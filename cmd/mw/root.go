@@ -12,6 +12,7 @@ func newRootCmd() *cobra.Command {
 		SilenceErrors: false,
 	}
 
+	root.AddCommand(newFileCmd())
 	root.AddCommand(newSyncCmd())
 	root.AddCommand(newVersionCmd())
 
