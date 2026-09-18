@@ -203,3 +203,33 @@ func TestShellLineJoinsTheWordsItQuoted(t *testing.T) {
 		t.Errorf("expected %q, got %q", want, got)
 	}
 }
+
+func TestTheCloseOutIsChainedOnHoweverTheSessionEnds(t *testing.T) {
+	spec, err := New().Session(launch(func(l *application.Launch) {
+		l.After = []string{"/root/millwright/bin/mw", "next", "mw-gq6.6"}
+	}))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+
+	line := spec.Command[2]
+	want := "> /root/millwright-vault/runs/mw-gq6.6/result.json; /root/millwright/bin/mw next mw-gq6.6"
+	if !strings.Contains(line, want) {
+		t.Errorf("expected the close-out to be chained after the redirection, got %q", line)
+	}
+	// `&&` would skip the close-out for exactly the sessions that need one: the
+	// ones that failed, ran out of fuel or died.
+	if strings.Contains(line, "&&") {
+		t.Errorf("expected the close-out to run whatever the harness exited with, got %q", line)
+	}
+}
+
+func TestASessionWithNothingAfterItEndsAtTheRedirection(t *testing.T) {
+	spec, err := New().Session(launch(nil))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	if strings.Contains(spec.Command[2], ";") {
+		t.Errorf("expected nothing chained after a session with no After, got %q", spec.Command[2])
+	}
+}

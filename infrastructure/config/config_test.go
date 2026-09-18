@@ -218,3 +218,38 @@ func TestVaultSaysHowToSetItWhenItIsNotSet(t *testing.T) {
 		}
 	}
 }
+
+func TestTestsSayHowEachRigIsChecked(t *testing.T) {
+	writeConfig(t, `host = "vps"
+
+[rigs]
+millwright = "/root/millwright"
+
+[tests]
+millwright = "make test"
+fellowship = "go test -tags integration ./..."
+`)
+
+	tests, err := config.Tests()
+	if err != nil {
+		t.Fatalf("reading how the rigs are tested: %v", err)
+	}
+	if len(tests) != 2 {
+		t.Fatalf("expected both rigs, got %+v", tests)
+	}
+	if tests["millwright"] != "make test" || tests["fellowship"] != "go test -tags integration ./..." {
+		t.Errorf("expected each rig's own command line, got %+v", tests)
+	}
+}
+
+func TestAHostThatSaysNothingAboutTestsIsNotAnError(t *testing.T) {
+	writeConfig(t, vpsConfig)
+
+	tests, err := config.Tests()
+	if err != nil {
+		t.Fatalf("reading how the rigs are tested: %v", err)
+	}
+	if len(tests) != 0 {
+		t.Errorf("expected no rig to say how it is tested, got %+v", tests)
+	}
+}

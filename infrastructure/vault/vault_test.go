@@ -2,6 +2,8 @@ package vault_test
 
 import (
 	"context"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -141,5 +143,69 @@ func TestVaultReadsNothingElseInTheSeat(t *testing.T) {
 		if strings.Contains(read, unwanted) {
 			t.Errorf("a seat read at boot must not hold %q", unwanted)
 		}
+	}
+}
+
+func TestReadRunFileTellsAResultFromNoResultAtAll(t *testing.T) {
+	v := vault.New(aVault(t))
+
+	read, err := v.ReadRunFile(context.Background(), "mw-old.1", application.ResultFileName)
+	if err != nil || read != "{}" {
+		t.Errorf("expected the result that was written, got %q (%v)", read, err)
+	}
+
+	_, err = v.ReadRunFile(context.Background(), "mw-gq6.8", application.ResultFileName)
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("expected a session that wrote nothing to be told from one that wrote a failure, got %v", err)
+	}
+}
+
+func TestAppendToLedgerOnlyEverAppends(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+	ctx := context.Background()
+
+	// The seat's ledger already holds a line with no newline of its own, which
+	// is how a file a person edited by hand often ends.
+	for _, line := range []string{"| a | first | line |", "| a | second | line |"} {
+		if err := v.AppendToLedger(ctx, "builder", line); err != nil {
+			t.Fatalf("appending %q: %v", line, err)
+		}
+	}
+
+	held, err := os.ReadFile(filepath.Join(dir, "seats", "builder", application.LedgerFileName))
+	if err != nil {
+		t.Fatalf("reading the ledger: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(held), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected the line that was there and the two appended, got %q", lines)
+	}
+	switch {
+	case lines[0] != "every story the builder ever worked":
+		t.Errorf("expected what the ledger already held to be untouched, got %q", lines[0])
+	case lines[1] != "| a | first | line |" || lines[2] != "| a | second | line |":
+		t.Errorf("expected both lines appended in order, got %q", lines)
+	}
+}
+
+func TestAppendToLedgerMakesTheLedgerOfASeatThatHasNone(t *testing.T) {
+	dir := aVault(t)
+	if err := vault.New(dir).AppendToLedger(context.Background(), "mayor", "| the mayor's first line |"); err != nil {
+		t.Fatalf("appending to a ledger that is not there yet: %v", err)
+	}
+	held, err := os.ReadFile(filepath.Join(dir, "seats", "mayor", application.LedgerFileName))
+	if err != nil || string(held) != "| the mayor's first line |\n" {
+		t.Errorf("expected the ledger to have been made with the line in it, got %q (%v)", held, err)
+	}
+}
+
+func TestAppendToLedgerRefusesWhatWouldNotBeOneLine(t *testing.T) {
+	v := vault.New(aVault(t))
+	if err := v.AppendToLedger(context.Background(), "builder", "| one |\n| two |"); err == nil {
+		t.Error("expected a line with a newline in it to be refused")
+	}
+	if err := v.AppendToLedger(context.Background(), "../etc", "| mine now |"); err == nil {
+		t.Error("expected a seat name that reaches outside the vault to be refused")
 	}
 }

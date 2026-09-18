@@ -1,0 +1,87 @@
+package application_test
+
+import (
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
+)
+
+// aLedgerLine is the line these tests write, with whatever a test changes.
+func aLedgerLine(change func(*application.LedgerLine)) application.LedgerLine {
+	line := application.LedgerLine{
+		When:    time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC),
+		StoryID: "mw-gq6.8",
+		Title:   "mw next: close out a finished story",
+		Outcome: "landed on main (fast-forward, abc123def456), 6 commits",
+		Path:    domain.Path{Model: domain.ModelOpus, Effort: domain.EffortHigh},
+		Result: application.SessionResult{
+			Turns: 37, CostUSD: 4.21, Duration: 28 * time.Minute,
+			Fuel: application.Fuel{Input: 1200, Output: 18000, CacheRead: 280000, CacheWrite: 12000},
+		},
+		Notes: []string{"dispatched by mw on vps", "session s-1"},
+	}
+	if change != nil {
+		change(&line)
+	}
+	return line
+}
+
+func TestALedgerLineIsOneRowOfTheLedgersTable(t *testing.T) {
+	line := aLedgerLine(nil).String()
+
+	if strings.Contains(line, "\n") {
+		t.Fatalf("expected one line, got:\n%s", line)
+	}
+	cells := strings.Split(strings.Trim(line, "|"), " | ")
+	if len(cells) != 6 {
+		t.Fatalf("expected the ledger's six columns, got %d in %q", len(cells), line)
+	}
+	for i, want := range []string{
+		"2026-09-18",
+		"mw next: close out a finished story (mw-gq6.8)",
+		"landed on main",
+		"opus/high",
+		"311,200 tokens",
+		"dispatched by mw on vps; session s-1",
+	} {
+		if !strings.Contains(cells[i], want) {
+			t.Errorf("expected column %d to hold %q, got %q", i+1, want, cells[i])
+		}
+	}
+}
+
+func TestALedgerLineCannotBreakTheTableItLandsIn(t *testing.T) {
+	line := aLedgerLine(func(l *application.LedgerLine) {
+		l.Title = "a story | with a bar"
+		l.Outcome = "not landed: the tests fail\nand here is the output"
+	}).String()
+
+	switch {
+	case strings.Contains(line, "\n"):
+		t.Errorf("expected the newline to be flattened, got:\n%s", line)
+	case !strings.Contains(line, `a story \| with a bar`):
+		t.Errorf("expected the bar in the title to be escaped, got %q", line)
+	case strings.Count(line, " | ") != 5:
+		t.Errorf("expected exactly six columns, got %q", line)
+	}
+}
+
+func TestALedgerLineSaysWhatItDoesNotKnow(t *testing.T) {
+	line := aLedgerLine(func(l *application.LedgerLine) {
+		l.Path = domain.Path{}
+		l.Title = ""
+		l.Notes = nil
+	}).String()
+
+	switch {
+	case !strings.Contains(line, "unknown"):
+		t.Errorf("expected a path with no model to read as unknown, got %q", line)
+	case !strings.Contains(line, "mw-gq6.8"):
+		t.Errorf("expected a story with no title to be named by its id, got %q", line)
+	case !strings.Contains(line, "—"):
+		t.Errorf("expected an empty column to be filled rather than left blank, got %q", line)
+	}
+}

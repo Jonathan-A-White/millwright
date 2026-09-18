@@ -103,9 +103,11 @@ func (g *Gateway) SetStoryState(ctx context.Context, id, dimension, value, reaso
 	return err
 }
 
-// StoryState implements application.WorkTracker. bd exits non-zero for a
-// dimension that was never set, and that is not a failure here: a story nobody
-// has recorded anything about simply has no state, which is "".
+// StoryState implements application.WorkTracker. A dimension nobody has ever
+// set is not a failure here — a story nobody has recorded anything about simply
+// has no state, which is "". bd says so in two ways, depending on the version:
+// by exiting non-zero, and by printing "(no <dimension> state set)" and exiting
+// zero (verified on bd 1.3.0). Both are read as nothing.
 func (g *Gateway) StoryState(ctx context.Context, id, dimension string) (string, error) {
 	switch {
 	case strings.TrimSpace(id) == "":
@@ -117,7 +119,11 @@ func (g *Gateway) StoryState(ctx context.Context, id, dimension string) (string,
 	if err != nil {
 		return "", nil
 	}
-	return strings.TrimSpace(string(out)), nil
+	said := strings.TrimSpace(string(out))
+	if strings.HasPrefix(said, "(no ") && strings.HasSuffix(said, "state set)") {
+		return "", nil
+	}
+	return said, nil
 }
 
 // OpenSteps implements application.WorkTracker: the step beads of a poured

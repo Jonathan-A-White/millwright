@@ -272,6 +272,48 @@ func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 		t.Fatalf("expected poured steps not to be offered as stories, got %+v: %v", steps, err)
 	}
 
+	// What a close-out asks before it lands anything: is every step of the
+	// story's formula closed? A step closed the way a session closes its own
+	// comes off the list, and the ones left come back in the order they are
+	// worked.
+	open, err := gateway.OpenSteps(ctx, molecule.RootID)
+	if err != nil {
+		t.Fatalf("reading the open steps of %s: %v", molecule.RootID, err)
+	}
+	if len(open) != len(molecule.Steps) || open[0].ID != molecule.Steps[0].ID {
+		t.Fatalf("expected every poured step open and in worked order, got %d of %d: %+v",
+			len(open), len(molecule.Steps), open)
+	}
+	bdRun(t, vault, beads.Program, "close", molecule.Steps[0].ID, "--reason", "understood")
+	open, err = gateway.OpenSteps(ctx, molecule.RootID)
+	if err != nil {
+		t.Fatalf("reading the open steps of %s again: %v", molecule.RootID, err)
+	}
+	if len(open) != len(molecule.Steps)-1 {
+		t.Fatalf("expected the closed step to come off the list, got %d of %d", len(open), len(molecule.Steps))
+	}
+	for _, step := range open {
+		if step.ID == molecule.Steps[0].ID {
+			t.Fatalf("expected %s to be closed, but it is still open", step.ID)
+		}
+	}
+	if none, err := gateway.OpenSteps(ctx, ""); err != nil || len(none) != 0 {
+		t.Fatalf("expected a story with no formula poured to have no open steps, got %+v: %v", none, err)
+	}
+
+	// And what it writes when it has landed, read back the way mw reads it.
+	if err := gateway.SetStoryState(ctx, storyID, application.RunState, application.RunLanded, "landed by the test"); err != nil {
+		t.Fatalf("recording the run state of %s: %v", storyID, err)
+	}
+	state, err := gateway.StoryState(ctx, storyID, application.RunState)
+	if err != nil || state != application.RunLanded {
+		t.Fatalf("expected %s=%s to be read back, got %q: %v", application.RunState, application.RunLanded, state, err)
+	}
+	unset, err := gateway.StoryState(ctx, storyID, "nothing-anybody-set")
+	if err != nil || unset != "" {
+		t.Fatalf("expected a dimension nobody set to read as nothing, got %q: %v", unset, err)
+	}
+
 	// The note each host leaves saying when it was last level with the other.
 	// Reading one nobody has written is not a failure: it is a host the other
 	// has never heard from. `bd sync` itself is never run here — it would reach
