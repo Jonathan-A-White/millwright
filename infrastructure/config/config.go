@@ -29,8 +29,14 @@ const (
 )
 
 // RigsTable is the table of the config file that says where each rig is checked
-// out on this host: rig name on the left, directory on the right.
-const RigsTable = "rigs"
+// out on this host: rig name on the left, directory on the right. TestsTable is
+// the table that says how each rig's own tests are run on this host: rig name on
+// the left, a command line on the right. A rig that is not in it is tested the
+// way DefaultTests says.
+const (
+	RigsTable  = "rigs"
+	TestsTable = "tests"
+)
 
 // DefaultCap is how many sessions may run at once on a host that does not say.
 // One, because the smaller of the factory's two hosts has a single core and
@@ -107,6 +113,23 @@ func Rigs() (map[string]string, error) {
 		}
 	}
 	return rigs, nil
+}
+
+// Tests reports how each rig's own tests are run on this machine, by rig name,
+// read from the `[tests]` table of ~/.config/mw/config.toml. A rig that says
+// nothing is tested by the adapter's own default, and a machine with no such
+// table is not an error: `make test` is what most rigs mean by their tests.
+//
+// It is a command line rather than a program and its arguments because a rig
+// says what its tests are in its own words, and because the factory must be
+// able to point a check at something trivial — a test of mw itself must never
+// run mw's own test suite inside itself.
+func Tests() (map[string]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	return tableIn(filepath.Join(home, File), TestsTable)
 }
 
 // RigNames is the rigs this machine has, in a settled order, for a message a

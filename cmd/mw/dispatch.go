@@ -5,7 +5,6 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
-	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
@@ -70,18 +69,13 @@ func newDispatchCmd() *cobra.Command {
 				Tracker:   gateway,
 				Worktrees: rig.New(),
 				Runner:    tmux.New(),
-				Boot: application.SeatBoot{
-					Vault:   files,
-					Harness: claude.New(),
-					Seat:    BuilderSeat,
-					Host:    host,
-				},
-				Sync:   application.Sync{Vault: files, Tracker: gateway, Host: host},
-				Host:   host,
-				Cap:    atOnce,
-				Rigs:   rigs,
-				DryRun: dryRun,
-				Out:    cmd.OutOrStdout(),
+				Boot:      builderBoot(files, host),
+				Sync:      application.Sync{Vault: files, Tracker: gateway, Host: host},
+				Host:      host,
+				Cap:       atOnce,
+				Rigs:      rigs,
+				DryRun:    dryRun,
+				Out:       cmd.OutOrStdout(),
 			}.Run(cmd.Context())
 			if err != nil {
 				return err
