@@ -83,6 +83,96 @@ const readyStoryJSON = `[
   }
 ]`
 
+// What `bd list --parent <epic> --all --limit 0 --json` prints for an epic with
+// two stories, the second waiting on the first: children newest first, and the
+// waiting written as an edge whose type is "blocks". Captured from bd 1.3.0.
+const listChildrenJSON = `[
+  {
+    "id": "t-c3i.2",
+    "title": "Story B",
+    "acceptance_criteria": "y",
+    "status": "deferred",
+    "priority": 2,
+    "issue_type": "task",
+    "created_at": "2026-09-18T22:05:44Z",
+    "updated_at": "2026-09-18T22:05:44Z",
+    "metadata": {
+      "model": "sonnet"
+    },
+    "dependencies": [
+      {
+        "issue_id": "t-c3i.2",
+        "depends_on_id": "t-c3i",
+        "type": "parent-child",
+        "created_at": "2026-09-18T22:05:44Z",
+        "metadata": "{}"
+      },
+      {
+        "issue_id": "t-c3i.2",
+        "depends_on_id": "t-c3i.1",
+        "type": "blocks",
+        "created_at": "2026-09-18T22:05:44Z",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 1,
+    "parent": "t-c3i"
+  },
+  {
+    "id": "t-c3i.1",
+    "title": "Story A",
+    "acceptance_criteria": "x",
+    "status": "closed",
+    "priority": 2,
+    "issue_type": "task",
+    "estimated_minutes": 60,
+    "created_at": "2026-09-18T22:05:42Z",
+    "updated_at": "2026-09-18T22:07:00Z",
+    "dependencies": [
+      {
+        "issue_id": "t-c3i.1",
+        "depends_on_id": "t-c3i",
+        "type": "parent-child",
+        "created_at": "2026-09-18T22:05:42Z",
+        "metadata": "{}"
+      }
+    ],
+    "dependency_count": 0,
+    "parent": "t-c3i"
+  }
+]`
+
+// What `bd show` prints for that same second story: the beads it waits on are
+// whole beads with a "dependency_type", not edges. Captured from bd 1.3.0,
+// trimmed to the fields the factory reads.
+const showBlockedStoryJSON = `[
+  {
+    "id": "t-c3i.2",
+    "title": "Story B",
+    "status": "deferred",
+    "issue_type": "task",
+    "created_at": "2026-09-18T22:05:44Z",
+    "metadata": { "model": "sonnet" },
+    "dependencies": [
+      {
+        "id": "t-c3i",
+        "title": "Epic one",
+        "issue_type": "epic",
+        "metadata": { "rig": "millwright" },
+        "dependency_type": "parent-child"
+      },
+      {
+        "id": "t-c3i.1",
+        "title": "Story A",
+        "status": "closed",
+        "issue_type": "task",
+        "dependency_type": "blocks"
+      }
+    ],
+    "parent": "t-c3i"
+  }
+]`
+
 const errorJSON = `{
   "error": "--days must be at least 1",
   "schema_version": 1
@@ -159,6 +249,66 @@ func TestDecodeBeadsAcceptsAnEmptyList(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Fatalf("expected no beads, got %d", len(got))
+	}
+}
+
+func TestWhatAStoryWaitsOnIsReadFromEitherDependencyShape(t *testing.T) {
+	listed, err := decodeBeads([]byte(listChildrenJSON))
+	if err != nil {
+		t.Fatalf("decoding a listing of an epic's children: %v", err)
+	}
+	if len(listed) != 2 {
+		t.Fatalf("expected two beads, got %d", len(listed))
+	}
+	for _, b := range listed {
+		got := b.needs()
+		switch b.ID {
+		case "t-c3i.2":
+			if len(got) != 1 || got[0] != "t-c3i.1" {
+				t.Errorf("expected %s to wait on t-c3i.1, got %v", b.ID, got)
+			}
+		case "t-c3i.1":
+			if len(got) != 0 {
+				t.Errorf("expected %s to wait on nothing, got %v", b.ID, got)
+			}
+		}
+	}
+
+	shown, err := decodeBeads([]byte(showBlockedStoryJSON))
+	if err != nil {
+		t.Fatalf("decoding a shown story: %v", err)
+	}
+	if got := shown[0].needs(); len(got) != 1 || got[0] != "t-c3i.1" {
+		t.Errorf("expected the shown story to wait on t-c3i.1 and not on its epic, got %v", got)
+	}
+	// And the story detail carries it, which is what a tree of an epic reads.
+	if got := shown[0].detail(domain.Path{}).Needs; len(got) != 1 || got[0] != "t-c3i.1" {
+		t.Errorf("expected the story detail to carry what it waits on, got %v", got)
+	}
+}
+
+func TestChildrenComeBackInTheOrderTheyWereFiled(t *testing.T) {
+	listed, err := decodeBeads([]byte(listChildrenJSON))
+	if err != nil {
+		t.Fatalf("decoding a listing of an epic's children: %v", err)
+	}
+	ordered := inFiledOrder(listed)
+	if ordered[0].ID != "t-c3i.1" || ordered[1].ID != "t-c3i.2" {
+		t.Fatalf("expected the oldest child first, got %s then %s", ordered[0].ID, ordered[1].ID)
+	}
+
+	// Beads bd stamped in the same second fall back to id order, counting the
+	// parts between the dots as the numbers they are.
+	same := []bead{
+		{ID: "t-a.10", CreatedAt: "2026-09-18T22:05:44Z"},
+		{ID: "t-a.9", CreatedAt: "2026-09-18T22:05:44Z"},
+		{ID: "t-a.2", CreatedAt: "2026-09-18T22:05:44Z"},
+	}
+	want := []string{"t-a.2", "t-a.9", "t-a.10"}
+	for i, b := range inFiledOrder(same) {
+		if b.ID != want[i] {
+			t.Fatalf("expected %v, got %s in place %d", want, b.ID, i)
+		}
 	}
 }
 

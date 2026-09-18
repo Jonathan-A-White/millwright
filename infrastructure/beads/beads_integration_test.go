@@ -422,6 +422,39 @@ func TestGatewayFilesAnEpicWithItsStoriesHeld(t *testing.T) {
 		t.Errorf("expected the epic to carry its success criteria, got %q", epic.Description)
 	}
 
+	// The whole epic read back is what `mw release` prints and releases from:
+	// the epic's title and defaults, and its stories in the order they were
+	// filed, each with what it waits on and what it is.
+	whole, err := gateway.ShowEpic(ctx, epicID)
+	if err != nil {
+		t.Fatalf("reading the epic %s: %v", epicID, err)
+	}
+	if whole.ID != epicID || whole.Title != "Walking skeleton" || whole.Defaults != defaults {
+		t.Errorf("expected the epic's id, title and defaults, got %+v", whole)
+	}
+	if len(whole.Stories) != 2 || whole.Stories[0].Story.ID != first || whole.Stories[1].Story.ID != second {
+		t.Fatalf("expected %s then %s, got %+v", first, second, application.EpicDetail{Stories: whole.Stories}.Stories)
+	}
+	if !whole.Stories[0].Held() || !whole.Stories[1].Held() {
+		t.Errorf("expected both stories to be read back held, got %q and %q",
+			whole.Stories[0].Status, whole.Stories[1].Status)
+	}
+	if got := whole.Stories[0].Needs; len(got) != 0 {
+		t.Errorf("expected %s to wait on nothing, got %v", first, got)
+	}
+	if got := whole.Stories[1].Needs; len(got) != 1 || got[0] != first {
+		t.Errorf("expected %s to wait on %s, got %v", second, first, got)
+	}
+	if got := whole.Stories[1].Merged().Formula; got != "chore" {
+		t.Errorf("expected the story's own formula over the epic's, got %q", got)
+	}
+	if _, err := gateway.ShowEpic(ctx, "t-nope"); err == nil {
+		t.Error("expected reading an epic nobody filed to fail")
+	}
+	if _, err := gateway.ShowEpic(ctx, first); err == nil {
+		t.Errorf("expected reading the story %s as an epic to fail", first)
+	}
+
 	// bd's own lint is the cheapest check that what was filed is specified
 	// well enough to be worked: it exits 1 and says what is missing when an
 	// epic has no success criteria or a story no acceptance criteria.
@@ -453,6 +486,20 @@ func TestGatewayFilesAnEpicWithItsStoriesHeld(t *testing.T) {
 	}
 	if len(ready) != 1 || ready[0].Story.ID != second {
 		t.Fatalf("expected %s to be ready once %s is closed, got %+v", second, first, ready)
+	}
+
+	// A story that is finished is still part of its epic: the tree a release
+	// prints shows the work already done, so the reading asks bd for the closed
+	// ones too, which its listing leaves out by default.
+	whole, err = gateway.ShowEpic(ctx, epicID)
+	if err != nil {
+		t.Fatalf("reading the epic %s after the close: %v", epicID, err)
+	}
+	if len(whole.Stories) != 2 || whole.Stories[0].Story.ID != first {
+		t.Fatalf("expected the closed story to still be part of the epic, got %+v", whole.Stories)
+	}
+	if !whole.Stories[0].Closed() {
+		t.Errorf("expected %s to be read back closed, got %q", first, whole.Stories[0].Status)
 	}
 }
 
