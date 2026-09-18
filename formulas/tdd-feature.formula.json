@@ -1,0 +1,67 @@
+{
+  "formula": "tdd-feature",
+  "description": "Work a story test-first: understand it, write the failing test, implement to green, verify, self-review, commit, close out.",
+  "version": 1,
+  "type": "workflow",
+  "pour": true,
+  "vars": {
+    "story": {
+      "description": "the story bead this formula works",
+      "required": true
+    },
+    "title": {
+      "description": "the story's title",
+      "required": true
+    }
+  },
+  "steps": [
+    {
+      "id": "understand",
+      "title": "Understand {{story}}: {{title}}",
+      "description": "Read the story bead {{story}}'s description and acceptance criteria, and read the code it touches, before changing anything.",
+      "type": "task"
+    },
+    {
+      "id": "red",
+      "title": "Write the failing feature or test first",
+      "description": "Write the Gherkin feature or unit test that captures {{story}}'s acceptance criteria, and confirm it fails for the right reason.",
+      "type": "task",
+      "depends_on": ["understand"]
+    },
+    {
+      "id": "green",
+      "title": "Implement until green",
+      "description": "Write the implementation for {{story}} until the failing test or feature from the previous step passes.",
+      "type": "task",
+      "depends_on": ["red"]
+    },
+    {
+      "id": "verify",
+      "title": "Run the full build, tests and vet",
+      "description": "Run the rig's build, the full test suite and vet; all must pass clean, not just the new test.",
+      "type": "task",
+      "depends_on": ["green"]
+    },
+    {
+      "id": "self-review",
+      "title": "Self-review the diff against the acceptance criteria",
+      "description": "Read the whole diff for {{story}} end to end against its acceptance criteria before committing.",
+      "type": "task",
+      "depends_on": ["verify"]
+    },
+    {
+      "id": "commit",
+      "title": "Commit",
+      "description": "Commit the change for {{story}} in small, plainly described commits, with no AI attribution lines.",
+      "type": "task",
+      "depends_on": ["self-review"]
+    },
+    {
+      "id": "close",
+      "title": "Write the closing comment and update rig memory",
+      "description": "Comment on {{story}} with what was built, what was verified and how, and anything left undone. If a fact about this rig would have saved real time, add it to the rig's Builder memory file.",
+      "type": "task",
+      "depends_on": ["commit"]
+    }
+  ]
+}
