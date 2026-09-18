@@ -1,6 +1,6 @@
 // Package config finds the factory's settings on the machine it is running
-// on. There is one setting so far — where the vault is — and it is read from
-// the environment or from ~/.config/mw/config.toml.
+// on. There are two so far — where the vault is, and which host this machine
+// is — and each is read from the environment or from ~/.config/mw/config.toml.
 package config
 
 import (
@@ -11,8 +11,11 @@ import (
 	"strings"
 )
 
-// VaultEnv is the environment variable that names the vault directory.
-const VaultEnv = "MW_VAULT"
+// The environment variables that answer for each setting, ahead of the file.
+const (
+	VaultEnv = "MW_VAULT"
+	HostEnv  = "MW_HOST"
+)
 
 // File is the config file's path under the home directory.
 var File = filepath.Join(".config", "mw", "config.toml")
@@ -21,34 +24,49 @@ var File = filepath.Join(".config", "mw", "config.toml")
 // database: $MW_VAULT if it is set, otherwise the root-table `vault` key of
 // ~/.config/mw/config.toml.
 func Vault() (string, error) {
-	if dir := strings.TrimSpace(os.Getenv(VaultEnv)); dir != "" {
-		return dir, nil
+	return setting("vault", VaultEnv)
+}
+
+// Host reports which of the factory's hosts this machine is — the name the
+// Mayor writes into a story's Path, `vps` or `laptop`, not the machine's
+// hostname: $MW_HOST if it is set, otherwise the root-table `host` key of
+// ~/.config/mw/config.toml. It is what a session's seat is signed with and
+// what the dispatcher asks beads for ready stories by.
+func Host() (string, error) {
+	return setting("host", HostEnv)
+}
+
+// setting reads one root-table key: the environment first, the config file
+// after it, and the way to set it if neither answers.
+func setting(key, env string) (string, error) {
+	if value := strings.TrimSpace(os.Getenv(env)); value != "" {
+		return value, nil
 	}
 
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("no %s is set and there is no home directory to read %s in: %w", VaultEnv, File, err)
+		return "", fmt.Errorf("no %s is set and there is no home directory to read %s in: %w", env, File, err)
 	}
 	path := filepath.Join(home, File)
 
-	dir, err := vaultIn(path)
+	value, err := valueIn(path, key)
 	if err != nil {
 		return "", err
 	}
-	if dir == "" {
-		return "", fmt.Errorf("the vault is not set: export %s=<dir>, or put `vault = \"<dir>\"` in %s", VaultEnv, path)
+	if value == "" {
+		return "", fmt.Errorf("the %s is not set: export %s=<value>, or put `%s = \"<value>\"` in %s", key, env, key, path)
 	}
-	return dir, nil
+	return value, nil
 }
 
-// vaultIn reads the root-table `vault` key out of a config file, or "" if the
-// file has no such key. A missing file is not an error: the environment may
-// still be how this machine is told where the vault is.
+// valueIn reads one root-table key out of a config file, or "" if the file has
+// no such key. A missing file is not an error: the environment may still be how
+// this machine is told what it needs to know.
 //
 // Only the handful of TOML this needs is understood: `key = value` in the root
 // table, with the value optionally quoted, and `#` comments. Keys after a
 // `[table]` header belong to that table and are skipped.
-func vaultIn(path string) (string, error) {
+func valueIn(path, key string) (string, error) {
 	file, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return "", nil
@@ -64,8 +82,8 @@ func vaultIn(path string) (string, error) {
 		if strings.HasPrefix(line, "[") {
 			break // the root table has ended; every later key belongs to a table
 		}
-		key, value, found := strings.Cut(line, "=")
-		if !found || strings.TrimSpace(key) != "vault" {
+		name, value, found := strings.Cut(line, "=")
+		if !found || strings.TrimSpace(name) != key {
 			continue
 		}
 		return unquote(value), nil

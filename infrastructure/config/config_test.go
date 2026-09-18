@@ -25,6 +25,7 @@ func writeConfig(t *testing.T, contents string) string {
 	}
 	t.Setenv("HOME", home)
 	t.Setenv("MW_VAULT", "")
+	t.Setenv("MW_HOST", "")
 	return home
 }
 
@@ -71,6 +72,41 @@ func TestVaultIgnoresKeysInsideATable(t *testing.T) {
 
 	if _, err := config.Vault(); err == nil {
 		t.Fatal("expected a vault set inside a table to be ignored")
+	}
+}
+
+func TestHostIsWhichOfTheFactorysHostsThisMachineIs(t *testing.T) {
+	writeConfig(t, "vault = \"/root/millwright-vault\"\nhost = \"vps\"\n")
+
+	got, err := config.Host()
+	if err != nil {
+		t.Fatalf("finding the host: %v", err)
+	}
+	if got != "vps" {
+		t.Fatalf("expected the host from the config file, got %q", got)
+	}
+
+	t.Setenv("MW_HOST", "laptop")
+	got, err = config.Host()
+	if err != nil {
+		t.Fatalf("finding the host: %v", err)
+	}
+	if got != "laptop" {
+		t.Fatalf("expected MW_HOST to win, got %q", got)
+	}
+}
+
+func TestHostSaysHowToSetItWhenItIsNotSet(t *testing.T) {
+	writeConfig(t, "vault = \"/root/millwright-vault\"\n")
+
+	_, err := config.Host()
+	if err == nil {
+		t.Fatal("expected an error when the host is set nowhere")
+	}
+	for _, want := range []string{"MW_HOST", "config.toml"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected the error to mention %q, got %q", want, err.Error())
+		}
 	}
 }
 
