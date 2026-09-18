@@ -29,25 +29,40 @@ const StatusInProgress = "in_progress"
 
 // Gateway reads and writes stories in one vault's beads database.
 type Gateway struct {
-	vault string
-	mu    sync.Mutex
+	vault   string
+	program string
+	mu      sync.Mutex
 }
 
 // Gateway satisfies the port.
 var _ application.WorkTracker = (*Gateway)(nil)
 
+// Option is a setting of a Gateway, given to New.
+type Option func(*Gateway)
+
+// WithProgram names the beads command to run, for a host that keeps it
+// somewhere unusual — and for a test that needs a stand-in for bd rather than
+// the real thing.
+func WithProgram(program string) Option {
+	return func(g *Gateway) { g.program = program }
+}
+
 // New returns a Gateway onto the beads database in a vault directory.
-func New(vault string) *Gateway {
-	return &Gateway{vault: vault}
+func New(vault string, opts ...Option) *Gateway {
+	g := &Gateway{vault: vault, program: Program}
+	for _, opt := range opts {
+		opt(g)
+	}
+	return g
 }
 
 // FromConfig returns a Gateway onto the vault this host is configured with.
-func FromConfig() (*Gateway, error) {
+func FromConfig(opts ...Option) (*Gateway, error) {
 	vault, err := config.Vault()
 	if err != nil {
 		return nil, err
 	}
-	return New(vault), nil
+	return New(vault, opts...), nil
 }
 
 // Vault reports the directory this Gateway runs bd in.
@@ -191,25 +206,34 @@ func (g *Gateway) showOne(ctx context.Context, id string) (bead, error) {
 	return found[0], nil
 }
 
-// call runs one bd command in the vault and returns its standard output. Only
-// one bd runs at a time: the database takes a single-writer lock.
+// call runs one bd command in the vault and returns its standard output, or
+// what bd said about why it would not.
 func (g *Gateway) call(ctx context.Context, args ...string) ([]byte, error) {
+	out, errs, err := g.run(ctx, args...)
+	if err != nil {
+		if said := said(out, errs); said != "" {
+			return nil, fmt.Errorf("%s %s: %w: %s", g.program, strings.Join(args, " "), err, said)
+		}
+		return nil, fmt.Errorf("%s %s: %w", g.program, strings.Join(args, " "), err)
+	}
+	return out, nil
+}
+
+// run runs one bd command in the vault and hands back both streams and the
+// unwrapped error, so that a caller that cares about bd's exit code can read
+// it. Only one bd runs at a time: the database takes a single-writer lock.
+func (g *Gateway) run(ctx context.Context, args ...string) ([]byte, []byte, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
 	full := append([]string{"-C", g.vault}, args...)
-	cmd := exec.CommandContext(ctx, Program, full...)
+	cmd := exec.CommandContext(ctx, g.program, full...)
 	var out, errs bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errs
 
-	if err := cmd.Run(); err != nil {
-		if said := said(out.Bytes(), errs.Bytes()); said != "" {
-			return nil, fmt.Errorf("%s %s: %w: %s", Program, strings.Join(args, " "), err, said)
-		}
-		return nil, fmt.Errorf("%s %s: %w", Program, strings.Join(args, " "), err)
-	}
-	return out.Bytes(), nil
+	err := cmd.Run()
+	return out.Bytes(), errs.Bytes(), err
 }
 
 // said is what bd told us about a failure: its error object if it printed one,

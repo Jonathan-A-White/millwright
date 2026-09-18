@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 )
@@ -162,6 +163,30 @@ func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 	}
 	if detail.Status != "closed" {
 		t.Fatalf("expected %s to be closed, got status %q", storyID, detail.Status)
+	}
+
+	// The note each host leaves saying when it was last level with the other.
+	// Reading one nobody has written is not a failure: it is a host the other
+	// has never heard from. `bd sync` itself is never run here — it would reach
+	// the factory's real remote — so only the note is exercised against bd.
+	key := application.LastSyncKey("vps")
+	before, err := gateway.Note(ctx, key)
+	if err != nil {
+		t.Fatalf("reading %s before anything wrote it: %v", key, err)
+	}
+	if before != "" {
+		t.Fatalf("expected no note yet, got %q", before)
+	}
+	level := time.Now().UTC().Format(application.LastSyncFormat)
+	if err := gateway.SetNote(ctx, key, level); err != nil {
+		t.Fatalf("writing %s: %v", key, err)
+	}
+	after, err := gateway.Note(ctx, key)
+	if err != nil {
+		t.Fatalf("reading %s: %v", key, err)
+	}
+	if after != level {
+		t.Fatalf("expected %s to be %q, got %q", key, level, after)
 	}
 }
 
