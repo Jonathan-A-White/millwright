@@ -19,6 +19,7 @@ import (
 const (
 	StatusOpen       = "open"
 	StatusInProgress = "in_progress"
+	StatusDeferred   = "deferred"
 	StatusClosed     = "closed"
 )
 
@@ -28,15 +29,16 @@ const Actor = "fake"
 // FakeTracker is an in-memory application.WorkTracker. Stories are listed in
 // the order they were added, so a test can assert on the whole list.
 //
-// It does not model dependencies between stories: a story it holds is ready as
-// soon as it is open, unclaimed, under the epic asked about and pointed at the
-// host asked about. Beads itself also withholds blocked stories.
+// A story it holds is ready when it is open (neither held nor claimed nor
+// closed), under the epic asked about, pointed at the host asked about, and
+// every story it waits on is closed — which is what beads does too.
 type FakeTracker struct {
 	mu sync.Mutex
 
 	defaults map[string]domain.Path // epic id -> its default path
 	stories  map[string]*fakeStory
 	order    []string
+	epics    []string
 
 	notes map[string]string
 	syncs int
@@ -52,6 +54,7 @@ type FakeTracker struct {
 type fakeStory struct {
 	detail      application.StoryDetail
 	metadata    map[string]string
+	needs       []string
 	comments    []string
 	closeReason string
 	touched     time.Time
@@ -91,6 +94,99 @@ func (f *FakeTracker) AddStory(epicID string, story domain.Story) {
 		metadata: map[string]string{},
 		touched:  time.Now(),
 	}
+}
+
+// CreateEpic implements application.WorkTracker. The fake mints ids the way
+// beads does — f-1 for an epic, f-1.1 for its first story — so that a test can
+// read a tree without knowing them in advance.
+func (f *FakeTracker) CreateEpic(_ context.Context, epic application.NewEpic) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return "", f.Err
+	}
+	if epic.Title == "" {
+		return "", fmt.Errorf("an epic needs a title")
+	}
+	id := fmt.Sprintf("f-%d", len(f.epics)+1)
+	f.epics = append(f.epics, id)
+	f.defaults[id] = epic.Defaults
+	return id, nil
+}
+
+// CreateStory implements application.WorkTracker. The story is filed held, and
+// stays that way until it is released.
+func (f *FakeTracker) CreateStory(_ context.Context, story application.NewStory) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return "", f.Err
+	}
+	switch {
+	case story.Title == "":
+		return "", fmt.Errorf("a story needs a title")
+	case story.EpicID == "":
+		return "", fmt.Errorf("a story needs an epic to be filed under")
+	}
+	for _, need := range story.Needs {
+		if _, filed := f.stories[need]; !filed {
+			return "", fmt.Errorf("story %q waits on %q, which is not filed", story.Title, need)
+		}
+	}
+
+	under := 0
+	for _, id := range f.order {
+		if f.stories[id].detail.EpicID == story.EpicID {
+			under++
+		}
+	}
+	id := fmt.Sprintf("%s.%d", story.EpicID, under+1)
+
+	f.order = append(f.order, id)
+	f.stories[id] = &fakeStory{
+		detail: application.StoryDetail{
+			Story: domain.Story{
+				ID:        id,
+				Title:     story.Title,
+				Overrides: story.Overrides,
+			},
+			Defaults:        f.defaults[story.EpicID],
+			EpicID:          story.EpicID,
+			Status:          StatusDeferred,
+			Description:     story.Description,
+			Acceptance:      story.Acceptance,
+			EstimateMinutes: story.EstimateMinutes,
+		},
+		metadata: story.Overrides.Metadata(),
+		needs:    append([]string(nil), story.Needs...),
+		touched:  time.Now(),
+	}
+	return id, nil
+}
+
+// ReleaseStory implements application.WorkTracker.
+func (f *FakeTracker) ReleaseStory(_ context.Context, id string) error {
+	return f.write(id, func(s *fakeStory) error {
+		if s.detail.Status == StatusDeferred {
+			s.detail.Status = StatusOpen
+		}
+		return nil
+	})
+}
+
+// Epics reports the ids of the epics filed, in the order they were filed.
+func (f *FakeTracker) Epics() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.epics...)
+}
+
+// Stories reports the ids of every story the fake holds, in the order they
+// arrived — so that a test can say that nothing at all was written.
+func (f *FakeTracker) Stories() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.order...)
 }
 
 // Touched backdates a story's last activity, so that StaleClaims can be told
@@ -165,7 +261,8 @@ func (f *FakeTracker) ReadyStories(_ context.Context, epicID, host string) ([]ap
 		case s.detail.EpicID != epicID,
 			s.detail.Status != StatusOpen,
 			s.detail.Assignee != "",
-			s.detail.Merged().Host != host:
+			s.detail.Merged().Host != host,
+			f.waiting(s):
 			continue
 		}
 		ready = append(ready, s.detail)
@@ -290,6 +387,18 @@ func (f *FakeTracker) Syncs() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.syncs
+}
+
+// waiting reports whether this story still waits on another that is not
+// finished. The lock is held by the caller.
+func (f *FakeTracker) waiting(s *fakeStory) bool {
+	for _, need := range s.needs {
+		blocker, filed := f.stories[need]
+		if !filed || blocker.detail.Status != StatusClosed {
+			return true
+		}
+	}
+	return false
 }
 
 // write applies a change to one story under the lock.

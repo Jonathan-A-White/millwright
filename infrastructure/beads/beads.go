@@ -24,8 +24,13 @@ import (
 // Program is the beads command this package shells out to.
 const Program = "bd"
 
-// StatusInProgress is beads' name for the status a claimed story is in.
-const StatusInProgress = "in_progress"
+// Beads' own names for the statuses the factory puts a story in: claimed, held
+// back from every dispatcher, and released to them again.
+const (
+	StatusInProgress = "in_progress"
+	StatusDeferred   = "deferred"
+	StatusOpen       = "open"
+)
 
 // Gateway reads and writes stories in one vault's beads database.
 type Gateway struct {
@@ -73,6 +78,107 @@ func (g *Gateway) Vault() string { return g.vault }
 func Available() bool {
 	_, err := exec.LookPath(Program)
 	return err == nil
+}
+
+// CreateEpic implements application.WorkTracker. An epic's success criteria go
+// in a section of its description rather than in the acceptance field: that is
+// where `bd lint` looks for them, and where the epics already in the factory's
+// tracker carry them.
+func (g *Gateway) CreateEpic(ctx context.Context, epic application.NewEpic) (string, error) {
+	if strings.TrimSpace(epic.Title) == "" {
+		return "", fmt.Errorf("an epic needs a title")
+	}
+	args := []string{"create", epic.Title, "--type", "epic"}
+
+	description := strings.TrimSpace(epic.Description)
+	if criteria := strings.TrimSpace(epic.SuccessCriteria); criteria != "" {
+		description = strings.TrimSpace(description + "\n\n## Success Criteria\n\n" + criteria)
+	}
+	if description != "" {
+		args = append(args, "--description", description)
+	}
+	if epic.Priority > 0 {
+		args = append(args, "--priority", strconv.Itoa(epic.Priority))
+	}
+	metadata, err := metadataJSON(epic.Defaults.Metadata())
+	if err != nil {
+		return "", fmt.Errorf("writing the default path of the epic %q: %w", epic.Title, err)
+	}
+	if metadata != "" {
+		args = append(args, "--metadata", metadata)
+	}
+	return g.created(ctx, "the epic "+epic.Title, args)
+}
+
+// CreateStory implements application.WorkTracker. The story is created
+// deferred, which is beads' own way of holding work back: a deferred story is
+// in the database, with its path, its acceptance criteria and everything it
+// waits on, and `bd ready` will not offer it to anybody until it is released.
+func (g *Gateway) CreateStory(ctx context.Context, story application.NewStory) (string, error) {
+	switch {
+	case strings.TrimSpace(story.Title) == "":
+		return "", fmt.Errorf("a story needs a title")
+	case strings.TrimSpace(story.EpicID) == "":
+		return "", fmt.Errorf("the story %q needs an epic to be filed under", story.Title)
+	}
+	args := []string{"create", story.Title, "--parent", story.EpicID, "--status", StatusDeferred}
+
+	if description := strings.TrimSpace(story.Description); description != "" {
+		args = append(args, "--description", description)
+	}
+	if acceptance := strings.TrimSpace(story.Acceptance); acceptance != "" {
+		args = append(args, "--acceptance", acceptance)
+	}
+	if story.Priority > 0 {
+		args = append(args, "--priority", strconv.Itoa(story.Priority))
+	}
+	if story.EstimateMinutes > 0 {
+		args = append(args, "--estimate", strconv.Itoa(story.EstimateMinutes))
+	}
+	metadata, err := metadataJSON(story.Overrides.Metadata())
+	if err != nil {
+		return "", fmt.Errorf("writing the path of the story %q: %w", story.Title, err)
+	}
+	if metadata != "" {
+		args = append(args, "--metadata", metadata)
+	}
+	for _, need := range story.Needs {
+		args = append(args, "--deps", "blocked-by:"+need)
+	}
+	return g.created(ctx, "the story "+story.Title, args)
+}
+
+// ReleaseStory implements application.WorkTracker: a held story becomes an open
+// one, and beads offers it as soon as nothing blocks it.
+func (g *Gateway) ReleaseStory(ctx context.Context, id string) error {
+	_, err := g.call(ctx, "update", id, "--status", StatusOpen)
+	return err
+}
+
+// created runs one `bd create` and reads back the id it gave what it created.
+func (g *Gateway) created(ctx context.Context, what string, args []string) (string, error) {
+	out, err := g.call(ctx, append(args, "--silent")...)
+	if err != nil {
+		return "", err
+	}
+	id := strings.TrimSpace(string(out))
+	if id == "" {
+		return "", fmt.Errorf("%s created %s without saying what id it gave it", g.program, what)
+	}
+	return id, nil
+}
+
+// metadataJSON is the metadata as bd's --metadata flag takes it, or "" when
+// there is none to write.
+func metadataJSON(fields map[string]string) (string, error) {
+	if len(fields) == 0 {
+		return "", nil
+	}
+	written, err := json.Marshal(fields)
+	if err != nil {
+		return "", err
+	}
+	return string(written), nil
 }
 
 // ShowStory implements application.WorkTracker. It reads the story, and the

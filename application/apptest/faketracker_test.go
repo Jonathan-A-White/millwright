@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -49,6 +50,86 @@ func TestShowStoryOverlaysTheEpicDefaults(t *testing.T) {
 	}
 	if path.Rig != "millwright" || path.Host != "vps" {
 		t.Errorf("expected the epic's defaults to fall through, got %+v", path)
+	}
+}
+
+func TestAFiledStoryIsHeldUntilItIsReleased(t *testing.T) {
+	f := apptest.NewFakeTracker()
+	ctx := context.Background()
+
+	epicID, err := f.CreateEpic(ctx, application.NewEpic{Title: "Walking skeleton", Defaults: epicDefaults()})
+	if err != nil {
+		t.Fatalf("filing the epic: %v", err)
+	}
+	first, err := f.CreateStory(ctx, application.NewStory{EpicID: epicID, Title: "Go module", Acceptance: "it passes", EstimateMinutes: 60})
+	if err != nil {
+		t.Fatalf("filing the first story: %v", err)
+	}
+	second, err := f.CreateStory(ctx, application.NewStory{
+		EpicID:     epicID,
+		Title:      "Beads gateway",
+		Acceptance: "it passes",
+		Overrides:  domain.Path{Model: domain.ModelSonnet},
+		Needs:      []string{first},
+	})
+	if err != nil {
+		t.Fatalf("filing the second story: %v", err)
+	}
+
+	// Held: nothing is ready, however complete its path is.
+	ready, err := f.ReadyStories(ctx, epicID, "vps")
+	if err != nil {
+		t.Fatalf("listing the ready stories: %v", err)
+	}
+	if len(ready) != 0 {
+		t.Fatalf("expected held stories not to be ready, got %v", apptest.IDs(ready))
+	}
+
+	// Released: the one that waits on nothing is ready, the other is not.
+	for _, id := range []string{first, second} {
+		if err := f.ReleaseStory(ctx, id); err != nil {
+			t.Fatalf("releasing %s: %v", id, err)
+		}
+	}
+	ready, err = f.ReadyStories(ctx, epicID, "vps")
+	if err != nil {
+		t.Fatalf("listing the ready stories after the release: %v", err)
+	}
+	if got := apptest.IDs(ready); len(got) != 1 || got[0] != first {
+		t.Fatalf("expected only %s to be ready, got %v", first, got)
+	}
+
+	// And once what it waits on is closed, the other one is ready too.
+	if err := f.CloseStory(ctx, first, "worked"); err != nil {
+		t.Fatalf("closing %s: %v", first, err)
+	}
+	ready, err = f.ReadyStories(ctx, epicID, "vps")
+	if err != nil {
+		t.Fatalf("listing the ready stories after the close: %v", err)
+	}
+	if got := apptest.IDs(ready); len(got) != 1 || got[0] != second {
+		t.Fatalf("expected %s to be ready once %s is closed, got %v", second, first, got)
+	}
+
+	detail, err := f.ShowStory(ctx, second)
+	if err != nil {
+		t.Fatalf("showing %s: %v", second, err)
+	}
+	if path, err := detail.Path(); err != nil || path.Model != domain.ModelSonnet {
+		t.Errorf("expected the filed story to carry its path override, got %+v (%v)", path, err)
+	}
+}
+
+func TestAStoryCannotBeFiledWaitingOnOneThatIsNot(t *testing.T) {
+	f := apptest.NewFakeTracker()
+	ctx := context.Background()
+
+	epicID, err := f.CreateEpic(ctx, application.NewEpic{Title: "Walking skeleton", Defaults: epicDefaults()})
+	if err != nil {
+		t.Fatalf("filing the epic: %v", err)
+	}
+	if _, err := f.CreateStory(ctx, application.NewStory{EpicID: epicID, Title: "Gateway", Needs: []string{"f-1.9"}}); err == nil {
+		t.Fatal("expected a story waiting on a story that is not filed to be refused")
 	}
 }
 
