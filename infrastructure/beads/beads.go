@@ -33,6 +33,9 @@ type Gateway struct {
 	mu    sync.Mutex
 }
 
+// Gateway satisfies the port.
+var _ application.WorkTracker = (*Gateway)(nil)
+
 // New returns a Gateway onto the beads database in a vault directory.
 func New(vault string) *Gateway {
 	return &Gateway{vault: vault}
