@@ -1,9 +1,15 @@
 package beads
 
-// The fixtures here are `bd --json` output captured verbatim from bd 1.0.4, so
-// that the decoding is pinned to the shapes bd really prints. The two commands
-// print a bead's dependencies differently — show prints the linked beads, ready
+// The fixtures here are `bd --json` output captured verbatim from bd, so that
+// the decoding is pinned to the shapes bd really prints. The two commands print
+// a bead's dependencies differently — show prints the linked beads, ready
 // prints the edges — and both have to be survivable.
+//
+// Captured from 1.0.4 and re-checked against 1.3.0, which prints these same
+// fields plus some the factory ignores (revision, lease_expires_at,
+// heartbeat_at, the *_count fields). 1.3.0 stopped inlining a bead's comments
+// and dependents without --include-comments / --include-dependents; it still
+// inlines dependencies, which is where a story's parent epic is read from.
 
 import (
 	"testing"
