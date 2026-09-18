@@ -10,7 +10,7 @@ PKG ?= ./...
 export GOFLAGS := -p=1
 export GOMAXPROCS := 1
 
-.PHONY: all build test lint clean
+.PHONY: all build test lint clean check-formulas
 
 all: build test lint
 
@@ -25,3 +25,8 @@ lint:
 
 clean:
 	rm -rf bin
+
+# Checks formulas/*.formula.json against a throwaway beads database.
+# Not part of `make test`: needs bd on PATH and takes real wall-clock time.
+check-formulas:
+	scripts/check-formulas.sh
