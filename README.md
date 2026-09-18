@@ -4,8 +4,9 @@ A personal software factory: one human directs a small set of AI-occupied
 seats that turn conversations into tracked work and tracked work into commits,
 across several rigs and two hosts, on a tight fuel budget.
 
-`mw` is the factory's command line. Today it knows its own version; the
-sessions, the beads gateway and the runner follow.
+`mw` is the factory's command line. Today it knows its own version, reads and
+writes stories through beads, and runs sessions in tmux; dispatching them
+follows.
 
 ## Getting started
 
@@ -39,6 +40,17 @@ features.
 Session, Story, Path, Formula, Rig, Host and Fuel each mean one thing here.
 Read it before naming anything. Sessions working this rig should also read
 [`CLAUDE.md`](CLAUDE.md).
+
+## Running a session
+
+`application.Runner` is the port a session is run through: start a command in a
+named session with a terminal attached, type into it, read what it has printed,
+ask whether it is still running, wait for it to end. `infrastructure/tmux` is
+the adapter — one tmux session per story, named after the story's id with the
+punctuation tmux reads as a target replaced (`mw-gq6.4` becomes `mw-gq6_4`), so
+that a person can `tmux attach -t mw-gq6_4` and watch any story being worked.
+tmux is told to keep the window when the command exits, so that the exit status
+and the last of the output are still there to be read afterwards.
 
 ## The Path
 
