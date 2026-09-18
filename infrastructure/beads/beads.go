@@ -18,6 +18,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 )
 
 // Program is the beads command this package shells out to.
@@ -35,6 +36,15 @@ type Gateway struct {
 // New returns a Gateway onto the beads database in a vault directory.
 func New(vault string) *Gateway {
 	return &Gateway{vault: vault}
+}
+
+// FromConfig returns a Gateway onto the vault this host is configured with.
+func FromConfig() (*Gateway, error) {
+	vault, err := config.Vault()
+	if err != nil {
+		return nil, err
+	}
+	return New(vault), nil
 }
 
 // Vault reports the directory this Gateway runs bd in.
