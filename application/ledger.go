@@ -2,6 +2,7 @@ package application
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -74,6 +75,52 @@ func (l LedgerLine) worker() string {
 	default:
 		return model + "/" + effort
 	}
+}
+
+// LedgerRow is as much of one line of a ledger as a report reads back: the day
+// it was written and the tokens its fuel column counted. It is the read side
+// of LedgerLine, kept as small as `mw status` needs — nothing else in the
+// factory reads a ledger back.
+type LedgerRow struct {
+	Date   string
+	Tokens int
+}
+
+// ParseLedgerRow reads one markdown table row of a ledger the way LedgerLine
+// wrote it: the date in the first column, the token total at the head of the
+// fifth (fuel). It reports false for a line that is not a table row of data —
+// the ledger's heading, its separator, a blank line, or one a person has
+// hand-edited past reading — so that summing a ledger never fails on a line it
+// does not need.
+func ParseLedgerRow(line string) (LedgerRow, bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "|") || !strings.HasSuffix(trimmed, "|") {
+		return LedgerRow{}, false
+	}
+	cells := strings.Split(strings.Trim(trimmed, "|"), " | ")
+	if len(cells) < 5 {
+		return LedgerRow{}, false
+	}
+	tokens, ok := leadingTokens(cells[4])
+	if !ok {
+		return LedgerRow{}, false
+	}
+	return LedgerRow{Date: strings.TrimSpace(cells[0]), Tokens: tokens}, true
+}
+
+// leadingTokens reads the token total off the head of a ledger's fuel column,
+// which Fuel.String writes as "12,345 tokens (...)".
+func leadingTokens(cell string) (int, bool) {
+	cell = strings.TrimSpace(cell)
+	at := strings.Index(cell, " tokens")
+	if at < 0 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.ReplaceAll(cell[:at], ",", ""))
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 // ledgerCell makes one value safe to put in a markdown table cell.

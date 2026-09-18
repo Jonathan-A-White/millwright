@@ -69,6 +69,35 @@ func TestALedgerLineCannotBreakTheTableItLandsIn(t *testing.T) {
 	}
 }
 
+func TestParseLedgerRowReadsBackWhatALedgerLineWrote(t *testing.T) {
+	line := aLedgerLine(nil).String()
+
+	row, ok := application.ParseLedgerRow(line)
+	if !ok {
+		t.Fatalf("expected %q to parse", line)
+	}
+	if row.Date != "2026-09-18" {
+		t.Errorf("expected the date column, got %q", row.Date)
+	}
+	if row.Tokens != 311200 {
+		t.Errorf("expected the token total off the fuel column, got %d", row.Tokens)
+	}
+}
+
+func TestParseLedgerRowIsFalseForALineThatIsNotOneOfData(t *testing.T) {
+	for _, line := range []string{
+		"",
+		"# Builder — ledger",
+		"| date | story | outcome | model/effort | fuel | notes |",
+		"|---|---|---|---|---|---|",
+		"not a table row at all",
+	} {
+		if _, ok := application.ParseLedgerRow(line); ok {
+			t.Errorf("expected %q not to parse as a data row", line)
+		}
+	}
+}
+
 func TestALedgerLineSaysWhatItDoesNotKnow(t *testing.T) {
 	line := aLedgerLine(func(l *application.LedgerLine) {
 		l.Path = domain.Path{}

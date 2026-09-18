@@ -19,6 +19,12 @@ const (
 	RunLanded  = "landed"
 	RunBlocked = "blocked"
 	RunStopped = "stopped"
+	// RunStuck is recorded by `mw sweep` (a separate story) for a story claimed
+	// here whose session has gone quiet without exiting. It is named here,
+	// alongside the run states mw next itself writes, because `mw status`
+	// reads it too: a story marked run=stopped or run=stuck is shown as that,
+	// never as running.
+	RunStuck = "stuck"
 )
 
 // CheckLines is how much of a failed test run is written onto the story. Enough
