@@ -27,6 +27,10 @@ const Actor = "fake"
 
 // FakeTracker is an in-memory application.WorkTracker. Stories are listed in
 // the order they were added, so a test can assert on the whole list.
+//
+// It does not model dependencies between stories: a story it holds is ready as
+// soon as it is open, unclaimed, under the epic asked about and pointed at the
+// host asked about. Beads itself also withholds blocked stories.
 type FakeTracker struct {
 	mu sync.Mutex
 
