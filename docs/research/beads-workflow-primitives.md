@@ -1,5 +1,10 @@
 # Beads workflow primitives: are they worth using?
 
+> ## Correction (2026-09-18, after the research was written)
+>
+> The verdict below that `bd formula` / `bd cook` is fragile is **wrong**. The failures came from hand-writing the schema with a `name` key; the top-level key is `formula = "<name>"`. The beads repo's own `examples/formulas/feature-workflow.formula.toml`, dropped into `.beads/formulas/`, was listed by `bd formula list`, cooked by `bd cook feature-workflow`, and poured by `bd mol pour feature-workflow --var feature_name=...` into a root bead plus five step beads with correct dependencies (only the first step appeared in `bd ready`). Verified on bd 1.0.4. The Governor has also run formulas in production elsewhere. **Verdict changed to USE NOW** for per-story formulas; `bd mol pour` comes with it. Swarms and mail remain ignored.
+
+
 Research date: 2026-09-18. Tested against `bd version 1.0.4 (ce242a879)` at
 `/usr/local/bin/bd`, in a scratch repo (`git init` + `bd init -p LAB
 --non-interactive --role maintainer --skip-agents --skip-hooks`), plus

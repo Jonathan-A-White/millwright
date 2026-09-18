@@ -22,6 +22,22 @@ _Avoid_: Agent, instance, run
 The seat the Governor talks to. Records what the Governor wants, breaks it into epics and stories, and sets each story's path. Never works stories itself.
 _Avoid_: Planner, orchestrator, PM
 
+**Builder**:
+The seat that works stories. One seat for all rigs and all models; the model and effort come from the story's path, not from the seat.
+_Avoid_: Worker, polecat, coder, dev
+
+**Clerk**:
+A cheap helper the Mayor hands clerical work to within its own session. Not a seat: it has no charter, no ledger and no memory of its own.
+_Avoid_: Assistant, secretary, sub-mayor
+
+**Charter**:
+The part of a seat that is always read at boot: who the seat is, its scope and authority, what it must and must never do. Only the Governor approves changes to it.
+_Avoid_: Prompt, persona, system prompt
+
+**Ledger**:
+A seat's append-only history, one line per story. Never edited, never read at boot.
+_Avoid_: Log, journal, history
+
 ### Work
 
 **Bead**:
@@ -40,8 +56,16 @@ A git repository the factory works on. The factory's own repo is a rig.
 _Avoid_: Project, repo (when you mean the unit of factory work)
 
 **Path**:
-The Mayor's plan for how an epic gets worked: the ordering of its stories, and for each story its rig, model and effort. Adjustable per story at any time before it starts.
+The Mayor's plan for how an epic gets worked: the ordering of its stories, and for each story its rig, target branch, harness, model, effort, formula and host. Adjustable per story at any time before it starts. A story without a rig and a target branch has no path.
 _Avoid_: Route, plan, schedule
+
+**Formula**:
+A beads formula: the step-by-step procedure a story is worked by, named in the story's path and poured into step beads when the story starts. Different stories in one epic may use different formulas.
+_Avoid_: Recipe, playbook, workflow, template
+
+**Harness**:
+The agent runtime a session runs in. Claude Code today; others may be added.
+_Avoid_: Runtime, CLI, provider
 
 **Mode**:
 How an epic's stories are allowed to overlap: serial, parallel, or hybrid (parallel within stages, serial between them).
