@@ -19,6 +19,10 @@ takes minutes — wait it out rather than retrying.
 
 ## Layout
 
+`docs/codemap.md` is the one page that says where everything is — the layers,
+every port with its adapter and fake, every use case with its command and
+feature, and how to add a command end to end. Read it before hunting.
+
 `domain/` pure value types, standard library only · `application/` use cases
 and ports · `infrastructure/` adapters · `cmd/mw` the cobra command line ·
 `features/` Gherkin, run by godog from `features/features_test.go`.
