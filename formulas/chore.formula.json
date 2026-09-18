@@ -1,0 +1,46 @@
+{
+  "formula": "chore",
+  "description": "Work a story with no test-first step: do the change, verify it against the acceptance criteria, commit, close out.",
+  "version": 1,
+  "type": "workflow",
+  "pour": true,
+  "vars": {
+    "story": {
+      "description": "the story bead this formula works",
+      "required": true
+    },
+    "title": {
+      "description": "the story's title",
+      "required": true
+    }
+  },
+  "steps": [
+    {
+      "id": "do",
+      "title": "Do {{story}}: {{title}}",
+      "description": "Make the change that {{story}} describes.",
+      "type": "task"
+    },
+    {
+      "id": "verify",
+      "title": "Verify",
+      "description": "Run whatever {{story}}'s acceptance criteria say to check, and confirm it passes.",
+      "type": "task",
+      "depends_on": ["do"]
+    },
+    {
+      "id": "commit",
+      "title": "Commit",
+      "description": "Commit the change for {{story}} in small, plainly described commits, with no AI attribution lines.",
+      "type": "task",
+      "depends_on": ["verify"]
+    },
+    {
+      "id": "close",
+      "title": "Closing comment",
+      "description": "Comment on {{story}} with what was done, what was verified and how, and anything left undone.",
+      "type": "task",
+      "depends_on": ["commit"]
+    }
+  ]
+}
