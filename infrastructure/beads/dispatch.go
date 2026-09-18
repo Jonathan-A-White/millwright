@@ -103,6 +103,48 @@ func (g *Gateway) SetStoryState(ctx context.Context, id, dimension, value, reaso
 	return err
 }
 
+// StoryState implements application.WorkTracker. bd exits non-zero for a
+// dimension that was never set, and that is not a failure here: a story nobody
+// has recorded anything about simply has no state, which is "".
+func (g *Gateway) StoryState(ctx context.Context, id, dimension string) (string, error) {
+	switch {
+	case strings.TrimSpace(id) == "":
+		return "", fmt.Errorf("reading a state: which story?")
+	case strings.TrimSpace(dimension) == "":
+		return "", fmt.Errorf("reading the state of %s: which dimension?", id)
+	}
+	out, _, err := g.run(ctx, "state", id, dimension)
+	if err != nil {
+		return "", nil
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// OpenSteps implements application.WorkTracker: the step beads of a poured
+// formula that are not closed. They come back in the order they are worked, so
+// that the first one still open is the first thing the session did not do.
+func (g *Gateway) OpenSteps(ctx context.Context, moleculeID string) ([]application.FormulaStep, error) {
+	if strings.TrimSpace(moleculeID) == "" {
+		return nil, nil
+	}
+	out, err := g.call(ctx, "list", "--parent", moleculeID, "--limit", "0", "--json")
+	if err != nil {
+		return nil, err
+	}
+	poured, err := decodeBeads(out)
+	if err != nil {
+		return nil, fmt.Errorf("reading the steps of %s: %w", moleculeID, err)
+	}
+
+	open := make([]bead, 0, len(poured))
+	for _, step := range poured {
+		if step.Status != StatusClosed {
+			open = append(open, step)
+		}
+	}
+	return inWorkedOrder(open), nil
+}
+
 // Formulas implements application.WorkTracker: the formulas bd can pour here,
 // which are the files installed under the database's own formulas directory.
 func (g *Gateway) Formulas(ctx context.Context) ([]string, error) {

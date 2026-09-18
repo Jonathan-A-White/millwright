@@ -25,11 +25,12 @@ import (
 const Program = "bd"
 
 // Beads' own names for the statuses the factory puts a story in: claimed, held
-// back from every dispatcher, and released to them again.
+// back from every dispatcher, released to them again, and finished.
 const (
 	StatusInProgress = "in_progress"
 	StatusDeferred   = "deferred"
 	StatusOpen       = "open"
+	StatusClosed     = "closed"
 )
 
 // Gateway reads and writes stories in one vault's beads database.

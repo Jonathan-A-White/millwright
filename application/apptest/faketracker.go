@@ -41,9 +41,10 @@ type FakeTracker struct {
 	order    []string
 	epics    []string
 
-	formulas  map[string][]application.FormulaStep // formula name -> its steps
-	molecules []application.Molecule
-	poured    map[string]string // story id -> the molecule poured for it
+	formulas    map[string][]application.FormulaStep // formula name -> its steps
+	molecules   []application.Molecule
+	poured      map[string]string // story id -> the molecule poured for it
+	closedSteps map[string]bool   // step id -> closed by the session working it
 
 	notes map[string]string
 	syncs int
@@ -472,11 +473,61 @@ func (f *FakeTracker) SetStoryMetadata(_ context.Context, id string, fields map[
 	return f.write(id, func(s *fakeStory) error {
 		for k, v := range fields {
 			s.metadata[k] = v
+			// The molecule a story carries is read back off the story, as beads
+			// reads it off the bead's metadata.
+			if k == application.MoleculeField {
+				s.detail.Molecule.RootID = v
+			}
 			// Path fields are metadata: keep the story's overrides in step.
 			_ = s.detail.Story.Overrides.Set(k, v)
 		}
 		return nil
 	})
+}
+
+// StoryState implements application.WorkTracker.
+func (f *FakeTracker) StoryState(_ context.Context, id, dimension string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return "", f.Err
+	}
+	if s, ok := f.stories[id]; ok {
+		return s.states[dimension], nil
+	}
+	return "", fmt.Errorf("no story %q", id)
+}
+
+// CloseStep closes one step of a poured molecule, as a session does as it works
+// its formula.
+func (f *FakeTracker) CloseStep(stepID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closedSteps == nil {
+		f.closedSteps = map[string]bool{}
+	}
+	f.closedSteps[stepID] = true
+}
+
+// OpenSteps implements application.WorkTracker.
+func (f *FakeTracker) OpenSteps(_ context.Context, moleculeID string) ([]application.FormulaStep, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	var open []application.FormulaStep
+	for _, molecule := range f.molecules {
+		if molecule.RootID != moleculeID {
+			continue
+		}
+		for _, step := range molecule.Steps {
+			if !f.closedSteps[step.ID] {
+				open = append(open, step)
+			}
+		}
+	}
+	return open, nil
 }
 
 // CommentOnStory implements application.WorkTracker.

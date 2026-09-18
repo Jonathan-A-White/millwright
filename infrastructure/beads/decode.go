@@ -110,6 +110,10 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		Description:     b.Description,
 		Acceptance:      b.Acceptance,
 		EstimateMinutes: b.EstimatedMinutes,
+		// The formula poured for this story, as the dispatch that poured it
+		// recorded it. Only the root is known from the story itself; the steps
+		// are read from the tracker by whoever needs them.
+		Molecule: application.Molecule{RootID: b.pathMetadata()[application.MoleculeField]},
 	}
 }
 

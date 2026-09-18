@@ -149,6 +149,15 @@ type WorkTracker interface {
 	// worked. Pouring twice makes two molecules, so pour once per dispatch.
 	PourFormula(ctx context.Context, formula, storyID, title string) (Molecule, error)
 
+	// StoryState reads back one dimension of a story's operational state, or ""
+	// when that dimension has never been set.
+	StoryState(ctx context.Context, id, dimension string) (string, error)
+
+	// OpenSteps lists the steps of a poured formula that are not closed yet:
+	// what the session working the story did not finish. A molecule whose steps
+	// are all closed comes back empty, and so does one that was never poured.
+	OpenSteps(ctx context.Context, moleculeID string) ([]FormulaStep, error)
+
 	// SetStoryMetadata writes metadata fields onto a story, leaving the fields
 	// it does not name alone. Path fields are metadata like any other.
 	SetStoryMetadata(ctx context.Context, id string, fields map[string]string) error
