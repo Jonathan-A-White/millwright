@@ -34,4 +34,5 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializePathScenario(ctx)
 	steps.InitializeReadyStoriesScenario(ctx)
 	steps.InitializeSeatBootScenario(ctx)
+	steps.InitializeSyncScenario(ctx)
 }
