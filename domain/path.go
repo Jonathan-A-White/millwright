@@ -6,6 +6,7 @@ package domain
 import (
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Harness is the agent runtime a session runs in.
@@ -42,14 +43,16 @@ const (
 // Path is the plan for how one story gets worked: the rig it is worked in, the
 // branch it targets, and the harness, model, effort, formula and host of the
 // session that works it. A story without a rig and a target branch has no path.
+// The tags are how a Path is written down in the Mayor's plan file; the field
+// names are the same as the metadata keys a bead stores it under.
 type Path struct {
-	Rig     string
-	Branch  string
-	Harness Harness
-	Model   Model
-	Effort  Effort
-	Formula string
-	Host    string
+	Rig     string  `json:"rig,omitempty"`
+	Branch  string  `json:"branch,omitempty"`
+	Harness Harness `json:"harness,omitempty"`
+	Model   Model   `json:"model,omitempty"`
+	Effort  Effort  `json:"effort,omitempty"`
+	Formula string  `json:"formula,omitempty"`
+	Host    string  `json:"host,omitempty"`
 }
 
 // Story is a bead sized to be worked start to finish by one session in one
@@ -151,6 +154,40 @@ func (p Path) Metadata() map[string]string {
 		m[field] = value
 	}
 	return m
+}
+
+// Summary is a path on one line, for a person reading a tree of stories:
+// where the work lands, who does it and how. Fields the path does not set are
+// left out, so that an incomplete path reads as what it is.
+func (p Path) Summary() string {
+	var parts []string
+	if where := join("/", p.Rig, p.Branch); where != "" {
+		parts = append(parts, where)
+	}
+	if who := join("/", string(p.Harness), string(p.Model), string(p.Effort)); who != "" {
+		parts = append(parts, who)
+	}
+	if p.Formula != "" {
+		parts = append(parts, p.Formula)
+	}
+	if p.Host != "" {
+		parts = append(parts, p.Host)
+	}
+	if len(parts) == 0 {
+		return "no path"
+	}
+	return strings.Join(parts, " · ")
+}
+
+// join puts the values that are set together, in order, and drops the rest.
+func join(separator string, values ...string) string {
+	set := make([]string, 0, len(values))
+	for _, value := range values {
+		if value != "" {
+			set = append(set, value)
+		}
+	}
+	return strings.Join(set, separator)
 }
 
 // PathFromMetadata reads a path out of stored metadata, ignoring every key

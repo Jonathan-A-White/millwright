@@ -1,0 +1,113 @@
+{
+  "epic": {
+    "key": "skeleton",
+    "title": "Walking skeleton: mw files, dispatches and closes out one story",
+    "priority": 1,
+    "description": "The smallest mw that closes the loop on the factory's own rig: the Mayor's plan file is filed into beads with a path on every story; a ready story is claimed and started in a fresh Builder session on the model and effort its path names; when the session ends, mw checks it, records its fuel in the Builder's ledger and starts whatever is ready next. Serves the prototype ticket 'Walking skeleton: one story from the Mayor's mouth to a commit' on the map (mw-6ww).\n\nPROVISIONAL, Governor to confirm: mw is an on-demand CLI with no daemon (the open grilling 'What does the Go binary own?'). Every story here holds under either answer; a daemon would be an addition, not a rewrite.",
+    "success_criteria": "A story filed with `mw file` is started by `mw dispatch` in a fresh session on its path's model and effort, lands a commit on its target branch in the millwright rig, and `mw next` closes it with a ledger line carrying its fuel, without a human touching beads, git or tmux in between.",
+    "defaults": {
+      "rig": "millwright",
+      "branch": "main",
+      "harness": "claude",
+      "model": "opus",
+      "effort": "high",
+      "formula": "tdd-feature",
+      "host": "vps"
+    }
+  },
+  "stories": [
+    {
+      "key": "module",
+      "title": "Go module, layout and the Path domain",
+      "priority": 1,
+      "estimate": 60,
+      "description": "Create the Go module github.com/Jonathan-A-White/millwright with the layout from the Builder's rig memory (domain/, application/, infrastructure/, cmd/mw, features/). cobra CLI with `mw version`. In domain/: Story and Path value types. A Path has rig, branch, harness, model, effort, formula, host. Validation: rig and branch are mandatory; harness is one of {claude}; model one of {fable, opus, sonnet, haiku}; effort one of {low, medium, high, xhigh, max}; a Path can be built from an epic's defaults overlaid with a story's overrides. Pure domain, no I/O. godog wired up with one feature, features/path_validation.feature, covering: missing rig rejected, missing branch rejected, unknown model rejected, story override beats epic default. Add a Makefile with build, test, lint (go vet) targets and a short README. Add a minimal CLAUDE.md for the rig (under 25 lines: read CONTEXT.md for vocabulary, how to build and test, nothing else).",
+      "acceptance": "`make build` produces bin/mw and `bin/mw version` prints a version. `make test` passes, including the godog feature with all four scenarios. `go vet ./...` is clean. domain/ imports nothing outside the standard library.",
+      "needs": []
+    },
+    {
+      "key": "formulas",
+      "title": "First formulas: tdd-feature and chore",
+      "priority": 2,
+      "estimate": 30,
+      "description": "Author two beads formulas in the rig under formulas/: tdd-feature (understand the story and the code it touches; write the failing feature or test first; implement until green; run the full build, tests and vet; self-review the diff against the acceptance criteria; commit; write the closing comment and update rig memory) and chore (do; verify; commit; closing comment). Top-level key is `formula = \"<name>\"` (see the correction note in docs/research/beads-workflow-primitives.md and the examples in the beads repo under examples/formulas/). Each takes a `story` variable (the story bead id) and a `title` variable. Add docs/formulas.md explaining in under a page how a formula is chosen per story and how it is installed into the vault's .beads/formulas/.",
+      "acceptance": "In a throwaway beads database in a temp dir (never the vault), both formulas are listed by `bd formula list`, cook without error with `bd cook <name>`, and `bd mol pour <name> --var story=x --var title=y` creates the expected step beads with only the first step ready. A script scripts/check-formulas.sh does exactly this and exits 0.",
+      "path": { "formula": "chore", "model": "sonnet" },
+      "needs": []
+    },
+    {
+      "key": "beads-gateway",
+      "title": "Beads gateway: read and write stories through bd",
+      "priority": 1,
+      "estimate": 90,
+      "description": "application/ defines a port (interface) for the work tracker: show a story with its Path (from bead metadata, with the parent epic's defaults overlaid), list ready stories for a host, claim, set metadata, comment, close with reason, list stale claims. infrastructure/beads implements it by shelling out to `bd --json` with `-C <vault>`; never more than one bd process at a time (single-writer lock). The vault location comes from config: env MW_VAULT, else ~/.config/mw/config.toml. An in-memory fake implements the same port for other stories' tests. Integration tests create a throwaway beads database in a temp dir and are skipped if bd is not on PATH.",
+      "acceptance": "`make test` passes. The integration test creates an epic with default path metadata and a story overriding model, and reads back the merged Path; claims it; confirms it no longer appears as ready; closes it. A feature file features/ready_stories.feature describes ready-for-host filtering against the fake.",
+      "needs": ["module"]
+    },
+    {
+      "key": "runner",
+      "title": "Runner port with a tmux backend",
+      "priority": 1,
+      "estimate": 90,
+      "description": "application/ defines the Runner port from the Herdr research: start a session (name, working directory, environment, command), send input, read recent output, report whether it is still running, wait for exit, close. infrastructure/tmux implements it with plain tmux (new-session -d / new-window, send-keys, capture-pane, has-session, kill-session). Session names are derived from the story id so a human can `tmux attach` to any story. A fake Runner for tests. Herdr is a later second backend; do not build it.",
+      "acceptance": "`make test` passes. An integration test (skipped if tmux is missing) starts `sh -c 'echo hello; sleep 1'` in a named tmux session in a temp dir, reads 'hello' from its output, observes it finish, and leaves no tmux session behind.",
+      "needs": ["module"]
+    },
+    {
+      "key": "file",
+      "title": "mw file: file the Mayor's plan and show the tree",
+      "priority": 1,
+      "estimate": 90,
+      "description": "`mw file <plan.json>` reads a plan in the format of plans/0001-walking-skeleton.json in the vault (an epic with default path, stories with optional path overrides, acceptance, estimate, needs). It validates before writing anything: every story resolves to a valid Path (rig and branch present), has acceptance criteria, and `needs` refer to real keys with no cycles. It then creates the epic and stories through the beads gateway (structured acceptance and estimate fields, path as metadata, needs as blocks dependencies, stories as children of the epic) with stories created DEFERRED or otherwise held so nothing is dispatchable yet, prints the tree with each story's path and what it waits on, and only on `--approve` (or an interactive yes) releases them. Do not use `bd create --graph`: it drops acceptance and estimate.",
+      "acceptance": "`make test` passes. features/file_plan.feature covers: valid plan files and prints a tree; plan with a story missing a branch is rejected and nothing is written; plan with a dependency cycle is rejected; unapproved plan leaves no story ready; approved plan leaves exactly the stories with no needs ready.",
+      "needs": ["beads-gateway"]
+    },
+    {
+      "key": "boot",
+      "title": "Seat boot: assemble a Builder session's priming and command line",
+      "priority": 1,
+      "estimate": 60,
+      "description": "Given a story and the vault, assemble the boot prompt file: seats/builder/charter.md, then seats/builder/rigs/<rig>.md if it exists, then the story (title, description, acceptance criteria, path, formula steps if poured). Build the harness command for the claude harness: `claude -p <kickoff prompt> --model <model> --effort <effort> --append-system-prompt-file <boot file> --output-format json` with the result JSON redirected to a per-story file under the vault's runs/<story-id>/, and a permission mode suitable for unattended work inside a worktree (read docs/research/claude-code-session-knobs.md, including its verification notes, and choose the least permissive mode that lets a Builder edit, build, test and commit; record the choice and why in docs/adr/ only if it passes the ADR bar, else in the closing comment). Pure assembly: this story launches nothing.",
+      "acceptance": "`make test` passes. features/seat_boot.feature covers: boot file contains the charter, the rig memory and the story's acceptance criteria in that order; a missing rig memory file is not an error; the command line carries the story's model and effort; nothing else from the vault (ledger, postmortems, other rigs) is included.",
+      "needs": ["beads-gateway"]
+    },
+    {
+      "key": "dispatch",
+      "title": "mw dispatch: start a fresh Builder session for each ready story",
+      "priority": 1,
+      "estimate": 120,
+      "description": "`mw dispatch` asks the gateway for stories ready for this host (host from config), up to a concurrency cap (config, default 1 on the vps), and for each: claims it; creates a git worktree of the rig at <rig>/../.mw-worktrees/<story-id> on a new branch mw/<story-id> from the story's target branch; pours the story's formula if one is named and installed; assembles the boot (seat boot story); starts the session through the Runner in that worktree. It records on the bead, via set-state, that the story is running and where. Rig checkout locations come from config (a map of rig name to path). `--dry-run` prints what it would start and writes nothing. If any step fails after the claim, the claim is released and the failure is commented on the bead.",
+      "acceptance": "`make test` passes. features/dispatch.feature (fakes for gateway and runner, a real temp git repo for worktrees) covers: one ready story starts one session in its own worktree on branch mw/<id> cut from the target branch; the concurrency cap is respected; a story for another host is left alone; a failure after claiming releases the claim; --dry-run starts nothing.",
+      "needs": ["beads-gateway", "runner", "boot"]
+    },
+    {
+      "key": "next",
+      "title": "mw next: close out a finished story, record fuel, keep going",
+      "priority": 1,
+      "estimate": 120,
+      "description": "`mw next <story-id>` runs when a story's session ends (the dispatch command line chains it after the harness exits, so no hook configuration is needed for headless sessions). It reads the session's result JSON from runs/<story-id>/; if the session errored or ran out of fuel it comments on the bead, marks the story blocked via set-state, releases nothing silently and stops. Otherwise it verifies the story branch has commits and the rig's `make test` passes in the worktree; under the rig's merge-slot it merges mw/<story-id> into the target branch (fast-forward or merge commit, never force) and removes the worktree; appends one line to seats/builder/ledger.md in the vault (date, story id and title, outcome, model, effort, turns, tokens in/out/cache, cost-equivalent); closes the bead with a reason; then runs dispatch again. The ledger is append-only: open for append, never rewrite.",
+      "acceptance": "`make test` passes. features/next.feature covers: a successful story is merged, ledgered with its fuel, closed, and the next ready story is dispatched; a failing `make test` leaves the story open and blocked with the output on the bead and nothing merged; an errored session is recorded truthfully and nothing is merged; the ledger only ever grows.",
+      "needs": ["dispatch"]
+    },
+    {
+      "key": "status-sweep",
+      "title": "mw status and mw sweep",
+      "priority": 2,
+      "estimate": 60,
+      "description": "`mw status` prints, for this host: running stories (with tmux session names to attach to), ready, blocked, and today's fuel from the ledger, in a layout that reads well on a phone-width terminal (under 60 columns). `mw sweep` finds claimed stories whose Runner session no longer exists or whose claim is older than a threshold (config, default 2h) with no session output change, comments the finding on the bead, and marks them stuck via set-state; it never kills or restarts anything by itself. Both are zero-token.",
+      "acceptance": "`make test` passes. features/sweep.feature covers: a claimed story with no live session is reported stuck; a claimed story with a live session is left alone; sweep changes nothing but state and comments. `mw status` output fits in 60 columns in a test.",
+      "path": { "model": "sonnet" },
+      "needs": ["beads-gateway", "runner"]
+    },
+    {
+      "key": "dogfood",
+      "title": "Dogfood run: one real story through the whole loop",
+      "priority": 1,
+      "estimate": 45,
+      "description": "With the Governor present: install mw on the VPS, install the formulas into the vault, write the mw config (vault path, rig paths, host name, cap). The Governor tells the Mayor one small real want for the millwright rig; the Mayor writes a one-story plan; `mw file --approve`, `mw dispatch`, and watch it through `mw status` and tmux until `mw next` closes it. Record what felt wrong as new beads. This resolves the map's prototype ticket.",
+      "acceptance": "A commit authored by a Builder session exists on millwright's main, its story bead is closed by mw with a reason, and seats/builder/ledger.md has a line for it with non-zero fuel. The Governor has said what felt wrong, and each point is a bead.",
+      "path": { "formula": "chore", "model": "fable", "effort": "high" },
+      "needs": ["next", "file", "formulas", "status-sweep"]
+    }
+  ]
+}
