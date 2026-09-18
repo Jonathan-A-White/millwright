@@ -265,3 +265,27 @@ func TestSeatIdentityIsTheSeatOnItsHost(t *testing.T) {
 		t.Errorf("expected a seat with no host to be just the seat, got %q", got)
 	}
 }
+
+func TestBootChainsTheCloseOutOntoTheSessionWithTheStoryAfterIt(t *testing.T) {
+	v, h := newFakeVault(), &fakeHarness{}
+	boot := aSeatBoot(v, h)
+	boot.After = []string{"/root/millwright/bin/mw", "next"}
+
+	if _, err := boot.Boot(context.Background(), aStory(nil), "/worktree"); err != nil {
+		t.Fatalf("booting the story: %v", err)
+	}
+	after := h.launch.After
+	if len(after) != 3 || after[0] != "/root/millwright/bin/mw" || after[1] != "next" || after[2] != "mw-gq6.6" {
+		t.Errorf("expected the close-out of this story to be chained on, got %q", after)
+	}
+
+	// A seat told to run nothing afterwards chains nothing: the story ends when
+	// the session does.
+	h.launch = application.Launch{}
+	if _, err := aSeatBoot(v, h).Boot(context.Background(), aStory(nil), "/worktree"); err != nil {
+		t.Fatalf("booting the story: %v", err)
+	}
+	if len(h.launch.After) != 0 {
+		t.Errorf("expected nothing chained on, got %q", h.launch.After)
+	}
+}
