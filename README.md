@@ -6,8 +6,9 @@ across several rigs and two hosts, on a tight fuel budget.
 
 `mw` is the factory's command line. Today it knows its own version, files the
 Mayor's plans with `mw file`, reads and writes stories through beads, runs
-sessions in tmux, and keeps the two hosts level with `mw sync`; dispatching
-sessions follows.
+sessions in tmux, keeps the two hosts level with `mw sync`, and starts a fresh
+Builder session for each ready story with `mw dispatch`; closing a finished
+story out follows.
 
 ## Getting started
 
@@ -98,6 +99,57 @@ with `--append-system-prompt-file`, its result redirected to
 and `MW_STORY` in its environment so that the work is signed by the seat rather
 than by the session. Assembling launches nothing and spends no fuel. See
 `features/seat_boot.feature`.
+
+## Dispatching a story
+
+```sh
+bin/mw dispatch --dry-run   # what it would start, writing nothing at all
+bin/mw dispatch             # claim, cut, pour, boot, start
+```
+
+`mw dispatch` is the one command that spends fuel, so everything it does before
+spending any is reversible. In order, once: `mw sync`, so that this host sees
+the other host's claims before it makes its own; what this host already has in
+flight, which is what the cap counts; what is ready here. Then, per story, up to
+the cap:
+
+1. **claim** it — from here everything is undone if anything fails;
+2. **fetch** the rig's origin and **cut** `mw/<story-id>` at
+   `<rig>/../.mw-worktrees/<story-id>`, from `origin/<target branch>` rather
+   than from a local branch the other host may have moved past;
+3. **pour** the story's formula into step beads, and record the molecule's id on
+   the story;
+4. **boot** the seat — the boot file, with the poured steps in it, so that a
+   session never has to ask the tracker what its own steps are;
+5. **start** the session through the runner;
+6. **record** `run=running` on the story, saying which session, worktree and
+   branch it is being worked in.
+
+A failure at 2, 3, 4 or 5 removes the worktree, gives the claim back and writes
+the reason on the story: the story is left exactly as ready as it was found.
+A failure at 6 is reported and nothing is undone — the session is alive and
+spending fuel, and a claim given back under a live session is how one story gets
+worked twice. A story whose Path names another host, or no host at all, is never
+claimed here, and neither is one whose rig this host has not checked out.
+
+`--dry-run` prints what it would start and writes nothing: nothing is synced,
+claimed, fetched, cut, poured or started. See `features/dispatch.feature`.
+
+### What a host is told
+
+`~/.config/mw/config.toml`, with `MW_VAULT`, `MW_HOST` and `MW_CAP` ahead of it:
+
+```toml
+vault = "/root/millwright-vault"   # the one beads database and the seats
+host  = "vps"                      # which of the factory's hosts this is
+cap   = 1                          # sessions running here at once (default 1)
+
+[rigs]
+millwright = "/root/millwright"    # where each rig is checked out here
+```
+
+A rig a story names but this host has no checkout of is said so plainly, and the
+story is left for the host that has it.
 
 ## Keeping two hosts level
 
