@@ -23,14 +23,15 @@ features.
 
 ## Layout
 
-| Directory         | What lives there                                                |
-| ----------------- | --------------------------------------------------------------- |
-| `domain/`         | Value types — Story, Path. Pure: standard library only, no I/O.  |
-| `application/`    | Use cases and the ports they reach the world through.            |
-| `infrastructure/` | Adapters behind those ports: beads, tmux, the harness, the disk. |
-| `cmd/mw/`         | The cobra command tree for the `mw` binary.                      |
-| `features/`       | Gherkin features, run by godog from `features/features_test.go`. |
-| `docs/`           | Architecture decision records and research notes.                |
+| Directory              | What lives there                                                 |
+| ---------------------- | ---------------------------------------------------------------- |
+| `domain/`              | Value types — Story, Path. Pure: standard library only, no I/O.   |
+| `application/`         | Use cases and the ports they reach the world through.             |
+| `application/apptest/` | In-memory stand-ins for those ports, for any package's tests.     |
+| `infrastructure/`      | Adapters behind those ports: beads, tmux, the harness, the disk.  |
+| `cmd/mw/`              | The cobra command tree for the `mw` binary.                       |
+| `features/`            | Gherkin features, run by godog from `features/features_test.go`.  |
+| `docs/`                | Architecture decision records and research notes.                 |
 
 ## Vocabulary
 
