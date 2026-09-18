@@ -17,6 +17,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newNextCmd())
 	root.AddCommand(newReleaseCmd())
 	root.AddCommand(newStatusCmd())
+	root.AddCommand(newSweepCmd())
 	root.AddCommand(newSyncCmd())
 	root.AddCommand(newVersionCmd())
 
