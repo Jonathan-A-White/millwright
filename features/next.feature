@@ -1,0 +1,155 @@
+Feature: Closing out a finished story and carrying on
+  mw next runs when a story's session ends: the dispatch command line chains it
+  after the harness exits, whatever the harness exited with. It reads what the
+  session reported and, on a good run, checks the work, lands the story's branch
+  on its target branch under the rig's merge slot, appends one line to the seat's
+  ledger, closes the story and dispatches whatever is ready next. On a bad run
+  nothing is landed and nothing is closed: what happened is written on the story
+  and in the ledger, and mw stops there.
+
+  Background:
+    Given a factory whose vault holds a builder charter and a ledger
+    And a rig "millwright" checked out from a bare origin of its own
+    And a plan "mw-gq6" whose stories are worked on "vps" and target "main"
+    And the story "mw-gq6.1" has been worked in its own worktree
+
+  Scenario: A finished story is landed, ledgered with its fuel, closed, and the next story dispatched
+    Given the session of "mw-gq6.1" reported this result:
+      """
+      {
+        "type": "result",
+        "subtype": "success",
+        "is_error": false,
+        "num_turns": 37,
+        "duration_ms": 1680000,
+        "session_id": "s-1",
+        "total_cost_usd": 4.21,
+        "usage": {
+          "input_tokens": 1200,
+          "output_tokens": 18000,
+          "cache_read_input_tokens": 280000,
+          "cache_creation_input_tokens": 12000
+        }
+      }
+      """
+    And the story "mw-gq6.2" is planned and ready to be worked here
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And it landed as a fast-forward
+    And the story "mw-gq6.1" is closed
+    And the last ledger line holds:
+      | mw-gq6.1       |
+      | landed on main |
+      | opus/high      |
+      | 311,200 tokens |
+      | 37 turns       |
+      | $4.21          |
+    And nothing is left of the worktree of "mw-gq6.1"
+    And a fresh session is running for "mw-gq6.2"
+
+  Scenario: The ledger is only ever appended to
+    Given the ledger already holds a line from an earlier story
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the ledger still holds every line it held before
+    And the last ledger line names "mw-gq6.1"
+
+  Scenario: A failing test leaves the story open and blocked, and nothing is landed
+    Given the session of "mw-gq6.1" reported a plain success
+    And the rig's tests fail, saying "undefined: Ledger"
+    And the story "mw-gq6.2" is planned and ready to be worked here
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the story "mw-gq6.1" is held blocked
+    And the story "mw-gq6.1" carries a comment quoting: undefined: Ledger
+    And the worktree of "mw-gq6.1" is still there
+    And the last ledger line holds:
+      | mw-gq6.1   |
+      | not landed |
+    And no fresh session was started
+
+  Scenario: An errored session is recorded truthfully and nothing is landed
+    Given the session of "mw-gq6.1" reported this result:
+      """
+      {
+        "type": "result",
+        "subtype": "error_during_execution",
+        "is_error": true,
+        "num_turns": 4,
+        "duration_ms": 30000,
+        "session_id": "s-2",
+        "total_cost_usd": 0.12,
+        "result": "the session ran out of fuel",
+        "usage": {"input_tokens": 10, "output_tokens": 20, "cache_read_input_tokens": 23000}
+      }
+      """
+    And the story "mw-gq6.2" is planned and ready to be worked here
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the story "mw-gq6.1" is held blocked
+    And the story "mw-gq6.1" carries a comment quoting: the session ran out of fuel
+    And the last ledger line holds:
+      | mw-gq6.1      |
+      | not landed    |
+      | 23,030 tokens |
+    And the worktree of "mw-gq6.1" is still there
+    And no fresh session was started
+    And the rig's tests were run 0 times
+
+  Scenario: A session that left no result at all is not taken for a success
+    Given the session of "mw-gq6.1" left no result at all
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the story "mw-gq6.1" is held blocked
+    And no fresh session was started
+
+  Scenario: A branch with no commits on it is not landed
+    Given the story "mw-gq6.9" has been worked in its own worktree, committing nothing
+    And the session of "mw-gq6.9" reported a plain success
+    When mw closes out "mw-gq6.9"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.9" is not closed
+    And the story "mw-gq6.9" is held blocked
+    And the rig's tests were run 0 times
+
+  Scenario: A formula step the session never closed stops the close-out
+    Given the session of "mw-gq6.1" reported a plain success
+    And a formula was poured for "mw-gq6.1" and one of its steps is still open
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the story "mw-gq6.1" is held blocked
+    And the story "mw-gq6.1" carries a comment quoting: formula step
+
+  Scenario: The target branch moved on the origin while the story was worked
+    Given the other host landed its own work on "main" while "mw-gq6.1" was worked
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the other host's work is still on "main" at the rig's origin
+    And it landed as a merge commit
+    And the rig's tests were run 2 times
+    And the story "mw-gq6.1" is closed
+
+  Scenario: The push is rejected once and then succeeds
+    Given the other host lands its own work the moment mw first tries to push
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the other host's work is still on "main" at the rig's origin
+    And mw pushed twice and forced nothing
+    And the story "mw-gq6.1" is closed
+
+  Scenario: The merge slot is given back once the landing is done
+    Given the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the merge slot of the rig is free again
+
+  Scenario: A close-out that lands nothing gives the merge slot back too
+    Given the session of "mw-gq6.1" reported a plain success
+    And the rig's tests fail, saying "still red"
+    When mw closes out "mw-gq6.1"
+    Then the merge slot of the rig is free again
