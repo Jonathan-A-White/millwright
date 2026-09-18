@@ -98,7 +98,7 @@ func TestWaitingForAMergeSlotGivesUpWhenTheContextDoes(t *testing.T) {
 	defer cancel()
 
 	// A long wait, cut short by the context rather than by the wait itself.
-	if _, err := rig.NewSlots(rig.WithSlotPoll(5 * time.Millisecond)).Take(ctx, dir, "me"); err == nil {
+	if _, err := rig.NewSlots(rig.WithSlotPoll(5*time.Millisecond)).Take(ctx, dir, "me"); err == nil {
 		t.Fatal("expected waiting for the slot to give up when the context did")
 	}
 }
