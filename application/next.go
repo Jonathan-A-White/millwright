@@ -454,6 +454,16 @@ func (n Next) ledgerNotes(c *closeOut, report *NextReport) []string {
 	return append(notes, report.Notes...)
 }
 
+// recordedGone reports whether id's run state already says its session is not
+// to be trusted as running — set by mw next (RunStopped) once a close-out
+// found it gone, or by mw sweep (RunStuck) once a sweep did. It is the guard
+// both share, so that whichever of them notices a claimed story's session is
+// gone first is the one that comments, and the other says nothing again.
+func recordedGone(ctx context.Context, tracker WorkTracker, id string) bool {
+	was, err := tracker.StoryState(ctx, id, RunState)
+	return err == nil && (was == RunStopped || was == RunStuck)
+}
+
 // abandoned finds the stories this host has claimed whose session is not there
 // any anymore, and says so on each of them. The claim is left alone on purpose:
 // the story's worktree holds work nobody has looked at, and a claim given back
@@ -485,9 +495,10 @@ func (n Next) abandoned(ctx context.Context, skip string, report *NextReport) []
 		}
 		gone = append(gone, id)
 
-		// Said once. A story already recorded stopped has been reported before,
-		// and a comment on every close-out would bury the first one.
-		if was, err := n.Tracker.StoryState(ctx, id, RunState); err == nil && was == RunStopped {
+		// Said once. A story a sweep already found stuck, or that an earlier
+		// close-out already found stopped, has been reported before, and a
+		// comment on every close-out would bury the first one.
+		if recordedGone(ctx, n.Tracker, id) {
 			continue
 		}
 		why := fmt.Sprintf("mw next on %s found this story claimed here with no session behind it: %s is %s. "+
