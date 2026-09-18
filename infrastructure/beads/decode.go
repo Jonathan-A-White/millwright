@@ -34,6 +34,32 @@ type linked struct {
 	Metadata json.RawMessage `json:"metadata"`
 }
 
+// edge is a bead's dependency as `bd list` and `bd ready` print it: the two
+// ends and the kind of link, and none of the linked bead's own fields. It is
+// the other of the two shapes bd prints under "dependencies".
+type edge struct {
+	Issue     string `json:"issue_id"`
+	DependsOn string `json:"depends_on_id"`
+	Kind      string `json:"type"`
+}
+
+// edges is the bead's dependencies read as edges, ignoring the ones printed in
+// the other shape.
+func (b bead) edges() []edge {
+	found := make([]edge, 0, len(b.Dependencies))
+	for _, raw := range b.Dependencies {
+		var e edge
+		if err := json.Unmarshal(raw, &e); err != nil {
+			continue
+		}
+		if e.Issue == "" || e.DependsOn == "" {
+			continue
+		}
+		found = append(found, e)
+	}
+	return found
+}
+
 // pathMetadata is the bead's metadata narrowed to the string values a Path can
 // be read from.
 func (b bead) pathMetadata() map[string]string {

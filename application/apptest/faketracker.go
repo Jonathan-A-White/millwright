@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -40,8 +41,15 @@ type FakeTracker struct {
 	order    []string
 	epics    []string
 
+	formulas  map[string][]application.FormulaStep // formula name -> its steps
+	molecules []application.Molecule
+	poured    map[string]string // story id -> the molecule poured for it
+
 	notes map[string]string
 	syncs int
+	// asked is the dispatch-facing calls in the order they were made, so that a
+	// test can say the hosts were levelled before anything was claimed.
+	asked []string
 
 	// Err, when set, is returned by every method instead of doing the work.
 	Err error
@@ -54,6 +62,7 @@ type FakeTracker struct {
 type fakeStory struct {
 	detail      application.StoryDetail
 	metadata    map[string]string
+	states      map[string]string
 	needs       []string
 	comments    []string
 	closeReason string
@@ -65,6 +74,8 @@ func NewFakeTracker() *FakeTracker {
 	return &FakeTracker{
 		defaults: map[string]domain.Path{},
 		stories:  map[string]*fakeStory{},
+		formulas: map[string][]application.FormulaStep{},
+		poured:   map[string]string{},
 		notes:    map[string]string{},
 	}
 }
@@ -247,6 +258,179 @@ func (f *FakeTracker) ShowStory(_ context.Context, id string) (application.Story
 	return s.detail, nil
 }
 
+// AddFormula installs a formula in the fake, with the steps pouring it makes.
+func (f *FakeTracker) AddFormula(name string, steps ...application.FormulaStep) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.formulas[name] = append([]application.FormulaStep(nil), steps...)
+}
+
+// Formulas implements application.WorkTracker.
+func (f *FakeTracker) Formulas(_ context.Context) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	names := make([]string, 0, len(f.formulas))
+	for name := range f.formulas {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// PourFormula implements application.WorkTracker. The step beads are named
+// after the molecule they belong to, as beads' own are, so that a test can tell
+// two pourings of one formula apart.
+func (f *FakeTracker) PourFormula(_ context.Context, formula, storyID, title string) (application.Molecule, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, "PourFormula")
+	if f.Err != nil {
+		return application.Molecule{}, f.Err
+	}
+	steps, installed := f.formulas[formula]
+	if !installed {
+		return application.Molecule{}, fmt.Errorf("no formula %q is installed", formula)
+	}
+
+	root := fmt.Sprintf("f-mol-%d", len(f.molecules)+1)
+	poured := application.Molecule{Formula: formula, RootID: root}
+	for i, step := range steps {
+		poured.Steps = append(poured.Steps, application.FormulaStep{
+			ID:          fmt.Sprintf("%s.%d", root, i+1),
+			Title:       strings.NewReplacer("{{story}}", storyID, "{{title}}", title).Replace(step.Title),
+			Description: strings.NewReplacer("{{story}}", storyID, "{{title}}", title).Replace(step.Description),
+		})
+	}
+	f.molecules = append(f.molecules, poured)
+	f.poured[storyID] = root
+	return poured, nil
+}
+
+// Poured reports the molecule poured for a story, and whether one was.
+func (f *FakeTracker) Poured(storyID string) (application.Molecule, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	root, ok := f.poured[storyID]
+	if !ok {
+		return application.Molecule{}, false
+	}
+	for _, molecule := range f.molecules {
+		if molecule.RootID == root {
+			return molecule, true
+		}
+	}
+	return application.Molecule{}, false
+}
+
+// Molecules reports how many formulas have been poured, so that a test can say
+// that nothing was.
+func (f *FakeTracker) Molecules() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.molecules)
+}
+
+// Asked reports the dispatch-facing calls the fake was made, in order: Sync,
+// RunningStories, ReadyForHost, ClaimStory, ReleaseClaim, PourFormula and
+// SetStoryState. It is how a test says what was done before what.
+func (f *FakeTracker) Asked() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.asked...)
+}
+
+// ReadyForHost implements application.WorkTracker.
+func (f *FakeTracker) ReadyForHost(_ context.Context, host string) ([]application.StoryDetail, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, "ReadyForHost")
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	if host == "" {
+		return nil, fmt.Errorf("which host are the ready stories for?")
+	}
+	var ready []application.StoryDetail
+	for _, id := range f.order {
+		s := f.stories[id]
+		switch {
+		case s.detail.Status != StatusOpen,
+			s.detail.Assignee != "",
+			s.detail.Merged().Host != host,
+			f.waiting(s):
+			continue
+		}
+		ready = append(ready, s.detail)
+	}
+	return ready, nil
+}
+
+// RunningStories implements application.WorkTracker.
+func (f *FakeTracker) RunningStories(_ context.Context, host string) ([]application.StoryDetail, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, "RunningStories")
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	var running []application.StoryDetail
+	for _, id := range f.order {
+		s := f.stories[id]
+		if s.detail.Status == StatusInProgress && s.detail.Merged().Host == host {
+			running = append(running, s.detail)
+		}
+	}
+	return running, nil
+}
+
+// ReleaseClaim implements application.WorkTracker.
+func (f *FakeTracker) ReleaseClaim(_ context.Context, id string) error {
+	f.note("ReleaseClaim")
+	return f.write(id, func(s *fakeStory) error {
+		if s.detail.Status == StatusInProgress {
+			s.detail.Status = StatusOpen
+		}
+		s.detail.Assignee = ""
+		return nil
+	})
+}
+
+// SetStoryState implements application.WorkTracker.
+func (f *FakeTracker) SetStoryState(_ context.Context, id, dimension, value, _ string) error {
+	f.note("SetStoryState")
+	if dimension == "" {
+		return fmt.Errorf("a state needs a dimension")
+	}
+	return f.write(id, func(s *fakeStory) error {
+		if s.states == nil {
+			s.states = map[string]string{}
+		}
+		s.states[dimension] = value
+		return nil
+	})
+}
+
+// State reports one dimension of a story's operational state, or "" when it has
+// never been set.
+func (f *FakeTracker) State(id, dimension string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if s, ok := f.stories[id]; ok {
+		return s.states[dimension]
+	}
+	return ""
+}
+
+// note records one dispatch-facing call under the lock.
+func (f *FakeTracker) note(call string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, call)
+}
+
 // ReadyStories implements application.WorkTracker.
 func (f *FakeTracker) ReadyStories(_ context.Context, epicID, host string) ([]application.StoryDetail, error) {
 	f.mu.Lock()
@@ -272,6 +456,7 @@ func (f *FakeTracker) ReadyStories(_ context.Context, epicID, host string) ([]ap
 
 // ClaimStory implements application.WorkTracker.
 func (f *FakeTracker) ClaimStory(_ context.Context, id string) error {
+	f.note("ClaimStory")
 	return f.write(id, func(s *fakeStory) error {
 		if s.detail.Assignee != "" && s.detail.Assignee != Actor {
 			return fmt.Errorf("story %q is already claimed by %s", id, s.detail.Assignee)
@@ -338,6 +523,7 @@ func (f *FakeTracker) StaleClaims(_ context.Context, days int) ([]application.St
 func (f *FakeTracker) Sync(_ context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.asked = append(f.asked, "Sync")
 	if f.Err != nil {
 		return f.Err
 	}

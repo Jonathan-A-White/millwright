@@ -7,7 +7,9 @@ package beads_test
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -46,6 +48,23 @@ func bdRun(t *testing.T, vault, program string, args ...string) string {
 		t.Fatalf("%s %s: %v\n%s", program, strings.Join(args, " "), err, out)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// installFormula copies one of the rig's formulas into a throwaway database's
+// own formulas directory, which is where bd looks for them first.
+func installFormula(t *testing.T, vault, name string) {
+	t.Helper()
+	dir := filepath.Join(vault, ".beads", "formulas")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("making %s: %v", dir, err)
+	}
+	written, err := os.ReadFile(filepath.Join("..", "..", "formulas", name+".formula.json"))
+	if err != nil {
+		t.Fatalf("reading the %s formula: %v", name, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name+".formula.json"), written, 0o644); err != nil {
+		t.Fatalf("installing the %s formula: %v", name, err)
+	}
 }
 
 func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
@@ -112,6 +131,22 @@ func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 		t.Fatalf("expected nothing ready on laptop, got %+v", elsewhere)
 	}
 
+	// A dispatcher asks for what is ready anywhere, not under one epic, and for
+	// what this host already has in flight.
+	anywhere, err := gateway.ReadyForHost(ctx, "vps")
+	if err != nil {
+		t.Fatalf("listing what is ready on vps: %v", err)
+	}
+	if len(anywhere) != 1 || anywhere[0].Story.ID != storyID {
+		t.Fatalf("expected %s to be ready on vps, got %+v", storyID, anywhere)
+	}
+	if elsewhere, err := gateway.ReadyForHost(ctx, "laptop"); err != nil || len(elsewhere) != 0 {
+		t.Fatalf("expected nothing ready on laptop, got %+v: %v", elsewhere, err)
+	}
+	if inFlight, err := gateway.RunningStories(ctx, "vps"); err != nil || len(inFlight) != 0 {
+		t.Fatalf("expected nothing running on vps yet, got %+v: %v", inFlight, err)
+	}
+
 	// Claiming it takes it out of the ready stories.
 	if err := gateway.ClaimStory(ctx, storyID); err != nil {
 		t.Fatalf("claiming %s: %v", storyID, err)
@@ -122,6 +157,39 @@ func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 	}
 	if len(ready) != 0 {
 		t.Fatalf("expected a claimed story not to be ready, got %+v", ready)
+	}
+
+	// A claimed story is what the concurrency cap counts, and releasing the
+	// claim makes it ready again — which is what a dispatch that failed after
+	// claiming does.
+	inFlight, err := gateway.RunningStories(ctx, "vps")
+	if err != nil {
+		t.Fatalf("listing what is running on vps: %v", err)
+	}
+	if len(inFlight) != 1 || inFlight[0].Story.ID != storyID {
+		t.Fatalf("expected %s to be running on vps, got %+v", storyID, inFlight)
+	}
+	if err := gateway.ReleaseClaim(ctx, storyID); err != nil {
+		t.Fatalf("giving back the claim on %s: %v", storyID, err)
+	}
+	given, err := gateway.ReadyForHost(ctx, "vps")
+	if err != nil {
+		t.Fatalf("listing what is ready after the claim was given back: %v", err)
+	}
+	if len(given) != 1 || given[0].Story.ID != storyID {
+		t.Fatalf("expected %s to be ready again once the claim was given back, got %+v", storyID, given)
+	}
+	if err := gateway.ClaimStory(ctx, storyID); err != nil {
+		t.Fatalf("claiming %s again: %v", storyID, err)
+	}
+
+	// What mw records on a dispatched story: run=running, with where it runs.
+	if err := gateway.SetStoryState(ctx, storyID, application.RunState, application.RunRunning,
+		"dispatched by the test"); err != nil {
+		t.Fatalf("recording the run state of %s: %v", storyID, err)
+	}
+	if state := bdRun(t, vault, beads.Program, "state", storyID, application.RunState); state != application.RunRunning {
+		t.Fatalf("expected %s to be recorded %s=%s, got %q", storyID, application.RunState, application.RunRunning, state)
 	}
 
 	// Metadata written is metadata read back, Path fields included.
@@ -163,6 +231,45 @@ func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 	}
 	if detail.Status != "closed" {
 		t.Fatalf("expected %s to be closed, got status %q", storyID, detail.Status)
+	}
+
+	// The rig's own formula, installed where bd pours from, poured for a story:
+	// the steps come back in the order they are worked, whatever order bd
+	// listed them in, and none of them is offered to a dispatcher as a story of
+	// its own — a step bead carries no path, and so belongs to no host.
+	installFormula(t, vault, "tdd-feature")
+	installed, err := gateway.Formulas(ctx)
+	if err != nil {
+		t.Fatalf("listing the installed formulas: %v", err)
+	}
+	if len(installed) != 1 || installed[0] != "tdd-feature" {
+		t.Fatalf("expected tdd-feature to be installed, got %q", installed)
+	}
+
+	molecule, err := gateway.PourFormula(ctx, "tdd-feature", storyID, "Beads gateway")
+	if err != nil {
+		t.Fatalf("pouring tdd-feature for %s: %v", storyID, err)
+	}
+	if !molecule.Poured() || molecule.RootID == "" {
+		t.Fatalf("expected a poured molecule, got %+v", molecule)
+	}
+	worked := make([]string, 0, len(molecule.Steps))
+	for _, step := range molecule.Steps {
+		worked = append(worked, step.Title)
+	}
+	if len(worked) != 7 {
+		t.Fatalf("expected the seven steps of tdd-feature, got %q", worked)
+	}
+	if !strings.HasPrefix(worked[0], "Understand "+storyID) {
+		t.Fatalf("expected the first step to be understanding the story, got %q", worked[0])
+	}
+	for at, want := range map[int]string{1: "failing", 2: "green", 3: "vet", 6: "closing comment"} {
+		if !strings.Contains(worked[at], want) {
+			t.Fatalf("expected step %d to be about %q, got %q (all: %q)", at+1, want, worked[at], worked)
+		}
+	}
+	if steps, err := gateway.ReadyForHost(ctx, "vps"); err != nil || len(steps) != 0 {
+		t.Fatalf("expected poured steps not to be offered as stories, got %+v: %v", steps, err)
 	}
 
 	// The note each host leaves saying when it was last level with the other.
