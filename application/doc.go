@@ -3,7 +3,8 @@
 // reporting what the factory is doing. It depends on domain and on its own
 // port interfaces, never on an adapter.
 //
-// The ports so far are WorkTracker, how stories are read and written, and
-// Runner, how the sessions that work them are started and watched. apptest
-// holds an in-memory stand-in for each.
+// The ports so far are WorkTracker, how stories are read and written; Runner,
+// how the sessions that work them are started and watched; Vault, where the
+// seats and each story's run are kept; and Harness, how a session's command
+// line is assembled. apptest holds an in-memory stand-in for the first two.
 package application
