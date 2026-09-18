@@ -18,7 +18,8 @@ make lint
 ```
 
 Go 1.27. The only dependencies are [cobra](https://github.com/spf13/cobra) for
-the CLI and [godog](https://github.com/cucumber/godog) for the features.
+the command line and [godog](https://github.com/cucumber/godog) for the
+features.
 
 ## Layout
 
