@@ -103,6 +103,87 @@ func (v *Vault) PutRunFile(_ context.Context, storyID, name, contents string) (s
 	return path, nil
 }
 
+// ReadRunFile implements application.Vault. A file that was never written comes
+// back as the error os.ReadFile gives, which satisfies errors.Is(err,
+// fs.ErrNotExist) — the caller has to tell "the session reported a failure"
+// from "the session reported nothing at all".
+func (v *Vault) ReadRunFile(_ context.Context, storyID, name string) (string, error) {
+	if err := safeName("story", storyID); err != nil {
+		return "", err
+	}
+	if err := safeName("run file", name); err != nil {
+		return "", err
+	}
+	written, err := os.ReadFile(v.RunFile(storyID, name))
+	if err != nil {
+		return "", err
+	}
+	return string(written), nil
+}
+
+// LedgerPath is where a seat's ledger lives in the vault.
+func (v *Vault) LedgerPath(seat string) string {
+	return filepath.Join(v.dir, SeatsDir, seat, application.LedgerFileName)
+}
+
+// AppendToLedger implements application.Vault. The file is opened for append
+// and never read back, which is what makes a ledger append-only in practice and
+// not merely by convention: there is no code path here that can rewrite a line
+// somebody already wrote. Both hosts append to the same file, and the vault's
+// .gitattributes tells git to merge it by keeping every line.
+func (v *Vault) AppendToLedger(_ context.Context, seat, line string) error {
+	if err := safeName("seat", seat); err != nil {
+		return err
+	}
+	if strings.ContainsAny(line, "\r\n") {
+		return fmt.Errorf("a ledger line is one line: this one has a newline in it")
+	}
+	path := v.LedgerPath(seat)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("making the %s seat's directory: %w", seat, err)
+	}
+
+	file, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("opening the %s seat's ledger to append to it: %w", seat, err)
+	}
+	defer file.Close()
+
+	// A ledger whose last line has no newline of its own would otherwise have
+	// this one run onto the end of it. Appending a newline first is the only
+	// write this package ever makes that is not the line itself.
+	if ends, err := endsInNewline(path); err == nil && !ends {
+		if _, err := file.WriteString("\n"); err != nil {
+			return fmt.Errorf("appending to the %s seat's ledger: %w", seat, err)
+		}
+	}
+	if _, err := file.WriteString(line + "\n"); err != nil {
+		return fmt.Errorf("appending to the %s seat's ledger: %w", seat, err)
+	}
+	return nil
+}
+
+// endsInNewline reports whether a file's last byte is a newline. An empty file,
+// and a file that is not there at all, count as ending in one: there is nothing
+// for a new line to run onto.
+func endsInNewline(path string) (bool, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return true, err
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil || info.Size() == 0 {
+		return true, err
+	}
+	last := make([]byte, 1)
+	if _, err := file.ReadAt(last, info.Size()-1); err != nil {
+		return true, err
+	}
+	return last[0] == '\n', nil
+}
+
 // safeName refuses a name that would reach outside the vault. Seat, rig and
 // story names all end up in a path, and every one of them comes from a bead or
 // a config file rather than from this package.
