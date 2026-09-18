@@ -6,9 +6,10 @@ across several rigs and two hosts, on a tight fuel budget.
 
 `mw` is the factory's command line. Today it knows its own version, files the
 Mayor's plans with `mw file`, reads and writes stories through beads, runs
-sessions in tmux, keeps the two hosts level with `mw sync`, and starts a fresh
-Builder session for each ready story with `mw dispatch`; closing a finished
-story out follows.
+sessions in tmux, keeps the two hosts level with `mw sync`, starts a fresh
+Builder session for each ready story with `mw dispatch`, and closes each
+finished story out with `mw next` — which lands it, ledgers what it burned,
+closes it and dispatches whatever is ready next.
 
 ## Getting started
 
@@ -135,6 +136,63 @@ claimed here, and neither is one whose rig this host has not checked out.
 `--dry-run` prints what it would start and writes nothing: nothing is synced,
 claimed, fetched, cut, poured or started. See `features/dispatch.feature`.
 
+## Closing a story out
+
+```sh
+bin/mw next mw-gq6.8                 # check, land, ledger, close, dispatch again
+bin/mw next mw-gq6.8 --no-dispatch   # close it out and stop there
+```
+
+`mw next` runs when a story's session ends: the command line `mw dispatch` starts
+the session with chains it on with `;`, not `&&`, so it runs whether the session
+finished, failed, ran dry or died. The baton is mw's, never the session's — a
+session that died before spawning its successor would stall the chain silently
+(ADR 0004) — and no hook has to be configured for it.
+
+It reads what the session reported in `runs/<story-id>/result.json`. A session
+that did not finish, or left no result at all, is written on the story, marked
+`run=blocked` and left alone: nothing is merged, nothing is closed, the claim is
+not given back and the worktree is kept, because it is the evidence. One ledger
+line is still appended, saying it did not land and what it burned getting there.
+
+A session that did finish is checked before anything is landed:
+
+1. the branch must hold **commits** that `origin/<target>` does not;
+2. every **step** of the story's poured formula must be closed;
+3. the **rig's own tests** must pass in the story's worktree.
+
+Then, under the rig's **merge slot**, `mw/<story-id>` is merged into the target
+branch as the remote has it — in a throwaway detached worktree, so neither the
+rig's checkout nor the story's worktree is disturbed. If that was not a
+fast-forward the tests are run **again** on the merged result, because nothing
+has ever tested that combination: the story's tests passed on the story's branch
+and the other host's passed on its own. The push is never forced; a push the
+remote refuses because the other host got there first is fetched, merged and
+pushed again, a bounded number of times.
+
+Only then: the worktree and its branch go, one line is appended to the seat's
+ledger, the story is closed with the reason, `mw sync` brings the hosts level so
+that the other host sees a closed story rather than a claimed one, and whatever
+is ready here is dispatched.
+
+The **merge slot** is an advisory lock (`flock`) on a file beside the rig's
+worktrees, one per rig per host. It is a lock rather than a file somebody writes
+their name in because the kernel holds it: an `mw` that is killed, runs out of
+memory or has its terminal closed under it gives the slot back the moment the
+process ends, so there is no stale slot to break by hand. A race between the two
+*hosts* is not settled here at all — it is settled where it has to be, by the
+remote refusing the second push.
+
+The ledger line is one row of the seat's table: the date, the story, the
+outcome, the model and effort it was worked at, the fuel it burned, and a note
+of which host ran it. The fuel comes from the harness's own result JSON —
+`usage.input_tokens`, `usage.output_tokens`, `usage.cache_read_input_tokens` and
+`usage.cache_creation_input_tokens` totalled and broken out, `num_turns`,
+`total_cost_usd` (a list-price equivalent, not a bill on a subscription) and
+`duration_ms`. The ledger is opened for append and never read back: there is no
+code path in mw that can rewrite a line a seat has already written. See
+`features/next.feature`.
+
 ### What a host is told
 
 `~/.config/mw/config.toml`, with `MW_VAULT`, `MW_HOST` and `MW_CAP` ahead of it:
@@ -146,10 +204,14 @@ cap   = 1                          # sessions running here at once (default 1)
 
 [rigs]
 millwright = "/root/millwright"    # where each rig is checked out here
+
+[tests]
+millwright = "make test"           # how a close-out asks this rig if it is green
 ```
 
 A rig a story names but this host has no checkout of is said so plainly, and the
-story is left for the host that has it.
+story is left for the host that has it. A rig `[tests]` does not name is checked
+with `make test`.
 
 ## Keeping two hosts level
 
