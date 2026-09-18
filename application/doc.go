@@ -3,5 +3,6 @@
 // reporting what the factory is doing. It depends on domain and on its own
 // port interfaces, never on an adapter.
 //
-// Empty for now: the first use case arrives with the beads gateway.
+// The first port is WorkTracker, how stories are read and written. apptest
+// holds an in-memory stand-in for it.
 package application
