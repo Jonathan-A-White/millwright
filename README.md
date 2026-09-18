@@ -5,7 +5,8 @@ seats that turn conversations into tracked work and tracked work into commits,
 across several rigs and two hosts, on a tight fuel budget.
 
 `mw` is the factory's command line. Today it knows its own version, files the
-Mayor's plans with `mw file`, reads and writes stories through beads, runs
+Mayor's plans with `mw file`, releases the ones approved later with
+`mw release`, reads and writes stories through beads, runs
 sessions in tmux, keeps the two hosts level with `mw sync`, starts a fresh
 Builder session for each ready story with `mw dispatch`, and closes each
 finished story out with `mw next` — which lands it, ledgers what it burned,
@@ -85,6 +86,27 @@ with nobody there, the plan stays held. Releasing sets every story back to open,
 and beads then keeps back the ones still waiting on another, so the stories that
 wait on nothing are exactly what a dispatcher can take. See
 `features/file_plan.feature`.
+
+## Releasing a plan filed earlier
+
+```sh
+bin/mw release mw-gq6   # print the epic's tree, release what is still held
+```
+
+The Governor is usually not at the machine when a plan is filed, and filing it
+again would file a second copy of it, so `mw release <epic-id>` is the other
+half of `mw file`: it reads the epic back out of the tracker, prints the same
+tree — every story with its Path, what it *still* waits on (a story it waits on
+that is already finished is no longer a wait), and what the tracker says it is —
+and then releases the stories that are still held. Running it is the approval,
+so nobody is asked anything.
+
+The tree is printed as the epic was found, before anything is released, and the
+line under it says what changed. Nothing but a held story is touched: one
+already taken, already finished or already released is left exactly as it was,
+so releasing an epic twice does no more than releasing it once. An epic the
+tracker does not have is a plain refusal, and nothing is written. See
+`features/release.feature`.
 
 ## Booting a session into a seat
 

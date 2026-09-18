@@ -156,7 +156,7 @@ func (n Next) closeOut(ctx context.Context, storyID string) (NextReport, error) 
 		return report, fmt.Errorf("closing out %s: %w", storyID, err)
 	}
 	report.Title = detail.Story.Title
-	if strings.EqualFold(detail.Status, "closed") {
+	if detail.Closed() {
 		return report, fmt.Errorf("closing out %s: it is closed already, so nothing was landed, ledgered or dispatched", storyID)
 	}
 
