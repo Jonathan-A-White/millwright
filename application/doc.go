@@ -5,6 +5,7 @@
 //
 // The ports so far are WorkTracker, how stories are read and written; Runner,
 // how the sessions that work them are started and watched; Vault, where the
-// seats and each story's run are kept; and Harness, how a session's command
-// line is assembled. apptest holds an in-memory stand-in for the first two.
+// seats and each story's run are kept; Harness, how a session's command line is
+// assembled; and, for keeping two hosts level, VaultFiles and TrackerSync.
+// apptest holds in-memory stand-ins for all but Vault and Harness.
 package application

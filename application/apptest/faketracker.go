@@ -38,8 +38,14 @@ type FakeTracker struct {
 	stories  map[string]*fakeStory
 	order    []string
 
+	notes map[string]string
+	syncs int
+
 	// Err, when set, is returned by every method instead of doing the work.
 	Err error
+	// SyncErr, when set, is what Sync reports instead of synchronising. Use
+	// SyncExits to make it the halt a beads exit code stands for.
+	SyncErr error
 }
 
 // fakeStory is one story as the fake remembers it.
@@ -56,6 +62,7 @@ func NewFakeTracker() *FakeTracker {
 	return &FakeTracker{
 		defaults: map[string]domain.Path{},
 		stories:  map[string]*fakeStory{},
+		notes:    map[string]string{},
 	}
 }
 
@@ -228,6 +235,63 @@ func (f *FakeTracker) StaleClaims(_ context.Context, days int) ([]application.St
 	return stale, nil
 }
 
+// Sync implements application.TrackerSync. Nothing is synchronised: the fake
+// counts the cycle and reports SyncErr, so that a use case can be walked
+// through a halted sync without a database or a remote.
+func (f *FakeTracker) Sync(_ context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return f.Err
+	}
+	f.syncs++
+	return f.SyncErr
+}
+
+// Note implements application.TrackerSync.
+func (f *FakeTracker) Note(_ context.Context, key string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return "", f.Err
+	}
+	return f.notes[key], nil
+}
+
+// SetNote implements application.TrackerSync.
+func (f *FakeTracker) SetNote(_ context.Context, key, value string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return f.Err
+	}
+	if key == "" {
+		return fmt.Errorf("a note needs a key")
+	}
+	f.notes[key] = value
+	return nil
+}
+
+// SyncExits makes the next Sync halt the way a beads exit code says it did.
+// Code 0 clears it.
+func (f *FakeTracker) SyncExits(code int, said string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if code == 0 {
+		f.SyncErr = nil
+		return
+	}
+	f.SyncErr = &application.SyncHalt{Code: code, Said: said}
+}
+
+// Syncs reports how many synchronisation cycles were asked for, so that a test
+// can say a halt was not retried.
+func (f *FakeTracker) Syncs() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.syncs
+}
+
 // write applies a change to one story under the lock.
 func (f *FakeTracker) write(id string, change func(*fakeStory) error) error {
 	f.mu.Lock()
@@ -263,5 +327,8 @@ func SortedIDs(details []application.StoryDetail) []string {
 	return ids
 }
 
-// FakeTracker satisfies the port.
-var _ application.WorkTracker = (*FakeTracker)(nil)
+// FakeTracker satisfies the ports the beads gateway stands behind.
+var (
+	_ application.WorkTracker = (*FakeTracker)(nil)
+	_ application.TrackerSync = (*FakeTracker)(nil)
+)

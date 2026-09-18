@@ -1,0 +1,198 @@
+package application_test
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
+)
+
+// level is the time the tests pin a sync to, so that the note a host leaves can
+// be compared exactly.
+var level = time.Date(2026, 9, 18, 14, 30, 0, 0, time.UTC)
+
+// syncing is a sync of a clean vault and a tracker that has nothing to say,
+// with the clock pinned.
+func syncing(t *testing.T) (application.Sync, *apptest.FakeVaultFiles, *apptest.FakeTracker) {
+	t.Helper()
+	files := &apptest.FakeVaultFiles{}
+	tracker := apptest.NewFakeTracker()
+	return application.Sync{
+		Vault:   files,
+		Tracker: tracker,
+		Host:    "vps",
+		Now:     func() time.Time { return level },
+	}, files, tracker
+}
+
+func TestSyncMarksPullsPushesAndRecordsWhenItWasLevel(t *testing.T) {
+	sync, files, tracker := syncing(t)
+	files.Marked = true
+	files.Incoming, files.Outgoing = 2, 1
+
+	report, err := sync.Run(context.Background())
+	if err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	if !report.Marked || report.Pulled != 2 || report.Pushed != 1 {
+		t.Fatalf("expected a marked vault with 2 pulled and 1 pushed, got %+v", report)
+	}
+	if report.Quiet() {
+		t.Fatal("expected a sync that moved commits not to be quiet")
+	}
+	if !report.At.Equal(level) {
+		t.Fatalf("expected the sync to be level at %s, got %s", level, report.At)
+	}
+
+	note, err := tracker.Note(context.Background(), application.LastSyncKey("vps"))
+	if err != nil {
+		t.Fatalf("reading the note: %v", err)
+	}
+	if note != level.Format(time.RFC3339) {
+		t.Fatalf("expected host.vps.last_sync to be %q, got %q", level.Format(time.RFC3339), note)
+	}
+	if got := tracker.Syncs(); got != 1 {
+		t.Fatalf("expected one synchronisation cycle, got %d", got)
+	}
+}
+
+func TestSyncWithNothingToDoIsQuiet(t *testing.T) {
+	sync, _, _ := syncing(t)
+
+	report, err := sync.Run(context.Background())
+	if err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	if !report.Quiet() {
+		t.Fatalf("expected a quiet sync, got %+v", report)
+	}
+	if !strings.Contains(report.String(), "already level") {
+		t.Fatalf("expected the report to say the vault was already level, got %q", report.String())
+	}
+}
+
+func TestSyncMarksLedgersBeforeItPulls(t *testing.T) {
+	sync, files, _ := syncing(t)
+	files.PullErr = errors.New("the remote went away")
+
+	if _, err := sync.Run(context.Background()); err == nil {
+		t.Fatal("expected a pull that failed to stop the sync")
+	}
+	marks, pulls, pushes := files.Moves()
+	if marks != 1 || pulls != 0 || pushes != 0 {
+		t.Fatalf("expected the vault marked once and nothing pushed, got %d marks, %d pulls, %d pushes", marks, pulls, pushes)
+	}
+}
+
+func TestSyncStopsOnUncommittedVaultWork(t *testing.T) {
+	sync, files, tracker := syncing(t)
+	files.Dirty = []string{"seats/mayor/ledger.md"}
+
+	report, err := sync.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected a vault holding uncommitted work to stop the sync")
+	}
+	for _, want := range []string{"uncommitted", "seats/mayor/ledger.md"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected the failure to say %q, got %q", want, err)
+		}
+	}
+	if marks, pulls, pushes := files.Moves(); marks+pulls+pushes != 0 {
+		t.Fatalf("expected nothing to have moved, got %d marks, %d pulls, %d pushes", marks, pulls, pushes)
+	}
+	if tracker.Syncs() != 0 {
+		t.Fatal("expected the beads database not to be synced at all")
+	}
+	if !report.At.IsZero() {
+		t.Fatalf("expected no time to be recorded, got %s", report.At)
+	}
+}
+
+func TestSyncSurfacesAHaltAndNeverRetriesIt(t *testing.T) {
+	for _, halt := range []struct {
+		code int
+		says []string
+	}{
+		{2, []string{"merge conflict", "by hand", "nothing was pushed"}},
+		{4, []string{"stuck", "nothing was pushed"}},
+	} {
+		sync, _, tracker := syncing(t)
+		tracker.SyncExits(halt.code, "bd said so")
+
+		_, err := sync.Run(context.Background())
+		if err == nil {
+			t.Fatalf("expected exit %d to stop the sync", halt.code)
+		}
+		for _, want := range append(halt.says, "bd said so") {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("expected the failure of exit %d to say %q, got %q", halt.code, want, err)
+			}
+		}
+		stopped, ok := application.Halted(err)
+		if !ok {
+			t.Fatalf("expected exit %d to come back as a halt, got %T", halt.code, err)
+		}
+		if stopped.Code != halt.code {
+			t.Fatalf("expected the halt to carry exit %d, got %d", halt.code, stopped.Code)
+		}
+		if stopped.Transient() {
+			t.Fatalf("expected exit %d not to be called transient", halt.code)
+		}
+		if got := tracker.Syncs(); got != 1 {
+			t.Fatalf("expected exit %d to be synced once and never retried, got %d cycles", halt.code, got)
+		}
+		note, _ := tracker.Note(context.Background(), application.LastSyncKey("vps"))
+		if note != "" {
+			t.Fatalf("expected a halted sync to record no time, got %q", note)
+		}
+	}
+}
+
+func TestSyncCallsALostPushRaceTransient(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	tracker.SyncExits(3, "")
+
+	_, err := sync.Run(context.Background())
+	stopped, ok := application.Halted(err)
+	if !ok {
+		t.Fatalf("expected exit 3 to come back as a halt, got %v", err)
+	}
+	if !stopped.Transient() {
+		t.Fatal("expected a lost push race to be transient")
+	}
+	if got := tracker.Syncs(); got != 1 {
+		t.Fatalf("expected mw not to retry the tracker's own retries, got %d cycles", got)
+	}
+}
+
+func TestSyncNeedsAHostAndItsPorts(t *testing.T) {
+	files, tracker := &apptest.FakeVaultFiles{}, apptest.NewFakeTracker()
+	for what, sync := range map[string]application.Sync{
+		"no host":    {Vault: files, Tracker: tracker},
+		"no vault":   {Tracker: tracker, Host: "vps"},
+		"no tracker": {Vault: files, Host: "vps"},
+	} {
+		if _, err := sync.Run(context.Background()); err == nil {
+			t.Fatalf("expected a sync with %s to be refused", what)
+		}
+	}
+}
+
+func TestLastSyncKeyNamesTheHost(t *testing.T) {
+	if got := application.LastSyncKey("vps"); got != "host.vps.last_sync" {
+		t.Fatalf("expected host.vps.last_sync, got %q", got)
+	}
+	if got := application.LastSyncKey("laptop"); got != "host.laptop.last_sync" {
+		t.Fatalf("expected host.laptop.last_sync, got %q", got)
+	}
+}
+
+func TestLedgerMarkIsTheLineTheVaultNeeds(t *testing.T) {
+	if application.LedgerMark != "seats/*/ledger.md merge=union" {
+		t.Fatalf("expected the ledger mark to be the gitattributes line, got %q", application.LedgerMark)
+	}
+}
