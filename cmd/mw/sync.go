@@ -50,13 +50,11 @@ func newSyncCmd() *cobra.Command {
 // that beads stopped leaves with beads' own code, so that whoever ran mw reads
 // the same number bd would have given them; anything else is a plain 1.
 func exitCode(err error) int {
-	switch {
-	case err == nil:
+	if err == nil {
 		return 0
-	default:
-		if halt, stopped := application.Halted(err); stopped && halt.Code != 0 {
-			return halt.Code
-		}
-		return 1
 	}
+	if halt, stopped := application.Halted(err); stopped && halt.Code != 0 {
+		return halt.Code
+	}
+	return 1
 }
