@@ -52,6 +52,21 @@ that a person can `tmux attach -t mw-gq6_4` and watch any story being worked.
 tmux is told to keep the window when the command exits, so that the exit status
 and the last of the output are still there to be read afterwards.
 
+## Booting a session into a seat
+
+A session is primed by `application.SeatBoot`: it reads the seat from the vault
+— `seats/<seat>/charter.md`, always, and `seats/<seat>/rigs/<rig>.md` when the
+seat has worked this rig before — writes the boot file to
+`runs/<story-id>/boot.md`, and asks the harness for the command line that
+starts the session. Nothing else the vault holds is read at boot, because a
+fresh session pays for every line of it (ADR 0003). `infrastructure/claude` is
+the harness adapter: a headless `claude --print --output-format json` primed
+with `--append-system-prompt-file`, its result redirected to
+`runs/<story-id>/result.json` beside the boot file, and `BEADS_ACTOR`, `MW_SEAT`
+and `MW_STORY` in its environment so that the work is signed by the seat rather
+than by the session. Assembling launches nothing and spends no fuel. See
+`features/seat_boot.feature`.
+
 ## The Path
 
 A story is worked by a **Path**: the rig it is worked in, the branch it
