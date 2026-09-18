@@ -173,6 +173,13 @@ type WorkTracker interface {
 	// counts. A story claimed on another host is not listed.
 	RunningStories(ctx context.Context, host string) ([]StoryDetail, error)
 
+	// BlockedForHost lists every open, unclaimed story in the tracker that
+	// waits on a dependency not yet finished, on a host — what `mw status`
+	// shows under "blocked" beside what ReadyForHost shows under "ready". Each
+	// story comes back with its own epic's defaults overlaid, and a story whose
+	// Path names no host is not listed for any host.
+	BlockedForHost(ctx context.Context, host string) ([]StoryDetail, error)
+
 	// ClaimStory takes a story: it becomes assigned and in progress, and stops
 	// being ready. Claiming a story already claimed by this actor is harmless.
 	ClaimStory(ctx context.Context, id string) error

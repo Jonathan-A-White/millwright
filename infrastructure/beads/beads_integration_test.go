@@ -476,6 +476,22 @@ func TestGatewayFilesAnEpicWithItsStoriesHeld(t *testing.T) {
 		t.Fatalf("expected only %s to be ready, got %+v", first, ready)
 	}
 
+	// The story waiting on it is released too, but not ready: it is blocked,
+	// with the epic's defaults overlaid the same way ShowStory reads them.
+	blocked, err := gateway.BlockedForHost(ctx, "vps")
+	if err != nil {
+		t.Fatalf("listing what is blocked on vps: %v", err)
+	}
+	if len(blocked) != 1 || blocked[0].Story.ID != second {
+		t.Fatalf("expected only %s to be blocked, got %+v", second, blocked)
+	}
+	if got := blocked[0].Merged().Formula; got != "chore" {
+		t.Errorf("expected the blocked story's own formula over the epic's, got %q", got)
+	}
+	if elsewhere, err := gateway.BlockedForHost(ctx, "laptop"); err != nil || len(elsewhere) != 0 {
+		t.Fatalf("expected nothing blocked on laptop, got %+v: %v", elsewhere, err)
+	}
+
 	// And beads lets the second one through once the first is closed.
 	if err := gateway.CloseStory(ctx, first, "worked"); err != nil {
 		t.Fatalf("closing %s: %v", first, err)
@@ -486,6 +502,9 @@ func TestGatewayFilesAnEpicWithItsStoriesHeld(t *testing.T) {
 	}
 	if len(ready) != 1 || ready[0].Story.ID != second {
 		t.Fatalf("expected %s to be ready once %s is closed, got %+v", second, first, ready)
+	}
+	if blocked, err := gateway.BlockedForHost(ctx, "vps"); err != nil || len(blocked) != 0 {
+		t.Fatalf("expected nothing blocked once %s is closed, got %+v: %v", first, blocked, err)
 	}
 
 	// A story that is finished is still part of its epic: the tree a release

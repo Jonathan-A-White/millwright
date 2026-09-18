@@ -215,6 +215,18 @@ func (f *FakeTracker) Touched(id string, when time.Time) {
 	}
 }
 
+// Needs sets the ids of the stories a story waits on, as if they had been
+// named when it was filed. It is for a fixture that adds a story with
+// AddStory and gives it a dependency afterwards, rather than filing it
+// through CreateStory.
+func (f *FakeTracker) Needs(id string, needs ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if s, ok := f.stories[id]; ok {
+		s.needs = append([]string(nil), needs...)
+	}
+}
+
 // Comments reports the comments left on a story, oldest first.
 func (f *FakeTracker) Comments(id string) []string {
 	f.mu.Lock()
@@ -414,6 +426,33 @@ func (f *FakeTracker) RunningStories(_ context.Context, host string) ([]applicat
 		}
 	}
 	return running, nil
+}
+
+// BlockedForHost implements application.WorkTracker.
+func (f *FakeTracker) BlockedForHost(_ context.Context, host string) ([]application.StoryDetail, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	if host == "" {
+		return nil, fmt.Errorf("which host are the blocked stories for?")
+	}
+	var blocked []application.StoryDetail
+	for _, id := range f.order {
+		s := f.stories[id]
+		switch {
+		case s.detail.Status != StatusOpen,
+			s.detail.Assignee != "",
+			s.detail.Merged().Host != host,
+			!f.waiting(s):
+			continue
+		}
+		detail := s.detail
+		detail.Needs = append([]string(nil), s.needs...)
+		blocked = append(blocked, detail)
+	}
+	return blocked, nil
 }
 
 // ReleaseClaim implements application.WorkTracker.

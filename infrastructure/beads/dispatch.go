@@ -79,6 +79,42 @@ func (g *Gateway) onHost(ctx context.Context, stories []bead, host string) ([]ap
 	return on, nil
 }
 
+// BlockedForHost implements application.WorkTracker. `bd blocked --json` finds
+// the stories a dependency holds back, but not their epic: its rows carry
+// neither a parent nor metadata, unlike `bd list` and `bd ready`. So each
+// candidate is read back with ShowStory, which already knows how to overlay an
+// epic's defaults onto a story read on its own — the same call `mw status`
+// makes for a story by id, reused here rather than a second way of doing it.
+func (g *Gateway) BlockedForHost(ctx context.Context, host string) ([]application.StoryDetail, error) {
+	if host == "" {
+		return nil, fmt.Errorf("which host are the blocked stories for?")
+	}
+	out, err := g.call(ctx, "blocked", "--json")
+	if err != nil {
+		return nil, err
+	}
+	candidates, err := decodeBeads(out)
+	if err != nil {
+		return nil, fmt.Errorf("reading what is blocked on %s: %w", host, err)
+	}
+
+	var blocked []application.StoryDetail
+	for _, story := range candidates {
+		if story.Type == TypeEpic || story.Status != StatusOpen || story.Assignee != "" {
+			continue
+		}
+		detail, err := g.ShowStory(ctx, story.ID)
+		if err != nil {
+			return nil, fmt.Errorf("reading the blocked story %s: %w", story.ID, err)
+		}
+		if detail.Merged().Host != host {
+			continue
+		}
+		blocked = append(blocked, detail)
+	}
+	return blocked, nil
+}
+
 // ReleaseClaim implements application.WorkTracker. The story goes back to open
 // and to nobody: bd offers only unassigned stories as ready, so leaving the
 // assignee on a released story would hide it from every dispatcher.
