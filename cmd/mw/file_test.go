@@ -118,6 +118,16 @@ func TestNobodyIsAskedWhenNobodyIsThere(t *testing.T) {
 	if approval(root, false) != nil {
 		t.Error("expected a run with nobody at the terminal to leave the plan held")
 	}
+	// Nor is /dev/null, which is a character device like a terminal is.
+	empty, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatalf("opening %s: %v", os.DevNull, err)
+	}
+	defer empty.Close()
+	root.SetIn(empty)
+	if approval(root, false) != nil {
+		t.Error("expected a run given no input at all to leave the plan held")
+	}
 	if approval(root, true) == nil {
 		t.Fatal("expected --approve to release the plan without asking")
 	}

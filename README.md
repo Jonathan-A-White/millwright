@@ -4,9 +4,10 @@ A personal software factory: one human directs a small set of AI-occupied
 seats that turn conversations into tracked work and tracked work into commits,
 across several rigs and two hosts, on a tight fuel budget.
 
-`mw` is the factory's command line. Today it knows its own version, reads and
-writes stories through beads, runs sessions in tmux, and keeps the two hosts
-level with `mw sync`; dispatching sessions follows.
+`mw` is the factory's command line. Today it knows its own version, files the
+Mayor's plans with `mw file`, reads and writes stories through beads, runs
+sessions in tmux, and keeps the two hosts level with `mw sync`; dispatching
+sessions follows.
 
 ## Getting started
 
@@ -51,6 +52,37 @@ punctuation tmux reads as a target replaced (`mw-gq6.4` becomes `mw-gq6_4`), so
 that a person can `tmux attach -t mw-gq6_4` and watch any story being worked.
 tmux is told to keep the window when the command exits, so that the exit status
 and the last of the output are still there to be read afterwards.
+
+## Filing a plan
+
+```sh
+bin/mw file plans/0001-walking-skeleton.json            # filed, and held
+bin/mw file plans/0001-walking-skeleton.json --approve  # filed and released
+```
+
+A plan is JSON: one epic with the default Path its stories inherit, and the
+stories, each with its acceptance criteria, its estimate, whatever it overrides
+of that Path, and the keys of the stories it needs done first. `mw file` reads
+the whole plan before it writes any of it — every story must resolve to a Path,
+carry acceptance criteria, and wait only on stories the plan has, never on
+itself or in a circle — and reports every reason it will not file a plan, not
+just the first. A plan that cannot be filed leaves the tracker untouched: half
+a plan in the tracker looks like work somebody meant.
+
+What is filed is an epic carrying the default Path as metadata and its success
+criteria as a section of its description (where `bd lint` looks for them), and
+under it the stories, in an order where none comes before what it waits on,
+each with its acceptance criteria and estimate in their own fields, its Path
+overrides as metadata, and what it waits on as a blocked-by dependency.
+
+Every story is filed **held** — beads' `deferred` status — so that nothing can
+be dispatched from a plan nobody has approved. `mw file` prints the tree it
+filed, with each story's Path and what it waits on, and then asks. `--approve`
+answers yes without asking; at a terminal, only a plain `y` or `yes` is a yes;
+with nobody there, the plan stays held. Releasing sets every story back to open,
+and beads then keeps back the ones still waiting on another, so the stories that
+wait on nothing are exactly what a dispatcher can take. See
+`features/file_plan.feature`.
 
 ## Booting a session into a seat
 

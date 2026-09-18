@@ -97,12 +97,20 @@ func confirm(in io.Reader, out io.Writer, question string) (bool, error) {
 	return false, nil
 }
 
-// atATerminal reports whether there is a person to ask on the other end.
+// atATerminal reports whether there is a person to ask on the other end. It is
+// the standard library's answer to that question rather than a true isatty,
+// which would cost a dependency: a terminal is a character device, and so is
+// /dev/null, which is how an unattended run is usually given no input. Both
+// ends of the guess are safe — a pipe is never asked, and a run nobody answers
+// leaves the plan held.
 func atATerminal(in io.Reader) bool {
 	file, isFile := in.(*os.File)
 	if !isFile {
 		return false
 	}
 	info, err := file.Stat()
-	return err == nil && info.Mode()&os.ModeCharDevice != 0
+	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+		return false
+	}
+	return file.Name() != os.DevNull
 }
