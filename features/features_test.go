@@ -33,4 +33,5 @@ func TestFeatures(t *testing.T) {
 func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializePathScenario(ctx)
 	steps.InitializeReadyStoriesScenario(ctx)
+	steps.InitializeSeatBootScenario(ctx)
 }
