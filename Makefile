@@ -20,8 +20,12 @@ build:
 test:
 	$(GO) test $(PKG)
 
+# go vet, then the code map check: docs/codemap.md must be under its size
+# limit, name only paths that exist, and leave out no port, use case or
+# cmd/mw command. It reads only this repository.
 lint:
 	$(GO) vet $(PKG)
+	scripts/check-codemap.sh
 
 clean:
 	rm -rf bin
