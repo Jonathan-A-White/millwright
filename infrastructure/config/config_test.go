@@ -26,7 +26,102 @@ func writeConfig(t *testing.T, contents string) string {
 	t.Setenv("HOME", home)
 	t.Setenv("MW_VAULT", "")
 	t.Setenv("MW_HOST", "")
+	t.Setenv("MW_CAP", "")
 	return home
+}
+
+// The VPS's own config file, as the README gives it, so that what the factory
+// is told to write is what the factory can read.
+const vpsConfig = `vault = "/root/millwright-vault"
+host = "vps"
+cap = 1
+
+[rigs]
+millwright = "/root/millwright"
+`
+
+func TestTheVPSConfigFileReadsBack(t *testing.T) {
+	writeConfig(t, vpsConfig)
+
+	dir, err := config.Vault()
+	if err != nil || dir != "/root/millwright-vault" {
+		t.Fatalf("expected the vault, got %q: %v", dir, err)
+	}
+	host, err := config.Host()
+	if err != nil || host != "vps" {
+		t.Fatalf("expected the host, got %q: %v", host, err)
+	}
+	atOnce, err := config.Cap()
+	if err != nil || atOnce != 1 {
+		t.Fatalf("expected a cap of 1, got %d: %v", atOnce, err)
+	}
+	rigs, err := config.Rigs()
+	if err != nil {
+		t.Fatalf("reading the rigs: %v", err)
+	}
+	if len(rigs) != 1 || rigs["millwright"] != "/root/millwright" {
+		t.Fatalf("expected the millwright rig's checkout, got %+v", rigs)
+	}
+}
+
+func TestCapIsOneUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\nhost = \"vps\"\n")
+
+	atOnce, err := config.Cap()
+	if err != nil {
+		t.Fatalf("reading the cap: %v", err)
+	}
+	if atOnce != config.DefaultCap {
+		t.Fatalf("expected the default cap %d, got %d", config.DefaultCap, atOnce)
+	}
+
+	t.Setenv("MW_CAP", "3")
+	if atOnce, err = config.Cap(); err != nil || atOnce != 3 {
+		t.Fatalf("expected MW_CAP to win with 3, got %d: %v", atOnce, err)
+	}
+}
+
+func TestCapRefusesWhatWouldStartNothingOrIsNotANumber(t *testing.T) {
+	writeConfig(t, "cap = 0\n")
+	if _, err := config.Cap(); err == nil {
+		t.Fatal("expected a cap of 0 to be refused")
+	}
+
+	writeConfig(t, "cap = \"lots\"\n")
+	if _, err := config.Cap(); err == nil {
+		t.Fatal("expected a cap that is not a number to be refused")
+	}
+}
+
+func TestRigsAreEmptyWhenNoneAreCheckedOutAndMustBeFullPaths(t *testing.T) {
+	writeConfig(t, "host = \"vps\"\n")
+	rigs, err := config.Rigs()
+	if err != nil {
+		t.Fatalf("reading the rigs of a machine with none: %v", err)
+	}
+	if len(rigs) != 0 {
+		t.Fatalf("expected no rigs, got %+v", rigs)
+	}
+
+	writeConfig(t, "[rigs]\nmillwright = \"../millwright\"\n")
+	if _, err := config.Rigs(); err == nil {
+		t.Fatal("expected a rig named by a relative path to be refused")
+	}
+}
+
+func TestRigsReadOnlyTheirOwnTable(t *testing.T) {
+	writeConfig(t, "[rigs]\nmillwright = \"/root/millwright\"  # the factory itself\n\n[elsewhere]\nfellowship = \"/root/fellowship\"\n")
+
+	rigs, err := config.Rigs()
+	if err != nil {
+		t.Fatalf("reading the rigs: %v", err)
+	}
+	if len(rigs) != 1 || rigs["millwright"] != "/root/millwright" {
+		t.Fatalf("expected only the rigs table to be read, got %+v", rigs)
+	}
+	if names := config.RigNames(rigs); len(names) != 1 || names[0] != "millwright" {
+		t.Fatalf("expected the rig names, got %q", names)
+	}
 }
 
 func TestVaultPrefersTheEnvironment(t *testing.T) {
