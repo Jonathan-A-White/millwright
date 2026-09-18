@@ -161,10 +161,10 @@ func (p Path) Metadata() map[string]string {
 // left out, so that an incomplete path reads as what it is.
 func (p Path) Summary() string {
 	var parts []string
-	if where := join("/", p.Rig, p.Branch); where != "" {
+	if where := joined("/", p.Rig, p.Branch); where != "" {
 		parts = append(parts, where)
 	}
-	if who := join("/", string(p.Harness), string(p.Model), string(p.Effort)); who != "" {
+	if who := joined("/", string(p.Harness), string(p.Model), string(p.Effort)); who != "" {
 		parts = append(parts, who)
 	}
 	if p.Formula != "" {
@@ -179,8 +179,8 @@ func (p Path) Summary() string {
 	return strings.Join(parts, " · ")
 }
 
-// join puts the values that are set together, in order, and drops the rest.
-func join(separator string, values ...string) string {
+// joined puts the values that are set together, in order, and drops the rest.
+func joined(separator string, values ...string) string {
 	set := make([]string, 0, len(values))
 	for _, value := range values {
 		if value != "" {

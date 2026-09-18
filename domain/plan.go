@@ -145,7 +145,7 @@ func (p Plan) Order() ([]PlanStory, error) {
 	for len(order) < len(p.Stories) {
 		placed := false
 		for _, story := range p.Stories {
-			if filed[story.Key] || !ready(story, filed) {
+			if filed[story.Key] || !canBeFiled(story, filed) {
 				continue
 			}
 			order = append(order, story)
@@ -236,8 +236,8 @@ func (s PlanStory) name(i int) string {
 	return fmt.Sprintf("story %d", i+1)
 }
 
-// ready reports whether every story this one waits on has been placed already.
-func ready(story PlanStory, filed map[string]bool) bool {
+// canBeFiled reports whether every story this one waits on is filed already.
+func canBeFiled(story PlanStory, filed map[string]bool) bool {
 	for _, need := range story.Needs {
 		if !filed[need] {
 			return false
