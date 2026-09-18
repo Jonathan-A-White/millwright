@@ -11,6 +11,10 @@
 //
 // This package reads the first two and nothing else: everything a session is
 // primed with is paid for on every story, so what is not needed is not read.
+//
+// The vault is also a git clone that both hosts commit to, so this package is
+// the adapter behind application.VaultFiles as well: git.go keeps the clone
+// level with the other host's.
 package vault
 
 import (
