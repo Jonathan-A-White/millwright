@@ -11,12 +11,13 @@ import (
 // it belongs to. The Path the story is actually worked by is the two overlaid,
 // which is what Path reports.
 type StoryDetail struct {
-	Story      domain.Story
-	Defaults   domain.Path
-	EpicID     string
-	Status     string
-	Assignee   string
-	Acceptance string
+	Story       domain.Story
+	Defaults    domain.Path
+	EpicID      string
+	Status      string
+	Assignee    string
+	Description string
+	Acceptance  string
 	// EstimateMinutes is the Mayor's estimate in minutes; zero when unset.
 	EstimateMinutes int
 }

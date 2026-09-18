@@ -15,6 +15,7 @@ import (
 type bead struct {
 	ID               string            `json:"id"`
 	Title            string            `json:"title"`
+	Description      string            `json:"description"`
 	Acceptance       string            `json:"acceptance_criteria"`
 	Status           string            `json:"status"`
 	Assignee         string            `json:"assignee"`
@@ -80,6 +81,7 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		EpicID:          b.Parent,
 		Status:          b.Status,
 		Assignee:        b.Assignee,
+		Description:     b.Description,
 		Acceptance:      b.Acceptance,
 		EstimateMinutes: b.EstimatedMinutes,
 	}
