@@ -102,6 +102,71 @@ func TestValidateAcceptsEveryKnownModelAndEffort(t *testing.T) {
 	}
 }
 
+func TestSetAndFieldRoundTripEveryPathField(t *testing.T) {
+	want := completePath()
+	var got domain.Path
+	for _, field := range domain.Fields {
+		value, err := want.Field(field)
+		if err != nil {
+			t.Fatalf("expected %q to be a path field, got %v", field, err)
+		}
+		if err := got.Set(field, value); err != nil {
+			t.Fatalf("setting %q: %v", field, err)
+		}
+	}
+	if got != want {
+		t.Fatalf("expected %+v, got %+v", want, got)
+	}
+}
+
+func TestSetAndFieldRejectAnUnknownField(t *testing.T) {
+	var p domain.Path
+	var unknown domain.UnknownFieldError
+	if err := p.Set("mode", "serial"); !errors.As(err, &unknown) || unknown.Field != "mode" {
+		t.Fatalf("expected an UnknownFieldError for mode, got %v", err)
+	}
+	if _, err := p.Field("mode"); !errors.As(err, &unknown) {
+		t.Fatalf("expected an UnknownFieldError for mode, got %v", err)
+	}
+}
+
+func TestMetadataLeavesOutEmptyFields(t *testing.T) {
+	p := completePath()
+	p.Formula = ""
+	p.Host = ""
+
+	got := p.Metadata()
+	if len(got) != 5 {
+		t.Fatalf("expected the five set fields, got %v", got)
+	}
+	if got["rig"] != "millwright" || got["model"] != "opus" {
+		t.Fatalf("expected rig and model to be written out, got %v", got)
+	}
+	if _, ok := got["formula"]; ok {
+		t.Fatalf("expected an empty formula to be left out, got %v", got)
+	}
+}
+
+func TestPathFromMetadataIgnoresKeysThatAreNotPathFields(t *testing.T) {
+	got := domain.PathFromMetadata(map[string]string{
+		"rig":    "millwright",
+		"model":  "haiku",
+		"mode":   "serial",
+		"origin": "the Mayor",
+	})
+	want := domain.Path{Rig: "millwright", Model: domain.ModelHaiku}
+	if got != want {
+		t.Fatalf("expected %+v, got %+v", want, got)
+	}
+}
+
+func TestPathFromMetadataAndMetadataRoundTrip(t *testing.T) {
+	want := completePath()
+	if got := domain.PathFromMetadata(want.Metadata()); got != want {
+		t.Fatalf("expected %+v, got %+v", want, got)
+	}
+}
+
 func TestOverlayReplacesOnlyTheFieldsTheOverrideSets(t *testing.T) {
 	defaults := completePath()
 	got := defaults.Overlay(domain.Path{

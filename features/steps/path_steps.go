@@ -42,7 +42,7 @@ func (c *pathContext) anEpicWithTheDefaultPath(table *godog.Table) error {
 		if len(row.Cells) != 2 {
 			return fmt.Errorf("default path rows need a field and a value, got %d cells", len(row.Cells))
 		}
-		if err := setPathField(&c.defaults, row.Cells[0].Value, row.Cells[1].Value); err != nil {
+		if err := c.defaults.Set(row.Cells[0].Value, row.Cells[1].Value); err != nil {
 			return err
 		}
 	}
@@ -50,7 +50,7 @@ func (c *pathContext) anEpicWithTheDefaultPath(table *godog.Table) error {
 }
 
 func (c *pathContext) theEpicsDefaultFieldIsNotSet(field string) error {
-	return setPathField(&c.defaults, field, "")
+	return c.defaults.Set(field, "")
 }
 
 func (c *pathContext) aStoryWithNoOverrides() error {
@@ -62,7 +62,7 @@ func (c *pathContext) aStoryThatOverrides(field, value string) error {
 	if c.story.ID == "" {
 		c.story = domain.Story{ID: "mw-test", Title: "a story"}
 	}
-	return setPathField(&c.story.Overrides, field, value)
+	return c.story.Overrides.Set(field, value)
 }
 
 func (c *pathContext) theStorysPathIsBuilt() error {
@@ -88,7 +88,7 @@ func (c *pathContext) thePathIsAccepted() error {
 }
 
 func (c *pathContext) thePathsFieldIs(field, want string) error {
-	got, err := pathField(c.built, field)
+	got, err := c.built.Field(field)
 	if err != nil {
 		return err
 	}
@@ -96,49 +96,4 @@ func (c *pathContext) thePathsFieldIs(field, want string) error {
 		return fmt.Errorf("expected the path's %s to be %q, got %q", field, want, got)
 	}
 	return nil
-}
-
-// setPathField sets one field of a path by its name in the feature file.
-func setPathField(p *domain.Path, field, value string) error {
-	switch field {
-	case "rig":
-		p.Rig = value
-	case "branch":
-		p.Branch = value
-	case "harness":
-		p.Harness = domain.Harness(value)
-	case "model":
-		p.Model = domain.Model(value)
-	case "effort":
-		p.Effort = domain.Effort(value)
-	case "formula":
-		p.Formula = value
-	case "host":
-		p.Host = value
-	default:
-		return fmt.Errorf("a path has no %q field", field)
-	}
-	return nil
-}
-
-// pathField reads one field of a path by its name in the feature file.
-func pathField(p domain.Path, field string) (string, error) {
-	switch field {
-	case "rig":
-		return p.Rig, nil
-	case "branch":
-		return p.Branch, nil
-	case "harness":
-		return string(p.Harness), nil
-	case "model":
-		return string(p.Model), nil
-	case "effort":
-		return string(p.Effort), nil
-	case "formula":
-		return p.Formula, nil
-	case "host":
-		return p.Host, nil
-	default:
-		return "", fmt.Errorf("a path has no %q field", field)
-	}
 }

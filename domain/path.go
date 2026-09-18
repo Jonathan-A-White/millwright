@@ -80,6 +80,89 @@ func (e UnknownValueError) Error() string {
 	return fmt.Sprintf("unknown %s %q", e.Field, e.Value)
 }
 
+// UnknownFieldError reports a name that is not one of a path's fields.
+type UnknownFieldError struct {
+	Field string
+}
+
+func (e UnknownFieldError) Error() string {
+	return fmt.Sprintf("a path has no %q field", e.Field)
+}
+
+// Fields are the names of a path's fields, in the order a path is written out.
+// They are also the metadata keys a path is stored under.
+var Fields = []string{"rig", "branch", "harness", "model", "effort", "formula", "host"}
+
+// Set sets the field of p named by one of Fields. It is how a path is read out
+// of stored metadata: one key, one value, at a time.
+func (p *Path) Set(field, value string) error {
+	switch field {
+	case "rig":
+		p.Rig = value
+	case "branch":
+		p.Branch = value
+	case "harness":
+		p.Harness = Harness(value)
+	case "model":
+		p.Model = Model(value)
+	case "effort":
+		p.Effort = Effort(value)
+	case "formula":
+		p.Formula = value
+	case "host":
+		p.Host = value
+	default:
+		return UnknownFieldError{Field: field}
+	}
+	return nil
+}
+
+// Field reads the field of p named by one of Fields.
+func (p Path) Field(field string) (string, error) {
+	switch field {
+	case "rig":
+		return p.Rig, nil
+	case "branch":
+		return p.Branch, nil
+	case "harness":
+		return string(p.Harness), nil
+	case "model":
+		return string(p.Model), nil
+	case "effort":
+		return string(p.Effort), nil
+	case "formula":
+		return p.Formula, nil
+	case "host":
+		return p.Host, nil
+	default:
+		return "", UnknownFieldError{Field: field}
+	}
+}
+
+// Metadata is p written out as the metadata keys a bead stores it under. Empty
+// fields are left out, so that writing it back does not erase a default.
+func (p Path) Metadata() map[string]string {
+	m := map[string]string{}
+	for _, field := range Fields {
+		value, err := p.Field(field)
+		if err != nil || value == "" {
+			continue
+		}
+		m[field] = value
+	}
+	return m
+}
+
+// PathFromMetadata reads a path out of stored metadata, ignoring every key
+// that does not name a path field.
+func PathFromMetadata(metadata map[string]string) Path {
+	var p Path
+	for field, value := range metadata {
+		_ = p.Set(field, value)
+	}
+	return p
+}
+
 // Overlay returns p with every field the override sets replacing p's own.
 // An empty field in the override means "keep what the default says".
 func (p Path) Overlay(override Path) Path {
