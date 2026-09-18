@@ -44,6 +44,7 @@ Feature: Closing out a finished story and carrying on
       | 311,200 tokens |
       | 37 turns       |
       | $4.21          |
+    And the rig's tests were run 1 times
     And nothing is left of the worktree of "mw-gq6.1"
     And a fresh session is running for "mw-gq6.2"
 
@@ -142,6 +143,15 @@ Feature: Closing out a finished story and carrying on
     And the other host's work is still on "main" at the rig's origin
     And mw pushed twice and forced nothing
     And the story "mw-gq6.1" is closed
+
+  Scenario: A story claimed here with no session behind it is not left looking like work in flight
+    Given the story "mw-gq6.3" is claimed here with no session behind it
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed
+    And the story "mw-gq6.3" is recorded as stopped
+    And the story "mw-gq6.3" carries a comment quoting: claimed here with no session behind it
+    And the story "mw-gq6.3" is not closed
 
   Scenario: The merge slot is given back once the landing is done
     Given the session of "mw-gq6.1" reported a plain success
