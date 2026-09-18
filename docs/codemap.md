@@ -121,9 +121,9 @@ One `go` command at a time on the VPS (1 vCPU, ~1 GB): the Makefile pins
 `GOFLAGS=-p=1` and `GOMAXPROCS=1`. `make test` takes about 2.5 minutes.
 
 - One package: `go test ./application/...` (add `-run TestName` for one test).
-- One feature: `features/features_test.go` builds `godog.Options` in code and
-  binds no flags, so `-run` cannot select a scenario. Temporarily set `Paths`
-  to that file, e.g. `[]string{"sweep.feature"}`, and run `go test ./features`.
+- One feature or one scenario: `MW_FEATURE=sweep.feature go test ./features`
+  (append `:17` for the scenario at that line). Unset, `make test` still
+  runs every feature, strictly; an unknown name fails the suite.
 - `scripts/check-codemap.sh` (run by `make lint`) fails when this page names a
   path that does not exist, passes 8192 bytes, or leaves out a port, a use
   case or a command file. Its header states the exact rules.
