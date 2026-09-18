@@ -179,7 +179,38 @@ func BootPrompt(seat Seat, detail StoryDetail) string {
 		section(&b, "(none recorded on the story)")
 	}
 
+	formulaSteps(&b, detail)
 	return b.String()
+}
+
+// formulaSteps writes the story's formula into the boot file: the step beads it
+// was poured into, in the order they are worked, each with the id the session
+// closes when the step is done. A session that has to ask the tracker what its
+// steps are pays for the asking; a session primed with them does not.
+func formulaSteps(b *strings.Builder, detail StoryDetail) {
+	molecule := detail.Molecule
+	formula := detail.Merged().Formula
+	if formula == "" && !molecule.Poured() {
+		return
+	}
+
+	b.WriteString("## Your formula\n\n")
+	if !molecule.Poured() {
+		section(b, fmt.Sprintf("Your formula is %s. It has not been poured into step beads — it is not installed "+
+			"where this factory pours formulas — so follow it from the rig's own docs.", formula))
+		return
+	}
+
+	fmt.Fprintf(b, "Work these steps in order, and close each one as you finish it (`bd close <step>`); "+
+		"closing a step is what makes the next one ready. They hang from %s.\n\n", molecule.RootID)
+	for _, step := range molecule.Steps {
+		fmt.Fprintf(b, "- %s · %s", step.ID, strings.TrimSpace(step.Title))
+		if description := strings.TrimSpace(step.Description); description != "" {
+			fmt.Fprintf(b, " — %s", description)
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
 }
 
 // section writes one block of the boot file, ending it with a blank line
