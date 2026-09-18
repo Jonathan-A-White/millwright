@@ -163,6 +163,28 @@ func (v *Vault) AppendToLedger(_ context.Context, seat, line string) error {
 	return nil
 }
 
+// ReadLedger implements application.Vault: every line of a seat's ledger, in
+// the order it holds them. This is the one place the vault reads a ledger back
+// rather than only appending to it — for a report, never to rewrite anything —
+// and a seat with no ledger yet reads back as no lines rather than an error.
+func (v *Vault) ReadLedger(_ context.Context, seat string) ([]string, error) {
+	if err := safeName("seat", seat); err != nil {
+		return nil, err
+	}
+	held, err := os.ReadFile(v.LedgerPath(seat))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading the %s seat's ledger: %w", seat, err)
+	}
+	trimmed := strings.TrimRight(string(held), "\n")
+	if trimmed == "" {
+		return nil, nil
+	}
+	return strings.Split(trimmed, "\n"), nil
+}
+
 // endsInNewline reports whether a file's last byte is a newline. An empty file,
 // and a file that is not there at all, count as ending in one: there is nothing
 // for a new line to run onto.

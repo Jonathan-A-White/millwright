@@ -209,3 +209,50 @@ func TestAppendToLedgerRefusesWhatWouldNotBeOneLine(t *testing.T) {
 		t.Error("expected a seat name that reaches outside the vault to be refused")
 	}
 }
+
+func TestReadLedgerReadsBackWhatWasAppended(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+	ctx := context.Background()
+
+	for _, line := range []string{"| a | first | line |", "| a | second | line |"} {
+		if err := v.AppendToLedger(ctx, "mayor", line); err != nil {
+			t.Fatalf("appending %q: %v", line, err)
+		}
+	}
+
+	lines, err := v.ReadLedger(ctx, "mayor")
+	if err != nil {
+		t.Fatalf("reading the ledger: %v", err)
+	}
+	if len(lines) != 2 || lines[0] != "| a | first | line |" || lines[1] != "| a | second | line |" {
+		t.Fatalf("expected both lines appended, in order, got %q", lines)
+	}
+
+	// The ledger the builder seat already holds, from aVault's own fixture.
+	held, err := v.ReadLedger(ctx, "builder")
+	if err != nil {
+		t.Fatalf("reading the builder's ledger: %v", err)
+	}
+	if len(held) != 1 || held[0] != "every story the builder ever worked" {
+		t.Fatalf("expected the builder's one fixture line, got %q", held)
+	}
+}
+
+func TestReadLedgerOfASeatWithNoneYetIsEmptyNotAnError(t *testing.T) {
+	v := vault.New(aVault(t))
+	lines, err := v.ReadLedger(context.Background(), "clerk")
+	if err != nil {
+		t.Fatalf("reading a ledger nobody has written: %v", err)
+	}
+	if len(lines) != 0 {
+		t.Errorf("expected no lines, got %q", lines)
+	}
+}
+
+func TestReadLedgerRefusesANameThatWouldReachOutsideTheVault(t *testing.T) {
+	v := vault.New(aVault(t))
+	if _, err := v.ReadLedger(context.Background(), "../etc"); err == nil {
+		t.Error("expected a seat name that reaches outside the vault to be refused")
+	}
+}

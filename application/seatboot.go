@@ -55,6 +55,13 @@ type Vault interface {
 	// for append and never read, so that no version of mw can rewrite a line a
 	// seat has already written.
 	AppendToLedger(ctx context.Context, seat, line string) error
+
+	// ReadLedger reads every line of a seat's ledger back, in the order it
+	// holds them. A seat with no ledger yet comes back with no lines and no
+	// error: there is nothing written to sum fuel from. This is the one read of
+	// the ledger the factory does, and it is used only for a report — nothing
+	// here is ever rewritten.
+	ReadLedger(ctx context.Context, seat string) ([]string, error)
 }
 
 // SeatBoot assembles the session that works one story: it writes the boot file

@@ -76,6 +76,19 @@ func (f *fakeVault) AppendToLedger(_ context.Context, seat, line string) error {
 	return nil
 }
 
+func (f *fakeVault) ReadLedger(_ context.Context, seat string) ([]string, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	var lines []string
+	for _, held := range f.ledger {
+		if strings.TrimPrefix(held, seat+": ") != held {
+			lines = append(lines, strings.TrimPrefix(held, seat+": "))
+		}
+	}
+	return lines, nil
+}
+
 // fakeHarness records the launch it was asked to turn into a session.
 type fakeHarness struct {
 	launch application.Launch
