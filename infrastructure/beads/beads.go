@@ -314,7 +314,10 @@ func (g *Gateway) CloseStory(ctx context.Context, id, reason string) error {
 }
 
 // StaleClaims implements application.WorkTracker. bd counts staleness in whole
-// days and will not accept fewer than one.
+// days and will not accept fewer than one. `bd stale --json` does not embed
+// the copy of the parent epic `bd show` does, so — like BlockedForHost —
+// each candidate is read back with ShowStory, which already knows how to
+// overlay an epic's defaults onto a story read on its own.
 func (g *Gateway) StaleClaims(ctx context.Context, days int) ([]application.StoryDetail, error) {
 	if days < 1 {
 		return nil, fmt.Errorf("stale claims need at least 1 day, got %d", days)
@@ -330,7 +333,11 @@ func (g *Gateway) StaleClaims(ctx context.Context, days int) ([]application.Stor
 
 	claims := make([]application.StoryDetail, 0, len(stories))
 	for _, story := range stories {
-		claims = append(claims, story.detail(domain.Path{}))
+		detail, err := g.ShowStory(ctx, story.ID)
+		if err != nil {
+			return nil, fmt.Errorf("reading the stale claim %s: %w", story.ID, err)
+		}
+		claims = append(claims, detail)
 	}
 	return claims, nil
 }
