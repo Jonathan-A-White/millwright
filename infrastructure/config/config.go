@@ -23,9 +23,10 @@ import (
 
 // The environment variables that answer for each setting, ahead of the file.
 const (
-	VaultEnv = "MW_VAULT"
-	HostEnv  = "MW_HOST"
-	CapEnv   = "MW_CAP"
+	VaultEnv      = "MW_VAULT"
+	HostEnv       = "MW_HOST"
+	CapEnv        = "MW_CAP"
+	StaleHoursEnv = "MW_STALE_HOURS"
 )
 
 // RigsTable is the table of the config file that says where each rig is checked
@@ -43,6 +44,10 @@ const (
 // under a gigabyte of memory, and because two sessions racing is the expensive
 // mistake to make by default.
 const DefaultCap = 1
+
+// DefaultStaleHours is how many hours a claimed story's session may show no
+// new output before `mw sweep` calls it stuck, when nothing says otherwise.
+const DefaultStaleHours = 2
 
 // File is the config file's path under the home directory.
 var File = filepath.Join(".config", "mw", "config.toml")
@@ -90,6 +95,35 @@ func Cap() (int, error) {
 		return 0, fmt.Errorf("the cap on sessions running at once is %d, so nothing could ever be started: set it to 1 or more", atOnce)
 	}
 	return atOnce, nil
+}
+
+// StaleHours reports how many hours a claimed story's session may show no new
+// output before `mw sweep` calls it stuck: $MW_STALE_HOURS if it is set,
+// otherwise the root-table `stale_hours` key of ~/.config/mw/config.toml, and
+// DefaultStaleHours when neither says.
+func StaleHours() (int, error) {
+	said := strings.TrimSpace(os.Getenv(StaleHoursEnv))
+	if said == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return 0, fmt.Errorf("no %s is set and there is no home directory to read %s in: %w", StaleHoursEnv, File, err)
+		}
+		if said, err = valueIn(filepath.Join(home, File), "stale_hours"); err != nil {
+			return 0, err
+		}
+	}
+	if said == "" {
+		return DefaultStaleHours, nil
+	}
+
+	hours, err := strconv.Atoi(said)
+	if err != nil {
+		return 0, fmt.Errorf("the stale threshold is %q, which is not a whole number of hours: set %s=<n>, or `stale_hours = <n>` in %s", said, StaleHoursEnv, File)
+	}
+	if hours < 1 {
+		return 0, fmt.Errorf("the stale threshold is %d hours, so a session would be called stuck the moment it was claimed: set it to 1 or more", hours)
+	}
+	return hours, nil
 }
 
 // Rigs reports where each rig the factory works is checked out on this machine,
