@@ -190,6 +190,123 @@ func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 	}
 }
 
+// Filing a plan is the other half of the gateway: it writes beads rather than
+// reading them. Everything here goes into one throwaway database too.
+func TestGatewayFilesAnEpicWithItsStoriesHeld(t *testing.T) {
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	gateway := beads.New(vault)
+	defaults := domain.Path{
+		Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude,
+		Model: domain.ModelOpus, Effort: domain.EffortHigh, Formula: "tdd-feature", Host: "vps",
+	}
+
+	epicID, err := gateway.CreateEpic(ctx, application.NewEpic{
+		Title:           "Walking skeleton",
+		Description:     "The smallest mw that closes the loop.",
+		SuccessCriteria: "One story goes from the plan file to a commit.",
+		Priority:        1,
+		Defaults:        defaults,
+	})
+	if err != nil {
+		t.Fatalf("filing the epic: %v", err)
+	}
+
+	first, err := gateway.CreateStory(ctx, application.NewStory{
+		EpicID:          epicID,
+		Title:           "Go module and the Path domain",
+		Description:     "Create the module.",
+		Acceptance:      "make test passes.",
+		Priority:        1,
+		EstimateMinutes: 60,
+	})
+	if err != nil {
+		t.Fatalf("filing the first story: %v", err)
+	}
+	second, err := gateway.CreateStory(ctx, application.NewStory{
+		EpicID:     epicID,
+		Title:      "First formulas",
+		Acceptance: "Both formulas cook.",
+		Priority:   2,
+		Overrides:  domain.Path{Model: domain.ModelSonnet, Formula: "chore"},
+		Needs:      []string{first},
+	})
+	if err != nil {
+		t.Fatalf("filing the second story: %v", err)
+	}
+
+	// Held: beads offers a dispatcher neither of them, path or no path.
+	ready, err := gateway.ReadyStories(ctx, epicID, "vps")
+	if err != nil {
+		t.Fatalf("listing the ready stories of a held plan: %v", err)
+	}
+	if len(ready) != 0 {
+		t.Fatalf("expected a held plan to leave nothing ready, got %+v", ready)
+	}
+
+	// The story carries its structured fields and its path override.
+	detail, err := gateway.ShowStory(ctx, second)
+	if err != nil {
+		t.Fatalf("showing %s: %v", second, err)
+	}
+	if detail.Acceptance != "Both formulas cook." || detail.EpicID != epicID {
+		t.Errorf("expected the filed story's acceptance criteria and epic, got %+v", detail)
+	}
+	path, err := detail.Path()
+	if err != nil {
+		t.Fatalf("the filed story has no path: %v", err)
+	}
+	want := defaults
+	want.Model, want.Formula = domain.ModelSonnet, "chore"
+	if path != want {
+		t.Errorf("expected the filed story's path %+v, got %+v", want, path)
+	}
+
+	// An epic's success criteria are where bd lint looks for them.
+	epic, err := gateway.ShowStory(ctx, epicID)
+	if err != nil {
+		t.Fatalf("showing %s: %v", epicID, err)
+	}
+	if !strings.Contains(epic.Description, "## Success Criteria") {
+		t.Errorf("expected the epic to carry its success criteria, got %q", epic.Description)
+	}
+
+	// bd's own lint is the cheapest check that what was filed is specified
+	// well enough to be worked: it exits 1 and says what is missing when an
+	// epic has no success criteria or a story no acceptance criteria.
+	if said := bdRun(t, vault, beads.Program, "lint", epicID, first, second); !strings.Contains(said, "No template warnings") {
+		t.Errorf("expected a filed plan to pass bd lint, got %q", said)
+	}
+
+	// Released: the one that waits on nothing is ready, the other is not.
+	for _, id := range []string{first, second} {
+		if err := gateway.ReleaseStory(ctx, id); err != nil {
+			t.Fatalf("releasing %s: %v", id, err)
+		}
+	}
+	ready, err = gateway.ReadyStories(ctx, epicID, "vps")
+	if err != nil {
+		t.Fatalf("listing the ready stories of a released plan: %v", err)
+	}
+	if len(ready) != 1 || ready[0].Story.ID != first {
+		t.Fatalf("expected only %s to be ready, got %+v", first, ready)
+	}
+
+	// And beads lets the second one through once the first is closed.
+	if err := gateway.CloseStory(ctx, first, "worked"); err != nil {
+		t.Fatalf("closing %s: %v", first, err)
+	}
+	ready, err = gateway.ReadyStories(ctx, epicID, "vps")
+	if err != nil {
+		t.Fatalf("listing the ready stories after the close: %v", err)
+	}
+	if len(ready) != 1 || ready[0].Story.ID != second {
+		t.Fatalf("expected %s to be ready once %s is closed, got %+v", second, first, ready)
+	}
+}
+
 func TestGatewayReportsWhatBeadsRefused(t *testing.T) {
 	vault := throwawayVault(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
