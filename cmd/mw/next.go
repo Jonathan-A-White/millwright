@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -59,6 +60,18 @@ func newNextCmd() *cobra.Command {
 			tests, err := config.Tests()
 			if err != nil {
 				return err
+			}
+
+			// A close-out takes away the very worktree its session was running
+			// in, and this process is standing in it: the shell that chained mw
+			// next onto the harness inherited the session's directory. Anything
+			// run after the removal — bd, tmux, the dispatch that follows —
+			// would be started from a directory that no longer exists, and on
+			// Linux that fails before the program is even reached. So the
+			// close-out works from the vault, which is never the thing it takes
+			// away.
+			if err := os.Chdir(dir); err != nil {
+				return fmt.Errorf("closing out %s: the vault %s cannot be worked from: %w", args[0], dir, err)
 			}
 
 			gateway := beads.New(dir)

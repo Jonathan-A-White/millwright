@@ -7,8 +7,9 @@ import (
 	"strings"
 )
 
-// LandingPrefix is what the throwaway worktree a story is landed in is called,
-// and MergeTries is how many times a landing will fetch, merge and push again
+// LandingPrefix is what the throwaway worktree a story is landed in is named
+// after — it is made beside the rig's story worktrees, with something unique
+// after this prefix, so that two landings never share a directory. MergeTries is how many times a landing will fetch, merge and push again
 // after losing the race to the other host. Bounded, because a host that keeps
 // losing the race is a host with something else wrong with it.
 const (
@@ -123,13 +124,6 @@ type Dispatcher interface {
 
 // Dispatch satisfies the port.
 var _ Dispatcher = Dispatch{}
-
-// LandingDir is the throwaway worktree a story is landed in: beside the rig's
-// story worktrees, named after the story, so that two close-outs on one host
-// never land in the same directory even if they somehow got past the slot.
-func LandingDir(rigDir, storyID string) string {
-	return WorktreeDir(rigDir, LandingPrefix+storyID)
-}
 
 // Rejected reports whether err is a push the remote refused because the branch
 // had moved: the one landing failure worth trying again.
