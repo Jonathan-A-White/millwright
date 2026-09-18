@@ -56,7 +56,7 @@ func TestAPlanNobodyApprovedStaysHeld(t *testing.T) {
 		t.Fatalf("expected nothing to be ready, got %v", apptest.IDs(ready))
 	}
 	// The person is told plainly that filing again is not how to release them.
-	for _, want := range []string{"nothing here can be dispatched", "would file a second copy", "bd update " + filed.Stories[0].ID} {
+	for _, want := range []string{"nothing here can be dispatched", "would file a second copy", "mw release " + filed.EpicID} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("expected the report to say %q, got:\n%s", want, out.String())
 		}

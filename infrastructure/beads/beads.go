@@ -27,11 +27,14 @@ const Program = "bd"
 // Beads' own names for the statuses the factory puts a story in: claimed, held
 // back from every dispatcher, released to them again, and finished.
 const (
-	StatusInProgress = "in_progress"
-	StatusDeferred   = "deferred"
-	StatusOpen       = "open"
-	StatusClosed     = "closed"
+	StatusInProgress = application.StatusInProgress
+	StatusDeferred   = application.StatusHeld
+	StatusOpen       = application.StatusOpen
+	StatusClosed     = application.StatusClosed
 )
+
+// TypeEpic is beads' name for the type of bead an epic is filed as.
+const TypeEpic = "epic"
 
 // Gateway reads and writes stories in one vault's beads database.
 type Gateway struct {
@@ -203,6 +206,41 @@ func (g *Gateway) ShowStory(ctx context.Context, id string) (application.StoryDe
 		}
 	}
 	return story.detail(defaults), nil
+}
+
+// ShowEpic implements application.WorkTracker: an epic as it stands, with the
+// default Path its stories inherit and every story filed under it — closed and
+// claimed ones included, which is why the listing asks bd for everything rather
+// than take its default of the unfinished. It only reads; releasing is a
+// separate call per story, so that a failure half way through has released
+// exactly the stories it says it did.
+func (g *Gateway) ShowEpic(ctx context.Context, id string) (application.EpicDetail, error) {
+	if strings.TrimSpace(id) == "" {
+		return application.EpicDetail{}, fmt.Errorf("reading an epic: which epic?")
+	}
+	epic, err := g.showOne(ctx, id)
+	if err != nil {
+		return application.EpicDetail{}, err
+	}
+	if epic.Type != "" && epic.Type != TypeEpic {
+		return application.EpicDetail{}, fmt.Errorf("%s is a %s, not an epic", id, epic.Type)
+	}
+	defaults := domain.PathFromMetadata(epic.pathMetadata())
+
+	out, err := g.call(ctx, "list", "--parent", id, "--limit", "0", "--all", "--json")
+	if err != nil {
+		return application.EpicDetail{}, err
+	}
+	stories, err := decodeBeads(out)
+	if err != nil {
+		return application.EpicDetail{}, fmt.Errorf("reading the stories of %s: %w", id, err)
+	}
+
+	filed := application.EpicDetail{ID: epic.ID, Title: epic.Title, Defaults: defaults}
+	for _, story := range inFiledOrder(stories) {
+		filed.Stories = append(filed.Stories, story.detail(defaults))
+	}
+	return filed, nil
 }
 
 // ReadyStories implements application.WorkTracker. The epic's defaults are read

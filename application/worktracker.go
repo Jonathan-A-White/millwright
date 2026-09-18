@@ -2,8 +2,21 @@ package application
 
 import (
 	"context"
+	"strings"
 
 	"github.com/Jonathan-A-White/millwright/domain"
+)
+
+// The statuses a story is in, in the tracker's own words. A story is held back
+// from every dispatcher (StatusHeld), released to them (StatusOpen), claimed by
+// a session (StatusInProgress), or finished (StatusClosed). "Held" is what the
+// factory calls what beads stores as "deferred": the tracker's word for work
+// that is filed but not yet approved.
+const (
+	StatusOpen       = "open"
+	StatusHeld       = "deferred"
+	StatusInProgress = "in_progress"
+	StatusClosed     = "closed"
 )
 
 // StoryDetail is everything the work tracker knows about one story: the story
@@ -18,6 +31,10 @@ type StoryDetail struct {
 	Assignee    string
 	Description string
 	Acceptance  string
+	// Needs is the ids of the stories this one waits on, as far as the listing
+	// it came from said. It is empty when the tracker was not asked for the
+	// story's dependencies.
+	Needs []string
 	// EstimateMinutes is the Mayor's estimate in minutes; zero when unset.
 	EstimateMinutes int
 	// Molecule is the formula poured for this story, empty until it has been
@@ -47,6 +64,17 @@ type FormulaStep struct {
 	Description string
 }
 
+// Held reports whether the tracker is holding this story back from every
+// dispatcher: filed, complete, and waiting on somebody to approve it.
+func (d StoryDetail) Held() bool {
+	return strings.EqualFold(strings.TrimSpace(d.Status), StatusHeld)
+}
+
+// Closed reports whether this story is finished.
+func (d StoryDetail) Closed() bool {
+	return strings.EqualFold(strings.TrimSpace(d.Status), StatusClosed)
+}
+
 // Merged is the epic's defaults overlaid with the story's own overrides,
 // whether or not what comes out is a complete Path. Use it to read one field
 // of a story that may not be fully planned yet; use Path before working it.
@@ -57,6 +85,19 @@ func (d StoryDetail) Merged() domain.Path {
 // Path is the Path this story is worked by, or the reason it has none.
 func (d StoryDetail) Path() (domain.Path, error) {
 	return d.Story.PathFrom(d.Defaults)
+}
+
+// EpicDetail is an epic as the tracker holds it now: what it is called, the
+// default Path its stories inherit, and every story filed under it — whatever
+// state each is in, closed ones included, because an epic's tree that leaves
+// out the work already done is not this epic's tree.
+type EpicDetail struct {
+	ID       string
+	Title    string
+	Defaults domain.Path
+	// Stories are in the order they were filed, each with the epic's defaults
+	// overlaid and with Needs filled in.
+	Stories []StoryDetail
 }
 
 // NewEpic is an epic about to be filed: what it delivers, how it will be known
@@ -110,6 +151,12 @@ type WorkTracker interface {
 
 	// ShowStory reports one story with its epic's default Path overlaid.
 	ShowStory(ctx context.Context, id string) (StoryDetail, error)
+
+	// ShowEpic reports an epic and every story filed under it, in the order
+	// they were filed, each with the epic's defaults overlaid and with what it
+	// waits on. An id that names no epic is an error, and reading is all it
+	// does: nothing is written.
+	ShowEpic(ctx context.Context, id string) (EpicDetail, error)
 
 	// ReadyStories lists the stories of an epic that can be started on a host
 	// right now: open, unclaimed, unblocked, and whose Path names that host.

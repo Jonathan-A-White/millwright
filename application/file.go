@@ -45,7 +45,9 @@ type FiledPlan struct {
 }
 
 // FiledStory is one story as it was filed: the key it had in the plan, the id
-// it has now, the Path it is worked by, and the ids it waits on.
+// it has now, the Path it is worked by, the ids it still waits on, and what the
+// tracker says it is now. A story just filed is held; a story read back later
+// may be anything.
 type FiledStory struct {
 	ID              string
 	Key             string
@@ -53,6 +55,46 @@ type FiledStory struct {
 	Path            domain.Path
 	EstimateMinutes int
 	Needs           []string
+	// State is the word the tree uses for what the tracker says this story is:
+	// held, open, in progress or closed. An empty State reads as held, which is
+	// what a story that has only just been filed is.
+	State string
+}
+
+// state is what the tree calls this story, defaulting to held.
+func (s FiledStory) state() string {
+	if s.State == "" {
+		return StateHeld
+	}
+	return s.State
+}
+
+// The words a tree uses for what the tracker says a story is. They are the
+// factory's words, not beads': a story beads has deferred is one the factory is
+// holding until somebody approves it.
+const (
+	StateHeld       = "held"
+	StateOpen       = "open"
+	StateInProgress = "in progress"
+	StateClosed     = "closed"
+)
+
+// StateOf is the word a tree uses for a status the tracker reported. A status
+// the factory does not know is printed as it came, rather than guessed at.
+func StateOf(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "":
+		return StateHeld
+	case StatusHeld:
+		return StateHeld
+	case StatusOpen:
+		return StateOpen
+	case StatusInProgress:
+		return StateInProgress
+	case StatusClosed:
+		return StateClosed
+	}
+	return status
 }
 
 // Run files the plan and reports what it filed.
@@ -115,6 +157,7 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 			Path:            path,
 			EstimateMinutes: story.Estimate,
 			Needs:           needs,
+			State:           StateHeld,
 		})
 	}
 
@@ -152,9 +195,11 @@ func (f File) print(block string) {
 	fmt.Fprint(f.Out, block)
 }
 
-// Tree is the filed plan as a person reads it: the epic and the default Path
-// its stories inherit, then every story with the Path it is worked by, what it
-// waits on, and that it is held.
+// Tree is the plan as a person reads it: the epic and the default Path its
+// stories inherit, then every story with the Path it is worked by, what it
+// still waits on, and what the tracker says it is. It is printed by the command
+// that files a plan and by the one that releases it later, so that the two show
+// the same thing.
 func (p FiledPlan) Tree() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s · %s\n", p.EpicID, p.Title)
@@ -164,7 +209,7 @@ func (p FiledPlan) Tree() string {
 		fmt.Fprintf(&b, "  %s · %s\n", story.ID, story.Title)
 		fmt.Fprintf(&b, "      path %s\n", story.Path.Summary())
 
-		state := []string{"held"}
+		state := []string{story.state()}
 		if story.EstimateMinutes > 0 {
 			state = append(state, fmt.Sprintf("%dm", story.EstimateMinutes))
 		}
@@ -193,13 +238,9 @@ func (p FiledPlan) Unblocked() []string {
 // holdings is what a person is told about a plan nobody released: that none of
 // it can be dispatched, and how to release it without filing it twice.
 func (p FiledPlan) holdings() string {
-	ids := make([]string, 0, len(p.Stories))
-	for _, story := range p.Stories {
-		ids = append(ids, story.ID)
-	}
 	return fmt.Sprintf("\nAll %d stories of %s are held: nothing here can be dispatched.\n"+
-		"Filing this plan again would file a second copy of it, so release these instead, in the vault:\n"+
-		"  bd update %s -s open\n", len(p.Stories), p.EpicID, strings.Join(ids, " "))
+		"Filing this plan again would file a second copy of it, so when it is approved, release this one:\n"+
+		"  mw release %s\n", len(p.Stories), p.EpicID, p.EpicID)
 }
 
 // releases is what a person is told about a plan that was approved: what was

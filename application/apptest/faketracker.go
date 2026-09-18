@@ -16,12 +16,13 @@ import (
 	"github.com/Jonathan-A-White/millwright/domain"
 )
 
-// Statuses a story in the fake tracker can be in. They are beads' own names.
+// Statuses a story in the fake tracker can be in. They are the tracker's own
+// names, which are beads' own names.
 const (
-	StatusOpen       = "open"
-	StatusInProgress = "in_progress"
-	StatusDeferred   = "deferred"
-	StatusClosed     = "closed"
+	StatusOpen       = application.StatusOpen
+	StatusInProgress = application.StatusInProgress
+	StatusDeferred   = application.StatusHeld
+	StatusClosed     = application.StatusClosed
 )
 
 // Actor is the assignee the fake records when a story is claimed.
@@ -37,6 +38,7 @@ type FakeTracker struct {
 	mu sync.Mutex
 
 	defaults map[string]domain.Path // epic id -> its default path
+	titles   map[string]string      // epic id -> what it is called
 	stories  map[string]*fakeStory
 	order    []string
 	epics    []string
@@ -74,6 +76,7 @@ type fakeStory struct {
 func NewFakeTracker() *FakeTracker {
 	return &FakeTracker{
 		defaults: map[string]domain.Path{},
+		titles:   map[string]string{},
 		stories:  map[string]*fakeStory{},
 		formulas: map[string][]application.FormulaStep{},
 		poured:   map[string]string{},
@@ -123,6 +126,7 @@ func (f *FakeTracker) CreateEpic(_ context.Context, epic application.NewEpic) (s
 	id := fmt.Sprintf("f-%d", len(f.epics)+1)
 	f.epics = append(f.epics, id)
 	f.defaults[id] = epic.Defaults
+	f.titles[id] = epic.Title
 	return id, nil
 }
 
@@ -257,6 +261,31 @@ func (f *FakeTracker) ShowStory(_ context.Context, id string) (application.Story
 		return application.StoryDetail{}, fmt.Errorf("no story %q", id)
 	}
 	return s.detail, nil
+}
+
+// ShowEpic implements application.WorkTracker. The stories come back in the
+// order they were filed, each carrying what it waits on.
+func (f *FakeTracker) ShowEpic(_ context.Context, id string) (application.EpicDetail, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return application.EpicDetail{}, f.Err
+	}
+	if _, filed := f.defaults[id]; !filed {
+		return application.EpicDetail{}, fmt.Errorf("no epic %q", id)
+	}
+
+	epic := application.EpicDetail{ID: id, Title: f.titles[id], Defaults: f.defaults[id]}
+	for _, storyID := range f.order {
+		s := f.stories[storyID]
+		if s.detail.EpicID != id {
+			continue
+		}
+		detail := s.detail
+		detail.Needs = append([]string(nil), s.needs...)
+		epic.Stories = append(epic.Stories, detail)
+	}
+	return epic, nil
 }
 
 // AddFormula installs a formula in the fake, with the steps pouring it makes.

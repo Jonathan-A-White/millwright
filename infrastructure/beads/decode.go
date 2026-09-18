@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
@@ -18,8 +21,10 @@ type bead struct {
 	Description      string            `json:"description"`
 	Acceptance       string            `json:"acceptance_criteria"`
 	Status           string            `json:"status"`
+	Type             string            `json:"issue_type"`
 	Assignee         string            `json:"assignee"`
 	EstimatedMinutes int               `json:"estimated_minutes"`
+	CreatedAt        string            `json:"created_at"`
 	Metadata         map[string]any    `json:"metadata"`
 	Parent           string            `json:"parent"`
 	Dependencies     []json.RawMessage `json:"dependencies"`
@@ -58,6 +63,39 @@ func (b bead) edges() []edge {
 		found = append(found, e)
 	}
 	return found
+}
+
+// needs is the ids of the beads this one waits on, read from whichever of the
+// two shapes bd printed its dependencies in: whole linked beads, as `bd show`
+// prints them, or edges, as `bd list` and `bd ready` do. The link to the parent
+// epic is not a wait, and neither shape carries what waits on this bead, so
+// what comes back is what this bead is blocked by. The two shapes share no
+// field names, so one of them decoding to nothing is how they are told apart.
+func (b bead) needs() []string {
+	var on []string
+	seen := map[string]bool{}
+	add := func(id string) {
+		if id == "" || id == b.Parent || seen[id] {
+			return
+		}
+		seen[id] = true
+		on = append(on, id)
+	}
+
+	for _, raw := range b.Dependencies {
+		var e edge
+		if json.Unmarshal(raw, &e) == nil && e.Issue == b.ID && e.DependsOn != "" {
+			if e.Kind != "parent-child" {
+				add(e.DependsOn)
+			}
+			continue
+		}
+		var link linked
+		if json.Unmarshal(raw, &link) == nil && link.ID != "" && link.Kind != "" && link.Kind != "parent-child" {
+			add(link.ID)
+		}
+	}
+	return on
 }
 
 // pathMetadata is the bead's metadata narrowed to the string values a Path can
@@ -110,11 +148,45 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		Description:     b.Description,
 		Acceptance:      b.Acceptance,
 		EstimateMinutes: b.EstimatedMinutes,
+		Needs:           b.needs(),
 		// The formula poured for this story, as the dispatch that poured it
 		// recorded it. Only the root is known from the story itself; the steps
 		// are read from the tracker by whoever needs them.
 		Molecule: application.Molecule{RootID: b.pathMetadata()[application.MoleculeField]},
 	}
+}
+
+// inFiledOrder puts beads in the order they were filed, which is the order the
+// tree of an epic reads in: oldest first, and, for beads bd stamped with the
+// same second, in id order. bd lists children newest first, and its timestamps
+// are whole seconds, so a plan filed in one go arrives both backwards and tied.
+func inFiledOrder(beads []bead) []bead {
+	sort.SliceStable(beads, func(i, j int) bool {
+		if beads[i].CreatedAt != beads[j].CreatedAt {
+			return beads[i].CreatedAt < beads[j].CreatedAt
+		}
+		return lessID(beads[i].ID, beads[j].ID)
+	})
+	return beads
+}
+
+// lessID orders two bead ids the way a person reads them: the parts between the
+// dots compare as numbers where both are numbers, so t-a.9 comes before t-a.10
+// rather than after it, which is what plain string order would say.
+func lessID(a, b string) bool {
+	left, right := strings.Split(a, "."), strings.Split(b, ".")
+	for i := 0; i < len(left) && i < len(right); i++ {
+		if left[i] == right[i] {
+			continue
+		}
+		ln, lerr := strconv.Atoi(left[i])
+		rn, rerr := strconv.Atoi(right[i])
+		if lerr == nil && rerr == nil {
+			return ln < rn
+		}
+		return left[i] < right[i]
+	}
+	return len(left) < len(right)
 }
 
 // decodeBeads reads the list of beads `bd --json` printed. bd reports a refusal
