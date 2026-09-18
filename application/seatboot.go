@@ -40,9 +40,21 @@ type Vault interface {
 	// making the story's run directory if it is not there yet.
 	PutRunFile(ctx context.Context, storyID, name, contents string) (string, error)
 
+	// ReadRunFile reads one file of a story's run back — the result a session
+	// left behind. A file that was never written comes back as an error
+	// satisfying errors.Is(err, fs.ErrNotExist), because a session that wrote
+	// nothing and a session that wrote a failure are not the same thing.
+	ReadRunFile(ctx context.Context, storyID, name string) (string, error)
+
 	// RunFile is where one file of a story's run belongs, whether or not
 	// anything has been written to it.
 	RunFile(storyID, name string) string
+
+	// AppendToLedger adds one line to the end of a seat's ledger, making the
+	// ledger if the seat has none yet. It only ever appends: the file is opened
+	// for append and never read, so that no version of mw can rewrite a line a
+	// seat has already written.
+	AppendToLedger(ctx context.Context, seat, line string) error
 }
 
 // SeatBoot assembles the session that works one story: it writes the boot file
@@ -56,6 +68,13 @@ type SeatBoot struct {
 	Harness Harness
 	Seat    string
 	Host    string
+
+	// After is what runs when the session's harness exits: the program and the
+	// arguments before the story's id, which is appended to them. It is how the
+	// baton is carried on without the session having to know anything about
+	// what comes after it — `mw next` closing the story out. An empty After
+	// leaves the session ending with nothing after it.
+	After []string
 }
 
 // Boot assembles the session that works detail in the worktree dir. What comes
@@ -104,6 +123,7 @@ func (b SeatBoot) Boot(ctx context.Context, detail StoryDetail, dir string) (Ses
 		BootFile:   bootFile,
 		ResultFile: b.Vault.RunFile(id, ResultFileName),
 		Kickoff:    KickoffPrompt(b.Seat, id),
+		After:      b.after(id),
 	})
 	if err != nil {
 		return SessionSpec{}, fmt.Errorf("booting %s: %w", id, err)
@@ -112,6 +132,15 @@ func (b SeatBoot) Boot(ctx context.Context, detail StoryDetail, dir string) (Ses
 		return SessionSpec{}, fmt.Errorf("booting %s: %w", id, err)
 	}
 	return spec, nil
+}
+
+// after is the command that runs when this story's session exits: what the
+// factory was told to run, with the story it worked after it.
+func (b SeatBoot) after(storyID string) []string {
+	if len(b.After) == 0 {
+		return nil
+	}
+	return append(append([]string(nil), b.After...), storyID)
 }
 
 // SeatIdentity is who a session is when it writes anything down: the seat it

@@ -123,6 +123,13 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 	// in the session, where a person who attaches to it can read it.
 	line := shellLine(argv) + " > " + shellQuote(l.ResultFile)
 
+	// Whatever comes after the session is chained with `;`, not `&&`: a session
+	// that failed, ran out of fuel or died is exactly the one whose closing out
+	// must still happen, and `&&` would skip it.
+	if len(l.After) > 0 {
+		line += "; " + shellLine(l.After)
+	}
+
 	identity := application.SeatIdentity(l.Seat, l.Host)
 	return application.SessionSpec{
 		Name: application.SessionName(l.StoryID),

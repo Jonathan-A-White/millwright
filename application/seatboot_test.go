@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"strings"
 	"testing"
 
@@ -16,6 +17,7 @@ import (
 type fakeVault struct {
 	seats   map[string]application.Seat // "<seat>/<rig>" -> what it reads as
 	written map[string]string           // "<story>/<file>" -> its contents
+	ledger  []string                    // the lines appended to a seat's ledger
 	err     error
 }
 
@@ -51,8 +53,27 @@ func (f *fakeVault) PutRunFile(_ context.Context, storyID, name, contents string
 	return "/vault/runs/" + storyID + "/" + name, nil
 }
 
+func (f *fakeVault) ReadRunFile(_ context.Context, storyID, name string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	written, ok := f.written[storyID+"/"+name]
+	if !ok {
+		return "", fmt.Errorf("no %s of %s: %w", name, storyID, fs.ErrNotExist)
+	}
+	return written, nil
+}
+
 func (f *fakeVault) RunFile(storyID, name string) string {
 	return "/vault/runs/" + storyID + "/" + name
+}
+
+func (f *fakeVault) AppendToLedger(_ context.Context, seat, line string) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.ledger = append(f.ledger, seat+": "+line)
+	return nil
 }
 
 // fakeHarness records the launch it was asked to turn into a session.

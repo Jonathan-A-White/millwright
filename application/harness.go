@@ -23,6 +23,13 @@ type Launch struct {
 	BootFile   string
 	Kickoff    string
 	ResultFile string
+
+	// After is the command run when the harness exits, however it exits: mw
+	// closing the story out. It is chained onto the harness's own command line
+	// rather than hung off a hook, because a session that dies fires no hooks
+	// and a story nobody closes out is a story nobody hears about again (ADR
+	// 0004). An empty After runs nothing afterwards.
+	After []string
 }
 
 // Validate reports the first reason a launch could not be turned into a
