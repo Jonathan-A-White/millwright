@@ -7,6 +7,6 @@ import "os"
 func main() {
 	if err := newRootCmd().Execute(); err != nil {
 		// cobra has already printed the error.
-		os.Exit(1)
+		os.Exit(exitCode(err))
 	}
 }

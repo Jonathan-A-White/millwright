@@ -1,0 +1,62 @@
+package main
+
+import (
+	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
+	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
+
+	"github.com/spf13/cobra"
+)
+
+// newSyncCmd builds `mw sync`: the one command that brings this host level with
+// the other one. It is safe to run by hand, from the dispatcher, or on a timer,
+// and it says in one line what it did.
+func newSyncCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "sync",
+		Short: "Bring this host level with the other one: the vault, then beads",
+		Long: "sync pulls the other host's vault commits and pushes this host's, then runs one beads\n" +
+			"synchronisation cycle, then records when this host was last level. It never migrates and\n" +
+			"never forces: what it cannot settle stops it, with the reason in plain words, and nothing\n" +
+			"is retried. A sync stopped by beads exits with beads' own exit code, so that a timer can\n" +
+			"branch on it: 2 is a merge conflict and 4 a stuck working set, and both wait for a person.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			dir, err := config.Vault()
+			if err != nil {
+				return err
+			}
+			host, err := config.Host()
+			if err != nil {
+				return err
+			}
+
+			report, err := application.Sync{
+				Vault:   vault.New(dir),
+				Tracker: beads.New(dir),
+				Host:    host,
+			}.Run(cmd.Context())
+			if err != nil {
+				return err
+			}
+			cmd.Printf("%s\n", report)
+			return nil
+		},
+	}
+}
+
+// exitCode is the status mw leaves with after a command reported err. A sync
+// that beads stopped leaves with beads' own code, so that whoever ran mw reads
+// the same number bd would have given them; anything else is a plain 1.
+func exitCode(err error) int {
+	switch {
+	case err == nil:
+		return 0
+	default:
+		if halt, stopped := application.Halted(err); stopped && halt.Code != 0 {
+			return halt.Code
+		}
+		return 1
+	}
+}

@@ -93,13 +93,14 @@ type SyncHalt struct {
 	Said string
 }
 
-// Error is the plain sentence a person reads when a sync stops.
+// Error is the plain sentence a person reads when a sync stops, with the
+// tracker's own exit code in it and the tracker's own words after it.
 func (h *SyncHalt) Error() string {
-	said := strings.TrimSpace(h.Said)
-	if said == "" {
-		return h.reason()
+	message := fmt.Sprintf("%s (bd sync exited %d)", h.reason(), h.Code)
+	if said := strings.TrimSpace(h.Said); said != "" {
+		return message + "; bd said: " + said
 	}
-	return h.reason() + ": " + said
+	return message
 }
 
 // reason says in plain words what the tracker's exit code means.
@@ -115,7 +116,7 @@ func (h *SyncHalt) reason() string {
 		return "the beads database has a stuck working set that no retry will clear: " +
 			"nothing was pushed, and it stays that way until a person clears it by hand"
 	default:
-		return fmt.Sprintf("the beads database could not be synced (bd sync exited %d)", h.Code)
+		return "the beads database could not be synced"
 	}
 }
 

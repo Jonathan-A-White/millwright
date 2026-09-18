@@ -5,8 +5,8 @@ seats that turn conversations into tracked work and tracked work into commits,
 across several rigs and two hosts, on a tight fuel budget.
 
 `mw` is the factory's command line. Today it knows its own version, reads and
-writes stories through beads, and runs sessions in tmux; dispatching them
-follows.
+writes stories through beads, runs sessions in tmux, and keeps the two hosts
+level with `mw sync`; dispatching sessions follows.
 
 ## Getting started
 
@@ -66,6 +66,28 @@ with `--append-system-prompt-file`, its result redirected to
 and `MW_STORY` in its environment so that the work is signed by the seat rather
 than by the session. Assembling launches nothing and spends no fuel. See
 `features/seat_boot.feature`.
+
+## Keeping two hosts level
+
+`mw sync` is the one command that brings this host level with the other, by
+hand, from the dispatcher or on a timer. In order: the vault's files, with a
+plain `git pull --rebase` and a push of what this host has and the other does
+not; then one `bd sync` for the factory's single beads database; then a note of
+when this host was last level, under `host.<name>.last_sync` in beads' key-value
+store, so that either host can say how stale the other is.
+
+It never migrates, never forces and never retries. A vault holding uncommitted
+work stops it — committing is a seat's job. A rebase that cannot finish is
+undone, so the vault is left as it was found. `bd sync`'s exit code is surfaced
+as it is and becomes mw's own: 2 (a merge conflict beads will not resolve) and 4
+(a working set only a person can clear) stop mw with a plain message and are
+never retried or auto-resolved.
+
+Ledgers are appended to by both hosts and edited by neither, so the vault's
+`.gitattributes` must carry `seats/*/ledger.md merge=union` — two hosts' appends
+then merge by keeping every line instead of conflicting. `mw sync` writes that
+line if it is missing and says so; committing it is a seat's job, and until
+someone does, only this host is covered. See `features/sync.feature`.
 
 ## The Path
 
