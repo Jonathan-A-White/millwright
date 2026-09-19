@@ -253,12 +253,12 @@ var _ application.SeatHarness = (*Harness)(nil)
 // SeatSession implements application.SeatHarness: the window that runs a
 // seat's own session.
 //
-// It is the opposite of Session in every way that matters. The session is
-// interactive — no `--print`, no result file, no `--permission-prompts none` —
-// because a seat's session is one a person watches, types into and is asked by;
-// it is primed with the seat's charter rather than with a story; and nothing
+// It is the opposite of Session in nearly every way that matters. The session
+// is interactive — no `--print`, no result file, no `--permission-prompts none`
+// — because a seat's session is one a person watches, types into and is asked
+// by; it is primed with the seat's charter rather than with a story; and nothing
 // follows it, because a seat's session ends when its occupant hands off, not
-// when a story is done.
+// when a story is done. What it shares with Session is SessionSettings.
 //
 // The charter travels as a path, not as text: a charter is pages long, and a
 // command line a person can read is worth more than one that carries a
@@ -285,8 +285,15 @@ func (h *Harness) SeatSession(l application.SeatLaunch) (application.WindowSpec,
 		argv = append(argv, "--effort", string(l.Effort))
 	}
 	argv = append(argv,
+		// The seat's session is asked about permissions, as it always has been:
+		// whether a seat may deny instead of ask when nobody is there is the
+		// Governor's open decision, mw-6ww.27, so no --permission-prompts flag is
+		// sent here until it is made.
 		"--permission-mode", h.permissionMode,
 		"--append-system-prompt-file", l.Charter,
+		// The seat signs the work and the model never does, and bd runs without
+		// being asked, as in a Builder's session. See SessionSettings.
+		"--settings", SessionSettings,
 		"--name", l.Name,
 		l.Kickoff,
 	)

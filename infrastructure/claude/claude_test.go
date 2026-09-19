@@ -385,6 +385,46 @@ func TestASeatSessionIsInteractiveAndPrimedFromTheCharterFile(t *testing.T) {
 	}
 }
 
+// TestASeatSessionGetsTheSettingsABuilderGets: a seat's session signs nothing
+// and may run bd without being asked, exactly as a Builder's does. Without
+// --settings it boots with Claude Code's default attribution on, which ends
+// every commit with a Co-Authored-By line the vault forbids and mw next
+// refuses, and it is asked about every bd call.
+func TestASeatSessionGetsTheSettingsABuilderGets(t *testing.T) {
+	spec, err := New().SeatSession(seatLaunch(nil))
+	if err != nil {
+		t.Fatalf("assembling the seat's session: %v", err)
+	}
+	// No shell reads the command, so the JSON is one argument of its own.
+	i := slices.Index(spec.Command, "--settings")
+	if i < 0 || i+1 >= len(spec.Command) {
+		t.Fatalf("expected the seat's session to carry --settings, got %q", spec.Command)
+	}
+	if got := spec.Command[i+1]; got != SessionSettings {
+		t.Errorf("expected --settings to be SessionSettings, got %q", got)
+	}
+	var settings struct {
+		Attribution struct {
+			Commit     *string `json:"commit"`
+			PR         *string `json:"pr"`
+			SessionURL *bool   `json:"sessionUrl"`
+		} `json:"attribution"`
+		Permissions struct {
+			Allow []string `json:"allow"`
+		} `json:"permissions"`
+	}
+	if err := json.Unmarshal([]byte(spec.Command[i+1]), &settings); err != nil {
+		t.Fatalf("the settings the seat's session is given are not JSON: %v", err)
+	}
+	a := settings.Attribution
+	if a.Commit == nil || *a.Commit != "" || a.PR == nil || *a.PR != "" || a.SessionURL == nil || *a.SessionURL {
+		t.Errorf("expected attribution to be off, got %+v", a)
+	}
+	if !slices.Contains(settings.Permissions.Allow, BeadsAllowRule) {
+		t.Errorf("expected permissions.allow to hold %q, got %v", BeadsAllowRule, settings.Permissions.Allow)
+	}
+}
+
 func TestASeatSessionLeavesOutWhatItWasNotGiven(t *testing.T) {
 	spec, err := New().SeatSession(seatLaunch(func(l *application.SeatLaunch) {
 		l.Model, l.Effort = "", ""
