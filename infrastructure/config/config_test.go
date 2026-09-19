@@ -29,6 +29,7 @@ func writeConfig(t *testing.T, contents string) string {
 	t.Setenv("MW_CAP", "")
 	t.Setenv("MW_STALE_HOURS", "")
 	t.Setenv("MW_HOST_SILENT_HOURS", "")
+	t.Setenv("MW_HANDOFF_AT", "")
 	return home
 }
 
@@ -126,6 +127,40 @@ func TestStaleHoursRefusesWhatWouldNeverGiveASessionAChanceOrIsNotANumber(t *tes
 	writeConfig(t, "stale_hours = \"soon\"\n")
 	if _, err := config.StaleHours(); err == nil {
 		t.Fatal("expected a stale threshold that is not a number to be refused")
+	}
+}
+
+func TestHandoffAtIs180000UntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\nhost = \"vps\"\n")
+
+	tokens, err := config.HandoffAt()
+	if err != nil {
+		t.Fatalf("reading the handoff limit: %v", err)
+	}
+	if config.DefaultHandoffAt != 180000 || tokens != config.DefaultHandoffAt {
+		t.Fatalf("expected the default of 180000 tokens, got %d", tokens)
+	}
+
+	writeConfig(t, "handoff_at = 120000\n")
+	if tokens, err = config.HandoffAt(); err != nil || tokens != 120000 {
+		t.Fatalf("expected the config file's handoff_at to read back as 120000, got %d: %v", tokens, err)
+	}
+
+	t.Setenv("MW_HANDOFF_AT", "90000")
+	if tokens, err = config.HandoffAt(); err != nil || tokens != 90000 {
+		t.Fatalf("expected MW_HANDOFF_AT to win with 90000, got %d: %v", tokens, err)
+	}
+}
+
+func TestHandoffAtRefusesWhatWouldHandEveryoneOffOrIsNotANumber(t *testing.T) {
+	writeConfig(t, "handoff_at = 0\n")
+	if _, err := config.HandoffAt(); err == nil {
+		t.Fatal("expected a handoff limit of 0 to be refused")
+	}
+
+	writeConfig(t, "handoff_at = \"soon\"\n")
+	if _, err := config.HandoffAt(); err == nil {
+		t.Fatal("expected a handoff limit that is not a number to be refused")
 	}
 }
 
