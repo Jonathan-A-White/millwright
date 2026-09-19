@@ -9,8 +9,10 @@
 //	seats/<seat>/postmortems/      never read at boot
 //	runs/<story-id>/               one directory per story worked
 //
-// This package reads the first two and nothing else: everything a session is
-// primed with is paid for on every story, so what is not needed is not read.
+// A story's session is primed from the first two and nothing else: everything
+// it is primed with is paid for on every story, so what is not needed is not
+// read. seat.go reads the little more that starting a seat's own session takes
+// — its kickoff text, its handoffs and its acting file — and no more than that.
 //
 // The vault is also a git clone that both hosts commit to, so this package is
 // the adapter behind application.VaultFiles as well: git.go keeps the clone
@@ -31,7 +33,7 @@ import (
 // to name by path when it commits are the application's, so that the layout is
 // written down once.
 const (
-	CharterFile = "charter.md"
+	CharterFile = application.CharterFileName
 	SeatsDir    = application.SeatsDir
 	RigsDir     = application.RigsDir
 	RunsDir     = application.RunsDir
