@@ -108,14 +108,16 @@ directory and fake only the tracker, runner and vault's git:
 ```sh
 export PATH=$PATH:/usr/local/go/bin      # Go is not on PATH in a non-login shell
 make build      # -> bin/mw
-make test       # go test ./... , features included
-make lint       # go vet ./... , then scripts/check-*.sh
+make test       # go test -tags beads_integration ./... , features included
+make lint       # go vet -tags beads_integration ./... , then scripts/check-*.sh
 ```
 
 One `go` command at a time on the VPS (1 vCPU): the Makefile pins
 `GOFLAGS=-p=1` and `GOMAXPROCS=1`.
 
-- One package: `go test ./application/...` (`-run TestName` for one).
+- One package: `go test ./application/...` (`-run TestName` for one). A plain
+  `go test` skips the real-`bd` cases of `infrastructure/beads` (most of the
+  suite's clock): add `-tags beads_integration`, as `make test` does.
 - One feature: `MW_FEATURE=sweep.feature go test ./features` (`:17` appended
   for the scenario at that line). An unknown name fails the suite.
 - `scripts/check-codemap.sh` fails when this page names a missing path,

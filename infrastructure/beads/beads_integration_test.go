@@ -1,12 +1,24 @@
+//go:build beads_integration
+
 package beads_test
 
-// This test drives a real bd against a throwaway database in a temp directory.
+// This test drives a real bd against throwaway databases in temp directories.
 // It never touches the factory's vault. bd is slow to start (about a second a
-// call on the VPS, several for `bd init`), so the whole story — create, show,
-// list, claim, write, close — runs against one database in one test.
+// call on the VPS, several for `bd init`), so each case works a whole story —
+// create, show, list, claim, write, close — in one database of its own.
+//
+// It is behind a build tag because it is most of this package's clock: a plain
+// `go test ./infrastructure/beads` skips it (see beads_integration_skipped_test.go)
+// and `make test` runs it with -tags beads_integration.
+//
+// `bd init` is paid once, in TestMain; each case starts from a copy of that
+// database, so the cases stay as separate from one another as they were when
+// each ran its own `bd init`.
 
 import (
 	"context"
+	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,22 +32,98 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 )
 
-// throwawayVault makes an empty beads database in a temp directory and returns
-// the directory it is in.
+// templateVault is an empty beads database, made once for the whole binary and
+// copied for each case; templateSkip says why there is none when bd or git is
+// missing, and the cases skip with it.
+var (
+	templateVault string
+	templateSkip  string
+)
+
+func TestMain(m *testing.M) {
+	// bd finds its database from these before it looks at the directory it runs
+	// in: a session that carries them must not point a test at its own vault.
+	os.Unsetenv("BEADS_DIR")
+	os.Unsetenv("BEADS_DB")
+
+	root, err := os.MkdirTemp("", "mw-beads-template-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "making the template database directory:", err)
+		os.Exit(1)
+	}
+	code := func() int {
+		defer os.RemoveAll(root)
+		switch {
+		case !beads.Available():
+			templateSkip = beads.Program + " is not on PATH"
+		default:
+			if _, err := exec.LookPath("git"); err != nil {
+				templateSkip = "git is not on PATH"
+				break
+			}
+			templateVault = root
+			for _, args := range [][]string{
+				{"git", "init", "-q"},
+				{beads.Program, "init", "-p", "t", "--non-interactive",
+					"--role", "maintainer", "--skip-agents", "--skip-hooks", "-q"},
+			} {
+				cmd := exec.Command(args[0], args[1:]...)
+				cmd.Dir = root
+				if out, err := cmd.CombinedOutput(); err != nil {
+					fmt.Fprintf(os.Stderr, "%s: %v\n%s", strings.Join(args, " "), err, out)
+					return 1
+				}
+			}
+		}
+		return m.Run()
+	}()
+	os.Exit(code)
+}
+
+// throwawayVault makes an empty beads database in a temp directory, a copy of
+// the template, and returns the directory it is in.
 func throwawayVault(t *testing.T) string {
 	t.Helper()
-	if !beads.Available() {
-		t.Skipf("%s is not on PATH", beads.Program)
-	}
-	if _, err := exec.LookPath("git"); err != nil {
-		t.Skip("git is not on PATH")
+	if templateSkip != "" {
+		t.Skip(templateSkip)
 	}
 
 	vault := t.TempDir()
-	bdRun(t, vault, "git", "init", "-q")
-	bdRun(t, vault, beads.Program, "init", "-p", "t", "--non-interactive",
-		"--role", "maintainer", "--skip-agents", "--skip-hooks", "-q")
+	if err := copyTree(templateVault, vault); err != nil {
+		t.Fatalf("copying the template database into %s: %v", vault, err)
+	}
 	return vault
+}
+
+// copyTree copies the regular files and directories under src into dst, which
+// exists, keeping their permissions.
+func copyTree(src, dst string) error {
+	return filepath.WalkDir(src, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil || rel == "." {
+			return err
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dst, rel)
+		switch {
+		case entry.IsDir():
+			return os.MkdirAll(target, info.Mode().Perm())
+		case info.Mode().IsRegular():
+			content, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			return os.WriteFile(target, content, info.Mode().Perm())
+		default:
+			return fmt.Errorf("%s is neither a file nor a directory", path)
+		}
+	})
 }
 
 // bdRun runs one setup command in the throwaway vault and fails the test if it
