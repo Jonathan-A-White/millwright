@@ -934,14 +934,17 @@ func (n Next) ledgerNotes(c *closeOut, report *NextReport) []string {
 	return append(notes, report.Notes...)
 }
 
-// recordedGone reports whether id's run state already says its session is not
-// to be trusted as running — set by mw next (RunStopped) once a close-out
-// found it gone, or by mw sweep (RunStuck) once a sweep did. It is the guard
-// both share, so that whichever of them notices a claimed story's session is
-// gone first is the one that comments, and the other says nothing again.
+// recordedGone reports whether id's run state already says something about its
+// session that a close-out or sweep has written: set by mw next (RunStopped)
+// once a close-out found it gone, by mw sweep (RunStuck) once a sweep did, or by
+// mw next (RunBlocked) once a landing was refused. A blocked story's session did
+// finish; it is not abandoned, and its reason is in the state the refusal wrote,
+// which a sweep must not write over. It is the guard both share, so that whichever
+// of them notices a claimed story's session is gone first is the one that
+// comments, and the other says nothing again.
 func recordedGone(ctx context.Context, tracker WorkTracker, id string) bool {
 	was, err := tracker.StoryState(ctx, id, RunState)
-	return err == nil && (was == RunStopped || was == RunStuck)
+	return err == nil && (was == RunStopped || was == RunStuck || was == RunBlocked)
 }
 
 // abandoned finds the stories this host has claimed whose session is not there

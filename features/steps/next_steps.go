@@ -49,8 +49,9 @@ type nextContext struct {
 	ledgerBefore []string
 	afterFirst   []string // the ledger as the first close-out of a scenario left it
 	originBefore string
-	rigBefore    string // the rig checkout's HEAD before mw closed out, in the rig checkout scenarios
-	signed       string // the short hash of the commit a scenario signed
+	rigBefore    string         // the rig checkout's HEAD before mw closed out, in the rig checkout scenarios
+	signed       string         // the short hash of the commit a scenario signed
+	commentsWere map[string]int // how many comments a story held before the close-out ran
 
 	report  application.NextReport
 	checked application.CheckReport // what mw check reported, in the check scenarios
@@ -109,6 +110,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the ledger already holds a line from an earlier story$`, c.theLedgerAlreadyHoldsALine)
 	ctx.Given(`^a formula was poured for "([^"]*)" and one of its steps is still open$`, c.aFormulaWithAnOpenStep)
 	ctx.Given(`^the story "([^"]*)" is claimed here with no session behind it$`, c.aStoryClaimedWithNoSession)
+	ctx.Given(`^the story "([^"]*)" is claimed here, its landing was refused and its session has ended$`, c.aStoryWhoseLandingWasRefused)
 	ctx.Given(`^the session of "([^"]*)" left these uncommitted in its worktree:$`, c.theSessionLeftUncommittedWork)
 	ctx.Given(`^a commit on the branch of "([^"]*)" carries "([^"]*)"$`, c.aCommitCarrying)
 	ctx.Given(`^the other host landed its own work on "([^"]*)" while "([^"]*)" was worked$`, c.theOtherHostLandedFirst)
@@ -149,6 +151,8 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^a fresh session is running for "([^"]*)"$`, c.aFreshSessionIsRunningFor)
 	ctx.Then(`^no fresh session was started$`, c.noFreshSessionWasStarted)
 	ctx.Then(`^the story "([^"]*)" is recorded as stopped$`, c.theStoryIsRecordedAsStopped)
+	ctx.Then(`^the story "([^"]*)" is still recorded as blocked$`, c.theStoryIsStillRecordedAsBlocked)
+	ctx.Then(`^the story "([^"]*)" holds no comment it did not hold before$`, c.theStoryHoldsNoNewComment)
 	ctx.Then(`^the merge slot of the rig is free again$`, c.theMergeSlotIsFree)
 	ctx.Then(`^the terminal holds no session of "([^"]*)"$`, c.theTerminalHoldsNoSession)
 	ctx.Then(`^the session of "([^"]*)" is still on the terminal, exited$`, c.theSessionIsStillThereExited)
@@ -358,6 +362,46 @@ func (c *nextContext) aStoryClaimedWithNoSession(id string) error {
 		return err
 	}
 	return c.tracker.ClaimStory(context.Background(), id)
+}
+
+// aStoryWhoseLandingWasRefused is a story an earlier close-out stopped on: the
+// claim is here, the session is gone, and stop() left run=blocked and its
+// reason as a comment. The comments held now are counted, so that a later step
+// can tell a new one from that one.
+func (c *nextContext) aStoryWhoseLandingWasRefused(id string) error {
+	if err := c.aStoryClaimedWithNoSession(id); err != nil {
+		return err
+	}
+	ctx := context.Background()
+	if err := c.tracker.CommentOnStory(ctx, id, "mw next did not close this story out: the push was refused"); err != nil {
+		return err
+	}
+	if err := c.tracker.SetStoryState(ctx, id, application.RunState, application.RunBlocked, "the push was refused"); err != nil {
+		return err
+	}
+	if c.commentsWere == nil {
+		c.commentsWere = map[string]int{}
+	}
+	c.commentsWere[id] = len(c.tracker.Comments(id))
+	return nil
+}
+
+func (c *nextContext) theStoryIsStillRecordedAsBlocked(id string) error {
+	if got := c.tracker.State(id, application.RunState); got != application.RunBlocked {
+		return fmt.Errorf("expected %s to still be recorded %s=%s, got %q", id, application.RunState, application.RunBlocked, got)
+	}
+	return nil
+}
+
+func (c *nextContext) theStoryHoldsNoNewComment(id string) error {
+	was, ok := c.commentsWere[id]
+	if !ok {
+		return fmt.Errorf("no comments were counted on %s before the close-out", id)
+	}
+	if comments := c.tracker.Comments(id); len(comments) != was {
+		return fmt.Errorf("expected %s to hold the %d comment(s) it held before, got %d: %q", id, was, len(comments), comments)
+	}
+	return nil
 }
 
 // aCommitCarrying puts one more commit on a story's branch whose message

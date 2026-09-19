@@ -308,6 +308,15 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.3" carries a comment quoting: claimed here with no session behind it
     And the story "mw-gq6.3" is not closed
 
+  Scenario: A story whose landing was refused is left as blocked, not overwritten as abandoned
+    Given the story "mw-gq6.3" is claimed here, its landing was refused and its session has ended
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed
+    And the story "mw-gq6.3" is still recorded as blocked
+    And the story "mw-gq6.3" holds no comment it did not hold before
+    And the story "mw-gq6.3" is not closed
+
   Scenario: A close the tracker refuses after the landing leaves the story landed but open, and the next run closes it
     Given the session of "mw-gq6.1" reported a plain success
     And the tracker refuses to close "mw-gq6.1", saying: assignee is root, actor is mw@vps; reclaim or use --force
