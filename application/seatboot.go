@@ -89,6 +89,11 @@ type Vault interface {
 	// anything has been written to it.
 	RunFile(storyID, name string) string
 
+	// Dir is the directory the vault is held in on this host. It differs from
+	// host to host, so it is asked of the vault rather than written anywhere a
+	// session reads.
+	Dir() string
+
 	// AppendToLedger adds one line to the end of a seat's ledger, making the
 	// ledger if the seat has none yet. It only ever appends: the file is opened
 	// for append and never read, so that no version of mw can rewrite a line a
@@ -169,7 +174,7 @@ func (b SeatBoot) Boot(ctx context.Context, detail StoryDetail, dir string) (Ses
 		// into it.
 		BootFile:   bootFile,
 		ResultFile: b.Vault.RunFile(id, ResultFileName),
-		Kickoff:    KickoffPrompt(b.Seat, id),
+		Kickoff:    KickoffPrompt(b.Seat, id, b.Vault.Dir()),
 		After:      b.after(id),
 	})
 	if err != nil {
@@ -214,7 +219,7 @@ func SeatIdentity(seat, host string) string {
 // KickoffPrompt is the first thing a session is told. It is short on purpose:
 // who it is and what it is working are in the boot file it was primed with,
 // and everything else it needs is in the story's own formula steps.
-func KickoffPrompt(seat, storyID string) string {
+func KickoffPrompt(seat, storyID, vaultDir string) string {
 	return fmt.Sprintf("You are booted into the %s seat of millwright, and your story is %s. "+
 		"Your charter, your memory of this rig and the story itself are in the system prompt you were given. "+
 		"Your worktree is the directory you are in: work only there. "+
@@ -234,8 +239,24 @@ func KickoffPrompt(seat, storyID string) string {
 		// headless session is over when its turn is, with anything uncommitted.
 		"bd runs without asking, but as its own Bash call, never chained with another command "+
 		"by ;, | or &&. "+
+		"%s"+
 		"This session is headless and ends when your turn ends: run the suite in the foreground "+
-		"and wait for it, never in the background, and commit before you stop.", seat, storyID)
+		"and wait for it, never in the background, and commit before you stop.", seat, storyID, bdVault(vaultDir))
+}
+
+// bdVault is the sentence that gives a session the exact bd command for this
+// host. From a worktree bd finds no beads database of its own; the vault holds
+// the one, and where it is differs from host to host, so a session left to work
+// the path out either guesses another host's or composes a change of directory
+// ahead of bd — a chained command, refused whole. It is the literal command
+// instead, taken from the vault this host is configured with.
+func bdVault(vaultDir string) string {
+	if vaultDir == "" {
+		return ""
+	}
+	return fmt.Sprintf("From your worktree bd finds no beads database, so point every bd call at this host's vault "+
+		"with -C, as in: bd -C %[1]s close <step>. The same goes for every other bd subcommand: bd -C %[1]s <subcommand> ... "+
+		"Never change directory first. ", vaultDir)
 }
 
 // BootPrompt is the boot file a session is primed with: the seat's charter,

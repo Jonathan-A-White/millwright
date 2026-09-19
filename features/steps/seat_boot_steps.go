@@ -64,6 +64,8 @@ func InitializeSeatBootScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the session runs in "([^"]*)"$`, c.theSessionRunsIn)
 	ctx.Then(`^the session's environment holds:$`, c.theEnvironmentHolds)
 	ctx.Then(`^the kickoff prompt holds:$`, c.theKickoffPromptHolds)
+	ctx.Then(`^the kickoff prompt holds none of:$`, c.theKickoffPromptHoldsNoneOf)
+	ctx.Then(`^the kickoff prompt points bd at the vault with "([^"]*)" and its path$`, c.theKickoffPromptPointsBdAtTheVault)
 	ctx.Then(`^the command is one shell line$`, c.theCommandIsOneShellLine)
 	ctx.Then(`^the command line holds no newline$`, c.theCommandLineHoldsNoNewline)
 }
@@ -329,7 +331,7 @@ func (c *seatBootContext) theKickoffPromptHolds(table *godog.Table) error {
 	if err != nil {
 		return err
 	}
-	prompt := application.KickoffPrompt(c.seat, c.detail.Story.ID)
+	prompt := application.KickoffPrompt(c.seat, c.detail.Story.ID, c.dir)
 	for _, row := range table.Rows {
 		if want := row.Cells[0].Value; !strings.Contains(prompt, want) {
 			return fmt.Errorf("expected the kickoff prompt to hold %q, got %q", want, prompt)
@@ -341,6 +343,39 @@ func (c *seatBootContext) theKickoffPromptHolds(table *godog.Table) error {
 	head, _, _ := strings.Cut(prompt, "'")
 	if !strings.Contains(line, head) {
 		return fmt.Errorf("expected the command line to carry the kickoff prompt, got %q", line)
+	}
+	return nil
+}
+
+func (c *seatBootContext) theKickoffPromptHoldsNoneOf(table *godog.Table) error {
+	if _, err := c.assembled(); err != nil {
+		return err
+	}
+	prompt := application.KickoffPrompt(c.seat, c.detail.Story.ID, c.dir)
+	for _, row := range table.Rows {
+		if unwanted := row.Cells[0].Value; strings.Contains(prompt, unwanted) {
+			return fmt.Errorf("the kickoff prompt holds %q, which does not belong in it: %q", unwanted, prompt)
+		}
+	}
+	return nil
+}
+
+// theKickoffPromptPointsBdAtTheVault checks the command the session is told to
+// type: the flag, then the path of the vault this scenario assembled from — the
+// literal path, so that no session has to work one out — and that the session is
+// really given that prompt.
+func (c *seatBootContext) theKickoffPromptPointsBdAtTheVault(flag string) error {
+	line, err := c.line()
+	if err != nil {
+		return err
+	}
+	want := flag + c.dir + " "
+	prompt := application.KickoffPrompt(c.seat, c.detail.Story.ID, c.dir)
+	if !strings.Contains(prompt, want) {
+		return fmt.Errorf("expected the kickoff prompt to hold %q, got %q", want, prompt)
+	}
+	if !strings.Contains(line, want) {
+		return fmt.Errorf("expected the command line to carry %q, got %q", want, line)
 	}
 	return nil
 }

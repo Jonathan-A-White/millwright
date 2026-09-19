@@ -90,6 +90,12 @@ Feature: Booting a session into a seat
       | run the suite in the foreground     |
       | commit before you stop              |
 
+  Scenario: The session is told the exact bd command for this host's vault
+    When the session that works the story is assembled for the "builder" seat
+    Then the kickoff prompt points bd at the vault with "bd -C " and its path
+    And the kickoff prompt holds none of:
+      | cd  |
+
   Scenario: A story whose title is full of punctuation is assembled safely
     Given the story is titled:
       """
