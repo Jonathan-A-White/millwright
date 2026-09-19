@@ -78,6 +78,11 @@ func InitializeSyncScenario(ctx *godog.ScenarioContext) {
 
 	ctx.Then(`^the sync succeeds$`, c.theSyncSucceeds)
 	ctx.Then(`^the sync fails, and mw stops with a non-zero exit$`, c.theSyncFails)
+	ctx.Then(`^the sync stops with the vault blocked$`, c.theSyncStopsWithTheVaultBlocked)
+	ctx.Then(`^mw exits (\d+)$`, c.mwExits)
+	ctx.Then(`^mw exits (\d+), which is neither a plain failure nor one of bd's own$`, c.mwExitsItsOwnStatus)
+	ctx.Then(`^the failure is one line$`, c.theFailureIsOneLine)
+	ctx.Then(`^the uncommitted change is still there, and nothing was pulled over it$`, c.theUncommittedChangeIsStillThere)
 	ctx.Then(`^the failure says, in plain words:$`, c.theFailureSays)
 	ctx.Then(`^the Mayor's ledger on this host holds, in this order:$`, c.theLedgerHoldsInThisOrder)
 	ctx.Then(`^no conflict is left in the vault$`, c.noConflictIsLeft)
@@ -87,7 +92,6 @@ func InitializeSyncScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the vault is where it was on both hosts$`, c.theVaultIsWhereItWasOnBothHosts)
 	ctx.Then(`^the vault is where it was on this host$`, c.theVaultIsWhereItWasOnThisHost)
 	ctx.Then(`^the beads database was synced once$`, c.theDatabaseWasSyncedOnce)
-	ctx.Then(`^the beads database was never synced$`, c.theDatabaseWasNeverSynced)
 	ctx.Then(`^the beads database holds the time of the sync under (\S+)$`, c.theDatabaseHoldsTheTimeUnder)
 	ctx.Then(`^nothing is recorded under (\S+)$`, c.nothingIsRecordedUnder)
 	ctx.Then(`^the vault marks (\S+) as (\S+)$`, c.theVaultMarks)
@@ -284,6 +288,83 @@ func (c *syncContext) theSyncFails() error {
 	return nil
 }
 
+// theSyncStopsWithTheVaultBlocked reads the failure as what it is: somebody's
+// uncommitted work in the vault, naming the files, rather than an ordinary
+// failure a timer would have to read the words of to tell apart.
+func (c *syncContext) theSyncStopsWithTheVaultBlocked() error {
+	if c.err == nil {
+		return fmt.Errorf("expected the vault half to be blocked, but the sync reported %s", c.report)
+	}
+	blocked, stopped := application.Blocked(c.err)
+	if !stopped {
+		return fmt.Errorf("expected a blocked vault, got %v", c.err)
+	}
+	if len(blocked.Files) == 0 {
+		return fmt.Errorf("expected the blocked vault to name the files in the way, got none")
+	}
+	return nil
+}
+
+// mwExits checks the status mw leaves with for this failure. mw's own exit is
+// application.ExitStatus of whatever the command returned (cmd/mw/sync.go,
+// cmd/mw/main.go), so this is the number a timer branches on.
+func (c *syncContext) mwExits(status int) error {
+	if got := application.ExitStatus(c.err); got != status {
+		return fmt.Errorf("expected mw to leave with %d, got %d (from %v)", status, got, c.err)
+	}
+	return nil
+}
+
+// mwExitsItsOwnStatus also holds the status apart from every other one a sync
+// can leave with: 1 is any plain failure and 2, 3 and 4 are bd's own, so a
+// blocked vault has to be none of them for a timer to tell it from a fault.
+func (c *syncContext) mwExitsItsOwnStatus(status int) error {
+	if err := c.mwExits(status); err != nil {
+		return err
+	}
+	for _, taken := range []int{1, 2, 3, 4} {
+		if status == taken {
+			return fmt.Errorf("expected a status of its own, got %d, which is already taken", status)
+		}
+	}
+	return nil
+}
+
+// theFailureIsOneLine keeps the message a timer's log holds to one line.
+func (c *syncContext) theFailureIsOneLine() error {
+	if c.err == nil {
+		return fmt.Errorf("expected the sync to stop, but it reported %s", c.report)
+	}
+	if said := c.err.Error(); strings.Contains(said, "\n") {
+		return fmt.Errorf("expected one line, got %q", said)
+	}
+	return nil
+}
+
+// theUncommittedChangeIsStillThere is the promise that mw touched nobody's
+// work: the edit is still uncommitted and the other host's line was not pulled
+// over it.
+func (c *syncContext) theUncommittedChangeIsStillThere() error {
+	ledger, err := os.ReadFile(filepath.Join(c.here, mayorLedger))
+	if err != nil {
+		return fmt.Errorf("reading the ledger: %w", err)
+	}
+	if !strings.Contains(string(ledger), thisLine) {
+		return fmt.Errorf("expected the uncommitted line to be left alone, the ledger holds %q", ledger)
+	}
+	if strings.Contains(string(ledger), otherLine) {
+		return fmt.Errorf("expected nothing to have been pulled over the uncommitted change, the ledger holds %q", ledger)
+	}
+	left, err := runGit(c.here, "status", "--porcelain", "--untracked-files=no")
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(left, mayorLedger) {
+		return fmt.Errorf("expected %s to still be uncommitted, git says %q", mayorLedger, left)
+	}
+	return nil
+}
+
 func (c *syncContext) theFailureSays(table *godog.Table) error {
 	if c.err == nil {
 		return fmt.Errorf("expected the sync to fail, but it reported %s", c.report)
@@ -406,13 +487,6 @@ func (c *syncContext) theVaultIsWhereItWasOnBothHosts() error {
 func (c *syncContext) theDatabaseWasSyncedOnce() error {
 	if got := c.tracker.Syncs(); got != 1 {
 		return fmt.Errorf("expected one synchronisation cycle, got %d", got)
-	}
-	return nil
-}
-
-func (c *syncContext) theDatabaseWasNeverSynced() error {
-	if got := c.tracker.Syncs(); got != 0 {
-		return fmt.Errorf("expected the beads database to be left alone, got %d cycles", got)
 	}
 	return nil
 }

@@ -4,7 +4,11 @@ Feature: Keeping the vault and beads in step between hosts
   order: the vault's files first, then the beads database, and last a note of
   when this host was level, so that the other host can tell how stale this one
   is. It never migrates and it never forces. A sync that cannot finish stops
-  and says why in plain words rather than resolving anything itself.
+  and says why in plain words rather than resolving anything itself. One thing
+  does not stop all of it: uncommitted work in the vault blocks the vault's half
+  only. The beads half runs anyway, so a timer keeps the hosts level in beads
+  while somebody's edit waits for them, and mw leaves with a status of its own
+  for that.
 
   Background:
     Given a vault shared by both hosts
@@ -71,13 +75,27 @@ Feature: Keeping the vault and beads in step between hosts
     And the sync reports that the mark was added
     And no conflict is left in the vault
 
-  Scenario: Uncommitted vault work stops the sync before anything moves
+  Scenario: Uncommitted vault work leaves the vault alone, and beads sync anyway
     Given the other host appended a line to the Mayor's ledger and pushed it
     And this host has an uncommitted change to the Mayor's ledger
     When this host syncs
-    Then the sync fails, and mw stops with a non-zero exit
+    Then the sync stops with the vault blocked
+    And mw exits 5, which is neither a plain failure nor one of bd's own
     And the failure says, in plain words:
       | uncommitted           |
       | seats/mayor/ledger.md |
-    And the beads database was never synced
+    And the failure is one line
+    And the uncommitted change is still there, and nothing was pulled over it
     And the vault is where it was on this host
+    And the beads database was synced once
+    And nothing is recorded under host.vps.last_sync
+
+  Scenario: A beads halt is what stops a sync whose vault half was blocked too
+    Given this host has an uncommitted change to the Mayor's ledger
+    And bd sync will exit 2
+    When this host syncs
+    Then the sync fails, and mw stops with a non-zero exit
+    And the failure says, in plain words:
+      | merge conflict |
+    And mw exits 2
+    And nothing is recorded under host.vps.last_sync
