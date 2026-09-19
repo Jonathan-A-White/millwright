@@ -1101,6 +1101,83 @@ stories it calls stuck, a watch its first failed check) and would leave nobody
 to wake for it. With no `[watch]` table the tick does not consult `mw watch`.
 See `features/millhand_tick.feature`.
 
+### Waking the Millhand by timer
+
+Two `systemd --user` timers in `contrib/systemd/` wake this host's Millhand, and
+each needs the same `~/.config/mw/dispatch.env` as the dispatch timer (see
+*Running a host on a timer*) so that `mw` is found:
+
+| Timer | Runs | When |
+| --- | --- | --- |
+| `mw-millhand-tick.timer` | `mw millhand tick` (`mw-millhand-tick.service`) | at 7, 22, 37 and 52 minutes past every hour; no catch-up |
+| `mw-millhand-review.timer` | `mw millhand --wake review --reason timer` (`mw-millhand-review.service`) | 07:30 and 19:30, local time; catches up |
+
+**The tick** is the routine timer above: it costs no tokens unless the mail, the
+sweep or the watch calls for a wake. Its minutes are off the dispatch timer's
+and the health timer's, so the three do not start together. `Persistent=false`,
+as for those: a host that was asleep does not run the ticks it missed.
+
+**The review** always wakes the Millhand, on the review model, and spends that
+fuel twice a day. `Persistent=true`: a review missed while the Laptop slept runs
+once when it wakes, not once for every one missed. If a Millhand is already up,
+`mw millhand` leaves with status 5; the unit has `SuccessExitStatus=5`, since
+"already up" is a wait and not a failure. Both services have `KillMode=process`,
+so the wake they start outlives the command that started it.
+
+**The cadence is a fuel knob.** Change it with a drop-in, never by editing the
+shipped unit; a change to the copy in `contrib/systemd/` is a change for every
+host, and `scripts/check-timer-units.sh` fails on it. To wake the review once a
+day:
+
+```sh
+systemctl --user edit mw-millhand-review.timer
+```
+
+```
+[Timer]
+OnCalendar=
+OnCalendar=*-*-* 07:30
+```
+
+The empty `OnCalendar=` clears the shipped times first. The same works for the
+tick's timer.
+
+**Install** by hand, once per host; nothing in the rig does it for you and
+nothing here needs `sudo`:
+
+```sh
+mkdir -p ~/.config/systemd/user ~/.config/mw
+cp contrib/systemd/mw-millhand-tick.service contrib/systemd/mw-millhand-tick.timer \
+   contrib/systemd/mw-millhand-review.service contrib/systemd/mw-millhand-review.timer \
+   ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now mw-millhand-tick.timer mw-millhand-review.timer
+```
+
+Enable one and not the other if that is what the host wants. `systemctl --user
+list-timers` says which are armed and when each next runs.
+
+**Undo it**:
+
+```sh
+systemctl --user disable --now mw-millhand-tick.timer mw-millhand-review.timer
+```
+
+That stops any further wake at once and leaves a Millhand already up alone: it
+is a tmux window, not the unit's to kill. Remove the four files from
+`~/.config/systemd/user/` and run `systemctl --user daemon-reload` to take the
+units away altogether.
+
+**Lingering.** A user timer runs only while your user manager does, which is
+while you are logged in, unless `loginctl enable-linger <you>` has been run
+(`loginctl show-user $USER -p Linger` says which). Without it these timers do
+not fire on a host nobody is logged into. That command needs root, and this rig
+never runs it for you.
+
+Each unit's own output is in the journal: `journalctl --user -u
+mw-millhand-tick` and `-u mw-millhand-review`. `scripts/check-timer-units.sh` (in
+`make lint`) verifies the four units with `systemd-analyze` and starts nothing.
+
 ## Watching a host from one that can lose its network
 
 ```sh
