@@ -55,6 +55,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeReleaseScenario(ctx)
 	steps.InitializeSeatBootScenario(ctx)
 	steps.InitializeSeatContextScenario(ctx)
+	steps.InitializeSeatUpScenario(ctx)
 	steps.InitializeStatusScenario(ctx)
 	steps.InitializeSweepScenario(ctx)
 	steps.InitializeSyncScenario(ctx)

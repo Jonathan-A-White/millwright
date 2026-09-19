@@ -245,3 +245,64 @@ func shellSafe(word string) bool {
 	}
 	return true
 }
+
+// Harness is the adapter behind application.SeatHarness too: a seat's own
+// session, which is interactive.
+var _ application.SeatHarness = (*Harness)(nil)
+
+// SeatSession implements application.SeatHarness: the window that runs a
+// seat's own session.
+//
+// It is the opposite of Session in every way that matters. The session is
+// interactive — no `--print`, no result file, no `--permission-prompts none` —
+// because a seat's session is one a person watches, types into and is asked by;
+// it is primed with the seat's charter rather than with a story; and nothing
+// follows it, because a seat's session ends when its occupant hands off, not
+// when a story is done.
+//
+// The charter travels as a path, not as text: a charter is pages long, and a
+// command line a person can read is worth more than one that carries a
+// document through a terminal.
+func (h *Harness) SeatSession(l application.SeatLaunch) (application.WindowSpec, error) {
+	if err := l.Validate(); err != nil {
+		return application.WindowSpec{}, err
+	}
+	if l.Model != "" && !domain.KnownModel(l.Model) {
+		return application.WindowSpec{}, fmt.Errorf("starting the %s seat: %q is not a model the factory runs on", l.Seat, l.Model)
+	}
+	if l.Effort != "" && !domain.KnownEffort(l.Effort) {
+		return application.WindowSpec{}, fmt.Errorf("starting the %s seat: %q is not an effort a session can be asked for", l.Seat, l.Effort)
+	}
+	if !knownPermissionMode(h.permissionMode) {
+		return application.WindowSpec{}, fmt.Errorf("starting the %s seat: %q is not a permission mode Claude Code takes", l.Seat, h.permissionMode)
+	}
+
+	argv := []string{h.program}
+	if l.Model != "" {
+		argv = append(argv, "--model", string(l.Model))
+	}
+	if l.Effort != "" {
+		argv = append(argv, "--effort", string(l.Effort))
+	}
+	argv = append(argv,
+		"--permission-mode", h.permissionMode,
+		"--append-system-prompt-file", l.Charter,
+		"--name", l.Name,
+		l.Kickoff,
+	)
+
+	return application.WindowSpec{
+		Name: l.Name,
+		Dir:  l.Dir,
+		Env: map[string]string{
+			// Who the session is for mail: the seat itself, never defaulted and
+			// never this host's copy of it — a seat's mail is the seat's,
+			// wherever the session reading it happens to run.
+			application.SeatEnv: l.Seat,
+		},
+		// No shell reads this: the window runs the program itself, so that a
+		// kickoff holding quotes, newlines or a dollar sign reaches the session
+		// as it was written.
+		Command: argv,
+	}, nil
+}

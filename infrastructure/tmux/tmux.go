@@ -46,61 +46,90 @@ const defaultReapGrace = 5 * time.Second
 // The longest Status sleeps between looks at a pane that is dead with no status.
 const maxReapPoll = 100 * time.Millisecond
 
-// Runner starts and watches sessions on one tmux server.
-type Runner struct {
+// server is one tmux server, and how this package talks to it: which tmux
+// command to run and which server it is. A Runner and a Windows are both one
+// of these, so the two are always looking at the same tmux.
+type server struct {
 	program string
 	socket  string
-	poll    time.Duration
-	grace   time.Duration
+}
+
+// Runner starts and watches sessions on one tmux server.
+type Runner struct {
+	server
+	poll  time.Duration
+	grace time.Duration
 }
 
 // Runner satisfies the port.
 var _ application.Runner = (*Runner)(nil)
 
-// Option is a setting of a Runner, given to New.
-type Option func(*Runner)
+// settings are what a Runner or a Windows is built from. One Option sets any
+// of them, so that both are pointed at a server, and at a tmux, the same way.
+type settings struct {
+	program string
+	socket  string
+	poll    time.Duration
+	grace   time.Duration
+	session string
+}
+
+// Option is a setting of a Runner or a Windows, given to New or NewWindows.
+type Option func(*settings)
 
 // WithSocket names the tmux server to work on: tmux's -L. Empty, the default,
 // is tmux's default server — the one holding whatever a person has open on this
 // machine. Tests must set it to a name of their own and kill that server when
 // they are done.
 func WithSocket(name string) Option {
-	return func(r *Runner) { r.socket = name }
+	return func(s *settings) { s.socket = name }
 }
 
 // WithPollInterval sets how long Wait first sleeps between looks at a session.
 // It backs off from there up to a couple of seconds.
 func WithPollInterval(d time.Duration) Option {
-	return func(r *Runner) { r.poll = d }
+	return func(s *settings) { s.poll = d }
 }
 
 // WithProgram names the tmux command to run, for a host that keeps it somewhere
 // unusual — and for a test that needs a stand-in for tmux rather than the real
 // thing.
 func WithProgram(program string) Option {
-	return func(r *Runner) { r.program = program }
+	return func(s *settings) { s.program = program }
 }
 
 // WithReapGrace sets how long Status gives a pane that is dead with no exit
 // status to be reaped before it reports the status unknown.
 func WithReapGrace(d time.Duration) Option {
-	return func(r *Runner) { r.grace = d }
+	return func(s *settings) { s.grace = d }
+}
+
+// WithSession names the tmux session a Windows opens a seat's window in,
+// instead of the one mw is itself running in. See NewWindows.
+func WithSession(name string) Option {
+	return func(s *settings) { s.session = name }
+}
+
+// chosen is the settings the options add up to, over this package's defaults.
+func chosen(opts []Option) settings {
+	s := settings{program: Program, poll: defaultPollInterval, grace: defaultReapGrace}
+	for _, opt := range opts {
+		opt(&s)
+	}
+	if s.poll <= 0 {
+		s.poll = defaultPollInterval
+	}
+	if s.grace < 0 {
+		s.grace = defaultReapGrace
+	}
+	return s
 }
 
 // New returns a Runner on tmux's default server, unless an option says
 // otherwise.
 func New(opts ...Option) *Runner {
-	r := &Runner{program: Program, poll: defaultPollInterval, grace: defaultReapGrace}
-	for _, opt := range opts {
-		opt(r)
-	}
-	if r.poll <= 0 {
-		r.poll = defaultPollInterval
-	}
-	if r.grace < 0 {
-		r.grace = defaultReapGrace
-	}
-	return r
+	s := chosen(opts)
+	return &Runner{server: server{program: s.program, socket: s.socket}, poll: s.poll, grace: s.grace}
 }
 
 // Socket reports the tmux server this Runner works on, empty for the default.
@@ -297,11 +326,11 @@ func startArgs(spec application.SessionSpec) []string {
 
 // commandArgs is what tmux is run with: the server to talk to, then the
 // command.
-func (r *Runner) commandArgs(args ...string) []string {
-	if r.socket == "" {
+func (s server) commandArgs(args ...string) []string {
+	if s.socket == "" {
 		return args
 	}
-	return append([]string{"-L", r.socket}, args...)
+	return append([]string{"-L", s.socket}, args...)
 }
 
 // target names a session's current window, exactly. The leading "=" is tmux's
@@ -388,17 +417,17 @@ func parseStatus(name string, printed []byte) (application.SessionStatus, error)
 }
 
 // call runs one tmux command and returns its standard output.
-func (r *Runner) call(ctx context.Context, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, r.program, r.commandArgs(args...)...)
+func (s server) call(ctx context.Context, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, s.program, s.commandArgs(args...)...)
 	var out, errs bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errs
 
 	if err := cmd.Run(); err != nil {
 		if said := strings.TrimSpace(errs.String()); said != "" {
-			return nil, fmt.Errorf("%s %s: %w: %s", r.program, strings.Join(args, " "), err, said)
+			return nil, fmt.Errorf("%s %s: %w: %s", s.program, strings.Join(args, " "), err, said)
 		}
-		return nil, fmt.Errorf("%s %s: %w", r.program, strings.Join(args, " "), err)
+		return nil, fmt.Errorf("%s %s: %w", s.program, strings.Join(args, " "), err)
 	}
 	return out.Bytes(), nil
 }

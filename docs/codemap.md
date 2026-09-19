@@ -29,6 +29,9 @@ Every adapter carries `var _ application.<Port> = ...`.
 | `Vault` | `application/seatboot.go` | `infrastructure/vault/vault.go` | `application/seatboot_test.go` |
 | `Runner` | `application/runner.go` | `infrastructure/tmux/tmux.go` | `application/apptest/fakerunner.go` |
 | `Harness` | `application/harness.go` | `infrastructure/claude/claude.go` | `application/seatboot_test.go` |
+| `SeatFiles` | `application/seatup.go` | `infrastructure/vault/seat.go` | none: temp vaults |
+| `Windows` | `application/seatup.go` | `infrastructure/tmux/window.go` | `application/apptest/fakewindows.go` |
+| `SeatHarness` | `application/seatup.go` | `infrastructure/claude/claude.go` | none |
 | `Transcripts` | `application/seatcontext.go` | `infrastructure/claude/transcripts.go` | none: temp-dir fixtures |
 | `Worktrees` | `application/worktrees.go` | `infrastructure/rig/worktree.go` | `application/dispatch_test.go` |
 | `Landing` | `application/landing.go` | `infrastructure/rig/landing.go` | none: real git |
@@ -55,6 +58,7 @@ from `cmd/mw/` only.
 | `Sync` | `application/sync.go` | `mw sync` — `cmd/mw/sync.go` | `features/sync.feature` |
 | `Mail` | `application/mail.go` | `mw mail` — `cmd/mw/mail.go` | `features/mail.feature` |
 | `SeatContext` | `application/seatcontext.go` | `mw seat context` — `cmd/mw/seat.go` | `features/seat_context.feature` |
+| `SeatUp` | `application/seatup.go` | `mw seat up` — `cmd/mw/seat.go` | `features/seat_up.feature` |
 | `SeatBoot` | `application/seatboot.go` | none: `Dispatch`, `Next` call it | `features/seat_boot.feature` |
 
 `cmd/mw/root.go` holds the tree (one `root.AddCommand` per command);
@@ -91,6 +95,7 @@ Copy `mw sweep`.
 | `installFormula` | same file | Copies a `formulas/` formula into it. |
 | `standIn` | `infrastructure/beads/sync_test.go` | A script standing in for `bd`. |
 | `privateRunner` | `infrastructure/tmux/tmux_integration_test.go` | A tmux server on its own socket. |
+| `privateWindows` | `infrastructure/tmux/window_integration_test.go` | A tmux server and seats session of its own. |
 | `aVault` | `infrastructure/vault/vault_test.go` | A vault with a seat in it. |
 | `twoHosts` | `infrastructure/vault/git_test.go` | Two clones of one vault. |
 | `aRig` | `infrastructure/rig/worktree_test.go` | A rig with a real origin. |

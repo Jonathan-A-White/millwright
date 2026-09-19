@@ -329,3 +329,81 @@ func TestASessionWithNothingAfterItEndsAtTheRedirection(t *testing.T) {
 		t.Errorf("expected nothing chained after a session with no After, got %q", spec.Command[2])
 	}
 }
+
+// seatLaunch is a complete seat launch, with whatever a test changes applied.
+func seatLaunch(change func(*application.SeatLaunch)) application.SeatLaunch {
+	l := application.SeatLaunch{
+		Seat:    "mayor",
+		Name:    "mayor-2026-09-19-13",
+		Dir:     "/root/millwright-vault",
+		Charter: "/root/millwright-vault/seats/mayor/charter.md",
+		Model:   domain.ModelOpus,
+		Effort:  domain.EffortHigh,
+		Kickoff: "Boot by procedures.md. Newest handoff: seats/mayor/handoffs/2026-09-19-12.md",
+	}
+	if change != nil {
+		change(&l)
+	}
+	return l
+}
+
+func TestASeatSessionIsInteractiveAndPrimedFromTheCharterFile(t *testing.T) {
+	spec, err := New().SeatSession(seatLaunch(nil))
+	if err != nil {
+		t.Fatalf("assembling the seat's session: %v", err)
+	}
+	if spec.Name != "mayor-2026-09-19-13" || spec.Dir != "/root/millwright-vault" {
+		t.Errorf("expected the window to be named after the session and to run in the vault, got %+v", spec)
+	}
+	if got := spec.Env[application.SeatEnv]; got != "mayor" {
+		t.Errorf("expected %s to be the seat itself, got %q", application.SeatEnv, got)
+	}
+
+	// The command is the program and its arguments: no shell reads it, so the
+	// kickoff reaches the session however it is written.
+	if spec.Command[0] != Program {
+		t.Errorf("expected the window to run %s itself, got %q", Program, spec.Command[0])
+	}
+	if last := spec.Command[len(spec.Command)-1]; last != seatLaunch(nil).Kickoff {
+		t.Errorf("expected the kickoff to be the last argument, got %q", last)
+	}
+	line := strings.Join(spec.Command, " ")
+	for _, want := range []string{
+		"--model opus", "--effort high", "--permission-mode " + DefaultPermissionMode,
+		"--append-system-prompt-file /root/millwright-vault/seats/mayor/charter.md",
+		"--name mayor-2026-09-19-13",
+	} {
+		if !strings.Contains(line, want) {
+			t.Errorf("expected the seat's session to carry %q, got %q", want, line)
+		}
+	}
+	// Nobody is at the keyboard is exactly what a seat's session is not.
+	for _, unwanted := range []string{"--print", "--output-format", "--permission-prompts"} {
+		if strings.Contains(line, unwanted) {
+			t.Errorf("expected an interactive session to carry no %s, got %q", unwanted, line)
+		}
+	}
+}
+
+func TestASeatSessionLeavesOutWhatItWasNotGiven(t *testing.T) {
+	spec, err := New().SeatSession(seatLaunch(func(l *application.SeatLaunch) {
+		l.Model, l.Effort = "", ""
+	}))
+	if err != nil {
+		t.Fatalf("assembling the seat's session: %v", err)
+	}
+	if line := strings.Join(spec.Command, " "); strings.Contains(line, "--model") || strings.Contains(line, "--effort") {
+		t.Errorf("expected a session given no model or effort to ask for neither, got %q", line)
+	}
+}
+
+func TestASeatSessionRefusesAModelOrEffortItCannotRun(t *testing.T) {
+	for _, change := range []func(*application.SeatLaunch){
+		func(l *application.SeatLaunch) { l.Model = "banana" },
+		func(l *application.SeatLaunch) { l.Effort = "utmost" },
+	} {
+		if _, err := New().SeatSession(seatLaunch(change)); err == nil {
+			t.Errorf("expected %+v to be refused", seatLaunch(change))
+		}
+	}
+}

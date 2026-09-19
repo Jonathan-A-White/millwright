@@ -192,7 +192,7 @@ func TestWaitStillReadsTheStatusOfAPaneReapedAfterAGap(t *testing.T) {
 
 func TestStatusStopsLookingWhenTheCallerDoes(t *testing.T) {
 	runner := standInTmux(t, "1||")
-	WithReapGrace(time.Minute)(runner)
+	runner.grace = time.Minute
 	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
 
