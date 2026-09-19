@@ -7,7 +7,7 @@
 # Three checks:
 #
 # 1. VERIFY. Where systemd-analyze exists, `systemd-analyze --user verify` must
-#    accept every unit file (the dispatch pair and the mail-notify pair). Where
+#    accept every unit file (the dispatch, mail-notify and health pairs). Where
 #    it does not exist (macOS, a container), the check says so and skips this
 #    one; it does not pass silently.
 #
@@ -16,9 +16,12 @@
 #
 # 3. THE DIRECTIVES THE README PROMISES. The service is a oneshot that treats
 #    exit 5 as success and leaves tmux sessions alive when it exits, and the
-#    timer does not catch up. Each is one line, so grep can hold them. The
-#    mail-notify pair the same: a oneshot that runs mw-mail-notify, a timer that
-#    does not catch up. And contrib/mail-notify is executable and parses.
+#    timer does not catch up. Each is one line, so grep can hold them. Each
+#    pair has its own rules below and none borrows another's: the mail-notify
+#    pair is a oneshot that runs mw-mail-notify on a timer that does not catch
+#    up, and the health pair a oneshot that runs mw-health every 15 minutes on
+#    a timer that does not catch up. And the scripts those two run
+#    (contrib/mail-notify, contrib/health/mw-health.sh) are executable and parse.
 
 set -eu
 
@@ -29,6 +32,9 @@ TIMER=$DIR/mw-dispatch.timer
 MAIL_SERVICE=$DIR/mw-mail-notify.service
 MAIL_TIMER=$DIR/mw-mail-notify.timer
 MAIL_SCRIPT=contrib/mail-notify
+HEALTH_SERVICE=$DIR/mw-health.service
+HEALTH_TIMER=$DIR/mw-health.timer
+HEALTH_SCRIPT=contrib/health/mw-health.sh
 
 cd "$REPO_ROOT"
 
@@ -42,11 +48,14 @@ fail() {
 [ -f "$MAIL_SERVICE" ] || fail "$MAIL_SERVICE does not exist"
 [ -f "$MAIL_TIMER" ] || fail "$MAIL_TIMER does not exist"
 [ -f "$MAIL_SCRIPT" ] || fail "$MAIL_SCRIPT does not exist"
+[ -f "$HEALTH_SERVICE" ] || fail "$HEALTH_SERVICE does not exist"
+[ -f "$HEALTH_TIMER" ] || fail "$HEALTH_TIMER does not exist"
+[ -f "$HEALTH_SCRIPT" ] || fail "$HEALTH_SCRIPT does not exist"
 
 # --- 1. systemd accepts the files ----------------------------------------
 if command -v systemd-analyze >/dev/null 2>&1; then
 	# verify exits 0 on some faults and only prints them, so any output at all fails.
-	out=$(systemd-analyze --user verify "$SERVICE" "$TIMER" "$MAIL_SERVICE" "$MAIL_TIMER" 2>&1) || {
+	out=$(systemd-analyze --user verify "$SERVICE" "$TIMER" "$MAIL_SERVICE" "$MAIL_TIMER" "$HEALTH_SERVICE" "$HEALTH_TIMER" 2>&1) || {
 		echo "$out" >&2
 		fail "systemd-analyze rejected the unit files"
 	}
@@ -68,19 +77,30 @@ fi
 # --- 3. the directives the README promises -------------------------------
 need() {
 	# $1 is the file, $2 the exact line it must carry.
-	grep -qx -- "$2" "$1" || fail "$1 has no line \`$2\`"
+	grep -qxF -- "$2" "$1" || fail "$1 has no line \`$2\`"
 }
+# The dispatch pair.
 need "$SERVICE" "Type=oneshot"
 need "$SERVICE" "SuccessExitStatus=5"
 need "$SERVICE" "KillMode=process"
 need "$SERVICE" "ExecStart=/usr/bin/env mw dispatch"
 need "$TIMER" "Persistent=false"
+need "$TIMER" "OnCalendar=*:0/5"
+# The mail-notify pair.
 need "$MAIL_SERVICE" "Type=oneshot"
 need "$MAIL_SERVICE" "ExecStart=/usr/bin/env mw-mail-notify"
 need "$MAIL_TIMER" "Persistent=false"
+need "$MAIL_TIMER" "OnCalendar=minutely"
+# The health pair.
+need "$HEALTH_SERVICE" "Type=oneshot"
+need "$HEALTH_SERVICE" "ExecStart=/usr/bin/env mw-health"
+need "$HEALTH_TIMER" "Persistent=false"
+need "$HEALTH_TIMER" "OnCalendar=*:0/15"
 
-# The script the mail-notify service runs must be there to run, and must parse.
-[ -x "$MAIL_SCRIPT" ] || fail "$MAIL_SCRIPT is not executable"
-sh -n "$MAIL_SCRIPT" || fail "$MAIL_SCRIPT does not parse"
+# The scripts the services run must be there to run, and must parse.
+for script in "$MAIL_SCRIPT" "$HEALTH_SCRIPT"; do
+	[ -x "$script" ] || fail "$script is not executable"
+	sh -n "$script" || fail "$script does not parse"
+done
 
-echo "OK: $DIR: $verified, names no host's directory, and carries the directives the README describes; $MAIL_SCRIPT is executable and parses"
+echo "OK: $DIR: $verified, names no host's directory, and carries the directives the README describes; $MAIL_SCRIPT and $HEALTH_SCRIPT are executable and parse"
