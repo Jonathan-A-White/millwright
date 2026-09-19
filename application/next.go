@@ -144,6 +144,12 @@ type NextReport struct {
 	// Pushes is how many times the push was attempted: more than one means the
 	// other host landed something while this story was being landed.
 	Pushes int
+	// Rig is what became of this host's own checkout of the rig once the story
+	// was landed: fast-forwarded onto the landed commit, or left as it was with
+	// the reason. RigDir is where that checkout is. A landing made by an earlier
+	// run says nothing about it.
+	Rig    Advanced
+	RigDir string
 	// Why is the reason nothing landed, empty when something did. Refused says
 	// it is the branch itself the checks turned away — no commits, a signed
 	// commit, open formula steps, failing tests — rather than something that
@@ -321,6 +327,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		return n.stop(ctx, c, report, firstLine(landErr.Error()), n.keepLandingError(ctx, c, report, landErr))
 	}
 	report.Landed, report.How = true, landed
+	n.advanceRig(ctx, c, report)
 
 	// The work is on the target branch at the remote from here: nothing below
 	// is undone, and nothing below stops the story being closed.
@@ -334,6 +341,20 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be recorded as %s=%s: %v", c.id, RunState, RunLanded, err))
 	}
 	return n.finish(ctx, c, report, outcome, false)
+}
+
+// advanceRig brings this host's own checkout of the rig up to the commit just
+// pushed, which the landing — made in a worktree of its own — never touched: a
+// rig left behind is a rig whose rebuilt binary is the old one. A checkout that
+// is not on the target branch or not clean is left alone and the report says so.
+// It changes nothing about the landing, so a git that fails is only a note.
+func (n Next) advanceRig(ctx context.Context, c *closeOut, report *NextReport) {
+	advanced, err := n.Landing.Advance(ctx, c.rigDir, c.target, report.How.Commit)
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the rig checkout %s could not be brought up to %s: %v", c.rigDir, c.target, err))
+		return
+	}
+	report.Rig, report.RigDir = advanced, c.rigDir
 }
 
 // keepLandingError writes the whole error of a failed landing beside the run
@@ -1017,6 +1038,12 @@ func (r NextReport) String() string {
 		fmt.Fprintf(&b, "  landed  %s on %s (%d commits, %d push(es))\n", r.How.LandedAs(r.Target), r.Target, r.Commits, r.Pushes)
 	default:
 		fmt.Fprintf(&b, "  STOPPED %s\n", r.Why)
+	}
+	switch {
+	case r.Rig.Moved:
+		fmt.Fprintf(&b, "  rig     %s fast-forwarded to %s on %s\n", r.RigDir, shortCommit(r.How.Commit), r.Target)
+	case r.Rig.Left != "":
+		fmt.Fprintf(&b, "  rig     %s left as it was, not brought up to %s: %s\n", r.RigDir, r.Target, r.Rig.Left)
 	}
 	if len(r.Uncommitted) > 0 {
 		fmt.Fprintf(&b, "  left    uncommitted work, %d path(s), in the worktree:\n", len(r.Uncommitted))

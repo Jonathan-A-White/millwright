@@ -496,3 +496,28 @@ Feature: Closing out a finished story and carrying on
     Then the story "mw-gq6.1" is closed
     And exactly one mail was sent, to "mayor" from "mw@vps"
     And that mail's subject is "Landed: The story mw-gq6.1"
+
+  Scenario: A landing brings this host's own checkout of the rig up to the main it pushed
+    Given the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the rig checkout is at the commit that landed on "main"
+    And the report says the rig checkout was fast-forwarded
+
+  Scenario: A rig checkout with uncommitted work is left as it was, and the report says so
+    Given the rig checkout has an uncommitted file "notes-to-self.md"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the story "mw-gq6.1" is closed
+    And the rig checkout is left where it was, with "notes-to-self.md" untouched
+    And the report says the rig checkout was left, quoting: notes-to-self.md
+
+  Scenario: A rig checkout on another branch is left as it was, and the report says so
+    Given the rig checkout is on a branch of its own, "wip"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the story "mw-gq6.1" is closed
+    And the rig checkout is left where it was, on "wip"
+    And the report says the rig checkout was left, quoting: it is on wip, not main
