@@ -246,13 +246,13 @@ func (p Path) Validate() error {
 	switch {
 	case p.Model == "":
 		return ErrModelRequired
-	case !knownModel(p.Model):
+	case !KnownModel(p.Model):
 		return UnknownValueError{Field: "model", Value: string(p.Model)}
 	}
 	switch {
 	case p.Effort == "":
 		return ErrEffortRequired
-	case !knownEffort(p.Effort):
+	case !KnownEffort(p.Effort):
 		return UnknownValueError{Field: "effort", Value: string(p.Effort)}
 	}
 	return nil
@@ -277,7 +277,8 @@ func knownHarness(h Harness) bool {
 	return false
 }
 
-func knownModel(m Model) bool {
+// KnownModel reports whether a model is one the factory runs on.
+func KnownModel(m Model) bool {
 	switch m {
 	case ModelFable, ModelOpus, ModelSonnet, ModelHaiku:
 		return true
@@ -285,7 +286,8 @@ func knownModel(m Model) bool {
 	return false
 }
 
-func knownEffort(e Effort) bool {
+// KnownEffort reports whether an effort is one a session can be asked for.
+func KnownEffort(e Effort) bool {
 	switch e {
 	case EffortLow, EffortMedium, EffortHigh, EffortXHigh, EffortMax:
 		return true
