@@ -189,8 +189,8 @@ func Blocked(err error) (*VaultBlocked, bool) {
 // ExitStatus is the status mw leaves with when a command reports err: beads'
 // own exit code when beads stopped a sync, VaultBlockedExit when nothing was
 // wrong but somebody's uncommitted vault work, MillhandUpExit when the Millhand
-// was not started because one is up, 1 for anything else, and 0 for nothing
-// wrong at all. cmd/mw leaves with it.
+// was not started because one is up, WatchWakeExit when mw watch calls for a
+// wake, 1 for anything else, and 0 for nothing wrong at all. cmd/mw leaves with it.
 func ExitStatus(err error) int {
 	if err == nil {
 		return 0
@@ -203,6 +203,9 @@ func ExitStatus(err error) int {
 	}
 	if _, up := MillhandIsUp(err); up {
 		return MillhandUpExit
+	}
+	if _, wake := WatchWakes(err); wake {
+		return WatchWakeExit
 	}
 	return 1
 }
