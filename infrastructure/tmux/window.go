@@ -33,7 +33,8 @@ const psProgram = "ps"
 //
 // Unlike a Runner's session, the window is not the factory's to watch: it
 // holds a live seat that a person attaches to, types into and reads. Nothing
-// here kills a window or sends anything to one.
+// here sends anything to a window, and the one thing that closes one is
+// reap.go, for a window a reaper was armed on and no other.
 type Windows struct {
 	server
 	// session is the tmux session windows are opened in, empty for the one mw

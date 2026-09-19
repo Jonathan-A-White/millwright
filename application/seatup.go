@@ -190,6 +190,12 @@ type SeatHarness interface {
 // handoff to boot from, or the seat is already held: its acting file names a
 // window that is still open and it has written no handoff since that window
 // was opened.
+//
+// Given a Terminal and an Armer it also arms the reaper that closes what is
+// finished with (SeatReap): on the window it was run from, when the seat's
+// acting file names that window — the outgoing session's own, closed once the
+// successor holds the seat — and, with ReapWhenIdle, on the window it opens,
+// for a session that will hand over to nobody.
 type SeatUp struct {
 	Seats   SeatFiles
 	Windows Windows
@@ -208,6 +214,15 @@ type SeatUp struct {
 	// Reason is why the session is being started, told to it after the
 	// kickoff. Empty says nothing.
 	Reason string
+
+	// Terminal and Armer are how a reaper is armed. With neither, nothing is
+	// armed; with ReapWhenIdle set, both are needed and starting is refused
+	// without them.
+	Terminal ReapTerminal
+	Armer    ReapArmer
+
+	// ReapWhenIdle arms a reaper in idle mode on the window that is opened.
+	ReapWhenIdle bool
 
 	// Now is the clock the window's date is taken from; nil is time.Now.
 	Now func() time.Time
@@ -241,6 +256,8 @@ func (s SeatUp) Run(ctx context.Context) (SeatUpReport, error) {
 		return SeatUpReport{}, fmt.Errorf("which seat is to be started?")
 	case !plainSeatName(s.Seat):
 		return SeatUpReport{}, fmt.Errorf("%q is not a seat: a seat is named in letters, digits, dashes and underscores", s.Seat)
+	case s.ReapWhenIdle && (s.Terminal == nil || s.Armer == nil):
+		return SeatUpReport{}, fmt.Errorf("closing the window when it is idle needs a terminal to look at and a reaper to start")
 	}
 
 	start, err := s.Seats.SeatStart(ctx, s.Seat, s.Host)
@@ -286,7 +303,54 @@ func (s SeatUp) Run(ctx context.Context) (SeatUpReport, error) {
 	if s.Out != nil {
 		fmt.Fprintln(s.Out, report)
 	}
-	return report, nil
+	return report, s.arm(ctx, start.Acting, spec.Name)
+}
+
+// arm starts the reapers this seat up is to start, after the session is
+// running. The session is up whatever happens here, so a reaper that cannot be
+// started is said and not undone: for the one asked for by ReapWhenIdle it is
+// the command's failure; for the one a person did not ask for by name, just a
+// line saying the window will not close itself.
+func (s SeatUp) arm(ctx context.Context, acting, opened string) error {
+	if s.Terminal == nil || s.Armer == nil {
+		return nil
+	}
+
+	switch here, in, err := s.Terminal.ThisWindow(ctx); {
+	case err != nil:
+		s.say("could not tell which window this is, so it will not close itself: %v", err)
+	case in && here.Name != "" && strings.Contains(acting, here.Name):
+		if err := s.Armer.Arm(ctx, ReapArming{Seat: s.Seat, Window: here.ID, Mode: ReapSuccessor}); err != nil {
+			s.say("this window (%s) was not armed to close: %v", here.ID, err)
+		} else {
+			s.say("this window (%s) will close itself once the successor has the seat; see %s", here.ID, ReapLogFileName(s.Seat))
+		}
+	}
+
+	if !s.ReapWhenIdle {
+		return nil
+	}
+	windows, err := s.Terminal.OpenWindows(ctx)
+	if err != nil {
+		return fmt.Errorf("the reaper could not be armed on the window %s: %w", opened, err)
+	}
+	for _, window := range windows {
+		if window.Name != opened {
+			continue
+		}
+		if err := s.Armer.Arm(ctx, ReapArming{Seat: s.Seat, Window: window.ID, Mode: ReapWhenIdle}); err != nil {
+			return fmt.Errorf("the reaper could not be armed on the window %s: %w", opened, err)
+		}
+		s.say("the new window (%s) will close itself once it is idle after a handoff; see %s", window.ID, ReapLogFileName(s.Seat))
+		return nil
+	}
+	return fmt.Errorf("the reaper could not be armed: the window %s is not among those open", opened)
+}
+
+func (s SeatUp) say(format string, args ...any) {
+	if s.Out != nil {
+		fmt.Fprintf(s.Out, format+"\n", args...)
+	}
 }
 
 // windowName is what the new session's window is called: the seat, today's

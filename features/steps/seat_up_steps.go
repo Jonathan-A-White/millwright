@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -39,6 +40,7 @@ var seatUpFirstHandoff = time.Date(2026, 9, 19, 6, 0, 0, 0, time.UTC)
 type seatUpContext struct {
 	dir     string // the vault
 	windows *apptest.FakeWindows
+	armer   *apptest.FakeReapArmer
 	today   time.Time
 	// written is how many handoffs have been written, so that each is newer
 	// than the one before it.
@@ -48,6 +50,8 @@ type seatUpContext struct {
 
 	report application.SeatUpReport
 	err    error
+	// said is what seat up printed.
+	said strings.Builder
 }
 
 // InitializeSeatUpScenario registers the steps of features/seat_up.feature.
@@ -55,7 +59,7 @@ func InitializeSeatUpScenario(ctx *godog.ScenarioContext) {
 	c := &seatUpContext{}
 
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
-		*c = seatUpContext{windows: apptest.NewFakeWindows(), today: time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)}
+		*c = seatUpContext{windows: apptest.NewFakeWindows(), armer: &apptest.FakeReapArmer{}, today: time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)}
 		return ctx, nil
 	})
 	ctx.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
@@ -79,7 +83,11 @@ func InitializeSeatUpScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the "([^"]*)" seat's acting file names the window "([^"]*)"$`, c.theActingFileNamesTheWindow)
 	ctx.Given(`^the newest handoff was written at "([^"]*)"$`, c.theNewestHandoffWasWrittenAt)
 
+	ctx.Given(`^the seat up was run from the window "([^"]*)"$`, c.theSeatUpWasRunFromTheWindow)
+	ctx.Given(`^the reaper cannot be started$`, c.theReaperCannotBeStarted)
+
 	ctx.When(`^mw seat up starts the "([^"]*)" seat$`, c.mwSeatUpStartsTheSeat)
+	ctx.When(`^mw seat up starts the "([^"]*)" seat and reaps its window when idle$`, c.mwSeatUpStartsTheSeatAndReaps)
 	ctx.When(`^mw seat up starts the "([^"]*)" seat on "([^"]*)" at "([^"]*)" for the reason "([^"]*)"$`, c.mwSeatUpStartsTheSeatAt)
 
 	ctx.Then(`^seat up succeeds$`, c.seatUpSucceeds)
@@ -94,6 +102,12 @@ func InitializeSeatUpScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the window's environment holds:$`, c.theWindowsEnvironmentHolds)
 	ctx.Then(`^the kickoff prompt of the window holds:$`, c.theKickoffOfTheWindowHolds)
 	ctx.Then(`^the kickoff prompt of the window holds none of:$`, c.theKickoffOfTheWindowHoldsNoneOf)
+	ctx.Then(`^a reaper was armed on the window "([^"]*)" in (successor|when-idle) mode for the "([^"]*)" seat$`, c.aReaperWasArmed)
+	ctx.Then(`^no reaper was armed$`, c.noReaperWasArmed)
+	ctx.Then(`^the seat's session was started all the same$`, c.theSessionWasStartedAllTheSame)
+	ctx.Then(`^seat up says the window will close itself once its successor has the seat$`, c.seatUpSays("will close itself once the successor has the seat"))
+	ctx.Then(`^seat up says the new window will close itself once it is idle after a handoff$`, c.seatUpSays("will close itself once it is idle after a handoff"))
+	ctx.Then(`^seat up fails saying the reaper could not be armed$`, c.seatUpFailsForTheReaper)
 	ctx.Then(`^seat up is refused saying the seat has no charter$`, c.refusedForNoCharter)
 	ctx.Then(`^seat up is refused saying the seat has no handoff$`, c.refusedForNoHandoff)
 	ctx.Then(`^seat up is refused saying the seat is already acting in "([^"]*)"$`, c.refusedForBeingHeld)
@@ -228,17 +242,37 @@ func (c *seatUpContext) seatFiles() application.SeatFiles {
 }
 
 func (c *seatUpContext) mwSeatUpStartsTheSeat(seat string) error {
-	return c.startTheSeat(seat, "", "", "")
+	return c.startTheSeat(seat, "", "", "", false)
 }
 
 func (c *seatUpContext) mwSeatUpStartsTheSeatAt(seat, model, effort, reason string) error {
-	return c.startTheSeat(seat, model, effort, reason)
+	return c.startTheSeat(seat, model, effort, reason, false)
+}
+
+func (c *seatUpContext) mwSeatUpStartsTheSeatAndReaps(seat string) error {
+	return c.startTheSeat(seat, "", "", "", true)
+}
+
+// theSeatUpWasRunFromTheWindow puts the process under test in a window a
+// scenario has opened, as tmux does by naming its pane in the environment.
+func (c *seatUpContext) theSeatUpWasRunFromTheWindow(name string) error {
+	id, open := c.windows.IDOf(name)
+	if !open {
+		return fmt.Errorf("the window %s is not open to run seat up from", name)
+	}
+	c.windows.RunsIn(id)
+	return nil
+}
+
+func (c *seatUpContext) theReaperCannotBeStarted() error {
+	c.armer.Err = errors.New("no such program")
+	return nil
 }
 
 // startTheSeat runs the use case with the real vault and the real Claude Code
 // harness, and only the terminal faked: what a window would be opened with is
 // exactly what mw would run.
-func (c *seatUpContext) startTheSeat(seat, model, effort, reason string) error {
+func (c *seatUpContext) startTheSeat(seat, model, effort, reason string, reapWhenIdle bool) error {
 	c.report, c.err = application.SeatUp{
 		Seats:   c.seatFiles(),
 		Windows: c.windows,
@@ -249,6 +283,11 @@ func (c *seatUpContext) startTheSeat(seat, model, effort, reason string) error {
 		Effort:  domain.Effort(effort),
 		Reason:  reason,
 		Now:     func() time.Time { return c.today },
+		Out:     &c.said,
+
+		Terminal:     c.windows,
+		Armer:        c.armer,
+		ReapWhenIdle: reapWhenIdle,
 	}.Run(context.Background())
 	return nil
 }
@@ -458,6 +497,52 @@ func (c *seatUpContext) refusedForBeingHeld(window string) error {
 	}
 	if !strings.Contains(said, window) {
 		return fmt.Errorf("expected the refusal to name the window %s, got %q", window, said)
+	}
+	return nil
+}
+
+func (c *seatUpContext) aReaperWasArmed(window, mode, seat string) error {
+	id, open := c.windows.IDOf(window)
+	if !open {
+		return fmt.Errorf("the window %s is not open, so no reaper can be armed on it", window)
+	}
+	want := application.ReapArming{Seat: seat, Window: id, Mode: application.ReapMode(mode)}
+	for _, armed := range c.armer.Armed {
+		if armed == want {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected a reaper armed as %+v, got %+v", want, c.armer.Armed)
+}
+
+func (c *seatUpContext) noReaperWasArmed() error {
+	if len(c.armer.Armed) != 0 {
+		return fmt.Errorf("expected no reaper to be armed, got %+v", c.armer.Armed)
+	}
+	return nil
+}
+
+// seatUpSays is the step that seat up printed some words, after the line that
+// says what it started.
+func (c *seatUpContext) seatUpSays(words string) func() error {
+	return func() error {
+		if !strings.Contains(c.said.String(), words) {
+			return fmt.Errorf("expected seat up to say %q, it said %q", words, c.said.String())
+		}
+		return nil
+	}
+}
+
+func (c *seatUpContext) seatUpFailsForTheReaper() error {
+	if c.err == nil || !strings.Contains(c.err.Error(), "armed") {
+		return fmt.Errorf("expected seat up to fail saying the reaper could not be armed, got %v", c.err)
+	}
+	return nil
+}
+
+func (c *seatUpContext) theSessionWasStartedAllTheSame() error {
+	if len(c.windows.Opened) != 1 {
+		return fmt.Errorf("expected one window to have been opened, %d were", len(c.windows.Opened))
 	}
 	return nil
 }
