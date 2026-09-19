@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -18,6 +19,11 @@ const (
 	StatusInProgress = "in_progress"
 	StatusClosed     = "closed"
 )
+
+// DefaultPriority is the priority a story has when nobody set one, and what a
+// tracker that reports none is taken to mean. Priorities run from 0, the most
+// urgent, to 4, as beads has them.
+const DefaultPriority = 2
 
 // StoryDetail is everything the work tracker knows about one story: the story
 // itself with the Path overrides it carries, and the default Path of the epic
@@ -39,6 +45,12 @@ type StoryDetail struct {
 	Needs []string
 	// EstimateMinutes is the Mayor's estimate in minutes; zero when unset.
 	EstimateMinutes int
+	// Priority is how urgent the story is, 0 (most urgent) to 4. It is what a
+	// dispatch starts stories by, so a tracker that does not say leaves it at
+	// DefaultPriority rather than at zero, which would be the most urgent of all.
+	Priority int
+	// Created is when the story was filed; zero when the tracker did not say.
+	Created time.Time
 	// Molecule is the formula poured for this story, empty until it has been
 	// poured. It is filled in by whoever pours it, not by reading the story.
 	Molecule Molecule

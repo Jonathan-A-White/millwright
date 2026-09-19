@@ -13,7 +13,9 @@ package beads
 
 import (
 	"testing"
+	"time"
 
+	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
 )
 
@@ -220,6 +222,28 @@ func TestDecodeBeadsReadsAStoryAndItsEmbeddedEpic(t *testing.T) {
 	}
 	if defaults != want {
 		t.Fatalf("expected the epic's default path %+v, got %+v", want, defaults)
+	}
+}
+
+func TestAStoryCarriesItsPriorityAndWhenItWasFiled(t *testing.T) {
+	got, err := decodeBeads([]byte(`[
+  {"id": "t-a", "title": "Urgent", "status": "open", "priority": 0, "created_at": "2026-09-19T07:06:14Z"},
+  {"id": "t-b", "title": "Unranked", "status": "open", "created_at": "not a time"}
+]`))
+	if err != nil {
+		t.Fatalf("decoding two beads: %v", err)
+	}
+
+	urgent := got[0].detail(domain.Path{})
+	if urgent.Priority != 0 || !urgent.Created.Equal(time.Date(2026, 9, 19, 7, 6, 14, 0, time.UTC)) {
+		t.Errorf("expected priority 0 filed at 2026-09-19T07:06:14Z, got %d and %v", urgent.Priority, urgent.Created)
+	}
+
+	// Priority 0 is the most urgent there is, so a bead that says nothing about
+	// it must not be read as one, and a time that is not a time is no time.
+	unranked := got[1].detail(domain.Path{})
+	if unranked.Priority != application.DefaultPriority || !unranked.Created.IsZero() {
+		t.Errorf("expected the default priority and no creation time, got %d and %v", unranked.Priority, unranked.Created)
 	}
 }
 

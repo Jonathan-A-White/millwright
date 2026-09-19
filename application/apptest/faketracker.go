@@ -108,10 +108,29 @@ func (f *FakeTracker) AddStory(epicID string, story domain.Story) {
 			Defaults: f.defaults[epicID],
 			EpicID:   epicID,
 			Status:   StatusOpen,
+			Priority: application.DefaultPriority,
 		},
 		metadata: map[string]string{},
 		touched:  time.Now(),
 	}
+}
+
+// SetPriority sets the priority of a story the fake holds, 0 being the most
+// urgent. A story added without one has application.DefaultPriority.
+func (f *FakeTracker) SetPriority(id string, priority int) error {
+	return f.write(id, func(s *fakeStory) error {
+		s.detail.Priority = priority
+		return nil
+	})
+}
+
+// SetCreated sets when a story the fake holds was filed. A story added without
+// one has no creation time, which a dispatch reads as no age to order it by.
+func (f *FakeTracker) SetCreated(id string, created time.Time) error {
+	return f.write(id, func(s *fakeStory) error {
+		s.detail.Created = created
+		return nil
+	})
 }
 
 // CreateEpic implements application.WorkTracker. The fake mints ids the way
@@ -172,6 +191,7 @@ func (f *FakeTracker) CreateStory(_ context.Context, story application.NewStory)
 			Defaults:        f.defaults[story.EpicID],
 			EpicID:          story.EpicID,
 			Status:          StatusDeferred,
+			Priority:        priorityOr(story.Priority),
 			Description:     story.Description,
 			Acceptance:      story.Acceptance,
 			EstimateMinutes: story.EstimateMinutes,
@@ -804,3 +824,12 @@ var (
 	_ application.TrackerSync  = (*FakeTracker)(nil)
 	_ application.TrackerNotes = (*FakeTracker)(nil)
 )
+
+// priorityOr is a priority a story was filed with, or the default when it was
+// filed with none: zero means "unset" in a NewStory, as it does for the tracker.
+func priorityOr(priority int) int {
+	if priority == 0 {
+		return application.DefaultPriority
+	}
+	return priority
+}
