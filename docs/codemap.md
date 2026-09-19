@@ -27,6 +27,7 @@ Every adapter carries `var _ application.<Port> = ...`.
 | `TrackerSync` | `application/sync.go` | `infrastructure/beads/sync.go` (same `Gateway`) | `application/apptest/faketracker.go` |
 | `TrackerNotes` | `application/status.go` | same, read half | same |
 | `VaultFiles` | `application/sync.go` | `infrastructure/vault/git.go` | `application/apptest/fakevaultfiles.go` |
+| `Mailbox` | `application/mail.go` | `infrastructure/beads/mail.go` (same `Gateway`) | `application/apptest/fakemailbox.go` |
 | `Vault` | `application/seatboot.go` | `infrastructure/vault/vault.go` | `application/seatboot_test.go` |
 | `Runner` | `application/runner.go` | `infrastructure/tmux/tmux.go` | `application/apptest/fakerunner.go` |
 | `Harness` | `application/harness.go` | `infrastructure/claude/claude.go` | `application/seatboot_test.go` |
@@ -55,6 +56,7 @@ from `cmd/mw/` only.
 | `Brief` | `application/brief.go` | `mw brief` — `cmd/mw/brief.go` | `features/brief.feature` |
 | `Sweep` | `application/sweep.go` | `mw sweep` — `cmd/mw/sweep.go` | `features/sweep.feature` |
 | `Sync` | `application/sync.go` | `mw sync` — `cmd/mw/sync.go` | `features/sync.feature` |
+| `Mail` | `application/mail.go` | `mw mail` — `cmd/mw/mail.go` | `features/mail.feature` |
 | `SeatContext` | `application/seatcontext.go` | `mw seat context` — `cmd/mw/seat.go` | `features/seat_context.feature` |
 | `SeatBoot` | `application/seatboot.go` | none — `Dispatch` and `Next` call it | `features/seat_boot.feature` |
 
@@ -116,8 +118,7 @@ make test       # go test -tags beads_integration ./... , features included
 make lint       # go vet -tags beads_integration ./... , then scripts/check-*.sh
 ```
 
-One `go` command at a time on the VPS (1 vCPU): the Makefile pins
-`GOFLAGS=-p=1` and `GOMAXPROCS=1`.
+One `go` command at a time on the VPS (1 vCPU); the Makefile pins the flags.
 
 - One package: `go test ./application/...` (`-run TestName` for one). A plain
   `go test` skips the real-`bd` cases of `infrastructure/beads` (most of the

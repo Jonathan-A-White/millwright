@@ -530,6 +530,31 @@ user manager up while no terminal is open was not tested: the timer fires only
 while WSL itself is running. `scripts/check-timer-units.sh` (in `make lint`)
 verifies the two unit files with `systemd-analyze` and starts nothing.
 
+## Sending and reading mail between seats
+
+```sh
+MW_SEAT=builder@laptop bin/mw mail send mayor -s "Ready for review" -m "The branch is up."
+MW_SEAT=mayor bin/mw mail inbox
+MW_SEAT=mayor bin/mw mail read mw-gq6.70
+bin/mw mail inbox --as governor
+```
+
+Mail is beads: a message is a bead of type `mail` (not beads' own `message`
+type, which is ephemeral and never syncs), assigned to its recipient, its
+subject the title, its body the description, `from` and `to` in its metadata.
+It travels between hosts as the rest of the vault does, on `mw sync`. This is
+the shape the stand-in `bin/mw-mail` in the vault writes, so mail already sent
+stays readable. The vault must declare the type (`bd config set types.custom
+mail`).
+
+`send` is signed by `$MW_SEAT` (seat or seat@host, as a session started by
+`mw dispatch` carries it). With `$MW_SEAT` unset it refuses, naming it, and
+writes nothing: it never signs as the Mayor or as anyone else. `inbox` lists the
+unread mail of `$MW_SEAT`, or of the seat `--as` names, oldest first; `read`
+prints a message's from, to, date, subject and body and closes it, which takes
+it out of the inbox. `read` refuses a bead that is not mail. Replying is not
+here yet. See `features/mail.feature`.
+
 ## Telling the Mayor's window when mail arrives
 
 A Mayor's own mail watcher dies with its session, so a report from the other
