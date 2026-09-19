@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -58,7 +59,7 @@ func TestSessionIsAShellLineThatKeepsTheResult(t *testing.T) {
 		"--permission-mode auto",
 		"--permission-prompts none",
 		"--append-system-prompt-file /root/millwright-vault/runs/mw-gq6.6/boot.md",
-		"--settings '" + NoAttribution + "'",
+		"--settings '" + SessionSettings + "'",
 		"--name mw-gq6.6",
 		"'You are booted into the builder seat.'",
 		"> /root/millwright-vault/runs/mw-gq6.6/result.json",
@@ -90,7 +91,7 @@ func TestTheSessionSignsNothing(t *testing.T) {
 			SessionURL *bool   `json:"sessionUrl"`
 		} `json:"attribution"`
 	}
-	if err := json.Unmarshal([]byte(NoAttribution), &settings); err != nil {
+	if err := json.Unmarshal([]byte(SessionSettings), &settings); err != nil {
 		t.Fatalf("the settings the session is given are not JSON: %v", err)
 	}
 	switch {
@@ -110,7 +111,7 @@ func TestTheSessionSignsNothing(t *testing.T) {
 
 	// The setting arrives as one word after --settings, quoted so that the
 	// shell hands Claude Code the JSON whole.
-	if want := "--settings '" + NoAttribution + "'"; !strings.Contains(spec.Command[2], want) {
+	if want := "--settings '" + SessionSettings + "'"; !strings.Contains(spec.Command[2], want) {
 		t.Errorf("expected the line to carry %q, got %q", want, spec.Command[2])
 	}
 
@@ -122,6 +123,46 @@ func TestTheSessionSignsNothing(t *testing.T) {
 	}
 	if len(left) != 0 {
 		t.Errorf("expected the adapter to leave nothing in the worktree, got %v", left)
+	}
+}
+
+// TestTheSessionMayRunBd pins the other half of the same settings document: a
+// session tracks its own work in beads, and in `auto` mode the permission
+// classifier has refused a `bd close` as a write to an external system, at
+// random and on both hosts. With `--permission-prompts none` such a refusal is
+// final. An allow rule for the bd program resolves the call before the
+// classifier is asked. It is the whole program rather than a list of
+// subcommands, by the Governor's decision (mw-gq6.43), and it rides in the same
+// one JSON document as the attribution keys, because `--settings` takes one.
+func TestTheSessionMayRunBd(t *testing.T) {
+	var settings struct {
+		Attribution map[string]any `json:"attribution"`
+		Permissions struct {
+			Allow []string `json:"allow"`
+		} `json:"permissions"`
+	}
+	if err := json.Unmarshal([]byte(SessionSettings), &settings); err != nil {
+		t.Fatalf("the settings the session is given are not JSON: %v", err)
+	}
+	if len(settings.Attribution) == 0 {
+		t.Error("expected one document holding both halves, got no attribution in it")
+	}
+	if !slices.Contains(settings.Permissions.Allow, BeadsAllowRule) {
+		t.Errorf("expected permissions.allow to hold %q, got %v", BeadsAllowRule, settings.Permissions.Allow)
+	}
+
+	// The rule is the program and a trailing wildcard: every bd command, not a
+	// list of subcommands. The space before the `*` is part of the rule.
+	if BeadsAllowRule != "Bash(bd *)" {
+		t.Errorf("expected the rule to allow every bd command, got %q", BeadsAllowRule)
+	}
+
+	spec, err := New().Session(launch(nil))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	if !strings.Contains(spec.Command[2], BeadsAllowRule) {
+		t.Errorf("expected the line to carry %q, got %q", BeadsAllowRule, spec.Command[2])
 	}
 }
 
@@ -213,7 +254,7 @@ func TestTheShellReadsBackTheArgumentsItWasGiven(t *testing.T) {
 		"[--append-system-prompt-file]\n[" + filepath.Join(dir, "boot.md") + "]\n",
 		// The settings JSON must reach Claude Code as one argument, braces,
 		// quotes and all.
-		"[--settings]\n[" + NoAttribution + "]\n",
+		"[--settings]\n[" + SessionSettings + "]\n",
 		"[" + kickoff + "]\n",
 	} {
 		if !strings.Contains(string(printed), want) {

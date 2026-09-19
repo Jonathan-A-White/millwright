@@ -62,6 +62,11 @@ Feature: Booting a session into a seat
     And the command line writes the result to the vault's "runs/mw-gq6.6/result.json"
     And the command line carries "--output-format json"
 
+  Scenario: The session is given one settings document, inline
+    When the session that works the story is assembled for the "builder" seat
+    Then the command line carries "Bash(bd *)"
+    And the settings on the command line are one JSON document that signs nothing and allows bd
+
   Scenario: The session runs in the worktree, as the seat, on the story
     When the session that works the story is assembled for the "builder" seat
     Then the session runs in "/root/.mw-worktrees/mw-gq6.6"

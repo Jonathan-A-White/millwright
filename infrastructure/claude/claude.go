@@ -33,22 +33,54 @@ const (
 	PermissionPlan        = "plan"
 )
 
-// NoAttribution is the Claude Code settings every session this factory starts
-// is given: no trailer on a commit, no line in a pull request description, no
-// session link. Claude Code's default is to sign both — `Co-Authored-By: <the
-// model> <noreply@anthropic.com>` on a commit and `Generated with ...` in a
-// pull request — and this factory's commits carry neither: a seat outlives
-// every session that occupies it, so the seat signs the work and the model
-// never does. Setting each part to the empty string is how the settings
-// reference says to hide it (`attribution.commit`, `attribution.pr`,
-// `attribution.sessionUrl`); the older `includeCoAuthoredBy: false` is
-// deprecated and is ignored the moment `attribution` is set, so it is not sent.
+// BeadsAllowRule lets a session run the bd program without being asked. Its
+// work is tracked in beads, and in `auto` mode the permission classifier judges
+// each command on its own: it has refused a session's `bd close` as a write to
+// an external system, at random and on both hosts, and with
+// `--permission-prompts none` a refusal is final — the story's steps stay open
+// and nothing lands. An allow rule is resolved before the classifier is asked
+// ("narrow Bash and PowerShell allow rules such as `Bash(npm test)` stay in
+// effect in auto mode. Claude Code resolves them before the classifier runs" —
+// the auto mode configuration reference); only broad rules like `Bash(*)` and
+// wildcarded interpreters are suspended there, and this is neither.
+//
+// It is the whole program rather than a list of subcommands, by the Governor's
+// decision (mw-gq6.43): it lives in the rig, the same on both hosts, and
+// nothing has to be added to anybody's own Claude settings. The rule is the
+// program, a space and a trailing `*`, which is the form the permission
+// reference and Claude Code's own dialog write (`Bash(bd:*)` is documented as
+// an equivalent way to write the same trailing wildcard). The space is part of
+// the rule: `Bash(bd*)` would also match `bdwhatever`.
+//
+// A rule matches each subcommand of a compound command separately, so a line
+// that chains bd with anything else — `bd show x | head; cat CONTEXT.md` — is
+// not allowed by this rule alone; the rest still goes to the classifier. That
+// is why the Builder's memory of this rig says to run bd on its own.
+const BeadsAllowRule = `Bash(bd *)`
+
+// SessionSettings is the Claude Code settings every session this factory starts
+// is given. It says two things, in one JSON document because `--settings` takes
+// one.
+//
+// The session signs nothing: no trailer on a commit, no line in a pull request
+// description, no session link. Claude Code's default is to sign both —
+// `Co-Authored-By: <the model> <noreply@anthropic.com>` on a commit and
+// `Generated with ...` in a pull request — and this factory's commits carry
+// neither: a seat outlives every session that occupies it, so the seat signs
+// the work and the model never does. Setting each part to the empty string is
+// how the settings reference says to hide it (`attribution.commit`,
+// `attribution.pr`, `attribution.sessionUrl`); the older
+// `includeCoAuthoredBy: false` is deprecated and is ignored the moment
+// `attribution` is set, so it is not sent.
+//
+// The session may run bd without being asked: see BeadsAllowRule for why that
+// is here and why it is the whole program.
 //
 // It travels as a JSON string on the command line, which `claude --settings`
 // takes as readily as a path, so that no settings file is ever written into a
 // rig's worktree — where a session could commit it by accident, and where
 // somebody would have to remember to take it away again.
-const NoAttribution = `{"attribution":{"commit":"","pr":"","sessionUrl":false}}`
+const SessionSettings = `{"attribution":{"commit":"","pr":"","sessionUrl":false},"permissions":{"allow":["` + BeadsAllowRule + `"]}}`
 
 // DefaultPermissionMode is how an unattended session is allowed to act. `auto`
 // is the least permissive mode a Builder can actually work in: a Builder must
@@ -132,8 +164,9 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 		// rather than left waiting forever in a pane nobody is watching.
 		"--permission-prompts", "none",
 		"--append-system-prompt-file", l.BootFile,
-		// The session signs nothing it commits. See NoAttribution.
-		"--settings", NoAttribution,
+		// The session signs nothing it commits, and may run bd without being
+		// asked. See SessionSettings.
+		"--settings", SessionSettings,
 		"--name", l.StoryID,
 		l.Kickoff,
 	}

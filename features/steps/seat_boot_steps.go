@@ -2,9 +2,11 @@ package steps
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -56,6 +58,7 @@ func InitializeSeatBootScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the boot file holds, in this order:$`, c.theBootFileHoldsInThisOrder)
 	ctx.Then(`^the boot file holds none of:$`, c.theBootFileHoldsNoneOf)
 	ctx.Then(`^the command line carries "([^"]*)"$`, c.theCommandLineCarries)
+	ctx.Then(`^the settings on the command line are one JSON document that signs nothing and allows bd$`, c.theSettingsAreOneJSONDocument)
 	ctx.Then(`^the command line primes the session from the vault's "([^"]*)"$`, c.theCommandLinePrimesFrom)
 	ctx.Then(`^the command line writes the result to the vault's "([^"]*)"$`, c.theCommandLineWritesTheResultTo)
 	ctx.Then(`^the session runs in "([^"]*)"$`, c.theSessionRunsIn)
@@ -230,6 +233,57 @@ func (c *seatBootContext) theCommandLineCarries(want string) error {
 	}
 	if !strings.Contains(line, want) {
 		return fmt.Errorf("expected the command line to carry %q, got %q", want, line)
+	}
+	return nil
+}
+
+// theSettingsAreOneJSONDocument reads the word after --settings back off the
+// shell line and checks that it is the whole of what the session is told: one
+// JSON document, no file on disk, holding both the attribution keys that keep a
+// machine's name off the work and the allow rule that lets the session run bd
+// without the auto-mode classifier being asked.
+func (c *seatBootContext) theSettingsAreOneJSONDocument() error {
+	line, err := c.line()
+	if err != nil {
+		return err
+	}
+	_, after, found := strings.Cut(line, "--settings ")
+	if !found {
+		return fmt.Errorf("expected the command line to carry --settings, got %q", line)
+	}
+	word := after
+	if strings.HasPrefix(after, "'") {
+		word, _, found = strings.Cut(after[1:], "'")
+		if !found {
+			return fmt.Errorf("the settings are not one quoted word: %q", after)
+		}
+	} else {
+		word, _, _ = strings.Cut(after, " ")
+	}
+
+	var settings struct {
+		Attribution struct {
+			Commit     *string `json:"commit"`
+			PR         *string `json:"pr"`
+			SessionURL *bool   `json:"sessionUrl"`
+		} `json:"attribution"`
+		Permissions struct {
+			Allow []string `json:"allow"`
+		} `json:"permissions"`
+	}
+	if err := json.Unmarshal([]byte(word), &settings); err != nil {
+		return fmt.Errorf("the settings are not one JSON document (%q): %w", word, err)
+	}
+	switch {
+	case settings.Attribution.Commit == nil || *settings.Attribution.Commit != "":
+		return fmt.Errorf("expected attribution.commit to be the empty string, got %v", settings.Attribution.Commit)
+	case settings.Attribution.PR == nil || *settings.Attribution.PR != "":
+		return fmt.Errorf("expected attribution.pr to be the empty string, got %v", settings.Attribution.PR)
+	case settings.Attribution.SessionURL == nil || *settings.Attribution.SessionURL:
+		return fmt.Errorf("expected attribution.sessionUrl to be false, got %v", settings.Attribution.SessionURL)
+	}
+	if !slices.Contains(settings.Permissions.Allow, claude.BeadsAllowRule) {
+		return fmt.Errorf("expected permissions.allow to hold %q, got %v", claude.BeadsAllowRule, settings.Permissions.Allow)
 	}
 	return nil
 }

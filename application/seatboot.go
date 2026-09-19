@@ -222,7 +222,7 @@ func KickoffPrompt(seat, storyID string) string {
 		"and write one truthful closing comment on the story when you are done. "+
 		"Do not push, do not merge, do not close the story. "+
 		// The harness is told the same thing by its settings (the claude
-		// adapter's NoAttribution), and mw next refuses a branch that carries
+		// adapter's SessionSettings), and mw next refuses a branch that carries
 		// one anyway; this is the third place, because a session that is told
 		// plainly does not have to be refused.
 		"Sign nothing you commit: no Co-Authored-By trailer, no Generated with line, "+
