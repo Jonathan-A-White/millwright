@@ -136,9 +136,12 @@ func (r *Runner) Output(ctx context.Context, name string, lines int) (string, er
 
 // Status implements application.Runner. remain-on-exit, which Start sets on the
 // session's window, is what leaves a finished command's exit status to be read:
-// tmux keeps the dead pane and reports what it exited with.
+// tmux keeps the dead pane and reports what it exited with. A pane is marked
+// dead as soon as its terminal closes, which can be a moment before tmux has
+// reaped the command and knows how it ended; parseStatus reads that gap as
+// still running rather than as a clean exit.
 func (r *Runner) Status(ctx context.Context, name string) (application.SessionStatus, error) {
-	out, err := r.call(ctx, "list-panes", "-t", target(name), "-F", "#{pane_dead}|#{pane_dead_status}")
+	out, err := r.call(ctx, "list-panes", "-t", target(name), "-F", "#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}")
 	if err != nil {
 		if there, checked := r.exists(ctx, name); checked == nil && !there {
 			return application.SessionStatus{Name: name, State: application.StateGone}, nil
@@ -250,6 +253,11 @@ func sessionTarget(name string) string { return "=" + name }
 // parseStatus reads what tmux printed for a session's panes. A window can hold
 // more than one pane; the session is running while any of them is, and the exit
 // status is the first one that finished left behind.
+//
+// A dead pane with neither an exit status nor a signal is one tmux has not
+// finished reaping: it drops the pane's terminal, and so marks it dead, before
+// it has collected the command's status. It counts as still running, or a
+// command that exited 3 is read as having exited 0.
 func parseStatus(name string, printed []byte) (application.SessionStatus, error) {
 	var (
 		panes    int
@@ -263,16 +271,21 @@ func parseStatus(name string, printed []byte) (application.SessionStatus, error)
 			continue
 		}
 		panes++
-		dead, status, found := strings.Cut(line, "|")
-		if !found {
+		fields := strings.Split(line, "|")
+		if len(fields) != 3 {
 			return application.SessionStatus{}, fmt.Errorf("reading the state of session %q: tmux printed %q", name, line)
 		}
+		dead, status, signal := fields[0], fields[1], fields[2]
 		switch dead {
 		case "0":
 			running = true
 		case "1":
-			// A dead pane tmux has no status for — killed rather than exited —
-			// counts as having exited with nothing to report.
+			if status == "" && signal == "" {
+				running = true
+				continue
+			}
+			// A dead pane tmux has a signal but no status for — killed rather
+			// than exited — counts as having exited with nothing to report.
 			if status == "" || known {
 				continue
 			}

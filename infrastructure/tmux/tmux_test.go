@@ -56,11 +56,13 @@ func TestParseStatusReadsWhatTheCommandIsDoing(t *testing.T) {
 		state    application.SessionState
 		exitCode int
 	}{
-		{"a live pane", "0|\n", application.StateRunning, 0},
-		{"a command that exited well", "1|0\n", application.StateExited, 0},
-		{"a command that failed", "1|7\n", application.StateExited, 7},
-		{"a dead pane tmux has no status for", "1|\n", application.StateExited, 0},
-		{"a window with a second pane in it", "0|\n0|\n", application.StateRunning, 0},
+		{"a live pane", "0||\n", application.StateRunning, 0},
+		{"a command that exited well", "1|0|\n", application.StateExited, 0},
+		{"a command that failed", "1|7|\n", application.StateExited, 7},
+		{"a command tmux has not finished reaping", "1||\n", application.StateRunning, 0},
+		{"a command that was killed", "1||9\n", application.StateExited, 0},
+		{"a window with a second pane in it", "0||\n0||\n", application.StateRunning, 0},
+		{"a second pane still being reaped", "1|3|\n1||\n", application.StateRunning, 0},
 	}
 	for _, c := range cases {
 		status, err := parseStatus("mw-gq6_4", []byte(c.printed))
@@ -75,7 +77,7 @@ func TestParseStatusReadsWhatTheCommandIsDoing(t *testing.T) {
 }
 
 func TestParseStatusRefusesWhatItCannotRead(t *testing.T) {
-	for _, printed := range []string{"", "\n", "yes|0\n", "1|later\n"} {
+	for _, printed := range []string{"", "\n", "yes|0|\n", "1|later|\n", "1|0\n"} {
 		if _, err := parseStatus("mw-gq6_4", []byte(printed)); err == nil {
 			t.Errorf("expected %q to be refused", printed)
 		}
