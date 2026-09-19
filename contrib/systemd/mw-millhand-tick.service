@@ -1,0 +1,29 @@
+# One `mw millhand tick`, run as the user, then it exits: no daemon. For
+# `systemctl --user`; see README.md, "Waking the Millhand".
+#
+# Started by mw-millhand-tick.timer. The tick looks at the host and costs no
+# tokens unless something needs the Millhand; then it starts one routine wake.
+# A oneshot unit is never started twice at once.
+[Unit]
+Description=Wake this host's Millhand if something needs it (mw millhand tick)
+
+[Service]
+Type=oneshot
+
+# A user unit gets a bare PATH. The host says where mw, bd, git and tmux are in
+# dispatch.env, the same one line `PATH=...` that mw-dispatch.service reads; the
+# leading "-" makes the file optional. `env` finds mw through the PATH that
+# file sets, which ExecStart on its own would not.
+EnvironmentFile=-%h/.config/mw/dispatch.env
+ExecStart=/usr/bin/env mw millhand tick
+
+# The Millhand is a session in a tmux window, and the tmux server that holds it
+# may be started by the tick inside this unit's control group. The default
+# KillMode would kill that whole group the moment the tick exits, and the wake
+# with it. Only the main process is ever stopped here.
+KillMode=process
+
+# Type=oneshot has no start timeout by default, and a hung git or bd would
+# then block every later tick. The tick runs a sync first, so this is longer
+# than the dispatch unit's two minutes.
+TimeoutStartSec=5min

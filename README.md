@@ -1072,24 +1072,113 @@ A tick costs no tokens unless something needs the Millhand, so it is safe to
 run every 15 minutes for ever. It looks in this order:
 
 1. A window named `millhand-*` already open: it says `already up` and stops.
-2. It runs one `mw sync`. A sync that fails is said in the line, and the tick
+2. With a `[watch]` table in the config file (see *Watching a host*), it applies
+   `mw watch`'s rule to the host it watches. This comes before the sync, because
+   a fault of this host's own network is one the sync would only time out on:
+   `local-fault` is said in the line, wakes nobody, and the sync is skipped. The
+   rest of the tick looks on this host all the same.
+3. It runs one `mw sync`. A sync that fails is said in the line, and the tick
    looks on this host all the same.
-3. Need is unread mail for `millhand@<host>` or plain `millhand`, or a story
-   `mw sweep` newly finds stuck on this host (sweep reports each story once).
-   The mail is only listed: it stays unread until the Millhand reads it.
-4. No need is `quiet`. Need is ONE routine wake, as `mw millhand --wake
+4. Need is unread mail for `millhand@<host>` or plain `millhand`, a story
+   `mw sweep` newly finds stuck on this host (sweep reports each story once), or
+   a watched host that is `unwell`, `stale` or `down`. `ok` and
+   `unreachable-once` are no need. The mail is only listed: it stays unread
+   until the Millhand reads it.
+5. No need is `quiet`. Need is ONE routine wake, as `mw millhand --wake
    routine` does it, whose reason names the mail subjects and the stuck story
-   titles, five of each and then a count.
+   titles, five of each and then a count, and the watch line verbatim: `mw watch
+   says: unwell load1,mayor_gone`. When the host is `down`, or `unwell` with
+   `mayor_gone` among its reasons, the reason ends with the charter's one
+   exception: *If the Mayor's process is gone and no handoff is under way you
+   may run the one respawn command on the VPS.*
 
 It prints one dated line and appends it to
 `~/.local/state/mw-millhand-tick/log` on this host, which is cut to its last
 500 lines; nothing else it keeps grows. It leaves with 0 for everything but a
-fault of its own: a wake that could not be started, or mail and stuck stories
-that could not be looked at when nothing else called for a wake (that is not
-`quiet`). `--dry-run` starts nothing and writes no log line, and it does not
-sweep, because a sweep records the stories it finds stuck and would leave
-nobody to wake for them. It does not consult `mw watch`. See
-`features/millhand_tick.feature`.
+fault of its own: a wake that could not be started, or mail, stuck stories or a
+watch that could not be looked at when nothing else called for a wake (that is
+not `quiet`). `--dry-run` starts nothing and writes no log line, and it runs
+neither the sweep nor the watch, because each records what it finds (a sweep the
+stories it calls stuck, a watch its first failed check) and would leave nobody
+to wake for it. With no `[watch]` table the tick does not consult `mw watch`.
+See `features/millhand_tick.feature`.
+
+### Waking the Millhand by timer
+
+Two `systemd --user` timers in `contrib/systemd/` wake this host's Millhand, and
+each needs the same `~/.config/mw/dispatch.env` as the dispatch timer (see
+*Running a host on a timer*) so that `mw` is found:
+
+| Timer | Runs | When |
+| --- | --- | --- |
+| `mw-millhand-tick.timer` | `mw millhand tick` (`mw-millhand-tick.service`) | at 7, 22, 37 and 52 minutes past every hour; no catch-up |
+| `mw-millhand-review.timer` | `mw millhand --wake review --reason timer` (`mw-millhand-review.service`) | 07:30 and 19:30, local time; catches up |
+
+**The tick** is the routine timer above: it costs no tokens unless the mail, the
+sweep or the watch calls for a wake. Its minutes are off the dispatch timer's
+and the health timer's, so the three do not start together. `Persistent=false`,
+as for those: a host that was asleep does not run the ticks it missed.
+
+**The review** always wakes the Millhand, on the review model, and spends that
+fuel twice a day. `Persistent=true`: a review missed while the Laptop slept runs
+once when it wakes, not once for every one missed. If a Millhand is already up,
+`mw millhand` leaves with status 5; the unit has `SuccessExitStatus=5`, since
+"already up" is a wait and not a failure. Both services have `KillMode=process`,
+so the wake they start outlives the command that started it.
+
+**The cadence is a fuel knob.** Change it with a drop-in, never by editing the
+shipped unit; a change to the copy in `contrib/systemd/` is a change for every
+host, and `scripts/check-timer-units.sh` fails on it. To wake the review once a
+day:
+
+```sh
+systemctl --user edit mw-millhand-review.timer
+```
+
+```
+[Timer]
+OnCalendar=
+OnCalendar=*-*-* 07:30
+```
+
+The empty `OnCalendar=` clears the shipped times first. The same works for the
+tick's timer.
+
+**Install** by hand, once per host; nothing in the rig does it for you and
+nothing here needs `sudo`:
+
+```sh
+mkdir -p ~/.config/systemd/user ~/.config/mw
+cp contrib/systemd/mw-millhand-tick.service contrib/systemd/mw-millhand-tick.timer \
+   contrib/systemd/mw-millhand-review.service contrib/systemd/mw-millhand-review.timer \
+   ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now mw-millhand-tick.timer mw-millhand-review.timer
+```
+
+Enable one and not the other if that is what the host wants. `systemctl --user
+list-timers` says which are armed and when each next runs.
+
+**Undo it**:
+
+```sh
+systemctl --user disable --now mw-millhand-tick.timer mw-millhand-review.timer
+```
+
+That stops any further wake at once and leaves a Millhand already up alone: it
+is a tmux window, not the unit's to kill. Remove the four files from
+`~/.config/systemd/user/` and run `systemctl --user daemon-reload` to take the
+units away altogether.
+
+**Lingering.** A user timer runs only while your user manager does, which is
+while you are logged in, unless `loginctl enable-linger <you>` has been run
+(`loginctl show-user $USER -p Linger` says which). Without it these timers do
+not fire on a host nobody is logged into. That command needs root, and this rig
+never runs it for you.
+
+Each unit's own output is in the journal: `journalctl --user -u
+mw-millhand-tick` and `-u mw-millhand-review`. `scripts/check-timer-units.sh` (in
+`make lint`) verifies the four units with `systemd-analyze` and starts nothing.
 
 ## Watching a host from one that can lose its network
 

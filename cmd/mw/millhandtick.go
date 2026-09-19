@@ -14,6 +14,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/ticklog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
+	"github.com/Jonathan-A-White/millwright/infrastructure/watch"
 
 	"github.com/spf13/cobra"
 )
@@ -29,17 +30,23 @@ func newMillhandTickCmd() *cobra.Command {
 		Use:   "tick [--dry-run]",
 		Short: "Wake the Millhand only if mail has come for it or a story is stuck",
 		Long: "tick is run every 15 minutes by a timer, and spends no tokens unless the Millhand is needed.\n" +
-			"If a window named millhand-* is already open it says \"already up\" and stops. Otherwise it runs\n" +
-			"one mw sync (a sync that fails is said in the line, and the tick looks on this host all the\n" +
-			"same), then looks for unread mail for millhand@<host> or millhand, and for a story mw sweep\n" +
-			"newly finds stuck on this host. With neither it says \"quiet\". With either, or both, it starts\n" +
-			"ONE routine wake of the Millhand (as `mw millhand --wake routine` does) whose reason lists the\n" +
-			"mail subjects and the stuck story titles, five of each and then a count. The mail is left unread.\n\n" +
+			"If a window named millhand-* is already open it says \"already up\" and stops. Otherwise, with a\n" +
+			"[watch] table in the config file, it applies mw watch's rule to the host it watches, before\n" +
+			"anything else: local-fault (this host's own network is down) is said in the line, wakes nobody\n" +
+			"and skips the sync, which would only time out. Then it runs one mw sync (a sync that fails is\n" +
+			"said in the line, and the tick looks on this host all the same), and looks for unread mail for\n" +
+			"millhand@<host> or millhand, for a story mw sweep newly finds stuck on this host, and for a\n" +
+			"watched host that is unwell, stale or down. With none of them it says \"quiet\". With any, it\n" +
+			"starts ONE routine wake of the Millhand (as `mw millhand --wake routine` does) whose reason\n" +
+			"lists the mail subjects and the stuck story titles, five of each and then a count, and the\n" +
+			"watch line verbatim. If the host is down or its Mayor is gone the reason ends with the\n" +
+			"charter's one exception. The mail is left unread.\n\n" +
 			"It prints one dated line and appends it to ~/.local/state/mw-millhand-tick/log on this host,\n" +
 			"which is cut to its last " + fmt.Sprint(application.TickLogLines) + " lines. It leaves with 0 for everything but a fault of its\n" +
 			"own, a wake that could not be started included. With --dry-run it says what it would do and\n" +
-			"starts nothing; it does not sweep, since a sweep records the stories it finds stuck, and it\n" +
-			"writes nothing to the log. It does not consult mw watch.",
+			"starts nothing; it runs neither the sweep nor the watch, since each records what it finds and\n" +
+			"would leave nobody to wake for it, and it writes nothing to the log. With no [watch] table it\n" +
+			"does not consult mw watch.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := config.Vault()
@@ -59,6 +66,10 @@ func newMillhandTickCmd() *cobra.Command {
 				return err
 			}
 			hours, err := config.StaleHours()
+			if err != nil {
+				return err
+			}
+			settings, err := config.Watch()
 			if err != nil {
 				return err
 			}
@@ -97,6 +108,16 @@ func newMillhandTickCmd() *cobra.Command {
 				Host:   host,
 				DryRun: dryRun,
 				Out:    cmd.OutOrStdout(),
+			}
+			watching := application.WatchSettings{
+				SSH: settings.SSH, Host: settings.Host, Outside: settings.Outside, Blog: settings.Blog,
+			}
+			if !watching.Empty() {
+				tick.Watch = application.Watch{
+					Probes:   watch.New(filepath.Join(home, WatchStateDir)),
+					Notes:    gateway,
+					Settings: watching,
+				}
 			}
 			// A rehearsal is not a tick: it leaves nothing in the log.
 			if !dryRun {

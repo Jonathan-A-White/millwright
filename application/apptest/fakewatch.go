@@ -28,8 +28,10 @@ type FakeWatch struct {
 	// ssh itself fail instead.
 	Health   string
 	SSHFails bool
-	// SaveErr, when set, is what saving the memory fails with.
+	// SaveErr, when set, is what saving the memory fails with, and LoadErr what
+	// loading it fails with.
 	SaveErr error
+	LoadErr error
 
 	memory  application.WatchMemory
 	saves   int
@@ -66,6 +68,9 @@ func (f *FakeWatch) ReadHealth(_ context.Context, ssh string) (string, error) {
 func (f *FakeWatch) LoadMemory(context.Context) (application.WatchMemory, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.LoadErr != nil {
+		return application.WatchMemory{}, f.LoadErr
+	}
 	return f.memory, nil
 }
 

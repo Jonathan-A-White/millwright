@@ -11,12 +11,21 @@ Feature: mw millhand tick
        names the mail subjects and the stuck story titles, at most 5 of each and
        then a count.
 
+  On a host with a [watch] table the tick also applies mw watch's rule to the
+  host it watches, before it syncs: unwell, stale and down are each a reason for
+  the wake, carrying the watch line verbatim, and one wake serves them with the
+  mail and the stuck stories. ok and unreachable-once wake nobody. local-fault,
+  this host's own network being down, wakes nobody and skips the sync, which
+  would only time out; the tick still looks at its own mail and stories. When the
+  Mayor's process is gone, or the host is down, the reason ends with the charter's
+  one exception. With no [watch] table the tick does not consult mw watch.
+
   It prints one dated line and appends it to a log on this host. It reads the
   mail and marks none of it read. It leaves with 0 whatever it found: a tick that
   did what it should is not a failure. --dry-run says what it would do and starts
   nothing; it does not sweep either, because a sweep records the stories it finds
-  stuck, and a story recorded by a rehearsal would never wake anybody. It does not
-  consult mw watch.
+  stuck, and a story recorded by a rehearsal would never wake anybody. For the same
+  reason it does not run mw watch, which remembers a failed check.
 
   Background:
     Given a vault holding the "millhand" seat
@@ -209,3 +218,162 @@ Feature: mw millhand tick
     When mw millhand tick is run
     And mw millhand tick is run
     Then the tick log holds 2 lines
+
+  Scenario: A host that is unwell wakes the Millhand once, with the watch line
+    Given the tick watches the host "vps" over ssh "vps-ssh", with the outside places "https://one.example" and "https://two.example"
+    And the tick can reach the outside places
+    And the watched host's health line is 5 minutes old and ends "verdict=unwell:load1"
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "woke the Millhand"
+    And mw millhand tick prints one dated line saying "unwell load1"
+    And the tick synced once
+    And exactly one window was opened
+    And the kickoff prompt of the window holds:
+      | a routine wake |
+      | unwell load1   |
+    And the kickoff prompt of the window holds none of:
+      | respawn |
+    And the tick log holds that line
+
+  Scenario: A host whose health line is stale wakes the Millhand once
+    Given the tick watches the host "vps" over ssh "vps-ssh", with the outside places "https://one.example" and "https://two.example"
+    And the tick can reach the outside places
+    And the watched host's health line is 50 minutes old and ends "verdict=ok"
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And exactly one window was opened
+    And the kickoff prompt of the window holds:
+      | a routine wake |
+      | stale          |
+
+  Scenario: A host that is down wakes the Millhand once, with the watch line
+    Given the tick watches the host "vps" over ssh "vps-ssh", with the outside places "https://one.example" and "https://two.example"
+    And the tick can reach the outside places
+    And ssh to the watched host fails
+    And the watched host first failed a check 10 minutes ago
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "down signs=none"
+    And exactly one window was opened
+    And the kickoff prompt of the window holds:
+      | a routine wake  |
+      | down signs=none |
+
+  Scenario: A host that is well wakes nobody
+    Given the tick watches the host "vps" over ssh "vps-ssh", with the outside places "https://one.example" and "https://two.example"
+    And the tick can reach the outside places
+    And the watched host's health line is 5 minutes old and ends "verdict=ok"
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "quiet"
+    And the tick synced once
+    And no window was opened
+    And no reaper was armed
+
+  Scenario: A host that could not be reached once wakes nobody, and the line says so
+    Given the tick watches the host "vps" over ssh "vps-ssh", with the outside places "https://one.example" and "https://two.example"
+    And the tick can reach the outside places
+    And ssh to the watched host fails
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "quiet"
+    And mw millhand tick prints one dated line saying "unreachable-once signs=none"
+    And no window was opened
+
+  Scenario: A local fault wakes nobody and skips the sync
+    Given the tick watches the host "vps" over ssh "vps-ssh", with the outside places "https://one.example" and "https://two.example"
+    And the tick cannot reach either outside place
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "quiet"
+    And mw millhand tick prints one dated line saying "local-fault"
+    And the tick did not sync
+    And ssh to the watched host was not tried
+    And no window was opened
+    And the tick log holds that line
+
+  Scenario: A local fault does not keep this host's own mail from waking the Millhand
+    Given the tick watches the host "vps" over ssh "vps-ssh", with the outside places "https://one.example" and "https://two.example"
+    And the tick cannot reach either outside place
+    And unread tick mail for "millhand@laptop" with the subject "Please look at the queue"
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "local-fault"
+    And the tick did not sync
+    And exactly one window was opened
+    And the kickoff prompt of the window holds:
+      | Please look at the queue |
+    And the kickoff prompt of the window holds none of:
+      | local-fault |
+
+  Scenario: Mail and an unwell host still wake the Millhand once, with both reasons
+    Given the tick watches the host "vps" over ssh "vps-ssh", with the outside places "https://one.example" and "https://two.example"
+    And the tick can reach the outside places
+    And the watched host's health line is 5 minutes old and ends "verdict=unwell:disk_pct"
+    And unread tick mail for "millhand@laptop" with the subject "Please look at the queue"
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And exactly one window was opened
+    And the kickoff prompt of the window holds:
+      | 1 unread message         |
+      | Please look at the queue |
+      | unwell disk_pct          |
+
+  Scenario: A stuck story and an unwell host still wake the Millhand once
+    Given the tick watches the host "vps" over ssh "vps-ssh", with the outside places "https://one.example" and "https://two.example"
+    And the tick can reach the outside places
+    And the watched host's health line is 5 minutes old and ends "verdict=unwell:disk_pct"
+    And the story "mw-tk.1" titled "Teach the cat to sit" is claimed here with no session behind it
+    When mw millhand tick is run
+    Then exactly one window was opened
+    And the kickoff prompt of the window holds:
+      | Teach the cat to sit |
+      | unwell disk_pct      |
+
+  Scenario: A Mayor that is gone ends the reason with the charter's one exception
+    Given the tick watches the host "vps" over ssh "vps-ssh", with the outside places "https://one.example" and "https://two.example"
+    And the tick can reach the outside places
+    And the watched host's health line is 5 minutes old and ends "verdict=unwell:load1,mayor_gone"
+    When mw millhand tick is run
+    Then exactly one window was opened
+    And the kickoff prompt of the window ends with "If the Mayor's process is gone and no handoff is under way you may run the one respawn command on the VPS."
+    And the kickoff prompt of the window holds:
+      | unwell load1,mayor_gone |
+
+  Scenario: A host that is down ends the reason with the charter's one exception too
+    Given the tick watches the host "vps" over ssh "vps-ssh", with the outside places "https://one.example" and "https://two.example"
+    And the tick can reach the outside places
+    And ssh to the watched host fails
+    And the watched host first failed a check 10 minutes ago
+    When mw millhand tick is run
+    Then the kickoff prompt of the window ends with "If the Mayor's process is gone and no handoff is under way you may run the one respawn command on the VPS."
+
+  Scenario: A watch that could not be run with nothing else to wake for is not quiet, and is a failure
+    Given the tick watches the host "vps" over ssh "vps-ssh", with the outside places "https://one.example" and "https://two.example"
+    And the tick can reach the outside places
+    And the tick's watch memory cannot be read
+    When mw millhand tick is run
+    Then mw millhand tick fails
+    And mw millhand tick prints one dated line saying "could not tell whether the Millhand is needed"
+    And mw millhand tick prints one dated line saying "watch failed"
+    And no window was opened
+
+  Scenario: With no watch table the tick does not consult mw watch
+    Given the tick can reach the outside places
+    And the watched host's health line is 50 minutes old and ends "verdict=unwell:mayor_gone"
+    When mw millhand tick is run
+    Then mw millhand tick prints one dated line saying "quiet"
+    And the tick synced once
+    And no window was opened
+    And nothing was asked of the watched host or the outside places
+
+  Scenario: A dry run does not run mw watch
+    Given the tick watches the host "vps" over ssh "vps-ssh", with the outside places "https://one.example" and "https://two.example"
+    And the tick can reach the outside places
+    And the watched host's health line is 5 minutes old and ends "verdict=unwell:load1"
+    When mw millhand tick is run as a dry run
+    Then mw millhand tick prints one dated line saying "dry run: quiet"
+    And mw millhand tick prints one dated line saying "not run in a dry run"
+    And no window was opened
+    And nothing was asked of the watched host or the outside places

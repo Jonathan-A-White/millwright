@@ -1,0 +1,28 @@
+# One review wake of the Millhand, run as the user, then it exits: no daemon.
+# For `systemctl --user`; see README.md, "Waking the Millhand".
+#
+# Started by mw-millhand-review.timer. Unlike the tick this does not look
+# first: it wakes the Millhand for its review, on the review model, and spends
+# that fuel every time.
+[Unit]
+Description=Wake this host's Millhand for a review (mw millhand --wake review)
+
+[Service]
+Type=oneshot
+
+# A user unit gets a bare PATH; see mw-millhand-tick.service.
+EnvironmentFile=-%h/.config/mw/dispatch.env
+ExecStart=/usr/bin/env mw millhand --wake review --reason timer
+
+# The wake is a tmux window whose server is started inside this unit's control
+# group. The default KillMode would kill that group when mw exits, and the
+# Millhand with it. Only the main process is ever stopped here.
+KillMode=process
+
+# Type=oneshot has no start timeout by default.
+TimeoutStartSec=5min
+
+# mw millhand leaves with 5 when a Millhand is already up: it started nothing
+# and says so. That is a wait, not a fault. Every other non-zero status still
+# fails the unit and shows in `systemctl --user status mw-millhand-review`.
+SuccessExitStatus=5

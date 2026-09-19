@@ -25,14 +25,24 @@ import (
 // tickEpic is the epic the stories of a tick scenario are filed under.
 const tickEpic = "mw-tk"
 
+// The outside places a tick scenario's watch asks of. Which of them answer is
+// the scenario's to say; the [watch] table naming them is only there when a
+// step wrote it.
+var tickOutside = []string{"https://one.example", "https://two.example"}
+
 // tickWorld is what a tick scenario reads through: a mailbox, a tracker and a
-// runner for the sweep, a sync that can fail, and a log in memory.
+// runner for the sweep, a sync that can fail, a log in memory, and the world
+// mw watch looks at.
 type tickWorld struct {
 	mailbox *apptest.FakeMailbox
 	tracker *apptest.FakeTracker
 	runner  *apptest.FakeRunner
 	sync    *tickSync
 	log     *apptest.FakeTickLog
+	// watch is the world the tick's watch reaches out to, and watching the
+	// [watch] table it was given: the zero value is no table at all.
+	watch    *apptest.FakeWatch
+	watching application.WatchSettings
 	// epicFiled says the epic the stories hang from has been filed.
 	epicFiled bool
 
@@ -66,6 +76,7 @@ func (c *seatUpContext) tickWorld() *tickWorld {
 			runner:  apptest.NewFakeRunner(),
 			sync:    &tickSync{},
 			log:     &apptest.FakeTickLog{},
+			watch:   apptest.NewFakeWatch(),
 		}
 	}
 	return c.tick
@@ -81,6 +92,13 @@ func registerMillhandTickSteps(ctx *godog.ScenarioContext, c *seatUpContext) {
 	ctx.Given(`^the sync fails saying "([^"]*)"$`, c.theSyncFailsSaying)
 	ctx.Given(`^the tick mail cannot be read$`, c.theMailCannotBeRead)
 	ctx.Given(`^a Millhand window opens while the tick syncs$`, c.aMillhandOpensDuringTheSync)
+	ctx.Given(`^the tick watches the host "([^"]*)" over ssh "([^"]*)", with the outside places "([^"]*)" and "([^"]*)"$`, c.theTickWatches)
+	ctx.Given(`^the tick can reach the outside places$`, c.outsidePlacesAnswer(true))
+	ctx.Given(`^the tick cannot reach either outside place$`, c.outsidePlacesAnswer(false))
+	ctx.Given(`^ssh to the watched host fails$`, c.sshToTheWatchedHostFails)
+	ctx.Given(`^the watched host's health line is (\d+) minutes old and ends "([^"]*)"$`, c.theWatchedHostsHealthLine)
+	ctx.Given(`^the watched host first failed a check (\d+) minutes ago$`, c.theWatchedHostFirstFailed)
+	ctx.Given(`^the tick's watch memory cannot be read$`, c.theWatchMemoryCannotBeRead)
 
 	ctx.When(`^mw millhand tick is run$`, func() error { return c.runTheTick(false) })
 	ctx.When(`^mw millhand tick is run as a dry run$`, func() error { return c.runTheTick(true) })
@@ -95,6 +113,9 @@ func registerMillhandTickSteps(ctx *godog.ScenarioContext, c *seatUpContext) {
 	ctx.Then(`^the tick log holds (\d+) lines$`, c.theLogHoldsLines)
 	ctx.Then(`^no tick mail was marked read$`, c.noTickMailWasMarkedRead)
 	ctx.Then(`^the story "([^"]*)" is not recorded as stuck by the tick$`, c.theStoryIsNotRecordedStuck)
+	ctx.Then(`^ssh to the watched host was not tried$`, c.sshWasNotTried)
+	ctx.Then(`^nothing was asked of the watched host or the outside places$`, c.nothingWasAskedOfTheWorld)
+	ctx.Then(`^the kickoff prompt of the window ends with "([^"]*)"$`, c.theKickoffEndsWith)
 }
 
 func (c *seatUpContext) unreadTickMail(mailbox, subject string) error {
@@ -248,6 +269,9 @@ func (c *seatUpContext) runTheTick(dryRun bool) error {
 			Host:    seatUpHost,
 			Now:     now,
 		},
+		Watch: application.Watch{
+			Probes: world.watch, Settings: world.watching, Notes: world.tracker, Now: now,
+		},
 		Log:    world.log,
 		Host:   seatUpHost,
 		DryRun: dryRun,
@@ -334,6 +358,76 @@ func (c *seatUpContext) noTickMailWasMarkedRead() error {
 func (c *seatUpContext) theStoryIsNotRecordedStuck(id string) error {
 	if got := c.tickWorld().tracker.State(id, application.RunState); got == application.RunStuck {
 		return fmt.Errorf("expected %s not to be recorded stuck, but it was", id)
+	}
+	return nil
+}
+
+func (c *seatUpContext) theTickWatches(host, ssh, one, two string) error {
+	c.tickWorld().watching = application.WatchSettings{SSH: ssh, Host: host, Outside: []string{one, two}}
+	return nil
+}
+
+func (c *seatUpContext) outsidePlacesAnswer(answer bool) func() error {
+	return func() error {
+		for _, url := range tickOutside {
+			c.tickWorld().watch.Answering[url] = answer
+		}
+		return nil
+	}
+}
+
+func (c *seatUpContext) sshToTheWatchedHostFails() error {
+	c.tickWorld().watch.SSHFails = true
+	return nil
+}
+
+// theWatchedHostsHealthLine makes ssh print a line as mw-health.sh writes it,
+// stamped that long before the tick's clock and ending in the verdict given.
+func (c *seatUpContext) theWatchedHostsHealthLine(minutes int, verdict string) error {
+	at := c.today.Add(-time.Duration(minutes) * time.Minute).UTC().Format(time.RFC3339)
+	c.tickWorld().watch.Health = at + " load1=0.50 mem_avail_mb=1000 disk_pct=42 services=none " + verdict
+	return nil
+}
+
+func (c *seatUpContext) theWatchedHostFirstFailed(minutes int) error {
+	c.tickWorld().watch.SetMemory(application.WatchMemory{
+		FirstFailure: c.today.Add(-time.Duration(minutes) * time.Minute),
+	})
+	return nil
+}
+
+func (c *seatUpContext) theWatchMemoryCannotBeRead() error {
+	c.tickWorld().watch.LoadErr = errors.New("the state directory is unreadable")
+	return nil
+}
+
+func (c *seatUpContext) sshWasNotTried() error {
+	if reads := c.tickWorld().watch.Reads(); len(reads) != 0 {
+		return fmt.Errorf("expected ssh not to be tried, it was asked to read the health line of %q", reads)
+	}
+	return nil
+}
+
+// nothingWasAskedOfTheWorld says mw watch was not run: it reached nowhere, read
+// nothing, kept nothing and logged nothing.
+func (c *seatUpContext) nothingWasAskedOfTheWorld() error {
+	watch := c.tickWorld().watch
+	if reached, reads, log := watch.Reached(), watch.Reads(), watch.Log(); len(reached)+len(reads)+len(log) != 0 {
+		return fmt.Errorf("expected mw watch not to be run, but it reached %q, read %q and logged %q", reached, reads, log)
+	}
+	if watch.Saves() != 0 {
+		return fmt.Errorf("expected mw watch to keep nothing, it saved its memory %d times", watch.Saves())
+	}
+	return nil
+}
+
+func (c *seatUpContext) theKickoffEndsWith(want string) error {
+	told, err := c.kickoff()
+	if err != nil {
+		return err
+	}
+	if !strings.HasSuffix(told, want) {
+		return fmt.Errorf("expected the kickoff to end with %q, got %q", want, told)
 	}
 	return nil
 }

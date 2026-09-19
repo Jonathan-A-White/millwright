@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // These run mw seat reap against a tmux server that is not there: the socket
@@ -14,7 +16,7 @@ import (
 func reapCmd(t *testing.T, vault string, args ...string) (string, error) {
 	t.Helper()
 	mwConfig(t, "vault = \""+vault+"\"\nhost = \"laptop\"\n")
-	t.Setenv(TmuxSocketEnv, "mw-test-no-such-server-"+strings.ReplaceAll(t.Name(), "/", "-"))
+	t.Setenv(TmuxSocketEnv, fmt.Sprintf("mw-test-%d-%d", os.Getpid(), time.Now().UnixNano()))
 	out := &bytes.Buffer{}
 	root := newRootCmd()
 	root.SetOut(out)

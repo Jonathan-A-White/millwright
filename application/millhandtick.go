@@ -24,6 +24,11 @@ type TickLog interface {
 	Append(ctx context.Context, line string) error
 }
 
+// MayorRespawnException is the one thing the Millhand's charter lets it do to
+// the Mayor's seat on the VPS, and the last thing a wake called for by a host
+// that is down or has lost its Mayor is told.
+const MayorRespawnException = "If the Mayor's process is gone and no handoff is under way you may run the one respawn command on the VPS."
+
 // MillhandTickReport is what one tick found: the one dated line it printed, and
 // whether it woke the Millhand.
 type MillhandTickReport struct {
@@ -38,22 +43,33 @@ func (r MillhandTickReport) String() string { return r.Line + "\n" }
 // something needs the Millhand:
 //
 //  1. A Millhand already up is the end of it: "already up".
-//  2. One sync, so that this host sees the other one's mail and claims. A sync
+//  2. On a host with a [watch] table, mw watch's rule is applied to the host it
+//     watches. This comes before the sync, because a fault of this host's own
+//     network is one the sync would only time out on: local-fault is said in the
+//     line, wakes nobody, and the sync is skipped. The rest of the tick looks on
+//     this host all the same.
+//  3. One sync, so that this host sees the other one's mail and claims. A sync
 //     that fails is said in the line, and the tick looks locally all the same.
-//  3. Need is unread mail for this host's Millhand — millhand@<host>, or plain
-//     millhand — or a story Sweep newly finds stuck on this host. The mail is
-//     only listed: it stays unread until the Millhand reads it.
-//  4. No need is "quiet" and nothing is started; need is ONE routine wake whose
-//     reason names the mail subjects and the stuck story titles.
+//  4. Need is unread mail for this host's Millhand — millhand@<host>, or plain
+//     millhand — or a story Sweep newly finds stuck on this host, or a watched
+//     host that is unwell, stale or down. The mail is only listed: it stays
+//     unread until the Millhand reads it.
+//  5. No need is "quiet" and nothing is started; need is ONE routine wake whose
+//     reason names the mail subjects, the stuck story titles and the watch line,
+//     verbatim. When the watch says the host is down or its Mayor is gone the
+//     reason ends with MayorRespawnException.
 //
-// A dry run does the same but starts nothing, and it does not sweep either: a
-// sweep records the stories it finds stuck, and Sweep only ever reports a story
-// once, so a rehearsal that recorded one would leave nobody to wake for it.
+// A dry run does the same but starts nothing, and it runs neither the sweep nor
+// the watch: a sweep records the stories it finds stuck, and Sweep only ever
+// reports a story once; a watch remembers a failed check, and the second is what
+// calls a host down. A rehearsal that recorded either would leave nobody to wake
+// for it.
 //
 // It prints one dated line and appends it to Log. It leaves with no error for
 // every outcome that is not a fault of its own: a failed sync is in the line, and
-// is no fault. A wake that fails is one, and so is mail or a sweep that could not
-// be looked at when nothing else called for a wake — that is not "quiet". It does not consult mw watch.
+// is no fault. A wake that fails is one, and so is mail, a sweep or a watch that
+// could not be looked at when nothing else called for a wake — that is not
+// "quiet". With no [watch] table, mw watch is not consulted at all.
 type MillhandTick struct {
 	// Millhand is the wake a tick starts; the tick sets its kind and reason and
 	// silences what seat up says, so that a tick prints one line.
@@ -62,6 +78,11 @@ type MillhandTick struct {
 	Mail     Mailbox
 	Sweep    Sweep
 	Log      TickLog
+
+	// Watch is mw watch's rule, applied to the host this one watches. Its
+	// Settings are the config's [watch] table: with none, or with no Probes, the
+	// tick does not consult it. The tick silences it, and it keeps its own log.
+	Watch Watch
 
 	// Host is this host, whose Millhand's mail is looked for.
 	Host   string
@@ -108,14 +129,23 @@ func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err err
 		return alreadyUp(up), false, nil
 	}
 
+	// The watch comes first: a fault of this host's own network is one a sync
+	// would only time out on.
+	health := t.health(ctx)
+
 	var notes []string
-	if _, err := t.Sync.Run(ctx); err != nil {
-		notes = append(notes, syncNote(err))
+	if !health.local {
+		if _, err := t.Sync.Run(ctx); err != nil {
+			notes = append(notes, syncNote(err))
+		}
+	}
+	if health.note != "" {
+		notes = append(notes, health.note)
 	}
 
-	// What could not be looked at locally is said, and if nothing else is found
-	// it is a fault: "quiet" is only for a tick that looked.
-	var lookErr error
+	// What could not be looked at is said, and if nothing else is found it is a
+	// fault: "quiet" is only for a tick that looked.
+	lookErr := health.err
 	mail, err := t.unreadMail(ctx)
 	if err != nil {
 		lookErr = err
@@ -135,7 +165,7 @@ func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err err
 		notes = append(notes, sweepNotes...)
 	}
 
-	verdict, reason := "quiet", tickReason(mail, stuck)
+	verdict, reason := "quiet", tickReason(mail, stuck, health)
 	switch {
 	case reason == "" && lookErr != nil:
 		verdict = "could not tell whether the Millhand is needed"
@@ -155,6 +185,50 @@ func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err err
 		}
 	}
 	return joinNotes(verdict, notes), woke, nil
+}
+
+// tickHealth is what applying mw watch's rule found, as the tick needs it.
+type tickHealth struct {
+	// line is the watch line, verbatim; empty when the watch found nothing: no
+	// [watch] table, a dry run, or a watch that failed.
+	line string
+	// wake is whether the line calls for a wake, and local whether it says this
+	// host's own network is down, so that a sync is not worth trying.
+	wake, local bool
+	// note is what the tick's line says of it besides a wake's reason.
+	note string
+	// err is the fault of a watch that could not be run.
+	err error
+}
+
+// health applies mw watch's rule, once. It does not fail the tick by itself: a
+// watch that could not be run is said in the line, and is a fault only when
+// nothing else calls for a wake.
+func (t MillhandTick) health(ctx context.Context) tickHealth {
+	if t.Watch.Settings.Empty() || t.Watch.Probes == nil {
+		return tickHealth{}
+	}
+	if t.DryRun {
+		return tickHealth{note: "mw watch not run in a dry run"}
+	}
+
+	watching := t.Watch
+	watching.Out = nil
+	report, err := watching.Run(ctx)
+	if _, wakes := WatchWakes(err); wakes {
+		err = nil
+	}
+	found := tickHealth{line: report.Line, wake: report.Wake, err: err}
+	switch {
+	case err != nil:
+		found.note = "watch failed: " + oneLine(err.Error())
+	case report.Line == WatchLocalFault:
+		found.local = true
+		found.note = WatchLocalFault + ": this host's network is down, so it did not sync"
+	case strings.HasPrefix(report.Line, WatchUnreachable):
+		found.note = "watch: " + report.Line
+	}
+	return found
 }
 
 // syncNote says what a sync that stopped did not do, in a phrase.
@@ -230,9 +304,9 @@ func (t MillhandTick) wake(ctx context.Context, reason string) (verdict string, 
 func alreadyUp(window string) string { return "already up (" + window + ")" }
 
 // tickReason is what the Millhand is told it was woken for: the mail subjects
-// and the stuck stories, TickReasonLimit of each and a count of the rest. It is
-// empty when there is nothing.
-func tickReason(mail, stuck []string) string {
+// and the stuck stories, TickReasonLimit of each and a count of the rest, and
+// the watch line as it was found. It is empty when there is nothing.
+func tickReason(mail, stuck []string, health tickHealth) string {
 	var parts []string
 	if len(mail) > 0 {
 		parts = append(parts, counted(len(mail), "unread message", "unread messages")+": "+named(mail))
@@ -240,7 +314,37 @@ func tickReason(mail, stuck []string) string {
 	if len(stuck) > 0 {
 		parts = append(parts, counted(len(stuck), "stuck story", "stuck stories")+": "+named(stuck))
 	}
+	if health.wake {
+		part := "mw watch says: " + health.line
+		if mayorMayBeGone(health.line) {
+			part += ". " + MayorRespawnException
+		}
+		parts = append(parts, part)
+	}
 	return strings.Join(parts, "; ")
+}
+
+// mayorMayBeGone reports whether a watch line that calls for a wake is one where
+// the Mayor may be gone: the host is down, so nothing is known of its Mayor, or
+// it is unwell and its reasons say mayor_gone (the health line's mayor=gone).
+func mayorMayBeGone(line string) bool {
+	fields := strings.Fields(line)
+	switch {
+	case len(fields) == 0:
+		return false
+	case fields[0] == WatchDown:
+		return true
+	case fields[0] != WatchUnwell:
+		return false
+	}
+	for _, field := range fields[1:] {
+		for _, reason := range strings.Split(field, ",") {
+			if reason == "mayor_gone" || reason == "mayor=gone" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // named lists the first TickReasonLimit names, and counts the rest.
