@@ -179,6 +179,15 @@ func (f *FakeTracker) SetCreated(id string, created time.Time) error {
 	})
 }
 
+// SetStarted sets when a story the fake holds was claimed. ClaimStory leaves it
+// alone: a scenario that wants a claim from long ago says so here.
+func (f *FakeTracker) SetStarted(id string, started time.Time) error {
+	return f.write(id, func(s *fakeStory) error {
+		s.detail.Started = started
+		return nil
+	})
+}
+
 // SetLabels sets the labels of a story the fake holds, replacing any it had. A
 // story added without any has none.
 func (f *FakeTracker) SetLabels(id string, labels ...string) error {

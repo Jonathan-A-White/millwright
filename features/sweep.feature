@@ -73,3 +73,77 @@ Feature: mw sweep
     Then sweeping succeeds
     And nothing was written through the sweep tracker but state and comments
     And nothing was started, sent to or closed through the sweep runner
+
+  Scenario: Sweeping a session whose output keeps changing makes no state changes
+    Given a sweep story "mw-swp.8" filed under it
+    And the sweep story "mw-swp.8" is claimed with its session running
+    When the session of "mw-swp.8" prints "step 1"
+    And mw sweep reads the host
+    And the session of "mw-swp.8" prints "step 2"
+    And mw sweep reads the host
+    And the session of "mw-swp.8" prints "step 3"
+    And mw sweep reads the host
+    And the session of "mw-swp.8" prints "step 4"
+    And mw sweep reads the host
+    And the session of "mw-swp.8" prints "step 5"
+    And mw sweep reads the host
+    Then sweeping succeeds
+    And the sweep story "mw-swp.8" is not recorded as stuck
+    And no state was recorded on the sweep story "mw-swp.8" by sweeping
+    And the sweep story "mw-swp.8" carries no comment
+
+  Scenario: A session that changed for hours and then goes quiet is reported stuck
+    Given a sweep story "mw-swp.9" filed under it
+    And the sweep story "mw-swp.9" is claimed with its session running
+    When the session of "mw-swp.9" prints "busy"
+    And mw sweep reads the host
+    And the clock advances 3 hours
+    And the session of "mw-swp.9" prints "busier"
+    And mw sweep reads the host
+    And the clock advances 1 hour
+    And mw sweep reads the host
+    Then the sweep story "mw-swp.9" is not recorded as stuck
+    When the clock advances 2 hours
+    And mw sweep reads the host
+    Then the sweep story "mw-swp.9" is recorded as stuck
+    And the sweep story "mw-swp.9" carries a comment quoting: printed nothing new
+    And no state was recorded on the sweep story "mw-swp.9" by sweeping but run=stuck
+
+  Scenario: What sweep saw of a session is remembered in the tracker's notes, not on the story
+    Given a sweep story "mw-swp.10" filed under it
+    And the sweep story "mw-swp.10" is claimed with its session running
+    And the session of "mw-swp.10" has printed "still working"
+    When mw sweep reads the host
+    Then sweeping succeeds
+    And the tracker's notes hold what sweep saw of "mw-swp.10"
+    And no state was recorded on the sweep story "mw-swp.10" by sweeping
+
+  Scenario: The silence clock starts at the claim, not at sweep's first look
+    Given a sweep story "mw-swp.11" filed under it
+    And the sweep story "mw-swp.11" is claimed with its session running
+    And the sweep story "mw-swp.11" was claimed 3 hours ago
+    And the session of "mw-swp.11" has printed "still working"
+    When mw sweep reads the host
+    Then the sweep story "mw-swp.11" is not recorded as stuck
+    When mw sweep reads the host
+    Then the sweep story "mw-swp.11" is recorded as stuck
+    And the sweep story "mw-swp.11" carries a comment quoting: printed nothing new
+
+  Scenario: A story claimed recently is still owed a full threshold
+    Given a sweep story "mw-swp.12" filed under it
+    And the sweep story "mw-swp.12" is claimed with its session running
+    And the sweep story "mw-swp.12" was claimed 1 hour ago
+    And the session of "mw-swp.12" has printed "still working"
+    When mw sweep reads the host
+    And mw sweep reads the host
+    Then the sweep story "mw-swp.12" is not recorded as stuck
+
+  Scenario: A story sweep found stuck no longer keeps a memory in the notes
+    Given a sweep story "mw-swp.13" filed under it
+    And the sweep story "mw-swp.13" is claimed with its session running
+    And the session of "mw-swp.13" has printed "still working"
+    When mw sweep reads the host
+    And the clock advances 3 hours
+    And mw sweep reads the host
+    Then the sweep story "mw-swp.13" is recorded as stuck
+    And the tracker's notes hold nothing of "mw-swp.13"

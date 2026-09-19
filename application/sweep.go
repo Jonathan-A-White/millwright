@@ -22,15 +22,25 @@ const DefaultStaleAfter = 2 * time.Hour
 // time.
 const SweepOutputLines = 20
 
-// The state dimensions Sweep records on a bead between runs. Sweep keeps no
-// daemon and no state of its own: a claimed story's session output
-// fingerprint, and when that fingerprint was first seen, are its only memory,
-// and the bead is the only place that survives between runs. Neither
-// dimension is a run state mw status reads.
-const (
-	SweepOutputState = "sweep-output"
-	SweepSinceState  = "sweep-output-since"
-)
+// SweepNotes is the part of the tracker's key-value store Sweep remembers in
+// between runs. Sweep keeps no daemon and no state of its own: what it saw of
+// a claimed story's session, and since when, is its only memory, and the
+// tracker is the only place that survives between runs. It is written as a
+// note, never as state on the story: every state change is a bead of its own
+// in the tracker, closed and synced to the other host, and a sweep every few
+// minutes would file two of them per story per pass. It is TrackerSync's own
+// Note, SetNote and ClearNote, narrowed.
+type SweepNotes interface {
+	Note(ctx context.Context, key string) (string, error)
+	SetNote(ctx context.Context, key, value string) error
+	ClearNote(ctx context.Context, key string) error
+}
+
+// SweepKey is where Sweep keeps what it saw of one story's session: the note's
+// key carries the story's id, and its value is the fingerprint of the session's
+// recent output and the Unix time that output was first seen — or, for a
+// session sweep had not seen before, when its story was claimed.
+func SweepKey(id string) string { return "sweep." + id }
 
 // Sweep finds, for one host, the claimed stories whose Runner session is gone
 // or has gone quiet, and marks each one run=stuck — once. It is the
@@ -41,6 +51,9 @@ const (
 type Sweep struct {
 	Tracker WorkTracker
 	Runner  Runner
+
+	// Memory is where Sweep keeps what it saw of each session between runs.
+	Memory SweepNotes
 
 	// Host is which of the factory's hosts this sweep is for.
 	Host string
@@ -85,6 +98,8 @@ func (s Sweep) Run(ctx context.Context) (SweepReport, error) {
 		return report, fmt.Errorf("sweeping %s: there is no work tracker to read it from", s.Host)
 	case s.Runner == nil:
 		return report, fmt.Errorf("sweeping %s: there is no runner to ask about sessions", s.Host)
+	case s.Memory == nil:
+		return report, fmt.Errorf("sweeping %s: there is nowhere to remember what a session printed", s.Host)
 	case s.Host == "":
 		return report, fmt.Errorf("sweeping: which host is this? set MW_HOST, or host in the config file")
 	}
@@ -129,7 +144,7 @@ func (s Sweep) one(ctx context.Context, detail StoryDetail, report *SweepReport)
 		return
 	}
 
-	stuck, why, err := s.silent(ctx, id, name)
+	stuck, why, err := s.silent(ctx, detail, name)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the output of %s's session could not be read: %v", id, err))
 		return
@@ -140,60 +155,72 @@ func (s Sweep) one(ctx context.Context, detail StoryDetail, report *SweepReport)
 }
 
 // silent reports whether a running session has printed nothing new since
-// sweep last looked, for at least StaleAfter. Sweep keeps no state of its own
-// between runs, so what it saw last time, and when, is written on the bead
-// itself under SweepOutputState and SweepSinceState — the only place a
-// zero-daemon sweep can remember anything. A session that changed, or one
-// swept for the first time, gets its clock reset rather than reported: every
-// session is owed at least one full StaleAfter before it is called stuck.
-func (s Sweep) silent(ctx context.Context, id, name string) (bool, string, error) {
+// sweep last looked, for at least StaleAfter. What sweep saw last time, and
+// since when, is the note SweepKey names in Memory. A session that changed gets
+// its clock reset to now rather than reported; one sweep has not seen before
+// starts its clock at the claim, when the tracker says when that was, and at
+// this look when it does not — either way every session is owed one full
+// StaleAfter, counted from the claim at the earliest, before it is called
+// stuck.
+func (s Sweep) silent(ctx context.Context, detail StoryDetail, name string) (bool, string, error) {
+	id := detail.Story.ID
 	output, err := s.Runner.Output(ctx, name, SweepOutputLines)
 	if err != nil {
 		return false, "", err
 	}
 	seen := fingerprint(output)
 
-	last, err := s.Tracker.StoryState(ctx, id, SweepOutputState)
+	saved, err := s.Memory.Note(ctx, SweepKey(id))
 	if err != nil {
 		return false, "", err
 	}
-	sinceText, err := s.Tracker.StoryState(ctx, id, SweepSinceState)
-	if err != nil {
-		return false, "", err
-	}
+	last, since, remembered := parseSweepNote(saved)
 
 	now := s.now()
-	if last != seen || sinceText == "" {
-		if err := s.Tracker.SetStoryState(ctx, id, SweepOutputState, seen,
-			"mw sweep recorded this session's output"); err != nil {
-			return false, "", err
+	if !remembered || last != seen {
+		first := now
+		if !remembered && !detail.Started.IsZero() && detail.Started.Before(now) {
+			first = detail.Started
 		}
-		if err := s.Tracker.SetStoryState(ctx, id, SweepSinceState, strconv.FormatInt(now.Unix(), 10),
-			"mw sweep recorded when this output was first seen"); err != nil {
+		note := seen + " " + strconv.FormatInt(first.Unix(), 10)
+		if err := s.Memory.SetNote(ctx, SweepKey(id), note); err != nil {
 			return false, "", err
 		}
 		return false, "", nil
 	}
 
-	since, err := strconv.ParseInt(sinceText, 10, 64)
-	if err != nil {
-		return false, "", fmt.Errorf("the recorded %s of %s is not a timestamp: %q", SweepSinceState, id, sinceText)
-	}
-	quiet := now.Sub(time.Unix(since, 0))
-	if quiet < s.staleAfter() {
+	if now.Sub(since) < s.staleAfter() {
 		return false, "", nil
 	}
 	why := fmt.Sprintf(
 		"mw sweep on %s found this story's session %s has printed nothing new for over %s, since %s. "+
 			"The claim was left alone; settling a stuck claim is a separate story.",
-		s.Host, name, s.staleAfter(), time.Unix(since, 0).UTC().Format(time.RFC3339))
+		s.Host, name, s.staleAfter(), since.UTC().Format(time.RFC3339))
 	return true, why, nil
 }
 
-// markStuck comments the finding on the bead once and records run=stuck. A
-// write that fails is noted and sweep moves on to the next claimed story
-// rather than stopping: one story's trouble is not a reason to leave every
-// other claimed story unexamined.
+// parseSweepNote reads a note Sweep wrote: the fingerprint and the time it was
+// first seen. A note that is missing or is not one of Sweep's is taken as a
+// session sweep has not seen, so that a note somebody edited by hand costs one
+// threshold of waiting rather than a sweep that never comes right.
+func parseSweepNote(note string) (fingerprint string, since time.Time, ok bool) {
+	fingerprint, when, found := strings.Cut(strings.TrimSpace(note), " ")
+	if !found || fingerprint == "" {
+		return "", time.Time{}, false
+	}
+	seconds, err := strconv.ParseInt(when, 10, 64)
+	if err != nil {
+		return "", time.Time{}, false
+	}
+	return fingerprint, time.Unix(seconds, 0), true
+}
+
+// markStuck comments the finding on the bead once, records run=stuck — the one
+// state sweep writes, because a claim gone stuck is an event worth keeping —
+// and forgets what it remembered of the session. A write that fails is noted
+// and sweep moves on to the next claimed story rather than stopping: one
+// story's trouble is not a reason to leave every other claimed story
+// unexamined.
 func (s Sweep) markStuck(ctx context.Context, detail StoryDetail, why string, report *SweepReport) {
 	id := detail.Story.ID
 	if err := s.Tracker.CommentOnStory(ctx, id, why); err != nil {
@@ -204,6 +231,11 @@ func (s Sweep) markStuck(ctx context.Context, detail StoryDetail, why string, re
 		return
 	}
 	report.Stuck = append(report.Stuck, detail)
+	// A story recorded stuck is skipped from now on, so what sweep remembered
+	// of its session is no use to anyone.
+	if err := s.Memory.ClearNote(ctx, SweepKey(id)); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("what sweep remembered of %s could not be cleared: %v", id, err))
+	}
 }
 
 // staleAfter is the threshold a session's unchanged output is measured

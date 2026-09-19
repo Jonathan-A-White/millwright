@@ -27,6 +27,7 @@ type bead struct {
 	Labels           []string          `json:"labels"`
 	EstimatedMinutes int               `json:"estimated_minutes"`
 	CreatedAt        string            `json:"created_at"`
+	StartedAt        string            `json:"started_at"`
 	Priority         *int              `json:"priority"`
 	Metadata         map[string]any    `json:"metadata"`
 	Parent           string            `json:"parent"`
@@ -163,6 +164,16 @@ func (b bead) created() time.Time {
 	return filed
 }
 
+// started is when bd says the bead was claimed, or the zero time when it says
+// nothing or something that is not a time.
+func (b bead) started() time.Time {
+	claimed, err := time.Parse(time.RFC3339, b.StartedAt)
+	if err != nil {
+		return time.Time{}
+	}
+	return claimed
+}
+
 // detail is this bead as a story of an epic with those defaults.
 func (b bead) detail(defaults domain.Path) application.StoryDetail {
 	return application.StoryDetail{
@@ -181,6 +192,7 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		EstimateMinutes: b.EstimatedMinutes,
 		Priority:        b.priority(),
 		Created:         b.created(),
+		Started:         b.started(),
 		Needs:           b.needs(),
 		// The formula poured for this story, as the dispatch that poured it
 		// recorded it. Only the root is known from the story itself; the steps

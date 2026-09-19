@@ -22,7 +22,9 @@ func newSweepCmd() *cobra.Command {
 			"session that is no longer there is reported stuck straight away. A session that is still\n" +
 			"there but has printed nothing new for longer than the stale threshold (config `stale_hours`,\n" +
 			"default 2) is reported stuck too. Either way the finding is commented on the bead once and\n" +
-			"recorded run=stuck; a story mw next or an earlier sweep already recorded gone is left alone.\n\n" +
+			"recorded run=stuck; a story mw next or an earlier sweep already recorded gone is left alone.\n" +
+			"What sweep saw of each session is kept as a note in bd's key-value store, not as state, so\n" +
+			"that sweeping often files no event beads.\n\n" +
 			"sweep never kills or restarts a session, never gives a claim back, and never touches a\n" +
 			"worktree, git or the ledger. Settling a stuck claim is a separate command.",
 		Args: cobra.NoArgs,
@@ -40,8 +42,10 @@ func newSweepCmd() *cobra.Command {
 				return err
 			}
 
+			gateway := mwGateway(dir, host)
 			_, err = application.Sweep{
-				Tracker:    mwGateway(dir, host),
+				Tracker:    gateway,
+				Memory:     gateway,
 				Runner:     tmux.New(),
 				Host:       host,
 				StaleAfter: time.Duration(hours) * time.Hour,

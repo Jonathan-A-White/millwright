@@ -60,6 +60,9 @@ type StoryDetail struct {
 	Priority int
 	// Created is when the story was filed; zero when the tracker did not say.
 	Created time.Time
+	// Started is when the story was claimed, as the tracker recorded it; zero
+	// when it was never claimed or the tracker did not say.
+	Started time.Time
 	// Molecule is the formula poured for this story, empty until it has been
 	// poured. It is filled in by whoever pours it, not by reading the story.
 	Molecule Molecule

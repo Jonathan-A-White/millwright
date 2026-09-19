@@ -57,7 +57,9 @@ func InitializeSweepScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the sweep story "([^"]*)" is claimed with its session running$`, c.theSweepStoryIsClaimedWithSessionRunning)
 	ctx.Given(`^the sweep story "([^"]*)" is marked run=(\S+)$`, c.theSweepStoryIsMarkedRun)
 	ctx.Given(`^the session of "([^"]*)" has printed "([^"]*)"$`, c.theSessionHasPrinted)
+	ctx.Given(`^the sweep story "([^"]*)" was claimed (\d+) hours? ago$`, c.theSweepStoryWasClaimedHoursAgo)
 
+	ctx.When(`^the session of "([^"]*)" prints "([^"]*)"$`, c.theSessionHasPrinted)
 	ctx.When(`^mw sweep reads the host$`, c.mwSweepReadsTheHost)
 	ctx.When(`^the clock advances (\d+) hours?$`, c.theClockAdvances)
 
@@ -69,6 +71,10 @@ func InitializeSweepScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the sweep story "([^"]*)" carries exactly (\d+) comment$`, c.theSweepStoryCarriesExactlyNComments)
 	ctx.Then(`^the sweep story "([^"]*)" is still recorded run=(\S+), not stuck$`, c.theSweepStoryIsStillRecordedRun)
 	ctx.Then(`^the sweep report shows "([^"]*)" on the rig "([^"]*)"$`, c.theSweepReportShowsOnTheRig)
+	ctx.Then(`^no state was recorded on the sweep story "([^"]*)" by sweeping$`, c.noStateWasRecorded)
+	ctx.Then(`^no state was recorded on the sweep story "([^"]*)" by sweeping but run=(\S+)$`, c.noStateWasRecordedButRun)
+	ctx.Then(`^the tracker's notes hold what sweep saw of "([^"]*)"$`, c.theNotesHoldWhatSweepSaw)
+	ctx.Then(`^the tracker's notes hold nothing of "([^"]*)"$`, c.theNotesHoldNothing)
 	ctx.Then(`^nothing was written through the sweep tracker but state and comments$`, c.nothingButStateAndComments)
 	ctx.Then(`^nothing was started, sent to or closed through the sweep runner$`, c.nothingStartedSentOrClosed)
 }
@@ -126,12 +132,21 @@ func (c *sweepContext) theSessionHasPrinted(id, text string) error {
 	return nil
 }
 
+func (c *sweepContext) theSweepStoryWasClaimedHoursAgo(id, hoursText string) error {
+	hours, err := strconv.Atoi(hoursText)
+	if err != nil {
+		return fmt.Errorf("parsing %q as a number of hours: %w", hoursText, err)
+	}
+	return c.tracker.SetStarted(id, c.now.Add(-time.Duration(hours)*time.Hour))
+}
+
 func (c *sweepContext) mwSweepReadsTheHost() error {
 	c.askedBefore = len(c.tracker.Asked())
 	c.namesBefore = c.runner.Names()
 	c.report, c.err = application.Sweep{
 		Tracker: c.tracker,
 		Runner:  c.runner,
+		Memory:  c.tracker,
 		Host:    sweepHost,
 		Now:     func() time.Time { return c.now },
 	}.Run(context.Background())
@@ -291,6 +306,62 @@ func (c *sweepContext) nothingStartedSentOrClosed() error {
 		if sent := c.runner.Input(name); len(sent) != 0 {
 			return fmt.Errorf("expected nothing sent to session %s, got %v", name, sent)
 		}
+	}
+	return nil
+}
+
+// noStateWasRecorded checks that sweeping wrote no state on the story at all:
+// every state change is a bead of its own in the tracker, so a sweep that only
+// watches a session must leave none behind.
+func (c *sweepContext) noStateWasRecorded(id string) error {
+	return c.noStateWasRecordedButRun(id, "")
+}
+
+// noStateWasRecordedButRun is the same, allowing the one run state sweep
+// records because it is an event worth keeping. An empty run allows none.
+func (c *sweepContext) noStateWasRecordedButRun(id, run string) error {
+	if err := c.sweepingSucceeds(); err != nil {
+		return err
+	}
+	calls := 0
+	for _, call := range c.tracker.Asked() {
+		if call == "SetStoryState" {
+			calls++
+		}
+	}
+	want := 0
+	if run != "" {
+		want = 1
+	}
+	if calls != want {
+		return fmt.Errorf("expected %d state change(s) written on %s, the tracker was asked to make %d", want, id, calls)
+	}
+	if run != "" {
+		if got := c.tracker.State(id, application.RunState); got != run {
+			return fmt.Errorf("expected %s to be recorded %s=%s, got %q", id, application.RunState, run, got)
+		}
+	}
+	return nil
+}
+
+func (c *sweepContext) theNotesHoldWhatSweepSaw(id string) error {
+	got, err := c.tracker.Note(context.Background(), application.SweepKey(id))
+	if err != nil {
+		return err
+	}
+	if got == "" {
+		return fmt.Errorf("expected the tracker's notes to hold what sweep saw of %s under %s, they hold nothing", id, application.SweepKey(id))
+	}
+	return nil
+}
+
+func (c *sweepContext) theNotesHoldNothing(id string) error {
+	got, err := c.tracker.Note(context.Background(), application.SweepKey(id))
+	if err != nil {
+		return err
+	}
+	if got != "" {
+		return fmt.Errorf("expected the tracker's notes to hold nothing of %s, got %q", id, got)
 	}
 	return nil
 }
