@@ -639,13 +639,16 @@ bin/mw status
 
 `mw status` takes no arguments and reads the vault, the tracker, the runner's
 session names and the Builder's ledger. It writes to none of them. It is the report for a phone: what this host is doing right now, in
-five parts.
+five parts, and a sixth when there is one.
 
 - **RUNNING** — the stories this host has claimed, each with the name of the
   tmux session to attach to. A story recorded `run=stopped` or `run=stuck` says
   `NOT RUNNING` rather than pretending, and a claimed story whose poured formula
   still has a step open says its close-out is blocked.
 - **READY** — what this host could take now.
+- **WAITING FOR THE GOVERNOR** — the ready or claimed stories labelled `hitl`,
+  worked with the Governor present. They are listed here and not under RUNNING
+  or READY, and the heading is left out when there are none.
 - **BLOCKED** — what is waiting, each with only the work it is still waiting
   for: a wait that has finished is not listed.
 - **OTHER HOSTS** — every other host a story is pathed to, and what it holds.

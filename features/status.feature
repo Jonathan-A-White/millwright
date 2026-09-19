@@ -32,6 +32,41 @@ Feature: mw status
     And the report lists "mw-gq6.2" as ready
     And the report lists "mw-gq6.3" as blocked
 
+  Scenario: A ready story labelled hitl is listed under its own heading, not under ready
+    Given a status story "mw-gq6.23" filed under it
+    And the status story "mw-gq6.23" is labelled "hitl"
+    And a status story "mw-gq6.24" filed under it
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "mw-gq6.23" as waiting for the Governor
+    And the report does not list "mw-gq6.23" as ready
+    And the report lists "mw-gq6.24" as ready
+
+  Scenario: A claimed story labelled hitl is listed under its own heading, not under running
+    Given a status story "mw-gq6.25" filed under it
+    And the status story "mw-gq6.25" is labelled "hitl"
+    And the status story "mw-gq6.25" is claimed with its session running
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "mw-gq6.25" as waiting for the Governor
+    And the report does not show "mw-gq6.25" as running
+
+  Scenario: With no story labelled hitl the report has no heading for the Governor
+    Given a status story "mw-gq6.26" filed under it
+    And a status story "mw-gq6.27" filed under it
+    And the status story "mw-gq6.27" is claimed with its session running
+    When mw status reads the host
+    Then reading status succeeds
+    And the report has no heading for stories waiting for the Governor
+
+  Scenario: The heading for the Governor fits a phone screen too
+    Given a status story "mw-gq6.28" titled "A story whose title runs on and on and on and on and on and on and on and on, well past a phone screen" filed under it
+    And the status story "mw-gq6.28" is labelled "hitl"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "mw-gq6.28" as waiting for the Governor
+    And every line of the report is at most 60 columns wide
+
   Scenario: A blocked story lists only what it is still waiting for
     Given a status story "mw-gq6.20" filed under it
     And a status story "mw-gq6.21" filed under it
