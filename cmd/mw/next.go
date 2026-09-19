@@ -28,8 +28,10 @@ func newNextCmd() *cobra.Command {
 		Long: "next reads what the story's session reported in runs/<story>/result.json. A session that did not\n" +
 			"finish is written on the story, marked blocked and left alone: nothing is merged, nothing is closed\n" +
 			"and the worktree is kept, because it is the evidence.\n\n" +
-			"A session that did finish is checked before anything is landed: the branch must hold commits, every\n" +
-			"step of its formula must be closed, and the rig's own tests must pass in the worktree. Then, under\n" +
+			"A session that did finish is checked before anything is landed: the branch must hold commits, none\n" +
+			"of those commits may be signed by a machine — a Co-Authored-By trailer or a \"Generated with\" line\n" +
+			"is refused, and the offending commit is named — every step of its formula must be closed, and the\n" +
+			"rig's own tests must pass in the worktree. Then, under\n" +
 			"the rig's merge slot, the branch is merged into the target branch as the remote has it — and if that\n" +
 			"was not a fast-forward the tests are run again on the merged result, because nothing has ever tested\n" +
 			"that combination. The push is never forced; a push the remote refuses is fetched and tried again a\n" +

@@ -246,6 +246,16 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 			c.branch, c.target), "")
 	}
 
+	// What the commits say about who wrote them. This is asked before the
+	// formula, before the tests and before the merge slot, because a commit
+	// message is the one thing a landing makes permanent and cannot take back:
+	// once it is on the target branch at the remote, only a force-push would
+	// undo it, and mw forces nothing. Refused here, the branch is still the
+	// session's to amend.
+	if stopped, why, said := n.signedByAMachine(ctx, c); stopped {
+		return n.stop(ctx, c, report, why, said)
+	}
+
 	// What the formula says the session was to do. A step still open is a step
 	// the session did not do, whatever the code looks like.
 	if root := c.detail.Molecule.RootID; root != "" {
@@ -298,6 +308,45 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be recorded as %s=%s: %v", c.id, RunState, RunLanded, err))
 	}
 	return n.finish(ctx, c, report, outcome, false)
+}
+
+// signedByAMachine reads the commits a landing would put on the target branch
+// and reports whether any of them is signed as a machine's work — the reason to
+// stop, and the detail for the story's comment. A branch whose commits could
+// not be read is refused too: a close-out that cannot tell lands nothing.
+//
+// The rule itself is AIAttribution, and it is applied to every commit the
+// landing would add, not only the newest: the target branch takes all of them.
+func (n Next) signedByAMachine(ctx context.Context, c *closeOut) (bool, string, string) {
+	commits, err := n.Landing.Commits(ctx, c.rigDir, c.branch, StartPoint(n.remote(), c.target))
+	if err != nil {
+		return true, fmt.Sprintf("the commit messages on %s could not be read: %v", c.branch, err), ""
+	}
+
+	var carrying []string
+	first, signature := Commit{}, ""
+	for _, commit := range commits {
+		line := AIAttribution(commit.Message)
+		if line == "" {
+			continue
+		}
+		if signature == "" {
+			first, signature = commit, line
+		}
+		carrying = append(carrying, "- "+commit.Hash+" · "+firstLine(commit.Message)+"\n  "+line)
+	}
+	if signature == "" {
+		return false, "", ""
+	}
+
+	why := fmt.Sprintf("commit %s on %s is signed as a machine's work, which this factory's commits never are: %s",
+		first.Hash, c.branch, signature)
+	said := fmt.Sprintf("The commit(s) carrying it:\n\n%s\n\nA seat outlives every session that occupies it, "+
+		"so the seat signs the work and the model never does. Nothing was merged: the branch is still the "+
+		"session's to amend. Reword the message(s) — `git rebase -i %s` or `git commit --amend` for the "+
+		"newest — and run `mw next %s` again.",
+		strings.Join(carrying, "\n"), StartPoint(n.remote(), c.target), c.id)
+	return true, why, said
 }
 
 // closeALanding is a close-out run again on a story an earlier one landed and

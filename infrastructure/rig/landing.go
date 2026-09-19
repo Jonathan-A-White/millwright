@@ -36,6 +36,50 @@ func (w *Worktrees) Ahead(ctx context.Context, rigDir, branch, base string) (int
 	return commits, nil
 }
 
+// commitEnd terminates each commit git log prints here, and endDirective is how
+// git is asked for it: a NUL cannot be passed in an argument, so git writes it
+// itself. A NUL is the one byte a commit message cannot hold, so it is the one
+// separator a message can never forge — and a message that carried the
+// separator could hide everything after it, which is the whole thing this
+// reading exists to catch.
+const (
+	commitEnd    = "\x00"
+	endDirective = "%x00"
+)
+
+// Commits implements application.Landing: the commits branch has that base does
+// not, oldest first — the order they would land in — each with its short hash
+// and its whole message.
+func (w *Worktrees) Commits(ctx context.Context, rigDir, branch, base string) ([]application.Commit, error) {
+	switch {
+	case branch == "":
+		return nil, fmt.Errorf("reading the commits in %s: which branch?", rigDir)
+	case base == "":
+		return nil, fmt.Errorf("reading the commits on %s in %s: ahead of what?", branch, rigDir)
+	}
+	// %B is the whole message, subject and body, exactly as it was written.
+	said, err := w.git(ctx, rigDir, "log", "--reverse", "--format=format:%h%n%B"+endDirective, base+".."+branch)
+	if err != nil {
+		return nil, err
+	}
+
+	var commits []application.Commit
+	for _, record := range strings.Split(said, commitEnd) {
+		// `format:` puts a newline between records, which lands at the head of
+		// the next one.
+		record = strings.TrimLeft(record, "\r\n")
+		if strings.TrimSpace(record) == "" {
+			continue
+		}
+		hash, message, _ := strings.Cut(record, "\n")
+		commits = append(commits, application.Commit{
+			Hash:    strings.TrimSpace(hash),
+			Message: strings.TrimRight(message, "\n"),
+		})
+	}
+	return commits, nil
+}
+
 // OpenLanding implements application.Landing. The landing is a worktree of its
 // own, detached at the target branch as the remote has it, so that neither the
 // rig's own checkout — which a person may be sitting in — nor the story's

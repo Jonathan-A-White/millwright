@@ -181,8 +181,9 @@ line is still appended, saying it did not land and what it burned getting there.
 A session that did finish is checked before anything is landed:
 
 1. the branch must hold **commits** that `origin/<target>` does not;
-2. every **step** of the story's poured formula must be closed;
-3. the **rig's own tests** must pass in the story's worktree.
+2. none of those commits may be **signed by a machine** (below);
+3. every **step** of the story's poured formula must be closed;
+4. the **rig's own tests** must pass in the story's worktree.
 
 Then, under the rig's **merge slot**, `mw/<story-id>` is merged into the target
 branch as the remote has it — in a throwaway detached worktree, so neither the
@@ -197,6 +198,30 @@ Only then: the worktree and its branch go, one line is appended to the seat's
 ledger, the story is closed with the reason, `mw sync` brings the hosts level so
 that the other host sees a closed story rather than a claimed one, and whatever
 is ready here is dispatched.
+
+### Nothing here is signed by a machine
+
+A seat outlives every session that occupies it, so the seat signs the work and
+the model never does. That is enforced in three places, so that it does not
+depend on any one of them:
+
+- the session `mw` starts is given `--settings` with
+  `attribution.commit` and `attribution.pr` set to the empty string and
+  `attribution.sessionUrl` to `false`, which is how Claude Code's settings
+  reference says to hide the `Co-Authored-By` trailer and the "Generated with"
+  line it would otherwise add. It is passed as a JSON string rather than a file,
+  so nothing is written into the rig's worktree for a session to commit by
+  accident;
+- the Builder's kickoff prompt says it in words;
+- `mw next` reads the messages of every commit it would land
+  (`origin/<target>..mw/<story-id>`) before it merges anything, and refuses the
+  branch if any line of any of them, ignoring case, starts with
+  `Co-Authored-By:` or holds "generated with". This factory has one human, so
+  there is no innocent second author. The story is marked `run=blocked`, a
+  comment names the offending commit by its short hash and quotes the line, one
+  "not landed" line goes in the ledger, the worktree and branch are kept, and
+  `mw next` leaves with 1. Nothing is merged, so the branch is still the
+  session's to amend.
 
 The **merge slot** is an advisory lock (`flock`) on a file beside the rig's
 worktrees, one per rig per host. It is a lock rather than a file somebody writes

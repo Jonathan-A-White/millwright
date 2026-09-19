@@ -49,6 +49,12 @@ type Landing interface {
 	// committed nothing, and there is nothing to land.
 	Ahead(ctx context.Context, rigDir, branch, base string) (int, error)
 
+	// Commits is those same commits themselves — the ones landing would put on
+	// the target branch — oldest first, each with the short hash a person names
+	// it by and its whole message, trailers and all. It is how a close-out
+	// reads what it is about to land before it lands it.
+	Commits(ctx context.Context, rigDir, branch, base string) ([]Commit, error)
+
 	// OpenLanding cuts a throwaway worktree of the rig at base, detached from
 	// every branch, and reports where it is. It is where the merge is made, the
 	// merged result is tested and the push is made from.
@@ -67,6 +73,47 @@ type Landing interface {
 	// CloseLanding takes the throwaway worktree away again. Closing what is not
 	// there is not an error.
 	CloseLanding(ctx context.Context, rigDir, landingDir string) error
+}
+
+// Commit is one commit a landing would put on the target branch: the short hash
+// a person names it by, and its whole message.
+type Commit struct {
+	Hash    string
+	Message string
+}
+
+// The two ways a commit message says a machine wrote it. Both are matched with
+// the case folded away, because a trailer git wrote and a trailer a model wrote
+// do not agree on it.
+const (
+	// coAuthoredBy is a trailer naming a second author. This factory has one
+	// human and no other contributors, so on a branch mw is about to land there
+	// is no innocent one: any Co-Authored-By at all is an AI signing the work.
+	coAuthoredBy = "co-authored-by:"
+
+	// generatedWith is the line Claude Code puts in a pull request description
+	// — "Generated with [Claude Code](...)" — and that sessions copy into
+	// commit messages.
+	generatedWith = "generated with"
+)
+
+// AIAttribution is the line of a commit message that signs the work as a
+// machine's, or the empty string when the message carries none. A line is one
+// when, ignoring case and surrounding space, it begins with a Co-Authored-By
+// trailer or holds the words "generated with" anywhere in it.
+//
+// This is the whole rule, and it is deliberately blunt: a seat outlives every
+// session that occupies it, so the seat signs the work and the model never
+// does, and a history that cannot be read as one human's is not worth arguing
+// about line by line.
+func AIAttribution(message string) string {
+	for _, line := range strings.Split(message, "\n") {
+		said := strings.ToLower(strings.TrimSpace(line))
+		if strings.HasPrefix(said, coAuthoredBy) || strings.Contains(said, generatedWith) {
+			return strings.TrimSpace(line)
+		}
+	}
+	return ""
 }
 
 // Checked is one run of a rig's own tests: whether they passed, what they
