@@ -274,3 +274,48 @@ func TestRunnerOnASessionThatIsNotThere(t *testing.T) {
 		t.Error("expected a second session of the same name to be refused")
 	}
 }
+
+func TestRunnerClosesAnExitedSessionAndOnlyThatOne(t *testing.T) {
+	runner := privateRunner(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	// A story's session and the session of another story whose id it is a prefix
+	// of (mw-gq6.6 and mw-gq6.61): closing the one must not touch the other.
+	landed := application.SessionName("mw-gq6.6")
+	other := application.SessionName("mw-gq6.61")
+	if err := runner.Start(ctx, application.SessionSpec{Name: landed, Command: []string{"sh", "-c", "exit 0"}}); err != nil {
+		t.Fatalf("starting %s: %v", landed, err)
+	}
+	if err := runner.Start(ctx, application.SessionSpec{Name: other, Command: []string{"sleep", "30"}}); err != nil {
+		t.Fatalf("starting %s: %v", other, err)
+	}
+	defer func() {
+		if err := runner.Close(context.Background(), other); err != nil {
+			t.Errorf("closing %s: %v", other, err)
+		}
+	}()
+
+	// The first has ended and remain-on-exit keeps it on screen, which is the
+	// session mw next finds a story's to be once the story is landed.
+	status, err := runner.Wait(ctx, landed)
+	if err != nil {
+		t.Fatalf("waiting for %s: %v", landed, err)
+	}
+	expectExit(t, status, 0)
+
+	if err := runner.Close(ctx, landed); err != nil {
+		t.Fatalf("closing the exited %s: %v", landed, err)
+	}
+	if status, err = runner.Status(ctx, landed); err != nil || status.State != application.StateGone {
+		t.Fatalf("expected the closed %s to be gone, got %+v, %v", landed, status, err)
+	}
+	if status, err = runner.Status(ctx, other); err != nil || !status.Running() {
+		t.Fatalf("expected %s to be left running, got %+v, %v", other, status, err)
+	}
+
+	// Closing what is already closed is what a second mw next does: harmless.
+	if err := runner.Close(ctx, landed); err != nil {
+		t.Errorf("expected closing a closed session to be harmless, got %v", err)
+	}
+}
