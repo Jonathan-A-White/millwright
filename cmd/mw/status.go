@@ -26,6 +26,10 @@ func newStatusCmd() *cobra.Command {
 			"`host_silent_hours`, default 2), or that never synced at all, is marked asleep and its work\n" +
 			"is listed as stranded, with the one line that re-paths a story here. Re-pathing is a\n" +
 			"person's act: status only says which stories are waiting for one.\n\n" +
+			"When a rig's memory in the Builder's seat is larger than the budget (config\n" +
+			"`rig_memory_bytes`, default 8000), a RIG MEMORY section says which and by how much: every\n" +
+			"session pays for that file at boot, so the Mayor is due to prune it. It is left out when\n" +
+			"none is over.\n\n" +
 			"Every line fits a phone-width terminal, at most 60 columns. Nothing is claimed, nothing is\n" +
 			"written and no session is started: status only reads.",
 		Args: cobra.NoArgs,
@@ -43,15 +47,21 @@ func newStatusCmd() *cobra.Command {
 				return err
 			}
 
+			budget, err := config.RigMemoryBytes()
+			if err != nil {
+				return err
+			}
+
 			tracker := mwGateway(dir, host)
 			_, err = application.Status{
-				Tracker:     tracker,
-				Notes:       tracker,
-				Vault:       mwVault(dir, host),
-				Host:        host,
-				Seat:        BuilderSeat,
-				HostSilence: time.Duration(hours) * time.Hour,
-				Out:         cmd.OutOrStdout(),
+				Tracker:        tracker,
+				Notes:          tracker,
+				Vault:          mwVault(dir, host),
+				Host:           host,
+				Seat:           BuilderSeat,
+				HostSilence:    time.Duration(hours) * time.Hour,
+				RigMemoryBytes: budget,
+				Out:            cmd.OutOrStdout(),
 			}.Run(cmd.Context())
 			return err
 		},

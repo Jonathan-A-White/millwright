@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -40,6 +41,9 @@ type statusContext struct {
 	// pinned it, so that the environment is left exactly as it was found.
 	silentHoursWas string
 	silentHoursSet bool
+	// rigMemoryWas and rigMemorySet are the same for $MW_RIG_MEMORY_BYTES.
+	rigMemoryWas string
+	rigMemorySet bool
 	// elsewhereWas is what each story pathed to another host looked like just
 	// before mw status ran — its host, its status and the note its host left —
 	// so that a scenario can say the report re-pathed and recorded nothing.
@@ -58,23 +62,34 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
 		was, set := os.LookupEnv(config.HostSilenceEnv)
+		memoryWas, memorySet := os.LookupEnv(config.RigMemoryEnv)
 		*c = statusContext{
 			tracker:        apptest.NewFakeTracker(),
 			runner:         apptest.NewFakeRunner(),
 			now:            time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC),
 			silentHoursWas: was,
 			silentHoursSet: set,
+			rigMemoryWas:   memoryWas,
+			rigMemorySet:   memorySet,
 			elsewhereWas:   map[string]string{},
 		}
 		// Every status scenario reads its threshold out of the configuration,
 		// and pins it in the environment so that no scenario ever reads this
 		// machine's own config file. The value is the default the config
-		// package would have given anyway.
+		// package would have given anyway. The rig memory budget is pinned the same way.
+		if err := os.Setenv(config.RigMemoryEnv, strconv.Itoa(config.DefaultRigMemoryBytes)); err != nil {
+			return ctx, err
+		}
 		return ctx, os.Setenv(config.HostSilenceEnv, strconv.Itoa(config.DefaultHostSilentHours))
 	})
 	ctx.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
 		if c.root != "" {
 			_ = os.RemoveAll(c.root)
+		}
+		if c.rigMemorySet {
+			_ = os.Setenv(config.RigMemoryEnv, c.rigMemoryWas)
+		} else {
+			_ = os.Unsetenv(config.RigMemoryEnv)
 		}
 		if c.silentHoursSet {
 			return ctx, os.Setenv(config.HostSilenceEnv, c.silentHoursWas)
@@ -100,6 +115,9 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the host "([^"]*)" has never synced$`, c.theHostHasNeverSynced)
 	ctx.Given(`^the host "([^"]*)" left a last sync note that is not a time$`, c.theHostLeftANoteThatIsNotATime)
 	ctx.Given(`^the configuration says a host is asleep after (\d+) hours$`, c.theConfigurationSaysAHostIsAsleepAfter)
+	ctx.Given(`^the builder's memory of the rig "([^"]*)" is (\d+) bytes$`, c.theBuildersMemoryOfTheRigIs)
+	ctx.Given(`^the builder's archive of the rig "([^"]*)" is (\d+) bytes$`, c.theBuildersArchiveOfTheRigIs)
+	ctx.Given(`^the configuration says a rig's memory may be (\d+) bytes$`, c.theConfigurationSaysARigsMemoryMayBe)
 
 	ctx.When(`^mw status reads the host$`, c.mwStatusReadsTheHost)
 
@@ -126,6 +144,9 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the report says how to re-path a story stranded on the host "([^"]*)"$`, c.theReportSaysHowToRePathFrom)
 	ctx.Then(`^nothing pathed to another host was re-pathed or touched$`, c.nothingElsewhereWasTouched)
 	ctx.Then(`^the report says "([^"]*)" needs "([^"]*)" and nothing else$`, c.theReportSaysNeedsAndNothingElse)
+	ctx.Then(`^the report has no RIG MEMORY section$`, c.theReportHasNoRigMemorySection)
+	ctx.Then(`^the report warns that the memory of the rig "([^"]*)" is (\d+) of (\d+) bytes$`, c.theReportWarnsAboutTheRigsMemory)
+	ctx.Then(`^the report does not warn about the memory of the rig "([^"]*)"$`, c.theReportDoesNotWarnAboutTheRigsMemory)
 }
 
 // workspace makes the temp directory this scenario keeps its vault in, once.
@@ -305,6 +326,41 @@ func (c *statusContext) theBuildersLedgerHoldsALineBurning(when, tokensText stri
 	return vault.New(dir).AppendToLedger(context.Background(), statusSeat, line)
 }
 
+// theBuildersMemoryOfTheRigIs writes a Builder's memory file for a rig, of
+// exactly the size given, into this scenario's own vault directory.
+func (c *statusContext) theBuildersMemoryOfTheRigIs(rig, bytesText string) error {
+	return c.writeRigFile(rig+application.MemoryExt, bytesText)
+}
+
+// theBuildersArchiveOfTheRigIs writes the file the Mayor moves pruned memory
+// into, beside the memory itself.
+func (c *statusContext) theBuildersArchiveOfTheRigIs(rig, bytesText string) error {
+	return c.writeRigFile(rig+"-archive"+application.MemoryExt, bytesText)
+}
+
+func (c *statusContext) writeRigFile(name, bytesText string) error {
+	size, err := strconv.Atoi(bytesText)
+	if err != nil {
+		return fmt.Errorf("the size %q is not a number: %w", bytesText, err)
+	}
+	dir, err := c.workspace()
+	if err != nil {
+		return err
+	}
+	rigs := filepath.Join(dir, application.SeatsDir, statusSeat, application.RigsDir)
+	if err := os.MkdirAll(rigs, 0o755); err != nil {
+		return fmt.Errorf("making the Builder's rigs directory: %w", err)
+	}
+	return os.WriteFile(filepath.Join(rigs, name), []byte(strings.Repeat("x", size)), 0o644)
+}
+
+// theConfigurationSaysARigsMemoryMayBe pins the budget in the environment the
+// config package reads first, so that the scenario really does get its budget
+// out of the configuration and never off this machine's config file.
+func (c *statusContext) theConfigurationSaysARigsMemoryMayBe(bytesText string) error {
+	return os.Setenv(config.RigMemoryEnv, bytesText)
+}
+
 func (c *statusContext) mwStatusReadsTheHost() error {
 	dir, err := c.workspace()
 	if err != nil {
@@ -314,19 +370,24 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 	if err != nil {
 		return fmt.Errorf("reading how long a host may be silent: %w", err)
 	}
+	budget, err := config.RigMemoryBytes()
+	if err != nil {
+		return fmt.Errorf("reading how large a rig's memory may be: %w", err)
+	}
 	c.askedBefore = len(c.tracker.Asked())
 	if err := c.rememberElsewhere(); err != nil {
 		return err
 	}
 
 	c.report, c.err = application.Status{
-		Tracker:     c.tracker,
-		Notes:       c.tracker,
-		Vault:       vault.New(dir),
-		Host:        statusHost,
-		Seat:        statusSeat,
-		HostSilence: time.Duration(hours) * time.Hour,
-		Now:         func() time.Time { return c.now },
+		Tracker:        c.tracker,
+		Notes:          c.tracker,
+		Vault:          vault.New(dir),
+		Host:           statusHost,
+		Seat:           statusSeat,
+		HostSilence:    time.Duration(hours) * time.Hour,
+		RigMemoryBytes: budget,
+		Now:            func() time.Time { return c.now },
 	}.Run(context.Background())
 	return nil
 }
@@ -769,6 +830,40 @@ func (c *statusContext) nothingWasWritten() error {
 	}
 	if names := c.runner.Names(); len(names) != 0 {
 		return fmt.Errorf("expected nothing started through the runner, got %v", names)
+	}
+	return nil
+}
+
+func (c *statusContext) theReportHasNoRigMemorySection() error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	if strings.Contains(c.report.String(), application.RigMemoryHeading) {
+		return fmt.Errorf("expected no %s section, got:\n%s", application.RigMemoryHeading, c.report.String())
+	}
+	return nil
+}
+
+func (c *statusContext) theReportWarnsAboutTheRigsMemory(rig, size, budget string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	want := fmt.Sprintf("%s %s/%s bytes", rig, size, budget)
+	printed := c.report.String()
+	if !strings.Contains(printed, application.RigMemoryHeading) || !strings.Contains(printed, want) {
+		return fmt.Errorf("expected a %s section saying %q, got:\n%s", application.RigMemoryHeading, want, printed)
+	}
+	return nil
+}
+
+func (c *statusContext) theReportDoesNotWarnAboutTheRigsMemory(rig string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	for _, line := range strings.Split(c.report.String(), "\n") {
+		if strings.HasPrefix(line, "  "+rig+" ") && strings.Contains(line, "bytes") {
+			return fmt.Errorf("expected no warning about the memory of %s, got:\n%s", rig, c.report.String())
+		}
 	}
 	return nil
 }
