@@ -115,6 +115,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the vault holds work of its own that nobody committed, to "([^"]*)"$`, c.theVaultHoldsOtherWork)
 	ctx.Given(`^the vault refuses a commit, saying: (.+)$`, c.theVaultRefusesACommit)
 	ctx.Given(`^the vault takes a commit again$`, c.theVaultTakesACommitAgain)
+	ctx.Given(`^the terminal still holds the exited session of "([^"]*)"$`, c.theTerminalHoldsAnExitedSession)
 
 	ctx.When(`^mw closes out "([^"]*)"$`, c.mwClosesOut)
 	ctx.When(`^mw closes out "([^"]*)" a second time$`, c.mwClosesOut)
@@ -142,6 +143,8 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^no fresh session was started$`, c.noFreshSessionWasStarted)
 	ctx.Then(`^the story "([^"]*)" is recorded as stopped$`, c.theStoryIsRecordedAsStopped)
 	ctx.Then(`^the merge slot of the rig is free again$`, c.theMergeSlotIsFree)
+	ctx.Then(`^the terminal holds no session of "([^"]*)"$`, c.theTerminalHoldsNoSession)
+	ctx.Then(`^the session of "([^"]*)" is still on the terminal, exited$`, c.theSessionIsStillThereExited)
 	ctx.Then(`^the close-out says the story is landed but still open$`, c.landedButStillOpen)
 	ctx.Then(`^the ledger holds exactly one line for "([^"]*)"$`, c.theLedgerHoldsOneLineFor)
 	ctx.Then(`^the ledger holds (\d+) lines for "([^"]*)"$`, c.theLedgerHoldsLinesFor)
@@ -859,6 +862,40 @@ func (c *nextContext) aFreshSessionIsRunningFor(id string) error {
 		}
 	}
 	return fmt.Errorf("expected a session for %s, got %q (the close-out said: %v)", id, c.runner.Names(), c.err)
+}
+
+// theTerminalHoldsAnExitedSession is the session a story was worked in, as it is
+// when mw next runs: its command has ended, and remain-on-exit keeps it on screen.
+func (c *nextContext) theTerminalHoldsAnExitedSession(id string) error {
+	name := application.SessionName(id)
+	err := c.runner.Start(context.Background(), application.SessionSpec{Name: name, Command: []string{"claude"}})
+	if err != nil {
+		return err
+	}
+	c.runner.Exit(name, 0)
+	return nil
+}
+
+func (c *nextContext) theTerminalHoldsNoSession(id string) error {
+	status, err := c.runner.Status(context.Background(), application.SessionName(id))
+	if err != nil {
+		return err
+	}
+	if status.State != application.StateGone {
+		return fmt.Errorf("expected the session of %s to have been closed, got %+v (the close-out said: %v)", id, status, c.err)
+	}
+	return nil
+}
+
+func (c *nextContext) theSessionIsStillThereExited(id string) error {
+	status, err := c.runner.Status(context.Background(), application.SessionName(id))
+	if err != nil {
+		return err
+	}
+	if !status.Finished() {
+		return fmt.Errorf("expected the session of %s to be left exited on the terminal, got %+v", id, status)
+	}
+	return nil
 }
 
 func (c *nextContext) noFreshSessionWasStarted() error {

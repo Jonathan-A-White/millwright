@@ -411,3 +411,18 @@ Feature: Closing out a finished story and carrying on
     And the rig's tests fail, saying "still red"
     When mw closes out "mw-gq6.1"
     Then the merge slot of the rig is free again
+
+  Scenario: A landed and closed story leaves no session behind
+    Given the session of "mw-gq6.1" reported a plain success
+    And the terminal still holds the exited session of "mw-gq6.1"
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed
+    And the terminal holds no session of "mw-gq6.1"
+
+  Scenario: A refused story's session is still there
+    Given the session of "mw-gq6.1" reported a plain success
+    And the rig's tests fail, saying "still red"
+    And the terminal still holds the exited session of "mw-gq6.1"
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is not closed
+    And the session of "mw-gq6.1" is still on the terminal, exited

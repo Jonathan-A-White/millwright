@@ -178,7 +178,25 @@ type closeOut struct {
 func (n Next) Run(ctx context.Context, storyID string) (NextReport, error) {
 	report, err := n.closeOut(ctx, storyID)
 	n.print(report.String())
+	n.closeSession(ctx, report)
 	return report, err
+}
+
+// closeSession takes away the runner session the story was worked in, once the
+// story is landed and closed. It is the last thing Run does, after the report is
+// printed, because mw next usually runs inside that very session: closing it
+// hangs up this process, and nothing after it is sure to run. A story that was
+// not closed keeps its session, exited, on screen — that is what it is kept for.
+// A session that is already gone is no error, and a session that cannot be
+// closed is said, not returned: the story is closed either way.
+func (n Next) closeSession(ctx context.Context, report NextReport) {
+	if n.Runner == nil || !report.Closed {
+		return
+	}
+	name := SessionName(report.StoryID)
+	if err := n.Runner.Close(ctx, name); err != nil {
+		n.print(fmt.Sprintf("  note    the session %s could not be closed: %v\n", name, err))
+	}
 }
 
 // closeOut is Run without the printing.
