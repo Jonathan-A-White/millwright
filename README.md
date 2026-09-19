@@ -475,6 +475,59 @@ user manager up while no terminal is open was not tested: the timer fires only
 while WSL itself is running. `scripts/check-timer-units.sh` (in `make lint`)
 verifies the two unit files with `systemd-analyze` and starts nothing.
 
+## Telling the Mayor's window when mail arrives
+
+A Mayor's own mail watcher dies with its session, so a report from the other
+host can sit unread. `contrib/mail-notify` is a small script that a second
+`systemd --user` timer runs every minute (`mw-mail-notify.timer`, running
+`mw-mail-notify.service`, both in `contrib/systemd/`). It reads no mail and
+starts nothing: at most it types **one fixed line** into the live Mayor's tmux
+window, `New mail for mayor: <n> message(s). Run bd mail inbox.`, and Enter.
+Each tick it skips everything if the 1-minute load is above 2.0; runs `mw sync`
+at `nice 19` and idle I/O priority if the last was five minutes ago or more;
+lists `bd mail inbox` and compares its ids with the ones it has announced; and,
+for new ones, types the line only when the pane is not working (no `esc to
+interrupt`) and its input line is empty. Otherwise it does nothing and tries
+again next tick, and it records the ids as announced only after typing. It never
+clears an input line, and a second tick while one runs does nothing (`flock`).
+
+The window is found from the vault's `.mayor-acting`, free text the Mayor
+writes: a window id (`@12`), the window's name (`mayor-2026-09-19-10`), or
+`window 3`. If it names no one window, nothing is typed.
+
+**Install**, once per host, by hand (nothing in the rig does it for you):
+
+```sh
+mkdir -p ~/.config/systemd/user ~/.config/mw ~/.local/bin
+ln -s "$PWD/contrib/mail-notify" ~/.local/bin/mw-mail-notify
+cp contrib/systemd/mw-mail-notify.service contrib/systemd/mw-mail-notify.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now mw-mail-notify.timer
+```
+
+The service reads the same `~/.config/mw/dispatch.env` as the dispatch timer for
+its `PATH`, which must reach `mw`, `bd`, `tmux`, `flock` and `~/.local/bin`; and
+the vault from `~/.config/mw/config.toml`. Its settings (`MW_MAIL_MAILBOX`,
+`MW_MAIL_LOAD_LIMIT`, `MW_MAIL_SYNC_EVERY`, `MW_MAIL_STATE_DIR`,
+`MW_TMUX_SOCKET`) go in an optional `~/.config/mw/mail-notify.env`, as `NAME=value`
+lines; the script's header lists them. A tmux server other than the default is
+named with `MW_TMUX_SOCKET`.
+
+**Undo it**:
+
+```sh
+systemctl --user disable --now mw-mail-notify.timer
+rm ~/.config/systemd/user/mw-mail-notify.service ~/.config/systemd/user/mw-mail-notify.timer ~/.local/bin/mw-mail-notify
+systemctl --user daemon-reload
+```
+
+`disable --now` alone stops it at once. Its output is in the journal:
+`journalctl --user -u mw-mail-notify`. The ids it has announced are in
+`~/.local/state/mw-mail-notify/announced`; deleting that file makes it announce
+whatever is unread again. `contrib/mailnotify_test.go` runs it against a private
+tmux server with stand-ins for `bd` and `mw`, and `scripts/check-timer-units.sh`
+verifies the units with `systemd-analyze` and starts nothing.
+
 ## Seeing what a host is doing
 
 ```sh

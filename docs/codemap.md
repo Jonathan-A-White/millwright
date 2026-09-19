@@ -87,7 +87,7 @@ plan file as JSON).
    `Args`, and a `RunE` that only reads config and calls the use case. Add
    `root.AddCommand(newSweepCmd())` in `cmd/mw/root.go`.
 8. **README** — a section in `README.md` beside "Keeping two hosts level",
-   ending with a pointer to the feature file. (`mw sweep` lacks its.)
+   ending with a pointer to the feature file.
 
 ## Test helpers
 
@@ -118,7 +118,7 @@ make lint       # go vet ./... , then scripts/check-*.sh
 ```
 
 One `go` command at a time on the VPS (1 vCPU, ~1 GB): the Makefile pins
-`GOFLAGS=-p=1` and `GOMAXPROCS=1`. `make test` takes about 2.5 minutes.
+`GOFLAGS=-p=1` and `GOMAXPROCS=1`.
 
 - One package: `go test ./application/...` (add `-run TestName` for one test).
 - One feature or one scenario: `MW_FEATURE=sweep.feature go test ./features`
@@ -126,7 +126,8 @@ One `go` command at a time on the VPS (1 vCPU, ~1 GB): the Makefile pins
   runs every feature, strictly; an unknown name fails the suite.
 - `scripts/check-codemap.sh` (run by `make lint`) fails when this page names a
   path that does not exist, passes 8192 bytes, or leaves out a port, a use
-  case or a command file. Its header states the exact rules.
-  `scripts/check-timer-units.sh` checks `contrib/systemd/`.
+  case or a command file.
+  `scripts/check-timer-units.sh` checks `contrib/systemd/` and the mail script
+  `contrib/mail-notify` (its test: `contrib/mailnotify_test.go`).
 - `make check-formulas` runs `scripts/check-formulas.sh` against a throwaway
   beads database. Not part of `make test`: it needs `bd`, `jq` and real time.
