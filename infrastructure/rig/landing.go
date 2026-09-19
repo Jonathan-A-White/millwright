@@ -36,6 +36,36 @@ func (w *Worktrees) Ahead(ctx context.Context, rigDir, branch, base string) (int
 	return commits, nil
 }
 
+// Uncommitted implements application.Landing: what `git status` finds changed
+// in the worktree at dir. -uall lists each untracked file, not the directory
+// that holds it, so the paths are files a person can open; -z keeps a path with
+// an odd character in it whole.
+func (w *Worktrees) Uncommitted(ctx context.Context, dir string) ([]string, error) {
+	if dir == "" {
+		return nil, fmt.Errorf("reading uncommitted work: in which worktree?")
+	}
+	said, err := w.git(ctx, dir, "status", "--porcelain=v1", "-z", "-uall")
+	if err != nil {
+		return nil, err
+	}
+
+	var paths []string
+	entries := strings.Split(said, "\x00")
+	for i := 0; i < len(entries); i++ {
+		entry := entries[i]
+		if len(entry) < 4 {
+			continue
+		}
+		paths = append(paths, entry[3:])
+		// A rename or a copy is followed by the path it came from, as an entry
+		// of its own with no status in front.
+		if entry[0] == 'R' || entry[0] == 'C' || entry[1] == 'R' || entry[1] == 'C' {
+			i++
+		}
+	}
+	return paths, nil
+}
+
 // commitEnd terminates each commit git log prints here, and endDirective is how
 // git is asked for it: a NUL cannot be passed in an argument, so git writes it
 // itself. A NUL is the one byte a commit message cannot hold, so it is the one

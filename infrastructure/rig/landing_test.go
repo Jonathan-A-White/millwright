@@ -74,3 +74,57 @@ func TestCommitsRefusesAHalfQuestion(t *testing.T) {
 		t.Error("expected reading the commits ahead of nothing to be refused")
 	}
 }
+
+// TestUncommittedNamesEveryChangedFileAndNothingElse drives real git: a
+// modified tracked file, a deleted one, a staged new one and an untracked one in
+// a directory are each named as a file, a rename is named once, and an ignored
+// file and a clean worktree are named not at all.
+func TestUncommittedNamesEveryChangedFileAndNothingElse(t *testing.T) {
+	here, _ := aRig(t)
+	ctx := context.Background()
+	worktrees := rig.New()
+
+	clean, err := worktrees.Uncommitted(ctx, here)
+	if err != nil {
+		t.Fatalf("reading a clean worktree: %v", err)
+	}
+	if len(clean) != 0 {
+		t.Fatalf("expected a clean worktree to list nothing, got %q", clean)
+	}
+
+	write(t, here, "moved-from.md", "to be renamed\n")
+	write(t, here, "gone.md", "to be deleted\n")
+	write(t, here, ".gitignore", "*.log\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "Files to disturb")
+
+	write(t, here, "README.md", "changed in place\n")
+	run(t, here, "git", "rm", "-q", "gone.md")
+	run(t, here, "git", "mv", "moved-from.md", "moved-to.md")
+	write(t, here, "staged.md", "new and staged\n")
+	run(t, here, "git", "add", "staged.md")
+	write(t, here, "notes/half-done.md", "new and untracked, in a directory\n")
+	write(t, here, "build.log", "ignored\n")
+
+	got, err := worktrees.Uncommitted(ctx, here)
+	if err != nil {
+		t.Fatalf("reading a dirty worktree: %v", err)
+	}
+	want := map[string]bool{
+		"README.md": true, "gone.md": true, "moved-to.md": true, "staged.md": true, "notes/half-done.md": true,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d paths, got %d: %q", len(want), len(got), got)
+	}
+	for _, path := range got {
+		if !want[path] {
+			t.Errorf("did not expect %q among the uncommitted paths %q", path, got)
+		}
+	}
+}
+
+func TestUncommittedRefusesAHalfQuestion(t *testing.T) {
+	if _, err := rig.New().Uncommitted(context.Background(), ""); err == nil {
+		t.Error("expected an error when no worktree is named")
+	}
+}

@@ -49,6 +49,13 @@ type Landing interface {
 	// committed nothing, and there is nothing to land.
 	Ahead(ctx context.Context, rigDir, branch, base string) (int, error)
 
+	// Uncommitted lists the paths the working tree at dir has changed and not
+	// committed — modified, added, deleted and untracked alike, each file on its
+	// own line of the list, ignored files not at all. Empty means the worktree
+	// is clean. It is how a close-out tells a session that did nothing from one
+	// that did the work and never committed it.
+	Uncommitted(ctx context.Context, dir string) ([]string, error)
+
 	// Commits is those same commits themselves — the ones landing would put on
 	// the target branch — oldest first, each with the short hash a person names
 	// it by and its whole message, trailers and all. It is how a close-out
