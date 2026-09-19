@@ -223,7 +223,8 @@ depend on any one of them:
   reference says to hide the `Co-Authored-By` trailer and the "Generated with"
   line it would otherwise add. It is passed as a JSON string rather than a file,
   so nothing is written into the rig's worktree for a session to commit by
-  accident;
+  accident (*What a session may run without asking* is the other half of that
+  same document);
 - the Builder's kickoff prompt says it in words;
 - `mw next` reads the messages of every commit it would land
   (`origin/<target>..mw/<story-id>`) before it merges anything, and refuses the
@@ -263,6 +264,33 @@ again closes it and carries on: the run that landed the story recorded
 `run=landed` the moment the push succeeded, so a later run knows there is
 nothing to merge, test or push, and it adds no second ledger line, because the
 seat's ledger already names the story.
+
+### What a session may run without asking
+
+The settings `mw` passes inline say one more thing:
+`permissions.allow: ["Bash(bd *)"]` — every invocation of `bd`, the one program
+a session must reach to work its story at all.
+
+A session runs in `auto` mode with `--permission-prompts none`, so a second
+model, the permission classifier, judges each command, and nobody is there to
+answer if it says no. It has refused a session's own `bd close` as a write to an
+external system — at random, on both hosts — and with nobody to ask, that
+refusal is final: the story's steps stay open and `mw next` will not land it. An
+allow rule is resolved before the classifier is asked, and a rule naming one
+program stays in effect in `auto` mode (only broad ones, like `Bash(*)` or a
+wildcarded interpreter, are suspended there).
+
+It is the whole of `bd` rather than a list of subcommands, by the Governor's
+decision: beads is this factory's own tracker, a session is *supposed* to write
+to it, and a list would have to be kept in step with bd forever. It lives here,
+in the rig, so both hosts get the same rule and nobody's personal Claude
+settings are touched. Nothing else is allowed: everything a session does besides
+`bd` still goes to the classifier.
+
+One consequence worth knowing, because it is how Claude Code matches: a rule
+must match **each subcommand** of a compound command on its own. `bd show x |
+head -5; cat CONTEXT.md` is not covered by this rule — the `head` and the `cat`
+are judged as usual, and a chain can be refused whole. Run `bd` on its own line.
 
 ### Who mw writes as
 
