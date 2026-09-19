@@ -536,30 +536,63 @@ user manager up while no terminal is open was not tested: the timer fires only
 while WSL itself is running. `scripts/check-timer-units.sh` (in `make lint`)
 verifies the two unit files with `systemd-analyze` and starts nothing.
 
-## Sending and reading mail between seats
+## Mail
 
 ```sh
 MW_SEAT=builder@laptop bin/mw mail send mayor -s "Ready for review" -m "The branch is up."
 MW_SEAT=mayor bin/mw mail inbox
 MW_SEAT=mayor bin/mw mail read mw-gq6.70
+MW_SEAT=mayor bin/mw mail reply mw-gq6.70 -m "Merged, thank you."
 bin/mw mail inbox --as governor
 ```
 
 Mail is beads: a message is a bead of type `mail` (not beads' own `message`
 type, which is ephemeral and never syncs), assigned to its recipient, its
 subject the title, its body the description, `from` and `to` in its metadata.
-It travels between hosts as the rest of the vault does, on `mw sync`. This is
-the shape the stand-in `bin/mw-mail` in the vault writes, so mail already sent
-stays readable. The vault must declare the type (`bd config set types.custom
-mail`).
+It travels between hosts as the rest of the vault does, on `mw sync`: mail sent
+in one clone is in the recipient's inbox in the other once both have synced.
+This is the shape the stand-in `bin/mw-mail` in the vault writes, so mail
+already sent stays readable. The vault must declare the type (`bd config set
+types.custom mail`).
 
-`send` is signed by `$MW_SEAT` (seat or seat@host, as a session started by
-`mw dispatch` carries it). With `$MW_SEAT` unset it refuses, naming it, and
-writes nothing: it never signs as the Mayor or as anyone else. `inbox` lists the
-unread mail of `$MW_SEAT`, or of the seat `--as` names, oldest first; `read`
-prints a message's from, to, date, subject and body and closes it, which takes
-it out of the inbox. `read` refuses a bead that is not mail. Replying is not
-here yet. See `features/mail.feature`.
+Mail is never a story. Every message is assigned to its recipient, carries no
+Path, and is not a child of any epic, so none of the queries that offer stories
+to a host (`mw dispatch`, `mw next`, `mw status`) returns one;
+`features/mail.feature` runs those queries against a real database holding
+mail, to keep it so.
+
+- **`MW_SEAT`** says who a session is, as `seat` or `seat@host` (a session
+  started by `mw dispatch` carries it). `send` and `reply` are signed by it. With
+  it unset they refuse, naming it, and write nothing: mail is never sent as the
+  Mayor or as anyone else by default. `inbox` and `read` take their mailbox from
+  it too, or from `--as <seat>`, which stands in for it.
+- **`send <to> -s <subject> [-m <body>]`** files a message to a seat (`mayor`,
+  `builder`, `governor`, or any seat) and prints its id and who it went to. A
+  message with no body says so.
+- **`inbox`** lists the unread mail of `$MW_SEAT`, or of the seat `--as` names,
+  oldest first: id, who it is from, when it was sent, its subject.
+- **`read <id>`** prints a message's from, to, date, subject and body and closes
+  it, which takes it out of the inbox. Reading it again prints it again. It
+  refuses a bead that is not mail.
+- **`reply <id> [-m <body>]`** sends to whoever sent message `<id>`, with the
+  subject `Re: <subject>`, linked to the original by a `related` dependency (the
+  kind `bin/mw-mail` used) and leaving the original as unread as it was. An id
+  that is not mail is a plain error, naming it, and nothing is written.
+
+`bd mail ...` is bd's own command for this and does nothing until it is told
+where mail is kept. Point it at `mw mail`, and `bd mail inbox`, `bd mail send`,
+`bd mail read` and `bd mail reply` keep working, now as `mw mail`:
+
+```sh
+bd config set mail.delegate "mw mail"
+```
+
+That is a setting of each host's own beads database, and a hand step: no Builder
+changes it. `mw` has to be on the `PATH` of whoever runs `bd mail` (the binary
+`make build` leaves is `bin/mw`; link or copy it somewhere on the `PATH`). The
+setting can also come from `$BEADS_MAIL_DELEGATE`, which bd checks first. Until
+it is changed, the delegate is the stand-in script, which writes the same beads.
+See `features/mail.feature`.
 
 ## Telling the Mayor's window when mail arrives
 
