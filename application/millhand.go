@@ -97,6 +97,21 @@ type Millhand struct {
 	Out io.Writer
 }
 
+// MillhandWindow is the name of the window of the Millhand's that is open in the
+// terminal, or "" when there is none. The Millhand is up when there is one.
+func MillhandWindow(ctx context.Context, windows Windows) (string, error) {
+	open, err := windows.List(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, window := range open {
+		if strings.HasPrefix(window.Name, MillhandSeat+"-") {
+			return window.Name, nil
+		}
+	}
+	return "", nil
+}
+
 // Run brings the Millhand up, or says that one is. Every refusal happens before
 // anything is opened.
 func (m Millhand) Run(ctx context.Context) (SeatUpReport, error) {
@@ -112,14 +127,12 @@ func (m Millhand) Run(ctx context.Context) (SeatUpReport, error) {
 		return SeatUpReport{}, err
 	}
 
-	open, err := m.Windows.List(ctx)
+	up, err := MillhandWindow(ctx, m.Windows)
 	if err != nil {
 		return SeatUpReport{}, err
 	}
-	for _, window := range open {
-		if strings.HasPrefix(window.Name, MillhandSeat+"-") {
-			return SeatUpReport{}, &AlreadyUp{Window: window.Name}
-		}
+	if up != "" {
+		return SeatUpReport{}, &AlreadyUp{Window: up}
 	}
 
 	told, err := m.told(ctx, wake)
