@@ -256,3 +256,39 @@ func TestReadLedgerRefusesANameThatWouldReachOutsideTheVault(t *testing.T) {
 		t.Error("expected a seat name that reaches outside the vault to be refused")
 	}
 }
+
+func TestRigMemorySizesAreTheSizesOfTheMemoriesAndNotTheirArchives(t *testing.T) {
+	dir := aVault(t)
+	archive := filepath.Join(dir, "seats", "builder", "rigs", "millwright-archive.md")
+	if err := os.WriteFile(archive, []byte(strings.Repeat("x", 9000)), 0o644); err != nil {
+		t.Fatalf("writing the archive: %v", err)
+	}
+
+	sizes, err := vault.New(dir).RigMemorySizes(context.Background(), "builder")
+	if err != nil {
+		t.Fatalf("sizing the memories: %v", err)
+	}
+	want := []application.RigMemorySize{
+		{Rig: "fellowship", Bytes: len("what the builder knows about fellowship")},
+		{Rig: "millwright", Bytes: len("what the builder knows about millwright")},
+	}
+	if len(sizes) != len(want) || sizes[0] != want[0] || sizes[1] != want[1] {
+		t.Errorf("expected %v, got %v", want, sizes)
+	}
+}
+
+func TestRigMemorySizesOfASeatWithNoRigsAreNoneNotAnError(t *testing.T) {
+	sizes, err := vault.New(aVault(t)).RigMemorySizes(context.Background(), "mayor")
+	if err != nil {
+		t.Fatalf("sizing the memories of a seat that has none: %v", err)
+	}
+	if len(sizes) != 0 {
+		t.Errorf("expected no sizes, got %v", sizes)
+	}
+}
+
+func TestRigMemorySizesRefuseANameThatWouldReachOutsideTheVault(t *testing.T) {
+	if _, err := vault.New(aVault(t)).RigMemorySizes(context.Background(), "../etc"); err == nil {
+		t.Error("expected a seat name that reaches outside the vault to be refused")
+	}
+}

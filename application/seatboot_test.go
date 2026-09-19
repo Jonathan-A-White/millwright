@@ -18,7 +18,9 @@ type fakeVault struct {
 	seats   map[string]application.Seat // "<seat>/<rig>" -> what it reads as
 	written map[string]string           // "<story>/<file>" -> its contents
 	ledger  []string                    // the lines appended to a seat's ledger
-	err     error
+	// memorySizes is what RigMemorySizes reports for any seat.
+	memorySizes []application.RigMemorySize
+	err         error
 }
 
 func newFakeVault() *fakeVault {
@@ -76,6 +78,13 @@ func (f *fakeVault) AppendToLedger(_ context.Context, seat, line string) error {
 	}
 	f.ledger = append(f.ledger, seat+": "+line)
 	return nil
+}
+
+func (f *fakeVault) RigMemorySizes(_ context.Context, _ string) ([]application.RigMemorySize, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.memorySizes, nil
 }
 
 func (f *fakeVault) ReadLedger(_ context.Context, seat string) ([]string, error) {

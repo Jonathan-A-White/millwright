@@ -41,7 +41,17 @@ const (
 	RunsDir = "runs"
 	// MemoryExt is what a seat's memory of one rig is written in.
 	MemoryExt = ".md"
+	// ArchiveSuffix ends the name of the file a seat's pruned memory of a rig is
+	// moved to, before MemoryExt. It is never read at boot, so it is never fuel.
+	ArchiveSuffix = "-archive"
 )
+
+// RigMemorySize is how large a seat's memory of one rig is, in bytes: what every
+// session working that rig reads at boot, and so what is paid on every story.
+type RigMemorySize struct {
+	Rig   string
+	Bytes int
+}
 
 // SeatWork is everything one story is allowed to have changed in the vault,
 // by path from the vault's root: the seat's ledger, which mw itself appends the
@@ -113,6 +123,12 @@ type Vault interface {
 	// for append and never read, so that no version of mw can rewrite a line a
 	// seat has already written.
 	AppendToLedger(ctx context.Context, seat, line string) error
+
+	// RigMemorySizes reads how large each of a seat's memories of a rig is, in
+	// rig order. The archive a memory is pruned into (<rig>-archive.md) is not a
+	// memory and is not counted. A seat with no memory of any rig comes back
+	// with none and no error. Only sizes are read, never the memory itself.
+	RigMemorySizes(ctx context.Context, seat string) ([]RigMemorySize, error)
 
 	// ReadLedger reads every line of a seat's ledger back, in the order it
 	// holds them. A seat with no ledger yet comes back with no lines and no
