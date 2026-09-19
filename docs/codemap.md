@@ -32,6 +32,9 @@ Every adapter carries `var _ application.<Port> = ...`.
 | `SeatFiles` | `application/seatup.go` | `infrastructure/vault/seat.go` | none: temp vaults |
 | `Windows` | `application/seatup.go` | `infrastructure/tmux/window.go` | `application/apptest/fakewindows.go` |
 | `SeatHarness` | `application/seatup.go` | `infrastructure/claude/claude.go` | none |
+| `ReapTerminal` | `application/seatreap.go` | `infrastructure/tmux/reap.go` | `application/apptest/fakereap.go` |
+| `ReapLog` | `application/seatreap.go` | `infrastructure/vault/reaplog.go` | none: temp vaults |
+| `ReapArmer` | `application/seatreap.go` | `infrastructure/reaper/arm.go` | `application/apptest/fakereap.go` |
 | `Transcripts` | `application/seatcontext.go` | `infrastructure/claude/transcripts.go` | none: temp-dir fixtures |
 | `Worktrees` | `application/worktrees.go` | `infrastructure/rig/worktree.go` | `application/dispatch_test.go` |
 | `Landing` | `application/landing.go` | `infrastructure/rig/landing.go` | none: real git |
@@ -59,6 +62,7 @@ from `cmd/mw/` only.
 | `Mail` | `application/mail.go` | `mw mail` — `cmd/mw/mail.go` | `features/mail.feature` |
 | `SeatContext` | `application/seatcontext.go` | `mw seat context` — `cmd/mw/seat.go` | `features/seat_context.feature` |
 | `SeatUp` | `application/seatup.go` | `mw seat up` — `cmd/mw/seat.go` | `features/seat_up.feature` |
+| `SeatReap` | `application/seatreap.go` | `mw seat reap` — `cmd/mw/seat.go` | `features/seat_reap.feature` |
 | `SeatBoot` | `application/seatboot.go` | none: `Dispatch`, `Next` call it | `features/seat_boot.feature` |
 
 `cmd/mw/root.go` holds the tree (one `root.AddCommand` per command);

@@ -930,11 +930,54 @@ is nothing to boot from; or it is already acting — its acting file names a
 window that is still open, and no handoff has been written since that window
 was opened. The acting file (`.<seat>-acting` in the vault, host-local and
 untracked) is never written by `mw`: the new session writes it at boot, and
-that is the hand-over signal. Closing the predecessor's window is nobody's job
-yet.
+that is the hand-over signal.
+
+Run from a tmux window the acting file names, it also arms the reaper below on
+that window, so the outgoing session's window closes itself once the
+successor has the seat. `--reap-when-idle` arms one in idle mode on the window
+it opens, for a session that will hand over to nobody — the Millhand's wake.
+Neither is armed when `mw` runs outside tmux or from a window the acting file
+does not name. `$MW_TMUX_SOCKET` names another tmux server than the default
+one, as tmux's `-L`; it is for tests.
 
 See `features/seat_up.feature`, and `infrastructure/tmux/window.go` for the
 windows themselves.
+
+## Closing a finished session's window
+
+```sh
+bin/mw seat reap mayor --window @3
+bin/mw seat reap millhand --window @7 --when-idle
+```
+
+`mw seat reap <seat> --window <tmux window id>` is a detached, zero-token
+watcher on one window: it looks every 30 seconds (`--interval`) and closes the
+window when its session is finished. A session ends its own window; no session
+ever closes another's. `mw seat up` starts it, and it can be run by hand.
+
+- **Successor mode**, the default: it closes the window once the seat's acting
+  file names someone else than it did when the watch was armed, the window that
+  someone is named after is open, and the pane is idle.
+- **Idle mode**, `--when-idle`, for a session with nobody to hand over to: it
+  closes the window once a handoff newer than the window exists and the pane is
+  idle. A window nothing can date counts as opened when the watch was armed.
+
+Idle means an empty input line with nothing running, on two looks in a row. A
+window whose input line holds text is never closed, in either mode: someone
+may be typing. Only the tmux adapter reads a pane.
+
+It gives up after `--limit` (3 hours), closing nothing and saying so, and
+exits non-zero. Arming, closing, giving up, and finding the window already gone
+each append one dated line to `.<seat>-reaper.log` in the vault:
+
+```
+2026-09-19T12:22:59Z reap @3: armed; waiting for .mayor-acting to name a successor whose window is open, and an idle pane
+2026-09-19T12:24:29Z reap @3: closed: the seat is held by someone else, and the pane was idle
+```
+
+It replaces the vault's `bin/mayor-reap-window`, which did the same in bash.
+See `features/seat_reap.feature`, and `infrastructure/tmux/reap.go` for how a
+pane is read and a window closed.
 
 ## The Path
 
