@@ -17,6 +17,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newDispatchCmd())
 	root.AddCommand(newFileCmd())
 	root.AddCommand(newMailCmd())
+	root.AddCommand(newMillhandCmd())
 	root.AddCommand(newNextCmd())
 	root.AddCommand(newReleaseCmd())
 	root.AddCommand(newSeatCmd())
