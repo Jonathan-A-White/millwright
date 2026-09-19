@@ -459,6 +459,79 @@ func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 	}
 }
 
+// What Sweep remembers of a session between runs is a note in bd's key-value
+// store, not state on the story: every `bd set-state` files a closed event bead
+// under the story, and a sweep every few minutes would file two per pass. This
+// shows the note round-trips against a real database and files nothing, where
+// set-state files an event, and that the claim time Sweep counts its first
+// silence from is read back off a claimed story.
+func TestGatewayKeepsWhatSweepSawWithoutFilingEvents(t *testing.T) {
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	epicID := bdRun(t, vault, beads.Program, "create", "A walking skeleton", "-t", "epic",
+		"--metadata", `{"rig":"millwright","branch":"main","harness":"claude","model":"opus","effort":"high","formula":"tdd-feature","host":"vps"}`,
+		"--silent")
+	storyID := bdRun(t, vault, beads.Program, "create", "A story a sweep watches",
+		"--parent", epicID, "--silent")
+
+	gateway := beads.New(vault, beads.WithActor("mw@vps"))
+	var _ application.SweepNotes = gateway
+
+	before := time.Now().UTC().Add(-time.Minute)
+	if err := gateway.ClaimStory(ctx, storyID); err != nil {
+		t.Fatalf("claiming %s: %v", storyID, err)
+	}
+	running, err := gateway.RunningStories(ctx, "vps")
+	if err != nil || len(running) != 1 {
+		t.Fatalf("expected %s to be running on vps, got %+v: %v", storyID, running, err)
+	}
+	if started := running[0].Started; started.Before(before) || started.After(time.Now().UTC().Add(time.Minute)) {
+		t.Fatalf("expected %s to have been claimed just now, bd says %v", storyID, started)
+	}
+
+	events := func() int {
+		out := bdRun(t, vault, beads.Program, "list", "--parent", storyID, "--all", "--limit", "0", "--json")
+		return strings.Count(out, `"issue_type": "event"`)
+	}
+	if got := events(); got != 0 {
+		t.Fatalf("expected %s to have no event beads yet, got %d", storyID, got)
+	}
+
+	key := application.SweepKey(storyID)
+	if seen, err := gateway.Note(ctx, key); err != nil || seen != "" {
+		t.Fatalf("expected sweep to remember nothing of %s yet, got %q: %v", storyID, seen, err)
+	}
+	for _, note := range []string{"0123456789abcdef 1789000000", "fedcba9876543210 1789003600"} {
+		if err := gateway.SetNote(ctx, key, note); err != nil {
+			t.Fatalf("remembering %q of %s: %v", note, storyID, err)
+		}
+		if got, err := gateway.Note(ctx, key); err != nil || got != note {
+			t.Fatalf("expected %s to be remembered as %q, got %q: %v", storyID, note, got, err)
+		}
+	}
+	if got := events(); got != 0 {
+		t.Fatalf("expected remembering what a sweep saw to file no event beads, got %d", got)
+	}
+
+	if err := gateway.ClearNote(ctx, key); err != nil {
+		t.Fatalf("forgetting %s: %v", storyID, err)
+	}
+	if got, err := gateway.Note(ctx, key); err != nil || got != "" {
+		t.Fatalf("expected sweep to remember nothing of %s after clearing it, got %q: %v", storyID, got, err)
+	}
+
+	// The one state sweep does write is an event worth keeping: that is what
+	// set-state files, and what the note above spared the story twice over.
+	if err := gateway.SetStoryState(ctx, storyID, application.RunState, application.RunStuck, "stuck, found by the test"); err != nil {
+		t.Fatalf("recording %s stuck: %v", storyID, err)
+	}
+	if got := events(); got != 1 {
+		t.Fatalf("expected recording run=stuck to file one event bead, got %d", got)
+	}
+}
+
 // Filing a plan is the other half of the gateway: it writes beads rather than
 // reading them. Everything here goes into one throwaway database too.
 func TestGatewayFilesAnEpicWithItsStoriesHeld(t *testing.T) {
