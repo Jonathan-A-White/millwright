@@ -181,7 +181,14 @@ func KickoffPrompt(seat, storyID string) string {
 		"Your worktree is the directory you are in: work only there. "+
 		"Follow the story's formula steps in order, leave the build and the tests green, "+
 		"and write one truthful closing comment on the story when you are done. "+
-		"Do not push, do not merge, do not close the story.", seat, storyID)
+		"Do not push, do not merge, do not close the story. "+
+		// The harness is told the same thing by its settings (the claude
+		// adapter's NoAttribution), and mw next refuses a branch that carries
+		// one anyway; this is the third place, because a session that is told
+		// plainly does not have to be refused.
+		"Sign nothing you commit: no Co-Authored-By trailer, no Generated with line, "+
+		"no AI attribution of any kind — the seat signs the work, never the model, "+
+		"and mw next refuses to land a branch whose commits carry one.", seat, storyID)
 }
 
 // BootPrompt is the boot file a session is primed with: the seat's charter,

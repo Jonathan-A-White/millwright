@@ -7,6 +7,7 @@ package claude
 // no session is ever started here, and nothing costs fuel.
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -57,6 +58,7 @@ func TestSessionIsAShellLineThatKeepsTheResult(t *testing.T) {
 		"--permission-mode auto",
 		"--permission-prompts none",
 		"--append-system-prompt-file /root/millwright-vault/runs/mw-gq6.6/boot.md",
+		"--settings '" + NoAttribution + "'",
 		"--name mw-gq6.6",
 		"'You are booted into the builder seat.'",
 		"> /root/millwright-vault/runs/mw-gq6.6/result.json",
@@ -70,6 +72,56 @@ func TestSessionIsAShellLineThatKeepsTheResult(t *testing.T) {
 	}
 	if spec.Dir != "/root/.mw-worktrees/mw-gq6.6" {
 		t.Errorf("expected the session to run in the worktree, got %q", spec.Dir)
+	}
+}
+
+// TestTheSessionSignsNothing pins the one setting this factory cannot do
+// without: Claude Code's default is to sign every commit it makes with a
+// Co-Authored-By trailer and every pull request with a "Generated with" line,
+// and this factory's commits carry neither. The setting is passed as a JSON
+// string on the command line rather than as a file, because a file would have
+// to live somewhere — and anywhere it could live in a rig's worktree is
+// somewhere a session could commit it by accident.
+func TestTheSessionSignsNothing(t *testing.T) {
+	var settings struct {
+		Attribution struct {
+			Commit     *string `json:"commit"`
+			PR         *string `json:"pr"`
+			SessionURL *bool   `json:"sessionUrl"`
+		} `json:"attribution"`
+	}
+	if err := json.Unmarshal([]byte(NoAttribution), &settings); err != nil {
+		t.Fatalf("the settings the session is given are not JSON: %v", err)
+	}
+	switch {
+	case settings.Attribution.Commit == nil || *settings.Attribution.Commit != "":
+		t.Errorf("expected attribution.commit to be the empty string, got %v", settings.Attribution.Commit)
+	case settings.Attribution.PR == nil || *settings.Attribution.PR != "":
+		t.Errorf("expected attribution.pr to be the empty string, got %v", settings.Attribution.PR)
+	case settings.Attribution.SessionURL == nil || *settings.Attribution.SessionURL:
+		t.Errorf("expected attribution.sessionUrl to be false, got %v", settings.Attribution.SessionURL)
+	}
+
+	dir := t.TempDir()
+	spec, err := New().Session(launch(func(l *application.Launch) { l.Dir = dir }))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+
+	// The setting arrives as one word after --settings, quoted so that the
+	// shell hands Claude Code the JSON whole.
+	if want := "--settings '" + NoAttribution + "'"; !strings.Contains(spec.Command[2], want) {
+		t.Errorf("expected the line to carry %q, got %q", want, spec.Command[2])
+	}
+
+	// Nothing was written into the worktree: no settings file for a session to
+	// commit by accident, and none to clean up afterwards.
+	left, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("reading the worktree back: %v", err)
+	}
+	if len(left) != 0 {
+		t.Errorf("expected the adapter to leave nothing in the worktree, got %v", left)
 	}
 }
 
@@ -159,6 +211,9 @@ func TestTheShellReadsBackTheArgumentsItWasGiven(t *testing.T) {
 	for _, want := range []string{
 		"[--model]\n[opus]\n",
 		"[--append-system-prompt-file]\n[" + filepath.Join(dir, "boot.md") + "]\n",
+		// The settings JSON must reach Claude Code as one argument, braces,
+		// quotes and all.
+		"[--settings]\n[" + NoAttribution + "]\n",
 		"[" + kickoff + "]\n",
 	} {
 		if !strings.Contains(string(printed), want) {

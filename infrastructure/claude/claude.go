@@ -33,6 +33,23 @@ const (
 	PermissionPlan        = "plan"
 )
 
+// NoAttribution is the Claude Code settings every session this factory starts
+// is given: no trailer on a commit, no line in a pull request description, no
+// session link. Claude Code's default is to sign both — `Co-Authored-By: <the
+// model> <noreply@anthropic.com>` on a commit and `Generated with ...` in a
+// pull request — and this factory's commits carry neither: a seat outlives
+// every session that occupies it, so the seat signs the work and the model
+// never does. Setting each part to the empty string is how the settings
+// reference says to hide it (`attribution.commit`, `attribution.pr`,
+// `attribution.sessionUrl`); the older `includeCoAuthoredBy: false` is
+// deprecated and is ignored the moment `attribution` is set, so it is not sent.
+//
+// It travels as a JSON string on the command line, which `claude --settings`
+// takes as readily as a path, so that no settings file is ever written into a
+// rig's worktree — where a session could commit it by accident, and where
+// somebody would have to remember to take it away again.
+const NoAttribution = `{"attribution":{"commit":"","pr":"","sessionUrl":false}}`
+
 // DefaultPermissionMode is how an unattended session is allowed to act. `auto`
 // is the least permissive mode a Builder can actually work in: a Builder must
 // edit files, build, test and commit inside its worktree with nobody watching.
@@ -115,6 +132,8 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 		// rather than left waiting forever in a pane nobody is watching.
 		"--permission-prompts", "none",
 		"--append-system-prompt-file", l.BootFile,
+		// The session signs nothing it commits. See NoAttribution.
+		"--settings", NoAttribution,
 		"--name", l.StoryID,
 		l.Kickoff,
 	}

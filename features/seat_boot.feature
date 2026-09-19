@@ -78,6 +78,7 @@ Feature: Booting a session into a seat
       | Do not push, do not merge           |
       | the directory you are in            |
       | Follow the story's formula steps    |
+      | no AI attribution of any kind       |
 
   Scenario: A story whose title is full of punctuation is assembled safely
     Given the story is titled:
