@@ -10,7 +10,9 @@ Mayor's plans with `mw file`, releases the ones approved later with
 sessions in tmux, keeps the two hosts level with `mw sync`, starts a fresh
 Builder session for each ready story with `mw dispatch`, and closes each
 finished story out with `mw next` — which lands it, ledgers what it burned,
-closes it and dispatches whatever is ready next.
+closes it and dispatches whatever is ready next. Two commands only look:
+`mw status` reports what a host is doing, and `mw sweep` marks the claimed
+stories whose session has gone or gone quiet.
 
 ## Getting started
 
@@ -321,13 +323,14 @@ bd reclaim mw-gq6.30                                        # or take it over fi
 ### What a host is told
 
 `~/.config/mw/config.toml`, with `MW_VAULT`, `MW_HOST`, `MW_CAP` and
-`MW_HOST_SILENT_HOURS` ahead of it:
+`MW_HOST_SILENT_HOURS` and `MW_STALE_HOURS` ahead of it:
 
 ```toml
 vault = "/root/millwright-vault"   # the one beads database and the seats
 host  = "vps"                      # which of the factory's hosts this is
 cap   = 1                          # sessions running here at once (default 1)
 host_silent_hours = 2              # how long another host may go unsynced (default 2)
+stale_hours = 2                    # how long a session may print nothing new before mw sweep calls it stuck (default 2)
 
 [rigs]
 millwright = "/root/millwright"    # where each rig is checked out here
@@ -377,7 +380,12 @@ someone does, only this host is covered. See `features/sync.feature`.
 
 ## Seeing what a host is doing
 
-`mw status` is the report for a phone: what this host is doing right now, in
+```sh
+bin/mw status
+```
+
+`mw status` takes no arguments and reads the vault, the tracker, the runner's
+session names and the Builder's ledger. It writes to none of them. It is the report for a phone: what this host is doing right now, in
 five parts.
 
 - **RUNNING** — the stories this host has claimed, each with the name of the
@@ -415,7 +423,43 @@ bd update <id> --set-metadata host=vps
 ```
 
 `mw status` only ever says this. Re-pathing a story is a person's act, never a
-report's. See `features/status.feature`.
+report's. The config keys it reads are `vault`, `host` and `host_silent_hours`
+(*What a host is told*). See `features/status.feature`.
+
+## Finding sessions that have stopped
+
+```sh
+bin/mw sweep
+```
+
+`mw sweep` takes no arguments and is for a host to run on itself, by hand or on
+a timer, to find the stories it has claimed whose session is no longer doing
+anything. It reads the stories this host has claimed, asks the runner whether
+each one's tmux session is still there, and reads the last twenty lines that
+session printed. It costs no tokens and starts no session.
+
+- A claimed story whose session is **gone** is stuck at once.
+- A session that is still there but has printed **nothing new** for longer than
+  the stale threshold is stuck too. Every session is owed one full threshold
+  before it is called that: the first sweep to see a session's output only
+  records it, and a session whose output has changed since has its clock reset.
+- A stuck story is commented on once, saying what was found, and recorded
+  `run=stuck`, which `mw status` then shows as `NOT RUNNING`. A story that
+  `mw next` or an earlier sweep already recorded gone is left alone, so sweeping
+  twice comments once.
+
+The threshold is `stale_hours` in the config file or `MW_STALE_HOURS`: whole
+hours, at least 1, two by default. Along with `vault` and `host`, that is all
+`mw sweep` reads from the config.
+
+The only things sweep writes are those comments and state on the story's own
+bead: `run`, and the fingerprint of the session's output and when it was first
+seen (`sweep-output` and `sweep-output-since`), which is how a sweep with no
+daemon remembers anything between runs. It never kills or restarts a session,
+never gives a claim back, and never touches a worktree, git or the ledger:
+settling a stuck claim is a separate command. One story's trouble — a session
+that cannot be asked about, a write that fails — is reported on a `!` line and
+the rest are still examined. See `features/sweep.feature`.
 
 ## The Path
 
