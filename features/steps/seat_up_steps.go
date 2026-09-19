@@ -58,6 +58,9 @@ type seatUpContext struct {
 	home        string
 	homeWas     string
 	modelEnvWas map[string]*string
+
+	// tick is what a mw millhand tick scenario reads through: see tickWorld.
+	tick *tickWorld
 }
 
 // InitializeSeatUpScenario registers the steps of features/seat_up.feature.
@@ -120,6 +123,7 @@ func InitializeSeatUpScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^seat up is refused saying the seat is already acting in "([^"]*)"$`, c.refusedForBeingHeld)
 
 	registerMillhandSteps(ctx, c)
+	registerMillhandTickSteps(ctx, c)
 }
 
 // write puts one file in the vault, making the directories above it.
