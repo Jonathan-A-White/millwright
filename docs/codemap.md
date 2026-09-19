@@ -24,6 +24,7 @@ Every adapter carries `var _ application.<Port> = ...`.
 | `WorkTracker` | `application/worktracker.go` | `infrastructure/beads/beads.go` (`Gateway`) | `application/apptest/faketracker.go` |
 | `TrackerSync` | `application/sync.go` | `infrastructure/beads/sync.go` (`Gateway`) | `application/apptest/faketracker.go` |
 | `TrackerNotes` | `application/status.go` | same, read half | same |
+| `SweepNotes` | `application/sweep.go` | same, `Note`s | same |
 | `VaultFiles` | `application/sync.go` | `infrastructure/vault/git.go` | `application/apptest/fakevaultfiles.go` |
 | `Mailbox` | `application/mail.go` | `infrastructure/beads/mail.go` (`Gateway`) | `application/apptest/fakemailbox.go` |
 | `Vault` | `application/seatboot.go` | `infrastructure/vault/vault.go` | `application/seatboot_test.go` |

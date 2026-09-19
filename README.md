@@ -841,8 +841,9 @@ session printed. It costs no tokens and starts no session.
 - A claimed story whose session is **gone** is stuck at once.
 - A session that is still there but has printed **nothing new** for longer than
   the stale threshold is stuck too. Every session is owed one full threshold
-  before it is called that: the first sweep to see a session's output only
-  records it, and a session whose output has changed since has its clock reset.
+  before it is called that. The clock starts at the claim when bd says when that
+  was, and at sweep's first look when it does not; a session whose output has
+  changed since the last sweep has its clock reset.
 - A stuck story is commented on once, saying what was found, and recorded
   `run=stuck`, which `mw status` then shows as `NOT RUNNING`. A story that
   `mw next` or an earlier sweep already recorded gone is left alone, so sweeping
@@ -852,10 +853,14 @@ The threshold is `stale_hours` in the config file or `MW_STALE_HOURS`: whole
 hours, at least 1, two by default. Along with `vault` and `host`, that is all
 `mw sweep` reads from the config.
 
-The only things sweep writes are those comments and state on the story's own
-bead: `run`, and the fingerprint of the session's output and when it was first
-seen (`sweep-output` and `sweep-output-since`), which is how a sweep with no
-daemon remembers anything between runs. It never kills or restarts a session,
+The only things sweep writes are those comments, `run=stuck` on the story's own
+bead, and one note per claimed story in bd's key-value store (`sweep.<id>`: a
+fingerprint of the session's output and when it was first seen), which is how a
+sweep with no daemon remembers anything between runs. The memory is a note, not
+state on the story, because every `bd set-state` files a closed event bead that
+syncs to the other host, and a sweep every few minutes would file two per story
+per pass; `run=stuck` is a state because that one is an event worth keeping, and
+the note is cleared when it is recorded. Sweep never kills or restarts a session,
 never gives a claim back, and never touches a worktree, git or the ledger:
 settling a stuck claim is a separate command. One story's trouble — a session
 that cannot be asked about, a write that fails — is reported on a `!` line and
