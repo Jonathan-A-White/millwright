@@ -10,9 +10,10 @@ Mayor's plans with `mw file`, releases the ones approved later with
 sessions in tmux, keeps the two hosts level with `mw sync`, starts a fresh
 Builder session for each ready story with `mw dispatch`, and closes each
 finished story out with `mw next` — which lands it, ledgers what it burned,
-closes it and dispatches whatever is ready next. Three commands only look:
+closes it and dispatches whatever is ready next. Four commands only look:
 `mw check` runs a story's pre-landing checks on its branch, `mw status` reports
-what a host is doing, and `mw sweep` marks the claimed stories whose session has
+what a host is doing, `mw brief` prints the live children of a bead for a seat
+to boot from, and `mw sweep` marks the claimed stories whose session has
 gone or gone quiet.
 
 ## Getting started
@@ -717,6 +718,38 @@ bd update <id> --set-metadata host=vps
 `mw status` only ever says this. Re-pathing a story is a person's act, never a
 report's. The config keys it reads are `vault`, `host`, `host_silent_hours` and
 `rig_memory_bytes` (*What a host is told*). See `features/status.feature`.
+
+## Briefing a seat from a bead
+
+```sh
+bin/mw brief mw-6ww mw-gq6 mw-0om
+bin/mw brief mw-6ww --comments 2
+```
+
+`mw brief` takes one or more epic ids and prints, for each and in the order
+given, what a booting seat still needs of it, and none of what `bd show` would
+also print. The `bd show` of a map is the whole description, every closed child
+and every comment: about 12K of a Mayor's boot. `mw brief` prints:
+
+- one line, the epic's title, id, status and priority (`The map · mw-6ww · open · P1`);
+- its children that are not closed, under **In progress**, **Open** and **Held**
+  (status `deferred`), a heading left out when nothing is under it. Each line
+  carries the child's title, id and priority, the host and model its path names
+  when it names them, and `waits on <title>` for each blocker that is not
+  finished, whether the blocker is in this epic or another. A blocker that is
+  closed is not named. A title is cut to 60 columns, and a blocker's to 24, with
+  an ellipsis: the id finds the rest, and three maps stay under about 5000
+  bytes;
+- one line, `N closed`, counting the children left out.
+
+With `--comments N` the newest N comments of each epic follow, oldest of them
+first, each in full and never truncated: they hold the Governor's words. There
+is no description. Output is plain text on standard output, written for a phone.
+
+An id the tracker does not have is an error naming it, and nothing is printed,
+not even the briefs of the ids before it. The command only reads: it writes
+nothing to beads. It reads the vault and host from the config file, as `mw
+status` does. See `features/brief.feature`.
 
 ## Finding sessions that have stopped
 
