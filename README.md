@@ -542,6 +542,85 @@ whatever is unread again. `contrib/mailnotify_test.go` runs it against a private
 tmux server with stand-ins for `bd` and `mw`, and `scripts/check-timer-units.sh`
 verifies the units with `systemd-analyze` and starts nothing.
 
+## A host's health line
+
+Every 15 minutes a third `systemd --user` timer writes **one line** to
+`~/.mw-health` saying whether the host, and the Mayor on it, are alive and well.
+`contrib/health/mw-health.sh` is a POSIX shell script; `mw-health.timer` runs
+`mw-health.service` (both in `contrib/systemd/`). It spends no tokens and it only
+**looks**: it never restarts, stops or ends anything, never types into tmux,
+never syncs, and writes nothing but that one file (made whole under a temp name
+and moved into place, so a reader never sees half a line). Something else, on
+this host or the other, reads the file.
+
+```
+2026-09-19T09:15:02Z load1=0.50 mem_avail_mb=1000 swap_used_mb=10 disk_pct=42 services=blog:up,api:up mayor=alive acting=match context=1000/180000 last_sync_age_s=300 syncs_running=0 verdict=ok
+```
+
+| Field | Means |
+| --- | --- |
+| `load1` | the 1-minute load average |
+| `mem_avail_mb`, `swap_used_mb` | memory available, and swap in use, in MB |
+| `disk_pct` | how full the filesystem holding `~` is |
+| `services` | `systemctl is-active` for each unit in `MW_HEALTH_SERVICES` (the Governor's blog services on the VPS): `name:up` or `name:down`; `none` when the list is empty |
+| `mayor` | `alive` when the tmux window named in the vault's `.mayor-acting` exists and holds more than a bare shell; `gone` when it does not; `none` with no `.mayor-acting` |
+| `acting` | `match` when that window exists, `mismatch` when the file names no window that does, `none` with no file. A missing window is both `mayor=gone` and `acting=mismatch` |
+| `context` | the Mayor's context as `<n>/<limit>`, from `mw seat context` when `mw` has it; otherwise `unknown` |
+| `last_sync_age_s` | seconds since this host's `host.<host>.last_sync` note in beads, which `mw sync` writes; `unknown` if there is none |
+| `syncs_running` | how many `mw sync` processes are running right now |
+| `verdict` | `ok`, or `unwell:` and the reasons, comma-separated |
+
+A reading the host cannot give is `unknown` and never makes it unwell. The
+reasons, with the limits they use (all set at the top of the script, and
+overridable in the unit's environment):
+
+| Reason | When | Limit |
+| --- | --- | --- |
+| `load1` | above | `MW_HEALTH_LOAD1_MAX`, 4 |
+| `mem_avail_mb` | below | `MW_HEALTH_MEM_AVAIL_MIN_MB`, 60 |
+| `disk_pct` | above | `MW_HEALTH_DISK_PCT_MAX`, 90 |
+| `service_down:<name>` | any service is not active | |
+| `mayor_gone` | `mayor=gone` | |
+| `acting_mismatch` | `acting=mismatch` | |
+| `context_over_limit` | context above the limit `mw` gives | |
+| `last_sync_stale` | `last_sync_age_s` above | `MW_HEALTH_SYNC_AGE_MAX_S`, 3600 |
+| `syncs_running` | above | `MW_HEALTH_SYNCS_RUNNING_MAX`, 1 |
+
+**Install** by hand, once per host; nothing in the rig does it for you and
+nothing here needs `sudo`:
+
+```sh
+mkdir -p ~/.config/systemd/user ~/.config/mw ~/.local/bin
+ln -s "$PWD/contrib/health/mw-health.sh" ~/.local/bin/mw-health
+cp contrib/systemd/mw-health.service contrib/systemd/mw-health.timer ~/.config/systemd/user/
+$EDITOR ~/.config/mw/health.env          # optional, NAME=value lines
+systemctl --user daemon-reload
+systemctl --user enable --now mw-health.timer
+```
+
+The service reads the same `~/.config/mw/dispatch.env` as the dispatch timer for
+its `PATH`, which must reach `mw`, `bd`, `tmux`, `systemctl` and
+`~/.local/bin`; the vault and host come from `~/.config/mw/config.toml`. Its
+settings go in the optional `~/.config/mw/health.env`; the script's header lists
+them. On the VPS, `MW_HEALTH_SERVICES="blog api"` names the blog's units, which
+are looked up as system units. To try it first, run `mw-health` by hand and read
+`~/.mw-health`.
+
+**Undo it**:
+
+```sh
+systemctl --user disable --now mw-health.timer
+rm ~/.config/systemd/user/mw-health.service ~/.config/systemd/user/mw-health.timer ~/.local/bin/mw-health ~/.mw-health
+systemctl --user daemon-reload
+```
+
+`disable --now` alone stops it at once and leaves the last line where it was.
+Its own output is in the journal, `journalctl --user -u mw-health`, and there is
+normally none. `scripts/check-health.sh` (in `make lint`) runs the script against
+stand-in commands, so it never reads the real host, and asserts the line for a
+well host and for each of the nine reasons; `scripts/check-timer-units.sh`
+verifies the units with `systemd-analyze` and starts nothing.
+
 ## Seeing what a host is doing
 
 ```sh

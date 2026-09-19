@@ -1,0 +1,28 @@
+# One `mw-health` run, as the user, then it exits: no daemon. For
+# `systemctl --user`; see README.md, "A host's health line".
+#
+# Started by mw-health.timer. It looks at the host and writes one line to
+# ~/.mw-health; it changes nothing else, starts nothing and spends no tokens.
+[Unit]
+Description=Write this host's one-line health reading (mw-health)
+
+[Service]
+Type=oneshot
+
+# A user unit gets a bare PATH. The host says where mw, bd, tmux and mw-health
+# itself are in dispatch.env, the same one line `PATH=...` that
+# mw-dispatch.service reads. The second file is for the host's settings of the
+# script (MW_HEALTH_SERVICES and the limits, listed in the header of
+# contrib/health/mw-health.sh); the leading "-" makes each file optional. `env`
+# finds mw-health through the PATH the first sets, which ExecStart on its own
+# would not.
+EnvironmentFile=-%h/.config/mw/dispatch.env
+EnvironmentFile=-%h/.config/mw/health.env
+ExecStart=/usr/bin/env mw-health
+
+# A reading is meant to be cheap and to step aside for real work.
+Nice=19
+
+# Type=oneshot has no start timeout by default, and a hung bd or mw would then
+# block every later reading.
+TimeoutStartSec=2min

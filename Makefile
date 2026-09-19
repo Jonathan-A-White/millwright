@@ -23,11 +23,14 @@ test:
 # go vet, then the code map check: docs/codemap.md must be under its size
 # limit, name only paths that exist, and leave out no port, use case or
 # cmd/mw command. Then the timer units: systemd-analyze must accept them where
-# it exists. Both checks read only this repository and start nothing.
+# it exists. Then the health script, run against stand-in commands for every
+# reading it takes. These checks read only this repository (and a temporary
+# directory) and start nothing.
 lint:
 	$(GO) vet $(PKG)
 	scripts/check-codemap.sh
 	scripts/check-timer-units.sh
+	scripts/check-health.sh
 
 clean:
 	rm -rf bin

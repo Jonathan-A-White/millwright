@@ -1,0 +1,15 @@
+# Runs mw-health.service every 15 minutes, on the quarter hour. For
+# `systemctl --user`; see README.md, "A host's health line".
+[Unit]
+Description=Every 15 minutes, write this host's health line (mw-health)
+
+[Timer]
+OnCalendar=*:0/15
+# No catch-up: a host that was asleep or off does not run the readings it
+# missed, and it is not woken to run them. A stale ~/.mw-health is itself news.
+Persistent=false
+WakeSystem=false
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target
