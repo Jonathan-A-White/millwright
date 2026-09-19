@@ -239,15 +239,16 @@ func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 	// And mw status, reading from the other host, sees the same story as work
 	// pathed away from it — with the epic's defaults overlaid, since that is
 	// where its host came from. From the VPS itself it is not work elsewhere.
-	away, err := gateway.WorkElsewhere(ctx, "laptop")
+	inHand, err := gateway.WorkInHand(ctx)
 	if err != nil {
-		t.Fatalf("listing what is pathed away from laptop: %v", err)
+		t.Fatalf("listing what is in hand: %v", err)
 	}
+	away := inHand.Elsewhere("laptop")
 	if len(away) != 1 || away[0].Story.ID != storyID || away[0].Merged().Host != "vps" {
 		t.Fatalf("expected %s to be work elsewhere as far as laptop is concerned, got %+v", storyID, away)
 	}
-	if here, err := gateway.WorkElsewhere(ctx, "vps"); err != nil || len(here) != 0 {
-		t.Fatalf("expected nothing pathed away from vps, got %+v: %v", here, err)
+	if here := inHand.Elsewhere("vps"); len(here) != 0 {
+		t.Fatalf("expected nothing pathed away from vps, got %+v", here)
 	}
 
 	// Claiming it takes it out of the ready stories.
@@ -274,8 +275,12 @@ func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 	}
 	// A claimed story is still work pathed elsewhere: that is exactly the work
 	// that strands when its host stops syncing.
-	if away, err := gateway.WorkElsewhere(ctx, "laptop"); err != nil || len(away) != 1 || away[0].Story.ID != storyID {
-		t.Fatalf("expected the claimed %s to still be work elsewhere, got %+v: %v", storyID, away, err)
+	inHand, err = gateway.WorkInHand(ctx)
+	if err != nil {
+		t.Fatalf("listing what is in hand after the claim: %v", err)
+	}
+	if away := inHand.Elsewhere("laptop"); len(away) != 1 || away[0].Story.ID != storyID {
+		t.Fatalf("expected the claimed %s to still be work elsewhere, got %+v", storyID, away)
 	}
 	if err := gateway.ReleaseClaim(ctx, storyID); err != nil {
 		t.Fatalf("giving back the claim on %s: %v", storyID, err)

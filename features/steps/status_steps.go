@@ -427,11 +427,11 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 // looks like, and what note its host left, just before mw status runs.
 func (c *statusContext) rememberElsewhere() error {
 	ctx := context.Background()
-	elsewhere, err := c.tracker.WorkElsewhere(ctx, statusHost)
+	inHand, err := c.tracker.WorkInHand(ctx)
 	if err != nil {
 		return fmt.Errorf("reading what the other hosts hold: %w", err)
 	}
-	for _, d := range elsewhere {
+	for _, d := range inHand.Elsewhere(statusHost) {
 		host := d.Merged().Host
 		said, err := c.tracker.Note(ctx, application.LastSyncKey(host))
 		if err != nil {
@@ -929,7 +929,7 @@ func (c *statusContext) nothingWasWritten() error {
 		return err
 	}
 	for _, call := range c.tracker.Asked()[c.askedBefore:] {
-		if call != "RunningStories" && call != "ReadyForHost" && call != "ReadyWithLabel" {
+		if call != "WorkInHand" && call != "ReadyWithLabel" {
 			return fmt.Errorf("expected mw status to only read the tracker, but it called %s", call)
 		}
 	}

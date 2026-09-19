@@ -177,10 +177,11 @@ type StatusReport struct {
 }
 
 // Run reads the report and prints it. Every call it makes is a read: the
-// tracker's RunningStories, StoryState and OpenSteps, ReadyForHost,
-// ReadyWithLabel, BlockedForHost and WorkElsewhere, one Note per other host,
-// and the vault's ReadLedger and RigMemorySizes. Nothing is claimed, nothing is
-// poured, nothing is written.
+// tracker's WorkInHand, StoryState and OpenSteps, ReadyWithLabel and
+// BlockedForHost, one Note per other host, and the vault's ReadLedger and
+// RigMemorySizes. WorkInHand is read once, and this host's running and ready
+// stories and the other hosts' work are all narrowed from it. Nothing is
+// claimed, nothing is poured, nothing is written.
 func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	report := StatusReport{Host: s.Host}
 	switch {
@@ -192,11 +193,12 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		return report, fmt.Errorf("reading status: whose ledger is today's fuel summed from?")
 	}
 
-	running, err := s.Tracker.RunningStories(ctx, s.Host)
+	work, err := s.Tracker.WorkInHand(ctx)
 	if err != nil {
-		return report, fmt.Errorf("reading what is running on %s: %w", s.Host, err)
+		return report, fmt.Errorf("reading what is in hand: %w", err)
 	}
-	for _, detail := range running {
+
+	for _, detail := range work.RunningOn(s.Host) {
 		if detail.Hitl() {
 			// The Mayor works it beside the Governor: there is no session of its
 			// own to judge, only a story to be found waiting.
@@ -210,11 +212,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		report.Running = append(report.Running, rs)
 	}
 
-	ready, err := s.Tracker.ReadyForHost(ctx, s.Host)
-	if err != nil {
-		return report, fmt.Errorf("reading what is ready on %s: %w", s.Host, err)
-	}
-	for _, detail := range ready {
+	for _, detail := range work.ReadyOn(s.Host) {
 		if detail.Hitl() {
 			// Listed below with every other bead for the Governor, whichever host
 			// its Path names.
@@ -241,7 +239,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	}
 	report.Blocked = blocked
 
-	others, err := s.elsewhere(ctx)
+	others, err := s.elsewhere(ctx, work)
 	if err != nil {
 		return report, err
 	}
@@ -288,29 +286,22 @@ func (s Status) running(ctx context.Context, detail StoryDetail) (RunningStory, 
 }
 
 // elsewhere reads what the other hosts hold: the stories pathed to each of
-// them, and when each last recorded itself level. It costs one listing plus
-// one note per host that has work, and writes nothing.
+// them, taken from the work already in hand, and when each last recorded itself
+// level. It costs one note per host that has work, and writes nothing.
 //
 // A host is called asleep when the last sync it recorded is further back than
 // the threshold, when it has never recorded one, or when what it recorded is
 // not a time. None of those is an error: a host that cannot say when it was
 // last level is exactly the host whose work a person must look at.
-func (s Status) elsewhere(ctx context.Context) ([]HostWork, error) {
+func (s Status) elsewhere(ctx context.Context, inHand WorkInHand) ([]HostWork, error) {
 	if s.Notes == nil {
 		return nil, nil
-	}
-	stories, err := s.Tracker.WorkElsewhere(ctx, s.Host)
-	if err != nil {
-		return nil, fmt.Errorf("reading what the other hosts hold: %w", err)
 	}
 
 	byHost := map[string][]StoryDetail{}
 	var hosts []string
-	for _, detail := range stories {
+	for _, detail := range inHand.Elsewhere(s.Host) {
 		host := detail.Merged().Host
-		if host == "" || host == s.Host {
-			continue
-		}
 		if _, seen := byHost[host]; !seen {
 			hosts = append(hosts, host)
 		}

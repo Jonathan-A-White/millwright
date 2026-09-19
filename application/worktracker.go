@@ -65,6 +65,49 @@ type StoryDetail struct {
 	Molecule Molecule
 }
 
+// WorkInHand is what the tracker has in hand across every host: the stories
+// ready to be taken and the stories already claimed, before either is narrowed
+// to a host. The tracker reads it once; each section of a report narrows it
+// with ReadyOn, RunningOn or Elsewhere.
+type WorkInHand struct {
+	// Ready are the stories open, unclaimed and unblocked, on any host or none.
+	Ready []StoryDetail
+	// Running are the stories claimed and not yet finished, on any host or none.
+	Running []StoryDetail
+}
+
+// ReadyOn is the ready stories whose Path names this host. A story whose Path
+// names no host is not offered to any host.
+func (w WorkInHand) ReadyOn(host string) []StoryDetail { return pathedTo(w.Ready, host) }
+
+// RunningOn is the claimed stories whose Path names this host.
+func (w WorkInHand) RunningOn(host string) []StoryDetail { return pathedTo(w.Running, host) }
+
+// Elsewhere is every story, ready and then claimed, whose Path names some host
+// other than this one. A story whose Path names no host is nobody's.
+func (w WorkInHand) Elsewhere(host string) []StoryDetail {
+	var away []StoryDetail
+	for _, list := range [][]StoryDetail{w.Ready, w.Running} {
+		for _, detail := range list {
+			if on := detail.Merged().Host; on != "" && on != host {
+				away = append(away, detail)
+			}
+		}
+	}
+	return away
+}
+
+// pathedTo narrows stories to the ones whose Path names the host.
+func pathedTo(stories []StoryDetail, host string) []StoryDetail {
+	var on []StoryDetail
+	for _, detail := range stories {
+		if merged := detail.Merged().Host; merged != "" && merged == host {
+			on = append(on, detail)
+		}
+	}
+	return on
+}
+
 // Molecule is a story's formula poured into beads: the root bead the steps hang
 // from, and the steps in the order they are worked. The zero Molecule is a
 // formula that has not been poured.
@@ -238,13 +281,14 @@ type WorkTracker interface {
 	// has an epic. It reads and writes nothing.
 	ReadyWithLabel(ctx context.Context, label string) ([]StoryDetail, error)
 
-	// WorkElsewhere lists the stories another host has in hand: every story that
-	// is ready to be taken or already claimed, whose Path names some host other
-	// than the one given. It is how `mw status` sees work that is nobody's here
-	// — what would be stranded if that host stopped syncing. Each story comes
-	// back with its own epic's defaults overlaid, and a story whose Path names
-	// no host is listed for nobody, here as everywhere else.
-	WorkElsewhere(ctx context.Context, host string) ([]StoryDetail, error)
+	// WorkInHand lists every story that is ready to be taken or already claimed,
+	// on every host, in one read: the two listings ReadyForHost and
+	// RunningStories make, unnarrowed, so that a caller wanting what one host and
+	// the others have in hand asks the tracker once, not once per section. Each
+	// story comes back with its own epic's defaults overlaid; a story whose Path
+	// names no host is listed, and WorkInHand's own narrowing leaves it out of
+	// every host. It reads and writes nothing.
+	WorkInHand(ctx context.Context) (WorkInHand, error)
 
 	// ClaimStory takes a story: it becomes assigned and in progress, and stops
 	// being ready. Claiming a story already claimed by this actor is harmless.

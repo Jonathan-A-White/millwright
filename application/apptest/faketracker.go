@@ -490,8 +490,9 @@ func (f *FakeTracker) Molecules() int {
 }
 
 // Asked reports the dispatch-facing calls the fake was made, in order: Sync,
-// RunningStories, ReadyForHost, ClaimStory, ReleaseClaim, PourFormula and
-// SetStoryState. It is how a test says what was done before what.
+// RunningStories, ReadyForHost, WorkInHand, ClaimStory, ReleaseClaim,
+// PourFormula and SetStoryState. It is how a test says what was done before
+// what.
 func (f *FakeTracker) Asked() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -609,31 +610,26 @@ func carries(labels []string, label string) bool {
 	return false
 }
 
-// WorkElsewhere implements application.WorkTracker: what the other hosts have
-// in hand, ready or claimed. A story pathed to no host is nobody's, here as in
-// the real tracker.
-func (f *FakeTracker) WorkElsewhere(_ context.Context, host string) ([]application.StoryDetail, error) {
+// WorkInHand implements application.WorkTracker: every story ready to be taken
+// or claimed and unfinished, whatever host — or none — its Path names.
+func (f *FakeTracker) WorkInHand(_ context.Context) (application.WorkInHand, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.asked = append(f.asked, "WorkInHand")
 	if f.Err != nil {
-		return nil, f.Err
+		return application.WorkInHand{}, f.Err
 	}
-	if host == "" {
-		return nil, fmt.Errorf("which host is the work elsewhere measured from?")
-	}
-	var elsewhere []application.StoryDetail
+	var work application.WorkInHand
 	for _, id := range f.order {
 		s := f.stories[id]
-		if on := s.detail.Merged().Host; on == "" || on == host {
-			continue
+		switch {
+		case s.detail.Status == StatusInProgress:
+			work.Running = append(work.Running, s.detail)
+		case s.detail.Status == StatusOpen && s.detail.Assignee == "" && !f.waiting(s):
+			work.Ready = append(work.Ready, s.detail)
 		}
-		ready := s.detail.Status == StatusOpen && s.detail.Assignee == "" && !f.waiting(s)
-		if !ready && s.detail.Status != StatusInProgress {
-			continue
-		}
-		elsewhere = append(elsewhere, s.detail)
 	}
-	return elsewhere, nil
+	return work, nil
 }
 
 // ReleaseClaim implements application.WorkTracker.
