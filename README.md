@@ -311,7 +311,9 @@ refusal before any `bd` is started.
 `mw` is neither the Mayor nor the Builder on purpose: what `mw dispatch` and
 `mw next` write down was decided by the machinery, not by a seat, and the
 factory's history has to be able to tell the two apart. A session's own writes
-are still signed by its seat — the harness sets `BEADS_ACTOR=<seat>@<host>`.
+are still signed by its seat — the harness sets `BEADS_ACTOR=<seat>@<host>`. The
+decision and the alternative turned down are in
+[ADR 0005](docs/adr/0005-mw-acts-under-its-own-name.md).
 
 A story claimed by hand is closed by hand under the name that claimed it:
 
