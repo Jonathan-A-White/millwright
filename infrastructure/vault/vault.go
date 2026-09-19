@@ -27,14 +27,14 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 )
 
-// The names of the parts of a seat this package reads. The two a close-out has
+// The names of the parts of a seat this package reads. The three a close-out has
 // to name by path when it commits are the application's, so that the layout is
 // written down once.
 const (
 	CharterFile = "charter.md"
 	SeatsDir    = application.SeatsDir
 	RigsDir     = application.RigsDir
-	RunsDir     = "runs"
+	RunsDir     = application.RunsDir
 )
 
 // Vault is one vault directory.

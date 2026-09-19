@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -90,6 +91,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the session of "([^"]*)" reported this result:$`, c.theSessionReportedThis)
 	ctx.Given(`^the session of "([^"]*)" reported a plain success$`, c.theSessionSucceeded)
 	ctx.Given(`^the session of "([^"]*)" left no result at all$`, c.theSessionLeftNothing)
+	ctx.Given(`^the run of "([^"]*)" left its boot file beside the result$`, c.theRunLeftItsBootFile)
 	ctx.Given(`^the rig's tests fail, saying "([^"]*)"$`, c.theRigsTestsFail)
 	ctx.Given(`^the rig's tests cannot be run, saying "([^"]*)"$`, c.theRigsTestsCannotBeRun)
 	ctx.Given(`^the story "([^"]*)" is planned and ready to be worked here$`, c.aStoryReadyHere)
@@ -138,6 +140,8 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the hosts were brought level$`, c.theHostsWereBroughtLevel)
 	ctx.Then(`^the close-out says the hosts could not be brought level, naming "([^"]*)"$`, c.theHostsCouldNotBeBroughtLevel)
 	ctx.Then(`^the close-out notes that the vault could not be committed$`, c.theVaultCommitFailureIsNoted)
+	ctx.Then(`^the vault commit does not hold "([^"]*)"$`, c.theVaultCommitDoesNotHold)
+	ctx.Then(`^the report says the run record of "([^"]*)" was missing$`, c.theRunRecordWasMissing)
 }
 
 // workspace makes the temp directory a scenario keeps everything in, once.
@@ -375,6 +379,17 @@ func (c *nextContext) theSessionSucceeded(id string) error {
 
 func (c *nextContext) theSessionLeftNothing(id string) error {
 	return os.RemoveAll(filepath.Join(c.vault, vault.RunsDir, id))
+}
+
+// theRunLeftItsBootFile is the file mw wrote to prime the session, sitting in
+// the run's directory beside the result. It is untracked in the vault and stays
+// that way: a close-out commits the result and never it.
+func (c *nextContext) theRunLeftItsBootFile(id string) error {
+	dir := filepath.Join(c.vault, vault.RunsDir, id)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, application.BootFileName), []byte("the boot prompt"), 0o644)
 }
 
 // putResult writes what the session reported where the harness would have
@@ -932,6 +947,32 @@ func (c *nextContext) theVaultCommitFailureIsNoted() error {
 	said := c.printed.String()
 	if !strings.Contains(said, "could not be committed") {
 		return fmt.Errorf("expected the report to note that the vault could not be committed, got:\n%s", said)
+	}
+	return nil
+}
+
+func (c *nextContext) theVaultCommitDoesNotHold(path string) error {
+	commit, err := c.lastVaultCommit()
+	if err != nil {
+		return err
+	}
+	for _, committed := range commit.Paths {
+		if committed == path {
+			return fmt.Errorf("expected mw not to commit %s, but it committed %q", path, commit.Paths)
+		}
+	}
+	return nil
+}
+
+// theRunRecordWasMissing is the close-out saying, in its report, that the one
+// file the story's fuel is evidenced by was not there to commit.
+func (c *nextContext) theRunRecordWasMissing(id string) error {
+	record := path.Join(vault.RunsDir, id, application.ResultFileName)
+	said := c.printed.String()
+	for _, want := range []string{record, "missing"} {
+		if !strings.Contains(said, want) {
+			return fmt.Errorf("expected the report to say the run record %s was missing, got:\n%s", record, said)
+		}
 	}
 	return nil
 }

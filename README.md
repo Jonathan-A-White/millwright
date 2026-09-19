@@ -205,12 +205,16 @@ the story is closed with the reason, `mw sync` brings the hosts level so that
 the other host sees a closed story rather than a claimed one, and whatever is
 ready here is dispatched.
 
-The commit is exactly two paths — `seats/<seat>/ledger.md` and
-`seats/<seat>/rigs/<rig>.md` — named explicitly, never `git add -A` and never
-`commit -a`, under a plain message naming the story and signed by nobody. They
-are the only files a story is allowed to write in the vault: mw wrote the first
-and the session may have written the second, so a close-out that left them
-uncommitted would stop its own sync and every later one. Anything else
+The commit is exactly three paths — `seats/<seat>/ledger.md`,
+`seats/<seat>/rigs/<rig>.md` and `runs/<story>/result.json` — named explicitly,
+never `git add -A` and never `commit -a`, under a plain message naming the story
+and signed by nobody. They are the only files a story is allowed to write in the
+vault: mw wrote the first and the run record, and the session may have written the
+second, so a close-out that left them uncommitted would stop its own sync and
+every later one. The run record is committed so that the evidence behind a ledger
+line's fuel travels to the other host with the line; `runs/<story>/boot.md` beside
+it is never committed. A run record that is not there is said so in the report,
+and the other two are committed all the same. Anything else
 uncommitted in the vault is still somebody else's to commit, and the sync's
 vault half still refuses because of it, naming the file — the story is landed and closed all the
 same, because none of that is undone. A close-out that lands nothing commits the

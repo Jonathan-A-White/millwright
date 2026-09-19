@@ -37,6 +37,8 @@ type Seat struct {
 const (
 	SeatsDir = "seats"
 	RigsDir  = "rigs"
+	// RunsDir is the directory a story's run is kept in, one subdirectory a story.
+	RunsDir = "runs"
 	// MemoryExt is what a seat's memory of one rig is written in.
 	MemoryExt = ".md"
 )
@@ -60,6 +62,18 @@ func SeatWork(seat, rig string) []string {
 		return work
 	}
 	return append(work, path.Join(SeatsDir, seat, RigsDir, rig+MemoryExt))
+}
+
+// RunRecord is the one file of a story's run a close-out commits, by path from
+// the vault's root: the session's result, the only evidence behind the fuel a
+// ledger line reports. The boot file beside it is left untracked — it is what
+// the session was primed with, and the run's own host is the only place it is
+// wanted. A story id that would reach outside the vault gives no path.
+func RunRecord(storyID string) string {
+	if !safeVaultName(storyID) {
+		return ""
+	}
+	return path.Join(RunsDir, storyID, ResultFileName)
 }
 
 // safeVaultName reports whether a name can be put in a vault path as it is.
