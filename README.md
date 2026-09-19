@@ -419,7 +419,8 @@ bd reclaim mw-gq6.30                                        # or take it over fi
 ### What a host is told
 
 `~/.config/mw/config.toml`, with `MW_VAULT`, `MW_HOST`, `MW_CAP` and
-`MW_HOST_SILENT_HOURS`, `MW_STALE_HOURS`, `MW_HANDOFF_AT` and `MW_RIG_MEMORY_BYTES` ahead of it:
+`MW_HOST_SILENT_HOURS`, `MW_STALE_HOURS`, `MW_HANDOFF_AT`, `MW_RIG_MEMORY_BYTES`,
+`MW_MILLHAND_ROUTINE_MODEL` and `MW_MILLHAND_REVIEW_MODEL` ahead of it:
 
 ```toml
 vault = "/root/millwright-vault"   # the one beads database and the seats
@@ -429,6 +430,8 @@ host_silent_hours = 2              # how long another host may go unsynced (defa
 stale_hours = 2                    # how long a session may print nothing new before mw sweep calls it stuck (default 2)
 handoff_at = 180000                # the context size, in tokens, at which mw seat context says handoff (default 180000)
 rig_memory_bytes = 8000            # how large the Builder's memory of one rig may grow before mw status says prune (default 8000)
+millhand_routine_model = "sonnet"  # the model of a routine wake, and of a wake by hand, of the Millhand (default sonnet)
+millhand_review_model = "opus"     # the model of a review wake of the Millhand (default opus)
 
 [rigs]
 millwright = "/root/millwright"    # where each rig is checked out here
@@ -1007,6 +1010,43 @@ each append one dated line to `.<seat>-reaper.log` in the vault:
 It replaces the vault's `bin/mayor-reap-window`, which did the same in bash.
 See `features/seat_reap.feature`, and `infrastructure/tmux/reap.go` for how a
 pane is read and a window closed.
+
+## Waking the Millhand
+
+```sh
+bin/mw millhand --wake routine --reason "the mail timer saw a message"
+bin/mw millhand --wake review
+bin/mw millhand                     # by hand: the Governor is here
+```
+
+`mw millhand` brings up this host's Millhand: `mw seat up millhand` with
+everything a wake settles already settled, so that a timer has one command to
+run. There are two kinds of wake, each on its own model, and a third for when
+the Governor is here (`--wake hand|routine|review`, `hand` by default):
+
+| Wake | Model (config key) | Effort |
+| --- | --- | --- |
+| `hand`, `routine` | `millhand_routine_model`, `sonnet` | high |
+| `review` | `millhand_review_model`, `opus` | high |
+
+The models are fuel knobs: set them in the config file (see *What a host is
+told*) or with `MW_MILLHAND_ROUTINE_MODEL` and `MW_MILLHAND_REVIEW_MODEL`. Every
+wake arms the idle reaper (`--reap-when-idle` of `mw seat up`), so the window
+closes itself once the Millhand has handed off. The kickoff is told the kind of
+wake and the `--reason` for it, after the newest handoff to boot from. For a
+review wake it is also told what `seats/millhand/hosts/<host>/review-since`
+holds, when that file exists, and nothing about a mark when it does not. `mw`
+only reads the mark: the Millhand moves it in its handoff.
+
+If a window named `millhand-*` is already open, it starts nothing, says so in
+one line and leaves with status **5**, so a timer can tell "already up" from a
+failure (1):
+
+```
+Error: the Millhand is already up in the window millhand-2026-09-19-03: nothing was started
+```
+
+See `features/millhand.feature`.
 
 ## The Path
 

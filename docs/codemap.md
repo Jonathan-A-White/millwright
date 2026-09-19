@@ -63,6 +63,7 @@ from `cmd/mw/` only.
 | `SeatContext` | `application/seatcontext.go` | `mw seat context` — `cmd/mw/seat.go` | `features/seat_context.feature` |
 | `SeatUp` | `application/seatup.go` | `mw seat up` — `cmd/mw/seat.go` | `features/seat_up.feature` |
 | `SeatReap` | `application/seatreap.go` | `mw seat reap` — `cmd/mw/seat.go` | `features/seat_reap.feature` |
+| `Millhand` | `application/millhand.go` | `mw millhand` — `cmd/mw/millhand.go` | `features/millhand.feature` |
 | `SeatBoot` | `application/seatboot.go` | none: `Dispatch`, `Next` call it | `features/seat_boot.feature` |
 
 `cmd/mw/root.go` holds the tree (one `root.AddCommand` per command);
