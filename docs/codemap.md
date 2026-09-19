@@ -30,6 +30,7 @@ Every adapter carries `var _ application.<Port> = ...`.
 | `Vault` | `application/seatboot.go` | `infrastructure/vault/vault.go` | `application/seatboot_test.go` |
 | `Runner` | `application/runner.go` | `infrastructure/tmux/tmux.go` | `application/apptest/fakerunner.go` |
 | `Harness` | `application/harness.go` | `infrastructure/claude/claude.go` | `application/seatboot_test.go` |
+| `Transcripts` | `application/seatcontext.go` | `infrastructure/claude/transcripts.go` (the only reader of `~/.claude`) | none — fixtures in a temp dir |
 | `Worktrees` | `application/worktrees.go` | `infrastructure/rig/worktree.go` | `application/dispatch_test.go` |
 | `Landing` | `application/landing.go` | `infrastructure/rig/landing.go` | none — real git in a temp repo |
 | `Checks` | `application/landing.go` | `infrastructure/rig/checks.go` | none — a real command |
@@ -38,7 +39,7 @@ Every adapter carries `var _ application.<Port> = ...`.
 | `HostSync` | `application/dispatch.go` | `application.Sync` | — |
 
 `infrastructure/config/config.go` is not a port: what this host knows about
-itself (vault, host, cap, stale and silence hours, rigs, test commands), read
+itself (vault, host, cap, stale and silence hours, handoff limit, rigs, test commands), read
 from `cmd/mw/` only.
 
 ## Use cases
@@ -52,6 +53,7 @@ from `cmd/mw/` only.
 | `Status` | `application/status.go` | `mw status` — `cmd/mw/status.go` | `features/status.feature` |
 | `Sweep` | `application/sweep.go` | `mw sweep` — `cmd/mw/sweep.go` | `features/sweep.feature` |
 | `Sync` | `application/sync.go` | `mw sync` — `cmd/mw/sync.go` | `features/sync.feature` |
+| `SeatContext` | `application/seatcontext.go` | `mw seat context` — `cmd/mw/seat.go` | `features/seat_context.feature` |
 | `SeatBoot` | `application/seatboot.go` | none — `Dispatch` and `Next` call it | `features/seat_boot.feature` |
 
 `cmd/mw/main.go` runs the tree; `cmd/mw/root.go` holds it (one

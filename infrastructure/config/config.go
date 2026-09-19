@@ -7,6 +7,7 @@
 //	host  = "vps"
 //	cap   = 1
 //	host_silent_hours = 2
+//	handoff_at = 180000
 //
 //	[rigs]
 //	millwright = "/root/millwright"
@@ -29,6 +30,7 @@ const (
 	CapEnv         = "MW_CAP"
 	StaleHoursEnv  = "MW_STALE_HOURS"
 	HostSilenceEnv = "MW_HOST_SILENT_HOURS"
+	HandoffAtEnv   = "MW_HANDOFF_AT"
 )
 
 // RigsTable is the table of the config file that says where each rig is checked
@@ -59,6 +61,10 @@ const DefaultStaleHours = 2
 // the hourly sync the factory runs, which is the smallest threshold that does
 // not call a host asleep for the lag alone.
 const DefaultHostSilentHours = 2
+
+// DefaultHandoffAt is the context size, in tokens, at which a seat's session
+// must hand off when nothing says otherwise.
+const DefaultHandoffAt = 180000
 
 // File is the config file's path under the home directory.
 var File = filepath.Join(".config", "mw", "config.toml")
@@ -165,6 +171,34 @@ func HostSilentHours() (int, error) {
 		return 0, fmt.Errorf("the host silence threshold is %d hours, so every other host would be called asleep the moment it synced: set it to 1 or more", hours)
 	}
 	return hours, nil
+}
+
+// HandoffAt reports the context size, in tokens, at which a seat's session must
+// hand off: $MW_HANDOFF_AT if it is set, otherwise the root-table `handoff_at`
+// key of ~/.config/mw/config.toml, and DefaultHandoffAt when neither says.
+func HandoffAt() (int, error) {
+	said := strings.TrimSpace(os.Getenv(HandoffAtEnv))
+	if said == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return 0, fmt.Errorf("no %s is set and there is no home directory to read %s in: %w", HandoffAtEnv, File, err)
+		}
+		if said, err = valueIn(filepath.Join(home, File), "handoff_at"); err != nil {
+			return 0, err
+		}
+	}
+	if said == "" {
+		return DefaultHandoffAt, nil
+	}
+
+	tokens, err := strconv.Atoi(said)
+	if err != nil {
+		return 0, fmt.Errorf("the handoff limit is %q, which is not a whole number of tokens: set %s=<n>, or `handoff_at = <n>` in %s", said, HandoffAtEnv, File)
+	}
+	if tokens < 1 {
+		return 0, fmt.Errorf("the handoff limit is %d tokens, so every session would be told to hand off at once: set it to 1 or more", tokens)
+	}
+	return tokens, nil
 }
 
 // Rigs reports where each rig the factory works is checked out on this machine,
