@@ -83,7 +83,7 @@ func newNextCmd() *cobra.Command {
 			}
 
 			gateway := mwGateway(dir, host)
-			files := vault.New(dir)
+			files := mwVault(dir, host)
 			worktrees := rig.New()
 			runner := tmux.New()
 			sync := application.Sync{Vault: files, Tracker: gateway, Host: host}

@@ -5,7 +5,6 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
-	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
 )
@@ -48,7 +47,7 @@ func newStatusCmd() *cobra.Command {
 			_, err = application.Status{
 				Tracker:     tracker,
 				Notes:       tracker,
-				Vault:       vault.New(dir),
+				Vault:       mwVault(dir, host),
 				Host:        host,
 				Seat:        BuilderSeat,
 				HostSilence: time.Duration(hours) * time.Hour,

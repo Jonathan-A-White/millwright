@@ -236,6 +236,55 @@ func TestCommitRecordsThePathsItWasGivenAndLeavesEverythingElseAlone(t *testing.
 	}
 }
 
+// authorOf reads who a commit is recorded under, name and email.
+func authorOf(t *testing.T, dir, revision string) string {
+	t.Helper()
+	return strings.TrimSpace(run(t, dir, "git", "log", "-1", "--format=%an <%ae>", revision))
+}
+
+func TestCommitIsAuthoredAsMwAndLeavesTheClonesOwnIdentityAlone(t *testing.T) {
+	here, _ := twoHosts(t)
+	files := vault.New(here, vault.WithAuthor("mw@laptop"))
+
+	write(t, here, "seats/builder/ledger.md", "| 2026-09-19 | mw-gq6.42 | landed on main |\n")
+	if _, err := files.Commit(context.Background(), "Close out mw-gq6.42: a story", []string{"seats/builder/ledger.md"}); err != nil {
+		t.Fatalf("committing: %v", err)
+	}
+	if got := authorOf(t, here, "HEAD"); got != "mw@laptop <mw@laptop>" {
+		t.Fatalf("expected mw's commit to be authored as mw@laptop, got %q", got)
+	}
+	if got := strings.TrimSpace(run(t, here, "git", "log", "-1", "--format=%cn <%ce>")); got != "mw@laptop <mw@laptop>" {
+		t.Fatalf("expected mw's commit to be committed as mw@laptop, got %q", got)
+	}
+
+	// The clone's own identity was not rewritten to get there ...
+	if got := strings.TrimSpace(run(t, here, "git", "config", "user.name")); got != "millwright test" {
+		t.Fatalf("expected the clone's user.name to be untouched, got %q", got)
+	}
+	if got := strings.TrimSpace(run(t, here, "git", "config", "user.email")); got != "test@millwright.invalid" {
+		t.Fatalf("expected the clone's user.email to be untouched, got %q", got)
+	}
+
+	// ... so a commit made by hand in the same clone is still the clone's.
+	write(t, here, "seats/mayor/ledger.md", "2026-09-17 the factory opened.\nby hand\n")
+	run(t, here, "git", "commit", "-qam", "By hand")
+	if got := authorOf(t, here, "HEAD"); got != "millwright test <test@millwright.invalid>" {
+		t.Fatalf("expected a commit by hand to keep the clone's author, got %q", got)
+	}
+}
+
+func TestCommitWithNoAuthorGivenLeavesItToTheClone(t *testing.T) {
+	here, _ := twoHosts(t)
+
+	write(t, here, "seats/builder/ledger.md", "| 2026-09-19 | mw-gq6.42 | landed on main |\n")
+	if _, err := vault.New(here).Commit(context.Background(), "Close out mw-gq6.42: a story", []string{"seats/builder/ledger.md"}); err != nil {
+		t.Fatalf("committing: %v", err)
+	}
+	if got := authorOf(t, here, "HEAD"); got != "millwright test <test@millwright.invalid>" {
+		t.Fatalf("expected the clone's author, got %q", got)
+	}
+}
+
 func TestCommitDoesNotCarryOffWhatSomebodyElseStaged(t *testing.T) {
 	here, _ := twoHosts(t)
 

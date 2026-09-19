@@ -39,11 +39,30 @@ const (
 
 // Vault is one vault directory.
 type Vault struct {
-	dir string
+	dir    string
+	author string
+}
+
+// Option shapes a Vault.
+type Option func(*Vault)
+
+// WithAuthor names who the commits this Vault makes are recorded under, as both
+// author and committer, name and email alike: mw@<host>, the name mw acts under
+// in the tracker (ADR 0005). It is given to git per command, with -c, and never
+// written into the clone's config, so a commit made by hand in the same clone
+// is still the person's. A Vault with no author leaves git to the clone's own.
+func WithAuthor(author string) Option {
+	return func(v *Vault) { v.author = strings.TrimSpace(author) }
 }
 
 // New returns the vault held in a directory.
-func New(dir string) *Vault { return &Vault{dir: dir} }
+func New(dir string, opts ...Option) *Vault {
+	v := &Vault{dir: dir}
+	for _, opt := range opts {
+		opt(v)
+	}
+	return v
+}
 
 // Vault satisfies the port.
 var _ application.Vault = (*Vault)(nil)

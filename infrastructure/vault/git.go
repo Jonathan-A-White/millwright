@@ -129,7 +129,9 @@ func changedPaths(out string) []string {
 // a vault two hosts and several seats write to: a commit with a pathspec takes
 // the working tree's version of those paths and nothing else, whatever else is
 // changed or even staged. Nothing is added with -A, nothing is committed with
-// -a, and a path nobody touched is not committed at all.
+// -a, and a path nobody touched is not committed at all. When the Vault has an
+// author (WithAuthor) the commit alone carries it, as -c user.name and -c
+// user.email.
 func (v *Vault) Commit(ctx context.Context, message string, paths []string) ([]string, error) {
 	if strings.TrimSpace(message) == "" {
 		return nil, fmt.Errorf("committing in %s: a commit needs a message", v.dir)
@@ -155,7 +157,11 @@ func (v *Vault) Commit(ctx context.Context, message string, paths []string) ([]s
 	if _, err := v.git(ctx, append([]string{"add", "--"}, changed...)...); err != nil {
 		return nil, err
 	}
-	if _, err := v.git(ctx, append([]string{"commit", "-m", message, "--"}, changed...)...); err != nil {
+	commit := append([]string{"commit", "-m", message, "--"}, changed...)
+	if v.author != "" {
+		commit = append([]string{"-c", "user.name=" + v.author, "-c", "user.email=" + v.author}, commit...)
+	}
+	if _, err := v.git(ctx, commit...); err != nil {
 		return nil, err
 	}
 	return changed, nil

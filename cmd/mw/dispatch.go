@@ -28,6 +28,13 @@ func mwGateway(dir, host string) *beads.Gateway {
 	return beads.New(dir, beads.WithActor(application.SeatIdentity(application.MwSeat, host)))
 }
 
+// mwVault is the vault's files as every command uses them: the clone in the
+// configured directory, committing under the same name mwGateway writes to the
+// tracker under, so that the tracker's history and git's tell the same story.
+func mwVault(dir, host string) *vault.Vault {
+	return vault.New(dir, vault.WithAuthor(application.SeatIdentity(application.MwSeat, host)))
+}
+
 // newDispatchCmd builds `mw dispatch`: the command that turns ready stories
 // into running sessions. It is the one command in the factory that spends fuel,
 // so everything it does before spending any is reversible, and --dry-run does
@@ -74,7 +81,7 @@ func newDispatchCmd() *cobra.Command {
 			}
 
 			gateway := mwGateway(dir, host)
-			files := vault.New(dir)
+			files := mwVault(dir, host)
 			report, err := application.Dispatch{
 				Tracker:   gateway,
 				Worktrees: rig.New(),
