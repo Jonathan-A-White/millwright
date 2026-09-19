@@ -40,16 +40,21 @@ func InitializeMailScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^mail was sent to "([^"]*)" with the subject "([^"]*)" and the body "([^"]*)"$`, c.mailWasSent)
 	ctx.Given(`^mail was sent to "([^"]*)" with the subject "([^"]*)" and the body:$`, c.mailWasSentWithBody)
 	ctx.Given(`^mail was sent to "([^"]*)" with the subject "([^"]*)" and no body$`, c.mailWasSentWithNoBody)
+	ctx.Given(`^the message with the subject "([^"]*)" was replied to with the body "([^"]*)"$`, c.theMessageWasRepliedTo)
 
 	ctx.When(`^mail is sent to "([^"]*)" with the subject "([^"]*)" and the body "([^"]*)"$`, c.mailIsSent)
 	ctx.When(`^the message with the subject "([^"]*)" is read$`, c.theMessageWithTheSubjectIsRead)
 	ctx.When(`^the message "([^"]*)" is read$`, c.theMessageIsRead)
+	ctx.When(`^the message with the subject "([^"]*)" is replied to with the body "([^"]*)"$`, c.theMessageWithTheSubjectIsRepliedTo)
+	ctx.When(`^the message "([^"]*)" is replied to with the body "([^"]*)"$`, c.theMessageIsRepliedTo)
 	ctx.When(`^the inbox is listed$`, c.theInboxIsListed)
 	ctx.When(`^the inbox is listed with --as "([^"]*)"$`, c.theInboxIsListedAs)
 
 	ctx.Then(`^sending mail succeeds$`, c.sendingMailSucceeds)
 	ctx.Then(`^reading mail succeeds$`, c.sendingMailSucceeds)
 	ctx.Then(`^listing the inbox succeeds$`, c.sendingMailSucceeds)
+	ctx.Then(`^replying to mail succeeds$`, c.sendingMailSucceeds)
+	ctx.Then(`^the message with the subject "([^"]*)" says it answers the message with the subject "([^"]*)"$`, c.theMessageAnswers)
 	ctx.Then(`^mail is refused, naming "([^"]*)"$`, c.mailIsRefusedNaming)
 	ctx.Then(`^the mailbox recorded no writes$`, c.theMailboxRecordedNoWrites)
 	ctx.Then(`^mail says it went to "([^"]*)"$`, c.mailSaysItWentTo)
@@ -113,6 +118,61 @@ func (c *mailContext) theMessageWithTheSubjectIsRead(subject string) error {
 		return fmt.Errorf("no message with the subject %q was sent", subject)
 	}
 	return c.theMessageIsRead(id)
+}
+
+func (c *mailContext) theMessageWasRepliedTo(subject, body string) error {
+	if err := c.theMessageWithTheSubjectIsRepliedTo(subject, body); err != nil {
+		return err
+	}
+	if c.err != nil {
+		return fmt.Errorf("replying to %q failed: %w", subject, c.err)
+	}
+	return nil
+}
+
+func (c *mailContext) theMessageWithTheSubjectIsRepliedTo(subject, body string) error {
+	id, ok := c.ids[subject]
+	if !ok {
+		return fmt.Errorf("no message with the subject %q was sent", subject)
+	}
+	return c.theMessageIsRepliedTo(id, body)
+}
+
+// theMessageIsRepliedTo replies to a message by id, and remembers the reply by
+// the subject it was given.
+func (c *mailContext) theMessageIsRepliedTo(id, body string) error {
+	var out strings.Builder
+	var replyID string
+	replyID, c.err = c.mail(&out).Reply(context.Background(), id, body)
+	c.printed = out.String()
+	if c.err != nil {
+		return nil
+	}
+	reply, err := c.mailbox.Get(context.Background(), replyID)
+	if err != nil {
+		return err
+	}
+	c.ids[reply.Subject] = replyID
+	return nil
+}
+
+func (c *mailContext) theMessageAnswers(subject, answered string) error {
+	id, ok := c.ids[subject]
+	if !ok {
+		return fmt.Errorf("no message with the subject %q was sent", subject)
+	}
+	original, ok := c.ids[answered]
+	if !ok {
+		return fmt.Errorf("no message with the subject %q was sent", answered)
+	}
+	message, err := c.mailbox.Get(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	if message.ReplyTo != original {
+		return fmt.Errorf("expected %q to answer %s (%q), it answers %q", subject, original, answered, message.ReplyTo)
+	}
+	return nil
 }
 
 func (c *mailContext) theMessageIsRead(id string) error {
