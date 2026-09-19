@@ -119,3 +119,55 @@ Feature: mw seat up
     When mw seat up starts the "mayor" seat
     Then seat up succeeds
     And the window is named "mayor-2026-09-19-06"
+
+  Scenario: Run from the window the acting file names, seat up arms a reaper on that window
+    Given the window "mayor-2026-09-19-02" was opened at "2026-09-19T05:00:00Z"
+    And the "mayor" seat's acting file names that window
+    And the seat up was run from the window "mayor-2026-09-19-02"
+    When mw seat up starts the "mayor" seat
+    Then seat up succeeds
+    And a reaper was armed on the window "mayor-2026-09-19-02" in successor mode for the "mayor" seat
+    And seat up says the window will close itself once its successor has the seat
+
+  Scenario: Run from a window the acting file does not name, seat up arms nothing
+    Given the window "mayor-2026-09-19-02" was opened at "2026-09-19T05:00:00Z"
+    And the "mayor" seat's acting file names that window
+    And the window "mayor-scratch" was opened at "2026-09-19T05:30:00Z"
+    And the seat up was run from the window "mayor-scratch"
+    When mw seat up starts the "mayor" seat
+    Then seat up succeeds
+    And no reaper was armed
+
+  Scenario: Run outside any window, seat up arms nothing
+    When mw seat up starts the "mayor" seat
+    Then seat up succeeds
+    And no reaper was armed
+
+  Scenario: With --reap-when-idle, seat up arms an idle-mode reaper on the window it opened
+    When mw seat up starts the "mayor" seat and reaps its window when idle
+    Then seat up succeeds
+    And a reaper was armed on the window "mayor-2026-09-19-03" in when-idle mode for the "mayor" seat
+    And seat up says the new window will close itself once it is idle after a handoff
+
+  Scenario: With --reap-when-idle and run from the window the acting file names, both windows are armed
+    Given the window "mayor-2026-09-19-02" was opened at "2026-09-19T05:00:00Z"
+    And the "mayor" seat's acting file names that window
+    And the seat up was run from the window "mayor-2026-09-19-02"
+    When mw seat up starts the "mayor" seat and reaps its window when idle
+    Then seat up succeeds
+    And a reaper was armed on the window "mayor-2026-09-19-02" in successor mode for the "mayor" seat
+    And a reaper was armed on the window "mayor-2026-09-19-03" in when-idle mode for the "mayor" seat
+
+  Scenario: A refused seat up arms nothing
+    Given the window "mayor-2026-09-19-02" was opened at "2026-09-19T10:00:00Z"
+    And the "mayor" seat's acting file names that window
+    And the seat up was run from the window "mayor-2026-09-19-02"
+    When mw seat up starts the "mayor" seat and reaps its window when idle
+    Then seat up is refused saying the seat is already acting in "mayor-2026-09-19-02"
+    And no reaper was armed
+
+  Scenario: A reaper that could not be started is said, and the seat is still started
+    Given the reaper cannot be started
+    When mw seat up starts the "mayor" seat and reaps its window when idle
+    Then the seat's session was started all the same
+    And seat up fails saying the reaper could not be armed
