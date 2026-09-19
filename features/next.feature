@@ -116,6 +116,31 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.9" is held blocked
     And the rig's tests were run 0 times
 
+  Scenario: A commit signed by an AI is not landed
+    Given the session of "mw-gq6.1" reported a plain success
+    And a commit on the branch of "mw-gq6.1" carries "Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the story "mw-gq6.1" is held blocked
+    And the story "mw-gq6.1" carries a comment quoting: Co-Authored-By: Claude Sonnet 5
+    And the comment on "mw-gq6.1" and the report name that commit
+    And the worktree of "mw-gq6.1" is still there
+    And the last ledger line holds:
+      | mw-gq6.1   |
+      | not landed |
+    And the rig's tests were run 0 times
+    And no fresh session was started
+
+  Scenario: A commit that says it was generated with an AI is not landed either
+    Given the session of "mw-gq6.1" reported a plain success
+    And a commit on the branch of "mw-gq6.1" carries "Generated with [Claude Code](https://claude.com/claude-code)"
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is held blocked
+    And the comment on "mw-gq6.1" and the report name that commit
+    And the worktree of "mw-gq6.1" is still there
+
   Scenario: A formula step the session never closed stops the close-out
     Given the session of "mw-gq6.1" reported a plain success
     And a formula was poured for "mw-gq6.1" and one of its steps is still open

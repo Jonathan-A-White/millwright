@@ -45,6 +45,7 @@ type nextContext struct {
 	lastEpic     string
 	ledgerBefore []string
 	originBefore string
+	signed       string // the short hash of the commit a scenario signed
 
 	report  application.NextReport
 	err     error
@@ -94,6 +95,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the ledger already holds a line from an earlier story$`, c.theLedgerAlreadyHoldsALine)
 	ctx.Given(`^a formula was poured for "([^"]*)" and one of its steps is still open$`, c.aFormulaWithAnOpenStep)
 	ctx.Given(`^the story "([^"]*)" is claimed here with no session behind it$`, c.aStoryClaimedWithNoSession)
+	ctx.Given(`^a commit on the branch of "([^"]*)" carries "([^"]*)"$`, c.aCommitCarrying)
 	ctx.Given(`^the other host landed its own work on "([^"]*)" while "([^"]*)" was worked$`, c.theOtherHostLandedFirst)
 	ctx.Given(`^the other host lands its own work the moment mw first tries to push$`, c.theOtherHostRacesThePush)
 	ctx.Given(`^the tracker refuses to close "([^"]*)", saying: (.+)$`, c.theTrackerRefusesToClose)
@@ -113,6 +115,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the story "([^"]*)" is not closed$`, c.theStoryIsNotClosed)
 	ctx.Then(`^the story "([^"]*)" is held blocked$`, c.theStoryIsHeldBlocked)
 	ctx.Then(`^the story "([^"]*)" carries a comment quoting: (.+)$`, c.theStoryCarriesACommentQuoting)
+	ctx.Then(`^the comment on "([^"]*)" and the report name that commit$`, c.theCommentAndReportNameTheCommit)
 	ctx.Then(`^the last ledger line holds:$`, c.theLastLedgerLineHolds)
 	ctx.Then(`^the last ledger line names "([^"]*)"$`, c.theLastLedgerLineNames)
 	ctx.Then(`^the ledger still holds every line it held before$`, c.theLedgerStillHoldsEveryLine)
@@ -291,6 +294,51 @@ func (c *nextContext) aStoryClaimedWithNoSession(id string) error {
 		return err
 	}
 	return c.tracker.ClaimStory(context.Background(), id)
+}
+
+// aCommitCarrying puts one more commit on a story's branch whose message
+// carries the line given — an AI signing the work, which is the one thing this
+// factory's commits never do. The short hash is kept, because what a close-out
+// that refuses to land it must say is which commit.
+func (c *nextContext) aCommitCarrying(id, line string) error {
+	dir := application.WorktreeDir(c.rig, id)
+	if err := os.WriteFile(filepath.Join(dir, "signed.md"), []byte("more of the work of "+id+"\n"), 0o644); err != nil {
+		return err
+	}
+	if err := gitRun(dir, "git", "add", "-A"); err != nil {
+		return err
+	}
+	if err := gitRun(dir, "git", "commit", "-qm", "More of the work of "+id+"\n\n"+line); err != nil {
+		return err
+	}
+	hash, err := gitSay(dir, "rev-parse", "--short", "HEAD")
+	if err != nil {
+		return err
+	}
+	c.signed = hash
+	return nil
+}
+
+// theCommentAndReportNameTheCommit is the whole point of refusing: a person
+// told only that "a commit is signed" has to go looking, so the story's comment
+// and the report both name the commit by its short hash.
+func (c *nextContext) theCommentAndReportNameTheCommit(id string) error {
+	if c.signed == "" {
+		return fmt.Errorf("no commit was signed in this scenario")
+	}
+	named := false
+	for _, comment := range c.tracker.Comments(id) {
+		if strings.Contains(comment, c.signed) {
+			named = true
+		}
+	}
+	if !named {
+		return fmt.Errorf("expected a comment on %s naming the commit %s, got %q", id, c.signed, c.tracker.Comments(id))
+	}
+	if said := c.printed.String(); !strings.Contains(said, c.signed) {
+		return fmt.Errorf("expected the report to name the commit %s, got:\n%s", c.signed, said)
+	}
+	return nil
 }
 
 func (c *nextContext) theStoryIsRecordedAsStopped(id string) error {
