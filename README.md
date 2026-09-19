@@ -209,8 +209,8 @@ The commit is exactly two paths — `seats/<seat>/ledger.md` and
 are the only files a story is allowed to write in the vault: mw wrote the first
 and the session may have written the second, so a close-out that left them
 uncommitted would stop its own sync and every later one. Anything else
-uncommitted in the vault is still somebody else's to commit, and the sync still
-refuses because of it, naming the file — the story is landed and closed all the
+uncommitted in the vault is still somebody else's to commit, and the sync's
+vault half still refuses because of it, naming the file — the story is landed and closed all the
 same, because none of that is undone. A close-out that lands nothing commits the
 line it wrote saying so, for the same reason.
 
@@ -350,13 +350,24 @@ when this host was last level, under `host.<name>.last_sync` in beads' key-value
 store, so that either host can say how stale the other is.
 
 It never migrates, never forces and never retries. A vault holding uncommitted
-work stops it, naming the files: committing them belongs to whoever wrote them,
-and the only vault files mw commits for itself are the two a close-out writes
-(above). A rebase that cannot finish is undone, so the vault is left as it was
-found. `bd sync`'s exit code is surfaced as it is and becomes mw's own: 2 (a
-merge conflict beads will not resolve) and 4
-(a working set only a person can clear) stop mw with a plain message and are
-never retried or auto-resolved.
+work stops the vault's half and only that half, naming the files on one line:
+committing them belongs to whoever wrote them, and the only vault files mw
+commits for itself are the two a close-out writes (above). The beads half runs
+anyway, so a `mw sync` on a timer keeps the hosts level in beads while one
+forgotten edit waits for whoever made it, and `mw sync` leaves with 5 — a status
+of its own, so that a timer reading nothing but the number can tell a waiting
+edit from a fault. Nothing is recorded under `host.<name>.last_sync` then: a
+host whose vault half never ran is not level, and the note may not say it was. A
+rebase that cannot finish is undone, so the vault is left as it was found. `bd
+sync`'s exit code is surfaced as it is and becomes mw's own: 2 (a merge conflict
+beads will not resolve) and 4 (a working set only a person can clear) stop mw
+with a plain message and are never retried or auto-resolved, and a beads halt is
+what mw reports even when the vault was blocked too.
+
+Everything that must not run on a stale vault still does not: `mw dispatch` and
+`mw next` sync before they act, and a blocked vault half stops them exactly as
+before — nothing is claimed, nothing is dispatched, and the reason names the
+files.
 
 Ledgers are appended to by both hosts and edited by neither, so the vault's
 `.gitattributes` must carry `seats/*/ledger.md merge=union` — two hosts' appends
