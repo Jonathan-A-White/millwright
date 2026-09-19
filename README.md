@@ -215,6 +215,12 @@ and the other host's passed on its own. The push is never forced; a push the
 remote refuses because the other host got there first is fetched, merged and
 pushed again, a bounded number of times.
 
+Once it is pushed, this host's own checkout of the rig is fast-forwarded onto
+the landed commit — a checkout left behind is one whose rebuilt binary is the
+old one. It is moved only when it is on the target branch, holds no uncommitted
+work (untracked files count) and has no commits of its own; otherwise it is
+left exactly as it was and the report's `rig` line says why.
+
 Only then: the worktree and its branch go, one line is appended to the seat's
 ledger, that line and the seat's memory of the rig are committed in the vault,
 the story is closed with the reason, `mw sync` brings the hosts level so that

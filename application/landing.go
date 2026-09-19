@@ -80,6 +80,22 @@ type Landing interface {
 	// CloseLanding takes the throwaway worktree away again. Closing what is not
 	// there is not an error.
 	CloseLanding(ctx context.Context, rigDir, landingDir string) error
+
+	// Advance fast-forwards the rig's own checkout onto commit, the one a landing
+	// has just put on branch at the remote. The landing was made in a worktree of
+	// its own, so this checkout is behind it until it is moved. It is moved only
+	// when it is on branch, has no uncommitted work and is behind commit;
+	// anything else is left exactly as it was and Left says why. Nothing is ever
+	// merged or forced, and an error is git failing, not a checkout left alone.
+	Advance(ctx context.Context, rigDir, branch, commit string) (Advanced, error)
+}
+
+// Advanced is what became of the rig's own checkout after a landing: Moved when
+// it was fast-forwarded onto the landed commit, Left as the plain reason when it
+// was left alone. Neither means it was already there.
+type Advanced struct {
+	Moved bool
+	Left  string
 }
 
 // Commit is one commit a landing would put on the target branch: the short hash
@@ -198,11 +214,15 @@ func (l Landed) LandedAs(target string) string {
 	if l.FastForward {
 		how = "fast-forward"
 	}
-	commit := l.Commit
+	return fmt.Sprintf("landed on %s (%s, %s)", target, how, shortCommit(l.Commit))
+}
+
+// shortCommit is a commit as a person names it, in a sentence.
+func shortCommit(commit string) string {
 	if len(commit) > 12 {
-		commit = commit[:12]
+		return commit[:12]
 	}
-	return fmt.Sprintf("landed on %s (%s, %s)", target, how, commit)
+	return commit
 }
 
 // Holders is the line written into a rig's merge slot, saying who has it.

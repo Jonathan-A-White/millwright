@@ -49,6 +49,7 @@ type nextContext struct {
 	ledgerBefore []string
 	afterFirst   []string // the ledger as the first close-out of a scenario left it
 	originBefore string
+	rigBefore    string // the rig checkout's HEAD before mw closed out, in the rig checkout scenarios
 	signed       string // the short hash of the commit a scenario signed
 
 	report  application.NextReport
@@ -121,6 +122,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the terminal still holds the exited session of "([^"]*)"$`, c.theTerminalHoldsAnExitedSession)
 
 	registerNextMailSteps(ctx, c)
+	registerNextRigSteps(ctx, c)
 
 	ctx.When(`^mw closes out "([^"]*)"$`, c.mwClosesOut)
 	ctx.When(`^mw closes out "([^"]*)" a second time$`, c.mwClosesOut)
@@ -966,7 +968,9 @@ func (c *nextContext) theLedgerHoldsOneLineFor(id string) error {
 
 // mergedOncePushedOnce reads what git was really asked to do, across every run
 // of the close-out in this scenario: a story landed once is merged once and
-// pushed once, however many times mw next is run afterwards.
+// pushed once, however many times mw next is run afterwards. The landing's own
+// merge is the one counted (`merge --no-edit`, made in the landing worktree):
+// the `merge --ff-only` that brings the rig checkout level is not a landing.
 func (c *nextContext) mergedOncePushedOnce() error {
 	asked, err := os.ReadFile(c.gitLog)
 	if err != nil {
@@ -975,7 +979,7 @@ func (c *nextContext) mergedOncePushedOnce() error {
 	merges, pushes := 0, 0
 	for _, line := range strings.Split(string(asked), "\n") {
 		switch {
-		case strings.HasPrefix(line, "merge "):
+		case strings.HasPrefix(line, "merge --no-edit "):
 			merges++
 		case strings.HasPrefix(line, "push "):
 			pushes++

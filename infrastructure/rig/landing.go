@@ -2,8 +2,10 @@ package rig
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -216,4 +218,80 @@ func rejected(err error) bool {
 		return true
 	}
 	return false
+}
+
+// Advance implements application.Landing. The checkout is left alone unless it
+// is on branch and clean, and it is only ever fast-forwarded: `merge --ff-only`
+// onto a commit the checkout is an ancestor of cannot lose anybody's work, and
+// what is not an ancestor is said, not merged. Untracked files count as work
+// here, because a person's notes in the checkout are theirs as much as an edit.
+func (w *Worktrees) Advance(ctx context.Context, rigDir, branch, commit string) (application.Advanced, error) {
+	switch {
+	case branch == "":
+		return application.Advanced{}, fmt.Errorf("advancing the checkout of %s: onto which branch?", rigDir)
+	case commit == "":
+		return application.Advanced{}, fmt.Errorf("advancing the checkout of %s: to which commit?", rigDir)
+	}
+
+	// Already there, on any branch: nothing to move and nothing to say.
+	if level, err := w.contains(ctx, rigDir, "HEAD", commit); err != nil {
+		return application.Advanced{}, err
+	} else if level {
+		return application.Advanced{}, nil
+	}
+
+	// "HEAD" is what git says when no branch is checked out.
+	on, err := w.git(ctx, rigDir, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return application.Advanced{}, err
+	}
+	switch on = strings.TrimSpace(on); {
+	case on == "HEAD":
+		return application.Advanced{Left: fmt.Sprintf("it is on no branch, not %s", branch)}, nil
+	case on != branch:
+		return application.Advanced{Left: fmt.Sprintf("it is on %s, not %s", on, branch)}, nil
+	}
+
+	dirty, err := w.Uncommitted(ctx, rigDir)
+	if err != nil {
+		return application.Advanced{}, err
+	}
+	if len(dirty) > 0 {
+		return application.Advanced{Left: fmt.Sprintf("it has %d uncommitted path(s): %s", len(dirty), strings.Join(dirty, ", "))}, nil
+	}
+
+	behind, err := w.contains(ctx, rigDir, commit, "HEAD")
+	if err != nil {
+		return application.Advanced{}, err
+	}
+	if !behind {
+		return application.Advanced{Left: fmt.Sprintf("%s here has commits of its own that %s does not", branch, shortCommit(commit))}, nil
+	}
+	if _, err := w.git(ctx, rigDir, "merge", "--ff-only", "--quiet", commit); err != nil {
+		return application.Advanced{}, err
+	}
+	return application.Advanced{Moved: true}, nil
+}
+
+// contains reports whether the commit that outer names has the one inner names
+// in its history, itself included. `merge-base --is-ancestor` answers in its
+// exit status: 0 yes, 1 no, anything else a failure.
+func (w *Worktrees) contains(ctx context.Context, dir, outer, inner string) (bool, error) {
+	_, err := w.git(ctx, dir, "merge-base", "--is-ancestor", inner, outer)
+	var exit *exec.ExitError
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.As(err, &exit) && exit.ExitCode() == 1:
+		return false, nil
+	}
+	return false, err
+}
+
+// shortCommit is a commit as a person names it, in a sentence.
+func shortCommit(commit string) string {
+	if len(commit) > 12 {
+		return commit[:12]
+	}
+	return commit
 }
