@@ -111,6 +111,10 @@ type NextReport struct {
 	// had landed, empty when the story was closed. A story with this set is
 	// landed and still open, and mw next run again is what closes it.
 	NotClosed string
+	// Assignee is who the tracker says holds the story, as far as it said. It
+	// is printed only when a landed story could not be closed, because the
+	// usual reason for that is that somebody else holds the claim.
+	Assignee string
 	// Result is what the session reported, as far as it could be read.
 	Result SessionResult
 	// Ledger is the line that was appended, empty when none was.
@@ -168,7 +172,7 @@ func (n Next) closeOut(ctx context.Context, storyID string) (NextReport, error) 
 	if err != nil {
 		return report, fmt.Errorf("closing out %s: %w", storyID, err)
 	}
-	report.Title = detail.Story.Title
+	report.Title, report.Assignee = detail.Story.Title, detail.Assignee
 	if detail.Closed() {
 		return report, fmt.Errorf("closing out %s: it is closed already, so nothing was landed, ledgered or dispatched", storyID)
 	}
@@ -636,6 +640,10 @@ func (r NextReport) String() string {
 	if r.Landed && !r.Closed {
 		fmt.Fprintf(&b, "  OPEN    the story is landed but still open: %s\n", firstLine(r.NotClosed))
 		fmt.Fprintf(&b, "          nothing above is undone; run `mw next %s` again to close it, and nothing is merged or ledgered twice\n", r.StoryID)
+		if r.Assignee != "" {
+			fmt.Fprintf(&b, "          %s holds the claim; a story claimed under another name is closed under it: `bd --actor %s close %s --reason \"landed\"`\n",
+				r.Assignee, r.Assignee, r.StoryID)
+		}
 	}
 	for _, id := range r.Abandoned {
 		fmt.Fprintf(&b, "  gone    %s is claimed here with no session behind it\n", id)

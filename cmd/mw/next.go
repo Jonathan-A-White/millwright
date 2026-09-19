@@ -34,7 +34,10 @@ func newNextCmd() *cobra.Command {
 			"was not a fast-forward the tests are run again on the merged result, because nothing has ever tested\n" +
 			"that combination. The push is never forced; a push the remote refuses is fetched and tried again a\n" +
 			"few times. Then the worktree goes, one line is appended to the seat's ledger, the story is closed,\n" +
-			"the hosts are brought level, and whatever is ready here is dispatched.",
+			"the hosts are brought level, and whatever is ready here is dispatched.\n\n" +
+			"A story that landed and could not be closed is reported as landed but still open, and nothing of\n" +
+			"the landing is undone. Run next on it again: it closes the story and carries on, without merging,\n" +
+			"testing or pushing anything a second time and without a second line in the ledger.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := config.Vault()

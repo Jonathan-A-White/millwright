@@ -120,7 +120,8 @@ the harness adapter: a headless `claude --print --output-format json` primed
 with `--append-system-prompt-file`, its result redirected to
 `runs/<story-id>/result.json` beside the boot file, and `BEADS_ACTOR`, `MW_SEAT`
 and `MW_STORY` in its environment so that the work is signed by the seat rather
-than by the session. Assembling launches nothing and spends no fuel. See
+than by the session — `builder@<host>`, which is not the name mw's own writes
+carry (see *Who mw writes as*). Assembling launches nothing and spends no fuel. See
 `features/seat_boot.feature`.
 
 ## Dispatching a story
@@ -211,9 +212,43 @@ of which host ran it. The fuel comes from the harness's own result JSON —
 `usage.input_tokens`, `usage.output_tokens`, `usage.cache_read_input_tokens` and
 `usage.cache_creation_input_tokens` totalled and broken out, `num_turns`,
 `total_cost_usd` (a list-price equivalent, not a bill on a subscription) and
-`duration_ms`. The ledger is opened for append and never read back: there is no
-code path in mw that can rewrite a line a seat has already written. See
+`duration_ms`. The ledger is opened for append and never rewritten: there is no
+code path in mw that can change a line a seat has already written. It is read
+back for two things only — a report of what a seat has burned, and a close-out
+run again, asking whether this story's line is in it already. See
 `features/next.feature`.
+
+If the landing succeeded and the **close** did not, the story is landed and
+still open: the work is on the target branch, the ledger line is written, and
+nothing of it is undone. `mw next` says so — `OPEN the story is landed but still
+open` — leaves with 1, and dispatches nothing. Running `mw next <story-id>`
+again closes it and carries on: the run that landed the story recorded
+`run=landed` the moment the push succeeded, so a later run knows there is
+nothing to merge, test or push, and it adds no second ledger line, because the
+seat's ledger already names the story.
+
+### Who mw writes as
+
+`mw` names itself on **every** `bd` it runs: `--actor mw@<host>`, from the
+`host` key of the config file. It is not read from `$BEADS_ACTOR`, because the
+same act is run from several environments that carry several names — a claim
+from the dispatcher's shell or a timer, the close from inside the Builder
+session that worked the story, which is signed `builder@<host>`. bd lets only
+the actor that claimed a story close it, so a claim and a close under two names
+is a story that lands and cannot be closed. A host with no `host` set is a plain
+refusal before any `bd` is started.
+
+`mw` is neither the Mayor nor the Builder on purpose: what `mw dispatch` and
+`mw next` write down was decided by the machinery, not by a seat, and the
+factory's history has to be able to tell the two apart. A session's own writes
+are still signed by its seat — the harness sets `BEADS_ACTOR=<seat>@<host>`.
+
+A story claimed by hand is closed by hand under the name that claimed it:
+
+```sh
+bd --actor root close mw-gq6.30 --reason "landed by hand"   # claimed as root
+bd reclaim mw-gq6.30                                        # or take it over first
+```
 
 ### What a host is told
 

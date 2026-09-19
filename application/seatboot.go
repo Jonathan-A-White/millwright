@@ -58,9 +58,10 @@ type Vault interface {
 
 	// ReadLedger reads every line of a seat's ledger back, in the order it
 	// holds them. A seat with no ledger yet comes back with no lines and no
-	// error: there is nothing written to sum fuel from. This is the one read of
-	// the ledger the factory does, and it is used only for a report — nothing
-	// here is ever rewritten.
+	// error: there is nothing written to sum fuel from. It is the only way the
+	// factory reads a ledger, and it is read for two things — a report of what
+	// a seat burned, and a close-out run again asking whether a story's line is
+	// in it already. Nothing here is ever rewritten.
 	ReadLedger(ctx context.Context, seat string) ([]string, error)
 }
 
