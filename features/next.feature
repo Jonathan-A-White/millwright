@@ -426,3 +426,73 @@ Feature: Closing out a finished story and carrying on
     When mw closes out "mw-gq6.1"
     Then the story "mw-gq6.1" is not closed
     And the session of "mw-gq6.1" is still on the terminal, exited
+
+  Scenario: A landed story mails the Mayor once, with the commit and the fuel
+    Given the session of "mw-gq6.1" reported this result:
+      """
+      {
+        "type": "result",
+        "subtype": "success",
+        "is_error": false,
+        "num_turns": 37,
+        "duration_ms": 1680000,
+        "session_id": "s-1",
+        "total_cost_usd": 4.21,
+        "usage": {
+          "input_tokens": 1200,
+          "output_tokens": 18000,
+          "cache_read_input_tokens": 280000,
+          "cache_creation_input_tokens": 12000
+        }
+      }
+      """
+    When mw closes out "mw-gq6.1"
+    Then exactly one mail was sent, to "mayor" from "mw@vps"
+    And that mail's subject is "Landed: The story mw-gq6.1"
+    And that mail's body names the commit that landed on "main"
+    And that mail's body holds:
+      | 311,200 tokens |
+      | $4.21          |
+
+  Scenario: A refused story mails the Mayor the whole reason
+    Given the session of "mw-gq6.1" reported a plain success
+    And the rig's tests fail, saying "remote: fatal error in commit_refs"
+    When mw closes out "mw-gq6.1"
+    Then exactly one mail was sent, to "mayor" from "mw@vps"
+    And that mail's subject is "Refused: The story mw-gq6.1"
+    And that mail's body holds:
+      | the rig's tests fail in the worktree |
+      | remote: fatal error in commit_refs   |
+
+  Scenario: A story that could not go ahead mails the Mayor that it is blocked
+    Given the session of "mw-gq6.1" left no result at all
+    When mw closes out "mw-gq6.1"
+    Then exactly one mail was sent, to "mayor" from "mw@vps"
+    And that mail's subject is "Blocked: The story mw-gq6.1"
+    And that mail's body holds:
+      | the session left no result |
+
+  Scenario: A mailbox that will not take the mail changes nothing about the landing
+    Given the session of "mw-gq6.1" reported a plain success
+    And the mailbox refuses every message, saying: the mail database is locked
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the story "mw-gq6.1" is closed
+    And the close-out returned no error
+    And stderr says the Mayor could not be mailed, quoting: the mail database is locked
+
+  Scenario: A close-out that finds nothing to do mails nobody
+    Given the story "mw-gq6.1" has already been closed
+    When mw closes out "mw-gq6.1"
+    Then no mail was sent
+
+  Scenario: A story landed by one run and closed by the next is mailed about once
+    Given the session of "mw-gq6.1" reported a plain success
+    And the tracker refuses to close "mw-gq6.1", saying: assignee is root, actor is mw@vps; reclaim or use --force
+    When mw closes out "mw-gq6.1"
+    Then the close-out says the story is landed but still open
+    Given the tracker will take a close of "mw-gq6.1" again
+    When mw closes out "mw-gq6.1" a second time
+    Then the story "mw-gq6.1" is closed
+    And exactly one mail was sent, to "mayor" from "mw@vps"
+    And that mail's subject is "Landed: The story mw-gq6.1"

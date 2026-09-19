@@ -36,6 +36,7 @@ type nextContext struct {
 	tracker *apptest.FakeTracker
 	runner  *apptest.FakeRunner
 	files   *apptest.FakeVaultFiles
+	mailbox *apptest.FakeMailbox
 
 	gitProgram   string // a wrapper that logs what git was asked to do
 	gitLog       string
@@ -54,6 +55,7 @@ type nextContext struct {
 	checked application.CheckReport // what mw check reported, in the check scenarios
 	err     error
 	printed bytes.Buffer // the report as the person running mw reads it
+	stderr  bytes.Buffer // what mw said on stderr
 
 	touchedBefore *touched // what a check scenario found before it ran mw check
 	touchedFor    string
@@ -79,6 +81,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 			tracker: apptest.NewFakeTracker(),
 			runner:  apptest.NewFakeRunner(),
 			files:   &apptest.FakeVaultFiles{},
+			mailbox: apptest.NewFakeMailbox(),
 		}
 		return ctx, nil
 	})
@@ -116,6 +119,8 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the vault refuses a commit, saying: (.+)$`, c.theVaultRefusesACommit)
 	ctx.Given(`^the vault takes a commit again$`, c.theVaultTakesACommitAgain)
 	ctx.Given(`^the terminal still holds the exited session of "([^"]*)"$`, c.theTerminalHoldsAnExitedSession)
+
+	registerNextMailSteps(ctx, c)
 
 	ctx.When(`^mw closes out "([^"]*)"$`, c.mwClosesOut)
 	ctx.When(`^mw closes out "([^"]*)" a second time$`, c.mwClosesOut)
@@ -618,6 +623,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 		Slot:      rig.NewSlots(rig.WithSlotWait(5*time.Second), rig.WithSlotPoll(20*time.Millisecond)),
 		Vault:     files,
 		Files:     c.files,
+		Mailbox:   c.mailbox,
 		Runner:    c.runner,
 		Sync:      application.Sync{Vault: c.files, Tracker: c.tracker, Host: nextHost},
 		Dispatch: application.Dispatch{
@@ -637,6 +643,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 		Rigs: rigs,
 		Now:  func() time.Time { return time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC) },
 		Out:  &c.printed,
+		Err:  &c.stderr,
 	}.Run(context.Background(), id)
 
 	if c.afterFirst == nil {

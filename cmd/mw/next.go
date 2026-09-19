@@ -37,6 +37,9 @@ func newNextCmd() *cobra.Command {
 			"that combination. The push is never forced; a push the remote refuses is fetched and tried again a\n" +
 			"few times. Then the worktree goes, one line is appended to the seat's ledger, the story is closed,\n" +
 			"the hosts are brought level, and whatever is ready here is dispatched.\n\n" +
+			"One mail goes to the Mayor from mw on this host — Landed, Refused (the checks turned the branch away)\n" +
+			"or Blocked (anything else stopped it) — holding this report; a mail that cannot be sent is said on\n" +
+			"stderr and changes nothing. A run that finds nothing to close sends none.\n\n" +
 			"That ledger line and the seat's memory of the rig — the only two vault files a story may write — are\n" +
 			"committed by path first, under a plain message naming the story, so that a close-out's own writing\n" +
 			"does not stop the sync that follows. Anything else uncommitted in the vault still does, naming the\n" +
@@ -113,6 +116,7 @@ func newNextCmd() *cobra.Command {
 				Slot:      rig.NewSlots(),
 				Vault:     files,
 				Files:     files,
+				Mailbox:   gateway,
 				Runner:    runner,
 				Sync:      sync,
 				Dispatch:  dispatcher,
@@ -120,6 +124,7 @@ func newNextCmd() *cobra.Command {
 				Host:      host,
 				Rigs:      rigs,
 				Out:       cmd.OutOrStdout(),
+				Err:       cmd.ErrOrStderr(),
 			}.Run(cmd.Context(), args[0])
 			return err
 		},

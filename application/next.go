@@ -27,6 +27,17 @@ const (
 	RunStuck = "stuck"
 )
 
+// MayorMailbox is whose mailbox a close-out writes to, and the verdicts it
+// starts the subject with: landed, refused by the checks, or blocked by
+// something else that stopped it.
+const (
+	MayorMailbox = "mayor"
+
+	MailLanded  = "Landed"
+	MailRefused = "Refused"
+	MailBlocked = "Blocked"
+)
+
 // CheckLines is how much of a failed test run is written onto the story. Enough
 // to see what broke, not so much that a bead becomes a log file.
 const CheckLines = 40
@@ -98,8 +109,16 @@ type Next struct {
 	// real one.
 	Now func() time.Time
 
+	// Mailbox is how the Mayor is told what became of the story: one mail at the
+	// end of a close-out that did something. A nil Mailbox sends none.
+	Mailbox Mailbox
+
 	// Out is where the report is printed. A nil Out prints nothing.
 	Out io.Writer
+
+	// Err is where what could not be done, and changes nothing about the outcome,
+	// is said: a mail that could not be sent. A nil Err says nothing.
+	Err io.Writer
 }
 
 // NextReport is what one close-out did.
@@ -125,8 +144,12 @@ type NextReport struct {
 	// Pushes is how many times the push was attempted: more than one means the
 	// other host landed something while this story was being landed.
 	Pushes int
-	// Why is the reason nothing landed, empty when something did.
-	Why string
+	// Why is the reason nothing landed, empty when something did. Refused says
+	// it is the branch itself the checks turned away — no commits, a signed
+	// commit, open formula steps, failing tests — rather than something that
+	// stopped the close-out before or during the landing.
+	Why     string
+	Refused bool
 	// NotClosed is what the tracker said when it would not close a story that
 	// had landed, empty when the story was closed. A story with this set is
 	// landed and still open, and mw next run again is what closes it.
@@ -280,6 +303,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		return n.stop(ctx, c, report, fmt.Sprintf("the rig could not be brought up to date with %s: %v", n.remote(), err), "")
 	}
 	if found := n.refusals(ctx, c, report, false); len(found) > 0 {
+		report.Refused = true
 		return n.stop(ctx, c, report, found[0].Why, found[0].Said)
 	}
 
@@ -552,12 +576,21 @@ func (n Next) finish(ctx context.Context, c *closeOut, report *NextReport, outco
 	// every sync until somebody commits it, and this is the run that can.
 	n.commit(ctx, c, report)
 
-	if err := n.Tracker.CloseStory(ctx, c.id, outcome); err != nil {
-		report.NotClosed = err.Error()
-		return *report, fmt.Errorf("closing out %s: it %s, but the story could not be closed, so it is landed and still open: %w",
-			c.id, outcome, err)
+	closeErr := n.Tracker.CloseStory(ctx, c.id, outcome)
+	if closeErr != nil {
+		report.NotClosed = closeErr.Error()
+	} else {
+		report.Closed = true
 	}
-	report.Closed = true
+	// Told once: the run that landed the story says so, and a later run that
+	// only closes it has nothing new for the Mayor.
+	if !again {
+		n.mailTheMayor(ctx, c, report, MailLanded, "")
+	}
+	if closeErr != nil {
+		return *report, fmt.Errorf("closing out %s: it %s, but the story could not be closed, so it is landed and still open: %w",
+			c.id, outcome, closeErr)
+	}
 
 	report.Abandoned = n.abandoned(ctx, c.id, report)
 	return n.carryOn(ctx, c, report)
@@ -708,12 +741,51 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, why, sa
 	// the next sync, whoever runs it, for a story that never landed.
 	n.commit(ctx, c, report)
 
+	verdict := MailBlocked
+	if report.Refused {
+		verdict = MailRefused
+	}
+	n.mailTheMayor(ctx, c, report, verdict, said)
+
 	err := fmt.Errorf("closing out %s: %s", c.id, why)
 	if len(trouble) > 0 {
 		report.Notes = append(report.Notes, trouble...)
 		err = fmt.Errorf("%w (and %s)", err, strings.Join(trouble, "; "))
 	}
 	return *report, err
+}
+
+// mailTheMayor sends the one mail that says what became of the story: from mw
+// on this host, to the Mayor, titled by the verdict and the story, and holding
+// the report mw next prints — the commit and the fuel line of a landing, the
+// reason and its detail of a story that landed nothing. It runs once the
+// outcome is settled and before the hosts are synced, so that the mail travels
+// with the sync that follows.
+//
+// A mail that cannot be sent is said on stderr and changes nothing: the story
+// is landed, or stopped, exactly as it was, and the Mayor still has the rig log
+// and the ledger to read.
+func (n Next) mailTheMayor(ctx context.Context, c *closeOut, report *NextReport, verdict, said string) {
+	if n.Mailbox == nil {
+		return
+	}
+	title := strings.Join(strings.Fields(c.detail.Story.Title), " ")
+	if title == "" {
+		title = c.id
+	}
+	body := report.String()
+	if said != "" {
+		body += "\n" + said + "\n"
+	}
+	if _, err := n.Mailbox.Send(ctx, NewMessage{
+		From:    SeatIdentity(MwSeat, n.Host),
+		To:      MayorMailbox,
+		Subject: verdict + ": " + title,
+		Body:    body,
+	}); err != nil && n.Err != nil {
+		fmt.Fprintf(n.Err, "mw next: the mail to %s about %s (%s) could not be sent: %v\n",
+			MayorMailbox, c.id, strings.ToLower(verdict), err)
+	}
 }
 
 // ledger appends this story's one line to the seat's ledger. A session's fuel is
