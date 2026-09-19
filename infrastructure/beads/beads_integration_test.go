@@ -551,6 +551,68 @@ func TestGatewayFilesAnEpicWithItsStoriesHeld(t *testing.T) {
 	}
 }
 
+// The dogfood failure of 2026-09-19, against a real bd: `mw dispatch` claimed a
+// story under whatever name the shell that ran it carried, and the `mw next`
+// chained onto the session ran with the Builder's BEADS_ACTOR, so bd refused the
+// close — "assignee is root, actor is builder@vps". A gateway that names itself
+// on every call claims and closes under one name whatever the environment says,
+// and this test runs both halves the way Dispatch and Next run them.
+func TestAStoryClaimedTheWayDispatchDoesIsClosedTheWayNextDoes(t *testing.T) {
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	// The environment of a Builder session: its own name, which is not the name
+	// the dispatcher claimed under.
+	t.Setenv("BEADS_ACTOR", "builder@vps")
+
+	epicID := bdRun(t, vault, beads.Program, "create", "A walking skeleton", "-t", "epic",
+		"--metadata", `{"rig":"millwright","branch":"main","harness":"claude","model":"opus","effort":"high","host":"vps"}`,
+		"--silent")
+	claimed := bdRun(t, vault, beads.Program, "create", "A story mw claims and closes",
+		"--parent", epicID, "--silent")
+	byHand := bdRun(t, vault, beads.Program, "create", "A story mw claims and somebody else tries to close",
+		"--parent", epicID, "--silent")
+
+	mw := beads.New(vault, beads.WithActor("mw@vps"))
+
+	// What `mw dispatch` does.
+	if err := mw.ClaimStory(ctx, claimed); err != nil {
+		t.Fatalf("claiming %s the way a dispatch does: %v", claimed, err)
+	}
+	// What `mw next` does at the end of the session, in the session's own
+	// environment.
+	if err := mw.CloseStory(ctx, claimed, "landed on main, 3 commits"); err != nil {
+		t.Fatalf("closing %s the way a close-out does: %v", claimed, err)
+	}
+	detail, err := mw.ShowStory(ctx, claimed)
+	if err != nil {
+		t.Fatalf("reading %s back: %v", claimed, err)
+	}
+	if !detail.Closed() {
+		t.Fatalf("expected %s to be closed, got %q", claimed, detail.Status)
+	}
+
+	// And the refusal this story exists because of, still there: a gateway that
+	// names nobody acts as whatever BEADS_ACTOR says, and bd will not let it
+	// close what mw claimed. That is why the name is passed rather than left to
+	// the environment — and it is the escape hatch too, the other way round: a
+	// story claimed by hand as root is closed by hand with `bd --actor root`.
+	if err := mw.ClaimStory(ctx, byHand); err != nil {
+		t.Fatalf("claiming %s the way a dispatch does: %v", byHand, err)
+	}
+	err = beads.New(vault).CloseStory(ctx, byHand, "closed by somebody else")
+	if err == nil {
+		t.Fatalf("expected bd to refuse a close of %s by an actor that is not the assignee", byHand)
+	}
+	if !strings.Contains(err.Error(), "mw@vps") {
+		t.Fatalf("expected the refusal to name the assignee mw@vps, got %q", err)
+	}
+	if err := beads.New(vault, beads.WithActor("mw@vps")).CloseStory(ctx, byHand, "closed under the same name"); err != nil {
+		t.Fatalf("closing %s under the name it was claimed under: %v", byHand, err)
+	}
+}
+
 func TestGatewayReportsWhatBeadsRefused(t *testing.T) {
 	vault := throwawayVault(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

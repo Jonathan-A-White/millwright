@@ -93,9 +93,12 @@ type NextReport struct {
 	Title   string
 	Host    string
 	// Landed says the story's work is on its target branch at the remote, and
-	// How is the way it got there.
-	Landed bool
-	How    Landed
+	// How is the way it got there. LandedEarlier says an earlier run of mw next
+	// landed it and this one only closed it out, so How is empty and nothing
+	// was merged, tested or pushed again.
+	Landed        bool
+	LandedEarlier bool
+	How           Landed
 	Target string
 	// Commits is how many commits the session left on the story's branch.
 	Commits int
@@ -104,6 +107,10 @@ type NextReport struct {
 	Pushes int
 	// Why is the reason nothing landed, empty when something did.
 	Why string
+	// NotClosed is what the tracker said when it would not close a story that
+	// had landed, empty when the story was closed. A story with this set is
+	// landed and still open, and mw next run again is what closes it.
+	NotClosed string
 	// Result is what the session reported, as far as it could be read.
 	Result SessionResult
 	// Ledger is the line that was appended, empty when none was.
@@ -186,6 +193,13 @@ func (n Next) closeOut(ctx context.Context, storyID string) (NextReport, error) 
 		target:   path.Branch,
 	}
 	report.Target = c.target
+
+	// A story this host has already landed, and could not close, is finished
+	// with everything but the close. Running mw next again must close it —
+	// without merging, testing, pushing or ledgering anything a second time.
+	if was, err := n.Tracker.StoryState(ctx, storyID, RunState); err == nil && was == RunLanded {
+		return n.closeALanding(ctx, c, &report)
+	}
 	return n.land(ctx, c, &report)
 }
 
@@ -270,25 +284,79 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 
 	// The work is on the target branch at the remote from here: nothing below
 	// is undone, and nothing below stops the story being closed.
+	outcome := fmt.Sprintf("%s, %d commits, mw next re-ran the rig's tests: pass", landed.LandedAs(c.target), report.Commits)
+
+	// Written before anything else, because it is what tells a later run that
+	// this story is landed. Everything after the push can fail — the close did,
+	// on the run this was written for — and a run that cannot tell a landed
+	// story from an unlanded one would merge it all over again.
+	if err := n.Tracker.SetStoryState(ctx, c.id, RunState, RunLanded, outcome); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be recorded as %s=%s: %v", c.id, RunState, RunLanded, err))
+	}
+	return n.finish(ctx, c, report, outcome, false)
+}
+
+// closeALanding is a close-out run again on a story an earlier one landed and
+// could not close. Nothing is read from the session, nothing is merged, tested
+// or pushed: the work is on the target branch already, and the only things left
+// are the ones that come after a landing.
+func (n Next) closeALanding(ctx context.Context, c *closeOut, report *NextReport) (NextReport, error) {
+	report.Landed, report.LandedEarlier = true, true
+	outcome := fmt.Sprintf("landed on %s by an earlier mw next on %s; closed by a later run", c.target, n.Host)
+	return n.finish(ctx, c, report, outcome, true)
+}
+
+// finish is everything that follows a landing: the worktree taken away, one
+// line in the seat's ledger, the story closed, and the baton carried on. It is
+// run by the close-out that landed the story and, when that one could not close
+// it, again by the next — so every step of it can be run twice. The worktree
+// port takes removing what is not there; the ledger is append-only, so a line
+// already written is the one that stands, and `again` is what asks.
+func (n Next) finish(ctx context.Context, c *closeOut, report *NextReport, outcome string, again bool) (NextReport, error) {
 	if err := n.Worktrees.Remove(ctx, c.rigDir, c.worktree, c.branch); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the worktree %s could not be taken away: %v", c.worktree, err))
 	}
 
-	outcome := fmt.Sprintf("%s, %d commits, mw next re-ran the rig's tests: pass", landed.LandedAs(c.target), report.Commits)
-	if err := n.ledger(ctx, c, report, outcome); err != nil {
-		report.Notes = append(report.Notes, err.Error())
+	written := false
+	if again {
+		held, err := n.ledgered(ctx, c.id)
+		if err != nil {
+			report.Notes = append(report.Notes, err.Error())
+		}
+		written = held
+	}
+	if !written {
+		if err := n.ledger(ctx, c, report, outcome); err != nil {
+			report.Notes = append(report.Notes, err.Error())
+		}
 	}
 
-	if err := n.Tracker.SetStoryState(ctx, c.id, RunState, RunLanded, outcome); err != nil {
-		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be recorded as %s=%s: %v", c.id, RunState, RunLanded, err))
-	}
 	if err := n.Tracker.CloseStory(ctx, c.id, outcome); err != nil {
-		return *report, fmt.Errorf("closing out %s: it %s, but the story could not be closed: %w", c.id, outcome, err)
+		report.NotClosed = err.Error()
+		return *report, fmt.Errorf("closing out %s: it %s, but the story could not be closed, so it is landed and still open: %w",
+			c.id, outcome, err)
 	}
 	report.Closed = true
 
 	report.Abandoned = n.abandoned(ctx, c.id, report)
 	return n.carryOn(ctx, c, report)
+}
+
+// ledgered reports whether the seat's ledger already holds this story's line.
+// The ledger is append-only and read for nothing but a report, so this is the
+// one thing a re-run asks it: a line the run that landed the story wrote is the
+// line that stands, and the run that closes it adds none.
+func (n Next) ledgered(ctx context.Context, id string) (bool, error) {
+	lines, err := n.Vault.ReadLedger(ctx, n.Seat)
+	if err != nil {
+		return false, fmt.Errorf("the %s seat's ledger could not be read to see whether %s is in it already: %v", n.Seat, id, err)
+	}
+	for _, line := range lines {
+		if LedgerNamesStory(line, id) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // merge is the landing itself, under the merge slot: fetch, merge into the
@@ -551,9 +619,12 @@ func (n Next) print(text string) {
 func (r NextReport) String() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "next on %s: %s\n", r.Host, r.StoryID)
-	if r.Landed {
+	switch {
+	case r.LandedEarlier:
+		fmt.Fprintf(&b, "  landed  on %s by an earlier run of mw next: nothing was merged, tested or pushed again\n", r.Target)
+	case r.Landed:
 		fmt.Fprintf(&b, "  landed  %s on %s (%d commits, %d push(es))\n", r.How.LandedAs(r.Target), r.Target, r.Commits, r.Pushes)
-	} else {
+	default:
 		fmt.Fprintf(&b, "  STOPPED %s\n", r.Why)
 	}
 	if r.Ledger != "" {
@@ -561,6 +632,10 @@ func (r NextReport) String() string {
 	}
 	if r.Closed {
 		b.WriteString("  closed  the story is closed\n")
+	}
+	if r.Landed && !r.Closed {
+		fmt.Fprintf(&b, "  OPEN    the story is landed but still open: %s\n", firstLine(r.NotClosed))
+		fmt.Fprintf(&b, "          nothing above is undone; run `mw next %s` again to close it, and nothing is merged or ledgered twice\n", r.StoryID)
 	}
 	for _, id := range r.Abandoned {
 		fmt.Fprintf(&b, "  gone    %s is claimed here with no session behind it\n", id)

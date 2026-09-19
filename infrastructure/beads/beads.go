@@ -40,6 +40,7 @@ const TypeEpic = "epic"
 type Gateway struct {
 	vault   string
 	program string
+	actor   string
 	mu      sync.Mutex
 }
 
@@ -56,6 +57,16 @@ func WithProgram(program string) Option {
 	return func(g *Gateway) { g.program = program }
 }
 
+// WithActor names who beads records as the actor of everything this Gateway
+// does. It is passed to bd on every call, rather than left to $BEADS_ACTOR,
+// because mw is run from several environments that carry several names — a
+// dispatcher's shell, a timer, a Builder session signed as its own seat — and
+// bd lets only the actor that claimed a story close it. A Gateway with no name
+// leaves bd to its own default, which is what a person running bd by hand gets.
+func WithActor(actor string) Option {
+	return func(g *Gateway) { g.actor = strings.TrimSpace(actor) }
+}
+
 // New returns a Gateway onto the beads database in a vault directory.
 func New(vault string, opts ...Option) *Gateway {
 	g := &Gateway{vault: vault, program: Program}
@@ -65,17 +76,39 @@ func New(vault string, opts ...Option) *Gateway {
 	return g
 }
 
-// FromConfig returns a Gateway onto the vault this host is configured with.
+// FromConfig returns a Gateway onto the vault this host is configured with,
+// acting under this host's name for mw — mw@<host>. A host that does not say
+// which host it is is a plain refusal here, before any bd is started: mw writes
+// under one name or it does not write.
 func FromConfig(opts ...Option) (*Gateway, error) {
 	vault, err := config.Vault()
 	if err != nil {
 		return nil, err
 	}
-	return New(vault, opts...), nil
+	actor, err := ActorFromConfig()
+	if err != nil {
+		return nil, err
+	}
+	return New(vault, append([]Option{WithActor(actor)}, opts...)...), nil
+}
+
+// ActorFromConfig is the name mw acts under on this host: the mw seat on the
+// host the config file names. The error is the one config.Host gives, which
+// says how to set it.
+func ActorFromConfig() (string, error) {
+	host, err := config.Host()
+	if err != nil {
+		return "", err
+	}
+	return application.SeatIdentity(application.MwSeat, host), nil
 }
 
 // Vault reports the directory this Gateway runs bd in.
 func (g *Gateway) Vault() string { return g.vault }
+
+// Actor reports the name beads records for everything this Gateway does, or ""
+// when it leaves that to bd.
+func (g *Gateway) Actor() string { return g.actor }
 
 // Available reports whether the beads command is on PATH. Tests that need a
 // real database skip themselves when it is not.
@@ -378,7 +411,13 @@ func (g *Gateway) run(ctx context.Context, args ...string) ([]byte, []byte, erro
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	full := append([]string{"-C", g.vault}, args...)
+	full := []string{"-C", g.vault}
+	if g.actor != "" {
+		// --actor is a flag of every bd subcommand, and naming it on reads as
+		// well as writes keeps one rule rather than a list of which calls write.
+		full = append(full, "--actor", g.actor)
+	}
+	full = append(full, args...)
 	cmd := exec.CommandContext(ctx, g.program, full...)
 	var out, errs bytes.Buffer
 	cmd.Stdout = &out

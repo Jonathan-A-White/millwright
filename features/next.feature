@@ -153,6 +153,22 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.3" carries a comment quoting: claimed here with no session behind it
     And the story "mw-gq6.3" is not closed
 
+  Scenario: A close the tracker refuses after the landing leaves the story landed but open, and the next run closes it
+    Given the session of "mw-gq6.1" reported a plain success
+    And the tracker refuses to close "mw-gq6.1", saying: assignee is root, actor is mw@vps; reclaim or use --force
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the story "mw-gq6.1" is not closed
+    And the close-out says the story is landed but still open
+    And the last ledger line names "mw-gq6.1"
+    And nothing is left of the worktree of "mw-gq6.1"
+    Given the tracker will take a close of "mw-gq6.1" again
+    When mw closes out "mw-gq6.1" a second time
+    Then the story "mw-gq6.1" is closed
+    And the ledger holds exactly one line for "mw-gq6.1"
+    And git was asked to merge once and to push once
+    And the rig's tests were run 1 times
+
   Scenario: The merge slot is given back once the landing is done
     Given the session of "mw-gq6.1" reported a plain success
     When mw closes out "mw-gq6.1"

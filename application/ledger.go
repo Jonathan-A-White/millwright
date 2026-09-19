@@ -108,6 +108,24 @@ func ParseLedgerRow(line string) (LedgerRow, bool) {
 	return LedgerRow{Date: strings.TrimSpace(cells[0]), Tokens: tokens}, true
 }
 
+// LedgerNamesStory reports whether one line of a ledger is this story's line.
+// The story column is the title with the id in brackets after it, or the id
+// alone when the story had no title, and it is matched whole: mw-gq6.1 is a
+// prefix of mw-gq6.10, and a close-out that took the one for the other would
+// leave a story with no line at all.
+func LedgerNamesStory(line, id string) bool {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "|") || !strings.HasSuffix(trimmed, "|") {
+		return false
+	}
+	cells := strings.Split(strings.Trim(trimmed, "|"), " | ")
+	if len(cells) < 2 {
+		return false
+	}
+	story := strings.TrimSpace(cells[1])
+	return story == id || strings.HasSuffix(story, "("+id+")")
+}
+
 // leadingTokens reads the token total off the head of a ledger's fuel column,
 // which Fuel.String writes as "12,345 tokens (...)".
 func leadingTokens(cell string) (int, bool) {

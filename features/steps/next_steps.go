@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -45,8 +46,9 @@ type nextContext struct {
 	ledgerBefore []string
 	originBefore string
 
-	report application.NextReport
-	err    error
+	report  application.NextReport
+	err     error
+	printed bytes.Buffer // the report as the person running mw reads it
 }
 
 // What a scenario's fixtures hold.
@@ -94,8 +96,11 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the story "([^"]*)" is claimed here with no session behind it$`, c.aStoryClaimedWithNoSession)
 	ctx.Given(`^the other host landed its own work on "([^"]*)" while "([^"]*)" was worked$`, c.theOtherHostLandedFirst)
 	ctx.Given(`^the other host lands its own work the moment mw first tries to push$`, c.theOtherHostRacesThePush)
+	ctx.Given(`^the tracker refuses to close "([^"]*)", saying: (.+)$`, c.theTrackerRefusesToClose)
+	ctx.Given(`^the tracker will take a close of "([^"]*)" again$`, c.theTrackerTakesACloseAgain)
 
 	ctx.When(`^mw closes out "([^"]*)"$`, c.mwClosesOut)
+	ctx.When(`^mw closes out "([^"]*)" a second time$`, c.mwClosesOut)
 
 	ctx.Then(`^the work of "([^"]*)" is on "([^"]*)" at the rig's origin$`, c.theWorkIsOnTheOrigin)
 	ctx.Then(`^the other host's work is still on "([^"]*)" at the rig's origin$`, c.theOtherHostsWorkIsStillThere)
@@ -117,6 +122,9 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^no fresh session was started$`, c.noFreshSessionWasStarted)
 	ctx.Then(`^the story "([^"]*)" is recorded as stopped$`, c.theStoryIsRecordedAsStopped)
 	ctx.Then(`^the merge slot of the rig is free again$`, c.theMergeSlotIsFree)
+	ctx.Then(`^the close-out says the story is landed but still open$`, c.landedButStillOpen)
+	ctx.Then(`^the ledger holds exactly one line for "([^"]*)"$`, c.theLedgerHoldsOneLineFor)
+	ctx.Then(`^git was asked to merge once and to push once$`, c.mergedOncePushedOnce)
 }
 
 // workspace makes the temp directory a scenario keeps everything in, once.
@@ -463,6 +471,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 		Host: nextHost,
 		Rigs: rigs,
 		Now:  func() time.Time { return time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC) },
+		Out:  &c.printed,
 	}.Run(context.Background(), id)
 	return nil
 }
@@ -678,6 +687,78 @@ func (c *nextContext) noFreshSessionWasStarted() error {
 	}
 	if c.report.Dispatched {
 		return fmt.Errorf("expected no dispatch at all, but one was run: %+v", c.report.Dispatch)
+	}
+	return nil
+}
+
+// theTrackerRefusesToClose makes the tracker turn a close down the way beads
+// turns down a close by an actor that is not the story's assignee — which is
+// how a close-out comes to land a story it cannot close.
+func (c *nextContext) theTrackerRefusesToClose(id, why string) error {
+	c.tracker.RefuseToClose(id, strings.TrimSpace(why))
+	return nil
+}
+
+func (c *nextContext) theTrackerTakesACloseAgain(id string) error {
+	c.tracker.RefuseToClose(id, "")
+	return nil
+}
+
+// landedButStillOpen is the state a person has to be told about plainly: the
+// work is on the target branch and nothing will undo it, but the story is still
+// open, and running mw next again is what closes it.
+func (c *nextContext) landedButStillOpen() error {
+	if !c.report.Landed || c.report.Closed {
+		return fmt.Errorf("expected a report saying landed and not closed, got %+v", c.report)
+	}
+	if c.err == nil {
+		return fmt.Errorf("expected the close-out to report a failure, it reported none")
+	}
+	said := c.printed.String()
+	for _, want := range []string{"landed but still open", "mw next " + c.report.StoryID} {
+		if !strings.Contains(said, want) {
+			return fmt.Errorf("expected the report to say %q, got:\n%s", want, said)
+		}
+	}
+	return nil
+}
+
+func (c *nextContext) theLedgerHoldsOneLineFor(id string) error {
+	lines, err := c.ledgerLines()
+	if err != nil {
+		return err
+	}
+	held := 0
+	for _, line := range lines {
+		if strings.Contains(line, id) {
+			held++
+		}
+	}
+	if held != 1 {
+		return fmt.Errorf("expected exactly one ledger line for %s, got %d in:\n%s", id, held, strings.Join(lines, "\n"))
+	}
+	return nil
+}
+
+// mergedOncePushedOnce reads what git was really asked to do, across every run
+// of the close-out in this scenario: a story landed once is merged once and
+// pushed once, however many times mw next is run afterwards.
+func (c *nextContext) mergedOncePushedOnce() error {
+	asked, err := os.ReadFile(c.gitLog)
+	if err != nil {
+		return fmt.Errorf("reading what mw asked git for: %w", err)
+	}
+	merges, pushes := 0, 0
+	for _, line := range strings.Split(string(asked), "\n") {
+		switch {
+		case strings.HasPrefix(line, "merge "):
+			merges++
+		case strings.HasPrefix(line, "push "):
+			pushes++
+		}
+	}
+	if merges != 1 || pushes != 1 {
+		return fmt.Errorf("expected one merge and one push, got %d and %d in:\n%s", merges, pushes, asked)
 	}
 	return nil
 }

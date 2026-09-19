@@ -5,7 +5,6 @@ import (
 	"os"
 
 	"github.com/Jonathan-A-White/millwright/application"
-	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
@@ -74,7 +73,7 @@ func newNextCmd() *cobra.Command {
 				return fmt.Errorf("closing out %s: the vault %s cannot be worked from: %w", args[0], dir, err)
 			}
 
-			gateway := beads.New(dir)
+			gateway := mwGateway(dir, host)
 			files := vault.New(dir)
 			worktrees := rig.New()
 			runner := tmux.New()

@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
-	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
@@ -45,7 +44,7 @@ func newStatusCmd() *cobra.Command {
 				return err
 			}
 
-			tracker := beads.New(dir)
+			tracker := mwGateway(dir, host)
 			_, err = application.Status{
 				Tracker:     tracker,
 				Notes:       tracker,

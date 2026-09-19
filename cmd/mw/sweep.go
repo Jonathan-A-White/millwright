@@ -4,7 +4,6 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
-	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 
@@ -42,7 +41,7 @@ func newSweepCmd() *cobra.Command {
 			}
 
 			_, err = application.Sweep{
-				Tracker:    beads.New(dir),
+				Tracker:    mwGateway(dir, host),
 				Runner:     tmux.New(),
 				Host:       host,
 				StaleAfter: time.Duration(hours) * time.Hour,

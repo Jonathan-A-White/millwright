@@ -18,6 +18,16 @@ import (
 // not from the seat.
 const BuilderSeat = "builder"
 
+// mwGateway is the beads gateway every command uses: the one in the configured
+// vault, acting under mw's own name on this host. mw names itself on every bd
+// call rather than leaving it to $BEADS_ACTOR, because a claim made under the
+// dispatcher's shell and a close attempted from inside a Builder session are
+// the same act by the same program, and bd lets only the actor that claimed a
+// story close it.
+func mwGateway(dir, host string) *beads.Gateway {
+	return beads.New(dir, beads.WithActor(application.SeatIdentity(application.MwSeat, host)))
+}
+
 // newDispatchCmd builds `mw dispatch`: the command that turns ready stories
 // into running sessions. It is the one command in the factory that spends fuel,
 // so everything it does before spending any is reversible, and --dry-run does
@@ -63,7 +73,7 @@ func newDispatchCmd() *cobra.Command {
 					host, config.RigsTable, config.File)
 			}
 
-			gateway := beads.New(dir)
+			gateway := mwGateway(dir, host)
 			files := vault.New(dir)
 			report, err := application.Dispatch{
 				Tracker:   gateway,

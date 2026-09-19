@@ -48,6 +48,9 @@ type FakeTracker struct {
 	poured      map[string]string // story id -> the molecule poured for it
 	closedSteps map[string]bool   // step id -> closed by the session working it
 
+	// refused is the stories CloseStory turns down, by the reason it gives.
+	refused map[string]string
+
 	notes map[string]string
 	syncs int
 	// asked is the dispatch-facing calls in the order they were made, so that a
@@ -640,9 +643,29 @@ func (f *FakeTracker) CommentOnStory(_ context.Context, id, text string) error {
 	})
 }
 
+// RefuseToClose makes CloseStory turn a story down, saying why — the way beads
+// turns down a close by an actor that is not the story's assignee. An empty why
+// lets closes through again, so that a test can walk a story from a close that
+// was refused to the run that closes it.
+func (f *FakeTracker) RefuseToClose(id, why string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.refused == nil {
+		f.refused = map[string]string{}
+	}
+	if why == "" {
+		delete(f.refused, id)
+		return
+	}
+	f.refused[id] = why
+}
+
 // CloseStory implements application.WorkTracker.
 func (f *FakeTracker) CloseStory(_ context.Context, id, reason string) error {
 	return f.write(id, func(s *fakeStory) error {
+		if why := f.refused[id]; why != "" {
+			return fmt.Errorf("%s", why)
+		}
 		s.detail.Status = StatusClosed
 		s.closeReason = reason
 		return nil

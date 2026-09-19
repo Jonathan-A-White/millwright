@@ -2,7 +2,6 @@ package main
 
 import (
 	"github.com/Jonathan-A-White/millwright/application"
-	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
@@ -34,7 +33,7 @@ func newSyncCmd() *cobra.Command {
 
 			report, err := application.Sync{
 				Vault:   vault.New(dir),
-				Tracker: beads.New(dir),
+				Tracker: mwGateway(dir, host),
 				Host:    host,
 			}.Run(cmd.Context())
 			if err != nil {

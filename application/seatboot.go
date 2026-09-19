@@ -150,6 +150,17 @@ func (b SeatBoot) after(storyID string) []string {
 	return append(append([]string(nil), b.After...), storyID)
 }
 
+// MwSeat is the name mw itself acts under when it writes to the tracker: the
+// claims `mw dispatch` makes, the closes and run states `mw next` writes, the
+// comments either of them leaves. It is not the Mayor and it is not the
+// Builder, because neither of them decided any of it — the machinery did — and
+// a factory whose history cannot tell a seat's act from the tooling's act
+// cannot be read afterwards. With SeatIdentity it reads as `mw@<host>`, the
+// same shape as every other name in the factory, and it says plainly which
+// machine wrote the line. A session's own writes stay signed by its seat: the
+// harness still sets BEADS_ACTOR to <seat>@<host>.
+const MwSeat = "mw"
+
 // SeatIdentity is who a session is when it writes anything down: the seat it
 // occupies and the host it runs on. Sessions are disposable and the seat is
 // what persists, so it is the seat that signs the work, never the session.
