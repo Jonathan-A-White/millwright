@@ -27,6 +27,7 @@ is the index.
 | --- | --- | --- | --- |
 | `WorkTracker` | `application/worktracker.go` | `infrastructure/beads/beads.go` (`Gateway`) | `application/apptest/faketracker.go` |
 | `TrackerSync` | `application/sync.go` | `infrastructure/beads/sync.go` (same `Gateway`) | `application/apptest/faketracker.go` |
+| `TrackerNotes` | `application/status.go` | same, read half | same |
 | `VaultFiles` | `application/sync.go` | `infrastructure/vault/git.go` | `application/apptest/fakevaultfiles.go` |
 | `Vault` | `application/seatboot.go` | `infrastructure/vault/vault.go` | `application/seatboot_test.go` |
 | `Runner` | `application/runner.go` | `infrastructure/tmux/tmux.go` | `application/apptest/fakerunner.go` |
@@ -39,8 +40,8 @@ is the index.
 | `HostSync` | `application/dispatch.go` | `application.Sync` | — |
 
 `infrastructure/config/config.go` is not a port: it is what this host knows
-about itself (vault, host, cap, stale hours, rigs, test commands), read from
-`cmd/mw/` only.
+about itself (vault, host, cap, stale and host-silence hours, rigs, test
+commands), read from `cmd/mw/` only.
 
 ## Use cases
 
@@ -86,8 +87,8 @@ plan file as JSON).
    `Args`, and a `RunE` that only reads config and calls the use case. Add
    `root.AddCommand(newSweepCmd())` in `cmd/mw/root.go`.
 8. **README** — a section in `README.md` beside "Keeping two hosts level",
-   ending with a pointer to the feature file. (`mw status` and `mw sweep` are
-   both still missing theirs.)
+   ending with a pointer to the feature file. (`mw status` and `mw sweep`
+   lack theirs.)
 
 ## Test helpers
 
