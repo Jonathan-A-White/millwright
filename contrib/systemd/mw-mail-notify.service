@@ -1,0 +1,31 @@
+# One `mw-mail-notify` tick, run as the user, then it exits: no daemon. For
+# `systemctl --user`; see README.md, "Telling the Mayor's window when mail
+# arrives".
+#
+# Started by mw-mail-notify.timer. A oneshot unit is never started twice at
+# once, and the script takes a lock of its own besides. It types one fixed line
+# into the Mayor's tmux window, and only when that window is idle with an empty
+# input line; it starts nothing and reads no mail content.
+[Unit]
+Description=Tell the Mayor's tmux window when mail arrives (mw-mail-notify)
+
+[Service]
+Type=oneshot
+
+# A user unit gets a bare PATH. The host says where mw, bd, tmux, flock and
+# mw-mail-notify itself are in dispatch.env, the same one line `PATH=...` that
+# mw-dispatch.service reads. The second file is for the host's settings of the
+# script (MW_MAIL_LOAD_LIMIT and the rest, listed in contrib/mail-notify); the
+# leading "-" makes each file optional. `env` finds mw-mail-notify through the
+# PATH the first sets, which ExecStart on its own would not.
+EnvironmentFile=-%h/.config/mw/dispatch.env
+EnvironmentFile=-%h/.config/mw/mail-notify.env
+ExecStart=/usr/bin/env mw-mail-notify
+
+# A tick is meant to be cheap and to step aside for real work: lowest CPU
+# priority for all of it (the sync inside also asks for idle I/O).
+Nice=19
+
+# Type=oneshot has no start timeout by default, and a hung mw sync or bd would
+# then block every later tick.
+TimeoutStartSec=2min

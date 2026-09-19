@@ -1,0 +1,19 @@
+# Runs mw-mail-notify.service every minute. For `systemctl --user`; see
+# README.md, "Telling the Mayor's window when mail arrives".
+#
+# A tick that finds nothing to do costs a load reading and one `bd mail inbox`.
+# The sync inside it happens at most every five minutes whatever this says; a
+# tick every minute means a sync is never more than a minute late.
+[Unit]
+Description=Every minute, tell the Mayor's window if mail has arrived (mw-mail-notify)
+
+[Timer]
+OnCalendar=minutely
+# No catch-up: a host that was asleep or off does not run the ticks it missed,
+# and it is not woken to run them.
+Persistent=false
+WakeSystem=false
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target
