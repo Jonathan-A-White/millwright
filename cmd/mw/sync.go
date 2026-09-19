@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
@@ -39,7 +41,7 @@ func newSyncCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			cmd.Printf("%s\n", report)
+			fmt.Fprintln(cmd.OutOrStdout(), report)
 			return nil
 		},
 	}

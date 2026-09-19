@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"runtime/debug"
 
 	"github.com/spf13/cobra"
@@ -56,7 +57,7 @@ func newVersionCmd() *cobra.Command {
 			if !ok {
 				info = nil
 			}
-			cmd.Println(versionLine(version, info))
+			fmt.Fprintln(cmd.OutOrStdout(), versionLine(version, info))
 			return nil
 		},
 	}

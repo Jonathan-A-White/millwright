@@ -91,7 +91,7 @@ func newDispatchCmd() *cobra.Command {
 				return err
 			}
 			if len(report.Started) > 0 && !report.DryRun {
-				cmd.Printf("Attach to a session with: tmux attach -t =%s\n", report.Started[0].Session)
+				fmt.Fprintf(cmd.OutOrStdout(), "Attach to a session with: tmux attach -t =%s\n", report.Started[0].Session)
 			}
 			return nil
 		},
