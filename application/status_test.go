@@ -188,3 +188,57 @@ func TestStatusWithoutNotesLeavesTheOtherHostsOut(t *testing.T) {
 		t.Fatalf("expected the section to say so plainly, got:\n%s", report.String())
 	}
 }
+
+// TestStatusReadsReadyAndRunningStoriesOnce says how often mw status asks the
+// tracker for the two listings every section is drawn from — what is ready and
+// what is claimed. Each costs a bd call, so it asks once per run, however many
+// hosts have work and whether or not there are notes to read.
+func TestStatusReadsReadyAndRunningStoriesOnce(t *testing.T) {
+	for name, notes := range map[string]bool{"with notes": true, "without notes": false} {
+		t.Run(name, func(t *testing.T) {
+			tracker := aTrackerPathedToVPS(t)
+			storyOn(t, tracker, "mw-gq6.30", "Ready here", "vps")
+			storyOn(t, tracker, "mw-gq6.31", "Claimed here", "vps")
+			storyOn(t, tracker, "mw-gq6.32", "Ready on the laptop", "laptop")
+			storyOn(t, tracker, "mw-gq6.33", "Claimed on the laptop", "laptop")
+			for _, id := range []string{"mw-gq6.31", "mw-gq6.33"} {
+				if err := tracker.ClaimStory(context.Background(), id); err != nil {
+					t.Fatalf("claiming %s: %v", id, err)
+				}
+			}
+			before := len(tracker.Asked())
+
+			status := application.Status{
+				Tracker: tracker,
+				Host:    "vps",
+				Seat:    "builder",
+				Now:     func() time.Time { return statusNow },
+			}
+			if notes {
+				status.Notes = tracker
+			}
+			report, err := status.Run(context.Background())
+			if err != nil {
+				t.Fatalf("reading status: %v", err)
+			}
+
+			listings := 0
+			for _, call := range tracker.Asked()[before:] {
+				switch call {
+				case "WorkInHand", "RunningStories", "ReadyForHost":
+					listings++
+				}
+			}
+			if listings != 1 {
+				t.Fatalf("expected the ready and running stories read once, asked %d times: %v",
+					listings, tracker.Asked()[before:])
+			}
+			if len(report.Running) != 1 || len(report.Ready) != 1 {
+				t.Fatalf("expected one story running and one ready here, got %+v", report)
+			}
+			if notes && (len(report.Others) != 1 || len(report.Others[0].Stories) != 2) {
+				t.Fatalf("expected the laptop's two stories listed, got %+v", report.Others)
+			}
+		})
+	}
+}
