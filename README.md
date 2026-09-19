@@ -5,16 +5,16 @@ seats that turn conversations into tracked work and tracked work into commits,
 across several rigs and two hosts, on a tight fuel budget.
 
 `mw` is the factory's command line. Today it knows its own version, files the
-Mayor's plans with `mw file`, releases the ones approved later with
-`mw release`, reads and writes stories through beads, runs
+Mayor's plans with `mw file`, shows a filed plan with `mw show`, releases the ones
+approved later with `mw release`, reads and writes stories through beads, runs
 sessions in tmux, keeps the two hosts level with `mw sync`, starts a fresh
 Builder session for each ready story with `mw dispatch`, and closes each
 finished story out with `mw next` — which lands it, ledgers what it burned,
-closes it and dispatches whatever is ready next. Four commands only look:
-`mw check` runs a story's pre-landing checks on its branch, `mw status` reports
-what a host is doing, `mw brief` prints the live children of a bead for a seat
-to boot from, and `mw sweep` marks the claimed stories whose session has
-gone or gone quiet.
+closes it and dispatches whatever is ready next. Five commands only look:
+`mw show` prints a filed plan's tree, `mw check` runs a story's pre-landing
+checks on its branch, `mw status` reports what a host is doing, `mw brief`
+prints the live children of a bead for a seat to boot from, and `mw sweep`
+marks the claimed stories whose session has gone or gone quiet.
 
 ## Getting started
 
@@ -94,6 +94,24 @@ with nobody there, the plan stays held. Releasing sets every story back to open,
 and beads then keeps back the ones still waiting on another, so the stories that
 wait on nothing are exactly what a dispatcher can take. See
 `features/file_plan.feature`.
+
+## Showing a plan filed earlier
+
+```sh
+bin/mw show mw-gq6      # print the epic's tree, and stop
+```
+
+The Governor approves a plan from a phone, later, and has to see what he is
+approving before he says yes. `mw show <epic-id>` reads the epic back out of the
+tracker and prints exactly the tree `mw release` prints, and then stops: it
+writes nothing, so every held story is as held after it as before. There is no
+`--dry-run` on `mw release`; this is the one command for looking.
+
+An id the tracker has no epic under, or that names a bead that is not an epic (a
+story, say), is a plain refusal. An epic filed *under* the epic is not a story:
+the tree names it as an epic, with its state, and leaves its own stories to
+`mw show` of its id — and `mw release` never releases it. See
+`features/show.feature`.
 
 ## Releasing a plan filed earlier
 

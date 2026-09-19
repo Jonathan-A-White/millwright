@@ -53,6 +53,7 @@ from `cmd/mw/` only.
 | --- | --- | --- | --- |
 | `File` | `application/file.go` | `mw file` — `cmd/mw/file.go` | `features/file_plan.feature` |
 | `Release` | `application/release.go` | `mw release` — `cmd/mw/release.go` | `features/release.feature` |
+| `Show` | `application/show.go` | `mw show` — `cmd/mw/show.go` | `features/show.feature` |
 | `Dispatch` | `application/dispatch.go` | `mw dispatch` — `cmd/mw/dispatch.go` | `features/dispatch.feature` |
 | `Next` | `application/next.go` | `mw next` — `cmd/mw/next.go` | `features/next.feature` |
 | `Check` | `application/check.go` | `mw check` — `cmd/mw/check.go` | `features/check.feature` |
