@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
@@ -69,6 +70,7 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^an epic "([^"]*)" whose stories are planned with the path:$`, c.anEpicWithTheDefaultPathForDispatch)
 	ctx.Given(`^a ready story "([^"]*)" of that epic$`, c.aReadyStoryOfThatEpic)
 	ctx.Given(`^a ready story "([^"]*)" of that epic that overrides "([^"]*)" with "([^"]*)"$`, c.aReadyStoryThatOverrides)
+	ctx.Given(`^a ready story "([^"]*)" of that epic at priority (\d+), filed at "([^"]*)"$`, c.aReadyStoryAtPriority)
 	ctx.Given(`^a story "([^"]*)" of that epic is already running here$`, c.aStoryAlreadyRunningHere)
 	ctx.Given(`^the other host has pushed a later commit to the rig's origin$`, c.theOtherHostHasPushed)
 	ctx.Given(`^the beads sync halts with exit code (\d+)$`, c.theBeadsSyncHalts)
@@ -94,6 +96,8 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^nothing was poured$`, c.nothingWasPoured)
 	ctx.Then(`^there is no boot file for "([^"]*)"$`, c.thereIsNoBootFileFor)
 	ctx.Then(`^dispatch would start "([^"]*)"$`, c.dispatchWouldStart)
+	ctx.Then(`^dispatch would start, in this order:$`, c.dispatchWouldStartInOrder)
+	ctx.Then(`^the dry run report lists them in that order$`, c.theReportListsThemInOrder)
 }
 
 // workspace makes the temp directory a scenario keeps its vault, its origin and
@@ -212,6 +216,24 @@ func (c *dispatchContext) anEpicWithTheDefaultPathForDispatch(id string, table *
 func (c *dispatchContext) aReadyStoryOfThatEpic(id string) error {
 	c.tracker.AddStory(c.lastEpic, domain.Story{ID: id, Title: "The story " + id})
 	return nil
+}
+
+// aReadyStoryAtPriority adds a ready story with the priority and the filing time
+// a scenario names. Scenarios add the stories in the order dispatch must not
+// start them in, so that the order they were added in cannot pass for the right
+// one.
+func (c *dispatchContext) aReadyStoryAtPriority(id string, priority int, filed string) error {
+	created, err := time.Parse(time.RFC3339, filed)
+	if err != nil {
+		return fmt.Errorf("%q is not a time: %w", filed, err)
+	}
+	if err := c.aReadyStoryOfThatEpic(id); err != nil {
+		return err
+	}
+	if err := c.tracker.SetPriority(id, priority); err != nil {
+		return err
+	}
+	return c.tracker.SetCreated(id, created)
 }
 
 func (c *dispatchContext) aReadyStoryThatOverrides(id, field, value string) error {
@@ -502,6 +524,47 @@ func (c *dispatchContext) dispatchWouldStart(id string) error {
 		}
 	}
 	return fmt.Errorf("expected the dry run to say it would start %s, got %+v", id, report.Started)
+}
+
+// dispatchWouldStartInOrder says the dry run would start exactly these stories,
+// most urgent and oldest first.
+func (c *dispatchContext) dispatchWouldStartInOrder(table *godog.Table) error {
+	report, err := c.dispatched()
+	if err != nil {
+		return err
+	}
+	if !report.DryRun {
+		return fmt.Errorf("expected a dry run, got %+v", report)
+	}
+	var want, got []string
+	for _, row := range table.Rows {
+		want = append(want, row.Cells[0].Value)
+	}
+	for _, started := range report.Started {
+		got = append(got, started.StoryID)
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		return fmt.Errorf("expected the dry run to start %q in that order, got %q", want, got)
+	}
+	return nil
+}
+
+// theReportListsThemInOrder reads the dry run as a person does, from what it
+// printed: each story's line comes after the line of the one before it.
+func (c *dispatchContext) theReportListsThemInOrder() error {
+	report, err := c.dispatched()
+	if err != nil {
+		return err
+	}
+	printed, at := report.String(), 0
+	for _, started := range report.Started {
+		found := strings.Index(printed[at:], "would start "+started.StoryID+" ")
+		if found < 0 {
+			return fmt.Errorf("expected the report to list %s after the stories before it, got:\n%s", started.StoryID, printed)
+		}
+		at += found
+	}
+	return nil
 }
 
 // gitRun runs one git command in a directory, for a scenario's fixtures.

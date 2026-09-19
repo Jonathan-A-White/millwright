@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
@@ -25,6 +26,7 @@ type bead struct {
 	Assignee         string            `json:"assignee"`
 	EstimatedMinutes int               `json:"estimated_minutes"`
 	CreatedAt        string            `json:"created_at"`
+	Priority         *int              `json:"priority"`
 	Metadata         map[string]any    `json:"metadata"`
 	Parent           string            `json:"parent"`
 	Dependencies     []json.RawMessage `json:"dependencies"`
@@ -141,6 +143,25 @@ func (b bead) parentPath() (domain.Path, bool) {
 	return domain.Path{}, false
 }
 
+// priority is the bead's priority, 0 being the most urgent. bd always prints
+// one, but a bead that printed none is not more urgent than the rest for it.
+func (b bead) priority() int {
+	if b.Priority == nil {
+		return application.DefaultPriority
+	}
+	return *b.Priority
+}
+
+// created is when bd says the bead was filed, or the zero time when it says
+// nothing or something that is not a time.
+func (b bead) created() time.Time {
+	filed, err := time.Parse(time.RFC3339, b.CreatedAt)
+	if err != nil {
+		return time.Time{}
+	}
+	return filed
+}
+
 // detail is this bead as a story of an epic with those defaults.
 func (b bead) detail(defaults domain.Path) application.StoryDetail {
 	return application.StoryDetail{
@@ -156,6 +177,8 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		Description:     b.Description,
 		Acceptance:      b.Acceptance,
 		EstimateMinutes: b.EstimatedMinutes,
+		Priority:        b.priority(),
+		Created:         b.created(),
 		Needs:           b.needs(),
 		// The formula poured for this story, as the dispatch that poured it
 		// recorded it. Only the root is known from the story itself; the steps
