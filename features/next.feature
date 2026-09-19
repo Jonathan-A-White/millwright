@@ -134,6 +134,28 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.9" is held blocked
     And the rig's tests were run 0 times
 
+  Scenario: A branch with no commits but a dirty worktree says the session left work uncommitted
+    Given the story "mw-gq6.9" has been worked in its own worktree, committing nothing
+    And the session of "mw-gq6.9" left these uncommitted in its worktree:
+      | README.md          |
+      | notes/half-done.md |
+      | the-feature.go     |
+    And the session of "mw-gq6.9" reported a plain success
+    When mw closes out "mw-gq6.9"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.9" is not closed
+    And the story "mw-gq6.9" is held blocked
+    And the worktree of "mw-gq6.9" is still there
+    And the rig's tests were run 0 times
+    And the comment on "mw-gq6.9" and the report say uncommitted work was left, listing:
+      | README.md          |
+      | notes/half-done.md |
+      | the-feature.go     |
+    And the last ledger line holds:
+      | mw-gq6.9         |
+      | uncommitted work |
+      | the-feature.go   |
+
   Scenario: A commit signed by an AI is not landed
     Given the session of "mw-gq6.1" reported a plain success
     And a commit on the branch of "mw-gq6.1" carries "Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"

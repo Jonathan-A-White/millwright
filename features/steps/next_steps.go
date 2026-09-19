@@ -98,6 +98,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the ledger already holds a line from an earlier story$`, c.theLedgerAlreadyHoldsALine)
 	ctx.Given(`^a formula was poured for "([^"]*)" and one of its steps is still open$`, c.aFormulaWithAnOpenStep)
 	ctx.Given(`^the story "([^"]*)" is claimed here with no session behind it$`, c.aStoryClaimedWithNoSession)
+	ctx.Given(`^the session of "([^"]*)" left these uncommitted in its worktree:$`, c.theSessionLeftUncommittedWork)
 	ctx.Given(`^a commit on the branch of "([^"]*)" carries "([^"]*)"$`, c.aCommitCarrying)
 	ctx.Given(`^the other host landed its own work on "([^"]*)" while "([^"]*)" was worked$`, c.theOtherHostLandedFirst)
 	ctx.Given(`^the other host lands its own work the moment mw first tries to push$`, c.theOtherHostRacesThePush)
@@ -123,6 +124,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the story "([^"]*)" carries a comment quoting: (.+)$`, c.theStoryCarriesACommentQuoting)
 	ctx.Then(`^the story "([^"]*)" carries no comment quoting: (.+)$`, c.theStoryCarriesNoCommentQuoting)
 	ctx.Then(`^the comment on "([^"]*)" and the report name that commit$`, c.theCommentAndReportNameTheCommit)
+	ctx.Then(`^the comment on "([^"]*)" and the report say uncommitted work was left, listing:$`, c.theCommentAndReportSayUncommittedWorkWasLeft)
 	ctx.Then(`^the last ledger line holds:$`, c.theLastLedgerLineHolds)
 	ctx.Then(`^the last ledger line names "([^"]*)"$`, c.theLastLedgerLineNames)
 	ctx.Then(`^the ledger still holds every line it held before$`, c.theLedgerStillHoldsEveryLine)
@@ -277,6 +279,26 @@ func (c *nextContext) theStoryCommittedNothing(id string) error {
 	return c.worked(id)
 }
 
+// theSessionLeftUncommittedWork is a session that ended its turn with work in
+// its worktree and never committed it: the first path is a file the rig already
+// tracks, changed in place, and the rest are new files, so that both kinds of
+// dirty are in the worktree — a subdirectory among them, which git would
+// otherwise fold into one line.
+func (c *nextContext) theSessionLeftUncommittedWork(id string, table *godog.Table) error {
+	dir := application.WorktreeDir(c.rig, id)
+	for _, row := range table.Rows {
+		file := row.Cells[0].Value
+		full := filepath.Join(dir, filepath.FromSlash(file))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(full, []byte("left undone by the session of "+id+"\n"), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // worked claims a story and cuts it the worktree a dispatch would have.
 func (c *nextContext) worked(id string) error {
 	if err := c.aStoryReadyHere(id); err != nil {
@@ -351,6 +373,25 @@ func (c *nextContext) theCommentAndReportNameTheCommit(id string) error {
 	}
 	if said := c.printed.String(); !strings.Contains(said, c.signed) {
 		return fmt.Errorf("expected the report to name the commit %s, got:\n%s", c.signed, said)
+	}
+	return nil
+}
+
+// theCommentAndReportSayUncommittedWorkWasLeft is the whole point of telling
+// "committed nothing" from "committed nothing, and left the work lying there":
+// the comment on the story and the report both say so, and both name every path.
+func (c *nextContext) theCommentAndReportSayUncommittedWorkWasLeft(id string, table *godog.Table) error {
+	comments := strings.Join(c.tracker.Comments(id), "\n")
+	said := c.printed.String()
+	for where, text := range map[string]string{"the comment on " + id: comments, "the report": said} {
+		if !strings.Contains(text, "uncommitted work") {
+			return fmt.Errorf("expected %s to say uncommitted work was left, got:\n%s", where, text)
+		}
+		for _, row := range table.Rows {
+			if file := row.Cells[0].Value; !strings.Contains(text, file) {
+				return fmt.Errorf("expected %s to list %s, got:\n%s", where, file, text)
+			}
+		}
 	}
 	return nil
 }

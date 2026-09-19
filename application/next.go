@@ -31,6 +31,15 @@ const (
 // to see what broke, not so much that a bead becomes a log file.
 const CheckLines = 40
 
+// UncommittedShort is how many of the paths a session left uncommitted are
+// named in the one-line reason a story is stopped for, which is what the ledger
+// and the run state carry; UncommittedListed is how many the comment and the
+// report list. Past either, the rest are counted, not named.
+const (
+	UncommittedShort  = 5
+	UncommittedListed = 50
+)
+
 // Next closes out one finished story and carries the baton on. It is the use
 // case that ends what dispatch began: the dispatch command line chains it after
 // the harness exits, whatever the harness exited with, so that a session that
@@ -108,6 +117,11 @@ type NextReport struct {
 	Target string
 	// Commits is how many commits the session left on the story's branch.
 	Commits int
+	// Uncommitted is the paths the session left changed and not committed in
+	// its worktree, when it committed nothing: the work a person has to look at
+	// before the worktree is thrown away. Empty when the worktree was clean or
+	// the session did commit.
+	Uncommitted []string
 	// Pushes is how many times the push was attempted: more than one means the
 	// other host landed something while this story was being landed.
 	Pushes int
@@ -251,8 +265,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	}
 	report.Commits = commits
 	if commits == 0 {
-		return n.stop(ctx, c, report, fmt.Sprintf("the session committed nothing to %s, so there is nothing to land on %s",
-			c.branch, c.target), "")
+		return n.nothingCommitted(ctx, c, report)
 	}
 
 	// What the commits say about who wrote them. This is asked before the
@@ -322,6 +335,54 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be recorded as %s=%s: %v", c.id, RunState, RunLanded, err))
 	}
 	return n.finish(ctx, c, report, outcome, false)
+}
+
+// nothingCommitted stops a close-out whose branch has no commits on it. A
+// session that did nothing and a session that did the work and never committed
+// it look alike on the branch and nothing like each other in the worktree — the
+// headless session ends when its turn does, whatever it left running — so the
+// worktree is read too, and what is in it is named: the person told "committed
+// nothing" would otherwise throw the worktree away.
+func (n Next) nothingCommitted(ctx context.Context, c *closeOut, report *NextReport) (NextReport, error) {
+	plain := fmt.Sprintf("the session committed nothing to %s, so there is nothing to land on %s", c.branch, c.target)
+
+	left, err := n.Landing.Uncommitted(ctx, c.worktree)
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the worktree %s could not be read for uncommitted work: %v", c.worktree, err))
+		return n.stop(ctx, c, report, plain, "")
+	}
+	if len(left) == 0 {
+		return n.stop(ctx, c, report, plain, "")
+	}
+	report.Uncommitted = left
+	return n.stop(ctx, c, report,
+		fmt.Sprintf("the session committed nothing to %s but left uncommitted work in its worktree (%s), so there is nothing to land on %s",
+			c.branch, pathList(left, UncommittedShort), c.target),
+		fmt.Sprintf("Uncommitted work left in %s (%d path(s)):\n%s", c.worktree, len(left), bullets(left, UncommittedListed)))
+}
+
+// pathList is up to limit paths on one line, and how many more there were.
+func pathList(paths []string, limit int) string {
+	if len(paths) <= limit {
+		return strings.Join(paths, ", ")
+	}
+	return fmt.Sprintf("%s, and %d more", strings.Join(paths[:limit], ", "), len(paths)-limit)
+}
+
+// bullets is up to limit paths one to a line, and how many more there were.
+func bullets(paths []string, limit int) string {
+	shown := paths
+	if len(shown) > limit {
+		shown = shown[:limit]
+	}
+	lines := make([]string, 0, len(shown)+1)
+	for _, path := range shown {
+		lines = append(lines, "- "+path)
+	}
+	if len(paths) > limit {
+		lines = append(lines, fmt.Sprintf("- and %d more", len(paths)-limit))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // signedByAMachine reads the commits a landing would put on the target branch
@@ -756,6 +817,12 @@ func (r NextReport) String() string {
 		fmt.Fprintf(&b, "  landed  %s on %s (%d commits, %d push(es))\n", r.How.LandedAs(r.Target), r.Target, r.Commits, r.Pushes)
 	default:
 		fmt.Fprintf(&b, "  STOPPED %s\n", r.Why)
+	}
+	if len(r.Uncommitted) > 0 {
+		fmt.Fprintf(&b, "  left    uncommitted work, %d path(s), in the worktree:\n", len(r.Uncommitted))
+		for _, line := range strings.Split(bullets(r.Uncommitted, UncommittedListed), "\n") {
+			fmt.Fprintf(&b, "            %s\n", line)
+		}
 	}
 	if r.Ledger != "" {
 		fmt.Fprintf(&b, "  ledger  %s\n", r.Ledger)
