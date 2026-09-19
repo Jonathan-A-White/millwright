@@ -33,7 +33,9 @@ type StoryDetail struct {
 	Acceptance  string
 	// Needs is the ids of the stories this one waits on, as far as the listing
 	// it came from said. It is empty when the tracker was not asked for the
-	// story's dependencies.
+	// story's dependencies. A listing that knows which of them are finished —
+	// BlockedForHost does — leaves the finished ones out: a story shown as
+	// waiting on work that is done reads as blocked when it is not.
 	Needs []string
 	// EstimateMinutes is the Mayor's estimate in minutes; zero when unset.
 	EstimateMinutes int
@@ -176,8 +178,9 @@ type WorkTracker interface {
 	// BlockedForHost lists every open, unclaimed story in the tracker that
 	// waits on a dependency not yet finished, on a host — what `mw status`
 	// shows under "blocked" beside what ReadyForHost shows under "ready". Each
-	// story comes back with its own epic's defaults overlaid, and a story whose
-	// Path names no host is not listed for any host.
+	// story comes back with its own epic's defaults overlaid, with its Needs
+	// narrowed to the stories it is still waiting for, and a story whose Path
+	// names no host is not listed for any host.
 	BlockedForHost(ctx context.Context, host string) ([]StoryDetail, error)
 
 	// WorkElsewhere lists the stories another host has in hand: every story that

@@ -32,6 +32,15 @@ Feature: mw status
     And the report lists "mw-gq6.2" as ready
     And the report lists "mw-gq6.3" as blocked
 
+  Scenario: A blocked story lists only what it is still waiting for
+    Given a status story "mw-gq6.20" filed under it
+    And a status story "mw-gq6.21" filed under it
+    And a status story "mw-gq6.22" filed under it, waiting on "mw-gq6.20" and "mw-gq6.21"
+    And the status story "mw-gq6.20" is finished
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "mw-gq6.22" needs "mw-gq6.21" and nothing else
+
   Scenario: A story filed with path overrides only is shown with the epic's defaults filled in
     Given a status story "mw-gq6.4" filed under it, overriding "model" with "sonnet"
     When mw status reads the host

@@ -36,6 +36,7 @@ type bead struct {
 type linked struct {
 	ID       string          `json:"id"`
 	Kind     string          `json:"dependency_type"`
+	Status   string          `json:"status"`
 	Metadata json.RawMessage `json:"metadata"`
 }
 
@@ -71,6 +72,12 @@ func (b bead) edges() []edge {
 // epic is not a wait, and neither shape carries what waits on this bead, so
 // what comes back is what this bead is blocked by. The two shapes share no
 // field names, so one of them decoding to nothing is how they are told apart.
+//
+// A wait on a bead that is already closed is not a wait: the whole linked bead
+// carries its status, so `bd show` says which of them are done, and a story
+// listed as blocked by work that is finished reads as blocked when it is not.
+// An edge carries no status, so a listing printed that way cannot narrow its
+// waits and does not pretend to.
 func (b bead) needs() []string {
 	var on []string
 	seen := map[string]bool{}
@@ -91,7 +98,8 @@ func (b bead) needs() []string {
 			continue
 		}
 		var link linked
-		if json.Unmarshal(raw, &link) == nil && link.ID != "" && link.Kind != "" && link.Kind != "parent-child" {
+		if json.Unmarshal(raw, &link) == nil && link.ID != "" && link.Kind != "" && link.Kind != "parent-child" &&
+			link.Status != StatusClosed {
 			add(link.ID)
 		}
 	}

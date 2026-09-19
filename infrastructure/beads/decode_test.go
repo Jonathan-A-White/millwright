@@ -167,6 +167,13 @@ const showBlockedStoryJSON = `[
         "status": "closed",
         "issue_type": "task",
         "dependency_type": "blocks"
+      },
+      {
+        "id": "t-c3i.3",
+        "title": "Story C",
+        "status": "open",
+        "issue_type": "task",
+        "dependency_type": "blocks"
       }
     ],
     "parent": "t-c3i"
@@ -274,15 +281,18 @@ func TestWhatAStoryWaitsOnIsReadFromEitherDependencyShape(t *testing.T) {
 		}
 	}
 
+	// A shown story carries its blockers whole, so a wait on work that is
+	// already closed can be — and is — left out: it waits on t-c3i.3, not on
+	// the finished t-c3i.1 and not on the epic it hangs from.
 	shown, err := decodeBeads([]byte(showBlockedStoryJSON))
 	if err != nil {
 		t.Fatalf("decoding a shown story: %v", err)
 	}
-	if got := shown[0].needs(); len(got) != 1 || got[0] != "t-c3i.1" {
-		t.Errorf("expected the shown story to wait on t-c3i.1 and not on its epic, got %v", got)
+	if got := shown[0].needs(); len(got) != 1 || got[0] != "t-c3i.3" {
+		t.Errorf("expected the shown story to wait on t-c3i.3 alone, got %v", got)
 	}
 	// And the story detail carries it, which is what a tree of an epic reads.
-	if got := shown[0].detail(domain.Path{}).Needs; len(got) != 1 || got[0] != "t-c3i.1" {
+	if got := shown[0].detail(domain.Path{}).Needs; len(got) != 1 || got[0] != "t-c3i.3" {
 		t.Errorf("expected the story detail to carry what it waits on, got %v", got)
 	}
 }

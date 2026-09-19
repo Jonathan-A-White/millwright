@@ -525,6 +525,16 @@ func TestGatewayFilesAnEpicWithItsStoriesHeld(t *testing.T) {
 	if blocked, err := gateway.BlockedForHost(ctx, "vps"); err != nil || len(blocked) != 0 {
 		t.Fatalf("expected nothing blocked once %s is closed, got %+v: %v", first, blocked, err)
 	}
+	// And it no longer says it waits on it: a wait on work that is finished is
+	// not a wait, and bd hands the whole blocking bead over with its status, so
+	// a story read on its own can say which of its waits are still waits.
+	stillWaiting, err := gateway.ShowStory(ctx, second)
+	if err != nil {
+		t.Fatalf("reading %s back: %v", second, err)
+	}
+	if len(stillWaiting.Needs) != 0 {
+		t.Errorf("expected %s to wait on nothing once %s is closed, got %v", second, first, stillWaiting.Needs)
+	}
 
 	// A story that is finished is still part of its epic: the tree a release
 	// prints shows the work already done, so the reading asks bd for the closed

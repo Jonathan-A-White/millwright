@@ -87,6 +87,8 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a status story "([^"]*)" titled "([^"]*)" filed under it$`, c.aStatusStoryTitledFiledUnderIt)
 	ctx.Given(`^a status story "([^"]*)" filed under it, overriding "([^"]*)" with "([^"]*)"$`, c.aStatusStoryOverriding)
 	ctx.Given(`^a status story "([^"]*)" filed under it, waiting on "([^"]*)"$`, c.aStatusStoryWaitingOn)
+	ctx.Given(`^a status story "([^"]*)" filed under it, waiting on "([^"]*)" and "([^"]*)"$`, c.aStatusStoryWaitingOnTwo)
+	ctx.Given(`^the status story "([^"]*)" is finished$`, c.theStatusStoryIsFinished)
 	ctx.Given(`^the status story "([^"]*)" is claimed with its session running$`, c.theStatusStoryIsClaimedAndRunning)
 	ctx.Given(`^the status story "([^"]*)" is marked run=(\S+)$`, c.theStatusStoryIsMarkedRun)
 	ctx.Given(`^the formula poured for "([^"]*)" has a step still open$`, c.theFormulaPouredHasAStepStillOpen)
@@ -118,6 +120,7 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the report says the host "([^"]*)" has never synced$`, c.theReportSaysTheHostHasNeverSynced)
 	ctx.Then(`^the report says how to re-path a story stranded on the host "([^"]*)"$`, c.theReportSaysHowToRePathFrom)
 	ctx.Then(`^nothing pathed to another host was re-pathed or touched$`, c.nothingElsewhereWasTouched)
+	ctx.Then(`^the report says "([^"]*)" needs "([^"]*)" and nothing else$`, c.theReportSaysNeedsAndNothingElse)
 }
 
 // workspace makes the temp directory this scenario keeps its vault in, once.
@@ -214,6 +217,16 @@ func (c *statusContext) aStatusStoryWaitingOn(id, need string) error {
 	c.tracker.AddStory(c.lastEpic, domain.Story{ID: id, Title: id})
 	c.tracker.Needs(id, need)
 	return nil
+}
+
+func (c *statusContext) aStatusStoryWaitingOnTwo(id, first, second string) error {
+	c.tracker.AddStory(c.lastEpic, domain.Story{ID: id, Title: id})
+	c.tracker.Needs(id, first, second)
+	return nil
+}
+
+func (c *statusContext) theStatusStoryIsFinished(id string) error {
+	return c.tracker.CloseStory(context.Background(), id, "worked by the test")
 }
 
 func (c *statusContext) theStatusStoryIsClaimedAndRunning(id string) error {
@@ -481,6 +494,24 @@ func (c *statusContext) everyLineIsAtMost60ColumnsWide() error {
 		if n := utf8.RuneCountInString(line); n > application.Width {
 			return fmt.Errorf("expected every line at most %d columns, got %d in %q", application.Width, n, line)
 		}
+	}
+	return nil
+}
+
+// theReportSaysNeedsAndNothingElse checks what a blocked story is shown as
+// waiting for: the stories it is still waiting on, and not the ones already
+// finished.
+func (c *statusContext) theReportSaysNeedsAndNothingElse(id, need string) error {
+	if err := c.theReportListsAsBlocked(id); err != nil {
+		return err
+	}
+	detail, _ := c.storyIn(id)
+	if len(detail.Needs) != 1 || detail.Needs[0] != need {
+		return fmt.Errorf("expected %s to need %s alone, got %v", id, need, detail.Needs)
+	}
+	if !strings.Contains(c.report.String(), "needs "+need+"\n") {
+		return fmt.Errorf("expected the printed report to say it needs %s and nothing else, got:\n%s",
+			need, c.report.String())
 	}
 	return nil
 }

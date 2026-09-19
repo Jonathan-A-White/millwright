@@ -449,7 +449,14 @@ func (f *FakeTracker) BlockedForHost(_ context.Context, host string) ([]applicat
 			continue
 		}
 		detail := s.detail
-		detail.Needs = append([]string(nil), s.needs...)
+		// Only what it is still waiting for: a story it waits on that is
+		// already finished is no longer a wait, which is what the real tracker
+		// says too when it is asked about one story at a time.
+		for _, need := range s.needs {
+			if blocker, filed := f.stories[need]; !filed || blocker.detail.Status != StatusClosed {
+				detail.Needs = append(detail.Needs, need)
+			}
+		}
 		blocked = append(blocked, detail)
 	}
 	return blocked, nil
