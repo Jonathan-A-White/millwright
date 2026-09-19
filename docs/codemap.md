@@ -87,8 +87,7 @@ plan file as JSON).
    `Args`, and a `RunE` that only reads config and calls the use case. Add
    `root.AddCommand(newSweepCmd())` in `cmd/mw/root.go`.
 8. **README** — a section in `README.md` beside "Keeping two hosts level",
-   ending with a pointer to the feature file. (`mw status` and `mw sweep`
-   lack theirs.)
+   ending with a pointer to the feature file. (`mw sweep` lacks its.)
 
 ## Test helpers
 
