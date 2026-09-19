@@ -43,6 +43,20 @@ func TestSeatWorkRefusesANameThatWouldReachOutsideTheVault(t *testing.T) {
 	}
 }
 
+func TestRunRecordIsTheResultOfTheStoryAndNotItsBootFile(t *testing.T) {
+	if got, want := application.RunRecord("mw-gq6.48"), "runs/mw-gq6.48/result.json"; got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestRunRecordRefusesAStoryThatWouldReachOutsideTheVault(t *testing.T) {
+	for _, id := range []string{"", "../seats/builder", "a/b"} {
+		if got := application.RunRecord(id); got != "" {
+			t.Fatalf("expected no path for the story %q, got %q", id, got)
+		}
+	}
+}
+
 func TestVaultCommitMessageNamesTheStoryAndSignsNothing(t *testing.T) {
 	message := application.VaultCommitMessage("mw-gq6.40", "mw next cannot sync\nafter its own landing")
 	for _, want := range []string{"mw-gq6.40", "mw next cannot sync after its own landing"} {

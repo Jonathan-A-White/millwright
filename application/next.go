@@ -586,10 +586,15 @@ func (n Next) ledger(ctx context.Context, c *closeOut, report *NextReport, outco
 }
 
 // commit records in the vault exactly what this story was allowed to write
-// there: the line mw next has just appended to the seat's ledger, and the
-// session's memory of the rig it worked. Nothing else — by explicit path, never
-// everything that happens to be lying about — because a vault holds the work of
-// two hosts and several seats, and a close-out is only entitled to its own.
+// there: the line mw next has just appended to the seat's ledger, the session's
+// memory of the rig it worked, and the session's result — the run record, which
+// is the evidence behind the ledger line's fuel. Nothing else, and never the
+// boot file beside the result — by explicit path, never everything that happens
+// to be lying about — because a vault holds the work of two hosts and several
+// seats, and a close-out is only entitled to its own.
+//
+// A run record that is not there is a note and no more: the rest is committed
+// all the same, and the report says which file was missing.
 //
 // A commit that cannot be made is a note, not a failure: the story landed, and
 // the sync that follows will name the files and refuse, which is exactly what
@@ -601,6 +606,13 @@ func (n Next) commit(ctx context.Context, c *closeOut, report *NextReport) {
 	paths := SeatWork(n.Seat, c.path.Rig)
 	if len(paths) == 0 {
 		return
+	}
+	if record := RunRecord(c.id); record != "" {
+		if _, err := n.Vault.ReadRunFile(ctx, c.id, ResultFileName); errors.Is(err, fs.ErrNotExist) {
+			report.Notes = append(report.Notes, fmt.Sprintf("the run record %s is missing from the vault, so it was not committed", record))
+		} else {
+			paths = append(paths, record)
+		}
 	}
 
 	committed, err := n.Files.Commit(ctx, VaultCommitMessage(c.id, c.detail.Story.Title), paths)

@@ -214,13 +214,16 @@ Feature: Closing out a finished story and carrying on
 
   Scenario: What mw and the session wrote in the vault is committed, so the sync that follows can run
     Given the session of "mw-gq6.1" reported a plain success
+    And the run of "mw-gq6.1" left its boot file beside the result
     And the story "mw-gq6.2" is planned and ready to be worked here
     When mw closes out "mw-gq6.1"
     Then the story "mw-gq6.1" is closed
     And mw committed to the vault exactly:
       | seats/builder/ledger.md          |
       | seats/builder/rigs/millwright.md |
+      | runs/mw-gq6.1/result.json        |
     And that vault commit names "mw-gq6.1" and signs nothing
+    And the vault commit does not hold "runs/mw-gq6.1/boot.md"
     And the hosts were brought level
     And a fresh session is running for "mw-gq6.2"
 
@@ -242,6 +245,16 @@ Feature: Closing out a finished story and carrying on
     And mw committed to the vault exactly:
       | seats/builder/ledger.md          |
       | seats/builder/rigs/millwright.md |
+      | runs/mw-gq6.1/result.json        |
+
+  Scenario: A session that left no result is not landed, and the close-out says the run record was missing
+    Given the session of "mw-gq6.1" left no result at all
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is not closed
+    And mw committed to the vault exactly:
+      | seats/builder/ledger.md          |
+      | seats/builder/rigs/millwright.md |
+    And the report says the run record of "mw-gq6.1" was missing
 
   Scenario: A ledger line an earlier run could not commit is committed by the run that closes the story
     Given the session of "mw-gq6.1" reported a plain success
@@ -258,6 +271,23 @@ Feature: Closing out a finished story and carrying on
     And mw committed to the vault exactly:
       | seats/builder/ledger.md          |
       | seats/builder/rigs/millwright.md |
+      | runs/mw-gq6.1/result.json        |
+
+  Scenario: A re-run that finds the run record gone still commits the rest, and says so
+    Given the session of "mw-gq6.1" reported a plain success
+    And the vault refuses a commit, saying: another git process seems to be running
+    And the tracker refuses to close "mw-gq6.1", saying: assignee is root, actor is mw@vps; reclaim or use --force
+    When mw closes out "mw-gq6.1"
+    Then the close-out says the story is landed but still open
+    Given the vault takes a commit again
+    And the tracker will take a close of "mw-gq6.1" again
+    And the session of "mw-gq6.1" left no result at all
+    When mw closes out "mw-gq6.1" a second time
+    Then the story "mw-gq6.1" is closed
+    And mw committed to the vault exactly:
+      | seats/builder/ledger.md          |
+      | seats/builder/rigs/millwright.md |
+    And the report says the run record of "mw-gq6.1" was missing
 
   Scenario: The merge slot is given back once the landing is done
     Given the session of "mw-gq6.1" reported a plain success
