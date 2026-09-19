@@ -10,9 +10,10 @@ Mayor's plans with `mw file`, releases the ones approved later with
 sessions in tmux, keeps the two hosts level with `mw sync`, starts a fresh
 Builder session for each ready story with `mw dispatch`, and closes each
 finished story out with `mw next` — which lands it, ledgers what it burned,
-closes it and dispatches whatever is ready next. Two commands only look:
-`mw status` reports what a host is doing, and `mw sweep` marks the claimed
-stories whose session has gone or gone quiet.
+closes it and dispatches whatever is ready next. Three commands only look:
+`mw check` runs a story's pre-landing checks on its branch, `mw status` reports
+what a host is doing, and `mw sweep` marks the claimed stories whose session has
+gone or gone quiet.
 
 ## Getting started
 
@@ -301,6 +302,31 @@ again closes it and carries on: the run that landed the story recorded
 `run=landed` the moment the push succeeded, so a later run knows there is
 nothing to merge, test or push, and it adds no second ledger line, because the
 seat's ledger already names the story.
+
+### Checking a branch before the session ends
+
+```sh
+bin/mw check mw-gq6.8                # what mw next would refuse, printed; changes nothing
+```
+
+`mw next` tells a session its branch is refused only after the session has ended
+and its fuel is spent. `mw check <story-id>` asks the same questions of the
+story's branch while the session can still fix it: commits on the branch, none
+signed by a machine, every formula step closed, the rig's tests passing in the
+worktree. It prints each refusal in the words `mw next` would use, with the
+detail `mw next` writes on the story (the steps still open, the commit, the
+tests' last lines), and leaves with 1 when any check fails. It reports **every**
+check that fails, not only the first: a session that fixes one and asks again
+pays for the tests each time.
+
+It is read-only. It writes no comment, run state or ledger line, commits nothing
+in the vault, and asks git for nothing that writes — no fetch, no merge slot, no
+landing worktree — so the commits are counted against `origin/<target>` as the
+rig last saw it. It does not read the session's result, which is not written
+until the session ends, and it does not try the merge, so a branch that passes
+can still be stopped by a conflict or by the other host's work. The last formula
+step is normally still open when a session runs it; the session's kickoff prompt
+names the command and says so. See `features/check.feature`.
 
 ### What a session may run without asking
 

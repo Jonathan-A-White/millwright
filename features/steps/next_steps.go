@@ -49,8 +49,12 @@ type nextContext struct {
 	signed       string // the short hash of the commit a scenario signed
 
 	report  application.NextReport
+	checked application.CheckReport // what mw check reported, in the check scenarios
 	err     error
 	printed bytes.Buffer // the report as the person running mw reads it
+
+	touchedBefore *touched // what a check scenario found before it ran mw check
+	touchedFor    string
 }
 
 // What a scenario's fixtures hold.
@@ -144,6 +148,8 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the close-out notes that the vault could not be committed$`, c.theVaultCommitFailureIsNoted)
 	ctx.Then(`^the vault commit does not hold "([^"]*)"$`, c.theVaultCommitDoesNotHold)
 	ctx.Then(`^the report says the run record of "([^"]*)" was missing$`, c.theRunRecordWasMissing)
+
+	registerCheckSteps(ctx, c)
 }
 
 // workspace makes the temp directory a scenario keeps everything in, once.
