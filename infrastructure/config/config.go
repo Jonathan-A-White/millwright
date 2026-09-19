@@ -14,6 +14,12 @@
 //
 //	[rigs]
 //	millwright = "/root/millwright"
+//
+//	[watch]
+//	ssh     = "vps"
+//	host    = "vps"
+//	outside = ["https://example.com", "https://www.wikipedia.org"]
+//	blog    = "https://blog.example.com"
 package config
 
 import (
@@ -49,6 +55,9 @@ const (
 	RigsTable  = "rigs"
 	TestsTable = "tests"
 )
+
+// WatchTable is the table of the config file that says what `mw watch` looks at.
+const WatchTable = "watch"
 
 // DefaultCap is how many sessions may run at once on a host that does not say.
 // One, because the smaller of the factory's two hosts has a single core and
@@ -306,6 +315,72 @@ func Tests() (map[string]string, error) {
 		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
 	}
 	return tableIn(filepath.Join(home, File), TestsTable)
+}
+
+// WatchSettings is what the `[watch]` table says: how to reach the host that is
+// watched, what it is called in beads, which two places outside both hosts say
+// this host's own network is up, and the blog whose answering is a sign the host
+// is alive.
+type WatchSettings struct {
+	SSH     string
+	Host    string
+	Outside []string
+	Blog    string
+}
+
+// Watch reports what `mw watch` looks at, read from the `[watch]` table of
+// ~/.config/mw/config.toml: `ssh` (the name ssh knows the watched host by),
+// `host` (its name in beads), `outside` (a list of URLs, two of them) and
+// `blog` (a URL). A machine with no such table watches nothing, which is not an
+// error: it is the zero value, and `mw watch` says so. A table that names no
+// ssh, no host or no outside place is one `mw watch` cannot use, and is refused
+// saying what is missing; the blog alone is optional, and without it the blog is
+// not one of the signs of life.
+func Watch() (WatchSettings, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return WatchSettings{}, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	table, err := tableIn(path, WatchTable)
+	if err != nil {
+		return WatchSettings{}, err
+	}
+	if len(table) == 0 {
+		return WatchSettings{}, nil
+	}
+
+	watch := WatchSettings{SSH: table["ssh"], Host: table["host"], Outside: list(table["outside"]), Blog: table["blog"]}
+	var missing []string
+	if watch.SSH == "" {
+		missing = append(missing, "ssh")
+	}
+	if watch.Host == "" {
+		missing = append(missing, "host")
+	}
+	if len(watch.Outside) == 0 {
+		missing = append(missing, "outside")
+	}
+	if len(missing) > 0 {
+		return WatchSettings{}, fmt.Errorf("the [%s] table of %s does not say %s: mw watch needs the ssh name of the host, its name in beads and the places outside that show this host's network is up",
+			WatchTable, path, strings.Join(missing, ", "))
+	}
+	return watch, nil
+}
+
+// list reads a value that is a list of strings: `["a", "b"]`, or one string
+// with commas in it, `"a, b"`. Nothing but the strings is kept, and none is
+// empty.
+func list(value string) []string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimSuffix(strings.TrimPrefix(value, "["), "]")
+	var items []string
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.Trim(strings.TrimSpace(item), `"'`); item != "" {
+			items = append(items, item)
+		}
+	}
+	return items
 }
 
 // RigNames is the rigs this machine has, in a settled order, for a message a

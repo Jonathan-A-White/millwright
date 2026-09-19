@@ -429,3 +429,64 @@ func TestTheMillhandsModelsAreReadFromTheEnvironmentAheadOfTheFile(t *testing.T)
 		t.Errorf("expected the environment to win for a review wake, got %q", review)
 	}
 }
+
+func TestAMachineWithNoWatchTableWatchesNothing(t *testing.T) {
+	writeConfig(t, vpsConfig)
+
+	watch, err := config.Watch()
+	if err != nil {
+		t.Fatalf("expected no table not to be an error, got %v", err)
+	}
+	if watch.SSH != "" || watch.Host != "" || len(watch.Outside) != 0 || watch.Blog != "" {
+		t.Errorf("expected nothing to watch, got %+v", watch)
+	}
+}
+
+func TestTheWatchTableReadsBack(t *testing.T) {
+	writeConfig(t, vpsConfig+`
+[watch]
+ssh     = "vps-ssh"   # what ssh calls it
+host    = "vps"
+outside = ["https://one.example", 'https://two.example']
+blog    = "https://blog.example"
+`)
+
+	watch, err := config.Watch()
+	if err != nil {
+		t.Fatalf("expected the table to read, got %v", err)
+	}
+	if watch.SSH != "vps-ssh" || watch.Host != "vps" || watch.Blog != "https://blog.example" {
+		t.Errorf("expected the watch table read back, got %+v", watch)
+	}
+	if got := strings.Join(watch.Outside, " "); got != "https://one.example https://two.example" {
+		t.Errorf("expected the two outside places, got %q", got)
+	}
+}
+
+func TestTheWatchTableReadsOnlyItself(t *testing.T) {
+	writeConfig(t, `[watch]
+ssh = "vps-ssh"
+host = "vps"
+outside = "https://one.example, https://two.example"
+
+[rigs]
+ssh = "/not/this"
+`)
+
+	watch, err := config.Watch()
+	if err != nil {
+		t.Fatalf("expected the table to read, got %v", err)
+	}
+	if watch.SSH != "vps-ssh" || len(watch.Outside) != 2 || watch.Blog != "" {
+		t.Errorf("expected only the watch table, with no blog, got %+v", watch)
+	}
+}
+
+func TestAWatchTableThatCannotBeUsedSaysWhatIsMissing(t *testing.T) {
+	writeConfig(t, "[watch]\nblog = \"https://blog.example\"\n")
+
+	_, err := config.Watch()
+	if err == nil || !strings.Contains(err.Error(), "ssh, host, outside") {
+		t.Fatalf("expected the refusal to name what is missing, got %v", err)
+	}
+}
