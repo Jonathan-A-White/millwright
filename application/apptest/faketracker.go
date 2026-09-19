@@ -576,6 +576,39 @@ func (f *FakeTracker) BlockedForHost(_ context.Context, host string) ([]applicat
 	return blocked, nil
 }
 
+// ReadyWithLabel implements application.WorkTracker: open, unblocked and
+// carrying the label, whatever host — or none — the Path names.
+func (f *FakeTracker) ReadyWithLabel(_ context.Context, label string) ([]application.StoryDetail, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, "ReadyWithLabel")
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	if label == "" {
+		return nil, fmt.Errorf("which label are the ready stories carrying?")
+	}
+	var ready []application.StoryDetail
+	for _, id := range f.order {
+		s := f.stories[id]
+		if s.detail.Status != StatusOpen || f.waiting(s) || !carries(s.detail.Labels, label) {
+			continue
+		}
+		ready = append(ready, s.detail)
+	}
+	return ready, nil
+}
+
+// carries reports whether a story's labels include the one asked for.
+func carries(labels []string, label string) bool {
+	for _, have := range labels {
+		if strings.EqualFold(strings.TrimSpace(have), label) {
+			return true
+		}
+	}
+	return false
+}
+
 // WorkElsewhere implements application.WorkTracker: what the other hosts have
 // in hand, ready or claimed. A story pathed to no host is nobody's, here as in
 // the real tracker.
