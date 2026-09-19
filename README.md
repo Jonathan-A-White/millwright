@@ -1070,24 +1070,36 @@ A tick costs no tokens unless something needs the Millhand, so it is safe to
 run every 15 minutes for ever. It looks in this order:
 
 1. A window named `millhand-*` already open: it says `already up` and stops.
-2. It runs one `mw sync`. A sync that fails is said in the line, and the tick
+2. With a `[watch]` table in the config file (see *Watching a host*), it applies
+   `mw watch`'s rule to the host it watches. This comes before the sync, because
+   a fault of this host's own network is one the sync would only time out on:
+   `local-fault` is said in the line, wakes nobody, and the sync is skipped. The
+   rest of the tick looks on this host all the same.
+3. It runs one `mw sync`. A sync that fails is said in the line, and the tick
    looks on this host all the same.
-3. Need is unread mail for `millhand@<host>` or plain `millhand`, or a story
-   `mw sweep` newly finds stuck on this host (sweep reports each story once).
-   The mail is only listed: it stays unread until the Millhand reads it.
-4. No need is `quiet`. Need is ONE routine wake, as `mw millhand --wake
+4. Need is unread mail for `millhand@<host>` or plain `millhand`, a story
+   `mw sweep` newly finds stuck on this host (sweep reports each story once), or
+   a watched host that is `unwell`, `stale` or `down`. `ok` and
+   `unreachable-once` are no need. The mail is only listed: it stays unread
+   until the Millhand reads it.
+5. No need is `quiet`. Need is ONE routine wake, as `mw millhand --wake
    routine` does it, whose reason names the mail subjects and the stuck story
-   titles, five of each and then a count.
+   titles, five of each and then a count, and the watch line verbatim: `mw watch
+   says: unwell load1,mayor_gone`. When the host is `down`, or `unwell` with
+   `mayor_gone` among its reasons, the reason ends with the charter's one
+   exception: *If the Mayor's process is gone and no handoff is under way you
+   may run the one respawn command on the VPS.*
 
 It prints one dated line and appends it to
 `~/.local/state/mw-millhand-tick/log` on this host, which is cut to its last
 500 lines; nothing else it keeps grows. It leaves with 0 for everything but a
-fault of its own: a wake that could not be started, or mail and stuck stories
-that could not be looked at when nothing else called for a wake (that is not
-`quiet`). `--dry-run` starts nothing and writes no log line, and it does not
-sweep, because a sweep records the stories it finds stuck and would leave
-nobody to wake for them. It does not consult `mw watch`. See
-`features/millhand_tick.feature`.
+fault of its own: a wake that could not be started, or mail, stuck stories or a
+watch that could not be looked at when nothing else called for a wake (that is
+not `quiet`). `--dry-run` starts nothing and writes no log line, and it runs
+neither the sweep nor the watch, because each records what it finds (a sweep the
+stories it calls stuck, a watch its first failed check) and would leave nobody
+to wake for it. With no `[watch]` table the tick does not consult `mw watch`.
+See `features/millhand_tick.feature`.
 
 ## Watching a host from one that can lose its network
 
