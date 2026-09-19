@@ -1054,6 +1054,41 @@ Error: the Millhand is already up in the window millhand-2026-09-19-03: nothing 
 
 See `features/millhand.feature`.
 
+### The routine timer's check: `mw millhand tick`
+
+```sh
+bin/mw millhand tick             # what a timer runs every 15 minutes
+bin/mw millhand tick --dry-run   # say what it would do, start nothing
+```
+
+```
+2026-09-19T15:45:00Z quiet
+2026-09-19T16:00:00Z woke the Millhand: 1 unread message: "Please look at the queue"; 1 stuck story: "Teach the cat to sit" (mw-x.1)
+```
+
+A tick costs no tokens unless something needs the Millhand, so it is safe to
+run every 15 minutes for ever. It looks in this order:
+
+1. A window named `millhand-*` already open: it says `already up` and stops.
+2. It runs one `mw sync`. A sync that fails is said in the line, and the tick
+   looks on this host all the same.
+3. Need is unread mail for `millhand@<host>` or plain `millhand`, or a story
+   `mw sweep` newly finds stuck on this host (sweep reports each story once).
+   The mail is only listed: it stays unread until the Millhand reads it.
+4. No need is `quiet`. Need is ONE routine wake, as `mw millhand --wake
+   routine` does it, whose reason names the mail subjects and the stuck story
+   titles, five of each and then a count.
+
+It prints one dated line and appends it to
+`~/.local/state/mw-millhand-tick/log` on this host, which is cut to its last
+500 lines; nothing else it keeps grows. It leaves with 0 for everything but a
+fault of its own: a wake that could not be started, or mail and stuck stories
+that could not be looked at when nothing else called for a wake (that is not
+`quiet`). `--dry-run` starts nothing and writes no log line, and it does not
+sweep, because a sweep records the stories it finds stuck and would leave
+nobody to wake for them. It does not consult `mw watch`. See
+`features/millhand_tick.feature`.
+
 ## Watching a host from one that can lose its network
 
 ```sh
