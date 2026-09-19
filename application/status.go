@@ -18,8 +18,8 @@ const Width = 60
 // before mw status calls it asleep and its work stranded, when nothing says
 // otherwise. It is the same two hours infrastructure/config.
 // DefaultHostSilentHours reads as its default, and for the same reason: a
-// host's last_sync note reaches this host one sync cycle late, so the freshest
-// reading of it is already a cycle old.
+// host's last_sync note reaches this host only on this host's own next sync, so
+// the freshest reading of it can already be a cycle old.
 const DefaultHostSilence = 2 * time.Hour
 
 // WaitingHeading is what heads the section for stories the Governor must be

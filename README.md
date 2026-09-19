@@ -414,9 +414,12 @@ with `make test`.
 `mw sync` is the one command that brings this host level with the other, by
 hand, from the dispatcher or on a timer. In order: the vault's files, with a
 plain `git pull --rebase` and a push of what this host has and the other does
-not; then one `bd sync` for the factory's single beads database; then a note of
-when this host was last level, under `host.<name>.last_sync` in beads' key-value
-store, so that either host can say how stale the other is.
+not; then one `bd sync` for the factory's single beads database, carrying a note
+of when this host was last level, under `host.<name>.last_sync` in beads'
+key-value store, so that either host can say how stale the other is. The note
+is written just before that `bd sync`, which is what pushes it, so the other
+host reads it on its next sync rather than one later; a `bd sync` that halts
+pushed nothing, and the note is put back the way it was.
 
 It never migrates, never forces and never retries. A vault holding uncommitted
 work stops the vault's half and only that half, naming the files on one line:
@@ -689,9 +692,8 @@ columns; a longer title is cut short with an ellipsis rather than wrapped.
 The OTHER HOSTS part is the whole of the factory's safety net for a host that
 has gone quiet. There is no failover: a host that stops syncing does not hand
 its work back. Each host is shown with when it last recorded itself level (the
-`host.<name>.last_sync` note `mw sync` leaves, so it is always a sync cycle
-behind), and the stories pathed to it that are ready or already claimed. A host
-is **ASLEEP** when that note is older than `host_silent_hours` — two by default,
+`host.<name>.last_sync` note `mw sync` leaves, as this host last read it), and
+the stories pathed to it that are ready or already claimed. A host is **ASLEEP** when that note is older than `host_silent_hours` — two by default,
 so that the lag alone does not call a host asleep — set in the config file or by
 `MW_HOST_SILENT_HOURS`, whole hours and at least 1. It is also `ASLEEP, never
 synced` when it has left no note at all, and `ASLEEP, last sync unreadable` when

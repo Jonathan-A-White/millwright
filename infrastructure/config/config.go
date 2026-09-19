@@ -56,10 +56,10 @@ const DefaultStaleHours = 2
 // DefaultHostSilentHours is how long another host may go without recording a
 // sync before `mw status` calls it asleep and its work stranded, when nothing
 // says otherwise. Two hours, and the reason it is not one: a host's last_sync
-// note only reaches this host on that host's *next* sync (mw-gq6.17), so the
-// freshest reading of it is already one cycle old. Two hours is two cycles of
-// the hourly sync the factory runs, which is the smallest threshold that does
-// not call a host asleep for the lag alone.
+// note reaches this host only on this host's own next sync, so the freshest
+// reading of it can already be one cycle old. Two hours is two cycles of the
+// hourly sync the factory runs, which is the smallest threshold that does not
+// call a host asleep for the lag alone.
 const DefaultHostSilentHours = 2
 
 // DefaultHandoffAt is the context size, in tokens, at which a seat's session
