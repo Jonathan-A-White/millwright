@@ -347,6 +347,11 @@ are still signed by its seat — the harness sets `BEADS_ACTOR=<seat>@<host>`. T
 decision and the alternative turned down are in
 [ADR 0005](docs/adr/0005-mw-acts-under-its-own-name.md).
 
+The vault commit `mw next` makes ("Close out <id>: <title>") is signed the same
+way: git's author and committer are `mw@<host>`, given to that one `git commit`
+with `-c user.name` and `-c user.email`. The clone's own `user.name` and
+`user.email` are never touched, so a commit by hand there is still yours.
+
 A story claimed by hand is closed by hand under the name that claimed it:
 
 ```sh

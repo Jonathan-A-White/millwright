@@ -7,3 +7,5 @@ Everything `mw` writes to the tracker on its own account — the claims `mw disp
 ## Consequences
 
 A host with no `host` in its config has no name to sign under, so `mw` refuses plainly before any `bd` is started. A story claimed under some other name — by hand, or before this decision, when claims carried whatever name the shell had — cannot be closed by `mw`; `mw next` says whose name holds the claim, and the story is closed by hand under that name, as root if need be: `bd --actor root close <story> --reason "landed by hand"`, or `bd reclaim <story>` to take it over first. See *Who mw writes as* in the README.
+
+The vault's git history is signed the same way: the commit `mw next` makes in the vault is authored and committed as `mw@<host>`, passed to that `git commit` with `-c user.name` and `-c user.email` rather than written into the clone's config, so a commit made by hand in the same clone keeps the clone's own identity.
