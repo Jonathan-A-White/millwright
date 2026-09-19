@@ -8,7 +8,8 @@
 # 1. SIZE. docs/codemap.md must be at most 8192 bytes. It is one page: if it
 #    no longer fits, cut something rather than raising the limit.
 #
-# 2. PATHS. "A path named in the map" is any span between single backticks
+# 2. PATHS. "A path named in the map" (in the map or in docs/adding-a-command.md,
+#    its companion page) is any span between single backticks
 #    that contains no whitespace, is made only of the characters
 #    A-Z a-z 0-9 . _ - /, and either contains a "/" or ends in .go .feature
 #    .sh or .md. Every such token must exist (file or directory) relative to
@@ -33,6 +34,7 @@ set -eu
 
 REPO_ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel 2>/dev/null) || REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 MAP=docs/codemap.md
+ADDING=docs/adding-a-command.md
 LIMIT=8192
 
 cd "$REPO_ROOT"
@@ -43,6 +45,7 @@ fail() {
 }
 
 [ -f "$MAP" ] || fail "$MAP does not exist"
+[ -f "$ADDING" ] || fail "$ADDING does not exist"
 
 # --- 1. size -------------------------------------------------------------
 size=$(wc -c <"$MAP" | tr -d ' ')
@@ -53,7 +56,7 @@ fi
 # --- 2. every path named in the map exists -------------------------------
 missing=0
 for token in $(
-	awk '/^```/ { fenced = !fenced; next } !fenced' "$MAP" |
+	awk 'FNR == 1 { fenced = 0 } /^```/ { fenced = !fenced; next } !fenced' "$MAP" "$ADDING" |
 		grep -o '`[^`]*`' |
 		tr -d '`' |
 		grep -E '^[A-Za-z0-9._/-]+$' |
@@ -61,7 +64,7 @@ for token in $(
 		sort -u
 ); do
 	if [ ! -e "$token" ]; then
-		echo "check-codemap: $MAP names \`$token\`, which does not exist" >&2
+		echo "check-codemap: $MAP or $ADDING names \`$token\`, which does not exist" >&2
 		missing=1
 	fi
 done
