@@ -26,6 +26,10 @@ _Avoid_: Planner, orchestrator, PM
 The seat that works stories. One seat for all rigs and all models; the model and effort come from the story's path, not from the seat.
 _Avoid_: Worker, polecat, coder, dev
 
+**Millhand**:
+The seat that is the hands and eyes of the factory on one host: it diagnoses what `mw` cannot, finds what is wrong, and does hand steps there when told. Woken on need, never always on. It never works stories and never decides. One per host that needs one; today, the Laptop's.
+_Avoid_: Helper, worker, watcher, deacon
+
 **Clerk**:
 A cheap helper the Mayor hands clerical work to within its own session. Not a seat: it has no charter, no ledger and no memory of its own.
 _Avoid_: Assistant, secretary, sub-mayor
