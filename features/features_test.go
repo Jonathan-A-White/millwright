@@ -44,6 +44,7 @@ func TestFeatures(t *testing.T) {
 
 // initializeScenarios registers the step definitions of every feature.
 func initializeScenarios(ctx *godog.ScenarioContext) {
+	steps.InitializeBriefScenario(ctx)
 	steps.InitializeDispatchScenario(ctx)
 	steps.InitializeFilePlanScenario(ctx)
 	steps.InitializeNextScenario(ctx)
