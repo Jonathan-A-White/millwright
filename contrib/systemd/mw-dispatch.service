@@ -1,0 +1,35 @@
+# One `mw dispatch`, run as the user, then it exits: no daemon. For
+# `systemctl --user`; see README.md, "Running a host on a timer".
+#
+# Started by mw-dispatch.timer. A oneshot unit is never started twice at once,
+# so a tick that lands while a dispatch is still running does nothing; mw's own
+# cap on sessions running at once is what limits the fuel spent.
+[Unit]
+Description=Dispatch ready stories to Builder sessions (mw dispatch)
+
+[Service]
+Type=oneshot
+
+# A user unit gets a bare PATH. The host says where mw, bd, git, tmux, claude and
+# go are in the file below, as one line `PATH=...`; the rig names no host's
+# directories. The leading "-" makes the file optional. `env` finds mw through
+# the PATH that file sets, which ExecStart on its own would not.
+EnvironmentFile=-%h/.config/mw/dispatch.env
+ExecStart=/usr/bin/env mw dispatch
+
+# The Builder sessions are tmux sessions, and the tmux server that holds them
+# is started by mw dispatch inside this unit's control group. The default
+# KillMode would kill that whole group the moment mw dispatch exits, and every
+# session with it. Only the main process is ever stopped here.
+KillMode=process
+
+# Type=oneshot has no start timeout by default, and a hung git or bd would
+# then block every later tick. Two minutes is many times a normal dispatch.
+TimeoutStartSec=2min
+
+# mw dispatch leaves with 5 when the vault holds uncommitted work: it stopped
+# before claiming anything and says which files, and only a person can commit
+# them. That is a wait, not a fault. Every other non-zero status (1, or beads'
+# 2 and 4 from the sync) still fails the unit and shows in
+# `systemctl --user status mw-dispatch`.
+SuccessExitStatus=5

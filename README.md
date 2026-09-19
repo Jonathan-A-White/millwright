@@ -380,6 +380,87 @@ then merge by keeping every line instead of conflicting. `mw sync` writes that
 line if it is missing and says so; committing it is a seat's job, and until
 someone does, only this host is covered. See `features/sync.feature`.
 
+## Running a host on a timer
+
+A host that only works stories needs no session of its own to keep it going: a
+`systemd --user` timer runs `mw dispatch` every five minutes, and each run
+starts, spends and ends with that one command. No daemon, and no tokens spent
+between ticks. The units are in `contrib/systemd/`: `mw-dispatch.service` (a
+oneshot that runs `mw dispatch` as you) and `mw-dispatch.timer` (every five
+minutes, on the clock).
+
+**Install**, once per host:
+
+```sh
+mkdir -p ~/.config/systemd/user ~/.config/mw
+cp contrib/systemd/mw-dispatch.service contrib/systemd/mw-dispatch.timer ~/.config/systemd/user/
+# or ln -s the two files, to follow the rig's copy
+$EDITOR ~/.config/mw/dispatch.env        # the one line below
+systemctl --user daemon-reload
+systemctl --user enable --now mw-dispatch.timer
+```
+
+A user unit gets a bare `PATH`, and the rig names no host's directories. The
+host owns `~/.config/mw/dispatch.env`, one line saying where `mw`, `bd`, `git`,
+`tmux`, `claude` and `go` are (`go` because a Builder runs the rig's tests):
+
+```
+PATH=/home/you/.local/bin:/home/you/go/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin
+```
+
+The file is optional in the unit, so a missing one is not an error, but then
+`mw` is not found. `mw dispatch` reads the rest — vault, host, cap, rigs — from
+`~/.config/mw/config.toml`, as it does by hand.
+
+**Stop it at once**: `systemctl --user disable --now mw-dispatch.timer`. That is
+the damper. It stops any further run and leaves the sessions already started
+alone, since they are tmux sessions and not the unit's to kill; end those with
+`tmux kill-session` if that is what you want. `systemctl --user list-timers`
+says whether it is armed.
+
+**Its output** goes to the journal: `journalctl --user -u mw-dispatch`, with
+`-f` to follow. Each run is the report `mw dispatch` prints. `systemctl --user
+status mw-dispatch` shows the last run and how it ended.
+
+**Exit 5 is not a failure.** `mw dispatch` syncs first (see above), and a vault
+holding uncommitted work stops the sync's vault half; `mw dispatch` then stops
+too, before it claims anything, and leaves with 5 (`mw sync` alone does the same
+after syncing beads). The unit has `SuccessExitStatus=5`, so that wait does not
+show as a failed unit; the journal has the one line naming the files, and
+nothing is dispatched until someone commits them. Any other non-zero status
+still fails the unit and shows in `systemctl --user status`: 1 is a plain
+failure, and 2 and 4 are beads' merge conflict and stuck working set, which
+wait for a person.
+
+**A second tick while a dispatch is still running does no harm.** A oneshot unit
+is never started while it is already running, so ticks do not overlap; the tick
+is dropped. The real damper on spending is not the timer but mw's cap: however
+often `mw dispatch` runs, it never has more sessions in flight than `cap`
+allows. The unit stops a run that takes longer than two minutes
+(`TimeoutStartSec`), because a oneshot otherwise waits for ever on a hung `git`
+or `bd`.
+
+`Persistent=false`: a host that was asleep or off does not catch up on the ticks
+it missed, and is not woken for them. The next tick on the clock is the next
+run.
+
+Two more lines in the service are there for a reason. `KillMode=process`:
+Builder sessions run in a tmux server that `mw dispatch` starts inside the
+unit's control group, and systemd's default would kill the group, sessions
+included, the moment `mw dispatch` exits. And `ExecStart=/usr/bin/env mw
+dispatch` rather than `mw dispatch`: `env` looks `mw` up on the `PATH` from
+`dispatch.env`, which systemd's own lookup would not use.
+
+**Lingering.** A user manager normally runs only while you are logged in, so a
+timer needs `loginctl enable-linger <you>` to fire on a host nobody is logged
+into. That command needs root (`sudo`), and this rig never runs it for you. Check
+first: `loginctl show-user $USER -p Linger` says `Linger=yes` or `Linger=no`. On
+the Laptop, under WSL2, systemd was running and the answer was `Linger=yes`
+already, so no `sudo` was needed there. Whether a WSL distribution keeps its
+user manager up while no terminal is open was not tested: the timer fires only
+while WSL itself is running. `scripts/check-timer-units.sh` (in `make lint`)
+verifies the two unit files with `systemd-analyze` and starts nothing.
+
 ## Seeing what a host is doing
 
 ```sh

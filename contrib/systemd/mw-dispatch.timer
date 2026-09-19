@@ -1,0 +1,15 @@
+# Runs mw-dispatch.service every five minutes. For `systemctl --user`; see
+# README.md, "Running a host on a timer".
+[Unit]
+Description=Every five minutes, dispatch ready stories (mw dispatch)
+
+[Timer]
+OnCalendar=*:0/5
+# No catch-up: a host that was asleep or off does not run the ticks it missed,
+# and it is not woken to run them. The next tick on the clock is the next run.
+Persistent=false
+WakeSystem=false
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

@@ -114,7 +114,7 @@ tracker, the runner and the vault's git: `features/steps/next_steps.go`.
 export PATH=$PATH:/usr/local/go/bin      # Go is not on PATH in a non-login shell
 make build      # -> bin/mw
 make test       # go test ./... , features included
-make lint       # go vet ./... , then scripts/check-codemap.sh
+make lint       # go vet ./... , then scripts/check-*.sh
 ```
 
 One `go` command at a time on the VPS (1 vCPU, ~1 GB): the Makefile pins
@@ -127,5 +127,6 @@ One `go` command at a time on the VPS (1 vCPU, ~1 GB): the Makefile pins
 - `scripts/check-codemap.sh` (run by `make lint`) fails when this page names a
   path that does not exist, passes 8192 bytes, or leaves out a port, a use
   case or a command file. Its header states the exact rules.
+  `scripts/check-timer-units.sh` checks `contrib/systemd/`.
 - `make check-formulas` runs `scripts/check-formulas.sh` against a throwaway
   beads database. Not part of `make test`: it needs `bd`, `jq` and real time.
