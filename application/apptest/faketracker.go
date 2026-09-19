@@ -133,6 +133,15 @@ func (f *FakeTracker) SetCreated(id string, created time.Time) error {
 	})
 }
 
+// SetLabels sets the labels of a story the fake holds, replacing any it had. A
+// story added without any has none.
+func (f *FakeTracker) SetLabels(id string, labels ...string) error {
+	return f.write(id, func(s *fakeStory) error {
+		s.detail.Labels = append([]string(nil), labels...)
+		return nil
+	})
+}
+
 // CreateEpic implements application.WorkTracker. The fake mints ids the way
 // beads does — f-1 for an epic, f-1.1 for its first story — so that a test can
 // read a tree without knowing them in advance.

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -611,6 +612,99 @@ func TestAStoryClaimedTheWayDispatchDoesIsClosedTheWayNextDoes(t *testing.T) {
 	if err := beads.New(vault, beads.WithActor("mw@vps")).CloseStory(ctx, byHand, "closed under the same name"); err != nil {
 		t.Fatalf("closing %s under the name it was claimed under: %v", byHand, err)
 	}
+}
+
+// A story labelled hitl is one the Governor must be present for. The gateway
+// has to tell that label on every way it reads a story that a dispatch reads:
+// one story shown, an epic's listing, what is ready, and what is running.
+func TestGatewayTellsAStorysLabels(t *testing.T) {
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	epicID := bdRun(t, vault, beads.Program, "create", "An epic", "-t", "epic",
+		"--metadata", `{"rig":"millwright","branch":"main","harness":"claude","model":"opus","effort":"high","host":"vps"}`,
+		"--silent")
+	// --no-inherit-labels: bd hands a parent's labels down to its children, and
+	// what is wanted here is the labels a story was given itself.
+	withLabel := bdRun(t, vault, beads.Program, "create", "With the Governor", "--parent", epicID,
+		"--labels", "hitl,other", "--no-inherit-labels", "--silent")
+	plain := bdRun(t, vault, beads.Program, "create", "On its own", "--parent", epicID,
+		"--no-inherit-labels", "--silent")
+
+	gateway := beads.New(vault)
+
+	shown, err := gateway.ShowStory(ctx, withLabel)
+	if err != nil {
+		t.Fatalf("showing %s: %v", withLabel, err)
+	}
+	if got := append([]string(nil), shown.Labels...); !slicesEqual(sorted(got), []string{"hitl", "other"}) {
+		t.Errorf("expected %s to carry the labels hitl and other, got %q", withLabel, got)
+	}
+	if !shown.Hitl() {
+		t.Errorf("expected %s to be a story the Governor must be present for", withLabel)
+	}
+	if shown, err := gateway.ShowStory(ctx, plain); err != nil || len(shown.Labels) != 0 || shown.Hitl() {
+		t.Errorf("expected %s to carry no labels, got %+v: %v", plain, shown, err)
+	}
+
+	epic, err := gateway.ShowEpic(ctx, epicID)
+	if err != nil {
+		t.Fatalf("showing the epic %s: %v", epicID, err)
+	}
+	if hitl := hitlIDs(epic.Stories); len(hitl) != 1 || hitl[0] != withLabel {
+		t.Errorf("expected only %s in the epic to be hitl, got %q", withLabel, hitl)
+	}
+
+	ready, err := gateway.ReadyForHost(ctx, "vps")
+	if err != nil {
+		t.Fatalf("listing what is ready on vps: %v", err)
+	}
+	if len(ready) != 2 {
+		t.Fatalf("expected both stories to be ready on vps, got %+v", ready)
+	}
+	if hitl := hitlIDs(ready); len(hitl) != 1 || hitl[0] != withLabel {
+		t.Errorf("expected only %s among what is ready to be hitl, got %q", withLabel, hitl)
+	}
+
+	if err := gateway.ClaimStory(ctx, withLabel); err != nil {
+		t.Fatalf("claiming %s: %v", withLabel, err)
+	}
+	running, err := gateway.RunningStories(ctx, "vps")
+	if err != nil {
+		t.Fatalf("listing what is running on vps: %v", err)
+	}
+	if len(running) != 1 || !running[0].Hitl() {
+		t.Errorf("expected %s to be running on vps and hitl, got %+v", withLabel, running)
+	}
+}
+
+func sorted(in []string) []string {
+	sort.Strings(in)
+	return in
+}
+
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// hitlIDs is the ids among the stories that are hitl.
+func hitlIDs(stories []application.StoryDetail) []string {
+	var ids []string
+	for _, story := range stories {
+		if story.Hitl() {
+			ids = append(ids, story.Story.ID)
+		}
+	}
+	return ids
 }
 
 func TestGatewayReportsWhatBeadsRefused(t *testing.T) {

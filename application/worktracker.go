@@ -20,6 +20,12 @@ const (
 	StatusClosed     = "closed"
 )
 
+// LabelHitl is the label on a story that is worked with the Governor present, a
+// human in the loop: the Mayor claims it and does it beside them, so no
+// dispatcher ever starts a session for it. It says who a story is for, which a
+// Path's host cannot: hosts are always named, never "any" or "the Governor".
+const LabelHitl = "hitl"
+
 // DefaultPriority is the priority a story has when nobody set one, and what a
 // tracker that reports none is taken to mean. Priorities run from 0, the most
 // urgent, to 4, as beads has them.
@@ -30,11 +36,14 @@ const DefaultPriority = 2
 // it belongs to. The Path the story is actually worked by is the two overlaid,
 // which is what Path reports.
 type StoryDetail struct {
-	Story       domain.Story
-	Defaults    domain.Path
-	EpicID      string
-	Status      string
-	Assignee    string
+	Story    domain.Story
+	Defaults domain.Path
+	EpicID   string
+	Status   string
+	Assignee string
+	// Labels are the tags the story carries in the tracker, as the tracker spells
+	// them; empty when it has none or the tracker was not asked.
+	Labels      []string
 	Description string
 	Acceptance  string
 	// Needs is the ids of the stories this one waits on, as far as the listing
@@ -87,6 +96,17 @@ func (d StoryDetail) Held() bool {
 // Closed reports whether this story is finished.
 func (d StoryDetail) Closed() bool {
 	return strings.EqualFold(strings.TrimSpace(d.Status), StatusClosed)
+}
+
+// Hitl reports whether this story is worked with the Governor present, which
+// no dispatcher may take and which is not a session for a host's cap to count.
+func (d StoryDetail) Hitl() bool {
+	for _, label := range d.Labels {
+		if strings.EqualFold(strings.TrimSpace(label), LabelHitl) {
+			return true
+		}
+	}
+	return false
 }
 
 // Merged is the epic's defaults overlaid with the story's own overrides,
