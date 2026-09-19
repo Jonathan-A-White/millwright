@@ -16,6 +16,7 @@ type FakeRunner struct {
 	mu       sync.Mutex
 	sessions map[string]*fakeSession
 	order    []string
+	closed   []string
 
 	// Err, when set, is returned by every method instead of doing the work.
 	Err error
@@ -143,6 +144,13 @@ func (f *FakeRunner) Close(_ context.Context, name string) error {
 	if s, ok := f.sessions[name]; ok {
 		f.finish(s, s.status.ExitCode)
 		delete(f.sessions, name)
+		f.closed = append(f.closed, name)
+		for i, ordered := range f.order {
+			if ordered == name {
+				f.order = append(f.order[:i], f.order[i+1:]...)
+				break
+			}
+		}
 	}
 	return nil
 }
@@ -165,6 +173,25 @@ func (f *FakeRunner) Exit(name string, exitCode int) {
 	if s, ok := f.sessions[name]; ok {
 		f.finish(s, exitCode)
 	}
+}
+
+// ExitUnknown ends a session's command without a status anyone could read, as
+// if the runner had lost how it ended. The session stays until it is closed.
+func (f *FakeRunner) ExitUnknown(name string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if s, ok := f.sessions[name]; ok && s.status.State == application.StateRunning {
+		s.status.State = application.StateExitUnknown
+		close(s.done)
+	}
+}
+
+// Closed reports the sessions that were closed while they were there, oldest
+// first. Closing a session that was already gone is not recorded.
+func (f *FakeRunner) Closed() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.closed...)
 }
 
 // Spec reports how a session was started, and whether it is there at all.
