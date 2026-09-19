@@ -45,6 +45,7 @@ type nextContext struct {
 
 	lastEpic     string
 	ledgerBefore []string
+	afterFirst   []string // the ledger as the first close-out of a scenario left it
 	originBefore string
 	signed       string // the short hash of the commit a scenario signed
 
@@ -97,6 +98,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the session of "([^"]*)" left no result at all$`, c.theSessionLeftNothing)
 	ctx.Given(`^the run of "([^"]*)" left its boot file beside the result$`, c.theRunLeftItsBootFile)
 	ctx.Given(`^the rig's tests fail, saying "([^"]*)"$`, c.theRigsTestsFail)
+	ctx.Given(`^the rig's tests pass$`, c.theRigsTestsPass)
 	ctx.Given(`^the rig's tests cannot be run, saying "([^"]*)"$`, c.theRigsTestsCannotBeRun)
 	ctx.Given(`^the story "([^"]*)" is planned and ready to be worked here$`, c.aStoryReadyHere)
 	ctx.Given(`^the ledger already holds a line from an earlier story$`, c.theLedgerAlreadyHoldsALine)
@@ -140,6 +142,11 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the merge slot of the rig is free again$`, c.theMergeSlotIsFree)
 	ctx.Then(`^the close-out says the story is landed but still open$`, c.landedButStillOpen)
 	ctx.Then(`^the ledger holds exactly one line for "([^"]*)"$`, c.theLedgerHoldsOneLineFor)
+	ctx.Then(`^the ledger holds (\d+) lines for "([^"]*)"$`, c.theLedgerHoldsLinesFor)
+	ctx.Then(`^the first ledger line for "([^"]*)" holds:$`, c.theFirstLedgerLineForHolds)
+	ctx.Then(`^the last ledger line holds no token figure$`, c.theLastLedgerLineHoldsNoTokenFigure)
+	ctx.Then(`^the ledger still holds, unchanged, what the first close-out left in it$`, c.theLedgerIsUnchangedSinceTheFirstCloseOut)
+	ctx.Then(`^mw status counts today's fuel as (.+)$`, c.mwStatusCountsTodaysFuelAs)
 	ctx.Then(`^git was asked to merge once and to push once$`, c.mergedOncePushedOnce)
 	ctx.Then(`^mw committed to the vault exactly:$`, c.mwCommittedToTheVaultExactly)
 	ctx.Then(`^that vault commit names "([^"]*)" and signs nothing$`, c.theVaultCommitNames)
@@ -449,6 +456,11 @@ func (c *nextContext) putResult(id, contents string) error {
 	return os.WriteFile(filepath.Join(dir, application.ResultFileName), []byte(contents), 0o644)
 }
 
+func (c *nextContext) theRigsTestsPass() error {
+	c.checkCommand = fmt.Sprintf("printf 'run\\n' >> %s", c.checkLog)
+	return nil
+}
+
 func (c *nextContext) theRigsTestsFail(saying string) error {
 	c.checkCommand = fmt.Sprintf("printf 'run\\n' >> %s; echo '%s'; exit 1", c.checkLog, saying)
 	return nil
@@ -601,6 +613,14 @@ func (c *nextContext) mwClosesOut(id string) error {
 		Now:  func() time.Time { return time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC) },
 		Out:  &c.printed,
 	}.Run(context.Background(), id)
+
+	if c.afterFirst == nil {
+		lines, err := c.ledgerLines()
+		if err != nil {
+			return err
+		}
+		c.afterFirst = lines
+	}
 	return nil
 }
 
@@ -1033,4 +1053,103 @@ func (c *nextContext) theMergeSlotIsFree() error {
 		return fmt.Errorf("expected the merge slot of the rig to be free: %w", err)
 	}
 	return held.Release(context.Background())
+}
+
+// linesFor are the ledger lines that name the story, in the order they were written.
+func (c *nextContext) linesFor(id string) ([]string, error) {
+	lines, err := c.ledgerLines()
+	if err != nil {
+		return nil, err
+	}
+	var named []string
+	for _, line := range lines {
+		if application.LedgerNamesStory(line, id) {
+			named = append(named, line)
+		}
+	}
+	return named, nil
+}
+
+func (c *nextContext) theLedgerHoldsLinesFor(count int, id string) error {
+	named, err := c.linesFor(id)
+	if err != nil {
+		return err
+	}
+	if len(named) != count {
+		return fmt.Errorf("expected %d ledger lines for %s, got %d in:\n%s", count, id, len(named), strings.Join(named, "\n"))
+	}
+	return nil
+}
+
+func (c *nextContext) theFirstLedgerLineForHolds(id string, table *godog.Table) error {
+	named, err := c.linesFor(id)
+	if err != nil {
+		return err
+	}
+	if len(named) == 0 {
+		return fmt.Errorf("the ledger holds no line for %s", id)
+	}
+	for _, row := range table.Rows {
+		want := strings.TrimSpace(row.Cells[0].Value)
+		if !strings.Contains(named[0], want) {
+			return fmt.Errorf("expected the first ledger line for %s to hold %q, got:\n%s", id, want, named[0])
+		}
+	}
+	return nil
+}
+
+// theLastLedgerLineHoldsNoTokenFigure is what keeps a report that sums the
+// ledger from adding a session's fuel a second time: nothing in the line reads
+// back as tokens.
+func (c *nextContext) theLastLedgerLineHoldsNoTokenFigure() error {
+	lines, err := c.ledgerLines()
+	if err != nil {
+		return err
+	}
+	if len(lines) == 0 {
+		return fmt.Errorf("the ledger is empty")
+	}
+	last := lines[len(lines)-1]
+	if row, ok := application.ParseLedgerRow(last); ok {
+		return fmt.Errorf("expected no token figure on the last ledger line, but it reads back as %d tokens:\n%s", row.Tokens, last)
+	}
+	if strings.Contains(last, "tokens") {
+		return fmt.Errorf("expected no token figure on the last ledger line, got:\n%s", last)
+	}
+	return nil
+}
+
+func (c *nextContext) theLedgerIsUnchangedSinceTheFirstCloseOut() error {
+	lines, err := c.ledgerLines()
+	if err != nil {
+		return err
+	}
+	if len(lines) < len(c.afterFirst) {
+		return fmt.Errorf("the ledger lost lines: it held %d after the first close-out and holds %d now", len(c.afterFirst), len(lines))
+	}
+	for i, was := range c.afterFirst {
+		if lines[i] != was {
+			return fmt.Errorf("line %d of the ledger was rewritten:\nwas: %s\nnow: %s", i+1, was, lines[i])
+		}
+	}
+	return nil
+}
+
+// mwStatusCountsTodaysFuelAs runs mw status against the vault the scenario has
+// been closing stories out in, on the day the close-outs were dated.
+func (c *nextContext) mwStatusCountsTodaysFuelAs(want string) error {
+	report, err := application.Status{
+		Tracker: c.tracker,
+		Vault:   vault.New(c.vault),
+		Host:    nextHost,
+		Seat:    nextSeat,
+		Now:     func() time.Time { return time.Date(2026, 9, 18, 18, 0, 0, 0, time.UTC) },
+	}.Run(context.Background())
+	if err != nil {
+		return fmt.Errorf("reading status: %w", err)
+	}
+	if got := fmt.Sprintf("%s tokens", application.Thousands(report.FuelToday)); got != want {
+		return fmt.Errorf("expected mw status to count today's fuel as %q, got %q", want, got)
+	}
+	return nil
 }

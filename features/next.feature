@@ -55,6 +55,73 @@ Feature: Closing out a finished story and carrying on
     Then the ledger still holds every line it held before
     And the last ledger line names "mw-gq6.1"
 
+  Scenario: A story refused twice is charged for its session's fuel once
+    Given the session of "mw-gq6.1" reported this result:
+      """
+      {
+        "type": "result",
+        "subtype": "success",
+        "is_error": false,
+        "num_turns": 26,
+        "duration_ms": 900000,
+        "session_id": "s-3",
+        "total_cost_usd": 0.44,
+        "usage": {
+          "input_tokens": 1200,
+          "output_tokens": 18000,
+          "cache_read_input_tokens": 280000,
+          "cache_creation_input_tokens": 12000
+        }
+      }
+      """
+    And the rig's tests fail, saying "remote: fatal error in commit_refs"
+    When mw closes out "mw-gq6.1"
+    And mw closes out "mw-gq6.1" a second time
+    Then the ledger holds 2 lines for "mw-gq6.1"
+    And the first ledger line for "mw-gq6.1" holds:
+      | not landed     |
+      | 311,200 tokens |
+      | session s-3    |
+    And the last ledger line holds:
+      | not landed      |
+      | already charged |
+      | session s-3     |
+    And the last ledger line holds no token figure
+    And the ledger still holds, unchanged, what the first close-out left in it
+    And mw status counts today's fuel as 311,200 tokens
+
+  Scenario: A story refused and then landed is charged for its session's fuel once
+    Given the session of "mw-gq6.1" reported this result:
+      """
+      {
+        "type": "result",
+        "subtype": "success",
+        "is_error": false,
+        "num_turns": 26,
+        "duration_ms": 900000,
+        "session_id": "s-3",
+        "total_cost_usd": 0.44,
+        "usage": {
+          "input_tokens": 1200,
+          "output_tokens": 18000,
+          "cache_read_input_tokens": 280000,
+          "cache_creation_input_tokens": 12000
+        }
+      }
+      """
+    And the rig's tests fail, saying "remote: fatal error in commit_refs"
+    When mw closes out "mw-gq6.1"
+    Given the rig's tests pass
+    When mw closes out "mw-gq6.1" a second time
+    Then the story "mw-gq6.1" is closed
+    And the ledger holds 2 lines for "mw-gq6.1"
+    And the last ledger line holds:
+      | landed on main  |
+      | already charged |
+      | session s-3     |
+    And the last ledger line holds no token figure
+    And mw status counts today's fuel as 311,200 tokens
+
   Scenario: A failing test leaves the story open and blocked, and nothing is landed
     Given the session of "mw-gq6.1" reported a plain success
     And the rig's tests fail, saying "undefined: Ledger"
