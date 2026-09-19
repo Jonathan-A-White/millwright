@@ -77,12 +77,18 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the other host has pushed a later commit to the rig's origin$`, c.theOtherHostHasPushed)
 	ctx.Given(`^the beads sync halts with exit code (\d+)$`, c.theBeadsSyncHalts)
 	ctx.Given(`^the runner refuses to start anything$`, c.theRunnerRefuses)
+	ctx.Given(`^an earlier session for "([^"]*)" lies dead$`, c.anEarlierSessionLiesDead)
+	ctx.Given(`^a session for "([^"]*)" is still running in its worktree$`, c.aSessionIsRunningInItsWorktree)
 
 	ctx.When(`^dispatch runs on "([^"]*)" with a cap of (\d+)$`, c.dispatchRuns)
 	ctx.When(`^dispatch runs on "([^"]*)" with a cap of (\d+) as a dry run$`, c.dispatchRunsDry)
 
 	ctx.Then(`^one session was started, for "([^"]*)"$`, c.oneSessionWasStartedFor)
 	ctx.Then(`^no session was started$`, c.noSessionWasStarted)
+	ctx.Then(`^the dead session for "([^"]*)" was closed$`, c.theDeadSessionWasClosed)
+	ctx.Then(`^nothing was closed$`, c.nothingWasClosed)
+	ctx.Then(`^the session for "([^"]*)" is running$`, c.theSessionIsRunning)
+	ctx.Then(`^the session for "([^"]*)" is still running in the worktree it began in$`, c.theSessionStillRunsWhereItBegan)
 	ctx.Then(`^the worktree of "([^"]*)" is a checkout of the rig on branch "([^"]*)"$`, c.theWorktreeIsOnBranch)
 	ctx.Then(`^the session for "([^"]*)" runs in the worktree of "([^"]*)"$`, c.theSessionRunsInTheWorktree)
 	ctx.Then(`^the story "([^"]*)" is claimed by this host$`, c.theStoryIsClaimedByDispatch)
@@ -281,6 +287,31 @@ func (c *dispatchContext) theRunnerRefuses() error {
 	return nil
 }
 
+// anEarlierSessionLiesDead leaves what a finished session leaves under mw: a dead
+// pane still holding the story's session name, in a directory that is not the
+// worktree a new dispatch will cut.
+func (c *dispatchContext) anEarlierSessionLiesDead(id string) error {
+	name := application.SessionName(id)
+	spec := application.SessionSpec{Name: name, Dir: filepath.Join(c.root, "earlier-run"), Command: []string{"claude"}}
+	if err := c.runner.Start(context.Background(), spec); err != nil {
+		return err
+	}
+	c.runner.Exit(name, 1)
+	return nil
+}
+
+// aSessionIsRunningInItsWorktree is a story that is being worked: its worktree
+// is there, on its branch, and a session that has not exited is running in it.
+func (c *dispatchContext) aSessionIsRunningInItsWorktree(id string) error {
+	dir, branch := c.worktreeOf(id), application.StoryBranch(id)
+	if err := rig.New().Add(context.Background(), c.rig, dir, branch, application.StartPoint(application.DefaultRemote, "main")); err != nil {
+		return fmt.Errorf("cutting the worktree of %s: %w", id, err)
+	}
+	return c.runner.Start(context.Background(), application.SessionSpec{
+		Name: application.SessionName(id), Dir: dir, Command: []string{"claude"},
+	})
+}
+
 func (c *dispatchContext) dispatchRuns(host string, cap int) error {
 	return c.dispatch(host, cap, false)
 }
@@ -345,6 +376,41 @@ func (c *dispatchContext) noSessionWasStarted() error {
 		return fmt.Errorf("expected the report to say nothing was started, got %+v", c.report.Started)
 	}
 	return nil
+}
+
+func (c *dispatchContext) theDeadSessionWasClosed(id string) error {
+	name := application.SessionName(id)
+	for _, closed := range c.runner.Closed() {
+		if closed == name {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected the dead session %s to have been closed, got %q closed (dispatch said: %v)", name, c.runner.Closed(), c.err)
+}
+
+func (c *dispatchContext) nothingWasClosed() error {
+	if closed := c.runner.Closed(); len(closed) != 0 {
+		return fmt.Errorf("expected no session to have been closed, got %q", closed)
+	}
+	return nil
+}
+
+func (c *dispatchContext) theSessionIsRunning(id string) error {
+	status, err := c.runner.Status(context.Background(), application.SessionName(id))
+	if err != nil {
+		return err
+	}
+	if !status.Running() {
+		return fmt.Errorf("expected the session for %s to be running, got %q", id, status.State)
+	}
+	return nil
+}
+
+func (c *dispatchContext) theSessionStillRunsWhereItBegan(id string) error {
+	if err := c.theSessionIsRunning(id); err != nil {
+		return err
+	}
+	return c.theSessionRunsInTheWorktree(id, id)
 }
 
 func (c *dispatchContext) worktreeOf(id string) string {

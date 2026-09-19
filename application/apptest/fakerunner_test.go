@@ -158,6 +158,32 @@ func TestFakeRunnerClosesASessionAndForgetsIt(t *testing.T) {
 	}
 }
 
+func TestFakeRunnerRecordsWhatWasClosedAndCanStartTheNameAgain(t *testing.T) {
+	runner, spec := startedRunner(t)
+	ctx := context.Background()
+
+	runner.ExitUnknown(spec.Name)
+	if status, _ := runner.Status(ctx, spec.Name); status.State != application.StateExitUnknown {
+		t.Fatalf("expected the session to have ended with its status unknown, got %+v", status)
+	}
+	if err := runner.Close(ctx, spec.Name); err != nil {
+		t.Fatalf("closing %s: %v", spec.Name, err)
+	}
+	// Closing what is not there is not something that was closed.
+	if err := runner.Close(ctx, spec.Name); err != nil {
+		t.Fatalf("closing %s again: %v", spec.Name, err)
+	}
+	if closed := runner.Closed(); len(closed) != 1 || closed[0] != spec.Name {
+		t.Errorf("expected %s to be recorded as closed once, got %q", spec.Name, closed)
+	}
+	if err := runner.Start(ctx, spec); err != nil {
+		t.Fatalf("starting %s again after it was closed: %v", spec.Name, err)
+	}
+	if names := runner.Names(); len(names) != 1 {
+		t.Errorf("expected the one session that was started again, got %q", names)
+	}
+}
+
 func TestFakeRunnerRefusesToWorkOnASessionItDoesNotHave(t *testing.T) {
 	runner := apptest.NewFakeRunner()
 	ctx := context.Background()
