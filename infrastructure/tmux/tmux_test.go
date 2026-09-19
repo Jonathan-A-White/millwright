@@ -6,8 +6,15 @@ package tmux
 // test, which runs against a private tmux server.
 
 import (
+	"context"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 )
@@ -59,10 +66,11 @@ func TestParseStatusReadsWhatTheCommandIsDoing(t *testing.T) {
 		{"a live pane", "0||\n", application.StateRunning, 0},
 		{"a command that exited well", "1|0|\n", application.StateExited, 0},
 		{"a command that failed", "1|7|\n", application.StateExited, 7},
-		{"a command tmux has not finished reaping", "1||\n", application.StateRunning, 0},
-		{"a command that was killed", "1||9\n", application.StateExited, 0},
+		{"a command tmux has not finished reaping", "1||\n", stateUnreaped, 0},
+		{"a command that was killed", "1||9\n", application.StateExited, 137},
 		{"a window with a second pane in it", "0||\n0||\n", application.StateRunning, 0},
-		{"a second pane still being reaped", "1|3|\n1||\n", application.StateRunning, 0},
+		{"a second pane still being reaped", "1|3|\n1||\n", stateUnreaped, 0},
+		{"a live pane beside one still being reaped", "0||\n1||\n", application.StateRunning, 0},
 	}
 	for _, c := range cases {
 		status, err := parseStatus("mw-gq6_4", []byte(c.printed))
@@ -77,7 +85,7 @@ func TestParseStatusReadsWhatTheCommandIsDoing(t *testing.T) {
 }
 
 func TestParseStatusRefusesWhatItCannotRead(t *testing.T) {
-	for _, printed := range []string{"", "\n", "yes|0|\n", "1|later|\n", "1|0\n"} {
+	for _, printed := range []string{"", "\n", "yes|0|\n", "1|later|\n", "1||nine\n", "1|0\n"} {
 		if _, err := parseStatus("mw-gq6_4", []byte(printed)); err == nil {
 			t.Errorf("expected %q to be refused", printed)
 		}
@@ -114,5 +122,85 @@ func TestCommandArgsPutTheSocketBeforeTheCommand(t *testing.T) {
 	got = strings.Join(New().commandArgs("kill-session"), " ")
 	if want := "kill-session"; got != want {
 		t.Errorf("commandArgs on the default server = %q, want %q", got, want)
+	}
+}
+
+// standInTmux writes a program that answers every call with the next of the
+// lines it is given — the last one again and again once they run out — and
+// returns a Runner that runs it instead of tmux. A pane tmux never learns the
+// status of cannot be had from a real tmux on demand: it is a race that only
+// some loaded boxes lose.
+func standInTmux(t *testing.T, printed ...string) *Runner {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in for tmux is a shell script")
+	}
+	dir := t.TempDir()
+	var script strings.Builder
+	fmt.Fprintf(&script, "#!/bin/sh\ncalls=%q\necho x >> \"$calls\"\nn=$(wc -l < \"$calls\")\ncase $n in\n", filepath.Join(dir, "calls"))
+	for i, line := range printed {
+		pattern := "*"
+		if i < len(printed)-1 {
+			pattern = strconv.Itoa(i + 1)
+		}
+		fmt.Fprintf(&script, "  %s) echo '%s' ;;\n", pattern, line)
+	}
+	script.WriteString("esac\n")
+	path := filepath.Join(dir, "tmux-stand-in")
+	if err := os.WriteFile(path, []byte(script.String()), 0o755); err != nil {
+		t.Fatalf("writing the stand-in: %v", err)
+	}
+	return New(WithProgram(path), WithPollInterval(5*time.Millisecond), WithReapGrace(150*time.Millisecond))
+}
+
+func TestWaitGivesUpOnAPaneThatStaysDeadWithNoStatusAndSaysItsExitIsUnknown(t *testing.T) {
+	runner := standInTmux(t, "1||")
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	started := time.Now()
+	status, err := runner.Wait(ctx, "mw-gq6_4")
+	if err != nil {
+		t.Fatalf("expected Wait to return the status it could make of the pane, got %v after %s", err, time.Since(started))
+	}
+	if status.State != application.StateExitUnknown {
+		t.Errorf("expected the exit to be reported unknown, got %+v", status)
+	}
+	if status.Running() || status.Finished() {
+		t.Errorf("expected a pane that ended with no status to be neither running nor finished, got %+v", status)
+	}
+	if took := time.Since(started); took < 100*time.Millisecond {
+		t.Errorf("expected Wait to give the pane its grace to be reaped first, returned after %s", took)
+	}
+}
+
+func TestWaitStillReadsTheStatusOfAPaneReapedAfterAGap(t *testing.T) {
+	// The original flake: dead, then a moment later dead with status 3. The
+	// grace is there for this, and the 3 must come back as 3.
+	runner := standInTmux(t, "1||", "1||", "1|3|")
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	status, err := runner.Wait(ctx, "mw-gq6_4")
+	if err != nil {
+		t.Fatalf("expected Wait to return, got %v", err)
+	}
+	if !status.Finished() || status.ExitCode != 3 {
+		t.Errorf("expected the command to have exited 3, got %+v", status)
+	}
+}
+
+func TestStatusStopsLookingWhenTheCallerDoes(t *testing.T) {
+	runner := standInTmux(t, "1||")
+	WithReapGrace(time.Minute)(runner)
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+
+	started := time.Now()
+	if _, err := runner.Status(ctx, "mw-gq6_4"); err == nil {
+		t.Error("expected a Status cut short by its context to say so")
+	}
+	if took := time.Since(started); took > 5*time.Second {
+		t.Errorf("expected Status to return when its context ran out, took %s", took)
 	}
 }

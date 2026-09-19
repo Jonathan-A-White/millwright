@@ -101,6 +101,10 @@ func TestSessionStatusReportsWhetherTheCommandIsStillRunning(t *testing.T) {
 	if gone.Running() || gone.Finished() {
 		t.Errorf("expected %+v to be neither running nor finished", gone)
 	}
+	unknown := application.SessionStatus{Name: "mw-gq6_4", State: application.StateExitUnknown}
+	if unknown.Running() || unknown.Finished() {
+		t.Errorf("expected %+v to be neither running nor finished: its exit status is not known", unknown)
+	}
 }
 
 func TestRecentLinesIsTheTailWithoutTheTerminalsPadding(t *testing.T) {

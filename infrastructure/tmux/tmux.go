@@ -36,10 +36,22 @@ const (
 	maxPollInterval     = 2 * time.Second
 )
 
+// How long a pane that is dead with no exit status is given to be reaped before
+// Status stops waiting for the status and reports it unknown. The gap is
+// ordinarily a few milliseconds; a box loaded enough to stretch it past this is
+// rarer than the case this exists for, a pane tmux reaped without ever noting
+// how it ended, whose status never comes.
+const defaultReapGrace = 5 * time.Second
+
+// The longest Status sleeps between looks at a pane that is dead with no status.
+const maxReapPoll = 100 * time.Millisecond
+
 // Runner starts and watches sessions on one tmux server.
 type Runner struct {
-	socket string
-	poll   time.Duration
+	program string
+	socket  string
+	poll    time.Duration
+	grace   time.Duration
 }
 
 // Runner satisfies the port.
@@ -62,15 +74,31 @@ func WithPollInterval(d time.Duration) Option {
 	return func(r *Runner) { r.poll = d }
 }
 
+// WithProgram names the tmux command to run, for a host that keeps it somewhere
+// unusual — and for a test that needs a stand-in for tmux rather than the real
+// thing.
+func WithProgram(program string) Option {
+	return func(r *Runner) { r.program = program }
+}
+
+// WithReapGrace sets how long Status gives a pane that is dead with no exit
+// status to be reaped before it reports the status unknown.
+func WithReapGrace(d time.Duration) Option {
+	return func(r *Runner) { r.grace = d }
+}
+
 // New returns a Runner on tmux's default server, unless an option says
 // otherwise.
 func New(opts ...Option) *Runner {
-	r := &Runner{poll: defaultPollInterval}
+	r := &Runner{program: Program, poll: defaultPollInterval, grace: defaultReapGrace}
 	for _, opt := range opts {
 		opt(r)
 	}
 	if r.poll <= 0 {
 		r.poll = defaultPollInterval
+	}
+	if r.grace < 0 {
+		r.grace = defaultReapGrace
 	}
 	return r
 }
@@ -136,11 +164,45 @@ func (r *Runner) Output(ctx context.Context, name string, lines int) (string, er
 
 // Status implements application.Runner. remain-on-exit, which Start sets on the
 // session's window, is what leaves a finished command's exit status to be read:
-// tmux keeps the dead pane and reports what it exited with. A pane is marked
-// dead as soon as its terminal closes, which can be a moment before tmux has
-// reaped the command and knows how it ended; parseStatus reads that gap as
-// still running rather than as a clean exit.
+// tmux keeps the dead pane and reports what it exited with.
+//
+// A pane is marked dead as soon as its terminal closes, which can be a moment
+// before tmux has reaped the command and knows how it ended. Status looks again
+// through that gap rather than call the command a clean exit. The gap is not
+// always a passing one: with one CPU to run on tmux is often seen to reap a
+// command without noting how it ended, and then no status ever arrives. So the
+// gap is given a grace, and a pane still dead with no status when it is up is
+// reported as StateExitUnknown, which is not a finished command and not a clean
+// exit either.
 func (r *Runner) Status(ctx context.Context, name string) (application.SessionStatus, error) {
+	var gapSince time.Time
+	sleep := time.Millisecond
+	for {
+		status, err := r.look(ctx, name)
+		if err != nil || status.State != stateUnreaped {
+			return status, err
+		}
+
+		if gapSince.IsZero() {
+			gapSince = time.Now()
+		}
+		left := r.grace - time.Since(gapSince)
+		if left <= 0 {
+			return application.SessionStatus{Name: name, State: application.StateExitUnknown}, nil
+		}
+		timer := time.NewTimer(min(sleep, left, maxReapPoll))
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return application.SessionStatus{}, ctx.Err()
+		case <-timer.C:
+		}
+		sleep *= 2
+	}
+}
+
+// look asks tmux once about a session's panes.
+func (r *Runner) look(ctx context.Context, name string) (application.SessionStatus, error) {
 	out, err := r.call(ctx, "list-panes", "-t", target(name), "-F", "#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}")
 	if err != nil {
 		if there, checked := r.exists(ctx, name); checked == nil && !there {
@@ -200,7 +262,7 @@ func (r *Runner) Close(ctx context.Context, name string) error {
 // return is the reason it could not be asked — tmux missing, say — which is not
 // the same as an answer of no.
 func (r *Runner) exists(ctx context.Context, name string) (bool, error) {
-	err := exec.CommandContext(ctx, Program, r.commandArgs("has-session", "-t", sessionTarget(name))...).Run()
+	err := exec.CommandContext(ctx, r.program, r.commandArgs("has-session", "-t", sessionTarget(name))...).Run()
 	if err == nil {
 		return true, nil
 	}
@@ -250,18 +312,27 @@ func target(name string) string { return "=" + name + ":" }
 // sessionTarget names a session itself, exactly.
 func sessionTarget(name string) string { return "=" + name }
 
+// stateUnreaped is what parseStatus says of a session whose command looks to
+// have ended but whose exit status tmux has not given yet. It is not one of the
+// states a Runner reports: Status looks again, and after its grace reports the
+// exit unknown.
+const stateUnreaped application.SessionState = "unreaped"
+
 // parseStatus reads what tmux printed for a session's panes. A window can hold
 // more than one pane; the session is running while any of them is, and the exit
 // status is the first one that finished left behind.
 //
 // A dead pane with neither an exit status nor a signal is one tmux has not
 // finished reaping: it drops the pane's terminal, and so marks it dead, before
-// it has collected the command's status. It counts as still running, or a
-// command that exited 3 is read as having exited 0.
+// it has collected the command's status. It is neither running nor exited 0 —
+// a command that exited 3 must not be read as having exited 0 — but stateUnreaped,
+// to be looked at again. A live pane in the window still makes the session
+// running.
 func parseStatus(name string, printed []byte) (application.SessionStatus, error) {
 	var (
 		panes    int
 		running  bool
+		unreaped bool
 		exitCode int
 		known    bool
 	)
@@ -281,15 +352,22 @@ func parseStatus(name string, printed []byte) (application.SessionStatus, error)
 			running = true
 		case "1":
 			if status == "" && signal == "" {
-				running = true
+				unreaped = true
 				continue
 			}
-			// A dead pane tmux has a signal but no status for — killed rather
-			// than exited — counts as having exited with nothing to report.
-			if status == "" || known {
+			if known {
 				continue
 			}
+			// A dead pane tmux has a signal but no status for was killed rather
+			// than exited. It reports as a shell does, 128 and the signal, so that
+			// it is never taken for a clean exit.
 			code, err := strconv.Atoi(status)
+			if status == "" {
+				var sig int
+				if sig, err = strconv.Atoi(signal); err == nil {
+					code = 128 + sig
+				}
+			}
 			if err != nil {
 				return application.SessionStatus{}, fmt.Errorf("reading the exit status of session %q: tmux printed %q", name, line)
 			}
@@ -303,22 +381,24 @@ func parseStatus(name string, printed []byte) (application.SessionStatus, error)
 		return application.SessionStatus{}, fmt.Errorf("reading the state of session %q: tmux printed nothing", name)
 	case running:
 		return application.SessionStatus{Name: name, State: application.StateRunning}, nil
+	case unreaped:
+		return application.SessionStatus{Name: name, State: stateUnreaped}, nil
 	}
 	return application.SessionStatus{Name: name, State: application.StateExited, ExitCode: exitCode}, nil
 }
 
 // call runs one tmux command and returns its standard output.
 func (r *Runner) call(ctx context.Context, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, Program, r.commandArgs(args...)...)
+	cmd := exec.CommandContext(ctx, r.program, r.commandArgs(args...)...)
 	var out, errs bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errs
 
 	if err := cmd.Run(); err != nil {
 		if said := strings.TrimSpace(errs.String()); said != "" {
-			return nil, fmt.Errorf("%s %s: %w: %s", Program, strings.Join(args, " "), err, said)
+			return nil, fmt.Errorf("%s %s: %w: %s", r.program, strings.Join(args, " "), err, said)
 		}
-		return nil, fmt.Errorf("%s %s: %w", Program, strings.Join(args, " "), err)
+		return nil, fmt.Errorf("%s %s: %w", r.program, strings.Join(args, " "), err)
 	}
 	return out.Bytes(), nil
 }

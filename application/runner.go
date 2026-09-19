@@ -61,12 +61,17 @@ const (
 	StateRunning SessionState = "running"
 	// StateExited: the command has finished, and its exit status is known.
 	StateExited SessionState = "exited"
+	// StateExitUnknown: the command has ended, but the runner could not learn
+	// how. It did not finish cleanly as far as anyone can tell: it is neither
+	// running nor Finished, and it says nothing about its exit status.
+	StateExitUnknown SessionState = "exited, status unknown"
 	// StateGone: there is no session of that name — never started, or closed.
 	StateGone SessionState = "gone"
 )
 
 // SessionStatus is what a Runner knows about one session right now. ExitCode is
-// the command's exit status and means something only once it has exited.
+// the command's exit status and means something only once it has exited, that
+// is when the state is StateExited.
 type SessionStatus struct {
 	Name     string
 	State    SessionState
@@ -78,7 +83,9 @@ func (s SessionStatus) Running() bool { return s.State == StateRunning }
 
 // Finished reports whether the session's command has exited and left a status
 // behind. A session that was closed, or never started, has not finished: it is
-// gone, and there is nothing left to read from it.
+// gone, and there is nothing left to read from it. Nor has one whose command
+// ended without a status the runner could read: that is StateExitUnknown, and a
+// caller must not take it for a clean exit.
 func (s SessionStatus) Finished() bool { return s.State == StateExited }
 
 // Runner is the port the factory runs its sessions through: it starts a command
@@ -108,7 +115,8 @@ type Runner interface {
 	Output(ctx context.Context, name string, lines int) (string, error)
 
 	// Status reports whether the session's command is still running and, once
-	// it is not, the status it exited with.
+	// it is not, the status it exited with — or that the command ended and how
+	// is not known.
 	Status(ctx context.Context, name string) (SessionStatus, error)
 
 	// Wait blocks until the session's command is no longer running, and reports
