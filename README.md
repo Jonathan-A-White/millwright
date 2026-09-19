@@ -357,7 +357,7 @@ bd reclaim mw-gq6.30                                        # or take it over fi
 ### What a host is told
 
 `~/.config/mw/config.toml`, with `MW_VAULT`, `MW_HOST`, `MW_CAP` and
-`MW_HOST_SILENT_HOURS` and `MW_STALE_HOURS` ahead of it:
+`MW_HOST_SILENT_HOURS`, `MW_STALE_HOURS` and `MW_HANDOFF_AT` ahead of it:
 
 ```toml
 vault = "/root/millwright-vault"   # the one beads database and the seats
@@ -365,6 +365,7 @@ host  = "vps"                      # which of the factory's hosts this is
 cap   = 1                          # sessions running here at once (default 1)
 host_silent_hours = 2              # how long another host may go unsynced (default 2)
 stale_hours = 2                    # how long a session may print nothing new before mw sweep calls it stuck (default 2)
+handoff_at = 180000                # the context size, in tokens, at which mw seat context says handoff (default 180000)
 
 [rigs]
 millwright = "/root/millwright"    # where each rig is checked out here
@@ -707,6 +708,38 @@ never gives a claim back, and never touches a worktree, git or the ledger:
 settling a stuck claim is a separate command. One story's trouble — a session
 that cannot be asked about, a write that fails — is reported on a `!` line and
 the rest are still examined. See `features/sweep.feature`.
+
+## Asking a seat how full its session is
+
+```sh
+bin/mw seat context
+```
+
+`mw seat context` prints one line, and takes no arguments beyond `--dir`:
+
+```
+context=142307 handoff_at=180000 ok session=0a1b2c3d
+```
+
+`context` is the size of the context the session's last assistant turn was
+given: its input, cache-read and cache-creation tokens added together. It is
+read from the newest transcript (the most recently written `*.jsonl`) Claude
+Code keeps for a working directory under `~/.claude/projects`: the vault from
+the config file unless `--dir` names another directory. A subagent's turns do
+not count, only the session's own last one. `handoff_at` is the limit, and the
+word after it is `ok` below the limit and `handoff` at it or above: a session
+that reads `handoff` should finish its step, write what the next session needs
+and hand off. `session` is the first eight characters of the session's id.
+
+Both `ok` and `handoff` exit 0: being full is a finding, not a failure. A
+directory with no transcript, or a transcript with no assistant turn yet, is an
+error that names the directory it looked in. It costs no tokens, starts no
+session and writes nothing.
+
+The limit is `handoff_at` in the config file or `MW_HANDOFF_AT`: whole tokens,
+at least 1, 180000 by default. See `features/seat_context.feature`. `mw seat` is
+the parent for the commands about a seat's own session; later ones sit beside
+`context`.
 
 ## The Path
 
