@@ -24,6 +24,7 @@ type bead struct {
 	Status           string            `json:"status"`
 	Type             string            `json:"issue_type"`
 	Assignee         string            `json:"assignee"`
+	Labels           []string          `json:"labels"`
 	EstimatedMinutes int               `json:"estimated_minutes"`
 	CreatedAt        string            `json:"created_at"`
 	Priority         *int              `json:"priority"`
@@ -174,6 +175,7 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		EpicID:          b.Parent,
 		Status:          b.Status,
 		Assignee:        b.Assignee,
+		Labels:          append([]string(nil), b.Labels...),
 		Description:     b.Description,
 		Acceptance:      b.Acceptance,
 		EstimateMinutes: b.EstimatedMinutes,

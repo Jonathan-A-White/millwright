@@ -71,7 +71,9 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a ready story "([^"]*)" of that epic$`, c.aReadyStoryOfThatEpic)
 	ctx.Given(`^a ready story "([^"]*)" of that epic that overrides "([^"]*)" with "([^"]*)"$`, c.aReadyStoryThatOverrides)
 	ctx.Given(`^a ready story "([^"]*)" of that epic at priority (\d+), filed at "([^"]*)"$`, c.aReadyStoryAtPriority)
+	ctx.Given(`^a ready story "([^"]*)" of that epic labelled "([^"]*)"$`, c.aReadyStoryLabelled)
 	ctx.Given(`^a story "([^"]*)" of that epic is already running here$`, c.aStoryAlreadyRunningHere)
+	ctx.Given(`^a story "([^"]*)" of that epic labelled "([^"]*)" is already running here$`, c.aLabelledStoryAlreadyRunningHere)
 	ctx.Given(`^the other host has pushed a later commit to the rig's origin$`, c.theOtherHostHasPushed)
 	ctx.Given(`^the beads sync halts with exit code (\d+)$`, c.theBeadsSyncHalts)
 	ctx.Given(`^the runner refuses to start anything$`, c.theRunnerRefuses)
@@ -98,6 +100,8 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^dispatch would start "([^"]*)"$`, c.dispatchWouldStart)
 	ctx.Then(`^dispatch would start, in this order:$`, c.dispatchWouldStartInOrder)
 	ctx.Then(`^the dry run report lists them in that order$`, c.theReportListsThemInOrder)
+	ctx.Then(`^dispatch passed over "([^"]*)", saying: (.+)$`, c.dispatchPassedOver)
+	ctx.Then(`^the dry run report says (\d+) of (\d+) sessions were already running$`, c.theReportSaysHowManyWereRunning)
 }
 
 // workspace makes the temp directory a scenario keeps its vault, its origin and
@@ -247,6 +251,21 @@ func (c *dispatchContext) aReadyStoryThatOverrides(id, field, value string) erro
 
 func (c *dispatchContext) aStoryAlreadyRunningHere(id string) error {
 	if err := c.aReadyStoryOfThatEpic(id); err != nil {
+		return err
+	}
+	return c.tracker.ClaimStory(context.Background(), id)
+}
+
+// aReadyStoryLabelled adds a ready story carrying a label.
+func (c *dispatchContext) aReadyStoryLabelled(id, label string) error {
+	if err := c.aReadyStoryOfThatEpic(id); err != nil {
+		return err
+	}
+	return c.tracker.SetLabels(id, label)
+}
+
+func (c *dispatchContext) aLabelledStoryAlreadyRunningHere(id, label string) error {
+	if err := c.aReadyStoryLabelled(id, label); err != nil {
 		return err
 	}
 	return c.tracker.ClaimStory(context.Background(), id)
@@ -563,6 +582,40 @@ func (c *dispatchContext) theReportListsThemInOrder() error {
 			return fmt.Errorf("expected the report to list %s after the stories before it, got:\n%s", started.StoryID, printed)
 		}
 		at += found
+	}
+	return nil
+}
+
+// dispatchPassedOver says the story was passed over with a reason containing
+// the words given, both in the report's data and in what a person reads.
+func (c *dispatchContext) dispatchPassedOver(id, saying string) error {
+	report, err := c.dispatched()
+	if err != nil {
+		return err
+	}
+	for _, passed := range report.Passed {
+		if passed.StoryID != id {
+			continue
+		}
+		if !strings.Contains(passed.Why, saying) {
+			return fmt.Errorf("expected %s to be passed over saying %q, got %q", id, saying, passed.Why)
+		}
+		if printed := report.String(); !strings.Contains(printed, "passed  "+id+" · "+passed.Why) {
+			return fmt.Errorf("expected the report to print why %s was passed over, got:\n%s", id, printed)
+		}
+		return nil
+	}
+	return fmt.Errorf("expected %s to be passed over, got %+v", id, report.Passed)
+}
+
+func (c *dispatchContext) theReportSaysHowManyWereRunning(running, cap int) error {
+	report, err := c.dispatched()
+	if err != nil {
+		return err
+	}
+	want := fmt.Sprintf("%d of %d sessions were already running", running, cap)
+	if printed := report.String(); !strings.Contains(printed, want) {
+		return fmt.Errorf("expected the report to say %q, got:\n%s", want, printed)
 	}
 	return nil
 }
