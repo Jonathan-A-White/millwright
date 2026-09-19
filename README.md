@@ -594,6 +594,14 @@ setting can also come from `$BEADS_MAIL_DELEGATE`, which bd checks first. Until
 it is changed, the delegate is the stand-in script, which writes the same beads.
 See `features/mail.feature`.
 
+`mw next` is a sender too: when it closes a story out it mails `mayor`, from
+`mw@<host>`, one message titled `Landed: <story title>`, `Refused: <story title>`
+(the checks turned the branch away) or `Blocked: <story title>` (anything else
+stopped it). The body is the report `mw next` prints, and for a story that landed
+nothing the whole reason too. A mail that cannot be sent is said on stderr and
+changes nothing about the landing; a run that finds nothing to close sends none.
+See `features/next.feature`.
+
 ## Telling the Mayor's window when mail arrives
 
 A Mayor's own mail watcher dies with its session, so a report from the other
