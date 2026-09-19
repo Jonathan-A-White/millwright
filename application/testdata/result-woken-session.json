@@ -1,0 +1,40 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "num_turns": 1,
+  "duration_ms": 3625,
+  "duration_api_ms": 151065,
+  "result_index": 2,
+  "origin": {"kind": "task-notification"},
+  "stop_reason": "end_turn",
+  "terminal_reason": "completed",
+  "session_id": "d74c02bc-1dc0-4891-ba91-adf7d5a1e480",
+  "total_cost_usd": 0.7433436000000001,
+  "permission_denials": [],
+  "result": "mw-gq6.33 is finished. The commits are 8021fdc and 894c9f1, and the closing comment is on the story. mw next can land it.",
+  "usage": {
+    "input_tokens": 4,
+    "output_tokens": 104,
+    "cache_read_input_tokens": 64917,
+    "cache_creation_input_tokens": 350,
+    "service_tier": "standard",
+    "cache_creation": {"ephemeral_1h_input_tokens": 350, "ephemeral_5m_input_tokens": 0}
+  },
+  "modelUsage": {
+    "claude-sonnet-5": {
+      "inputTokens": 84,
+      "outputTokens": 12827,
+      "cacheReadInputTokens": 1973788,
+      "cacheCreationInputTokens": 55037,
+      "webSearchRequests": 0,
+      "costUSD": 0.7433436000000001,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 64000,
+      "thinkingTokens": 2108,
+      "canonicalModel": "claude-sonnet-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  }
+}
