@@ -30,6 +30,7 @@ func writeConfig(t *testing.T, contents string) string {
 	t.Setenv("MW_STALE_HOURS", "")
 	t.Setenv("MW_HOST_SILENT_HOURS", "")
 	t.Setenv("MW_HANDOFF_AT", "")
+	t.Setenv("MW_RIG_MEMORY_BYTES", "")
 	return home
 }
 
@@ -356,5 +357,40 @@ func TestAHostThatSaysNothingAboutTestsIsNotAnError(t *testing.T) {
 	}
 	if len(tests) != 0 {
 		t.Errorf("expected no rig to say how it is tested, got %+v", tests)
+	}
+}
+
+func TestRigMemoryBytesIsEightThousandUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\nhost = \"vps\"\n")
+
+	bytes, err := config.RigMemoryBytes()
+	if err != nil {
+		t.Fatalf("reading how large a rig's memory may be: %v", err)
+	}
+	if config.DefaultRigMemoryBytes != 8000 || bytes != config.DefaultRigMemoryBytes {
+		t.Fatalf("expected the default of 8000 bytes, got %d", bytes)
+	}
+
+	t.Setenv(config.RigMemoryEnv, "500")
+	if bytes, err = config.RigMemoryBytes(); err != nil || bytes != 500 {
+		t.Fatalf("expected %s to win with 500, got %d: %v", config.RigMemoryEnv, bytes, err)
+	}
+
+	t.Setenv(config.RigMemoryEnv, "")
+	writeConfig(t, "rig_memory_bytes = 6000\n")
+	if bytes, err = config.RigMemoryBytes(); err != nil || bytes != 6000 {
+		t.Fatalf("expected the config file's rig_memory_bytes to read back as 6000, got %d: %v", bytes, err)
+	}
+}
+
+func TestRigMemoryBytesRefusesWhatWouldCallEveryRigOverBudgetOrIsNotANumber(t *testing.T) {
+	writeConfig(t, "rig_memory_bytes = 0\n")
+	if _, err := config.RigMemoryBytes(); err == nil {
+		t.Fatal("expected a rig memory budget of 0 to be refused")
+	}
+
+	writeConfig(t, "rig_memory_bytes = \"plenty\"\n")
+	if _, err := config.RigMemoryBytes(); err == nil {
+		t.Fatal("expected a rig memory budget that is not a number to be refused")
 	}
 }
