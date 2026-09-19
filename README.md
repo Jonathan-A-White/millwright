@@ -195,9 +195,21 @@ remote refuses because the other host got there first is fetched, merged and
 pushed again, a bounded number of times.
 
 Only then: the worktree and its branch go, one line is appended to the seat's
-ledger, the story is closed with the reason, `mw sync` brings the hosts level so
-that the other host sees a closed story rather than a claimed one, and whatever
-is ready here is dispatched.
+ledger, that line and the seat's memory of the rig are committed in the vault,
+the story is closed with the reason, `mw sync` brings the hosts level so that
+the other host sees a closed story rather than a claimed one, and whatever is
+ready here is dispatched.
+
+The commit is exactly two paths — `seats/<seat>/ledger.md` and
+`seats/<seat>/rigs/<rig>.md` — named explicitly, never `git add -A` and never
+`commit -a`, under a plain message naming the story and signed by nobody. They
+are the only files a story is allowed to write in the vault: mw wrote the first
+and the session may have written the second, so a close-out that left them
+uncommitted would stop its own sync and every later one. Anything else
+uncommitted in the vault is still somebody else's to commit, and the sync still
+refuses because of it, naming the file — the story is landed and closed all the
+same, because none of that is undone. A close-out that lands nothing commits the
+line it wrote saying so, for the same reason.
 
 ### Nothing here is signed by a machine
 
@@ -305,9 +317,11 @@ when this host was last level, under `host.<name>.last_sync` in beads' key-value
 store, so that either host can say how stale the other is.
 
 It never migrates, never forces and never retries. A vault holding uncommitted
-work stops it — committing is a seat's job. A rebase that cannot finish is
-undone, so the vault is left as it was found. `bd sync`'s exit code is surfaced
-as it is and becomes mw's own: 2 (a merge conflict beads will not resolve) and 4
+work stops it, naming the files: committing them belongs to whoever wrote them,
+and the only vault files mw commits for itself are the two a close-out writes
+(above). A rebase that cannot finish is undone, so the vault is left as it was
+found. `bd sync`'s exit code is surfaced as it is and becomes mw's own: 2 (a
+merge conflict beads will not resolve) and 4
 (a working set only a person can clear) stop mw with a plain message and are
 never retried or auto-resolved.
 
