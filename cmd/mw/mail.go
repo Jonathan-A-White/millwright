@@ -14,14 +14,15 @@ import (
 func newMailCmd() *cobra.Command {
 	mail := &cobra.Command{
 		Use:   "mail",
-		Short: "Send, list and read the mail between seats",
+		Short: "Send, reply to, list and read the mail between seats",
 		Long: "mail is how sessions, seats and the Governor leave each other messages. Mail is beads: a\n" +
 			"message is a bead of type mail, so it travels between hosts with `mw sync`.\n\n" +
 			"A message is signed by the seat in $MW_SEAT (seat or seat@host), which is never defaulted,\n" +
-			"and inbox and read take their mailbox from $MW_SEAT too, or from --as.",
+			"and inbox and read take their mailbox from $MW_SEAT too, or from --as.\n\n" +
+			"`bd mail ...` runs this command when bd's mail.delegate is set to `mw mail`.",
 		Args: cobra.NoArgs,
 	}
-	mail.AddCommand(newMailSendCmd(), newMailInboxCmd(), newMailReadCmd())
+	mail.AddCommand(newMailSendCmd(), newMailReplyCmd(), newMailInboxCmd(), newMailReadCmd())
 	return mail
 }
 
@@ -66,6 +67,31 @@ func newMailSendCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVarP(&subject, "subject", "s", "", "the subject of the message (required)")
 	cmd.Flags().StringVarP(&body, "body", "m", "", "the body of the message")
+	return cmd
+}
+
+// newMailReplyCmd builds `mw mail reply`.
+func newMailReplyCmd() *cobra.Command {
+	var body string
+
+	cmd := &cobra.Command{
+		Use:   "reply <id> [-m <body>]",
+		Short: "Answer a message, to whoever sent it",
+		Long: "reply files a message to the seat that sent message <id>, titled \"Re: \" and its\n" +
+			"subject, linked to it, and prints its id and who it went to. It is signed by $MW_SEAT, as\n" +
+			"send is, and refuses without it. The message answered is left unread if it was unread. An\n" +
+			"id that is not mail is refused, and nothing is written.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			mail, err := mailUseCase(cmd)
+			if err != nil {
+				return err
+			}
+			_, err = mail.Reply(cmd.Context(), args[0], body)
+			return err
+		},
+	}
+	cmd.Flags().StringVarP(&body, "body", "m", "", "the body of the reply")
 	return cmd
 }
 

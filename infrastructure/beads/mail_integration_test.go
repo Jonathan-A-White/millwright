@@ -122,3 +122,64 @@ func TestGatewaySendsMailAsTheStandInDidAndReadsMailTheStandInSent(t *testing.T)
 		t.Errorf("expected %s to stay open, it is %s", story, got)
 	}
 }
+
+func TestGatewayLinksAReplyToTheMessageItAnswersAsTheStandInDid(t *testing.T) {
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	bdRun(t, vault, beads.Program, "config", "set", "types.custom", "mail")
+	gateway := beads.New(vault)
+
+	original, err := gateway.Send(ctx, application.NewMessage{
+		From: "builder@laptop", To: "mayor", Subject: "Ready for review", Body: "The branch is up.",
+	})
+	if err != nil {
+		t.Fatalf("sending mail: %v", err)
+	}
+	reply, err := gateway.Send(ctx, application.NewMessage{
+		From: "mayor", To: "builder@laptop", Subject: "Re: Ready for review", Body: "Merged.", ReplyTo: original,
+	})
+	if err != nil {
+		t.Fatalf("sending the reply: %v", err)
+	}
+
+	// The link is a related dependency of the reply on the original, which is
+	// what `--deps related:<id>` made of it in bin/mw-mail.
+	var shown []struct {
+		Dependencies []struct {
+			ID   string `json:"id"`
+			Kind string `json:"dependency_type"`
+		} `json:"dependencies"`
+	}
+	if err := json.Unmarshal([]byte(bdRun(t, vault, beads.Program, "show", reply, "--json")), &shown); err != nil || len(shown) != 1 ||
+		len(shown[0].Dependencies) != 1 || shown[0].Dependencies[0].ID != original || shown[0].Dependencies[0].Kind != "related" {
+		t.Errorf("expected %s to depend on %s by a related link, got %+v (%v)", reply, original, shown, err)
+	}
+
+	// Get reports the reply as linked, and the original as answering nothing;
+	// it reads without closing anything.
+	got, err := gateway.Get(ctx, reply)
+	if err != nil || got.ReplyTo != original || got.From != "mayor" || got.To != "builder@laptop" {
+		t.Errorf("expected the reply to say it answers %s, from mayor to builder@laptop, got %+v: %v", original, got, err)
+	}
+	got, err = gateway.Get(ctx, original)
+	if err != nil || got.ReplyTo != "" {
+		t.Errorf("expected the original to answer nothing, got %+v: %v", got, err)
+	}
+	if status := showMail(t, vault, original).Status; status != "open" {
+		t.Errorf("expected %s to stay open after Get, it is %s", original, status)
+	}
+
+	// The inbox lists the reply as linked too, from the edge bd lists.
+	unread, err := gateway.Inbox(ctx, "builder@laptop")
+	if err != nil || len(unread) != 1 || unread[0].ReplyTo != original {
+		t.Errorf("expected the reply in the inbox of builder@laptop, answering %s, got %+v: %v", original, unread, err)
+	}
+
+	// A bead that is not mail is refused by Get, as it is by Read.
+	story := bdRun(t, vault, beads.Program, "create", "Not mail at all", "-t", "task", "--silent")
+	if _, err := gateway.Get(ctx, story); err == nil || !strings.Contains(err.Error(), story) {
+		t.Errorf("expected getting %s to be refused, naming it, got %v", story, err)
+	}
+}

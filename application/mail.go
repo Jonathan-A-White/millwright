@@ -19,12 +19,15 @@ const NoBody = "(no body)"
 
 // NewMessage is a message about to be sent: who from, who to, and what it says.
 // From is the seat's own name, seat or seat@host, and To is a mailbox: mayor,
-// builder, governor, or any seat.
+// builder, governor, or any seat. ReplyTo is the id of the message this one
+// answers, or empty when it answers none; a message that answers one is linked
+// to it.
 type NewMessage struct {
 	From    string
 	To      string
 	Subject string
 	Body    string
+	ReplyTo string
 }
 
 // Message is one message as the mailbox holds it.
@@ -36,6 +39,9 @@ type Message struct {
 	Body    string
 	// Sent is when it was sent; zero when the mailbox did not say.
 	Sent time.Time
+	// ReplyTo is the id of the message this one answers; empty when it answers
+	// none.
+	ReplyTo string
 }
 
 // Mailbox is the port mail travels through. Mail is beads, so it goes between
@@ -50,6 +56,11 @@ type Mailbox interface {
 	// reads and writes nothing.
 	Inbox(ctx context.Context, mailbox string) ([]Message, error)
 
+	// Get reports one message and changes nothing: it stays as unread as it was.
+	// An id that names no message — including a bead that is not mail — is an
+	// error.
+	Get(ctx context.Context, id string) (Message, error)
+
 	// Read reports one message and marks it read, so that it leaves its
 	// recipient's inbox; reader is who read it. Reading a message that is
 	// already read reports it again and changes nothing. An id that names no
@@ -58,7 +69,7 @@ type Mailbox interface {
 	Read(ctx context.Context, id, reader string) (Message, error)
 }
 
-// Mail is what a seat does with its mail: send, list its inbox, read a message.
+// Mail is what a seat does with its mail: send, reply, list its inbox, read a message.
 // Seat is the seat this session is, from $MW_SEAT, and it is never defaulted:
 // a message signed by no one, or by the wrong seat, cannot be answered.
 type Mail struct {
@@ -77,10 +88,9 @@ type Mail struct {
 // given. It refuses, naming $MW_SEAT, when there is no seat to sign it, and
 // before anything is written. A message with no body is stored as NoBody.
 func (m Mail) Send(ctx context.Context, to, subject, body string) (string, error) {
-	from := strings.TrimSpace(m.Seat)
-	if from == "" {
-		return "", fmt.Errorf("mail is signed by the seat that sends it, and %s is not set: "+
-			"set it to your seat (seat or seat@host); mail is never sent as anyone by default", SeatEnv)
+	from, err := m.signer()
+	if err != nil {
+		return "", err
 	}
 	to = mailboxName(to)
 	if to == "" {
@@ -99,6 +109,37 @@ func (m Mail) Send(ctx context.Context, to, subject, body string) (string, error
 	}
 	m.printf("%s -> %s\n", id, to)
 	return id, nil
+}
+
+// Reply answers a message: it goes to whoever sent the original, is titled
+// "Re: " and the original's subject, and is linked to the original, which is
+// left as unread as it was. It refuses, naming $MW_SEAT, when there is no seat
+// to sign it, and when the id is not a message, or a message that says nothing
+// of who sent it — a reply with nowhere to go — and writes nothing in either
+// case. A reply with no body is stored as NoBody.
+func (m Mail) Reply(ctx context.Context, id, body string) (string, error) {
+	from, err := m.signer()
+	if err != nil {
+		return "", err
+	}
+	original, err := m.Mailbox.Get(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	to := mailboxName(original.From)
+	if to == "" {
+		return "", fmt.Errorf("%s says nothing of who sent it, so a reply has nowhere to go: send the answer with mail send", id)
+	}
+	if strings.TrimSpace(body) == "" {
+		body = NoBody
+	}
+
+	replyID, err := m.Mailbox.Send(ctx, NewMessage{From: from, To: to, Subject: "Re: " + original.Subject, Body: body, ReplyTo: id})
+	if err != nil {
+		return "", err
+	}
+	m.printf("%s -> %s\n", replyID, to)
+	return replyID, nil
 }
 
 // Inbox prints the unread mail of a mailbox, oldest first, one line each: the
@@ -138,6 +179,17 @@ func (m Mail) Read(ctx context.Context, id, as string) (Message, error) {
 	m.printf("From: %s\nTo: %s\nDate: %s\nSubject: %s\n\n%s\n",
 		orUnknown(message.From), orUnknown(message.To), sentInFull(message.Sent), message.Subject, message.Body)
 	return message, nil
+}
+
+// signer is the seat that signs what this session sends: $MW_SEAT, and never a
+// default of anyone's.
+func (m Mail) signer() (string, error) {
+	from := strings.TrimSpace(m.Seat)
+	if from == "" {
+		return "", fmt.Errorf("mail is signed by the seat that sends it, and %s is not set: "+
+			"set it to your seat (seat or seat@host); mail is never sent as anyone by default", SeatEnv)
+	}
+	return from, nil
 }
 
 // actingAs is the mailbox a seat works in: the one it was told to with --as, or

@@ -2,6 +2,7 @@ package beads
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 
@@ -25,18 +26,23 @@ const LabelMail = "mail"
 // work, and beads' own default is the same.
 const mailPriority = application.DefaultPriority
 
+// dependencyRelated is the kind of dependency a reply is linked to the message
+// it answers by: a link that waits on nothing, which is how bin/mw-mail linked
+// them (`--deps related:<id>`).
+const dependencyRelated = "related"
+
 // Send implements application.Mailbox. A message is a bead of type mail:
 // assigned to the recipient, its subject the title, its body the description,
 // and who it is from and to in the metadata. It is open until it is read, and
-// versioned, which is what lets it travel to the other host on a sync. This is
-// the shape the stand-in bin/mw-mail wrote, so mail already sent stays
-// readable.
+// versioned, which is what lets it travel to the other host on a sync. A reply
+// is also linked to the message it answers. This is the shape the stand-in
+// bin/mw-mail wrote, so mail already sent stays readable.
 func (g *Gateway) Send(ctx context.Context, message application.NewMessage) (string, error) {
 	metadata, err := metadataJSON(map[string]string{"from": message.From, "to": message.To})
 	if err != nil {
 		return "", err
 	}
-	return g.created(ctx, "the message", []string{
+	args := []string{
 		"create", message.Subject,
 		"--type", TypeMail,
 		"--priority", strconv.Itoa(mailPriority),
@@ -45,7 +51,33 @@ func (g *Gateway) Send(ctx context.Context, message application.NewMessage) (str
 		"--description", message.Body,
 		"--storage-class", "versioned",
 		"--metadata", metadata,
-	})
+	}
+	if message.ReplyTo != "" {
+		args = append(args, "--deps", dependencyRelated+":"+message.ReplyTo)
+	}
+	return g.created(ctx, "the message", args)
+}
+
+// Get implements application.Mailbox: the message as it is, read or not. A
+// bead that is not mail is refused, as Read refuses it.
+func (g *Gateway) Get(ctx context.Context, id string) (application.Message, error) {
+	mail, err := g.mailBead(ctx, id)
+	if err != nil {
+		return application.Message{}, err
+	}
+	return mail.message(), nil
+}
+
+// mailBead is the bead an id names, when it is mail.
+func (g *Gateway) mailBead(ctx context.Context, id string) (bead, error) {
+	found, err := g.showOne(ctx, id)
+	if err != nil {
+		return bead{}, err
+	}
+	if found.Type != TypeMail {
+		return bead{}, fmt.Errorf("%s is a %s, not mail", id, describeType(found.Type))
+	}
+	return found, nil
 }
 
 // Inbox implements application.Mailbox: the open mail assigned to a mailbox,
@@ -72,12 +104,9 @@ func (g *Gateway) Inbox(ctx context.Context, mailbox string) ([]application.Mess
 // that is not mail is refused before anything is closed, since closing a story
 // because someone asked to read it would be a poor way to find that out.
 func (g *Gateway) Read(ctx context.Context, id, reader string) (application.Message, error) {
-	mail, err := g.showOne(ctx, id)
+	mail, err := g.mailBead(ctx, id)
 	if err != nil {
 		return application.Message{}, err
-	}
-	if mail.Type != TypeMail {
-		return application.Message{}, fmt.Errorf("%s is a %s, not mail", id, describeType(mail.Type))
 	}
 	if mail.Status == StatusOpen {
 		args := []string{"close", id, "--reason", "read by " + reader}
@@ -118,5 +147,27 @@ func (b bead) message() application.Message {
 		Subject: b.Title,
 		Body:    b.Description,
 		Sent:    b.created(),
+		ReplyTo: b.answers(),
 	}
+}
+
+// answers is the id of the message this bead is a reply to: the bead it has a
+// related dependency on. bd prints that as a whole linked bead on `bd show`
+// and as an edge on `bd list`; an edge that runs the other way, from a reply to
+// this bead, is an answer to it, not what it answers.
+func (b bead) answers() string {
+	for _, raw := range b.Dependencies {
+		var e edge
+		if json.Unmarshal(raw, &e) == nil && e.Issue != "" && e.DependsOn != "" {
+			if e.Issue == b.ID && e.Kind == dependencyRelated {
+				return e.DependsOn
+			}
+			continue
+		}
+		var link linked
+		if json.Unmarshal(raw, &link) == nil && link.ID != "" && link.Kind == dependencyRelated {
+			return link.ID
+		}
+	}
+	return ""
 }

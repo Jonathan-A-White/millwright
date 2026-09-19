@@ -19,8 +19,8 @@ func TestMailCommandsArePartOfMw(t *testing.T) {
 		for _, sub := range cmd.Commands() {
 			subs = append(subs, sub.Name())
 		}
-		if got := strings.Join(subs, " "); got != "inbox read send" {
-			t.Fatalf("expected mw mail to have inbox, read and send, got %q", got)
+		if got := strings.Join(subs, " "); got != "inbox read reply send" {
+			t.Fatalf("expected mw mail to have inbox, read, reply and send, got %q", got)
 		}
 		return
 	}
@@ -43,13 +43,18 @@ func mailFails(t *testing.T, args ...string) error {
 	return err
 }
 
-func TestMailSendRefusesWithNoSeatNamingMwSeat(t *testing.T) {
+func TestMailSendAndReplyRefuseWithNoSeatNamingMwSeat(t *testing.T) {
 	mwConfig(t, "vault = \""+t.TempDir()+"\"\nhost = \"laptop\"\n")
 	t.Setenv("MW_SEAT", "")
 
-	err := mailFails(t, "send", "mayor", "-s", "Who am I?", "-m", "Nobody.")
-	if !strings.Contains(err.Error(), "MW_SEAT") {
-		t.Errorf("expected the refusal to name MW_SEAT, got: %v", err)
+	for _, args := range [][]string{
+		{"send", "mayor", "-s", "Who am I?", "-m", "Nobody."},
+		{"reply", "mw-1", "-m", "Nobody."},
+	} {
+		err := mailFails(t, args...)
+		if !strings.Contains(err.Error(), "MW_SEAT") {
+			t.Errorf("expected mw mail %s to name MW_SEAT, got: %v", strings.Join(args, " "), err)
+		}
 	}
 }
 

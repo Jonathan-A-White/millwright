@@ -67,6 +67,7 @@ func (f *FakeMailbox) Send(_ context.Context, message application.NewMessage) (s
 		Subject: message.Subject,
 		Body:    message.Body,
 		Sent:    FirstSent.Add(time.Duration(f.sent-1) * time.Minute),
+		ReplyTo: message.ReplyTo,
 	}}
 	f.writes++
 	return id, nil
@@ -87,6 +88,20 @@ func (f *FakeMailbox) Inbox(_ context.Context, mailbox string) ([]application.Me
 	}
 	sort.Slice(unread, func(i, j int) bool { return unread[i].Sent.Before(unread[j].Sent) })
 	return unread, nil
+}
+
+// Get implements application.Mailbox.
+func (f *FakeMailbox) Get(_ context.Context, id string) (application.Message, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return application.Message{}, f.Err
+	}
+	message, ok := f.messages[id]
+	if !ok {
+		return application.Message{}, fmt.Errorf("no mail %s", id)
+	}
+	return message.Message, nil
 }
 
 // Read implements application.Mailbox.
