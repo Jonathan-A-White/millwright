@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/domain"
@@ -118,6 +119,30 @@ type DispatchReport struct {
 	Synced bool
 }
 
+// inStartOrder is the stories in the order a dispatch starts them: the most
+// urgent first, and of equal urgency the one filed longest ago. A story with no
+// creation time comes after every story that has one. Stories the tracker lists
+// alike keep the order it listed them in, because the tracker's timestamps are
+// whole seconds and a plan filed in one go is all one second.
+//
+// mw does the sorting itself rather than trusting the order the tracker lists
+// them in, which is the tracker's idea of what is ready and not the Mayor's of
+// what is next. The list it is given is left as it was.
+func inStartOrder(ready []StoryDetail) []StoryDetail {
+	ordered := append([]StoryDetail(nil), ready...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		a, b := ordered[i], ordered[j]
+		if a.Priority != b.Priority {
+			return a.Priority < b.Priority
+		}
+		if a.Created.IsZero() != b.Created.IsZero() {
+			return !a.Created.IsZero()
+		}
+		return a.Created.Before(b.Created)
+	})
+	return ordered
+}
+
 // Run dispatches what this host can take and reports what it did.
 //
 // The order is the point. This host is brought level with the other one before
@@ -125,7 +150,8 @@ type DispatchReport struct {
 // Mayor's newest stories are both in what a sync brings in, and a dispatcher
 // working from a stale view claims work that is not its own. Then what is
 // already in flight here, because that is what the cap counts. Then what is
-// ready. Only then is anything claimed.
+// ready, most urgent and oldest first, so that when the cap is smaller than what
+// is ready it is the right stories that wait. Only then is anything claimed.
 func (d Dispatch) Run(ctx context.Context) (DispatchReport, error) {
 	switch {
 	case d.Tracker == nil || d.Worktrees == nil || d.Runner == nil:
@@ -159,6 +185,7 @@ func (d Dispatch) Run(ctx context.Context) (DispatchReport, error) {
 	if err != nil {
 		return report, fmt.Errorf("dispatching on %s: reading what is ready here: %w", d.Host, err)
 	}
+	ready = inStartOrder(ready)
 
 	// The formulas installed are read once, and only if a story names one.
 	var formulas map[string]bool

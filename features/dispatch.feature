@@ -59,6 +59,26 @@ Feature: Dispatching the stories this host is ready to work
     Then one session was started, for "mw-gq6.1"
     And the story "mw-gq6.2" is not claimed
 
+  Scenario: The more urgent story is started first, however old the other is
+    Given a ready story "mw-gq6.1" of that epic at priority 3, filed at "2026-09-01T09:00:00Z"
+    And a ready story "mw-gq6.2" of that epic at priority 1, filed at "2026-09-02T09:00:00Z"
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.2"
+    And the story "mw-gq6.1" is not claimed
+
+  Scenario: Of two stories as urgent as each other the older is started first
+    Given a ready story "mw-gq6.1" of that epic at priority 2, filed at "2026-09-02T09:00:00Z"
+    And a ready story "mw-gq6.2" of that epic at priority 2, filed at "2026-09-01T09:00:00Z"
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.2"
+    And the story "mw-gq6.1" is not claimed
+
+  Scenario: A story with no creation time is started after those that have one
+    Given a ready story "mw-gq6.1" of that epic
+    And a ready story "mw-gq6.2" of that epic at priority 2, filed at "2026-09-01T09:00:00Z"
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.2"
+
   Scenario: A story already running here counts against the cap
     Given a ready story "mw-gq6.1" of that epic
     And a story "mw-gq6.9" of that epic is already running here
@@ -108,3 +128,16 @@ Feature: Dispatching the stories this host is ready to work
     And there is no worktree for "mw-gq6.1"
     And nothing was poured
     And there is no boot file for "mw-gq6.1"
+
+  Scenario: A dry run lists the stories in the order they would be started
+    Given a ready story "mw-gq6.1" of that epic at priority 3, filed at "2026-09-01T09:00:00Z"
+    And a ready story "mw-gq6.2" of that epic at priority 2, filed at "2026-09-03T09:00:00Z"
+    And a ready story "mw-gq6.3" of that epic at priority 2, filed at "2026-09-02T09:00:00Z"
+    And a ready story "mw-gq6.4" of that epic at priority 1, filed at "2026-09-04T09:00:00Z"
+    When dispatch runs on "vps" with a cap of 4 as a dry run
+    Then dispatch would start, in this order:
+      | mw-gq6.4 |
+      | mw-gq6.3 |
+      | mw-gq6.2 |
+      | mw-gq6.1 |
+    And the dry run report lists them in that order

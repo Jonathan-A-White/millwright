@@ -136,8 +136,12 @@ bin/mw dispatch             # claim, cut, pour, boot, start
 `mw dispatch` is the one command that spends fuel, so everything it does before
 spending any is reversible. In order, once: `mw sync`, so that this host sees
 the other host's claims before it makes its own; what this host already has in
-flight, which is what the cap counts; what is ready here. Then, per story, up to
-the cap:
+flight, which is what the cap counts; what is ready here, which `mw` puts in
+order itself — the most urgent priority first (P0 before P4), and of equal
+priority the story filed longest ago — so that when the cap is smaller than what
+is ready, the right stories wait. That is how the Mayor re-prioritises: change a
+story's priority, and the next dispatch takes it earlier or later. Then, per
+story, in that order, up to the cap:
 
 1. **claim** it — from here everything is undone if anything fails;
 2. **fetch** the rig's origin and **cut** `mw/<story-id>` at
@@ -158,8 +162,8 @@ spending fuel, and a claim given back under a live session is how one story gets
 worked twice. A story whose Path names another host, or no host at all, is never
 claimed here, and neither is one whose rig this host has not checked out.
 
-`--dry-run` prints what it would start and writes nothing: nothing is synced,
-claimed, fetched, cut, poured or started. See `features/dispatch.feature`.
+`--dry-run` prints what it would start, in that same order, and writes nothing:
+nothing is synced, claimed, fetched, cut, poured or started. See `features/dispatch.feature`.
 
 ## Closing a story out
 
