@@ -12,6 +12,7 @@ func newRootCmd() *cobra.Command {
 		SilenceErrors: false,
 	}
 
+	root.AddCommand(newBriefCmd())
 	root.AddCommand(newCheckCmd())
 	root.AddCommand(newDispatchCmd())
 	root.AddCommand(newFileCmd())

@@ -820,3 +820,37 @@ func TestGatewayReportsWhatBeadsRefused(t *testing.T) {
 		t.Fatalf("expected the error to name the story, got %q", err)
 	}
 }
+
+// A brief reads an epic's status and priority beside its stories, and the
+// comments of any bead, whole and oldest first. Reading writes nothing.
+func TestGatewayReadsAnEpicsStatusPriorityAndComments(t *testing.T) {
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	epicID := bdRun(t, vault, beads.Program, "create", "A map", "-t", "epic", "-p", "1", "--silent")
+	bdRun(t, vault, beads.Program, "create", "A child", "--parent", epicID, "--silent")
+	bdRun(t, vault, beads.Program, "comments", "add", epicID, "The first.")
+	bdRun(t, vault, beads.Program, "comments", "add", epicID, "The second,\n\nwhole.")
+
+	gateway := beads.New(vault)
+	epic, err := gateway.ShowEpic(ctx, epicID)
+	if err != nil {
+		t.Fatalf("reading the epic %s: %v", epicID, err)
+	}
+	if epic.Status != application.StatusOpen || epic.Priority != 1 || len(epic.Stories) != 1 {
+		t.Errorf("expected an open epic at priority 1 with one story, got %+v", epic)
+	}
+
+	comments, err := gateway.StoryComments(ctx, epicID)
+	if err != nil {
+		t.Fatalf("reading the comments of %s: %v", epicID, err)
+	}
+	if len(comments) != 2 || comments[0].Text != "The first." || comments[1].Text != "The second,\n\nwhole." {
+		t.Errorf("expected the two comments oldest first and whole, got %+v", comments)
+	}
+
+	if _, err := gateway.StoryComments(ctx, "no-such-bead"); err == nil {
+		t.Error("expected the comments of a bead that does not exist to be an error")
+	}
+}

@@ -558,13 +558,16 @@ func clip(b *strings.Builder, text string) {
 
 // clipped is text cut to at most Width runes, marked with an ellipsis when
 // something was cut off so a person knows the line does not say everything.
-func clipped(text string) string {
+func clipped(text string) string { return clippedTo(text, Width) }
+
+// clippedTo is text cut to at most n runes, marked the same way.
+func clippedTo(text string, n int) string {
 	r := []rune(text)
-	if len(r) <= Width {
+	if len(r) <= n {
 		return text
 	}
-	if Width <= 1 {
-		return string(r[:Width])
+	if n <= 1 {
+		return string(r[:n])
 	}
-	return string(r[:Width-1]) + "…"
+	return string(r[:n-1]) + "…"
 }

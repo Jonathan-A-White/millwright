@@ -246,3 +246,38 @@ func decodeBeads(printed []byte) ([]bead, error) {
 	}
 	return beads, nil
 }
+
+// decodeComments reads the list of comments `bd comments --json` printed,
+// oldest first. A comment whose time cannot be read has none, and sorts before
+// the rest, keeping the place bd printed it in among such comments.
+func decodeComments(printed []byte) ([]application.Comment, error) {
+	printed = bytes.TrimSpace(printed)
+	if len(printed) == 0 {
+		return nil, nil
+	}
+	if printed[0] == '{' {
+		var reported struct {
+			Error string `json:"error"`
+		}
+		if err := json.Unmarshal(printed, &reported); err == nil && reported.Error != "" {
+			return nil, errors.New(reported.Error)
+		}
+	}
+
+	var said []struct {
+		Author    string `json:"author"`
+		Text      string `json:"text"`
+		CreatedAt string `json:"created_at"`
+	}
+	if err := json.Unmarshal(printed, &said); err != nil {
+		return nil, fmt.Errorf("%s printed something that is not a list of comments: %w", Program, err)
+	}
+
+	comments := make([]application.Comment, 0, len(said))
+	for _, one := range said {
+		created, _ := time.Parse(time.RFC3339, one.CreatedAt)
+		comments = append(comments, application.Comment{Author: one.Author, Created: created, Text: one.Text})
+	}
+	sort.SliceStable(comments, func(i, j int) bool { return comments[i].Created.Before(comments[j].Created) })
+	return comments, nil
+}

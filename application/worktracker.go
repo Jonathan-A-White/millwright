@@ -87,6 +87,14 @@ type FormulaStep struct {
 	Description string
 }
 
+// Comment is one comment left on a story: who left it, when, and what it says,
+// as written.
+type Comment struct {
+	Author  string
+	Created time.Time
+	Text    string
+}
+
 // Held reports whether the tracker is holding this story back from every
 // dispatcher: filed, complete, and waiting on somebody to approve it.
 func (d StoryDetail) Held() bool {
@@ -126,8 +134,14 @@ func (d StoryDetail) Path() (domain.Path, error) {
 // state each is in, closed ones included, because an epic's tree that leaves
 // out the work already done is not this epic's tree.
 type EpicDetail struct {
-	ID       string
-	Title    string
+	ID    string
+	Title string
+	// Status is what the tracker says the epic is, in its own words; empty when
+	// the tracker did not say.
+	Status string
+	// Priority is how urgent the epic is, 0 (most urgent) to 4, DefaultPriority
+	// when the tracker did not say.
+	Priority int
 	Defaults domain.Path
 	// Stories are in the order they were filed, each with the epic's defaults
 	// overlaid and with Needs filled in.
@@ -261,6 +275,10 @@ type WorkTracker interface {
 
 	// CommentOnStory appends one comment to a story.
 	CommentOnStory(ctx context.Context, id, text string) error
+
+	// StoryComments lists the comments left on a story, oldest first. It reads
+	// and writes nothing, and a story with no comments has an empty list.
+	StoryComments(ctx context.Context, id string) ([]Comment, error)
 
 	// CloseStory closes a story with the reason it was closed for.
 	CloseStory(ctx context.Context, id, reason string) error
