@@ -2,6 +2,8 @@ package rig_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -126,5 +128,180 @@ func TestUncommittedNamesEveryChangedFileAndNothingElse(t *testing.T) {
 func TestUncommittedRefusesAHalfQuestion(t *testing.T) {
 	if _, err := rig.New().Uncommitted(context.Background(), ""); err == nil {
 		t.Error("expected an error when no worktree is named")
+	}
+}
+
+// landed lands a story's one commit on main at the origin the way mw next does —
+// in a throwaway worktree, pushed from there — and leaves the rig checkout
+// where it was, which is what Advance is for.
+func landed(t *testing.T, here string) application.Landed {
+	t.Helper()
+	ctx := context.Background()
+	worktrees := rig.New()
+
+	run(t, here, "git", "checkout", "-q", "-b", "mw/story")
+	write(t, here, "story.md", "the story's work\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "The story's work")
+	run(t, here, "git", "checkout", "-q", "main")
+
+	dir, err := worktrees.OpenLanding(ctx, here, "origin/main")
+	if err != nil {
+		t.Fatalf("opening the landing: %v", err)
+	}
+	merged, err := worktrees.Merge(ctx, dir, "mw/story")
+	if err != nil {
+		t.Fatalf("merging the story: %v", err)
+	}
+	if err := worktrees.Push(ctx, dir, "origin", "main"); err != nil {
+		t.Fatalf("pushing the landing: %v", err)
+	}
+	if err := worktrees.CloseLanding(ctx, here, dir); err != nil {
+		t.Fatalf("closing the landing: %v", err)
+	}
+	return merged
+}
+
+// TestAdvanceBringsTheRigCheckoutToTheLandedCommit drives real git: a landing is
+// made and pushed from a throwaway worktree, so the rig's own checkout is behind
+// the main it just pushed until Advance fast-forwards it.
+func TestAdvanceBringsTheRigCheckoutToTheLandedCommit(t *testing.T) {
+	here, _ := aRig(t)
+	ctx := context.Background()
+	worktrees := rig.New()
+
+	merged := landed(t, here)
+	if got := run(t, here, "git", "rev-parse", "HEAD"); got == merged.Commit {
+		t.Fatalf("expected the rig checkout to be behind the landing before Advance, but it is at %s", got)
+	}
+
+	advanced, err := worktrees.Advance(ctx, here, "main", merged.Commit)
+	if err != nil {
+		t.Fatalf("advancing the rig checkout: %v", err)
+	}
+	if !advanced.Moved || advanced.Left != "" {
+		t.Errorf("expected the checkout to be moved with nothing left, got %+v", advanced)
+	}
+	if got := run(t, here, "git", "rev-parse", "HEAD"); got != merged.Commit {
+		t.Errorf("expected the rig checkout at the landed commit %s, got %s", merged.Commit, got)
+	}
+	if got := run(t, here, "git", "rev-parse", "main"); got != merged.Commit {
+		t.Errorf("expected main at the landed commit %s, got %s", merged.Commit, got)
+	}
+	if _, err := os.Stat(filepath.Join(here, "story.md")); err != nil {
+		t.Errorf("expected the story's work in the rig checkout: %v", err)
+	}
+
+	// Once level there is nothing to move and nothing to say.
+	again, err := worktrees.Advance(ctx, here, "main", merged.Commit)
+	if err != nil {
+		t.Fatalf("advancing a checkout already level: %v", err)
+	}
+	if again.Moved || again.Left != "" {
+		t.Errorf("expected a level checkout to be neither moved nor left, got %+v", again)
+	}
+}
+
+// TestAdvanceLeavesADirtyCheckoutAloneAndSaysSo: a person's work in progress in
+// the rig checkout is never touched, tracked changes and stray files alike.
+func TestAdvanceLeavesADirtyCheckoutAloneAndSaysSo(t *testing.T) {
+	cases := []struct {
+		name  string
+		touch func(t *testing.T, here string) (path, content string)
+	}{
+		{"a modified tracked file", func(t *testing.T, here string) (string, string) {
+			write(t, here, "README.md", "half-done edit\n")
+			return "README.md", "half-done edit\n"
+		}},
+		{"an untracked file", func(t *testing.T, here string) (string, string) {
+			write(t, here, "scratch.md", "a note to self\n")
+			return "scratch.md", "a note to self\n"
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			here, _ := aRig(t)
+			merged := landed(t, here)
+			before := run(t, here, "git", "rev-parse", "HEAD")
+			path, content := tc.touch(t, here)
+
+			advanced, err := rig.New().Advance(context.Background(), here, "main", merged.Commit)
+			if err != nil {
+				t.Fatalf("advancing a dirty checkout is left alone, not an error: %v", err)
+			}
+			if advanced.Moved {
+				t.Errorf("expected a dirty checkout not to be moved, got %+v", advanced)
+			}
+			if !strings.Contains(advanced.Left, "uncommitted") || !strings.Contains(advanced.Left, path) {
+				t.Errorf("expected the reason to say the checkout has uncommitted work and name %s, got %q", path, advanced.Left)
+			}
+			if got := run(t, here, "git", "rev-parse", "HEAD"); got != before {
+				t.Errorf("expected HEAD left at %s, got %s", before, got)
+			}
+			if got, err := os.ReadFile(filepath.Join(here, path)); err != nil || string(got) != content {
+				t.Errorf("expected %s left as it was, got %q (%v)", path, got, err)
+			}
+		})
+	}
+}
+
+// TestAdvanceLeavesACheckoutOnAnotherBranchAlone: somebody working on a branch
+// of their own in the rig checkout is not moved onto main, and neither is main.
+func TestAdvanceLeavesACheckoutOnAnotherBranchAlone(t *testing.T) {
+	here, _ := aRig(t)
+	merged := landed(t, here)
+	run(t, here, "git", "checkout", "-q", "-b", "wip")
+	before := run(t, here, "git", "rev-parse", "HEAD")
+	mainBefore := run(t, here, "git", "rev-parse", "main")
+
+	advanced, err := rig.New().Advance(context.Background(), here, "main", merged.Commit)
+	if err != nil {
+		t.Fatalf("advancing a checkout on another branch is left alone, not an error: %v", err)
+	}
+	if advanced.Moved {
+		t.Errorf("expected a checkout on another branch not to be moved, got %+v", advanced)
+	}
+	if !strings.Contains(advanced.Left, "wip") || !strings.Contains(advanced.Left, "main") {
+		t.Errorf("expected the reason to name both wip and main, got %q", advanced.Left)
+	}
+	if got := run(t, here, "git", "rev-parse", "HEAD"); got != before {
+		t.Errorf("expected HEAD left at %s, got %s", before, got)
+	}
+	if got := run(t, here, "git", "rev-parse", "main"); got != mainBefore {
+		t.Errorf("expected main left at %s, got %s", mainBefore, got)
+	}
+}
+
+// TestAdvanceLeavesACheckoutWithCommitsOfItsOwnAlone: a local main that has
+// commits the remote does not is not fast-forwardable, and mw merges nothing
+// into it.
+func TestAdvanceLeavesACheckoutWithCommitsOfItsOwnAlone(t *testing.T) {
+	here, _ := aRig(t)
+	merged := landed(t, here)
+	write(t, here, "local.md", "committed here, never pushed\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "A local commit")
+	before := run(t, here, "git", "rev-parse", "HEAD")
+
+	advanced, err := rig.New().Advance(context.Background(), here, "main", merged.Commit)
+	if err != nil {
+		t.Fatalf("advancing a diverged checkout is left alone, not an error: %v", err)
+	}
+	if advanced.Moved || advanced.Left == "" {
+		t.Errorf("expected a diverged checkout to be left with a reason, got %+v", advanced)
+	}
+	if got := run(t, here, "git", "rev-parse", "HEAD"); got != before {
+		t.Errorf("expected HEAD left at %s, got %s", before, got)
+	}
+}
+
+func TestAdvanceRefusesAHalfQuestion(t *testing.T) {
+	here, _ := aRig(t)
+	ctx := context.Background()
+	if _, err := rig.New().Advance(ctx, here, "", "abc"); err == nil {
+		t.Error("expected advancing no branch to be refused")
+	}
+	if _, err := rig.New().Advance(ctx, here, "main", ""); err == nil {
+		t.Error("expected advancing to no commit to be refused")
 	}
 }
