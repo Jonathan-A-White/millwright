@@ -352,3 +352,25 @@ func TestPathMetadataIgnoresValuesThatAreNotStrings(t *testing.T) {
 		t.Fatalf("expected only the string metadata, got %v", got)
 	}
 }
+
+func TestCommentsComeBackOldestFirstWithTheirTextWhole(t *testing.T) {
+	printed := `[
+	  {"id":"b","issue_id":"t-a","author":"mayor@laptop","text":"second\n\nin full","created_at":"2026-09-19T09:22:00Z"},
+	  {"id":"a","issue_id":"t-a","author":"governor","text":"first","created_at":"2026-09-18T10:00:00Z"}
+	]`
+	got, err := decodeComments([]byte(printed))
+	if err != nil {
+		t.Fatalf("decoding comments: %v", err)
+	}
+	if len(got) != 2 || got[0].Text != "first" || got[1].Text != "second\n\nin full" || got[1].Author != "mayor@laptop" {
+		t.Fatalf("expected the comments oldest first and whole, got %+v", got)
+	}
+
+	none, err := decodeComments([]byte("[]"))
+	if err != nil || len(none) != 0 {
+		t.Fatalf("expected no comments from an empty list, got %+v, %v", none, err)
+	}
+	if _, err := decodeComments([]byte(`{"error":"no issue found"}`)); err == nil {
+		t.Fatal("expected bd's error object to come back as an error")
+	}
+}

@@ -39,6 +39,8 @@ type FakeTracker struct {
 
 	defaults map[string]domain.Path // epic id -> its default path
 	titles   map[string]string      // epic id -> what it is called
+	epicSays map[string]epicFacts   // epic id -> its status and priority, when set
+	epicSaid map[string][]string    // epic id -> the comments on it, oldest first
 	stories  map[string]*fakeStory
 	order    []string
 	epics    []string
@@ -50,6 +52,10 @@ type FakeTracker struct {
 
 	// refused is the stories CloseStory turns down, by the reason it gives.
 	refused map[string]string
+
+	// writes counts the calls that changed something, so that a test can say a
+	// reading wrote nothing.
+	writes int
 
 	notes map[string]string
 	// published is the notes as the last sync that got through left them: what
@@ -68,6 +74,12 @@ type FakeTracker struct {
 	SyncErr error
 }
 
+// epicFacts is what DescribeEpic gave an epic beyond its title.
+type epicFacts struct {
+	status   string
+	priority int
+}
+
 // fakeStory is one story as the fake remembers it.
 type fakeStory struct {
 	detail      application.StoryDetail
@@ -84,6 +96,8 @@ func NewFakeTracker() *FakeTracker {
 	return &FakeTracker{
 		defaults:  map[string]domain.Path{},
 		titles:    map[string]string{},
+		epicSays:  map[string]epicFacts{},
+		epicSaid:  map[string][]string{},
 		stories:   map[string]*fakeStory{},
 		formulas:  map[string][]application.FormulaStep{},
 		poured:    map[string]string{},
@@ -97,6 +111,24 @@ func (f *FakeTracker) AddEpic(id string, defaults domain.Path) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.defaults[id] = defaults
+}
+
+// DescribeEpic gives an epic the title, status and priority a reading of it
+// reports. An epic never described reads as untitled, open and at
+// application.DefaultPriority.
+func (f *FakeTracker) DescribeEpic(id, title, status string, priority int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.titles[id] = title
+	f.epicSays[id] = epicFacts{status: status, priority: priority}
+}
+
+// AddEpicComment records a comment already left on an epic, after those before
+// it. It is a fixture, not a write: Writes does not count it.
+func (f *FakeTracker) AddEpicComment(id, text string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.epicSaid[id] = append(f.epicSaid[id], text)
 }
 
 // AddStory records an open, unclaimed story under an epic. Its Overrides are
@@ -125,6 +157,15 @@ func (f *FakeTracker) AddStory(epicID string, story domain.Story) {
 func (f *FakeTracker) SetPriority(id string, priority int) error {
 	return f.write(id, func(s *fakeStory) error {
 		s.detail.Priority = priority
+		return nil
+	})
+}
+
+// SetStatus sets the status of a story the fake holds, whatever it was: how a
+// fixture makes a story held, in progress or closed without walking it there.
+func (f *FakeTracker) SetStatus(id, status string) error {
+	return f.write(id, func(s *fakeStory) error {
+		s.detail.Status = status
 		return nil
 	})
 }
@@ -159,6 +200,7 @@ func (f *FakeTracker) CreateEpic(_ context.Context, epic application.NewEpic) (s
 	if epic.Title == "" {
 		return "", fmt.Errorf("an epic needs a title")
 	}
+	f.writes++
 	id := fmt.Sprintf("f-%d", len(f.epics)+1)
 	f.epics = append(f.epics, id)
 	f.defaults[id] = epic.Defaults
@@ -186,6 +228,7 @@ func (f *FakeTracker) CreateStory(_ context.Context, story application.NewStory)
 		}
 	}
 
+	f.writes++
 	under := 0
 	for _, id := range f.order {
 		if f.stories[id].detail.EpicID == story.EpicID {
@@ -275,6 +318,36 @@ func (f *FakeTracker) Comments(id string) []string {
 	return append([]string(nil), s.comments...)
 }
 
+// Writes reports how many calls changed something — a story or epic filed, a
+// story written to, a note set or cleared — so that a test can say that a
+// reading wrote nothing.
+func (f *FakeTracker) Writes() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.writes
+}
+
+// StoryComments implements application.WorkTracker. The fake keeps only what a
+// comment said, so each comes back from the actor, without a time.
+func (f *FakeTracker) StoryComments(_ context.Context, id string) ([]application.Comment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	texts := f.epicSaid[id]
+	if s, ok := f.stories[id]; ok {
+		texts = s.comments
+	} else if _, epic := f.defaults[id]; !epic {
+		return nil, fmt.Errorf("no story %q", id)
+	}
+	comments := make([]application.Comment, 0, len(texts))
+	for _, text := range texts {
+		comments = append(comments, application.Comment{Author: Actor, Text: text})
+	}
+	return comments, nil
+}
+
 // CloseReason reports why a story was closed, or "" if it is still open.
 func (f *FakeTracker) CloseReason(id string) string {
 	f.mu.Lock()
@@ -324,7 +397,11 @@ func (f *FakeTracker) ShowEpic(_ context.Context, id string) (application.EpicDe
 		return application.EpicDetail{}, fmt.Errorf("no epic %q", id)
 	}
 
-	epic := application.EpicDetail{ID: id, Title: f.titles[id], Defaults: f.defaults[id]}
+	epic := application.EpicDetail{ID: id, Title: f.titles[id], Defaults: f.defaults[id],
+		Status: StatusOpen, Priority: application.DefaultPriority}
+	if says, described := f.epicSays[id]; described {
+		epic.Status, epic.Priority = says.status, says.priority
+	}
 	for _, storyID := range f.order {
 		s := f.stories[storyID]
 		if s.detail.EpicID != id {
@@ -769,6 +846,7 @@ func (f *FakeTracker) SetNote(_ context.Context, key, value string) error {
 	if key == "" {
 		return fmt.Errorf("a note needs a key")
 	}
+	f.writes++
 	f.notes[key] = value
 	return nil
 }
@@ -792,6 +870,7 @@ func (f *FakeTracker) ClearNote(_ context.Context, key string) error {
 	if key == "" {
 		return fmt.Errorf("a note needs a key")
 	}
+	f.writes++
 	delete(f.notes, key)
 	return nil
 }
@@ -842,6 +921,7 @@ func (f *FakeTracker) write(id string, change func(*fakeStory) error) error {
 	if err := change(s); err != nil {
 		return err
 	}
+	f.writes++
 	s.touched = time.Now()
 	return nil
 }

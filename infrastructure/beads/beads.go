@@ -269,7 +269,9 @@ func (g *Gateway) ShowEpic(ctx context.Context, id string) (application.EpicDeta
 		return application.EpicDetail{}, fmt.Errorf("reading the stories of %s: %w", id, err)
 	}
 
-	filed := application.EpicDetail{ID: epic.ID, Title: epic.Title, Defaults: defaults}
+	filed := application.EpicDetail{
+		ID: epic.ID, Title: epic.Title, Status: epic.Status, Priority: epic.priority(), Defaults: defaults,
+	}
 	for _, story := range inFiledOrder(stories) {
 		filed.Stories = append(filed.Stories, story.detail(defaults))
 	}
@@ -338,6 +340,21 @@ func (g *Gateway) SetStoryMetadata(ctx context.Context, id string, fields map[st
 func (g *Gateway) CommentOnStory(ctx context.Context, id, text string) error {
 	_, err := g.call(ctx, "comment", id, text)
 	return err
+}
+
+// StoryComments implements application.WorkTracker. bd lists them oldest first;
+// they are put in that order here too, by the time each says it was left, so
+// that a caller taking the newest never depends on it.
+func (g *Gateway) StoryComments(ctx context.Context, id string) ([]application.Comment, error) {
+	out, err := g.call(ctx, "comments", id, "--json")
+	if err != nil {
+		return nil, err
+	}
+	comments, err := decodeComments(out)
+	if err != nil {
+		return nil, fmt.Errorf("reading the comments of %s: %w", id, err)
+	}
+	return comments, nil
 }
 
 // CloseStory implements application.WorkTracker.
