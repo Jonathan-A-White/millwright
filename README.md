@@ -289,12 +289,14 @@ bd reclaim mw-gq6.30                                        # or take it over fi
 
 ### What a host is told
 
-`~/.config/mw/config.toml`, with `MW_VAULT`, `MW_HOST` and `MW_CAP` ahead of it:
+`~/.config/mw/config.toml`, with `MW_VAULT`, `MW_HOST`, `MW_CAP` and
+`MW_HOST_SILENT_HOURS` ahead of it:
 
 ```toml
 vault = "/root/millwright-vault"   # the one beads database and the seats
 host  = "vps"                      # which of the factory's hosts this is
 cap   = 1                          # sessions running here at once (default 1)
+host_silent_hours = 2              # how long another host may go unsynced (default 2)
 
 [rigs]
 millwright = "/root/millwright"    # where each rig is checked out here
@@ -330,6 +332,48 @@ Ledgers are appended to by both hosts and edited by neither, so the vault's
 then merge by keeping every line instead of conflicting. `mw sync` writes that
 line if it is missing and says so; committing it is a seat's job, and until
 someone does, only this host is covered. See `features/sync.feature`.
+
+## Seeing what a host is doing
+
+`mw status` is the report for a phone: what this host is doing right now, in
+five parts.
+
+- **RUNNING** — the stories this host has claimed, each with the name of the
+  tmux session to attach to. A story recorded `run=stopped` or `run=stuck` says
+  `NOT RUNNING` rather than pretending, and a claimed story whose poured formula
+  still has a step open says its close-out is blocked.
+- **READY** — what this host could take now.
+- **BLOCKED** — what is waiting, each with only the work it is still waiting
+  for: a wait that has finished is not listed.
+- **OTHER HOSTS** — every other host a story is pathed to, and what it holds.
+- **FUEL today** — the tokens the Builder's ledger charged on lines dated today,
+  and 0 when the seat has no ledger yet.
+
+A story filed with only its overrides is shown with the epic's defaults filled
+in. The command only reads: no claim, no write to a bead, no note, no ledger
+line and no session is started, so it costs no tokens. Every line fits 60
+columns; a longer title is cut short with an ellipsis rather than wrapped.
+
+The OTHER HOSTS part is the whole of the factory's safety net for a host that
+has gone quiet. There is no failover: a host that stops syncing does not hand
+its work back. Each host is shown with when it last recorded itself level (the
+`host.<name>.last_sync` note `mw sync` leaves, so it is always a sync cycle
+behind), and the stories pathed to it that are ready or already claimed. A host
+is **ASLEEP** when that note is older than `host_silent_hours` — two by default,
+so that the lag alone does not call a host asleep — set in the config file or by
+`MW_HOST_SILENT_HOURS`, whole hours and at least 1. It is also `ASLEEP, never
+synced` when it has left no note at all, and `ASLEEP, last sync unreadable` when
+its note is not a time; neither is an error, since a host that cannot say when
+it was last level is the one to look at. The stories of a sleeping host are
+marked **stranded**: nothing here will move them and no other host will take
+them. Under it `mw status` prints the one line that brings a story here:
+
+```sh
+bd update <id> --set-metadata host=vps
+```
+
+`mw status` only ever says this. Re-pathing a story is a person's act, never a
+report's. See `features/status.feature`.
 
 ## The Path
 
