@@ -34,6 +34,25 @@ func (g *Gateway) ReadyForHost(ctx context.Context, host string) ([]application.
 	return g.onHost(ctx, stories, host)
 }
 
+// ReadyWithLabel implements application.WorkTracker. It is `bd ready` narrowed
+// by a label, so bd applies its own idea of blocked, held and claimed, and
+// unlike ReadyForHost it neither asks for unassigned beads nor drops the ones
+// whose Path names no host: a bead for the Governor is nobody's to dispatch.
+func (g *Gateway) ReadyWithLabel(ctx context.Context, label string) ([]application.StoryDetail, error) {
+	if strings.TrimSpace(label) == "" {
+		return nil, fmt.Errorf("which label are the ready stories carrying?")
+	}
+	out, err := g.call(ctx, "ready", "--label", label, "--exclude-type", "epic", "--limit", "0", "--json")
+	if err != nil {
+		return nil, err
+	}
+	beads, err := decodeBeads(out)
+	if err != nil {
+		return nil, fmt.Errorf("reading what is ready under the label %s: %w", label, err)
+	}
+	return g.overlaid(ctx, beads)
+}
+
 // RunningStories implements application.WorkTracker: what this host has in
 // flight, which is what a concurrency cap counts.
 func (g *Gateway) RunningStories(ctx context.Context, host string) ([]application.StoryDetail, error) {

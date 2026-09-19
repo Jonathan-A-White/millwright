@@ -229,6 +229,15 @@ type WorkTracker interface {
 	// names no host is not listed for any host.
 	BlockedForHost(ctx context.Context, host string) ([]StoryDetail, error)
 
+	// ReadyWithLabel lists every bead carrying a label that is open and not
+	// blocked, whatever it is pathed to — or whether it has a Path at all: the
+	// tickets the Mayors file under the map for the Governor have no rig and no
+	// host, and no host-keyed listing above would ever show them. A bead that is
+	// held, claimed, closed or waiting on an open bead is not listed, and nor is
+	// an epic. Each comes back with its own epic's defaults overlaid, when it
+	// has an epic. It reads and writes nothing.
+	ReadyWithLabel(ctx context.Context, label string) ([]StoryDetail, error)
+
 	// WorkElsewhere lists the stories another host has in hand: every story that
 	// is ready to be taken or already claimed, whose Path names some host other
 	// than the one given. It is how `mw status` sees work that is nobody's here

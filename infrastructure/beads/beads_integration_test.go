@@ -779,6 +779,55 @@ func TestGatewayTellsAStorysLabels(t *testing.T) {
 	}
 }
 
+// A bead labelled hitl that no epic gave a Path — the ticket a Mayor files for
+// the Governor — is found by its label alone, if it is open and not blocked;
+// one that is closed, blocked, claimed or unlabelled is not.
+func TestGatewayListsWhatIsReadyUnderALabelWhateverItsPath(t *testing.T) {
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	epicID := bdRun(t, vault, beads.Program, "create", "An epic", "-t", "epic",
+		"--metadata", `{"rig":"millwright","branch":"main","harness":"claude","model":"opus","effort":"high","host":"laptop"}`,
+		"--silent")
+	pathless := bdRun(t, vault, beads.Program, "create", "Governor: turn on the mail notifier",
+		"--labels", "hitl,wayfinder:task", "--priority", "1", "--silent")
+	pathed := bdRun(t, vault, beads.Program, "create", "A story for the Governor", "--parent", epicID,
+		"--labels", "hitl", "--no-inherit-labels", "--silent")
+	closed := bdRun(t, vault, beads.Program, "create", "Already done", "--labels", "hitl", "--silent")
+	bdRun(t, vault, beads.Program, "close", closed, "--reason", "done")
+	blocker := bdRun(t, vault, beads.Program, "create", "The errand first", "--silent")
+	blocked := bdRun(t, vault, beads.Program, "create", "The errand after", "--labels", "hitl", "--silent")
+	bdRun(t, vault, beads.Program, "dep", "add", blocked, blocker)
+	claimed := bdRun(t, vault, beads.Program, "create", "Being done now", "--labels", "hitl", "--silent")
+	bdRun(t, vault, beads.Program, "update", claimed, "--claim")
+	bdRun(t, vault, beads.Program, "create", "Not for the Governor", "--silent")
+
+	found, err := beads.New(vault).ReadyWithLabel(ctx, application.LabelHitl)
+	if err != nil {
+		t.Fatalf("listing what is ready under hitl: %v", err)
+	}
+	var ids []string
+	for _, story := range found {
+		ids = append(ids, story.Story.ID)
+	}
+	if want := sorted([]string{pathless, pathed}); !slicesEqual(sorted(ids), want) {
+		t.Fatalf("expected %q ready under hitl, got %q", want, ids)
+	}
+	for _, story := range found {
+		switch story.Story.ID {
+		case pathless:
+			if got := story.Merged().Rig; got != "" || story.Priority != 1 {
+				t.Errorf("expected %s to have no rig and priority 1, got rig %q priority %d", pathless, got, story.Priority)
+			}
+		case pathed:
+			if got := story.Merged().Host; got != "laptop" {
+				t.Errorf("expected %s to inherit the host laptop, got %q", pathed, got)
+			}
+		}
+	}
+}
+
 func sorted(in []string) []string {
 	sort.Strings(in)
 	return in
