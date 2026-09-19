@@ -728,6 +728,26 @@ func TestGatewayFilesAnEpicWithItsStoriesHeld(t *testing.T) {
 	if !whole.Stories[0].Closed() {
 		t.Errorf("expected %s to be read back closed, got %q", first, whole.Stories[0].Status)
 	}
+
+	// The listing reads only direct children, so an epic filed under the epic
+	// comes back among them: marked as an epic, which is how a tree tells it from
+	// a story, and readable in its own right.
+	child := bdRun(t, vault, beads.Program, "create", "Later work", "-t", "epic", "--parent", epicID, "--silent")
+	whole, err = gateway.ShowEpic(ctx, epicID)
+	if err != nil {
+		t.Fatalf("reading the epic %s with an epic under it: %v", epicID, err)
+	}
+	if len(whole.Stories) != 3 {
+		t.Fatalf("expected the two stories and the child epic, got %+v", whole.Stories)
+	}
+	for _, detail := range whole.Stories {
+		if got := detail.Story.ID == child; detail.IsEpic != got {
+			t.Errorf("expected %s to be an epic: %v, got %v", detail.Story.ID, got, detail.IsEpic)
+		}
+	}
+	if _, err := gateway.ShowEpic(ctx, child); err != nil {
+		t.Errorf("expected the child epic %s to be readable as an epic: %v", child, err)
+	}
 }
 
 // The dogfood failure of 2026-09-19, against a real bd: `mw dispatch` claimed a

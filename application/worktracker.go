@@ -63,6 +63,10 @@ type StoryDetail struct {
 	// Started is when the story was claimed, as the tracker recorded it; zero
 	// when it was never claimed or the tracker did not say.
 	Started time.Time
+	// IsEpic is true when this is not a story but an epic filed under an epic:
+	// a listing of an epic's children returns it among them, and it is not work
+	// a session takes. A tracker that does not say leaves it false.
+	IsEpic bool
 	// Molecule is the formula poured for this story, empty until it has been
 	// poured. It is filled in by whoever pours it, not by reading the story.
 	Molecule Molecule
@@ -190,7 +194,9 @@ type EpicDetail struct {
 	Priority int
 	Defaults domain.Path
 	// Stories are in the order they were filed, each with the epic's defaults
-	// overlaid and with Needs filled in.
+	// overlaid and with Needs filled in. They are every direct child of the
+	// epic: one that is itself an epic is among them with IsEpic set, and its
+	// own children are not read.
 	Stories []StoryDetail
 }
 

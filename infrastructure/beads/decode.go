@@ -194,6 +194,7 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		Created:         b.created(),
 		Started:         b.started(),
 		Needs:           b.needs(),
+		IsEpic:          b.Type == TypeEpic,
 		// The formula poured for this story, as the dispatch that poured it
 		// recorded it. Only the root is known from the story itself; the steps
 		// are read from the tracker by whoever needs them.

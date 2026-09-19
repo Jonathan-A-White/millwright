@@ -41,7 +41,20 @@ type FiledPlan struct {
 	Title    string
 	Defaults domain.Path
 	Stories  []FiledStory
+	// Epics are the epics filed directly under this one, which a plan read back
+	// from the tracker may have and a plan just filed never does. They are not
+	// stories: nothing here releases them, and the tree names them as epics.
+	Epics    []FiledEpic
 	Released bool
+}
+
+// FiledEpic is an epic found under a filed epic: its id, what it is called, and
+// the word the tree uses for what the tracker says it is (see FiledStory.State).
+// Its own stories are not read.
+type FiledEpic struct {
+	ID    string
+	Title string
+	State string
 }
 
 // FiledStory is one story as it was filed: the key it had in the plan, the id
@@ -219,6 +232,10 @@ func (p FiledPlan) Tree() string {
 			state = append(state, "waits on "+strings.Join(story.Needs, ", "))
 		}
 		fmt.Fprintf(&b, "      %s\n", strings.Join(state, " · "))
+	}
+	for _, epic := range p.Epics {
+		fmt.Fprintf(&b, "\n  %s · %s\n", epic.ID, epic.Title)
+		fmt.Fprintf(&b, "      an epic, %s: its stories are not shown here, mw show %s prints them\n", epic.State, epic.ID)
 	}
 	return b.String()
 }

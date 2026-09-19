@@ -78,6 +78,14 @@ func filedFrom(epic EpicDetail) FiledPlan {
 
 	filed := FiledPlan{EpicID: epic.ID, Title: epic.Title, Defaults: epic.Defaults}
 	for _, story := range epic.Stories {
+		// A child that is itself an epic is not a story of this plan: it is
+		// named as an epic, and it is never released or counted as work.
+		if story.IsEpic {
+			filed.Epics = append(filed.Epics, FiledEpic{
+				ID: story.Story.ID, Title: story.Story.Title, State: StateOf(story.Status),
+			})
+			continue
+		}
 		waits := make([]string, 0, len(story.Needs))
 		for _, need := range story.Needs {
 			// A need the epic does not hold is one this reading cannot vouch

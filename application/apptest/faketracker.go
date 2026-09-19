@@ -152,6 +152,18 @@ func (f *FakeTracker) AddStory(epicID string, story domain.Story) {
 	}
 }
 
+// AddChildEpic records an epic filed under another epic, as a listing of the
+// parent's children returns it: among its stories, marked as an epic. It can be
+// shown in its own right, with the defaults of its parent.
+func (f *FakeTracker) AddChildEpic(parentID, id, title string) {
+	f.AddStory(parentID, domain.Story{ID: id, Title: title})
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stories[id].detail.IsEpic = true
+	f.defaults[id] = f.defaults[parentID]
+	f.titles[id] = title
+}
+
 // SetPriority sets the priority of a story the fake holds, 0 being the most
 // urgent. A story added without one has application.DefaultPriority.
 func (f *FakeTracker) SetPriority(id string, priority int) error {
@@ -401,6 +413,9 @@ func (f *FakeTracker) ShowEpic(_ context.Context, id string) (application.EpicDe
 	defer f.mu.Unlock()
 	if f.Err != nil {
 		return application.EpicDetail{}, f.Err
+	}
+	if story, filed := f.stories[id]; filed && !story.detail.IsEpic {
+		return application.EpicDetail{}, fmt.Errorf("%s is a story, not an epic", id)
 	}
 	if _, filed := f.defaults[id]; !filed {
 		return application.EpicDetail{}, fmt.Errorf("no epic %q", id)

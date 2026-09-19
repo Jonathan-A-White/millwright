@@ -22,6 +22,10 @@ type releaseContext struct {
 
 	printed bytes.Buffer
 	err     error
+
+	// writesBefore is how many writes the tracker had taken when the epic was
+	// last shown.
+	writesBefore int
 }
 
 // InitializeReleaseScenario registers the steps of features/release.feature.
@@ -49,6 +53,8 @@ func InitializeReleaseScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the story "([^"]*)" of the filed plan is now (.+)$`, c.theStoryOfTheFiledPlanIsNow)
 	ctx.Then(`^the stories ready on (\S+) once released are (.+)$`, c.theStoriesReadyOnceReleasedAre)
 	ctx.Then(`^every story of the filed plan is still held$`, c.everyStoryOfTheFiledPlanIsStillHeld)
+
+	c.registerShowSteps(ctx)
 }
 
 // thePlanFiledAndHeldEarlier files the plan the way `mw file` does when nobody

@@ -20,6 +20,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newNextCmd())
 	root.AddCommand(newReleaseCmd())
 	root.AddCommand(newSeatCmd())
+	root.AddCommand(newShowCmd())
 	root.AddCommand(newStatusCmd())
 	root.AddCommand(newSweepCmd())
 	root.AddCommand(newSyncCmd())
