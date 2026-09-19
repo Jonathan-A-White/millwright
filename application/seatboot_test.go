@@ -68,6 +68,8 @@ func (f *fakeVault) RunFile(storyID, name string) string {
 	return "/vault/runs/" + storyID + "/" + name
 }
 
+func (f *fakeVault) Dir() string { return "/vault" }
+
 func (f *fakeVault) AppendToLedger(_ context.Context, seat, line string) error {
 	if f.err != nil {
 		return f.err
@@ -165,7 +167,7 @@ func TestBootWritesTheBootFileAndHandsTheHarnessEverything(t *testing.T) {
 		t.Errorf("expected the boot file that was written, got %q", l.BootFile)
 	case l.ResultFile != "/vault/runs/mw-gq6.6/"+application.ResultFileName:
 		t.Errorf("expected the result beside it, got %q", l.ResultFile)
-	case l.Kickoff != application.KickoffPrompt("builder", "mw-gq6.6"):
+	case l.Kickoff != application.KickoffPrompt("builder", "mw-gq6.6", "/vault"):
 		t.Errorf("expected the kickoff prompt, got %q", l.Kickoff)
 	case l.Path.Model != domain.ModelOpus:
 		t.Errorf("expected the story's model, got %q", l.Path.Model)
@@ -300,5 +302,30 @@ func TestBootChainsTheCloseOutOntoTheSessionWithTheStoryAfterIt(t *testing.T) {
 	}
 	if len(h.launch.After) != 0 {
 		t.Errorf("expected nothing chained on, got %q", h.launch.After)
+	}
+}
+
+func TestKickoffPromptGivesTheLiteralBdCommandForTheVault(t *testing.T) {
+	prompt := application.KickoffPrompt("builder", "mw-gq6.6", "/home/jwhite/100%-vault")
+
+	for _, want := range []string{
+		"bd -C /home/jwhite/100%-vault close <step>",
+		"bd -C /home/jwhite/100%-vault <subcommand>",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected the kickoff prompt to hold %q, got %q", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "%!") {
+		t.Errorf("expected the vault's path to be written as it is, got %q", prompt)
+	}
+	if strings.Contains(prompt, "cd ") {
+		t.Errorf("expected the kickoff prompt to say nothing of a change of directory, got %q", prompt)
+	}
+}
+
+func TestKickoffPromptWithNoVaultPathSaysNothingOfBdC(t *testing.T) {
+	if prompt := application.KickoffPrompt("builder", "mw-gq6.6", ""); strings.Contains(prompt, "bd -C") {
+		t.Errorf("expected no bd -C without a vault path, got %q", prompt)
 	}
 }
