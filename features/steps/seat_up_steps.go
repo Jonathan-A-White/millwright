@@ -52,6 +52,12 @@ type seatUpContext struct {
 	err    error
 	// said is what seat up printed.
 	said strings.Builder
+
+	// home, homeWas and modelEnvWas are the home directory a scenario reads its
+	// config from and what it stood in for: see isolateConfig.
+	home        string
+	homeWas     string
+	modelEnvWas map[string]*string
 }
 
 // InitializeSeatUpScenario registers the steps of features/seat_up.feature.
@@ -63,6 +69,7 @@ func InitializeSeatUpScenario(ctx *godog.ScenarioContext) {
 		return ctx, nil
 	})
 	ctx.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
+		c.restoreConfig()
 		if c.dir != "" {
 			_ = os.RemoveAll(c.dir)
 		}
@@ -111,6 +118,8 @@ func InitializeSeatUpScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^seat up is refused saying the seat has no charter$`, c.refusedForNoCharter)
 	ctx.Then(`^seat up is refused saying the seat has no handoff$`, c.refusedForNoHandoff)
 	ctx.Then(`^seat up is refused saying the seat is already acting in "([^"]*)"$`, c.refusedForBeingHeld)
+
+	registerMillhandSteps(ctx, c)
 }
 
 // write puts one file in the vault, making the directories above it.
