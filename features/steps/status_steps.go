@@ -12,6 +12,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/cucumber/godog"
@@ -35,6 +36,14 @@ type statusContext struct {
 
 	lastEpic string
 	now      time.Time
+	// silentHoursWas is what $MW_HOST_SILENT_HOURS held before this scenario
+	// pinned it, so that the environment is left exactly as it was found.
+	silentHoursWas string
+	silentHoursSet bool
+	// elsewhereWas is what each story pathed to another host looked like just
+	// before mw status ran — its host, its status and the note its host left —
+	// so that a scenario can say the report re-pathed and recorded nothing.
+	elsewhereWas map[string]string
 	// askedBefore is how many calls the tracker had logged just before mw
 	// status ran, so that a scenario can say what it asked and nothing more.
 	askedBefore int
@@ -48,18 +57,29 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	c := &statusContext{}
 
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
+		was, set := os.LookupEnv(config.HostSilenceEnv)
 		*c = statusContext{
-			tracker: apptest.NewFakeTracker(),
-			runner:  apptest.NewFakeRunner(),
-			now:     time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC),
+			tracker:        apptest.NewFakeTracker(),
+			runner:         apptest.NewFakeRunner(),
+			now:            time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC),
+			silentHoursWas: was,
+			silentHoursSet: set,
+			elsewhereWas:   map[string]string{},
 		}
-		return ctx, nil
+		// Every status scenario reads its threshold out of the configuration,
+		// and pins it in the environment so that no scenario ever reads this
+		// machine's own config file. The value is the default the config
+		// package would have given anyway.
+		return ctx, os.Setenv(config.HostSilenceEnv, strconv.Itoa(config.DefaultHostSilentHours))
 	})
 	ctx.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
 		if c.root != "" {
 			_ = os.RemoveAll(c.root)
 		}
-		return ctx, nil
+		if c.silentHoursSet {
+			return ctx, os.Setenv(config.HostSilenceEnv, c.silentHoursWas)
+		}
+		return ctx, os.Unsetenv(config.HostSilenceEnv)
 	})
 
 	ctx.Given(`^the status epic "([^"]*)" on the default path:$`, c.theStatusEpicOnTheDefaultPath)
@@ -70,8 +90,13 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the status story "([^"]*)" is claimed with its session running$`, c.theStatusStoryIsClaimedAndRunning)
 	ctx.Given(`^the status story "([^"]*)" is marked run=(\S+)$`, c.theStatusStoryIsMarkedRun)
 	ctx.Given(`^the formula poured for "([^"]*)" has a step still open$`, c.theFormulaPouredHasAStepStillOpen)
+	ctx.Given(`^a status story "([^"]*)" titled "([^"]*)" pathed to the host "([^"]*)"$`, c.aStatusStoryTitledPathedToTheHost)
 	ctx.Given(`^the builder's ledger holds a line from (today|\d{4}-\d{2}-\d{2}) burning (\d+) tokens$`,
 		c.theBuildersLedgerHoldsALineBurning)
+	ctx.Given(`^the host "([^"]*)" last synced (\d+) hours? ago$`, c.theHostLastSyncedHoursAgo)
+	ctx.Given(`^the host "([^"]*)" has never synced$`, c.theHostHasNeverSynced)
+	ctx.Given(`^the host "([^"]*)" left a last sync note that is not a time$`, c.theHostLeftANoteThatIsNotATime)
+	ctx.Given(`^the configuration says a host is asleep after (\d+) hours$`, c.theConfigurationSaysAHostIsAsleepAfter)
 
 	ctx.When(`^mw status reads the host$`, c.mwStatusReadsTheHost)
 
@@ -86,6 +111,13 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the report says today's fuel is (.+)$`, c.theReportSaysTodaysFuelIs)
 	ctx.Then(`^every line of the report is at most 60 columns wide$`, c.everyLineIsAtMost60ColumnsWide)
 	ctx.Then(`^nothing was written through the tracker, the ledger or the runner$`, c.nothingWasWritten)
+	ctx.Then(`^the report lists "([^"]*)" under the other host "([^"]*)"$`, c.theReportListsUnderTheOtherHost)
+	ctx.Then(`^the report lists "([^"]*)" as stranded on the host "([^"]*)"$`, c.theReportListsAsStrandedOn)
+	ctx.Then(`^the report does not call the host "([^"]*)" asleep$`, c.theReportDoesNotCallTheHostAsleep)
+	ctx.Then(`^the report shows the last sync time of the host "([^"]*)"$`, c.theReportShowsTheLastSyncTimeOf)
+	ctx.Then(`^the report says the host "([^"]*)" has never synced$`, c.theReportSaysTheHostHasNeverSynced)
+	ctx.Then(`^the report says how to re-path a story stranded on the host "([^"]*)"$`, c.theReportSaysHowToRePathFrom)
+	ctx.Then(`^nothing pathed to another host was re-pathed or touched$`, c.nothingElsewhereWasTouched)
 }
 
 // workspace makes the temp directory this scenario keeps its vault in, once.
@@ -133,6 +165,49 @@ func (c *statusContext) aStatusStoryOverriding(id, field, value string) error {
 	}
 	c.tracker.AddStory(c.lastEpic, story)
 	return nil
+}
+
+// aStatusStoryTitledPathedToTheHost files a story under the epic with a title
+// of its own and a Path that names another host — what the other-hosts section
+// is made of.
+func (c *statusContext) aStatusStoryTitledPathedToTheHost(id, title, host string) error {
+	story := domain.Story{ID: id, Title: title}
+	if err := story.Overrides.Set("host", host); err != nil {
+		return err
+	}
+	c.tracker.AddStory(c.lastEpic, story)
+	return nil
+}
+
+// theHostLastSyncedHoursAgo leaves the note a host writes for itself when a
+// sync finishes, dated against this scenario's clock.
+func (c *statusContext) theHostLastSyncedHoursAgo(host, hoursText string) error {
+	hours, err := strconv.Atoi(hoursText)
+	if err != nil {
+		return fmt.Errorf("the hours %q are not a number: %w", hoursText, err)
+	}
+	at := c.now.Add(-time.Duration(hours) * time.Hour).UTC().Format(application.LastSyncFormat)
+	return c.tracker.SetNote(context.Background(), application.LastSyncKey(host), at)
+}
+
+// theHostHasNeverSynced is the absence of a note, said out loud: a host nobody
+// has ever recorded a sync for leaves the key-value store empty.
+func (c *statusContext) theHostHasNeverSynced(host string) error {
+	if said, err := c.tracker.Note(context.Background(), application.LastSyncKey(host)); err != nil || said != "" {
+		return fmt.Errorf("expected %s to have no last sync note, got %q: %v", host, said, err)
+	}
+	return nil
+}
+
+func (c *statusContext) theHostLeftANoteThatIsNotATime(host string) error {
+	return c.tracker.SetNote(context.Background(), application.LastSyncKey(host), "a while back")
+}
+
+// theConfigurationSaysAHostIsAsleepAfter pins the threshold in the environment
+// the config package reads first, so that the scenario really does get its
+// threshold out of the configuration and never off this machine's config file.
+func (c *statusContext) theConfigurationSaysAHostIsAsleepAfter(hours string) error {
+	return os.Setenv(config.HostSilenceEnv, hours)
 }
 
 func (c *statusContext) aStatusStoryWaitingOn(id, need string) error {
@@ -213,14 +288,43 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 	if err != nil {
 		return err
 	}
+	hours, err := config.HostSilentHours()
+	if err != nil {
+		return fmt.Errorf("reading how long a host may be silent: %w", err)
+	}
 	c.askedBefore = len(c.tracker.Asked())
+	if err := c.rememberElsewhere(); err != nil {
+		return err
+	}
+
 	c.report, c.err = application.Status{
-		Tracker: c.tracker,
-		Vault:   vault.New(dir),
-		Host:    statusHost,
-		Seat:    statusSeat,
-		Now:     func() time.Time { return c.now },
+		Tracker:     c.tracker,
+		Notes:       c.tracker,
+		Vault:       vault.New(dir),
+		Host:        statusHost,
+		Seat:        statusSeat,
+		HostSilence: time.Duration(hours) * time.Hour,
+		Now:         func() time.Time { return c.now },
 	}.Run(context.Background())
+	return nil
+}
+
+// rememberElsewhere writes down what every story pathed away from this host
+// looks like, and what note its host left, just before mw status runs.
+func (c *statusContext) rememberElsewhere() error {
+	ctx := context.Background()
+	elsewhere, err := c.tracker.WorkElsewhere(ctx, statusHost)
+	if err != nil {
+		return fmt.Errorf("reading what the other hosts hold: %w", err)
+	}
+	for _, d := range elsewhere {
+		host := d.Merged().Host
+		said, err := c.tracker.Note(ctx, application.LastSyncKey(host))
+		if err != nil {
+			return fmt.Errorf("reading the last sync note of %s: %w", host, err)
+		}
+		c.elsewhereWas[d.Story.ID] = fmt.Sprintf("%s|%s|%s|%s", host, d.Status, d.Assignee, said)
+	}
 	return nil
 }
 
@@ -377,6 +481,158 @@ func (c *statusContext) everyLineIsAtMost60ColumnsWide() error {
 		if n := utf8.RuneCountInString(line); n > application.Width {
 			return fmt.Errorf("expected every line at most %d columns, got %d in %q", application.Width, n, line)
 		}
+	}
+	return nil
+}
+
+// otherHost is the report's block for one host, if it has one.
+func (c *statusContext) otherHost(host string) (application.HostWork, bool) {
+	for _, w := range c.report.Others {
+		if w.Host == host {
+			return w, true
+		}
+	}
+	return application.HostWork{}, false
+}
+
+// listedUnder reports whether the report's block for a host holds a story.
+func listedUnder(w application.HostWork, id string) bool {
+	for _, d := range w.Stories {
+		if d.Story.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *statusContext) theReportListsUnderTheOtherHost(id, host string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	w, ok := c.otherHost(host)
+	if !ok {
+		return fmt.Errorf("the report holds nothing for the host %s:\n%s", host, c.report.String())
+	}
+	if !listedUnder(w, id) {
+		return fmt.Errorf("%s is not listed under %s:\n%s", id, host, c.report.String())
+	}
+	if printed := c.report.String(); !strings.Contains(printed, host) || !strings.Contains(printed, id) {
+		return fmt.Errorf("expected the printed report to name %s under %s, got:\n%s", id, host, printed)
+	}
+	return nil
+}
+
+func (c *statusContext) theReportListsAsStrandedOn(id, host string) error {
+	if err := c.theReportListsUnderTheOtherHost(id, host); err != nil {
+		return err
+	}
+	w, _ := c.otherHost(host)
+	if !w.Asleep {
+		return fmt.Errorf("expected %s to be called asleep, got %+v", host, w)
+	}
+	if !strings.Contains(c.report.String(), "stranded") {
+		return fmt.Errorf("expected the printed report to call the work stranded, got:\n%s", c.report.String())
+	}
+	return nil
+}
+
+func (c *statusContext) theReportDoesNotCallTheHostAsleep(host string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	w, ok := c.otherHost(host)
+	if !ok {
+		return fmt.Errorf("the report holds nothing for the host %s:\n%s", host, c.report.String())
+	}
+	if w.Asleep {
+		return fmt.Errorf("expected %s to be taken as awake, got %+v", host, w)
+	}
+	if strings.Contains(c.report.String(), "stranded") {
+		return fmt.Errorf("expected nothing to be called stranded, got:\n%s", c.report.String())
+	}
+	return nil
+}
+
+func (c *statusContext) theReportShowsTheLastSyncTimeOf(host string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	w, ok := c.otherHost(host)
+	if !ok {
+		return fmt.Errorf("the report holds nothing for the host %s:\n%s", host, c.report.String())
+	}
+	if w.LastSync.IsZero() {
+		return fmt.Errorf("expected the report to know when %s last synced, got %+v", host, w)
+	}
+	when := w.LastSync.UTC().Format(application.LastSyncFormat)
+	if !strings.Contains(c.report.String(), when) {
+		return fmt.Errorf("expected the printed report to say %s, got:\n%s", when, c.report.String())
+	}
+	return nil
+}
+
+func (c *statusContext) theReportSaysTheHostHasNeverSynced(host string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	w, ok := c.otherHost(host)
+	if !ok {
+		return fmt.Errorf("the report holds nothing for the host %s:\n%s", host, c.report.String())
+	}
+	if !w.NeverSynced() {
+		return fmt.Errorf("expected %s to have never synced, got %+v", host, w)
+	}
+	if !strings.Contains(c.report.String(), "never synced") {
+		return fmt.Errorf("expected the printed report to say never synced, got:\n%s", c.report.String())
+	}
+	return nil
+}
+
+// theReportSaysHowToRePathFrom checks the hint a person acts on: the line that
+// re-paths a story stranded on a sleeping host onto the host reading the
+// report. mw status only ever prints it.
+func (c *statusContext) theReportSaysHowToRePathFrom(host string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	if _, ok := c.otherHost(host); !ok {
+		return fmt.Errorf("the report holds nothing for the host %s:\n%s", host, c.report.String())
+	}
+	hint := application.RepathHint + statusHost
+	if !strings.Contains(c.report.String(), hint) {
+		return fmt.Errorf("expected the printed report to say %q, got:\n%s", hint, c.report.String())
+	}
+	return nil
+}
+
+// nothingElsewhereWasTouched says the section changed nothing it read: no
+// story was re-pathed, claimed or released, and no host's last sync note was
+// written — the whole point of a read-only report of somebody else's work.
+func (c *statusContext) nothingElsewhereWasTouched() error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	if len(c.elsewhereWas) == 0 {
+		return fmt.Errorf("no story was pathed to another host, so this scenario proves nothing")
+	}
+	ctx := context.Background()
+	for id, was := range c.elsewhereWas {
+		detail, err := c.tracker.ShowStory(ctx, id)
+		if err != nil {
+			return fmt.Errorf("reading %s back: %w", id, err)
+		}
+		host := detail.Merged().Host
+		said, err := c.tracker.Note(ctx, application.LastSyncKey(host))
+		if err != nil {
+			return fmt.Errorf("reading the last sync note of %s: %w", host, err)
+		}
+		now := fmt.Sprintf("%s|%s|%s|%s", host, detail.Status, detail.Assignee, said)
+		if now != was {
+			return fmt.Errorf("expected %s to be left exactly as it was (%s), got %s", id, was, now)
+		}
+	}
+	if syncs := c.tracker.Syncs(); syncs != 0 {
+		return fmt.Errorf("expected mw status to synchronise nothing, got %d cycles", syncs)
 	}
 	return nil
 }

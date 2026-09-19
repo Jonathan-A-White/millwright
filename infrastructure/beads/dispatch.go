@@ -51,11 +51,73 @@ func (g *Gateway) RunningStories(ctx context.Context, host string) ([]applicatio
 	return g.onHost(ctx, stories, host)
 }
 
+// WorkElsewhere implements application.WorkTracker: what the other hosts have
+// in hand. It is the two listings a dispatcher already makes — everything
+// ready and unclaimed, everything claimed and unfinished — read once each and
+// kept where the Path names a host that is not this one. Two bd calls, plus
+// one per distinct epic whose defaults a story inherits and bd did not inline.
+//
+// Nothing here judges whether that host is awake: mw status does that, from
+// the note the host left. The tracker only says what is pathed where.
+func (g *Gateway) WorkElsewhere(ctx context.Context, host string) ([]application.StoryDetail, error) {
+	if host == "" {
+		return nil, fmt.Errorf("which host is the work elsewhere measured from?")
+	}
+	out, err := g.call(ctx, "ready", "--unassigned", "--exclude-type", "epic", "--json")
+	if err != nil {
+		return nil, err
+	}
+	stories, err := decodeBeads(out)
+	if err != nil {
+		return nil, fmt.Errorf("reading what is ready away from %s: %w", host, err)
+	}
+
+	out, err = g.call(ctx, "list", "--status", StatusInProgress, "--exclude-type", "epic", "--limit", "0", "--json")
+	if err != nil {
+		return nil, err
+	}
+	claimed, err := decodeBeads(out)
+	if err != nil {
+		return nil, fmt.Errorf("reading what is claimed away from %s: %w", host, err)
+	}
+
+	details, err := g.overlaid(ctx, append(stories, claimed...))
+	if err != nil {
+		return nil, err
+	}
+	var elsewhere []application.StoryDetail
+	for _, detail := range details {
+		if on := detail.Merged().Host; on == "" || on == host {
+			continue
+		}
+		elsewhere = append(elsewhere, detail)
+	}
+	return elsewhere, nil
+}
+
 // onHost narrows beads to the stories worked on one host, with each story's
-// epic defaults overlaid. Every distinct epic is read once.
+// epic defaults overlaid.
 func (g *Gateway) onHost(ctx context.Context, stories []bead, host string) ([]application.StoryDetail, error) {
-	defaults := map[string]domain.Path{}
+	details, err := g.overlaid(ctx, stories)
+	if err != nil {
+		return nil, err
+	}
 	var on []application.StoryDetail
+	for _, detail := range details {
+		if merged := detail.Merged().Host; merged == "" || merged != host {
+			continue
+		}
+		on = append(on, detail)
+	}
+	return on, nil
+}
+
+// overlaid is beads read as stories, each with its epic's default Path
+// overlaid. Every distinct epic is read once, however many stories hang from
+// it, and not at all when bd inlined the epic with the story.
+func (g *Gateway) overlaid(ctx context.Context, stories []bead) ([]application.StoryDetail, error) {
+	defaults := map[string]domain.Path{}
+	var details []application.StoryDetail
 
 	for _, story := range stories {
 		path, found := story.parentPath()
@@ -70,13 +132,9 @@ func (g *Gateway) onHost(ctx context.Context, stories []bead, host string) ([]ap
 				defaults[story.Parent] = path
 			}
 		}
-		detail := story.detail(path)
-		if merged := detail.Merged().Host; merged == "" || merged != host {
-			continue
-		}
-		on = append(on, detail)
+		details = append(details, story.detail(path))
 	}
-	return on, nil
+	return details, nil
 }
 
 // BlockedForHost implements application.WorkTracker. `bd blocked --json` finds

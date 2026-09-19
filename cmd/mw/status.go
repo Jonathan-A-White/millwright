@@ -1,6 +1,8 @@
 package main
 
 import (
+	"time"
+
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
@@ -21,6 +23,11 @@ func newStatusCmd() *cobra.Command {
 			"from the Builder's ledger. A story filed with only its path overrides is shown with the\n" +
 			"epic's defaults filled in. A claimed story whose close-out is blocked by an open formula\n" +
 			"step says so, and a story recorded run=stopped or run=stuck is shown as that, not running.\n\n" +
+			"It then shows every other host a story is pathed to: when that host last recorded itself\n" +
+			"level, and what it holds. A host silent for longer than the threshold (config\n" +
+			"`host_silent_hours`, default 2), or that never synced at all, is marked asleep and its work\n" +
+			"is listed as stranded, with the one line that re-paths a story here. Re-pathing is a\n" +
+			"person's act: status only says which stories are waiting for one.\n\n" +
 			"Every line fits a phone-width terminal, at most 60 columns. Nothing is claimed, nothing is\n" +
 			"written and no session is started: status only reads.",
 		Args: cobra.NoArgs,
@@ -33,13 +40,20 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			hours, err := config.HostSilentHours()
+			if err != nil {
+				return err
+			}
 
+			tracker := beads.New(dir)
 			_, err = application.Status{
-				Tracker: beads.New(dir),
-				Vault:   vault.New(dir),
-				Host:    host,
-				Seat:    BuilderSeat,
-				Out:     cmd.OutOrStdout(),
+				Tracker:     tracker,
+				Notes:       tracker,
+				Vault:       vault.New(dir),
+				Host:        host,
+				Seat:        BuilderSeat,
+				HostSilence: time.Duration(hours) * time.Hour,
+				Out:         cmd.OutOrStdout(),
 			}.Run(cmd.Context())
 			return err
 		},

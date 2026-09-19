@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 	"time"
 )
@@ -13,17 +14,49 @@ import (
 // title however long it runs included.
 const Width = 60
 
+// DefaultHostSilence is how long another host may go without recording a sync
+// before mw status calls it asleep and its work stranded, when nothing says
+// otherwise. It is the same two hours infrastructure/config.
+// DefaultHostSilentHours reads as its default, and for the same reason: a
+// host's last_sync note reaches this host one sync cycle late, so the freshest
+// reading of it is already a cycle old.
+const DefaultHostSilence = 2 * time.Hour
+
+// RepathHint is what a person does about work stranded on a sleeping host: it
+// is re-pathed, by hand, to a host that is awake. mw status only ever says
+// this; re-pathing a story is the Mayor's act, never a report's.
+const RepathHint = "bd update <id> --set-metadata host="
+
+// TrackerNotes is the read half of the notes the factory's hosts leave each
+// other in the tracker's key-value store — when each was last level, above
+// all. It is deliberately the read half alone: mw status reads another host's
+// last sync and must not be able to write one, not even by mistake.
+type TrackerNotes interface {
+	// Note reads one value out of the tracker's key-value store, or "" when the
+	// key is not there. It is TrackerSync's own Note, narrowed.
+	Note(ctx context.Context, key string) (string, error)
+}
+
 // Status reads, for one host, what is running there, what is ready to be
-// taken, what is blocked, and today's fuel from a seat's ledger. It is the
-// read-only, zero-token twin of dispatch: nothing is claimed, nothing is
-// written to a bead, nothing is appended to the ledger, and no session is
+// taken, what is blocked, today's fuel from a seat's ledger, and what every
+// other host has in hand and when it last synced. It is the read-only,
+// zero-token twin of dispatch: nothing is claimed, nothing is written to a
+// bead, no note is left, nothing is appended to the ledger, and no session is
 // started, sent to or closed.
 type Status struct {
 	Tracker WorkTracker
 	Vault   Vault
+	// Notes is where the other hosts' last sync times are read from. A nil
+	// Notes leaves the other-hosts section out altogether rather than calling
+	// every host asleep on no evidence.
+	Notes TrackerNotes
 
 	// Host is which of the factory's hosts this report is for.
 	Host string
+
+	// HostSilence is how long another host's recorded sync may be behind
+	// before its work is called stranded. Zero reads DefaultHostSilence.
+	HostSilence time.Duration
 	// Seat is whose ledger today's fuel is summed from — the Builder's, since
 	// the Builder is the seat that works every story.
 	Seat string
@@ -64,21 +97,63 @@ func (r RunningStory) Stopped() bool {
 // step of its poured formula is still open.
 func (r RunningStory) FormulaOpen() bool { return r.FormulaSteps > 0 }
 
+// HostWork is what one other host has in hand, as this host can see it: when
+// that host last recorded itself level, whether that is recent enough to
+// believe it is awake, and the stories pathed to it.
+//
+// The factory has no automatic failover: a host that stops syncing does not
+// hand its work back. So this is the whole of the safety net — the work is
+// named, the silence is named, and a person re-paths it.
+type HostWork struct {
+	// Host is the host these stories are pathed to.
+	Host string
+	// LastSync is when that host recorded itself last level, as its own note
+	// says. It is zero when the host has never recorded one, and zero when the
+	// note it left cannot be read as a time.
+	LastSync time.Time
+	// Said is the note exactly as the tracker held it, so that one nobody can
+	// read as a time is still shown rather than swallowed. It is "" when the
+	// host has never recorded a sync.
+	Said string
+	// Silent is how long it is since LastSync, and zero when there is no
+	// LastSync to measure from.
+	Silent time.Duration
+	// Asleep says this host has been silent for longer than the threshold — or
+	// has never synced, or left a note that is not a time. Its stories are
+	// stranded: nothing here will move them, and no other host will take them
+	// until somebody re-paths them.
+	Asleep bool
+	// Stories are the stories pathed to this host that are ready to be taken or
+	// already claimed, in the order the tracker listed them.
+	Stories []StoryDetail
+}
+
+// NeverSynced reports whether this host has never recorded being level at all.
+func (w HostWork) NeverSynced() bool { return w.Said == "" }
+
+// Unreadable reports whether this host left a note that cannot be read as a
+// time — the one case where a host is called asleep without a last sync to
+// show for it.
+func (w HostWork) Unreadable() bool { return w.Said != "" && w.LastSync.IsZero() }
+
 // StatusReport is what one host is doing right now, as `mw status` reads it.
 type StatusReport struct {
 	Host    string
 	Running []RunningStory
 	Ready   []StoryDetail
 	Blocked []StoryDetail
+	// Others is what every other host named in a story's Path has in hand, one
+	// entry per host, in host order.
+	Others []HostWork
 	// FuelToday is every token the seat's ledger charged today, summed from
 	// the lines the ledger dates today.
 	FuelToday int
 }
 
 // Run reads the report and prints it. Every call it makes is a read: the
-// tracker's RunningStories, StoryState and OpenSteps, ReadyForHost and
-// BlockedForHost, and the vault's ReadLedger. Nothing is claimed, nothing is
-// poured, nothing is written.
+// tracker's RunningStories, StoryState and OpenSteps, ReadyForHost,
+// BlockedForHost and WorkElsewhere, one Note per other host, and the vault's
+// ReadLedger. Nothing is claimed, nothing is poured, nothing is written.
 func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	report := StatusReport{Host: s.Host}
 	switch {
@@ -114,6 +189,12 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	}
 	report.Blocked = blocked
 
+	others, err := s.elsewhere(ctx)
+	if err != nil {
+		return report, err
+	}
+	report.Others = others
+
 	fuel, err := s.fuelToday(ctx)
 	if err != nil {
 		return report, fmt.Errorf("summing today's fuel from the %s seat's ledger: %w", s.Seat, err)
@@ -145,6 +226,67 @@ func (s Status) running(ctx context.Context, detail StoryDetail) (RunningStory, 
 		rs.FormulaSteps = len(open)
 	}
 	return rs, nil
+}
+
+// elsewhere reads what the other hosts hold: the stories pathed to each of
+// them, and when each last recorded itself level. It costs one listing plus
+// one note per host that has work, and writes nothing.
+//
+// A host is called asleep when the last sync it recorded is further back than
+// the threshold, when it has never recorded one, or when what it recorded is
+// not a time. None of those is an error: a host that cannot say when it was
+// last level is exactly the host whose work a person must look at.
+func (s Status) elsewhere(ctx context.Context) ([]HostWork, error) {
+	if s.Notes == nil {
+		return nil, nil
+	}
+	stories, err := s.Tracker.WorkElsewhere(ctx, s.Host)
+	if err != nil {
+		return nil, fmt.Errorf("reading what the other hosts hold: %w", err)
+	}
+
+	byHost := map[string][]StoryDetail{}
+	var hosts []string
+	for _, detail := range stories {
+		host := detail.Merged().Host
+		if host == "" || host == s.Host {
+			continue
+		}
+		if _, seen := byHost[host]; !seen {
+			hosts = append(hosts, host)
+		}
+		byHost[host] = append(byHost[host], detail)
+	}
+	sort.Strings(hosts)
+
+	now := s.now()
+	work := make([]HostWork, 0, len(hosts))
+	for _, host := range hosts {
+		said, err := s.Notes.Note(ctx, LastSyncKey(host))
+		if err != nil {
+			return nil, fmt.Errorf("reading when %s last synced: %w", host, err)
+		}
+
+		held := HostWork{Host: host, Said: strings.TrimSpace(said), Stories: byHost[host]}
+		if held.Said != "" {
+			if at, err := time.Parse(LastSyncFormat, held.Said); err == nil {
+				held.LastSync = at
+				held.Silent = now.Sub(at)
+			}
+		}
+		held.Asleep = held.LastSync.IsZero() || held.Silent > s.hostSilence()
+		work = append(work, held)
+	}
+	return work, nil
+}
+
+// hostSilence is how long another host's last recorded sync may be behind
+// before its work is called stranded.
+func (s Status) hostSilence() time.Duration {
+	if s.HostSilence <= 0 {
+		return DefaultHostSilence
+	}
+	return s.HostSilence
 }
 
 // fuelToday sums the tokens of the seat's ledger lines dated today. A seat
@@ -225,9 +367,66 @@ func (r StatusReport) String() string {
 	}
 	b.WriteString("\n")
 
+	clip(&b, fmt.Sprintf("OTHER HOSTS (%d)", len(r.Others)))
+	if len(r.Others) == 0 {
+		clip(&b, "  nothing pathed to another host")
+	}
+	for _, w := range r.Others {
+		w.write(&b, r.Host)
+	}
+	b.WriteString("\n")
+
 	clip(&b, fmt.Sprintf("FUEL today: %s tokens", Thousands(r.FuelToday)))
 	b.WriteString("\n")
 	return b.String()
+}
+
+// write is one other host's block: the host and how long it has been quiet,
+// the sync it last recorded, and the stories pathed to it — marked stranded,
+// with the one line that re-paths them, when the host is asleep. here is the
+// host the report is for, and so the host a stranded story is re-pathed to.
+func (w HostWork) write(b *strings.Builder, here string) {
+	clip(b, fmt.Sprintf("  %s · %s", w.Host, w.state()))
+	switch {
+	case w.Unreadable():
+		clip(b, fmt.Sprintf("    its note says %q, which is not a time", w.Said))
+	case !w.LastSync.IsZero():
+		clip(b, fmt.Sprintf("    last sync %s (a cycle behind)", w.LastSync.UTC().Format(LastSyncFormat)))
+	}
+	if w.Asleep {
+		clip(b, "    re-path: "+RepathHint+here)
+	}
+
+	note := ""
+	if w.Asleep {
+		note = "stranded"
+	}
+	for _, d := range w.Stories {
+		writeStoryIn(b, "    ", d, strings.TrimPrefix(note+" · "+readyOrClaimed(d), " · "))
+	}
+}
+
+// state is how a host's silence reads at the head of its block.
+func (w HostWork) state() string {
+	switch {
+	case w.NeverSynced():
+		return "ASLEEP, never synced"
+	case w.Unreadable():
+		return "ASLEEP, last sync unreadable"
+	case w.Asleep:
+		return "ASLEEP, silent " + Clock(w.Silent)
+	default:
+		return "synced " + Clock(w.Silent) + " ago"
+	}
+}
+
+// readyOrClaimed says, in one word, whether a story elsewhere is waiting to be
+// taken or already in somebody's hands.
+func readyOrClaimed(d StoryDetail) string {
+	if strings.EqualFold(strings.TrimSpace(d.Status), StatusInProgress) {
+		return "claimed"
+	}
+	return "ready"
 }
 
 // write is one running story as the report shows it: the story, its session,
@@ -248,10 +447,16 @@ func (r RunningStory) write(b *strings.Builder) {
 // line of note when there is something to say. Every line is clipped to
 // Width on its own, so a title of any length never widens the report.
 func writeStory(b *strings.Builder, d StoryDetail, note string) {
-	clip(b, fmt.Sprintf("  %s · %s", d.Story.ID, d.Merged().Rig))
-	clip(b, "    "+d.Story.Title)
+	writeStoryIn(b, "  ", d, note)
+}
+
+// writeStoryIn is writeStory indented under something else — a story listed
+// under the host it is pathed to, rather than under a heading.
+func writeStoryIn(b *strings.Builder, pad string, d StoryDetail, note string) {
+	clip(b, fmt.Sprintf("%s%s · %s", pad, d.Story.ID, d.Merged().Rig))
+	clip(b, pad+"  "+d.Story.Title)
 	if note != "" {
-		clip(b, "    "+note)
+		clip(b, pad+"  "+note)
 	}
 }
 

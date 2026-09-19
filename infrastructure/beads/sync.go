@@ -10,8 +10,12 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 )
 
-// Gateway also brings the one beads database level with the other host's.
-var _ application.TrackerSync = (*Gateway)(nil)
+// Gateway also brings the one beads database level with the other host's, and
+// is where a read-only reader of the hosts' notes — mw status — reads them.
+var (
+	_ application.TrackerSync  = (*Gateway)(nil)
+	_ application.TrackerNotes = (*Gateway)(nil)
+)
 
 // NoteMissing is what bd says when a key is not in its key-value store — it
 // exits 1 and prints `<key> (not set)`. That is not a failure here: a host that

@@ -6,6 +6,7 @@
 //	vault = "/root/millwright-vault"
 //	host  = "vps"
 //	cap   = 1
+//	host_silent_hours = 2
 //
 //	[rigs]
 //	millwright = "/root/millwright"
@@ -23,10 +24,11 @@ import (
 
 // The environment variables that answer for each setting, ahead of the file.
 const (
-	VaultEnv      = "MW_VAULT"
-	HostEnv       = "MW_HOST"
-	CapEnv        = "MW_CAP"
-	StaleHoursEnv = "MW_STALE_HOURS"
+	VaultEnv       = "MW_VAULT"
+	HostEnv        = "MW_HOST"
+	CapEnv         = "MW_CAP"
+	StaleHoursEnv  = "MW_STALE_HOURS"
+	HostSilenceEnv = "MW_HOST_SILENT_HOURS"
 )
 
 // RigsTable is the table of the config file that says where each rig is checked
@@ -48,6 +50,15 @@ const DefaultCap = 1
 // DefaultStaleHours is how many hours a claimed story's session may show no
 // new output before `mw sweep` calls it stuck, when nothing says otherwise.
 const DefaultStaleHours = 2
+
+// DefaultHostSilentHours is how long another host may go without recording a
+// sync before `mw status` calls it asleep and its work stranded, when nothing
+// says otherwise. Two hours, and the reason it is not one: a host's last_sync
+// note only reaches this host on that host's *next* sync (mw-gq6.17), so the
+// freshest reading of it is already one cycle old. Two hours is two cycles of
+// the hourly sync the factory runs, which is the smallest threshold that does
+// not call a host asleep for the lag alone.
+const DefaultHostSilentHours = 2
 
 // File is the config file's path under the home directory.
 var File = filepath.Join(".config", "mw", "config.toml")
@@ -122,6 +133,36 @@ func StaleHours() (int, error) {
 	}
 	if hours < 1 {
 		return 0, fmt.Errorf("the stale threshold is %d hours, so a session would be called stuck the moment it was claimed: set it to 1 or more", hours)
+	}
+	return hours, nil
+}
+
+// HostSilentHours reports how long another host may go without recording a
+// sync before `mw status` calls it asleep and lists its work as stranded:
+// $MW_HOST_SILENT_HOURS if it is set, otherwise the root-table
+// `host_silent_hours` key of ~/.config/mw/config.toml, and
+// DefaultHostSilentHours when neither says.
+func HostSilentHours() (int, error) {
+	said := strings.TrimSpace(os.Getenv(HostSilenceEnv))
+	if said == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return 0, fmt.Errorf("no %s is set and there is no home directory to read %s in: %w", HostSilenceEnv, File, err)
+		}
+		if said, err = valueIn(filepath.Join(home, File), "host_silent_hours"); err != nil {
+			return 0, err
+		}
+	}
+	if said == "" {
+		return DefaultHostSilentHours, nil
+	}
+
+	hours, err := strconv.Atoi(said)
+	if err != nil {
+		return 0, fmt.Errorf("the host silence threshold is %q, which is not a whole number of hours: set %s=<n>, or `host_silent_hours = <n>` in %s", said, HostSilenceEnv, File)
+	}
+	if hours < 1 {
+		return 0, fmt.Errorf("the host silence threshold is %d hours, so every other host would be called asleep the moment it synced: set it to 1 or more", hours)
 	}
 	return hours, nil
 }

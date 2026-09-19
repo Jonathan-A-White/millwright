@@ -1,8 +1,11 @@
 Feature: mw status
   mw status reads, for this host, what is running, what is ready, what is
-  blocked, and today's fuel — and writes nothing at all: no claim, no
-  comment, no state, no ledger line, no session. Every line of the report
-  fits a phone-width terminal, at most 60 columns, however long a title is.
+  blocked, and today's fuel — and, for every other host, when it last synced
+  and what is pathed to it, so that work stranded on a host that has gone
+  quiet is seen and re-pathed by hand. It writes nothing at all: no claim, no
+  comment, no state, no note, no ledger line, no session. Every line of the
+  report fits a phone-width terminal, at most 60 columns, however long a
+  title is.
 
   Background:
     Given the status epic "mw-gq6" on the default path:
@@ -87,3 +90,67 @@ Feature: mw status
     When mw status reads the host
     Then reading status succeeds
     And nothing was written through the tracker, the ledger or the runner
+
+  Scenario: A story pathed to another host that synced recently is listed under that host, not stranded
+    Given a status story "mw-gq6.12" filed under it, overriding "host" with "laptop"
+    And the host "laptop" last synced 1 hour ago
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "mw-gq6.12" under the other host "laptop"
+    And the report does not call the host "laptop" asleep
+
+  Scenario: A story pathed to a host whose last sync is older than the threshold is stranded
+    Given a status story "mw-gq6.13" filed under it, overriding "host" with "laptop"
+    And the host "laptop" last synced 28 hours ago
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "mw-gq6.13" as stranded on the host "laptop"
+    And the report shows the last sync time of the host "laptop"
+    And the report says how to re-path a story stranded on the host "laptop"
+
+  Scenario: A host that has never synced is shown as never synced, and its work as stranded
+    Given a status story "mw-gq6.14" filed under it, overriding "host" with "laptop"
+    And the host "laptop" has never synced
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says the host "laptop" has never synced
+    And the report lists "mw-gq6.14" as stranded on the host "laptop"
+
+  Scenario: A story claimed on a sleeping host is stranded, like a ready one
+    Given a status story "mw-gq6.15" filed under it, overriding "host" with "laptop"
+    And the status story "mw-gq6.15" is claimed with its session running
+    And the host "laptop" last synced 28 hours ago
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "mw-gq6.15" as stranded on the host "laptop"
+
+  Scenario: How long a host may be silent is what the configuration says
+    Given the configuration says a host is asleep after 6 hours
+    And a status story "mw-gq6.16" filed under it, overriding "host" with "laptop"
+    And the host "laptop" last synced 5 hours ago
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "mw-gq6.16" under the other host "laptop"
+    And the report does not call the host "laptop" asleep
+
+  Scenario: A last sync note that is not a time is read as asleep, not as an error
+    Given a status story "mw-gq6.17" filed under it, overriding "host" with "laptop"
+    And the host "laptop" left a last sync note that is not a time
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "mw-gq6.17" as stranded on the host "laptop"
+
+  Scenario: The other hosts section fits a phone screen too
+    Given a status story "mw-gq6.18" titled "A story whose title runs on and on and on and on and on and on and on and on, well past a phone screen" pathed to the host "laptop"
+    And the host "laptop" last synced 28 hours ago
+    When mw status reads the host
+    Then reading status succeeds
+    And every line of the report is at most 60 columns wide
+
+  Scenario: Reading what another host holds writes nothing and re-paths nothing
+    Given a status story "mw-gq6.19" filed under it, overriding "host" with "laptop"
+    And the host "laptop" last synced 28 hours ago
+    When mw status reads the host
+    Then reading status succeeds
+    And nothing was written through the tracker, the ledger or the runner
+    And nothing pathed to another host was re-pathed or touched

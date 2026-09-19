@@ -28,6 +28,7 @@ func writeConfig(t *testing.T, contents string) string {
 	t.Setenv("MW_HOST", "")
 	t.Setenv("MW_CAP", "")
 	t.Setenv("MW_STALE_HOURS", "")
+	t.Setenv("MW_HOST_SILENT_HOURS", "")
 	return home
 }
 
@@ -125,6 +126,40 @@ func TestStaleHoursRefusesWhatWouldNeverGiveASessionAChanceOrIsNotANumber(t *tes
 	writeConfig(t, "stale_hours = \"soon\"\n")
 	if _, err := config.StaleHours(); err == nil {
 		t.Fatal("expected a stale threshold that is not a number to be refused")
+	}
+}
+
+func TestHostSilentHoursIsTwoUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\nhost = \"vps\"\n")
+
+	hours, err := config.HostSilentHours()
+	if err != nil {
+		t.Fatalf("reading how long a host may be silent: %v", err)
+	}
+	if hours != config.DefaultHostSilentHours {
+		t.Fatalf("expected the default of %d hours, got %d", config.DefaultHostSilentHours, hours)
+	}
+
+	t.Setenv(config.HostSilenceEnv, "6")
+	if hours, err = config.HostSilentHours(); err != nil || hours != 6 {
+		t.Fatalf("expected %s to win with 6, got %d: %v", config.HostSilenceEnv, hours, err)
+	}
+
+	writeConfig(t, "host_silent_hours = 4\n")
+	if hours, err = config.HostSilentHours(); err != nil || hours != 4 {
+		t.Fatalf("expected the config file's host_silent_hours to read back as 4, got %d: %v", hours, err)
+	}
+}
+
+func TestHostSilentHoursRefusesWhatWouldCallEveryHostAsleepOrIsNotANumber(t *testing.T) {
+	writeConfig(t, "host_silent_hours = 0\n")
+	if _, err := config.HostSilentHours(); err == nil {
+		t.Fatal("expected a host silence threshold of 0 to be refused")
+	}
+
+	writeConfig(t, "host_silent_hours = \"a while\"\n")
+	if _, err := config.HostSilentHours(); err == nil {
+		t.Fatal("expected a host silence threshold that is not a number to be refused")
 	}
 }
 

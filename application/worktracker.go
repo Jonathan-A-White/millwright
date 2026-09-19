@@ -180,6 +180,14 @@ type WorkTracker interface {
 	// Path names no host is not listed for any host.
 	BlockedForHost(ctx context.Context, host string) ([]StoryDetail, error)
 
+	// WorkElsewhere lists the stories another host has in hand: every story that
+	// is ready to be taken or already claimed, whose Path names some host other
+	// than the one given. It is how `mw status` sees work that is nobody's here
+	// — what would be stranded if that host stopped syncing. Each story comes
+	// back with its own epic's defaults overlaid, and a story whose Path names
+	// no host is listed for nobody, here as everywhere else.
+	WorkElsewhere(ctx context.Context, host string) ([]StoryDetail, error)
+
 	// ClaimStory takes a story: it becomes assigned and in progress, and stops
 	// being ready. Claiming a story already claimed by this actor is harmless.
 	ClaimStory(ctx context.Context, id string) error

@@ -455,6 +455,33 @@ func (f *FakeTracker) BlockedForHost(_ context.Context, host string) ([]applicat
 	return blocked, nil
 }
 
+// WorkElsewhere implements application.WorkTracker: what the other hosts have
+// in hand, ready or claimed. A story pathed to no host is nobody's, here as in
+// the real tracker.
+func (f *FakeTracker) WorkElsewhere(_ context.Context, host string) ([]application.StoryDetail, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	if host == "" {
+		return nil, fmt.Errorf("which host is the work elsewhere measured from?")
+	}
+	var elsewhere []application.StoryDetail
+	for _, id := range f.order {
+		s := f.stories[id]
+		if on := s.detail.Merged().Host; on == "" || on == host {
+			continue
+		}
+		ready := s.detail.Status == StatusOpen && s.detail.Assignee == "" && !f.waiting(s)
+		if !ready && s.detail.Status != StatusInProgress {
+			continue
+		}
+		elsewhere = append(elsewhere, s.detail)
+	}
+	return elsewhere, nil
+}
+
 // ReleaseClaim implements application.WorkTracker.
 func (f *FakeTracker) ReleaseClaim(_ context.Context, id string) error {
 	f.note("ReleaseClaim")
@@ -743,6 +770,7 @@ func SortedIDs(details []application.StoryDetail) []string {
 
 // FakeTracker satisfies the ports the beads gateway stands behind.
 var (
-	_ application.WorkTracker = (*FakeTracker)(nil)
-	_ application.TrackerSync = (*FakeTracker)(nil)
+	_ application.WorkTracker  = (*FakeTracker)(nil)
+	_ application.TrackerSync  = (*FakeTracker)(nil)
+	_ application.TrackerNotes = (*FakeTracker)(nil)
 )
