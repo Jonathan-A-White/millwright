@@ -103,7 +103,11 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a status story "([^"]*)" filed under it, overriding "([^"]*)" with "([^"]*)"$`, c.aStatusStoryOverriding)
 	ctx.Given(`^a status story "([^"]*)" filed under it, waiting on "([^"]*)"$`, c.aStatusStoryWaitingOn)
 	ctx.Given(`^a status story "([^"]*)" filed under it, waiting on "([^"]*)" and "([^"]*)"$`, c.aStatusStoryWaitingOnTwo)
+	ctx.Given(`^a status bead "([^"]*)" titled "([^"]*)" filed under no epic$`, c.aStatusBeadUnderNoEpic)
+	ctx.Given(`^a status bead "([^"]*)" titled "([^"]*)" filed under no epic, waiting on "([^"]*)"$`,
+		c.aStatusBeadUnderNoEpicWaitingOn)
 	ctx.Given(`^the status story "([^"]*)" is labelled "([^"]*)"$`, c.theStatusStoryIsLabelled)
+	ctx.Given(`^the status story "([^"]*)" is at priority (\d)$`, c.theStatusStoryIsAtPriority)
 	ctx.Given(`^the status story "([^"]*)" is finished$`, c.theStatusStoryIsFinished)
 	ctx.Given(`^the status story "([^"]*)" is claimed with its session running$`, c.theStatusStoryIsClaimedAndRunning)
 	ctx.Given(`^the status story "([^"]*)" is marked run=(\S+)$`, c.theStatusStoryIsMarkedRun)
@@ -126,6 +130,11 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the report lists "([^"]*)" as ready$`, c.theReportListsAsReady)
 	ctx.Then(`^the report lists "([^"]*)" as blocked$`, c.theReportListsAsBlocked)
 	ctx.Then(`^the report lists "([^"]*)" as waiting for the Governor$`, c.theReportListsAsWaitingForTheGovernor)
+	ctx.Then(`^the report does not list "([^"]*)" as waiting for the Governor$`, c.theReportDoesNotListAsWaiting)
+	ctx.Then(`^the report shows "([^"]*)" under the heading for the Governor with its title and no rig or host line$`,
+		c.theReportShowsAPathlessWaitingBead)
+	ctx.Then(`^the report lists "([^"]*)" before "([^"]*)" under the heading for the Governor$`,
+		c.theReportListsBeforeUnderWaiting)
 	ctx.Then(`^the report does not list "([^"]*)" as ready$`, c.theReportDoesNotListAsReady)
 	ctx.Then(`^the report does not show "([^"]*)" as running$`, c.theReportDoesNotShowAsRunning)
 	ctx.Then(`^the report has no heading for stories waiting for the Governor$`, c.theReportHasNoHeadingForTheGovernor)
@@ -249,6 +258,28 @@ func (c *statusContext) aStatusStoryWaitingOnTwo(id, first, second string) error
 	c.tracker.AddStory(c.lastEpic, domain.Story{ID: id, Title: id})
 	c.tracker.Needs(id, first, second)
 	return nil
+}
+
+// aStatusBeadUnderNoEpic files a bead the way the Mayors file a ticket for the
+// Governor: under the map rather than under an epic with a default Path, so it
+// has no rig and no host.
+func (c *statusContext) aStatusBeadUnderNoEpic(id, title string) error {
+	c.tracker.AddStory("", domain.Story{ID: id, Title: title})
+	return nil
+}
+
+func (c *statusContext) aStatusBeadUnderNoEpicWaitingOn(id, title, need string) error {
+	c.tracker.AddStory("", domain.Story{ID: id, Title: title})
+	c.tracker.Needs(id, need)
+	return nil
+}
+
+func (c *statusContext) theStatusStoryIsAtPriority(id, priority string) error {
+	n, err := strconv.Atoi(priority)
+	if err != nil {
+		return fmt.Errorf("the priority %q is not a number: %w", priority, err)
+	}
+	return c.tracker.SetPriority(id, n)
 }
 
 func (c *statusContext) theStatusStoryIsLabelled(id, label string) error {
@@ -507,6 +538,80 @@ func (c *statusContext) theReportListsAsWaitingForTheGovernor(id string) error {
 	if !strings.Contains(headedBy(c.report.String(), application.WaitingHeading), id) {
 		return fmt.Errorf("expected the printed report to list %s under %q, got:\n%s",
 			id, application.WaitingHeading, c.report.String())
+	}
+	return nil
+}
+
+func (c *statusContext) theReportDoesNotListAsWaiting(id string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	for _, d := range c.report.Waiting {
+		if d.Story.ID == id {
+			return fmt.Errorf("%s is listed as waiting for the Governor:\n%s", id, c.report.String())
+		}
+	}
+	if strings.Contains(headedBy(c.report.String(), application.WaitingHeading), id) {
+		return fmt.Errorf("expected the printed report not to list %s under %q, got:\n%s",
+			id, application.WaitingHeading, c.report.String())
+	}
+	return nil
+}
+
+// theReportShowsAPathlessWaitingBead checks the printed heading lists a bead
+// with no Path by its id and its title alone: no rig, no host.
+func (c *statusContext) theReportShowsAPathlessWaitingBead(id string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	var title string
+	for _, d := range c.report.Waiting {
+		if d.Story.ID == id {
+			title = d.Story.Title
+		}
+	}
+	if title == "" {
+		return fmt.Errorf("%s is not listed as waiting for the Governor:\n%s", id, c.report.String())
+	}
+	lines := strings.Split(headedBy(c.report.String(), application.WaitingHeading), "\n")
+	for i, line := range lines {
+		if !strings.Contains(line, id) {
+			continue
+		}
+		if line != "  "+id {
+			return fmt.Errorf("expected the line for %s to be its id alone, got %q in:\n%s", id, line, c.report.String())
+		}
+		if i+1 >= len(lines) || lines[i+1] != "    "+clippedTitle(title) {
+			return fmt.Errorf("expected the title %q under %s, got:\n%s", title, id, c.report.String())
+		}
+		return nil
+	}
+	return fmt.Errorf("%s is not printed under %q:\n%s", id, application.WaitingHeading, c.report.String())
+}
+
+// clippedTitle is a title as the report clips it to fit under its indent.
+func clippedTitle(title string) string {
+	if utf8.RuneCountInString(title) <= application.Width-4 {
+		return title
+	}
+	return string([]rune(title)[:application.Width-5]) + "…"
+}
+
+// theReportListsBeforeUnderWaiting checks the printed heading lists one story
+// above another.
+func (c *statusContext) theReportListsBeforeUnderWaiting(first, second string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	block := headedBy(c.report.String(), application.WaitingHeading)
+	at, then := strings.Index(block, first), strings.Index(block, second)
+	switch {
+	case at < 0:
+		return fmt.Errorf("%s is not printed under %q:\n%s", first, application.WaitingHeading, c.report.String())
+	case then < 0:
+		return fmt.Errorf("%s is not printed under %q:\n%s", second, application.WaitingHeading, c.report.String())
+	case at > then:
+		return fmt.Errorf("expected %s above %s under %q, got:\n%s", first, second, application.WaitingHeading, c.report.String())
 	}
 	return nil
 }
@@ -824,7 +929,7 @@ func (c *statusContext) nothingWasWritten() error {
 		return err
 	}
 	for _, call := range c.tracker.Asked()[c.askedBefore:] {
-		if call != "RunningStories" && call != "ReadyForHost" {
+		if call != "RunningStories" && call != "ReadyForHost" && call != "ReadyWithLabel" {
 			return fmt.Errorf("expected mw status to only read the tracker, but it called %s", call)
 		}
 	}

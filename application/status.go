@@ -157,9 +157,10 @@ type StatusReport struct {
 	Host    string
 	Running []RunningStory
 	Ready   []StoryDetail
-	// Waiting are the stories labelled hitl that are ready or already claimed:
-	// worked with the Governor present, so neither a dispatcher's to take nor a
-	// session for Running to show. They are in no other list.
+	// Waiting are the beads labelled hitl that are open and not blocked, on any
+	// host or none, and the stories labelled hitl this host has claimed: worked
+	// with the Governor present, so neither a dispatcher's to take nor a session
+	// for Running to show. They are in no other list, most urgent first.
 	Waiting []StoryDetail
 	Blocked []StoryDetail
 	// Others is what every other host named in a story's Path has in hand, one
@@ -177,9 +178,9 @@ type StatusReport struct {
 
 // Run reads the report and prints it. Every call it makes is a read: the
 // tracker's RunningStories, StoryState and OpenSteps, ReadyForHost,
-// BlockedForHost and WorkElsewhere, one Note per other host, and the vault's
-// ReadLedger and RigMemorySizes. Nothing is claimed, nothing is poured, nothing
-// is written.
+// ReadyWithLabel, BlockedForHost and WorkElsewhere, one Note per other host,
+// and the vault's ReadLedger and RigMemorySizes. Nothing is claimed, nothing is
+// poured, nothing is written.
 func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	report := StatusReport{Host: s.Host}
 	switch {
@@ -215,11 +216,24 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	}
 	for _, detail := range ready {
 		if detail.Hitl() {
-			report.Waiting = append(report.Waiting, detail)
+			// Listed below with every other bead for the Governor, whichever host
+			// its Path names.
 			continue
 		}
 		report.Ready = append(report.Ready, detail)
 	}
+
+	// A bead for the Governor may have no Path at all, so no listing keyed by
+	// host finds it: ask for the label itself. A hitl story ready on this host
+	// comes back here too, and is listed once.
+	governors, err := s.Tracker.ReadyWithLabel(ctx, LabelHitl)
+	if err != nil {
+		return report, fmt.Errorf("reading what waits for the Governor: %w", err)
+	}
+	report.Waiting = append(report.Waiting, governors...)
+	sort.SliceStable(report.Waiting, func(i, j int) bool {
+		return report.Waiting[i].Priority < report.Waiting[j].Priority
+	})
 
 	blocked, err := s.Tracker.BlockedForHost(ctx, s.Host)
 	if err != nil {
@@ -533,8 +547,9 @@ func (r RunningStory) write(b *strings.Builder) {
 }
 
 // writeStory is one story's block: its id and rig, its title, and one more
-// line of note when there is something to say. Every line is clipped to
-// Width on its own, so a title of any length never widens the report.
+// line of note when there is something to say. A bead with no rig — a ticket
+// for the Governor — is its id alone. Every line is clipped to Width on its
+// own, so a title of any length never widens the report.
 func writeStory(b *strings.Builder, d StoryDetail, note string) {
 	writeStoryIn(b, "  ", d, note)
 }
@@ -542,7 +557,11 @@ func writeStory(b *strings.Builder, d StoryDetail, note string) {
 // writeStoryIn is writeStory indented under something else — a story listed
 // under the host it is pathed to, rather than under a heading.
 func writeStoryIn(b *strings.Builder, pad string, d StoryDetail, note string) {
-	clip(b, fmt.Sprintf("%s%s · %s", pad, d.Story.ID, d.Merged().Rig))
+	if rig := d.Merged().Rig; rig != "" {
+		clip(b, fmt.Sprintf("%s%s · %s", pad, d.Story.ID, rig))
+	} else {
+		clip(b, pad+d.Story.ID)
+	}
 	clip(b, pad+"  "+d.Story.Title)
 	if note != "" {
 		clip(b, pad+"  "+note)

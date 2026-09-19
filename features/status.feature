@@ -59,6 +59,71 @@ Feature: mw status
     Then reading status succeeds
     And the report has no heading for stories waiting for the Governor
 
+  Scenario: An open bead labelled hitl with no path is listed under the heading for the Governor
+    Given a status bead "mw-6ww.30" titled "Governor: turn on the VPS mail notifier" filed under no epic
+    And the status story "mw-6ww.30" is labelled "hitl"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "mw-6ww.30" as waiting for the Governor
+    And the report shows "mw-6ww.30" under the heading for the Governor with its title and no rig or host line
+
+  Scenario: A pathless bead labelled hitl is listed on whichever host is asked
+    Given a status bead "mw-6ww.31" titled "Governor: pick the Laptop's name" filed under no epic
+    And the status story "mw-6ww.31" is labelled "hitl"
+    And a status story "mw-gq6.35" filed under it, overriding "host" with "laptop"
+    And the status story "mw-gq6.35" is labelled "hitl"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "mw-6ww.31" as waiting for the Governor
+    And the report lists "mw-gq6.35" as waiting for the Governor
+
+  Scenario: A closed bead labelled hitl is not listed under the heading for the Governor
+    Given a status bead "mw-6ww.32" titled "Governor: an errand already done" filed under no epic
+    And the status story "mw-6ww.32" is labelled "hitl"
+    And the status story "mw-6ww.32" is finished
+    When mw status reads the host
+    Then reading status succeeds
+    And the report does not list "mw-6ww.32" as waiting for the Governor
+    And the report has no heading for stories waiting for the Governor
+
+  Scenario: A bead labelled hitl that an open bead blocks is not listed under the heading for the Governor
+    Given a status bead "mw-6ww.33" titled "Governor: the errand that comes first" filed under no epic
+    And a status bead "mw-6ww.34" titled "Governor: the errand that waits" filed under no epic, waiting on "mw-6ww.33"
+    And the status story "mw-6ww.34" is labelled "hitl"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report does not list "mw-6ww.34" as waiting for the Governor
+    And the report has no heading for stories waiting for the Governor
+
+  Scenario: A bead labelled hitl is listed once the bead that blocked it is finished
+    Given a status bead "mw-6ww.36" titled "Governor: the errand that came first" filed under no epic
+    And a status bead "mw-6ww.37" titled "Governor: the errand that waited" filed under no epic, waiting on "mw-6ww.36"
+    And the status story "mw-6ww.37" is labelled "hitl"
+    And the status story "mw-6ww.36" is finished
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "mw-6ww.37" as waiting for the Governor
+
+  Scenario: A bead that is not labelled hitl is not listed under the heading for the Governor
+    Given a status bead "mw-6ww.38" titled "A loose ticket for nobody in particular" filed under no epic
+    When mw status reads the host
+    Then reading status succeeds
+    And the report has no heading for stories waiting for the Governor
+
+  Scenario: The beads waiting for the Governor are listed by title, most urgent first
+    Given a status bead "mw-6ww.40" titled "Governor: a routine errand" filed under no epic
+    And the status story "mw-6ww.40" is labelled "hitl"
+    And a status bead "mw-6ww.41" titled "Governor: an urgent errand" filed under no epic
+    And the status story "mw-6ww.41" is labelled "hitl"
+    And the status story "mw-6ww.41" is at priority 0
+    And a status story "mw-gq6.36" titled "Governor: a story that is pathed" filed under it
+    And the status story "mw-gq6.36" is labelled "hitl"
+    And the status story "mw-gq6.36" is at priority 1
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "mw-6ww.41" before "mw-gq6.36" under the heading for the Governor
+    And the report lists "mw-gq6.36" before "mw-6ww.40" under the heading for the Governor
+
   Scenario: The heading for the Governor fits a phone screen too
     Given a status story "mw-gq6.28" titled "A story whose title runs on and on and on and on and on and on and on and on, well past a phone screen" filed under it
     And the status story "mw-gq6.28" is labelled "hitl"
