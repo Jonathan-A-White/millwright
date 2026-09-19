@@ -13,8 +13,6 @@ Where everything is. `CONTEXT.md` has the vocabulary, the ADRs the reasons.
 | command line | `cmd/mw/` | Cobra wiring only: read config, run the use case. |
 | features | `features/` | Gherkin; step code in `features/steps/`. |
 
-New behaviour is a use case; anything outside the process goes behind a port.
-
 ## Ports
 
 Every adapter carries `var _ application.<Port> = ...`.
@@ -74,24 +72,7 @@ from `cmd/mw/` only.
 Neither port nor use case: `application/fuel.go`, `application/ledger.go`,
 `domain/plan.go`.
 
-## Adding a command
-
-Copy `mw sweep`.
-
-1. **Feature** — `features/sweep.feature` first. Step text is unique across
-   all features; Gherkin does not unescape `\"`.
-2. **Steps** — `features/steps/sweep_steps.go`: context struct, `Before` reset,
-   ctx.Given/When/Then; register in `features/features_test.go`.
-3. **Use case** — `application/sweep.go`: struct of ports and settings, `Run(ctx)`
-   returning a report with `String()`.
-4. **Port method** — if a port falls short, add it with a doc comment.
-5. **Fake** — `application/apptest/faketracker.go`.
-6. **Adapter** — `infrastructure/beads/beads.go`, tested in
-   `infrastructure/beads/beads_integration_test.go`.
-7. **Cobra** — `cmd/mw/sweep.go`: `newSweepCmd()`, a `RunE` that only reads
-   config and calls the use case; add it in `cmd/mw/root.go`.
-8. **README** — a section beside "Keeping two hosts level", ending with a
-   pointer to the feature file.
+Adding a command: read `docs/adding-a-command.md` first.
 
 ## Test helpers
 
