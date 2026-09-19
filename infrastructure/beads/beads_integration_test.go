@@ -414,6 +414,27 @@ func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 		t.Fatalf("expected a story with no formula poured to have no open steps, got %+v: %v", none, err)
 	}
 
+	// What a dispatch asks before it pours again: is the molecule the story
+	// recorded still open, and which of its steps are left? One bd has no record
+	// of is missing, not a failure, and a root that is closed is not worked again.
+	reopened, err := gateway.OpenMolecule(ctx, molecule.RootID)
+	if err != nil {
+		t.Fatalf("reading the molecule %s: %v", molecule.RootID, err)
+	}
+	if reopened.RootID != molecule.RootID || len(reopened.Steps) != len(molecule.Steps)-1 || reopened.Steps[0].ID != open[0].ID {
+		t.Fatalf("expected the open molecule with its %d open steps in worked order, got %+v", len(open), reopened)
+	}
+	if missing, err := gateway.OpenMolecule(ctx, "mw-nope-zzz"); err != nil || missing.Poured() || missing.RootID != "" {
+		t.Fatalf("expected a molecule bd has no record of to be none, got %+v: %v", missing, err)
+	}
+	if none, err := gateway.OpenMolecule(ctx, ""); err != nil || none.RootID != "" {
+		t.Fatalf("expected no molecule recorded to be none, got %+v: %v", none, err)
+	}
+	bdRun(t, vault, beads.Program, "close", molecule.RootID, "--force", "--reason", "finished")
+	if closed, err := gateway.OpenMolecule(ctx, molecule.RootID); err != nil || closed.RootID != "" || closed.Poured() {
+		t.Fatalf("expected a closed molecule to be none, got %+v: %v", closed, err)
+	}
+
 	// And what it writes when it has landed, read back the way mw reads it.
 	if err := gateway.SetStoryState(ctx, storyID, application.RunState, application.RunLanded, "landed by the test"); err != nil {
 		t.Fatalf("recording the run state of %s: %v", storyID, err)

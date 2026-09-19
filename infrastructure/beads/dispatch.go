@@ -230,6 +230,32 @@ func (g *Gateway) StoryState(ctx context.Context, id, dimension string) (string,
 	return said, nil
 }
 
+// OpenMolecule implements application.WorkTracker: the root bead of a poured
+// formula, if it is still open, with the steps of it that are not closed. A root
+// bd says it has no record of is a missing molecule, not a failure; any other
+// way of not being able to read it is one, so that a dispatch that cannot tell
+// does not pour a second molecule on a guess.
+func (g *Gateway) OpenMolecule(ctx context.Context, rootID string) (application.Molecule, error) {
+	if strings.TrimSpace(rootID) == "" {
+		return application.Molecule{}, nil
+	}
+	root, err := g.showOne(ctx, rootID)
+	if err != nil {
+		if strings.Contains(err.Error(), "no issues found") || strings.Contains(err.Error(), "not found") {
+			return application.Molecule{}, nil
+		}
+		return application.Molecule{}, fmt.Errorf("reading the molecule %s: %w", rootID, err)
+	}
+	if root.Status == StatusClosed {
+		return application.Molecule{}, nil
+	}
+	open, err := g.OpenSteps(ctx, rootID)
+	if err != nil {
+		return application.Molecule{}, err
+	}
+	return application.Molecule{RootID: rootID, Steps: open}, nil
+}
+
 // OpenSteps implements application.WorkTracker: the step beads of a poured
 // formula that are not closed. They come back in the order they are worked, so
 // that the first one still open is the first thing the session did not do.

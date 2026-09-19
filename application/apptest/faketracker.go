@@ -49,6 +49,7 @@ type FakeTracker struct {
 	molecules   []application.Molecule
 	poured      map[string]string // story id -> the molecule poured for it
 	closedSteps map[string]bool   // step id -> closed by the session working it
+	closedRoots map[string]bool   // molecule root id -> closed
 
 	// refused is the stories CloseStory turns down, by the reason it gives.
 	refused map[string]string
@@ -66,6 +67,9 @@ type FakeTracker struct {
 	// asked is the dispatch-facing calls in the order they were made, so that a
 	// test can say the hosts were levelled before anything was claimed.
 	asked []string
+
+	// failing is the methods FailOn makes fail, by the error each gives.
+	failing map[string]error
 
 	// Err, when set, is returned by every method instead of doing the work.
 	Err error
@@ -515,7 +519,7 @@ func (f *FakeTracker) Molecules() int {
 
 // Asked reports the dispatch-facing calls the fake was made, in order: Sync,
 // RunningStories, ReadyForHost, WorkInHand, ClaimStory, ReleaseClaim,
-// PourFormula and SetStoryState. It is how a test says what was done before
+// OpenMolecule, PourFormula and SetStoryState. It is how a test says what was done before
 // what.
 func (f *FakeTracker) Asked() []string {
 	f.mu.Lock()
@@ -776,6 +780,59 @@ func (f *FakeTracker) CloseStep(stepID string) {
 		f.closedSteps = map[string]bool{}
 	}
 	f.closedSteps[stepID] = true
+}
+
+// FailOn makes one method, named as Asked names it, fail with err instead of
+// doing its work, and leaves every other method alone. A nil err lets it work
+// again. Only OpenMolecule looks at it so far.
+func (f *FakeTracker) FailOn(method string, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failing == nil {
+		f.failing = map[string]error{}
+	}
+	if err == nil {
+		delete(f.failing, method)
+		return
+	}
+	f.failing[method] = err
+}
+
+// CloseMolecule closes the root bead of a poured molecule, as whoever finishes
+// with a story does. Its steps are left as they were.
+func (f *FakeTracker) CloseMolecule(rootID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closedRoots == nil {
+		f.closedRoots = map[string]bool{}
+	}
+	f.closedRoots[rootID] = true
+}
+
+// OpenMolecule implements application.WorkTracker.
+func (f *FakeTracker) OpenMolecule(_ context.Context, rootID string) (application.Molecule, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, "OpenMolecule")
+	if f.Err != nil {
+		return application.Molecule{}, f.Err
+	}
+	if err := f.failing["OpenMolecule"]; err != nil {
+		return application.Molecule{}, err
+	}
+	for _, molecule := range f.molecules {
+		if molecule.RootID != rootID || f.closedRoots[rootID] {
+			continue
+		}
+		open := application.Molecule{RootID: rootID}
+		for _, step := range molecule.Steps {
+			if !f.closedSteps[step.ID] {
+				open.Steps = append(open.Steps, step)
+			}
+		}
+		return open, nil
+	}
+	return application.Molecule{}, nil
 }
 
 // OpenSteps implements application.WorkTracker.

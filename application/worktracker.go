@@ -319,12 +319,21 @@ type WorkTracker interface {
 
 	// PourFormula pours a formula into step beads for one story and reports the
 	// molecule it made: the root bead and the steps in the order they are
-	// worked. Pouring twice makes two molecules, so pour once per dispatch.
+	// worked. Pouring twice makes two molecules, so pour only when the story has
+	// no open molecule to work (see OpenMolecule).
 	PourFormula(ctx context.Context, formula, storyID, title string) (Molecule, error)
 
 	// StoryState reads back one dimension of a story's operational state, or ""
 	// when that dimension has never been set.
 	StoryState(ctx context.Context, id, dimension string) (string, error)
+
+	// OpenMolecule reads back a molecule a story recorded: the root bead and the
+	// steps of it not closed yet, in the order they are worked. It is the zero
+	// Molecule when the root is closed or is not in the tracker at all — beads
+	// are never deleted, but a root can be missing from this host's copy — and
+	// an error only when the tracker could not say which. It reads and writes
+	// nothing, and leaves Formula empty: the tracker does not know it.
+	OpenMolecule(ctx context.Context, rootID string) (Molecule, error)
 
 	// OpenSteps lists the steps of a poured formula that are not closed yet:
 	// what the session working the story did not finish. A molecule whose steps
