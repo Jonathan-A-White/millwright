@@ -1,0 +1,20 @@
+# Runs mw-millhand-tick.service at 7, 22, 37 and 52 minutes past every hour. For
+# `systemctl --user`; see README.md, "Waking the Millhand".
+#
+# The minutes are off the dispatch timer's (0, 5, 10, ...) and the health
+# timer's (0, 15, 30, 45), so the three do not start together. The cadence is a
+# fuel knob: change it with a drop-in (`systemctl --user edit
+# mw-millhand-tick.timer`), never by editing this file.
+[Unit]
+Description=Every 15 minutes, wake the Millhand if something needs it (mw millhand tick)
+
+[Timer]
+OnCalendar=*:7/15
+# No catch-up: a host that was asleep or off does not run the ticks it missed,
+# and it is not woken to run them. The next tick on the clock is the next run.
+Persistent=false
+WakeSystem=false
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

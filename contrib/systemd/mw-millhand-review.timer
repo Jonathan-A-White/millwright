@@ -1,0 +1,20 @@
+# Runs mw-millhand-review.service at 07:30 and 19:30, local time. For
+# `systemctl --user`; see README.md, "Waking the Millhand".
+#
+# The hours are a comma list on the hour field, `07,19:30`: written as
+# `07:30,19:30` systemd reads the comma in the minute field and the timer fires
+# at the wrong times. The cadence is a fuel knob: change it with a drop-in
+# (`systemctl --user edit mw-millhand-review.timer`), never by editing this file.
+[Unit]
+Description=Twice a day, wake the Millhand for a review (mw millhand --wake review)
+
+[Timer]
+OnCalendar=*-*-* 07,19:30
+# Catch up: a review missed because the host was asleep or off runs once when
+# it wakes. It is not woken for it.
+Persistent=true
+WakeSystem=false
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
