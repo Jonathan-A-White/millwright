@@ -254,8 +254,16 @@ func KickoffPrompt(seat, storyID, vaultDir string) string {
 		"bd runs without asking, but as its own Bash call, never chained with another command "+
 		"by ;, | or &&. "+
 		"%s"+
+		// mw next refuses a branch only once the session has ended and its fuel is
+		// spent; mw check asks the same questions now, changes nothing, and fails
+		// when mw next would.
+		"Once your work is committed, run `mw check %s` and fix whatever it refuses: "+
+		"it makes the checks mw next makes before landing (commits on the branch, none signed, "+
+		"every formula step closed, the rig's tests passing), prints what mw next would print for each "+
+		"refusal, writes nothing anywhere and exits non-zero when any check fails. "+
+		"A formula step you have not closed yet is one it will name. "+
 		"This session is headless and ends when your turn ends: run the suite in the foreground "+
-		"and wait for it, never in the background, and commit before you stop.", seat, storyID, bdVault(vaultDir))
+		"and wait for it, never in the background, and commit before you stop.", seat, storyID, bdVault(vaultDir), storyID)
 }
 
 // bdVault is the sentence that gives a session the exact bd command for this

@@ -252,60 +252,13 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		return n.stop(ctx, c, report, "the session did not finish: "+result.Trouble(), "")
 	}
 
-	// What the session left on the branch. The target branch as the remote has
-	// it now is what the work is measured against: the other host may have
-	// landed on it while this story was worked.
+	// The target branch as the remote has it now is what the work is measured
+	// against: the other host may have landed on it while this story was worked.
 	if err := n.Worktrees.Fetch(ctx, c.rigDir); err != nil {
 		return n.stop(ctx, c, report, fmt.Sprintf("the rig could not be brought up to date with %s: %v", n.remote(), err), "")
 	}
-	base := StartPoint(n.remote(), c.target)
-	commits, err := n.Landing.Ahead(ctx, c.rigDir, c.branch, base)
-	if err != nil {
-		return n.stop(ctx, c, report, fmt.Sprintf("the commits on %s could not be counted: %v", c.branch, err), "")
-	}
-	report.Commits = commits
-	if commits == 0 {
-		return n.nothingCommitted(ctx, c, report)
-	}
-
-	// What the commits say about who wrote them. This is asked before the
-	// formula, before the tests and before the merge slot, because a commit
-	// message is the one thing a landing makes permanent and cannot take back:
-	// once it is on the target branch at the remote, only a force-push would
-	// undo it, and mw forces nothing. Refused here, the branch is still the
-	// session's to amend.
-	if stopped, why, said := n.signedByAMachine(ctx, c); stopped {
-		return n.stop(ctx, c, report, why, said)
-	}
-
-	// What the formula says the session was to do. A step still open is a step
-	// the session did not do, whatever the code looks like.
-	if root := c.detail.Molecule.RootID; root != "" {
-		open, err := n.Tracker.OpenSteps(ctx, root)
-		if err != nil {
-			return n.stop(ctx, c, report, fmt.Sprintf("the steps of the formula poured as %s could not be read: %v", root, err), "")
-		}
-		if len(open) > 0 {
-			return n.stop(ctx, c, report,
-				fmt.Sprintf("%d formula step(s) of %s are still open, so the formula was not finished", len(open), root),
-				"Still open:\n"+stepList(open))
-		}
-	}
-
-	// What the rig itself says about the work, in the worktree the session left.
-	checked, err := n.Checks.Run(ctx, c.path.Rig, c.worktree)
-	if err != nil {
-		return n.stop(ctx, c, report, fmt.Sprintf("the rig's tests could not be run in %s: %v", c.worktree, err), "")
-	}
-	if checked.NotRun {
-		return n.stop(ctx, c, report,
-			fmt.Sprintf("the rig's tests could not be run in the worktree: `%s` did not start, so this host is missing something the command needs (a toolchain not on its PATH?)", checked.Command),
-			"The last lines of `"+checked.Command+"` in "+c.worktree+":\n\n```\n"+checked.Tail(CheckLines)+"\n```")
-	}
-	if !checked.Passed {
-		return n.stop(ctx, c, report,
-			fmt.Sprintf("the rig's tests fail in the worktree: `%s` did not pass", checked.Command),
-			"The last lines of `"+checked.Command+"` in "+c.worktree+":\n\n```\n"+checked.Tail(CheckLines)+"\n```")
+	if found := n.refusals(ctx, c, report, false); len(found) > 0 {
+		return n.stop(ctx, c, report, found[0].Why, found[0].Said)
 	}
 
 	// Only one close-out at a time may touch a rig's target branch on this host.
@@ -337,28 +290,109 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	return n.finish(ctx, c, report, outcome, false)
 }
 
-// nothingCommitted stops a close-out whose branch has no commits on it. A
+// Refusal is one reason a branch is not landed: the line that says it, and the
+// detail a person needs to act on it — which steps are open, which commit is
+// signed, what the tests said. It is what a close-out writes on the story and
+// what mw check prints, worded once.
+type Refusal struct {
+	Why, Said string
+}
+
+// refusals reads the branch a session left against everything mw next asks of
+// it before landing, in the order it asks: commits, whom they are signed by,
+// the formula's steps and the rig's own tests in the worktree. A branch with no
+// commits is refused there and then, because there is nothing to sign, close or
+// test. With all false it stops at the first refusal, as a close-out does,
+// because a commit message is permanent and the tests are the slow part; with
+// all true it goes on to the rest, which is what a session checking its own
+// branch wants to be told at once. It reads and never writes: all it changes
+// is the report it fills in.
+func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all bool) []Refusal {
+	var found []Refusal
+	// refuse notes one refusal and says whether to go no further.
+	refuse := func(why, said string) bool {
+		found = append(found, Refusal{why, said})
+		return !all
+	}
+
+	// What the session left on the branch, measured against the target branch
+	// as this rig last saw the remote's.
+	base := StartPoint(n.remote(), c.target)
+	commits, err := n.Landing.Ahead(ctx, c.rigDir, c.branch, base)
+	if err != nil {
+		refuse(fmt.Sprintf("the commits on %s could not be counted: %v", c.branch, err), "")
+		return found
+	}
+	report.Commits = commits
+	if commits == 0 {
+		why, said := n.nothingCommitted(ctx, c, report)
+		refuse(why, said)
+		return found
+	}
+
+	// What the commits say about who wrote them. This is asked before the
+	// formula, before the tests and before the merge slot, because a commit
+	// message is the one thing a landing makes permanent and cannot take back:
+	// once it is on the target branch at the remote, only a force-push would
+	// undo it, and mw forces nothing. Refused here, the branch is still the
+	// session's to amend.
+	if stopped, why, said := n.signedByAMachine(ctx, c); stopped && refuse(why, said) {
+		return found
+	}
+
+	// What the formula says the session was to do. A step still open is a step
+	// the session did not do, whatever the code looks like.
+	if root := c.detail.Molecule.RootID; root != "" {
+		open, err := n.Tracker.OpenSteps(ctx, root)
+		switch {
+		case err != nil:
+			if refuse(fmt.Sprintf("the steps of the formula poured as %s could not be read: %v", root, err), "") {
+				return found
+			}
+		case len(open) > 0:
+			if refuse(fmt.Sprintf("%d formula step(s) of %s are still open, so the formula was not finished", len(open), root),
+				"Still open:\n"+stepList(open)) {
+				return found
+			}
+		}
+	}
+
+	// What the rig itself says about the work, in the worktree the session left.
+	checked, err := n.Checks.Run(ctx, c.path.Rig, c.worktree)
+	switch {
+	case err != nil:
+		refuse(fmt.Sprintf("the rig's tests could not be run in %s: %v", c.worktree, err), "")
+	case checked.NotRun:
+		refuse(fmt.Sprintf("the rig's tests could not be run in the worktree: `%s` did not start, so this host is missing something the command needs (a toolchain not on its PATH?)", checked.Command),
+			"The last lines of `"+checked.Command+"` in "+c.worktree+":\n\n```\n"+checked.Tail(CheckLines)+"\n```")
+	case !checked.Passed:
+		refuse(fmt.Sprintf("the rig's tests fail in the worktree: `%s` did not pass", checked.Command),
+			"The last lines of `"+checked.Command+"` in "+c.worktree+":\n\n```\n"+checked.Tail(CheckLines)+"\n```")
+	}
+	return found
+}
+
+// nothingCommitted is the refusal of a branch with no commits on it. A
 // session that did nothing and a session that did the work and never committed
 // it look alike on the branch and nothing like each other in the worktree — the
 // headless session ends when its turn does, whatever it left running — so the
 // worktree is read too, and what is in it is named: the person told "committed
 // nothing" would otherwise throw the worktree away.
-func (n Next) nothingCommitted(ctx context.Context, c *closeOut, report *NextReport) (NextReport, error) {
+func (n Next) nothingCommitted(ctx context.Context, c *closeOut, report *NextReport) (why, said string) {
 	plain := fmt.Sprintf("the session committed nothing to %s, so there is nothing to land on %s", c.branch, c.target)
 
 	left, err := n.Landing.Uncommitted(ctx, c.worktree)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the worktree %s could not be read for uncommitted work: %v", c.worktree, err))
-		return n.stop(ctx, c, report, plain, "")
+		return plain, ""
 	}
 	if len(left) == 0 {
-		return n.stop(ctx, c, report, plain, "")
+		return plain, ""
 	}
 	report.Uncommitted = left
-	return n.stop(ctx, c, report,
-		fmt.Sprintf("the session committed nothing to %s but left uncommitted work in its worktree (%s), so there is nothing to land on %s",
+	return fmt.Sprintf("the session committed nothing to %s but left uncommitted work in its worktree (%s), so there is nothing to land on %s",
 			c.branch, pathList(left, UncommittedShort), c.target),
-		fmt.Sprintf("Uncommitted work left in %s (%d path(s)):\n%s", c.worktree, len(left), bullets(left, UncommittedListed)))
+		fmt.Sprintf("Uncommitted work left in %s (%d path(s)):\n%s", c.worktree, len(left), bullets(left, UncommittedListed))
 }
 
 // pathList is up to limit paths on one line, and how many more there were.

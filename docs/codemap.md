@@ -50,6 +50,7 @@ from `cmd/mw/` only.
 | `Release` | `application/release.go` | `mw release` — `cmd/mw/release.go` | `features/release.feature` |
 | `Dispatch` | `application/dispatch.go` | `mw dispatch` — `cmd/mw/dispatch.go` | `features/dispatch.feature` |
 | `Next` | `application/next.go` | `mw next` — `cmd/mw/next.go` | `features/next.feature` |
+| `Check` | `application/check.go` | `mw check` — `cmd/mw/check.go` | `features/check.feature` |
 | `Status` | `application/status.go` | `mw status` — `cmd/mw/status.go` | `features/status.feature` |
 | `Sweep` | `application/sweep.go` | `mw sweep` — `cmd/mw/sweep.go` | `features/sweep.feature` |
 | `Sync` | `application/sync.go` | `mw sync` — `cmd/mw/sync.go` | `features/sync.feature` |
