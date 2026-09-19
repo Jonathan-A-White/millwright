@@ -88,6 +88,7 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a status story "([^"]*)" filed under it, overriding "([^"]*)" with "([^"]*)"$`, c.aStatusStoryOverriding)
 	ctx.Given(`^a status story "([^"]*)" filed under it, waiting on "([^"]*)"$`, c.aStatusStoryWaitingOn)
 	ctx.Given(`^a status story "([^"]*)" filed under it, waiting on "([^"]*)" and "([^"]*)"$`, c.aStatusStoryWaitingOnTwo)
+	ctx.Given(`^the status story "([^"]*)" is labelled "([^"]*)"$`, c.theStatusStoryIsLabelled)
 	ctx.Given(`^the status story "([^"]*)" is finished$`, c.theStatusStoryIsFinished)
 	ctx.Given(`^the status story "([^"]*)" is claimed with its session running$`, c.theStatusStoryIsClaimedAndRunning)
 	ctx.Given(`^the status story "([^"]*)" is marked run=(\S+)$`, c.theStatusStoryIsMarkedRun)
@@ -106,6 +107,10 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the report shows "([^"]*)" running with session "([^"]*)"$`, c.theReportShowsRunningWithSession)
 	ctx.Then(`^the report lists "([^"]*)" as ready$`, c.theReportListsAsReady)
 	ctx.Then(`^the report lists "([^"]*)" as blocked$`, c.theReportListsAsBlocked)
+	ctx.Then(`^the report lists "([^"]*)" as waiting for the Governor$`, c.theReportListsAsWaitingForTheGovernor)
+	ctx.Then(`^the report does not list "([^"]*)" as ready$`, c.theReportDoesNotListAsReady)
+	ctx.Then(`^the report does not show "([^"]*)" as running$`, c.theReportDoesNotShowAsRunning)
+	ctx.Then(`^the report has no heading for stories waiting for the Governor$`, c.theReportHasNoHeadingForTheGovernor)
 	ctx.Then(`^the report shows "([^"]*)" on the rig "([^"]*)"$`, c.theReportShowsOnTheRig)
 	ctx.Then(`^the report says the close-out of "([^"]*)" is blocked by an open formula step$`,
 		c.theReportSaysCloseOutBlockedByFormula)
@@ -223,6 +228,10 @@ func (c *statusContext) aStatusStoryWaitingOnTwo(id, first, second string) error
 	c.tracker.AddStory(c.lastEpic, domain.Story{ID: id, Title: id})
 	c.tracker.Needs(id, first, second)
 	return nil
+}
+
+func (c *statusContext) theStatusStoryIsLabelled(id, label string) error {
+	return c.tracker.SetLabels(id, label)
 }
 
 func (c *statusContext) theStatusStoryIsFinished(id string) error {
@@ -416,6 +425,87 @@ func (c *statusContext) theReportListsAsBlocked(id string) error {
 		}
 	}
 	return fmt.Errorf("%s is not listed as blocked:\n%s", id, c.report.String())
+}
+
+// theReportListsAsWaitingForTheGovernor checks the story is in the report's
+// section for stories the Governor must be present for, and printed under that
+// heading rather than another.
+func (c *statusContext) theReportListsAsWaitingForTheGovernor(id string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	found := false
+	for _, d := range c.report.Waiting {
+		if d.Story.ID == id {
+			found = true
+		}
+	}
+	if !found {
+		return fmt.Errorf("%s is not listed as waiting for the Governor:\n%s", id, c.report.String())
+	}
+	if !strings.Contains(headedBy(c.report.String(), application.WaitingHeading), id) {
+		return fmt.Errorf("expected the printed report to list %s under %q, got:\n%s",
+			id, application.WaitingHeading, c.report.String())
+	}
+	return nil
+}
+
+func (c *statusContext) theReportDoesNotListAsReady(id string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	for _, d := range c.report.Ready {
+		if d.Story.ID == id {
+			return fmt.Errorf("%s is listed as ready:\n%s", id, c.report.String())
+		}
+	}
+	if strings.Contains(headedBy(c.report.String(), "READY"), id) {
+		return fmt.Errorf("expected the printed report not to list %s under READY, got:\n%s", id, c.report.String())
+	}
+	return nil
+}
+
+func (c *statusContext) theReportDoesNotShowAsRunning(id string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	if _, ok := c.runningIn(id); ok {
+		return fmt.Errorf("%s is listed as running:\n%s", id, c.report.String())
+	}
+	if strings.Contains(headedBy(c.report.String(), "RUNNING"), id) {
+		return fmt.Errorf("expected the printed report not to list %s under RUNNING, got:\n%s", id, c.report.String())
+	}
+	return nil
+}
+
+func (c *statusContext) theReportHasNoHeadingForTheGovernor() error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	if len(c.report.Waiting) != 0 {
+		return fmt.Errorf("expected nothing waiting for the Governor, got %d stories", len(c.report.Waiting))
+	}
+	if strings.Contains(c.report.String(), application.WaitingHeading) {
+		return fmt.Errorf("expected no %q heading, got:\n%s", application.WaitingHeading, c.report.String())
+	}
+	return nil
+}
+
+// headedBy is the block of a printed report that starts at the line beginning
+// with heading and runs to the next blank line, or "" when there is none.
+func headedBy(printed, heading string) string {
+	lines := strings.Split(printed, "\n")
+	for i, line := range lines {
+		if !strings.HasPrefix(line, heading) {
+			continue
+		}
+		end := i + 1
+		for end < len(lines) && lines[end] != "" {
+			end++
+		}
+		return strings.Join(lines[i:end], "\n")
+	}
+	return ""
 }
 
 func (c *statusContext) theReportShowsOnTheRig(id, rig string) error {

@@ -22,6 +22,10 @@ const Width = 60
 // reading of it is already a cycle old.
 const DefaultHostSilence = 2 * time.Hour
 
+// WaitingHeading is what heads the section for stories the Governor must be
+// present for. The report leaves the section out when there are none.
+const WaitingHeading = "WAITING FOR THE GOVERNOR"
+
 // RepathHint is what a person does about work stranded on a sleeping host: it
 // is re-pathed, by hand, to a host that is awake. mw status only ever says
 // this; re-pathing a story is the Mayor's act, never a report's.
@@ -38,8 +42,8 @@ type TrackerNotes interface {
 }
 
 // Status reads, for one host, what is running there, what is ready to be
-// taken, what is blocked, today's fuel from a seat's ledger, and what every
-// other host has in hand and when it last synced. It is the read-only,
+// taken, what waits for the Governor, what is blocked, today's fuel from a
+// seat's ledger, and what every other host has in hand and when it last synced. It is the read-only,
 // zero-token twin of dispatch: nothing is claimed, nothing is written to a
 // bead, no note is left, nothing is appended to the ledger, and no session is
 // started, sent to or closed.
@@ -141,6 +145,10 @@ type StatusReport struct {
 	Host    string
 	Running []RunningStory
 	Ready   []StoryDetail
+	// Waiting are the stories labelled hitl that are ready or already claimed:
+	// worked with the Governor present, so neither a dispatcher's to take nor a
+	// session for Running to show. They are in no other list.
+	Waiting []StoryDetail
 	Blocked []StoryDetail
 	// Others is what every other host named in a story's Path has in hand, one
 	// entry per host, in host order.
@@ -170,6 +178,12 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		return report, fmt.Errorf("reading what is running on %s: %w", s.Host, err)
 	}
 	for _, detail := range running {
+		if detail.Hitl() {
+			// The Mayor works it beside the Governor: there is no session of its
+			// own to judge, only a story to be found waiting.
+			report.Waiting = append(report.Waiting, detail)
+			continue
+		}
 		rs, err := s.running(ctx, detail)
 		if err != nil {
 			return report, err
@@ -181,7 +195,13 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	if err != nil {
 		return report, fmt.Errorf("reading what is ready on %s: %w", s.Host, err)
 	}
-	report.Ready = ready
+	for _, detail := range ready {
+		if detail.Hitl() {
+			report.Waiting = append(report.Waiting, detail)
+			continue
+		}
+		report.Ready = append(report.Ready, detail)
+	}
 
 	blocked, err := s.Tracker.BlockedForHost(ctx, s.Host)
 	if err != nil {
@@ -353,6 +373,14 @@ func (r StatusReport) String() string {
 		writeStory(&b, d, "")
 	}
 	b.WriteString("\n")
+
+	if len(r.Waiting) > 0 {
+		clip(&b, fmt.Sprintf("%s (%d)", WaitingHeading, len(r.Waiting)))
+		for _, d := range r.Waiting {
+			writeStory(&b, d, readyOrClaimed(d))
+		}
+		b.WriteString("\n")
+	}
 
 	clip(&b, fmt.Sprintf("BLOCKED (%d)", len(r.Blocked)))
 	if len(r.Blocked) == 0 {
