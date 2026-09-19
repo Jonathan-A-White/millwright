@@ -438,6 +438,12 @@ millwright = "/root/millwright"    # where each rig is checked out here
 
 [tests]
 millwright = "make test"           # how a close-out asks this rig if it is green
+
+[watch]                            # what mw watch looks at; leave it out to watch nothing
+ssh = "vps"                        # the name ssh knows the watched host by
+host = "vps"                       # its name in beads
+outside = ["https://one.example", "https://two.example"]
+blog = "https://blog.example.com"  # optional: the blog answering is a sign of life
 ```
 
 A rig a story names but this host has no checkout of is said so plainly, and the
@@ -1047,6 +1053,55 @@ Error: the Millhand is already up in the window millhand-2026-09-19-03: nothing 
 ```
 
 See `features/millhand.feature`.
+
+## Watching a host from one that can lose its network
+
+```sh
+bin/mw watch
+```
+
+`mw watch` is for a host that sometimes loses its own network (the Laptop) and
+so has to tell a fault of its own from a fault of the host it watches (the VPS).
+It prints **one line**, appends the same line, dated, to
+`~/.local/state/mw-watch/log`, and reads and writes nothing else but the state it
+keeps in that directory. It takes no arguments and is run on a timer.
+
+The watched host is named by a `[watch]` table in the config file:
+
+```toml
+[watch]
+ssh     = "vps"                       # the name ssh knows it by
+host    = "vps"                       # its name in beads
+outside = ["https://one.example", "https://two.example"]
+blog    = "https://blog.example.com"  # optional
+```
+
+The rule has three cases:
+
+1. **Neither outside place answers**: `local-fault`. Nobody is woken and what
+   `mw watch` remembers is left as it was.
+2. **An outside place answers and ssh answers**: it reads the host's health line
+   (see *A host's health line*) with exactly `cat ~/.mw-health`, `BatchMode` and a
+   10 second timeout. The text is opaque but for its leading UTC timestamp and its
+   trailing verdict: `ok`, `unwell <reasons>`, or `stale` when the timestamp is
+   older than 40 minutes, is not a time, or there is no line. Whatever ssh
+   answers, the count of failed checks (case 3) is forgotten.
+3. **An outside place answers but ssh fails**: it looks for signs of life, the blog
+   answering over HTTPS and the host's `last_sync` note in the local beads (the
+   one `mw status` reads for OTHER HOSTS) fresher than 30 minutes. The first such
+   check says `unreachable-once signs=<blog,sync,none>` and is remembered; the
+   host is `down signs=<...>` only when a second failed check comes 3 minutes or
+   more after the first.
+
+| Line | Leaves with |
+| --- | --- |
+| `local-fault`, `ok`, `unreachable-once signs=...`, `nothing to watch` | 0 |
+| `unwell <reasons>`, `stale`, `down signs=...` | 6 |
+
+**6** means a wake is called for; 1 is still a failure, such as an unwritable
+state directory. With no `[watch]` table the line is `nothing to watch`. A table
+that does not say `ssh`, `host` and `outside` is refused. The memory (the time of
+the first failed check) is `memory` beside the log. See `features/watch.feature`.
 
 ## The Path
 
