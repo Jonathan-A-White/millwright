@@ -222,7 +222,8 @@ the other host sees a closed story rather than a claimed one, and whatever is
 ready here is dispatched.
 
 The commit is exactly three paths — `seats/<seat>/ledger.md`,
-`seats/<seat>/rigs/<rig>.md` and `runs/<story>/result.json` — named explicitly,
+`seats/<seat>/rigs/<rig>.md` and `runs/<story>/result.json` — and a fourth,
+`runs/<story>/landing-error.txt`, when a landing failed (below) — named explicitly,
 never `git add -A` and never `commit -a`, under a plain message naming the story
 and signed by nobody. They are the only files a story is allowed to write in the
 vault: mw wrote the first and the run record, and the session may have written the
@@ -260,6 +261,11 @@ depend on any one of them:
   "not landed" line goes in the ledger, the worktree and branch are kept, and
   `mw next` leaves with 1. Nothing is merged, so the branch is still the
   session's to amend.
+
+A landing that fails — a push the remote refuses, a merge that will not go —
+keeps the whole of git's error in `runs/<story>/landing-error.txt` and quotes it
+in full, fenced, in the story's comment; the ledger row keeps its one line, the
+first line of the error.
 
 The **merge slot** is an advisory lock (`flock`) on a file beside the rig's
 worktrees, one per rig per host. It is a lock rather than a file somebody writes
