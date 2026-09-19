@@ -852,6 +852,49 @@ at least 1, 180000 by default. See `features/seat_context.feature`. `mw seat` is
 the parent for the commands about a seat's own session; later ones sit beside
 `context`.
 
+## Starting a seat's next session
+
+```sh
+bin/mw seat up mayor --effort high --reason "the handoff is written"
+```
+
+`mw seat up <seat>` starts one interactive Claude Code session for the seat, in
+a new tmux window of the session `mw` is running in — or of a detached session
+named `mw-seats`, when `mw` is running outside tmux. The window is named
+`<seat>-<UTC date>-<nn>`, with `nn` one past the highest number the seat has
+used for a handoff or for a window already open, and the line it prints names
+it:
+
+```
+started the mayor seat in the window mayor-2026-09-19-13, booting from seats/mayor/handoffs/2026-09-19-12.md
+```
+
+The session is primed with the seat's charter, by path, and is told the seat's
+own kickoff text if it keeps one, or a default that sends it to its charter and
+its newest handoff. Either way `mw` appends the newest handoff to boot from and
+the `--reason` it was started for. It runs in the vault, with `MW_SEAT` set to
+the seat so that its mail is signed and never defaulted, at `--model` and
+`--effort` when they are given, in `auto` permission mode. Nothing else the
+vault holds is read or passed: no ledger, no memory of a rig, no prime from the
+tracker — a session that wants any of it can read it itself, and a session
+primed with it pays for every line at boot.
+
+Handoffs are read from `seats/<seat>/hosts/<host>/handoffs/` for a seat that
+keeps a directory for this host, and from `seats/<seat>/handoffs/` for one that
+does not; the newest by name is the one it boots from.
+
+It refuses, starts nothing and exits non-zero in three cases: the seat has no
+charter, so there is nothing to boot into; it has written no handoff, so there
+is nothing to boot from; or it is already acting — its acting file names a
+window that is still open, and no handoff has been written since that window
+was opened. The acting file (`.<seat>-acting` in the vault, host-local and
+untracked) is never written by `mw`: the new session writes it at boot, and
+that is the hand-over signal. Closing the predecessor's window is nobody's job
+yet.
+
+See `features/seat_up.feature`, and `infrastructure/tmux/window.go` for the
+windows themselves.
+
 ## The Path
 
 A story is worked by a **Path**: the rig it is worked in, the branch it
