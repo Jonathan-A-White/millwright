@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,7 +20,7 @@ func privateTmux(t *testing.T, window string) string {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("tmux is not on PATH")
 	}
-	socket := "mw-test-millhand-" + strings.ReplaceAll(t.Name(), "/", "-") + time.Now().Format("150405.000000")
+	socket := fmt.Sprintf("mw-test-%d-%d", os.Getpid(), time.Now().UnixNano())
 	t.Setenv("TMUX", "")
 	t.Setenv(TmuxSocketEnv, socket)
 	t.Cleanup(func() {
