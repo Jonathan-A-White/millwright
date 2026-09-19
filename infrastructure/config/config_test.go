@@ -31,6 +31,8 @@ func writeConfig(t *testing.T, contents string) string {
 	t.Setenv("MW_HOST_SILENT_HOURS", "")
 	t.Setenv("MW_HANDOFF_AT", "")
 	t.Setenv("MW_RIG_MEMORY_BYTES", "")
+	t.Setenv("MW_MILLHAND_ROUTINE_MODEL", "")
+	t.Setenv("MW_MILLHAND_REVIEW_MODEL", "")
 	return home
 }
 
@@ -392,5 +394,38 @@ func TestRigMemoryBytesRefusesWhatWouldCallEveryRigOverBudgetOrIsNotANumber(t *t
 	writeConfig(t, "rig_memory_bytes = \"plenty\"\n")
 	if _, err := config.RigMemoryBytes(); err == nil {
 		t.Fatal("expected a rig memory budget that is not a number to be refused")
+	}
+}
+
+func TestTheMillhandsModelsAreSonnetForRoutineAndOpusForReviewUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\n")
+	routine, err := config.MillhandRoutineModel()
+	if err != nil || routine != "sonnet" {
+		t.Errorf("expected sonnet for a routine wake, got %q, %v", routine, err)
+	}
+	review, err := config.MillhandReviewModel()
+	if err != nil || review != "opus" {
+		t.Errorf("expected opus for a review wake, got %q, %v", review, err)
+	}
+}
+
+func TestTheMillhandsModelsAreReadFromTheEnvironmentAheadOfTheFile(t *testing.T) {
+	writeConfig(t, "millhand_routine_model = \"haiku\"\nmillhand_review_model = 'fable'\n\n[rigs]\nmillhand_review_model = \"nothing\"\n")
+	routine, err := config.MillhandRoutineModel()
+	if err != nil || routine != "haiku" {
+		t.Errorf("expected the file's haiku for a routine wake, got %q, %v", routine, err)
+	}
+	review, err := config.MillhandReviewModel()
+	if err != nil || review != "fable" {
+		t.Errorf("expected the file's fable for a review wake, got %q, %v", review, err)
+	}
+
+	t.Setenv("MW_MILLHAND_ROUTINE_MODEL", "opus")
+	t.Setenv("MW_MILLHAND_REVIEW_MODEL", "sonnet")
+	if routine, _ := config.MillhandRoutineModel(); routine != "opus" {
+		t.Errorf("expected the environment to win for a routine wake, got %q", routine)
+	}
+	if review, _ := config.MillhandReviewModel(); review != "sonnet" {
+		t.Errorf("expected the environment to win for a review wake, got %q", review)
 	}
 }

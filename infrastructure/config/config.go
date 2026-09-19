@@ -9,6 +9,8 @@
 //	host_silent_hours = 2
 //	handoff_at = 180000
 //	rig_memory_bytes = 8000
+//	millhand_routine_model = "sonnet"
+//	millhand_review_model = "opus"
 //
 //	[rigs]
 //	millwright = "/root/millwright"
@@ -33,6 +35,9 @@ const (
 	HostSilenceEnv = "MW_HOST_SILENT_HOURS"
 	HandoffAtEnv   = "MW_HANDOFF_AT"
 	RigMemoryEnv   = "MW_RIG_MEMORY_BYTES"
+
+	MillhandRoutineModelEnv = "MW_MILLHAND_ROUTINE_MODEL"
+	MillhandReviewModelEnv  = "MW_MILLHAND_REVIEW_MODEL"
 )
 
 // RigsTable is the table of the config file that says where each rig is checked
@@ -73,6 +78,14 @@ const DefaultHandoffAt = 180000
 // Every Builder reads that file at boot, so its size is fuel paid on every
 // story.
 const DefaultRigMemoryBytes = 8000
+
+// The models `mw millhand` wakes the Millhand on when nothing says otherwise: a
+// routine wake and a wake by hand on Sonnet, a review wake on Opus. They are
+// fuel knobs, so they are settings and not code.
+const (
+	DefaultMillhandRoutineModel = "sonnet"
+	DefaultMillhandReviewModel  = "opus"
+)
 
 // File is the config file's path under the home directory.
 var File = filepath.Join(".config", "mw", "config.toml")
@@ -238,6 +251,23 @@ func HandoffAt() (int, error) {
 	return tokens, nil
 }
 
+// MillhandRoutineModel reports the model a routine wake, and a wake by hand, of
+// the Millhand runs on: $MW_MILLHAND_ROUTINE_MODEL if it is set, otherwise the
+// root-table `millhand_routine_model` key of ~/.config/mw/config.toml, and
+// DefaultMillhandRoutineModel when neither says. Whether it names a model the
+// factory runs on is for the harness to say when a session is started on it.
+func MillhandRoutineModel() (string, error) {
+	return optionalSetting("millhand_routine_model", MillhandRoutineModelEnv, DefaultMillhandRoutineModel)
+}
+
+// MillhandReviewModel reports the model a review wake of the Millhand runs on:
+// $MW_MILLHAND_REVIEW_MODEL if it is set, otherwise the root-table
+// `millhand_review_model` key of ~/.config/mw/config.toml, and
+// DefaultMillhandReviewModel when neither says.
+func MillhandReviewModel() (string, error) {
+	return optionalSetting("millhand_review_model", MillhandReviewModelEnv, DefaultMillhandReviewModel)
+}
+
 // Rigs reports where each rig the factory works is checked out on this machine,
 // by rig name, read from the `[rigs]` table of ~/.config/mw/config.toml. A
 // machine with no such table works no rigs, which is not an error here: it is
@@ -308,6 +338,27 @@ func setting(key, env string) (string, error) {
 	}
 	if value == "" {
 		return "", fmt.Errorf("the %s is not set: export %s=<value>, or put `%s = \"<value>\"` in %s", key, env, key, path)
+	}
+	return value, nil
+}
+
+// optionalSetting is setting for a key that has a default: the environment
+// first, the config file after it, and the default when neither says.
+func optionalSetting(key, env, fallback string) (string, error) {
+	if value := strings.TrimSpace(os.Getenv(env)); value != "" {
+		return value, nil
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("no %s is set and there is no home directory to read %s in: %w", env, File, err)
+	}
+	value, err := valueIn(filepath.Join(home, File), key)
+	if err != nil {
+		return "", err
+	}
+	if value == "" {
+		return fallback, nil
 	}
 	return value, nil
 }
