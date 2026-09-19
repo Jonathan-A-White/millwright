@@ -164,6 +164,41 @@ Feature: Dispatching the stories this host is ready to work
     Then the formula "tdd-feature" was poured for "mw-gq6.1"
     And the boot file of "mw-gq6.1" holds every poured step, in order
 
+  Scenario: A story whose recorded molecule is still open is dispatched without a second pour
+    Given a ready story "mw-gq6.1" of that epic
+    And the story "mw-gq6.1" has the formula "tdd-feature" poured and recorded, with its first step closed
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.1"
+    And nothing more was poured
+    And the story "mw-gq6.1" still records its first molecule
+    And the boot file of "mw-gq6.1" holds only the steps still open, in order
+
+  Scenario: A story whose recorded molecule is closed gets a fresh pour
+    Given a ready story "mw-gq6.1" of that epic
+    And the story "mw-gq6.1" has the formula "tdd-feature" poured and recorded, with its molecule closed
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.1"
+    And the formula "tdd-feature" was poured again for "mw-gq6.1"
+    And the story "mw-gq6.1" records the molecule it was poured as
+    And the boot file of "mw-gq6.1" holds every poured step, in order
+
+  Scenario: A story whose recorded molecule is missing gets a fresh pour
+    Given a ready story "mw-gq6.1" of that epic
+    And the story "mw-gq6.1" records a molecule that does not exist
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.1"
+    And the formula "tdd-feature" was poured for "mw-gq6.1"
+    And the story "mw-gq6.1" records the molecule it was poured as
+    And the boot file of "mw-gq6.1" holds every poured step, in order
+
+  Scenario: A story whose recorded molecule has no step left open gets a fresh pour
+    Given a ready story "mw-gq6.1" of that epic
+    And the story "mw-gq6.1" has the formula "tdd-feature" poured and recorded, with every step closed
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.1"
+    And the formula "tdd-feature" was poured again for "mw-gq6.1"
+    And the boot file of "mw-gq6.1" holds every poured step, in order
+
   Scenario: A dry run starts nothing
     Given a ready story "mw-gq6.1" of that epic
     When dispatch runs on "vps" with a cap of 1 as a dry run

@@ -88,6 +88,10 @@ type Started struct {
 	// Session is the runner's name for the session, not the story's id.
 	Session  string
 	Molecule Molecule
+	// Reused is true when Molecule is one an earlier dispatch poured for the story
+	// and that was still open, so that nothing was poured this time. Its Steps are
+	// the ones still open.
+	Reused bool
 }
 
 // Passed is one ready story this dispatch did not take, and why. It is not a
@@ -299,6 +303,10 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 		return Started{}, false, fmt.Errorf("claiming %s: %w", id, err)
 	}
 
+	// recorded is whether the story names the molecule this dispatch poured, and
+	// so whether the next dispatch will find it.
+	var recorded bool
+
 	// undo gives back everything this dispatch took, and says what it could not.
 	undo := func(what string, why error, worktree bool) (Started, bool, error) {
 		failed := fmt.Errorf("%s of %s: %w", what, id, why)
@@ -308,10 +316,16 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 			}
 		}
 		// Beads are never deleted here, so a formula poured before the failure
-		// stays where it is, and is said so rather than quietly left.
-		if started.Molecule.Poured() {
-			failed = fmt.Errorf("%w (the formula was already poured as %s, which is left behind; the next dispatch pours another)",
-				failed, started.Molecule.RootID)
+		// stays where it is, and is said so rather than quietly left. One the story
+		// records is worked by the next dispatch; one it does not is not found.
+		if started.Molecule.Poured() && !started.Reused {
+			if recorded {
+				failed = fmt.Errorf("%w (the formula was already poured as %s, which is left behind; the next dispatch works it while it is open)",
+					failed, started.Molecule.RootID)
+			} else {
+				failed = fmt.Errorf("%w (the formula was already poured as %s, which is left behind and not recorded on the story; the next dispatch pours another)",
+					failed, started.Molecule.RootID)
+			}
 		}
 		released, err := d.release(ctx, id, failed)
 		return Started{}, released, err
@@ -326,7 +340,21 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 		return undo("cutting the worktree", err, false)
 	}
 
-	if path.Formula != "" && formulas[path.Formula] {
+	// A molecule an earlier dispatch poured for this story, and that is still open,
+	// is worked on rather than poured again: beads are never deleted, so a second
+	// pour would leave the first behind for good, with the steps it had closed.
+	if path.Formula != "" && detail.Molecule.RootID != "" {
+		open, err := d.Tracker.OpenMolecule(ctx, detail.Molecule.RootID)
+		if err != nil {
+			return undo("reading the molecule "+detail.Molecule.RootID, err, true)
+		}
+		if open.Poured() {
+			open.Formula = path.Formula
+			detail.Molecule, started.Molecule, started.Reused = open, open, true
+		}
+	}
+
+	if !started.Reused && path.Formula != "" && formulas[path.Formula] {
 		molecule, err := d.Tracker.PourFormula(ctx, path.Formula, id, detail.Story.Title)
 		if err != nil {
 			return undo("pouring the formula "+path.Formula, err, true)
@@ -338,6 +366,7 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 		if err := d.Tracker.SetStoryMetadata(ctx, id, map[string]string{MoleculeField: molecule.RootID}); err != nil {
 			return undo("recording the molecule "+molecule.RootID, err, true)
 		}
+		recorded = true
 	}
 
 	spec, err := d.Boot.Boot(ctx, detail, started.Worktree)
@@ -361,7 +390,11 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 	// undoing it for.
 	where := fmt.Sprintf("dispatched by mw on %s: session %s in %s on %s", d.Host, spec.Name, started.Worktree, started.Branch)
 	if molecule := started.Molecule; molecule.Poured() {
-		where += fmt.Sprintf(", working %s (%d steps)", molecule.RootID, len(molecule.Steps))
+		if started.Reused {
+			where += fmt.Sprintf(", working %s again (%d steps still open)", molecule.RootID, len(molecule.Steps))
+		} else {
+			where += fmt.Sprintf(", working %s (%d steps)", molecule.RootID, len(molecule.Steps))
+		}
 	}
 	if err := d.Tracker.SetStoryState(ctx, id, RunState, RunRunning, where); err != nil {
 		return started, false, fmt.Errorf("the session %s is running in %s, but %s could not be recorded as %s=%s: %w",
@@ -456,7 +489,9 @@ func (r DispatchReport) String() string {
 	for _, started := range r.Started {
 		fmt.Fprintf(&b, "  %s %s · %s · %s on %s cut from %s", verb, started.StoryID, started.Session,
 			started.Worktree, started.Branch, started.Start)
-		if molecule := started.Molecule; molecule.Poured() {
+		if molecule := started.Molecule; molecule.Poured() && started.Reused {
+			fmt.Fprintf(&b, " · %s reused as %s (%d steps still open)", molecule.Formula, molecule.RootID, len(molecule.Steps))
+		} else if molecule.Poured() {
 			fmt.Fprintf(&b, " · %s poured as %s (%d steps)", molecule.Formula, molecule.RootID, len(molecule.Steps))
 		} else if started.Path.Formula != "" && !r.DryRun {
 			fmt.Fprintf(&b, " · the formula %s is not installed here, so no step beads were poured", started.Path.Formula)

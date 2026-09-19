@@ -172,7 +172,9 @@ story, in that order, up to the cap:
    `<rig>/../.mw-worktrees/<story-id>`, from `origin/<target branch>` rather
    than from a local branch the other host may have moved past;
 3. **pour** the story's formula into step beads, and record the molecule's id on
-   the story;
+   the story — unless the story already records a molecule whose root is still
+   open (an earlier dispatch failed after pouring): that one is worked again, with
+   only the steps still open, and nothing is poured;
 4. **boot** the seat — the boot file, with the poured steps in it, so that a
    session never has to ask the tracker what its own steps are;
 5. **start** the session through the runner;

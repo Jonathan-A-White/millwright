@@ -33,8 +33,11 @@ type dispatchContext struct {
 	files   *apptest.FakeVaultFiles
 
 	lastEpic string
-	report   application.DispatchReport
-	err      error
+	// earlier is the molecule a scenario poured for a story before the dispatch
+	// ran, so that it can say whether the dispatch reused it or poured another.
+	earlier application.Molecule
+	report  application.DispatchReport
+	err     error
 }
 
 // The text a scenario's fixtures hold, so that a scenario can say what reached
@@ -79,6 +82,10 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the runner refuses to start anything$`, c.theRunnerRefuses)
 	ctx.Given(`^an earlier session for "([^"]*)" lies dead$`, c.anEarlierSessionLiesDead)
 	ctx.Given(`^a session for "([^"]*)" is still running in its worktree$`, c.aSessionIsRunningInItsWorktree)
+	ctx.Given(`^the story "([^"]*)" has the formula "([^"]*)" poured and recorded, with its first step closed$`, c.theStoryHasAMoleculeWithItsFirstStepClosed)
+	ctx.Given(`^the story "([^"]*)" has the formula "([^"]*)" poured and recorded, with its molecule closed$`, c.theStoryHasAMoleculeClosed)
+	ctx.Given(`^the story "([^"]*)" has the formula "([^"]*)" poured and recorded, with every step closed$`, c.theStoryHasAMoleculeWithEveryStepClosed)
+	ctx.Given(`^the story "([^"]*)" records a molecule that does not exist$`, c.theStoryRecordsAMissingMolecule)
 
 	ctx.When(`^dispatch runs on "([^"]*)" with a cap of (\d+)$`, c.dispatchRuns)
 	ctx.When(`^dispatch runs on "([^"]*)" with a cap of (\d+) as a dry run$`, c.dispatchRunsDry)
@@ -102,6 +109,11 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the formula "([^"]*)" was poured for "([^"]*)"$`, c.theFormulaWasPouredFor)
 	ctx.Then(`^the boot file of "([^"]*)" holds every poured step, in order$`, c.theBootFileHoldsEveryStep)
 	ctx.Then(`^nothing was poured$`, c.nothingWasPoured)
+	ctx.Then(`^nothing more was poured$`, c.nothingMoreWasPoured)
+	ctx.Then(`^the formula "([^"]*)" was poured again for "([^"]*)"$`, c.theFormulaWasPouredAgainFor)
+	ctx.Then(`^the story "([^"]*)" still records its first molecule$`, c.theStoryStillRecordsItsFirstMolecule)
+	ctx.Then(`^the story "([^"]*)" records the molecule it was poured as$`, c.theStoryRecordsTheMoleculeItWasPouredAs)
+	ctx.Then(`^the boot file of "([^"]*)" holds only the steps still open, in order$`, c.theBootFileHoldsOnlyTheOpenSteps)
 	ctx.Then(`^there is no boot file for "([^"]*)"$`, c.thereIsNoBootFileFor)
 	ctx.Then(`^dispatch would start "([^"]*)"$`, c.dispatchWouldStart)
 	ctx.Then(`^dispatch would start, in this order:$`, c.dispatchWouldStartInOrder)
@@ -310,6 +322,54 @@ func (c *dispatchContext) aSessionIsRunningInItsWorktree(id string) error {
 	return c.runner.Start(context.Background(), application.SessionSpec{
 		Name: application.SessionName(id), Dir: dir, Command: []string{"claude"},
 	})
+}
+
+// pourAndRecord pours a formula for a story and records the molecule on it, as
+// an earlier dispatch that failed after pouring would have left it.
+func (c *dispatchContext) pourAndRecord(id, formula string) (application.Molecule, error) {
+	ctx := context.Background()
+	molecule, err := c.tracker.PourFormula(ctx, formula, id, "The story "+id)
+	if err != nil {
+		return application.Molecule{}, err
+	}
+	if err := c.tracker.SetStoryMetadata(ctx, id, map[string]string{application.MoleculeField: molecule.RootID}); err != nil {
+		return application.Molecule{}, err
+	}
+	c.earlier = molecule
+	return molecule, nil
+}
+
+func (c *dispatchContext) theStoryHasAMoleculeWithItsFirstStepClosed(id, formula string) error {
+	molecule, err := c.pourAndRecord(id, formula)
+	if err != nil {
+		return err
+	}
+	c.tracker.CloseStep(molecule.Steps[0].ID)
+	return nil
+}
+
+func (c *dispatchContext) theStoryHasAMoleculeClosed(id, formula string) error {
+	molecule, err := c.pourAndRecord(id, formula)
+	if err != nil {
+		return err
+	}
+	c.tracker.CloseMolecule(molecule.RootID)
+	return nil
+}
+
+func (c *dispatchContext) theStoryHasAMoleculeWithEveryStepClosed(id, formula string) error {
+	molecule, err := c.pourAndRecord(id, formula)
+	if err != nil {
+		return err
+	}
+	for _, step := range molecule.Steps {
+		c.tracker.CloseStep(step.ID)
+	}
+	return nil
+}
+
+func (c *dispatchContext) theStoryRecordsAMissingMolecule(id string) error {
+	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.MoleculeField: "f-mol-gone"})
 }
 
 func (c *dispatchContext) dispatchRuns(host string, cap int) error {
@@ -583,6 +643,65 @@ func (c *dispatchContext) theBootFileHoldsEveryStep(id string) error {
 func (c *dispatchContext) nothingWasPoured() error {
 	if poured := c.tracker.Molecules(); poured != 0 {
 		return fmt.Errorf("expected nothing to have been poured, got %d molecules", poured)
+	}
+	return nil
+}
+
+// nothingMoreWasPoured says the only molecule there is, is the one the scenario
+// poured before the dispatch ran.
+func (c *dispatchContext) nothingMoreWasPoured() error {
+	if poured := c.tracker.Molecules(); poured != 1 {
+		return fmt.Errorf("expected the molecule poured before the dispatch to be the only one, got %d molecules", poured)
+	}
+	return nil
+}
+
+func (c *dispatchContext) theFormulaWasPouredAgainFor(formula, id string) error {
+	if poured := c.tracker.Molecules(); poured != 2 {
+		return fmt.Errorf("expected the formula %s to have been poured a second time for %s, got %d molecules in all", formula, id, poured)
+	}
+	molecule, poured := c.tracker.Poured(id)
+	if !poured || molecule.Formula != formula || molecule.RootID == c.earlier.RootID {
+		return fmt.Errorf("expected a new molecule of %s for %s, got %+v (the one before was %s)", formula, id, molecule, c.earlier.RootID)
+	}
+	return nil
+}
+
+func (c *dispatchContext) theStoryStillRecordsItsFirstMolecule(id string) error {
+	if got := c.tracker.Metadata(id)[application.MoleculeField]; got != c.earlier.RootID {
+		return fmt.Errorf("expected %s to still record the molecule %s, got %q", id, c.earlier.RootID, got)
+	}
+	return nil
+}
+
+func (c *dispatchContext) theStoryRecordsTheMoleculeItWasPouredAs(id string) error {
+	molecule, poured := c.tracker.Poured(id)
+	if !poured {
+		return fmt.Errorf("nothing was poured for %s", id)
+	}
+	if got := c.tracker.Metadata(id)[application.MoleculeField]; got != molecule.RootID {
+		return fmt.Errorf("expected %s to record the molecule %s it was poured as, got %q", id, molecule.RootID, got)
+	}
+	return nil
+}
+
+// theBootFileHoldsOnlyTheOpenSteps reads the boot file for the steps the earlier
+// molecule had left open, in order, and for none of the ones it had closed.
+func (c *dispatchContext) theBootFileHoldsOnlyTheOpenSteps(id string) error {
+	written, err := os.ReadFile(filepath.Join(c.vault, vault.RunsDir, id, application.BootFileName))
+	if err != nil {
+		return fmt.Errorf("reading the boot file of %s: %w", id, err)
+	}
+	boot, at := string(written), 0
+	for _, step := range c.earlier.Steps[1:] {
+		found := strings.Index(boot[at:], step.ID)
+		if found < 0 {
+			return fmt.Errorf("the boot file of %s does not hold the open step %s, in order:\n%s", id, step.ID, boot)
+		}
+		at += found + len(step.ID)
+	}
+	if first := c.earlier.Steps[0]; strings.Contains(boot, first.ID) {
+		return fmt.Errorf("the boot file of %s holds the step %s, which was already closed:\n%s", id, first.ID, boot)
 	}
 	return nil
 }

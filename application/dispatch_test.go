@@ -211,6 +211,60 @@ func TestDispatchGivesBackTheClaimAndTheWorktreeWhenTheBootFails(t *testing.T) {
 	}
 }
 
+func TestDispatchWorksAnOpenMoleculeAgainAndDoesNotCallItLeftBehindWhenTheBootFails(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, _, _ := aFactory(t)
+	tracker.AddFormula("tdd-feature", application.FormulaStep{Title: "One"}, application.FormulaStep{Title: "Two"})
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	first, err := tracker.PourFormula(ctx, "tdd-feature", "mw-gq6.1", "A story")
+	if err != nil {
+		t.Fatalf("pouring: %v", err)
+	}
+	if err := tracker.SetStoryMetadata(ctx, "mw-gq6.1", map[string]string{application.MoleculeField: first.RootID}); err != nil {
+		t.Fatalf("recording the molecule: %v", err)
+	}
+	dispatch.Boot.Seat = "nobody"
+
+	report, err := dispatch.Run(ctx)
+	if err == nil {
+		t.Fatal("expected the dispatch to report the failure")
+	}
+	if tracker.Molecules() != 1 {
+		t.Fatalf("expected the open molecule to be reused, got %d molecules", tracker.Molecules())
+	}
+	if strings.Contains(err.Error(), "left behind") || strings.Contains(report.Failed[0].Err.Error(), "poured as") {
+		t.Fatalf("expected the failure not to say a molecule was poured and left behind, got %q", err)
+	}
+}
+
+func TestDispatchGivesBackTheClaimWhenTheTrackerCannotSayIfTheMoleculeIsOpen(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, worktrees, runner, _ := aFactory(t)
+	tracker.AddFormula("tdd-feature", application.FormulaStep{Title: "One"})
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	if err := tracker.SetStoryMetadata(ctx, "mw-gq6.1", map[string]string{application.MoleculeField: "f-mol-1"}); err != nil {
+		t.Fatalf("recording the molecule: %v", err)
+	}
+	tracker.FailOn("OpenMolecule", fmt.Errorf("the database is locked"))
+
+	report, err := dispatch.Run(ctx)
+	if err == nil || !strings.Contains(err.Error(), "the database is locked") {
+		t.Fatalf("expected the dispatch to say why, got %v", err)
+	}
+	if len(report.Failed) != 1 || !report.Failed[0].Released {
+		t.Fatalf("expected one failure with the claim given back, got %+v", report.Failed)
+	}
+	if tracker.Molecules() != 0 {
+		t.Fatalf("expected no second molecule poured on a guess, got %d", tracker.Molecules())
+	}
+	if len(runner.Names()) != 0 {
+		t.Fatalf("expected no session, got %q", runner.Names())
+	}
+	if _, removed := worktrees.was(); len(removed) != 1 {
+		t.Fatalf("expected the worktree removed, got %q", removed)
+	}
+}
+
 func TestDispatchKeepsTheClaimWhenTheSessionIsAlreadyRunning(t *testing.T) {
 	ctx := context.Background()
 	dispatch, tracker, _, runner, _ := aFactory(t)
