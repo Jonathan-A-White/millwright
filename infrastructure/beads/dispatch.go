@@ -70,48 +70,39 @@ func (g *Gateway) RunningStories(ctx context.Context, host string) ([]applicatio
 	return g.onHost(ctx, stories, host)
 }
 
-// WorkElsewhere implements application.WorkTracker: what the other hosts have
-// in hand. It is the two listings a dispatcher already makes — everything
-// ready and unclaimed, everything claimed and unfinished — read once each and
-// kept where the Path names a host that is not this one. Two bd calls, plus
-// one per distinct epic whose defaults a story inherits and bd did not inline.
+// WorkInHand implements application.WorkTracker: everything ready and
+// unclaimed, and everything claimed and unfinished, on every host. It is the
+// two listings a dispatcher makes, read once each with every distinct epic's
+// defaults read once between them: two bd calls, plus one per distinct epic
+// whose defaults a story inherits and bd did not inline.
 //
-// Nothing here judges whether that host is awake: mw status does that, from
-// the note the host left. The tracker only says what is pathed where.
-func (g *Gateway) WorkElsewhere(ctx context.Context, host string) ([]application.StoryDetail, error) {
-	if host == "" {
-		return nil, fmt.Errorf("which host is the work elsewhere measured from?")
-	}
+// Nothing here narrows to a host, and nothing judges whether a host is awake:
+// mw status does both, from what this returns and the note the host left.
+func (g *Gateway) WorkInHand(ctx context.Context) (application.WorkInHand, error) {
 	out, err := g.call(ctx, "ready", "--unassigned", "--exclude-type", "epic", "--json")
 	if err != nil {
-		return nil, err
+		return application.WorkInHand{}, err
 	}
-	stories, err := decodeBeads(out)
+	ready, err := decodeBeads(out)
 	if err != nil {
-		return nil, fmt.Errorf("reading what is ready away from %s: %w", host, err)
+		return application.WorkInHand{}, fmt.Errorf("reading what is ready: %w", err)
 	}
 
 	out, err = g.call(ctx, "list", "--status", StatusInProgress, "--exclude-type", "epic", "--limit", "0", "--json")
 	if err != nil {
-		return nil, err
+		return application.WorkInHand{}, err
 	}
 	claimed, err := decodeBeads(out)
 	if err != nil {
-		return nil, fmt.Errorf("reading what is claimed away from %s: %w", host, err)
+		return application.WorkInHand{}, fmt.Errorf("reading what is claimed: %w", err)
 	}
 
-	details, err := g.overlaid(ctx, append(stories, claimed...))
+	n := len(ready)
+	details, err := g.overlaid(ctx, append(ready, claimed...))
 	if err != nil {
-		return nil, err
+		return application.WorkInHand{}, err
 	}
-	var elsewhere []application.StoryDetail
-	for _, detail := range details {
-		if on := detail.Merged().Host; on == "" || on == host {
-			continue
-		}
-		elsewhere = append(elsewhere, detail)
-	}
-	return elsewhere, nil
+	return application.WorkInHand{Ready: details[:n:n], Running: details[n:]}, nil
 }
 
 // onHost narrows beads to the stories worked on one host, with each story's

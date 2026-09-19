@@ -209,11 +209,11 @@ func (c *mailBeadsContext) readyOnAre(host, title string) error {
 }
 
 func (c *mailBeadsContext) readyElsewhereAre(host, title string) error {
-	elsewhere, err := c.laptop.WorkElsewhere(context.Background(), host)
+	inHand, err := c.laptop.WorkInHand(context.Background())
 	if err != nil {
 		return err
 	}
-	return c.expectExactly("the work elsewhere than "+host, elsewhere, title)
+	return c.expectExactly("the work elsewhere than "+host, inHand.Elsewhere(host), title)
 }
 
 // twoClones makes the laptop's database, gives it a remote to sync through, and
