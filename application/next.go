@@ -51,6 +51,12 @@ type Next struct {
 	Slot      MergeSlot
 	Vault     Vault
 
+	// Files is the vault as a git clone: what a close-out commits its own
+	// ledger line and the session's rig memory through, so that the sync it
+	// then runs is not stopped by the work it has just done. A nil Files leaves
+	// them uncommitted, and the sync will say so.
+	Files VaultFiles
+
 	// Runner is how a story claimed here is told from a story really being
 	// worked here: a claim with no session behind it is a session that went
 	// away. A nil Runner skips that check.
@@ -119,7 +125,10 @@ type NextReport struct {
 	Result SessionResult
 	// Ledger is the line that was appended, empty when none was.
 	Ledger string
-	Closed bool
+	// Committed is what was committed in the vault, empty when there was
+	// nothing to commit.
+	Committed []string
+	Closed    bool
 	// Abandoned names the stories claimed here whose session is not there any
 	// more — claims a person or a later sweep has to settle.
 	Abandoned []string
@@ -383,6 +392,10 @@ func (n Next) finish(ctx context.Context, c *closeOut, report *NextReport, outco
 			report.Notes = append(report.Notes, err.Error())
 		}
 	}
+	// Committed whether this run wrote the line or an earlier one did: a line
+	// written by a run that could not commit it is still standing in the way of
+	// every sync until somebody commits it, and this is the run that can.
+	n.commit(ctx, c, report)
 
 	if err := n.Tracker.CloseStory(ctx, c.id, outcome); err != nil {
 		report.NotClosed = err.Error()
@@ -531,6 +544,10 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, why, sa
 	if err := n.ledger(ctx, c, report, "not landed: "+firstLine(why)); err != nil {
 		trouble = append(trouble, err.Error())
 	}
+	// A close-out that lands nothing syncs nothing either, but the line it has
+	// just written is in the vault all the same: left uncommitted it would stop
+	// the next sync, whoever runs it, for a story that never landed.
+	n.commit(ctx, c, report)
 
 	err := fmt.Errorf("closing out %s: %s", c.id, why)
 	if len(trouble) > 0 {
@@ -557,6 +574,45 @@ func (n Next) ledger(ctx context.Context, c *closeOut, report *NextReport, outco
 	}
 	report.Ledger = line
 	return nil
+}
+
+// commit records in the vault exactly what this story was allowed to write
+// there: the line mw next has just appended to the seat's ledger, and the
+// session's memory of the rig it worked. Nothing else — by explicit path, never
+// everything that happens to be lying about — because a vault holds the work of
+// two hosts and several seats, and a close-out is only entitled to its own.
+//
+// A commit that cannot be made is a note, not a failure: the story landed, and
+// the sync that follows will name the files and refuse, which is exactly what
+// it does for anybody else's uncommitted work.
+func (n Next) commit(ctx context.Context, c *closeOut, report *NextReport) {
+	if n.Files == nil {
+		return
+	}
+	paths := SeatWork(n.Seat, c.path.Rig)
+	if len(paths) == 0 {
+		return
+	}
+
+	committed, err := n.Files.Commit(ctx, VaultCommitMessage(c.id, c.detail.Story.Title), paths)
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be committed in the vault, so the next sync will refuse until somebody does: %v",
+			strings.Join(paths, " and "), err))
+		return
+	}
+	report.Committed = append(report.Committed, committed...)
+}
+
+// VaultCommitMessage is the message a close-out commits the vault under: which
+// story the work belongs to, in one plain line, signed by nobody. A seat
+// outlives every session that occupies it, so nothing here is signed by a model
+// — and mw's own commits hold to the same rule mw next holds a branch to.
+func VaultCommitMessage(storyID, title string) string {
+	said := strings.Join(strings.Fields(title), " ")
+	if said == "" {
+		return "Close out " + storyID
+	}
+	return fmt.Sprintf("Close out %s: %s", storyID, said)
 }
 
 // ledgerNotes is the last column of the ledger line: who ran the story and
@@ -682,6 +738,9 @@ func (r NextReport) String() string {
 	}
 	if r.Ledger != "" {
 		fmt.Fprintf(&b, "  ledger  %s\n", r.Ledger)
+	}
+	if len(r.Committed) > 0 {
+		fmt.Fprintf(&b, "  commit  %s committed in the vault\n", strings.Join(r.Committed, ", "))
 	}
 	if r.Closed {
 		b.WriteString("  closed  the story is closed\n")

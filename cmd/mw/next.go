@@ -37,6 +37,10 @@ func newNextCmd() *cobra.Command {
 			"that combination. The push is never forced; a push the remote refuses is fetched and tried again a\n" +
 			"few times. Then the worktree goes, one line is appended to the seat's ledger, the story is closed,\n" +
 			"the hosts are brought level, and whatever is ready here is dispatched.\n\n" +
+			"That ledger line and the seat's memory of the rig — the only two vault files a story may write — are\n" +
+			"committed by path first, under a plain message naming the story, so that a close-out's own writing\n" +
+			"does not stop the sync that follows. Anything else uncommitted in the vault still does, naming the\n" +
+			"file; the story is landed and closed all the same.\n\n" +
 			"A story that landed and could not be closed is reported as landed but still open, and nothing of\n" +
 			"the landing is undone. Run next on it again: it closes the story and carries on, without merging,\n" +
 			"testing or pushing anything a second time and without a second line in the ledger.",
@@ -108,6 +112,7 @@ func newNextCmd() *cobra.Command {
 				Checks:    rig.NewChecks(rig.WithCommands(tests)),
 				Slot:      rig.NewSlots(),
 				Vault:     files,
+				Files:     files,
 				Runner:    runner,
 				Sync:      sync,
 				Dispatch:  dispatcher,

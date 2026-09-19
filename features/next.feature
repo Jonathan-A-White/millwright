@@ -194,6 +194,53 @@ Feature: Closing out a finished story and carrying on
     And git was asked to merge once and to push once
     And the rig's tests were run 1 times
 
+  Scenario: What mw and the session wrote in the vault is committed, so the sync that follows can run
+    Given the session of "mw-gq6.1" reported a plain success
+    And the story "mw-gq6.2" is planned and ready to be worked here
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed
+    And mw committed to the vault exactly:
+      | seats/builder/ledger.md          |
+      | seats/builder/rigs/millwright.md |
+    And that vault commit names "mw-gq6.1" and signs nothing
+    And the hosts were brought level
+    And a fresh session is running for "mw-gq6.2"
+
+  Scenario: Any other uncommitted vault file still stops the sync, and the story is landed and closed all the same
+    Given the session of "mw-gq6.1" reported a plain success
+    And the vault holds work of its own that nobody committed, to "seats/mayor/ledger.md"
+    And the story "mw-gq6.2" is planned and ready to be worked here
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the story "mw-gq6.1" is closed
+    And the close-out says the hosts could not be brought level, naming "seats/mayor/ledger.md"
+    And no fresh session was started
+
+  Scenario: A close-out that lands nothing commits the line it wrote saying so
+    Given the session of "mw-gq6.1" reported a plain success
+    And the rig's tests fail, saying "still red here"
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is not closed
+    And mw committed to the vault exactly:
+      | seats/builder/ledger.md          |
+      | seats/builder/rigs/millwright.md |
+
+  Scenario: A ledger line an earlier run could not commit is committed by the run that closes the story
+    Given the session of "mw-gq6.1" reported a plain success
+    And the vault refuses a commit, saying: another git process seems to be running
+    And the tracker refuses to close "mw-gq6.1", saying: assignee is root, actor is mw@vps; reclaim or use --force
+    When mw closes out "mw-gq6.1"
+    Then the close-out says the story is landed but still open
+    And the close-out notes that the vault could not be committed
+    Given the vault takes a commit again
+    And the tracker will take a close of "mw-gq6.1" again
+    When mw closes out "mw-gq6.1" a second time
+    Then the story "mw-gq6.1" is closed
+    And the ledger holds exactly one line for "mw-gq6.1"
+    And mw committed to the vault exactly:
+      | seats/builder/ledger.md          |
+      | seats/builder/rigs/millwright.md |
+
   Scenario: The merge slot is given back once the landing is done
     Given the session of "mw-gq6.1" reported a plain success
     When mw closes out "mw-gq6.1"

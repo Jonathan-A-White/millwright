@@ -100,6 +100,9 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the other host lands its own work the moment mw first tries to push$`, c.theOtherHostRacesThePush)
 	ctx.Given(`^the tracker refuses to close "([^"]*)", saying: (.+)$`, c.theTrackerRefusesToClose)
 	ctx.Given(`^the tracker will take a close of "([^"]*)" again$`, c.theTrackerTakesACloseAgain)
+	ctx.Given(`^the vault holds work of its own that nobody committed, to "([^"]*)"$`, c.theVaultHoldsOtherWork)
+	ctx.Given(`^the vault refuses a commit, saying: (.+)$`, c.theVaultRefusesACommit)
+	ctx.Given(`^the vault takes a commit again$`, c.theVaultTakesACommitAgain)
 
 	ctx.When(`^mw closes out "([^"]*)"$`, c.mwClosesOut)
 	ctx.When(`^mw closes out "([^"]*)" a second time$`, c.mwClosesOut)
@@ -128,6 +131,11 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the close-out says the story is landed but still open$`, c.landedButStillOpen)
 	ctx.Then(`^the ledger holds exactly one line for "([^"]*)"$`, c.theLedgerHoldsOneLineFor)
 	ctx.Then(`^git was asked to merge once and to push once$`, c.mergedOncePushedOnce)
+	ctx.Then(`^mw committed to the vault exactly:$`, c.mwCommittedToTheVaultExactly)
+	ctx.Then(`^that vault commit names "([^"]*)" and signs nothing$`, c.theVaultCommitNames)
+	ctx.Then(`^the hosts were brought level$`, c.theHostsWereBroughtLevel)
+	ctx.Then(`^the close-out says the hosts could not be brought level, naming "([^"]*)"$`, c.theHostsCouldNotBeBroughtLevel)
+	ctx.Then(`^the close-out notes that the vault could not be committed$`, c.theVaultCommitFailureIsNoted)
 }
 
 // workspace makes the temp directory a scenario keeps everything in, once.
@@ -501,6 +509,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 		Checks:    rig.NewChecks(rig.WithCommand(c.checkCommand)),
 		Slot:      rig.NewSlots(rig.WithSlotWait(5*time.Second), rig.WithSlotPoll(20*time.Millisecond)),
 		Vault:     files,
+		Files:     c.files,
 		Runner:    c.runner,
 		Sync:      application.Sync{Vault: c.files, Tracker: c.tracker, Host: nextHost},
 		Dispatch: application.Dispatch{
@@ -807,6 +816,103 @@ func (c *nextContext) mergedOncePushedOnce() error {
 	}
 	if merges != 1 || pushes != 1 {
 		return fmt.Errorf("expected one merge and one push, got %d and %d in:\n%s", merges, pushes, asked)
+	}
+	return nil
+}
+
+// theVaultHoldsOtherWork is a vault file nobody committed that is none of mw's
+// business: not the seat's ledger and not the rig memory, so a close-out leaves
+// it exactly where it is and the sync that follows refuses because of it.
+func (c *nextContext) theVaultHoldsOtherWork(path string) error {
+	c.files.Dirty = append(c.files.Dirty, path)
+	return nil
+}
+
+func (c *nextContext) theVaultRefusesACommit(why string) error {
+	c.files.CommitErr = fmt.Errorf("%s", strings.TrimSpace(why))
+	return nil
+}
+
+func (c *nextContext) theVaultTakesACommitAgain() error {
+	c.files.CommitErr = nil
+	return nil
+}
+
+// mwCommittedToTheVaultExactly is the whole of the rule: a close-out commits
+// the seat's ledger and that seat's memory of the story's rig, by path, and
+// nothing else — never everything the vault happens to hold.
+func (c *nextContext) mwCommittedToTheVaultExactly(table *godog.Table) error {
+	commit, err := c.lastVaultCommit()
+	if err != nil {
+		return err
+	}
+	var want []string
+	for _, row := range table.Rows {
+		want = append(want, strings.TrimSpace(row.Cells[0].Value))
+	}
+	if strings.Join(commit.Paths, "\n") != strings.Join(want, "\n") {
+		return fmt.Errorf("expected mw to commit exactly %q, got %q", want, commit.Paths)
+	}
+	if said := c.printed.String(); !strings.Contains(said, want[0]) {
+		return fmt.Errorf("expected the report to say what was committed, got:\n%s", said)
+	}
+	return nil
+}
+
+// theVaultCommitNames is the message: it says which story the work belongs to,
+// and it is signed by nobody — least of all by a machine.
+func (c *nextContext) theVaultCommitNames(id string) error {
+	commit, err := c.lastVaultCommit()
+	if err != nil {
+		return err
+	}
+	for _, want := range []string{id, "The story " + id} {
+		if !strings.Contains(commit.Message, want) {
+			return fmt.Errorf("expected the commit message to hold %q, got %q", want, commit.Message)
+		}
+	}
+	if signature := application.AIAttribution(commit.Message); signature != "" {
+		return fmt.Errorf("the commit message is signed by a machine: %q", signature)
+	}
+	return nil
+}
+
+// lastVaultCommit is the commit mw made in the vault most recently, which is
+// the one the scenario running now is asking about.
+func (c *nextContext) lastVaultCommit() (apptest.VaultCommit, error) {
+	made := c.files.Commits()
+	if len(made) == 0 {
+		return apptest.VaultCommit{}, fmt.Errorf("mw committed nothing to the vault (the close-out said: %v)", c.err)
+	}
+	return made[len(made)-1], nil
+}
+
+func (c *nextContext) theHostsWereBroughtLevel() error {
+	if !c.report.Synced {
+		return fmt.Errorf("expected the hosts to have been brought level, got %+v (the close-out said: %v)", c.report, c.err)
+	}
+	return nil
+}
+
+// theHostsCouldNotBeBroughtLevel is the refusal that stands: a vault file mw
+// may not commit is still a sync that stops, naming the file — and the story is
+// landed and closed regardless, because none of that is undone.
+func (c *nextContext) theHostsCouldNotBeBroughtLevel(path string) error {
+	if c.err == nil {
+		return fmt.Errorf("expected the close-out to say the hosts could not be brought level, it reported no failure")
+	}
+	for _, want := range []string{"could not be brought level", path} {
+		if !strings.Contains(c.err.Error(), want) {
+			return fmt.Errorf("expected the failure to hold %q, got %v", want, c.err)
+		}
+	}
+	return nil
+}
+
+func (c *nextContext) theVaultCommitFailureIsNoted() error {
+	said := c.printed.String()
+	if !strings.Contains(said, "could not be committed") {
+		return fmt.Errorf("expected the report to note that the vault could not be committed, got:\n%s", said)
 	}
 	return nil
 }
