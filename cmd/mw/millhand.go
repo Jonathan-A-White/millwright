@@ -76,6 +76,7 @@ func newMillhandCmd() *cobra.Command {
 			return err
 		},
 	}
+	cmd.AddCommand(newMillhandTickCmd())
 	cmd.Flags().StringVar(&wake, "wake", string(application.WakeHand), "the kind of wake: hand, routine or review")
 	cmd.Flags().StringVar(&reason, "reason", "", "why the Millhand is being woken, told to it after the kind of wake")
 	return cmd

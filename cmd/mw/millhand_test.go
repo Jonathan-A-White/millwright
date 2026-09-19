@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -76,5 +78,41 @@ func TestMillhandRefusesAKindOfWakeItDoesNotKnow(t *testing.T) {
 func TestMillhandTakesNoArguments(t *testing.T) {
 	if _, err := millhandCmd(t, "routine"); err == nil {
 		t.Fatal("expected a stray argument to be refused: the kind of wake is --wake")
+	}
+}
+
+func TestMillhandTickFindingTheMillhandUpSaysSoLogsItAndLeavesWithZero(t *testing.T) {
+	privateTmux(t, "millhand-2026-09-19-03")
+
+	out, err := millhandCmd(t, "tick")
+	if err != nil {
+		t.Fatalf("expected a tick that found the Millhand up to succeed, got %q, %v", out, err)
+	}
+	if lines := strings.Split(strings.TrimSpace(out), "\n"); len(lines) != 1 || !strings.Contains(lines[0], "already up (millhand-2026-09-19-03)") {
+		t.Fatalf("expected one line saying the Millhand is already up, got %q", out)
+	}
+
+	home, homeErr := os.UserHomeDir()
+	if homeErr != nil {
+		t.Fatal(homeErr)
+	}
+	logged, readErr := os.ReadFile(filepath.Join(home, MillhandTickStateDir, "log"))
+	if readErr != nil {
+		t.Fatalf("expected the tick to log its line: %v", readErr)
+	}
+	if strings.TrimSpace(string(logged)) != strings.TrimSpace(out) {
+		t.Errorf("expected the log to hold the line that was printed, got %q and %q", logged, out)
+	}
+}
+
+func TestMillhandTickDryRunLeavesNothingInTheLog(t *testing.T) {
+	privateTmux(t, "millhand-2026-09-19-03")
+
+	if out, err := millhandCmd(t, "tick", "--dry-run"); err != nil || !strings.Contains(out, "already up") {
+		t.Fatalf("expected a dry run to find the Millhand up, got %q, %v", out, err)
+	}
+	home, _ := os.UserHomeDir()
+	if _, err := os.Stat(filepath.Join(home, MillhandTickStateDir)); !os.IsNotExist(err) {
+		t.Errorf("expected a dry run to write nothing, stat says %v", err)
 	}
 }
