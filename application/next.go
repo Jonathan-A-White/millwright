@@ -749,8 +749,7 @@ func (r NextReport) String() string {
 		fmt.Fprintf(&b, "  OPEN    the story is landed but still open: %s\n", firstLine(r.NotClosed))
 		fmt.Fprintf(&b, "          nothing above is undone; run `mw next %s` again to close it, and nothing is merged or ledgered twice\n", r.StoryID)
 		if r.Assignee != "" {
-			fmt.Fprintf(&b, "          %s holds the claim; a story claimed under another name is closed under it: `bd --actor %s close %s --reason \"landed\"`\n",
-				r.Assignee, r.Assignee, r.StoryID)
+			b.WriteString(r.claimHint())
 		}
 	}
 	for _, id := range r.Abandoned {
@@ -766,6 +765,22 @@ func (r NextReport) String() string {
 		b.WriteString(r.Dispatch.String())
 	}
 	return b.String()
+}
+
+// claimHint is what a person is told when a landed story would not close
+// because somebody's name holds the claim: whose name it is, why mw cannot act
+// under it, and the bd command that closes the story as its holder. The command
+// is written for a shell to read as it stands, so a name with a space in it —
+// as the claims made before mw acted under a name of its own carry — is quoted.
+func (r NextReport) claimHint() string {
+	mw := SeatIdentity(MwSeat, r.Host)
+	closeIt := "`" + strings.Join([]string{"bd", "--actor", shellWord(r.Assignee), "close", shellWord(r.StoryID),
+		"--reason", shellWord("landed")}, " ") + "`"
+	if r.Assignee == mw {
+		return fmt.Sprintf("          %s holds the claim, which is mw's own name: close it under that name: %s\n", r.Assignee, closeIt)
+	}
+	return fmt.Sprintf("          %s holds the claim, which predates mw acting as %s: a story claimed under another name is closed under it: %s\n",
+		r.Assignee, mw, closeIt)
 }
 
 // stepList is the formula steps a session left open, one per line.
