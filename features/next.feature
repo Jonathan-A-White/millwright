@@ -276,6 +276,29 @@ Feature: Closing out a finished story and carrying on
     And mw pushed twice and forced nothing
     And the story "mw-gq6.1" is closed
 
+  Scenario: A push the origin refuses with a many-line error keeps the whole error beside the run
+    Given the session of "mw-gq6.1" reported a plain success
+    And the origin refuses every push, saying:
+      """
+      refusing to update refs/heads/main
+      the branch is protected
+      required status checks are expected
+      contact an administrator
+      fatal error in commit_refs
+      """
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the ledger holds exactly one line for "mw-gq6.1"
+    And that ledger line holds only the first line of what the origin said
+    And the run of "mw-gq6.1" holds a landing error with every line the origin said
+    And the comment on "mw-gq6.1" quotes every line the origin said
+    And mw committed to the vault exactly:
+      | seats/builder/ledger.md            |
+      | seats/builder/rigs/millwright.md   |
+      | runs/mw-gq6.1/result.json          |
+      | runs/mw-gq6.1/landing-error.txt    |
+
   Scenario: A story claimed here with no session behind it is not left looking like work in flight
     Given the story "mw-gq6.3" is claimed here with no session behind it
     And the session of "mw-gq6.1" reported a plain success

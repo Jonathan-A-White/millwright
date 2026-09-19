@@ -10,10 +10,13 @@ import (
 )
 
 // The files a story leaves in its own directory under the vault's runs/, side
-// by side: what its session was booted with, and what it reported back.
+// by side: what its session was booted with, what it reported back, and — when
+// a landing failed — the whole of what git said, which the ledger's one line
+// cannot hold.
 const (
-	BootFileName   = "boot.md"
-	ResultFileName = "result.json"
+	BootFileName         = "boot.md"
+	ResultFileName       = "result.json"
+	LandingErrorFileName = "landing-error.txt"
 )
 
 // Seat is the part of a seat a session is primed with at boot: the charter,
@@ -80,10 +83,21 @@ func SeatWork(seat, rig string) []string {
 // the session was primed with, and the run's own host is the only place it is
 // wanted. A story id that would reach outside the vault gives no path.
 func RunRecord(storyID string) string {
+	return runFilePath(storyID, ResultFileName)
+}
+
+// LandingErrorRecord is the file a failed landing's whole error is kept in, by
+// path from the vault's root, committed with the run record. A story id that
+// would reach outside the vault gives no path.
+func LandingErrorRecord(storyID string) string {
+	return runFilePath(storyID, LandingErrorFileName)
+}
+
+func runFilePath(storyID, name string) string {
 	if !safeVaultName(storyID) {
 		return ""
 	}
-	return path.Join(RunsDir, storyID, ResultFileName)
+	return path.Join(RunsDir, storyID, name)
 }
 
 // safeVaultName reports whether a name can be put in a vault path as it is.

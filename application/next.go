@@ -166,6 +166,10 @@ type closeOut struct {
 	branch   string
 	target   string
 	result   SessionResult
+
+	// landingError says this run kept the whole error of a failed landing in the
+	// vault, so the close-out commits it.
+	landingError bool
 }
 
 // Run closes out one story and reports what it did. The error it returns is the
@@ -272,7 +276,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		report.Notes = append(report.Notes, fmt.Sprintf("the merge slot of %s could not be given back: %v", c.path.Rig, err))
 	}
 	if landErr != nil {
-		return n.stop(ctx, c, report, firstLine(landErr.Error()), said(landErr))
+		return n.stop(ctx, c, report, firstLine(landErr.Error()), n.keepLandingError(ctx, c, report, landErr))
 	}
 	report.Landed, report.How = true, landed
 
@@ -288,6 +292,39 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be recorded as %s=%s: %v", c.id, RunState, RunLanded, err))
 	}
 	return n.finish(ctx, c, report, outcome, false)
+}
+
+// keepLandingError writes the whole error of a failed landing beside the run
+// and returns what the story's comment quotes: the same text, in full. The
+// ledger and the run state take only its first line, so this file is what says
+// afterwards whether the remote refused the push or hung up. A file that cannot
+// be written is a note, not a reason to say less.
+func (n Next) keepLandingError(ctx context.Context, c *closeOut, report *NextReport, landErr error) string {
+	text := landErr.Error()
+	kept := "The whole error, as git said it:\n\n" + fenced(text)
+	if _, err := n.Vault.PutRunFile(ctx, c.id, LandingErrorFileName, text+"\n"); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the whole error of the landing could not be kept in the run of %s: %v", c.id, err))
+		return kept
+	}
+	c.landingError = true
+	return kept + "\n\nIt is also kept at " + n.Vault.RunFile(c.id, LandingErrorFileName) + "."
+}
+
+// fenced is text in a code block whose fence is longer than any run of
+// backticks inside it, so that an error which quotes a block of its own does not
+// end this one early.
+func fenced(text string) string {
+	longest, run := 0, 0
+	for _, r := range text {
+		if r == '`' {
+			run++
+			longest = max(longest, run)
+			continue
+		}
+		run = 0
+	}
+	fence := strings.Repeat("`", max(3, longest+1))
+	return fence + "\n" + text + "\n" + fence
 }
 
 // Refusal is one reason a branch is not landed: the line that says it, and the
@@ -717,6 +754,10 @@ func (n Next) charged(ctx context.Context, sessionID string) (bool, error) {
 // to be lying about — because a vault holds the work of two hosts and several
 // seats, and a close-out is only entitled to its own.
 //
+// The whole error of a landing that failed, when this run kept one, is
+// committed beside it by explicit path, so that what git said survives the
+// worktree and reaches the other host.
+//
 // A run record that is not there is a note and no more: the rest is committed
 // all the same, and the report says which file was missing.
 //
@@ -735,6 +776,12 @@ func (n Next) commit(ctx context.Context, c *closeOut, report *NextReport) {
 		if _, err := n.Vault.ReadRunFile(ctx, c.id, ResultFileName); errors.Is(err, fs.ErrNotExist) {
 			report.Notes = append(report.Notes, fmt.Sprintf("the run record %s is missing from the vault, so it was not committed", record))
 		} else {
+			paths = append(paths, record)
+		}
+	}
+
+	if c.landingError {
+		if record := LandingErrorRecord(c.id); record != "" {
 			paths = append(paths, record)
 		}
 	}
@@ -941,14 +988,4 @@ func stepList(steps []FormulaStep) string {
 		said = append(said, "- "+step.ID+" · "+strings.TrimSpace(step.Title))
 	}
 	return strings.Join(said, "\n")
-}
-
-// said is everything after the first line of a failure, which is where a
-// command's own output ends up.
-func said(err error) string {
-	text := err.Error()
-	if cut := strings.IndexByte(text, '\n'); cut >= 0 {
-		return strings.TrimSpace(text[cut:])
-	}
-	return ""
 }

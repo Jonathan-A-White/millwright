@@ -57,6 +57,17 @@ func TestRunRecordRefusesAStoryThatWouldReachOutsideTheVault(t *testing.T) {
 	}
 }
 
+func TestLandingErrorRecordIsBesideTheResultOfTheStory(t *testing.T) {
+	if got, want := application.LandingErrorRecord("mw-gq6.58"), "runs/mw-gq6.58/landing-error.txt"; got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+	for _, id := range []string{"", "../seats/builder", "a/b"} {
+		if got := application.LandingErrorRecord(id); got != "" {
+			t.Fatalf("expected no path for the story %q, got %q", id, got)
+		}
+	}
+}
+
 func TestVaultCommitMessageNamesTheStoryAndSignsNothing(t *testing.T) {
 	message := application.VaultCommitMessage("mw-gq6.40", "mw next cannot sync\nafter its own landing")
 	for _, want := range []string{"mw-gq6.40", "mw next cannot sync after its own landing"} {

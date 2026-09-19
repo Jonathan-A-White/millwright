@@ -41,7 +41,8 @@ type nextContext struct {
 	gitLog       string
 	checkCommand string // what this scenario's "rig tests" are
 	checkLog     string
-	racer        string // the other host, landing work mid-push
+	racer        string   // the other host, landing work mid-push
+	refusal      []string // what the origin's hook says when it refuses a push
 
 	lastEpic     string
 	ledgerBefore []string
@@ -108,6 +109,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a commit on the branch of "([^"]*)" carries "([^"]*)"$`, c.aCommitCarrying)
 	ctx.Given(`^the other host landed its own work on "([^"]*)" while "([^"]*)" was worked$`, c.theOtherHostLandedFirst)
 	ctx.Given(`^the other host lands its own work the moment mw first tries to push$`, c.theOtherHostRacesThePush)
+	ctx.Given(`^the origin refuses every push, saying:$`, c.theOriginRefusesEveryPush)
 	ctx.Given(`^the tracker refuses to close "([^"]*)", saying: (.+)$`, c.theTrackerRefusesToClose)
 	ctx.Given(`^the tracker will take a close of "([^"]*)" again$`, c.theTrackerTakesACloseAgain)
 	ctx.Given(`^the vault holds work of its own that nobody committed, to "([^"]*)"$`, c.theVaultHoldsOtherWork)
@@ -155,6 +157,9 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the close-out notes that the vault could not be committed$`, c.theVaultCommitFailureIsNoted)
 	ctx.Then(`^the vault commit does not hold "([^"]*)"$`, c.theVaultCommitDoesNotHold)
 	ctx.Then(`^the report says the run record of "([^"]*)" was missing$`, c.theRunRecordWasMissing)
+	ctx.Then(`^that ledger line holds only the first line of what the origin said$`, c.theLedgerLineHoldsOnlyTheFirstRefusalLine)
+	ctx.Then(`^the run of "([^"]*)" holds a landing error with every line the origin said$`, c.theRunHoldsTheWholeLandingError)
+	ctx.Then(`^the comment on "([^"]*)" quotes every line the origin said$`, c.theCommentQuotesTheWholeRefusal)
 
 	registerCheckSteps(ctx, c)
 }
@@ -564,6 +569,23 @@ git commit -qm "The other host lands its own work"
 git push -q origin main
 `, c.seed, nextOtherFile)
 	return os.WriteFile(c.racer, []byte(script), 0o755)
+}
+
+// theOriginRefusesEveryPush is a hook on the bare origin that says what it is
+// given, line by line, and declines: the push GitHub refused with a server
+// error of several lines, which is not a lost race and so is never retried.
+func (c *nextContext) theOriginRefusesEveryPush(said *godog.DocString) error {
+	for _, line := range strings.Split(said.Content, "\n") {
+		if strings.TrimSpace(line) != "" {
+			c.refusal = append(c.refusal, strings.TrimSpace(line))
+		}
+	}
+	said1 := filepath.Join(c.root, "refusal.txt")
+	if err := os.WriteFile(said1, []byte(strings.Join(c.refusal, "\n")+"\n"), 0o644); err != nil {
+		return err
+	}
+	hook := fmt.Sprintf("#!/bin/sh\ncat %s >&2\nexit 1\n", said1)
+	return os.WriteFile(filepath.Join(c.origin(), "hooks", "pre-receive"), []byte(hook), 0o755)
 }
 
 // mwClosesOut runs the use case the way mw does: the real worktrees, the real
@@ -1039,6 +1061,53 @@ func (c *nextContext) theRunRecordWasMissing(id string) error {
 	for _, want := range []string{record, "missing"} {
 		if !strings.Contains(said, want) {
 			return fmt.Errorf("expected the report to say the run record %s was missing, got:\n%s", record, said)
+		}
+	}
+	return nil
+}
+
+// theLedgerLineHoldsOnlyTheFirstRefusalLine is the ledger's rule: a row is one
+// line, so the rest of what git said is nowhere in it.
+func (c *nextContext) theLedgerLineHoldsOnlyTheFirstRefusalLine() error {
+	lines, err := c.ledgerLines()
+	if err != nil {
+		return err
+	}
+	if len(lines) != len(c.ledgerBefore)+1 {
+		return fmt.Errorf("expected the close-out to add one ledger line, got %d before and %d after", len(c.ledgerBefore), len(lines))
+	}
+	last := lines[len(lines)-1]
+	if !strings.Contains(last, "not landed") || !strings.Contains(last, c.refusal[0]) {
+		return fmt.Errorf("expected the ledger line to say not landed and hold %q, got:\n%s", c.refusal[0], last)
+	}
+	for _, later := range c.refusal[1:] {
+		if strings.Contains(last, later) {
+			return fmt.Errorf("expected the ledger line to hold only the first line of the refusal, but it holds %q:\n%s", later, last)
+		}
+	}
+	return nil
+}
+
+// theRunHoldsTheWholeLandingError reads the file beside the result, which is
+// the one place the whole of git's stderr is kept.
+func (c *nextContext) theRunHoldsTheWholeLandingError(id string) error {
+	kept, err := os.ReadFile(filepath.Join(c.vault, vault.RunsDir, id, "landing-error.txt"))
+	if err != nil {
+		return fmt.Errorf("expected the run of %s to hold the landing error: %w", id, err)
+	}
+	for _, line := range c.refusal {
+		if !strings.Contains(string(kept), line) {
+			return fmt.Errorf("expected the landing error to hold %q, got:\n%s", line, kept)
+		}
+	}
+	return nil
+}
+
+func (c *nextContext) theCommentQuotesTheWholeRefusal(id string) error {
+	comments := strings.Join(c.tracker.Comments(id), "\n")
+	for _, line := range c.refusal {
+		if !strings.Contains(comments, line) {
+			return fmt.Errorf("expected a comment on %s quoting %q, got:\n%s", id, line, comments)
 		}
 	}
 	return nil
