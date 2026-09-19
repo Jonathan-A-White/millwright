@@ -21,7 +21,9 @@ func newSyncCmd() *cobra.Command {
 			"synchronisation cycle, then records when this host was last level. It never migrates and\n" +
 			"never forces: what it cannot settle stops it, with the reason in plain words, and nothing\n" +
 			"is retried. A sync stopped by beads exits with beads' own exit code, so that a timer can\n" +
-			"branch on it: 2 is a merge conflict and 4 a stuck working set, and both wait for a person.",
+			"branch on it: 2 is a merge conflict and 4 a stuck working set, and both wait for a person.\n" +
+			"Work nobody committed in the vault is not a failure: the vault half is skipped, beads are\n" +
+			"synced anyway, and sync exits 5 with one line naming the files. mw commits nobody's edits.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := config.Vault()
@@ -49,13 +51,7 @@ func newSyncCmd() *cobra.Command {
 
 // exitCode is the status mw leaves with after a command reported err. A sync
 // that beads stopped leaves with beads' own code, so that whoever ran mw reads
-// the same number bd would have given them; anything else is a plain 1.
-func exitCode(err error) int {
-	if err == nil {
-		return 0
-	}
-	if halt, stopped := application.Halted(err); stopped && halt.Code != 0 {
-		return halt.Code
-	}
-	return 1
-}
+// the same number bd would have given them; a sync only somebody's uncommitted
+// vault work stood in the way of leaves with a status of its own; anything else
+// is a plain 1.
+func exitCode(err error) int { return application.ExitStatus(err) }

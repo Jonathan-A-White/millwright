@@ -53,6 +53,10 @@ func TestExitCodeIsBeadsOwnWhenBeadsStoppedTheSync(t *testing.T) {
 			t.Fatalf("expected a halt on %d to leave with %d, got %d", code, want, got)
 		}
 	}
+	blocked := &application.VaultBlocked{Host: "vps", Files: []string{"seats/mayor/ledger.md"}}
+	if got := exitCode(blocked); got != application.VaultBlockedExit {
+		t.Fatalf("expected a vault nobody committed to leave with %d, got %d", application.VaultBlockedExit, got)
+	}
 	if got := exitCode(errors.New("something else went wrong")); got != 1 {
 		t.Fatalf("expected an ordinary failure to leave with 1, got %d", got)
 	}
