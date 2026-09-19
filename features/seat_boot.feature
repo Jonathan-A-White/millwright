@@ -86,6 +86,8 @@ Feature: Booting a session into a seat
       | no AI attribution of any kind       |
       | bd runs without asking              |
       | as its own Bash call, never chained |
+      | run `mw check mw-gq6.6`             |
+      | exits non-zero when any check fails |
       | ends when your turn ends            |
       | run the suite in the foreground     |
       | commit before you stop              |
