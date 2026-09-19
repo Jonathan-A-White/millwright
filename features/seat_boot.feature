@@ -84,6 +84,11 @@ Feature: Booting a session into a seat
       | the directory you are in            |
       | Follow the story's formula steps    |
       | no AI attribution of any kind       |
+      | bd runs without asking              |
+      | as its own Bash call, never chained |
+      | ends when your turn ends            |
+      | run the suite in the foreground     |
+      | commit before you stop              |
 
   Scenario: A story whose title is full of punctuation is assembled safely
     Given the story is titled:

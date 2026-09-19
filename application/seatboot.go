@@ -227,7 +227,15 @@ func KickoffPrompt(seat, storyID string) string {
 		// plainly does not have to be refused.
 		"Sign nothing you commit: no Co-Authored-By trailer, no Generated with line, "+
 		"no AI attribution of any kind — the seat signs the work, never the model, "+
-		"and mw next refuses to land a branch whose commits carry one.", seat, storyID)
+		"and mw next refuses to land a branch whose commits carry one. "+
+		// Both are learned the hard way and are the same for every rig: an
+		// allow rule for bd must match every part of a compound command, so a
+		// chained one goes to the classifier and can be refused whole; and a
+		// headless session is over when its turn is, with anything uncommitted.
+		"bd runs without asking, but as its own Bash call, never chained with another command "+
+		"by ;, | or &&. "+
+		"This session is headless and ends when your turn ends: run the suite in the foreground "+
+		"and wait for it, never in the background, and commit before you stop.", seat, storyID)
 }
 
 // BootPrompt is the boot file a session is primed with: the seat's charter,
