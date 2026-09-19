@@ -243,6 +243,104 @@ func TestDispatchKeepsTheClaimWhenTheSessionIsAlreadyRunning(t *testing.T) {
 	}
 }
 
+// startOldSession leaves a session under the story's name on the runner, as an
+// earlier run did, and returns the name.
+func startOldSession(t *testing.T, runner *apptest.FakeRunner, id string) string {
+	t.Helper()
+	name := application.SessionName(id)
+	if err := runner.Start(context.Background(), application.SessionSpec{Name: name, Dir: "/old", Command: []string{"claude"}}); err != nil {
+		t.Fatalf("starting the earlier session: %v", err)
+	}
+	return name
+}
+
+func TestDispatchClearsAnEndedSessionOfTheSameNameWhateverItsExitWas(t *testing.T) {
+	for name, end := range map[string]func(*apptest.FakeRunner, string){
+		"exited":         func(r *apptest.FakeRunner, n string) { r.Exit(n, 1) },
+		"status unknown": func(r *apptest.FakeRunner, n string) { r.ExitUnknown(n) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			dispatch, tracker, worktrees, runner, _ := aFactory(t)
+			tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+			session := startOldSession(t, runner, "mw-gq6.1")
+			end(runner, session)
+
+			report, err := dispatch.Run(context.Background())
+			if err != nil {
+				t.Fatalf("expected the story to be dispatched again, got %v", err)
+			}
+			if len(report.Started) != 1 || len(runner.Names()) != 1 {
+				t.Fatalf("expected one session, got %+v", report)
+			}
+			if closed := runner.Closed(); len(closed) != 1 || closed[0] != session {
+				t.Errorf("expected the dead %s to be closed, got %q", session, closed)
+			}
+			if status, _ := runner.Status(context.Background(), session); !status.Running() {
+				t.Errorf("expected the new session to be running, got %+v", status)
+			}
+			if _, removed := worktrees.was(); len(removed) != 0 {
+				t.Errorf("expected the worktree to be kept, got %q removed", removed)
+			}
+		})
+	}
+}
+
+func TestDispatchRefusesAStoryWhoseSessionIsStillRunningAndTouchesNothing(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, worktrees, runner, _ := aFactory(t)
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	session := startOldSession(t, runner, "mw-gq6.1")
+
+	report, err := dispatch.Run(ctx)
+	if err == nil || !strings.Contains(err.Error(), "still running") {
+		t.Fatalf("expected the dispatch to refuse a story whose session is running, got %v", err)
+	}
+	if len(report.Started) != 0 || len(report.Failed) != 1 {
+		t.Fatalf("expected one failure and nothing started, got %+v", report)
+	}
+	if closed := runner.Closed(); len(closed) != 0 {
+		t.Errorf("expected nothing to be closed, got %q", closed)
+	}
+	if status, _ := runner.Status(ctx, session); !status.Running() {
+		t.Errorf("expected the running session to be left alone, got %+v", status)
+	}
+	if added, removed := worktrees.was(); len(added)+len(removed) != 0 {
+		t.Errorf("expected no worktree to be cut or removed, got %q added and %q removed", added, removed)
+	}
+	detail, _ := tracker.ShowStory(ctx, "mw-gq6.1")
+	if detail.Assignee != "" || detail.Status == apptest.StatusInProgress {
+		t.Errorf("expected the story to be left unclaimed, got status %q assignee %q", detail.Status, detail.Assignee)
+	}
+}
+
+func TestDispatchGivesBackTheClaimAndTheWorktreeWhenTheDeadSessionWillNotClose(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, worktrees, runner, _ := aFactory(t)
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	runner.Exit(startOldSession(t, runner, "mw-gq6.1"), 1)
+	dispatch.Runner = &closeRefusing{FakeRunner: runner}
+
+	report, err := dispatch.Run(ctx)
+	if err == nil || !strings.Contains(err.Error(), "clearing the dead session") {
+		t.Fatalf("expected the dispatch to say the dead session could not be cleared, got %v", err)
+	}
+	if len(report.Failed) != 1 || !report.Failed[0].Released {
+		t.Fatalf("expected the claim to be given back, got %+v", report.Failed)
+	}
+	if _, removed := worktrees.was(); len(removed) != 1 {
+		t.Errorf("expected the worktree this dispatch cut to be removed, got %q", removed)
+	}
+}
+
+// closeRefusing is a runner that cannot close a session.
+type closeRefusing struct {
+	*apptest.FakeRunner
+}
+
+func (r *closeRefusing) Close(context.Context, string) error {
+	return fmt.Errorf("the runner would not close it")
+}
+
 // stateRefusing is a tracker that does everything but record a story's state.
 type stateRefusing struct {
 	*apptest.FakeTracker

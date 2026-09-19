@@ -43,7 +43,9 @@ var _ HostSync = Sync{}
 // undone is a session that has actually started — a story whose session is
 // running stays claimed, however badly the recording of it went, because a
 // claim given back while a session works the story would let a second dispatch
-// start it twice.
+// start it twice. A session that has ended and still holds the story's name is
+// closed before the story starts again; one that is still running is a story
+// being worked, and is refused before anything is claimed, cut or removed.
 type Dispatch struct {
 	Tracker   WorkTracker
 	Worktrees Worktrees
@@ -285,6 +287,14 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 		return started, false, nil
 	}
 
+	// A session already holding the story's name is looked at before anything
+	// is taken, so that a refusal leaves everything as it was: the worktree the
+	// story may already have is a live session's, and nothing here may undo it.
+	lying, err := d.namesake(ctx, started.Session, id)
+	if err != nil {
+		return Started{}, false, err
+	}
+
 	if err := d.Tracker.ClaimStory(ctx, id); err != nil {
 		return Started{}, false, fmt.Errorf("claiming %s: %w", id, err)
 	}
@@ -334,6 +344,14 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 	if err != nil {
 		return undo("assembling the session", err, true)
 	}
+	// Only now, with everything else in place, is the dead session cleared away:
+	// its output is all that is left of the run before, and a dispatch that fails
+	// on the way here has no use for the name.
+	if lying {
+		if err := d.Runner.Close(ctx, spec.Name); err != nil {
+			return undo("clearing the dead session "+spec.Name, err, true)
+		}
+	}
 	if err := d.Runner.Start(ctx, spec); err != nil {
 		return undo("starting the session", err, true)
 	}
@@ -350,6 +368,28 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 			spec.Name, started.Worktree, id, RunState, RunRunning, err)
 	}
 	return started, false, nil
+}
+
+// namesake looks for a session already called name, the one a story is worked
+// in. A running one is a real second session, and the story is refused rather
+// than started twice. One that has ended is a corpse mw leaves on purpose
+// (remain-on-exit) that would make the runner refuse the name for ever; lying
+// says there is one to close before the new session starts.
+func (d Dispatch) namesake(ctx context.Context, name, id string) (lying bool, err error) {
+	status, err := d.Runner.Status(ctx, name)
+	if err != nil {
+		// A runner that cannot say cannot start the session either, and Start
+		// says so on the path that gives the claim back; refusing here would
+		// leave the failure unrecorded on the story.
+		return false, nil
+	}
+	switch status.State {
+	case StateRunning:
+		return false, fmt.Errorf("the session %s of %s is still running here, so it was not started again; nothing was claimed, closed or removed", name, id)
+	case StateExited, StateExitUnknown:
+		return true, nil
+	}
+	return false, nil
 }
 
 // release gives a claim back and writes on the story why it was given back. It
