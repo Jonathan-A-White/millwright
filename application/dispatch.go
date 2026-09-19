@@ -178,8 +178,14 @@ func (d Dispatch) Run(ctx context.Context) (DispatchReport, error) {
 	if err != nil {
 		return report, fmt.Errorf("dispatching on %s: reading what is already running here: %w", d.Host, err)
 	}
-	report.Running = len(running)
-	free := d.Cap - len(running)
+	// A story the Governor must be present for is claimed by the Mayor, not run
+	// by a session of this host, so it is not one of the sessions the cap counts.
+	for _, detail := range running {
+		if !detail.Hitl() {
+			report.Running++
+		}
+	}
+	free := d.Cap - report.Running
 
 	ready, err := d.Tracker.ReadyForHost(ctx, d.Host)
 	if err != nil {
@@ -191,6 +197,13 @@ func (d Dispatch) Run(ctx context.Context) (DispatchReport, error) {
 	var formulas map[string]bool
 	for _, detail := range ready {
 		id := detail.Story.ID
+		// First, so that a story that is not a session's to take is never passed
+		// over for the cap instead: the cap is not what stops it.
+		if detail.Hitl() {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
+				"the Governor must be present for it (labelled %s): it is worked with the Mayor, never by a dispatched session", LabelHitl)})
+			continue
+		}
 		// A story that was claimed and could not be started counts against the
 		// cap too: whatever stopped it will probably stop the next one, and a
 		// dispatcher that claims and releases every ready story in turn is

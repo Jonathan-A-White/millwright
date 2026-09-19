@@ -104,6 +104,30 @@ Feature: Dispatching the stories this host is ready to work
     Then no session was started
     And the story "mw-abc.1" is not claimed
 
+  Scenario: A story the Governor must be present for is passed over
+    Given a ready story "mw-gq6.1" of that epic labelled "hitl"
+    When dispatch runs on "vps" with a cap of 1
+    Then no session was started
+    And the story "mw-gq6.1" is not claimed
+    And dispatch passed over "mw-gq6.1", saying: the Governor must be present for it
+
+  Scenario: A dry run passes it over too
+    Given a ready story "mw-gq6.1" of that epic labelled "hitl"
+    When dispatch runs on "vps" with a cap of 1 as a dry run
+    Then no session was started
+    And dispatch passed over "mw-gq6.1", saying: the Governor must be present for it
+
+  Scenario: A story the Governor must be present for does not use up the cap
+    Given a ready story "mw-gq6.1" of that epic
+    And a story "mw-gq6.9" of that epic labelled "hitl" is already running here
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.1"
+
+  Scenario: A story the Governor must be present for does not count as a session running here
+    Given a story "mw-gq6.9" of that epic labelled "hitl" is already running here
+    When dispatch runs on "vps" with a cap of 1 as a dry run
+    Then the dry run report says 0 of 1 sessions were already running
+
   Scenario: A failure after claiming releases the claim
     Given a ready story "mw-gq6.1" of that epic
     And the runner refuses to start anything

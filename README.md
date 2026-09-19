@@ -162,6 +162,12 @@ spending fuel, and a claim given back under a live session is how one story gets
 worked twice. A story whose Path names another host, or no host at all, is never
 claimed here, and neither is one whose rig this host has not checked out.
 
+A story the Governor must be present for carries the label `hitl` (`bd update
+<id> --add-label hitl`; a story filed under an epic inherits the epic's labels
+unless made with `--no-inherit-labels`). No dispatcher takes it, and, dry run
+or not, it is passed over with that reason; the Mayor claims it and does it beside
+the Governor, and a `hitl` story in progress does not count against the cap.
+
 `--dry-run` prints what it would start, in that same order, and writes nothing:
 nothing is synced, claimed, fetched, cut, poured or started. See `features/dispatch.feature`.
 
