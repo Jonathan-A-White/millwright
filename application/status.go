@@ -26,6 +26,15 @@ const DefaultHostSilence = 2 * time.Hour
 // present for. The report leaves the section out when there are none.
 const WaitingHeading = "WAITING FOR THE GOVERNOR"
 
+// RigMemoryHeading is what heads the section naming the rigs whose memory has
+// outgrown its budget. The report leaves the section out when none has.
+const RigMemoryHeading = "RIG MEMORY"
+
+// DefaultRigMemoryBytes is how large a Builder's memory of one rig may grow
+// before mw status says it is due to be pruned, when nothing says otherwise. It
+// is the same 8000 infrastructure/config.DefaultRigMemoryBytes reads as.
+const DefaultRigMemoryBytes = 8000
+
 // RepathHint is what a person does about work stranded on a sleeping host: it
 // is re-pathed, by hand, to a host that is awake. mw status only ever says
 // this; re-pathing a story is the Mayor's act, never a report's.
@@ -61,6 +70,9 @@ type Status struct {
 	// HostSilence is how long another host's recorded sync may be behind
 	// before its work is called stranded. Zero reads DefaultHostSilence.
 	HostSilence time.Duration
+	// RigMemoryBytes is how large the Seat's memory of one rig may be before the
+	// report says it is due to be pruned. Zero reads DefaultRigMemoryBytes.
+	RigMemoryBytes int
 	// Seat is whose ledger today's fuel is summed from — the Builder's, since
 	// the Builder is the seat that works every story.
 	Seat string
@@ -156,12 +168,18 @@ type StatusReport struct {
 	// FuelToday is every token the seat's ledger charged today, summed from
 	// the lines the ledger dates today.
 	FuelToday int
+	// RigMemory are the rigs whose memory is larger than RigMemoryBudget, in rig
+	// order. It is empty, and the report has no section for it, when none is.
+	RigMemory []RigMemorySize
+	// RigMemoryBudget is the size a rig's memory was held to.
+	RigMemoryBudget int
 }
 
 // Run reads the report and prints it. Every call it makes is a read: the
 // tracker's RunningStories, StoryState and OpenSteps, ReadyForHost,
 // BlockedForHost and WorkElsewhere, one Note per other host, and the vault's
-// ReadLedger. Nothing is claimed, nothing is poured, nothing is written.
+// ReadLedger and RigMemorySizes. Nothing is claimed, nothing is poured, nothing
+// is written.
 func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	report := StatusReport{Host: s.Host}
 	switch {
@@ -220,6 +238,13 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		return report, fmt.Errorf("summing today's fuel from the %s seat's ledger: %w", s.Seat, err)
 	}
 	report.FuelToday = fuel
+
+	over, err := s.rigMemoryOverBudget(ctx)
+	if err != nil {
+		return report, fmt.Errorf("sizing the %s seat's memory of its rigs: %w", s.Seat, err)
+	}
+	report.RigMemory = over
+	report.RigMemoryBudget = s.rigMemoryBudget()
 
 	s.print(report.String())
 	return report, nil
@@ -333,6 +358,34 @@ func (s Status) fuelToday(ctx context.Context) (int, error) {
 	return total, nil
 }
 
+// rigMemoryOverBudget is the rigs whose memory is larger than the budget, in
+// rig order. A report with no vault to read them from has none.
+func (s Status) rigMemoryOverBudget(ctx context.Context) ([]RigMemorySize, error) {
+	if s.Vault == nil {
+		return nil, nil
+	}
+	sizes, err := s.Vault.RigMemorySizes(ctx, s.Seat)
+	if err != nil {
+		return nil, err
+	}
+	var over []RigMemorySize
+	for _, size := range sizes {
+		if size.Bytes > s.rigMemoryBudget() {
+			over = append(over, size)
+		}
+	}
+	return over, nil
+}
+
+// rigMemoryBudget is how large a rig's memory may be before it is called due
+// to be pruned.
+func (s Status) rigMemoryBudget() int {
+	if s.RigMemoryBytes <= 0 {
+		return DefaultRigMemoryBytes
+	}
+	return s.RigMemoryBytes
+}
+
 // now is the clock "today" is read by.
 func (s Status) now() time.Time {
 	if s.Now == nil {
@@ -403,6 +456,14 @@ func (r StatusReport) String() string {
 		w.write(&b, r.Host)
 	}
 	b.WriteString("\n")
+
+	if len(r.RigMemory) > 0 {
+		clip(&b, RigMemoryHeading)
+		for _, size := range r.RigMemory {
+			clip(&b, fmt.Sprintf("  %s %d/%d bytes: prune (Mayor)", size.Rig, size.Bytes, r.RigMemoryBudget))
+		}
+		b.WriteString("\n")
+	}
 
 	clip(&b, fmt.Sprintf("FUEL today: %s tokens", Thousands(r.FuelToday)))
 	b.WriteString("\n")

@@ -8,6 +8,7 @@
 //	cap   = 1
 //	host_silent_hours = 2
 //	handoff_at = 180000
+//	rig_memory_bytes = 8000
 //
 //	[rigs]
 //	millwright = "/root/millwright"
@@ -31,6 +32,7 @@ const (
 	StaleHoursEnv  = "MW_STALE_HOURS"
 	HostSilenceEnv = "MW_HOST_SILENT_HOURS"
 	HandoffAtEnv   = "MW_HANDOFF_AT"
+	RigMemoryEnv   = "MW_RIG_MEMORY_BYTES"
 )
 
 // RigsTable is the table of the config file that says where each rig is checked
@@ -65,6 +67,12 @@ const DefaultHostSilentHours = 2
 // DefaultHandoffAt is the context size, in tokens, at which a seat's session
 // must hand off when nothing says otherwise.
 const DefaultHandoffAt = 180000
+
+// DefaultRigMemoryBytes is how large a Builder's memory of one rig may grow
+// before `mw status` says it is due to be pruned, when nothing says otherwise.
+// Every Builder reads that file at boot, so its size is fuel paid on every
+// story.
+const DefaultRigMemoryBytes = 8000
 
 // File is the config file's path under the home directory.
 var File = filepath.Join(".config", "mw", "config.toml")
@@ -171,6 +179,35 @@ func HostSilentHours() (int, error) {
 		return 0, fmt.Errorf("the host silence threshold is %d hours, so every other host would be called asleep the moment it synced: set it to 1 or more", hours)
 	}
 	return hours, nil
+}
+
+// RigMemoryBytes reports how large a Builder's memory of one rig may grow
+// before `mw status` warns that it is due to be pruned: $MW_RIG_MEMORY_BYTES if
+// it is set, otherwise the root-table `rig_memory_bytes` key of
+// ~/.config/mw/config.toml, and DefaultRigMemoryBytes when neither says.
+func RigMemoryBytes() (int, error) {
+	said := strings.TrimSpace(os.Getenv(RigMemoryEnv))
+	if said == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return 0, fmt.Errorf("no %s is set and there is no home directory to read %s in: %w", RigMemoryEnv, File, err)
+		}
+		if said, err = valueIn(filepath.Join(home, File), "rig_memory_bytes"); err != nil {
+			return 0, err
+		}
+	}
+	if said == "" {
+		return DefaultRigMemoryBytes, nil
+	}
+
+	bytes, err := strconv.Atoi(said)
+	if err != nil {
+		return 0, fmt.Errorf("the rig memory budget is %q, which is not a whole number of bytes: set %s=<n>, or `rig_memory_bytes = <n>` in %s", said, RigMemoryEnv, File)
+	}
+	if bytes < 1 {
+		return 0, fmt.Errorf("the rig memory budget is %d bytes, so every rig's memory would be over it: set it to 1 or more", bytes)
+	}
+	return bytes, nil
 }
 
 // HandoffAt reports the context size, in tokens, at which a seat's session must

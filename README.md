@@ -388,7 +388,7 @@ bd reclaim mw-gq6.30                                        # or take it over fi
 ### What a host is told
 
 `~/.config/mw/config.toml`, with `MW_VAULT`, `MW_HOST`, `MW_CAP` and
-`MW_HOST_SILENT_HOURS`, `MW_STALE_HOURS` and `MW_HANDOFF_AT` ahead of it:
+`MW_HOST_SILENT_HOURS`, `MW_STALE_HOURS`, `MW_HANDOFF_AT` and `MW_RIG_MEMORY_BYTES` ahead of it:
 
 ```toml
 vault = "/root/millwright-vault"   # the one beads database and the seats
@@ -397,6 +397,7 @@ cap   = 1                          # sessions running here at once (default 1)
 host_silent_hours = 2              # how long another host may go unsynced (default 2)
 stale_hours = 2                    # how long a session may print nothing new before mw sweep calls it stuck (default 2)
 handoff_at = 180000                # the context size, in tokens, at which mw seat context says handoff (default 180000)
+rig_memory_bytes = 8000            # how large the Builder's memory of one rig may grow before mw status says prune (default 8000)
 
 [rigs]
 millwright = "/root/millwright"    # where each rig is checked out here
@@ -668,7 +669,7 @@ bin/mw status
 
 `mw status` takes no arguments and reads the vault, the tracker, the runner's
 session names and the Builder's ledger. It writes to none of them. It is the report for a phone: what this host is doing right now, in
-five parts, and a sixth when there is one.
+five parts, and two more when there is something to say.
 
 - **RUNNING** — the stories this host has claimed, each with the name of the
   tmux session to attach to. A story recorded `run=stopped` or `run=stuck` says
@@ -681,6 +682,13 @@ five parts, and a sixth when there is one.
 - **BLOCKED** — what is waiting, each with only the work it is still waiting
   for: a wait that has finished is not listed.
 - **OTHER HOSTS** — every other host a story is pathed to, and what it holds.
+- **RIG MEMORY** — one line per rig whose Builder memory
+  (`seats/builder/rigs/<rig>.md`) is larger than `rig_memory_bytes`, 8000 by
+  default: `millwright 8412/8000 bytes: prune (Mayor)`. Every Builder reads that
+  file at boot, so its size is fuel paid on every story, and this is what tells
+  the Mayor to prune it. The section is left out when no rig is over, a rig with
+  no memory file is not an error, and the archive a memory is pruned into
+  (`<rig>-archive.md`) is never counted.
 - **FUEL today** — the tokens the Builder's ledger charged on lines dated today,
   and 0 when the seat has no ledger yet.
 
@@ -707,8 +715,8 @@ bd update <id> --set-metadata host=vps
 ```
 
 `mw status` only ever says this. Re-pathing a story is a person's act, never a
-report's. The config keys it reads are `vault`, `host` and `host_silent_hours`
-(*What a host is told*). See `features/status.feature`.
+report's. The config keys it reads are `vault`, `host`, `host_silent_hours` and
+`rig_memory_bytes` (*What a host is told*). See `features/status.feature`.
 
 ## Finding sessions that have stopped
 

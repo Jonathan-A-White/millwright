@@ -101,6 +101,36 @@ func (v *Vault) Seat(_ context.Context, seat, rig string) (application.Seat, err
 	return read, nil
 }
 
+// RigMemorySizes implements application.Vault: the size of every file in the
+// seat's rigs directory that is a memory of a rig, sorted by rig. It stats the
+// files and reads none of them. A seat with no rigs directory yet has none.
+func (v *Vault) RigMemorySizes(_ context.Context, seat string) ([]application.RigMemorySize, error) {
+	if err := safeName("seat", seat); err != nil {
+		return nil, err
+	}
+	entries, err := os.ReadDir(filepath.Join(v.dir, SeatsDir, seat, RigsDir))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("listing the %s seat's memories of its rigs: %w", seat, err)
+	}
+
+	var sizes []application.RigMemorySize
+	for _, entry := range entries {
+		rig, ok := strings.CutSuffix(entry.Name(), application.MemoryExt)
+		if !ok || entry.IsDir() || strings.HasSuffix(rig, application.ArchiveSuffix) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return nil, fmt.Errorf("sizing the %s seat's memory of the rig %s: %w", seat, rig, err)
+		}
+		sizes = append(sizes, application.RigMemorySize{Rig: rig, Bytes: int(info.Size())})
+	}
+	return sizes, nil
+}
+
 // RunFile implements application.Vault.
 func (v *Vault) RunFile(storyID, name string) string {
 	return filepath.Join(v.dir, RunsDir, storyID, name)

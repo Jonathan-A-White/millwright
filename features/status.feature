@@ -198,3 +198,46 @@ Feature: mw status
     Then reading status succeeds
     And nothing was written through the tracker, the ledger or the runner
     And nothing pathed to another host was re-pathed or touched
+
+  Scenario: A rig whose memory is under the budget shows no RIG MEMORY section at all
+    Given the builder's memory of the rig "millwright" is 7999 bytes
+    When mw status reads the host
+    Then reading status succeeds
+    And the report has no RIG MEMORY section
+
+  Scenario: A rig whose memory is over the budget is named with its size and the budget
+    Given the builder's memory of the rig "millwright" is 8412 bytes
+    And the builder's memory of the rig "fellowship" is 300 bytes
+    When mw status reads the host
+    Then reading status succeeds
+    And the report warns that the memory of the rig "millwright" is 8412 of 8000 bytes
+    And the report does not warn about the memory of the rig "fellowship"
+    And every line of the report is at most 60 columns wide
+
+  Scenario: The budget of a rig's memory is what the configuration says
+    Given the configuration says a rig's memory may be 500 bytes
+    And the builder's memory of the rig "millwright" is 600 bytes
+    And the builder's memory of the rig "fellowship" is 400 bytes
+    When mw status reads the host
+    Then reading status succeeds
+    And the report warns that the memory of the rig "millwright" is 600 of 500 bytes
+    And the report does not warn about the memory of the rig "fellowship"
+
+  Scenario: An archive of a rig's memory is never counted, however large
+    Given the builder's memory of the rig "millwright" is 200 bytes
+    And the builder's archive of the rig "millwright" is 90000 bytes
+    When mw status reads the host
+    Then reading status succeeds
+    And the report has no RIG MEMORY section
+
+  Scenario: A rig with no memory file is not an error
+    Given a status story "mw-gq6.29" filed under it
+    When mw status reads the host
+    Then reading status succeeds
+    And the report has no RIG MEMORY section
+
+  Scenario: Reading the rigs' memory writes nothing
+    Given the builder's memory of the rig "millwright" is 8412 bytes
+    When mw status reads the host
+    Then reading status succeeds
+    And nothing was written through the tracker, the ledger or the runner
