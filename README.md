@@ -56,7 +56,11 @@ the adapter — one tmux session per story, named after the story's id with the
 punctuation tmux reads as a target replaced (`mw-gq6.4` becomes `mw-gq6_4`), so
 that a person can `tmux attach -t mw-gq6_4` and watch any story being worked.
 tmux is told to keep the window when the command exits, so that the exit status
-and the last of the output are still there to be read afterwards.
+and the last of the output are still there to be read afterwards. tmux does not
+always record that status — pinned to one CPU it often reaps a command and never
+notes how it ended — so a session whose command has ended with no status after a
+few seconds is reported as `exited, status unknown`: not running, not finished,
+and not a clean exit.
 
 ## Filing a plan
 
