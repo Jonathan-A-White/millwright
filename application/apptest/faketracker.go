@@ -52,7 +52,11 @@ type FakeTracker struct {
 	refused map[string]string
 
 	notes map[string]string
-	syncs int
+	// published is the notes as the last sync that got through left them: what
+	// the other host reads on its next sync. A note set after that sync is in
+	// notes and not yet here.
+	published map[string]string
+	syncs     int
 	// asked is the dispatch-facing calls in the order they were made, so that a
 	// test can say the hosts were levelled before anything was claimed.
 	asked []string
@@ -78,12 +82,13 @@ type fakeStory struct {
 // NewFakeTracker returns an empty fake work tracker.
 func NewFakeTracker() *FakeTracker {
 	return &FakeTracker{
-		defaults: map[string]domain.Path{},
-		titles:   map[string]string{},
-		stories:  map[string]*fakeStory{},
-		formulas: map[string][]application.FormulaStep{},
-		poured:   map[string]string{},
-		notes:    map[string]string{},
+		defaults:  map[string]domain.Path{},
+		titles:    map[string]string{},
+		stories:   map[string]*fakeStory{},
+		formulas:  map[string][]application.FormulaStep{},
+		poured:    map[string]string{},
+		notes:     map[string]string{},
+		published: map[string]string{},
 	}
 }
 
@@ -724,7 +729,8 @@ func (f *FakeTracker) StaleClaims(_ context.Context, days int) ([]application.St
 
 // Sync implements application.TrackerSync. Nothing is synchronised: the fake
 // counts the cycle and reports SyncErr, so that a use case can be walked
-// through a halted sync without a database or a remote.
+// through a halted sync without a database or a remote. A cycle that gets
+// through publishes the notes as they stand; a halted one publishes nothing.
 func (f *FakeTracker) Sync(_ context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -733,7 +739,14 @@ func (f *FakeTracker) Sync(_ context.Context) error {
 		return f.Err
 	}
 	f.syncs++
-	return f.SyncErr
+	if f.SyncErr != nil {
+		return f.SyncErr
+	}
+	f.published = make(map[string]string, len(f.notes))
+	for key, value := range f.notes {
+		f.published[key] = value
+	}
+	return nil
 }
 
 // Note implements application.TrackerSync.
@@ -757,6 +770,29 @@ func (f *FakeTracker) SetNote(_ context.Context, key, value string) error {
 		return fmt.Errorf("a note needs a key")
 	}
 	f.notes[key] = value
+	return nil
+}
+
+// PublishedNote reads a note as the other host would on its next sync: as it
+// stood when the last sync that got through pushed it. "" when that sync did
+// not carry the key, or none has got through.
+func (f *FakeTracker) PublishedNote(key string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.published[key]
+}
+
+// ClearNote implements application.TrackerSync.
+func (f *FakeTracker) ClearNote(_ context.Context, key string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return f.Err
+	}
+	if key == "" {
+		return fmt.Errorf("a note needs a key")
+	}
+	delete(f.notes, key)
 	return nil
 }
 

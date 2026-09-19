@@ -88,6 +88,10 @@ type TrackerSync interface {
 
 	// SetNote writes one value into the tracker's key-value store.
 	SetNote(ctx context.Context, key, value string) error
+
+	// ClearNote deletes one key from the tracker's key-value store. A key that
+	// is not there is already what was asked for, and is not an error.
+	ClearNote(ctx context.Context, key string) error
 }
 
 // SyncHalt is a tracker synchronisation that stopped without publishing
@@ -244,14 +248,14 @@ func (r SyncReport) String() string {
 }
 
 // Sync brings this host level with the other one: the vault's files, then the
-// beads database, then a note of when this host was last level.
+// beads database, carrying a note of when this host was last level.
 //
 // The order is the point. The vault's ledgers merge cleanly only once git has
 // been told they do, so the mark goes in before anything is pulled. The note is
-// written last, because only a sync that finished is one this host was level
-// at — which means the note itself reaches the other host on the next sync, one
-// cycle later. That is the honest trade: a note written earlier would travel
-// sooner and lie whenever the sync went on to fail.
+// written once the vault's half is level and before the beads cycle, because
+// that cycle is what pushes it: the other host reads it on its next sync, not
+// one cycle later. A cycle that halts pushed nothing, so the note is taken back
+// out and never says a host was level when it was not.
 //
 // Nothing here is retried and nothing is forced. A sync that cannot finish
 // leaves the vault as it found it and hands back the reason.
@@ -305,24 +309,61 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 		}
 	}
 
-	if err := s.Tracker.Sync(ctx); err != nil {
-		return report, fmt.Errorf("syncing the beads database on %s: %w", s.Host, err)
-	}
-
-	// The beads half is level, but a host whose vault half never ran is not
-	// level, and the note says it was. So nothing is recorded, and what is in
-	// the way is handed back instead — with a status of its own, because nothing
-	// here is broken.
+	// A host whose vault half never ran is not level, and the note says it was.
+	// So nothing is recorded, the beads half runs anyway, and what is in the way
+	// is handed back afterwards — with a status of its own, because nothing here
+	// is broken.
 	if len(report.Blocked) > 0 {
+		if err := s.Tracker.Sync(ctx); err != nil {
+			return report, fmt.Errorf("syncing the beads database on %s: %w", s.Host, err)
+		}
 		return report, &VaultBlocked{Host: s.Host, Files: report.Blocked}
 	}
 
-	report.At = s.now()
-	if err := s.Tracker.SetNote(ctx, LastSyncKey(s.Host), report.At.UTC().Format(LastSyncFormat)); err != nil {
-		report.At = time.Time{}
-		return report, fmt.Errorf("recording when %s was last level: %w", s.Host, err)
+	// The vault half is level, so this is the moment the host is. The note goes
+	// in before the beads cycle, because that cycle is what pushes it: written
+	// after, it would wait for the next one. If the cycle then halts nothing was
+	// pushed, and the note is put back the way it was.
+	return s.syncBeadsRecordingLevel(ctx, report)
+}
+
+// syncBeadsRecordingLevel runs the beads half with the note of when this host
+// was level already in the database, so that the one cycle carries it out.
+//
+// A note that cannot be written does not keep the cycle from running — hosts
+// that stay level in beads keep working — but it is still a failure, said after
+// the cycle, and nothing is claimed to have been recorded.
+func (s Sync) syncBeadsRecordingLevel(ctx context.Context, report SyncReport) (SyncReport, error) {
+	key := LastSyncKey(s.Host)
+	at := s.now()
+	before, noteErr := s.Tracker.Note(ctx, key)
+	if noteErr == nil {
+		noteErr = s.Tracker.SetNote(ctx, key, at.UTC().Format(LastSyncFormat))
 	}
+
+	if err := s.Tracker.Sync(ctx); err != nil {
+		err = fmt.Errorf("syncing the beads database on %s: %w", s.Host, err)
+		if noteErr == nil {
+			if restoreErr := s.restoreNote(ctx, key, before); restoreErr != nil {
+				err = fmt.Errorf("%w; and taking back the note of when %s was level: %v", err, s.Host, restoreErr)
+			}
+		}
+		return report, err
+	}
+	if noteErr != nil {
+		return report, fmt.Errorf("recording when %s was last level: %w", s.Host, noteErr)
+	}
+	report.At = at
 	return report, nil
+}
+
+// restoreNote puts a note back the way it was: the value it had, or no value at
+// all when it had none.
+func (s Sync) restoreNote(ctx context.Context, key, before string) error {
+	if before == "" {
+		return s.Tracker.ClearNote(ctx, key)
+	}
+	return s.Tracker.SetNote(ctx, key, before)
 }
 
 // now is the clock this sync reads.

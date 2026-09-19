@@ -80,3 +80,21 @@ func firstLine(said string) string {
 	line, _, _ := strings.Cut(strings.TrimSpace(said), "\n")
 	return strings.TrimSpace(line)
 }
+
+// ClearNote implements application.TrackerSync. A key that is not there is
+// already cleared, so bd's word that it is missing is not a failure.
+func (g *Gateway) ClearNote(ctx context.Context, key string) error {
+	if key == "" {
+		return fmt.Errorf("a note needs a key")
+	}
+	if _, err := g.call(ctx, "kv", "clear", key); err != nil {
+		said := strings.ToLower(err.Error())
+		for _, missing := range NoteMissing {
+			if strings.Contains(said, missing) {
+				return nil
+			}
+		}
+		return err
+	}
+	return nil
+}

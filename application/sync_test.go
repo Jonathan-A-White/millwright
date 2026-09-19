@@ -61,6 +61,45 @@ func TestSyncMarksPullsPushesAndRecordsWhenItWasLevel(t *testing.T) {
 	}
 }
 
+func TestSyncPublishesTheNoteInTheSameCycleThatWroteIt(t *testing.T) {
+	sync, _, tracker := syncing(t)
+
+	if _, err := sync.Run(context.Background()); err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	if got, want := tracker.PublishedNote(application.LastSyncKey("vps")), level.Format(application.LastSyncFormat); got != want {
+		t.Fatalf("expected the other host to read host.vps.last_sync as %q after one sync, got %q", want, got)
+	}
+}
+
+func TestAHaltedSyncTakesTheNoteBackToWhatItWas(t *testing.T) {
+	key := application.LastSyncKey("vps")
+	earlier := level.Add(-time.Hour).Format(application.LastSyncFormat)
+
+	for name, before := range map[string]string{"a first sync": "", "a later one": earlier} {
+		t.Run(name, func(t *testing.T) {
+			sync, _, tracker := syncing(t)
+			if before != "" {
+				if err := tracker.SetNote(context.Background(), key, before); err != nil {
+					t.Fatalf("writing the earlier note: %v", err)
+				}
+			}
+			tracker.SyncExits(2, "conflict")
+
+			if _, err := sync.Run(context.Background()); err == nil {
+				t.Fatal("expected the halt to stop the sync")
+			}
+			note, err := tracker.Note(context.Background(), key)
+			if err != nil {
+				t.Fatalf("reading the note: %v", err)
+			}
+			if note != before {
+				t.Fatalf("expected host.vps.last_sync to be back to %q, got %q", before, note)
+			}
+		})
+	}
+}
+
 func TestSyncWithNothingToDoIsQuiet(t *testing.T) {
 	sync, _, _ := syncing(t)
 

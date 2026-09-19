@@ -84,4 +84,7 @@ func TestANoteNeedsAKey(t *testing.T) {
 	if err := gateway.SetNote(context.Background(), "", "now"); err == nil {
 		t.Fatal("expected a note with no key to be refused")
 	}
+	if err := gateway.ClearNote(context.Background(), ""); err == nil {
+		t.Fatal("expected clearing a note with no key to be refused")
+	}
 }

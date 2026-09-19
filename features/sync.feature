@@ -1,7 +1,7 @@
 Feature: Keeping the vault and beads in step between hosts
   mw sync is the one command that brings this host level with the other one. It
   runs by hand, from the dispatcher, or on a timer, and always in the same
-  order: the vault's files first, then the beads database, and last a note of
+  order: the vault's files first, then the beads database, carrying a note of
   when this host was level, so that the other host can tell how stale this one
   is. It never migrates and it never forces. A sync that cannot finish stops
   and says why in plain words rather than resolving anything itself. One thing
@@ -44,6 +44,11 @@ Feature: Keeping the vault and beads in step between hosts
     When this host syncs
     Then the sync succeeds
     And the beads database holds the time of the sync under host.vps.last_sync
+
+  Scenario: The note reaches the other host in the same sync that wrote it
+    When this host syncs
+    Then the sync succeeds
+    And the other host's next sync reads the time of the sync under host.vps.last_sync
 
   Scenario: An unresolvable beads conflict stops the sync
     Given bd sync will exit 2

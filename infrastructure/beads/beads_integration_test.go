@@ -445,6 +445,18 @@ func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 	if after != level {
 		t.Fatalf("expected %s to be %q, got %q", key, level, after)
 	}
+
+	// Taking a note back is how a sync that halted leaves no claim of having
+	// been level; clearing one that is already gone is not a failure either.
+	if err := gateway.ClearNote(ctx, key); err != nil {
+		t.Fatalf("clearing %s: %v", key, err)
+	}
+	if cleared, err := gateway.Note(ctx, key); err != nil || cleared != "" {
+		t.Fatalf("expected %s to be gone after clearing it, got %q: %v", key, cleared, err)
+	}
+	if err := gateway.ClearNote(ctx, key); err != nil {
+		t.Fatalf("expected clearing a note that is not there to be no failure, got %v", err)
+	}
 }
 
 // Filing a plan is the other half of the gateway: it writes beads rather than

@@ -93,6 +93,7 @@ func InitializeSyncScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the vault is where it was on this host$`, c.theVaultIsWhereItWasOnThisHost)
 	ctx.Then(`^the beads database was synced once$`, c.theDatabaseWasSyncedOnce)
 	ctx.Then(`^the beads database holds the time of the sync under (\S+)$`, c.theDatabaseHoldsTheTimeUnder)
+	ctx.Then(`^the other host's next sync reads the time of the sync under (\S+)$`, c.theOtherHostReadsTheTimeUnder)
 	ctx.Then(`^nothing is recorded under (\S+)$`, c.nothingIsRecordedUnder)
 	ctx.Then(`^the vault marks (\S+) as (\S+)$`, c.theVaultMarks)
 	ctx.Then(`^the sync reports that the mark was added$`, c.theSyncReportsTheMark)
@@ -502,6 +503,17 @@ func (c *syncContext) theDatabaseHoldsTheTimeUnder(key string) error {
 	}
 	if !c.report.At.Equal(syncedAt) {
 		return fmt.Errorf("expected the sync to report it was level at %s, got %s", syncedAt, c.report.At)
+	}
+	return nil
+}
+
+// theOtherHostReadsTheTimeUnder reads the note as the other host's next sync
+// would find it: as this host's sync published it, not as it sits in this
+// host's own database.
+func (c *syncContext) theOtherHostReadsTheTimeUnder(key string) error {
+	got, want := c.tracker.PublishedNote(key), syncedAt.Format(application.LastSyncFormat)
+	if got != want {
+		return fmt.Errorf("expected the other host to read %s as %q after this one sync, got %q", key, want, got)
 	}
 	return nil
 }
