@@ -183,7 +183,10 @@ A session that did finish is checked before anything is landed:
 1. the branch must hold **commits** that `origin/<target>` does not;
 2. none of those commits may be **signed by a machine** (below);
 3. every **step** of the story's poured formula must be closed;
-4. the **rig's own tests** must pass in the story's worktree.
+4. the **rig's own tests** must pass in the story's worktree. A test command
+   the shell could not run at all (exit 126 or 127 — a toolchain that is not on
+   the PATH `mw` was started with) is reported as that, with the command's own
+   last lines, and not as a failing test; the story is blocked either way.
 
 Then, under the rig's **merge slot**, `mw/<story-id>` is merged into the target
 branch as the remote has it — in a throwaway detached worktree, so neither the

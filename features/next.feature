@@ -70,6 +70,24 @@ Feature: Closing out a finished story and carrying on
       | not landed |
     And no fresh session was started
 
+  Scenario: Tests that could not be run are not reported as failing, and nothing is landed
+    Given the session of "mw-gq6.1" reported a plain success
+    And the rig's tests cannot be run, saying "make: go: No such file or directory"
+    And the story "mw-gq6.2" is planned and ready to be worked here
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the story "mw-gq6.1" is held blocked
+    And the story "mw-gq6.1" carries a comment quoting: could not be run
+    And the story "mw-gq6.1" carries a comment quoting: make: go: No such file or directory
+    And the story "mw-gq6.1" carries no comment quoting: tests fail
+    And the worktree of "mw-gq6.1" is still there
+    And the last ledger line holds:
+      | mw-gq6.1                            |
+      | not landed                          |
+      | could not be run                    |
+    And no fresh session was started
+
   Scenario: An errored session is recorded truthfully and nothing is landed
     Given the session of "mw-gq6.1" reported this result:
       """

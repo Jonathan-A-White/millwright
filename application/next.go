@@ -284,6 +284,11 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	if err != nil {
 		return n.stop(ctx, c, report, fmt.Sprintf("the rig's tests could not be run in %s: %v", c.worktree, err), "")
 	}
+	if checked.NotRun {
+		return n.stop(ctx, c, report,
+			fmt.Sprintf("the rig's tests could not be run in the worktree: `%s` did not start, so this host is missing something the command needs (a toolchain not on its PATH?)", checked.Command),
+			"The last lines of `"+checked.Command+"` in "+c.worktree+":\n\n```\n"+checked.Tail(CheckLines)+"\n```")
+	}
 	if !checked.Passed {
 		return n.stop(ctx, c, report,
 			fmt.Sprintf("the rig's tests fail in the worktree: `%s` did not pass", checked.Command),
@@ -481,6 +486,10 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 		checked, err := n.Checks.Run(ctx, c.path.Rig, dir)
 		if err != nil {
 			return Landed{}, fmt.Errorf("the rig's tests could not be run on the merged result in %s: %w", dir, err)
+		}
+		if checked.NotRun {
+			return Landed{}, fmt.Errorf("the rig's tests could not be run on the merged result in %s: `%s` did not start, so nothing was pushed\n\n```\n%s\n```",
+				dir, checked.Command, checked.Tail(CheckLines))
 		}
 		if !checked.Passed {
 			return Landed{}, fmt.Errorf("%s and %s do not pass the rig's tests together: `%s` failed on the merged result, so nothing was pushed\n\n```\n%s\n```",

@@ -21,6 +21,12 @@ const (
 	Shell          = "/bin/sh"
 )
 
+// The exit statuses a POSIX shell gives a command it could not run at all.
+const (
+	exitNotExecutable = 126
+	exitNotFound      = 127
+)
+
 // Checks runs one rig's own tests. It is the adapter behind application.Checks.
 //
 // What the tests are is per rig and per host: the factory does not know how any
@@ -117,6 +123,12 @@ func (c *Checks) Run(ctx context.Context, rig, dir string) (application.Checked,
 	// unable to ask the question at all.
 	var exited *exec.ExitError
 	if errors.As(err, &exited) && ctx.Err() == nil {
+		// The shell's own words for a command it could not run: not found, or found
+		// and not executable. That is a toolchain this host does not have on its
+		// PATH, not a test that is red, and a person reading "the tests fail" would
+		// go looking at the code.
+		code := exited.ExitCode()
+		checked.NotRun = code == exitNotExecutable || code == exitNotFound
 		return checked, nil
 	}
 	return application.Checked{}, fmt.Errorf("running `%s` in %s: %w: %s", command, dir, err, application.RecentLines(out.String(), 10))

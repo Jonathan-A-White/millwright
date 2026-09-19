@@ -52,3 +52,32 @@ func TestTestsThatCannotBeRunAtAllAreAFailure(t *testing.T) {
 		t.Error("expected running the tests nowhere to be refused")
 	}
 }
+
+func TestACommandTheShellCouldNotFindIsNotARedTest(t *testing.T) {
+	for _, code := range []string{"126", "127"} {
+		checks := rig.NewChecks(rig.WithCommand("echo 'make: go: No such file or directory'; exit " + code))
+
+		checked, err := checks.Run(context.Background(), "millwright", t.TempDir())
+		if err != nil {
+			t.Fatalf("exit %s: expected the run to be reported, not to fail: %v", code, err)
+		}
+		switch {
+		case checked.Passed:
+			t.Errorf("exit %s: expected the run not to have passed", code)
+		case !checked.NotRun:
+			t.Errorf("exit %s: expected the run to be reported as one that could not be made, got %+v", code, checked)
+		case !strings.Contains(checked.Tail(5), "No such file or directory"):
+			t.Errorf("exit %s: expected the command's own output to be kept, got %q", code, checked.Output)
+		}
+	}
+}
+
+func TestATestThatExitsWithAnyOtherCodeHasRun(t *testing.T) {
+	checked, err := rig.NewChecks(rig.WithCommand("exit 2")).Run(context.Background(), "millwright", t.TempDir())
+	if err != nil {
+		t.Fatalf("running the rig's tests: %v", err)
+	}
+	if checked.Passed || checked.NotRun {
+		t.Errorf("expected a red run that did run, got %+v", checked)
+	}
+}

@@ -91,6 +91,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the session of "([^"]*)" reported a plain success$`, c.theSessionSucceeded)
 	ctx.Given(`^the session of "([^"]*)" left no result at all$`, c.theSessionLeftNothing)
 	ctx.Given(`^the rig's tests fail, saying "([^"]*)"$`, c.theRigsTestsFail)
+	ctx.Given(`^the rig's tests cannot be run, saying "([^"]*)"$`, c.theRigsTestsCannotBeRun)
 	ctx.Given(`^the story "([^"]*)" is planned and ready to be worked here$`, c.aStoryReadyHere)
 	ctx.Given(`^the ledger already holds a line from an earlier story$`, c.theLedgerAlreadyHoldsALine)
 	ctx.Given(`^a formula was poured for "([^"]*)" and one of its steps is still open$`, c.aFormulaWithAnOpenStep)
@@ -118,6 +119,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the story "([^"]*)" is not closed$`, c.theStoryIsNotClosed)
 	ctx.Then(`^the story "([^"]*)" is held blocked$`, c.theStoryIsHeldBlocked)
 	ctx.Then(`^the story "([^"]*)" carries a comment quoting: (.+)$`, c.theStoryCarriesACommentQuoting)
+	ctx.Then(`^the story "([^"]*)" carries no comment quoting: (.+)$`, c.theStoryCarriesNoCommentQuoting)
 	ctx.Then(`^the comment on "([^"]*)" and the report name that commit$`, c.theCommentAndReportNameTheCommit)
 	ctx.Then(`^the last ledger line holds:$`, c.theLastLedgerLineHolds)
 	ctx.Then(`^the last ledger line names "([^"]*)"$`, c.theLastLedgerLineNames)
@@ -387,6 +389,13 @@ func (c *nextContext) putResult(id, contents string) error {
 
 func (c *nextContext) theRigsTestsFail(saying string) error {
 	c.checkCommand = fmt.Sprintf("printf 'run\\n' >> %s; echo '%s'; exit 1", c.checkLog, saying)
+	return nil
+}
+
+// theRigsTestsCannotBeRun is the toolchain missing: the shell finds no program
+// to run, and says so with exit status 127.
+func (c *nextContext) theRigsTestsCannotBeRun(saying string) error {
+	c.checkCommand = fmt.Sprintf("printf 'run\\n' >> %s; echo '%s'; exit 127", c.checkLog, saying)
 	return nil
 }
 
@@ -661,6 +670,16 @@ func (c *nextContext) theStoryCarriesACommentQuoting(id, words string) error {
 		}
 	}
 	return fmt.Errorf("expected a comment on %s quoting %q, got %q", id, want, comments)
+}
+
+func (c *nextContext) theStoryCarriesNoCommentQuoting(id, words string) error {
+	want := strings.TrimSpace(words)
+	for _, comment := range c.tracker.Comments(id) {
+		if strings.Contains(comment, want) {
+			return fmt.Errorf("expected no comment on %s quoting %q, got %q", id, want, comment)
+		}
+	}
+	return nil
 }
 
 func (c *nextContext) theLastLedgerLineHolds(table *godog.Table) error {

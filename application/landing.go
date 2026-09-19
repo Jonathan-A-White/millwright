@@ -119,9 +119,15 @@ func AIAttribution(message string) string {
 // Checked is one run of a rig's own tests: whether they passed, what they
 // printed, and the command that was run, so that a person reading a story that
 // was stopped can run the same thing by hand.
+//
+// NotRun is a run that did not get as far as running any tests: the shell found
+// no program to run (exit status 127) or could not run the one it found (126).
+// It is a host missing its toolchain, not a story with a red test, and so it is
+// told apart from Passed being false. It is never set together with Passed.
 type Checked struct {
 	Command string
 	Passed  bool
+	NotRun  bool
 	Output  string
 }
 
