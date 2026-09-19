@@ -3,6 +3,7 @@ package application_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -88,27 +89,108 @@ func TestSyncMarksLedgersBeforeItPulls(t *testing.T) {
 	}
 }
 
-func TestSyncStopsOnUncommittedVaultWork(t *testing.T) {
+func TestSyncLeavesABlockedVaultAloneAndSyncsBeadsAnyway(t *testing.T) {
 	sync, files, tracker := syncing(t)
-	files.Dirty = []string{"seats/mayor/ledger.md"}
+	files.Dirty = []string{"seats/mayor/ledger.md", "seats/builder/rigs/millwright.md"}
 
 	report, err := sync.Run(context.Background())
 	if err == nil {
-		t.Fatal("expected a vault holding uncommitted work to stop the sync")
+		t.Fatal("expected a vault holding uncommitted work to block the vault half of the sync")
 	}
-	for _, want := range []string{"uncommitted", "seats/mayor/ledger.md"} {
+	blocked, stopped := application.Blocked(err)
+	if !stopped {
+		t.Fatalf("expected a blocked vault, got %T: %v", err, err)
+	}
+	if blocked.Host != "vps" {
+		t.Fatalf("expected the blocked vault to name the host, got %q", blocked.Host)
+	}
+	if len(blocked.Files) != 2 {
+		t.Fatalf("expected both files in the way, got %v", blocked.Files)
+	}
+	for _, want := range []string{"uncommitted", "seats/mayor/ledger.md", "seats/builder/rigs/millwright.md"} {
 		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("expected the failure to say %q, got %q", want, err)
+			t.Fatalf("expected the message to say %q, got %q", want, err)
 		}
 	}
+	if strings.Contains(err.Error(), "\n") {
+		t.Fatalf("expected one line a timer can log, got %q", err)
+	}
+	if got := application.ExitStatus(err); got != application.VaultBlockedExit {
+		t.Fatalf("expected mw to leave with %d, got %d", application.VaultBlockedExit, got)
+	}
+
 	if marks, pulls, pushes := files.Moves(); marks+pulls+pushes != 0 {
-		t.Fatalf("expected nothing to have moved, got %d marks, %d pulls, %d pushes", marks, pulls, pushes)
+		t.Fatalf("expected the vault left alone, got %d marks, %d pulls, %d pushes", marks, pulls, pushes)
 	}
-	if tracker.Syncs() != 0 {
-		t.Fatal("expected the beads database not to be synced at all")
+	if got := tracker.Syncs(); got != 1 {
+		t.Fatalf("expected the beads half to run anyway, got %d cycles", got)
 	}
+
 	if !report.At.IsZero() {
-		t.Fatalf("expected no time to be recorded, got %s", report.At)
+		t.Fatalf("expected no time to be recorded for a host that is not level, got %s", report.At)
+	}
+	note, err := tracker.Note(context.Background(), application.LastSyncKey("vps"))
+	if err != nil {
+		t.Fatalf("reading the note: %v", err)
+	}
+	if note != "" {
+		t.Fatalf("expected nothing recorded under host.vps.last_sync, got %q", note)
+	}
+	if len(report.Blocked) != 2 {
+		t.Fatalf("expected the report to hold what blocked it, got %v", report.Blocked)
+	}
+	if report.Quiet() {
+		t.Fatal("expected a blocked sync not to be called quiet")
+	}
+	if said := report.String(); !strings.Contains(said, "seats/mayor/ledger.md") || !strings.Contains(said, "beads synced") {
+		t.Fatalf("expected the report to name the files and say beads were synced, got %q", said)
+	}
+}
+
+func TestABlockedVaultHasAStatusOfItsOwn(t *testing.T) {
+	for _, taken := range []int{0, 1, 2, 3, 4} {
+		if application.VaultBlockedExit == taken {
+			t.Fatalf("expected a status distinct from a plain failure and from bd's own, got %d", taken)
+		}
+	}
+}
+
+func TestExitStatusSaysWhatStoppedMw(t *testing.T) {
+	if got := application.ExitStatus(nil); got != 0 {
+		t.Fatalf("expected nothing wrong to leave with 0, got %d", got)
+	}
+	if got := application.ExitStatus(errors.New("something else went wrong")); got != 1 {
+		t.Fatalf("expected an ordinary failure to leave with 1, got %d", got)
+	}
+	for code, want := range map[int]int{0: 1, 1: 1, 2: 2, 3: 3, 4: 4} {
+		if got := application.ExitStatus(&application.SyncHalt{Code: code}); got != want {
+			t.Fatalf("expected a halt on %d to leave with %d, got %d", code, want, got)
+		}
+	}
+	blocked := &application.VaultBlocked{Host: "vps", Files: []string{"seats/mayor/ledger.md"}}
+	if got := application.ExitStatus(fmt.Errorf("dispatching on vps: %w", blocked)); got != application.VaultBlockedExit {
+		t.Fatalf("expected a blocked vault to leave with %d even when it is wrapped, got %d", application.VaultBlockedExit, got)
+	}
+}
+
+func TestSyncStopsWhenBeadsHaltsEvenThoughTheVaultWasBlockedToo(t *testing.T) {
+	sync, files, tracker := syncing(t)
+	files.Dirty = []string{"seats/mayor/ledger.md"}
+	tracker.SyncExits(2, "bd said so")
+
+	_, err := sync.Run(context.Background())
+	halt, stopped := application.Halted(err)
+	if !stopped {
+		t.Fatalf("expected the beads halt to be what stopped the sync, got %T: %v", err, err)
+	}
+	if halt.Code != 2 {
+		t.Fatalf("expected bd's own exit 2, got %d", halt.Code)
+	}
+	if got := application.ExitStatus(err); got != 2 {
+		t.Fatalf("expected mw to leave with 2, got %d", got)
+	}
+	if got := tracker.Syncs(); got != 1 {
+		t.Fatalf("expected one synchronisation cycle, got %d", got)
 	}
 }
 

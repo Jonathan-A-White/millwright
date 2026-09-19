@@ -144,6 +144,61 @@ func Halted(err error) (*SyncHalt, bool) {
 	return halt, errors.As(err, &halt)
 }
 
+// VaultBlockedExit is the status mw leaves with when the one thing in a sync's
+// way was work somebody has not committed in the vault. It is a status of its
+// own on purpose: 1 is any plain failure and 2, 3 and 4 are beads' own, so a
+// timer reading nothing but the number can tell "one forgotten edit is waiting
+// for whoever wrote it" from "something is broken".
+const VaultBlockedExit = 5
+
+// VaultBlocked is a sync whose vault half could not run because the vault holds
+// changes to tracked files that nobody has committed. Committing them belongs
+// to whoever wrote them — mw never commits on a seat's behalf — so the vault is
+// left exactly as it was found, and the beads half runs anyway: hosts that stay
+// level in beads keep working while one edit waits.
+//
+// It is not a fault, and a timer should not treat it as one: it carries
+// VaultBlockedExit, and says what is in the way in one line.
+type VaultBlocked struct {
+	Host string
+	// Files are the tracked files changed but not committed, as the vault
+	// reported them.
+	Files []string
+}
+
+// Error is the one line a person, or a timer's log, reads: which host, which
+// files, and what mw did and did not do about them.
+func (b *VaultBlocked) Error() string {
+	return fmt.Sprintf("%s: the vault holds uncommitted changes to %s, so the vault was left alone: "+
+		"nothing was pulled, nothing was pushed, and mw commits nobody's work for them; "+
+		"beads were synced all the same, so commit them when you can",
+		b.Host, strings.Join(b.Files, ", "))
+}
+
+// Blocked reports whether err is a sync whose vault half was blocked by work
+// nobody committed, and what was in the way.
+func Blocked(err error) (*VaultBlocked, bool) {
+	var blocked *VaultBlocked
+	return blocked, errors.As(err, &blocked)
+}
+
+// ExitStatus is the status mw leaves with when a command reports err: beads'
+// own exit code when beads stopped a sync, VaultBlockedExit when nothing was
+// wrong but somebody's uncommitted vault work, 1 for anything else, and 0 for
+// nothing wrong at all. cmd/mw leaves with it.
+func ExitStatus(err error) int {
+	if err == nil {
+		return 0
+	}
+	if halt, stopped := Halted(err); stopped && halt.Code != 0 {
+		return halt.Code
+	}
+	if _, stopped := Blocked(err); stopped {
+		return VaultBlockedExit
+	}
+	return 1
+}
+
 // SyncReport is what one sync did. Marked says the vault had to be told that
 // ledgers merge by union; Pulled and Pushed count the commits that moved; At is
 // the time recorded for this host, and is zero when nothing was recorded.
@@ -153,19 +208,29 @@ type SyncReport struct {
 	Pulled int
 	Pushed int
 	At     time.Time
+
+	// Blocked names the uncommitted tracked files that kept the vault half from
+	// running at all. It is empty for every sync that got to touch the vault.
+	Blocked []string
 }
 
 // Quiet reports whether the sync found nothing to do: nothing to mark, nothing
-// to pull and nothing to push.
-func (r SyncReport) Quiet() bool { return !r.Marked && r.Pulled == 0 && r.Pushed == 0 }
+// to pull and nothing to push. A sync the vault blocked is not quiet — it has
+// something to say, even though nothing moved.
+func (r SyncReport) Quiet() bool {
+	return !r.Marked && r.Pulled == 0 && r.Pushed == 0 && len(r.Blocked) == 0
+}
 
 // String is the one line mw prints when a sync finishes.
 func (r SyncReport) String() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s: ", r.Host)
-	if r.Quiet() {
+	switch {
+	case len(r.Blocked) > 0:
+		fmt.Fprintf(&b, "the vault was left alone, it holds uncommitted changes to %s", strings.Join(r.Blocked, ", "))
+	case r.Quiet():
 		b.WriteString("the vault was already level")
-	} else {
+	default:
 		fmt.Fprintf(&b, "pulled %d, pushed %d", r.Pulled, r.Pushed)
 		if r.Marked {
 			fmt.Fprintf(&b, "; marked %s as %s (commit it, so the other host is covered too)", LedgerPattern, MergeUnion)
@@ -190,6 +255,13 @@ func (r SyncReport) String() string {
 //
 // Nothing here is retried and nothing is forced. A sync that cannot finish
 // leaves the vault as it found it and hands back the reason.
+//
+// One thing stops half of it rather than all of it. A vault holding work nobody
+// committed blocks the vault's half only: mw commits nobody's edits, so it
+// leaves them alone, syncs beads anyway, and comes back with a *VaultBlocked
+// naming the files. That is what lets a sync run on a timer — one forgotten
+// ledger edit no longer costs the hosts every later tick — and it is still a
+// stop, so nothing that must not run on a stale vault runs after it.
 type Sync struct {
 	Vault   VaultFiles
 	Tracker TrackerSync
@@ -211,29 +283,38 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 	report := SyncReport{Host: s.Host}
 
 	// A vault holding work nobody has committed cannot be rebased onto the
-	// other host's, and committing someone else's work is not a sync's job.
+	// other host's, and committing someone else's work is not a sync's job. So
+	// the vault's half is skipped whole — nothing marked, nothing pulled,
+	// nothing pushed — and the beads half runs anyway: on a timer, one forgotten
+	// edit must not keep the hosts from seeing each other's claims every tick.
 	dirty, err := s.Vault.Uncommitted(ctx)
 	if err != nil {
 		return report, fmt.Errorf("syncing the vault on %s: %w", s.Host, err)
 	}
-	if len(dirty) > 0 {
-		return report, fmt.Errorf("syncing the vault on %s: it holds uncommitted changes to %s: "+
-			"commit them and sync again; nothing was pulled and nothing was pushed",
-			s.Host, strings.Join(dirty, ", "))
-	}
+	report.Blocked = dirty
 
-	if report.Marked, err = s.Vault.MarkLedgers(ctx); err != nil {
-		return report, fmt.Errorf("syncing the vault on %s: %w", s.Host, err)
-	}
-	if report.Pulled, err = s.Vault.Pull(ctx); err != nil {
-		return report, fmt.Errorf("syncing the vault on %s: %w", s.Host, err)
-	}
-	if report.Pushed, err = s.Vault.Push(ctx); err != nil {
-		return report, fmt.Errorf("syncing the vault on %s: %w", s.Host, err)
+	if len(report.Blocked) == 0 {
+		if report.Marked, err = s.Vault.MarkLedgers(ctx); err != nil {
+			return report, fmt.Errorf("syncing the vault on %s: %w", s.Host, err)
+		}
+		if report.Pulled, err = s.Vault.Pull(ctx); err != nil {
+			return report, fmt.Errorf("syncing the vault on %s: %w", s.Host, err)
+		}
+		if report.Pushed, err = s.Vault.Push(ctx); err != nil {
+			return report, fmt.Errorf("syncing the vault on %s: %w", s.Host, err)
+		}
 	}
 
 	if err := s.Tracker.Sync(ctx); err != nil {
 		return report, fmt.Errorf("syncing the beads database on %s: %w", s.Host, err)
+	}
+
+	// The beads half is level, but a host whose vault half never ran is not
+	// level, and the note says it was. So nothing is recorded, and what is in
+	// the way is handed back instead — with a status of its own, because nothing
+	// here is broken.
+	if len(report.Blocked) > 0 {
+		return report, &VaultBlocked{Host: s.Host, Files: report.Blocked}
 	}
 
 	report.At = s.now()
