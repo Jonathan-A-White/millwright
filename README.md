@@ -265,11 +265,25 @@ remote refusing the second push.
 
 The ledger line is one row of the seat's table: the date, the story, the
 outcome, the model and effort it was worked at, the fuel it burned, and a note
-of which host ran it. The fuel comes from the harness's own result JSON —
-`usage.input_tokens`, `usage.output_tokens`, `usage.cache_read_input_tokens` and
-`usage.cache_creation_input_tokens` totalled and broken out, `num_turns`,
-`total_cost_usd` (a list-price equivalent, not a bill on a subscription) and
-`duration_ms`. The ledger is opened for append and never rewritten: there is no
+of which host ran it.
+
+The fuel comes from the harness's own result JSON, and the fuel column names
+which figure each number is, because the fields in that file do not all cover
+the same span. The tokens are `modelUsage` — every model the session used, its
+subagents included — totalled and broken out, and the column says **whole
+session**; a file with no `modelUsage` gives up only its last turn's `usage`,
+and the column says **last turn only** instead. Beside them are
+`total_cost_usd` (a list-price equivalent for the whole session, not a bill on
+a subscription) and the turn count and clock. A session that a background task
+or a monitor woke leaves a result whose `num_turns` and `duration_ms` are the
+last turn's alone — mw-gq6.33 ran fifteen minutes and its file says one turn
+and 3.6 seconds — so on those lines the turns read **after the last wake-up**
+and the clock is `duration_api_ms`, named **of API time**, which is the only
+whole-session length the file holds. Why each field covers what it covers, with
+the evidence from two real runs, is in
+`docs/research/claude-code-result-json-fuel.md`.
+
+The ledger is opened for append and never rewritten: there is no
 code path in mw that can change a line a seat has already written. It is read
 back for two things only — a report of what a seat has burned, and a close-out
 run again, asking whether this story's line is in it already. See
