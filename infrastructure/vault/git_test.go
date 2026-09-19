@@ -187,6 +187,120 @@ func TestUncommittedListsChangedTrackedFilesAndIgnoresTheRest(t *testing.T) {
 	}
 }
 
+// committed is the paths one commit touched, newest commit first argument.
+func committed(t *testing.T, dir, revision string) []string {
+	t.Helper()
+	out := run(t, dir, "git", "show", "--pretty=format:", "--name-only", revision)
+	var names []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		if strings.TrimSpace(line) != "" {
+			names = append(names, strings.TrimSpace(line))
+		}
+	}
+	return names
+}
+
+func TestCommitRecordsThePathsItWasGivenAndLeavesEverythingElseAlone(t *testing.T) {
+	here, _ := twoHosts(t)
+	files := vault.New(here)
+
+	// What a story leaves behind: mw's own ledger line and the session's memory
+	// of the rig, both new, beside work of somebody else's that is none of a
+	// close-out's business.
+	write(t, here, "seats/builder/ledger.md", "| 2026-09-19 | mw-gq6.40 | landed on main |\n")
+	write(t, here, "seats/builder/rigs/millwright.md", "- the rig's memory, as the session left it\n")
+	write(t, here, "seats/mayor/ledger.md", "2026-09-17 the factory opened.\nsomebody else's line\n")
+	write(t, here, "runs/mw-gq6.40/result.json", "{}\n")
+
+	paths := []string{"seats/builder/ledger.md", "seats/builder/rigs/millwright.md"}
+	recorded, err := files.Commit(context.Background(), "mw next: a story (mw-gq6.40)", paths)
+	if err != nil {
+		t.Fatalf("committing: %v", err)
+	}
+	if strings.Join(recorded, "\n") != strings.Join(paths, "\n") {
+		t.Fatalf("expected %q to be committed, got %q", paths, recorded)
+	}
+	if held := committed(t, here, "HEAD"); strings.Join(held, "\n") != strings.Join(paths, "\n") {
+		t.Fatalf("expected the commit to hold exactly %q, got %q", paths, held)
+	}
+	if message := strings.TrimSpace(run(t, here, "git", "log", "-1", "--format=%B")); message != "mw next: a story (mw-gq6.40)" {
+		t.Fatalf("unexpected commit message %q", message)
+	}
+
+	left, err := files.Uncommitted(context.Background())
+	if err != nil {
+		t.Fatalf("reading what is uncommitted: %v", err)
+	}
+	if len(left) != 1 || left[0] != "seats/mayor/ledger.md" {
+		t.Fatalf("expected somebody else's work to be left exactly where it was, got %q", left)
+	}
+}
+
+func TestCommitDoesNotCarryOffWhatSomebodyElseStaged(t *testing.T) {
+	here, _ := twoHosts(t)
+
+	write(t, here, "seats/builder/ledger.md", "| 2026-09-19 | mw-gq6.40 | landed on main |\n")
+	write(t, here, "seats/mayor/ledger.md", "2026-09-17 the factory opened.\nstaged by hand\n")
+	run(t, here, "git", "add", "seats/mayor/ledger.md")
+
+	if _, err := vault.New(here).Commit(context.Background(), "mw next: a story (mw-gq6.40)", []string{"seats/builder/ledger.md"}); err != nil {
+		t.Fatalf("committing: %v", err)
+	}
+	if held := committed(t, here, "HEAD"); len(held) != 1 || held[0] != "seats/builder/ledger.md" {
+		t.Fatalf("expected the commit to hold the ledger alone, got %q", held)
+	}
+}
+
+func TestCommitMakesNoCommitWhenNothingChanged(t *testing.T) {
+	here, _ := twoHosts(t)
+	files := vault.New(here)
+	paths := []string{"seats/builder/ledger.md", "seats/builder/rigs/millwright.md"}
+
+	recorded, err := files.Commit(context.Background(), "mw next: a story (mw-gq6.40)", paths)
+	if err != nil {
+		t.Fatalf("committing a vault with none of those files in it: %v", err)
+	}
+	if len(recorded) != 0 {
+		t.Fatalf("expected nothing to be committed, got %q", recorded)
+	}
+	head := run(t, here, "git", "rev-parse", "HEAD")
+
+	write(t, here, "seats/builder/ledger.md", "| 2026-09-19 | mw-gq6.40 | landed on main |\n")
+	if _, err := files.Commit(context.Background(), "mw next: a story (mw-gq6.40)", paths); err != nil {
+		t.Fatalf("committing: %v", err)
+	}
+	recorded, err = files.Commit(context.Background(), "mw next: a story (mw-gq6.40)", paths)
+	if err != nil {
+		t.Fatalf("committing again with nothing changed: %v", err)
+	}
+	if len(recorded) != 0 {
+		t.Fatalf("expected a second commit of unchanged files to make none, got %q", recorded)
+	}
+	if now := run(t, here, "git", "rev-parse", "HEAD"); now == head {
+		t.Fatal("expected the one real commit to have been made")
+	}
+	if count := strings.TrimSpace(run(t, here, "git", "rev-list", "--count", "HEAD")); count != "2" {
+		t.Fatalf("expected exactly one commit on top of the vault's first, got %s", count)
+	}
+}
+
+func TestCommitRefusesAPathThatWouldReachOutsideTheVault(t *testing.T) {
+	here, _ := twoHosts(t)
+	head := run(t, here, "git", "rev-parse", "HEAD")
+
+	for _, reach := range []string{"../elsewhere.md", "/etc/passwd", "seats/../../out.md"} {
+		if _, err := vault.New(here).Commit(context.Background(), "mw next: a story (mw-gq6.40)", []string{reach}); err == nil {
+			t.Fatalf("expected %q to be refused", reach)
+		}
+	}
+	if _, err := vault.New(here).Commit(context.Background(), "  ", []string{"seats/mayor/ledger.md"}); err == nil {
+		t.Fatal("expected a commit with no message to be refused")
+	}
+	if now := run(t, here, "git", "rev-parse", "HEAD"); now != head {
+		t.Fatalf("expected nothing to have been committed, HEAD went from %s to %s", head, now)
+	}
+}
+
 func TestPullAndPushMoveOnlyWhatIsThere(t *testing.T) {
 	here, there := twoHosts(t)
 	files := vault.New(here)

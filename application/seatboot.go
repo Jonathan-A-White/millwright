@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"path"
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/domain"
@@ -26,6 +27,44 @@ type Seat struct {
 	Rig     string
 	// Memory is the seat's memory of Rig, empty when the seat has none.
 	Memory string
+}
+
+// The vault's own layout, as far as anything outside the vault adapter needs to
+// name it: the directory the seats are in, and the directory a seat keeps its
+// memory of each rig in (ADR 0003). They are here rather than in the adapter
+// because a close-out has to say, by path, which of the vault's files it may
+// commit — and that is a decision, not a detail of the disk.
+const (
+	SeatsDir = "seats"
+	RigsDir  = "rigs"
+	// MemoryExt is what a seat's memory of one rig is written in.
+	MemoryExt = ".md"
+)
+
+// SeatWork is everything one story is allowed to have changed in the vault,
+// by path from the vault's root: the seat's ledger, which mw itself appends the
+// story's line to, and that seat's memory of the rig the story was worked in,
+// which the session may have added a line to. Nothing else in the vault is
+// either of their business, and a close-out commits exactly these.
+//
+// A name that would reach outside the vault gives no paths at all, so that a
+// bad seat or rig name commits nothing rather than something unintended. So
+// does an empty seat; an empty rig only leaves the memory out, because a story
+// with no rig has no memory to commit.
+func SeatWork(seat, rig string) []string {
+	if !safeVaultName(seat) {
+		return nil
+	}
+	work := []string{path.Join(SeatsDir, seat, LedgerFileName)}
+	if rig == "" || !safeVaultName(rig) {
+		return work
+	}
+	return append(work, path.Join(SeatsDir, seat, RigsDir, rig+MemoryExt))
+}
+
+// safeVaultName reports whether a name can be put in a vault path as it is.
+func safeVaultName(name string) bool {
+	return name != "" && !strings.ContainsAny(name, `/\`) && !strings.Contains(name, "..")
 }
 
 // Vault is the port the factory reads seats from and writes a story's run

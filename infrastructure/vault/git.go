@@ -98,6 +98,11 @@ func (v *Vault) Uncommitted(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 
+	return changedPaths(out), nil
+}
+
+// changedPaths reads the paths out of git status --porcelain.
+func changedPaths(out string) []string {
 	var changed []string
 	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
 		if len(line) < 4 {
@@ -111,7 +116,69 @@ func (v *Vault) Uncommitted(ctx context.Context) ([]string, error) {
 		}
 		changed = append(changed, strings.Trim(path, `"`))
 	}
+	return changed
+}
+
+// Commit implements application.VaultFiles: it records exactly the paths it is
+// given, and nothing else the vault holds.
+//
+// Three git commands, in this order: `status --porcelain --untracked-files=all
+// -- <paths>` to see which of them there is anything to commit in, `add --
+// <those>` so that a file git has never seen is committable, and `commit -m
+// <message> -- <those>`. The pathspec on the commit is what makes this safe in
+// a vault two hosts and several seats write to: a commit with a pathspec takes
+// the working tree's version of those paths and nothing else, whatever else is
+// changed or even staged. Nothing is added with -A, nothing is committed with
+// -a, and a path nobody touched is not committed at all.
+func (v *Vault) Commit(ctx context.Context, message string, paths []string) ([]string, error) {
+	if strings.TrimSpace(message) == "" {
+		return nil, fmt.Errorf("committing in %s: a commit needs a message", v.dir)
+	}
+	for _, path := range paths {
+		if err := insideTheVault(path); err != nil {
+			return nil, fmt.Errorf("committing in %s: %w", v.dir, err)
+		}
+	}
+	if len(paths) == 0 {
+		return nil, nil
+	}
+
+	out, err := v.git(ctx, append([]string{"status", "--porcelain", "--untracked-files=all", "--"}, paths...)...)
+	if err != nil {
+		return nil, err
+	}
+	changed := changedPaths(out)
+	if len(changed) == 0 {
+		return nil, nil
+	}
+
+	if _, err := v.git(ctx, append([]string{"add", "--"}, changed...)...); err != nil {
+		return nil, err
+	}
+	if _, err := v.git(ctx, append([]string{"commit", "-m", message, "--"}, changed...)...); err != nil {
+		return nil, err
+	}
 	return changed, nil
+}
+
+// insideTheVault refuses a path that names something the vault does not hold.
+// Every path a commit is given comes from a seat name and a rig name, and both
+// come from a bead or a config file rather than from this package.
+func insideTheVault(path string) error {
+	switch {
+	case strings.TrimSpace(path) == "":
+		return fmt.Errorf("a path to commit cannot be empty")
+	case filepath.IsAbs(path), strings.HasPrefix(path, "/"):
+		return fmt.Errorf("%q is not a path in the vault: it is absolute", path)
+	case strings.HasPrefix(path, "-"):
+		return fmt.Errorf("%q is not a path in the vault: it reads as an option", path)
+	}
+	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+		if part == ".." {
+			return fmt.Errorf("%q is not a path in the vault: it reaches outside it", path)
+		}
+	}
+	return nil
 }
 
 // Pull implements application.VaultFiles: git pull --rebase, and the count of

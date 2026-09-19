@@ -27,11 +27,13 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 )
 
-// The names of the parts of a seat this package reads.
+// The names of the parts of a seat this package reads. The two a close-out has
+// to name by path when it commits are the application's, so that the layout is
+// written down once.
 const (
 	CharterFile = "charter.md"
-	SeatsDir    = "seats"
-	RigsDir     = "rigs"
+	SeatsDir    = application.SeatsDir
+	RigsDir     = application.RigsDir
 	RunsDir     = "runs"
 )
 
@@ -68,7 +70,7 @@ func (v *Vault) Seat(_ context.Context, seat, rig string) (application.Seat, err
 	if err := safeName("rig", rig); err != nil {
 		return application.Seat{}, err
 	}
-	memory, err := os.ReadFile(filepath.Join(v.dir, SeatsDir, seat, RigsDir, rig+".md"))
+	memory, err := os.ReadFile(filepath.Join(v.dir, SeatsDir, seat, RigsDir, rig+application.MemoryExt))
 	switch {
 	case os.IsNotExist(err):
 		// A seat that has not worked this rig yet boots without a memory of it.

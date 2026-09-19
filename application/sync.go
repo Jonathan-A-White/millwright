@@ -41,9 +41,21 @@ type VaultFiles interface {
 
 	// Uncommitted lists the tracked files changed but not committed. A vault
 	// with any of them cannot be rebased onto the other host's work, and
-	// committing them is a seat's job, not a sync's. Files git does not track
-	// are not listed: they are in nobody's way.
+	// committing them is not a sync's job. Files git does not track are not
+	// listed: they are in nobody's way.
 	Uncommitted(ctx context.Context) ([]string, error)
+
+	// Commit records exactly the paths it is given, each one from the vault's
+	// root, under message, and reports which of them there was really something
+	// to commit in. Nothing else the vault holds is touched — not a file
+	// somebody else changed, not one somebody else staged — and a path that is
+	// not there, or that has not changed, is left out rather than refused: a
+	// commit with nothing in it is not made at all, and that is not an error.
+	//
+	// It is how the one thing mw writes in the vault during a story, and the one
+	// thing the session may write beside it, stop standing in the way of the
+	// next sync. Anything else uncommitted is still somebody's to commit.
+	Commit(ctx context.Context, message string, paths []string) ([]string, error)
 
 	// Pull brings the other host's commits in and replays this host's on top,
 	// reporting how many came in. It is a plain rebase: nothing is forced, and
