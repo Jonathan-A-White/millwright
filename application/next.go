@@ -661,16 +661,24 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, why, sa
 	return *report, err
 }
 
-// ledger appends this story's one line to the seat's ledger.
+// ledger appends this story's one line to the seat's ledger. A session's fuel is
+// charged by one line only: when the ledger already holds the line that charged
+// this session — a close-out run again after a refusal — this line records its
+// own outcome and says the fuel was charged above.
 func (n Next) ledger(ctx context.Context, c *closeOut, report *NextReport, outcome string) error {
+	charged, err := n.charged(ctx, c.result.SessionID)
+	if err != nil {
+		report.Notes = append(report.Notes, err.Error())
+	}
 	line := LedgerLine{
-		When:    n.now(),
-		StoryID: c.id,
-		Title:   c.detail.Story.Title,
-		Outcome: outcome,
-		Path:    c.path,
-		Result:  c.result,
-		Notes:   n.ledgerNotes(c, report),
+		When:        n.now(),
+		StoryID:     c.id,
+		Title:       c.detail.Story.Title,
+		Outcome:     outcome,
+		Path:        c.path,
+		Result:      c.result,
+		Notes:       n.ledgerNotes(c, report),
+		FuelCharged: charged,
 	}.String()
 
 	if err := n.Vault.AppendToLedger(ctx, n.Seat, line); err != nil {
@@ -678,6 +686,27 @@ func (n Next) ledger(ctx context.Context, c *closeOut, report *NextReport, outco
 	}
 	report.Ledger = line
 	return nil
+}
+
+// charged reports whether the seat's ledger already holds the line that
+// counted this session's fuel. A ledger that cannot be read says no, with the
+// reason: a line that counts fuel twice can be seen and put right, and a line
+// that is not written cannot.
+func (n Next) charged(ctx context.Context, sessionID string) (bool, error) {
+	if sessionID == "" {
+		return false, nil
+	}
+	lines, err := n.Vault.ReadLedger(ctx, n.Seat)
+	if err != nil {
+		return false, fmt.Errorf("the %s seat's ledger could not be read to see whether session %s was charged already, so its fuel is counted again: %v",
+			n.Seat, sessionID, err)
+	}
+	for _, line := range lines {
+		if LedgerChargesSession(line, sessionID) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // commit records in the vault exactly what this story was allowed to write

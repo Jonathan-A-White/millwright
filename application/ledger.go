@@ -31,7 +31,16 @@ type LedgerLine struct {
 	Path    domain.Path
 	Result  SessionResult
 	Notes   []string
+	// FuelCharged says an earlier line of the ledger already counted this
+	// session's fuel: the fuel column then points back at it and carries no
+	// figure, so that a report summing the ledger adds the session once.
+	FuelCharged bool
 }
+
+// fuelChargedAbove is what the fuel column says when the session's fuel was
+// counted by an earlier line. It holds no token figure on purpose: whatever
+// ParseLedgerRow can read tokens off, `mw status` adds.
+const fuelChargedAbove = "fuel already charged by an earlier line for this session"
 
 // String is the line as it is appended, with no newline of its own. Every cell
 // is written so that it cannot break the table it lands in: a newline becomes a
@@ -42,13 +51,22 @@ func (l LedgerLine) String() string {
 		l.story(),
 		l.Outcome,
 		l.worker(),
-		l.Result.Spent(),
+		l.fuel(),
 		strings.Join(l.Notes, "; "),
 	}
 	for i, cell := range cells {
 		cells[i] = ledgerCell(cell)
 	}
 	return "| " + strings.Join(cells, " | ") + " |"
+}
+
+// fuel is the fuel column: what the session spent, or a pointer back to the
+// line that already said so.
+func (l LedgerLine) fuel() string {
+	if l.FuelCharged {
+		return fuelChargedAbove
+	}
+	return l.Result.Spent()
 }
 
 // story is the story column: its title with its id after it, the way the
@@ -124,6 +142,30 @@ func LedgerNamesStory(line, id string) bool {
 	}
 	story := strings.TrimSpace(cells[1])
 	return story == id || strings.HasSuffix(story, "("+id+")")
+}
+
+// LedgerChargesSession reports whether one line of a ledger is the line that
+// charged a session's fuel: a row with a token figure in its fuel column whose
+// notes name the session. A line that only points back at the fuel has no
+// figure and is not it. A session nobody can name is never charged already,
+// because two sessions that both left no id are not one session.
+func LedgerChargesSession(line, sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	if _, ok := ParseLedgerRow(line); !ok {
+		return false
+	}
+	cells := strings.Split(strings.Trim(strings.TrimSpace(line), "|"), " | ")
+	if len(cells) < 6 {
+		return false
+	}
+	for _, note := range strings.Split(cells[5], ";") {
+		if strings.TrimSpace(note) == "session "+sessionID {
+			return true
+		}
+	}
+	return false
 }
 
 // leadingTokens reads the token total off the head of a ledger's fuel column,

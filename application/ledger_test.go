@@ -18,7 +18,7 @@ func aLedgerLine(change func(*application.LedgerLine)) application.LedgerLine {
 		Outcome: "landed on main (fast-forward, abc123def456), 6 commits",
 		Path:    domain.Path{Model: domain.ModelOpus, Effort: domain.EffortHigh},
 		Result: application.SessionResult{
-			Turns: 37, CostUSD: 4.21, Duration: 28 * time.Minute,
+			SessionID: "s-1", Turns: 37, CostUSD: 4.21, Duration: 28 * time.Minute,
 			Fuel: application.Fuel{Input: 1200, Output: 18000, CacheRead: 280000, CacheWrite: 12000},
 		},
 		Notes: []string{"dispatched by mw on vps", "session s-1"},
@@ -112,5 +112,76 @@ func TestALedgerLineSaysWhatItDoesNotKnow(t *testing.T) {
 		t.Errorf("expected a story with no title to be named by its id, got %q", line)
 	case !strings.Contains(line, "—"):
 		t.Errorf("expected an empty column to be filled rather than left blank, got %q", line)
+	}
+}
+
+func TestALedgerLineForFuelAlreadyChargedCarriesNoTokenFigure(t *testing.T) {
+	line := aLedgerLine(func(l *application.LedgerLine) {
+		l.FuelCharged = true
+	}).String()
+
+	switch {
+	case !strings.Contains(line, "already charged"):
+		t.Errorf("expected the fuel column to say the fuel was charged already, got %q", line)
+	case strings.Contains(line, "311,200"), strings.Contains(line, "tokens"), strings.Contains(line, "$4.21"):
+		t.Errorf("expected no figure that a report would add again, got %q", line)
+	case !strings.Contains(line, "session s-1"):
+		t.Errorf("expected the line to still name the session it is about, got %q", line)
+	}
+	if row, ok := application.ParseLedgerRow(line); ok {
+		t.Errorf("expected no fuel to read back off the line, got %d tokens", row.Tokens)
+	}
+}
+
+func TestALedgerChargesASessionWhenALineCarriesItsFuelAndNamesIt(t *testing.T) {
+	charged := aLedgerLine(nil).String()
+
+	if !application.LedgerChargesSession(charged, "s-1") {
+		t.Errorf("expected %q to charge session s-1", charged)
+	}
+	if application.LedgerChargesSession(charged, "s-10") || application.LedgerChargesSession(charged, "s") {
+		t.Errorf("expected the session to be matched whole, not by prefix, in %q", charged)
+	}
+	if application.LedgerChargesSession(charged, "") {
+		t.Errorf("expected no session at all never to be charged already")
+	}
+}
+
+func TestALineThatOnlyPointsAtChargedFuelDoesNotChargeItAgain(t *testing.T) {
+	pointer := aLedgerLine(func(l *application.LedgerLine) { l.FuelCharged = true }).String()
+
+	if application.LedgerChargesSession(pointer, "s-1") {
+		t.Errorf("expected %q not to count as the line that charged the session", pointer)
+	}
+}
+
+func TestASessionRefusedAndThenLandedIsChargedOnce(t *testing.T) {
+	refused := aLedgerLine(func(l *application.LedgerLine) {
+		l.Outcome = "not landed: the rig's tests fail"
+	}).String()
+	ledger := []string{
+		"| date | story | outcome | model/effort | fuel | notes |",
+		"|---|---|---|---|---|---|",
+		refused,
+	}
+
+	landed := aLedgerLine(func(l *application.LedgerLine) {
+		for _, line := range ledger {
+			l.FuelCharged = l.FuelCharged || application.LedgerChargesSession(line, l.Result.SessionID)
+		}
+	})
+	ledger = append(ledger, landed.String())
+
+	if !strings.Contains(ledger[3], "landed on main") {
+		t.Fatalf("expected the second line to carry the second outcome, got %q", ledger[3])
+	}
+	total := 0
+	for _, line := range ledger {
+		if row, ok := application.ParseLedgerRow(line); ok {
+			total += row.Tokens
+		}
+	}
+	if total != 311200 {
+		t.Errorf("expected the session's fuel counted once, got %d tokens across the ledger", total)
 	}
 }
