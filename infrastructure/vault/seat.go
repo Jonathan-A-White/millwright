@@ -69,6 +69,24 @@ func (v *Vault) SeatStart(_ context.Context, seat, host string) (application.Sea
 	return start, nil
 }
 
+// HostFile implements application.SeatFiles: one file of the seat's directory
+// for a host, empty when the seat has no such file.
+func (v *Vault) HostFile(_ context.Context, seat, host, name string) (string, error) {
+	for what, value := range map[string]string{"seat": seat, "host": host, "file": name} {
+		if err := safeName(what, value); err != nil {
+			return "", err
+		}
+	}
+	contents, err := os.ReadFile(filepath.Join(v.dir, SeatsDir, seat, application.SeatHostsDir, host, name))
+	switch {
+	case err == nil:
+		return string(contents), nil
+	case os.IsNotExist(err):
+		return "", nil
+	}
+	return "", fmt.Errorf("reading the %s seat's %s for %s: %w", seat, name, host, err)
+}
+
 // handoffDir is where a seat's handoffs on this host belong, from the vault's
 // root: under its own hosts/<host>/ when the seat keeps one for this host, and
 // beside its charter when it does not.

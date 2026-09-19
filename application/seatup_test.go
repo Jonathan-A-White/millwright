@@ -24,6 +24,10 @@ func (f *fakeSeatFiles) SeatStart(_ context.Context, seat, host string) (applica
 	return start, nil
 }
 
+func (f *fakeSeatFiles) HostFile(context.Context, string, string, string) (string, error) {
+	return "", nil
+}
+
 // aSeatStart is a seat with a charter and two handoffs, the newest written an
 // hour before noon, with whatever a test changes applied.
 func aSeatStart(change func(*application.SeatStart)) application.SeatStart {

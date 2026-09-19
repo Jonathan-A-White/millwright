@@ -292,3 +292,28 @@ func TestRigMemorySizesRefuseANameThatWouldReachOutsideTheVault(t *testing.T) {
 		t.Error("expected a seat name that reaches outside the vault to be refused")
 	}
 }
+
+func TestAHostFileIsWhatTheSeatKeepsForThatHostAndEmptyWhenItKeepsNone(t *testing.T) {
+	dir := aVault(t)
+	full := filepath.Join(dir, "seats", "millhand", "hosts", "laptop", "review-since")
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(full, []byte("2026-09-18T20:15:00Z\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	v := vault.New(dir)
+
+	got, err := v.HostFile(context.Background(), "millhand", "laptop", "review-since")
+	if err != nil || got != "2026-09-18T20:15:00Z\n" {
+		t.Fatalf("expected what the file holds, got %q, %v", got, err)
+	}
+	for _, other := range [][3]string{{"millhand", "vps", "review-since"}, {"millhand", "laptop", "nothing"}, {"mayor", "laptop", "review-since"}} {
+		if got, err := v.HostFile(context.Background(), other[0], other[1], other[2]); err != nil || got != "" {
+			t.Errorf("expected %v to read as empty and not as a failure, got %q, %v", other, got, err)
+		}
+	}
+	if _, err := v.HostFile(context.Background(), "millhand", "../laptop", "review-since"); err == nil {
+		t.Error("expected a host that reaches outside the vault to be refused")
+	}
+}

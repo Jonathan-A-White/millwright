@@ -81,6 +81,11 @@ type SeatFiles interface {
 	// A seat with no charter, no handoff or no acting file is not an error
 	// here: what is missing comes back empty.
 	SeatStart(ctx context.Context, seat, host string) (SeatStart, error)
+
+	// HostFile reads one file a seat keeps for a host, seats/<seat>/hosts/<host>/<name>,
+	// and returns what it holds. A file that is not there reads as empty and is
+	// not an error: what an empty file means is the use case's to say.
+	HostFile(ctx context.Context, seat, host, name string) (string, error)
 }
 
 // Window is one window of the terminal this host's seats run in.
