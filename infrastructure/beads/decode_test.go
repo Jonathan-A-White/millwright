@@ -374,3 +374,25 @@ func TestCommentsComeBackOldestFirstWithTheirTextWhole(t *testing.T) {
 		t.Fatal("expected bd's error object to come back as an error")
 	}
 }
+
+func TestAStoryCarriesWhenItWasClaimed(t *testing.T) {
+	got, err := decodeBeads([]byte(`[
+  {"id": "t-a", "title": "Claimed", "status": "in_progress", "started_at": "2026-09-19T12:30:41Z"},
+  {"id": "t-b", "title": "Never claimed", "status": "open"},
+  {"id": "t-c", "title": "Odd", "status": "in_progress", "started_at": "not a time"}
+]`))
+	if err != nil {
+		t.Fatalf("decoding three beads: %v", err)
+	}
+
+	if started := got[0].detail(domain.Path{}).Started; !started.Equal(time.Date(2026, 9, 19, 12, 30, 41, 0, time.UTC)) {
+		t.Errorf("expected a claim at 2026-09-19T12:30:41Z, got %v", started)
+	}
+	// No claim, or a time that is not a time, is no time: sweep then counts
+	// from its own first look instead.
+	for _, b := range got[1:] {
+		if started := b.detail(domain.Path{}).Started; !started.IsZero() {
+			t.Errorf("expected %s to have no claim time, got %v", b.ID, started)
+		}
+	}
+}
