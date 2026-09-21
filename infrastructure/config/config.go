@@ -50,6 +50,8 @@ const (
 	DispatchSyncTriesEnv = "MW_DISPATCH_SYNC_TRIES"
 	DispatchSyncWaitEnv  = "MW_DISPATCH_SYNC_WAIT"
 
+	MaxAttemptsEnv = "MW_MAX_ATTEMPTS"
+
 	MillhandRoutineModelEnv = "MW_MILLHAND_ROUTINE_MODEL"
 	MillhandReviewModelEnv  = "MW_MILLHAND_REVIEW_MODEL"
 )
@@ -75,6 +77,13 @@ const WatchTable = "watch"
 // under a gigabyte of memory, and because two sessions racing is the expensive
 // mistake to make by default.
 const DefaultCap = 1
+
+// DefaultMaxAttempts is how many times a story is started in all, its first
+// dispatch and every one after a refusal or a giving back, before mw dispatch
+// stops and tells the Mayor, when nothing says otherwise. It is a fuel knob: each
+// attempt is a fresh session paid for in full. application.DefaultMaxAttempts is
+// the same number.
+const DefaultMaxAttempts = 3
 
 // DefaultStaleHours is how many hours a claimed story's session may show no
 // new output before `mw sweep` calls it stuck, when nothing says otherwise.
@@ -170,6 +179,27 @@ func Cap() (int, error) {
 		return 0, fmt.Errorf("the cap on sessions running at once is %d, so nothing could ever be started: set it to 1 or more", atOnce)
 	}
 	return atOnce, nil
+}
+
+// MaxAttempts reports how many times a story may be started in all: $MW_MAX_ATTEMPTS
+// if it is set, otherwise the root-table `max_attempts` key of
+// ~/.config/mw/config.toml, and DefaultMaxAttempts when neither says.
+func MaxAttempts() (int, error) {
+	said, err := optionalSetting("max_attempts", MaxAttemptsEnv, "")
+	if err != nil {
+		return 0, err
+	}
+	if said == "" {
+		return DefaultMaxAttempts, nil
+	}
+	tries, err := strconv.Atoi(said)
+	if err != nil {
+		return 0, fmt.Errorf("the number of times a story is tried is %q, which is not a whole number: set %s=<n>, or `max_attempts = <n>` in %s", said, MaxAttemptsEnv, File)
+	}
+	if tries < 1 {
+		return 0, fmt.Errorf("a story would be tried %d times, so none would ever be started: set max_attempts to 1 or more", tries)
+	}
+	return tries, nil
 }
 
 // StaleHours reports how many hours a claimed story's session may show no new

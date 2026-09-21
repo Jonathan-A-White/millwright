@@ -36,6 +36,7 @@ func writeConfig(t *testing.T, contents string) string {
 	t.Setenv("MW_MILLHAND_REVIEW_MODEL", "")
 	t.Setenv("MW_DISPATCH_SYNC_TRIES", "")
 	t.Setenv("MW_DISPATCH_SYNC_WAIT", "")
+	t.Setenv("MW_MAX_ATTEMPTS", "")
 	return home
 }
 
@@ -456,6 +457,40 @@ func TestRigMemoryBytesRefusesWhatWouldCallEveryRigOverBudgetOrIsNotANumber(t *t
 	writeConfig(t, "rig_memory_bytes = \"plenty\"\n")
 	if _, err := config.RigMemoryBytes(); err == nil {
 		t.Fatal("expected a rig memory budget that is not a number to be refused")
+	}
+}
+
+func TestMaxAttemptsIsThreeUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\nhost = \"vps\"\n")
+
+	tries, err := config.MaxAttempts()
+	if err != nil {
+		t.Fatalf("reading how many times a story is tried: %v", err)
+	}
+	if config.DefaultMaxAttempts != 3 || tries != config.DefaultMaxAttempts {
+		t.Fatalf("expected the default of 3 attempts, got %d", tries)
+	}
+
+	writeConfig(t, "max_attempts = 5\n")
+	if tries, err = config.MaxAttempts(); err != nil || tries != 5 {
+		t.Fatalf("expected the config file's max_attempts to read back as 5, got %d: %v", tries, err)
+	}
+
+	t.Setenv(config.MaxAttemptsEnv, "2")
+	if tries, err = config.MaxAttempts(); err != nil || tries != 2 {
+		t.Fatalf("expected %s to win with 2, got %d: %v", config.MaxAttemptsEnv, tries, err)
+	}
+}
+
+func TestMaxAttemptsRefusesWhatWouldTryNothingOrIsNotANumber(t *testing.T) {
+	writeConfig(t, "max_attempts = 0\n")
+	if _, err := config.MaxAttempts(); err == nil {
+		t.Fatal("expected a max_attempts of 0 to be refused")
+	}
+
+	writeConfig(t, "max_attempts = \"many\"\n")
+	if _, err := config.MaxAttempts(); err == nil {
+		t.Fatal("expected a max_attempts that is not a number to be refused")
 	}
 }
 
