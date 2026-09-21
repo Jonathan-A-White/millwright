@@ -59,8 +59,10 @@ type RigMemorySize struct {
 // SeatWork is everything one story is allowed to have changed in the vault,
 // by path from the vault's root: the seat's ledger, which mw itself appends the
 // story's line to, and that seat's memory of the rig the story was worked in,
-// which the session may have added a line to. Nothing else in the vault is
-// either of their business, and a close-out commits exactly these.
+// which the Mayor writes from what Builders propose in their closing comments
+// and a session never edits (a stray edit is committed all the same, so that it
+// never blocks a sync). Nothing else in the vault is either of their business,
+// and a close-out commits exactly these.
 //
 // A name that would reach outside the vault gives no paths at all, so that a
 // bad seat or rig name commits nothing rather than something unintended. So
@@ -287,6 +289,8 @@ func KickoffPrompt(seat, storyID, vaultDir string) string {
 		"Your worktree is the directory you are in: work only there. "+
 		"Follow the story's formula steps in order, leave the build and the tests green, "+
 		"and write one truthful closing comment on the story when you are done. "+
+		// The Mayor places what he keeps of the notes; the session only proposes.
+		"Your memory of this rig is read-only to you: propose notes under \"For the rig memory:\" in your closing comment. "+
 		"Do not push, do not merge, do not close the story. "+
 		// The harness is told the same thing by its settings (the claude
 		// adapter's SessionSettings), and mw next refuses a branch that carries
@@ -328,6 +332,7 @@ func RebaseKickoffPrompt(seat, storyID, vaultDir, onto string) string {
 		"so that both the story's work and what landed meanwhile are kept, run the rig's suite in the foreground "+
 		"until it is green, and commit. The branch was never pushed, so the rebase forces nothing. "+
 		"Do not push, do not merge, do not close the story, and work nothing else of it. "+
+		"Your memory of this rig is read-only to you: propose notes under \"For the rig memory:\" in your closing comment. "+
 		"Sign nothing you commit: no Co-Authored-By trailer, no Generated with line, "+
 		"no AI attribution of any kind. "+
 		"bd runs without asking, but as its own Bash call, never chained with another command "+

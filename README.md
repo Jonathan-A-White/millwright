@@ -288,9 +288,10 @@ The commit is exactly three paths — `seats/<seat>/ledger.md`,
 `runs/<story>/landing-error.txt`, when a landing failed (below) — named explicitly,
 never `git add -A` and never `commit -a`, under a plain message naming the story
 and signed by nobody. They are the only files a story is allowed to write in the
-vault: mw wrote the first and the run record, and the session may have written the
-second, so a close-out that left them uncommitted would stop its own sync and
-every later one. The run record is committed so that the evidence behind a ledger
+vault: mw wrote the first and the run record, and the Mayor writes the second from
+what Builders propose in their closing comments (a session never edits it, but a
+stray edit is committed all the same), so a close-out that left them uncommitted
+would stop its own sync and every later one. The run record is committed so that the evidence behind a ledger
 line's fuel travels to the other host with the line; `runs/<story>/boot.md` beside
 it is never committed. A run record that is not there is said so in the report,
 and the other two are committed all the same. Anything else

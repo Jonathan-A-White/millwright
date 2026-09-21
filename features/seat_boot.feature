@@ -84,6 +84,7 @@ Feature: Booting a session into a seat
       | the directory you are in            |
       | Follow the story's formula steps    |
       | no AI attribution of any kind       |
+      | read-only to you: propose notes under "For the rig memory:" |
       | bd runs without asking              |
       | as its own Bash call, never chained |
       | run `mw check mw-gq6.6`             |
