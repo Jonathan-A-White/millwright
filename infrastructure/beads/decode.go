@@ -122,6 +122,33 @@ func (b bead) pathMetadata() map[string]string {
 	return metadata
 }
 
+// attempts is how many sessions were started for this bead, as its metadata
+// says. bd stores a number it is given as a number, and a story edited by hand
+// may hold the count as text, so both are read; anything else is no attempts.
+func (b bead) attempts() int {
+	switch value := b.Metadata[application.AttemptsField].(type) {
+	case float64:
+		return int(value)
+	case string:
+		if n, err := strconv.Atoi(strings.TrimSpace(value)); err == nil {
+			return n
+		}
+	}
+	return 0
+}
+
+// exhausted is whether mw dispatch has marked this bead as having used up its
+// attempts: the mark holds the count it was said at, and is empty once cleared.
+func (b bead) exhausted() bool {
+	switch value := b.Metadata[application.AttemptsExhaustedField].(type) {
+	case float64:
+		return true
+	case string:
+		return strings.TrimSpace(value) != ""
+	}
+	return false
+}
+
 // parentPath is the default Path of this bead's parent, read from the copy of
 // the parent bd embeds in a shown bead. It reports whether that copy was there.
 func (b bead) parentPath() (domain.Path, bool) {
@@ -193,6 +220,8 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		Priority:        b.priority(),
 		Created:         b.created(),
 		Started:         b.started(),
+		Attempts:        b.attempts(),
+		Exhausted:       b.exhausted(),
 		Needs:           b.needs(),
 		IsEpic:          b.Type == TypeEpic,
 		// The formula poured for this story, as the dispatch that poured it

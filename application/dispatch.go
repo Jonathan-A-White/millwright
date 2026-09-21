@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -47,6 +48,13 @@ var _ HostSync = Sync{}
 // start it twice. A session that has ended and still holds the story's name is
 // closed before the story starts again; one that is still running is a story
 // being worked, and is refused before anything is claimed, cut or removed.
+//
+// A story is started a bounded number of times. Each session that gets as far as
+// running is counted on the story (AttemptsField), after the session starts and
+// never before, so that a dispatch that fails on the way to one — the fetch, the
+// worktree, the runner — leaves the count as it was. A story that has had
+// MaxAttempts is not claimed at all: it is marked blocked and the Mayor is told
+// once (see exhausted), and only a person resetting the count starts it again.
 type Dispatch struct {
 	Tracker   WorkTracker
 	Worktrees Worktrees
@@ -75,6 +83,15 @@ type Dispatch struct {
 	Host string
 	Cap  int
 	Rigs map[string]string
+
+	// MaxAttempts is how many times a story may be started in all; a story tried
+	// that many times is not started again, and the Mayor is told. Fewer than one
+	// is DefaultMaxAttempts.
+	MaxAttempts int
+
+	// Mailbox is how the Mayor is told a story used up its attempts. A nil
+	// Mailbox tells nobody: the story is still marked and commented on.
+	Mailbox Mailbox
 
 	// Remote is the remote a story's branch is cut from. Empty is DefaultRemote,
 	// and whatever it says must be the remote the Worktrees adapter fetches.
@@ -110,6 +127,9 @@ type Started struct {
 	// Session is the runner's name for the session, not the story's id.
 	Session  string
 	Molecule Molecule
+	// Attempt is which attempt this session is for the story: the first is 1.
+	// Zero on a dry run, which starts nothing.
+	Attempt int
 	// Reused is true when Molecule is one an earlier dispatch poured for the story
 	// and that was still open, so that nothing was poured this time. Its Steps are
 	// the ones still open.
@@ -141,7 +161,10 @@ type DispatchReport struct {
 	Started []Started
 	Passed  []Passed
 	Failed  []Failed
-	DryRun  bool
+	// Notes are what could not be written when a story was found to have used up
+	// its attempts: the story is left as it was, and a later tick tries again.
+	Notes  []string
+	DryRun bool
 	// Sync is what the sync before the dispatch moved, when there was one.
 	Sync   SyncReport
 	Synced bool
@@ -291,17 +314,6 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 				"the Governor must be present for it (labelled %s): it is worked with the Mayor, never by a dispatched session", LabelHitl)})
 			continue
 		}
-		// A story that was claimed and could not be started counts against the
-		// cap too: whatever stopped it will probably stop the next one, and a
-		// dispatcher that claims and releases every ready story in turn is
-		// worse than one that stops and says so.
-		if len(report.Started)+len(report.Failed) >= free {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
-				"%s has taken %d of the %d sessions it may run at once", d.Host,
-				report.Running+len(report.Started)+len(report.Failed), d.Cap)})
-			continue
-		}
-
 		path, err := detail.Path()
 		if err != nil {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Why: "it has no path: " + err.Error()})
@@ -323,6 +335,29 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		if !checkedOut {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
 				"the rig %s is not checked out on %s: add it under [rigs] in the config file", path.Rig, d.Host)})
+			continue
+		}
+
+		// Before the cap, because a story that is not started takes none of the
+		// sessions the cap counts, and the Mayor is to be told of it now rather
+		// than once whatever is running has finished.
+		if tried := detail.Attempts; tried >= d.maxAttempts() {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
+				"it has been started %d times, the most a story may be (max_attempts): it is not started again until its counter is reset by hand", tried)})
+			if !d.DryRun {
+				d.exhausted(ctx, detail, &report)
+			}
+			continue
+		}
+
+		// A story that was claimed and could not be started counts against the
+		// cap too: whatever stopped it will probably stop the next one, and a
+		// dispatcher that claims and releases every ready story in turn is
+		// worse than one that stops and says so.
+		if len(report.Started)+len(report.Failed) >= free {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
+				"%s has taken %d of the %d sessions it may run at once", d.Host,
+				report.Running+len(report.Started)+len(report.Failed), d.Cap)})
 			continue
 		}
 
@@ -495,7 +530,15 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 
 	// From here the session is alive and spending fuel. Nothing below is worth
 	// undoing it for.
+	started.Attempt = detail.Attempts + 1
+	var unrecorded []error
+	if err := d.Tracker.SetStoryMetadata(ctx, id, attemptFields(detail, started.Attempt)); err != nil {
+		unrecorded = append(unrecorded, fmt.Errorf("the attempt could not be recorded as %s=%d: %w", AttemptsField, started.Attempt, err))
+	}
 	where := fmt.Sprintf("dispatched by mw on %s: session %s in %s on %s", d.Host, spec.Name, started.Worktree, started.Branch)
+	if started.Attempt > 1 {
+		where += fmt.Sprintf(", attempt %d", started.Attempt)
+	}
 	if molecule := started.Molecule; molecule.Poured() {
 		if started.Reused {
 			where += fmt.Sprintf(", working %s again (%d steps still open)", molecule.RootID, len(molecule.Steps))
@@ -504,8 +547,11 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 		}
 	}
 	if err := d.Tracker.SetStoryState(ctx, id, RunState, RunRunning, where); err != nil {
-		return started, false, fmt.Errorf("the session %s is running in %s, but %s could not be recorded as %s=%s: %w",
-			spec.Name, started.Worktree, id, RunState, RunRunning, err)
+		unrecorded = append(unrecorded, fmt.Errorf("%s could not be recorded as %s=%s: %w", id, RunState, RunRunning, err))
+	}
+	if len(unrecorded) > 0 {
+		return started, false, fmt.Errorf("the session %s is running in %s, but %w",
+			spec.Name, started.Worktree, errors.Join(unrecorded...))
 	}
 	return started, false, nil
 }
@@ -603,6 +649,9 @@ func (r DispatchReport) String() string {
 	for _, started := range r.Started {
 		fmt.Fprintf(&b, "  %s %s · %s · %s on %s cut from %s", verb, started.StoryID, started.Session,
 			started.Worktree, started.Branch, started.Start)
+		if started.Attempt > 1 {
+			fmt.Fprintf(&b, " · attempt %d", started.Attempt)
+		}
 		if molecule := started.Molecule; molecule.Poured() && started.Reused {
 			fmt.Fprintf(&b, " · %s reused as %s (%d steps still open)", molecule.Formula, molecule.RootID, len(molecule.Steps))
 		} else if molecule.Poured() {
@@ -617,6 +666,9 @@ func (r DispatchReport) String() string {
 	}
 	for _, failed := range r.Failed {
 		fmt.Fprintf(&b, "  FAILED  %s · %s\n", failed.StoryID, failed.line())
+	}
+	for _, note := range r.Notes {
+		fmt.Fprintf(&b, "  note    %s\n", note)
 	}
 	if len(r.Started) == 0 && len(r.Failed) == 0 && len(r.Passed) == 0 {
 		b.WriteString("  nothing is ready here\n")

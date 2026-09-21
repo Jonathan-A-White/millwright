@@ -80,6 +80,10 @@ func newNextCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			maxAttempts, err := config.MaxAttempts()
+			if err != nil {
+				return err
+			}
 
 			// A close-out takes away the very worktree its session was running
 			// in, and this process is standing in it: the shell that chained mw
@@ -105,14 +109,16 @@ func newNextCmd() *cobra.Command {
 			var dispatcher application.Dispatcher
 			if !noDispatch {
 				dispatcher = application.Dispatch{
-					Tracker:   gateway,
-					Worktrees: worktrees,
-					Runner:    runner,
-					Boot:      builderBoot(files, host),
-					Host:      host,
-					Cap:       atOnce,
-					Rigs:      rigs,
-					Out:       cmd.OutOrStdout(),
+					Tracker:     gateway,
+					Worktrees:   worktrees,
+					Runner:      runner,
+					Boot:        builderBoot(files, host),
+					Host:        host,
+					Cap:         atOnce,
+					MaxAttempts: maxAttempts,
+					Mailbox:     gateway,
+					Rigs:        rigs,
+					Out:         cmd.OutOrStdout(),
 				}
 			}
 

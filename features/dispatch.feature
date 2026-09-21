@@ -311,3 +311,108 @@ Feature: Dispatching the stories this host is ready to work
     Given a ready story "mw-gq6.1" of that epic
     When dispatch runs on "vps" with a cap of 1 as a dry run
     Then the dispatch log holds 0 lines
+
+  # A story is tried a bounded number of times. Every session mw starts for it is
+  # an attempt, written on the story; at the cap mw dispatch stops, and the
+  # Mayor is the one who decides what happens next.
+
+  Scenario: A story's first dispatch records one attempt
+    Given a ready story "mw-gq6.1" of that epic
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.1"
+    And the story "mw-gq6.1" records 1 attempt
+
+  Scenario: A story given back and dispatched again records a second attempt
+    Given a ready story "mw-gq6.1" of that epic
+    When dispatch runs on "vps" with a cap of 1
+    And the story "mw-gq6.1" is given back once its session has ended
+    And dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.1"
+    And the story "mw-gq6.1" records 2 attempts
+
+  Scenario: A dispatch that fails before a session starts leaves the count as it was
+    Given a ready story "mw-gq6.1" of that epic
+    And the runner refuses to start anything
+    When dispatch runs on "vps" with a cap of 1
+    Then no session was started
+    And the story "mw-gq6.1" records 0 attempts
+
+  Scenario: A story tried once and then failed before its session starts is still tried once
+    Given a ready story "mw-gq6.1" of that epic
+    And the story "mw-gq6.1" has been tried 1 time
+    And the runner refuses to start anything
+    When dispatch runs on "vps" with a cap of 1
+    Then no session was started
+    And the story "mw-gq6.1" records 1 attempt
+
+  Scenario: A story tried twice is started a third time when the config says nothing about attempts
+    Given a ready story "mw-gq6.1" of that epic
+    And the story "mw-gq6.1" has been tried 2 times
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.1"
+    And the story "mw-gq6.1" records 3 attempts
+
+  Scenario: At the cap the story is not started, is blocked, and the Mayor is told once
+    Given a ready story "mw-gq6.1" of that epic
+    And the story "mw-gq6.1" has been tried 3 times
+    And the story "mw-gq6.1" carries the comment "mw next on vps did not close this story out (tests-fail): go test failed in ./application"
+    And the story "mw-gq6.1" carries the comment "mw next on vps did not close this story out (open-steps): 2 formula steps are still open"
+    When dispatch runs on "vps" with a cap of 1
+    And dispatch runs on "vps" with a cap of 1
+    Then no session was started
+    And there is no worktree for "mw-gq6.1"
+    And the story "mw-gq6.1" is not claimed
+    And the story "mw-gq6.1" is recorded as blocked for the reason "attempts-exhausted"
+    And the story "mw-gq6.1" carries exactly one comment saying it used up its attempts
+    And the Mayor has 1 mail
+    And the mail to the Mayor says "mw-gq6.1"
+    And the mail to the Mayor says "started 3 times"
+    And the mail to the Mayor says "(tests-fail)"
+    And the mail to the Mayor says "(open-steps)"
+    And the mail to the Mayor says "attempts=0"
+
+  Scenario: A story at the cap does not use up the cap on sessions
+    Given a ready story "mw-gq6.1" of that epic
+    And the story "mw-gq6.1" has been tried 3 times
+    And a ready story "mw-gq6.2" of that epic
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.2"
+
+  Scenario: The cap on attempts comes from the config
+    Given the config file says max_attempts is 2
+    And a ready story "mw-gq6.1" of that epic
+    And the story "mw-gq6.1" has been tried 2 times
+    When dispatch runs on "vps" with a cap of 1
+    Then no session was started
+    And the story "mw-gq6.1" is recorded as blocked for the reason "attempts-exhausted"
+
+  Scenario: A dry run says a story is at the cap and writes nothing
+    Given a ready story "mw-gq6.1" of that epic
+    And the story "mw-gq6.1" has been tried 3 times
+    When dispatch runs on "vps" with a cap of 1 as a dry run
+    Then dispatch passed over "mw-gq6.1", saying: started 3 times
+    And the story "mw-gq6.1" is not marked blocked
+    And the story "mw-gq6.1" carries no comment saying it used up its attempts
+    And the Mayor has 0 mails
+
+  Scenario: Once the counter is reset by hand the story is dispatched again
+    Given a ready story "mw-gq6.1" of that epic
+    And the story "mw-gq6.1" has been tried 3 times
+    When dispatch runs on "vps" with a cap of 1
+    And the counter of "mw-gq6.1" is reset by hand
+    And dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.1"
+    And the story "mw-gq6.1" records 1 attempt
+    And the story "mw-gq6.1" is recorded as running
+
+  Scenario: A story that uses its attempts up again after a reset is told to the Mayor again
+    Given a ready story "mw-gq6.1" of that epic
+    And the story "mw-gq6.1" has been tried 3 times
+    When dispatch runs on "vps" with a cap of 1
+    And the counter of "mw-gq6.1" is reset by hand to 2
+    And dispatch runs on "vps" with a cap of 1
+    And the story "mw-gq6.1" is given back once its session has ended
+    And dispatch runs on "vps" with a cap of 1
+    Then the story "mw-gq6.1" is not claimed
+    And the story "mw-gq6.1" carries 2 comments saying it used up its attempts
+    And the Mayor has 2 mails

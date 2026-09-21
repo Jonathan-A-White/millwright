@@ -34,11 +34,15 @@ type dispatchContext struct {
 	tracker *apptest.FakeTracker
 	runner  *apptest.FakeRunner
 	files   *apptest.FakeVaultFiles
+	mail    *apptest.FakeMailbox
 
 	// out is what the dispatch printed, and waits is every wait it asked for,
 	// which a scenario never really sits through.
 	out   bytes.Buffer
 	waits []time.Duration
+	// maxAttempts is the cap on attempts a scenario's config file gave, when it
+	// gave one; otherwise the dispatch is run with the default the config would.
+	maxAttempts int
 	// configured is the sync knobs a scenario's config file gave, when it gave
 	// them; otherwise the dispatch is run with the defaults the config would.
 	configured *syncKnobs
@@ -67,6 +71,7 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 			tracker: apptest.NewFakeTracker(),
 			runner:  apptest.NewFakeRunner(),
 			files:   &apptest.FakeVaultFiles{},
+			mail:    apptest.NewFakeMailbox(),
 		}
 		return ctx, nil
 	})
@@ -93,6 +98,9 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the sync can never resolve a name$`, c.theSyncCanNeverResolve)
 	ctx.Given(`^the vault's pull is refused with "([^"]*)"$`, c.theVaultsPullIsRefused)
 	ctx.Given(`^the config file says dispatch_sync_tries is (\d+) and dispatch_sync_wait is "([^"]*)"$`, c.theConfigSaysTheSyncKnobs)
+	ctx.Given(`^the config file says max_attempts is (\d+)$`, c.theConfigSaysMaxAttempts)
+	ctx.Given(`^the story "([^"]*)" has been tried (\d+) times?$`, c.theStoryHasBeenTried)
+	ctx.Given(`^the story "([^"]*)" carries the comment "([^"]*)"$`, c.theStoryCarriesTheComment)
 	ctx.Given(`^the runner refuses to start anything$`, c.theRunnerRefuses)
 	ctx.Given(`^an earlier session for "([^"]*)" lies dead$`, c.anEarlierSessionLiesDead)
 	ctx.Given(`^a session for "([^"]*)" is still running in its worktree$`, c.aSessionIsRunningInItsWorktree)
@@ -103,6 +111,9 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 
 	ctx.When(`^dispatch runs on "([^"]*)" with a cap of (\d+)$`, c.dispatchRuns)
 	ctx.When(`^dispatch runs on "([^"]*)" with a cap of (\d+) as a dry run$`, c.dispatchRunsDry)
+	ctx.When(`^the story "([^"]*)" is given back once its session has ended$`, c.theStoryIsGivenBack)
+	ctx.When(`^the counter of "([^"]*)" is reset by hand$`, c.theCounterIsResetByHand)
+	ctx.When(`^the counter of "([^"]*)" is reset by hand to (\d+)$`, c.theCounterIsResetByHandTo)
 
 	ctx.Then(`^one session was started, for "([^"]*)"$`, c.oneSessionWasStartedFor)
 	ctx.Then(`^no session was started$`, c.noSessionWasStarted)
@@ -142,6 +153,14 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the dry run report lists them in that order$`, c.theReportListsThemInOrder)
 	ctx.Then(`^dispatch passed over "([^"]*)", saying: (.+)$`, c.dispatchPassedOver)
 	ctx.Then(`^the dry run report says (\d+) of (\d+) sessions were already running$`, c.theReportSaysHowManyWereRunning)
+	ctx.Then(`^the story "([^"]*)" records (\d+) attempts?$`, c.theStoryRecordsAttempts)
+	ctx.Then(`^the story "([^"]*)" is recorded as blocked for the reason "([^"]*)"$`, c.theStoryIsRecordedAsBlockedFor)
+	ctx.Then(`^the story "([^"]*)" is not marked blocked$`, c.theStoryIsNotRecordedAsBlocked)
+	ctx.Then(`^the story "([^"]*)" carries exactly one comment saying it used up its attempts$`, c.theStoryCarriesOneExhaustedComment)
+	ctx.Then(`^the story "([^"]*)" carries (\d+) comments saying it used up its attempts$`, c.theStoryCarriesExhaustedComments)
+	ctx.Then(`^the story "([^"]*)" carries no comment saying it used up its attempts$`, c.theStoryCarriesNoExhaustedComment)
+	ctx.Then(`^the Mayor has (\d+) mails?$`, c.theMayorHasMails)
+	ctx.Then(`^the mail to the Mayor says "([^"]*)"$`, c.theMailSays)
 }
 
 // workspace makes the temp directory a scenario keeps its vault, its origin and
@@ -498,13 +517,15 @@ func (c *dispatchContext) dispatch(host string, cap int, dryRun bool) error {
 			c.waits = append(c.waits, d)
 			return nil
 		},
-		Host:   host,
-		Cap:    cap,
-		Rigs:   map[string]string{"millwright": c.rig},
-		DryRun: dryRun,
-		Out:    &c.out,
-		Log:    ticklog.New(c.dispatchLogDir()),
-		Now:    func() time.Time { return dispatchNow },
+		Host:        host,
+		Cap:         cap,
+		MaxAttempts: c.attempts(),
+		Mailbox:     c.mail,
+		Rigs:        map[string]string{"millwright": c.rig},
+		DryRun:      dryRun,
+		Out:         &c.out,
+		Log:         ticklog.New(c.dispatchLogDir()),
+		Now:         func() time.Time { return dispatchNow },
 	}.Run(context.Background())
 	return nil
 }
@@ -1045,6 +1066,158 @@ func (c *dispatchContext) dispatchPrintedTheOneLine(line string) error {
 func (c *dispatchContext) dispatchLeavesWithStatus(status int) error {
 	if got := application.ExitStatus(c.err); got != status {
 		return fmt.Errorf("expected dispatch to leave with %d, it leaves with %d (it said: %v)", status, got, c.err)
+	}
+	return nil
+}
+
+// attempts is how many times a story may be started: what the scenario's config
+// file said, else what the config says when it says nothing.
+func (c *dispatchContext) attempts() int {
+	if c.maxAttempts > 0 {
+		return c.maxAttempts
+	}
+	return config.DefaultMaxAttempts
+}
+
+// theConfigSaysMaxAttempts writes a config file under a home directory of the
+// scenario's own and reads the knob back out of it the way mw does, so that a
+// scenario proves the cap comes from the config and not from the step.
+func (c *dispatchContext) theConfigSaysMaxAttempts(tries int) error {
+	root, err := c.workspace()
+	if err != nil {
+		return err
+	}
+	home := filepath.Join(root, "home")
+	dir := filepath.Join(home, ".config", "mw")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(fmt.Sprintf("max_attempts = %d\n", tries)), 0o644); err != nil {
+		return err
+	}
+	if os.Getenv(config.MaxAttemptsEnv) != "" {
+		return fmt.Errorf("%s is set in the environment, and would answer ahead of the config file", config.MaxAttemptsEnv)
+	}
+	// HOME is the process's, and other scenarios read it: it is moved only for as
+	// long as it takes to read the config, and put back before the step returns.
+	before := os.Getenv("HOME")
+	os.Setenv("HOME", home)
+	defer os.Setenv("HOME", before)
+
+	c.maxAttempts, err = config.MaxAttempts()
+	return err
+}
+
+func (c *dispatchContext) theStoryHasBeenTried(id string, times int) error {
+	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.AttemptsField: fmt.Sprint(times)})
+}
+
+func (c *dispatchContext) theStoryCarriesTheComment(id, text string) error {
+	return c.tracker.CommentOnStory(context.Background(), id, text)
+}
+
+// theStoryIsGivenBack is what it takes for a story whose session has ended to
+// be dispatched again: the claim given back, the dead session left where it
+// lies, and the worktree cleared away, which is what the Mayor does before a
+// story worked once is worked again.
+func (c *dispatchContext) theStoryIsGivenBack(id string) error {
+	if err := c.tracker.ReleaseClaim(context.Background(), id); err != nil {
+		return err
+	}
+	c.runner.Exit(application.SessionName(id), 1)
+	return rig.New().Remove(context.Background(), c.rig, c.worktreeOf(id), application.StoryBranch(id))
+}
+
+func (c *dispatchContext) theCounterIsResetByHand(id string) error {
+	return c.theCounterIsResetByHandTo(id, 0)
+}
+
+func (c *dispatchContext) theCounterIsResetByHandTo(id string, to int) error {
+	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.AttemptsField: fmt.Sprint(to)})
+}
+
+func (c *dispatchContext) theStoryRecordsAttempts(id string, want int) error {
+	detail, err := c.tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	if detail.Attempts != want {
+		return fmt.Errorf("expected %s to record %d attempts, got %d (dispatch said: %v)", id, want, detail.Attempts, c.err)
+	}
+	return nil
+}
+
+func (c *dispatchContext) theStoryIsRecordedAsBlockedFor(id, reason string) error {
+	if got := c.tracker.State(id, application.RunState); got != application.RunBlocked {
+		return fmt.Errorf("expected %s to be recorded %s=%s, got %q (dispatch said: %v)", id, application.RunState, application.RunBlocked, got, c.err)
+	}
+	if said := c.tracker.StateReason(id, application.RunState); !strings.HasPrefix(said, "("+reason+")") {
+		return fmt.Errorf("expected the reason to begin with the code (%s), got %q", reason, said)
+	}
+	return nil
+}
+
+func (c *dispatchContext) theStoryIsNotRecordedAsBlocked(id string) error {
+	if got := c.tracker.State(id, application.RunState); got == application.RunBlocked {
+		return fmt.Errorf("expected %s not to be recorded as blocked, but it is", id)
+	}
+	return nil
+}
+
+// exhaustedComments counts the comments on a story that say it used up its
+// attempts, by the code they carry.
+func (c *dispatchContext) exhaustedComments(id string) int {
+	var said int
+	for _, comment := range c.tracker.Comments(id) {
+		if strings.Contains(comment, string(application.ReasonAttemptsExhausted)) {
+			said++
+		}
+	}
+	return said
+}
+
+func (c *dispatchContext) theStoryCarriesExhaustedComments(id string, want int) error {
+	if got := c.exhaustedComments(id); got != want {
+		return fmt.Errorf("expected %d comments on %s saying it used up its attempts, got %d: %q", want, id, got, c.tracker.Comments(id))
+	}
+	return nil
+}
+
+func (c *dispatchContext) theStoryCarriesOneExhaustedComment(id string) error {
+	return c.theStoryCarriesExhaustedComments(id, 1)
+}
+
+func (c *dispatchContext) theStoryCarriesNoExhaustedComment(id string) error {
+	return c.theStoryCarriesExhaustedComments(id, 0)
+}
+
+// mailsToTheMayor is what waits in the Mayor's mailbox, oldest first.
+func (c *dispatchContext) mailsToTheMayor() ([]application.Message, error) {
+	return c.mail.Inbox(context.Background(), application.MayorMailbox)
+}
+
+func (c *dispatchContext) theMayorHasMails(want int) error {
+	mails, err := c.mailsToTheMayor()
+	if err != nil {
+		return err
+	}
+	if len(mails) != want {
+		return fmt.Errorf("expected the Mayor to have %d mails, got %d: %+v", want, len(mails), mails)
+	}
+	return nil
+}
+
+func (c *dispatchContext) theMailSays(words string) error {
+	mails, err := c.mailsToTheMayor()
+	if err != nil {
+		return err
+	}
+	if len(mails) == 0 {
+		return fmt.Errorf("expected a mail to the Mayor saying %q, but there is none", words)
+	}
+	last := mails[len(mails)-1]
+	if !strings.Contains(last.Subject+"\n"+last.Body, words) {
+		return fmt.Errorf("expected the mail to the Mayor to say %q, got subject %q and body:\n%s", words, last.Subject, last.Body)
 	}
 	return nil
 }

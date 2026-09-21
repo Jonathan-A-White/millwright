@@ -306,7 +306,7 @@ func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 	}
 
 	// Metadata written is metadata read back, Path fields included.
-	if err := gateway.SetStoryMetadata(ctx, storyID, map[string]string{"effort": "max", "run": "running"}); err != nil {
+	if err := gateway.SetStoryMetadata(ctx, storyID, map[string]string{"effort": "max", "run": "running", application.AttemptsField: "2"}); err != nil {
 		t.Fatalf("setting metadata on %s: %v", storyID, err)
 	}
 	detail, err = gateway.ShowStory(ctx, storyID)
@@ -315,6 +315,10 @@ func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 	}
 	if detail.Merged().Effort != domain.EffortMax {
 		t.Errorf("expected the written effort to be read back, got %q", detail.Merged().Effort)
+	}
+	// bd keeps the count as a number; it comes back as the count.
+	if detail.Attempts != 2 || detail.Exhausted {
+		t.Errorf("expected the written attempts to be read back as 2, got %d (exhausted %v)", detail.Attempts, detail.Exhausted)
 	}
 	if detail.Status != beads.StatusInProgress || detail.Assignee == "" {
 		t.Errorf("expected a claimed story, got status %q assignee %q", detail.Status, detail.Assignee)

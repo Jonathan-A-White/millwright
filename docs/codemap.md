@@ -76,7 +76,8 @@ from `cmd/mw/` only.
 `features/path_validation.feature` covers `domain/path.go`,
 `features/ready_stories.feature` the `WorkTracker` contract; no commands.
 Neither port nor use case: `application/fuel.go`, `application/ledger.go`,
-`application/tickcounts.go` (what the tick logs say), `domain/plan.go`.
+`application/tickcounts.go` (what the tick logs say),
+`application/attempts.go` (the attempts cap), `domain/plan.go`.
 
 Adding a command: read `docs/adding-a-command.md` first.
 

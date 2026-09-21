@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -89,6 +90,7 @@ type fakeStory struct {
 	detail      application.StoryDetail
 	metadata    map[string]string
 	states      map[string]string
+	reasons     map[string]string // dimension -> why it was last set
 	needs       []string
 	comments    []string
 	closeReason string
@@ -673,7 +675,7 @@ func (f *FakeTracker) ReleaseClaim(_ context.Context, id string) error {
 }
 
 // SetStoryState implements application.WorkTracker.
-func (f *FakeTracker) SetStoryState(_ context.Context, id, dimension, value, _ string) error {
+func (f *FakeTracker) SetStoryState(_ context.Context, id, dimension, value, reason string) error {
 	f.note("SetStoryState")
 	if dimension == "" {
 		return fmt.Errorf("a state needs a dimension")
@@ -689,8 +691,23 @@ func (f *FakeTracker) SetStoryState(_ context.Context, id, dimension, value, _ s
 			s.states = map[string]string{}
 		}
 		s.states[dimension] = value
+		if s.reasons == nil {
+			s.reasons = map[string]string{}
+		}
+		s.reasons[dimension] = reason
 		return nil
 	})
+}
+
+// StateReason reports why one dimension of a story's operational state was last
+// set, or "" when it never was.
+func (f *FakeTracker) StateReason(id, dimension string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if s, ok := f.stories[id]; ok {
+		return s.reasons[dimension]
+	}
+	return ""
 }
 
 // State reports one dimension of a story's operational state, or "" when it has
@@ -756,6 +773,13 @@ func (f *FakeTracker) SetStoryMetadata(_ context.Context, id string, fields map[
 			// reads it off the bead's metadata.
 			if k == application.MoleculeField {
 				s.detail.Molecule.RootID = v
+			}
+			// So are the attempts, and the mark that the Mayor was told of them.
+			if k == application.AttemptsField {
+				s.detail.Attempts, _ = strconv.Atoi(v)
+			}
+			if k == application.AttemptsExhaustedField {
+				s.detail.Exhausted = v != ""
 			}
 			// Path fields are metadata: keep the story's overrides in step.
 			_ = s.detail.Story.Overrides.Set(k, v)

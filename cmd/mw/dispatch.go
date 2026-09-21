@@ -73,6 +73,10 @@ func newDispatchCmd() *cobra.Command {
 			"starts the session. It never takes more than the cap allows, never takes a story whose path\n" +
 			"names another host or no host at all, and gives the claim back if anything fails before the\n" +
 			"session starts.\n\n" +
+			"A story is started at most max_attempts times in all (3 unless the config file says\n" +
+			"otherwise). One that has been started that many times is not started again: it is left\n" +
+			"unclaimed and marked run=blocked, and the Mayor is mailed once. Only resetting its\n" +
+			"attempts counter by hand lets it be started again.\n\n" +
 			"If the sync cannot resolve a name (a host just woken from standby has no network for a\n" +
 			"minute), dispatch waits and tries the sync again, dispatch_sync_tries times in all,\n" +
 			"dispatch_sync_wait apart. If the name still cannot be resolved it claims nothing, prints one\n" +
@@ -115,22 +119,29 @@ func newDispatchCmd() *cobra.Command {
 				return err
 			}
 
+			maxAttempts, err := config.MaxAttempts()
+			if err != nil {
+				return err
+			}
+
 			gateway := mwGateway(dir, host)
 			files := mwVault(dir, host)
 			logs := hostTickLogs()
 			dispatch := application.Dispatch{
-				Tracker:   gateway,
-				Worktrees: rig.New(),
-				Runner:    tmux.New(),
-				Boot:      builderBoot(files, host),
-				Sync:      application.Sync{Vault: files, Tracker: gateway, Host: host, Ticks: logs},
-				SyncTries: tries,
-				SyncWait:  wait,
-				Host:      host,
-				Cap:       atOnce,
-				Rigs:      rigs,
-				DryRun:    dryRun,
-				Out:       cmd.OutOrStdout(),
+				Tracker:     gateway,
+				Worktrees:   rig.New(),
+				Runner:      tmux.New(),
+				Boot:        builderBoot(files, host),
+				Sync:        application.Sync{Vault: files, Tracker: gateway, Host: host, Ticks: logs},
+				SyncTries:   tries,
+				SyncWait:    wait,
+				Host:        host,
+				Cap:         atOnce,
+				MaxAttempts: maxAttempts,
+				Mailbox:     gateway,
+				Rigs:        rigs,
+				DryRun:      dryRun,
+				Out:         cmd.OutOrStdout(),
 			}
 			// A rehearsal is not a run: it leaves nothing in the log.
 			if !dryRun {

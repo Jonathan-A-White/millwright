@@ -67,6 +67,11 @@ type StoryDetail struct {
 	// a listing of an epic's children returns it among them, and it is not work
 	// a session takes. A tracker that does not say leaves it false.
 	IsEpic bool
+	// Attempts is how many times a session was started for this story, as its
+	// AttemptsField metadata says; zero when it never was. Exhausted says mw
+	// dispatch has already told the Mayor the story used them all up.
+	Attempts  int
+	Exhausted bool
 	// Molecule is the formula poured for this story, empty until it has been
 	// poured. It is filled in by whoever pours it, not by reading the story.
 	Molecule Molecule

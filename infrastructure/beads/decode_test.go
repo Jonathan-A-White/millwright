@@ -396,3 +396,28 @@ func TestAStoryCarriesWhenItWasClaimed(t *testing.T) {
 		}
 	}
 }
+
+// bd stores a number written with --set-metadata as a number, so the count
+// mw writes comes back as one; a count edited by hand may be text.
+func TestAStoryCarriesHowManyTimesItWasStarted(t *testing.T) {
+	got, err := decodeBeads([]byte(`[
+  {"id": "t-a", "title": "Started twice", "status": "open", "metadata": {"attempts": 2}},
+  {"id": "t-b", "title": "Count as text", "status": "open", "metadata": {"attempts": "3", "attempts_exhausted": "3"}},
+  {"id": "t-c", "title": "Never started", "status": "open", "metadata": {"model": "haiku", "attempts_exhausted": ""}},
+  {"id": "t-d", "title": "Odd", "status": "open", "metadata": {"attempts": "lots"}}
+]`))
+	if err != nil {
+		t.Fatalf("decoding four beads: %v", err)
+	}
+
+	for i, want := range []struct {
+		attempts  int
+		exhausted bool
+	}{{2, false}, {3, true}, {0, false}, {0, false}} {
+		detail := got[i].detail(domain.Path{})
+		if detail.Attempts != want.attempts || detail.Exhausted != want.exhausted {
+			t.Errorf("%s: expected %d attempts and exhausted=%v, got %d and %v",
+				got[i].ID, want.attempts, want.exhausted, detail.Attempts, detail.Exhausted)
+		}
+	}
+}
