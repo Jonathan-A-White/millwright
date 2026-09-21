@@ -291,6 +291,50 @@ Feature: Closing out a finished story and carrying on
     And mw pushed twice and forced nothing
     And the story "mw-gq6.1" is closed
 
+  Scenario: A branch that conflicts with the moved target is sent back once to a fresh Builder to rebase
+    Given the other host landed a change to the same file as "mw-gq6.1" on "main"
+    And the session of "mw-gq6.1" reported a plain success
+    And mw next is running in the session of "mw-gq6.1"
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And a fresh session is running for "mw-gq6.1" in its worktree, told to rebase onto "origin/main"
+    And the story "mw-gq6.1" is recorded as sent back to rebase
+    And the story "mw-gq6.1" carries a comment quoting: sent back once to a fresh Builder session
+    And the report says "mw-gq6.1" was sent back to rebase
+    And the last ledger line holds:
+      | not landed (merge-conflict): |
+      | sent back to rebase          |
+    And the worktree of "mw-gq6.1" is still there
+    And 2 sessions were ever started for "mw-gq6.1"
+
+  Scenario: A story sent back to rebase lands once its branch is rebased cleanly
+    Given the other host landed a change to the same file as "mw-gq6.1" on "main"
+    And the session of "mw-gq6.1" reported a plain success
+    And mw next is running in the session of "mw-gq6.1"
+    When mw closes out "mw-gq6.1"
+    Given the session sent back rebases the branch of "mw-gq6.1" onto "origin/main" and commits the resolution
+    When mw closes out "mw-gq6.1" a second time
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the file of "mw-gq6.1" on "main" at the rig's origin keeps the other host's line too
+    And it landed as a fast-forward
+    And the story "mw-gq6.1" is closed
+    And 2 sessions were ever started for "mw-gq6.1"
+
+  Scenario: A second conflict stops with a plain message and starts no third session
+    Given the other host landed a change to the same file as "mw-gq6.1" on "main"
+    And the session of "mw-gq6.1" reported a plain success
+    And mw next is running in the session of "mw-gq6.1"
+    When mw closes out "mw-gq6.1"
+    Given the session sent back for "mw-gq6.1" ends without rebasing
+    When mw closes out "mw-gq6.1" a second time
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is held blocked
+    And the report says it stopped for "merge-conflict"
+    And the story "mw-gq6.1" carries a comment quoting: it was sent back once to rebase already
+    And the worktree of "mw-gq6.1" is still there
+    And 2 sessions were ever started for "mw-gq6.1"
+
   Scenario: A push the origin refuses with a many-line error keeps the whole error beside the run
     Given the session of "mw-gq6.1" reported a plain success
     And the origin refuses every push, saying:

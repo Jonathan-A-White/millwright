@@ -128,6 +128,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 
 	registerNextMailSteps(ctx, c)
 	registerNextRigSteps(ctx, c)
+	registerNextRebaseSteps(ctx, c)
 
 	ctx.When(`^mw closes out "([^"]*)"$`, c.mwClosesOut)
 	ctx.When(`^mw closes out "([^"]*)" a second time$`, c.mwClosesOut)
@@ -674,6 +675,10 @@ func (c *nextContext) mwClosesOut(id string) error {
 	worktrees := rig.New(rig.WithProgram(c.gitProgram))
 	rigs := map[string]string{"millwright": c.rig}
 	files := vault.New(c.vault)
+	boot := application.SeatBoot{
+		Vault: files, Harness: claude.New(), Seat: nextSeat, Host: nextHost,
+		After: []string{"mw", "next"},
+	}
 
 	c.report, c.err = application.Next{
 		Tracker:   c.tracker,
@@ -690,14 +695,12 @@ func (c *nextContext) mwClosesOut(id string) error {
 			Tracker:   c.tracker,
 			Worktrees: worktrees,
 			Runner:    c.runner,
-			Boot: application.SeatBoot{
-				Vault: files, Harness: claude.New(), Seat: nextSeat, Host: nextHost,
-				After: []string{"mw", "next"},
-			},
-			Host: nextHost,
-			Cap:  1,
-			Rigs: rigs,
+			Boot:      boot,
+			Host:      nextHost,
+			Cap:       1,
+			Rigs:      rigs,
 		},
+		Boot: boot,
 		Seat: nextSeat,
 		Host: nextHost,
 		Rigs: rigs,

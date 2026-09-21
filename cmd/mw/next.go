@@ -35,10 +35,14 @@ func newNextCmd() *cobra.Command {
 			"the rig's merge slot, the branch is merged into the target branch as the remote has it — and if that\n" +
 			"was not a fast-forward the tests are run again on the merged result, because nothing has ever tested\n" +
 			"that combination. The push is never forced; a push the remote refuses is fetched and tried again a\n" +
-			"few times. Then the worktree goes, one line is appended to the seat's ledger, the story is closed,\n" +
-			"the hosts are brought level, and whatever is ready here is dispatched.\n\n" +
-			"One mail goes to the Mayor from mw on this host — Landed, Refused (the checks turned the branch away)\n" +
-			"or Blocked (anything else stopped it) — holding this report; a mail that cannot be sent is said on\n" +
+			"few times. A branch that does not merge without conflicts is sent back, once, to a fresh Builder\n" +
+			"session in the same worktree, told to rebase onto the target branch, resolve, run the suite and\n" +
+			"commit; the story is recorded rebase=sent-back and the mw next that session ends with lands it. A\n" +
+			"second conflict stops as any refusal does, and nobody is sent back again. Then the worktree goes,\n" +
+			"one line is appended to the seat's ledger, the story is closed, the hosts are brought level, and\n" +
+			"whatever is ready here is dispatched.\n\n" +
+			"One mail goes to the Mayor from mw on this host — Landed, Refused (the checks turned the branch away),\n" +
+			"Sent back (to rebase) or Blocked (anything else stopped it) — holding this report; a mail that cannot be sent is said on\n" +
 			"stderr and changes nothing. A run that finds nothing to close sends none.\n\n" +
 			"That ledger line and the seat's memory of the rig — the only two vault files a story may write — are\n" +
 			"committed by path first, under a plain message naming the story, so that a close-out's own writing\n" +
@@ -120,6 +124,7 @@ func newNextCmd() *cobra.Command {
 				Runner:    runner,
 				Sync:      sync,
 				Dispatch:  dispatcher,
+				Boot:      builderBoot(files, host),
 				Seat:      BuilderSeat,
 				Host:      host,
 				Rigs:      rigs,

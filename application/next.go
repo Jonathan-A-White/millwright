@@ -27,6 +27,16 @@ const (
 	RunStuck = "stuck"
 )
 
+// RebaseState is the state dimension that says a story's branch was sent back
+// to a fresh Builder session to rebase, after it would not merge into its
+// target branch without conflicts. RebaseSentBack is its one value. It is on
+// the story, not in a note, because it is what keeps the send-back to once: a
+// story carrying it that conflicts again is stopped, never sent back again.
+const (
+	RebaseState    = "rebase"
+	RebaseSentBack = "sent-back"
+)
+
 // Reason is the short, stable code a close-out that landed nothing is filed
 // under, so that a person, `mw status` and the Mayor can tell a branch that needs
 // fixing from a factory that does — the free text of the reason says what
@@ -90,9 +100,10 @@ func reasonOf(err error) Reason {
 const (
 	MayorMailbox = "mayor"
 
-	MailLanded  = "Landed"
-	MailRefused = "Refused"
-	MailBlocked = "Blocked"
+	MailLanded   = "Landed"
+	MailRefused  = "Refused"
+	MailBlocked  = "Blocked"
+	MailSentBack = "Sent back"
 )
 
 // CheckLines is how much of a failed test run is written onto the story. Enough
@@ -118,8 +129,10 @@ const (
 // are closed and the rig's own tests pass — first in the story's worktree and
 // again on the merged result whenever merging made something new. It never
 // forces a push, never resolves a merge for anybody, and never closes a story it
-// did not land. Everything it refuses to do is written on the story and in the
-// seat's ledger, so that a story that did not land says so in both places.
+// did not land. A branch that will not merge is sent back, once, to a fresh
+// session of the seat to rebase; a second conflict stops there. Everything it
+// refuses to do is written on the story and in the seat's ledger, so that a
+// story that did not land says so in both places.
 type Next struct {
 	Tracker   WorkTracker
 	Worktrees Worktrees
@@ -147,6 +160,11 @@ type Next struct {
 	// Dispatch is the baton: what is ready on this host becomes a running
 	// session. A nil Dispatch closes the story out and stops there.
 	Dispatch Dispatcher
+
+	// Boot assembles the fresh session a branch that would not merge is sent
+	// back to, to rebase, through Runner. One with no harness, or a nil Runner,
+	// sends nothing back: a conflict stops the close-out.
+	Boot SeatBoot
 
 	// Seat is whose ledger the line is written in, Host is which host this is,
 	// and Rigs is where each rig is checked out.
@@ -215,6 +233,14 @@ type NextReport struct {
 	Why     string
 	Reason  Reason
 	Refused bool
+	// SentBack names the fresh session a branch that would not merge was sent
+	// back to, to rebase onto the target branch, empty when it was not. A story
+	// sent back is not landed and not stopped: it is being worked again, and
+	// the mw next its session ends with lands it.
+	SentBack string
+	// Aside is the session this close-out ran in, renamed out of the way of the
+	// one it sent the story back to. It is closed last, as a landed story's is.
+	Aside string
 	// NotClosed is what the tracker said when it would not close a story that
 	// had landed, empty when the story was closed. A story with this set is
 	// landed and still open, and mw next run again is what closes it.
@@ -278,10 +304,18 @@ func (n Next) Run(ctx context.Context, storyID string) (NextReport, error) {
 // A session that is already gone is no error, and a session that cannot be
 // closed is said, not returned: the story is closed either way.
 func (n Next) closeSession(ctx context.Context, report NextReport) {
-	if n.Runner == nil || !report.Closed {
+	if n.Runner == nil {
 		return
 	}
 	name := SessionName(report.StoryID)
+	switch {
+	case report.Aside != "":
+		// Sent back: the story's name is the fresh session's now, and the one
+		// this close-out ran in has been moved aside to be closed.
+		name = report.Aside
+	case !report.Closed:
+		return
+	}
 	if err := n.Runner.Close(ctx, name); err != nil {
 		n.print(fmt.Sprintf("  note    the session %s could not be closed: %v\n", name, err))
 	}
@@ -416,7 +450,15 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		report.Notes = append(report.Notes, fmt.Sprintf("the merge slot of %s could not be given back: %v", c.path.Rig, err))
 	}
 	if landErr != nil {
-		return n.stop(ctx, c, report, reasonOf(landErr), firstLine(landErr.Error()), n.keepLandingError(ctx, c, report, landErr))
+		kept := n.keepLandingError(ctx, c, report, landErr)
+		if Conflicted(landErr) {
+			whyNot := n.sendBack(ctx, c, report, landErr, kept)
+			if whyNot == "" {
+				return *report, nil
+			}
+			kept = "It was not sent back to rebase: " + whyNot + "\n\n" + kept
+		}
+		return n.stop(ctx, c, report, reasonOf(landErr), firstLine(landErr.Error()), kept)
 	}
 	report.Landed, report.How = true, landed
 	n.advanceRig(ctx, c, report)
@@ -433,6 +475,104 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be recorded as %s=%s: %v", c.id, RunState, RunLanded, err))
 	}
 	return n.finish(ctx, c, report, outcome, false)
+}
+
+// asideSuffix is added to the name of the session a close-out ran in when a
+// story is sent back, so that the fresh session can take the story's own name.
+const asideSuffix = "-sent-back"
+
+// sendBack answers a branch that would not merge into its target branch without
+// conflicts the one time it is allowed to: a fresh session of the seat, in the
+// same worktree, told to rebase onto the target branch as the remote has it,
+// resolve, run the suite and commit, and the mw next it ends with lands it as
+// usual. The branch was never pushed, so the rebase forces nothing.
+//
+// Once only, and recorded on the story before anything is started, so that it
+// cannot loop: a story already sent back, or one that cannot be recorded as
+// sent back, is not sent. What it returns is why it was not sent, empty when it
+// was; the close-out then stops as for any conflict.
+func (n Next) sendBack(ctx context.Context, c *closeOut, report *NextReport, landErr error, kept string) string {
+	if n.Runner == nil || n.Boot.Harness == nil {
+		return "this mw next has no session to send it back to"
+	}
+	was, err := n.Tracker.StoryState(ctx, c.id, RebaseState)
+	if err != nil {
+		return fmt.Sprintf("whether it was sent back before could not be read: %v", err)
+	}
+	if was == RebaseSentBack {
+		return "it was sent back once to rebase already, and a story is sent back only once. The conflict is a person's to resolve now"
+	}
+
+	onto := StartPoint(n.remote(), c.target)
+	spec, err := n.Boot.Rebase(ctx, c.detail, c.worktree, onto)
+	if err != nil {
+		return fmt.Sprintf("the session to rebase it could not be assembled: %v", err)
+	}
+	if err := n.Tracker.SetStoryState(ctx, c.id, RebaseState, RebaseSentBack,
+		fmt.Sprintf("sent back to rebase onto %s: %s", onto, firstLine(landErr.Error()))); err != nil {
+		return fmt.Sprintf("it could not be recorded as %s=%s, which is what keeps it to once: %v", RebaseState, RebaseSentBack, err)
+	}
+	aside, err := n.makeWay(ctx, spec.Name)
+	if err != nil {
+		return fmt.Sprintf("the session %s could not be moved out of the way: %v", spec.Name, err)
+	}
+	if err := n.Runner.Start(ctx, spec); err != nil {
+		// The session moved aside gets its name back, so that the story is
+		// left with the session it was worked in, as any stopped story is.
+		if aside != "" {
+			if back := n.Runner.Rename(ctx, aside, spec.Name); back != nil {
+				report.Notes = append(report.Notes, fmt.Sprintf("the session %s could not be given its name %s back: %v", aside, spec.Name, back))
+			}
+		}
+		return fmt.Sprintf("the session %s to rebase it could not be started: %v", spec.Name, err)
+	}
+	report.Aside = aside
+
+	// From here the fresh session is running and spending fuel: nothing below
+	// undoes it, and what cannot be recorded is a note.
+	report.SentBack, report.Reason, report.Why = spec.Name, ReasonMergeConflict, firstLine(landErr.Error())
+	where := fmt.Sprintf("sent back to rebase by mw on %s: session %s in %s on %s, onto %s", n.Host, spec.Name, c.worktree, c.branch, onto)
+	note := fmt.Sprintf("mw next on %s did not land this story (%s): %s does not merge into %s without conflicts, "+
+		"because %s moved on while the story was worked.\n\n"+
+		"It was sent back once to a fresh Builder session, %s, in the worktree %s, to rebase %s onto %s, resolve, "+
+		"run the suite and commit. The mw next that session ends with lands it as usual. It is not sent back again: "+
+		"a second conflict stops the close-out and is a person's to resolve. Nothing was merged, nothing was pushed "+
+		"and nothing was forced.\n\n%s",
+		n.Host, ReasonMergeConflict, c.branch, c.target, c.target, spec.Name, c.worktree, c.branch, onto, kept)
+	if err := n.Tracker.CommentOnStory(ctx, c.id, note); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the send-back could not be written on the story: %v", err))
+	}
+	if err := n.Tracker.SetStoryState(ctx, c.id, RunState, RunRunning, where); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be recorded as %s=%s: %v", c.id, RunState, RunRunning, err))
+	}
+	// The line charges the session that worked the story, whose result the
+	// fresh one will write over; the fresh one is charged by its own line.
+	if err := n.ledger(ctx, c, report, NotLanded(ReasonMergeConflict, "sent back to rebase onto "+onto+" in session "+spec.Name)); err != nil {
+		report.Notes = append(report.Notes, err.Error())
+	}
+	n.commit(ctx, c, report)
+	n.mailTheMayor(ctx, c, report, MailSentBack, note)
+	return ""
+}
+
+// makeWay frees the story's session name for the session it is sent back to.
+// A session still running under it is the one this close-out is running in,
+// chained on after the harness, and is renamed rather than closed, because
+// closing it would end this very process; one that has ended is closed. It
+// reports the name a renamed session now has.
+func (n Next) makeWay(ctx context.Context, name string) (string, error) {
+	status, err := n.Runner.Status(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	switch status.State {
+	case StateRunning:
+		aside := SessionName(name + asideSuffix)
+		return aside, n.Runner.Rename(ctx, name, aside)
+	case StateExited, StateExitUnknown:
+		return "", n.Runner.Close(ctx, name)
+	}
+	return "", nil
 }
 
 // advanceRig brings this host's own checkout of the rig up to the commit just
@@ -1133,6 +1273,9 @@ func (r NextReport) String() string {
 		fmt.Fprintf(&b, "  landed  on %s by an earlier run of mw next: nothing was merged, tested or pushed again\n", r.Target)
 	case r.Landed:
 		fmt.Fprintf(&b, "  landed  %s on %s (%d commits, %d push(es))\n", r.How.LandedAs(r.Target), r.Target, r.Commits, r.Pushes)
+	case r.SentBack != "":
+		fmt.Fprintf(&b, "  SENT BACK (%s) %s\n", r.Reason, r.Why)
+		fmt.Fprintf(&b, "          to %s, a fresh session rebasing onto %s; sent back once, never again\n", r.SentBack, r.Target)
 	default:
 		if r.Reason == "" {
 			fmt.Fprintf(&b, "  STOPPED %s\n", r.Why)
