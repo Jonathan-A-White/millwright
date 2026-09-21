@@ -39,11 +39,13 @@ Gather and write ~/laptop-inventory.md (markdown, under ~200 lines), then print 
 STOP HERE. Show me the report and ask whether to continue to Phase 2.
 
 PHASE 2 - JOIN (only after I say continue). Do these in order; verify each before the next.
-1. Toolchain, only what is missing or older than the VPS: Go 1.27.x (official tarball to
-   /usr/local/go, verify the sha256 from go.dev), tmux, git, gh, jq, ripgrep (apt), and bd **v1.3.0
-   exactly** (release binary from github.com/gastownhall/beads/releases/tag/v1.3.0, verify its sha256
-   against the release's published digest; the VPS runs 1.3.0 and the versions must match). Don't
-   install dolt separately unless bd asks for it. Don't install Herdr yet.
+1. Toolchain, only what is missing or not at the pinned version. The pins are GO_VERSION and
+   BD_VERSION in scripts/pins.env of the public repo (raw.githubusercontent.com/Jonathan-A-White/
+   millwright/main/scripts/pins.env): Go (official tarball to /usr/local/go, verify the sha256 from
+   go.dev), tmux, git, gh, jq, ripgrep (apt), and bd **at BD_VERSION exactly** (release binary from
+   github.com/gastownhall/beads/releases, tag v<BD_VERSION>, verify its sha256 against the release's
+   published digest; every host runs the same bd). scripts/install.sh does all of this: read it and
+   run it if you like. Don't install dolt separately unless bd asks for it. Don't install Herdr yet.
 2. `gh auth status` must show Jonathan-A-White with access to private repos; if not, stop and tell me
    to run `gh auth login`. Then `gh auth setup-git`.
 3. Clone inside the WSL filesystem (NOT under /mnt/c): ~/millwright and ~/millwright-vault.
@@ -51,7 +53,7 @@ PHASE 2 - JOIN (only after I say continue). Do these in order; verify each befor
    (repo-local, not --global).
 4. In ~/millwright-vault: `bd bootstrap --dry-run`, show me the plan; it should say it will clone from
    the git origin's Dolt data (refs/dolt/data). Then `bd bootstrap --yes`. Then verify, one command at
-   a time: `bd version` (1.3.0); `bd show mw-6ww` (the wayfinder map, an open epic); `bd ready
+   a time: `bd version` (BD_VERSION); `bd show mw-6ww` (the wayfinder map, an open epic); `bd ready
    --parent mw-gq6 --unassigned` (walking-skeleton stories); `bd count`.
 5. Round trip, to prove coordination works: from ~/millwright-vault run
    `bd create "Laptop joined the factory" -t task -p 3 -d "Round-trip check from the laptop. Close me

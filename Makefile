@@ -29,14 +29,15 @@ test:
 # cmd/mw command. Then the timer units: systemd-analyze must accept them where
 # it exists. Then the health script, run against stand-in commands for every
 # reading it takes. Then template/, which must hold no personal or host-bound
-# detail. These checks read only this repository (and a temporary directory)
-# and start nothing.
+# detail. Then the installer, run against stand-in commands, and its pins. These
+# checks read only this repository (and a temporary directory) and start nothing.
 lint:
 	$(GO) vet -tags $(TAGS) $(PKG)
 	scripts/check-codemap.sh
 	scripts/check-timer-units.sh
 	scripts/check-health.sh
 	scripts/check-template.sh
+	scripts/check-install.sh
 
 clean:
 	rm -rf bin
