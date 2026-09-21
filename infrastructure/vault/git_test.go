@@ -444,3 +444,44 @@ func TestPullSaysSoWhenTheBranchTracksNothing(t *testing.T) {
 		t.Fatalf("expected the reason to say the branch tracks nothing, got %v", err)
 	}
 }
+
+// fakeGit puts a `git` that says one thing on stderr and exits 128 first on the
+// PATH, so that the vault meets a failure the way a host that has just woken up
+// does, with no network to reach and no real name to look up.
+func fakeGit(t *testing.T, says string) {
+	t.Helper()
+	dir := t.TempDir()
+	script := "#!/bin/sh\necho '" + says + "' >&2\nexit 128\n"
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
+		t.Fatalf("writing the stand-in for git: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func TestAFetchThatCannotResolveTheRemoteIsANameThatCouldNotBeResolved(t *testing.T) {
+	fakeGit(t, "ssh: Could not resolve hostname github.com: Temporary failure in name resolution")
+
+	_, err := vault.New(t.TempDir()).Push(context.Background())
+	unresolved, ok := application.Unresolved(err)
+	if !ok {
+		t.Fatalf("expected a name that could not be resolved, got %T: %v", err, err)
+	}
+	if !strings.Contains(unresolved.Said, "Could not resolve hostname github.com") {
+		t.Fatalf("expected the line git said, got %q", unresolved.Said)
+	}
+}
+
+func TestAnyOtherGitFailureIsLeftExactlyAsGitSaidIt(t *testing.T) {
+	fakeGit(t, "git@github.com: Permission denied (publickey).")
+
+	_, err := vault.New(t.TempDir()).Push(context.Background())
+	if err == nil {
+		t.Fatal("expected the failure to be reported")
+	}
+	if _, ok := application.Unresolved(err); ok {
+		t.Fatalf("expected a refused key not to be a name that could not be resolved, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "Permission denied (publickey)") {
+		t.Fatalf("expected git's own words, got %v", err)
+	}
+}

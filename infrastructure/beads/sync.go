@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/netfault"
 )
 
 // Gateway also brings the one beads database level with the other host's, and
@@ -42,7 +43,15 @@ func (g *Gateway) Sync(ctx context.Context) error {
 		// bd never ran, or was killed: there is no exit code to be faithful to.
 		return fmt.Errorf("%s sync in %s: %w", g.program, g.vault, err)
 	}
-	return &application.SyncHalt{Code: exited.ExitCode(), Said: firstLine(said(out, errs))}
+	told := said(out, errs)
+	halt := &application.SyncHalt{Code: exited.ExitCode(), Said: firstLine(told)}
+	// A bd that could not resolve the remote's name is still bd's halt, with its
+	// exit code, underneath; the wrapper is what lets a dispatch wait for the
+	// network to come back.
+	if line, unresolved := netfault.NameNotResolved(told); unresolved {
+		return &application.NameNotResolved{Said: line, Err: halt}
+	}
+	return halt
 }
 
 // Note implements application.TrackerSync. A key that is not there comes back
