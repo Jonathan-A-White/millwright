@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 )
@@ -102,18 +104,8 @@ func (c *Checks) Run(ctx context.Context, rig, dir string) (application.Checked,
 		return application.Checked{}, fmt.Errorf("running `%s`: %w", command, err)
 	}
 
-	cmd := exec.CommandContext(ctx, c.shell, "-c", command)
-	cmd.Dir = dir
-	// Nobody is at the keyboard: a test that asks git for a password would wait
-	// there forever in a pane nobody is watching.
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-
-	err := cmd.Run()
-	checked := application.Checked{Command: command, Output: out.String(), Passed: err == nil}
+	output, err := runLine(ctx, c.shell, command, dir)
+	checked := application.Checked{Command: command, Output: output, Passed: err == nil}
 	if err == nil {
 		return checked, nil
 	}
@@ -131,5 +123,32 @@ func (c *Checks) Run(ctx context.Context, rig, dir string) (application.Checked,
 		checked.NotRun = code == exitNotExecutable || code == exitNotFound
 		return checked, nil
 	}
-	return application.Checked{}, fmt.Errorf("running `%s` in %s: %w: %s", command, dir, err, application.RecentLines(out.String(), 10))
+	return application.Checked{}, fmt.Errorf("running `%s` in %s: %w: %s", command, dir, err, application.RecentLines(output, 10))
+}
+
+// killGrace is how long a command that has been told to stop is given to let go
+// of what it printed before mw stops waiting for it.
+const killGrace = time.Second
+
+// runLine reads a command line with the shell in dir, and reports everything it
+// printed, both streams in the order they came. It is the one way this package
+// runs a rig's own command line, for its tests and for what follows a landing
+// alike. A context that ends stops the command and everything it started, not
+// only the shell: `make` and the compiler under it are the ones still running
+// when a limit is reached.
+func runLine(ctx context.Context, shell, command, dir string) (string, error) {
+	cmd := exec.CommandContext(ctx, shell, "-c", command)
+	cmd.Dir = dir
+	// Nobody is at the keyboard: a test that asks git for a password would wait
+	// there forever in a pane nobody is watching.
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = killGrace
+
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	err := cmd.Run()
+	return out.String(), err
 }
