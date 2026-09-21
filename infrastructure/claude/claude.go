@@ -7,6 +7,7 @@
 package claude
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -81,6 +82,54 @@ const BeadsAllowRule = `Bash(bd *)`
 // rig's worktree — where a session could commit it by accident, and where
 // somebody would have to remember to take it away again.
 const SessionSettings = `{"attribution":{"commit":"","pr":"","sessionUrl":false},"permissions":{"allow":["` + BeadsAllowRule + `"]}}`
+
+// DenyHookCommand is what Claude Code runs for a PermissionRequest hook of an
+// unattended seat, and what it prints is the answer to the prompt: a deny with
+// the reason Claude is told. The hooks reference gives the shape — a
+// `hookSpecificOutput` with `hookEventName` `PermissionRequest` and a
+// `decision` of `behavior` `deny` and a `message` — and says exit code 2 is not
+// honored for this event, so the answer has to be the JSON, printed with exit 0.
+// It is printf and nothing else: `jq` is not known to be on both hosts, and printf is in
+// every /bin/sh. The message holds no single quote, so that the whole JSON
+// document sits inside single quotes.
+const DenyHookCommand = `printf '%s' '{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"Nobody is watching this seat, so a permission it is not already granted is denied rather than asked for. Use what is allowed, or write down what you needed in your handoff."}}}'`
+
+// UnattendedSeatSettings is SessionSettings with the deny hook added: what a
+// seat's session is given when nobody is watching it (mw-gq6.77).
+//
+// A Builder's `--permission-prompts none` does nothing in an interactive
+// session (`claude --help`: it says who answers permission prompts "with
+// --print"), and `--permission-mode dontAsk` would drop the auto classifier
+// altogether, which a seat keeps. The way the permission-modes reference gives
+// for an interactive session is a `PermissionRequest` hook, which "can answer
+// the prompt the way it answers any other". No matcher is given, and the hooks
+// reference says a group with none "activates on every occurrence of the
+// event", so no tool is left to ask about. Nothing the classifier or an allow
+// rule already decides reaches the hook: it is only ever run for a prompt.
+var UnattendedSeatSettings = withDenyHook(SessionSettings)
+
+// withDenyHook is settings with the PermissionRequest hook that runs
+// DenyHookCommand added. The document is read and written back rather than
+// spliced, so that the command's quotes are escaped by the JSON encoder and not
+// by hand. SessionSettings is a constant of this package, so it cannot fail.
+func withDenyHook(settings string) string {
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(settings), &doc); err != nil {
+		panic(fmt.Sprintf("SessionSettings is not JSON: %v", err))
+	}
+	doc["hooks"] = map[string]any{
+		"PermissionRequest": []any{
+			map[string]any{"hooks": []any{
+				map[string]any{"type": "command", "command": DenyHookCommand},
+			}},
+		},
+	}
+	out, err := json.Marshal(doc)
+	if err != nil {
+		panic(fmt.Sprintf("the unattended seat settings do not encode: %v", err))
+	}
+	return string(out)
+}
 
 // DefaultPermissionMode is how an unattended session is allowed to act. `auto`
 // is the least permissive mode a Builder can actually work in: a Builder must
@@ -196,6 +245,14 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 	}, nil
 }
 
+// seatSettings is the --settings a seat's session is given.
+func seatSettings(attended bool) string {
+	if attended {
+		return SessionSettings
+	}
+	return UnattendedSeatSettings
+}
+
 // knownPermissionMode reports whether Claude Code takes this mode.
 func knownPermissionMode(mode string) bool {
 	switch mode {
@@ -254,11 +311,15 @@ var _ application.SeatHarness = (*Harness)(nil)
 // seat's own session.
 //
 // It is the opposite of Session in nearly every way that matters. The session
-// is interactive — no `--print`, no result file, no `--permission-prompts none`
-// — because a seat's session is one a person watches, types into and is asked
-// by; it is primed with the seat's charter rather than with a story; and nothing
-// follows it, because a seat's session ends when its occupant hands off, not
-// when a story is done. What it shares with Session is SessionSettings.
+// is interactive — no `--print`, no result file, and so no `--permission-prompts
+// none`, which does nothing without `--print`; it is primed with the seat's
+// charter rather than with a story; and nothing follows it, because a seat's
+// session ends when its occupant hands off, not when a story is done.
+//
+// Nobody is assumed to be watching it. What it shares with Session is
+// SessionSettings, and unless the launch is Attended it also has the deny hook
+// of UnattendedSeatSettings, which is how an interactive session is kept from
+// hanging on a prompt (mw-gq6.77). An attended one is asked, as it always was.
 //
 // The charter travels as a path, not as text: a charter is pages long, and a
 // command line a person can read is worth more than one that carries a
@@ -285,15 +346,13 @@ func (h *Harness) SeatSession(l application.SeatLaunch) (application.WindowSpec,
 		argv = append(argv, "--effort", string(l.Effort))
 	}
 	argv = append(argv,
-		// The seat's session is asked about permissions, as it always has been:
-		// whether a seat may deny instead of ask when nobody is there is the
-		// Governor's open decision, mw-6ww.27, so no --permission-prompts flag is
-		// sent here until it is made.
+		// Still `auto`: the classifier keeps deciding what it can. The hook only
+		// answers what would have been asked of a person.
 		"--permission-mode", h.permissionMode,
 		"--append-system-prompt-file", l.Charter,
 		// The seat signs the work and the model never does, and bd runs without
 		// being asked, as in a Builder's session. See SessionSettings.
-		"--settings", SessionSettings,
+		"--settings", seatSettings(l.Attended),
 		"--name", l.Name,
 		l.Kickoff,
 	)

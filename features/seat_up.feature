@@ -41,6 +41,23 @@ Feature: mw seat up
       | seats/mayor/handoffs/2026-09-19-02.md |
       | the map says so                       |
 
+  Scenario: A seat nobody is watching denies a permission instead of asking for it
+    When mw seat up starts the "mayor" seat
+    Then seat up succeeds
+    And the window's session denies a permission it would have asked for
+    And the window's command carries:
+      | --permission-mode auto |
+    And the window's command holds none of:
+      | --print               |
+      | --permission-prompts  |
+
+  Scenario: A seat brought up attended is asked about permissions
+    When mw seat up starts the "mayor" seat attended
+    Then seat up succeeds
+    And the window's session is asked about permissions, as a person's own would be
+    And the window's command carries:
+      | --permission-mode auto |
+
   Scenario: Nothing else in the vault is read or passed
     When mw seat up starts the "mayor" seat
     Then seat up succeeds

@@ -150,6 +150,11 @@ type Windows interface {
 // model and effort it runs at, and the first thing it is told.
 //
 // Model and Effort may be empty, and then the harness is left to its own.
+//
+// Attended says a person is at the keyboard: the session is asked about a
+// permission that is not already decided, as it always has been. Unset, nobody
+// is watching, and the harness has the session deny what it would have asked
+// rather than hang on a prompt nobody answers.
 type SeatLaunch struct {
 	Seat    string
 	Name    string
@@ -158,6 +163,8 @@ type SeatLaunch struct {
 	Model   domain.Model
 	Effort  domain.Effort
 	Kickoff string
+
+	Attended bool
 }
 
 // Validate reports the first reason a seat launch could not be turned into a
@@ -219,6 +226,11 @@ type SeatUp struct {
 	// Reason is why the session is being started, told to it after the
 	// kickoff. Empty says nothing.
 	Reason string
+
+	// Attended is for a seat a person brings up by hand to talk to: its
+	// session is asked about permissions. Every other seat session, the
+	// Millhand's tick wake included, is unattended and denies instead.
+	Attended bool
 
 	// Terminal and Armer are how a reaper is armed. With neither, nothing is
 	// armed; with ReapWhenIdle set, both are needed and starting is refused
@@ -296,6 +308,8 @@ func (s SeatUp) Run(ctx context.Context) (SeatUpReport, error) {
 		Model:   s.Model,
 		Effort:  s.Effort,
 		Kickoff: SeatKickoff(s.Seat, start.Kickoff, newest.Path, s.Reason),
+
+		Attended: s.Attended,
 	})
 	if err != nil {
 		return SeatUpReport{}, err

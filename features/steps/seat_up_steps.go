@@ -2,10 +2,13 @@ package steps
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -59,6 +62,9 @@ type seatUpContext struct {
 	homeWas     string
 	modelEnvWas map[string]*string
 
+	// attended is whether the seat is started with --attended.
+	attended bool
+
 	// tick is what a mw millhand tick scenario reads through: see tickWorld.
 	tick *tickWorld
 }
@@ -97,6 +103,7 @@ func InitializeSeatUpScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the reaper cannot be started$`, c.theReaperCannotBeStarted)
 
 	ctx.When(`^mw seat up starts the "([^"]*)" seat$`, c.mwSeatUpStartsTheSeat)
+	ctx.When(`^mw seat up starts the "([^"]*)" seat attended$`, c.mwSeatUpStartsTheSeatAttended)
 	ctx.When(`^mw seat up starts the "([^"]*)" seat and reaps its window when idle$`, c.mwSeatUpStartsTheSeatAndReaps)
 	ctx.When(`^mw seat up starts the "([^"]*)" seat on "([^"]*)" at "([^"]*)" for the reason "([^"]*)"$`, c.mwSeatUpStartsTheSeatAt)
 
@@ -107,6 +114,8 @@ func InitializeSeatUpScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^seat up says it started the seat in the window "([^"]*)"$`, c.seatUpSaysItStartedTheSeatIn)
 	ctx.Then(`^the window's command carries:$`, c.theWindowsCommandCarries)
 	ctx.Then(`^the window's command holds none of:$`, c.theWindowsCommandHoldsNoneOf)
+	ctx.Then(`^the window's session denies a permission it would have asked for$`, c.theSessionDeniesWhatItWouldAsk(true))
+	ctx.Then(`^the window's session is asked about permissions, as a person's own would be$`, c.theSessionDeniesWhatItWouldAsk(false))
 	ctx.Then(`^the window's command primes the session from the vault's "([^"]*)"$`, c.theWindowsCommandPrimesFrom)
 	ctx.Then(`^the window runs in the vault$`, c.theWindowRunsInTheVault)
 	ctx.Then(`^the window's environment holds:$`, c.theWindowsEnvironmentHolds)
@@ -258,6 +267,11 @@ func (c *seatUpContext) mwSeatUpStartsTheSeat(seat string) error {
 	return c.startTheSeat(seat, "", "", "", false)
 }
 
+func (c *seatUpContext) mwSeatUpStartsTheSeatAttended(seat string) error {
+	c.attended = true
+	return c.startTheSeat(seat, "", "", "", false)
+}
+
 func (c *seatUpContext) mwSeatUpStartsTheSeatAt(seat, model, effort, reason string) error {
 	return c.startTheSeat(seat, model, effort, reason, false)
 }
@@ -287,16 +301,17 @@ func (c *seatUpContext) theReaperCannotBeStarted() error {
 // exactly what mw would run.
 func (c *seatUpContext) startTheSeat(seat, model, effort, reason string, reapWhenIdle bool) error {
 	c.report, c.err = application.SeatUp{
-		Seats:   c.seatFiles(),
-		Windows: c.windows,
-		Harness: claude.New(),
-		Seat:    seat,
-		Host:    seatUpHost,
-		Model:   domain.Model(model),
-		Effort:  domain.Effort(effort),
-		Reason:  reason,
-		Now:     func() time.Time { return c.today },
-		Out:     &c.said,
+		Seats:    c.seatFiles(),
+		Windows:  c.windows,
+		Harness:  claude.New(),
+		Seat:     seat,
+		Host:     seatUpHost,
+		Model:    domain.Model(model),
+		Effort:   domain.Effort(effort),
+		Reason:   reason,
+		Attended: c.attended,
+		Now:      func() time.Time { return c.today },
+		Out:      &c.said,
 
 		Terminal:     c.windows,
 		Armer:        c.armer,
@@ -366,6 +381,53 @@ func (c *seatUpContext) seatUpSaysItStartedTheSeatIn(window string) error {
 		return fmt.Errorf("expected the line to name the window %s, got %q", window, said)
 	}
 	return nil
+}
+
+// theSessionDeniesWhatItWouldAsk reads the settings the window's command was
+// given: the session either carries a PermissionRequest hook, which Claude
+// Code runs in place of asking the person, or it carries none.
+func (c *seatUpContext) theSessionDeniesWhatItWouldAsk(denies bool) func() error {
+	return func() error {
+		spec, err := c.opened()
+		if err != nil {
+			return err
+		}
+		i := slices.Index(spec.Command, "--settings")
+		if i < 0 || i+1 >= len(spec.Command) {
+			return fmt.Errorf("expected the command to carry --settings, got %q", spec.Command)
+		}
+		var settings struct {
+			Hooks struct {
+				PermissionRequest []struct {
+					Hooks []struct {
+						Type    string `json:"type"`
+						Command string `json:"command"`
+					} `json:"hooks"`
+				} `json:"PermissionRequest"`
+			} `json:"hooks"`
+		}
+		if err := json.Unmarshal([]byte(spec.Command[i+1]), &settings); err != nil {
+			return fmt.Errorf("the settings are not JSON (%q): %w", spec.Command[i+1], err)
+		}
+		hooks := settings.Hooks.PermissionRequest
+		if !denies {
+			if len(hooks) != 0 {
+				return fmt.Errorf("expected no PermissionRequest hook, got %+v", hooks)
+			}
+			return nil
+		}
+		if len(hooks) != 1 || len(hooks[0].Hooks) != 1 || hooks[0].Hooks[0].Type != "command" {
+			return fmt.Errorf("expected one PermissionRequest command hook, got %+v", hooks)
+		}
+		out, err := exec.Command("/bin/sh", "-c", hooks[0].Hooks[0].Command).Output()
+		if err != nil {
+			return fmt.Errorf("running the hook: %w", err)
+		}
+		if !strings.Contains(string(out), `"behavior":"deny"`) {
+			return fmt.Errorf("expected the hook to answer deny, it printed %q", out)
+		}
+		return nil
+	}
 }
 
 func (c *seatUpContext) theWindowsCommandCarries(table *godog.Table) error {

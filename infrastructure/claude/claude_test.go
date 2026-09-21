@@ -391,7 +391,7 @@ func TestASeatSessionIsInteractiveAndPrimedFromTheCharterFile(t *testing.T) {
 // every commit with a Co-Authored-By line the vault forbids and mw next
 // refuses, and it is asked about every bd call.
 func TestASeatSessionGetsTheSettingsABuilderGets(t *testing.T) {
-	spec, err := New().SeatSession(seatLaunch(nil))
+	spec, err := New().SeatSession(seatLaunch(func(l *application.SeatLaunch) { l.Attended = true }))
 	if err != nil {
 		t.Fatalf("assembling the seat's session: %v", err)
 	}
@@ -422,6 +422,127 @@ func TestASeatSessionGetsTheSettingsABuilderGets(t *testing.T) {
 	}
 	if !slices.Contains(settings.Permissions.Allow, BeadsAllowRule) {
 		t.Errorf("expected permissions.allow to hold %q, got %v", BeadsAllowRule, settings.Permissions.Allow)
+	}
+}
+
+// settingsOfSeat is the word after --settings on a seat session's command line.
+func settingsOfSeat(t *testing.T, l application.SeatLaunch) string {
+	t.Helper()
+	spec, err := New().SeatSession(l)
+	if err != nil {
+		t.Fatalf("assembling the seat's session: %v", err)
+	}
+	i := slices.Index(spec.Command, "--settings")
+	if i < 0 || i+1 >= len(spec.Command) {
+		t.Fatalf("expected the seat's session to carry --settings, got %q", spec.Command)
+	}
+	return spec.Command[i+1]
+}
+
+// permissionHooks is the PermissionRequest part of a settings document.
+type permissionHooks struct {
+	Hooks struct {
+		PermissionRequest []struct {
+			Matcher string `json:"matcher"`
+			Hooks   []struct {
+				Type    string `json:"type"`
+				Command string `json:"command"`
+			} `json:"hooks"`
+		} `json:"PermissionRequest"`
+	} `json:"hooks"`
+}
+
+// TestAnUnattendedSeatSessionDeniesWhatItWouldAsk: a seat nobody is watching
+// must never hang on a permission prompt. `--permission-prompts none` does
+// nothing in an interactive session, so the seat's settings carry a
+// PermissionRequest hook that answers deny (Claude Code's hooks reference,
+// "PermissionRequest decision control"), and the session stays interactive
+// and in the permission mode it always had.
+func TestAnUnattendedSeatSessionDeniesWhatItWouldAsk(t *testing.T) {
+	spec, err := New().SeatSession(seatLaunch(nil))
+	if err != nil {
+		t.Fatalf("assembling the seat's session: %v", err)
+	}
+	line := strings.Join(spec.Command, " ")
+	for _, unwanted := range []string{"--print", "--permission-prompts"} {
+		if strings.Contains(line, unwanted) {
+			t.Errorf("expected an interactive session to carry no %s, got %q", unwanted, line)
+		}
+	}
+	if !strings.Contains(line, "--permission-mode "+DefaultPermissionMode) {
+		t.Errorf("expected the seat to stay in %s, got %q", DefaultPermissionMode, line)
+	}
+
+	settings := settingsOfSeat(t, seatLaunch(nil))
+	var got permissionHooks
+	if err := json.Unmarshal([]byte(settings), &got); err != nil {
+		t.Fatalf("the settings the seat's session is given are not JSON: %v", err)
+	}
+	groups := got.Hooks.PermissionRequest
+	if len(groups) != 1 || len(groups[0].Hooks) != 1 {
+		t.Fatalf("expected one PermissionRequest hook, got %+v", groups)
+	}
+	if groups[0].Matcher != "" && groups[0].Matcher != "*" {
+		t.Errorf("expected the hook to match every tool, got the matcher %q", groups[0].Matcher)
+	}
+	hook := groups[0].Hooks[0]
+	if hook.Type != "command" {
+		t.Errorf("expected a command hook, got %q", hook.Type)
+	}
+
+	// Run what Claude Code would run: what it prints must be a deny decision.
+	out, err := exec.Command("/bin/sh", "-c", hook.Command).Output()
+	if err != nil {
+		t.Fatalf("running the hook %q: %v", hook.Command, err)
+	}
+	var decision struct {
+		HookSpecificOutput struct {
+			HookEventName string `json:"hookEventName"`
+			Decision      struct {
+				Behavior string `json:"behavior"`
+				Message  string `json:"message"`
+			} `json:"decision"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal(out, &decision); err != nil {
+		t.Fatalf("the hook printed %q, which is not JSON: %v", out, err)
+	}
+	d := decision.HookSpecificOutput
+	if d.HookEventName != "PermissionRequest" || d.Decision.Behavior != "deny" || d.Decision.Message == "" {
+		t.Errorf("expected a PermissionRequest deny with a reason, got %q", out)
+	}
+
+	// The rest of what a Builder's session is given is still there.
+	var base struct {
+		Attribution struct {
+			Commit *string `json:"commit"`
+		} `json:"attribution"`
+		Permissions struct {
+			Allow []string `json:"allow"`
+		} `json:"permissions"`
+	}
+	if err := json.Unmarshal([]byte(settings), &base); err != nil {
+		t.Fatal(err)
+	}
+	if base.Attribution.Commit == nil || !slices.Contains(base.Permissions.Allow, BeadsAllowRule) {
+		t.Errorf("expected the unattended seat to keep the attribution and the bd rule, got %q", settings)
+	}
+}
+
+// TestAnAttendedSeatSessionIsAskedAsItAlwaysWas: a seat a person brings up by
+// hand to talk to is asked about permissions, so its settings are exactly what
+// a Builder gets and carry no hook.
+func TestAnAttendedSeatSessionIsAskedAsItAlwaysWas(t *testing.T) {
+	settings := settingsOfSeat(t, seatLaunch(func(l *application.SeatLaunch) { l.Attended = true }))
+	if settings != SessionSettings {
+		t.Errorf("expected --settings to be SessionSettings, got %q", settings)
+	}
+	var got permissionHooks
+	if err := json.Unmarshal([]byte(settings), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Hooks.PermissionRequest) != 0 || strings.Contains(settings, "hooks") {
+		t.Errorf("expected an attended seat to carry no hook, got %q", settings)
 	}
 }
 

@@ -63,6 +63,7 @@ Feature: mw millhand tick
     And the kickoff prompt of the window holds:
       | a routine wake           |
       | Please look at the queue |
+    And the window's session denies a permission it would have asked for
     And the reaper log holds one line saying "closed by the tick: finished at 2026-09-19T06:00:00Z, window left open"
     And the tick log holds that line
 

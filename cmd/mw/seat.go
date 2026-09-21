@@ -46,7 +46,7 @@ func seatWindows() *tmux.Windows {
 // window of its own. It is the one command here that starts anything.
 func newSeatUpCmd() *cobra.Command {
 	var model, effort, reason string
-	var reapWhenIdle bool
+	var reapWhenIdle, attended bool
 	cmd := &cobra.Command{
 		Use:   "up <seat>",
 		Short: "Start a seat's next session in a window of its own",
@@ -66,7 +66,11 @@ func newSeatUpCmd() *cobra.Command {
 			"seat is handed over.\n\n" +
 			"Run from a tmux window the seat's acting file names, it also arms `mw seat reap` on that window, so\n" +
 			"that the outgoing session's window closes itself once its successor has the seat. --reap-when-idle\n" +
-			"arms one in idle mode on the window it opens, for a session that hands over to nobody.",
+			"arms one in idle mode on the window it opens, for a session that hands over to nobody.\n\n" +
+			"Nobody is assumed to be watching: the session is given a PermissionRequest hook that denies a\n" +
+			"permission it would otherwise ask for, so it never hangs on a prompt (the denial is in its\n" +
+			"transcript). --attended, for a seat brought up by hand to talk to, leaves the hook out and the\n" +
+			"session asks as Claude Code does.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := config.Vault()
@@ -95,6 +99,7 @@ func newSeatUpCmd() *cobra.Command {
 				Reason:  reason,
 				Out:     cmd.OutOrStdout(),
 
+				Attended:     attended,
 				Terminal:     windows,
 				Armer:        reaper.New(exe),
 				ReapWhenIdle: reapWhenIdle,
@@ -103,6 +108,7 @@ func newSeatUpCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&reapWhenIdle, "reap-when-idle", false, "close the new window once a handoff newer than it exists and its pane is idle")
+	cmd.Flags().BoolVar(&attended, "attended", false, "a person is at the keyboard: the session asks about permissions instead of denying them")
 	cmd.Flags().StringVar(&model, "model", "", "the model the session runs on (default: the harness's own)")
 	cmd.Flags().StringVar(&effort, "effort", "", "how hard the session is asked to think (default: the harness's own)")
 	cmd.Flags().StringVar(&reason, "reason", "", "why the session is being started, told to it after the kickoff")
