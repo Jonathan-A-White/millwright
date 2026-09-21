@@ -29,7 +29,10 @@ TimeoutStartSec=2min
 
 # mw dispatch leaves with 5 when the vault holds uncommitted work: it stopped
 # before claiming anything and says which files, and only a person can commit
-# them. That is a wait, not a fault. Every other non-zero status (1, or beads'
-# 2 and 4 from the sync) still fails the unit and shows in
-# `systemctl --user status mw-dispatch`.
-SuccessExitStatus=5
+# them. That is a wait, not a fault. It leaves with 7 when its sync could not
+# resolve a name even after waiting, which is a host just woken from standby
+# with no network yet: it says "local network fault", claimed nothing, and the
+# next tick tries again. Every other non-zero status (1, or beads' 2 and 4 from
+# the sync) still fails the unit and shows in `systemctl --user status
+# mw-dispatch`.
+SuccessExitStatus=5 7

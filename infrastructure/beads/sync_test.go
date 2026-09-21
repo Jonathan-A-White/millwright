@@ -88,3 +88,31 @@ func TestANoteNeedsAKey(t *testing.T) {
 		t.Fatal("expected clearing a note with no key to be refused")
 	}
 }
+
+// A bd that could not resolve the remote's name says so in the sync's own words,
+// and comes back as a name that could not be resolved, so that a dispatch can
+// wait the network out. It is still bd's halt underneath, with the exit code bd
+// gave, so a sync run by hand reads the same number as before.
+func TestSyncNamesAFailureToResolveAHostAndKeepsBdsExitCode(t *testing.T) {
+	gateway := standIn(t, "fatal: unable to access 'https://x/': Could not resolve host: github.com", 1)
+
+	err := gateway.Sync(context.Background())
+	unresolved, ok := application.Unresolved(err)
+	if !ok {
+		t.Fatalf("expected a name that could not be resolved, got %T: %v", err, err)
+	}
+	if !strings.Contains(unresolved.Said, "Could not resolve host: github.com") {
+		t.Fatalf("expected the line git said, got %q", unresolved.Said)
+	}
+	halt, ok := application.Halted(err)
+	if !ok || halt.Code != 1 {
+		t.Fatalf("expected the halt bd gave to be kept underneath, got %v", err)
+	}
+}
+
+func TestSyncDoesNotCallAnyOtherFailureAnUnresolvedName(t *testing.T) {
+	err := standIn(t, "CONFLICT in the working set", 2).Sync(context.Background())
+	if _, ok := application.Unresolved(err); ok {
+		t.Fatalf("expected a conflict not to be a name that could not be resolved, got %v", err)
+	}
+}

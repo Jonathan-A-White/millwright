@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 )
@@ -33,6 +34,8 @@ func writeConfig(t *testing.T, contents string) string {
 	t.Setenv("MW_RIG_MEMORY_BYTES", "")
 	t.Setenv("MW_MILLHAND_ROUTINE_MODEL", "")
 	t.Setenv("MW_MILLHAND_REVIEW_MODEL", "")
+	t.Setenv("MW_DISPATCH_SYNC_TRIES", "")
+	t.Setenv("MW_DISPATCH_SYNC_WAIT", "")
 	return home
 }
 
@@ -516,5 +519,63 @@ func TestAWatchTableThatCannotBeUsedSaysWhatIsMissing(t *testing.T) {
 	_, err := config.Watch()
 	if err == nil || !strings.Contains(err.Error(), "ssh, host, outside") {
 		t.Fatalf("expected the refusal to name what is missing, got %v", err)
+	}
+}
+
+func TestDispatchWaitsThreeTriesFifteenSecondsApartUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, "")
+	tries, err := config.DispatchSyncTries()
+	if err != nil || tries != 3 {
+		t.Fatalf("expected 3 tries, got %d: %v", tries, err)
+	}
+	wait, err := config.DispatchSyncWait()
+	if err != nil || wait != 15*time.Second {
+		t.Fatalf("expected a wait of 15s, got %s: %v", wait, err)
+	}
+
+	writeConfig(t, "dispatch_sync_tries = 4\ndispatch_sync_wait = \"20s\"\n")
+	if tries, err = config.DispatchSyncTries(); err != nil || tries != 4 {
+		t.Fatalf("expected the file's 4 tries, got %d: %v", tries, err)
+	}
+	if wait, err = config.DispatchSyncWait(); err != nil || wait != 20*time.Second {
+		t.Fatalf("expected the file's wait of 20s, got %s: %v", wait, err)
+	}
+
+	t.Setenv("MW_DISPATCH_SYNC_TRIES", "2")
+	t.Setenv("MW_DISPATCH_SYNC_WAIT", "5s")
+	if tries, err = config.DispatchSyncTries(); err != nil || tries != 2 {
+		t.Fatalf("expected the environment's 2 tries ahead of the file, got %d: %v", tries, err)
+	}
+	if wait, err = config.DispatchSyncWait(); err != nil || wait != 5*time.Second {
+		t.Fatalf("expected the environment's wait of 5s ahead of the file, got %s: %v", wait, err)
+	}
+}
+
+func TestDispatchSyncKnobsRefuseWhatIsNotANumberOrWouldRunPastTheUnit(t *testing.T) {
+	for _, bad := range []struct{ file, want string }{
+		{"dispatch_sync_tries = 0\n", "1 or more"},
+		{"dispatch_sync_tries = many\n", "not a whole number"},
+		{"dispatch_sync_wait = soon\n", "not a duration"},
+		{"dispatch_sync_wait = \"-5s\"\n", "negative"},
+		{"dispatch_sync_tries = 10\ndispatch_sync_wait = \"15s\"\n", "2 minutes"},
+	} {
+		writeConfig(t, bad.file)
+		_, triesErr := config.DispatchSyncTries()
+		_, waitErr := config.DispatchSyncWait()
+		err := triesErr
+		if err == nil {
+			err = waitErr
+		}
+		if err == nil || !strings.Contains(err.Error(), bad.want) {
+			t.Errorf("expected %q to be refused, saying %q, got %v", bad.file, bad.want, err)
+		}
+	}
+}
+
+func TestDispatchSyncWaitOfZeroIsAllowedSoATestNeverSleeps(t *testing.T) {
+	writeConfig(t, "dispatch_sync_wait = \"0s\"\n")
+	wait, err := config.DispatchSyncWait()
+	if err != nil || wait != 0 {
+		t.Fatalf("expected a wait of 0, got %s: %v", wait, err)
 	}
 }

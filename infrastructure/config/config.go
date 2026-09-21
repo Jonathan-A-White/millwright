@@ -9,6 +9,8 @@
 //	host_silent_hours = 2
 //	handoff_at = 180000
 //	rig_memory_bytes = 8000
+//	dispatch_sync_tries = 3
+//	dispatch_sync_wait = "15s"
 //	millhand_routine_model = "sonnet"
 //	millhand_review_model = "opus"
 //
@@ -30,6 +32,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // The environment variables that answer for each setting, ahead of the file.
@@ -43,6 +46,9 @@ const (
 	RigMemoryEnv   = "MW_RIG_MEMORY_BYTES"
 
 	TickRecheckEnv = "MW_TICK_RECHECK_SECONDS"
+
+	DispatchSyncTriesEnv = "MW_DISPATCH_SYNC_TRIES"
+	DispatchSyncWaitEnv  = "MW_DISPATCH_SYNC_WAIT"
 
 	MillhandRoutineModelEnv = "MW_MILLHAND_ROUTINE_MODEL"
 	MillhandReviewModelEnv  = "MW_MILLHAND_REVIEW_MODEL"
@@ -101,6 +107,18 @@ const DefaultRigMemoryBytes = 8000
 const (
 	DefaultMillhandRoutineModel = "sonnet"
 	DefaultMillhandReviewModel  = "opus"
+)
+
+// What `mw dispatch` does when its sync cannot resolve a name, which is what a
+// host just woken from standby says until its network is back: it tries the
+// sync DefaultDispatchSyncTries times in all, DefaultDispatchSyncWait apart. They
+// are settings and not code, and the two together may not wait past
+// MaxDispatchSyncWait, which is well inside the two minutes the dispatch unit
+// gives a run before systemd kills it.
+const (
+	DefaultDispatchSyncTries = 3
+	DefaultDispatchSyncWait  = 15 * time.Second
+	MaxDispatchSyncWait      = 90 * time.Second
 )
 
 // File is the config file's path under the home directory.
@@ -295,6 +313,62 @@ func HandoffAt() (int, error) {
 		return 0, fmt.Errorf("the handoff limit is %d tokens, so every session would be told to hand off at once: set it to 1 or more", tokens)
 	}
 	return tokens, nil
+}
+
+// DispatchSyncTries reports how many times `mw dispatch` tries its sync when it
+// fails because a name could not be resolved: $MW_DISPATCH_SYNC_TRIES if it is
+// set, otherwise the root-table `dispatch_sync_tries` key of
+// ~/.config/mw/config.toml, and DefaultDispatchSyncTries when neither says. One
+// is no retry.
+func DispatchSyncTries() (int, error) {
+	tries, _, err := dispatchSync()
+	return tries, err
+}
+
+// DispatchSyncWait reports how long `mw dispatch` waits between those tries:
+// $MW_DISPATCH_SYNC_WAIT if it is set, otherwise the root-table
+// `dispatch_sync_wait` key of ~/.config/mw/config.toml, written as a duration
+// (`"15s"`), and DefaultDispatchSyncWait when neither says. Zero is allowed.
+func DispatchSyncWait() (time.Duration, error) {
+	_, wait, err := dispatchSync()
+	return wait, err
+}
+
+// dispatchSync reads both knobs and refuses a pair that would wait past what
+// the dispatch unit allows, so that a run is never killed for waiting.
+func dispatchSync() (int, time.Duration, error) {
+	tries := DefaultDispatchSyncTries
+	said, err := optionalSetting("dispatch_sync_tries", DispatchSyncTriesEnv, "")
+	if err != nil {
+		return 0, 0, err
+	}
+	if said != "" {
+		if tries, err = strconv.Atoi(said); err != nil {
+			return 0, 0, fmt.Errorf("the number of times dispatch tries its sync is %q, which is not a whole number: set %s=<n>, or `dispatch_sync_tries = <n>` in %s", said, DispatchSyncTriesEnv, File)
+		}
+		if tries < 1 {
+			return 0, 0, fmt.Errorf("dispatch would try its sync %d times, so it would never sync: set it to 1 or more (1 is no retry)", tries)
+		}
+	}
+
+	wait := DefaultDispatchSyncWait
+	if said, err = optionalSetting("dispatch_sync_wait", DispatchSyncWaitEnv, ""); err != nil {
+		return 0, 0, err
+	}
+	if said != "" {
+		if wait, err = time.ParseDuration(said); err != nil {
+			return 0, 0, fmt.Errorf("the wait between dispatch's sync tries is %q, which is not a duration such as 15s: set %s=<duration>, or `dispatch_sync_wait = \"<duration>\"` in %s", said, DispatchSyncWaitEnv, File)
+		}
+		if wait < 0 {
+			return 0, 0, fmt.Errorf("the wait between dispatch's sync tries is %s, which is negative: set it to 0 or more", wait)
+		}
+	}
+
+	if total := time.Duration(tries-1) * wait; total > MaxDispatchSyncWait {
+		return 0, 0, fmt.Errorf("dispatch would wait %s in all (%d tries, %s apart), and the dispatch unit is stopped at 2 minutes: keep the waiting to %s or less",
+			total, tries, wait, MaxDispatchSyncWait)
+	}
+	return tries, wait, nil
 }
 
 // MillhandRoutineModel reports the model a routine wake, and a wake by hand, of

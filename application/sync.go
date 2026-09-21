@@ -190,7 +190,8 @@ func Blocked(err error) (*VaultBlocked, bool) {
 // own exit code when beads stopped a sync, VaultBlockedExit when nothing was
 // wrong but somebody's uncommitted vault work, MillhandUpExit when the Millhand
 // was not started because one is up, WatchWakeExit when mw watch calls for a
-// wake, 1 for anything else, and 0 for nothing wrong at all. cmd/mw leaves with it.
+// wake, NetworkFaultExit when a dispatch waited out the network and it did not
+// come back, 1 for anything else, and 0 for nothing wrong at all. cmd/mw leaves with it.
 func ExitStatus(err error) int {
 	if err == nil {
 		return 0
@@ -206,6 +207,9 @@ func ExitStatus(err error) int {
 	}
 	if _, wake := WatchWakes(err); wake {
 		return WatchWakeExit
+	}
+	if _, fault := LocalFault(err); fault {
+		return NetworkFaultExit
 	}
 	return 1
 }

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/netfault"
 )
 
 // Git is the command this adapter keeps the vault level with, and
@@ -266,7 +267,11 @@ func (v *Vault) git(ctx context.Context, args ...string) (string, error) {
 		if said == "" {
 			return "", fmt.Errorf("%s %s in %s: %w", Git, strings.Join(args, " "), v.dir, err)
 		}
-		return "", fmt.Errorf("%s %s in %s: %w: %s", Git, strings.Join(args, " "), v.dir, err, said)
+		failed := fmt.Errorf("%s %s in %s: %w: %s", Git, strings.Join(args, " "), v.dir, err, said)
+		if line, unresolved := netfault.NameNotResolved(said); unresolved {
+			return "", &application.NameNotResolved{Said: line, Err: failed}
+		}
+		return "", failed
 	}
 	return out.String(), nil
 }

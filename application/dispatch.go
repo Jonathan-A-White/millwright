@@ -6,6 +6,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -56,6 +57,18 @@ type Dispatch struct {
 	// sees the other host's claims before it makes its own. A nil Sync skips
 	// it, which is what a dry run does.
 	Sync HostSync
+
+	// SyncTries is how many times the sync is tried when it fails because a name
+	// could not be resolved, which is what a host just woken from standby says
+	// until its network is back, and SyncWait is how long to wait between the
+	// tries. Only that failure is tried again: a retry must never hide a real
+	// fault. Fewer than one is one try, which is no retry at all.
+	SyncTries int
+	SyncWait  time.Duration
+
+	// Wait is how the wait between tries is made, so that a test never sleeps.
+	// The zero value waits for real, and stops when the context does.
+	Wait func(ctx context.Context, d time.Duration) error
 
 	// Host is which of the factory's hosts this is, Cap is how many sessions
 	// may be running here at once, and Rigs is where each rig is checked out.
@@ -123,6 +136,9 @@ type DispatchReport struct {
 	// Sync is what the sync before the dispatch moved, when there was one.
 	Sync   SyncReport
 	Synced bool
+	// SyncRetries is how many times the sync had to be tried again, because a
+	// name could not be resolved, before it got through.
+	SyncRetries int
 }
 
 // inStartOrder is the stories in the order a dispatch starts them: the most
@@ -173,7 +189,14 @@ func (d Dispatch) Run(ctx context.Context) (DispatchReport, error) {
 	// commits and pulls the other's. So a dry run reads the view this host
 	// already has, and says so.
 	if !d.DryRun && d.Sync != nil {
-		synced, err := d.Sync.Run(ctx)
+		synced, retries, err := d.syncWaitingForTheNetwork(ctx)
+		report.SyncRetries = retries
+		if fault, gaveUp := LocalFault(err); gaveUp {
+			// Not a failed run: the network is not back yet, and the next tick tries
+			// again. The one line is printed here, so that nothing else is.
+			d.print(fault.Line() + "\n")
+			return report, err
+		}
 		if err != nil {
 			return report, fmt.Errorf("dispatching on %s: the hosts could not be brought level, so nothing was claimed: %w", d.Host, err)
 		}
@@ -265,6 +288,32 @@ func (d Dispatch) Run(ctx context.Context) (DispatchReport, error) {
 		return report, fmt.Errorf("dispatching on %s: %s", d.Host, report.failures())
 	}
 	return report, nil
+}
+
+// syncWaitingForTheNetwork runs the sync, and runs it again after SyncWait while
+// what stops it is a name that could not be resolved, up to SyncTries tries. It
+// reports how many times it had to try again. When the name still cannot be
+// resolved it is a *LocalNetworkFault; every other failure comes back at once,
+// as it was.
+func (d Dispatch) syncWaitingForTheNetwork(ctx context.Context) (SyncReport, int, error) {
+	tries := max(d.SyncTries, 1)
+	for try := 1; ; try++ {
+		report, err := d.Sync.Run(ctx)
+		unresolved, down := Unresolved(err)
+		if !down {
+			return report, try - 1, err
+		}
+		if try >= tries {
+			return report, try - 1, &LocalNetworkFault{Said: unresolved.Said, Tries: try}
+		}
+		wait := d.Wait
+		if wait == nil {
+			wait = waitFor
+		}
+		if err := wait(ctx, d.SyncWait); err != nil {
+			return report, try - 1, fmt.Errorf("waiting %s for the network to come back: %w", d.SyncWait, err)
+		}
+	}
 }
 
 // start dispatches one story: claim, worktree, formula, boot, session, and the
@@ -480,6 +529,13 @@ func (r DispatchReport) String() string {
 	fmt.Fprintf(&b, "%s on %s: %d of %d sessions were already running\n", what, r.Host, r.Running, r.Cap)
 	if r.Synced {
 		fmt.Fprintf(&b, "  synced  %s\n", r.Sync)
+	}
+	if r.SyncRetries > 0 {
+		times := "times"
+		if r.SyncRetries == 1 {
+			times = "time"
+		}
+		fmt.Fprintf(&b, "  retried the sync %d %s: a name could not be resolved until the network came back\n", r.SyncRetries, times)
 	}
 
 	verb := "started"

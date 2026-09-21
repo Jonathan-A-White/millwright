@@ -212,6 +212,33 @@ func TestExitStatusSaysWhatStoppedMw(t *testing.T) {
 	}
 }
 
+func TestALocalNetworkFaultHasAStatusOfItsOwn(t *testing.T) {
+	for _, taken := range []int{0, 1, 2, 3, 4, application.VaultBlockedExit, application.MillhandUpExit, application.WatchWakeExit} {
+		if application.NetworkFaultExit == taken {
+			t.Fatalf("expected a status distinct from every other mw leaves with, got %d", taken)
+		}
+	}
+	fault := &application.LocalNetworkFault{Said: "Could not resolve host: github.com", Tries: 3}
+	if got := application.ExitStatus(fmt.Errorf("dispatching: %w", fault)); got != application.NetworkFaultExit {
+		t.Fatalf("expected a local network fault to leave with %d, got %d", application.NetworkFaultExit, got)
+	}
+	if want := "local network fault: Could not resolve host: github.com; nothing dispatched"; fault.Line() != want {
+		t.Fatalf("expected the line %q, got %q", want, fault.Line())
+	}
+}
+
+// A name that could not be resolved is still whatever failed underneath, so a
+// sync run by hand leaves with the status it always did.
+func TestAnUnresolvedNameKeepsTheHaltUnderneathItsExitCode(t *testing.T) {
+	halted := &application.NameNotResolved{Said: "no such host", Err: &application.SyncHalt{Code: 3}}
+	if got := application.ExitStatus(halted); got != 3 {
+		t.Fatalf("expected the halt underneath to decide the status, got %d", got)
+	}
+	if got := application.ExitStatus(&application.NameNotResolved{Said: "no such host"}); got != 1 {
+		t.Fatalf("expected a name that could not be resolved, run by hand, to be a plain failure, got %d", got)
+	}
+}
+
 func TestSyncStopsWhenBeadsHaltsEvenThoughTheVaultWasBlockedToo(t *testing.T) {
 	sync, files, tracker := syncing(t)
 	files.Dirty = []string{"seats/mayor/ledger.md"}

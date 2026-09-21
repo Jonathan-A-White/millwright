@@ -422,7 +422,8 @@ bd reclaim mw-gq6.30                                        # or take it over fi
 
 `~/.config/mw/config.toml`, with `MW_VAULT`, `MW_HOST`, `MW_CAP` and
 `MW_HOST_SILENT_HOURS`, `MW_STALE_HOURS`, `MW_HANDOFF_AT`, `MW_RIG_MEMORY_BYTES`,
-`MW_MILLHAND_ROUTINE_MODEL` and `MW_MILLHAND_REVIEW_MODEL` ahead of it:
+`MW_DISPATCH_SYNC_TRIES`, `MW_DISPATCH_SYNC_WAIT`, `MW_MILLHAND_ROUTINE_MODEL` and
+`MW_MILLHAND_REVIEW_MODEL` ahead of it:
 
 ```toml
 vault = "/root/millwright-vault"   # the one beads database and the seats
@@ -432,6 +433,8 @@ host_silent_hours = 2              # how long another host may go unsynced (defa
 stale_hours = 2                    # how long a session may print nothing new before mw sweep calls it stuck (default 2)
 handoff_at = 180000                # the context size, in tokens, at which mw seat context says handoff (default 180000)
 rig_memory_bytes = 8000            # how large the Builder's memory of one rig may grow before mw status says prune (default 8000)
+dispatch_sync_tries = 3            # how many times mw dispatch tries its sync when a name cannot be resolved (default 3)
+dispatch_sync_wait = "15s"         # how long it waits between those tries (default 15s, at most 90s in all)
 millhand_routine_model = "sonnet"  # the model of a routine wake, and of a wake by hand, of the Millhand (default sonnet)
 millhand_review_model = "opus"     # the model of a review wake of the Millhand (default opus)
 
@@ -535,12 +538,27 @@ status mw-dispatch` shows the last run and how it ended.
 **Exit 5 is not a failure.** `mw dispatch` syncs first (see above), and a vault
 holding uncommitted work stops the sync's vault half; `mw dispatch` then stops
 too, before it claims anything, and leaves with 5 (`mw sync` alone does the same
-after syncing beads). The unit has `SuccessExitStatus=5`, so that wait does not
+after syncing beads). The unit lists 5 in `SuccessExitStatus`, so that wait does not
 show as a failed unit; the journal has the one line naming the files, and
 nothing is dispatched until someone commits them. Any other non-zero status
 still fails the unit and shows in `systemctl --user status`: 1 is a plain
 failure, and 2 and 4 are beads' merge conflict and stuck working set, which
 wait for a person.
+
+**Exit 7 is not a failure either.** A host that has just woken from standby can
+have no name resolution for a minute or two (`Could not resolve hostname
+github.com`). `mw dispatch`'s sync fails on that, and only on that, and waits and
+tries it again: `dispatch_sync_tries` times in all (3), `dispatch_sync_wait` apart
+(`"15s"`; `MW_DISPATCH_SYNC_TRIES` and `MW_DISPATCH_SYNC_WAIT` answer ahead of the
+file). A sync that gets through on a later try dispatches as usual and says `retried
+the sync 2 times`. One that never does claims nothing, prints one line, `local
+network fault: <what git said>; nothing dispatched`, and leaves with 7, which the
+unit lists in `SuccessExitStatus=5 7`, so a sleeping network does not show as a
+failed unit and the next tick simply tries again. The tries and the waits together
+may not run past 90 seconds (`mw dispatch` refuses a config that would), because
+the unit is stopped at two minutes. Every other sync failure is not retried and
+fails as before, and `mw sync` by hand never waits. After changing the unit file,
+copy it again and `systemctl --user daemon-reload`.
 
 **A second tick while a dispatch is still running does no harm.** A oneshot unit
 is never started while it is already running, so ticks do not overlap; the tick

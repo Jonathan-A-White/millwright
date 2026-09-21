@@ -93,7 +93,7 @@ need() {
 }
 # The dispatch pair.
 need "$SERVICE" "Type=oneshot"
-need "$SERVICE" "SuccessExitStatus=5"
+need "$SERVICE" "SuccessExitStatus=5 7"
 need "$SERVICE" "KillMode=process"
 need "$SERVICE" "ExecStart=/usr/bin/env mw dispatch"
 need "$TIMER" "Persistent=false"
