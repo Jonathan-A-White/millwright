@@ -1071,7 +1071,20 @@ bin/mw millhand tick --dry-run   # say what it would do, start nothing
 A tick costs no tokens unless something needs the Millhand, so it is safe to
 run every 15 minutes for ever. It looks in this order:
 
-1. A window named `millhand-*` already open: it says `already up` and stops.
+1. A window named `millhand-*` already open: it says `already up` and stops,
+   unless that Millhand is finished. Finished is the rule `mw seat reap
+   --when-idle` closes by: it wrote a handoff after its window opened, and its
+   pane is idle at an empty input line on two looks in a row, 30 seconds apart
+   (`tick_recheck_seconds` in the config file, or `MW_TICK_RECHECK_SECONDS`; 0 is
+   no wait). Then the tick closes the window, adds one line to
+   `.millhand-reaper.log` in the vault (`closed by the tick: finished at <handoff
+   time>, window left open`), says so in its line (`closed the finished
+   Millhand's window …`), and goes on as if no Millhand were up, so the same tick
+   may wake a fresh one. This heals a window left open when its reaper died, gave
+   up or slept through it. A window whose input line holds text, or whose pane is
+   working, or that has no handoff newer than itself, is never closed: `already
+   up`. A look the terminal cannot answer counts as not finished. `--dry-run`
+   says `would close` and closes nothing.
 2. With a `[watch]` table in the config file (see *Watching a host*), it applies
    `mw watch`'s rule to the host it watches. This comes before the sync, because
    a fault of this host's own network is one the sync would only time out on:

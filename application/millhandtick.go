@@ -42,7 +42,14 @@ func (r MillhandTickReport) String() string { return r.Line + "\n" }
 // MillhandTick is what the routine timer runs. It spends no tokens unless
 // something needs the Millhand:
 //
-//  1. A Millhand already up is the end of it: "already up".
+//  1. A Millhand already up is the end of it: "already up" — unless its session
+//     is finished, by the rule mw seat reap --when-idle closes by: it wrote a
+//     handoff after its window opened, and its pane is idle at an empty input
+//     line on two looks Recheck apart. Then the tick closes the window, adds one
+//     line to the reaper log, says so in its line, and goes on as if no Millhand
+//     were up, so that the same tick may wake a fresh one. A window whose input
+//     line holds text is never closed, and a look that cannot be made is a look
+//     at a session that is not finished.
 //  2. On a host with a [watch] table, mw watch's rule is applied to the host it
 //     watches. This comes before the sync, because a fault of this host's own
 //     network is one the sync would only time out on: local-fault is said in the
@@ -83,6 +90,14 @@ type MillhandTick struct {
 	// Settings are the config's [watch] table: with none, or with no Probes, the
 	// tick does not consult it. The tick silences it, and it keeps its own log.
 	Watch Watch
+
+	// ReapLog is where a tick that closes a finished Millhand's window says so:
+	// the Millhand's reaper log. Recheck is how long the tick waits between its
+	// two looks at the window's pane, and Sleep waits it out, or until ctx ends;
+	// a nil Sleep sleeps for real, and a zero Recheck does not wait.
+	ReapLog ReapLog
+	Recheck time.Duration
+	Sleep   func(ctx context.Context, d time.Duration) error
 
 	// Host is this host, whose Millhand's mail is looked for.
 	Host   string
@@ -125,15 +140,23 @@ func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err err
 	if err != nil {
 		return "could not look for the Millhand's window: " + oneLine(err.Error()), false, err
 	}
+
+	var notes []string
 	if up != "" {
-		return alreadyUp(up), false, nil
+		gone, note, err := t.heal(ctx, up)
+		switch {
+		case err != nil:
+			return joinNotes(alreadyUp(up), []string{note}), false, err
+		case !gone:
+			return alreadyUp(up), false, nil
+		}
+		notes = append(notes, note)
 	}
 
 	// The watch comes first: a fault of this host's own network is one a sync
 	// would only time out on.
 	health := t.health(ctx)
 
-	var notes []string
 	if !health.local {
 		if _, err := t.Sync.Run(ctx); err != nil {
 			notes = append(notes, syncNote(err))
@@ -185,6 +208,72 @@ func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err err
 		}
 	}
 	return joinNotes(verdict, notes), woke, nil
+}
+
+// heal asks whether the Millhand whose window is open is finished, and closes
+// the window if it is. It says whether the Millhand is to be counted as gone —
+// the window was closed, or in a dry run would have been — and the words for the
+// line. A Millhand that is not finished is left alone: gone is false and there
+// is nothing to say. The window is closed only when it was found idle twice,
+// Recheck apart, and never on a doubt.
+func (t MillhandTick) heal(ctx context.Context, name string) (gone bool, note string, err error) {
+	if t.Millhand.Terminal == nil || t.Millhand.Seats == nil {
+		return false, "", nil
+	}
+	rule := SeatReap{
+		Seats:    t.Millhand.Seats,
+		Terminal: t.Millhand.Terminal,
+		Seat:     MillhandSeat,
+		Host:     t.Host,
+		WhenIdle: true,
+		Now:      t.now,
+		Sleep:    t.Sleep,
+	}
+	window, there := t.reapWindow(ctx, name)
+	if !there {
+		return false, "", nil
+	}
+	if _, finished := rule.Finished(ctx, window); !finished {
+		return false, "", nil
+	}
+	if err := rule.wait(ctx, t.Recheck); err != nil {
+		return false, "", nil
+	}
+	handoff, finished := rule.Finished(ctx, window)
+	if !finished {
+		return false, "", nil
+	}
+
+	if t.DryRun {
+		return true, fmt.Sprintf("dry run: would close the finished Millhand's window %s (its handoff of %s, window left open)", name, handoff.UTC().Format(time.RFC3339)), nil
+	}
+	if err := t.Millhand.Terminal.Close(ctx, window.ID); err != nil {
+		return false, "could not close the finished Millhand's window: " + oneLine(err.Error()), fmt.Errorf("closing the window %s: %w", name, err)
+	}
+	note = fmt.Sprintf("closed the finished Millhand's window %s (its handoff of %s, window left open)", name, handoff.UTC().Format(time.RFC3339))
+	if t.ReapLog != nil {
+		said := fmt.Sprintf("%s reap %s: closed by the tick: finished at %s, window left open",
+			t.now().UTC().Format(time.RFC3339), window.ID, handoff.UTC().Format(time.RFC3339))
+		if err := t.ReapLog.Note(ctx, MillhandSeat, said); err != nil {
+			note += "; the reaper log could not be written: " + oneLine(err.Error())
+		}
+	}
+	return true, note, nil
+}
+
+// reapWindow is the window of that name as the terminal's reaper side sees it,
+// with its id and when it opened; false when it cannot be found.
+func (t MillhandTick) reapWindow(ctx context.Context, name string) (ReapWindow, bool) {
+	open, err := t.Millhand.Terminal.OpenWindows(ctx)
+	if err != nil {
+		return ReapWindow{}, false
+	}
+	for _, window := range open {
+		if window.Name == name {
+			return window, true
+		}
+	}
+	return ReapWindow{}, false
 }
 
 // tickHealth is what applying mw watch's rule found, as the tick needs it.

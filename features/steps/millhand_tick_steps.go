@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +15,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/cucumber/godog"
 )
@@ -45,6 +48,9 @@ type tickWorld struct {
 	watching application.WatchSettings
 	// epicFiled says the epic the stories hang from has been filed.
 	epicFiled bool
+	// whileWaiting is what happens in the wait between the tick's two checks of
+	// a Millhand's pane.
+	whileWaiting func()
 
 	report application.MillhandTickReport
 	err    error
@@ -99,6 +105,9 @@ func registerMillhandTickSteps(ctx *godog.ScenarioContext, c *seatUpContext) {
 	ctx.Given(`^the watched host's health line is (\d+) minutes old and ends "([^"]*)"$`, c.theWatchedHostsHealthLine)
 	ctx.Given(`^the watched host first failed a check (\d+) minutes ago$`, c.theWatchedHostFirstFailed)
 	ctx.Given(`^the tick's watch memory cannot be read$`, c.theWatchMemoryCannotBeRead)
+	ctx.Given(`^the pane of the window "([^"]*)" (has text on its input line|is working)$`, c.thePaneOfTheWindow)
+	ctx.Given(`^the pane of the window "([^"]*)" turns to text on its input line while the tick waits between its checks$`, c.thePaneTurnsWhileTheTickWaits)
+	ctx.Given(`^the terminal cannot say what the pane of the window "([^"]*)" is doing$`, c.theTerminalCannotSayWhatThePaneIsDoing)
 
 	ctx.When(`^mw millhand tick is run$`, func() error { return c.runTheTick(false) })
 	ctx.When(`^mw millhand tick is run as a dry run$`, func() error { return c.runTheTick(true) })
@@ -116,6 +125,10 @@ func registerMillhandTickSteps(ctx *godog.ScenarioContext, c *seatUpContext) {
 	ctx.Then(`^ssh to the watched host was not tried$`, c.sshWasNotTried)
 	ctx.Then(`^nothing was asked of the watched host or the outside places$`, c.nothingWasAskedOfTheWorld)
 	ctx.Then(`^the kickoff prompt of the window ends with "([^"]*)"$`, c.theKickoffEndsWith)
+	ctx.Then(`^the window "([^"]*)" was closed$`, c.theWindowWasClosed)
+	ctx.Then(`^the window "([^"]*)" was not closed$`, c.theWindowWasNotClosed)
+	ctx.Then(`^the reaper log holds one line saying "([^"]*)"$`, c.theReaperLogHoldsOneLineSaying)
+	ctx.Then(`^the reaper log holds no line$`, c.theReaperLogHoldsNoLine)
 }
 
 func (c *seatUpContext) unreadTickMail(mailbox, subject string) error {
@@ -259,6 +272,15 @@ func (c *seatUpContext) runTheTick(dryRun bool) error {
 			RoutineModel: domain.Model(routine),
 			ReviewModel:  domain.Model(review),
 			Now:          now,
+		},
+		ReapLog: vault.New(c.dir),
+		// No wait between the two checks of a pane, but for what a scenario
+		// makes happen in it.
+		Sleep: func(context.Context, time.Duration) error {
+			if world.whileWaiting != nil {
+				world.whileWaiting()
+			}
+			return nil
 		},
 		Sync: world.sync,
 		Mail: world.mailbox,
@@ -428,6 +450,95 @@ func (c *seatUpContext) theKickoffEndsWith(want string) error {
 	}
 	if !strings.HasSuffix(told, want) {
 		return fmt.Errorf("expected the kickoff to end with %q, got %q", want, told)
+	}
+	return nil
+}
+
+func (c *seatUpContext) thePaneOfTheWindow(name, state string) error {
+	id, open := c.windows.IDOf(name)
+	if !open {
+		return fmt.Errorf("the window %s is not open", name)
+	}
+	pane := application.PaneInput
+	if state == "is working" {
+		pane = application.PaneWorking
+	}
+	return c.windows.Pane(id, pane)
+}
+
+func (c *seatUpContext) thePaneTurnsWhileTheTickWaits(name string) error {
+	id, open := c.windows.IDOf(name)
+	if !open {
+		return fmt.Errorf("the window %s is not open", name)
+	}
+	c.tickWorld().whileWaiting = func() { _ = c.windows.Pane(id, application.PaneInput) }
+	return nil
+}
+
+func (c *seatUpContext) theTerminalCannotSayWhatThePaneIsDoing(name string) error {
+	if _, open := c.windows.IDOf(name); !open {
+		return fmt.Errorf("the window %s is not open", name)
+	}
+	c.windows.PaneErr = errors.New("the terminal is not answering")
+	return nil
+}
+
+// theWindowWasClosed says the tick closed the window: it is gone, and the
+// terminal was asked to close it.
+func (c *seatUpContext) theWindowWasClosed(name string) error {
+	if _, open := c.windows.IDOf(name); open {
+		return fmt.Errorf("expected the window %s to be closed, it is open", name)
+	}
+	if len(c.windows.ClosedIDs()) == 0 {
+		return fmt.Errorf("expected the tick to close the window %s, but the terminal was never asked to close one", name)
+	}
+	return nil
+}
+
+func (c *seatUpContext) theWindowWasNotClosed(name string) error {
+	if _, open := c.windows.IDOf(name); !open {
+		return fmt.Errorf("expected the window %s to stay open, it is gone", name)
+	}
+	if closed := c.windows.ClosedIDs(); len(closed) != 0 {
+		return fmt.Errorf("expected the tick to close nothing, it closed %q", closed)
+	}
+	return nil
+}
+
+// reaperLog is the lines of the Millhand's reaper log, none when it was never
+// written.
+func (c *seatUpContext) reaperLog() ([]string, error) {
+	raw, err := os.ReadFile(filepath.Join(c.dir, application.ReapLogFileName(application.MillhandSeat)))
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n"), nil
+}
+
+func (c *seatUpContext) theReaperLogHoldsOneLineSaying(words string) error {
+	lines, err := c.reaperLog()
+	if err != nil {
+		return err
+	}
+	if len(lines) != 1 {
+		return fmt.Errorf("expected the reaper log to hold one line, it holds %q", lines)
+	}
+	if !strings.HasPrefix(lines[0], "2026-09-19T12:00:00Z ") || !strings.Contains(lines[0], words) {
+		return fmt.Errorf("expected a dated line saying %q, got %q", words, lines[0])
+	}
+	return nil
+}
+
+func (c *seatUpContext) theReaperLogHoldsNoLine() error {
+	lines, err := c.reaperLog()
+	if err != nil {
+		return err
+	}
+	if len(lines) != 0 {
+		return fmt.Errorf("expected the reaper log to hold nothing, it holds %q", lines)
 	}
 	return nil
 }

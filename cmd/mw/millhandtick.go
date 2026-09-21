@@ -30,10 +30,14 @@ func newMillhandTickCmd() *cobra.Command {
 		Use:   "tick [--dry-run]",
 		Short: "Wake the Millhand only if mail has come for it or a story is stuck",
 		Long: "tick is run every 15 minutes by a timer, and spends no tokens unless the Millhand is needed.\n" +
-			"If a window named millhand-* is already open it says \"already up\" and stops. Otherwise, with a\n" +
-			"[watch] table in the config file, it applies mw watch's rule to the host it watches, before\n" +
-			"anything else: local-fault (this host's own network is down) is said in the line, wakes nobody\n" +
-			"and skips the sync, which would only time out. Then it runs one mw sync (a sync that fails is\n" +
+			"If a window named millhand-* is already open it says \"already up\" and stops, unless that Millhand\n" +
+			"is finished: it has written a handoff newer than its window and its pane is idle at an empty input\n" +
+			"line on two looks, the rule mw seat reap --when-idle closes by, the looks tick_recheck_seconds\n" +
+			"(30) apart. Then the tick closes the window, adds one line to .millhand-reaper.log in the vault,\n" +
+			"says so in its line and goes on as if no Millhand were up; a window whose input line holds text is\n" +
+			"never closed. Otherwise, with a [watch] table in the config file, it applies mw watch's rule to\n" +
+			"the host it watches, before anything else: local-fault (this host's own network is down) is said\n" +
+			"in the line, wakes nobody and skips the sync, which would only time out. Then it runs one mw sync (a sync that fails is\n" +
 			"said in the line, and the tick looks on this host all the same), and looks for unread mail for\n" +
 			"millhand@<host> or millhand, for a story mw sweep newly finds stuck on this host, and for a\n" +
 			"watched host that is unwell, stale or down. With none of them it says \"quiet\". With any, it\n" +
@@ -69,6 +73,10 @@ func newMillhandTickCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			recheck, err := config.TickRecheckSeconds()
+			if err != nil {
+				return err
+			}
 			settings, err := config.Watch()
 			if err != nil {
 				return err
@@ -83,10 +91,11 @@ func newMillhandTickCmd() *cobra.Command {
 			}
 
 			windows := seatWindows()
+			files := vault.New(dir)
 			gateway := mwGateway(dir, host)
 			tick := application.MillhandTick{
 				Millhand: application.Millhand{
-					Seats:    vault.New(dir),
+					Seats:    files,
 					Windows:  windows,
 					Harness:  claude.New(),
 					Terminal: windows,
@@ -105,9 +114,11 @@ func newMillhandTickCmd() *cobra.Command {
 					Host:       host,
 					StaleAfter: time.Duration(hours) * time.Hour,
 				},
-				Host:   host,
-				DryRun: dryRun,
-				Out:    cmd.OutOrStdout(),
+				ReapLog: files,
+				Recheck: time.Duration(recheck) * time.Second,
+				Host:    host,
+				DryRun:  dryRun,
+				Out:     cmd.OutOrStdout(),
 			}
 			watching := application.WatchSettings{
 				SSH: settings.SSH, Host: settings.Host, Outside: settings.Outside, Blog: settings.Blog,

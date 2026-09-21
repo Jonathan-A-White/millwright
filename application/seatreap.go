@@ -244,7 +244,7 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 			idle = 0
 			continue
 		}
-		if state, err := s.Terminal.PaneState(ctx, s.Window); err != nil || state != PaneIdle {
+		if !s.paneIdle(ctx, s.Window) {
 			idle = 0
 			continue
 		}
@@ -281,11 +281,9 @@ func (s SeatReap) held(ctx context.Context, window ReapWindow, was string, armed
 	}
 
 	if s.WhenIdle {
-		opened := window.Opened
-		if opened.IsZero() {
-			opened = armed
-		}
-		return handedOffSince(start.Handoffs, opened), nil
+		opened := openedOr(window, armed)
+		_, since := newestHandoffSince(start.Handoffs, opened)
+		return since, nil
 	}
 
 	if strings.TrimSpace(start.Acting) == was {
@@ -301,6 +299,52 @@ func (s SeatReap) held(ctx context.Context, window ReapWindow, was string, armed
 		}
 	}
 	return false, nil
+}
+
+// Finished is one look, by the rule of idle mode, at whether the session in a
+// window is finished: a handoff was written after the window was opened, and its
+// pane is idle at an empty input line. It says when the newest handoff was
+// written. Idle mode asks it on two looks in a row; a caller that closes on it
+// asks twice, and a look that cannot be made is a look at a session that is not
+// finished. The window nothing can date counts as opened at now, so that only a
+// handoff that is surely newer finishes it.
+func (s SeatReap) Finished(ctx context.Context, window ReapWindow) (handoff time.Time, finished bool) {
+	start, err := s.Seats.SeatStart(ctx, s.Seat, s.Host)
+	if err != nil {
+		return time.Time{}, false
+	}
+	handoff, since := newestHandoffSince(start.Handoffs, openedOr(window, s.now()))
+	if !since || !s.paneIdle(ctx, window.ID) {
+		return time.Time{}, false
+	}
+	return handoff, true
+}
+
+// openedOr is when a window was opened, or the time given when nothing can say.
+func openedOr(window ReapWindow, unknown time.Time) time.Time {
+	if window.Opened.IsZero() {
+		return unknown
+	}
+	return window.Opened
+}
+
+// newestHandoffSince is when the newest handoff was written, and whether any was
+// written after the window was opened.
+func newestHandoffSince(handoffs []Handoff, opened time.Time) (time.Time, bool) {
+	var newest time.Time
+	for _, handoff := range handoffs {
+		if handoff.Written.After(opened) && handoff.Written.After(newest) {
+			newest = handoff.Written
+		}
+	}
+	return newest, !newest.IsZero()
+}
+
+// paneIdle reports whether the window's pane is idle: a pane that cannot be read
+// is not.
+func (s SeatReap) paneIdle(ctx context.Context, window string) bool {
+	state, err := s.Terminal.PaneState(ctx, window)
+	return err == nil && state == PaneIdle
 }
 
 // find is the window being reaped, among those open.
