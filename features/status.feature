@@ -171,6 +171,30 @@ Feature: mw status
     Then reading status succeeds
     And the report shows "mw-gq6.7" as run=stuck, not running
 
+  Scenario: A story started more than once shows how many attempts it has had
+    Given a status story "mw-gq6.8" filed under it
+    And the status story "mw-gq6.8" is claimed with its session running
+    And the status story "mw-gq6.8" has been started 2 times
+    When mw status reads the host
+    Then reading status succeeds
+    And the report shows "mw-gq6.8" with 2 attempts
+
+  Scenario: A story given back after several attempts shows them among the ready
+    Given a status story "mw-gq6.8" filed under it
+    And the status story "mw-gq6.8" has been started 3 times
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "mw-gq6.8" as ready
+    And the report shows "mw-gq6.8" with 3 attempts
+
+  Scenario: A story started once shows no attempts
+    Given a status story "mw-gq6.8" filed under it
+    And the status story "mw-gq6.8" is claimed with its session running
+    And the status story "mw-gq6.8" has been started 1 time
+    When mw status reads the host
+    Then reading status succeeds
+    And the report shows no attempts for "mw-gq6.8"
+
   Scenario: Today's fuel is summed from the ledger lines dated today
     Given the builder's ledger holds a line from today burning 12000 tokens
     And the builder's ledger holds a line from today burning 3000 tokens

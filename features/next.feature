@@ -293,6 +293,7 @@ Feature: Closing out a finished story and carrying on
 
   Scenario: A branch that conflicts with the moved target is sent back once to a fresh Builder to rebase
     Given the other host landed a change to the same file as "mw-gq6.1" on "main"
+    And the session of "mw-gq6.1" was the first that dispatch started for it
     And the session of "mw-gq6.1" reported a plain success
     And mw next is running in the session of "mw-gq6.1"
     When mw closes out "mw-gq6.1"
@@ -307,6 +308,7 @@ Feature: Closing out a finished story and carrying on
       | sent back to rebase          |
     And the worktree of "mw-gq6.1" is still there
     And 2 sessions were ever started for "mw-gq6.1"
+    And the attempts counted on "mw-gq6.1" come to 2
 
   Scenario: A story sent back to rebase lands once its branch is rebased cleanly
     Given the other host landed a change to the same file as "mw-gq6.1" on "main"

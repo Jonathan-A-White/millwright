@@ -21,6 +21,7 @@ import (
 func registerNextRebaseSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the other host landed a change to the same file as "([^"]*)" on "([^"]*)"$`, c.theOtherHostChangedTheSameFile)
 	ctx.Given(`^mw next is running in the session of "([^"]*)"$`, c.mwNextIsRunningInTheSession)
+	ctx.Given(`^the session of "([^"]*)" was the first that dispatch started for it$`, c.theSessionWasTheFirstAttempt)
 	ctx.Given(`^the session sent back rebases the branch of "([^"]*)" onto "([^"]*)" and commits the resolution$`, c.theSentBackSessionRebases)
 	ctx.Given(`^the session sent back for "([^"]*)" ends without rebasing$`, c.theSentBackSessionEndsWithoutRebasing)
 
@@ -28,6 +29,7 @@ func registerNextRebaseSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^the story "([^"]*)" is recorded as sent back to rebase$`, c.theStoryIsRecordedAsSentBack)
 	ctx.Then(`^the report says "([^"]*)" was sent back to rebase$`, c.theReportSaysItWasSentBack)
 	ctx.Then(`^(\d+) sessions were ever started for "([^"]*)"$`, c.sessionsWereEverStarted)
+	ctx.Then(`^the attempts counted on "([^"]*)" come to (\d+)$`, c.theAttemptsCountedComeTo)
 	ctx.Then(`^the file of "([^"]*)" on "([^"]*)" at the rig's origin keeps the other host's line too$`, c.theOtherHostsLineIsKept)
 }
 
@@ -156,6 +158,22 @@ func (c *nextContext) theOtherHostsLineIsKept(id, branch string) error {
 	}
 	if !strings.Contains(said, strings.TrimSpace(otherHostsLine)) {
 		return fmt.Errorf("expected %s at the origin to keep the other host's line, got %q", branch, said)
+	}
+	return nil
+}
+
+// theSessionWasTheFirstAttempt is what dispatch leaves on a story it started.
+func (c *nextContext) theSessionWasTheFirstAttempt(id string) error {
+	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.AttemptsField: "1"})
+}
+
+func (c *nextContext) theAttemptsCountedComeTo(id string, want int) error {
+	detail, err := c.tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	if detail.Attempts != want {
+		return fmt.Errorf("expected %s to have %d attempts counted, got %d", id, want, detail.Attempts)
 	}
 	return nil
 }

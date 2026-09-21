@@ -582,6 +582,11 @@ func writeStoryIn(b *strings.Builder, pad string, d StoryDetail, note string) {
 	if note != "" {
 		clip(b, pad+"  "+note)
 	}
+	// A story started once is the usual story; one started more than once is one
+	// that was refused or given back, and is running out of tries.
+	if d.Attempts > 1 {
+		clip(b, fmt.Sprintf("%s  attempts %d", pad, d.Attempts))
+	}
 }
 
 // clip writes one line, cut to Width runes so a phone-width terminal never

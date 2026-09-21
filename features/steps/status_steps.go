@@ -113,6 +113,7 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the status story "([^"]*)" is at priority (\d)$`, c.theStatusStoryIsAtPriority)
 	ctx.Given(`^the status story "([^"]*)" is finished$`, c.theStatusStoryIsFinished)
 	ctx.Given(`^the status story "([^"]*)" is claimed with its session running$`, c.theStatusStoryIsClaimedAndRunning)
+	ctx.Given(`^the status story "([^"]*)" has been started (\d+) times?$`, c.theStatusStoryHasBeenStarted)
 	ctx.Given(`^the status story "([^"]*)" is marked run=(\S+)$`, c.theStatusStoryIsMarkedRun)
 	ctx.Given(`^the formula poured for "([^"]*)" has a step still open$`, c.theFormulaPouredHasAStepStillOpen)
 	ctx.Given(`^a status story "([^"]*)" titled "([^"]*)" pathed to the host "([^"]*)"$`, c.aStatusStoryTitledPathedToTheHost)
@@ -132,6 +133,8 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 
 	ctx.Then(`^reading status succeeds$`, c.readingStatusSucceeds)
 	ctx.Then(`^the report shows "([^"]*)" running with session "([^"]*)"$`, c.theReportShowsRunningWithSession)
+	ctx.Then(`^the report shows "([^"]*)" with (\d+) attempts$`, c.theReportShowsAttempts)
+	ctx.Then(`^the report shows no attempts for "([^"]*)"$`, c.theReportShowsNoAttempts)
 	ctx.Then(`^the report lists "([^"]*)" as ready$`, c.theReportListsAsReady)
 	ctx.Then(`^the report lists "([^"]*)" as blocked$`, c.theReportListsAsBlocked)
 	ctx.Then(`^the report lists "([^"]*)" as waiting for the Governor$`, c.theReportListsAsWaitingForTheGovernor)
@@ -979,6 +982,57 @@ func (c *statusContext) theReportDoesNotWarnAboutTheRigsMemory(rig string) error
 		if strings.HasPrefix(line, "  "+rig+" ") && strings.Contains(line, "bytes") {
 			return fmt.Errorf("expected no warning about the memory of %s, got:\n%s", rig, c.report.String())
 		}
+	}
+	return nil
+}
+
+func (c *statusContext) theStatusStoryHasBeenStarted(id string, times int) error {
+	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.AttemptsField: fmt.Sprint(times)})
+}
+
+// attemptsLine is the line of the printed report's block for one story that
+// says how many attempts it has had, or "" when its block says none.
+func (c *statusContext) attemptsLine(id string) (string, error) {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return "", err
+	}
+	lines := strings.Split(c.report.String(), "\n")
+	for i, line := range lines {
+		if !strings.HasPrefix(line, "  "+id) {
+			continue
+		}
+		// The block is the lines indented under the story's own line.
+		for _, under := range lines[i+1:] {
+			if !strings.HasPrefix(under, "    ") {
+				return "", nil
+			}
+			if strings.HasPrefix(strings.TrimSpace(under), "attempts ") {
+				return strings.TrimSpace(under), nil
+			}
+		}
+		return "", nil
+	}
+	return "", fmt.Errorf("%s is not in the printed report:\n%s", id, c.report.String())
+}
+
+func (c *statusContext) theReportShowsAttempts(id string, want int) error {
+	got, err := c.attemptsLine(id)
+	if err != nil {
+		return err
+	}
+	if wanted := fmt.Sprintf("attempts %d", want); got != wanted {
+		return fmt.Errorf("expected the block of %s to say %q, got %q:\n%s", id, wanted, got, c.report.String())
+	}
+	return nil
+}
+
+func (c *statusContext) theReportShowsNoAttempts(id string) error {
+	got, err := c.attemptsLine(id)
+	if err != nil {
+		return err
+	}
+	if got != "" {
+		return fmt.Errorf("expected the block of %s to say nothing of attempts, got %q", id, got)
 	}
 	return nil
 }

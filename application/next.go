@@ -538,6 +538,9 @@ func (n Next) sendBack(ctx context.Context, c *closeOut, report *NextReport, lan
 
 	// From here the fresh session is running and spending fuel: nothing below
 	// undoes it, and what cannot be recorded is a note.
+	if err := recordAttempt(ctx, n.Tracker, c.detail); err != nil {
+		report.Notes = append(report.Notes, err.Error())
+	}
 	report.SentBack, report.Reason, report.Why = spec.Name, ReasonMergeConflict, firstLine(landErr.Error())
 	where := fmt.Sprintf("sent back to rebase by mw on %s: session %s in %s on %s, onto %s", n.Host, spec.Name, c.worktree, c.branch, onto)
 	note := fmt.Sprintf("mw next on %s did not land this story (%s): %s does not merge into %s without conflicts, "+
@@ -981,7 +984,7 @@ func (n Next) carryOn(ctx context.Context, c *closeOut, report *NextReport) (Nex
 func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason Reason, why, said string) (NextReport, error) {
 	report.Why, report.Reason = why, reason
 
-	note := fmt.Sprintf("mw next on %s did not close this story out (%s): %s\n\n"+
+	note := fmt.Sprintf("mw next on %s "+RefusedPhrase+"%s): %s\n\n"+
 		"Nothing was merged and nothing was pushed. The story is not closed and the claim was not given back. "+
 		"The worktree %s and the branch %s are left as the session left them.",
 		n.Host, reason, why, c.worktree, c.branch)
