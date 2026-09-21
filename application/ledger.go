@@ -144,6 +144,18 @@ func LedgerNamesStory(line, id string) bool {
 	return story == id || strings.HasSuffix(story, "("+id+")")
 }
 
+// LedgerLandsStory reports whether one line of a ledger is the line of a story
+// that landed: this story's line whose outcome column begins "landed", as
+// opposed to "not landed: ...". It is what a run finds when the landing's own
+// run=landed record never got written.
+func LedgerLandsStory(line, id string) bool {
+	if !LedgerNamesStory(line, id) {
+		return false
+	}
+	cells := strings.Split(strings.Trim(strings.TrimSpace(line), "|"), " | ")
+	return len(cells) >= 3 && strings.HasPrefix(strings.TrimSpace(cells[2]), "landed")
+}
+
 // LedgerChargesSession reports whether one line of a ledger is the line that
 // charged a session's fuel: a row with a token figure in its fuel column whose
 // notes name the session. A line that only points back at the fuel has no

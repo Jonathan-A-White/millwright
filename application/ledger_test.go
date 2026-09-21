@@ -185,3 +185,20 @@ func TestASessionRefusedAndThenLandedIsChargedOnce(t *testing.T) {
 		t.Errorf("expected the session's fuel counted once, got %d tokens across the ledger", total)
 	}
 }
+
+func TestALedgerLineLandsAStoryOnlyWhenItsOutcomeSaysLanded(t *testing.T) {
+	landed := aLedgerLine(nil).String()
+	refused := aLedgerLine(func(l *application.LedgerLine) {
+		l.Outcome = "not landed: the rig's tests fail"
+	}).String()
+
+	if !application.LedgerLandsStory(landed, "mw-gq6.8") {
+		t.Errorf("a line whose outcome is landed should land mw-gq6.8: %s", landed)
+	}
+	if application.LedgerLandsStory(refused, "mw-gq6.8") {
+		t.Errorf("a line whose outcome is not landed should not land mw-gq6.8: %s", refused)
+	}
+	if application.LedgerLandsStory(landed, "mw-gq6.80") {
+		t.Errorf("a line for mw-gq6.8 should not land mw-gq6.80: %s", landed)
+	}
+}
