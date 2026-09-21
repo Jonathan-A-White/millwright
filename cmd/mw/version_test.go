@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"testing"
@@ -73,6 +75,59 @@ func TestVersionLineRenderings(t *testing.T) {
 				t.Fatalf("got %q, want %q", got, c.want)
 			}
 		})
+	}
+}
+
+// harnessOnPath puts a program named claude, with the given body, first on PATH.
+func harnessOnPath(t *testing.T, body string) {
+	t.Helper()
+
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func TestVersionPrintsTheHarnessVersionBesideMws(t *testing.T) {
+	harnessOnPath(t, `echo "9.8.7 (Claude Code)"`)
+
+	stdout, stderr := runSeparately(t, "version")
+
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "mw "+version) {
+		t.Fatalf("expected mw's line first, got %q", stdout)
+	}
+	if lines[1] != "claude 9.8.7 (Claude Code)" {
+		t.Fatalf("expected the harness's own version on the second line, got %q", lines[1])
+	}
+	if stderr != "" {
+		t.Fatalf("expected nothing on stderr, got %q", stderr)
+	}
+}
+
+func TestVersionSaysPlainlyWhenTheHarnessIsNotInstalled(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+
+	stdout, stderr := runSeparately(t, "version")
+
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	if len(lines) != 2 || lines[1] != "claude: not installed" {
+		t.Fatalf("expected mw's line and a plain 'not installed', got %q", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("expected nothing on stderr, got %q", stderr)
+	}
+}
+
+func TestVersionSaysPlainlyWhenTheHarnessWillNotTellItsVersion(t *testing.T) {
+	harnessOnPath(t, `exit 3`)
+
+	stdout, _ := runSeparately(t, "version")
+
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[1], "claude: version unknown") {
+		t.Fatalf("expected mw's line and a plain 'version unknown', got %q", stdout)
 	}
 }
 

@@ -73,7 +73,7 @@ from `cmd/mw/` only.
 | `SeatBoot` | `application/seatboot.go` | none: `Dispatch`, `Next` call it | `features/seat_boot.feature` |
 
 `cmd/mw/root.go` holds the tree (one `root.AddCommand` per command);
-`cmd/mw/main.go` runs it; `cmd/mw/version.go` is `mw version`, no use case.
+`cmd/mw/main.go` runs it; `cmd/mw/version.go` is `mw version` (mw's and `claude`'s), no use case.
 `features/path_validation.feature` covers `domain/path.go`,
 `features/ready_stories.feature` the `WorkTracker` contract; no commands.
 Neither port nor use case: `application/fuel.go`, `application/ledger.go`,
