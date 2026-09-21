@@ -1052,6 +1052,23 @@ Handoffs are read from `seats/<seat>/hosts/<host>/handoffs/` for a seat that
 keeps a directory for this host, and from `seats/<seat>/handoffs/` for one that
 does not; the newest by name is the one it boots from.
 
+Nobody is assumed to be watching, so the session never hangs on a permission
+prompt. It stays in `auto` mode, where the classifier and the allow rules decide
+what they can; but its `--settings` also carry a `PermissionRequest` hook that
+answers *deny* to whatever would still have been asked of a person, with a
+message saying nobody is watching. The denial is in the session's transcript,
+and the session goes on with what it may do; it is not asked, and nothing waits
+for an answer. (`--permission-prompts none`, which a Builder gets, only works
+with `--print`, and a seat's session is interactive.) The Millhand's wake, which
+is `mw seat up millhand` run by a timer, is always unattended.
+
+`--attended` is for the seat you bring up by hand to talk to: it leaves the hook
+out, and the session asks about a permission as Claude Code does. Only a person
+passes it; no timer or wake ever does. The hook JSON follows Claude Code's hooks
+reference, <https://code.claude.com/docs/en/hooks> (`PermissionRequest`: the
+`hookSpecificOutput` with a `decision` of `behavior` `deny`), and the permission
+modes reference, <https://code.claude.com/docs/en/permission-modes>.
+
 It refuses, starts nothing and exits non-zero in three cases: the seat has no
 charter, so there is nothing to boot into; it has written no handoff, so there
 is nothing to boot from; or it is already acting — its acting file names a
