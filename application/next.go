@@ -27,6 +27,63 @@ const (
 	RunStuck = "stuck"
 )
 
+// Reason is the short, stable code a close-out that landed nothing is filed
+// under, so that a person, `mw status` and the Mayor can tell a branch that needs
+// fixing from a factory that does — the free text of the reason says what
+// happened, and this says which kind of thing it was. The vocabulary is small and
+// fixed on purpose: a code is written into the ledger, and a reader of an old
+// ledger must find it still means what it meant.
+type Reason string
+
+// The reasons a close-out lands nothing. The first group is the branch itself
+// turned away by the checks — the session's work to amend; the second is
+// something else stopping the close-out before or during the landing — the
+// factory's, or the other host's, to look at.
+const (
+	// The branch.
+	ReasonNoCommits       Reason = "no-commits"
+	ReasonUncommittedWork Reason = "uncommitted-work"
+	ReasonSignedCommit    Reason = "signed-commit"
+	ReasonOpenSteps       Reason = "open-steps"
+	ReasonTestsFail       Reason = "tests-fail"
+	ReasonMergeConflict   Reason = "merge-conflict"
+	ReasonMergedTestsFail Reason = "merged-tests-fail"
+
+	// The factory.
+	ReasonNoResult      Reason = "no-result"
+	ReasonSessionFailed Reason = "session-failed"
+	ReasonTestsNotRun   Reason = "tests-not-run"
+	ReasonGitFailed     Reason = "git-failed"
+	ReasonTrackerFailed Reason = "tracker-failed"
+	ReasonMergeSlot     Reason = "merge-slot"
+	ReasonPushLost      Reason = "push-lost"
+	ReasonLandingFailed Reason = "landing-failed"
+)
+
+// landingFailure is an error of the landing that knows which Reason it stops a
+// close-out for. It is transparent to errors.Is and errors.As, so that
+// Rejected and Conflicted see through it.
+type landingFailure struct {
+	reason Reason
+	err    error
+}
+
+func (f landingFailure) Error() string { return f.err.Error() }
+func (f landingFailure) Unwrap() error { return f.err }
+
+// failedFor is err, marked as stopping a close-out for reason.
+func failedFor(reason Reason, err error) error { return landingFailure{reason, err} }
+
+// reasonOf is the Reason an error of the landing stops a close-out for: the one
+// it was marked with, else ReasonLandingFailed.
+func reasonOf(err error) Reason {
+	var marked landingFailure
+	if errors.As(err, &marked) {
+		return marked.reason
+	}
+	return ReasonLandingFailed
+}
+
 // MayorMailbox is whose mailbox a close-out writes to, and the verdicts it
 // starts the subject with: landed, refused by the checks, or blocked by
 // something else that stopped it.
@@ -133,7 +190,7 @@ type NextReport struct {
 	Landed        bool
 	LandedEarlier bool
 	How           Landed
-	Target string
+	Target        string
 	// Commits is how many commits the session left on the story's branch.
 	Commits int
 	// Uncommitted is the paths the session left changed and not committed in
@@ -150,11 +207,13 @@ type NextReport struct {
 	// run says nothing about it.
 	Rig    Advanced
 	RigDir string
-	// Why is the reason nothing landed, empty when something did. Refused says
-	// it is the branch itself the checks turned away — no commits, a signed
-	// commit, open formula steps, failing tests — rather than something that
-	// stopped the close-out before or during the landing.
+	// Why is the reason nothing landed, empty when something did, and Reason is
+	// the code it is filed under. Refused says it is the branch itself the
+	// checks turned away — no commits, a signed commit, open formula steps,
+	// failing tests — rather than something that stopped the close-out before
+	// or during the landing.
 	Why     string
+	Reason  Reason
 	Refused bool
 	// NotClosed is what the tracker said when it would not close a story that
 	// had landed, empty when the story was closed. A story with this set is
@@ -321,43 +380,43 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	// session that succeeded quietly: it is one that died.
 	printed, err := n.Vault.ReadRunFile(ctx, c.id, ResultFileName)
 	if errors.Is(err, fs.ErrNotExist) {
-		return n.stop(ctx, c, report, fmt.Sprintf("the session left no result at %s, so it never started or it died before it could write one",
+		return n.stop(ctx, c, report, ReasonNoResult, fmt.Sprintf("the session left no result at %s, so it never started or it died before it could write one",
 			n.Vault.RunFile(c.id, ResultFileName)), "")
 	}
 	if err != nil {
-		return n.stop(ctx, c, report, fmt.Sprintf("the session's result could not be read: %v", err), "")
+		return n.stop(ctx, c, report, ReasonNoResult, fmt.Sprintf("the session's result could not be read: %v", err), "")
 	}
 	result, err := ReadSessionResult(printed)
 	if err != nil {
-		return n.stop(ctx, c, report, fmt.Sprintf("the session's result could not be read: %v", err), "")
+		return n.stop(ctx, c, report, ReasonNoResult, fmt.Sprintf("the session's result could not be read: %v", err), "")
 	}
 	c.result, report.Result = result, result
 	if !result.Finished() {
-		return n.stop(ctx, c, report, "the session did not finish: "+result.Trouble(), "")
+		return n.stop(ctx, c, report, ReasonSessionFailed, "the session did not finish: "+result.Trouble(), "")
 	}
 
 	// The target branch as the remote has it now is what the work is measured
 	// against: the other host may have landed on it while this story was worked.
 	if err := n.Worktrees.Fetch(ctx, c.rigDir); err != nil {
-		return n.stop(ctx, c, report, fmt.Sprintf("the rig could not be brought up to date with %s: %v", n.remote(), err), "")
+		return n.stop(ctx, c, report, ReasonGitFailed, fmt.Sprintf("the rig could not be brought up to date with %s: %v", n.remote(), err), "")
 	}
 	if found := n.refusals(ctx, c, report, false); len(found) > 0 {
 		report.Refused = true
-		return n.stop(ctx, c, report, found[0].Why, found[0].Said)
+		return n.stop(ctx, c, report, found[0].Reason, found[0].Why, found[0].Said)
 	}
 
 	// Only one close-out at a time may touch a rig's target branch on this host.
 	// The other host's races are settled by the remote itself, below.
 	holding, err := n.Slot.Take(ctx, c.rigDir, Holders(n.Seat, n.Host, c.id))
 	if err != nil {
-		return n.stop(ctx, c, report, fmt.Sprintf("the merge slot of %s could not be taken: %v", c.path.Rig, err), "")
+		return n.stop(ctx, c, report, ReasonMergeSlot, fmt.Sprintf("the merge slot of %s could not be taken: %v", c.path.Rig, err), "")
 	}
 	landed, landErr := n.merge(ctx, c, report)
 	if err := holding.Release(ctx); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the merge slot of %s could not be given back: %v", c.path.Rig, err))
 	}
 	if landErr != nil {
-		return n.stop(ctx, c, report, firstLine(landErr.Error()), n.keepLandingError(ctx, c, report, landErr))
+		return n.stop(ctx, c, report, reasonOf(landErr), firstLine(landErr.Error()), n.keepLandingError(ctx, c, report, landErr))
 	}
 	report.Landed, report.How = true, landed
 	n.advanceRig(ctx, c, report)
@@ -426,8 +485,9 @@ func fenced(text string) string {
 // Refusal is one reason a branch is not landed: the line that says it, and the
 // detail a person needs to act on it — which steps are open, which commit is
 // signed, what the tests said. It is what a close-out writes on the story and
-// what mw check prints, worded once.
+// what mw check prints, worded once. Reason is the code it is filed under.
 type Refusal struct {
+	Reason    Reason
 	Why, Said string
 }
 
@@ -443,8 +503,8 @@ type Refusal struct {
 func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all bool) []Refusal {
 	var found []Refusal
 	// refuse notes one refusal and says whether to go no further.
-	refuse := func(why, said string) bool {
-		found = append(found, Refusal{why, said})
+	refuse := func(reason Reason, why, said string) bool {
+		found = append(found, Refusal{reason, why, said})
 		return !all
 	}
 
@@ -453,13 +513,13 @@ func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all
 	base := StartPoint(n.remote(), c.target)
 	commits, err := n.Landing.Ahead(ctx, c.rigDir, c.branch, base)
 	if err != nil {
-		refuse(fmt.Sprintf("the commits on %s could not be counted: %v", c.branch, err), "")
+		refuse(ReasonGitFailed, fmt.Sprintf("the commits on %s could not be counted: %v", c.branch, err), "")
 		return found
 	}
 	report.Commits = commits
 	if commits == 0 {
-		why, said := n.nothingCommitted(ctx, c, report)
-		refuse(why, said)
+		reason, why, said := n.nothingCommitted(ctx, c, report)
+		refuse(reason, why, said)
 		return found
 	}
 
@@ -469,7 +529,7 @@ func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all
 	// once it is on the target branch at the remote, only a force-push would
 	// undo it, and mw forces nothing. Refused here, the branch is still the
 	// session's to amend.
-	if stopped, why, said := n.signedByAMachine(ctx, c); stopped && refuse(why, said) {
+	if stopped, reason, why, said := n.signedByAMachine(ctx, c); stopped && refuse(reason, why, said) {
 		return found
 	}
 
@@ -479,11 +539,11 @@ func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all
 		open, err := n.Tracker.OpenSteps(ctx, root)
 		switch {
 		case err != nil:
-			if refuse(fmt.Sprintf("the steps of the formula poured as %s could not be read: %v", root, err), "") {
+			if refuse(ReasonTrackerFailed, fmt.Sprintf("the steps of the formula poured as %s could not be read: %v", root, err), "") {
 				return found
 			}
 		case len(open) > 0:
-			if refuse(fmt.Sprintf("%d formula step(s) of %s are still open, so the formula was not finished", len(open), root),
+			if refuse(ReasonOpenSteps, fmt.Sprintf("%d formula step(s) of %s are still open, so the formula was not finished", len(open), root),
 				"Still open:\n"+stepList(open)) {
 				return found
 			}
@@ -494,12 +554,12 @@ func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all
 	checked, err := n.Checks.Run(ctx, c.path.Rig, c.worktree)
 	switch {
 	case err != nil:
-		refuse(fmt.Sprintf("the rig's tests could not be run in %s: %v", c.worktree, err), "")
+		refuse(ReasonTestsNotRun, fmt.Sprintf("the rig's tests could not be run in %s: %v", c.worktree, err), "")
 	case checked.NotRun:
-		refuse(fmt.Sprintf("the rig's tests could not be run in the worktree: `%s` did not start, so this host is missing something the command needs (a toolchain not on its PATH?)", checked.Command),
+		refuse(ReasonTestsNotRun, fmt.Sprintf("the rig's tests could not be run in the worktree: `%s` did not start, so this host is missing something the command needs (a toolchain not on its PATH?)", checked.Command),
 			"The last lines of `"+checked.Command+"` in "+c.worktree+":\n\n```\n"+checked.Tail(CheckLines)+"\n```")
 	case !checked.Passed:
-		refuse(fmt.Sprintf("the rig's tests fail in the worktree: `%s` did not pass", checked.Command),
+		refuse(ReasonTestsFail, fmt.Sprintf("the rig's tests fail in the worktree: `%s` did not pass", checked.Command),
 			"The last lines of `"+checked.Command+"` in "+c.worktree+":\n\n```\n"+checked.Tail(CheckLines)+"\n```")
 	}
 	return found
@@ -511,19 +571,19 @@ func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all
 // headless session ends when its turn does, whatever it left running — so the
 // worktree is read too, and what is in it is named: the person told "committed
 // nothing" would otherwise throw the worktree away.
-func (n Next) nothingCommitted(ctx context.Context, c *closeOut, report *NextReport) (why, said string) {
+func (n Next) nothingCommitted(ctx context.Context, c *closeOut, report *NextReport) (reason Reason, why, said string) {
 	plain := fmt.Sprintf("the session committed nothing to %s, so there is nothing to land on %s", c.branch, c.target)
 
 	left, err := n.Landing.Uncommitted(ctx, c.worktree)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the worktree %s could not be read for uncommitted work: %v", c.worktree, err))
-		return plain, ""
+		return ReasonNoCommits, plain, ""
 	}
 	if len(left) == 0 {
-		return plain, ""
+		return ReasonNoCommits, plain, ""
 	}
 	report.Uncommitted = left
-	return fmt.Sprintf("the session committed nothing to %s but left uncommitted work in its worktree (%s), so there is nothing to land on %s",
+	return ReasonUncommittedWork, fmt.Sprintf("the session committed nothing to %s but left uncommitted work in its worktree (%s), so there is nothing to land on %s",
 			c.branch, pathList(left, UncommittedShort), c.target),
 		fmt.Sprintf("Uncommitted work left in %s (%d path(s)):\n%s", c.worktree, len(left), bullets(left, UncommittedListed))
 }
@@ -559,10 +619,10 @@ func bullets(paths []string, limit int) string {
 //
 // The rule itself is AIAttribution, and it is applied to every commit the
 // landing would add, not only the newest: the target branch takes all of them.
-func (n Next) signedByAMachine(ctx context.Context, c *closeOut) (bool, string, string) {
+func (n Next) signedByAMachine(ctx context.Context, c *closeOut) (bool, Reason, string, string) {
 	commits, err := n.Landing.Commits(ctx, c.rigDir, c.branch, StartPoint(n.remote(), c.target))
 	if err != nil {
-		return true, fmt.Sprintf("the commit messages on %s could not be read: %v", c.branch, err), ""
+		return true, ReasonGitFailed, fmt.Sprintf("the commit messages on %s could not be read: %v", c.branch, err), ""
 	}
 
 	var carrying []string
@@ -578,7 +638,7 @@ func (n Next) signedByAMachine(ctx context.Context, c *closeOut) (bool, string, 
 		carrying = append(carrying, "- "+commit.Hash+" · "+firstLine(commit.Message)+"\n  "+line)
 	}
 	if signature == "" {
-		return false, "", ""
+		return false, "", "", ""
 	}
 
 	why := fmt.Sprintf("commit %s on %s is signed as a machine's work, which this factory's commits never are: %s",
@@ -588,7 +648,7 @@ func (n Next) signedByAMachine(ctx context.Context, c *closeOut) (bool, string, 
 		"session's to amend. Reword the message(s) — `git rebase -i %s` or `git commit --amend` for the "+
 		"newest — and run `mw next %s` again.",
 		strings.Join(carrying, "\n"), StartPoint(n.remote(), c.target), c.id)
-	return true, why, said
+	return true, ReasonSignedCommit, why, said
 }
 
 // closeALanding is a close-out run again on a story an earlier one landed and
@@ -678,12 +738,12 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 	for try := 1; try <= n.tries(); try++ {
 		if try > 1 {
 			if err := n.Worktrees.Fetch(ctx, c.rigDir); err != nil {
-				return Landed{}, fmt.Errorf("the rig could not be brought up to date with %s: %w", n.remote(), err)
+				return Landed{}, failedFor(ReasonGitFailed, fmt.Errorf("the rig could not be brought up to date with %s: %w", n.remote(), err))
 			}
 		}
 		dir, err := n.Landing.OpenLanding(ctx, c.rigDir, base)
 		if err != nil {
-			return Landed{}, fmt.Errorf("a landing of %s at %s could not be opened: %w", c.path.Rig, base, err)
+			return Landed{}, failedFor(ReasonLandingFailed, fmt.Errorf("a landing of %s at %s could not be opened: %w", c.path.Rig, base, err))
 		}
 
 		landed, err := n.push(ctx, c, report, dir)
@@ -700,8 +760,8 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 			return Landed{}, err
 		}
 	}
-	return Landed{}, fmt.Errorf("%s could not be landed on %s: the other host got there first %d times running; nothing was forced: %w",
-		c.branch, c.target, n.tries(), lost)
+	return Landed{}, failedFor(ReasonPushLost, fmt.Errorf("%s could not be landed on %s: the other host got there first %d times running; nothing was forced: %w",
+		c.branch, c.target, n.tries(), lost))
 }
 
 // push is one attempt at a landing, in a landing worktree that is already open:
@@ -710,10 +770,10 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 	landed, err := n.Landing.Merge(ctx, dir, c.branch)
 	if err != nil {
 		if Conflicted(err) {
-			return Landed{}, fmt.Errorf("%s does not merge into %s without conflicts, which mw will not resolve for anybody: %w",
-				c.branch, c.target, err)
+			return Landed{}, failedFor(ReasonMergeConflict, fmt.Errorf("%s does not merge into %s without conflicts, which mw will not resolve for anybody: %w",
+				c.branch, c.target, err))
 		}
-		return Landed{}, fmt.Errorf("%s could not be merged into %s: %w", c.branch, c.target, err)
+		return Landed{}, failedFor(ReasonLandingFailed, fmt.Errorf("%s could not be merged into %s: %w", c.branch, c.target, err))
 	}
 
 	// A merge commit is a combination of two branches that nothing has ever been
@@ -722,15 +782,15 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 	if !landed.FastForward {
 		checked, err := n.Checks.Run(ctx, c.path.Rig, dir)
 		if err != nil {
-			return Landed{}, fmt.Errorf("the rig's tests could not be run on the merged result in %s: %w", dir, err)
+			return Landed{}, failedFor(ReasonTestsNotRun, fmt.Errorf("the rig's tests could not be run on the merged result in %s: %w", dir, err))
 		}
 		if checked.NotRun {
-			return Landed{}, fmt.Errorf("the rig's tests could not be run on the merged result in %s: `%s` did not start, so nothing was pushed\n\n```\n%s\n```",
-				dir, checked.Command, checked.Tail(CheckLines))
+			return Landed{}, failedFor(ReasonTestsNotRun, fmt.Errorf("the rig's tests could not be run on the merged result in %s: `%s` did not start, so nothing was pushed\n\n```\n%s\n```",
+				dir, checked.Command, checked.Tail(CheckLines)))
 		}
 		if !checked.Passed {
-			return Landed{}, fmt.Errorf("%s and %s do not pass the rig's tests together: `%s` failed on the merged result, so nothing was pushed\n\n```\n%s\n```",
-				c.branch, c.target, checked.Command, checked.Tail(CheckLines))
+			return Landed{}, failedFor(ReasonMergedTestsFail, fmt.Errorf("%s and %s do not pass the rig's tests together: `%s` failed on the merged result, so nothing was pushed\n\n```\n%s\n```",
+				c.branch, c.target, checked.Command, checked.Tail(CheckLines)))
 		}
 	}
 
@@ -764,18 +824,19 @@ func (n Next) carryOn(ctx context.Context, c *closeOut, report *NextReport) (Nex
 	return *report, nil
 }
 
-// stop records a close-out that landed nothing: the reason on the story, the
-// story marked blocked so that nobody takes it for work in flight, and one line
-// in the ledger saying it did not land. Nothing is merged, nothing is pushed,
-// nothing is closed and nothing is given back — the worktree and the branch are
-// left exactly as the session left them, because they are the evidence.
-func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, why, said string) (NextReport, error) {
-	report.Why = why
+// stop records a close-out that landed nothing: the reason, and the code it is
+// filed under, on the story; the story marked blocked so that nobody takes it
+// for work in flight; and one line in the ledger saying it did not land, its
+// outcome starting with the code. Nothing is merged, nothing is pushed, nothing
+// is closed and nothing is given back — the worktree and the branch are left
+// exactly as the session left them, because they are the evidence.
+func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason Reason, why, said string) (NextReport, error) {
+	report.Why, report.Reason = why, reason
 
-	note := fmt.Sprintf("mw next on %s did not close this story out: %s\n\n"+
+	note := fmt.Sprintf("mw next on %s did not close this story out (%s): %s\n\n"+
 		"Nothing was merged and nothing was pushed. The story is not closed and the claim was not given back. "+
 		"The worktree %s and the branch %s are left as the session left them.",
-		n.Host, why, c.worktree, c.branch)
+		n.Host, reason, why, c.worktree, c.branch)
 	if said != "" {
 		note += "\n\n" + said
 	}
@@ -784,10 +845,10 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, why, sa
 	if err := n.Tracker.CommentOnStory(ctx, c.id, note); err != nil {
 		trouble = append(trouble, fmt.Sprintf("the reason could not be written on the story: %v", err))
 	}
-	if err := n.Tracker.SetStoryState(ctx, c.id, RunState, RunBlocked, why); err != nil {
+	if err := n.Tracker.SetStoryState(ctx, c.id, RunState, RunBlocked, "("+string(reason)+") "+why); err != nil {
 		trouble = append(trouble, fmt.Sprintf("%s could not be recorded as %s=%s: %v", c.id, RunState, RunBlocked, err))
 	}
-	if err := n.ledger(ctx, c, report, "not landed: "+firstLine(why)); err != nil {
+	if err := n.ledger(ctx, c, report, NotLanded(reason, firstLine(why))); err != nil {
 		trouble = append(trouble, err.Error())
 	}
 	// A close-out that lands nothing syncs nothing either, but the line it has
@@ -1073,7 +1134,11 @@ func (r NextReport) String() string {
 	case r.Landed:
 		fmt.Fprintf(&b, "  landed  %s on %s (%d commits, %d push(es))\n", r.How.LandedAs(r.Target), r.Target, r.Commits, r.Pushes)
 	default:
-		fmt.Fprintf(&b, "  STOPPED %s\n", r.Why)
+		if r.Reason == "" {
+			fmt.Fprintf(&b, "  STOPPED %s\n", r.Why)
+		} else {
+			fmt.Fprintf(&b, "  STOPPED (%s) %s\n", r.Reason, r.Why)
+		}
 	}
 	switch {
 	case r.Rig.Moved:

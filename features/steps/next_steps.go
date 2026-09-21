@@ -147,6 +147,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the comment on "([^"]*)" and the report name that commit$`, c.theCommentAndReportNameTheCommit)
 	ctx.Then(`^the comment on "([^"]*)" and the report say uncommitted work was left, listing:$`, c.theCommentAndReportSayUncommittedWorkWasLeft)
 	ctx.Then(`^the last ledger line holds:$`, c.theLastLedgerLineHolds)
+	ctx.Then(`^the report says it stopped for "([^"]*)"$`, c.theReportSaysItStoppedFor)
 	ctx.Then(`^the last ledger line names "([^"]*)"$`, c.theLastLedgerLineNames)
 	ctx.Then(`^the ledger still holds every line it held before$`, c.theLedgerStillHoldsEveryLine)
 	ctx.Then(`^nothing is left of the worktree of "([^"]*)"$`, c.nothingIsLeftOfTheWorktree)
@@ -1308,6 +1309,19 @@ func (c *nextContext) theFirstLedgerLineForHolds(id string, table *godog.Table) 
 		if !strings.Contains(named[0], want) {
 			return fmt.Errorf("expected the first ledger line for %s to hold %q, got:\n%s", id, want, named[0])
 		}
+	}
+	return nil
+}
+
+// theReportSaysItStoppedFor is the reason code, the one fact of a refusal a
+// person or the Mayor can tell it apart by: on the report the close-out returns,
+// in the report a person reads, and — through the ledger steps — in the ledger.
+func (c *nextContext) theReportSaysItStoppedFor(code string) error {
+	if c.report.Reason != application.Reason(code) {
+		return fmt.Errorf("expected the report to carry the reason code %q, got %q (%q)", code, c.report.Reason, c.report.Why)
+	}
+	if want := "STOPPED (" + code + ") "; !strings.Contains(c.printed.String(), want) {
+		return fmt.Errorf("expected the printed report to say %q, got:\n%s", want, c.printed.String())
 	}
 	return nil
 }

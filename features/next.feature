@@ -133,8 +133,9 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.1" carries a comment quoting: undefined: Ledger
     And the worktree of "mw-gq6.1" is still there
     And the last ledger line holds:
-      | mw-gq6.1   |
-      | not landed |
+      | mw-gq6.1                  |
+      | not landed (tests-fail):  |
+    And the report says it stopped for "tests-fail"
     And no fresh session was started
 
   Scenario: Tests that could not be run are not reported as failing, and nothing is landed
@@ -151,8 +152,9 @@ Feature: Closing out a finished story and carrying on
     And the worktree of "mw-gq6.1" is still there
     And the last ledger line holds:
       | mw-gq6.1                            |
-      | not landed                          |
+      | not landed (tests-not-run):         |
       | could not be run                    |
+    And the report says it stopped for "tests-not-run"
     And no fresh session was started
 
   Scenario: An errored session is recorded truthfully and nothing is landed
@@ -177,9 +179,10 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.1" is held blocked
     And the story "mw-gq6.1" carries a comment quoting: the session ran out of fuel
     And the last ledger line holds:
-      | mw-gq6.1      |
-      | not landed    |
-      | 23,030 tokens |
+      | mw-gq6.1                       |
+      | not landed (session-failed):   |
+      | 23,030 tokens                  |
+    And the report says it stopped for "session-failed"
     And the worktree of "mw-gq6.1" is still there
     And no fresh session was started
     And the rig's tests were run 0 times
@@ -190,6 +193,9 @@ Feature: Closing out a finished story and carrying on
     Then nothing was landed on "main"
     And the story "mw-gq6.1" is not closed
     And the story "mw-gq6.1" is held blocked
+    And the report says it stopped for "no-result"
+    And the last ledger line holds:
+      | not landed (no-result): |
     And no fresh session was started
 
   Scenario: A branch with no commits on it is not landed
@@ -199,6 +205,9 @@ Feature: Closing out a finished story and carrying on
     Then nothing was landed on "main"
     And the story "mw-gq6.9" is not closed
     And the story "mw-gq6.9" is held blocked
+    And the report says it stopped for "no-commits"
+    And the last ledger line holds:
+      | not landed (no-commits): |
     And the rig's tests were run 0 times
 
   Scenario: A branch with no commits but a dirty worktree says the session left work uncommitted
@@ -218,9 +227,11 @@ Feature: Closing out a finished story and carrying on
       | README.md          |
       | notes/half-done.md |
       | the-feature.go     |
+    And the report says it stopped for "uncommitted-work"
     And the last ledger line holds:
-      | mw-gq6.9         |
-      | uncommitted work |
+      | mw-gq6.9                      |
+      | not landed (uncommitted-work): |
+      | uncommitted work              |
       | the-feature.go   |
 
   Scenario: A commit signed by an AI is not landed
@@ -233,9 +244,10 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.1" carries a comment quoting: Co-Authored-By: Claude Sonnet 5
     And the comment on "mw-gq6.1" and the report name that commit
     And the worktree of "mw-gq6.1" is still there
+    And the report says it stopped for "signed-commit"
     And the last ledger line holds:
-      | mw-gq6.1   |
-      | not landed |
+      | mw-gq6.1                      |
+      | not landed (signed-commit):   |
     And the rig's tests were run 0 times
     And no fresh session was started
 
@@ -256,6 +268,9 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.1" is not closed
     And the story "mw-gq6.1" is held blocked
     And the story "mw-gq6.1" carries a comment quoting: formula step
+    And the report says it stopped for "open-steps"
+    And the last ledger line holds:
+      | not landed (open-steps): |
 
   Scenario: The target branch moved on the origin while the story was worked
     Given the other host landed its own work on "main" while "mw-gq6.1" was worked
@@ -291,6 +306,7 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.1" is not closed
     And the ledger holds exactly one line for "mw-gq6.1"
     And that ledger line holds only the first line of what the origin said
+    And the report says it stopped for "landing-failed"
     And the run of "mw-gq6.1" holds a landing error with every line the origin said
     And the comment on "mw-gq6.1" quotes every line the origin said
     And mw committed to the vault exactly:

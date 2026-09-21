@@ -144,10 +144,17 @@ func LedgerNamesStory(line, id string) bool {
 	return story == id || strings.HasSuffix(story, "("+id+")")
 }
 
+// NotLanded is the outcome of a close-out that landed nothing: "not landed",
+// the code it is filed under in brackets, and why. A ledger holds lines written
+// before there were codes, "not landed: ...", and LedgerLandsStory reads both.
+func NotLanded(reason Reason, why string) string {
+	return fmt.Sprintf("not landed (%s): %s", reason, why)
+}
+
 // LedgerLandsStory reports whether one line of a ledger is the line of a story
 // that landed: this story's line whose outcome column begins "landed", as
-// opposed to "not landed: ...". It is what a run finds when the landing's own
-// run=landed record never got written.
+// opposed to "not landed: ..." or "not landed (code): ...". It is what a run
+// finds when the landing's own run=landed record never got written.
 func LedgerLandsStory(line, id string) bool {
 	if !LedgerNamesStory(line, id) {
 		return false
