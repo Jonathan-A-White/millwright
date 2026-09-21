@@ -77,6 +77,11 @@ type Status struct {
 	// the Builder is the seat that works every story.
 	Seat string
 
+	// Ticks are this host's logs of its timers' runs, counted for the TICKS
+	// section. A log that is not there, or that no line was ever written to,
+	// leaves its timer out; with neither there is no section.
+	Ticks TickLogs
+
 	// Now is the clock "today" is read by, for picking out the ledger's lines
 	// dated today. The zero value reads the real one.
 	Now func() time.Time
@@ -139,6 +144,9 @@ type HostWork struct {
 	// stranded: nothing here will move them, and no other host will take them
 	// until somebody re-paths them.
 	Asleep bool
+	// Ticks are the counts of that host's timers as it left them with its last
+	// sync: nothing known of a host that has left none.
+	Ticks HostTicks
 	// Stories are the stories pathed to this host that are ready to be taken or
 	// already claimed, in the order the tracker listed them.
 	Stories []StoryDetail
@@ -166,6 +174,8 @@ type StatusReport struct {
 	// Others is what every other host named in a story's Path has in hand, one
 	// entry per host, in host order.
 	Others []HostWork
+	// Ticks are how this host's own timers are doing, counted from their logs.
+	Ticks HostTicks
 	// FuelToday is every token the seat's ledger charged today, summed from
 	// the lines the ledger dates today.
 	FuelToday int
@@ -178,10 +188,10 @@ type StatusReport struct {
 
 // Run reads the report and prints it. Every call it makes is a read: the
 // tracker's WorkInHand, StoryState and OpenSteps, ReadyWithLabel and
-// BlockedForHost, one Note per other host, and the vault's ReadLedger and
-// RigMemorySizes. WorkInHand is read once, and this host's running and ready
-// stories and the other hosts' work are all narrowed from it. Nothing is
-// claimed, nothing is poured, nothing is written.
+// BlockedForHost, two Notes per other host, the two tick logs' Read and the
+// vault's ReadLedger and RigMemorySizes. WorkInHand is read once, and this
+// host's running and ready stories and the other hosts' work are all narrowed
+// from it. Nothing is claimed, nothing is poured, nothing is written.
 func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	report := StatusReport{Host: s.Host}
 	switch {
@@ -244,6 +254,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		return report, err
 	}
 	report.Others = others
+	report.Ticks = ReadHostTicks(ctx, s.Ticks)
 
 	fuel, err := s.fuelToday(ctx)
 	if err != nil {
@@ -287,7 +298,8 @@ func (s Status) running(ctx context.Context, detail StoryDetail) (RunningStory, 
 
 // elsewhere reads what the other hosts hold: the stories pathed to each of
 // them, taken from the work already in hand, and when each last recorded itself
-// level. It costs one note per host that has work, and writes nothing.
+// level and how its timers were doing. It costs two notes per host that has
+// work, and writes nothing.
 //
 // A host is called asleep when the last sync it recorded is further back than
 // the threshold, when it has never recorded one, or when what it recorded is
@@ -325,6 +337,12 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand) ([]HostWork, e
 			}
 		}
 		held.Asleep = held.LastSync.IsZero() || held.Silent > s.hostSilence()
+
+		ticks, err := s.Notes.Note(ctx, TicksKey(host))
+		if err != nil {
+			return nil, fmt.Errorf("reading how the timers of %s are doing: %w", host, err)
+		}
+		held.Ticks = ParseHostTicks(ticks)
 		work = append(work, held)
 	}
 	return work, nil
@@ -462,6 +480,12 @@ func (r StatusReport) String() string {
 	}
 	b.WriteString("\n")
 
+	if r.Ticks.Known() {
+		clip(&b, TicksHeading)
+		r.Ticks.write(&b, "  ")
+		b.WriteString("\n")
+	}
+
 	if len(r.RigMemory) > 0 {
 		clip(&b, RigMemoryHeading)
 		for _, size := range r.RigMemory {
@@ -490,6 +514,7 @@ func (w HostWork) write(b *strings.Builder, here string) {
 	if w.Asleep {
 		clip(b, "    re-path: "+RepathHint+here)
 	}
+	w.Ticks.write(b, "    ")
 
 	note := ""
 	if w.Asleep {

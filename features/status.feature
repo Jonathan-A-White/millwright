@@ -306,3 +306,92 @@ Feature: mw status
     When mw status reads the host
     Then reading status succeeds
     And nothing was written through the tracker, the ledger or the runner
+
+  # Ticks: a timer whose runs fail looks, from outside, like one that works. The
+  # logs the dispatch and the Millhand's tick keep are counted, on this host, and
+  # the counts go to the other host with every sync.
+  Scenario: Three failed dispatch runs after a good one are counted, with the time of the good one
+    Given the dispatch log of "vps" holds a good run at "2026-09-21T09:00:00Z"
+    And the dispatch log of "vps" then holds 3 failed runs
+    When mw status reads the host
+    Then reading status succeeds
+    And the TICKS section says of the dispatch: "last good 2026-09-21 09:00Z"
+    And the TICKS section says of the dispatch: "failed 3 in a row"
+
+  Scenario: Local network faults are counted apart from failed runs
+    Given the dispatch log of "vps" holds a good run at "2026-09-21T09:00:00Z"
+    And the dispatch log of "vps" then holds 7 local network faults
+    When mw status reads the host
+    Then reading status succeeds
+    And the TICKS section says of the dispatch: "7 local network faults, 0 failed"
+
+  Scenario: Failed runs and local network faults each keep their own count
+    Given the dispatch log of "vps" holds a good run at "2026-09-21T09:00:00Z"
+    And the dispatch log of "vps" then holds 2 failed runs
+    And the dispatch log of "vps" then holds 1 local network fault
+    When mw status reads the host
+    Then reading status succeeds
+    And the TICKS section says of the dispatch: "1 local network fault, 2 failed"
+
+  Scenario: A good run resets the count
+    Given the dispatch log of "vps" holds a good run at "2026-09-21T09:00:00Z"
+    And the dispatch log of "vps" then holds 3 failed runs
+    And the dispatch log of "vps" then holds 1 good run
+    When mw status reads the host
+    Then reading status succeeds
+    And the TICKS section says of the dispatch: "failed 0 in a row"
+    And the TICKS section says of the dispatch: "last good 2026-09-21 10:00Z"
+
+  Scenario: A log with no good run in it says so
+    Given the dispatch log of "vps" holds 4 failed runs
+    When mw status reads the host
+    Then reading status succeeds
+    And the TICKS section says of the dispatch: "no good run logged"
+    And the TICKS section says of the dispatch: "failed 4 in a row"
+
+  Scenario: The Millhand's tick is counted the same way, beside the dispatch
+    Given the dispatch log of "vps" holds a good run at "2026-09-21T09:00:00Z"
+    And the Millhand tick log of "vps" holds a good run at "2026-09-21T09:05:00Z"
+    And the Millhand tick log of "vps" then holds 3 failed runs
+    When mw status reads the host
+    Then reading status succeeds
+    And the TICKS section says of the dispatch: "failed 0 in a row"
+    And the TICKS section says of the Millhand tick: "last good 2026-09-21 09:05Z"
+    And the TICKS section says of the Millhand tick: "failed 3 in a row"
+
+  Scenario: A host with no log prints no TICKS section
+    When mw status reads the host
+    Then reading status succeeds
+    And the report has no TICKS section
+
+  Scenario: A host with only one of the logs prints only that one
+    Given the Millhand tick log of "vps" holds a good run at "2026-09-21T09:05:00Z"
+    When mw status reads the host
+    Then reading status succeeds
+    And the TICKS section says of the Millhand tick: "last good 2026-09-21 09:05Z"
+    And the TICKS section has nothing on the dispatch
+
+  Scenario: The other host's counts appear under OTHER HOSTS after it syncs
+    Given a status story "mw-gq6.12" filed under it, overriding "host" with "laptop"
+    And the dispatch log of "laptop" holds a good run at "2026-09-21T09:00:00Z"
+    And the dispatch log of "laptop" then holds 12 failed runs
+    And the Millhand tick log of "laptop" holds a good run at "2026-09-21T09:05:00Z"
+    And the host "laptop" syncs
+    When mw status reads the host
+    Then reading status succeeds
+    And under OTHER HOSTS the host "laptop" shows for the dispatch: "last good 2026-09-21 09:00Z"
+    And under OTHER HOSTS the host "laptop" shows for the dispatch: "failed 12 in a row"
+    And under OTHER HOSTS the host "laptop" shows for the Millhand tick: "failed 0 in a row"
+
+  Scenario: A host that syncs with no log leaves no note of ticks, and shows none
+    Given a status story "mw-gq6.12" filed under it, overriding "host" with "laptop"
+    And the host "laptop" syncs
+    When mw status reads the host
+    Then reading status succeeds
+    And under OTHER HOSTS the host "laptop" shows nothing of its ticks
+
+  Scenario: Reading the counts writes nothing
+    Given the dispatch log of "vps" holds 3 failed runs
+    When mw status reads the host
+    Then reading status succeeds
+    And nothing was written through the tracker, the ledger or the runner

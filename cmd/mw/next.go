@@ -93,7 +93,7 @@ func newNextCmd() *cobra.Command {
 			files := mwVault(dir, host)
 			worktrees := rig.New()
 			runner := tmux.New()
-			sync := application.Sync{Vault: files, Tracker: gateway, Host: host}
+			sync := application.Sync{Vault: files, Tracker: gateway, Host: host, Ticks: hostTickLogs()}
 
 			// The dispatch that follows does not sync for itself: the close-out
 			// syncs once, after the story is closed, so that the other host sees

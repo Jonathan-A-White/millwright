@@ -16,6 +16,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
+	"github.com/Jonathan-A-White/millwright/infrastructure/ticklog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/cucumber/godog"
@@ -122,6 +123,9 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the dispatch report says the sync was retried (\d+) times$`, c.theReportSaysTheSyncWasRetried)
 	ctx.Then(`^dispatch printed the one line "([^"]*)"$`, c.dispatchPrintedTheOneLine)
 	ctx.Then(`^dispatch leaves with status (\d+)$`, c.dispatchLeavesWithStatus)
+	ctx.Then(`^the dispatch log holds exactly one line: "([^"]*)"$`, c.theDispatchLogHoldsExactly)
+	ctx.Then(`^the dispatch log holds exactly one line that begins "([^"]*)" and says "([^"]*)"$`, c.theDispatchLogHoldsALineSaying)
+	ctx.Then(`^the dispatch log holds (\d+) lines?$`, c.theDispatchLogHoldsLines)
 	ctx.Then(`^the story "([^"]*)" carries a comment saying the dispatch failed$`, c.theStoryCarriesAFailureComment)
 	ctx.Then(`^there is no worktree for "([^"]*)"$`, c.thereIsNoWorktreeFor)
 	ctx.Then(`^the formula "([^"]*)" was poured for "([^"]*)"$`, c.theFormulaWasPouredFor)
@@ -499,7 +503,57 @@ func (c *dispatchContext) dispatch(host string, cap int, dryRun bool) error {
 		Rigs:   map[string]string{"millwright": c.rig},
 		DryRun: dryRun,
 		Out:    &c.out,
+		Log:    ticklog.New(c.dispatchLogDir()),
+		Now:    func() time.Time { return dispatchNow },
 	}.Run(context.Background())
+	return nil
+}
+
+// dispatchNow is the time every dispatch scenario runs at, so that a line of
+// the log can be said whole.
+var dispatchNow = time.Date(2026, 9, 21, 12, 0, 0, 0, time.UTC)
+
+// dispatchLogDir is where a scenario's dispatch keeps its log: inside the
+// scenario's own temp directory, never under the real home.
+func (c *dispatchContext) dispatchLogDir() string {
+	return filepath.Join(c.root, "state", "mw-dispatch")
+}
+
+// dispatchLogLines is what the log holds, oldest first.
+func (c *dispatchContext) dispatchLogLines() ([]string, error) {
+	return ticklog.New(c.dispatchLogDir()).Read(context.Background())
+}
+
+func (c *dispatchContext) theDispatchLogHoldsLines(n int) error {
+	lines, err := c.dispatchLogLines()
+	if err != nil {
+		return err
+	}
+	if len(lines) != n {
+		return fmt.Errorf("expected the dispatch log to hold %d lines, it holds %d: %q", n, len(lines), lines)
+	}
+	return nil
+}
+
+func (c *dispatchContext) theDispatchLogHoldsExactly(line string) error {
+	lines, err := c.dispatchLogLines()
+	if err != nil {
+		return err
+	}
+	if len(lines) != 1 || lines[0] != line {
+		return fmt.Errorf("expected the dispatch log to hold exactly %q, it holds %q (dispatch said: %v)", line, lines, c.err)
+	}
+	return nil
+}
+
+func (c *dispatchContext) theDispatchLogHoldsALineSaying(begins, says string) error {
+	lines, err := c.dispatchLogLines()
+	if err != nil {
+		return err
+	}
+	if len(lines) != 1 || !strings.HasPrefix(lines[0], begins) || !strings.Contains(lines[0], says) {
+		return fmt.Errorf("expected the dispatch log to hold one line beginning %q and saying %q, it holds %q", begins, says, lines)
+	}
 	return nil
 }
 

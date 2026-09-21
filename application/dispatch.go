@@ -85,6 +85,15 @@ type Dispatch struct {
 	// started.
 	DryRun bool
 
+	// Log is the log this host keeps of its dispatch runs: one dated line for
+	// every run that was made, the failed ones too, so that a timer whose runs
+	// fail can be told from one whose runs work. A nil Log keeps none, and a dry
+	// run is not a run and adds nothing to it.
+	Log TickLog
+
+	// Now is the clock a line of the log is dated by; nil is time.Now.
+	Now func() time.Time
+
 	// Out is where the report is printed. A nil Out prints nothing.
 	Out io.Writer
 }
@@ -175,6 +184,55 @@ func inStartOrder(ready []StoryDetail) []StoryDetail {
 // ready, most urgent and oldest first, so that when the cap is smaller than what
 // is ready it is the right stories that wait. Only then is anything claimed.
 func (d Dispatch) Run(ctx context.Context) (DispatchReport, error) {
+	report, err := d.run(ctx)
+	if d.Log != nil && !d.DryRun {
+		line := d.now().UTC().Format(time.RFC3339) + " " + dispatchLogWords(report, err)
+		if logErr := d.Log.Append(ctx, line); logErr != nil && err == nil {
+			err = fmt.Errorf("appending to the dispatch log: %w", logErr)
+		}
+	}
+	return report, err
+}
+
+// The words a dispatch's line of its log holds after the time. ok says the run
+// did what it is for, and is followed by how many sessions it started or that
+// nothing was ready; a local network fault is a run that could not be made, not
+// one that failed; failed is followed by why, on one line.
+const (
+	DispatchLogOK           = "ok: "
+	DispatchLogNothingReady = DispatchLogOK + "nothing ready"
+	DispatchLogFault        = "local network fault"
+	DispatchLogFailed       = "failed: "
+)
+
+// DispatchLogReasonLimit is how many characters of a failure's reason its line
+// of the log keeps: a complaint of many lines of git's is one line, and short.
+const DispatchLogReasonLimit = 200
+
+// dispatchLogWords is what one run of Run says of itself in the log.
+func dispatchLogWords(report DispatchReport, err error) string {
+	switch {
+	case err != nil:
+		if _, fault := LocalFault(err); fault {
+			return DispatchLogFault
+		}
+		return DispatchLogFailed + clippedTo(oneLine(err.Error()), DispatchLogReasonLimit)
+	case len(report.Started) == 0 && len(report.Passed) == 0:
+		return DispatchLogNothingReady
+	}
+	return fmt.Sprintf("%s%d started", DispatchLogOK, len(report.Started))
+}
+
+// now is the clock the log is dated by.
+func (d Dispatch) now() time.Time {
+	if d.Now == nil {
+		return time.Now()
+	}
+	return d.Now()
+}
+
+// run is one dispatch, without the line it leaves in the log.
+func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	switch {
 	case d.Tracker == nil || d.Worktrees == nil || d.Runner == nil:
 		return DispatchReport{}, fmt.Errorf("dispatching: a dispatch needs a work tracker, worktrees and a runner")

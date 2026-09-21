@@ -810,6 +810,12 @@ five parts, and two more when there is something to say.
 - **BLOCKED** — what is waiting, each with only the work it is still waiting
   for: a wait that has finished is not listed.
 - **OTHER HOSTS** — every other host a story is pathed to, and what it holds.
+- **TICKS** — how this host's timers are doing, counted from the logs they
+  keep: for `mw dispatch` and for the Millhand's tick, when the last good run
+  was and how many runs since have failed (`failed 3 in a row`). A local network
+  fault is counted apart (`7 local network faults, 0 failed`), and a good run
+  resets both. A host that keeps neither log prints no section, and one that
+  keeps only one prints that one. See below.
 - **RIG MEMORY** — one line per rig whose Builder memory
   (`seats/builder/rigs/<rig>.md`) is larger than `rig_memory_bytes`, 8000 by
   default: `millwright 8412/8000 bytes: prune (Mayor)`. Every Builder reads that
@@ -844,6 +850,24 @@ them. Under it `mw status` prints the one line that brings a story here:
 ```sh
 bd update <id> --set-metadata host=vps
 ```
+
+**TICKS.** A timer whose runs fail looks, from outside, like one that works, so
+each timer keeps a log. `mw dispatch` appends one dated line to
+`~/.local/state/mw-dispatch/log` for every run it makes, the failed ones too
+(none for `--dry-run`): `ok: <n> started`, `ok: nothing ready`,
+`local network fault`, or `failed: <one-line reason>`. `mw millhand tick` keeps
+`~/.local/state/mw-millhand-tick/log` the same way. Each log is this host's own
+and is cut to its last 500 lines. `mw status` counts them, newest first, back to
+the last good run. A tick counts as failed when its line says it could not look
+for the Millhand's window or tell whether it is needed, or that its wake or its
+sync failed; as a local network fault when its watch found this host's own
+network down.
+
+The same counts go to the other host: every sync that gets level leaves them in
+`host.<name>.ticks`, beside `last_sync` and pushed by the same `bd sync`, and
+OTHER HOSTS shows them under that host — `dispatch · last good … / failed 12 in
+a row` — without a tunnel to it. A host that keeps no log leaves no note. Nothing
+wakes anyone on a count: it is only shown.
 
 `mw status` only ever says this. Re-pathing a story is a person's act, never a
 report's. The config keys it reads are `vault`, `host`, `host_silent_hours` and

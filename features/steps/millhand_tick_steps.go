@@ -120,6 +120,7 @@ func registerMillhandTickSteps(ctx *godog.ScenarioContext, c *seatUpContext) {
 	ctx.Then(`^the tick synced once$`, c.theTickSyncedTimes(1))
 	ctx.Then(`^the tick log holds that line$`, c.theLogHoldsThatLine)
 	ctx.Then(`^the tick log holds (\d+) lines$`, c.theLogHoldsLines)
+	ctx.Then(`^the tick log counts as (a good run|a failed run|a local network fault)$`, c.theLogCountsAs)
 	ctx.Then(`^no tick mail was marked read$`, c.noTickMailWasMarkedRead)
 	ctx.Then(`^the story "([^"]*)" is not recorded as stuck by the tick$`, c.theStoryIsNotRecordedStuck)
 	ctx.Then(`^ssh to the watched host was not tried$`, c.sshWasNotTried)
@@ -348,6 +349,24 @@ func (c *seatUpContext) theLogHoldsThatLine() error {
 	lines := world.log.Lines()
 	if len(lines) != 1 || lines[0] != want {
 		return fmt.Errorf("expected the log to hold %q, it holds %q", want, lines)
+	}
+	return nil
+}
+
+// theLogCountsAs says how mw status will read the tick's line: the words the
+// tick wrote are the ones the counts are made from.
+func (c *seatUpContext) theLogCountsAs(what string) error {
+	lines := c.tickWorld().log.Lines()
+	if len(lines) != 1 {
+		return fmt.Errorf("expected the log to hold one line, it holds %q", lines)
+	}
+	want := map[string]application.TickOutcome{
+		"a good run":            application.TickGood,
+		"a failed run":          application.TickFailed,
+		"a local network fault": application.TickFault,
+	}[what]
+	if _, got := application.MillhandTickOutcome(lines[0]); got != want {
+		return fmt.Errorf("expected %q to count as %s, it counts as %s", lines[0], want, got)
 	}
 	return nil
 }
