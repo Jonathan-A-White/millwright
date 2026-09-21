@@ -76,6 +76,10 @@ func newNextCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			afterLanding, err := config.AfterLanding()
+			if err != nil {
+				return err
+			}
 
 			// A close-out takes away the very worktree its session was running
 			// in, and this process is standing in it: the shell that chained mw
@@ -130,6 +134,8 @@ func newNextCmd() *cobra.Command {
 				Rigs:      rigs,
 				Out:       cmd.OutOrStdout(),
 				Err:       cmd.ErrOrStderr(),
+
+				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding)),
 			}.Run(cmd.Context(), args[0])
 			return err
 		},

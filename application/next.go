@@ -141,6 +141,11 @@ type Next struct {
 	Slot      MergeSlot
 	Vault     Vault
 
+	// AfterLanding runs the command a host names for a rig once a landing has
+	// moved this host's checkout of it, so that a host rebuilds what it runs
+	// from the rig by itself. A nil AfterLanding runs nothing.
+	AfterLanding AfterLanding
+
 	// Files is the vault as a git clone: what a close-out commits its own
 	// ledger line and the session's rig memory through, so that the sync it
 	// then runs is not stopped by the work it has just done. A nil Files leaves
@@ -474,6 +479,9 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	if err := n.Tracker.SetStoryState(ctx, c.id, RunState, RunLanded, outcome); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be recorded as %s=%s: %v", c.id, RunState, RunLanded, err))
 	}
+	// After the story is recorded as landed, so that a command that is killed
+	// with the session it runs in leaves a story a later run can tell is landed.
+	n.afterLanding(ctx, c, report)
 	return n.finish(ctx, c, report, outcome, false)
 }
 

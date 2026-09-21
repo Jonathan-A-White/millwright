@@ -40,6 +40,7 @@ Every adapter carries `var _ application.<Port> = ...`.
 | `Worktrees` | `application/worktrees.go` | `infrastructure/rig/worktree.go` | `application/dispatch_test.go` |
 | `Landing` | `application/landing.go` | `infrastructure/rig/landing.go` | none: real git |
 | `Checks` | `application/landing.go` | `infrastructure/rig/checks.go` | none |
+| `AfterLanding` | `application/afterlanding.go` | `infrastructure/rig/afterlanding.go` | none |
 | `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/slot.go` | none: real `flock` |
 | `Dispatcher` | `application/landing.go` | `application.Dispatch` | — |
 | `HostSync` | `application/dispatch.go` | `application.Sync` | — |

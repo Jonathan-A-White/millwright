@@ -54,6 +54,9 @@ type nextContext struct {
 	signed       string         // the short hash of the commit a scenario signed
 	commentsWere map[string]int // how many comments a story held before the close-out ran
 
+	afterCommands map[string]string // the [after_landing] table this scenario's rig host has
+	afterLimit    time.Duration     // how long an after-landing command may run; zero is the adapter's own
+
 	report  application.NextReport
 	checked application.CheckReport // what mw check reported, in the check scenarios
 	err     error
@@ -128,6 +131,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 
 	registerNextMailSteps(ctx, c)
 	registerNextRigSteps(ctx, c)
+	registerNextAfterLandingSteps(ctx, c)
 	registerNextRebaseSteps(ctx, c)
 
 	ctx.When(`^mw closes out "([^"]*)"$`, c.mwClosesOut)
@@ -707,6 +711,8 @@ func (c *nextContext) mwClosesOut(id string) error {
 		Now:  func() time.Time { return time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC) },
 		Out:  &c.printed,
 		Err:  &c.stderr,
+
+		AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(c.afterCommands), rig.WithAfterLimit(c.afterLimit)),
 	}.Run(context.Background(), id)
 
 	if c.afterFirst == nil {

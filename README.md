@@ -241,6 +241,18 @@ old one. It is moved only when it is on the target branch, holds no uncommitted
 work (untracked files count) and has no commits of its own; otherwise it is
 left exactly as it was and the report's `rig` line says why.
 
+A host that runs its own `mw` from a rig's checkout says so in its config, and a
+moved checkout is then rebuilt by the landing itself: the command the
+`[after_landing]` table names for the rig is run once, in the rig's checkout,
+under a five-minute limit, after the checkout was moved and never otherwise (see
+*What a host is told*). It changes nothing about the landing: the story is recorded
+landed, ledgered and closed exactly as without it. A command that exits non-zero,
+is not found or outlives its limit is one plain line — `after landing: make
+build: exit status 2: <the tail of its output>` — in the report, the ledger line,
+a comment on the story and the `Landed:` mail to the Mayor, so that they know
+this host's binary is old; success is `after landing: make build: ok` in the
+report and the mail. A rig the table does not name runs nothing.
+
 Only then: the worktree and its branch go, one line is appended to the seat's
 ledger, that line and the seat's memory of the rig are committed in the vault,
 the story is closed with the reason, `mw sync` brings the hosts level so that
@@ -444,6 +456,9 @@ millwright = "/root/millwright"    # where each rig is checked out here
 [tests]
 millwright = "make test"           # how a close-out asks this rig if it is green
 
+[after_landing]
+millwright = "make build"          # run in this rig's checkout once a landing has moved it (default: nothing)
+
 [watch]                            # what mw watch looks at; leave it out to watch nothing
 ssh = "vps"                        # the name ssh knows the watched host by
 host = "vps"                       # its name in beads
@@ -453,7 +468,11 @@ blog = "https://blog.example.com"  # optional: the blog answering is a sign of l
 
 A rig a story names but this host has no checkout of is said so plainly, and the
 story is left for the host that has it. A rig `[tests]` does not name is checked
-with `make test`.
+with `make test`. A rig `[after_landing]` does not name has nothing run after a
+landing; the table is for a host whose timers run a binary built in a rig's
+checkout, which a landing leaves one commit stale until the command rebuilds it.
+The command is one line, read by `/bin/sh` in the rig's checkout like a `[tests]`
+line, and is stopped after five minutes.
 
 ## Keeping two hosts level
 

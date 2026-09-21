@@ -608,3 +608,65 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.1" is closed
     And the rig checkout is left where it was, on "wip"
     And the report says the rig checkout was left, quoting: it is on wip, not main
+
+  Scenario: A rig's own after-landing command runs once, in the rig checkout, once the landing has moved it
+    Given the rig names a command to run after a landing
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the rig checkout is at the commit that landed on "main"
+    And the rig's after-landing command ran once, in the rig checkout, at the commit that landed on "main"
+    And the report says: after landing: <the command>: ok
+    And the story "mw-gq6.1" is closed
+
+  Scenario: An after-landing command that fails is said, and the story is landed and closed all the same
+    Given the rig names a command to run after a landing, which prints "make: *** No rule to make target 'build'" and exits 2
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the story "mw-gq6.1" is closed exactly as it is without an after-landing command
+    And the rig's after-landing command ran once, in the rig checkout, at the commit that landed on "main"
+    And the report says: after landing: <the command>: exit status 2: make: *** No rule to make target 'build'
+    And the comment on "mw-gq6.1" says: after landing: <the command>: exit status 2: make: *** No rule to make target 'build'
+    And exactly one mail was sent, to "mayor" from "mw@vps"
+    And that mail's subject is "Landed: The story mw-gq6.1"
+    And that mail's body says: after landing: <the command>: exit status 2: make: *** No rule to make target 'build'
+    And the close-out returned no error
+
+  Scenario: An after-landing command that outlives its time limit is stopped, and said, and the story is landed all the same
+    Given the rig names a command to run after a landing, which runs far too long
+    And after-landing commands are stopped after 300 milliseconds
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the story "mw-gq6.1" is closed exactly as it is without an after-landing command
+    And the report says: after landing: <the command>: stopped after 300ms, still running
+    And the story "mw-gq6.1" carries a comment quoting: stopped after 300ms
+    And the close-out returned no error
+
+  Scenario: An after-landing command does not run when the rig checkout was left on another branch
+    Given the rig checkout is on a branch of its own, "wip"
+    And the rig names a command to run after a landing
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the story "mw-gq6.1" is closed
+    And the rig's after-landing command did not run
+    And the report says: after landing: <the command>: not run, the rig checkout was left as it was: it is on wip, not main
+
+  Scenario: An after-landing command does not run when the rig checkout has uncommitted work
+    Given the rig checkout has an uncommitted file "notes-to-self.md"
+    And the rig names a command to run after a landing
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed
+    And the rig's after-landing command did not run
+    And the report says: after landing: <the command>: not run, the rig checkout was left as it was: it has 1 uncommitted path(s): notes-to-self.md
+
+  Scenario: A rig the after-landing table does not name has nothing run
+    Given another rig, and not this one, names a command to run after a landing
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed
+    And the rig's after-landing command did not run
+    And the report does not mention an after-landing command
