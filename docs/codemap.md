@@ -112,5 +112,6 @@ faking only tracker, runner and vault git: `features/steps/next_steps.go`.
 - `scripts/check-codemap.sh` checks this page; `scripts/check-timer-units.sh`
   checks `contrib/systemd/` and `contrib/mail-notify`; `scripts/check-template.sh`
   checks `template/`; `scripts/check-install.sh` checks `scripts/install.sh` and
-  `scripts/pins.env`.
+  `scripts/pins.env`; `scripts/check-install-units.sh` checks
+  `scripts/install-units.sh`, which links `contrib/systemd/` timers.
 - `make check-formulas` needs `bd`, `jq` and real time; not in `make test`.
