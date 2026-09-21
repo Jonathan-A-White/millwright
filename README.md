@@ -587,7 +587,9 @@ the Laptop, under WSL2, systemd was running and the answer was `Linger=yes`
 already, so no `sudo` was needed there. Whether a WSL distribution keeps its
 user manager up while no terminal is open was not tested: the timer fires only
 while WSL itself is running. `scripts/check-timer-units.sh` (in `make lint`)
-verifies the two unit files with `systemd-analyze` and starts nothing.
+verifies the two unit files with `systemd-analyze` and starts nothing; it fails
+only on what `systemd-analyze` says about the rig's own unit files, and prints
+what it says about the host's own user units as ignored.
 
 ## Mail
 

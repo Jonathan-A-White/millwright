@@ -66,15 +66,34 @@ fail() {
 
 # --- 1. systemd accepts the files ----------------------------------------
 if command -v systemd-analyze >/dev/null 2>&1; then
-	# verify exits 0 on some faults and only prints them, so any output at all fails.
-	out=$(systemd-analyze --user verify "$SERVICE" "$TIMER" "$MAIL_SERVICE" "$MAIL_TIMER" "$HEALTH_SERVICE" "$HEALTH_TIMER" "$TICK_SERVICE" "$TICK_TIMER" "$REVIEW_SERVICE" "$REVIEW_TIMER" 2>&1) || {
+	# verify exits 0 on some faults and only prints them, so a line naming one of
+	# this rig's unit files fails. With --user it also loads the host's own units
+	# and complains about them (not the rig's to change): those lines are noted
+	# and do not fail. A line names a rig unit by its path or, as systemd does for
+	# some faults, by its file name alone.
+	UNITS="$SERVICE $TIMER $MAIL_SERVICE $MAIL_TIMER $HEALTH_SERVICE $HEALTH_TIMER $TICK_SERVICE $TICK_TIMER $REVIEW_SERVICE $REVIEW_TIMER"
+	# shellcheck disable=SC2086 # the unit paths hold no spaces; word splitting is the point
+	out=$(systemd-analyze --user verify $UNITS 2>&1) || {
 		echo "$out" >&2
 		fail "systemd-analyze rejected the unit files"
 	}
-	if [ -n "$out" ]; then
-		echo "$out" >&2
-		fail "systemd-analyze had something to say about the unit files"
-	fi
+	ours=""
+	while IFS= read -r line; do
+		[ -n "$line" ] || continue
+		mine=""
+		for unit in $UNITS; do
+			case $line in *"${unit##*/}"*) mine=1 ;; esac
+		done
+		if [ -n "$mine" ]; then
+			echo "$line" >&2
+			ours=1
+		else
+			echo "check-timer-units: ignored: not the rig's unit: $line" >&2
+		fi
+	done <<-END
+	$out
+	END
+	[ -z "$ours" ] || fail "systemd-analyze had something to say about the unit files"
 	verified="verified by systemd-analyze"
 else
 	echo "check-timer-units: systemd-analyze is not installed here, so the unit files were NOT verified; only checks 2 and 3 ran" >&2
