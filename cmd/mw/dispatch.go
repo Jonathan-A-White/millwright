@@ -2,11 +2,14 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
+	"github.com/Jonathan-A-White/millwright/infrastructure/ticklog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
@@ -33,6 +36,24 @@ func mwGateway(dir, host string) *beads.Gateway {
 // tracker under, so that the tracker's history and git's tell the same story.
 func mwVault(dir, host string) *vault.Vault {
 	return vault.New(dir, vault.WithAuthor(application.SeatIdentity(application.MwSeat, host)))
+}
+
+// DispatchStateDir is where mw dispatch keeps its log, under the home
+// directory, beside the Millhand tick's. It is this host's own: nothing in it is
+// synced anywhere, though the counts of what is in it are.
+var DispatchStateDir = filepath.Join(".local", "state", "mw-dispatch")
+
+// hostTickLogs are the logs this host's timers keep, in the home directory. A
+// host with no home directory has none.
+func hostTickLogs() application.TickLogs {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return application.TickLogs{}
+	}
+	return application.TickLogs{
+		Dispatch: ticklog.New(filepath.Join(home, DispatchStateDir)),
+		Millhand: ticklog.New(filepath.Join(home, MillhandTickStateDir)),
+	}
 }
 
 // newDispatchCmd builds `mw dispatch`: the command that turns ready stories
@@ -96,12 +117,13 @@ func newDispatchCmd() *cobra.Command {
 
 			gateway := mwGateway(dir, host)
 			files := mwVault(dir, host)
-			report, err := application.Dispatch{
+			logs := hostTickLogs()
+			dispatch := application.Dispatch{
 				Tracker:   gateway,
 				Worktrees: rig.New(),
 				Runner:    tmux.New(),
 				Boot:      builderBoot(files, host),
-				Sync:      application.Sync{Vault: files, Tracker: gateway, Host: host},
+				Sync:      application.Sync{Vault: files, Tracker: gateway, Host: host, Ticks: logs},
 				SyncTries: tries,
 				SyncWait:  wait,
 				Host:      host,
@@ -109,7 +131,12 @@ func newDispatchCmd() *cobra.Command {
 				Rigs:      rigs,
 				DryRun:    dryRun,
 				Out:       cmd.OutOrStdout(),
-			}.Run(cmd.Context())
+			}
+			// A rehearsal is not a run: it leaves nothing in the log.
+			if !dryRun {
+				dispatch.Log = logs.Dispatch
+			}
+			report, err := dispatch.Run(cmd.Context())
 			if _, gaveUp := application.LocalFault(err); gaveUp {
 				// The one line naming it has been printed, so cobra is not to print
 				// the error too: only the status it leaves with says so.

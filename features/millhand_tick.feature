@@ -140,6 +140,7 @@ Feature: mw millhand tick
     And no window was opened
     And no reaper was armed
     And the tick log holds that line
+    And the tick log counts as a good run
 
   Scenario: Mail wakes the Millhand once, and the reason names the subject
     Given unread tick mail for "millhand@laptop" with the subject "Please look at the queue"
@@ -261,6 +262,7 @@ Feature: mw millhand tick
     And mw millhand tick prints one dated line saying "quiet"
     And mw millhand tick prints one dated line saying "sync failed"
     And no window was opened
+    And the tick log counts as a failed run
 
   Scenario: Mail that cannot be read is not quiet, and is a failure
     Given the tick mail cannot be read
@@ -270,6 +272,7 @@ Feature: mw millhand tick
     And mw millhand tick prints one dated line saying "mail could not be read"
     And no window was opened
     And the tick log holds that line
+    And the tick log counts as a failed run
 
   Scenario: Mail that cannot be read does not keep a stuck story from waking the Millhand
     Given the tick mail cannot be read
@@ -292,6 +295,7 @@ Feature: mw millhand tick
     When mw millhand tick is run
     Then mw millhand tick succeeds
     And mw millhand tick prints one dated line saying "already up"
+    And the tick log counts as a good run
 
   Scenario: A wake that fails is reported in the line and is a failure
     Given the "millhand" seat has no charter
@@ -301,6 +305,7 @@ Feature: mw millhand tick
     And mw millhand tick prints one dated line saying "wake failed"
     And no window was opened
     And the tick log holds that line
+    And the tick log counts as a failed run
 
   Scenario: Every tick adds one line to the log
     When mw millhand tick is run
@@ -380,6 +385,7 @@ Feature: mw millhand tick
     And ssh to the watched host was not tried
     And no window was opened
     And the tick log holds that line
+    And the tick log counts as a local network fault
 
   Scenario: A local fault does not keep this host's own mail from waking the Millhand
     Given the tick watches the host "vps" over ssh "vps-ssh", with the outside places "https://one.example" and "https://two.example"

@@ -282,6 +282,14 @@ type Sync struct {
 	Tracker TrackerSync
 	Host    string
 
+	// Ticks are the logs this host's timers keep. Every sync that gets level
+	// leaves the counts of them beside the note of when it was, as TicksKey, so
+	// that the other host can say how this one's timers are doing without a
+	// tunnel to it. A host that keeps no log leaves no note, and a log that
+	// cannot be read, or a note that cannot be written, is left out: none of them
+	// is the sync's to fail.
+	Ticks TickLogs
+
 	// Now is the clock, so that a test can pin the time a sync was level at.
 	// The zero value reads the real one.
 	Now func() time.Time
@@ -350,6 +358,15 @@ func (s Sync) syncBeadsRecordingLevel(ctx context.Context, report SyncReport) (S
 	before, noteErr := s.Tracker.Note(ctx, key)
 	if noteErr == nil {
 		noteErr = s.Tracker.SetNote(ctx, key, at.UTC().Format(LastSyncFormat))
+	}
+
+	// The counts go out in the same cycle. They are a report and not a claim
+	// that this host was level, so a cycle that halts leaves them where they are:
+	// the next one carries fresher ones. They are best effort: a note that cannot
+	// be written costs the other host a reading, and must not cost this one its
+	// dispatch.
+	if held := ReadHostTicks(ctx, s.Ticks); held.Known() {
+		_ = s.Tracker.SetNote(ctx, TicksKey(s.Host), held.Note())
 	}
 
 	if err := s.Tracker.Sync(ctx); err != nil {

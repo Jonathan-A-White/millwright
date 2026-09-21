@@ -17,12 +17,26 @@ const TickLogLines = 500
 // wake's reason names; the rest are counted.
 const TickReasonLimit = 5
 
-// TickLog is the log a host keeps of what its ticks found: one line each,
+// TickLog is the log a host keeps of what a timer's runs found: one line each,
 // appended, and never more than TickLogLines of them — an adapter drops the
-// oldest as it appends.
+// oldest as it appends. mw millhand tick keeps one and mw dispatch another.
 type TickLog interface {
 	Append(ctx context.Context, line string) error
+
+	// Read is the lines the log holds, oldest first; none, and no error, for a
+	// log nothing has been written to. mw status and mw sync count them.
+	Read(ctx context.Context) ([]string, error)
 }
+
+// The words of a tick's line that MillhandTickOutcome reads it by: how a tick
+// says it could not look for the Millhand's window, could not tell whether the
+// Millhand is needed, could not start a wake, or could not sync.
+const (
+	TickCouldNotLook = "could not look for the Millhand's window: "
+	TickCouldNotTell = "could not tell whether the Millhand is needed"
+	TickWakeFailed   = "wake failed: "
+	TickSyncFailed   = "sync failed: "
+)
 
 // MayorRespawnException is the one thing the Millhand's charter lets it do to
 // the Mayor's seat on the VPS, and the last thing a wake called for by a host
@@ -138,7 +152,7 @@ func (t MillhandTick) Run(ctx context.Context) (MillhandTickReport, error) {
 func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err error) {
 	up, err := MillhandWindow(ctx, t.Millhand.Windows)
 	if err != nil {
-		return "could not look for the Millhand's window: " + oneLine(err.Error()), false, err
+		return TickCouldNotLook + oneLine(err.Error()), false, err
 	}
 
 	var notes []string
@@ -191,7 +205,7 @@ func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err err
 	verdict, reason := "quiet", tickReason(mail, stuck, health)
 	switch {
 	case reason == "" && lookErr != nil:
-		verdict = "could not tell whether the Millhand is needed"
+		verdict = TickCouldNotTell
 		if t.DryRun {
 			verdict = "dry run: " + verdict
 		}
@@ -325,7 +339,7 @@ func syncNote(err error) string {
 	if blocked, ok := Blocked(err); ok {
 		return "sync did only its beads half: the vault holds uncommitted changes to " + strings.Join(blocked.Files, ", ")
 	}
-	return "sync failed: " + oneLine(err.Error())
+	return TickSyncFailed + oneLine(err.Error())
 }
 
 // unreadMail is the quoted subjects of the unread mail in this host's Millhand's
@@ -385,7 +399,7 @@ func (t MillhandTick) wake(ctx context.Context, reason string) (verdict string, 
 		return alreadyUp(up.Window), false, nil
 	}
 	if err != nil {
-		return "wake failed: " + oneLine(err.Error()), false, err
+		return TickWakeFailed + oneLine(err.Error()), false, err
 	}
 	return "woke the Millhand: " + reason, true, nil
 }

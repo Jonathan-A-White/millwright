@@ -26,6 +26,11 @@ func newStatusCmd() *cobra.Command {
 			"`host_silent_hours`, default 2), or that never synced at all, is marked asleep and its work\n" +
 			"is listed as stranded, with the one line that re-paths a story here. Re-pathing is a\n" +
 			"person's act: status only says which stories are waiting for one.\n\n" +
+			"A TICKS section says how this host's timers are doing, counted from the logs mw dispatch and\n" +
+			"mw millhand tick keep: the time of the last good run of each and how many runs since have\n" +
+			"failed, with local network faults counted apart. It is left out on a host that keeps no log.\n" +
+			"The same counts reach the other host with every sync, and are shown under its block in OTHER\n" +
+			"HOSTS.\n\n" +
 			"When a rig's memory in the Builder's seat is larger than the budget (config\n" +
 			"`rig_memory_bytes`, default 8000), a RIG MEMORY section says which and by how much: every\n" +
 			"session pays for that file at boot, so the Mayor is due to prune it. It is left out when\n" +
@@ -59,6 +64,7 @@ func newStatusCmd() *cobra.Command {
 				Vault:          mwVault(dir, host),
 				Host:           host,
 				Seat:           BuilderSeat,
+				Ticks:          hostTickLogs(),
 				HostSilence:    time.Duration(hours) * time.Hour,
 				RigMemoryBytes: budget,
 				Out:            cmd.OutOrStdout(),

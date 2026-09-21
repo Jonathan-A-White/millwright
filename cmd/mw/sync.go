@@ -22,7 +22,10 @@ func newSyncCmd() *cobra.Command {
 			"is retried. A sync stopped by beads exits with beads' own exit code, so that a timer can\n" +
 			"branch on it: 2 is a merge conflict and 4 a stuck working set, and both wait for a person.\n" +
 			"Work nobody committed in the vault is not a failure: the vault half is skipped, beads are\n" +
-			"synced anyway, and sync exits 5 with one line naming the files. mw commits nobody's edits.",
+			"synced anyway, and sync exits 5 with one line naming the files. mw commits nobody's edits.\n\n" +
+			"With the note of when this host was level it leaves the counts of its timers' logs, for the\n" +
+			"other host's mw status to show: the last good run of mw dispatch and of the Millhand's tick, and\n" +
+			"how many runs since have failed.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := config.Vault()
@@ -38,6 +41,7 @@ func newSyncCmd() *cobra.Command {
 				Vault:   mwVault(dir, host),
 				Tracker: mwGateway(dir, host),
 				Host:    host,
+				Ticks:   hostTickLogs(),
 			}.Run(cmd.Context())
 			if err != nil {
 				return err

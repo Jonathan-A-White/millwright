@@ -344,3 +344,46 @@ func TestLedgerMarkIsTheLineTheVaultNeeds(t *testing.T) {
 		t.Fatalf("expected the ledger mark to be the gitattributes line, got %q", application.LedgerMark)
 	}
 }
+
+func TestSyncLeavesTheCountsOfItsTicksBesideTheNoteOfWhenItWasLevel(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	sync.Ticks = application.TickLogs{
+		Dispatch: heldLog(t, "2026-09-21T09:00:00Z ok: 1 started", "2026-09-21T09:15:00Z failed: no", "2026-09-21T09:30:00Z failed: no"),
+	}
+	if _, err := sync.Run(context.Background()); err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+
+	note, err := tracker.Note(context.Background(), application.TicksKey("vps"))
+	if err != nil {
+		t.Fatalf("reading the note: %v", err)
+	}
+	held := application.ParseHostTicks(note)
+	if !held.Dispatch.Known || held.Dispatch.Failed != 2 || held.Millhand.Known {
+		t.Fatalf("expected host.vps.ticks to hold 2 failed dispatch runs and nothing of the tick, got %q", note)
+	}
+	if key := application.TicksKey("vps"); key != "host.vps.ticks" {
+		t.Fatalf("expected the key to sit beside host.vps.last_sync, got %q", key)
+	}
+}
+
+func TestSyncWithNoLogsLeavesNoNoteOfTicks(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	if _, err := sync.Run(context.Background()); err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	if note, _ := tracker.Note(context.Background(), application.TicksKey("vps")); note != "" {
+		t.Fatalf("expected no note of ticks without a log, got %q", note)
+	}
+}
+
+func TestASyncThatCannotReadALogStillSyncs(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	sync.Ticks = application.TickLogs{Dispatch: &apptest.FakeTickLog{ReadErr: errors.New("unreadable")}}
+	if _, err := sync.Run(context.Background()); err != nil {
+		t.Fatalf("expected a log nobody can read not to stop a sync, got %v", err)
+	}
+	if got := tracker.Syncs(); got != 1 {
+		t.Fatalf("expected one cycle, got %d", got)
+	}
+}

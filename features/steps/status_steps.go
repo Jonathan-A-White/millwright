@@ -51,6 +51,9 @@ type statusContext struct {
 	// askedBefore is how many calls the tracker had logged just before mw
 	// status ran, so that a scenario can say what it asked and nothing more.
 	askedBefore int
+	// lastTick is when each host's log of each kind was last added to, so that
+	// the next lines a scenario adds come after it.
+	lastTick map[string]time.Time
 
 	report application.StatusReport
 	err    error
@@ -122,6 +125,8 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the builder's memory of the rig "([^"]*)" is (\d+) bytes$`, c.theBuildersMemoryOfTheRigIs)
 	ctx.Given(`^the builder's archive of the rig "([^"]*)" is (\d+) bytes$`, c.theBuildersArchiveOfTheRigIs)
 	ctx.Given(`^the configuration says a rig's memory may be (\d+) bytes$`, c.theConfigurationSaysARigsMemoryMayBe)
+
+	c.registerTickSteps(ctx)
 
 	ctx.When(`^mw status reads the host$`, c.mwStatusReadsTheHost)
 
@@ -405,6 +410,10 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 	if err != nil {
 		return fmt.Errorf("reading how large a rig's memory may be: %w", err)
 	}
+	logs, err := c.tickLogsOf(statusHost)
+	if err != nil {
+		return err
+	}
 	c.askedBefore = len(c.tracker.Asked())
 	if err := c.rememberElsewhere(); err != nil {
 		return err
@@ -418,6 +427,7 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 		Seat:           statusSeat,
 		HostSilence:    time.Duration(hours) * time.Hour,
 		RigMemoryBytes: budget,
+		Ticks:          logs,
 		Now:            func() time.Time { return c.now },
 	}.Run(context.Background())
 	return nil

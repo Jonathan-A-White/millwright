@@ -264,3 +264,50 @@ Feature: Dispatching the stories this host is ready to work
       | mw-gq6.2 |
       | mw-gq6.1 |
     And the dry run report lists them in that order
+
+  # The log is what lets a run that failed be told from one that worked, when
+  # nobody was watching: mw status counts what it holds, and only a run that
+  # was really made is in it.
+  Scenario: A run that starts a story adds one dated line to the dispatch log
+    Given a ready story "mw-gq6.1" of that epic
+    When dispatch runs on "vps" with a cap of 1
+    Then the dispatch log holds exactly one line: "2026-09-21T12:00:00Z ok: 1 started"
+
+  Scenario: A run that finds nothing ready adds one line saying so
+    When dispatch runs on "vps" with a cap of 1
+    Then the dispatch log holds exactly one line: "2026-09-21T12:00:00Z ok: nothing ready"
+
+  Scenario: A run that only passed stories over is a good run that started none
+    Given a ready story "mw-gq6.1" of that epic labelled "hitl"
+    When dispatch runs on "vps" with a cap of 1
+    Then the dispatch log holds exactly one line: "2026-09-21T12:00:00Z ok: 0 started"
+
+  Scenario: A local network fault adds one line, and it is not called a failure
+    Given a ready story "mw-gq6.1" of that epic
+    And the sync can never resolve a name
+    When dispatch runs on "vps" with a cap of 1
+    Then the dispatch log holds exactly one line: "2026-09-21T12:00:00Z local network fault"
+
+  Scenario: A failed run still adds its line
+    Given a ready story "mw-gq6.1" of that epic
+    And the vault's pull is refused with "git@github.com: Permission denied (publickey)."
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch leaves with status 1
+    And the dispatch log holds exactly one line that begins "2026-09-21T12:00:00Z failed: " and says "Permission denied (publickey)"
+
+  Scenario: A run that claimed a story and could not start it is a failed run
+    Given a ready story "mw-gq6.1" of that epic
+    And the runner refuses to start anything
+    When dispatch runs on "vps" with a cap of 1
+    Then the dispatch log holds exactly one line that begins "2026-09-21T12:00:00Z failed: " and says "mw-gq6.1"
+
+  Scenario: Each run adds a line of its own
+    Given a ready story "mw-gq6.1" of that epic
+    When dispatch runs on "vps" with a cap of 1
+    And dispatch runs on "vps" with a cap of 1
+    Then the dispatch log holds 2 lines
+
+  Scenario: A dry run adds nothing to the dispatch log
+    Given a ready story "mw-gq6.1" of that epic
+    When dispatch runs on "vps" with a cap of 1 as a dry run
+    Then the dispatch log holds 0 lines

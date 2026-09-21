@@ -105,7 +105,7 @@ func newMillhandTickCmd() *cobra.Command {
 					RoutineModel: domain.Model(routine),
 					ReviewModel:  domain.Model(review),
 				},
-				Sync: application.Sync{Vault: mwVault(dir, host), Tracker: gateway, Host: host},
+				Sync: application.Sync{Vault: mwVault(dir, host), Tracker: gateway, Host: host, Ticks: hostTickLogs()},
 				Mail: gateway,
 				Sweep: application.Sweep{
 					Tracker:    gateway,
