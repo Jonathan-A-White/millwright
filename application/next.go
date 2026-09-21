@@ -278,7 +278,40 @@ func (n Next) closeOut(ctx context.Context, storyID string) (NextReport, error) 
 	if was, err := n.Tracker.StoryState(ctx, storyID, RunState); err == nil && was == RunLanded {
 		return n.closeALanding(ctx, c, &report)
 	}
+	// The run=landed write can fail after the push, and then the story carries
+	// no marker. What a landing does leave is its ledger line, written before
+	// the close was tried, and the branch merged into the target.
+	if n.ledgeredAsLanded(ctx, c, &report) {
+		return n.closeALanding(ctx, c, &report)
+	}
 	return n.land(ctx, c, &report)
+}
+
+// ledgeredAsLanded reports whether the seat's ledger holds this story's line as
+// landed while its branch has nothing left to land: a landing is finished by
+// removing the worktree and its branch, so a branch that is gone, or one with no
+// commits the target lacks, is the branch merged. A branch that still has
+// commits beyond the target is new work on a story landed once before, and is
+// landed like any other. A ledger that cannot be read says no, with a note: the
+// story is then treated as it was before this check existed.
+func (n Next) ledgeredAsLanded(ctx context.Context, c *closeOut, report *NextReport) bool {
+	lines, err := n.Vault.ReadLedger(ctx, n.Seat)
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the %s seat's ledger could not be read to see whether %s landed already: %v", n.Seat, c.id, err))
+		return false
+	}
+	landed := false
+	for _, line := range lines {
+		if LedgerLandsStory(line, c.id) {
+			landed = true
+			break
+		}
+	}
+	if !landed {
+		return false
+	}
+	ahead, err := n.Landing.Ahead(ctx, c.rigDir, c.branch, StartPoint(n.remote(), c.target))
+	return err != nil || ahead == 0
 }
 
 // land takes one story from "its session has ended" to "it is on the target

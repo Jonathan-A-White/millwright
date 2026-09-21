@@ -3,6 +3,7 @@ package steps
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -118,6 +119,8 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the origin refuses every push, saying:$`, c.theOriginRefusesEveryPush)
 	ctx.Given(`^the tracker refuses to close "([^"]*)", saying: (.+)$`, c.theTrackerRefusesToClose)
 	ctx.Given(`^the tracker will take a close of "([^"]*)" again$`, c.theTrackerTakesACloseAgain)
+	ctx.Given(`^the tracker cannot record the run state, saying: (.+)$`, c.theTrackerCannotRecordTheRunState)
+	ctx.Given(`^the tracker can record the run state again$`, c.theTrackerCanRecordTheRunStateAgain)
 	ctx.Given(`^the vault holds work of its own that nobody committed, to "([^"]*)"$`, c.theVaultHoldsOtherWork)
 	ctx.Given(`^the vault refuses a commit, saying: (.+)$`, c.theVaultRefusesACommit)
 	ctx.Given(`^the vault takes a commit again$`, c.theVaultTakesACommitAgain)
@@ -152,12 +155,15 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^no fresh session was started$`, c.noFreshSessionWasStarted)
 	ctx.Then(`^the story "([^"]*)" is recorded as stopped$`, c.theStoryIsRecordedAsStopped)
 	ctx.Then(`^the story "([^"]*)" is still recorded as blocked$`, c.theStoryIsStillRecordedAsBlocked)
+	ctx.Then(`^the story "([^"]*)" is not recorded as blocked$`, c.theStoryIsNotRecordedAsBlocked)
 	ctx.Then(`^the story "([^"]*)" holds no comment it did not hold before$`, c.theStoryHoldsNoNewComment)
 	ctx.Then(`^the merge slot of the rig is free again$`, c.theMergeSlotIsFree)
 	ctx.Then(`^the terminal holds no session of "([^"]*)"$`, c.theTerminalHoldsNoSession)
 	ctx.Then(`^the session of "([^"]*)" is still on the terminal, exited$`, c.theSessionIsStillThereExited)
 	ctx.Then(`^the close-out says the story is landed but still open$`, c.landedButStillOpen)
 	ctx.Then(`^the ledger holds exactly one line for "([^"]*)"$`, c.theLedgerHoldsOneLineFor)
+	ctx.Then(`^the ledger holds no "([^"]*)" line for "([^"]*)"$`, c.theLedgerHoldsNoSuchLineFor)
+	ctx.Then(`^the close-out says the story was landed by an earlier run$`, c.theCloseOutSaysLandedEarlier)
 	ctx.Then(`^the ledger holds (\d+) lines for "([^"]*)"$`, c.theLedgerHoldsLinesFor)
 	ctx.Then(`^the first ledger line for "([^"]*)" holds:$`, c.theFirstLedgerLineForHolds)
 	ctx.Then(`^the last ledger line holds no token figure$`, c.theLastLedgerLineHoldsNoTokenFigure)
@@ -389,6 +395,13 @@ func (c *nextContext) aStoryWhoseLandingWasRefused(id string) error {
 func (c *nextContext) theStoryIsStillRecordedAsBlocked(id string) error {
 	if got := c.tracker.State(id, application.RunState); got != application.RunBlocked {
 		return fmt.Errorf("expected %s to still be recorded %s=%s, got %q", id, application.RunState, application.RunBlocked, got)
+	}
+	return nil
+}
+
+func (c *nextContext) theStoryIsNotRecordedAsBlocked(id string) error {
+	if got := c.tracker.State(id, application.RunState); got == application.RunBlocked {
+		return fmt.Errorf("expected %s not to be recorded %s=%s, but it is", id, application.RunState, got)
 	}
 	return nil
 }
@@ -971,6 +984,46 @@ func (c *nextContext) theTrackerRefusesToClose(id, why string) error {
 
 func (c *nextContext) theTrackerTakesACloseAgain(id string) error {
 	c.tracker.RefuseToClose(id, "")
+	return nil
+}
+
+// theTrackerCannotRecordTheRunState makes the write of run=landed — the one
+// that comes right after the push — fail.
+func (c *nextContext) theTrackerCannotRecordTheRunState(why string) error {
+	c.tracker.FailOn("SetStoryState", errors.New(strings.TrimSpace(why)))
+	return nil
+}
+
+func (c *nextContext) theTrackerCanRecordTheRunStateAgain() error {
+	c.tracker.FailOn("SetStoryState", nil)
+	return nil
+}
+
+// theCloseOutSaysLandedEarlier is what a close-out that only closed a landing
+// says: landed, by an earlier run, and nothing merged, tested or pushed again.
+func (c *nextContext) theCloseOutSaysLandedEarlier() error {
+	if !c.report.Landed || !c.report.LandedEarlier {
+		return fmt.Errorf("expected a report saying the story was landed by an earlier run, got %+v", c.report)
+	}
+	if want := "by an earlier run of mw next"; !strings.Contains(c.printed.String(), want) {
+		return fmt.Errorf("expected the report to say %q, got:\n%s", want, c.printed.String())
+	}
+	return nil
+}
+
+// theLedgerHoldsNoSuchLineFor reads the ledger for a line of this story whose
+// outcome says what: "not landed" is the line a close-out writes when it lands
+// nothing.
+func (c *nextContext) theLedgerHoldsNoSuchLineFor(what, id string) error {
+	lines, err := c.ledgerLines()
+	if err != nil {
+		return err
+	}
+	for _, line := range lines {
+		if application.LedgerNamesStory(line, id) && strings.Contains(line, what) {
+			return fmt.Errorf("expected no %q line for %s in the ledger, got %q", what, id, line)
+		}
+	}
 	return nil
 }
 

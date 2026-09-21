@@ -333,6 +333,24 @@ Feature: Closing out a finished story and carrying on
     And git was asked to merge once and to push once
     And the rig's tests were run 1 times
 
+  Scenario: A landing whose run=landed write failed is found already landed by the next run, and only closed
+    Given the session of "mw-gq6.1" reported a plain success
+    And the tracker cannot record the run state, saying: the database is locked
+    And the tracker refuses to close "mw-gq6.1", saying: assignee is root, actor is mw@vps; reclaim or use --force
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the story "mw-gq6.1" is not closed
+    Given the tracker can record the run state again
+    And the tracker will take a close of "mw-gq6.1" again
+    When mw closes out "mw-gq6.1" a second time
+    Then the story "mw-gq6.1" is closed
+    And the close-out says the story was landed by an earlier run
+    And the ledger holds exactly one line for "mw-gq6.1"
+    And the ledger holds no "not landed" line for "mw-gq6.1"
+    And the story "mw-gq6.1" is not recorded as blocked
+    And git was asked to merge once and to push once
+    And the rig's tests were run 1 times
+
   Scenario: What mw and the session wrote in the vault is committed, so the sync that follows can run
     Given the session of "mw-gq6.1" reported a plain success
     And the run of "mw-gq6.1" left its boot file beside the result

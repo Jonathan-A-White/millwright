@@ -678,6 +678,12 @@ func (f *FakeTracker) SetStoryState(_ context.Context, id, dimension, value, _ s
 	if dimension == "" {
 		return fmt.Errorf("a state needs a dimension")
 	}
+	f.mu.Lock()
+	failing := f.failing["SetStoryState"]
+	f.mu.Unlock()
+	if failing != nil {
+		return failing
+	}
 	return f.write(id, func(s *fakeStory) error {
 		if s.states == nil {
 			s.states = map[string]string{}
@@ -784,7 +790,7 @@ func (f *FakeTracker) CloseStep(stepID string) {
 
 // FailOn makes one method, named as Asked names it, fail with err instead of
 // doing its work, and leaves every other method alone. A nil err lets it work
-// again. Only OpenMolecule looks at it so far.
+// again. Only OpenMolecule and SetStoryState look at it so far.
 func (f *FakeTracker) FailOn(method string, err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
