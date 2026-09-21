@@ -58,8 +58,8 @@
     },
     {
       "id": "close",
-      "title": "Write the closing comment and update rig memory",
-      "description": "Comment on {{story}} with what was built, what was verified and how, and anything left undone. If a fact about this rig would have saved real time, add it to the rig's Builder memory file.",
+      "title": "Write the closing comment and propose rig memory notes",
+      "description": "Comment on {{story}} with what was built, what was verified and how, and anything left undone. END the closing comment with a section headed exactly 'For the rig memory:' holding at most two short lines that a later Builder on this rig would have been saved real time by, or the single word 'nothing'. The Builder does NOT edit the rig memory file: the Mayor places what he keeps.",
       "type": "task",
       "depends_on": ["commit"]
     }
