@@ -194,6 +194,30 @@ unless made with `--no-inherit-labels`). No dispatcher takes it, and, dry run
 or not, it is passed over with that reason; the Mayor claims it and does it beside
 the Governor, and a `hitl` story in progress does not count against the cap.
 
+**A story is tried a bounded number of times.** Every session mw starts for a
+story is an attempt, counted in the story's `attempts` metadata once the session
+is running: a dispatch that fails before that (the fetch, the worktree, the
+runner) is not one, and the rebase session `mw next` sends a conflicted story
+back to is one. `max_attempts` in the config file (`MW_MAX_ATTEMPTS` ahead of it,
+default 3) is how many a story gets. A ready story that has had them all is not
+started: `mw dispatch` leaves it unclaimed, marks it `run=blocked` under the
+reason code `attempts-exhausted`, writes one comment on it and mails the Mayor
+once, with the count and the refusals `mw next` recorded on the story. A later
+tick finds the mark (`attempts_exhausted` in the metadata) and says nothing more,
+and the story does not use up a place under the cap. `mw status` shows
+`attempts N` under a story that has had more than one.
+
+The way back in is the Mayor's, and explicit: once the cause is dealt with, reset
+the counter by hand, and nothing else does. A story `mw next` refused is still
+claimed, so give it back too:
+
+```sh
+bd update <story-id> --set-metadata attempts=0                       # unclaimed, exhausted
+bd update <story-id> --status open --assignee "" --set-metadata attempts=0   # a refused story, claimed
+```
+
+The next dispatch then starts it as a first attempt.
+
 `--dry-run` prints what it would start, in that same order, and writes nothing:
 nothing is synced, claimed, fetched, cut, poured or started. See `features/dispatch.feature`.
 
@@ -434,8 +458,8 @@ bd reclaim mw-gq6.30                                        # or take it over fi
 
 `~/.config/mw/config.toml`, with `MW_VAULT`, `MW_HOST`, `MW_CAP` and
 `MW_HOST_SILENT_HOURS`, `MW_STALE_HOURS`, `MW_HANDOFF_AT`, `MW_RIG_MEMORY_BYTES`,
-`MW_DISPATCH_SYNC_TRIES`, `MW_DISPATCH_SYNC_WAIT`, `MW_MILLHAND_ROUTINE_MODEL` and
-`MW_MILLHAND_REVIEW_MODEL` ahead of it:
+`MW_DISPATCH_SYNC_TRIES`, `MW_DISPATCH_SYNC_WAIT`, `MW_MAX_ATTEMPTS`,
+`MW_MILLHAND_ROUTINE_MODEL` and `MW_MILLHAND_REVIEW_MODEL` ahead of it:
 
 ```toml
 vault = "/root/millwright-vault"   # the one beads database and the seats
@@ -447,6 +471,7 @@ handoff_at = 180000                # the context size, in tokens, at which mw se
 rig_memory_bytes = 8000            # how large the Builder's memory of one rig may grow before mw status says prune (default 8000)
 dispatch_sync_tries = 3            # how many times mw dispatch tries its sync when a name cannot be resolved (default 3)
 dispatch_sync_wait = "15s"         # how long it waits between those tries (default 15s, at most 90s in all)
+max_attempts = 3                   # how many times a story is started in all before mw dispatch stops and mails the Mayor (default 3)
 millhand_routine_model = "sonnet"  # the model of a routine wake, and of a wake by hand, of the Millhand (default sonnet)
 millhand_review_model = "opus"     # the model of a review wake of the Millhand (default opus)
 
