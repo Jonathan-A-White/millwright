@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
+	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
@@ -32,7 +34,14 @@ type dispatchContext struct {
 	runner  *apptest.FakeRunner
 	files   *apptest.FakeVaultFiles
 
-	lastEpic string
+	// out is what the dispatch printed, and waits is every wait it asked for,
+	// which a scenario never really sits through.
+	out   bytes.Buffer
+	waits []time.Duration
+	// configured is the sync knobs a scenario's config file gave, when it gave
+	// them; otherwise the dispatch is run with the defaults the config would.
+	configured *syncKnobs
+	lastEpic   string
 	// earlier is the molecule a scenario poured for a story before the dispatch
 	// ran, so that it can say whether the dispatch reused it or poured another.
 	earlier application.Molecule
@@ -79,6 +88,10 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a story "([^"]*)" of that epic labelled "([^"]*)" is already running here$`, c.aLabelledStoryAlreadyRunningHere)
 	ctx.Given(`^the other host has pushed a later commit to the rig's origin$`, c.theOtherHostHasPushed)
 	ctx.Given(`^the beads sync halts with exit code (\d+)$`, c.theBeadsSyncHalts)
+	ctx.Given(`^the sync cannot resolve a name for its first (\d+) tries$`, c.theSyncCannotResolveForItsFirstTries)
+	ctx.Given(`^the sync can never resolve a name$`, c.theSyncCanNeverResolve)
+	ctx.Given(`^the vault's pull is refused with "([^"]*)"$`, c.theVaultsPullIsRefused)
+	ctx.Given(`^the config file says dispatch_sync_tries is (\d+) and dispatch_sync_wait is "([^"]*)"$`, c.theConfigSaysTheSyncKnobs)
 	ctx.Given(`^the runner refuses to start anything$`, c.theRunnerRefuses)
 	ctx.Given(`^an earlier session for "([^"]*)" lies dead$`, c.anEarlierSessionLiesDead)
 	ctx.Given(`^a session for "([^"]*)" is still running in its worktree$`, c.aSessionIsRunningInItsWorktree)
@@ -104,6 +117,11 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the worktree of "([^"]*)" holds the later commit$`, c.theWorktreeHoldsTheLaterCommit)
 	ctx.Then(`^the work tracker was asked, in this order:$`, c.theTrackerWasAskedInThisOrder)
 	ctx.Then(`^dispatch failed, saying: (.+)$`, c.dispatchFailedSaying)
+	ctx.Then(`^the sync was tried (\d+) times?, waiting (\d+)s between the tries$`, c.theSyncWasTriedWaiting)
+	ctx.Then(`^the sync was tried (\d+) times?, waiting nothing$`, c.theSyncWasTriedWaitingNothing)
+	ctx.Then(`^the dispatch report says the sync was retried (\d+) times$`, c.theReportSaysTheSyncWasRetried)
+	ctx.Then(`^dispatch printed the one line "([^"]*)"$`, c.dispatchPrintedTheOneLine)
+	ctx.Then(`^dispatch leaves with status (\d+)$`, c.dispatchLeavesWithStatus)
 	ctx.Then(`^the story "([^"]*)" carries a comment saying the dispatch failed$`, c.theStoryCarriesAFailureComment)
 	ctx.Then(`^there is no worktree for "([^"]*)"$`, c.thereIsNoWorktreeFor)
 	ctx.Then(`^the formula "([^"]*)" was poured for "([^"]*)"$`, c.theFormulaWasPouredFor)
@@ -294,6 +312,73 @@ func (c *dispatchContext) theBeadsSyncHalts(code int) error {
 	return nil
 }
 
+// resolveFailure is what the vault's adapter hands back when git could not
+// resolve the remote's name: the typed error, with git's own words under it.
+func resolveFailure() error {
+	said := "ssh: Could not resolve hostname github.com: Temporary failure in name resolution"
+	return &application.NameNotResolved{Said: said, Err: fmt.Errorf("git pull --rebase in /vault: exit status 128: %s", said)}
+}
+
+func (c *dispatchContext) theSyncCannotResolveForItsFirstTries(tries int) error {
+	c.files.PullErr, c.files.PullErrFor = resolveFailure(), tries
+	return nil
+}
+
+func (c *dispatchContext) theSyncCanNeverResolve() error {
+	c.files.PullErr, c.files.PullErrFor = resolveFailure(), 0
+	return nil
+}
+
+func (c *dispatchContext) theVaultsPullIsRefused(said string) error {
+	c.files.PullErr = fmt.Errorf("git pull --rebase in /vault: exit status 128: %s", said)
+	return nil
+}
+
+// syncKnobs are what the config gives dispatch for its sync.
+type syncKnobs struct {
+	tries int
+	wait  time.Duration
+}
+
+// theConfigSaysTheSyncKnobs writes a config file under a home directory of the
+// scenario's own and reads the knobs back out of it the way mw does, so that a
+// scenario proves they come from the config and not from the step.
+func (c *dispatchContext) theConfigSaysTheSyncKnobs(tries int, wait string) error {
+	root, err := c.workspace()
+	if err != nil {
+		return err
+	}
+	home := filepath.Join(root, "home")
+	dir := filepath.Join(home, ".config", "mw")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	file := fmt.Sprintf("dispatch_sync_tries = %d\ndispatch_sync_wait = %q\n", tries, wait)
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(file), 0o644); err != nil {
+		return err
+	}
+	// HOME is the process's, and other scenarios read it: it is moved only for as
+	// long as it takes to read the config, and put back before the step returns.
+	before := os.Getenv("HOME")
+	os.Setenv("HOME", home)
+	defer os.Setenv("HOME", before)
+
+	for _, env := range []string{config.DispatchSyncTriesEnv, config.DispatchSyncWaitEnv} {
+		if os.Getenv(env) != "" {
+			return fmt.Errorf("%s is set in the environment, and would answer ahead of the config file", env)
+		}
+	}
+	knobs := &syncKnobs{}
+	if knobs.tries, err = config.DispatchSyncTries(); err != nil {
+		return err
+	}
+	if knobs.wait, err = config.DispatchSyncWait(); err != nil {
+		return err
+	}
+	c.configured = knobs
+	return nil
+}
+
 func (c *dispatchContext) theRunnerRefuses() error {
 	c.runner.Err = fmt.Errorf("this runner starts nothing")
 	return nil
@@ -385,6 +470,13 @@ func (c *dispatchContext) dispatchRunsDry(host string, cap int) error {
 // only two things that would reach outside this temp directory: the beads
 // database and the terminal a session runs in.
 func (c *dispatchContext) dispatch(host string, cap int, dryRun bool) error {
+	// Without a config file of its own a scenario runs with what the config would
+	// say if it said nothing: 3 tries, 15 seconds apart. Nothing sleeps: the wait
+	// is written down instead.
+	knobs := syncKnobs{tries: config.DefaultDispatchSyncTries, wait: config.DefaultDispatchSyncWait}
+	if c.configured != nil {
+		knobs = *c.configured
+	}
 	c.report, c.err = application.Dispatch{
 		Tracker:   c.tracker,
 		Worktrees: rig.New(),
@@ -395,11 +487,18 @@ func (c *dispatchContext) dispatch(host string, cap int, dryRun bool) error {
 			Seat:    "builder",
 			Host:    host,
 		},
-		Sync:   application.Sync{Vault: c.files, Tracker: c.tracker, Host: host},
+		Sync:      application.Sync{Vault: c.files, Tracker: c.tracker, Host: host},
+		SyncTries: knobs.tries,
+		SyncWait:  knobs.wait,
+		Wait: func(_ context.Context, d time.Duration) error {
+			c.waits = append(c.waits, d)
+			return nil
+		},
 		Host:   host,
 		Cap:    cap,
 		Rigs:   map[string]string{"millwright": c.rig},
 		DryRun: dryRun,
+		Out:    &c.out,
 	}.Run(context.Background())
 	return nil
 }
@@ -837,6 +936,61 @@ func gitIdentify(dir string) error {
 		if err := gitRun(dir, "git", setting...); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// theSyncWasTriedWaiting says the sync was tried that many times, with one wait
+// between each try and the next of the length the scenario expects.
+func (c *dispatchContext) theSyncWasTriedWaiting(tries, seconds int) error {
+	if got := c.files.PullTries(); got != tries {
+		return fmt.Errorf("expected the sync to be tried %d times, it was tried %d", tries, got)
+	}
+	want := time.Duration(seconds) * time.Second
+	if len(c.waits) != tries-1 {
+		return fmt.Errorf("expected %d waits between %d tries, got %v", tries-1, tries, c.waits)
+	}
+	for _, waited := range c.waits {
+		if waited != want {
+			return fmt.Errorf("expected every wait to be %s, got %v", want, c.waits)
+		}
+	}
+	return nil
+}
+
+func (c *dispatchContext) theSyncWasTriedWaitingNothing(tries int) error {
+	if got := c.files.PullTries(); got != tries {
+		return fmt.Errorf("expected the sync to be tried %d time, it was tried %d", tries, got)
+	}
+	if len(c.waits) != 0 {
+		return fmt.Errorf("expected no wait, got %v", c.waits)
+	}
+	return nil
+}
+
+func (c *dispatchContext) theReportSaysTheSyncWasRetried(retries int) error {
+	if c.report.SyncRetries != retries {
+		return fmt.Errorf("expected the report to count %d retries, got %d", retries, c.report.SyncRetries)
+	}
+	want := fmt.Sprintf("retried the sync %d times", retries)
+	if !strings.Contains(c.out.String(), want) {
+		return fmt.Errorf("expected what dispatch printed to say %q, got:\n%s", want, c.out.String())
+	}
+	return nil
+}
+
+// dispatchPrintedTheOneLine says the whole of what dispatch printed was that one
+// line, and that the error it left with is not to be printed again.
+func (c *dispatchContext) dispatchPrintedTheOneLine(line string) error {
+	if got := c.out.String(); got != line+"\n" {
+		return fmt.Errorf("expected dispatch to print exactly %q, got %q", line+"\n", got)
+	}
+	return nil
+}
+
+func (c *dispatchContext) dispatchLeavesWithStatus(status int) error {
+	if got := application.ExitStatus(c.err); got != status {
+		return fmt.Errorf("expected dispatch to leave with %d, it leaves with %d (it said: %v)", status, got, c.err)
 	}
 	return nil
 }

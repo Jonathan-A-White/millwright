@@ -52,6 +52,11 @@ func newDispatchCmd() *cobra.Command {
 			"starts the session. It never takes more than the cap allows, never takes a story whose path\n" +
 			"names another host or no host at all, and gives the claim back if anything fails before the\n" +
 			"session starts.\n\n" +
+			"If the sync cannot resolve a name (a host just woken from standby has no network for a\n" +
+			"minute), dispatch waits and tries the sync again, dispatch_sync_tries times in all,\n" +
+			"dispatch_sync_wait apart. If the name still cannot be resolved it claims nothing, prints one\n" +
+			"line beginning \"local network fault\" and leaves with " + fmt.Sprint(application.NetworkFaultExit) + ", which a timer may\n" +
+			"treat as a wait. Every other sync failure is not retried.\n\n" +
 			"--dry-run prints what it would start and writes nothing: nothing is synced, claimed, cut,\n" +
 			"poured or started.",
 		Args: cobra.NoArgs,
@@ -80,6 +85,15 @@ func newDispatchCmd() *cobra.Command {
 					host, config.RigsTable, config.File)
 			}
 
+			tries, err := config.DispatchSyncTries()
+			if err != nil {
+				return err
+			}
+			wait, err := config.DispatchSyncWait()
+			if err != nil {
+				return err
+			}
+
 			gateway := mwGateway(dir, host)
 			files := mwVault(dir, host)
 			report, err := application.Dispatch{
@@ -88,12 +102,19 @@ func newDispatchCmd() *cobra.Command {
 				Runner:    tmux.New(),
 				Boot:      builderBoot(files, host),
 				Sync:      application.Sync{Vault: files, Tracker: gateway, Host: host},
+				SyncTries: tries,
+				SyncWait:  wait,
 				Host:      host,
 				Cap:       atOnce,
 				Rigs:      rigs,
 				DryRun:    dryRun,
 				Out:       cmd.OutOrStdout(),
 			}.Run(cmd.Context())
+			if _, gaveUp := application.LocalFault(err); gaveUp {
+				// The one line naming it has been printed, so cobra is not to print
+				// the error too: only the status it leaves with says so.
+				cmd.SilenceErrors = true
+			}
 			if err != nil {
 				return err
 			}

@@ -52,6 +52,49 @@ Feature: Dispatching the stories this host is ready to work
     And no session was started
     And the story "mw-gq6.1" is not claimed
 
+  Scenario: A sync that cannot resolve a name is tried again, and the dispatch goes on once it can
+    Given a ready story "mw-gq6.1" of that epic
+    And the sync cannot resolve a name for its first 2 tries
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.1"
+    And the sync was tried 3 times, waiting 15s between the tries
+    And the dispatch report says the sync was retried 2 times
+
+  Scenario: A sync that never resolves a name is a local network fault, not a failed run
+    Given a ready story "mw-gq6.1" of that epic
+    And the sync can never resolve a name
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch printed the one line "local network fault: ssh: Could not resolve hostname github.com: Temporary failure in name resolution; nothing dispatched"
+    And no session was started
+    And the story "mw-gq6.1" is not claimed
+    And the sync was tried 3 times, waiting 15s between the tries
+    And dispatch leaves with status 7
+
+  Scenario: Any other sync failure is not tried again and fails as it always did
+    Given a ready story "mw-gq6.1" of that epic
+    And the vault's pull is refused with "git@github.com: Permission denied (publickey)."
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch failed, saying: Permission denied (publickey)
+    And no session was started
+    And the story "mw-gq6.1" is not claimed
+    And the sync was tried 1 time, waiting nothing
+    And dispatch leaves with status 1
+
+  Scenario: A halted beads sync is not tried again either
+    Given a ready story "mw-gq6.1" of that epic
+    And the beads sync halts with exit code 2
+    When dispatch runs on "vps" with a cap of 1
+    Then the sync was tried 1 time, waiting nothing
+    And dispatch leaves with status 2
+
+  Scenario: How many times the sync is tried, and how long dispatch waits, come from the config
+    Given the config file says dispatch_sync_tries is 2 and dispatch_sync_wait is "7s"
+    And a ready story "mw-gq6.1" of that epic
+    And the sync can never resolve a name
+    When dispatch runs on "vps" with a cap of 1
+    Then the sync was tried 2 times, waiting 7s between the tries
+    And dispatch leaves with status 7
+
   Scenario: The concurrency cap is respected
     Given a ready story "mw-gq6.1" of that epic
     And a ready story "mw-gq6.2" of that epic

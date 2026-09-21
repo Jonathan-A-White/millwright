@@ -28,10 +28,16 @@ type FakeVaultFiles struct {
 	// way the real clone reports a file nobody touched.
 	Unchanged []string
 
+	// PullErrFor, when positive, is how many Pulls report PullErr before the
+	// next ones work, the way a network that comes back does. Zero leaves
+	// PullErr as it always was: every Pull reports it.
+	PullErrFor int
+
 	// MarkErr, DirtyErr, PullErr, PushErr and CommitErr each stop that step.
 	MarkErr, DirtyErr, PullErr, PushErr, CommitErr error
 
 	marks, pulls, pushes int
+	pullTries            int
 	commits              []VaultCommit
 }
 
@@ -72,8 +78,11 @@ func (f *FakeVaultFiles) Uncommitted(_ context.Context) ([]string, error) {
 func (f *FakeVaultFiles) Pull(_ context.Context) (int, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.pullTries++
 	if f.PullErr != nil {
-		return 0, f.PullErr
+		if f.PullErrFor == 0 || f.pullTries <= f.PullErrFor {
+			return 0, f.PullErr
+		}
 	}
 	f.pulls++
 	return f.Incoming, nil
@@ -136,4 +145,12 @@ func (f *FakeVaultFiles) Moves() (marks, pulls, pushes int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.marks, f.pulls, f.pushes
+}
+
+// PullTries reports how many times Pull was asked, whether it worked or not, so
+// that a test can say a failed sync was tried again, or that it was not.
+func (f *FakeVaultFiles) PullTries() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pullTries
 }
