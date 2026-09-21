@@ -37,6 +37,10 @@ type FakeWindows struct {
 	// Err, when set, is returned by every method instead of doing the work.
 	Err error
 
+	// PaneErr, when set, is returned by PaneState alone: a terminal that lists
+	// its windows but cannot say what a pane is doing.
+	PaneErr error
+
 	// At is what a window opened by Open is recorded as having been opened at.
 	At time.Time
 }

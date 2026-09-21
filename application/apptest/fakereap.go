@@ -142,6 +142,9 @@ func (f *FakeWindows) PaneState(_ context.Context, id string) (application.PaneS
 	if f.Err != nil {
 		return "", f.Err
 	}
+	if f.PaneErr != nil {
+		return "", f.PaneErr
+	}
 	i := f.index(id)
 	if i < 0 {
 		return "", fmt.Errorf("no window %s is open", id)

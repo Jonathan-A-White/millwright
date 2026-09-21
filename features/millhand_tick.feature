@@ -2,7 +2,13 @@ Feature: mw millhand tick
   mw millhand tick is what the routine timer runs, every 15 minutes, for ever. It
   spends no tokens unless something needs the Millhand. It looks, in this order:
 
-    1. If a Millhand window is already open, it says "already up" and stops.
+    1. If a Millhand window is already open, it says "already up" and stops,
+       unless that Millhand is finished: it has written a handoff newer than its
+       window and its pane is idle at an empty input line on two checks running,
+       the rule mw seat reap --when-idle closes by. Then the tick closes the
+       window, adds one line to the Millhand's reaper log, says so in its line and
+       carries on as if no Millhand were up, so the same tick may wake a fresh
+       one. A window whose input line holds text is never closed.
     2. It runs one mw sync, so that this host sees the other one's mail and claims.
     3. It looks for mail addressed to this host's Millhand, millhand@<host> or
        plain millhand, and for a story mw sweep newly finds stuck on this host.
@@ -43,6 +49,88 @@ Feature: mw millhand tick
     And no window was opened
     And the tick did not sync
     And the tick log holds that line
+
+  Scenario: A finished Millhand's window is closed and the same tick wakes a fresh Millhand for waiting mail
+    Given the window "millhand-2026-09-19-04" was opened at "2026-09-19T05:00:00Z"
+    And unread tick mail for "millhand@laptop" with the subject "Please look at the queue"
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "closed the finished Millhand's window millhand-2026-09-19-04"
+    And mw millhand tick prints one dated line saying "woke the Millhand"
+    And the window "millhand-2026-09-19-04" was closed
+    And the tick synced once
+    And exactly one window was opened
+    And the kickoff prompt of the window holds:
+      | a routine wake           |
+      | Please look at the queue |
+    And the reaper log holds one line saying "closed by the tick: finished at 2026-09-19T06:00:00Z, window left open"
+    And the tick log holds that line
+
+  Scenario: A finished Millhand's window is closed, and with nothing waiting the tick says so
+    Given the window "millhand-2026-09-19-04" was opened at "2026-09-19T05:00:00Z"
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "closed the finished Millhand's window millhand-2026-09-19-04"
+    And mw millhand tick prints one dated line saying "quiet"
+    And the window "millhand-2026-09-19-04" was closed
+    And no window was opened
+    And the reaper log holds one line saying "closed by the tick: finished at 2026-09-19T06:00:00Z, window left open"
+
+  Scenario: A window with text on its input line is never closed
+    Given the window "millhand-2026-09-19-04" was opened at "2026-09-19T05:00:00Z"
+    And the pane of the window "millhand-2026-09-19-04" has text on its input line
+    And unread tick mail for "millhand@laptop" with the subject "Please look at the queue"
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "already up (millhand-2026-09-19-04)"
+    And the window "millhand-2026-09-19-04" was not closed
+    And the tick did not sync
+    And no window was opened
+    And the reaper log holds no line
+
+  Scenario: A working pane is already up
+    Given the window "millhand-2026-09-19-04" was opened at "2026-09-19T05:00:00Z"
+    And the pane of the window "millhand-2026-09-19-04" is working
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "already up (millhand-2026-09-19-04)"
+    And the window "millhand-2026-09-19-04" was not closed
+    And the reaper log holds no line
+
+  Scenario: A window with no handoff newer than its creation is already up
+    Given the window "millhand-2026-09-19-05" was opened at "2026-09-19T08:00:00Z"
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "already up (millhand-2026-09-19-05)"
+    And the window "millhand-2026-09-19-05" was not closed
+    And the reaper log holds no line
+
+  Scenario: A pane that is idle on the first check but busy on the second is already up
+    Given the window "millhand-2026-09-19-04" was opened at "2026-09-19T05:00:00Z"
+    And the pane of the window "millhand-2026-09-19-04" turns to text on its input line while the tick waits between its checks
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "already up (millhand-2026-09-19-04)"
+    And the window "millhand-2026-09-19-04" was not closed
+    And the reaper log holds no line
+
+  Scenario: A terminal that cannot be asked about a pane leaves the window alone
+    Given the window "millhand-2026-09-19-04" was opened at "2026-09-19T05:00:00Z"
+    And the terminal cannot say what the pane of the window "millhand-2026-09-19-04" is doing
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "already up (millhand-2026-09-19-04)"
+    And the window "millhand-2026-09-19-04" was not closed
+    And the reaper log holds no line
+
+  Scenario: A dry run says it would close a finished window and closes nothing
+    Given the window "millhand-2026-09-19-04" was opened at "2026-09-19T05:00:00Z"
+    When mw millhand tick is run as a dry run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "dry run: would close the finished Millhand's window millhand-2026-09-19-04"
+    And the window "millhand-2026-09-19-04" was not closed
+    And the reaper log holds no line
+    And no window was opened
 
   Scenario: Nothing to do is quiet and starts nothing
     When mw millhand tick is run
