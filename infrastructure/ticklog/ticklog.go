@@ -60,6 +60,24 @@ func (l *Log) Append(_ context.Context, line string) error {
 	return nil
 }
 
+// Read implements application.TickLog: the lines the log holds, oldest first. A
+// log never written to holds none. Nothing is made or changed.
+func (l *Log) Read(_ context.Context) ([]string, error) {
+	path := filepath.Join(l.Dir, File)
+	held, err := os.ReadFile(path)
+	switch {
+	case os.IsNotExist(err):
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf("reading %s: %w", path, err)
+	}
+	text := strings.TrimSuffix(string(held), "\n")
+	if text == "" {
+		return nil, nil
+	}
+	return strings.Split(text, "\n"), nil
+}
+
 func (l *Log) keep() int {
 	if l.Keep <= 0 {
 		return application.TickLogLines

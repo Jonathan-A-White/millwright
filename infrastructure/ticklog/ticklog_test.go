@@ -102,3 +102,41 @@ func TestAppendFailsWhenTheDirectoryCannotBeMade(t *testing.T) {
 		t.Fatal("expected an error")
 	}
 }
+
+func TestReadGivesTheLinesOldestFirst(t *testing.T) {
+	dir := t.TempDir()
+	log := New(dir)
+	for _, line := range []string{"one", "two", "three"} {
+		if err := log.Append(context.Background(), line); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := log.Read(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, "|") != "one|two|three" {
+		t.Fatalf("Read = %q", got)
+	}
+}
+
+func TestReadOfALogNothingWasWrittenToIsEmptyAndMakesNothing(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "state", "mw-dispatch")
+	got, err := New(dir).Read(context.Background())
+	if err != nil || len(got) != 0 {
+		t.Fatalf("Read = %q, %v; expected no lines and no error", got, err)
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("expected reading to make nothing, but %s is there (%v)", dir, err)
+	}
+}
+
+func TestReadOfAnEmptyFileIsEmpty(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, File), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := New(dir).Read(context.Background()); err != nil || len(got) != 0 {
+		t.Fatalf("Read = %q, %v; expected no lines", got, err)
+	}
+}
