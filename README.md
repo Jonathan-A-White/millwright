@@ -16,6 +16,30 @@ checks on its branch, `mw status` reports what a host is doing, `mw brief`
 prints the live children of a bead for a seat to boot from, and `mw sweep`
 marks the claimed stories whose session has gone or gone quiet.
 
+## Installing
+
+On Debian or Ubuntu (WSL Ubuntu included), as your own user, one line installs the
+tools and builds `mw`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Jonathan-A-White/millwright/main/scripts/install.sh | sh
+```
+
+It needs apt packages (git, tmux, jq, ripgrep, python3, curl, ca-certificates, gh,
+make), Go and `bd` at the versions in `scripts/pins.env` (each checked against the
+sha256 its release publishes). It clones the rig to `~/millwright` (or `$MW_HOME`; run
+from inside a checkout, it uses that one), runs `make build` and links `mw` into
+`~/.local/bin` (or `$MW_BIN`); Go goes to `~/.local/go`. Every step is printed first
+and skipped when already done, so running it again is safe. `sh scripts/install.sh
+--dry-run` prints the steps and changes nothing. It never runs `sudo`: when packages
+are missing it prints the one `apt-get install` command that needs root and stops
+before changing anything; run that with `sudo`, then run the line again. On any
+other system it prints what it would need and exits non-zero.
+
+It never handles a secret. It ends by printing the hand steps that are yours, each
+with its command and a check: install and log in to `claude`, GitHub credentials for
+a private vault (`gh auth login`), your git identity, and `mw init`.
+
 ## Getting started
 
 ```sh
@@ -26,7 +50,8 @@ make test
 make lint
 ```
 
-Go 1.27. The only dependencies are [cobra](https://github.com/spf13/cobra) for
+Go at the version in `scripts/pins.env`, which is the `go` line of `go.mod` and which
+`make lint` holds to it. The only dependencies are [cobra](https://github.com/spf13/cobra) for
 the command line and [godog](https://github.com/cucumber/godog) for the
 features.
 
