@@ -12,6 +12,7 @@ Where everything is. `CONTEXT.md` has the vocabulary, the ADRs the reasons.
 | infrastructure | `infrastructure/` | One subpackage per adapter: the only place bd, git, tmux, claude or the disk is touched. |
 | command line | `cmd/mw/` | Cobra wiring only: read config, run the use case. |
 | features | `features/` | Gherkin; step code in `features/steps/`. |
+| template | `template/` | The files a fresh vault is born from: charters, vision, ledger, `CLAUDE.md`. No personal or host detail. |
 
 ## Ports
 
@@ -109,5 +110,6 @@ faking only tracker, runner and vault git: `features/steps/next_steps.go`.
 - One feature: `MW_FEATURE=sweep.feature go test ./features` (`:17` appended
   for the scenario at that line).
 - `scripts/check-codemap.sh` checks this page; `scripts/check-timer-units.sh`
-  checks `contrib/systemd/` and `contrib/mail-notify`.
+  checks `contrib/systemd/` and `contrib/mail-notify`; `scripts/check-template.sh`
+  checks `template/`.
 - `make check-formulas` needs `bd`, `jq` and real time; not in `make test`.
