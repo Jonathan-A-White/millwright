@@ -176,6 +176,24 @@ type SeatBoot struct {
 // Boot assembles the session that works detail in the worktree dir. What comes
 // back is ready for a Runner to start.
 func (b SeatBoot) Boot(ctx context.Context, detail StoryDetail, dir string) (SessionSpec, error) {
+	return b.boot(ctx, detail, dir, func(vaultDir string) string {
+		return KickoffPrompt(b.Seat, detail.Story.ID, vaultDir)
+	})
+}
+
+// Rebase assembles a fresh session for a story whose branch would not merge
+// into its target branch without conflicts: booted into the same seat, in the
+// same worktree, with the same story, and told to rebase the branch onto onto —
+// the target branch as the remote has it — rather than to work the story again.
+func (b SeatBoot) Rebase(ctx context.Context, detail StoryDetail, dir, onto string) (SessionSpec, error) {
+	return b.boot(ctx, detail, dir, func(vaultDir string) string {
+		return RebaseKickoffPrompt(b.Seat, detail.Story.ID, vaultDir, onto)
+	})
+}
+
+// boot is Boot with the first thing the session is told left to the caller,
+// given the vault's directory on this host.
+func (b SeatBoot) boot(ctx context.Context, detail StoryDetail, dir string, kickoff func(vaultDir string) string) (SessionSpec, error) {
 	id := detail.Story.ID
 	switch {
 	case b.Vault == nil || b.Harness == nil:
@@ -218,7 +236,7 @@ func (b SeatBoot) Boot(ctx context.Context, detail StoryDetail, dir string) (Ses
 		// into it.
 		BootFile:   bootFile,
 		ResultFile: b.Vault.RunFile(id, ResultFileName),
-		Kickoff:    KickoffPrompt(b.Seat, id, b.Vault.Dir()),
+		Kickoff:    kickoff(b.Vault.Dir()),
 		After:      b.after(id),
 	})
 	if err != nil {
@@ -294,6 +312,32 @@ func KickoffPrompt(seat, storyID, vaultDir string) string {
 		"A formula step you have not closed yet is one it will name. "+
 		"This session is headless and ends when your turn ends: run the suite in the foreground "+
 		"and wait for it, never in the background, and commit before you stop.", seat, storyID, bdVault(vaultDir), storyID)
+}
+
+// RebaseKickoffPrompt is the first thing a session sent back to rebase is told.
+// The story's work is done and its formula's steps are closed; what is left is
+// only to bring the branch onto the target branch as it is now, so that mw next
+// can land it. The branch has never been pushed, so rewriting it forces nothing.
+func RebaseKickoffPrompt(seat, storyID, vaultDir, onto string) string {
+	return fmt.Sprintf("You are booted into the %s seat of millwright, and your story is %s. "+
+		"Your charter, your memory of this rig and the story itself are in the system prompt you were given. "+
+		"Your worktree is the directory you are in: work only there. "+
+		"The story has been worked and its formula steps are closed, but its branch does not merge into %s "+
+		"without conflicts: the target branch moved on while the story was worked. "+
+		"You are sent back once, to rebase: run `git rebase %s` in your worktree, resolve every conflict "+
+		"so that both the story's work and what landed meanwhile are kept, run the rig's suite in the foreground "+
+		"until it is green, and commit. The branch was never pushed, so the rebase forces nothing. "+
+		"Do not push, do not merge, do not close the story, and work nothing else of it. "+
+		"Sign nothing you commit: no Co-Authored-By trailer, no Generated with line, "+
+		"no AI attribution of any kind. "+
+		"bd runs without asking, but as its own Bash call, never chained with another command "+
+		"by ;, | or &&. "+
+		"%s"+
+		"Say on the story, in one comment, what the conflicts were and how you resolved them. "+
+		"Once the rebase is committed, run `mw check %s` and fix whatever it refuses. "+
+		"When you end, mw next lands the branch; if it still conflicts it stops, and nobody is sent back again. "+
+		"This session is headless and ends when your turn ends: run the suite in the foreground "+
+		"and wait for it, never in the background, and commit before you stop.", seat, storyID, onto, onto, bdVault(vaultDir), storyID)
 }
 
 // bdVault is the sentence that gives a session the exact bd command for this

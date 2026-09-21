@@ -338,3 +338,23 @@ func TestKickoffPromptWithNoVaultPathSaysNothingOfBdC(t *testing.T) {
 		t.Errorf("expected no bd -C without a vault path, got %q", prompt)
 	}
 }
+
+func TestRebaseKickoffPromptSaysWhatToRebaseOntoAndNothingMore(t *testing.T) {
+	prompt := application.RebaseKickoffPrompt("builder", "mw-gq6.50", "/home/jwhite/vault", "origin/main")
+
+	for _, want := range []string{
+		"mw-gq6.50",
+		"git rebase origin/main",
+		"bd -C /home/jwhite/vault close <step>",
+		"mw check mw-gq6.50",
+		"Do not push",
+		"Sign nothing",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected the rebase kickoff to hold %q, got %q", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "%!") {
+		t.Errorf("expected every value written as it is, got %q", prompt)
+	}
+}
