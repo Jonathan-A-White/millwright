@@ -429,12 +429,8 @@ func actingWindow(acting string, open []Window) (Window, bool) {
 // due. A window nothing could date counts as older than every handoff: the
 // refusal is for a seat that is demonstrably still held.
 func handedOffSince(handoffs []Handoff, opened time.Time) bool {
-	for _, handoff := range handoffs {
-		if handoff.Written.After(opened) {
-			return true
-		}
-	}
-	return false
+	_, since := newestHandoffSince(handoffs, opened)
+	return since
 }
 
 // seatWindowNumber is the number a seat's window is numbered with — 13 of
