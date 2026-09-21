@@ -572,16 +572,19 @@ between ticks. The units are in `contrib/systemd/`: `mw-dispatch.service` (a
 oneshot that runs `mw dispatch` as you) and `mw-dispatch.timer` (every five
 minutes, on the clock).
 
-**Install**, once per host:
+**Install**, once per host. Write `~/.config/mw/dispatch.env` (the one line
+below), then:
 
 ```sh
-mkdir -p ~/.config/systemd/user ~/.config/mw
-cp contrib/systemd/mw-dispatch.service contrib/systemd/mw-dispatch.timer ~/.config/systemd/user/
-# or ln -s the two files, to follow the rig's copy
-$EDITOR ~/.config/mw/dispatch.env        # the one line below
-systemctl --user daemon-reload
-systemctl --user enable --now mw-dispatch.timer
+sh scripts/install-units.sh --enable mw-dispatch
 ```
+
+`scripts/install-units.sh` *links* the pair into `~/.config/systemd/user` (so a
+landing that changes a unit needs only `systemctl --user daemon-reload`), reloads
+systemd, and enables the timer only with `--enable`. It takes any of the five
+timer pairs in `contrib/systemd/` by name, and with none named lists them and
+which are installed and active, changing nothing; `--dry-run` says what it would
+do. It prints the `loginctl enable-linger` line as a hand step and never runs it.
 
 A user unit gets a bare `PATH`, and the rig names no host's directories. The
 host owns `~/.config/mw/dispatch.env`, one line saying where `mw`, `bd`, `git`,
@@ -747,15 +750,9 @@ The window is found from the vault's `.mayor-acting`, free text the Mayor
 writes: a window id (`@12`), the window's name (`mayor-2026-09-19-10`), or
 `window 3`. If it names no one window, nothing is typed.
 
-**Install**, once per host, by hand (nothing in the rig does it for you):
-
-```sh
-mkdir -p ~/.config/systemd/user ~/.config/mw ~/.local/bin
-ln -s "$PWD/contrib/mail-notify" ~/.local/bin/mw-mail-notify
-cp contrib/systemd/mw-mail-notify.service contrib/systemd/mw-mail-notify.timer ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now mw-mail-notify.timer
-```
+**Install**, once per host: `sh scripts/install-units.sh --enable mw-mail-notify`
+(see *Running a host on a timer*). It prints one hand step for this pair, the
+`ln -s` that puts `contrib/mail-notify` on `~/.local/bin` as `mw-mail-notify`.
 
 The service reads the same `~/.config/mw/dispatch.env` as the dispatch timer for
 its `PATH`, which must reach `mw`, `bd`, `tmux`, `flock` and `~/.local/bin`; and
@@ -824,17 +821,11 @@ overridable in the unit's environment):
 | `last_sync_stale` | `last_sync_age_s` above | `MW_HEALTH_SYNC_AGE_MAX_S`, 3600 |
 | `syncs_running` | above | `MW_HEALTH_SYNCS_RUNNING_MAX`, 1 |
 
-**Install** by hand, once per host; nothing in the rig does it for you and
-nothing here needs `sudo`:
-
-```sh
-mkdir -p ~/.config/systemd/user ~/.config/mw ~/.local/bin
-ln -s "$PWD/contrib/health/mw-health.sh" ~/.local/bin/mw-health
-cp contrib/systemd/mw-health.service contrib/systemd/mw-health.timer ~/.config/systemd/user/
-$EDITOR ~/.config/mw/health.env          # optional, NAME=value lines
-systemctl --user daemon-reload
-systemctl --user enable --now mw-health.timer
-```
+**Install**, once per host: `sh scripts/install-units.sh --enable mw-health`
+(see *Running a host on a timer*); nothing here needs `sudo`. It prints one hand
+step for this pair, the `ln -s` that puts `contrib/health/mw-health.sh` on
+`~/.local/bin` as `mw-health`. `~/.config/mw/health.env` is optional,
+`NAME=value` lines.
 
 The service reads the same `~/.config/mw/dispatch.env` as the dispatch timer for
 its `PATH`, which must reach `mw`, `bd`, `tmux`, `systemctl` and
@@ -1288,20 +1279,10 @@ OnCalendar=*-*-* 07:30
 The empty `OnCalendar=` clears the shipped times first. The same works for the
 tick's timer.
 
-**Install** by hand, once per host; nothing in the rig does it for you and
-nothing here needs `sudo`:
-
-```sh
-mkdir -p ~/.config/systemd/user ~/.config/mw
-cp contrib/systemd/mw-millhand-tick.service contrib/systemd/mw-millhand-tick.timer \
-   contrib/systemd/mw-millhand-review.service contrib/systemd/mw-millhand-review.timer \
-   ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now mw-millhand-tick.timer mw-millhand-review.timer
-```
-
-Enable one and not the other if that is what the host wants. `systemctl --user
-list-timers` says which are armed and when each next runs.
+**Install**, once per host: `sh scripts/install-units.sh --enable
+mw-millhand-tick mw-millhand-review` (see *Running a host on a timer*); nothing
+here needs `sudo`. Name one and not the other if that is what the host wants.
+`systemctl --user list-timers` says which are armed and when each next runs.
 
 **Undo it**:
 
