@@ -17,6 +17,7 @@ type FakeRunner struct {
 	sessions map[string]*fakeSession
 	order    []string
 	closed   []string
+	started  []string
 
 	// Err, when set, is returned by every method instead of doing the work.
 	Err error
@@ -60,6 +61,7 @@ func (f *FakeRunner) Start(_ context.Context, spec application.SessionSpec) erro
 		done:   make(chan struct{}),
 	}
 	f.order = append(f.order, spec.Name)
+	f.started = append(f.started, spec.Name)
 	return nil
 }
 
@@ -134,6 +136,32 @@ func (f *FakeRunner) Wait(ctx context.Context, name string) (application.Session
 	return f.Status(ctx, name)
 }
 
+// Rename implements application.Runner.
+func (f *FakeRunner) Rename(_ context.Context, name, to string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return f.Err
+	}
+	s, ok := f.sessions[name]
+	if !ok {
+		return fmt.Errorf("no session %q", name)
+	}
+	if _, taken := f.sessions[to]; taken {
+		return fmt.Errorf("session %q is already there", to)
+	}
+	delete(f.sessions, name)
+	s.spec.Name, s.status.Name = to, to
+	f.sessions[to] = s
+	for i, ordered := range f.order {
+		if ordered == name {
+			f.order[i] = to
+			break
+		}
+	}
+	return nil
+}
+
 // Close implements application.Runner.
 func (f *FakeRunner) Close(_ context.Context, name string) error {
 	f.mu.Lock()
@@ -192,6 +220,14 @@ func (f *FakeRunner) Closed() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.closed...)
+}
+
+// Started reports every session ever started, under the name it was started
+// with, oldest first: closed and renamed ones too.
+func (f *FakeRunner) Started() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.started...)
 }
 
 // Spec reports how a session was started, and whether it is there at all.

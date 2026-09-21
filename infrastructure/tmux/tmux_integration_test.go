@@ -319,3 +319,37 @@ func TestRunnerClosesAnExitedSessionAndOnlyThatOne(t *testing.T) {
 		t.Errorf("expected closing a closed session to be harmless, got %v", err)
 	}
 }
+
+// TestRunnerRenamesASessionAndFreesItsName is what a close-out that sends a
+// story back does from inside the story's own session: moves that session aside,
+// still running, so that a fresh one can be started under the story's name.
+func TestRunnerRenamesASessionAndFreesItsName(t *testing.T) {
+	runner := privateRunner(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	name := application.SessionName("mw-gq6.50")
+	aside := name + "-sent-back"
+	if err := runner.Start(ctx, application.SessionSpec{Name: name, Command: []string{"sleep", "30"}}); err != nil {
+		t.Fatalf("starting %s: %v", name, err)
+	}
+	if err := runner.Rename(ctx, name, aside); err != nil {
+		t.Fatalf("renaming %s: %v", name, err)
+	}
+	defer func() { _ = runner.Close(context.Background(), aside) }()
+
+	if status, err := runner.Status(ctx, aside); err != nil || !status.Running() {
+		t.Fatalf("expected %s still running under its new name, got %+v, %v", aside, status, err)
+	}
+	if status, err := runner.Status(ctx, name); err != nil || status.State != application.StateGone {
+		t.Fatalf("expected no session left named %s, got %+v, %v", name, status, err)
+	}
+	if err := runner.Start(ctx, application.SessionSpec{Name: name, Command: []string{"sleep", "30"}}); err != nil {
+		t.Fatalf("starting a fresh %s under the freed name: %v", name, err)
+	}
+	defer func() { _ = runner.Close(context.Background(), name) }()
+
+	if err := runner.Rename(ctx, name, aside); err == nil {
+		t.Errorf("expected renaming onto a name already there to fail")
+	}
+}

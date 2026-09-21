@@ -124,6 +124,13 @@ type Runner interface {
 	// error and the last status it saw.
 	Wait(ctx context.Context, name string) (SessionStatus, error)
 
+	// Rename gives a session a new name, leaving what runs in it running. It
+	// is how a session makes way for a new one under its name while it is
+	// still going: the close-out that sends a story back to be rebased runs
+	// inside the session the story was worked in. It fails if there is no
+	// session of that name, or one of the new name is already there.
+	Rename(ctx context.Context, name, to string) error
+
 	// Close ends the session and everything running in it. Closing a session
 	// that is already gone is harmless. Nothing of it can be read afterwards.
 	Close(ctx context.Context, name string) error

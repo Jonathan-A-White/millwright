@@ -275,6 +275,15 @@ func (r *Runner) Wait(ctx context.Context, name string) (application.SessionStat
 	}
 }
 
+// Rename implements application.Runner.
+func (r *Runner) Rename(ctx context.Context, name, to string) error {
+	if to != application.SessionName(to) {
+		return fmt.Errorf("a session cannot be renamed %q: use SessionName, which makes it %q", to, application.SessionName(to))
+	}
+	_, err := r.call(ctx, "rename-session", "-t", sessionTarget(name), to)
+	return err
+}
+
 // Close implements application.Runner. Killing a session that is already gone
 // is not a failure: the session is gone either way.
 func (r *Runner) Close(ctx context.Context, name string) error {
