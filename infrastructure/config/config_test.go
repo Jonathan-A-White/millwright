@@ -393,6 +393,37 @@ func TestAHostThatSaysNothingAboutTestsIsNotAnError(t *testing.T) {
 	}
 }
 
+func TestAfterLandingSaysWhatEachRigRunsOnceALandingMovedIt(t *testing.T) {
+	writeConfig(t, `host = "laptop"
+
+[tests]
+millwright = "make test"
+
+[after_landing]
+millwright = "make build"
+`)
+
+	after, err := config.AfterLanding()
+	if err != nil {
+		t.Fatalf("reading what runs after a landing: %v", err)
+	}
+	if len(after) != 1 || after["millwright"] != "make build" {
+		t.Errorf("expected only the rig's own command line, not the tests', got %+v", after)
+	}
+}
+
+func TestAHostThatSaysNothingAboutAfterALandingRunsNothing(t *testing.T) {
+	writeConfig(t, vpsConfig)
+
+	after, err := config.AfterLanding()
+	if err != nil {
+		t.Fatalf("reading what runs after a landing: %v", err)
+	}
+	if len(after) != 0 {
+		t.Errorf("expected no rig to have a command, got %+v", after)
+	}
+}
+
 func TestRigMemoryBytesIsEightThousandUntilAHostSaysOtherwise(t *testing.T) {
 	writeConfig(t, "vault = \"/v\"\nhost = \"vps\"\n")
 

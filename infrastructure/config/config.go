@@ -58,10 +58,13 @@ const (
 // out on this host: rig name on the left, directory on the right. TestsTable is
 // the table that says how each rig's own tests are run on this host: rig name on
 // the left, a command line on the right. A rig that is not in it is tested the
-// way DefaultTests says.
+// way DefaultTests says. AfterLandingTable is the table of the command each rig
+// has run once a landing has moved this host's checkout of it; a rig that is not
+// in it has none.
 const (
-	RigsTable  = "rigs"
-	TestsTable = "tests"
+	RigsTable         = "rigs"
+	TestsTable        = "tests"
+	AfterLandingTable = "after_landing"
 )
 
 // WatchTable is the table of the config file that says what `mw watch` looks at.
@@ -426,6 +429,22 @@ func Tests() (map[string]string, error) {
 		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
 	}
 	return tableIn(filepath.Join(home, File), TestsTable)
+}
+
+// AfterLanding reports the command each rig has run after a landing has moved
+// this host's checkout of it, by rig name, read from the `[after_landing]` table
+// of ~/.config/mw/config.toml: `millwright = "make build"` is how a host that
+// runs its own mw from the rig's bin/ keeps it current. A rig that says nothing
+// has nothing run, and a machine with no such table is not an error.
+//
+// It is a command line, as a test is in `[tests]`, and for the same reason: a
+// rig says what it means in its own words, and the shell reads them.
+func AfterLanding() (map[string]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	return tableIn(filepath.Join(home, File), AfterLandingTable)
 }
 
 // WatchSettings is what the `[watch]` table says: how to reach the host that is
