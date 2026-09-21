@@ -202,3 +202,41 @@ func TestALedgerLineLandsAStoryOnlyWhenItsOutcomeSaysLanded(t *testing.T) {
 		t.Errorf("a line for mw-gq6.8 should not land mw-gq6.80: %s", landed)
 	}
 }
+
+func TestALineNotLandedForAReasonCodeDoesNotLandTheStory(t *testing.T) {
+	for _, code := range []application.Reason{
+		application.ReasonTestsFail, application.ReasonSignedCommit, application.ReasonNoResult, application.ReasonLandingFailed,
+	} {
+		line := aLedgerLine(func(l *application.LedgerLine) {
+			l.Outcome = application.NotLanded(code, "something was refused\nover two lines")
+		}).String()
+
+		if !strings.Contains(line, "not landed ("+string(code)+"): something was refused") {
+			t.Errorf("expected the outcome to start with the reason code %s, got %s", code, line)
+		}
+		if application.LedgerLandsStory(line, "mw-gq6.8") {
+			t.Errorf("a line not landed for %s should not land mw-gq6.8: %s", code, line)
+		}
+		if !application.LedgerNamesStory(line, "mw-gq6.8") {
+			t.Errorf("a line not landed for %s should still name mw-gq6.8: %s", code, line)
+		}
+	}
+}
+
+func TestALandedLineStillLandsTheStoryBesideRefusedOnesOfEitherKind(t *testing.T) {
+	old := aLedgerLine(func(l *application.LedgerLine) { l.Outcome = "not landed: the rig's tests fail" }).String()
+	coded := aLedgerLine(func(l *application.LedgerLine) {
+		l.Outcome = application.NotLanded(application.ReasonSignedCommit, "a commit is signed")
+	}).String()
+	landed := aLedgerLine(nil).String()
+
+	landsIt := 0
+	for _, line := range []string{old, coded, landed} {
+		if application.LedgerLandsStory(line, "mw-gq6.8") {
+			landsIt++
+		}
+	}
+	if landsIt != 1 {
+		t.Errorf("expected exactly the landed line among an old refusal, a coded one and a landing to land the story, %d did", landsIt)
+	}
+}
