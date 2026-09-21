@@ -42,6 +42,8 @@ const (
 	HandoffAtEnv   = "MW_HANDOFF_AT"
 	RigMemoryEnv   = "MW_RIG_MEMORY_BYTES"
 
+	TickRecheckEnv = "MW_TICK_RECHECK_SECONDS"
+
 	MillhandRoutineModelEnv = "MW_MILLHAND_ROUTINE_MODEL"
 	MillhandReviewModelEnv  = "MW_MILLHAND_REVIEW_MODEL"
 )
@@ -77,6 +79,11 @@ const DefaultStaleHours = 2
 // hourly sync the factory runs, which is the smallest threshold that does not
 // call a host asleep for the lag alone.
 const DefaultHostSilentHours = 2
+
+// DefaultTickRecheckSeconds is how long `mw millhand tick` waits between its two
+// looks at a Millhand's pane before it closes the window of a finished one: the
+// reaper's own half minute.
+const DefaultTickRecheckSeconds = 30
 
 // DefaultHandoffAt is the context size, in tokens, at which a seat's session
 // must hand off when nothing says otherwise.
@@ -201,6 +208,36 @@ func HostSilentHours() (int, error) {
 		return 0, fmt.Errorf("the host silence threshold is %d hours, so every other host would be called asleep the moment it synced: set it to 1 or more", hours)
 	}
 	return hours, nil
+}
+
+// TickRecheckSeconds reports how many seconds `mw millhand tick` waits between
+// its two looks at a Millhand's pane: $MW_TICK_RECHECK_SECONDS if it is set,
+// otherwise the root-table `tick_recheck_seconds` key of
+// ~/.config/mw/config.toml, and DefaultTickRecheckSeconds when neither says.
+// Zero is no wait.
+func TickRecheckSeconds() (int, error) {
+	said := strings.TrimSpace(os.Getenv(TickRecheckEnv))
+	if said == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return 0, fmt.Errorf("no %s is set and there is no home directory to read %s in: %w", TickRecheckEnv, File, err)
+		}
+		if said, err = valueIn(filepath.Join(home, File), "tick_recheck_seconds"); err != nil {
+			return 0, err
+		}
+	}
+	if said == "" {
+		return DefaultTickRecheckSeconds, nil
+	}
+
+	seconds, err := strconv.Atoi(said)
+	if err != nil {
+		return 0, fmt.Errorf("the tick's recheck wait is %q, which is not a whole number of seconds: set %s=<n>, or `tick_recheck_seconds = <n>` in %s", said, TickRecheckEnv, File)
+	}
+	if seconds < 0 {
+		return 0, fmt.Errorf("the tick's recheck wait is %d seconds, which is before the first look: set it to 0 or more", seconds)
+	}
+	return seconds, nil
 }
 
 // RigMemoryBytes reports how large a Builder's memory of one rig may grow
