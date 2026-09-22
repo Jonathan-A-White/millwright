@@ -4,6 +4,81 @@ A personal software factory: one human directs a small set of AI-occupied
 seats that turn conversations into tracked work and tracked work into commits,
 across several rigs and two hosts, on a tight fuel budget.
 
+## Quick start
+
+One line installs everything this needs and builds `mw`, on Debian or Ubuntu
+(WSL Ubuntu included), as your own user:
+
+```sh
+url=https://raw.githubusercontent.com/Jonathan-A-White/millwright/main/scripts/install.sh
+curl -fsSL "$url" | sh
+```
+
+Piping a script straight into a shell is worth a second thought. Download it and
+read it first if you'd rather, then run it the same way:
+
+```sh
+curl -fsSL "$url" -o install.sh
+less install.sh && sh install.sh
+```
+
+It never handles a secret, and ends by printing the hand steps that are still
+yours, each with its command and a check:
+
+- **`[claude]`** install the harness and log in to it
+  install: `curl -fsSL https://claude.ai/install.sh | bash` · log in: `claude auth login` · check: `claude auth status`
+- **`[github]`** GitHub credentials, for a private vault (or a deploy key on the
+  vault's repo, cloned over ssh)
+  run: `gh auth login && gh auth setup-git` · check: `gh auth status`
+- **`[git-identity]`** tell git who you are
+  run: `git config --global user.name "Your Name" && git config --global user.email "you@example.com"` · check: `git config --global user.name && git config --global user.email`
+- **`[mw-init]`** set `mw` up on this host — see below
+  run: `mw init` · check: `test -f ~/.config/mw/config.toml && echo ok`
+
+Then `mw init --vault <dir> --prefix <prefix>` for a factory of your own, or `mw
+init --join <git-url> --vault <dir>` to bring this host onto one that already
+exists (*Making a fresh vault* and *Joining an existing vault*, below).
+
+Next, `scripts/install-units.sh` puts this host's timers where systemd finds
+them (*Running a host on a timer*, below). Which ones a host wants depends on
+what it does here:
+
+- a host that runs Builders wants `mw-dispatch`;
+- the Mayor's home wants `mw-mail-notify` and `mw-health`;
+- a host with a Millhand wants the two Millhand timers, `mw-millhand-tick` and
+  `mw-millhand-review`.
+
+`sh scripts/install-units.sh --enable <name>...` links and arms them; run it
+with no name to see what is installed and active already.
+
+Last, `mw seat up mayor` starts the Mayor's session, primed from its charter and
+its newest handoff. A fresh vault has no handoff yet, so the very first
+conversation is by hand instead: open `claude` in the vault, point it at
+`seats/mayor/charter.md` and `seats/mayor/vision.md`, and talk — it ends by
+writing the first handoff. Every session after that starts with `mw seat up
+mayor`.
+
+## Moving a host
+
+Moving a seat's home — the Mayor's, say — to a new host:
+
+1. **Join** on the new box first, so the seat has somewhere to land before it
+   leaves the old one: `mw init --join <git-url> --vault <dir> --host <name>`,
+   then `scripts/install-units.sh` there for whichever timers it now wants.
+2. **Turn the old host's timers off first** — whichever it ran for the seat
+   that is moving (`mw-mail-notify` and `mw-health` for the Mayor's home, the
+   two Millhand timers for a Millhand): `systemctl --user disable --now
+   <unit>.timer` for each. Two hosts must never run the same seat's timers at
+   once.
+3. **Move the designated-migrator note**, if the old host held it: the line in
+   the vault's `CLAUDE.md` naming which one host runs `bd migrate` — every
+   other clone stays on `bd bootstrap`, never `bd migrate`, forever.
+
+What this does **not** move: any other timer the old host still runs (a
+dispatcher's, another seat's), any rig only it has checked out, and anything
+else it serves that millwright did not start. Those stay exactly where they
+are; only the seat crosses over.
+
 `mw` is the factory's command line. Today it knows its own version, files the
 Mayor's plans with `mw file`, shows a filed plan with `mw show`, releases the ones
 approved later with `mw release`, reads and writes stories through beads, runs
@@ -18,27 +93,18 @@ marks the claimed stories whose session has gone or gone quiet.
 
 ## Installing
 
-On Debian or Ubuntu (WSL Ubuntu included), as your own user, one line installs the
-tools and builds `mw`:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/Jonathan-A-White/millwright/main/scripts/install.sh | sh
-```
-
-It needs apt packages (git, tmux, jq, ripgrep, python3, curl, ca-certificates, gh,
-make), Go and `bd` at the versions in `scripts/pins.env` (each checked against the
-sha256 its release publishes). It clones the rig to `~/millwright` (or `$MW_HOME`; run
-from inside a checkout, it uses that one), runs `make build` and links `mw` into
-`~/.local/bin` (or `$MW_BIN`); Go goes to `~/.local/go`. Every step is printed first
-and skipped when already done, so running it again is safe. `sh scripts/install.sh
---dry-run` prints the steps and changes nothing. It never runs `sudo`: when packages
-are missing it prints the one `apt-get install` command that needs root and stops
-before changing anything; run that with `sudo`, then run the line again. On any
-other system it prints what it would need and exits non-zero.
-
-It never handles a secret. It ends by printing the hand steps that are yours, each
-with its command and a check: install and log in to `claude`, GitHub credentials for
-a private vault (`gh auth login`), your git identity, and `mw init`.
+See *Quick start*, above, for the one line. It needs apt packages (git, tmux, jq,
+ripgrep, python3, curl, ca-certificates, gh, make), Go and `bd` at the versions in
+`scripts/pins.env` (each checked against the sha256 its release publishes). It
+clones the rig to `~/millwright` (or `$MW_HOME`; run from inside a checkout, it
+uses that one), runs `make build` and links `mw` into `~/.local/bin` (or
+`$MW_BIN`); Go goes to `~/.local/go`. Every step is printed first and skipped
+when already done, so running it again is safe. `sh scripts/install.sh
+--dry-run` prints the steps and changes nothing. It never runs `sudo`: when
+packages are missing it prints the one `apt-get install` command that needs
+root and stops before changing anything; run that with `sudo`, then run the
+line again. On any other system it prints what it would need and exits
+non-zero.
 
 ## Getting started
 
@@ -614,12 +680,9 @@ migrator; that stays whichever host it already was. `--join` and `--prefix` are
 refused together, since a joined vault already has its own database.
 
 It then writes `~/.config/mw/config.toml` under the same never-overwrite rule `mw
-init` writes it under, and ends with one `mw sync`, printed or its failure. A MOVE
-of the Mayor's home needs more than this command does: the designated-migrator note
-in the vault's `CLAUDE.md`, this host's units (`scripts/install-units.sh`), and the
-old host's timers turned off first, so two hosts never dispatch as one name — `mw
-init --join` prints all three as still owed rather than doing them. See
-`features/init.feature`.
+init` writes it under, and ends with one `mw sync`, printed or its failure.
+Moving a seat's home to a new host with this command needs more besides — see
+*Moving a host*, above. See `features/init.feature`.
 
 ## Running a host on a timer
 
