@@ -18,9 +18,11 @@ func newSyncCmd() *cobra.Command {
 		Short: "Bring this host level with the other one: the vault, then beads",
 		Long: "sync pulls the other host's vault commits and pushes this host's, then runs one beads\n" +
 			"synchronisation cycle, then records when this host was last level. It never migrates and\n" +
-			"never forces: what it cannot settle stops it, with the reason in plain words, and nothing\n" +
-			"is retried. A sync stopped by beads exits with beads' own exit code, so that a timer can\n" +
-			"branch on it: 2 is a merge conflict and 4 a stuck working set, and both wait for a person.\n" +
+			"never forces: what it cannot settle stops it, with the reason in plain words. A merge\n" +
+			"conflict (bd exit 2) is given one retry after a short wait, since it sometimes clears on\n" +
+			"its own within seconds; nothing else is retried. A sync stopped by beads exits with beads'\n" +
+			"own exit code, so that a timer can branch on it: 2 is a merge conflict and 4 a stuck\n" +
+			"working set, and both wait for a person.\n" +
 			"Work nobody committed in the vault is not a failure: the vault half is skipped, beads are\n" +
 			"synced anyway, and sync exits 5 with one line naming the files. mw commits nobody's edits.\n\n" +
 			"With the note of when this host was level it leaves the counts of its timers' logs, for the\n" +

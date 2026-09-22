@@ -50,15 +50,23 @@ Feature: Keeping the vault and beads in step between hosts
     Then the sync succeeds
     And the other host's next sync reads the time of the sync under host.vps.last_sync
 
-  Scenario: An unresolvable beads conflict stops the sync
+  Scenario: An unresolvable beads conflict stops the sync after its one retry
     Given bd sync will exit 2
     When this host syncs
     Then the sync fails, and mw stops with a non-zero exit
     And the failure says, in plain words:
       | merge conflict |
       | by hand        |
-    And the beads database was synced once
+    And the beads database was synced twice, the conflict retried once
     And nothing is recorded under host.vps.last_sync
+
+  Scenario: A beads conflict that clears on retry is level, with a notice
+    Given bd sync will exit 2, then clear on the next try
+    When this host syncs
+    Then the sync succeeds
+    And the sync reports that the conflict cleared on retry
+    And the beads database was synced twice, the conflict retried once
+    And the beads database holds the time of the sync under host.vps.last_sync
 
   Scenario: A stuck working set stops the sync
     Given bd sync will exit 4

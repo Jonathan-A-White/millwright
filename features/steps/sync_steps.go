@@ -73,6 +73,7 @@ func InitializeSyncScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^this host appended its own line to the Mayor's ledger$`, c.thisHostAppended)
 	ctx.Given(`^this host has an uncommitted change to the Mayor's ledger$`, c.thisHostHasAnUncommittedChange)
 	ctx.Given(`^bd sync will exit (\d+)$`, c.bdSyncWillExit)
+	ctx.Given(`^bd sync will exit (\d+), then clear on the next try$`, c.bdSyncWillExitThenClear)
 
 	ctx.When(`^this host syncs$`, c.thisHostSyncs)
 
@@ -92,6 +93,8 @@ func InitializeSyncScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the vault is where it was on both hosts$`, c.theVaultIsWhereItWasOnBothHosts)
 	ctx.Then(`^the vault is where it was on this host$`, c.theVaultIsWhereItWasOnThisHost)
 	ctx.Then(`^the beads database was synced once$`, c.theDatabaseWasSyncedOnce)
+	ctx.Then(`^the beads database was synced twice, the conflict retried once$`, c.theDatabaseWasSyncedTwice)
+	ctx.Then(`^the sync reports that the conflict cleared on retry$`, c.theSyncReportsTheRetryNotice)
 	ctx.Then(`^the beads database holds the time of the sync under (\S+)$`, c.theDatabaseHoldsTheTimeUnder)
 	ctx.Then(`^the other host's next sync reads the time of the sync under (\S+)$`, c.theOtherHostReadsTheTimeUnder)
 	ctx.Then(`^nothing is recorded under (\S+)$`, c.nothingIsRecordedUnder)
@@ -253,6 +256,11 @@ func (c *syncContext) bdSyncWillExit(code int) error {
 	return nil
 }
 
+func (c *syncContext) bdSyncWillExitThenClear(code int) error {
+	c.tracker.SyncExitsOnce(code, fmt.Sprintf("bd sync exited %d", code))
+	return nil
+}
+
 func (c *syncContext) thisHostSyncs() error {
 	var err error
 	if c.headBefore, err = runGit(c.here, "rev-parse", "HEAD"); err != nil {
@@ -267,6 +275,7 @@ func (c *syncContext) thisHostSyncs() error {
 		Tracker: c.tracker,
 		Host:    c.host,
 		Now:     func() time.Time { return syncedAt },
+		Sleep:   func(context.Context, time.Duration) error { return nil },
 	}
 	c.report, c.err = sync.Run(context.Background())
 	return nil
@@ -488,6 +497,20 @@ func (c *syncContext) theVaultIsWhereItWasOnBothHosts() error {
 func (c *syncContext) theDatabaseWasSyncedOnce() error {
 	if got := c.tracker.Syncs(); got != 1 {
 		return fmt.Errorf("expected one synchronisation cycle, got %d", got)
+	}
+	return nil
+}
+
+func (c *syncContext) theDatabaseWasSyncedTwice() error {
+	if got := c.tracker.Syncs(); got != 2 {
+		return fmt.Errorf("expected the conflict's one retry, got %d cycles", got)
+	}
+	return nil
+}
+
+func (c *syncContext) theSyncReportsTheRetryNotice() error {
+	if !strings.Contains(c.report.String(), "conflict cleared on retry") {
+		return fmt.Errorf("expected the report to say the conflict cleared on retry, got %q", c.report.String())
 	}
 	return nil
 }
