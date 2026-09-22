@@ -735,6 +735,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 		Files:     filesPort,
 		Mailbox:   c.mailbox,
 		Runner:    c.runner,
+		Memory:    c.tracker,
 		Sync:      application.Sync{Vault: c.files, Tracker: c.tracker, Host: nextHost},
 		Dispatch: application.Dispatch{
 			Tracker:   c.tracker,

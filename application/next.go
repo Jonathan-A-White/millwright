@@ -157,6 +157,13 @@ type Next struct {
 	// away. A nil Runner skips that check.
 	Runner Runner
 
+	// Memory is where mw sweep remembers what it saw of a story's last session,
+	// cleared when a close-out sends the story back to a fresh session of its
+	// own (mw-gq6.86): that fresh session's pane starts blank too, and a note
+	// the ended session left behind would otherwise be read as its silence,
+	// since the old session's clock. A nil Memory clears nothing.
+	Memory SweepNotes
+
 	// Sync brings the hosts level after the story is closed and before anything
 	// new is dispatched, so that the other host sees the closed story before it
 	// picks its own next work. A nil Sync skips it.
@@ -601,6 +608,11 @@ func (n Next) sendBack(ctx context.Context, c *closeOut, report *NextReport, lan
 
 	// From here the fresh session is running and spending fuel: nothing below
 	// undoes it, and what cannot be recorded is a note.
+	if n.Memory != nil {
+		if err := n.Memory.ClearNote(ctx, SweepKey(c.id)); err != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf("what mw sweep remembered of the ended session could not be cleared: %v", err))
+		}
+	}
 	if err := recordAttempt(ctx, n.Tracker, c.detail); err != nil {
 		report.Notes = append(report.Notes, err.Error())
 	}
