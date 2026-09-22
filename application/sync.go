@@ -23,6 +23,20 @@ const (
 // the VPS is host.vps.last_sync.
 func LastSyncKey(host string) string { return "host." + host + ".last_sync" }
 
+// LastGCKey is where a host records when it last asked the tracker to
+// reclaim the disk space its own history piles up, so that mw sync does not
+// ask more often than GCInterval. Only this host ever reads its own key: no
+// other host has a reason to know.
+func LastGCKey(host string) string { return "host." + host + ".last_gc" }
+
+// DefaultGCInterval is how long a host waits between asking the tracker to
+// reclaim disk space, when nothing says otherwise. A tracker that commits
+// after every write, which is bd's own default, can run up thousands of
+// commits between one full collection and the next; asking on every sync
+// would cost every sync the minutes a full collection can take on a large
+// store, to reclaim space that waiting a day does not meaningfully lose.
+const DefaultGCInterval = 24 * time.Hour
+
 // LastSyncFormat is how a sync time is written down: RFC 3339 in UTC, so that
 // two hosts in two time zones compare as text.
 const LastSyncFormat = time.RFC3339
@@ -184,6 +198,12 @@ type TrackerSync interface {
 	// ClearNote deletes one key from the tracker's key-value store. A key that
 	// is not there is already what was asked for, and is not an error.
 	ClearNote(ctx context.Context, key string) error
+
+	// GC asks the tracker to reclaim the disk space its own history piles
+	// up. It is never part of a synchronisation cycle itself — Sync.Run calls
+	// it on its own cadence, at most once per GCInterval per host — and it
+	// must never delete tracked work: choosing to do that is a person's call.
+	GC(ctx context.Context) error
 }
 
 // SyncHalt is a tracker synchronisation that stopped without publishing
@@ -326,6 +346,11 @@ type SyncReport struct {
 	// cleared on the one retry, naming what bd said on that first try. Empty
 	// when no retry happened.
 	Retried string
+
+	// GCed says this sync also asked the tracker to reclaim its disk space,
+	// on the cadence GCInterval sets. False on most syncs: it is not that
+	// nothing needed reclaiming, only that it was not this sync's turn.
+	GCed bool
 }
 
 // Quiet reports whether the sync found nothing to do: nothing to mark, nothing
@@ -353,6 +378,9 @@ func (r SyncReport) String() string {
 	b.WriteString("; beads synced")
 	if r.Retried != "" {
 		fmt.Fprintf(&b, "; %s", r.Retried)
+	}
+	if r.GCed {
+		b.WriteString("; garbage collected")
 	}
 	if !r.At.IsZero() {
 		fmt.Fprintf(&b, "; level at %s", r.At.UTC().Format(LastSyncFormat))
@@ -392,6 +420,10 @@ type Sync struct {
 	// cannot be read, or a note that cannot be written, is left out: none of them
 	// is the sync's to fail.
 	Ticks TickLogs
+
+	// GCInterval is how long this host waits between asking the tracker to
+	// reclaim disk space. Zero reads DefaultGCInterval.
+	GCInterval time.Duration
 
 	// Now is the clock, so that a test can pin the time a sync was level at.
 	// The zero value reads the real one.
@@ -496,7 +528,48 @@ func (s Sync) syncBeadsRecordingLevel(ctx context.Context, report SyncReport) (S
 		return report, fmt.Errorf("recording when %s was last level: %w", s.Host, noteErr)
 	}
 	report.At = at
+	report.GCed = s.maybeGC(ctx)
 	return report, nil
+}
+
+// maybeGC asks the tracker to reclaim disk space when it has been at least
+// GCInterval since this host last did, and reports whether it did. Nothing
+// here is worth failing a sync over: a tracker that fails to collect leaves
+// the report unmarked, and the next sync tries again on its own cadence.
+func (s Sync) maybeGC(ctx context.Context) bool {
+	if !s.dueForGC(ctx) {
+		return false
+	}
+	if err := s.Tracker.GC(ctx); err != nil {
+		return false
+	}
+	_ = s.Tracker.SetNote(ctx, LastGCKey(s.Host), s.now().UTC().Format(LastSyncFormat))
+	return true
+}
+
+// dueForGC reports whether it has been at least GCInterval since this host
+// last asked the tracker to reclaim disk space. Never having asked, and a
+// note that cannot be read as a time, both read as due: better one collection
+// too many than a cadence that silently never runs.
+func (s Sync) dueForGC(ctx context.Context) bool {
+	last, err := s.Tracker.Note(ctx, LastGCKey(s.Host))
+	if err != nil || last == "" {
+		return true
+	}
+	at, err := time.Parse(LastSyncFormat, last)
+	if err != nil {
+		return true
+	}
+	return s.now().Sub(at) >= s.gcInterval()
+}
+
+// gcInterval is how long this host waits between asking the tracker to
+// reclaim disk space.
+func (s Sync) gcInterval() time.Duration {
+	if s.GCInterval <= 0 {
+		return DefaultGCInterval
+	}
+	return s.GCInterval
 }
 
 // syncTracker runs one tracker synchronisation cycle. A merge conflict (bd

@@ -610,3 +610,80 @@ func TestASyncThatCannotReadALogStillSyncs(t *testing.T) {
 		t.Fatalf("expected one cycle, got %d", got)
 	}
 }
+
+func TestASyncAsksTheTrackerToCollectWhenItHasNeverAsked(t *testing.T) {
+	sync, _, tracker := syncing(t)
+
+	report, err := sync.Run(context.Background())
+	if err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	if !report.GCed {
+		t.Fatal("expected a host that has never asked before to ask this time")
+	}
+	if got := tracker.GCs(); got != 1 {
+		t.Fatalf("expected one collection, got %d", got)
+	}
+	note, err := tracker.Note(context.Background(), application.LastGCKey("vps"))
+	if err != nil {
+		t.Fatalf("reading the note: %v", err)
+	}
+	if note != level.Format(application.LastSyncFormat) {
+		t.Fatalf("expected host.vps.last_gc to be %q, got %q", level.Format(application.LastSyncFormat), note)
+	}
+}
+
+func TestASyncDoesNotAskTheTrackerToCollectBeforeItsCadence(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	if err := tracker.SetNote(context.Background(), application.LastGCKey("vps"),
+		level.Add(-time.Hour).UTC().Format(application.LastSyncFormat)); err != nil {
+		t.Fatalf("seeding the last collection: %v", err)
+	}
+
+	report, err := sync.Run(context.Background())
+	if err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	if report.GCed {
+		t.Fatal("expected a host that collected an hour ago not to ask again before its cadence")
+	}
+	if got := tracker.GCs(); got != 0 {
+		t.Fatalf("expected no collection, got %d", got)
+	}
+}
+
+func TestASyncAsksTheTrackerToCollectOncePastItsCadence(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	sync.GCInterval = time.Hour
+	if err := tracker.SetNote(context.Background(), application.LastGCKey("vps"),
+		level.Add(-2*time.Hour).UTC().Format(application.LastSyncFormat)); err != nil {
+		t.Fatalf("seeding the last collection: %v", err)
+	}
+
+	report, err := sync.Run(context.Background())
+	if err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	if !report.GCed {
+		t.Fatal("expected a host past its cadence to ask again")
+	}
+	if got := tracker.GCs(); got != 1 {
+		t.Fatalf("expected one collection, got %d", got)
+	}
+}
+
+func TestASyncThatCannotCollectStillSucceeds(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	tracker.GCErr = errors.New("no space to write a compacted commit")
+
+	report, err := sync.Run(context.Background())
+	if err != nil {
+		t.Fatalf("expected a failed collection not to stop a sync, got %v", err)
+	}
+	if report.GCed {
+		t.Fatal("expected a failed collection not to be reported as one")
+	}
+	if !strings.Contains(report.String(), "beads synced") {
+		t.Fatalf("expected the sync to still report as synced, got %q", report.String())
+	}
+}

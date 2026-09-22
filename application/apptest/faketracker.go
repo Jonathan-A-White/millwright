@@ -65,6 +65,12 @@ type FakeTracker struct {
 	// notes and not yet here.
 	published map[string]string
 	syncs     int
+	// gcs counts the calls to GC, so a test can say whether one happened.
+	gcs int
+	// GCErr, when set, is what GC reports instead of collecting.
+	GCErr error
+	// size is what Size reports.
+	size int64
 	// asked is the dispatch-facing calls in the order they were made, so that a
 	// test can say the hosts were levelled before anything was claimed.
 	asked []string
@@ -526,7 +532,7 @@ func (f *FakeTracker) Molecules() int {
 
 // Asked reports the dispatch-facing calls the fake was made, in order: Sync,
 // RunningStories, ReadyForHost, WorkInHand, ClaimStory, ReleaseClaim,
-// OpenMolecule, PourFormula and SetStoryState. It is how a test says what was done before
+// OpenMolecule, PourFormula, SetStoryState and GC. It is how a test says what was done before
 // what.
 func (f *FakeTracker) Asked() []string {
 	f.mu.Lock()
@@ -1054,6 +1060,48 @@ func (f *FakeTracker) Syncs() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.syncs
+}
+
+// GC implements application.TrackerSync. Nothing is actually collected: the
+// fake counts the call, so a test can say whether mw sync asked for one.
+func (f *FakeTracker) GC(_ context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, "GC")
+	if f.Err != nil {
+		return f.Err
+	}
+	if f.GCErr != nil {
+		return f.GCErr
+	}
+	f.gcs++
+	return nil
+}
+
+// GCs reports how many times GC was asked to collect, so that a test can say
+// a cadence held it back.
+func (f *FakeTracker) GCs() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.gcs
+}
+
+// SetSize makes Size report bytes, as if the beads database were that large
+// on disk.
+func (f *FakeTracker) SetSize(bytes int64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.size = bytes
+}
+
+// Size implements application.TrackerNotes.
+func (f *FakeTracker) Size(_ context.Context) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return 0, f.Err
+	}
+	return f.size, nil
 }
 
 // waiting reports whether this story still waits on another that is not

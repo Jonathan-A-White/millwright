@@ -98,6 +98,79 @@ func TestASyncConflictThatClearsOnRetryGoesThroughTheRealGateway(t *testing.T) {
 	}
 }
 
+// recordingStandIn writes a program that always exits 0 but first writes the
+// arguments it was called with, space-joined, on their own line in a file
+// beside it — so a test can say exactly what a gateway method ran, not just
+// that it exited without error.
+func recordingStandIn(t *testing.T) (gateway *beads.Gateway, calls string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in for bd is a shell script")
+	}
+	dir := t.TempDir()
+	calls = filepath.Join(dir, "calls")
+	path := filepath.Join(dir, "bd-stand-in")
+	script := fmt.Sprintf("#!/bin/sh\necho \"$*\" >> %q\nexit 0\n", calls)
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing the stand-in: %v", err)
+	}
+	return beads.New(dir, beads.WithProgram(path)), calls
+}
+
+func TestGCSkipsDecayAndAsksBdToForceItThroughWithoutAPrompt(t *testing.T) {
+	gateway, calls := recordingStandIn(t)
+
+	if err := gateway.GC(context.Background()); err != nil {
+		t.Fatalf("collecting: %v", err)
+	}
+	said, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatalf("reading what was called: %v", err)
+	}
+	line := strings.TrimSpace(string(said))
+	if !strings.Contains(line, "gc") || !strings.Contains(line, "--skip-decay") || !strings.Contains(line, "--force") {
+		t.Fatalf("expected gc to skip decay and force past the prompt, got %q", line)
+	}
+}
+
+func TestSizeSumsEveryFileUnderBeadsAndIgnoresTheRest(t *testing.T) {
+	dir := t.TempDir()
+	beadsDir := filepath.Join(dir, ".beads")
+	if err := os.MkdirAll(filepath.Join(beadsDir, "backup"), 0o755); err != nil {
+		t.Fatalf("making the beads directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(beadsDir, "issues.jsonl"), make([]byte, 100), 0o644); err != nil {
+		t.Fatalf("writing a database file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(beadsDir, "backup", "chunk.darc"), make([]byte, 250), 0o644); err != nil {
+		t.Fatalf("writing a backup chunk: %v", err)
+	}
+	// A file outside .beads must never be counted: it is not this database's.
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), make([]byte, 9999), 0o644); err != nil {
+		t.Fatalf("writing an unrelated file: %v", err)
+	}
+
+	gateway := beads.New(dir)
+	size, err := gateway.Size(context.Background())
+	if err != nil {
+		t.Fatalf("sizing: %v", err)
+	}
+	if size != 350 {
+		t.Fatalf("expected 100+250=350 bytes under .beads, got %d", size)
+	}
+}
+
+func TestSizeOfAVaultWithNoBeadsDirectoryYetIsZeroNotAFailure(t *testing.T) {
+	gateway := beads.New(t.TempDir())
+	size, err := gateway.Size(context.Background())
+	if err != nil {
+		t.Fatalf("expected no .beads yet to size as zero, got %v", err)
+	}
+	if size != 0 {
+		t.Fatalf("expected 0, got %d", size)
+	}
+}
+
 func TestSyncSurfacesTheExitCodeItWasGiven(t *testing.T) {
 	for _, exit := range []int{1, 2, 3, 4, 7} {
 		gateway := standIn(t, "bd said what it said", exit)

@@ -27,7 +27,10 @@ func newSyncCmd() *cobra.Command {
 			"synced anyway, and sync exits 5 with one line naming the files. mw commits nobody's edits.\n\n" +
 			"With the note of when this host was level it leaves the counts of its timers' logs, for the\n" +
 			"other host's mw status to show: the last good run of mw dispatch and of the Millhand's tick, and\n" +
-			"how many runs since have failed.",
+			"how many runs since have failed.\n\n" +
+			"Once level, it also asks the tracker to reclaim the disk space its own auto-commit history\n" +
+			"piles up — never more than once a day per host, since a full collection can take real time.\n" +
+			"Nothing is ever deleted by it: that stays a person's call.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := config.Vault()

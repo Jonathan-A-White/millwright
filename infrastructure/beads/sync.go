@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -17,6 +20,11 @@ var (
 	_ application.TrackerSync  = (*Gateway)(nil)
 	_ application.TrackerNotes = (*Gateway)(nil)
 )
+
+// beadsDir is where bd keeps everything about one vault's database — the
+// working database, its auto-commit history, and its auto-backups — relative
+// to the vault directory a Gateway runs bd in.
+const beadsDir = ".beads"
 
 // NoteMissing is what bd says when a key is not in its key-value store — it
 // exits 1 and prints `<key> (not set)`. That is not a failure here: a host that
@@ -74,6 +82,49 @@ func (g *Gateway) Note(ctx context.Context, key string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// GC implements application.TrackerSync: asks bd to reclaim the disk space
+// its own auto-commit history piles up — its compact and Dolt GC phases.
+// Decay, which deletes issues closed a long time ago, is skipped: choosing to
+// delete tracked work is a person's call, not something a sync makes on a
+// timer.
+func (g *Gateway) GC(ctx context.Context) error {
+	_, err := g.call(ctx, "gc", "--skip-decay", "--force")
+	return err
+}
+
+// Size implements application.TrackerNotes: every byte this host's beads
+// database occupies on disk under .beads in the vault — the working
+// database, its auto-commit history, and whatever bd itself keeps there, its
+// auto-backups included. It is host-local: an adapter never sizes another
+// host's disk, so mw status only ever calls this for the host it runs on. A
+// vault that has not been bd-initialised yet has no .beads at all, which
+// sizes as 0 rather than a failure: there is nothing there yet, not an error.
+func (g *Gateway) Size(_ context.Context) (int64, error) {
+	root := filepath.Join(g.vault, beadsDir)
+	var total int64
+	err := filepath.WalkDir(root, func(_ string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		total += info.Size()
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("sizing the beads database in %s: %w", g.vault, err)
+	}
+	return total, nil
 }
 
 // SetNote implements application.TrackerSync.
