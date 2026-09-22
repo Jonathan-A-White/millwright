@@ -109,6 +109,10 @@ func newDispatchCmd() *cobra.Command {
 				return fmt.Errorf("no rig is checked out on %s: add one under [%s] in ~/%s, as `<rig> = \"<directory>\"`",
 					host, config.RigsTable, config.File)
 			}
+			tests, err := config.Tests()
+			if err != nil {
+				return err
+			}
 
 			tries, err := config.DispatchSyncTries()
 			if err != nil {
@@ -131,7 +135,7 @@ func newDispatchCmd() *cobra.Command {
 				Tracker:     gateway,
 				Worktrees:   rig.New(),
 				Runner:      tmux.New(),
-				Boot:        builderBoot(files, host),
+				Boot:        builderBoot(files, host, tests),
 				Sync:        application.Sync{Vault: files, Tracker: gateway, Host: host, Ticks: logs},
 				SyncTries:   tries,
 				SyncWait:    wait,

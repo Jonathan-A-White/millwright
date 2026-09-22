@@ -112,7 +112,7 @@ func newNextCmd() *cobra.Command {
 					Tracker:     gateway,
 					Worktrees:   worktrees,
 					Runner:      runner,
-					Boot:        builderBoot(files, host),
+					Boot:        builderBoot(files, host, tests),
 					Host:        host,
 					Cap:         atOnce,
 					MaxAttempts: maxAttempts,
@@ -134,7 +134,7 @@ func newNextCmd() *cobra.Command {
 				Runner:    runner,
 				Sync:      sync,
 				Dispatch:  dispatcher,
-				Boot:      builderBoot(files, host),
+				Boot:      builderBoot(files, host, tests),
 				Seat:      BuilderSeat,
 				Host:      host,
 				Rigs:      rigs,
@@ -156,10 +156,13 @@ func newNextCmd() *cobra.Command {
 
 // builderBoot is how every dispatched session is assembled: into the Builder
 // seat, on this host, with this same mw chained on after the harness exits.
-func builderBoot(files *vault.Vault, host string) application.SeatBoot {
+// tests is the [tests] table, so the session may run its own rig's tests
+// without being asked, exactly as `mw next` would run them (see
+// claude.WithTests).
+func builderBoot(files *vault.Vault, host string, tests map[string]string) application.SeatBoot {
 	return application.SeatBoot{
 		Vault:   files,
-		Harness: claude.New(),
+		Harness: claude.New(claude.WithTests(tests)),
 		Seat:    BuilderSeat,
 		Host:    host,
 		After:   afterSession(),
