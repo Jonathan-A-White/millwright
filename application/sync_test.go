@@ -27,6 +27,7 @@ func syncing(t *testing.T) (application.Sync, *apptest.FakeVaultFiles, *apptest.
 		Tracker: tracker,
 		Host:    "vps",
 		Now:     func() time.Time { return level },
+		Sleep:   func(context.Context, time.Duration) error { return nil },
 	}, files, tracker
 }
 
@@ -255,17 +256,18 @@ func TestSyncStopsWhenBeadsHaltsEvenThoughTheVaultWasBlockedToo(t *testing.T) {
 	if got := application.ExitStatus(err); got != 2 {
 		t.Fatalf("expected mw to leave with 2, got %d", got)
 	}
-	if got := tracker.Syncs(); got != 1 {
-		t.Fatalf("expected one synchronisation cycle, got %d", got)
+	if got := tracker.Syncs(); got != 2 {
+		t.Fatalf("expected the conflict's one retry even though the vault was blocked, got %d cycles", got)
 	}
 }
 
+// A merge conflict is the one exit code that gets a retry: TestASyncConflict*
+// below covers it. Every other halt is surfaced on the first try.
 func TestSyncSurfacesAHaltAndNeverRetriesIt(t *testing.T) {
 	for _, halt := range []struct {
 		code int
 		says []string
 	}{
-		{2, []string{"merge conflict", "by hand", "nothing was pushed"}},
 		{4, []string{"stuck", "nothing was pushed"}},
 	} {
 		sync, _, tracker := syncing(t)
@@ -297,6 +299,70 @@ func TestSyncSurfacesAHaltAndNeverRetriesIt(t *testing.T) {
 		if note != "" {
 			t.Fatalf("expected a halted sync to record no time, got %q", note)
 		}
+	}
+}
+
+func TestAConflictThatClearsOnRetryIsLevelWithTheNotice(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	var waited []time.Duration
+	sync.Sleep = func(_ context.Context, d time.Duration) error {
+		waited = append(waited, d)
+		return nil
+	}
+	tracker.SyncExitsOnce(2, "conflict in the working set")
+
+	report, err := sync.Run(context.Background())
+	if err != nil {
+		t.Fatalf("expected the conflict to clear on retry, got %v", err)
+	}
+	if want := "conflict cleared on retry (bd said: conflict in the working set)"; report.Retried != want {
+		t.Fatalf("expected the retry notice %q, got %q", want, report.Retried)
+	}
+	if !strings.Contains(report.String(), report.Retried) {
+		t.Fatalf("expected the printed report to carry the notice, got %q", report.String())
+	}
+	if !report.At.Equal(level) {
+		t.Fatalf("expected the sync to be level at %s, got %s", level, report.At)
+	}
+	if got := tracker.Syncs(); got != 2 {
+		t.Fatalf("expected the conflict retried exactly once, got %d cycles", got)
+	}
+	if len(waited) != 1 || waited[0] != application.ConflictRetryDelay {
+		t.Fatalf("expected one wait of %s before the retry, got %v", application.ConflictRetryDelay, waited)
+	}
+	note, err := tracker.Note(context.Background(), application.LastSyncKey("vps"))
+	if err != nil {
+		t.Fatalf("reading the note: %v", err)
+	}
+	if note != level.Format(application.LastSyncFormat) {
+		t.Fatalf("expected host.vps.last_sync to be recorded once the retry cleared, got %q", note)
+	}
+}
+
+func TestAConflictThatDoesNotClearOnRetryHaltsCarryingBothFirstLines(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	tracker.SyncExitsOnce(2, "first conflict")
+	tracker.SyncExits(2, "second conflict")
+
+	_, err := sync.Run(context.Background())
+	halt, stopped := application.Halted(err)
+	if !stopped {
+		t.Fatalf("expected the halt to survive the retry, got %T: %v", err, err)
+	}
+	if halt.Code != 2 {
+		t.Fatalf("expected bd's own exit 2, got %d", halt.Code)
+	}
+	for _, want := range []string{"first conflict", "second conflict"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected the halt to carry both first lines, missing %q in %q", want, err)
+		}
+	}
+	if got := tracker.Syncs(); got != 2 {
+		t.Fatalf("expected exactly one retry, got %d cycles", got)
+	}
+	note, _ := tracker.Note(context.Background(), application.LastSyncKey("vps"))
+	if note != "" {
+		t.Fatalf("expected a halt that survives the retry to record no time, got %q", note)
 	}
 }
 

@@ -77,6 +77,11 @@ type FakeTracker struct {
 	// SyncErr, when set, is what Sync reports instead of synchronising. Use
 	// SyncExits to make it the halt a beads exit code stands for.
 	SyncErr error
+	// syncErrOnce, when set, is what the very next Sync call reports, after
+	// which it clears itself; set with SyncExitsOnce. It is checked before
+	// SyncErr, so a test can chain "fails once, then fails a different way"
+	// by setting both.
+	syncErrOnce error
 }
 
 // epicFacts is what DescribeEpic gave an epic beyond its title.
@@ -956,6 +961,11 @@ func (f *FakeTracker) Sync(_ context.Context) error {
 		return f.Err
 	}
 	f.syncs++
+	if f.syncErrOnce != nil {
+		err := f.syncErrOnce
+		f.syncErrOnce = nil
+		return err
+	}
 	if f.SyncErr != nil {
 		return f.SyncErr
 	}
@@ -1025,6 +1035,17 @@ func (f *FakeTracker) SyncExits(code int, said string) {
 		return
 	}
 	f.SyncErr = &application.SyncHalt{Code: code, Said: said}
+}
+
+// SyncExitsOnce makes only the very next Sync call halt the way a beads exit
+// code says it did; the call after that reports SyncErr (or nothing, when
+// SyncErr is unset) as if the tracker had come right on its own. It is how a
+// test stands in for a conflict that clears on retry, or for one that does not
+// but says something different the second time.
+func (f *FakeTracker) SyncExitsOnce(code int, said string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.syncErrOnce = &application.SyncHalt{Code: code, Said: said}
 }
 
 // Syncs reports how many synchronisation cycles were asked for, so that a test

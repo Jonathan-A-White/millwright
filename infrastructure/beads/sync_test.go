@@ -8,8 +8,10 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 )
 
@@ -32,6 +34,68 @@ func standIn(t *testing.T, says string, exit int) *beads.Gateway {
 		t.Fatalf("writing the stand-in: %v", err)
 	}
 	return beads.New(dir, beads.WithProgram(path))
+}
+
+// standInThatClearsOnItsSecondCall returns a Gateway whose stand-in exits with
+// first on the first call and 0 on every one after, counting calls in a file
+// beside it — the shape of a conflict that bd itself would have cleared by
+// the following try, as one did on the Mayor's boot sync.
+func standInThatClearsOnItsSecondCall(t *testing.T, first int, saidFirst string) *beads.Gateway {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in for bd is a shell script")
+	}
+	dir := t.TempDir()
+	counter := filepath.Join(dir, "calls")
+	path := filepath.Join(dir, "bd-stand-in")
+	// Only `bd sync` itself is made to fail and counted; `kv get`/`kv set`,
+	// which Note and SetNote also run through this same stand-in, always
+	// succeed, or the note-keeping around the cycle would be what failed.
+	script := fmt.Sprintf(`#!/bin/sh
+is_sync=0
+for a in "$@"; do
+  if [ "$a" = "sync" ]; then
+    is_sync=1
+  fi
+done
+if [ "$is_sync" = "0" ]; then
+  exit 0
+fi
+n=$(cat %q 2>/dev/null || echo 0)
+n=$((n+1))
+echo "$n" > %q
+if [ "$n" = "1" ]; then
+  echo %q >&2
+  exit %d
+fi
+exit 0
+`, counter, counter, saidFirst, first)
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing the stand-in: %v", err)
+	}
+	return beads.New(dir, beads.WithProgram(path))
+}
+
+// A conflict that clears by the next try is exactly what motivated this
+// story: `mw sync` gave application.Sync.Run the retry, and the real gateway
+// underneath is what actually runs bd a second time — this is the two working
+// together, not the fake tracker standing in for one of them.
+func TestASyncConflictThatClearsOnRetryGoesThroughTheRealGateway(t *testing.T) {
+	gateway := standInThatClearsOnItsSecondCall(t, 2, "CONFLICT in the working set")
+	sync := application.Sync{
+		Vault:   &apptest.FakeVaultFiles{},
+		Tracker: gateway,
+		Host:    "vps",
+		Sleep:   func(context.Context, time.Duration) error { return nil },
+	}
+
+	report, err := sync.Run(context.Background())
+	if err != nil {
+		t.Fatalf("expected the conflict to clear on the gateway's second bd sync, got %v", err)
+	}
+	if want := "conflict cleared on retry (bd said: CONFLICT in the working set)"; report.Retried != want {
+		t.Fatalf("expected the retry notice %q, got %q", want, report.Retried)
+	}
 }
 
 func TestSyncSurfacesTheExitCodeItWasGiven(t *testing.T) {
