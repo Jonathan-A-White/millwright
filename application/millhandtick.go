@@ -75,14 +75,15 @@ func (r MillhandTickReport) String() string { return r.Line + "\n" }
 //     this host all the same.
 //  3. One sync, so that this host sees the other one's mail and claims. A sync
 //     that fails is said in the line, and the tick looks locally all the same.
-//  4. Need is unread mail for this host's Millhand — millhand@<host>, or plain
-//     millhand — or a story Sweep newly finds stuck on this host, or a watched
-//     host that is unwell, stale or down. The mail is only listed: it stays
-//     unread until the Millhand reads it.
+//  4. Need is unread mail in any mailbox this host's Millhand reads —
+//     millhand@<host>, plain millhand, or the host's own box <host>, which the
+//     Millhand reads once it is up — or a story Sweep newly finds stuck on this
+//     host, or a watched host that is unwell, stale or down. The mail is only
+//     listed: it stays unread until the Millhand reads it.
 //  5. No need is "quiet" and nothing is started; need is ONE routine wake whose
-//     reason names the mail subjects, the stuck story titles and the watch line,
-//     verbatim. When the watch says the host is down or its Mayor is gone the
-//     reason ends with MayorRespawnException.
+//     reason names each mailbox's unread mail, box by box, the stuck story
+//     titles and the watch line, verbatim. When the watch says the host is down
+//     or its Mayor is gone the reason ends with MayorRespawnException.
 //
 // A dry run does the same but starts nothing, and it runs neither the sweep nor
 // the watch: a sweep records the stories it finds stuck, and Sweep only ever
@@ -419,33 +420,53 @@ func syncNote(err error) string {
 	return TickSyncFailed + oneLine(err.Error())
 }
 
-// unreadMail is the quoted subjects of the unread mail in this host's Millhand's
-// mailboxes, oldest first. The mail is not read. What could be listed comes
-// back with the error, if a mailbox could not be.
-func (t MillhandTick) unreadMail(ctx context.Context) ([]string, error) {
-	var messages []Message
+// mailBoxes is every mailbox this host's Millhand reads, in the order the
+// wake reason names them: its host-qualified box, its plain seat box, and the
+// host's own box, which the Millhand reads once it is up.
+func (t MillhandTick) mailBoxes() []string {
+	return []string{SeatIdentity(MillhandSeat, t.Host), MillhandSeat, t.Host}
+}
+
+// boxMail is the unread mail found in one mailbox: its quoted subjects,
+// oldest first.
+type boxMail struct {
+	box      string
+	subjects []string
+}
+
+// unreadMail is the unread mail in every mailbox this host's Millhand reads,
+// one group per box that holds any, oldest message first within a box. The
+// mail is not read. What could be listed comes back with the error, if a
+// mailbox could not be.
+func (t MillhandTick) unreadMail(ctx context.Context) ([]boxMail, error) {
+	var groups []boxMail
 	var failed error
 	seen := map[string]bool{}
-	for _, mailbox := range []string{SeatIdentity(MillhandSeat, t.Host), MillhandSeat} {
+	for _, mailbox := range t.mailBoxes() {
 		inbox, err := t.Mail.Inbox(ctx, mailbox)
 		if err != nil {
 			failed = err
 			continue
 		}
+		var messages []Message
 		for _, message := range inbox {
 			if !seen[message.ID] {
 				seen[message.ID] = true
 				messages = append(messages, message)
 			}
 		}
-	}
-	sort.SliceStable(messages, func(i, j int) bool { return messages[i].Sent.Before(messages[j].Sent) })
+		if len(messages) == 0 {
+			continue
+		}
+		sort.SliceStable(messages, func(i, j int) bool { return messages[i].Sent.Before(messages[j].Sent) })
 
-	subjects := make([]string, len(messages))
-	for i, message := range messages {
-		subjects[i] = fmt.Sprintf("%q", oneLine(message.Subject))
+		subjects := make([]string, len(messages))
+		for i, message := range messages {
+			subjects[i] = fmt.Sprintf("%q", oneLine(message.Subject))
+		}
+		groups = append(groups, boxMail{box: mailbox, subjects: subjects})
 	}
-	return subjects, failed
+	return groups, failed
 }
 
 // sweep is the stories Sweep newly finds stuck on this host, as `"title" (id)`,
@@ -483,13 +504,14 @@ func (t MillhandTick) wake(ctx context.Context, reason string) (verdict string, 
 
 func alreadyUp(window string) string { return "already up (" + window + ")" }
 
-// tickReason is what the Millhand is told it was woken for: the mail subjects
-// and the stuck stories, TickReasonLimit of each and a count of the rest, and
-// the watch line as it was found. It is empty when there is nothing.
-func tickReason(mail, stuck []string, health tickHealth) string {
+// tickReason is what the Millhand is told it was woken for: the unread mail
+// of each mailbox it reads, named with its box and TickReasonLimit subjects
+// then a count of the rest, the stuck stories the same way, and the watch
+// line as it was found. It is empty when there is nothing.
+func tickReason(mail []boxMail, stuck []string, health tickHealth) string {
 	var parts []string
-	if len(mail) > 0 {
-		parts = append(parts, counted(len(mail), "unread message", "unread messages")+": "+named(mail))
+	for _, group := range mail {
+		parts = append(parts, counted(len(group.subjects), "unread", "unread")+" in "+group.box+": "+named(group.subjects))
 	}
 	if len(stuck) > 0 {
 		parts = append(parts, counted(len(stuck), "stuck story", "stuck stories")+": "+named(stuck))
