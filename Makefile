@@ -14,7 +14,7 @@ TAGS ?= beads_integration
 export GOFLAGS := -p=1
 export GOMAXPROCS := 1
 
-.PHONY: all build test lint clean check-formulas
+.PHONY: all build test lint clean check-formulas check-bootstrap
 
 all: build test lint
 
@@ -48,3 +48,10 @@ clean:
 # Not part of `make test`: needs bd on PATH and takes real wall-clock time.
 check-formulas:
 	scripts/check-formulas.sh
+
+# Proves scripts/install.sh works from nothing in a clean container. Not part
+# of build, test or lint: it needs docker and the network. Skips itself with
+# exit 0 and prints "skipped: no docker" on a host without docker (the VPS
+# must never run this).
+check-bootstrap:
+	scripts/check-bootstrap.sh
