@@ -66,6 +66,13 @@ type Dispatch struct {
 	// it, which is what a dry run does.
 	Sync HostSync
 
+	// SyncHalts is this host's own mark of a halted sync: written once the
+	// sync halts on a merge conflict or a stuck working set, left alone on a
+	// halt that repeats, and cleared once the sync is level again. A nil
+	// SyncHalts writes and clears nothing, and mw status here has no local
+	// mark to read.
+	SyncHalts SyncHaltMarker
+
 	// SyncTries is how many times the sync is tried when it fails because a name
 	// could not be resolved, which is what a host just woken from standby says
 	// until its network is back, and SyncWait is how long to wait between the
@@ -279,8 +286,10 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			return report, err
 		}
 		if err != nil {
+			RecordSyncHalt(ctx, d.SyncHalts, err, d.now())
 			return report, fmt.Errorf("dispatching on %s: the hosts could not be brought level, so nothing was claimed: %w", d.Host, err)
 		}
+		ClearSyncHalt(ctx, d.SyncHalts)
 		report.Sync, report.Synced = synced, true
 	}
 

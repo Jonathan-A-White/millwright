@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
@@ -402,4 +403,44 @@ type stateRefusing struct {
 
 func (t *stateRefusing) SetStoryState(context.Context, string, string, string, string) error {
 	return fmt.Errorf("the tracker would not write the state")
+}
+
+func TestDispatchMarksASyncHaltAndLeavesNothingClaimed(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, _, _ := aFactory(t)
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	sync := &stubSync{err: &application.SyncHalt{Code: 2, Said: "conflict in the working set"}}
+	marker := apptest.NewFakeSyncHaltMarker()
+	dispatch.Sync = sync
+	dispatch.SyncHalts = marker
+
+	if _, err := dispatch.Run(ctx); err == nil {
+		t.Fatal("expected a halted sync to stop the dispatch")
+	}
+	info, there, err := marker.Read(ctx)
+	if err != nil || !there {
+		t.Fatalf("expected the marker written, there=%v, err=%v", there, err)
+	}
+	if info.Said != "conflict in the working set" {
+		t.Fatalf("expected the marker to hold what bd said, got %+v", info)
+	}
+}
+
+func TestDispatchClearsTheMarkerOnceLevelAgain(t *testing.T) {
+	ctx := context.Background()
+	dispatch, _, _, _, _ := aFactory(t)
+	sync := &stubSync{}
+	marker := apptest.NewFakeSyncHaltMarker()
+	if err := marker.Write(ctx, application.SyncHaltInfo{At: time.Now().Add(-time.Hour), Said: "old"}); err != nil {
+		t.Fatalf("seeding the marker: %v", err)
+	}
+	dispatch.Sync = sync
+	dispatch.SyncHalts = marker
+
+	if _, err := dispatch.Run(ctx); err != nil {
+		t.Fatalf("expected a level sync with nothing ready to succeed, got %v", err)
+	}
+	if _, there, _ := marker.Read(ctx); there {
+		t.Fatal("expected a level sync to clear the marker")
+	}
 }
