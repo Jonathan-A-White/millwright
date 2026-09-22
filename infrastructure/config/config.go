@@ -11,6 +11,8 @@
 //	rig_memory_bytes = 8000
 //	dispatch_sync_tries = 3
 //	dispatch_sync_wait = "15s"
+//	push_tries = 3
+//	push_wait_seconds = 20
 //	millhand_routine_model = "sonnet"
 //	millhand_review_model = "opus"
 //
@@ -52,6 +54,9 @@ const (
 
 	DispatchSyncTriesEnv = "MW_DISPATCH_SYNC_TRIES"
 	DispatchSyncWaitEnv  = "MW_DISPATCH_SYNC_WAIT"
+
+	PushTriesEnv       = "MW_PUSH_TRIES"
+	PushWaitSecondsEnv = "MW_PUSH_WAIT_SECONDS"
 
 	MaxAttemptsEnv = "MW_MAX_ATTEMPTS"
 
@@ -146,6 +151,16 @@ const (
 	DefaultDispatchSyncTries = 3
 	DefaultDispatchSyncWait  = 15 * time.Second
 	MaxDispatchSyncWait      = 90 * time.Second
+)
+
+// What `mw next` does when a push fails on a fault at the remote itself,
+// worth trying again — never a reason the remote states and will never take
+// back — when nothing says otherwise: it tries the push DefaultPushTries
+// times in all, DefaultPushWaitSeconds apart. application.DefaultPushTries is
+// the same number.
+const (
+	DefaultPushTries       = 3
+	DefaultPushWaitSeconds = 20
 )
 
 // File is the config file's path under the home directory.
@@ -476,6 +491,51 @@ func dispatchSync() (int, time.Duration, error) {
 			total, tries, wait, MaxDispatchSyncWait)
 	}
 	return tries, wait, nil
+}
+
+// PushTries reports how many times `mw next` tries a push again when it fails
+// on a fault at the remote itself, worth trying again: $MW_PUSH_TRIES if it is
+// set, otherwise the root-table `push_tries` key of ~/.config/mw/config.toml,
+// and DefaultPushTries when neither says. One is no retry.
+func PushTries() (int, error) {
+	said, err := optionalSetting("push_tries", PushTriesEnv, "")
+	if err != nil {
+		return 0, err
+	}
+	if said == "" {
+		return DefaultPushTries, nil
+	}
+	tries, err := strconv.Atoi(said)
+	if err != nil {
+		return 0, fmt.Errorf("the number of times a push is tried is %q, which is not a whole number: set %s=<n>, or `push_tries = <n>` in %s", said, PushTriesEnv, File)
+	}
+	if tries < 1 {
+		return 0, fmt.Errorf("a push would be tried %d times, so it would never be tried at all: set push_tries to 1 or more (1 is no retry)", tries)
+	}
+	return tries, nil
+}
+
+// PushWaitSeconds reports how many seconds `mw next` waits between those
+// tries: $MW_PUSH_WAIT_SECONDS if it is set, otherwise the root-table
+// `push_wait_seconds` key of ~/.config/mw/config.toml, and
+// DefaultPushWaitSeconds when neither says. Zero is allowed, so a test never
+// sleeps.
+func PushWaitSeconds() (int, error) {
+	said, err := optionalSetting("push_wait_seconds", PushWaitSecondsEnv, "")
+	if err != nil {
+		return 0, err
+	}
+	if said == "" {
+		return DefaultPushWaitSeconds, nil
+	}
+	seconds, err := strconv.Atoi(said)
+	if err != nil {
+		return 0, fmt.Errorf("the wait between push tries is %q, which is not a whole number of seconds: set %s=<n>, or `push_wait_seconds = <n>` in %s", said, PushWaitSecondsEnv, File)
+	}
+	if seconds < 0 {
+		return 0, fmt.Errorf("the wait between push tries is %d seconds, which is negative: set it to 0 or more", seconds)
+	}
+	return seconds, nil
 }
 
 // MillhandRoutineModel reports the model a routine wake, and a wake by hand, of

@@ -489,7 +489,8 @@ bd reclaim mw-gq6.30                                        # or take it over fi
 
 `~/.config/mw/config.toml`, with `MW_VAULT`, `MW_HOST`, `MW_CAP` and
 `MW_HOST_SILENT_HOURS`, `MW_STALE_HOURS`, `MW_HANDOFF_AT`, `MW_RIG_MEMORY_BYTES`,
-`MW_DISPATCH_SYNC_TRIES`, `MW_DISPATCH_SYNC_WAIT`, `MW_MAX_ATTEMPTS`,
+`MW_DISPATCH_SYNC_TRIES`, `MW_DISPATCH_SYNC_WAIT`, `MW_PUSH_TRIES`,
+`MW_PUSH_WAIT_SECONDS`, `MW_MAX_ATTEMPTS`,
 `MW_MILLHAND_ROUTINE_MODEL`, `MW_MILLHAND_REVIEW_MODEL`,
 `MW_NUDGE_AFTER_MINUTES` and `MW_NUDGE_SYNC_STALE_MINUTES` ahead of it:
 
@@ -503,6 +504,8 @@ handoff_at = 180000                # the context size, in tokens, at which mw se
 rig_memory_bytes = 8000            # how large the Builder's memory of one rig may grow before mw status says prune (default 8000)
 dispatch_sync_tries = 3            # how many times mw dispatch tries its sync when a name cannot be resolved (default 3)
 dispatch_sync_wait = "15s"         # how long it waits between those tries (default 15s, at most 90s in all)
+push_tries = 3                     # how many times mw next tries a push again after a fault at the remote itself (default 3)
+push_wait_seconds = 20             # how long it waits between those tries (default 20)
 max_attempts = 3                   # how many times a story is started in all before mw dispatch stops and mails the Mayor (default 3)
 millhand_routine_model = "sonnet"  # the model of a routine wake, and of a wake by hand, of the Millhand (default sonnet)
 millhand_review_model = "opus"     # the model of a review wake of the Millhand (default opus)

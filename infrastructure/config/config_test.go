@@ -715,3 +715,52 @@ func TestDispatchSyncWaitOfZeroIsAllowedSoATestNeverSleeps(t *testing.T) {
 		t.Fatalf("expected a wait of 0, got %s: %v", wait, err)
 	}
 }
+
+func TestPushTriesThreeTwentySecondsApartUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, "")
+	tries, err := config.PushTries()
+	if err != nil || tries != 3 {
+		t.Fatalf("expected 3 tries, got %d: %v", tries, err)
+	}
+	wait, err := config.PushWaitSeconds()
+	if err != nil || wait != 20 {
+		t.Fatalf("expected a wait of 20 seconds, got %d: %v", wait, err)
+	}
+
+	writeConfig(t, "push_tries = 5\npush_wait_seconds = 30\n")
+	if tries, err = config.PushTries(); err != nil || tries != 5 {
+		t.Fatalf("expected the file's 5 tries, got %d: %v", tries, err)
+	}
+	if wait, err = config.PushWaitSeconds(); err != nil || wait != 30 {
+		t.Fatalf("expected the file's wait of 30s, got %d: %v", wait, err)
+	}
+
+	t.Setenv("MW_PUSH_TRIES", "2")
+	t.Setenv("MW_PUSH_WAIT_SECONDS", "0")
+	if tries, err = config.PushTries(); err != nil || tries != 2 {
+		t.Fatalf("expected the environment's 2 tries ahead of the file, got %d: %v", tries, err)
+	}
+	if wait, err = config.PushWaitSeconds(); err != nil || wait != 0 {
+		t.Fatalf("expected the environment's wait of 0 ahead of the file, got %d: %v", wait, err)
+	}
+}
+
+func TestPushKnobsRefuseWhatIsNotANumber(t *testing.T) {
+	for _, bad := range []struct{ file, want string }{
+		{"push_tries = 0\n", "1 or more"},
+		{"push_tries = many\n", "not a whole number"},
+		{"push_wait_seconds = soon\n", "not a whole number"},
+		{"push_wait_seconds = -5\n", "negative"},
+	} {
+		writeConfig(t, bad.file)
+		_, triesErr := config.PushTries()
+		_, waitErr := config.PushWaitSeconds()
+		err := triesErr
+		if err == nil {
+			err = waitErr
+		}
+		if err == nil || !strings.Contains(err.Error(), bad.want) {
+			t.Errorf("expected %q to be refused, saying %q, got %v", bad.file, bad.want, err)
+		}
+	}
+}

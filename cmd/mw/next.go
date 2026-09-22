@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
@@ -34,8 +35,10 @@ func newNextCmd() *cobra.Command {
 			"rig's own tests must pass in the worktree. Then, under\n" +
 			"the rig's merge slot, the branch is merged into the target branch as the remote has it — and if that\n" +
 			"was not a fast-forward the tests are run again on the merged result, because nothing has ever tested\n" +
-			"that combination. The push is never forced; a push the remote refuses is fetched and tried again a\n" +
-			"few times. A branch that does not merge without conflicts is sent back, once, to a fresh Builder\n" +
+			"that combination. The push is never forced; a push the remote refuses because the branch moved is\n" +
+			"fetched and tried again a few times, and a push that fails on a fault at the remote itself — never a\n" +
+			"stated refusal — is tried again in place a few times too, waiting between tries (push_tries and\n" +
+			"push_wait_seconds). A branch that does not merge without conflicts is sent back, once, to a fresh Builder\n" +
 			"session in the same worktree, told to rebase onto the target branch, resolve, run the suite and\n" +
 			"commit; the story is recorded rebase=sent-back and the mw next that session ends with lands it. A\n" +
 			"second conflict stops as any refusal does, and nobody is sent back again. Then the worktree goes,\n" +
@@ -81,6 +84,14 @@ func newNextCmd() *cobra.Command {
 				return err
 			}
 			maxAttempts, err := config.MaxAttempts()
+			if err != nil {
+				return err
+			}
+			pushTries, err := config.PushTries()
+			if err != nil {
+				return err
+			}
+			pushWaitSeconds, err := config.PushWaitSeconds()
 			if err != nil {
 				return err
 			}
@@ -140,6 +151,8 @@ func newNextCmd() *cobra.Command {
 				Seat:      BuilderSeat,
 				Host:      host,
 				Rigs:      rigs,
+				PushTries: pushTries,
+				PushWait:  time.Duration(pushWaitSeconds) * time.Second,
 				Out:       cmd.OutOrStdout(),
 				Err:       cmd.ErrOrStderr(),
 
