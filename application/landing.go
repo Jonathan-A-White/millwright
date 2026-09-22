@@ -59,6 +59,13 @@ type Landing interface {
 	// that did the work and never committed it.
 	Uncommitted(ctx context.Context, dir string) ([]string, error)
 
+	// CommitLeftovers commits everything left uncommitted in the working tree
+	// at dir — tracked and untracked alike — under message, and reports the
+	// commit it made. It is how a retry keeps a session's unfinished work
+	// rather than losing it once the worktree that holds it is bundled and
+	// removed.
+	CommitLeftovers(ctx context.Context, dir, message string) (string, error)
+
 	// Commits is those same commits themselves — the ones landing would put on
 	// the target branch — oldest first, each with the short hash a person names
 	// it by and its whole message, trailers and all. It is how a close-out
@@ -84,6 +91,18 @@ type Landing interface {
 	// CloseLanding takes the throwaway worktree away again. Closing what is not
 	// there is not an error.
 	CloseLanding(ctx context.Context, rigDir, landingDir string) error
+
+	// Bundle captures every commit branch has that base does not into one
+	// self-contained file at dest, replayable into any clone of this rig, and
+	// reports the commit at branch's tip that it captured. It makes dest's
+	// directory if it is not there yet. It is how a retry keeps a branch's
+	// work safe before the branch itself is deleted.
+	Bundle(ctx context.Context, rigDir, branch, base, dest string) (string, error)
+
+	// VerifyBundle checks that a bundle Bundle made can be replayed into this
+	// rig — that every commit it is built on is here. A bundle that cannot is
+	// an error: nothing may rely on one that does not verify.
+	VerifyBundle(ctx context.Context, rigDir, dest string) error
 
 	// Advance fast-forwards the rig's own checkout onto commit, the one a landing
 	// has just put on branch at the remote. The landing was made in a worktree of

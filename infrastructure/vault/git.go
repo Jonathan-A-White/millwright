@@ -227,6 +227,16 @@ func (v *Vault) Push(ctx context.Context) (int, error) {
 	return outgoing, nil
 }
 
+// Head implements application.VaultFiles: the commit this clone has checked
+// out right now.
+func (v *Vault) Head(ctx context.Context) (string, error) {
+	out, err := v.git(ctx, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // upstream is the branch this clone tracks, and the reason there is none: a
 // vault whose branch tracks nothing has no other host to be level with.
 func (v *Vault) upstream(ctx context.Context) (string, error) {

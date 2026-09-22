@@ -173,6 +173,10 @@ type VaultFiles interface {
 	// reporting how many went out. A clone with nothing to push does not reach
 	// the remote at all.
 	Push(ctx context.Context) (int, error)
+
+	// Head reports the commit the vault's clone has checked out right now, so
+	// that a caller that has just committed something there can name it by.
+	Head(ctx context.Context) (string, error)
 }
 
 // TrackerSync is the port mw brings the one beads database level with the other

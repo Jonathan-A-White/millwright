@@ -68,6 +68,59 @@ func (w *Worktrees) Uncommitted(ctx context.Context, dir string) ([]string, erro
 	return paths, nil
 }
 
+// CommitLeftovers implements application.Landing.
+func (w *Worktrees) CommitLeftovers(ctx context.Context, dir, message string) (string, error) {
+	if dir == "" {
+		return "", fmt.Errorf("committing leftovers: in which worktree?")
+	}
+	if strings.TrimSpace(message) == "" {
+		return "", fmt.Errorf("committing leftovers in %s: a commit needs a message", dir)
+	}
+	if _, err := w.git(ctx, dir, "add", "-A"); err != nil {
+		return "", err
+	}
+	if _, err := w.git(ctx, dir, "commit", "-q", "-m", message); err != nil {
+		return "", err
+	}
+	sha, err := w.git(ctx, dir, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(sha), nil
+}
+
+// Bundle implements application.Landing.
+func (w *Worktrees) Bundle(ctx context.Context, rigDir, branch, base, dest string) (string, error) {
+	switch {
+	case branch == "":
+		return "", fmt.Errorf("bundling %s: which branch?", rigDir)
+	case base == "":
+		return "", fmt.Errorf("bundling %s in %s: ahead of what?", branch, rigDir)
+	case dest == "":
+		return "", fmt.Errorf("bundling %s in %s: to where?", branch, rigDir)
+	}
+	sha, err := w.git(ctx, rigDir, "rev-parse", branch)
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		return "", fmt.Errorf("making the directory %s belongs in: %w", dest, err)
+	}
+	if _, err := w.git(ctx, rigDir, "bundle", "create", dest, base+".."+branch); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(sha), nil
+}
+
+// VerifyBundle implements application.Landing.
+func (w *Worktrees) VerifyBundle(ctx context.Context, rigDir, dest string) error {
+	if dest == "" {
+		return fmt.Errorf("verifying a bundle: which file?")
+	}
+	_, err := w.git(ctx, rigDir, "bundle", "verify", dest)
+	return err
+}
+
 // commitEnd terminates each commit git log prints here, and endDirective is how
 // git is asked for it: a NUL cannot be passed in an argument, so git writes it
 // itself. A NUL is the one byte a commit message cannot hold, so it is the one

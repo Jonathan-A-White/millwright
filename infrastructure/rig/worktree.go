@@ -120,6 +120,37 @@ func (w *Worktrees) Remove(ctx context.Context, rigDir, dir, branch string) erro
 	return err
 }
 
+// RemoveWithoutForce implements application.Worktrees: the same as Remove,
+// except that a worktree still holding uncommitted work is refused rather
+// than thrown away, and so is its branch.
+func (w *Worktrees) RemoveWithoutForce(ctx context.Context, rigDir, dir string) error {
+	if dir != "" {
+		if _, err := os.Stat(dir); err == nil {
+			if _, err := w.git(ctx, rigDir, "worktree", "remove", dir); err != nil {
+				return err
+			}
+		}
+	}
+	_, err := w.git(ctx, rigDir, "worktree", "prune")
+	return err
+}
+
+// DeleteBranch implements application.Worktrees: a safe delete first, forcing
+// only when that refuses it.
+func (w *Worktrees) DeleteBranch(ctx context.Context, rigDir, branch string) error {
+	if branch == "" {
+		return nil
+	}
+	if _, err := w.git(ctx, rigDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
+		return nil // no such branch: nothing to delete
+	}
+	if _, err := w.git(ctx, rigDir, "branch", "-d", branch); err == nil {
+		return nil
+	}
+	_, err := w.git(ctx, rigDir, "branch", "-D", branch)
+	return err
+}
+
 // git runs one git command in a rig and returns its standard output. It never
 // prompts: a dispatch may run from a hook with nobody at the keyboard, and a
 // command waiting for a password would hang there unnoticed.

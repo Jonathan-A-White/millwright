@@ -36,6 +36,11 @@ type FakeVaultFiles struct {
 	// MarkErr, DirtyErr, PullErr, PushErr and CommitErr each stop that step.
 	MarkErr, DirtyErr, PullErr, PushErr, CommitErr error
 
+	// HeadSHA is what Head reports; HeadErr, when set, is what it reports
+	// instead.
+	HeadSHA string
+	HeadErr error
+
 	marks, pulls, pushes int
 	pullTries            int
 	commits              []VaultCommit
@@ -120,6 +125,16 @@ func (f *FakeVaultFiles) Commit(_ context.Context, message string, paths []strin
 	}
 	f.commits = append(f.commits, VaultCommit{Message: message, Paths: append([]string(nil), paths...)})
 	return recorded, nil
+}
+
+// Head implements application.VaultFiles.
+func (f *FakeVaultFiles) Head(_ context.Context) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.HeadErr != nil {
+		return "", f.HeadErr
+	}
+	return f.HeadSHA, nil
 }
 
 // Commits is every commit the fake was asked to make, in order.

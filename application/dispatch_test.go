@@ -59,6 +59,17 @@ func (f *fakeWorktrees) Remove(_ context.Context, _, dir, branch string) error {
 	return f.RemoveErr
 }
 
+func (f *fakeWorktrees) RemoveWithoutForce(_ context.Context, _, dir string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.removed = append(f.removed, dir)
+	return f.RemoveErr
+}
+
+func (f *fakeWorktrees) DeleteBranch(_ context.Context, _, _ string) error {
+	return nil
+}
+
 func (f *fakeWorktrees) was() (added, removed []string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

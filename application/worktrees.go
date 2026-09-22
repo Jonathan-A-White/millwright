@@ -46,4 +46,16 @@ type Worktrees interface {
 	// been made. Removing what is not there is not an error — it is how a
 	// dispatch that failed halfway tidies up after itself.
 	Remove(ctx context.Context, rigDir, dir, branch string) error
+
+	// RemoveWithoutForce takes a worktree away exactly as Remove does, except
+	// that it refuses rather than discarding anything a session left
+	// uncommitted in it. It is what a retry uses once a worktree's commits are
+	// safely bundled and pushed to the vault: nothing here is ever thrown away
+	// unread. Removing what is not there is not an error.
+	RemoveWithoutForce(ctx context.Context, rigDir, dir string) error
+
+	// DeleteBranch removes a branch that is checked out nowhere, trying a safe
+	// delete (`git branch -d`) first and forcing (`git branch -D`) only when
+	// the safe delete refuses it. A branch that is not there is not an error.
+	DeleteBranch(ctx context.Context, rigDir, branch string) error
 }
