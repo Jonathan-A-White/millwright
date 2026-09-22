@@ -93,6 +93,37 @@ func TestCommitMakesOneCommitByTheFallbackAuthorWhereGitKnowsNobody(t *testing.T
 	}
 }
 
+func TestCommitFoldsACommitBdInitMadeIntoTheFirst(t *testing.T) {
+	birth := aBirth(t)
+	dir := t.TempDir()
+	write(t, dir, "a.txt", "one\n")
+
+	if err := birth.Commit(context.Background(), dir, "A fresh vault"); err != nil {
+		t.Fatalf("committing: %v", err)
+	}
+	// Standing in for bd init on a host where it commits its own files.
+	write(t, dir, ".beads/config.yaml", "prefix: mw\n")
+	run(t, dir, "git", "add", "-A")
+	run(t, dir, "git", "-c", "user.name=bd", "-c", "user.email=bd@testhost", "commit", "-q", "-m", "bd init")
+	write(t, dir, ".beads/issues.jsonl", "")
+	if err := birth.Commit(context.Background(), dir, "A fresh vault"); err != nil {
+		t.Fatalf("committing again: %v", err)
+	}
+
+	if count := strings.TrimSpace(run(t, dir, "git", "rev-list", "--count", "HEAD")); count != "1" {
+		t.Errorf("the vault has %s commits, want 1", count)
+	}
+	if subject := strings.TrimSpace(run(t, dir, "git", "log", "--format=%an|%s")); subject != "mw@testhost|A fresh vault" {
+		t.Errorf("the commit reads %q", subject)
+	}
+	if files := run(t, dir, "git", "ls-tree", "-r", "--name-only", "HEAD"); files != ".beads/config.yaml\n.beads/issues.jsonl\na.txt\n" {
+		t.Errorf("the commit holds %q, want every file", files)
+	}
+	if left := strings.TrimSpace(run(t, dir, "git", "status", "--porcelain")); left != "" {
+		t.Errorf("the commit left this out:\n%s", left)
+	}
+}
+
 func TestWriteIfAbsentNeverTouchesAFileThatIsThere(t *testing.T) {
 	birth := aBirth(t)
 	path := filepath.Join(t.TempDir(), ".config", "mw", "config.toml")

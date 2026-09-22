@@ -87,10 +87,35 @@ func (b *Birth) Commit(ctx context.Context, dir, message string) error {
 		}
 	}
 	if hasCommit == nil {
+		// Whatever was committed after the first commit (bd init commits its
+		// files on some hosts) is put back in the index, to be folded in with
+		// the rest.
+		if err := b.backToRoot(ctx, dir); err != nil {
+			return err
+		}
 		_, err := b.git(ctx, dir, who, "commit", "-q", "--amend", "--no-edit")
 		return err
 	}
 	_, err := b.git(ctx, dir, who, "commit", "-q", "-m", message)
+	return err
+}
+
+// backToRoot moves the branch back to its first commit, keeping every later
+// commit's changes staged, when there is more than one commit.
+func (b *Birth) backToRoot(ctx context.Context, dir string) error {
+	count, err := b.git(ctx, dir, nil, "rev-list", "--count", "HEAD")
+	if err != nil || strings.TrimSpace(count) == "1" {
+		return err
+	}
+	roots, err := b.git(ctx, dir, nil, "rev-list", "--max-parents=0", "HEAD")
+	if err != nil {
+		return err
+	}
+	fields := strings.Fields(roots)
+	if len(fields) != 1 {
+		return fmt.Errorf("the history in %s has %d first commits, want 1", dir, len(fields))
+	}
+	_, err = b.git(ctx, dir, nil, "reset", "-q", "--soft", fields[0])
 	return err
 }
 
