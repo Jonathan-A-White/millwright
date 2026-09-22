@@ -172,7 +172,12 @@ with `--append-system-prompt-file`, its result redirected to
 `runs/<story-id>/result.json` beside the boot file, and `BEADS_ACTOR`, `MW_SEAT`
 and `MW_STORY` in its environment so that the work is signed by the seat rather
 than by the session — `builder@<host>`, which is not the name mw's own writes
-carry (see *Who mw writes as*). Assembling launches nothing and spends no fuel. See
+carry (see *Who mw writes as*). It also carries
+`CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1`, so a Builder cannot background a
+command and end its turn before it finishes, which lost uncommitted work more
+than once (mw-gq6.90); a seat's own session (`SeatSession`, below) does not get
+it, since a seat's mail watcher and waiters run in the background by design.
+Assembling launches nothing and spends no fuel. See
 `features/seat_boot.feature`.
 
 ## Dispatching a story

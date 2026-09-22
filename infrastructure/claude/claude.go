@@ -335,6 +335,16 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 			"BEADS_ACTOR": identity,
 			"MW_SEAT":     identity,
 			"MW_STORY":    l.StoryID,
+			// A story's session is headless: it ends the moment its turn does,
+			// so a command backgrounded with it (the test suite, most often)
+			// and never waited on is lost the instant the turn ends, taking
+			// whatever was never committed with it (mw-gq6.90; it happened
+			// three times: mw-gq6.39, twice on mw-gq6.86). This is the
+			// harness's own way to take the option away rather than trust it
+			// is never used. A seat's own session (SeatSession) is not given
+			// this: its mail watcher and waiters run in the background by
+			// design.
+			"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1",
 		},
 		Command: []string{h.shell, "-c", line},
 	}, nil
