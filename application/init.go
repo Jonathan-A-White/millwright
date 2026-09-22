@@ -39,10 +39,11 @@ type TrackerBirth interface {
 	InitTracker(ctx context.Context, prefix string) error
 }
 
-// InitFirstCommit is the message of the vault's first commit. bd init stages its
-// own files after that commit is made, and would make a commit of its own in a
-// repository that had none, so the commit is made twice: the template, then the
-// same commit again with the beads files in it.
+// InitFirstCommit is the message of the vault's first commit. bd init needs a
+// repository to work in, and may or may not commit its own files there (it does
+// on some hosts, only stages them on others), so the commit is made twice: the
+// template, then once more with the beads files in it, whatever bd init
+// committed folded back into that one first commit.
 const InitFirstCommit = "A fresh vault, from the template"
 
 // Init makes a fresh vault: the template laid into a directory that has nothing
