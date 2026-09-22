@@ -192,6 +192,14 @@ type Next struct {
 	// losing the race to the other host. Zero is MergeTries.
 	Tries int
 
+	// PushTries is how many times a push is tried again after it fails on a
+	// fault at the remote itself, worth trying again — never a stated refusal,
+	// and never the race with the other host, which Tries governs on its own.
+	// Zero is DefaultPushTries. PushWait is how long it waits between those
+	// tries; the zero value is no wait, so that a test never sleeps.
+	PushTries int
+	PushWait  time.Duration
+
 	// Now is the clock the ledger line is dated by. The zero value reads the
 	// real one.
 	Now func() time.Time
@@ -955,9 +963,13 @@ func (n Next) ledgered(ctx context.Context, id string) (bool, error) {
 
 // merge is the landing itself, under the merge slot: fetch, merge into the
 // target branch as the remote has it, test whatever merging made, and push. A
-// push the remote refuses is a race with the other host, and the whole thing is
-// done again from its newest commit — a bounded number of times, and never
-// forced.
+// push the remote refuses because the branch moved is a race with the other
+// host, and the whole thing is done again from its newest commit — a bounded
+// number of times, and never forced. A push that fails on a fault at the
+// remote itself, worth trying again, is retried in place by push, below,
+// without a fresh fetch or merge, since nothing upstream has changed; a push
+// the remote refuses for a stated reason is landing-failed at once, exactly as
+// before either kind of retry existed.
 func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Landed, error) {
 	base := StartPoint(n.remote(), c.target)
 	var lost error
@@ -1020,11 +1032,39 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 		}
 	}
 
-	report.Pushes++
-	if err := n.Landing.Push(ctx, dir, n.remote(), c.target); err != nil {
+	if err := n.pushRetrying(ctx, c, report, dir); err != nil {
 		return Landed{}, err
 	}
 	return landed, nil
+}
+
+// pushRetrying pushes what the landing worktree has checked out, and tries
+// again after a wait when the push itself failed on a fault at the remote
+// worth trying again, up to PushTries times in all. It never retries a push
+// the remote refused for a stated reason, or the race with the other host —
+// Rejected — which merge's own loop answers by fetching and merging afresh;
+// either comes back as it was, for merge to tell apart. Every attempt is
+// counted on the report, whichever kind of failure eventually stops it.
+func (n Next) pushRetrying(ctx context.Context, c *closeOut, report *NextReport, dir string) error {
+	var last error
+	for try := 1; try <= n.pushTries(); try++ {
+		if try > 1 {
+			if err := waitFor(ctx, n.PushWait); err != nil {
+				return failedFor(ReasonLandingFailed, fmt.Errorf("waiting %s to try the push to %s again: %w", n.PushWait, c.target, err))
+			}
+		}
+		report.Pushes++
+		err := n.Landing.Push(ctx, dir, n.remote(), c.target)
+		if err == nil {
+			return nil
+		}
+		if !Transient(err) {
+			return err
+		}
+		last = err
+	}
+	return failedFor(ReasonLandingFailed, fmt.Errorf("the push to %s kept failing on a fault at the remote, %d time(s) running: %w",
+		c.target, n.pushTries(), last))
 }
 
 // carryOn brings the hosts level and dispatches whatever is ready now. It runs
@@ -1332,6 +1372,19 @@ func (n Next) tries() int {
 		return MergeTries
 	}
 	return n.Tries
+}
+
+// DefaultPushTries is how many times a push is tried when nothing says
+// otherwise: infrastructure/config.DefaultPushTries is the same number.
+const DefaultPushTries = 3
+
+// pushTries is how many times a push will try again after failing on a fault
+// at the remote worth trying again.
+func (n Next) pushTries() int {
+	if n.PushTries < 1 {
+		return DefaultPushTries
+	}
+	return n.PushTries
 }
 
 // now is the clock the ledger line is dated by.

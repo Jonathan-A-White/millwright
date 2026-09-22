@@ -17,12 +17,15 @@ const (
 	MergeTries    = 3
 )
 
-// The two ways a landing stops that mw itself knows what to do about: a merge
-// it will not resolve, and a push the remote refused because somebody else got
-// there first. Adapters wrap their own words around these.
+// The ways a landing stops that mw itself knows what to do about: a merge it
+// will not resolve, a push the remote refused because somebody else got there
+// first, and a push that failed on a fault at the remote itself — never a
+// stated refusal — worth trying again. Adapters wrap their own words around
+// these.
 var (
 	ErrMergeConflict = errors.New("the merge has conflicts")
 	ErrPushRejected  = errors.New("the push was rejected: the branch moved on the remote")
+	ErrPushTransient = errors.New("the push failed: a fault at the remote, not a stated refusal")
 )
 
 // Landed is one merge of a story's branch into its target branch: the commit
@@ -74,7 +77,8 @@ type Landing interface {
 
 	// Push publishes what the landing worktree has checked out as branch on the
 	// remote. A remote that has moved on refuses it, and the refusal comes back
-	// as ErrPushRejected; nothing is ever forced.
+	// as ErrPushRejected; a fault at the remote itself, worth trying again,
+	// comes back as ErrPushTransient. Nothing is ever forced.
 	Push(ctx context.Context, landingDir, remote, branch string) error
 
 	// CloseLanding takes the throwaway worktree away again. Closing what is not
@@ -202,8 +206,13 @@ type Dispatcher interface {
 var _ Dispatcher = Dispatch{}
 
 // Rejected reports whether err is a push the remote refused because the branch
-// had moved: the one landing failure worth trying again.
+// had moved: one of the two landing failures worth trying again.
 func Rejected(err error) bool { return errors.Is(err, ErrPushRejected) }
+
+// Transient reports whether err is a push that failed on a fault at the
+// remote itself, worth trying again, as against a reason the remote states
+// and will never take back.
+func Transient(err error) bool { return errors.Is(err, ErrPushTransient) }
 
 // Conflicted reports whether err is a merge that could not be made.
 func Conflicted(err error) bool { return errors.Is(err, ErrMergeConflict) }
