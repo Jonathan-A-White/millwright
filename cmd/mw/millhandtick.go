@@ -34,8 +34,10 @@ func newMillhandTickCmd() *cobra.Command {
 			"is finished: it has written a handoff newer than its window and its pane is idle at an empty input\n" +
 			"line on two looks, the rule mw seat reap --when-idle closes by, the looks tick_recheck_seconds\n" +
 			"(30) apart. Then the tick closes the window, adds one line to .millhand-reaper.log in the vault,\n" +
-			"says so in its line and goes on as if no Millhand were up; a window whose input line holds text is\n" +
-			"never closed. Otherwise, with a [watch] table in the config file, it applies mw watch's rule to\n" +
+			"says so in its line and goes on as if no Millhand were up. A Millhand idle on the same two looks\n" +
+			"with no handoff since its window opened never got going: the tick closes its window, says\n" +
+			"\"restarted\" in its line and ends with a wake that tells the fresh Millhand why. A window whose\n" +
+			"input line holds text, or whose pane is working, is never closed. Otherwise, with a [watch] table in the config file, it applies mw watch's rule to\n" +
 			"the host it watches, before anything else: local-fault (this host's own network is down) is said\n" +
 			"in the line, wakes nobody and skips the sync, which would only time out. Then it runs one mw sync (a sync that fails is\n" +
 			"said in the line, and the tick looks on this host all the same), and looks for unread mail for\n" +

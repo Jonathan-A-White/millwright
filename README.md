@@ -1226,10 +1226,16 @@ run every 15 minutes for ever. It looks in this order:
    time>, window left open`), says so in its line (`closed the finished
    Millhand's window …`), and goes on as if no Millhand were up, so the same tick
    may wake a fresh one. This heals a window left open when its reaper died, gave
-   up or slept through it. A window whose input line holds text, or whose pane is
-   working, or that has no handoff newer than itself, is never closed: `already
-   up`. A look the terminal cannot answer counts as not finished. `--dry-run`
-   says `would close` and closes nothing.
+   up or slept through it. A Millhand whose wake never got going — its pane idle
+   on the same two looks and no handoff written since its window opened, as when
+   its first turn died on an API error — is restarted: the tick closes the window
+   (`closed by the tick: up but idle since <opened>, no handoff` in the reaper
+   log) and ends with a wake whatever else there is to wake for, telling the
+   fresh Millhand why; its line says `restarted: up but idle since <opened>, no
+   handoff`. A window whose input line holds text, or whose pane is working, is
+   never closed: `already up`. A look the terminal cannot answer counts as not
+   finished. `--dry-run` says `would close` or `would be restarted` and closes
+   nothing.
 2. With a `[watch]` table in the config file (see *Watching a host*), it applies
    `mw watch`'s rule to the host it watches. This comes before the sync, because
    a fault of this host's own network is one the sync would only time out on:
