@@ -490,7 +490,8 @@ bd reclaim mw-gq6.30                                        # or take it over fi
 `~/.config/mw/config.toml`, with `MW_VAULT`, `MW_HOST`, `MW_CAP` and
 `MW_HOST_SILENT_HOURS`, `MW_STALE_HOURS`, `MW_HANDOFF_AT`, `MW_RIG_MEMORY_BYTES`,
 `MW_DISPATCH_SYNC_TRIES`, `MW_DISPATCH_SYNC_WAIT`, `MW_MAX_ATTEMPTS`,
-`MW_MILLHAND_ROUTINE_MODEL` and `MW_MILLHAND_REVIEW_MODEL` ahead of it:
+`MW_MILLHAND_ROUTINE_MODEL`, `MW_MILLHAND_REVIEW_MODEL`,
+`MW_NUDGE_AFTER_MINUTES` and `MW_NUDGE_SYNC_STALE_MINUTES` ahead of it:
 
 ```toml
 vault = "/root/millwright-vault"   # the one beads database and the seats
@@ -505,6 +506,8 @@ dispatch_sync_wait = "15s"         # how long it waits between those tries (defa
 max_attempts = 3                   # how many times a story is started in all before mw dispatch stops and mails the Mayor (default 3)
 millhand_routine_model = "sonnet"  # the model of a routine wake, and of a wake by hand, of the Millhand (default sonnet)
 millhand_review_model = "opus"     # the model of a review wake of the Millhand (default opus)
+nudge_after_minutes = 60           # how long a claimed story may run with nothing mailed about it before mw nudge names it (default 60)
+nudge_sync_stale_minutes = 20      # how stale another host's last sync may be before mw nudge names it (default 20)
 
 [rigs]
 millwright = "/root/millwright"    # where each rig is checked out here
@@ -763,18 +766,33 @@ See `features/next.feature`.
 ## Telling the Mayor's window when mail arrives
 
 A Mayor's own mail watcher dies with its session, so a report from the other
-host can sit unread. `contrib/mail-notify` is a small script that a second
-`systemd --user` timer runs every minute (`mw-mail-notify.timer`, running
-`mw-mail-notify.service`, both in `contrib/systemd/`). It reads no mail and
-starts nothing: at most it types **one fixed line** into the live Mayor's tmux
-window, `New mail for mayor: <n> message(s). Run bd mail inbox.`, and Enter.
+host can sit unread — and when nothing arrives at all, nothing wakes the
+Mayor, which at night is when it matters most. `contrib/mail-notify` is a small
+script that a second `systemd --user` timer runs every minute
+(`mw-mail-notify.timer`, running `mw-mail-notify.service`, both in
+`contrib/systemd/`). It reads no mail and starts nothing: at most it types two
+fixed-shape lines into the live Mayor's tmux window, and Enter after each.
 Each tick it skips everything if the 1-minute load is above 2.0; runs `mw sync`
 at `nice 19` and idle I/O priority if the last was five minutes ago or more;
-lists `bd mail inbox` and compares its ids with the ones it has announced; and,
-for new ones, types the line only when the pane is not working (no `esc to
-interrupt`) and its input line is empty. Otherwise it does nothing and tries
-again next tick, and it records the ids as announced only after typing. It never
-clears an input line, and a second tick while one runs does nothing (`flock`).
+lists `bd mail inbox` and compares its ids with the ones it has announced; and
+runs `mw nudge` (below), reusing the same synced beads. For new mail, it types
+`New mail for mayor: <n> message(s). Run bd mail inbox.`; for whatever `mw
+nudge` still has to say once its own per-condition hourly damper is applied,
+`Quiet alarm for mayor: <clause>[; <clause> ...]. Run mw status.` — either or
+both, only when the pane is not working (no `esc to interrupt`) and its input
+line is empty. Otherwise it does nothing and tries again next tick, and it
+records the ids as announced, and each clause's condition as fired, only after
+each is typed. It never clears an input line, and a second tick while one runs
+does nothing (`flock`).
+
+`mw nudge` is the zero-token, read-only use case behind the second line: it
+reads this host's claimed stories for one running longer than
+`nudge_after_minutes` (default 60) with nothing landed, refused or blocked
+mailed to the Mayor about it since it was claimed, and every other host a
+story is pathed to for one whose last recorded sync, as this host last heard
+it, is older than `nudge_sync_stale_minutes` (default 20) — both in
+`~/.config/mw/config.toml` (*What a host is told*). It writes nothing: no
+story is claimed, no note is left, no mail is sent. See `application/nudge.go`.
 
 The window is found from the vault's `.mayor-acting`, free text the Mayor
 writes: a window id (`@12`), the window's name (`mayor-2026-09-19-10`), or
