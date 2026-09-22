@@ -119,6 +119,23 @@ func (b *Birth) backToRoot(ctx context.Context, dir string) error {
 	return err
 }
 
+// Clone implements application.VaultBirth: it makes dir a git clone of url,
+// the same clone a person's own `git clone` would make. Nothing here forces,
+// migrates or rewrites what the clone brings with it — that is the vault's
+// own history, from wherever it already lives.
+func (b *Birth) Clone(ctx context.Context, url, dir string) error {
+	cmd := exec.CommandContext(ctx, Git, "clone", "-q", url, dir)
+	cmd.Env = append(append(os.Environ(), "GIT_TERMINAL_PROMPT=0"), b.env...)
+
+	var out, errs bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &errs
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s clone %s %s: %w: %s", Git, url, dir, err, strings.TrimSpace(errs.String()))
+	}
+	return nil
+}
+
 // WriteIfAbsent implements application.VaultBirth. The file is made with
 // O_EXCL, so that a file that turns up between the look and the write is still
 // not overwritten.

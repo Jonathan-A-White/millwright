@@ -9,9 +9,11 @@ import (
 	"strings"
 )
 
-// VaultBirth is what Init asks of the disk and of git to bring a vault into
-// being. It is one port because the three are one act: nothing is written until
-// the directory is known to be free, and the commit is of exactly what was laid.
+// VaultBirth is what Init asks of the disk and of git to bring a vault onto
+// this host: laid fresh from the template with Lay and Commit, or cloned
+// whole from one that already exists with Clone. Vacant and WriteIfAbsent are
+// common to both: nothing is written until the directory is known to be free,
+// and the config file at the end is never overwritten.
 type VaultBirth interface {
 	// Vacant reports an error unless dir does not exist or is an empty directory.
 	Vacant(ctx context.Context, dir string) error
@@ -27,16 +29,27 @@ type VaultBirth interface {
 	// first commit, and it is not pushed anywhere yet.
 	Commit(ctx context.Context, dir, message string) error
 
+	// Clone makes dir a git clone of url: the whole of a vault that already
+	// exists somewhere else, history and all, exactly as a person's own git
+	// clone would bring it. Nothing here is migrated, rewritten or forced.
+	Clone(ctx context.Context, url, dir string) error
+
 	// WriteIfAbsent writes text to path, creating its directories, unless a file
 	// is already there; it reports whether it wrote. A file that is there is not
 	// read, not merged and not touched.
 	WriteIfAbsent(ctx context.Context, path, text string) (bool, error)
 }
 
-// TrackerBirth is what Init asks of beads: a new database, in the vault
-// directory the port was made for, whose story ids begin with the prefix.
+// TrackerBirth is what Init asks of beads: a new database with InitTracker,
+// whose story ids begin with the prefix, or the one already in a cloned vault
+// picked up rather than replaced with BootstrapTracker.
 type TrackerBirth interface {
 	InitTracker(ctx context.Context, prefix string) error
+
+	// BootstrapTracker picks up the beads database already in the vault this
+	// host just cloned — bd bootstrap, never bd init and never bd migrate: a
+	// host joining a vault is never its designated migrator.
+	BootstrapTracker(ctx context.Context) error
 }
 
 // InitFirstCommit is the message of the vault's first commit. bd init needs a
@@ -46,9 +59,11 @@ type TrackerBirth interface {
 // committed folded back into that one first commit.
 const InitFirstCommit = "A fresh vault, from the template"
 
-// Init makes a fresh vault: the template laid into a directory that has nothing
-// in it, one first commit, a beads database with the prefix the Governor chose,
-// and this host's config file if it has none.
+// Init makes a fresh vault, or brings this host onto one that already
+// exists: the template laid into a directory that has nothing in it, one
+// first commit, a beads database with the prefix the Governor chose, or that
+// same directory a git clone of an existing vault with its database picked up
+// rather than replaced — either way, this host's config file if it has none.
 //
 // It checks everything it can before it writes anything, so a refusal leaves
 // nothing behind. The config file is the exception to "write what was asked":
@@ -60,12 +75,17 @@ type Init struct {
 	Template fs.FS
 }
 
-// InitRequest is one vault to make.
+// InitRequest is one vault to make, or to join.
 type InitRequest struct {
 	// Dir is the vault's directory, a full path.
 	Dir string
-	// Prefix is what the ids of the vault's stories begin with.
+	// Prefix is what the ids of a fresh vault's stories begin with. Empty
+	// when URL says this host is joining a vault that already has its own.
 	Prefix string
+	// URL is where an existing vault's git remote already lives, for a host
+	// that is joining rather than making one. Empty for a fresh vault, and
+	// refused together with Prefix: a joined vault already has its own.
+	URL string
 	// Host is what the config file calls this host.
 	Host string
 	// Rigs is where each rig is checked out on this host, by name, each a full path.
@@ -78,6 +98,10 @@ type InitRequest struct {
 type InitReport struct {
 	Dir    string
 	Prefix string
+	// URL and Joined are set when this host joined a vault rather than
+	// making one.
+	URL    string
+	Joined bool
 
 	ConfigPath string
 	// ConfigWritten is whether the file was made. When it was not, ConfigText
@@ -88,18 +112,29 @@ type InitReport struct {
 
 var validPrefix = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
 
-// Run makes the vault.
+// Run makes the vault, or joins one that already exists when req.URL says so.
 func (i Init) Run(ctx context.Context, req InitRequest) (InitReport, error) {
-	if i.Vault == nil || i.Tracker == nil || i.Template == nil {
-		return InitReport{}, fmt.Errorf("making a vault: there is no place to make it, no beads to make its database, or no template")
+	if i.Vault == nil || i.Tracker == nil {
+		return InitReport{}, fmt.Errorf("making a vault: there is no place to make it, or no beads to make its database")
 	}
 	if err := req.validate(); err != nil {
 		return InitReport{}, err
 	}
+	if req.URL != "" {
+		return i.runJoin(ctx, req)
+	}
+	if i.Template == nil {
+		return InitReport{}, fmt.Errorf("making a vault: there is no template to lay")
+	}
+	return i.runFresh(ctx, req)
+}
+
+// runFresh lays the template into req.Dir, commits it, and makes a beads
+// database with req.Prefix.
+func (i Init) runFresh(ctx context.Context, req InitRequest) (InitReport, error) {
 	if err := i.Vault.Vacant(ctx, req.Dir); err != nil {
 		return InitReport{}, err
 	}
-
 	if err := i.Vault.Lay(ctx, req.Dir, i.Template); err != nil {
 		return InitReport{}, err
 	}
@@ -122,13 +157,38 @@ func (i Init) Run(ctx context.Context, req InitRequest) (InitReport, error) {
 	return report, nil
 }
 
-// validate refuses a request that could not make a vault, before anything is
-// written.
+// runJoin clones req.URL whole into req.Dir and picks up the beads database
+// already in it, rather than laying the template or making a fresh one: this
+// host is never the vault's designated migrator by running it.
+func (i Init) runJoin(ctx context.Context, req InitRequest) (InitReport, error) {
+	if err := i.Vault.Vacant(ctx, req.Dir); err != nil {
+		return InitReport{}, err
+	}
+	if err := i.Vault.Clone(ctx, req.URL, req.Dir); err != nil {
+		return InitReport{}, err
+	}
+	if err := i.Tracker.BootstrapTracker(ctx); err != nil {
+		return InitReport{}, fmt.Errorf("%w: the vault is cloned into %s but its database is not picked up; remove the directory and run mw init --join again", err, req.Dir)
+	}
+
+	report := InitReport{Dir: req.Dir, URL: req.URL, Joined: true, ConfigPath: req.ConfigPath, ConfigText: req.configText()}
+	wrote, err := i.Vault.WriteIfAbsent(ctx, req.ConfigPath, report.ConfigText)
+	if err != nil {
+		return report, fmt.Errorf("the vault is joined, but %w", err)
+	}
+	report.ConfigWritten = wrote
+	return report, nil
+}
+
+// validate refuses a request that could not make or join a vault, before
+// anything is written.
 func (r InitRequest) validate() error {
 	switch {
 	case strings.TrimSpace(r.Dir) == "":
 		return fmt.Errorf("making a vault: it needs a directory")
-	case !validPrefix.MatchString(r.Prefix):
+	case r.Prefix != "" && r.URL != "":
+		return fmt.Errorf("mw init takes --prefix or --join, not both: a joined vault already has its own beads database")
+	case r.URL == "" && !validPrefix.MatchString(r.Prefix):
 		return fmt.Errorf("the prefix %q will not do: it starts with a letter and holds only letters, digits, - and _", r.Prefix)
 	case strings.TrimSpace(r.Host) == "":
 		return fmt.Errorf("making a vault: it needs the name of this host")
@@ -165,12 +225,16 @@ func (r InitRequest) configText() string {
 	return text.String()
 }
 
-// String says what was made and what is owed next: the vault is private, so it
-// has no remote until someone makes one, and this host's timers are not linked
-// until scripts/install-units.sh is run.
+// String says what was made or joined and what is owed next. A fresh vault is
+// private, so it has no remote until someone makes one; a joined vault is a
+// MOVE only in part, and says what the rest still needs.
 func (r InitReport) String() string {
 	var out strings.Builder
-	fmt.Fprintf(&out, "Made the vault at %s: the template, one commit, a beads database with the prefix %s.\n", r.Dir, r.Prefix)
+	if r.Joined {
+		fmt.Fprintf(&out, "Joined the vault at %s, cloned from %s: bd bootstrap picked up its database.\n", r.Dir, r.URL)
+	} else {
+		fmt.Fprintf(&out, "Made the vault at %s: the template, one commit, a beads database with the prefix %s.\n", r.Dir, r.Prefix)
+	}
 
 	if r.ConfigWritten {
 		fmt.Fprintf(&out, "Wrote %s.\n", r.ConfigPath)
@@ -179,9 +243,15 @@ func (r InitReport) String() string {
 	}
 
 	fmt.Fprintf(&out, "\nStill owed:\n")
-	fmt.Fprintf(&out, "  1. Make a private remote for the vault, then:\n")
-	fmt.Fprintf(&out, "       git -C %s remote add origin <url>\n", r.Dir)
-	fmt.Fprintf(&out, "       git -C %s push -u origin main\n", r.Dir)
-	fmt.Fprintf(&out, "  2. In the millwright checkout: scripts/install-units.sh\n")
+	if r.Joined {
+		fmt.Fprintf(&out, "  1. The designated-migrator note in the vault's CLAUDE.md, if it is not there already.\n")
+		fmt.Fprintf(&out, "  2. In the millwright checkout: scripts/install-units.sh\n")
+		fmt.Fprintf(&out, "  3. The old host's timers turned off first, so two hosts never dispatch as one name.\n")
+	} else {
+		fmt.Fprintf(&out, "  1. Make a private remote for the vault, then:\n")
+		fmt.Fprintf(&out, "       git -C %s remote add origin <url>\n", r.Dir)
+		fmt.Fprintf(&out, "       git -C %s push -u origin main\n", r.Dir)
+		fmt.Fprintf(&out, "  2. In the millwright checkout: scripts/install-units.sh\n")
+	}
 	return out.String()
 }
