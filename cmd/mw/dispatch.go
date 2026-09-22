@@ -152,6 +152,7 @@ func newDispatchCmd() *cobra.Command {
 				Worktrees:   rig.New(),
 				Runner:      tmux.New(),
 				Boot:        builderBoot(files, host, tests),
+				Memory:      gateway,
 				Sync:        application.Sync{Vault: files, Tracker: gateway, Host: host, Ticks: logs},
 				SyncTries:   tries,
 				SyncWait:    wait,

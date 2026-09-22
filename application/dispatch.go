@@ -61,6 +61,13 @@ type Dispatch struct {
 	Runner    Runner
 	Boot      SeatBoot
 
+	// Memory is where mw sweep remembers what it saw of a story's last session,
+	// so that a fresh attempt can clear it (mw-gq6.86): a session's pane starts
+	// blank whichever attempt it is, and a note an earlier attempt left behind
+	// would otherwise make a fresh session look silent since the old attempt's
+	// clock. A nil Memory clears nothing, which is what a dry run does too.
+	Memory SweepNotes
+
 	// Sync is run before anything is asked of the tracker, so that this host
 	// sees the other host's claims before it makes its own. A nil Sync skips
 	// it, which is what a dry run does.
@@ -541,6 +548,14 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 	// undoing it for.
 	started.Attempt = detail.Attempts + 1
 	var unrecorded []error
+	// What mw sweep remembered of the session this replaces is no use to this
+	// one: its pane starts blank too, and would otherwise be read as this
+	// attempt's own silence, since the old attempt's clock (mw-gq6.86).
+	if d.Memory != nil {
+		if err := d.Memory.ClearNote(ctx, SweepKey(id)); err != nil {
+			unrecorded = append(unrecorded, fmt.Errorf("what mw sweep remembered of the last attempt could not be cleared: %w", err))
+		}
+	}
 	if err := d.Tracker.SetStoryMetadata(ctx, id, attemptFields(detail, started.Attempt)); err != nil {
 		unrecorded = append(unrecorded, fmt.Errorf("the attempt could not be recorded as %s=%d: %w", AttemptsField, started.Attempt, err))
 	}

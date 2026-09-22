@@ -105,6 +105,7 @@ func (c *nextContext) mwDispatchesAgain(id string) error {
 		Tracker:   c.tracker,
 		Worktrees: worktrees,
 		Runner:    c.runner,
+		Memory:    c.tracker,
 		Boot:      boot,
 		Host:      nextHost,
 		Cap:       1,

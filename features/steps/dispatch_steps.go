@@ -504,6 +504,7 @@ func (c *dispatchContext) dispatch(host string, cap int, dryRun bool) error {
 		Tracker:   c.tracker,
 		Worktrees: rig.New(),
 		Runner:    c.runner,
+		Memory:    c.tracker,
 		Boot: application.SeatBoot{
 			Vault:   vault.New(c.vault),
 			Harness: claude.New(),
