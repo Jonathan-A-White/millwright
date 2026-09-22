@@ -20,21 +20,36 @@ import (
 // initHost is the host name a scenario's config file carries unless it says another.
 const initHost = "testhost"
 
-// initTracker stands in for beads: it records the prefixes it was asked to make
-// a database with. The real `bd init` is tried in infrastructure/beads.
-type initTracker struct{ prefixes []string }
+// initTracker stands in for beads: it records the prefixes it was asked to
+// make a database with, and how many times it was asked to pick one up
+// instead. The real `bd init` and `bd bootstrap` are tried in
+// infrastructure/beads.
+type initTracker struct {
+	prefixes     []string
+	bootstrapped int
+}
 
 func (t *initTracker) InitTracker(_ context.Context, prefix string) error {
 	t.prefixes = append(t.prefixes, prefix)
 	return nil
 }
 
+func (t *initTracker) BootstrapTracker(_ context.Context) error {
+	t.bootstrapped++
+	return nil
+}
+
 // initContext holds a throwaway home, in which the vault, the config file and
 // what git knows of the committer all live: nothing here reaches the real
-// ~/.config/mw, the real vault or the real git config.
+// ~/.config/mw, the real vault or the real git config. remoteRoot and
+// bareRemote are outside the home, so the one vault a join scenario makes
+// under the home is still the only one vaultDir's glob finds.
 type initContext struct {
 	home    string
 	tracker *initTracker
+
+	remoteRoot string
+	bareRemote string
 
 	report application.InitReport
 	err    error
@@ -52,6 +67,9 @@ func InitializeInitScenario(ctx *godog.ScenarioContext) {
 		if c.home != "" {
 			os.RemoveAll(c.home)
 		}
+		if c.remoteRoot != "" {
+			os.RemoveAll(c.remoteRoot)
+		}
 		return ctx, nil
 	})
 
@@ -60,13 +78,18 @@ func InitializeInitScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a directory "([^"]*)" holding the file "([^"]*)"$`, c.aDirectoryHolding)
 	ctx.Given(`^git knows the name "([^"]*)" in the throwaway home$`, c.gitKnowsTheName)
 	ctx.Given(`^a config file that says:$`, c.aConfigFileThatSays)
+	ctx.Given(`^a bare git remote holding a vault to join$`, c.aBareGitRemoteHoldingAVault)
 
 	ctx.When(`^mw init makes the vault "([^"]*)" with the prefix "([^"]*)"$`, c.mwInitMakes)
 	ctx.When(`^mw init makes the vault "([^"]*)" with the prefix "([^"]*)", the host "([^"]*)" and the rigs:$`, c.mwInitMakesWithRigs)
+	ctx.When(`^mw init joins the vault as "([^"]*)"$`, c.mwInitJoins)
+	ctx.When(`^mw init makes the vault "([^"]*)" with the prefix "([^"]*)" and joins "([^"]*)"$`, c.mwInitMakesAndJoins)
 
 	ctx.Then(`^initialising succeeds$`, c.initialisingSucceeds)
 	ctx.Then(`^initialising is refused, saying "([^"]*)" is not empty$`, c.refusedNotEmpty)
 	ctx.Then(`^initialising is refused, saying the prefix will not do$`, c.refusedPrefix)
+	ctx.Then(`^initialising is refused, saying --join and --prefix cannot both be given$`, c.refusedJoinAndPrefix)
+	ctx.Then(`^the beads database was picked up rather than made$`, c.databasePickedUp)
 	ctx.Then(`^the vault holds the three seat charters$`, c.theVaultHoldsTheCharters)
 	ctx.Then(`^the vault's vision and ledger are the template's blank ones$`, c.blankVisionAndLedger)
 	ctx.Then(`^the vault is a git repository with one commit$`, c.oneCommit)
@@ -133,17 +156,80 @@ func (c *initContext) mwInitMakesWithRigs(name, prefix, host string, table *godo
 }
 
 func (c *initContext) run(name, prefix, host string, rigs map[string]string) error {
+	return c.runRequest(application.InitRequest{
+		Dir:        filepath.Join(c.home, name),
+		Prefix:     prefix,
+		Host:       host,
+		Rigs:       rigs,
+		ConfigPath: c.configPath(),
+	})
+}
+
+func (c *initContext) runRequest(req application.InitRequest) error {
 	birth := vault.NewBirth("mw@"+initHost,
 		"HOME="+c.home, "XDG_CONFIG_HOME="+filepath.Join(c.home, ".config"), "GIT_CONFIG_NOSYSTEM=1")
 	c.report, c.err = application.Init{Vault: birth, Tracker: c.tracker, Template: millwright.Template()}.
-		Run(context.Background(), application.InitRequest{
-			Dir:        filepath.Join(c.home, name),
-			Prefix:     prefix,
-			Host:       host,
-			Rigs:       rigs,
-			ConfigPath: c.configPath(),
-		})
+		Run(context.Background(), req)
 	return nil
+}
+
+// aBareGitRemoteHoldingAVault makes a vault the way mw init makes a fresh
+// one, outside the throwaway home so it is never what vaultDir's glob finds,
+// then pushes it to a bare repository: a stand-in for a vault that already
+// exists on another host, to clone from in a join scenario.
+func (c *initContext) aBareGitRemoteHoldingAVault() error {
+	root, err := os.MkdirTemp("", "mw-init-remote-")
+	if err != nil {
+		return err
+	}
+	c.remoteRoot = root
+
+	source := filepath.Join(root, "source")
+	birth := vault.NewBirth("mw@origin",
+		"HOME="+root, "XDG_CONFIG_HOME="+filepath.Join(root, ".config"), "GIT_CONFIG_NOSYSTEM=1")
+	if err := birth.Lay(context.Background(), source, millwright.Template()); err != nil {
+		return err
+	}
+	if err := birth.Commit(context.Background(), source, application.InitFirstCommit); err != nil {
+		return err
+	}
+
+	c.bareRemote = filepath.Join(root, "origin.git")
+	if out, err := runGitIn(root, "init", "-q", "--bare", "-b", "main", c.bareRemote); err != nil {
+		return fmt.Errorf("making the bare remote: %w: %s", err, out)
+	}
+	if out, err := runGitIn(source, "remote", "add", "origin", c.bareRemote); err != nil {
+		return fmt.Errorf("adding the origin remote: %w: %s", err, out)
+	}
+	if out, err := runGitIn(source, "push", "-q", "origin", "main"); err != nil {
+		return fmt.Errorf("pushing the source vault: %w: %s", err, out)
+	}
+	return nil
+}
+
+func runGitIn(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func (c *initContext) mwInitJoins(name string) error {
+	return c.runRequest(application.InitRequest{
+		Dir:        filepath.Join(c.home, name),
+		URL:        c.bareRemote,
+		Host:       initHost,
+		ConfigPath: c.configPath(),
+	})
+}
+
+func (c *initContext) mwInitMakesAndJoins(name, prefix, url string) error {
+	return c.runRequest(application.InitRequest{
+		Dir:        filepath.Join(c.home, name),
+		Prefix:     prefix,
+		URL:        url,
+		Host:       initHost,
+		ConfigPath: c.configPath(),
+	})
 }
 
 func (c *initContext) initialisingSucceeds() error {
@@ -169,6 +255,26 @@ func (c *initContext) refusedPrefix() error {
 	}
 	if !strings.Contains(c.err.Error(), "prefix") {
 		return fmt.Errorf("mw init refused, but not for the prefix: %v", c.err)
+	}
+	return nil
+}
+
+func (c *initContext) refusedJoinAndPrefix() error {
+	if c.err == nil {
+		return fmt.Errorf("mw init took both --join and --prefix, which it should have refused")
+	}
+	if said := c.err.Error(); !strings.Contains(said, "--join") || !strings.Contains(said, "--prefix") {
+		return fmt.Errorf("mw init refused, but not for taking both --join and --prefix: %v", c.err)
+	}
+	return nil
+}
+
+func (c *initContext) databasePickedUp() error {
+	if c.tracker.bootstrapped != 1 {
+		return fmt.Errorf("beads was asked to pick up a database %d times, not once", c.tracker.bootstrapped)
+	}
+	if len(c.tracker.prefixes) != 0 {
+		return fmt.Errorf("beads was asked to make a fresh database with the prefixes %v, rather than picking one up", c.tracker.prefixes)
 	}
 	return nil
 }

@@ -72,6 +72,19 @@ Feature: mw init
       """
     And the report says the config file was written
 
+  Scenario: --join and --prefix are refused together, and nothing is written
+    When mw init makes the vault "fresh" with the prefix "tst" and joins "https://example.test/vault.git"
+    Then initialising is refused, saying --join and --prefix cannot both be given
+    And there is no directory "fresh"
+    And no beads database was made
+
+  Scenario: Joining brings this host onto a vault that already exists, without making a new database
+    Given a bare git remote holding a vault to join
+    When mw init joins the vault as "joined"
+    Then initialising succeeds
+    And the vault holds the three seat charters
+    And the beads database was picked up rather than made
+
   Scenario: A config file that is already there is left as it is
     Given a config file that says:
       """
