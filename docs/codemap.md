@@ -12,7 +12,7 @@ Where everything is. `CONTEXT.md` has the vocabulary, the ADRs the reasons.
 | infrastructure | `infrastructure/` | One subpackage per adapter: the only place bd, git, tmux, claude or the disk is touched. |
 | command line | `cmd/mw/` | Cobra wiring only: read config, run the use case. |
 | features | `features/` | Gherkin; step code in `features/steps/`. |
-| template | `template/` | The files a fresh vault is born from: charters, vision, ledger, `CLAUDE.md`. No personal or host detail. |
+| template | `template/` | What a fresh vault is born from, embedded by `embed.go`. No personal or host detail. |
 
 ## Ports
 
@@ -39,6 +39,7 @@ Every adapter carries `var _ application.<Port> = ...`.
 | `WatchProbes` | `application/watch.go` | `infrastructure/watch/watch.go` | `application/apptest/fakewatch.go` |
 | `TickLog` | `application/millhandtick.go` | `infrastructure/ticklog/ticklog.go` | `application/apptest/faketicklog.go` |
 | `Worktrees` | `application/worktrees.go` | `infrastructure/rig/worktree.go` | `application/dispatch_test.go` |
+| `VaultBirth`, `TrackerBirth` | `application/init.go` | `infrastructure/vault/birth.go`, `infrastructure/beads/init.go` | none: temp dirs |
 | `Landing` | `application/landing.go` | `infrastructure/rig/landing.go` | none: real git |
 | `Checks` | `application/landing.go` | `infrastructure/rig/checks.go` | none |
 | `AfterLanding` | `application/afterlanding.go` | `infrastructure/rig/afterlanding.go` | none |
@@ -71,6 +72,7 @@ from `cmd/mw/` only.
 | `MillhandTick` | `application/millhandtick.go` | `mw millhand tick` — `cmd/mw/millhandtick.go` | `features/millhand_tick.feature` |
 | `Watch` | `application/watch.go` | `mw watch` — `cmd/mw/watch.go` | `features/watch.feature` |
 | `SeatBoot` | `application/seatboot.go` | none: `Dispatch`, `Next` call it | `features/seat_boot.feature` |
+| `Init` | `application/init.go` | `mw init` — `cmd/mw/init.go` | `features/init.feature` |
 
 `cmd/mw/root.go` holds the tree (one `root.AddCommand` per command);
 `cmd/mw/main.go` runs it; `cmd/mw/version.go` is `mw version` (mw's and `claude`'s), no use case.
@@ -109,9 +111,6 @@ faking only tracker, runner and vault git: `features/steps/next_steps.go`.
   `-tags beads_integration` for the real-`bd` cases, as `make test` does.
 - One feature: `MW_FEATURE=sweep.feature go test ./features` (`:17` appended
   for the scenario at that line).
-- `scripts/check-codemap.sh` checks this page; `scripts/check-timer-units.sh`
-  checks `contrib/systemd/` and `contrib/mail-notify`; `scripts/check-template.sh`
-  checks `template/`; `scripts/check-install.sh` checks `scripts/install.sh` and
-  `scripts/pins.env`; `scripts/check-install-units.sh` checks
-  `scripts/install-units.sh`, which links `contrib/systemd/` timers.
+- `make lint` also runs `scripts/check-*.sh`, one per thing checked: this page,
+  `template/`, `contrib/systemd/`, `scripts/install.sh` and `scripts/install-units.sh`.
 - `make check-formulas` needs `bd`, `jq` and real time; not in `make test`.

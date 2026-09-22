@@ -563,6 +563,29 @@ then merge by keeping every line instead of conflicting. `mw sync` writes that
 line if it is missing and says so; committing it is a seat's job, and until
 someone does, only this host is covered. See `features/sync.feature`.
 
+## Making a fresh vault
+
+```sh
+mw init --vault <dir> --prefix <prefix> [--host <name>] [--rig <name>=<dir>]...
+```
+
+`mw init` is the one command that runs before there is a vault or a config file,
+so it reads neither. It lays the template built into the `mw` binary (an installed
+`mw` needs no checkout beside it) into `<dir>`, makes `<dir>` a git repository with
+one first commit that carries no attribution, and makes a beads database there whose
+story ids begin with `<prefix>`: the one place mw runs `bd init`. It refuses, and
+writes nothing, if `<dir>` exists and has anything in it, and a prefix beads would
+not take is refused the same way. The commit is made by whoever git knows; on a
+machine where git knows nobody it is made as `mw@<host>`.
+
+It then writes `~/.config/mw/config.toml`, with the vault, `--host` (default: the
+machine's hostname; the name a story's Path uses, `vps` or `laptop`, is what you want
+here), `cap = 1` and a `[rigs]` table of the `--rig` flags, only if that file does not
+exist. A file that is there is never read, merged or changed: `mw init` prints the
+lines it would have written instead. It ends by printing what is owed next: a private
+remote for the vault and `git push`, then `scripts/install-units.sh`. See
+`features/init.feature`.
+
 ## Running a host on a timer
 
 A host that only works stories needs no session of its own to keep it going: a
