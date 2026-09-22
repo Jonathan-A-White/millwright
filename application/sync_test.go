@@ -443,6 +443,163 @@ func TestSyncWithNoLogsLeavesNoNoteOfTicks(t *testing.T) {
 	}
 }
 
+func TestAHaltWorthAnAlarmNotesItselfForTheOtherHost(t *testing.T) {
+	for _, code := range []int{2, 4} {
+		sync, _, tracker := syncing(t)
+		tracker.SyncExits(code, "bd said so")
+
+		if _, err := sync.Run(context.Background()); err == nil {
+			t.Fatalf("expected exit %d to stop the sync", code)
+		}
+		note, err := tracker.Note(context.Background(), application.SyncHaltKey("vps"))
+		if err != nil {
+			t.Fatalf("reading the note: %v", err)
+		}
+		info, ok := application.ParseSyncHalt(note)
+		if !ok {
+			t.Fatalf("expected a sync-halted note for exit %d, got %q", code, note)
+		}
+		if !info.At.Equal(level) || !strings.Contains(info.Said, "bd said so") {
+			t.Fatalf("expected the note to hold %s and %q, got %+v", level, "bd said so", info)
+		}
+	}
+}
+
+func TestAHaltNotWorthAnAlarmLeavesNoNote(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	tracker.SyncExits(3, "lost the push race")
+
+	if _, err := sync.Run(context.Background()); err == nil {
+		t.Fatal("expected exit 3 to stop the sync")
+	}
+	if note, _ := tracker.Note(context.Background(), application.SyncHaltKey("vps")); note != "" {
+		t.Fatalf("expected no sync-halted note for a lost push race, got %q", note)
+	}
+}
+
+func TestARepeatedHaltLeavesTheFirstNoteAlone(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	earlier := level.Add(-time.Hour)
+	if err := tracker.SetNote(context.Background(), application.SyncHaltKey("vps"),
+		application.FormatSyncHalt(application.SyncHaltInfo{At: earlier, Said: "first conflict"})); err != nil {
+		t.Fatalf("writing the earlier note: %v", err)
+	}
+	tracker.SyncExits(2, "second conflict")
+
+	if _, err := sync.Run(context.Background()); err == nil {
+		t.Fatal("expected the halt to stop the sync")
+	}
+	note, err := tracker.Note(context.Background(), application.SyncHaltKey("vps"))
+	if err != nil {
+		t.Fatalf("reading the note: %v", err)
+	}
+	info, ok := application.ParseSyncHalt(note)
+	if !ok || !info.At.Equal(earlier) || info.Said != "first conflict" {
+		t.Fatalf("expected the note to keep naming the first halt, got %+v (ok=%v)", info, ok)
+	}
+}
+
+func TestALevelSyncClearsTheHaltNote(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	if err := tracker.SetNote(context.Background(), application.SyncHaltKey("vps"),
+		application.FormatSyncHalt(application.SyncHaltInfo{At: level.Add(-time.Hour), Said: "old conflict"})); err != nil {
+		t.Fatalf("writing the earlier note: %v", err)
+	}
+
+	if _, err := sync.Run(context.Background()); err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	if note, _ := tracker.Note(context.Background(), application.SyncHaltKey("vps")); note != "" {
+		t.Fatalf("expected a level sync to clear the sync-halted note, got %q", note)
+	}
+}
+
+func TestABlockedVaultDoesNotClearTheHaltNote(t *testing.T) {
+	sync, files, tracker := syncing(t)
+	files.Dirty = []string{"seats/mayor/ledger.md"}
+	if err := tracker.SetNote(context.Background(), application.SyncHaltKey("vps"),
+		application.FormatSyncHalt(application.SyncHaltInfo{At: level.Add(-time.Hour), Said: "old conflict"})); err != nil {
+		t.Fatalf("writing the earlier note: %v", err)
+	}
+
+	if _, err := sync.Run(context.Background()); err == nil {
+		t.Fatal("expected a blocked vault to stop the sync from being level")
+	}
+	if note, _ := tracker.Note(context.Background(), application.SyncHaltKey("vps")); note == "" {
+		t.Fatal("expected a sync that is not level to leave the sync-halted note alone")
+	}
+}
+
+func TestSyncHaltKeyNamesTheHost(t *testing.T) {
+	if got := application.SyncHaltKey("vps"); got != "host.vps.sync_halted" {
+		t.Fatalf("expected host.vps.sync_halted, got %q", got)
+	}
+}
+
+func TestFormatAndParseSyncHaltRoundTrip(t *testing.T) {
+	info := application.SyncHaltInfo{At: level, Said: "the beads database has a merge conflict"}
+	parsed, ok := application.ParseSyncHalt(application.FormatSyncHalt(info))
+	if !ok || !parsed.At.Equal(info.At) || parsed.Said != info.Said {
+		t.Fatalf("expected the mark to round-trip, got %+v (ok=%v)", parsed, ok)
+	}
+}
+
+func TestParseSyncHaltRefusesTextWithNoTime(t *testing.T) {
+	if _, ok := application.ParseSyncHalt("not a time\nsome text"); ok {
+		t.Fatal("expected text with no time on its first line to read as no mark")
+	}
+	if _, ok := application.ParseSyncHalt(""); ok {
+		t.Fatal("expected empty text to read as no mark")
+	}
+}
+
+func TestRecordSyncHaltIsFreshOnlyOnce(t *testing.T) {
+	marker := apptest.NewFakeSyncHaltMarker()
+	halt := &application.SyncHalt{Code: 2, Said: "conflict"}
+
+	if fresh := application.RecordSyncHalt(context.Background(), marker, halt, level); !fresh {
+		t.Fatal("expected the first halt to be fresh")
+	}
+	if fresh := application.RecordSyncHalt(context.Background(), marker, halt, level.Add(time.Minute)); fresh {
+		t.Fatal("expected a second halt to not be fresh")
+	}
+	info, there, err := marker.Read(context.Background())
+	if err != nil || !there {
+		t.Fatalf("expected the marker to hold the first halt, got %+v, there=%v, err=%v", info, there, err)
+	}
+	if !info.At.Equal(level) {
+		t.Fatalf("expected the marker to keep naming the first halt at %s, got %s", level, info.At)
+	}
+}
+
+func TestRecordSyncHaltIgnoresAHaltNotWorthAnAlarm(t *testing.T) {
+	marker := apptest.NewFakeSyncHaltMarker()
+	if fresh := application.RecordSyncHalt(context.Background(), marker, &application.SyncHalt{Code: 3}, level); fresh {
+		t.Fatal("expected a lost push race not to be recorded")
+	}
+	if fresh := application.RecordSyncHalt(context.Background(), marker, errors.New("not a halt"), level); fresh {
+		t.Fatal("expected an ordinary error not to be recorded")
+	}
+	if fresh := application.RecordSyncHalt(context.Background(), nil, &application.SyncHalt{Code: 2}, level); fresh {
+		t.Fatal("expected a nil marker never to be called fresh")
+	}
+	if _, there, _ := marker.Read(context.Background()); there {
+		t.Fatal("expected nothing recorded")
+	}
+}
+
+func TestClearSyncHaltRemovesTheMarker(t *testing.T) {
+	marker := apptest.NewFakeSyncHaltMarker()
+	application.RecordSyncHalt(context.Background(), marker, &application.SyncHalt{Code: 2, Said: "x"}, level)
+
+	application.ClearSyncHalt(context.Background(), marker)
+	if _, there, _ := marker.Read(context.Background()); there {
+		t.Fatal("expected the marker to be cleared")
+	}
+	// A nil marker must not panic.
+	application.ClearSyncHalt(context.Background(), nil)
+}
+
 func TestASyncThatCannotReadALogStillSyncs(t *testing.T) {
 	sync, _, tracker := syncing(t)
 	sync.Ticks = application.TickLogs{Dispatch: &apptest.FakeTickLog{ReadErr: errors.New("unreadable")}}

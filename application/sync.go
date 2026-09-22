@@ -27,6 +27,93 @@ func LastSyncKey(host string) string { return "host." + host + ".last_sync" }
 // two hosts in two time zones compare as text.
 const LastSyncFormat = time.RFC3339
 
+// SyncHaltKey is where a host that just halted a sync worth an alarm — a merge
+// conflict or a stuck working set, bd exit 2 or 4 — says so, so that another
+// host's sync reads it once it can. The one thing it cannot carry is the halt
+// that is stopping it: nothing written here is published until a later sync
+// gets through, so a host reading this key sees the word only once the halt it
+// names has already cleared. Both hosts read each other's, so the key carries
+// the host, like LastSyncKey.
+func SyncHaltKey(host string) string { return "host." + host + ".sync_halted" }
+
+// SyncHaltInfo is what a sync-halted mark holds, wherever it is kept: when the
+// halt happened, in UTC, and the first line bd said about it.
+type SyncHaltInfo struct {
+	At   time.Time
+	Said string
+}
+
+// FormatSyncHalt is a SyncHaltInfo as a mark holds it: the time on its own
+// first line, in LastSyncFormat, and what bd said after it.
+func FormatSyncHalt(info SyncHaltInfo) string {
+	return info.At.UTC().Format(LastSyncFormat) + "\n" + info.Said
+}
+
+// ParseSyncHalt reads a mark back. ok is false when text does not even carry a
+// time: a mark nobody wrote, or one too garbled to trust, reads the same as no
+// mark at all.
+func ParseSyncHalt(text string) (SyncHaltInfo, bool) {
+	line, rest, _ := strings.Cut(text, "\n")
+	at, err := time.Parse(LastSyncFormat, strings.TrimSpace(line))
+	if err != nil {
+		return SyncHaltInfo{}, false
+	}
+	return SyncHaltInfo{At: at, Said: rest}, true
+}
+
+// SyncHaltMarker is where a host that halts a sync says so outside the
+// tracker: a mark only this host reads, written by mw dispatch and mw
+// millhand tick and read straight by mw status here, so that this host's own
+// report never waits on the very sync that is stuck to carry the word. The
+// adapter is a file in this host's state directory.
+type SyncHaltMarker interface {
+	// Write records info, replacing whatever mark was already there.
+	Write(ctx context.Context, info SyncHaltInfo) error
+
+	// Read reports the mark, and whether there is one. No mark, not a failure
+	// to read one, is (SyncHaltInfo{}, false, nil).
+	Read(ctx context.Context) (SyncHaltInfo, bool, error)
+
+	// Clear removes the mark. One that is not there is already what was asked
+	// for, and is not an error.
+	Clear(ctx context.Context) error
+}
+
+// RecordSyncHalt keeps marker level with what a sync's error says: a halt on a
+// merge conflict or a stuck working set (bd exit 2 or 4) writes it once — a
+// mark already there from an earlier halt is left alone, so that "since" keeps
+// naming when this run of halts began rather than its latest tick — and it
+// reports whether this write was the first one, the one moment worth a
+// notice. Every other outcome, a halt this is not raised over included, leaves
+// the mark as it found it: clearing it is ClearSyncHalt's, called once a sync
+// is level again, never this. A nil marker, or one that cannot be read or
+// written, changes nothing and is never called fresh: a host that cannot tell
+// whether it already said so must not say so twice.
+func RecordSyncHalt(ctx context.Context, marker SyncHaltMarker, err error, now time.Time) bool {
+	if marker == nil {
+		return false
+	}
+	halt, isHalt := Halted(err)
+	if !isHalt || (halt.Code != 2 && halt.Code != 4) {
+		return false
+	}
+	if _, already, readErr := marker.Read(ctx); readErr != nil || already {
+		return false
+	}
+	if writeErr := marker.Write(ctx, SyncHaltInfo{At: now, Said: halt.Said}); writeErr != nil {
+		return false
+	}
+	return true
+}
+
+// ClearSyncHalt takes marker back out once a sync is level again. A nil
+// marker, or a clear that fails, changes nothing worth failing a run over.
+func ClearSyncHalt(ctx context.Context, marker SyncHaltMarker) {
+	if marker != nil {
+		_ = marker.Clear(ctx)
+	}
+}
+
 // ConflictRetryDelay is how long Sync.Run waits before giving a merge conflict
 // (bd exit 2) its one retry, so that a conflict that is about to clear on its
 // own has had a moment to do so.
@@ -401,6 +488,9 @@ func (s Sync) syncBeadsRecordingLevel(ctx context.Context, report SyncReport) (S
 		}
 		return report, err
 	}
+	// A sync that got level again is not halted any more, whatever it said
+	// about itself earlier.
+	_ = s.Tracker.ClearNote(ctx, SyncHaltKey(s.Host))
 	report.Retried = retried
 	if noteErr != nil {
 		return report, fmt.Errorf("recording when %s was last level: %w", s.Host, noteErr)
@@ -423,6 +513,9 @@ func (s Sync) syncTracker(ctx context.Context) (string, error) {
 	err := s.Tracker.Sync(ctx)
 	halt, isHalt := Halted(err)
 	if !isHalt || halt.Code != 2 {
+		if isHalt {
+			s.noteHalt(ctx, halt)
+		}
 		return "", err
 	}
 	firstSaid := halt.Said
@@ -434,10 +527,27 @@ func (s Sync) syncTracker(ctx context.Context) (string, error) {
 		return fmt.Sprintf("conflict cleared on retry (bd said: %s)", firstSaid), nil
 	} else if retryHalt, ok := Halted(retryErr); ok {
 		retryHalt.Said = fmt.Sprintf("%s; retried, and bd said: %s", firstSaid, retryHalt.Said)
+		s.noteHalt(ctx, retryHalt)
 		return "", retryHalt
 	} else {
 		return "", retryErr
 	}
+}
+
+// noteHalt writes SyncHaltKey once for a halt worth an alarm elsewhere — a
+// merge conflict or a stuck working set — so that another host's sync reads it
+// once it can. A note already there from an earlier halt is left alone, so it
+// keeps naming when this run of halts began. Best effort: a note that cannot
+// be written costs another host a reading, not this sync.
+func (s Sync) noteHalt(ctx context.Context, halt *SyncHalt) {
+	if halt.Code != 2 && halt.Code != 4 {
+		return
+	}
+	key := SyncHaltKey(s.Host)
+	if existing, err := s.Tracker.Note(ctx, key); err != nil || existing != "" {
+		return
+	}
+	_ = s.Tracker.SetNote(ctx, key, FormatSyncHalt(SyncHaltInfo{At: s.now(), Said: halt.Said}))
 }
 
 // wait pauses for the given duration, or ends early when ctx does.
