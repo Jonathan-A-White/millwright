@@ -304,7 +304,20 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 
 	// Only the result goes to the file. What Claude Code says on stderr stays
 	// in the session, where a person who attaches to it can read it.
-	line := shellLine(argv) + " > " + shellQuote(l.ResultFile)
+	//
+	// The redirect writes to a temp path beside the real one and is renamed
+	// into place only once the session has fully exited, rather than opening
+	// the real path directly: a plain `> l.ResultFile` opens (and truncates)
+	// that exact path the moment this line starts, and keeps the same file
+	// descriptor for the session's whole run however long that is — so
+	// anything else that replaces the path while the session is still going
+	// (a git operation elsewhere in the vault touched it, on the incident this
+	// guards against, mw-gq6.89) orphans that descriptor, and the session's
+	// own completed write lands nowhere anyone can read it. The rename is
+	// atomic on the same filesystem, so whatever the real path held meanwhile
+	// is replaced whole, never partially, by this session's own result.
+	tmp := l.ResultFile + ".tmp"
+	line := shellLine(argv) + " > " + shellQuote(tmp) + "; mv " + shellQuote(tmp) + " " + shellQuote(l.ResultFile)
 
 	// Whatever comes after the session is chained with `;`, not `&&`: a session
 	// that failed, ran out of fuel or died is exactly the one whose closing out

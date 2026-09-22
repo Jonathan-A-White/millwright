@@ -62,7 +62,8 @@ func TestSessionIsAShellLineThatKeepsTheResult(t *testing.T) {
 		"--settings '" + SessionSettings + "'",
 		"--name mw-gq6.6",
 		"'You are booted into the builder seat.'",
-		"> /root/millwright-vault/runs/mw-gq6.6/result.json",
+		"> /root/millwright-vault/runs/mw-gq6.6/result.json.tmp",
+		"; mv /root/millwright-vault/runs/mw-gq6.6/result.json.tmp /root/millwright-vault/runs/mw-gq6.6/result.json",
 	} {
 		if !strings.Contains(line, want) {
 			t.Errorf("expected the line to carry %q, got %q", want, line)
@@ -73,6 +74,83 @@ func TestSessionIsAShellLineThatKeepsTheResult(t *testing.T) {
 	}
 	if spec.Dir != "/root/.mw-worktrees/mw-gq6.6" {
 		t.Errorf("expected the session to run in the worktree, got %q", spec.Dir)
+	}
+}
+
+// TestTheResultIsWrittenToATempPathAndRenamedIntoPlace pins the fix for
+// mw-gq6.89: a session ran to completion and its real result never reached
+// result.json, because a plain `> result.json` redirect opens (and truncates)
+// that exact path the moment the session starts and keeps the same file
+// descriptor for the session's whole run — so anything else that replaces the
+// path in the meantime (a git operation elsewhere in the vault touched it, on
+// the incident's evidence) orphans the descriptor, and the session's own,
+// completed write lands nowhere anyone can read it. Redirecting into a temp
+// path beside the real one and renaming it into place only once the session
+// has fully exited means nothing but this session's own finished output ever
+// reaches the real path, however the vault around it was touched meanwhile.
+func TestTheResultIsWrittenToATempPathAndRenamedIntoPlace(t *testing.T) {
+	spec, err := New().Session(launch(nil))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	line := spec.Command[2]
+
+	if strings.Contains(line, "> /root/millwright-vault/runs/mw-gq6.6/result.json;") ||
+		strings.HasSuffix(strings.TrimSpace(line), "> /root/millwright-vault/runs/mw-gq6.6/result.json") {
+		t.Errorf("expected the session to redirect into a temp path, not its result path directly, got %q", line)
+	}
+	tmpThenRename := "> /root/millwright-vault/runs/mw-gq6.6/result.json.tmp; " +
+		"mv /root/millwright-vault/runs/mw-gq6.6/result.json.tmp /root/millwright-vault/runs/mw-gq6.6/result.json"
+	if !strings.Contains(line, tmpThenRename) {
+		t.Errorf("expected the redirect to a temp path followed by a rename into the real one, got %q", line)
+	}
+}
+
+// TestTheResultReplacesWhateverWasAtItsPathWhenTheSessionEnds runs the
+// assembled line for real, through a stand-in for claude, with something
+// already sitting at the result path when the session starts — standing in for
+// a stale result an earlier attempt left, or a git operation that touched the
+// path while this session ran. The rename at the end must still leave exactly
+// this session's own output there, and nothing of the temp file behind.
+func TestTheResultReplacesWhateverWasAtItsPathWhenTheSessionEnds(t *testing.T) {
+	dir := t.TempDir()
+	result := filepath.Join(dir, "result.json")
+	if err := os.WriteFile(result, []byte("stale"), 0o644); err != nil {
+		t.Fatalf("seeding the result path: %v", err)
+	}
+
+	program := filepath.Join(dir, "claude")
+	if err := os.WriteFile(program, []byte("#!/bin/sh\nprintf '%s' '{\"ok\":true}'\n"), 0o755); err != nil {
+		t.Fatalf("writing the stand-in claude: %v", err)
+	}
+
+	spec, err := New(WithProgram(program)).Session(launch(func(l *application.Launch) {
+		l.ResultFile = result
+	}))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	if err := exec.Command(spec.Command[0], spec.Command[1:]...).Run(); err != nil {
+		t.Fatalf("running the assembled line: %v", err)
+	}
+
+	got, err := os.ReadFile(result)
+	if err != nil {
+		t.Fatalf("reading the result back: %v", err)
+	}
+	if string(got) != `{"ok":true}` {
+		t.Errorf("expected the session's own result to have replaced what was there, got %q", got)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("reading the directory back: %v", err)
+	}
+	if len(entries) != 2 { // the stand-in claude and result.json, no leftover .tmp
+		var names []string
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("expected no leftover temp file, got %v", names)
 	}
 }
 
@@ -411,9 +489,10 @@ func TestTheCloseOutIsChainedOnHoweverTheSessionEnds(t *testing.T) {
 	}
 
 	line := spec.Command[2]
-	want := "> /root/millwright-vault/runs/mw-gq6.6/result.json; /root/millwright/bin/mw next mw-gq6.6"
+	want := "mv /root/millwright-vault/runs/mw-gq6.6/result.json.tmp /root/millwright-vault/runs/mw-gq6.6/result.json" +
+		"; /root/millwright/bin/mw next mw-gq6.6"
 	if !strings.Contains(line, want) {
-		t.Errorf("expected the close-out to be chained after the redirection, got %q", line)
+		t.Errorf("expected the close-out to be chained after the rename into place, got %q", line)
 	}
 	// `&&` would skip the close-out for exactly the sessions that need one: the
 	// ones that failed, ran out of fuel or died.
@@ -422,13 +501,14 @@ func TestTheCloseOutIsChainedOnHoweverTheSessionEnds(t *testing.T) {
 	}
 }
 
-func TestASessionWithNothingAfterItEndsAtTheRedirection(t *testing.T) {
+func TestASessionWithNothingAfterItEndsAtTheRename(t *testing.T) {
 	spec, err := New().Session(launch(nil))
 	if err != nil {
 		t.Fatalf("assembling the session: %v", err)
 	}
-	if strings.Contains(spec.Command[2], ";") {
-		t.Errorf("expected nothing chained after a session with no After, got %q", spec.Command[2])
+	line := spec.Command[2]
+	if !strings.HasSuffix(line, "mv /root/millwright-vault/runs/mw-gq6.6/result.json.tmp /root/millwright-vault/runs/mw-gq6.6/result.json") {
+		t.Errorf("expected nothing chained after the rename with no After, got %q", line)
 	}
 }
 
