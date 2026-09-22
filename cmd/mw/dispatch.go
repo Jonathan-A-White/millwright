@@ -9,6 +9,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
+	"github.com/Jonathan-A-White/millwright/infrastructure/synchalt"
 	"github.com/Jonathan-A-White/millwright/infrastructure/ticklog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
@@ -42,6 +43,21 @@ func mwVault(dir, host string) *vault.Vault {
 // directory, beside the Millhand tick's. It is this host's own: nothing in it is
 // synced anywhere, though the counts of what is in it are.
 var DispatchStateDir = filepath.Join(".local", "state", "mw-dispatch")
+
+// SyncHaltStateDir is where this host marks its own sync halted, under the
+// home directory: shared between mw dispatch and mw millhand tick, and read
+// straight back by mw status here. Nothing in it is synced anywhere.
+var SyncHaltStateDir = filepath.Join(".local", "state", "mw")
+
+// hostSyncHalt is this host's own mark of a halted sync, kept in
+// SyncHaltStateDir. A host with no home directory keeps none.
+func hostSyncHalt() application.SyncHaltMarker {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	return synchalt.New(filepath.Join(home, SyncHaltStateDir))
+}
 
 // hostTickLogs are the logs this host's timers keep, in the home directory. A
 // host with no home directory has none.
@@ -139,6 +155,7 @@ func newDispatchCmd() *cobra.Command {
 				Sync:        application.Sync{Vault: files, Tracker: gateway, Host: host, Ticks: logs},
 				SyncTries:   tries,
 				SyncWait:    wait,
+				SyncHalts:   hostSyncHalt(),
 				Host:        host,
 				Cap:         atOnce,
 				MaxAttempts: maxAttempts,

@@ -62,6 +62,7 @@ func newStatusCmd() *cobra.Command {
 				Tracker:        tracker,
 				Notes:          tracker,
 				Vault:          mwVault(dir, host),
+				SyncHalt:       hostSyncHalt(),
 				Host:           host,
 				Seat:           BuilderSeat,
 				Ticks:          hostTickLogs(),
