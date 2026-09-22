@@ -10,6 +10,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/notify"
 	"github.com/Jonathan-A-White/millwright/infrastructure/reaper"
 	"github.com/Jonathan-A-White/millwright/infrastructure/ticklog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
@@ -116,11 +117,13 @@ func newMillhandTickCmd() *cobra.Command {
 					Host:       host,
 					StaleAfter: time.Duration(hours) * time.Hour,
 				},
-				ReapLog: files,
-				Recheck: time.Duration(recheck) * time.Second,
-				Host:    host,
-				DryRun:  dryRun,
-				Out:     cmd.OutOrStdout(),
+				ReapLog:   files,
+				Recheck:   time.Duration(recheck) * time.Second,
+				SyncHalts: hostSyncHalt(),
+				Notify:    notify.New(),
+				Host:      host,
+				DryRun:    dryRun,
+				Out:       cmd.OutOrStdout(),
 			}
 			watching := application.WatchSettings{
 				SSH: settings.SSH, Host: settings.Host, Outside: settings.Outside, Blog: settings.Blog,

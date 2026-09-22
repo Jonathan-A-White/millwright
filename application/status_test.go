@@ -189,6 +189,71 @@ func TestStatusWithoutNotesLeavesTheOtherHostsOut(t *testing.T) {
 	}
 }
 
+// TestStatusShowsThisHostsOwnHaltFromItsMarker is the local half of the story:
+// mw status reads its own halted sync straight from its marker, never through
+// the tracker, so it says so even while the halt itself is what is blocking
+// the tracker from carrying the word anywhere else.
+func TestStatusShowsThisHostsOwnHaltFromItsMarker(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	marker := apptest.NewFakeSyncHaltMarker()
+	at := statusNow.Add(-40 * time.Minute)
+	if err := marker.Write(context.Background(), application.SyncHaltInfo{At: at, Said: "conflict in the working set"}); err != nil {
+		t.Fatalf("writing the marker: %v", err)
+	}
+
+	report, err := application.Status{
+		Tracker:  tracker,
+		Host:     "vps",
+		Seat:     "builder",
+		SyncHalt: marker,
+		Now:      func() time.Time { return statusNow },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatalf("reading status: %v", err)
+	}
+	if report.Halt == nil || !report.Halt.At.Equal(at) || report.Halt.Said != "conflict in the working set" {
+		t.Fatalf("expected the report to hold the local halt, got %+v", report.Halt)
+	}
+	want := "host vps: sync halted since " + at.UTC().Format(application.LastSyncFormat)
+	if !strings.Contains(report.String(), want) {
+		t.Fatalf("expected the printed report to say %q, got:\n%s", want, report.String())
+	}
+}
+
+// TestStatusWithNoLocalHaltSaysNothingOfOne is the other side: a host that has
+// never halted, or that cleared, leaves the line out.
+func TestStatusWithNoLocalHaltSaysNothingOfOne(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	report := otherHostStatus(t, tracker)
+	if report.Halt != nil {
+		t.Fatalf("expected no local halt, got %+v", report.Halt)
+	}
+	if strings.Contains(report.String(), "sync halted") {
+		t.Fatalf("expected nothing said of a halt, got:\n%s", report.String())
+	}
+}
+
+// TestOtherHostsSectionShowsAHostsHaltedSync is the other-hosts half: mw
+// status reads the sync-halted note it already has the plumbing to read, the
+// same way it reads each host's last sync.
+func TestOtherHostsSectionShowsAHostsHaltedSync(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.36", "Something pathed to the laptop", "laptop")
+	syncedAt(t, tracker, "laptop", 90*time.Minute)
+	at := statusNow.Add(-40 * time.Minute)
+	if err := tracker.SetNote(context.Background(), application.SyncHaltKey("laptop"),
+		application.FormatSyncHalt(application.SyncHaltInfo{At: at, Said: "conflict in the working set"})); err != nil {
+		t.Fatalf("writing the note: %v", err)
+	}
+
+	block := section(otherHostStatus(t, tracker))
+	t.Logf("\n%s", block)
+	want := "host laptop: sync halted since " + at.UTC().Format(application.LastSyncFormat)
+	if !strings.Contains(block, want) {
+		t.Errorf("expected the section to say %q, got:\n%s", want, block)
+	}
+}
+
 // TestStatusReadsReadyAndRunningStoriesOnce says how often mw status asks the
 // tracker for the two listings every section is drawn from — what is ready and
 // what is claimed. Each costs a bd call, so it asks once per run, however many

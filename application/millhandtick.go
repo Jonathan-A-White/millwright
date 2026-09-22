@@ -38,6 +38,14 @@ const (
 	TickSyncFailed   = "sync failed: "
 )
 
+// Notifier is where mw millhand tick raises the one desktop notice a sync
+// halt is worth, once, on a host that has one to raise it through. A host with
+// none reads a nil Notifier and sends nothing beyond the mark and the status
+// line.
+type Notifier interface {
+	Notify(ctx context.Context, line string) error
+}
+
 // MayorRespawnException is the one thing the Millhand's charter lets it do to
 // the Mayor's seat on the VPS, and the last thing a wake called for by a host
 // that is down or has lost its Mayor is told.
@@ -104,6 +112,17 @@ type MillhandTick struct {
 	Mail     Mailbox
 	Sweep    Sweep
 	Log      TickLog
+
+	// SyncHalts is this host's own mark of a halted sync: written once a sync
+	// halts on a merge conflict or a stuck working set, left alone on a halt
+	// that repeats, and cleared once a sync is level again. A nil SyncHalts
+	// writes and clears nothing, and mw status here has no local mark to read.
+	SyncHalts SyncHaltMarker
+
+	// Notify is where the one desktop notice a fresh halt is worth is raised.
+	// A nil Notify, or a host with no notifier of its own, sends nothing more
+	// than the mark and the status line.
+	Notify Notifier
 
 	// Watch is mw watch's rule, applied to the host this one watches. Its
 	// Settings are the config's [watch] table: with none, or with no Probes, the
@@ -183,6 +202,13 @@ func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err err
 	if !health.local {
 		if _, err := t.Sync.Run(ctx); err != nil {
 			notes = append(notes, syncNote(err))
+			if RecordSyncHalt(ctx, t.SyncHalts, err, t.now()) {
+				if note := t.notifyHalt(ctx, err); note != "" {
+					notes = append(notes, note)
+				}
+			}
+		} else {
+			ClearSyncHalt(ctx, t.SyncHalts)
 		}
 	}
 	if health.note != "" {
@@ -418,6 +444,26 @@ func syncNote(err error) string {
 		return "sync did only its beads half: the vault holds uncommitted changes to " + strings.Join(blocked.Files, ", ")
 	}
 	return TickSyncFailed + oneLine(err.Error())
+}
+
+// notifyHalt raises the one desktop notice a fresh sync halt is worth. It is
+// called only once RecordSyncHalt has already said this is the first halt of a
+// run of them, and only on a real run: a dry run sends nothing, since nothing
+// else it does is real either. A nil Notify sends nothing. A notice that
+// cannot be raised is said as a note of its own, never a failure of the tick.
+func (t MillhandTick) notifyHalt(ctx context.Context, err error) string {
+	if t.Notify == nil || t.DryRun {
+		return ""
+	}
+	halt, ok := Halted(err)
+	if !ok {
+		return ""
+	}
+	line := fmt.Sprintf("mw: sync halted on %s since %s: %s", t.Host, t.now().UTC().Format(LastSyncFormat), halt.Said)
+	if notifyErr := t.Notify.Notify(ctx, line); notifyErr != nil {
+		return "notify failed: " + oneLine(notifyErr.Error())
+	}
+	return ""
 }
 
 // mailBoxes is every mailbox this host's Millhand reads, in the order the

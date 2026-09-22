@@ -39,6 +39,8 @@ Every adapter carries `var _ application.<Port> = ...`.
 | `WatchProbes` | `application/watch.go` | `infrastructure/watch/watch.go` | `application/apptest/fakewatch.go` |
 | `TickLog` | `application/millhandtick.go` | `infrastructure/ticklog/ticklog.go` | `application/apptest/faketicklog.go` |
 | `Worktrees` | `application/worktrees.go` | `infrastructure/rig/worktree.go` | `application/dispatch_test.go` |
+| `SyncHaltMarker` | `application/sync.go` | `infrastructure/synchalt/synchalt.go` | `application/apptest/fakesynchalt.go` |
+| `Notifier` | `application/millhandtick.go` | `infrastructure/notify/notify.go` | none |
 | `VaultBirth`, `TrackerBirth` | `application/init.go` | `infrastructure/vault/birth.go`, `infrastructure/beads/init.go` | none |
 | `Landing` | `application/landing.go` | `infrastructure/rig/landing.go` | none |
 | `Checks` | `application/landing.go` | `infrastructure/rig/checks.go` | none |
@@ -48,8 +50,7 @@ Every adapter carries `var _ application.<Port> = ...`.
 | `HostSync` | `application/dispatch.go` | `application.Sync` | — |
 
 `infrastructure/config/config.go` is not a port: this host's settings, read
-from `cmd/mw/` only. A rig's `[tests]` line is also a Bash allow rule its
-session may run (`claude.WithTests`).
+from `cmd/mw/` only.
 
 ## Use cases
 
@@ -75,13 +76,12 @@ session may run (`claude.WithTests`).
 | `SeatBoot` | `application/seatboot.go` | none: `Dispatch`, `Next` call it | `features/seat_boot.feature` |
 | `Init` | `application/init.go` | `mw init` — `cmd/mw/init.go` | `features/init.feature` |
 
-`cmd/mw/root.go` holds the tree (one `root.AddCommand` per command);
-`cmd/mw/main.go` runs it; `cmd/mw/version.go` is `mw version`, no use case.
+`cmd/mw/root.go` holds the tree; `cmd/mw/main.go` runs it; `cmd/mw/version.go`
+is `mw version`, no use case.
 `features/path_validation.feature` covers `domain/path.go`,
 `features/ready_stories.feature` the `WorkTracker` contract; no commands.
 Neither port nor use case: `application/fuel.go`, `application/ledger.go`,
-`application/tickcounts.go` (what the tick logs say),
-`application/attempts.go` (the attempts cap), `domain/plan.go`.
+`application/tickcounts.go`, `application/attempts.go`, `domain/plan.go`.
 
 Adding a command: read `docs/adding-a-command.md` first.
 
@@ -112,6 +112,6 @@ faking only tracker, runner and vault git: `features/steps/next_steps.go`.
   `-tags beads_integration` for the real-`bd` cases, as `make test` does.
 - One feature: `MW_FEATURE=sweep.feature go test ./features` (`:17` appended
   for the scenario at that line).
-- `make lint` also runs `scripts/check-*.sh`, one per thing checked: this page,
-  `template/`, `contrib/systemd/`, `scripts/install.sh` and `scripts/install-units.sh`.
+- `make lint` also runs `scripts/check-*.sh`: this page, `template/`,
+  `contrib/systemd/` and the install scripts.
 - `make check-formulas` needs `bd`, `jq` and real time; not in `make test`.
