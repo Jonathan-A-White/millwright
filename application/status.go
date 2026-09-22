@@ -64,6 +64,11 @@ type Status struct {
 	// every host asleep on no evidence.
 	Notes TrackerNotes
 
+	// SyncHalt is this host's own mark of a halted sync, read straight rather
+	// than through the tracker: the one thing a halted sync cannot carry is
+	// the word of its own halt. A nil SyncHalt leaves the local line out.
+	SyncHalt SyncHaltMarker
+
 	// Host is which of the factory's hosts this report is for.
 	Host string
 
@@ -139,6 +144,11 @@ type HostWork struct {
 	// Silent is how long it is since LastSync, and zero when there is no
 	// LastSync to measure from.
 	Silent time.Duration
+	// Halt is what that host's own sync-halted note says, read like every
+	// other note of it — which, since the note rides the very sync that is
+	// stuck, may say nothing of a halt that has not cleared yet. Nil when it
+	// has recorded none.
+	Halt *SyncHaltInfo
 	// Asleep says this host has been silent for longer than the threshold — or
 	// has never synced, or left a note that is not a time. Its stories are
 	// stranded: nothing here will move them, and no other host will take them
@@ -184,6 +194,9 @@ type StatusReport struct {
 	RigMemory []RigMemorySize
 	// RigMemoryBudget is the size a rig's memory was held to.
 	RigMemoryBudget int
+	// Halt is what this host's own sync-halted mark says, read straight from
+	// SyncHalt rather than through the tracker. Nil when nothing is halted.
+	Halt *SyncHaltInfo
 }
 
 // Run reads the report and prints it. Every call it makes is a read: the
@@ -269,6 +282,14 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	report.RigMemory = over
 	report.RigMemoryBudget = s.rigMemoryBudget()
 
+	if s.SyncHalt != nil {
+		if info, there, err := s.SyncHalt.Read(ctx); err != nil {
+			return report, fmt.Errorf("reading whether this host's own sync is halted: %w", err)
+		} else if there {
+			report.Halt = &info
+		}
+	}
+
 	s.print(report.String())
 	return report, nil
 }
@@ -337,6 +358,14 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand) ([]HostWork, e
 			}
 		}
 		held.Asleep = held.LastSync.IsZero() || held.Silent > s.hostSilence()
+
+		haltSaid, err := s.Notes.Note(ctx, SyncHaltKey(host))
+		if err != nil {
+			return nil, fmt.Errorf("reading whether %s's sync is halted: %w", host, err)
+		}
+		if info, ok := ParseSyncHalt(haltSaid); ok {
+			held.Halt = &info
+		}
 
 		ticks, err := s.Notes.Note(ctx, TicksKey(host))
 		if err != nil {
@@ -432,6 +461,11 @@ func (r StatusReport) String() string {
 	clip(&b, fmt.Sprintf("mw status · %s", r.Host))
 	b.WriteString("\n")
 
+	if r.Halt != nil {
+		clip(&b, haltLine(r.Host, *r.Halt))
+		b.WriteString("\n")
+	}
+
 	clip(&b, fmt.Sprintf("RUNNING (%d)", len(r.Running)))
 	if len(r.Running) == 0 {
 		clip(&b, "  nothing running")
@@ -505,6 +539,9 @@ func (r StatusReport) String() string {
 // host the report is for, and so the host a stranded story is re-pathed to.
 func (w HostWork) write(b *strings.Builder, here string) {
 	clip(b, fmt.Sprintf("  %s · %s", w.Host, w.state()))
+	if w.Halt != nil {
+		clip(b, "    "+haltLine(w.Host, *w.Halt))
+	}
 	switch {
 	case w.Unreadable():
 		clip(b, fmt.Sprintf("    its note says %q, which is not a time", w.Said))
@@ -537,6 +574,12 @@ func (w HostWork) state() string {
 	default:
 		return "synced " + Clock(w.Silent) + " ago"
 	}
+}
+
+// haltLine is the one line a halted sync is worth, wherever it is shown: the
+// host, since when, and what bd said.
+func haltLine(host string, halt SyncHaltInfo) string {
+	return fmt.Sprintf("host %s: sync halted since %s: %s", host, halt.At.UTC().Format(LastSyncFormat), halt.Said)
 }
 
 // readyOrClaimed says, in one word, whether a story elsewhere is waiting to be
