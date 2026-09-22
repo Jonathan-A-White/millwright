@@ -189,6 +189,65 @@ func TestStatusWithoutNotesLeavesTheOtherHostsOut(t *testing.T) {
 	}
 }
 
+// TestStatusShowsThisHostsBeadsSize is the plain case: a size under budget is
+// shown without a warning.
+func TestStatusShowsThisHostsBeadsSize(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	tracker.SetSize(500_000_000)
+
+	report := otherHostStatus(t, tracker)
+	if !report.BeadsKnown || report.BeadsBytes != 500_000_000 {
+		t.Fatalf("expected a known size of 500,000,000 bytes, got known=%v bytes=%d", report.BeadsKnown, report.BeadsBytes)
+	}
+	if !strings.Contains(report.String(), "BEADS 500MB") {
+		t.Fatalf("expected the report to show the size, got:\n%s", report.String())
+	}
+	if strings.Contains(report.String(), "past the") {
+		t.Fatalf("expected no warning under budget, got:\n%s", report.String())
+	}
+}
+
+// TestStatusWarnsPastTheBeadsBudget is the friction this story exists for:
+// past the budget, mw status says so without a Clerk running du.
+func TestStatusWarnsPastTheBeadsBudget(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	tracker.SetSize(1_500_000_000)
+
+	report := otherHostStatus(t, tracker)
+	if report.BeadsBytes <= report.BeadsBudgetBytes {
+		t.Fatalf("expected the size to be past the budget, got %d/%d", report.BeadsBytes, report.BeadsBudgetBytes)
+	}
+	want := "BEADS 1.5GB: past the 1.0GB budget"
+	if !strings.Contains(report.String(), want) {
+		t.Fatalf("expected %q, got:\n%s", want, report.String())
+	}
+}
+
+// TestStatusWithoutNotesLeavesTheBeadsSizeOut mirrors
+// TestStatusWithoutNotesLeavesTheOtherHostsOut: Size is TrackerNotes', so a
+// report with no Notes to read it from says nothing of it, rather than
+// claiming an empty database.
+func TestStatusWithoutNotesLeavesTheBeadsSizeOut(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	tracker.SetSize(500_000_000)
+
+	report, err := application.Status{
+		Tracker: tracker,
+		Host:    "vps",
+		Seat:    "builder",
+		Now:     func() time.Time { return statusNow },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatalf("reading status: %v", err)
+	}
+	if report.BeadsKnown {
+		t.Fatalf("expected the size to be unknown without Notes, got %+v", report)
+	}
+	if strings.Contains(report.String(), "BEADS") {
+		t.Fatalf("expected nothing said of the size, got:\n%s", report.String())
+	}
+}
+
 // TestStatusShowsThisHostsOwnHaltFromItsMarker is the local half of the story:
 // mw status reads its own halted sync straight from its marker, never through
 // the tracker, so it says so even while the halt itself is what is blocking

@@ -35,6 +35,9 @@ func newStatusCmd() *cobra.Command {
 			"`rig_memory_bytes`, default 8000), a RIG MEMORY section says which and by how much: every\n" +
 			"session pays for that file at boot, so the Mayor is due to prune it. It is left out when\n" +
 			"none is over.\n\n" +
+			"A BEADS line says how large this host's own beads database is on disk — its auto-commit\n" +
+			"history and auto-backups included, since both have grown unbounded before — and warns once\n" +
+			"it passes 1 GB, so the Mayor sees it without asking a Clerk to run du.\n\n" +
 			"Every line fits a phone-width terminal, at most 60 columns. Nothing is claimed, nothing is\n" +
 			"written and no session is started: status only reads.",
 		Args: cobra.NoArgs,

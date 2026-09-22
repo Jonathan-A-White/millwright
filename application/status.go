@@ -35,19 +35,34 @@ const RigMemoryHeading = "RIG MEMORY"
 // is the same 8000 infrastructure/config.DefaultRigMemoryBytes reads as.
 const DefaultRigMemoryBytes = 8000
 
+// DefaultBeadsBudgetBytes is how large a host's own beads database — .beads
+// in full, its auto-commit history and auto-backups included, since both
+// have run away in the past — may grow before mw status warns it is past
+// budget, when nothing says otherwise.
+const DefaultBeadsBudgetBytes = 1_000_000_000
+
 // RepathHint is what a person does about work stranded on a sleeping host: it
 // is re-pathed, by hand, to a host that is awake. mw status only ever says
 // this; re-pathing a story is the Mayor's act, never a report's.
 const RepathHint = "bd update <id> --set-metadata host="
 
-// TrackerNotes is the read half of the notes the factory's hosts leave each
+// TrackerNotes is the read-only half of what mw status learns about the
+// tracker without writing to it: the notes the factory's hosts leave each
 // other in the tracker's key-value store — when each was last level, above
-// all. It is deliberately the read half alone: mw status reads another host's
-// last sync and must not be able to write one, not even by mistake.
+// all — and how large this host's own database is on disk. It is
+// deliberately read-only: mw status reads another host's last sync and must
+// not be able to write one, not even by mistake.
 type TrackerNotes interface {
 	// Note reads one value out of the tracker's key-value store, or "" when the
 	// key is not there. It is TrackerSync's own Note, narrowed.
 	Note(ctx context.Context, key string) (string, error)
+
+	// Size reports how many bytes this host's own beads database occupies on
+	// disk — the working database and whatever else bd keeps beside it, its
+	// auto-commit history and auto-backups included. It is host-local: no
+	// adapter can size another host's disk, so mw status never calls this for
+	// a host other than the one it runs on.
+	Size(ctx context.Context) (int64, error)
 }
 
 // Status reads, for one host, what is running there, what is ready to be
@@ -78,6 +93,10 @@ type Status struct {
 	// RigMemoryBytes is how large the Seat's memory of one rig may be before the
 	// report says it is due to be pruned. Zero reads DefaultRigMemoryBytes.
 	RigMemoryBytes int
+	// BeadsBudgetBytes is how large this host's own beads database may grow
+	// before the report warns it is past budget. Zero reads
+	// DefaultBeadsBudgetBytes.
+	BeadsBudgetBytes int64
 	// Seat is whose ledger today's fuel is summed from — the Builder's, since
 	// the Builder is the seat that works every story.
 	Seat string
@@ -197,6 +216,13 @@ type StatusReport struct {
 	// Halt is what this host's own sync-halted mark says, read straight from
 	// SyncHalt rather than through the tracker. Nil when nothing is halted.
 	Halt *SyncHaltInfo
+	// BeadsBytes is how large this host's own beads database is on disk, and
+	// BeadsKnown says whether it was measured at all: a report with no Notes
+	// to read it from leaves both zero rather than claiming an empty
+	// database. BeadsBudgetBytes is the size it was held to.
+	BeadsBytes       int64
+	BeadsKnown       bool
+	BeadsBudgetBytes int64
 }
 
 // Run reads the report and prints it. Every call it makes is a read: the
@@ -288,6 +314,16 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		} else if there {
 			report.Halt = &info
 		}
+	}
+
+	if s.Notes != nil {
+		size, err := s.Notes.Size(ctx)
+		if err != nil {
+			return report, fmt.Errorf("sizing this host's own beads database: %w", err)
+		}
+		report.BeadsBytes = size
+		report.BeadsBudgetBytes = s.beadsBudget()
+		report.BeadsKnown = true
 	}
 
 	s.print(report.String())
@@ -438,6 +474,15 @@ func (s Status) rigMemoryBudget() int {
 	return s.RigMemoryBytes
 }
 
+// beadsBudget is how large this host's own beads database may grow before
+// the report warns it is past budget.
+func (s Status) beadsBudget() int64 {
+	if s.BeadsBudgetBytes <= 0 {
+		return DefaultBeadsBudgetBytes
+	}
+	return s.BeadsBudgetBytes
+}
+
 // now is the clock "today" is read by.
 func (s Status) now() time.Time {
 	if s.Now == nil {
@@ -463,6 +508,11 @@ func (r StatusReport) String() string {
 
 	if r.Halt != nil {
 		clip(&b, haltLine(r.Host, *r.Halt))
+		b.WriteString("\n")
+	}
+
+	if r.BeadsKnown {
+		clip(&b, beadsLine(r.BeadsBytes, r.BeadsBudgetBytes))
 		b.WriteString("\n")
 	}
 
@@ -580,6 +630,30 @@ func (w HostWork) state() string {
 // host, since when, and what bd said.
 func haltLine(host string, halt SyncHaltInfo) string {
 	return fmt.Sprintf("host %s: sync halted since %s: %s", host, halt.At.UTC().Format(LastSyncFormat), halt.Said)
+}
+
+// beadsLine is the one line this host's own beads database is worth: its
+// size, and a warning once it is past budget, so the Mayor sees it without
+// asking a Clerk to run du.
+func beadsLine(bytes, budget int64) string {
+	if bytes > budget {
+		return fmt.Sprintf("BEADS %s: past the %s budget", formatBytes(bytes), formatBytes(budget))
+	}
+	return fmt.Sprintf("BEADS %s", formatBytes(bytes))
+}
+
+// formatBytes writes a byte count the way a person reads one: whole
+// gigabytes once there are any, otherwise whole megabytes, otherwise the
+// bytes themselves.
+func formatBytes(n int64) string {
+	switch {
+	case n >= 1_000_000_000:
+		return fmt.Sprintf("%.1fGB", float64(n)/1e9)
+	case n >= 1_000_000:
+		return fmt.Sprintf("%dMB", n/1_000_000)
+	default:
+		return fmt.Sprintf("%dB", n)
+	}
 }
 
 // readyOrClaimed says, in one word, whether a story elsewhere is waiting to be
