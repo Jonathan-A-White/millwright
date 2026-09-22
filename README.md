@@ -519,7 +519,9 @@ blog = "https://blog.example.com"  # optional: the blog answering is a sign of l
 
 A rig a story names but this host has no checkout of is said so plainly, and the
 story is left for the host that has it. A rig `[tests]` does not name is checked
-with `make test`. A rig `[after_landing]` does not name has nothing run after a
+with `make test`. The `[tests]` line is also what a session working that rig may
+run without being asked — the whole line, and each side of a top-level `&&` on
+its own. A rig `[after_landing]` does not name has nothing run after a
 landing; the table is for a host whose timers run a binary built in a rig's
 checkout, which a landing leaves one commit stale until the command rebuilds it.
 The command is one line, read by `/bin/sh` in the rig's checkout like a `[tests]`

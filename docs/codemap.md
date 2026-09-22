@@ -29,18 +29,18 @@ Every adapter carries `var _ application.<Port> = ...`.
 | `Vault` | `application/seatboot.go` | `infrastructure/vault/vault.go` | `application/seatboot_test.go` |
 | `Runner` | `application/runner.go` | `infrastructure/tmux/tmux.go` | `application/apptest/fakerunner.go` |
 | `Harness` | `application/harness.go` | `infrastructure/claude/claude.go` | `application/seatboot_test.go` |
-| `SeatFiles` | `application/seatup.go` | `infrastructure/vault/seat.go` | none: temp vaults |
+| `SeatFiles` | `application/seatup.go` | `infrastructure/vault/seat.go` | none |
 | `Windows` | `application/seatup.go` | `infrastructure/tmux/window.go` | `application/apptest/fakewindows.go` |
 | `SeatHarness` | `application/seatup.go` | `infrastructure/claude/claude.go` | none |
 | `ReapTerminal` | `application/seatreap.go` | `infrastructure/tmux/reap.go` | `application/apptest/fakereap.go` |
-| `ReapLog` | `application/seatreap.go` | `infrastructure/vault/reaplog.go` | none: temp vaults |
+| `ReapLog` | `application/seatreap.go` | `infrastructure/vault/reaplog.go` | none |
 | `ReapArmer` | `application/seatreap.go` | `infrastructure/reaper/arm.go` | `application/apptest/fakereap.go` |
-| `Transcripts` | `application/seatcontext.go` | `infrastructure/claude/transcripts.go` | none: temp-dir fixtures |
+| `Transcripts` | `application/seatcontext.go` | `infrastructure/claude/transcripts.go` | none |
 | `WatchProbes` | `application/watch.go` | `infrastructure/watch/watch.go` | `application/apptest/fakewatch.go` |
 | `TickLog` | `application/millhandtick.go` | `infrastructure/ticklog/ticklog.go` | `application/apptest/faketicklog.go` |
 | `Worktrees` | `application/worktrees.go` | `infrastructure/rig/worktree.go` | `application/dispatch_test.go` |
-| `VaultBirth`, `TrackerBirth` | `application/init.go` | `infrastructure/vault/birth.go`, `infrastructure/beads/init.go` | none: temp dirs |
-| `Landing` | `application/landing.go` | `infrastructure/rig/landing.go` | none: real git |
+| `VaultBirth`, `TrackerBirth` | `application/init.go` | `infrastructure/vault/birth.go`, `infrastructure/beads/init.go` | none |
+| `Landing` | `application/landing.go` | `infrastructure/rig/landing.go` | none |
 | `Checks` | `application/landing.go` | `infrastructure/rig/checks.go` | none |
 | `AfterLanding` | `application/afterlanding.go` | `infrastructure/rig/afterlanding.go` | none |
 | `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/slot.go` | none: real `flock` |
@@ -48,7 +48,8 @@ Every adapter carries `var _ application.<Port> = ...`.
 | `HostSync` | `application/dispatch.go` | `application.Sync` | — |
 
 `infrastructure/config/config.go` is not a port: this host's settings, read
-from `cmd/mw/` only.
+from `cmd/mw/` only. A rig's `[tests]` line is also a Bash allow rule its
+session may run (`claude.WithTests`).
 
 ## Use cases
 
@@ -75,7 +76,7 @@ from `cmd/mw/` only.
 | `Init` | `application/init.go` | `mw init` — `cmd/mw/init.go` | `features/init.feature` |
 
 `cmd/mw/root.go` holds the tree (one `root.AddCommand` per command);
-`cmd/mw/main.go` runs it; `cmd/mw/version.go` is `mw version` (mw's and `claude`'s), no use case.
+`cmd/mw/main.go` runs it; `cmd/mw/version.go` is `mw version`, no use case.
 `features/path_validation.feature` covers `domain/path.go`,
 `features/ready_stories.feature` the `WorkTracker` contract; no commands.
 Neither port nor use case: `application/fuel.go`, `application/ledger.go`,
