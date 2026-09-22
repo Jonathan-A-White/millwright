@@ -39,6 +39,15 @@ type nextContext struct {
 	files   *apptest.FakeVaultFiles
 	mailbox *apptest.FakeMailbox
 
+	// realVault says the vault is a real git clone (mw-gq6.87's own scenarios),
+	// so that mw next commits to it for real and a scenario can read git's own
+	// status back, rather than the in-memory files fake every other scenario
+	// commits through.
+	realVault bool
+	// dispatchReport is what the last standalone dispatch (mw-gq6.87's own
+	// scenarios, re-dispatching a story before it is closed out) reported.
+	dispatchReport application.DispatchReport
+
 	gitProgram   string // a wrapper that logs what git was asked to do
 	gitLog       string
 	checkCommand string // what this scenario's "rig tests" are
@@ -133,6 +142,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerNextRigSteps(ctx, c)
 	registerNextAfterLandingSteps(ctx, c)
 	registerNextRebaseSteps(ctx, c)
+	registerNextReattemptSteps(ctx, c)
 
 	ctx.When(`^mw closes out "([^"]*)"$`, c.mwClosesOut)
 	ctx.When(`^mw closes out "([^"]*)" a second time$`, c.mwClosesOut)
@@ -684,6 +694,14 @@ func (c *nextContext) mwClosesOut(id string) error {
 		After: []string{"mw", "next"},
 	}
 
+	// Every scenario but mw-gq6.87's own commits through the in-memory files
+	// fake; those commit to the real clone, so that they can read git's own
+	// status back and prove nothing tracked was left dirty.
+	var filesPort application.VaultFiles = c.files
+	if c.realVault {
+		filesPort = files
+	}
+
 	c.report, c.err = application.Next{
 		Tracker:   c.tracker,
 		Worktrees: worktrees,
@@ -691,7 +709,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 		Checks:    rig.NewChecks(rig.WithCommand(c.checkCommand)),
 		Slot:      rig.NewSlots(rig.WithSlotWait(5*time.Second), rig.WithSlotPoll(20*time.Millisecond)),
 		Vault:     files,
-		Files:     c.files,
+		Files:     filesPort,
 		Mailbox:   c.mailbox,
 		Runner:    c.runner,
 		Sync:      application.Sync{Vault: c.files, Tracker: c.tracker, Host: nextHost},
