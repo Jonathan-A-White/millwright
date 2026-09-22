@@ -48,24 +48,25 @@ PHASE 2 - JOIN (only after I say continue). Do these in order; verify each befor
    run it if you like. Don't install dolt separately unless bd asks for it. Don't install Herdr yet.
 2. `gh auth status` must show Jonathan-A-White with access to private repos; if not, stop and tell me
    to run `gh auth login`. Then `gh auth setup-git`.
-3. Clone inside the WSL filesystem (NOT under /mnt/c): ~/millwright and ~/millwright-vault.
-   In both: git config user.name "Jonathan White"; git config user.email jonathan.jawhite@gmail.com
-   (repo-local, not --global).
-4. In ~/millwright-vault: `bd bootstrap --dry-run`, show me the plan; it should say it will clone from
-   the git origin's Dolt data (refs/dolt/data). Then `bd bootstrap --yes`. Then verify, one command at
-   a time: `bd version` (BD_VERSION); `bd show mw-6ww` (the wayfinder map, an open epic); `bd ready
-   --parent mw-gq6 --unassigned` (walking-skeleton stories); `bd count`.
-5. Round trip, to prove coordination works: from ~/millwright-vault run
+3. Clone ~/millwright inside the WSL filesystem (NOT under /mnt/c). In it: git config user.name
+   "Jonathan White"; git config user.email jonathan.jawhite@gmail.com (repo-local, not --global).
+4. In ~/millwright: `make build`. Report timings.
+5. `bin/mw init --join https://github.com/Jonathan-A-White/millwright-vault --vault ~/millwright-vault
+   --host laptop`. This clones the vault, runs `bd bootstrap` to pick up its database (never `bd init`,
+   never `bd migrate`, never a forced push — the VPS is the designated migrator, this machine is not),
+   writes ~/.config/mw/config.toml, and runs one `mw sync`. Show me everything it prints; stop if it
+   says a failure rather than a level sync. Then, inside ~/millwright-vault: git config user.name
+   "Jonathan White"; git config user.email jonathan.jawhite@gmail.com (repo-local), for step 8.
+6. Verify, one command at a time: `bd version` (BD_VERSION); `bd show mw-6ww` (the wayfinder map, an
+   open epic); `bd ready --parent mw-gq6 --unassigned` (walking-skeleton stories); `bd count`.
+7. Round trip, to prove coordination works: from ~/millwright-vault run
    `bd create "Laptop joined the factory" -t task -p 3 -d "Round-trip check from the laptop. Close me
    from the VPS." --silent`, then `bd sync`. Tell me the new bead's id. (The Mayor on the VPS will
    sync, see it, and close it; after your next `bd sync` you should see it closed.)
-6. In ~/millwright: `make build && make test` to prove the rig builds here. Report timings.
-7. Write ~/.config/mw/config.toml with: host = "laptop"; vault = the absolute path of
-   ~/millwright-vault; [rigs] millwright = the absolute path of ~/millwright. (mw itself is still
-   being built; this is so it works the moment it is installed.)
 8. Copy ~/laptop-inventory.md to ~/millwright-vault/hosts/laptop-inventory.md, commit it in the vault
    with a plain message (no AI attribution lines) and `git push`.
-9. Tell me: what was installed, every verification result, the round-trip bead id, and anything odd.
+9. In ~/millwright: `make test`, to prove the rig builds here too. Report timings.
+10. Tell me: what was installed, every verification result, the round-trip bead id, and anything odd.
 ```
 
 After Phase 2, tell the Mayor on the VPS the round-trip bead's id.

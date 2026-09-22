@@ -599,6 +599,28 @@ lines it would have written instead. It ends by printing what is owed next: a pr
 remote for the vault and `git push`, then `scripts/install-units.sh`. See
 `features/init.feature`.
 
+## Joining an existing vault
+
+```sh
+mw init --join <git-url> --vault <dir> [--host <name>] [--rig <name>=<dir>]...
+```
+
+`mw init --join` brings a second host onto a vault that already exists, instead of
+making one: it clones `<git-url>` into `<dir>` (the same rule as a fresh vault's —
+`<dir>` must not exist or must be empty), and picks up the vault's beads database
+with `bd bootstrap` rather than making one — never `bd init`, never `bd migrate`,
+never a forced push. Running it never makes this host the vault's designated
+migrator; that stays whichever host it already was. `--join` and `--prefix` are
+refused together, since a joined vault already has its own database.
+
+It then writes `~/.config/mw/config.toml` under the same never-overwrite rule `mw
+init` writes it under, and ends with one `mw sync`, printed or its failure. A MOVE
+of the Mayor's home needs more than this command does: the designated-migrator note
+in the vault's `CLAUDE.md`, this host's units (`scripts/install-units.sh`), and the
+old host's timers turned off first, so two hosts never dispatch as one name — `mw
+init --join` prints all three as still owed rather than doing them. See
+`features/init.feature`.
+
 ## Running a host on a timer
 
 A host that only works stories needs no session of its own to keep it going: a
