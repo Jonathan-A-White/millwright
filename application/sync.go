@@ -27,6 +27,11 @@ func LastSyncKey(host string) string { return "host." + host + ".last_sync" }
 // two hosts in two time zones compare as text.
 const LastSyncFormat = time.RFC3339
 
+// ConflictRetryDelay is how long Sync.Run waits before giving a merge conflict
+// (bd exit 2) its one retry, so that a conflict that is about to clear on its
+// own has had a moment to do so.
+const ConflictRetryDelay = 5 * time.Second
+
 // VaultFiles is the port mw keeps the vault's files in step with the other
 // host through. One adapter is the vault's git clone on disk.
 //
@@ -100,8 +105,10 @@ type TrackerSync interface {
 //
 // The codes are beads': 1 an error, 2 a merge conflict it will not resolve
 // itself, 3 a push race it has already retried, 4 a working set only a person
-// can clear. Nothing here is ever retried by mw — 2 and 4 because no retry can
-// help, 3 because the tracker has already spent its own retries.
+// can clear. A conflict that looks stuck sometimes clears within seconds, so
+// Sync.Run gives exit 2 exactly one retry before declaring the halt; nothing
+// else is ever retried by mw — 4 because no retry can help, 3 because the
+// tracker has already spent its own retries.
 type SyncHalt struct {
 	Code int
 	// Said is what the tracker printed, kept so that a person reading the
@@ -227,6 +234,11 @@ type SyncReport struct {
 	// Blocked names the uncommitted tracked files that kept the vault half from
 	// running at all. It is empty for every sync that got to touch the vault.
 	Blocked []string
+
+	// Retried is the notice that a merge conflict on the first beads cycle
+	// cleared on the one retry, naming what bd said on that first try. Empty
+	// when no retry happened.
+	Retried string
 }
 
 // Quiet reports whether the sync found nothing to do: nothing to mark, nothing
@@ -252,6 +264,9 @@ func (r SyncReport) String() string {
 		}
 	}
 	b.WriteString("; beads synced")
+	if r.Retried != "" {
+		fmt.Fprintf(&b, "; %s", r.Retried)
+	}
 	if !r.At.IsZero() {
 		fmt.Fprintf(&b, "; level at %s", r.At.UTC().Format(LastSyncFormat))
 	}
@@ -268,8 +283,9 @@ func (r SyncReport) String() string {
 // one cycle later. A cycle that halts pushed nothing, so the note is taken back
 // out and never says a host was level when it was not.
 //
-// Nothing here is retried and nothing is forced. A sync that cannot finish
-// leaves the vault as it found it and hands back the reason.
+// Nothing here is forced, and the only retry is the beads cycle's own: a merge
+// conflict is given one more try before it is declared a halt. A sync that
+// cannot finish leaves the vault as it found it and hands back the reason.
 //
 // One thing stops half of it rather than all of it. A vault holding work nobody
 // committed blocks the vault's half only: mw commits nobody's edits, so it
@@ -293,6 +309,10 @@ type Sync struct {
 	// Now is the clock, so that a test can pin the time a sync was level at.
 	// The zero value reads the real one.
 	Now func() time.Time
+
+	// Sleep waits out the pause before a conflict's one retry, or until ctx
+	// ends; a nil Sleep sleeps for real.
+	Sleep func(ctx context.Context, d time.Duration) error
 }
 
 // Run does one sync and reports what moved.
@@ -333,9 +353,11 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 	// is handed back afterwards — with a status of its own, because nothing here
 	// is broken.
 	if len(report.Blocked) > 0 {
-		if err := s.Tracker.Sync(ctx); err != nil {
+		retried, err := s.syncTracker(ctx)
+		if err != nil {
 			return report, fmt.Errorf("syncing the beads database on %s: %w", s.Host, err)
 		}
+		report.Retried = retried
 		return report, &VaultBlocked{Host: s.Host, Files: report.Blocked}
 	}
 
@@ -369,7 +391,8 @@ func (s Sync) syncBeadsRecordingLevel(ctx context.Context, report SyncReport) (S
 		_ = s.Tracker.SetNote(ctx, TicksKey(s.Host), held.Note())
 	}
 
-	if err := s.Tracker.Sync(ctx); err != nil {
+	retried, err := s.syncTracker(ctx)
+	if err != nil {
 		err = fmt.Errorf("syncing the beads database on %s: %w", s.Host, err)
 		if noteErr == nil {
 			if restoreErr := s.restoreNote(ctx, key, before); restoreErr != nil {
@@ -378,11 +401,58 @@ func (s Sync) syncBeadsRecordingLevel(ctx context.Context, report SyncReport) (S
 		}
 		return report, err
 	}
+	report.Retried = retried
 	if noteErr != nil {
 		return report, fmt.Errorf("recording when %s was last level: %w", s.Host, noteErr)
 	}
 	report.At = at
 	return report, nil
+}
+
+// syncTracker runs one tracker synchronisation cycle. A merge conflict (bd
+// exit 2) gets exactly one retry, after a short wait: the friction that
+// motivated this was a conflict that halted `mw sync` and then cleared on its
+// own, by hand, forty seconds later. Nothing else is retried — 4 because no
+// retry can help, 3 because the tracker has already spent its own.
+//
+// A retry that clears reports the notice to print, naming what bd said the
+// first time, and no error. A retry that does not clear returns the second
+// halt with the first attempt's words folded in, so that a person reading it
+// sees both.
+func (s Sync) syncTracker(ctx context.Context) (string, error) {
+	err := s.Tracker.Sync(ctx)
+	halt, isHalt := Halted(err)
+	if !isHalt || halt.Code != 2 {
+		return "", err
+	}
+	firstSaid := halt.Said
+
+	if waitErr := s.wait(ctx, ConflictRetryDelay); waitErr != nil {
+		return "", err
+	}
+	if retryErr := s.Tracker.Sync(ctx); retryErr == nil {
+		return fmt.Sprintf("conflict cleared on retry (bd said: %s)", firstSaid), nil
+	} else if retryHalt, ok := Halted(retryErr); ok {
+		retryHalt.Said = fmt.Sprintf("%s; retried, and bd said: %s", firstSaid, retryHalt.Said)
+		return "", retryHalt
+	} else {
+		return "", retryErr
+	}
+}
+
+// wait pauses for the given duration, or ends early when ctx does.
+func (s Sync) wait(ctx context.Context, d time.Duration) error {
+	if s.Sleep != nil {
+		return s.Sleep(ctx, d)
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // restoreNote puts a note back the way it was: the value it had, or no value at

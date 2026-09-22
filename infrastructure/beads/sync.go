@@ -28,10 +28,12 @@ var NoteMissing = []string{"not set", "not found"}
 // conflicts, recompute what is blocked, push with bd's own bounded retries.
 //
 // bd's exit code is surfaced as it was, in a *application.SyncHalt. Nothing is
-// retried here: bd 2 (a conflict it will not resolve) and bd 4 (a working set
-// only a person can clear) never come right on their own, and bd 3 is bd
-// reporting that it has already spent its retries. Nothing is resolved here
-// either: a conflict in the factory's one database is the Governor's to look at.
+// retried here: a conflict (bd 2) does sometimes come right within seconds,
+// but the one retry it gets for that is application.Sync's, run by calling
+// this method again — not this gateway's. bd 4 (a working set only a person
+// can clear) never comes right on its own, and bd 3 is bd reporting that it
+// has already spent its retries. Nothing is resolved here either: a conflict
+// in the factory's one database is the Governor's to look at.
 func (g *Gateway) Sync(ctx context.Context) error {
 	out, errs, err := g.run(ctx, "sync")
 	if err == nil {
