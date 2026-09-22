@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -141,6 +142,13 @@ func safeVaultName(name string) bool {
 	return name != "" && !strings.ContainsAny(name, `/\`) && !strings.Contains(name, "..")
 }
 
+// RunFileInfo is what StatRunFile reports about one file of a story's run,
+// without reading its contents.
+type RunFileInfo struct {
+	Size    int64
+	ModTime time.Time
+}
+
 // Vault is the port the factory reads seats from and writes a story's run
 // into. One adapter is the vault directory on disk.
 type Vault interface {
@@ -158,6 +166,14 @@ type Vault interface {
 	// satisfying errors.Is(err, fs.ErrNotExist), because a session that wrote
 	// nothing and a session that wrote a failure are not the same thing.
 	ReadRunFile(ctx context.Context, storyID, name string) (string, error)
+
+	// StatRunFile reports the size and last-modified time of one file of a
+	// story's run, without reading it — what a close-out has left to say about
+	// a result that is there but empty, when the content itself says nothing
+	// (mw-gq6.89). A file that was never written comes back as an error
+	// satisfying errors.Is(err, fs.ErrNotExist), the same rule ReadRunFile
+	// follows.
+	StatRunFile(ctx context.Context, storyID, name string) (RunFileInfo, error)
 
 	// RunFile is where one file of a story's run belongs, whether or not
 	// anything has been written to it.

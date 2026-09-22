@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
@@ -157,6 +158,27 @@ func TestReadRunFileTellsAResultFromNoResultAtAll(t *testing.T) {
 	_, err = v.ReadRunFile(context.Background(), "mw-gq6.8", application.ResultFileName)
 	if !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("expected a session that wrote nothing to be told from one that wrote a failure, got %v", err)
+	}
+}
+
+func TestStatRunFileReportsSizeAndModTimeWithoutReadingIt(t *testing.T) {
+	v := vault.New(aVault(t))
+
+	before := time.Now().Add(-time.Minute)
+	info, err := v.StatRunFile(context.Background(), "mw-old.1", application.ResultFileName)
+	if err != nil {
+		t.Fatalf("statting the result: %v", err)
+	}
+	if info.Size != 2 { // "{}"
+		t.Errorf("expected the size of the file written, got %d", info.Size)
+	}
+	if info.ModTime.Before(before) {
+		t.Errorf("expected a mod time close to now, got %s", info.ModTime)
+	}
+
+	_, err = v.StatRunFile(context.Background(), "mw-gq6.8", application.ResultFileName)
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("expected a file that was never written to be told from one that was, got %v", err)
 	}
 }
 

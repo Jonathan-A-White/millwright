@@ -115,6 +115,8 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the session of "([^"]*)" reported this result:$`, c.theSessionReportedThis)
 	ctx.Given(`^the session of "([^"]*)" reported a plain success$`, c.theSessionSucceeded)
 	ctx.Given(`^the session of "([^"]*)" left no result at all$`, c.theSessionLeftNothing)
+	ctx.Given(`^the session of "([^"]*)" left an empty result$`, c.theSessionLeftAnEmptyResult)
+	ctx.Given(`^the pane of "([^"]*)" last printed "([^"]*)"$`, c.thePaneLastPrinted)
 	ctx.Given(`^the run of "([^"]*)" left its boot file beside the result$`, c.theRunLeftItsBootFile)
 	ctx.Given(`^the rig's tests fail, saying "([^"]*)"$`, c.theRigsTestsFail)
 	ctx.Given(`^the rig's tests pass$`, c.theRigsTestsPass)
@@ -521,6 +523,27 @@ func (c *nextContext) theSessionSucceeded(id string) error {
 
 func (c *nextContext) theSessionLeftNothing(id string) error {
 	return os.RemoveAll(filepath.Join(c.vault, vault.RunsDir, id))
+}
+
+// theSessionLeftAnEmptyResult is a result file that is there, and empty — the
+// shape a completed session's own real result took on mw-tgdm.5 (mw-gq6.89),
+// as opposed to theSessionLeftNothing, where the file was never written at all.
+func (c *nextContext) theSessionLeftAnEmptyResult(id string) error {
+	return c.putResult(id, "")
+}
+
+// thePaneLastPrinted is the tail of a session's pane, read back when its
+// result comes back empty (mw-gq6.89). It starts the session in the fake
+// runner if nothing has yet, so a scenario need not set one up separately.
+func (c *nextContext) thePaneLastPrinted(id, text string) error {
+	name := application.SessionName(id)
+	if _, ok := c.runner.Spec(name); !ok {
+		if err := c.runner.Start(context.Background(), application.SessionSpec{Name: name, Command: []string{"claude"}}); err != nil {
+			return err
+		}
+	}
+	c.runner.Write(name, text+"\n")
+	return nil
 }
 
 // theRunLeftItsBootFile is the file mw wrote to prime the session, sitting in

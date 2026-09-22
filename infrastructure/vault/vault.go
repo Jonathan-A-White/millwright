@@ -174,6 +174,21 @@ func (v *Vault) ReadRunFile(_ context.Context, storyID, name string) (string, er
 	return string(written), nil
 }
 
+// StatRunFile implements application.Vault.
+func (v *Vault) StatRunFile(_ context.Context, storyID, name string) (application.RunFileInfo, error) {
+	if err := safeName("story", storyID); err != nil {
+		return application.RunFileInfo{}, err
+	}
+	if err := safeName("run file", name); err != nil {
+		return application.RunFileInfo{}, err
+	}
+	info, err := os.Stat(v.RunFile(storyID, name))
+	if err != nil {
+		return application.RunFileInfo{}, err
+	}
+	return application.RunFileInfo{Size: info.Size(), ModTime: info.ModTime()}, nil
+}
+
 // LedgerPath is where a seat's ledger lives in the vault.
 func (v *Vault) LedgerPath(seat string) string {
 	return filepath.Join(v.dir, SeatsDir, seat, application.LedgerFileName)

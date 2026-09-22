@@ -198,6 +198,18 @@ Feature: Closing out a finished story and carrying on
       | not landed (no-result): |
     And no fresh session was started
 
+  Scenario: A session's result file is there but empty says what mw next looked at
+    Given the session of "mw-gq6.1" left an empty result
+    And the pane of "mw-gq6.1" last printed "still rebasing when it stopped"
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the story "mw-gq6.1" is held blocked
+    And the report says it stopped for "no-result"
+    And the story "mw-gq6.1" carries a comment quoting: runs/mw-gq6.1/result.json
+    And the story "mw-gq6.1" carries a comment quoting: byte(s), last modified
+    And the story "mw-gq6.1" carries a comment quoting: still rebasing when it stopped
+
   Scenario: A branch with no commits on it is not landed
     Given the story "mw-gq6.9" has been worked in its own worktree, committing nothing
     And the session of "mw-gq6.9" reported a plain success

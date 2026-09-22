@@ -66,6 +66,17 @@ func (f *fakeVault) ReadRunFile(_ context.Context, storyID, name string) (string
 	return written, nil
 }
 
+func (f *fakeVault) StatRunFile(_ context.Context, storyID, name string) (application.RunFileInfo, error) {
+	if f.err != nil {
+		return application.RunFileInfo{}, f.err
+	}
+	written, ok := f.written[storyID+"/"+name]
+	if !ok {
+		return application.RunFileInfo{}, fmt.Errorf("no %s of %s: %w", name, storyID, fs.ErrNotExist)
+	}
+	return application.RunFileInfo{Size: int64(len(written))}, nil
+}
+
 func (f *fakeVault) RunFile(storyID, name string) string {
 	return "/vault/runs/" + storyID + "/" + name
 }

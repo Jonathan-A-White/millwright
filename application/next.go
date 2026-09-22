@@ -431,13 +431,18 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	// What the session itself reported. A session that wrote nothing is not a
 	// session that succeeded quietly: it is one that died.
 	resultName := ResultFileNameForAttempt(c.attempt())
+	resultPath := n.Vault.RunFile(c.id, resultName)
 	printed, err := n.Vault.ReadRunFile(ctx, c.id, resultName)
 	if errors.Is(err, fs.ErrNotExist) {
 		return n.stop(ctx, c, report, ReasonNoResult, fmt.Sprintf("the session left no result at %s, so it never started or it died before it could write one",
-			n.Vault.RunFile(c.id, resultName)), "")
+			resultPath), "")
 	}
 	if err != nil {
 		return n.stop(ctx, c, report, ReasonNoResult, fmt.Sprintf("the session's result could not be read: %v", err), "")
+	}
+	if strings.TrimSpace(printed) == "" {
+		why, said := n.emptyResult(ctx, c, resultName, resultPath)
+		return n.stop(ctx, c, report, ReasonNoResult, why, said)
 	}
 	result, err := ReadSessionResult(printed)
 	if err != nil {
@@ -497,6 +502,50 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	// with the session it runs in leaves a story a later run can tell is landed.
 	n.afterLanding(ctx, c, report)
 	return n.finish(ctx, c, report, outcome, false)
+}
+
+// PaneTailLines is how many of a session's last printed lines are shown
+// beside an empty result: enough to see what it was doing when whatever wrote
+// there stopped, not the whole pane.
+const PaneTailLines = 40
+
+// emptyResult is the reason and detail for a session whose result file is
+// there but holds nothing — not ReasonNoResult's other case, a path that was
+// never written at all, but one that exists and is blank. That is what a
+// session's own finished result looks like once something else has replaced
+// the path underneath the redirect that was still writing to it (mw-gq6.89:
+// a completed session's real result never reached result.json because a git
+// operation elsewhere in the vault touched the same path while the session's
+// shell still held it open). So the bare word "empty" is not enough here: what
+// mw next looked at is — the path itself, its size and when it was last
+// touched, and the tail of what the session's pane last printed, when the
+// session is still there to ask.
+func (n Next) emptyResult(ctx context.Context, c *closeOut, resultName, resultPath string) (why, said string) {
+	why = fmt.Sprintf("the session's result at %s is empty", resultPath)
+
+	info, err := n.Vault.StatRunFile(ctx, c.id, resultName)
+	if err != nil {
+		said = fmt.Sprintf("%s could not be examined: %v", resultPath, err)
+	} else {
+		said = fmt.Sprintf("%s is %d byte(s), last modified %s", resultPath, info.Size, info.ModTime.UTC().Format(time.RFC3339))
+	}
+	if tail := n.paneTail(ctx, c); tail != "" {
+		said += "\n\nThe last lines of the session's pane:\n\n```\n" + tail + "\n```"
+	}
+	return why, said
+}
+
+// paneTail is the tail of what a story's session last printed, empty when
+// there is no runner to ask or no session left for it to answer about.
+func (n Next) paneTail(ctx context.Context, c *closeOut) string {
+	if n.Runner == nil {
+		return ""
+	}
+	out, err := n.Runner.Output(ctx, SessionName(c.id), PaneTailLines)
+	if err != nil {
+		return ""
+	}
+	return out
 }
 
 // asideSuffix is added to the name of the session a close-out ran in when a
