@@ -45,6 +45,9 @@ const (
 	HandoffAtEnv   = "MW_HANDOFF_AT"
 	RigMemoryEnv   = "MW_RIG_MEMORY_BYTES"
 
+	NudgeAfterMinutesEnv     = "MW_NUDGE_AFTER_MINUTES"
+	NudgeSyncStaleMinutesEnv = "MW_NUDGE_SYNC_STALE_MINUTES"
+
 	TickRecheckEnv = "MW_TICK_RECHECK_SECONDS"
 
 	DispatchSyncTriesEnv = "MW_DISPATCH_SYNC_TRIES"
@@ -97,6 +100,18 @@ const DefaultStaleHours = 2
 // hourly sync the factory runs, which is the smallest threshold that does not
 // call a host asleep for the lag alone.
 const DefaultHostSilentHours = 2
+
+// DefaultNudgeAfterMinutes is how long a story claimed on this host may run
+// with nothing landed, refused or blocked mailed to the Mayor about it before
+// the mail notifier's quiet alarm names it, when nothing says otherwise.
+const DefaultNudgeAfterMinutes = 60
+
+// DefaultNudgeSyncStaleMinutes is how long another host's last recorded sync,
+// as this host last heard it, may be behind before the mail notifier's quiet
+// alarm names it, when nothing says otherwise. It is deliberately far shorter
+// than DefaultHostSilentHours: the quiet alarm is meant to catch a sync gone
+// stale in minutes, at night, before a person would otherwise notice.
+const DefaultNudgeSyncStaleMinutes = 20
 
 // DefaultTickRecheckSeconds is how long `mw millhand tick` waits between its two
 // looks at a Millhand's pane before it closes the window of a finished one: the
@@ -259,6 +274,65 @@ func HostSilentHours() (int, error) {
 		return 0, fmt.Errorf("the host silence threshold is %d hours, so every other host would be called asleep the moment it synced: set it to 1 or more", hours)
 	}
 	return hours, nil
+}
+
+// NudgeAfterMinutes reports how long a story claimed on this host may run with
+// nothing mailed to the Mayor about it before the mail notifier's quiet alarm
+// names it: $MW_NUDGE_AFTER_MINUTES if it is set, otherwise the root-table
+// `nudge_after_minutes` key of ~/.config/mw/config.toml, and
+// DefaultNudgeAfterMinutes when neither says.
+func NudgeAfterMinutes() (int, error) {
+	said := strings.TrimSpace(os.Getenv(NudgeAfterMinutesEnv))
+	if said == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return 0, fmt.Errorf("no %s is set and there is no home directory to read %s in: %w", NudgeAfterMinutesEnv, File, err)
+		}
+		if said, err = valueIn(filepath.Join(home, File), "nudge_after_minutes"); err != nil {
+			return 0, err
+		}
+	}
+	if said == "" {
+		return DefaultNudgeAfterMinutes, nil
+	}
+
+	minutes, err := strconv.Atoi(said)
+	if err != nil {
+		return 0, fmt.Errorf("the quiet alarm's story limit is %q, which is not a whole number of minutes: set %s=<n>, or `nudge_after_minutes = <n>` in %s", said, NudgeAfterMinutesEnv, File)
+	}
+	if minutes < 1 {
+		return 0, fmt.Errorf("the quiet alarm's story limit is %d minutes, so a claimed story would be named the moment it was: set it to 1 or more", minutes)
+	}
+	return minutes, nil
+}
+
+// NudgeSyncStaleMinutes reports how long another host's last recorded sync may
+// be behind before the mail notifier's quiet alarm names it: $MW_NUDGE_SYNC_STALE_MINUTES
+// if it is set, otherwise the root-table `nudge_sync_stale_minutes` key of
+// ~/.config/mw/config.toml, and DefaultNudgeSyncStaleMinutes when neither says.
+func NudgeSyncStaleMinutes() (int, error) {
+	said := strings.TrimSpace(os.Getenv(NudgeSyncStaleMinutesEnv))
+	if said == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return 0, fmt.Errorf("no %s is set and there is no home directory to read %s in: %w", NudgeSyncStaleMinutesEnv, File, err)
+		}
+		if said, err = valueIn(filepath.Join(home, File), "nudge_sync_stale_minutes"); err != nil {
+			return 0, err
+		}
+	}
+	if said == "" {
+		return DefaultNudgeSyncStaleMinutes, nil
+	}
+
+	minutes, err := strconv.Atoi(said)
+	if err != nil {
+		return 0, fmt.Errorf("the quiet alarm's sync staleness limit is %q, which is not a whole number of minutes: set %s=<n>, or `nudge_sync_stale_minutes = <n>` in %s", said, NudgeSyncStaleMinutesEnv, File)
+	}
+	if minutes < 1 {
+		return 0, fmt.Errorf("the quiet alarm's sync staleness limit is %d minutes, so another host would be named the moment it synced: set it to 1 or more", minutes)
+	}
+	return minutes, nil
 }
 
 // TickRecheckSeconds reports how many seconds `mw millhand tick` waits between

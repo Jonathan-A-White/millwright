@@ -37,6 +37,8 @@ func writeConfig(t *testing.T, contents string) string {
 	t.Setenv("MW_DISPATCH_SYNC_TRIES", "")
 	t.Setenv("MW_DISPATCH_SYNC_WAIT", "")
 	t.Setenv("MW_MAX_ATTEMPTS", "")
+	t.Setenv("MW_NUDGE_AFTER_MINUTES", "")
+	t.Setenv("MW_NUDGE_SYNC_STALE_MINUTES", "")
 	return home
 }
 
@@ -230,6 +232,74 @@ func TestHostSilentHoursRefusesWhatWouldCallEveryHostAsleepOrIsNotANumber(t *tes
 	writeConfig(t, "host_silent_hours = \"a while\"\n")
 	if _, err := config.HostSilentHours(); err == nil {
 		t.Fatal("expected a host silence threshold that is not a number to be refused")
+	}
+}
+
+func TestNudgeAfterMinutesIsSixtyUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\nhost = \"vps\"\n")
+
+	minutes, err := config.NudgeAfterMinutes()
+	if err != nil {
+		t.Fatalf("reading how long a story may run before the quiet alarm names it: %v", err)
+	}
+	if minutes != config.DefaultNudgeAfterMinutes {
+		t.Fatalf("expected the default of %d minutes, got %d", config.DefaultNudgeAfterMinutes, minutes)
+	}
+
+	t.Setenv(config.NudgeAfterMinutesEnv, "90")
+	if minutes, err = config.NudgeAfterMinutes(); err != nil || minutes != 90 {
+		t.Fatalf("expected %s to win with 90, got %d: %v", config.NudgeAfterMinutesEnv, minutes, err)
+	}
+
+	writeConfig(t, "nudge_after_minutes = 45\n")
+	if minutes, err = config.NudgeAfterMinutes(); err != nil || minutes != 45 {
+		t.Fatalf("expected the config file's nudge_after_minutes to read back as 45, got %d: %v", minutes, err)
+	}
+}
+
+func TestNudgeAfterMinutesRefusesWhatWouldNameEveryStoryAtOnceOrIsNotANumber(t *testing.T) {
+	writeConfig(t, "nudge_after_minutes = 0\n")
+	if _, err := config.NudgeAfterMinutes(); err == nil {
+		t.Fatal("expected a story limit of 0 minutes to be refused")
+	}
+
+	writeConfig(t, "nudge_after_minutes = \"a while\"\n")
+	if _, err := config.NudgeAfterMinutes(); err == nil {
+		t.Fatal("expected a story limit that is not a number to be refused")
+	}
+}
+
+func TestNudgeSyncStaleMinutesIsTwentyUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\nhost = \"vps\"\n")
+
+	minutes, err := config.NudgeSyncStaleMinutes()
+	if err != nil {
+		t.Fatalf("reading how stale another host's sync may be before the quiet alarm names it: %v", err)
+	}
+	if minutes != config.DefaultNudgeSyncStaleMinutes {
+		t.Fatalf("expected the default of %d minutes, got %d", config.DefaultNudgeSyncStaleMinutes, minutes)
+	}
+
+	t.Setenv(config.NudgeSyncStaleMinutesEnv, "10")
+	if minutes, err = config.NudgeSyncStaleMinutes(); err != nil || minutes != 10 {
+		t.Fatalf("expected %s to win with 10, got %d: %v", config.NudgeSyncStaleMinutesEnv, minutes, err)
+	}
+
+	writeConfig(t, "nudge_sync_stale_minutes = 30\n")
+	if minutes, err = config.NudgeSyncStaleMinutes(); err != nil || minutes != 30 {
+		t.Fatalf("expected the config file's nudge_sync_stale_minutes to read back as 30, got %d: %v", minutes, err)
+	}
+}
+
+func TestNudgeSyncStaleMinutesRefusesWhatWouldNameEveryHostAtOnceOrIsNotANumber(t *testing.T) {
+	writeConfig(t, "nudge_sync_stale_minutes = 0\n")
+	if _, err := config.NudgeSyncStaleMinutes(); err == nil {
+		t.Fatal("expected a sync staleness limit of 0 minutes to be refused")
+	}
+
+	writeConfig(t, "nudge_sync_stale_minutes = \"a while\"\n")
+	if _, err := config.NudgeSyncStaleMinutes(); err == nil {
+		t.Fatal("expected a sync staleness limit that is not a number to be refused")
 	}
 }
 
