@@ -166,6 +166,108 @@ func TestTheSessionMayRunBd(t *testing.T) {
 	}
 }
 
+// TestTheSessionMayRunItsRigsOwnTests: a Builder session is refused a command
+// the [tests] table names for its own rig unless an allow rule already covers
+// it (mw-gq6.83). The whole line becomes a rule, and so does each side of a
+// `&&`, so a Builder may run either half alone.
+func TestTheSessionMayRunItsRigsOwnTests(t *testing.T) {
+	h := New(WithTests(map[string]string{"spell-forge": "npm ci --no-audit --no-fund && npm test"}))
+
+	spec, err := h.Session(launch(func(l *application.Launch) { l.Path.Rig = "spell-forge" }))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	got := settingsAllow(t, settingsFromLine(t, spec.Command[2]))
+
+	want := []string{
+		BeadsAllowRule,
+		"Bash(npm ci --no-audit --no-fund && npm test)",
+		"Bash(npm ci --no-audit --no-fund)",
+		"Bash(npm test)",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("expected exactly %v, got %v", want, got)
+	}
+	for _, rule := range want {
+		if !slices.Contains(got, rule) {
+			t.Errorf("expected permissions.allow to hold %q, got %v", rule, got)
+		}
+	}
+}
+
+// TestARigWithNoTestsLineGetsOnlyTheBeadsRule: a rig this host's [tests] table
+// does not name adds no rule at all — its tests, whatever they are, still go
+// to the classifier.
+func TestARigWithNoTestsLineGetsOnlyTheBeadsRule(t *testing.T) {
+	h := New(WithTests(map[string]string{"spell-forge": "npm test"}))
+
+	spec, err := h.Session(launch(func(l *application.Launch) { l.Path.Rig = "millwright" }))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	if got := settingsFromLine(t, spec.Command[2]); got != SessionSettings {
+		t.Errorf("expected the settings a rig with no tests line gets to be exactly SessionSettings, got %q", got)
+	}
+}
+
+// TestTheTestsRuleIsTakenVerbatim: the rule text is the config's command line
+// exactly, with no shell rewriting, and a command that could smuggle a second
+// one past an allow rule meant for the one it names is refused at launch.
+func TestTheTestsRuleIsTakenVerbatim(t *testing.T) {
+	command := `go test -tags "beads_integration,slow"  ./...`
+	h := New(WithTests(map[string]string{"spell-forge": command}))
+	spec, err := h.Session(launch(func(l *application.Launch) { l.Path.Rig = "spell-forge" }))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	got := settingsAllow(t, settingsFromLine(t, spec.Command[2]))
+	if !slices.Contains(got, "Bash("+command+")") {
+		t.Errorf("expected the rule to carry the command verbatim, got %v", got)
+	}
+
+	for name, bad := range map[string]string{
+		"a newline":   "npm ci\nrm -rf /",
+		"a semicolon": "npm ci; rm -rf /",
+	} {
+		h := New(WithTests(map[string]string{"spell-forge": bad}))
+		if _, err := h.Session(launch(func(l *application.Launch) { l.Path.Rig = "spell-forge" })); err == nil {
+			t.Errorf("expected a tests command holding %s to be refused at launch, got no error", name)
+		}
+	}
+}
+
+// settingsFromLine is the word after --settings on a session's shell line: the
+// line is one string, not an argv, and the JSON is always quoted in single
+// quotes because it is never a plain shell word.
+func settingsFromLine(t *testing.T, line string) string {
+	t.Helper()
+	const marker = "--settings '"
+	start := strings.Index(line, marker)
+	if start < 0 {
+		t.Fatalf("expected the line to carry %s, got %q", marker, line)
+	}
+	start += len(marker)
+	end := strings.Index(line[start:], "'")
+	if end < 0 {
+		t.Fatalf("expected the settings to end in a closing quote, got %q", line)
+	}
+	return line[start : start+end]
+}
+
+// settingsAllow is permissions.allow of a settings JSON document.
+func settingsAllow(t *testing.T, settings string) []string {
+	t.Helper()
+	var doc struct {
+		Permissions struct {
+			Allow []string `json:"allow"`
+		} `json:"permissions"`
+	}
+	if err := json.Unmarshal([]byte(settings), &doc); err != nil {
+		t.Fatalf("the settings are not JSON: %v", err)
+	}
+	return doc.Permissions.Allow
+}
+
 func TestSessionIsTheSeatOnThisHost(t *testing.T) {
 	spec, err := New().Session(launch(nil))
 	if err != nil {

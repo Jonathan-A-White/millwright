@@ -83,6 +83,37 @@ const BeadsAllowRule = `Bash(bd *)`
 // somebody would have to remember to take it away again.
 const SessionSettings = `{"attribution":{"commit":"","pr":"","sessionUrl":false},"permissions":{"allow":["` + BeadsAllowRule + `"]}}`
 
+// testsAllowRule turns a rig's own [tests] command line into the Bash allow
+// rules a session working that rig may run without being asked (mw-gq6.83):
+// the whole line, verbatim, and — for a command of the form `<a> && <b>` —
+// each side again on its own, so a Builder refused the whole may still run
+// half of it alone. A rig this host names no command for gets none.
+//
+// The text is never rewritten by a shell of ours: it is split on the literal
+// `" && "` a config author wrote, not reparsed. A command holding a newline or
+// a `;` could run more than the one command an allow rule is meant to bound,
+// so it is refused here rather than quietly turned into a rule that allows
+// more than it names.
+func testsAllowRule(command string) ([]string, error) {
+	if command == "" {
+		return nil, nil
+	}
+	if strings.ContainsAny(command, "\n;") {
+		return nil, fmt.Errorf("the tests command %q cannot become a session allow rule: "+
+			"a newline or a `;` could run more than the one command it names", command)
+	}
+	rules := []string{bashAllowRule(command)}
+	if parts := strings.Split(command, " && "); len(parts) > 1 {
+		for _, part := range parts {
+			rules = append(rules, bashAllowRule(part))
+		}
+	}
+	return rules, nil
+}
+
+// bashAllowRule is the allow rule for one exact command line.
+func bashAllowRule(command string) string { return "Bash(" + command + ")" }
+
 // DenyHookCommand is what Claude Code runs for a PermissionRequest hook of an
 // unattended seat, and what it prints is the answer to the prompt: a deny with
 // the reason Claude is told. The hooks reference gives the shape — a
@@ -107,6 +138,42 @@ const DenyHookCommand = `printf '%s' '{"hookSpecificOutput":{"hookEventName":"Pe
 // event", so no tool is left to ask about. Nothing the classifier or an allow
 // rule already decides reaches the hook: it is only ever run for a prompt.
 var UnattendedSeatSettings = withDenyHook(SessionSettings)
+
+// sessionSettings is the --settings a story's session is given: SessionSettings,
+// plus a rule for tests's own allow rules when tests is not empty (see
+// testsAllowRule). A rig with no [tests] line — tests is "" — gets exactly
+// SessionSettings, byte for byte, so a host that names no tests for any rig
+// sees no change from before this rule existed.
+//
+// The document is read and written back rather than spliced, for the same
+// reason withDenyHook is: so that the rule's own quotes and parentheses are
+// escaped by the JSON encoder and not by hand.
+func sessionSettings(tests string) (string, error) {
+	if tests == "" {
+		return SessionSettings, nil
+	}
+	rules, err := testsAllowRule(tests)
+	if err != nil {
+		return "", err
+	}
+
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(SessionSettings), &doc); err != nil {
+		panic(fmt.Sprintf("SessionSettings is not JSON: %v", err))
+	}
+	permissions := doc["permissions"].(map[string]any)
+	allow := permissions["allow"].([]any)
+	for _, rule := range rules {
+		allow = append(allow, rule)
+	}
+	permissions["allow"] = allow
+
+	out, err := json.Marshal(doc)
+	if err != nil {
+		return "", fmt.Errorf("the session settings for %q do not encode: %w", tests, err)
+	}
+	return string(out), nil
+}
 
 // withDenyHook is settings with the PermissionRequest hook that runs
 // DenyHookCommand added. The document is read and written back rather than
@@ -147,6 +214,7 @@ type Harness struct {
 	program        string
 	shell          string
 	permissionMode string
+	tests          map[string]string
 }
 
 // Harness satisfies the port.
@@ -170,6 +238,15 @@ func WithShell(path string) Option {
 // See DefaultPermissionMode for why the default is what it is.
 func WithPermissionMode(mode string) Option {
 	return func(h *Harness) { h.permissionMode = mode }
+}
+
+// WithTests names each rig's own tests command, by rig name, as the [tests]
+// table of the config file has it (config.Tests). A session working a rig
+// this names is given a Bash allow rule for that rig's own command, on top of
+// BeadsAllowRule, so a Builder may run its rig's own tests without being
+// asked (mw-gq6.83). A rig this does not name gets no such rule.
+func WithTests(commands map[string]string) Option {
+	return func(h *Harness) { h.tests = commands }
 }
 
 // New returns a Harness that runs Claude Code as this host has it, unless an
@@ -201,6 +278,10 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 	if !knownPermissionMode(h.permissionMode) {
 		return application.SessionSpec{}, fmt.Errorf("launching %s: %q is not a permission mode Claude Code takes", l.StoryID, h.permissionMode)
 	}
+	settings, err := sessionSettings(h.tests[l.Path.Rig])
+	if err != nil {
+		return application.SessionSpec{}, fmt.Errorf("launching %s: %w", l.StoryID, err)
+	}
 
 	argv := []string{
 		h.program,
@@ -213,9 +294,10 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 		// rather than left waiting forever in a pane nobody is watching.
 		"--permission-prompts", "none",
 		"--append-system-prompt-file", l.BootFile,
-		// The session signs nothing it commits, and may run bd without being
-		// asked. See SessionSettings.
-		"--settings", SessionSettings,
+		// The session signs nothing it commits, may run bd without being asked,
+		// and may run its own rig's tests when h.tests names one. See
+		// SessionSettings and sessionSettings.
+		"--settings", settings,
 		"--name", l.StoryID,
 		l.Kickoff,
 	}
