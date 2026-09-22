@@ -9,6 +9,12 @@ Feature: mw millhand tick
        window, adds one line to the Millhand's reaper log, says so in its line and
        carries on as if no Millhand were up, so the same tick may wake a fresh
        one. A window whose input line holds text is never closed.
+       A Millhand whose wake never got going is restarted: its pane is idle at
+       an empty input line on the same two checks and it has written no
+       handoff since its window opened. The tick closes the window, says
+       "restarted: up but idle since <opened>, no handoff" and wakes a fresh
+       Millhand, telling it so. A working pane, text on the input line or a
+       pane that cannot be read is still "already up".
     2. It runs one mw sync, so that this host sees the other one's mail and claims.
     3. It looks for mail addressed to this host's Millhand, millhand@<host> or
        plain millhand, and for a story mw sweep newly finds stuck on this host.
@@ -42,6 +48,7 @@ Feature: mw millhand tick
 
   Scenario: A Millhand already up starts nothing, and nothing else is looked at
     Given the window "millhand-2026-09-19-05" was opened at "2026-09-19T08:00:00Z"
+    And the pane of the window "millhand-2026-09-19-05" is working
     And unread tick mail for "millhand@laptop" with the subject "Please look at the queue"
     When mw millhand tick is run
     Then mw millhand tick succeeds
@@ -98,12 +105,84 @@ Feature: mw millhand tick
     And the window "millhand-2026-09-19-04" was not closed
     And the reaper log holds no line
 
-  Scenario: A window with no handoff newer than its creation is already up
-    Given the window "millhand-2026-09-19-05" was opened at "2026-09-19T08:00:00Z"
+  Scenario: An idle Millhand with no handoff since its window opened is restarted
+    Given the window "millhand-test" was opened at "2026-09-19T08:00:00Z"
     When mw millhand tick is run
     Then mw millhand tick succeeds
-    And mw millhand tick prints one dated line saying "already up (millhand-2026-09-19-05)"
-    And the window "millhand-2026-09-19-05" was not closed
+    And mw millhand tick prints one dated line saying "woke the Millhand"
+    And mw millhand tick prints one dated line saying "restarted: up but idle since 2026-09-19T08:00:00Z, no handoff"
+    And the window "millhand-test" was closed
+    And the tick synced once
+    And exactly one window was opened
+    And the kickoff prompt of the window holds:
+      | a routine wake                                |
+      | idle at its prompt since 2026-09-19T08:00:00Z |
+      | no handoff                                    |
+    And the reaper log holds one line saying "closed by the tick: up but idle since 2026-09-19T08:00:00Z, no handoff"
+    And the tick log holds that line
+    And the tick log counts as a good run
+
+  Scenario: A restarted Millhand is told of the mail that is waiting too
+    Given the window "millhand-test" was opened at "2026-09-19T08:00:00Z"
+    And unread tick mail for "millhand@laptop" with the subject "Please look at the queue"
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "restarted: up but idle since 2026-09-19T08:00:00Z, no handoff"
+    And the window "millhand-test" was closed
+    And exactly one window was opened
+    And the kickoff prompt of the window holds:
+      | Please look at the queue |
+      | no handoff               |
+
+  Scenario: A working pane with no handoff since its window opened is already up
+    Given the window "millhand-test" was opened at "2026-09-19T08:00:00Z"
+    And the pane of the window "millhand-test" is working
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "already up (millhand-test)"
+    And the window "millhand-test" was not closed
+    And the tick did not sync
+    And no window was opened
+    And the reaper log holds no line
+
+  Scenario: Text on the input line with no handoff since the window opened is already up
+    Given the window "millhand-test" was opened at "2026-09-19T08:00:00Z"
+    And the pane of the window "millhand-test" has text on its input line
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "already up (millhand-test)"
+    And the window "millhand-test" was not closed
+    And no window was opened
+    And the reaper log holds no line
+
+  Scenario: A pane that cannot be read with no handoff since the window opened is already up
+    Given the window "millhand-test" was opened at "2026-09-19T08:00:00Z"
+    And the terminal cannot say what the pane of the window "millhand-test" is doing
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "already up (millhand-test)"
+    And the window "millhand-test" was not closed
+    And no window was opened
+    And the reaper log holds no line
+
+  Scenario: An idle pane with no handoff that turns busy between the checks is already up
+    Given the window "millhand-test" was opened at "2026-09-19T08:00:00Z"
+    And the pane of the window "millhand-test" turns to text on its input line while the tick waits between its checks
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "already up (millhand-test)"
+    And the window "millhand-test" was not closed
+    And no window was opened
+    And the reaper log holds no line
+
+  Scenario: A dry run says it would restart an idle Millhand with no handoff, and closes nothing
+    Given the window "millhand-test" was opened at "2026-09-19T08:00:00Z"
+    When mw millhand tick is run as a dry run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "dry run: would wake the Millhand"
+    And mw millhand tick prints one dated line saying "would be restarted: up but idle since 2026-09-19T08:00:00Z, no handoff"
+    And the window "millhand-test" was not closed
+    And no window was opened
     And the reaper log holds no line
 
   Scenario: A pane that is idle on the first check but busy on the second is already up
