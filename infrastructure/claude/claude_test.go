@@ -362,6 +362,23 @@ func TestSessionIsTheSeatOnThisHost(t *testing.T) {
 	}
 }
 
+// TestAStorySessionDisablesBackgroundTasks pins mw-gq6.90: a story's session
+// is headless and ends the moment its turn does, so a Builder that backgrounds
+// a command with it (the test suite, most often) and then ends its turn saying
+// it will check back loses whatever it never committed — this happened three
+// times (mw-gq6.39, twice on mw-gq6.86) despite the rig memory saying not to in
+// words. CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 is the harness's own way to
+// take that option away rather than trust it is never used.
+func TestAStorySessionDisablesBackgroundTasks(t *testing.T) {
+	spec, err := New().Session(launch(nil))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	if got := spec.Env["CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"]; got != "1" {
+		t.Errorf("expected a story session to disable background tasks, got %q", got)
+	}
+}
+
 func TestSessionTakesThePermissionModeItIsGiven(t *testing.T) {
 	spec, err := New(WithPermissionMode(PermissionDontAsk)).Session(launch(nil))
 	if err != nil {
@@ -564,6 +581,20 @@ func TestASeatSessionIsInteractiveAndPrimedFromTheCharterFile(t *testing.T) {
 		if strings.Contains(line, unwanted) {
 			t.Errorf("expected an interactive session to carry no %s, got %q", unwanted, line)
 		}
+	}
+}
+
+// TestASeatSessionDoesNotDisableBackgroundTasks: a seat (the Mayor, a
+// Millhand) is not a Builder — its mail watcher and its waiters run in the
+// background by design, and a seat's session outlives any one turn, so
+// mw-gq6.90's fix is scoped to a story's own session and must not reach here.
+func TestASeatSessionDoesNotDisableBackgroundTasks(t *testing.T) {
+	spec, err := New().SeatSession(seatLaunch(nil))
+	if err != nil {
+		t.Fatalf("assembling the seat's session: %v", err)
+	}
+	if _, ok := spec.Env["CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"]; ok {
+		t.Errorf("expected a seat's session not to disable background tasks, got %q", spec.Env)
 	}
 }
 
