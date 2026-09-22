@@ -122,9 +122,13 @@ func TestInitJoinBringsThisHostOntoAnExistingVaultWithoutEverMigratingIt(t *test
 	mustRun(t, origin, "git", "remote", "add", "origin", bare)
 	mustRun(t, origin, "git", "push", "-q", "-u", "origin", "main")
 	bestEffortRun(t, origin, beads.Program, "sync", "--yes")
-	mustRun(t, origin, "git", "add", "-A")
-	mustRun(t, origin, "git", "-c", "user.name=origin", "-c", "user.email=origin@test.example",
-		"commit", "-q", "-m", "bd sync: adopt the dolt remote")
+	commitIfDirty(t, origin, "bd sync: adopt the dolt remote")
+	if tracked := mustRun(t, origin, "git", "ls-files", ".beads/config.yaml"); !strings.Contains(tracked, ".beads/config.yaml") {
+		t.Error("the beads config is not tracked in origin after adopting the dolt remote, so the joiner has nothing to fetch it from")
+	}
+	if left := strings.TrimSpace(mustRun(t, origin, "git", "status", "--porcelain")); left != "" {
+		t.Errorf("origin's tree is not clean after adopting the dolt remote:\n%s", left)
+	}
 	mustRun(t, origin, beads.Program, "dolt", "push")
 	mustRun(t, origin, beads.Program, "sync")
 	mustRun(t, origin, "git", "push", "-q", "origin", "main")
@@ -195,4 +199,18 @@ func bestEffortRun(t *testing.T, dir, program string, args ...string) string {
 	cmd.Dir = dir
 	out, _ := cmd.CombinedOutput()
 	return string(out)
+}
+
+// commitIfDirty commits everything in dir under the given identity, but only
+// if the working tree is not already clean: bd sync --yes may have committed
+// this file itself already, invented git identity or not, depending on the
+// host — nothing here should depend on which.
+func commitIfDirty(t *testing.T, dir, msg string) {
+	t.Helper()
+	if strings.TrimSpace(mustRun(t, dir, "git", "status", "--porcelain")) == "" {
+		return
+	}
+	mustRun(t, dir, "git", "add", "-A")
+	mustRun(t, dir, "git", "-c", "user.name=origin", "-c", "user.email=origin@test.example",
+		"commit", "-q", "-m", msg)
 }
