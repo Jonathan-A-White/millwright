@@ -16,12 +16,14 @@ Feature: mw millhand tick
        Millhand, telling it so. A working pane, text on the input line or a
        pane that cannot be read is still "already up".
     2. It runs one mw sync, so that this host sees the other one's mail and claims.
-    3. It looks for mail addressed to this host's Millhand, millhand@<host> or
-       plain millhand, and for a story mw sweep newly finds stuck on this host.
+    3. It looks for mail in every mailbox this host's Millhand reads —
+       millhand@<host>, plain millhand, and the host's own box <host>, which the
+       Millhand reads once it is up — and for a story mw sweep newly finds stuck
+       on this host.
     4. Nothing of either: it says "quiet" and starts nothing.
     5. Either, or both: it starts ONE routine wake of the Millhand, whose reason
-       names the mail subjects and the stuck story titles, at most 5 of each and
-       then a count.
+       names each mailbox's unread mail, box by box, and the stuck story titles,
+       at most 5 of each and then a count.
 
   On a host with a [watch] table the tick also applies mw watch's rule to the
   host it watches, before it syncs: unwell, stale and down are each a reason for
@@ -222,7 +224,7 @@ Feature: mw millhand tick
     And the tick log holds that line
     And the tick log counts as a good run
 
-  Scenario: Mail wakes the Millhand once, and the reason names the subject
+  Scenario: Mail wakes the Millhand once, and the reason names the subject and its box
     Given unread tick mail for "millhand@laptop" with the subject "Please look at the queue"
     When mw millhand tick is run
     Then mw millhand tick succeeds
@@ -232,9 +234,9 @@ Feature: mw millhand tick
       | --model sonnet |
       | --effort high  |
     And the kickoff prompt of the window holds:
-      | a routine wake           |
-      | 1 unread message         |
-      | Please look at the queue |
+      | a routine wake              |
+      | 1 unread in millhand@laptop |
+      | Please look at the queue    |
     And the tick log holds that line
     And no tick mail was marked read
 
@@ -243,7 +245,36 @@ Feature: mw millhand tick
     When mw millhand tick is run
     Then exactly one window was opened
     And the kickoff prompt of the window holds:
-      | For whoever is on |
+      | 1 unread in millhand: |
+      | For whoever is on     |
+
+  Scenario: Mail in the host's own box wakes the Millhand, and the reason names that box
+    Given unread tick mail for "laptop" with the subject "Please look at the queue"
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "1 unread in laptop"
+    And exactly one window was opened
+    And the kickoff prompt of the window holds:
+      | a routine wake           |
+      | 1 unread in laptop:      |
+      | Please look at the queue |
+    And the tick log holds that line
+    And no tick mail was marked read
+
+  Scenario: The three boxes the Millhand reads are each counted, not merged into one
+    Given unread tick mail for "millhand@laptop" with the subject "For the host-qualified box"
+    And unread tick mail for "millhand" with the subject "For the plain box"
+    And unread tick mail for "laptop" with the subject "For the host's own box"
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And exactly one window was opened
+    And the kickoff prompt of the window holds:
+      | 1 unread in millhand@laptop |
+      | For the host-qualified box  |
+      | 1 unread in millhand:       |
+      | For the plain box           |
+      | 1 unread in laptop:         |
+      | For the host's own box      |
 
   Scenario: A stuck story wakes the Millhand once, and the reason names it
     Given the story "mw-tk.1" titled "Teach the cat to sit" is claimed here with no session behind it
@@ -281,13 +312,13 @@ Feature: mw millhand tick
     When mw millhand tick is run
     Then exactly one window was opened
     And the kickoff prompt of the window holds:
-      | 7 unread messages |
-      | Mail A            |
-      | Mail E            |
-      | and 2 more        |
-      | 7 stuck stories   |
-      | Story A           |
-      | Story E           |
+      | 7 unread in millhand@laptop |
+      | Mail A                      |
+      | Mail E                      |
+      | and 2 more                  |
+      | 7 stuck stories             |
+      | Story A                     |
+      | Story E                     |
     And the kickoff prompt of the window holds none of:
       | Mail F  |
       | Mail G  |
@@ -490,9 +521,9 @@ Feature: mw millhand tick
     Then mw millhand tick succeeds
     And exactly one window was opened
     And the kickoff prompt of the window holds:
-      | 1 unread message         |
-      | Please look at the queue |
-      | unwell disk_pct          |
+      | 1 unread in millhand@laptop |
+      | Please look at the queue    |
+      | unwell disk_pct             |
 
   Scenario: A stuck story and an unwell host still wake the Millhand once
     Given the tick watches the host "vps" over ssh "vps-ssh", with the outside places "https://one.example" and "https://two.example"
