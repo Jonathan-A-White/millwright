@@ -383,7 +383,7 @@ func (c *seatUpContext) theLogHoldsLines(count int) error {
 func (c *seatUpContext) noTickMailWasMarkedRead() error {
 	world := c.tickWorld()
 	unread := 0
-	for _, mailbox := range []string{"millhand@laptop", "millhand", "mayor", "millhand@vps", "builder@laptop"} {
+	for _, mailbox := range []string{"millhand@laptop", "millhand", "laptop", "mayor", "millhand@vps", "builder@laptop"} {
 		messages, err := world.mailbox.Inbox(context.Background(), mailbox)
 		if err != nil {
 			return err
