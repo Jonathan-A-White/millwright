@@ -85,7 +85,41 @@ func SeatWork(seat, rig string) []string {
 // the session was primed with, and the run's own host is the only place it is
 // wanted. A story id that would reach outside the vault gives no path.
 func RunRecord(storyID string) string {
-	return runFilePath(storyID, ResultFileName)
+	return RunRecordForAttempt(storyID, 1)
+}
+
+// RunRecordForAttempt is RunRecord for one of a story's attempts. A story's
+// first attempt keeps the plain name RunRecord always gave — the one an
+// earlier close-out may already have committed — and every attempt after it
+// gets a name of its own, numbered by attempt, so that a re-dispatched story
+// never writes over a path a run before it may have already committed.
+func RunRecordForAttempt(storyID string, attempt int) string {
+	return runFilePath(storyID, ResultFileNameForAttempt(attempt))
+}
+
+// BootFileNameForAttempt and ResultFileNameForAttempt are the names a story's
+// boot file and run record are written under for one of its attempts: the
+// plain BootFileName and ResultFileName for the first attempt, and a name
+// numbered by attempt for every one after it.
+func BootFileNameForAttempt(attempt int) string {
+	return attemptRunFileName(BootFileName, attempt)
+}
+
+func ResultFileNameForAttempt(attempt int) string {
+	return attemptRunFileName(ResultFileName, attempt)
+}
+
+// attemptRunFileName is the run file name base is written under for attempt.
+// The first attempt of a story is not numbered at all, so that nothing about
+// the common case — a story worked once — changes, and so that a run record or
+// boot file an earlier version of mw already committed keeps the name mw next
+// still knows to read.
+func attemptRunFileName(base string, attempt int) string {
+	if attempt <= 1 {
+		return base
+	}
+	ext := path.Ext(base)
+	return fmt.Sprintf("%s-%d%s", strings.TrimSuffix(base, ext), attempt, ext)
 }
 
 // LandingErrorRecord is the file a failed landing's whole error is kept in, by
@@ -222,7 +256,17 @@ func (b SeatBoot) boot(ctx context.Context, detail StoryDetail, dir string, kick
 		return SessionSpec{}, fmt.Errorf("booting %s: %w", id, err)
 	}
 
-	bootFile, err := b.Vault.PutRunFile(ctx, id, BootFileName, BootPrompt(seat, detail))
+	// The attempt this session is: the first for a story dispatched fresh, one
+	// more for a story sent back to rebase or dispatched again after an earlier
+	// attempt ended without closing the story out. It is what keeps this
+	// session's boot file and result from ever landing on a path an earlier
+	// attempt may already have committed to the vault (mw-gq6.87) — a
+	// re-dispatch that reused the first attempt's names once truncated a
+	// committed result out from under a sync in progress, and left the vault
+	// refusing every dispatch and sync until somebody committed the empty file
+	// by hand.
+	attempt := detail.Attempts + 1
+	bootFile, err := b.Vault.PutRunFile(ctx, id, BootFileNameForAttempt(attempt), BootPrompt(seat, detail))
 	if err != nil {
 		return SessionSpec{}, fmt.Errorf("booting %s: %w", id, err)
 	}
@@ -237,7 +281,7 @@ func (b SeatBoot) boot(ctx context.Context, detail StoryDetail, dir string, kick
 		// boot file has already made: the session's own shell only redirects
 		// into it.
 		BootFile:   bootFile,
-		ResultFile: b.Vault.RunFile(id, ResultFileName),
+		ResultFile: b.Vault.RunFile(id, ResultFileNameForAttempt(attempt)),
 		Kickoff:    kickoff(b.Vault.Dir()),
 		After:      b.after(id),
 	})

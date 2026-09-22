@@ -291,6 +291,19 @@ type closeOut struct {
 	landingError bool
 }
 
+// attempt is which attempt of the story this close-out is closing: what the
+// tracker recorded when the session it is closing was started, or the first
+// when nothing was recorded at all. It is what a close-out reads and commits
+// the run record under (mw-gq6.87): the same number a re-dispatch's own boot
+// computed its file names from, so that a close-out always finds the result
+// the attempt it is closing actually wrote.
+func (c *closeOut) attempt() int {
+	if c.detail.Attempts < 1 {
+		return 1
+	}
+	return c.detail.Attempts
+}
+
 // Run closes out one story and reports what it did. The error it returns is the
 // reason the story did not land; the report says what was recorded anyway,
 // because a close-out that lands nothing still writes down what happened.
@@ -417,10 +430,11 @@ func (n Next) ledgeredAsLanded(ctx context.Context, c *closeOut, report *NextRep
 func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextReport, error) {
 	// What the session itself reported. A session that wrote nothing is not a
 	// session that succeeded quietly: it is one that died.
-	printed, err := n.Vault.ReadRunFile(ctx, c.id, ResultFileName)
+	resultName := ResultFileNameForAttempt(c.attempt())
+	printed, err := n.Vault.ReadRunFile(ctx, c.id, resultName)
 	if errors.Is(err, fs.ErrNotExist) {
 		return n.stop(ctx, c, report, ReasonNoResult, fmt.Sprintf("the session left no result at %s, so it never started or it died before it could write one",
-			n.Vault.RunFile(c.id, ResultFileName)), "")
+			n.Vault.RunFile(c.id, resultName)), "")
 	}
 	if err != nil {
 		return n.stop(ctx, c, report, ReasonNoResult, fmt.Sprintf("the session's result could not be read: %v", err), "")
@@ -1128,8 +1142,8 @@ func (n Next) commit(ctx context.Context, c *closeOut, report *NextReport) {
 	if len(paths) == 0 {
 		return
 	}
-	if record := RunRecord(c.id); record != "" {
-		if _, err := n.Vault.ReadRunFile(ctx, c.id, ResultFileName); errors.Is(err, fs.ErrNotExist) {
+	if record := RunRecordForAttempt(c.id, c.attempt()); record != "" {
+		if _, err := n.Vault.ReadRunFile(ctx, c.id, ResultFileNameForAttempt(c.attempt())); errors.Is(err, fs.ErrNotExist) {
 			report.Notes = append(report.Notes, fmt.Sprintf("the run record %s is missing from the vault, so it was not committed", record))
 		} else {
 			paths = append(paths, record)
