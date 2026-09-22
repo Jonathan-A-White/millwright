@@ -72,7 +72,10 @@ func newFactory(t *testing.T) *factory {
 
 	f.write("bin/bd", "#!/bin/sh\necho \"$*\" >> \"$MW_TEST_DIR/bd.log\"\n"+
 		"[ \"$1 $2\" = \"mail inbox\" ] && cat \"$MW_TEST_DIR/inbox\"\nexit 0\n", 0o755)
-	f.write("bin/mw", "#!/bin/sh\necho \"$*\" >> \"$MW_TEST_DIR/mw.log\"\nexit 0\n", 0o755)
+	f.write("bin/mw", "#!/bin/sh\ncase \"$1\" in\n"+
+		"sync) echo \"$*\" >> \"$MW_TEST_DIR/mw.log\" ;;\n"+
+		"nudge) echo \"$*\" >> \"$MW_TEST_DIR/nudge.log\"; [ -f \"$MW_TEST_DIR/nudge-output\" ] && cat \"$MW_TEST_DIR/nudge-output\" ;;\n"+
+		"esac\nexit 0\n", 0o755)
 	f.write("vault/.mayor-acting", "", 0o644)
 	f.write("loadavg", "0.10 0.10 0.10 1/100 1\n", 0o644)
 	f.inbox()
@@ -112,6 +115,16 @@ func (f *factory) inbox(ids ...string) {
 }
 
 func (f *factory) load(l string) { f.write("loadavg", l+" 0.10 0.10 1/100 1\n", 0o644) }
+
+// nudges sets what `mw nudge` prints, one clause a line, key and text tab
+// separated, as the real one would: mw nudge's own output shape.
+func (f *factory) nudges(rows ...[2]string) {
+	var b strings.Builder
+	for _, row := range rows {
+		b.WriteString(row[0] + "\t" + row[1] + "\n")
+	}
+	f.write("nudge-output", b.String(), 0o644)
+}
 
 // announced is the ids the script has recorded as told.
 func (f *factory) announced() string { return f.read("state/announced") }
@@ -199,8 +212,9 @@ func (f *factory) nothingMoreTyped(want string) {
 	}
 }
 
-func (f *factory) syncs() int   { return strings.Count(f.read("mw.log"), "\n") }
-func (f *factory) bdCalls() int { return strings.Count(f.read("bd.log"), "\n") }
+func (f *factory) syncs() int      { return strings.Count(f.read("mw.log"), "\n") }
+func (f *factory) bdCalls() int    { return strings.Count(f.read("bd.log"), "\n") }
+func (f *factory) nudgeCalls() int { return strings.Count(f.read("nudge.log"), "\n") }
 
 const actingByID = "Mayor after handoff 10 (window ID)"
 
@@ -418,6 +432,76 @@ func TestNoTmuxServerAtAllTypesNothingAndStartsNothing(t *testing.T) {
 	}
 	if got := f.announced(); got != "" {
 		t.Fatalf("recorded %q for mail that was never announced", got)
+	}
+}
+
+func TestQuietAlarmTypesWhatMwNudgeSaysWithNoNewMail(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.nudges([2]string{"mw-gq6.30", "mw-gq6.30 in progress 73 min, no mail"})
+
+	f.tick()
+
+	f.typed("Quiet alarm for mayor: mw-gq6.30 in progress 73 min, no mail. Run mw status.\n")
+}
+
+func TestQuietAlarmCombinesEveryClauseMwNudgeGivesInOneLine(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.nudges(
+		[2]string{"mw-gq6.30", "mw-gq6.30 in progress 73 min, no mail"},
+		[2]string{"host:laptop", "laptop last synced 31 min ago"},
+	)
+
+	f.tick()
+
+	f.typed("Quiet alarm for mayor: mw-gq6.30 in progress 73 min, no mail; laptop last synced 31 min ago. Run mw status.\n")
+}
+
+func TestQuietAlarmSaysNothingWhenMwNudgeSaysNothing(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+
+	f.tick()
+
+	f.nothingMoreTyped("")
+	if f.nudgeCalls() != 1 {
+		t.Fatalf("expected mw nudge to be asked once, got %d", f.nudgeCalls())
+	}
+}
+
+func TestQuietAlarmIsDampedForAnHourPerCondition(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.nudges([2]string{"mw-gq6.30", "mw-gq6.30 in progress 73 min, no mail"})
+
+	f.tick()
+	f.typed("Quiet alarm for mayor: mw-gq6.30 in progress 73 min, no mail. Run mw status.\n")
+
+	f.tick()
+	f.nothingMoreTyped("Quiet alarm for mayor: mw-gq6.30 in progress 73 min, no mail. Run mw status.\n")
+	if f.nudgeCalls() != 2 {
+		t.Fatalf("expected mw nudge to still be asked on the second tick, got %d", f.nudgeCalls())
+	}
+
+	// A different condition is not damped by the first's having fired.
+	f.nudges([2]string{"host:laptop", "laptop last synced 31 min ago"})
+	f.tick()
+	f.typed("Quiet alarm for mayor: mw-gq6.30 in progress 73 min, no mail. Run mw status.\n" +
+		"Quiet alarm for mayor: laptop last synced 31 min ago. Run mw status.\n")
+}
+
+func TestQuietAlarmAndNewMailEachTypeTheirOwnLine(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.inbox("mw-aaa")
+	f.nudges([2]string{"mw-gq6.30", "mw-gq6.30 in progress 73 min, no mail"})
+
+	f.tick()
+
+	f.typed(fmt.Sprintf(announcement, 1) + "Quiet alarm for mayor: mw-gq6.30 in progress 73 min, no mail. Run mw status.\n")
+	if got := f.announced(); got != "mw-aaa\n" {
+		t.Fatalf("recorded ids %q", got)
 	}
 }
 
