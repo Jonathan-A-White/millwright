@@ -131,6 +131,8 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the other host landed its own work on "([^"]*)" while "([^"]*)" was worked$`, c.theOtherHostLandedFirst)
 	ctx.Given(`^the other host lands its own work the moment mw first tries to push$`, c.theOtherHostRacesThePush)
 	ctx.Given(`^the origin refuses every push, saying:$`, c.theOriginRefusesEveryPush)
+	ctx.Given(`^the origin fails the first push with a transient fault at the remote, then accepts it, saying:$`, c.theOriginFaultsOnceThenAccepts)
+	ctx.Given(`^the origin fails every push with a transient fault at the remote, saying:$`, c.theOriginFaultsOnEveryPush)
 	ctx.Given(`^the tracker refuses to close "([^"]*)", saying: (.+)$`, c.theTrackerRefusesToClose)
 	ctx.Given(`^the tracker will take a close of "([^"]*)" again$`, c.theTrackerTakesACloseAgain)
 	ctx.Given(`^the tracker cannot record the run state, saying: (.+)$`, c.theTrackerCannotRecordTheRunState)
@@ -197,6 +199,8 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the report says the run record of "([^"]*)" was missing$`, c.theRunRecordWasMissing)
 	ctx.Then(`^that ledger line holds only the first line of what the origin said$`, c.theLedgerLineHoldsOnlyTheFirstRefusalLine)
 	ctx.Then(`^the run of "([^"]*)" holds a landing error with every line the origin said$`, c.theRunHoldsTheWholeLandingError)
+	ctx.Then(`^the run of "([^"]*)" holds no landing error$`, c.theRunHoldsNoLandingError)
+	ctx.Then(`^the landing error of "([^"]*)" says it was tried (\d+) times$`, c.theLandingErrorSaysHowManyTriesWereMade)
 	ctx.Then(`^the comment on "([^"]*)" quotes every line the origin said$`, c.theCommentQuotesTheWholeRefusal)
 
 	registerCheckSteps(ctx, c)
@@ -692,6 +696,45 @@ func (c *nextContext) theOriginRefusesEveryPush(said *godog.DocString) error {
 	}
 	hook := fmt.Sprintf("#!/bin/sh\ncat %s >&2\nexit 1\n", said1)
 	return os.WriteFile(filepath.Join(c.origin(), "hooks", "pre-receive"), []byte(hook), 0o755)
+}
+
+// writeTransientFaultHook leaves an `update` hook on the bare origin that
+// prints said and declines — an `update` hook rather than a `pre-receive`
+// hook, because git labels a pre-receive decline "(pre-receive hook
+// declined)" whatever it is told, which this factory reads as a stated
+// refusal, never a fault worth trying again; an `update` hook's decline
+// carries no such wording, so what mw next sees is said itself, the same
+// words GitHub's own commit_refs fault carries. once, given a marker path,
+// declines only the first time it runs and accepts every push after; given
+// none, it declines every time.
+func (c *nextContext) writeTransientFaultHook(said *godog.DocString, once bool) error {
+	c.refusal = nil
+	for _, line := range strings.Split(said.Content, "\n") {
+		if strings.TrimSpace(line) != "" {
+			c.refusal = append(c.refusal, strings.TrimSpace(line))
+		}
+	}
+	saidFile := filepath.Join(c.root, "transient.txt")
+	if err := os.WriteFile(saidFile, []byte(strings.Join(c.refusal, "\n")+"\n"), 0o644); err != nil {
+		return err
+	}
+
+	var hook string
+	if once {
+		marker := filepath.Join(c.root, "transient.done")
+		hook = fmt.Sprintf("#!/bin/sh\nif [ -f %s ]; then exit 0; fi\n: > %s\ncat %s >&2\nexit 1\n", marker, marker, saidFile)
+	} else {
+		hook = fmt.Sprintf("#!/bin/sh\ncat %s >&2\nexit 1\n", saidFile)
+	}
+	return os.WriteFile(filepath.Join(c.origin(), "hooks", "update"), []byte(hook), 0o755)
+}
+
+func (c *nextContext) theOriginFaultsOnceThenAccepts(said *godog.DocString) error {
+	return c.writeTransientFaultHook(said, true)
+}
+
+func (c *nextContext) theOriginFaultsOnEveryPush(said *godog.DocString) error {
+	return c.writeTransientFaultHook(said, false)
 }
 
 // mwClosesOut runs the use case the way mw does: the real worktrees, the real
@@ -1296,6 +1339,33 @@ func (c *nextContext) theRunHoldsTheWholeLandingError(id string) error {
 		if !strings.Contains(string(kept), line) {
 			return fmt.Errorf("expected the landing error to hold %q, got:\n%s", line, kept)
 		}
+	}
+	return nil
+}
+
+// theRunHoldsNoLandingError is what a landing that recovers on its own leaves
+// behind: the whole-error file this factory keeps only for a failed landing is
+// never written for one that eventually succeeded.
+func (c *nextContext) theRunHoldsNoLandingError(id string) error {
+	path := filepath.Join(c.vault, vault.RunsDir, id, "landing-error.txt")
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("expected no landing error to be kept for %s, but %s exists", id, path)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("checking for a landing error of %s: %w", id, err)
+	}
+	return nil
+}
+
+// theLandingErrorSaysHowManyTriesWereMade checks the whole-error file names
+// the number of times the push was tried before mw next gave up on it.
+func (c *nextContext) theLandingErrorSaysHowManyTriesWereMade(id string, tries int) error {
+	kept, err := os.ReadFile(filepath.Join(c.vault, vault.RunsDir, id, "landing-error.txt"))
+	if err != nil {
+		return fmt.Errorf("expected the run of %s to hold the landing error: %w", id, err)
+	}
+	want := fmt.Sprintf("%d time(s) running", tries)
+	if !strings.Contains(string(kept), want) {
+		return fmt.Errorf("expected the landing error of %s to say %q, got:\n%s", id, want, kept)
 	}
 	return nil
 }

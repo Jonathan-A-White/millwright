@@ -303,6 +303,34 @@ Feature: Closing out a finished story and carrying on
     And mw pushed twice and forced nothing
     And the story "mw-gq6.1" is closed
 
+  Scenario: A push that fails once on a transient fault at the remote succeeds on the next try
+    Given the origin fails the first push with a transient fault at the remote, then accepts it, saying:
+      """
+      remote: fatal error in commit_refs
+      ! [remote rejected] HEAD -> main (failure)
+      """
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And mw pushed twice and forced nothing
+    And the run of "mw-gq6.1" holds no landing error
+    And the story "mw-gq6.1" is closed
+
+  Scenario: A push that keeps failing on a transient fault at the remote is landing-failed once its tries run out
+    Given the origin fails every push with a transient fault at the remote, saying:
+      """
+      remote: fatal error in commit_refs
+      ! [remote rejected] HEAD -> main (failure)
+      """
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is held blocked
+    And the story "mw-gq6.1" is not closed
+    And the report says it stopped for "landing-failed"
+    And the run of "mw-gq6.1" holds a landing error with every line the origin said
+    And the landing error of "mw-gq6.1" says it was tried 3 times
+
   Scenario: A branch that conflicts with the moved target is sent back once to a fresh Builder to rebase
     Given the other host landed a change to the same file as "mw-gq6.1" on "main"
     And the session of "mw-gq6.1" was the first that dispatch started for it
@@ -367,6 +395,7 @@ Feature: Closing out a finished story and carrying on
     And the report says it stopped for "landing-failed"
     And the run of "mw-gq6.1" holds a landing error with every line the origin said
     And the comment on "mw-gq6.1" quotes every line the origin said
+    And git was asked to merge once and to push once
     And mw committed to the vault exactly:
       | seats/builder/ledger.md            |
       | seats/builder/rigs/millwright.md   |
