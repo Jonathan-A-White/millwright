@@ -63,7 +63,11 @@ func (r MillhandTickReport) String() string { return r.Line + "\n" }
 //     line to the reaper log, says so in its line, and goes on as if no Millhand
 //     were up, so that the same tick may wake a fresh one. A window whose input
 //     line holds text is never closed, and a look that cannot be made is a look
-//     at a session that is not finished.
+//     at a session that is not finished. A Millhand whose wake never got going
+//     is restarted: on the same two looks its pane is idle and it has written
+//     no handoff since its window opened. The tick closes the window, says
+//     "restarted" in its line and goes on, and the wake it ends with, whatever
+//     else there is or is not to wake for, tells the fresh Millhand why.
 //  2. On a host with a [watch] table, mw watch's rule is applied to the host it
 //     watches. This comes before the sync, because a fault of this host's own
 //     network is one the sync would only time out on: local-fault is said in the
@@ -156,8 +160,12 @@ func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err err
 	}
 
 	var notes []string
+	var restarted string
 	if up != "" {
 		gone, note, err := t.heal(ctx, up)
+		if err == nil && !gone {
+			gone, note, restarted, err = t.restart(ctx, up)
+		}
 		switch {
 		case err != nil:
 			return joinNotes(alreadyUp(up), []string{note}), false, err
@@ -204,6 +212,13 @@ func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err err
 
 	verdict, reason := "quiet", tickReason(mail, stuck, health)
 	switch {
+	case restarted == "":
+	case reason == "":
+		reason = restarted
+	default:
+		reason += "; " + restarted
+	}
+	switch {
 	case reason == "" && lookErr != nil:
 		verdict = TickCouldNotTell
 		if t.DryRun {
@@ -234,15 +249,7 @@ func (t MillhandTick) heal(ctx context.Context, name string) (gone bool, note st
 	if t.Millhand.Terminal == nil || t.Millhand.Seats == nil {
 		return false, "", nil
 	}
-	rule := SeatReap{
-		Seats:    t.Millhand.Seats,
-		Terminal: t.Millhand.Terminal,
-		Seat:     MillhandSeat,
-		Host:     t.Host,
-		WhenIdle: true,
-		Now:      t.now,
-		Sleep:    t.Sleep,
-	}
+	rule := t.reapRule()
 	window, there := t.reapWindow(ctx, name)
 	if !there {
 		return false, "", nil
@@ -273,6 +280,76 @@ func (t MillhandTick) heal(ctx context.Context, name string) (gone bool, note st
 		}
 	}
 	return true, note, nil
+}
+
+// restart asks whether the Millhand whose window is open is a wake that never
+// got going, and closes the window if it is, by the reaper's own path. It says
+// whether the Millhand is to be counted as gone — the window was closed, or in a
+// dry run would have been — the words for the line, and what the fresh Millhand
+// is to be told of it. The window is closed only when it was found stalled twice,
+// Recheck apart, and never on a doubt.
+func (t MillhandTick) restart(ctx context.Context, name string) (gone bool, note, told string, err error) {
+	if t.Millhand.Terminal == nil || t.Millhand.Seats == nil {
+		return false, "", "", nil
+	}
+	rule := t.reapRule()
+	window, there := t.reapWindow(ctx, name)
+	if !there || !t.stalled(ctx, rule, window) {
+		return false, "", "", nil
+	}
+	if err := rule.wait(ctx, t.Recheck); err != nil || !t.stalled(ctx, rule, window) {
+		return false, "", "", nil
+	}
+
+	opened := window.Opened.UTC().Format(time.RFC3339)
+	told = fmt.Sprintf("the Millhand woken before this one sat idle at its prompt since %s with no handoff, and the tick closed its window %s", opened, name)
+	if t.DryRun {
+		return true, fmt.Sprintf("dry run: would be restarted: up but idle since %s, no handoff (window %s left open)", opened, name), told, nil
+	}
+	if err := t.Millhand.Terminal.Close(ctx, window.ID); err != nil {
+		return false, "could not close the stalled Millhand's window: " + oneLine(err.Error()), "", fmt.Errorf("closing the window %s: %w", name, err)
+	}
+	note = fmt.Sprintf("restarted: up but idle since %s, no handoff (closed the window %s)", opened, name)
+	if t.ReapLog != nil {
+		said := fmt.Sprintf("%s reap %s: closed by the tick: up but idle since %s, no handoff",
+			t.now().UTC().Format(time.RFC3339), window.ID, opened)
+		if err := t.ReapLog.Note(ctx, MillhandSeat, said); err != nil {
+			note += "; the reaper log could not be written: " + oneLine(err.Error())
+		}
+	}
+	return true, note, told, nil
+}
+
+// stalled is one look at whether the Millhand in a window is a wake that never
+// got going: the terminal can say when its window opened, no handoff has been
+// written since, and its pane is idle at an empty input line — the reaper's
+// newest handoff since and its idle pane. A look that cannot be made is a look at
+// a wake that is going.
+func (t MillhandTick) stalled(ctx context.Context, rule SeatReap, window ReapWindow) bool {
+	if window.Opened.IsZero() {
+		return false
+	}
+	start, err := rule.Seats.SeatStart(ctx, rule.Seat, rule.Host)
+	if err != nil {
+		return false
+	}
+	if _, since := newestHandoffSince(start.Handoffs, window.Opened); since {
+		return false
+	}
+	return rule.paneIdle(ctx, window.ID)
+}
+
+// reapRule is the rule of mw seat reap --when-idle, for this host's Millhand.
+func (t MillhandTick) reapRule() SeatReap {
+	return SeatReap{
+		Seats:    t.Millhand.Seats,
+		Terminal: t.Millhand.Terminal,
+		Seat:     MillhandSeat,
+		Host:     t.Host,
+		WhenIdle: true,
+		Now:      t.now,
+		Sleep:    t.Sleep,
+	}
 }
 
 // reapWindow is the window of that name as the terminal's reaper side sees it,
