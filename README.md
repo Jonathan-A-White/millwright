@@ -604,6 +604,37 @@ checkout, which a landing leaves one commit stale until the command rebuilds it.
 The command is one line, read by `/bin/sh` in the rig's checkout like a `[tests]`
 line, and is stopped after five minutes.
 
+## Recovering a story after a refused landing
+
+```sh
+bin/mw retry mw-gq6.8
+```
+
+`mw retry` is the hand recovery a refused landing used to take a person several
+steps to run, as one command. It is run on the story's own host once its
+session has ended — typically right after `mw next` has refused its landing.
+It refuses, changing nothing at all, at the first of these that does not hold:
+
+1. the session named on the story must not still be **running**;
+2. a worktree a session left dirty is **committed** onto its branch, under a
+   plain message naming the story and the attempt;
+3. the branch's commits ahead of the target are **bundled** into
+   `runs/<story>/attempt-<n>.bundle` in the vault, and the bundle must verify;
+4. the vault must **accept and push** that bundle.
+
+Only once all of that has held are the worktree and branch taken away — the
+worktree never forced, and the branch deleted safely (`git branch -d`) and
+forced (`-D`) only when that refuses it — and the claim given back with the
+story set open again (not merely unassigned: a story left `in_progress` is
+never offered to a dispatcher). One comment is left on the story naming the
+branch commit the bundle captured, where the bundle is, and the commit the
+vault pushed it as.
+
+It never resets a story's attempts count, and a story already started
+`max_attempts` times is refused with "attempts exhausted" rather than retried
+— resetting the counter by hand is what allows another attempt. See
+`features/retry.feature`.
+
 ## Keeping two hosts level
 
 `mw sync` is the one command that brings this host level with the other, by

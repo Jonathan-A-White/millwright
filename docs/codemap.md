@@ -58,6 +58,7 @@ Every adapter carries `var _ application.<Port> = ...`.
 | --- | --- | --- | --- |
 | `File` | `application/file.go` | `mw file` — `cmd/mw/file.go` | `features/file_plan.feature` |
 | `Release` | `application/release.go` | `mw release` — `cmd/mw/release.go` | `features/release.feature` |
+| `Retry` | `application/retry.go` | `mw retry` — `cmd/mw/retry.go` | `features/retry.feature` |
 | `Show` | `application/show.go` | `mw show` — `cmd/mw/show.go` | `features/show.feature` |
 | `Dispatch` | `application/dispatch.go` | `mw dispatch` — `cmd/mw/dispatch.go` | `features/dispatch.feature` |
 | `Next` | `application/next.go` | `mw next` — `cmd/mw/next.go` | `features/next.feature` |
@@ -81,8 +82,6 @@ Every adapter carries `var _ application.<Port> = ...`.
 is `mw version`, no use case.
 `features/path_validation.feature` covers `domain/path.go`,
 `features/ready_stories.feature` the `WorkTracker` contract; no commands.
-Neither port nor use case: `application/fuel.go`, `application/ledger.go`,
-`application/tickcounts.go`, `application/attempts.go`, `domain/plan.go`.
 
 Adding a command: read `docs/adding-a-command.md`.
 
