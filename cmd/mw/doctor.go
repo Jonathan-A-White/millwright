@@ -83,6 +83,7 @@ func newDoctorCmd() *cobra.Command {
 					doctor.NewVaultDirty(vault, host),
 					doctor.NewTimers(units),
 					doctor.NewBeadsSize(vault),
+					doctor.NewMayorGone(vault),
 				},
 				State: store,
 				Log:   store,
