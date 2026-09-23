@@ -92,6 +92,8 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a ready story "([^"]*)" of that epic labelled "([^"]*)"$`, c.aReadyStoryLabelled)
 	ctx.Given(`^a story "([^"]*)" of that epic is already running here$`, c.aStoryAlreadyRunningHere)
 	ctx.Given(`^a story "([^"]*)" of that epic labelled "([^"]*)" is already running here$`, c.aLabelledStoryAlreadyRunningHere)
+	ctx.Given(`^the story "([^"]*)" waits on "([^"]*)"$`, c.theStoryWaitsOn)
+	ctx.Given(`^the story "([^"]*)" is closed$`, c.theStoryIsClosedGiven)
 	ctx.Given(`^the other host has pushed a later commit to the rig's origin$`, c.theOtherHostHasPushed)
 	ctx.Given(`^the beads sync halts with exit code (\d+)$`, c.theBeadsSyncHalts)
 	ctx.Given(`^the sync cannot resolve a name for its first (\d+) tries$`, c.theSyncCannotResolveForItsFirstTries)
@@ -328,6 +330,20 @@ func (c *dispatchContext) aLabelledStoryAlreadyRunningHere(id, label string) err
 		return err
 	}
 	return c.tracker.ClaimStory(context.Background(), id)
+}
+
+// theStoryWaitsOn gives a story a dependency, as if bd's ready set had not
+// caught up with it yet (mw-gq6.93): the fake still offers the story ready,
+// carrying the wait for Dispatch's own guard to find.
+func (c *dispatchContext) theStoryWaitsOn(id, need string) error {
+	c.tracker.Needs(id, need)
+	return nil
+}
+
+// theStoryIsClosedGiven closes a story named in a Given, the way a blocker is
+// finished before the story waiting on it is dispatched.
+func (c *dispatchContext) theStoryIsClosedGiven(id string) error {
+	return c.tracker.CloseStory(context.Background(), id, "worked by the test")
 }
 
 func (c *dispatchContext) theBeadsSyncHalts(code int) error {

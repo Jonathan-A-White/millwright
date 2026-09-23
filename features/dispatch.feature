@@ -147,6 +147,40 @@ Feature: Dispatching the stories this host is ready to work
     Then no session was started
     And the story "mw-abc.1" is not claimed
 
+  Scenario: A story whose blocker is claimed and running is not dispatched
+    Given a ready story "mw-gq6.1" of that epic
+    And a story "mw-gq6.9" of that epic is already running here
+    And the story "mw-gq6.1" waits on "mw-gq6.9"
+    When dispatch runs on "vps" with a cap of 2
+    Then no session was started
+    And the story "mw-gq6.1" is not claimed
+    And dispatch passed over "mw-gq6.1", saying: waits on mw-gq6.9 (in_progress)
+
+  Scenario: A story whose blocker is still open is not dispatched either
+    Given a ready story "mw-gq6.1" of that epic
+    And a ready story "mw-gq6.9" of that epic
+    And the story "mw-gq6.1" waits on "mw-gq6.9"
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.9"
+    And the story "mw-gq6.1" is not claimed
+    And dispatch passed over "mw-gq6.1", saying: waits on mw-gq6.9 (open)
+
+  Scenario: A dry run says the same of a story whose blocker is not finished
+    Given a ready story "mw-gq6.1" of that epic
+    And a story "mw-gq6.9" of that epic is already running here
+    And the story "mw-gq6.1" waits on "mw-gq6.9"
+    When dispatch runs on "vps" with a cap of 2 as a dry run
+    Then no session was started
+    And dispatch passed over "mw-gq6.1", saying: waits on mw-gq6.9 (in_progress)
+
+  Scenario: Once its blocker is closed the story is dispatched as before
+    Given a ready story "mw-gq6.1" of that epic
+    And a story "mw-gq6.9" of that epic is already running here
+    And the story "mw-gq6.1" waits on "mw-gq6.9"
+    And the story "mw-gq6.9" is closed
+    When dispatch runs on "vps" with a cap of 2
+    Then one session was started, for "mw-gq6.1"
+
   Scenario: A story the Governor must be present for is passed over
     Given a ready story "mw-gq6.1" of that epic labelled "hitl"
     When dispatch runs on "vps" with a cap of 1

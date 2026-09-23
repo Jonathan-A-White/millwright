@@ -60,7 +60,7 @@ Every adapter carries `var _ application.<Port> = ...`.
 | `Release` | `application/release.go` | `mw release` — `cmd/mw/release.go` | `features/release.feature` |
 | `Retry` | `application/retry.go` | `mw retry` — `cmd/mw/retry.go` | `features/retry.feature` |
 | `Show` | `application/show.go` | `mw show` — `cmd/mw/show.go` | `features/show.feature` |
-| `Dispatch` | `application/dispatch.go` | `mw dispatch` — `cmd/mw/dispatch.go` | `features/dispatch.feature` |
+| `Dispatch` | `application/dispatch.go` | `mw dispatch` — `cmd/mw/dispatch.go` | `features/dispatch.feature` (re-checks blockers itself) |
 | `Next` | `application/next.go` | `mw next` — `cmd/mw/next.go` | `features/next.feature` |
 | `Check` | `application/check.go` | `mw check` — `cmd/mw/check.go` | `features/check.feature` |
 | `Status` | `application/status.go` | `mw status` — `cmd/mw/status.go` | `features/status.feature` |
