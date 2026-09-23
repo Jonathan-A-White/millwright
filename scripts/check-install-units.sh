@@ -14,7 +14,9 @@
 # an unknown unit, a copy in the way, a link elsewhere and a missing systemctl
 # each stop the run with nothing changed; XDG_CONFIG_HOME is honoured; the
 # linger line is printed and loginctl is never called; the README's copy-paste
-# install blocks are gone in favour of the script.
+# install blocks are gone in favour of the script. --system links every file
+# under contrib/systemd/system/ into a stand-in /etc/systemd/system instead,
+# refuses without root, and never touches the --user directory.
 #
 # shellcheck is run over both scripts when it is installed, and skipped when not.
 
@@ -79,12 +81,12 @@ standin() { # <dir> <name>, the body on stdin
 }
 
 # systemctl logs every call. `is-active` answers from FAKE_ACTIVE, a list of
-# timer names that are active; nothing else it is asked does anything.
+# timer names that are active; nothing else it is asked does anything. A
+# `--system` install calls it with no `--user`; both forms are accepted.
 standin "$STAND" systemctl <<'EOF'
 #!/bin/sh
 echo "systemctl $*" >>"$FAKE_CALLS"
-[ "$1" = --user ] || exit 99
-shift
+[ "$1" != --user ] || shift
 case $1 in
 is-active)
 	shift
@@ -102,15 +104,29 @@ standin "$STAND" loginctl <<'EOF'
 echo "loginctl $*" >>"$FAKE_CALLS"
 exit 99
 EOF
+# id: the script's --system mode asks only `id -u`, to refuse without root.
+# Answers from FAKE_UID; unset means an ordinary, non-root test user, so a
+# scenario that wants root sets FAKE_UID=0 itself.
+standin "$STAND" id <<'EOF'
+#!/bin/sh
+echo "id $*" >>"$FAKE_CALLS"
+case $1 in
+-u) echo "${FAKE_UID:-1000}" ;;
+-un) echo "${FAKE_USER:-tester}" ;;
+*) exit 99 ;;
+esac
+EOF
 
-# world: a fresh host: an empty HOME, the stand-ins on PATH.
+# world: a fresh host: an empty HOME, the stand-ins on PATH, a stand-in
+# /etc/systemd/system for --system.
 world() {
 	rm -rf "$W"
-	mkdir -p "$W/bin" "$W/home" "$W/xdg"
+	mkdir -p "$W/bin" "$W/home" "$W/xdg" "$W/etc/systemd/system"
 	for c in "$STAND"/*; do ln -s "$c" "$W/bin/$(basename "$c")"; done
 	: >"$W/calls"
 	ENVX=""
 	USERDIR=$W/home/.config/systemd/user
+	SYSDIR=$W/etc/systemd/system
 }
 # snap: everything under the world but the call log.
 snap() {
@@ -121,12 +137,15 @@ snap() {
 	)
 }
 # run <arg>...: run the script with those arguments; OUT is what it printed, RC its status.
+# MW_SYSTEM_UNIT_DIR redirects --system's /etc/systemd/system to the stand-in
+# one, the way XDG_CONFIG_HOME already redirects --user's; a real host never
+# sets it and gets the real directory.
 run() {
 	: >"$W/calls"
 	RC=0
 	# shellcheck disable=SC2086
 	OUT=$(cd "$W" && env -i PATH="$W/bin:$REAL" HOME="$W/home" USER=tester FAKE_CALLS="$W/calls" \
-		$ENVX "$SH" "$REPO_ROOT/$SCRIPT" "$@" 2>&1) || RC=$?
+		MW_SYSTEM_UNIT_DIR="$SYSDIR" $ENVX "$SH" "$REPO_ROOT/$SCRIPT" "$@" 2>&1) || RC=$?
 }
 
 # --- assertions ------------------------------------------------------------------
@@ -157,6 +176,17 @@ is_link_to_rig() { # <path> <unit file>
 	[ -f "$1" ] || fail "$NAME: $1 links to nothing"
 }
 nlinks() { find "$1" -type l 2>/dev/null | wc -l | tr -d ' '; }
+is_link_to_rig_system() { # <path> <unit file>
+	[ -L "$1" ] || fail "$NAME: $1 is not a symlink"
+	[ "$(readlink "$1")" = "$REPO_ROOT/$UNITDIR/system/$2" ] || fail "$NAME: $1 links to $(readlink "$1"), wanted $REPO_ROOT/$UNITDIR/system/$2"
+	[ -f "$1" ] || fail "$NAME: $1 links to nothing"
+}
+SYSFILES=""
+for f in "$UNITDIR"/system/*; do
+	[ -f "$f" ] || continue
+	SYSFILES="$SYSFILES $(basename "$f")"
+done
+[ -n "$SYSFILES" ] || fail "$UNITDIR/system holds no unit file"
 
 # --- 3. --help and a flag it does not know ------------------------------------------
 NAME="--help"
@@ -335,7 +365,61 @@ is_link_to_rig "$W/xdg/systemd/user/mw-health.timer" mw-health.timer
 [ ! -e "$W/home/.config" ] || fail "$NAME: it wrote under HOME/.config as well"
 ok
 
-# --- 10. what it refuses, with nothing changed --------------------------------------------------
+# --- 10. --system: root units, a fixed set, never the --user directory --------------------------
+NAME="--system as non-root prints one line and exits 2, touching nothing"
+world
+snap >"$T/before"
+run --system
+rc_is 2
+lines=$(printf '%s\n' "$OUT" | wc -l | tr -d ' ')
+[ "$lines" = 1 ] || fail "$NAME: printed $lines lines, wanted 1:
+$OUT"
+calls_are 0 'systemctl'
+calls_are 0 'loginctl'
+unchanged "$(cat "$T/before")"
+ok
+
+NAME="--system as root links every file under system/, reloads, --enable arms the seat and doctor units"
+world
+mkdir -p "$USERDIR"
+before_user=$(find "$USERDIR" | sort)
+ENVX="FAKE_UID=0"
+run --system --enable
+rc_is 0
+for f in $SYSFILES; do is_link_to_rig_system "$SYSDIR/$f" "$f"; done
+want=$(echo $SYSFILES | wc -w)
+[ "$(nlinks "$SYSDIR")" = "$want" ] || fail "$NAME: $(nlinks "$SYSDIR") symlinks under $SYSDIR, wanted $want"
+calls_are 1 '^systemctl daemon-reload$'
+calls_are 1 '^systemctl enable --now mw-seat-tmux.service mw-doctor.timer$'
+[ "$(grep -n 'daemon-reload' "$W/calls" | cut -d: -f1)" -lt "$(grep -n 'enable' "$W/calls" | cut -d: -f1)" ] || fail "$NAME: enable came before the reload"
+[ "$(find "$USERDIR" | sort)" = "$before_user" ] || fail "$NAME: it touched the --user directory"
+has 'seat.env'
+lacks 'loginctl'
+ok
+
+NAME="--system without --enable links and reloads but enables nothing"
+world
+ENVX="FAKE_UID=0"
+run --system
+rc_is 0
+calls_are 1 '^systemctl daemon-reload$'
+calls_are 0 'enable'
+has 'not enabled'
+ok
+
+NAME="--system --dry-run as root changes nothing"
+world
+ENVX="FAKE_UID=0"
+snap >"$T/before"
+run --system --dry-run --enable
+rc_is 0
+has 'would link'
+calls_are 0 'systemctl'
+calls_are 0 'loginctl'
+unchanged "$(cat "$T/before")"
+ok
+
+# --- 11. what it refuses, with nothing changed --------------------------------------------------
 NAME="an unknown unit is refused before anything is linked"
 world
 snap >"$T/before"
@@ -386,7 +470,7 @@ has 'systemctl'
 unchanged "$(cat "$T/before")"
 ok
 
-# --- 11. the README points here ----------------------------------------------------------------------
+# --- 12. the README points here ----------------------------------------------------------------------
 NAME="the README's copy-paste install blocks are gone"
 if grep -n 'cp contrib/systemd/' README.md; then
 	fail "$NAME: README.md still copies units by hand; it should name $SCRIPT"
@@ -394,7 +478,7 @@ fi
 [ "$(grep -c "$SCRIPT" README.md)" -ge 3 ] || fail "$NAME: README.md names $SCRIPT fewer than three times (one line for each of its three install blocks)"
 ok
 
-# --- 12. shellcheck, where it exists ---------------------------------------------------------------------
+# --- 13. shellcheck, where it exists ---------------------------------------------------------------------
 if command -v shellcheck >/dev/null 2>&1; then
 	shellcheck "$SCRIPT" scripts/check-install-units.sh || fail "shellcheck found something"
 	echo "ok: shellcheck"
