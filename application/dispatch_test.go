@@ -96,6 +96,10 @@ func aFactory(t *testing.T) (application.Dispatch, *apptest.FakeTracker, *fakeWo
 		Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude,
 		Model: domain.ModelOpus, Effort: domain.EffortHigh, Formula: "tdd-feature", Host: "vps",
 	})
+	// Installed with no steps: what most of this file's tests care about is
+	// everything past the claim, not the formula. The tests about the formula
+	// itself install it with their own steps, or leave it out on purpose.
+	tracker.AddFormula("tdd-feature")
 	worktrees, runner := &fakeWorktrees{}, apptest.NewFakeRunner()
 
 	return application.Dispatch{
@@ -164,28 +168,41 @@ func TestDispatchPassesOverAStoryWhoseRigIsNotCheckedOutHere(t *testing.T) {
 	}
 }
 
-func TestDispatchBootsAStoryWhoseFormulaIsNotInstalledWithoutPouringIt(t *testing.T) {
+// mw-gq6.95: a story whose path names a formula this vault has not installed
+// is refused before it is claimed, rather than started anyway with nothing
+// poured for it — the boot file mw-gq6.94 left behind, with no step beads and
+// nothing for the Builder to follow but the rig's own docs.
+func TestDispatchDoesNotClaimAStoryWhoseFormulaIsNotInstalled(t *testing.T) {
 	ctx := context.Background()
-	dispatch, tracker, _, runner, vaultDir := aFactory(t)
-	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	dispatch, tracker, _, runner, _ := aFactory(t)
+	tracker.AddStory("mw-gq6", domain.Story{
+		ID: "mw-gq6.1", Title: "A story",
+		Overrides: domain.Path{Formula: "story"},
+	})
 
 	report, err := dispatch.Run(ctx)
 	if err != nil {
 		t.Fatalf("dispatching: %v", err)
 	}
-	if len(report.Started) != 1 || len(runner.Names()) != 1 {
-		t.Fatalf("expected the story to be started anyway, got %+v", report)
+	if len(report.Started) != 0 || len(runner.Names()) != 0 {
+		t.Fatalf("expected nothing to be started, got %+v", report)
 	}
-	if tracker.Molecules() != 0 {
-		t.Fatalf("expected nothing to have been poured, got %d molecules", tracker.Molecules())
+	if len(report.Passed) != 1 || !strings.Contains(report.Passed[0].Why, "formula story is not installed") {
+		t.Fatalf("expected the story to be passed over for its formula, got %+v", report.Passed)
+	}
+	if status, err := tracker.ShowStory(ctx, "mw-gq6.1"); err != nil || status.Status != application.StatusOpen {
+		t.Fatalf("expected the story to stay unclaimed, got %+v (%v)", status, err)
+	}
+	if got := tracker.Comments("mw-gq6.1"); len(got) != 1 || !strings.Contains(got[0], application.ReasonFormulaNotInstalled) {
+		t.Fatalf("expected exactly one comment naming the reason, got %q", got)
 	}
 
-	booted, err := os.ReadFile(filepath.Join(vaultDir, vault.RunsDir, "mw-gq6.1", application.BootFileName))
-	if err != nil {
-		t.Fatalf("reading the boot file: %v", err)
+	// A second dispatch says nothing more.
+	if _, err := dispatch.Run(ctx); err != nil {
+		t.Fatalf("dispatching again: %v", err)
 	}
-	if !strings.Contains(string(booted), "not installed") {
-		t.Fatalf("expected the boot file to say the formula was not poured, got %q", booted)
+	if got := tracker.Comments("mw-gq6.1"); len(got) != 1 {
+		t.Fatalf("expected the comment not to be repeated, got %q", got)
 	}
 }
 
