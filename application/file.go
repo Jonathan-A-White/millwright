@@ -122,6 +122,9 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	if err != nil {
 		return FiledPlan{}, err
 	}
+	if err := f.validateFormulas(ctx, plan, order); err != nil {
+		return FiledPlan{}, err
+	}
 
 	epicID, err := f.Tracker.CreateEpic(ctx, NewEpic{
 		Title:           plan.Epic.Title,
@@ -198,6 +201,40 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	filed.Released = true
 	f.print(filed.releases())
 	return filed, nil
+}
+
+// validateFormulas refuses the whole plan, naming the story key, when a
+// story's path names a formula this tracker has not installed — before
+// anything is written, the same as plan.Validate does for the rest of a
+// path. The tracker is asked only when some story in the plan names a
+// formula at all, so a plan that never mentions one costs nothing extra.
+func (f File) validateFormulas(ctx context.Context, plan domain.Plan, order []domain.PlanStory) error {
+	var needsCheck bool
+	for _, story := range order {
+		path, err := story.PathFrom(plan.Epic.Defaults)
+		if err == nil && path.Formula != "" {
+			needsCheck = true
+			break
+		}
+	}
+	if !needsCheck {
+		return nil
+	}
+
+	installed, err := f.Tracker.Formulas(ctx)
+	if err != nil {
+		return fmt.Errorf("checking which formulas are installed: %w", err)
+	}
+	for _, story := range order {
+		path, err := story.PathFrom(plan.Epic.Defaults)
+		if err != nil {
+			continue
+		}
+		if err := path.ValidateFormula(installed); err != nil {
+			return fmt.Errorf("filing story %s: %w", story.Key, err)
+		}
+	}
+	return nil
 }
 
 // print writes one block of the report, when there is somewhere to write it.

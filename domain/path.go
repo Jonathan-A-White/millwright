@@ -92,6 +92,19 @@ func (e UnknownFieldError) Error() string {
 	return fmt.Sprintf("a path has no %q field", e.Field)
 }
 
+// FormulaNotInstalledError reports a path whose formula names one this
+// factory does not pour: it names something, but not something installed
+// where the caller checked.
+type FormulaNotInstalledError struct {
+	Formula   string
+	Installed []string
+}
+
+func (e FormulaNotInstalledError) Error() string {
+	return fmt.Sprintf("formula %s is not installed in this vault (installed: %s)",
+		e.Formula, strings.Join(e.Installed, ", "))
+}
+
 // Fields are the names of a path's fields, in the order a path is written out.
 // They are also the metadata keys a path is stored under.
 var Fields = []string{"rig", "branch", "harness", "model", "effort", "formula", "host"}
@@ -256,6 +269,23 @@ func (p Path) Validate() error {
 		return UnknownValueError{Field: "effort", Value: string(p.Effort)}
 	}
 	return nil
+}
+
+// ValidateFormula reports the reason p's formula cannot be worked, given the
+// formulas installed where it would be poured. A path with no formula is not
+// refused here — not every path is worked by a formula — and the installed
+// list is the caller's to supply: this stays pure, and a path built once may
+// be checked against a different vault's installed formulas than another's.
+func (p Path) ValidateFormula(installed []string) error {
+	if p.Formula == "" {
+		return nil
+	}
+	for _, name := range installed {
+		if name == p.Formula {
+			return nil
+		}
+	}
+	return FormulaNotInstalledError{Formula: p.Formula, Installed: installed}
 }
 
 // PathFrom builds the path this story is worked by: the epic's defaults

@@ -214,6 +214,20 @@ Feature: Dispatching the stories this host is ready to work
     And the story "mw-gq6.1" carries a comment saying the dispatch failed
     And there is no worktree for "mw-gq6.1"
 
+  Scenario: A story whose formula is not installed is not claimed, and told once
+    Given a ready story "mw-gq6.1" of that epic that overrides "formula" with "story"
+    When dispatch runs on "vps" with a cap of 1
+    Then no session was started
+    And the story "mw-gq6.1" is not claimed
+    And dispatch passed over "mw-gq6.1", saying: its formula story is not installed here
+    And the story "mw-gq6.1" carries exactly one comment saying its formula is not installed
+
+  Scenario: A second dispatch does not comment again about the same uninstalled formula
+    Given a ready story "mw-gq6.1" of that epic that overrides "formula" with "story"
+    When dispatch runs on "vps" with a cap of 1
+    And dispatch runs on "vps" with a cap of 1
+    Then the story "mw-gq6.1" carries exactly one comment saying its formula is not installed
+
   Scenario: A story whose earlier session is lying dead is dispatched again
     Given a ready story "mw-gq6.1" of that epic
     And an earlier session for "mw-gq6.1" lies dead

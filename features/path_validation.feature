@@ -40,3 +40,15 @@ Feature: Path validation
     And the path's "effort" is "low"
     And the path's "rig" is "millwright"
     And the path's "formula" is "tdd-feature"
+
+  Scenario: A formula not installed in the vault is rejected
+    Given the installed formulas are "chore" and "tdd-feature"
+    And a story that overrides "formula" with "story"
+    When the story's path is built
+    Then the path is rejected because: formula story is not installed in this vault (installed: chore, tdd-feature)
+
+  Scenario: An installed formula is accepted
+    Given the installed formulas are "chore" and "tdd-feature"
+    And a story that overrides "formula" with "chore"
+    When the story's path is built
+    Then the path is accepted

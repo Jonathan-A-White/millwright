@@ -30,7 +30,12 @@ func InitializeFilePlanScenario(ctx *godog.ScenarioContext) {
 	c := &fileContext{}
 
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
-		*c = fileContext{tracker: apptest.NewFakeTracker()}
+		tracker := apptest.NewFakeTracker()
+		// The Background's plan names both of these; a scenario that names a
+		// formula neither of them is testing the refusal itself.
+		tracker.AddFormula("tdd-feature")
+		tracker.AddFormula("chore")
+		*c = fileContext{tracker: tracker}
 		return ctx, nil
 	})
 

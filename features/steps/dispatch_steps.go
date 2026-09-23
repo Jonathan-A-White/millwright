@@ -161,6 +161,7 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the story "([^"]*)" carries exactly one comment saying it used up its attempts$`, c.theStoryCarriesOneExhaustedComment)
 	ctx.Then(`^the story "([^"]*)" carries (\d+) comments saying it used up its attempts$`, c.theStoryCarriesExhaustedComments)
 	ctx.Then(`^the story "([^"]*)" carries no comment saying it used up its attempts$`, c.theStoryCarriesNoExhaustedComment)
+	ctx.Then(`^the story "([^"]*)" carries exactly one comment saying its formula is not installed$`, c.theStoryCarriesOneFormulaNotInstalledComment)
 	ctx.Then(`^the Mayor has (\d+) mails?$`, c.theMayorHasMails)
 	ctx.Then(`^the mail to the Mayor says "([^"]*)"$`, c.theMailSays)
 }
@@ -1191,6 +1192,25 @@ func (c *dispatchContext) exhaustedComments(id string) int {
 		}
 	}
 	return said
+}
+
+// formulaNotInstalledComments counts the comments on a story that say its
+// formula is not installed, by the code they carry.
+func (c *dispatchContext) formulaNotInstalledComments(id string) int {
+	var said int
+	for _, comment := range c.tracker.Comments(id) {
+		if strings.Contains(comment, application.ReasonFormulaNotInstalled) {
+			said++
+		}
+	}
+	return said
+}
+
+func (c *dispatchContext) theStoryCarriesOneFormulaNotInstalledComment(id string) error {
+	if got := c.formulaNotInstalledComments(id); got != 1 {
+		return fmt.Errorf("expected exactly one comment on %s saying its formula is not installed, got %d: %q", id, got, c.tracker.Comments(id))
+	}
+	return nil
 }
 
 func (c *dispatchContext) theStoryCarriesExhaustedComments(id string, want int) error {

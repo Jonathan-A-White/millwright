@@ -14,8 +14,11 @@ import (
 type pathContext struct {
 	defaults domain.Path
 	story    domain.Story
-	built    domain.Path
-	err      error
+	// installed is the formulas a scenario says are installed, checked once the
+	// path is built; nil when no scenario said, which skips the check entirely.
+	installed []string
+	built     domain.Path
+	err       error
 }
 
 // InitializePathScenario registers the steps of features/path_validation.feature.
@@ -31,6 +34,7 @@ func InitializePathScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the epic's default (\w+) is not set$`, c.theEpicsDefaultFieldIsNotSet)
 	ctx.Given(`^a story with no overrides$`, c.aStoryWithNoOverrides)
 	ctx.Given(`^(?:a|the) story (?:that|also) overrides "([^"]*)" with "([^"]*)"$`, c.aStoryThatOverrides)
+	ctx.Given(`^the installed formulas are "([^"]*)" and "([^"]*)"$`, c.theInstalledFormulasAre)
 	ctx.When(`^the story's path is built$`, c.theStorysPathIsBuilt)
 	ctx.Then(`^the path is rejected because: (.+)$`, c.thePathIsRejectedBecause)
 	ctx.Then(`^the path is accepted$`, c.thePathIsAccepted)
@@ -65,8 +69,16 @@ func (c *pathContext) aStoryThatOverrides(field, value string) error {
 	return c.story.Overrides.Set(field, value)
 }
 
+func (c *pathContext) theInstalledFormulasAre(first, second string) error {
+	c.installed = []string{first, second}
+	return nil
+}
+
 func (c *pathContext) theStorysPathIsBuilt() error {
 	c.built, c.err = c.story.PathFrom(c.defaults)
+	if c.err == nil && c.installed != nil {
+		c.err = c.built.ValidateFormula(c.installed)
+	}
 	return nil
 }
 

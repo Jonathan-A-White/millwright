@@ -34,6 +34,7 @@ func twoStoryPlan() domain.Plan {
 
 func TestAPlanNobodyApprovedStaysHeld(t *testing.T) {
 	tracker := apptest.NewFakeTracker()
+	tracker.AddFormula("tdd-feature")
 	out := &strings.Builder{}
 
 	filed, err := application.File{
@@ -65,6 +66,7 @@ func TestAPlanNobodyApprovedStaysHeld(t *testing.T) {
 
 func TestAnApprovedPlanSaysWhatIsReadyNow(t *testing.T) {
 	tracker := apptest.NewFakeTracker()
+	tracker.AddFormula("tdd-feature")
 	out := &strings.Builder{}
 
 	filed, err := application.File{
@@ -92,6 +94,7 @@ func TestAnApprovedPlanSaysWhatIsReadyNow(t *testing.T) {
 
 func TestAPlanIsNotFiledAtAllWhenItCannotBeFiled(t *testing.T) {
 	tracker := apptest.NewFakeTracker()
+	tracker.AddFormula("tdd-feature")
 	plan := twoStoryPlan()
 	plan.Epic.Defaults.Branch = ""
 
@@ -120,6 +123,7 @@ func (h *halfATracker) CreateStory(ctx context.Context, story application.NewSto
 
 func TestFilingThatStopsHalfwaySaysWhatIsAlreadyFiled(t *testing.T) {
 	tracker := &halfATracker{FakeTracker: apptest.NewFakeTracker()}
+	tracker.AddFormula("tdd-feature")
 
 	_, err := (application.File{Tracker: tracker}).Run(context.Background(), twoStoryPlan())
 	if err == nil {

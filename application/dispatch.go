@@ -319,7 +319,9 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	}
 	ready = inStartOrder(ready)
 
-	// The formulas installed are read once, and only if a story names one.
+	// The formulas installed are read once, and only if a story names one. A
+	// dry run reads them too, so that it reports the same refusal a real run
+	// would, without writing anything.
 	var formulas map[string]bool
 	for _, detail := range ready {
 		id := detail.Story.ID
@@ -367,6 +369,26 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			continue
 		}
 
+		// A story whose formula this vault has not installed is refused before
+		// the cap, the same as one whose attempts are exhausted: claiming it
+		// would start a session with nothing poured to work from, over and over,
+		// for a mistake only a person filing the story again can fix (mw-gq6.95).
+		if path.Formula != "" {
+			if formulas == nil {
+				if formulas, err = d.installedFormulas(ctx); err != nil {
+					return report, fmt.Errorf("dispatching on %s: %w", d.Host, err)
+				}
+			}
+			if !formulas[path.Formula] {
+				report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
+					"its formula %s is not installed here, so it is not claimed", path.Formula)})
+				if !d.DryRun {
+					d.refuseUninstalledFormula(ctx, id, path.Formula, &report)
+				}
+				continue
+			}
+		}
+
 		// Before the cap, because a story that is not started takes none of the
 		// sessions the cap counts, and the Mayor is to be told of it now rather
 		// than once whatever is running has finished.
@@ -388,12 +410,6 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 				"%s has taken %d of the %d sessions it may run at once", d.Host,
 				report.Running+len(report.Started)+len(report.Failed), d.Cap)})
 			continue
-		}
-
-		if !d.DryRun && path.Formula != "" && formulas == nil {
-			if formulas, err = d.installedFormulas(ctx); err != nil {
-				return report, fmt.Errorf("dispatching on %s: %w", d.Host, err)
-			}
 		}
 
 		started, released, err := d.start(ctx, detail, path, rigDir, formulas)
@@ -658,6 +674,39 @@ func (d Dispatch) installedFormulas(ctx context.Context) (map[string]bool, error
 		installed[name] = true
 	}
 	return installed, nil
+}
+
+// ReasonFormulaNotInstalled is the code a comment carries when mw dispatch
+// would not claim a story because its path names a formula this vault has
+// not installed (mw-gq6.95): the reason refuseUninstalledFormula's own
+// comment looks for, so that a second dispatch finding one already there
+// says nothing again.
+const ReasonFormulaNotInstalled = "formula-not-installed"
+
+// refuseUninstalledFormula tells whoever reads the story that its formula is
+// not installed here, once: a story left ready with a formula nobody has
+// installed would otherwise be found again on every dispatch and commented on
+// every time, drowning the one useful line in noise.
+func (d Dispatch) refuseUninstalledFormula(ctx context.Context, id, formula string, report *DispatchReport) {
+	comments, err := d.Tracker.StoryComments(ctx, id)
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf(
+			"%s: whether it was already told its formula is not installed could not be read, so it may be told again: %v", id, err))
+	} else {
+		for _, comment := range comments {
+			if strings.Contains(comment.Text, ReasonFormulaNotInstalled) {
+				return
+			}
+		}
+	}
+
+	said := fmt.Sprintf("mw dispatch on %s did not claim this story (%s): its path names the formula %s, "+
+		"which is not installed in this vault. It is dispatched once the formula is installed here or the story's path names one that is.",
+		d.Host, ReasonFormulaNotInstalled, formula)
+	if err := d.Tracker.CommentOnStory(ctx, id, said); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf(
+			"%s: the comment about its uninstalled formula could not be written: %v", id, err))
+	}
 }
 
 // remote is the remote a story's branch is cut from.

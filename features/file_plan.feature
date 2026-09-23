@@ -132,6 +132,24 @@ Feature: Filing the Mayor's plan
     Then filing is refused, saying: waits on runner, which no story in this plan is
     And nothing is written
 
+  Scenario: A story whose formula is not installed is rejected and nothing is written
+    Given the plan:
+      """
+      {
+        "epic": {
+          "key": "skeleton",
+          "title": "Walking skeleton",
+          "defaults": { "rig": "millwright", "branch": "main", "harness": "claude", "model": "opus", "effort": "high", "host": "vps" }
+        },
+        "stories": [
+          { "key": "module", "title": "Go module", "acceptance": "make test passes.", "path": { "formula": "story" }, "needs": [] }
+        ]
+      }
+      """
+    When the plan is filed
+    Then filing is refused, saying: filing story module: formula story is not installed in this vault (installed: chore, tdd-feature)
+    And nothing is written
+
   Scenario: A story with no acceptance criteria is rejected
     Given the plan:
       """
