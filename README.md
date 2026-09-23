@@ -596,6 +596,8 @@ blog = "https://blog.example.com"  # optional: the blog answering is a sign of l
 [doctor]                           # what mw doctor checks; leave it out for the shipped defaults
 units = ["mw-dispatch.service", "mw-millhand-tick.service", "mw-millhand-review.service", "mw-doctor.service"]
 state_dir = "/root/.local/state/mw-doctor"  # default: ~/.local/state/mw-doctor
+reach = ["api.anthropic.com:443", "github.com:443"]  # default; what the wifi check tries to reach
+powershell = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"  # default; wifi check's Windows-backed sign
 ```
 
 A rig a story names but this host has no checkout of is said so plainly, and the
@@ -1556,13 +1558,16 @@ changes nothing: no cure runs, no state is written, no log line is appended.
 It leaves with 0 when every check is ok or cured, and 6 when any check is left
 faulty and uncured (damped, or its cure failed), so a timer's journal shows it.
 
-The `[doctor]` table of the config file says which units the **daemon-reload**
-check, the first one, asks about, and where state is kept:
+The `[doctor]` table of the config file says which units **daemon-reload**
+asks about, which hosts **wifi** tries to reach, where its powershell.exe
+sign is, and where state is kept:
 
 ```toml
 [doctor]
-units     = ["mw-dispatch.service", "mw-millhand-tick.service", "mw-millhand-review.service", "mw-doctor.service"]
-state_dir = "/root/.local/state/mw-doctor"   # default: ~/.local/state/mw-doctor
+units      = ["mw-dispatch.service", "mw-millhand-tick.service", "mw-millhand-review.service", "mw-doctor.service"]
+state_dir  = "/root/.local/state/mw-doctor"   # default: ~/.local/state/mw-doctor
+reach      = ["api.anthropic.com:443", "github.com:443"]
+powershell = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
 ```
 
 **daemon-reload** asks `systemctl --user show <unit> -p NeedDaemonReload` for
@@ -1570,6 +1575,23 @@ every unit and is faulty when any says yes; its cure is `systemctl --user
 daemon-reload`, its damper 10 minutes with a cap of 3, and its way back "none
 needed: daemon-reload is idempotent" (running it again, by hand or later, costs
 nothing). A unit systemd has never loaded reads cannot-tell, not faulty.
+
+**wifi** cures the fault behind mw-6ww.9: Wi-Fi stayed associated while DNS
+and every TCP connection from WSL failed for six hours, cured in 30 seconds by
+a manual Wi-Fi reconnect. Its probe resolves and TCP-connects (5 s each) to
+`reach`'s hosts, ok if any answers; unreachable is only faulty once this
+check's own record of when it first looked down is 5 minutes old or more —
+before that it logs "faulty (waiting 5m)" and cures nothing, so one blip does
+not bounce the network. Its cure reads the associated network's name (its
+SSID) with `netsh wlan show interfaces`, refusing (joining nothing) if the
+interface is not associated with one; then `netsh wlan disconnect`, a 3 s
+settle, `netsh wlan connect name=<ssid>` — the same network, never another —
+and up to 20 s giving the rejoin a chance before it returns. Its damper is 30
+minutes with a cap of 3 per outage, and its way back is that same `netsh wlan
+connect name=<ssid>` command, read fresh so it names whatever network is
+actually associated. `powershell` is not run; its presence is only this
+check's sign that the host is Windows-backed at all — absent, the check reads
+cannot-tell, inert, on every run.
 
 **Install**, once per host: `sh scripts/install-units.sh --enable mw-doctor`
 (see *Running a host on a timer*), which runs `mw-doctor.timer` at 2, 7, 12,
