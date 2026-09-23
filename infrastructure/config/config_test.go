@@ -741,6 +741,45 @@ func TestDoctorPowershellIsTheShippedPathUntilAHostSaysOtherwise(t *testing.T) {
 	}
 }
 
+func TestDoctorTunnelSettingsAreTheShippedDefaultsUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, "[watch]\nssh = \"vps-ssh\"\nhost = \"vps\"\noutside = [\"https://one.example\"]\n")
+
+	unit, err := config.DoctorTunnelUnit()
+	if err != nil || unit != config.DefaultDoctorTunnelUnit {
+		t.Fatalf("expected the default tunnel unit, got %q: %v", unit, err)
+	}
+	probe, err := config.DoctorTunnelProbe()
+	if err != nil || probe != config.DefaultDoctorTunnelProbe {
+		t.Fatalf("expected the default tunnel probe, got %q: %v", probe, err)
+	}
+	host, err := config.DoctorTunnelHost()
+	if err != nil || host != "vps" {
+		t.Fatalf("expected the [watch] table's host, got %q: %v", host, err)
+	}
+
+	writeConfig(t, "[watch]\nssh = \"vps-ssh\"\nhost = \"vps\"\noutside = [\"https://one.example\"]\n\n"+
+		"[doctor]\ntunnel_unit = \"other-tunnel.service\"\ntunnel_host = \"other-vps\"\ntunnel_probe = \"ss -ltn\"\n")
+
+	if unit, err = config.DoctorTunnelUnit(); err != nil || unit != "other-tunnel.service" {
+		t.Fatalf("expected the file's tunnel_unit, got %q: %v", unit, err)
+	}
+	if probe, err = config.DoctorTunnelProbe(); err != nil || probe != "ss -ltn" {
+		t.Fatalf("expected the file's tunnel_probe, got %q: %v", probe, err)
+	}
+	if host, err = config.DoctorTunnelHost(); err != nil || host != "other-vps" {
+		t.Fatalf("expected the file's tunnel_host, got %q: %v", host, err)
+	}
+}
+
+func TestDoctorTunnelHostWithNoWatchTableIsEmpty(t *testing.T) {
+	writeConfig(t, vpsConfig)
+
+	host, err := config.DoctorTunnelHost()
+	if err != nil || host != "" {
+		t.Fatalf("expected no host with no [watch] table to fall back to, got %q: %v", host, err)
+	}
+}
+
 func TestDispatchWaitsThreeTriesFifteenSecondsApartUntilAHostSaysOtherwise(t *testing.T) {
 	writeConfig(t, "")
 	tries, err := config.DispatchSyncTries()

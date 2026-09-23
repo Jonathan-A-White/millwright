@@ -26,10 +26,13 @@
 //	blog    = "https://blog.example.com"
 //
 //	[doctor]
-//	units      = ["mw-dispatch.service", "mw-millhand-tick.service"]
-//	state_dir  = "/root/.local/state/mw-doctor"
-//	reach      = ["api.anthropic.com:443", "github.com:443"]
-//	powershell = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+//	units        = ["mw-dispatch.service", "mw-millhand-tick.service"]
+//	state_dir    = "/root/.local/state/mw-doctor"
+//	reach        = ["api.anthropic.com:443", "github.com:443"]
+//	powershell   = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+//	tunnel_unit  = "reverse-tunnel.service"
+//	tunnel_host  = "vps"
+//	tunnel_probe = "ss -ltn sport = :2222"
 package config
 
 import (
@@ -772,6 +775,72 @@ func DoctorPowershell() (string, error) {
 		return powershell, nil
 	}
 	return DefaultDoctorPowershell, nil
+}
+
+// DefaultDoctorTunnelUnit is the user unit mw doctor's tunnel check restarts
+// when the [doctor] table says nothing: this rig's own reverse tunnel.
+const DefaultDoctorTunnelUnit = "reverse-tunnel.service"
+
+// DefaultDoctorTunnelProbe is the command mw doctor's tunnel check runs over
+// ssh on the VPS to check the tunnel's listener, when the [doctor] table
+// says nothing.
+const DefaultDoctorTunnelProbe = "ss -ltn sport = :2222"
+
+// DoctorTunnelUnit reports the user unit mw doctor's tunnel check restarts
+// when the tunnel is down: the `[doctor]` table's `tunnel_unit` key of
+// ~/.config/mw/config.toml, and DefaultDoctorTunnelUnit when the table says
+// nothing.
+func DoctorTunnelUnit() (string, error) {
+	return doctorTunnelSetting("tunnel_unit", DefaultDoctorTunnelUnit)
+}
+
+// DoctorTunnelProbe reports the command mw doctor's tunnel check runs over
+// ssh on the VPS to check the tunnel's listener: the `[doctor]` table's
+// `tunnel_probe` key of ~/.config/mw/config.toml, and
+// DefaultDoctorTunnelProbe when the table says nothing.
+func DoctorTunnelProbe() (string, error) {
+	return doctorTunnelSetting("tunnel_probe", DefaultDoctorTunnelProbe)
+}
+
+// DoctorTunnelHost reports the VPS's ssh name mw doctor's tunnel check
+// connects to: the `[doctor]` table's `tunnel_host` key of
+// ~/.config/mw/config.toml, and the `[watch]` table's `host` when the
+// [doctor] table says nothing — the tunnel this check minds carries the same
+// ssh `mw watch` rides.
+func DoctorTunnelHost() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	table, err := tableIn(filepath.Join(home, File), DoctorTable)
+	if err != nil {
+		return "", err
+	}
+	if host := strings.TrimSpace(table["tunnel_host"]); host != "" {
+		return host, nil
+	}
+	watch, err := Watch()
+	if err != nil {
+		return "", err
+	}
+	return watch.Host, nil
+}
+
+// doctorTunnelSetting reads one [doctor] table key, and fallback when the
+// table says nothing about it.
+func doctorTunnelSetting(key, fallback string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	table, err := tableIn(filepath.Join(home, File), DoctorTable)
+	if err != nil {
+		return "", err
+	}
+	if value := strings.TrimSpace(table[key]); value != "" {
+		return value, nil
+	}
+	return fallback, nil
 }
 
 // list reads a value that is a list of strings: `["a", "b"]`, or one string
