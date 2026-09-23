@@ -491,6 +491,95 @@ func TestQuietAlarmIsDampedForAnHourPerCondition(t *testing.T) {
 		"Quiet alarm for mayor: laptop last synced 31 min ago. Run mw status.\n")
 }
 
+// setNudgedFiredAt rewrites when a quiet alarm condition last fired, keeping
+// whatever wait the script itself last chose for it, so a test can jump the
+// clock without touching the backoff computation.
+func (f *factory) setNudgedFiredAt(key string, at time.Time) {
+	f.t.Helper()
+	wait := "0"
+	if fields := strings.Fields(f.read("state/nudged/" + key)); len(fields) >= 2 {
+		wait = fields[1]
+	}
+	f.write("state/nudged/"+key, fmt.Sprintf("%d %s\n", at.Unix(), wait), 0o644)
+}
+
+func TestQuietAlarmBacksOffDoublingCappedAtEightHours(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.nudges([2]string{"mw-gq6.30", "mw-gq6.30 in progress 73 min, no mail"})
+	line := "Quiet alarm for mayor: mw-gq6.30 in progress 73 min, no mail. Run mw status.\n"
+	typed := ""
+
+	// The first time, it is typed at once.
+	f.tick()
+	typed += line
+	f.typed(typed)
+
+	// Just under an hour later: still damped.
+	f.setNudgedFiredAt("mw-gq6.30", time.Now().Add(-59*time.Minute))
+	f.tick()
+	f.nothingMoreTyped(typed)
+
+	// An hour later: fires again, and backs off to two hours.
+	f.setNudgedFiredAt("mw-gq6.30", time.Now().Add(-61*time.Minute))
+	f.tick()
+	typed += line
+	f.typed(typed)
+
+	// Under two hours since that: still damped.
+	f.setNudgedFiredAt("mw-gq6.30", time.Now().Add(-119*time.Minute))
+	f.tick()
+	f.nothingMoreTyped(typed)
+
+	// Two hours since: fires, backs off to four hours.
+	f.setNudgedFiredAt("mw-gq6.30", time.Now().Add(-121*time.Minute))
+	f.tick()
+	typed += line
+	f.typed(typed)
+
+	// Four hours since: fires, backs off to eight hours, the cap.
+	f.setNudgedFiredAt("mw-gq6.30", time.Now().Add(-241*time.Minute))
+	f.tick()
+	typed += line
+	f.typed(typed)
+
+	// Nine hours since: fires again, because the wait is capped at eight
+	// hours rather than doubling again to sixteen (which would still be
+	// damped at nine).
+	f.setNudgedFiredAt("mw-gq6.30", time.Now().Add(-541*time.Minute))
+	f.tick()
+	typed += line
+	f.typed(typed)
+
+	// Under eight hours since that: still damped, confirming the wait held
+	// at the cap rather than growing further.
+	f.setNudgedFiredAt("mw-gq6.30", time.Now().Add(-479*time.Minute))
+	f.tick()
+	f.nothingMoreTyped(typed)
+}
+
+func TestQuietAlarmResetsWhenConditionClearsAndReturns(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.nudges([2]string{"mw-gq6.30", "mw-gq6.30 in progress 73 min, no mail"})
+	line := "Quiet alarm for mayor: mw-gq6.30 in progress 73 min, no mail. Run mw status.\n"
+
+	f.tick()
+	f.typed(line)
+
+	// The condition clears: mw nudge says nothing about it.
+	f.nudges()
+	f.tick()
+	f.nothingMoreTyped(line)
+
+	// It returns well inside the hour it would otherwise still be damped
+	// for: the damper was reset when the condition cleared, so it is typed
+	// again at once.
+	f.nudges([2]string{"mw-gq6.30", "mw-gq6.30 in progress 73 min, no mail"})
+	f.tick()
+	f.typed(line + line)
+}
+
 func TestQuietAlarmAndNewMailEachTypeTheirOwnLine(t *testing.T) {
 	f := newFactory(t)
 	f.mayor("idle", actingByID)

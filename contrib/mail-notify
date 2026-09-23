@@ -14,8 +14,10 @@
 #   3. lists `bd mail inbox` for the mailbox and compares its ids with the ids
 #      it has already announced;
 #   4. runs `mw nudge`, which reuses that same synced beads, for the quiet
-#      alarm's clauses, and drops any whose condition already fired within the
-#      last hour (recorded per condition in the state directory);
+#      alarm's clauses, and drops any whose condition already fired more
+#      recently than its damper: 1 h the first time, doubling on each repeat
+#      while the condition keeps holding, capped at 8 h, and reset once the
+#      condition clears (recorded per condition in the state directory);
 #   5. if there is new mail, or a clause survived the damper, finds the
 #      Mayor's window from the vault's .mayor-acting and, once it is not
 #      working and its input line is empty, types "New mail for mayor: <n>
@@ -63,8 +65,11 @@ SYNC_EVERY=${MW_MAIL_SYNC_EVERY:-300}
 STATE=${MW_MAIL_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mw-mail-notify}
 LOADAVG=${MW_MAIL_LOADAVG_FILE:-/proc/loadavg}
 
-# How long a quiet alarm condition, once typed, is left untyped again.
+# How long a quiet alarm condition, once typed, is left untyped again: 1 h the
+# first time, then doubled on each repeat while the condition keeps holding,
+# up to this cap.
 NUDGE_DAMPER_SECONDS=3600
+NUDGE_DAMPER_MAX_SECONDS=28800
 
 say() { echo "mail-notify: $*"; }
 die() { echo "mail-notify: $*" >&2; exit 1; }
@@ -131,29 +136,52 @@ fi
 [ -n "$new" ] && count=$(echo "$new" | wc -l | tr -d ' ')
 
 # 4. The quiet alarm: what `mw nudge` says is true right now, reusing the beads
-# the sync above already left in the vault, damped to at most once a
-# condition every NUDGE_DAMPER_SECONDS.
+# the sync above already left in the vault. A condition that keeps holding is
+# typed less and less often (see NUDGE_DAMPER_SECONDS above), so a sleeping
+# host is not re-announced every tick all night.
 tab=$(printf '\t')
 nudge_texts=""
 nudge_fired=""
+nudge_keys=""
 if nudge_raw=$(cd "$vault" && mw nudge 2>/dev/null) && [ -n "$nudge_raw" ]; then
 	while IFS="$tab" read -r key text; do
 		[ -n "$key" ] || continue
 		safe=$(printf '%s' "$key" | tr -c 'A-Za-z0-9._-' '_')
+		nudge_keys="$nudge_keys$safe
+"
 		fired=0
+		wait=0
 		if [ -f "$STATE/nudged/$safe" ]; then
-			last=$(cat "$STATE/nudged/$safe")
-			case $last in '' | *[!0-9]*) fired=0 ;; *) fired=$last ;; esac
+			read -r fired wait <"$STATE/nudged/$safe"
+			case $fired in '' | *[!0-9]*) fired=0 ;; esac
+			case $wait in '' | *[!0-9]*) wait=0 ;; esac
 		fi
-		if [ $((now - fired)) -lt "$NUDGE_DAMPER_SECONDS" ]; then
+		if [ $((now - fired)) -lt "$wait" ]; then
 			continue
 		fi
 		if [ -n "$nudge_texts" ]; then nudge_texts="$nudge_texts; $text"; else nudge_texts=$text; fi
-		nudge_fired="$nudge_fired$safe
+		if [ "$wait" -eq 0 ]; then
+			next=$NUDGE_DAMPER_SECONDS
+		else
+			next=$((wait * 2))
+			[ "$next" -gt "$NUDGE_DAMPER_MAX_SECONDS" ] && next=$NUDGE_DAMPER_MAX_SECONDS
+		fi
+		nudge_fired="$nudge_fired$safe $next
 "
 	done <<-EOF
 	$nudge_raw
 	EOF
+fi
+
+# A condition `mw nudge` no longer names has cleared: drop its damper, so its
+# next return is typed at once instead of held to whatever wait it had
+# reached before.
+if [ -d "$STATE/nudged" ]; then
+	for file in "$STATE/nudged"/*; do
+		[ -e "$file" ] || continue
+		base=$(basename "$file")
+		echo "$nudge_keys" | grep -qxF "$base" || rm -f "$file"
+	done
 fi
 
 [ -n "$new" ] || [ -n "$nudge_texts" ] || exit 0
@@ -237,8 +265,8 @@ if [ -n "$nudge_texts" ]; then
 		line="Quiet alarm for $MAILBOX: $nudge_texts. Run mw status."
 		if type_line "$line"; then
 			mkdir -p "$STATE/nudged"
-			printf '%s' "$nudge_fired" | while IFS= read -r safe; do
-				[ -n "$safe" ] && echo "$now" >"$STATE/nudged/$safe"
+			printf '%s' "$nudge_fired" | while IFS=" " read -r safe wait; do
+				[ -n "$safe" ] && echo "$now $wait" >"$STATE/nudged/$safe"
 			done
 			say "typed into $target: $line"
 		else
