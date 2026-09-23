@@ -68,6 +68,44 @@ Feature: mw doctor
     And the doctor log is empty
     And the check "widget" was not cured
 
+  Scenario: A check that cannot tell writes a note naming the verdict, the reason and its last log lines
+    Given a doctor check "widget" whose probe cannot tell "no reading"
+    When mw doctor runs
+    Then mw doctor leaves with the status 0
+    And the note "doctor.widget" holds "cannot-tell"
+    And the note "doctor.widget" holds "no reading"
+    And the note "doctor.widget" holds "widget cannot-tell no reading"
+
+  Scenario: A cure that fails once leaves no note, but failing again writes one
+    Given a doctor check "widget" whose probe says faulty "misaligned"
+    And the check "widget"'s damper is 1 minute, cap 3
+    And the check "widget"'s cure fails, saying "no wrench found"
+    When mw doctor runs
+    Then the note "doctor.widget" does not exist
+    When 1 minute goes by
+    And mw doctor runs
+    Then the note "doctor.widget" holds "cure-failed"
+    And the note "doctor.widget" holds "no wrench found"
+
+  Scenario: A check back to ok clears its note
+    Given a doctor check "widget" whose probe cannot tell "no reading"
+    When mw doctor runs
+    Then the note "doctor.widget" holds "cannot-tell"
+    When the check "widget"'s probe says ok
+    And mw doctor runs
+    Then the note "doctor.widget" does not exist
+
+  Scenario: A notes port that fails does not change the exit status
+    Given a doctor check "widget" whose probe says faulty "misaligned"
+    And the check "widget"'s damper is 1 minute, cap 1
+    And the notes port fails, saying "kv unavailable"
+    When mw doctor runs
+    And 1 minute goes by
+    And mw doctor runs
+    Then mw doctor leaves with the status 6
+    And the doctor log holds "note-failed"
+    And the doctor log holds "kv unavailable"
+
   Scenario: The real daemon-reload check cures with systemctl --user daemon-reload
     Given a fake systemctl that says "mw-dispatch.service" needs a reload
     When mw doctor's daemon-reload check runs for real

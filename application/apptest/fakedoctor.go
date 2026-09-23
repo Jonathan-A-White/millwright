@@ -2,6 +2,7 @@ package apptest
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,6 +13,7 @@ var (
 	_ application.DoctorState = (*FakeDoctorState)(nil)
 	_ application.DoctorLog   = (*FakeDoctorLog)(nil)
 	_ application.DoctorCheck = (*FakeDoctorCheck)(nil)
+	_ application.DoctorNotes = (*FakeDoctorNotes)(nil)
 )
 
 // FakeDoctorState is an in-memory application.DoctorState: one episode per
@@ -87,6 +89,11 @@ func (f *FakeDoctorLog) Lines() []string {
 	return append([]string(nil), f.lines...)
 }
 
+// Read implements application.DoctorLog.
+func (f *FakeDoctorLog) Read(_ context.Context) ([]string, error) {
+	return f.Lines(), nil
+}
+
 // FakeDoctorCheck is a scriptable application.DoctorCheck: what its probe and
 // its cure answer are set with the fields, and how many times each was
 // called is read back with the methods.
@@ -147,4 +154,75 @@ func (f *FakeDoctorCheck) Cures() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.cures
+}
+
+// FakeDoctorNotes is an in-memory application.DoctorNotes: one value per
+// key, kept until cleared. Err, when set, is what every write and clear
+// answers instead, standing in for a notes port that cannot be reached.
+type FakeDoctorNotes struct {
+	mu    sync.Mutex
+	notes map[string]string
+
+	Err error
+}
+
+// NewFakeDoctorNotes is a notes port with nothing kept yet.
+func NewFakeDoctorNotes() *FakeDoctorNotes {
+	return &FakeDoctorNotes{notes: map[string]string{}}
+}
+
+// Note implements application.DoctorNotes.
+func (f *FakeDoctorNotes) Note(_ context.Context, key string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return "", f.Err
+	}
+	return f.notes[key], nil
+}
+
+// SetNote implements application.DoctorNotes.
+func (f *FakeDoctorNotes) SetNote(_ context.Context, key, value string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return f.Err
+	}
+	f.notes[key] = value
+	return nil
+}
+
+// ClearNote implements application.DoctorNotes.
+func (f *FakeDoctorNotes) ClearNote(_ context.Context, key string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return f.Err
+	}
+	delete(f.notes, key)
+	return nil
+}
+
+// NotesWithPrefix implements application.DoctorNotes.
+func (f *FakeDoctorNotes) NotesWithPrefix(_ context.Context, prefix string) (map[string]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	found := map[string]string{}
+	for key, value := range f.notes {
+		if strings.HasPrefix(key, prefix) {
+			found[key] = value
+		}
+	}
+	return found, nil
+}
+
+// Get is the value kept for key, and whether it is there at all.
+func (f *FakeDoctorNotes) Get(key string) (string, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	value, ok := f.notes[key]
+	return value, ok
 }

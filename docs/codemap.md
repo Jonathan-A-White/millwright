@@ -7,10 +7,10 @@ Where everything is; `CONTEXT.md` has the vocabulary, ADRs the reasons.
 | Layer | Directory | Rule |
 | --- | --- | --- |
 | domain | `domain/` | Value types, validation; stdlib only. |
-| application | `application/` | One file per use case, plus ports; never imports an adapter. |
+| application | `application/` | One file per use case, plus ports; imports no adapter. |
 | fakes | `application/apptest/` | In-memory stand-ins for the ports. |
-| infrastructure | `infrastructure/` | One subpackage per adapter; only place bd, git, tmux, claude, disk touched. |
-| command line | `cmd/mw/` | Cobra wiring only: read config, run the use case. |
+| infrastructure | `infrastructure/` | One subpackage per adapter; place bd, git, tmux, claude, disk touched. |
+| command line | `cmd/mw/` | Cobra wiring: read config, run the use case. |
 | features | `features/` | Gherkin; step code in `features/steps/`. |
 | template | `template/` | What a fresh vault is born from (`embed.go`); no host detail. |
 
@@ -37,7 +37,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `ReapArmer` | `application/seatreap.go` | `infrastructure/reaper/arm.go` | `application/apptest/fakereap.go` |
 | `Transcripts` | `application/seatcontext.go` | `infrastructure/claude/transcripts.go` | none |
 | `WatchProbes` | `application/watch.go` | `infrastructure/watch/watch.go` | `application/apptest/fakewatch.go` |
-| `DoctorCheck`, `DoctorState`, `DoctorLog` | `application/doctor.go` | `infrastructure/doctor` | none |
+| `DoctorCheck`, `DoctorState`, `DoctorLog`, `DoctorNotes` | `application/doctor.go` | `infrastructure/doctor` | none |
 | `TickLog` | `application/millhandtick.go` | `infrastructure/ticklog/ticklog.go` | `application/apptest/faketicklog.go` |
 | `Worktrees` | `application/worktrees.go` | `infrastructure/rig/worktree.go` | `application/dispatch_test.go` |
 | `SyncHaltMarker` | `application/sync.go` | `infrastructure/synchalt/synchalt.go` | `application/apptest/fakesynchalt.go` |

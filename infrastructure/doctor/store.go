@@ -115,6 +115,24 @@ func (s *Store) Append(_ context.Context, line string) error {
 	return file.Close()
 }
 
+// Read implements application.DoctorLog: every line the log holds, oldest
+// first; none, and no error, for a log nothing has been written to yet.
+func (s *Store) Read(_ context.Context) ([]string, error) {
+	path := filepath.Join(s.Dir, LogFile)
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", path, err)
+	}
+	text := strings.TrimRight(string(data), "\n")
+	if text == "" {
+		return nil, nil
+	}
+	return strings.Split(text, "\n"), nil
+}
+
 func formatTime(at time.Time) string {
 	if at.IsZero() {
 		return ""

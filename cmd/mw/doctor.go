@@ -12,8 +12,9 @@ import (
 
 // newDoctorCmd builds `mw doctor`: a table of checks, each its own probe,
 // cure, damper and way back, run on this host and logged here. It calls
-// nothing but a check's own probe or cure, writes no beads note, sends no
-// mail, and touches no tracker.
+// nothing but a check's own probe or cure, and never AI, mail or a push
+// notice itself: a check left needing a person is a beads note, one key per
+// check, and `mw millhand tick` is what wakes the Millhand for it.
 func newDoctorCmd() *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
@@ -83,6 +84,7 @@ func newDoctorCmd() *cobra.Command {
 				},
 				State: store,
 				Log:   store,
+				Notes: mwGateway(vault, host),
 				Out:   cmd.OutOrStdout(),
 			}, name, dryRun)
 		},

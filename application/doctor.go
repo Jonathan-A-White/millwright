@@ -90,6 +90,41 @@ type DoctorState interface {
 // time, dated by the caller.
 type DoctorLog interface {
 	Append(ctx context.Context, line string) error
+
+	// Read is every line the log holds, oldest first; none, and no error, for
+	// a log nothing has been written to yet. Notes read a check's own recent
+	// lines out of it.
+	Read(ctx context.Context) ([]string, error)
+}
+
+// DoctorNotePrefix is the prefix every check's own note is kept under.
+const DoctorNotePrefix = "doctor."
+
+// DoctorNoteKey is the note kept for one check: DoctorNoteKey("wifi") ==
+// "doctor.wifi".
+func DoctorNoteKey(check string) string { return DoctorNotePrefix + check }
+
+// DoctorNoteLogLines is how many of a check's own most recent log lines its
+// note carries, so a person or the Millhand reading the note has the recent
+// history without opening the log itself.
+const DoctorNoteLogLines = 3
+
+// DoctorNotes is where the doctor writes and clears the note that says a
+// check needs a person's attention, and where mw millhand tick later finds
+// every note under DoctorNotePrefix and remembers which it has already woken
+// the Millhand for. It is TrackerSync's own Note, SetNote and ClearNote,
+// narrowed, plus a way to list every note under one prefix without knowing
+// the checks' names ahead of time — the same shape SweepNotes is, with that
+// one addition. The doctor may be offline: a write or clear that fails is
+// logged as note-failed and the run goes on; the next run retries.
+type DoctorNotes interface {
+	Note(ctx context.Context, key string) (string, error)
+	SetNote(ctx context.Context, key, value string) error
+	ClearNote(ctx context.Context, key string) error
+
+	// NotesWithPrefix reports every note whose key has the given prefix, key
+	// to value. A nil map, no error, is no notes under that prefix.
+	NotesWithPrefix(ctx context.Context, prefix string) (map[string]string, error)
 }
 
 // DoctorFault is what Run returns when this pass ends with a check faulty and
@@ -201,6 +236,11 @@ type Doctor struct {
 	State  DoctorState
 	Log    DoctorLog
 
+	// Notes is where a check needing a person's attention is written as a
+	// note, and cleared once it is ok again. A nil Notes writes and clears
+	// nothing, so a caller with nowhere to keep one still runs.
+	Notes DoctorNotes
+
 	// Now is the clock episodes and log lines are read and dated by. The zero
 	// value reads the real one.
 	Now func() time.Time
@@ -285,6 +325,7 @@ func (d Doctor) one(ctx context.Context, check DoctorCheck, dryRun bool) (Doctor
 			if err := d.append(ctx, DoctorResult{Check: name, Verdict: "ok"}); err != nil {
 				return DoctorResult{}, err
 			}
+			d.clearNote(ctx, name)
 		}
 		return DoctorResult{Check: name, Verdict: "ok"}, nil
 
@@ -294,6 +335,7 @@ func (d Doctor) one(ctx context.Context, check DoctorCheck, dryRun bool) (Doctor
 			if err := d.append(ctx, result); err != nil {
 				return DoctorResult{}, err
 			}
+			d.writeNote(ctx, name, result)
 		}
 		return result, nil
 	}
@@ -318,14 +360,21 @@ func (d Doctor) faulty(ctx context.Context, check DoctorCheck, reason string, dr
 		return DoctorResult{}, fmt.Errorf("reading %s's doctor state: %w", name, err)
 	}
 	wait, capPerEpisode := check.Damper()
-	damped := (capPerEpisode > 0 && episode.Cures >= capPerEpisode) ||
-		(!episode.LastCure.IsZero() && d.now().Sub(episode.LastCure) < wait)
+	capped := capPerEpisode > 0 && episode.Cures >= capPerEpisode
+	cooling := !episode.LastCure.IsZero() && d.now().Sub(episode.LastCure) < wait
+	damped := capped || cooling
 
 	if damped {
 		result := DoctorResult{Check: name, Verdict: "damped", Reason: reason, WayBack: check.WayBack(), Faulty: true}
 		if !dryRun {
 			if err := d.append(ctx, result); err != nil {
 				return DoctorResult{}, err
+			}
+			// Only the cap ending an episode is a person's to look at: the
+			// ordinary cooldown between two cures is expected, and passes on
+			// its own.
+			if capped {
+				d.writeNote(ctx, name, result)
 			}
 		}
 		return result, nil
@@ -350,6 +399,11 @@ func (d Doctor) faulty(ctx context.Context, check DoctorCheck, reason string, dr
 		if err := d.append(ctx, result); err != nil {
 			return DoctorResult{}, err
 		}
+		// The first failed cure of an episode is not yet a person's to look
+		// at: the damper gives it another try first. The second is.
+		if episode.Cures >= 2 {
+			d.writeNote(ctx, name, result)
+		}
 		return result, nil
 	}
 
@@ -367,6 +421,57 @@ func (d Doctor) append(ctx context.Context, result DoctorResult) error {
 		return fmt.Errorf("appending to the doctor log: %w", err)
 	}
 	return nil
+}
+
+// writeNote sets a check's own note to this result, dated, with its last
+// DoctorNoteLogLines lines from the log beside it. The doctor may be
+// offline: a write that fails is logged as note-failed, and the run goes on
+// unchanged — the exit status is decided already, by the result's own
+// Faulty, not by whether the note got written. The next run retries.
+func (d Doctor) writeNote(ctx context.Context, check string, result DoctorResult) {
+	if d.Notes == nil {
+		return
+	}
+	value := d.now().UTC().Format(time.RFC3339) + " " + result.Verdict
+	if result.Reason != "" {
+		value += " " + result.Reason
+	}
+	value += " | last log lines: " + strings.Join(d.checkLogLines(ctx, check), " | ")
+	if err := d.Notes.SetNote(ctx, DoctorNoteKey(check), value); err != nil {
+		_ = d.append(ctx, DoctorResult{Check: check, Verdict: "note-failed", Reason: oneLine(err.Error())})
+	}
+}
+
+// clearNote takes back a check's own note, now that its probe says ok. A
+// clear that fails is logged as note-failed the same way a write is.
+func (d Doctor) clearNote(ctx context.Context, check string) {
+	if d.Notes == nil {
+		return
+	}
+	if err := d.Notes.ClearNote(ctx, DoctorNoteKey(check)); err != nil {
+		_ = d.append(ctx, DoctorResult{Check: check, Verdict: "note-failed", Reason: oneLine(err.Error())})
+	}
+}
+
+// checkLogLines is this check's own last DoctorNoteLogLines lines out of the
+// log, oldest first; none of them, on a log Read cannot answer, is not a
+// failure — the note is written with what there is.
+func (d Doctor) checkLogLines(ctx context.Context, check string) []string {
+	lines, err := d.Log.Read(ctx)
+	if err != nil {
+		return nil
+	}
+	var matched []string
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[1] == check {
+			matched = append(matched, line)
+		}
+	}
+	if len(matched) > DoctorNoteLogLines {
+		matched = matched[len(matched)-DoctorNoteLogLines:]
+	}
+	return matched
 }
 
 // now is the clock episodes and log lines are read and dated by.

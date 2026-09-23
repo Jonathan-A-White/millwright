@@ -32,6 +32,7 @@ type doctorContext struct {
 
 	state *apptest.FakeDoctorState
 	log   *apptest.FakeDoctorLog
+	notes *apptest.FakeDoctorNotes
 	now   time.Time
 
 	systemctlCalls string
@@ -52,6 +53,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 		*c = doctorContext{
 			state: apptest.NewFakeDoctorState(),
 			log:   &apptest.FakeDoctorLog{},
+			notes: apptest.NewFakeDoctorNotes(),
 			now:   time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC),
 		}
 		return ctx, nil
@@ -59,6 +61,8 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 
 	ctx.Given(`^a doctor check "([^"]*)" whose probe says ok$`, c.aCheckWhoseProbeSaysOK)
 	ctx.Given(`^a doctor check "([^"]*)" whose probe says faulty "([^"]*)"$`, c.aCheckWhoseProbeSaysFaulty)
+	ctx.Given(`^a doctor check "([^"]*)" whose probe cannot tell "([^"]*)"$`, c.aCheckWhoseProbeCannotTell)
+	ctx.Given(`^the notes port fails, saying "([^"]*)"$`, c.theNotesPortFails)
 	ctx.Given(`^the check "([^"]*)"'s way back is "([^"]*)"$`, c.theChecksWayBackIs)
 	ctx.Given(`^the check "([^"]*)"'s damper is (\d+) minutes?, cap (\d+)$`, c.theChecksDamperIs)
 	ctx.Given(`^the check "([^"]*)"'s cure fails, saying "([^"]*)"$`, c.theChecksCureFails)
@@ -88,6 +92,8 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^netsh was not run$`, c.netshWasNotRun)
 	ctx.Then(`^netsh was run with "([^"]*)" (\d+) times?$`, c.netshWasRunWithNTimes)
 	ctx.Then(`^the doctor log holds a way back naming the commit it made$`, c.theDoctorLogHoldsAWayBackNamingTheCommitItMade)
+	ctx.Then(`^the note "([^"]*)" holds "([^"]*)"$`, c.theNoteHolds)
+	ctx.Then(`^the note "([^"]*)" does not exist$`, c.theNoteDoesNotExist)
 }
 
 func (c *doctorContext) fake(name string) *apptest.FakeDoctorCheck {
@@ -118,6 +124,18 @@ func (c *doctorContext) aCheckWhoseProbeSaysFaulty(name, reason string) error {
 	fake := c.addFake(name)
 	fake.Verdict = application.DoctorFaulty
 	fake.Reason = reason
+	return nil
+}
+
+func (c *doctorContext) aCheckWhoseProbeCannotTell(name, reason string) error {
+	fake := c.addFake(name)
+	fake.Verdict = application.DoctorCannotTell
+	fake.Reason = reason
+	return nil
+}
+
+func (c *doctorContext) theNotesPortFails(said string) error {
+	c.notes.Err = errors.New(said)
 	return nil
 }
 
@@ -171,6 +189,7 @@ func (c *doctorContext) run(dryRun bool) error {
 		Checks: c.checks(),
 		State:  c.state,
 		Log:    c.log,
+		Notes:  c.notes,
 		Now:    func() time.Time { return c.now },
 		Out:    &c.out,
 	}.Run(context.Background(), "", dryRun)
@@ -494,6 +513,24 @@ func (c *doctorContext) theDoctorLogHoldsAWayBackNamingTheCommitItMade() error {
 		}
 	}
 	return fmt.Errorf("expected the doctor log to hold a way back naming commit %s, got %v", hash, c.log.Lines())
+}
+
+func (c *doctorContext) theNoteHolds(key, substr string) error {
+	value, ok := c.notes.Get(key)
+	if !ok {
+		return fmt.Errorf("expected the note %q to exist, it does not", key)
+	}
+	if !strings.Contains(value, substr) {
+		return fmt.Errorf("expected the note %q to hold %q, it holds %q", key, substr, value)
+	}
+	return nil
+}
+
+func (c *doctorContext) theNoteDoesNotExist(key string) error {
+	if value, ok := c.notes.Get(key); ok {
+		return fmt.Errorf("expected the note %q not to exist, it holds %q", key, value)
+	}
+	return nil
 }
 
 func (c *doctorContext) netshCallLines() ([]string, error) {
