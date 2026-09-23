@@ -2,6 +2,7 @@ package beads
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -19,6 +20,7 @@ import (
 var (
 	_ application.TrackerSync  = (*Gateway)(nil)
 	_ application.TrackerNotes = (*Gateway)(nil)
+	_ application.DoctorNotes  = (*Gateway)(nil)
 )
 
 // beadsDir is where bd keeps everything about one vault's database — the
@@ -82,6 +84,31 @@ func (g *Gateway) Note(ctx context.Context, key string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// NotesWithPrefix implements application.DoctorNotes. bd's own `kv list` has
+// no prefix filter, so this reads the whole table and filters it here; a
+// non-string value (bd's own "schema_version" among them) is not a note and
+// is skipped rather than failing the read.
+func (g *Gateway) NotesWithPrefix(ctx context.Context, prefix string) (map[string]string, error) {
+	out, err := g.call(ctx, "kv", "list", "--json")
+	if err != nil {
+		return nil, err
+	}
+	var all map[string]any
+	if err := json.Unmarshal(out, &all); err != nil {
+		return nil, fmt.Errorf("parsing bd kv list --json: %w", err)
+	}
+	found := map[string]string{}
+	for key, value := range all {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		if text, ok := value.(string); ok {
+			found[key] = text
+		}
+	}
+	return found, nil
 }
 
 // GC implements application.TrackerSync: asks bd to reclaim the disk space

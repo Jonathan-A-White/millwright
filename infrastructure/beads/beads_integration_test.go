@@ -562,6 +562,55 @@ func TestGatewayKeepsWhatSweepSawWithoutFilingEvents(t *testing.T) {
 	}
 }
 
+// mw doctor writes a note per check under application.DoctorNotePrefix, and
+// mw millhand tick finds every one of them without knowing the checks' names
+// ahead of time, by NotesWithPrefix over bd's own `kv list --json`. This
+// shows that round trip against a real database: writing two checks' notes
+// and a note outside the prefix, and reading back only the two that match.
+func TestGatewayNotesWithPrefixFindsTheDoctorsNotes(t *testing.T) {
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	gateway := beads.New(vault)
+	var _ application.DoctorNotes = gateway
+
+	if found, err := gateway.NotesWithPrefix(ctx, application.DoctorNotePrefix); err != nil || len(found) != 0 {
+		t.Fatalf("expected no doctor notes yet, got %+v: %v", found, err)
+	}
+
+	wifi := application.DoctorNoteKey("wifi")
+	tunnel := application.DoctorNoteKey("tunnel")
+	if err := gateway.SetNote(ctx, wifi, "2026-09-23T12:00:00Z cannot-tell faulty (waiting 5m)"); err != nil {
+		t.Fatalf("writing %s: %v", wifi, err)
+	}
+	if err := gateway.SetNote(ctx, tunnel, "2026-09-23T12:00:00Z damped restart failed"); err != nil {
+		t.Fatalf("writing %s: %v", tunnel, err)
+	}
+	if err := gateway.SetNote(ctx, "not-a-doctor-note", "unrelated"); err != nil {
+		t.Fatalf("writing an unrelated note: %v", err)
+	}
+
+	found, err := gateway.NotesWithPrefix(ctx, application.DoctorNotePrefix)
+	if err != nil {
+		t.Fatalf("reading the doctor notes: %v", err)
+	}
+	if len(found) != 2 || found[wifi] == "" || found[tunnel] == "" {
+		t.Fatalf("expected exactly the two doctor notes, got %+v", found)
+	}
+
+	if err := gateway.ClearNote(ctx, wifi); err != nil {
+		t.Fatalf("clearing %s: %v", wifi, err)
+	}
+	found, err = gateway.NotesWithPrefix(ctx, application.DoctorNotePrefix)
+	if err != nil {
+		t.Fatalf("reading the doctor notes after clearing one: %v", err)
+	}
+	if len(found) != 1 || found[tunnel] == "" {
+		t.Fatalf("expected only the tunnel note left, got %+v", found)
+	}
+}
+
 // Filing a plan is the other half of the gateway: it writes beads rather than
 // reading them. Everything here goes into one throwaway database too.
 func TestGatewayFilesAnEpicWithItsStoriesHeld(t *testing.T) {

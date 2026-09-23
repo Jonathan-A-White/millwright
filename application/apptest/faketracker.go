@@ -1014,6 +1014,22 @@ func (f *FakeTracker) SetNote(_ context.Context, key, value string) error {
 	return nil
 }
 
+// NotesWithPrefix implements application.DoctorNotes.
+func (f *FakeTracker) NotesWithPrefix(_ context.Context, prefix string) (map[string]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	found := map[string]string{}
+	for key, value := range f.notes {
+		if strings.HasPrefix(key, prefix) {
+			found[key] = value
+		}
+	}
+	return found, nil
+}
+
 // PublishedNote reads a note as the other host would on its next sync: as it
 // stood when the last sync that got through pushed it. "" when that sync did
 // not carry the key, or none has got through.
@@ -1164,6 +1180,7 @@ var (
 	_ application.WorkTracker  = (*FakeTracker)(nil)
 	_ application.TrackerSync  = (*FakeTracker)(nil)
 	_ application.TrackerNotes = (*FakeTracker)(nil)
+	_ application.DoctorNotes  = (*FakeTracker)(nil)
 )
 
 // priorityOr is a priority a story was filed with, or the default when it was
