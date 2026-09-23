@@ -822,6 +822,49 @@ verifies the two unit files with `systemd-analyze` and starts nothing; it fails
 only on what `systemd-analyze` says about the rig's own unit files, and prints
 what it says about the host's own user units as ignored.
 
+## The seat's tmux server on the VPS
+
+A host whose seats run as root (the VPS) needs its tmux server itself kept up
+by something that does not die with a user manager: `contrib/systemd/system/`
+holds `mw-seat-tmux.service`, a *system* unit (no `--user`, no login needed)
+that makes sure a tmux server with a session named `0` — the default socket
+`infrastructure/tmux/tmux.go` talks to — exists, and does nothing when one
+already does. It never kills the server it starts or found: `KillMode=process`
+and `ExecStop=/bin/true` mean stopping or restarting the unit leaves every
+session inside alone, and `OOMScoreAdjust=-900` makes the kernel spare it
+before almost anything else on the box.
+
+Why a system unit and not `systemctl --user`: on the VPS the tmux server used
+to live under root's `--user` manager (`user-0.slice`). When the OOM killer
+took the manager, systemd killed everything under it, the Mayor's session
+included — and with nobody logging in to restart the manager, nothing would
+have brought it back. A system unit answers to no user manager.
+
+The same reasoning gives `mw-doctor` a system copy: `contrib/systemd/system/mw-doctor.service`
+and `.timer`, the same pair as the `--user` one above (same cadence, same
+cures) but run as root (`User=root`) and started at boot, not at login.
+Install both with `sh scripts/install-units.sh --system --enable`, run as
+root: it links every file under `contrib/systemd/system/` into
+`/etc/systemd/system`, `systemctl daemon-reload`s once, and with `--enable`
+arms `mw-seat-tmux.service` and `mw-doctor.timer`. Without root it refuses in
+one line and changes nothing; it never touches the `--user` directory, and
+`--dry-run` says what it would do.
+
+A system unit gets a bare `PATH` too: `contrib/seat.env.example` is a template
+for `/root/.config/mw/seat.env`'s one `PATH=` line (where `tmux`, and anything
+the seat's own commands need, live), read by `mw-seat-tmux.service` via
+`EnvironmentFile=-%h/.config/mw/seat.env` (`%h` is `/root` for the system
+manager). A server a login already started is left exactly as it is: the unit
+never restarts or replaces one that is already up, so it is not this unit's
+server — not OOM-spared by it — until that server dies and the unit starts the
+next one. Check a server's actual score with
+`cat /proc/<its pid>/oom_score_adj`. The way back: `systemctl disable --now
+mw-seat-tmux.service mw-doctor.timer`, then remove the symlinks the install
+printed. `scripts/check-timer-units.sh` verifies the three system unit files
+with `systemd-analyze` (no `--user`) the same way, and proves
+`mw-seat-tmux.service`'s `ExecStart` against a stand-in `tmux`: a no-op when
+session `0` is already up, `tmux new-session -d -s 0` when it is not.
+
 ## Mail
 
 ```sh
@@ -1646,6 +1689,10 @@ start together. Unlike the rig's other units the service does not rely on
 whose own environment may be at fault is the point. `scripts/check-timer-units.sh`
 (in `make lint`) verifies the pair with `systemd-analyze` and starts nothing.
 See `features/doctor.feature`.
+
+On a host whose seats run as root (the VPS), install the *system* copy of
+this pair instead — `sh scripts/install-units.sh --system --enable` — so it
+answers to no user manager; see *The seat's tmux server on the VPS*, below.
 
 ## Heavy work on a small host
 
