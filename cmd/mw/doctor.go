@@ -52,12 +52,21 @@ func newDoctorCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			vault, err := config.Vault()
+			if err != nil {
+				return err
+			}
+			host, err := config.Host()
+			if err != nil {
+				return err
+			}
 
 			store := doctor.New(dir)
 			return runDoctor(cmd, application.Doctor{
 				Checks: application.DoctorChecks{
 					doctor.NewDaemonReload(units),
 					doctor.NewWifi(reach, powershell, store),
+					doctor.NewVaultDirty(vault, host),
 				},
 				State: store,
 				Log:   store,
