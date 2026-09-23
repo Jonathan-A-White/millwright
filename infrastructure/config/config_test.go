@@ -658,6 +658,51 @@ func TestAWatchTableThatCannotBeUsedSaysWhatIsMissing(t *testing.T) {
 	}
 }
 
+func TestDoctorUnitsIsTheShippedFourUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, vpsConfig)
+
+	units, err := config.DoctorUnits()
+	if err != nil {
+		t.Fatalf("reading the doctor's units: %v", err)
+	}
+	if strings.Join(units, ",") != strings.Join(config.DefaultDoctorUnits, ",") {
+		t.Fatalf("expected the default units, got %+v", units)
+	}
+
+	writeConfig(t, "[doctor]\nunits = [\"mw-dispatch.service\", \"mw-doctor.service\"]\n")
+	units, err = config.DoctorUnits()
+	if err != nil {
+		t.Fatalf("reading the doctor's units: %v", err)
+	}
+	if got := strings.Join(units, " "); got != "mw-dispatch.service mw-doctor.service" {
+		t.Fatalf("expected the file's units, got %q", got)
+	}
+}
+
+func TestDoctorStateDirIsUnderHomeUntilAHostSaysOtherwise(t *testing.T) {
+	home := writeConfig(t, vpsConfig)
+
+	dir, err := config.DoctorStateDir()
+	if err != nil {
+		t.Fatalf("reading the doctor's state dir: %v", err)
+	}
+	if want := filepath.Join(home, config.DefaultDoctorStateDir); dir != want {
+		t.Fatalf("expected %q, got %q", want, dir)
+	}
+
+	writeConfig(t, "[doctor]\nstate_dir = \"/var/lib/mw-doctor\"\n")
+	if dir, err = config.DoctorStateDir(); err != nil || dir != "/var/lib/mw-doctor" {
+		t.Fatalf("expected the file's state_dir, got %q: %v", dir, err)
+	}
+}
+
+func TestDoctorStateDirRefusesARelativePath(t *testing.T) {
+	writeConfig(t, "[doctor]\nstate_dir = \"relative/path\"\n")
+	if _, err := config.DoctorStateDir(); err == nil || !strings.Contains(err.Error(), "full path") {
+		t.Fatalf("expected a relative state_dir to be refused, got %v", err)
+	}
+}
+
 func TestDispatchWaitsThreeTriesFifteenSecondsApartUntilAHostSaysOtherwise(t *testing.T) {
 	writeConfig(t, "")
 	tries, err := config.DispatchSyncTries()

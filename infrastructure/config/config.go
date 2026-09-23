@@ -24,6 +24,10 @@
 //	host    = "vps"
 //	outside = ["https://example.com", "https://www.wikipedia.org"]
 //	blog    = "https://blog.example.com"
+//
+//	[doctor]
+//	units     = ["mw-dispatch.service", "mw-millhand-tick.service"]
+//	state_dir = "/root/.local/state/mw-doctor"
 package config
 
 import (
@@ -79,6 +83,9 @@ const (
 
 // WatchTable is the table of the config file that says what `mw watch` looks at.
 const WatchTable = "watch"
+
+// DoctorTable is the table of the config file that says what `mw doctor` checks.
+const DoctorTable = "doctor"
 
 // DefaultCap is how many sessions may run at once on a host that does not say.
 // One, because the smaller of the factory's two hosts has a single core and
@@ -660,6 +667,59 @@ func Watch() (WatchSettings, error) {
 			WatchTable, path, strings.Join(missing, ", "))
 	}
 	return watch, nil
+}
+
+// DefaultDoctorUnits are the user units mw doctor's daemon-reload check asks
+// systemctl about when the [doctor] table says nothing: the units this rig
+// ships.
+var DefaultDoctorUnits = []string{
+	"mw-dispatch.service", "mw-millhand-tick.service", "mw-millhand-review.service", "mw-doctor.service",
+}
+
+// DefaultDoctorStateDir is where mw doctor keeps its episode state and its
+// log, under the home directory, when the [doctor] table says nothing.
+var DefaultDoctorStateDir = filepath.Join(".local", "state", "mw-doctor")
+
+// DoctorUnits reports the user units mw doctor's daemon-reload check asks
+// systemctl about, read from the `[doctor]` table's `units` key of
+// ~/.config/mw/config.toml, and DefaultDoctorUnits when the table says
+// nothing.
+func DoctorUnits() ([]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	table, err := tableIn(filepath.Join(home, File), DoctorTable)
+	if err != nil {
+		return nil, err
+	}
+	if units := list(table["units"]); len(units) > 0 {
+		return units, nil
+	}
+	return DefaultDoctorUnits, nil
+}
+
+// DoctorStateDir reports where mw doctor keeps its episode state and its log:
+// the `[doctor]` table's `state_dir` key of ~/.config/mw/config.toml, a full
+// path, and DefaultDoctorStateDir under the home directory when the table
+// says nothing.
+func DoctorStateDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	table, err := tableIn(path, DoctorTable)
+	if err != nil {
+		return "", err
+	}
+	if dir := strings.TrimSpace(table["state_dir"]); dir != "" {
+		if !filepath.IsAbs(dir) {
+			return "", fmt.Errorf("the doctor's state_dir is %q in %s: it must be a full path", dir, path)
+		}
+		return dir, nil
+	}
+	return filepath.Join(home, DefaultDoctorStateDir), nil
 }
 
 // list reads a value that is a list of strings: `["a", "b"]`, or one string
