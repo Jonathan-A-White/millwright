@@ -3,7 +3,6 @@ package doctor
 import (
 	"context"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -45,10 +44,6 @@ const (
 	WifiDamperWait = 30 * time.Minute
 	WifiDamperCap  = 3
 )
-
-// wifiDialTimeout is how long Probe and Cure's post-reconnect poll each give
-// one reach host to resolve and connect before trying the next.
-const wifiDialTimeout = 5 * time.Second
 
 // Wifi is the check that bounces this host's Wi-Fi, from WSL, when the
 // internet has looked unreachable for five minutes straight: it reads the
@@ -176,18 +171,9 @@ func (w *Wifi) WayBack() string {
 	return "netsh wlan connect name=" + ssid
 }
 
-// reachable is ok if any of Reach's hosts resolves and TCP-connects within
-// wifiDialTimeout.
+// reachable is ok if any of Reach's hosts resolves and TCP-connects.
 func (w *Wifi) reachable(ctx context.Context) bool {
-	for _, host := range w.reach() {
-		dialer := net.Dialer{Timeout: wifiDialTimeout}
-		conn, err := dialer.DialContext(ctx, "tcp", host)
-		if err == nil {
-			conn.Close()
-			return true
-		}
-	}
-	return false
+	return reach(ctx, w.reach())
 }
 
 func (w *Wifi) reach() []string {
