@@ -31,11 +31,42 @@ func privateTmuxRunning(t *testing.T, window, command string) string {
 	t.Setenv(TmuxSocketEnv, socket)
 	t.Cleanup(func() {
 		_ = exec.Command("tmux", "-L", socket, "kill-server").Run()
+		_ = os.Remove(socketPath(socket))
 	})
 	if out, err := exec.Command("tmux", "-L", socket, "new-session", "-d", "-s", "mw-seats", "-n", window, command).CombinedOutput(); err != nil {
 		t.Fatalf("starting a tmux server of this test's own: %v: %s", err, out)
 	}
 	return socket
+}
+
+// TestPrivateTmuxRemovesItsSocketFileWhenTheTestEnds guards against the
+// helper leaving a dead socket file behind once its server is killed: tmux
+// does not remove the file itself on kill-server, only the test's cleanup can.
+func TestPrivateTmuxRemovesItsSocketFileWhenTheTestEnds(t *testing.T) {
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux is not on PATH")
+	}
+	var path string
+	t.Run("inner", func(t *testing.T) {
+		socket := privateTmux(t, "scratch")
+		path = socketPath(socket)
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected the private tmux server's socket file to exist while the test runs, got %v", err)
+		}
+	})
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("expected the socket file %s to be removed once the test ended, got %v", path, err)
+	}
+}
+
+// socketPath is where tmux puts the socket of a server named with -L, so that
+// a test can check whether its own socket file is still there.
+func socketPath(socket string) string {
+	dir := os.Getenv("TMUX_TMPDIR")
+	if dir == "" {
+		dir = "/tmp"
+	}
+	return filepath.Join(dir, fmt.Sprintf("tmux-%d", os.Getuid()), socket)
 }
 
 func millhandCmd(t *testing.T, args ...string) (string, error) {
