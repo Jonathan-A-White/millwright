@@ -304,9 +304,14 @@ func (d Doctor) one(ctx context.Context, check DoctorCheck, dryRun bool) (Doctor
 // faulty is the DoctorFaulty half of one: decide, from the check's damper and
 // what its episode remembers, whether this fault is cured, damped, or, in a
 // dry run, would be either.
+//
+// WayBack is read fresh for each outcome rather than once up front: a damped
+// or dry-run report never runs Cure, so it reads whatever WayBack can say
+// before any cure; a cured report reads it only after Cure has run, so a
+// check whose way back names what the cure actually did — a vault-dirty
+// commit's own hash, say — can report that rather than a guess.
 func (d Doctor) faulty(ctx context.Context, check DoctorCheck, reason string, dryRun bool) (DoctorResult, error) {
 	name := check.Name()
-	wayBack := check.WayBack()
 
 	episode, err := d.State.Load(ctx, name)
 	if err != nil {
@@ -317,7 +322,7 @@ func (d Doctor) faulty(ctx context.Context, check DoctorCheck, reason string, dr
 		(!episode.LastCure.IsZero() && d.now().Sub(episode.LastCure) < wait)
 
 	if damped {
-		result := DoctorResult{Check: name, Verdict: "damped", Reason: reason, WayBack: wayBack, Faulty: true}
+		result := DoctorResult{Check: name, Verdict: "damped", Reason: reason, WayBack: check.WayBack(), Faulty: true}
 		if !dryRun {
 			if err := d.append(ctx, result); err != nil {
 				return DoctorResult{}, err
@@ -327,7 +332,7 @@ func (d Doctor) faulty(ctx context.Context, check DoctorCheck, reason string, dr
 	}
 
 	if dryRun {
-		return DoctorResult{Check: name, Verdict: "would-cure", Reason: reason, WayBack: wayBack}, nil
+		return DoctorResult{Check: name, Verdict: "would-cure", Reason: reason, WayBack: check.WayBack()}, nil
 	}
 
 	cureErr := check.Cure(ctx)
@@ -348,7 +353,7 @@ func (d Doctor) faulty(ctx context.Context, check DoctorCheck, reason string, dr
 		return result, nil
 	}
 
-	result := DoctorResult{Check: name, Verdict: "cured", Reason: reason, WayBack: wayBack}
+	result := DoctorResult{Check: name, Verdict: "cured", Reason: reason, WayBack: check.WayBack()}
 	if err := d.append(ctx, result); err != nil {
 		return DoctorResult{}, err
 	}
