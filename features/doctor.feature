@@ -148,3 +148,11 @@ Feature: mw doctor
     Then mw doctor leaves with the status 0
     And the doctor log holds "vault-dirty cured"
     And the doctor log holds a way back naming the commit it made
+
+  Scenario: The real timers check starts an enabled timer that is inactive with systemctl --user start, the way back naming it
+    Given a fake systemctl reporting the timer "mw-dispatch.timer" enabled and inactive
+    When mw doctor's timers check runs for real
+    Then mw doctor leaves with the status 0
+    And systemctl was run with "--user start mw-dispatch.timer"
+    And the doctor log holds "timers cured"
+    And the doctor log holds "systemctl --user stop mw-dispatch.timer"

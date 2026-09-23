@@ -1629,6 +1629,15 @@ minutes with a cap of 3, and its way back is `systemctl --user stop
 <tunnel_unit>`. It never touches the VPS beyond that one read-only ssh call,
 never edits the unit, and never uses sudo.
 
+**timers** cures a factory timer left stopped by the rig's own machinery
+(a hand `systemctl --user stop`, a reinstall that missed its timer, a
+daemon-reload that dropped one) and so gone silent, watching nobody: for each
+`units` entry whose matching `<name>.timer` is enabled here at all (a timer
+not installed on this host is skipped, not faulted) but not active, its cure
+is `systemctl --user start <timer>`, its damper 30 minutes with a cap of 3,
+and its way back `systemctl --user stop <timer>` for exactly the timers the
+cure started.
+
 **Install**, once per host: `sh scripts/install-units.sh --enable mw-doctor`
 (see *Running a host on a timer*), which runs `mw-doctor.timer` at 2, 7, 12,
 ... past the hour — off the dispatch timer's own minutes, so the two never

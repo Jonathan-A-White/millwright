@@ -71,6 +71,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a fake powershell that exists$`, c.aFakePowershellThatExists)
 	ctx.Given(`^the internet is unreachable$`, c.theInternetIsUnreachable)
 	ctx.Given(`^a vault with a modified tracked file "([^"]*)"$`, c.aVaultWithAModifiedTrackedFile)
+	ctx.Given(`^a fake systemctl reporting the timer "([^"]*)" enabled and inactive$`, c.aFakeSystemctlReportingTheTimerEnabledAndInactive)
 
 	ctx.When(`^the check "([^"]*)"'s probe says ok$`, c.theChecksProbeSaysOK)
 	ctx.When(`^the check "([^"]*)"'s probe says faulty "([^"]*)" again$`, c.theChecksProbeSaysFaultyAgain)
@@ -79,6 +80,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^mw doctor's daemon-reload check runs for real$`, c.mwDoctorsDaemonReloadCheckRunsForReal)
 	ctx.When(`^mw doctor's wifi check runs$`, c.mwDoctorsWifiCheckRuns)
 	ctx.When(`^mw doctor's vault-dirty check runs for real$`, c.mwDoctorsVaultDirtyCheckRunsForReal)
+	ctx.When(`^mw doctor's timers check runs for real$`, c.mwDoctorsTimersCheckRunsForReal)
 	ctx.When(`^(\d+) minutes? go(?:es)? by$`, c.minutesPass)
 	ctx.When(`^(\d+) hours? go(?:es)? by$`, c.hoursPass)
 
@@ -307,6 +309,49 @@ exit 1
 	c.real.(*doctor.DaemonReload).Program = program
 	return nil
 }
+
+// aFakeSystemctlReportingTheTimerEnabledAndInactive writes a stand-in
+// systemctl that answers `--user is-enabled <timer>` enabled and `--user
+// is-active <timer>` inactive for the named timer, succeeds `--user start
+// <timer>`, logs every call to a file this scenario reads back, and wires up
+// the real infrastructure/doctor.Timers check to run it, over the one unit
+// that timer belongs to.
+func (c *doctorContext) aFakeSystemctlReportingTheTimerEnabledAndInactive(timer string) error {
+	if runtime.GOOS == "windows" {
+		return fmt.Errorf("the stand-in for systemctl is a shell script; this scenario does not run on windows")
+	}
+	dir, err := os.MkdirTemp("", "mw-doctor-timers-systemctl")
+	if err != nil {
+		return err
+	}
+	program := filepath.Join(dir, "systemctl-stand-in")
+	c.systemctlCalls = filepath.Join(dir, "calls")
+
+	script := fmt.Sprintf(`#!/bin/sh
+echo "$*" >>%q
+if [ "$1" = --user ] && [ "$2" = is-enabled ] && [ "$3" = %q ]; then
+  echo enabled
+  exit 0
+fi
+if [ "$1" = --user ] && [ "$2" = is-active ] && [ "$3" = %q ]; then
+  echo inactive
+  exit 3
+fi
+if [ "$1" = --user ] && [ "$2" = start ]; then
+  exit 0
+fi
+exit 1
+`, c.systemctlCalls, timer, timer)
+	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
+		return fmt.Errorf("writing the systemctl stand-in: %w", err)
+	}
+
+	unit := strings.TrimSuffix(timer, ".timer") + ".service"
+	c.real = &doctor.Timers{Units: []string{unit}, Program: program}
+	return nil
+}
+
+func (c *doctorContext) mwDoctorsTimersCheckRunsForReal() error { return c.run(false) }
 
 func (c *doctorContext) systemctlWasRunWith(args string) error {
 	if c.systemctlCalls == "" {
