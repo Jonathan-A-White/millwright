@@ -49,3 +49,23 @@ Feature: mw retry
     Then the retry refuses, saying: attempts exhausted
     And the worktree of "mw-gq6.1" was left untouched
     And the story "mw-gq6.1" still records 3 attempts
+
+  Scenario: A zero-commit attempt is retried: nothing to bundle, cleaned up, handed back open
+    Given the story "mw-gq6.1" was dispatched but the session made no commits
+    And the session of "mw-gq6.1" has ended
+    When mw retries "mw-gq6.1"
+    Then the retry succeeds
+    And the retry found nothing to keep for "mw-gq6.1"
+    And the worktree and branch of "mw-gq6.1" are both gone
+    And the story "mw-gq6.1" is open and unassigned
+    And the story "mw-gq6.1" still records 1 attempt
+
+  Scenario: A retry that fails partway describes only what it actually did
+    Given the story "mw-gq6.1" was dispatched and worked in its own worktree
+    And the session of "mw-gq6.1" has ended
+    And the vault cannot reach its origin
+    When mw retries "mw-gq6.1"
+    Then the retry fails, saying: could not be pushed
+    And the printed report names the bundle but nothing after it
+    And the worktree of "mw-gq6.1" was left untouched
+    And the story "mw-gq6.1" is still claimed

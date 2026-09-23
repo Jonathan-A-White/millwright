@@ -69,15 +69,20 @@ func InitializeRetryScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the rig "([^"]*)" is checked out here, from a bare origin of its own$`, c.theRigIsCheckedOutHereFromItsOrigin)
 	ctx.Given(`^an epic "([^"]*)" whose stories are worked on "([^"]*)" and target "([^"]*)"$`, c.anEpicWorkedOnTarget)
 	ctx.Given(`^the story "([^"]*)" was dispatched and worked in its own worktree$`, c.theStoryWasDispatchedAndWorked)
+	ctx.Given(`^the story "([^"]*)" was dispatched but the session made no commits$`, c.theStoryWasDispatchedWithNoCommits)
 	ctx.Given(`^the worktree of "([^"]*)" also holds uncommitted work$`, c.theWorktreeAlsoHoldsUncommittedWork)
 	ctx.Given(`^the session of "([^"]*)" has ended$`, c.theSessionHasEnded)
 	ctx.Given(`^the session of "([^"]*)" is still running$`, c.theSessionIsStillRunning)
 	ctx.Given(`^the story "([^"]*)" has been tried (\d+) times in all$`, c.theStoryHasBeenTriedTimesInAll)
+	ctx.Given(`^the vault cannot reach its origin$`, c.theVaultCannotReachItsOrigin)
 
 	ctx.When(`^mw retries "([^"]*)"$`, c.mwRetries)
 
 	ctx.Then(`^the retry succeeds$`, c.theRetrySucceeds)
 	ctx.Then(`^the retry refuses, saying: (.+)$`, c.theRetryRefusesSaying)
+	ctx.Then(`^the retry fails, saying: (.+)$`, c.theRetryFailsSaying)
+	ctx.Then(`^the retry found nothing to keep for "([^"]*)"$`, c.theRetryFoundNothingToKeep)
+	ctx.Then(`^the printed report names the bundle but nothing after it$`, c.thePrintedReportNamesTheBundleButNothingAfterIt)
 	ctx.Then(`^the branch of "([^"]*)" was bundled into "([^"]*)" in the vault, and it verifies$`, c.theBranchWasBundledIntoAndVerifies)
 	ctx.Then(`^the vault committed and pushed the bundle of "([^"]*)"$`, c.theVaultCommittedAndPushedTheBundle)
 	ctx.Then(`^the worktree and branch of "([^"]*)" are both gone$`, c.retryNothingIsLeftOfTheWorktree)
@@ -228,6 +233,45 @@ func (c *retryContext) theStoryWasDispatchedAndWorked(id string) error {
 	return nil
 }
 
+// theStoryWasDispatchedWithNoCommits leaves the world as a dispatch that
+// started a session would, except that the session ended without ever
+// committing anything: the story claimed, its first attempt recorded, its
+// worktree cut from the target branch and left exactly there — the shape a
+// stop-and-mail-me condition hit before the first commit leaves behind.
+func (c *retryContext) theStoryWasDispatchedWithNoCommits(id string) error {
+	c.tracker.AddStory(c.lastEpic, domain.Story{ID: id, Title: "The story " + id})
+	ctx := context.Background()
+	if err := c.tracker.ClaimStory(ctx, id); err != nil {
+		return err
+	}
+	if err := c.tracker.SetStoryMetadata(ctx, id, map[string]string{application.AttemptsField: "1"}); err != nil {
+		return err
+	}
+	if err := c.tracker.SetStoryState(ctx, id, application.RunState, application.RunBlocked,
+		"mw next did not close this story out (no-commits): the session ended before committing anything"); err != nil {
+		return err
+	}
+
+	worktrees := rig.New()
+	if err := worktrees.Fetch(ctx, c.rig); err != nil {
+		return err
+	}
+	dir := application.WorktreeDir(c.rig, id)
+	branch := application.StoryBranch(id)
+	if err := worktrees.Add(ctx, c.rig, dir, branch, application.StartPoint(rig.DefaultRemote, "main")); err != nil {
+		return err
+	}
+	return gitIdentify(dir)
+}
+
+// theVaultCannotReachItsOrigin breaks the vault's remote by taking its bare
+// origin away, so that a commit made in the vault's own clone still succeeds
+// but the push that follows it fails — the shape of a retry that gets partway
+// through bundling before a real fault stops it.
+func (c *retryContext) theVaultCannotReachItsOrigin() error {
+	return os.RemoveAll(c.vaultOrigin)
+}
+
 // theWorktreeAlsoHoldsUncommittedWork is what a session left in its worktree
 // without ever committing it: the shape a headless session's turn ending mid-
 // edit leaves behind.
@@ -295,6 +339,52 @@ func (c *retryContext) theRetryRefusesSaying(want string) error {
 	}
 	if !strings.Contains(c.err.Error(), want) && !strings.Contains(c.report.Why, want) {
 		return fmt.Errorf("expected the refusal to say %q, got error %q / why %q", want, c.err, c.report.Why)
+	}
+	return nil
+}
+
+// theRetryFailsSaying checks a retry that stopped on a real fault partway
+// through, not one of the two preconditions that refuse it outright: the
+// error is still there, but the report never claims to have refused.
+func (c *retryContext) theRetryFailsSaying(want string) error {
+	if c.err == nil {
+		return fmt.Errorf("expected the retry to fail, but it succeeded: %+v", c.report)
+	}
+	if c.report.Refused {
+		return fmt.Errorf("expected the report to say it failed, not refused: %+v", c.report)
+	}
+	if !strings.Contains(c.err.Error(), want) {
+		return fmt.Errorf("expected the failure to say %q, got error %q", want, c.err)
+	}
+	return nil
+}
+
+// theRetryFoundNothingToKeep checks the report and the printed text both say
+// the branch had no commits ahead of the target, so the bundle step was
+// skipped rather than refused.
+func (c *retryContext) theRetryFoundNothingToKeep(id string) error {
+	if !c.report.NothingAhead {
+		return fmt.Errorf("expected the report to say there was nothing to keep, got %+v", c.report)
+	}
+	if !strings.Contains(c.printed.String(), "nothing to keep") {
+		return fmt.Errorf("expected the printed report to say nothing to keep, got %q", c.printed.String())
+	}
+	return nil
+}
+
+// thePrintedReportNamesTheBundleButNothingAfterIt is the fix for the bug this
+// feature covers: a retry that bundled the branch but failed before it could
+// push, remove the worktree or give the claim back must print only the bundle
+// line, never the vault, gone or open lines it never reached.
+func (c *retryContext) thePrintedReportNamesTheBundleButNothingAfterIt() error {
+	printed := c.printed.String()
+	if !strings.Contains(printed, "\n  bundle") {
+		return fmt.Errorf("expected the printed report to name the bundle, got %q", printed)
+	}
+	for _, absent := range []string{"\n  vault", "\n  gone", "\n  open"} {
+		if strings.Contains(printed, absent) {
+			return fmt.Errorf("expected the printed report to say nothing about %q, got %q", strings.TrimSpace(absent), printed)
+		}
 	}
 	return nil
 }
