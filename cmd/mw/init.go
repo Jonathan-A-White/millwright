@@ -70,6 +70,7 @@ func newInitCmd() *cobra.Command {
 				Tracker: mwGateway(request.Dir, request.Host),
 				Host:    request.Host,
 				Ticks:   hostTickLogs(),
+				Lock:    hostSyncLock(),
 			}.Run(cmd.Context())
 			if err != nil {
 				return err

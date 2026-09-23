@@ -133,6 +133,22 @@ func ClearSyncHalt(ctx context.Context, marker SyncHaltMarker) {
 // own has had a moment to do so.
 const ConflictRetryDelay = 5 * time.Second
 
+// HostLock is the port that keeps two syncs on this host from running the
+// beads half at once. Without it, a dispatch tick, the Millhand's tick, its
+// own sync, and the sync mw next runs after a landing can each write this
+// host's note of when it was last level into the same beads working set
+// before any of them has committed, which is what a merge the tracker
+// refuses looks like from the outside: "local changes would be stomped by
+// merge". Take waits for the lock, bounded by the adapter's own wait, and
+// reports the release to call once the caller is done with it; a lock still
+// held past that bound is refused, naming the file that would not clear. The
+// adapter is a file lock in this host's state directory.
+type HostLock interface {
+	// Take waits for this host's sync lock, or for ctx to end, whichever comes
+	// first.
+	Take(ctx context.Context) (release func(), err error)
+}
+
 // VaultFiles is the port mw keeps the vault's files in step with the other
 // host through. One adapter is the vault's git clone on disk.
 //
@@ -433,6 +449,12 @@ type Sync struct {
 	// reclaim disk space. Zero reads DefaultGCInterval.
 	GCInterval time.Duration
 
+	// Lock keeps this host's beads half from running twice at once. A nil
+	// Lock runs it unlocked, which is never mw's own choice — every command
+	// that builds a Sync sets one — and is only ever a test's, for a test
+	// that has no stake in this race.
+	Lock HostLock
+
 	// Now is the clock, so that a test can pin the time a sync was level at.
 	// The zero value reads the real one.
 	Now func() time.Time
@@ -492,7 +514,30 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 	// in before the beads cycle, because that cycle is what pushes it: written
 	// after, it would wait for the next one. If the cycle then halts nothing was
 	// pushed, and the note is put back the way it was.
+	//
+	// Two syncs on this host must not both be in here at once: the whole of it
+	// runs under this host's own lock, so that a second caller waits for the
+	// first rather than racing it to write the note.
+	release, err := s.takeLock(ctx)
+	if err != nil {
+		return report, err
+	}
+	defer release()
 	return s.syncBeadsRecordingLevel(ctx, report)
+}
+
+// takeLock waits for this host's sync lock, when Lock is set, and reports the
+// release to call once the caller is done with it. A nil Lock is never mw's
+// own choice, so it runs unlocked rather than refusing to sync.
+func (s Sync) takeLock(ctx context.Context) (func(), error) {
+	if s.Lock == nil {
+		return func() {}, nil
+	}
+	release, err := s.Lock.Take(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("syncing the beads database on %s: %w", s.Host, err)
+	}
+	return release, nil
 }
 
 // syncBeadsRecordingLevel runs the beads half with the note of when this host

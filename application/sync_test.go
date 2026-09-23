@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
+	stdsync "sync"
 	"testing"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/infrastructure/hostlock"
 )
 
 // level is the time the tests pin a sync to, so that the note a host leaves can
@@ -685,5 +688,110 @@ func TestASyncThatCannotCollectStillSucceeds(t *testing.T) {
 	}
 	if !strings.Contains(report.String(), "beads synced") {
 		t.Fatalf("expected the sync to still report as synced, got %q", report.String())
+	}
+}
+
+// span is when one beads cycle a delayedTracker ran started and ended.
+type span struct{ start, end time.Time }
+
+// delayedTracker wraps a FakeTracker but makes each Sync cycle take a
+// measurable amount of real time, without holding the fake's own lock while
+// it waits, and records when each cycle started and ended — so that a test of
+// Sync.Lock can tell whether two callers' beads cycles overlapped, rather than
+// only whether both got through.
+type delayedTracker struct {
+	*apptest.FakeTracker
+	delay time.Duration
+
+	mu     stdsync.Mutex
+	cycles []span
+}
+
+func (d *delayedTracker) Sync(ctx context.Context) error {
+	start := time.Now()
+	time.Sleep(d.delay)
+	err := d.FakeTracker.Sync(ctx)
+	d.mu.Lock()
+	d.cycles = append(d.cycles, span{start: start, end: time.Now()})
+	d.mu.Unlock()
+	return err
+}
+
+func TestTwoSyncsOnOneHostNeverInterleaveTheirBeadsCycle(t *testing.T) {
+	lockDir := t.TempDir()
+	lock := hostlock.New(lockDir, hostlock.WithPoll(5*time.Millisecond))
+	tracker := &delayedTracker{FakeTracker: apptest.NewFakeTracker(), delay: 100 * time.Millisecond}
+
+	newSync := func() application.Sync {
+		return application.Sync{
+			Vault:   &apptest.FakeVaultFiles{},
+			Tracker: tracker,
+			Host:    "vps",
+			Lock:    lock,
+			Now:     func() time.Time { return level },
+		}
+	}
+
+	var wg stdsync.WaitGroup
+	reports := make([]application.SyncReport, 2)
+	errs := make([]error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			reports[i], errs[i] = newSync().Run(context.Background())
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("sync %d: %v", i, err)
+		}
+		if !reports[i].At.Equal(level) {
+			t.Fatalf("sync %d: expected to end level at %s, got %+v", i, level, reports[i])
+		}
+	}
+	if got := tracker.FakeTracker.Syncs(); got != 2 {
+		t.Fatalf("expected exactly two beads cycles, got %d", got)
+	}
+	if len(tracker.cycles) != 2 {
+		t.Fatalf("expected two cycles recorded, got %d", len(tracker.cycles))
+	}
+	first, second := tracker.cycles[0], tracker.cycles[1]
+	if first.start.Before(second.end) && second.start.Before(first.end) {
+		t.Fatalf("expected the two cycles not to overlap, got %+v and %+v", first, second)
+	}
+
+	note, err := tracker.Note(context.Background(), application.LastSyncKey("vps"))
+	if err != nil {
+		t.Fatalf("reading the note: %v", err)
+	}
+	if note != level.UTC().Format(application.LastSyncFormat) {
+		t.Fatalf("expected host.vps.last_sync to be %q, got %q", level.UTC().Format(application.LastSyncFormat), note)
+	}
+	if halted, _ := tracker.Note(context.Background(), application.SyncHaltKey("vps")); halted != "" {
+		t.Fatalf("expected no halt, and so no restore, got %q", halted)
+	}
+}
+
+func TestASyncLockHeldPastItsBoundNamesTheLockFile(t *testing.T) {
+	lockDir := t.TempDir()
+	holding, err := hostlock.New(lockDir, hostlock.WithWait(50*time.Millisecond), hostlock.WithPoll(5*time.Millisecond)).
+		Take(context.Background())
+	if err != nil {
+		t.Fatalf("taking the lock to hold it: %v", err)
+	}
+	defer holding()
+
+	sync, _, _ := syncing(t)
+	sync.Lock = hostlock.New(lockDir, hostlock.WithWait(50*time.Millisecond), hostlock.WithPoll(5*time.Millisecond))
+
+	_, err = sync.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected a sync to fail while another already holds this host's sync lock")
+	}
+	if want := filepath.Join(lockDir, hostlock.File); !strings.Contains(err.Error(), want) {
+		t.Fatalf("expected the failure to name the lock file %q, got %q", want, err)
 	}
 }

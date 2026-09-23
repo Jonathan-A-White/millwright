@@ -8,6 +8,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/hostlock"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/synchalt"
 	"github.com/Jonathan-A-White/millwright/infrastructure/ticklog"
@@ -57,6 +58,22 @@ func hostSyncHalt() application.SyncHaltMarker {
 		return nil
 	}
 	return synchalt.New(filepath.Join(home, SyncHaltStateDir))
+}
+
+// SyncLockStateDir is where this host's sync lock lives, under the home
+// directory, beside the sync-halted mark: shared by every command that syncs
+// — mw dispatch, mw millhand tick, mw next and mw sync itself — so that two of
+// them never run the beads half at once.
+var SyncLockStateDir = filepath.Join(".local", "state", "mw")
+
+// hostSyncLock is this host's own sync lock, kept in SyncLockStateDir. A host
+// with no home directory keeps none, and syncs unlocked.
+func hostSyncLock() application.HostLock {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	return hostlock.New(filepath.Join(home, SyncLockStateDir))
 }
 
 // hostTickLogs are the logs this host's timers keep, in the home directory. A
@@ -153,7 +170,7 @@ func newDispatchCmd() *cobra.Command {
 				Runner:      tmux.New(),
 				Boot:        builderBoot(files, host, tests),
 				Memory:      gateway,
-				Sync:        application.Sync{Vault: files, Tracker: gateway, Host: host, Ticks: logs},
+				Sync:        application.Sync{Vault: files, Tracker: gateway, Host: host, Ticks: logs, Lock: hostSyncLock()},
 				SyncTries:   tries,
 				SyncWait:    wait,
 				SyncHalts:   hostSyncHalt(),
