@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -33,6 +34,8 @@ type doctorContext struct {
 	now   time.Time
 
 	systemctlCalls string
+	netshCalls     string
+	wifi           *doctor.Wifi
 
 	out    bytes.Buffer
 	report application.DoctorReport
@@ -58,12 +61,16 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the check "([^"]*)"'s damper is (\d+) minutes?, cap (\d+)$`, c.theChecksDamperIs)
 	ctx.Given(`^the check "([^"]*)"'s cure fails, saying "([^"]*)"$`, c.theChecksCureFails)
 	ctx.Given(`^a fake systemctl that says "([^"]*)" needs a reload$`, c.aFakeSystemctlThatSaysNeedsAReload)
+	ctx.Given(`^a fake netsh reporting the network "([^"]*)"$`, c.aFakeNetshReportingTheNetwork)
+	ctx.Given(`^a fake powershell that exists$`, c.aFakePowershellThatExists)
+	ctx.Given(`^the internet is unreachable$`, c.theInternetIsUnreachable)
 
 	ctx.When(`^the check "([^"]*)"'s probe says ok$`, c.theChecksProbeSaysOK)
 	ctx.When(`^the check "([^"]*)"'s probe says faulty "([^"]*)" again$`, c.theChecksProbeSaysFaultyAgain)
 	ctx.When(`^mw doctor runs$`, c.mwDoctorRuns)
 	ctx.When(`^mw doctor runs dry$`, c.mwDoctorRunsDry)
 	ctx.When(`^mw doctor's daemon-reload check runs for real$`, c.mwDoctorsDaemonReloadCheckRunsForReal)
+	ctx.When(`^mw doctor's wifi check runs$`, c.mwDoctorsWifiCheckRuns)
 	ctx.When(`^(\d+) minutes? go(?:es)? by$`, c.minutesPass)
 	ctx.When(`^(\d+) hours? go(?:es)? by$`, c.hoursPass)
 
@@ -74,6 +81,8 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the check "([^"]*)" was cured (\d+) times?$`, c.theCheckWasCuredNTimes)
 	ctx.Then(`^mw doctor printed "([^"]*)"$`, c.mwDoctorPrinted)
 	ctx.Then(`^systemctl was run with "([^"]*)"$`, c.systemctlWasRunWith)
+	ctx.Then(`^netsh was not run$`, c.netshWasNotRun)
+	ctx.Then(`^netsh was run with "([^"]*)" (\d+) times?$`, c.netshWasRunWithNTimes)
 }
 
 func (c *doctorContext) fake(name string) *apptest.FakeDoctorCheck {
@@ -287,4 +296,141 @@ func (c *doctorContext) systemctlWasRunWith(args string) error {
 		return fmt.Errorf("expected systemctl to have been called with %q, it was called with:\n%s", args, data)
 	}
 	return nil
+}
+
+// aFakeNetshReportingTheNetwork writes a stand-in netsh.exe that answers
+// `wlan show interfaces` with a fixture naming ssid (a BSSID line ahead of
+// it, as real netsh output has), and `wlan disconnect` / `wlan connect`
+// with success, logging every call to a file this scenario reads back, and
+// wires up the real infrastructure/doctor.Wifi check to run it, its own
+// clock tied to this scenario's.
+func (c *doctorContext) aFakeNetshReportingTheNetwork(ssid string) error {
+	if runtime.GOOS == "windows" {
+		return fmt.Errorf("the stand-in for netsh is a shell script; this scenario does not run on windows")
+	}
+	dir, err := os.MkdirTemp("", "mw-doctor-netsh")
+	if err != nil {
+		return err
+	}
+	program := filepath.Join(dir, "netsh-stand-in")
+	c.netshCalls = filepath.Join(dir, "calls")
+
+	script := fmt.Sprintf(`#!/bin/sh
+echo "$*" >>%q
+if [ "$1" = wlan ] && [ "$2" = show ] && [ "$3" = interfaces ]; then
+  echo "    BSSID : 00:11:22:33:44:55"
+  echo "    SSID : %s"
+  exit 0
+fi
+if [ "$1" = wlan ] && [ "$2" = disconnect ]; then
+  exit 0
+fi
+if [ "$1" = wlan ] && [ "$2" = connect ]; then
+  exit 0
+fi
+exit 1
+`, c.netshCalls, ssid)
+	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
+		return fmt.Errorf("writing the netsh stand-in: %w", err)
+	}
+
+	c.wifi = &doctor.Wifi{
+		Netsh: program,
+		State: c.state,
+		Now:   func() time.Time { return c.now },
+		// Sleep advances this scenario's own mocked clock rather than
+		// really waiting, so Cure's post-reconnect poll (bounded by that
+		// same clock) settles in no real time instead of spinning forever
+		// against a clock nothing else is moving.
+		Sleep: func(d time.Duration) { c.now = c.now.Add(d) },
+	}
+	c.real = c.wifi
+	return nil
+}
+
+// aFakePowershellThatExists gives the scenario's wifi check a powershell.exe
+// path that is present, so its probe is not inert.
+func (c *doctorContext) aFakePowershellThatExists() error {
+	if c.wifi == nil {
+		return fmt.Errorf("no fake netsh was set up in this scenario")
+	}
+	dir, err := os.MkdirTemp("", "mw-doctor-powershell")
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(dir, "powershell.exe")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		return fmt.Errorf("writing a stand-in powershell.exe: %w", err)
+	}
+	c.wifi.Powershell = path
+	return nil
+}
+
+// theInternetIsUnreachable points the scenario's wifi check at a closed
+// local port, refusing every connection at once, standing in for the
+// internet being down without a real network call.
+func (c *doctorContext) theInternetIsUnreachable() error {
+	if c.wifi == nil {
+		return fmt.Errorf("no fake netsh was set up in this scenario")
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return fmt.Errorf("finding a closed port: %w", err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+	c.wifi.Reach = []string{addr}
+	return nil
+}
+
+func (c *doctorContext) mwDoctorsWifiCheckRuns() error { return c.run(false) }
+
+func (c *doctorContext) netshWasNotRun() error {
+	lines, err := c.netshCallLines()
+	if err != nil {
+		return err
+	}
+	if len(lines) != 0 {
+		return fmt.Errorf("expected netsh not to have run, it was called with:\n%v", lines)
+	}
+	return nil
+}
+
+func (c *doctorContext) netshWasRunWithNTimes(args, wantText string) error {
+	want, err := strconv.Atoi(wantText)
+	if err != nil {
+		return fmt.Errorf("parsing %q as a number of times: %w", wantText, err)
+	}
+	lines, err := c.netshCallLines()
+	if err != nil {
+		return err
+	}
+	got := 0
+	for _, line := range lines {
+		if line == args {
+			got++
+		}
+	}
+	if got != want {
+		return fmt.Errorf("expected netsh to have been called with %q %d time(s), got %d (all calls: %v)", args, want, got, lines)
+	}
+	return nil
+}
+
+func (c *doctorContext) netshCallLines() ([]string, error) {
+	if c.netshCalls == "" {
+		return nil, fmt.Errorf("no fake netsh was set up in this scenario")
+	}
+	data, err := os.ReadFile(c.netshCalls)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading the netsh call log: %w", err)
+	}
+	text := strings.TrimRight(string(data), "\n")
+	if text == "" {
+		return nil, nil
+	}
+	return strings.Split(text, "\n"), nil
 }

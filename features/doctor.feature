@@ -74,3 +74,32 @@ Feature: mw doctor
     Then mw doctor leaves with the status 0
     And systemctl was run with "--user daemon-reload"
     And the doctor log holds "daemon-reload cured"
+
+  Scenario: The real wifi check waits five minutes, then bounces the network with netsh, damped after 30 minutes and capped at 3
+    Given a fake netsh reporting the network "Whitehouse"
+    And a fake powershell that exists
+    And the internet is unreachable
+    When mw doctor's wifi check runs
+    Then the doctor log holds "wifi cannot-tell faulty (waiting 5m)"
+    And netsh was not run
+    When 5 minutes go by
+    And mw doctor's wifi check runs
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "wifi cured internet unreachable since"
+    And the doctor log holds "netsh wlan connect name=Whitehouse"
+    And netsh was run with "wlan connect name=Whitehouse" 1 time
+    When mw doctor's wifi check runs
+    Then mw doctor leaves with the status 6
+    And the doctor log holds "wifi damped"
+    And netsh was run with "wlan connect name=Whitehouse" 1 time
+    When 30 minutes go by
+    And mw doctor's wifi check runs
+    Then netsh was run with "wlan connect name=Whitehouse" 2 times
+    When 30 minutes go by
+    And mw doctor's wifi check runs
+    Then netsh was run with "wlan connect name=Whitehouse" 3 times
+    When 30 minutes go by
+    And mw doctor's wifi check runs
+    Then mw doctor leaves with the status 6
+    And the doctor log holds "wifi damped"
+    And netsh was run with "wlan connect name=Whitehouse" 3 times
