@@ -1559,15 +1559,19 @@ It leaves with 0 when every check is ok or cured, and 6 when any check is left
 faulty and uncured (damped, or its cure failed), so a timer's journal shows it.
 
 The `[doctor]` table of the config file says which units **daemon-reload**
-asks about, which hosts **wifi** tries to reach, where its powershell.exe
-sign is, and where state is kept:
+asks about, which hosts **wifi** and **tunnel** try to reach, where its
+powershell.exe sign is, what unit and command **tunnel** restarts and runs,
+and where state is kept:
 
 ```toml
 [doctor]
-units      = ["mw-dispatch.service", "mw-millhand-tick.service", "mw-millhand-review.service", "mw-doctor.service"]
-state_dir  = "/root/.local/state/mw-doctor"   # default: ~/.local/state/mw-doctor
-reach      = ["api.anthropic.com:443", "github.com:443"]
-powershell = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+units        = ["mw-dispatch.service", "mw-millhand-tick.service", "mw-millhand-review.service", "mw-doctor.service"]
+state_dir    = "/root/.local/state/mw-doctor"   # default: ~/.local/state/mw-doctor
+reach        = ["api.anthropic.com:443", "github.com:443"]
+powershell   = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+tunnel_unit  = "reverse-tunnel.service"         # default; the unit tunnel restarts
+tunnel_host  = "vps"                            # default: the [watch] table's host
+tunnel_probe = "ss -ltn sport = :2222"          # default; run over ssh on tunnel_host
 ```
 
 **daemon-reload** asks `systemctl --user show <unit> -p NeedDaemonReload` for
@@ -1592,6 +1596,19 @@ connect name=<ssid>` command, read fresh so it names whatever network is
 actually associated. `powershell` is not run; its presence is only this
 check's sign that the host is Windows-backed at all — absent, the check reads
 cannot-tell, inert, on every run.
+
+**tunnel** cures the fault behind the Laptop's reverse ssh tunnel to the VPS
+staying dead after standby while its timer said SUCCESS: it runs one `ssh -o
+BatchMode=yes -o ConnectTimeout=10 <tunnel_host> <tunnel_probe>`, faulty when
+the listener it prints is absent, ok when present, and cannot-tell when ssh
+itself fails to get through — the VPS being unreachable is `mw watch`'s
+concern, not this check's. When the internet itself looks down (checked the
+same way **wifi** does, over `reach`) that is cannot-tell too, so a dead
+internet is never blamed on the tunnel. Its cure is `systemctl --user
+restart <tunnel_unit>`, a 15 s settle, then a re-probe; its damper is 15
+minutes with a cap of 3, and its way back is `systemctl --user stop
+<tunnel_unit>`. It never touches the VPS beyond that one read-only ssh call,
+never edits the unit, and never uses sudo.
 
 **Install**, once per host: `sh scripts/install-units.sh --enable mw-doctor`
 (see *Running a host on a timer*), which runs `mw-doctor.timer` at 2, 7, 12,
