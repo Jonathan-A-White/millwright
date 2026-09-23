@@ -6,17 +6,17 @@ Where everything is; `CONTEXT.md` has the vocabulary, ADRs the reasons.
 
 | Layer | Directory | Rule |
 | --- | --- | --- |
-| domain | `domain/` | Value types and validation. Standard library only. |
-| application | `application/` | One file per use case, plus its ports. Never imports an adapter. |
+| domain | `domain/` | Value types, validation; stdlib only. |
+| application | `application/` | One file per use case, plus ports; never imports an adapter. |
 | fakes | `application/apptest/` | In-memory stand-ins for the ports. |
-| infrastructure | `infrastructure/` | One subpackage per adapter: the only place bd, git, tmux, claude, disk touched. |
+| infrastructure | `infrastructure/` | One subpackage per adapter; only place bd, git, tmux, claude, disk touched. |
 | command line | `cmd/mw/` | Cobra wiring only: read config, run the use case. |
 | features | `features/` | Gherkin; step code in `features/steps/`. |
-| template | `template/` | What a fresh vault is born from, via `embed.go`; no personal or host detail. |
+| template | `template/` | What a fresh vault is born from (`embed.go`); no host detail. |
 
 ## Ports
 
-Every adapter carries `var _ application.<Port> = ...`.
+Every adapter: `var _ application.<Port> = ...`.
 
 | Port | Declared in | Real adapter | Fake |
 | --- | --- | --- | --- |
@@ -37,6 +37,7 @@ Every adapter carries `var _ application.<Port> = ...`.
 | `ReapArmer` | `application/seatreap.go` | `infrastructure/reaper/arm.go` | `application/apptest/fakereap.go` |
 | `Transcripts` | `application/seatcontext.go` | `infrastructure/claude/transcripts.go` | none |
 | `WatchProbes` | `application/watch.go` | `infrastructure/watch/watch.go` | `application/apptest/fakewatch.go` |
+| `DoctorCheck`, `DoctorState`, `DoctorLog` | `application/doctor.go` | `infrastructure/doctor` | none |
 | `TickLog` | `application/millhandtick.go` | `infrastructure/ticklog/ticklog.go` | `application/apptest/faketicklog.go` |
 | `Worktrees` | `application/worktrees.go` | `infrastructure/rig/worktree.go` | `application/dispatch_test.go` |
 | `SyncHaltMarker` | `application/sync.go` | `infrastructure/synchalt/synchalt.go` | `application/apptest/fakesynchalt.go` |
@@ -49,8 +50,7 @@ Every adapter carries `var _ application.<Port> = ...`.
 | `Dispatcher` | `application/landing.go` | `application.Dispatch` | — |
 | `HostSync` | `application/dispatch.go` | `application.Sync` | — |
 
-`infrastructure/config/config.go` is not a port: this host's settings, from
-`cmd/mw/` only.
+`infrastructure/config/config.go` is not a port: read by `cmd/mw/`.
 
 ## Use cases
 
@@ -60,7 +60,7 @@ Every adapter carries `var _ application.<Port> = ...`.
 | `Release` | `application/release.go` | `mw release` — `cmd/mw/release.go` | `features/release.feature` |
 | `Retry` | `application/retry.go` | `mw retry` — `cmd/mw/retry.go` | `features/retry.feature` |
 | `Show` | `application/show.go` | `mw show` — `cmd/mw/show.go` | `features/show.feature` |
-| `Dispatch` | `application/dispatch.go` | `mw dispatch` — `cmd/mw/dispatch.go` | `features/dispatch.feature` (re-checks blockers itself) |
+| `Dispatch` | `application/dispatch.go` | `mw dispatch` — `cmd/mw/dispatch.go` | `features/dispatch.feature` |
 | `Next` | `application/next.go` | `mw next` — `cmd/mw/next.go` | `features/next.feature` |
 | `Check` | `application/check.go` | `mw check` — `cmd/mw/check.go` | `features/check.feature` |
 | `Status` | `application/status.go` | `mw status` — `cmd/mw/status.go` | `features/status.feature` |
@@ -75,13 +75,14 @@ Every adapter carries `var _ application.<Port> = ...`.
 | `Millhand` | `application/millhand.go` | `mw millhand` — `cmd/mw/millhand.go` | `features/millhand.feature` |
 | `MillhandTick` | `application/millhandtick.go` | `mw millhand tick` — `cmd/mw/millhandtick.go` | `features/millhand_tick.feature` |
 | `Watch` | `application/watch.go` | `mw watch` — `cmd/mw/watch.go` | `features/watch.feature` |
+| `Doctor` | `application/doctor.go` | `mw doctor` — `cmd/mw/doctor.go` | `features/doctor.feature` |
 | `SeatBoot` | `application/seatboot.go` | none: `Dispatch`, `Next` call it | `features/seat_boot.feature` |
 | `Init` | `application/init.go` | `mw init` — `cmd/mw/init.go` | `features/init.feature` |
 
 `cmd/mw/root.go` holds the tree; `cmd/mw/main.go` runs it; `cmd/mw/version.go`
-is `mw version`, no use case.
-`features/path_validation.feature` covers `domain/path.go`,
-`features/ready_stories.feature` the `WorkTracker` contract; no commands.
+is `mw version` (no use case).
+`features/path_validation.feature` covers `domain/path.go`;
+`features/ready_stories.feature` the `WorkTracker` contract (no commands).
 
 Adding a command: read `docs/adding-a-command.md`.
 
@@ -89,17 +90,17 @@ Adding a command: read `docs/adding-a-command.md`.
 
 | Helper | Where | What it gives |
 | --- | --- | --- |
-| `throwawayVault` | `infrastructure/beads/beads_integration_test.go` | A real bd database in `t.TempDir()`; ~1s per `bd` call. |
-| `installFormula` | same file | Copies a `formulas/` formula into it. |
-| `standIn` | `infrastructure/beads/sync_test.go` | A script standing in for `bd`. |
-| `privateRunner` | `infrastructure/tmux/tmux_integration_test.go` | A tmux server on its own socket. |
-| `privateWindows` | `infrastructure/tmux/window_integration_test.go` | A tmux server, seats session of its own. |
+| `throwawayVault` | `infrastructure/beads/beads_integration_test.go` | A real bd database in `t.TempDir()`. |
+| `installFormula` | same file | Copies a formula into it. |
+| `standIn` | `infrastructure/beads/sync_test.go` | Stands in for `bd`. |
+| `privateRunner` | `infrastructure/tmux/tmux_integration_test.go` | A private tmux server. |
+| `privateWindows` | `infrastructure/tmux/window_integration_test.go` | A tmux server with a seats session. |
 | `aVault` | `infrastructure/vault/vault_test.go` | A vault with a seat in it. |
 | `twoHosts` | `infrastructure/vault/git_test.go` | Two clones of one vault. |
 | `aRig` | `infrastructure/rig/worktree_test.go` | A rig with a real origin. |
-| `aRigDir` | `infrastructure/rig/slot_test.go` | A directory to take the merge slot. |
+| `aRigDir` | `infrastructure/rig/slot_test.go` | A directory for the merge slot. |
 | `mwConfig` | `cmd/mw/dispatch_test.go` | A `config.toml` in a temp `HOME`. |
-| `aFactory` | `application/dispatch_test.go` | A `Dispatch` on a temp vault, with fakes. |
+| `aFactory` | `application/dispatch_test.go` | A `Dispatch` on a temp vault, faked. |
 
 Feature steps build a real rig, origin, clone and vault in a temp directory,
 faking only tracker, runner, vault git: `features/steps/next_steps.go`.
@@ -108,10 +109,8 @@ faking only tracker, runner, vault git: `features/steps/next_steps.go`.
 
 `make build`, `make test`, `make lint`: see `CLAUDE.md`.
 
-- One package: `go test ./application/...` (`-run TestName`). Add
+- One package: `go test ./application/...` (`-run TestName`); add
   `-tags beads_integration` for the real-`bd` cases, as `make test` does.
-- One feature: `MW_FEATURE=sweep.feature go test ./features` (`:17` appended
-  for the scenario at that line).
-- `make lint` runs `scripts/check-*.sh`: this page, `template/`,
-  `contrib/systemd/`, install scripts.
-- `make check-formulas` needs `bd`, `jq` and real time; not in `make test`.
+- One feature: `MW_FEATURE=sweep.feature go test ./features` (`:17` for one scenario).
+- `make lint` runs `scripts/check-*.sh`: this page, `template/`, `contrib/systemd/`, install scripts.
+- `make check-formulas` needs `bd`, `jq`, real time; not in `make test`.

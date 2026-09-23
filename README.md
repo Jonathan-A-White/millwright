@@ -592,6 +592,10 @@ ssh = "vps"                        # the name ssh knows the watched host by
 host = "vps"                       # its name in beads
 outside = ["https://one.example", "https://two.example"]
 blog = "https://blog.example.com"  # optional: the blog answering is a sign of life
+
+[doctor]                           # what mw doctor checks; leave it out for the shipped defaults
+units = ["mw-dispatch.service", "mw-millhand-tick.service", "mw-millhand-review.service", "mw-doctor.service"]
+state_dir = "/root/.local/state/mw-doctor"  # default: ~/.local/state/mw-doctor
 ```
 
 A rig a story names but this host has no checkout of is said so plainly, and the
@@ -1526,6 +1530,55 @@ The rule has three cases:
 state directory. With no `[watch]` table the line is `nothing to watch`. A table
 that does not say `ssh`, `host` and `outside` is refused. The memory (the time of
 the first failed check) is `memory` beside the log. See `features/watch.feature`.
+
+## mw doctor
+
+```sh
+bin/mw doctor              # every check
+bin/mw doctor daemon-reload
+bin/mw doctor --dry-run
+```
+
+`mw doctor` cures this host's known faults offline and without AI: a table of
+checks, each the same shape — a **probe** that only reads and reports ok,
+faulty (with a reason) or cannot-tell; a **cure** run only when the probe says
+faulty and the **damper** allows it (a minimum wait between two cures and a cap
+on how many one fault episode may spend before it gives up and waits for a
+person); and a **way back**, printed by `--dry-run` and written to the log
+beside every cure. An episode ends, and the count resets, the next time the
+probe says ok. With no check named it works the whole table; named
+(`mw doctor daemon-reload`), only that one.
+
+Every run appends one dated line per check to `~/.local/state/mw-doctor/log`:
+`<time> <check> <ok|cannot-tell|cured|damped|cure-failed> <reason>`, the way
+back beside every cure. `--dry-run` prints what a faulty check would do and
+changes nothing: no cure runs, no state is written, no log line is appended.
+It leaves with 0 when every check is ok or cured, and 6 when any check is left
+faulty and uncured (damped, or its cure failed), so a timer's journal shows it.
+
+The `[doctor]` table of the config file says which units the **daemon-reload**
+check, the first one, asks about, and where state is kept:
+
+```toml
+[doctor]
+units     = ["mw-dispatch.service", "mw-millhand-tick.service", "mw-millhand-review.service", "mw-doctor.service"]
+state_dir = "/root/.local/state/mw-doctor"   # default: ~/.local/state/mw-doctor
+```
+
+**daemon-reload** asks `systemctl --user show <unit> -p NeedDaemonReload` for
+every unit and is faulty when any says yes; its cure is `systemctl --user
+daemon-reload`, its damper 10 minutes with a cap of 3, and its way back "none
+needed: daemon-reload is idempotent" (running it again, by hand or later, costs
+nothing). A unit systemd has never loaded reads cannot-tell, not faulty.
+
+**Install**, once per host: `sh scripts/install-units.sh --enable mw-doctor`
+(see *Running a host on a timer*), which runs `mw-doctor.timer` at 2, 7, 12,
+... past the hour — off the dispatch timer's own minutes, so the two never
+start together. Unlike the rig's other units the service does not rely on
+`PATH`: `ExecStart` names `~/.local/bin/mw` directly, since doctoring a host
+whose own environment may be at fault is the point. `scripts/check-timer-units.sh`
+(in `make lint`) verifies the pair with `systemd-analyze` and starts nothing.
+See `features/doctor.feature`.
 
 ## The Path
 
