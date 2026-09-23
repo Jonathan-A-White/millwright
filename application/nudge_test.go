@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -166,5 +167,60 @@ func TestNudgeCombinesAStaleStoryAndAStaleHostInOneReport(t *testing.T) {
 
 	if len(clauses) != 2 {
 		t.Fatalf("expected both clauses, got %+v", clauses)
+	}
+}
+
+// mw-gq6.98: a quiet alarm blamed the laptop's stale sync while the VPS's own
+// sync was the one actually halted — the VPS could not pull, so the laptop's
+// last-sync note had frozen, and the alarm named the wrong host. Once this
+// host's own sync is halted, its other-host "last synced" clauses are not to
+// be trusted, so they are replaced by one clause naming this host's own halt.
+func TestNudgeNamesThisHostsOwnSyncHaltInPlaceOfOtherHostsAges(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.31", "Something pathed to the laptop", "laptop")
+	syncedAt(t, tracker, "laptop", 29*time.Minute)
+
+	marker := apptest.NewFakeSyncHaltMarker()
+	at := statusNow.Add(-15 * time.Minute)
+	said := "Error: merge conflict — sync halted, nothing pushed."
+	if err := marker.Write(context.Background(), application.SyncHaltInfo{At: at, Said: said}); err != nil {
+		t.Fatalf("writing the marker: %v", err)
+	}
+
+	clauses := nudgeReport(t, tracker, application.Nudge{SyncHalt: marker})
+
+	if len(clauses) != 1 {
+		t.Fatalf("expected exactly one clause, got %+v", clauses)
+	}
+	if clauses[0].Key != "sync:vps" {
+		t.Fatalf("expected the clause keyed by this host's own halt, got %q", clauses[0].Key)
+	}
+	if strings.Contains(clauses[0].Text, "last synced") {
+		t.Fatalf("expected the halt clause to replace the last-synced clause, got %q", clauses[0].Text)
+	}
+	if want := at.UTC().Format(application.LastSyncFormat); !strings.Contains(clauses[0].Text, want) {
+		t.Fatalf("expected the clause to name the halt time %q, got %q", want, clauses[0].Text)
+	}
+	if !strings.Contains(clauses[0].Text, said) {
+		t.Fatalf("expected the clause to carry what bd said, got %q", clauses[0].Text)
+	}
+}
+
+// TestNudgeSaysNothingSpecialWhenTheMarkerHoldsNoHalt confirms the old
+// last-synced clause still returns once a SyncHalt marker is wired in but
+// holds nothing: the mark, not merely the field being set, is what changes
+// the report.
+func TestNudgeSaysNothingSpecialWhenTheMarkerHoldsNoHalt(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.31", "Something pathed to the laptop", "laptop")
+	syncedAt(t, tracker, "laptop", 29*time.Minute)
+
+	clauses := nudgeReport(t, tracker, application.Nudge{SyncHalt: apptest.NewFakeSyncHaltMarker()})
+
+	if len(clauses) != 1 {
+		t.Fatalf("expected the old last-synced clause, got %+v", clauses)
+	}
+	if clauses[0].Key != "host:laptop" {
+		t.Fatalf("expected the clause keyed by the host, got %q", clauses[0].Key)
 	}
 }
