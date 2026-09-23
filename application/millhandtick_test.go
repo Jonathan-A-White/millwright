@@ -63,6 +63,47 @@ func TestATickWakesOnlyForItsOwnHostsDoctorNotes(t *testing.T) {
 	}
 }
 
+// TestATickWakesOnlyWhenADoctorNotesVerdictOrReasonChanges is the regression
+// for mw-i80dx.9: a note whose text changes only in its timestamp or its
+// "last log lines" tail — the doctor rewrites both on every run — must not
+// wake the Millhand again, but a change of verdict or reason must.
+func TestATickWakesOnlyWhenADoctorNotesVerdictOrReasonChanges(t *testing.T) {
+	key := DoctorNoteKey("laptop", "mayor-gone")
+	notes := &fakeDoctorNotesByKey{notes: map[string]string{
+		key: "2026-09-23T18:42:17Z cannot-tell no .mayor-acting: nobody names a Mayor on this host | last log lines: a | b | c",
+	}}
+	tick := MillhandTick{DoctorNotes: notes, Host: "laptop"}
+
+	reasons, _, err := tick.doctor(context.Background())
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+	if len(reasons) != 1 || !strings.Contains(reasons[0], "mayor-gone") {
+		t.Fatalf("expected one reason naming mayor-gone on first sight, got %v", reasons)
+	}
+
+	// The doctor rewrites the same check's note: a new timestamp and a new
+	// log tail, but the same verdict and reason.
+	notes.notes[key] = "2026-09-23T18:47:15Z cannot-tell no .mayor-acting: nobody names a Mayor on this host | last log lines: d | e | f"
+	reasons, _, err = tick.doctor(context.Background())
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+	if len(reasons) != 0 {
+		t.Fatalf("expected no wake reason for an unchanged verdict and reason, got %v", reasons)
+	}
+
+	// The verdict changes: cannot-tell to faulty.
+	notes.notes[key] = "2026-09-23T18:52:28Z faulty no .mayor-acting: nobody names a Mayor on this host | last log lines: g | h | i"
+	reasons, _, err = tick.doctor(context.Background())
+	if err != nil {
+		t.Fatalf("doctor: %v", err)
+	}
+	if len(reasons) != 1 || !strings.Contains(reasons[0], "mayor-gone") {
+		t.Fatalf("expected one reason naming mayor-gone for a changed verdict, got %v", reasons)
+	}
+}
+
 func TestMayorMayBeGone(t *testing.T) {
 	for line, want := range map[string]bool{
 		"down signs=none":         true,

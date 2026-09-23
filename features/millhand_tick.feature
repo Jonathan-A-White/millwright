@@ -366,6 +366,25 @@ Feature: mw millhand tick
     And mw millhand tick is run
     Then mw millhand tick prints one dated line saying "woke the Millhand"
 
+  Scenario: A doctor note rewritten with only a new timestamp and log tail is not woken for again
+    Given a doctor note "wifi" saying "2026-09-19T11:00:00Z cannot-tell faulty (waiting 5m) | last log lines: a | b | c"
+    When mw millhand tick is run
+    Then mw millhand tick prints one dated line saying "woke the Millhand"
+    When the Millhand's window is closed
+    And a doctor note "wifi" saying "2026-09-19T11:05:00Z cannot-tell faulty (waiting 5m) | last log lines: d | e | f"
+    And mw millhand tick is run
+    Then mw millhand tick prints one dated line saying "quiet"
+    And exactly one window was opened
+
+  Scenario: A doctor note that changes verdict wakes the Millhand again, with no clear between
+    Given a doctor note "wifi" saying "2026-09-19T11:00:00Z cannot-tell faulty (waiting 5m)"
+    When mw millhand tick is run
+    Then mw millhand tick prints one dated line saying "woke the Millhand"
+    When the Millhand's window is closed
+    And a doctor note "wifi" saying "2026-09-19T12:00:00Z faulty no reach"
+    And mw millhand tick is run
+    Then mw millhand tick prints one dated line saying "woke the Millhand"
+
   Scenario: A dry run says what it would do and starts nothing
     Given unread tick mail for "millhand@laptop" with the subject "Please look at the queue"
     When mw millhand tick is run as a dry run
