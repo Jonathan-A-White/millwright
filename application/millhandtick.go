@@ -113,6 +113,13 @@ type MillhandTick struct {
 	Sweep    Sweep
 	Log      TickLog
 
+	// DoctorNotes is where mw doctor leaves the note that a check needs a
+	// person's attention, one key per check under DoctorNotePrefix; the tick
+	// reads every one of them and remembers, in the same store, which it has
+	// already woken the Millhand for. A nil DoctorNotes is no doctor notes to
+	// look for at all.
+	DoctorNotes DoctorNotes
+
 	// SyncHalts is this host's own mark of a halted sync: written once a sync
 	// halts on a merge conflict or a stuck working set, left alone on a halt
 	// that repeats, and cleared once a sync is level again. A nil SyncHalts
@@ -237,7 +244,20 @@ func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err err
 		notes = append(notes, sweepNotes...)
 	}
 
-	verdict, reason := "quiet", tickReason(mail, stuck, health)
+	var doctor []string
+	if t.DryRun {
+		notes = append(notes, "doctor notes not looked for in a dry run")
+	} else {
+		var doctorNotes []string
+		doctor, doctorNotes, err = t.doctor(ctx)
+		if err != nil {
+			lookErr = err
+			notes = append(notes, "doctor notes could not be read: "+oneLine(err.Error()))
+		}
+		notes = append(notes, doctorNotes...)
+	}
+
+	verdict, reason := "quiet", tickReason(mail, stuck, doctor, health)
 	switch {
 	case restarted == "":
 	case reason == "":
@@ -533,6 +553,60 @@ func (t MillhandTick) sweep(ctx context.Context) (stuck, notes []string, err err
 	return stuck, notes, nil
 }
 
+// DoctorSeenKey is where the tick remembers, for one check on this host, the
+// text of the doctor.<check> note it last woke the Millhand for — its own
+// memory, kept beside the doctor's notes, the way Sweep's memory of a
+// session is kept beside its story. A note whose text has not changed since
+// is not woken for again; a fresh one — a new fault, or the same one again
+// after the check went ok and cleared it — is.
+func DoctorSeenKey(host, check string) string { return "millhandtick.doctor." + host + "." + check }
+
+// doctor is every doctor.<check> note the tick has not already woken the
+// Millhand for, as ready-made wake reasons, and what it noted on the way. It
+// is skipped, quietly, with no DoctorNotes wired at all.
+func (t MillhandTick) doctor(ctx context.Context) (reasons, notes []string, err error) {
+	if t.DoctorNotes == nil {
+		return nil, nil, nil
+	}
+	found, err := t.DoctorNotes.NotesWithPrefix(ctx, DoctorNotePrefix)
+	if err != nil {
+		return nil, nil, err
+	}
+	checks := make([]string, 0, len(found))
+	for key := range found {
+		checks = append(checks, strings.TrimPrefix(key, DoctorNotePrefix))
+	}
+	sort.Strings(checks)
+
+	for _, check := range checks {
+		value := found[DoctorNoteKey(check)]
+		seenKey := DoctorSeenKey(t.Host, check)
+		seen, readErr := t.DoctorNotes.Note(ctx, seenKey)
+		if readErr != nil {
+			notes = append(notes, fmt.Sprintf("doctor: %s's seen mark could not be read: %s", check, oneLine(readErr.Error())))
+			continue
+		}
+		if seen == value {
+			continue
+		}
+		if setErr := t.DoctorNotes.SetNote(ctx, seenKey, value); setErr != nil {
+			notes = append(notes, fmt.Sprintf("doctor: %s's seen mark could not be written: %s", check, oneLine(setErr.Error())))
+			continue
+		}
+		reasons = append(reasons, doctorReasonPart(check, value))
+	}
+	return reasons, notes, nil
+}
+
+// doctorReasonPart is one doctor note's wake reason: the check it is about,
+// its note text verbatim, and the standing instructions for a person taking
+// it from there.
+func doctorReasonPart(check, note string) string {
+	return fmt.Sprintf(
+		"doctor: %s: %s. Run `mw doctor %s` by hand, read ~/.local/state/mw-doctor/log, report.",
+		check, note, check)
+}
+
 // wake starts the one routine wake, and says what came of it. A Millhand that
 // came up since the check is not a failure.
 func (t MillhandTick) wake(ctx context.Context, reason string) (verdict string, woke bool, err error) {
@@ -552,9 +626,10 @@ func alreadyUp(window string) string { return "already up (" + window + ")" }
 
 // tickReason is what the Millhand is told it was woken for: the unread mail
 // of each mailbox it reads, named with its box and TickReasonLimit subjects
-// then a count of the rest, the stuck stories the same way, and the watch
-// line as it was found. It is empty when there is nothing.
-func tickReason(mail []boxMail, stuck []string, health tickHealth) string {
+// then a count of the rest, the stuck stories the same way, every doctor note
+// newly seen, and the watch line as it was found. It is empty when there is
+// nothing.
+func tickReason(mail []boxMail, stuck, doctor []string, health tickHealth) string {
 	var parts []string
 	for _, group := range mail {
 		parts = append(parts, counted(len(group.subjects), "unread", "unread")+" in "+group.box+": "+named(group.subjects))
@@ -562,6 +637,7 @@ func tickReason(mail []boxMail, stuck []string, health tickHealth) string {
 	if len(stuck) > 0 {
 		parts = append(parts, counted(len(stuck), "stuck story", "stuck stories")+": "+named(stuck))
 	}
+	parts = append(parts, doctor...)
 	if health.wake {
 		part := "mw watch says: " + health.line
 		if mayorMayBeGone(health.line) {

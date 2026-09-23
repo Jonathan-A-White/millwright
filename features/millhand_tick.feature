@@ -333,6 +333,39 @@ Feature: mw millhand tick
     Then mw millhand tick prints one dated line saying "quiet"
     And no window was opened
 
+  Scenario: A doctor note wakes the Millhand once, naming the check and its text
+    Given a doctor note "wifi" saying "2026-09-19T11:00:00Z cannot-tell faulty (waiting 5m)"
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "woke the Millhand"
+    And mw millhand tick prints one dated line saying "doctor: wifi: 2026-09-19T11:00:00Z cannot-tell"
+    And exactly one window was opened
+    And the kickoff prompt of the window holds:
+      | a routine wake       |
+      | doctor: wifi         |
+      | Run `mw doctor wifi` |
+
+  Scenario: The same doctor note is not woken for twice
+    Given a doctor note "wifi" saying "2026-09-19T11:00:00Z cannot-tell faulty (waiting 5m)"
+    When mw millhand tick is run
+    Then exactly one window was opened
+    When the Millhand's window is closed
+    And mw millhand tick is run
+    Then mw millhand tick prints one dated line saying "quiet"
+    And exactly one window was opened
+
+  Scenario: A doctor note that clears and returns wakes the Millhand again
+    Given a doctor note "wifi" saying "2026-09-19T11:00:00Z cannot-tell faulty (waiting 5m)"
+    When mw millhand tick is run
+    Then mw millhand tick prints one dated line saying "woke the Millhand"
+    When the Millhand's window is closed
+    And the doctor note "wifi" is cleared
+    And mw millhand tick is run
+    Then mw millhand tick prints one dated line saying "quiet"
+    When a doctor note "wifi" saying "2026-09-19T12:30:00Z cannot-tell faulty (waiting 5m) again"
+    And mw millhand tick is run
+    Then mw millhand tick prints one dated line saying "woke the Millhand"
+
   Scenario: A dry run says what it would do and starts nothing
     Given unread tick mail for "millhand@laptop" with the subject "Please look at the queue"
     When mw millhand tick is run as a dry run

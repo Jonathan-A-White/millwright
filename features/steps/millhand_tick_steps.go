@@ -108,10 +108,14 @@ func registerMillhandTickSteps(ctx *godog.ScenarioContext, c *seatUpContext) {
 	ctx.Given(`^the pane of the window "([^"]*)" (has text on its input line|is working)$`, c.thePaneOfTheWindow)
 	ctx.Given(`^the pane of the window "([^"]*)" turns to text on its input line while the tick waits between its checks$`, c.thePaneTurnsWhileTheTickWaits)
 	ctx.Given(`^the terminal cannot say what the pane of the window "([^"]*)" is doing$`, c.theTerminalCannotSayWhatThePaneIsDoing)
+	ctx.Given(`^a doctor note "([^"]*)" saying "([^"]*)"$`, c.aDoctorNote)
+	ctx.Given(`^the doctor note "([^"]*)" is cleared$`, c.theDoctorNoteIsCleared)
 
 	ctx.When(`^mw millhand tick is run$`, func() error { return c.runTheTick(false) })
 	ctx.When(`^mw millhand tick is run as a dry run$`, func() error { return c.runTheTick(true) })
 	ctx.When(`^the Millhand's window is closed$`, c.theMillhandsWindowIsClosed)
+	ctx.When(`^a doctor note "([^"]*)" saying "([^"]*)"$`, c.aDoctorNote)
+	ctx.When(`^the doctor note "([^"]*)" is cleared$`, c.theDoctorNoteIsCleared)
 
 	ctx.Then(`^mw millhand tick succeeds$`, c.theTickSucceeds)
 	ctx.Then(`^mw millhand tick fails$`, c.theTickFails)
@@ -226,6 +230,14 @@ func (c *seatUpContext) theMailCannotBeRead() error {
 	return nil
 }
 
+func (c *seatUpContext) aDoctorNote(check, text string) error {
+	return c.tickWorld().tracker.SetNote(context.Background(), application.DoctorNoteKey(check), text)
+}
+
+func (c *seatUpContext) theDoctorNoteIsCleared(check string) error {
+	return c.tickWorld().tracker.ClearNote(context.Background(), application.DoctorNoteKey(check))
+}
+
 func (c *seatUpContext) aMillhandOpensDuringTheSync() error {
 	c.tickWorld().sync.onRun = func() {
 		c.windows.Holds("millhand-2026-09-19-05", time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC))
@@ -283,8 +295,9 @@ func (c *seatUpContext) runTheTick(dryRun bool) error {
 			}
 			return nil
 		},
-		Sync: world.sync,
-		Mail: world.mailbox,
+		Sync:        world.sync,
+		Mail:        world.mailbox,
+		DoctorNotes: world.tracker,
 		Sweep: application.Sweep{
 			Tracker: world.tracker,
 			Memory:  world.tracker,

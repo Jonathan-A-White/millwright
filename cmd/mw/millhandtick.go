@@ -42,18 +42,20 @@ func newMillhandTickCmd() *cobra.Command {
 			"the host it watches, before anything else: local-fault (this host's own network is down) is said\n" +
 			"in the line, wakes nobody and skips the sync, which would only time out. Then it runs one mw sync (a sync that fails is\n" +
 			"said in the line, and the tick looks on this host all the same), and looks for unread mail for\n" +
-			"millhand@<host> or millhand, for a story mw sweep newly finds stuck on this host, and for a\n" +
-			"watched host that is unwell, stale or down. With none of them it says \"quiet\". With any, it\n" +
-			"starts ONE routine wake of the Millhand (as `mw millhand --wake routine` does) whose reason\n" +
-			"lists the mail subjects and the stuck story titles, five of each and then a count, and the\n" +
-			"watch line verbatim. If the host is down or its Mayor is gone the reason ends with the\n" +
-			"charter's one exception. The mail is left unread.\n\n" +
+			"millhand@<host> or millhand, for a story mw sweep newly finds stuck on this host, for a\n" +
+			"watched host that is unwell, stale or down, and for a doctor.<check> note mw doctor has newly\n" +
+			"written or changed. With none of them it says \"quiet\". With any, it starts ONE routine wake\n" +
+			"of the Millhand (as `mw millhand --wake routine` does) whose reason lists the mail subjects\n" +
+			"and the stuck story titles, five of each and then a count, the watch line verbatim, and every\n" +
+			"doctor note with its check's name and a standing instruction to run mw doctor by hand. If the\n" +
+			"host is down or its Mayor is gone the reason ends with the charter's one exception. The mail\n" +
+			"is left unread; a doctor note is woken for once, until it clears and comes back.\n\n" +
 			"It prints one dated line and appends it to ~/.local/state/mw-millhand-tick/log on this host,\n" +
 			"which is cut to its last " + fmt.Sprint(application.TickLogLines) + " lines. It leaves with 0 for everything but a fault of its\n" +
 			"own, a wake that could not be started included. With --dry-run it says what it would do and\n" +
-			"starts nothing; it runs neither the sweep nor the watch, since each records what it finds and\n" +
-			"would leave nobody to wake for it, and it writes nothing to the log. With no [watch] table it\n" +
-			"does not consult mw watch.",
+			"starts nothing; it runs neither the sweep, the watch nor the doctor note look-up, since each\n" +
+			"records what it finds and would leave nobody to wake for it, and it writes nothing to the log.\n" +
+			"With no [watch] table it does not consult mw watch.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := config.Vault()
@@ -108,8 +110,9 @@ func newMillhandTickCmd() *cobra.Command {
 					RoutineModel: domain.Model(routine),
 					ReviewModel:  domain.Model(review),
 				},
-				Sync: application.Sync{Vault: mwVault(dir, host), Tracker: gateway, Host: host, Ticks: hostTickLogs()},
-				Mail: gateway,
+				Sync:        application.Sync{Vault: mwVault(dir, host), Tracker: gateway, Host: host, Ticks: hostTickLogs()},
+				Mail:        gateway,
+				DoctorNotes: gateway,
 				Sweep: application.Sweep{
 					Tracker:    gateway,
 					Memory:     gateway,
