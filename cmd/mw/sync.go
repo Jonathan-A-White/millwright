@@ -47,6 +47,7 @@ func newSyncCmd() *cobra.Command {
 				Tracker: mwGateway(dir, host),
 				Host:    host,
 				Ticks:   hostTickLogs(),
+				Lock:    hostSyncLock(),
 			}.Run(cmd.Context())
 			if err != nil {
 				return err
