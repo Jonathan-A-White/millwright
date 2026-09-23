@@ -104,6 +104,48 @@ func TestAHaltedSyncTakesTheNoteBackToWhatItWas(t *testing.T) {
 	}
 }
 
+// mw-gq6.98: a plain `mw sync` (contrib/mail-notify's step) never touched
+// this host's own local sync-halted mark, only mw dispatch and mw millhand
+// tick did — so a quiet alarm reading that mark saw nothing halted even while
+// this host's own beads sync was stuck on a merge conflict. A sync's halt now
+// writes it, the same shape as mw dispatch's own test.
+func TestSyncMarksASyncHaltOnItsOwnLocalMarker(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	marker := apptest.NewFakeSyncHaltMarker()
+	sync.SyncHalts = marker
+	tracker.SyncExits(2, "conflict in the working set")
+
+	if _, err := sync.Run(context.Background()); err == nil {
+		t.Fatal("expected the halt to stop the sync")
+	}
+	info, there, err := marker.Read(context.Background())
+	if err != nil || !there {
+		t.Fatalf("expected the marker written, there=%v, err=%v", there, err)
+	}
+	if !strings.Contains(info.Said, "conflict in the working set") {
+		t.Fatalf("expected the marker to hold what bd said, got %+v", info)
+	}
+}
+
+// TestSyncClearsItsOwnLocalMarkerOnceLevelAgain is the other half: a sync
+// that gets level again clears the mark, so a later quiet alarm does not go
+// on naming a halt that has already cleared.
+func TestSyncClearsItsOwnLocalMarkerOnceLevelAgain(t *testing.T) {
+	sync, _, _ := syncing(t)
+	marker := apptest.NewFakeSyncHaltMarker()
+	if err := marker.Write(context.Background(), application.SyncHaltInfo{At: level.Add(-time.Hour), Said: "old"}); err != nil {
+		t.Fatalf("seeding the marker: %v", err)
+	}
+	sync.SyncHalts = marker
+
+	if _, err := sync.Run(context.Background()); err != nil {
+		t.Fatalf("expected a level sync to succeed, got %v", err)
+	}
+	if _, there, _ := marker.Read(context.Background()); there {
+		t.Fatal("expected a level sync to clear the marker")
+	}
+}
+
 func TestSyncWithNothingToDoIsQuiet(t *testing.T) {
 	sync, _, _ := syncing(t)
 

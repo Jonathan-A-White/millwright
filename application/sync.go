@@ -455,6 +455,14 @@ type Sync struct {
 	// that has no stake in this race.
 	Lock HostLock
 
+	// SyncHalts is this host's own mark of a halted sync: written once the
+	// beads cycle halts on a merge conflict or a stuck working set, left alone
+	// on a halt that repeats, and cleared once the cycle is level again. It is
+	// a mark only this host reads, unlike noteHalt's, which is written into
+	// the tracker for the OTHER host to read once a later sync gets through. A
+	// nil SyncHalts writes and clears nothing.
+	SyncHalts SyncHaltMarker
+
 	// Now is the clock, so that a test can pin the time a sync was level at.
 	// The zero value reads the real one.
 	Now func() time.Time
@@ -502,7 +510,7 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 	// is handed back afterwards — with a status of its own, because nothing here
 	// is broken.
 	if len(report.Blocked) > 0 {
-		retried, err := s.syncTracker(ctx)
+		retried, err := s.syncTrackerMarking(ctx)
 		if err != nil {
 			return report, fmt.Errorf("syncing the beads database on %s: %w", s.Host, err)
 		}
@@ -563,7 +571,7 @@ func (s Sync) syncBeadsRecordingLevel(ctx context.Context, report SyncReport) (S
 		_ = s.Tracker.SetNote(ctx, TicksKey(s.Host), held.Note())
 	}
 
-	retried, err := s.syncTracker(ctx)
+	retried, err := s.syncTrackerMarking(ctx)
 	if err != nil {
 		err = fmt.Errorf("syncing the beads database on %s: %w", s.Host, err)
 		if noteErr == nil {
@@ -658,6 +666,22 @@ func (s Sync) syncTracker(ctx context.Context) (string, error) {
 	} else {
 		return "", retryErr
 	}
+}
+
+// syncTrackerMarking runs syncTracker and keeps SyncHalts level with what it
+// found: a halt records it, unless a halt already recorded is still there,
+// and getting level again clears it. This is separate from noteHalt, which
+// publishes the halt into the tracker for the other host to read once it
+// can; SyncHalts is read straight by this host's own mw status and mw nudge,
+// so it must not wait on the very sync that is stuck to carry the word.
+func (s Sync) syncTrackerMarking(ctx context.Context) (string, error) {
+	retried, err := s.syncTracker(ctx)
+	if err != nil {
+		RecordSyncHalt(ctx, s.SyncHalts, err, s.now())
+	} else {
+		ClearSyncHalt(ctx, s.SyncHalts)
+	}
+	return retried, err
 }
 
 // noteHalt writes SyncHaltKey once for a halt worth an alarm elsewhere — a
