@@ -103,3 +103,10 @@ Feature: mw doctor
     Then mw doctor leaves with the status 6
     And the doctor log holds "wifi damped"
     And netsh was run with "wlan connect name=Whitehouse" 3 times
+
+  Scenario: The real vault-dirty check commits a modified run file by its exact path, the log line naming the commit to revert
+    Given a vault with a modified tracked file "runs/mw-gq6.11/result.json"
+    When mw doctor's vault-dirty check runs for real
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "vault-dirty cured"
+    And the doctor log holds a way back naming the commit it made

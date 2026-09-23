@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -36,6 +37,7 @@ type doctorContext struct {
 	systemctlCalls string
 	netshCalls     string
 	wifi           *doctor.Wifi
+	vaultDirtyDir  string
 
 	out    bytes.Buffer
 	report application.DoctorReport
@@ -64,6 +66,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a fake netsh reporting the network "([^"]*)"$`, c.aFakeNetshReportingTheNetwork)
 	ctx.Given(`^a fake powershell that exists$`, c.aFakePowershellThatExists)
 	ctx.Given(`^the internet is unreachable$`, c.theInternetIsUnreachable)
+	ctx.Given(`^a vault with a modified tracked file "([^"]*)"$`, c.aVaultWithAModifiedTrackedFile)
 
 	ctx.When(`^the check "([^"]*)"'s probe says ok$`, c.theChecksProbeSaysOK)
 	ctx.When(`^the check "([^"]*)"'s probe says faulty "([^"]*)" again$`, c.theChecksProbeSaysFaultyAgain)
@@ -71,6 +74,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^mw doctor runs dry$`, c.mwDoctorRunsDry)
 	ctx.When(`^mw doctor's daemon-reload check runs for real$`, c.mwDoctorsDaemonReloadCheckRunsForReal)
 	ctx.When(`^mw doctor's wifi check runs$`, c.mwDoctorsWifiCheckRuns)
+	ctx.When(`^mw doctor's vault-dirty check runs for real$`, c.mwDoctorsVaultDirtyCheckRunsForReal)
 	ctx.When(`^(\d+) minutes? go(?:es)? by$`, c.minutesPass)
 	ctx.When(`^(\d+) hours? go(?:es)? by$`, c.hoursPass)
 
@@ -83,6 +87,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^systemctl was run with "([^"]*)"$`, c.systemctlWasRunWith)
 	ctx.Then(`^netsh was not run$`, c.netshWasNotRun)
 	ctx.Then(`^netsh was run with "([^"]*)" (\d+) times?$`, c.netshWasRunWithNTimes)
+	ctx.Then(`^the doctor log holds a way back naming the commit it made$`, c.theDoctorLogHoldsAWayBackNamingTheCommitItMade)
 }
 
 func (c *doctorContext) fake(name string) *apptest.FakeDoctorCheck {
@@ -415,6 +420,80 @@ func (c *doctorContext) netshWasRunWithNTimes(args, wantText string) error {
 		return fmt.Errorf("expected netsh to have been called with %q %d time(s), got %d (all calls: %v)", args, want, got, lines)
 	}
 	return nil
+}
+
+// aVaultWithAModifiedTrackedFile makes a real git vault — a bare repository
+// standing in for the remote both hosts share, and a clone of it — with path
+// already committed, then rewrites it without committing: the fault a
+// re-dispatch leaves behind by truncating its own runs/<id>/result.json or
+// rewriting its boot.md. It wires the real infrastructure/doctor.VaultDirty
+// check to run against that clone.
+func (c *doctorContext) aVaultWithAModifiedTrackedFile(path string) error {
+	if _, err := exec.LookPath("git"); err != nil {
+		return fmt.Errorf("git is not on PATH; this scenario needs a real git clone")
+	}
+	root, err := os.MkdirTemp("", "mw-doctor-vault-dirty")
+	if err != nil {
+		return err
+	}
+	remote := filepath.Join(root, "origin.git")
+	if _, err := runGit(root, "init", "--bare", "-q", "-b", "main", remote); err != nil {
+		return err
+	}
+	dir := filepath.Join(root, "vault")
+	if _, err := runGit(root, "clone", "-q", remote, dir); err != nil {
+		return err
+	}
+	if _, err := runGit(dir, "config", "user.name", "millwright test"); err != nil {
+		return err
+	}
+	if _, err := runGit(dir, "config", "user.email", "test@millwright.invalid"); err != nil {
+		return err
+	}
+
+	full := filepath.Join(dir, path)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(full, []byte("{}\n"), 0o644); err != nil {
+		return err
+	}
+	if _, err := runGit(dir, "add", "-A"); err != nil {
+		return err
+	}
+	if _, err := runGit(dir, "commit", "-qm", "the vault opens"); err != nil {
+		return err
+	}
+	if _, err := runGit(dir, "push", "-q", "-u", "origin", "main"); err != nil {
+		return err
+	}
+
+	// A re-dispatch truncating its own run file, not committing it.
+	if err := os.WriteFile(full, []byte(""), 0o644); err != nil {
+		return err
+	}
+
+	c.vaultDirtyDir = dir
+	c.real = doctor.NewVaultDirty(dir, "laptop")
+	return nil
+}
+
+func (c *doctorContext) mwDoctorsVaultDirtyCheckRunsForReal() error { return c.run(false) }
+
+func (c *doctorContext) theDoctorLogHoldsAWayBackNamingTheCommitItMade() error {
+	if c.vaultDirtyDir == "" {
+		return fmt.Errorf("no vault-dirty scenario was set up")
+	}
+	hash, err := runGit(c.vaultDirtyDir, "rev-parse", "HEAD")
+	if err != nil {
+		return err
+	}
+	for _, line := range c.log.Lines() {
+		if strings.Contains(line, "revert") && strings.Contains(line, hash) {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected the doctor log to hold a way back naming commit %s, got %v", hash, c.log.Lines())
 }
 
 func (c *doctorContext) netshCallLines() ([]string, error) {
