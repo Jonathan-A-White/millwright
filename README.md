@@ -1394,27 +1394,36 @@ run every 15 minutes for ever. It looks in this order:
 3. It runs one `mw sync`. A sync that fails is said in the line, and the tick
    looks on this host all the same.
 4. Need is unread mail for `millhand@<host>` or plain `millhand`, a story
-   `mw sweep` newly finds stuck on this host (sweep reports each story once), or
-   a watched host that is `unwell`, `stale` or `down`. `ok` and
-   `unreachable-once` are no need. The mail is only listed: it stays unread
-   until the Millhand reads it.
+   `mw sweep` newly finds stuck on this host (sweep reports each story once), a
+   watched host that is `unwell`, `stale` or `down`, or a `doctor.<check>` note
+   `mw doctor` has newly written or changed. `ok` and `unreachable-once` are no
+   need. The mail is only listed: it stays unread until the Millhand reads it.
 5. No need is `quiet`. Need is ONE routine wake, as `mw millhand --wake
    routine` does it, whose reason names the mail subjects and the stuck story
-   titles, five of each and then a count, and the watch line verbatim: `mw watch
-   says: unwell load1,mayor_gone`. When the host is `down`, or `unwell` with
+   titles, five of each and then a count, the watch line verbatim: `mw watch
+   says: unwell load1,mayor_gone`, and every doctor note, naming the check and
+   its text verbatim, with the standing instruction to run `mw doctor <check>`
+   by hand, read the log, and report. When the host is `down`, or `unwell` with
    `mayor_gone` among its reasons, the reason ends with the charter's one
    exception: *If the Mayor's process is gone and no handoff is under way you
    may run the one respawn command on the VPS.*
 
+A doctor note is woken for once: the tick remembers, per check, the text of
+the note it last woke for, and a note whose text has not changed since is not
+woken for again. A fresh one — a new fault, or the same one again after the
+check went ok and its note cleared — is.
+
 It prints one dated line and appends it to
 `~/.local/state/mw-millhand-tick/log` on this host, which is cut to its last
 500 lines; nothing else it keeps grows. It leaves with 0 for everything but a
-fault of its own: a wake that could not be started, or mail, stuck stories or a
-watch that could not be looked at when nothing else called for a wake (that is
-not `quiet`). `--dry-run` starts nothing and writes no log line, and it runs
-neither the sweep nor the watch, because each records what it finds (a sweep the
-stories it calls stuck, a watch its first failed check) and would leave nobody
-to wake for it. With no `[watch]` table the tick does not consult `mw watch`.
+fault of its own: a wake that could not be started, or mail, stuck stories,
+doctor notes or a watch that could not be looked at when nothing else called
+for a wake (that is not `quiet`). `--dry-run` starts nothing and writes no log
+line, and it runs neither the sweep, the watch nor the doctor note look-up,
+because each records what it finds (a sweep the stories it calls stuck, a
+watch its first failed check, the tick its own memory of a doctor note woken
+for) and would leave nobody to wake for it. With no `[watch]` table the tick
+does not consult `mw watch`.
 See `features/millhand_tick.feature`.
 
 ### Waking the Millhand by timer
@@ -1557,6 +1566,16 @@ back beside every cure. `--dry-run` prints what a faulty check would do and
 changes nothing: no cure runs, no state is written, no log line is appended.
 It leaves with 0 when every check is ok or cured, and 6 when any check is left
 faulty and uncured (damped, or its cure failed), so a timer's journal shows it.
+
+`mw doctor` never calls AI, sends mail or raises a push notice itself: a
+check that cannot tell, or is cure-failed a second time in its episode, or is
+damped because its episode hit the cap, gets a beads note of its own,
+`doctor.<check>`, holding the time, the verdict, the reason and its last 3
+log lines; a check back to ok has its note cleared. `mw millhand tick` is
+what wakes the Millhand for one, once per note, telling it to run `mw doctor
+<check>` by hand and read the log. The doctor may be offline when it tries to
+write or clear a note: that failure is logged as `note-failed` and changes
+nothing else; the next run retries.
 
 The `[doctor]` table of the config file says which units **daemon-reload**
 asks about, which hosts **wifi** and **tunnel** try to reach, where its
