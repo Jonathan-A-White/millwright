@@ -58,8 +58,24 @@ type Sweep struct {
 	// Host is which of the factory's hosts this sweep is for.
 	Host string
 
+	// Activity reads a claimed story's worktree for the newest file it has
+	// written, so a session that only writes — every Builder, since its
+	// session runs headless (`claude --print ... > result.json.tmp`) and
+	// buffers everything it would print until it exits — is not judged by its
+	// blank pane alone. dir not existing yet is not an error: Activity reports
+	// the zero time. A nil Activity, or a rig Sweep has no directory for in
+	// Rigs, leaves a session judged by its pane alone, exactly as before this
+	// fold-in.
+	Activity func(ctx context.Context, dir string) (time.Time, error)
+
+	// Rigs is where each rig is checked out on this host, keyed by name — the
+	// same config Dispatch and Check read — so Sweep can place a claimed
+	// story's worktree for Activity.
+	Rigs map[string]string
+
 	// StaleAfter is how long a claimed story's session may show no new output
-	// before its claim is called stuck. Zero reads DefaultStaleAfter.
+	// or worktree activity before its claim is called stuck. Zero reads
+	// DefaultStaleAfter.
 	StaleAfter time.Duration
 
 	// Now is the clock staleness is measured against. The zero value reads the
@@ -146,7 +162,7 @@ func (s Sweep) one(ctx context.Context, detail StoryDetail, report *SweepReport)
 
 	stuck, why, err := s.silent(ctx, detail, name)
 	if err != nil {
-		report.Notes = append(report.Notes, fmt.Sprintf("the output of %s's session could not be read: %v", id, err))
+		report.Notes = append(report.Notes, fmt.Sprintf("the sign of life of %s's session could not be read: %v", id, err))
 		return
 	}
 	if stuck {
@@ -154,21 +170,28 @@ func (s Sweep) one(ctx context.Context, detail StoryDetail, report *SweepReport)
 	}
 }
 
-// silent reports whether a running session has printed nothing new since
-// sweep last looked, for at least StaleAfter. What sweep saw last time, and
-// since when, is the note SweepKey names in Memory. A session that changed gets
-// its clock reset to now rather than reported; one sweep has not seen before
-// starts its clock at the claim, when the tracker says when that was, and at
-// this look when it does not — either way every session is owed one full
-// StaleAfter, counted from the claim at the earliest, before it is called
-// stuck.
+// silent reports whether a running session has printed or written nothing new
+// since sweep last looked, for at least StaleAfter. What sweep saw last time,
+// and since when, is the note SweepKey names in Memory. A session that
+// changed gets its clock reset to now rather than reported; one sweep has not
+// seen before starts its clock at the claim, when the tracker says when that
+// was, and at this look when it does not — either way every session is owed
+// one full StaleAfter, counted from the claim at the earliest, before it is
+// called stuck.
 func (s Sweep) silent(ctx context.Context, detail StoryDetail, name string) (bool, string, error) {
 	id := detail.Story.ID
 	output, err := s.Runner.Output(ctx, name, SweepOutputLines)
 	if err != nil {
 		return false, "", err
 	}
+	newest, err := s.worktreeActivity(ctx, detail)
+	if err != nil {
+		return false, "", fmt.Errorf("reading its worktree's activity: %w", err)
+	}
 	seen := fingerprint(output)
+	if !newest.IsZero() {
+		seen = fingerprint(output + "\x00" + newest.UTC().Format(time.RFC3339Nano))
+	}
 
 	saved, err := s.Memory.Note(ctx, SweepKey(id))
 	if err != nil {
@@ -197,6 +220,21 @@ func (s Sweep) silent(ctx context.Context, detail StoryDetail, name string) (boo
 			"The claim was left alone; settling a stuck claim is a separate story.",
 		s.Host, name, s.staleAfter(), since.UTC().Format(time.RFC3339))
 	return true, why, nil
+}
+
+// worktreeActivity is the newest file a claimed story's worktree holds, or
+// the zero time when Sweep cannot place one: Activity is not wired, or the
+// story's rig is not in Rigs. Either way a session is then judged by its pane
+// alone, exactly as sweep always has.
+func (s Sweep) worktreeActivity(ctx context.Context, detail StoryDetail) (time.Time, error) {
+	if s.Activity == nil {
+		return time.Time{}, nil
+	}
+	rigDir, ok := s.Rigs[detail.Merged().Rig]
+	if !ok {
+		return time.Time{}, nil
+	}
+	return s.Activity(ctx, WorktreeDir(rigDir, detail.Story.ID))
 }
 
 // parseSweepNote reads a note Sweep wrote: the fingerprint and the time it was
