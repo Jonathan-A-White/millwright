@@ -52,6 +52,18 @@ func newDoctorCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			tunnelUnit, err := config.DoctorTunnelUnit()
+			if err != nil {
+				return err
+			}
+			tunnelHost, err := config.DoctorTunnelHost()
+			if err != nil {
+				return err
+			}
+			tunnelProbe, err := config.DoctorTunnelProbe()
+			if err != nil {
+				return err
+			}
 			vault, err := config.Vault()
 			if err != nil {
 				return err
@@ -66,6 +78,7 @@ func newDoctorCmd() *cobra.Command {
 				Checks: application.DoctorChecks{
 					doctor.NewDaemonReload(units),
 					doctor.NewWifi(reach, powershell, store),
+					doctor.NewTunnel(tunnelHost, reach, tunnelUnit, tunnelProbe),
 					doctor.NewVaultDirty(vault, host),
 				},
 				State: store,
