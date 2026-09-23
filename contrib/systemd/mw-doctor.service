@@ -1,0 +1,23 @@
+# One `mw doctor` run, as the user, then it exits: no daemon. For
+# `systemctl --user`; see README.md, "mw doctor".
+#
+# Started by mw-doctor.timer. It works a table of checks, each its own probe
+# and cure, offline and without AI, and logs what it found on this host; it
+# writes no beads note, sends no mail and touches no tracker.
+[Unit]
+Description=Cure this host's known faults offline, on a table of checks (mw doctor)
+
+[Service]
+Type=oneshot
+
+# Unlike the rig's other units this does not rely on PATH to find mw: doctor's
+# job is to work even when this host's own environment is suspect, so it runs
+# the binary at its one fixed, known place. `env` only saves `systemd-analyze
+# verify` from having to resolve %h itself; it does no PATH lookup on a path
+# holding a "/".
+EnvironmentFile=-%h/.config/mw/dispatch.env
+ExecStart=/usr/bin/env %h/.local/bin/mw doctor
+
+# Type=oneshot has no start timeout by default, and a hung systemctl would
+# then block every later run.
+TimeoutStartSec=2min
