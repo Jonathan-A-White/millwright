@@ -15,6 +15,7 @@ import (
 func filedAndHeld(t *testing.T) (*apptest.FakeTracker, application.FiledPlan) {
 	t.Helper()
 	tracker := apptest.NewFakeTracker()
+	tracker.AddFormula("tdd-feature")
 	filed, err := application.File{Tracker: tracker}.Run(context.Background(), twoStoryPlan())
 	if err != nil {
 		t.Fatalf("filing the plan: %v", err)

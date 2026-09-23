@@ -33,7 +33,11 @@ func InitializeReleaseScenario(ctx *godog.ScenarioContext) {
 	c := &releaseContext{}
 
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
-		*c = releaseContext{tracker: apptest.NewFakeTracker()}
+		tracker := apptest.NewFakeTracker()
+		// The plans this feature and show.feature file both name these formulas.
+		tracker.AddFormula("tdd-feature")
+		tracker.AddFormula("chore")
+		*c = releaseContext{tracker: tracker}
 		return ctx, nil
 	})
 
