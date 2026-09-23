@@ -1686,6 +1686,22 @@ BEADS line warns on; past it there is no cure — repacking would delete packs
 — so it only ever writes the check's own `doctor.beads-size` note for the
 Millhand to look at.
 
+**mayor-gone** respawns the Mayor when the window its own vault-local
+`.mayor-acting` names is gone, or is open but its pane holds nothing but a
+bare shell — the same reading of `.mayor-acting`
+`contrib/health/mw-health.sh` keeps for its own `mayor=gone` line. Its probe
+is cannot-tell, naming which, when `.mayor-acting` is absent (a host the
+Mayor does not sit on) or the vault's `bin/mayor-up` is missing or not
+executable — it never invents its own way to bring a Mayor up. Its cure is
+always that script, `MW_DOCTOR=1 <vault>/bin/mayor-up`, given 120 s: it
+brings up the tmux server if that is what is missing, then respawns from the
+newest handoff with a note that its predecessor is gone. Its damper is 30
+minutes with a cap of 2 per episode, and its way back, once a cure has run,
+is `tmux kill-window -t '<window id mayor-up started>'` — before that, dry
+run or damped, it is the mayor-up line itself, there being no window id yet
+to know a kill from. `mw doctor mayor-gone` is the recovery by hand;
+`--dry-run` prints the line it would run and changes nothing.
+
 **Install**, once per host: `sh scripts/install-units.sh --enable mw-doctor`
 (see *Running a host on a timer*), which runs `mw-doctor.timer` at 2, 7, 12,
 ... past the hour — off the dispatch timer's own minutes, so the two never
