@@ -169,3 +169,74 @@ Feature: mw doctor
     And the note "doctor.beads-size" holds "damped"
     And the note "doctor.beads-size" holds "200"
     And the note "doctor.beads-size" holds "100"
+
+  Scenario: The real mayor-gone check with no .mayor-acting is cannot-tell, and mayor-up never runs
+    Given a vault with no .mayor-acting
+    When mw doctor's mayor-gone check runs for real
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "mayor-gone cannot-tell"
+    And the doctor log holds ".mayor-acting"
+    And mayor-up was not run
+
+  Scenario: The real mayor-gone check whose window is open with a live process is ok
+    Given a vault whose .mayor-acting names the window "mayor-2026-09-23-39"
+    And a stand-in tmux listing that window with a live claude process
+    And a stand-in bin/mayor-up in that vault that starts a Mayor in window "@7"
+    When mw doctor's mayor-gone check runs for real
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "mayor-gone ok"
+    And mayor-up was not run
+
+  Scenario: The real mayor-gone check whose window is gone runs mayor-up, the way back naming the window it started
+    Given a vault whose .mayor-acting names the window "mayor-2026-09-23-39"
+    And a stand-in tmux with no window open
+    And a stand-in bin/mayor-up in that vault that starts a Mayor in window "@7"
+    When mw doctor's mayor-gone check runs for real
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "mayor-gone cured"
+    And the doctor log holds "tmux kill-window -t '@7'"
+    And mayor-up was run 1 time
+
+  Scenario: The same mayor-gone fault within 30 minutes is damped, and mayor-up is not run again
+    Given a vault whose .mayor-acting names the window "mayor-2026-09-23-39"
+    And a stand-in tmux with no window open
+    And a stand-in bin/mayor-up in that vault that starts a Mayor in window "@7"
+    When mw doctor's mayor-gone check runs for real
+    And 10 minutes go by
+    And mw doctor's mayor-gone check runs for real
+    Then mw doctor leaves with the status 6
+    And the doctor log holds "mayor-gone damped"
+    And mayor-up was run 1 time
+
+  Scenario: mayor-up failing twice writes the check's own note and spends no third cure in the episode
+    Given a vault whose .mayor-acting names the window "mayor-2026-09-23-39"
+    And a stand-in tmux with no window open
+    And a stand-in bin/mayor-up in that vault that always exits 4, saying "cannot: no live Mayor could be started"
+    When mw doctor's mayor-gone check runs for real
+    And 30 minutes go by
+    And mw doctor's mayor-gone check runs for real
+    Then mw doctor leaves with the status 6
+    And the note "doctor.mayor-gone" holds "cure-failed"
+    And mayor-up was run 2 times
+    When 30 minutes go by
+    And mw doctor's mayor-gone check runs for real
+    Then mayor-up was run 2 times
+
+  Scenario: bin/mayor-up missing is cannot-tell, and nothing runs
+    Given a vault whose .mayor-acting names the window "mayor-2026-09-23-39"
+    And a stand-in tmux with no window open
+    When mw doctor's mayor-gone check runs for real
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "mayor-gone cannot-tell"
+    And the doctor log holds "bin/mayor-up"
+    And mayor-up was not run
+
+  Scenario: --dry-run on a faulty mayor-gone check prints the mayor-up line, and changes nothing
+    Given a vault whose .mayor-acting names the window "mayor-2026-09-23-39"
+    And a stand-in tmux with no window open
+    And a stand-in bin/mayor-up in that vault that starts a Mayor in window "@7"
+    When mw doctor runs dry
+    Then mw doctor leaves with the status 0
+    And mw doctor printed "bin/mayor-up"
+    And mayor-up was not run
+    And the doctor log is empty

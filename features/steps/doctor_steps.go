@@ -40,6 +40,9 @@ type doctorContext struct {
 	wifi           *doctor.Wifi
 	vaultDirtyDir  string
 
+	mayorGoneVault string
+	mayorUpCalls   string
+
 	out    bytes.Buffer
 	report application.DoctorReport
 	err    error
@@ -73,6 +76,12 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a vault with a modified tracked file "([^"]*)"$`, c.aVaultWithAModifiedTrackedFile)
 	ctx.Given(`^a fake systemctl reporting the timer "([^"]*)" enabled and inactive$`, c.aFakeSystemctlReportingTheTimerEnabledAndInactive)
 	ctx.Given(`^a vault whose \.beads is (\d+) bytes, past a (\d+) byte budget$`, c.aVaultWhoseBeadsIsBytesPastABudget)
+	ctx.Given(`^a vault with no \.mayor-acting$`, c.aVaultWithNoMayorActing)
+	ctx.Given(`^a vault whose \.mayor-acting names the window "([^"]*)"$`, c.aVaultWhoseMayorActingNamesTheWindow)
+	ctx.Given(`^a stand-in tmux listing that window with a live claude process$`, c.aStandInTmuxListingThatWindowWithALiveProcess)
+	ctx.Given(`^a stand-in tmux with no window open$`, c.aStandInTmuxWithNoWindowOpen)
+	ctx.Given(`^a stand-in bin/mayor-up in that vault that starts a Mayor in window "([^"]*)"$`, c.aStandInMayorUpThatStartsAMayorInWindow)
+	ctx.Given(`^a stand-in bin/mayor-up in that vault that always exits 4, saying "([^"]*)"$`, c.aStandInMayorUpThatAlwaysExits4Saying)
 
 	ctx.When(`^the check "([^"]*)"'s probe says ok$`, c.theChecksProbeSaysOK)
 	ctx.When(`^the check "([^"]*)"'s probe says faulty "([^"]*)" again$`, c.theChecksProbeSaysFaultyAgain)
@@ -83,6 +92,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^mw doctor's vault-dirty check runs for real$`, c.mwDoctorsVaultDirtyCheckRunsForReal)
 	ctx.When(`^mw doctor's timers check runs for real$`, c.mwDoctorsTimersCheckRunsForReal)
 	ctx.When(`^mw doctor's beads-size check runs for real$`, c.mwDoctorsBeadsSizeCheckRunsForReal)
+	ctx.When(`^mw doctor's mayor-gone check runs for real$`, c.mwDoctorsMayorGoneCheckRunsForReal)
 	ctx.When(`^(\d+) minutes? go(?:es)? by$`, c.minutesPass)
 	ctx.When(`^(\d+) hours? go(?:es)? by$`, c.hoursPass)
 
@@ -98,6 +108,8 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the doctor log holds a way back naming the commit it made$`, c.theDoctorLogHoldsAWayBackNamingTheCommitItMade)
 	ctx.Then(`^the note "([^"]*)" holds "([^"]*)"$`, c.theNoteHolds)
 	ctx.Then(`^the note "([^"]*)" does not exist$`, c.theNoteDoesNotExist)
+	ctx.Then(`^mayor-up was not run$`, c.mayorUpWasNotRun)
+	ctx.Then(`^mayor-up was run (\d+) times?$`, c.mayorUpWasRunNTimes)
 }
 
 func (c *doctorContext) fake(name string) *apptest.FakeDoctorCheck {
@@ -628,4 +640,167 @@ func (c *doctorContext) netshCallLines() ([]string, error) {
 		return nil, nil
 	}
 	return strings.Split(text, "\n"), nil
+}
+
+// ensureMayorGoneVault makes, once per scenario, a temp dir standing in for a
+// vault, and wires up the real infrastructure/doctor.MayorGone check against
+// it. Nothing here reads a real vault or touches a real tmux server.
+func (c *doctorContext) ensureMayorGoneVault() (string, error) {
+	if c.mayorGoneVault != "" {
+		return c.mayorGoneVault, nil
+	}
+	dir, err := os.MkdirTemp("", "mw-doctor-mayor-gone")
+	if err != nil {
+		return "", err
+	}
+	c.mayorGoneVault = dir
+	c.real = doctor.NewMayorGone(dir)
+	return dir, nil
+}
+
+func (c *doctorContext) mayorGoneCheck() (*doctor.MayorGone, error) {
+	if _, err := c.ensureMayorGoneVault(); err != nil {
+		return nil, err
+	}
+	check, ok := c.real.(*doctor.MayorGone)
+	if !ok {
+		return nil, fmt.Errorf("no mayor-gone check is set up in this scenario")
+	}
+	return check, nil
+}
+
+func (c *doctorContext) aVaultWithNoMayorActing() error {
+	_, err := c.ensureMayorGoneVault()
+	return err
+}
+
+func (c *doctorContext) aVaultWhoseMayorActingNamesTheWindow(name string) error {
+	dir, err := c.ensureMayorGoneVault()
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, application.ActingFileName("mayor")), []byte("acting in window "+name+"\n"), 0o644)
+}
+
+// writeMayorGoneTmux writes a stand-in tmux whose body answers list-windows
+// and list-panes, the only two subcommands the real check ever runs, and
+// wires the check to run it instead of a real tmux.
+func (c *doctorContext) writeMayorGoneTmux(body string) error {
+	if runtime.GOOS == "windows" {
+		return fmt.Errorf("the stand-in for tmux is a shell script; this scenario does not run on windows")
+	}
+	check, err := c.mayorGoneCheck()
+	if err != nil {
+		return err
+	}
+	dir, err := os.MkdirTemp("", "mw-doctor-mayor-gone-tmux")
+	if err != nil {
+		return err
+	}
+	program := filepath.Join(dir, "tmux-stand-in")
+	script := "#!/bin/sh\n" + body + "exit 0\n"
+	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
+		return fmt.Errorf("writing the tmux stand-in: %w", err)
+	}
+	check.Tmux = program
+	return nil
+}
+
+func (c *doctorContext) aStandInTmuxListingThatWindowWithALiveProcess() error {
+	return c.writeMayorGoneTmux(`case "$1" in
+list-windows) printf '@7\tmayor-2026-09-23-39\n' ;;
+list-panes) printf '0 claude\n' ;;
+esac
+`)
+}
+
+func (c *doctorContext) aStandInTmuxWithNoWindowOpen() error {
+	return c.writeMayorGoneTmux(`case "$1" in
+list-windows) : ;;
+list-panes) printf '0 bash\n' ;;
+esac
+`)
+}
+
+// aStandInMayorUpThatStartsAMayorInWindow writes a stand-in bin/mayor-up
+// under the scenario's vault that logs one line per call (for counting) and
+// prints the window id last, the way the real script does, so WayBack reads
+// it.
+func (c *doctorContext) aStandInMayorUpThatStartsAMayorInWindow(windowID string) error {
+	dir, err := c.ensureMayorGoneVault()
+	if err != nil {
+		return err
+	}
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return err
+	}
+	calls := filepath.Join(dir, "mayor-up-calls")
+	c.mayorUpCalls = calls
+	script := fmt.Sprintf(`#!/bin/sh
+echo call >>%q
+echo "started a Mayor in window %s from handoff N; the way back: tmux kill-window -t '%s'"
+echo %s
+exit 0
+`, calls, windowID, windowID, windowID)
+	return os.WriteFile(filepath.Join(binDir, "mayor-up"), []byte(script), 0o755)
+}
+
+// aStandInMayorUpThatAlwaysExits4Saying writes a stand-in bin/mayor-up that
+// never starts a Mayor, the way the real script exits 4 when it cannot.
+func (c *doctorContext) aStandInMayorUpThatAlwaysExits4Saying(msg string) error {
+	dir, err := c.ensureMayorGoneVault()
+	if err != nil {
+		return err
+	}
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		return err
+	}
+	calls := filepath.Join(dir, "mayor-up-calls")
+	c.mayorUpCalls = calls
+	script := fmt.Sprintf(`#!/bin/sh
+echo call >>%q
+echo %q
+exit 4
+`, calls, msg)
+	return os.WriteFile(filepath.Join(binDir, "mayor-up"), []byte(script), 0o755)
+}
+
+func (c *doctorContext) mwDoctorsMayorGoneCheckRunsForReal() error { return c.run(false) }
+
+func (c *doctorContext) mayorUpWasNotRun() error {
+	return c.mayorUpCallCount(0)
+}
+
+func (c *doctorContext) mayorUpWasRunNTimes(wantText string) error {
+	want, err := strconv.Atoi(wantText)
+	if err != nil {
+		return fmt.Errorf("parsing %q as a number of calls: %w", wantText, err)
+	}
+	return c.mayorUpCallCount(want)
+}
+
+func (c *doctorContext) mayorUpCallCount(want int) error {
+	if c.mayorUpCalls == "" {
+		if want == 0 {
+			return nil
+		}
+		return fmt.Errorf("no stand-in bin/mayor-up was set up in this scenario")
+	}
+	data, err := os.ReadFile(c.mayorUpCalls)
+	if os.IsNotExist(err) {
+		data = nil
+	} else if err != nil {
+		return fmt.Errorf("reading the mayor-up call log: %w", err)
+	}
+	text := strings.TrimRight(string(data), "\n")
+	var got int
+	if text != "" {
+		got = len(strings.Split(text, "\n"))
+	}
+	if got != want {
+		return fmt.Errorf("expected bin/mayor-up to have been run %d time(s), got %d:\n%s", want, got, data)
+	}
+	return nil
 }
