@@ -43,11 +43,12 @@ func newSyncCmd() *cobra.Command {
 			}
 
 			report, err := application.Sync{
-				Vault:   mwVault(dir, host),
-				Tracker: mwGateway(dir, host),
-				Host:    host,
-				Ticks:   hostTickLogs(),
-				Lock:    hostSyncLock(),
+				Vault:     mwVault(dir, host),
+				Tracker:   mwGateway(dir, host),
+				Host:      host,
+				Ticks:     hostTickLogs(),
+				Lock:      hostSyncLock(),
+				SyncHalts: hostSyncHalt(),
 			}.Run(cmd.Context())
 			if err != nil {
 				return err
