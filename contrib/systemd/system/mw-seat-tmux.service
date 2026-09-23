@@ -1,0 +1,44 @@
+# Makes sure a tmux server with a session named "0" exists on this host's
+# default socket, and sets it up so the kernel spares it under memory
+# pressure. A system unit (root), for hosts whose seats run as root; see
+# README.md, "The seat's tmux server on the VPS". A host whose seats run as a
+# person instead needs no unit for this: their login starts the server.
+#
+# Why a system unit and not `systemctl --user`: the VPS's tmux server used to
+# live under root's user manager (user-0.slice). When the OOM killer took the
+# manager, systemd killed everything under it, the Mayor's session included —
+# and with nobody logging in, nothing would have restarted it. A system unit
+# answers to no user manager, so it cannot be taken down with one.
+[Unit]
+Description=Keep a tmux server up for this host's seats (session 0)
+After=network.target
+
+[Service]
+Type=forking
+RemainAfterExit=yes
+
+# A system unit gets a bare PATH. The host says where tmux and the rest of a
+# seat's tools live in this file; the leading "-" makes it optional, since a
+# server already up needs nothing from it.
+EnvironmentFile=-%h/.config/mw/seat.env
+
+# has-session first, so a server a login (or an earlier run of this unit)
+# already started is left exactly as it is: this never restarts or replaces
+# a running server, and starting one is a no-op once one exists. Only when
+# none does it start one, detached, on the default socket — the one
+# `infrastructure/tmux/tmux.go` talks to with no `-L`.
+ExecStart=/bin/sh -c 'tmux has-session -t =0 2>/dev/null || exec tmux new-session -d -s 0'
+
+# Stopping or restarting this unit must never kill the server: the sessions
+# inside it (the Mayor's, a Builder's) are not this unit's to end.
+ExecStop=/bin/true
+KillMode=process
+
+# The one process everything else on this host depends on: make the kernel's
+# OOM killer pick almost anything else before this. `oom_score_adj` is
+# inherited across tmux's own fork, so the server this starts carries it too;
+# a server a login already started keeps whatever score it was given then.
+OOMScoreAdjust=-900
+
+[Install]
+WantedBy=multi-user.target
