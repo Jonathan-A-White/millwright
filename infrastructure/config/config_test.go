@@ -703,6 +703,44 @@ func TestDoctorStateDirRefusesARelativePath(t *testing.T) {
 	}
 }
 
+func TestDoctorReachIsTheShippedTwoUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, vpsConfig)
+
+	reach, err := config.DoctorReach()
+	if err != nil {
+		t.Fatalf("reading the doctor's reach: %v", err)
+	}
+	if strings.Join(reach, ",") != strings.Join(config.DefaultDoctorReach, ",") {
+		t.Fatalf("expected the default reach, got %+v", reach)
+	}
+
+	writeConfig(t, "[doctor]\nreach = [\"example.com:443\"]\n")
+	reach, err = config.DoctorReach()
+	if err != nil {
+		t.Fatalf("reading the doctor's reach: %v", err)
+	}
+	if got := strings.Join(reach, " "); got != "example.com:443" {
+		t.Fatalf("expected the file's reach, got %q", got)
+	}
+}
+
+func TestDoctorPowershellIsTheShippedPathUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, vpsConfig)
+
+	powershell, err := config.DoctorPowershell()
+	if err != nil {
+		t.Fatalf("reading the doctor's powershell path: %v", err)
+	}
+	if powershell != config.DefaultDoctorPowershell {
+		t.Fatalf("expected the default powershell path, got %q", powershell)
+	}
+
+	writeConfig(t, "[doctor]\npowershell = \"/mnt/c/somewhere/powershell.exe\"\n")
+	if powershell, err = config.DoctorPowershell(); err != nil || powershell != "/mnt/c/somewhere/powershell.exe" {
+		t.Fatalf("expected the file's powershell path, got %q: %v", powershell, err)
+	}
+}
+
 func TestDispatchWaitsThreeTriesFifteenSecondsApartUntilAHostSaysOtherwise(t *testing.T) {
 	writeConfig(t, "")
 	tries, err := config.DispatchSyncTries()

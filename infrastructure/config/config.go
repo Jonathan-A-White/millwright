@@ -26,8 +26,10 @@
 //	blog    = "https://blog.example.com"
 //
 //	[doctor]
-//	units     = ["mw-dispatch.service", "mw-millhand-tick.service"]
-//	state_dir = "/root/.local/state/mw-doctor"
+//	units      = ["mw-dispatch.service", "mw-millhand-tick.service"]
+//	state_dir  = "/root/.local/state/mw-doctor"
+//	reach      = ["api.anthropic.com:443", "github.com:443"]
+//	powershell = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
 package config
 
 import (
@@ -720,6 +722,56 @@ func DoctorStateDir() (string, error) {
 		return dir, nil
 	}
 	return filepath.Join(home, DefaultDoctorStateDir), nil
+}
+
+// DefaultDoctorReach are the host:port pairs mw doctor's wifi check tries to
+// reach when the [doctor] table says nothing: two places outside this
+// factory, on different providers, so one of them being down is not mistaken
+// for this host's own network being down.
+var DefaultDoctorReach = []string{"api.anthropic.com:443", "github.com:443"}
+
+// DefaultDoctorPowershell is where mw doctor's wifi check looks for
+// powershell.exe when the [doctor] table says nothing: WSL's mount of the
+// path Windows itself uses. Its presence is what tells the check it is
+// running on a Windows-backed host at all; its absence makes the check inert.
+const DefaultDoctorPowershell = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+
+// DoctorReach reports the host:port pairs mw doctor's wifi check probes for
+// reachability, read from the `[doctor]` table's `reach` key of
+// ~/.config/mw/config.toml, and DefaultDoctorReach when the table says
+// nothing.
+func DoctorReach() ([]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	table, err := tableIn(filepath.Join(home, File), DoctorTable)
+	if err != nil {
+		return nil, err
+	}
+	if reach := list(table["reach"]); len(reach) > 0 {
+		return reach, nil
+	}
+	return DefaultDoctorReach, nil
+}
+
+// DoctorPowershell reports the path to powershell.exe mw doctor's wifi check
+// tests for, to tell whether this host is Windows-backed: the `[doctor]`
+// table's `powershell` key of ~/.config/mw/config.toml, and
+// DefaultDoctorPowershell when the table says nothing.
+func DoctorPowershell() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	table, err := tableIn(filepath.Join(home, File), DoctorTable)
+	if err != nil {
+		return "", err
+	}
+	if powershell := strings.TrimSpace(table["powershell"]); powershell != "" {
+		return powershell, nil
+	}
+	return DefaultDoctorPowershell, nil
 }
 
 // list reads a value that is a list of strings: `["a", "b"]`, or one string
