@@ -234,6 +234,62 @@ func TestNamingOneCheckRunsOnlyThatOne(t *testing.T) {
 	}
 }
 
+// TestATurnOKOnOneHostDoesNotClearAnotherHostsNote is the regression for
+// mw-i80dx.8: two hosts' doctors shared one note key per check, so one host
+// turning a check ok cleared the other host's still-faulty note. Each host's
+// note must be kept and cleared under its own key.
+func TestATurnOKOnOneHostDoesNotClearAnotherHostsNote(t *testing.T) {
+	notes := apptest.NewFakeDoctorNotes()
+	now := doctorNow
+
+	laptopCheck := &apptest.FakeDoctorCheck{
+		CheckName: "beads-size", Verdict: application.DoctorFaulty, Reason: "vault over budget",
+		Wait: 0, Cap: 1,
+	}
+	laptop := application.Doctor{
+		Checks: application.DoctorChecks{laptopCheck},
+		State:  apptest.NewFakeDoctorState(),
+		Log:    &apptest.FakeDoctorLog{},
+		Notes:  notes,
+		Host:   "laptop",
+		Now:    func() time.Time { return now },
+	}
+	// First run cures the fault, spending the cap; the second finds it faulty
+	// again with the cap already spent, so it is damped and a note is written.
+	if _, err := laptop.Run(context.Background(), "", false); err != nil {
+		t.Fatalf("laptop first run: %v", err)
+	}
+	if _, err := laptop.Run(context.Background(), "", false); application.ExitStatus(err) != application.DoctorFaultExit {
+		t.Fatalf("laptop second run: expected the fault exit, got %v", err)
+	}
+
+	laptopKey := application.DoctorNoteKey("laptop", "beads-size")
+	if _, ok := notes.Get(laptopKey); !ok {
+		t.Fatalf("expected %s to be written", laptopKey)
+	}
+
+	vpsCheck := &apptest.FakeDoctorCheck{CheckName: "beads-size", Verdict: application.DoctorOK}
+	vps := application.Doctor{
+		Checks: application.DoctorChecks{vpsCheck},
+		State:  apptest.NewFakeDoctorState(),
+		Log:    &apptest.FakeDoctorLog{},
+		Notes:  notes,
+		Host:   "vps",
+		Now:    func() time.Time { return now },
+	}
+	if _, err := vps.Run(context.Background(), "", false); err != nil {
+		t.Fatalf("vps run: %v", err)
+	}
+
+	if _, ok := notes.Get(laptopKey); !ok {
+		t.Errorf("expected the laptop's own note to survive the vps doctor turning ok, got it cleared")
+	}
+	vpsKey := application.DoctorNoteKey("vps", "beads-size")
+	if _, ok := notes.Get(vpsKey); ok {
+		t.Errorf("expected no note written for the vps's own ok check, got one")
+	}
+}
+
 func contains(lines []string, substr string) bool {
 	for _, line := range lines {
 		if strings.Contains(line, substr) {

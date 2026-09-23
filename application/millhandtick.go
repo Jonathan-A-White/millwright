@@ -561,9 +561,14 @@ func (t MillhandTick) sweep(ctx context.Context) (stuck, notes []string, err err
 // after the check went ok and cleared it — is.
 func DoctorSeenKey(host, check string) string { return "millhandtick.doctor." + host + "." + check }
 
-// doctor is every doctor.<check> note the tick has not already woken the
-// Millhand for, as ready-made wake reasons, and what it noted on the way. It
-// is skipped, quietly, with no DoctorNotes wired at all.
+// doctor is every doctor.<host>.<check> note of this tick's own host that it
+// has not already woken the Millhand for, as ready-made wake reasons, and
+// what it noted on the way. A note of another host is left alone — two
+// hosts' doctors share the one table, and only the host it is about should
+// ever wake for it. A leftover doctor.<check> note with no host, from before
+// notes were host-qualified, does not parse and is skipped the same way,
+// rather than read as any one host's. It is skipped, quietly, with no
+// DoctorNotes wired at all.
 func (t MillhandTick) doctor(ctx context.Context) (reasons, notes []string, err error) {
 	if t.DoctorNotes == nil {
 		return nil, nil, nil
@@ -574,12 +579,16 @@ func (t MillhandTick) doctor(ctx context.Context) (reasons, notes []string, err 
 	}
 	checks := make([]string, 0, len(found))
 	for key := range found {
-		checks = append(checks, strings.TrimPrefix(key, DoctorNotePrefix))
+		host, check, ok := ParseDoctorNoteKey(key)
+		if !ok || host != t.Host {
+			continue
+		}
+		checks = append(checks, check)
 	}
 	sort.Strings(checks)
 
 	for _, check := range checks {
-		value := found[DoctorNoteKey(check)]
+		value := found[DoctorNoteKey(t.Host, check)]
 		seenKey := DoctorSeenKey(t.Host, check)
 		seen, readErr := t.DoctorNotes.Note(ctx, seenKey)
 		if readErr != nil {

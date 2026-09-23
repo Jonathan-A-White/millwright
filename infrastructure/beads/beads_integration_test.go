@@ -579,8 +579,8 @@ func TestGatewayNotesWithPrefixFindsTheDoctorsNotes(t *testing.T) {
 		t.Fatalf("expected no doctor notes yet, got %+v: %v", found, err)
 	}
 
-	wifi := application.DoctorNoteKey("wifi")
-	tunnel := application.DoctorNoteKey("tunnel")
+	wifi := application.DoctorNoteKey("laptop", "wifi")
+	tunnel := application.DoctorNoteKey("laptop", "tunnel")
 	if err := gateway.SetNote(ctx, wifi, "2026-09-23T12:00:00Z cannot-tell faulty (waiting 5m)"); err != nil {
 		t.Fatalf("writing %s: %v", wifi, err)
 	}

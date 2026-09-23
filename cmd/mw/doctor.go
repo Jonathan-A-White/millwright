@@ -88,6 +88,7 @@ func newDoctorCmd() *cobra.Command {
 				State: store,
 				Log:   store,
 				Notes: mwGateway(vault, host),
+				Host:  host,
 				Out:   cmd.OutOrStdout(),
 			}, name, dryRun)
 		},

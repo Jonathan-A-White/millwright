@@ -43,8 +43,9 @@ func newMillhandTickCmd() *cobra.Command {
 			"in the line, wakes nobody and skips the sync, which would only time out. Then it runs one mw sync (a sync that fails is\n" +
 			"said in the line, and the tick looks on this host all the same), and looks for unread mail for\n" +
 			"millhand@<host> or millhand, for a story mw sweep newly finds stuck on this host, for a\n" +
-			"watched host that is unwell, stale or down, and for a doctor.<check> note mw doctor has newly\n" +
-			"written or changed. With none of them it says \"quiet\". With any, it starts ONE routine wake\n" +
+			"watched host that is unwell, stale or down, and for a doctor.<host>.<check> note of its own\n" +
+			"host that mw doctor has newly written or changed; another host's own note is left alone.\n" +
+			"With none of them it says \"quiet\". With any, it starts ONE routine wake\n" +
 			"of the Millhand (as `mw millhand --wake routine` does) whose reason lists the mail subjects\n" +
 			"and the stuck story titles, five of each and then a count, the watch line verbatim, and every\n" +
 			"doctor note with its check's name and a standing instruction to run mw doctor by hand. If the\n" +

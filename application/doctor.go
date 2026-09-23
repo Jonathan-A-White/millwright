@@ -100,9 +100,29 @@ type DoctorLog interface {
 // DoctorNotePrefix is the prefix every check's own note is kept under.
 const DoctorNotePrefix = "doctor."
 
-// DoctorNoteKey is the note kept for one check: DoctorNoteKey("wifi") ==
-// "doctor.wifi".
-func DoctorNoteKey(check string) string { return DoctorNotePrefix + check }
+// DoctorNoteKey is the note kept for one check on one host:
+// DoctorNoteKey("laptop", "wifi") == "doctor.laptop.wifi". Two hosts run the
+// doctor against the one shared config table, so the host is part of the
+// key: without it, one host's check turning ok clears another host's still-
+// faulty note of the same check.
+func DoctorNoteKey(host, check string) string { return DoctorNotePrefix + host + "." + check }
+
+// ParseDoctorNoteKey is DoctorNoteKey's inverse: the host and check a note's
+// key names, and whether it parses at all. A key with no host — the shape
+// written before this host-qualified form — does not parse: ok is false, so
+// a caller does not mistake a leftover host-less row for any particular
+// host's.
+func ParseDoctorNoteKey(key string) (host, check string, ok bool) {
+	rest := strings.TrimPrefix(key, DoctorNotePrefix)
+	if rest == key {
+		return "", "", false
+	}
+	host, check, found := strings.Cut(rest, ".")
+	if !found || host == "" || check == "" {
+		return "", "", false
+	}
+	return host, check, true
+}
 
 // DoctorNoteLogLines is how many of a check's own most recent log lines its
 // note carries, so a person or the Millhand reading the note has the recent
@@ -240,6 +260,12 @@ type Doctor struct {
 	// note, and cleared once it is ok again. A nil Notes writes and clears
 	// nothing, so a caller with nowhere to keep one still runs.
 	Notes DoctorNotes
+
+	// Host is this host, part of the key a check's own note is written and
+	// cleared under: two hosts share one config table, so without it one
+	// host's doctor would clear another's still-faulty note of the same
+	// check.
+	Host string
 
 	// Now is the clock episodes and log lines are read and dated by. The zero
 	// value reads the real one.
@@ -437,7 +463,7 @@ func (d Doctor) writeNote(ctx context.Context, check string, result DoctorResult
 		value += " " + result.Reason
 	}
 	value += " | last log lines: " + strings.Join(d.checkLogLines(ctx, check), " | ")
-	if err := d.Notes.SetNote(ctx, DoctorNoteKey(check), value); err != nil {
+	if err := d.Notes.SetNote(ctx, DoctorNoteKey(d.Host, check), value); err != nil {
 		_ = d.append(ctx, DoctorResult{Check: check, Verdict: "note-failed", Reason: oneLine(err.Error())})
 	}
 }
@@ -448,7 +474,7 @@ func (d Doctor) clearNote(ctx context.Context, check string) {
 	if d.Notes == nil {
 		return
 	}
-	if err := d.Notes.ClearNote(ctx, DoctorNoteKey(check)); err != nil {
+	if err := d.Notes.ClearNote(ctx, DoctorNoteKey(d.Host, check)); err != nil {
 		_ = d.append(ctx, DoctorResult{Check: check, Verdict: "note-failed", Reason: oneLine(err.Error())})
 	}
 }

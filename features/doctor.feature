@@ -72,28 +72,28 @@ Feature: mw doctor
     Given a doctor check "widget" whose probe cannot tell "no reading"
     When mw doctor runs
     Then mw doctor leaves with the status 0
-    And the note "doctor.widget" holds "cannot-tell"
-    And the note "doctor.widget" holds "no reading"
-    And the note "doctor.widget" holds "widget cannot-tell no reading"
+    And the note "doctor.laptop.widget" holds "cannot-tell"
+    And the note "doctor.laptop.widget" holds "no reading"
+    And the note "doctor.laptop.widget" holds "widget cannot-tell no reading"
 
   Scenario: A cure that fails once leaves no note, but failing again writes one
     Given a doctor check "widget" whose probe says faulty "misaligned"
     And the check "widget"'s damper is 1 minute, cap 3
     And the check "widget"'s cure fails, saying "no wrench found"
     When mw doctor runs
-    Then the note "doctor.widget" does not exist
+    Then the note "doctor.laptop.widget" does not exist
     When 1 minute goes by
     And mw doctor runs
-    Then the note "doctor.widget" holds "cure-failed"
-    And the note "doctor.widget" holds "no wrench found"
+    Then the note "doctor.laptop.widget" holds "cure-failed"
+    And the note "doctor.laptop.widget" holds "no wrench found"
 
   Scenario: A check back to ok clears its note
     Given a doctor check "widget" whose probe cannot tell "no reading"
     When mw doctor runs
-    Then the note "doctor.widget" holds "cannot-tell"
+    Then the note "doctor.laptop.widget" holds "cannot-tell"
     When the check "widget"'s probe says ok
     And mw doctor runs
-    Then the note "doctor.widget" does not exist
+    Then the note "doctor.laptop.widget" does not exist
 
   Scenario: A notes port that fails does not change the exit status
     Given a doctor check "widget" whose probe says faulty "misaligned"
@@ -162,13 +162,13 @@ Feature: mw doctor
     When mw doctor's beads-size check runs for real
     Then mw doctor leaves with the status 6
     And the doctor log holds "beads-size cure-failed no cure"
-    And the note "doctor.beads-size" does not exist
+    And the note "doctor.laptop.beads-size" does not exist
     When mw doctor's beads-size check runs for real
     Then mw doctor leaves with the status 6
     And the doctor log holds "beads-size damped"
-    And the note "doctor.beads-size" holds "damped"
-    And the note "doctor.beads-size" holds "200"
-    And the note "doctor.beads-size" holds "100"
+    And the note "doctor.laptop.beads-size" holds "damped"
+    And the note "doctor.laptop.beads-size" holds "200"
+    And the note "doctor.laptop.beads-size" holds "100"
 
   Scenario: The real mayor-gone check with no .mayor-acting is cannot-tell, and mayor-up never runs
     Given a vault with no .mayor-acting
@@ -216,7 +216,7 @@ Feature: mw doctor
     And 30 minutes go by
     And mw doctor's mayor-gone check runs for real
     Then mw doctor leaves with the status 6
-    And the note "doctor.mayor-gone" holds "cure-failed"
+    And the note "doctor.laptop.mayor-gone" holds "cure-failed"
     And mayor-up was run 2 times
     When 30 minutes go by
     And mw doctor's mayor-gone check runs for real

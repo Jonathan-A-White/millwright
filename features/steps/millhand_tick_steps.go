@@ -231,11 +231,11 @@ func (c *seatUpContext) theMailCannotBeRead() error {
 }
 
 func (c *seatUpContext) aDoctorNote(check, text string) error {
-	return c.tickWorld().tracker.SetNote(context.Background(), application.DoctorNoteKey(check), text)
+	return c.tickWorld().tracker.SetNote(context.Background(), application.DoctorNoteKey(seatUpHost, check), text)
 }
 
 func (c *seatUpContext) theDoctorNoteIsCleared(check string) error {
-	return c.tickWorld().tracker.ClearNote(context.Background(), application.DoctorNoteKey(check))
+	return c.tickWorld().tracker.ClearNote(context.Background(), application.DoctorNoteKey(seatUpHost, check))
 }
 
 func (c *seatUpContext) aMillhandOpensDuringTheSync() error {

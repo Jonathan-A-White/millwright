@@ -206,6 +206,7 @@ func (c *doctorContext) run(dryRun bool) error {
 		State:  c.state,
 		Log:    c.log,
 		Notes:  c.notes,
+		Host:   seatUpHost,
 		Now:    func() time.Time { return c.now },
 		Out:    &c.out,
 	}.Run(context.Background(), "", dryRun)
