@@ -31,6 +31,11 @@ type fakeWorktrees struct {
 	removed []string
 
 	FetchErr, AddErr, RemoveErr error
+
+	// OnAdd, when set, runs before Add returns AddErr — the hook a test uses to
+	// stand in for a second dispatcher winning the race for the same story in
+	// the instant between this one's Add failing and its release running.
+	OnAdd func()
 }
 
 var _ application.Worktrees = (*fakeWorktrees)(nil)
@@ -46,6 +51,9 @@ func (f *fakeWorktrees) Add(_ context.Context, _, dir, branch, start string) err
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.AddErr != nil {
+		if f.OnAdd != nil {
+			f.OnAdd()
+		}
 		return f.AddErr
 	}
 	f.added = append(f.added, fmt.Sprintf("%s %s %s", dir, branch, start))
@@ -412,6 +420,80 @@ func TestDispatchGivesBackTheClaimAndTheWorktreeWhenTheDeadSessionWillNotClose(t
 	}
 	if _, removed := worktrees.was(); len(removed) != 1 {
 		t.Errorf("expected the worktree this dispatch cut to be removed, got %q", removed)
+	}
+}
+
+// mw-gq6.96: two dispatchers can pass the namesake check and claim the same
+// story in the same instant — the check at the top of start is not atomic
+// with the claim — and then race to cut its worktree. The loser here fails
+// cutting the worktree with the error git gives when the branch already
+// exists, because the winner has already cut it and, by the time the loser
+// gets to release, started its session too. The loser must not clear a claim
+// the winner is now working under.
+func TestDispatchLeavesTheClaimWhenAnotherDispatcherStartedTheStoryInTheSameInstant(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, worktrees, runner, _ := aFactory(t)
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	worktrees.AddErr = fmt.Errorf("fatal: a branch named 'mw/mw-gq6.1' already exists")
+	session := application.SessionName("mw-gq6.1")
+	worktrees.OnAdd = func() {
+		if err := runner.Start(ctx, application.SessionSpec{Name: session, Dir: "/other", Command: []string{"claude"}}); err != nil {
+			t.Fatalf("starting the other dispatcher's session: %v", err)
+		}
+	}
+
+	report, err := dispatch.Run(ctx)
+	if err == nil || !strings.Contains(err.Error(), session) {
+		t.Fatalf("expected the failure to name the running session %s, got %v", session, err)
+	}
+	if len(report.Failed) != 1 || report.Failed[0].Released {
+		t.Fatalf("expected one failure that left the claim alone, got %+v", report.Failed)
+	}
+	for _, asked := range tracker.Asked() {
+		if asked == "ReleaseClaim" {
+			t.Fatalf("expected the claim not to be released, got %q", tracker.Asked())
+		}
+	}
+	detail, err := tracker.ShowStory(ctx, "mw-gq6.1")
+	if err != nil {
+		t.Fatalf("showing the story: %v", err)
+	}
+	if detail.Status != apptest.StatusInProgress {
+		t.Fatalf("expected the story to stay claimed under the running session, got %q", detail.Status)
+	}
+	if comments := tracker.Comments("mw-gq6.1"); len(comments) != 1 || !strings.Contains(comments[0], session) {
+		t.Fatalf("expected one comment naming the running session, got %q", comments)
+	}
+}
+
+// mw-gq6.96: the same worktree failure, but with no session of the story's
+// name running anywhere — the ordinary case, where this dispatcher really is
+// the only one, and the claim it took is given back exactly as before.
+func TestDispatchStillGivesBackTheClaimWhenTheWorktreeFailsAndNoSessionIsRunning(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, worktrees, runner, _ := aFactory(t)
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	worktrees.AddErr = fmt.Errorf("fatal: a branch named 'mw/mw-gq6.1' already exists")
+
+	report, err := dispatch.Run(ctx)
+	if err == nil {
+		t.Fatal("expected the dispatch to report the failure")
+	}
+	if len(report.Failed) != 1 || !report.Failed[0].Released {
+		t.Fatalf("expected one failure with the claim given back, got %+v", report.Failed)
+	}
+	if len(runner.Names()) != 0 {
+		t.Fatalf("expected no session, got %q", runner.Names())
+	}
+	detail, err := tracker.ShowStory(ctx, "mw-gq6.1")
+	if err != nil {
+		t.Fatalf("showing the story: %v", err)
+	}
+	if detail.Assignee != "" || detail.Status == apptest.StatusInProgress {
+		t.Fatalf("expected the claim to be given back, got status %q assignee %q", detail.Status, detail.Assignee)
+	}
+	if comments := tracker.Comments("mw-gq6.1"); len(comments) != 1 {
+		t.Fatalf("expected one comment saying why, got %q", comments)
 	}
 }
 
