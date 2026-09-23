@@ -46,6 +46,7 @@ func TestFeatures(t *testing.T) {
 func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeBriefScenario(ctx)
 	steps.InitializeDispatchScenario(ctx)
+	steps.InitializeDoctorScenario(ctx)
 	steps.InitializeFilePlanScenario(ctx)
 	steps.InitializeInitScenario(ctx)
 	steps.InitializeMailBeadsScenario(ctx)
