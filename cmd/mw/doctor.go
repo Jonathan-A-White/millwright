@@ -44,13 +44,24 @@ func newDoctorCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			reach, err := config.DoctorReach()
+			if err != nil {
+				return err
+			}
+			powershell, err := config.DoctorPowershell()
+			if err != nil {
+				return err
+			}
 
 			store := doctor.New(dir)
 			return runDoctor(cmd, application.Doctor{
-				Checks: application.DoctorChecks{doctor.NewDaemonReload(units)},
-				State:  store,
-				Log:    store,
-				Out:    cmd.OutOrStdout(),
+				Checks: application.DoctorChecks{
+					doctor.NewDaemonReload(units),
+					doctor.NewWifi(reach, powershell, store),
+				},
+				State: store,
+				Log:   store,
+				Out:   cmd.OutOrStdout(),
 			}, name, dryRun)
 		},
 	}
