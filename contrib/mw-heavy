@@ -1,0 +1,64 @@
+#!/bin/sh
+# Run one command under a memory-capped systemd scope, with the mail-notify
+# lock held so no `mw sync` runs beside it. Usage:
+#
+#   mw-heavy <command> [args...]
+#
+# The lock is `flock` on the same file contrib/mail-notify locks (see its
+# header): $MW_MAIL_STATE_DIR, else ${XDG_STATE_HOME:-~/.local/state}, then
+# /mw-mail-notify/lock. mw-heavy waits for it rather than stepping aside, so a
+# heavy command and a mail-notify tick never run at once; a tick's own lock is
+# non-blocking, so it simply skips a turn while mw-heavy holds it.
+#
+# When `systemd-run` is on PATH, the command runs as
+#   systemd-run --scope --quiet --same-dir -p MemoryMax=<max> -p MemorySwapMax=<swap> -- <command>
+# with --user added unless this is root (a system scope as root; a user scope
+# otherwise). Without systemd-run it runs the command plainly, under the same
+# lock, and says so in one line on stderr. Its exit status is the command's.
+#
+# Settings:
+#   MW_HEAVY_LOCK          the lock file (else the mail-notify one, above)
+#   MW_HEAVY_MEMORY_MAX    systemd-run's MemoryMax                (512M)
+#   MW_HEAVY_SWAP_MAX      systemd-run's MemorySwapMax            (1G)
+#   MW_HEAVY_DRY            1: print the systemd-run line and run nothing
+
+set -u
+
+die() {
+	echo "mw-heavy: $*" >&2
+	exit 1
+}
+
+[ "$#" -ge 1 ] || die "usage: mw-heavy <command> [args...]"
+
+memory_max=${MW_HEAVY_MEMORY_MAX:-512M}
+swap_max=${MW_HEAVY_SWAP_MAX:-1G}
+
+user_flag=""
+[ "$(id -u)" = 0 ] || user_flag="--user"
+
+if [ "${MW_HEAVY_DRY:-}" = 1 ]; then
+	# shellcheck disable=SC2027,SC2086
+	echo "would run: systemd-run --scope --quiet --same-dir${user_flag:+ $user_flag} -p MemoryMax=$memory_max -p MemorySwapMax=$swap_max -- $*"
+	exit 0
+fi
+
+lock=${MW_HEAVY_LOCK:-}
+if [ -z "$lock" ]; then
+	state=${MW_MAIL_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mw-mail-notify}
+	lock=$state/lock
+fi
+mkdir -p "$(dirname "$lock")" || die "cannot make $(dirname "$lock")"
+
+exec 9>"$lock" || die "cannot open the lock at $lock"
+flock 9 || die "cannot take the lock at $lock"
+
+if command -v systemd-run >/dev/null 2>&1; then
+	# shellcheck disable=SC2086
+	systemd-run --scope --quiet --same-dir $user_flag -p MemoryMax="$memory_max" -p MemorySwapMax="$swap_max" -- "$@"
+	exit $?
+fi
+
+echo "mw-heavy: systemd-run is not installed; running $* under the lock, with no memory cap" >&2
+"$@"
+exit $?
