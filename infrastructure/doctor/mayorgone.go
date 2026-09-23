@@ -169,7 +169,7 @@ func (m *MayorGone) timeout() time.Duration {
 // found under. No server running reads as no windows open — an answer, not a
 // failure to ask, the same as infrastructure/tmux's own reading of it.
 func (m *MayorGone) windows(ctx context.Context) (names []string, byName map[string]string, err error) {
-	out, runErr := m.run(ctx, "list-windows", "-a", "-F", "#{window_id}\t#{window_name}")
+	out, runErr := m.run(ctx, "list-windows", "-a", "-F", "#{window_id}|#{window_name}")
 	byName = map[string]string{}
 	if runErr != nil {
 		if mayorGoneNoServer(runErr) {
@@ -178,7 +178,7 @@ func (m *MayorGone) windows(ctx context.Context) (names []string, byName map[str
 		return nil, nil, runErr
 	}
 	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
-		fields := strings.SplitN(line, "\t", 2)
+		fields := strings.SplitN(line, "|", 2)
 		if len(fields) != 2 || fields[0] == "" || fields[1] == "" {
 			continue
 		}

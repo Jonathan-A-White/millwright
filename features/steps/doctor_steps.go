@@ -708,7 +708,7 @@ func (c *doctorContext) writeMayorGoneTmux(body string) error {
 
 func (c *doctorContext) aStandInTmuxListingThatWindowWithALiveProcess() error {
 	return c.writeMayorGoneTmux(`case "$1" in
-list-windows) printf '@7\tmayor-2026-09-23-39\n' ;;
+list-windows) printf '@7|mayor-2026-09-23-39\n' ;;
 list-panes) printf '0 claude\n' ;;
 esac
 `)
