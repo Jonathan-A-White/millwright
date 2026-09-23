@@ -634,7 +634,24 @@ func (d Dispatch) namesake(ctx context.Context, name, id string) (lying bool, er
 // release gives a claim back and writes on the story why it was given back. It
 // reports whether the claim really did go back, and the failure a person should
 // read — the original one, with whatever went wrong releasing it after it.
+//
+// Two dispatchers can claim the same story in the same instant — the check at
+// the top of start is not atomic with the claim itself — and then race to cut
+// its worktree. The one that loses that race must not clear the claim the
+// winner is working under: a session of the story's name is looked for again,
+// right here, right before the claim would be given back, and if one is now
+// running the claim stays with it untouched. Anywhere else this were checked
+// — earlier in start — the winner might not have started its session yet, so
+// the race would still be open; here, immediately before release, is as late
+// as it can be checked.
 func (d Dispatch) release(ctx context.Context, id string, why error) (bool, error) {
+	if status, err := d.Runner.Status(ctx, SessionName(id)); err == nil && status.Running() {
+		said := fmt.Sprintf("mw dispatch on %s could not start this story, but the session %s of %s is running here now, so the claim stays with it: %v", d.Host, status.Name, id, why)
+		if err := d.Tracker.CommentOnStory(ctx, id, said); err != nil {
+			return false, fmt.Errorf("%w (the session %s of %s is running here now, so the claim was left alone, but that could not be written on the story: %v)", why, status.Name, id, err)
+		}
+		return false, fmt.Errorf("%w (the session %s of %s is running here now, so the claim was left alone rather than given back)", why, status.Name, id)
+	}
 	if err := d.Tracker.ReleaseClaim(ctx, id); err != nil {
 		return false, fmt.Errorf("%w (and the claim could not be given back either: %v — %s is claimed by a session that is not running, and needs releasing by hand)", why, err, id)
 	}
