@@ -1,0 +1,20 @@
+# Runs mw-doctor.service at 2, 7, 12, ... minutes past every hour. A system
+# unit; see README.md, "The seat's tmux server on the VPS".
+#
+# The minutes are off the dispatch timer's (0, 5, 10, ...), so the two never
+# start together. The cadence is a fuel knob: change it with a drop-in
+# (`systemctl edit mw-doctor.timer`), never by editing this file.
+[Unit]
+Description=Every 5 minutes, cure this host's known faults offline (mw doctor)
+
+[Timer]
+OnCalendar=*:2/5
+# No catch-up: a host that was asleep or off does not run the checks it
+# missed, and it is not woken to run them. The next tick on the clock is the
+# next run.
+Persistent=false
+WakeSystem=false
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

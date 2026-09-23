@@ -1,0 +1,40 @@
+# One `mw doctor` run, as root, then it exits: no daemon. A system unit, for
+# hosts whose seats run as root; see README.md, "The seat's tmux server on
+# the VPS". The `systemctl --user` pair in `contrib/systemd/mw-doctor.service`
+# is for a host whose seats run as a person instead — never install both for
+# the same seat.
+#
+# Why a system unit and not `systemctl --user`: a `--user` timer dies with the
+# user manager it runs under, and on a host with nobody logging in nothing
+# restarts that manager. A system unit answers to no user manager.
+#
+# Started by mw-doctor.timer. It works a table of checks, each its own probe
+# and cure, offline and without AI, and logs what it found on this host; it
+# writes no beads note, sends no mail and touches no tracker.
+[Unit]
+Description=Cure this host's known faults offline, on a table of checks (mw doctor)
+
+[Service]
+Type=oneshot
+
+# %h resolves for the system manager without needing this, but it is named
+# here anyway so the unit says in one place, plainly, who it runs as.
+User=root
+
+# Unlike the rig's other units this does not rely on PATH to find mw: doctor's
+# job is to work even when this host's own environment is suspect, so it runs
+# the binary at its one fixed, known place. `env` only saves `systemd-analyze
+# verify` from having to resolve %h itself; it does no PATH lookup on a path
+# holding a "/".
+EnvironmentFile=-%h/.config/mw/dispatch.env
+ExecStart=/usr/bin/env %h/.local/bin/mw doctor
+
+# Type=oneshot has no start timeout by default, and a hung systemctl would
+# then block every later run.
+TimeoutStartSec=2min
+
+# A run starts no tmux server (its cures never start one), so a memory squeeze
+# may kill it first, before the seat or anything else on the host: make the
+# kernel's OOM killer pick it first, and cap what it may use.
+OOMScoreAdjust=500
+MemoryMax=384M

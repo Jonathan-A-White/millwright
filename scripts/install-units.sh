@@ -1,10 +1,11 @@
 #!/bin/sh
-# Put a host's timer units where systemd --user finds them, from one command.
+# Put a host's timer units where systemd finds them, from one command.
 #
 #   sh scripts/install-units.sh                        list the pairs; change nothing
 #   sh scripts/install-units.sh mw-health              link one pair, daemon-reload
 #   sh scripts/install-units.sh --enable mw-dispatch mw-health
 #   sh scripts/install-units.sh --dry-run mw-health    say what would happen
+#   sh scripts/install-units.sh --system --enable       root units; see below
 #
 # A unit name is a timer/service pair in contrib/systemd/, named without its
 # suffix (mw-dispatch, mw-millhand-tick, mw-millhand-review, mw-mail-notify,
@@ -25,16 +26,28 @@
 # a link somewhere else) is never overwritten: it is named and the run stops
 # before changing anything.
 #
-# Settings: XDG_CONFIG_HOME (where the user's systemd units live).
+# --system installs the root units under contrib/systemd/system/ instead — a
+# host whose seats run as root (see README.md, "The seat's tmux server on the
+# VPS"), never a host whose seats run as a person. It takes no unit name: it
+# always links every file under contrib/systemd/system/, needs root (refuses
+# in one line, exit 2, otherwise), and never touches the --user directory or
+# takes any of the pair-selecting flags' unit-name arguments. --enable and
+# --dry-run both still apply.
+#
+# Settings: XDG_CONFIG_HOME (where the user's systemd units live);
+# MW_SYSTEM_UNIT_DIR (where --system's units go; default /etc/systemd/system,
+# for testing against a stand-in).
 
 set -eu
 
 DRY=0
 ENABLE=0
+SYSTEM=0
 
 usage() {
 	cat <<'EOF'
 Usage: sh install-units.sh [--enable] [--dry-run] [unit-name]...
+       sh install-units.sh --system [--enable] [--dry-run]
        sh install-units.sh --help
 
 Links the named timer/service pairs from contrib/systemd/ into
@@ -42,9 +55,14 @@ Links the named timer/service pairs from contrib/systemd/ into
 `systemctl --user daemon-reload`. With no unit named, lists the pairs and
 which are installed and active, and changes nothing.
 
-  --enable    also `systemctl --user enable --now` each named timer; without
-              it no timer is enabled
+--system links every file under contrib/systemd/system/ into
+/etc/systemd/system instead (root units, for a host whose seats run as
+root), runs `systemctl daemon-reload`, and takes no unit name.
+
+  --enable    also `systemctl [--user] enable --now` the relevant timers;
+              without it no timer is enabled
   --dry-run   print what would be done; change nothing
+  --system    install the root units instead of a --user pair
   --help      print this
 
 `loginctl enable-linger` is printed as a hand step and never run.
@@ -62,15 +80,82 @@ for arg in "$@"; do
 	case $arg in
 	--enable) ENABLE=1 ;;
 	--dry-run) DRY=1 ;;
+	--system) SYSTEM=1 ;;
 	--help | -h) usage; exit 0 ;;
 	-*) echo "install-units.sh: unknown option: $arg" >&2; usage >&2; exit 2 ;;
 	*) UNITS="$UNITS $arg" ;;
 	esac
 done
 
-[ -n "${HOME:-}" ] || die "HOME is not set"
 SELF_DIR=$(cd "$(dirname "$0")" && pwd)
 RIG=$(cd "$SELF_DIR/.." && pwd)
+
+# --- --system: a fixed set of root units, never the --user directory --------------
+if [ "$SYSTEM" = 1 ]; then
+	[ "$(id -u)" = "0" ] || { echo "install-units.sh: --system needs root: run this as the root user" >&2; exit 2; }
+	[ -z "$UNITS" ] || die "--system takes no unit names: it always installs every file under contrib/systemd/system/"
+
+	SYS_SRC=$RIG/contrib/systemd/system
+	SYS_DEST=${MW_SYSTEM_UNIT_DIR:-/etc/systemd/system}
+	[ -d "$SYS_SRC" ] || die "$SYS_SRC does not exist: run this from the rig's checkout"
+
+	SYS_FILES=""
+	for f in "$SYS_SRC"/*; do
+		[ -f "$f" ] || continue
+		SYS_FILES="$SYS_FILES $(basename "$f")"
+	done
+	[ -n "$SYS_FILES" ] || die "$SYS_SRC holds no unit file"
+
+	for f in $SYS_FILES; do
+		if [ -L "$SYS_DEST/$f" ]; then
+			[ "$(readlink "$SYS_DEST/$f")" = "$SYS_SRC/$f" ] ||
+				die "$SYS_DEST/$f is a link to $(readlink "$SYS_DEST/$f"), not to this rig; remove it by hand first. Nothing was changed"
+		elif [ -e "$SYS_DEST/$f" ]; then
+			die "$SYS_DEST/$f exists and is not a link (a copy?); remove it by hand first. Nothing was changed"
+		fi
+	done
+
+	if [ "$DRY" = 0 ]; then
+		command -v systemctl >/dev/null 2>&1 || die "systemctl is not on PATH; nothing was changed"
+	fi
+
+	run() { # <command>...: run it, or say it would be
+		if [ "$DRY" = 1 ]; then echo "would run: $*"; else echo "run: $*"; "$@"; fi
+	}
+
+	if [ "$DRY" = 1 ]; then echo "would make: $SYS_DEST"; else mkdir -p "$SYS_DEST"; fi
+	for f in $SYS_FILES; do
+		if [ -L "$SYS_DEST/$f" ]; then
+			echo "skip: $SYS_DEST/$f already links to $SYS_SRC/$f"
+		elif [ "$DRY" = 1 ]; then
+			echo "would link: $SYS_DEST/$f -> $SYS_SRC/$f"
+		else
+			ln -s "$SYS_SRC/$f" "$SYS_DEST/$f"
+			echo "linked: $SYS_DEST/$f -> $SYS_SRC/$f"
+		fi
+	done
+
+	run systemctl daemon-reload
+	if [ "$ENABLE" = 1 ]; then
+		run systemctl enable --now mw-seat-tmux.service mw-doctor.timer
+	else
+		echo "not enabled: nothing is armed. To arm, run again with --enable, or:"
+		echo "  systemctl enable --now mw-seat-tmux.service mw-doctor.timer"
+	fi
+
+	echo
+	echo "Hand step (this script runs none of it):"
+	echo "  [env]      %h/.config/mw/seat.env (the system manager's %h; see README.md) sets the"
+	echo "             units' PATH. $RIG/contrib/seat.env.example is a template for its one line."
+	echo
+	echo "Way back:"
+	echo "  systemctl disable --now mw-seat-tmux.service mw-doctor.timer"
+	for f in $SYS_FILES; do echo "  rm $SYS_DEST/$f"; done
+
+	exit 0
+fi
+
+[ -n "${HOME:-}" ] || die "HOME is not set"
 SRC=$RIG/contrib/systemd
 DEST=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
 [ -d "$SRC" ] || die "$SRC does not exist: run this from the rig's checkout"

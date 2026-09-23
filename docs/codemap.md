@@ -1,6 +1,6 @@
 # Code map
 
-Where everything is; `CONTEXT.md` has the vocabulary, ADRs the reasons.
+Where everything is; `CONTEXT.md` has the vocabulary, ADRs the why.
 
 ## Layers
 
@@ -12,7 +12,7 @@ Where everything is; `CONTEXT.md` has the vocabulary, ADRs the reasons.
 | infrastructure | `infrastructure/` | One subpackage per adapter (bd, git, tmux, claude, disk). |
 | command line | `cmd/mw/` | Cobra wiring: read config, run the use case. |
 | features | `features/` | Gherkin; step code in `features/steps/`. |
-| template | `template/` | What a fresh vault is born from (`embed.go`); no host detail. |
+| template | `template/` | Born from `embed.go`; no host detail. |
 
 ## Ports
 
@@ -46,7 +46,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `Landing` | `application/landing.go` | `infrastructure/rig/landing.go` | none |
 | `Checks` | `application/landing.go` | `infrastructure/rig/checks.go` | none |
 | `AfterLanding` | `application/afterlanding.go` | `infrastructure/rig/afterlanding.go` | none |
-| `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/slot.go` | none: real `flock` |
+| `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/slot.go` | none (`flock`) |
 | `Dispatcher` | `application/landing.go` | `application.Dispatch` | — |
 | `HostSync` | `application/dispatch.go` | `application.Sync` | — |
 
@@ -84,26 +84,26 @@ is `mw version` (no use case).
 `features/path_validation.feature` covers `domain/path.go`;
 `features/ready_stories.feature` the `WorkTracker` contract (no commands).
 
-Adding a command: `docs/adding-a-command.md`.
+Add a command: `docs/adding-a-command.md`.
 
 ## Test helpers
 
 | Helper | Where | What it gives |
 | --- | --- | --- |
-| `throwawayVault` | `infrastructure/beads/beads_integration_test.go` | A real bd database, temp dir. |
-| `installFormula` | same file | Copies a formula into it. |
+| `throwawayVault` | `infrastructure/beads/beads_integration_test.go` | A real bd DB, temp dir. |
+| `installFormula` | same file | Copies a formula in. |
 | `standIn` | `infrastructure/beads/sync_test.go` | Stands in for `bd`. |
 | `privateRunner` | `infrastructure/tmux/tmux_integration_test.go` | A private tmux server. |
-| `privateWindows` | `infrastructure/tmux/window_integration_test.go` | A tmux server, seats session. |
+| `privateWindows` | `infrastructure/tmux/window_integration_test.go` | A tmux server + seat. |
 | `aVault` | `infrastructure/vault/vault_test.go` | A vault with a seat. |
-| `twoHosts` | `infrastructure/vault/git_test.go` | Two clones of one vault. |
+| `twoHosts` | `infrastructure/vault/git_test.go` | Two vault clones. |
 | `aRig` | `infrastructure/rig/worktree_test.go` | A rig, real origin. |
-| `aRigDir` | `infrastructure/rig/slot_test.go` | A merge-slot directory. |
-| `mwConfig` | `cmd/mw/dispatch_test.go` | A `config.toml`, temp `HOME`. |
+| `aRigDir` | `infrastructure/rig/slot_test.go` | A merge-slot dir. |
+| `mwConfig` | `cmd/mw/dispatch_test.go` | A `config.toml`, temp HOME. |
 | `aFactory` | `application/dispatch_test.go` | A faked `Dispatch`, temp vault. |
 
-Feature steps build a real rig, origin, clone, vault in a temp dir; fake only
-tracker, runner, vault git: `features/steps/next_steps.go`.
+Feature steps: `features/steps/next_steps.go` builds a real rig, clone, vault;
+fakes only tracker, runner, vault git.
 
 ## Build and test
 
@@ -114,4 +114,5 @@ tracker, runner, vault git: `features/steps/next_steps.go`.
 - One feature: `MW_FEATURE=sweep.feature go test ./features` (`:17` for one scenario).
 - `make lint` runs `scripts/check-*.sh`: this page, `template/`, `contrib/systemd/`, install scripts.
 - `contrib/mw-heavy` caps memory: `MW_HEAVY_MEMORY_MAX`, `MW_HEAVY_SWAP_MAX`.
+- `contrib/systemd/system/` (`--system`): seat tmux, doctor; env `contrib/seat.env.example`.
 - `make check-formulas` needs `bd`, `jq`, real time; not in `make test`.
