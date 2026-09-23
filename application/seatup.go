@@ -419,23 +419,44 @@ func SeatKickoff(seat, own, handoff, reason string) string {
 }
 
 // actingWindow is the window a seat's acting file names, if it is still open.
-// The acting file is written by the session itself, in its own words, so it is
-// searched for the name of an open window rather than read as one; the longest
-// name that occurs in it wins, so that a window whose name ends in another's
-// cannot be mistaken for it.
 func actingWindow(acting string, open []Window) (Window, bool) {
-	if strings.TrimSpace(acting) == "" {
+	names := make([]string, len(open))
+	for i, window := range open {
+		names[i] = window.Name
+	}
+	name, ok := MatchActingName(acting, names)
+	if !ok {
 		return Window{}, false
 	}
-	named := make([]Window, len(open))
-	copy(named, open)
-	sort.SliceStable(named, func(i, j int) bool { return len(named[i].Name) > len(named[j].Name) })
-	for _, window := range named {
-		if window.Name != "" && strings.Contains(acting, window.Name) {
+	for _, window := range open {
+		if window.Name == name {
 			return window, true
 		}
 	}
 	return Window{}, false
+}
+
+// MatchActingName is, of names, the one a seat's acting file names, if any.
+// The acting file is written by the session itself, in its own words, so it
+// is searched for the name of an open window rather than read as one; the
+// longest name that occurs in it wins, so that a window whose name ends in
+// another's cannot be mistaken for it. SeatUp uses it to tell whether a seat
+// is already held; the doctor's mayor-gone check uses it to tell whether the
+// window a seat's acting file names is still open — the one place both read
+// an acting file's text, rather than each inventing its own way to.
+func MatchActingName(acting string, names []string) (string, bool) {
+	if strings.TrimSpace(acting) == "" {
+		return "", false
+	}
+	sorted := make([]string, len(names))
+	copy(sorted, names)
+	sort.SliceStable(sorted, func(i, j int) bool { return len(sorted[i]) > len(sorted[j]) })
+	for _, name := range sorted {
+		if name != "" && strings.Contains(acting, name) {
+			return name, true
+		}
+	}
+	return "", false
 }
 
 // handedOffSince reports whether any handoff was written after a window was
