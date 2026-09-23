@@ -156,3 +156,16 @@ Feature: mw doctor
     And systemctl was run with "--user start mw-dispatch.timer"
     And the doctor log holds "timers cured"
     And the doctor log holds "systemctl --user stop mw-dispatch.timer"
+
+  Scenario: The real beads-size check past its budget has no cure, and writes a note once damped
+    Given a vault whose .beads is 200 bytes, past a 100 byte budget
+    When mw doctor's beads-size check runs for real
+    Then mw doctor leaves with the status 6
+    And the doctor log holds "beads-size cure-failed no cure"
+    And the note "doctor.beads-size" does not exist
+    When mw doctor's beads-size check runs for real
+    Then mw doctor leaves with the status 6
+    And the doctor log holds "beads-size damped"
+    And the note "doctor.beads-size" holds "damped"
+    And the note "doctor.beads-size" holds "200"
+    And the note "doctor.beads-size" holds "100"

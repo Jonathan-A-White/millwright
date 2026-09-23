@@ -72,6 +72,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the internet is unreachable$`, c.theInternetIsUnreachable)
 	ctx.Given(`^a vault with a modified tracked file "([^"]*)"$`, c.aVaultWithAModifiedTrackedFile)
 	ctx.Given(`^a fake systemctl reporting the timer "([^"]*)" enabled and inactive$`, c.aFakeSystemctlReportingTheTimerEnabledAndInactive)
+	ctx.Given(`^a vault whose \.beads is (\d+) bytes, past a (\d+) byte budget$`, c.aVaultWhoseBeadsIsBytesPastABudget)
 
 	ctx.When(`^the check "([^"]*)"'s probe says ok$`, c.theChecksProbeSaysOK)
 	ctx.When(`^the check "([^"]*)"'s probe says faulty "([^"]*)" again$`, c.theChecksProbeSaysFaultyAgain)
@@ -81,6 +82,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^mw doctor's wifi check runs$`, c.mwDoctorsWifiCheckRuns)
 	ctx.When(`^mw doctor's vault-dirty check runs for real$`, c.mwDoctorsVaultDirtyCheckRunsForReal)
 	ctx.When(`^mw doctor's timers check runs for real$`, c.mwDoctorsTimersCheckRunsForReal)
+	ctx.When(`^mw doctor's beads-size check runs for real$`, c.mwDoctorsBeadsSizeCheckRunsForReal)
 	ctx.When(`^(\d+) minutes? go(?:es)? by$`, c.minutesPass)
 	ctx.When(`^(\d+) hours? go(?:es)? by$`, c.hoursPass)
 
@@ -352,6 +354,38 @@ exit 1
 }
 
 func (c *doctorContext) mwDoctorsTimersCheckRunsForReal() error { return c.run(false) }
+
+// aVaultWhoseBeadsIsBytesPastABudget makes a temp dir standing in for a
+// vault, with a .beads directory holding one file of exactly size bytes, and
+// wires up the real infrastructure/doctor.BeadsSize check against it with
+// the named budget — nothing here reads a real vault.
+func (c *doctorContext) aVaultWhoseBeadsIsBytesPastABudget(sizeText, budgetText string) error {
+	size, err := strconv.Atoi(sizeText)
+	if err != nil {
+		return fmt.Errorf("parsing %q as a byte count: %w", sizeText, err)
+	}
+	budget, err := strconv.Atoi(budgetText)
+	if err != nil {
+		return fmt.Errorf("parsing %q as a byte count: %w", budgetText, err)
+	}
+
+	dir, err := os.MkdirTemp("", "mw-doctor-beads-size")
+	if err != nil {
+		return err
+	}
+	beads := filepath.Join(dir, ".beads")
+	if err := os.MkdirAll(beads, 0o755); err != nil {
+		return fmt.Errorf("making %s: %w", beads, err)
+	}
+	if err := os.WriteFile(filepath.Join(beads, "data"), make([]byte, size), 0o644); err != nil {
+		return fmt.Errorf("writing the .beads fixture: %w", err)
+	}
+
+	c.real = &doctor.BeadsSize{Dir: dir, Budget: int64(budget)}
+	return nil
+}
+
+func (c *doctorContext) mwDoctorsBeadsSizeCheckRunsForReal() error { return c.run(false) }
 
 func (c *doctorContext) systemctlWasRunWith(args string) error {
 	if c.systemctlCalls == "" {

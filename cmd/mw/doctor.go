@@ -82,6 +82,7 @@ func newDoctorCmd() *cobra.Command {
 					doctor.NewTunnel(tunnelHost, reach, tunnelUnit, tunnelProbe),
 					doctor.NewVaultDirty(vault, host),
 					doctor.NewTimers(units),
+					doctor.NewBeadsSize(vault),
 				},
 				State: store,
 				Log:   store,

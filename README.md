@@ -1638,6 +1638,11 @@ is `systemctl --user start <timer>`, its damper 30 minutes with a cap of 3,
 and its way back `systemctl --user stop <timer>` for exactly the timers the
 cure started.
 
+**beads-size** watches `.beads` against the same 1 GB budget `mw status`'s
+BEADS line warns on; past it there is no cure — repacking would delete packs
+— so it only ever writes the check's own `doctor.beads-size` note for the
+Millhand to look at.
+
 **Install**, once per host: `sh scripts/install-units.sh --enable mw-doctor`
 (see *Running a host on a timer*), which runs `mw-doctor.timer` at 2, 7, 12,
 ... past the hour — off the dispatch timer's own minutes, so the two never
