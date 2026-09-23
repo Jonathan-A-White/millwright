@@ -1647,6 +1647,43 @@ whose own environment may be at fault is the point. `scripts/check-timer-units.s
 (in `make lint`) verifies the pair with `systemd-analyze` and starts nothing.
 See `features/doctor.feature`.
 
+## Heavy work on a small host
+
+The two heaviest things the VPS runs — a Clerk's verification (the rig's own
+`go test`) and the notifier's `mw sync` (bd's dolt) — once ran at once and the
+kernel killed the user manager. `contrib/mw-heavy` runs one command under a
+memory cap, with the mail-notify lock held so no sync can land beside it.
+
+**Install**, once per host, the same way as `contrib/mail-notify`: put it on
+`PATH` with `ln -s "$(pwd)/contrib/mw-heavy" ~/.local/bin/mw-heavy` (run from
+the rig's checkout). Then:
+
+```sh
+mw-heavy make test
+```
+
+When `systemd-run` is on `PATH` it runs the command as a transient, capped
+scope (`--scope -p MemoryMax=... -p MemorySwapMax=...`, `--user` added unless
+it is root); without `systemd-run` it runs the command plainly, under the
+same lock, and says so in one line on stderr. Its exit status is always the
+command's. `MW_HEAVY_MEMORY_MAX` (default `512M`) and `MW_HEAVY_SWAP_MAX`
+(default `1G`) are the two caps; `MW_HEAVY_LOCK` overrides the lock file
+(else the same one `contrib/mail-notify` locks, above); `MW_HEAVY_DRY=1`
+prints the `systemd-run` line it would run and runs nothing. A Mayor's
+verification of a landed branch runs the rig's tests through it.
+
+`OOMScoreAdjust=500` and `MemoryMax=384M` are also set directly on
+`mw-mail-notify.service`, `mw-health.service` and `mw-doctor.service`, so a
+memory squeeze on the host picks one of these ticks over the seat or the
+blog, and none of the three can itself run the host out of memory.
+`mw-dispatch.service`, `mw-millhand-tick.service` and
+`mw-millhand-review.service` carry neither: each can start the tmux server
+that holds Builder or Millhand sessions, and those sessions would inherit
+whatever cap and score the unit carried. `scripts/check-heavy.sh` (in `make
+lint`) proves the script's locking, capping, fallback and dry run against a
+stand-in `systemd-run` and a real `flock`, and that exactly these three units
+carry `OOMScoreAdjust`.
+
 ## The Path
 
 A story is worked by a **Path**: the rig it is worked in, the branch it
