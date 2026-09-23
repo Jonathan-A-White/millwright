@@ -554,12 +554,31 @@ func (t MillhandTick) sweep(ctx context.Context) (stuck, notes []string, err err
 }
 
 // DoctorSeenKey is where the tick remembers, for one check on this host, the
-// text of the doctor.<check> note it last woke the Millhand for — its own
-// memory, kept beside the doctor's notes, the way Sweep's memory of a
-// session is kept beside its story. A note whose text has not changed since
-// is not woken for again; a fresh one — a new fault, or the same one again
-// after the check went ok and cleared it — is.
+// normalised text (normalizeDoctorNote) of the doctor.<check> note it last
+// woke the Millhand for — its own memory, kept beside the doctor's notes, the
+// way Sweep's memory of a session is kept beside its story. A note whose
+// verdict and reason have not changed since is not woken for again, even
+// though the doctor rewrites its timestamp and its "last log lines" tail on
+// every run; a fresh one — a new fault, a changed reason, or the same one
+// again after the check went ok and cleared it — is.
 func DoctorSeenKey(host, check string) string { return "millhandtick.doctor." + host + "." + check }
+
+// normalizeDoctorNote is a doctor note's text with the parts that change on
+// every run, whether or not anything is actually new, taken back out: the
+// leading RFC3339 timestamp Doctor.writeNote stamps it with, and the
+// "| last log lines: ..." tail it appends. What is left is the verdict and
+// the reason, which is what changing means for a doctor note.
+func normalizeDoctorNote(value string) string {
+	if i := strings.Index(value, " | last log lines:"); i >= 0 {
+		value = value[:i]
+	}
+	if sp := strings.IndexByte(value, ' '); sp >= 0 {
+		if _, err := time.Parse(time.RFC3339, value[:sp]); err == nil {
+			value = value[sp+1:]
+		}
+	}
+	return value
+}
 
 // doctor is every doctor.<host>.<check> note of this tick's own host that it
 // has not already woken the Millhand for, as ready-made wake reasons, and
@@ -589,16 +608,17 @@ func (t MillhandTick) doctor(ctx context.Context) (reasons, notes []string, err 
 
 	for _, check := range checks {
 		value := found[DoctorNoteKey(t.Host, check)]
+		normalized := normalizeDoctorNote(value)
 		seenKey := DoctorSeenKey(t.Host, check)
 		seen, readErr := t.DoctorNotes.Note(ctx, seenKey)
 		if readErr != nil {
 			notes = append(notes, fmt.Sprintf("doctor: %s's seen mark could not be read: %s", check, oneLine(readErr.Error())))
 			continue
 		}
-		if seen == value {
+		if seen == normalized {
 			continue
 		}
-		if setErr := t.DoctorNotes.SetNote(ctx, seenKey, value); setErr != nil {
+		if setErr := t.DoctorNotes.SetNote(ctx, seenKey, normalized); setErr != nil {
 			notes = append(notes, fmt.Sprintf("doctor: %s's seen mark could not be written: %s", check, oneLine(setErr.Error())))
 			continue
 		}
