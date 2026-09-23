@@ -347,6 +347,19 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Why: "it is worked on " + path.Host})
 			continue
 		}
+
+		// bd's own ready set is trusted for everything except this: a dependency
+		// filed on a story moments after bd decided it was ready is not always
+		// caught by it (mw-gq6.93), so what the candidate still waits on is read
+		// back fresh here rather than taken on the ready listing's word.
+		if blocker, status, blocked, err := d.blockedBy(ctx, detail); err != nil {
+			return report, fmt.Errorf("dispatching on %s: %w", d.Host, err)
+		} else if blocked {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
+				"waits on %s (%s)", blocker, status)})
+			continue
+		}
+
 		rigDir, checkedOut := d.Rigs[path.Rig]
 		if !checkedOut {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
@@ -614,6 +627,24 @@ func (d Dispatch) release(ctx context.Context, id string, why error) (bool, erro
 		return true, fmt.Errorf("%w (the claim was given back, but the failure could not be written on the story: %v)", why, err)
 	}
 	return true, why
+}
+
+// blockedBy is the first of a candidate's needs that is not yet finished, and
+// its status as the tracker says it now — not as the ready listing said it a
+// moment ago. A need already closed is not a wait, the same as everywhere else
+// a story's Needs are read (see bead.needs and Brief.waitsOn).
+func (d Dispatch) blockedBy(ctx context.Context, detail StoryDetail) (blocker, status string, blocked bool, err error) {
+	for _, need := range detail.Needs {
+		read, err := d.Tracker.ShowStory(ctx, need)
+		if err != nil {
+			return "", "", false, fmt.Errorf("reading %s, which %s waits on: %w", need, detail.Story.ID, err)
+		}
+		if read.Closed() {
+			continue
+		}
+		return need, read.Status, true, nil
+	}
+	return "", "", false, nil
 }
 
 // installedFormulas is the set of formulas the tracker can pour.

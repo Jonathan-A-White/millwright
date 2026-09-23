@@ -540,7 +540,13 @@ func (f *FakeTracker) Asked() []string {
 	return append([]string(nil), f.asked...)
 }
 
-// ReadyForHost implements application.WorkTracker.
+// ReadyForHost implements application.WorkTracker. Unlike ReadyWithLabel and
+// BlockedForHost it does not narrow to what is unblocked: bd's own ready set
+// is what decides that in the real tracker, and what it decides is not always
+// caught up with a dependency filed moments before (mw-gq6.93) — so a story is
+// offered here open, unassigned and pathed to the host, whatever it still
+// waits on, with every one of its needs carried on it for Dispatch's own guard
+// to read back and judge for itself.
 func (f *FakeTracker) ReadyForHost(_ context.Context, host string) ([]application.StoryDetail, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -557,11 +563,12 @@ func (f *FakeTracker) ReadyForHost(_ context.Context, host string) ([]applicatio
 		switch {
 		case s.detail.Status != StatusOpen,
 			s.detail.Assignee != "",
-			s.detail.Merged().Host != host,
-			f.waiting(s):
+			s.detail.Merged().Host != host:
 			continue
 		}
-		ready = append(ready, s.detail)
+		detail := s.detail
+		detail.Needs = append([]string(nil), s.needs...)
+		ready = append(ready, detail)
 	}
 	return ready, nil
 }
