@@ -29,3 +29,10 @@ Nice=19
 # Type=oneshot has no start timeout by default, and a hung mw sync or bd would
 # then block every later tick.
 TimeoutStartSec=2min
+
+# A tick starts no tmux server (it only ever reads an existing one), so a
+# memory squeeze may kill it first, before the seat or the blog it shares the
+# host with: make the kernel's OOM killer pick it first, and cap it so a
+# runaway `mw sync` cannot itself starve the host.
+OOMScoreAdjust=500
+MemoryMax=384M

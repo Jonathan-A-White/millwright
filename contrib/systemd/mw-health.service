@@ -26,3 +26,9 @@ Nice=19
 # Type=oneshot has no start timeout by default, and a hung bd or mw would then
 # block every later reading.
 TimeoutStartSec=2min
+
+# A reading starts no tmux server (it only ever reads an existing one), so a
+# memory squeeze may kill it first, before the seat or the blog it shares the
+# host with: make the kernel's OOM killer pick it first, and cap what it may use.
+OOMScoreAdjust=500
+MemoryMax=384M

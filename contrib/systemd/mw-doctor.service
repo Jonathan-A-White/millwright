@@ -21,3 +21,9 @@ ExecStart=/usr/bin/env %h/.local/bin/mw doctor
 # Type=oneshot has no start timeout by default, and a hung systemctl would
 # then block every later run.
 TimeoutStartSec=2min
+
+# A run starts no tmux server (its cures never start one), so a memory squeeze
+# may kill it first, before the seat or the blog it shares the host with: make
+# the kernel's OOM killer pick it first, and cap what it may use.
+OOMScoreAdjust=500
+MemoryMax=384M
