@@ -39,6 +39,10 @@ func writeConfig(t *testing.T, contents string) string {
 	t.Setenv("MW_MAX_ATTEMPTS", "")
 	t.Setenv("MW_NUDGE_AFTER_MINUTES", "")
 	t.Setenv("MW_NUDGE_SYNC_STALE_MINUTES", "")
+	t.Setenv("MW_POSTERN_BACKEND", "")
+	t.Setenv("MW_POSTERN_FLOAT_SATS", "")
+	t.Setenv("MW_POSTERN_GOVERNOR_KEY", "")
+	t.Setenv("MW_POSTERN_KEY_FILE", "")
 	return home
 }
 
@@ -884,5 +888,110 @@ func TestPushKnobsRefuseWhatIsNotANumber(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), bad.want) {
 			t.Errorf("expected %q to be refused, saying %q, got %v", bad.file, bad.want, err)
 		}
+	}
+}
+
+func TestPosternBackendIsTheDesktopUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, vpsConfig)
+
+	backend, err := config.PosternBackend()
+	if err != nil {
+		t.Fatalf("reading the postern backend: %v", err)
+	}
+	if config.DefaultPosternBackend != "http://desktop.mw:8787" || backend != config.DefaultPosternBackend {
+		t.Fatalf("expected the default backend, got %q", backend)
+	}
+
+	t.Setenv(config.PosternBackendEnv, "http://elsewhere:1234")
+	if backend, err = config.PosternBackend(); err != nil || backend != "http://elsewhere:1234" {
+		t.Fatalf("expected %s to win, got %q: %v", config.PosternBackendEnv, backend, err)
+	}
+
+	t.Setenv(config.PosternBackendEnv, "")
+	writeConfig(t, "postern_backend = \"http://file:8787\"\n")
+	if backend, err = config.PosternBackend(); err != nil || backend != "http://file:8787" {
+		t.Fatalf("expected the config file's postern_backend to read back, got %q: %v", backend, err)
+	}
+}
+
+func TestPosternFloatSatsIsOneHundredThousandUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, vpsConfig)
+
+	sats, err := config.PosternFloatSats()
+	if err != nil {
+		t.Fatalf("reading the postern float cap: %v", err)
+	}
+	if config.DefaultPosternFloatSats != 100000 || sats != config.DefaultPosternFloatSats {
+		t.Fatalf("expected the default of 100000 satoshis, got %d", sats)
+	}
+
+	t.Setenv(config.PosternFloatSatsEnv, "5000")
+	if sats, err = config.PosternFloatSats(); err != nil || sats != 5000 {
+		t.Fatalf("expected %s to win with 5000, got %d: %v", config.PosternFloatSatsEnv, sats, err)
+	}
+
+	t.Setenv(config.PosternFloatSatsEnv, "")
+	writeConfig(t, "postern_float_sats = 2000\n")
+	if sats, err = config.PosternFloatSats(); err != nil || sats != 2000 {
+		t.Fatalf("expected the config file's postern_float_sats to read back as 2000, got %d: %v", sats, err)
+	}
+}
+
+func TestPosternFloatSatsRefusesWhatIsNegativeOrIsNotANumber(t *testing.T) {
+	writeConfig(t, "postern_float_sats = -1\n")
+	if _, err := config.PosternFloatSats(); err == nil {
+		t.Fatal("expected a negative postern float cap to be refused")
+	}
+
+	writeConfig(t, "postern_float_sats = \"plenty\"\n")
+	if _, err := config.PosternFloatSats(); err == nil {
+		t.Fatal("expected a postern float cap that is not a number to be refused")
+	}
+}
+
+func TestPosternGovernorKeyIsEmptyUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, vpsConfig)
+
+	key, err := config.PosternGovernorKey()
+	if err != nil {
+		t.Fatalf("reading the postern governor key: %v", err)
+	}
+	if key != "" {
+		t.Fatalf("expected no postern governor key by default, got %q", key)
+	}
+
+	t.Setenv(config.PosternGovernorKeyEnv, "02abc")
+	if key, err = config.PosternGovernorKey(); err != nil || key != "02abc" {
+		t.Fatalf("expected %s to win, got %q: %v", config.PosternGovernorKeyEnv, key, err)
+	}
+
+	t.Setenv(config.PosternGovernorKeyEnv, "")
+	writeConfig(t, "postern_governor_key = \"03def\"\n")
+	if key, err = config.PosternGovernorKey(); err != nil || key != "03def" {
+		t.Fatalf("expected the config file's postern_governor_key to read back, got %q: %v", key, err)
+	}
+}
+
+func TestPosternKeyFileIsUnderHomeUntilAHostSaysOtherwise(t *testing.T) {
+	home := writeConfig(t, vpsConfig)
+
+	path, err := config.PosternKeyFile()
+	if err != nil {
+		t.Fatalf("reading the postern key file: %v", err)
+	}
+	if want := filepath.Join(home, config.DefaultPosternKeyFile); path != want {
+		t.Fatalf("expected %q, got %q", want, path)
+	}
+
+	writeConfig(t, "postern_key_file = \"/etc/mw/postern.key\"\n")
+	if path, err = config.PosternKeyFile(); err != nil || path != "/etc/mw/postern.key" {
+		t.Fatalf("expected the file's postern_key_file, got %q: %v", path, err)
+	}
+}
+
+func TestPosternKeyFileRefusesARelativePath(t *testing.T) {
+	writeConfig(t, "postern_key_file = \"relative/path\"\n")
+	if _, err := config.PosternKeyFile(); err == nil || !strings.Contains(err.Error(), "full path") {
+		t.Fatalf("expected a relative postern_key_file to be refused, got %v", err)
 	}
 }

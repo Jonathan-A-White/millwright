@@ -71,6 +71,11 @@ const (
 
 	MillhandRoutineModelEnv = "MW_MILLHAND_ROUTINE_MODEL"
 	MillhandReviewModelEnv  = "MW_MILLHAND_REVIEW_MODEL"
+
+	PosternBackendEnv     = "MW_POSTERN_BACKEND"
+	PosternFloatSatsEnv   = "MW_POSTERN_FLOAT_SATS"
+	PosternGovernorKeyEnv = "MW_POSTERN_GOVERNOR_KEY"
+	PosternKeyFileEnv     = "MW_POSTERN_KEY_FILE"
 )
 
 // RigsTable is the table of the config file that says where each rig is checked
@@ -152,6 +157,80 @@ const (
 	DefaultMillhandRoutineModel = "sonnet"
 	DefaultMillhandReviewModel  = "opus"
 )
+
+// DefaultPosternBackend is where the postern's backend is reached when
+// nothing says otherwise: the Governor's Desktop, on this factory's own
+// network.
+const DefaultPosternBackend = "http://desktop.mw:8787"
+
+// DefaultPosternFloatSats is the postern's float cap, in testnet satoshis,
+// when nothing says otherwise: mw refuses every send that would carry the
+// float past it. PROVISIONAL until the Governor confirms it with the tree.
+const DefaultPosternFloatSats = 100000
+
+// DefaultPosternKeyFile is where the Mayor's postern key is kept under the
+// home directory when nothing says otherwise: host-local, outside the vault
+// and its backups, like .mayor-acting.
+var DefaultPosternKeyFile = filepath.Join(".config", "mw", "postern.key")
+
+// PosternBackend reports the URL of the postern's backend: $MW_POSTERN_BACKEND
+// if it is set, otherwise the root-table `postern_backend` key of
+// ~/.config/mw/config.toml, and DefaultPosternBackend when neither says.
+func PosternBackend() (string, error) {
+	return optionalSetting("postern_backend", PosternBackendEnv, DefaultPosternBackend)
+}
+
+// PosternFloatSats reports the postern's float cap, in testnet satoshis, that
+// mw enforces on every send: $MW_POSTERN_FLOAT_SATS if it is set, otherwise
+// the root-table `postern_float_sats` key of ~/.config/mw/config.toml, and
+// DefaultPosternFloatSats when neither says.
+func PosternFloatSats() (int, error) {
+	said, err := optionalSetting("postern_float_sats", PosternFloatSatsEnv, "")
+	if err != nil {
+		return 0, err
+	}
+	if said == "" {
+		return DefaultPosternFloatSats, nil
+	}
+	sats, err := strconv.Atoi(said)
+	if err != nil {
+		return 0, fmt.Errorf("the postern float cap is %q, which is not a whole number of satoshis: set %s=<n>, or `postern_float_sats = <n>` in %s", said, PosternFloatSatsEnv, File)
+	}
+	if sats < 0 {
+		return 0, fmt.Errorf("the postern float cap is %d satoshis, which is negative: set it to 0 or more", sats)
+	}
+	return sats, nil
+}
+
+// PosternGovernorKey reports the Governor's compressed public key, as hex,
+// that the postern backend answers to: $MW_POSTERN_GOVERNOR_KEY if it is
+// set, otherwise the root-table `postern_governor_key` key of
+// ~/.config/mw/config.toml, and empty when neither says.
+func PosternGovernorKey() (string, error) {
+	return optionalSetting("postern_governor_key", PosternGovernorKeyEnv, "")
+}
+
+// PosternKeyFile reports where the Mayor's postern key is kept:
+// $MW_POSTERN_KEY_FILE if it is set, otherwise the root-table
+// `postern_key_file` key of ~/.config/mw/config.toml, a full path either
+// way, and DefaultPosternKeyFile under the home directory when neither says.
+func PosternKeyFile() (string, error) {
+	said, err := optionalSetting("postern_key_file", PosternKeyFileEnv, "")
+	if err != nil {
+		return "", err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("no %s is set and there is no home directory to read %s in: %w", PosternKeyFileEnv, File, err)
+	}
+	if said != "" {
+		if !filepath.IsAbs(said) {
+			return "", fmt.Errorf("the postern key file is %q in %s: it must be a full path", said, filepath.Join(home, File))
+		}
+		return said, nil
+	}
+	return filepath.Join(home, DefaultPosternKeyFile), nil
+}
 
 // What `mw dispatch` does when its sync cannot resolve a name, which is what a
 // host just woken from standby says until its network is back: it tries the
