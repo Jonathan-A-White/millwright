@@ -723,6 +723,32 @@ func TestASyncAsksTheTrackerToCollectOncePastItsCadence(t *testing.T) {
 	}
 }
 
+// TestASyncChecksPackCountsEvenWhenGCIsNotDue is mw-gq6.104's friction: the
+// Dolt git-remote-cache grows on every sync, far faster than the once-a-day
+// GC can keep up, so every sync asks the tracker to check it — not only the
+// syncs that happen to fall on the daily GC's own cadence.
+func TestASyncChecksPackCountsEvenWhenGCIsNotDue(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	if err := tracker.SetNote(context.Background(), application.LastGCKey("vps"),
+		level.Add(-time.Hour).UTC().Format(application.LastSyncFormat)); err != nil {
+		t.Fatalf("seeding the last collection: %v", err)
+	}
+
+	report, err := sync.Run(context.Background())
+	if err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	if report.GCed {
+		t.Fatal("expected a host that collected an hour ago not to ask again before its cadence")
+	}
+	if got := tracker.GCs(); got != 0 {
+		t.Fatalf("expected no collection, got %d", got)
+	}
+	if got := tracker.PackChecks(); got != 1 {
+		t.Fatalf("expected the not-due sync to still check the git-remote-cache pack counts, got %d", got)
+	}
+}
+
 func TestASyncThatCannotCollectStillSucceeds(t *testing.T) {
 	sync, _, tracker := syncing(t)
 	tracker.GCErr = errors.New("no space to write a compacted commit")

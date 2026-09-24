@@ -73,6 +73,13 @@ type FakeTracker struct {
 	// call that carries the repack too, and a GC that never ran carries
 	// neither.
 	repacks int
+	// packChecks counts every successful call to Sync, mirroring the check a
+	// real Gateway now also makes after every `bd sync`: whether a
+	// git-remote-cache has grown past the repack threshold. Unlike repacks,
+	// this runs on every sync, the daily GC's own cadence or not — the fake
+	// holds no cache to crowd, but a test still wants to say the question was
+	// asked.
+	packChecks int
 	// GCErr, when set, is what GC reports instead of collecting.
 	GCErr error
 	// size is what Size reports.
@@ -992,7 +999,17 @@ func (f *FakeTracker) Sync(_ context.Context) error {
 	for key, value := range f.notes {
 		f.published[key] = value
 	}
+	f.packChecks++
 	return nil
+}
+
+// PackChecks reports how many successful synchronisation cycles checked the
+// git-remote-cache pack counts, so that a test can say every sync asks the
+// question, whether or not it was also the daily GC's turn.
+func (f *FakeTracker) PackChecks() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.packChecks
 }
 
 // Note implements application.TrackerSync.
