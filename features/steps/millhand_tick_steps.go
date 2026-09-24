@@ -46,6 +46,9 @@ type tickWorld struct {
 	// [watch] table it was given: the zero value is no table at all.
 	watch    *apptest.FakeWatch
 	watching application.WatchSettings
+	// reach is whether the tick's Reach says the internet looks up at all,
+	// reachable until a step says otherwise.
+	reach *apptest.FakeReach
 	// epicFiled says the epic the stories hang from has been filed.
 	epicFiled bool
 	// whileWaiting is what happens in the wait between the tick's two checks of
@@ -83,6 +86,7 @@ func (c *seatUpContext) tickWorld() *tickWorld {
 			sync:    &tickSync{},
 			log:     &apptest.FakeTickLog{},
 			watch:   apptest.NewFakeWatch(),
+			reach:   apptest.NewFakeReach(),
 		}
 	}
 	return c.tick
@@ -110,6 +114,8 @@ func registerMillhandTickSteps(ctx *godog.ScenarioContext, c *seatUpContext) {
 	ctx.Given(`^the terminal cannot say what the pane of the window "([^"]*)" is doing$`, c.theTerminalCannotSayWhatThePaneIsDoing)
 	ctx.Given(`^a doctor note "([^"]*)" saying "([^"]*)"$`, c.aDoctorNote)
 	ctx.Given(`^the doctor note "([^"]*)" is cleared$`, c.theDoctorNoteIsCleared)
+	ctx.Given(`^the Millhand tick log already holds a line from (\d+) minutes ago$`, c.theTickLogAlreadyHoldsALineFromMinutesAgo)
+	ctx.Given(`^the tick cannot reach the internet at all$`, c.theTickCannotReachTheInternetAtAll)
 
 	ctx.When(`^mw millhand tick is run$`, func() error { return c.runTheTick(false) })
 	ctx.When(`^mw millhand tick is run as a dry run$`, func() error { return c.runTheTick(true) })
@@ -238,6 +244,19 @@ func (c *seatUpContext) theDoctorNoteIsCleared(check string) error {
 	return c.tickWorld().tracker.ClearNote(context.Background(), application.DoctorNoteKey(seatUpHost, check))
 }
 
+// theTickLogAlreadyHoldsALineFromMinutesAgo seeds the tick's own log with one
+// line, as if an earlier tick had written it that long before the clock the
+// scenario's tick runs by.
+func (c *seatUpContext) theTickLogAlreadyHoldsALineFromMinutesAgo(minutes int) error {
+	at := c.today.Add(-time.Duration(minutes) * time.Minute)
+	return c.tickWorld().log.Append(context.Background(), at.UTC().Format(time.RFC3339)+" quiet")
+}
+
+func (c *seatUpContext) theTickCannotReachTheInternetAtAll() error {
+	c.tickWorld().reach.SetReachable(false)
+	return nil
+}
+
 func (c *seatUpContext) aMillhandOpensDuringTheSync() error {
 	c.tickWorld().sync.onRun = func() {
 		c.windows.Holds("millhand-2026-09-19-05", time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC))
@@ -308,6 +327,7 @@ func (c *seatUpContext) runTheTick(dryRun bool) error {
 		Watch: application.Watch{
 			Probes: world.watch, Settings: world.watching, Notes: world.tracker, Now: now,
 		},
+		Reach:  world.reach,
 		Log:    world.log,
 		Host:   seatUpHost,
 		DryRun: dryRun,

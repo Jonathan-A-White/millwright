@@ -392,6 +392,24 @@ Feature: mw millhand tick
     And mw millhand tick is run
     Then mw millhand tick prints one dated line saying "woke the Millhand"
 
+  Scenario: A resume defers a pending doctor note and wakes nobody
+    Given the Millhand tick log already holds a line from 45 minutes ago
+    And a doctor note "wifi" saying "2026-09-19T11:00:00Z cannot-tell faulty (waiting 5m)"
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "resumed after 45m0s"
+    And mw millhand tick prints one dated line saying "resuming: 1 doctor note and health deferred"
+    And no window was opened
+
+  Scenario: A local network fault defers a pending doctor note the same way
+    Given the tick cannot reach the internet at all
+    And a doctor note "wifi" saying "2026-09-19T11:00:00Z cannot-tell faulty (waiting 5m)"
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "local network fault"
+    And mw millhand tick prints one dated line saying "resuming: 1 doctor note and health deferred"
+    And no window was opened
+
   Scenario: A dry run says what it would do and starts nothing
     Given unread tick mail for "millhand@laptop" with the subject "Please look at the queue"
     When mw millhand tick is run as a dry run
