@@ -32,8 +32,9 @@ test:
 # detail. Then the installer, run against stand-in commands, and its pins. Then
 # the unit installer, run against a stand-in systemctl and a throwaway HOME.
 # Then mw-heavy, against a stand-in systemd-run and a real flock on a
-# throwaway lock file. These checks read only this repository (and a
-# temporary directory) and start nothing.
+# throwaway lock file. Then wg-enrol, against temp files with WG_SYNC=0 (and,
+# for the syncconf scenario, stand-in wg and wg-quick). These checks read
+# only this repository (and a temporary directory) and start nothing.
 lint:
 	$(GO) vet -tags $(TAGS) $(PKG)
 	scripts/check-codemap.sh
@@ -43,6 +44,7 @@ lint:
 	scripts/check-install.sh
 	scripts/check-install-units.sh
 	scripts/check-heavy.sh
+	scripts/check-wg-enrol.sh
 
 clean:
 	rm -rf bin
