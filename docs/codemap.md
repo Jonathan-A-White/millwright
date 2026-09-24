@@ -1,6 +1,6 @@
 # Code map
 
-Where everything is; `CONTEXT.md` has the vocabulary, ADRs the why.
+Where everything is; `CONTEXT.md` has the vocabulary, ADRs why.
 
 ## Layers
 
@@ -49,7 +49,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/slot.go` | none (`flock`) |
 | `Dispatcher` | `application/landing.go` | `application.Dispatch` | — |
 | `HostSync` | `application/dispatch.go` | `application.Sync` | — |
-| `PosternKeyFile` | `application/postern.go` | `infrastructure/postern/keyfile.go` | none |
+| `PosternKeyFile`, `Postern`, `Cipher` | `application/postern.go` | `infrastructure/postern/keyfile.go` (key) | `apptest.FakePostern`/`FakeCipher` |
 
 `infrastructure/config/config.go` is not a port: read by `cmd/mw/`.
 
@@ -79,12 +79,11 @@ Every adapter: `var _ application.<Port> = ...`.
 | `Doctor` | `application/doctor.go` | `mw doctor` — `cmd/mw/doctor.go` | `features/doctor.feature` |
 | `SeatBoot` | `application/seatboot.go` | none: `Dispatch`, `Next` call it | `features/seat_boot.feature` |
 | `Init` | `application/init.go` | `mw init` — `cmd/mw/init.go` | `features/init.feature` |
-| `PosternKeyInit`, `PosternKeyShow` | `application/postern.go` | `mw postern key init`/`show` — `cmd/mw/postern.go` | `features/postern_key.feature` |
+| `PosternKeyInit`, `PosternKeyShow`, `PosternInbox`, `PosternSend` | `application/postern.go` | `mw postern key`/`inbox`/`send` — `cmd/mw/postern.go` | `features/postern_key.feature` |
 
-`cmd/mw/root.go` holds the tree; `cmd/mw/main.go` runs it; `cmd/mw/version.go`
-is `mw version` (no use case).
-`features/path_validation.feature` covers `domain/path.go`;
-`features/ready_stories.feature` the `WorkTracker` contract (no commands).
+`cmd/mw/root.go` holds the tree; `cmd/mw/main.go` runs it; `cmd/mw/version.go` is
+`mw version` (no use case). `features/path_validation.feature` covers
+`domain/path.go`; `features/ready_stories.feature` the `WorkTracker` contract.
 
 Add a command: `docs/adding-a-command.md`.
 
@@ -112,5 +111,5 @@ Add a command: `docs/adding-a-command.md`.
 
 - One package: `go test ./application/...` (`-run TestName`, `-tags beads_integration` for real `bd`).
 - One feature: `MW_FEATURE=sweep.feature go test ./features` (`:17` for a scenario).
-- `make lint` runs `scripts/check-*.sh` (this page, `template/`, `contrib/`, installers); `make
-  check-formulas` needs `bd`, `jq`, time, not in `make test`.
+- `make lint` runs `scripts/check-*.sh`; `make check-formulas` needs `bd`, `jq`, time, not in
+  `make test`.
