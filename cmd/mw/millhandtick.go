@@ -10,6 +10,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 	"github.com/Jonathan-A-White/millwright/infrastructure/notify"
 	"github.com/Jonathan-A-White/millwright/infrastructure/reaper"
 	"github.com/Jonathan-A-White/millwright/infrastructure/ticklog"
@@ -87,6 +88,10 @@ func newMillhandTickCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			reach, err := config.DoctorReach()
+			if err != nil {
+				return err
+			}
 			home, err := os.UserHomeDir()
 			if err != nil {
 				return fmt.Errorf("there is no home directory to keep the tick log in: %w", err)
@@ -121,6 +126,7 @@ func newMillhandTickCmd() *cobra.Command {
 					Host:       host,
 					StaleAfter: time.Duration(hours) * time.Hour,
 				},
+				Reach:     doctor.NetReach{Hosts: reach},
 				ReapLog:   files,
 				Recheck:   time.Duration(recheck) * time.Second,
 				SyncHalts: hostSyncHalt(),
