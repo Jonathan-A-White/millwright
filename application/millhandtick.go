@@ -75,7 +75,13 @@ func (r MillhandTickReport) String() string { return r.Line + "\n" }
 //     is restarted: on the same two looks its pane is idle and it has written
 //     no handoff since its window opened. The tick closes the window, says
 //     "restarted" in its line and goes on, and the wake it ends with, whatever
-//     else there is or is not to wake for, tells the fresh Millhand why.
+//     else there is or is not to wake for, tells the fresh Millhand why. While
+//     mw watch says this host's own network is down, a stalled Millhand is left
+//     alone instead: restarting it would only spawn another Millhand that can
+//     do no more than the last, since the fault that stopped this one is the
+//     same fault that would keep Claude Code from reaching the API. The tick
+//     says so in its line and closes nothing; the next tick that still finds it
+//     stalled once the fault clears restarts it as usual.
 //  2. On a host with a [watch] table, mw watch's rule is applied to the host it
 //     watches. This comes before the sync, because a fault of this host's own
 //     network is one the sync would only time out on: local-fault is said in the
@@ -188,15 +194,26 @@ func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err err
 
 	var notes []string
 	var restarted string
+	var health tickHealth
+	healthLooked := false
 	if up != "" {
 		gone, note, err := t.heal(ctx, up)
-		if err == nil && !gone {
-			gone, note, restarted, err = t.restart(ctx, up)
+		if err == nil && !gone && t.stalledCandidate(ctx, up) {
+			health = t.health(ctx)
+			healthLooked = true
+			if health.local {
+				note = leftAloneNote(up)
+			} else {
+				gone, note, restarted, err = t.restart(ctx, up)
+			}
 		}
 		switch {
 		case err != nil:
 			return joinNotes(alreadyUp(up), []string{note}), false, err
 		case !gone:
+			if note != "" {
+				return joinNotes(alreadyUp(up), []string{note}), false, nil
+			}
 			return alreadyUp(up), false, nil
 		}
 		notes = append(notes, note)
@@ -204,7 +221,9 @@ func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err err
 
 	// The watch comes first: a fault of this host's own network is one a sync
 	// would only time out on.
-	health := t.health(ctx)
+	if !healthLooked {
+		health = t.health(ctx)
+	}
 
 	if !health.local {
 		if _, err := t.Sync.Run(ctx); err != nil {
@@ -365,6 +384,26 @@ func (t MillhandTick) restart(ctx context.Context, name string) (gone bool, note
 		}
 	}
 	return true, note, told, nil
+}
+
+// stalledCandidate is a first look — before health is known, and before any
+// waiting — at whether the window is a wake that never got going: whether
+// restart would be worth trying at all, and so whether health.local is worth
+// asking about before it is.
+func (t MillhandTick) stalledCandidate(ctx context.Context, name string) bool {
+	if t.Millhand.Terminal == nil || t.Millhand.Seats == nil {
+		return false
+	}
+	rule := t.reapRule()
+	window, there := t.reapWindow(ctx, name)
+	return there && t.stalled(ctx, rule, window)
+}
+
+// leftAloneNote is what the tick's line says when a stalled Millhand's window
+// is left alone because this host's own network is down: restarting it would
+// only spawn another Millhand that could do no more than the last.
+func leftAloneNote(window string) string {
+	return WatchLocalFault + ": stalled Millhand's window " + window + " left alone (no outside place answers)"
 }
 
 // stalled is one look at whether the Millhand in a window is a wake that never
