@@ -63,19 +63,13 @@ func remoteCacheFixture(t *testing.T, vault string, pushes int) (repo string, re
 	return repo, refs
 }
 
-// packCount counts the pack files a bare repo holds, so a test can say a
+// mustPackCount counts the pack files a bare repo holds, so a test can say a
 // repack collapsed several into one.
-func packCount(t *testing.T, repo string) int {
+func mustPackCount(t *testing.T, repo string) int {
 	t.Helper()
-	entries, err := os.ReadDir(filepath.Join(repo, "objects", "pack"))
+	count, err := packCount(repo)
 	if err != nil {
 		t.Fatalf("listing packs in %s: %v", repo, err)
-	}
-	count := 0
-	for _, entry := range entries {
-		if filepath.Ext(entry.Name()) == ".pack" {
-			count++
-		}
 	}
 	return count
 }
@@ -84,7 +78,7 @@ func TestRepackRemoteCachesCollapsesEveryPackIntoOneAndKeepsEveryRefResolving(t 
 	vault := t.TempDir()
 	repo, refs := remoteCacheFixture(t, vault, 5)
 
-	if before := packCount(t, repo); before < 2 {
+	if before := mustPackCount(t, repo); before < 2 {
 		t.Fatalf("expected the fixture to leave several packs, got %d", before)
 	}
 
@@ -93,7 +87,7 @@ func TestRepackRemoteCachesCollapsesEveryPackIntoOneAndKeepsEveryRefResolving(t 
 		t.Fatalf("repacking the remote cache: %v", err)
 	}
 
-	if after := packCount(t, repo); after != 1 {
+	if after := mustPackCount(t, repo); after != 1 {
 		t.Fatalf("expected exactly one pack left after repacking, got %d", after)
 	}
 	for _, ref := range refs {
@@ -115,7 +109,7 @@ func TestRepackRemoteCachesFindsEveryDoltDatabaseUnderTheVault(t *testing.T) {
 	if err := gateway.repackRemoteCaches(context.Background()); err != nil {
 		t.Fatalf("repacking the remote caches: %v", err)
 	}
-	if after := packCount(t, firstRepo); after != 1 {
+	if after := mustPackCount(t, firstRepo); after != 1 {
 		t.Fatalf("expected the first cache to end with one pack, got %d", after)
 	}
 }
@@ -144,7 +138,7 @@ func TestGCAlsoRepacksTheGitRemoteCache(t *testing.T) {
 	gateway := New(dir, WithProgram(path))
 
 	repo, refs := remoteCacheFixture(t, dir, 5)
-	if before := packCount(t, repo); before < 2 {
+	if before := mustPackCount(t, repo); before < 2 {
 		t.Fatalf("expected the fixture to leave several packs, got %d", before)
 	}
 
@@ -152,12 +146,101 @@ func TestGCAlsoRepacksTheGitRemoteCache(t *testing.T) {
 		t.Fatalf("collecting: %v", err)
 	}
 
-	if after := packCount(t, repo); after != 1 {
+	if after := mustPackCount(t, repo); after != 1 {
 		t.Fatalf("expected GC to leave exactly one pack in the remote cache, got %d", after)
 	}
 	for _, ref := range refs {
 		if _, err := runGit(context.Background(), repo, "rev-parse", ref); err != nil {
 			t.Fatalf("expected %s to still resolve after GC repacked the cache, got %v", ref, err)
 		}
+	}
+}
+
+// standInBD writes a stand-in for bd that always exits 0, so a test can call
+// Gateway.Sync without a real beads database.
+func standInBD(t *testing.T, dir string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in for bd is a shell script")
+	}
+	path := filepath.Join(dir, "bd-stand-in")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("writing the stand-in: %v", err)
+	}
+	return path
+}
+
+// TestSyncAlsoRepacksACacheThatHasGrownPastTheThreshold is mw-gq6.104's
+// friction: bd's own gc runs once a day, but the git-remote-cache Dolt keeps
+// beside the database gains a full pack on every `bd dolt push`/pull — far
+// faster than the daily GC can keep up on a small disk. So every sync, not
+// only the once-a-day GC, checks each cache's pack count and repacks the ones
+// that have grown past remoteCacheRepackThreshold.
+func TestSyncAlsoRepacksACacheThatHasGrownPastTheThreshold(t *testing.T) {
+	dir := t.TempDir()
+	path := standInBD(t, dir)
+	gateway := New(dir, WithProgram(path))
+
+	repo, refs := remoteCacheFixture(t, dir, remoteCacheRepackThreshold+1)
+	if before := mustPackCount(t, repo); before != remoteCacheRepackThreshold+1 {
+		t.Fatalf("expected the fixture to leave %d packs, got %d", remoteCacheRepackThreshold+1, before)
+	}
+
+	if err := gateway.Sync(context.Background()); err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+
+	if after := mustPackCount(t, repo); after != 1 {
+		t.Fatalf("expected a sync to leave exactly one pack in a crowded cache, got %d", after)
+	}
+	for _, ref := range refs {
+		if _, err := runGit(context.Background(), repo, "rev-parse", ref); err != nil {
+			t.Fatalf("expected %s to still resolve after the sync repacked the cache, got %v", ref, err)
+		}
+	}
+}
+
+// TestSyncLeavesACacheAtTheThresholdAlone is the other half: a cache that has
+// not yet grown past remoteCacheRepackThreshold packs costs nothing extra on
+// a sync that runs every few minutes.
+func TestSyncLeavesACacheAtTheThresholdAlone(t *testing.T) {
+	dir := t.TempDir()
+	path := standInBD(t, dir)
+	gateway := New(dir, WithProgram(path))
+
+	repo, _ := remoteCacheFixture(t, dir, remoteCacheRepackThreshold)
+	before := mustPackCount(t, repo)
+	if before != remoteCacheRepackThreshold {
+		t.Fatalf("expected the fixture to leave %d packs, got %d", remoteCacheRepackThreshold, before)
+	}
+
+	if err := gateway.Sync(context.Background()); err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+
+	if after := mustPackCount(t, repo); after != before {
+		t.Fatalf("expected a cache at the threshold to be left untouched, had %d packs, now %d", before, after)
+	}
+}
+
+// TestSyncSwallowsAFailureRepackingACrowdedCache is mw-gq6.104's third
+// acceptance criterion: a repack that fails on the pack-count path must never
+// turn a sync itself into a halt — the sync already got through, and this
+// housekeeping is not worth losing that over.
+func TestSyncSwallowsAFailureRepackingACrowdedCache(t *testing.T) {
+	dir := t.TempDir()
+	path := standInBD(t, dir)
+	gateway := New(dir, WithProgram(path))
+
+	repo, _ := remoteCacheFixture(t, dir, remoteCacheRepackThreshold+1)
+	// Take away the write permission repacking needs, so repacking this one
+	// cache fails, without touching whether `bd sync` itself succeeded.
+	if err := os.Chmod(filepath.Join(repo, "objects", "pack"), 0o500); err != nil {
+		t.Fatalf("making the pack directory read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(repo, "objects", "pack"), 0o700) })
+
+	if err := gateway.Sync(context.Background()); err != nil {
+		t.Fatalf("expected a repack failure not to fail the sync, got %v", err)
 	}
 }

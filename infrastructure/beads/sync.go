@@ -35,7 +35,14 @@ const beadsDir = ".beads"
 var NoteMissing = []string{"not set", "not found"}
 
 // Sync implements application.TrackerSync: one `bd sync` — pull, look for
-// conflicts, recompute what is blocked, push with bd's own bounded retries.
+// conflicts, recompute what is blocked, push with bd's own bounded retries —
+// then a check of the git-remote-cache clones Dolt keeps beside the database,
+// repacking whichever has grown past remoteCacheRepackThreshold packs. That
+// check runs on every sync, not only the once-a-day GC: the cache can gain a
+// full pack on every `bd dolt push`/pull, faster than a daily collection can
+// keep up. A repack that fails there is never a reason to fail the sync
+// itself — the pull, conflict check and push already got through — so its
+// error is dropped rather than returned.
 //
 // bd's exit code is surfaced as it was, in a *application.SyncHalt. Nothing is
 // retried here: a conflict (bd 2) does sometimes come right within seconds,
@@ -47,6 +54,7 @@ var NoteMissing = []string{"not set", "not found"}
 func (g *Gateway) Sync(ctx context.Context) error {
 	out, errs, err := g.run(ctx, "sync")
 	if err == nil {
+		_ = g.repackCrowdedRemoteCaches(ctx)
 		return nil
 	}
 
