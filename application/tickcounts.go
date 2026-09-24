@@ -161,7 +161,7 @@ func MillhandTickOutcome(line string) (time.Time, TickOutcome) {
 		return at, TickFailed
 	}
 	for _, note := range parts[1:] {
-		if strings.HasPrefix(note, WatchLocalFault+":") {
+		if strings.HasPrefix(note, WatchLocalFault+":") || strings.HasPrefix(note, TickLocalNetworkFault) {
 			return at, TickFault
 		}
 	}
@@ -301,4 +301,107 @@ func (c TickCount) write(b *strings.Builder, pad, label string) {
 func (h HostTicks) write(b *strings.Builder, pad string) {
 	h.Dispatch.write(b, pad, TicksDispatchLabel)
 	h.Millhand.write(b, pad, TicksMillhandLabel)
+}
+
+// tickResumedPrefix and tickResumingPrefix are what a Millhand tick's own
+// line opens with when it announces a resume grace and while it still holds:
+// the two words ReadResumeGrace and a tick's own resumeGrace look for in the
+// log's newest line, so mw status and the tick agree on what is open from the
+// very words the tick wrote.
+const (
+	tickResumedPrefix  = "resumed after "
+	tickResumingPrefix = "resuming: "
+)
+
+// TickResumed reports, from a Millhand tick log's newest line, whether now is
+// a resume — the host slept through the timer that runs the tick, so the gap
+// since that line is more than ResumeGap — and, when it is, the words to
+// announce it with. A log with nothing in it yet is never a resume: there is
+// nothing to have slept through.
+func TickResumed(ctx context.Context, log TickLog, now time.Time) (announce string, resumed bool) {
+	if log == nil {
+		return "", false
+	}
+	lines, err := log.Read(ctx)
+	if err != nil || len(lines) == 0 {
+		return "", false
+	}
+	when, _, ok := splitTickLine(lines[len(lines)-1])
+	if !ok {
+		return "", false
+	}
+	gap := now.Sub(when)
+	if gap <= ResumeGap {
+		return "", false
+	}
+	return tickResumedPrefix + gap.Round(time.Second).String(), true
+}
+
+// ResumeState is what a Millhand tick log's newest line says about a resume
+// grace still running: when it was found, and until when doctor notes and
+// the health verdict are deferred on its account. The zero value is no open
+// grace.
+type ResumeState struct {
+	Resumed    time.Time
+	GraceUntil time.Time
+}
+
+// Open reports whether now still falls inside this grace.
+func (r ResumeState) Open(now time.Time) bool {
+	return !r.GraceUntil.IsZero() && now.Before(r.GraceUntil)
+}
+
+// ReadResumeGrace reads a Millhand tick log's newest line and says whether it
+// opened a resume grace that is still running at now — the same words the
+// tick itself looks for before deferring, so mw status shows exactly what
+// the tick decided by, from the tick log alone: the smaller state to keep
+// than a note of its own, since the tick already reads this log every turn
+// to know what to write next, and a resume is exactly the kind of thing a
+// log already exists to say once and be believed.
+//
+// Only a line that itself announced or continued a resume counts: an
+// ordinary line read again within GraceAfterResume of itself — two ticks
+// running close together, in a test or a dry run — is not mistaken for an
+// open grace. A local network fault is not read back this way at all: that
+// grace is judged fresh from Reach every tick, never remembered between
+// them.
+func ReadResumeGrace(ctx context.Context, log TickLog, now time.Time) ResumeState {
+	if log == nil {
+		return ResumeState{}
+	}
+	lines, err := log.Read(ctx)
+	if err != nil || len(lines) == 0 {
+		return ResumeState{}
+	}
+	when, words, ok := splitTickLine(lines[len(lines)-1])
+	if !ok || !resumeGraceLine(words) {
+		return ResumeState{}
+	}
+	until := when.Add(GraceAfterResume)
+	if !now.Before(until) {
+		return ResumeState{}
+	}
+	return ResumeState{Resumed: when, GraceUntil: until}
+}
+
+// resumeGraceLine reports whether a tick's own line opened or is continuing a
+// resume grace.
+func resumeGraceLine(words string) bool {
+	return strings.Contains(words, tickResumedPrefix) || strings.Contains(words, tickResumingPrefix)
+}
+
+// MillhandResumeLine is the line mw status shows under the Millhand tick
+// while a resume grace still holds, read from the very state the tick itself
+// judges by: "" once there is none to show. Its two times are shown to the
+// minute alone, with no date: GraceAfterResume is minutes long, so both
+// always fall on the one day, and the line stays well inside a phone-width
+// report even beside the pad it is shown under.
+func MillhandResumeLine(ctx context.Context, log TickLog, now time.Time) string {
+	grace := ReadResumeGrace(ctx, log, now)
+	if !grace.Open(now) {
+		return ""
+	}
+	const clockFormat = "15:04Z"
+	return fmt.Sprintf("resumed %s (grace until %s)",
+		grace.Resumed.UTC().Format(clockFormat), grace.GraceUntil.UTC().Format(clockFormat))
 }

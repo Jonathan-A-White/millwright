@@ -17,6 +17,35 @@ const TickLogLines = 500
 // wake's reason names; the rest are counted.
 const TickReasonLimit = 5
 
+// ResumeGap is how much longer than the timer that runs mw millhand tick
+// (every 15 minutes) a gap since the tick log's newest line must be before a
+// tick calls it a resume — the host slept, rather than merely run its
+// ordinary turn.
+const ResumeGap = 30 * time.Minute
+
+// GraceAfterResume is how long, after a resume or a local network fault, a
+// tick defers doctor notes and the health verdict rather than waking the
+// Millhand for them: room enough for a network that is only settling back
+// in — DNS, a tunnel restarting itself — to clear on its own before it is
+// treated as real trouble.
+const GraceAfterResume = 3 * time.Minute
+
+// TickLocalNetworkFault is what a Millhand tick's line says when Reach
+// cannot reach any of its targets at all: this host's own network, not real
+// trouble, found without needing a [watch] table at all. It is the same
+// words mw dispatch's own LocalNetworkFault prints, for the same kind of
+// finding, under a name of its own so the two are never confused as one type.
+const TickLocalNetworkFault = "local network fault"
+
+// Reach is whether the internet looks reachable at all from this host — the
+// same TCP-dial test mw doctor's wifi and tunnel checks make — asked here to
+// tell a local network fault (every target unreachable) from real trouble
+// worth a wake. A nil Reach is never asked, so a tick with none wired takes
+// no grace on its account.
+type Reach interface {
+	Reachable(ctx context.Context) bool
+}
+
 // TickLog is the log a host keeps of what a timer's runs found: one line each,
 // appended, and never more than TickLogLines of them — an adapter drops the
 // oldest as it appends. mw millhand tick keeps one and mw dispatch another.
@@ -142,6 +171,11 @@ type MillhandTick struct {
 	// tick does not consult it. The tick silences it, and it keeps its own log.
 	Watch Watch
 
+	// Reach tells a local network fault (every target unreachable) from real
+	// trouble, opening the same grace a resume does. A nil Reach is never
+	// asked, so a tick with none wired never finds one this way.
+	Reach Reach
+
 	// ReapLog is where a tick that closes a finished Millhand's window says so:
 	// the Millhand's reaper log. Recheck is how long the tick waits between its
 	// two looks at the window's pane, and Sleep waits it out, or until ctx ends;
@@ -219,6 +253,22 @@ func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err err
 		notes = append(notes, note)
 	}
 
+	// A resume or a local network fault opens a short grace: doctor notes and
+	// the health verdict are deferred rather than read as trouble, giving a
+	// network that is only settling back in room to clear on its own. Mail and
+	// a newly stuck story still wake the Millhand regardless: they are real
+	// work, resume or not.
+	announce, justResumed := TickResumed(ctx, t.Log, t.now())
+	resuming := justResumed || ReadResumeGrace(ctx, t.Log, t.now()).Open(t.now())
+	localFault := t.Reach != nil && !t.Reach.Reachable(ctx)
+	deferring := resuming || localFault
+	if justResumed {
+		notes = append(notes, announce)
+	}
+	if localFault {
+		notes = append(notes, TickLocalNetworkFault)
+	}
+
 	// The watch comes first: a fault of this host's own network is one a sync
 	// would only time out on.
 	if !healthLooked {
@@ -264,9 +314,18 @@ func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err err
 	}
 
 	var doctor []string
-	if t.DryRun {
+	pending := 0
+	switch {
+	case t.DryRun:
 		notes = append(notes, "doctor notes not looked for in a dry run")
-	} else {
+	case deferring:
+		var pendErr error
+		pending, pendErr = t.pendingDoctorNotes(ctx)
+		if pendErr != nil {
+			lookErr = pendErr
+			notes = append(notes, "doctor notes could not be read: "+oneLine(pendErr.Error()))
+		}
+	default:
 		var doctorNotes []string
 		doctor, doctorNotes, err = t.doctor(ctx)
 		if err != nil {
@@ -276,7 +335,15 @@ func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err err
 		notes = append(notes, doctorNotes...)
 	}
 
-	verdict, reason := "quiet", tickReason(mail, stuck, doctor, health)
+	healthForReason := health
+	if deferring {
+		healthForReason.wake = false
+	}
+	if deferring && !t.DryRun && (pending > 0 || health.wake) {
+		notes = append(notes, tickResumingPrefix+counted(pending, "doctor note", "doctor notes")+" and health deferred")
+	}
+
+	verdict, reason := "quiet", tickReason(mail, stuck, doctor, healthForReason)
 	switch {
 	case restarted == "":
 	case reason == "":
@@ -664,6 +731,36 @@ func (t MillhandTick) doctor(ctx context.Context) (reasons, notes []string, err 
 		reasons = append(reasons, doctorReasonPart(check, value))
 	}
 	return reasons, notes, nil
+}
+
+// pendingDoctorNotes is how many of this host's own doctor.<host>.<check>
+// notes are not yet marked seen, without marking any of them — unlike
+// doctor, which marks a note seen the moment it turns it into a wake reason.
+// A grace's deferral must not mark a note seen: that would lose it, rather
+// than merely hold it back for the tick that reads it once the grace ends.
+func (t MillhandTick) pendingDoctorNotes(ctx context.Context) (int, error) {
+	if t.DoctorNotes == nil {
+		return 0, nil
+	}
+	found, err := t.DoctorNotes.NotesWithPrefix(ctx, DoctorNotePrefix)
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for key, value := range found {
+		host, check, ok := ParseDoctorNoteKey(key)
+		if !ok || host != t.Host {
+			continue
+		}
+		seen, readErr := t.DoctorNotes.Note(ctx, DoctorSeenKey(t.Host, check))
+		if readErr != nil {
+			continue
+		}
+		if seen != normalizeDoctorNote(value) {
+			count++
+		}
+	}
+	return count, nil
 }
 
 // doctorReasonPart is one doctor note's wake reason: the check it is about,
