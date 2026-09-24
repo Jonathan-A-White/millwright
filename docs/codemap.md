@@ -102,17 +102,17 @@ Add a command: `docs/adding-a-command.md`.
 | `mwConfig` | `cmd/mw/dispatch_test.go` | A `config.toml`, temp HOME. |
 | `aFactory` | `application/dispatch_test.go` | A faked `Dispatch`, temp vault. |
 
-Feature steps: `features/steps/next_steps.go` builds a real rig, clone, vault;
-fakes only tracker, runner, vault git.
+Feature steps: `features/steps/next_steps.go` builds a real rig; fakes tracker,
+runner, vault git.
 
 ## Build and test
 
-`make build`, `make test`, `make lint`: see `CLAUDE.md`.
+`make build`, `test`, `lint`: see `CLAUDE.md`.
 
 - One package: `go test ./application/...` (`-run TestName`); add
   `-tags beads_integration` for the real-`bd` cases, as `make test` does.
-- One feature: `MW_FEATURE=sweep.feature go test ./features` (`:17` for one scenario).
-- `make lint` runs `scripts/check-*.sh`: this page, `template/`, `contrib/systemd/`, install scripts.
-- `contrib/mw-heavy` caps memory: `MW_HEAVY_MEMORY_MAX`, `MW_HEAVY_SWAP_MAX`.
+- One feature: `MW_FEATURE=sweep.feature go test ./features` (`:17` for a scenario).
+- `make lint` runs `scripts/check-*.sh`: this page, `template/`, `contrib/systemd/`, installers.
+- `contrib/mw-heavy` caps memory (`MW_HEAVY_MEMORY_MAX`, `MW_HEAVY_SWAP_MAX`); `contrib/wg-enrol` enrols a peer.
 - `contrib/systemd/system/` (`--system`): seat tmux, doctor; env `contrib/seat.env.example`.
-- `make check-formulas` needs `bd`, `jq`, real time; not in `make test`.
+- `make check-formulas` needs `bd`, `jq`, time; not in `make test`.
