@@ -669,6 +669,9 @@ func TestASyncAsksTheTrackerToCollectWhenItHasNeverAsked(t *testing.T) {
 	if got := tracker.GCs(); got != 1 {
 		t.Fatalf("expected one collection, got %d", got)
 	}
+	if got := tracker.Repacked(); got != 1 {
+		t.Fatalf("expected the due collection to also carry the git-remote-cache repack, got %d", got)
+	}
 	note, err := tracker.Note(context.Background(), application.LastGCKey("vps"))
 	if err != nil {
 		t.Fatalf("reading the note: %v", err)
@@ -694,6 +697,9 @@ func TestASyncDoesNotAskTheTrackerToCollectBeforeItsCadence(t *testing.T) {
 	}
 	if got := tracker.GCs(); got != 0 {
 		t.Fatalf("expected no collection, got %d", got)
+	}
+	if got := tracker.Repacked(); got != 0 {
+		t.Fatalf("expected a GC held back by its cadence to carry no repack either, got %d", got)
 	}
 }
 

@@ -67,6 +67,12 @@ type FakeTracker struct {
 	syncs     int
 	// gcs counts the calls to GC, so a test can say whether one happened.
 	gcs int
+	// repacks counts the calls to GC that a real Gateway would also have
+	// repacked the Dolt git-remote-cache on, mirroring gcs: the fake reclaims
+	// nothing on disk, but a test still wants to say that a due GC is the one
+	// call that carries the repack too, and a GC that never ran carries
+	// neither.
+	repacks int
 	// GCErr, when set, is what GC reports instead of collecting.
 	GCErr error
 	// size is what Size reports.
@@ -1086,7 +1092,9 @@ func (f *FakeTracker) Syncs() int {
 }
 
 // GC implements application.TrackerSync. Nothing is actually collected: the
-// fake counts the call, so a test can say whether mw sync asked for one.
+// fake counts the call, so a test can say whether mw sync asked for one — and
+// counts it again as a repack, since the real Gateway this stands in for
+// repacks the git-remote-cache in the same call.
 func (f *FakeTracker) GC(_ context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -1098,6 +1106,7 @@ func (f *FakeTracker) GC(_ context.Context) error {
 		return f.GCErr
 	}
 	f.gcs++
+	f.repacks++
 	return nil
 }
 
@@ -1107,6 +1116,15 @@ func (f *FakeTracker) GCs() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.gcs
+}
+
+// Repacked reports how many of those collections also carried the
+// git-remote-cache repack, so that a test can say a due GC carries it and a
+// GC held back by its cadence carries neither.
+func (f *FakeTracker) Repacked() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.repacks
 }
 
 // SetSize makes Size report bytes, as if the beads database were that large
