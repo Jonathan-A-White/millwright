@@ -77,7 +77,7 @@ func (t *Tunnel) Name() string { return TunnelName }
 // prints no listening socket, ok when it does, and cannot-tell when ssh
 // itself fails to get through.
 func (t *Tunnel) Probe(ctx context.Context) (application.Verdict, string) {
-	if !reach(ctx, t.reach()) {
+	if !Reach(ctx, t.reach()) {
 		return application.DoctorCannotTell, "internet unreachable"
 	}
 

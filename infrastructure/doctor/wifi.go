@@ -173,7 +173,7 @@ func (w *Wifi) WayBack() string {
 
 // reachable is ok if any of Reach's hosts resolves and TCP-connects.
 func (w *Wifi) reachable(ctx context.Context) bool {
-	return reach(ctx, w.reach())
+	return Reach(ctx, w.reach())
 }
 
 func (w *Wifi) reach() []string {
