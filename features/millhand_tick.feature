@@ -34,6 +34,13 @@ Feature: mw millhand tick
   Mayor's process is gone, or the host is down, the reason ends with the charter's
   one exception. With no [watch] table the tick does not consult mw watch.
 
+  A stalled Millhand — one whose wake never got going, by the same two checks —
+  is left alone while local-fault holds: restarting it would only spawn another
+  Millhand that can do no more than the last, since the fault that stopped this
+  one is the same fault that would keep Claude Code from reaching the API. The
+  tick says so in its line and closes nothing. Once the fault clears, the next
+  tick that still finds it stalled restarts it as usual.
+
   It prints one dated line and appends it to a log on this host. It reads the
   mail and marks none of it read. It leaves with 0 whatever it found: a tick that
   did what it should is not a failure. --dry-run says what it would do and starts
@@ -563,6 +570,36 @@ Feature: mw millhand tick
       | Please look at the queue |
     And the kickoff prompt of the window holds none of:
       | local-fault |
+
+  Scenario: A stalled Millhand is left alone during a local fault
+    Given the tick watches the host "vps" over ssh "vps-ssh", with the outside places "https://one.example" and "https://two.example"
+    And the tick cannot reach either outside place
+    And the window "millhand-test" was opened at "2026-09-19T08:00:00Z"
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "already up (millhand-test)"
+    And mw millhand tick prints one dated line saying "local-fault: stalled Millhand's window millhand-test left alone"
+    And the window "millhand-test" was not closed
+    And the tick did not sync
+    And no window was opened
+    And the reaper log holds no line
+    And the tick log holds that line
+    And the tick log counts as a local network fault
+
+  Scenario: A stalled Millhand is restarted once the local fault clears
+    Given the tick watches the host "vps" over ssh "vps-ssh", with the outside places "https://one.example" and "https://two.example"
+    And the tick can reach the outside places
+    And the window "millhand-test" was opened at "2026-09-19T08:00:00Z"
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "woke the Millhand"
+    And mw millhand tick prints one dated line saying "restarted: up but idle since 2026-09-19T08:00:00Z, no handoff"
+    And the window "millhand-test" was closed
+    And exactly one window was opened
+    And the kickoff prompt of the window holds:
+      | a routine wake                                |
+      | idle at its prompt since 2026-09-19T08:00:00Z |
+      | no handoff                                    |
 
   Scenario: Mail and an unwell host still wake the Millhand once, with both reasons
     Given the tick watches the host "vps" over ssh "vps-ssh", with the outside places "https://one.example" and "https://two.example"
