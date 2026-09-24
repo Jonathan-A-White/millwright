@@ -112,13 +112,20 @@ func (g *Gateway) NotesWithPrefix(ctx context.Context, prefix string) (map[strin
 }
 
 // GC implements application.TrackerSync: asks bd to reclaim the disk space
-// its own auto-commit history piles up — its compact and Dolt GC phases.
-// Decay, which deletes issues closed a long time ago, is skipped: choosing to
-// delete tracked work is a person's call, not something a sync makes on a
-// timer.
+// its own auto-commit history piles up — its compact and Dolt GC phases —
+// then repacks the git-remote-cache bare clones Dolt keeps beside the
+// database, the one thing bd's own gc never touches: every `bd dolt
+// push`/pull leaves a new full pack there. Decay, which deletes issues closed
+// a long time ago, is skipped: choosing to delete tracked work is a person's
+// call, not something a sync makes on a timer.
+//
+// A repack that fails is reported the same way a failed `bd gc` itself would
+// be: a plain error from GC, never a reason bd's own collection is undone.
 func (g *Gateway) GC(ctx context.Context) error {
-	_, err := g.call(ctx, "gc", "--skip-decay", "--force")
-	return err
+	if _, err := g.call(ctx, "gc", "--skip-decay", "--force"); err != nil {
+		return err
+	}
+	return g.repackRemoteCaches(ctx)
 }
 
 // Size implements application.TrackerNotes: every byte this host's beads

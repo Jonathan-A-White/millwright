@@ -98,6 +98,34 @@ func TestASyncConflictThatClearsOnRetryGoesThroughTheRealGateway(t *testing.T) {
 	}
 }
 
+// TestASyncStaysLevelWhenGCsRepackOfTheRemoteCacheFails is the rest of this
+// story's third acceptance criterion, through application.Sync and the real
+// gateway together: a repack failure must never be the reason a sync that
+// otherwise got level comes back as one that did not.
+func TestASyncStaysLevelWhenGCsRepackOfTheRemoteCacheFails(t *testing.T) {
+	gateway, _ := recordingStandIn(t)
+	broken := filepath.Join(gateway.Vault(), ".beads", "embeddeddolt", "x", ".dolt", "git-remote-cache", "h", "repo.git")
+	if err := os.MkdirAll(broken, 0o755); err != nil {
+		t.Fatalf("making a broken remote cache: %v", err)
+	}
+	sync := application.Sync{
+		Vault:   &apptest.FakeVaultFiles{},
+		Tracker: gateway,
+		Host:    "vps",
+	}
+
+	report, err := sync.Run(context.Background())
+	if err != nil {
+		t.Fatalf("expected a failed repack not to fail the sync, got %v", err)
+	}
+	if report.GCed {
+		t.Fatal("expected the failed repack to be reported like any other GC failure, not as a collection that happened")
+	}
+	if report.At.IsZero() {
+		t.Fatal("expected the sync to still record the host as level")
+	}
+}
+
 // recordingStandIn writes a program that always exits 0 but first writes the
 // arguments it was called with, space-joined, on their own line in a file
 // beside it — so a test can say exactly what a gateway method ran, not just
@@ -130,6 +158,23 @@ func TestGCSkipsDecayAndAsksBdToForceItThroughWithoutAPrompt(t *testing.T) {
 	line := strings.TrimSpace(string(said))
 	if !strings.Contains(line, "gc") || !strings.Contains(line, "--skip-decay") || !strings.Contains(line, "--force") {
 		t.Fatalf("expected gc to skip decay and force past the prompt, got %q", line)
+	}
+}
+
+// TestGCReportsARepackFailureLikeAnyOtherGCFailure covers the story's third
+// acceptance criterion at the gateway: a remote cache repack that fails —
+// here, one that is not really a git repository — is reported the same way a
+// failed `bd gc` itself would be, as a plain error from GC, not a panic and
+// not a silent success.
+func TestGCReportsARepackFailureLikeAnyOtherGCFailure(t *testing.T) {
+	gateway, _ := recordingStandIn(t)
+	broken := filepath.Join(gateway.Vault(), ".beads", "embeddeddolt", "x", ".dolt", "git-remote-cache", "h", "repo.git")
+	if err := os.MkdirAll(broken, 0o755); err != nil {
+		t.Fatalf("making a broken remote cache: %v", err)
+	}
+
+	if err := gateway.GC(context.Background()); err == nil {
+		t.Fatal("expected a remote cache that is not a real repository to fail the repack")
 	}
 }
 
