@@ -13,20 +13,24 @@
 #      five minutes ago or more;
 #   3. lists `bd mail inbox` for the mailbox and compares its ids with the ids
 #      it has already announced;
-#   4. runs `mw nudge`, which reuses that same synced beads, for the quiet
+#   4. when this host has a postern key file, runs `mw postern inbox
+#      --unread-count` and compares it with the count last noted: above zero
+#      and higher than that is something to type, same count or fewer is not;
+#   5. runs `mw nudge`, which reuses that same synced beads, for the quiet
 #      alarm's clauses, and drops any whose condition already fired more
 #      recently than its damper: 1 h the first time, doubling on each repeat
 #      while the condition keeps holding, capped at 8 h, and reset once the
 #      condition clears (recorded per condition in the state directory);
-#   5. if there is new mail, or a clause survived the damper, finds the
-#      Mayor's window from the vault's .mayor-acting and, once it is not
-#      working and its input line is empty, types "New mail for mayor: <n>
-#      message(s). Run bd mail inbox." and Enter, then "Quiet alarm for
-#      mayor: <clause>[; <clause> ...]. Run mw status." and Enter (checking
-#      the window is idle again first, since typing the first may have woken
-#      it);
-#   6. records the mail ids as announced, and each clause's condition as
-#      fired, only after each is typed.
+#   6. if there is new mail, a postern count risen since last noted, or a
+#      clause survived the damper, finds the Mayor's window from the vault's
+#      .mayor-acting and, once it is not working and its input line is empty,
+#      types "New mail for mayor: <n> message(s). Run bd mail inbox." and
+#      Enter, then "New postern message for mayor (<n> unread)" and Enter,
+#      then "Quiet alarm for mayor: <clause>[; <clause> ...]. Run mw status."
+#      and Enter (checking the window is idle again first before each line
+#      after the first, since typing one may have woken it);
+#   7. records the mail ids as announced, the postern count as last noted,
+#      and each clause's condition as fired, only after each is typed.
 # Otherwise it does nothing and the next tick tries again.
 #
 # It never types mail content, never clears an input line, and never starts a
@@ -34,6 +38,10 @@
 # nothing (flock). It exits 0 whenever it chose not to act; non-zero is a fault.
 # It never syncs, nor asks bd, more than the mail check already did: the
 # quiet alarm reads only what that sync left in the vault, under the same lock.
+#
+# The postern poll (step 4) is skipped silently, with no call to `mw`, on a
+# host with no postern key file (config's postern_key_file, default
+# ~/.config/mw/postern.key): such a host has no postern side.
 #
 # The Mayor's window comes from .mayor-acting, which is free text. In it, the
 # first of these that names exactly one window on the tmux server wins:
@@ -88,6 +96,21 @@ fi
 [ -n "$vault" ] || die "no vault: set MW_VAULT, or \`vault = \"...\"\` in ~/.config/mw/config.toml"
 [ -d "$vault" ] || die "the vault $vault is not a directory"
 
+# The postern key file: $MW_POSTERN_KEY_FILE, else the root-table
+# `postern_key_file` key of mw's config file, else the default under the home
+# directory (infrastructure/config's PosternKeyFile). Never fatal when it is
+# not there: that host simply has no postern side.
+keyfile=${MW_POSTERN_KEY_FILE:-}
+if [ -z "$keyfile" ] && [ -r "$HOME/.config/mw/config.toml" ]; then
+	keyfile=$(sed -n '/^[[:space:]]*\[/q; s/^[[:space:]]*postern_key_file[[:space:]]*=[[:space:]]*//p' "$HOME/.config/mw/config.toml" | head -n 1)
+	case $keyfile in
+	\"*) keyfile=${keyfile#\"}; keyfile=${keyfile%%\"*} ;;
+	\'*) keyfile=${keyfile#\'}; keyfile=${keyfile%%\'*} ;;
+	*) keyfile=${keyfile%%#*}; keyfile=${keyfile%"${keyfile##*[![:space:]]}"} ;;
+	esac
+fi
+[ -n "$keyfile" ] || keyfile="$HOME/.config/mw/postern.key"
+
 command -v flock >/dev/null 2>&1 || die "flock is not installed"
 command -v tmux >/dev/null 2>&1 || die "tmux is not installed"
 mkdir -p "$STATE" || die "cannot make $STATE"
@@ -135,7 +158,22 @@ if listing=$(cd "$vault" && bd mail inbox "$MAILBOX" 2>/dev/null); then
 fi
 [ -n "$new" ] && count=$(echo "$new" | wc -l | tr -d ' ')
 
-# 4. The quiet alarm: what `mw nudge` says is true right now, reusing the beads
+# 4. The postern inbox: skipped silently, with no call to mw, on a host with
+# no postern key file. A count above zero and higher than what was last
+# noted is something to type; the same count again, or a lower one, is not.
+postern_text=""
+postern_count=0
+if [ -r "$keyfile" ]; then
+	postern_count=$(cd "$vault" && mw postern inbox --unread-count 2>/dev/null) || postern_count=""
+	case $postern_count in *[!0-9]* | "") postern_count=0 ;; esac
+	postern_last=$(cat "$STATE/postern-count" 2>/dev/null || echo 0)
+	case $postern_last in *[!0-9]* | "") postern_last=0 ;; esac
+	if [ "$postern_count" -gt 0 ] && [ "$postern_count" -gt "$postern_last" ]; then
+		postern_text="New postern message for $MAILBOX ($postern_count unread)"
+	fi
+fi
+
+# 5. The quiet alarm: what `mw nudge` says is true right now, reusing the beads
 # the sync above already left in the vault. A condition that keeps holding is
 # typed less and less often (see NUDGE_DAMPER_SECONDS above), so a sleeping
 # host is not re-announced every tick all night.
@@ -184,9 +222,9 @@ if [ -d "$STATE/nudged" ]; then
 	done
 fi
 
-[ -n "$new" ] || [ -n "$nudge_texts" ] || exit 0
+[ -n "$new" ] || [ -n "$postern_text" ] || [ -n "$nudge_texts" ] || exit 0
 
-# 5. The Mayor's window, from the vault's .mayor-acting.
+# 6. The Mayor's window, from the vault's .mayor-acting.
 acting=$(cat "$vault/.mayor-acting" 2>/dev/null) || acting=""
 [ -n "$acting" ] || { say "something to tell $MAILBOX, but $vault/.mayor-acting names no one; will try again"; exit 0; }
 windows=$(tmx list-windows -a -F "#{window_id}${tab}#{window_index}${tab}#{window_name}" 2>/dev/null) ||
@@ -244,7 +282,7 @@ typed_mail=0
 if [ -n "$new" ]; then
 	line="New mail for $MAILBOX: $count message(s). Run bd mail inbox."
 	if type_line "$line"; then
-		# 6. Only now are the ids announced. What is no longer in the inbox is
+		# 7. Only now are the ids announced. What is no longer in the inbox is
 		# dropped from the record, so it does not grow.
 		echo "$current" >"$STATE/announced"
 		say "typed into $target: $line"
@@ -254,9 +292,31 @@ if [ -n "$new" ]; then
 	fi
 fi
 
-if [ -n "$nudge_texts" ]; then
+typed_postern=0
+if [ -n "$postern_text" ]; then
 	ready=0
 	if [ "$typed_mail" -eq 1 ]; then
+		pane_idle && ready=1
+	else
+		ready=1
+	fi
+	if [ "$ready" -eq 1 ]; then
+		if type_line "$postern_text"; then
+			# 7. Only now is the count last noted, the same as the mail ids above.
+			echo "$postern_count" >"$STATE/postern-count"
+			say "typed into $target: $postern_text"
+			typed_postern=1
+		else
+			say "typing into $target failed; will try again"
+		fi
+	else
+		say "something to tell $MAILBOX, but window $target is busy again after the mail line; will try again"
+	fi
+fi
+
+if [ -n "$nudge_texts" ]; then
+	ready=0
+	if [ "$typed_mail" -eq 1 ] || [ "$typed_postern" -eq 1 ]; then
 		pane_idle && ready=1
 	else
 		ready=1

@@ -75,6 +75,7 @@ func newFactory(t *testing.T) *factory {
 	f.write("bin/mw", "#!/bin/sh\ncase \"$1\" in\n"+
 		"sync) echo \"$*\" >> \"$MW_TEST_DIR/mw.log\" ;;\n"+
 		"nudge) echo \"$*\" >> \"$MW_TEST_DIR/nudge.log\"; [ -f \"$MW_TEST_DIR/nudge-output\" ] && cat \"$MW_TEST_DIR/nudge-output\" ;;\n"+
+		"postern) echo \"$*\" >> \"$MW_TEST_DIR/postern.log\"; cat \"$MW_TEST_DIR/postern-count\" 2>/dev/null ;;\n"+
 		"esac\nexit 0\n", 0o755)
 	f.write("vault/.mayor-acting", "", 0o644)
 	f.write("loadavg", "0.10 0.10 0.10 1/100 1\n", 0o644)
@@ -125,6 +126,16 @@ func (f *factory) nudges(rows ...[2]string) {
 	}
 	f.write("nudge-output", b.String(), 0o644)
 }
+
+// posternKey makes this host's postern key file exist, at the default path
+// `mw postern key` itself would resolve HOME to. Not calling it leaves the
+// host with no postern side.
+func (f *factory) posternKey() { f.write(".config/mw/postern.key", "fake-key\n", 0o600) }
+
+// posternCount sets what `mw postern inbox --unread-count` prints.
+func (f *factory) posternCount(n int) { f.write("postern-count", strconv.Itoa(n)+"\n", 0o644) }
+
+func (f *factory) posternCalls() int { return strings.Count(f.read("postern.log"), "\n") }
 
 // announced is the ids the script has recorded as told.
 func (f *factory) announced() string { return f.read("state/announced") }
@@ -591,6 +602,62 @@ func TestQuietAlarmAndNewMailEachTypeTheirOwnLine(t *testing.T) {
 	f.typed(fmt.Sprintf(announcement, 1) + "Quiet alarm for mayor: mw-gq6.30 in progress 73 min, no mail. Run mw status.\n")
 	if got := f.announced(); got != "mw-aaa\n" {
 		t.Fatalf("recorded ids %q", got)
+	}
+}
+
+const posternAnnouncement = "New postern message for mayor (%d unread)\n"
+
+func TestPosternPollWithNoKeyFileMakesNoCall(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternCount(2)
+
+	f.tick()
+
+	f.nothingMoreTyped("")
+	if f.posternCalls() != 0 {
+		t.Fatalf("mw postern was called %q with no postern key file", f.read("postern.log"))
+	}
+}
+
+func TestPosternPollWithZeroUnreadTypesNothing(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.posternCount(0)
+
+	f.tick()
+
+	f.nothingMoreTyped("")
+	if f.posternCalls() != 1 {
+		t.Fatalf("mw postern inbox was called %d times, want 1", f.posternCalls())
+	}
+}
+
+func TestPosternPollWithUnreadTypesOneLine(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.posternCount(2)
+
+	f.tick()
+
+	f.typed(fmt.Sprintf(posternAnnouncement, 2))
+}
+
+func TestPosternPollRepeatsNothingForTheSameCount(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.posternCount(2)
+
+	f.tick()
+	f.typed(fmt.Sprintf(posternAnnouncement, 2))
+
+	f.tick()
+	f.nothingMoreTyped(fmt.Sprintf(posternAnnouncement, 2))
+	if f.posternCalls() != 2 {
+		t.Fatalf("mw postern inbox was called %d times across two ticks, want 2", f.posternCalls())
 	}
 }
 
