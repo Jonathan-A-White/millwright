@@ -558,7 +558,9 @@ bd reclaim mw-gq6.30                                        # or take it over fi
 `MW_DISPATCH_SYNC_TRIES`, `MW_DISPATCH_SYNC_WAIT`, `MW_PUSH_TRIES`,
 `MW_PUSH_WAIT_SECONDS`, `MW_MAX_ATTEMPTS`,
 `MW_MILLHAND_ROUTINE_MODEL`, `MW_MILLHAND_REVIEW_MODEL`,
-`MW_NUDGE_AFTER_MINUTES` and `MW_NUDGE_SYNC_STALE_MINUTES` ahead of it:
+`MW_NUDGE_AFTER_MINUTES`, `MW_NUDGE_SYNC_STALE_MINUTES`, `MW_POSTERN_BACKEND`,
+`MW_POSTERN_FLOAT_SATS`, `MW_POSTERN_GOVERNOR_KEY` and `MW_POSTERN_KEY_FILE`
+ahead of it:
 
 ```toml
 vault = "/root/millwright-vault"   # the one beads database and the seats
@@ -577,6 +579,10 @@ millhand_routine_model = "sonnet"  # the model of a routine wake, and of a wake 
 millhand_review_model = "opus"     # the model of a review wake of the Millhand (default opus)
 nudge_after_minutes = 60           # how long a claimed story may run with nothing mailed about it before mw nudge names it (default 60)
 nudge_sync_stale_minutes = 20      # how stale another host's last sync may be before mw nudge names it (default 20)
+postern_backend = "http://desktop.mw:8787"  # where the postern's backend is reached (default shown)
+postern_float_sats = 100000        # the postern's float cap, in testnet satoshis, enforced on every send (default 100000, PROVISIONAL)
+postern_governor_key = ""          # the Governor's compressed public key, as hex, the postern backend answers to (default empty)
+postern_key_file = "~/.config/mw/postern.key"  # where the Mayor's postern key is kept, outside the vault (default shown)
 
 [rigs]
 millwright = "/root/millwright"    # where each rig is checked out here
@@ -678,6 +684,16 @@ Ledgers are appended to by both hosts and edited by neither, so the vault's
 then merge by keeping every line instead of conflicting. `mw sync` writes that
 line if it is missing and says so; committing it is a seat's job, and until
 someone does, only this host is covered. See `features/sync.feature`.
+
+## The postern key
+
+The postern is the Mayor's testnet payment key: a plain file on the VPS,
+outside the vault and its backups, host-local like `.mayor-acting`. `mw
+postern key init` generates it once — a secp256k1 testnet key, written 0600 to
+`postern_key_file` (default `~/.config/mw/postern.key`) — and refuses to
+overwrite one that is already there. `mw postern key show` prints its
+compressed public key and its testnet address; it never prints the private
+key. See `features/postern_key.feature`.
 
 ## Making a fresh vault
 

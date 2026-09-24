@@ -49,6 +49,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/slot.go` | none (`flock`) |
 | `Dispatcher` | `application/landing.go` | `application.Dispatch` | — |
 | `HostSync` | `application/dispatch.go` | `application.Sync` | — |
+| `PosternKeyFile` | `application/postern.go` | `infrastructure/postern/keyfile.go` | none |
 
 `infrastructure/config/config.go` is not a port: read by `cmd/mw/`.
 
@@ -78,6 +79,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `Doctor` | `application/doctor.go` | `mw doctor` — `cmd/mw/doctor.go` | `features/doctor.feature` |
 | `SeatBoot` | `application/seatboot.go` | none: `Dispatch`, `Next` call it | `features/seat_boot.feature` |
 | `Init` | `application/init.go` | `mw init` — `cmd/mw/init.go` | `features/init.feature` |
+| `PosternKeyInit`, `PosternKeyShow` | `application/postern.go` | `mw postern key init`/`show` — `cmd/mw/postern.go` | `features/postern_key.feature` |
 
 `cmd/mw/root.go` holds the tree; `cmd/mw/main.go` runs it; `cmd/mw/version.go`
 is `mw version` (no use case).
@@ -102,17 +104,13 @@ Add a command: `docs/adding-a-command.md`.
 | `mwConfig` | `cmd/mw/dispatch_test.go` | A `config.toml`, temp HOME. |
 | `aFactory` | `application/dispatch_test.go` | A faked `Dispatch`, temp vault. |
 
-Feature steps: `features/steps/next_steps.go` builds a real rig; fakes tracker,
-runner, vault git.
+`features/steps/next_steps.go` builds a real rig; fakes tracker, runner, vault git.
 
 ## Build and test
 
 `make build`, `test`, `lint`: see `CLAUDE.md`.
 
-- One package: `go test ./application/...` (`-run TestName`); add
-  `-tags beads_integration` for the real-`bd` cases, as `make test` does.
+- One package: `go test ./application/...` (`-run TestName`, `-tags beads_integration` for real `bd`).
 - One feature: `MW_FEATURE=sweep.feature go test ./features` (`:17` for a scenario).
-- `make lint` runs `scripts/check-*.sh`: this page, `template/`, `contrib/systemd/`, installers.
-- `contrib/mw-heavy` caps memory (`MW_HEAVY_MEMORY_MAX`, `MW_HEAVY_SWAP_MAX`); `contrib/wg-enrol` enrols a peer.
-- `contrib/systemd/system/` (`--system`): seat tmux, doctor; env `contrib/seat.env.example`.
-- `make check-formulas` needs `bd`, `jq`, time; not in `make test`.
+- `make lint` runs `scripts/check-*.sh` (this page, `template/`, `contrib/`, installers); `make
+  check-formulas` needs `bd`, `jq`, time, not in `make test`.
