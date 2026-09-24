@@ -1,0 +1,212 @@
+#!/bin/bash
+# Enrol a host on the factory's WireGuard network, run as root on the hub.
+# Usage:
+#
+#   wg-enrol NAME PUBKEY
+#   wg-enrol --remove NAME
+#
+# The peer generates its own keypair (wg genkey | tee key | wg pubkey) and
+# hands over only the public key; this script never sees a private key.
+#
+# NAME must match [a-z0-9-]+. PUBKEY must be 44 base64 characters ending in
+# '=' (what `wg pubkey` prints). laptop and desktop get the fixed addresses
+# already named in the hosts file, 10.88.0.2 and 10.88.0.3; any other name
+# gets the lowest free 10.88.0.x from .4, skipping addresses already used by
+# a [Peer] block in the config. Re-running with the same NAME and PUBKEY
+# changes nothing and prints the same client config again; re-running with
+# the same NAME and a different PUBKEY is refused.
+#
+# Each enrol appends a [Peer] block to the config, adds a hosts line if one
+# is not already there, and (unless WG_SYNC=0) runs
+#   wg syncconf wg0 <(wg-quick strip wg0)
+# so the running tunnel picks up the peer without a restart. --remove drops
+# the peer's block and hosts line and syncconfs the same way.
+#
+# Settings, all overridable for testing:
+#   WG_CONF      the WireGuard config to edit       (/etc/wireguard/wg0.conf)
+#   WG_PUB       the hub's own public key            (/etc/wireguard/vps.pub)
+#   WG_HOSTS     the hosts file to add a line to     (/etc/hosts)
+#   WG_ENDPOINT  the hub's public endpoint           (207.148.16.27:51820)
+#   WG_SYNC      1: run wg syncconf after a change; 0: skip it        (1)
+
+set -eu
+
+WG_CONF=${WG_CONF:-/etc/wireguard/wg0.conf}
+WG_PUB=${WG_PUB:-/etc/wireguard/vps.pub}
+WG_HOSTS=${WG_HOSTS:-/etc/hosts}
+WG_ENDPOINT=${WG_ENDPOINT:-207.148.16.27:51820}
+WG_SYNC=${WG_SYNC:-1}
+
+die() {
+	echo "wg-enrol: $*" >&2
+	exit 1
+}
+
+usage() {
+	echo "usage: wg-enrol NAME PUBKEY" >&2
+	echo "       wg-enrol --remove NAME" >&2
+	exit 1
+}
+
+valid_name() {
+	case "$1" in
+	'') return 1 ;;
+	*[!a-z0-9-]*) return 1 ;;
+	esac
+	return 0
+}
+
+valid_key() {
+	[ "${#1}" -eq 44 ] || return 1
+	case "$1" in
+	*[!A-Za-z0-9+/=]*) return 1 ;;
+	esac
+	case "$1" in
+	*=) ;;
+	*) return 1 ;;
+	esac
+	case "${1%=}" in
+	*=*) return 1 ;;
+	esac
+	return 0
+}
+
+# The line number of "# peer NAME (enrolled ..." in WG_CONF, or empty.
+peer_line() {
+	grep -n "^# peer $1 (enrolled" "$WG_CONF" 2>/dev/null | head -1 | cut -d: -f1
+}
+
+peer_key() {
+	ln=$1
+	sed -n "$((ln + 2))p" "$WG_CONF" | sed 's/^PublicKey = //'
+}
+
+peer_addr() {
+	ln=$1
+	sed -n "$((ln + 3))p" "$WG_CONF" | sed 's/^AllowedIPs = //'
+}
+
+used_octets() {
+	printf '%s\n' 1 2 3
+	grep -oE '^AllowedIPs = 10\.88\.0\.[0-9]+/32' "$WG_CONF" 2>/dev/null |
+		sed -E 's#.*10\.88\.0\.([0-9]+)/32#\1#'
+}
+
+pick_octet() {
+	case "$1" in
+	laptop)
+		echo 2
+		return
+		;;
+	desktop)
+		echo 3
+		return
+		;;
+	esac
+	n=4
+	while used_octets | grep -qx "$n"; do
+		n=$((n + 1))
+	done
+	echo "$n"
+}
+
+ensure_hosts_line() {
+	line="10.88.0.$1 $2.mw # mw-wg"
+	grep -qxF "$line" "$WG_HOSTS" 2>/dev/null && return 0
+	echo "$line" >>"$WG_HOSTS"
+}
+
+remove_hosts_line() {
+	[ -f "$WG_HOSTS" ] || return 0
+	tmp=$(mktemp)
+	grep -vF "$1.mw # mw-wg" "$WG_HOSTS" >"$tmp" || true
+	mv "$tmp" "$WG_HOSTS"
+}
+
+sync_tunnel() {
+	[ "$WG_SYNC" = 1 ] || return 0
+	wg syncconf wg0 <(wg-quick strip wg0)
+}
+
+print_config() {
+	name=$1
+	key=$2
+	octet=$3
+	hub_key=$(cat "$WG_PUB")
+	cat <<EOF
+# Client config for $name — paste into /etc/wireguard/wg0.conf there.
+[Interface]
+Address = 10.88.0.$octet/24
+PrivateKey = <PASTE YOUR PRIVATE KEY>
+
+[Peer]
+PublicKey = $hub_key
+Endpoint = $WG_ENDPOINT
+AllowedIPs = 10.88.0.0/24
+PersistentKeepalive = 25
+
+On $name, before enrolling:
+  sudo apt install wireguard-tools
+  wg genkey | tee key | wg pubkey
+Then, after enrolling:
+  sudoedit /etc/wireguard/wg0.conf   # paste the config above
+  sudo chmod 600 /etc/wireguard/wg0.conf
+  sudo systemctl enable --now wg-quick@wg0
+  ping vps.mw
+EOF
+}
+
+enrol() {
+	name=$1
+	key=$2
+	valid_name "$name" || die "bad name: $name"
+	valid_key "$key" || die "bad key: $key"
+
+	ln=$(peer_line "$name")
+	if [ -n "$ln" ]; then
+		existing_key=$(peer_key "$ln")
+		[ "$existing_key" = "$key" ] || die "$name is already enrolled with a different key"
+		addr=$(peer_addr "$ln")
+		octet=${addr%%/*}
+		octet=${octet##*.}
+		print_config "$name" "$key" "$octet"
+		return 0
+	fi
+
+	octet=$(pick_octet "$name")
+	{
+		printf '\n# peer %s (enrolled %s)\n' "$name" "$(date +%F)"
+		echo "[Peer]"
+		echo "PublicKey = $key"
+		echo "AllowedIPs = 10.88.0.$octet/32"
+		echo "PersistentKeepalive = 25"
+	} >>"$WG_CONF"
+	ensure_hosts_line "$octet" "$name"
+	sync_tunnel
+	print_config "$name" "$key" "$octet"
+}
+
+remove() {
+	name=$1
+	valid_name "$name" || die "bad name: $name"
+	ln=$(peer_line "$name")
+	[ -n "$ln" ] || die "$name is not enrolled"
+
+	tmp=$(mktemp)
+	awk -v start="$ln" 'NR >= start && NR < start + 5 { next } { print }' "$WG_CONF" >"$tmp"
+	mv "$tmp" "$WG_CONF"
+	remove_hosts_line "$name"
+	sync_tunnel
+	echo "removed $name"
+}
+
+[ "$#" -ge 1 ] || usage
+
+if [ "$1" = "--remove" ]; then
+	[ "$#" -eq 2 ] || usage
+	remove "$2"
+	exit 0
+fi
+
+[ "$#" -eq 2 ] || usage
+enrol "$1" "$2"
