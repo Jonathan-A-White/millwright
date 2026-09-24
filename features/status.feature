@@ -395,6 +395,21 @@ Feature: mw status
     And the TICKS section says of the Millhand tick: "last good 2026-09-21 09:05Z"
     And the TICKS section has nothing on the dispatch
 
+  Scenario: A resume grace still open is shown under the Millhand tick
+    Given the Millhand tick log of "vps" holds a good run at "2026-09-18T11:00:00Z"
+    And the Millhand tick log of "vps" then holds a line saying "resumed after 45m0s" at "2026-09-18T11:58:00Z"
+    When mw status reads the host
+    Then reading status succeeds
+    And the TICKS section says of the Millhand tick: "resumed 11:58Z (grace until 12:01Z)"
+
+  Scenario: A resume grace that has run out says nothing under the Millhand tick
+    Given the Millhand tick log of "vps" holds a good run at "2026-09-18T11:00:00Z"
+    And the Millhand tick log of "vps" then holds a line saying "resumed after 45m0s" at "2026-09-18T11:50:00Z"
+    When mw status reads the host
+    Then reading status succeeds
+    And the TICKS section says of the Millhand tick: "last good 2026-09-18 11:50Z"
+    And the TICKS section does not say of the Millhand tick: "resumed"
+
   Scenario: The other host's counts appear under OTHER HOSTS after it syncs
     Given a status story "mw-gq6.12" filed under it, overriding "host" with "laptop"
     And the dispatch log of "laptop" holds a good run at "2026-09-21T09:00:00Z"

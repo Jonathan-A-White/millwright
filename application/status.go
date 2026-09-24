@@ -205,6 +205,10 @@ type StatusReport struct {
 	Others []HostWork
 	// Ticks are how this host's own timers are doing, counted from their logs.
 	Ticks HostTicks
+	// MillhandResume is the "resumed ... (grace until ...)" line shown under
+	// the Millhand tick while its resume grace still holds; "" once it does
+	// not.
+	MillhandResume string
 	// FuelToday is every token the seat's ledger charged today, summed from
 	// the lines the ledger dates today.
 	FuelToday int
@@ -294,6 +298,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	}
 	report.Others = others
 	report.Ticks = ReadHostTicks(ctx, s.Ticks)
+	report.MillhandResume = MillhandResumeLine(ctx, s.Ticks.Millhand, s.now())
 
 	fuel, err := s.fuelToday(ctx)
 	if err != nil {
@@ -567,6 +572,9 @@ func (r StatusReport) String() string {
 	if r.Ticks.Known() {
 		clip(&b, TicksHeading)
 		r.Ticks.write(&b, "  ")
+		if r.MillhandResume != "" {
+			clip(&b, "    "+r.MillhandResume)
+		}
 		b.WriteString("\n")
 	}
 

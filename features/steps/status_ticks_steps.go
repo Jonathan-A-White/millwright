@@ -42,11 +42,13 @@ var tickWords = map[string]map[string]string{
 // TICKS section back.
 func (c *statusContext) registerTickSteps(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the (dispatch|Millhand tick) log of "([^"]*)" holds a good run at "([^"]*)"$`, c.aLogHoldsAGoodRunAt)
+	ctx.Given(`^the (dispatch|Millhand tick) log of "([^"]*)" then holds a line saying "([^"]*)" at "([^"]*)"$`, c.aLogThenHoldsALineSayingAt)
 	ctx.Given(`^the (dispatch|Millhand tick) log of "([^"]*)" (?:then )?holds (\d+) (good run|failed run|local network fault)s?$`,
 		c.aLogHoldsRuns)
 	ctx.Given(`^the host "([^"]*)" syncs$`, c.theHostSyncs)
 
 	ctx.Then(`^the TICKS section says of the (dispatch|Millhand tick): "([^"]*)"$`, c.theTicksSectionSays)
+	ctx.Then(`^the TICKS section does not say of the (dispatch|Millhand tick): "([^"]*)"$`, c.theTicksSectionDoesNotSay)
 	ctx.Then(`^the TICKS section has nothing on the (dispatch|Millhand tick)$`, c.theTicksSectionHasNothingOn)
 	ctx.Then(`^the report has no TICKS section$`, c.theReportHasNoTicksSection)
 	ctx.Then(`^under OTHER HOSTS the host "([^"]*)" shows for the (dispatch|Millhand tick): "([^"]*)"$`, c.otherHostShowsForTicks)
@@ -95,6 +97,18 @@ func (c *statusContext) aLogHoldsAGoodRunAt(kind, host, at string) error {
 		return fmt.Errorf("the time %q is not RFC 3339: %w", at, err)
 	}
 	return c.appendTick(kind, host, when, tickWords[kind]["good"])
+}
+
+// aLogThenHoldsALineSayingAt appends one line of a scenario's own choosing,
+// dated, to a host's log: what mw status shows of a resume grace is read
+// straight off the tick's own words, so a scenario writes them verbatim
+// rather than through a fixed outcome.
+func (c *statusContext) aLogThenHoldsALineSayingAt(kind, host, words, at string) error {
+	when, err := time.Parse(time.RFC3339, at)
+	if err != nil {
+		return fmt.Errorf("the time %q is not RFC 3339: %w", at, err)
+	}
+	return c.appendTick(kind, host, when, words)
 }
 
 // aLogHoldsRuns adds runs a quarter of an hour apart, the first a quarter of an
@@ -195,6 +209,18 @@ func (c *statusContext) theTicksSectionSays(kind, words string) error {
 	block := blockAt(sectionOf(lines, application.TicksHeading), "  "+tickKinds[kind]+" ")
 	if !strings.Contains(strings.Join(block, "\n"), words) {
 		return fmt.Errorf("expected the TICKS section to say of the %s %q, got:\n%s", kind, words, c.report.String())
+	}
+	return nil
+}
+
+func (c *statusContext) theTicksSectionDoesNotSay(kind, words string) error {
+	lines, err := c.printedLines()
+	if err != nil {
+		return err
+	}
+	block := blockAt(sectionOf(lines, application.TicksHeading), "  "+tickKinds[kind]+" ")
+	if strings.Contains(strings.Join(block, "\n"), words) {
+		return fmt.Errorf("expected the TICKS section not to say of the %s %q, got:\n%s", kind, words, c.report.String())
 	}
 	return nil
 }
