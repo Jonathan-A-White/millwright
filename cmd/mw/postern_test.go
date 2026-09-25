@@ -1,0 +1,175 @@
+package main
+
+import (
+	"bytes"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/bsv-blockchain/go-sdk/transaction"
+
+	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/postern"
+)
+
+// posternRecordFixture is infrastructure/postern/testdata/record.json: one
+// message record, the keys at both ends of it, and its exact script bytes.
+type posternRecordFixture struct {
+	SenderWIF       string `json:"senderWIF"`
+	SenderPubKey    string `json:"senderPubKey"`
+	SenderAddress   string `json:"senderAddress"`
+	RecipientWIF    string `json:"recipientWIF"`
+	RecipientPubKey string `json:"recipientPubKey"`
+	Text            string `json:"text"`
+	Class           string `json:"class"`
+	Ts              int64  `json:"ts"`
+	Ct              string `json:"ct"`
+	ScriptHex       string `json:"scriptHex"`
+}
+
+func loadPosternRecordFixture(t *testing.T) posternRecordFixture {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "infrastructure", "postern", "testdata", "record.json"))
+	if err != nil {
+		t.Fatalf("reading the record fixture: %v", err)
+	}
+	var f posternRecordFixture
+	if err := json.Unmarshal(raw, &f); err != nil {
+		t.Fatalf("parsing the record fixture: %v", err)
+	}
+	return f
+}
+
+// posternHome sets up a temp HOME whose config points mw at backend and at a
+// key file holding wif, and puts a stand-in for bd first on PATH that has no
+// notes and takes every note it is given, so the inbox cursor starts at 0.
+func posternHome(t *testing.T, backend, wif, governorKey string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in for bd is a shell script")
+	}
+	keyFile := filepath.Join(t.TempDir(), "postern.key")
+	if err := os.WriteFile(keyFile, []byte(wif+"\n"), 0o600); err != nil {
+		t.Fatalf("writing the key file: %v", err)
+	}
+	mwConfig(t, fmt.Sprintf("vault = %q\nhost = \"laptop\"\npostern_backend = %q\npostern_key_file = %q\npostern_governor_key = %q\n",
+		t.TempDir(), backend, keyFile, governorKey))
+	for _, env := range []string{"MW_POSTERN_BACKEND", "MW_POSTERN_FLOAT_SATS", "MW_POSTERN_GOVERNOR_KEY", "MW_POSTERN_KEY_FILE"} {
+		t.Setenv(env, "")
+	}
+
+	bin := t.TempDir()
+	script := "#!/bin/sh\nfor a in \"$@\"; do\n  if [ \"$a\" = \"get\" ]; then\n    echo \"postern.inbox.cursor (not set)\" >&2\n    exit 1\n  fi\ndone\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(bin, "bd"), []byte(script), 0o755); err != nil {
+		t.Fatalf("writing the stand-in for bd: %v", err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// fakePosternBackend stands in for the postern backend's /api (postern's
+// docs/api.md): each route a canned JSON answer, and the last broadcast kept.
+func fakePosternBackend(t *testing.T, routes map[string]string) (url string, broadcast *string) {
+	t.Helper()
+	var sent string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/broadcast" {
+			var body struct {
+				Rawtx string `json:"rawtx"`
+			}
+			raw, _ := io.ReadAll(r.Body)
+			if err := json.Unmarshal(raw, &body); err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			sent = body.Rawtx
+			io.WriteString(w, `{"txid":"f00dfeed"}`)
+			return
+		}
+		answer, ok := routes[r.URL.RequestURI()]
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			io.WriteString(w, `{"error":"no such route: `+r.URL.RequestURI()+`"}`)
+			return
+		}
+		io.WriteString(w, answer)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL, &sent
+}
+
+func runPostern(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	out := &bytes.Buffer{}
+	root := newRootCmd()
+	root.SetOut(out)
+	root.SetErr(out)
+	root.SetArgs(append([]string{"postern"}, args...))
+	err := root.Execute()
+	return out.String(), err
+}
+
+func TestPosternInboxPrintsTheTextOfARecordFromTheBackend(t *testing.T) {
+	f := loadPosternRecordFixture(t)
+	messages, _ := json.Marshal(map[string]any{
+		"records": []map[string]any{{"seq": 1, "txid": "3af1", "vout": 0, "scriptHex": f.ScriptHex, "height": 0, "firstSeen": "2026-09-24T12:00:03Z"}},
+		"next":    1,
+	})
+	url, _ := fakePosternBackend(t, map[string]string{"/api/messages?since=0": string(messages)})
+	posternHome(t, url, f.RecipientWIF, "")
+
+	out, err := runPostern(t, "inbox")
+	if err != nil {
+		t.Fatalf("mw postern inbox failed: %v\n%s", err, out)
+	}
+	for _, want := range []string{f.Text, f.Class, f.SenderPubKey} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected mw postern inbox to print %q, got:\n%s", want, out)
+		}
+	}
+}
+
+// fixedCipher encrypts every text to one known ciphertext, so the record a
+// send builds can be compared with the fixture byte for byte.
+type fixedCipher struct{ ct string }
+
+func (c fixedCipher) Encrypt(string, string) (string, error) { return c.ct, nil }
+func (c fixedCipher) Decrypt(string, string) (string, error) {
+	return "", fmt.Errorf("fixedCipher does not decrypt")
+}
+
+func TestPosternSendBroadcastsTheFixturesRecordScript(t *testing.T) {
+	f := loadPosternRecordFixture(t)
+	url, broadcast := fakePosternBackend(t, map[string]string{
+		"/api/balance/" + f.SenderAddress: `{"confirmed":10000,"unconfirmed":0}`,
+		"/api/utxos/" + f.SenderAddress:   `{"utxos":[{"txid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","vout":0,"satoshis":10000,"height":100}]}`,
+	})
+	posternHome(t, url, f.SenderWIF, f.RecipientPubKey)
+	realCipher, realClock := posternCipher, posternClock
+	t.Cleanup(func() { posternCipher, posternClock = realCipher, realClock })
+	posternCipher = func(*postern.KeyFile) application.Cipher { return fixedCipher{ct: f.Ct} }
+	posternClock = func() time.Time { return time.Unix(f.Ts, 0) }
+
+	out, err := runPostern(t, "send", "--class", f.Class, f.Text)
+	if err != nil {
+		t.Fatalf("mw postern send failed: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(out) != "f00dfeed" {
+		t.Errorf("expected mw postern send to print the backend's txid, got:\n%s", out)
+	}
+	tx, err := transaction.NewTransactionFromHex(*broadcast)
+	if err != nil {
+		t.Fatalf("the backend was sent something that is not a transaction (%q): %v", *broadcast, err)
+	}
+	if got := hex.EncodeToString(*tx.Outputs[0].LockingScript); got != f.ScriptHex {
+		t.Fatalf("expected the record output's script to be the fixture's\n%s\ngot\n%s", f.ScriptHex, got)
+	}
+}

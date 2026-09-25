@@ -1,6 +1,8 @@
 package main
 
 import (
+	"time"
+
 	"github.com/spf13/cobra"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -86,6 +88,22 @@ func newPosternKeyShowCmd() *cobra.Command {
 	}
 }
 
+// posternCipher is the cipher mw postern inbox and send use: BRC-78, from
+// the postern key. A test swaps it for one whose ciphertext it knows.
+var posternCipher = func(keys *postern.KeyFile) application.Cipher { return postern.NewCipher(keys) }
+
+// posternClock stamps a message mw postern send builds. A test fixes it.
+var posternClock = time.Now
+
+// posternBackend is the postern backend config postern_backend points at.
+func posternBackend() (*postern.HTTP, error) {
+	base, err := config.PosternBackend()
+	if err != nil {
+		return nil, err
+	}
+	return postern.NewHTTP(base), nil
+}
+
 // posternMemory is where mw postern inbox keeps its cursor: a note in this
 // host's own vault, the same gateway every command notes through.
 func posternMemory() (application.PosternNotes, error) {
@@ -100,9 +118,8 @@ func posternMemory() (application.PosternNotes, error) {
 	return mwGateway(dir, host), nil
 }
 
-// newPosternInboxCmd builds `mw postern inbox`. The postern backend and the
-// cipher have no real adapter yet — a later story wires them in — so it
-// refuses, naming what is missing, until then.
+// newPosternInboxCmd builds `mw postern inbox`, reading from the postern
+// backend at postern_backend and decrypting with the postern key.
 func newPosternInboxCmd() *cobra.Command {
 	var unreadCount bool
 
@@ -124,10 +141,16 @@ func newPosternInboxCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			backend, err := posternBackend()
+			if err != nil {
+				return err
+			}
 			inbox := application.PosternInbox{
-				Keys:   keys,
-				Memory: memory,
-				Out:    cmd.OutOrStdout(),
+				Postern: backend,
+				Cipher:  posternCipher(keys),
+				Keys:    keys,
+				Memory:  memory,
+				Out:     cmd.OutOrStdout(),
 			}
 			if unreadCount {
 				_, err = inbox.UnreadCount(cmd.Context())
@@ -141,9 +164,9 @@ func newPosternInboxCmd() *cobra.Command {
 	return cmd
 }
 
-// newPosternSendCmd builds `mw postern send`. The postern backend and the
-// cipher have no real adapter yet — a later story wires them in — so it
-// refuses, naming what is missing, until then.
+// newPosternSendCmd builds `mw postern send`, encrypting from the postern key
+// to postern_governor_key and broadcasting through the postern backend at
+// postern_backend.
 func newPosternSendCmd() *cobra.Command {
 	var class string
 
@@ -169,10 +192,17 @@ func newPosternSendCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			backend, err := posternBackend()
+			if err != nil {
+				return err
+			}
 			send := application.PosternSend{
+				Postern:     backend,
+				Cipher:      posternCipher(keys),
 				Keys:        keys,
 				GovernorKey: governorKey,
 				FloatSats:   int64(floatSats),
+				Now:         posternClock,
 				Out:         cmd.OutOrStdout(),
 			}
 			_, err = send.Run(cmd.Context(), class, args[0])

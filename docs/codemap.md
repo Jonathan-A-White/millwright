@@ -9,7 +9,7 @@ Where everything is; `CONTEXT.md` has the vocabulary, ADRs why.
 | domain | `domain/` | Value types, validation; stdlib only. |
 | application | `application/` | One file per use case, plus ports; imports no adapter. |
 | fakes | `application/apptest/` | In-memory port stand-ins. |
-| infrastructure | `infrastructure/` | One subpackage per adapter (bd, git, tmux, claude, disk). |
+| infrastructure | `infrastructure/` | One subpackage per adapter. |
 | command line | `cmd/mw/` | Cobra wiring: read config, run the use case. |
 | features | `features/` | Gherkin; step code in `features/steps/`. |
 | template | `template/` | Born from `embed.go`; no host detail. |
@@ -49,7 +49,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/slot.go` | none (`flock`) |
 | `Dispatcher` | `application/landing.go` | `application.Dispatch` | — |
 | `HostSync` | `application/dispatch.go` | `application.Sync` | — |
-| `PosternKeyFile`, `Postern`, `Cipher` | `application/postern.go` | `infrastructure/postern/keyfile.go` | `apptest.FakePostern`/`FakeCipher` |
+| `PosternKeyFile`, `Postern`, `Cipher` | `application/postern.go` | `infrastructure/postern` (`KeyFile`, `HTTP`, `Cipher`) | `apptest.FakePostern`/`FakeCipher` |
 
 `infrastructure/config/config.go` is not a port: read by `cmd/mw/`.
 
