@@ -27,6 +27,19 @@ const initHost = "testhost"
 type initTracker struct {
 	prefixes     []string
 	bootstrapped int
+
+	// dir is the vault directory BootstrapTracker rewrites .beads/config.yaml
+	// in, set by runRequest before Run: bd bootstrap works on the vault it
+	// was just asked to pick up, and it is the only file this stand-in
+	// touches.
+	dir string
+	// dropNewline stands in for bd 1.3.0's own bd bootstrap, which rewrites
+	// .beads/config.yaml and drops its trailing newline.
+	dropNewline bool
+	// rewrite, when set, is bd bootstrap changing .beads/config.yaml some
+	// other way, for the scenario where that is left alone rather than
+	// restored.
+	rewrite string
 }
 
 func (t *initTracker) InitTracker(_ context.Context, prefix string) error {
@@ -36,6 +49,17 @@ func (t *initTracker) InitTracker(_ context.Context, prefix string) error {
 
 func (t *initTracker) BootstrapTracker(_ context.Context) error {
 	t.bootstrapped++
+	switch {
+	case t.dropNewline:
+		path := filepath.Join(t.dir, ".beads", "config.yaml")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(path, []byte(strings.TrimRight(string(data), "\n")), 0o644)
+	case t.rewrite != "":
+		return os.WriteFile(filepath.Join(t.dir, ".beads", "config.yaml"), []byte(t.rewrite), 0o644)
+	}
 	return nil
 }
 
@@ -79,6 +103,8 @@ func InitializeInitScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^git knows the name "([^"]*)" in the throwaway home$`, c.gitKnowsTheName)
 	ctx.Given(`^a config file that says:$`, c.aConfigFileThatSays)
 	ctx.Given(`^a bare git remote holding a vault to join$`, c.aBareGitRemoteHoldingAVault)
+	ctx.Given(`^bd bootstrap will drop the trailing newline from \.beads/config\.yaml$`, c.bdBootstrapDropsTheNewline)
+	ctx.Given(`^bd bootstrap will rewrite \.beads/config\.yaml to "([^"]*)"$`, c.bdBootstrapRewritesConfigTo)
 
 	ctx.When(`^mw init makes the vault "([^"]*)" with the prefix "([^"]*)"$`, c.mwInitMakes)
 	ctx.When(`^mw init makes the vault "([^"]*)" with the prefix "([^"]*)", the host "([^"]*)" and the rigs:$`, c.mwInitMakesWithRigs)
@@ -106,6 +132,10 @@ func InitializeInitScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the report says the config file was written$`, c.reportSaysWritten)
 	ctx.Then(`^the report does not say the config file was written$`, c.reportSaysNotWritten)
 	ctx.Then(`^the report shows the lines the config file would have had, with the host "([^"]*)" and the rig "([^"]*)"$`, c.reportShowsLines)
+	ctx.Then(`^\.beads/config\.yaml holds no uncommitted changes$`, c.configYAMLClean)
+	ctx.Then(`^\.beads/config\.yaml holds uncommitted changes$`, c.configYAMLDirty)
+	ctx.Then(`^the report says bd bootstrap's dropped trailing newline was restored$`, c.reportSaysNewlineRestored)
+	ctx.Then(`^the report does not mention a restored trailing newline$`, c.reportDoesNotMentionRestoredNewline)
 }
 
 func (c *initContext) configPath() string { return filepath.Join(c.home, config.File) }
@@ -168,6 +198,7 @@ func (c *initContext) run(name, prefix, host string, rigs map[string]string) err
 func (c *initContext) runRequest(req application.InitRequest) error {
 	birth := vault.NewBirth("mw@"+initHost,
 		"HOME="+c.home, "XDG_CONFIG_HOME="+filepath.Join(c.home, ".config"), "GIT_CONFIG_NOSYSTEM=1")
+	c.tracker.dir = req.Dir
 	c.report, c.err = application.Init{Vault: birth, Tracker: c.tracker, Template: millwright.Template()}.
 		Run(context.Background(), req)
 	return nil
@@ -194,6 +225,18 @@ func (c *initContext) aBareGitRemoteHoldingAVault() error {
 		return err
 	}
 
+	// A stand-in for bd init's own config file, so a join scenario has
+	// something in .beads for bd bootstrap (initTracker, here) to rewrite.
+	if err := os.MkdirAll(filepath.Join(source, ".beads"), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(source, ".beads", "config.yaml"), []byte("enabled: false\n"), 0o644); err != nil {
+		return err
+	}
+	if err := birth.Commit(context.Background(), source, application.InitFirstCommit); err != nil {
+		return err
+	}
+
 	c.bareRemote = filepath.Join(root, "origin.git")
 	if out, err := runGitIn(root, "init", "-q", "--bare", "-b", "main", c.bareRemote); err != nil {
 		return fmt.Errorf("making the bare remote: %w: %s", err, out)
@@ -211,6 +254,16 @@ func runGitIn(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+func (c *initContext) bdBootstrapDropsTheNewline() error {
+	c.tracker.dropNewline = true
+	return nil
+}
+
+func (c *initContext) bdBootstrapRewritesConfigTo(content string) error {
+	c.tracker.rewrite = content
+	return nil
 }
 
 func (c *initContext) mwInitJoins(name string) error {
@@ -437,6 +490,42 @@ func (c *initContext) reportSaysWritten() error {
 func (c *initContext) reportSaysNotWritten() error {
 	if c.report.ConfigWritten || strings.Contains(c.report.String(), "Wrote ") {
 		return fmt.Errorf("the report says the config file was written:\n%s", c.report)
+	}
+	return nil
+}
+
+func (c *initContext) configYAMLClean() error {
+	out, err := c.git("status", "--porcelain", "--", ".beads/config.yaml")
+	if err != nil {
+		return fmt.Errorf("git status: %v: %s", err, out)
+	}
+	if strings.TrimSpace(out) != "" {
+		return fmt.Errorf(".beads/config.yaml still holds uncommitted changes:\n%s", out)
+	}
+	return nil
+}
+
+func (c *initContext) configYAMLDirty() error {
+	out, err := c.git("status", "--porcelain", "--", ".beads/config.yaml")
+	if err != nil {
+		return fmt.Errorf("git status: %v: %s", err, out)
+	}
+	if strings.TrimSpace(out) == "" {
+		return fmt.Errorf(".beads/config.yaml holds no uncommitted changes, want it left alone with some")
+	}
+	return nil
+}
+
+func (c *initContext) reportSaysNewlineRestored() error {
+	if !strings.Contains(c.report.String(), "trailing newline") {
+		return fmt.Errorf("the report does not mention the restored trailing newline:\n%s", c.report)
+	}
+	return nil
+}
+
+func (c *initContext) reportDoesNotMentionRestoredNewline() error {
+	if strings.Contains(c.report.String(), "trailing newline") {
+		return fmt.Errorf("the report mentions a restored trailing newline, but should have left the file alone:\n%s", c.report)
 	}
 	return nil
 }

@@ -85,6 +85,22 @@ Feature: mw init
     And the vault holds the three seat charters
     And the beads database was picked up rather than made
 
+  Scenario: bd bootstrap's dropped trailing newline is restored before the first sync
+    Given a bare git remote holding a vault to join
+    And bd bootstrap will drop the trailing newline from .beads/config.yaml
+    When mw init joins the vault as "joined"
+    Then initialising succeeds
+    And .beads/config.yaml holds no uncommitted changes
+    And the report says bd bootstrap's dropped trailing newline was restored
+
+  Scenario: bd bootstrap changing .beads/config.yaml some other way is left alone
+    Given a bare git remote holding a vault to join
+    And bd bootstrap will rewrite .beads/config.yaml to "enabled: true"
+    When mw init joins the vault as "joined"
+    Then initialising succeeds
+    And .beads/config.yaml holds uncommitted changes
+    And the report does not mention a restored trailing newline
+
   Scenario: A config file that is already there is left as it is
     Given a config file that says:
       """
