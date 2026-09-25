@@ -54,6 +54,7 @@ func InitializeSweepScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a sweep story "([^"]*)" filed under it$`, c.aSweepStoryFiledUnderIt)
 	ctx.Given(`^a sweep story "([^"]*)" filed under it, overriding "([^"]*)" with "([^"]*)"$`, c.aSweepStoryOverriding)
 	ctx.Given(`^the sweep story "([^"]*)" is claimed with no session behind it$`, c.theSweepStoryIsClaimedWithNoSession)
+	ctx.Given(`^the sweep story "([^"]*)" is claimed with a dead pane behind it$`, c.theSweepStoryIsClaimedWithADeadPane)
 	ctx.Given(`^the sweep story "([^"]*)" is claimed with its session running$`, c.theSweepStoryIsClaimedWithSessionRunning)
 	ctx.Given(`^the sweep story "([^"]*)" is marked run=(\S+)$`, c.theSweepStoryIsMarkedRun)
 	ctx.Given(`^the session of "([^"]*)" has printed "([^"]*)"$`, c.theSessionHasPrinted)
@@ -110,6 +111,23 @@ func (c *sweepContext) aSweepStoryOverriding(id, field, value string) error {
 
 func (c *sweepContext) theSweepStoryIsClaimedWithNoSession(id string) error {
 	return c.tracker.ClaimStory(context.Background(), id)
+}
+
+// theSweepStoryIsClaimedWithADeadPane is mw-gq6.106's shape: the tmux window
+// is still there, but its command has already ended, remain-on-exit's dead
+// pane with a known exit status — the same as a Builder's session dying
+// mid-story leaves behind.
+func (c *sweepContext) theSweepStoryIsClaimedWithADeadPane(id string) error {
+	ctx := context.Background()
+	if err := c.tracker.ClaimStory(ctx, id); err != nil {
+		return err
+	}
+	name := application.SessionName(id)
+	if err := c.runner.Start(ctx, application.SessionSpec{Name: name, Command: []string{"true"}}); err != nil {
+		return err
+	}
+	c.runner.Exit(name, 1)
+	return nil
 }
 
 func (c *sweepContext) theSweepStoryIsClaimedWithSessionRunning(id string) error {

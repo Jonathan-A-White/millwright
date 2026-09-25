@@ -22,6 +22,14 @@ Feature: mw sweep
     And the sweep story "mw-swp.1" is recorded as stuck
     And the sweep story "mw-swp.1" carries a comment quoting: no session behind it
 
+  Scenario: A claimed story whose window is there but its pane has died is reported stuck, not running
+    Given a sweep story "mw-swp.14" filed under it
+    And the sweep story "mw-swp.14" is claimed with a dead pane behind it
+    When mw sweep reads the host
+    Then sweeping succeeds
+    And the sweep story "mw-swp.14" is recorded as stuck
+    And the sweep story "mw-swp.14" carries a comment quoting: no session behind it
+
   Scenario: A claimed story with a live, active session is left alone
     Given a sweep story "mw-swp.2" filed under it
     And the sweep story "mw-swp.2" is claimed with its session running
