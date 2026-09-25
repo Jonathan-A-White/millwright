@@ -771,6 +771,33 @@ func TestPosternSnapshotChangedBeadsRunsOnceThenWaitsOutTheInterval(t *testing.T
 	}
 }
 
+// The interval is a hard cap in the script, not a knob a host can set
+// (mw-tfne4.16, amending mw-tfne4.12): MW_MAIL_SNAPSHOT_EVERY in the
+// environment has no effect on it.
+func TestMWMailSnapshotEveryInTheEnvironmentHasNoEffect(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.posternCount(0)
+	f.env = append(f.env, "MW_MAIL_SNAPSHOT_EVERY=1")
+
+	f.tick()
+	if n := f.posternSubCalls("snapshot"); n != 1 {
+		t.Fatalf("mw postern snapshot was called %d times on the first tick, want 1", n)
+	}
+
+	// Well past a 1-second interval, and the beads have changed: a live
+	// MW_MAIL_SNAPSHOT_EVERY=1 would run this again. The hard 600s cap must
+	// not.
+	f.beadsLevel("lvl-2")
+	f.setSnapshotLastAt(time.Now().Add(-2 * time.Second))
+	f.tick()
+
+	if n := f.posternSubCalls("snapshot"); n != 1 {
+		t.Fatalf("mw postern snapshot was called %d times with MW_MAIL_SNAPSHOT_EVERY=1 set, want 1 (the interval is a hard 600s cap)", n)
+	}
+}
+
 func TestPosternSnapshotDoesNotRunWithoutAKeyFile(t *testing.T) {
 	f := newFactory(t)
 	f.mayor("idle", actingByID)
