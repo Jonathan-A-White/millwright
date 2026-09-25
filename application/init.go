@@ -34,6 +34,17 @@ type VaultBirth interface {
 	// clone would bring it. Nothing here is migrated, rewritten or forced.
 	Clone(ctx context.Context, url, dir string) error
 
+	// RestoreBootstrapNewline undoes the one harmless side effect bd bootstrap
+	// leaves behind: bd 1.3.0 rewrites .beads/config.yaml and drops its
+	// trailing newline, which is not a person's work and should never block
+	// this host's first sync. When dir's .beads/config.yaml differs from what
+	// is committed by nothing but that trailing newline, it is restored from
+	// the index and RestoreBootstrapNewline reports true. A .beads/config.yaml
+	// that is unchanged, or changed some other way, is left exactly as it is,
+	// and it reports false: anything more than the newline is somebody's work
+	// to commit, same as today.
+	RestoreBootstrapNewline(ctx context.Context, dir string) (bool, error)
+
 	// WriteIfAbsent writes text to path, creating its directories, unless a file
 	// is already there; it reports whether it wrote. A file that is there is not
 	// read, not merged and not touched.
@@ -108,6 +119,10 @@ type InitReport struct {
 	// is what Init would have written.
 	ConfigWritten bool
 	ConfigText    string
+
+	// RestoredBootstrapNewline is whether bd bootstrap's dropped trailing
+	// newline in .beads/config.yaml was restored. Set only on a join.
+	RestoredBootstrapNewline bool
 }
 
 var validPrefix = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
@@ -170,8 +185,12 @@ func (i Init) runJoin(ctx context.Context, req InitRequest) (InitReport, error) 
 	if err := i.Tracker.BootstrapTracker(ctx); err != nil {
 		return InitReport{}, fmt.Errorf("%w: the vault is cloned into %s but its database is not picked up; remove the directory and run mw init --join again", err, req.Dir)
 	}
+	restored, err := i.Vault.RestoreBootstrapNewline(ctx, req.Dir)
+	if err != nil {
+		return InitReport{}, fmt.Errorf("%w: the vault is cloned into %s and its database is picked up, but .beads/config.yaml could not be checked for bd bootstrap's dropped trailing newline", err, req.Dir)
+	}
 
-	report := InitReport{Dir: req.Dir, URL: req.URL, Joined: true, ConfigPath: req.ConfigPath, ConfigText: req.configText()}
+	report := InitReport{Dir: req.Dir, URL: req.URL, Joined: true, RestoredBootstrapNewline: restored, ConfigPath: req.ConfigPath, ConfigText: req.configText()}
 	wrote, err := i.Vault.WriteIfAbsent(ctx, req.ConfigPath, report.ConfigText)
 	if err != nil {
 		return report, fmt.Errorf("the vault is joined, but %w", err)
@@ -232,6 +251,9 @@ func (r InitReport) String() string {
 	var out strings.Builder
 	if r.Joined {
 		fmt.Fprintf(&out, "Joined the vault at %s, cloned from %s: bd bootstrap picked up its database.\n", r.Dir, r.URL)
+		if r.RestoredBootstrapNewline {
+			fmt.Fprintf(&out, "bd bootstrap dropped .beads/config.yaml's trailing newline; restored it, so the first sync is not blocked by it.\n")
+		}
 	} else {
 		fmt.Fprintf(&out, "Made the vault at %s: the template, one commit, a beads database with the prefix %s.\n", r.Dir, r.Prefix)
 	}

@@ -136,6 +136,41 @@ func (b *Birth) Clone(ctx context.Context, url, dir string) error {
 	return nil
 }
 
+// RestoreBootstrapNewline implements application.VaultBirth. Telling a
+// newline-only change from any other kind is a convenience, not a
+// precondition of the join: anything that keeps it from being told — the
+// file missing from HEAD, say — is treated the same as "changed some other
+// way" and left alone, rather than failing a join whose clone and bootstrap
+// both already succeeded. Only a checkout that was actually called for and
+// then failed is reported as an error.
+func (b *Birth) RestoreBootstrapNewline(ctx context.Context, dir string) (bool, error) {
+	const path = ".beads/config.yaml"
+
+	status, err := b.git(ctx, dir, nil, "status", "--porcelain", "--", path)
+	if err != nil || strings.TrimSpace(status) == "" {
+		return false, nil
+	}
+
+	committed, err := b.git(ctx, dir, nil, "show", "HEAD:"+path)
+	if err != nil {
+		return false, nil
+	}
+	working, err := os.ReadFile(filepath.Join(dir, path))
+	if err != nil {
+		return false, nil
+	}
+	if string(working) == committed || strings.TrimRight(string(working), "\n") != strings.TrimRight(committed, "\n") {
+		// Either nothing changed, or it changed by more than the trailing
+		// newline: left exactly as it is, for mw sync to report as today.
+		return false, nil
+	}
+
+	if _, err := b.git(ctx, dir, nil, "checkout", "--", path); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // WriteIfAbsent implements application.VaultBirth. The file is made with
 // O_EXCL, so that a file that turns up between the look and the write is still
 // not overwritten.
