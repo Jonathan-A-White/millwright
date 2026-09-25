@@ -61,7 +61,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `Release` | `application/release.go` | `mw release` — `cmd/mw/release.go` | `features/release.feature` |
 | `Retry` | `application/retry.go` | `mw retry` — `cmd/mw/retry.go` | `features/retry.feature` |
 | `Show` | `application/show.go` | `mw show` — `cmd/mw/show.go` | `features/show.feature` |
-| `Dispatch` | `application/dispatch.go` | `mw dispatch` — `cmd/mw/dispatch.go` | `features/dispatch.feature` (dead pane: gq6.106) |
+| `Dispatch` | `application/dispatch.go` | `mw dispatch` — `cmd/mw/dispatch.go` | `features/dispatch.feature` |
 | `Next` | `application/next.go` | `mw next` — `cmd/mw/next.go` | `features/next.feature` |
 | `Check` | `application/check.go` | `mw check` — `cmd/mw/check.go` | `features/check.feature` |
 | `Status` | `application/status.go` | `mw status` — `cmd/mw/status.go` | `features/status.feature` |
@@ -79,7 +79,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `Doctor` | `application/doctor.go` | `mw doctor` — `cmd/mw/doctor.go` | `features/doctor.feature` |
 | `SeatBoot` | `application/seatboot.go` | none: `Dispatch`, `Next` call it | `features/seat_boot.feature` |
 | `Init` | `application/init.go` | `mw init` — `cmd/mw/init.go` | `features/init.feature` |
-| `PosternKeyInit`, `PosternKeyShow`, `PosternInbox`, `PosternSend` | `application/postern.go` | `mw postern key`/`inbox`/`send` — `cmd/mw/postern.go` | `features/postern_key.feature` |
+| `PosternKeyInit`, `PosternKeyShow`, `PosternInbox`, `PosternSend` | `application/postern.go` | `mw postern key`/`inbox`/`send` (`--bead --recommend --option`; mails mayor) — `cmd/mw/postern.go` | `features/postern_key.feature` |
 
 `cmd/mw/root.go` holds the tree; `cmd/mw/main.go` runs it; `cmd/mw/version.go` is
 `mw version` (no use case). `features/path_validation.feature` covers
@@ -109,7 +109,7 @@ Add a command: `docs/adding-a-command.md`.
 
 `make build`, `test`, `lint`: see `CLAUDE.md`.
 
-- One package: `go test ./application/...` (`-run TestName`, `-tags beads_integration` for real `bd`).
+- One package: `go test ./application/...` (`-run TestName`, `-tags beads_integration`).
 - One feature: `MW_FEATURE=sweep.feature go test ./features` (`:17` for a scenario).
 - `make lint` runs `scripts/check-*.sh`; `make check-formulas` needs `bd`, `jq`, not in
   `make test`.

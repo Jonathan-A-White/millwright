@@ -29,3 +29,27 @@ Feature: mw postern inbox
     When mw postern inbox is run
     Then the postern inbox cursor is saved as a note
     And no story state was set
+
+  Scenario: a reply naming a bead the tracker knows is recorded on the bead and mails the Mayor
+    Given bead "mw-abc.1" is known to the tracker
+    And bead "mw-abc.1" has an open question, txid "question-txid"
+    And a postern reply for bead "mw-abc.1" with answer "A" and txid "answer-txid" addressed to this key
+    When mw postern inbox is run
+    Then reading succeeds
+    And bead "mw-abc.1" is commented an ANSWER with txid "answer-txid" from "governor-pubkey-hex" saying "A"
+    And bead "mw-abc.1"'s question note is cleared
+    And mail "Answer: mw-abc.1: A" was sent to mayor
+
+  Scenario: a reply naming a bead the tracker does not know is printed, and nothing is written
+    Given a postern reply for bead "mw-unknown.1" with answer "A" and txid "answer-txid" addressed to this key
+    When mw postern inbox is run
+    Then reading succeeds
+    And it printed "mw-unknown.1"
+    And bead "mw-unknown.1" has no comment
+    And no mail was sent for the reply
+
+  Scenario: a plain text message still prints as before
+    Given a plain text postern record with text "hello" addressed to this key
+    When mw postern inbox is run
+    Then reading succeeds
+    And it printed "hello"
