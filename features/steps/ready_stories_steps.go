@@ -19,6 +19,7 @@ type readyContext struct {
 	lastEpic string
 	listed   []application.StoryDetail
 	err      error
+	lease    leaseWorld
 }
 
 // InitializeReadyStoriesScenario registers the steps of
@@ -40,6 +41,7 @@ func InitializeReadyStoriesScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the ready stories are "([^"]*)"$`, c.theReadyStoriesAre)
 	ctx.Then(`^there are no ready stories$`, c.thereAreNoReadyStories)
 	ctx.Then(`^the ready story "([^"]*)" is worked on model "([^"]*)"$`, c.theReadyStoryIsWorkedOnModel)
+	registerClaimLeaseSteps(ctx, c)
 }
 
 func (c *readyContext) anEpicWithTheDefaultPath(id string, table *godog.Table) error {

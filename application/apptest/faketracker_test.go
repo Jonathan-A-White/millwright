@@ -203,28 +203,40 @@ func TestCommentAndCloseAreRecorded(t *testing.T) {
 	}
 }
 
-func TestStaleClaimsFindsOnlyClaimsLeftTooLong(t *testing.T) {
+func TestStaleClaimsFindsOnlyClaimsWhoseLeaseRanOut(t *testing.T) {
 	f := trackerWithOneStory(t)
 	ctx := context.Background()
+	claimed := time.Date(2026, 9, 25, 10, 0, 0, 0, time.UTC)
+	f.Clock = func() time.Time { return claimed }
 
 	if err := f.ClaimStory(ctx, "mw-gq6.3"); err != nil {
 		t.Fatalf("claiming: %v", err)
 	}
 
-	stale, err := f.StaleClaims(ctx, 2)
+	stale, err := f.StaleClaims(ctx, claimed.Add(apptest.LeaseTTL))
 	if err != nil {
 		t.Fatalf("listing stale claims: %v", err)
 	}
 	if len(stale) != 0 {
-		t.Fatalf("expected a fresh claim not to be stale, got %v", apptest.IDs(stale))
+		t.Fatalf("expected a claim whose lease has not run out not to be stale, got %v", apptest.IDs(stale))
 	}
 
-	f.Touched("mw-gq6.3", time.Now().AddDate(0, 0, -5))
-	stale, err = f.StaleClaims(ctx, 2)
+	stale, err = f.StaleClaims(ctx, claimed.Add(apptest.LeaseTTL+time.Second))
 	if err != nil {
 		t.Fatalf("listing stale claims: %v", err)
 	}
 	if got := apptest.IDs(stale); len(got) != 1 || got[0] != "mw-gq6.3" {
 		t.Fatalf("expected the abandoned claim, got %v", got)
+	}
+
+	if err := f.SetLeaseExpires("mw-gq6.3", time.Time{}); err != nil {
+		t.Fatalf("clearing the lease: %v", err)
+	}
+	stale, err = f.StaleClaims(ctx, claimed.AddDate(1, 0, 0))
+	if err != nil {
+		t.Fatalf("listing stale claims: %v", err)
+	}
+	if len(stale) != 0 {
+		t.Fatalf("expected a claim with no lease never to be stale, got %v", apptest.IDs(stale))
 	}
 }

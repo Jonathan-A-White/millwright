@@ -83,7 +83,7 @@ Every adapter: `var _ application.<Port> = ...`.
 
 `cmd/mw/root.go` holds the tree; `cmd/mw/main.go` runs it; `cmd/mw/version.go` is
 `mw version`. `features/path_validation.feature` covers `domain/path.go`;
-`features/ready_stories.feature` the `WorkTracker` contract.
+`features/ready_stories.feature`, `features/claim_lease.feature` the `WorkTracker` contract.
 
 Add a command: `docs/adding-a-command.md`.
 
