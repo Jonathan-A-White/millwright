@@ -1,9 +1,10 @@
 Feature: mw postern inbox
   mw postern inbox reads the postern's message records addressed to this
-  host's key, decrypts them, and prints them newest first: class, from and
-  text. Reading marks them read, by moving a cursor kept in a bd kv note,
-  never an event of its own. --unread-count prints only how many are unread,
-  without reading them, so a notifier can poll it without consuming anything.
+  host's key, decrypts them, and prints them newest first: class, from, txid
+  and when, then the text. Reading marks them read, by moving a cursor kept
+  in a bd kv note, never an event of its own. --unread-count prints only how
+  many are unread, without reading them, so a notifier can poll it without
+  consuming anything.
 
   Background:
     Given a throwaway postern key
@@ -53,3 +54,9 @@ Feature: mw postern inbox
     When mw postern inbox is run
     Then reading succeeds
     And it printed "hello"
+
+  Scenario: inbox prints the txid of each message
+    Given a postern record of class "message" addressed to this key with txid "record-txid"
+    When mw postern inbox is run
+    Then reading succeeds
+    And it printed "record-txid"

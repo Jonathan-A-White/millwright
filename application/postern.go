@@ -304,7 +304,7 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 				continue
 			}
 		}
-		i.printf("%s  from %s  %s\n%s\n", m.Class, orUnknown(m.From), sentInFull(m.Ts), m.Text)
+		i.printf("%s  from %s  txid %s  %s\n%s\n", m.Class, orUnknown(m.From), orUnknown(m.Txid), sentInFull(m.Ts), m.Text)
 	}
 	if newest > cursor {
 		if err := i.Memory.SetNote(ctx, PosternCursorKey, strconv.FormatInt(newest, 10)); err != nil {
@@ -446,6 +446,8 @@ func reversePosternInbox(mine []PosternInboxMessage) []PosternInboxMessage {
 // bead to ask — the question postern's docs/protocol.md section 6 shapes: the
 // recommended option and every option offered.
 type PosternSendRequest struct {
+	// Class is one of PosternClasses. Empty defaults to "message", the
+	// common case of a plain reply.
 	Class string
 	Text  string
 
@@ -511,6 +513,9 @@ type PosternSend struct {
 func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, error) {
 	if err := s.wired(req.asksQuestion()); err != nil {
 		return "", err
+	}
+	if strings.TrimSpace(req.Class) == "" {
+		req.Class = "message"
 	}
 	if err := req.validate(); err != nil {
 		return "", err

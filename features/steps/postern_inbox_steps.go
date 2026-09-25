@@ -65,6 +65,7 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 
 	ctx.Given(`^a throwaway postern key$`, c.aThrowawayPosternKey)
 	ctx.Given(`^a postern record of class "([^"]*)" addressed to this key$`, c.aPosternRecordAddressedToThisKey)
+	ctx.Given(`^a postern record of class "([^"]*)" addressed to this key with txid "([^"]*)"$`, c.aPosternRecordAddressedToThisKeyWithTxid)
 	ctx.Given(`^a postern record of class "([^"]*)" addressed to another key$`, c.aPosternRecordAddressedToAnotherKey)
 	ctx.Given(`^bead "([^"]*)" is known to the tracker$`, c.beadIsKnownToTheTracker)
 	ctx.Given(`^bead "([^"]*)" has an open question, txid "([^"]*)"$`, c.beadHasAnOpenQuestion)
@@ -108,12 +109,13 @@ func (c *posternInboxContext) aThrowawayPosternKey() error {
 	return nil
 }
 
-func (c *posternInboxContext) addRecord(class, to string) error {
+func (c *posternInboxContext) addRecord(class, to, txid string) error {
 	ciphertext, err := c.cipher.Encrypt(to, fmt.Sprintf("%s text", class))
 	if err != nil {
 		return err
 	}
 	c.backend.AddRecord(application.PosternRecord{
+		Txid:       txid,
 		Class:      class,
 		From:       "governor-pubkey-hex",
 		To:         to,
@@ -123,11 +125,15 @@ func (c *posternInboxContext) addRecord(class, to string) error {
 }
 
 func (c *posternInboxContext) aPosternRecordAddressedToThisKey(class string) error {
-	return c.addRecord(class, c.pubKey)
+	return c.addRecord(class, c.pubKey, "")
+}
+
+func (c *posternInboxContext) aPosternRecordAddressedToThisKeyWithTxid(class, txid string) error {
+	return c.addRecord(class, c.pubKey, txid)
 }
 
 func (c *posternInboxContext) aPosternRecordAddressedToAnotherKey(class string) error {
-	return c.addRecord(class, "another-key-pubkey-hex")
+	return c.addRecord(class, "another-key-pubkey-hex", "")
 }
 
 func (c *posternInboxContext) beadIsKnownToTheTracker(id string) error {

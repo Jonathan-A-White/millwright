@@ -28,6 +28,14 @@ Feature: mw postern send
     When mw postern send "urgent" "Ready for review." is run
     Then it is refused, saying "urgent" is not a class postern knows
 
+  Scenario: send with no --class defaults to class message
+    Given the postern key's balance is 1000 satoshis
+    And the postern key holds a spendable utxo of 5000 satoshis
+    And the clock reads 1758700000 for sending
+    When mw postern send "Ship it?" is run with no --class
+    Then sending succeeds
+    And the broadcast record is postern's payload, classed "message", stamped 1758700000
+
   Scenario: send refuses when there is no governor key to send to
     Given the postern governor key is ""
     And the postern key's balance is 1000 satoshis

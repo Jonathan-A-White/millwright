@@ -171,7 +171,7 @@ func TestPosternInboxPrintsTheTextOfARecordFromTheBackend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mw postern inbox failed: %v\n%s", err, out)
 	}
-	for _, want := range []string{f.Text, f.Class, f.SenderPubKey} {
+	for _, want := range []string{f.Text, f.Class, f.SenderPubKey, "3af1"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected mw postern inbox to print %q, got:\n%s", want, out)
 		}
@@ -200,6 +200,37 @@ func TestPosternSendBroadcastsTheFixturesRecordScript(t *testing.T) {
 	posternClock = func() time.Time { return time.Unix(f.Ts, 0) }
 
 	out, err := runPostern(t, "send", "--class", f.Class, f.Text)
+	if err != nil {
+		t.Fatalf("mw postern send failed: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(out) != "f00dfeed" {
+		t.Errorf("expected mw postern send to print the backend's txid, got:\n%s", out)
+	}
+	tx, err := transaction.NewTransactionFromHex(*broadcast)
+	if err != nil {
+		t.Fatalf("the backend was sent something that is not a transaction (%q): %v", *broadcast, err)
+	}
+	if got := hex.EncodeToString(*tx.Outputs[0].LockingScript); got != f.ScriptHex {
+		t.Fatalf("expected the record output's script to be the fixture's\n%s\ngot\n%s", f.ScriptHex, got)
+	}
+}
+
+// TestPosternSendDefaultsClassToMessage checks that mw postern send with no
+// --class sends class message, the same record the fixture's class "message"
+// vector expects, rather than refusing for want of a class.
+func TestPosternSendDefaultsClassToMessage(t *testing.T) {
+	f := loadPosternRecordFixture(t)
+	url, broadcast := fakePosternBackend(t, map[string]string{
+		"/api/balance/" + f.SenderAddress: `{"confirmed":10000,"unconfirmed":0}`,
+		"/api/utxos/" + f.SenderAddress:   `{"utxos":[{"txid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","vout":0,"satoshis":10000,"height":100}]}`,
+	})
+	posternHome(t, url, f.SenderWIF, f.RecipientPubKey)
+	realCipher, realClock := posternCipher, posternClock
+	t.Cleanup(func() { posternCipher, posternClock = realCipher, realClock })
+	posternCipher = func(*postern.KeyFile) application.Cipher { return fixedCipher{ct: f.Ct} }
+	posternClock = func() time.Time { return time.Unix(f.Ts, 0) }
+
+	out, err := runPostern(t, "send", f.Text)
 	if err != nil {
 		t.Fatalf("mw postern send failed: %v\n%s", err, out)
 	}

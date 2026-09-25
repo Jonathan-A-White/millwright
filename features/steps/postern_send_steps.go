@@ -72,6 +72,7 @@ func InitializePosternSendScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the bead "([^"]*)" exists$`, c.theBeadExists)
 
 	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" is run$`, c.mwPosternSendIsRun)
+	ctx.When(`^mw postern send "([^"]*)" is run with no --class$`, c.mwPosternSendIsRunWithNoClass)
 	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" for bead "([^"]*)" recommending "([^"]*)" with options "([^"]*)" is run$`, c.mwPosternSendAsksAQuestionIsRun)
 
 	ctx.Then(`^sending succeeds$`, c.itSucceeds)
@@ -160,6 +161,11 @@ func (c *posternSendContext) send() application.PosternSend {
 
 func (c *posternSendContext) mwPosternSendIsRun(class, text string) error {
 	c.txid, c.err = c.send().Run(context.Background(), application.PosternSendRequest{Class: class, Text: text})
+	return nil
+}
+
+func (c *posternSendContext) mwPosternSendIsRunWithNoClass(text string) error {
+	c.txid, c.err = c.send().Run(context.Background(), application.PosternSendRequest{Text: text})
 	return nil
 }
 

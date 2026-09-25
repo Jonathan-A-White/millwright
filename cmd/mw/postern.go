@@ -138,7 +138,7 @@ func newPosternInboxCmd() *cobra.Command {
 		Use:   "inbox",
 		Short: "Read the postern's messages addressed to this host's key",
 		Long: "inbox reads the postern's message records addressed to this host's key, decrypts\n" +
-			"them, and prints them newest first: class, from, when and text. Reading marks them\n" +
+			"them, and prints them newest first: class, from, txid, when and text. Reading marks them\n" +
 			"read, by moving a cursor kept in a bd kv note, never an event of its own.\n\n" +
 			"A reply whose plaintext names a bead this host's tracker knows is not printed: its\n" +
 			"answer is appended to the bead verbatim, with the txid and the sender's public key, the\n" +
@@ -192,8 +192,9 @@ func newPosternSendCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "send <text>",
 		Short: "Send a message to the Governor over the postern",
-		Long: "send builds a message record, classed --class, signs a transaction spending the\n" +
-			"postern key's own testnet balance to carry it, and broadcasts it, printing the txid.\n\n" +
+		Long: "send builds a message record, classed --class (default message), signs a transaction\n" +
+			"spending the postern key's own testnet balance to carry it, and broadcasts it, printing\n" +
+			"the txid.\n\n" +
 			"It refuses when postern_governor_key is not set, when the key's balance would exceed\n" +
 			"postern_float_sats, naming the excess, or when --class is not one of message,\n" +
 			"decision-needed, landing or alarm.\n\n" +
@@ -241,7 +242,7 @@ func newPosternSendCmd() *cobra.Command {
 			return err
 		},
 	}
-	cmd.Flags().StringVar(&class, "class", "", "the message's class: message, decision-needed, landing or alarm (required)")
+	cmd.Flags().StringVar(&class, "class", "", "the message's class: message, decision-needed, landing or alarm (default message)")
 	cmd.Flags().StringVar(&bead, "bead", "", "the bead a decision-needed question is about")
 	cmd.Flags().StringVar(&recommend, "recommend", "", "the option a decision-needed question recommends")
 	cmd.Flags().StringArrayVar(&options, "option", nil, "an option a decision-needed question offers (repeatable)")
