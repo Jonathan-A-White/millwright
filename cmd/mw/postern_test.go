@@ -183,8 +183,8 @@ func TestPosternInboxPrintsTheTextOfARecordFromTheBackend(t *testing.T) {
 type fixedCipher struct{ ct string }
 
 func (c fixedCipher) Encrypt(string, string) (string, error) { return c.ct, nil }
-func (c fixedCipher) Decrypt(string, string) (string, error) {
-	return "", fmt.Errorf("fixedCipher does not decrypt")
+func (c fixedCipher) Decrypt(string, string) (string, string, error) {
+	return "", "", fmt.Errorf("fixedCipher does not decrypt")
 }
 
 func TestPosternSendBroadcastsTheFixturesRecordScript(t *testing.T) {

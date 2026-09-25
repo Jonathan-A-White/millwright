@@ -2,12 +2,21 @@ package postern
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 
 	"github.com/bsv-blockchain/go-sdk/message"
 	ec "github.com/bsv-blockchain/go-sdk/primitives/ec"
 
 	"github.com/Jonathan-A-White/millwright/application"
+)
+
+// brc78SenderOffset and brc78SenderLen locate the sender's compressed public
+// key inside a BRC-78 EncryptedMessage: 4 version bytes, then the sender key,
+// go-sdk's message.Decrypt reads the same way but never reports back.
+const (
+	brc78SenderOffset = 4
+	brc78SenderLen    = 33
 )
 
 var _ application.Cipher = (*Cipher)(nil)
@@ -44,20 +53,23 @@ func (c *Cipher) Encrypt(toPubKey, text string) (string, error) {
 }
 
 // Decrypt implements application.Cipher: ciphertext, base64, decrypted with
-// privKey, WIF. A ciphertext for another key, or one whose AES-GCM tag does
-// not verify, is an error.
-func (c *Cipher) Decrypt(privKey, ciphertext string) (string, error) {
+// privKey, WIF, reporting the sender's compressed public key BRC-78 itself
+// binds into the ciphertext alongside the plaintext. A ciphertext for
+// another key, or one whose AES-GCM tag does not verify — which requires the
+// private key matching that sender key — is an error.
+func (c *Cipher) Decrypt(privKey, ciphertext string) (text string, envelopeFrom string, err error) {
 	priv, err := ec.PrivateKeyFromWif(privKey)
 	if err != nil {
-		return "", fmt.Errorf("the key to decrypt with is not a valid WIF key: %w", err)
+		return "", "", fmt.Errorf("the key to decrypt with is not a valid WIF key: %w", err)
 	}
 	ct, err := base64.StdEncoding.DecodeString(ciphertext)
 	if err != nil {
-		return "", fmt.Errorf("the ciphertext is not base64: %w", err)
+		return "", "", fmt.Errorf("the ciphertext is not base64: %w", err)
 	}
-	text, err := message.Decrypt(ct, priv)
+	plain, err := message.Decrypt(ct, priv)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return string(text), nil
+	envelopeFrom = hex.EncodeToString(ct[brc78SenderOffset : brc78SenderOffset+brc78SenderLen])
+	return string(plain), envelopeFrom, nil
 }

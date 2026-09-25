@@ -140,6 +140,10 @@ func newPosternInboxCmd() *cobra.Command {
 		Long: "inbox reads the postern's message records addressed to this host's key, decrypts\n" +
 			"them, and prints them newest first: class, from, txid, when and text. Reading marks them\n" +
 			"read, by moving a cursor kept in a bd kv note, never an event of its own.\n\n" +
+			"A message's sender is the BRC-78 envelope's own key, not the payload's own claim: a\n" +
+			"payload — or, once the backend can supply one, a transaction signing key — that disagrees\n" +
+			"with the envelope is printed with what it falsely claimed, and never read as a reply. A\n" +
+			"verified sender equal to postern_governor_key prints as \"the Governor\".\n\n" +
 			"A reply whose plaintext names a bead this host's tracker knows is not printed: its\n" +
 			"answer is appended to the bead verbatim, with the txid and the sender's public key, the\n" +
 			"question's note is cleared, and the Mayor is mailed so the notifier wakes the seat. A\n" +
@@ -160,15 +164,20 @@ func newPosternInboxCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			governorKey, err := config.PosternGovernorKey()
+			if err != nil {
+				return err
+			}
 			inbox := application.PosternInbox{
-				Postern: backend,
-				Cipher:  posternCipher(keys),
-				Keys:    keys,
-				Memory:  gateway,
-				Tracker: gateway,
-				Mailbox: gateway,
-				Host:    host,
-				Out:     cmd.OutOrStdout(),
+				Postern:     backend,
+				Cipher:      posternCipher(keys),
+				Keys:        keys,
+				Memory:      gateway,
+				Tracker:     gateway,
+				Mailbox:     gateway,
+				Host:        host,
+				GovernorKey: governorKey,
+				Out:         cmd.OutOrStdout(),
 			}
 			if unreadCount {
 				_, err = inbox.UnreadCount(cmd.Context())

@@ -288,7 +288,7 @@ func TestPosternSnapshotRunEncryptsAndWritesAtomically(t *testing.T) {
 		t.Fatalf("expected exactly one write, got %d", file.Writes())
 	}
 
-	plaintext, err := cipher.Decrypt("any-private-key", string(file.Written()))
+	plaintext, _, err := cipher.Decrypt("any-private-key", string(file.Written()))
 	if err != nil {
 		t.Fatalf("decrypting what was written: %v", err)
 	}
