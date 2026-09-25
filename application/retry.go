@@ -22,6 +22,97 @@ func BundleRecord(storyID string, attempt int) string {
 	return runFilePath(storyID, BundleFileName(attempt))
 }
 
+// salvagedBranch is what became of a branch's leftover commits once
+// salvageBranch kept them before the branch itself was cleared away.
+type salvagedBranch struct {
+	// CommittedLeftovers says the worktree held work nobody had committed, and
+	// it was committed onto the branch before bundling.
+	CommittedLeftovers bool
+	// NothingAhead says the branch had no commits ahead of base, so bundling,
+	// committing and pushing were all skipped.
+	NothingAhead bool
+	// Bundled says the branch's commits were captured into a bundle that
+	// verified, and BranchCommit and BundlePath are meaningful.
+	Bundled      bool
+	BranchCommit string
+	BundlePath   string
+	// VaultPushed says the bundle reached the vault's own remote, and
+	// VaultCommit is meaningful.
+	VaultPushed bool
+	VaultCommit string
+}
+
+// salvageBranch bundles branch's commits ahead of base into the vault — first
+// committing whatever dir holds uncommitted, if anything — and then removes
+// the worktree at dir and the branch itself, exactly as mw retry does. rigDir
+// must already be fetched. attempt numbers the bundle file, so that a branch
+// kept more than once keeps every earlier attempt's evidence rather than
+// writing over it.
+//
+// It is shared between mw retry and a dispatch that finds a leftover
+// worktree or branch from an earlier attempt in the way of a fresh cut
+// (mw-gq6.107), so that the two never drift apart. What it returns is always
+// what actually happened, even when it stops on an error partway through —
+// never what was only planned.
+func salvageBranch(ctx context.Context, worktrees Worktrees, landing Landing, files VaultFiles, vlt Vault, rigDir, storyID, dir, branch, base string, attempt int) (salvagedBranch, error) {
+	var s salvagedBranch
+
+	left, err := landing.Uncommitted(ctx, dir)
+	if err != nil {
+		return s, fmt.Errorf("reading what %s left uncommitted: %w", dir, err)
+	}
+	if len(left) > 0 {
+		message := fmt.Sprintf("%s attempt %d: uncommitted leftovers", storyID, attempt)
+		if _, err := landing.CommitLeftovers(ctx, dir, message); err != nil {
+			return s, fmt.Errorf("committing what %s left uncommitted (%s): %w", dir, strings.Join(left, ", "), err)
+		}
+		s.CommittedLeftovers = true
+	}
+
+	ahead, err := landing.Ahead(ctx, rigDir, branch, base)
+	if err != nil {
+		return s, fmt.Errorf("counting the commits %s has ahead of %s: %w", branch, base, err)
+	}
+	kept := "there was nothing to keep"
+	if ahead == 0 {
+		s.NothingAhead = true
+	} else {
+		dest := vlt.RunFile(storyID, BundleFileName(attempt))
+		sha, err := landing.Bundle(ctx, rigDir, branch, base, dest)
+		if err != nil {
+			return s, fmt.Errorf("bundling %s into %s: %w", branch, dest, err)
+		}
+		s.BranchCommit = sha
+		if err := landing.VerifyBundle(ctx, rigDir, dest); err != nil {
+			return s, fmt.Errorf("the bundle %s does not verify, so nothing more was touched: %w", dest, err)
+		}
+		s.Bundled = true
+
+		relPath := BundleRecord(storyID, attempt)
+		s.BundlePath = relPath
+		kept = fmt.Sprintf("the bundle %s is safe in the vault", relPath)
+		commitMessage := fmt.Sprintf("%s: bundle of attempt %d branch %s, kept before it was cleared away", storyID, attempt, branch)
+		if _, err := files.Commit(ctx, commitMessage, []string{relPath}); err != nil {
+			return s, fmt.Errorf("committing the bundle %s in the vault: %w", relPath, err)
+		}
+		if _, err := files.Push(ctx); err != nil {
+			return s, fmt.Errorf("the bundle %s is committed in the vault but could not be pushed, so nothing more was touched: %w", relPath, err)
+		}
+		s.VaultPushed = true
+		if head, err := files.Head(ctx); err == nil {
+			s.VaultCommit = head
+		}
+	}
+
+	if err := worktrees.RemoveWithoutForce(ctx, rigDir, dir); err != nil {
+		return s, fmt.Errorf("%s, but the worktree %s could not be removed: %w", kept, dir, err)
+	}
+	if err := worktrees.DeleteBranch(ctx, rigDir, branch); err != nil {
+		return s, fmt.Errorf("%s and the worktree is gone, but the branch %s could not be deleted: %w", kept, branch, err)
+	}
+	return s, nil
+}
+
 // Retry is mw's answer to a story whose session has ended and whose landing
 // was refused (or that a person has otherwise decided to try again): it is
 // the hand recovery that used to take a person several steps and a round trip
@@ -202,71 +293,24 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 		return report, fmt.Errorf("retrying %s: fetching the rig: %w", storyID, err)
 	}
 
-	left, err := r.Landing.Uncommitted(ctx, report.Worktree)
-	if err != nil {
-		return report, fmt.Errorf("retrying %s: reading what its worktree %s left uncommitted: %w", storyID, report.Worktree, err)
-	}
-	if len(left) > 0 {
-		message := fmt.Sprintf("%s attempt %d: uncommitted leftovers", storyID, attempt)
-		if _, err := r.Landing.CommitLeftovers(ctx, report.Worktree, message); err != nil {
-			return report, fmt.Errorf("retrying %s: committing what its worktree left uncommitted (%s): %w",
-				storyID, strings.Join(left, ", "), err)
-		}
-		report.CommittedLeftovers = true
-	}
-
 	base := StartPoint(r.remote(), path.Branch)
-	ahead, err := r.Landing.Ahead(ctx, rigDir, report.Branch, base)
+	salvaged, err := salvageBranch(ctx, r.Worktrees, r.Landing, r.Files, r.Vault, rigDir, storyID, report.Worktree, report.Branch, base, attempt)
+	report.CommittedLeftovers = salvaged.CommittedLeftovers
+	report.NothingAhead = salvaged.NothingAhead
+	report.Bundled = salvaged.Bundled
+	report.BranchCommit = salvaged.BranchCommit
+	report.BundlePath = salvaged.BundlePath
+	report.VaultPushed = salvaged.VaultPushed
+	report.VaultCommit = salvaged.VaultCommit
 	if err != nil {
-		return report, fmt.Errorf("retrying %s: counting the commits %s has ahead of %s: %w", storyID, report.Branch, report.Target, err)
-	}
-
-	kept := "there was nothing to keep"
-	if ahead == 0 {
-		report.NothingAhead = true
-	} else {
-		dest := r.Vault.RunFile(storyID, BundleFileName(attempt))
-		sha, err := r.Landing.Bundle(ctx, rigDir, report.Branch, base, dest)
-		if err != nil {
-			return report, fmt.Errorf("retrying %s: bundling %s into %s: %w", storyID, report.Branch, dest, err)
-		}
-		report.BranchCommit = sha
-		if err := r.Landing.VerifyBundle(ctx, rigDir, dest); err != nil {
-			return report, fmt.Errorf("retrying %s: the bundle %s does not verify, so nothing more was touched: %w", storyID, dest, err)
-		}
-		report.Bundled = true
-
-		relPath := BundleRecord(storyID, attempt)
-		report.BundlePath = relPath
-		kept = fmt.Sprintf("the bundle %s is safe in the vault", relPath)
-		commitMessage := fmt.Sprintf("%s: bundle of attempt %d branch %s, kept before the retry", storyID, attempt, report.Branch)
-		if _, err := r.Files.Commit(ctx, commitMessage, []string{relPath}); err != nil {
-			return report, fmt.Errorf("retrying %s: committing the bundle %s in the vault: %w", storyID, relPath, err)
-		}
-		if _, err := r.Files.Push(ctx); err != nil {
-			return report, fmt.Errorf("retrying %s: the bundle %s is committed in the vault but could not be pushed, so nothing more was touched: %w",
-				storyID, relPath, err)
-		}
-		report.VaultPushed = true
-		if head, err := r.Files.Head(ctx); err == nil {
-			report.VaultCommit = head
-		}
-	}
-
-	if err := r.Worktrees.RemoveWithoutForce(ctx, rigDir, report.Worktree); err != nil {
-		return report, fmt.Errorf("retrying %s: %s, but the worktree %s could not be removed: %w",
-			storyID, kept, report.Worktree, err)
+		return report, fmt.Errorf("retrying %s: %w", storyID, err)
 	}
 	report.WorktreeGone = true
-	if err := r.Worktrees.DeleteBranch(ctx, rigDir, report.Branch); err != nil {
-		return report, fmt.Errorf("retrying %s: %s and the worktree is gone, but the branch %s could not be deleted: %w",
-			storyID, kept, report.Branch, err)
-	}
 	report.BranchGone = true
 
 	if err := r.Tracker.ReleaseClaim(ctx, storyID); err != nil {
-		return report, fmt.Errorf("retrying %s: %s and the worktree and branch are gone, but the claim could not be given back: %w",
-			storyID, kept, err)
+		return report, fmt.Errorf("retrying %s: the worktree and branch are gone, but the claim could not be given back: %w",
+			storyID, err)
 	}
 	report.ClaimReleased = true
 
