@@ -232,6 +232,9 @@ func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err err
 	healthLooked := false
 	if up != "" {
 		gone, note, err := t.heal(ctx, up)
+		if err == nil && !gone && t.firstRunStuck(ctx, up) {
+			return firstRunStuckLine(up, t.noteFirstRunStuck(ctx, up)), false, nil
+		}
 		if err == nil && !gone && t.stalledCandidate(ctx, up) {
 			health = t.health(ctx)
 			healthLooked = true
@@ -471,6 +474,85 @@ func (t MillhandTick) stalledCandidate(ctx context.Context, name string) bool {
 // only spawn another Millhand that could do no more than the last.
 func leftAloneNote(window string) string {
 	return WatchLocalFault + ": stalled Millhand's window " + window + " left alone (no outside place answers)"
+}
+
+// FirstRunDoctorCheck is the name the tick's own note about a Millhand stuck
+// at Claude Code's first-run screen is kept under: doctor.<host>.<check>, the
+// same note kind mw doctor's give-ups use, so the Mayor's notifier sees it
+// with no check of its own having to know the Millhand never came up.
+const FirstRunDoctorCheck = "millhand-first-run"
+
+// firstRunStuck is two looks, Recheck apart, at whether the Millhand's window
+// is showing Claude Code's own first-run screen — a theme choice or the login
+// menu, not yet a prompt at all. It is the one state a restart cannot fix,
+// since the fresh session it opens would show the very same screen: a person
+// is needed. Never on a doubt: a look that cannot be made, or a window that
+// cannot be found, is a look at a pane that is not stuck.
+func (t MillhandTick) firstRunStuck(ctx context.Context, name string) bool {
+	if t.Millhand.Terminal == nil {
+		return false
+	}
+	window, there := t.reapWindow(ctx, name)
+	if !there || !t.atFirstRun(ctx, window.ID) {
+		return false
+	}
+	if err := t.reapRule().wait(ctx, t.Recheck); err != nil {
+		return false
+	}
+	return t.atFirstRun(ctx, window.ID)
+}
+
+// atFirstRun is one look at whether the window's pane shows Claude Code's own
+// first-run screen.
+func (t MillhandTick) atFirstRun(ctx context.Context, windowID string) bool {
+	state, err := t.Millhand.Terminal.PaneState(ctx, windowID)
+	return err == nil && state == PaneFirstRun
+}
+
+// firstRunHandStep is the standing instructions the tick's line and doctor
+// note both give: what a person does about a Millhand stuck at Claude Code's
+// first-run screen.
+const firstRunHandStep = "hands needed: tmux attach -t mw-seats, finish it, detach"
+
+// firstRunStuckLine is what the tick's line says when the Millhand's window is
+// stuck at Claude Code's first-run screen, with whatever noteErr adds — a
+// doctor note's own trouble, or nothing when there was none.
+func firstRunStuckLine(window, noteErr string) string {
+	line := "the Millhand is stuck at claude's first-run screen (" + firstRunHandStep + ") (" + window + ")"
+	if noteErr != "" {
+		line = joinNotes(line, []string{noteErr})
+	}
+	return line
+}
+
+// noteFirstRunStuck leaves the tick's own doctor note the first time the
+// Millhand's window is found stuck at Claude Code's first-run screen, under
+// FirstRunDoctorCheck, and does nothing on a later tick that finds it stuck
+// still: DoctorNotes.Note reads back "" for a key nothing has set, which is
+// how a note already left is told apart from none at all. A nil DoctorNotes
+// leaves no note, and a dry run leaves none either — nothing else a dry run
+// does is real. It says what went wrong leaving the note, "" when nothing
+// did.
+func (t MillhandTick) noteFirstRunStuck(ctx context.Context, window string) string {
+	if t.DoctorNotes == nil {
+		return ""
+	}
+	key := DoctorNoteKey(t.Host, FirstRunDoctorCheck)
+	existing, err := t.DoctorNotes.Note(ctx, key)
+	if err != nil {
+		return "doctor note could not be read: " + oneLine(err.Error())
+	}
+	if existing != "" {
+		return ""
+	}
+	if t.DryRun {
+		return "dry run: would leave a doctor note that the Millhand is stuck at claude's first-run screen"
+	}
+	value := t.now().UTC().Format(time.RFC3339) + " faulty stuck at claude's first-run screen: " + firstRunHandStep + " (" + window + ")"
+	if err := t.DoctorNotes.SetNote(ctx, key, value); err != nil {
+		return "doctor note could not be written: " + oneLine(err.Error())
+	}
+	return ""
 }
 
 // stalled is one look at whether the Millhand in a window is a wake that never

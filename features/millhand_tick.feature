@@ -184,6 +184,26 @@ Feature: mw millhand tick
     And no window was opened
     And the reaper log holds no line
 
+  Scenario: A Millhand stuck at claude's first-run screen is reported, not restarted
+    Given the window "millhand-test" was opened at "2026-09-19T08:00:00Z"
+    And the pane of the window "millhand-test" shows claude's first-run screen
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "the Millhand is stuck at claude's first-run screen (hands needed: tmux attach -t mw-seats, finish it, detach)"
+    And the window "millhand-test" was not closed
+    And no window was opened
+    And the tick did not sync
+    And the reaper log holds no line
+    And a doctor note "millhand-first-run" says "stuck at claude's first-run screen"
+
+  Scenario: A second tick that still finds claude's first-run screen leaves no second doctor note
+    Given the window "millhand-test" was opened at "2026-09-19T08:00:00Z"
+    And the pane of the window "millhand-test" shows claude's first-run screen
+    When mw millhand tick is run
+    And mw millhand tick is run
+    Then mw millhand tick prints one dated line saying "the Millhand is stuck at claude's first-run screen"
+    And the tick's tracker took exactly 1 note write
+
   Scenario: A dry run says it would restart an idle Millhand with no handoff, and closes nothing
     Given the window "millhand-test" was opened at "2026-09-19T08:00:00Z"
     When mw millhand tick is run as a dry run

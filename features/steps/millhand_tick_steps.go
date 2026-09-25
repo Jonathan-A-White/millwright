@@ -109,7 +109,7 @@ func registerMillhandTickSteps(ctx *godog.ScenarioContext, c *seatUpContext) {
 	ctx.Given(`^the watched host's health line is (\d+) minutes old and ends "([^"]*)"$`, c.theWatchedHostsHealthLine)
 	ctx.Given(`^the watched host first failed a check (\d+) minutes ago$`, c.theWatchedHostFirstFailed)
 	ctx.Given(`^the tick's watch memory cannot be read$`, c.theWatchMemoryCannotBeRead)
-	ctx.Given(`^the pane of the window "([^"]*)" (has text on its input line|is working)$`, c.thePaneOfTheWindow)
+	ctx.Given(`^the pane of the window "([^"]*)" (has text on its input line|is working|shows claude's first-run screen)$`, c.thePaneOfTheWindow)
 	ctx.Given(`^the pane of the window "([^"]*)" turns to text on its input line while the tick waits between its checks$`, c.thePaneTurnsWhileTheTickWaits)
 	ctx.Given(`^the terminal cannot say what the pane of the window "([^"]*)" is doing$`, c.theTerminalCannotSayWhatThePaneIsDoing)
 	ctx.Given(`^a doctor note "([^"]*)" saying "([^"]*)"$`, c.aDoctorNote)
@@ -140,6 +140,8 @@ func registerMillhandTickSteps(ctx *godog.ScenarioContext, c *seatUpContext) {
 	ctx.Then(`^the window "([^"]*)" was not closed$`, c.theWindowWasNotClosed)
 	ctx.Then(`^the reaper log holds one line saying "([^"]*)"$`, c.theReaperLogHoldsOneLineSaying)
 	ctx.Then(`^the reaper log holds no line$`, c.theReaperLogHoldsNoLine)
+	ctx.Then(`^a doctor note "([^"]*)" says "([^"]*)"$`, c.aDoctorNoteSays)
+	ctx.Then(`^the tick's tracker took exactly (\d+) note writes?$`, c.theTicksTrackerTookExactlyNoteWrites)
 }
 
 func (c *seatUpContext) unreadTickMail(mailbox, subject string) error {
@@ -512,10 +514,36 @@ func (c *seatUpContext) thePaneOfTheWindow(name, state string) error {
 		return fmt.Errorf("the window %s is not open", name)
 	}
 	pane := application.PaneInput
-	if state == "is working" {
+	switch state {
+	case "is working":
 		pane = application.PaneWorking
+	case "shows claude's first-run screen":
+		pane = application.PaneFirstRun
 	}
 	return c.windows.Pane(id, pane)
+}
+
+// aDoctorNoteSays says the tick left a doctor note for that check whose text
+// holds the words.
+func (c *seatUpContext) aDoctorNoteSays(check, want string) error {
+	value, err := c.tickWorld().tracker.Note(context.Background(), application.DoctorNoteKey(seatUpHost, check))
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(value, want) {
+		return fmt.Errorf("expected the doctor note %q to say %q, got %q", check, want, value)
+	}
+	return nil
+}
+
+// theTicksTrackerTookExactlyNoteWrites says how many writes the tracker took
+// across every tick this scenario has run: a scenario with nothing else that
+// writes a note counts them all as the doctor note's own.
+func (c *seatUpContext) theTicksTrackerTookExactlyNoteWrites(want int) error {
+	if got := c.tickWorld().tracker.Writes(); got != want {
+		return fmt.Errorf("expected the tracker to take %d note write(s), it took %d", want, got)
+	}
+	return nil
 }
 
 func (c *seatUpContext) thePaneTurnsWhileTheTickWaits(name string) error {
