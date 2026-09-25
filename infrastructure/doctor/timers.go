@@ -58,20 +58,21 @@ func (t *Timers) Name() string { return TimersName }
 // <timer>` for every timer derived from Units, skipping any that is not
 // enabled here; `systemctl --user is-active <timer>` for the rest, faulty
 // naming every one that is enabled but not active. cannot-tell when systemctl
-// itself could not be run at all — no systemctl on PATH, no user manager —
-// rather than a plain "not enabled" or "not active" answer. When every timer
-// in the list has no unit file on this host at all, ok, with a reason saying
-// so, rather than faulty or cannot-tell.
+// itself could not be run at all — no systemctl on PATH — rather than a plain
+// "not enabled" or "not active" answer. When every timer in the list has no
+// unit file on this host at all, ok, with a reason saying so, rather than
+// faulty or cannot-tell; the same when systemctl cannot reach a user manager
+// to ask at all, a system-scope install rather than a fault.
 func (t *Timers) Probe(ctx context.Context) (application.Verdict, string) {
-	faulty, allSkipped, cannotTell := t.faulty(ctx)
+	faulty, okReason, cannotTell := t.faulty(ctx)
 	if cannotTell != "" {
 		return application.DoctorCannotTell, cannotTell
 	}
 	if len(faulty) > 0 {
 		return application.DoctorFaulty, "not active: " + strings.Join(faulty, ", ")
 	}
-	if allSkipped {
-		return application.DoctorOK, notInstalledReason
+	if okReason != "" {
+		return application.DoctorOK, okReason
 	}
 	return application.DoctorOK, ""
 }
@@ -118,22 +119,27 @@ func (t *Timers) WayBack() string {
 }
 
 // faulty is every timer, derived from Units, that is enabled here but not
-// active; allSkipped, whether every one of them has no unit file on this host
-// at all; or, if systemctl itself could not be asked at all, a cannotTell
-// reason naming why. A timer not enabled here is skipped, not faulted: it may
-// simply not be installed on this host.
-func (t *Timers) faulty(ctx context.Context) (names []string, allSkipped bool, cannotTell string) {
+// active; okReason, when it is not faulty, a reason it is ok that is not the
+// plain silent case — every one of them has no unit file on this host at
+// all, or systemctl cannot reach a user manager to ask at all; or, if
+// systemctl itself could not be asked for some other, genuine reason, a
+// cannotTell reason naming why. A timer not enabled here is skipped, not
+// faulted: it may simply not be installed on this host.
+func (t *Timers) faulty(ctx context.Context) (names []string, okReason string, cannotTell string) {
 	skipped := 0
 	for _, unit := range t.Units {
 		timer := timerName(unit)
 
 		enabledOut, err := t.run(ctx, "is-enabled", timer)
 		if err != nil && strings.TrimSpace(enabledOut) == "" {
-			if unitNotFound(err) {
+			switch {
+			case unitNotFound(err):
 				skipped++
 				continue
+			case noUserManager(err):
+				return nil, noUserManagerReason, ""
 			}
-			return nil, false, fmt.Sprintf("systemctl is-enabled %s: %v", timer, err)
+			return nil, "", fmt.Sprintf("systemctl is-enabled %s: %v", timer, err)
 		}
 		if strings.TrimSpace(enabledOut) != "enabled" {
 			continue
@@ -141,13 +147,19 @@ func (t *Timers) faulty(ctx context.Context) (names []string, allSkipped bool, c
 
 		activeOut, err := t.run(ctx, "is-active", timer)
 		if err != nil && strings.TrimSpace(activeOut) == "" {
-			return nil, false, fmt.Sprintf("systemctl is-active %s: %v", timer, err)
+			if noUserManager(err) {
+				return nil, noUserManagerReason, ""
+			}
+			return nil, "", fmt.Sprintf("systemctl is-active %s: %v", timer, err)
 		}
 		if strings.TrimSpace(activeOut) != "active" {
 			names = append(names, timer)
 		}
 	}
-	return names, skipped > 0 && skipped == len(t.Units), ""
+	if skipped > 0 && skipped == len(t.Units) {
+		return names, notInstalledReason, ""
+	}
+	return names, "", ""
 }
 
 func (t *Timers) run(ctx context.Context, args ...string) (string, error) {
