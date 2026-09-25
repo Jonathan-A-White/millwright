@@ -331,6 +331,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		}
 		ClearSyncHalt(ctx, d.SyncHalts)
 		report.Sync, report.Synced = synced, true
+		d.print(fmt.Sprintf("  synced  %s\n", synced))
 	}
 
 	running, err := d.Tracker.RunningStories(ctx, d.Host)
@@ -543,6 +544,7 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 	if err := d.Tracker.ClaimStory(ctx, id); err != nil {
 		return Started{}, false, fmt.Errorf("claiming %s: %w", id, err)
 	}
+	d.print(fmt.Sprintf("  claimed %s\n", id))
 
 	// recorded is whether the story names the molecule this dispatch poured, and
 	// so whether the next dispatch will find it.
@@ -643,6 +645,7 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 		return undo("starting the session", err, true)
 	}
 	started.Session = spec.Name
+	d.print(fmt.Sprintf("  launched %s · session %s\n", id, spec.Name))
 
 	// From here the session is alive and spending fuel. Nothing below is worth
 	// undoing it for.
@@ -823,18 +826,28 @@ func (d Dispatch) namesake(ctx context.Context, name, id string) (lying bool, er
 // the race would still be open; here, immediately before release, is as late
 // as it can be checked.
 func (d Dispatch) release(ctx context.Context, id string, why error) (bool, error) {
-	if status, err := d.Runner.Status(ctx, SessionName(id)); err == nil && status.Running() {
+	// The give-back runs on a context of its own, detached from the tick's:
+	// ctx is exactly what a cancelled tick has already ended, and mw-gq6.108
+	// made a real bd or git command refuse outright the instant its context is
+	// done. A give-back attempted on that same, already-cancelled context
+	// would be refused for the same reason, leaving the claim stuck exactly as
+	// mw-gq6.110 found it (mw-1589l.19, TimeoutStartSec, cured by hand). Giving
+	// a claim back is owed to the story whatever became of the tick that took
+	// it.
+	giveBack := context.WithoutCancel(ctx)
+	if status, err := d.Runner.Status(giveBack, SessionName(id)); err == nil && status.Running() {
 		said := fmt.Sprintf("mw dispatch on %s could not start this story, but the session %s of %s is running here now, so the claim stays with it: %v", d.Host, status.Name, id, why)
-		if err := d.Tracker.CommentOnStory(ctx, id, said); err != nil {
+		if err := d.Tracker.CommentOnStory(giveBack, id, said); err != nil {
 			return false, fmt.Errorf("%w (the session %s of %s is running here now, so the claim was left alone, but that could not be written on the story: %v)", why, status.Name, id, err)
 		}
 		return false, fmt.Errorf("%w (the session %s of %s is running here now, so the claim was left alone rather than given back)", why, status.Name, id)
 	}
-	if err := d.Tracker.ReleaseClaim(ctx, id); err != nil {
+	if err := d.Tracker.ReleaseClaim(giveBack, id); err != nil {
 		return false, fmt.Errorf("%w (and the claim could not be given back either: %v — %s is claimed by a session that is not running, and needs releasing by hand)", why, err, id)
 	}
+	d.print(fmt.Sprintf("  gave back %s: %v\n", id, why))
 	said := fmt.Sprintf("mw dispatch on %s could not start this story, so the claim was given back and nothing is running: %v", d.Host, why)
-	if err := d.Tracker.CommentOnStory(ctx, id, said); err != nil {
+	if err := d.Tracker.CommentOnStory(giveBack, id, said); err != nil {
 		return true, fmt.Errorf("%w (the claim was given back, but the failure could not be written on the story: %v)", why, err)
 	}
 	return true, why

@@ -1,6 +1,7 @@
 package application_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -47,14 +48,31 @@ type fakeWorktrees struct {
 	// test uses to stand in for a second dispatcher starting its session in
 	// the instant between this one's Exists check and its own.
 	OnExists func()
+
+	// FetchEntered, when set, is closed the instant Fetch is called, so a test
+	// can wait until a dispatch has claimed a story and reached the fetch
+	// before it cancels the context Fetch is blocking on.
+	FetchEntered chan struct{}
+	// FetchBlocks, when true, makes Fetch wait for its context to be done
+	// rather than return at once, standing in for a fetch a slow link never
+	// finishes (mw-gq6.110).
+	FetchBlocks bool
 }
 
 var _ application.Worktrees = (*fakeWorktrees)(nil)
 
-func (f *fakeWorktrees) Fetch(_ context.Context, rigDir string) error {
+func (f *fakeWorktrees) Fetch(ctx context.Context, rigDir string) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.fetched = append(f.fetched, rigDir)
+	entered, blocks := f.FetchEntered, f.FetchBlocks
+	f.mu.Unlock()
+	if entered != nil {
+		close(entered)
+	}
+	if blocks {
+		<-ctx.Done()
+		return ctx.Err()
+	}
 	return f.FetchErr
 }
 
@@ -962,5 +980,110 @@ func TestDispatchWithNoLeftoverDispatchesExactlyAsBefore(t *testing.T) {
 	}
 	if added, _ := worktrees.was(); len(added) != 1 {
 		t.Fatalf("expected exactly one worktree cut, got %q", added)
+	}
+}
+
+// mw-gq6.110: a dispatch tick killed mid-flight — TimeoutStartSec on a slow
+// link, 2026-09-25 — left no trace of what it had claimed, because the report
+// was only ever printed once Run returned; and the give-back it tried on its
+// way out used the same context the tick was cancelled on, which mw-gq6.108
+// made a real bd or git command refuse outright, leaving the claim stuck
+// (mw-1589l.19, cured by hand). These two tests walk a cancellation between
+// the claim and the launch, the exact gap that incident fell into.
+
+// cancelRefusingTracker refuses ReleaseClaim and CommentOnStory when the
+// context they are given is already done, standing in for a real bd command
+// that mw-gq6.108 made a cancelled context kill outright: giving a claim back
+// on the same context a cancelled tick runs under would be refused for
+// exactly that reason.
+type cancelRefusingTracker struct {
+	*apptest.FakeTracker
+}
+
+func (t *cancelRefusingTracker) ReleaseClaim(ctx context.Context, id string) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return t.FakeTracker.ReleaseClaim(ctx, id)
+}
+
+func (t *cancelRefusingTracker) CommentOnStory(ctx context.Context, id, text string) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return t.FakeTracker.CommentOnStory(ctx, id, text)
+}
+
+func TestDispatchPrintsTheClaimBeforeAFetchThatNeverReturns(t *testing.T) {
+	dispatch, tracker, worktrees, _, _ := aFactory(t)
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	entered := make(chan struct{})
+	worktrees.FetchEntered = entered
+	worktrees.FetchBlocks = true
+	out := &bytes.Buffer{}
+	dispatch.Out = out
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		dispatch.Run(ctx)
+		close(done)
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected the fetch to be reached before the test gives up")
+	}
+	if !strings.Contains(out.String(), "mw-gq6.1") {
+		t.Fatalf("expected the claim of mw-gq6.1 to already be printed while the fetch is still blocked, got %q", out.String())
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected the cancelled dispatch to return")
+	}
+}
+
+func TestDispatchGivesBackAClaimCancelledBetweenTheClaimAndTheLaunch(t *testing.T) {
+	dispatch, tracker, worktrees, runner, _ := aFactory(t)
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	dispatch.Tracker = &cancelRefusingTracker{FakeTracker: tracker}
+	entered := make(chan struct{})
+	worktrees.FetchEntered = entered
+	worktrees.FetchBlocks = true
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		dispatch.Run(ctx)
+		close(done)
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected the fetch to be reached before the test gives up")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected the cancelled dispatch to return")
+	}
+
+	if len(runner.Names()) != 0 {
+		t.Fatalf("expected no session started, got %q", runner.Names())
+	}
+	detail, err := tracker.ShowStory(context.Background(), "mw-gq6.1")
+	if err != nil {
+		t.Fatalf("showing the story: %v", err)
+	}
+	if detail.Status != application.StatusOpen || detail.Assignee != "" {
+		t.Fatalf("expected the claim given back and the story left open, got status %q assignee %q", detail.Status, detail.Assignee)
 	}
 }
