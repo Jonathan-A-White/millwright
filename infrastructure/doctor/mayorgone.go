@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -58,6 +59,10 @@ type MayorGone struct {
 	Vault string
 	// Tmux is the program run for tmux. Empty reads "tmux".
 	Tmux string
+	// PS is the program run for ps, asked for the whole process table when no
+	// window name matches .mayor-acting, to tell a Mayor resumed into a
+	// window of another name from one that is really gone. Empty reads "ps".
+	PS string
 	// Timeout bounds Cure's run of bin/mayor-up. Empty reads
 	// MayorGoneCureTimeout.
 	Timeout time.Duration
@@ -78,8 +83,11 @@ func (m *MayorGone) Name() string { return MayorGoneName }
 // Probe implements application.DoctorCheck: cannot-tell naming whichever of
 // .mayor-acting or bin/mayor-up is missing or not executable; otherwise
 // faulty naming the acting file when no open tmux window matches what it
-// names, faulty naming the window when it is open but its pane holds nothing
-// live but a bare shell, and ok when a live process is found there.
+// names and no window's pane runs a process carrying a session id the acting
+// file names either — a Mayor resumed by `claude --resume` into a window of
+// another name still shows up there — faulty naming the window when it is
+// open but its pane holds nothing live but a bare shell, and ok when a live
+// process is found there.
 func (m *MayorGone) Probe(ctx context.Context) (application.Verdict, string) {
 	actingPath := m.actingPath()
 	acting, err := os.ReadFile(actingPath)
@@ -97,6 +105,13 @@ func (m *MayorGone) Probe(ctx context.Context) (application.Verdict, string) {
 		return application.DoctorCannotTell, fmt.Sprintf("asking tmux for its windows: %v", err)
 	}
 	name, found := application.MatchActingName(string(acting), names)
+	if !found {
+		sessionName, sessionFound, sessionErr := m.matchBySession(ctx, string(acting), byName)
+		if sessionErr != nil {
+			return application.DoctorCannotTell, fmt.Sprintf("asking the process tree whether a window carries %s's session: %v", actingPath, sessionErr)
+		}
+		name, found = sessionName, sessionFound
+	}
 	if !found {
 		return application.DoctorFaulty, "no open tmux window matches " + actingPath
 	}
@@ -186,6 +201,124 @@ func (m *MayorGone) windows(ctx context.Context) (names []string, byName map[str
 		byName[fields[1]] = fields[0]
 	}
 	return names, byName, nil
+}
+
+// mayorGoneSessionID is a session id-like token in an acting file's free
+// text: eight or more hex digits, long enough that a window name's own
+// hyphen-separated date fields (never more than four digits between
+// hyphens) cannot be mistaken for one. It catches both a bare Claude Code
+// session id and the leading segment of one written with its usual dashes.
+var mayorGoneSessionID = regexp.MustCompile(`[0-9a-fA-F]{8,}`)
+
+// matchBySession is the name of a window in byName whose pane runs a process
+// — or has one among its descendants — carrying a session id acting names,
+// when acting names no window found by MatchActingName. It is how a Mayor
+// resumed by `claude --resume` into a window of a name .mayor-acting never
+// gave is still found: tmux opens the new window under the harness's own
+// name, not the acting file's, but the resumed session's process still
+// carries the id the acting file recorded when it was first started.
+func (m *MayorGone) matchBySession(ctx context.Context, acting string, byName map[string]string) (string, bool, error) {
+	tokens := mayorGoneSessionID.FindAllString(acting, -1)
+	if len(tokens) == 0 {
+		return "", false, nil
+	}
+
+	panePIDs, err := m.panePIDs(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	if len(panePIDs) == 0 {
+		return "", false, nil
+	}
+	procs, err := m.processes(ctx)
+	if err != nil {
+		return "", false, err
+	}
+
+	for name, window := range byName {
+		for _, pid := range panePIDs[window] {
+			if processTreeCarries(procs, pid, tokens) {
+				return name, true, nil
+			}
+		}
+	}
+	return "", false, nil
+}
+
+// panePIDs is the pid of each open window's pane, by window id.
+func (m *MayorGone) panePIDs(ctx context.Context) (map[string][]string, error) {
+	out, err := m.run(ctx, "list-panes", "-a", "-F", "#{window_id} #{pane_pid}")
+	pids := map[string][]string{}
+	if err != nil {
+		if mayorGoneNoServer(err) {
+			return pids, nil
+		}
+		return nil, err
+	}
+	for _, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		pids[fields[0]] = append(pids[fields[0]], fields[1])
+	}
+	return pids, nil
+}
+
+// mayorGoneProcess is one line of the process table matchBySession reads.
+type mayorGoneProcess struct {
+	ppid string
+	args string
+}
+
+// processes is the whole process table, by pid, read in one ps.
+func (m *MayorGone) processes(ctx context.Context) (map[string]mayorGoneProcess, error) {
+	program := m.PS
+	if program == "" {
+		program = "ps"
+	}
+	out, err := exec.CommandContext(ctx, program, "-eo", "pid=,ppid=,args=").Output()
+	if err != nil {
+		return nil, err
+	}
+	procs := map[string]mayorGoneProcess{}
+	for _, line := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		procs[fields[0]] = mayorGoneProcess{ppid: fields[1], args: strings.Join(fields[2:], " ")}
+	}
+	return procs, nil
+}
+
+// processTreeCarries reports whether pid, or any of its descendants in
+// procs, has one of tokens in its command line.
+func processTreeCarries(procs map[string]mayorGoneProcess, pid string, tokens []string) bool {
+	seen := map[string]bool{}
+	queue := []string{pid}
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+
+		if proc, ok := procs[id]; ok {
+			for _, token := range tokens {
+				if strings.Contains(proc.args, token) {
+					return true
+				}
+			}
+		}
+		for candidate, proc := range procs {
+			if proc.ppid == id && !seen[candidate] {
+				queue = append(queue, candidate)
+			}
+		}
+	}
+	return false
 }
 
 // paneAlive reports whether window holds a live pane running anything but a
