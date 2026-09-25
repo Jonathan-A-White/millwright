@@ -56,6 +56,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializePosternInboxScenario(ctx)
 	steps.InitializePosternKeyScenario(ctx)
 	steps.InitializePosternSendScenario(ctx)
+	steps.InitializePosternServeScenario(ctx)
 	steps.InitializeReadyStoriesScenario(ctx)
 	steps.InitializeReleaseScenario(ctx)
 	steps.InitializeRetryScenario(ctx)
