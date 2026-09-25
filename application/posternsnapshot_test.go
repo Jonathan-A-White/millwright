@@ -369,6 +369,54 @@ func TestPosternSnapshotWritesEmptyListsAsArraysNotNull(t *testing.T) {
 	}
 }
 
+// TestPosternSnapshotReadsEveryLiveEpicAndItsChildrensCommentsInOneCallEach
+// covers mw-tfne4.17: with several live epics, each carrying a needs_you
+// question and a landed child, Build must still ask the tracker for every
+// epic's own fields in one ShowEpics call and every epic's children's
+// comments in one StoriesComments call — not one of either per epic — while
+// building exactly the same snapshot a call per epic would have.
+func TestPosternSnapshotReadsEveryLiveEpicAndItsChildrensCommentsInOneCallEach(t *testing.T) {
+	tracker := aSnapshotTracker()
+
+	tracker.AddEpic("mw-a", domain.Path{})
+	tracker.DescribeEpic("mw-a", "Epic A", apptest.StatusOpen, 1)
+	addChild(tracker, "mw-a", "mw-a.1", "Ship now or wait?")
+	askQuestion(t, tracker, "mw-a.1", "2026-09-24T12:00:00Z", "Ship now or wait?", "ship", "ship, wait")
+	addChild(tracker, "mw-a", "mw-a.2", "Landed recently")
+	closeLanded(t, tracker, "mw-a.2", snapshotNow.Add(-3*24*time.Hour))
+
+	tracker.AddEpic("mw-b", domain.Path{})
+	tracker.DescribeEpic("mw-b", "Epic B", apptest.StatusInProgress, 2)
+	addChild(tracker, "mw-b", "mw-b.1", "Ready to ship?")
+	askQuestion(t, tracker, "mw-b.1", "2026-09-24T13:00:00Z", "Ready to ship?", "ship", "")
+	addChild(tracker, "mw-b", "mw-b.2", "Landed recently too")
+	closeLanded(t, tracker, "mw-b.2", snapshotNow.Add(-1*24*time.Hour))
+
+	doc := snapshotDoc(t, tracker)
+
+	if got := tracker.ShowEpicsCalls(); got != 1 {
+		t.Fatalf("expected the live epics to be read in one ShowEpics call, got %d", got)
+	}
+	if got := tracker.StoriesCommentsCalls(); got != 1 {
+		t.Fatalf("expected every epic's children's comments to be read in one StoriesComments call, got %d", got)
+	}
+
+	for _, want := range []struct {
+		epic, needsYou, landed string
+	}{
+		{"mw-a", "mw-a.1", "mw-a.2"},
+		{"mw-b", "mw-b.1", "mw-b.2"},
+	} {
+		e := epicOf(t, doc, want.epic)
+		if len(e.NeedsYou) != 1 || e.NeedsYou[0].ID != want.needsYou {
+			t.Fatalf("expected %s's needs_you to hold %s, got %+v", want.epic, want.needsYou, e.NeedsYou)
+		}
+		if len(e.Landed) != 1 || e.Landed[0].ID != want.landed {
+			t.Fatalf("expected %s's landed to hold %s, got %+v", want.epic, want.landed, e.Landed)
+		}
+	}
+}
+
 func equalStrings(got, want []string) bool {
 	if len(got) != len(want) {
 		return false
