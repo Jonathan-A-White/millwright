@@ -102,12 +102,16 @@ func tailLine(output string) string {
 //
 // Nothing runs for a rig the host names no command for, or for a checkout the
 // landing did not move: what a command built there would be the old commit.
+// A rig the host names no command for still gets a line in the report, so
+// that a Mayor reading it can tell "this host names no command for this rig"
+// from "the command was not configured when mw next started".
 func (n Next) afterLanding(ctx context.Context, c *closeOut, report *NextReport) {
 	if n.AfterLanding == nil {
 		return
 	}
 	command := n.AfterLanding.Command(c.path.Rig)
 	if command == "" {
+		report.Notes = append(report.Notes, afterLandingLine("none", "this host names no command for "+c.path.Rig))
 		return
 	}
 	if !report.Rig.Moved {

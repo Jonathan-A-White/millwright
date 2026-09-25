@@ -706,10 +706,13 @@ Feature: Closing out a finished story and carrying on
     And the rig's after-landing command did not run
     And the report says: after landing: <the command>: not run, the rig checkout was left as it was: it has 1 uncommitted path(s): notes-to-self.md
 
-  Scenario: A rig the after-landing table does not name has nothing run
+  Scenario: A rig the after-landing table does not name has nothing run, and the report says so
     Given another rig, and not this one, names a command to run after a landing
     And the session of "mw-gq6.1" reported a plain success
     When mw closes out "mw-gq6.1"
     Then the story "mw-gq6.1" is closed
     And the rig's after-landing command did not run
-    And the report does not mention an after-landing command
+    And the report says: after landing: none: this host names no command for millwright
+    And the story "mw-gq6.1" carries no comment quoting: after landing
+    And exactly one mail was sent, to "mayor" from "mw@vps"
+    And that mail's body says: after landing: none: this host names no command for millwright

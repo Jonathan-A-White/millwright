@@ -29,7 +29,6 @@ func registerNextAfterLandingSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^the rig's after-landing command ran once, in the rig checkout, at the commit that landed on "([^"]*)"$`, c.theCommandRanOnce)
 	ctx.Then(`^the rig's after-landing command did not run$`, c.theCommandDidNotRun)
 	ctx.Then(`^the report says: (.+)$`, c.theReportSays)
-	ctx.Then(`^the report does not mention an after-landing command$`, c.theReportDoesNotMentionOne)
 	ctx.Then(`^the comment on "([^"]*)" says: (.+)$`, c.theCommentSays)
 	ctx.Then(`^that mail's body says: (.+)$`, c.thatMailsBodySays)
 	ctx.Then(`^the story "([^"]*)" is closed exactly as it is without an after-landing command$`, c.theStoryIsClosedAsWithout)
@@ -124,13 +123,6 @@ func (c *nextContext) theReportSays(line string) error {
 	want := c.spoken(line)
 	if said := c.printed.String(); !strings.Contains(said, want) {
 		return fmt.Errorf("expected the report to say %q, got:\n%s", want, said)
-	}
-	return nil
-}
-
-func (c *nextContext) theReportDoesNotMentionOne() error {
-	if said := c.printed.String(); strings.Contains(said, "after landing") {
-		return fmt.Errorf("expected the report to say nothing of an after-landing command, got:\n%s", said)
 	}
 	return nil
 }
