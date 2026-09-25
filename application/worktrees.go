@@ -42,6 +42,12 @@ type Worktrees interface {
 	// worktree is its own, and reusing one would hide work nobody looked at.
 	Add(ctx context.Context, rigDir, dir, branch, start string) error
 
+	// Exists reports whether dir or branch is already there — left behind by
+	// an earlier attempt that never had Remove or RemoveWithoutForce run on
+	// it — so that a caller about to cut a fresh worktree can find out before
+	// Add refuses it (mw-gq6.107).
+	Exists(ctx context.Context, rigDir, dir, branch string) (bool, error)
+
 	// Remove takes a worktree and its branch away again, as if they had never
 	// been made. Removing what is not there is not an error — it is how a
 	// dispatch that failed halfway tidies up after itself.
