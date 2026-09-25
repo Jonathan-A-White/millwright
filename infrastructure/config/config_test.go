@@ -43,6 +43,7 @@ func writeConfig(t *testing.T, contents string) string {
 	t.Setenv("MW_POSTERN_FLOAT_SATS", "")
 	t.Setenv("MW_POSTERN_GOVERNOR_KEY", "")
 	t.Setenv("MW_POSTERN_KEY_FILE", "")
+	t.Setenv("MW_POSTERN_SNAPSHOT_PATH", "")
 	return home
 }
 
@@ -993,5 +994,35 @@ func TestPosternKeyFileRefusesARelativePath(t *testing.T) {
 	writeConfig(t, "postern_key_file = \"relative/path\"\n")
 	if _, err := config.PosternKeyFile(); err == nil || !strings.Contains(err.Error(), "full path") {
 		t.Fatalf("expected a relative postern_key_file to be refused, got %v", err)
+	}
+}
+
+func TestPosternSnapshotPathIsUnderHomeUntilAHostSaysOtherwise(t *testing.T) {
+	home := writeConfig(t, vpsConfig)
+
+	path, err := config.PosternSnapshotPath()
+	if err != nil {
+		t.Fatalf("reading the postern snapshot path: %v", err)
+	}
+	if want := filepath.Join(home, config.DefaultPosternSnapshotPath); path != want {
+		t.Fatalf("expected %q, got %q", want, path)
+	}
+
+	t.Setenv(config.PosternSnapshotPathEnv, "/tmp/snapshot.bin")
+	if path, err = config.PosternSnapshotPath(); err != nil || path != "/tmp/snapshot.bin" {
+		t.Fatalf("expected %s to win, got %q: %v", config.PosternSnapshotPathEnv, path, err)
+	}
+
+	t.Setenv(config.PosternSnapshotPathEnv, "")
+	writeConfig(t, "postern_snapshot_path = \"/etc/mw/snapshot.bin\"\n")
+	if path, err = config.PosternSnapshotPath(); err != nil || path != "/etc/mw/snapshot.bin" {
+		t.Fatalf("expected the file's postern_snapshot_path, got %q: %v", path, err)
+	}
+}
+
+func TestPosternSnapshotPathRefusesARelativePath(t *testing.T) {
+	writeConfig(t, "postern_snapshot_path = \"relative/path\"\n")
+	if _, err := config.PosternSnapshotPath(); err == nil || !strings.Contains(err.Error(), "full path") {
+		t.Fatalf("expected a relative postern_snapshot_path to be refused, got %v", err)
 	}
 }

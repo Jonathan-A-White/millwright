@@ -72,10 +72,11 @@ const (
 	MillhandRoutineModelEnv = "MW_MILLHAND_ROUTINE_MODEL"
 	MillhandReviewModelEnv  = "MW_MILLHAND_REVIEW_MODEL"
 
-	PosternBackendEnv     = "MW_POSTERN_BACKEND"
-	PosternFloatSatsEnv   = "MW_POSTERN_FLOAT_SATS"
-	PosternGovernorKeyEnv = "MW_POSTERN_GOVERNOR_KEY"
-	PosternKeyFileEnv     = "MW_POSTERN_KEY_FILE"
+	PosternBackendEnv      = "MW_POSTERN_BACKEND"
+	PosternFloatSatsEnv    = "MW_POSTERN_FLOAT_SATS"
+	PosternGovernorKeyEnv  = "MW_POSTERN_GOVERNOR_KEY"
+	PosternKeyFileEnv      = "MW_POSTERN_KEY_FILE"
+	PosternSnapshotPathEnv = "MW_POSTERN_SNAPSHOT_PATH"
 )
 
 // RigsTable is the table of the config file that says where each rig is checked
@@ -173,6 +174,11 @@ const DefaultPosternFloatSats = 100000
 // and its backups, like .mayor-acting.
 var DefaultPosternKeyFile = filepath.Join(".config", "mw", "postern.key")
 
+// DefaultPosternSnapshotPath is where mw postern snapshot writes the
+// encrypted snapshot under the home directory when nothing says otherwise:
+// state, not config, so it lives under .local/state rather than .config.
+var DefaultPosternSnapshotPath = filepath.Join(".local", "state", "mw", "snapshot.bin")
+
 // PosternBackend reports the URL of the postern's backend: $MW_POSTERN_BACKEND
 // if it is set, otherwise the root-table `postern_backend` key of
 // ~/.config/mw/config.toml, and DefaultPosternBackend when neither says.
@@ -230,6 +236,29 @@ func PosternKeyFile() (string, error) {
 		return said, nil
 	}
 	return filepath.Join(home, DefaultPosternKeyFile), nil
+}
+
+// PosternSnapshotPath reports where mw postern snapshot writes the encrypted
+// snapshot of every live epic: $MW_POSTERN_SNAPSHOT_PATH if it is set,
+// otherwise the root-table `postern_snapshot_path` key of
+// ~/.config/mw/config.toml, a full path either way, and
+// DefaultPosternSnapshotPath under the home directory when neither says.
+func PosternSnapshotPath() (string, error) {
+	said, err := optionalSetting("postern_snapshot_path", PosternSnapshotPathEnv, "")
+	if err != nil {
+		return "", err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("no %s is set and there is no home directory to read %s in: %w", PosternSnapshotPathEnv, File, err)
+	}
+	if said != "" {
+		if !filepath.IsAbs(said) {
+			return "", fmt.Errorf("the postern snapshot path is %q in %s: it must be a full path", said, filepath.Join(home, File))
+		}
+		return said, nil
+	}
+	return filepath.Join(home, DefaultPosternSnapshotPath), nil
 }
 
 // What `mw dispatch` does when its sync cannot resolve a name, which is what a
