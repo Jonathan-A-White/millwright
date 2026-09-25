@@ -33,3 +33,11 @@ Feature: mw postern send
     And the postern key's balance is 1000 satoshis
     When mw postern send "message" "Ready for review." is run
     Then it is refused, saying postern_governor_key is not set
+
+  Scenario: the record carries postern's own payload, in its field order
+    Given the postern key's balance is 1000 satoshis
+    And the postern key holds a spendable utxo of 5000 satoshis
+    And the clock reads 1758700000 for sending
+    When mw postern send "decision-needed" "Ship it?" is run
+    Then sending succeeds
+    And the broadcast record is postern's payload, classed "decision-needed", stamped 1758700000

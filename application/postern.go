@@ -30,10 +30,11 @@ type PosternKeyFile interface {
 	// PrivateKeyWIF reads the key file and reports its private key,
 	// WIF-encoded, so that Inbox can decrypt a message addressed to it.
 	PrivateKeyWIF() (string, error)
-	// Sign builds a record transaction — utxos spent as its inputs, one
-	// output carrying payload as the postern's on-chain record, one output
-	// paying the change back to this key's own address — and reports it
-	// signed, as raw transaction hex ready to broadcast.
+	// Sign builds a record transaction, postern's docs/protocol.md section
+	// 4 — utxos spent as its inputs, but a 1-satoshi one; output 0 carrying
+	// payload as the postern's on-chain record; output 1 paying 1 satoshi to
+	// the postern anchor; output 2 the change back to this key's own address
+	// — and reports it signed, as raw transaction hex ready to broadcast.
 	Sign(utxos []PosternUtxo, payload []byte) (rawtx string, err error)
 }
 
@@ -126,9 +127,9 @@ type PosternUtxo struct {
 
 // Postern is the port to the postern backend: reading indexed message
 // records since a sequence number, and reading and spending the postern
-// key's testnet balance. The real adapter talks to the Go backend's HTTP API
-// (docs/api.md, github.com/Jonathan-A-White/postern); a later story wires it
-// in — until then it is nil, and Inbox and Send refuse, naming it.
+// key's testnet balance. The real adapter, infrastructure/postern's HTTP,
+// talks to the Go backend's HTTP API (docs/api.md,
+// github.com/Jonathan-A-White/postern).
 type Postern interface {
 	// Messages reports every indexed record after sequence number since,
 	// oldest first.
@@ -144,8 +145,8 @@ type Postern interface {
 
 // Cipher is the port that encrypts and decrypts a message's text between the
 // postern key and the party at the other end of it. The real adapter is
-// BRC-78 EncryptedMessage (docs/research/messages.md,
-// github.com/Jonathan-A-White/postern); a later story wires it in.
+// BRC-78 EncryptedMessage (docs/protocol.md section 2,
+// github.com/Jonathan-A-White/postern), infrastructure/postern's Cipher.
 type Cipher interface {
 	// Encrypt encrypts text for the holder of toPubKey (compressed, hex) and
 	// reports the ciphertext, base64.
@@ -181,15 +182,22 @@ func validPosternClass(class string) bool {
 	return false
 }
 
-// posternPayload is a message's on-chain payload, version 1 of the nftgate
-// record framing (docs/research/messages.md, github.com/Jonathan-A-White/postern):
-// UTF-8 JSON with a kind discriminator, "msg" being postern's own, extended
-// here with the class mw's use cases sort a message by.
-type posternPayload struct {
-	Kind       string `json:"kind"`
-	Class      string `json:"class"`
-	Ciphertext string `json:"ciphertext"`
-	Ts         string `json:"ts"`
+// PosternMessageKind is the kind a postern message record's payload carries.
+const PosternMessageKind = "msg"
+
+// PosternPayload is a message record's on-chain payload, postern's
+// docs/protocol.md section 1 (github.com/Jonathan-A-White/postern): UTF-8
+// JSON, fields in this order — the order postern's own TypeScript writes them
+// in, so the two build the same bytes — carried as version 1 of the nftgate
+// record framing. Everything but Ct travels in the clear.
+type PosternPayload struct {
+	V     int    `json:"v"`     // always 1
+	Kind  string `json:"kind"`  // always PosternMessageKind
+	Class string `json:"class"` // one of PosternClasses
+	To    string `json:"to"`    // recipient's compressed public key, hex
+	From  string `json:"from"`  // sender's compressed public key, hex
+	Ts    int64  `json:"ts"`    // Unix seconds, when the sender built it
+	Ct    string `json:"ct"`    // the BRC-78 ciphertext of the text, base64
 }
 
 // PosternInboxMessage is one record as Inbox reports it: decrypted, and only
@@ -310,14 +318,13 @@ func (i PosternInbox) readCursor(ctx context.Context) (int64, error) {
 	return cursor, nil
 }
 
-// wired reports what mw postern inbox is missing before it can do anything:
-// a later story wires the postern backend and the cipher in.
+// wired reports what mw postern inbox is missing before it can do anything.
 func (i PosternInbox) wired() error {
 	switch {
 	case i.Postern == nil:
-		return fmt.Errorf("mw postern inbox: no postern backend is configured yet: a later story wires it in")
+		return fmt.Errorf("mw postern inbox: no postern backend is configured")
 	case i.Cipher == nil:
-		return fmt.Errorf("mw postern inbox: no cipher is configured yet: a later story wires it in")
+		return fmt.Errorf("mw postern inbox: no cipher is configured")
 	case i.Keys == nil:
 		return fmt.Errorf("mw postern inbox: no postern key file is configured")
 	case i.Memory == nil:
@@ -377,7 +384,7 @@ func (s PosternSend) Run(ctx context.Context, class, text string) (string, error
 	if !validPosternClass(class) {
 		return "", fmt.Errorf("mw postern send: %q is not a class postern knows: %s", class, strings.Join(PosternClasses, ", "))
 	}
-	_, address, err := s.Keys.PublicKey()
+	from, address, err := s.Keys.PublicKey()
 	if err != nil {
 		return "", err
 	}
@@ -394,8 +401,10 @@ func (s PosternSend) Run(ctx context.Context, class, text string) (string, error
 	if err != nil {
 		return "", err
 	}
-	ts := s.now()
-	payload, err := json.Marshal(posternPayload{Kind: "msg", Class: class, Ciphertext: ciphertext, Ts: ts.UTC().Format(time.RFC3339)})
+	payload, err := json.Marshal(PosternPayload{
+		V: 1, Kind: PosternMessageKind, Class: class,
+		To: s.GovernorKey, From: from, Ts: s.now().Unix(), Ct: ciphertext,
+	})
 	if err != nil {
 		return "", fmt.Errorf("building the record's payload: %w", err)
 	}
@@ -415,14 +424,13 @@ func (s PosternSend) Run(ctx context.Context, class, text string) (string, error
 	return txid, nil
 }
 
-// wired reports what mw postern send is missing before it can do anything: a
-// later story wires the postern backend and the cipher in.
+// wired reports what mw postern send is missing before it can do anything.
 func (s PosternSend) wired() error {
 	switch {
 	case s.Postern == nil:
-		return fmt.Errorf("mw postern send: no postern backend is configured yet: a later story wires it in")
+		return fmt.Errorf("mw postern send: no postern backend is configured")
 	case s.Cipher == nil:
-		return fmt.Errorf("mw postern send: no cipher is configured yet: a later story wires it in")
+		return fmt.Errorf("mw postern send: no cipher is configured")
 	case s.Keys == nil:
 		return fmt.Errorf("mw postern send: no postern key file is configured")
 	}

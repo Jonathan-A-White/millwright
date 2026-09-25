@@ -7,11 +7,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/postern"
 
+	"github.com/bsv-blockchain/go-sdk/transaction"
 	"github.com/cucumber/godog"
 )
 
@@ -31,6 +33,7 @@ type posternSendContext struct {
 
 	governorKey string
 	floatSats   int64
+	now         func() time.Time
 
 	txid string
 	err  error
@@ -61,6 +64,7 @@ func InitializePosternSendScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the postern key's balance is (\d+) satoshis$`, c.thePosternKeysBalanceIsSatoshis)
 	ctx.Given(`^the postern key holds a spendable utxo of (\d+) satoshis$`, c.thePosternKeyHoldsASpendableUtxoOfSatoshis)
 	ctx.Given(`^the postern backend will report the txid "([^"]*)"$`, c.thePosternBackendWillReportTheTxid)
+	ctx.Given(`^the clock reads (\d+) for sending$`, c.theClockReadsForSending)
 
 	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" is run$`, c.mwPosternSendIsRun)
 
@@ -69,6 +73,7 @@ func InitializePosternSendScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^it is refused, naming the excess of (\d+)$`, c.itIsRefusedNamingTheExcessOf)
 	ctx.Then(`^it is refused, saying "([^"]*)" is not a class postern knows$`, c.itIsRefusedSayingIsNotAClass)
 	ctx.Then(`^it is refused, saying postern_governor_key is not set$`, c.itIsRefusedSayingGovernorKeyNotSet)
+	ctx.Then(`^the broadcast record is postern's payload, classed "([^"]*)", stamped (\d+)$`, c.theBroadcastRecordIsPosternsPayload)
 }
 
 func (c *posternSendContext) aThrowawayPosternKey() error {
@@ -114,6 +119,11 @@ func (c *posternSendContext) thePosternBackendWillReportTheTxid(txid string) err
 	return nil
 }
 
+func (c *posternSendContext) theClockReadsForSending(unix int64) error {
+	c.now = func() time.Time { return time.Unix(unix, 0) }
+	return nil
+}
+
 func (c *posternSendContext) mwPosternSendIsRun(class, text string) error {
 	send := application.PosternSend{
 		Postern:     c.backend,
@@ -121,6 +131,7 @@ func (c *posternSendContext) mwPosternSendIsRun(class, text string) error {
 		Keys:        c.keys,
 		GovernorKey: c.governorKey,
 		FloatSats:   c.floatSats,
+		Now:         c.now,
 	}
 	c.txid, c.err = send.Run(context.Background(), class, text)
 	return nil
@@ -166,6 +177,38 @@ func (c *posternSendContext) itIsRefusedSayingGovernorKeyNotSet() error {
 	}
 	if !strings.Contains(c.err.Error(), "postern_governor_key") {
 		return fmt.Errorf("expected the refusal to name postern_governor_key, got: %q", c.err.Error())
+	}
+	return nil
+}
+
+// theBroadcastRecordIsPosternsPayload reads the one transaction broadcast
+// back off the fake backend and checks its record output byte for byte: the
+// payload is postern's docs/protocol.md section 1, fields in its order, from
+// this key to the governor key.
+func (c *posternSendContext) theBroadcastRecordIsPosternsPayload(class string, ts int64) error {
+	sent := c.backend.Broadcasts()
+	if len(sent) != 1 {
+		return fmt.Errorf("expected one broadcast, got %d", len(sent))
+	}
+	tx, err := transaction.NewTransactionFromHex(sent[0])
+	if err != nil {
+		return fmt.Errorf("parsing the broadcast transaction: %w", err)
+	}
+	payload, ok := postern.DecodeRecordScript(tx.Outputs[0].LockingScript.String())
+	if !ok {
+		return fmt.Errorf("expected output 0 to be a version-1 record, got %s", tx.Outputs[0].LockingScript.String())
+	}
+	from, _, err := c.keys.PublicKey()
+	if err != nil {
+		return err
+	}
+	ct, err := c.cipher.Encrypt(c.governorKey, "Ship it?")
+	if err != nil {
+		return err
+	}
+	want := fmt.Sprintf(`{"v":1,"kind":"msg","class":%q,"to":%q,"from":%q,"ts":%d,"ct":%q}`, class, c.governorKey, from, ts, ct)
+	if string(payload) != want {
+		return fmt.Errorf("expected the payload\n%s\ngot\n%s", want, payload)
 	}
 	return nil
 }
