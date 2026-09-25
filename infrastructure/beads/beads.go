@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
@@ -421,9 +423,19 @@ func (g *Gateway) call(ctx context.Context, args ...string) ([]byte, error) {
 	return out, nil
 }
 
+// killGrace is how long a bd that has been told to stop is given to let go of
+// its output before mw stops waiting for it.
+const killGrace = time.Second
+
 // run runs one bd command in the vault and hands back both streams and the
 // unwrapped error, so that a caller that cares about bd's exit code can read
 // it. Only one bd runs at a time: the database takes a single-writer lock.
+//
+// bd runs in a process group of its own, so that a context that ends — mw
+// told to stop by a signal, or a dispatch tick giving up — takes with it not
+// only bd but the git it may have started underneath (`bd sync` talks to the
+// remote through git itself), rather than leaving them behind for the next
+// tick to trip over.
 func (g *Gateway) run(ctx context.Context, args ...string) ([]byte, []byte, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -436,11 +448,20 @@ func (g *Gateway) run(ctx context.Context, args ...string) ([]byte, []byte, erro
 	}
 	full = append(full, args...)
 	cmd := exec.CommandContext(ctx, g.program, full...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = killGrace
 	var out, errs bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errs
 
 	err := cmd.Run()
+	if err != nil && ctx.Err() != nil {
+		// The context ended, not bd: this is mw stopping, not bd failing, and the
+		// exit code underneath (a process this host just killed) is not bd's own
+		// to be faithful to.
+		err = fmt.Errorf("stopped: %w", ctx.Err())
+	}
 	return out.Bytes(), errs.Bytes(), err
 }
 

@@ -81,3 +81,19 @@ func TestATestThatExitsWithAnyOtherCodeHasRun(t *testing.T) {
 		t.Errorf("expected a red run that did run, got %+v", checked)
 	}
 }
+
+// A rig's own tests are not a sync: the low-speed limit that ends a stalled
+// vault fetch belongs to the vault's git runner alone, and giving it to a
+// rig's build or test command as well would fail a slow but healthy build
+// that happens to write output slowly to git (a large checkout, say).
+func TestARigsTestsDoNotCarryTheVaultsLowSpeedLimit(t *testing.T) {
+	checks := rig.NewChecks(rig.WithCommand(`echo "limit=$GIT_HTTP_LOW_SPEED_LIMIT time=$GIT_HTTP_LOW_SPEED_TIME"`))
+
+	checked, err := checks.Run(context.Background(), "millwright", t.TempDir())
+	if err != nil {
+		t.Fatalf("running the rig's tests: %v", err)
+	}
+	if want := "limit= time=\n"; checked.Output != want {
+		t.Fatalf("expected a rig's own command to see no low-speed limit, got %q", checked.Output)
+	}
+}

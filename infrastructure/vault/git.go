@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/netfault"
@@ -260,19 +262,50 @@ func (v *Vault) commitsBetween(ctx context.Context, from, to string) (int, error
 	return count, nil
 }
 
+// killGrace is how long a git that has been told to stop is given to let go of
+// its output before mw stops waiting for it.
+const killGrace = time.Second
+
+// lowSpeedLimit and lowSpeedTime bound how long a git network call may sit
+// transferring almost nothing before it gives up: below lowSpeedLimit
+// bytes/sec for lowSpeedTime seconds, git fails it itself rather than a sync
+// holding a tick while a stalled connection sits there. They are not a config
+// knob — every vault git call gets the same wait, on both hosts.
+const (
+	lowSpeedLimit = "1000"
+	lowSpeedTime  = "60"
+)
+
 // git runs one git command in the vault and returns its standard output. It
 // never prompts: a sync may run on a timer with nobody at the keyboard, and a
-// command waiting for a password would hang there until someone noticed.
+// command waiting for a password would hang there until someone noticed. Nor
+// does it hang on a stalled connection: a fetch or push transferring under
+// lowSpeedLimit bytes/sec for lowSpeedTime seconds is git's own failure to
+// report, not a wait for mw to hold.
+//
+// It runs in a process group of its own, so that a context that ends — mw
+// told to stop by a signal, or a dispatch tick giving up — takes the whole
+// group with it, rather than leaving a fetch running behind mw's back for the
+// next sync to trip over.
 func (v *Vault) git(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, Git, args...)
 	cmd.Dir = v.dir
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
+	cmd.Env = append(os.Environ(),
+		"GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0",
+		"GIT_HTTP_LOW_SPEED_LIMIT="+lowSpeedLimit, "GIT_HTTP_LOW_SPEED_TIME="+lowSpeedTime)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = killGrace
 
 	var out, errs bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errs
 
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			// The context ended, not git: this is mw stopping, not git failing.
+			return "", fmt.Errorf("%s %s in %s: stopped: %w", Git, strings.Join(args, " "), v.dir, ctx.Err())
+		}
 		said := strings.TrimSpace(errs.String() + "\n" + out.String())
 		if said == "" {
 			return "", fmt.Errorf("%s %s in %s: %w", Git, strings.Join(args, " "), v.dir, err)
