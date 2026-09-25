@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"testing"
@@ -24,6 +25,10 @@ const (
 	// The empty input line of Claude Code: the prompt mark and a no-break space.
 	emptyPrompt = `printf '\342\235\257\302\240\n'`
 )
+
+// killedElapsed matches the one log line a snapshot the timeout killed
+// leaves: a mention of the kill and how many seconds it ran before it.
+var killedElapsed = regexp.MustCompile(`killed after \d+s`)
 
 // A pane script for each state the Mayor's window can be in. Each ends in a cat
 // that writes whatever is typed into it to $MW_TEST_DIR/typed, so that a test
@@ -71,7 +76,11 @@ func newFactory(t *testing.T) *factory {
 	})
 
 	f.write("bin/bd", "#!/bin/sh\necho \"$*\" >> \"$MW_TEST_DIR/bd.log\"\n"+
-		"[ \"$1 $2\" = \"mail inbox\" ] && cat \"$MW_TEST_DIR/inbox\"\nexit 0\n", 0o755)
+		"case \"$1 $2\" in\n"+
+		"\"mail inbox\") cat \"$MW_TEST_DIR/inbox\" ;;\n"+
+		"\"vc status\") level=$(cat \"$MW_TEST_DIR/beads-level\" 2>/dev/null || echo lvl-1); "+
+		"printf '{\"branch\":\"main\",\"commit\":\"%s\"}\\n' \"$level\" ;;\n"+
+		"esac\nexit 0\n", 0o755)
 	f.write("bin/mw", "#!/bin/sh\ncase \"$1\" in\n"+
 		"sync) echo \"$*\" >> \"$MW_TEST_DIR/mw.log\" ;;\n"+
 		"nudge) echo \"$*\" >> \"$MW_TEST_DIR/nudge.log\"; [ -f \"$MW_TEST_DIR/nudge-output\" ] && cat \"$MW_TEST_DIR/nudge-output\" ;;\n"+
@@ -134,6 +143,25 @@ func (f *factory) posternKey() { f.write(".config/mw/postern.key", "fake-key\n",
 
 // posternCount sets what `mw postern inbox --unread-count` prints.
 func (f *factory) posternCount(n int) { f.write("postern-count", strconv.Itoa(n)+"\n", 0o644) }
+
+// beadsLevel sets what `bd vc status --json` reports as the commit: the
+// notifier's own stand-in for "the beads changed". Not calling it leaves the
+// default, "lvl-1", so a first tick with no prior marker always sees a level
+// to record.
+func (f *factory) beadsLevel(level string) { f.write("beads-level", level, 0o644) }
+
+// snapshotLevel is the marker the script last recorded for the snapshot it
+// wrote or attempted.
+func (f *factory) snapshotLevel() string {
+	return strings.TrimSuffix(f.read("state/snapshot-level"), "\n")
+}
+
+// setSnapshotLastAt rewrites when the snapshot was last attempted, so a test
+// can put the interval gate well in the past without sleeping for it.
+func (f *factory) setSnapshotLastAt(at time.Time) {
+	f.t.Helper()
+	f.write("state/snapshot-last", strconv.FormatInt(at.Unix(), 10)+"\n", 0o644)
+}
 
 func (f *factory) posternCalls() int { return strings.Count(f.read("postern.log"), "\n") }
 
@@ -674,17 +702,72 @@ func TestPosternPollRepeatsNothingForTheSameCount(t *testing.T) {
 	}
 }
 
-func TestPosternSnapshotRunsOncePerTickWithAKeyFile(t *testing.T) {
+func TestPosternSnapshotRunsOnceOnTheFirstTickWithAKeyFile(t *testing.T) {
 	f := newFactory(t)
 	f.mayor("idle", actingByID)
 	f.posternKey()
 	f.posternCount(0)
 
 	f.tick()
+
+	if n := f.posternSubCalls("snapshot"); n != 1 {
+		t.Fatalf("mw postern snapshot was called %d times, want 1", n)
+	}
+	if got := f.snapshotLevel(); got != "lvl-1" {
+		t.Fatalf("recorded snapshot level %q, want lvl-1", got)
+	}
+}
+
+func TestPosternSnapshotUnchangedBeadsRunsNothingEvenPastTheInterval(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.posternCount(0)
+
+	f.tick()
+	if n := f.posternSubCalls("snapshot"); n != 1 {
+		t.Fatalf("mw postern snapshot was called %d times on the first tick, want 1", n)
+	}
+
+	// Well past MW_MAIL_SNAPSHOT_EVERY, but the beads have not changed since:
+	// still nothing.
+	f.setSnapshotLastAt(time.Now().Add(-1 * time.Hour))
+	f.tick()
+
+	if n := f.posternSubCalls("snapshot"); n != 1 {
+		t.Fatalf("mw postern snapshot was called %d times with the beads unchanged, want 1", n)
+	}
+}
+
+func TestPosternSnapshotChangedBeadsRunsOnceThenWaitsOutTheInterval(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.posternCount(0)
+
+	f.tick()
+	if n := f.posternSubCalls("snapshot"); n != 1 {
+		t.Fatalf("mw postern snapshot was called %d times on the first tick, want 1", n)
+	}
+
+	// The beads change again at once, but MW_MAIL_SNAPSHOT_EVERY has not
+	// passed since the last attempt: still nothing.
+	f.beadsLevel("lvl-2")
+	f.tick()
+
+	if n := f.posternSubCalls("snapshot"); n != 1 {
+		t.Fatalf("mw postern snapshot was called %d times inside the interval, want 1", n)
+	}
+
+	// Once both the interval has passed and the beads changed, it runs again.
+	f.setSnapshotLastAt(time.Now().Add(-1 * time.Hour))
 	f.tick()
 
 	if n := f.posternSubCalls("snapshot"); n != 2 {
-		t.Fatalf("mw postern snapshot was called %d times across two ticks, want 2", n)
+		t.Fatalf("mw postern snapshot was called %d times once the interval passed with changed beads, want 2", n)
+	}
+	if got := f.snapshotLevel(); got != "lvl-2" {
+		t.Fatalf("recorded snapshot level %q, want lvl-2", got)
 	}
 }
 
@@ -738,7 +821,7 @@ func TestASlowPosternSnapshotIsKilledByItsOwnTimeoutAndDoesNotStopTheTick(t *tes
 	f.inbox("mw-aaa")
 
 	start := time.Now()
-	f.tick()
+	out := f.tick()
 	elapsed := time.Since(start)
 
 	f.typed(fmt.Sprintf(announcement, 1))
@@ -747,6 +830,15 @@ func TestASlowPosternSnapshotIsKilledByItsOwnTimeoutAndDoesNotStopTheTick(t *tes
 	}
 	if elapsed >= 4*time.Second {
 		t.Fatalf("the tick took %v; a snapshot bounded to a 1s timeout should never have run anywhere near the 5s it tried to sleep", elapsed)
+	}
+	if !killedElapsed.MatchString(out) {
+		t.Fatalf("output %q does not report the kill with its elapsed seconds", out)
+	}
+
+	// The next tick, still inside MW_MAIL_SNAPSHOT_EVERY, does not retry.
+	f.tick()
+	if n := f.posternSubCalls("snapshot"); n != 1 {
+		t.Fatalf("mw postern snapshot was called %d times after a second tick, want 1 (no retry inside the interval)", n)
 	}
 }
 
