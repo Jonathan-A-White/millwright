@@ -709,6 +709,26 @@ inspection. The notifier tick (`contrib/mail-notify`) calls it once after `mw
 nudge`, only on a host with a postern key file, and a failing snapshot is
 logged but never stops the tick.
 
+The postern's VPS-local hand steps — this host's config lines and the nginx
+site — are `mw postern serve` and `mw postern nginx`, both idempotent, both
+backing up what they are about to change first, and both taking `--dry-run`:
+
+```sh
+mw postern serve --backend <url> --snapshot-path <path> --governor-key <hex> [--backup-dir <dir>] [--dry-run]
+mw postern nginx --conf <path> --backend <url> [--backup-dir <dir>] [--dry-run]
+```
+
+`mw postern serve` writes or replaces `postern_backend`, `postern_snapshot_path`
+and `postern_governor_key` in this host's config file — a re-run with the same
+values changes nothing — and makes the snapshot's own directory. `mw postern
+nginx` ensures a `location = /snapshot` block (aliased to the config's own
+`postern_snapshot_path`, no-store, nosniff, served as an opaque octet stream)
+and points the `/api` upstream(s) at `--backend`, both marker-based so a re-run
+is a no-op; it then runs `nginx -t` and, only once that passes, `systemctl
+reload nginx`, restoring the backup automatically if the test fails so a bad
+edit is never left live. Both print the backup path and the way back.
+`--backup-dir` defaults to `/root/tidy`. See `features/postern_serve.feature`.
+
 ## Making a fresh vault
 
 ```sh

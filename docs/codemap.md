@@ -20,12 +20,12 @@ Every adapter: `var _ application.<Port> = ...`.
 
 | Port | Declared in | Real adapter | Fake |
 | --- | --- | --- | --- |
-| `WorkTracker` | `application/worktracker.go` | `infrastructure/beads/beads.go` (`Gateway`) | `apptest.FakeTracker` |
-| `TrackerSync` | `application/sync.go` | `infrastructure/beads/sync.go` (`Gateway`) | `apptest.FakeTracker` |
+| `WorkTracker` | `application/worktracker.go` | `infrastructure/beads/beads.go` | `apptest.FakeTracker` |
+| `TrackerSync` | `application/sync.go` | `infrastructure/beads/sync.go` | `apptest.FakeTracker` |
 | `TrackerNotes` | `application/status.go` | same, read half | same |
 | `SweepNotes` | `application/sweep.go` | same, `Note`s | same |
 | `VaultFiles` | `application/sync.go` | `infrastructure/vault/git.go` | `apptest.FakeVaultFiles` |
-| `Mailbox` | `application/mail.go` | `infrastructure/beads/mail.go` (`Gateway`) | `apptest.FakeMailbox` |
+| `Mailbox` | `application/mail.go` | `infrastructure/beads/mail.go` | `apptest.FakeMailbox` |
 | `Vault` | `application/seatboot.go` | `infrastructure/vault/vault.go` | `application/seatboot_test.go` |
 | `Runner` | `application/runner.go` | `infrastructure/tmux/tmux.go` | `apptest.FakeRunner` |
 | `Harness` | `application/harness.go` | `infrastructure/claude/claude.go` | `application/seatboot_test.go` |
@@ -46,10 +46,10 @@ Every adapter: `var _ application.<Port> = ...`.
 | `Landing` | `application/landing.go` | `infrastructure/rig/landing.go` | none |
 | `Checks` | `application/landing.go` | `infrastructure/rig/checks.go` | none |
 | `AfterLanding` | `application/afterlanding.go` | `infrastructure/rig/afterlanding.go` | none |
-| `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/slot.go` | none (`flock`) |
+| `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/slot.go` | none |
 | `Dispatcher` | `application/landing.go` | `application.Dispatch` | — |
 | `HostSync` | `application/dispatch.go` | `application.Sync` | — |
-| `PosternKeyFile`, `Postern`, `Cipher`, `PosternSnapshotFile` | `application/postern.go`, `application/posternsnapshot.go` | `infrastructure/postern` | `apptest.FakePostern`/`FakeCipher`/`FakeSnapshotFile` |
+| Postern ports (key, msg, snapshot, hand) | `application/postern*.go` | `infrastructure/postern` | `apptest.Fake{Postern,Cipher,SnapshotFile,NginxRunner}` |
 
 `infrastructure/config/config.go` is not a port: read by `cmd/mw/`.
 
@@ -70,17 +70,16 @@ Every adapter: `var _ application.<Port> = ...`.
 | `Sync` | `application/sync.go` | `mw sync` — `cmd/mw/sync.go` | `features/sync.feature` |
 | `Nudge` | `application/nudge.go` | `mw nudge` — `cmd/mw/nudge.go` | none |
 | `Mail` | `application/mail.go` | `mw mail` — `cmd/mw/mail.go` | `features/mail.feature` |
-| `SeatContext` | `application/seatcontext.go` | `mw seat context` — `cmd/mw/seat.go` | `features/seat_context.feature` |
-| `SeatUp` | `application/seatup.go` | `mw seat up` — `cmd/mw/seat.go` | `features/seat_up.feature` |
-| `SeatReap` | `application/seatreap.go` | `mw seat reap` — `cmd/mw/seat.go` | `features/seat_reap.feature` |
+| `SeatContext`, `SeatUp`, `SeatReap` | `application/seatcontext.go`, `application/seatup.go`, `application/seatreap.go` | `mw seat context`/`up`/`reap` — `cmd/mw/seat.go` | `features/seat_context.feature`, `features/seat_up.feature`, `features/seat_reap.feature` |
 | `Millhand` | `application/millhand.go` | `mw millhand` — `cmd/mw/millhand.go` | `features/millhand.feature` |
 | `MillhandTick` | `application/millhandtick.go` | `mw millhand tick` — `cmd/mw/millhandtick.go` | `features/millhand_tick.feature` |
 | `Watch` | `application/watch.go` | `mw watch` — `cmd/mw/watch.go` | `features/watch.feature` |
 | `Doctor` | `application/doctor.go` | `mw doctor` — `cmd/mw/doctor.go` | `features/doctor.feature` |
 | `SeatBoot` | `application/seatboot.go` | none: `Dispatch`, `Next` call it | `features/seat_boot.feature` |
 | `Init` | `application/init.go` | `mw init` — `cmd/mw/init.go` | `features/init.feature` |
-| `PosternKeyInit`, `PosternKeyShow`, `PosternInbox`, `PosternSend` | `application/postern.go` | `mw postern key`/`inbox`/`send` (`--bead --recommend --option`; mails mayor) — `cmd/mw/postern.go` | `features/postern_key.feature` |
-| `PosternSnapshot` | `application/posternsnapshot.go` | `mw postern snapshot` (`--json`; landed w/o `VERIFIED`) — `cmd/mw/postern.go` | none |
+| `PosternKeyInit`, `PosternKeyShow`, `PosternInbox`, `PosternSend` | `application/postern.go` | `mw postern key`/`inbox`/`send` (`--bead --recommend --option`; mails mayor) | `features/postern_key.feature` |
+| `PosternSnapshot` | `application/posternsnapshot.go` | `mw postern snapshot` (`--json`; landed w/o `VERIFIED`) | none |
+| `PosternServe`, `PosternNginx` | `application/posternhand.go` | `mw postern serve`/`nginx` (`--dry-run`) — `cmd/mw/postern.go` | `features/postern_serve.feature` |
 
 `cmd/mw/root.go` holds the tree; `cmd/mw/main.go` runs it; `cmd/mw/version.go` is
 `mw version`. `features/path_validation.feature` covers `domain/path.go`;
