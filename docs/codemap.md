@@ -49,7 +49,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/slot.go` | none (`flock`) |
 | `Dispatcher` | `application/landing.go` | `application.Dispatch` | — |
 | `HostSync` | `application/dispatch.go` | `application.Sync` | — |
-| `PosternKeyFile`, `Postern`, `Cipher` | `application/postern.go` | `infrastructure/postern/keyfile.go` (key) | `apptest.FakePostern`/`FakeCipher` |
+| `PosternKeyFile`, `Postern`, `Cipher` | `application/postern.go` | `infrastructure/postern/keyfile.go` | `apptest.FakePostern`/`FakeCipher` |
 
 `infrastructure/config/config.go` is not a port: read by `cmd/mw/`.
 
@@ -61,7 +61,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `Release` | `application/release.go` | `mw release` — `cmd/mw/release.go` | `features/release.feature` |
 | `Retry` | `application/retry.go` | `mw retry` — `cmd/mw/retry.go` | `features/retry.feature` |
 | `Show` | `application/show.go` | `mw show` — `cmd/mw/show.go` | `features/show.feature` |
-| `Dispatch` | `application/dispatch.go` | `mw dispatch` — `cmd/mw/dispatch.go` | `features/dispatch.feature` |
+| `Dispatch` | `application/dispatch.go` | `mw dispatch` — `cmd/mw/dispatch.go` | `features/dispatch.feature` (dead pane: gq6.106) |
 | `Next` | `application/next.go` | `mw next` — `cmd/mw/next.go` | `features/next.feature` |
 | `Check` | `application/check.go` | `mw check` — `cmd/mw/check.go` | `features/check.feature` |
 | `Status` | `application/status.go` | `mw status` — `cmd/mw/status.go` | `features/status.feature` |
@@ -103,7 +103,7 @@ Add a command: `docs/adding-a-command.md`.
 | `mwConfig` | `cmd/mw/dispatch_test.go` | A `config.toml`, temp HOME. |
 | `aFactory` | `application/dispatch_test.go` | A faked `Dispatch`, temp vault. |
 
-`features/steps/next_steps.go` builds a real rig; fakes tracker, runner, vault git.
+`features/steps/next_steps.go`: real rig; fakes tracker, runner, vault git.
 
 ## Build and test
 
@@ -111,5 +111,5 @@ Add a command: `docs/adding-a-command.md`.
 
 - One package: `go test ./application/...` (`-run TestName`, `-tags beads_integration` for real `bd`).
 - One feature: `MW_FEATURE=sweep.feature go test ./features` (`:17` for a scenario).
-- `make lint` runs `scripts/check-*.sh`; `make check-formulas` needs `bd`, `jq`, time, not in
+- `make lint` runs `scripts/check-*.sh`; `make check-formulas` needs `bd`, `jq`, not in
   `make test`.
