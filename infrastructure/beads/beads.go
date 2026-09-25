@@ -280,6 +280,25 @@ func (g *Gateway) ShowEpic(ctx context.Context, id string) (application.EpicDeta
 	return filed, nil
 }
 
+// LiveEpics implements application.WorkTracker: every epic bd has open or in
+// progress, oldest filed first, whatever it is nested under.
+func (g *Gateway) LiveEpics(ctx context.Context) ([]string, error) {
+	out, err := g.call(ctx, "list", "--type", TypeEpic, "--status", StatusOpen+","+StatusInProgress, "--limit", "0", "--json")
+	if err != nil {
+		return nil, err
+	}
+	beads, err := decodeBeads(out)
+	if err != nil {
+		return nil, fmt.Errorf("reading the live epics: %w", err)
+	}
+	beads = inFiledOrder(beads)
+	ids := make([]string, 0, len(beads))
+	for _, b := range beads {
+		ids = append(ids, b.ID)
+	}
+	return ids, nil
+}
+
 // ReadyStories implements application.WorkTracker. The epic's defaults are read
 // once and overlaid on every story under it, including stories nested deeper
 // than one level: the epic asked for is what sets the defaults.

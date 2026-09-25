@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -30,6 +32,7 @@ func newPosternCmd() *cobra.Command {
 	root.AddCommand(key)
 	root.AddCommand(newPosternInboxCmd())
 	root.AddCommand(newPosternSendCmd())
+	root.AddCommand(newPosternSnapshotCmd())
 	return root
 }
 
@@ -238,5 +241,72 @@ func newPosternSendCmd() *cobra.Command {
 	cmd.Flags().StringVar(&bead, "bead", "", "the bead a decision-needed question is about")
 	cmd.Flags().StringVar(&recommend, "recommend", "", "the option a decision-needed question recommends")
 	cmd.Flags().StringArrayVar(&options, "option", nil, "an option a decision-needed question offers (repeatable)")
+	return cmd
+}
+
+// posternSnapshotClock stamps the written_at a snapshot is built with. A test
+// fixes it.
+var posternSnapshotClock = time.Now
+
+// newPosternSnapshotCmd builds `mw postern snapshot`: the brief of every live
+// epic, encrypted to the Governor's key and written where nginx serves it.
+func newPosternSnapshotCmd() *cobra.Command {
+	var jsonOut bool
+
+	cmd := &cobra.Command{
+		Use:   "snapshot",
+		Short: "Write the encrypted snapshot of every live epic for the Governor's app",
+		Long: "snapshot builds postern's docs/protocol.md section 7 JSON of every epic open or in\n" +
+			"progress: each epic's children still waiting on a decision-needed question\n" +
+			"(needs_you), closed in the last 7 days and not yet marked VERIFIED on a comment\n" +
+			"(landed), in progress then open and unblocked by priority (working), and how many\n" +
+			"are neither (closed_count). It encrypts that JSON to postern_governor_key and writes\n" +
+			"it atomically to postern_snapshot_path (default ~/.local/state/mw/snapshot.bin).\n\n" +
+			"--json prints the plaintext instead of writing anything, for inspection.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			gateway, _, err := posternGateway()
+			if err != nil {
+				return err
+			}
+			snapshot := application.PosternSnapshot{
+				Tracker: gateway,
+				Notes:   gateway,
+				Now:     posternSnapshotClock,
+			}
+			if jsonOut {
+				doc, err := snapshot.Build(cmd.Context())
+				if err != nil {
+					return err
+				}
+				encoded, err := json.Marshal(doc)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintln(cmd.OutOrStdout(), string(encoded))
+				return nil
+			}
+
+			keys, err := posternKeys()
+			if err != nil {
+				return err
+			}
+			governorKey, err := config.PosternGovernorKey()
+			if err != nil {
+				return err
+			}
+			path, err := config.PosternSnapshotPath()
+			if err != nil {
+				return err
+			}
+			snapshot.Cipher = posternCipher(keys)
+			snapshot.File = postern.NewSnapshotFile(path)
+			snapshot.GovernorKey = governorKey
+			snapshot.Out = cmd.OutOrStdout()
+			_, err = snapshot.Run(cmd.Context())
+			return err
+		},
+	}
+	cmd.Flags().BoolVar(&jsonOut, "json", false, "print the plaintext snapshot JSON instead of writing the encrypted file")
 	return cmd
 }

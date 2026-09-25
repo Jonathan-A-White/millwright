@@ -137,6 +137,19 @@ func (f *factory) posternCount(n int) { f.write("postern-count", strconv.Itoa(n)
 
 func (f *factory) posternCalls() int { return strings.Count(f.read("postern.log"), "\n") }
 
+// posternSubCalls counts postern.log lines logged as "postern <sub> ...":
+// "inbox" or "snapshot", so a test can tell the poll and the snapshot apart
+// even though both are logged by the same stand-in case.
+func (f *factory) posternSubCalls(sub string) int {
+	n := 0
+	for _, line := range strings.Split(f.read("postern.log"), "\n") {
+		if fields := strings.Fields(line); len(fields) > 1 && fields[1] == sub {
+			n++
+		}
+	}
+	return n
+}
+
 // announced is the ids the script has recorded as told.
 func (f *factory) announced() string { return f.read("state/announced") }
 
@@ -629,8 +642,8 @@ func TestPosternPollWithZeroUnreadTypesNothing(t *testing.T) {
 	f.tick()
 
 	f.nothingMoreTyped("")
-	if f.posternCalls() != 1 {
-		t.Fatalf("mw postern inbox was called %d times, want 1", f.posternCalls())
+	if n := f.posternSubCalls("inbox"); n != 1 {
+		t.Fatalf("mw postern inbox was called %d times, want 1", n)
 	}
 }
 
@@ -656,8 +669,56 @@ func TestPosternPollRepeatsNothingForTheSameCount(t *testing.T) {
 
 	f.tick()
 	f.nothingMoreTyped(fmt.Sprintf(posternAnnouncement, 2))
-	if f.posternCalls() != 2 {
-		t.Fatalf("mw postern inbox was called %d times across two ticks, want 2", f.posternCalls())
+	if n := f.posternSubCalls("inbox"); n != 2 {
+		t.Fatalf("mw postern inbox was called %d times across two ticks, want 2", n)
+	}
+}
+
+func TestPosternSnapshotRunsOncePerTickWithAKeyFile(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.posternCount(0)
+
+	f.tick()
+	f.tick()
+
+	if n := f.posternSubCalls("snapshot"); n != 2 {
+		t.Fatalf("mw postern snapshot was called %d times across two ticks, want 2", n)
+	}
+}
+
+func TestPosternSnapshotDoesNotRunWithoutAKeyFile(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternCount(0)
+
+	f.tick()
+
+	if n := f.posternSubCalls("snapshot"); n != 0 {
+		t.Fatalf("mw postern snapshot was called %d times with no postern key file, want 0", n)
+	}
+}
+
+func TestAFailingPosternSnapshotDoesNotStopTheTick(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.posternCount(0)
+	f.write("bin/mw", "#!/bin/sh\ncase \"$1 $2\" in\n"+
+		"\"postern snapshot\") echo \"$*\" >> \"$MW_TEST_DIR/postern.log\"; exit 1 ;;\n"+
+		"esac\ncase \"$1\" in\n"+
+		"sync) echo \"$*\" >> \"$MW_TEST_DIR/mw.log\" ;;\n"+
+		"nudge) echo \"$*\" >> \"$MW_TEST_DIR/nudge.log\"; [ -f \"$MW_TEST_DIR/nudge-output\" ] && cat \"$MW_TEST_DIR/nudge-output\" ;;\n"+
+		"postern) echo \"$*\" >> \"$MW_TEST_DIR/postern.log\"; cat \"$MW_TEST_DIR/postern-count\" 2>/dev/null ;;\n"+
+		"esac\nexit 0\n", 0o755)
+	f.inbox("mw-aaa")
+
+	f.tick()
+
+	f.typed(fmt.Sprintf(announcement, 1))
+	if n := f.posternSubCalls("snapshot"); n != 1 {
+		t.Fatalf("mw postern snapshot was called %d times, want 1 (even though it failed)", n)
 	}
 }
 

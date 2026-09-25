@@ -21,7 +21,11 @@
 #      recently than its damper: 1 h the first time, doubling on each repeat
 #      while the condition keeps holding, capped at 8 h, and reset once the
 #      condition clears (recorded per condition in the state directory);
-#   6. if there is new mail, a postern count risen since last noted, or a
+#   6. when this host has a postern key file, runs `mw postern snapshot`,
+#      refreshing the brief of every live epic for the Governor's app —
+#      unconditionally, every tick, whether or not there is anything else to
+#      tell the Mayor; a failure is logged and never stops the tick;
+#   7. if there is new mail, a postern count risen since last noted, or a
 #      clause survived the damper, finds the Mayor's window from the vault's
 #      .mayor-acting and, once it is not working and its input line is empty,
 #      types "New mail for mayor: <n> message(s). Run bd mail inbox." and
@@ -29,7 +33,7 @@
 #      then "Quiet alarm for mayor: <clause>[; <clause> ...]. Run mw status."
 #      and Enter (checking the window is idle again first before each line
 #      after the first, since typing one may have woken it);
-#   7. records the mail ids as announced, the postern count as last noted,
+#   8. records the mail ids as announced, the postern count as last noted,
 #      and each clause's condition as fired, only after each is typed.
 # Otherwise it does nothing and the next tick tries again.
 #
@@ -39,9 +43,10 @@
 # It never syncs, nor asks bd, more than the mail check already did: the
 # quiet alarm reads only what that sync left in the vault, under the same lock.
 #
-# The postern poll (step 4) is skipped silently, with no call to `mw`, on a
-# host with no postern key file (config's postern_key_file, default
-# ~/.config/mw/postern.key): such a host has no postern side.
+# The postern poll (step 4) and the postern snapshot (step 6) are both
+# skipped silently, with no call to `mw`, on a host with no postern key file
+# (config's postern_key_file, default ~/.config/mw/postern.key): such a host
+# has no postern side.
 #
 # The Mayor's window comes from .mayor-acting, which is free text. In it, the
 # first of these that names exactly one window on the tmux server wins:
@@ -222,9 +227,18 @@ if [ -d "$STATE/nudged" ]; then
 	done
 fi
 
+# 6. The postern snapshot: refreshed every tick, on a host with a postern key
+# file, whether or not there is anything below to tell the Mayor about — the
+# Governor's app reads it independently of the tmux window. A failure is
+# logged and never stops the tick: the app simply serves the last good
+# snapshot until the next one gets through.
+if [ -r "$keyfile" ]; then
+	(cd "$vault" && mw postern snapshot >/dev/null 2>&1) || say "mw postern snapshot did not finish cleanly; carrying on with the last one written"
+fi
+
 [ -n "$new" ] || [ -n "$postern_text" ] || [ -n "$nudge_texts" ] || exit 0
 
-# 6. The Mayor's window, from the vault's .mayor-acting.
+# 7. The Mayor's window, from the vault's .mayor-acting.
 acting=$(cat "$vault/.mayor-acting" 2>/dev/null) || acting=""
 [ -n "$acting" ] || { say "something to tell $MAILBOX, but $vault/.mayor-acting names no one; will try again"; exit 0; }
 windows=$(tmx list-windows -a -F "#{window_id}${tab}#{window_index}${tab}#{window_name}" 2>/dev/null) ||
@@ -282,7 +296,7 @@ typed_mail=0
 if [ -n "$new" ]; then
 	line="New mail for $MAILBOX: $count message(s). Run bd mail inbox."
 	if type_line "$line"; then
-		# 7. Only now are the ids announced. What is no longer in the inbox is
+		# 8. Only now are the ids announced. What is no longer in the inbox is
 		# dropped from the record, so it does not grow.
 		echo "$current" >"$STATE/announced"
 		say "typed into $target: $line"
@@ -302,7 +316,7 @@ if [ -n "$postern_text" ]; then
 	fi
 	if [ "$ready" -eq 1 ]; then
 		if type_line "$postern_text"; then
-			# 7. Only now is the count last noted, the same as the mail ids above.
+			# 8. Only now is the count last noted, the same as the mail ids above.
 			echo "$postern_count" >"$STATE/postern-count"
 			say "typed into $target: $postern_text"
 			typed_postern=1

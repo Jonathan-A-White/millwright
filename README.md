@@ -559,8 +559,8 @@ bd reclaim mw-gq6.30                                        # or take it over fi
 `MW_PUSH_WAIT_SECONDS`, `MW_MAX_ATTEMPTS`,
 `MW_MILLHAND_ROUTINE_MODEL`, `MW_MILLHAND_REVIEW_MODEL`,
 `MW_NUDGE_AFTER_MINUTES`, `MW_NUDGE_SYNC_STALE_MINUTES`, `MW_POSTERN_BACKEND`,
-`MW_POSTERN_FLOAT_SATS`, `MW_POSTERN_GOVERNOR_KEY` and `MW_POSTERN_KEY_FILE`
-ahead of it:
+`MW_POSTERN_FLOAT_SATS`, `MW_POSTERN_GOVERNOR_KEY`, `MW_POSTERN_KEY_FILE` and
+`MW_POSTERN_SNAPSHOT_PATH` ahead of it:
 
 ```toml
 vault = "/root/millwright-vault"   # the one beads database and the seats
@@ -583,6 +583,7 @@ postern_backend = "http://desktop.mw:8787"  # where the postern's backend is rea
 postern_float_sats = 100000        # the postern's float cap, in testnet satoshis, enforced on every send (default 100000, PROVISIONAL)
 postern_governor_key = ""          # the Governor's compressed public key, as hex, the postern backend answers to (default empty)
 postern_key_file = "~/.config/mw/postern.key"  # where the Mayor's postern key is kept, outside the vault (default shown)
+postern_snapshot_path = "~/.local/state/mw/snapshot.bin"  # where mw postern snapshot writes the encrypted snapshot (default shown)
 
 [rigs]
 millwright = "/root/millwright"    # where each rig is checked out here
@@ -694,6 +695,19 @@ postern key init` generates it once — a secp256k1 testnet key, written 0600 to
 overwrite one that is already there. `mw postern key show` prints its
 compressed public key and its testnet address; it never prints the private
 key. See `features/postern_key.feature`.
+
+`mw postern snapshot` writes the brief of every live epic (open or in
+progress) as postern's docs/protocol.md §7 JSON: each epic's children still
+waiting on a decision-needed question (`needs_you`), closed in the last 7 days
+and not yet marked `VERIFIED` on a comment (`landed`), in progress then open
+and unblocked by priority (`working`), and how many are neither
+(`closed_count`). It encrypts that JSON to `postern_governor_key` and writes it
+atomically — a temp file, then renamed into place — to `postern_snapshot_path`
+(default `~/.local/state/mw/snapshot.bin`), the file nginx serves to the
+Governor's app. `--json` prints the plaintext instead of writing anything, for
+inspection. The notifier tick (`contrib/mail-notify`) calls it once after `mw
+nudge`, only on a host with a postern key file, and a failing snapshot is
+logged but never stops the tick.
 
 ## Making a fresh vault
 

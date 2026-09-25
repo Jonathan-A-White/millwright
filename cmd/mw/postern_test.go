@@ -214,3 +214,57 @@ func TestPosternSendBroadcastsTheFixturesRecordScript(t *testing.T) {
 		t.Fatalf("expected the record output's script to be the fixture's\n%s\ngot\n%s", f.ScriptHex, got)
 	}
 }
+
+func TestPosternSnapshotJSONPrintsThePlaintextWithoutWritingAnything(t *testing.T) {
+	posternHome(t, "http://unused", "", "")
+
+	snapshotPath := filepath.Join(t.TempDir(), "snapshot.bin")
+	t.Setenv("MW_POSTERN_SNAPSHOT_PATH", snapshotPath)
+
+	out, err := runPostern(t, "snapshot", "--json")
+	if err != nil {
+		t.Fatalf("mw postern snapshot --json failed: %v\n%s", err, out)
+	}
+	var doc struct {
+		WrittenAt string `json:"written_at"`
+		Epics     []any  `json:"epics"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("expected --json to print valid JSON, got %q: %v", out, err)
+	}
+	if doc.WrittenAt == "" {
+		t.Errorf("expected written_at to be set, got %q", out)
+	}
+	if len(doc.Epics) != 0 {
+		t.Errorf("expected no live epics from the empty stand-in, got %v", doc.Epics)
+	}
+	if _, err := os.Stat(snapshotPath); !os.IsNotExist(err) {
+		t.Fatalf("expected --json to write nothing, but %s exists", snapshotPath)
+	}
+}
+
+func TestPosternSnapshotWritesTheEncryptedFileAtomically(t *testing.T) {
+	posternHome(t, "http://unused", "", "governor-pubkey-hex")
+
+	snapshotPath := filepath.Join(t.TempDir(), "state", "snapshot.bin")
+	t.Setenv("MW_POSTERN_SNAPSHOT_PATH", snapshotPath)
+
+	realCipher := posternCipher
+	t.Cleanup(func() { posternCipher = realCipher })
+	posternCipher = func(*postern.KeyFile) application.Cipher { return fixedCipher{ct: "ZmFrZS1jaXBoZXJ0ZXh0"} }
+
+	out, err := runPostern(t, "snapshot")
+	if err != nil {
+		t.Fatalf("mw postern snapshot failed: %v\n%s", err, out)
+	}
+	raw, err := os.ReadFile(snapshotPath)
+	if err != nil {
+		t.Fatalf("reading the written snapshot: %v", err)
+	}
+	if string(raw) != "ZmFrZS1jaXBoZXJ0ZXh0" {
+		t.Fatalf("expected the encrypted ciphertext on disk, got %q", raw)
+	}
+	if _, err := os.Stat(snapshotPath + ".tmp"); !os.IsNotExist(err) {
+		t.Fatalf("expected no temp file left behind, stat gave: %v", err)
+	}
+}
