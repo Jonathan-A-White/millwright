@@ -25,6 +25,12 @@ func TestClassifyPane(t *testing.T) {
 		{"a screen with no prompt on it is not idle", "Do you want to proceed?\n 1. Yes\n 2. No\n", application.PaneInput},
 		{"a blank screen is not idle", "\n\n\n", application.PaneInput},
 		{"a mark that is not at the start of a line is not the input line", "  ❯\u00a0\n", application.PaneInput},
+		{"claude's theme screen is its first-run screen",
+			"Welcome to Claude Code v2.1.282\n\nLet's get started.\n\nChoose the text style that looks best with your terminal\nTo change this later, run /theme\n1. Auto (match terminal)\n2. Dark mode\n",
+			application.PaneFirstRun},
+		{"claude's login menu is its first-run screen",
+			"Select login method:\n1. Claude account with subscription\n2. Anthropic Console account\n",
+			application.PaneFirstRun},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

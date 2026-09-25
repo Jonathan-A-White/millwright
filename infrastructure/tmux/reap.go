@@ -33,6 +33,14 @@ const (
 	noBreakSpace  = " "
 )
 
+// firstRunMarkers are lines Claude Code's own first-run screens show, before
+// it has a prompt of its own at all: a theme choice and the login menu.
+var firstRunMarkers = []string{
+	"Welcome to Claude Code",
+	"Choose the text style",
+	"Select login method",
+}
+
 // OpenWindows implements application.ReapTerminal: every window of every
 // session on the server, each dated by the process in its pane as List does.
 func (w *Windows) OpenWindows(ctx context.Context) ([]application.ReapWindow, error) {
@@ -116,9 +124,11 @@ func (w *Windows) PaneState(ctx context.Context, window string) (application.Pan
 
 // classifyPane says what a screen of Claude Code is doing. A session that says
 // how to interrupt it is working. One with a prompt mark on a line of its own
-// is at an empty input line, and idle. Anything else is not to be closed over:
-// the mark has text after it, or there is no prompt on the screen at all — a
-// question being asked, a menu, a session that has not started.
+// is at an empty input line, and idle. One that shows a firstRunMarkers line
+// is at Claude Code's own first-run screen, not yet a prompt at all. Anything
+// else is not to be closed over: the mark has text after it, or there is no
+// prompt on the screen at all — a question being asked, a menu, a session
+// that has not started.
 func classifyPane(screen string) application.PaneState {
 	// An empty input line is the mark and a no-break space, which a pattern for
 	// blank space does not always take for one.
@@ -129,6 +139,11 @@ func classifyPane(screen string) application.PaneState {
 	for _, line := range strings.Split(screen, "\n") {
 		if rest, isPrompt := strings.CutPrefix(line, promptMark); isPrompt && strings.TrimSpace(rest) == "" {
 			return application.PaneIdle
+		}
+	}
+	for _, marker := range firstRunMarkers {
+		if strings.Contains(screen, marker) {
+			return application.PaneFirstRun
 		}
 	}
 	return application.PaneInput

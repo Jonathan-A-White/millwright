@@ -51,6 +51,11 @@ const (
 	// it, or it is not at a prompt at all. Someone may be in the middle of a
 	// sentence, and a window is never closed over their words.
 	PaneInput PaneState = "input"
+	// PaneFirstRun is a pane at one of Claude Code's own first-run screens — a
+	// theme choice, the login menu — before it has a prompt of its own at all.
+	// It is never idle and never restarted: a fresh session would show the very
+	// same screen, so only a person can get it past it.
+	PaneFirstRun PaneState = "first-run"
 )
 
 // ReapTerminal is the port a reaper looks at windows through, and closes one
