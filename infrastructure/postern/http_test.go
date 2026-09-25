@@ -49,10 +49,10 @@ func serve(t *testing.T, answers map[string]answer) (*backend, *postern.HTTP) {
 }
 
 func TestMessagesReadsTheRecordsSinceTheCursorFromTheirScripts(t *testing.T) {
-	f := loadRecordFixture(t)
+	f := loadProtocolFixture(t)
 	records, _ := json.Marshal(map[string]any{
 		"records": []map[string]any{
-			{"seq": 4, "txid": "t4", "vout": 0, "scriptHex": f.ScriptHex, "height": 0, "firstSeen": "2026-09-24T12:00:03.512Z"},
+			{"seq": 4, "txid": "t4", "vout": 0, "scriptHex": f.RecordScriptHex, "height": 0, "firstSeen": "2026-09-24T12:00:03.512Z"},
 			{"seq": 5, "txid": "t5", "vout": 0, "scriptHex": "006a076e667467617465010102" + "7b7d", "height": 0, "firstSeen": "2026-09-24T12:00:04Z",
 				"payload": map[string]any{}},
 		},
@@ -65,7 +65,7 @@ func TestMessagesReadsTheRecordsSinceTheCursorFromTheirScripts(t *testing.T) {
 		t.Fatalf("reading messages: %v", err)
 	}
 	want := []application.PosternRecord{
-		{Seq: 4, Txid: "t4", Class: f.Class, From: f.SenderPubKey, To: f.RecipientPubKey, Ts: time.Unix(f.Ts, 0).UTC(), Ciphertext: f.Ct},
+		{Seq: 4, Txid: "t4", Class: f.EncryptMessage.Class, From: f.EncryptMessage.From, To: f.EncryptMessage.To, Ts: time.Unix(f.EncryptMessage.Ts, 0).UTC(), Ciphertext: f.EncryptMessage.Ct},
 		{Seq: 5, Txid: "t5"},
 	}
 	if len(got) != len(want) {

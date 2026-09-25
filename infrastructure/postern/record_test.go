@@ -2,32 +2,54 @@ package postern_test
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"testing"
 
+	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/postern"
 )
 
-func TestRecordScriptIsTheFixturesBytes(t *testing.T) {
-	f := loadRecordFixture(t)
+// fixturePayload rebuilds the payload bytes postern's own TypeScript wrote
+// (application.PosternPayload's field order matches its JSON key order, the
+// same reasoning documented on that type), from the fixture's encryptMessage.
+func fixturePayload(t *testing.T, f protocolFixture) []byte {
+	t.Helper()
+	payload, err := json.Marshal(application.PosternPayload{
+		V:     f.EncryptMessage.V,
+		Kind:  f.EncryptMessage.Kind,
+		Class: f.EncryptMessage.Class,
+		To:    f.EncryptMessage.To,
+		From:  f.EncryptMessage.From,
+		Ts:    f.EncryptMessage.Ts,
+		Ct:    f.EncryptMessage.Ct,
+	})
+	if err != nil {
+		t.Fatalf("marshaling the fixture's payload: %v", err)
+	}
+	return payload
+}
 
-	got, err := postern.RecordScript([]byte(f.Payload))
+func TestRecordScriptIsTheFixturesBytes(t *testing.T) {
+	f := loadProtocolFixture(t)
+
+	got, err := postern.RecordScript(fixturePayload(t, f))
 	if err != nil {
 		t.Fatalf("building the record script: %v", err)
 	}
-	if hex.EncodeToString(*got) != f.ScriptHex {
-		t.Fatalf("expected the record script\n%s\ngot\n%s", f.ScriptHex, hex.EncodeToString(*got))
+	if hex.EncodeToString(*got) != f.RecordScriptHex {
+		t.Fatalf("expected the record script\n%s\ngot\n%s", f.RecordScriptHex, hex.EncodeToString(*got))
 	}
 }
 
 func TestDecodeRecordScriptReadsTheFixturesPayload(t *testing.T) {
-	f := loadRecordFixture(t)
+	f := loadProtocolFixture(t)
 
-	payload, ok := postern.DecodeRecordScript(f.ScriptHex)
+	payload, ok := postern.DecodeRecordScript(f.RecordScriptHex)
 	if !ok {
 		t.Fatal("expected the fixture's script to decode as a version-1 record")
 	}
-	if string(payload) != f.Payload {
-		t.Fatalf("expected the payload\n%s\ngot\n%s", f.Payload, payload)
+	if string(payload) != string(fixturePayload(t, f)) {
+		t.Fatalf("expected the payload\n%s\ngot\n%s", fixturePayload(t, f), payload)
 	}
 }
 
