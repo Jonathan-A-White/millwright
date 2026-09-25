@@ -15,10 +15,14 @@ import (
 
 // fakeTimersSystemctl writes a stand-in for systemctl that answers `--user
 // is-enabled <timer>` and `--user is-active <timer>` from enabled and active
-// (timer -> true/false; a timer in neither map reads as not enabled, the way
-// a timer never installed on this host would), always succeeds `--user start
-// <timer>`, and logs every call to a file this test can read back.
-func fakeTimersSystemctl(t *testing.T, enabled, active map[string]bool) (program, callLog string) {
+// (timer -> true/false; a timer in neither map reads as disabled but
+// installed: exit 1, stdout "disabled"), always succeeds `--user start
+// <timer>`, and logs every call to a file this test can read back. A timer in
+// notInstalled fails is-enabled the way systemctl does for one with no unit
+// file at all: exit 1, empty stdout, "No such file or directory" on stderr. A
+// timer in broken fails is-enabled for some other, genuine reason, naming no
+// unit file.
+func fakeTimersSystemctl(t *testing.T, enabled, active map[string]bool, notInstalled, broken []string) (program, callLog string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("the stand-in for systemctl is a shell script")
@@ -27,7 +31,7 @@ func fakeTimersSystemctl(t *testing.T, enabled, active map[string]bool) (program
 	program = filepath.Join(dir, "systemctl-stand-in")
 	callLog = filepath.Join(dir, "calls")
 
-	var enabledCases, activeCases strings.Builder
+	var enabledCases, activeCases, notInstalledCases, brokenCases strings.Builder
 	for timer, ok := range enabled {
 		if ok {
 			fmt.Fprintf(&enabledCases, "  %q) echo enabled; exit 0 ;;\n", timer)
@@ -38,12 +42,19 @@ func fakeTimersSystemctl(t *testing.T, enabled, active map[string]bool) (program
 			fmt.Fprintf(&activeCases, "  %q) echo active; exit 0 ;;\n", timer)
 		}
 	}
+	for _, timer := range notInstalled {
+		fmt.Fprintf(&notInstalledCases, "  %q) echo %q 1>&2; exit 1 ;;\n", timer,
+			"Failed to get unit file state for "+timer+": No such file or directory")
+	}
+	for _, timer := range broken {
+		fmt.Fprintf(&brokenCases, "  %q) echo \"Failed to connect to bus: Connection refused\" 1>&2; exit 1 ;;\n", timer)
+	}
 
 	script := fmt.Sprintf(`#!/bin/sh
 echo "$*" >>%q
 if [ "$1" = --user ] && [ "$2" = is-enabled ]; then
   case "$3" in
-%s  *) echo disabled; exit 1 ;;
+%s%s%s  *) echo disabled; exit 1 ;;
   esac
 fi
 if [ "$1" = --user ] && [ "$2" = is-active ]; then
@@ -55,7 +66,7 @@ if [ "$1" = --user ] && [ "$2" = start ]; then
   exit 0
 fi
 exit 1
-`, callLog, enabledCases.String(), activeCases.String())
+`, callLog, notInstalledCases.String(), brokenCases.String(), enabledCases.String(), activeCases.String())
 	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
 		t.Fatalf("writing the stand-in: %v", err)
 	}
@@ -66,6 +77,7 @@ func TestTheTimersProbeIsOKWhenEveryEnabledTimerIsActive(t *testing.T) {
 	program, _ := fakeTimersSystemctl(t,
 		map[string]bool{"mw-dispatch.timer": true, "mw-millhand-tick.timer": true},
 		map[string]bool{"mw-dispatch.timer": true, "mw-millhand-tick.timer": true},
+		nil, nil,
 	)
 	check := &doctor.Timers{Units: []string{"mw-dispatch.service", "mw-millhand-tick.service"}, Program: program}
 
@@ -79,6 +91,7 @@ func TestTheTimersProbeIsFaultyWhenAnEnabledTimerIsInactive(t *testing.T) {
 	program, _ := fakeTimersSystemctl(t,
 		map[string]bool{"mw-dispatch.timer": true},
 		map[string]bool{"mw-dispatch.timer": false},
+		nil, nil,
 	)
 	check := &doctor.Timers{Units: []string{"mw-dispatch.service"}, Program: program}
 
@@ -93,14 +106,59 @@ func TestTheTimersProbeIsFaultyWhenAnEnabledTimerIsInactive(t *testing.T) {
 
 func TestTheTimersProbeSkipsATimerThatIsNotEnabled(t *testing.T) {
 	program, _ := fakeTimersSystemctl(t,
-		map[string]bool{}, // mw-millhand-review.timer not installed on this host
+		map[string]bool{}, // mw-millhand-review.timer installed but disabled
 		map[string]bool{},
+		nil, nil,
 	)
 	check := &doctor.Timers{Units: []string{"mw-millhand-review.service"}, Program: program}
 
 	verdict, reason := check.Probe(context.Background())
 	if verdict != application.DoctorOK {
 		t.Fatalf("expected ok (skipped, not faulty), got %s (%s)", verdict, reason)
+	}
+}
+
+func TestTheTimersProbeIsOKNAWhenNoUnitIsInstalled(t *testing.T) {
+	program, _ := fakeTimersSystemctl(t, map[string]bool{}, map[string]bool{},
+		[]string{"mw-dispatch.timer", "mw-doctor.timer"}, nil)
+	check := &doctor.Timers{Units: []string{"mw-dispatch.service", "mw-doctor.service"}, Program: program}
+
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorOK {
+		t.Fatalf("expected ok, got %s (%s)", verdict, reason)
+	}
+	if want := "n/a: none of these units is installed here"; reason != want {
+		t.Errorf("expected reason %q, got %q", want, reason)
+	}
+}
+
+func TestTheTimersProbeSkipsANotInstalledTimerInAMixedList(t *testing.T) {
+	program, _ := fakeTimersSystemctl(t,
+		map[string]bool{"mw-dispatch.timer": true},
+		map[string]bool{"mw-dispatch.timer": false},
+		[]string{"mw-doctor.timer"}, nil,
+	)
+	check := &doctor.Timers{Units: []string{"mw-dispatch.service", "mw-doctor.service"}, Program: program}
+
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorFaulty {
+		t.Fatalf("expected faulty, got %s (%s)", verdict, reason)
+	}
+	if !strings.Contains(reason, "mw-dispatch.timer") {
+		t.Errorf("expected the reason to name the inactive timer, got %q", reason)
+	}
+	if strings.Contains(reason, "mw-doctor.timer") {
+		t.Errorf("expected the not-installed timer skipped, not named, got %q", reason)
+	}
+}
+
+func TestTheTimersProbeIsStillCannotTellOnAGenuineFailure(t *testing.T) {
+	program, _ := fakeTimersSystemctl(t, map[string]bool{}, map[string]bool{}, nil, []string{"mw-dispatch.timer"})
+	check := &doctor.Timers{Units: []string{"mw-dispatch.service"}, Program: program}
+
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorCannotTell {
+		t.Fatalf("expected cannot-tell, got %s (%s)", verdict, reason)
 	}
 }
 
@@ -117,6 +175,7 @@ func TestTheTimersCureStartsOnlyTheFaultyTimer(t *testing.T) {
 	program, calls := fakeTimersSystemctl(t,
 		map[string]bool{"mw-dispatch.timer": true, "mw-millhand-tick.timer": true},
 		map[string]bool{"mw-dispatch.timer": false, "mw-millhand-tick.timer": true},
+		nil, nil,
 	)
 	check := &doctor.Timers{Units: []string{"mw-dispatch.service", "mw-millhand-tick.service"}, Program: program}
 

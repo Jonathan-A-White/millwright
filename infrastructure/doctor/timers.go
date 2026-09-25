@@ -59,14 +59,19 @@ func (t *Timers) Name() string { return TimersName }
 // enabled here; `systemctl --user is-active <timer>` for the rest, faulty
 // naming every one that is enabled but not active. cannot-tell when systemctl
 // itself could not be run at all — no systemctl on PATH, no user manager —
-// rather than a plain "not enabled" or "not active" answer.
+// rather than a plain "not enabled" or "not active" answer. When every timer
+// in the list has no unit file on this host at all, ok, with a reason saying
+// so, rather than faulty or cannot-tell.
 func (t *Timers) Probe(ctx context.Context) (application.Verdict, string) {
-	faulty, cannotTell := t.faulty(ctx)
+	faulty, allSkipped, cannotTell := t.faulty(ctx)
 	if cannotTell != "" {
 		return application.DoctorCannotTell, cannotTell
 	}
 	if len(faulty) > 0 {
 		return application.DoctorFaulty, "not active: " + strings.Join(faulty, ", ")
+	}
+	if allSkipped {
+		return application.DoctorOK, notInstalledReason
 	}
 	return application.DoctorOK, ""
 }
@@ -77,7 +82,7 @@ func (t *Timers) Probe(ctx context.Context) (application.Verdict, string) {
 // timer that is already active is a no-op, so a timer another cure or a
 // person has since brought up in between costs nothing extra.
 func (t *Timers) Cure(ctx context.Context) error {
-	faulty, cannotTell := t.faulty(ctx)
+	faulty, _, cannotTell := t.faulty(ctx)
 	if cannotTell != "" {
 		return fmt.Errorf("%s", cannotTell)
 	}
@@ -113,16 +118,22 @@ func (t *Timers) WayBack() string {
 }
 
 // faulty is every timer, derived from Units, that is enabled here but not
-// active, or, if systemctl itself could not be asked at all, a cannotTell
+// active; allSkipped, whether every one of them has no unit file on this host
+// at all; or, if systemctl itself could not be asked at all, a cannotTell
 // reason naming why. A timer not enabled here is skipped, not faulted: it may
 // simply not be installed on this host.
-func (t *Timers) faulty(ctx context.Context) (names []string, cannotTell string) {
+func (t *Timers) faulty(ctx context.Context) (names []string, allSkipped bool, cannotTell string) {
+	skipped := 0
 	for _, unit := range t.Units {
 		timer := timerName(unit)
 
 		enabledOut, err := t.run(ctx, "is-enabled", timer)
 		if err != nil && strings.TrimSpace(enabledOut) == "" {
-			return nil, fmt.Sprintf("systemctl is-enabled %s: %v", timer, err)
+			if unitNotFound(err) {
+				skipped++
+				continue
+			}
+			return nil, false, fmt.Sprintf("systemctl is-enabled %s: %v", timer, err)
 		}
 		if strings.TrimSpace(enabledOut) != "enabled" {
 			continue
@@ -130,13 +141,13 @@ func (t *Timers) faulty(ctx context.Context) (names []string, cannotTell string)
 
 		activeOut, err := t.run(ctx, "is-active", timer)
 		if err != nil && strings.TrimSpace(activeOut) == "" {
-			return nil, fmt.Sprintf("systemctl is-active %s: %v", timer, err)
+			return nil, false, fmt.Sprintf("systemctl is-active %s: %v", timer, err)
 		}
 		if strings.TrimSpace(activeOut) != "active" {
 			names = append(names, timer)
 		}
 	}
-	return names, ""
+	return names, skipped > 0 && skipped == len(t.Units), ""
 }
 
 func (t *Timers) run(ctx context.Context, args ...string) (string, error) {
