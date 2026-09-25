@@ -45,12 +45,20 @@ func NewDaemonReload(units []string) *DaemonReload {
 func (d *DaemonReload) Name() string { return DaemonReloadName }
 
 // Probe implements application.DoctorCheck: `systemctl --user show <unit> -p
-// NeedDaemonReload` for every unit. Faulty when any says yes; cannot-tell
-// when systemctl itself could not be asked, or answered a unit with neither
-// yes nor no — a unit systemd has never loaded, among them.
+// NeedDaemonReload` for every unit installed on this host — a unit with no
+// unit file at all is skipped rather than asked. Faulty when any installed
+// unit says yes; cannot-tell when systemctl itself could not be asked, or
+// answered a unit with neither yes nor no. When every unit in the list is
+// skipped, ok, with a reason saying so, rather than faulty or cannot-tell:
+// a host that simply does not run any of them.
 func (d *DaemonReload) Probe(ctx context.Context) (application.Verdict, string) {
 	var needing, unclear []string
+	skipped := 0
 	for _, unit := range d.Units {
+		if d.notInstalled(ctx, unit) {
+			skipped++
+			continue
+		}
 		out, err := d.run(ctx, "show", unit, "-p", "NeedDaemonReload")
 		if err != nil {
 			unclear = append(unclear, fmt.Sprintf("%s: %v", unit, err))
@@ -70,7 +78,23 @@ func (d *DaemonReload) Probe(ctx context.Context) (application.Verdict, string) 
 	if len(unclear) > 0 {
 		return application.DoctorCannotTell, "systemctl did not say: " + strings.Join(unclear, ", ")
 	}
+	if skipped > 0 && skipped == len(d.Units) {
+		return application.DoctorOK, notInstalledReason
+	}
 	return application.DoctorOK, ""
+}
+
+// notInstalled reports whether unit has no unit file on this host at all:
+// `systemctl --user show <unit> -p LoadState` saying "not-found", or failing
+// the way systemctl does for one. A genuine failure to ask at all is not
+// skipped here: it falls through to the NeedDaemonReload query below, which
+// fails the same way and is reported cannot-tell.
+func (d *DaemonReload) notInstalled(ctx context.Context, unit string) bool {
+	out, err := d.run(ctx, "show", unit, "-p", "LoadState")
+	if err != nil {
+		return unitNotFound(err)
+	}
+	return loadStateValue(out) == "not-found"
 }
 
 // Cure implements application.DoctorCheck: `systemctl --user daemon-reload`.
@@ -104,6 +128,18 @@ func needDaemonReloadValue(out string) string {
 	line := strings.TrimSpace(out)
 	key, value, found := strings.Cut(line, "=")
 	if !found || key != "NeedDaemonReload" {
+		return ""
+	}
+	return strings.TrimSpace(value)
+}
+
+// loadStateValue reads systemctl show's one line of output down to the value
+// after "LoadState=", the same way needDaemonReloadValue reads
+// "NeedDaemonReload=".
+func loadStateValue(out string) string {
+	line := strings.TrimSpace(out)
+	key, value, found := strings.Cut(line, "=")
+	if !found || key != "LoadState" {
 		return ""
 	}
 	return strings.TrimSpace(value)
