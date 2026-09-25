@@ -112,10 +112,17 @@ type PosternRecord struct {
 	Seq        int64
 	Txid       string
 	Class      string
-	From       string // sender's compressed public key, hex
+	From       string // sender's compressed public key, hex, as the payload itself claims — anyone's to write, never trusted alone
 	To         string // recipient's compressed public key, hex
 	Ts         time.Time
 	Ciphertext string // base64, as it travels on chain
+
+	// Signer is the compressed public key, hex, that signed the funding
+	// transaction's input, when the postern backend supplies enough to
+	// recover it (its scriptSig, or the raw transaction). Empty when it does
+	// not, so it is never compared — an unchecked signer is not evidence for
+	// or against a record's sender.
+	Signer string
 }
 
 // PosternUtxo is one unspent output the postern key's balance is built from.
@@ -152,8 +159,14 @@ type Cipher interface {
 	// reports the ciphertext, base64.
 	Encrypt(toPubKey, text string) (ciphertext string, err error)
 	// Decrypt decrypts ciphertext (base64) with privKey (WIF) and reports its
-	// plaintext text. Ciphertext this key cannot open is an error.
-	Decrypt(privKey, ciphertext string) (text string, err error)
+	// plaintext text, along with envelopeFrom: the sender's compressed
+	// public key, hex, that BRC-78 itself binds into the ciphertext.
+	// Decrypt only succeeds if the AES-GCM tag verifies, which requires the
+	// private key matching envelopeFrom — so a successful Decrypt is proof
+	// the message was encrypted by that key's holder, unlike the payload's
+	// own From field, which is free text anyone can write. Ciphertext this
+	// key cannot open is an error.
+	Decrypt(privKey, ciphertext string) (text string, envelopeFrom string, err error)
 }
 
 // PosternNotes is the part of the tracker's key-value store Inbox remembers
@@ -244,9 +257,20 @@ type PosternInboxMessage struct {
 	Seq   int64
 	Txid  string
 	Class string
-	From  string
-	Ts    time.Time
-	Text  string
+	// From is the sender mw trusts: the BRC-78 envelope's own sender key
+	// (Cipher.Decrypt's envelopeFrom), never the payload's From field taken
+	// on its own word. When the payload's From, or — once the backend can
+	// supply one — the transaction's signing key, disagrees with the
+	// envelope, From instead names the envelope's key and what was falsely
+	// claimed, and Verified is false: "<envelope key> (payload claimed
+	// <claim>)" or "<envelope key> (signer claimed <signer>)".
+	From     string
+	Verified bool
+	// SignerChecked is true once the postern backend has supplied enough to
+	// compare the transaction's signing key against the envelope.
+	SignerChecked bool
+	Ts            time.Time
+	Text          string
 }
 
 // PosternInbox reads the postern's message records addressed to this host's
@@ -273,6 +297,12 @@ type PosternInbox struct {
 	// SeatIdentity(MwSeat, Host).
 	Host string
 
+	// GovernorKey is the Governor's compressed public key, hex — config
+	// postern_governor_key. A verified sender equal to it is printed as "the
+	// Governor" rather than its hex. Empty prints every verified sender as
+	// its hex.
+	GovernorKey string
+
 	// Out is where a full read's messages are printed, and where UnreadCount
 	// prints the count. A nil Out prints nothing.
 	Out io.Writer
@@ -295,16 +325,21 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 	}
 	newestFirst := reversePosternInbox(mine)
 	for _, m := range newestFirst {
-		if reply, ok := decodePosternReply(m.Text); ok {
-			recorded, err := i.recordAnswer(ctx, m, reply)
-			if err != nil {
-				return nil, err
-			}
-			if recorded {
-				continue
+		// A record whose sender is not verified is never read as a reply,
+		// however its plaintext decodes: recording its answer on a bead
+		// would take a forged or unverifiable claim as someone's word.
+		if m.Verified {
+			if reply, ok := decodePosternReply(m.Text); ok {
+				recorded, err := i.recordAnswer(ctx, m, reply)
+				if err != nil {
+					return nil, err
+				}
+				if recorded {
+					continue
+				}
 			}
 		}
-		i.printf("%s  from %s  txid %s  %s\n%s\n", m.Class, orUnknown(m.From), orUnknown(m.Txid), sentInFull(m.Ts), m.Text)
+		i.printf("%s  from %s  txid %s  %s\n%s\n", m.Class, i.fromLabel(m), orUnknown(m.Txid), sentInFull(m.Ts), m.Text)
 	}
 	if newest > cursor {
 		if err := i.Memory.SetNote(ctx, PosternCursorKey, strconv.FormatInt(newest, 10)); err != nil {
@@ -341,6 +376,25 @@ func (i PosternInbox) recordAnswer(ctx context.Context, m PosternInboxMessage, r
 		}
 	}
 	return true, nil
+}
+
+// fromLabel is the text mw postern inbox prints for m's sender: m.From
+// unchanged for an unverified sender (already annotated with what was
+// falsely claimed), otherwise "the Governor" when it is i.GovernorKey, its
+// hex key otherwise — with "(signer unchecked)" appended when the backend
+// has not yet supplied enough to compare the transaction's signing key.
+func (i PosternInbox) fromLabel(m PosternInboxMessage) string {
+	if !m.Verified {
+		return m.From
+	}
+	label := m.From
+	if i.GovernorKey != "" && label == i.GovernorKey {
+		label = "the Governor"
+	}
+	if !m.SignerChecked {
+		label += " (signer unchecked)"
+	}
+	return label
 }
 
 // UnreadCount reports how many messages addressed to this key are unread,
@@ -387,13 +441,34 @@ func (i PosternInbox) fetch(ctx context.Context) (mine []PosternInboxMessage, ne
 		if r.To != pubKeyHex {
 			continue
 		}
-		text, err := i.Cipher.Decrypt(privKey, r.Ciphertext)
+		text, envelopeFrom, err := i.Cipher.Decrypt(privKey, r.Ciphertext)
 		if err != nil {
 			return nil, 0, 0, fmt.Errorf("decrypting record %d (%s): %w", r.Seq, r.Txid, err)
 		}
-		mine = append(mine, PosternInboxMessage{Seq: r.Seq, Txid: r.Txid, Class: r.Class, From: r.From, Ts: r.Ts, Text: text})
+		from, verified, signerChecked := posternVerifySender(envelopeFrom, r.From, r.Signer)
+		mine = append(mine, PosternInboxMessage{
+			Seq: r.Seq, Txid: r.Txid, Class: r.Class,
+			From: from, Verified: verified, SignerChecked: signerChecked,
+			Ts: r.Ts, Text: text,
+		})
 	}
 	return mine, newest, cursor, nil
+}
+
+// posternVerifySender is the sender mw trusts for a record whose ciphertext
+// decrypted to envelopeFrom (Cipher.Decrypt's own cryptographically bound
+// sender key): claimedFrom is the payload's own From field, signer the
+// transaction's signing key when the backend supplies one ("" when it does
+// not). A record is verified only when both agree with envelopeFrom — a
+// disagreement is reported as text rather than hidden, and never verified.
+func posternVerifySender(envelopeFrom, claimedFrom, signer string) (from string, verified bool, signerChecked bool) {
+	if claimedFrom != envelopeFrom {
+		return fmt.Sprintf("%s (payload claimed %s)", envelopeFrom, orUnknown(claimedFrom)), false, signer != ""
+	}
+	if signer != "" && signer != envelopeFrom {
+		return fmt.Sprintf("%s (signer claimed %s)", envelopeFrom, signer), false, true
+	}
+	return envelopeFrom, true, signer != ""
 }
 
 // readCursor is the stored cursor, or 0 when Inbox has never read before.
