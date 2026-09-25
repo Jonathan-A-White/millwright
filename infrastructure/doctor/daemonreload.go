@@ -49,18 +49,28 @@ func (d *DaemonReload) Name() string { return DaemonReloadName }
 // unit file at all is skipped rather than asked. Faulty when any installed
 // unit says yes; cannot-tell when systemctl itself could not be asked, or
 // answered a unit with neither yes nor no. When every unit in the list is
-// skipped, ok, with a reason saying so, rather than faulty or cannot-tell:
-// a host that simply does not run any of them.
+// skipped, ok, with a reason saying so, rather than faulty or cannot-tell: a
+// host that simply does not run any of them. The same, immediately, when
+// systemctl cannot reach a user manager to ask at all — a system-scope
+// install rather than a fault — since nothing it might otherwise have said
+// about any other unit can be trusted either.
 func (d *DaemonReload) Probe(ctx context.Context) (application.Verdict, string) {
 	var needing, unclear []string
 	skipped := 0
 	for _, unit := range d.Units {
-		if d.notInstalled(ctx, unit) {
+		skip, busReason := d.notInstalled(ctx, unit)
+		if busReason != "" {
+			return application.DoctorOK, busReason
+		}
+		if skip {
 			skipped++
 			continue
 		}
 		out, err := d.run(ctx, "show", unit, "-p", "NeedDaemonReload")
 		if err != nil {
+			if noUserManager(err) {
+				return application.DoctorOK, noUserManagerReason
+			}
 			unclear = append(unclear, fmt.Sprintf("%s: %v", unit, err))
 			continue
 		}
@@ -88,13 +98,18 @@ func (d *DaemonReload) Probe(ctx context.Context) (application.Verdict, string) 
 // `systemctl --user show <unit> -p LoadState` saying "not-found", or failing
 // the way systemctl does for one. A genuine failure to ask at all is not
 // skipped here: it falls through to the NeedDaemonReload query below, which
-// fails the same way and is reported cannot-tell.
-func (d *DaemonReload) notInstalled(ctx context.Context, unit string) bool {
+// fails the same way and is reported cannot-tell. If instead systemctl cannot
+// reach a user manager's bus at all, busReason names the reason the whole
+// check should answer ok with, rather than treating this one unit specially.
+func (d *DaemonReload) notInstalled(ctx context.Context, unit string) (skip bool, busReason string) {
 	out, err := d.run(ctx, "show", unit, "-p", "LoadState")
 	if err != nil {
-		return unitNotFound(err)
+		if noUserManager(err) {
+			return false, noUserManagerReason
+		}
+		return unitNotFound(err), ""
 	}
-	return loadStateValue(out) == "not-found"
+	return loadStateValue(out) == "not-found", ""
 }
 
 // Cure implements application.DoctorCheck: `systemctl --user daemon-reload`.
