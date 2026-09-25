@@ -280,6 +280,73 @@ func (g *Gateway) ShowEpic(ctx context.Context, id string) (application.EpicDeta
 	return filed, nil
 }
 
+// ShowEpics implements application.WorkTracker: ShowEpic for several epics at
+// once. Their own fields — title, status, priority — are read in a single bd
+// show call rather than one per epic; each epic's children still cost their
+// own bd list --parent call underneath, since bd's --parent flag takes only
+// one parent at a time and there is no way found to ask for several epics'
+// children in one call without losing what a story waits on (mw-tfne4.17).
+func (g *Gateway) ShowEpics(ctx context.Context, ids []string) ([]application.EpicDetail, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	found, err := g.showMany(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[string]bead, len(found))
+	for _, b := range found {
+		byID[b.ID] = b
+	}
+
+	out := make([]application.EpicDetail, 0, len(ids))
+	for _, id := range ids {
+		epic, ok := byID[id]
+		if !ok {
+			return nil, fmt.Errorf("no bead %s in %s", id, g.vault)
+		}
+		if epic.Type != "" && epic.Type != TypeEpic {
+			return nil, fmt.Errorf("%s is a %s, not an epic", id, epic.Type)
+		}
+		defaults := domain.PathFromMetadata(epic.pathMetadata())
+
+		listed, err := g.call(ctx, "list", "--parent", id, "--limit", "0", "--all", "--json")
+		if err != nil {
+			return nil, err
+		}
+		stories, err := decodeBeads(listed)
+		if err != nil {
+			return nil, fmt.Errorf("reading the stories of %s: %w", id, err)
+		}
+
+		filed := application.EpicDetail{
+			ID: epic.ID, Title: epic.Title, Status: epic.Status, Priority: epic.priority(), Defaults: defaults,
+		}
+		for _, story := range inFiledOrder(stories) {
+			filed.Stories = append(filed.Stories, story.detail(defaults))
+		}
+		out = append(out, filed)
+	}
+	return out, nil
+}
+
+// showMany reads several beads in one bd call: bd show takes any number of
+// ids and prints them in the same JSON array shape showOne reads one bead
+// from.
+func (g *Gateway) showMany(ctx context.Context, ids []string) ([]bead, error) {
+	args := append([]string{"show"}, ids...)
+	args = append(args, "--json")
+	out, err := g.call(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	found, err := decodeBeads(out)
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", strings.Join(ids, ", "), err)
+	}
+	return found, nil
+}
+
 // LiveEpics implements application.WorkTracker: every epic bd has open or in
 // progress, oldest filed first, whatever it is nested under.
 func (g *Gateway) LiveEpics(ctx context.Context) ([]string, error) {
@@ -376,6 +443,29 @@ func (g *Gateway) StoryComments(ctx context.Context, id string) ([]application.C
 		return nil, fmt.Errorf("reading the comments of %s: %w", id, err)
 	}
 	return comments, nil
+}
+
+// StoriesComments implements application.WorkTracker: StoryComments for
+// several stories at once, keyed by id. bd show --include-comments streams
+// every comment inline for as many ids as it is given in one process, rather
+// than one bd comments process per story (mw-tfne4.17). An id bd does not
+// recognise is left out of the result rather than failing the whole call, the
+// way bd show itself skips it.
+func (g *Gateway) StoriesComments(ctx context.Context, ids []string) (map[string][]application.Comment, error) {
+	if len(ids) == 0 {
+		return map[string][]application.Comment{}, nil
+	}
+	args := append([]string{"show"}, ids...)
+	args = append(args, "--include-comments", "--json")
+	out, err := g.call(ctx, args...)
+	if err != nil {
+		return nil, err
+	}
+	said, err := decodeCommentsByID(out)
+	if err != nil {
+		return nil, fmt.Errorf("reading the comments of %s: %w", strings.Join(ids, ", "), err)
+	}
+	return said, nil
 }
 
 // CloseStory implements application.WorkTracker.

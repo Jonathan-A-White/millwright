@@ -92,6 +92,12 @@ type FakeTracker struct {
 	// test can say a story's comments were never read.
 	commentReads map[string]int
 
+	// showEpicsCalls counts each call to ShowEpics, and storiesCommentsCalls
+	// each call to StoriesComments, so that a test can say a batch of epics or
+	// stories was read in one tracker call rather than one per epic or story.
+	showEpicsCalls       int
+	storiesCommentsCalls int
+
 	// failing is the methods FailOn makes fail, by the error each gives.
 	failing map[string]error
 
@@ -449,6 +455,26 @@ func (f *FakeTracker) StoryComments(_ context.Context, id string) ([]application
 	return comments, nil
 }
 
+// StoriesComments implements application.WorkTracker: StoryComments for each
+// id, keyed by id. Each call still goes through StoryComments, so
+// CommentReads keeps counting them the same way a test written against the
+// single-story call already does; the one call to StoriesComments itself is
+// counted separately, by StoriesCommentsCalls.
+func (f *FakeTracker) StoriesComments(ctx context.Context, ids []string) (map[string][]application.Comment, error) {
+	f.mu.Lock()
+	f.storiesCommentsCalls++
+	f.mu.Unlock()
+	out := make(map[string][]application.Comment, len(ids))
+	for _, id := range ids {
+		comments, err := f.StoryComments(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		out[id] = comments
+	}
+	return out, nil
+}
+
 // CloseReason reports why a story was closed, or "" if it is still open.
 func (f *FakeTracker) CloseReason(id string) string {
 	f.mu.Lock()
@@ -516,6 +542,43 @@ func (f *FakeTracker) ShowEpic(_ context.Context, id string) (application.EpicDe
 		epic.Stories = append(epic.Stories, detail)
 	}
 	return epic, nil
+}
+
+// ShowEpics implements application.WorkTracker: ShowEpic for each id, in
+// order. The fake holds nothing that costs more calls to read together, so it
+// simply asks ShowEpic once per id; it counts the one call to ShowEpics
+// itself, so a test can say a caller asked for a batch of epics in one
+// tracker call rather than one per epic.
+func (f *FakeTracker) ShowEpics(ctx context.Context, ids []string) ([]application.EpicDetail, error) {
+	f.mu.Lock()
+	f.showEpicsCalls++
+	f.mu.Unlock()
+	out := make([]application.EpicDetail, 0, len(ids))
+	for _, id := range ids {
+		epic, err := f.ShowEpic(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, epic)
+	}
+	return out, nil
+}
+
+// ShowEpicsCalls reports how many times ShowEpics was called, so that a test
+// can say several epics were read in one batch rather than one call each.
+func (f *FakeTracker) ShowEpicsCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.showEpicsCalls
+}
+
+// StoriesCommentsCalls reports how many times StoriesComments was called, so
+// that a test can say several stories' comments were read in one batch
+// rather than one call each.
+func (f *FakeTracker) StoriesCommentsCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.storiesCommentsCalls
 }
 
 // LiveEpics implements application.WorkTracker: the epics added (AddEpic or

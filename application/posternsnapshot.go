@@ -162,6 +162,14 @@ func (s PosternSnapshot) write(ctx context.Context, doc PosternSnapshotDoc) erro
 
 // Build reads the tracker and reports the snapshot's plaintext, without
 // encrypting or writing anything: what --json prints for inspection.
+//
+// Reading is done in as few tracker calls as the shape of the data allows,
+// rather than one per epic and more per question (mw-tfne4.17): every live
+// epic's own fields and every epic's children are read by startEpic, without
+// touching a single story's comments; every child across every epic that
+// still needs a comment read — to build its needs_you entry or to check a
+// landed one for VERIFIED — is collected first and read back in the one
+// StoriesComments call finishEpic then applies to each epic in turn.
 func (s PosternSnapshot) Build(ctx context.Context) (PosternSnapshotDoc, error) {
 	if s.Tracker == nil {
 		return PosternSnapshotDoc{}, fmt.Errorf("mw postern snapshot: no work tracker is configured")
@@ -175,32 +183,68 @@ func (s PosternSnapshot) Build(ctx context.Context) (PosternSnapshotDoc, error) 
 		return PosternSnapshotDoc{}, fmt.Errorf("listing the live epics: %w", err)
 	}
 
-	doc := PosternSnapshotDoc{WrittenAt: s.now().UTC().Format(time.RFC3339)}
-	for _, id := range ids {
-		epic, err := s.epic(ctx, id)
+	epics, err := s.Tracker.ShowEpics(ctx, ids)
+	if err != nil {
+		return PosternSnapshotDoc{}, fmt.Errorf("reading the live epics: %w", err)
+	}
+
+	builds := make([]*epicBuild, len(epics))
+	var needComments []string
+	for i, detail := range epics {
+		b, err := s.startEpic(ctx, detail)
 		if err != nil {
 			return PosternSnapshotDoc{}, err
 		}
-		doc.Epics = append(doc.Epics, epic)
+		builds[i] = b
+		for _, child := range b.needsYou {
+			needComments = append(needComments, child.Story.ID)
+		}
+		for _, child := range b.landedCand {
+			needComments = append(needComments, child.Story.ID)
+		}
+	}
+
+	comments, err := s.Tracker.StoriesComments(ctx, needComments)
+	if err != nil {
+		return PosternSnapshotDoc{}, fmt.Errorf("reading the comments of the live epics' children: %w", err)
+	}
+
+	doc := PosternSnapshotDoc{WrittenAt: s.now().UTC().Format(time.RFC3339)}
+	for _, b := range builds {
+		doc.Epics = append(doc.Epics, s.finishEpic(b, comments))
 	}
 	return doc, nil
 }
 
-// epic builds one live epic's brief: needs_you, landed and working, in that
-// order, and everything else collapsed to closed_count.
-func (s PosternSnapshot) epic(ctx context.Context, id string) (PosternSnapshotEpic, error) {
-	detail, err := s.Tracker.ShowEpic(ctx, id)
-	if err != nil {
-		return PosternSnapshotEpic{}, fmt.Errorf("reading the epic %s: %w", id, err)
-	}
+// epicBuild is one live epic's brief in progress: everything Build can read
+// without any story's comments, plus which children still need one read —
+// needsYou and landedCand — so that every comment they need, across every
+// epic, is read back in the one StoriesComments call Build makes.
+type epicBuild struct {
+	out          PosternSnapshotEpic
+	needsYou     []StoryDetail
+	landedCand   []StoryDetail
+	inProgress   []PosternSnapshotWorking
+	openFrontier []PosternSnapshotWorking
+	counted      int
+	total        int
+}
 
-	out := PosternSnapshotEpic{
-		ID:       detail.ID,
-		Title:    detail.Title,
-		Priority: priorityLabel(detail.Priority),
-		Status:   detail.Status,
-		NeedsYou: []PosternSnapshotQuestion{},
-		Landed:   []PosternSnapshotLanded{},
+// startEpic builds an epic's header and its working frontier, and sorts its
+// children into needs_you and landed candidates for finishEpic to read the
+// comments of — without reading a single comment itself.
+func (s PosternSnapshot) startEpic(ctx context.Context, detail EpicDetail) (*epicBuild, error) {
+	b := &epicBuild{
+		out: PosternSnapshotEpic{
+			ID:       detail.ID,
+			Title:    detail.Title,
+			Priority: priorityLabel(detail.Priority),
+			Status:   detail.Status,
+			NeedsYou: []PosternSnapshotQuestion{},
+			Landed:   []PosternSnapshotLanded{},
+		},
+		inProgress:   []PosternSnapshotWorking{},
+		openFrontier: []PosternSnapshotWorking{},
 	}
 
 	lookup := map[string]StoryDetail{}
@@ -209,15 +253,11 @@ func (s PosternSnapshot) epic(ctx context.Context, id string) (PosternSnapshotEp
 	}
 
 	now := s.now()
-	inProgress, openFrontier := []PosternSnapshotWorking{}, []PosternSnapshotWorking{}
-	counted := 0
-	total := 0
-
 	for _, child := range detail.Stories {
 		if child.IsEpic {
 			continue
 		}
-		total++
+		b.total++
 
 		// A story closed outside the Landed window is neither landed nor
 		// needs_you nor working: it is read no further, so an epic's long tail
@@ -227,66 +267,71 @@ func (s PosternSnapshot) epic(ctx context.Context, id string) (PosternSnapshotEp
 			if child.ClosedAt.IsZero() || now.Sub(child.ClosedAt) > PosternSnapshotWindow {
 				continue
 			}
-			landed, ok, err := s.landed(ctx, child)
-			if err != nil {
-				return PosternSnapshotEpic{}, err
-			}
-			if ok {
-				out.Landed = append(out.Landed, landed)
-				counted++
-			}
+			b.landedCand = append(b.landedCand, child)
 			continue
 		}
 
 		asked, err := s.Notes.Note(ctx, PosternQuestionKey(child.Story.ID))
 		if err != nil {
-			return PosternSnapshotEpic{}, fmt.Errorf("reading %s's question note: %w", child.Story.ID, err)
+			return nil, fmt.Errorf("reading %s's question note: %w", child.Story.ID, err)
 		}
 		if strings.TrimSpace(asked) != "" {
-			question, err := s.needsYou(ctx, child)
-			if err != nil {
-				return PosternSnapshotEpic{}, err
-			}
-			out.NeedsYou = append(out.NeedsYou, question)
+			b.needsYou = append(b.needsYou, child)
 		}
 
 		switch {
 		case strings.EqualFold(strings.TrimSpace(child.Status), StatusInProgress):
 			waits, err := s.waits(ctx, child, lookup)
 			if err != nil {
-				return PosternSnapshotEpic{}, err
+				return nil, err
 			}
-			inProgress = append(inProgress, workingEntry(child, waits))
-			counted++
+			b.inProgress = append(b.inProgress, workingEntry(child, waits))
+			b.counted++
 		case !child.Held():
 			waits, err := s.waits(ctx, child, lookup)
 			if err != nil {
-				return PosternSnapshotEpic{}, err
+				return nil, err
 			}
 			if len(waits) == 0 {
-				openFrontier = append(openFrontier, workingEntry(child, waits))
-				counted++
+				b.openFrontier = append(b.openFrontier, workingEntry(child, waits))
+				b.counted++
 			}
 		}
 	}
 
-	sort.SliceStable(openFrontier, func(i, j int) bool {
-		return priorityOf(openFrontier[i].Priority) < priorityOf(openFrontier[j].Priority)
+	sort.SliceStable(b.openFrontier, func(i, j int) bool {
+		return priorityOf(b.openFrontier[i].Priority) < priorityOf(b.openFrontier[j].Priority)
 	})
-	out.Working = append(inProgress, openFrontier...)
-	out.ClosedCount = total - counted
-	return out, nil
+	return b, nil
 }
 
-// needsYou builds one needs_you entry from the newest QUESTION comment on
-// child, recommended and options read from its text, asked_at from the
-// comment's own recorded time when the tracker gives one, or else from the
-// timestamp the comment's text itself carries.
-func (s PosternSnapshot) needsYou(ctx context.Context, child StoryDetail) (PosternSnapshotQuestion, error) {
-	comments, err := s.Tracker.StoryComments(ctx, child.Story.ID)
-	if err != nil {
-		return PosternSnapshotQuestion{}, fmt.Errorf("reading %s's comments: %w", child.Story.ID, err)
+// finishEpic completes an epic's brief with its children's comments, already
+// read by Build into comments, keyed by story id.
+func (s PosternSnapshot) finishEpic(b *epicBuild, comments map[string][]Comment) PosternSnapshotEpic {
+	out := b.out
+	out.Working = append(b.inProgress, b.openFrontier...)
+
+	counted := b.counted
+	for _, child := range b.landedCand {
+		landed, ok := landedFromComments(child, comments[child.Story.ID])
+		if ok {
+			out.Landed = append(out.Landed, landed)
+			counted++
+		}
 	}
+	for _, child := range b.needsYou {
+		out.NeedsYou = append(out.NeedsYou, needsYouFromComments(child, comments[child.Story.ID]))
+	}
+
+	out.ClosedCount = b.total - counted
+	return out
+}
+
+// needsYouFromComments builds one needs_you entry from the newest QUESTION
+// comment among child's comments, recommended and options read from its
+// text, asked_at from the comment's own recorded time when the tracker gives
+// one, or else from the timestamp the comment's text itself carries.
+func needsYouFromComments(child StoryDetail, comments []Comment) PosternSnapshotQuestion {
 	question := PosternSnapshotQuestion{ID: child.Story.ID, Title: child.Story.Title}
 	for i := len(comments) - 1; i >= 0; i-- {
 		m := posternQuestionComment.FindStringSubmatch(comments[i].Text)
@@ -304,25 +349,20 @@ func (s PosternSnapshot) needsYou(ctx context.Context, child StoryDetail) (Poste
 		question.Options = splitOptions(m[3])
 		break
 	}
-	return question, nil
+	return question
 }
 
-// landed reports child as a landed entry, unless it carries a comment naming
-// PosternSnapshotVerifiedMarker. The caller has already established child
-// closed within PosternSnapshotWindow: landed reads its comments only once
-// that is known, never for a story that does not belong in landed at all. ok
-// is false, with no error, for a verified child.
-func (s PosternSnapshot) landed(ctx context.Context, child StoryDetail) (PosternSnapshotLanded, bool, error) {
-	comments, err := s.Tracker.StoryComments(ctx, child.Story.ID)
-	if err != nil {
-		return PosternSnapshotLanded{}, false, fmt.Errorf("reading %s's comments: %w", child.Story.ID, err)
-	}
+// landedFromComments reports child as a landed entry, unless it carries a
+// comment naming PosternSnapshotVerifiedMarker. The caller has already
+// established child closed within PosternSnapshotWindow. ok is false for a
+// verified child.
+func landedFromComments(child StoryDetail, comments []Comment) (PosternSnapshotLanded, bool) {
 	for _, c := range comments {
 		if strings.Contains(c.Text, PosternSnapshotVerifiedMarker) {
-			return PosternSnapshotLanded{}, false, nil
+			return PosternSnapshotLanded{}, false
 		}
 	}
-	return PosternSnapshotLanded{ID: child.Story.ID, Title: child.Story.Title, LandedAt: formatOrEmpty(child.ClosedAt)}, true, nil
+	return PosternSnapshotLanded{ID: child.Story.ID, Title: child.Story.Title, LandedAt: formatOrEmpty(child.ClosedAt)}, true
 }
 
 // waits is the ids of what child still waits on that is not finished, reading

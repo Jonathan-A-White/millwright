@@ -361,3 +361,47 @@ func decodeComments(printed []byte) ([]application.Comment, error) {
 	sort.SliceStable(comments, func(i, j int) bool { return comments[i].Created.Before(comments[j].Created) })
 	return comments, nil
 }
+
+// decodeCommentsByID reads the comments `bd show --include-comments --json`
+// embeds on each bead it prints, keyed by the bead's id and sorted oldest
+// first the same way decodeComments sorts a single story's — the batched
+// counterpart StoriesComments reads.
+func decodeCommentsByID(printed []byte) (map[string][]application.Comment, error) {
+	printed = bytes.TrimSpace(printed)
+	out := map[string][]application.Comment{}
+	if len(printed) == 0 {
+		return out, nil
+	}
+
+	if printed[0] == '{' {
+		var reported struct {
+			Error string `json:"error"`
+		}
+		if err := json.Unmarshal(printed, &reported); err == nil && reported.Error != "" {
+			return nil, errors.New(reported.Error)
+		}
+	}
+
+	var shown []struct {
+		ID       string `json:"id"`
+		Comments []struct {
+			Author    string `json:"author"`
+			Text      string `json:"text"`
+			CreatedAt string `json:"created_at"`
+		} `json:"comments"`
+	}
+	if err := json.Unmarshal(printed, &shown); err != nil {
+		return nil, fmt.Errorf("%s printed something that is not a list of beads: %w", Program, err)
+	}
+
+	for _, one := range shown {
+		comments := make([]application.Comment, 0, len(one.Comments))
+		for _, said := range one.Comments {
+			created, _ := time.Parse(time.RFC3339, said.CreatedAt)
+			comments = append(comments, application.Comment{Author: said.Author, Created: created, Text: said.Text})
+		}
+		sort.SliceStable(comments, func(i, j int) bool { return comments[i].Created.Before(comments[j].Created) })
+		out[one.ID] = comments
+	}
+	return out, nil
+}

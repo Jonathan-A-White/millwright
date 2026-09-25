@@ -275,6 +275,14 @@ type WorkTracker interface {
 	// does: nothing is written.
 	ShowEpic(ctx context.Context, id string) (EpicDetail, error)
 
+	// ShowEpics is ShowEpic for several epics at once, in the order ids names
+	// them: a caller reading many epics — a project view across all of them,
+	// say — asks the tracker to spend as few calls as it can on their own
+	// fields (title, status, priority) rather than one per epic, though each
+	// epic's children may still cost their own call underneath. An id that
+	// names no epic is an error, just as ShowEpic's is.
+	ShowEpics(ctx context.Context, ids []string) ([]EpicDetail, error)
+
 	// LiveEpics lists the ids of every epic that is open or in progress, in
 	// the order the tracker files them — what a project view means by "live":
 	// a held or closed epic has nothing left for it to say. It reads and
@@ -373,6 +381,14 @@ type WorkTracker interface {
 	// StoryComments lists the comments left on a story, oldest first. It reads
 	// and writes nothing, and a story with no comments has an empty list.
 	StoryComments(ctx context.Context, id string) ([]Comment, error)
+
+	// StoriesComments is StoryComments for several stories at once, keyed by
+	// id: a caller that would otherwise read many stories' comments back to
+	// back asks the tracker to spend one call on all of them instead of one
+	// each. A story with no comments has an empty list, same as
+	// StoryComments, and an id the tracker does not recognise is simply
+	// absent from the map rather than failing the whole call.
+	StoriesComments(ctx context.Context, ids []string) (map[string][]Comment, error)
 
 	// CloseStory closes a story with the reason it was closed for.
 	CloseStory(ctx context.Context, id, reason string) error
