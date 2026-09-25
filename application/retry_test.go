@@ -44,6 +44,9 @@ func (f *fakeRetryLanding) Fetch(context.Context, string) error { return nil }
 func (f *fakeRetryLanding) Add(context.Context, string, string, string, string) error {
 	return nil
 }
+func (f *fakeRetryLanding) Exists(context.Context, string, string, string) (bool, error) {
+	return false, nil
+}
 func (f *fakeRetryLanding) Remove(context.Context, string, string, string) error { return nil }
 
 func (f *fakeRetryLanding) RemoveWithoutForce(context.Context, string, string) error {

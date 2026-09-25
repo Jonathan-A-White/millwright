@@ -94,6 +94,23 @@ func (w *Worktrees) Add(ctx context.Context, rigDir, dir, branch, start string) 
 	return err
 }
 
+// Exists implements application.Worktrees.
+func (w *Worktrees) Exists(ctx context.Context, rigDir, dir, branch string) (bool, error) {
+	if dir != "" {
+		if _, err := os.Stat(dir); err == nil {
+			return true, nil
+		} else if !os.IsNotExist(err) {
+			return false, fmt.Errorf("checking whether %s is already there: %w", dir, err)
+		}
+	}
+	if branch != "" {
+		if _, err := w.git(ctx, rigDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err == nil {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // Remove implements application.Worktrees: the worktree and its branch go, and
 // what was never there is not complained about.
 func (w *Worktrees) Remove(ctx context.Context, rigDir, dir, branch string) error {

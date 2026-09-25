@@ -164,9 +164,12 @@ func newDispatchCmd() *cobra.Command {
 			gateway := mwGateway(dir, host)
 			files := mwVault(dir, host)
 			logs := hostTickLogs()
+			worktrees := rig.New()
 			dispatch := application.Dispatch{
 				Tracker:     gateway,
-				Worktrees:   rig.New(),
+				Worktrees:   worktrees,
+				Landing:     worktrees,
+				Files:       files,
 				Runner:      tmux.New(),
 				Boot:        builderBoot(files, host, tests),
 				Memory:      gateway,

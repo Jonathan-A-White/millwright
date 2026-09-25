@@ -138,6 +138,34 @@ Feature: Dispatching the stories this host is ready to work
     And the story "mw-gq6.9" records 2 attempts
     And dispatch reclaimed "mw-gq6.9" for a dead pane with an expired lease
 
+  # mw-gq6.107: a dead-pane reclaim gives the claim back but leaves the
+  # worktree and branch an earlier attempt cut exactly as they were, so the
+  # fresh attempt below finds them in the way of its own cut.
+
+  Scenario: A leftover worktree and branch from a reclaimed dead pane are saved before the fresh cut
+    Given a story "mw-gq6.9" of that epic was dispatched and left its worktree with 2 commits
+    And the story "mw-gq6.9" has been tried 1 time
+    And the session of "mw-gq6.9" has a dead pane and its lease has expired
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.9"
+    And the story "mw-gq6.9" records 2 attempts
+    And the worktree of "mw-gq6.9" is a checkout of the rig on branch "mw/mw-gq6.9"
+    And the leftover branch of "mw-gq6.9" was saved as a bundle under "runs/mw-gq6.9/attempt-1.bundle" in the vault
+    And the dispatch line for "mw-gq6.9" names the bundle and the attempt
+
+  Scenario: If saving a leftover branch fails, only that story is refused and the run still exits 0
+    Given a story "mw-gq6.9" of that epic was dispatched and left its worktree with 1 commit
+    And the story "mw-gq6.9" has been tried 1 time
+    And the session of "mw-gq6.9" has a dead pane and its lease has expired
+    And the vault cannot push the bundle
+    And a ready story "mw-gq6.1" of that epic
+    When dispatch runs on "vps" with a cap of 2
+    Then one session was started, for "mw-gq6.1"
+    And dispatch passed over "mw-gq6.9", saying: could not be saved
+    And the story "mw-gq6.9" carries a comment saying the dispatch failed
+    And the story "mw-gq6.9" is not claimed
+    And dispatch leaves with status 0
+
   Scenario: A dead pane whose lease has not expired still counts against the cap
     Given a ready story "mw-gq6.1" of that epic
     And a story "mw-gq6.9" of that epic is already running here
