@@ -170,6 +170,44 @@ type PosternNotes interface {
 // sequence number of every record it has read, ours or not.
 const PosternCursorKey = "postern.inbox.cursor"
 
+// PosternQuestionKey is the note key a question sent for a bead is marked
+// open under, until its reply clears it: postern's docs/protocol.md section
+// 6.
+func PosternQuestionKey(bead string) string { return "postern.question." + bead }
+
+// PosternQuestion is a decision-needed message's plaintext, postern's
+// docs/protocol.md section 6: a JSON object naming the bead it is asked
+// about, the question, the recommended option and every option offered.
+type PosternQuestion struct {
+	Bead    string   `json:"bead"`
+	Q       string   `json:"q"`
+	Rec     string   `json:"rec"`
+	Options []string `json:"options"`
+}
+
+// PosternReply is a reply's plaintext, postern's docs/protocol.md section 6:
+// a JSON object naming the bead it answers and the answer. A plaintext that
+// does not decode as one — including plain text, and a question — is not a
+// reply.
+type PosternReply struct {
+	Bead   string `json:"bead"`
+	Answer string `json:"answer"`
+}
+
+// decodePosternReply reads text as a PosternReply, reporting false when it is
+// not a JSON object with a non-empty bead field — plain text, exactly as
+// postern's protocol says a message not shaped this way is read.
+func decodePosternReply(text string) (PosternReply, bool) {
+	var reply PosternReply
+	if err := json.Unmarshal([]byte(text), &reply); err != nil {
+		return PosternReply{}, false
+	}
+	if strings.TrimSpace(reply.Bead) == "" || strings.TrimSpace(reply.Answer) == "" {
+		return PosternReply{}, false
+	}
+	return reply, true
+}
+
 // PosternClasses is the set of classes mw postern send accepts.
 var PosternClasses = []string{"message", "decision-needed", "landing", "alarm"}
 
@@ -204,6 +242,7 @@ type PosternPayload struct {
 // what a person reading it needs.
 type PosternInboxMessage struct {
 	Seq   int64
+	Txid  string
 	Class string
 	From  string
 	Ts    time.Time
@@ -222,13 +261,30 @@ type PosternInbox struct {
 	Keys    PosternKeyFile
 	Memory  PosternNotes
 
+	// Tracker records a reply's answer on the bead it names, and clears the
+	// note the question it answers was marked open under. A nil Tracker
+	// leaves every reply printed as text, exactly as an unknown bead does.
+	Tracker WorkTracker
+	// Mailbox, when set, is sent a message to the Mayor's mailbox for every
+	// reply recorded, so the notifier wakes the seat. A nil Mailbox records
+	// the reply but sends nothing.
+	Mailbox Mailbox
+	// Host names this host, for the mail a recorded reply sends: it is signed
+	// SeatIdentity(MwSeat, Host).
+	Host string
+
 	// Out is where a full read's messages are printed, and where UnreadCount
 	// prints the count. A nil Out prints nothing.
 	Out io.Writer
 }
 
 // Run prints every unread message addressed to this key, newest first, and
-// marks them read.
+// marks them read. A message whose plaintext decodes as a reply naming a bead
+// this host's tracker knows is not printed as text: its answer is appended to
+// the bead verbatim, with the txid and the sender's public key, the open
+// question's note is cleared, and the Mayor is mailed so the notifier wakes
+// the seat. A reply naming a bead the tracker does not know is printed as
+// text, and nothing is written for it.
 func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 	if err := i.wired(); err != nil {
 		return nil, err
@@ -239,6 +295,15 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 	}
 	newestFirst := reversePosternInbox(mine)
 	for _, m := range newestFirst {
+		if reply, ok := decodePosternReply(m.Text); ok {
+			recorded, err := i.recordAnswer(ctx, m, reply)
+			if err != nil {
+				return nil, err
+			}
+			if recorded {
+				continue
+			}
+		}
 		i.printf("%s  from %s  %s\n%s\n", m.Class, orUnknown(m.From), sentInFull(m.Ts), m.Text)
 	}
 	if newest > cursor {
@@ -247,6 +312,35 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 		}
 	}
 	return newestFirst, nil
+}
+
+// recordAnswer appends reply's answer to the bead it names, clears the note
+// that bead's question was marked open under, and mails the Mayor, reporting
+// true once done. A bead the tracker does not know — including no tracker at
+// all — reports false and changes nothing, so the reply is left for Run to
+// print as text.
+func (i PosternInbox) recordAnswer(ctx context.Context, m PosternInboxMessage, reply PosternReply) (bool, error) {
+	if i.Tracker == nil {
+		return false, nil
+	}
+	comment := fmt.Sprintf("ANSWER %s from %s, txid %s: %s", sentInFull(m.Ts), orUnknown(m.From), m.Txid, reply.Answer)
+	if err := i.Tracker.CommentOnStory(ctx, reply.Bead, comment); err != nil {
+		return false, nil
+	}
+	if err := i.Memory.ClearNote(ctx, PosternQuestionKey(reply.Bead)); err != nil {
+		return false, err
+	}
+	if i.Mailbox != nil {
+		if _, err := i.Mailbox.Send(ctx, NewMessage{
+			From:    SeatIdentity(MwSeat, i.Host),
+			To:      MayorMailbox,
+			Subject: fmt.Sprintf("Answer: %s: %s", reply.Bead, reply.Answer),
+			Body:    comment,
+		}); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 // UnreadCount reports how many messages addressed to this key are unread,
@@ -297,7 +391,7 @@ func (i PosternInbox) fetch(ctx context.Context) (mine []PosternInboxMessage, ne
 		if err != nil {
 			return nil, 0, 0, fmt.Errorf("decrypting record %d (%s): %w", r.Seq, r.Txid, err)
 		}
-		mine = append(mine, PosternInboxMessage{Seq: r.Seq, Class: r.Class, From: r.From, Ts: r.Ts, Text: text})
+		mine = append(mine, PosternInboxMessage{Seq: r.Seq, Txid: r.Txid, Class: r.Class, From: r.From, Ts: r.Ts, Text: text})
 	}
 	return mine, newest, cursor, nil
 }
@@ -347,15 +441,56 @@ func reversePosternInbox(mine []PosternInboxMessage) []PosternInboxMessage {
 	return out
 }
 
+// PosternSendRequest is what mw postern send is asked to do: text, classed
+// class, and — only for class decision-needed, and only when Bead names a
+// bead to ask — the question postern's docs/protocol.md section 6 shapes: the
+// recommended option and every option offered.
+type PosternSendRequest struct {
+	Class string
+	Text  string
+
+	// Bead is the bead a decision-needed message asks about. Empty sends
+	// Text as plain text, exactly as before this field existed. Set, it
+	// refuses unless Class is decision-needed, and Text becomes the
+	// question's text rather than the plaintext itself.
+	Bead      string
+	Recommend string
+	Options   []string
+}
+
+// asksQuestion reports whether this request asks a question of a bead, rather
+// than sending plain text.
+func (r PosternSendRequest) asksQuestion() bool { return strings.TrimSpace(r.Bead) != "" }
+
+// validate reports why this request cannot be sent, before anything is spent
+// or broadcast: --bead, --recommend and --option are only for class
+// decision-needed.
+func (r PosternSendRequest) validate() error {
+	askedFor := strings.TrimSpace(r.Bead) != "" || strings.TrimSpace(r.Recommend) != "" || len(r.Options) > 0
+	if askedFor && r.Class != "decision-needed" {
+		return fmt.Errorf("mw postern send: --bead, --recommend and --option are only accepted with --class decision-needed")
+	}
+	return nil
+}
+
 // PosternSend builds a message record, signs a transaction spending this
 // key's own testnet balance to carry it, and broadcasts it. It refuses when
 // there is no governor key configured to send to, when the key's balance
 // exceeds the float cap mw enforces on every send, or when the class is not
-// one mw knows.
+// one mw knows. Asked to send a question (PosternSendRequest.Bead set), it
+// also comments the bead once the broadcast succeeds and marks it open with a
+// note, so that mw postern inbox knows to look for a reply.
 type PosternSend struct {
 	Postern Postern
 	Cipher  Cipher
 	Keys    PosternKeyFile
+
+	// Tracker comments the bead a question is asked about. Required only for
+	// a request that asks one.
+	Tracker WorkTracker
+	// Notes marks a question's bead open, under PosternQuestionKey. Required
+	// only for a request that asks one.
+	Notes PosternNotes
 
 	// GovernorKey is who a message is sent to: the Governor's compressed
 	// public key, hex — config postern_governor_key. Empty refuses.
@@ -372,17 +507,19 @@ type PosternSend struct {
 	Out io.Writer
 }
 
-// Run sends text, classed as class, and reports the txid it was broadcast
-// under.
-func (s PosternSend) Run(ctx context.Context, class, text string) (string, error) {
-	if err := s.wired(); err != nil {
+// Run sends req, and reports the txid it was broadcast under.
+func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, error) {
+	if err := s.wired(req.asksQuestion()); err != nil {
+		return "", err
+	}
+	if err := req.validate(); err != nil {
 		return "", err
 	}
 	if strings.TrimSpace(s.GovernorKey) == "" {
 		return "", fmt.Errorf("mw postern send: postern_governor_key is not set, so there is nowhere to send to")
 	}
-	if !validPosternClass(class) {
-		return "", fmt.Errorf("mw postern send: %q is not a class postern knows: %s", class, strings.Join(PosternClasses, ", "))
+	if !validPosternClass(req.Class) {
+		return "", fmt.Errorf("mw postern send: %q is not a class postern knows: %s", req.Class, strings.Join(PosternClasses, ", "))
 	}
 	from, address, err := s.Keys.PublicKey()
 	if err != nil {
@@ -397,12 +534,20 @@ func (s PosternSend) Run(ctx context.Context, class, text string) (string, error
 			"mw postern send: the postern key's balance is %d satoshis, over the float cap of %d by %d: it refuses to send until the balance is back under the cap",
 			balance, s.FloatSats, balance-s.FloatSats)
 	}
+	text := req.Text
+	if req.asksQuestion() {
+		question, err := json.Marshal(PosternQuestion{Bead: req.Bead, Q: req.Text, Rec: req.Recommend, Options: req.Options})
+		if err != nil {
+			return "", fmt.Errorf("building the question: %w", err)
+		}
+		text = string(question)
+	}
 	ciphertext, err := s.Cipher.Encrypt(s.GovernorKey, text)
 	if err != nil {
 		return "", err
 	}
 	payload, err := json.Marshal(PosternPayload{
-		V: 1, Kind: PosternMessageKind, Class: class,
+		V: 1, Kind: PosternMessageKind, Class: req.Class,
 		To: s.GovernorKey, From: from, Ts: s.now().Unix(), Ct: ciphertext,
 	})
 	if err != nil {
@@ -420,12 +565,34 @@ func (s PosternSend) Run(ctx context.Context, class, text string) (string, error
 	if err != nil {
 		return "", err
 	}
+	if req.asksQuestion() {
+		if err := s.recordQuestion(ctx, req, txid); err != nil {
+			return "", err
+		}
+	}
 	s.printf("%s\n", txid)
 	return txid, nil
 }
 
+// recordQuestion comments req.Bead with the question just broadcast, and
+// marks it open with a note, so mw postern inbox knows a reply to it answers
+// this bead.
+func (s PosternSend) recordQuestion(ctx context.Context, req PosternSendRequest, txid string) error {
+	comment := fmt.Sprintf("QUESTION %s asked by postern, txid %s: %s (recommended %s; options %s)",
+		s.now().UTC().Format(time.RFC3339), txid, req.Text, req.Recommend, strings.Join(req.Options, ", "))
+	if err := s.Tracker.CommentOnStory(ctx, req.Bead, comment); err != nil {
+		return fmt.Errorf("recording the question on %s: %w", req.Bead, err)
+	}
+	if err := s.Notes.SetNote(ctx, PosternQuestionKey(req.Bead), txid); err != nil {
+		return fmt.Errorf("marking %s's question open: %w", req.Bead, err)
+	}
+	return nil
+}
+
 // wired reports what mw postern send is missing before it can do anything.
-func (s PosternSend) wired() error {
+// needsRecording is true for a request that asks a question, which also
+// needs somewhere to record it before anything is spent or broadcast.
+func (s PosternSend) wired(needsRecording bool) error {
 	switch {
 	case s.Postern == nil:
 		return fmt.Errorf("mw postern send: no postern backend is configured")
@@ -433,6 +600,10 @@ func (s PosternSend) wired() error {
 		return fmt.Errorf("mw postern send: no cipher is configured")
 	case s.Keys == nil:
 		return fmt.Errorf("mw postern send: no postern key file is configured")
+	case needsRecording && s.Tracker == nil:
+		return fmt.Errorf("mw postern send: no work tracker is configured to record the question on the bead")
+	case needsRecording && s.Notes == nil:
+		return fmt.Errorf("mw postern send: nowhere to remember that the question is open")
 	}
 	return nil
 }
