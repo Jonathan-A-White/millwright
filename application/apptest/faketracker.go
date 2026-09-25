@@ -140,6 +140,9 @@ func NewFakeTracker() *FakeTracker {
 func (f *FakeTracker) AddEpic(id string, defaults domain.Path) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if _, seen := f.defaults[id]; !seen {
+		f.epics = append(f.epics, id)
+	}
 	f.defaults[id] = defaults
 }
 
@@ -190,6 +193,9 @@ func (f *FakeTracker) AddChildEpic(parentID, id, title string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.stories[id].detail.IsEpic = true
+	if _, seen := f.defaults[id]; !seen {
+		f.epics = append(f.epics, id)
+	}
 	f.defaults[id] = f.defaults[parentID]
 	f.titles[id] = title
 }
@@ -236,6 +242,24 @@ func (f *FakeTracker) SetStarted(id string, started time.Time) error {
 func (f *FakeTracker) SetLeaseExpires(id string, expires time.Time) error {
 	return f.write(id, func(s *fakeStory) error {
 		s.detail.LeaseExpires = expires
+		return nil
+	})
+}
+
+// SetUpdated sets when a story the fake holds was last changed. A story added
+// without one has no updated time.
+func (f *FakeTracker) SetUpdated(id string, updated time.Time) error {
+	return f.write(id, func(s *fakeStory) error {
+		s.detail.Updated = updated
+		return nil
+	})
+}
+
+// SetClosedAt sets when a story the fake holds was closed. CloseStory leaves
+// it alone: a scenario that wants a landing from days ago says so here.
+func (f *FakeTracker) SetClosedAt(id string, closed time.Time) error {
+	return f.write(id, func(s *fakeStory) error {
+		s.detail.ClosedAt = closed
 		return nil
 	})
 }
@@ -476,6 +500,29 @@ func (f *FakeTracker) ShowEpic(_ context.Context, id string) (application.EpicDe
 		epic.Stories = append(epic.Stories, detail)
 	}
 	return epic, nil
+}
+
+// LiveEpics implements application.WorkTracker: the epics added (AddEpic or
+// AddChildEpic) or created (CreateEpic), in that order, narrowed to the ones
+// open or in progress. An epic never described (DescribeEpic) is open, like
+// ShowEpic's own default.
+func (f *FakeTracker) LiveEpics(_ context.Context) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	var live []string
+	for _, id := range f.epics {
+		status := StatusOpen
+		if says, described := f.epicSays[id]; described && says.status != "" {
+			status = says.status
+		}
+		if strings.EqualFold(status, StatusOpen) || strings.EqualFold(status, StatusInProgress) {
+			live = append(live, id)
+		}
+	}
+	return live, nil
 }
 
 // AddFormula installs a formula in the fake, with the steps pouring it makes.

@@ -63,6 +63,12 @@ type StoryDetail struct {
 	// Started is when the story was claimed, as the tracker recorded it; zero
 	// when it was never claimed or the tracker did not say.
 	Started time.Time
+	// Updated is when the tracker last recorded a change to the story; zero
+	// when the tracker did not say.
+	Updated time.Time
+	// ClosedAt is when the story was closed, as the tracker recorded it; zero
+	// when it is not closed or the tracker did not say.
+	ClosedAt time.Time
 	// IsEpic is true when this is not a story but an epic filed under an epic:
 	// a listing of an epic's children returns it among them, and it is not work
 	// a session takes. A tracker that does not say leaves it false.
@@ -268,6 +274,12 @@ type WorkTracker interface {
 	// waits on. An id that names no epic is an error, and reading is all it
 	// does: nothing is written.
 	ShowEpic(ctx context.Context, id string) (EpicDetail, error)
+
+	// LiveEpics lists the ids of every epic that is open or in progress, in
+	// the order the tracker files them — what a project view means by "live":
+	// a held or closed epic has nothing left for it to say. It reads and
+	// writes nothing.
+	LiveEpics(ctx context.Context) ([]string, error)
 
 	// ReadyStories lists the stories of an epic that can be started on a host
 	// right now: open, unclaimed, unblocked, and whose Path names that host.

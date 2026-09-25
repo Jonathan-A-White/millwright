@@ -28,6 +28,8 @@ type bead struct {
 	EstimatedMinutes int               `json:"estimated_minutes"`
 	CreatedAt        string            `json:"created_at"`
 	StartedAt        string            `json:"started_at"`
+	UpdatedAt        string            `json:"updated_at"`
+	ClosedAt         string            `json:"closed_at"`
 	LeaseExpiresAt   string            `json:"lease_expires_at"`
 	Priority         *int              `json:"priority"`
 	Metadata         map[string]any    `json:"metadata"`
@@ -202,6 +204,27 @@ func (b bead) started() time.Time {
 	return claimed
 }
 
+// updated is when bd says the bead was last changed, or the zero time when it
+// says nothing or something that is not a time.
+func (b bead) updated() time.Time {
+	changed, err := time.Parse(time.RFC3339, b.UpdatedAt)
+	if err != nil {
+		return time.Time{}
+	}
+	return changed
+}
+
+// closedAt is when bd says the bead was closed, or the zero time when it says
+// nothing or something that is not a time — including a bead that is not
+// closed at all, which bd never stamps.
+func (b bead) closedAt() time.Time {
+	closed, err := time.Parse(time.RFC3339, b.ClosedAt)
+	if err != nil {
+		return time.Time{}
+	}
+	return closed
+}
+
 // leaseExpires is when bd says this bead's claim lease runs out, or the zero
 // time when it says nothing or something that is not a time — a bead never
 // claimed, or a bd too old to print lease_expires_at at all.
@@ -232,6 +255,8 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		Priority:        b.priority(),
 		Created:         b.created(),
 		Started:         b.started(),
+		Updated:         b.updated(),
+		ClosedAt:        b.closedAt(),
 		LeaseExpires:    b.leaseExpires(),
 		Attempts:        b.attempts(),
 		Exhausted:       b.exhausted(),
