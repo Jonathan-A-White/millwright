@@ -166,15 +166,33 @@ type Failed struct {
 	Released bool
 }
 
+// Reclaimed is one story this dispatch found already claimed here whose tmux
+// window still stood but whose pane had died, with the tracker's own lease on
+// the claim expired too (mw-gq6.106): the session ended without mw next ever
+// hearing about it. Its window was closed and its claim given back, so it is
+// read fresh among what is ready and, if nothing else stops it, dispatched
+// again below as the next attempt.
+type Reclaimed struct {
+	StoryID string
+	Session string
+	// LeaseExpired is when the tracker's lease on the claim ran out, the second
+	// sign alongside the dead pane that made this dispatch act rather than
+	// leave the claim counted as running.
+	LeaseExpired time.Time
+}
+
 // DispatchReport is what one dispatch did.
 type DispatchReport struct {
 	Host string
 	Cap  int
 	// Running is how many sessions this host already had in flight.
 	Running int
-	Started []Started
-	Passed  []Passed
-	Failed  []Failed
+	// Reclaimed is every claim this dispatch took back from a dead pane and an
+	// expired lease before it read what is ready.
+	Reclaimed []Reclaimed
+	Started   []Started
+	Passed    []Passed
+	Failed    []Failed
 	// Notes are what could not be written when a story was found to have used up
 	// its attempts: the story is left as it was, and a later tick tries again.
 	Notes  []string
@@ -307,9 +325,22 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	// A story the Governor must be present for is claimed by the Mayor, not run
 	// by a session of this host, so it is not one of the sessions the cap counts.
 	for _, detail := range running {
-		if !detail.Hitl() {
-			report.Running++
+		if detail.Hitl() {
+			continue
 		}
+		if !d.DryRun {
+			reclaimed, err := d.reclaimDeadPane(ctx, detail, &report)
+			if err != nil {
+				return report, fmt.Errorf("dispatching on %s: %w", d.Host, err)
+			}
+			if reclaimed {
+				// Given back below, so it is read fresh among what is ready rather
+				// than counted here: a claim this dispatch just returned is not one
+				// still holding a session.
+				continue
+			}
+		}
+		report.Running++
 	}
 	free := d.Cap - report.Running
 
@@ -609,6 +640,60 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 	return started, false, nil
 }
 
+// reclaimDeadPane looks at one story this host already has claimed, and gives
+// the claim back when its tmux window is still there but its pane has died
+// and the tracker's own lease on the claim has expired: together the
+// strongest sign that the session ended without mw next ever hearing about it
+// (the Laptop's DNS outage of 2026-09-24, mw-gq6.106). A live session, a
+// window gone outright, or a lease not yet expired are all left exactly as
+// they were — counted running, the same as before this existed — because
+// either sign alone is not enough to act on without a person's word.
+//
+// Nothing is cut or removed here: only the window, whose pane is already
+// dead, is closed, and the claim given back. What the story's worktree and
+// branch still hold from the attempt that died is left for the next attempt
+// to run into, or for a person to settle by hand with mw retry.
+func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, report *DispatchReport) (bool, error) {
+	id := detail.Story.ID
+	name := SessionName(id)
+	status, err := d.Runner.Status(ctx, name)
+	if err != nil {
+		// A runner that cannot say cannot be trusted to say the pane is dead
+		// either: leave the claim counted as running, as if this check were
+		// never made.
+		return false, nil
+	}
+	if status.State != StateExited && status.State != StateExitUnknown {
+		return false, nil
+	}
+	if detail.LeaseExpires.IsZero() || !d.now().After(detail.LeaseExpires) {
+		return false, nil
+	}
+
+	why := fmt.Sprintf(
+		"mw dispatch on %s found %s claimed here with a dead pane (%s is %s) and its lease expired at %s with no heartbeat since: "+
+			"the window was closed and the claim given back so it is dispatched again as a fresh attempt.",
+		d.Host, id, name, status.State, detail.LeaseExpires.UTC().Format(time.RFC3339))
+
+	if err := d.Runner.Close(ctx, name); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf(
+			"%s: its session %s has a dead pane and an expired lease, but the window could not be closed, so the claim was left alone: %v",
+			id, name, err))
+		return false, nil
+	}
+	if err := d.Tracker.ReleaseClaim(ctx, id); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf(
+			"%s: its session %s had a dead pane and an expired lease and its window was closed, but the claim could not be given back: %v",
+			id, name, err))
+		return false, nil
+	}
+	if err := d.Tracker.CommentOnStory(ctx, id, why); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s: the dead-pane reclaim could not be commented on: %v", id, err))
+	}
+	report.Reclaimed = append(report.Reclaimed, Reclaimed{StoryID: id, Session: name, LeaseExpired: detail.LeaseExpires})
+	return true, nil
+}
+
 // namesake looks for a session already called name, the one a story is worked
 // in. A running one is a real second session, and the story is refused rather
 // than started twice. One that has ended is a corpse mw leaves on purpose
@@ -761,6 +846,10 @@ func (r DispatchReport) String() string {
 			times = "time"
 		}
 		fmt.Fprintf(&b, "  retried the sync %d %s: a name could not be resolved until the network came back\n", r.SyncRetries, times)
+	}
+	for _, reclaim := range r.Reclaimed {
+		fmt.Fprintf(&b, "  reclaimed %s · %s · dead pane, lease expired %s\n", reclaim.StoryID, reclaim.Session,
+			reclaim.LeaseExpired.UTC().Format(time.RFC3339))
 	}
 
 	verb := "started"

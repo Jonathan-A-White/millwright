@@ -91,6 +91,8 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a ready story "([^"]*)" of that epic at priority (\d+), filed at "([^"]*)"$`, c.aReadyStoryAtPriority)
 	ctx.Given(`^a ready story "([^"]*)" of that epic labelled "([^"]*)"$`, c.aReadyStoryLabelled)
 	ctx.Given(`^a story "([^"]*)" of that epic is already running here$`, c.aStoryAlreadyRunningHere)
+	ctx.Given(`^the session of "([^"]*)" has a dead pane and its lease has expired$`, c.theSessionHasADeadPaneAndLeaseExpired)
+	ctx.Given(`^the session of "([^"]*)" has a dead pane but its lease has not expired$`, c.theSessionHasADeadPaneButLeaseNotExpired)
 	ctx.Given(`^a story "([^"]*)" of that epic labelled "([^"]*)" is already running here$`, c.aLabelledStoryAlreadyRunningHere)
 	ctx.Given(`^the story "([^"]*)" waits on "([^"]*)"$`, c.theStoryWaitsOn)
 	ctx.Given(`^the story "([^"]*)" is closed$`, c.theStoryIsClosedGiven)
@@ -154,7 +156,9 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^dispatch would start, in this order:$`, c.dispatchWouldStartInOrder)
 	ctx.Then(`^the dry run report lists them in that order$`, c.theReportListsThemInOrder)
 	ctx.Then(`^dispatch passed over "([^"]*)", saying: (.+)$`, c.dispatchPassedOver)
+	ctx.Then(`^dispatch reclaimed "([^"]*)" for a dead pane with an expired lease$`, c.dispatchReclaimedForADeadPane)
 	ctx.Then(`^the dry run report says (\d+) of (\d+) sessions were already running$`, c.theReportSaysHowManyWereRunning)
+	ctx.Then(`^dispatch reports (\d+) of (\d+) sessions were already running$`, c.theReportSaysHowManyWereRunning)
 	ctx.Then(`^the story "([^"]*)" records (\d+) attempts?$`, c.theStoryRecordsAttempts)
 	ctx.Then(`^the story "([^"]*)" is recorded as blocked for the reason "([^"]*)"$`, c.theStoryIsRecordedAsBlockedFor)
 	ctx.Then(`^the story "([^"]*)" is not marked blocked$`, c.theStoryIsNotRecordedAsBlocked)
@@ -316,6 +320,29 @@ func (c *dispatchContext) aStoryAlreadyRunningHere(id string) error {
 		return err
 	}
 	return c.tracker.ClaimStory(context.Background(), id)
+}
+
+// deadPaneWithLease is mw-gq6.106's shape: the tmux window a story's earlier
+// session ran in is still there, but its command has already ended —
+// remain-on-exit's dead pane with a known exit status — and the tracker's own
+// lease on the claim expires at the given time relative to dispatchNow, the
+// clock every scenario in this file runs at.
+func (c *dispatchContext) deadPaneWithLease(id string, leaseExpires time.Time) error {
+	ctx := context.Background()
+	name := application.SessionName(id)
+	if err := c.runner.Start(ctx, application.SessionSpec{Name: name, Dir: filepath.Join(c.root, "earlier-run"), Command: []string{"claude"}}); err != nil {
+		return err
+	}
+	c.runner.Exit(name, 1)
+	return c.tracker.SetLeaseExpires(id, leaseExpires)
+}
+
+func (c *dispatchContext) theSessionHasADeadPaneAndLeaseExpired(id string) error {
+	return c.deadPaneWithLease(id, dispatchNow.Add(-time.Hour))
+}
+
+func (c *dispatchContext) theSessionHasADeadPaneButLeaseNotExpired(id string) error {
+	return c.deadPaneWithLease(id, dispatchNow.Add(time.Hour))
 }
 
 // aReadyStoryLabelled adds a ready story carrying a label.
@@ -965,6 +992,26 @@ func (c *dispatchContext) theReportListsThemInOrder() error {
 
 // dispatchPassedOver says the story was passed over with a reason containing
 // the words given, both in the report's data and in what a person reads.
+// dispatchReclaimedForADeadPane checks that a story's claim was taken back
+// for a dead pane and an expired lease (mw-gq6.106), and that the printed
+// report names it.
+func (c *dispatchContext) dispatchReclaimedForADeadPane(id string) error {
+	report, err := c.dispatched()
+	if err != nil {
+		return err
+	}
+	for _, reclaimed := range report.Reclaimed {
+		if reclaimed.StoryID != id {
+			continue
+		}
+		if printed := report.String(); !strings.Contains(printed, "dead pane") {
+			return fmt.Errorf("expected the report to print that %s's dead pane was reclaimed, got:\n%s", id, printed)
+		}
+		return nil
+	}
+	return fmt.Errorf("expected %s to be reclaimed for a dead pane, got %+v", id, report.Reclaimed)
+}
+
 func (c *dispatchContext) dispatchPassedOver(id, saying string) error {
 	report, err := c.dispatched()
 	if err != nil {

@@ -129,6 +129,23 @@ Feature: Dispatching the stories this host is ready to work
     Then no session was started
     And the story "mw-gq6.1" is not claimed
 
+  Scenario: A dead pane with an expired lease is reclaimed and started again as the next attempt
+    Given a story "mw-gq6.9" of that epic is already running here
+    And the story "mw-gq6.9" has been tried 1 time
+    And the session of "mw-gq6.9" has a dead pane and its lease has expired
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.9"
+    And the story "mw-gq6.9" records 2 attempts
+    And dispatch reclaimed "mw-gq6.9" for a dead pane with an expired lease
+
+  Scenario: A dead pane whose lease has not expired still counts against the cap
+    Given a ready story "mw-gq6.1" of that epic
+    And a story "mw-gq6.9" of that epic is already running here
+    And the session of "mw-gq6.9" has a dead pane but its lease has not expired
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch reports 1 of 1 sessions were already running
+    And the story "mw-gq6.1" is not claimed
+
   Scenario: A story for the other host is left alone even when this host is idle
     Given a ready story "mw-gq6.2" of that epic that overrides "host" with "laptop"
     When dispatch runs on "vps" with a cap of 1

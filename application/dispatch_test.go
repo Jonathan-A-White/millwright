@@ -345,6 +345,177 @@ func startOldSession(t *testing.T, runner *apptest.FakeRunner, id string) string
 	return name
 }
 
+// claimedStory adds a story already claimed here, as one an earlier dispatch
+// started and mw next has not closed out looks: still in_progress, carrying
+// the attempts an earlier session was counted at.
+func claimedStory(t *testing.T, tracker *apptest.FakeTracker, id string, attempts int) {
+	t.Helper()
+	tracker.AddStory("mw-gq6", domain.Story{ID: id, Title: "A story"})
+	if err := tracker.ClaimStory(context.Background(), id); err != nil {
+		t.Fatalf("claiming %s: %v", id, err)
+	}
+	if attempts > 0 {
+		if err := tracker.SetStoryMetadata(context.Background(), id,
+			map[string]string{application.AttemptsField: fmt.Sprint(attempts)}); err != nil {
+			t.Fatalf("recording %s's attempts: %v", id, err)
+		}
+	}
+}
+
+// mw-gq6.106: dispatch counted a claimed story's tmux window as its session
+// still running whether or not the window's pane was actually alive, so a
+// Builder that died left its claim standing forever. These four tests walk
+// the window through the states the bug report actually saw (mw-1589l.6/.11,
+// 2026-09-24 23:16-23:35Z): a live pane, a dead one with the lease expired,
+// a dead one with the lease still good, and no window at all.
+
+func TestDispatchCountsALivePaneAsRunningAndDoesNotReclaim(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, runner, _ := aFactory(t)
+	now := time.Date(2026, 9, 24, 23, 30, 0, 0, time.UTC)
+	dispatch.Now = func() time.Time { return now }
+	claimedStory(t, tracker, "mw-gq6.9", 1)
+	if err := tracker.SetLeaseExpires("mw-gq6.9", now.Add(-time.Hour)); err != nil {
+		t.Fatalf("setting the lease: %v", err)
+	}
+	session := startOldSession(t, runner, "mw-gq6.9")
+
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatalf("expected the dispatch to run cleanly, got %v", err)
+	}
+	if report.Running != 1 || len(report.Reclaimed) != 0 {
+		t.Fatalf("expected the live session counted running and nothing reclaimed, got %+v", report)
+	}
+	if closed := runner.Closed(); len(closed) != 0 {
+		t.Fatalf("expected the live window left untouched, got %q closed", closed)
+	}
+	if status, _ := runner.Status(ctx, session); !status.Running() {
+		t.Fatalf("expected the session still running, got %+v", status)
+	}
+	detail, err := tracker.ShowStory(ctx, "mw-gq6.9")
+	if err != nil {
+		t.Fatalf("showing the story: %v", err)
+	}
+	if detail.Status != apptest.StatusInProgress || detail.Assignee == "" {
+		t.Fatalf("expected the claim left exactly as it was, got status %q assignee %q", detail.Status, detail.Assignee)
+	}
+}
+
+func TestDispatchReclaimsADeadPaneWithAnExpiredLeaseAndRedispatchesTheNextAttempt(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, runner, _ := aFactory(t)
+	now := time.Date(2026, 9, 24, 23, 30, 0, 0, time.UTC)
+	dispatch.Now = func() time.Time { return now }
+	claimedStory(t, tracker, "mw-gq6.9", 1)
+	expires := now.Add(-33 * time.Minute)
+	if err := tracker.SetLeaseExpires("mw-gq6.9", expires); err != nil {
+		t.Fatalf("setting the lease: %v", err)
+	}
+	session := startOldSession(t, runner, "mw-gq6.9")
+	runner.Exit(session, 1)
+
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatalf("expected the story to be reclaimed and redispatched, got %v", err)
+	}
+	if report.Running != 0 {
+		t.Fatalf("expected the dead pane not counted running, got %+v", report)
+	}
+	if len(report.Reclaimed) != 1 || report.Reclaimed[0].StoryID != "mw-gq6.9" || report.Reclaimed[0].Session != session {
+		t.Fatalf("expected mw-gq6.9's dead window reported reclaimed, got %+v", report.Reclaimed)
+	}
+	if !report.Reclaimed[0].LeaseExpired.Equal(expires) {
+		t.Fatalf("expected the report to carry the lease's expiry, got %v", report.Reclaimed[0].LeaseExpired)
+	}
+	if closed := runner.Closed(); len(closed) != 1 || closed[0] != session {
+		t.Fatalf("expected the dead window closed, got %q closed", closed)
+	}
+	if len(report.Started) != 1 || report.Started[0].StoryID != "mw-gq6.9" || report.Started[0].Attempt != 2 {
+		t.Fatalf("expected mw-gq6.9 started again as attempt 2, got %+v", report.Started)
+	}
+	if status, _ := runner.Status(ctx, session); !status.Running() {
+		t.Fatalf("expected the fresh session running under the same name, got %+v", status)
+	}
+	detail, err := tracker.ShowStory(ctx, "mw-gq6.9")
+	if err != nil {
+		t.Fatalf("showing the story: %v", err)
+	}
+	if detail.Status != apptest.StatusInProgress {
+		t.Fatalf("expected the story claimed again under the new attempt, got %q", detail.Status)
+	}
+	comments := tracker.Comments("mw-gq6.9")
+	if len(comments) == 0 || !strings.Contains(comments[0], "dead pane") {
+		t.Fatalf("expected a comment naming the dead pane, got %q", comments)
+	}
+	printed := report.String()
+	if !strings.Contains(printed, "dead pane") || !strings.Contains(printed, expires.UTC().Format(time.RFC3339)) {
+		t.Fatalf("expected the printed report to name the dead pane and the expired lease, got:\n%s", printed)
+	}
+}
+
+func TestDispatchLeavesADeadPaneCountedRunningUntilItsLeaseExpires(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, runner, _ := aFactory(t)
+	now := time.Date(2026, 9, 24, 23, 30, 0, 0, time.UTC)
+	dispatch.Now = func() time.Time { return now }
+	claimedStory(t, tracker, "mw-gq6.9", 1)
+	if err := tracker.SetLeaseExpires("mw-gq6.9", now.Add(time.Hour)); err != nil {
+		t.Fatalf("setting the lease: %v", err)
+	}
+	session := startOldSession(t, runner, "mw-gq6.9")
+	runner.Exit(session, 1)
+
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatalf("expected the dispatch to run cleanly, got %v", err)
+	}
+	if report.Running != 1 || len(report.Reclaimed) != 0 {
+		t.Fatalf("expected the claim left counted running while its lease still holds, got %+v", report)
+	}
+	if closed := runner.Closed(); len(closed) != 0 {
+		t.Fatalf("expected the dead window left untouched, got %q closed", closed)
+	}
+	detail, err := tracker.ShowStory(ctx, "mw-gq6.9")
+	if err != nil {
+		t.Fatalf("showing the story: %v", err)
+	}
+	if detail.Status != apptest.StatusInProgress || detail.Assignee == "" {
+		t.Fatalf("expected the claim left exactly as it was, got status %q assignee %q", detail.Status, detail.Assignee)
+	}
+}
+
+func TestDispatchLeavesAClaimWithNoWindowAtAllCountedRunningAsBefore(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, runner, _ := aFactory(t)
+	now := time.Date(2026, 9, 24, 23, 30, 0, 0, time.UTC)
+	dispatch.Now = func() time.Time { return now }
+	claimedStory(t, tracker, "mw-gq6.9", 1)
+	if err := tracker.SetLeaseExpires("mw-gq6.9", now.Add(-time.Hour)); err != nil {
+		t.Fatalf("setting the lease: %v", err)
+	}
+	// No session of this name was ever started: the window is gone outright,
+	// the case mw sweep already flags and a person settles with mw retry.
+
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatalf("expected the dispatch to run cleanly, got %v", err)
+	}
+	if report.Running != 1 || len(report.Reclaimed) != 0 {
+		t.Fatalf("expected the claim still counted running, got %+v", report)
+	}
+	if closed := runner.Closed(); len(closed) != 0 {
+		t.Fatalf("expected nothing closed for a window that was never there, got %q", closed)
+	}
+	detail, err := tracker.ShowStory(ctx, "mw-gq6.9")
+	if err != nil {
+		t.Fatalf("showing the story: %v", err)
+	}
+	if detail.Status != apptest.StatusInProgress || detail.Assignee == "" {
+		t.Fatalf("expected the claim left exactly as it was, got status %q assignee %q", detail.Status, detail.Assignee)
+	}
+}
+
 func TestDispatchClearsAnEndedSessionOfTheSameNameWhateverItsExitWas(t *testing.T) {
 	for name, end := range map[string]func(*apptest.FakeRunner, string){
 		"exited":         func(r *apptest.FakeRunner, n string) { r.Exit(n, 1) },
