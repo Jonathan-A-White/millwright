@@ -729,7 +729,7 @@ func TestPosternSnapshotUnchangedBeadsRunsNothingEvenPastTheInterval(t *testing.
 		t.Fatalf("mw postern snapshot was called %d times on the first tick, want 1", n)
 	}
 
-	// Well past MW_MAIL_SNAPSHOT_EVERY, but the beads have not changed since:
+	// Well past the snapshot interval, but the beads have not changed since:
 	// still nothing.
 	f.setSnapshotLastAt(time.Now().Add(-1 * time.Hour))
 	f.tick()
@@ -750,7 +750,7 @@ func TestPosternSnapshotChangedBeadsRunsOnceThenWaitsOutTheInterval(t *testing.T
 		t.Fatalf("mw postern snapshot was called %d times on the first tick, want 1", n)
 	}
 
-	// The beads change again at once, but MW_MAIL_SNAPSHOT_EVERY has not
+	// The beads change again at once, but the snapshot interval has not
 	// passed since the last attempt: still nothing.
 	f.beadsLevel("lvl-2")
 	f.tick()
@@ -835,7 +835,7 @@ func TestASlowPosternSnapshotIsKilledByItsOwnTimeoutAndDoesNotStopTheTick(t *tes
 		t.Fatalf("output %q does not report the kill with its elapsed seconds", out)
 	}
 
-	// The next tick, still inside MW_MAIL_SNAPSHOT_EVERY, does not retry.
+	// The next tick, still inside the snapshot interval, does not retry.
 	f.tick()
 	if n := f.posternSubCalls("snapshot"); n != 1 {
 		t.Fatalf("mw postern snapshot was called %d times after a second tick, want 1 (no retry inside the interval)", n)

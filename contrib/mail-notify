@@ -22,16 +22,15 @@
 #      while the condition keeps holding, capped at 8 h, and reset once the
 #      condition clears (recorded per condition in the state directory);
 #   6. when this host has a postern key file, and the beads have changed since
-#      the last snapshot written or attempted and at least
-#      MW_MAIL_SNAPSHOT_EVERY seconds have passed since then, runs `mw postern
-#      snapshot` after the nudge, bounded to MW_MAIL_SNAPSHOT_TIMEOUT seconds
-#      (default 60) so a slow snapshot can never hold a tick past a minute
-#      (mw-tfne4.8): refreshing the brief of every live epic for the
-#      Governor's app. A run that fails, or that hits the timeout and is
-#      killed, is logged once with how long it ran and never stops the tick;
-#      either way the next attempt waits a full MW_MAIL_SNAPSHOT_EVERY, so a
-#      snapshot slower than its timeout is never retried every tick
-#      (mw-tfne4.12);
+#      the last snapshot written or attempted and at least 600 seconds have
+#      passed since then, runs `mw postern snapshot` after the nudge, bounded
+#      to MW_MAIL_SNAPSHOT_TIMEOUT seconds (default 60) so a slow snapshot can
+#      never hold a tick past a minute (mw-tfne4.8): refreshing the brief of
+#      every live epic for the Governor's app. A run that fails, or that hits
+#      the timeout and is killed, is logged once with how long it ran and
+#      never stops the tick; either way the next attempt waits a full 600
+#      seconds, so a snapshot slower than its timeout is never retried every
+#      tick (mw-tfne4.12);
 #   7. if there is new mail, a postern count risen since last noted, or a
 #      clause survived the damper, finds the Mayor's window from the vault's
 #      .mayor-acting and, once it is not working and its input line is empty,
@@ -82,11 +81,6 @@
 #                        a snapshot takes longer than this to build (see
 #                        README.md, "Telling the Mayor's window when mail
 #                        arrives")                                      (60)
-#   MW_MAIL_SNAPSHOT_EVERY
-#                        least seconds between two attempts at `mw postern
-#                        snapshot` (step 6), win or lose, so a snapshot slower
-#                        than its own timeout is never retried every tick
-#                        (mw-tfne4.12)                                  (600)
 #   MW_TMUX_SOCKET       a tmux server other than the default, as `tmux -L`
 
 set -u
@@ -97,7 +91,7 @@ SYNC_EVERY=${MW_MAIL_SYNC_EVERY:-300}
 STATE=${MW_MAIL_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mw-mail-notify}
 LOADAVG=${MW_MAIL_LOADAVG_FILE:-/proc/loadavg}
 SNAPSHOT_TIMEOUT=${MW_MAIL_SNAPSHOT_TIMEOUT:-60}
-SNAPSHOT_EVERY=${MW_MAIL_SNAPSHOT_EVERY:-600}
+SNAPSHOT_EVERY=600
 
 # How long a quiet alarm condition, once typed, is left untyped again: 1 h the
 # first time, then doubled on each repeat while the condition keeps holding,
