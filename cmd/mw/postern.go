@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -33,6 +35,8 @@ func newPosternCmd() *cobra.Command {
 	root.AddCommand(newPosternInboxCmd())
 	root.AddCommand(newPosternSendCmd())
 	root.AddCommand(newPosternSnapshotCmd())
+	root.AddCommand(newPosternServeCmd())
+	root.AddCommand(newPosternNginxCmd())
 	return root
 }
 
@@ -317,5 +321,95 @@ func newPosternSnapshotCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print the plaintext snapshot JSON instead of writing the encrypted file")
+	return cmd
+}
+
+// newPosternServeCmd builds `mw postern serve`: the VPS-local hand step of
+// setting this host's postern config lines and making the snapshot's
+// directory, idempotent and printing the way back.
+func newPosternServeCmd() *cobra.Command {
+	var backend, snapshotPath, governorKey, backupDir string
+	var dryRun bool
+
+	cmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Set this host's postern config lines and make the snapshot directory",
+		Long: "serve writes or replaces postern_backend, postern_snapshot_path and postern_governor_key\n" +
+			"in this host's config file — idempotent, so a re-run with the same values changes\n" +
+			"nothing — and makes the snapshot's own directory. It backs the config file up first,\n" +
+			"unless there is none yet to back up, and prints the backup path and the way back.\n\n" +
+			"--dry-run prints what it would do without touching anything.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("there is no home directory to write %s in: %w", config.File, err)
+			}
+			serve := application.PosternServe{
+				Files:      postern.NewHandFile(),
+				ConfigPath: filepath.Join(home, config.File),
+				BackupDir:  backupDir,
+				Out:        cmd.OutOrStdout(),
+			}
+			_, err = serve.Run(cmd.Context(), application.PosternServeRequest{
+				Backend: backend, SnapshotPath: snapshotPath, GovernorKey: governorKey, DryRun: dryRun,
+			})
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&backend, "backend", "", "the postern backend's URL (required)")
+	cmd.Flags().StringVar(&snapshotPath, "snapshot-path", "", "where mw postern snapshot writes the encrypted snapshot, a full path (required)")
+	cmd.Flags().StringVar(&governorKey, "governor-key", "", "the Governor's compressed public key, as hex (required)")
+	cmd.Flags().StringVar(&backupDir, "backup-dir", application.DefaultPosternHandBackupDir, "where the config file is backed up before it is changed")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what would change without touching anything")
+	for _, name := range []string{"backend", "snapshot-path", "governor-key"} {
+		_ = cmd.MarkFlagRequired(name)
+	}
+	return cmd
+}
+
+// newPosternNginxCmd builds `mw postern nginx`: the VPS-local hand step of
+// ensuring the postern's /snapshot location and /api upstream in the nginx
+// site, backed up, tested and reloaded, printing the way back.
+func newPosternNginxCmd() *cobra.Command {
+	var conf, backend, backupDir string
+	var dryRun bool
+
+	cmd := &cobra.Command{
+		Use:   "nginx",
+		Short: "Ensure the postern's /snapshot location and /api upstream in the nginx site",
+		Long: "nginx ensures a `location = /snapshot` block, aliased to postern_snapshot_path, and\n" +
+			"points the /api upstream(s) at --backend, in the nginx site named by --conf — idempotent,\n" +
+			"so a re-run that would change nothing touches nothing. It backs the site file up first,\n" +
+			"writes it, then runs `nginx -t` and, only once that passes, `systemctl reload nginx`,\n" +
+			"printing every command and the way back. A failed nginx -t restores the backup, so a bad\n" +
+			"edit is never left live.\n\n" +
+			"--dry-run prints what it would do without touching anything.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			snapshotPath, err := config.PosternSnapshotPath()
+			if err != nil {
+				return err
+			}
+			nginx := application.PosternNginx{
+				Conf:      postern.NewHandFile(),
+				ConfPath:  conf,
+				BackupDir: backupDir,
+				Runner:    postern.NewNginxRunner(),
+				Out:       cmd.OutOrStdout(),
+			}
+			_, err = nginx.Run(cmd.Context(), application.PosternNginxRequest{
+				Backend: backend, SnapshotPath: snapshotPath, DryRun: dryRun,
+			})
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&conf, "conf", "", "the nginx site file to edit (required)")
+	cmd.Flags().StringVar(&backend, "backend", "", "the /api upstream's URL (required)")
+	cmd.Flags().StringVar(&backupDir, "backup-dir", application.DefaultPosternHandBackupDir, "where the site file is backed up before it is changed")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what would change without touching anything")
+	for _, name := range []string{"conf", "backend"} {
+		_ = cmd.MarkFlagRequired(name)
+	}
 	return cmd
 }
