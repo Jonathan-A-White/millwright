@@ -850,6 +850,20 @@ and `ExecStop=/bin/true` mean stopping or restarting the unit leaves every
 session inside alone, and `OOMScoreAdjust=-900` makes the kernel spare it
 before almost anything else on the box.
 
+If the server dies anyway — every pane exiting, `tmux kill-server`, anything
+— `Restart=always` and `RestartSec=2` bring the unit's `ExecStart` back
+within a couple of seconds, which starts an empty server the next thing that
+needs the seat's session (the doctor's cure, a login) finds waiting instead
+of a login scope outside the unit. `StartLimitIntervalSec=0` means a server
+that keeps dying never exhausts systemd's default restart budget and leaves
+the unit `failed`: it always tries again. This is why there is no
+`RemainAfterExit=yes` here even though the unit is `Type=forking`: that
+directive keeps a unit reporting `active` once its tracked process is gone
+instead of restarting it, which is exactly how the tmux server going missing
+once went unnoticed until the next login. `scripts/check-seat-tmux-respawn.sh`
+proves the restart live, on a throwaway `--user` unit and tmux socket so the
+real session `0` is never touched.
+
 Why a system unit and not `systemctl --user`: on the VPS the tmux server used
 to live under root's `--user` manager (`user-0.slice`). When the OOM killer
 took the manager, systemd killed everything under it, the Mayor's session
