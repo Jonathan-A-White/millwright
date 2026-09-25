@@ -104,3 +104,45 @@ func TestACancelledSyncKillsBdAndWhateverItStarted(t *testing.T) {
 		t.Errorf("expected the child it started (pid %d) to be gone too, not orphaned", childPid)
 	}
 }
+
+// lingeringBd is a stand-in bd that takes a moment before it exits on its
+// own, standing in for a real bd command doing real work — mw must not
+// report the call finished before bd itself actually has.
+func lingeringBd(t *testing.T, delay time.Duration) (program string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in for bd is a shell script")
+	}
+	dir := t.TempDir()
+	program = filepath.Join(dir, "bd-lingering")
+	script := fmt.Sprintf("#!/bin/sh\nsleep %f\n", delay.Seconds())
+	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing the stand-in: %v", err)
+	}
+	return program
+}
+
+// TestSyncDoesNotReturnBeforeTheBdItStartedExits is here because of
+// mw-gq6.113: the Laptop's journal showed a bd process still running after
+// mw-dispatch.service had already stopped. Investigating found the run
+// function in beads.go (g.run) already waits out cmd.Run() for the direct
+// child it starts on every ordinary, uncancelled exit — this pins that down
+// so a future change to run cannot regress it quietly. It does not reach the
+// actual cause: bd 1.3.0 ships its own anonymous usage-metrics reporting
+// (`bd metrics`), which — when due — re-executes itself as a background
+// flusher (internal/metrics, env BD_IS_FLUSHER, posting to
+// BEADS_METRICS_ENDPOINT) that mw never started directly and has no way to
+// wait for or reach; that grandchild is what journald was seeing.
+func TestSyncDoesNotReturnBeforeTheBdItStartedExits(t *testing.T) {
+	const delay = 300 * time.Millisecond
+	gateway := beads.New(t.TempDir(), beads.WithProgram(lingeringBd(t, delay)))
+
+	start := time.Now()
+	if err := gateway.Sync(context.Background()); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed < delay {
+		t.Fatalf("Sync returned after %s, before the stand-in bd's %s sleep had run: "+
+			"mw must wait for the bd it starts to actually exit, not report done early", elapsed, delay)
+	}
+}
