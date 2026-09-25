@@ -160,8 +160,9 @@ func (f *FakeDoctorCheck) Cures() int {
 // key, kept until cleared. Err, when set, is what every write and clear
 // answers instead, standing in for a notes port that cannot be reached.
 type FakeDoctorNotes struct {
-	mu    sync.Mutex
-	notes map[string]string
+	mu     sync.Mutex
+	notes  map[string]string
+	clears int
 
 	Err error
 }
@@ -196,11 +197,20 @@ func (f *FakeDoctorNotes) SetNote(_ context.Context, key, value string) error {
 func (f *FakeDoctorNotes) ClearNote(_ context.Context, key string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.clears++
 	if f.Err != nil {
 		return f.Err
 	}
 	delete(f.notes, key)
 	return nil
+}
+
+// Clears is how many times ClearNote was called, whether or not there was
+// anything to clear.
+func (f *FakeDoctorNotes) Clears() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.clears
 }
 
 // NotesWithPrefix implements application.DoctorNotes.

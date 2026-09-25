@@ -74,6 +74,14 @@ type DoctorEpisode struct {
 	FirstFaulty time.Time
 	Cures       int
 	LastCure    time.Time
+
+	// LastOKReason is the reason an ok verdict was last logged with. A check
+	// that answers ok with a reason — "n/a: none of these units is installed
+	// here", say — is said once, in the log and in a kv write; a later run
+	// that answers ok with the same reason costs neither, while nothing has
+	// changed. Empty for a check whose last logged ok carried no reason, or
+	// whose episode has never been saved.
+	LastOKReason string
 }
 
 // DoctorState is where mw doctor keeps each check's episode between runs.
@@ -344,16 +352,7 @@ func (d Doctor) one(ctx context.Context, check DoctorCheck, dryRun bool) (Doctor
 
 	switch verdict {
 	case DoctorOK:
-		if !dryRun {
-			if err := d.State.Reset(ctx, name); err != nil {
-				return DoctorResult{}, fmt.Errorf("resetting %s's doctor state: %w", name, err)
-			}
-			if err := d.append(ctx, DoctorResult{Check: name, Verdict: "ok"}); err != nil {
-				return DoctorResult{}, err
-			}
-			d.clearNote(ctx, name)
-		}
-		return DoctorResult{Check: name, Verdict: "ok"}, nil
+		return d.ok(ctx, name, reason, dryRun)
 
 	case DoctorCannotTell:
 		result := DoctorResult{Check: name, Verdict: "cannot-tell", Reason: reason}
@@ -367,6 +366,49 @@ func (d Doctor) one(ctx context.Context, check DoctorCheck, dryRun bool) (Doctor
 	}
 
 	return d.faulty(ctx, check, reason, dryRun)
+}
+
+// ok is the DoctorOK half of one. A plain ok, with no reason, is logged and
+// its note cleared every run, as it always has been: cheap, and a reader of
+// the log can trust that a check's silence since its last "ok" line means
+// nothing has run since. An ok with a reason — a check explaining why there
+// is nothing to do — is said once: it is logged and its note cleared only the
+// first time, or again if the reason changes, and the reason said is
+// remembered in the check's own episode so a later run with nothing new to
+// say costs neither a log line nor a kv write.
+func (d Doctor) ok(ctx context.Context, name, reason string, dryRun bool) (DoctorResult, error) {
+	result := DoctorResult{Check: name, Verdict: "ok", Reason: reason}
+	if dryRun {
+		return result, nil
+	}
+
+	if reason == "" {
+		if err := d.State.Reset(ctx, name); err != nil {
+			return DoctorResult{}, fmt.Errorf("resetting %s's doctor state: %w", name, err)
+		}
+		if err := d.append(ctx, result); err != nil {
+			return DoctorResult{}, err
+		}
+		d.clearNote(ctx, name)
+		return result, nil
+	}
+
+	episode, err := d.State.Load(ctx, name)
+	if err != nil {
+		return DoctorResult{}, fmt.Errorf("reading %s's doctor state: %w", name, err)
+	}
+	if episode.LastOKReason == reason {
+		return result, nil
+	}
+
+	if err := d.append(ctx, result); err != nil {
+		return DoctorResult{}, err
+	}
+	d.clearNote(ctx, name)
+	if err := d.State.Save(ctx, name, DoctorEpisode{LastOKReason: reason}); err != nil {
+		return DoctorResult{}, fmt.Errorf("saving %s's doctor state: %w", name, err)
+	}
+	return result, nil
 }
 
 // faulty is the DoctorFaulty half of one: decide, from the check's damper and

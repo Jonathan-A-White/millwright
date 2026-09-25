@@ -290,6 +290,73 @@ func TestATurnOKOnOneHostDoesNotClearAnotherHostsNote(t *testing.T) {
 	}
 }
 
+func TestAnOKReasonIsLoggedOnceAndNotRepeatedWhileNothingChanges(t *testing.T) {
+	state := apptest.NewFakeDoctorState()
+	log := &apptest.FakeDoctorLog{}
+	notes := apptest.NewFakeDoctorNotes()
+	now := doctorNow
+	check := &apptest.FakeDoctorCheck{
+		CheckName: "timers", Verdict: application.DoctorOK,
+		Reason: "n/a: none of these units is installed here",
+	}
+	d := application.Doctor{
+		Checks: application.DoctorChecks{check},
+		State:  state,
+		Log:    log,
+		Notes:  notes,
+		Host:   "vps",
+		Now:    func() time.Time { return now },
+	}
+
+	if _, err := d.Run(context.Background(), "", false); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	if want := "2026-09-23T12:00:00Z timers ok n/a: none of these units is installed here"; !contains(log.Lines(), want) {
+		t.Errorf("expected the log to hold %q, got %v", want, log.Lines())
+	}
+	if len(log.Lines()) != 1 {
+		t.Fatalf("expected one log line after the first run, got %v", log.Lines())
+	}
+	firstClears := notes.Clears()
+
+	if _, err := d.Run(context.Background(), "", false); err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if len(log.Lines()) != 1 {
+		t.Errorf("expected no new log line on the second run, got %v", log.Lines())
+	}
+	if notes.Clears() != firstClears {
+		t.Errorf("expected no new kv write on the second run, clears went from %d to %d", firstClears, notes.Clears())
+	}
+
+	// A changed reason is said again.
+	check.Reason = "n/a: still none of these units is installed here, differently"
+	if _, err := d.Run(context.Background(), "", false); err != nil {
+		t.Fatalf("third run: %v", err)
+	}
+	if len(log.Lines()) != 2 {
+		t.Errorf("expected a new log line once the reason changes, got %v", log.Lines())
+	}
+}
+
+func TestAPlainOKWithNoReasonIsStillLoggedEveryRun(t *testing.T) {
+	state := apptest.NewFakeDoctorState()
+	log := &apptest.FakeDoctorLog{}
+	now := doctorNow
+	check := &apptest.FakeDoctorCheck{CheckName: "widget", Verdict: application.DoctorOK}
+	d := aDoctor(state, log, &now, check)
+
+	if _, err := d.Run(context.Background(), "", false); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	if _, err := d.Run(context.Background(), "", false); err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if len(log.Lines()) != 2 {
+		t.Errorf("expected a plain ok logged every run, got %v", log.Lines())
+	}
+}
+
 func contains(lines []string, substr string) bool {
 	for _, line := range lines {
 		if strings.Contains(line, substr) {
