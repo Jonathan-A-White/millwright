@@ -1,18 +1,29 @@
 #!/bin/sh
-# Prove that contrib/systemd/system/mw-seat-tmux.service actually respawns a
-# tmux server that dies out from under it, the way the unit file promises
-# (Restart=, RestartSec=, and no RemainAfterExit= to swallow the restart).
+# Prove two things live about contrib/systemd/system/mw-seat-tmux.service that
+# a static read of the file cannot: that it does NOT restart-loop when it
+# finds a session already up that it did not start (mw-gq6.111), and that it
+# still respawns a tmux server that dies out from under it, the way the unit
+# file promises (Restart=, RestartSec=, and no RemainAfterExit= to swallow
+# the restart).
 #
-# check-timer-units.sh already holds the file's static directives and its
-# ExecStart's has-session/new-session logic to stand-ins; it never starts a
-# real unit. This script does, on purpose: a static read of the file cannot
-# tell you whether systemd actually restarts the service once the process it
-# was tracking is gone, only a live run can. So it loads the file's own
-# Type=, Restart=, RestartSec= and KillMode= values into a transient --user
-# unit (systemd-run --collect: no file written, unloaded when it stops), on
-# a tmux socket named for this run alone — the real session "0" on this host
-# is never touched — kills that tmux server, and watches the unit come back
-# active and running, with a fresh session, within RestartSec.
+# mw-gq6.111: with the unit's old Type=forking, ExecStart's `has-session ||
+# new-session` forked a new tmux server only in the branch where none existed
+# yet. When a session was already up, has-session succeeded and the whole
+# command exited immediately with nothing forked into the unit's cgroup, so
+# systemd saw its tracked process gone a moment after starting it and, with
+# Restart=always/RestartSec=2, restarted the unit every 2s forever. Type=
+# simple fixes this: ExecStart now settles into a loop that watches
+# has-session, so the process systemd tracks stays up for as long as the
+# session does, whichever of them started it.
+#
+# check-timer-units.sh already holds the file's static directives and runs
+# its ExecStart's has-session/new-session/watch logic against a stand-in
+# tmux; it never starts a real unit. This script does, on purpose: only a
+# live run can show whether systemd actually restarts (or does not restart)
+# the service. So it loads the file's own Type=, Restart=, RestartSec= and
+# KillMode= values into transient --user units (systemd-run --collect: no
+# file written, unloaded when they stop), each on a tmux socket named for
+# this run alone — the real session "0" on this host is never touched.
 #
 # --system (root, no login) is how the VPS actually runs this unit; that needs
 # root and is what check-timer-units.sh's systemd-analyze pass (no --user)
@@ -45,7 +56,7 @@ fi
 grep -qx 'Restart=always' "$SERVICE" ||
 	fail "$SERVICE has no \`Restart=always\` -- a clean tmux exit (what \`tmux kill-server\` causes) does not count as a failure, so Restart=on-failure alone never fires"
 grep -q '^RestartSec=' "$SERVICE" || fail "$SERVICE has no \`RestartSec=\`"
-grep -qx 'Type=forking' "$SERVICE" || fail "$SERVICE is no longer Type=forking; this check's transient unit assumes it is"
+grep -qx 'Type=simple' "$SERVICE" || fail "$SERVICE is no longer Type=simple; this check's transient unit assumes it is"
 grep -qx 'KillMode=process' "$SERVICE" || fail "$SERVICE has no \`KillMode=process\`"
 
 restartsec=$(sed -n 's/^RestartSec=//p' "$SERVICE" | head -1)
@@ -73,44 +84,82 @@ case $execline in
 esac
 
 RUNID=$$-$(date +%s 2>/dev/null || echo 0)
-SOCK="mw-seat-respawn-test-$RUNID"
-UNIT="mw-seat-tmux-respawn-test-$RUNID"
+SOCK_PRE="mw-seat-preexist-test-$RUNID"
+UNIT_PRE="mw-seat-tmux-preexist-test-$RUNID"
+SOCK_KILL="mw-seat-respawn-test-$RUNID"
+UNIT_KILL="mw-seat-tmux-respawn-test-$RUNID"
 
 T=$(mktemp -d)
 cleanup() {
-	systemctl --user stop "$UNIT.service" >/dev/null 2>&1 || true
-	tmux -L "$SOCK" kill-server >/dev/null 2>&1 || true
+	systemctl --user stop "$UNIT_PRE.service" >/dev/null 2>&1 || true
+	systemctl --user stop "$UNIT_KILL.service" >/dev/null 2>&1 || true
+	tmux -L "$SOCK_PRE" kill-server >/dev/null 2>&1 || true
+	tmux -L "$SOCK_KILL" kill-server >/dev/null 2>&1 || true
 	# tmux does not always unlink its socket file on a killed server; take the
-	# stale file with it rather than leaving it in the tmpdir run after run.
-	rm -f "${TMUX_TMPDIR:-/tmp/tmux-$(id -u)}/$SOCK"
+	# stale files with it rather than leaving them in the tmpdir run after run.
+	rm -f "${TMUX_TMPDIR:-/tmp/tmux-$(id -u)}/$SOCK_PRE" "${TMUX_TMPDIR:-/tmp/tmux-$(id -u)}/$SOCK_KILL"
 	rm -rf "$T"
 }
 trap cleanup EXIT INT TERM
 
 # A stand-in "tmux" ahead of the real one on PATH, so the file's own
-# ExecStart line runs unmodified against this run's own socket instead of
-# the host's real session "0". The real tmux is called by absolute path: a
-# bare "tmux" here would resolve back to this same wrapper first on PATH.
+# ExecStart line runs unmodified against a socket this run picks (via
+# $MW_TEST_SEAT_SOCK, set per scenario below) instead of the host's real
+# session "0". The real tmux is called by absolute path: a bare "tmux" here
+# would resolve back to this same wrapper first on PATH.
 REALTMUX=$(command -v tmux)
 mkdir -p "$T/bin"
 {
 	echo '#!/bin/sh'
-	echo "exec $REALTMUX -L $SOCK \"\$@\""
+	echo "exec $REALTMUX -L \"\$MW_TEST_SEAT_SOCK\" \"\$@\""
 } >"$T/bin/tmux"
 chmod +x "$T/bin/tmux"
-
-systemd-run --user --collect --unit="$UNIT" \
-	--service-type=forking \
-	-p "Restart=always" -p "RestartSec=$restartsec" -p "KillMode=process" -p "ExecStop=/bin/true" \
-	-E "PATH=$T/bin:/usr/bin:/bin" \
-	/bin/sh -c "$execcmd" >/dev/null
 
 # systemctl show's `Name=Value` lines, one property per line: unambiguous
 # regardless of how many -p names are asked for in one call (unlike --value,
 # whose lines do not always come back in the order they were asked for).
-show_field() { # <field>
-	systemctl --user show "$UNIT.service" -p "$1" 2>/dev/null | sed -n "s/^$1=//p"
+show_field() { # <unit> <field>
+	systemctl --user show "$1.service" -p "$2" 2>/dev/null | sed -n "s/^$2=//p"
 }
+
+# --- 1. a session already up before the unit ever starts --------------------
+# The mw-gq6.111 bug: has-session succeeding on a session the unit did not
+# start used to leave nothing forked into the unit's cgroup, so Type=forking
+# saw its tracked process gone a moment after starting and restart-looped
+# forever. Proves: after 10s the unit made zero restarts, and the
+# pre-existing session (marked, so a replacement rather than a real leave-
+# alone would be caught) is exactly as it was.
+tmux -L "$SOCK_PRE" new-session -d -s 0
+tmux -L "$SOCK_PRE" list-sessions >/dev/null 2>&1 || fail "could not set up a pre-existing session on $SOCK_PRE to test against"
+tmux -L "$SOCK_PRE" set-environment -t =0 MW_TEST_MARKER "$RUNID"
+
+systemd-run --user --collect --unit="$UNIT_PRE" \
+	--service-type=simple \
+	-p "Restart=always" -p "RestartSec=$restartsec" -p "KillMode=process" -p "ExecStop=/bin/true" \
+	-E "PATH=$T/bin:/usr/bin:/bin" -E "MW_TEST_SEAT_SOCK=$SOCK_PRE" \
+	/bin/sh -c "$execcmd" >/dev/null
+
+sleep 10
+as=$(show_field "$UNIT_PRE" ActiveState)
+ss=$(show_field "$UNIT_PRE" SubState)
+nrestarts=$(show_field "$UNIT_PRE" NRestarts)
+[ "$as/$ss" = "active/running" ] && [ "${nrestarts:-0}" = 0 ] ||
+	fail "a session already up before the unit started: expected active/running with 0 restarts 10s later, got ActiveState=$as SubState=$ss NRestarts=$nrestarts -- this is the mw-gq6.111 restart loop if NRestarts is climbing"
+
+tmux -L "$SOCK_PRE" list-sessions >/dev/null 2>&1 ||
+	fail "a session already up before the unit started: the session is gone now"
+marker=$(tmux -L "$SOCK_PRE" show-environment -t =0 MW_TEST_MARKER 2>/dev/null | sed -n 's/^MW_TEST_MARKER=//p')
+[ "$marker" = "$RUNID" ] ||
+	fail "a session already up before the unit started: its marker environment variable is gone, so the unit replaced it instead of leaving it alone (got '$marker')"
+
+systemctl --user stop "$UNIT_PRE.service" >/dev/null 2>&1 || true
+
+# --- 2. does it still come back once a server it's watching dies? -----------
+systemd-run --user --collect --unit="$UNIT_KILL" \
+	--service-type=simple \
+	-p "Restart=always" -p "RestartSec=$restartsec" -p "KillMode=process" -p "ExecStop=/bin/true" \
+	-E "PATH=$T/bin:/usr/bin:/bin" -E "MW_TEST_SEAT_SOCK=$SOCK_KILL" \
+	/bin/sh -c "$execcmd" >/dev/null
 
 # Waits for ActiveState/SubState to read active/running with NRestarts above
 # the given threshold -- not just active/running by itself, which a stale
@@ -121,9 +170,9 @@ wait_for_restart_above() {
 	i=0
 	limit=$((restartsec + 5))
 	while [ "$i" -le "$limit" ]; do
-		as=$(show_field ActiveState)
-		ss=$(show_field SubState)
-		nrestarts=$(show_field NRestarts)
+		as=$(show_field "$UNIT_KILL" ActiveState)
+		ss=$(show_field "$UNIT_KILL" SubState)
+		nrestarts=$(show_field "$UNIT_KILL" NRestarts)
 		if [ "$as/$ss" = "active/running" ] && [ "${nrestarts:-0}" -gt "$threshold" ]; then
 			return 0
 		fi
@@ -133,15 +182,15 @@ wait_for_restart_above() {
 	fail "the unit did not reach active/running with more than $threshold restart(s) within ${limit}s of the server dying; last seen: ActiveState=$as SubState=$ss NRestarts=$nrestarts"
 }
 
-as=$(show_field ActiveState)
-ss=$(show_field SubState)
+as=$(show_field "$UNIT_KILL" ActiveState)
+ss=$(show_field "$UNIT_KILL" SubState)
 [ "$as/$ss" = "active/running" ] || fail "the unit was not active/running right after it started: ActiveState=$as SubState=$ss"
-tmux -L "$SOCK" list-sessions >/dev/null 2>&1 || fail "the unit says active/running but session $SOCK has no session"
+tmux -L "$SOCK_KILL" list-sessions >/dev/null 2>&1 || fail "the unit says active/running but session $SOCK_KILL has no session"
 
-tmux -L "$SOCK" kill-server
+tmux -L "$SOCK_KILL" kill-server
 
 wait_for_restart_above 0
-tmux -L "$SOCK" list-sessions >/dev/null 2>&1 ||
+tmux -L "$SOCK_KILL" list-sessions >/dev/null 2>&1 ||
 	fail "the unit reports active/running again after the server died, but a fresh tmux session is not there"
 
-echo "OK: $SERVICE restarts a tmux server that dies out from under it, and \`systemctl --user show $UNIT.service -p ActiveState,SubState\` says active/running again within RestartSec (${restartsec}s)"
+echo "OK: $SERVICE does not restart-loop on a session it found already up (0 restarts, untouched, over 10s) and still restarts a tmux server that dies out from under it, reaching active/running again within RestartSec (${restartsec}s)"

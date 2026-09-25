@@ -33,14 +33,17 @@
 #    at 2, 7, 12, ... that does not catch up. And the scripts those two run
 #    (contrib/mail-notify, contrib/health/mw-health.sh) are executable and parse.
 #    The system pair carries the same shape, run as root; mw-seat-tmux is
-#    forking, never kills the server it starts or found, restarts one that
-#    dies (never with RemainAfterExit=, which swallows the restart — see
+#    simple (not forking — see check-seat-tmux-respawn.sh for why), never
+#    kills the server it starts or found, restarts one that dies (never with
+#    RemainAfterExit=, which swallows the restart — see
 #    scripts/check-seat-tmux-respawn.sh for the live proof), and scores -900 —
 #    exactly once each, since a stray second line would silently double up.
 #
 # 4. THE SEAT UNIT'S COMMAND. mw-seat-tmux.service's ExecStart, run with a
-#    stand-in tmux on PATH, calls only has-session when a session named "0"
-#    already exists, and starts one only when it does not.
+#    stand-in tmux on PATH, calls only has-session (never new-session) when a
+#    session named "0" already exists, starts one only when it does not, and
+#    either way settles into a loop that watches has-session rather than
+#    exiting — the process Type=simple then tracks as long as session 0 is up.
 
 set -eu
 
@@ -203,7 +206,10 @@ need "$DOCTOR_TIMER" "Persistent=false"
 # The seat's tmux server, a system unit. No RemainAfterExit=yes: that marked
 # the unit active (exited) the instant its tracked server died instead of
 # restarting it. scripts/check-seat-tmux-respawn.sh proves the restart live.
-need "$SEAT_TMUX_SERVICE" "Type=forking"
+# Type=simple, not forking: forking tracked a forked child that only existed
+# in the branch where ExecStart started the server itself, so a session found
+# already up left nothing for systemd to track and restart-looped (mw-gq6.111).
+need "$SEAT_TMUX_SERVICE" "Type=simple"
 if grep -q '^RemainAfterExit=' "$SEAT_TMUX_SERVICE"; then
 	fail "$SEAT_TMUX_SERVICE sets RemainAfterExit=, which swallows Restart="
 fi
@@ -249,23 +255,53 @@ ST=$(mktemp -d)
 trap 'rm -rf "$ST"' EXIT INT TERM
 STSH=$(command -v sh)
 mkdir -p "$ST/bin"
+# Stateful: has-session answers from $SEAT_STATE (set up by run_seatcmd
+# below) and flips to "up" the moment new-session is called — the real
+# ExecStart's loop relies on a session it just started reading back as up,
+# and a stub that never changes state would exit the loop immediately
+# instead of settling into the watch this check means to prove. Reads its
+# state with the shell's own `read` rather than `cat`, since this directory
+# comes first on PATH when the command under test runs and shadows no
+# external tool it doesn't provide.
 cat >"$ST/bin/tmux" <<'EOF'
 #!/bin/sh
 echo "tmux $*" >>"$SEAT_CALLS"
+state=
+IFS= read -r state <"$SEAT_STATE"
 if [ "$1 $2 $3" = "has-session -t =0" ]; then
-	[ "${SEAT_SESSION_UP:-0}" = 1 ] && exit 0 || exit 1
+	[ "$state" = 1 ] && exit 0 || exit 1
+fi
+if [ "$1 $2 $3" = "new-session -d -s" ]; then
+	echo 1 >"$SEAT_STATE"
 fi
 exit 0
 EOF
 chmod +x "$ST/bin/tmux"
 
-: >"$ST/calls"
-PATH="$ST/bin" SEAT_CALLS="$ST/calls" SEAT_SESSION_UP=1 "$STSH" -c "$seatcmd"
+# ExecStart now settles into a loop that never returns on its own as long as
+# the stub says the session is up, exactly like the real unit watching a real
+# session — so each case below runs it in the background and kills it after
+# it has had time to make its calls and reach the loop's `sleep 1` line,
+# rather than waiting for an exit that is not supposed to happen.
+run_seatcmd() {
+	: >"$ST/calls"
+	echo "$1" >"$ST/state"
+	PATH="$ST/bin:/usr/bin:/bin" SEAT_CALLS="$ST/calls" SEAT_STATE="$ST/state" "$STSH" -c "$seatcmd" &
+	seatpid=$!
+	sleep 1
+	kill "$seatpid" 2>/dev/null || true
+	wait "$seatpid" 2>/dev/null || true
+}
+
+run_seatcmd 1
 grep -qx 'tmux has-session -t =0' "$ST/calls" || fail "a session already up: ExecStart did not call has-session"
 grep -q '^tmux new-session' "$ST/calls" && fail "a session already up: ExecStart started a new one anyway"
+[ "$(grep -c '^tmux has-session -t =0$' "$ST/calls")" -ge 2 ] ||
+	fail "a session already up: ExecStart did not settle into a loop watching has-session (only $(grep -c '^tmux has-session -t =0$' "$ST/calls") call(s) in 1s)"
 
-: >"$ST/calls"
-PATH="$ST/bin" SEAT_CALLS="$ST/calls" SEAT_SESSION_UP=0 "$STSH" -c "$seatcmd"
+run_seatcmd 0
 grep -qx 'tmux new-session -d -s 0' "$ST/calls" || fail "no session up: ExecStart did not start one with new-session -d -s 0"
+[ "$(grep -c '^tmux has-session -t =0$' "$ST/calls")" -ge 2 ] ||
+	fail "no session up: ExecStart did not settle into a loop watching has-session once it started one"
 
-echo "OK: $DIR: $verified, names no host's directory, carries the directives the README describes, and mw-seat-tmux's ExecStart is a no-op only when session 0 is already up; $MAIL_SCRIPT and $HEALTH_SCRIPT are executable and parse"
+echo "OK: $DIR: $verified, names no host's directory, carries the directives the README describes, and mw-seat-tmux's ExecStart is a no-op that settles into watching has-session when session 0 is already up, and starts one and then watches it when not; $MAIL_SCRIPT and $HEALTH_SCRIPT are executable and parse"
