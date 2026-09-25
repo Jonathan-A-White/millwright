@@ -3,6 +3,8 @@ package application_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -181,6 +183,59 @@ func TestPosternSnapshotBuildsTheSectionSevenShapeWithTheRightGroupsAndOrder(t *
 	}
 	if len(b.Working) != 1 || b.Working[0].ID != "mw-b.1" {
 		t.Fatalf("expected epic B's working to hold mw-b.1, got %+v", b.Working)
+	}
+}
+
+func TestPosternSnapshotNeverReadsCommentsOfAClosedStoryOutsideTheWindow(t *testing.T) {
+	tracker := aSnapshotTracker()
+	tracker.AddEpic("mw-a", domain.Path{})
+
+	addChild(tracker, "mw-a", "mw-a.1", "Closed long ago, question note never cleared")
+	closeLanded(t, tracker, "mw-a.1", snapshotNow.Add(-10*24*time.Hour))
+	if err := tracker.SetNote(context.Background(), application.PosternQuestionKey("mw-a.1"), "txid-mw-a.1"); err != nil {
+		t.Fatalf("leaving a stale question note on mw-a.1: %v", err)
+	}
+
+	addChild(tracker, "mw-a", "mw-a.2", "Closed within the window")
+	closeLanded(t, tracker, "mw-a.2", snapshotNow.Add(-3*24*time.Hour))
+
+	doc := snapshotDoc(t, tracker)
+	a := epicOf(t, doc, "mw-a")
+
+	if tracker.CommentReads("mw-a.1") != 0 {
+		t.Fatalf("expected mw-a.1's comments never to be read, got %d reads", tracker.CommentReads("mw-a.1"))
+	}
+	if tracker.CommentReads("mw-a.2") != 1 {
+		t.Fatalf("expected mw-a.2's comments to be read once (the landed check), got %d reads", tracker.CommentReads("mw-a.2"))
+	}
+	if len(a.NeedsYou) != 0 {
+		t.Fatalf("expected a closed story never to appear in needs_you, got %+v", a.NeedsYou)
+	}
+	if len(a.Landed) != 1 || a.Landed[0].ID != "mw-a.2" {
+		t.Fatalf("expected landed to hold only mw-a.2, got %+v", a.Landed)
+	}
+}
+
+func TestPosternSnapshotRunChecksTheGovernorKeyBeforeReadingTheTracker(t *testing.T) {
+	tracker := aSnapshotTracker()
+	tracker.AddEpic("mw-a", domain.Path{})
+	// If Build ever ran before the key check, this would be the error Run
+	// returns instead of the "no governor key" one below.
+	tracker.Err = fmt.Errorf("the tracker was read, but the governor key was never checked")
+
+	snapshot := application.PosternSnapshot{
+		Tracker: tracker,
+		Notes:   tracker,
+		Cipher:  apptest.NewFakeCipher(),
+		File:    apptest.NewFakeSnapshotFile("/tmp/mw-postern-snapshot-test.bin"),
+		Now:     func() time.Time { return snapshotNow },
+	}
+	_, err := snapshot.Run(context.Background())
+	if err == nil {
+		t.Fatal("expected Run to refuse without a governor key")
+	}
+	if !strings.Contains(err.Error(), "postern_governor_key") {
+		t.Fatalf("expected the refusal to name postern_governor_key, got: %v", err)
 	}
 }
 

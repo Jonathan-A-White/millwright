@@ -107,8 +107,14 @@ type PosternSnapshot struct {
 
 // Run builds the snapshot, encrypts it to GovernorKey and writes it through
 // File, reporting the doc it wrote (so a caller can say how much it held
-// without decrypting the file back).
+// without decrypting the file back). What write needs — the cipher, the file
+// and the governor key — is checked before Build makes a single call to the
+// tracker, so that a config mistake fails in an instant rather than after
+// however long a full read of every live epic takes (mw-tfne4.8).
 func (s PosternSnapshot) Run(ctx context.Context) (PosternSnapshotDoc, error) {
+	if err := s.checkWritable(); err != nil {
+		return PosternSnapshotDoc{}, err
+	}
 	doc, err := s.Build(ctx)
 	if err != nil {
 		return PosternSnapshotDoc{}, err
@@ -122,8 +128,10 @@ func (s PosternSnapshot) Run(ctx context.Context) (PosternSnapshotDoc, error) {
 	return doc, nil
 }
 
-// write encrypts doc's JSON to GovernorKey and writes it through File.
-func (s PosternSnapshot) write(ctx context.Context, doc PosternSnapshotDoc) error {
+// checkWritable reports whether Run has everything write will need, without
+// touching the tracker: a cipher, somewhere to write, and a governor key to
+// encrypt to.
+func (s PosternSnapshot) checkWritable() error {
 	if s.Cipher == nil {
 		return fmt.Errorf("mw postern snapshot: no cipher is configured")
 	}
@@ -132,6 +140,14 @@ func (s PosternSnapshot) write(ctx context.Context, doc PosternSnapshotDoc) erro
 	}
 	if strings.TrimSpace(s.GovernorKey) == "" {
 		return fmt.Errorf("mw postern snapshot: postern_governor_key is not set, so there is no one to encrypt it to")
+	}
+	return nil
+}
+
+// write encrypts doc's JSON to GovernorKey and writes it through File.
+func (s PosternSnapshot) write(ctx context.Context, doc PosternSnapshotDoc) error {
+	if err := s.checkWritable(); err != nil {
+		return err
 	}
 	plaintext, err := json.Marshal(doc)
 	if err != nil {
@@ -201,6 +217,25 @@ func (s PosternSnapshot) epic(ctx context.Context, id string) (PosternSnapshotEp
 		}
 		total++
 
+		// A story closed outside the Landed window is neither landed nor
+		// needs_you nor working: it is read no further, so an epic's long tail
+		// of old, finished stories costs no comment read and no note read
+		// (mw-tfne4.8) — this is most of an epic's history on a live rig.
+		if child.Closed() {
+			if child.ClosedAt.IsZero() || now.Sub(child.ClosedAt) > PosternSnapshotWindow {
+				continue
+			}
+			landed, ok, err := s.landed(ctx, child)
+			if err != nil {
+				return PosternSnapshotEpic{}, err
+			}
+			if ok {
+				out.Landed = append(out.Landed, landed)
+				counted++
+			}
+			continue
+		}
+
 		asked, err := s.Notes.Note(ctx, PosternQuestionKey(child.Story.ID))
 		if err != nil {
 			return PosternSnapshotEpic{}, fmt.Errorf("reading %s's question note: %w", child.Story.ID, err)
@@ -214,15 +249,6 @@ func (s PosternSnapshot) epic(ctx context.Context, id string) (PosternSnapshotEp
 		}
 
 		switch {
-		case child.Closed():
-			landed, ok, err := s.landed(ctx, child, now)
-			if err != nil {
-				return PosternSnapshotEpic{}, err
-			}
-			if ok {
-				out.Landed = append(out.Landed, landed)
-				counted++
-			}
 		case strings.EqualFold(strings.TrimSpace(child.Status), StatusInProgress):
 			waits, err := s.waits(ctx, child, lookup)
 			if err != nil {
@@ -279,14 +305,12 @@ func (s PosternSnapshot) needsYou(ctx context.Context, child StoryDetail) (Poste
 	return question, nil
 }
 
-// landed reports child as a landed entry when it closed within
-// PosternSnapshotWindow of now and carries no comment naming
-// PosternSnapshotVerifiedMarker. ok is false, with no error, for a child that
-// does not belong in landed at all.
-func (s PosternSnapshot) landed(ctx context.Context, child StoryDetail, now time.Time) (PosternSnapshotLanded, bool, error) {
-	if child.ClosedAt.IsZero() || now.Sub(child.ClosedAt) > PosternSnapshotWindow {
-		return PosternSnapshotLanded{}, false, nil
-	}
+// landed reports child as a landed entry, unless it carries a comment naming
+// PosternSnapshotVerifiedMarker. The caller has already established child
+// closed within PosternSnapshotWindow: landed reads its comments only once
+// that is known, never for a story that does not belong in landed at all. ok
+// is false, with no error, for a verified child.
+func (s PosternSnapshot) landed(ctx context.Context, child StoryDetail) (PosternSnapshotLanded, bool, error) {
 	comments, err := s.Tracker.StoryComments(ctx, child.Story.ID)
 	if err != nil {
 		return PosternSnapshotLanded{}, false, fmt.Errorf("reading %s's comments: %w", child.Story.ID, err)

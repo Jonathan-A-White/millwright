@@ -88,6 +88,10 @@ type FakeTracker struct {
 	// test can say the hosts were levelled before anything was claimed.
 	asked []string
 
+	// commentReads counts each call to StoryComments, by story id, so that a
+	// test can say a story's comments were never read.
+	commentReads map[string]int
+
 	// failing is the methods FailOn makes fail, by the error each gives.
 	failing map[string]error
 
@@ -403,6 +407,14 @@ func (f *FakeTracker) Comments(id string) []string {
 	return append([]string(nil), s.comments...)
 }
 
+// CommentReads reports how many times StoryComments was called for id, so
+// that a test can say a story's comments were never read.
+func (f *FakeTracker) CommentReads(id string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.commentReads[id]
+}
+
 // Writes reports how many calls changed something — a story or epic filed, a
 // story written to, a note set or cleared — so that a test can say that a
 // reading wrote nothing.
@@ -417,6 +429,10 @@ func (f *FakeTracker) Writes() int {
 func (f *FakeTracker) StoryComments(_ context.Context, id string) ([]application.Comment, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.commentReads == nil {
+		f.commentReads = map[string]int{}
+	}
+	f.commentReads[id]++
 	if f.Err != nil {
 		return nil, f.Err
 	}
