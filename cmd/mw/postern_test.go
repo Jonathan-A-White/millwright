@@ -17,36 +17,77 @@ import (
 
 	"github.com/bsv-blockchain/go-sdk/transaction"
 
+	ec "github.com/bsv-blockchain/go-sdk/primitives/ec"
+	"github.com/bsv-blockchain/go-sdk/script"
+
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/postern"
 )
 
-// posternRecordFixture is infrastructure/postern/testdata/record.json: one
-// message record, the keys at both ends of it, and its exact script bytes.
+// posternRecordFixture is infrastructure/postern/testdata/protocol-vectors.json
+// (postern's own committed fixture, docs/protocol.md section 5), reshaped
+// into the WIF and address forms these tests build an mw home around.
 type posternRecordFixture struct {
-	SenderWIF       string `json:"senderWIF"`
-	SenderPubKey    string `json:"senderPubKey"`
-	SenderAddress   string `json:"senderAddress"`
-	RecipientWIF    string `json:"recipientWIF"`
-	RecipientPubKey string `json:"recipientPubKey"`
-	Text            string `json:"text"`
-	Class           string `json:"class"`
-	Ts              int64  `json:"ts"`
-	Ct              string `json:"ct"`
-	ScriptHex       string `json:"scriptHex"`
+	SenderWIF       string
+	SenderPubKey    string
+	SenderAddress   string
+	RecipientWIF    string
+	RecipientPubKey string
+	Text            string
+	Class           string
+	Ts              int64
+	Ct              string
+	ScriptHex       string
 }
 
 func loadPosternRecordFixture(t *testing.T) posternRecordFixture {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("..", "..", "infrastructure", "postern", "testdata", "record.json"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "infrastructure", "postern", "testdata", "protocol-vectors.json"))
 	if err != nil {
-		t.Fatalf("reading the record fixture: %v", err)
+		t.Fatalf("reading the protocol fixture: %v", err)
 	}
-	var f posternRecordFixture
+	var f struct {
+		Inputs struct {
+			SenderPrivateKeyHex    string `json:"senderPrivateKeyHex"`
+			SenderPublicKeyHex     string `json:"senderPublicKeyHex"`
+			RecipientPrivateKeyHex string `json:"recipientPrivateKeyHex"`
+			RecipientPublicKeyHex  string `json:"recipientPublicKeyHex"`
+			Plaintext              string `json:"plaintext"`
+		} `json:"inputs"`
+		EncryptMessage struct {
+			Class string `json:"class"`
+			Ts    int64  `json:"ts"`
+			Ct    string `json:"ct"`
+		} `json:"encryptMessage"`
+		RecordScriptHex string `json:"recordScriptHex"`
+	}
 	if err := json.Unmarshal(raw, &f); err != nil {
-		t.Fatalf("parsing the record fixture: %v", err)
+		t.Fatalf("parsing the protocol fixture: %v", err)
 	}
-	return f
+	senderPriv, err := ec.PrivateKeyFromHex(f.Inputs.SenderPrivateKeyHex)
+	if err != nil {
+		t.Fatalf("parsing the fixture's sender key: %v", err)
+	}
+	recipientPriv, err := ec.PrivateKeyFromHex(f.Inputs.RecipientPrivateKeyHex)
+	if err != nil {
+		t.Fatalf("parsing the fixture's recipient key: %v", err)
+	}
+	senderAddr, err := script.NewAddressFromPublicKeyString(f.Inputs.SenderPublicKeyHex, false)
+	if err != nil {
+		t.Fatalf("deriving the fixture sender's testnet address: %v", err)
+	}
+	return posternRecordFixture{
+		SenderWIF:       senderPriv.WifPrefix(byte(ec.TestNet)),
+		SenderPubKey:    f.Inputs.SenderPublicKeyHex,
+		SenderAddress:   senderAddr.AddressString,
+		RecipientWIF:    recipientPriv.WifPrefix(byte(ec.TestNet)),
+		RecipientPubKey: f.Inputs.RecipientPublicKeyHex,
+		Text:            f.Inputs.Plaintext,
+		Class:           f.EncryptMessage.Class,
+		Ts:              f.EncryptMessage.Ts,
+		Ct:              f.EncryptMessage.Ct,
+		ScriptHex:       f.RecordScriptHex,
+	}
 }
 
 // posternHome sets up a temp HOME whose config points mw at backend and at a
