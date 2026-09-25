@@ -722,6 +722,34 @@ func TestAFailingPosternSnapshotDoesNotStopTheTick(t *testing.T) {
 	}
 }
 
+func TestASlowPosternSnapshotIsKilledByItsOwnTimeoutAndDoesNotStopTheTick(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.posternCount(0)
+	f.env = append(f.env, "MW_MAIL_SNAPSHOT_TIMEOUT=1")
+	f.write("bin/mw", "#!/bin/sh\ncase \"$1 $2\" in\n"+
+		"\"postern snapshot\") echo \"$*\" >> \"$MW_TEST_DIR/postern.log\"; sleep 5; exit 0 ;;\n"+
+		"esac\ncase \"$1\" in\n"+
+		"sync) echo \"$*\" >> \"$MW_TEST_DIR/mw.log\" ;;\n"+
+		"nudge) echo \"$*\" >> \"$MW_TEST_DIR/nudge.log\"; [ -f \"$MW_TEST_DIR/nudge-output\" ] && cat \"$MW_TEST_DIR/nudge-output\" ;;\n"+
+		"postern) echo \"$*\" >> \"$MW_TEST_DIR/postern.log\"; cat \"$MW_TEST_DIR/postern-count\" 2>/dev/null ;;\n"+
+		"esac\nexit 0\n", 0o755)
+	f.inbox("mw-aaa")
+
+	start := time.Now()
+	f.tick()
+	elapsed := time.Since(start)
+
+	f.typed(fmt.Sprintf(announcement, 1))
+	if n := f.posternSubCalls("snapshot"); n != 1 {
+		t.Fatalf("mw postern snapshot was called %d times, want 1 (even though it hung)", n)
+	}
+	if elapsed >= 4*time.Second {
+		t.Fatalf("the tick took %v; a snapshot bounded to a 1s timeout should never have run anywhere near the 5s it tried to sleep", elapsed)
+	}
+}
+
 func TestTheScriptIsExecutableAndParses(t *testing.T) {
 	info, err := os.Stat("mail-notify")
 	if err != nil {

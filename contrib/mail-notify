@@ -21,10 +21,13 @@
 #      recently than its damper: 1 h the first time, doubling on each repeat
 #      while the condition keeps holding, capped at 8 h, and reset once the
 #      condition clears (recorded per condition in the state directory);
-#   6. when this host has a postern key file, runs `mw postern snapshot`,
-#      refreshing the brief of every live epic for the Governor's app —
-#      unconditionally, every tick, whether or not there is anything else to
-#      tell the Mayor; a failure is logged and never stops the tick;
+#   6. when this host has a postern key file, runs `mw postern snapshot`
+#      after the nudge, bounded to MW_MAIL_SNAPSHOT_TIMEOUT seconds (default
+#      60) so a slow snapshot can never hold the tick past a minute
+#      (mw-tfne4.8): refreshing the brief of every live epic for the
+#      Governor's app — unconditionally, every tick, whether or not there is
+#      anything else to tell the Mayor; a failure, or a run that hits the
+#      timeout, is logged and never stops the tick;
 #   7. if there is new mail, a postern count risen since last noted, or a
 #      clause survived the damper, finds the Mayor's window from the vault's
 #      .mayor-acting and, once it is not working and its input line is empty,
@@ -68,6 +71,10 @@
 #                        the last sync, the lock
 #                        (${XDG_STATE_HOME:-~/.local/state}/mw-mail-notify)
 #   MW_MAIL_LOADAVG_FILE where the load average is read (/proc/loadavg; else uptime)
+#   MW_MAIL_SNAPSHOT_TIMEOUT
+#                        seconds `mw postern snapshot` (step 6) may run before
+#                        it is killed, so a slow snapshot never holds a tick
+#                        past a minute (mw-tfne4.8)                     (60)
 #   MW_TMUX_SOCKET       a tmux server other than the default, as `tmux -L`
 
 set -u
@@ -77,6 +84,7 @@ LOAD_LIMIT=${MW_MAIL_LOAD_LIMIT:-2.0}
 SYNC_EVERY=${MW_MAIL_SYNC_EVERY:-300}
 STATE=${MW_MAIL_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mw-mail-notify}
 LOADAVG=${MW_MAIL_LOADAVG_FILE:-/proc/loadavg}
+SNAPSHOT_TIMEOUT=${MW_MAIL_SNAPSHOT_TIMEOUT:-60}
 
 # How long a quiet alarm condition, once typed, is left untyped again: 1 h the
 # first time, then doubled on each repeat while the condition keeps holding,
@@ -118,6 +126,7 @@ fi
 
 command -v flock >/dev/null 2>&1 || die "flock is not installed"
 command -v tmux >/dev/null 2>&1 || die "tmux is not installed"
+command -v timeout >/dev/null 2>&1 || die "timeout is not installed"
 mkdir -p "$STATE" || die "cannot make $STATE"
 
 # Never two at once: a tick that finds another running does nothing.
@@ -229,11 +238,13 @@ fi
 
 # 6. The postern snapshot: refreshed every tick, on a host with a postern key
 # file, whether or not there is anything below to tell the Mayor about — the
-# Governor's app reads it independently of the tmux window. A failure is
+# Governor's app reads it independently of the tmux window. Bounded to
+# SNAPSHOT_TIMEOUT seconds: a snapshot that runs long is killed rather than
+# starving every tick after it (mw-tfne4.8). A failure, timeout included, is
 # logged and never stops the tick: the app simply serves the last good
 # snapshot until the next one gets through.
 if [ -r "$keyfile" ]; then
-	(cd "$vault" && mw postern snapshot >/dev/null 2>&1) || say "mw postern snapshot did not finish cleanly; carrying on with the last one written"
+	(cd "$vault" && timeout "$SNAPSHOT_TIMEOUT" mw postern snapshot >/dev/null 2>&1) || say "mw postern snapshot did not finish cleanly; carrying on with the last one written"
 fi
 
 [ -n "$new" ] || [ -n "$postern_text" ] || [ -n "$nudge_texts" ] || exit 0
