@@ -1059,9 +1059,21 @@ The service reads the same `~/.config/mw/dispatch.env` as the dispatch timer for
 its `PATH`, which must reach `mw`, `bd`, `tmux`, `flock` and `~/.local/bin`; and
 the vault from `~/.config/mw/config.toml`. Its settings (`MW_MAIL_MAILBOX`,
 `MW_MAIL_LOAD_LIMIT`, `MW_MAIL_SYNC_EVERY`, `MW_MAIL_STATE_DIR`,
-`MW_TMUX_SOCKET`) go in an optional `~/.config/mw/mail-notify.env`, as `NAME=value`
-lines; the script's header lists them. A tmux server other than the default is
-named with `MW_TMUX_SOCKET`.
+`MW_MAIL_SNAPSHOT_TIMEOUT`, `MW_MAIL_SNAPSHOT_EVERY`, `MW_TMUX_SOCKET`) go in
+an optional `~/.config/mw/mail-notify.env`, as `NAME=value` lines; the script's
+header lists them. A tmux server other than the default is named with
+`MW_TMUX_SOCKET`.
+
+On a host with a postern key file, the tick also refreshes the postern
+snapshot (`mw postern snapshot`, above) once the vault's beads have changed
+since the last attempt and `MW_MAIL_SNAPSHOT_EVERY` seconds (default 600) have
+passed since then — never unconditionally, and never more than once every
+`MW_MAIL_SNAPSHOT_EVERY`. Each attempt is bounded to `MW_MAIL_SNAPSHOT_TIMEOUT`
+seconds (default 60) and killed past that, logged once with how long it ran; a
+slow host whose beads take longer than the default to snapshot should raise
+`MW_MAIL_SNAPSHOT_TIMEOUT` rather than lower `MW_MAIL_SNAPSHOT_EVERY` — a
+snapshot that never finishes inside its timeout is never worth retrying more
+often (mw-tfne4.12).
 
 **Undo it**:
 

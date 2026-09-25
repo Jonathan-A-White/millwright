@@ -21,13 +21,17 @@
 #      recently than its damper: 1 h the first time, doubling on each repeat
 #      while the condition keeps holding, capped at 8 h, and reset once the
 #      condition clears (recorded per condition in the state directory);
-#   6. when this host has a postern key file, runs `mw postern snapshot`
-#      after the nudge, bounded to MW_MAIL_SNAPSHOT_TIMEOUT seconds (default
-#      60) so a slow snapshot can never hold the tick past a minute
+#   6. when this host has a postern key file, and the beads have changed since
+#      the last snapshot written or attempted and at least
+#      MW_MAIL_SNAPSHOT_EVERY seconds have passed since then, runs `mw postern
+#      snapshot` after the nudge, bounded to MW_MAIL_SNAPSHOT_TIMEOUT seconds
+#      (default 60) so a slow snapshot can never hold a tick past a minute
 #      (mw-tfne4.8): refreshing the brief of every live epic for the
-#      Governor's app — unconditionally, every tick, whether or not there is
-#      anything else to tell the Mayor; a failure, or a run that hits the
-#      timeout, is logged and never stops the tick;
+#      Governor's app. A run that fails, or that hits the timeout and is
+#      killed, is logged once with how long it ran and never stops the tick;
+#      either way the next attempt waits a full MW_MAIL_SNAPSHOT_EVERY, so a
+#      snapshot slower than its timeout is never retried every tick
+#      (mw-tfne4.12);
 #   7. if there is new mail, a postern count risen since last noted, or a
 #      clause survived the damper, finds the Mayor's window from the vault's
 #      .mayor-acting and, once it is not working and its input line is empty,
@@ -68,13 +72,21 @@
 #   MW_MAIL_LOAD_LIMIT   skip the tick above this 1-minute load        (2.0)
 #   MW_MAIL_SYNC_EVERY   least seconds between two `mw sync`s          (300)
 #   MW_MAIL_STATE_DIR    the ids announced, the quiet alarm's dampers,
-#                        the last sync, the lock
+#                        the last sync, the last snapshot, the lock
 #                        (${XDG_STATE_HOME:-~/.local/state}/mw-mail-notify)
 #   MW_MAIL_LOADAVG_FILE where the load average is read (/proc/loadavg; else uptime)
 #   MW_MAIL_SNAPSHOT_TIMEOUT
 #                        seconds `mw postern snapshot` (step 6) may run before
 #                        it is killed, so a slow snapshot never holds a tick
-#                        past a minute (mw-tfne4.8)                     (60)
+#                        past a minute (mw-tfne4.8); raise it on a host where
+#                        a snapshot takes longer than this to build (see
+#                        README.md, "Telling the Mayor's window when mail
+#                        arrives")                                      (60)
+#   MW_MAIL_SNAPSHOT_EVERY
+#                        least seconds between two attempts at `mw postern
+#                        snapshot` (step 6), win or lose, so a snapshot slower
+#                        than its own timeout is never retried every tick
+#                        (mw-tfne4.12)                                  (600)
 #   MW_TMUX_SOCKET       a tmux server other than the default, as `tmux -L`
 
 set -u
@@ -85,6 +97,7 @@ SYNC_EVERY=${MW_MAIL_SYNC_EVERY:-300}
 STATE=${MW_MAIL_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mw-mail-notify}
 LOADAVG=${MW_MAIL_LOADAVG_FILE:-/proc/loadavg}
 SNAPSHOT_TIMEOUT=${MW_MAIL_SNAPSHOT_TIMEOUT:-60}
+SNAPSHOT_EVERY=${MW_MAIL_SNAPSHOT_EVERY:-600}
 
 # How long a quiet alarm condition, once typed, is left untyped again: 1 h the
 # first time, then doubled on each repeat while the condition keeps holding,
@@ -236,15 +249,42 @@ if [ -d "$STATE/nudged" ]; then
 	done
 fi
 
-# 6. The postern snapshot: refreshed every tick, on a host with a postern key
-# file, whether or not there is anything below to tell the Mayor about — the
-# Governor's app reads it independently of the tmux window. Bounded to
-# SNAPSHOT_TIMEOUT seconds: a snapshot that runs long is killed rather than
-# starving every tick after it (mw-tfne4.8). A failure, timeout included, is
-# logged and never stops the tick: the app simply serves the last good
-# snapshot until the next one gets through.
+# 6. The postern snapshot: on a host with a postern key file, refreshed only
+# when the beads have changed since the marker left by the last attempt and
+# at least SNAPSHOT_EVERY seconds have passed since then — the app reads it
+# independently of the tmux window, and a snapshot this host's beads have not
+# moved since is not worth rebuilding (mw-tfne4.12). The marker is `bd vc
+# status`'s own commit, cheap beside the snapshot itself; a bd too old to have
+# it, or a call that fails, reads as "changed", so the interval alone still
+# bounds how often it is tried. Bounded to SNAPSHOT_TIMEOUT seconds: a
+# snapshot that runs long is killed rather than starving every tick after it
+# (mw-tfne4.8), logged once with how long it ran either way, and never stops
+# the tick: the app simply serves the last good snapshot until the next one
+# gets through. The time and the level are both recorded before the attempt
+# runs, so one that hangs or fails is not retried before SNAPSHOT_EVERY has
+# passed again.
 if [ -r "$keyfile" ]; then
-	(cd "$vault" && timeout "$SNAPSHOT_TIMEOUT" mw postern snapshot >/dev/null 2>&1) || say "mw postern snapshot did not finish cleanly; carrying on with the last one written"
+	snap_last=$(cat "$STATE/snapshot-last" 2>/dev/null || echo 0)
+	case $snap_last in *[!0-9]* | "") snap_last=0 ;; esac
+	if [ $((now - snap_last)) -ge "$SNAPSHOT_EVERY" ]; then
+		level=$(cd "$vault" && bd vc status --json 2>/dev/null | sed -n 's/.*"commit"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+		noted=$(cat "$STATE/snapshot-level" 2>/dev/null || echo "")
+		if [ -z "$level" ] || [ "$level" != "$noted" ]; then
+			echo "$now" >"$STATE/snapshot-last"
+			[ -n "$level" ] && echo "$level" >"$STATE/snapshot-level"
+			start=$now
+			(cd "$vault" && timeout "$SNAPSHOT_TIMEOUT" mw postern snapshot >/dev/null 2>&1)
+			status=$?
+			if [ "$status" -ne 0 ]; then
+				elapsed=$(($(date +%s) - start))
+				if [ "$status" -eq 124 ]; then
+					say "mw postern snapshot exceeded ${SNAPSHOT_TIMEOUT}s and was killed after ${elapsed}s; not retrying before ${SNAPSHOT_EVERY}s have passed"
+				else
+					say "mw postern snapshot did not finish cleanly after ${elapsed}s; not retrying before ${SNAPSHOT_EVERY}s have passed"
+				fi
+			fi
+		fi
+	fi
 fi
 
 [ -n "$new" ] || [ -n "$postern_text" ] || [ -n "$nudge_texts" ] || exit 0
