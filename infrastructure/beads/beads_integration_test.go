@@ -1000,6 +1000,65 @@ func TestGatewayListsWhatIsReadyUnderALabelWhateverItsPath(t *testing.T) {
 	}
 }
 
+// mw-tfne4.17: postern's snapshot reads several live epics and several
+// stories' comments without paying one bd call per epic and per story. This
+// checks ShowEpics and StoriesComments, each in a single bd call, against two
+// epics with children and comments, and that they report exactly what
+// calling ShowEpic and StoryComments once per id would have.
+func TestGatewayReadsSeveralEpicsAndStoriesCommentsInOneCallEach(t *testing.T) {
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	firstEpic := bdRun(t, vault, beads.Program, "create", "First epic", "-t", "epic", "-p", "1", "--silent")
+	firstChild := bdRun(t, vault, beads.Program, "create", "First epic's child", "--parent", firstEpic, "--silent")
+	bdRun(t, vault, beads.Program, "comments", "add", firstChild, "First child's first comment.")
+	bdRun(t, vault, beads.Program, "comments", "add", firstChild, "First child's second comment.")
+
+	secondEpic := bdRun(t, vault, beads.Program, "create", "Second epic", "-t", "epic", "-p", "2", "--silent")
+	secondChild := bdRun(t, vault, beads.Program, "create", "Second epic's child", "--parent", secondEpic, "--silent")
+	bdRun(t, vault, beads.Program, "comments", "add", secondChild, "Second child's only comment.")
+
+	gateway := beads.New(vault)
+
+	epics, err := gateway.ShowEpics(ctx, []string{firstEpic, secondEpic})
+	if err != nil {
+		t.Fatalf("reading both epics: %v", err)
+	}
+	if len(epics) != 2 {
+		t.Fatalf("expected both epics, got %+v", epics)
+	}
+	for i, id := range []string{firstEpic, secondEpic} {
+		want, err := gateway.ShowEpic(ctx, id)
+		if err != nil {
+			t.Fatalf("reading %s on its own: %v", id, err)
+		}
+		if epics[i].ID != want.ID || epics[i].Title != want.Title || epics[i].Status != want.Status ||
+			epics[i].Priority != want.Priority || len(epics[i].Stories) != len(want.Stories) {
+			t.Fatalf("expected ShowEpics(%s) to match ShowEpic(%s), got %+v want %+v", id, id, epics[i], want)
+		}
+	}
+	if _, err := gateway.ShowEpics(ctx, []string{firstEpic, "t-nope"}); err == nil {
+		t.Error("expected reading an epic nobody filed among a batch to fail")
+	}
+
+	comments, err := gateway.StoriesComments(ctx, []string{firstChild, secondChild})
+	if err != nil {
+		t.Fatalf("reading both children's comments: %v", err)
+	}
+	if len(comments[firstChild]) != 2 || comments[firstChild][0].Text != "First child's first comment." ||
+		comments[firstChild][1].Text != "First child's second comment." {
+		t.Errorf("expected %s's two comments oldest first, got %+v", firstChild, comments[firstChild])
+	}
+	if len(comments[secondChild]) != 1 || comments[secondChild][0].Text != "Second child's only comment." {
+		t.Errorf("expected %s's one comment, got %+v", secondChild, comments[secondChild])
+	}
+
+	if empty, err := gateway.StoriesComments(ctx, nil); err != nil || len(empty) != 0 {
+		t.Errorf("expected no ids to read nothing without failing, got %+v: %v", empty, err)
+	}
+}
+
 func sorted(in []string) []string {
 	sort.Strings(in)
 	return in
