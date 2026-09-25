@@ -776,6 +776,28 @@ func TestDoctorTunnelSettingsAreTheShippedDefaultsUntilAHostSaysOtherwise(t *tes
 	}
 }
 
+func TestDoctorWgSettingsAreTheShippedDefaultsUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, "")
+
+	hub, err := config.DoctorWgHub()
+	if err != nil || hub != config.DefaultDoctorWgHub {
+		t.Fatalf("expected the default wg hub, got %q: %v", hub, err)
+	}
+	unit, err := config.DoctorWgUnit()
+	if err != nil || unit != config.DefaultDoctorWgUnit {
+		t.Fatalf("expected the default wg unit, got %q: %v", unit, err)
+	}
+
+	writeConfig(t, "[doctor]\ndoctor_wg_hub = \"10.88.0.1:2222\"\ndoctor_wg_unit = \"other-wg.service\"\n")
+
+	if hub, err = config.DoctorWgHub(); err != nil || hub != "10.88.0.1:2222" {
+		t.Fatalf("expected the file's doctor_wg_hub, got %q: %v", hub, err)
+	}
+	if unit, err = config.DoctorWgUnit(); err != nil || unit != "other-wg.service" {
+		t.Fatalf("expected the file's doctor_wg_unit, got %q: %v", unit, err)
+	}
+}
+
 func TestDoctorTunnelHostWithNoWatchTableIsEmpty(t *testing.T) {
 	writeConfig(t, vpsConfig)
 

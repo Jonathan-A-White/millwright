@@ -26,13 +26,15 @@
 //	blog    = "https://blog.example.com"
 //
 //	[doctor]
-//	units        = ["mw-dispatch.service", "mw-millhand-tick.service"]
-//	state_dir    = "/root/.local/state/mw-doctor"
-//	reach        = ["api.anthropic.com:443", "github.com:443"]
-//	powershell   = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
-//	tunnel_unit  = "reverse-tunnel.service"
-//	tunnel_host  = "vps"
-//	tunnel_probe = "ss -ltn sport = :2222"
+//	units          = ["mw-dispatch.service", "mw-millhand-tick.service"]
+//	state_dir      = "/root/.local/state/mw-doctor"
+//	reach          = ["api.anthropic.com:443", "github.com:443"]
+//	powershell     = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+//	tunnel_unit    = "reverse-tunnel.service"
+//	tunnel_host    = "vps"
+//	tunnel_probe   = "ss -ltn sport = :2222"
+//	doctor_wg_hub  = "10.88.0.1:22"
+//	doctor_wg_unit = "wg-quick@wg0"
 package config
 
 import (
@@ -899,7 +901,7 @@ const DefaultDoctorTunnelProbe = "ss -ltn sport = :2222"
 // ~/.config/mw/config.toml, and DefaultDoctorTunnelUnit when the table says
 // nothing.
 func DoctorTunnelUnit() (string, error) {
-	return doctorTunnelSetting("tunnel_unit", DefaultDoctorTunnelUnit)
+	return doctorTableSetting("tunnel_unit", DefaultDoctorTunnelUnit)
 }
 
 // DoctorTunnelProbe reports the command mw doctor's tunnel check runs over
@@ -907,7 +909,32 @@ func DoctorTunnelUnit() (string, error) {
 // `tunnel_probe` key of ~/.config/mw/config.toml, and
 // DefaultDoctorTunnelProbe when the table says nothing.
 func DoctorTunnelProbe() (string, error) {
-	return doctorTunnelSetting("tunnel_probe", DefaultDoctorTunnelProbe)
+	return doctorTableSetting("tunnel_probe", DefaultDoctorTunnelProbe)
+}
+
+// DefaultDoctorWgHub is the hub's ssh host:port mw doctor's wg check dials
+// over wg0, when the [doctor] table says nothing: this rig's own wireguard
+// hub.
+const DefaultDoctorWgHub = "10.88.0.1:22"
+
+// DefaultDoctorWgUnit is the unit mw doctor's wg check restarts when the hub
+// is unreachable over wg0, when the [doctor] table says nothing.
+const DefaultDoctorWgUnit = "wg-quick@wg0"
+
+// DoctorWgHub reports the hub's ssh host:port mw doctor's wg check dials
+// over wg0: the `[doctor]` table's `doctor_wg_hub` key of
+// ~/.config/mw/config.toml, and DefaultDoctorWgHub when the table says
+// nothing.
+func DoctorWgHub() (string, error) {
+	return doctorTableSetting("doctor_wg_hub", DefaultDoctorWgHub)
+}
+
+// DoctorWgUnit reports the unit mw doctor's wg check restarts when the hub is
+// unreachable over wg0: the `[doctor]` table's `doctor_wg_unit` key of
+// ~/.config/mw/config.toml, and DefaultDoctorWgUnit when the table says
+// nothing.
+func DoctorWgUnit() (string, error) {
+	return doctorTableSetting("doctor_wg_unit", DefaultDoctorWgUnit)
 }
 
 // DoctorTunnelHost reports the VPS's ssh name mw doctor's tunnel check
@@ -934,9 +961,9 @@ func DoctorTunnelHost() (string, error) {
 	return watch.Host, nil
 }
 
-// doctorTunnelSetting reads one [doctor] table key, and fallback when the
+// doctorTableSetting reads one [doctor] table key, and fallback when the
 // table says nothing about it.
-func doctorTunnelSetting(key, fallback string) (string, error) {
+func doctorTableSetting(key, fallback string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("there is no home directory to read %s in: %w", File, err)

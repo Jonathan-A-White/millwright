@@ -1718,17 +1718,19 @@ nothing else; the next run retries.
 The `[doctor]` table of the config file says which units **daemon-reload**
 asks about, which hosts **wifi** and **tunnel** try to reach, where its
 powershell.exe sign is, what unit and command **tunnel** restarts and runs,
-and where state is kept:
+what hub and unit **wg** dials and restarts, and where state is kept:
 
 ```toml
 [doctor]
-units        = ["mw-dispatch.service", "mw-millhand-tick.service", "mw-millhand-review.service", "mw-doctor.service"]
-state_dir    = "/root/.local/state/mw-doctor"   # default: ~/.local/state/mw-doctor
-reach        = ["api.anthropic.com:443", "github.com:443"]
-powershell   = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
-tunnel_unit  = "reverse-tunnel.service"         # default; the unit tunnel restarts
-tunnel_host  = "vps"                            # default: the [watch] table's host
-tunnel_probe = "ss -ltn sport = :2222"          # default; run over ssh on tunnel_host
+units          = ["mw-dispatch.service", "mw-millhand-tick.service", "mw-millhand-review.service", "mw-doctor.service"]
+state_dir      = "/root/.local/state/mw-doctor"   # default: ~/.local/state/mw-doctor
+reach          = ["api.anthropic.com:443", "github.com:443"]
+powershell     = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
+tunnel_unit    = "reverse-tunnel.service"         # default; the unit tunnel restarts
+tunnel_host    = "vps"                            # default: the [watch] table's host
+tunnel_probe   = "ss -ltn sport = :2222"          # default; run over ssh on tunnel_host
+doctor_wg_hub  = "10.88.0.1:22"                   # default; the hub's ssh host:port, dialed over wg0
+doctor_wg_unit = "wg-quick@wg0"                   # default; the unit wg restarts
 ```
 
 **daemon-reload** asks `systemctl --user show <unit> -p NeedDaemonReload` for
@@ -1766,6 +1768,20 @@ restart <tunnel_unit>`, a 15 s settle, then a re-probe; its damper is 15
 minutes with a cap of 3, and its way back is `systemctl --user stop
 <tunnel_unit>`. It never touches the VPS beyond that one read-only ssh call,
 never edits the unit, and never uses sudo.
+
+**wg** cures this host's wg-quick@wg0 unit going down while the hub stays
+reachable no other way: it TCP-dials `doctor_wg_hub`'s ssh port over wg0, no
+root, ok when it answers, faulty once it has looked unreachable for 3 minutes
+straight. It is cannot-tell, not faulty, when the internet itself looks down
+(checked the same way **wifi** and **tunnel** do), when this host has no wg0
+interface at all, or when wg0's own address is the hub's — this host being
+the hub itself, with nothing to restart. Its cure is `sudo -n systemctl
+restart <doctor_wg_unit>`, a 15 s settle, then a re-probe; a `sudo -n` that
+needs a password fails naming the sudoers line this host lacks, rather than a
+bare exec error. Its damper is 15 minutes with a cap of 3, and its way back
+(never run by the check) is `sudo systemctl stop <doctor_wg_unit>`. It never
+edits the unit or the wireguard config, and never runs anything elevated
+beyond that one restart.
 
 **timers** cures a factory timer left stopped by the rig's own machinery
 (a hand `systemctl --user stop`, a reinstall that missed its timer, a
