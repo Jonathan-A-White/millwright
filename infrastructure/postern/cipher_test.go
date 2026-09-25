@@ -14,13 +14,16 @@ import (
 func TestCipherDecryptsTheFixturesCiphertext(t *testing.T) {
 	f := loadProtocolFixture(t)
 
-	text, err := postern.NewCipher(postern.New(keyFileHolding(t, "unused"))).Decrypt(
+	text, from, err := postern.NewCipher(postern.New(keyFileHolding(t, "unused"))).Decrypt(
 		wifFromHex(t, f.Inputs.RecipientPrivateKeyHex), f.EncryptMessage.Ct)
 	if err != nil {
 		t.Fatalf("decrypting the fixture: %v", err)
 	}
 	if text != f.Inputs.Plaintext {
 		t.Fatalf("expected %q, got %q", f.Inputs.Plaintext, text)
+	}
+	if from != f.Inputs.SenderPublicKeyHex {
+		t.Fatalf("expected the envelope sender %s, got %s", f.Inputs.SenderPublicKeyHex, from)
 	}
 }
 
@@ -52,12 +55,15 @@ func TestCipherRoundTripsFromTheKeyFileToTheRecipient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("encrypting: %v", err)
 	}
-	text, err := cipher.Decrypt(wifFromHex(t, f.Inputs.RecipientPrivateKeyHex), ct)
+	text, from, err := cipher.Decrypt(wifFromHex(t, f.Inputs.RecipientPrivateKeyHex), ct)
 	if err != nil {
 		t.Fatalf("decrypting: %v", err)
 	}
 	if text != "Ship it?" {
 		t.Fatalf("expected %q, got %q", "Ship it?", text)
+	}
+	if from != f.Inputs.SenderPublicKeyHex {
+		t.Fatalf("expected the envelope sender %s, got %s", f.Inputs.SenderPublicKeyHex, from)
 	}
 
 	// BRC-78 carries the sender's and the recipient's public keys in the clear
@@ -84,7 +90,7 @@ func TestCipherRefusesAKeyTheMessageIsNotFor(t *testing.T) {
 		t.Fatalf("making a key: %v", err)
 	}
 
-	_, err = postern.NewCipher(postern.New(keyFileHolding(t, "unused"))).Decrypt(other.WifPrefix(byte(ec.TestNet)), f.EncryptMessage.Ct)
+	_, _, err = postern.NewCipher(postern.New(keyFileHolding(t, "unused"))).Decrypt(other.WifPrefix(byte(ec.TestNet)), f.EncryptMessage.Ct)
 	if err == nil {
 		t.Fatal("expected a key the message is not for to be refused")
 	}

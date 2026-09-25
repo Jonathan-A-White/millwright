@@ -60,3 +60,44 @@ Feature: mw postern inbox
     When mw postern inbox is run
     Then reading succeeds
     And it printed "record-txid"
+
+  Scenario: a payload's claimed sender the envelope does not back is flagged, and never recorded as a reply
+    Given bead "mw-abc.2" is known to the tracker
+    And bead "mw-abc.2" has an open question, txid "spoof-question-txid"
+    And a postern reply for bead "mw-abc.2" with answer "A" and txid "spoof-txid" addressed to this key claiming to be from "impostor-pubkey-hex"
+    When mw postern inbox is run
+    Then reading succeeds
+    And it printed "from governor-pubkey-hex (payload claimed impostor-pubkey-hex)"
+    And bead "mw-abc.2" has no comment
+    And no mail was sent for the reply
+
+  Scenario: a transaction signed by a key the envelope does not back is flagged, and never recorded as a reply
+    Given bead "mw-abc.3" is known to the tracker
+    And bead "mw-abc.3" has an open question, txid "signer-question-txid"
+    And a postern reply for bead "mw-abc.3" with answer "A" and txid "signer-txid" addressed to this key signed by "impostor-pubkey-hex"
+    When mw postern inbox is run
+    Then reading succeeds
+    And it printed "from governor-pubkey-hex (signer claimed impostor-pubkey-hex)"
+    And bead "mw-abc.3" has no comment
+    And no mail was sent for the reply
+
+  Scenario: a verified sender who is the Governor, with the signer checked, is named as the Governor
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And a postern record of class "message" addressed to this key signed by "governor-pubkey-hex"
+    When mw postern inbox is run
+    Then reading succeeds
+    And it printed "from the Governor  txid"
+
+  Scenario: a verified sender who is not the Governor, with the signer checked, is printed as their hex key
+    Given mw postern inbox trusts "some-other-governor-key" as the Governor's key
+    And a postern record of class "message" addressed to this key signed by "governor-pubkey-hex"
+    When mw postern inbox is run
+    Then reading succeeds
+    And it printed "from governor-pubkey-hex  txid"
+
+  Scenario: a verified sender the backend cannot yet supply a signer for is flagged unchecked
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And a postern record of class "message" addressed to this key
+    When mw postern inbox is run
+    Then reading succeeds
+    And it printed "from the Governor (signer unchecked)  txid"

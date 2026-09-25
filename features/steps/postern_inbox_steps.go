@@ -27,14 +27,15 @@ var posternReplyStamp = time.Date(2026, time.September, 25, 10, 0, 0, 0, time.UT
 // cipher, and a fake tracker standing in for the note store, so that mw
 // postern inbox can be exercised with no network and no real bd.
 type posternInboxContext struct {
-	home    string
-	keys    *postern.KeyFile
-	pubKey  string
-	backend *apptest.FakePostern
-	cipher  *apptest.FakeCipher
-	memory  *apptest.FakeTracker
-	mailbox *apptest.FakeMailbox
-	out     *bytes.Buffer
+	home        string
+	keys        *postern.KeyFile
+	pubKey      string
+	backend     *apptest.FakePostern
+	cipher      *apptest.FakeCipher
+	memory      *apptest.FakeTracker
+	mailbox     *apptest.FakeMailbox
+	out         *bytes.Buffer
+	governorKey string
 
 	messages    []application.PosternInboxMessage
 	unreadCount int
@@ -47,9 +48,16 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	c := &posternInboxContext{}
 
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
+		cipher := apptest.NewFakeCipher()
+		// The envelope's sender key every fake record is really encrypted
+		// under, standing in for BRC-78's embedded sender public key: the
+		// same placeholder these scenarios have always used as the sender's
+		// hex, so a record built without overriding From or Signer is a
+		// genuine, verified one.
+		cipher.From = "governor-pubkey-hex"
 		*c = posternInboxContext{
 			backend: apptest.NewFakePostern(),
-			cipher:  apptest.NewFakeCipher(),
+			cipher:  cipher,
 			memory:  apptest.NewFakeTracker(),
 			mailbox: apptest.NewFakeMailbox(),
 			out:     &bytes.Buffer{},
@@ -72,6 +80,12 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a postern reply for bead "([^"]*)" with answer "([^"]*)" and txid "([^"]*)" addressed to this key$`,
 		c.aPosternReplyAddressedToThisKey)
 	ctx.Given(`^a plain text postern record with text "([^"]*)" addressed to this key$`, c.aPlainTextRecordAddressedToThisKey)
+	ctx.Given(`^a postern record of class "([^"]*)" addressed to this key signed by "([^"]*)"$`, c.aPosternRecordAddressedToThisKeySignedBy)
+	ctx.Given(`^a postern reply for bead "([^"]*)" with answer "([^"]*)" and txid "([^"]*)" addressed to this key claiming to be from "([^"]*)"$`,
+		c.aPosternReplyClaimingToBeFrom)
+	ctx.Given(`^a postern reply for bead "([^"]*)" with answer "([^"]*)" and txid "([^"]*)" addressed to this key signed by "([^"]*)"$`,
+		c.aPosternReplySignedBy)
+	ctx.Given(`^mw postern inbox trusts "([^"]*)" as the Governor's key$`, c.thePosternGovernorKeyIs)
 
 	ctx.When(`^mw postern inbox is run$`, c.mwPosternInboxIsRun)
 	ctx.When(`^mw postern inbox --unread-count is run$`, c.mwPosternInboxUnreadCountIsRun)
@@ -117,7 +131,7 @@ func (c *posternInboxContext) addRecord(class, to, txid string) error {
 	c.backend.AddRecord(application.PosternRecord{
 		Txid:       txid,
 		Class:      class,
-		From:       "governor-pubkey-hex",
+		From:       c.cipher.From,
 		To:         to,
 		Ciphertext: ciphertext,
 	})
@@ -134,6 +148,30 @@ func (c *posternInboxContext) aPosternRecordAddressedToThisKeyWithTxid(class, tx
 
 func (c *posternInboxContext) aPosternRecordAddressedToAnotherKey(class string) error {
 	return c.addRecord(class, "another-key-pubkey-hex", "")
+}
+
+// aPosternRecordAddressedToThisKeySignedBy adds a record whose transaction
+// signing key the postern backend supplies (application.PosternRecord.Signer)
+// as signer, alongside the genuine envelope sender every fake record is
+// really encrypted under.
+func (c *posternInboxContext) aPosternRecordAddressedToThisKeySignedBy(class, signer string) error {
+	ciphertext, err := c.cipher.Encrypt(c.pubKey, fmt.Sprintf("%s text", class))
+	if err != nil {
+		return err
+	}
+	c.backend.AddRecord(application.PosternRecord{
+		Class:      class,
+		From:       c.cipher.From,
+		To:         c.pubKey,
+		Signer:     signer,
+		Ciphertext: ciphertext,
+	})
+	return nil
+}
+
+func (c *posternInboxContext) thePosternGovernorKeyIs(key string) error {
+	c.governorKey = key
+	return nil
 }
 
 func (c *posternInboxContext) beadIsKnownToTheTracker(id string) error {
@@ -157,8 +195,56 @@ func (c *posternInboxContext) aPosternReplyAddressedToThisKey(bead, answer, txid
 	c.backend.AddRecord(application.PosternRecord{
 		Txid:       txid,
 		Class:      "message",
-		From:       "governor-pubkey-hex",
+		From:       c.cipher.From,
 		To:         c.pubKey,
+		Ts:         posternReplyStamp,
+		Ciphertext: ciphertext,
+	})
+	return nil
+}
+
+// aPosternReplyClaimingToBeFrom adds a reply whose payload's own from field
+// (claimedFrom) is not the key the message is really encrypted under
+// (c.cipher.From) — a forged claim the envelope does not back.
+func (c *posternInboxContext) aPosternReplyClaimingToBeFrom(bead, answer, txid, claimedFrom string) error {
+	text, err := json.Marshal(application.PosternReply{Bead: bead, Answer: answer})
+	if err != nil {
+		return err
+	}
+	ciphertext, err := c.cipher.Encrypt(c.pubKey, string(text))
+	if err != nil {
+		return err
+	}
+	c.backend.AddRecord(application.PosternRecord{
+		Txid:       txid,
+		Class:      "message",
+		From:       claimedFrom,
+		To:         c.pubKey,
+		Ts:         posternReplyStamp,
+		Ciphertext: ciphertext,
+	})
+	return nil
+}
+
+// aPosternReplySignedBy adds a reply whose payload's from field is genuine
+// (c.cipher.From) but whose transaction signing key (signer) is not — as if
+// the postern backend had supplied a signer that disagrees with the
+// envelope.
+func (c *posternInboxContext) aPosternReplySignedBy(bead, answer, txid, signer string) error {
+	text, err := json.Marshal(application.PosternReply{Bead: bead, Answer: answer})
+	if err != nil {
+		return err
+	}
+	ciphertext, err := c.cipher.Encrypt(c.pubKey, string(text))
+	if err != nil {
+		return err
+	}
+	c.backend.AddRecord(application.PosternRecord{
+		Txid:       txid,
+		Class:      "message",
+		From:       c.cipher.From,
+		To:         c.pubKey,
+		Signer:     signer,
 		Ts:         posternReplyStamp,
 		Ciphertext: ciphertext,
 	})
@@ -172,7 +258,7 @@ func (c *posternInboxContext) aPlainTextRecordAddressedToThisKey(text string) er
 	}
 	c.backend.AddRecord(application.PosternRecord{
 		Class:      "message",
-		From:       "governor-pubkey-hex",
+		From:       c.cipher.From,
 		To:         c.pubKey,
 		Ciphertext: ciphertext,
 	})
@@ -181,13 +267,14 @@ func (c *posternInboxContext) aPlainTextRecordAddressedToThisKey(text string) er
 
 func (c *posternInboxContext) inbox() application.PosternInbox {
 	return application.PosternInbox{
-		Postern: c.backend,
-		Cipher:  c.cipher,
-		Keys:    c.keys,
-		Memory:  c.memory,
-		Tracker: c.memory,
-		Mailbox: c.mailbox,
-		Out:     c.out,
+		Postern:     c.backend,
+		Cipher:      c.cipher,
+		Keys:        c.keys,
+		Memory:      c.memory,
+		Tracker:     c.memory,
+		Mailbox:     c.mailbox,
+		GovernorKey: c.governorKey,
+		Out:         c.out,
 	}
 }
 

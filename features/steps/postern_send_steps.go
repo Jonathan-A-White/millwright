@@ -285,7 +285,7 @@ func (c *posternSendContext) theBroadcastRecordIsPosternsQuestion(bead, q, rec, 
 	if err != nil {
 		return err
 	}
-	text, err := c.cipher.Decrypt(privKey, record.Ct)
+	text, _, err := c.cipher.Decrypt(privKey, record.Ct)
 	if err != nil {
 		return fmt.Errorf("decrypting the record's plaintext: %w", err)
 	}
