@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -322,9 +323,26 @@ type WorkTracker interface {
 	// every host. It reads and writes nothing.
 	WorkInHand(ctx context.Context) (WorkInHand, error)
 
-	// ClaimStory takes a story: it becomes assigned and in progress, and stops
-	// being ready. Claiming a story already claimed by this actor is harmless.
+	// ClaimStory takes a story: it becomes assigned and in progress, stops
+	// being ready, and carries a lease the tracker keeps (see LeaseExpires)
+	// that a heartbeat renews. Claiming a story already claimed by this actor
+	// is harmless. The claim is conditional: a story another assignee already
+	// holds is not taken from them — it fails with a *ClaimHeldError, and
+	// nothing is written.
 	ClaimStory(ctx context.Context, id string) error
+
+	// HeartbeatClaim pushes the lease on a claim this actor holds forward by
+	// the tracker's lease length. It fails, writing nothing, when the story is
+	// no longer this actor's claim — reclaimed, released or closed — which is
+	// how whatever is heartbeating learns to stop.
+	HeartbeatClaim(ctx context.Context, id string) error
+
+	// ReclaimStory gives back a claim whose lease has expired with no heartbeat
+	// since: the story is unassigned and open again, the same as ReleaseClaim
+	// leaves it. It reports whether it did. A claim whose lease still holds,
+	// and a claim that carries no lease at all, are left exactly as they were
+	// and reported not reclaimed.
+	ReclaimStory(ctx context.Context, id string) (bool, error)
 
 	// ReleaseClaim gives a claim back: the story is unassigned and open again,
 	// and any dispatcher may take it. It is how a dispatch that failed after
@@ -377,8 +395,22 @@ type WorkTracker interface {
 	// CloseStory closes a story with the reason it was closed for.
 	CloseStory(ctx context.Context, id, reason string) error
 
-	// StaleClaims lists claimed stories untouched for at least days days — the
-	// sessions that went away without closing or handing back. days must be at
-	// least 1. The stories come back without an epic's defaults overlaid.
-	StaleClaims(ctx context.Context, days int) ([]StoryDetail, error)
+	// StaleClaims lists the claimed stories whose lease had expired by now
+	// with no heartbeat since — the sessions that went away without closing or
+	// handing back, which ReclaimStory may give back. A claim that carries no
+	// lease is not listed: nothing says when its holder was last heard from.
+	// Each story comes back with its own epic's defaults overlaid. It reads
+	// and writes nothing.
+	StaleClaims(ctx context.Context, now time.Time) ([]StoryDetail, error)
+}
+
+// ClaimHeldError is a claim refused because another assignee already holds
+// the story: the conditional claim failing cleanly, with nothing written.
+type ClaimHeldError struct {
+	ID     string
+	Holder string
+}
+
+func (e *ClaimHeldError) Error() string {
+	return fmt.Sprintf("%s is already claimed by %s, so it was not taken", e.ID, e.Holder)
 }

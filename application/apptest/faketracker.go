@@ -29,6 +29,10 @@ const (
 // Actor is the assignee the fake records when a story is claimed.
 const Actor = "fake"
 
+// LeaseTTL is how long a claim's lease runs in the fake, from the claim or the
+// last heartbeat: five minutes, as bd 1.3.0 grants it and does not let be set.
+const LeaseTTL = 5 * time.Minute
+
 // FakeTracker is an in-memory application.WorkTracker. Stories are listed in
 // the order they were added, so a test can assert on the whole list.
 //
@@ -95,6 +99,10 @@ type FakeTracker struct {
 	// failing is the methods FailOn makes fail, by the error each gives.
 	failing map[string]error
 
+	// Clock is what a claim's lease is counted from. A nil Clock reads the
+	// real one.
+	Clock func() time.Time
+
 	// Err, when set, is returned by every method instead of doing the work.
 	Err error
 	// SyncErr, when set, is what Sync reports instead of synchronising. Use
@@ -122,7 +130,6 @@ type fakeStory struct {
 	needs       []string
 	comments    []string
 	closeReason string
-	touched     time.Time
 }
 
 // NewFakeTracker returns an empty fake work tracker.
@@ -185,7 +192,6 @@ func (f *FakeTracker) AddStory(epicID string, story domain.Story) {
 			Priority: application.DefaultPriority,
 		},
 		metadata: map[string]string{},
-		touched:  time.Now(),
 	}
 }
 
@@ -344,7 +350,6 @@ func (f *FakeTracker) CreateStory(_ context.Context, story application.NewStory)
 		},
 		metadata: story.Overrides.Metadata(),
 		needs:    append([]string(nil), story.Needs...),
-		touched:  time.Now(),
 	}
 	return id, nil
 }
@@ -374,14 +379,15 @@ func (f *FakeTracker) Stories() []string {
 	return append([]string(nil), f.order...)
 }
 
-// Touched backdates a story's last activity, so that StaleClaims can be told
-// about a session that went away.
-func (f *FakeTracker) Touched(id string, when time.Time) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if s, ok := f.stories[id]; ok {
-		s.touched = when
-	}
+// ClaimAs claims a story for another assignee than the fake's own Actor, with
+// a lease until the time given: the claim another host's dispatcher made.
+func (f *FakeTracker) ClaimAs(id, holder string, until time.Time) error {
+	return f.write(id, func(s *fakeStory) error {
+		s.detail.Assignee = holder
+		s.detail.Status = StatusInProgress
+		s.detail.LeaseExpires = until
+		return nil
+	})
 }
 
 // Needs sets the ids of the stories a story waits on, as if they had been
@@ -774,6 +780,7 @@ func (f *FakeTracker) ReleaseClaim(_ context.Context, id string) error {
 			s.detail.Status = StatusOpen
 		}
 		s.detail.Assignee = ""
+		s.detail.LeaseExpires = time.Time{}
 		return nil
 	})
 }
@@ -860,10 +867,11 @@ func (f *FakeTracker) ClaimStory(_ context.Context, id string) error {
 	f.note("ClaimStory")
 	return f.write(id, func(s *fakeStory) error {
 		if s.detail.Assignee != "" && s.detail.Assignee != Actor {
-			return fmt.Errorf("story %q is already claimed by %s", id, s.detail.Assignee)
+			return &application.ClaimHeldError{ID: id, Holder: s.detail.Assignee}
 		}
 		s.detail.Assignee = Actor
 		s.detail.Status = StatusInProgress
+		s.detail.LeaseExpires = f.now().Add(LeaseTTL)
 		return nil
 	})
 }
@@ -1028,24 +1036,66 @@ func (f *FakeTracker) CloseStory(_ context.Context, id, reason string) error {
 }
 
 // StaleClaims implements application.WorkTracker.
-func (f *FakeTracker) StaleClaims(_ context.Context, days int) ([]application.StoryDetail, error) {
+func (f *FakeTracker) StaleClaims(_ context.Context, now time.Time) ([]application.StoryDetail, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.Err != nil {
 		return nil, f.Err
 	}
-	if days < 1 {
-		return nil, fmt.Errorf("stale claims need at least 1 day, got %d", days)
-	}
-	cutoff := time.Now().AddDate(0, 0, -days)
 	var stale []application.StoryDetail
 	for _, id := range f.order {
-		s := f.stories[id]
-		if s.detail.Status == StatusInProgress && s.touched.Before(cutoff) {
+		if s := f.stories[id]; lapsed(s.detail, now) {
 			stale = append(stale, s.detail)
 		}
 	}
 	return stale, nil
+}
+
+// HeartbeatClaim implements application.WorkTracker.
+func (f *FakeTracker) HeartbeatClaim(_ context.Context, id string) error {
+	return f.write(id, func(s *fakeStory) error {
+		if s.detail.Status != StatusInProgress || s.detail.Assignee != Actor {
+			return fmt.Errorf("heartbeat %s: it is %s and held by %q, not a claim of %s", id, s.detail.Status, s.detail.Assignee, Actor)
+		}
+		s.detail.LeaseExpires = f.now().Add(LeaseTTL)
+		return nil
+	})
+}
+
+// ReclaimStory implements application.WorkTracker.
+// A lease that still holds is left alone and counts as no write.
+func (f *FakeTracker) ReclaimStory(_ context.Context, id string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return false, f.Err
+	}
+	s, ok := f.stories[id]
+	if !ok {
+		return false, fmt.Errorf("no story %q", id)
+	}
+	if !lapsed(s.detail, f.now()) {
+		return false, nil
+	}
+	s.detail.Status = StatusOpen
+	s.detail.Assignee = ""
+	s.detail.LeaseExpires = time.Time{}
+	f.writes++
+	return true, nil
+}
+
+// lapsed reports whether a story is claimed under a lease that had run out by
+// now. A claim with no lease has not lapsed: nothing says when it would.
+func lapsed(detail application.StoryDetail, now time.Time) bool {
+	return detail.Status == StatusInProgress && !detail.LeaseExpires.IsZero() && now.After(detail.LeaseExpires)
+}
+
+// now is the fake's clock: Clock when set, the real one otherwise.
+func (f *FakeTracker) now() time.Time {
+	if f.Clock != nil {
+		return f.Clock()
+	}
+	return time.Now()
 }
 
 // Sync implements application.TrackerSync. Nothing is synchronised: the fake
@@ -1262,7 +1312,6 @@ func (f *FakeTracker) write(id string, change func(*fakeStory) error) error {
 		return err
 	}
 	f.writes++
-	s.touched = time.Now()
 	return nil
 }
 

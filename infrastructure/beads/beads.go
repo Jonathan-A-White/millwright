@@ -331,9 +331,23 @@ func (g *Gateway) ReadyStories(ctx context.Context, epicID, host string) ([]appl
 	return ready, nil
 }
 
-// ClaimStory implements application.WorkTracker.
+// ClaimStory implements application.WorkTracker. `bd update --claim` is
+// already the conditional claim: it takes a story nobody holds, is harmless on
+// one this actor holds, and refuses one another actor holds, writing nothing —
+// and it is the only update that grants a lease, which is why it is not
+// `--if-assignee` (bd will not combine the two). A refusal is told apart from
+// any other failure by reading the story back rather than by bd's wording: a
+// story found in progress under an assignee is held by someone else, since
+// bd would have let this actor's own claim stand.
 func (g *Gateway) ClaimStory(ctx context.Context, id string) error {
 	_, err := g.call(ctx, "update", id, "--claim")
+	if err == nil {
+		return nil
+	}
+	story, readErr := g.showOne(ctx, id)
+	if readErr == nil && story.Status == StatusInProgress && story.Assignee != "" && story.Assignee != g.actor {
+		return &application.ClaimHeldError{ID: id, Holder: story.Assignee}
+	}
 	return err
 }
 
@@ -384,33 +398,61 @@ func (g *Gateway) CloseStory(ctx context.Context, id, reason string) error {
 	return err
 }
 
-// StaleClaims implements application.WorkTracker. bd counts staleness in whole
-// days and will not accept fewer than one. `bd stale --json` does not embed
-// the copy of the parent epic `bd show` does, so — like BlockedForHost —
-// each candidate is read back with ShowStory, which already knows how to
-// overlay an epic's defaults onto a story read on its own.
-func (g *Gateway) StaleClaims(ctx context.Context, days int) ([]application.StoryDetail, error) {
-	if days < 1 {
-		return nil, fmt.Errorf("stale claims need at least 1 day, got %d", days)
-	}
-	out, err := g.call(ctx, "stale", "--days", strconv.Itoa(days), "--status", StatusInProgress, "--json")
+// StaleClaims implements application.WorkTracker. It reads what is claimed,
+// as RunningStories does, and keeps the claims whose lease bd says had run out
+// by now. A claim bd shows no lease for is never listed: one made before bd
+// kept leases, or — bd's heartbeat help calls leases node-local — one made on
+// the other host. This host cannot say when that one was last heard from.
+func (g *Gateway) StaleClaims(ctx context.Context, now time.Time) ([]application.StoryDetail, error) {
+	out, err := g.call(ctx, "list", "--status", StatusInProgress, "--exclude-type", "epic", "--limit", "0", "--json")
 	if err != nil {
 		return nil, err
 	}
-	stories, err := decodeBeads(out)
+	claimed, err := decodeBeads(out)
 	if err != nil {
 		return nil, fmt.Errorf("reading the stale claims: %w", err)
 	}
-
-	claims := make([]application.StoryDetail, 0, len(stories))
-	for _, story := range stories {
-		detail, err := g.ShowStory(ctx, story.ID)
-		if err != nil {
-			return nil, fmt.Errorf("reading the stale claim %s: %w", story.ID, err)
+	var lapsed []bead
+	for _, story := range claimed {
+		if expires := story.leaseExpires(); !expires.IsZero() && now.After(expires) {
+			lapsed = append(lapsed, story)
 		}
-		claims = append(claims, detail)
 	}
-	return claims, nil
+	return g.overlaid(ctx, lapsed)
+}
+
+// HeartbeatClaim implements application.WorkTracker. bd refuses a heartbeat
+// from anyone but the claim's holder, and on a story no longer in progress.
+func (g *Gateway) HeartbeatClaim(ctx context.Context, id string) error {
+	_, err := g.call(ctx, "heartbeat", id)
+	return err
+}
+
+// ReclaimStory implements application.WorkTracker. `bd reclaim` itself judges
+// whether the lease has run out, so it is asked for no grace beyond that
+// (--older-than 0s) and for exactly this story; what it reports reclaimed says
+// whether it did. It is never given --any-replica, which bd warns reverts a
+// lease another replica granted however alive its holder is: who may reclaim
+// the other host's claims is not settled.
+func (g *Gateway) ReclaimStory(ctx context.Context, id string) (bool, error) {
+	out, err := g.call(ctx, "reclaim", "--older-than", "0s", "--id", id, "--json")
+	if err != nil {
+		return false, err
+	}
+	var report struct {
+		Reclaimed []struct {
+			ID string `json:"id"`
+		} `json:"reclaimed"`
+	}
+	if err := json.Unmarshal(out, &report); err != nil {
+		return false, fmt.Errorf("reading what bd reclaimed of %s: %w", id, err)
+	}
+	for _, reclaimed := range report.Reclaimed {
+		if reclaimed.ID == id {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // showOne reads exactly one bead.

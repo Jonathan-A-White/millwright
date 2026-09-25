@@ -325,7 +325,7 @@ func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 	}
 
 	// A claim made a moment ago is not stale.
-	stale, err := gateway.StaleClaims(ctx, 1)
+	stale, err := gateway.StaleClaims(ctx, time.Now())
 	if err != nil {
 		t.Fatalf("listing the stale claims: %v", err)
 	}
