@@ -215,6 +215,61 @@ func TestPosternSendBroadcastsTheFixturesRecordScript(t *testing.T) {
 	}
 }
 
+// noBdCalls puts a stand-in bd ahead of PATH that logs every call it gets to
+// callLog, so a test can say bd was never called.
+func noBdCalls(t *testing.T) (callLog string) {
+	t.Helper()
+	callLog = filepath.Join(t.TempDir(), "bd-calls.log")
+	bin := t.TempDir()
+	script := fmt.Sprintf("#!/bin/sh\necho \"$@\" >>%q\nexit 0\n", callLog)
+	if err := os.WriteFile(filepath.Join(bin, "bd"), []byte(script), 0o755); err != nil {
+		t.Fatalf("writing the stand-in for bd: %v", err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return callLog
+}
+
+// assertNoBdCalls fails the test if the stand-in bd from noBdCalls was ever
+// called.
+func assertNoBdCalls(t *testing.T, callLog string) {
+	t.Helper()
+	if data, err := os.ReadFile(callLog); err == nil {
+		t.Fatalf("expected no bd call, but bd was called:\n%s", data)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("reading the bd call log: %v", err)
+	}
+}
+
+func TestPosternSnapshotRefusesWithoutAGovernorKeyBeforeCallingBd(t *testing.T) {
+	posternHome(t, "http://unused", "unused-wif", "")
+	callLog := noBdCalls(t)
+
+	out, err := runPostern(t, "snapshot")
+	if err == nil {
+		t.Fatalf("expected mw postern snapshot to refuse without a governor key, got:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "postern_governor_key") {
+		t.Fatalf("expected the refusal to name postern_governor_key, got: %v", err)
+	}
+	assertNoBdCalls(t, callLog)
+}
+
+func TestPosternSnapshotRefusesWithoutAKeyFileBeforeCallingBd(t *testing.T) {
+	f := loadPosternRecordFixture(t)
+	posternHome(t, "http://unused", "unused-wif", f.RecipientPubKey)
+	t.Setenv("MW_POSTERN_KEY_FILE", filepath.Join(t.TempDir(), "missing.key"))
+	callLog := noBdCalls(t)
+
+	out, err := runPostern(t, "snapshot")
+	if err == nil {
+		t.Fatalf("expected mw postern snapshot to refuse without a key file, got:\n%s", out)
+	}
+	if !strings.Contains(err.Error(), "no postern key") {
+		t.Fatalf("expected the refusal to name the missing postern key, got: %v", err)
+	}
+	assertNoBdCalls(t, callLog)
+}
+
 func TestPosternSnapshotJSONPrintsThePlaintextWithoutWritingAnything(t *testing.T) {
 	posternHome(t, "http://unused", "", "")
 

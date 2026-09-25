@@ -295,6 +295,15 @@ func newPosternSnapshotCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Checked here, before Build ever runs: a key file that is not
+			// there yet would otherwise surface only once Cipher.Encrypt
+			// reads it, after a full — and possibly slow — read of every
+			// live epic (mw-tfne4.8).
+			if exists, err := keys.Exists(); err != nil {
+				return err
+			} else if !exists {
+				return fmt.Errorf("no postern key at %s: run mw postern key init first", keys.Path())
+			}
 			path, err := config.PosternSnapshotPath()
 			if err != nil {
 				return err
