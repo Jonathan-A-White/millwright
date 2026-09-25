@@ -81,7 +81,7 @@ Feature: mw postern serve / mw postern nginx
           location /api/ {
               proxy_pass http://laptop.mw:8787;
           }
-          location /api/healthz {
+          location = /api/healthz {
               proxy_pass http://laptop.mw:8787/healthz;
           }
           # mw-api end
@@ -96,7 +96,7 @@ Feature: mw postern serve / mw postern nginx
           location /api/ {
               proxy_pass http://desktop.mw:8787;
           }
-          location /api/healthz {
+          location = /api/healthz {
               proxy_pass http://desktop.mw:8787/healthz;
           }
           # mw-api end
