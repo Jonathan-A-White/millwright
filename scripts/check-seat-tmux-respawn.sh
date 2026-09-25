@@ -34,6 +34,14 @@
 # Skips (exit 0, one note on stderr) rather than fails when this host has no
 # reachable --user systemd instance or no tmux: the static checks in
 # check-timer-units.sh still cover the file's directives there.
+#
+# mw-gq6.112: with Type=simple, systemd marks the unit active/running the
+# instant /bin/sh is exec'd -- before ExecStart's `tmux new-session` has
+# actually made the session. A single list-sessions check made right after
+# seeing active/running raced that gap and failed under load (reported by the
+# Mayor from a `make lint` run on the VPS). Every list-sessions check here
+# that follows an active/running read now polls, bounded, instead of reading
+# once; scenario 3 below proves it against a simulated slow new-session.
 
 set -eu
 
@@ -88,16 +96,20 @@ SOCK_PRE="mw-seat-preexist-test-$RUNID"
 UNIT_PRE="mw-seat-tmux-preexist-test-$RUNID"
 SOCK_KILL="mw-seat-respawn-test-$RUNID"
 UNIT_KILL="mw-seat-tmux-respawn-test-$RUNID"
+SOCK_SLOW="mw-seat-slow-test-$RUNID"
+UNIT_SLOW="mw-seat-tmux-slow-test-$RUNID"
 
 T=$(mktemp -d)
 cleanup() {
 	systemctl --user stop "$UNIT_PRE.service" >/dev/null 2>&1 || true
 	systemctl --user stop "$UNIT_KILL.service" >/dev/null 2>&1 || true
+	systemctl --user stop "$UNIT_SLOW.service" >/dev/null 2>&1 || true
 	tmux -L "$SOCK_PRE" kill-server >/dev/null 2>&1 || true
 	tmux -L "$SOCK_KILL" kill-server >/dev/null 2>&1 || true
+	tmux -L "$SOCK_SLOW" kill-server >/dev/null 2>&1 || true
 	# tmux does not always unlink its socket file on a killed server; take the
 	# stale files with it rather than leaving them in the tmpdir run after run.
-	rm -f "${TMUX_TMPDIR:-/tmp/tmux-$(id -u)}/$SOCK_PRE" "${TMUX_TMPDIR:-/tmp/tmux-$(id -u)}/$SOCK_KILL"
+	rm -f "${TMUX_TMPDIR:-/tmp/tmux-$(id -u)}/$SOCK_PRE" "${TMUX_TMPDIR:-/tmp/tmux-$(id -u)}/$SOCK_KILL" "${TMUX_TMPDIR:-/tmp/tmux-$(id -u)}/$SOCK_SLOW"
 	rm -rf "$T"
 }
 trap cleanup EXIT INT TERM
@@ -120,6 +132,23 @@ chmod +x "$T/bin/tmux"
 # whose lines do not always come back in the order they were asked for).
 show_field() { # <unit> <field>
 	systemctl --user show "$1.service" -p "$2" 2>/dev/null | sed -n "s/^$2=//p"
+}
+
+# Bounded poll for a session to exist, rather than a single read straight
+# after the unit reports active/running: with Type=simple that report lands
+# the instant ExecStart's /bin/sh is exec'd, before its `tmux new-session` has
+# necessarily run (mw-gq6.112) -- a few seconds of polling covers that gap
+# without hiding a real failure, since it still returns failure once the
+# bound runs out.
+wait_for_session() { # <sock>
+	i=0
+	limit=5
+	while [ "$i" -le "$limit" ]; do
+		tmux -L "$1" list-sessions >/dev/null 2>&1 && return 0
+		sleep 1
+		i=$((i + 1))
+	done
+	return 1
 }
 
 # --- 1. a session already up before the unit ever starts --------------------
@@ -185,12 +214,43 @@ wait_for_restart_above() {
 as=$(show_field "$UNIT_KILL" ActiveState)
 ss=$(show_field "$UNIT_KILL" SubState)
 [ "$as/$ss" = "active/running" ] || fail "the unit was not active/running right after it started: ActiveState=$as SubState=$ss"
-tmux -L "$SOCK_KILL" list-sessions >/dev/null 2>&1 || fail "the unit says active/running but session $SOCK_KILL has no session"
+wait_for_session "$SOCK_KILL" || fail "the unit says active/running but session $SOCK_KILL has no session"
 
 tmux -L "$SOCK_KILL" kill-server
 
 wait_for_restart_above 0
-tmux -L "$SOCK_KILL" list-sessions >/dev/null 2>&1 ||
+wait_for_session "$SOCK_KILL" ||
 	fail "the unit reports active/running again after the server died, but a fresh tmux session is not there"
 
-echo "OK: $SERVICE does not restart-loop on a session it found already up (0 restarts, untouched, over 10s) and still restarts a tmux server that dies out from under it, reaching active/running again within RestartSec (${restartsec}s)"
+systemctl --user stop "$UNIT_KILL.service" >/dev/null 2>&1 || true
+
+# --- 3. does the check itself survive a slow new-session? -------------------
+# mw-gq6.112 live: a stand-in tmux that sleeps before running new-session,
+# standing in for a new-session slowed by host load. Right after the unit
+# reports active/running, its own session is not there yet -- proving
+# wait_for_session's poll, not a single read, is what makes this check pass.
+mkdir -p "$T/bin-slow"
+{
+	echo '#!/bin/sh'
+	echo 'case "$1" in'
+	echo '	new-session) sleep 3 ;;'
+	echo 'esac'
+	echo "exec $REALTMUX -L \"\$MW_TEST_SEAT_SOCK\" \"\$@\""
+} >"$T/bin-slow/tmux"
+chmod +x "$T/bin-slow/tmux"
+
+systemd-run --user --collect --unit="$UNIT_SLOW" \
+	--service-type=simple \
+	-p "Restart=always" -p "RestartSec=$restartsec" -p "KillMode=process" -p "ExecStop=/bin/true" \
+	-E "PATH=$T/bin-slow:/usr/bin:/bin" -E "MW_TEST_SEAT_SOCK=$SOCK_SLOW" \
+	/bin/sh -c "$execcmd" >/dev/null
+
+as=$(show_field "$UNIT_SLOW" ActiveState)
+ss=$(show_field "$UNIT_SLOW" SubState)
+[ "$as/$ss" = "active/running" ] || fail "slow new-session: the unit was not active/running right after it started: ActiveState=$as SubState=$ss"
+wait_for_session "$SOCK_SLOW" ||
+	fail "slow new-session: session $SOCK_SLOW never appeared within wait_for_session's bound -- the poll is not covering a slow new-session the way it should"
+
+systemctl --user stop "$UNIT_SLOW.service" >/dev/null 2>&1 || true
+
+echo "OK: $SERVICE does not restart-loop on a session it found already up (0 restarts, untouched, over 10s), still restarts a tmux server that dies out from under it, reaching active/running again within RestartSec (${restartsec}s), and this check's own session waits survive a slow new-session"
