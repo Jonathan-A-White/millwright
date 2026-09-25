@@ -6,10 +6,11 @@ package beads
 // prints the edges — and both have to be survivable.
 //
 // Captured from 1.0.4 and re-checked against 1.3.0, which prints these same
-// fields plus some the factory ignores (revision, lease_expires_at,
-// heartbeat_at, the *_count fields). 1.3.0 stopped inlining a bead's comments
-// and dependents without --include-comments / --include-dependents; it still
-// inlines dependencies, which is where a story's parent epic is read from.
+// fields plus some the factory ignores (revision, heartbeat_at, the *_count
+// fields — lease_expires_at is read, mw-gq6.106). 1.3.0 stopped inlining a
+// bead's comments and dependents without --include-comments /
+// --include-dependents; it still inlines dependencies, which is where a
+// story's parent epic is read from.
 
 import (
 	"testing"
@@ -393,6 +394,29 @@ func TestAStoryCarriesWhenItWasClaimed(t *testing.T) {
 	for _, b := range got[1:] {
 		if started := b.detail(domain.Path{}).Started; !started.IsZero() {
 			t.Errorf("expected %s to have no claim time, got %v", b.ID, started)
+		}
+	}
+}
+
+// mw-gq6.106: a dispatch that finds a claim's tmux pane dead trusts the
+// lease bd itself keeps on the claim, not a clock of mw's own, to say
+// whether the claim is worth taking back.
+func TestAStoryCarriesWhenItsLeaseExpires(t *testing.T) {
+	got, err := decodeBeads([]byte(`[
+  {"id": "t-a", "title": "Claimed", "status": "in_progress", "lease_expires_at": "2026-09-24T22:57:41Z"},
+  {"id": "t-b", "title": "Never claimed", "status": "open"},
+  {"id": "t-c", "title": "Odd", "status": "in_progress", "lease_expires_at": "not a time"}
+]`))
+	if err != nil {
+		t.Fatalf("decoding three beads: %v", err)
+	}
+
+	if expires := got[0].detail(domain.Path{}).LeaseExpires; !expires.Equal(time.Date(2026, 9, 24, 22, 57, 41, 0, time.UTC)) {
+		t.Errorf("expected the lease to expire at 2026-09-24T22:57:41Z, got %v", expires)
+	}
+	for _, b := range got[1:] {
+		if expires := b.detail(domain.Path{}).LeaseExpires; !expires.IsZero() {
+			t.Errorf("expected %s to carry no lease, got %v", b.ID, expires)
 		}
 	}
 }

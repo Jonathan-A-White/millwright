@@ -230,6 +230,16 @@ func (f *FakeTracker) SetStarted(id string, started time.Time) error {
 	})
 }
 
+// SetLeaseExpires sets when a story the fake holds's claim lease expires. A
+// story added without one has no lease, which a dispatch never reads as
+// expired (mw-gq6.106).
+func (f *FakeTracker) SetLeaseExpires(id string, expires time.Time) error {
+	return f.write(id, func(s *fakeStory) error {
+		s.detail.LeaseExpires = expires
+		return nil
+	})
+}
+
 // SetLabels sets the labels of a story the fake holds, replacing any it had. A
 // story added without any has none.
 func (f *FakeTracker) SetLabels(id string, labels ...string) error {

@@ -75,6 +75,12 @@ type StoryDetail struct {
 	// Molecule is the formula poured for this story, empty until it has been
 	// poured. It is filled in by whoever pours it, not by reading the story.
 	Molecule Molecule
+	// LeaseExpires is when the tracker's own lease on this story's claim runs
+	// out unless a heartbeat renews it first; zero when the story is not
+	// claimed or the tracker does not say. A claim found past this with its
+	// session's tmux pane dead is a dispatch's strongest sign that the session
+	// ended without mw next ever hearing about it (mw-gq6.106).
+	LeaseExpires time.Time
 }
 
 // WorkInHand is what the tracker has in hand across every host: the stories

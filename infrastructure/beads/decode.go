@@ -28,6 +28,7 @@ type bead struct {
 	EstimatedMinutes int               `json:"estimated_minutes"`
 	CreatedAt        string            `json:"created_at"`
 	StartedAt        string            `json:"started_at"`
+	LeaseExpiresAt   string            `json:"lease_expires_at"`
 	Priority         *int              `json:"priority"`
 	Metadata         map[string]any    `json:"metadata"`
 	Parent           string            `json:"parent"`
@@ -201,6 +202,17 @@ func (b bead) started() time.Time {
 	return claimed
 }
 
+// leaseExpires is when bd says this bead's claim lease runs out, or the zero
+// time when it says nothing or something that is not a time — a bead never
+// claimed, or a bd too old to print lease_expires_at at all.
+func (b bead) leaseExpires() time.Time {
+	expires, err := time.Parse(time.RFC3339, b.LeaseExpiresAt)
+	if err != nil {
+		return time.Time{}
+	}
+	return expires
+}
+
 // detail is this bead as a story of an epic with those defaults.
 func (b bead) detail(defaults domain.Path) application.StoryDetail {
 	return application.StoryDetail{
@@ -220,6 +232,7 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		Priority:        b.priority(),
 		Created:         b.created(),
 		Started:         b.started(),
+		LeaseExpires:    b.leaseExpires(),
 		Attempts:        b.attempts(),
 		Exhausted:       b.exhausted(),
 		Needs:           b.needs(),
