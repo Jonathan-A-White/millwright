@@ -13,9 +13,27 @@
 Description=Keep a tmux server up for this host's seats (session 0)
 After=network.target
 
+# The one process everything else on this host depends on must keep trying:
+# systemd's default (5 restarts inside 10s) is close enough to RestartSec=2's
+# own cadence below that a server dying repeatedly could exhaust it and leave
+# the unit "failed" -- exactly the silence this fix exists to close, in a new
+# shape. No limit at all.
+StartLimitIntervalSec=0
+
 [Service]
 Type=forking
-RemainAfterExit=yes
+
+# RemainAfterExit=yes used to sit here instead of Restart=: it kept the unit
+# "active (exited)" once its tracked process (the tmux server) was gone,
+# rather than dead, but that also swallows a restart -- systemd never treats
+# an already-"active" unit as one to restart, so a server that died (all of
+# 02:48Z 2026-09-25's panes exited, or a plain `tmux kill-server`) left the
+# unit reporting active with nothing behind it, and the next thing that
+# needed the seat's session landed in a login scope instead. Restart=always
+# is what notices: a clean tmux exit (what `tmux kill-server` causes) is not
+# a "failure", so Restart=on-failure alone would not have caught it either.
+Restart=always
+RestartSec=2
 
 # A system unit gets a bare PATH. The host says where tmux and the rest of a
 # seat's tools live in this file; the leading "-" makes it optional, since a

@@ -33,7 +33,9 @@
 #    at 2, 7, 12, ... that does not catch up. And the scripts those two run
 #    (contrib/mail-notify, contrib/health/mw-health.sh) are executable and parse.
 #    The system pair carries the same shape, run as root; mw-seat-tmux is
-#    forking, never kills the server it starts or found, and scores -900 —
+#    forking, never kills the server it starts or found, restarts one that
+#    dies (never with RemainAfterExit=, which swallows the restart — see
+#    scripts/check-seat-tmux-respawn.sh for the live proof), and scores -900 —
 #    exactly once each, since a stray second line would silently double up.
 #
 # 4. THE SEAT UNIT'S COMMAND. mw-seat-tmux.service's ExecStart, run with a
@@ -198,9 +200,16 @@ need "$DOCTOR_SERVICE" "Type=oneshot"
 need "$DOCTOR_SERVICE" "ExecStart=/usr/bin/env %h/.local/bin/mw doctor"
 need "$DOCTOR_TIMER" "OnCalendar=*:2/5"
 need "$DOCTOR_TIMER" "Persistent=false"
-# The seat's tmux server, a system unit.
+# The seat's tmux server, a system unit. No RemainAfterExit=yes: that marked
+# the unit active (exited) the instant its tracked server died instead of
+# restarting it. scripts/check-seat-tmux-respawn.sh proves the restart live.
 need "$SEAT_TMUX_SERVICE" "Type=forking"
-need "$SEAT_TMUX_SERVICE" "RemainAfterExit=yes"
+if grep -q '^RemainAfterExit=' "$SEAT_TMUX_SERVICE"; then
+	fail "$SEAT_TMUX_SERVICE sets RemainAfterExit=, which swallows Restart="
+fi
+need "$SEAT_TMUX_SERVICE" "Restart=always"
+need "$SEAT_TMUX_SERVICE" "RestartSec=2"
+need "$SEAT_TMUX_SERVICE" "StartLimitIntervalSec=0"
 need "$SEAT_TMUX_SERVICE" "ExecStop=/bin/true"
 need "$SEAT_TMUX_SERVICE" "KillMode=process"
 need "$SEAT_TMUX_SERVICE" "OOMScoreAdjust=-900"
