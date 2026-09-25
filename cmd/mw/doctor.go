@@ -65,6 +65,14 @@ func newDoctorCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			wgHub, err := config.DoctorWgHub()
+			if err != nil {
+				return err
+			}
+			wgUnit, err := config.DoctorWgUnit()
+			if err != nil {
+				return err
+			}
 			vault, err := config.Vault()
 			if err != nil {
 				return err
@@ -80,6 +88,7 @@ func newDoctorCmd() *cobra.Command {
 					doctor.NewDaemonReload(units),
 					doctor.NewWifi(reach, powershell, store),
 					doctor.NewTunnel(tunnelHost, reach, tunnelUnit, tunnelProbe),
+					doctor.NewWg(wgHub, reach, wgUnit, store),
 					doctor.NewVaultDirty(vault, host),
 					doctor.NewTimers(units),
 					doctor.NewBeadsSize(vault),
