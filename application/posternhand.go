@@ -497,8 +497,8 @@ func findBlock(lines []string, marker string) (start, end int, ok bool) {
 var posternProxyPassRe = regexp.MustCompile(`^(\s*proxy_pass\s+)(https?://[^/;\s]+)([^;\s]*)(;\s*)$`)
 
 // posternLocationRe matches an nginx `location <path> {` line, capturing
-// the path.
-var posternLocationRe = regexp.MustCompile(`^\s*location\s+(\S+)\s*\{`)
+// the path — skipping past an optional modifier (=, ^~, ~, ~*) ahead of it.
+var posternLocationRe = regexp.MustCompile(`^\s*location\s+(?:(?:=|\^~|~\*|~)\s+)?(\S+)\s*\{`)
 
 // setAPIBackend returns text with every proxy_pass line inside a `location`
 // block whose path names /api pointed at authority (a URL's scheme and
