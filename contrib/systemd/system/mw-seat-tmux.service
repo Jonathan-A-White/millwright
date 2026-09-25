@@ -21,7 +21,17 @@ After=network.target
 StartLimitIntervalSec=0
 
 [Service]
-Type=forking
+# Type=forking used to sit here: ExecStart's `has-session || new-session`
+# forks a new tmux server only in the branch where none existed yet. When one
+# already did (a login, or an earlier run of this unit), `has-session`
+# succeeded and the whole command exited straight away without forking
+# anything into this unit's cgroup -- systemd saw its tracked process gone
+# a moment after it started, and with Restart=always/RestartSec=2 restarted
+# it forever, every 2s, with the found session never touched (mw-gq6.111:
+# reproduced live 2026-09-25 against a session the unit did not create).
+# Type=simple fixes this by tracking ExecStart's own process, not a forked
+# child: see the loop below.
+Type=simple
 
 # RemainAfterExit=yes used to sit here instead of Restart=: it kept the unit
 # "active (exited)" once its tracked process (the tmux server) was gone,
@@ -42,10 +52,13 @@ EnvironmentFile=-%h/.config/mw/seat.env
 
 # has-session first, so a server a login (or an earlier run of this unit)
 # already started is left exactly as it is: this never restarts or replaces
-# a running server, and starting one is a no-op once one exists. Only when
-# none does it start one, detached, on the default socket — the one
-# `infrastructure/tmux/tmux.go` talks to with no `-L`.
-ExecStart=/bin/sh -c 'tmux has-session -t =0 2>/dev/null || exec tmux new-session -d -s 0'
+# a running server, and starting one is a no-op once one exists. Either way,
+# the `while` loop that follows is what this unit's Type=simple then tracks
+# as its one process: it polls has-session and sleeps for as long as session
+# 0 stays up, whether this unit started it or only found it. Only when the
+# session goes away does the loop's condition fail and the process exit,
+# which is what gives Restart=always something to notice and act on.
+ExecStart=/bin/sh -c 'tmux has-session -t =0 2>/dev/null || tmux new-session -d -s 0; while tmux has-session -t =0 2>/dev/null; do sleep 1; done'
 
 # Stopping or restarting this unit must never kill the server: the sessions
 # inside it (the Mayor's, a Builder's) are not this unit's to end.

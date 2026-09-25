@@ -871,12 +871,28 @@ needs the seat's session (the doctor's cure, a login) finds waiting instead
 of a login scope outside the unit. `StartLimitIntervalSec=0` means a server
 that keeps dying never exhausts systemd's default restart budget and leaves
 the unit `failed`: it always tries again. This is why there is no
-`RemainAfterExit=yes` here even though the unit is `Type=forking`: that
-directive keeps a unit reporting `active` once its tracked process is gone
-instead of restarting it, which is exactly how the tmux server going missing
-once went unnoticed until the next login. `scripts/check-seat-tmux-respawn.sh`
-proves the restart live, on a throwaway `--user` unit and tmux socket so the
-real session `0` is never touched.
+`RemainAfterExit=yes` here: that directive keeps a unit reporting `active`
+once its tracked process is gone instead of restarting it, which is exactly
+how the tmux server going missing once went unnoticed until the next login.
+`scripts/check-seat-tmux-respawn.sh` proves the restart live, on a throwaway
+`--user` unit and tmux socket so the real session `0` is never touched.
+
+The unit is `Type=simple`, not `forking`: `ExecStart` runs `has-session ||
+new-session`, then settles into a loop that polls `has-session` and sleeps
+for as long as session `0` stays up, so that loop's own process is what
+`Type=simple` tracks as the unit's main process — whether this unit started
+the session or only found one already there. `Type=forking` used to sit here
+instead, expecting `ExecStart` to fork a server and exit; that held only in
+the branch where no session existed yet. When one was already up (a login,
+or an earlier run of this unit), `has-session` succeeded and the whole
+command returned immediately with nothing forked into the unit's cgroup, so
+systemd saw its tracked process gone a moment after starting it and, with
+`Restart=always`/`RestartSec=2`, restarted the unit every 2 seconds forever
+— the found session untouched throughout, but the unit never settling. The
+watch loop is what closes that: `scripts/check-seat-tmux-respawn.sh` proves,
+on a throwaway unit and socket with a session started before the unit ever
+runs, that it now reaches `active`/`running` with zero restarts and leaves
+that session exactly as it found it.
 
 Why a system unit and not `systemctl --user`: on the VPS the tmux server used
 to live under root's `--user` manager (`user-0.slice`). When the OOM killer
@@ -906,8 +922,9 @@ next one. Check a server's actual score with
 mw-seat-tmux.service mw-doctor.timer`, then remove the symlinks the install
 printed. `scripts/check-timer-units.sh` verifies the three system unit files
 with `systemd-analyze` (no `--user`) the same way, and proves
-`mw-seat-tmux.service`'s `ExecStart` against a stand-in `tmux`: a no-op when
-session `0` is already up, `tmux new-session -d -s 0` when it is not.
+`mw-seat-tmux.service`'s `ExecStart` against a stand-in `tmux`: a no-op that
+settles into watching `has-session` when session `0` is already up,
+`tmux new-session -d -s 0` followed by the same watch when it is not.
 
 ## Mail
 
