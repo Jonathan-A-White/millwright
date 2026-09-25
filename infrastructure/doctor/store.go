@@ -65,6 +65,8 @@ func (s *Store) Load(_ context.Context, check string) (application.DoctorEpisode
 			}
 		case "lastCure":
 			episode.LastCure = parseTime(value)
+		case "lastOKReason":
+			episode.LastOKReason = value
 		}
 	}
 	return episode, nil
@@ -78,8 +80,8 @@ func (s *Store) Save(_ context.Context, check string, episode application.Doctor
 	}
 	path := s.stateFile(check)
 	whole := path + ".new"
-	body := fmt.Sprintf("firstFaulty=%s\ncures=%d\nlastCure=%s\n",
-		formatTime(episode.FirstFaulty), episode.Cures, formatTime(episode.LastCure))
+	body := fmt.Sprintf("firstFaulty=%s\ncures=%d\nlastCure=%s\nlastOKReason=%s\n",
+		formatTime(episode.FirstFaulty), episode.Cures, formatTime(episode.LastCure), episode.LastOKReason)
 	if err := os.WriteFile(whole, []byte(body), 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", whole, err)
 	}
