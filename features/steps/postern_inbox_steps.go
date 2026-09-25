@@ -3,18 +3,25 @@ package steps
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/postern"
 
 	"github.com/cucumber/godog"
 )
+
+// posternReplyStamp is when every fake reply record in this feature's
+// scenarios is stamped, so the ANSWER comment's timestamp is predictable.
+var posternReplyStamp = time.Date(2026, time.September, 25, 10, 0, 0, 0, time.UTC)
 
 // posternInboxContext holds a throwaway postern key, a fake backend and
 // cipher, and a fake tracker standing in for the note store, so that mw
@@ -26,6 +33,7 @@ type posternInboxContext struct {
 	backend *apptest.FakePostern
 	cipher  *apptest.FakeCipher
 	memory  *apptest.FakeTracker
+	mailbox *apptest.FakeMailbox
 	out     *bytes.Buffer
 
 	messages    []application.PosternInboxMessage
@@ -43,6 +51,7 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 			backend: apptest.NewFakePostern(),
 			cipher:  apptest.NewFakeCipher(),
 			memory:  apptest.NewFakeTracker(),
+			mailbox: apptest.NewFakeMailbox(),
 			out:     &bytes.Buffer{},
 		}
 		return ctx, nil
@@ -57,6 +66,11 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a throwaway postern key$`, c.aThrowawayPosternKey)
 	ctx.Given(`^a postern record of class "([^"]*)" addressed to this key$`, c.aPosternRecordAddressedToThisKey)
 	ctx.Given(`^a postern record of class "([^"]*)" addressed to another key$`, c.aPosternRecordAddressedToAnotherKey)
+	ctx.Given(`^bead "([^"]*)" is known to the tracker$`, c.beadIsKnownToTheTracker)
+	ctx.Given(`^bead "([^"]*)" has an open question, txid "([^"]*)"$`, c.beadHasAnOpenQuestion)
+	ctx.Given(`^a postern reply for bead "([^"]*)" with answer "([^"]*)" and txid "([^"]*)" addressed to this key$`,
+		c.aPosternReplyAddressedToThisKey)
+	ctx.Given(`^a plain text postern record with text "([^"]*)" addressed to this key$`, c.aPlainTextRecordAddressedToThisKey)
 
 	ctx.When(`^mw postern inbox is run$`, c.mwPosternInboxIsRun)
 	ctx.When(`^mw postern inbox --unread-count is run$`, c.mwPosternInboxUnreadCountIsRun)
@@ -68,6 +82,12 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the unread count is (\d+)$`, c.theUnreadCountIs)
 	ctx.Then(`^the postern inbox cursor is saved as a note$`, c.thePosternInboxCursorIsSavedAsANote)
 	ctx.Then(`^no story state was set$`, c.noStoryStateWasSet)
+	ctx.Then(`^bead "([^"]*)" is commented an ANSWER with txid "([^"]*)" from "([^"]*)" saying "([^"]*)"$`, c.beadIsCommentedTheAnswer)
+	ctx.Then(`^bead "([^"]*)"'s question note is cleared$`, c.beadsQuestionNoteIsCleared)
+	ctx.Then(`^mail "([^"]*)" was sent to mayor$`, c.mailWasSentToMayor)
+	ctx.Then(`^bead "([^"]*)" has no comment$`, c.beadHasNoComment)
+	ctx.Then(`^no mail was sent for the reply$`, c.noMailWasSent)
+	ctx.Then(`^it printed "([^"]*)"$`, c.itPrintedText)
 }
 
 func (c *posternInboxContext) aThrowawayPosternKey() error {
@@ -110,12 +130,57 @@ func (c *posternInboxContext) aPosternRecordAddressedToAnotherKey(class string) 
 	return c.addRecord(class, "another-key-pubkey-hex")
 }
 
+func (c *posternInboxContext) beadIsKnownToTheTracker(id string) error {
+	c.memory.AddStory("epic", domain.Story{ID: id})
+	return nil
+}
+
+func (c *posternInboxContext) beadHasAnOpenQuestion(id, txid string) error {
+	return c.memory.SetNote(context.Background(), application.PosternQuestionKey(id), txid)
+}
+
+func (c *posternInboxContext) aPosternReplyAddressedToThisKey(bead, answer, txid string) error {
+	text, err := json.Marshal(application.PosternReply{Bead: bead, Answer: answer})
+	if err != nil {
+		return err
+	}
+	ciphertext, err := c.cipher.Encrypt(c.pubKey, string(text))
+	if err != nil {
+		return err
+	}
+	c.backend.AddRecord(application.PosternRecord{
+		Txid:       txid,
+		Class:      "message",
+		From:       "governor-pubkey-hex",
+		To:         c.pubKey,
+		Ts:         posternReplyStamp,
+		Ciphertext: ciphertext,
+	})
+	return nil
+}
+
+func (c *posternInboxContext) aPlainTextRecordAddressedToThisKey(text string) error {
+	ciphertext, err := c.cipher.Encrypt(c.pubKey, text)
+	if err != nil {
+		return err
+	}
+	c.backend.AddRecord(application.PosternRecord{
+		Class:      "message",
+		From:       "governor-pubkey-hex",
+		To:         c.pubKey,
+		Ciphertext: ciphertext,
+	})
+	return nil
+}
+
 func (c *posternInboxContext) inbox() application.PosternInbox {
 	return application.PosternInbox{
 		Postern: c.backend,
 		Cipher:  c.cipher,
 		Keys:    c.keys,
 		Memory:  c.memory,
+		Tracker: c.memory,
+		Mailbox: c.mailbox,
 		Out:     c.out,
 	}
 }
@@ -196,6 +261,77 @@ func (c *posternInboxContext) noStoryStateWasSet() error {
 		if asked == "SetStoryState" {
 			return fmt.Errorf("expected no SetStoryState call, but one was made: %v", c.memory.Asked())
 		}
+	}
+	return nil
+}
+
+func (c *posternInboxContext) beadIsCommentedTheAnswer(bead, txid, from, answer string) error {
+	if err := c.itSucceeds(); err != nil {
+		return err
+	}
+	comments, err := c.memory.StoryComments(context.Background(), bead)
+	if err != nil {
+		return err
+	}
+	if len(comments) == 0 {
+		return fmt.Errorf("expected a comment on %s, found none", bead)
+	}
+	want := fmt.Sprintf("ANSWER %s from %s, txid %s: %s", posternReplyStamp.UTC().Format(time.RFC3339), from, txid, answer)
+	got := comments[len(comments)-1].Text
+	if got != want {
+		return fmt.Errorf("expected the comment\n%s\ngot\n%s", want, got)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) beadsQuestionNoteIsCleared(bead string) error {
+	saved, err := c.memory.Note(context.Background(), application.PosternQuestionKey(bead))
+	if err != nil {
+		return err
+	}
+	if saved != "" {
+		return fmt.Errorf("expected %s's question note to be cleared, still holds %q", bead, saved)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) mailWasSentToMayor(subject string) error {
+	unread, err := c.mailbox.Inbox(context.Background(), "mayor")
+	if err != nil {
+		return err
+	}
+	for _, message := range unread {
+		if message.Subject == subject {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected mail %q to mayor, got: %+v", subject, unread)
+}
+
+// beadHasNoComment checks that bead carries no comment; a bead the tracker
+// has never heard of — as an unknown bead in these scenarios is — counts as
+// having none.
+func (c *posternInboxContext) beadHasNoComment(bead string) error {
+	comments, err := c.memory.StoryComments(context.Background(), bead)
+	if err != nil {
+		return nil
+	}
+	if len(comments) != 0 {
+		return fmt.Errorf("expected no comment on %s, got: %+v", bead, comments)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) noMailWasSent() error {
+	if c.mailbox.Writes() != 0 {
+		return fmt.Errorf("expected no mail sent, but %d write(s) were made", c.mailbox.Writes())
+	}
+	return nil
+}
+
+func (c *posternInboxContext) itPrintedText(want string) error {
+	if !strings.Contains(c.out.String(), want) {
+		return fmt.Errorf("expected the output to contain %q, got:\n%s", want, c.out.String())
 	}
 	return nil
 }

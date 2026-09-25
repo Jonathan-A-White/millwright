@@ -41,3 +41,21 @@ Feature: mw postern send
     When mw postern send "decision-needed" "Ship it?" is run
     Then sending succeeds
     And the broadcast record is postern's payload, classed "decision-needed", stamped 1758700000
+
+  Scenario: --bead, --recommend and --option send a question and record it on the bead
+    Given the postern key's balance is 1000 satoshis
+    And the postern key holds a spendable utxo of 5000 satoshis
+    And the postern backend will report the txid "question-txid"
+    And the clock reads 1758700000 for sending
+    And the bead "mw-abc.1" exists
+    When mw postern send "decision-needed" "Ship it?" for bead "mw-abc.1" recommending "A" with options "A, B" is run
+    Then sending succeeds
+    And the broadcast record is postern's question for bead "mw-abc.1", "Ship it?" recommending "A" with options "A, B"
+    And bead "mw-abc.1" is commented the QUESTION with txid "question-txid", "Ship it?" recommending "A" with options "A, B"
+    And bead "mw-abc.1"'s question note holds the txid "question-txid"
+
+  Scenario: --bead is refused without --class decision-needed
+    Given the postern key's balance is 1000 satoshis
+    And the bead "mw-abc.1" exists
+    When mw postern send "message" "Ship it?" for bead "mw-abc.1" recommending "A" with options "A" is run
+    Then it is refused, saying --bead is only accepted with --class decision-needed
