@@ -317,6 +317,58 @@ func TestPosternSnapshotRunRefusesWithoutAGovernorKey(t *testing.T) {
 	}
 }
 
+// TestPosternSnapshotWritesEmptyListsAsArraysNotNull covers mw-tfne4.14: the
+// app's isValidSnapshot requires needs_you, landed, working, waits and
+// options to be arrays on every epic, never null.
+func TestPosternSnapshotWritesEmptyListsAsArraysNotNull(t *testing.T) {
+	tracker := aSnapshotTracker()
+	tracker.AddEpic("mw-a", domain.Path{})
+	tracker.DescribeEpic("mw-a", "Epic A, nothing going on", apptest.StatusOpen, 1)
+
+	tracker.AddEpic("mw-b", domain.Path{})
+	tracker.DescribeEpic("mw-b", "Epic B, a working child and a question with no options", apptest.StatusOpen, 1)
+	addChild(tracker, "mw-b", "mw-b.1", "Open and unblocked, so working with no waits")
+	addChild(tracker, "mw-b", "mw-b.2", "Ship now or wait, no options given")
+	askQuestion(t, tracker, "mw-b.2", "2026-09-24T12:00:00Z", "Ship now or wait?", "ship", "")
+
+	doc := snapshotDoc(t, tracker)
+	data, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshaling the doc: %v", err)
+	}
+	got := string(data)
+
+	a := epicOf(t, doc, "mw-a")
+	if len(a.NeedsYou) != 0 || len(a.Landed) != 0 || len(a.Working) != 0 {
+		t.Fatalf("expected epic A to have nothing going on, got %+v", a)
+	}
+	for _, want := range []string{`"needs_you":[]`, `"landed":[]`, `"working":[]`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected epic A with nothing going on to write %s, got %s", want, got)
+		}
+	}
+
+	b := epicOf(t, doc, "mw-b")
+	var mwB1 *application.PosternSnapshotWorking
+	for i := range b.Working {
+		if b.Working[i].ID == "mw-b.1" {
+			mwB1 = &b.Working[i]
+		}
+	}
+	if mwB1 == nil || len(mwB1.Waits) != 0 {
+		t.Fatalf("expected mw-b.1 to be working with no waits, got %+v", b.Working)
+	}
+	if len(b.NeedsYou) != 1 || len(b.NeedsYou[0].Options) != 0 {
+		t.Fatalf("expected mw-b.2's question to hold no options, got %+v", b.NeedsYou)
+	}
+	if !strings.Contains(got, `"waits":[]`) {
+		t.Errorf("expected a working entry with no waits to write \"waits\":[], got %s", got)
+	}
+	if !strings.Contains(got, `"options":[]`) {
+		t.Errorf("expected a question with no options to write \"options\":[], got %s", got)
+	}
+}
+
 func equalStrings(got, want []string) bool {
 	if len(got) != len(want) {
 		return false

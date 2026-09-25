@@ -199,6 +199,8 @@ func (s PosternSnapshot) epic(ctx context.Context, id string) (PosternSnapshotEp
 		Title:    detail.Title,
 		Priority: priorityLabel(detail.Priority),
 		Status:   detail.Status,
+		NeedsYou: []PosternSnapshotQuestion{},
+		Landed:   []PosternSnapshotLanded{},
 	}
 
 	lookup := map[string]StoryDetail{}
@@ -207,7 +209,7 @@ func (s PosternSnapshot) epic(ctx context.Context, id string) (PosternSnapshotEp
 	}
 
 	now := s.now()
-	var inProgress, openFrontier []PosternSnapshotWorking
+	inProgress, openFrontier := []PosternSnapshotWorking{}, []PosternSnapshotWorking{}
 	counted := 0
 	total := 0
 
@@ -328,7 +330,7 @@ func (s PosternSnapshot) landed(ctx context.Context, child StoryDetail) (Postern
 // waitsOn, but reports ids rather than titles: postern's docs/protocol.md §7
 // names waits by bead id.
 func (s PosternSnapshot) waits(ctx context.Context, child StoryDetail, lookup map[string]StoryDetail) ([]string, error) {
-	var ids []string
+	ids := []string{}
 	for _, need := range child.Needs {
 		blocker, known := lookup[need]
 		if !known {
@@ -391,14 +393,15 @@ func formatOrEmpty(t time.Time) string {
 }
 
 // splitOptions reads an "a, b, c" options list, as PosternSend's
-// recordQuestion joins it, back into a slice. An empty list is nil, not one
-// empty option.
+// recordQuestion joins it, back into a slice. An empty list is an empty
+// slice, not one empty option, and never nil: postern's docs/protocol.md §7
+// writes options as an array on every question.
 func splitOptions(csv string) []string {
+	options := []string{}
 	csv = strings.TrimSpace(csv)
 	if csv == "" {
-		return nil
+		return options
 	}
-	var options []string
 	for _, o := range strings.Split(csv, ",") {
 		if o = strings.TrimSpace(o); o != "" {
 			options = append(options, o)
