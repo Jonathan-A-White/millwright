@@ -744,7 +744,11 @@ making one: it clones `<git-url>` into `<dir>` (the same rule as a fresh vault's
 with `bd bootstrap` rather than making one — never `bd init`, never `bd migrate`,
 never a forced push. Running it never makes this host the vault's designated
 migrator; that stays whichever host it already was. `--join` and `--prefix` are
-refused together, since a joined vault already has its own database.
+refused together, since a joined vault already has its own database. If `bd
+bootstrap` leaves `.beads/config.yaml` modified only by its dropped trailing
+newline (bd 1.3.0), that is restored so the first sync is not blocked by it;
+anything else it changes is left alone and reported the way any uncommitted
+change is.
 
 It then writes `~/.config/mw/config.toml` under the same never-overwrite rule `mw
 init` writes it under, and ends with one `mw sync`, printed or its failure.
