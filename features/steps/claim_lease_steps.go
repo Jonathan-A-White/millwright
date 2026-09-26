@@ -89,6 +89,7 @@ func registerClaimLeaseSteps(ctx *godog.ScenarioContext, c *readyContext) {
 	ctx.Then(`^the heartbeat fails$`, c.theHeartbeatFails)
 	ctx.Then(`^the claim fails because "([^"]*)" holds the story$`, c.theClaimFailsBecauseHeld)
 	ctx.Then(`^the story "([^"]*)" is held by "([^"]*)" with a lease until (\d\d:\d\d)$`, c.theStoryIsStillHeldBy)
+	ctx.When(`^the story "([^"]*)" is released$`, c.theStoryIsReleased)
 
 	ctx.Given(`^the session of "([^"]*)" is running$`, c.theSessionIsRunning)
 	ctx.When(`^mw next heartbeats "([^"]*)" while its session runs for (\d+) minutes?$`, c.mwNextHeartbeatsWhileItsSessionRunsForMinutes)
@@ -236,6 +237,15 @@ func (c *readyContext) theHeartbeatFails() error {
 	if c.lease.beatErr == nil {
 		return fmt.Errorf("expected the heartbeat to fail, and it went through")
 	}
+	return nil
+}
+
+// theStoryIsReleased calls ReleaseClaim as the fake tracker's own actor. Any
+// failure — bd's --if-assignee guard refusing a give-back that is not this
+// actor's to give — is swallowed here: the Then step that follows checks the
+// story's own state, which is what the guard is meant to leave untouched.
+func (c *readyContext) theStoryIsReleased(id string) error {
+	_ = c.tracker.ReleaseClaim(context.Background(), id)
 	return nil
 }
 
