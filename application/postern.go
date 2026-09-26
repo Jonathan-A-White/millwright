@@ -268,27 +268,28 @@ func decodePosternThreadedMessage(text string) (PosternThreadedMessage, bool) {
 }
 
 // posternThreadAndText reads a decrypted record's class and plaintext,
-// reporting the thread label mw postern inbox prints it under and the text a
-// person should read. A decision-needed question's or a reply's own bead IS
-// its thread (postern's docs/protocol.md section 6); anything else reads the
-// plaintext's own thread wrapper, unwrapping it to the text it names;
-// PosternGeneralThread when there is none.
-func posternThreadAndText(class, text string) (thread, display string) {
+// reporting the thread label mw postern inbox prints it under, the text a
+// person should read, and whether that thread is a bead rather than a named
+// topic or the general thread. A decision-needed question's or a reply's own
+// bead IS its thread (postern's docs/protocol.md section 6); anything else
+// reads the plaintext's own thread wrapper, unwrapping it to the text it
+// names; PosternGeneralThread when there is none.
+func posternThreadAndText(class, text string) (thread, display string, isBead bool) {
 	if class == "decision-needed" {
 		if question, ok := decodePosternQuestion(text); ok {
-			return question.Bead, text
+			return question.Bead, text, true
 		}
 	}
 	if reply, ok := decodePosternReply(text); ok {
-		return reply.Bead, text
+		return reply.Bead, text, true
 	}
 	if wrapped, ok := decodePosternThreadedMessage(text); ok {
 		if strings.TrimSpace(wrapped.Thread.Bead) != "" {
-			return wrapped.Thread.Bead, wrapped.Text
+			return wrapped.Thread.Bead, wrapped.Text, true
 		}
-		return wrapped.Thread.Topic, wrapped.Text
+		return wrapped.Thread.Topic, wrapped.Text, false
 	}
-	return PosternGeneralThread, text
+	return PosternGeneralThread, text, false
 }
 
 // PosternClasses is the set of classes mw postern send accepts.
@@ -345,6 +346,9 @@ type PosternInboxMessage struct {
 	// bead or topic the plaintext's own thread wrapper names, or
 	// PosternGeneralThread when it names neither.
 	Thread string
+	// ThreadIsBead reports whether Thread names a bead, rather than a named
+	// topic or PosternGeneralThread.
+	ThreadIsBead bool
 }
 
 // PosternInbox reads the postern's message records addressed to this host's
@@ -388,7 +392,10 @@ type PosternInbox struct {
 // the bead verbatim, with the txid and the sender's public key, the open
 // question's note is cleared, and the Mayor is mailed so the notifier wakes
 // the seat. A reply naming a bead the tracker does not know is printed as
-// text, and nothing is written for it.
+// text, and nothing is written for it. Any other verified message from the
+// Governor whose thread is a bead is likewise not printed as text: it lands
+// as a comment on that bead instead, once per txid. A topic thread, or a
+// verified sender who is not the Governor, is printed as text as before.
 func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 	if err := i.wired(); err != nil {
 		return nil, err
@@ -405,6 +412,14 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 		if m.Verified {
 			if reply, ok := decodePosternReply(m.Text); ok {
 				recorded, err := i.recordAnswer(ctx, m, reply)
+				if err != nil {
+					return nil, err
+				}
+				if recorded {
+					continue
+				}
+			} else if m.ThreadIsBead && i.isGovernor(m) {
+				recorded, err := i.recordThreadComment(ctx, m)
 				if err != nil {
 					return nil, err
 				}
@@ -448,6 +463,47 @@ func (i PosternInbox) recordAnswer(ctx context.Context, m PosternInboxMessage, r
 		}); err != nil {
 			return false, err
 		}
+	}
+	return true, nil
+}
+
+// PosternThreadCommentKey is the note key a thread message's txid is marked
+// commented under, once recordThreadComment has appended it to its bead: a
+// record fetched more than once — the same underlying message indexed twice,
+// say — is never commented on twice.
+func PosternThreadCommentKey(txid string) string { return "postern.threadcomment." + txid }
+
+// isGovernor reports whether m's verified sender is the configured Governor's
+// key. An unconfigured GovernorKey never matches, so a thread comment is only
+// ever recorded once mw postern inbox trusts a specific key as the Governor's.
+func (i PosternInbox) isGovernor(m PosternInboxMessage) bool {
+	return i.GovernorKey != "" && m.From == i.GovernorKey
+}
+
+// recordThreadComment appends m's text to the bead its thread names, reading
+// 'The Governor by postern <ts>: <text>', reporting true once done — or
+// already done, for a txid recordThreadComment has already commented, which
+// changes nothing and is still reported done so Run leaves it out of the
+// inbox. A bead the tracker does not know reports false and changes nothing,
+// so Run prints it as text, exactly as an unrecordable reply does.
+func (i PosternInbox) recordThreadComment(ctx context.Context, m PosternInboxMessage) (bool, error) {
+	if i.Tracker == nil {
+		return false, nil
+	}
+	key := PosternThreadCommentKey(m.Txid)
+	already, err := i.Memory.Note(ctx, key)
+	if err != nil {
+		return false, err
+	}
+	if already != "" {
+		return true, nil
+	}
+	comment := fmt.Sprintf("The Governor by postern %s: %s", sentInFull(m.Ts), m.Text)
+	if err := i.Tracker.CommentOnStory(ctx, m.Thread, comment); err != nil {
+		return false, nil
+	}
+	if err := i.Memory.SetNote(ctx, key, m.Txid); err != nil {
+		return false, err
 	}
 	return true, nil
 }
@@ -520,11 +576,11 @@ func (i PosternInbox) fetch(ctx context.Context) (mine []PosternInboxMessage, ne
 			return nil, 0, 0, fmt.Errorf("decrypting record %d (%s): %w", r.Seq, r.Txid, err)
 		}
 		from, verified, signerChecked := posternVerifySender(envelopeFrom, r.From, r.Signer)
-		thread, display := posternThreadAndText(r.Class, text)
+		thread, display, threadIsBead := posternThreadAndText(r.Class, text)
 		mine = append(mine, PosternInboxMessage{
 			Seq: r.Seq, Txid: r.Txid, Class: r.Class,
 			From: from, Verified: verified, SignerChecked: signerChecked,
-			Ts: r.Ts, Text: display, Thread: thread,
+			Ts: r.Ts, Text: display, Thread: thread, ThreadIsBead: threadIsBead,
 		})
 	}
 	return mine, newest, cursor, nil
