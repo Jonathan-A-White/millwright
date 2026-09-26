@@ -77,8 +77,12 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a postern record of class "([^"]*)" addressed to another key$`, c.aPosternRecordAddressedToAnotherKey)
 	ctx.Given(`^bead "([^"]*)" is known to the tracker$`, c.beadIsKnownToTheTracker)
 	ctx.Given(`^bead "([^"]*)" has an open question, txid "([^"]*)"$`, c.beadHasAnOpenQuestion)
+	ctx.Given(`^epic "([^"]*)" has (\d+) held stories$`, c.epicHasNHeldStories)
+	ctx.Given(`^epic "([^"]*)" has an open question offering "([^"]*)", txid "([^"]*)"$`, c.epicHasAnOpenQuestionOffering)
 	ctx.Given(`^a postern reply for bead "([^"]*)" with answer "([^"]*)" and txid "([^"]*)" addressed to this key$`,
 		c.aPosternReplyAddressedToThisKey)
+	ctx.Given(`^a postern reply from "([^"]*)" for bead "([^"]*)" with answer "([^"]*)" and txid "([^"]*)" addressed to this key$`,
+		c.aPosternReplyFromAddressedToThisKey)
 	ctx.Given(`^a plain text postern record with text "([^"]*)" addressed to this key$`, c.aPlainTextRecordAddressedToThisKey)
 	ctx.Given(`^a postern record of class "([^"]*)" addressed to this key, threaded on bead "([^"]*)"$`, c.aPosternRecordAddressedToThisKeyThreadedOnBead)
 	ctx.Given(`^a postern record of class "([^"]*)" addressed to this key, on topic "([^"]*)"$`, c.aPosternRecordAddressedToThisKeyOnTopic)
@@ -113,6 +117,8 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^it did not print "([^"]*)"$`, c.itDidNotPrintText)
 	ctx.Then(`^no mail was sent for the reply$`, c.noMailWasSent)
 	ctx.Then(`^it printed "([^"]*)"$`, c.itPrintedText)
+	ctx.Then(`^epic "([^"]*)"'s held stories are released$`, c.epicsHeldStoriesAreReleased)
+	ctx.Then(`^bead "([^"]*)" is commented a RELEASED with txid "([^"]*)"$`, c.beadIsCommentedARELEASEDWithTxid)
 }
 
 func (c *posternInboxContext) aThrowawayPosternKey() error {
@@ -307,6 +313,36 @@ func (c *posternInboxContext) beadHasAnOpenQuestion(id, txid string) error {
 	return c.memory.SetNote(context.Background(), application.PosternQuestionKey(id), txid)
 }
 
+// epicHasNHeldStories files epic id with n held stories under it, named
+// "<id>.1", "<id>.2" and so on, so a Release-tap scenario has something to
+// release.
+func (c *posternInboxContext) epicHasNHeldStories(id string, n int) error {
+	c.memory.AddEpic(id, domain.Path{})
+	for i := 1; i <= n; i++ {
+		storyID := fmt.Sprintf("%s.%d", id, i)
+		c.memory.AddStory(id, domain.Story{ID: storyID, Title: fmt.Sprintf("Story %d", i)})
+		if err := c.memory.SetStatus(storyID, apptest.StatusDeferred); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// epicHasAnOpenQuestionOffering marks id's question open, offering the
+// comma-separated options in optionsCSV — the shape
+// PosternSend.recordQuestion's own note takes, so a Release tap can be
+// checked against what was actually offered.
+func (c *posternInboxContext) epicHasAnOpenQuestionOffering(id, optionsCSV, txid string) error {
+	note, err := json.Marshal(struct {
+		Txid    string   `json:"txid"`
+		Options []string `json:"options,omitempty"`
+	}{Txid: txid, Options: splitOptions(optionsCSV)})
+	if err != nil {
+		return err
+	}
+	return c.memory.SetNote(context.Background(), application.PosternQuestionKey(id), string(note))
+}
+
 func (c *posternInboxContext) aPosternReplyAddressedToThisKey(bead, answer, txid string) error {
 	text, err := json.Marshal(application.PosternReply{Bead: bead, Answer: answer})
 	if err != nil {
@@ -369,6 +405,31 @@ func (c *posternInboxContext) aPosternReplySignedBy(bead, answer, txid, signer s
 		From:       c.cipher.From,
 		To:         c.pubKey,
 		Signer:     signer,
+		Ts:         posternReplyStamp,
+		Ciphertext: ciphertext,
+	})
+	return nil
+}
+
+// aPosternReplyFromAddressedToThisKey is aPosternReplyAddressedToThisKey with
+// an explicit, genuinely verified sender: the envelope and the payload's own
+// claimed From both agree on from, so the reply is verified but is not
+// necessarily the Governor's.
+func (c *posternInboxContext) aPosternReplyFromAddressedToThisKey(from, bead, answer, txid string) error {
+	text, err := json.Marshal(application.PosternReply{Bead: bead, Answer: answer})
+	if err != nil {
+		return err
+	}
+	c.cipher.From = from
+	ciphertext, err := c.cipher.Encrypt(c.pubKey, string(text))
+	if err != nil {
+		return err
+	}
+	c.backend.AddRecord(application.PosternRecord{
+		Txid:       txid,
+		Class:      "message",
+		From:       from,
+		To:         c.pubKey,
 		Ts:         posternReplyStamp,
 		Ciphertext: ciphertext,
 	})
@@ -572,6 +633,43 @@ func (c *posternInboxContext) beadHasNComments(bead string, want int) error {
 	}
 	if len(comments) != want {
 		return fmt.Errorf("expected %d comment(s) on %s, got %d: %+v", want, bead, len(comments), comments)
+	}
+	return nil
+}
+
+// epicsHeldStoriesAreReleased checks that every story epic id holds is open,
+// not held: what a Release tap's release, run through mw postern inbox,
+// should have done.
+func (c *posternInboxContext) epicsHeldStoriesAreReleased(id string) error {
+	epic, err := c.memory.ShowEpic(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	if len(epic.Stories) == 0 {
+		return fmt.Errorf("expected %s to have stories, found none", id)
+	}
+	for _, story := range epic.Stories {
+		if story.Status == apptest.StatusDeferred {
+			return fmt.Errorf("expected %s to be released, still held", story.Story.ID)
+		}
+	}
+	return nil
+}
+
+// beadIsCommentedARELEASEDWithTxid checks bead's last comment is the RELEASED
+// comment a Release tap leaves, naming txid.
+func (c *posternInboxContext) beadIsCommentedARELEASEDWithTxid(bead, txid string) error {
+	comments, err := c.memory.StoryComments(context.Background(), bead)
+	if err != nil {
+		return err
+	}
+	if len(comments) == 0 {
+		return fmt.Errorf("expected a comment on %s, found none", bead)
+	}
+	got := comments[len(comments)-1].Text
+	want := fmt.Sprintf("RELEASED by mw on the Governor's Release tap (txid %s)", txid)
+	if !strings.Contains(got, want) {
+		return fmt.Errorf("expected the last comment on %s to contain %q, got %q", bead, want, got)
 	}
 	return nil
 }

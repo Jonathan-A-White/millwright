@@ -165,3 +165,32 @@ Feature: mw postern inbox
     When mw postern inbox is run
     Then reading succeeds
     And it printed "topic update"
+
+  Scenario: the Governor taps Release on the epic's approval question, and its held stories are released
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And epic "mw-epic.1" has 2 held stories
+    And epic "mw-epic.1" has an open question offering "Release, Hold", txid "question-txid"
+    And a postern reply for bead "mw-epic.1" with answer "Release" and txid "tap-txid" addressed to this key
+    When mw postern inbox is run
+    Then reading succeeds
+    And epic "mw-epic.1"'s held stories are released
+    And bead "mw-epic.1" is commented a RELEASED with txid "tap-txid"
+    And mail "Released: mw-epic.1" was sent to mayor
+
+  Scenario: any other answer to the same question releases nothing
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And epic "mw-epic.2" has 2 held stories
+    And epic "mw-epic.2" has an open question offering "Release, Hold", txid "question-txid"
+    And a postern reply for bead "mw-epic.2" with answer "Hold" and txid "hold-txid" addressed to this key
+    When mw postern inbox is run
+    Then reading succeeds
+    And bead "mw-epic.2" has 1 comment
+
+  Scenario: a Release tap from a signer who is not the Governor releases nothing
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And epic "mw-epic.3" has 2 held stories
+    And epic "mw-epic.3" has an open question offering "Release, Hold", txid "question-txid"
+    And a postern reply from "some-other-pubkey-hex" for bead "mw-epic.3" with answer "Release" and txid "other-txid" addressed to this key
+    When mw postern inbox is run
+    Then reading succeeds
+    And bead "mw-epic.3" has 1 comment
