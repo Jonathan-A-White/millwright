@@ -4,12 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 
 	"github.com/cucumber/godog"
 )
@@ -34,6 +39,18 @@ type leaseWorld struct {
 	claimedAt  time.Time
 	heartbeats []time.Time
 	staleSeen  bool
+
+	// heartbeatLog and heartbeatCountAtRunEnd are what "a dispatched
+	// session's shell line runs its harness for a while, heartbeating
+	// alongside it" leaves behind: where the heartbeat stand-in logged its
+	// ticks, and how many it had logged the moment the whole shell line — the
+	// real one infrastructure/claude builds — finished running. shellLineDir
+	// is the scratch directory both live under, removed by the scenario's
+	// own After hook (registerClaimLeaseSteps has no Before/After of its
+	// own to hang this off).
+	heartbeatLog           string
+	heartbeatCountAtRunEnd int
+	shellLineDir           string
 }
 
 // heartbeatSpy is a WorkTracker that records the simulated time of every
@@ -77,6 +94,11 @@ func registerClaimLeaseSteps(ctx *godog.ScenarioContext, c *readyContext) {
 	ctx.When(`^mw next heartbeats "([^"]*)" while its session runs for (\d+) minutes?$`, c.mwNextHeartbeatsWhileItsSessionRunsForMinutes)
 	ctx.Then(`^the story "([^"]*)" was heartbeated at least every (\d+) minutes?$`, c.theStoryWasHeartbeatedAtLeastEveryMinutes)
 	ctx.Then(`^the story "([^"]*)" was never among the stale claims while its session ran$`, c.theStoryWasNeverAmongTheStaleClaims)
+	ctx.Then(`^mw sweep on "([^"]*)" at (\d\d:\d\d) finds nothing newly stuck$`, c.mwSweepOnAtFindsNothingNewlyStuck)
+
+	ctx.When(`^a dispatched session's shell line runs its harness for a while, heartbeating alongside it$`, c.aDispatchedSessionsShellLineRunsHeartbeatingAlongsideIt)
+	ctx.Then(`^the heartbeat ran more than once while the harness ran$`, c.theHeartbeatRanMoreThanOnceWhileTheHarnessRan)
+	ctx.Then(`^the heartbeat stopped once the harness exited$`, c.theHeartbeatStoppedOnceTheHarnessExited)
 }
 
 // at sets the fake tracker's clock to a time of day on leaseDay.
@@ -304,4 +326,116 @@ func (c *readyContext) theStoryWasNeverAmongTheStaleClaims(id string) error {
 		return fmt.Errorf("expected %s never to be among the stale claims while its session ran, and it was", id)
 	}
 	return nil
+}
+
+// mwSweepOnAtFindsNothingNewlyStuck runs the real Sweep use case at clock,
+// against the same fake tracker and clock every other step of this feature
+// shares, and expects it to have found nothing to mark run=stuck.
+func (c *readyContext) mwSweepOnAtFindsNothingNewlyStuck(host, clock string) error {
+	now, err := c.at(clock)
+	if err != nil {
+		return err
+	}
+	report, err := application.Sweep{Tracker: c.tracker, Host: host, Now: func() time.Time { return now }}.Run(context.Background())
+	if err != nil {
+		return fmt.Errorf("sweeping %s: %w", host, err)
+	}
+	if len(report.Stuck) != 0 {
+		return fmt.Errorf("expected nothing newly stuck on %s at %s, got %v", host, clock, report.Stuck)
+	}
+	return nil
+}
+
+// aDispatchedSessionsShellLineRunsHeartbeatingAlongsideIt runs, for real, the
+// exact shell line infrastructure/claude's Session builds for a launch with a
+// Heartbeat: a stand-in for the harness that takes noticeably longer than one
+// heartbeat tick, and a stand-in for the heartbeat that logs one line per
+// tick for as long as it is left running. Nothing here reaches bd or tmux —
+// both stand-ins are shell scripts of this test's own — so what this proves
+// is the shell line's own mechanics: the heartbeat starts backgrounded
+// alongside the harness and is killed the moment the harness's own command
+// line finishes, before this call returns.
+func (c *readyContext) aDispatchedSessionsShellLineRunsHeartbeatingAlongsideIt() error {
+	dir, err := os.MkdirTemp("", "mw-heartbeat-shell-line")
+	if err != nil {
+		return fmt.Errorf("making a scratch directory: %w", err)
+	}
+	c.lease.shellLineDir = dir
+
+	harness := filepath.Join(dir, "claude")
+	heartbeat := filepath.Join(dir, "heartbeat")
+	log := filepath.Join(dir, "heartbeat.log")
+	c.lease.heartbeatLog = log
+
+	harnessScript := "#!/bin/sh\nsleep 0.3\nprintf '{\"ok\":true}'\n"
+	if err := os.WriteFile(harness, []byte(harnessScript), 0o755); err != nil {
+		return fmt.Errorf("writing the stand-in harness: %w", err)
+	}
+	heartbeatScript := "#!/bin/sh\nwhile :; do date +%s%N >> " + log + "; sleep 0.03; done\n"
+	if err := os.WriteFile(heartbeat, []byte(heartbeatScript), 0o755); err != nil {
+		return fmt.Errorf("writing the stand-in heartbeat: %w", err)
+	}
+
+	spec, err := claude.New(claude.WithProgram(harness)).Session(application.Launch{
+		StoryID: "mw-gq6.1",
+		Path: domain.Path{
+			Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude,
+			Model: domain.ModelOpus, Effort: domain.EffortHigh,
+			Formula: "tdd-feature", Host: "vps",
+		},
+		Seat:       "builder",
+		BootFile:   filepath.Join(dir, "boot.md"),
+		ResultFile: filepath.Join(dir, "result.json"),
+		Kickoff:    "kickoff",
+		Heartbeat:  []string{heartbeat},
+	})
+	if err != nil {
+		return fmt.Errorf("assembling the session: %w", err)
+	}
+
+	if err := exec.Command(spec.Command[0], spec.Command[1:]...).Run(); err != nil {
+		return fmt.Errorf("running the assembled shell line: %w", err)
+	}
+
+	count, err := heartbeatLogLines(log)
+	if err != nil {
+		return err
+	}
+	c.lease.heartbeatCountAtRunEnd = count
+	return nil
+}
+
+func (c *readyContext) theHeartbeatRanMoreThanOnceWhileTheHarnessRan() error {
+	if c.lease.heartbeatCountAtRunEnd < 2 {
+		return fmt.Errorf("expected the heartbeat to have ticked more than once while the harness ran, got %d", c.lease.heartbeatCountAtRunEnd)
+	}
+	return nil
+}
+
+func (c *readyContext) theHeartbeatStoppedOnceTheHarnessExited() error {
+	// The shell line's own `kill $HB` has already run by the time
+	// aDispatchedSessionsShellLineRunsHeartbeatingAlongsideIt returned; this
+	// waits past the heartbeat's own tick to prove it is truly gone, not just
+	// caught mid-tick.
+	time.Sleep(200 * time.Millisecond)
+	count, err := heartbeatLogLines(c.lease.heartbeatLog)
+	if err != nil {
+		return err
+	}
+	if count != c.lease.heartbeatCountAtRunEnd {
+		return fmt.Errorf("expected no more heartbeats once the harness exited, had %d then %d", c.lease.heartbeatCountAtRunEnd, count)
+	}
+	return nil
+}
+
+// heartbeatLogLines is how many ticks the heartbeat stand-in has logged so far.
+func heartbeatLogLines(path string) (int, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("reading the heartbeat log: %w", err)
+	}
+	return strings.Count(string(data), "\n"), nil
 }

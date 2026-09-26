@@ -63,3 +63,9 @@ Feature: A claim is a lease
     Then the story "mw-gq6.1" was heartbeated at least every 2 minutes
     And the story "mw-gq6.1" was never among the stale claims while its session ran
     And the stale claims at 10:07 are ""
+    And mw sweep on "vps" at 10:07 finds nothing newly stuck
+
+  Scenario: A dispatched session heartbeats its claim while the harness runs and stops when the harness exits
+    When a dispatched session's shell line runs its harness for a while, heartbeating alongside it
+    Then the heartbeat ran more than once while the harness ran
+    And the heartbeat stopped once the harness exited
