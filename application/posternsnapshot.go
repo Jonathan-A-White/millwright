@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -20,6 +21,26 @@ const PosternSnapshotWindow = 7 * 24 * time.Hour
 // closed child carrying it in any comment is not landed: somebody has already
 // looked.
 const PosternSnapshotVerifiedMarker = "VERIFIED"
+
+// PosternSnapshotMemoryKey is the note Build remembers, between runs, what it
+// last found of every landed candidate still worth reading — its
+// comment_count and whether that count's comments carried
+// PosternSnapshotVerifiedMarker (mw-tfne4.27). Comments are append-only: a
+// candidate whose comment_count has not moved since the memory was written
+// cannot have gained the marker, and one already found to carry it keeps it,
+// so only a candidate unknown to the memory or whose count has since risen
+// needs its comments read again. It is one note for the whole snapshot,
+// JSON of id -> posternSnapshotMemoryEntry, read once and rewritten only
+// when it changed — TrackerSync's own Note/SetNote, the same pattern
+// SweepNotes uses.
+const PosternSnapshotMemoryKey = "postern.snapshot.landed"
+
+// posternSnapshotMemoryEntry is what PosternSnapshotMemoryKey remembers of
+// one landed candidate.
+type posternSnapshotMemoryEntry struct {
+	Count    int  `json:"count"`
+	Verified bool `json:"verified"`
+}
 
 // PosternSnapshotFile is where mw postern snapshot writes the encrypted
 // snapshot of every live epic, postern's docs/protocol.md §7 — the file nginx
@@ -169,17 +190,24 @@ func (s PosternSnapshot) write(ctx context.Context, doc PosternSnapshotDoc) erro
 // touching a single story's comments; every child across every epic that
 // still needs a comment read — every needs_you candidate, to build its entry,
 // and a landed candidate only when its own comment_count says it carries one
-// worth checking for VERIFIED (mw-tfne4.24) — is collected first and read
-// back in the one StoriesComments call finishEpic then applies to each epic
-// in turn. A landed candidate with no comments at all is never a match for
-// PosternSnapshotVerifiedMarker, so its absence from that call still lands it
-// correctly; it is most of a live epic's closed-within-window tail.
+// worth checking for VERIFIED (mw-tfne4.24) and PosternSnapshotMemoryKey does
+// not already answer that at its current comment_count (mw-tfne4.27) — is
+// collected first and read back in the one StoriesComments call finishEpic
+// then applies to each epic in turn. A landed candidate with no comments at
+// all is never a match for PosternSnapshotVerifiedMarker, so its absence from
+// that call still lands it correctly; it is most of a live epic's
+// closed-within-window tail.
 func (s PosternSnapshot) Build(ctx context.Context) (PosternSnapshotDoc, error) {
 	if s.Tracker == nil {
 		return PosternSnapshotDoc{}, fmt.Errorf("mw postern snapshot: no work tracker is configured")
 	}
 	if s.Notes == nil {
 		return PosternSnapshotDoc{}, fmt.Errorf("mw postern snapshot: nowhere to read a question's note from")
+	}
+
+	memory, err := s.readLandedMemory(ctx)
+	if err != nil {
+		return PosternSnapshotDoc{}, err
 	}
 
 	ids, err := s.Tracker.LiveEpics(ctx)
@@ -208,10 +236,16 @@ func (s PosternSnapshot) Build(ctx context.Context) (PosternSnapshotDoc, error) 
 			// on a comment it actually has: one the listing already reports
 			// as carrying none is landed without spending a read on it
 			// (mw-tfne4.24) — most of a live epic's closed-within-window
-			// tail, which is never commented on again once closed.
-			if child.CommentCount > 0 {
-				needComments = append(needComments, child.Story.ID)
+			// tail, which is never commented on again once closed. One the
+			// memory already answers at its current comment_count needs no
+			// read either (mw-tfne4.27).
+			if child.CommentCount == 0 {
+				continue
 			}
+			if mem, known := memory[child.Story.ID]; known && mem.Count == child.CommentCount {
+				continue
+			}
+			needComments = append(needComments, child.Story.ID)
 		}
 	}
 
@@ -220,11 +254,56 @@ func (s PosternSnapshot) Build(ctx context.Context) (PosternSnapshotDoc, error) 
 		return PosternSnapshotDoc{}, fmt.Errorf("reading the comments of the live epics' children: %w", err)
 	}
 
+	newMemory := map[string]posternSnapshotMemoryEntry{}
 	doc := PosternSnapshotDoc{WrittenAt: s.now().UTC().Format(time.RFC3339)}
 	for _, b := range builds {
-		doc.Epics = append(doc.Epics, s.finishEpic(b, comments))
+		doc.Epics = append(doc.Epics, s.finishEpic(b, comments, memory, newMemory))
 	}
+
+	if err := s.writeLandedMemory(ctx, memory, newMemory); err != nil {
+		return PosternSnapshotDoc{}, err
+	}
+
 	return doc, nil
+}
+
+// readLandedMemory reads PosternSnapshotMemoryKey, reporting what it holds as
+// id -> posternSnapshotMemoryEntry. A note never set, or one whose text does
+// not parse as that JSON, means remember nothing: Build proceeds exactly as
+// if this were its first run (mw-tfne4.27).
+func (s PosternSnapshot) readLandedMemory(ctx context.Context) (map[string]posternSnapshotMemoryEntry, error) {
+	raw, err := s.Notes.Note(ctx, PosternSnapshotMemoryKey)
+	if err != nil {
+		return nil, fmt.Errorf("reading the landed comment memory: %w", err)
+	}
+	memory := map[string]posternSnapshotMemoryEntry{}
+	if strings.TrimSpace(raw) != "" {
+		var parsed map[string]posternSnapshotMemoryEntry
+		if err := json.Unmarshal([]byte(raw), &parsed); err == nil && parsed != nil {
+			memory = parsed
+		}
+	}
+	return memory, nil
+}
+
+// writeLandedMemory rewrites PosternSnapshotMemoryKey to newMemory, unless it
+// holds exactly what oldMemory already did: a Build that remembered nothing
+// new spends no write on it. newMemory carries an entry only for a landed
+// candidate this Build actually saw with a comment worth remembering, so one
+// that has aged out of PosternSnapshotWindow since oldMemory was read is
+// dropped here.
+func (s PosternSnapshot) writeLandedMemory(ctx context.Context, oldMemory, newMemory map[string]posternSnapshotMemoryEntry) error {
+	if reflect.DeepEqual(oldMemory, newMemory) {
+		return nil
+	}
+	encoded, err := json.Marshal(newMemory)
+	if err != nil {
+		return fmt.Errorf("building the landed comment memory: %w", err)
+	}
+	if err := s.Notes.SetNote(ctx, PosternSnapshotMemoryKey, string(encoded)); err != nil {
+		return fmt.Errorf("writing the landed comment memory: %w", err)
+	}
+	return nil
 }
 
 // epicBuild is one live epic's brief in progress: everything Build can read
@@ -317,14 +396,17 @@ func (s PosternSnapshot) startEpic(ctx context.Context, detail EpicDetail) (*epi
 }
 
 // finishEpic completes an epic's brief with its children's comments, already
-// read by Build into comments, keyed by story id.
-func (s PosternSnapshot) finishEpic(b *epicBuild, comments map[string][]Comment) PosternSnapshotEpic {
+// read by Build into comments, keyed by story id. memory is what Build
+// remembered of a landed candidate's verdict at the start of this run;
+// newMemory is filled in with what this run knows of one worth remembering,
+// for Build to write back.
+func (s PosternSnapshot) finishEpic(b *epicBuild, comments map[string][]Comment, memory, newMemory map[string]posternSnapshotMemoryEntry) PosternSnapshotEpic {
 	out := b.out
 	out.Working = append(b.inProgress, b.openFrontier...)
 
 	counted := b.counted
 	for _, child := range b.landedCand {
-		landed, ok := landedFromComments(child, comments[child.Story.ID])
+		landed, ok := landedVerdict(child, comments, memory, newMemory)
 		if ok {
 			out.Landed = append(out.Landed, landed)
 			counted++
@@ -361,6 +443,30 @@ func needsYouFromComments(child StoryDetail, comments []Comment) PosternSnapshot
 		break
 	}
 	return question
+}
+
+// landedVerdict reports whether child belongs in its epic's landed group,
+// consulting memory before spending a read on its comments (mw-tfne4.27): a
+// candidate with no comments at all is landed by construction and never
+// worth remembering; one memory already answers at its current comment_count
+// is classified from there, without touching comments; anything else is
+// classified fresh from comments, and that verdict is recorded into
+// newMemory for Build to write back.
+func landedVerdict(child StoryDetail, comments map[string][]Comment, memory, newMemory map[string]posternSnapshotMemoryEntry) (PosternSnapshotLanded, bool) {
+	landed := PosternSnapshotLanded{ID: child.Story.ID, Title: child.Story.Title, LandedAt: formatOrEmpty(child.ClosedAt)}
+
+	if child.CommentCount == 0 {
+		return landed, true
+	}
+
+	if mem, known := memory[child.Story.ID]; known && mem.Count == child.CommentCount {
+		newMemory[child.Story.ID] = mem
+		return landed, !mem.Verified
+	}
+
+	result, ok := landedFromComments(child, comments[child.Story.ID])
+	newMemory[child.Story.ID] = posternSnapshotMemoryEntry{Count: child.CommentCount, Verified: !ok}
+	return result, ok
 }
 
 // landedFromComments reports child as a landed entry, unless it carries a
