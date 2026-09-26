@@ -377,6 +377,57 @@ Feature: Closing out a finished story and carrying on
     And the worktree of "mw-gq6.1" is still there
     And 2 sessions were ever started for "mw-gq6.1"
 
+  Scenario: A branch that merges cleanly but fails the rig's tests together is sent back once to fix them
+    Given the other host landed its own work on "main" while "mw-gq6.1" was worked
+    And the rig's tests fail only once "main" is merged in
+    And the session of "mw-gq6.1" was the first that dispatch started for it
+    And the session of "mw-gq6.1" reported a plain success
+    And mw next is running in the session of "mw-gq6.1"
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the worktree of "mw-gq6.1" already has "main" merged in
+    And a fresh session is running for "mw-gq6.1" in its worktree, told to fix the merged tests
+    And the story "mw-gq6.1" is recorded as sent back to fix the merged tests
+    And the story "mw-gq6.1" carries a comment quoting: sent back once, as attempt 2
+    And the report says "mw-gq6.1" was sent back to fix the merged tests
+    And the last ledger line holds:
+      | not landed (merged-tests-fail): |
+      | sent back as attempt 2          |
+    And the worktree of "mw-gq6.1" is still there
+    And 2 sessions were ever started for "mw-gq6.1"
+    And the attempts counted on "mw-gq6.1" come to 2
+
+  Scenario: A story sent back to fix the merged tests lands once the fix is committed
+    Given the other host landed its own work on "main" while "mw-gq6.1" was worked
+    And the rig's tests fail only once "main" is merged in
+    And the session of "mw-gq6.1" reported a plain success
+    And mw next is running in the session of "mw-gq6.1"
+    When mw closes out "mw-gq6.1"
+    Given the session sent back fixes the merged tests of "mw-gq6.1" and commits the fix
+    When mw closes out "mw-gq6.1" a second time
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the story "mw-gq6.1" is closed
+    And 2 sessions were ever started for "mw-gq6.1"
+
+  Scenario: A second merged-tests-fail stops with a plain message and starts no third session
+    Given the other host landed its own work on "main" while "mw-gq6.1" was worked
+    And the rig's tests fail only once "main" is merged in
+    And the session of "mw-gq6.1" reported a plain success
+    And mw next is running in the session of "mw-gq6.1"
+    When mw closes out "mw-gq6.1"
+    Given the session sent back for "mw-gq6.1" ends without fixing the merged tests
+    When mw closes out "mw-gq6.1" a second time
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is held blocked
+    And the report says it stopped for "merged-tests-fail"
+    And the story "mw-gq6.1" carries a comment quoting: second merged-tests-fail
+    And the last ledger line holds:
+      | not landed (merged-tests-fail): |
+      | second merged-tests-fail        |
+    And the worktree of "mw-gq6.1" is still there
+    And 2 sessions were ever started for "mw-gq6.1"
+
   Scenario: A push the origin refuses with a many-line error keeps the whole error beside the run
     Given the session of "mw-gq6.1" reported a plain success
     And the origin refuses every push, saying:

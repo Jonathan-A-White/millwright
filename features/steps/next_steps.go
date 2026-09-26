@@ -146,6 +146,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerNextRigSteps(ctx, c)
 	registerNextAfterLandingSteps(ctx, c)
 	registerNextRebaseSteps(ctx, c)
+	registerNextMergeFixSteps(ctx, c)
 	registerNextReattemptSteps(ctx, c)
 
 	ctx.When(`^mw closes out "([^"]*)"$`, c.mwClosesOut)
