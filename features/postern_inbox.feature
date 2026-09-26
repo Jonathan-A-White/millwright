@@ -6,7 +6,10 @@ Feature: mw postern inbox
   plaintext wrapper names, or "general" when it names neither. Reading marks
   them read, by moving a cursor kept in a bd kv note, never an event of its
   own. --unread-count prints only how many are unread, without reading them,
-  so a notifier can poll it without consuming anything.
+  so a notifier can poll it without consuming anything. A verified message
+  from the Governor whose thread is a bead lands as a comment on that bead
+  instead of printing in the inbox, once per txid; a topic thread, or a
+  sender who is not the Governor, is left in the inbox as before.
 
   Background:
     Given a throwaway postern key
@@ -128,3 +131,37 @@ Feature: mw postern inbox
     When mw postern inbox is run
     Then reading succeeds
     And it printed "thread mw-abc.2"
+
+  Scenario: a Governor's message in a bead thread lands as a comment on that bead, not in the inbox
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And bead "mw-thread.1" is known to the tracker
+    And a postern message from "governor-pubkey-hex" threaded on bead "mw-thread.1" with text "ship it" and txid "gov-txid-1"
+    When mw postern inbox is run
+    Then reading succeeds
+    And bead "mw-thread.1" is commented by the Governor saying "ship it"
+    And it did not print "ship it"
+
+  Scenario: the same txid is never commented on a bead twice
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And bead "mw-thread.2" is known to the tracker
+    And a postern message from "governor-pubkey-hex" threaded on bead "mw-thread.2" with text "status" and txid "dup-txid"
+    And a postern message from "governor-pubkey-hex" threaded on bead "mw-thread.2" with text "status" and txid "dup-txid"
+    When mw postern inbox is run
+    Then reading succeeds
+    And bead "mw-thread.2" has 1 comment
+
+  Scenario: a bead-threaded message from a sender who is not the Governor stays in the inbox
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And bead "mw-thread.3" is known to the tracker
+    And a postern message from "some-other-pubkey-hex" threaded on bead "mw-thread.3" with text "not the boss" and txid "other-txid"
+    When mw postern inbox is run
+    Then reading succeeds
+    And it printed "not the boss"
+    And bead "mw-thread.3" has no comment
+
+  Scenario: a Governor's message on a named topic stays in the inbox, not commented on any bead
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And a postern message from "governor-pubkey-hex" on topic "roadmap" with text "topic update" and txid "topic-txid"
+    When mw postern inbox is run
+    Then reading succeeds
+    And it printed "topic update"

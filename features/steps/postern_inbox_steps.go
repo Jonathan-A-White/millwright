@@ -89,6 +89,10 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a postern reply for bead "([^"]*)" with answer "([^"]*)" and txid "([^"]*)" addressed to this key signed by "([^"]*)"$`,
 		c.aPosternReplySignedBy)
 	ctx.Given(`^mw postern inbox trusts "([^"]*)" as the Governor's key$`, c.thePosternGovernorKeyIs)
+	ctx.Given(`^a postern message from "([^"]*)" threaded on bead "([^"]*)" with text "([^"]*)" and txid "([^"]*)"$`,
+		c.aPosternMessageFromThreadedOnBead)
+	ctx.Given(`^a postern message from "([^"]*)" on topic "([^"]*)" with text "([^"]*)" and txid "([^"]*)"$`,
+		c.aPosternMessageFromOnTopic)
 
 	ctx.When(`^mw postern inbox is run$`, c.mwPosternInboxIsRun)
 	ctx.When(`^mw postern inbox --unread-count is run$`, c.mwPosternInboxUnreadCountIsRun)
@@ -104,6 +108,9 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^bead "([^"]*)"'s question note is cleared$`, c.beadsQuestionNoteIsCleared)
 	ctx.Then(`^mail "([^"]*)" was sent to mayor$`, c.mailWasSentToMayor)
 	ctx.Then(`^bead "([^"]*)" has no comment$`, c.beadHasNoComment)
+	ctx.Then(`^bead "([^"]*)" is commented by the Governor saying "([^"]*)"$`, c.beadIsCommentedByTheGovernor)
+	ctx.Then(`^bead "([^"]*)" has (\d+) comments?$`, c.beadHasNComments)
+	ctx.Then(`^it did not print "([^"]*)"$`, c.itDidNotPrintText)
 	ctx.Then(`^no mail was sent for the reply$`, c.noMailWasSent)
 	ctx.Then(`^it printed "([^"]*)"$`, c.itPrintedText)
 }
@@ -209,6 +216,60 @@ func (c *posternInboxContext) aPosternRecordAddressedToThisKeyOnTopic(class, top
 		Class:      class,
 		From:       c.cipher.From,
 		To:         c.pubKey,
+		Ciphertext: ciphertext,
+	})
+	return nil
+}
+
+// aPosternMessageFromThreadedOnBead adds a record wrapped in postern's thread
+// envelope naming bead, its envelope sender (and its payload's claimed From)
+// both set to from, so a genuine, verified message is what these scenarios
+// need to exercise a Governor's reply landing as a bead comment.
+func (c *posternInboxContext) aPosternMessageFromThreadedOnBead(from, bead, text, txid string) error {
+	wrapped, err := json.Marshal(application.PosternThreadedMessage{
+		Thread: application.PosternThread{Bead: bead},
+		Text:   text,
+	})
+	if err != nil {
+		return err
+	}
+	c.cipher.From = from
+	ciphertext, err := c.cipher.Encrypt(c.pubKey, string(wrapped))
+	if err != nil {
+		return err
+	}
+	c.backend.AddRecord(application.PosternRecord{
+		Txid:       txid,
+		Class:      "message",
+		From:       from,
+		To:         c.pubKey,
+		Ts:         posternReplyStamp,
+		Ciphertext: ciphertext,
+	})
+	return nil
+}
+
+// aPosternMessageFromOnTopic is aPosternMessageFromThreadedOnBead's twin for a
+// named topic thread, rather than a bead.
+func (c *posternInboxContext) aPosternMessageFromOnTopic(from, topic, text, txid string) error {
+	wrapped, err := json.Marshal(application.PosternThreadedMessage{
+		Thread: application.PosternThread{Topic: topic},
+		Text:   text,
+	})
+	if err != nil {
+		return err
+	}
+	c.cipher.From = from
+	ciphertext, err := c.cipher.Encrypt(c.pubKey, string(wrapped))
+	if err != nil {
+		return err
+	}
+	c.backend.AddRecord(application.PosternRecord{
+		Txid:       txid,
+		Class:      "message",
+		From:       from,
+		To:         c.pubKey,
+		Ts:         posternReplyStamp,
 		Ciphertext: ciphertext,
 	})
 	return nil
@@ -474,6 +535,50 @@ func (c *posternInboxContext) beadHasNoComment(bead string) error {
 	}
 	if len(comments) != 0 {
 		return fmt.Errorf("expected no comment on %s, got: %+v", bead, comments)
+	}
+	return nil
+}
+
+// beadIsCommentedByTheGovernor checks that bead's last comment is the thread
+// comment mw postern inbox writes for a Governor's message, stamped with
+// posternReplyStamp exactly as beadIsCommentedTheAnswer checks the ANSWER
+// comment's own timestamp.
+func (c *posternInboxContext) beadIsCommentedByTheGovernor(bead, text string) error {
+	if err := c.itSucceeds(); err != nil {
+		return err
+	}
+	comments, err := c.memory.StoryComments(context.Background(), bead)
+	if err != nil {
+		return err
+	}
+	if len(comments) == 0 {
+		return fmt.Errorf("expected a comment on %s, found none", bead)
+	}
+	want := fmt.Sprintf("The Governor by postern %s: %s", posternReplyStamp.UTC().Format(time.RFC3339), text)
+	got := comments[len(comments)-1].Text
+	if got != want {
+		return fmt.Errorf("expected the comment\n%s\ngot\n%s", want, got)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) beadHasNComments(bead string, want int) error {
+	if err := c.itSucceeds(); err != nil {
+		return err
+	}
+	comments, err := c.memory.StoryComments(context.Background(), bead)
+	if err != nil {
+		return err
+	}
+	if len(comments) != want {
+		return fmt.Errorf("expected %d comment(s) on %s, got %d: %+v", want, bead, len(comments), comments)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) itDidNotPrintText(text string) error {
+	if strings.Contains(c.out.String(), text) {
+		return fmt.Errorf("expected the output not to contain %q, got:\n%s", text, c.out.String())
 	}
 	return nil
 }
