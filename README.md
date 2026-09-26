@@ -1799,7 +1799,11 @@ their total is past `tmp_leftovers_budget_bytes`, its cure is a plain
 cap of 3, and its way back is "none: nothing to restore" — everything it
 removes had no live owner. `~/.cache/go-build` is checked against the same
 budget on its own and cleared with `go clean -cache`, a rebuildable cache,
-rather than deleted by hand; it is never folded into the leftovers' own total.
+rather than deleted by hand; it is never folded into the leftovers' own
+total. A go-build cache past budget with a file open under it, or a `go`,
+`gotestsum`, `compile`, `link` or `vet` process running, is a live build or
+test rather than a leftover: Probe reports it ok instead of faulty, and Cure
+leaves it for a later tick rather than clearing it out from underneath.
 
 **mayor-gone** respawns the Mayor when the window its own vault-local
 `.mayor-acting` names is gone, or is open but its pane holds nothing but a
