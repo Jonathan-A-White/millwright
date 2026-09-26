@@ -90,6 +90,15 @@ type DoctorEpisode struct {
 	// changed. Empty for a check whose last logged ok carried no reason, or
 	// whose episode has never been saved.
 	LastOKReason string
+
+	// LastCannotTellReason is the same said-once treatment LastOKReason gives
+	// an ok with a reason, for cannot-tell: a check that cannot tell for the
+	// same reason on every run — a host with no powershell.exe, say — is
+	// logged and noted only the first time, or again once the reason
+	// changes; a note already written for it is left in place, unrewritten,
+	// while the reason repeats. Empty for a check whose last logged
+	// cannot-tell carried no reason, or whose episode has never been saved.
+	LastCannotTellReason string
 }
 
 // DoctorState is where mw doctor keeps each check's episode between runs.
@@ -363,14 +372,7 @@ func (d Doctor) one(ctx context.Context, check DoctorCheck, dryRun bool) (Doctor
 		return d.ok(ctx, name, reason, dryRun)
 
 	case DoctorCannotTell:
-		result := DoctorResult{Check: name, Verdict: "cannot-tell", Reason: reason}
-		if !dryRun {
-			if err := d.append(ctx, result); err != nil {
-				return DoctorResult{}, err
-			}
-			d.writeNote(ctx, name, result)
-		}
-		return result, nil
+		return d.cannotTell(ctx, name, reason, dryRun)
 	}
 
 	return d.faulty(ctx, check, reason, dryRun)
@@ -414,6 +416,35 @@ func (d Doctor) ok(ctx context.Context, name, reason string, dryRun bool) (Docto
 	}
 	d.clearNote(ctx, name)
 	if err := d.State.Save(ctx, name, DoctorEpisode{LastOKReason: reason}); err != nil {
+		return DoctorResult{}, fmt.Errorf("saving %s's doctor state: %w", name, err)
+	}
+	return result, nil
+}
+
+// cannotTell is the DoctorCannotTell half of one, said once the same way an
+// ok-with-reason is: logged and noted only the first time, or again once the
+// reason changes. A repeat of the same reason costs neither a log line nor a
+// kv write, and leaves a note already written for it in place, unrewritten.
+func (d Doctor) cannotTell(ctx context.Context, name, reason string, dryRun bool) (DoctorResult, error) {
+	result := DoctorResult{Check: name, Verdict: "cannot-tell", Reason: reason}
+	if dryRun {
+		return result, nil
+	}
+
+	episode, err := d.State.Load(ctx, name)
+	if err != nil {
+		return DoctorResult{}, fmt.Errorf("reading %s's doctor state: %w", name, err)
+	}
+	if episode.LastCannotTellReason == reason {
+		return result, nil
+	}
+
+	if err := d.append(ctx, result); err != nil {
+		return DoctorResult{}, err
+	}
+	d.writeNote(ctx, name, result)
+	episode.LastCannotTellReason = reason
+	if err := d.State.Save(ctx, name, episode); err != nil {
 		return DoctorResult{}, fmt.Errorf("saving %s's doctor state: %w", name, err)
 	}
 	return result, nil

@@ -162,6 +162,7 @@ func (f *FakeDoctorCheck) Cures() int {
 type FakeDoctorNotes struct {
 	mu     sync.Mutex
 	notes  map[string]string
+	sets   int
 	clears int
 
 	Err error
@@ -186,11 +187,19 @@ func (f *FakeDoctorNotes) Note(_ context.Context, key string) (string, error) {
 func (f *FakeDoctorNotes) SetNote(_ context.Context, key, value string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.sets++
 	if f.Err != nil {
 		return f.Err
 	}
 	f.notes[key] = value
 	return nil
+}
+
+// Sets is how many times SetNote was called, whether or not it succeeded.
+func (f *FakeDoctorNotes) Sets() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.sets
 }
 
 // ClearNote implements application.DoctorNotes.
