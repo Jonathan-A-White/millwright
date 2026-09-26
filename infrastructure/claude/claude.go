@@ -319,6 +319,17 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 	tmp := l.ResultFile + ".tmp"
 	line := shellLine(argv) + " > " + shellQuote(tmp) + "; mv " + shellQuote(tmp) + " " + shellQuote(l.ResultFile)
 
+	// Heartbeat runs beside the harness, not after it: started in the
+	// background before the harness's own command line and killed the moment
+	// that line finishes, so the lease it renews is never left running once
+	// nothing is left to renew it for. Heartbeat's own stop condition — the
+	// session no longer running — would settle it eventually even without the
+	// kill, but not until its next tick, and not at all if After never runs
+	// (mw-gq6.124).
+	if len(l.Heartbeat) > 0 {
+		line = shellLine(l.Heartbeat) + " & HB=$!; " + line + "; kill $HB 2>/dev/null"
+	}
+
 	// Whatever comes after the session is chained with `;`, not `&&`: a session
 	// that failed, ran out of fuel or died is exactly the one whose closing out
 	// must still happen, and `&&` would skip it.

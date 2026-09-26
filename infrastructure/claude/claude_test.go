@@ -518,6 +518,45 @@ func TestTheCloseOutIsChainedOnHoweverTheSessionEnds(t *testing.T) {
 	}
 }
 
+func TestTheHeartbeatRunsBesideTheHarnessAndIsKilledBeforeTheCloseOut(t *testing.T) {
+	spec, err := New().Session(launch(func(l *application.Launch) {
+		l.Heartbeat = []string{"/root/millwright/bin/mw", "next", "--heartbeat", "mw-gq6.6"}
+		l.After = []string{"/root/millwright/bin/mw", "next", "mw-gq6.6"}
+	}))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+
+	line := spec.Command[2]
+	want := "/root/millwright/bin/mw next --heartbeat mw-gq6.6 & HB=$!; claude --print" +
+		" --output-format json --model opus --effort high --permission-mode auto" +
+		" --permission-prompts none --append-system-prompt-file /root/millwright-vault/runs/mw-gq6.6/boot.md" +
+		" --settings " + shellQuote(SessionSettings) +
+		" --name mw-gq6.6 'You are booted into the builder seat.'" +
+		" > /root/millwright-vault/runs/mw-gq6.6/result.json.tmp" +
+		"; mv /root/millwright-vault/runs/mw-gq6.6/result.json.tmp /root/millwright-vault/runs/mw-gq6.6/result.json" +
+		"; kill $HB 2>/dev/null" +
+		"; /root/millwright/bin/mw next mw-gq6.6"
+	if line != want {
+		t.Errorf("expected the heartbeat backgrounded, killed after the harness and before the close-out, and chained onward, got:\nwant %q\ngot  %q", want, line)
+	}
+}
+
+func TestASessionWithNoHeartbeatStartsNothingBesideTheHarness(t *testing.T) {
+	spec, err := New().Session(launch(func(l *application.Launch) {
+		l.After = []string{"/root/millwright/bin/mw", "next", "mw-gq6.6"}
+	}))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	line := spec.Command[2]
+	for _, unwanted := range []string{"&", "HB=", "kill "} {
+		if strings.Contains(line, unwanted) {
+			t.Errorf("expected no heartbeat, backgrounding or kill with an empty Heartbeat, got %q in %q", unwanted, line)
+		}
+	}
+}
+
 func TestASessionWithNothingAfterItEndsAtTheRename(t *testing.T) {
 	spec, err := New().Session(launch(nil))
 	if err != nil {
