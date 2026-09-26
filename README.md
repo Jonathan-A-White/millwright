@@ -1720,6 +1720,7 @@ tunnel_host    = "vps"                            # default: the [watch] table's
 tunnel_probe   = "ss -ltn sport = :2222"          # default; run over ssh on tunnel_host
 doctor_wg_hub  = "10.88.0.1:22"                   # default; the hub's ssh host:port, dialed over wg0
 doctor_wg_unit = "wg-quick@wg0"                   # default; the unit wg restarts
+tmp_leftovers_budget_bytes = 200000000            # default (200 MB); tmp-leftovers' and go-build's own budget
 ```
 
 **daemon-reload** asks `systemctl --user show <unit> -p NeedDaemonReload` for
@@ -1785,6 +1786,20 @@ cure started.
 BEADS line warns on; past it there is no cure — repacking would delete packs
 — so it only ever writes the check's own `doctor.beads-size` note for the
 Millhand to look at.
+
+**tmp-leftovers** cures the fault behind the VPS reaching 94% disk on
+2026-09-25 from the factory's own dead leftovers: a killed bd's dolt spool
+files (`/tmp/nbs-spool-*`), `/tmp/bd`, and a stale Claude Code session
+directory (`/tmp/claude-0/<session>`). "Dead" is read the way `fuser` or
+`lsof +D` would answer it — no process on this host has the path open, read
+by hand over `/proc` so no external program has to be on PATH — never a path
+this check does not know about, and never one that is live. Faulty once
+their total is past `tmp_leftovers_budget_bytes`, its cure is a plain
+`os.RemoveAll` on exactly the dead ones found; its damper is 5 minutes with a
+cap of 3, and its way back is "none: nothing to restore" — everything it
+removes had no live owner. `~/.cache/go-build` is checked against the same
+budget on its own and cleared with `go clean -cache`, a rebuildable cache,
+rather than deleted by hand; it is never folded into the leftovers' own total.
 
 **mayor-gone** respawns the Mayor when the window its own vault-local
 `.mayor-acting` names is gone, or is open but its pane holds nothing but a
