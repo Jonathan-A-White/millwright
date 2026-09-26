@@ -17,21 +17,18 @@ import (
 // What a sweep scenario's fixtures hold.
 const sweepHost = "vps"
 
-// sweepContext holds a fake work tracker and a fake runner: the only two
-// ports mw sweep reads and writes through. Nothing here reaches the factory's
-// own vault, beads database or a real tmux server.
+// sweepContext holds a fake work tracker: the only port mw sweep reads and
+// writes through now that StaleClaims is the one definition of a stuck claim.
+// Nothing here reaches the factory's own vault or beads database.
 type sweepContext struct {
 	tracker *apptest.FakeTracker
-	runner  *apptest.FakeRunner
 
 	lastEpic string
 	now      time.Time
 
-	// askedBefore and namesBefore are the tracker's and runner's own logs just
-	// before mw sweep last ran, so a scenario can say what changed and nothing
-	// more.
+	// askedBefore is the tracker's own log just before mw sweep last ran, so a
+	// scenario can say what changed and nothing more.
 	askedBefore int
-	namesBefore []string
 
 	report application.SweepReport
 	err    error
@@ -44,25 +41,21 @@ func InitializeSweepScenario(ctx *godog.ScenarioContext) {
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
 		*c = sweepContext{
 			tracker: apptest.NewFakeTracker(),
-			runner:  apptest.NewFakeRunner(),
 			now:     time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC),
 		}
+		c.tracker.Clock = func() time.Time { return c.now }
 		return ctx, nil
 	})
 
 	ctx.Given(`^the sweep epic "([^"]*)" on the default path:$`, c.theSweepEpicOnTheDefaultPath)
 	ctx.Given(`^a sweep story "([^"]*)" filed under it$`, c.aSweepStoryFiledUnderIt)
 	ctx.Given(`^a sweep story "([^"]*)" filed under it, overriding "([^"]*)" with "([^"]*)"$`, c.aSweepStoryOverriding)
-	ctx.Given(`^the sweep story "([^"]*)" is claimed with no session behind it$`, c.theSweepStoryIsClaimedWithNoSession)
-	ctx.Given(`^the sweep story "([^"]*)" is claimed with a dead pane behind it$`, c.theSweepStoryIsClaimedWithADeadPane)
-	ctx.Given(`^the sweep story "([^"]*)" is claimed with its session running$`, c.theSweepStoryIsClaimedWithSessionRunning)
+	ctx.Given(`^the sweep story "([^"]*)" is claimed$`, c.theSweepStoryIsClaimed)
 	ctx.Given(`^the sweep story "([^"]*)" is marked run=(\S+)$`, c.theSweepStoryIsMarkedRun)
-	ctx.Given(`^the session of "([^"]*)" has printed "([^"]*)"$`, c.theSessionHasPrinted)
-	ctx.Given(`^the sweep story "([^"]*)" was claimed (\d+) hours? ago$`, c.theSweepStoryWasClaimedHoursAgo)
 
-	ctx.When(`^the session of "([^"]*)" prints "([^"]*)"$`, c.theSessionHasPrinted)
+	ctx.When(`^the claim on "([^"]*)" is heartbeaten$`, c.theClaimIsHeartbeaten)
 	ctx.When(`^mw sweep reads the host$`, c.mwSweepReadsTheHost)
-	ctx.When(`^the clock advances (\d+) hours?$`, c.theClockAdvances)
+	ctx.When(`^the clock advances (\d+) minutes?$`, c.theClockAdvancesMinutes)
 
 	ctx.Then(`^sweeping succeeds$`, c.sweepingSucceeds)
 	ctx.Then(`^the sweep story "([^"]*)" is recorded as stuck$`, c.theSweepStoryIsRecordedAsStuck)
@@ -72,12 +65,7 @@ func InitializeSweepScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the sweep story "([^"]*)" carries exactly (\d+) comment$`, c.theSweepStoryCarriesExactlyNComments)
 	ctx.Then(`^the sweep story "([^"]*)" is still recorded run=(\S+), not stuck$`, c.theSweepStoryIsStillRecordedRun)
 	ctx.Then(`^the sweep report shows "([^"]*)" on the rig "([^"]*)"$`, c.theSweepReportShowsOnTheRig)
-	ctx.Then(`^no state was recorded on the sweep story "([^"]*)" by sweeping$`, c.noStateWasRecorded)
-	ctx.Then(`^no state was recorded on the sweep story "([^"]*)" by sweeping but run=(\S+)$`, c.noStateWasRecordedButRun)
-	ctx.Then(`^the tracker's notes hold what sweep saw of "([^"]*)"$`, c.theNotesHoldWhatSweepSaw)
-	ctx.Then(`^the tracker's notes hold nothing of "([^"]*)"$`, c.theNotesHoldNothing)
 	ctx.Then(`^nothing was written through the sweep tracker but state and comments$`, c.nothingButStateAndComments)
-	ctx.Then(`^nothing was started, sent to or closed through the sweep runner$`, c.nothingStartedSentOrClosed)
 }
 
 func (c *sweepContext) theSweepEpicOnTheDefaultPath(id string, table *godog.Table) error {
@@ -109,74 +97,34 @@ func (c *sweepContext) aSweepStoryOverriding(id, field, value string) error {
 	return nil
 }
 
-func (c *sweepContext) theSweepStoryIsClaimedWithNoSession(id string) error {
+func (c *sweepContext) theSweepStoryIsClaimed(id string) error {
 	return c.tracker.ClaimStory(context.Background(), id)
-}
-
-// theSweepStoryIsClaimedWithADeadPane is mw-gq6.106's shape: the tmux window
-// is still there, but its command has already ended, remain-on-exit's dead
-// pane with a known exit status — the same as a Builder's session dying
-// mid-story leaves behind.
-func (c *sweepContext) theSweepStoryIsClaimedWithADeadPane(id string) error {
-	ctx := context.Background()
-	if err := c.tracker.ClaimStory(ctx, id); err != nil {
-		return err
-	}
-	name := application.SessionName(id)
-	if err := c.runner.Start(ctx, application.SessionSpec{Name: name, Command: []string{"true"}}); err != nil {
-		return err
-	}
-	c.runner.Exit(name, 1)
-	return nil
-}
-
-func (c *sweepContext) theSweepStoryIsClaimedWithSessionRunning(id string) error {
-	ctx := context.Background()
-	if err := c.tracker.ClaimStory(ctx, id); err != nil {
-		return err
-	}
-	return c.runner.Start(ctx, application.SessionSpec{
-		Name:    application.SessionName(id),
-		Command: []string{"true"},
-	})
 }
 
 func (c *sweepContext) theSweepStoryIsMarkedRun(id, run string) error {
 	return c.tracker.SetStoryState(context.Background(), id, application.RunState, run, "recorded by the test")
 }
 
-func (c *sweepContext) theSessionHasPrinted(id, text string) error {
-	c.runner.Write(application.SessionName(id), text+"\n")
-	return nil
-}
-
-func (c *sweepContext) theSweepStoryWasClaimedHoursAgo(id, hoursText string) error {
-	hours, err := strconv.Atoi(hoursText)
-	if err != nil {
-		return fmt.Errorf("parsing %q as a number of hours: %w", hoursText, err)
-	}
-	return c.tracker.SetStarted(id, c.now.Add(-time.Duration(hours)*time.Hour))
+func (c *sweepContext) theClaimIsHeartbeaten(id string) error {
+	return c.tracker.HeartbeatClaim(context.Background(), id)
 }
 
 func (c *sweepContext) mwSweepReadsTheHost() error {
 	c.askedBefore = len(c.tracker.Asked())
-	c.namesBefore = c.runner.Names()
 	c.report, c.err = application.Sweep{
 		Tracker: c.tracker,
-		Runner:  c.runner,
-		Memory:  c.tracker,
 		Host:    sweepHost,
 		Now:     func() time.Time { return c.now },
 	}.Run(context.Background())
 	return nil
 }
 
-func (c *sweepContext) theClockAdvances(hoursText string) error {
-	hours, err := strconv.Atoi(hoursText)
+func (c *sweepContext) theClockAdvancesMinutes(minutesText string) error {
+	minutes, err := strconv.Atoi(minutesText)
 	if err != nil {
-		return fmt.Errorf("parsing %q as a number of hours: %w", hoursText, err)
+		return fmt.Errorf("parsing %q as a number of minutes: %w", minutesText, err)
 	}
-	c.now = c.now.Add(time.Duration(hours) * time.Hour)
+	c.now = c.now.Add(time.Duration(minutes) * time.Minute)
 	return nil
 }
 
@@ -284,8 +232,8 @@ func (c *sweepContext) theSweepReportShowsOnTheRig(id, rig string) error {
 }
 
 // nothingButStateAndComments checks that no claim was given back, no story
-// was closed, and no dispatch-facing call beyond reading what is claimed and
-// setting state was made.
+// was closed, and no dispatch-facing call beyond reading what is claimed,
+// reading the stale claims and setting state was made.
 func (c *sweepContext) nothingButStateAndComments() error {
 	if err := c.sweepingSucceeds(); err != nil {
 		return err
@@ -308,78 +256,6 @@ func (c *sweepContext) nothingButStateAndComments() error {
 		default:
 			return fmt.Errorf("expected sweep to only read what is claimed and set state, but it called %s", call)
 		}
-	}
-	return nil
-}
-
-func (c *sweepContext) nothingStartedSentOrClosed() error {
-	if err := c.sweepingSucceeds(); err != nil {
-		return err
-	}
-	after := c.runner.Names()
-	if len(after) != len(c.namesBefore) {
-		return fmt.Errorf("expected the runner's sessions to be unchanged, had %v now have %v", c.namesBefore, after)
-	}
-	for _, name := range after {
-		if sent := c.runner.Input(name); len(sent) != 0 {
-			return fmt.Errorf("expected nothing sent to session %s, got %v", name, sent)
-		}
-	}
-	return nil
-}
-
-// noStateWasRecorded checks that sweeping wrote no state on the story at all:
-// every state change is a bead of its own in the tracker, so a sweep that only
-// watches a session must leave none behind.
-func (c *sweepContext) noStateWasRecorded(id string) error {
-	return c.noStateWasRecordedButRun(id, "")
-}
-
-// noStateWasRecordedButRun is the same, allowing the one run state sweep
-// records because it is an event worth keeping. An empty run allows none.
-func (c *sweepContext) noStateWasRecordedButRun(id, run string) error {
-	if err := c.sweepingSucceeds(); err != nil {
-		return err
-	}
-	calls := 0
-	for _, call := range c.tracker.Asked() {
-		if call == "SetStoryState" {
-			calls++
-		}
-	}
-	want := 0
-	if run != "" {
-		want = 1
-	}
-	if calls != want {
-		return fmt.Errorf("expected %d state change(s) written on %s, the tracker was asked to make %d", want, id, calls)
-	}
-	if run != "" {
-		if got := c.tracker.State(id, application.RunState); got != run {
-			return fmt.Errorf("expected %s to be recorded %s=%s, got %q", id, application.RunState, run, got)
-		}
-	}
-	return nil
-}
-
-func (c *sweepContext) theNotesHoldWhatSweepSaw(id string) error {
-	got, err := c.tracker.Note(context.Background(), application.SweepKey(id))
-	if err != nil {
-		return err
-	}
-	if got == "" {
-		return fmt.Errorf("expected the tracker's notes to hold what sweep saw of %s under %s, they hold nothing", id, application.SweepKey(id))
-	}
-	return nil
-}
-
-func (c *sweepContext) theNotesHoldNothing(id string) error {
-	got, err := c.tracker.Note(context.Background(), application.SweepKey(id))
-	if err != nil {
-		return err
-	}
-	if got != "" {
-		return fmt.Errorf("expected the tracker's notes to hold nothing of %s, got %q", id, got)
 	}
 	return nil
 }

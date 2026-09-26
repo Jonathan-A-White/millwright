@@ -14,7 +14,6 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/notify"
 	"github.com/Jonathan-A-White/millwright/infrastructure/reaper"
 	"github.com/Jonathan-A-White/millwright/infrastructure/ticklog"
-	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 	"github.com/Jonathan-A-White/millwright/infrastructure/watch"
 
@@ -76,10 +75,6 @@ func newMillhandTickCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			hours, err := config.StaleHours()
-			if err != nil {
-				return err
-			}
 			recheck, err := config.TickRecheckSeconds()
 			if err != nil {
 				return err
@@ -120,11 +115,8 @@ func newMillhandTickCmd() *cobra.Command {
 				Mail:        gateway,
 				DoctorNotes: gateway,
 				Sweep: application.Sweep{
-					Tracker:    gateway,
-					Memory:     gateway,
-					Runner:     tmux.New(),
-					Host:       host,
-					StaleAfter: time.Duration(hours) * time.Hour,
+					Tracker: gateway,
+					Host:    host,
 				},
 				Reach:     doctor.NetReach{Hosts: reach},
 				ReapLog:   files,

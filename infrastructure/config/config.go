@@ -53,7 +53,6 @@ const (
 	VaultEnv       = "MW_VAULT"
 	HostEnv        = "MW_HOST"
 	CapEnv         = "MW_CAP"
-	StaleHoursEnv  = "MW_STALE_HOURS"
 	HostSilenceEnv = "MW_HOST_SILENT_HOURS"
 	HandoffAtEnv   = "MW_HANDOFF_AT"
 	RigMemoryEnv   = "MW_RIG_MEMORY_BYTES"
@@ -112,10 +111,6 @@ const DefaultCap = 1
 // attempt is a fresh session paid for in full. application.DefaultMaxAttempts is
 // the same number.
 const DefaultMaxAttempts = 3
-
-// DefaultStaleHours is how many hours a claimed story's session may show no
-// new output before `mw sweep` calls it stuck, when nothing says otherwise.
-const DefaultStaleHours = 2
 
 // DefaultHostSilentHours is how long another host may go without recording a
 // sync before `mw status` calls it asleep and its work stranded, when nothing
@@ -352,35 +347,6 @@ func MaxAttempts() (int, error) {
 		return 0, fmt.Errorf("a story would be tried %d times, so none would ever be started: set max_attempts to 1 or more", tries)
 	}
 	return tries, nil
-}
-
-// StaleHours reports how many hours a claimed story's session may show no new
-// output before `mw sweep` calls it stuck: $MW_STALE_HOURS if it is set,
-// otherwise the root-table `stale_hours` key of ~/.config/mw/config.toml, and
-// DefaultStaleHours when neither says.
-func StaleHours() (int, error) {
-	said := strings.TrimSpace(os.Getenv(StaleHoursEnv))
-	if said == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return 0, fmt.Errorf("no %s is set and there is no home directory to read %s in: %w", StaleHoursEnv, File, err)
-		}
-		if said, err = valueIn(filepath.Join(home, File), "stale_hours"); err != nil {
-			return 0, err
-		}
-	}
-	if said == "" {
-		return DefaultStaleHours, nil
-	}
-
-	hours, err := strconv.Atoi(said)
-	if err != nil {
-		return 0, fmt.Errorf("the stale threshold is %q, which is not a whole number of hours: set %s=<n>, or `stale_hours = <n>` in %s", said, StaleHoursEnv, File)
-	}
-	if hours < 1 {
-		return 0, fmt.Errorf("the stale threshold is %d hours, so a session would be called stuck the moment it was claimed: set it to 1 or more", hours)
-	}
-	return hours, nil
 }
 
 // HostSilentHours reports how long another host may go without recording a

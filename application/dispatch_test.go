@@ -767,59 +767,6 @@ func TestDispatchClearsTheMarkerOnceLevelAgain(t *testing.T) {
 	}
 }
 
-// mw-gq6.86: a story's second attempt starts with a blank pane too, the same
-// one mw sweep may have fingerprinted for the first attempt before it ended.
-// Left in place, that note's clock survives into the second attempt, and a
-// sweep right after it starts reads it as this attempt's own silence, since
-// the first attempt's clock — which is well past the stale threshold by then.
-func TestDispatchClearsTheSweepNoteSoAFreshAttemptIsNotMarkedStuckFromTheLastOnesClock(t *testing.T) {
-	ctx := context.Background()
-	dispatch, tracker, _, runner, _ := aFactory(t)
-	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
-	dispatch.Memory = tracker
-
-	clock := time.Date(2026, 9, 22, 0, 50, 0, 0, time.UTC)
-	sweep := application.Sweep{
-		Tracker: tracker, Runner: runner, Memory: tracker, Host: "vps",
-		Now: func() time.Time { return clock },
-	}
-
-	// Attempt 1 starts, its pane blank, and a sweep right after remembers it.
-	if _, err := dispatch.Run(ctx); err != nil {
-		t.Fatalf("dispatching attempt 1: %v", err)
-	}
-	if _, err := sweep.Run(ctx); err != nil {
-		t.Fatalf("sweeping after attempt 1 started: %v", err)
-	}
-
-	// Attempt 1's session ends before it prints anything, and the story is
-	// given back the way mw next leaves it once a session is gone.
-	runner.Exit(application.SessionName("mw-gq6.1"), 1)
-	if err := tracker.ReleaseClaim(ctx, "mw-gq6.1"); err != nil {
-		t.Fatalf("giving back the claim: %v", err)
-	}
-
-	// Attempt 2 is dispatched, well past the stale threshold since attempt 1's
-	// note was written.
-	clock = clock.Add(2*time.Hour + time.Minute)
-	if _, err := dispatch.Run(ctx); err != nil {
-		t.Fatalf("dispatching attempt 2: %v", err)
-	}
-
-	report, err := sweep.Run(ctx)
-	if err != nil {
-		t.Fatalf("sweeping right after attempt 2 started: %v", err)
-	}
-	if got := tracker.State("mw-gq6.1", application.RunState); got == application.RunStuck {
-		t.Fatalf("expected the fresh attempt not to be recorded %s=%s, got %q", application.RunState, application.RunStuck, got)
-	}
-	for _, d := range report.Stuck {
-		if d.Story.ID == "mw-gq6.1" {
-			t.Fatalf("expected mw-gq6.1 not to be reported stuck, got %+v", report.Stuck)
-		}
-	}
-}
-
 // mw-gq6.107: a dead-pane reclaim gives a story's claim back but leaves the
 // worktree and branch an earlier attempt cut exactly as they were, and the
 // fresh attempt below used to fail every time on git's own "already exists"

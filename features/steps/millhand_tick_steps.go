@@ -88,6 +88,11 @@ func (c *seatUpContext) tickWorld() *tickWorld {
 			watch:   apptest.NewFakeWatch(),
 			reach:   apptest.NewFakeReach(),
 		}
+		// StaleClaims judges a lease against the tracker's own clock
+		// (mw-gq6.120): every scenario in this feature runs at c.today, so the
+		// tracker's clock reads the same time a stuck story's lease is set
+		// relative to.
+		c.tick.tracker.Clock = func() time.Time { return c.today }
 	}
 	return c.tick
 }
@@ -227,8 +232,8 @@ func (c *seatUpContext) unreadTickMessages(count, mailbox, first, last string) e
 	return nil
 }
 
-// aStuckStory files a story on this host, claimed by it, with no session behind
-// it: the one thing a sweep calls stuck straight away.
+// aStuckStory files a story on this host, claimed by it, with its lease
+// already run out: what StaleClaims, and so a sweep, calls stuck.
 func (c *seatUpContext) aStuckStory(id, title string) error {
 	world := c.tickWorld()
 	if !world.epicFiled {
@@ -245,7 +250,12 @@ func (c *seatUpContext) aStuckStory(id, title string) error {
 		world.tracker.AddEpic(tickEpic, defaults)
 	}
 	world.tracker.AddStory(tickEpic, domain.Story{ID: id, Title: title})
-	return world.tracker.ClaimStory(context.Background(), id)
+	if err := world.tracker.ClaimStory(context.Background(), id); err != nil {
+		return err
+	}
+	// Stuck by StaleClaims's own definition: a lease that ran out with no
+	// heartbeat since, well past bd's fixed five-minute TTL.
+	return world.tracker.SetLeaseExpires(id, c.today.Add(-time.Hour))
 }
 
 func (c *seatUpContext) stuckStories(count, first, last string) error {
@@ -359,8 +369,6 @@ func (c *seatUpContext) runTheTick(dryRun bool) error {
 		DoctorNotes: world.tracker,
 		Sweep: application.Sweep{
 			Tracker: world.tracker,
-			Memory:  world.tracker,
-			Runner:  world.runner,
 			Host:    seatUpHost,
 			Now:     now,
 		},

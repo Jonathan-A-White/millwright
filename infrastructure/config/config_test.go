@@ -110,28 +110,6 @@ func TestCapRefusesWhatWouldStartNothingOrIsNotANumber(t *testing.T) {
 	}
 }
 
-func TestStaleHoursIsTwoUntilAHostSaysOtherwise(t *testing.T) {
-	writeConfig(t, "vault = \"/v\"\nhost = \"vps\"\n")
-
-	hours, err := config.StaleHours()
-	if err != nil {
-		t.Fatalf("reading the stale threshold: %v", err)
-	}
-	if hours != config.DefaultStaleHours {
-		t.Fatalf("expected the default of %d hours, got %d", config.DefaultStaleHours, hours)
-	}
-
-	t.Setenv("MW_STALE_HOURS", "6")
-	if hours, err = config.StaleHours(); err != nil || hours != 6 {
-		t.Fatalf("expected MW_STALE_HOURS to win with 6, got %d: %v", hours, err)
-	}
-
-	writeConfig(t, "stale_hours = 4\n")
-	if hours, err = config.StaleHours(); err != nil || hours != 4 {
-		t.Fatalf("expected the config file's stale_hours to read back as 4, got %d: %v", hours, err)
-	}
-}
-
 func TestTickRecheckSecondsIsThirtyUntilAHostSaysOtherwise(t *testing.T) {
 	writeConfig(t, "vault = \"/v\"\nhost = \"vps\"\n")
 
@@ -157,18 +135,6 @@ func TestTickRecheckSecondsIsThirtyUntilAHostSaysOtherwise(t *testing.T) {
 	t.Setenv("MW_TICK_RECHECK_SECONDS", "soon")
 	if _, err = config.TickRecheckSeconds(); err == nil {
 		t.Fatal("expected a wait that is not a number to be refused")
-	}
-}
-
-func TestStaleHoursRefusesWhatWouldNeverGiveASessionAChanceOrIsNotANumber(t *testing.T) {
-	writeConfig(t, "stale_hours = 0\n")
-	if _, err := config.StaleHours(); err == nil {
-		t.Fatal("expected a stale threshold of 0 to be refused")
-	}
-
-	writeConfig(t, "stale_hours = \"soon\"\n")
-	if _, err := config.StaleHours(); err == nil {
-		t.Fatal("expected a stale threshold that is not a number to be refused")
 	}
 }
 

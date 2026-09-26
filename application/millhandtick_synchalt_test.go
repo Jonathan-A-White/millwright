@@ -52,8 +52,6 @@ func aTick(t *testing.T) (application.MillhandTick, *stubSync, *apptest.FakeSync
 		Notify:    notifier,
 		Sweep: application.Sweep{
 			Tracker: apptest.NewFakeTracker(),
-			Memory:  apptest.NewFakeTracker(),
-			Runner:  apptest.NewFakeRunner(),
 			Host:    "vps",
 		},
 		Host: "vps",

@@ -105,7 +105,7 @@ func (r *resumeTick) run(t *testing.T) application.MillhandTickReport {
 		Sync:        &stubSync{},
 		Mail:        r.mailbox,
 		DoctorNotes: r.notes,
-		Sweep:       application.Sweep{Tracker: apptest.NewFakeTracker(), Memory: apptest.NewFakeTracker(), Runner: apptest.NewFakeRunner(), Host: "laptop", Now: now},
+		Sweep:       application.Sweep{Tracker: apptest.NewFakeTracker(), Host: "laptop", Now: now},
 		Reach:       r.reach,
 		Watch:       r.watching,
 		Log:         r.log,
