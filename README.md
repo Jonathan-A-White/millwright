@@ -554,7 +554,7 @@ bd reclaim mw-gq6.30                                        # or take it over fi
 ### What a host is told
 
 `~/.config/mw/config.toml`, with `MW_VAULT`, `MW_HOST`, `MW_CAP` and
-`MW_HOST_SILENT_HOURS`, `MW_STALE_HOURS`, `MW_HANDOFF_AT`, `MW_RIG_MEMORY_BYTES`,
+`MW_HOST_SILENT_HOURS`, `MW_HANDOFF_AT`, `MW_RIG_MEMORY_BYTES`,
 `MW_DISPATCH_SYNC_TRIES`, `MW_DISPATCH_SYNC_WAIT`, `MW_PUSH_TRIES`,
 `MW_PUSH_WAIT_SECONDS`, `MW_MAX_ATTEMPTS`,
 `MW_MILLHAND_ROUTINE_MODEL`, `MW_MILLHAND_REVIEW_MODEL`,
@@ -567,7 +567,6 @@ vault = "/root/millwright-vault"   # the one beads database and the seats
 host  = "vps"                      # which of the factory's hosts this is
 cap   = 1                          # sessions running here at once (default 1)
 host_silent_hours = 2              # how long another host may go unsynced (default 2)
-stale_hours = 2                    # how long a session may print nothing new before mw sweep calls it stuck (default 2)
 handoff_at = 180000                # the context size, in tokens, at which mw seat context says handoff (default 180000)
 rig_memory_bytes = 8000            # how large the Builder's memory of one rig may grow before mw status says prune (default 8000)
 dispatch_sync_tries = 3            # how many times mw dispatch tries its sync when a name cannot be resolved (default 3)
@@ -1284,38 +1283,28 @@ bin/mw sweep
 ```
 
 `mw sweep` takes no arguments and is for a host to run on itself, by hand or on
-a timer, to find the stories it has claimed whose session is no longer doing
-anything. It reads the stories this host has claimed, asks the runner whether
-each one's tmux session is still there, and reads the last twenty lines that
-session printed. It costs no tokens and starts no session.
+a timer, to find the stories it has claimed whose session has gone away. It
+reads the stories this host has claimed and asks the tracker which of them
+StaleClaims lists: a claim whose lease — five minutes, bd's own fixed TTL —
+ran out with no heartbeat since. It costs no tokens and starts no session.
 
-- A claimed story whose session is **gone** is stuck at once.
-- A session that is still there but has printed **nothing new** for longer than
-  the stale threshold is stuck too. Every session is owed one full threshold
-  before it is called that. The clock starts at the claim when bd says when that
-  was, and at sweep's first look when it does not; a session whose output has
-  changed since the last sweep has its clock reset.
-- A stuck story is commented on once, saying what was found, and recorded
-  `run=stuck`, which `mw status` then shows as `NOT RUNNING`. A story that
-  `mw next` or an earlier sweep already recorded gone is left alone, so sweeping
-  twice comments once.
+A found story is commented on once, saying when its lease expired, and
+recorded `run=stuck`, which `mw status` then shows as `NOT RUNNING`. A story
+that `mw next` or an earlier sweep already recorded gone is left alone, so
+sweeping twice comments once.
 
-The threshold is `stale_hours` in the config file or `MW_STALE_HOURS`: whole
-hours, at least 1, two by default. Along with `vault` and `host`, that is all
-`mw sweep` reads from the config.
+`mw next` itself heartbeats a claimed story's lease every two minutes for as
+long as its session is running, so a session actually at work never goes
+stale; StaleClaims is left to report only a session that really has gone
+away. Along with `vault` and `host`, that is all `mw sweep` reads from the
+config.
 
-The only things sweep writes are those comments, `run=stuck` on the story's own
-bead, and one note per claimed story in bd's key-value store (`sweep.<id>`: a
-fingerprint of the session's output and when it was first seen), which is how a
-sweep with no daemon remembers anything between runs. The memory is a note, not
-state on the story, because every `bd set-state` files a closed event bead that
-syncs to the other host, and a sweep every few minutes would file two per story
-per pass; `run=stuck` is a state because that one is an event worth keeping, and
-the note is cleared when it is recorded. Sweep never kills or restarts a session,
-never gives a claim back, and never touches a worktree, git or the ledger:
-settling a stuck claim is a separate command. One story's trouble — a session
-that cannot be asked about, a write that fails — is reported on a `!` line and
-the rest are still examined. See `features/sweep.feature`.
+The only things sweep writes are those comments and `run=stuck` on the
+story's own bead. Sweep never kills or restarts a session, never gives a
+claim back, and never touches a worktree, git or the ledger: settling a stuck
+claim is a separate command. One story's trouble — a write that fails — is
+reported on a `!` line and the rest are still examined. See
+`features/sweep.feature`.
 
 ## Asking a seat how full its session is
 
