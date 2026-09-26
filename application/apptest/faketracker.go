@@ -135,13 +135,17 @@ type epicFacts struct {
 
 // fakeStory is one story as the fake remembers it.
 type fakeStory struct {
-	detail      application.StoryDetail
-	metadata    map[string]string
-	states      map[string]string
-	reasons     map[string]string // dimension -> why it was last set
-	needs       []string
-	comments    []string
-	closeReason string
+	detail   application.StoryDetail
+	metadata map[string]string
+	states   map[string]string
+	reasons  map[string]string // dimension -> why it was last set
+	needs    []string
+	comments []string
+	// commentTimes is comments' own timestamps, index for index; a comment
+	// left through CommentOnStory rather than CommentOnStoryAt carries the
+	// zero time, same as a real tracker asked for one it never recorded.
+	commentTimes []time.Time
+	closeReason  string
 }
 
 // NewFakeTracker returns an empty fake work tracker.
@@ -236,6 +240,16 @@ func (f *FakeTracker) SetPriority(id string, priority int) error {
 func (f *FakeTracker) SetStatus(id, status string) error {
 	return f.write(id, func(s *fakeStory) error {
 		s.detail.Status = status
+		return nil
+	})
+}
+
+// SetDescription sets the description a story reports, as ShowEpic(s) and
+// ShowStory already carry it from a real bd show: a reader gets it straight
+// off StoryDetail, no further call.
+func (f *FakeTracker) SetDescription(id, description string) error {
+	return f.write(id, func(s *fakeStory) error {
+		s.detail.Description = description
 		return nil
 	})
 }
@@ -443,7 +457,8 @@ func (f *FakeTracker) Writes() int {
 }
 
 // StoryComments implements application.WorkTracker. The fake keeps only what a
-// comment said, so each comes back from the actor, without a time.
+// comment said, so each comes back from the actor, with the zero time unless
+// CommentOnStoryAt gave it one.
 func (f *FakeTracker) StoryComments(_ context.Context, id string) ([]application.Comment, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -455,14 +470,20 @@ func (f *FakeTracker) StoryComments(_ context.Context, id string) ([]application
 		return nil, f.Err
 	}
 	texts := f.epicSaid[id]
+	var times []time.Time
 	if s, ok := f.stories[id]; ok {
 		texts = s.comments
+		times = s.commentTimes
 	} else if _, epic := f.defaults[id]; !epic {
 		return nil, fmt.Errorf("no story %q", id)
 	}
 	comments := make([]application.Comment, 0, len(texts))
-	for _, text := range texts {
-		comments = append(comments, application.Comment{Author: Actor, Text: text})
+	for i, text := range texts {
+		var at time.Time
+		if i < len(times) {
+			at = times[i]
+		}
+		comments = append(comments, application.Comment{Author: Actor, Text: text, Created: at})
 	}
 	return comments, nil
 }
@@ -1079,6 +1100,18 @@ func (f *FakeTracker) OpenSteps(_ context.Context, moleculeID string) ([]applica
 func (f *FakeTracker) CommentOnStory(_ context.Context, id, text string) error {
 	return f.write(id, func(s *fakeStory) error {
 		s.comments = append(s.comments, text)
+		s.commentTimes = append(s.commentTimes, time.Time{})
+		return nil
+	})
+}
+
+// CommentOnStoryAt is CommentOnStory with an explicit time, for a fixture that
+// needs a comment's own timestamp back — a snapshot's newest three, for
+// instance.
+func (f *FakeTracker) CommentOnStoryAt(id, text string, at time.Time) error {
+	return f.write(id, func(s *fakeStory) error {
+		s.comments = append(s.comments, text)
+		s.commentTimes = append(s.commentTimes, at)
 		return nil
 	})
 }
