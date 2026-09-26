@@ -697,10 +697,13 @@ key. See `features/postern_key.feature`.
 
 `mw postern snapshot` writes the brief of every live epic (open or in
 progress) as postern's docs/protocol.md §7 JSON: each epic's children still
-waiting on a decision-needed question (`needs_you`), closed in the last 7 days
-and not yet marked `VERIFIED` on a comment (`landed`), in progress then open
-and unblocked by priority (`working`), and how many are neither
-(`closed_count`). It encrypts that JSON to `postern_governor_key` and writes it
+waiting on a decision-needed question (`needs_you`), closed in the last 24
+hours and not yet marked `VERIFIED` on a comment (`landed`), in progress then
+open and unblocked by priority (`working`), and how many are closed in all
+(`closed_count`, kept as a running total even of what `landed` also lists). A
+`needs_you`, `working` or `landed` entry also carries the bead's description
+and newest three comments, each cut to 4000 runes with a trailing marker. It
+encrypts that JSON to `postern_governor_key` and writes it
 atomically — a temp file, then renamed into place — to `postern_snapshot_path`
 (default `~/.local/state/mw/snapshot.bin`), the file nginx serves to the
 Governor's app. `--json` prints the plaintext instead of writing anything, for

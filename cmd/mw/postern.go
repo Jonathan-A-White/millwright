@@ -283,10 +283,12 @@ func newPosternSnapshotCmd() *cobra.Command {
 		Short: "Write the encrypted snapshot of every live epic for the Governor's app",
 		Long: "snapshot builds postern's docs/protocol.md section 7 JSON of every epic open or in\n" +
 			"progress: each epic's children still waiting on a decision-needed question\n" +
-			"(needs_you), closed in the last 7 days and not yet marked VERIFIED on a comment\n" +
+			"(needs_you), closed in the last 24 hours and not yet marked VERIFIED on a comment\n" +
 			"(landed), in progress then open and unblocked by priority (working), and how many\n" +
-			"are neither (closed_count). It encrypts that JSON to postern_governor_key and writes\n" +
-			"it atomically to postern_snapshot_path (default ~/.local/state/mw/snapshot.bin).\n\n" +
+			"are closed in all (closed_count). A needs_you, working or landed entry carries the\n" +
+			"bead's description and newest three comments too, each cut to 4000 runes. It\n" +
+			"encrypts that JSON to postern_governor_key and writes it atomically to\n" +
+			"postern_snapshot_path (default ~/.local/state/mw/snapshot.bin).\n\n" +
 			"--json prints the plaintext instead of writing anything, for inspection.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
