@@ -110,6 +110,12 @@ const (
 // to see what broke, not so much that a bead becomes a log file.
 const CheckLines = 40
 
+// HeartbeatInterval is how often Heartbeat renews a claimed story's lease for
+// as long as its session is running: comfortably inside bd's fixed five-
+// minute lease (LeaseTTL, infrastructure/beads), so the lease a claim starts
+// with never lapses mid-session.
+const HeartbeatInterval = 2 * time.Minute
+
 // UncommittedShort is how many of the paths a session left uncommitted are
 // named in the one-line reason a story is stopped for, which is what the ledger
 // and the run state carry; UncommittedListed is how many the comment and the
@@ -156,6 +162,11 @@ type Next struct {
 	// worked here: a claim with no session behind it is a session that went
 	// away. A nil Runner skips that check.
 	Runner Runner
+
+	// HeartbeatWait is how Heartbeat waits between ticks: the real clock,
+	// unless a test replaces it to move time without truly waiting for it.
+	// A nil HeartbeatWait waits for real.
+	HeartbeatWait func(ctx context.Context, d time.Duration) error
 
 	// Memory is where mw sweep remembers what it saw of a story's last session,
 	// cleared when a close-out sends the story back to a fresh session of its
@@ -352,6 +363,48 @@ func (n Next) closeSession(ctx context.Context, report NextReport) {
 	if err := n.Runner.Close(ctx, name); err != nil {
 		n.print(fmt.Sprintf("  note    the session %s could not be closed: %v\n", name, err))
 	}
+}
+
+// Heartbeat renews storyID's claim's lease every HeartbeatInterval for as
+// long as its session is still running, so that the lease bd's fixed five-
+// minute TTL grants at claim never lapses while the Builder is still at
+// work: it is mw next itself, run alongside the Builder's own session from
+// the moment it starts to the moment it ends, at zero tokens and with no
+// daemon. It returns once the session is no longer running, or ctx is
+// cancelled, whichever comes first — neither is an error, since both are the
+// ordinary way this loop ends. A heartbeat that fails is a note on Out, and
+// does not stop the loop: the very next tick may renew the lease, and one
+// truly lost is StaleClaims's and ReclaimStory's to settle, not this loop's.
+func (n Next) Heartbeat(ctx context.Context, storyID string) error {
+	if n.Tracker == nil || n.Runner == nil {
+		return fmt.Errorf("heartbeating %s: it needs a work tracker and a runner to watch its session", storyID)
+	}
+	name := SessionName(storyID)
+	for {
+		if err := n.wait(ctx, HeartbeatInterval); err != nil {
+			return nil
+		}
+		status, err := n.Runner.Status(ctx, name)
+		if err != nil {
+			return fmt.Errorf("heartbeating %s: its session %s could not be asked about: %w", storyID, name, err)
+		}
+		if !status.Running() {
+			return nil
+		}
+		if err := n.Tracker.HeartbeatClaim(ctx, storyID); err != nil {
+			n.print(fmt.Sprintf("mw next: the claim on %s could not be heartbeated: %v\n", storyID, err))
+		}
+	}
+}
+
+// wait pauses for d, or until ctx ends, whichever is first — the real clock,
+// unless HeartbeatWait says otherwise, which is how a test moves time without
+// truly waiting for it.
+func (n Next) wait(ctx context.Context, d time.Duration) error {
+	if n.HeartbeatWait != nil {
+		return n.HeartbeatWait(ctx, d)
+	}
+	return waitFor(ctx, d)
 }
 
 // closeOut is Run without the printing.

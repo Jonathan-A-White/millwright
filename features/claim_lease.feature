@@ -55,3 +55,11 @@ Feature: A claim is a lease
     When the story "mw-gq6.1" is claimed at 10:01
     Then the claim fails because "mw@laptop" holds the story
     And the story "mw-gq6.1" is held by "mw@laptop" with a lease until 10:05
+
+  Scenario: A session that runs 7 minutes keeps its claim's lease alive
+    Given the story "mw-gq6.1" is claimed at 10:00
+    And the session of "mw-gq6.1" is running
+    When mw next heartbeats "mw-gq6.1" while its session runs for 7 minutes
+    Then the story "mw-gq6.1" was heartbeated at least every 2 minutes
+    And the story "mw-gq6.1" was never among the stale claims while its session ran
+    And the stale claims at 10:07 are ""

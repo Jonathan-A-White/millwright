@@ -16,6 +16,7 @@ import (
 // spoken about, and the stories the last listing returned.
 type readyContext struct {
 	tracker  *apptest.FakeTracker
+	runner   *apptest.FakeRunner
 	lastEpic string
 	listed   []application.StoryDetail
 	err      error
@@ -28,7 +29,7 @@ func InitializeReadyStoriesScenario(ctx *godog.ScenarioContext) {
 	c := &readyContext{}
 
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
-		*c = readyContext{tracker: apptest.NewFakeTracker()}
+		*c = readyContext{tracker: apptest.NewFakeTracker(), runner: apptest.NewFakeRunner()}
 		return ctx, nil
 	})
 

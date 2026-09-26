@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +25,33 @@ type leaseWorld struct {
 	claimErr  error
 	beatErr   error
 	reclaimed bool
+
+	// claimedAt, heartbeats and staleSeen are what
+	// "mw next heartbeats ... while its session runs" leaves behind: when the
+	// story was last claimed, the simulated time of each successful
+	// HeartbeatClaim, and whether the story was ever found among the stale
+	// claims while it ran.
+	claimedAt  time.Time
+	heartbeats []time.Time
+	staleSeen  bool
+}
+
+// heartbeatSpy is a WorkTracker that records the simulated time of every
+// successful HeartbeatClaim it makes, into seen, so a scenario can check the
+// gaps between them without the fake tracker itself having to know about
+// simulated time.
+type heartbeatSpy struct {
+	*apptest.FakeTracker
+	seen *[]time.Time
+	now  func() time.Time
+}
+
+func (h heartbeatSpy) HeartbeatClaim(ctx context.Context, id string) error {
+	if err := h.FakeTracker.HeartbeatClaim(ctx, id); err != nil {
+		return err
+	}
+	*h.seen = append(*h.seen, h.now())
+	return nil
 }
 
 // registerClaimLeaseSteps registers the steps of features/claim_lease.feature.
@@ -44,6 +72,11 @@ func registerClaimLeaseSteps(ctx *godog.ScenarioContext, c *readyContext) {
 	ctx.Then(`^the heartbeat fails$`, c.theHeartbeatFails)
 	ctx.Then(`^the claim fails because "([^"]*)" holds the story$`, c.theClaimFailsBecauseHeld)
 	ctx.Then(`^the story "([^"]*)" is held by "([^"]*)" with a lease until (\d\d:\d\d)$`, c.theStoryIsStillHeldBy)
+
+	ctx.Given(`^the session of "([^"]*)" is running$`, c.theSessionIsRunning)
+	ctx.When(`^mw next heartbeats "([^"]*)" while its session runs for (\d+) minutes?$`, c.mwNextHeartbeatsWhileItsSessionRunsForMinutes)
+	ctx.Then(`^the story "([^"]*)" was heartbeated at least every (\d+) minutes?$`, c.theStoryWasHeartbeatedAtLeastEveryMinutes)
+	ctx.Then(`^the story "([^"]*)" was never among the stale claims while its session ran$`, c.theStoryWasNeverAmongTheStaleClaims)
 }
 
 // at sets the fake tracker's clock to a time of day on leaseDay.
@@ -61,6 +94,7 @@ func (c *readyContext) theStoryIsClaimedAt(id, clock string) error {
 	if _, err := c.at(clock); err != nil {
 		return err
 	}
+	c.lease.claimedAt = c.lease.now
 	return c.tracker.ClaimStory(context.Background(), id)
 }
 
@@ -190,6 +224,84 @@ func (c *readyContext) theClaimFailsBecauseHeld(holder string) error {
 	}
 	if held.Holder != holder {
 		return fmt.Errorf("expected the claim to name %s as the holder, got %s", holder, held.Holder)
+	}
+	return nil
+}
+
+func (c *readyContext) theSessionIsRunning(id string) error {
+	return c.runner.Start(context.Background(), application.SessionSpec{
+		Name:    application.SessionName(id),
+		Command: []string{"true"},
+	})
+}
+
+// mwNextHeartbeatsWhileItsSessionRunsForMinutes drives application.Next's
+// Heartbeat with a clock that advances, on every wait, by exactly the wait it
+// was asked for — so a session "running" for minutes never really waits, but
+// the fake tracker's clock moves precisely as it would if it did. The
+// session's runner session is ended, as if the Builder's harness had just
+// exited, once the simulated clock reaches minutes past when the loop
+// started waiting; the very next check of the session then stops the loop,
+// exactly as a real session ending does.
+func (c *readyContext) mwNextHeartbeatsWhileItsSessionRunsForMinutes(id, minutesText string) error {
+	minutes, err := strconv.Atoi(minutesText)
+	if err != nil {
+		return fmt.Errorf("parsing %q as minutes: %w", minutesText, err)
+	}
+	name := application.SessionName(id)
+	ends := c.lease.now.Add(time.Duration(minutes) * time.Minute)
+	c.lease.heartbeats = nil
+	c.lease.staleSeen = false
+
+	spy := heartbeatSpy{FakeTracker: c.tracker, seen: &c.lease.heartbeats, now: func() time.Time { return c.lease.now }}
+
+	n := application.Next{
+		Tracker: spy,
+		Runner:  c.runner,
+		HeartbeatWait: func(ctx context.Context, d time.Duration) error {
+			c.lease.now = c.lease.now.Add(d)
+			c.tracker.Clock = func() time.Time { return c.lease.now }
+			stale, err := c.tracker.StaleClaims(ctx, c.lease.now)
+			if err != nil {
+				return err
+			}
+			for _, s := range stale {
+				if s.Story.ID == id {
+					c.lease.staleSeen = true
+				}
+			}
+			if !c.lease.now.Before(ends) {
+				c.runner.Exit(name, 0)
+			}
+			return nil
+		},
+	}
+	return n.Heartbeat(context.Background(), id)
+}
+
+func (c *readyContext) theStoryWasHeartbeatedAtLeastEveryMinutes(id, minutesText string) error {
+	minutes, err := strconv.Atoi(minutesText)
+	if err != nil {
+		return fmt.Errorf("parsing %q as minutes: %w", minutesText, err)
+	}
+	interval := time.Duration(minutes) * time.Minute
+	if len(c.lease.heartbeats) == 0 {
+		return fmt.Errorf("expected %s to have been heartbeated, and it never was", id)
+	}
+	last := c.lease.claimedAt
+	for _, at := range c.lease.heartbeats {
+		if at.Sub(last) > interval {
+			return fmt.Errorf("expected %s to be heartbeated at least every %s, but %s passed between %s and %s",
+				id, interval, at.Sub(last), last.Format("15:04"), at.Format("15:04"))
+		}
+		last = at
+	}
+	return nil
+}
+
+func (c *readyContext) theStoryWasNeverAmongTheStaleClaims(id string) error {
+	if c.lease.staleSeen {
+		return fmt.Errorf("expected %s never to be among the stale claims while its session ran, and it was", id)
 	}
 	return nil
 }
