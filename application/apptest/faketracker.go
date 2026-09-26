@@ -96,6 +96,12 @@ type FakeTracker struct {
 	// test can say a story's comments were never read.
 	commentReads map[string]int
 
+	// noteReads and noteWrites count each call to Note and to SetNote, by key,
+	// so that a test can say a note was read once and written only when its
+	// content changed.
+	noteReads  map[string]int
+	noteWrites map[string]int
+
 	// showEpicsCalls counts each call to ShowEpics, and storiesCommentsCalls
 	// each call to StoriesComments, so that a test can say a batch of epics or
 	// stories was read in one tracker call rather than one per epic or story.
@@ -1205,6 +1211,10 @@ func (f *FakeTracker) PackChecks() int {
 func (f *FakeTracker) Note(_ context.Context, key string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.noteReads == nil {
+		f.noteReads = map[string]int{}
+	}
+	f.noteReads[key]++
 	if f.Err != nil {
 		return "", f.Err
 	}
@@ -1221,9 +1231,29 @@ func (f *FakeTracker) SetNote(_ context.Context, key, value string) error {
 	if key == "" {
 		return fmt.Errorf("a note needs a key")
 	}
+	if f.noteWrites == nil {
+		f.noteWrites = map[string]int{}
+	}
+	f.noteWrites[key]++
 	f.writes++
 	f.notes[key] = value
 	return nil
+}
+
+// NoteReads reports how many times Note was called for key, so that a test
+// can say a note was read once per Build rather than once per candidate.
+func (f *FakeTracker) NoteReads(key string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.noteReads[key]
+}
+
+// NoteWrites reports how many times SetNote was called for key, so that a
+// test can say a note already matching what would be written was left alone.
+func (f *FakeTracker) NoteWrites(key string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.noteWrites[key]
 }
 
 // NotesWithPrefix implements application.DoctorNotes.

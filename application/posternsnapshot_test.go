@@ -472,6 +472,186 @@ func TestPosternSnapshotNeverReadsALandedChildsCommentsWhenItHasNone(t *testing.
 	}
 }
 
+// TestPosternSnapshotRemembersALandedCandidatesVerdictBetweenBuilds covers
+// mw-tfne4.27's AC1: a second Build over an unchanged listing must not read a
+// landed candidate's comments again once its comment_count and verdict are
+// already remembered, and must classify it exactly as the first Build did.
+func TestPosternSnapshotRemembersALandedCandidatesVerdictBetweenBuilds(t *testing.T) {
+	tracker := aSnapshotTracker()
+	tracker.AddEpic("mw-a", domain.Path{})
+	tracker.DescribeEpic("mw-a", "Epic A", apptest.StatusOpen, 1)
+	addChild(tracker, "mw-a", "mw-a.1", "Landed recently, commented on")
+	closeLanded(t, tracker, "mw-a.1", snapshotNow.Add(-3*24*time.Hour))
+	if err := tracker.CommentOnStory(context.Background(), "mw-a.1", "shipped fine"); err != nil {
+		t.Fatalf("commenting on mw-a.1: %v", err)
+	}
+
+	first := snapshotDoc(t, tracker)
+	a := epicOf(t, first, "mw-a")
+	if len(a.Landed) != 1 || a.Landed[0].ID != "mw-a.1" {
+		t.Fatalf("expected the first build to land mw-a.1, got %+v", a.Landed)
+	}
+	if got := tracker.CommentReads("mw-a.1"); got != 1 {
+		t.Fatalf("expected the first build to read mw-a.1's comments once, got %d", got)
+	}
+
+	second := snapshotDoc(t, tracker)
+	b := epicOf(t, second, "mw-a")
+	if len(b.Landed) != 1 || b.Landed[0].ID != "mw-a.1" {
+		t.Fatalf("expected the second build to classify mw-a.1 the same way, got %+v", b.Landed)
+	}
+	if got := tracker.CommentReads("mw-a.1"); got != 1 {
+		t.Fatalf("expected the second build to remember mw-a.1's verdict rather than rereading its comments, got %d total reads", got)
+	}
+}
+
+// TestPosternSnapshotRereadsALandedCandidateWhoseCommentCountRose covers
+// mw-tfne4.27's AC2: a risen comment_count invalidates the remembered
+// verdict, so it is read again; once that read finds
+// PosternSnapshotVerifiedMarker, the candidate drops out of landed, and that
+// new verdict is itself remembered without a further read.
+func TestPosternSnapshotRereadsALandedCandidateWhoseCommentCountRose(t *testing.T) {
+	tracker := aSnapshotTracker()
+	tracker.AddEpic("mw-a", domain.Path{})
+	tracker.DescribeEpic("mw-a", "Epic A", apptest.StatusOpen, 1)
+	addChild(tracker, "mw-a", "mw-a.1", "Landed recently, commented on")
+	closeLanded(t, tracker, "mw-a.1", snapshotNow.Add(-3*24*time.Hour))
+	if err := tracker.CommentOnStory(context.Background(), "mw-a.1", "shipped fine"); err != nil {
+		t.Fatalf("commenting on mw-a.1: %v", err)
+	}
+
+	first := snapshotDoc(t, tracker)
+	a := epicOf(t, first, "mw-a")
+	if len(a.Landed) != 1 || a.Landed[0].ID != "mw-a.1" {
+		t.Fatalf("expected the first build to land mw-a.1, got %+v", a.Landed)
+	}
+
+	// A VERIFIED comment lands after the first build: comment_count rises.
+	if err := tracker.CommentOnStory(context.Background(), "mw-a.1", "VERIFIED GOOD, live on the VPS"); err != nil {
+		t.Fatalf("verifying mw-a.1: %v", err)
+	}
+
+	second := snapshotDoc(t, tracker)
+	b := epicOf(t, second, "mw-a")
+	if len(b.Landed) != 0 {
+		t.Fatalf("expected mw-a.1 to drop out of landed once verified, got %+v", b.Landed)
+	}
+	if got := tracker.CommentReads("mw-a.1"); got != 2 {
+		t.Fatalf("expected the risen comment_count to trigger a fresh read, got %d total reads", got)
+	}
+
+	// A third build with nothing further changed must not read it again: the
+	// verified verdict is itself remembered.
+	third := snapshotDoc(t, tracker)
+	c := epicOf(t, third, "mw-a")
+	if len(c.Landed) != 0 {
+		t.Fatalf("expected mw-a.1 to stay out of landed, got %+v", c.Landed)
+	}
+	if got := tracker.CommentReads("mw-a.1"); got != 2 {
+		t.Fatalf("expected a verified candidate's memory to stick without a further read, got %d total reads", got)
+	}
+}
+
+// TestPosternSnapshotDropsAMemoryEntryOnceItsIdLeavesTheWindow covers
+// mw-tfne4.27's AC2: a landed candidate's memory entry must not survive in
+// the note once it ages out of PosternSnapshotWindow.
+func TestPosternSnapshotDropsAMemoryEntryOnceItsIdLeavesTheWindow(t *testing.T) {
+	tracker := aSnapshotTracker()
+	tracker.AddEpic("mw-a", domain.Path{})
+	tracker.DescribeEpic("mw-a", "Epic A", apptest.StatusOpen, 1)
+	addChild(tracker, "mw-a", "mw-a.1", "Landed recently, commented on")
+	closeLanded(t, tracker, "mw-a.1", snapshotNow.Add(-3*24*time.Hour))
+	if err := tracker.CommentOnStory(context.Background(), "mw-a.1", "shipped fine"); err != nil {
+		t.Fatalf("commenting on mw-a.1: %v", err)
+	}
+
+	build := func(now time.Time) {
+		t.Helper()
+		_, err := application.PosternSnapshot{
+			Tracker: tracker,
+			Notes:   tracker,
+			Now:     func() time.Time { return now },
+		}.Build(context.Background())
+		if err != nil {
+			t.Fatalf("building the snapshot: %v", err)
+		}
+	}
+
+	build(snapshotNow)
+	raw, err := tracker.Note(context.Background(), application.PosternSnapshotMemoryKey)
+	if err != nil {
+		t.Fatalf("reading the memory note: %v", err)
+	}
+	if !strings.Contains(raw, "mw-a.1") {
+		t.Fatalf("expected the memory to remember mw-a.1 after the first build, got %q", raw)
+	}
+
+	// Nine days later mw-a.1 has aged out of the 7-day landed window.
+	build(snapshotNow.Add(9 * 24 * time.Hour))
+	raw, err = tracker.Note(context.Background(), application.PosternSnapshotMemoryKey)
+	if err != nil {
+		t.Fatalf("reading the memory note: %v", err)
+	}
+	if strings.Contains(raw, "mw-a.1") {
+		t.Fatalf("expected mw-a.1 to be dropped from the memory once it left the window, got %q", raw)
+	}
+}
+
+// TestPosternSnapshotLandedMemoryIsOneNoteReadOnceAndWrittenOnlyWhenChanged
+// covers mw-tfne4.27's AC3: the memory is kept as one note, read once per
+// Build, and rewritten only when its content actually changed.
+func TestPosternSnapshotLandedMemoryIsOneNoteReadOnceAndWrittenOnlyWhenChanged(t *testing.T) {
+	tracker := aSnapshotTracker()
+	tracker.AddEpic("mw-a", domain.Path{})
+	tracker.DescribeEpic("mw-a", "Epic A", apptest.StatusOpen, 1)
+	addChild(tracker, "mw-a", "mw-a.1", "Landed recently, commented on")
+	closeLanded(t, tracker, "mw-a.1", snapshotNow.Add(-3*24*time.Hour))
+	if err := tracker.CommentOnStory(context.Background(), "mw-a.1", "shipped fine"); err != nil {
+		t.Fatalf("commenting on mw-a.1: %v", err)
+	}
+
+	snapshotDoc(t, tracker)
+	if got := tracker.NoteReads(application.PosternSnapshotMemoryKey); got != 1 {
+		t.Fatalf("expected the memory note to be read once, got %d", got)
+	}
+	if got := tracker.NoteWrites(application.PosternSnapshotMemoryKey); got != 1 {
+		t.Fatalf("expected the first build to write the memory note once, got %d", got)
+	}
+
+	snapshotDoc(t, tracker)
+	if got := tracker.NoteReads(application.PosternSnapshotMemoryKey); got != 2 {
+		t.Fatalf("expected the second build to read the memory note once more, got %d", got)
+	}
+	if got := tracker.NoteWrites(application.PosternSnapshotMemoryKey); got != 1 {
+		t.Fatalf("expected the second build, seeing nothing changed, to write the memory note no further, got %d", got)
+	}
+}
+
+// TestPosternSnapshotBuildsWithAMissingOrUnreadableMemoryNote covers
+// mw-tfne4.27's AC3: a note that does not parse means remember nothing, and
+// Build still succeeds, reading the affected candidate's comments fresh.
+func TestPosternSnapshotBuildsWithAMissingOrUnreadableMemoryNote(t *testing.T) {
+	tracker := aSnapshotTracker()
+	tracker.AddEpic("mw-a", domain.Path{})
+	addChild(tracker, "mw-a", "mw-a.1", "Landed recently, commented on")
+	closeLanded(t, tracker, "mw-a.1", snapshotNow.Add(-3*24*time.Hour))
+	if err := tracker.CommentOnStory(context.Background(), "mw-a.1", "shipped fine"); err != nil {
+		t.Fatalf("commenting on mw-a.1: %v", err)
+	}
+	if err := tracker.SetNote(context.Background(), application.PosternSnapshotMemoryKey, "not valid json"); err != nil {
+		t.Fatalf("seeding an unreadable memory note: %v", err)
+	}
+
+	doc := snapshotDoc(t, tracker)
+	a := epicOf(t, doc, "mw-a")
+	if len(a.Landed) != 1 || a.Landed[0].ID != "mw-a.1" {
+		t.Fatalf("expected an unreadable memory note to be treated as remembering nothing, got %+v", a.Landed)
+	}
+	if got := tracker.CommentReads("mw-a.1"); got != 1 {
+		t.Fatalf("expected mw-a.1's comments to be read since memory held nothing usable, got %d", got)
+	}
+}
+
 func equalStrings(got, want []string) bool {
 	if len(got) != len(want) {
 		return false
