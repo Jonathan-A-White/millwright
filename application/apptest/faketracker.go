@@ -1096,8 +1096,22 @@ func (f *FakeTracker) OpenSteps(_ context.Context, moleculeID string) ([]applica
 	return open, nil
 }
 
-// CommentOnStory implements application.WorkTracker.
+// CommentOnStory implements application.WorkTracker. An id that names a story
+// is written there, as always; an id that names an epic with no story entry
+// of its own — one filed with AddEpic and never also added as a story — is
+// written to the epic's own comments (StoryComments already reads these
+// back), so a question or an answer can land on an epic bead directly.
 func (f *FakeTracker) CommentOnStory(_ context.Context, id, text string) error {
+	f.mu.Lock()
+	if _, isStory := f.stories[id]; !isStory {
+		if _, isEpic := f.defaults[id]; isEpic {
+			f.epicSaid[id] = append(f.epicSaid[id], text)
+			f.writes++
+			f.mu.Unlock()
+			return nil
+		}
+	}
+	f.mu.Unlock()
 	return f.write(id, func(s *fakeStory) error {
 		s.comments = append(s.comments, text)
 		s.commentTimes = append(s.commentTimes, time.Time{})
