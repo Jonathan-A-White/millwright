@@ -243,6 +243,17 @@ func (b SeatBoot) Rebase(ctx context.Context, detail StoryDetail, dir, onto stri
 	})
 }
 
+// MergeFix assembles a fresh session for a story whose branch merges into its
+// target branch without conflicts but whose merged result fails the rig's
+// tests: booted into the same seat, in the same worktree — which already has
+// onto merged into it — and told to fix the failing tests rather than to work
+// the story again.
+func (b SeatBoot) MergeFix(ctx context.Context, detail StoryDetail, dir, onto string) (SessionSpec, error) {
+	return b.boot(ctx, detail, dir, func(vaultDir string) string {
+		return MergeFixKickoffPrompt(b.Seat, detail.Story.ID, vaultDir, onto)
+	})
+}
+
 // boot is Boot with the first thing the session is told left to the caller,
 // given the vault's directory on this host.
 func (b SeatBoot) boot(ctx context.Context, detail StoryDetail, dir string, kickoff func(vaultDir string) string) (SessionSpec, error) {
@@ -403,6 +414,32 @@ func RebaseKickoffPrompt(seat, storyID, vaultDir, onto string) string {
 		"When you end, mw next lands the branch; if it still conflicts it stops, and nobody is sent back again. "+
 		"This session is headless and ends when your turn ends: run the suite in the foreground "+
 		"and wait for it, never in the background, and commit before you stop.", seat, storyID, onto, onto, bdVault(vaultDir), storyID)
+}
+
+// MergeFixKickoffPrompt is the first thing a session sent back to fix the
+// merged tests is told. The story's work is done, its formula's steps are
+// closed and its branch already has onto merged into it, without conflicts;
+// what is left is why the merged result fails the rig's tests.
+func MergeFixKickoffPrompt(seat, storyID, vaultDir, onto string) string {
+	return fmt.Sprintf("You are booted into the %s seat of millwright, and your story is %s. "+
+		"Your charter, your memory of this rig and the story itself are in the system prompt you were given. "+
+		"Your worktree is the directory you are in: work only there. "+
+		"The story has been worked and its formula steps are closed, and its branch already has %s merged into it, "+
+		"without conflicts — but the merged result fails the rig's tests. "+
+		"You are sent back once, to fix them: find why the tests fail on the merged result, fix it, "+
+		"run the rig's suite in the foreground until it is green, and commit. "+
+		"Do not push, do not merge again, do not close the story, and work nothing else of it. "+
+		"Your memory of this rig is read-only to you: propose notes under \"For the rig memory:\" in your closing comment. "+
+		"Sign nothing you commit: no Co-Authored-By trailer, no Generated with line, "+
+		"no AI attribution of any kind. "+
+		"bd runs without asking, but as its own Bash call, never chained with another command "+
+		"by ;, | or &&. "+
+		"%s"+
+		"Say on the story, in one comment, what failed and how you fixed it. "+
+		"Once the fix is committed, run `mw check %s` and fix whatever it refuses. "+
+		"When you end, mw next lands the branch; if the merged tests still fail it stops, and nobody is sent back again. "+
+		"This session is headless and ends when your turn ends: run the suite in the foreground "+
+		"and wait for it, never in the background, and commit before you stop.", seat, storyID, onto, bdVault(vaultDir), storyID)
 }
 
 // bdVault is the sentence that gives a session the exact bd command for this

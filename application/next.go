@@ -37,6 +37,19 @@ const (
 	RebaseSentBack = "sent-back"
 )
 
+// MergedTestsState is the state dimension that says a story's branch was sent
+// back to a fresh Builder session to fix the rig's tests, after its branch
+// merged into its target branch without conflicts but the merged result
+// failed them. MergedTestsSentBack is its one value, kept separately from
+// RebaseState because the two send-backs answer different failures and a
+// story may need either on its own. It is on the story, not in a note, for the
+// same reason RebaseState is: a story carrying it whose branch fails the
+// merged tests again is stopped, never sent back again.
+const (
+	MergedTestsState    = "mergedtests"
+	MergedTestsSentBack = "sent-back"
+)
+
 // Reason is the short, stable code a close-out that landed nothing is filed
 // under, so that a person, `mw status` and the Mayor can tell a branch that needs
 // fixing from a factory that does — the free text of the reason says what
@@ -543,12 +556,19 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	}
 	if landErr != nil {
 		kept := n.keepLandingError(ctx, c, report, landErr)
-		if Conflicted(landErr) {
+		switch {
+		case Conflicted(landErr):
 			whyNot := n.sendBack(ctx, c, report, landErr, kept)
 			if whyNot == "" {
 				return *report, nil
 			}
 			kept = "It was not sent back to rebase: " + whyNot + "\n\n" + kept
+		case reasonOf(landErr) == ReasonMergedTestsFail:
+			whyNot := n.sendBackForFailingTests(ctx, c, report, landErr, kept)
+			if whyNot == "" {
+				return *report, nil
+			}
+			kept = "It was not sent back to fix the tests: " + whyNot + "\n\n" + kept
 		}
 		return n.stop(ctx, c, report, reasonOf(landErr), firstLine(landErr.Error()), kept)
 	}
@@ -722,6 +742,97 @@ func (n Next) makeWay(ctx context.Context, name string) (string, error) {
 	return "", nil
 }
 
+// sendBackForFailingTests answers a branch that merges into its target branch
+// without conflicts but whose merged result fails the rig's tests the one time
+// it is allowed to: onto — the target branch as the remote has it — is merged
+// into the story's own branch, in its own worktree, because that merge is
+// already known to have no conflicts and only the tests are left broken; a
+// fresh session of the seat is sent back to find why they fail on the merged
+// result, fix it, run the suite and commit. The mw next it ends with lands it
+// as usual.
+//
+// Once only, and recorded on the story before anything is started, so that it
+// cannot loop: a story already sent back for this reason, or one that cannot be
+// recorded as sent back, is not sent. What it returns is why it was not sent,
+// empty when it was; the close-out then stops as for any merged-tests-fail.
+func (n Next) sendBackForFailingTests(ctx context.Context, c *closeOut, report *NextReport, landErr error, kept string) string {
+	if n.Runner == nil || n.Boot.Harness == nil {
+		return "this mw next has no session to send it back to"
+	}
+	was, err := n.Tracker.StoryState(ctx, c.id, MergedTestsState)
+	if err != nil {
+		return fmt.Sprintf("whether it was sent back before could not be read: %v", err)
+	}
+	if was == MergedTestsSentBack {
+		return "it was sent back once to fix the merged tests already, and a story is sent back only once. The failure is a person's to resolve now"
+	}
+
+	onto := StartPoint(n.remote(), c.target)
+	if _, err := n.Landing.Merge(ctx, c.worktree, onto); err != nil {
+		return fmt.Sprintf("%s could not be merged into the worktree to send it back: %v", onto, err)
+	}
+	spec, err := n.Boot.MergeFix(ctx, c.detail, c.worktree, onto)
+	if err != nil {
+		return fmt.Sprintf("the session to fix the tests could not be assembled: %v", err)
+	}
+	next := c.detail.Attempts + 1
+	if err := n.Tracker.SetStoryState(ctx, c.id, MergedTestsState, MergedTestsSentBack,
+		fmt.Sprintf("sent back as attempt %d to fix the merged tests, %s merged in: %s", next, onto, firstLine(landErr.Error()))); err != nil {
+		return fmt.Sprintf("it could not be recorded as %s=%s, which is what keeps it to once: %v", MergedTestsState, MergedTestsSentBack, err)
+	}
+	aside, err := n.makeWay(ctx, spec.Name)
+	if err != nil {
+		return fmt.Sprintf("the session %s could not be moved out of the way: %v", spec.Name, err)
+	}
+	if err := n.Runner.Start(ctx, spec); err != nil {
+		// The session moved aside gets its name back, so that the story is
+		// left with the session it was worked in, as any stopped story is.
+		if aside != "" {
+			if back := n.Runner.Rename(ctx, aside, spec.Name); back != nil {
+				report.Notes = append(report.Notes, fmt.Sprintf("the session %s could not be given its name %s back: %v", aside, spec.Name, back))
+			}
+		}
+		return fmt.Sprintf("the session %s to fix the tests could not be started: %v", spec.Name, err)
+	}
+	report.Aside = aside
+
+	// From here the fresh session is running and spending fuel: nothing below
+	// undoes it, and what cannot be recorded is a note.
+	if n.Memory != nil {
+		if err := n.Memory.ClearNote(ctx, SweepKey(c.id)); err != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf("what mw sweep remembered of the ended session could not be cleared: %v", err))
+		}
+	}
+	if err := recordAttempt(ctx, n.Tracker, c.detail); err != nil {
+		report.Notes = append(report.Notes, err.Error())
+	}
+	report.SentBack, report.Reason, report.Why = spec.Name, ReasonMergedTestsFail, firstLine(landErr.Error())
+	where := fmt.Sprintf("sent back to fix the merged tests by mw on %s: session %s in %s on %s, %s merged in, attempt %d",
+		n.Host, spec.Name, c.worktree, c.branch, onto, next)
+	note := fmt.Sprintf("mw next on %s did not land this story (%s): %s and %s do not pass the rig's tests together.\n\n"+
+		"%s has been merged into %s in its worktree, since that merge on its own has no conflicts — only the tests fail. "+
+		"It was sent back once, as attempt %d, to a fresh Builder session, %s, in the worktree %s, to find why the "+
+		"tests fail on the merged result, fix it, run the suite and commit. The mw next that session ends with lands "+
+		"it as usual. It is not sent back again: a second failure here stops the close-out and is a person's to "+
+		"resolve. Nothing was pushed.\n\n%s",
+		n.Host, ReasonMergedTestsFail, c.branch, c.target, onto, c.branch, next, spec.Name, c.worktree, kept)
+	if err := n.Tracker.CommentOnStory(ctx, c.id, note); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the send-back could not be written on the story: %v", err))
+	}
+	if err := n.Tracker.SetStoryState(ctx, c.id, RunState, RunRunning, where); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be recorded as %s=%s: %v", c.id, RunState, RunRunning, err))
+	}
+	// The line charges the session that worked the story, whose result the
+	// fresh one will write over; the fresh one is charged by its own line.
+	if err := n.ledger(ctx, c, report, NotLanded(ReasonMergedTestsFail,
+		fmt.Sprintf("sent back as attempt %d to fix the merged tests, %s merged into %s, in session %s", next, onto, c.branch, spec.Name))); err != nil {
+		report.Notes = append(report.Notes, err.Error())
+	}
+	n.commit(ctx, c, report)
+	n.mailTheMayor(ctx, c, report, MailSentBack, note)
+	return ""
+}
+
 // advanceRig brings this host's own checkout of the rig up to the commit just
 // pushed, which the landing — made in a worktree of its own — never touched: a
 // rig left behind is a rig whose rebuilt binary is the old one. A checkout that
@@ -846,8 +957,16 @@ func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all
 		refuse(ReasonTestsNotRun, fmt.Sprintf("the rig's tests could not be run in the worktree: `%s` did not start, so this host is missing something the command needs (a toolchain not on its PATH?)", checked.Command),
 			"The last lines of `"+checked.Command+"` in "+c.worktree+":\n\n```\n"+checked.Tail(CheckLines)+"\n```")
 	case !checked.Passed:
-		refuse(ReasonTestsFail, fmt.Sprintf("the rig's tests fail in the worktree: `%s` did not pass", checked.Command),
-			"The last lines of `"+checked.Command+"` in "+c.worktree+":\n\n```\n"+checked.Tail(CheckLines)+"\n```")
+		reason, why := ReasonTestsFail, fmt.Sprintf("the rig's tests fail in the worktree: `%s` did not pass", checked.Command)
+		// A worktree that already carries the target merged in, because it was
+		// sent back once to fix the merged tests, is the merged result: a
+		// failure here is the same failure again, not a fresh one.
+		if sentBack, _ := n.Tracker.StoryState(ctx, c.id, MergedTestsState); sentBack == MergedTestsSentBack {
+			reason = ReasonMergedTestsFail
+			why = fmt.Sprintf("second merged-tests-fail: %s and %s still do not pass the rig's tests together: `%s` did not pass",
+				c.branch, c.target, checked.Command)
+		}
+		refuse(reason, why, "The last lines of `"+checked.Command+"` in "+c.worktree+":\n\n```\n"+checked.Tail(CheckLines)+"\n```")
 	}
 	return found
 }
@@ -1467,7 +1586,11 @@ func (r NextReport) String() string {
 		fmt.Fprintf(&b, "  landed  %s on %s (%d commits, %d push(es))\n", r.How.LandedAs(r.Target), r.Target, r.Commits, r.Pushes)
 	case r.SentBack != "":
 		fmt.Fprintf(&b, "  SENT BACK (%s) %s\n", r.Reason, r.Why)
-		fmt.Fprintf(&b, "          to %s, a fresh session rebasing onto %s; sent back once, never again\n", r.SentBack, r.Target)
+		if r.Reason == ReasonMergedTestsFail {
+			fmt.Fprintf(&b, "          to %s, a fresh session fixing the merged tests; sent back once, never again\n", r.SentBack)
+		} else {
+			fmt.Fprintf(&b, "          to %s, a fresh session rebasing onto %s; sent back once, never again\n", r.SentBack, r.Target)
+		}
 	default:
 		if r.Reason == "" {
 			fmt.Fprintf(&b, "  STOPPED %s\n", r.Why)
