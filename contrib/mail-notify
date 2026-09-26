@@ -271,6 +271,7 @@ if [ -r "$keyfile" ]; then
 			status=$?
 			if [ "$status" -ne 0 ]; then
 				elapsed=$(($(date +%s) - start))
+				[ "$elapsed" -lt 0 ] && elapsed=0
 				if [ "$status" -eq 124 ]; then
 					say "mw postern snapshot exceeded ${SNAPSHOT_TIMEOUT}s and was killed after ${elapsed}s; not retrying before ${SNAPSHOT_EVERY}s have passed"
 				else
