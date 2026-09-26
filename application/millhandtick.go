@@ -251,6 +251,9 @@ func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err err
 			if note != "" {
 				return joinNotes(alreadyUp(up), []string{note}), false, nil
 			}
+			if line, handled, nudgeErr := t.mailWhileUp(ctx, up); handled {
+				return line, false, nudgeErr
+			}
 			return alreadyUp(up), false, nil
 		}
 		notes = append(notes, note)
@@ -454,6 +457,122 @@ func (t MillhandTick) restart(ctx context.Context, name string) (gone bool, note
 		}
 	}
 	return true, note, told, nil
+}
+
+// mailWhileUp is what a tick does with a Millhand that is up and staying up —
+// not being reaped as finished, nor restarted as stalled — when its box holds
+// unread mail: an idle pane is typed the same wake line the Mayor's own
+// notifier types, so the Millhand reads it without a fresh session; a pane
+// that already holds text on its input line is never typed over, and is left
+// for the Mayor to look at instead, by a doctor note left once. It says
+// whether it decided anything at all: false when there is no mail, or the
+// pane's state cannot be read, and the tick says "already up" as it always
+// has.
+func (t MillhandTick) mailWhileUp(ctx context.Context, name string) (line string, handled bool, err error) {
+	if t.Millhand.Terminal == nil {
+		return "", false, nil
+	}
+	window, there := t.reapWindow(ctx, name)
+	if !there {
+		return "", false, nil
+	}
+	state, err := t.Millhand.Terminal.PaneState(ctx, window.ID)
+	if err != nil || (state != PaneIdle && state != PaneInput) {
+		return "", false, nil
+	}
+
+	mail, mailErr := t.unreadMail(ctx)
+	if mailErr != nil {
+		return "", false, nil
+	}
+	unread := 0
+	for _, group := range mail {
+		unread += len(group.subjects)
+	}
+	if unread == 0 {
+		return "", false, nil
+	}
+
+	if state == PaneInput {
+		return t.reportIdleWithText(ctx, name), true, nil
+	}
+	return t.nudge(ctx, name, window.ID, unread)
+}
+
+// MillhandNudgeFormat is the line a tick types into an idle Millhand's window
+// when its box holds unread mail it has not been told of yet: the same words
+// the Mayor's own notifier (contrib/mail-notify) types, naming the Millhand
+// instead. It carries no trailing newline: Type presses Enter of its own.
+const MillhandNudgeFormat = "New mail for millhand: %d message(s). Run bd mail inbox."
+
+// nudge types the wake line into an idle Millhand's window, once, and says so
+// in the tick's line. A dry run says what it would type and types nothing.
+func (t MillhandTick) nudge(ctx context.Context, name, window string, unread int) (line string, handled bool, err error) {
+	text := fmt.Sprintf(MillhandNudgeFormat, unread)
+	if t.DryRun {
+		return fmt.Sprintf("dry run: would nudge the Millhand's window %s: %s", name, oneLine(text)), true, nil
+	}
+	if typeErr := t.Millhand.Terminal.Type(ctx, window, text); typeErr != nil {
+		note := "could not nudge the Millhand: " + oneLine(typeErr.Error())
+		return joinNotes(alreadyUp(name), []string{note}), true, fmt.Errorf("typing into the window %s: %w", name, typeErr)
+	}
+	return nudgedLine(name, unread), true, nil
+}
+
+func nudgedLine(window string, unread int) string {
+	return fmt.Sprintf("nudged (%s): %s", window, counted(unread, "unread message", "unread messages"))
+}
+
+// MillhandIdleInputCheck is the doctor check name the tick's own note about an
+// idle Millhand with text already on its input line is kept under, the same
+// way FirstRunDoctorCheck is: a person decides whether it is safe to send, so
+// the mail is never typed over what may be a half-written thought.
+const MillhandIdleInputCheck = "millhand-idle-input"
+
+// idleWithTextOnItsInputLine is the words the tick's line and the doctor note
+// both say when unread mail is waiting for a Millhand whose pane already holds
+// text on its input line.
+const idleWithTextOnItsInputLine = "idle with text on its input line"
+
+// reportIdleWithText is what the tick's line says, and the doctor note it
+// leaves once, when unread mail is waiting for a Millhand whose pane already
+// holds text on its input line: the window is left exactly as it is.
+func (t MillhandTick) reportIdleWithText(ctx context.Context, name string) string {
+	line := joinNotes(alreadyUp(name), []string{idleWithTextOnItsInputLine})
+	if note := t.noteIdleWithText(ctx, name); note != "" {
+		line = joinNotes(line, []string{note})
+	}
+	return line
+}
+
+// noteIdleWithText leaves the tick's own doctor note the first time a
+// Millhand's window is found idle with text on its input line and unread mail
+// waiting, under MillhandIdleInputCheck, and does nothing on a later tick that
+// finds it so still: DoctorNotes.Note reads back "" for a key nothing has set,
+// which is how a note already left is told apart from none at all. A nil
+// DoctorNotes leaves no note, and a dry run leaves none either. It says what
+// went wrong leaving the note, "" when nothing did.
+func (t MillhandTick) noteIdleWithText(ctx context.Context, window string) string {
+	if t.DoctorNotes == nil {
+		return ""
+	}
+	key := DoctorNoteKey(t.Host, MillhandIdleInputCheck)
+	existing, err := t.DoctorNotes.Note(ctx, key)
+	if err != nil {
+		return "doctor note could not be read: " + oneLine(err.Error())
+	}
+	if existing != "" {
+		return ""
+	}
+	if t.DryRun {
+		return "dry run: would leave a doctor note that the Millhand is idle with text on its input line"
+	}
+	value := t.now().UTC().Format(time.RFC3339) + " faulty " + idleWithTextOnItsInputLine +
+		", unread mail waiting (" + window + "): a person decides whether it is safe to send"
+	if err := t.DoctorNotes.SetNote(ctx, key, value); err != nil {
+		return "doctor note could not be written: " + oneLine(err.Error())
+	}
+	return ""
 }
 
 // stalledCandidate is a first look — before health is known, and before any

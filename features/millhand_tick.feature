@@ -15,6 +15,15 @@ Feature: mw millhand tick
        "restarted: up but idle since <opened>, no handoff" and wakes a fresh
        Millhand, telling it so. A working pane, text on the input line or a
        pane that cannot be read is still "already up".
+
+       A Millhand that stays up — neither reaped nor restarted — whose box
+       holds unread mail is told of it without a fresh session: an idle pane
+       is typed the same wake line the Mayor's own notifier types ("New mail
+       for millhand: N message(s). Run bd mail inbox.") and the tick says
+       "nudged". A pane with text already on its input line is never typed
+       over: the tick says "idle with text on its input line" and leaves one
+       doctor note for the Mayor, so a person decides. Either way "already up"
+       is still true: nothing is closed and no fresh Millhand is woken.
     2. It runs one mw sync, so that this host sees the other one's mail and claims.
     3. It looks for mail in every mailbox this host's Millhand reads —
        millhand@<host>, plain millhand, and the host's own box <host>, which the
@@ -93,17 +102,59 @@ Feature: mw millhand tick
     And no window was opened
     And the reaper log holds one line saying "closed by the tick: finished at 2026-09-19T06:00:00Z, window left open"
 
-  Scenario: A window with text on its input line is never closed
+  Scenario: A window with text on its input line is never closed, and unread mail is reported instead of typed over
     Given the window "millhand-2026-09-19-04" was opened at "2026-09-19T05:00:00Z"
     And the pane of the window "millhand-2026-09-19-04" has text on its input line
     And unread tick mail for "millhand@laptop" with the subject "Please look at the queue"
     When mw millhand tick is run
     Then mw millhand tick succeeds
     And mw millhand tick prints one dated line saying "already up (millhand-2026-09-19-04)"
+    And mw millhand tick prints one dated line saying "idle with text on its input line"
+    And the window "millhand-2026-09-19-04" was typed nothing
     And the window "millhand-2026-09-19-04" was not closed
     And the tick did not sync
     And no window was opened
     And the reaper log holds no line
+    And a doctor note "millhand-idle-input" says "idle with text on its input line"
+
+  Scenario: A second tick that still finds text on the input line leaves no second doctor note
+    Given the window "millhand-2026-09-19-04" was opened at "2026-09-19T05:00:00Z"
+    And the pane of the window "millhand-2026-09-19-04" has text on its input line
+    And unread tick mail for "millhand@laptop" with the subject "Please look at the queue"
+    When mw millhand tick is run
+    And mw millhand tick is run
+    Then mw millhand tick prints one dated line saying "idle with text on its input line"
+    And the tick's tracker took exactly 1 note write
+
+  Scenario: An idle Millhand with unread mail waiting is nudged once, not closed
+    Given the window "millhand-test" is open, its age not known
+    And unread tick mail for "millhand@laptop" with the subject "Please look at the queue"
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "nudged (millhand-test)"
+    And the window "millhand-test" was typed "New mail for millhand: 1 message(s). Run bd mail inbox.\n"
+    And the window "millhand-test" was not closed
+    And no window was opened
+    And the tick did not sync
+    And the reaper log holds no line
+
+  Scenario: An idle Millhand with no unread mail is simply already up
+    Given the window "millhand-test" is open, its age not known
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "already up (millhand-test)"
+    And the window "millhand-test" was typed nothing
+    And the window "millhand-test" was not closed
+    And no window was opened
+
+  Scenario: A dry run says it would nudge an idle Millhand, and types nothing
+    Given the window "millhand-test" is open, its age not known
+    And unread tick mail for "millhand@laptop" with the subject "Please look at the queue"
+    When mw millhand tick is run as a dry run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "dry run: would nudge the Millhand's window millhand-test"
+    And the window "millhand-test" was typed nothing
+    And no window was opened
 
   Scenario: A working pane is already up
     Given the window "millhand-2026-09-19-04" was opened at "2026-09-19T05:00:00Z"

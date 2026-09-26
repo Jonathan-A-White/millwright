@@ -116,6 +116,7 @@ func registerMillhandTickSteps(ctx *godog.ScenarioContext, c *seatUpContext) {
 	ctx.Given(`^the doctor note "([^"]*)" is cleared$`, c.theDoctorNoteIsCleared)
 	ctx.Given(`^the Millhand tick log already holds a line from (\d+) minutes ago$`, c.theTickLogAlreadyHoldsALineFromMinutesAgo)
 	ctx.Given(`^the tick cannot reach the internet at all$`, c.theTickCannotReachTheInternetAtAll)
+	ctx.Given(`^the window "([^"]*)" is open, its age not known$`, c.theWindowIsOpenOfUnknownAge)
 
 	ctx.When(`^mw millhand tick is run$`, func() error { return c.runTheTick(false) })
 	ctx.When(`^mw millhand tick is run as a dry run$`, func() error { return c.runTheTick(true) })
@@ -142,6 +143,43 @@ func registerMillhandTickSteps(ctx *godog.ScenarioContext, c *seatUpContext) {
 	ctx.Then(`^the reaper log holds no line$`, c.theReaperLogHoldsNoLine)
 	ctx.Then(`^a doctor note "([^"]*)" says "([^"]*)"$`, c.aDoctorNoteSays)
 	ctx.Then(`^the tick's tracker took exactly (\d+) note writes?$`, c.theTicksTrackerTookExactlyNoteWrites)
+	ctx.Then(`^the window "([^"]*)" was typed "([^"]*)"$`, c.theWindowWasTyped)
+	ctx.Then(`^the window "([^"]*)" was typed nothing$`, c.theWindowWasTypedNothing)
+}
+
+// theWindowIsOpenOfUnknownAge puts a window in the terminal whose opened time
+// the terminal cannot say: neither finished nor stalled ever fires for it, so
+// a scenario can walk through what happens with a Millhand simply up, whatever
+// its pane is doing.
+func (c *seatUpContext) theWindowIsOpenOfUnknownAge(window string) error {
+	c.windows.Holds(window, time.Time{})
+	c.lastSeeded = window
+	return nil
+}
+
+func (c *seatUpContext) theWindowWasTyped(name, want string) error {
+	id, open := c.windows.IDOf(name)
+	if !open {
+		return fmt.Errorf("the window %s is not open", name)
+	}
+	// Gherkin does not unescape, so a newline is written as \n.
+	want = strings.ReplaceAll(want, `\n`, "\n")
+	typed := c.windows.Typed(id)
+	if len(typed) != 1 || typed[0] != want {
+		return fmt.Errorf("expected the window to be typed %q exactly once, got %q", want, typed)
+	}
+	return nil
+}
+
+func (c *seatUpContext) theWindowWasTypedNothing(name string) error {
+	id, open := c.windows.IDOf(name)
+	if !open {
+		return fmt.Errorf("the window %s is not open", name)
+	}
+	if typed := c.windows.Typed(id); len(typed) != 0 {
+		return fmt.Errorf("expected nothing typed into the window, got %q", typed)
+	}
+	return nil
 }
 
 func (c *seatUpContext) unreadTickMail(mailbox, subject string) error {
