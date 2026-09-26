@@ -695,6 +695,24 @@ overwrite one that is already there. `mw postern key show` prints its
 compressed public key and its testnet address; it never prints the private
 key. See `features/postern_key.feature`.
 
+`mw postern send` can ask a decision-needed question about a bead
+(`--bead --recommend --option`, repeatable): once broadcast, the bead is
+commented QUESTION and marked open with a note that records the txid and the
+options offered. `mw postern inbox` reads a reply to it and appends ANSWER to
+the bead, clears the note, and mails the Mayor.
+
+If the answer is a Release tap — its text, trimmed and case-folded, is
+"release" — and the bead is an epic, `mw postern inbox` releases its held
+stories itself, exactly as `mw release <epic>` would, with no Mayor turn: it
+appends a RELEASED comment naming the stories now ready and mails the Mayor
+what was released. This only happens when every guard holds: the reply's
+verified sender is this host's configured `postern_governor_key`, and the
+question it answers offered Release among its options. Any other answer is
+still recorded as above, but releases nothing; a signer that is not the
+Governor's key (including an unconfigured `postern_governor_key`), a question
+that never offered Release, a bead that is not an epic, or an epic with
+nothing held, also releases nothing — the Mayor is always mailed why.
+
 `mw postern snapshot` writes the brief of every live epic (open or in
 progress) as postern's docs/protocol.md §7 JSON: each epic's children still
 waiting on a decision-needed question (`needs_you`), closed in the last 24

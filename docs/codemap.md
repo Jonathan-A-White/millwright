@@ -77,7 +77,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `Doctor` | `application/doctor.go` | `mw doctor` — `cmd/mw/doctor.go` | `features/doctor.feature` |
 | `SeatBoot` | `application/seatboot.go` | none: `Dispatch`, `Next` call it | `features/seat_boot.feature` |
 | `Init` | `application/init.go` | `mw init` — `cmd/mw/init.go` | `features/init.feature` |
-| `PosternKeyInit`, `PosternKeyShow`, `PosternInbox`, `PosternSend` | `application/postern.go` | `mw postern key`/`inbox`/`send` (`--bead --recommend --option`; mails mayor) | `features/postern_key.feature` |
+| `PosternKeyInit`, `PosternKeyShow`, `PosternInbox`, `PosternSend` | `application/postern.go` | `mw postern key`/`inbox`/`send` (`--bead --recommend --option`; mails mayor; Release tap) | `features/postern_key.feature` |
 | `PosternSnapshot` | `application/posternsnapshot.go` | `mw postern snapshot` (`--json`; landed w/o `VERIFIED`) | none |
 | `PosternServe`, `PosternNginx` | `application/posternhand.go` | `mw postern serve`/`nginx` (`--dry-run`) — `cmd/mw/postern.go` | `features/postern_serve.feature` |
 
