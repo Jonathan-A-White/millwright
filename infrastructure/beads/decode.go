@@ -35,6 +35,7 @@ type bead struct {
 	Metadata         map[string]any    `json:"metadata"`
 	Parent           string            `json:"parent"`
 	Dependencies     []json.RawMessage `json:"dependencies"`
+	CommentCount     int               `json:"comment_count"`
 }
 
 // linked is a bead's dependency as `bd show` prints it: the whole linked bead,
@@ -258,6 +259,7 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		Updated:         b.updated(),
 		ClosedAt:        b.closedAt(),
 		LeaseExpires:    b.leaseExpires(),
+		CommentCount:    b.CommentCount,
 		Attempts:        b.attempts(),
 		Exhausted:       b.exhausted(),
 		Needs:           b.needs(),

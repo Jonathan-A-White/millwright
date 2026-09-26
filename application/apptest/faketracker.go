@@ -515,7 +515,9 @@ func (f *FakeTracker) ShowStory(_ context.Context, id string) (application.Story
 	if !ok {
 		return application.StoryDetail{}, fmt.Errorf("no story %q", id)
 	}
-	return s.detail, nil
+	detail := s.detail
+	detail.CommentCount = len(s.comments)
+	return detail, nil
 }
 
 // ShowEpic implements application.WorkTracker. The stories come back in the
@@ -545,6 +547,7 @@ func (f *FakeTracker) ShowEpic(_ context.Context, id string) (application.EpicDe
 		}
 		detail := s.detail
 		detail.Needs = append([]string(nil), s.needs...)
+		detail.CommentCount = len(s.comments)
 		epic.Stories = append(epic.Stories, detail)
 	}
 	return epic, nil

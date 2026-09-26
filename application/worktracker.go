@@ -88,6 +88,11 @@ type StoryDetail struct {
 	// session's tmux pane dead is a dispatch's strongest sign that the session
 	// ended without mw next ever hearing about it (mw-gq6.106).
 	LeaseExpires time.Time
+	// CommentCount is how many comments the story carries, as the listing it
+	// came from said; zero when the tracker did not say. A story reporting
+	// zero can carry no marker written as a comment, so a reader looking for
+	// one needs no further call to find that out (mw-tfne4.24).
+	CommentCount int
 }
 
 // WorkInHand is what the tracker has in hand across every host: the stories

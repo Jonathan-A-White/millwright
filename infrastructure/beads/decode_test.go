@@ -445,3 +445,23 @@ func TestAStoryCarriesHowManyTimesItWasStarted(t *testing.T) {
 		}
 	}
 }
+
+// mw-tfne4.24: a snapshot reader skips reading a story's comments back when
+// bd's own listing already says there are none to find, so the count bd
+// prints on every bead must come through as a story's own field.
+func TestAStoryCarriesHowManyCommentsItHas(t *testing.T) {
+	got, err := decodeBeads([]byte(`[
+  {"id": "t-a", "title": "Talked about", "status": "closed", "comment_count": 3},
+  {"id": "t-b", "title": "Never commented on", "status": "closed"}
+]`))
+	if err != nil {
+		t.Fatalf("decoding two beads: %v", err)
+	}
+
+	if got := got[0].detail(domain.Path{}).CommentCount; got != 3 {
+		t.Errorf("expected comment_count 3, got %d", got)
+	}
+	if got := got[1].detail(domain.Path{}).CommentCount; got != 0 {
+		t.Errorf("expected a bead with no comment_count field to read as 0, got %d", got)
+	}
+}
