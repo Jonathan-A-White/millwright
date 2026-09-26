@@ -3,6 +3,7 @@ package beads
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -72,6 +73,76 @@ func mustPackCount(t *testing.T, repo string) int {
 		t.Fatalf("listing packs in %s: %v", repo, err)
 	}
 	return count
+}
+
+// mustPackBytes totals the size of every pack file a bare repo holds, so a
+// test can say a cache's packs have crossed remoteCacheRepackThresholdBytes.
+func mustPackBytes(t *testing.T, repo string) int64 {
+	t.Helper()
+	total, err := packBytes(repo)
+	if err != nil {
+		t.Fatalf("totalling pack bytes in %s: %v", repo, err)
+	}
+	return total
+}
+
+// largeRemoteCacheFixture is remoteCacheFixture with each push carrying a
+// bytesPerPush blob of pseudo-random, so-not-compressible-away data instead
+// of a few bytes of text, so the packs it leaves behind add up to a chosen
+// total size rather than just a chosen count — the shape a handful of real
+// `bd dolt push`s leaves once the database itself, not just its history, has
+// grown.
+func largeRemoteCacheFixture(t *testing.T, vault string, pushes, bytesPerPush int) (repo string, refs []string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("this fixture shells out to git")
+	}
+	repo = filepath.Join(vault, beadsDir, "embeddeddolt", "x", ".dolt", "git-remote-cache", "h", "repo.git")
+	if _, err := runGit(context.Background(), "", "init", "--bare", "-q", repo); err != nil {
+		t.Fatalf("making the bare remote cache: %v", err)
+	}
+	if _, err := runGit(context.Background(), repo, "config", "receive.unpackLimit", "0"); err != nil {
+		t.Fatalf("configuring the bare remote cache to keep pushes packed: %v", err)
+	}
+	if _, err := runGit(context.Background(), repo, "config", "gc.auto", "0"); err != nil {
+		t.Fatalf("disabling auto gc on the bare remote cache: %v", err)
+	}
+
+	work := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q"},
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "test"},
+		{"remote", "add", "origin", repo},
+	} {
+		if _, err := runGit(context.Background(), work, args...); err != nil {
+			t.Fatalf("setting up the working clone: %v", err)
+		}
+	}
+
+	source := rand.New(rand.NewSource(1))
+	for i := 0; i < pushes; i++ {
+		blob := make([]byte, bytesPerPush)
+		if _, err := source.Read(blob); err != nil {
+			t.Fatalf("filling a %d-byte blob: %v", bytesPerPush, err)
+		}
+		path := filepath.Join(work, fmt.Sprintf("file%d.bin", i))
+		if err := os.WriteFile(path, blob, 0o644); err != nil {
+			t.Fatalf("writing a file to commit: %v", err)
+		}
+		ref := fmt.Sprintf("refs/heads/b%d", i)
+		for _, args := range [][]string{
+			{"add", "."},
+			{"commit", "-q", "-m", fmt.Sprintf("commit %d", i)},
+			{"push", "-q", "origin", "HEAD:" + ref},
+		} {
+			if _, err := runGit(context.Background(), work, args...); err != nil {
+				t.Fatalf("pushing commit %d: %v", i, err)
+			}
+		}
+		refs = append(refs, ref)
+	}
+	return repo, refs
 }
 
 func TestRepackRemoteCachesCollapsesEveryPackIntoOneAndKeepsEveryRefResolving(t *testing.T) {
@@ -242,5 +313,60 @@ func TestSyncSwallowsAFailureRepackingACrowdedCache(t *testing.T) {
 
 	if err := gateway.Sync(context.Background()); err != nil {
 		t.Fatalf("expected a repack failure not to fail the sync, got %v", err)
+	}
+}
+
+// TestSyncAlsoRepacksACacheWhosePacksTotalMoreThanTheByteThreshold is
+// mw-gq6.123's fix: a handful of large `bd dolt push`s can cross
+// remoteCacheRepackThresholdBytes well before enough packs pile up to trip
+// the count-based rule above, so a sync also checks the total bytes a
+// cache's packs hold.
+func TestSyncAlsoRepacksACacheWhosePacksTotalMoreThanTheByteThreshold(t *testing.T) {
+	dir := t.TempDir()
+	path := standInBD(t, dir)
+	gateway := New(dir, WithProgram(path))
+
+	repo, refs := largeRemoteCacheFixture(t, dir, 3, 100_000_000)
+	if beforeCount := mustPackCount(t, repo); beforeCount > remoteCacheRepackThreshold {
+		t.Fatalf("expected the fixture to stay under the pack-count threshold, got %d packs", beforeCount)
+	}
+	if beforeBytes := mustPackBytes(t, repo); beforeBytes <= remoteCacheRepackThresholdBytes {
+		t.Fatalf("expected the fixture to leave more than %d bytes of packs, got %d", remoteCacheRepackThresholdBytes, beforeBytes)
+	}
+
+	if err := gateway.Sync(context.Background()); err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+
+	if after := mustPackCount(t, repo); after != 1 {
+		t.Fatalf("expected a sync to leave exactly one pack in a cache crowded by bytes, got %d", after)
+	}
+	for _, ref := range refs {
+		if _, err := runGit(context.Background(), repo, "rev-parse", ref); err != nil {
+			t.Fatalf("expected %s to still resolve after the sync repacked the cache, got %v", ref, err)
+		}
+	}
+}
+
+// TestSyncLeavesACacheUnderTheByteThresholdAlone is the other half of
+// mw-gq6.123's fix: a cache with only a few small packs, under both the
+// pack-count and byte thresholds, costs nothing extra on a sync.
+func TestSyncLeavesACacheUnderTheByteThresholdAlone(t *testing.T) {
+	dir := t.TempDir()
+	path := standInBD(t, dir)
+	gateway := New(dir, WithProgram(path))
+
+	repo, _ := remoteCacheFixture(t, dir, 3)
+	before := mustPackCount(t, repo)
+	if beforeBytes := mustPackBytes(t, repo); beforeBytes >= remoteCacheRepackThresholdBytes {
+		t.Fatalf("expected the fixture to leave well under %d bytes of packs, got %d", remoteCacheRepackThresholdBytes, beforeBytes)
+	}
+
+	if err := gateway.Sync(context.Background()); err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+
+	if after := mustPackCount(t, repo); after != before {
+		t.Fatalf("expected a cache under both thresholds to be left untouched, had %d packs, now %d", before, after)
 	}
 }
