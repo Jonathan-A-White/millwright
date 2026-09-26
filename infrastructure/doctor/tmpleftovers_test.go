@@ -198,6 +198,78 @@ func TestTmpLeftoversGoBuildCacheIsClearedOnlyPastItsOwnBudget(t *testing.T) {
 	}
 }
 
+func TestTmpLeftoversGoBuildCacheLiveWithAnOpenFileIsLeftAlone(t *testing.T) {
+	tmp, proc := tlHost(t)
+	goBuildDir := filepath.Join(t.TempDir(), "go-build")
+	if err := os.MkdirAll(goBuildDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	blobPath := filepath.Join(goBuildDir, "blob")
+	if err := os.WriteFile(blobPath, make([]byte, 200), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tlMarkLive(t, proc, blobPath)
+
+	var cleaned int
+	check := &doctor.TmpLeftovers{
+		TmpDir: tmp, ProcDir: proc, GoBuildDir: goBuildDir, Budget: 100,
+		GoClean: func(context.Context) error { cleaned++; return nil },
+	}
+
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorOK {
+		t.Fatalf("expected ok while a process has go-build open, got %s (%s)", verdict, reason)
+	}
+	if !strings.Contains(reason, "go-build") || !strings.Contains(reason, "live") {
+		t.Fatalf("expected the reason to say go-build is live, got %q", reason)
+	}
+
+	if err := check.Cure(context.Background()); err != nil {
+		t.Fatalf("curing: %v", err)
+	}
+	if cleaned != 0 {
+		t.Fatalf("expected go clean -cache never to run while go-build is live, ran %d times", cleaned)
+	}
+	if _, err := os.Stat(blobPath); err != nil {
+		t.Fatalf("expected go-build's contents to remain: %v", err)
+	}
+}
+
+func TestTmpLeftoversGoBuildCacheLiveWithARunningGoProcessIsLeftAlone(t *testing.T) {
+	tmp, proc := tlHost(t)
+	goBuildDir := filepath.Join(t.TempDir(), "go-build")
+	if err := os.MkdirAll(goBuildDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(goBuildDir, "blob"), make([]byte, 200), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pidDir := filepath.Join(proc, "200")
+	if err := os.MkdirAll(pidDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pidDir, "comm"), []byte("go\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var cleaned int
+	check := &doctor.TmpLeftovers{
+		TmpDir: tmp, ProcDir: proc, GoBuildDir: goBuildDir, Budget: 100,
+		GoClean: func(context.Context) error { cleaned++; return nil },
+	}
+
+	verdict, _ := check.Probe(context.Background())
+	if verdict != application.DoctorOK {
+		t.Fatalf("expected ok while a go process is running, got %s", verdict)
+	}
+	if err := check.Cure(context.Background()); err != nil {
+		t.Fatalf("curing: %v", err)
+	}
+	if cleaned != 0 {
+		t.Fatalf("expected go clean -cache never to run while a go process is running, ran %d times", cleaned)
+	}
+}
+
 func TestTmpLeftoversGoBuildCacheUnderBudgetIsNeverCleaned(t *testing.T) {
 	tmp, proc := tlHost(t)
 	goBuildDir := filepath.Join(t.TempDir(), "go-build")
