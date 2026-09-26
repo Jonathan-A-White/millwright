@@ -43,6 +43,10 @@ type doctorContext struct {
 	mayorGoneVault string
 	mayorUpCalls   string
 
+	tmpLeftoversTmp       string
+	tmpLeftoversProc      string
+	tmpLeftoversFDCounter int
+
 	out    bytes.Buffer
 	report application.DoctorReport
 	err    error
@@ -82,6 +86,13 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a stand-in tmux with no window open$`, c.aStandInTmuxWithNoWindowOpen)
 	ctx.Given(`^a stand-in bin/mayor-up in that vault that starts a Mayor in window "([^"]*)"$`, c.aStandInMayorUpThatStartsAMayorInWindow)
 	ctx.Given(`^a stand-in bin/mayor-up in that vault that always exits 4, saying "([^"]*)"$`, c.aStandInMayorUpThatAlwaysExits4Saying)
+	ctx.Given(`^a fake host with a dead spool file "([^"]*)" of (\d+) bytes$`, c.aFakeHostWithADeadSpoolFile)
+	ctx.Given(`^a fake host with a live spool file "([^"]*)" of (\d+) bytes$`, c.aFakeHostWithALiveSpoolFile)
+	ctx.Given(`^a fake host with a stale claude session dir "([^"]*)" of (\d+) bytes$`, c.aFakeHostWithAStaleClaudeSessionDir)
+	ctx.Given(`^a fake host with a live claude session dir "([^"]*)" of (\d+) bytes$`, c.aFakeHostWithALiveClaudeSessionDir)
+	ctx.Given(`^a fake host with an unrelated file "([^"]*)" of (\d+) bytes$`, c.aFakeHostWithAnUnrelatedFile)
+	ctx.Given(`^the tmp-leftovers check's budget is (\d+) bytes$`, c.theTmpLeftoversChecksBudgetIsBytes)
+	ctx.Given(`^the fake host's /proc does not exist$`, c.theFakeHostsProcDoesNotExist)
 
 	ctx.When(`^the check "([^"]*)"'s probe says ok$`, c.theChecksProbeSaysOK)
 	ctx.When(`^the check "([^"]*)"'s probe says faulty "([^"]*)" again$`, c.theChecksProbeSaysFaultyAgain)
@@ -93,6 +104,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^mw doctor's timers check runs for real$`, c.mwDoctorsTimersCheckRunsForReal)
 	ctx.When(`^mw doctor's beads-size check runs for real$`, c.mwDoctorsBeadsSizeCheckRunsForReal)
 	ctx.When(`^mw doctor's mayor-gone check runs for real$`, c.mwDoctorsMayorGoneCheckRunsForReal)
+	ctx.When(`^mw doctor's tmp-leftovers check runs for real$`, c.mwDoctorsTmpLeftoversCheckRunsForReal)
 	ctx.When(`^(\d+) minutes? go(?:es)? by$`, c.minutesPass)
 	ctx.When(`^(\d+) hours? go(?:es)? by$`, c.hoursPass)
 
@@ -110,6 +122,8 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the note "([^"]*)" does not exist$`, c.theNoteDoesNotExist)
 	ctx.Then(`^mayor-up was not run$`, c.mayorUpWasNotRun)
 	ctx.Then(`^mayor-up was run (\d+) times?$`, c.mayorUpWasRunNTimes)
+	ctx.Then(`^the tmp file "([^"]*)" exists$`, c.theTmpFileExists)
+	ctx.Then(`^the tmp file "([^"]*)" does not exist$`, c.theTmpFileDoesNotExist)
 }
 
 func (c *doctorContext) fake(name string) *apptest.FakeDoctorCheck {
@@ -780,6 +794,186 @@ func (c *doctorContext) mayorUpWasRunNTimes(wantText string) error {
 		return fmt.Errorf("parsing %q as a number of calls: %w", wantText, err)
 	}
 	return c.mayorUpCallCount(want)
+}
+
+// ensureTmpLeftoversHost makes, once per scenario, a fake host's tmp and proc
+// directories and wires up the real infrastructure/doctor.TmpLeftovers check
+// against them. Nothing here reads this host's own /tmp or /proc.
+func (c *doctorContext) ensureTmpLeftoversHost() (tmp, proc string, err error) {
+	if c.tmpLeftoversTmp != "" {
+		return c.tmpLeftoversTmp, c.tmpLeftoversProc, nil
+	}
+	root, err := os.MkdirTemp("", "mw-doctor-tmp-leftovers")
+	if err != nil {
+		return "", "", err
+	}
+	tmp = filepath.Join(root, "tmp")
+	proc = filepath.Join(root, "proc")
+	if err := os.MkdirAll(tmp, 0o755); err != nil {
+		return "", "", err
+	}
+	if err := os.MkdirAll(proc, 0o755); err != nil {
+		return "", "", err
+	}
+	c.tmpLeftoversTmp = tmp
+	c.tmpLeftoversProc = proc
+	c.real = &doctor.TmpLeftovers{TmpDir: tmp, ProcDir: proc}
+	return tmp, proc, nil
+}
+
+func (c *doctorContext) tmpLeftoversCheck() (*doctor.TmpLeftovers, error) {
+	if _, _, err := c.ensureTmpLeftoversHost(); err != nil {
+		return nil, err
+	}
+	check, ok := c.real.(*doctor.TmpLeftovers)
+	if !ok {
+		return nil, fmt.Errorf("no tmp-leftovers check is set up in this scenario")
+	}
+	return check, nil
+}
+
+// markTmpLeftoversLive gives path a live owner: a symlink under a fake pid's
+// fd directory in the scenario's fake /proc, the same shape the real /proc
+// gives a process's open files.
+func (c *doctorContext) markTmpLeftoversLive(path string) error {
+	_, proc, err := c.ensureTmpLeftoversHost()
+	if err != nil {
+		return err
+	}
+	c.tmpLeftoversFDCounter++
+	fdDir := filepath.Join(proc, "100", "fd")
+	if err := os.MkdirAll(fdDir, 0o755); err != nil {
+		return err
+	}
+	return os.Symlink(path, filepath.Join(fdDir, strconv.Itoa(c.tmpLeftoversFDCounter)))
+}
+
+func (c *doctorContext) aFakeHostWithADeadSpoolFile(name, sizeText string) error {
+	tmp, _, err := c.ensureTmpLeftoversHost()
+	if err != nil {
+		return err
+	}
+	size, err := strconv.Atoi(sizeText)
+	if err != nil {
+		return fmt.Errorf("parsing %q as a byte count: %w", sizeText, err)
+	}
+	return os.WriteFile(filepath.Join(tmp, name), make([]byte, size), 0o644)
+}
+
+func (c *doctorContext) aFakeHostWithALiveSpoolFile(name, sizeText string) error {
+	tmp, _, err := c.ensureTmpLeftoversHost()
+	if err != nil {
+		return err
+	}
+	size, err := strconv.Atoi(sizeText)
+	if err != nil {
+		return fmt.Errorf("parsing %q as a byte count: %w", sizeText, err)
+	}
+	path := filepath.Join(tmp, name)
+	if err := os.WriteFile(path, make([]byte, size), 0o644); err != nil {
+		return err
+	}
+	return c.markTmpLeftoversLive(path)
+}
+
+func (c *doctorContext) aFakeHostWithAStaleClaudeSessionDir(name, sizeText string) error {
+	tmp, _, err := c.ensureTmpLeftoversHost()
+	if err != nil {
+		return err
+	}
+	size, err := strconv.Atoi(sizeText)
+	if err != nil {
+		return fmt.Errorf("parsing %q as a byte count: %w", sizeText, err)
+	}
+	dir := filepath.Join(tmp, "claude-0", name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, "state.json"), make([]byte, size), 0o644)
+}
+
+func (c *doctorContext) aFakeHostWithALiveClaudeSessionDir(name, sizeText string) error {
+	tmp, _, err := c.ensureTmpLeftoversHost()
+	if err != nil {
+		return err
+	}
+	size, err := strconv.Atoi(sizeText)
+	if err != nil {
+		return fmt.Errorf("parsing %q as a byte count: %w", sizeText, err)
+	}
+	dir := filepath.Join(tmp, "claude-0", name)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "state.json"), make([]byte, size), 0o644); err != nil {
+		return err
+	}
+	return c.markTmpLeftoversLive(dir)
+}
+
+func (c *doctorContext) aFakeHostWithAnUnrelatedFile(name, sizeText string) error {
+	tmp, _, err := c.ensureTmpLeftoversHost()
+	if err != nil {
+		return err
+	}
+	size, err := strconv.Atoi(sizeText)
+	if err != nil {
+		return fmt.Errorf("parsing %q as a byte count: %w", sizeText, err)
+	}
+	return os.WriteFile(filepath.Join(tmp, name), make([]byte, size), 0o644)
+}
+
+func (c *doctorContext) theTmpLeftoversChecksBudgetIsBytes(budgetText string) error {
+	budget, err := strconv.Atoi(budgetText)
+	if err != nil {
+		return fmt.Errorf("parsing %q as a byte count: %w", budgetText, err)
+	}
+	check, err := c.tmpLeftoversCheck()
+	if err != nil {
+		return err
+	}
+	check.Budget = int64(budget)
+	return nil
+}
+
+// theFakeHostsProcDoesNotExist points the check's ProcDir at a path that was
+// never created, standing in for a host this check cannot read /proc on at
+// all.
+func (c *doctorContext) theFakeHostsProcDoesNotExist() error {
+	check, err := c.tmpLeftoversCheck()
+	if err != nil {
+		return err
+	}
+	check.ProcDir = filepath.Join(c.tmpLeftoversProc, "does-not-exist")
+	return nil
+}
+
+func (c *doctorContext) mwDoctorsTmpLeftoversCheckRunsForReal() error { return c.run(false) }
+
+func (c *doctorContext) theTmpFileExists(name string) error {
+	tmp, _, err := c.ensureTmpLeftoversHost()
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(tmp, name)
+	if _, err := os.Stat(path); err != nil {
+		return fmt.Errorf("expected %s to exist: %v", path, err)
+	}
+	return nil
+}
+
+func (c *doctorContext) theTmpFileDoesNotExist(name string) error {
+	tmp, _, err := c.ensureTmpLeftoversHost()
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(tmp, name)
+	if _, err := os.Stat(path); err == nil {
+		return fmt.Errorf("expected %s not to exist, it does", path)
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	return nil
 }
 
 func (c *doctorContext) mayorUpCallCount(want int) error {

@@ -242,3 +242,42 @@ Feature: mw doctor
     And mw doctor printed "bin/mayor-up"
     And mayor-up was not run
     And the doctor log is empty
+
+  Scenario: The real tmp-leftovers check past its budget removes only the dead spool file and the stale claude session dir, leaving the live two and an unrelated file alone
+    Given a fake host with a dead spool file "nbs-spool-dead" of 5000000 bytes
+    And a fake host with a live spool file "nbs-spool-live" of 5000000 bytes
+    And a fake host with a stale claude session dir "session-dead" of 5000000 bytes
+    And a fake host with a live claude session dir "session-live" of 5000000 bytes
+    And a fake host with an unrelated file "notes.txt" of 1000 bytes
+    And the tmp-leftovers check's budget is 100 bytes
+    When mw doctor's tmp-leftovers check runs for real
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "tmp-leftovers cured"
+    And the doctor log holds "10000000"
+    And the tmp file "nbs-spool-dead" does not exist
+    And the tmp file "nbs-spool-live" exists
+    And the tmp file "claude-0/session-dead" does not exist
+    And the tmp file "claude-0/session-live" exists
+    And the tmp file "notes.txt" exists
+
+  Scenario: The real tmp-leftovers check under its budget with only dead leftovers reports ok and removes nothing
+    Given a fake host with a dead spool file "nbs-spool-dead" of 5000000 bytes
+    And a fake host with an unrelated file "notes.txt" of 1000 bytes
+    And the tmp-leftovers check's budget is 100000000 bytes
+    When mw doctor's tmp-leftovers check runs for real
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "tmp-leftovers ok"
+    And the doctor log holds "5000000"
+    And the tmp file "nbs-spool-dead" exists
+    And the tmp file "notes.txt" exists
+
+  Scenario: The real tmp-leftovers check with no /proc to read is cannot-tell, and writes a note
+    Given a fake host with a dead spool file "nbs-spool-dead" of 5000000 bytes
+    And a fake host with an unrelated file "notes.txt" of 1000 bytes
+    And the fake host's /proc does not exist
+    When mw doctor's tmp-leftovers check runs for real
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "tmp-leftovers cannot-tell"
+    And the note "doctor.laptop.tmp-leftovers" holds "cannot-tell"
+    And the tmp file "nbs-spool-dead" exists
+    And the tmp file "notes.txt" exists
