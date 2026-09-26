@@ -223,6 +223,13 @@ type SeatBoot struct {
 	// what comes after it — `mw next` closing the story out. An empty After
 	// leaves the session ending with nothing after it.
 	After []string
+
+	// Heartbeat is what runs beside the session's harness, from the moment it
+	// starts to the moment it exits: the program and the arguments before the
+	// story's id, the same shape as After. It is how the story's claim's lease
+	// is kept renewed for as long as the harness is really running — `mw next
+	// --heartbeat`. An empty Heartbeat starts nothing beside the harness.
+	Heartbeat []string
 }
 
 // Boot assembles the session that works detail in the worktree dir. What comes
@@ -311,6 +318,7 @@ func (b SeatBoot) boot(ctx context.Context, detail StoryDetail, dir string, kick
 		ResultFile: b.Vault.RunFile(id, ResultFileNameForAttempt(attempt)),
 		Kickoff:    kickoff(b.Vault.Dir()),
 		After:      b.after(id),
+		Heartbeat:  b.heartbeat(id),
 	})
 	if err != nil {
 		return SessionSpec{}, fmt.Errorf("booting %s: %w", id, err)
@@ -328,6 +336,16 @@ func (b SeatBoot) after(storyID string) []string {
 		return nil
 	}
 	return append(append([]string(nil), b.After...), storyID)
+}
+
+// heartbeat is the command that runs beside this story's session, from the
+// moment its harness starts to the moment it exits: what the factory was told
+// to run, with the story it is heartbeating after it.
+func (b SeatBoot) heartbeat(storyID string) []string {
+	if len(b.Heartbeat) == 0 {
+		return nil
+	}
+	return append(append([]string(nil), b.Heartbeat...), storyID)
 }
 
 // MwSeat is the name mw itself acts under when it writes to the tracker: the

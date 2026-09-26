@@ -30,6 +30,14 @@ type Launch struct {
 	// and a story nobody closes out is a story nobody hears about again (ADR
 	// 0004). An empty After runs nothing afterwards.
 	After []string
+
+	// Heartbeat is the command that renews this story's claim's lease for as
+	// long as the harness is running: started in the background before the
+	// harness and killed the moment the harness exits, before After runs. It
+	// is chained into the same command line as After is, for the same reason
+	// — nothing else is running once the harness has died to start it any
+	// other way. An empty Heartbeat starts nothing beside the harness.
+	Heartbeat []string
 }
 
 // Validate reports the first reason a launch could not be turned into a

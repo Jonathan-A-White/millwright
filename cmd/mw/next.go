@@ -22,6 +22,7 @@ import (
 func newNextCmd() *cobra.Command {
 	var noDispatch bool
 	var capOverride int
+	var heartbeat bool
 
 	cmd := &cobra.Command{
 		Use:   "next <story-id>",
@@ -64,6 +65,19 @@ func newNextCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+
+			// --heartbeat is not a close-out: it is the other half of what
+			// this same command runs when it is chained into a dispatched
+			// session's shell line — beside the harness, not after it —
+			// renewing the story's claim's lease for as long as the harness
+			// is really running, and returning once it is not.
+			if heartbeat {
+				return application.Next{
+					Tracker: mwGateway(dir, host),
+					Runner:  tmux.New(),
+				}.Heartbeat(cmd.Context(), args[0])
+			}
+
 			atOnce, err := config.Cap()
 			if err != nil {
 				return err
@@ -166,6 +180,8 @@ func newNextCmd() *cobra.Command {
 		"close the story out and stop, without starting whatever is ready next")
 	cmd.Flags().IntVar(&capOverride, "cap", 0,
 		"how many sessions may run at once when dispatching, instead of what the config file says")
+	cmd.Flags().BoolVar(&heartbeat, "heartbeat", false,
+		"renew the story's claim's lease while its session runs, until the session ends; run beside a dispatched session's harness, not by hand")
 	return cmd
 }
 
@@ -176,11 +192,12 @@ func newNextCmd() *cobra.Command {
 // claude.WithTests).
 func builderBoot(files *vault.Vault, host string, tests map[string]string) application.SeatBoot {
 	return application.SeatBoot{
-		Vault:   files,
-		Harness: claude.New(claude.WithTests(tests)),
-		Seat:    BuilderSeat,
-		Host:    host,
-		After:   afterSession(),
+		Vault:     files,
+		Harness:   claude.New(claude.WithTests(tests)),
+		Seat:      BuilderSeat,
+		Host:      host,
+		After:     afterSession(),
+		Heartbeat: heartbeatSession(),
 	}
 }
 
@@ -190,9 +207,24 @@ func builderBoot(files *vault.Vault, host string, tests map[string]string) appli
 // PATH — and a mw that cannot say where it is falls back to the name, which is
 // what a host with mw installed has anyway.
 func afterSession() []string {
+	return append(mwProgram(), "next")
+}
+
+// heartbeatSession is the command that runs beside a dispatched session's
+// harness, from the moment it starts to the moment it exits: this same mw,
+// renewing the claim's lease. Found the same way afterSession's mw is.
+func heartbeatSession() []string {
+	return append(mwProgram(), "next", "--heartbeat")
+}
+
+// mwProgram is the mw this host runs, as one argument: the running program's
+// own path when it can be found, so that a mw run from a worktree chains that
+// mw rather than whatever is on PATH, and falls back to the name otherwise,
+// which is what a host with mw installed has anyway.
+func mwProgram() []string {
 	program, err := os.Executable()
 	if err != nil || program == "" {
 		program = "mw"
 	}
-	return []string{program, "next"}
+	return []string{program}
 }
