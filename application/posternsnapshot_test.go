@@ -198,6 +198,9 @@ func TestPosternSnapshotNeverReadsCommentsOfAClosedStoryOutsideTheWindow(t *test
 
 	addChild(tracker, "mw-a", "mw-a.2", "Closed within the window")
 	closeLanded(t, tracker, "mw-a.2", snapshotNow.Add(-3*24*time.Hour))
+	if err := tracker.CommentOnStory(context.Background(), "mw-a.2", "shipped fine"); err != nil {
+		t.Fatalf("leaving an ordinary comment on mw-a.2: %v", err)
+	}
 
 	doc := snapshotDoc(t, tracker)
 	a := epicOf(t, doc, "mw-a")
@@ -206,7 +209,7 @@ func TestPosternSnapshotNeverReadsCommentsOfAClosedStoryOutsideTheWindow(t *test
 		t.Fatalf("expected mw-a.1's comments never to be read, got %d reads", tracker.CommentReads("mw-a.1"))
 	}
 	if tracker.CommentReads("mw-a.2") != 1 {
-		t.Fatalf("expected mw-a.2's comments to be read once (the landed check), got %d reads", tracker.CommentReads("mw-a.2"))
+		t.Fatalf("expected mw-a.2's comments to be read once (it carries one, so the landed check must find it is not VERIFIED), got %d reads", tracker.CommentReads("mw-a.2"))
 	}
 	if len(a.NeedsYou) != 0 {
 		t.Fatalf("expected a closed story never to appear in needs_you, got %+v", a.NeedsYou)
@@ -413,6 +416,58 @@ func TestPosternSnapshotReadsEveryLiveEpicAndItsChildrensCommentsInOneCallEach(t
 		}
 		if len(e.Landed) != 1 || e.Landed[0].ID != want.landed {
 			t.Fatalf("expected %s's landed to hold %s, got %+v", want.epic, want.landed, e.Landed)
+		}
+	}
+}
+
+// TestPosternSnapshotNeverReadsALandedChildsCommentsWhenItHasNone covers
+// mw-tfne4.24: on a live rig, almost every closed-within-window child across
+// every live epic carries no comment at all, so cannot carry
+// PosternSnapshotVerifiedMarker either — reading its comments back only to
+// find none is what made mw-tfne4.17's single StoriesComments call slow
+// again. Two epics, each with a needs_you child and a landed child with no
+// comment, must still land in one StoriesComments call that names only the
+// needs_you ids.
+func TestPosternSnapshotNeverReadsALandedChildsCommentsWhenItHasNone(t *testing.T) {
+	tracker := aSnapshotTracker()
+
+	tracker.AddEpic("mw-a", domain.Path{})
+	tracker.DescribeEpic("mw-a", "Epic A", apptest.StatusOpen, 1)
+	addChild(tracker, "mw-a", "mw-a.1", "Ship now or wait?")
+	askQuestion(t, tracker, "mw-a.1", "2026-09-24T12:00:00Z", "Ship now or wait?", "ship", "ship, wait")
+	addChild(tracker, "mw-a", "mw-a.2", "Landed recently, never commented on")
+	closeLanded(t, tracker, "mw-a.2", snapshotNow.Add(-3*24*time.Hour))
+
+	tracker.AddEpic("mw-b", domain.Path{})
+	tracker.DescribeEpic("mw-b", "Epic B", apptest.StatusInProgress, 2)
+	addChild(tracker, "mw-b", "mw-b.1", "Ready to ship?")
+	askQuestion(t, tracker, "mw-b.1", "2026-09-24T13:00:00Z", "Ready to ship?", "ship", "")
+	addChild(tracker, "mw-b", "mw-b.2", "Landed recently too, never commented on")
+	closeLanded(t, tracker, "mw-b.2", snapshotNow.Add(-1*24*time.Hour))
+
+	doc := snapshotDoc(t, tracker)
+
+	if got := tracker.StoriesCommentsCalls(); got != 1 {
+		t.Fatalf("expected every epic's children's comments to be read in one StoriesComments call, got %d", got)
+	}
+	for _, id := range []string{"mw-a.1", "mw-b.1"} {
+		if got := tracker.CommentReads(id); got != 1 {
+			t.Fatalf("expected the needs_you candidate %s to be read once, got %d", id, got)
+		}
+	}
+	for _, id := range []string{"mw-a.2", "mw-b.2"} {
+		if got := tracker.CommentReads(id); got != 0 {
+			t.Fatalf("expected the commentless landed candidate %s never to be read, got %d", id, got)
+		}
+	}
+
+	for _, want := range []struct{ epic, landed string }{
+		{"mw-a", "mw-a.2"},
+		{"mw-b", "mw-b.2"},
+	} {
+		e := epicOf(t, doc, want.epic)
+		if len(e.Landed) != 1 || e.Landed[0].ID != want.landed {
+			t.Fatalf("expected %s's landed to hold %s despite never reading its comments, got %+v", want.epic, want.landed, e.Landed)
 		}
 	}
 }

@@ -167,9 +167,13 @@ func (s PosternSnapshot) write(ctx context.Context, doc PosternSnapshotDoc) erro
 // rather than one per epic and more per question (mw-tfne4.17): every live
 // epic's own fields and every epic's children are read by startEpic, without
 // touching a single story's comments; every child across every epic that
-// still needs a comment read — to build its needs_you entry or to check a
-// landed one for VERIFIED — is collected first and read back in the one
-// StoriesComments call finishEpic then applies to each epic in turn.
+// still needs a comment read — every needs_you candidate, to build its entry,
+// and a landed candidate only when its own comment_count says it carries one
+// worth checking for VERIFIED (mw-tfne4.24) — is collected first and read
+// back in the one StoriesComments call finishEpic then applies to each epic
+// in turn. A landed candidate with no comments at all is never a match for
+// PosternSnapshotVerifiedMarker, so its absence from that call still lands it
+// correctly; it is most of a live epic's closed-within-window tail.
 func (s PosternSnapshot) Build(ctx context.Context) (PosternSnapshotDoc, error) {
 	if s.Tracker == nil {
 		return PosternSnapshotDoc{}, fmt.Errorf("mw postern snapshot: no work tracker is configured")
@@ -200,7 +204,14 @@ func (s PosternSnapshot) Build(ctx context.Context) (PosternSnapshotDoc, error) 
 			needComments = append(needComments, child.Story.ID)
 		}
 		for _, child := range b.landedCand {
-			needComments = append(needComments, child.Story.ID)
+			// A landed candidate can only carry PosternSnapshotVerifiedMarker
+			// on a comment it actually has: one the listing already reports
+			// as carrying none is landed without spending a read on it
+			// (mw-tfne4.24) — most of a live epic's closed-within-window
+			// tail, which is never commented on again once closed.
+			if child.CommentCount > 0 {
+				needComments = append(needComments, child.Story.ID)
+			}
 		}
 	}
 
