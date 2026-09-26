@@ -138,8 +138,10 @@ func newPosternInboxCmd() *cobra.Command {
 		Use:   "inbox",
 		Short: "Read the postern's messages addressed to this host's key",
 		Long: "inbox reads the postern's message records addressed to this host's key, decrypts\n" +
-			"them, and prints them newest first: class, from, txid, when and text. Reading marks them\n" +
-			"read, by moving a cursor kept in a bd kv note, never an event of its own.\n\n" +
+			"them, and prints them newest first: class, from, txid, thread, when and text. A message's\n" +
+			"thread is the bead a decision-needed question (or its reply) names, the bead or topic its\n" +
+			"own plaintext wrapper names (mw postern send --thread/--topic), or \"general\" otherwise.\n" +
+			"Reading marks them read, by moving a cursor kept in a bd kv note, never an event of its own.\n\n" +
 			"A message's sender is the BRC-78 envelope's own key, not the payload's own claim: a\n" +
 			"payload — or, once the backend can supply one, a transaction signing key — that disagrees\n" +
 			"with the envelope is printed with what it falsely claimed, and never read as a reply. A\n" +
@@ -195,7 +197,7 @@ func newPosternInboxCmd() *cobra.Command {
 // to postern_governor_key and broadcasting through the postern backend at
 // postern_backend.
 func newPosternSendCmd() *cobra.Command {
-	var class, bead, recommend string
+	var class, bead, recommend, thread, topic string
 	var options []string
 
 	cmd := &cobra.Command{
@@ -211,7 +213,11 @@ func newPosternSendCmd() *cobra.Command {
 			"bead: <text> becomes the question, and postern's docs/protocol.md section 6 question is\n" +
 			"sent in its place. Once broadcast, the bead is commented QUESTION with the txid and\n" +
 			"marked open, so mw postern inbox knows a reply to it answers this bead. They are refused\n" +
-			"with any --class but decision-needed.",
+			"with any --class but decision-needed.\n\n" +
+			"--thread <bead-id> or --topic <name> wraps <text> in postern's docs/protocol.md section\n" +
+			"6 thread envelope, so mw postern inbox prints it under that bead or topic rather than the\n" +
+			"general thread. They are mutually exclusive, and refused alongside --bead: a decision-needed\n" +
+			"question's own bead is already its thread.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			keys, err := posternKeys()
@@ -247,6 +253,7 @@ func newPosternSendCmd() *cobra.Command {
 			}
 			_, err = send.Run(cmd.Context(), application.PosternSendRequest{
 				Class: class, Text: args[0], Bead: bead, Recommend: recommend, Options: options,
+				Thread: thread, Topic: topic,
 			})
 			return err
 		},
@@ -255,6 +262,8 @@ func newPosternSendCmd() *cobra.Command {
 	cmd.Flags().StringVar(&bead, "bead", "", "the bead a decision-needed question is about")
 	cmd.Flags().StringVar(&recommend, "recommend", "", "the option a decision-needed question recommends")
 	cmd.Flags().StringArrayVar(&options, "option", nil, "an option a decision-needed question offers (repeatable)")
+	cmd.Flags().StringVar(&thread, "thread", "", "the bead this message's thread is (refused with --topic or a decision-needed question)")
+	cmd.Flags().StringVar(&topic, "topic", "", "the named topic this message's thread is (refused with --thread or a decision-needed question)")
 	return cmd
 }
 
