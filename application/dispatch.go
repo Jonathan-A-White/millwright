@@ -738,12 +738,13 @@ func (d Dispatch) refuseLeftover(ctx context.Context, id string, err error) (Sta
 
 // reclaimDeadPane looks at one story this host already has claimed, and gives
 // the claim back when its tmux window is still there but its pane has died
-// and the tracker's own lease on the claim has expired: together the
-// strongest sign that the session ended without mw next ever hearing about it
-// (the Laptop's DNS outage of 2026-09-24, mw-gq6.106). A live session, a
-// window gone outright, or a lease not yet expired are all left exactly as
-// they were — counted running, the same as before this existed — because
-// either sign alone is not enough to act on without a person's word.
+// and ReclaimStory says the tracker's own lease on the claim has run out:
+// together the strongest sign that the session ended without mw next ever
+// hearing about it (the Laptop's DNS outage of 2026-09-24, mw-gq6.106). A
+// live session, a window gone outright, or a lease ReclaimStory says still
+// holds are all left exactly as they were — counted running, the same as
+// before this existed — because either sign alone is not enough to act on
+// without a person's word.
 //
 // Nothing is cut or removed here: only the window, whose pane is already
 // dead, is closed, and the claim given back. What the story's worktree and
@@ -762,26 +763,28 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 	if status.State != StateExited && status.State != StateExitUnknown {
 		return false, nil
 	}
-	if detail.LeaseExpires.IsZero() || !d.now().After(detail.LeaseExpires) {
+
+	reclaimed, err := d.Tracker.ReclaimStory(ctx, id)
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf(
+			"%s: its session %s has a dead pane, but whether its lease had run out could not be read: %v", id, name, err))
+		return false, nil
+	}
+	if !reclaimed {
+		// The lease still holds: left alone for one more tick, exactly as a
+		// live session is.
 		return false, nil
 	}
 
 	why := fmt.Sprintf(
-		"mw dispatch on %s found %s claimed here with a dead pane (%s is %s) and its lease expired at %s with no heartbeat since: "+
+		"mw dispatch on %s found %s claimed here with a dead pane (%s is %s) and its lease had run out with no heartbeat since: "+
 			"the window was closed and the claim given back so it is dispatched again as a fresh attempt.",
-		d.Host, id, name, status.State, detail.LeaseExpires.UTC().Format(time.RFC3339))
+		d.Host, id, name, status.State)
 
 	if err := d.Runner.Close(ctx, name); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf(
-			"%s: its session %s has a dead pane and an expired lease, but the window could not be closed, so the claim was left alone: %v",
+			"%s: its session %s had a dead pane and its lease had run out, and the claim was given back, but the window could not be closed: %v",
 			id, name, err))
-		return false, nil
-	}
-	if err := d.Tracker.ReleaseClaim(ctx, id); err != nil {
-		report.Notes = append(report.Notes, fmt.Sprintf(
-			"%s: its session %s had a dead pane and an expired lease and its window was closed, but the claim could not be given back: %v",
-			id, name, err))
-		return false, nil
 	}
 	if err := d.Tracker.CommentOnStory(ctx, id, why); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s: the dead-pane reclaim could not be commented on: %v", id, err))

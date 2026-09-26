@@ -415,6 +415,7 @@ func TestDispatchCountsALivePaneAsRunningAndDoesNotReclaim(t *testing.T) {
 	dispatch, tracker, _, runner, _ := aFactory(t)
 	now := time.Date(2026, 9, 24, 23, 30, 0, 0, time.UTC)
 	dispatch.Now = func() time.Time { return now }
+	tracker.Clock = func() time.Time { return now }
 	claimedStory(t, tracker, "mw-gq6.9", 1)
 	if err := tracker.SetLeaseExpires("mw-gq6.9", now.Add(-time.Hour)); err != nil {
 		t.Fatalf("setting the lease: %v", err)
@@ -448,6 +449,7 @@ func TestDispatchReclaimsADeadPaneWithAnExpiredLeaseAndRedispatchesTheNextAttemp
 	dispatch, tracker, _, runner, _ := aFactory(t)
 	now := time.Date(2026, 9, 24, 23, 30, 0, 0, time.UTC)
 	dispatch.Now = func() time.Time { return now }
+	tracker.Clock = func() time.Time { return now }
 	claimedStory(t, tracker, "mw-gq6.9", 1)
 	expires := now.Add(-33 * time.Minute)
 	if err := tracker.SetLeaseExpires("mw-gq6.9", expires); err != nil {
@@ -500,6 +502,7 @@ func TestDispatchLeavesADeadPaneCountedRunningUntilItsLeaseExpires(t *testing.T)
 	dispatch, tracker, _, runner, _ := aFactory(t)
 	now := time.Date(2026, 9, 24, 23, 30, 0, 0, time.UTC)
 	dispatch.Now = func() time.Time { return now }
+	tracker.Clock = func() time.Time { return now }
 	claimedStory(t, tracker, "mw-gq6.9", 1)
 	if err := tracker.SetLeaseExpires("mw-gq6.9", now.Add(time.Hour)); err != nil {
 		t.Fatalf("setting the lease: %v", err)
@@ -531,6 +534,7 @@ func TestDispatchLeavesAClaimWithNoWindowAtAllCountedRunningAsBefore(t *testing.
 	dispatch, tracker, _, runner, _ := aFactory(t)
 	now := time.Date(2026, 9, 24, 23, 30, 0, 0, time.UTC)
 	dispatch.Now = func() time.Time { return now }
+	tracker.Clock = func() time.Time { return now }
 	claimedStory(t, tracker, "mw-gq6.9", 1)
 	if err := tracker.SetLeaseExpires("mw-gq6.9", now.Add(-time.Hour)); err != nil {
 		t.Fatalf("setting the lease: %v", err)

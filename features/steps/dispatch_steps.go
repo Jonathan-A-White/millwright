@@ -80,6 +80,11 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 			bundleFiles: &apptest.FakeVaultFiles{},
 			mail:        apptest.NewFakeMailbox(),
 		}
+		// ReclaimStory judges a lease against the fake tracker's own clock
+		// (mw-gq6.120): every scenario in this file runs at dispatchNow, so the
+		// tracker's clock reads the same time deadPaneWithLease's leases are
+		// set relative to.
+		c.tracker.Clock = func() time.Time { return dispatchNow }
 		return ctx, nil
 	})
 	ctx.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
