@@ -325,6 +325,29 @@ func TestBootChainsTheCloseOutOntoTheSessionWithTheStoryAfterIt(t *testing.T) {
 	}
 }
 
+func TestBootChainsTheHeartbeatOntoTheSessionWithTheStoryAfterIt(t *testing.T) {
+	v, h := newFakeVault(), &fakeHarness{}
+	boot := aSeatBoot(v, h)
+	boot.Heartbeat = []string{"/root/millwright/bin/mw", "next", "--heartbeat"}
+
+	if _, err := boot.Boot(context.Background(), aStory(nil), "/worktree"); err != nil {
+		t.Fatalf("booting the story: %v", err)
+	}
+	beat := h.launch.Heartbeat
+	if len(beat) != 4 || beat[0] != "/root/millwright/bin/mw" || beat[1] != "next" || beat[2] != "--heartbeat" || beat[3] != "mw-gq6.6" {
+		t.Errorf("expected the heartbeat of this story to be chained on, got %q", beat)
+	}
+
+	// A seat told to heartbeat nothing starts nothing beside the harness.
+	h.launch = application.Launch{}
+	if _, err := aSeatBoot(v, h).Boot(context.Background(), aStory(nil), "/worktree"); err != nil {
+		t.Fatalf("booting the story: %v", err)
+	}
+	if len(h.launch.Heartbeat) != 0 {
+		t.Errorf("expected nothing heartbeated, got %q", h.launch.Heartbeat)
+	}
+}
+
 func TestKickoffPromptGivesTheLiteralBdCommandForTheVault(t *testing.T) {
 	prompt := application.KickoffPrompt("builder", "mw-gq6.6", "/home/jwhite/100%-vault")
 
