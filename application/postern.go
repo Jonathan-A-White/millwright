@@ -443,6 +443,14 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 // true once done. A bead the tracker does not know — including no tracker at
 // all — reports false and changes nothing, so the reply is left for Run to
 // print as text.
+//
+// When the answer is itself a Release tap (its text, trimmed and
+// case-folded, is "release"), the epic it names is released as `mw release`
+// would — but only when the question it answers offered Release as one of
+// its options, and m's verified sender is this host's configured
+// GovernorKey. Any other signer, a question that never offered Release, a
+// bead that is not an epic, or one with nothing held, releases nothing; the
+// Mayor is always mailed what happened, so a refusal is never silent.
 func (i PosternInbox) recordAnswer(ctx context.Context, m PosternInboxMessage, reply PosternReply) (bool, error) {
 	if i.Tracker == nil {
 		return false, nil
@@ -450,6 +458,10 @@ func (i PosternInbox) recordAnswer(ctx context.Context, m PosternInboxMessage, r
 	comment := fmt.Sprintf("ANSWER %s from %s, txid %s: %s", sentInFull(m.Ts), orUnknown(m.From), m.Txid, reply.Answer)
 	if err := i.Tracker.CommentOnStory(ctx, reply.Bead, comment); err != nil {
 		return false, nil
+	}
+	noteValue, err := i.Memory.Note(ctx, PosternQuestionKey(reply.Bead))
+	if err != nil {
+		return false, err
 	}
 	if err := i.Memory.ClearNote(ctx, PosternQuestionKey(reply.Bead)); err != nil {
 		return false, err
@@ -464,7 +476,102 @@ func (i PosternInbox) recordAnswer(ctx context.Context, m PosternInboxMessage, r
 			return false, err
 		}
 	}
+	if isReleaseTap(reply.Answer) {
+		if err := i.releaseOnTap(ctx, m, reply.Bead, noteValue); err != nil {
+			return false, err
+		}
+	}
 	return true, nil
+}
+
+// isReleaseTap reports whether answer, trimmed and case-folded, asks for the
+// epic it answers to be released.
+func isReleaseTap(answer string) bool {
+	return strings.EqualFold(strings.TrimSpace(answer), "release")
+}
+
+// posternQuestionNote is what a bead's PosternQuestionKey note holds while its
+// question is open: the txid it was asked under and the options it offered,
+// so a reply's answer can be checked against what was actually offered,
+// without re-reading the question's own comment. A note written before this
+// field existed, or one set directly to a bare txid (as a fixture might),
+// does not decode as this shape — posternQuestionOfferedRelease reads that as
+// "no options recorded", never as an offer of Release.
+type posternQuestionNote struct {
+	Txid    string   `json:"txid"`
+	Options []string `json:"options,omitempty"`
+}
+
+// posternQuestionOfferedRelease reports whether noteValue — a bead's
+// PosternQuestionKey note — recorded Release among the options its question
+// offered.
+func posternQuestionOfferedRelease(noteValue string) bool {
+	var note posternQuestionNote
+	if err := json.Unmarshal([]byte(noteValue), &note); err != nil {
+		return false
+	}
+	for _, option := range note.Options {
+		if strings.EqualFold(strings.TrimSpace(option), "release") {
+			return true
+		}
+	}
+	return false
+}
+
+// releaseOnTap runs Release{Tracker: i.Tracker} against bead, exactly as `mw
+// release <bead>` would, once every guard holds: m's verified sender is this
+// host's configured GovernorKey, and noteValue shows the question it answers
+// offered Release. It appends a RELEASED comment naming the stories now
+// ready, and always mails the Mayor what happened — released, or why not.
+func (i PosternInbox) releaseOnTap(ctx context.Context, m PosternInboxMessage, bead, noteValue string) error {
+	if !i.isGovernor(m) {
+		return i.mailReleaseOutcome(ctx, bead, false, fmt.Sprintf("%s: not released, the tap's signer unchecked", bead))
+	}
+	if !posternQuestionOfferedRelease(noteValue) {
+		return i.mailReleaseOutcome(ctx, bead, false, fmt.Sprintf("%s: not released, its question never offered Release", bead))
+	}
+	found, err := Release{Tracker: i.Tracker}.Run(ctx, bead)
+	if err != nil {
+		return i.mailReleaseOutcome(ctx, bead, false, fmt.Sprintf("%s: not released: %s", bead, err.Error()))
+	}
+	held := found.held()
+	if len(held) == 0 {
+		return i.mailReleaseOutcome(ctx, bead, false, fmt.Sprintf("%s: not released, it has no held stories", bead))
+	}
+	ready := found.ready()
+	comment := fmt.Sprintf("RELEASED by mw on the Governor's Release tap (txid %s): %s", m.Txid, joinOrNone(ready))
+	if err := i.Tracker.CommentOnStory(ctx, bead, comment); err != nil {
+		return err
+	}
+	return i.mailReleaseOutcome(ctx, bead, true,
+		fmt.Sprintf("Released: %s: %d stories, ready: %s", bead, len(held), joinOrNone(ready)))
+}
+
+// mailReleaseOutcome mails the Mayor what a Release tap did or did not do. A
+// nil Mailbox sends nothing, exactly as an ordinary answer's mail does not.
+func (i PosternInbox) mailReleaseOutcome(ctx context.Context, bead string, released bool, body string) error {
+	if i.Mailbox == nil {
+		return nil
+	}
+	subject := fmt.Sprintf("Release not applied: %s", bead)
+	if released {
+		subject = fmt.Sprintf("Released: %s", bead)
+	}
+	_, err := i.Mailbox.Send(ctx, NewMessage{
+		From:    SeatIdentity(MwSeat, i.Host),
+		To:      MayorMailbox,
+		Subject: subject,
+		Body:    body,
+	})
+	return err
+}
+
+// joinOrNone is items joined with ", ", or "none" when there are none.
+func joinOrNone(items []string) string {
+	if len(items) == 0 {
+		return "none"
+	}
+	return strings.Join(items, ", ")
 }
 
 // PosternThreadCommentKey is the note key a thread message's txid is marked
@@ -822,14 +929,20 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 
 // recordQuestion comments req.Bead with the question just broadcast, and
 // marks it open with a note, so mw postern inbox knows a reply to it answers
-// this bead.
+// this bead. The note holds the txid and the options offered
+// (posternQuestionNote), so a Release tap can be checked against what the
+// question actually offered.
 func (s PosternSend) recordQuestion(ctx context.Context, req PosternSendRequest, txid string) error {
 	comment := fmt.Sprintf("QUESTION %s asked by postern, txid %s: %s (recommended %s; options %s)",
 		s.now().UTC().Format(time.RFC3339), txid, req.Text, req.Recommend, strings.Join(req.Options, ", "))
 	if err := s.Tracker.CommentOnStory(ctx, req.Bead, comment); err != nil {
 		return fmt.Errorf("recording the question on %s: %w", req.Bead, err)
 	}
-	if err := s.Notes.SetNote(ctx, PosternQuestionKey(req.Bead), txid); err != nil {
+	note, err := json.Marshal(posternQuestionNote{Txid: txid, Options: req.Options})
+	if err != nil {
+		return fmt.Errorf("building %s's question note: %w", req.Bead, err)
+	}
+	if err := s.Notes.SetNote(ctx, PosternQuestionKey(req.Bead), string(note)); err != nil {
 		return fmt.Errorf("marking %s's question open: %w", req.Bead, err)
 	}
 	return nil

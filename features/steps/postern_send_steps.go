@@ -351,8 +351,14 @@ func (c *posternSendContext) beadsQuestionNoteHoldsTheTxid(bead, txid string) er
 	if err != nil {
 		return err
 	}
-	if saved != txid {
-		return fmt.Errorf("expected the question note to hold txid %q, got %q", txid, saved)
+	var note struct {
+		Txid string `json:"txid"`
+	}
+	if err := json.Unmarshal([]byte(saved), &note); err != nil {
+		return fmt.Errorf("expected the question note to decode, got %q: %w", saved, err)
+	}
+	if note.Txid != txid {
+		return fmt.Errorf("expected the question note to hold txid %q, got %q", txid, note.Txid)
 	}
 	return nil
 }
