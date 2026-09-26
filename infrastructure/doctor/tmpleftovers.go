@@ -166,7 +166,9 @@ func (t *TmpLeftovers) Cure(ctx context.Context) error {
 }
 
 // Damper implements application.DoctorCheck.
-func (t *TmpLeftovers) Damper() (time.Duration, int) { return TmpLeftoversDamperWait, TmpLeftoversDamperCap }
+func (t *TmpLeftovers) Damper() (time.Duration, int) {
+	return TmpLeftoversDamperWait, TmpLeftoversDamperCap
+}
 
 // WayBack implements application.DoctorCheck: there is nothing to restore —
 // every path this check ever removes was already found dead, with no live
