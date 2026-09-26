@@ -152,6 +152,42 @@ func (f *FakeWindows) PaneState(_ context.Context, id string) (application.PaneS
 	return f.panes[i], nil
 }
 
+// typedInto is one call Type made: the window it typed into and the text.
+type typedInto struct {
+	id   string
+	text string
+}
+
+// Type implements application.ReapTerminal. What is recorded holds the
+// newline Enter would really leave on a captured pane, though Type itself is
+// given the line without one.
+func (f *FakeWindows) Type(_ context.Context, id, text string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return f.Err
+	}
+	if f.index(id) < 0 {
+		return fmt.Errorf("no window %s is open", id)
+	}
+	f.typed = append(f.typed, typedInto{id: id, text: text + "\n"})
+	return nil
+}
+
+// Typed is the text of every call Type made into the window of that id, as it
+// would appear on the pane after Enter, in order.
+func (f *FakeWindows) Typed(id string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, t := range f.typed {
+		if t.id == id {
+			out = append(out, t.text)
+		}
+	}
+	return out
+}
+
 // Close implements application.ReapTerminal.
 func (f *FakeWindows) Close(_ context.Context, id string) error {
 	f.mu.Lock()

@@ -233,6 +233,31 @@ func TestReaperClosesARealIdleWindowOnceTheSeatIsHandedOver(t *testing.T) {
 	}
 }
 
+func TestTypeSendsTextAndEnterIntoARealPane(t *testing.T) {
+	windows, _ := privateWindows(t)
+	dir := t.TempDir()
+	typed := filepath.Join(dir, "typed")
+	program := filepath.Join(dir, "catch.sh")
+	if err := os.WriteFile(program, []byte("#!/bin/sh\nexec cat > "+typed+"\n"), 0o755); err != nil {
+		t.Fatalf("writing the stand-in: %v", err)
+	}
+	if err := windows.Open(context.Background(), application.WindowSpec{Name: "millhand-2026-09-19-12", Dir: dir, Command: []string{program}}); err != nil {
+		t.Fatalf("opening the window: %v", err)
+	}
+	id := idOf(t, windows, "millhand-2026-09-19-12")
+
+	line := "New mail for millhand: 1 message(s). Run bd mail inbox."
+	if err := windows.Type(context.Background(), id, line); err != nil {
+		t.Fatalf("typing into the window: %v", err)
+	}
+
+	// Enter leaves its own newline on the pane, though Type was given none.
+	waitFor(t, "the pane to have been typed the line", func() bool {
+		got, err := os.ReadFile(typed)
+		return err == nil && string(got) == line+"\n"
+	})
+}
+
 func TestReaperNeverClosesARealWindowWithTextOnItsInputLine(t *testing.T) {
 	windows, _ := privateWindows(t)
 	typed := openStandIn(t, windows, t.TempDir(), "mayor-2026-09-19-12", typedInput)

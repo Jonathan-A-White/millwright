@@ -77,6 +77,11 @@ type ReapTerminal interface {
 	// PaneState reports what the window's pane is doing.
 	PaneState(ctx context.Context, window string) (PaneState, error)
 
+	// Type sends text into the window's pane, literally, followed by the Enter
+	// key — the same way a person's line would reach it. It is how a tick tells
+	// an idle Millhand of mail waiting for it without opening a fresh session.
+	Type(ctx context.Context, window, text string) error
+
 	// Close closes the window and what runs in it. Closing a window that is
 	// already gone is not a failure.
 	Close(ctx context.Context, window string) error

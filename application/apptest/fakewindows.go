@@ -30,6 +30,8 @@ type FakeWindows struct {
 	nextID int
 	// closed is the id of every window Close has closed.
 	closed []string
+	// typed is every call Type has made, in order.
+	typed []typedInto
 
 	// Opened is every spec Open was asked for, in the order it was asked.
 	Opened []application.WindowSpec

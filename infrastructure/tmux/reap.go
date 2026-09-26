@@ -149,6 +149,19 @@ func classifyPane(screen string) application.PaneState {
 	return application.PaneInput
 }
 
+// Type implements application.ReapTerminal: the text, typed literally into the
+// window's pane, followed by the Enter key.
+func (w *Windows) Type(ctx context.Context, window, text string) error {
+	if err := windowID(window); err != nil {
+		return err
+	}
+	if _, err := w.call(ctx, "send-keys", "-t", window, "-l", "--", text); err != nil {
+		return err
+	}
+	_, err := w.call(ctx, "send-keys", "-t", window, "Enter")
+	return err
+}
+
 // Close implements application.ReapTerminal: the window named by id, and what
 // runs in it. A window that is already gone is not a failure.
 func (w *Windows) Close(ctx context.Context, window string) error {
