@@ -869,6 +869,37 @@ func TestASlowPosternSnapshotIsKilledByItsOwnTimeoutAndDoesNotStopTheTick(t *tes
 	}
 }
 
+// TestAKilledPosternSnapshotNeverReportsANegativeElapsedTime covers a wall
+// clock that steps back between the two `date` reads the script takes around
+// a killed snapshot (start, then the kill): the elapsed seconds it logs must
+// clamp at 0, never go negative.
+func TestAKilledPosternSnapshotNeverReportsANegativeElapsedTime(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.posternCount(0)
+	f.env = append(f.env, "MW_MAIL_SNAPSHOT_TIMEOUT=1")
+	f.write("bin/date", "#!/bin/sh\n"+
+		"n=$(cat \"$MW_TEST_DIR/date-calls\" 2>/dev/null || echo 0)\n"+
+		"n=$((n + 1))\n"+
+		"echo \"$n\" > \"$MW_TEST_DIR/date-calls\"\n"+
+		"if [ \"$n\" -eq 1 ]; then echo 1000000000; else echo 999999997; fi\n", 0o755)
+	f.write("bin/mw", "#!/bin/sh\ncase \"$1 $2\" in\n"+
+		"\"postern snapshot\") echo \"$*\" >> \"$MW_TEST_DIR/postern.log\"; sleep 5; exit 0 ;;\n"+
+		"esac\ncase \"$1\" in\n"+
+		"sync) echo \"$*\" >> \"$MW_TEST_DIR/mw.log\" ;;\n"+
+		"nudge) echo \"$*\" >> \"$MW_TEST_DIR/nudge.log\"; [ -f \"$MW_TEST_DIR/nudge-output\" ] && cat \"$MW_TEST_DIR/nudge-output\" ;;\n"+
+		"postern) echo \"$*\" >> \"$MW_TEST_DIR/postern.log\"; cat \"$MW_TEST_DIR/postern-count\" 2>/dev/null ;;\n"+
+		"esac\nexit 0\n", 0o755)
+	f.inbox("mw-aaa")
+
+	out := f.tick()
+
+	if !strings.Contains(out, "killed after 0s") {
+		t.Fatalf("output %q does not report the kill as 0s when the clock stepped back between the two date reads", out)
+	}
+}
+
 func TestTheScriptIsExecutableAndParses(t *testing.T) {
 	info, err := os.Stat("mail-notify")
 	if err != nil {
