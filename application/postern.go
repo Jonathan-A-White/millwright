@@ -221,6 +221,76 @@ func decodePosternReply(text string) (PosternReply, bool) {
 	return reply, true
 }
 
+// decodePosternQuestion reads text as a PosternQuestion, reporting false when
+// it is not a JSON object with a non-empty bead field.
+func decodePosternQuestion(text string) (PosternQuestion, bool) {
+	var question PosternQuestion
+	if err := json.Unmarshal([]byte(text), &question); err != nil {
+		return PosternQuestion{}, false
+	}
+	if strings.TrimSpace(question.Bead) == "" {
+		return PosternQuestion{}, false
+	}
+	return question, true
+}
+
+// PosternGeneralThread is what mw postern inbox prints for a message whose
+// plaintext names no thread at all.
+const PosternGeneralThread = "general"
+
+// PosternThread is a message's thread reference, postern's docs/protocol.md
+// section 6 Threads subsection: a bead or a named topic, never both.
+type PosternThread struct {
+	Bead  string `json:"bead,omitempty"`
+	Topic string `json:"topic,omitempty"`
+}
+
+// PosternThreadedMessage is the plaintext a message carries when it names an
+// explicit thread rather than plain text: postern's docs/protocol.md section
+// 6 Threads subsection.
+type PosternThreadedMessage struct {
+	Thread PosternThread `json:"thread"`
+	Text   string        `json:"text"`
+}
+
+// decodePosternThreadedMessage reads text as a PosternThreadedMessage,
+// reporting false when it is not a JSON object naming a bead or a topic
+// thread — plain text, or a question or a reply, read exactly as before.
+func decodePosternThreadedMessage(text string) (PosternThreadedMessage, bool) {
+	var wrapped PosternThreadedMessage
+	if err := json.Unmarshal([]byte(text), &wrapped); err != nil {
+		return PosternThreadedMessage{}, false
+	}
+	if strings.TrimSpace(wrapped.Thread.Bead) == "" && strings.TrimSpace(wrapped.Thread.Topic) == "" {
+		return PosternThreadedMessage{}, false
+	}
+	return wrapped, true
+}
+
+// posternThreadAndText reads a decrypted record's class and plaintext,
+// reporting the thread label mw postern inbox prints it under and the text a
+// person should read. A decision-needed question's or a reply's own bead IS
+// its thread (postern's docs/protocol.md section 6); anything else reads the
+// plaintext's own thread wrapper, unwrapping it to the text it names;
+// PosternGeneralThread when there is none.
+func posternThreadAndText(class, text string) (thread, display string) {
+	if class == "decision-needed" {
+		if question, ok := decodePosternQuestion(text); ok {
+			return question.Bead, text
+		}
+	}
+	if reply, ok := decodePosternReply(text); ok {
+		return reply.Bead, text
+	}
+	if wrapped, ok := decodePosternThreadedMessage(text); ok {
+		if strings.TrimSpace(wrapped.Thread.Bead) != "" {
+			return wrapped.Thread.Bead, wrapped.Text
+		}
+		return wrapped.Thread.Topic, wrapped.Text
+	}
+	return PosternGeneralThread, text
+}
+
 // PosternClasses is the set of classes mw postern send accepts.
 var PosternClasses = []string{"message", "decision-needed", "landing", "alarm"}
 
@@ -271,6 +341,10 @@ type PosternInboxMessage struct {
 	SignerChecked bool
 	Ts            time.Time
 	Text          string
+	// Thread is the bead a decision-needed question or its reply names, the
+	// bead or topic the plaintext's own thread wrapper names, or
+	// PosternGeneralThread when it names neither.
+	Thread string
 }
 
 // PosternInbox reads the postern's message records addressed to this host's
@@ -339,7 +413,7 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 				}
 			}
 		}
-		i.printf("%s  from %s  txid %s  %s\n%s\n", m.Class, i.fromLabel(m), orUnknown(m.Txid), sentInFull(m.Ts), m.Text)
+		i.printf("%s  from %s  txid %s  thread %s  %s\n%s\n", m.Class, i.fromLabel(m), orUnknown(m.Txid), m.Thread, sentInFull(m.Ts), m.Text)
 	}
 	if newest > cursor {
 		if err := i.Memory.SetNote(ctx, PosternCursorKey, strconv.FormatInt(newest, 10)); err != nil {
@@ -446,10 +520,11 @@ func (i PosternInbox) fetch(ctx context.Context) (mine []PosternInboxMessage, ne
 			return nil, 0, 0, fmt.Errorf("decrypting record %d (%s): %w", r.Seq, r.Txid, err)
 		}
 		from, verified, signerChecked := posternVerifySender(envelopeFrom, r.From, r.Signer)
+		thread, display := posternThreadAndText(r.Class, text)
 		mine = append(mine, PosternInboxMessage{
 			Seq: r.Seq, Txid: r.Txid, Class: r.Class,
 			From: from, Verified: verified, SignerChecked: signerChecked,
-			Ts: r.Ts, Text: text,
+			Ts: r.Ts, Text: display, Thread: thread,
 		})
 	}
 	return mine, newest, cursor, nil
@@ -533,19 +608,41 @@ type PosternSendRequest struct {
 	Bead      string
 	Recommend string
 	Options   []string
+
+	// Thread, set, wraps Text in postern's docs/protocol.md section 6
+	// thread envelope, naming the bead this message belongs to — distinct
+	// from Bead, which only asks a question. Refused together with Topic,
+	// and together with a request that asks a question, whose own bead is
+	// already its thread.
+	Thread string
+	// Topic, set, wraps Text in the same envelope, naming a topic thread
+	// rather than a bead. Refused together with Thread.
+	Topic string
 }
 
 // asksQuestion reports whether this request asks a question of a bead, rather
 // than sending plain text.
 func (r PosternSendRequest) asksQuestion() bool { return strings.TrimSpace(r.Bead) != "" }
 
+// setsThread reports whether this request wraps Text with an explicit thread.
+func (r PosternSendRequest) setsThread() bool {
+	return strings.TrimSpace(r.Thread) != "" || strings.TrimSpace(r.Topic) != ""
+}
+
 // validate reports why this request cannot be sent, before anything is spent
 // or broadcast: --bead, --recommend and --option are only for class
-// decision-needed.
+// decision-needed; --thread and --topic are mutually exclusive, and refused
+// together with a question, whose own bead is already its thread.
 func (r PosternSendRequest) validate() error {
 	askedFor := strings.TrimSpace(r.Bead) != "" || strings.TrimSpace(r.Recommend) != "" || len(r.Options) > 0
 	if askedFor && r.Class != "decision-needed" {
 		return fmt.Errorf("mw postern send: --bead, --recommend and --option are only accepted with --class decision-needed")
+	}
+	if strings.TrimSpace(r.Thread) != "" && strings.TrimSpace(r.Topic) != "" {
+		return fmt.Errorf("mw postern send: --thread and --topic cannot both be set")
+	}
+	if r.asksQuestion() && r.setsThread() {
+		return fmt.Errorf("mw postern send: --thread and --topic are refused with a decision-needed question: its own bead is already the thread")
 	}
 	return nil
 }
@@ -615,12 +712,25 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 			balance, s.FloatSats, balance-s.FloatSats)
 	}
 	text := req.Text
-	if req.asksQuestion() {
+	switch {
+	case req.asksQuestion():
 		question, err := json.Marshal(PosternQuestion{Bead: req.Bead, Q: req.Text, Rec: req.Recommend, Options: req.Options})
 		if err != nil {
 			return "", fmt.Errorf("building the question: %w", err)
 		}
 		text = string(question)
+	case strings.TrimSpace(req.Thread) != "":
+		wrapped, err := json.Marshal(PosternThreadedMessage{Thread: PosternThread{Bead: req.Thread}, Text: req.Text})
+		if err != nil {
+			return "", fmt.Errorf("building the threaded message: %w", err)
+		}
+		text = string(wrapped)
+	case strings.TrimSpace(req.Topic) != "":
+		wrapped, err := json.Marshal(PosternThreadedMessage{Thread: PosternThread{Topic: req.Topic}, Text: req.Text})
+		if err != nil {
+			return "", fmt.Errorf("building the threaded message: %w", err)
+		}
+		text = string(wrapped)
 	}
 	ciphertext, err := s.Cipher.Encrypt(s.GovernorKey, text)
 	if err != nil {

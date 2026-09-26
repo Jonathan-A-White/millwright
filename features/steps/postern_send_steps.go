@@ -74,6 +74,10 @@ func InitializePosternSendScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" is run$`, c.mwPosternSendIsRun)
 	ctx.When(`^mw postern send "([^"]*)" is run with no --class$`, c.mwPosternSendIsRunWithNoClass)
 	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" for bead "([^"]*)" recommending "([^"]*)" with options "([^"]*)" is run$`, c.mwPosternSendAsksAQuestionIsRun)
+	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" threaded on bead "([^"]*)" is run$`, c.mwPosternSendThreadedOnBeadIsRun)
+	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" on topic "([^"]*)" is run$`, c.mwPosternSendOnTopicIsRun)
+	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" threaded on bead "([^"]*)" and on topic "([^"]*)" is run$`, c.mwPosternSendThreadedOnBeadAndTopicIsRun)
+	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" for bead "([^"]*)" recommending "([^"]*)" with options "([^"]*)" threaded on bead "([^"]*)" is run$`, c.mwPosternSendAsksAQuestionThreadedOnBeadIsRun)
 
 	ctx.Then(`^sending succeeds$`, c.itSucceeds)
 	ctx.Then(`^it prints "([^"]*)"$`, c.itPrints)
@@ -85,6 +89,10 @@ func InitializePosternSendScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the broadcast record is postern's question for bead "([^"]*)", "([^"]*)" recommending "([^"]*)" with options "([^"]*)"$`, c.theBroadcastRecordIsPosternsQuestion)
 	ctx.Then(`^bead "([^"]*)" is commented the QUESTION with txid "([^"]*)", "([^"]*)" recommending "([^"]*)" with options "([^"]*)"$`, c.beadIsCommentedTheQuestion)
 	ctx.Then(`^bead "([^"]*)"'s question note holds the txid "([^"]*)"$`, c.beadsQuestionNoteHoldsTheTxid)
+	ctx.Then(`^the broadcast record's plaintext is threaded on bead "([^"]*)" with text "([^"]*)"$`, c.theBroadcastRecordsPlaintextIsThreadedOnBead)
+	ctx.Then(`^the broadcast record's plaintext is on topic "([^"]*)" with text "([^"]*)"$`, c.theBroadcastRecordsPlaintextIsOnTopic)
+	ctx.Then(`^it is refused, saying --thread and --topic cannot both be set$`, c.itIsRefusedSayingThreadAndTopicCannotBothBeSet)
+	ctx.Then(`^it is refused, saying --thread and --topic are refused with a decision-needed question$`, c.itIsRefusedSayingThreadRefusedWithQuestion)
 }
 
 // splitOptions reads a comma-space-joined options list back into a slice, the
@@ -172,6 +180,28 @@ func (c *posternSendContext) mwPosternSendIsRunWithNoClass(text string) error {
 func (c *posternSendContext) mwPosternSendAsksAQuestionIsRun(class, text, bead, recommend, optionsCSV string) error {
 	c.txid, c.err = c.send().Run(context.Background(), application.PosternSendRequest{
 		Class: class, Text: text, Bead: bead, Recommend: recommend, Options: splitOptions(optionsCSV),
+	})
+	return nil
+}
+
+func (c *posternSendContext) mwPosternSendThreadedOnBeadIsRun(class, text, thread string) error {
+	c.txid, c.err = c.send().Run(context.Background(), application.PosternSendRequest{Class: class, Text: text, Thread: thread})
+	return nil
+}
+
+func (c *posternSendContext) mwPosternSendOnTopicIsRun(class, text, topic string) error {
+	c.txid, c.err = c.send().Run(context.Background(), application.PosternSendRequest{Class: class, Text: text, Topic: topic})
+	return nil
+}
+
+func (c *posternSendContext) mwPosternSendThreadedOnBeadAndTopicIsRun(class, text, thread, topic string) error {
+	c.txid, c.err = c.send().Run(context.Background(), application.PosternSendRequest{Class: class, Text: text, Thread: thread, Topic: topic})
+	return nil
+}
+
+func (c *posternSendContext) mwPosternSendAsksAQuestionThreadedOnBeadIsRun(class, text, bead, recommend, optionsCSV, thread string) error {
+	c.txid, c.err = c.send().Run(context.Background(), application.PosternSendRequest{
+		Class: class, Text: text, Bead: bead, Recommend: recommend, Options: splitOptions(optionsCSV), Thread: thread,
 	})
 	return nil
 }
@@ -323,6 +353,86 @@ func (c *posternSendContext) beadsQuestionNoteHoldsTheTxid(bead, txid string) er
 	}
 	if saved != txid {
 		return fmt.Errorf("expected the question note to hold txid %q, got %q", txid, saved)
+	}
+	return nil
+}
+
+// decryptedBroadcastPlaintext reads the one transaction broadcast back off
+// the fake backend and decrypts its record's plaintext.
+func (c *posternSendContext) decryptedBroadcastPlaintext() (string, error) {
+	sent := c.backend.Broadcasts()
+	if len(sent) != 1 {
+		return "", fmt.Errorf("expected one broadcast, got %d", len(sent))
+	}
+	tx, err := transaction.NewTransactionFromHex(sent[0])
+	if err != nil {
+		return "", fmt.Errorf("parsing the broadcast transaction: %w", err)
+	}
+	payload, ok := postern.DecodeRecordScript(tx.Outputs[0].LockingScript.String())
+	if !ok {
+		return "", fmt.Errorf("expected output 0 to be a version-1 record, got %s", tx.Outputs[0].LockingScript.String())
+	}
+	var record application.PosternPayload
+	if err := json.Unmarshal(payload, &record); err != nil {
+		return "", fmt.Errorf("the record's payload is not JSON: %w", err)
+	}
+	privKey, err := c.keys.PrivateKeyWIF()
+	if err != nil {
+		return "", err
+	}
+	text, _, err := c.cipher.Decrypt(privKey, record.Ct)
+	if err != nil {
+		return "", fmt.Errorf("decrypting the record's plaintext: %w", err)
+	}
+	return text, nil
+}
+
+func (c *posternSendContext) theBroadcastRecordsPlaintextIsThreadedOnBead(bead, text string) error {
+	got, err := c.decryptedBroadcastPlaintext()
+	if err != nil {
+		return err
+	}
+	want, err := json.Marshal(application.PosternThreadedMessage{Thread: application.PosternThread{Bead: bead}, Text: text})
+	if err != nil {
+		return err
+	}
+	if got != string(want) {
+		return fmt.Errorf("expected the plaintext\n%s\ngot\n%s", want, got)
+	}
+	return nil
+}
+
+func (c *posternSendContext) theBroadcastRecordsPlaintextIsOnTopic(topic, text string) error {
+	got, err := c.decryptedBroadcastPlaintext()
+	if err != nil {
+		return err
+	}
+	want, err := json.Marshal(application.PosternThreadedMessage{Thread: application.PosternThread{Topic: topic}, Text: text})
+	if err != nil {
+		return err
+	}
+	if got != string(want) {
+		return fmt.Errorf("expected the plaintext\n%s\ngot\n%s", want, got)
+	}
+	return nil
+}
+
+func (c *posternSendContext) itIsRefusedSayingThreadAndTopicCannotBothBeSet() error {
+	if c.err == nil {
+		return fmt.Errorf("expected send to be refused, but it succeeded")
+	}
+	if !strings.Contains(c.err.Error(), "--thread") || !strings.Contains(c.err.Error(), "--topic") {
+		return fmt.Errorf("expected the refusal to name --thread and --topic, got: %q", c.err.Error())
+	}
+	return nil
+}
+
+func (c *posternSendContext) itIsRefusedSayingThreadRefusedWithQuestion() error {
+	if c.err == nil {
+		return fmt.Errorf("expected send to be refused, but it succeeded")
+	}
+	if !strings.Contains(c.err.Error(), "--thread") || !strings.Contains(c.err.Error(), "decision-needed question") {
+		return fmt.Errorf("expected the refusal to say --thread is refused with a decision-needed question, got: %q", c.err.Error())
 	}
 	return nil
 }

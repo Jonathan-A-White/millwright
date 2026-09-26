@@ -80,6 +80,9 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a postern reply for bead "([^"]*)" with answer "([^"]*)" and txid "([^"]*)" addressed to this key$`,
 		c.aPosternReplyAddressedToThisKey)
 	ctx.Given(`^a plain text postern record with text "([^"]*)" addressed to this key$`, c.aPlainTextRecordAddressedToThisKey)
+	ctx.Given(`^a postern record of class "([^"]*)" addressed to this key, threaded on bead "([^"]*)"$`, c.aPosternRecordAddressedToThisKeyThreadedOnBead)
+	ctx.Given(`^a postern record of class "([^"]*)" addressed to this key, on topic "([^"]*)"$`, c.aPosternRecordAddressedToThisKeyOnTopic)
+	ctx.Given(`^a postern question for bead "([^"]*)" addressed to this key$`, c.aPosternQuestionForBeadAddressedToThisKey)
 	ctx.Given(`^a postern record of class "([^"]*)" addressed to this key signed by "([^"]*)"$`, c.aPosternRecordAddressedToThisKeySignedBy)
 	ctx.Given(`^a postern reply for bead "([^"]*)" with answer "([^"]*)" and txid "([^"]*)" addressed to this key claiming to be from "([^"]*)"$`,
 		c.aPosternReplyClaimingToBeFrom)
@@ -164,6 +167,66 @@ func (c *posternInboxContext) aPosternRecordAddressedToThisKeySignedBy(class, si
 		From:       c.cipher.From,
 		To:         c.pubKey,
 		Signer:     signer,
+		Ciphertext: ciphertext,
+	})
+	return nil
+}
+
+func (c *posternInboxContext) aPosternRecordAddressedToThisKeyThreadedOnBead(class, bead string) error {
+	wrapped, err := json.Marshal(application.PosternThreadedMessage{
+		Thread: application.PosternThread{Bead: bead},
+		Text:   fmt.Sprintf("%s text", class),
+	})
+	if err != nil {
+		return err
+	}
+	ciphertext, err := c.cipher.Encrypt(c.pubKey, string(wrapped))
+	if err != nil {
+		return err
+	}
+	c.backend.AddRecord(application.PosternRecord{
+		Class:      class,
+		From:       c.cipher.From,
+		To:         c.pubKey,
+		Ciphertext: ciphertext,
+	})
+	return nil
+}
+
+func (c *posternInboxContext) aPosternRecordAddressedToThisKeyOnTopic(class, topic string) error {
+	wrapped, err := json.Marshal(application.PosternThreadedMessage{
+		Thread: application.PosternThread{Topic: topic},
+		Text:   fmt.Sprintf("%s text", class),
+	})
+	if err != nil {
+		return err
+	}
+	ciphertext, err := c.cipher.Encrypt(c.pubKey, string(wrapped))
+	if err != nil {
+		return err
+	}
+	c.backend.AddRecord(application.PosternRecord{
+		Class:      class,
+		From:       c.cipher.From,
+		To:         c.pubKey,
+		Ciphertext: ciphertext,
+	})
+	return nil
+}
+
+func (c *posternInboxContext) aPosternQuestionForBeadAddressedToThisKey(bead string) error {
+	question, err := json.Marshal(application.PosternQuestion{Bead: bead, Q: "Ship it?", Rec: "A", Options: []string{"A", "B"}})
+	if err != nil {
+		return err
+	}
+	ciphertext, err := c.cipher.Encrypt(c.pubKey, string(question))
+	if err != nil {
+		return err
+	}
+	c.backend.AddRecord(application.PosternRecord{
+		Class:      "decision-needed",
+		From:       c.cipher.From,
+		To:         c.pubKey,
 		Ciphertext: ciphertext,
 	})
 	return nil

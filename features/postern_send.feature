@@ -5,6 +5,10 @@ Feature: mw postern send
   to send to, when the key's balance would exceed the float cap mw enforces on
   every send, naming the excess, or when the class is not one mw knows.
 
+  --thread <bead-id> or --topic <name> wraps the message's plaintext with an
+  explicit thread; a decision-needed question's own --bead is already its
+  thread, so --thread and --topic are refused alongside one.
+
   Background:
     Given a throwaway postern key for sending
     And the postern governor key is "governor-pubkey-hex"
@@ -67,3 +71,28 @@ Feature: mw postern send
     And the bead "mw-abc.1" exists
     When mw postern send "message" "Ship it?" for bead "mw-abc.1" recommending "A" with options "A" is run
     Then it is refused, saying --bead is only accepted with --class decision-needed
+
+  Scenario: --thread wraps the message with a bead thread
+    Given the postern key's balance is 1000 satoshis
+    And the postern key holds a spendable utxo of 5000 satoshis
+    When mw postern send "message" "Ready for review." threaded on bead "mw-abc.1" is run
+    Then sending succeeds
+    And the broadcast record's plaintext is threaded on bead "mw-abc.1" with text "Ready for review."
+
+  Scenario: --topic wraps the message with a named topic thread
+    Given the postern key's balance is 1000 satoshis
+    And the postern key holds a spendable utxo of 5000 satoshis
+    When mw postern send "message" "Ready for review." on topic "roadmap" is run
+    Then sending succeeds
+    And the broadcast record's plaintext is on topic "roadmap" with text "Ready for review."
+
+  Scenario: --thread and --topic cannot both be set
+    Given the postern key's balance is 1000 satoshis
+    When mw postern send "message" "Ready for review." threaded on bead "mw-abc.1" and on topic "roadmap" is run
+    Then it is refused, saying --thread and --topic cannot both be set
+
+  Scenario: --thread is refused with a decision-needed question, whose own bead is already the thread
+    Given the postern key's balance is 1000 satoshis
+    And the bead "mw-abc.1" exists
+    When mw postern send "decision-needed" "Ship it?" for bead "mw-abc.1" recommending "A" with options "A" threaded on bead "mw-other.1" is run
+    Then it is refused, saying --thread and --topic are refused with a decision-needed question
