@@ -2,7 +2,6 @@ package doctor
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -33,8 +32,15 @@ const (
 
 // errBeadsSizeNoCure is what Cure always returns: a repack that would shrink
 // .beads deletes packs, held back by the Doctor-checks approval (mw-6ww.40),
-// so this check can only ever report the fault, never fix it.
-var errBeadsSizeNoCure = errors.New("no cure: repacking .beads would delete packs; a person clears space by hand")
+// so this check can only ever report the fault, never fix it. It says what
+// already relieves this without a cure, so a person reading it is not left
+// thinking nothing is being done: a crowded git-remote-cache repacks itself
+// on the next sync, and the tracker's own GC keeps to its cadence regardless.
+var errBeadsSizeNoCure = fmt.Errorf(
+	"no cure: a crowded git-remote-cache now repacks itself with the next sync; "+
+		"the tracker's own GC also runs at least every %dh; a person clears space by hand only if both still fall behind",
+	int(application.DefaultGCInterval.Hours()),
+)
 
 // BeadsSize is the check that watches this host's own .beads against the
 // same budget mw status warns against: past it, an unattended sync or

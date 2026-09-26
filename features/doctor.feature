@@ -162,6 +162,8 @@ Feature: mw doctor
     When mw doctor's beads-size check runs for real
     Then mw doctor leaves with the status 6
     And the doctor log holds "beads-size cure-failed no cure"
+    And the doctor log holds "repacks itself"
+    And the doctor log holds "GC"
     And the note "doctor.laptop.beads-size" does not exist
     When mw doctor's beads-size check runs for real
     Then mw doctor leaves with the status 6

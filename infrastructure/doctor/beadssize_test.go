@@ -48,8 +48,15 @@ func TestBeadsSizeProbeIsFaultyPastBudgetNamingBytesAndBudget(t *testing.T) {
 		t.Fatalf("expected the reason to name the bytes and the budget, got %q", reason)
 	}
 
-	if err := check.Cure(context.Background()); err == nil {
+	err := check.Cure(context.Background())
+	if err == nil {
 		t.Fatal("expected curing to fail: there is no cure")
+	}
+	if !strings.Contains(err.Error(), "repacks itself") {
+		t.Fatalf("expected the cure's error to name the repack that already runs on the next sync, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "GC") {
+		t.Fatalf("expected the cure's error to name the tracker's own GC, got %q", err.Error())
 	}
 	if way := check.WayBack(); !strings.Contains(way, "none") {
 		t.Fatalf("expected the way back to say none, got %q", way)
