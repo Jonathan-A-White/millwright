@@ -9,6 +9,14 @@ import (
 	"time"
 )
 
+// DefaultTmpLeftoversBudgetBytes is how many bytes of this factory's own dead
+// temp leftovers — a killed bd's dolt spool files, /tmp/bd, a stale
+// /tmp/claude-0/<session> dir — mw doctor's tmp-leftovers check holds a host
+// to, and separately holds ~/.cache/go-build to, before it clears them, when
+// nothing says otherwise. It is the same 200_000_000
+// infrastructure/config.DefaultDoctorTmpLeftoversBudgetBytes reads as.
+const DefaultTmpLeftoversBudgetBytes = 200_000_000
+
 // DoctorFaultExit is the status mw doctor leaves with when this run ends with
 // a check faulty and uncured — damped, or its cure failed. It is
 // WatchWakeExit's neighbour: the same "somebody should look" signal a timer's

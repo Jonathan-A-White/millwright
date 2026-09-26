@@ -35,6 +35,7 @@
 //	tunnel_probe   = "ss -ltn sport = :2222"
 //	doctor_wg_hub  = "10.88.0.1:22"
 //	doctor_wg_unit = "wg-quick@wg0"
+//	tmp_leftovers_budget_bytes = 200000000
 package config
 
 import (
@@ -901,6 +902,42 @@ func DoctorWgHub() (string, error) {
 // nothing.
 func DoctorWgUnit() (string, error) {
 	return doctorTableSetting("doctor_wg_unit", DefaultDoctorWgUnit)
+}
+
+// DefaultDoctorTmpLeftoversBudgetBytes is how many bytes of this factory's own
+// dead temp leftovers — a killed bd's dolt spool files, /tmp/bd, a stale
+// /tmp/claude-0/<session> dir — mw doctor's tmp-leftovers check holds a host
+// to, and separately holds ~/.cache/go-build to, when the [doctor] table says
+// nothing. It is the same 200_000_000 application.DefaultTmpLeftoversBudgetBytes
+// reads as.
+const DefaultDoctorTmpLeftoversBudgetBytes int64 = 200_000_000
+
+// DoctorTmpLeftoversBudgetBytes reports the byte budget mw doctor's
+// tmp-leftovers check holds this host's own dead temp leftovers to, and
+// separately holds ~/.cache/go-build to: the `[doctor]` table's
+// `tmp_leftovers_budget_bytes` key of ~/.config/mw/config.toml, and
+// DefaultDoctorTmpLeftoversBudgetBytes when the table says nothing.
+func DoctorTmpLeftoversBudgetBytes() (int64, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return 0, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	table, err := tableIn(filepath.Join(home, File), DoctorTable)
+	if err != nil {
+		return 0, err
+	}
+	said := strings.TrimSpace(table["tmp_leftovers_budget_bytes"])
+	if said == "" {
+		return DefaultDoctorTmpLeftoversBudgetBytes, nil
+	}
+	bytes, err := strconv.ParseInt(said, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("the doctor's tmp_leftovers_budget_bytes is %q, which is not a whole number of bytes: set `tmp_leftovers_budget_bytes = <n>` in %s", said, File)
+	}
+	if bytes < 1 {
+		return 0, fmt.Errorf("the doctor's tmp_leftovers_budget_bytes is %d, so every host would be over budget: set it to 1 or more", bytes)
+	}
+	return bytes, nil
 }
 
 // DoctorTunnelHost reports the VPS's ssh name mw doctor's tunnel check

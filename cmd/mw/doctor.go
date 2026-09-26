@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
@@ -73,6 +74,10 @@ func newDoctorCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			tmpLeftoversBudget, err := config.DoctorTmpLeftoversBudgetBytes()
+			if err != nil {
+				return err
+			}
 			vault, err := config.Vault()
 			if err != nil {
 				return err
@@ -83,6 +88,8 @@ func newDoctorCmd() *cobra.Command {
 			}
 
 			store := doctor.New(dir)
+			tmpLeftovers := doctor.NewTmpLeftovers(os.TempDir())
+			tmpLeftovers.Budget = tmpLeftoversBudget
 			return runDoctor(cmd, application.Doctor{
 				Checks: application.DoctorChecks{
 					doctor.NewDaemonReload(units),
@@ -92,6 +99,7 @@ func newDoctorCmd() *cobra.Command {
 					doctor.NewVaultDirty(vault, host),
 					doctor.NewTimers(units),
 					doctor.NewBeadsSize(vault),
+					tmpLeftovers,
 					doctor.NewMayorGone(vault),
 				},
 				State: store,

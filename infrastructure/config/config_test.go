@@ -764,6 +764,32 @@ func TestDoctorWgSettingsAreTheShippedDefaultsUntilAHostSaysOtherwise(t *testing
 	}
 }
 
+func TestDoctorTmpLeftoversBudgetIsTheShippedDefaultUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, "")
+
+	budget, err := config.DoctorTmpLeftoversBudgetBytes()
+	if err != nil || budget != config.DefaultDoctorTmpLeftoversBudgetBytes {
+		t.Fatalf("expected the default tmp-leftovers budget, got %d: %v", budget, err)
+	}
+
+	writeConfig(t, "[doctor]\ntmp_leftovers_budget_bytes = 500000000\n")
+	if budget, err = config.DoctorTmpLeftoversBudgetBytes(); err != nil || budget != 500_000_000 {
+		t.Fatalf("expected the file's tmp_leftovers_budget_bytes, got %d: %v", budget, err)
+	}
+}
+
+func TestDoctorTmpLeftoversBudgetRefusesANonNumberOrLessThanOne(t *testing.T) {
+	writeConfig(t, "[doctor]\ntmp_leftovers_budget_bytes = \"a lot\"\n")
+	if _, err := config.DoctorTmpLeftoversBudgetBytes(); err == nil || !strings.Contains(err.Error(), "whole number") {
+		t.Fatalf("expected a non-number to be refused, got %v", err)
+	}
+
+	writeConfig(t, "[doctor]\ntmp_leftovers_budget_bytes = 0\n")
+	if _, err := config.DoctorTmpLeftoversBudgetBytes(); err == nil || !strings.Contains(err.Error(), "over budget") {
+		t.Fatalf("expected zero to be refused, got %v", err)
+	}
+}
+
 func TestDoctorTunnelHostWithNoWatchTableIsEmpty(t *testing.T) {
 	writeConfig(t, vpsConfig)
 
