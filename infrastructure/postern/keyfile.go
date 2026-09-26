@@ -6,6 +6,7 @@
 package postern
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -100,6 +101,28 @@ func (k *KeyFile) Sign(utxos []application.PosternUtxo, payload []byte) (string,
 		return "", err
 	}
 	return tx.Hex(), nil
+}
+
+// SignNonce signs nonce with the postern key, for the Authorization header
+// postern's docs/api.md Authentication section describes: a DER-encoded
+// ECDSA signature over sha256(nonce) (the nonce string's UTF-8 bytes, a
+// single hash, not double), matching @bsv/sdk's PrivateKey.sign(nonceString)
+// and Signature.toDER().
+func (k *KeyFile) SignNonce(nonce string) (string, error) {
+	priv, err := k.privateKey()
+	if err != nil {
+		return "", err
+	}
+	hash := sha256.Sum256([]byte(nonce))
+	sig, err := priv.Sign(hash[:])
+	if err != nil {
+		return "", fmt.Errorf("signing the postern backend's challenge: %w", err)
+	}
+	der, err := sig.ToDER()
+	if err != nil {
+		return "", fmt.Errorf("DER-encoding the postern challenge signature: %w", err)
+	}
+	return hex.EncodeToString(der), nil
 }
 
 // privateKey reads the key file and parses its private key.

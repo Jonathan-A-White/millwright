@@ -103,13 +103,15 @@ var posternCipher = func(keys *postern.KeyFile) application.Cipher { return post
 // posternClock stamps a message mw postern send builds. A test fixes it.
 var posternClock = time.Now
 
-// posternBackend is the postern backend config postern_backend points at.
-func posternBackend() (*postern.HTTP, error) {
+// posternBackend is the postern backend config postern_backend points at,
+// authenticating every call with keys — the Mayor's postern key — signing
+// the backend's challenge (postern's docs/api.md Authentication section).
+func posternBackend(keys *postern.KeyFile) (*postern.HTTP, error) {
 	base, err := config.PosternBackend()
 	if err != nil {
 		return nil, err
 	}
-	return postern.NewHTTP(base), nil
+	return postern.NewHTTP(base, keys), nil
 }
 
 // posternGateway is the beads gateway mw postern inbox and send read and
@@ -162,7 +164,7 @@ func newPosternInboxCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			backend, err := posternBackend()
+			backend, err := posternBackend(keys)
 			if err != nil {
 				return err
 			}
@@ -232,7 +234,7 @@ func newPosternSendCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			backend, err := posternBackend()
+			backend, err := posternBackend(keys)
 			if err != nil {
 				return err
 			}

@@ -117,11 +117,19 @@ func posternHome(t *testing.T, backend, wif, governorKey string) {
 }
 
 // fakePosternBackend stands in for the postern backend's /api (postern's
-// docs/api.md): each route a canned JSON answer, and the last broadcast kept.
+// docs/api.md): each route a canned JSON answer, and the last broadcast
+// kept. GET /api/challenge, which every other route requires a signed proof
+// against, is answered with a fresh nonce every time.
 func fakePosternBackend(t *testing.T, routes map[string]string) (url string, broadcast *string) {
 	t.Helper()
 	var sent string
+	var challenges int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/api/challenge" {
+			challenges++
+			fmt.Fprintf(w, `{"nonce":"nonce-%d"}`, challenges)
+			return
+		}
 		if r.Method == http.MethodPost && r.URL.Path == "/api/broadcast" {
 			var body struct {
 				Rawtx string `json:"rawtx"`
