@@ -31,6 +31,18 @@ const tmpLeftoversBdName = "bd"
 // subdirectory per Claude Code session.
 const tmpLeftoversClaudeDir = "claude-0"
 
+// tmpLeftoversLiveGoProcessNames are the process names (as /proc/<pid>/comm
+// reports them) that mean a go build, test or vet is under way: go-build's
+// cure would race a live one of these even with no file of its own held open
+// yet.
+var tmpLeftoversLiveGoProcessNames = map[string]bool{
+	"go":        true,
+	"gotestsum": true,
+	"compile":   true,
+	"link":      true,
+	"vet":       true,
+}
+
 // The tmp-leftovers check's damper: a short idle between two cures, and a
 // modest cap — its cure is a plain delete of things already found to have no
 // live owner, safe to retry, unlike a check whose cure reaches over the
@@ -100,9 +112,9 @@ func (t *TmpLeftovers) Name() string { return TmpLeftoversName }
 // Probe implements application.DoctorCheck: cannot-tell when this host's own
 // leftovers cannot be read at all (ProcDir missing, TmpDir's claude-0
 // unreadable); faulty, naming whichever of the dead leftovers' total and
-// GoBuildDir's size is past its own share of the budget; ok, naming the dead
-// bytes found, when there are some but they are under budget; a plain ok
-// otherwise.
+// GoBuildDir's size is past its own share of the budget and not live; ok,
+// naming the dead bytes found and any live-but-over-budget GoBuildDir left
+// alone, when there are some but nothing is faulty; a plain ok otherwise.
 func (t *TmpLeftovers) Probe(context.Context) (application.Verdict, string) {
 	dead, err := t.deadLeftovers()
 	if err != nil {
@@ -111,28 +123,38 @@ func (t *TmpLeftovers) Probe(context.Context) (application.Verdict, string) {
 	budget := t.budget()
 	total := sumBytes(dead)
 
-	var faults []string
+	var faults, oks []string
 	if total > budget {
 		faults = append(faults, fmt.Sprintf("%d bytes of dead leftovers, past the %d byte budget", total, budget))
+	} else if total > 0 {
+		oks = append(oks, fmt.Sprintf("%d bytes of dead leftovers found, under the %d byte budget", total, budget))
 	}
+
 	if goBuildBytes, err := t.dirSize(t.GoBuildDir); err == nil && goBuildBytes > budget {
-		faults = append(faults, fmt.Sprintf("go-build cache is %d bytes, past its own %d byte budget", goBuildBytes, budget))
+		live, err := t.goBuildLive()
+		if err != nil {
+			return application.DoctorCannotTell, err.Error()
+		}
+		if live {
+			oks = append(oks, fmt.Sprintf("go-build is %d bytes, past the %d byte budget, but a go process is live: left alone", goBuildBytes, budget))
+		} else {
+			faults = append(faults, fmt.Sprintf("go-build cache is %d bytes, past its own %d byte budget", goBuildBytes, budget))
+		}
 	}
+
 	if len(faults) > 0 {
 		return application.DoctorFaulty, strings.Join(faults, "; ")
 	}
-	if total > 0 {
-		return application.DoctorOK, fmt.Sprintf("%d bytes of dead leftovers found, under the %d byte budget", total, budget)
-	}
-	return application.DoctorOK, ""
+	return application.DoctorOK, strings.Join(oks, "; ")
 }
 
 // Cure implements application.DoctorCheck: os.RemoveAll on exactly the dead
 // leftovers Probe would find, only when their total is past budget, and
 // separately `go clean -cache` on GoBuildDir, only when it is past budget on
-// its own. Neither runs when its own half is not faulty: a check faulty only
-// on GoBuildDir never touches a dead leftover still under budget, and the
-// reverse.
+// its own and not live. Neither runs when its own half is not faulty: a check
+// faulty only on GoBuildDir never touches a dead leftover still under
+// budget, and the reverse; a live GoBuildDir is left for a later tick rather
+// than cleaned out from under a running go build, test or vet.
 func (t *TmpLeftovers) Cure(ctx context.Context) error {
 	dead, err := t.deadLeftovers()
 	if err != nil {
@@ -153,11 +175,17 @@ func (t *TmpLeftovers) Cure(ctx context.Context) error {
 	}
 
 	if goBuildBytes, err := t.dirSize(t.GoBuildDir); err == nil && goBuildBytes > budget {
-		if err := t.goClean(ctx); err != nil {
-			return fmt.Errorf("go clean -cache: %w", err)
+		live, err := t.goBuildLive()
+		if err != nil {
+			return err
 		}
-		cured = append(cured, t.GoBuildDir)
-		freed += goBuildBytes
+		if !live {
+			if err := t.goClean(ctx); err != nil {
+				return fmt.Errorf("go clean -cache: %w", err)
+			}
+			cured = append(cured, t.GoBuildDir)
+			freed += goBuildBytes
+		}
 	}
 
 	t.cured = cured
@@ -279,6 +307,22 @@ func (t *TmpLeftovers) pathSize(path string, info os.FileInfo) (int64, error) {
 	return total, nil
 }
 
+// goBuildLive reports whether GoBuildDir should be left alone rather than
+// faulted on or cleaned: something on this host has a file open under it, or
+// a go build/test/vet process of its own is running — either is reason
+// enough to leave a live cache alone even past budget.
+func (t *TmpLeftovers) goBuildLive() (bool, error) {
+	procDir := t.procDir()
+	open, err := openedByAnyProcess(procDir, t.GoBuildDir)
+	if err != nil {
+		return false, err
+	}
+	if open {
+		return true, nil
+	}
+	return anyProcessNamed(procDir, tmpLeftoversLiveGoProcessNames)
+}
+
 // dirSize is dir's size, the way pathSize sums a directory, or an error for a
 // dir that is empty, missing, or not there to size at all — a caller that
 // only acts on a nil error skips it either way.
@@ -370,6 +414,33 @@ func openedByAnyProcess(procDir, target string) (bool, error) {
 			if link == target || strings.HasPrefix(link, target+string(filepath.Separator)) {
 				return true, nil
 			}
+		}
+	}
+	return false, nil
+}
+
+// anyProcessNamed reports whether any process under procDir is one of names,
+// read from <procDir>/<pid>/comm the way `ps` reads a process's own name. A
+// process this check cannot read the comm file of, exited mid-scan or
+// otherwise, is treated as not one of names.
+func anyProcessNamed(procDir string, names map[string]bool) (bool, error) {
+	entries, err := os.ReadDir(procDir)
+	if err != nil {
+		return false, fmt.Errorf("listing %s: %w", procDir, err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if _, err := strconv.Atoi(entry.Name()); err != nil {
+			continue
+		}
+		comm, err := os.ReadFile(filepath.Join(procDir, entry.Name(), "comm"))
+		if err != nil {
+			continue
+		}
+		if names[strings.TrimSpace(string(comm))] {
+			return true, nil
 		}
 	}
 	return false, nil
