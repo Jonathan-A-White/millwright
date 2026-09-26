@@ -359,7 +359,9 @@ type WorkTracker interface {
 
 	// ReleaseClaim gives a claim back: the story is unassigned and open again,
 	// and any dispatcher may take it. It is how a dispatch that failed after
-	// claiming leaves the story exactly as ready as it found it.
+	// claiming leaves the story exactly as ready as it found it. It is
+	// conditional on this actor's own name: a claim another actor holds is
+	// left exactly as it was, and reported as a failure, writing nothing.
 	ReleaseClaim(ctx context.Context, id string) error
 
 	// SetStoryState records one dimension of a story's operational state — what
