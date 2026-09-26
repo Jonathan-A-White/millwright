@@ -1,10 +1,12 @@
 Feature: mw postern inbox
   mw postern inbox reads the postern's message records addressed to this
-  host's key, decrypts them, and prints them newest first: class, from, txid
-  and when, then the text. Reading marks them read, by moving a cursor kept
-  in a bd kv note, never an event of its own. --unread-count prints only how
-  many are unread, without reading them, so a notifier can poll it without
-  consuming anything.
+  host's key, decrypts them, and prints them newest first: class, from, txid,
+  thread and when, then the text. A message's thread is the bead a
+  decision-needed question (or its reply) names, the bead or topic its own
+  plaintext wrapper names, or "general" when it names neither. Reading marks
+  them read, by moving a cursor kept in a bd kv note, never an event of its
+  own. --unread-count prints only how many are unread, without reading them,
+  so a notifier can poll it without consuming anything.
 
   Background:
     Given a throwaway postern key
@@ -101,3 +103,28 @@ Feature: mw postern inbox
     When mw postern inbox is run
     Then reading succeeds
     And it printed "from the Governor (signer unchecked)  txid"
+
+  Scenario: a message with no thread prints the general thread
+    Given a plain text postern record with text "hello" addressed to this key
+    When mw postern inbox is run
+    Then reading succeeds
+    And it printed "thread general"
+
+  Scenario: a message threaded on a bead prints that bead as its thread
+    Given a postern record of class "message" addressed to this key, threaded on bead "mw-abc.1"
+    When mw postern inbox is run
+    Then reading succeeds
+    And it printed "thread mw-abc.1"
+    And it printed "message text"
+
+  Scenario: a message on a named topic prints that topic as its thread
+    Given a postern record of class "message" addressed to this key, on topic "roadmap"
+    When mw postern inbox is run
+    Then reading succeeds
+    And it printed "thread roadmap"
+
+  Scenario: a decision-needed question's own bead is its thread, without an explicit thread field
+    Given a postern question for bead "mw-abc.2" addressed to this key
+    When mw postern inbox is run
+    Then reading succeeds
+    And it printed "thread mw-abc.2"
