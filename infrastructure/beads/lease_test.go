@@ -138,3 +138,23 @@ func TestAClaimRefusedOnAStorySomeoneElseHoldsIsReportedHeld(t *testing.T) {
 		t.Fatalf("expected t-1 held by mw@laptop, got %v", err)
 	}
 }
+
+// ReleaseClaim names the actor giving the claim back with --if-assignee, so
+// that bd itself refuses a give-back that no longer matches who this host
+// thinks holds the claim — the guard TestReleaseClaimByAnotherActorLeavesTheClaimUntouched
+// exercises against a real bd.
+func TestReleaseClaimNamesItsOwnActorAsTheGuard(t *testing.T) {
+	gateway, log := leaseStandIn(t, map[string]string{
+		"update": `[{"id": "t-1"}]`,
+	})
+	if err := gateway.ReleaseClaim(context.Background(), "t-1"); err != nil {
+		t.Fatalf("releasing: %v", err)
+	}
+	asked, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatalf("reading what bd was asked: %v", err)
+	}
+	if want := "update t-1 --status open --assignee  --if-assignee mw@vps"; !strings.Contains(string(asked), want) {
+		t.Fatalf("expected bd to be asked %q, got %q", want, asked)
+	}
+}

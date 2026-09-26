@@ -93,3 +93,53 @@ func TestAClaimIsALeaseInARealBd(t *testing.T) {
 		t.Fatalf("expected %s still claimed by mw@vps, got %+v: %v", storyID, still, err)
 	}
 }
+
+// mw-gq6.119: ReleaseClaim names its own actor as bd's --if-assignee guard,
+// so a give-back by a host that is not the current holder can never clear
+// another host's claim.
+func TestReleaseClaimByAnotherActorLeavesTheClaimUntouched(t *testing.T) {
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	epicID := bdRun(t, vault, beads.Program, "create", "A walking skeleton", "-t", "epic",
+		"--metadata", `{"rig":"millwright","branch":"main","harness":"claude","model":"opus","effort":"high","formula":"tdd-feature","host":"vps"}`,
+		"--silent")
+	storyID := bdRun(t, vault, beads.Program, "create", "A story claimed by one host",
+		"--parent", epicID, "--silent")
+
+	vps := beads.New(vault, beads.WithActor("mw@vps"))
+	laptop := beads.New(vault, beads.WithActor("mw@laptop"))
+
+	if err := vps.ClaimStory(ctx, storyID); err != nil {
+		t.Fatalf("claiming %s: %v", storyID, err)
+	}
+	held, err := vps.ShowStory(ctx, storyID)
+	if err != nil {
+		t.Fatalf("showing %s: %v", storyID, err)
+	}
+
+	if err := laptop.ReleaseClaim(ctx, storyID); err == nil {
+		t.Fatalf("expected a release by mw@laptop, which does not hold %s, to fail", storyID)
+	}
+
+	after, err := vps.ShowStory(ctx, storyID)
+	if err != nil {
+		t.Fatalf("showing %s after the refused release: %v", storyID, err)
+	}
+	if after.Status != application.StatusInProgress || after.Assignee != "mw@vps" || !after.LeaseExpires.Equal(held.LeaseExpires) {
+		t.Fatalf("expected the refused release to leave %s claimed by mw@vps until %v, got %q held by %q until %v",
+			storyID, held.LeaseExpires, after.Status, after.Assignee, after.LeaseExpires)
+	}
+
+	if err := vps.ReleaseClaim(ctx, storyID); err != nil {
+		t.Fatalf("giving back %s's own claim: %v", storyID, err)
+	}
+	given, err := vps.ShowStory(ctx, storyID)
+	if err != nil {
+		t.Fatalf("showing %s after its own release: %v", storyID, err)
+	}
+	if given.Status != application.StatusOpen || given.Assignee != "" {
+		t.Fatalf("expected %s open and unassigned after its holder released it, got %q held by %q", storyID, given.Status, given.Assignee)
+	}
+}

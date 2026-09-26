@@ -5,7 +5,9 @@ Feature: A claim is a lease
   session that went away, which StaleClaims reports and which can be reclaimed
   — given back, open and unassigned, for any dispatcher to take. A claim is
   also conditional: it takes a story nobody else holds, and fails cleanly,
-  writing nothing, when another assignee already holds it.
+  writing nothing, when another assignee already holds it. A release is
+  conditional the same way: it gives back only the claim its own actor holds,
+  writing nothing when another actor holds the story instead.
 
   Background:
     Given an epic "mw-gq6" with the default path:
@@ -55,6 +57,11 @@ Feature: A claim is a lease
     When the story "mw-gq6.1" is claimed at 10:01
     Then the claim fails because "mw@laptop" holds the story
     And the story "mw-gq6.1" is held by "mw@laptop" with a lease until 10:05
+
+  Scenario: A release by another actor leaves the claim untouched
+    Given the story "mw-gq6.1" is held by "mw@laptop" with a lease until 10:05
+    When the story "mw-gq6.1" is released
+    Then the story "mw-gq6.1" is held by "mw@laptop" with a lease until 10:05
 
   Scenario: A session that runs 7 minutes keeps its claim's lease alive
     Given the story "mw-gq6.1" is claimed at 10:00

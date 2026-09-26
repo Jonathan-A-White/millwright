@@ -185,9 +185,18 @@ func (g *Gateway) BlockedForHost(ctx context.Context, host string) ([]applicatio
 
 // ReleaseClaim implements application.WorkTracker. The story goes back to open
 // and to nobody: bd offers only unassigned stories as ready, so leaving the
-// assignee on a released story would hide it from every dispatcher.
+// assignee on a released story would hide it from every dispatcher. A Gateway
+// that names its actor has the update carry --if-assignee naming it, so a
+// give-back can never clear a claim another actor has since taken: bd writes
+// nothing and exits 13 when the story is no longer this actor's to give back.
+// A Gateway with no actor of its own — the same case run guards with
+// --actor — has nothing to compare against and asks for none.
 func (g *Gateway) ReleaseClaim(ctx context.Context, id string) error {
-	_, err := g.call(ctx, "update", id, "--status", StatusOpen, "--assignee", "")
+	args := []string{"update", id, "--status", StatusOpen, "--assignee", ""}
+	if g.actor != "" {
+		args = append(args, "--if-assignee", g.actor)
+	}
+	_, err := g.call(ctx, args...)
 	return err
 }
 
