@@ -339,6 +339,80 @@ func TestAnOKReasonIsLoggedOnceAndNotRepeatedWhileNothingChanges(t *testing.T) {
 	}
 }
 
+func TestACannotTellReasonIsLoggedOnceAndNotRepeatedWhileNothingChanges(t *testing.T) {
+	state := apptest.NewFakeDoctorState()
+	log := &apptest.FakeDoctorLog{}
+	notes := apptest.NewFakeDoctorNotes()
+	now := doctorNow
+	check := &apptest.FakeDoctorCheck{
+		CheckName: "wifi", Verdict: application.DoctorCannotTell,
+		Reason: "powershell not found: this host is not Windows-backed",
+	}
+	d := application.Doctor{
+		Checks: application.DoctorChecks{check},
+		State:  state,
+		Log:    log,
+		Notes:  notes,
+		Host:   "vps",
+		Now:    func() time.Time { return now },
+	}
+
+	if _, err := d.Run(context.Background(), "", false); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	if want := "2026-09-23T12:00:00Z wifi cannot-tell powershell not found: this host is not Windows-backed"; !contains(log.Lines(), want) {
+		t.Errorf("expected the log to hold %q, got %v", want, log.Lines())
+	}
+	if len(log.Lines()) != 1 {
+		t.Fatalf("expected one log line after the first run, got %v", log.Lines())
+	}
+	if notes.Sets() != 1 {
+		t.Fatalf("expected one kv write after the first run, got %d", notes.Sets())
+	}
+	firstNote, ok := notes.Get(application.DoctorNoteKey("vps", "wifi"))
+	if !ok {
+		t.Fatalf("expected a note written for wifi")
+	}
+
+	if _, err := d.Run(context.Background(), "", false); err != nil {
+		t.Fatalf("second run: %v", err)
+	}
+	if _, err := d.Run(context.Background(), "", false); err != nil {
+		t.Fatalf("third run: %v", err)
+	}
+	if len(log.Lines()) != 1 {
+		t.Errorf("expected no new log line while the reason repeats, got %v", log.Lines())
+	}
+	if notes.Sets() != 1 {
+		t.Errorf("expected no new kv write while the reason repeats, sets went from 1 to %d", notes.Sets())
+	}
+	if got, ok := notes.Get(application.DoctorNoteKey("vps", "wifi")); !ok || got != firstNote {
+		t.Errorf("expected the note left in place unrewritten, got %q (was %q)", got, firstNote)
+	}
+
+	// A changed reason is said again.
+	check.Reason = "powershell not found: some other reason"
+	if _, err := d.Run(context.Background(), "", false); err != nil {
+		t.Fatalf("fourth run: %v", err)
+	}
+	if len(log.Lines()) != 2 {
+		t.Errorf("expected a new log line once the reason changes, got %v", log.Lines())
+	}
+	if notes.Sets() != 2 {
+		t.Errorf("expected a new kv write once the reason changes, got %d sets", notes.Sets())
+	}
+
+	// A run answering ok clears the note.
+	check.Verdict = application.DoctorOK
+	check.Reason = ""
+	if _, err := d.Run(context.Background(), "", false); err != nil {
+		t.Fatalf("fifth run: %v", err)
+	}
+	if _, ok := notes.Get(application.DoctorNoteKey("vps", "wifi")); ok {
+		t.Errorf("expected the note cleared once the check answers ok")
+	}
+}
+
 func TestAPlainOKWithNoReasonIsStillLoggedEveryRun(t *testing.T) {
 	state := apptest.NewFakeDoctorState()
 	log := &apptest.FakeDoctorLog{}

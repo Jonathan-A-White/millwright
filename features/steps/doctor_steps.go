@@ -96,6 +96,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 
 	ctx.When(`^the check "([^"]*)"'s probe says ok$`, c.theChecksProbeSaysOK)
 	ctx.When(`^the check "([^"]*)"'s probe says faulty "([^"]*)" again$`, c.theChecksProbeSaysFaultyAgain)
+	ctx.When(`^the check "([^"]*)"'s probe cannot tell "([^"]*)" again$`, c.theChecksProbeCannotTellAgain)
 	ctx.When(`^mw doctor runs$`, c.mwDoctorRuns)
 	ctx.When(`^mw doctor runs dry$`, c.mwDoctorRunsDry)
 	ctx.When(`^mw doctor's daemon-reload check runs for real$`, c.mwDoctorsDaemonReloadCheckRunsForReal)
@@ -110,6 +111,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 
 	ctx.Then(`^mw doctor leaves with the status (\d+)$`, c.mwDoctorLeavesWith)
 	ctx.Then(`^the doctor log holds "([^"]*)"$`, c.theDoctorLogHolds)
+	ctx.Then(`^the doctor log holds exactly (\d+) lines?$`, c.theDoctorLogHoldsExactlyNLines)
 	ctx.Then(`^the doctor log is empty$`, c.theDoctorLogIsEmpty)
 	ctx.Then(`^the check "([^"]*)" was not cured$`, c.theCheckWasNotCured)
 	ctx.Then(`^the check "([^"]*)" was cured (\d+) times?$`, c.theCheckWasCuredNTimes)
@@ -202,6 +204,10 @@ func (c *doctorContext) theChecksProbeSaysFaultyAgain(name, reason string) error
 	return c.aCheckWhoseProbeSaysFaulty(name, reason)
 }
 
+func (c *doctorContext) theChecksProbeCannotTellAgain(name, reason string) error {
+	return c.aCheckWhoseProbeCannotTell(name, reason)
+}
+
 func (c *doctorContext) checks() application.DoctorChecks {
 	if c.real != nil {
 		return application.DoctorChecks{c.real}
@@ -265,6 +271,13 @@ func (c *doctorContext) theDoctorLogHolds(substr string) error {
 		}
 	}
 	return fmt.Errorf("expected the doctor log to hold %q, got %v", substr, c.log.Lines())
+}
+
+func (c *doctorContext) theDoctorLogHoldsExactlyNLines(want int) error {
+	if got := len(c.log.Lines()); got != want {
+		return fmt.Errorf("expected the doctor log to hold exactly %d line(s), got %d: %v", want, got, c.log.Lines())
+	}
+	return nil
 }
 
 func (c *doctorContext) theDoctorLogIsEmpty() error {

@@ -76,6 +76,21 @@ Feature: mw doctor
     And the note "doctor.laptop.widget" holds "no reading"
     And the note "doctor.laptop.widget" holds "widget cannot-tell no reading"
 
+  Scenario: A cannot-tell verdict repeated with the same reason is said once
+    Given a doctor check "widget" whose probe cannot tell "no reading"
+    When mw doctor runs
+    Then the doctor log holds exactly 1 line
+    When mw doctor runs
+    And mw doctor runs
+    Then the doctor log holds exactly 1 line
+    And the note "doctor.laptop.widget" holds "cannot-tell"
+    When the check "widget"'s probe cannot tell "a different reason" again
+    And mw doctor runs
+    Then the doctor log holds exactly 2 lines
+    When the check "widget"'s probe says ok
+    And mw doctor runs
+    Then the note "doctor.laptop.widget" does not exist
+
   Scenario: A cure that fails once leaves no note, but failing again writes one
     Given a doctor check "widget" whose probe says faulty "misaligned"
     And the check "widget"'s damper is 1 minute, cap 3
