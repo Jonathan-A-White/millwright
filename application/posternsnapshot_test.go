@@ -91,7 +91,7 @@ func TestPosternSnapshotBuildsTheSectionSevenShapeWithTheRightGroupsAndOrder(t *
 	askQuestion(t, tracker, "mw-a.1", "2026-09-24T12:00:00Z", "Ship now or wait?", "ship", "ship, wait")
 
 	addChild(tracker, "mw-a", "mw-a.2", "Landed recently")
-	closeLanded(t, tracker, "mw-a.2", snapshotNow.Add(-3*24*time.Hour))
+	closeLanded(t, tracker, "mw-a.2", snapshotNow.Add(-2*time.Hour))
 
 	addChild(tracker, "mw-a", "mw-a.3", "In progress now")
 	if err := tracker.SetStatus("mw-a.3", apptest.StatusInProgress); err != nil {
@@ -121,7 +121,7 @@ func TestPosternSnapshotBuildsTheSectionSevenShapeWithTheRightGroupsAndOrder(t *
 	closeLanded(t, tracker, "mw-a.8", snapshotNow.Add(-10*24*time.Hour))
 
 	addChild(tracker, "mw-a", "mw-a.9", "Closed recently but verified")
-	closeLanded(t, tracker, "mw-a.9", snapshotNow.Add(-1*24*time.Hour))
+	closeLanded(t, tracker, "mw-a.9", snapshotNow.Add(-5*time.Hour))
 	if err := tracker.CommentOnStory(context.Background(), "mw-a.9", "VERIFIED GOOD, live on the VPS"); err != nil {
 		t.Fatalf("verifying mw-a.9: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestPosternSnapshotBuildsTheSectionSevenShapeWithTheRightGroupsAndOrder(t *
 	if len(a.Landed) != 1 || a.Landed[0].ID != "mw-a.2" {
 		t.Fatalf("expected landed to hold only mw-a.2, got %+v", a.Landed)
 	}
-	if want := snapshotNow.Add(-3 * 24 * time.Hour).UTC().Format(time.RFC3339); a.Landed[0].LandedAt != want {
+	if want := snapshotNow.Add(-2 * time.Hour).UTC().Format(time.RFC3339); a.Landed[0].LandedAt != want {
 		t.Errorf("expected landed_at %q, got %q", want, a.Landed[0].LandedAt)
 	}
 
@@ -173,8 +173,8 @@ func TestPosternSnapshotBuildsTheSectionSevenShapeWithTheRightGroupsAndOrder(t *
 		t.Fatalf("expected working %v (in-progress first, then the frontier by priority), got %v", wantWorking, gotWorking)
 	}
 
-	if a.ClosedCount != 4 {
-		t.Errorf("expected closed_count 4 (blocked, held, closed-too-old, closed-verified), got %d", a.ClosedCount)
+	if a.ClosedCount != 5 {
+		t.Errorf("expected closed_count 5 (landed-and-shown, blocked, held, closed-too-old, closed-verified: closed_count keeps the running total even of what landed also lists), got %d", a.ClosedCount)
 	}
 
 	b := epicOf(t, doc, "mw-b")
@@ -197,7 +197,7 @@ func TestPosternSnapshotNeverReadsCommentsOfAClosedStoryOutsideTheWindow(t *test
 	}
 
 	addChild(tracker, "mw-a", "mw-a.2", "Closed within the window")
-	closeLanded(t, tracker, "mw-a.2", snapshotNow.Add(-3*24*time.Hour))
+	closeLanded(t, tracker, "mw-a.2", snapshotNow.Add(-2*time.Hour))
 	if err := tracker.CommentOnStory(context.Background(), "mw-a.2", "shipped fine"); err != nil {
 		t.Fatalf("leaving an ordinary comment on mw-a.2: %v", err)
 	}
@@ -386,14 +386,14 @@ func TestPosternSnapshotReadsEveryLiveEpicAndItsChildrensCommentsInOneCallEach(t
 	addChild(tracker, "mw-a", "mw-a.1", "Ship now or wait?")
 	askQuestion(t, tracker, "mw-a.1", "2026-09-24T12:00:00Z", "Ship now or wait?", "ship", "ship, wait")
 	addChild(tracker, "mw-a", "mw-a.2", "Landed recently")
-	closeLanded(t, tracker, "mw-a.2", snapshotNow.Add(-3*24*time.Hour))
+	closeLanded(t, tracker, "mw-a.2", snapshotNow.Add(-2*time.Hour))
 
 	tracker.AddEpic("mw-b", domain.Path{})
 	tracker.DescribeEpic("mw-b", "Epic B", apptest.StatusInProgress, 2)
 	addChild(tracker, "mw-b", "mw-b.1", "Ready to ship?")
 	askQuestion(t, tracker, "mw-b.1", "2026-09-24T13:00:00Z", "Ready to ship?", "ship", "")
 	addChild(tracker, "mw-b", "mw-b.2", "Landed recently too")
-	closeLanded(t, tracker, "mw-b.2", snapshotNow.Add(-1*24*time.Hour))
+	closeLanded(t, tracker, "mw-b.2", snapshotNow.Add(-5*time.Hour))
 
 	doc := snapshotDoc(t, tracker)
 
@@ -436,14 +436,14 @@ func TestPosternSnapshotNeverReadsALandedChildsCommentsWhenItHasNone(t *testing.
 	addChild(tracker, "mw-a", "mw-a.1", "Ship now or wait?")
 	askQuestion(t, tracker, "mw-a.1", "2026-09-24T12:00:00Z", "Ship now or wait?", "ship", "ship, wait")
 	addChild(tracker, "mw-a", "mw-a.2", "Landed recently, never commented on")
-	closeLanded(t, tracker, "mw-a.2", snapshotNow.Add(-3*24*time.Hour))
+	closeLanded(t, tracker, "mw-a.2", snapshotNow.Add(-2*time.Hour))
 
 	tracker.AddEpic("mw-b", domain.Path{})
 	tracker.DescribeEpic("mw-b", "Epic B", apptest.StatusInProgress, 2)
 	addChild(tracker, "mw-b", "mw-b.1", "Ready to ship?")
 	askQuestion(t, tracker, "mw-b.1", "2026-09-24T13:00:00Z", "Ready to ship?", "ship", "")
 	addChild(tracker, "mw-b", "mw-b.2", "Landed recently too, never commented on")
-	closeLanded(t, tracker, "mw-b.2", snapshotNow.Add(-1*24*time.Hour))
+	closeLanded(t, tracker, "mw-b.2", snapshotNow.Add(-5*time.Hour))
 
 	doc := snapshotDoc(t, tracker)
 
@@ -481,7 +481,7 @@ func TestPosternSnapshotRemembersALandedCandidatesVerdictBetweenBuilds(t *testin
 	tracker.AddEpic("mw-a", domain.Path{})
 	tracker.DescribeEpic("mw-a", "Epic A", apptest.StatusOpen, 1)
 	addChild(tracker, "mw-a", "mw-a.1", "Landed recently, commented on")
-	closeLanded(t, tracker, "mw-a.1", snapshotNow.Add(-3*24*time.Hour))
+	closeLanded(t, tracker, "mw-a.1", snapshotNow.Add(-2*time.Hour))
 	if err := tracker.CommentOnStory(context.Background(), "mw-a.1", "shipped fine"); err != nil {
 		t.Fatalf("commenting on mw-a.1: %v", err)
 	}
@@ -515,7 +515,7 @@ func TestPosternSnapshotRereadsALandedCandidateWhoseCommentCountRose(t *testing.
 	tracker.AddEpic("mw-a", domain.Path{})
 	tracker.DescribeEpic("mw-a", "Epic A", apptest.StatusOpen, 1)
 	addChild(tracker, "mw-a", "mw-a.1", "Landed recently, commented on")
-	closeLanded(t, tracker, "mw-a.1", snapshotNow.Add(-3*24*time.Hour))
+	closeLanded(t, tracker, "mw-a.1", snapshotNow.Add(-2*time.Hour))
 	if err := tracker.CommentOnStory(context.Background(), "mw-a.1", "shipped fine"); err != nil {
 		t.Fatalf("commenting on mw-a.1: %v", err)
 	}
@@ -560,7 +560,7 @@ func TestPosternSnapshotDropsAMemoryEntryOnceItsIdLeavesTheWindow(t *testing.T) 
 	tracker.AddEpic("mw-a", domain.Path{})
 	tracker.DescribeEpic("mw-a", "Epic A", apptest.StatusOpen, 1)
 	addChild(tracker, "mw-a", "mw-a.1", "Landed recently, commented on")
-	closeLanded(t, tracker, "mw-a.1", snapshotNow.Add(-3*24*time.Hour))
+	closeLanded(t, tracker, "mw-a.1", snapshotNow.Add(-2*time.Hour))
 	if err := tracker.CommentOnStory(context.Background(), "mw-a.1", "shipped fine"); err != nil {
 		t.Fatalf("commenting on mw-a.1: %v", err)
 	}
@@ -586,7 +586,7 @@ func TestPosternSnapshotDropsAMemoryEntryOnceItsIdLeavesTheWindow(t *testing.T) 
 		t.Fatalf("expected the memory to remember mw-a.1 after the first build, got %q", raw)
 	}
 
-	// Nine days later mw-a.1 has aged out of the 7-day landed window.
+	// Nine days later mw-a.1 has long since aged out of the 24-hour landed window.
 	build(snapshotNow.Add(9 * 24 * time.Hour))
 	raw, err = tracker.Note(context.Background(), application.PosternSnapshotMemoryKey)
 	if err != nil {
@@ -605,7 +605,7 @@ func TestPosternSnapshotLandedMemoryIsOneNoteReadOnceAndWrittenOnlyWhenChanged(t
 	tracker.AddEpic("mw-a", domain.Path{})
 	tracker.DescribeEpic("mw-a", "Epic A", apptest.StatusOpen, 1)
 	addChild(tracker, "mw-a", "mw-a.1", "Landed recently, commented on")
-	closeLanded(t, tracker, "mw-a.1", snapshotNow.Add(-3*24*time.Hour))
+	closeLanded(t, tracker, "mw-a.1", snapshotNow.Add(-2*time.Hour))
 	if err := tracker.CommentOnStory(context.Background(), "mw-a.1", "shipped fine"); err != nil {
 		t.Fatalf("commenting on mw-a.1: %v", err)
 	}
@@ -634,7 +634,7 @@ func TestPosternSnapshotBuildsWithAMissingOrUnreadableMemoryNote(t *testing.T) {
 	tracker := aSnapshotTracker()
 	tracker.AddEpic("mw-a", domain.Path{})
 	addChild(tracker, "mw-a", "mw-a.1", "Landed recently, commented on")
-	closeLanded(t, tracker, "mw-a.1", snapshotNow.Add(-3*24*time.Hour))
+	closeLanded(t, tracker, "mw-a.1", snapshotNow.Add(-2*time.Hour))
 	if err := tracker.CommentOnStory(context.Background(), "mw-a.1", "shipped fine"); err != nil {
 		t.Fatalf("commenting on mw-a.1: %v", err)
 	}
@@ -649,6 +649,164 @@ func TestPosternSnapshotBuildsWithAMissingOrUnreadableMemoryNote(t *testing.T) {
 	}
 	if got := tracker.CommentReads("mw-a.1"); got != 1 {
 		t.Fatalf("expected mw-a.1's comments to be read since memory held nothing usable, got %d", got)
+	}
+}
+
+// TestPosternSnapshotWorkingEntryCarriesItsDescriptionAndNewestThreeComments
+// covers mw-hy6f4.3's AC1: a working bead's description and newest three of
+// five comments, newest first with their own timestamps; a description over
+// PosternSnapshotTextLimit runes is cut to it with a trailing marker.
+func TestPosternSnapshotWorkingEntryCarriesItsDescriptionAndNewestThreeComments(t *testing.T) {
+	tracker := aSnapshotTracker()
+	tracker.AddEpic("mw-a", domain.Path{})
+	addChild(tracker, "mw-a", "mw-a.1", "Open and unblocked, being worked on")
+	longDescription := strings.Repeat("d", 6000)
+	if err := tracker.SetDescription("mw-a.1", longDescription); err != nil {
+		t.Fatalf("describing mw-a.1: %v", err)
+	}
+
+	times := make([]time.Time, 5)
+	texts := []string{"first", "second", "third", "fourth", "fifth"}
+	for i, text := range texts {
+		times[i] = snapshotNow.Add(-time.Duration(len(texts)-i) * time.Hour)
+		if err := tracker.CommentOnStoryAt("mw-a.1", text, times[i]); err != nil {
+			t.Fatalf("commenting on mw-a.1: %v", err)
+		}
+	}
+
+	doc := snapshotDoc(t, tracker)
+	a := epicOf(t, doc, "mw-a")
+	if len(a.Working) != 1 || a.Working[0].ID != "mw-a.1" {
+		t.Fatalf("expected mw-a.1 to be working, got %+v", a.Working)
+	}
+	w := a.Working[0]
+
+	if got := len([]rune(w.Description)); got != application.PosternSnapshotTextLimit {
+		t.Fatalf("expected the description cut to %d runes, got %d", application.PosternSnapshotTextLimit, got)
+	}
+	if want := strings.Repeat("d", application.PosternSnapshotTextLimit-1) + "…"; w.Description != want {
+		t.Errorf("expected the cut description to end with a trailing marker, got %q", w.Description)
+	}
+
+	wantComments := []struct{ at, text string }{
+		{times[4].UTC().Format(time.RFC3339), "fifth"},
+		{times[3].UTC().Format(time.RFC3339), "fourth"},
+		{times[2].UTC().Format(time.RFC3339), "third"},
+	}
+	if len(w.Comments) != len(wantComments) {
+		t.Fatalf("expected the newest 3 of 5 comments, got %d: %+v", len(w.Comments), w.Comments)
+	}
+	for i, want := range wantComments {
+		if w.Comments[i].At != want.at || w.Comments[i].Text != want.text {
+			t.Errorf("comment %d: expected {%q, %q}, got %+v", i, want.at, want.text, w.Comments[i])
+		}
+	}
+}
+
+// TestPosternSnapshotLandedWindowIsTheLastDayAndClosedCountKeepsTheTotal
+// covers mw-hy6f4.3's AC2: a bead landed 2 hours before written_at is listed
+// under landed with its text; one landed 30 hours before is not; closed_count
+// counts both regardless.
+func TestPosternSnapshotLandedWindowIsTheLastDayAndClosedCountKeepsTheTotal(t *testing.T) {
+	tracker := aSnapshotTracker()
+	tracker.AddEpic("mw-a", domain.Path{})
+
+	addChild(tracker, "mw-a", "mw-a.1", "Landed 2 hours ago")
+	closeLanded(t, tracker, "mw-a.1", snapshotNow.Add(-2*time.Hour))
+	if err := tracker.SetDescription("mw-a.1", "shipped the thing"); err != nil {
+		t.Fatalf("describing mw-a.1: %v", err)
+	}
+	if err := tracker.CommentOnStoryAt("mw-a.1", "all good", snapshotNow.Add(-90*time.Minute)); err != nil {
+		t.Fatalf("commenting on mw-a.1: %v", err)
+	}
+
+	addChild(tracker, "mw-a", "mw-a.2", "Landed 30 hours ago")
+	closeLanded(t, tracker, "mw-a.2", snapshotNow.Add(-30*time.Hour))
+
+	doc := snapshotDoc(t, tracker)
+	a := epicOf(t, doc, "mw-a")
+
+	if len(a.Landed) != 1 || a.Landed[0].ID != "mw-a.1" {
+		t.Fatalf("expected only the bead landed 2 hours ago to be listed, got %+v", a.Landed)
+	}
+	if want := snapshotNow.Add(-2 * time.Hour).UTC().Format(time.RFC3339); a.Landed[0].LandedAt != want {
+		t.Errorf("expected landed_at %q, got %q", want, a.Landed[0].LandedAt)
+	}
+	if a.Landed[0].Description != "shipped the thing" {
+		t.Errorf("expected the landed entry's description, got %q", a.Landed[0].Description)
+	}
+	if len(a.Landed[0].Comments) != 1 || a.Landed[0].Comments[0].Text != "all good" {
+		t.Errorf("expected the landed entry's comment, got %+v", a.Landed[0].Comments)
+	}
+
+	if a.ClosedCount != 2 {
+		t.Errorf("expected closed_count to count both the listed and the too-old bead, got %d", a.ClosedCount)
+	}
+}
+
+// TestPosternSnapshotStaysUnderOneMegabyteWithThirtyLargeBeads is the
+// AC-note of mw-hy6f4.3's AC5: 30 beads each carrying a 4000-character
+// description and three 4000-character comments must still marshal to under
+// 1 MB of plaintext, so the encrypted snapshot stays a reasonable size for
+// the phone to fetch.
+func TestPosternSnapshotStaysUnderOneMegabyteWithThirtyLargeBeads(t *testing.T) {
+	tracker := aSnapshotTracker()
+	tracker.AddEpic("mw-a", domain.Path{})
+	bigText := strings.Repeat("x", application.PosternSnapshotTextLimit)
+
+	for i := 0; i < 30; i++ {
+		id := fmt.Sprintf("mw-a.%d", i)
+		addChild(tracker, "mw-a", id, "A bead with a lot of text")
+		if err := tracker.SetDescription(id, bigText); err != nil {
+			t.Fatalf("describing %s: %v", id, err)
+		}
+		for c := 0; c < 3; c++ {
+			at := snapshotNow.Add(-time.Duration(c+1) * time.Hour)
+			if err := tracker.CommentOnStoryAt(id, bigText, at); err != nil {
+				t.Fatalf("commenting on %s: %v", id, err)
+			}
+		}
+	}
+
+	doc := snapshotDoc(t, tracker)
+	encoded, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshaling the snapshot: %v", err)
+	}
+	if len(encoded) >= 1<<20 {
+		t.Fatalf("expected the snapshot of 30 beads with 4000-character texts to stay under 1 MB, got %d bytes", len(encoded))
+	}
+}
+
+// TestPosternSnapshotRunLogsThePlaintextByteSize covers mw-hy6f4.3's demand
+// to keep the encrypted snapshot's size in mind: Run's own log line names
+// the plaintext's byte size, not just the epic count.
+func TestPosternSnapshotRunLogsThePlaintextByteSize(t *testing.T) {
+	tracker := aSnapshotTracker()
+	tracker.AddEpic("mw-a", domain.Path{})
+	addChild(tracker, "mw-a", "mw-a.1", "Open and unblocked")
+
+	var out strings.Builder
+	snapshot := application.PosternSnapshot{
+		Tracker:     tracker,
+		Notes:       tracker,
+		Cipher:      apptest.NewFakeCipher(),
+		File:        apptest.NewFakeSnapshotFile("/tmp/mw-postern-snapshot-test.bin"),
+		GovernorKey: "governor-pubkey-hex",
+		Now:         func() time.Time { return snapshotNow },
+		Out:         &out,
+	}
+	doc, err := snapshot.Run(context.Background())
+	if err != nil {
+		t.Fatalf("running the snapshot: %v", err)
+	}
+	encoded, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("marshaling the doc: %v", err)
+	}
+	want := fmt.Sprintf("%d plaintext byte(s)", len(encoded))
+	if !strings.Contains(out.String(), want) {
+		t.Errorf("expected the log line to name the plaintext's byte size %q, got %q", want, out.String())
 	}
 }
 
