@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -360,5 +362,107 @@ func TestPosternSnapshotWritesTheEncryptedFileAtomically(t *testing.T) {
 	}
 	if _, err := os.Stat(snapshotPath + ".tmp"); !os.IsNotExist(err) {
 		t.Fatalf("expected no temp file left behind, stat gave: %v", err)
+	}
+}
+
+// TestPosternInboxDownloadsDecryptsAndWritesAnAttachment covers mw-dxy1c.3
+// AC3: a message carrying an attachment makes mw postern inbox download
+// GET /api/blobs/{hash} with the signed Authorization header, and write the
+// decrypted image under this host's state directory.
+func TestPosternInboxDownloadsDecryptsAndWritesAnAttachment(t *testing.T) {
+	f := loadPosternRecordFixture(t)
+	image := bytes.Repeat([]byte{0x89, 0x50, 0x4e, 0x47, 0x00, 0x0d, 0x0a, 0x1a}, 400) // a stand-in PNG
+
+	senderKeyPath := filepath.Join(t.TempDir(), "sender.key")
+	if err := os.WriteFile(senderKeyPath, []byte(f.SenderWIF+"\n"), 0o600); err != nil {
+		t.Fatalf("writing the sender key: %v", err)
+	}
+	senderCipher := postern.NewCipher(postern.New(senderKeyPath))
+
+	imageCtB64, err := senderCipher.Encrypt(f.RecipientPubKey, string(image))
+	if err != nil {
+		t.Fatalf("encrypting the image: %v", err)
+	}
+	rawCiphertext, err := base64.StdEncoding.DecodeString(imageCtB64)
+	if err != nil {
+		t.Fatalf("decoding the image's ciphertext: %v", err)
+	}
+	sum := sha256.Sum256(rawCiphertext)
+	hash := hex.EncodeToString(sum[:])
+
+	wrapped, err := json.Marshal(application.PosternThreadedMessage{
+		Text:       "a screenshot",
+		Attachment: &application.PosternAttachment{Hash: hash, Size: int64(len(rawCiphertext)), Mime: "image/png"},
+	})
+	if err != nil {
+		t.Fatalf("building the message: %v", err)
+	}
+	messageCtB64, err := senderCipher.Encrypt(f.RecipientPubKey, string(wrapped))
+	if err != nil {
+		t.Fatalf("encrypting the message: %v", err)
+	}
+	payload, err := json.Marshal(application.PosternPayload{
+		V: 1, Kind: application.PosternMessageKind, Class: "message",
+		To: f.RecipientPubKey, From: f.SenderPubKey, Ts: 1758800000, Ct: messageCtB64,
+	})
+	if err != nil {
+		t.Fatalf("building the payload: %v", err)
+	}
+	recordScript, err := postern.RecordScript(payload)
+	if err != nil {
+		t.Fatalf("building the record script: %v", err)
+	}
+	messages, err := json.Marshal(map[string]any{
+		"records": []map[string]any{{"seq": 1, "txid": "img-txid", "vout": 0, "scriptHex": hex.EncodeToString(*recordScript), "height": 0, "firstSeen": "2026-09-24T12:00:03Z"}},
+		"next":    1,
+	})
+	if err != nil {
+		t.Fatalf("building the messages answer: %v", err)
+	}
+
+	var blobRequested bool
+	var blobAuth string
+	challenges := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/challenge":
+			challenges++
+			fmt.Fprintf(w, `{"nonce":"nonce-%d"}`, challenges)
+		case r.Method == http.MethodGet && r.URL.RequestURI() == "/api/messages?since=0":
+			w.Write(messages)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/blobs/"+hash:
+			blobRequested = true
+			blobAuth = r.Header.Get("Authorization")
+			w.Write(rawCiphertext)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			io.WriteString(w, `{"error":"no such route: `+r.URL.RequestURI()+`"}`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	posternHome(t, srv.URL, f.RecipientWIF, f.SenderPubKey)
+
+	out, err := runPostern(t, "inbox")
+	if err != nil {
+		t.Fatalf("mw postern inbox failed: %v\n%s", err, out)
+	}
+	if !blobRequested {
+		t.Fatal("expected GET /api/blobs/{hash} to be requested")
+	}
+	if !strings.HasPrefix(blobAuth, "Postern ") {
+		t.Fatalf("expected the blob request's Authorization header to be signed, got %q", blobAuth)
+	}
+
+	wantPath := filepath.Join(os.Getenv("HOME"), ".local", "state", "mw", "postern", "inbox", "img-txid.png")
+	written, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatalf("reading %s: %v", wantPath, err)
+	}
+	if !bytes.Equal(written, image) {
+		t.Errorf("expected the written file to hold the decrypted image, got %d bytes", len(written))
+	}
+	if !strings.Contains(out, wantPath) {
+		t.Errorf("expected mw postern inbox to print %s, got:\n%s", wantPath, out)
 	}
 }
