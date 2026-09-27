@@ -49,7 +49,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/slot.go` | none |
 | `Dispatcher` | `application/landing.go` | `application.Dispatch` | — |
 | `HostSync` | `application/dispatch.go` | `application.Sync` | — |
-| Postern ports (key, msg, snapshot, hand) | `application/postern*.go` | `infrastructure/postern` | `apptest.Fake{Postern,Cipher,SnapshotFile,NginxRunner}` |
+| Postern ports (key, msg+blob, snapshot, hand) | `application/postern*.go` | `infrastructure/postern` | `apptest.Fake{Postern,Cipher,SnapshotFile,NginxRunner}` |
 
 `infrastructure/config/config.go` is not a port: read by `cmd/mw/`.
 
@@ -103,7 +103,7 @@ Add a command: `docs/adding-a-command.md`.
 | `mwConfig` | `cmd/mw/dispatch_test.go` | `config.toml`, temp HOME. |
 | `aFactory` | `application/dispatch_test.go` | Faked `Dispatch`, temp vault. |
 
-`features/steps/next_steps.go`: real rig; fakes tracker, runner, vault git.
+`features/steps/next_steps.go`: rig; fakes tracker, runner, vault git.
 
 ## Build and test
 

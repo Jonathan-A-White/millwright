@@ -713,6 +713,16 @@ Governor's key (including an unconfigured `postern_governor_key`), a question
 that never offered Release, a bead that is not an epic, or an epic with
 nothing held, also releases nothing — the Mayor is always mailed why.
 
+A message carrying an attachment (postern's docs/protocol.md §8) is
+downloaded — `GET /api/blobs/{hash}` with the same signed challenge every
+other call carries — its sha256 checked against the hash it was announced
+under (a mismatch is refused and writes nothing), decrypted with the postern
+key, and written 0600 under `~/.local/state/mw/postern/inbox`, named by the
+message's txid and an extension by its mime (`.png`, `.jpg` or `.webp`). `mw
+postern inbox` prints the caption and the file's path; a bead comment naming
+it ends with " [image: <path>]". A download or decrypt failure prints the
+error and still records the text.
+
 `mw postern snapshot` writes the brief of every live epic (open or in
 progress) as postern's docs/protocol.md §7 JSON: each epic's children still
 waiting on a decision-needed question (`needs_you`), closed in the last 24
