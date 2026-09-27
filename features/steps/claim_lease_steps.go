@@ -381,7 +381,13 @@ func (c *readyContext) aDispatchedSessionsShellLineRunsHeartbeatingAlongsideIt()
 	if err := os.WriteFile(harness, []byte(harnessScript), 0o755); err != nil {
 		return fmt.Errorf("writing the stand-in harness: %w", err)
 	}
-	heartbeatScript := "#!/bin/sh\nwhile :; do date +%s%N >> " + log + "; sleep 0.03; done\n"
+	// Every line the heartbeat writes comes from a shell builtin (echo), never
+	// a forked process: a forked `date` can still be mid-write when the kill
+	// lands, and the orphaned child then writes one more line after the shell
+	// that started it is already gone. The TERM trap writes "stopped" as its
+	// last act before exiting, so the log itself proves the kill was
+	// delivered rather than the test only inferring it from a fixed sleep.
+	heartbeatScript := "#!/bin/sh\ntrap 'echo stopped >> " + log + "; exit 0' TERM\nwhile :; do echo tick >> " + log + "; sleep 0.03; done\n"
 	if err := os.WriteFile(heartbeat, []byte(heartbeatScript), 0o755); err != nil {
 		return fmt.Errorf("writing the stand-in heartbeat: %w", err)
 	}
@@ -407,7 +413,7 @@ func (c *readyContext) aDispatchedSessionsShellLineRunsHeartbeatingAlongsideIt()
 		return fmt.Errorf("running the assembled shell line: %w", err)
 	}
 
-	count, err := heartbeatLogLines(log)
+	count, err := countHeartbeatTicks(log)
 	if err != nil {
 		return err
 	}
@@ -425,10 +431,25 @@ func (c *readyContext) theHeartbeatRanMoreThanOnceWhileTheHarnessRan() error {
 func (c *readyContext) theHeartbeatStoppedOnceTheHarnessExited() error {
 	// The shell line's own `kill $HB` has already run by the time
 	// aDispatchedSessionsShellLineRunsHeartbeatingAlongsideIt returned; this
-	// waits past the heartbeat's own tick to prove it is truly gone, not just
-	// caught mid-tick.
-	time.Sleep(200 * time.Millisecond)
-	count, err := heartbeatLogLines(c.lease.heartbeatLog)
+	// polls for the heartbeat's own TERM trap to write "stopped" as its last
+	// act, rather than sleeping a fixed interval and hoping nothing more
+	// arrives — a forked child of the heartbeat could otherwise still be
+	// mid-write when a fixed sleep is checked, on a loaded box.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		stopped, err := heartbeatLogHasStopped(c.lease.heartbeatLog)
+		if err != nil {
+			return err
+		}
+		if stopped {
+			break
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the heartbeat never logged its own stop within %s of the harness exiting", 5*time.Second)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	count, err := countHeartbeatTicks(c.lease.heartbeatLog)
 	if err != nil {
 		return err
 	}
@@ -438,14 +459,33 @@ func (c *readyContext) theHeartbeatStoppedOnceTheHarnessExited() error {
 	return nil
 }
 
-// heartbeatLogLines is how many ticks the heartbeat stand-in has logged so far.
-func heartbeatLogLines(path string) (int, error) {
+// countHeartbeatTicks is how many ticks the heartbeat stand-in has logged so
+// far, not counting the "stopped" line its TERM trap appends once killed.
+func countHeartbeatTicks(path string) (int, error) {
+	data, err := heartbeatLogContents(path)
+	if err != nil {
+		return 0, err
+	}
+	return strings.Count(data, "tick\n"), nil
+}
+
+// heartbeatLogHasStopped reports whether the heartbeat stand-in's TERM trap
+// has already written its "stopped" line, the last line it ever writes.
+func heartbeatLogHasStopped(path string) (bool, error) {
+	data, err := heartbeatLogContents(path)
+	if err != nil {
+		return false, err
+	}
+	return strings.Contains(data, "stopped\n"), nil
+}
+
+func heartbeatLogContents(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return 0, nil
+			return "", nil
 		}
-		return 0, fmt.Errorf("reading the heartbeat log: %w", err)
+		return "", fmt.Errorf("reading the heartbeat log: %w", err)
 	}
-	return strings.Count(string(data), "\n"), nil
+	return string(data), nil
 }
