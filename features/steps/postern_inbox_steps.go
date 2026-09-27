@@ -3,6 +3,9 @@ package steps
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -36,6 +39,13 @@ type posternInboxContext struct {
 	mailbox     *apptest.FakeMailbox
 	out         *bytes.Buffer
 	governorKey string
+	attachDir   string
+
+	// attachImage and attachTxid are what the last "carrying a screenshot"
+	// step built, so a later Then step can compute the path mw postern
+	// inbox should have written it to, without hardcoding it in the feature.
+	attachImage []byte
+	attachTxid  string
 
 	messages    []application.PosternInboxMessage
 	unreadCount int
@@ -95,6 +105,8 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^mw postern inbox trusts "([^"]*)" as the Governor's key$`, c.thePosternGovernorKeyIs)
 	ctx.Given(`^a postern message from "([^"]*)" threaded on bead "([^"]*)" with text "([^"]*)" and txid "([^"]*)"$`,
 		c.aPosternMessageFromThreadedOnBead)
+	ctx.Given(`^a postern message from "([^"]*)" threaded on bead "([^"]*)" with text "([^"]*)" and txid "([^"]*)" carrying a screenshot$`,
+		c.aPosternMessageFromThreadedOnBeadCarryingAScreenshot)
 	ctx.Given(`^a postern message from "([^"]*)" on topic "([^"]*)" with text "([^"]*)" and txid "([^"]*)"$`,
 		c.aPosternMessageFromOnTopic)
 
@@ -119,6 +131,8 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^it printed "([^"]*)"$`, c.itPrintedText)
 	ctx.Then(`^epic "([^"]*)"'s held stories are released$`, c.epicsHeldStoriesAreReleased)
 	ctx.Then(`^bead "([^"]*)" is commented a RELEASED with txid "([^"]*)"$`, c.beadIsCommentedARELEASEDWithTxid)
+	ctx.Then(`^the decrypted image is written under the attachment directory$`, c.theDecryptedImageIsWrittenUnderTheAttachmentDirectory)
+	ctx.Then(`^bead "([^"]*)"'s last comment names the decrypted image's path$`, c.beadsLastCommentNamesTheDecryptedImagesPath)
 }
 
 func (c *posternInboxContext) aThrowawayPosternKey() error {
@@ -127,6 +141,7 @@ func (c *posternInboxContext) aThrowawayPosternKey() error {
 		return err
 	}
 	c.home = home
+	c.attachDir = filepath.Join(home, "postern-attachments")
 	c.keys = postern.New(filepath.Join(home, "postern.key"))
 	if err := c.keys.Generate(); err != nil {
 		return err
@@ -252,6 +267,53 @@ func (c *posternInboxContext) aPosternMessageFromThreadedOnBead(from, bead, text
 		Ts:         posternReplyStamp,
 		Ciphertext: ciphertext,
 	})
+	return nil
+}
+
+// aPosternMessageFromThreadedOnBeadCarryingAScreenshot is
+// aPosternMessageFromThreadedOnBead with an attachment: a stand-in image,
+// encrypted to this key exactly as the real cipher would decrypt it, stored
+// in the fake backend's blob store under its sha256 hash, and announced in
+// the message's plaintext (postern's docs/protocol.md section 8). It
+// remembers the image and the txid so a later Then step can compute the
+// path mw postern inbox should have written it to.
+func (c *posternInboxContext) aPosternMessageFromThreadedOnBeadCarryingAScreenshot(from, bead, text, txid string) error {
+	image := bytes.Repeat([]byte{0x89, 0x50, 0x4e, 0x47, 0x00, 0x0d, 0x0a, 0x1a}, 400) // a stand-in PNG
+	c.cipher.From = from
+	imageCtB64, err := c.cipher.Encrypt(c.pubKey, string(image))
+	if err != nil {
+		return err
+	}
+	raw, err := base64.StdEncoding.DecodeString(imageCtB64)
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256(raw)
+	hash := hex.EncodeToString(sum[:])
+	c.backend.SetBlob(hash, raw)
+
+	wrapped, err := json.Marshal(application.PosternThreadedMessage{
+		Thread:     application.PosternThread{Bead: bead},
+		Text:       text,
+		Attachment: &application.PosternAttachment{Hash: hash, Size: int64(len(raw)), Mime: "image/png"},
+	})
+	if err != nil {
+		return err
+	}
+	ciphertext, err := c.cipher.Encrypt(c.pubKey, string(wrapped))
+	if err != nil {
+		return err
+	}
+	c.backend.AddRecord(application.PosternRecord{
+		Txid:       txid,
+		Class:      "message",
+		From:       from,
+		To:         c.pubKey,
+		Ts:         posternReplyStamp,
+		Ciphertext: ciphertext,
+	})
+	c.attachImage = image
+	c.attachTxid = txid
 	return nil
 }
 
@@ -452,14 +514,15 @@ func (c *posternInboxContext) aPlainTextRecordAddressedToThisKey(text string) er
 
 func (c *posternInboxContext) inbox() application.PosternInbox {
 	return application.PosternInbox{
-		Postern:     c.backend,
-		Cipher:      c.cipher,
-		Keys:        c.keys,
-		Memory:      c.memory,
-		Tracker:     c.memory,
-		Mailbox:     c.mailbox,
-		GovernorKey: c.governorKey,
-		Out:         c.out,
+		Postern:       c.backend,
+		Cipher:        c.cipher,
+		Keys:          c.keys,
+		Memory:        c.memory,
+		Tracker:       c.memory,
+		Mailbox:       c.mailbox,
+		GovernorKey:   c.governorKey,
+		AttachmentDir: c.attachDir,
+		Out:           c.out,
 	}
 }
 
@@ -691,6 +754,54 @@ func (c *posternInboxContext) noMailWasSent() error {
 func (c *posternInboxContext) itPrintedText(want string) error {
 	if !strings.Contains(c.out.String(), want) {
 		return fmt.Errorf("expected the output to contain %q, got:\n%s", want, c.out.String())
+	}
+	return nil
+}
+
+// attachmentPath is the path a "carrying a screenshot" step's image should
+// have been written to: the attachment directory, its txid, and .png (the
+// stand-in image's own mime).
+func (c *posternInboxContext) attachmentPath() string {
+	return filepath.Join(c.attachDir, c.attachTxid+".png")
+}
+
+func (c *posternInboxContext) theDecryptedImageIsWrittenUnderTheAttachmentDirectory() error {
+	if err := c.itSucceeds(); err != nil {
+		return err
+	}
+	path := c.attachmentPath()
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("expected %s to exist: %w", path, err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		return fmt.Errorf("expected %s to be mode 0600, got %o", path, info.Mode().Perm())
+	}
+	written, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(written, c.attachImage) {
+		return fmt.Errorf("expected %s to hold the decrypted image, got %d bytes", path, len(written))
+	}
+	if !strings.Contains(c.out.String(), path) {
+		return fmt.Errorf("expected the output to print %s, got:\n%s", path, c.out.String())
+	}
+	return nil
+}
+
+func (c *posternInboxContext) beadsLastCommentNamesTheDecryptedImagesPath(bead string) error {
+	comments, err := c.memory.StoryComments(context.Background(), bead)
+	if err != nil {
+		return err
+	}
+	if len(comments) == 0 {
+		return fmt.Errorf("expected a comment on %s, found none", bead)
+	}
+	want := fmt.Sprintf(" [image: %s]", c.attachmentPath())
+	got := comments[len(comments)-1].Text
+	if !strings.HasSuffix(got, want) {
+		return fmt.Errorf("expected the comment on %s to end with %q, got %q", bead, want, got)
 	}
 	return nil
 }

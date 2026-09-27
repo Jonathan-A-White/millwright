@@ -194,3 +194,13 @@ Feature: mw postern inbox
     When mw postern inbox is run
     Then reading succeeds
     And bead "mw-epic.3" has 1 comment
+
+  Scenario: the Governor sends a screenshot with a caption, and it is downloaded, decrypted and its path recorded
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And bead "mw-thread.4" is known to the tracker
+    And a postern message from "governor-pubkey-hex" threaded on bead "mw-thread.4" with text "check this out" and txid "img-txid" carrying a screenshot
+    When mw postern inbox is run
+    Then reading succeeds
+    And it printed "check this out"
+    And the decrypted image is written under the attachment directory
+    And bead "mw-thread.4"'s last comment names the decrypted image's path
