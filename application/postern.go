@@ -2,9 +2,14 @@ package application
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -148,6 +153,10 @@ type Postern interface {
 	Balance(ctx context.Context, address string) (int64, error)
 	// Broadcast forwards a raw signed transaction and reports its txid.
 	Broadcast(ctx context.Context, rawtx string) (string, error)
+	// Blob downloads the whole body stored under hash at the postern
+	// backend's blob store, postern's docs/protocol.md section 8: the raw
+	// ciphertext bytes an attachment was uploaded as, untouched.
+	Blob(ctx context.Context, hash string) ([]byte, error)
 }
 
 // Cipher is the port that encrypts and decrypts a message's text between the
@@ -246,22 +255,35 @@ type PosternThread struct {
 }
 
 // PosternThreadedMessage is the plaintext a message carries when it names an
-// explicit thread rather than plain text: postern's docs/protocol.md section
-// 6 Threads subsection.
+// explicit thread, an attachment, or both, rather than plain text: postern's
+// docs/protocol.md sections 6 (Threads) and 8 (Attachments).
 type PosternThreadedMessage struct {
-	Thread PosternThread `json:"thread"`
-	Text   string        `json:"text"`
+	Thread     PosternThread      `json:"thread"`
+	Text       string             `json:"text"`
+	Attachment *PosternAttachment `json:"attachment,omitempty"`
+}
+
+// PosternAttachment is a message's optional attachment, postern's
+// docs/protocol.md section 8: an image, encrypted exactly as the message
+// text is, uploaded whole to the postern backend's blob store. Hash is the
+// sha256, hex, of the ciphertext body as uploaded; Size is that body's own
+// byte count; Mime is one of image/png, image/jpeg or image/webp.
+type PosternAttachment struct {
+	Hash string `json:"hash"`
+	Size int64  `json:"size"`
+	Mime string `json:"mime"`
 }
 
 // decodePosternThreadedMessage reads text as a PosternThreadedMessage,
 // reporting false when it is not a JSON object naming a bead or a topic
-// thread — plain text, or a question or a reply, read exactly as before.
+// thread, or carrying an attachment — plain text, or a question or a reply,
+// read exactly as before.
 func decodePosternThreadedMessage(text string) (PosternThreadedMessage, bool) {
 	var wrapped PosternThreadedMessage
 	if err := json.Unmarshal([]byte(text), &wrapped); err != nil {
 		return PosternThreadedMessage{}, false
 	}
-	if strings.TrimSpace(wrapped.Thread.Bead) == "" && strings.TrimSpace(wrapped.Thread.Topic) == "" {
+	if strings.TrimSpace(wrapped.Thread.Bead) == "" && strings.TrimSpace(wrapped.Thread.Topic) == "" && wrapped.Attachment == nil {
 		return PosternThreadedMessage{}, false
 	}
 	return wrapped, true
@@ -269,27 +291,33 @@ func decodePosternThreadedMessage(text string) (PosternThreadedMessage, bool) {
 
 // posternThreadAndText reads a decrypted record's class and plaintext,
 // reporting the thread label mw postern inbox prints it under, the text a
-// person should read, and whether that thread is a bead rather than a named
-// topic or the general thread. A decision-needed question's or a reply's own
-// bead IS its thread (postern's docs/protocol.md section 6); anything else
-// reads the plaintext's own thread wrapper, unwrapping it to the text it
-// names; PosternGeneralThread when there is none.
-func posternThreadAndText(class, text string) (thread, display string, isBead bool) {
+// person should read, whether that thread is a bead rather than a named
+// topic or the general thread, and the attachment it carries, if any. A
+// decision-needed question's or a reply's own bead IS its thread (postern's
+// docs/protocol.md section 6); anything else reads the plaintext's own
+// thread wrapper, unwrapping it to the text and the attachment (postern's
+// docs/protocol.md section 8) it names; PosternGeneralThread when there is
+// no thread at all.
+func posternThreadAndText(class, text string) (thread, display string, isBead bool, attachment *PosternAttachment) {
 	if class == "decision-needed" {
 		if question, ok := decodePosternQuestion(text); ok {
-			return question.Bead, text, true
+			return question.Bead, text, true, nil
 		}
 	}
 	if reply, ok := decodePosternReply(text); ok {
-		return reply.Bead, text, true
+		return reply.Bead, text, true, nil
 	}
 	if wrapped, ok := decodePosternThreadedMessage(text); ok {
-		if strings.TrimSpace(wrapped.Thread.Bead) != "" {
-			return wrapped.Thread.Bead, wrapped.Text, true
+		switch {
+		case strings.TrimSpace(wrapped.Thread.Bead) != "":
+			return wrapped.Thread.Bead, wrapped.Text, true, wrapped.Attachment
+		case strings.TrimSpace(wrapped.Thread.Topic) != "":
+			return wrapped.Thread.Topic, wrapped.Text, false, wrapped.Attachment
+		default:
+			return PosternGeneralThread, wrapped.Text, false, wrapped.Attachment
 		}
-		return wrapped.Thread.Topic, wrapped.Text, false
 	}
-	return PosternGeneralThread, text, false
+	return PosternGeneralThread, text, false, nil
 }
 
 // PosternClasses is the set of classes mw postern send accepts.
@@ -349,6 +377,9 @@ type PosternInboxMessage struct {
 	// ThreadIsBead reports whether Thread names a bead, rather than a named
 	// topic or PosternGeneralThread.
 	ThreadIsBead bool
+	// Attachment is the image this message carries, postern's
+	// docs/protocol.md section 8, or nil for a message with none.
+	Attachment *PosternAttachment
 }
 
 // PosternInbox reads the postern's message records addressed to this host's
@@ -381,6 +412,13 @@ type PosternInbox struct {
 	// its hex.
 	GovernorKey string
 
+	// AttachmentDir is where a message's attachment is downloaded, decrypted
+	// and written, 0600, named by its record's own txid and an extension by
+	// its mime: postern's docs/protocol.md section 8. Required only for a
+	// message that carries one; a run that never sees an attachment never
+	// reads it.
+	AttachmentDir string
+
 	// Out is where a full read's messages are printed, and where UnreadCount
 	// prints the count. A nil Out prints nothing.
 	Out io.Writer
@@ -396,6 +434,14 @@ type PosternInbox struct {
 // Governor whose thread is a bead is likewise not printed as text: it lands
 // as a comment on that bead instead, once per txid. A topic thread, or a
 // verified sender who is not the Governor, is printed as text as before.
+//
+// A message carrying an attachment (postern's docs/protocol.md section 8) is
+// always printed too, whether or not it is also recorded on a bead: the
+// download's outcome — the path an image was decrypted and written to,
+// "attachment refused: hash mismatch" when its sha256 disagrees with the
+// hash it was announced under, or a download or decrypt failure — is printed
+// on its own line under the message, and a bead comment naming it ends with
+// " [image: <path>]" once it is written.
 func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 	if err := i.wired(); err != nil {
 		return nil, err
@@ -406,6 +452,7 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 	}
 	newestFirst := reversePosternInbox(mine)
 	for _, m := range newestFirst {
+		line, path := i.attachmentOutcome(ctx, m)
 		// A record whose sender is not verified is never read as a reply,
 		// however its plaintext decodes: recording its answer on a bead
 		// would take a forged or unverifiable claim as someone's word.
@@ -415,20 +462,23 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 				if err != nil {
 					return nil, err
 				}
-				if recorded {
+				if recorded && m.Attachment == nil {
 					continue
 				}
 			} else if m.ThreadIsBead && i.isGovernor(m) {
-				recorded, err := i.recordThreadComment(ctx, m)
+				recorded, err := i.recordThreadComment(ctx, m, path)
 				if err != nil {
 					return nil, err
 				}
-				if recorded {
+				if recorded && m.Attachment == nil {
 					continue
 				}
 			}
 		}
 		i.printf("%s  from %s  txid %s  thread %s  %s\n%s\n", m.Class, i.fromLabel(m), orUnknown(m.Txid), m.Thread, sentInFull(m.Ts), m.Text)
+		if line != "" {
+			i.printf("%s\n", line)
+		}
 	}
 	if newest > cursor {
 		if err := i.Memory.SetNote(ctx, PosternCursorKey, strconv.FormatInt(newest, 10)); err != nil {
@@ -436,6 +486,70 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 		}
 	}
 	return newestFirst, nil
+}
+
+// attachmentOutcome handles m's attachment, if it carries one: line is what
+// Run prints under the message — the written file's path on success,
+// "attachment refused: hash mismatch", or a download or decrypt failure's
+// error — and path is that file's path, set only on success, for
+// recordThreadComment to name in its bead comment. Both are empty for a
+// message with no attachment.
+func (i PosternInbox) attachmentOutcome(ctx context.Context, m PosternInboxMessage) (line, path string) {
+	if m.Attachment == nil {
+		return "", ""
+	}
+	path, err := i.downloadAttachment(ctx, m)
+	if err != nil {
+		return err.Error(), ""
+	}
+	return path, path
+}
+
+// downloadAttachment downloads m's attachment, checks its sha256 against the
+// hash it was announced under, decrypts it with this host's key, and writes
+// it 0600 to AttachmentDir, named by m's txid and an extension by the
+// attachment's mime, reporting the path it wrote. A hash mismatch is
+// reported as "attachment refused: hash mismatch" and writes nothing.
+func (i PosternInbox) downloadAttachment(ctx context.Context, m PosternInboxMessage) (string, error) {
+	raw, err := i.Postern.Blob(ctx, m.Attachment.Hash)
+	if err != nil {
+		return "", fmt.Errorf("downloading the attachment: %w", err)
+	}
+	sum := sha256.Sum256(raw)
+	if !strings.EqualFold(hex.EncodeToString(sum[:]), strings.TrimSpace(m.Attachment.Hash)) {
+		return "", fmt.Errorf("attachment refused: hash mismatch")
+	}
+	privKey, err := i.Keys.PrivateKeyWIF()
+	if err != nil {
+		return "", err
+	}
+	plain, _, err := i.Cipher.Decrypt(privKey, base64.StdEncoding.EncodeToString(raw))
+	if err != nil {
+		return "", fmt.Errorf("decrypting the attachment: %w", err)
+	}
+	if err := os.MkdirAll(i.AttachmentDir, 0o700); err != nil {
+		return "", fmt.Errorf("making %s: %w", i.AttachmentDir, err)
+	}
+	path := filepath.Join(i.AttachmentDir, m.Txid+posternAttachmentExtension(m.Attachment.Mime))
+	if err := os.WriteFile(path, []byte(plain), 0o600); err != nil {
+		return "", fmt.Errorf("writing the attachment: %w", err)
+	}
+	return path, nil
+}
+
+// posternAttachmentExtension is the file extension mime's image writes under:
+// postern's docs/protocol.md section 8 names image/png, image/jpeg and
+// image/webp; anything else — which the phone never sends — falls back to
+// .png rather than refusing a file already safely downloaded and decrypted.
+func posternAttachmentExtension(mime string) string {
+	switch strings.ToLower(strings.TrimSpace(mime)) {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/webp":
+		return ".webp"
+	default:
+		return ".png"
+	}
 }
 
 // recordAnswer appends reply's answer to the bead it names, clears the note
@@ -592,8 +706,10 @@ func (i PosternInbox) isGovernor(m PosternInboxMessage) bool {
 // already done, for a txid recordThreadComment has already commented, which
 // changes nothing and is still reported done so Run leaves it out of the
 // inbox. A bead the tracker does not know reports false and changes nothing,
-// so Run prints it as text, exactly as an unrecordable reply does.
-func (i PosternInbox) recordThreadComment(ctx context.Context, m PosternInboxMessage) (bool, error) {
+// so Run prints it as text, exactly as an unrecordable reply does. imagePath,
+// set, is a decrypted attachment's path: the comment ends with " [image:
+// <imagePath>]".
+func (i PosternInbox) recordThreadComment(ctx context.Context, m PosternInboxMessage, imagePath string) (bool, error) {
 	if i.Tracker == nil {
 		return false, nil
 	}
@@ -606,6 +722,9 @@ func (i PosternInbox) recordThreadComment(ctx context.Context, m PosternInboxMes
 		return true, nil
 	}
 	comment := fmt.Sprintf("The Governor by postern %s: %s", sentInFull(m.Ts), m.Text)
+	if imagePath != "" {
+		comment += fmt.Sprintf(" [image: %s]", imagePath)
+	}
 	if err := i.Tracker.CommentOnStory(ctx, m.Thread, comment); err != nil {
 		return false, nil
 	}
@@ -683,11 +802,12 @@ func (i PosternInbox) fetch(ctx context.Context) (mine []PosternInboxMessage, ne
 			return nil, 0, 0, fmt.Errorf("decrypting record %d (%s): %w", r.Seq, r.Txid, err)
 		}
 		from, verified, signerChecked := posternVerifySender(envelopeFrom, r.From, r.Signer)
-		thread, display, threadIsBead := posternThreadAndText(r.Class, text)
+		thread, display, threadIsBead, attachment := posternThreadAndText(r.Class, text)
 		mine = append(mine, PosternInboxMessage{
 			Seq: r.Seq, Txid: r.Txid, Class: r.Class,
 			From: from, Verified: verified, SignerChecked: signerChecked,
 			Ts: r.Ts, Text: display, Thread: thread, ThreadIsBead: threadIsBead,
+			Attachment: attachment,
 		})
 	}
 	return mine, newest, cursor, nil

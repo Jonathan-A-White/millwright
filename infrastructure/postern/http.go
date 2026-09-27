@@ -8,12 +8,17 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 )
+
+// posternBlobHash matches a sha256 hash, hex: 64 hex characters, postern's
+// docs/protocol.md section 8.
+var posternBlobHash = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
 
 var _ application.Postern = (*HTTP)(nil)
 
@@ -151,17 +156,42 @@ func (h *HTTP) Broadcast(ctx context.Context, rawtx string) (string, error) {
 // backend answers holds no licence is reported plainly, naming the key,
 // rather than the backend's own terse 401.
 func (h *HTTP) authDo(ctx context.Context, method, path string, body []byte, into any) error {
-	pubKeyHex, header, err := h.authHeader(ctx)
+	raw, err := h.authFetch(ctx, method, path, body)
 	if err != nil {
 		return err
 	}
-	if err := h.do(ctx, method, path, body, into, header); err != nil {
-		if strings.Contains(err.Error(), posternNoLicenceError) {
-			return fmt.Errorf("the postern key %s holds no licence: mint one before mw can use the postern backend at %s", pubKeyHex, h.base)
-		}
-		return err
+	if err := json.Unmarshal(raw, into); err != nil {
+		return fmt.Errorf("the postern backend at %s answered %s %s with something that is not its JSON: %w", h.base, method, path, err)
 	}
 	return nil
+}
+
+// authFetch is fetch, proven to the backend first exactly as authDo is, and
+// reporting the raw body rather than unmarshaling it.
+func (h *HTTP) authFetch(ctx context.Context, method, path string, body []byte) ([]byte, error) {
+	pubKeyHex, header, err := h.authHeader(ctx)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := h.fetch(ctx, method, path, body, header)
+	if err != nil {
+		if strings.Contains(err.Error(), posternNoLicenceError) {
+			return nil, fmt.Errorf("the postern key %s holds no licence: mint one before mw can use the postern backend at %s", pubKeyHex, h.base)
+		}
+		return nil, err
+	}
+	return raw, nil
+}
+
+// Blob implements application.Postern: GET /api/blobs/{hash} (postern's
+// docs/protocol.md section 8), the whole ciphertext body an attachment was
+// uploaded as, untouched. A hash that is not 64 hex characters is refused
+// before any network call.
+func (h *HTTP) Blob(ctx context.Context, hash string) ([]byte, error) {
+	if !posternBlobHash.MatchString(hash) {
+		return nil, fmt.Errorf("%q is not a sha256 hash, 64 hex characters: refusing to ask the postern backend for it", hash)
+	}
+	return h.authFetch(ctx, http.MethodGet, "/api/blobs/"+url.PathEscape(hash), nil)
 }
 
 // authHeader asks the backend for a fresh challenge nonce and signs it with
@@ -201,16 +231,30 @@ func (h *HTTP) challenge(ctx context.Context) (string, error) {
 
 // do makes one call to the backend and reads its JSON answer into into,
 // carrying authHeader as the request's Authorization header when it is not
-// empty. An answer other than 200 is an error carrying the status and the
-// backend's own {"error": ...} message.
+// empty.
 func (h *HTTP) do(ctx context.Context, method, path string, body []byte, into any, authHeader string) error {
+	raw, err := h.fetch(ctx, method, path, body, authHeader)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(raw, into); err != nil {
+		return fmt.Errorf("the postern backend at %s answered %s %s with something that is not its JSON: %w", h.base, method, path, err)
+	}
+	return nil
+}
+
+// fetch makes one call to the backend and reports its raw body, carrying
+// authHeader as the request's Authorization header when it is not empty. An
+// answer other than 200 is an error carrying the status and the backend's
+// own {"error": ...} message.
+func (h *HTTP) fetch(ctx context.Context, method, path string, body []byte, authHeader string) ([]byte, error) {
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, h.base+path, reader)
 	if err != nil {
-		return fmt.Errorf("asking the postern backend at %s: %w", h.base, err)
+		return nil, fmt.Errorf("asking the postern backend at %s: %w", h.base, err)
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -220,12 +264,12 @@ func (h *HTTP) do(ctx context.Context, method, path string, body []byte, into an
 	}
 	resp, err := h.client.Do(req)
 	if err != nil {
-		return fmt.Errorf("reaching the postern backend at %s: %w", h.base, err)
+		return nil, fmt.Errorf("reaching the postern backend at %s: %w", h.base, err)
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("reading the postern backend's answer to %s %s: %w", method, path, err)
+		return nil, fmt.Errorf("reading the postern backend's answer to %s %s: %w", method, path, err)
 	}
 	if resp.StatusCode != http.StatusOK {
 		var said struct {
@@ -234,10 +278,7 @@ func (h *HTTP) do(ctx context.Context, method, path string, body []byte, into an
 		if json.Unmarshal(raw, &said) != nil || said.Error == "" {
 			said.Error = strings.TrimSpace(string(raw))
 		}
-		return fmt.Errorf("the postern backend at %s said %d to %s %s: %s", h.base, resp.StatusCode, method, path, said.Error)
+		return nil, fmt.Errorf("the postern backend at %s said %d to %s %s: %s", h.base, resp.StatusCode, method, path, said.Error)
 	}
-	if err := json.Unmarshal(raw, into); err != nil {
-		return fmt.Errorf("the postern backend at %s answered %s %s with something that is not its JSON: %w", h.base, method, path, err)
-	}
-	return nil
+	return raw, nil
 }

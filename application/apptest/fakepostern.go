@@ -18,6 +18,7 @@ type FakePostern struct {
 	utxos     map[string][]application.PosternUtxo
 	balance   map[string]int64
 	broadcast []string
+	blobs     map[string][]byte
 
 	// NextTxid is the txid Broadcast reports. "fake-txid" when empty.
 	NextTxid string
@@ -34,7 +35,16 @@ func NewFakePostern() *FakePostern {
 	return &FakePostern{
 		utxos:   map[string][]application.PosternUtxo{},
 		balance: map[string]int64{},
+		blobs:   map[string][]byte{},
 	}
+}
+
+// SetBlob sets what Blob reports for hash: a blob store's raw body,
+// standing in for the postern backend's GET /api/blobs/{hash}.
+func (f *FakePostern) SetBlob(hash string, body []byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.blobs[hash] = append([]byte(nil), body...)
 }
 
 // AddRecord adds a record to the index, in the order Messages reports it: the
@@ -121,4 +131,18 @@ func (f *FakePostern) Broadcast(_ context.Context, rawtx string) (string, error)
 		return f.NextTxid, nil
 	}
 	return fmt.Sprintf("fake-txid-%d", len(f.broadcast)), nil
+}
+
+// Blob implements application.Postern.
+func (f *FakePostern) Blob(_ context.Context, hash string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	body, ok := f.blobs[hash]
+	if !ok {
+		return nil, fmt.Errorf("no blob for hash %s", hash)
+	}
+	return append([]byte(nil), body...), nil
 }

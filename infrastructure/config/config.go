@@ -177,6 +177,12 @@ var DefaultPosternKeyFile = filepath.Join(".config", "mw", "postern.key")
 // state, not config, so it lives under .local/state rather than .config.
 var DefaultPosternSnapshotPath = filepath.Join(".local", "state", "mw", "snapshot.bin")
 
+// DefaultPosternInboxDir is where mw postern inbox writes a message's
+// downloaded and decrypted attachment under the home directory: state,
+// alongside the snapshot, never the vault or a rig. There is no setting for
+// it.
+var DefaultPosternInboxDir = filepath.Join(".local", "state", "mw", "postern", "inbox")
+
 // PosternBackend reports the URL of the postern's backend: $MW_POSTERN_BACKEND
 // if it is set, otherwise the root-table `postern_backend` key of
 // ~/.config/mw/config.toml, and DefaultPosternBackend when neither says.
@@ -257,6 +263,17 @@ func PosternSnapshotPath() (string, error) {
 		return said, nil
 	}
 	return filepath.Join(home, DefaultPosternSnapshotPath), nil
+}
+
+// PosternInboxDir reports the full path to the directory mw postern inbox
+// writes a decrypted attachment to: DefaultPosternInboxDir under the home
+// directory. There is no setting for it.
+func PosternInboxDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("there is no home directory to write a postern attachment in: %w", err)
+	}
+	return filepath.Join(home, DefaultPosternInboxDir), nil
 }
 
 // What `mw dispatch` does when its sync cannot resolve a name, which is what a

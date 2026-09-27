@@ -157,6 +157,10 @@ func newPosternInboxCmd() *cobra.Command {
 			"sender is postern_governor_key and the question it answers offered Release among its\n" +
 			"options. Any other signer, a question that never offered Release, a bead that is not an\n" +
 			"epic, or one with nothing held, releases nothing; the Mayor is always mailed why.\n\n" +
+			"A message carrying an attachment is downloaded, its sha256 checked against the hash it\n" +
+			"was announced under, decrypted with the postern key, and written 0600 under the postern\n" +
+			"inbox's own state directory, named by the message's txid; its path is printed under the\n" +
+			"message, and a bead comment naming it ends with \" [image: <path>]\".\n\n" +
 			"--unread-count prints only how many are unread, without reading them, so a notifier can\n" +
 			"poll it without consuming anything.",
 		Args: cobra.NoArgs,
@@ -177,16 +181,21 @@ func newPosternInboxCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			attachmentDir, err := config.PosternInboxDir()
+			if err != nil {
+				return err
+			}
 			inbox := application.PosternInbox{
-				Postern:     backend,
-				Cipher:      posternCipher(keys),
-				Keys:        keys,
-				Memory:      gateway,
-				Tracker:     gateway,
-				Mailbox:     gateway,
-				Host:        host,
-				GovernorKey: governorKey,
-				Out:         cmd.OutOrStdout(),
+				Postern:       backend,
+				Cipher:        posternCipher(keys),
+				Keys:          keys,
+				Memory:        gateway,
+				Tracker:       gateway,
+				Mailbox:       gateway,
+				Host:          host,
+				GovernorKey:   governorKey,
+				AttachmentDir: attachmentDir,
+				Out:           cmd.OutOrStdout(),
 			}
 			if unreadCount {
 				_, err = inbox.UnreadCount(cmd.Context())
