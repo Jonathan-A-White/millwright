@@ -106,7 +106,7 @@ func posternHome(t *testing.T, backend, wif, governorKey string) {
 	}
 	mwConfig(t, fmt.Sprintf("vault = %q\nhost = \"laptop\"\npostern_backend = %q\npostern_key_file = %q\npostern_governor_key = %q\n",
 		t.TempDir(), backend, keyFile, governorKey))
-	for _, env := range []string{"MW_POSTERN_BACKEND", "MW_POSTERN_FLOAT_SATS", "MW_POSTERN_GOVERNOR_KEY", "MW_POSTERN_KEY_FILE"} {
+	for _, env := range []string{"MW_POSTERN_BACKEND", "MW_POSTERN_FLOAT_SATS", "MW_POSTERN_GOVERNOR_KEY", "MW_POSTERN_KEY_FILE", "MW_POSTERN_CHANNEL", "MW_POSTERN_TRANSCRIBE_CMD", "MW_POSTERN_VIEW_PATH"} {
 		t.Setenv(env, "")
 	}
 
@@ -192,7 +192,8 @@ func TestPosternInboxPrintsTheTextOfARecordFromTheBackend(t *testing.T) {
 // send builds can be compared with the fixture byte for byte.
 type fixedCipher struct{ ct string }
 
-func (c fixedCipher) Encrypt(string, string) (string, error) { return c.ct, nil }
+func (c fixedCipher) Encrypt(string, string) (string, error)      { return c.ct, nil }
+func (c fixedCipher) EncryptBytes(string, []byte) (string, error) { return c.ct, nil }
 func (c fixedCipher) Decrypt(string, string) (string, string, error) {
 	return "", "", fmt.Errorf("fixedCipher does not decrypt")
 }
@@ -204,6 +205,7 @@ func TestPosternSendBroadcastsTheFixturesRecordScript(t *testing.T) {
 		"/api/utxos/" + f.SenderAddress:   `{"utxos":[{"txid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","vout":0,"satoshis":10000,"height":100}]}`,
 	})
 	posternHome(t, url, f.SenderWIF, f.RecipientPubKey)
+	t.Setenv("MW_POSTERN_CHANNEL", "chain")
 	realCipher, realClock := posternCipher, posternClock
 	t.Cleanup(func() { posternCipher, posternClock = realCipher, realClock })
 	posternCipher = func(*postern.KeyFile) application.Cipher { return fixedCipher{ct: f.Ct} }
@@ -235,6 +237,7 @@ func TestPosternSendDefaultsClassToMessage(t *testing.T) {
 		"/api/utxos/" + f.SenderAddress:   `{"utxos":[{"txid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","vout":0,"satoshis":10000,"height":100}]}`,
 	})
 	posternHome(t, url, f.SenderWIF, f.RecipientPubKey)
+	t.Setenv("MW_POSTERN_CHANNEL", "chain")
 	realCipher, realClock := posternCipher, posternClock
 	t.Cleanup(func() { posternCipher, posternClock = realCipher, realClock })
 	posternCipher = func(*postern.KeyFile) application.Cipher { return fixedCipher{ct: f.Ct} }

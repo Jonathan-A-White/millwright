@@ -567,6 +567,7 @@ func (f *FakeTracker) ShowEpic(_ context.Context, id string) (application.EpicDe
 	if says, described := f.epicSays[id]; described {
 		epic.Status, epic.Priority = says.status, says.priority
 	}
+	epic.Bead = f.epicBead(id, epic)
 	for _, storyID := range f.order {
 		s := f.stories[storyID]
 		if s.detail.EpicID != id {
@@ -578,6 +579,124 @@ func (f *FakeTracker) ShowEpic(_ context.Context, id string) (application.EpicDe
 		epic.Stories = append(epic.Stories, detail)
 	}
 	return epic, nil
+}
+
+// epicBead is an epic's own bead as the fake holds it, the lock held by the
+// caller: the story entry a child epic was filed as (AddChildEpic), its
+// title, status and priority those of epic, or — for a root epic, which has
+// none — a bead made of what epic says and the comments left on it.
+func (f *FakeTracker) epicBead(id string, epic application.EpicDetail) application.StoryDetail {
+	bead := application.StoryDetail{Story: domain.Story{ID: id}, IsEpic: true, Type: "epic"}
+	if s, filed := f.stories[id]; filed {
+		bead = s.detail
+		bead.Labels = append([]string(nil), s.detail.Labels...)
+		bead.CommentCount = len(s.comments)
+		bead.Defaults = domain.Path{}
+		bead.IsEpic = true
+		if bead.Type == "" {
+			bead.Type = "epic"
+		}
+	} else {
+		bead.CommentCount = len(f.epicSaid[id])
+	}
+	bead.Story.Title = epic.Title
+	bead.Story.Overrides = epic.Defaults
+	bead.Status = epic.Status
+	bead.Priority = epic.Priority
+	return bead
+}
+
+// ShowBeads implements application.WorkTracker: each id the fake holds, story
+// or epic, in the order asked, an unknown one left out. A story's Needs are
+// narrowed to the unfinished, as bd show's whole linked beads let the real
+// tracker narrow them.
+func (f *FakeTracker) ShowBeads(ctx context.Context, ids []string) ([]application.StoryDetail, error) {
+	f.mu.Lock()
+	f.asked = append(f.asked, "ShowBeads")
+	err := f.Err
+	f.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	var found []application.StoryDetail
+	for _, id := range ids {
+		f.mu.Lock()
+		s, isStory := f.stories[id]
+		_, isEpic := f.defaults[id]
+		var detail application.StoryDetail
+		if isStory && !s.detail.IsEpic {
+			detail = s.detail
+			detail.CommentCount = len(s.comments)
+			for _, need := range s.needs {
+				if blocker, filed := f.stories[need]; !filed || blocker.detail.Status != StatusClosed {
+					detail.Needs = append(detail.Needs, need)
+				}
+			}
+		}
+		f.mu.Unlock()
+		switch {
+		case isStory && !s.detail.IsEpic:
+			found = append(found, detail)
+		case isEpic:
+			epic, err := f.ShowEpic(ctx, id)
+			if err != nil {
+				return nil, err
+			}
+			found = append(found, epic.Bead)
+		}
+	}
+	return found, nil
+}
+
+// SetType sets the tracker's word for what kind of bead a story is — bug,
+// feature, chore — as a fixture. A story added without one reports none.
+func (f *FakeTracker) SetType(id, kind string) error {
+	return f.write(id, func(s *fakeStory) error {
+		s.detail.Type = kind
+		return nil
+	})
+}
+
+// SetStoryPriority implements application.WorkTracker: a story's priority,
+// or a root epic's, which DescribeEpic otherwise sets.
+func (f *FakeTracker) SetStoryPriority(_ context.Context, id string, priority int) error {
+	if err := application.ValidPriority(priority); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	if _, isStory := f.stories[id]; !isStory {
+		if _, isEpic := f.defaults[id]; isEpic {
+			says, described := f.epicSays[id]
+			if !described {
+				says = epicFacts{status: StatusOpen}
+			}
+			says.priority = priority
+			f.epicSays[id] = says
+			f.writes++
+			f.mu.Unlock()
+			return nil
+		}
+	}
+	f.mu.Unlock()
+	return f.SetPriority(id, priority)
+}
+
+// AddLabel implements application.WorkTracker, for a story the fake holds.
+func (f *FakeTracker) AddLabel(_ context.Context, id, label string) error {
+	return f.write(id, func(s *fakeStory) error {
+		if !carries(s.detail.Labels, label) {
+			s.detail.Labels = append(append([]string(nil), s.detail.Labels...), label)
+		}
+		return nil
+	})
+}
+
+// HoldStory implements application.WorkTracker.
+func (f *FakeTracker) HoldStory(_ context.Context, id string) error {
+	return f.write(id, func(s *fakeStory) error {
+		s.detail.Status = StatusDeferred
+		return nil
+	})
 }
 
 // ShowEpics implements application.WorkTracker: ShowEpic for each id, in

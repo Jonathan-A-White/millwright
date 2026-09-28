@@ -273,6 +273,7 @@ func (g *Gateway) ShowEpic(ctx context.Context, id string) (application.EpicDeta
 
 	filed := application.EpicDetail{
 		ID: epic.ID, Title: epic.Title, Status: epic.Status, Priority: epic.priority(), Defaults: defaults,
+		Bead: epic.ownBead(),
 	}
 	for _, story := range inFiledOrder(stories) {
 		filed.Stories = append(filed.Stories, story.detail(defaults))
@@ -321,6 +322,7 @@ func (g *Gateway) ShowEpics(ctx context.Context, ids []string) ([]application.Ep
 
 		filed := application.EpicDetail{
 			ID: epic.ID, Title: epic.Title, Status: epic.Status, Priority: epic.priority(), Defaults: defaults,
+			Bead: epic.ownBead(),
 		}
 		for _, story := range inFiledOrder(stories) {
 			filed.Stories = append(filed.Stories, story.detail(defaults))
@@ -328,6 +330,89 @@ func (g *Gateway) ShowEpics(ctx context.Context, ids []string) ([]application.Ep
 		out = append(out, filed)
 	}
 	return out, nil
+}
+
+// ShowBeads implements application.WorkTracker: bd show takes any number of
+// ids and prints each as a whole bead, its blockers as whole linked beads
+// (so its Needs narrow to the unfinished) and its parent embedded (so a
+// story's Defaults are its parent's, with no second look). A bead bd says it
+// has no record of is left out: asked about alone, bd refuses it; asked
+// about among others, the rest are read one at a time so that one unknown id
+// does not hide the beads that are there.
+func (g *Gateway) ShowBeads(ctx context.Context, ids []string) ([]application.StoryDetail, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	found, err := g.showMany(ctx, ids)
+	if err != nil {
+		if !beadMissing(err) {
+			return nil, err
+		}
+		if len(ids) == 1 {
+			return nil, nil
+		}
+		var each []application.StoryDetail
+		for _, id := range ids {
+			one, err := g.ShowBeads(ctx, []string{id})
+			if err != nil {
+				return nil, err
+			}
+			each = append(each, one...)
+		}
+		return each, nil
+	}
+	byID := make(map[string]bead, len(found))
+	for _, b := range found {
+		byID[b.ID] = b
+	}
+	out := make([]application.StoryDetail, 0, len(ids))
+	for _, id := range ids {
+		b, ok := byID[id]
+		if !ok {
+			continue
+		}
+		defaults, _ := b.parentPath()
+		out = append(out, b.detail(defaults))
+	}
+	return out, nil
+}
+
+// beadMissing reports whether err is bd saying it has no record of a bead,
+// in any of the ways it has been seen to say so.
+func beadMissing(err error) bool {
+	said := strings.ToLower(err.Error())
+	for _, missing := range []string{"no issue found", "no issues found", "not found"} {
+		if strings.Contains(said, missing) {
+			return true
+		}
+	}
+	return false
+}
+
+// SetStoryPriority implements application.WorkTracker: one bd update, refused
+// before bd is asked when the priority is not one beads holds.
+func (g *Gateway) SetStoryPriority(ctx context.Context, id string, priority int) error {
+	if err := application.ValidPriority(priority); err != nil {
+		return err
+	}
+	_, err := g.call(ctx, "update", id, "--priority", strconv.Itoa(priority))
+	return err
+}
+
+// AddLabel implements application.WorkTracker: one bd update --add-label,
+// which leaves the bead's other labels alone and one it already carries as
+// it is.
+func (g *Gateway) AddLabel(ctx context.Context, id, label string) error {
+	_, err := g.call(ctx, "update", id, "--add-label", label)
+	return err
+}
+
+// HoldStory implements application.WorkTracker: the story goes back to
+// deferred, beads' own way of holding work, the status CreateStory files it
+// in.
+func (g *Gateway) HoldStory(ctx context.Context, id string) error {
+	_, err := g.call(ctx, "update", id, "--status", StatusDeferred)
+	return err
 }
 
 // showMany reads several beads in one bd call: bd show takes any number of

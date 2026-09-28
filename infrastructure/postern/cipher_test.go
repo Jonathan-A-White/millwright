@@ -104,3 +104,46 @@ func TestCipherRefusesARecipientThatIsNotAPublicKey(t *testing.T) {
 		t.Fatalf("expected the refusal to name the bad key, got: %v", err)
 	}
 }
+
+// EncryptBytes is BRC-78 over raw bytes rather than a string's UTF-8: a gzip
+// stream, or an attachment's bytes, round-trips byte for byte, invalid UTF-8
+// and all, so the live view (postern's docs/protocol.md section 11) and an
+// attachment (section 14) can be encrypted as they are.
+func TestCipherEncryptBytesRoundTripsBytesThatAreNotUTF8(t *testing.T) {
+	f := loadProtocolFixture(t)
+	senderWIF := wifFromHex(t, f.Inputs.SenderPrivateKeyHex)
+	cipher := postern.NewCipher(postern.New(keyFileHolding(t, senderWIF)))
+	plain := []byte{0x1f, 0x8b, 0x08, 0x00, 0xff, 0xfe, 0x00, 0x80, 0xc3}
+
+	ct, err := cipher.EncryptBytes(f.Inputs.RecipientPublicKeyHex, plain)
+	if err != nil {
+		t.Fatalf("encrypting bytes: %v", err)
+	}
+	text, from, err := cipher.Decrypt(wifFromHex(t, f.Inputs.RecipientPrivateKeyHex), ct)
+	if err != nil {
+		t.Fatalf("decrypting: %v", err)
+	}
+	if text != string(plain) {
+		t.Fatalf("expected the bytes %x back, got %x", plain, []byte(text))
+	}
+	if from != f.Inputs.SenderPublicKeyHex {
+		t.Fatalf("expected the envelope sender %s, got %s", f.Inputs.SenderPublicKeyHex, from)
+	}
+}
+
+// Encrypt of a string and EncryptBytes of its UTF-8 bytes are the same
+// construction: under pinned randomness they write the same ciphertext.
+func TestCipherEncryptIsEncryptBytesOfTheTextsUTF8(t *testing.T) {
+	f := loadProtocolFixture(t)
+	senderWIF := wifFromHex(t, f.Inputs.SenderPrivateKeyHex)
+	cipher := postern.NewCipher(postern.New(keyFileHolding(t, senderWIF)))
+
+	pinFixtureRandomness(t)
+	ct, err := cipher.EncryptBytes(f.Inputs.RecipientPublicKeyHex, []byte(f.Inputs.Plaintext))
+	if err != nil {
+		t.Fatalf("encrypting: %v", err)
+	}
+	if ct != f.EncryptMessage.Ct {
+		t.Fatalf("expected the fixture's ciphertext\n%s\ngot\n%s", f.EncryptMessage.Ct, ct)
+	}
+}

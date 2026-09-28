@@ -99,6 +99,10 @@ func newMillhandTickCmd() *cobra.Command {
 			windows := seatWindows()
 			files := vault.New(dir)
 			gateway := mwGateway(dir, host)
+			sync, err := hostSync(application.Sync{Vault: mwVault(dir, host), Tracker: gateway, Host: host, Ticks: hostTickLogs(), Lock: hostSyncLock()})
+			if err != nil {
+				return err
+			}
 			tick := application.MillhandTick{
 				Millhand: application.Millhand{
 					Seats:    files,
@@ -111,7 +115,7 @@ func newMillhandTickCmd() *cobra.Command {
 					RoutineModel: domain.Model(routine),
 					ReviewModel:  domain.Model(review),
 				},
-				Sync:        application.Sync{Vault: mwVault(dir, host), Tracker: gateway, Host: host, Ticks: hostTickLogs(), Lock: hostSyncLock()},
+				Sync:        sync,
 				Mail:        gateway,
 				DoctorNotes: gateway,
 				Sweep: application.Sweep{

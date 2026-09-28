@@ -91,6 +91,71 @@ checks on its branch, `mw status` reports what a host is doing, `mw brief`
 prints the live children of a bead for a seat to boot from, and `mw sweep`
 marks the claimed stories whose session has gone or gone quiet.
 
+### The factory on one host (the desktop)
+
+The factory has one home, the desktop: the Mayor, the one beads database, the
+mail notifier and the postern backend all live there, always on. The database
+runs as a Dolt server (`dolt sql-server` on the desktop), so every host's `bd`
+writes the same rows and a claim is atomic across hosts; GitHub stops being how
+the hosts see each other's beads and becomes a backup of them, pushed on a
+timer. Each host's `beads_sync` says which side of that it is on:
+
+| `beads_sync` | The host | What `mw sync` does with beads |
+| --- | --- | --- |
+| `remote` (default) | keeps a copy of its own | one `bd sync` every sync, carrying the notes: *Keeping two hosts level* |
+| `backup` | holds the one database: the desktop | writes the notes straight into it every sync; one `bd sync` as a backup only once the last got through `beads_backup_minutes` ago (30), recorded as `host.<name>.last_backup`; GC on its usual daily cadence |
+| `shared` | reaches the desktop's database: the Laptop on a boost | writes the notes straight into it every sync; never a `bd sync` and never a GC, which are the desktop's |
+
+In every mode the vault half runs exactly as before, and every sync that gets
+the vault level writes the note of when the host was level, with its timers'
+counts — so "laptop last synced 12 min ago" still means the Laptop's timers
+last got it level 12 minutes ago. A backup that fails is said on the sync's one
+line (and a merge conflict or a stuck working set is marked the way any such
+halt is, for `mw status` and `mw nudge` to show), but it stops nothing and takes
+no note back: no host's view of the work waits on it, and the next sync tries
+again. `mw status` says the mode on its `BEADS SYNC` line
+— with, on the desktop, how long ago the last backup got through — and no
+longer calls another host's last sync "a cycle behind" once it is read live
+out of the one database; `mw nudge` keeps the other hosts' ages beside this
+host's own halt rather than dropping them. Any other `beads_sync` is refused,
+naming the three.
+
+**The desktop**, once the Mayor has moved there (above):
+
+1. The beads database in Dolt's server mode, listening on the desktop's
+   WireGuard address (10.88.0.3), with the desktop's own `bd` pointed at it
+   too: once a server holds the database, no `bd` opens it on its own.
+2. `beads_sync = "backup"` in `~/.config/mw/config.toml`, and
+   `beads_backup_minutes` to change the half hour.
+3. `MW_MAIL_SYNC_EVERY=60` in `~/.config/mw/mail-notify.env`: a sync there is a
+   few local writes, with no remote round trip unless a backup is due.
+4. The postern backend's environment, `mw postern serve --env-file <file>
+   --addr 10.88.0.3:8787` (*The postern key*, below), then a restart of the
+   backend.
+
+**A boost on the Laptop**, when the Governor wants more Builders at once:
+
+1. `beads_sync = "shared"` in the Laptop's config, and bd's own
+   `BEADS_DOLT_SERVER_HOST=10.88.0.3`, `BEADS_DOLT_SERVER_PORT` and
+   `BEADS_DOLT_SERVER_PASSWORD` in its `~/.config/mw/dispatch.env` — which every
+   timer reads — and in the shell anything runs `bd` from. It keeps no beads of
+   its own and never syncs them.
+2. Raise its `cap`, arm `mw-dispatch`, and path stories to `host=laptop`.
+3. `mw doctor beads-server` says whether it reaches the database (*mw doctor*).
+
+To end the boost, stop the Laptop dispatching. `mw` refuses a `cap` below 1
+today, so rather than a cap of 0 that is `systemctl --user disable --now
+mw-dispatch.timer` there; the sessions already running finish, and whatever is
+still pathed to the Laptop is re-pathed (`bd update <id> --set-metadata
+host=desktop`).
+
+**What stays on the VPS**: nginx and its TLS, the WireGuard hub, the Governor's
+blog, and a watchdog. nginx proxies the postern's `/api` — and `/api/events`,
+the backend's event stream, unbuffered — to the backend on the desktop,
+`http://desktop.mw:8787`: `mw postern nginx --conf <site>` there, whose
+`--backend` defaults to `postern_backend`. Every factory timer the VPS ran for
+the Mayor is turned off by the move itself, step 2 above.
+
 ## Installing
 
 See *Quick start*, above, for the one line. It needs apt packages (git, tmux, jq,
@@ -559,8 +624,10 @@ bd reclaim mw-gq6.30                                        # or take it over fi
 `MW_PUSH_WAIT_SECONDS`, `MW_MAX_ATTEMPTS`,
 `MW_MILLHAND_ROUTINE_MODEL`, `MW_MILLHAND_REVIEW_MODEL`,
 `MW_NUDGE_AFTER_MINUTES`, `MW_NUDGE_SYNC_STALE_MINUTES`, `MW_POSTERN_BACKEND`,
-`MW_POSTERN_FLOAT_SATS`, `MW_POSTERN_GOVERNOR_KEY`, `MW_POSTERN_KEY_FILE` and
-`MW_POSTERN_SNAPSHOT_PATH` ahead of it:
+`MW_POSTERN_FLOAT_SATS`, `MW_POSTERN_GOVERNOR_KEY`, `MW_POSTERN_KEY_FILE`,
+`MW_POSTERN_SNAPSHOT_PATH`, `MW_POSTERN_VIEW_PATH`, `MW_POSTERN_CHANNEL`,
+`MW_POSTERN_TRANSCRIBE_CMD`, `MW_BEADS_SYNC`, `MW_BEADS_BACKUP_MINUTES` and
+`MW_HANDS_ROOT_HELPER` ahead of it:
 
 ```toml
 vault = "/root/millwright-vault"   # the one beads database and the seats
@@ -583,6 +650,12 @@ postern_float_sats = 100000        # the postern's float cap, in testnet satoshi
 postern_governor_key = ""          # the Governor's compressed public key, as hex, the postern backend answers to (default empty)
 postern_key_file = "~/.config/mw/postern.key"  # where the Mayor's postern key is kept, outside the vault (default shown)
 postern_snapshot_path = "~/.local/state/mw/snapshot.bin"  # where mw postern snapshot writes the encrypted snapshot (default shown)
+postern_view_path = "~/.local/state/postern/view.b64"  # the live view mw postern view writes and the postern backend serves (default shown)
+postern_channel = "direct"         # how mw postern send delivers: direct to the backend, or chain, a funded transaction (default chain)
+postern_transcribe_cmd = ""        # what hears the Governor's voice notes, the audio's path appended, e.g. contrib/postern-transcribe (default empty: none are heard)
+beads_sync = "remote"              # remote (a copy of its own), backup (holds the one database) or shared (reaches another host's) (default remote)
+beads_backup_minutes = 30          # on a backup host, how long between two backups of the one database (default 30)
+hands_root_helper = "/usr/local/sbin/mw-hands-root"  # what a root hands step is handed to, through sudo -n, on every host (default shown)
 
 [rigs]
 millwright = "/root/millwright"    # where each rig is checked out here
@@ -592,6 +665,10 @@ millwright = "make test"           # how a close-out asks this rig if it is gree
 
 [after_landing]
 millwright = "make build"          # run in this rig's checkout once a landing has moved it (default: nothing)
+
+[hands_hosts]                      # how this host reaches another host a hands step is for; leave it out to run steps for this host only
+laptop = "ssh laptop"              # an ssh prefix, split on whitespace
+vps = "ssh mw@allmymind.org"       # a NON-root login: over a root login a user step would run as root unchecked, so mw refuses it
 
 [watch]                            # what mw watch looks at; leave it out to watch nothing
 ssh = "vps"                        # the name ssh knows the watched host by
@@ -683,7 +760,14 @@ Ledgers are appended to by both hosts and edited by neither, so the vault's
 `.gitattributes` must carry `seats/*/ledger.md merge=union` — two hosts' appends
 then merge by keeping every line instead of conflicting. `mw sync` writes that
 line if it is missing and says so; committing it is a seat's job, and until
-someone does, only this host is covered. See `features/sync.feature`.
+someone does, only this host is covered.
+
+All of that is `beads_sync = "remote"`, the default: every host keeping a copy
+of its own. On the host that holds the one database (`backup`) the `bd sync` is
+only a backup, run once one is due, and on a host that reaches it (`shared`)
+there is none; in both the note is written straight into the database every
+sync. See *The factory on one host (the desktop)*, above, and
+`features/sync.feature`.
 
 ## The postern key
 
@@ -723,6 +807,64 @@ postern inbox` prints the caption and the file's path; a bead comment naming
 it ends with " [image: <path>]". A download or decrypt failure prints the
 error and still records the text.
 
+`mw postern send` delivers by `postern_channel`: `direct` hands the record
+straight to the postern backend (postern's docs/protocol.md §9), its txid
+`direct:<sha256>`, with no coins, no float cap and no broadcast; `chain`, the
+default, is the funded transaction above. A host says `direct` only once the
+backend it reaches takes direct records (`POST /api/messages`): an older
+backend answers 404 to it, and there is no falling back to the chain. A message sent in a bead's thread
+(`--thread`) is commented on that bead too, `MAYOR via postern, txid <id>:
+<text>`, so the whole exchange lives on the bead. `--attach <file>`
+(repeatable) encrypts a file to the Governor, uploads it to the backend's blob
+store and announces it in the message (§8, §14): at most 8 MiB, its type read
+from its extension (images, `.webm .ogg .m4a .mp3` voice, `.pdf`, `.txt`);
+several files are several messages, the caption on the last. See
+`features/postern_send.feature`.
+
+The Governor's one-tap actions (§13: `release` a held story or an epic's held
+stories, `hold` an open unclaimed story, set a `priority` 0 to 4, mark a story
+`verified`) go straight to beads at zero tokens: the backend's on-message hook
+runs `mw postern inbox --apply`, which applies every verified message from
+`postern_governor_key` since the cursor — actions, replies, comments in a
+bead's thread, voice notes — at most once per txid (a
+`postern.applied.<txid>` note), comments what it did on the bead (`RELEASED by
+the Governor via postern, txid …`, `VERIFIED by the Governor via postern
+(<txid>)`) and mails the Mayor. It moves no cursor and prints no message's
+text. The Mayor's own `mw postern inbox` then shows an applied message as one
+line, `applied <kind> <bead> txid <id>`, and never applies it twice; an action
+this host does not know is left as text, and one it cannot apply (a hold on a
+claimed story, say) is refused and the Mayor told why. BRC-78 has no replay
+protection, so an action is applied only when the backend vouched for the
+record's signer (the key that delivered it, or signed its transaction);
+otherwise it too is left as text. See
+`features/postern_inbox_apply.feature`.
+
+A voice note — a Governor's message whose attachment is audio — is heard on
+this host, never by a third party (§14): with `postern_transcribe_cmd` set,
+the decrypted audio's path is appended to it and it is given five minutes;
+what it prints is the transcript, written on the bead as `GOVERNOR (voice) via
+postern, txid …: <transcript>` (or printed, for a topic thread), sent back to
+the Governor in the same thread as a `role: "transcript"` message, and mailed
+to the Mayor. `contrib/postern-transcribe` is the command to set it to: it
+converts the note with ffmpeg to 16 kHz mono WAV in a temporary directory and
+runs whisper.cpp's `whisper-cli` on it, printing plain text only; the model is
+`$POSTERN_WHISPER_MODEL`, by default `~/.local/share/whisper/ggml-base.en.bin`.
+
+`mw postern view` writes the live view the Governor's app shows (§11): every
+live epic, every bead under one at any depth (a closed one only within the
+week; the rest counted in its epic's `done_earlier`), every live bead's parent
+chain, and the needs waiting on the Governor — an open question, a live epic
+with held stories, a story landed in the last day without `VERIFIED`, an open
+`demo` or `hitl` bead, a story out of attempts, a host with work pathed to it
+unsynced for 20 minutes — most blocking first, then oldest. It gzips the JSON,
+seals it with BRC-78 to `postern_governor_key` and writes it base64,
+atomically, to `postern_view_path`, for the backend's `GET /api/view`. It
+costs one bd call per live epic and a handful besides, so it can run every
+half minute; `--json` prints the plaintext. `mw postern bead <id>` prints one
+bead in full (§12), sealed the same way, for the backend's
+`GET /api/beads/{id}` (`POSTERN_BEAD_CMD`); an unknown bead leaves with status
+3. See `features/postern_view.feature` and `features/postern_bead.feature`.
+
 `mw postern snapshot` writes the brief of every live epic (open or in
 progress) as postern's docs/protocol.md §7 JSON: each epic's children still
 waiting on a decision-needed question (`needs_you`), closed in the last 24
@@ -739,25 +881,137 @@ inspection. The notifier tick (`contrib/mail-notify`) calls it once after `mw
 nudge`, only on a host with a postern key file, and a failing snapshot is
 logged but never stops the tick.
 
-The postern's VPS-local hand steps — this host's config lines and the nginx
-site — are `mw postern serve` and `mw postern nginx`, both idempotent, both
-backing up what they are about to change first, and both taking `--dry-run`:
+The postern's hand steps — this host's config lines and the postern backend's
+environment, on the desktop, and the nginx site, on the VPS — are `mw postern
+serve` and `mw postern nginx`, both idempotent, both backing up what they are
+about to change first, and both taking `--dry-run`, which prints everything
+they would write:
 
 ```sh
-mw postern serve --backend <url> --snapshot-path <path> --governor-key <hex> [--backup-dir <dir>] [--dry-run]
-mw postern nginx --conf <path> --backend <url> [--backup-dir <dir>] [--dry-run]
+mw postern serve [--backend <url>] [--snapshot-path <path>] [--governor-key <hex>] [--env-file <path> [--addr <host:port>] [--view-path <path>] [--mw <path>] [--mayor-key <hex>]] [--backup-dir <dir>] [--dry-run]
+mw postern nginx --conf <path> [--backend <url>] [--backup-dir <dir>] [--dry-run]
 ```
 
 `mw postern serve` writes or replaces `postern_backend`, `postern_snapshot_path`
 and `postern_governor_key` in this host's config file — a re-run with the same
-values changes nothing — and makes the snapshot's own directory. `mw postern
-nginx` ensures a `location = /snapshot` block (aliased to the config's own
-`postern_snapshot_path`, no-store, nosniff, served as an opaque octet stream)
-and points the `/api` upstream(s) at `--backend`, both marker-based so a re-run
-is a no-op; it then runs `nginx -t` and, only once that passes, `systemctl
-reload nginx`, restoring the backup automatically if the test fails so a bad
-edit is never left live. Both print the backup path and the way back.
-`--backup-dir` defaults to `/root/tidy`. See `features/postern_serve.feature`.
+values changes nothing — and makes the snapshot's own directory. Each defaults
+to what the config already says, so a flag is only needed to change one; the
+Governor's key has no default, so it is said once. With `--env-file`, naming the
+backend's environment file (a systemd `EnvironmentFile`), it also writes or
+replaces the backend's own lines there, every other line — `POSTERN_ANCHOR`,
+`POSTERN_DATA` and the rest — left as it was:
+
+| Line | From |
+| --- | --- |
+| `POSTERN_ADDR` | `--addr`: `127.0.0.1:8787` by default, `10.88.0.3:8787` on the desktop |
+| `POSTERN_VIEW_FILE` | `--view-path`: `postern_view_path`, which serve writes into the config too |
+| `POSTERN_BEAD_CMD` | `<--mw> postern bead`; `--mw` is the mw running serve by default |
+| `POSTERN_ON_MESSAGE` | `<--mw> postern inbox --apply` |
+| `POSTERN_MAYOR_KEY` | `--mayor-key`: this host's postern key's public half by default |
+| `POSTERN_ISSUER_KEY` | the Governor's key: he issues the licence |
+
+It makes the view's directory, and says to restart the backend, which reads its
+environment only when it starts.
+
+`mw postern nginx` ensures a `location = /api/events` block ahead of the
+general `/api/` location — the backend's event stream, held open for as long as
+the app is:
+
+```nginx
+    # mw-api-events
+    location = /api/events {
+        proxy_pass http://desktop.mw:8787;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 1h;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+    }
+```
+
+and a `location = /snapshot` block (aliased to the config's own
+`postern_snapshot_path`, no-store, nosniff, served as an opaque octet stream),
+and points every `/api` upstream at `--backend` (`postern_backend` by
+default), all marker-based so a re-run is a no-op; it then runs `nginx -t` and,
+only once that passes, `systemctl reload nginx`, restoring the backup
+automatically if the test fails so a bad edit is never left live. Both print
+the backup path and the way back. `--backup-dir` defaults to `/root/tidy`,
+which is the VPS's; on the desktop, name one of your own. See
+`features/postern_serve.feature`.
+
+## Steps for his hands
+
+A step only the Governor's hands could take — a `sudo` line, a unit to
+enable, a file to move between hosts — is written down by the Mayor, not
+typed as a `!` line for him to copy (postern's docs/protocol.md §17):
+
+```sh
+mw hands add <bead> --id <id> --host <host> --as user|root [--way-back '<commands>'] [--replace] -- '<commands>'
+mw hands list <bead>
+```
+
+`mw hands add` keeps the step in the bead's note `hands.<bead>` (a JSON array
+of `{id, host, as, run, way_back, added_at}`), comments it on the bead exactly
+as it will run (`HANDS STEP <id> on <host> as <as>:`, then the commands and the
+way back, fenced), and labels the bead `hitl`. The commands are one quoted
+argument after `--`. An id is used once per bead; `--replace` changes a step,
+which changes its hash and so voids any approval of the old one. `mw hands
+list` prints each step with its sha256 and whether it has run.
+
+Postern shows a `hitl` bead's steps under his hands (the view's `hands` need
+carries each with its §17 sha256 and, once run, `ran`). He approves a step with
+his key — a fresh fingerprint, then a signature over its hash and the time —
+and the approval arrives as a `run` action. `mw postern inbox --apply` runs it
+only when every check holds: it came from `postern_governor_key` and the
+backend vouched for its signer; the step on the bead still hashes to what he
+approved ("the step changed since you approved it" otherwise); the signature
+verifies; the approval is under 15 minutes old and not over 2 minutes ahead;
+and that approval has not run before (a `hands.approval.<hash>.<time>` note,
+written before the step starts). A step for this host (`host`) runs here; a
+step for another runs over that host's ssh prefix in `[hands_hosts]`, and one
+with no entry is refused naming the key to add. `as: user` runs `sh -c` as
+this host's user for at most 10 minutes; `as: root` hands the whole request, on
+standard input, to `sudo -n` `hands_root_helper`. The run is recorded in
+`hands.ran.<bead>.<id>` (`{at, exit, host}`), commented on the bead (`RAN step
+<id> on <host> as <as>, exit <n> (approved by the Governor via postern, txid
+…)` and the last 4000 characters of output), sent back to him in the bead's
+thread, and mailed to the Mayor. A refusal goes out the same three ways, says
+why, and is never tried again.
+
+A root step runs through `mw-hands-root` (`make build` builds it into `bin/`),
+a small program that takes nothing from its arguments or environment. It
+refuses unless it runs as root; reads the request (at most 64 KiB) from
+standard input; trusts only `/etc/mw-hands/governor.pub` and
+`/etc/mw-hands/host`, and only when they and their directory are root's and
+writable by no one else; refuses a step for another host, a step that is not
+`as: root`, a hash that does not match, a signature that does not verify, an
+approval over 15 minutes old or 2 ahead, and an approval already in
+`/var/lib/mw-hands/used` — where it records the approval before it runs
+anything. Then it runs `/bin/sh -c` as root, with a fixed environment and a
+10-minute limit, streams the output, and leaves with the step's own status; a
+refusal is exit 126 and one line on standard error. So the host's own account
+can run nothing as root without his signature, and an approval runs once, on
+the host it was given for.
+
+He installs it once, by his own hands, on each host that should run root
+steps:
+
+```sh
+sudo ~/millwright/contrib/install-hands-root <user> [<governor public key hex>] [--yes]
+```
+
+It refuses unless run as root and until `bin/mw-hands-root` is built (`make -C
+~/millwright build`); takes the key, when not given, from `postern_governor_key`
+in `<user>`'s own mw config (its home from the password database, never
+`$HOME`), and this host's name from `host` there; checks the key is 66 hex
+starting 02 or 03, shows it with a fingerprint, and asks before writing
+anything (`--yes` skips the question). It installs `/usr/local/sbin/mw-hands-root`
+(0755), `/etc/mw-hands/governor.pub` and `/etc/mw-hands/host` (0644) and
+`/etc/sudoers.d/mw-hands` (0440) holding exactly `<user> ALL=(root) NOPASSWD:
+/usr/local/sbin/mw-hands-root`, checked with `visudo -cf` before it is moved into
+place, all root's; makes `/var/lib/mw-hands` (0700); and prints the way back.
+Re-running it replaces the same files and keeps the record of approvals run.
+See `features/hands.feature` and `features/postern_inbox_apply.feature`.
 
 ## Making a fresh vault
 
@@ -1056,7 +1310,9 @@ script that a second `systemd --user` timer runs every minute
 `contrib/systemd/`). It reads no mail and starts nothing: at most it types two
 fixed-shape lines into the live Mayor's tmux window, and Enter after each.
 Each tick it skips everything if the 1-minute load is above 2.0; runs `mw sync`
-at `nice 19` and idle I/O priority if the last was five minutes ago or more;
+at `nice 19` and idle I/O priority if the last was `MW_MAIL_SYNC_EVERY` seconds
+ago or more (300, five minutes; 60 on the desktop, where a sync is a few local
+writes);
 lists `bd mail inbox` and compares its ids with the ones it has announced; and
 runs `mw nudge` (below), reusing the same synced beads. For new mail, it types
 `New mail for mayor: <n> message(s). Run bd mail inbox.`; for whatever `mw
@@ -1089,6 +1345,7 @@ The service reads the same `~/.config/mw/dispatch.env` as the dispatch timer for
 its `PATH`, which must reach `mw`, `bd`, `tmux`, `flock` and `~/.local/bin`; and
 the vault from `~/.config/mw/config.toml`. Its settings (`MW_MAIL_MAILBOX`,
 `MW_MAIL_LOAD_LIMIT`, `MW_MAIL_SYNC_EVERY`, `MW_MAIL_STATE_DIR`,
+`MW_MAIL_VIEW_EVERY`, `MW_MAIL_VIEW_TIMEOUT`, `MW_MAIL_SNAPSHOT_EVERY`,
 `MW_MAIL_SNAPSHOT_TIMEOUT`, `MW_TMUX_SOCKET`) go in an optional
 `~/.config/mw/mail-notify.env`, as `NAME=value` lines; the script's header
 lists them. A tmux server other than the default is named with
@@ -1096,12 +1353,25 @@ lists them. A tmux server other than the default is named with
 
 On a host with a postern key file, the tick also refreshes the postern
 snapshot (`mw postern snapshot`, above) once the vault's beads have changed
-since the last attempt and at most once every ten minutes — never
-unconditionally. Each attempt is bounded to `MW_MAIL_SNAPSHOT_TIMEOUT` seconds
-(default 60) and killed past that, logged once with how long it ran; a slow
-host whose beads take longer than the default to snapshot should raise
-`MW_MAIL_SNAPSHOT_TIMEOUT` — a snapshot that never finishes inside its timeout
-is never worth retrying more often (mw-tfne4.12).
+since the last attempt and at most once every `MW_MAIL_SNAPSHOT_EVERY` seconds
+(default 600, ten minutes) — never unconditionally. Each attempt is bounded to
+`MW_MAIL_SNAPSHOT_TIMEOUT` seconds (default 60) and killed past that, logged
+once with how long it ran; a slow host whose beads take longer than the default
+to snapshot should raise `MW_MAIL_SNAPSHOT_TIMEOUT` — a snapshot that never
+finishes inside its timeout is never worth retrying more often (mw-tfne4.12).
+
+Just before it, on the host that serves the live view, the tick refreshes the
+view the postern backend serves — `mw postern view` — once the beads have
+changed and at most once every `MW_MAIL_VIEW_EVERY` seconds. That setting is
+the opt-in: unset (the default) there is no view step at all, so a host whose
+notifier predates the live view never starts building one; the host running
+the backend that serves the view installs its notifier with
+`MW_MAIL_VIEW_EVERY=30` (the vault's hosts/desktop-move.md step 4.3). Bounded to
+`MW_MAIL_VIEW_TIMEOUT` seconds (default 60) and logged the same way. It first
+asks `mw postern view --help` whether this mw has the view at all (looking for
+the view's own usage line: cobra exits 0 for a subcommand it does not know),
+and passes over an mw without it silently. The view and the snapshot read the
+beads' level once a tick between them.
 
 **Undo it**:
 
@@ -1240,7 +1510,11 @@ The OTHER HOSTS part is the whole of the factory's safety net for a host that
 has gone quiet. There is no failover: a host that stops syncing does not hand
 its work back. Each host is shown with when it last recorded itself level (the
 `host.<name>.last_sync` note `mw sync` leaves, as this host last read it), and
-the stories pathed to it that are ready or already claimed. A host is **ASLEEP** when that note is older than `host_silent_hours` — two by default,
+the stories pathed to it that are ready or already claimed. On a host whose
+`beads_sync` is `backup` or `shared` that note is read live out of the one
+database rather than a cycle behind, and the report's `BEADS SYNC` line says
+which mode this host is in and, on the desktop, how long ago its last backup
+got through. A host is **ASLEEP** when that note is older than `host_silent_hours` — two by default,
 so that the lag alone does not call a host asleep — set in the config file or by
 `MW_HOST_SILENT_HOURS`, whole hours and at least 1. It is also `ASLEEP, never
 synced` when it has left no note at all, and `ASLEEP, last sync unreadable` when
@@ -1272,8 +1546,8 @@ a row` — without a tunnel to it. A host that keeps no log leaves no note. Noth
 wakes anyone on a count: it is only shown.
 
 `mw status` only ever says this. Re-pathing a story is a person's act, never a
-report's. The config keys it reads are `vault`, `host`, `host_silent_hours` and
-`rig_memory_bytes` (*What a host is told*). See `features/status.feature`.
+report's. The config keys it reads are `vault`, `host`, `host_silent_hours`,
+`rig_memory_bytes` and `beads_sync` (*What a host is told*). See `features/status.feature`.
 
 ## Briefing a seat from a bead
 
@@ -1812,6 +2086,17 @@ not installed on this host is skipped, not faulted) but not active, its cure
 is `systemctl --user start <timer>`, its damper 30 minutes with a cap of 3,
 and its way back `systemctl --user stop <timer>` for exactly the timers the
 cure started.
+
+**beads-server** is for a host whose `beads_sync` is `shared` — the Laptop on a
+boost — whose `bd` reaches the desktop's database over the network: one TCP
+dial, with a 3 s timeout, of `BEADS_DOLT_SERVER_HOST` on
+`BEADS_DOLT_SERVER_PORT` (3307 when unset) as `mw doctor`'s own environment has
+them, from `dispatch.env`. It is faulty when the database does not answer, and
+there is no cure from here — the database runs on another host — so, as with
+**beads-size**, the second faulty run writes the note that wakes the Millhand;
+**wg** is the check that restarts this host's end of the link. Every other host
+reads it ok, saying why there is nothing to reach; a `shared` host with no
+`BEADS_DOLT_SERVER_HOST` in that environment reads cannot-tell.
 
 **beads-size** watches `.beads` against the same 1 GB budget `mw status`'s
 BEADS line warns on; past it there is no cure — repacking would delete packs

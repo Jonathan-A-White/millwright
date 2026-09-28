@@ -43,6 +43,9 @@ type syncContext struct {
 	host    string
 	tracker *apptest.FakeTracker
 
+	mode           application.BeadsSyncMode
+	backupInterval time.Duration
+
 	headBefore   string // this host's HEAD before the sync
 	remoteBefore string // the shared remote's main before the sync
 
@@ -74,6 +77,9 @@ func InitializeSyncScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^this host has an uncommitted change to the Mayor's ledger$`, c.thisHostHasAnUncommittedChange)
 	ctx.Given(`^bd sync will exit (\d+)$`, c.bdSyncWillExit)
 	ctx.Given(`^bd sync will exit (\d+), then clear on the next try$`, c.bdSyncWillExitThenClear)
+	ctx.Given(`^this host keeps the one beads database, backed up every (\d+) minutes$`, c.thisHostKeepsTheOneDatabase)
+	ctx.Given(`^its last backup of the beads database was (\d+) minutes ago$`, c.itsLastBackupWas)
+	ctx.Given(`^this host's beads live in another host's database$`, c.thisHostsBeadsLiveElsewhere)
 
 	ctx.When(`^this host syncs$`, c.thisHostSyncs)
 
@@ -100,6 +106,11 @@ func InitializeSyncScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^nothing is recorded under (\S+)$`, c.nothingIsRecordedUnder)
 	ctx.Then(`^the vault marks (\S+) as (\S+)$`, c.theVaultMarks)
 	ctx.Then(`^the sync reports that the mark was added$`, c.theSyncReportsTheMark)
+	ctx.Then(`^the beads database was never synced$`, c.theDatabaseWasNeverSynced)
+	ctx.Then(`^the beads database was never asked to reclaim its disk space$`, c.theDatabaseWasNeverCollected)
+	ctx.Then(`^the sync says no backup was due$`, c.theSyncSaysNoBackupWasDue)
+	ctx.Then(`^the sync says a backup ran$`, c.theSyncSaysABackupRan)
+	ctx.Then(`^the sync says the backup halted on a merge conflict$`, c.theSyncSaysTheBackupHalted)
 }
 
 // runGit runs one git command in a directory, for the scenario's own setup and
@@ -276,6 +287,9 @@ func (c *syncContext) thisHostSyncs() error {
 		Host:    c.host,
 		Now:     func() time.Time { return syncedAt },
 		Sleep:   func(context.Context, time.Duration) error { return nil },
+
+		Mode:           c.mode,
+		BackupInterval: c.backupInterval,
 	}
 	c.report, c.err = sync.Run(context.Background())
 	return nil
@@ -579,6 +593,58 @@ func (c *syncContext) theSyncReportsTheMark() error {
 	}
 	if !strings.Contains(c.report.String(), application.LedgerPattern) {
 		return fmt.Errorf("expected the report to name what it marked, got %q", c.report.String())
+	}
+	return nil
+}
+
+func (c *syncContext) thisHostKeepsTheOneDatabase(minutes int) error {
+	c.mode = application.BeadsSyncBackup
+	c.backupInterval = time.Duration(minutes) * time.Minute
+	return nil
+}
+
+func (c *syncContext) itsLastBackupWas(minutes int) error {
+	at := syncedAt.Add(-time.Duration(minutes) * time.Minute).Format(application.LastSyncFormat)
+	return c.tracker.SetNote(context.Background(), application.LastBackupKey(c.host), at)
+}
+
+func (c *syncContext) thisHostsBeadsLiveElsewhere() error {
+	c.mode = application.BeadsSyncShared
+	return nil
+}
+
+func (c *syncContext) theDatabaseWasNeverSynced() error {
+	if got := c.tracker.Syncs(); got != 0 {
+		return fmt.Errorf("expected no synchronisation cycle, got %d", got)
+	}
+	return nil
+}
+
+func (c *syncContext) theDatabaseWasNeverCollected() error {
+	if got := c.tracker.GCs(); got != 0 || c.report.GCed {
+		return fmt.Errorf("expected no collection, got %d", got)
+	}
+	return nil
+}
+
+func (c *syncContext) theSyncSaysNoBackupWasDue() error {
+	if c.report.BackedUp || !strings.Contains(c.report.String(), "backup not due") {
+		return fmt.Errorf("expected the sync to say no backup was due, got %q", c.report.String())
+	}
+	return nil
+}
+
+func (c *syncContext) theSyncSaysABackupRan() error {
+	if !c.report.BackedUp || !strings.Contains(c.report.String(), "backed up") {
+		return fmt.Errorf("expected the sync to say a backup ran, got %q", c.report.String())
+	}
+	return nil
+}
+
+func (c *syncContext) theSyncSaysTheBackupHalted() error {
+	said := c.report.String()
+	if c.report.BackedUp || !strings.Contains(said, "backup halted") || !strings.Contains(said, "merge conflict") {
+		return fmt.Errorf("expected the sync to say the backup halted on a merge conflict, got %q", said)
 	}
 	return nil
 }

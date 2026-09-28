@@ -49,3 +49,30 @@ func TestDoctorTableRunsWifiBeforeTunnel(t *testing.T) {
 		t.Fatalf("expected wifi to run before tunnel, got:\n%s", report)
 	}
 }
+
+// A host whose beads live in another host's database has its link to it in
+// the table: beads-server dials BEADS_DOLT_SERVER_HOST on its port, and a
+// database that does not answer is faulty. Every other host reads it ok.
+func TestDoctorTableHasTheBeadsServerCheck(t *testing.T) {
+	closed := closedDoctorPort(t)
+	host, port, err := net.SplitHostPort(closed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vault := t.TempDir()
+	mwConfig(t, fmt.Sprintf("vault = %q\nhost = \"laptop\"\nbeads_sync = \"shared\"\n\n[doctor]\nreach = [%q]\n", vault, closed))
+	t.Setenv("MW_BEADS_SYNC", "")
+	t.Setenv("BEADS_DOLT_SERVER_HOST", host)
+	t.Setenv("BEADS_DOLT_SERVER_PORT", port)
+
+	out := &bytes.Buffer{}
+	root := newRootCmd()
+	root.SetOut(out)
+	root.SetErr(out)
+	root.SetArgs([]string{"doctor", "--dry-run", "beads-server"})
+	_ = root.Execute()
+
+	if report := out.String(); !strings.Contains(report, "beads-server") || !strings.Contains(report, closed) {
+		t.Fatalf("expected beads-server to name the database that does not answer, got:\n%s", report)
+	}
+}

@@ -101,6 +101,14 @@ type Status struct {
 	// the Builder is the seat that works every story.
 	Seat string
 
+	// SyncMode is how this host's beads database is synced, config
+	// beads_sync: said on the report's BEADS SYNC line, with the last backup
+	// on the host that keeps the one database, and read for whether another
+	// host's note of its last sync is a cycle behind (remote) or read live
+	// out of the one database every host shares. Empty reads
+	// BeadsSyncRemote.
+	SyncMode BeadsSyncMode
+
 	// Ticks are this host's logs of its timers' runs, counted for the TICKS
 	// section. A log that is not there, or that no line was ever written to,
 	// leaves its timer out; with neither there is no section.
@@ -227,6 +235,18 @@ type StatusReport struct {
 	BeadsBytes       int64
 	BeadsKnown       bool
 	BeadsBudgetBytes int64
+
+	// SyncMode is how this host's beads are synced. It is said on its own
+	// line only when BeadsKnown is: a report with no Notes says nothing of
+	// the beads at all.
+	SyncMode BeadsSyncMode
+	// LastBackup is when a backup of the one database last got through, on
+	// the host that keeps it, and BackupAge how long ago that was. Both are
+	// zero when it never has, and when LastBackupSaid, the note as the
+	// tracker held it, cannot be read as a time.
+	LastBackup     time.Time
+	BackupAge      time.Duration
+	LastBackupSaid string
 }
 
 // Run reads the report and prints it. Every call it makes is a read: the
@@ -236,7 +256,7 @@ type StatusReport struct {
 // host's running and ready stories and the other hosts' work are all narrowed
 // from it. Nothing is claimed, nothing is poured, nothing is written.
 func (s Status) Run(ctx context.Context) (StatusReport, error) {
-	report := StatusReport{Host: s.Host}
+	report := StatusReport{Host: s.Host, SyncMode: s.syncMode()}
 	switch {
 	case s.Tracker == nil:
 		return report, fmt.Errorf("reading status: there is no work tracker to read it from")
@@ -329,6 +349,18 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		report.BeadsBytes = size
 		report.BeadsBudgetBytes = s.beadsBudget()
 		report.BeadsKnown = true
+
+		if report.SyncMode == BeadsSyncBackup {
+			said, err := s.Notes.Note(ctx, LastBackupKey(s.Host))
+			if err != nil {
+				return report, fmt.Errorf("reading when %s last backed up its beads: %w", s.Host, err)
+			}
+			report.LastBackupSaid = strings.TrimSpace(said)
+			if at, err := time.Parse(LastSyncFormat, report.LastBackupSaid); err == nil {
+				report.LastBackup = at
+				report.BackupAge = s.now().Sub(at)
+			}
+		}
 	}
 
 	s.print(report.String())
@@ -416,6 +448,14 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand) ([]HostWork, e
 		work = append(work, held)
 	}
 	return work, nil
+}
+
+// syncMode is how this host's beads are synced, remote when nothing says.
+func (s Status) syncMode() BeadsSyncMode {
+	if s.SyncMode == "" {
+		return BeadsSyncRemote
+	}
+	return s.SyncMode
 }
 
 // hostSilence is how long another host's last recorded sync may be behind
@@ -512,12 +552,17 @@ func (r StatusReport) String() string {
 	b.WriteString("\n")
 
 	if r.Halt != nil {
-		clip(&b, haltLine(r.Host, *r.Halt))
+		if r.SyncMode == BeadsSyncBackup {
+			clip(&b, backupHaltLine(r.Host, *r.Halt))
+		} else {
+			clip(&b, haltLine(r.Host, *r.Halt))
+		}
 		b.WriteString("\n")
 	}
 
 	if r.BeadsKnown {
 		clip(&b, beadsLine(r.BeadsBytes, r.BeadsBudgetBytes))
+		clip(&b, r.syncModeLine())
 		b.WriteString("\n")
 	}
 
@@ -565,7 +610,7 @@ func (r StatusReport) String() string {
 		clip(&b, "  nothing pathed to another host")
 	}
 	for _, w := range r.Others {
-		w.write(&b, r.Host)
+		w.write(&b, r.Host, r.SyncMode.OneDatabase())
 	}
 	b.WriteString("\n")
 
@@ -595,7 +640,9 @@ func (r StatusReport) String() string {
 // the sync it last recorded, and the stories pathed to it — marked stranded,
 // with the one line that re-paths them, when the host is asleep. here is the
 // host the report is for, and so the host a stranded story is re-pathed to.
-func (w HostWork) write(b *strings.Builder, here string) {
+// live says the note was read straight out of the one database every host
+// shares, rather than out of this host's own copy, which is a cycle behind.
+func (w HostWork) write(b *strings.Builder, here string, live bool) {
 	clip(b, fmt.Sprintf("  %s · %s", w.Host, w.state()))
 	if w.Halt != nil {
 		clip(b, "    "+haltLine(w.Host, *w.Halt))
@@ -603,6 +650,8 @@ func (w HostWork) write(b *strings.Builder, here string) {
 	switch {
 	case w.Unreadable():
 		clip(b, fmt.Sprintf("    its note says %q, which is not a time", w.Said))
+	case !w.LastSync.IsZero() && live:
+		clip(b, fmt.Sprintf("    last sync %s", w.LastSync.UTC().Format(LastSyncFormat)))
 	case !w.LastSync.IsZero():
 		clip(b, fmt.Sprintf("    last sync %s (a cycle behind)", w.LastSync.UTC().Format(LastSyncFormat)))
 	}
@@ -638,6 +687,32 @@ func (w HostWork) state() string {
 // host, since when, and what bd said.
 func haltLine(host string, halt SyncHaltInfo) string {
 	return fmt.Sprintf("host %s: sync halted since %s: %s", host, halt.At.UTC().Format(LastSyncFormat), halt.Said)
+}
+
+// backupHaltLine is haltLine on the host that keeps the one database, where
+// the only cycle that can halt is its backup.
+func backupHaltLine(host string, halt SyncHaltInfo) string {
+	return fmt.Sprintf("host %s: beads backup halted since %s: %s", host, halt.At.UTC().Format(LastSyncFormat), halt.Said)
+}
+
+// syncModeLine is the one line how this host's beads are synced is worth,
+// and on the host that keeps the one database, when it last backed it up.
+func (r StatusReport) syncModeLine() string {
+	switch r.SyncMode {
+	case BeadsSyncBackup:
+		switch {
+		case r.LastBackupSaid == "":
+			return "BEADS SYNC backup · never backed up"
+		case r.LastBackup.IsZero():
+			return "BEADS SYNC backup · last backup unreadable"
+		default:
+			return "BEADS SYNC backup · backed up " + Clock(r.BackupAge) + " ago"
+		}
+	case BeadsSyncShared:
+		return "BEADS SYNC shared · kept on another host"
+	default:
+		return "BEADS SYNC remote"
+	}
 }
 
 // beadsLine is the one line this host's own beads database is worth: its

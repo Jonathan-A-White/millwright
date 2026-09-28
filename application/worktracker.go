@@ -32,6 +32,21 @@ const LabelHitl = "hitl"
 // urgent, to 4, as beads has them.
 const DefaultPriority = 2
 
+// MostUrgentPriority and LeastUrgentPriority bound a priority, as beads has
+// them: 0 is the most urgent, 4 the least.
+const (
+	MostUrgentPriority  = 0
+	LeastUrgentPriority = 4
+)
+
+// ValidPriority reports why priority is not one beads holds, or nil.
+func ValidPriority(priority int) error {
+	if priority < MostUrgentPriority || priority > LeastUrgentPriority {
+		return fmt.Errorf("priority %d is not one the tracker holds: priorities run %d (most urgent) to %d", priority, MostUrgentPriority, LeastUrgentPriority)
+	}
+	return nil
+}
+
 // StoryDetail is everything the work tracker knows about one story: the story
 // itself with the Path overrides it carries, and the default Path of the epic
 // it belongs to. The Path the story is actually worked by is the two overlaid,
@@ -74,6 +89,9 @@ type StoryDetail struct {
 	// a listing of an epic's children returns it among them, and it is not work
 	// a session takes. A tracker that does not say leaves it false.
 	IsEpic bool
+	// Type is the tracker's own word for what kind of bead this is — epic,
+	// task, bug, feature, chore — as it spells it; empty when it did not say.
+	Type string
 	// Attempts is how many times a session was started for this story, as its
 	// AttemptsField metadata says; zero when it never was. Exhausted says mw
 	// dispatch has already told the Mayor the story used them all up.
@@ -221,6 +239,13 @@ type EpicDetail struct {
 	// epic: one that is itself an epic is among them with IsEpic set, and its
 	// own children are not read.
 	Stories []StoryDetail
+	// Bead is the epic's own bead, as a listing of its parent's children
+	// would report it: the parent it is filed under (EpicID, empty for a
+	// root), its labels, times, description and comment count — what a reader
+	// showing the epic as one bead among the rest needs (mw postern view).
+	// Its own default Path is Defaults above; Bead.Story.Overrides is the same
+	// metadata read as overrides.
+	Bead StoryDetail
 }
 
 // NewEpic is an epic about to be filed: what it delivers, how it will be known
@@ -288,6 +313,17 @@ type WorkTracker interface {
 	// epic's children may still cost their own call underneath. An id that
 	// names no epic is an error, just as ShowEpic's is.
 	ShowEpics(ctx context.Context, ids []string) ([]EpicDetail, error)
+
+	// ShowBeads reads several beads at once, whatever each is — story, epic
+	// or anything else the tracker holds — in the order ids names them, in as
+	// few calls as the tracker allows: what a reader that must look at a
+	// handful of beads outside the epics it already read (the parents of a
+	// live epic, a blocker in another tree) asks instead of ShowStory once
+	// each. Each bead's Needs are narrowed to the unfinished, and a story's
+	// Defaults are its parent's when the tracker hands them over in the same
+	// read, empty otherwise. An id the tracker does not know is left out
+	// rather than failing the whole read. It reads and writes nothing.
+	ShowBeads(ctx context.Context, ids []string) ([]StoryDetail, error)
 
 	// LiveEpics lists the ids of every epic that is open or in progress, in
 	// the order the tracker files them — what a project view means by "live":
@@ -399,6 +435,20 @@ type WorkTracker interface {
 	// SetStoryMetadata writes metadata fields onto a story, leaving the fields
 	// it does not name alone. Path fields are metadata like any other.
 	SetStoryMetadata(ctx context.Context, id string, fields map[string]string) error
+
+	// SetStoryPriority sets a bead's priority, 0 (most urgent) to 4; anything
+	// outside that is refused before the tracker is asked. It is the
+	// Governor's priority tap (postern's docs/protocol.md section 13).
+	SetStoryPriority(ctx context.Context, id string, priority int) error
+
+	// HoldStory holds a story back from every dispatcher, as it was when it
+	// was filed (StatusHeld), until ReleaseStory lets it through again. Whether
+	// the story is open and unclaimed is the caller's to check first.
+	HoldStory(ctx context.Context, id string) error
+
+	// AddLabel puts label on a bead, leaving its other labels as they are; a
+	// bead already carrying it is left as it is.
+	AddLabel(ctx context.Context, id, label string) error
 
 	// CommentOnStory appends one comment to a story.
 	CommentOnStory(ctx context.Context, id, text string) error

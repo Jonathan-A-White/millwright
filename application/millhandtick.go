@@ -282,15 +282,19 @@ func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err err
 	}
 
 	if !health.local {
-		if _, err := t.Sync.Run(ctx); err != nil {
+		if synced, err := t.Sync.Run(ctx); err != nil {
 			notes = append(notes, syncNote(err))
 			if RecordSyncHalt(ctx, t.SyncHalts, err, t.now()) {
 				if note := t.notifyHalt(ctx, err); note != "" {
 					notes = append(notes, note)
 				}
 			}
-		} else {
-			ClearSyncHalt(ctx, t.SyncHalts)
+		} else if KeepSyncHalt(ctx, t.SyncHalts, synced, nil, t.now()) {
+			// Level, with the backup of the one database halted: said the
+			// same way a halted sync is, the first time.
+			if note := t.notifyHalt(ctx, synced.BackupErr); note != "" {
+				notes = append(notes, note)
+			}
 		}
 	}
 	if health.note != "" {

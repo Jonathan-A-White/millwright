@@ -5,6 +5,7 @@
 
 GO ?= go
 BIN ?= bin/mw
+HANDS_ROOT_BIN ?= bin/mw-hands-root
 PKG ?= ./...
 # The build tags make test and make lint compile in. beads_integration is the
 # real-bd cases of infrastructure/beads, most of the suite's clock, which a
@@ -18,8 +19,11 @@ export GOMAXPROCS := 1
 
 all: build test lint
 
+# mw-hands-root runs as root through sudo: built static, so no loader or
+# library outside the binary has any say in what it does.
 build:
 	$(GO) build -o $(BIN) ./cmd/mw
+	CGO_ENABLED=0 $(GO) build -o $(HANDS_ROOT_BIN) ./cmd/mw-hands-root
 
 test:
 	$(GO) test -tags $(TAGS) $(PKG)

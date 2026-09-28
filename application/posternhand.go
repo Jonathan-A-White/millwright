@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -49,25 +50,123 @@ type PosternNginxRunner interface {
 	Reload(ctx context.Context) (output string, err error)
 }
 
+// DefaultPosternAddr is where the postern backend listens when nothing says
+// otherwise: this host alone. The host the backend runs on for the factory,
+// the desktop, says its WireGuard address instead (10.88.0.3:8787), so that
+// the VPS's nginx reaches it over the tunnel.
+const DefaultPosternAddr = "127.0.0.1:8787"
+
 // PosternServeRequest is what mw postern serve is asked to set in this
-// host's config file.
+// host's config file and, given EnvFile, in the postern backend's own
+// environment file.
 type PosternServeRequest struct {
 	Backend      string
 	SnapshotPath string
 	GovernorKey  string
 	DryRun       bool
+
+	// EnvFile is the postern backend's environment file — a systemd
+	// EnvironmentFile, NAME="value" lines — to write the backend's own
+	// POSTERN_ lines into. Empty leaves the backend's environment alone, and
+	// none of the fields below is read.
+	EnvFile string
+	// Addr is where the backend listens, POSTERN_ADDR. Empty reads
+	// DefaultPosternAddr.
+	Addr string
+	// ViewPath is the live view mw postern view writes and the backend
+	// serves, POSTERN_VIEW_FILE, a full path. It is also written into this
+	// host's config file as postern_view_path, so that the two never
+	// disagree.
+	ViewPath string
+	// Mw is the full path of the mw the backend runs: `<Mw> postern bead`
+	// for a bead's detail (POSTERN_BEAD_CMD) and `<Mw> postern inbox
+	// --apply` on each message (POSTERN_ON_MESSAGE).
+	Mw string
+	// MayorKey is the Mayor's postern public key, as hex, the backend
+	// answers /api/me with (POSTERN_MAYOR_KEY). GovernorKey is the
+	// licence's issuer (POSTERN_ISSUER_KEY): the Governor issues it.
+	MayorKey string
 }
 
 // posternServeKeys is the order mw postern serve writes or replaces the
 // three postern lines in, root-table keys of ~/.config/mw/config.toml.
 var posternServeKeys = []string{"postern_backend", "postern_snapshot_path", "postern_governor_key"}
 
+// posternServeViewKey is the fourth, written only beside an environment
+// file, which is what names the view.
+const posternServeViewKey = "postern_view_path"
+
+// posternEnvKeys is the order mw postern serve writes or replaces the
+// backend's own lines in its environment file.
+var posternEnvKeys = []string{
+	"POSTERN_ADDR", "POSTERN_VIEW_FILE", "POSTERN_BEAD_CMD", "POSTERN_ON_MESSAGE", "POSTERN_MAYOR_KEY", "POSTERN_ISSUER_KEY",
+}
+
+// configKeys is the config file's keys this request writes, in order.
+func (r PosternServeRequest) configKeys() []string {
+	if r.EnvFile == "" {
+		return posternServeKeys
+	}
+	return append(append([]string{}, posternServeKeys...), posternServeViewKey)
+}
+
 func (r PosternServeRequest) values() map[string]string {
-	return map[string]string{
+	values := map[string]string{
 		"postern_backend":       r.Backend,
 		"postern_snapshot_path": r.SnapshotPath,
 		"postern_governor_key":  r.GovernorKey,
 	}
+	if r.EnvFile != "" {
+		values[posternServeViewKey] = r.ViewPath
+	}
+	return values
+}
+
+// envValues is the backend's own lines, by name.
+func (r PosternServeRequest) envValues() map[string]string {
+	return map[string]string{
+		"POSTERN_ADDR":       r.addr(),
+		"POSTERN_VIEW_FILE":  r.ViewPath,
+		"POSTERN_BEAD_CMD":   r.Mw + " postern bead",
+		"POSTERN_ON_MESSAGE": r.Mw + " postern inbox --apply",
+		"POSTERN_MAYOR_KEY":  r.MayorKey,
+		"POSTERN_ISSUER_KEY": r.GovernorKey,
+	}
+}
+
+func (r PosternServeRequest) addr() string {
+	if strings.TrimSpace(r.Addr) == "" {
+		return DefaultPosternAddr
+	}
+	return r.Addr
+}
+
+// validateEnv refuses an environment file request that could not be
+// written, or that would leave the backend short of what it needs.
+func (r PosternServeRequest) validateEnv() error {
+	switch {
+	case !filepath.IsAbs(r.EnvFile):
+		return fmt.Errorf("mw postern serve: --env-file %q must be a full path", r.EnvFile)
+	case strings.TrimSpace(r.ViewPath) == "":
+		return fmt.Errorf("mw postern serve: --env-file needs the view's path (--view-path, or postern_view_path)")
+	case !filepath.IsAbs(r.ViewPath):
+		return fmt.Errorf("mw postern serve: --view-path %q must be a full path", r.ViewPath)
+	case strings.TrimSpace(r.Mw) == "":
+		return fmt.Errorf("mw postern serve: --env-file needs the mw the backend runs (--mw)")
+	case !filepath.IsAbs(r.Mw):
+		return fmt.Errorf("mw postern serve: --mw %q must be a full path", r.Mw)
+	case strings.TrimSpace(r.MayorKey) == "":
+		return fmt.Errorf("mw postern serve: --env-file needs the Mayor's postern public key (--mayor-key, or run mw postern key init on this host first)")
+	}
+	if _, _, err := net.SplitHostPort(r.addr()); err != nil {
+		return fmt.Errorf("mw postern serve: --addr %q is not a host:port: %w", r.addr(), err)
+	}
+	for name, value := range r.envValues() {
+		if strings.ContainsAny(value, "\"\\\n$`") {
+			return fmt.Errorf("mw postern serve: %s would be %q, which cannot be written into an environment file", name, value)
+		}
+	}
+	return nil
 }
 
 // validate refuses a request that could not be written into a config file,
@@ -88,6 +187,9 @@ func (r PosternServeRequest) validate() error {
 			return fmt.Errorf("mw postern serve: %s is %q, which cannot be written into a config file", name, value)
 		}
 	}
+	if r.EnvFile != "" {
+		return r.validateEnv()
+	}
 	return nil
 }
 
@@ -98,6 +200,12 @@ func (r PosternServeRequest) validate() error {
 // the snapshot's own directory. It backs the config file up first, unless
 // there is none yet to back up, and --dry-run prints what it would do
 // without touching anything.
+//
+// Given the backend's environment file it does the same there, for the
+// backend's own POSTERN_ lines — every other line of the file left exactly
+// as it was — writes postern_view_path beside the three, and makes the
+// view's directory. The backend reads its environment only when it starts,
+// so the report says to restart it.
 type PosternServe struct {
 	Files      PosternHandFile
 	ConfigPath string
@@ -117,6 +225,15 @@ type PosternServeReport struct {
 	Changed     bool
 	DryRun      bool
 	NewText     string // what the config file holds, or would hold
+
+	// The backend's environment file, when one was asked for: where it is,
+	// its backup, whether it changed and what it holds, or would hold, and
+	// the view's directory. EnvFile is empty when none was.
+	EnvFile       string
+	EnvBackupPath string
+	EnvChanged    bool
+	EnvNewText    string
+	ViewDir       string
 }
 
 func (r PosternServeReport) String() string {
@@ -128,6 +245,15 @@ func (r PosternServeReport) String() string {
 			fmt.Fprintf(&out, "--dry-run: %s already says this; nothing to write.\n", r.ConfigPath)
 		}
 		fmt.Fprintf(&out, "--dry-run: would make the snapshot directory %s\n", r.SnapshotDir)
+		if r.EnvFile != "" {
+			if r.EnvChanged {
+				fmt.Fprintf(&out, "--dry-run: would write %s:\n\n%s\n", r.EnvFile, r.EnvNewText)
+				fmt.Fprintf(&out, "--dry-run: and would say to restart the postern backend, so that it reads %s\n", r.EnvFile)
+			} else {
+				fmt.Fprintf(&out, "--dry-run: %s already says this; nothing to write.\n", r.EnvFile)
+			}
+			fmt.Fprintf(&out, "--dry-run: would make the view directory %s\n", r.ViewDir)
+		}
 		return out.String()
 	}
 	if !r.Changed {
@@ -141,6 +267,24 @@ func (r PosternServeReport) String() string {
 	fmt.Fprintf(&out, "the snapshot directory %s is there\n", r.SnapshotDir)
 	if r.BackupPath != "" {
 		fmt.Fprintf(&out, "the way back: cp %s %s\n", r.BackupPath, r.ConfigPath)
+	}
+	if r.EnvFile == "" {
+		return out.String()
+	}
+	if !r.EnvChanged {
+		fmt.Fprintf(&out, "%s already says this: nothing changed.\n", r.EnvFile)
+	} else {
+		if r.EnvBackupPath != "" {
+			fmt.Fprintf(&out, "backed up %s to %s\n", r.EnvFile, r.EnvBackupPath)
+		}
+		fmt.Fprintf(&out, "wrote %s\n", r.EnvFile)
+	}
+	fmt.Fprintf(&out, "the view directory %s is there\n", r.ViewDir)
+	if r.EnvBackupPath != "" {
+		fmt.Fprintf(&out, "the way back: cp %s %s\n", r.EnvBackupPath, r.EnvFile)
+	}
+	if r.EnvChanged {
+		fmt.Fprintf(&out, "restart the postern backend now, so that it reads %s\n", r.EnvFile)
 	}
 	return out.String()
 }
@@ -162,7 +306,7 @@ func (s PosternServe) Run(ctx context.Context, req PosternServeRequest) (Postern
 	if err != nil {
 		return PosternServeReport{}, fmt.Errorf("reading %s: %w", s.ConfigPath, err)
 	}
-	newText := upsertRootKeys(text, posternServeKeys, req.values())
+	newText := upsertRootKeys(text, req.configKeys(), req.values())
 	snapshotDir := filepath.Dir(req.SnapshotPath)
 
 	report := PosternServeReport{
@@ -171,6 +315,18 @@ func (s PosternServe) Run(ctx context.Context, req PosternServeRequest) (Postern
 		Changed:     newText != text,
 		DryRun:      req.DryRun,
 		NewText:     newText,
+	}
+
+	var envText string
+	var envExists bool
+	if req.EnvFile != "" {
+		if envText, envExists, err = s.Files.Read(ctx, req.EnvFile); err != nil {
+			return PosternServeReport{}, fmt.Errorf("reading %s: %w", req.EnvFile, err)
+		}
+		report.EnvFile = req.EnvFile
+		report.EnvNewText = upsertEnvLines(envText, posternEnvKeys, req.envValues())
+		report.EnvChanged = report.EnvNewText != envText
+		report.ViewDir = filepath.Dir(req.ViewPath)
 	}
 
 	if req.DryRun {
@@ -192,6 +348,24 @@ func (s PosternServe) Run(ctx context.Context, req PosternServeRequest) (Postern
 	}
 	if err := s.Files.MkdirAll(ctx, snapshotDir); err != nil {
 		return report, fmt.Errorf("making the snapshot directory %s: %w", snapshotDir, err)
+	}
+
+	if req.EnvFile != "" {
+		if report.EnvChanged {
+			if envExists {
+				backupPath, err := s.Files.Backup(ctx, req.EnvFile, s.backupDir())
+				if err != nil {
+					return report, fmt.Errorf("backing up %s: %w", req.EnvFile, err)
+				}
+				report.EnvBackupPath = backupPath
+			}
+			if err := s.Files.Write(ctx, req.EnvFile, report.EnvNewText); err != nil {
+				return report, fmt.Errorf("writing %s: %w", req.EnvFile, err)
+			}
+		}
+		if err := s.Files.MkdirAll(ctx, report.ViewDir); err != nil {
+			return report, fmt.Errorf("making the view directory %s: %w", report.ViewDir, err)
+		}
 	}
 
 	s.printf(report.String())
@@ -266,19 +440,70 @@ func upsertRootKeys(text string, order []string, values map[string]string) strin
 	return strings.Join(append(head, tail...), "\n") + "\n"
 }
 
+// upsertEnvLines returns an environment file's text with each of order's
+// names set to values[name], as NAME="value": a line that already sets the
+// name — "export " ahead of it or not — is replaced in place, and a name no
+// line sets is appended at the end. Comments, blank lines and every other
+// name are left exactly as they were, and a line already saying what is
+// asked is left byte for byte, so text with nothing to change comes back
+// unmodified.
+func upsertEnvLines(text string, order []string, values map[string]string) string {
+	var lines []string
+	if text != "" {
+		lines = strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+	}
+
+	found := map[string]bool{}
+	modified := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		name, _, ok := strings.Cut(strings.TrimPrefix(trimmed, "export "), "=")
+		if !ok {
+			continue
+		}
+		name = strings.TrimSpace(name)
+		value, wanted := values[name]
+		if !wanted {
+			continue
+		}
+		found[name] = true
+		if want := fmt.Sprintf("%s=%q", name, value); lines[i] != want {
+			lines[i] = want
+			modified = true
+		}
+	}
+
+	for _, name := range order {
+		if !found[name] {
+			lines = append(lines, fmt.Sprintf("%s=%q", name, values[name]))
+			modified = true
+		}
+	}
+	if !modified {
+		return text
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
 // posternAPIEndMarker is the comment already in the postern's nginx site,
 // after the /api location(s), that mw postern nginx anchors the /snapshot
-// location on. posternSnapshotMarker is the comment mw postern nginx writes
-// ahead of that location itself, so a re-run can find and replace its own
-// block rather than growing a second one.
+// location on. posternSnapshotMarker and posternEventsMarker are the
+// comments mw postern nginx writes ahead of the /snapshot and /api/events
+// locations themselves, so a re-run can find and replace its own block
+// rather than growing a second one.
 const (
 	posternAPIEndMarker   = "# mw-api end"
 	posternSnapshotMarker = "# mw-snapshot"
+	posternEventsMarker   = "# mw-api-events"
 )
 
 // PosternNginxRequest is what mw postern nginx is asked to ensure in the
-// nginx site file: the /snapshot location, aliased to SnapshotPath, and the
-// /api upstream, set to Backend.
+// nginx site file: the /api/events location, the /snapshot location,
+// aliased to SnapshotPath, and the /api upstream — the events location's
+// among them — set to Backend.
 type PosternNginxRequest struct {
 	Backend      string
 	SnapshotPath string
@@ -302,9 +527,13 @@ func (r PosternNginxRequest) validate() (authority string, err error) {
 	return u.Scheme + "://" + u.Host, nil
 }
 
-// PosternNginx ensures the postern's /snapshot location and /api upstream in
-// an nginx site file, backing it up first, then runs `nginx -t` and, only
-// once that passes, `systemctl reload nginx`. A run that would change
+// PosternNginx ensures the postern's /api/events location, its /snapshot
+// location and its /api upstream in an nginx site file, backing it up first,
+// then runs `nginx -t` and, only once that passes, `systemctl reload nginx`.
+// The events location is the backend's event stream, held open for as long
+// as the app is: nothing buffered or cached, an hour before an idle read
+// gives up, and HTTP/1.1 with no Connection header so the connection to the
+// backend is kept. It sits ahead of the general /api/ location. A run that would change
 // nothing is a no-op: nothing is backed up, written, tested or reloaded.
 // --dry-run prints what would change without touching anything. A failed
 // nginx -t restores the backup, so a bad edit is never left live.
@@ -372,7 +601,11 @@ func (n PosternNginx) Run(ctx context.Context, req PosternNginxRequest) (Postern
 		return PosternNginxReport{}, fmt.Errorf("mw postern nginx: no nginx site file at %s", n.ConfPath)
 	}
 
-	withSnapshot, err := ensureSnapshotLocation(text, req.SnapshotPath)
+	withEvents, err := ensureEventsLocation(text, authority)
+	if err != nil {
+		return PosternNginxReport{}, err
+	}
+	withSnapshot, err := ensureSnapshotLocation(withEvents, req.SnapshotPath)
 	if err != nil {
 		return PosternNginxReport{}, err
 	}
@@ -445,6 +678,75 @@ func snapshotBlock(path string) []string {
 		"    }",
 	}
 }
+
+// eventsBlock is the /api/events location mw postern nginx writes, passed
+// to the backend at authority (a URL's scheme and host) with the request's
+// own path: the event stream, never buffered or cached, held an hour
+// between reads, over HTTP/1.1 with the Connection header cleared so nginx
+// keeps the backend's connection open.
+func eventsBlock(authority string) []string {
+	return []string{
+		"    " + posternEventsMarker,
+		"    location = /api/events {",
+		"        proxy_pass " + authority + ";",
+		"        proxy_buffering off;",
+		"        proxy_cache off;",
+		"        proxy_read_timeout 1h;",
+		"        proxy_http_version 1.1;",
+		`        proxy_set_header Connection "";`,
+		"    }",
+	}
+}
+
+// ensureEventsLocation returns text with the /api/events location block
+// present: replacing its own block, marked with posternEventsMarker, when
+// one is already there, or inserting a fresh one just ahead of the general
+// /api/ location when it is not — or, in a site with no such location, just
+// ahead of posternAPIEndMarker. A site with neither does not look like the
+// postern's, and is refused rather than guessed at.
+func ensureEventsLocation(text, authority string) (string, error) {
+	lines := strings.Split(text, "\n")
+	block := eventsBlock(authority)
+
+	if start, end, ok := findBlock(lines, posternEventsMarker); ok {
+		rebuilt := append([]string{}, lines[:start]...)
+		rebuilt = append(rebuilt, block...)
+		rebuilt = append(rebuilt, lines[end+1:]...)
+		return strings.Join(rebuilt, "\n"), nil
+	}
+
+	at := -1
+	for i, line := range lines {
+		if isGeneralAPILocation(line) {
+			at = i
+			break
+		}
+	}
+	if at < 0 {
+		for i, line := range lines {
+			if strings.Contains(line, posternAPIEndMarker) {
+				at = i
+				break
+			}
+		}
+	}
+	if at < 0 {
+		return "", fmt.Errorf("mw postern nginx: no /api/ location and no %q marker in the nginx site: it does not look like the postern's site file", posternAPIEndMarker)
+	}
+	rebuilt := append([]string{}, lines[:at]...)
+	rebuilt = append(rebuilt, block...)
+	rebuilt = append(rebuilt, lines[at:]...)
+	return strings.Join(rebuilt, "\n"), nil
+}
+
+// posternGeneralAPIRe matches the line that opens the general /api/
+// location: a prefix location — no modifier, or ^~ — on /api/ or /api. An
+// exact (=) or regular expression (~, ~*) location is never it.
+var posternGeneralAPIRe = regexp.MustCompile(`^\s*location\s+(?:\^~\s+)?/api/?\s*\{`)
+
+// isGeneralAPILocation reports whether line opens the general /api/
+// location.
+func isGeneralAPILocation(line string) bool { return posternGeneralAPIRe.MatchString(line) }
 
 // ensureSnapshotLocation returns text with the /snapshot location block
 // present and aliased to snapshotPath: replacing its own block, marked with

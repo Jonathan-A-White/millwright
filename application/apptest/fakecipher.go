@@ -42,6 +42,12 @@ func (f *FakeCipher) Encrypt(toPubKey, text string) (string, error) {
 	return base64.StdEncoding.EncodeToString([]byte(toPubKey + "\x00" + f.From + "\x00" + text)), nil
 }
 
+// EncryptBytes implements application.Cipher: Encrypt of the bytes as they
+// are, which the reversible encoding carries byte for byte.
+func (f *FakeCipher) EncryptBytes(toPubKey string, plain []byte) (string, error) {
+	return f.Encrypt(toPubKey, string(plain))
+}
+
 // Decrypt implements application.Cipher.
 func (f *FakeCipher) Decrypt(privKey, ciphertext string) (string, string, error) {
 	if f.Err != nil {

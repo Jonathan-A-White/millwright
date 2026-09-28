@@ -1,6 +1,7 @@
 package beads
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -102,6 +103,9 @@ func (g *Gateway) NotesWithPrefix(ctx context.Context, prefix string) (map[strin
 	out, err := g.call(ctx, "kv", "list", "--json")
 	if err != nil {
 		return nil, err
+	}
+	if len(bytes.TrimSpace(out)) == 0 {
+		return map[string]string{}, nil
 	}
 	var all map[string]any
 	if err := json.Unmarshal(out, &all); err != nil {

@@ -2,6 +2,8 @@ package apptest
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"sync"
@@ -19,8 +21,11 @@ type FakePostern struct {
 	balance   map[string]int64
 	broadcast []string
 	blobs     map[string][]byte
+	delivered [][]byte
+	uploaded  [][]byte
 
-	// NextTxid is the txid Broadcast reports. "fake-txid" when empty.
+	// NextTxid is the txid Broadcast and Deliver report. When empty,
+	// Broadcast reports "fake-txid-<n>" and Deliver "direct:fake-<n>".
 	NextTxid string
 
 	// Err, when set, is returned by every method instead of doing the work.
@@ -145,4 +150,56 @@ func (f *FakePostern) Blob(_ context.Context, hash string) ([]byte, error) {
 		return nil, fmt.Errorf("no blob for hash %s", hash)
 	}
 	return append([]byte(nil), body...), nil
+}
+
+// Deliver implements application.Postern: the payload is kept, in order, for
+// Delivered to report.
+func (f *FakePostern) Deliver(_ context.Context, payload []byte) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return "", f.Err
+	}
+	f.delivered = append(f.delivered, append([]byte(nil), payload...))
+	if f.NextTxid != "" {
+		return f.NextTxid, nil
+	}
+	return fmt.Sprintf("direct:fake-%d", len(f.delivered)), nil
+}
+
+// Delivered reports the payloads Deliver was handed, in order.
+func (f *FakePostern) Delivered() [][]byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([][]byte, len(f.delivered))
+	for i, p := range f.delivered {
+		out[i] = append([]byte(nil), p...)
+	}
+	return out
+}
+
+// UploadBlob implements application.Postern: the body is stored under its
+// own sha256, where Blob finds it, and kept for Uploaded to report.
+func (f *FakePostern) UploadBlob(_ context.Context, body []byte) (string, int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return "", 0, f.Err
+	}
+	sum := sha256.Sum256(body)
+	hash := hex.EncodeToString(sum[:])
+	f.blobs[hash] = append([]byte(nil), body...)
+	f.uploaded = append(f.uploaded, append([]byte(nil), body...))
+	return hash, int64(len(body)), nil
+}
+
+// Uploaded reports the bodies UploadBlob was handed, in order.
+func (f *FakePostern) Uploaded() [][]byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([][]byte, len(f.uploaded))
+	for i, b := range f.uploaded {
+		out[i] = append([]byte(nil), b...)
+	}
+	return out
 }

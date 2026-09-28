@@ -15,6 +15,8 @@
 //	push_wait_seconds = 20
 //	millhand_routine_model = "sonnet"
 //	millhand_review_model = "opus"
+//	beads_sync = "remote"
+//	beads_backup_minutes = 30
 //
 //	[rigs]
 //	millwright = "/root/millwright"
@@ -41,6 +43,7 @@ package config
 import (
 	"bufio"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -74,11 +77,28 @@ const (
 	MillhandRoutineModelEnv = "MW_MILLHAND_ROUTINE_MODEL"
 	MillhandReviewModelEnv  = "MW_MILLHAND_REVIEW_MODEL"
 
-	PosternBackendEnv      = "MW_POSTERN_BACKEND"
-	PosternFloatSatsEnv    = "MW_POSTERN_FLOAT_SATS"
-	PosternGovernorKeyEnv  = "MW_POSTERN_GOVERNOR_KEY"
-	PosternKeyFileEnv      = "MW_POSTERN_KEY_FILE"
-	PosternSnapshotPathEnv = "MW_POSTERN_SNAPSHOT_PATH"
+	PosternBackendEnv       = "MW_POSTERN_BACKEND"
+	PosternFloatSatsEnv     = "MW_POSTERN_FLOAT_SATS"
+	PosternGovernorKeyEnv   = "MW_POSTERN_GOVERNOR_KEY"
+	PosternKeyFileEnv       = "MW_POSTERN_KEY_FILE"
+	PosternSnapshotPathEnv  = "MW_POSTERN_SNAPSHOT_PATH"
+	PosternViewPathEnv      = "MW_POSTERN_VIEW_PATH"
+	PosternChannelEnv       = "MW_POSTERN_CHANNEL"
+	PosternTranscribeCmdEnv = "MW_POSTERN_TRANSCRIBE_CMD"
+
+	HandsRootHelperEnv = "MW_HANDS_ROOT_HELPER"
+
+	BeadsSyncEnv          = "MW_BEADS_SYNC"
+	BeadsBackupMinutesEnv = "MW_BEADS_BACKUP_MINUTES"
+)
+
+// The environment variables bd itself reads to reach a Dolt database server
+// rather than a database of its own: a host whose beads_sync is shared sets
+// them, and mw doctor's beads-server check dials what they name. They are
+// bd's, not mw's, so they have no key in the config file.
+const (
+	BeadsDoltServerHostEnv = "BEADS_DOLT_SERVER_HOST"
+	BeadsDoltServerPortEnv = "BEADS_DOLT_SERVER_PORT"
 )
 
 // RigsTable is the table of the config file that says where each rig is checked
@@ -93,6 +113,11 @@ const (
 	TestsTable        = "tests"
 	AfterLandingTable = "after_landing"
 )
+
+// HandsHostsTable is the table of the config file that says how this host
+// reaches each other host a hands step may be for: host name on the left, an
+// ssh prefix on the right (`laptop = "ssh laptop"`).
+const HandsHostsTable = "hands_hosts"
 
 // WatchTable is the table of the config file that says what `mw watch` looks at.
 const WatchTable = "watch"
@@ -265,6 +290,34 @@ func PosternSnapshotPath() (string, error) {
 	return filepath.Join(home, DefaultPosternSnapshotPath), nil
 }
 
+// DefaultPosternViewPath is where mw postern view writes the encrypted live
+// view under the home directory when nothing says otherwise, and so where
+// mw postern serve tells the postern backend to read it from
+// (POSTERN_VIEW_FILE): state, beside the backend's own.
+var DefaultPosternViewPath = filepath.Join(".local", "state", "postern", "view.b64")
+
+// PosternViewPath reports where the encrypted live view is written and read:
+// $MW_POSTERN_VIEW_PATH if it is set, otherwise the root-table
+// `postern_view_path` key of ~/.config/mw/config.toml, a full path either
+// way, and DefaultPosternViewPath under the home directory when neither says.
+func PosternViewPath() (string, error) {
+	said, err := optionalSetting("postern_view_path", PosternViewPathEnv, "")
+	if err != nil {
+		return "", err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("no %s is set and there is no home directory to read %s in: %w", PosternViewPathEnv, File, err)
+	}
+	if said != "" {
+		if !filepath.IsAbs(said) {
+			return "", fmt.Errorf("the postern view path is %q in %s: it must be a full path", said, filepath.Join(home, File))
+		}
+		return said, nil
+	}
+	return filepath.Join(home, DefaultPosternViewPath), nil
+}
+
 // PosternInboxDir reports the full path to the directory mw postern inbox
 // writes a decrypted attachment to: DefaultPosternInboxDir under the home
 // directory. There is no setting for it.
@@ -274,6 +327,84 @@ func PosternInboxDir() (string, error) {
 		return "", fmt.Errorf("there is no home directory to write a postern attachment in: %w", err)
 	}
 	return filepath.Join(home, DefaultPosternInboxDir), nil
+}
+
+// The channels mw postern send delivers a message by: straight to the
+// postern backend (postern's docs/protocol.md §9), or in a funded testnet
+// transaction (§4). DefaultPosternChannel is chain, what every host did
+// before the direct channel existed: a host sends directly only once its
+// config says `postern_channel = "direct"`, which the move to the desktop
+// sets when the backend that takes direct records runs there (the vault's
+// hosts/desktop-move.md step 4.1). Direct is the Governor's 2026-09-28
+// decision for where the factory ends up, not a default that a merge may
+// switch on under a backend that answers 404 to it.
+const (
+	PosternChannelDirect  = "direct"
+	PosternChannelChain   = "chain"
+	DefaultPosternChannel = PosternChannelChain
+)
+
+// PosternChannel reports how mw postern send delivers a message:
+// $MW_POSTERN_CHANNEL if it is set, otherwise the root-table
+// `postern_channel` key of ~/.config/mw/config.toml, and
+// DefaultPosternChannel when neither says. Anything but direct or chain, in
+// any case, is refused.
+func PosternChannel() (string, error) {
+	said, err := optionalSetting("postern_channel", PosternChannelEnv, DefaultPosternChannel)
+	if err != nil {
+		return "", err
+	}
+	switch channel := strings.ToLower(strings.TrimSpace(said)); channel {
+	case PosternChannelDirect, PosternChannelChain:
+		return channel, nil
+	default:
+		return "", fmt.Errorf("the postern channel is %q, which is neither %s nor %s: set %s=<channel>, or `postern_channel = \"<channel>\"` in %s",
+			said, PosternChannelDirect, PosternChannelChain, PosternChannelEnv, File)
+	}
+}
+
+// DefaultHandsRootHelper is where contrib/install-hands-root installs
+// mw-hands-root on every host, and where mw looks for it through sudo -n.
+const DefaultHandsRootHelper = "/usr/local/sbin/mw-hands-root"
+
+// HandsRootHelper reports the path mw hands a root step to, through sudo -n,
+// on whichever host it runs (postern's docs/protocol.md §17):
+// $MW_HANDS_ROOT_HELPER if it is set, otherwise the root-table
+// `hands_root_helper` key of ~/.config/mw/config.toml, a full path either
+// way, and DefaultHandsRootHelper when neither says. The sudoers line
+// contrib/install-hands-root writes names only the default.
+func HandsRootHelper() (string, error) {
+	said, err := optionalSetting("hands_root_helper", HandsRootHelperEnv, DefaultHandsRootHelper)
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(said) {
+		return "", fmt.Errorf("the hands root helper is %q: it must be a full path, as sudo names it", said)
+	}
+	return said, nil
+}
+
+// HandsHosts reports how this host reaches each other host a hands step may
+// be for, read from the `[hands_hosts]` table of ~/.config/mw/config.toml:
+// host name to an ssh prefix, split on whitespace when it is used. A host not
+// in it is one no step is run on from here, and a machine with no such table
+// runs steps for itself only.
+func HandsHosts() (map[string]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	return tableIn(filepath.Join(home, File), HandsHostsTable)
+}
+
+// PosternTranscribeCmd reports the command mw postern inbox transcribes a
+// Governor's voice note with, on this host and never a third party's
+// (postern's docs/protocol.md §14): $MW_POSTERN_TRANSCRIBE_CMD if it is set,
+// otherwise the root-table `postern_transcribe_cmd` key of
+// ~/.config/mw/config.toml, split on whitespace with the audio file's path
+// appended. Empty when neither says, and then no voice note is transcribed.
+func PosternTranscribeCmd() (string, error) {
+	return optionalSetting("postern_transcribe_cmd", PosternTranscribeCmdEnv, "")
 }
 
 // What `mw dispatch` does when its sync cannot resolve a name, which is what a
@@ -642,6 +773,94 @@ func PushWaitSeconds() (int, error) {
 		return 0, fmt.Errorf("the wait between push tries is %d seconds, which is negative: set it to 0 or more", seconds)
 	}
 	return seconds, nil
+}
+
+// The ways `mw sync` may treat this host's beads database, the root-table
+// `beads_sync` key of the config file. application.BeadsSyncMode names the
+// same three.
+//
+//   - remote: every host keeps a copy of its own and brings it level with the
+//     others through the tracker's remote on every sync. The default: what
+//     every host did before the factory moved to one home.
+//   - backup: this host holds the one database every other host reaches. The
+//     tracker's remote is a backup of it, pushed every beads_backup_minutes,
+//     and never what keeps the hosts level.
+//   - shared: this host's bd reaches another host's database over the
+//     network (BEADS_DOLT_SERVER_HOST and the rest) and keeps no copy of its
+//     own, so it has nothing to push, pull or collect.
+const (
+	BeadsSyncRemote  = "remote"
+	BeadsSyncBackup  = "backup"
+	BeadsSyncShared  = "shared"
+	DefaultBeadsSync = BeadsSyncRemote
+)
+
+// DefaultBeadsBackupMinutes is how long a host whose beads_sync is backup
+// waits between two backups of the one database, when nothing says otherwise.
+const DefaultBeadsBackupMinutes = 30
+
+// DefaultBeadsDoltServerPort is the port bd reaches a Dolt database server
+// on when BEADS_DOLT_SERVER_PORT says nothing: bd's own server mode default
+// (docs/research/beads-hosts-and-rigs.md, section 5).
+const DefaultBeadsDoltServerPort = "3307"
+
+// BeadsSync reports how `mw sync` treats this host's beads database:
+// $MW_BEADS_SYNC if it is set, otherwise the root-table `beads_sync` key of
+// ~/.config/mw/config.toml, and DefaultBeadsSync when neither says. Anything
+// but the three choices is refused, naming them.
+func BeadsSync() (string, error) {
+	said, err := optionalSetting("beads_sync", BeadsSyncEnv, DefaultBeadsSync)
+	if err != nil {
+		return "", err
+	}
+	switch said {
+	case BeadsSyncRemote, BeadsSyncBackup, BeadsSyncShared:
+		return said, nil
+	}
+	return "", fmt.Errorf("beads_sync is %q, which is not one of its three choices: %q (every host keeps a copy, level through the remote), %q (this host holds the one database, the remote a backup) or %q (this host's bd reaches another host's database); set %s=<choice>, or `beads_sync = \"<choice>\"` in %s",
+		said, BeadsSyncRemote, BeadsSyncBackup, BeadsSyncShared, BeadsSyncEnv, File)
+}
+
+// BeadsBackupMinutes reports how many minutes a host whose beads_sync is
+// backup waits between two backups: $MW_BEADS_BACKUP_MINUTES if it is set,
+// otherwise the root-table `beads_backup_minutes` key of
+// ~/.config/mw/config.toml, and DefaultBeadsBackupMinutes when neither says.
+func BeadsBackupMinutes() (int, error) {
+	said, err := optionalSetting("beads_backup_minutes", BeadsBackupMinutesEnv, "")
+	if err != nil {
+		return 0, err
+	}
+	if said == "" {
+		return DefaultBeadsBackupMinutes, nil
+	}
+	minutes, err := strconv.Atoi(said)
+	if err != nil {
+		return 0, fmt.Errorf("the beads backup interval is %q, which is not a whole number of minutes: set %s=<n>, or `beads_backup_minutes = <n>` in %s", said, BeadsBackupMinutesEnv, File)
+	}
+	if minutes < 1 {
+		return 0, fmt.Errorf("the beads backup interval is %d minutes, so every sync would push a backup: set it to 1 or more", minutes)
+	}
+	return minutes, nil
+}
+
+// BeadsServerAddress reports the host:port this host's bd reaches its Dolt
+// database server on: $BEADS_DOLT_SERVER_HOST, on $BEADS_DOLT_SERVER_PORT or
+// DefaultBeadsDoltServerPort. Both are bd's own environment, so the config
+// file has no say; "" when no host is set, which is every host whose
+// beads_sync is not shared.
+func BeadsServerAddress() (string, error) {
+	host := strings.TrimSpace(os.Getenv(BeadsDoltServerHostEnv))
+	if host == "" {
+		return "", nil
+	}
+	port := strings.TrimSpace(os.Getenv(BeadsDoltServerPortEnv))
+	if port == "" {
+		port = DefaultBeadsDoltServerPort
+	}
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		return "", fmt.Errorf("%s is %q, which is not a port number", BeadsDoltServerPortEnv, port)
+	}
+	return net.JoinHostPort(host, port), nil
 }
 
 // MillhandRoutineModel reports the model a routine wake, and a wake by hand, of
