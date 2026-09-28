@@ -21,7 +21,10 @@
 #      recently than its damper: 1 h the first time, doubling on each repeat
 #      while the condition keeps holding, capped at 8 h, and reset once the
 #      condition clears (recorded per condition in the state directory);
-#   6. when this host has a postern key file and its mw has `mw postern view`
+#   6. when this host serves the live view (MW_MAIL_VIEW_EVERY is set: the
+#      install on the host whose postern backend serves the view sets it;
+#      unset, there is no view step at all), has a postern key file, and its
+#      mw has `mw postern view`
 #      (asked once a tick, with `mw postern view --help`, only when a view is
 #      otherwise due), and the beads have changed since the last view written
 #      or attempted and at least MW_MAIL_VIEW_EVERY seconds (default 30) have
@@ -92,7 +95,10 @@
 #                        the lock
 #                        (${XDG_STATE_HOME:-~/.local/state}/mw-mail-notify)
 #   MW_MAIL_LOADAVG_FILE where the load average is read (/proc/loadavg; else uptime)
-#   MW_MAIL_VIEW_EVERY   least seconds between two `mw postern view`s  (30)
+#   MW_MAIL_VIEW_EVERY   least seconds between two `mw postern view`s; set
+#                        only on the host that serves the live view (30
+#                        there, as hosts/desktop-move.md installs it);
+#                        unset, no view step                         (unset)
 #   MW_MAIL_VIEW_TIMEOUT seconds `mw postern view` (step 6) may run before
 #                        it is killed                                   (60)
 #   MW_MAIL_SNAPSHOT_EVERY
@@ -116,14 +122,16 @@ STATE=${MW_MAIL_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mw-mail-notify}
 LOADAVG=${MW_MAIL_LOADAVG_FILE:-/proc/loadavg}
 SNAPSHOT_TIMEOUT=${MW_MAIL_SNAPSHOT_TIMEOUT:-60}
 SNAPSHOT_EVERY=${MW_MAIL_SNAPSHOT_EVERY:-600}
-VIEW_EVERY=${MW_MAIL_VIEW_EVERY:-30}
+VIEW_EVERY=${MW_MAIL_VIEW_EVERY:-}
 VIEW_TIMEOUT=${MW_MAIL_VIEW_TIMEOUT:-60}
 
 # A setting that is not a whole number of seconds reads as its default.
 case $SYNC_EVERY in '' | *[!0-9]*) SYNC_EVERY=300 ;; esac
 case $SNAPSHOT_TIMEOUT in '' | *[!0-9]*) SNAPSHOT_TIMEOUT=60 ;; esac
 case $SNAPSHOT_EVERY in '' | *[!0-9]*) SNAPSHOT_EVERY=600 ;; esac
-case $VIEW_EVERY in '' | *[!0-9]*) VIEW_EVERY=30 ;; esac
+# MW_MAIL_VIEW_EVERY is the exception: unset is its own setting, no view step;
+# set but not a number, it reads as 30.
+case $VIEW_EVERY in '') ;; *[!0-9]*) VIEW_EVERY=30 ;; esac
 case $VIEW_TIMEOUT in '' | *[!0-9]*) VIEW_TIMEOUT=60 ;; esac
 
 # How long a quiet alarm condition, once typed, is left untyped again: 1 h the
@@ -288,8 +296,8 @@ beads_level() {
 	level_read=1
 }
 
-# 6. The live view: on a host with a postern key file whose mw has `mw postern
-# view`, refreshed only when the beads have changed since the marker left by
+# 6. The live view: on a host that serves it (MW_MAIL_VIEW_EVERY set) with a
+# postern key file whose mw has `mw postern view`, refreshed only when the beads have changed since the marker left by
 # the last attempt and at least VIEW_EVERY seconds have passed since then —
 # the postern backend serves the file to the Governor's app, and a view the
 # beads have not moved since is not worth rebuilding. Whether mw has the view
@@ -302,7 +310,7 @@ beads_level() {
 # killed, and never stops the tick; the time and the level are recorded before
 # the attempt runs, so one that hangs or fails is not retried before
 # VIEW_EVERY has passed again.
-if [ -r "$keyfile" ]; then
+if [ -n "$VIEW_EVERY" ] && [ -r "$keyfile" ]; then
 	view_last=$(cat "$STATE/view-last" 2>/dev/null || echo 0)
 	case $view_last in *[!0-9]* | "") view_last=0 ;; esac
 	if [ $((now - view_last)) -ge "$VIEW_EVERY" ]; then

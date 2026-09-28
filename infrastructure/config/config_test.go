@@ -1160,26 +1160,26 @@ func TestPosternViewPathIsUnderHomeUntilAHostSaysOtherwise(t *testing.T) {
 	}
 }
 
-func TestPosternChannelIsDirectUntilAHostSaysChain(t *testing.T) {
+func TestPosternChannelIsChainUntilAHostSaysDirect(t *testing.T) {
 	writeConfig(t, vpsConfig)
 
 	channel, err := config.PosternChannel()
 	if err != nil {
 		t.Fatalf("reading the postern channel: %v", err)
 	}
-	if channel != "direct" || config.DefaultPosternChannel != "direct" {
-		t.Fatalf("expected the direct channel by default, got %q", channel)
+	if channel != "chain" || config.DefaultPosternChannel != "chain" {
+		t.Fatalf("expected the chain channel by default, got %q", channel)
 	}
 
-	t.Setenv(config.PosternChannelEnv, "chain")
-	if channel, err = config.PosternChannel(); err != nil || channel != "chain" {
-		t.Fatalf("expected %s to win with chain, got %q: %v", config.PosternChannelEnv, channel, err)
+	t.Setenv(config.PosternChannelEnv, "direct")
+	if channel, err = config.PosternChannel(); err != nil || channel != "direct" {
+		t.Fatalf("expected %s to win with direct, got %q: %v", config.PosternChannelEnv, channel, err)
 	}
 
 	t.Setenv(config.PosternChannelEnv, "")
-	writeConfig(t, "postern_channel = \"Chain\"\n")
-	if channel, err = config.PosternChannel(); err != nil || channel != "chain" {
-		t.Fatalf("expected the file's postern_channel read as chain, got %q: %v", channel, err)
+	writeConfig(t, "postern_channel = \"Direct\"\n")
+	if channel, err = config.PosternChannel(); err != nil || channel != "direct" {
+		t.Fatalf("expected the file's postern_channel read as direct, got %q: %v", channel, err)
 	}
 
 	writeConfig(t, "postern_channel = \"pigeon\"\n")

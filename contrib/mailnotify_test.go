@@ -151,6 +151,11 @@ func (f *factory) nudges(rows ...[2]string) {
 // host with no postern side.
 func (f *factory) posternKey() { f.write(".config/mw/postern.key", "fake-key\n", 0o600) }
 
+// servesTheView sets MW_MAIL_VIEW_EVERY to thirty seconds, as the install on
+// the host that serves the live view does (the vault's hosts/desktop-move.md
+// step 4.3): without it the notifier has no view step at all.
+func (f *factory) servesTheView() { f.env = append(f.env, "MW_MAIL_VIEW_EVERY=30") }
+
 // posternCount sets what `mw postern inbox --unread-count` prints.
 func (f *factory) posternCount(n int) { f.write("postern-count", strconv.Itoa(n)+"\n", 0o644) }
 
@@ -965,6 +970,7 @@ func (f *factory) setViewLastAt(at time.Time) {
 func TestPosternViewRunsOnTheFirstTickWithAKeyFile(t *testing.T) {
 	f := newFactory(t)
 	f.mayor("idle", actingByID)
+	f.servesTheView()
 	f.posternKey()
 	f.posternCount(0)
 
@@ -981,6 +987,7 @@ func TestPosternViewRunsOnTheFirstTickWithAKeyFile(t *testing.T) {
 func TestPosternViewDoesNotRunWithoutAKeyFile(t *testing.T) {
 	f := newFactory(t)
 	f.mayor("idle", actingByID)
+	f.servesTheView()
 
 	f.tick()
 
@@ -992,6 +999,7 @@ func TestPosternViewDoesNotRunWithoutAKeyFile(t *testing.T) {
 func TestPosternViewUnchangedBeadsRunsNothingEvenPastTheInterval(t *testing.T) {
 	f := newFactory(t)
 	f.mayor("idle", actingByID)
+	f.servesTheView()
 	f.posternKey()
 	f.posternCount(0)
 
@@ -1007,6 +1015,7 @@ func TestPosternViewUnchangedBeadsRunsNothingEvenPastTheInterval(t *testing.T) {
 func TestPosternViewChangedBeadsRunsOnceThenWaitsOutItsInterval(t *testing.T) {
 	f := newFactory(t)
 	f.mayor("idle", actingByID)
+	f.servesTheView()
 	f.posternKey()
 	f.posternCount(0)
 
@@ -1019,7 +1028,7 @@ func TestPosternViewChangedBeadsRunsOnceThenWaitsOutItsInterval(t *testing.T) {
 		t.Fatalf("mw postern view ran %d times inside its interval, want 1", n)
 	}
 
-	// Past the default thirty seconds, with the beads changed: it runs again.
+	// Past the thirty seconds, with the beads changed: it runs again.
 	f.setViewLastAt(time.Now().Add(-31 * time.Second))
 	f.tick()
 	if n := f.viewRuns(); n != 2 {
@@ -1031,6 +1040,22 @@ func TestPosternViewChangedBeadsRunsOnceThenWaitsOutItsInterval(t *testing.T) {
 	// The snapshot keeps its own, far longer, interval.
 	if n := f.posternSubCalls("snapshot"); n != 1 {
 		t.Fatalf("mw postern snapshot ran %d times, want 1", n)
+	}
+}
+
+func TestPosternViewIsNotAskedForWhereTheHostDoesNotServeIt(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.posternCount(0)
+
+	f.tick()
+
+	if f.viewRuns() != 0 || f.viewProbes() != 0 {
+		t.Fatalf("mw postern view was asked about with MW_MAIL_VIEW_EVERY unset: %q", f.read("postern.log"))
+	}
+	if n := f.posternSubCalls("snapshot"); n != 1 {
+		t.Fatalf("mw postern snapshot ran %d times, want 1: the snapshot does not wait on the view", n)
 	}
 }
 
@@ -1054,6 +1079,7 @@ func TestMWMailViewEverySetsTheViewInterval(t *testing.T) {
 func TestTheBeadsLevelIsReadOnceATickForTheViewAndTheSnapshotBoth(t *testing.T) {
 	f := newFactory(t)
 	f.mayor("idle", actingByID)
+	f.servesTheView()
 	f.posternKey()
 	f.posternCount(0)
 
@@ -1070,6 +1096,7 @@ func TestTheBeadsLevelIsReadOnceATickForTheViewAndTheSnapshotBoth(t *testing.T) 
 func TestPosternViewIsSkippedWhereMwHasNoViewCommand(t *testing.T) {
 	f := newFactory(t)
 	f.mayor("idle", actingByID)
+	f.servesTheView()
 	f.posternKey()
 	f.posternCount(0)
 	f.write("no-view", "", 0o644)
@@ -1097,6 +1124,7 @@ func TestPosternViewIsSkippedWhereMwHasNoViewCommand(t *testing.T) {
 func TestAFailingPosternViewIsLoggedAndDoesNotStopTheTick(t *testing.T) {
 	f := newFactory(t)
 	f.mayor("idle", actingByID)
+	f.servesTheView()
 	f.posternKey()
 	f.posternCount(0)
 	f.write("view-fails", "", 0o644)
@@ -1116,6 +1144,7 @@ func TestAFailingPosternViewIsLoggedAndDoesNotStopTheTick(t *testing.T) {
 func TestASlowPosternViewIsKilledByItsOwnTimeoutAndNotRetriedInsideItsInterval(t *testing.T) {
 	f := newFactory(t)
 	f.mayor("idle", actingByID)
+	f.servesTheView()
 	f.posternKey()
 	f.posternCount(0)
 	f.env = append(f.env, "MW_MAIL_VIEW_TIMEOUT=1")

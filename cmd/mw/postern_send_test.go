@@ -55,12 +55,13 @@ func (d *directBackend) serve(t *testing.T) string {
 	return srv.URL
 }
 
-// By default mw postern send delivers the fixture's very record script
-// straight to the backend: no balance, no coins, no broadcast.
+// On the direct channel mw postern send delivers the fixture's very record
+// script straight to the backend: no balance, no coins, no broadcast.
 func TestPosternSendDeliversTheFixturesRecordScriptDirectly(t *testing.T) {
 	f := loadPosternRecordFixture(t)
 	backend := &directBackend{}
 	posternHome(t, backend.serve(t), f.SenderWIF, f.RecipientPubKey)
+	t.Setenv("MW_POSTERN_CHANNEL", "direct") // the backend here takes direct records; the default is chain
 	realCipher, realClock := posternCipher, posternClock
 	t.Cleanup(func() { posternCipher, posternClock = realCipher, realClock })
 	posternCipher = func(*postern.KeyFile) application.Cipher { return fixedCipher{ct: f.Ct} }
@@ -84,6 +85,7 @@ func TestPosternSendAttachesAFileAndMayLeaveTheTextOut(t *testing.T) {
 	f := loadPosternRecordFixture(t)
 	backend := &directBackend{}
 	posternHome(t, backend.serve(t), f.SenderWIF, f.RecipientPubKey)
+	t.Setenv("MW_POSTERN_CHANNEL", "direct") // the backend here takes direct records; the default is chain
 	file := filepath.Join(t.TempDir(), "screen.png")
 	if err := os.WriteFile(file, []byte("\x89PNG pixels"), 0o600); err != nil {
 		t.Fatal(err)

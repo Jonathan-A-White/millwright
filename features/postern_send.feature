@@ -1,8 +1,8 @@
 Feature: mw postern send
   mw postern send builds a message record and sends it by postern_channel,
-  printing the txid. The direct channel, the default, hands the record
-  straight to the postern backend (postern's docs/protocol.md section 9); the
-  chain channel signs a transaction spending the postern key's own testnet
+  printing the txid. The direct channel hands the record straight to the
+  postern backend (postern's docs/protocol.md section 9); the chain channel,
+  the default, signs a transaction spending the postern key's own testnet
   balance to carry it, and broadcasts it. It refuses when there is no
   governor key to send to, when the class is not one mw knows, or — on the
   chain — when the key's balance would exceed the float cap mw enforces,

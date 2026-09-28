@@ -79,6 +79,7 @@ func TestPosternInboxApplyRunsAHandsStepTheGovernorApproved(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	posternHome(t, srv.URL, f.RecipientWIF, f.SenderPubKey)
+	t.Setenv("MW_POSTERN_CHANNEL", "direct") // the backend here takes direct records; the default is chain
 
 	bin := t.TempDir()
 	log := filepath.Join(bin, "calls.log")

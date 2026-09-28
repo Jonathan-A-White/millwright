@@ -651,7 +651,7 @@ postern_governor_key = ""          # the Governor's compressed public key, as he
 postern_key_file = "~/.config/mw/postern.key"  # where the Mayor's postern key is kept, outside the vault (default shown)
 postern_snapshot_path = "~/.local/state/mw/snapshot.bin"  # where mw postern snapshot writes the encrypted snapshot (default shown)
 postern_view_path = "~/.local/state/postern/view.b64"  # the live view mw postern view writes and the postern backend serves (default shown)
-postern_channel = "direct"         # how mw postern send delivers: direct to the backend, or chain, a funded transaction (default direct)
+postern_channel = "direct"         # how mw postern send delivers: direct to the backend, or chain, a funded transaction (default chain)
 postern_transcribe_cmd = ""        # what hears the Governor's voice notes, the audio's path appended, e.g. contrib/postern-transcribe (default empty: none are heard)
 beads_sync = "remote"              # remote (a copy of its own), backup (holds the one database) or shared (reaches another host's) (default remote)
 beads_backup_minutes = 30          # on a backup host, how long between two backups of the one database (default 30)
@@ -807,10 +807,12 @@ postern inbox` prints the caption and the file's path; a bead comment naming
 it ends with " [image: <path>]". A download or decrypt failure prints the
 error and still records the text.
 
-`mw postern send` delivers by `postern_channel`: `direct`, the default, hands
-the record straight to the postern backend (postern's docs/protocol.md §9),
-its txid `direct:<sha256>`, with no coins, no float cap and no broadcast;
-`chain` is the funded transaction above. A message sent in a bead's thread
+`mw postern send` delivers by `postern_channel`: `direct` hands the record
+straight to the postern backend (postern's docs/protocol.md §9), its txid
+`direct:<sha256>`, with no coins, no float cap and no broadcast; `chain`, the
+default, is the funded transaction above. A host says `direct` only once the
+backend it reaches takes direct records (`POST /api/messages`): an older
+backend answers 404 to it, and there is no falling back to the chain. A message sent in a bead's thread
 (`--thread`) is commented on that bead too, `MAYOR via postern, txid <id>:
 <text>`, so the whole exchange lives on the bead. `--attach <file>`
 (repeatable) encrypts a file to the Governor, uploads it to the backend's blob
@@ -1358,9 +1360,13 @@ once with how long it ran; a slow host whose beads take longer than the default
 to snapshot should raise `MW_MAIL_SNAPSHOT_TIMEOUT` — a snapshot that never
 finishes inside its timeout is never worth retrying more often (mw-tfne4.12).
 
-Just before it, on the same host, the tick refreshes the live view the postern
-backend serves — `mw postern view` — once the beads have changed and at most
-once every `MW_MAIL_VIEW_EVERY` seconds (default 30), bounded to
+Just before it, on the host that serves the live view, the tick refreshes the
+view the postern backend serves — `mw postern view` — once the beads have
+changed and at most once every `MW_MAIL_VIEW_EVERY` seconds. That setting is
+the opt-in: unset (the default) there is no view step at all, so a host whose
+notifier predates the live view never starts building one; the host running
+the backend that serves the view installs its notifier with
+`MW_MAIL_VIEW_EVERY=30` (the vault's hosts/desktop-move.md step 4.3). Bounded to
 `MW_MAIL_VIEW_TIMEOUT` seconds (default 60) and logged the same way. It first
 asks `mw postern view --help` whether this mw has the view at all (looking for
 the view's own usage line: cobra exits 0 for a subcommand it does not know),

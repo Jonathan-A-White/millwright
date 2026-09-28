@@ -331,12 +331,17 @@ func PosternInboxDir() (string, error) {
 
 // The channels mw postern send delivers a message by: straight to the
 // postern backend (postern's docs/protocol.md §9), or in a funded testnet
-// transaction (§4). DefaultPosternChannel is direct, the Governor's
-// 2026-09-28 decision.
+// transaction (§4). DefaultPosternChannel is chain, what every host did
+// before the direct channel existed: a host sends directly only once its
+// config says `postern_channel = "direct"`, which the move to the desktop
+// sets when the backend that takes direct records runs there (the vault's
+// hosts/desktop-move.md step 4.1). Direct is the Governor's 2026-09-28
+// decision for where the factory ends up, not a default that a merge may
+// switch on under a backend that answers 404 to it.
 const (
 	PosternChannelDirect  = "direct"
 	PosternChannelChain   = "chain"
-	DefaultPosternChannel = PosternChannelDirect
+	DefaultPosternChannel = PosternChannelChain
 )
 
 // PosternChannel reports how mw postern send delivers a message:

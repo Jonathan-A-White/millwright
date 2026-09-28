@@ -150,6 +150,7 @@ func TestPosternInboxApplyHearsAVoiceNote(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	posternHome(t, srv.URL, f.RecipientWIF, f.SenderPubKey)
+	t.Setenv("MW_POSTERN_CHANNEL", "direct") // the backend here takes direct records; the default is chain
 	log := bdRecording(t, `[{"id": "mw-e.3", "status": "open", "issue_type": "task"}]`)
 	hear := filepath.Join(t.TempDir(), "hear")
 	if err := os.WriteFile(hear, []byte("#!/bin/sh\ncase \"$(cat \"$1\")\" in *Governor*) echo '  ship it  ';; *) exit 3;; esac\n"), 0o755); err != nil {
