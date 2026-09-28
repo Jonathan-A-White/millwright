@@ -264,11 +264,19 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		Exhausted:       b.exhausted(),
 		Needs:           b.needs(),
 		IsEpic:          b.Type == TypeEpic,
+		Type:            b.Type,
 		// The formula poured for this story, as the dispatch that poured it
 		// recorded it. Only the root is known from the story itself; the steps
 		// are read from the tracker by whoever needs them.
 		Molecule: application.Molecule{RootID: b.pathMetadata()[application.MoleculeField]},
 	}
+}
+
+// ownBead is this bead — an epic, shown on its own — as a listing of its
+// parent's children would report it, with no defaults of its parent's
+// overlaid: an epic's own Path is its default one, read as its overrides.
+func (b bead) ownBead() application.StoryDetail {
+	return b.detail(domain.Path{})
 }
 
 // inFiledOrder puts beads in the order they were filed, which is the order the
