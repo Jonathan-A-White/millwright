@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
@@ -30,7 +31,13 @@ func newSyncCmd() *cobra.Command {
 			"how many runs since have failed.\n\n" +
 			"Once level, it also asks the tracker to reclaim the disk space its own auto-commit history\n" +
 			"piles up — never more than once a day per host, since a full collection can take real time.\n" +
-			"Nothing is ever deleted by it: that stays a person's call.",
+			"Nothing is ever deleted by it: that stays a person's call.\n\n" +
+			"All of that is config `beads_sync = \"remote\"`, the default. On the host that keeps the one\n" +
+			"database (`backup`) the beads cycle is only a backup, run once the last one is\n" +
+			"`beads_backup_minutes` old (default 30); one that halts is said and marked but stops nothing.\n" +
+			"On a host whose bd reaches another host's database (`shared`) there is no beads cycle and no\n" +
+			"collection. In both the note of when this host was level is written on every sync, straight\n" +
+			"into the one database.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := config.Vault()
@@ -42,14 +49,18 @@ func newSyncCmd() *cobra.Command {
 				return err
 			}
 
-			report, err := application.Sync{
+			sync, err := hostSync(application.Sync{
 				Vault:     mwVault(dir, host),
 				Tracker:   mwGateway(dir, host),
 				Host:      host,
 				Ticks:     hostTickLogs(),
 				Lock:      hostSyncLock(),
 				SyncHalts: hostSyncHalt(),
-			}.Run(cmd.Context())
+			})
+			if err != nil {
+				return err
+			}
+			report, err := sync.Run(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -57,6 +68,33 @@ func newSyncCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// hostBeadsSync is how this host's beads database is treated: config
+// beads_sync, remote when it says nothing.
+func hostBeadsSync() (application.BeadsSyncMode, error) {
+	said, err := config.BeadsSync()
+	if err != nil {
+		return "", err
+	}
+	return application.ParseBeadsSyncMode(said)
+}
+
+// hostSync is sync with this host's beads_sync mode and backup interval set
+// from config, so that every command that brings this host level — mw sync,
+// dispatch, next and the Millhand's tick — treats the beads database alike.
+func hostSync(sync application.Sync) (application.Sync, error) {
+	mode, err := hostBeadsSync()
+	if err != nil {
+		return sync, err
+	}
+	minutes, err := config.BeadsBackupMinutes()
+	if err != nil {
+		return sync, err
+	}
+	sync.Mode = mode
+	sync.BackupInterval = time.Duration(minutes) * time.Minute
+	return sync, nil
 }
 
 // exitCode is the status mw leaves with after a command reported err. A sync
