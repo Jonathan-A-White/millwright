@@ -25,6 +25,7 @@ type posternServeContext struct {
 	home string
 
 	configPath    string
+	envPath       string
 	nginxConfPath string
 	nginxOriginal string
 
@@ -61,6 +62,7 @@ func InitializePosternServeScenario(ctx *godog.ScenarioContext) {
 
 	ctx.Given(`^a throwaway home for the postern hand commands$`, c.aThrowawayHome)
 	ctx.Given(`^a postern config file that says:$`, c.aConfigFileThatSays)
+	ctx.Given(`^a postern backend environment file that says:$`, c.anEnvFileThatSays)
 	ctx.Given(`^an nginx site file that says:$`, c.anNginxSiteFileThatSays)
 	ctx.Given(`^the postern snapshot path is "([^"]*)"$`, c.thePosternSnapshotPathIs)
 	ctx.Given(`^the fake nginx test will fail, saying "([^"]*)"$`, c.theFakeNginxTestWillFail)
@@ -81,6 +83,13 @@ func InitializePosternServeScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^there is no snapshot directory$`, c.thereIsNoSnapshotDirectory)
 	ctx.Then(`^the config file was backed up exactly (\d+) times?$`, c.theConfigFileWasBackedUpExactly)
 	ctx.Then(`^the serve report says it would write postern_backend$`, c.theServeReportSaysItWouldWrite)
+	ctx.Then(`^serving fails, naming the Mayor's key$`, c.servingFailsNamingTheMayorsKey)
+	ctx.Then(`^the postern backend's environment file says:$`, c.theEnvFileSays)
+	ctx.Then(`^there is no postern backend environment file$`, c.thereIsNoEnvFile)
+	ctx.Then(`^the view directory exists$`, c.theViewDirectoryExists)
+	ctx.Then(`^there is no view directory$`, c.thereIsNoViewDirectory)
+	ctx.Then(`^the environment file was backed up exactly (\d+) times?$`, c.theEnvFileWasBackedUpExactly)
+	ctx.Then(`^the serve report shows the environment line (.+)$`, c.theServeReportShowsTheEnvLine)
 	ctx.Then(`^the nginx site file holds:$`, c.theNginxSiteFileHolds)
 	ctx.Then(`^the nginx site file is unchanged$`, c.theNginxSiteFileIsUnchanged)
 	ctx.Then(`^nginx was tested (\d+) times? and reloaded (\d+) times?$`, c.nginxWasTestedAndReloaded)
@@ -98,6 +107,7 @@ func (c *posternServeContext) aThrowawayHome() error {
 	}
 	c.home = home
 	c.configPath = filepath.Join(home, "config.toml")
+	c.envPath = filepath.Join(home, "postern.env")
 	c.nginxConfPath = filepath.Join(home, "nginx", "postern.conf")
 	c.serveBackupDir = filepath.Join(home, "backup-serve")
 	c.nginxBackupDir = filepath.Join(home, "backup-nginx")
@@ -141,6 +151,16 @@ func (c *posternServeContext) requestFromTable(table *godog.Table) application.P
 			req.SnapshotPath = value
 		case "governor-key":
 			req.GovernorKey = value
+		case "env-file":
+			req.EnvFile = value
+		case "addr":
+			req.Addr = value
+		case "view-path":
+			req.ViewPath = value
+		case "mw":
+			req.Mw = value
+		case "mayor-key":
+			req.MayorKey = value
 		}
 	}
 	return req
@@ -257,14 +277,20 @@ func (c *posternServeContext) thereIsNoSnapshotDirectory() error {
 }
 
 func (c *posternServeContext) theConfigFileWasBackedUpExactly(count string) error {
-	return backupCount(c.serveBackupDir, count)
+	return backupCount(c.serveBackupDir, filepath.Base(c.configPath), count)
+}
+
+func (c *posternServeContext) theEnvFileWasBackedUpExactly(count string) error {
+	return backupCount(c.serveBackupDir, filepath.Base(c.envPath), count)
 }
 
 func (c *posternServeContext) theNginxSiteFileWasBackedUpExactly(count string) error {
-	return backupCount(c.nginxBackupDir, count)
+	return backupCount(c.nginxBackupDir, filepath.Base(c.nginxConfPath), count)
 }
 
-func backupCount(dir, want string) error {
+// backupCount counts the backups of one file in dir, named as HandFile.Backup
+// names them: the file's own base name, a stamp, and .bak.
+func backupCount(dir, base, want string) error {
 	n, err := strconv.Atoi(want)
 	if err != nil {
 		return err
@@ -276,8 +302,81 @@ func backupCount(dir, want string) error {
 		}
 		return err
 	}
-	if len(entries) != n {
-		return fmt.Errorf("%s holds %d backup(s), want %d", dir, len(entries), n)
+	found := 0
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), base+".") {
+			found++
+		}
+	}
+	if found != n {
+		return fmt.Errorf("%s holds %d backup(s) of %s, want %d", dir, found, base, n)
+	}
+	return nil
+}
+
+func (c *posternServeContext) anEnvFileThatSays(text *godog.DocString) error {
+	return os.WriteFile(c.envPath, []byte(c.expand(text.Content)+"\n"), 0o644)
+}
+
+func (c *posternServeContext) servingFailsNamingTheMayorsKey() error {
+	if c.err == nil {
+		return fmt.Errorf("serving succeeded; wanted it refused for want of the Mayor's key")
+	}
+	if !strings.Contains(c.err.Error(), "Mayor's") {
+		return fmt.Errorf("serving failed with %q, not naming the Mayor's key", c.err)
+	}
+	return nil
+}
+
+func (c *posternServeContext) theEnvFileSays(text *godog.DocString) error {
+	want := c.expand(text.Content)
+	got, err := os.ReadFile(c.envPath)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(string(got)) != strings.TrimSpace(want) {
+		return fmt.Errorf("the environment file says:\n%s\nnot:\n%s", got, want)
+	}
+	return nil
+}
+
+func (c *posternServeContext) thereIsNoEnvFile() error {
+	if _, err := os.Stat(c.envPath); !os.IsNotExist(err) {
+		return fmt.Errorf("wanted no environment file at %s", c.envPath)
+	}
+	return nil
+}
+
+func (c *posternServeContext) theViewDirectoryExists() error {
+	dir := filepath.Dir(c.lastServeReq.ViewPath)
+	info, err := os.Stat(dir)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", dir)
+	}
+	return nil
+}
+
+func (c *posternServeContext) thereIsNoViewDirectory() error {
+	if dir := filepath.Dir(c.lastServeReq.ViewPath); dirExists(dir) {
+		return fmt.Errorf("wanted no view directory at %s", dir)
+	}
+	return nil
+}
+
+func dirExists(dir string) bool {
+	_, err := os.Stat(dir)
+	return err == nil
+}
+
+func (c *posternServeContext) theServeReportShowsTheEnvLine(line string) error {
+	if !c.serveReport.DryRun {
+		return fmt.Errorf("the report is not a --dry-run report")
+	}
+	if !strings.Contains(c.serveReport.EnvNewText, line) || !strings.Contains(c.serveReport.String(), line) {
+		return fmt.Errorf("the report does not show %s:\n%s", line, c.serveReport.String())
 	}
 	return nil
 }
