@@ -35,6 +35,7 @@ func newPosternCmd() *cobra.Command {
 	root.AddCommand(newPosternInboxCmd())
 	root.AddCommand(newPosternSendCmd())
 	root.AddCommand(newPosternSnapshotCmd())
+	root.AddCommand(newPosternViewCmd())
 	root.AddCommand(newPosternServeCmd())
 	root.AddCommand(newPosternNginxCmd())
 	return root

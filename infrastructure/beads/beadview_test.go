@@ -118,3 +118,27 @@ func TestSetStoryPriorityAndHoldStoryAreOneBdUpdateEach(t *testing.T) {
 		t.Errorf("expected bd update t-1 --status deferred, got %q", lines[1])
 	}
 }
+
+// NotesWithPrefix reads every note in one bd kv list; a bd that prints
+// nothing lists no notes rather than failing the read.
+func TestNotesWithPrefixIsOneListAndReadsNothingPrintedAsNoNotes(t *testing.T) {
+	gateway, log := leaseStandIn(t, map[string]string{
+		"list": `{"host.vps.last_sync": "2026-09-28T11:00:00Z", "postern.question.t-1": "{}", "schema_version": 3}`,
+	})
+	found, err := gateway.NotesWithPrefix(context.Background(), "host.")
+	if err != nil {
+		t.Fatalf("listing the notes: %v", err)
+	}
+	if len(found) != 1 || found["host.vps.last_sync"] != "2026-09-28T11:00:00Z" {
+		t.Fatalf("expected only the host note, got %v", found)
+	}
+	asked, _ := os.ReadFile(log)
+	if !strings.Contains(string(asked), "kv list --json") {
+		t.Fatalf("expected one bd kv list --json, got %q", asked)
+	}
+
+	silent, _ := recorder(t)
+	if found, err := silent.NotesWithPrefix(context.Background(), ""); err != nil || len(found) != 0 {
+		t.Fatalf("expected no notes and no error from a bd that printed nothing, got %v: %v", found, err)
+	}
+}
