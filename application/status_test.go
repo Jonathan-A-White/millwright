@@ -211,13 +211,13 @@ func TestStatusShowsThisHostsBeadsSize(t *testing.T) {
 // past the budget, mw status says so without a Clerk running du.
 func TestStatusWarnsPastTheBeadsBudget(t *testing.T) {
 	tracker := aTrackerPathedToVPS(t)
-	tracker.SetSize(1_500_000_000)
+	tracker.SetSize(2_000_000_000)
 
 	report := otherHostStatus(t, tracker)
 	if report.BeadsBytes <= report.BeadsBudgetBytes {
 		t.Fatalf("expected the size to be past the budget, got %d/%d", report.BeadsBytes, report.BeadsBudgetBytes)
 	}
-	want := "BEADS 1.5GB: past the 1.0GB budget"
+	want := "BEADS 2.0GB: past the 1.5GB budget"
 	if !strings.Contains(report.String(), want) {
 		t.Fatalf("expected %q, got:\n%s", want, report.String())
 	}

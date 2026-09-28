@@ -38,8 +38,9 @@ const DefaultRigMemoryBytes = 8000
 // DefaultBeadsBudgetBytes is how large a host's own beads database — .beads
 // in full, its auto-commit history and auto-backups included, since both
 // have run away in the past — may grow before mw status warns it is past
-// budget, when nothing says otherwise.
-const DefaultBeadsBudgetBytes = 1_000_000_000
+// budget, when nothing says otherwise. It is 1.5 GB until the factory's home
+// moves to the desktop, plans/0021; revisit then.
+const DefaultBeadsBudgetBytes = 1_500_000_000
 
 // RepathHint is what a person does about work stranded on a sleeping host: it
 // is re-pathed, by hand, to a host that is awake. mw status only ever says

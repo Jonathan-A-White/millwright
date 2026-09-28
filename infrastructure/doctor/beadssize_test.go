@@ -95,6 +95,12 @@ func TestBeadsSizeProbeReadsTheDefaultBudgetWhenNoneIsSet(t *testing.T) {
 	}
 }
 
+func TestDefaultBeadsBudgetIsOneAndAHalfGigabytes(t *testing.T) {
+	if application.DefaultBeadsBudgetBytes != 1_500_000_000 {
+		t.Fatalf("expected the default beads budget to be 1.5 GB, got %d", application.DefaultBeadsBudgetBytes)
+	}
+}
+
 func TestBeadsSizeDamperIsZeroWaitCapOne(t *testing.T) {
 	check := doctor.NewBeadsSize("")
 	wait, capPerEpisode := check.Damper()
