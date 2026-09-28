@@ -36,6 +36,7 @@ type posternSendContext struct {
 
 	governorKey string
 	floatSats   int64
+	channel     string
 	now         func() time.Time
 
 	txid string
@@ -70,6 +71,14 @@ func InitializePosternSendScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the postern backend will report the txid "([^"]*)"$`, c.thePosternBackendWillReportTheTxid)
 	ctx.Given(`^the clock reads (\d+) for sending$`, c.theClockReadsForSending)
 	ctx.Given(`^the bead "([^"]*)" exists$`, c.theBeadExists)
+	ctx.Given(`^the postern channel is "([^"]*)"$`, c.thePosternChannelIs)
+	ctx.Given(`^a file "([^"]*)" to attach$`, c.aFileToAttach)
+	ctx.Given(`^a file "([^"]*)" of (\d+) MiB to attach$`, c.aFileOfMiBToAttach)
+	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" attaching "([^"]*)" is run$`, c.mwPosternSendAttachingIsRun)
+	ctx.Then(`^bead "([^"]*)" is commented "([^"]*)"$`, c.beadIsCommented)
+	ctx.Then(`^the record was delivered directly, and nothing was broadcast$`, c.theRecordWasDeliveredDirectly)
+	ctx.Then(`^the delivered message announces the uploaded "([^"]*)" file, captioned "([^"]*)"$`, c.theDeliveredMessageAnnouncesTheUpload)
+	ctx.Then(`^it is refused, and nothing was uploaded or sent$`, c.itIsRefusedAndNothingWasSent)
 
 	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" is run$`, c.mwPosternSendIsRun)
 	ctx.When(`^mw postern send "([^"]*)" is run with no --class$`, c.mwPosternSendIsRunWithNoClass)
@@ -163,8 +172,84 @@ func (c *posternSendContext) send() application.PosternSend {
 		Notes:       c.tracker,
 		GovernorKey: c.governorKey,
 		FloatSats:   c.floatSats,
+		Channel:     c.channel,
 		Now:         c.now,
 	}
+}
+
+func (c *posternSendContext) thePosternChannelIs(channel string) error {
+	c.channel = channel
+	return nil
+}
+
+func (c *posternSendContext) aFileToAttach(name string) error {
+	return os.WriteFile(filepath.Join(c.home, name), []byte("%PDF-1.7 a report"), 0o600)
+}
+
+func (c *posternSendContext) aFileOfMiBToAttach(name string, mib int) error {
+	return os.WriteFile(filepath.Join(c.home, name), make([]byte, mib<<20), 0o600)
+}
+
+func (c *posternSendContext) mwPosternSendAttachingIsRun(class, text, name string) error {
+	c.txid, c.err = c.send().Run(context.Background(), application.PosternSendRequest{
+		Class: class, Text: text, Attachments: []string{filepath.Join(c.home, name)},
+	})
+	return nil
+}
+
+func (c *posternSendContext) beadIsCommented(bead, want string) error {
+	comments := c.tracker.Comments(bead)
+	if len(comments) == 0 || comments[len(comments)-1] != want {
+		return fmt.Errorf("expected %s's last comment %q, got %v", bead, want, comments)
+	}
+	return nil
+}
+
+func (c *posternSendContext) theRecordWasDeliveredDirectly() error {
+	if n := len(c.backend.Delivered()); n != 1 {
+		return fmt.Errorf("expected one direct delivery, got %d", n)
+	}
+	if n := len(c.backend.Broadcasts()); n != 0 {
+		return fmt.Errorf("expected nothing broadcast, got %d", n)
+	}
+	return nil
+}
+
+func (c *posternSendContext) theDeliveredMessageAnnouncesTheUpload(mime, caption string) error {
+	delivered, uploaded := c.backend.Delivered(), c.backend.Uploaded()
+	if len(delivered) != 1 || len(uploaded) != 1 {
+		return fmt.Errorf("expected one upload and one delivery, got %d and %d", len(uploaded), len(delivered))
+	}
+	var record application.PosternPayload
+	if err := json.Unmarshal(delivered[0], &record); err != nil {
+		return err
+	}
+	privKey, err := c.keys.PrivateKeyWIF()
+	if err != nil {
+		return err
+	}
+	text, _, err := c.cipher.Decrypt(privKey, record.Ct)
+	if err != nil {
+		return err
+	}
+	var body application.PosternThreadedMessage
+	if err := json.Unmarshal([]byte(text), &body); err != nil {
+		return fmt.Errorf("the plaintext is not the threaded body: %w", err)
+	}
+	if body.Text != caption || body.Attachment == nil || body.Attachment.Mime != mime || body.Attachment.Size != int64(len(uploaded[0])) {
+		return fmt.Errorf("expected a %s attachment captioned %q, got %s", mime, caption, text)
+	}
+	return nil
+}
+
+func (c *posternSendContext) itIsRefusedAndNothingWasSent() error {
+	if c.err == nil {
+		return fmt.Errorf("expected send to be refused, but it succeeded")
+	}
+	if len(c.backend.Uploaded()) != 0 || len(c.backend.Delivered()) != 0 || len(c.backend.Broadcasts()) != 0 {
+		return fmt.Errorf("expected nothing uploaded or sent")
+	}
+	return nil
 }
 
 func (c *posternSendContext) mwPosternSendIsRun(class, text string) error {

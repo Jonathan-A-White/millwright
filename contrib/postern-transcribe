@@ -1,0 +1,83 @@
+#!/bin/sh
+# postern-transcribe — hear one of the Governor's voice notes on this host.
+#
+#   postern-transcribe <audio file>
+#
+# Prints what was said in <audio file> as plain text, one paragraph, on
+# standard output, and nothing else there; whatever goes wrong is said on
+# standard error, with a non-zero exit. mw postern inbox runs it for every
+# voice note the Governor sends (postern's docs/protocol.md section 14): set
+#
+#   postern_transcribe_cmd = "/path/to/contrib/postern-transcribe"
+#
+# in ~/.config/mw/config.toml (or MW_POSTERN_TRANSCRIBE_CMD). mw appends the
+# decrypted audio's path and gives it five minutes. Nothing leaves this host:
+# the Governor's decision 11 is that a voice note is never transcribed by a
+# third party.
+#
+# It converts the note with ffmpeg to 16 kHz mono 16-bit WAV in a temporary
+# directory, removed afterwards, and runs whisper.cpp's command line on it.
+#
+# Needs:
+#   ffmpeg        on PATH
+#   whisper-cli   whisper.cpp's command line, on PATH, or $POSTERN_WHISPER_CLI
+#   a ggml model  $POSTERN_WHISPER_MODEL, default
+#                 ~/.local/share/whisper/ggml-base.en.bin — fetch it with
+#                 whisper.cpp's models/download-ggml-model.sh base.en
+# Optional:
+#   POSTERN_WHISPER_THREADS   threads whisper-cli uses (its own default when unset)
+set -eu
+
+if [ "$#" -ne 1 ]; then
+  echo "usage: postern-transcribe <audio file>" >&2
+  exit 2
+fi
+input=$1
+case $input in
+  -*) input=./$input ;;
+esac
+if [ ! -r "$input" ]; then
+  echo "postern-transcribe: cannot read $input" >&2
+  exit 2
+fi
+
+model=${POSTERN_WHISPER_MODEL:-$HOME/.local/share/whisper/ggml-base.en.bin}
+cli=${POSTERN_WHISPER_CLI:-whisper-cli}
+if [ ! -r "$model" ]; then
+  echo "postern-transcribe: no whisper model at $model: fetch one, or set POSTERN_WHISPER_MODEL" >&2
+  exit 2
+fi
+for tool in ffmpeg "$cli"; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "postern-transcribe: $tool is not on PATH" >&2
+    exit 2
+  fi
+done
+
+work=$(mktemp -d "${TMPDIR:-/tmp}/postern-transcribe.XXXXXX")
+trap 'rm -rf "$work"' EXIT
+trap 'exit 130' INT TERM
+
+if ! ffmpeg -nostdin -hide_banner -loglevel error -y -i "$input" -ar 16000 -ac 1 -c:a pcm_s16le "$work/voice.wav" 2>"$work/ffmpeg.log"; then
+  echo "postern-transcribe: ffmpeg could not convert $input:" >&2
+  cat "$work/ffmpeg.log" >&2
+  exit 1
+fi
+
+set -- -m "$model" -f "$work/voice.wav" -nt -np -otxt -of "$work/voice"
+if [ -n "${POSTERN_WHISPER_THREADS:-}" ]; then
+  set -- "$@" -t "$POSTERN_WHISPER_THREADS"
+fi
+if ! "$cli" "$@" >/dev/null 2>"$work/whisper.log"; then
+  echo "postern-transcribe: $cli could not transcribe $input:" >&2
+  cat "$work/whisper.log" >&2
+  exit 1
+fi
+if [ ! -r "$work/voice.txt" ]; then
+  echo "postern-transcribe: $cli wrote no transcript" >&2
+  exit 1
+fi
+
+# Plain text only: every line trimmed, blank ones dropped, the rest run into
+# one paragraph.
+sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$work/voice.txt" | awk 'NF { printf "%s%s", sep, $0; sep = " " } END { if (sep != "") print "" }'

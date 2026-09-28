@@ -49,7 +49,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/slot.go` | none |
 | `Dispatcher` | `application/landing.go` | `application.Dispatch` | — |
 | `HostSync` | `application/dispatch.go` | `application.Sync` | — |
-| Postern ports (key, msg+blob, snapshot, hand) | `application/postern*.go` | `infrastructure/postern` | `apptest.Fake{Postern,Cipher,SnapshotFile,NginxRunner}` |
+| Postern ports | `application/postern*.go` | `infrastructure/postern` | `apptest.Fake{Postern,Cipher,SnapshotFile,NginxRunner,Transcriber}` |
 
 `infrastructure/config/config.go` is not a port: read by `cmd/mw/`.
 
@@ -77,8 +77,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `Doctor` | `application/doctor.go` | `mw doctor` — `cmd/mw/doctor.go` | `features/doctor.feature` |
 | `SeatBoot` | `application/seatboot.go` | none: `Dispatch`, `Next` call it | `features/seat_boot.feature` |
 | `Init` | `application/init.go` | `mw init` — `cmd/mw/init.go` | `features/init.feature` |
-| `PosternKeyInit`, `PosternKeyShow`, `PosternInbox`, `PosternSend` | `application/postern.go` | `mw postern key`/`inbox`/`send` (`--bead --recommend --option`; mails mayor; Release tap) | `features/postern_key.feature` |
-| `PosternSnapshot` | `application/posternsnapshot.go` | `mw postern snapshot` (`--json`; landed w/o `VERIFIED`) | none |
+| PosternKey*, PosternInbox (Apply), PosternSend, PosternSnapshot, PosternView, PosternBead | application/postern.go, application/posternvoice.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern key/inbox/send/snapshot/view/bead — cmd/mw/posternview.go, cmd/mw/posternbead.go | `features/postern_*.feature` |
 | `PosternServe`, `PosternNginx` | `application/posternhand.go` | `mw postern serve`/`nginx` — `cmd/mw/postern.go` | `features/postern_serve.feature` |
 
 `cmd/mw/root.go` holds the tree; `cmd/mw/main.go` runs it; `cmd/mw/version.go` is

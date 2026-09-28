@@ -77,12 +77,14 @@ const (
 	MillhandRoutineModelEnv = "MW_MILLHAND_ROUTINE_MODEL"
 	MillhandReviewModelEnv  = "MW_MILLHAND_REVIEW_MODEL"
 
-	PosternBackendEnv      = "MW_POSTERN_BACKEND"
-	PosternFloatSatsEnv    = "MW_POSTERN_FLOAT_SATS"
-	PosternGovernorKeyEnv  = "MW_POSTERN_GOVERNOR_KEY"
-	PosternKeyFileEnv      = "MW_POSTERN_KEY_FILE"
-	PosternSnapshotPathEnv = "MW_POSTERN_SNAPSHOT_PATH"
-	PosternViewPathEnv     = "MW_POSTERN_VIEW_PATH"
+	PosternBackendEnv       = "MW_POSTERN_BACKEND"
+	PosternFloatSatsEnv     = "MW_POSTERN_FLOAT_SATS"
+	PosternGovernorKeyEnv   = "MW_POSTERN_GOVERNOR_KEY"
+	PosternKeyFileEnv       = "MW_POSTERN_KEY_FILE"
+	PosternSnapshotPathEnv  = "MW_POSTERN_SNAPSHOT_PATH"
+	PosternViewPathEnv      = "MW_POSTERN_VIEW_PATH"
+	PosternChannelEnv       = "MW_POSTERN_CHANNEL"
+	PosternTranscribeCmdEnv = "MW_POSTERN_TRANSCRIBE_CMD"
 
 	BeadsSyncEnv          = "MW_BEADS_SYNC"
 	BeadsBackupMinutesEnv = "MW_BEADS_BACKUP_MINUTES"
@@ -318,6 +320,45 @@ func PosternInboxDir() (string, error) {
 		return "", fmt.Errorf("there is no home directory to write a postern attachment in: %w", err)
 	}
 	return filepath.Join(home, DefaultPosternInboxDir), nil
+}
+
+// The channels mw postern send delivers a message by: straight to the
+// postern backend (postern's docs/protocol.md §9), or in a funded testnet
+// transaction (§4). DefaultPosternChannel is direct, the Governor's
+// 2026-09-28 decision.
+const (
+	PosternChannelDirect  = "direct"
+	PosternChannelChain   = "chain"
+	DefaultPosternChannel = PosternChannelDirect
+)
+
+// PosternChannel reports how mw postern send delivers a message:
+// $MW_POSTERN_CHANNEL if it is set, otherwise the root-table
+// `postern_channel` key of ~/.config/mw/config.toml, and
+// DefaultPosternChannel when neither says. Anything but direct or chain, in
+// any case, is refused.
+func PosternChannel() (string, error) {
+	said, err := optionalSetting("postern_channel", PosternChannelEnv, DefaultPosternChannel)
+	if err != nil {
+		return "", err
+	}
+	switch channel := strings.ToLower(strings.TrimSpace(said)); channel {
+	case PosternChannelDirect, PosternChannelChain:
+		return channel, nil
+	default:
+		return "", fmt.Errorf("the postern channel is %q, which is neither %s nor %s: set %s=<channel>, or `postern_channel = \"<channel>\"` in %s",
+			said, PosternChannelDirect, PosternChannelChain, PosternChannelEnv, File)
+	}
+}
+
+// PosternTranscribeCmd reports the command mw postern inbox transcribes a
+// Governor's voice note with, on this host and never a third party's
+// (postern's docs/protocol.md §14): $MW_POSTERN_TRANSCRIBE_CMD if it is set,
+// otherwise the root-table `postern_transcribe_cmd` key of
+// ~/.config/mw/config.toml, split on whitespace with the audio file's path
+// appended. Empty when neither says, and then no voice note is transcribed.
+func PosternTranscribeCmd() (string, error) {
+	return optionalSetting("postern_transcribe_cmd", PosternTranscribeCmdEnv, "")
 }
 
 // What `mw dispatch` does when its sync cannot resolve a name, which is what a

@@ -240,3 +240,109 @@ func TestStaleClaimsFindsOnlyClaimsWhoseLeaseRanOut(t *testing.T) {
 		t.Fatalf("expected a claim with no lease never to be stale, got %v", apptest.IDs(stale))
 	}
 }
+
+// ShowBeads reads stories and epics alike, in the order asked, leaving out an
+// id the fake does not hold, the way bd show skips one it does not know: a
+// root epic, a child epic and a story each come back as one bead.
+func TestShowBeadsReadsStoriesAndEpicsAndSkipsTheUnknown(t *testing.T) {
+	f := trackerWithOneStory(t)
+	f.DescribeEpic("mw-gq6", "Walking skeleton", apptest.StatusInProgress, 1)
+	f.AddChildEpic("mw-gq6", "mw-gq6.9", "A child epic")
+	ctx := context.Background()
+
+	found, err := f.ShowBeads(ctx, []string{"mw-gq6.3", "mw-nope", "mw-gq6", "mw-gq6.9"})
+	if err != nil {
+		t.Fatalf("showing the beads: %v", err)
+	}
+	if got := apptest.IDs(found); len(got) != 3 || got[0] != "mw-gq6.3" || got[1] != "mw-gq6" || got[2] != "mw-gq6.9" {
+		t.Fatalf("expected mw-gq6.3, mw-gq6, mw-gq6.9 in that order, got %v", got)
+	}
+	if found[0].IsEpic || found[0].EpicID != "mw-gq6" {
+		t.Errorf("expected mw-gq6.3 to be a story under mw-gq6, got %+v", found[0])
+	}
+	root := found[1]
+	if !root.IsEpic || root.Story.Title != "Walking skeleton" || root.Status != apptest.StatusInProgress || root.Priority != 1 || root.EpicID != "" {
+		t.Errorf("expected the root epic as described, with no parent, got %+v", root)
+	}
+	if !found[2].IsEpic || found[2].EpicID != "mw-gq6" {
+		t.Errorf("expected the child epic filed under mw-gq6, got %+v", found[2])
+	}
+}
+
+// ShowBeads narrows a bead's Needs to what is unfinished, as bd show's
+// whole linked beads let it.
+func TestShowBeadsNarrowsNeedsToTheUnfinished(t *testing.T) {
+	f := trackerWithOneStory(t)
+	f.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "Done"})
+	f.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.2", Title: "Not yet"})
+	if err := f.SetStatus("mw-gq6.1", apptest.StatusClosed); err != nil {
+		t.Fatal(err)
+	}
+	f.Needs("mw-gq6.3", "mw-gq6.1", "mw-gq6.2")
+
+	found, err := f.ShowBeads(context.Background(), []string{"mw-gq6.3"})
+	if err != nil {
+		t.Fatalf("showing: %v", err)
+	}
+	if len(found) != 1 || len(found[0].Needs) != 1 || found[0].Needs[0] != "mw-gq6.2" {
+		t.Fatalf("expected mw-gq6.3 to wait only on mw-gq6.2, got %+v", found)
+	}
+}
+
+// An epic's own bead rides along with ShowEpic: its parent, labels and
+// comment count, as a listing of its parent's children would report it.
+func TestShowEpicCarriesTheEpicsOwnBead(t *testing.T) {
+	f := trackerWithOneStory(t)
+	f.AddChildEpic("mw-gq6", "mw-gq6.9", "A child epic")
+	if err := f.SetLabels("mw-gq6.9", "wayfinder:map"); err != nil {
+		t.Fatal(err)
+	}
+	f.AddEpicComment("mw-gq6", "a word on the root")
+
+	root, err := f.ShowEpic(context.Background(), "mw-gq6")
+	if err != nil {
+		t.Fatalf("showing the root: %v", err)
+	}
+	if root.Bead.Story.ID != "mw-gq6" || !root.Bead.IsEpic || root.Bead.EpicID != "" || root.Bead.CommentCount != 1 {
+		t.Errorf("expected the root's own bead, with one comment and no parent, got %+v", root.Bead)
+	}
+	child, err := f.ShowEpic(context.Background(), "mw-gq6.9")
+	if err != nil {
+		t.Fatalf("showing the child: %v", err)
+	}
+	if child.Bead.EpicID != "mw-gq6" || len(child.Bead.Labels) != 1 || child.Bead.Labels[0] != "wayfinder:map" {
+		t.Errorf("expected the child epic's parent and label, got %+v", child.Bead)
+	}
+}
+
+func TestSetStoryPriorityAndHoldStoryWriteTheStory(t *testing.T) {
+	f := trackerWithOneStory(t)
+	ctx := context.Background()
+
+	if err := f.SetStoryPriority(ctx, "mw-gq6.3", 0); err != nil {
+		t.Fatalf("setting the priority: %v", err)
+	}
+	if err := f.HoldStory(ctx, "mw-gq6.3"); err != nil {
+		t.Fatalf("holding: %v", err)
+	}
+	detail, err := f.ShowStory(ctx, "mw-gq6.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Priority != 0 || detail.Status != apptest.StatusDeferred {
+		t.Fatalf("expected priority 0 and held, got priority %d, status %s", detail.Priority, detail.Status)
+	}
+	if err := f.SetStoryPriority(ctx, "mw-gq6", 4); err != nil {
+		t.Fatalf("setting the epic's priority: %v", err)
+	}
+	epic, err := f.ShowEpic(ctx, "mw-gq6")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if epic.Priority != 4 {
+		t.Fatalf("expected the epic at priority 4, got %d", epic.Priority)
+	}
+	if err := f.SetStoryPriority(ctx, "mw-gq6.3", 5); err == nil {
+		t.Fatal("expected priority 5 to be refused: priorities run 0 to 4")
+	}
+}

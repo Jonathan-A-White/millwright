@@ -625,8 +625,8 @@ bd reclaim mw-gq6.30                                        # or take it over fi
 `MW_MILLHAND_ROUTINE_MODEL`, `MW_MILLHAND_REVIEW_MODEL`,
 `MW_NUDGE_AFTER_MINUTES`, `MW_NUDGE_SYNC_STALE_MINUTES`, `MW_POSTERN_BACKEND`,
 `MW_POSTERN_FLOAT_SATS`, `MW_POSTERN_GOVERNOR_KEY`, `MW_POSTERN_KEY_FILE`,
-`MW_POSTERN_SNAPSHOT_PATH`, `MW_POSTERN_VIEW_PATH`, `MW_BEADS_SYNC` and
-`MW_BEADS_BACKUP_MINUTES` ahead of it:
+`MW_POSTERN_SNAPSHOT_PATH`, `MW_POSTERN_VIEW_PATH`, `MW_POSTERN_CHANNEL`,
+`MW_POSTERN_TRANSCRIBE_CMD`, `MW_BEADS_SYNC` and `MW_BEADS_BACKUP_MINUTES` ahead of it:
 
 ```toml
 vault = "/root/millwright-vault"   # the one beads database and the seats
@@ -650,6 +650,8 @@ postern_governor_key = ""          # the Governor's compressed public key, as he
 postern_key_file = "~/.config/mw/postern.key"  # where the Mayor's postern key is kept, outside the vault (default shown)
 postern_snapshot_path = "~/.local/state/mw/snapshot.bin"  # where mw postern snapshot writes the encrypted snapshot (default shown)
 postern_view_path = "~/.local/state/postern/view.b64"  # the live view mw postern view writes and the postern backend serves (default shown)
+postern_channel = "direct"         # how mw postern send delivers: direct to the backend, or chain, a funded transaction (default direct)
+postern_transcribe_cmd = ""        # what hears the Governor's voice notes, the audio's path appended, e.g. contrib/postern-transcribe (default empty: none are heard)
 beads_sync = "remote"              # remote (a copy of its own), backup (holds the one database) or shared (reaches another host's) (default remote)
 beads_backup_minutes = 30          # on a backup host, how long between two backups of the one database (default 30)
 
@@ -798,6 +800,62 @@ message's txid and an extension by its mime (`.png`, `.jpg` or `.webp`). `mw
 postern inbox` prints the caption and the file's path; a bead comment naming
 it ends with " [image: <path>]". A download or decrypt failure prints the
 error and still records the text.
+
+`mw postern send` delivers by `postern_channel`: `direct`, the default, hands
+the record straight to the postern backend (postern's docs/protocol.md §9),
+its txid `direct:<sha256>`, with no coins, no float cap and no broadcast;
+`chain` is the funded transaction above. A message sent in a bead's thread
+(`--thread`) is commented on that bead too, `MAYOR via postern, txid <id>:
+<text>`, so the whole exchange lives on the bead. `--attach <file>`
+(repeatable) encrypts a file to the Governor, uploads it to the backend's blob
+store and announces it in the message (§8, §14): at most 8 MiB, its type read
+from its extension (images, `.webm .ogg .m4a .mp3` voice, `.pdf`, `.txt`);
+several files are several messages, the caption on the last. See
+`features/postern_send.feature`.
+
+The Governor's one-tap actions (§13: `release` a held story or an epic's held
+stories, `hold` an open unclaimed story, set a `priority` 0 to 4, mark a story
+`verified`) go straight to beads at zero tokens: the backend's on-message hook
+runs `mw postern inbox --apply`, which applies every verified message from
+`postern_governor_key` since the cursor — actions, replies, comments in a
+bead's thread, voice notes — at most once per txid (a
+`postern.applied.<txid>` note), comments what it did on the bead (`RELEASED by
+the Governor via postern, txid …`, `VERIFIED by the Governor via postern
+(<txid>)`) and mails the Mayor. It moves no cursor and prints no message's
+text. The Mayor's own `mw postern inbox` then shows an applied message as one
+line, `applied <kind> <bead> txid <id>`, and never applies it twice; an action
+this host does not know is left as text, and one it cannot apply (a hold on a
+claimed story, say) is refused and the Mayor told why. BRC-78 has no replay
+protection, so an action is applied only when the backend vouched for the
+record's signer (the key that delivered it, or signed its transaction);
+otherwise it too is left as text. See
+`features/postern_inbox_apply.feature`.
+
+A voice note — a Governor's message whose attachment is audio — is heard on
+this host, never by a third party (§14): with `postern_transcribe_cmd` set,
+the decrypted audio's path is appended to it and it is given five minutes;
+what it prints is the transcript, written on the bead as `GOVERNOR (voice) via
+postern, txid …: <transcript>` (or printed, for a topic thread), sent back to
+the Governor in the same thread as a `role: "transcript"` message, and mailed
+to the Mayor. `contrib/postern-transcribe` is the command to set it to: it
+converts the note with ffmpeg to 16 kHz mono WAV in a temporary directory and
+runs whisper.cpp's `whisper-cli` on it, printing plain text only; the model is
+`$POSTERN_WHISPER_MODEL`, by default `~/.local/share/whisper/ggml-base.en.bin`.
+
+`mw postern view` writes the live view the Governor's app shows (§11): every
+live epic, every bead under one at any depth (a closed one only within the
+week; the rest counted in its epic's `done_earlier`), every live bead's parent
+chain, and the needs waiting on the Governor — an open question, a live epic
+with held stories, a story landed in the last day without `VERIFIED`, an open
+`demo` or `hitl` bead, a story out of attempts, a host with work pathed to it
+unsynced for 20 minutes — most blocking first, then oldest. It gzips the JSON,
+seals it with BRC-78 to `postern_governor_key` and writes it base64,
+atomically, to `postern_view_path`, for the backend's `GET /api/view`. It
+costs one bd call per live epic and a handful besides, so it can run every
+half minute; `--json` prints the plaintext. `mw postern bead <id>` prints one
+bead in full (§12), sealed the same way, for the backend's
+`GET /api/beads/{id}` (`POSTERN_BEAD_CMD`); an unknown bead leaves with status
+3. See `features/postern_view.feature` and `features/postern_bead.feature`.
 
 `mw postern snapshot` writes the brief of every live epic (open or in
 progress) as postern's docs/protocol.md §7 JSON: each epic's children still

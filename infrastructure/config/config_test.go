@@ -49,6 +49,8 @@ func writeConfig(t *testing.T, contents string) string {
 	t.Setenv("MW_BEADS_BACKUP_MINUTES", "")
 	t.Setenv("BEADS_DOLT_SERVER_HOST", "")
 	t.Setenv("BEADS_DOLT_SERVER_PORT", "")
+	t.Setenv("MW_POSTERN_CHANNEL", "")
+	t.Setenv("MW_POSTERN_TRANSCRIBE_CMD", "")
 	return home
 }
 
@@ -1136,7 +1138,7 @@ func TestPosternViewPathIsUnderHomeUntilAHostSaysOtherwise(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading the postern view path: %v", err)
 	}
-	if want := filepath.Join(home, ".local", "state", "postern", "view.b64"); path != want {
+	if want := filepath.Join(home, ".local", "state", "postern", "view.b64"); path != want || path != filepath.Join(home, config.DefaultPosternViewPath) {
 		t.Fatalf("expected %q, got %q", want, path)
 	}
 
@@ -1146,8 +1148,61 @@ func TestPosternViewPathIsUnderHomeUntilAHostSaysOtherwise(t *testing.T) {
 	}
 
 	t.Setenv(config.PosternViewPathEnv, "")
+	writeConfig(t, "postern_view_path = \"/srv/postern/view.b64\"\n")
+	if path, err = config.PosternViewPath(); err != nil || path != "/srv/postern/view.b64" {
+		t.Fatalf("expected the file's postern_view_path, got %q: %v", path, err)
+	}
+
 	writeConfig(t, "postern_view_path = \"relative/view.b64\"\n")
 	if _, err := config.PosternViewPath(); err == nil || !strings.Contains(err.Error(), "full path") {
 		t.Fatalf("expected a relative postern_view_path to be refused, got %v", err)
+	}
+}
+
+func TestPosternChannelIsDirectUntilAHostSaysChain(t *testing.T) {
+	writeConfig(t, vpsConfig)
+
+	channel, err := config.PosternChannel()
+	if err != nil {
+		t.Fatalf("reading the postern channel: %v", err)
+	}
+	if channel != "direct" || config.DefaultPosternChannel != "direct" {
+		t.Fatalf("expected the direct channel by default, got %q", channel)
+	}
+
+	t.Setenv(config.PosternChannelEnv, "chain")
+	if channel, err = config.PosternChannel(); err != nil || channel != "chain" {
+		t.Fatalf("expected %s to win with chain, got %q: %v", config.PosternChannelEnv, channel, err)
+	}
+
+	t.Setenv(config.PosternChannelEnv, "")
+	writeConfig(t, "postern_channel = \"Chain\"\n")
+	if channel, err = config.PosternChannel(); err != nil || channel != "chain" {
+		t.Fatalf("expected the file's postern_channel read as chain, got %q: %v", channel, err)
+	}
+
+	writeConfig(t, "postern_channel = \"pigeon\"\n")
+	if _, err := config.PosternChannel(); err == nil || !strings.Contains(err.Error(), "pigeon") {
+		t.Fatalf("expected an unknown postern_channel to be refused, naming it, got %v", err)
+	}
+}
+
+func TestPosternTranscribeCmdIsEmptyUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, vpsConfig)
+
+	cmd, err := config.PosternTranscribeCmd()
+	if err != nil || cmd != "" {
+		t.Fatalf("expected no transcriber by default, got %q: %v", cmd, err)
+	}
+
+	t.Setenv(config.PosternTranscribeCmdEnv, "/usr/local/bin/postern-transcribe")
+	if cmd, err = config.PosternTranscribeCmd(); err != nil || cmd != "/usr/local/bin/postern-transcribe" {
+		t.Fatalf("expected %s to win, got %q: %v", config.PosternTranscribeCmdEnv, cmd, err)
+	}
+
+	t.Setenv(config.PosternTranscribeCmdEnv, "")
+	writeConfig(t, "postern_transcribe_cmd = \"postern-transcribe --quiet\"\n")
+	if cmd, err = config.PosternTranscribeCmd(); err != nil || cmd != "postern-transcribe --quiet" {
+		t.Fatalf("expected the file's postern_transcribe_cmd, got %q: %v", cmd, err)
 	}
 }

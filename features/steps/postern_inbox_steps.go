@@ -40,6 +40,7 @@ type posternInboxContext struct {
 	out         *bytes.Buffer
 	governorKey string
 	attachDir   string
+	transcriber *apptest.FakeTranscriber
 
 	// attachImage and attachTxid are what the last "carrying a screenshot"
 	// step built, so a later Then step can compute the path mw postern
@@ -110,6 +111,18 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a postern message from "([^"]*)" on topic "([^"]*)" with text "([^"]*)" and txid "([^"]*)"$`,
 		c.aPosternMessageFromOnTopic)
 
+	ctx.Given(`^a postern action "([^"]*)" on bead "([^"]*)" from "([^"]*)" with txid "([^"]*)"$`, c.aPosternActionOnBeadFrom)
+	ctx.Given(`^a postern priority (\d+) action on bead "([^"]*)" from the Governor with txid "([^"]*)"$`, c.aPosternPriorityActionFromTheGovernor)
+	ctx.Given(`^bead "([^"]*)" is claimed by "([^"]*)"$`, c.beadIsClaimedBy)
+	ctx.When(`^mw postern inbox --apply is run$`, c.mwPosternInboxApplyIsRun)
+	ctx.Given(`^the postern inbox hears voice notes as "([^"]*)"$`, c.thePosternInboxHearsVoiceNotesAs)
+	ctx.Given(`^a postern voice note from "([^"]*)" threaded on bead "([^"]*)" with txid "([^"]*)"$`, c.aPosternVoiceNoteThreadedOnBead)
+	ctx.Then(`^the transcript "([^"]*)" was sent back to the Governor in bead "([^"]*)"'s thread, re "([^"]*)"$`, c.theTranscriptWasSentBack)
+	ctx.Then(`^bead "([^"]*)" now stands "([^"]*)"$`, c.beadNowStands)
+	ctx.Then(`^bead "([^"]*)" now has priority (\d+)$`, c.beadNowHasPriority)
+	ctx.Then(`^bead "([^"]*)"'s last comment reads "([^"]*)"$`, c.beadsLastCommentReads)
+	ctx.Then(`^the txid "([^"]*)" is marked applied$`, c.theTxidIsMarkedApplied)
+	ctx.Then(`^the postern inbox cursor has not moved$`, c.thePosternInboxCursorHasNotMoved)
 	ctx.When(`^mw postern inbox is run$`, c.mwPosternInboxIsRun)
 	ctx.When(`^mw postern inbox --unread-count is run$`, c.mwPosternInboxUnreadCountIsRun)
 
@@ -513,7 +526,7 @@ func (c *posternInboxContext) aPlainTextRecordAddressedToThisKey(text string) er
 }
 
 func (c *posternInboxContext) inbox() application.PosternInbox {
-	return application.PosternInbox{
+	inbox := application.PosternInbox{
 		Postern:       c.backend,
 		Cipher:        c.cipher,
 		Keys:          c.keys,
@@ -524,6 +537,74 @@ func (c *posternInboxContext) inbox() application.PosternInbox {
 		AttachmentDir: c.attachDir,
 		Out:           c.out,
 	}
+	if c.transcriber != nil {
+		inbox.Transcriber = c.transcriber
+		inbox.Sender = &application.PosternSend{
+			Postern: c.backend, Cipher: c.cipher, Keys: c.keys, GovernorKey: c.governorKey,
+		}
+	}
+	return inbox
+}
+
+func (c *posternInboxContext) thePosternInboxHearsVoiceNotesAs(transcript string) error {
+	c.transcriber = &apptest.FakeTranscriber{Transcript: transcript}
+	return nil
+}
+
+// aPosternVoiceNoteThreadedOnBead adds a record whose plaintext carries an
+// audio attachment in bead's thread, the audio encrypted to this key and
+// stored in the fake backend's blob store under its sha256.
+func (c *posternInboxContext) aPosternVoiceNoteThreadedOnBead(from, bead, txid string) error {
+	c.cipher.From = from
+	sealed, err := c.cipher.EncryptBytes(c.pubKey, []byte("OggS a voice"))
+	if err != nil {
+		return err
+	}
+	raw, err := base64.StdEncoding.DecodeString(sealed)
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256(raw)
+	hash := hex.EncodeToString(sum[:])
+	c.backend.SetBlob(hash, raw)
+	body, err := json.Marshal(application.PosternThreadedMessage{
+		Thread:     application.PosternThread{Bead: bead},
+		Attachment: &application.PosternAttachment{Hash: hash, Size: int64(len(raw)), Mime: "audio/ogg"},
+	})
+	if err != nil {
+		return err
+	}
+	ciphertext, err := c.cipher.Encrypt(c.pubKey, string(body))
+	if err != nil {
+		return err
+	}
+	c.backend.AddRecord(application.PosternRecord{
+		Txid: txid, Class: "message", From: from, To: c.pubKey, Ts: posternReplyStamp, Ciphertext: ciphertext,
+	})
+	return nil
+}
+
+func (c *posternInboxContext) theTranscriptWasSentBack(transcript, bead, re string) error {
+	delivered := c.backend.Delivered()
+	if len(delivered) != 1 {
+		return fmt.Errorf("expected one message sent back, got %d", len(delivered))
+	}
+	var payload application.PosternPayload
+	if err := json.Unmarshal(delivered[0], &payload); err != nil {
+		return err
+	}
+	text, _, err := c.cipher.Decrypt("governor", payload.Ct)
+	if err != nil {
+		return err
+	}
+	var body application.PosternThreadedMessage
+	if err := json.Unmarshal([]byte(text), &body); err != nil {
+		return err
+	}
+	if body.Text != transcript || body.Thread.Bead != bead || body.Re != re || body.Role != application.PosternRoleTranscript {
+		return fmt.Errorf("expected the transcript %q in %s's thread re %s, got %s", transcript, bead, re, text)
+	}
+	return nil
 }
 
 func (c *posternInboxContext) mwPosternInboxIsRun() error {
@@ -802,6 +883,99 @@ func (c *posternInboxContext) beadsLastCommentNamesTheDecryptedImagesPath(bead s
 	got := comments[len(comments)-1].Text
 	if !strings.HasSuffix(got, want) {
 		return fmt.Errorf("expected the comment on %s to end with %q, got %q", bead, want, got)
+	}
+	return nil
+}
+
+// aPosternActionOnBeadFrom adds a record whose plaintext is postern's
+// docs/protocol.md section 13 action, genuinely sent by from.
+func (c *posternInboxContext) aPosternActionOnBeadFrom(action, bead, from, txid string) error {
+	return c.addAction(from, txid, map[string]any{"action": action, "bead": bead})
+}
+
+func (c *posternInboxContext) aPosternPriorityActionFromTheGovernor(priority int, bead, txid string) error {
+	return c.addAction(c.governorKey, txid, map[string]any{"action": "priority", "bead": bead, "priority": priority})
+}
+
+func (c *posternInboxContext) addAction(from, txid string, action map[string]any) error {
+	text, err := json.Marshal(action)
+	if err != nil {
+		return err
+	}
+	c.cipher.From = from
+	ciphertext, err := c.cipher.Encrypt(c.pubKey, string(text))
+	if err != nil {
+		return err
+	}
+	c.backend.AddRecord(application.PosternRecord{
+		Txid: txid, Class: "message", From: from, To: c.pubKey, Signer: from, Ts: posternReplyStamp, Ciphertext: ciphertext,
+	})
+	return nil
+}
+
+func (c *posternInboxContext) beadIsClaimedBy(bead, holder string) error {
+	return c.memory.ClaimAs(bead, holder, posternReplyStamp.Add(time.Hour))
+}
+
+func (c *posternInboxContext) mwPosternInboxApplyIsRun() error {
+	_, c.err = c.inbox().Apply(context.Background())
+	return nil
+}
+
+func (c *posternInboxContext) beadNowStands(bead, status string) error {
+	if err := c.itSucceeds(); err != nil {
+		return err
+	}
+	detail, err := c.memory.ShowStory(context.Background(), bead)
+	if err != nil {
+		return err
+	}
+	if detail.Status != status {
+		return fmt.Errorf("expected %s to stand %s, got %s", bead, status, detail.Status)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) beadNowHasPriority(bead string, priority int) error {
+	detail, err := c.memory.ShowStory(context.Background(), bead)
+	if err != nil {
+		return err
+	}
+	if detail.Priority != priority {
+		return fmt.Errorf("expected %s at priority %d, got %d", bead, priority, detail.Priority)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) beadsLastCommentReads(bead, want string) error {
+	comments, err := c.memory.StoryComments(context.Background(), bead)
+	if err != nil {
+		return err
+	}
+	if len(comments) == 0 || comments[len(comments)-1].Text != want {
+		return fmt.Errorf("expected %s's last comment %q, got %+v", bead, want, comments)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) theTxidIsMarkedApplied(txid string) error {
+	note, err := c.memory.Note(context.Background(), application.PosternAppliedKey(txid))
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(note, "applied ") {
+		return fmt.Errorf("expected %s marked applied, got %q", txid, note)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) thePosternInboxCursorHasNotMoved() error {
+	saved, err := c.memory.Note(context.Background(), application.PosternCursorKey)
+	if err != nil {
+		return err
+	}
+	if saved != "" {
+		return fmt.Errorf("expected the cursor not to move, it reads %q", saved)
 	}
 	return nil
 }
