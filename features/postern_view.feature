@@ -32,3 +32,9 @@ Feature: mw postern view
     When the live view is run and written
     Then the written view opens, from gzip, to a v 2 view holding "mw-v.1"
     And the view read no comments of "mw-v.1" or "mw-v.2"
+
+  Scenario: A hands need carries its steps, each with the hash his approval binds and how it ran
+    Given the view's bead "mw-v.1" has the hands step "linger" on "desktop" as "root" running "loginctl enable-linger jwhite"
+    And the view's hands step "linger" on "mw-v.1" ran with exit 0
+    When the live view is built
+    Then the view's hands need on "mw-v.1" carries the step "linger" with its sha256, run with exit 0

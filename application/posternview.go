@@ -86,6 +86,17 @@ type PosternViewNeed struct {
 	Recommended string   `json:"recommended"`
 	Options     []string `json:"options"`
 	Blocks      int      `json:"blocks"`
+	// Steps are a hands need's steps (§17), absent on any other need.
+	Steps []PosternViewHandsStep `json:"steps,omitempty"`
+}
+
+// PosternViewHandsStep is one hands step as a hands need carries it: the
+// step, the sha256 of its canonical bytes that his approval binds, and —
+// once it has run — how.
+type PosternViewHandsStep struct {
+	domain.HandsStep
+	SHA256 string    `json:"sha256"`
+	Ran    *HandsRan `json:"ran,omitempty"`
 }
 
 // PosternViewPath is a bead's merged Path as §11 writes it: every field, empty
@@ -586,7 +597,9 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 			needs = append(needs, b.need(PosternNeedDemo, e, since, viewSummary(d.Description)))
 		}
 		if hasLabel(d.Labels, LabelHitl) {
-			needs = append(needs, b.need(PosternNeedHands, e, since, viewSummary(d.Description)))
+			need := b.need(PosternNeedHands, e, since, viewSummary(d.Description))
+			need.Steps = viewHandsSteps(id, notes)
+			needs = append(needs, need)
 		}
 		if !d.IsEpic && d.Exhausted {
 			needs = append(needs, b.need(PosternNeedAlarm, e, firstKnown(d.Updated, d.Created),
@@ -750,6 +763,25 @@ func viewBeadOf(e *viewEntry) PosternViewBead {
 		Path: e.path, Attempts: d.Attempts, Summary: viewSummary(d.Description),
 		Comments: d.CommentCount, DoneEarlier: e.doneEarlier,
 	}
+}
+
+// viewHandsSteps is bead's hands steps from notes, each with its hash and
+// its last run: nil for a bead with none, or with a note that does not read
+// as steps.
+func viewHandsSteps(bead string, notes map[string]string) []PosternViewHandsStep {
+	records, err := parseHandsSteps(notes[HandsStepsKey(bead)])
+	if err != nil || len(records) == 0 {
+		return nil
+	}
+	steps := make([]PosternViewHandsStep, 0, len(records))
+	for _, record := range records {
+		step := PosternViewHandsStep{HandsStep: record.HandsStep, SHA256: domain.HandsSHA256(bead, record.HandsStep)}
+		if ran, ok := parseHandsRan(notes[HandsRanKey(bead, record.ID)]); ok {
+			step.Ran = &ran
+		}
+		steps = append(steps, step)
+	}
+	return steps
 }
 
 // workable reports whether a bead is open or in progress: neither held nor

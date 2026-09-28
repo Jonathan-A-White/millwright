@@ -583,3 +583,47 @@ func TestPosternViewAndSnapshotShareTheLandedMemory(t *testing.T) {
 		t.Fatalf("expected the snapshot to show the remembered comment, got %+v", landed)
 	}
 }
+
+// A hands need carries its bead's steps (§17): each with the sha256 his
+// approval binds and, once it has run, how — read from the notes the view
+// already reads in one go, at no further tracker call.
+func TestPosternViewHandsNeedCarriesItsStepsAndHowTheyRan(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	liveEpic(tracker, "mw-f758y", domain.Path{})
+	tracker.AddStory("mw-f758y", domain.Story{ID: "mw-f758y.8", Title: "Enable lingering"})
+	mustDo(t, tracker.SetLabels("mw-f758y.8", "hitl"))
+	linger := domain.HandsStep{ID: "linger", Host: "desktop", As: "root", Run: "loginctl enable-linger jwhite", WayBack: "loginctl disable-linger jwhite"}
+	restart := domain.HandsStep{ID: "restart", Host: "vps", As: "user", Run: "systemctl --user restart mw-dispatch"}
+	steps, _ := json.Marshal([]application.HandsStepRecord{{HandsStep: linger, AddedAt: "x"}, {HandsStep: restart, AddedAt: "y"}})
+	mustDo(t, tracker.SetNote(ctx, application.HandsStepsKey("mw-f758y.8"), string(steps)))
+	mustDo(t, tracker.SetNote(ctx, application.HandsRanKey("mw-f758y.8", "linger"), `{"at":"2026-09-28T12:03:00Z","exit":0,"host":"desktop"}`))
+
+	doc := viewDoc(t, tracker)
+
+	hands := viewNeed(t, doc, "hands", "mw-f758y.8")
+	if len(hands.Steps) != 2 {
+		t.Fatalf("expected two steps on the hands need, got %+v", hands.Steps)
+	}
+	first, second := hands.Steps[0], hands.Steps[1]
+	if first.ID != "linger" || first.Host != "desktop" || first.As != "root" || first.Run != linger.Run || first.WayBack != linger.WayBack ||
+		first.SHA256 != domain.HandsSHA256("mw-f758y.8", linger) {
+		t.Fatalf("expected the linger step with its hash, got %+v", first)
+	}
+	if first.Ran == nil || *first.Ran != (application.HandsRan{At: "2026-09-28T12:03:00Z", Exit: 0, Host: "desktop"}) {
+		t.Fatalf("expected linger's run, got %+v", first.Ran)
+	}
+	if second.Ran != nil || second.SHA256 != domain.HandsSHA256("mw-f758y.8", restart) {
+		t.Fatalf("expected restart with its hash and no run, got %+v", second)
+	}
+	raw, _ := json.Marshal(hands)
+	if !strings.Contains(string(raw), `"steps":[{"id":"linger","host":"desktop","as":"root","run":"loginctl enable-linger jwhite","way_back":"loginctl disable-linger jwhite","sha256":"`) ||
+		strings.Count(string(raw), `"ran":`) != 1 {
+		t.Fatalf("expected §17's step shape, ran only once run, got %s", raw)
+	}
+	for _, n := range doc.Needs {
+		if n.Kind != "hands" && n.Steps != nil {
+			t.Fatalf("expected steps only on a hands need, got %+v", n)
+		}
+	}
+}

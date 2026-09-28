@@ -49,6 +49,9 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" landed a month ago$`, c.theViewsBeadLandedAMonthAgo)
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" has a postern question open since two hours ago$`, c.theViewsBeadHasAQuestionOpen)
 
+	ctx.Given(`^the view's bead "([^"]*)" has the hands step "([^"]*)" on "([^"]*)" as "([^"]*)" running "([^"]*)"$`, c.theViewsBeadHasTheHandsStep)
+	ctx.Given(`^the view's hands step "([^"]*)" on "([^"]*)" ran with exit (\d+)$`, c.theViewsHandsStepRan)
+	ctx.Then(`^the view's hands need on "([^"]*)" carries the step "([^"]*)" with its sha256, run with exit (\d+)$`, c.theViewsHandsNeedCarriesTheStep)
 	ctx.When(`^the live view is built$`, c.theLiveViewIsBuilt)
 	ctx.When(`^the live view is run and written$`, c.theLiveViewIsRunAndWritten)
 
@@ -220,4 +223,39 @@ func (c *posternViewContext) theViewReadNoCommentsOf(a, b string) error {
 		}
 	}
 	return nil
+}
+
+func (c *posternViewContext) theViewsBeadHasTheHandsStep(bead, id, host, as, run string) error {
+	steps, err := json.Marshal([]application.HandsStepRecord{{HandsStep: domain.HandsStep{ID: id, Host: host, As: as, Run: run}}})
+	if err != nil {
+		return err
+	}
+	return c.tracker.SetNote(context.Background(), application.HandsStepsKey(bead), string(steps))
+}
+
+func (c *posternViewContext) theViewsHandsStepRan(id, bead string, exit int) error {
+	return c.tracker.SetNote(context.Background(), application.HandsRanKey(bead, id),
+		fmt.Sprintf(`{"at":"2026-09-28T11:50:00Z","exit":%d,"host":"desktop"}`, exit))
+}
+
+func (c *posternViewContext) theViewsHandsNeedCarriesTheStep(bead, id string, exit int) error {
+	for _, n := range c.doc.Needs {
+		if n.Kind != application.PosternNeedHands || n.Bead != bead {
+			continue
+		}
+		for _, step := range n.Steps {
+			if step.ID != id {
+				continue
+			}
+			if step.SHA256 != domain.HandsSHA256(bead, step.HandsStep) {
+				return fmt.Errorf("expected %s's sha256 over its canonical bytes, got %s", id, step.SHA256)
+			}
+			if step.Ran == nil || step.Ran.Exit != exit {
+				return fmt.Errorf("expected %s run with exit %d, got %+v", id, exit, step.Ran)
+			}
+			return nil
+		}
+		return fmt.Errorf("the hands need on %s carries no step %s: %+v", bead, id, n.Steps)
+	}
+	return fmt.Errorf("the view has no hands need on %s", bead)
 }
