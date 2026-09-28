@@ -14,7 +14,7 @@ func main() {
 	defer stop()
 	if err := newRootCmd().ExecuteContext(ctx); err != nil {
 		// cobra has already printed the error.
-		os.Exit(exitCode(err))
+		os.Exit(exitStatus(err))
 	}
 }
 

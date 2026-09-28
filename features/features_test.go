@@ -53,6 +53,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeMailScenario(ctx)
 	steps.InitializeNextScenario(ctx)
 	steps.InitializePathScenario(ctx)
+	steps.InitializePosternBeadScenario(ctx)
 	steps.InitializePosternInboxScenario(ctx)
 	steps.InitializePosternKeyScenario(ctx)
 	steps.InitializePosternSendScenario(ctx)
