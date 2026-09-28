@@ -212,21 +212,23 @@ func newPosternInboxCmd() *cobra.Command {
 }
 
 // newPosternSendCmd builds `mw postern send`, encrypting from the postern key
-// to postern_governor_key and broadcasting through the postern backend at
-// postern_backend.
+// to postern_governor_key and sending through the postern backend at
+// postern_backend, by postern_channel.
 func newPosternSendCmd() *cobra.Command {
 	var class, bead, recommend, thread, topic string
-	var options []string
+	var options, attach []string
 
 	cmd := &cobra.Command{
-		Use:   "send <text>",
+		Use:   "send [<text>]",
 		Short: "Send a message to the Governor over the postern",
-		Long: "send builds a message record, classed --class (default message), signs a transaction\n" +
-			"spending the postern key's own testnet balance to carry it, and broadcasts it, printing\n" +
-			"the txid.\n\n" +
-			"It refuses when postern_governor_key is not set, when the key's balance would exceed\n" +
-			"postern_float_sats, naming the excess, or when --class is not one of message,\n" +
-			"decision-needed, landing or alarm.\n\n" +
+		Long: "send builds a message record, classed --class (default message), and sends it by\n" +
+			"postern_channel, printing the txid. The direct channel (the default) hands the record\n" +
+			"straight to the postern backend (postern's docs/protocol.md section 9), whose txid is\n" +
+			"direct:<sha256>; the chain channel signs a transaction spending the postern key's own\n" +
+			"testnet balance to carry it, and broadcasts it.\n\n" +
+			"It refuses when postern_governor_key is not set, when --class is not one of message,\n" +
+			"decision-needed, landing or alarm, or — on the chain channel only — when the key's\n" +
+			"balance would exceed postern_float_sats, naming the excess.\n\n" +
 			"--bead, --recommend and --option (repeatable) ask a decision-needed question about a\n" +
 			"bead: <text> becomes the question, and postern's docs/protocol.md section 6 question is\n" +
 			"sent in its place. Once broadcast, the bead is commented QUESTION with the txid and\n" +
@@ -235,9 +237,22 @@ func newPosternSendCmd() *cobra.Command {
 			"--thread <bead-id> or --topic <name> wraps <text> in postern's docs/protocol.md section\n" +
 			"6 thread envelope, so mw postern inbox prints it under that bead or topic rather than the\n" +
 			"general thread. They are mutually exclusive, and refused alongside --bead: a decision-needed\n" +
-			"question's own bead is already its thread.",
-		Args: cobra.ExactArgs(1),
+			"question's own bead is already its thread. Once sent, a message in a bead's thread is\n" +
+			"commented on that bead too: MAYOR via postern, txid <id>: <text>.\n\n" +
+			"--attach <file> (repeatable) encrypts the file to the Governor, uploads it to the\n" +
+			"backend's blob store and announces it in the message (sections 8 and 14): at most 8 MiB,\n" +
+			"typed by its extension — .png .jpg .jpeg .webp .webm .ogg .oga .opus .m4a .mp4 .mp3\n" +
+			".pdf .txt .md .log. Several files are several messages, <text> the caption on the last.\n" +
+			"Refused with --bead. <text> may be left out when a file is attached.",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			text := ""
+			if len(args) == 1 {
+				text = args[0]
+			}
+			if len(args) == 0 && len(attach) == 0 {
+				return fmt.Errorf("mw postern send: what should it say? give the text, or --attach a file")
+			}
 			keys, err := posternKeys()
 			if err != nil {
 				return err
@@ -247,6 +262,10 @@ func newPosternSendCmd() *cobra.Command {
 				return err
 			}
 			floatSats, err := config.PosternFloatSats()
+			if err != nil {
+				return err
+			}
+			channel, err := config.PosternChannel()
 			if err != nil {
 				return err
 			}
@@ -266,16 +285,18 @@ func newPosternSendCmd() *cobra.Command {
 				Notes:       gateway,
 				GovernorKey: governorKey,
 				FloatSats:   int64(floatSats),
+				Channel:     channel,
 				Now:         posternClock,
 				Out:         cmd.OutOrStdout(),
 			}
 			_, err = send.Run(cmd.Context(), application.PosternSendRequest{
-				Class: class, Text: args[0], Bead: bead, Recommend: recommend, Options: options,
-				Thread: thread, Topic: topic,
+				Class: class, Text: text, Bead: bead, Recommend: recommend, Options: options,
+				Thread: thread, Topic: topic, Attachments: attach,
 			})
 			return err
 		},
 	}
+	cmd.Flags().StringArrayVar(&attach, "attach", nil, "a file to send with the message, encrypted to the Governor (repeatable)")
 	cmd.Flags().StringVar(&class, "class", "", "the message's class: message, decision-needed, landing or alarm (default message)")
 	cmd.Flags().StringVar(&bead, "bead", "", "the bead a decision-needed question is about")
 	cmd.Flags().StringVar(&recommend, "recommend", "", "the option a decision-needed question recommends")

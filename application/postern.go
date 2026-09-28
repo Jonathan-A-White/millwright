@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -278,11 +279,34 @@ type PosternThread struct {
 
 // PosternThreadedMessage is the plaintext a message carries when it names an
 // explicit thread, an attachment, or both, rather than plain text: postern's
-// docs/protocol.md sections 6 (Threads) and 8 (Attachments).
+// docs/protocol.md sections 6 (Threads), 8 (Attachments) and 14 (re and
+// role).
 type PosternThreadedMessage struct {
 	Thread     PosternThread      `json:"thread"`
 	Text       string             `json:"text"`
 	Attachment *PosternAttachment `json:"attachment,omitempty"`
+	// Re is the txid of the message this one answers or annotates; Role
+	// says what Text is (PosternRoleTranscript). Both are section 14's, and
+	// empty on any other message.
+	Re   string `json:"re,omitempty"`
+	Role string `json:"role,omitempty"`
+}
+
+// MarshalJSON writes the message in the field order postern's own
+// TypeScript writes it, leaving thread out altogether for the general
+// thread: the app reads an empty thread object as no threaded body at all.
+func (m PosternThreadedMessage) MarshalJSON() ([]byte, error) {
+	var thread *PosternThread
+	if strings.TrimSpace(m.Thread.Bead) != "" || strings.TrimSpace(m.Thread.Topic) != "" {
+		thread = &m.Thread
+	}
+	return json.Marshal(struct {
+		Thread     *PosternThread     `json:"thread,omitempty"`
+		Text       string             `json:"text"`
+		Attachment *PosternAttachment `json:"attachment,omitempty"`
+		Re         string             `json:"re,omitempty"`
+		Role       string             `json:"role,omitempty"`
+	}{thread, m.Text, m.Attachment, m.Re, m.Role})
 }
 
 // PosternAttachment is a message's optional attachment, postern's
@@ -305,7 +329,7 @@ func decodePosternThreadedMessage(text string) (PosternThreadedMessage, bool) {
 	if err := json.Unmarshal([]byte(text), &wrapped); err != nil {
 		return PosternThreadedMessage{}, false
 	}
-	if strings.TrimSpace(wrapped.Thread.Bead) == "" && strings.TrimSpace(wrapped.Thread.Topic) == "" && wrapped.Attachment == nil {
+	if strings.TrimSpace(wrapped.Thread.Bead) == "" && strings.TrimSpace(wrapped.Thread.Topic) == "" && wrapped.Attachment == nil && wrapped.Role == "" {
 		return PosternThreadedMessage{}, false
 	}
 	return wrapped, true
@@ -927,11 +951,56 @@ type PosternSendRequest struct {
 	// thread envelope, naming the bead this message belongs to — distinct
 	// from Bead, which only asks a question. Refused together with Topic,
 	// and together with a request that asks a question, whose own bead is
-	// already its thread.
+	// already its thread. Once sent, the bead is commented with what the
+	// Mayor said (the Governor's 2026-09-28 decision: the exchange is
+	// written to the bead), unless Role says the text is not the Mayor's
+	// own.
 	Thread string
 	// Topic, set, wraps Text in the same envelope, naming a topic thread
 	// rather than a bead. Refused together with Thread.
 	Topic string
+
+	// Attachments are files to send with the message, postern's
+	// docs/protocol.md sections 8 and 14: each is encrypted to the
+	// Governor, uploaded to the backend's blob store and announced in a
+	// message of its own, the caption (Text) on the last. Each must be at
+	// most PosternAttachmentLimit bytes, of a type PosternAttachmentMimes
+	// names by its extension. Refused with a question.
+	Attachments []string
+
+	// Re and Role are section 14's annotations: the txid of the message
+	// this one answers or annotates, and what the text is —
+	// PosternRoleTranscript for what this host heard in a voice note.
+	Re   string
+	Role string
+}
+
+// PosternRoleTranscript is the role of a message whose text is what the
+// Mayor's host heard in the voice note its re names: postern's
+// docs/protocol.md section 14.
+const PosternRoleTranscript = "transcript"
+
+// The channels a message is sent by: straight to the postern backend
+// (postern's docs/protocol.md section 9, the default since the Governor's
+// 2026-09-28 decision), or in a funded testnet transaction (section 4).
+const (
+	PosternChannelDirect = "direct"
+	PosternChannelChain  = "chain"
+)
+
+// PosternAttachmentLimit is the most bytes a file sent with a message may
+// hold: postern's docs/protocol.md sections 8 and 14, 8 MiB — the backend
+// refuses a ciphertext over it plus the envelope's own overhead.
+const PosternAttachmentLimit = 8 << 20
+
+// PosternAttachmentMimes names the type of each file extension mw postern
+// send attaches, from the types postern's docs/protocol.md section 14 lists;
+// any other extension is refused.
+var PosternAttachmentMimes = map[string]string{
+	".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
+	".webm": "audio/webm", ".ogg": "audio/ogg", ".oga": "audio/ogg", ".opus": "audio/ogg",
+	".m4a": "audio/mp4", ".mp4": "audio/mp4", ".mp3": "audio/mpeg",
+	".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/plain", ".log": "text/plain",
 }
 
 // asksQuestion reports whether this request asks a question of a bead, rather
@@ -943,10 +1012,17 @@ func (r PosternSendRequest) setsThread() bool {
 	return strings.TrimSpace(r.Thread) != "" || strings.TrimSpace(r.Topic) != ""
 }
 
+// commentsThread reports whether, once sent, this request is written to the
+// bead its thread names: the Mayor's own words are; a transcript is not.
+func (r PosternSendRequest) commentsThread() bool {
+	return strings.TrimSpace(r.Thread) != "" && r.Role != PosternRoleTranscript
+}
+
 // validate reports why this request cannot be sent, before anything is spent
 // or broadcast: --bead, --recommend and --option are only for class
 // decision-needed; --thread and --topic are mutually exclusive, and refused
-// together with a question, whose own bead is already its thread.
+// together with a question, whose own bead is already its thread; so is an
+// attachment, which a question's shape cannot carry.
 func (r PosternSendRequest) validate() error {
 	askedFor := strings.TrimSpace(r.Bead) != "" || strings.TrimSpace(r.Recommend) != "" || len(r.Options) > 0
 	if askedFor && r.Class != "decision-needed" {
@@ -958,23 +1034,74 @@ func (r PosternSendRequest) validate() error {
 	if r.asksQuestion() && r.setsThread() {
 		return fmt.Errorf("mw postern send: --thread and --topic are refused with a decision-needed question: its own bead is already the thread")
 	}
+	if r.asksQuestion() && len(r.Attachments) > 0 {
+		return fmt.Errorf("mw postern send: --attach is refused with a decision-needed question: a question carries no attachment")
+	}
 	return nil
 }
 
-// PosternSend builds a message record, signs a transaction spending this
-// key's own testnet balance to carry it, and broadcasts it. It refuses when
-// there is no governor key configured to send to, when the key's balance
-// exceeds the float cap mw enforces on every send, or when the class is not
-// one mw knows. Asked to send a question (PosternSendRequest.Bead set), it
-// also comments the bead once the broadcast succeeds and marks it open with a
-// note, so that mw postern inbox knows to look for a reply.
+// posternFile is one file read for sending: its path, its bytes and the mime
+// its extension names.
+type posternFile struct {
+	path string
+	data []byte
+	mime string
+}
+
+// readPosternFiles reads every file req attaches, refusing the lot before
+// anything is sent when one cannot be: missing, too large, or of a type
+// section 14 does not list.
+func readPosternFiles(paths []string) ([]posternFile, error) {
+	files := make([]posternFile, 0, len(paths))
+	for _, path := range paths {
+		mime, ok := PosternAttachmentMimes[strings.ToLower(filepath.Ext(path))]
+		if !ok {
+			return nil, fmt.Errorf("mw postern send: %s is not a type postern carries: attach one of %s", path, strings.Join(posternAttachmentExtensions(), " "))
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, fmt.Errorf("mw postern send: %w", err)
+		}
+		if info.Size() > PosternAttachmentLimit {
+			return nil, fmt.Errorf("mw postern send: %s is %d bytes, over the %d bytes (8 MiB) an attachment may be", path, info.Size(), PosternAttachmentLimit)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("mw postern send: %w", err)
+		}
+		files = append(files, posternFile{path: path, data: data, mime: mime})
+	}
+	return files, nil
+}
+
+// posternAttachmentExtensions is every extension PosternAttachmentMimes
+// names, sorted, for a refusal a person reads.
+func posternAttachmentExtensions() []string {
+	exts := make([]string, 0, len(PosternAttachmentMimes))
+	for ext := range PosternAttachmentMimes {
+		exts = append(exts, ext)
+	}
+	sort.Strings(exts)
+	return exts
+}
+
+// PosternSend sends a message to the Governor: by the direct channel (the
+// default, postern's docs/protocol.md section 9), the record payload handed
+// straight to the backend; or by the chain (section 4), a transaction
+// spending this key's own testnet balance, signed and broadcast. It refuses
+// when there is no governor key configured to send to, when the class is not
+// one mw knows, and — on the chain only — when the key's balance exceeds the
+// float cap. Asked to send a question (PosternSendRequest.Bead set), it
+// also comments the bead once the message is sent and marks it open with a
+// note, so that mw postern inbox knows to look for a reply; a message in a
+// bead's thread is commented on that bead too.
 type PosternSend struct {
 	Postern Postern
 	Cipher  Cipher
 	Keys    PosternKeyFile
 
-	// Tracker comments the bead a question is asked about. Required only for
-	// a request that asks one.
+	// Tracker comments the bead a question is asked about, or a message is
+	// threaded on. Required only for a request that does either.
 	Tracker WorkTracker
 	// Notes marks a question's bead open, under PosternQuestionKey. Required
 	// only for a request that asks one.
@@ -983,21 +1110,26 @@ type PosternSend struct {
 	// GovernorKey is who a message is sent to: the Governor's compressed
 	// public key, hex — config postern_governor_key. Empty refuses.
 	GovernorKey string
-	// FloatSats is the balance cap mw enforces before every send — config
-	// postern_float_sats.
+	// FloatSats is the balance cap mw enforces before every send on the
+	// chain — config postern_float_sats.
 	FloatSats int64
+	// Channel is how a message travels — config postern_channel:
+	// PosternChannelDirect, or PosternChannelChain. Empty is direct.
+	Channel string
 
 	// Now is the clock a sent message is stamped with. The zero value reads
 	// the real one.
 	Now func() time.Time
 
-	// Out is where the txid is printed. A nil Out prints nothing.
+	// Out is where each txid is printed, one a line. A nil Out prints
+	// nothing.
 	Out io.Writer
 }
 
-// Run sends req, and reports the txid it was broadcast under.
+// Run sends req, and reports the txid of the message carrying its text: the
+// last, when several files make several messages.
 func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, error) {
-	if err := s.wired(req.asksQuestion()); err != nil {
+	if err := s.wired(req.asksQuestion(), req.commentsThread()); err != nil {
 		return "", err
 	}
 	if strings.TrimSpace(req.Class) == "" {
@@ -1012,50 +1144,144 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 	if !validPosternClass(req.Class) {
 		return "", fmt.Errorf("mw postern send: %q is not a class postern knows: %s", req.Class, strings.Join(PosternClasses, ", "))
 	}
+	channel, err := s.channel()
+	if err != nil {
+		return "", err
+	}
+	if channel == PosternChannelChain && len(req.Attachments) > 1 {
+		return "", fmt.Errorf("mw postern send: several files are several transactions, which would spend the same coins on the chain: attach one at a time, or send by the direct channel")
+	}
+	files, err := readPosternFiles(req.Attachments)
+	if err != nil {
+		return "", err
+	}
 	from, address, err := s.Keys.PublicKey()
 	if err != nil {
 		return "", err
 	}
-	balance, err := s.Postern.Balance(ctx, address)
-	if err != nil {
-		return "", err
+	if channel == PosternChannelChain {
+		balance, err := s.Postern.Balance(ctx, address)
+		if err != nil {
+			return "", err
+		}
+		if balance > s.FloatSats {
+			return "", fmt.Errorf(
+				"mw postern send: the postern key's balance is %d satoshis, over the float cap of %d by %d: it refuses to send until the balance is back under the cap",
+				balance, s.FloatSats, balance-s.FloatSats)
+		}
 	}
-	if balance > s.FloatSats {
-		return "", fmt.Errorf(
-			"mw postern send: the postern key's balance is %d satoshis, over the float cap of %d by %d: it refuses to send until the balance is back under the cap",
-			balance, s.FloatSats, balance-s.FloatSats)
+
+	// Every file is uploaded before any message is sent, so a failed upload
+	// sends nothing.
+	attachments := make([]*PosternAttachment, 0, len(files))
+	for _, file := range files {
+		attachment, err := s.upload(ctx, file)
+		if err != nil {
+			return "", err
+		}
+		attachments = append(attachments, attachment)
 	}
-	text := req.Text
+
+	var txid string
+	if len(attachments) == 0 {
+		text, err := req.plaintext(req.Text, nil)
+		if err != nil {
+			return "", err
+		}
+		if txid, err = s.sendOne(ctx, channel, req.Class, from, address, text); err != nil {
+			return "", err
+		}
+	}
+	for i, attachment := range attachments {
+		caption := ""
+		if i == len(attachments)-1 {
+			caption = req.Text
+		}
+		text, err := req.plaintext(caption, attachment)
+		if err != nil {
+			return "", err
+		}
+		if txid, err = s.sendOne(ctx, channel, req.Class, from, address, text); err != nil {
+			return "", err
+		}
+		if i < len(attachments)-1 {
+			s.printf("%s\n", txid)
+		}
+	}
+
+	if req.asksQuestion() {
+		if err := s.recordQuestion(ctx, req, txid); err != nil {
+			return "", err
+		}
+	}
+	s.printf("%s\n", txid)
+	if req.commentsThread() {
+		if err := s.recordThreadMessage(ctx, req, txid, files); err != nil {
+			return txid, fmt.Errorf("mw postern send: sent as %s, but %w", txid, err)
+		}
+	}
+	return txid, nil
+}
+
+// plaintext is what a message of this request carries, before it is
+// encrypted: a question's section 6 shape; the threaded body (sections 6, 8
+// and 14) when it names a thread, carries an attachment or annotates
+// another message; or text, bare, otherwise.
+func (r PosternSendRequest) plaintext(text string, attachment *PosternAttachment) (string, error) {
+	var body any
 	switch {
-	case req.asksQuestion():
-		question, err := json.Marshal(PosternQuestion{Bead: req.Bead, Q: req.Text, Rec: req.Recommend, Options: req.Options})
-		if err != nil {
-			return "", fmt.Errorf("building the question: %w", err)
+	case r.asksQuestion():
+		body = PosternQuestion{Bead: r.Bead, Q: text, Rec: r.Recommend, Options: r.Options}
+	case r.setsThread() || attachment != nil || r.Re != "" || r.Role != "":
+		body = PosternThreadedMessage{
+			Thread: PosternThread{Bead: strings.TrimSpace(r.Thread), Topic: strings.TrimSpace(r.Topic)},
+			Text:   text, Attachment: attachment, Re: r.Re, Role: r.Role,
 		}
-		text = string(question)
-	case strings.TrimSpace(req.Thread) != "":
-		wrapped, err := json.Marshal(PosternThreadedMessage{Thread: PosternThread{Bead: req.Thread}, Text: req.Text})
-		if err != nil {
-			return "", fmt.Errorf("building the threaded message: %w", err)
-		}
-		text = string(wrapped)
-	case strings.TrimSpace(req.Topic) != "":
-		wrapped, err := json.Marshal(PosternThreadedMessage{Thread: PosternThread{Topic: req.Topic}, Text: req.Text})
-		if err != nil {
-			return "", fmt.Errorf("building the threaded message: %w", err)
-		}
-		text = string(wrapped)
+	default:
+		return text, nil
 	}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("building the message's plaintext: %w", err)
+	}
+	return string(encoded), nil
+}
+
+// upload encrypts file's bytes to the Governor, as a message's text is
+// encrypted, and uploads the ciphertext to the backend's blob store,
+// reporting the attachment that announces it.
+func (s PosternSend) upload(ctx context.Context, file posternFile) (*PosternAttachment, error) {
+	sealed, err := s.Cipher.EncryptBytes(s.GovernorKey, file.data)
+	if err != nil {
+		return nil, fmt.Errorf("encrypting %s: %w", file.path, err)
+	}
+	raw, err := base64.StdEncoding.DecodeString(sealed)
+	if err != nil {
+		return nil, fmt.Errorf("encrypting %s: the ciphertext is not base64: %w", file.path, err)
+	}
+	hash, size, err := s.Postern.UploadBlob(ctx, raw)
+	if err != nil {
+		return nil, fmt.Errorf("uploading %s: %w", file.path, err)
+	}
+	return &PosternAttachment{Hash: hash, Size: size, Mime: file.mime}, nil
+}
+
+// sendOne encrypts text to the Governor as one message record, classed
+// class, and sends it by channel, reporting its txid.
+func (s PosternSend) sendOne(ctx context.Context, channel, class, from, address, text string) (string, error) {
 	ciphertext, err := s.Cipher.Encrypt(s.GovernorKey, text)
 	if err != nil {
 		return "", err
 	}
 	payload, err := json.Marshal(PosternPayload{
-		V: 1, Kind: PosternMessageKind, Class: req.Class,
+		V: 1, Kind: PosternMessageKind, Class: class,
 		To: s.GovernorKey, From: from, Ts: s.now().Unix(), Ct: ciphertext,
 	})
 	if err != nil {
 		return "", fmt.Errorf("building the record's payload: %w", err)
+	}
+	if channel == PosternChannelDirect {
+		return s.Postern.Deliver(ctx, payload)
 	}
 	utxos, err := s.Postern.Utxos(ctx, address)
 	if err != nil {
@@ -1065,17 +1291,39 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 	if err != nil {
 		return "", err
 	}
-	txid, err := s.Postern.Broadcast(ctx, rawtx)
-	if err != nil {
-		return "", err
+	return s.Postern.Broadcast(ctx, rawtx)
+}
+
+// channel is how this send travels: Channel, direct when empty; anything
+// else is refused.
+func (s PosternSend) channel() (string, error) {
+	switch channel := strings.ToLower(strings.TrimSpace(s.Channel)); channel {
+	case "", PosternChannelDirect:
+		return PosternChannelDirect, nil
+	case PosternChannelChain:
+		return PosternChannelChain, nil
+	default:
+		return "", fmt.Errorf("mw postern send: %q is not a channel postern knows: %s or %s", s.Channel, PosternChannelDirect, PosternChannelChain)
 	}
-	if req.asksQuestion() {
-		if err := s.recordQuestion(ctx, req, txid); err != nil {
-			return "", err
+}
+
+// recordThreadMessage comments the bead req's thread names with what the
+// Mayor said in it — "MAYOR via postern, txid <id>: <text>", naming the
+// files sent with it — so that the exchange lives on the bead as well as in
+// the thread.
+func (s PosternSend) recordThreadMessage(ctx context.Context, req PosternSendRequest, txid string, files []posternFile) error {
+	comment := fmt.Sprintf("MAYOR via postern, txid %s: %s", txid, req.Text)
+	if len(files) > 0 {
+		names := make([]string, 0, len(files))
+		for _, file := range files {
+			names = append(names, filepath.Base(file.path))
 		}
+		comment += fmt.Sprintf(" [attached: %s]", strings.Join(names, ", "))
 	}
-	s.printf("%s\n", txid)
-	return txid, nil
+	if err := s.Tracker.CommentOnStory(ctx, req.Thread, comment); err != nil {
+		return fmt.Errorf("recording it on %s: %w", req.Thread, err)
+	}
+	return nil
 }
 
 // recordQuestion comments req.Bead with the question just broadcast, and
@@ -1104,8 +1352,9 @@ func (s PosternSend) recordQuestion(ctx context.Context, req PosternSendRequest,
 
 // wired reports what mw postern send is missing before it can do anything.
 // needsRecording is true for a request that asks a question, which also
-// needs somewhere to record it before anything is spent or broadcast.
-func (s PosternSend) wired(needsRecording bool) error {
+// needs somewhere to record it before anything is spent or broadcast;
+// needsTracker for one whose thread is a bead, commented once sent.
+func (s PosternSend) wired(needsRecording, needsTracker bool) error {
 	switch {
 	case s.Postern == nil:
 		return fmt.Errorf("mw postern send: no postern backend is configured")
@@ -1117,6 +1366,8 @@ func (s PosternSend) wired(needsRecording bool) error {
 		return fmt.Errorf("mw postern send: no work tracker is configured to record the question on the bead")
 	case needsRecording && s.Notes == nil:
 		return fmt.Errorf("mw postern send: nowhere to remember that the question is open")
+	case needsTracker && s.Tracker == nil:
+		return fmt.Errorf("mw postern send: no work tracker is configured to record the message on its bead")
 	}
 	return nil
 }
