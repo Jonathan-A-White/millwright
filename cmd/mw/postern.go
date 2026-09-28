@@ -12,6 +12,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/hands"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostlock"
 	"github.com/Jonathan-A-White/millwright/infrastructure/postern"
 )
@@ -181,7 +182,13 @@ func newPosternInboxCmd() *cobra.Command {
 			"transcript. It is written on the bead (GOVERNOR (voice) via postern, txid <id>:\n" +
 			"<transcript>), sent back to the Governor in the same thread as a transcript of the note,\n" +
 			"and mailed to the Mayor — once per txid, in the --apply pass or the Mayor's read,\n" +
-			"whichever sees it first. contrib/postern-transcribe is the command this rig ships.",
+			"whichever sees it first. contrib/postern-transcribe is the command this rig ships.\n\n" +
+			"A run action (section 17) runs a hands step the Governor approved (mw hands add), once\n" +
+			"the step still hashes to what he approved, his signature verifies against\n" +
+			"postern_governor_key, the approval is under 15 minutes old and has not run before: here\n" +
+			"or over the step host's [hands_hosts] ssh prefix, as this host's user (sh -c) or as root\n" +
+			"through sudo -n hands_root_helper. How it ran, or why not, is commented on the bead, sent\n" +
+			"back to him in the bead's thread and mailed to the Mayor.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			keys, err := posternKeys()
@@ -221,7 +228,7 @@ func newPosternInboxCmd() *cobra.Command {
 				_, err = inbox.UnreadCount(cmd.Context())
 				return err
 			}
-			if err := hearVoiceNotes(&inbox, backend, keys, governorKey); err != nil {
+			if err := answerTheGovernor(&inbox, backend, keys, governorKey); err != nil {
 				return err
 			}
 			if apply {
@@ -238,15 +245,13 @@ func newPosternInboxCmd() *cobra.Command {
 	return cmd
 }
 
-// hearVoiceNotes gives inbox a transcriber, when postern_transcribe_cmd names
-// one, and a sender to hand each transcript back to the Governor by, on
-// postern_channel. With no transcriber configured it changes nothing, so a
-// read never fails for a sending setting it would not use.
-func hearVoiceNotes(inbox *application.PosternInbox, backend application.Postern, keys *postern.KeyFile, governorKey string) error {
-	command, err := config.PosternTranscribeCmd()
-	if err != nil || command == "" {
-		return err
-	}
+// answerTheGovernor gives inbox what it needs to act on the Governor's word
+// and answer him: a sender, on postern_channel, for a voice note's
+// transcript and a hands step's outcome; a transcriber, when
+// postern_transcribe_cmd names one; and the runner, verifier and
+// [hands_hosts] a hands step he approved is run by (postern's
+// docs/protocol.md §17).
+func answerTheGovernor(inbox *application.PosternInbox, backend application.Postern, keys *postern.KeyFile, governorKey string) error {
 	channel, err := config.PosternChannel()
 	if err != nil {
 		return err
@@ -255,7 +260,6 @@ func hearVoiceNotes(inbox *application.PosternInbox, backend application.Postern
 	if err != nil {
 		return err
 	}
-	inbox.Transcriber = postern.NewCommandTranscriber(command)
 	inbox.Sender = &application.PosternSend{
 		Postern:     backend,
 		Cipher:      inbox.Cipher,
@@ -265,12 +269,32 @@ func hearVoiceNotes(inbox *application.PosternInbox, backend application.Postern
 		Channel:     channel,
 		Now:         posternClock,
 	}
+	command, err := config.PosternTranscribeCmd()
+	if err != nil {
+		return err
+	}
+	if command != "" {
+		inbox.Transcriber = postern.NewCommandTranscriber(command)
+	}
+	helper, err := config.HandsRootHelper()
+	if err != nil {
+		return err
+	}
+	handsHosts, err := config.HandsHosts()
+	if err != nil {
+		return err
+	}
+	inbox.HandsRunner = hands.NewRunner(helper)
+	inbox.HandsVerifier = hands.Verifier{}
+	inbox.HandsHosts = handsHosts
+	inbox.Now = posternClock
 	return nil
 }
 
 // posternInboxLockWait is how long a pass waits for another to finish: longer
-// than the five minutes a voice note's transcription may take.
-const posternInboxLockWait = 6 * time.Minute
+// than the ten minutes a hands step may run, and the five a voice note's
+// transcription may take.
+const posternInboxLockWait = 12 * time.Minute
 
 // posternInboxLock is the lock every postern inbox read and apply pass takes
 // on this host, kept beside the attachments it writes, so that two passes
