@@ -79,6 +79,10 @@ const (
 	PosternGovernorKeyEnv  = "MW_POSTERN_GOVERNOR_KEY"
 	PosternKeyFileEnv      = "MW_POSTERN_KEY_FILE"
 	PosternSnapshotPathEnv = "MW_POSTERN_SNAPSHOT_PATH"
+
+	PosternViewPathEnv      = "MW_POSTERN_VIEW_PATH"
+	PosternChannelEnv       = "MW_POSTERN_CHANNEL"
+	PosternTranscribeCmdEnv = "MW_POSTERN_TRANSCRIBE_CMD"
 )
 
 // RigsTable is the table of the config file that says where each rig is checked
@@ -274,6 +278,72 @@ func PosternInboxDir() (string, error) {
 		return "", fmt.Errorf("there is no home directory to write a postern attachment in: %w", err)
 	}
 	return filepath.Join(home, DefaultPosternInboxDir), nil
+}
+
+// DefaultPosternViewPath is where mw postern view writes the sealed live view
+// under the home directory when nothing says otherwise: postern's
+// docs/protocol.md §11, the file the postern backend serves as GET /api/view.
+var DefaultPosternViewPath = filepath.Join(".local", "state", "postern", "view.b64")
+
+// The channels mw postern send delivers a message by: straight to the
+// postern backend (postern's docs/protocol.md §9), or in a funded testnet
+// transaction (§4). DefaultPosternChannel is direct, the Governor's
+// 2026-09-28 decision.
+const (
+	PosternChannelDirect  = "direct"
+	PosternChannelChain   = "chain"
+	DefaultPosternChannel = PosternChannelDirect
+)
+
+// PosternViewPath reports where mw postern view writes the sealed live view:
+// $MW_POSTERN_VIEW_PATH if it is set, otherwise the root-table
+// `postern_view_path` key of ~/.config/mw/config.toml, a full path either
+// way, and DefaultPosternViewPath under the home directory when neither says.
+func PosternViewPath() (string, error) {
+	said, err := optionalSetting("postern_view_path", PosternViewPathEnv, "")
+	if err != nil {
+		return "", err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("no %s is set and there is no home directory to read %s in: %w", PosternViewPathEnv, File, err)
+	}
+	if said != "" {
+		if !filepath.IsAbs(said) {
+			return "", fmt.Errorf("the postern view path is %q in %s: it must be a full path", said, filepath.Join(home, File))
+		}
+		return said, nil
+	}
+	return filepath.Join(home, DefaultPosternViewPath), nil
+}
+
+// PosternChannel reports how mw postern send delivers a message:
+// $MW_POSTERN_CHANNEL if it is set, otherwise the root-table
+// `postern_channel` key of ~/.config/mw/config.toml, and
+// DefaultPosternChannel when neither says. Anything but direct or chain, in
+// any case, is refused.
+func PosternChannel() (string, error) {
+	said, err := optionalSetting("postern_channel", PosternChannelEnv, DefaultPosternChannel)
+	if err != nil {
+		return "", err
+	}
+	switch channel := strings.ToLower(strings.TrimSpace(said)); channel {
+	case PosternChannelDirect, PosternChannelChain:
+		return channel, nil
+	default:
+		return "", fmt.Errorf("the postern channel is %q, which is neither %s nor %s: set %s=<channel>, or `postern_channel = \"<channel>\"` in %s",
+			said, PosternChannelDirect, PosternChannelChain, PosternChannelEnv, File)
+	}
+}
+
+// PosternTranscribeCmd reports the command mw postern inbox transcribes a
+// Governor's voice note with, on this host and never a third party's
+// (postern's docs/protocol.md §14): $MW_POSTERN_TRANSCRIBE_CMD if it is set,
+// otherwise the root-table `postern_transcribe_cmd` key of
+// ~/.config/mw/config.toml, split on whitespace with the audio file's path
+// appended. Empty when neither says, and then no voice note is transcribed.
+func PosternTranscribeCmd() (string, error) {
+	return optionalSetting("postern_transcribe_cmd", PosternTranscribeCmdEnv, "")
 }
 
 // What `mw dispatch` does when its sync cannot resolve a name, which is what a
