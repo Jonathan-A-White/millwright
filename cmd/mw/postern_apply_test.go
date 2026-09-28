@@ -1,9 +1,13 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,5 +92,100 @@ func TestPosternInboxApplyReleasesAHeldStoryOnTheGovernorsTap(t *testing.T) {
 	}
 	if strings.Contains(string(calls), "kv set postern.inbox.cursor") {
 		t.Errorf("expected the cursor left where it was, got:\n%s", calls)
+	}
+}
+
+// A Governor's voice note, end to end: the audio is fetched from the blob
+// store and decrypted, postern_transcribe_cmd hears it, the transcript is
+// written on the bead and delivered back to the Governor in the same thread.
+func TestPosternInboxApplyHearsAVoiceNote(t *testing.T) {
+	f := loadPosternRecordFixture(t)
+	governorKeyFile := filepath.Join(t.TempDir(), "governor.key")
+	if err := os.WriteFile(governorKeyFile, []byte(f.SenderWIF+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	governor := postern.NewCipher(postern.New(governorKeyFile))
+	audio := []byte("OggS the voice of the Governor")
+	sealed, err := governor.EncryptBytes(f.RecipientPubKey, audio)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob, _ := base64.StdEncoding.DecodeString(sealed)
+	hash := sha256Hex(blob)
+	body, _ := json.Marshal(application.PosternThreadedMessage{
+		Thread:     application.PosternThread{Bead: "mw-e.3"},
+		Attachment: &application.PosternAttachment{Hash: hash, Size: int64(len(blob)), Mime: "audio/ogg"},
+	})
+	ct, err := governor.Encrypt(f.RecipientPubKey, string(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(application.PosternPayload{V: 1, Kind: "msg", Class: "message",
+		To: f.RecipientPubKey, From: f.SenderPubKey, Ts: 1758800000, Ct: ct})
+	script, _ := postern.RecordScript(payload)
+	messages, _ := json.Marshal(map[string]any{"records": []map[string]any{{
+		"seq": 1, "txid": "direct:voice", "vout": 0, "scriptHex": hex.EncodeToString(*script), "signer": f.SenderPubKey,
+	}}})
+
+	var delivered []string
+	challenges := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		switch {
+		case r.URL.Path == "/api/challenge":
+			challenges++
+			fmt.Fprintf(w, `{"nonce":"n-%d"}`, challenges)
+		case r.URL.RequestURI() == "/api/messages?since=0":
+			w.Write(messages)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/blobs/"+hash:
+			w.Write(blob)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/messages":
+			delivered = append(delivered, string(raw))
+			w.WriteHeader(http.StatusCreated)
+			io.WriteString(w, `{"txid":"direct:back","seq":2}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			io.WriteString(w, `{"error":"no route"}`)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	posternHome(t, srv.URL, f.RecipientWIF, f.SenderPubKey)
+	log := bdRecording(t, `[{"id": "mw-e.3", "status": "open", "issue_type": "task"}]`)
+	hear := filepath.Join(t.TempDir(), "hear")
+	if err := os.WriteFile(hear, []byte("#!/bin/sh\ncase \"$(cat \"$1\")\" in *Governor*) echo '  ship it  ';; *) exit 3;; esac\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MW_POSTERN_TRANSCRIBE_CMD", hear)
+
+	out, err := runPostern(t, "inbox", "--apply")
+	if err != nil {
+		t.Fatalf("mw postern inbox --apply failed: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(out) != "applied voice mw-e.3 txid direct:voice" {
+		t.Fatalf("expected the voice note applied, got %q", out)
+	}
+	calls, _ := os.ReadFile(log)
+	if !strings.Contains(string(calls), "comment mw-e.3 GOVERNOR (voice) via postern, txid direct:voice: ship it") {
+		t.Fatalf("expected the transcript written on the bead, got:\n%s", calls)
+	}
+	if len(delivered) != 1 {
+		t.Fatalf("expected the transcript delivered back once, got %d", len(delivered))
+	}
+	var back struct {
+		ScriptHex string `json:"scriptHex"`
+	}
+	_ = json.Unmarshal([]byte(delivered[0]), &back)
+	sentPayload, ok := postern.DecodeRecordScript(back.ScriptHex)
+	if !ok {
+		t.Fatalf("expected a record script delivered, got %s", delivered[0])
+	}
+	var p application.PosternPayload
+	_ = json.Unmarshal(sentPayload, &p)
+	text, _, err := governor.Decrypt(f.SenderWIF, p.Ct)
+	if err != nil {
+		t.Fatalf("the Governor cannot read the transcript sent back: %v", err)
+	}
+	if text != `{"thread":{"bead":"mw-e.3"},"text":"ship it","re":"direct:voice","role":"transcript"}` {
+		t.Fatalf("expected section 14's transcript body, got %s", text)
 	}
 }

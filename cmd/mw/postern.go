@@ -173,7 +173,14 @@ func newPosternInboxCmd() *cobra.Command {
 			"once per txid, commented on its bead and mailed to the Mayor. It moves no cursor and\n" +
 			"prints no message's text, only one line per message applied. A plain read then shows an\n" +
 			"applied message as that one line: applied <kind> <bead> txid <id>. An action this host\n" +
-			"does not know is left for the Mayor to read as text.",
+			"does not know is left for the Mayor to read as text.\n\n" +
+			"A voice note from the Governor (an audio attachment, section 14) is heard on this host\n" +
+			"when postern_transcribe_cmd is set: the command, split on whitespace, runs with the\n" +
+			"decrypted audio's path appended, for at most 5 minutes, and what it prints is the\n" +
+			"transcript. It is written on the bead (GOVERNOR (voice) via postern, txid <id>:\n" +
+			"<transcript>), sent back to the Governor in the same thread as a transcript of the note,\n" +
+			"and mailed to the Mayor — once per txid, in the --apply pass or the Mayor's read,\n" +
+			"whichever sees it first. contrib/postern-transcribe is the command this rig ships.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			keys, err := posternKeys()
@@ -213,6 +220,9 @@ func newPosternInboxCmd() *cobra.Command {
 				_, err = inbox.UnreadCount(cmd.Context())
 				return err
 			}
+			if err := hearVoiceNotes(&inbox, backend, keys, governorKey); err != nil {
+				return err
+			}
 			if apply {
 				_, err = inbox.Apply(cmd.Context())
 				return err
@@ -225,6 +235,36 @@ func newPosternInboxCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&apply, "apply", false, "apply the Governor's replies, bead comments and actions at once, moving no cursor")
 	cmd.MarkFlagsMutuallyExclusive("unread-count", "apply")
 	return cmd
+}
+
+// hearVoiceNotes gives inbox a transcriber, when postern_transcribe_cmd names
+// one, and a sender to hand each transcript back to the Governor by, on
+// postern_channel. With no transcriber configured it changes nothing, so a
+// read never fails for a sending setting it would not use.
+func hearVoiceNotes(inbox *application.PosternInbox, backend application.Postern, keys *postern.KeyFile, governorKey string) error {
+	command, err := config.PosternTranscribeCmd()
+	if err != nil || command == "" {
+		return err
+	}
+	channel, err := config.PosternChannel()
+	if err != nil {
+		return err
+	}
+	floatSats, err := config.PosternFloatSats()
+	if err != nil {
+		return err
+	}
+	inbox.Transcriber = postern.NewCommandTranscriber(command)
+	inbox.Sender = &application.PosternSend{
+		Postern:     backend,
+		Cipher:      inbox.Cipher,
+		Keys:        keys,
+		GovernorKey: governorKey,
+		FloatSats:   int64(floatSats),
+		Channel:     channel,
+		Now:         posternClock,
+	}
+	return nil
 }
 
 // posternInboxLockWait is how long a pass waits for another to finish: longer

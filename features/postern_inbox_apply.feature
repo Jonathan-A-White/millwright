@@ -73,3 +73,12 @@ Feature: mw postern inbox --apply
     And mw postern inbox is run
     Then it printed "dance"
     And bead "mw-act.3" has no comment
+
+  Scenario: A voice note from the Governor is heard on this host, written on its bead, and sent back to him
+    Given the postern inbox hears voice notes as "ship the storage engine as planned"
+    And a postern voice note from "governor-pubkey-hex" threaded on bead "mw-act.3" with txid "direct:voice"
+    When mw postern inbox --apply is run
+    Then bead "mw-act.3"'s last comment reads "GOVERNOR (voice) via postern, txid direct:voice: ship the storage engine as planned"
+    And the transcript "ship the storage engine as planned" was sent back to the Governor in bead "mw-act.3"'s thread, re "direct:voice"
+    And mail "Voice: mw-act.3: ship the storage engine as planned" was sent to mayor
+    And the txid "direct:voice" is marked applied

@@ -470,6 +470,14 @@ type PosternInbox struct {
 	// Mayor's own read — never apply the same message together.
 	Lock HostLock
 
+	// Transcriber hears the Governor's voice notes, postern's
+	// docs/protocol.md section 14 — config postern_transcribe_cmd. Nil hears
+	// none: a voice note is then read like any message with an attachment.
+	Transcriber PosternTranscriber
+	// Sender sends what was heard in a voice note back to the Governor, in
+	// the note's own thread. Nil sends nothing back.
+	Sender *PosternSend
+
 	// Out is where a full read's messages are printed, and where UnreadCount
 	// prints the count. A nil Out prints nothing.
 	Out io.Writer

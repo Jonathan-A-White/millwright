@@ -91,7 +91,7 @@ func (a posternApplied) line() string {
 // (mw postern inbox --apply): everything indexed since the cursor that the
 // Governor verifiably sent and this host knows how to apply is applied at
 // once — a reply to a question (section 6), a comment in a bead's thread, an
-// action (section 13) — each at most once per
+// action (section 13), a voice note (section 14) — each at most once per
 // txid, marked under PosternAppliedKey, commented on its bead and mailed to
 // the Mayor. It never moves the cursor, so the Mayor's own read still sees
 // every message, and never prints what a message says: only one line per
@@ -127,7 +127,7 @@ func (i PosternInbox) Apply(ctx context.Context) ([]string, error) {
 			continue
 		}
 		var outcome, path string
-		if m.Attachment != nil && m.ThreadIsBead {
+		if m.Attachment != nil && (m.ThreadIsBead || i.isVoiceNote(m)) {
 			outcome, path = i.attachmentOutcome(ctx, m)
 		}
 		result, handled, err := i.applyOne(ctx, m, outcome, path)
@@ -189,6 +189,10 @@ func (i PosternInbox) applyOne(ctx context.Context, m PosternInboxMessage, outco
 			return posternApplied{}, false, nil
 		}
 		result, err := i.applyAction(ctx, m, action)
+		return result, err == nil, err
+	}
+	if i.isVoiceNote(m) {
+		result, err := i.applyVoice(ctx, m, outcome, path)
 		return result, err == nil, err
 	}
 	if m.ThreadIsBead {
