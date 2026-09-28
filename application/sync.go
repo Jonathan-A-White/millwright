@@ -177,6 +177,23 @@ func RecordSyncHalt(ctx context.Context, marker SyncHaltMarker, err error, now t
 	return true
 }
 
+// KeepSyncHalt keeps marker level with one whole sync: err is what it failed
+// with, and report what it said. A sync that failed is RecordSyncHalt's; one
+// that got level clears the mark, unless it got level with its backup of the
+// one database halted (report.BackupErr), which is recorded the same way a
+// failed sync's halt is — the halt is real, it only stops nothing. It reports
+// whether this was the mark's first write, the one moment worth a notice.
+func KeepSyncHalt(ctx context.Context, marker SyncHaltMarker, report SyncReport, err error, now time.Time) bool {
+	if err == nil {
+		err = report.BackupErr
+	}
+	if err != nil {
+		return RecordSyncHalt(ctx, marker, err, now)
+	}
+	ClearSyncHalt(ctx, marker)
+	return false
+}
+
 // ClearSyncHalt takes marker back out once a sync is level again. A nil
 // marker, or a clear that fails, changes nothing worth failing a run over.
 func ClearSyncHalt(ctx context.Context, marker SyncHaltMarker) {
@@ -442,10 +459,12 @@ type SyncReport struct {
 	// most syncs there: a backup is due only once every BackupInterval.
 	BackedUp bool
 
-	// BackupHalt is why a backup this sync tried did not get through, in
-	// the tracker's own plain words. Empty when none was tried, or it got
-	// through.
-	BackupHalt string
+	// BackupErr is why a backup this sync tried did not get through — a
+	// *SyncHalt carrying the tracker's own exit code, as a failed remote
+	// cycle's error would be. Nil when none was tried, or it got through. It
+	// is never the sync's own error: KeepSyncHalt is how a caller that marks
+	// halts reads it.
+	BackupErr error
 }
 
 // Quiet reports whether the sync found nothing to do: nothing to mark, nothing
@@ -491,8 +510,8 @@ func (r SyncReport) beadsPhrase() string {
 		switch {
 		case r.BackedUp:
 			return "; beads kept here, backed up"
-		case r.BackupHalt != "":
-			return "; beads kept here, backup halted: " + r.BackupHalt
+		case r.BackupErr != nil:
+			return "; beads kept here, backup halted: " + r.BackupErr.Error()
 		default:
 			return "; beads kept here, backup not due"
 		}
@@ -691,7 +710,7 @@ func (s Sync) recordLevelInTheOneDatabase(ctx context.Context, report SyncReport
 		return report, fmt.Errorf("recording when %s was last level: %w", s.Host, noteErr)
 	}
 	report.At = at
-	if report.Mode == BeadsSyncBackup && report.BackupHalt == "" {
+	if report.Mode == BeadsSyncBackup && report.BackupErr == nil {
 		report.GCed = s.maybeGC(ctx)
 	}
 	return report, nil
@@ -712,7 +731,7 @@ func (s Sync) backupIfDue(ctx context.Context, report *SyncReport) {
 	retried, err := s.syncTrackerMarking(ctx)
 	report.Retried = retried
 	if err != nil {
-		report.BackupHalt = err.Error()
+		report.BackupErr = err
 		return
 	}
 	_ = s.Tracker.ClearNote(ctx, SyncHaltKey(s.Host))

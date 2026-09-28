@@ -143,7 +143,7 @@ func TestABackupThatHaltsIsSaidButDoesNotStopTheHostThatKeepsTheOneDatabase(t *t
 	if got := note(t, tracker, application.LastBackupKey("vps")); got != "" {
 		t.Fatalf("expected no backup recorded, got %q", got)
 	}
-	if report.BackedUp || !strings.Contains(report.BackupHalt, "merge conflict") {
+	if report.BackedUp || report.BackupErr == nil || !strings.Contains(report.BackupErr.Error(), "merge conflict") {
 		t.Fatalf("expected the report to carry the halt, got %+v", report)
 	}
 	if said := report.String(); !strings.Contains(said, "backup halted") {
@@ -290,5 +290,78 @@ func TestANoteThatCannotBeWrittenStillFailsAHostThatKeepsTheOneDatabase(t *testi
 
 	if _, err := sync.Run(context.Background()); err == nil {
 		t.Fatal("expected a note that cannot be written to be a failure")
+	}
+}
+
+// backupHalting is a HostSync that gets level, with its backup of the one
+// database halted as halt says: what a sync on the desktop comes back with
+// while GitHub will not take the backup.
+type backupHalting struct{ halt error }
+
+func (b backupHalting) Run(context.Context) (application.SyncReport, error) {
+	return application.SyncReport{Host: "vps", Mode: application.BeadsSyncBackup, BackupErr: b.halt}, nil
+}
+
+func TestKeepSyncHaltRecordsAHaltedBackupAndClearsOnceOneGetsThrough(t *testing.T) {
+	ctx := context.Background()
+	marker := apptest.NewFakeSyncHaltMarker()
+	halted := application.SyncReport{Mode: application.BeadsSyncBackup, BackupErr: &application.SyncHalt{Code: 4, Said: "stuck"}}
+
+	if !application.KeepSyncHalt(ctx, marker, halted, nil, level) {
+		t.Fatal("expected the first halted backup to be the fresh one")
+	}
+	if application.KeepSyncHalt(ctx, marker, halted, nil, level.Add(time.Minute)) {
+		t.Fatal("expected a repeat not to be fresh")
+	}
+	if info, there, _ := marker.Read(ctx); !there || info.Said != "stuck" || !info.At.Equal(level) {
+		t.Fatalf("expected the first halt kept, got %+v (there=%v)", info, there)
+	}
+
+	if application.KeepSyncHalt(ctx, marker, application.SyncReport{Mode: application.BeadsSyncBackup}, nil, level) {
+		t.Fatal("expected a sync that got through not to be fresh")
+	}
+	if _, there, _ := marker.Read(ctx); there {
+		t.Fatal("expected a backup that got through to clear the mark")
+	}
+
+	if !application.KeepSyncHalt(ctx, marker, application.SyncReport{}, &application.SyncHalt{Code: 2, Said: "conflict"}, level) {
+		t.Fatal("expected a failed sync's halt recorded as RecordSyncHalt does")
+	}
+}
+
+func TestDispatchMarksAHaltedBackupRatherThanClearingTheMark(t *testing.T) {
+	ctx := context.Background()
+	dispatch, _, _, _, _ := aFactory(t)
+	marker := apptest.NewFakeSyncHaltMarker()
+	dispatch.Sync = backupHalting{halt: &application.SyncHalt{Code: 2, Said: "conflict in the working set"}}
+	dispatch.SyncHalts = marker
+
+	if _, err := dispatch.Run(ctx); err != nil {
+		t.Fatalf("expected a halted backup not to stop the dispatch, got %v", err)
+	}
+	if info, there, _ := marker.Read(ctx); !there || info.Said != "conflict in the working set" {
+		t.Fatalf("expected the halted backup marked, got %+v (there=%v)", info, there)
+	}
+}
+
+func TestATickMarksAHaltedBackupAndNotifiesOnce(t *testing.T) {
+	tick, _, marker, notifier := aTick(t)
+	tick.Sync = backupHalting{halt: &application.SyncHalt{Code: 2, Said: "conflict in the working set"}}
+
+	if _, err := tick.Run(context.Background()); err != nil {
+		t.Fatalf("expected a halted backup not to fail the tick, got %v", err)
+	}
+	if _, there, _ := marker.Read(context.Background()); !there {
+		t.Fatal("expected the halted backup marked")
+	}
+	if len(notifier.lines) != 1 {
+		t.Fatalf("expected one notice of the halted backup, got %v", notifier.lines)
+	}
+
+	if _, err := tick.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(notifier.lines) != 1 {
+		t.Fatalf("expected no second notice while the same halt holds, got %v", notifier.lines)
 	}
 }
