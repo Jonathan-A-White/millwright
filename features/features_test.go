@@ -2,6 +2,7 @@ package features
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/Jonathan-A-White/millwright/features/steps"
@@ -9,6 +10,19 @@ import (
 	"github.com/cucumber/godog"
 	"github.com/cucumber/godog/colors"
 )
+
+// TestMain clears bd's Dolt server settings before any scenario runs. A session
+// on a host whose bd runs in server mode carries them (beads.env), and the real
+// `bd init` some scenarios run would then make its throwaway database on the
+// host's shared server instead of in the scenario's temp directory.
+func TestMain(m *testing.M) {
+	for _, kv := range os.Environ() {
+		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "BEADS_DOLT_") {
+			os.Unsetenv(name)
+		}
+	}
+	os.Exit(m.Run())
+}
 
 // MW_FEATURE narrows a run to one feature file, or one scenario within it,
 // without touching `make test` (which leaves it unset and so still runs

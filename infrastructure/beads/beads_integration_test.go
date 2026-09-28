@@ -45,6 +45,13 @@ func TestMain(m *testing.M) {
 	// in: a session that carries them must not point a test at its own vault.
 	os.Unsetenv("BEADS_DIR")
 	os.Unsetenv("BEADS_DB")
+	// So do the Dolt server settings of a host whose bd runs in server mode: a
+	// bd init here would otherwise make its database on that host's server.
+	for _, kv := range os.Environ() {
+		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "BEADS_DOLT_") {
+			os.Unsetenv(name)
+		}
+	}
 
 	root, err := os.MkdirTemp("", "mw-beads-template-")
 	if err != nil {
