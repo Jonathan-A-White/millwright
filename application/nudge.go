@@ -50,11 +50,20 @@ type Nudge struct {
 	// SyncHalt is this host's own mark of a halted sync, read straight rather
 	// than through the tracker, the same as Status.SyncHalt: the one thing a
 	// halt cannot carry is word of itself, since nothing it writes is
-	// published until a later sync gets through. When it is set, the other
-	// hosts' "last synced" clauses would be read off a note this host cannot
-	// currently refresh, so they are left out in favour of the one clause
-	// naming this host's own halt. A nil SyncHalt reads as never halted.
+	// published until a later sync gets through. When it is set on a host
+	// that keeps a copy of its own (remote), the other hosts' "last synced"
+	// clauses would be read off a note this host cannot currently refresh, so
+	// they are left out in favour of the one clause naming this host's own
+	// halt; SyncMode says when they are not. A nil SyncHalt reads as never
+	// halted.
 	SyncHalt SyncHaltMarker
+
+	// SyncMode is how this host's beads are synced. On a host that reads the
+	// one database every host shares (backup, shared) another host's note of
+	// its last sync is read live, not off this host's own copy, so this
+	// host's own halt says nothing of it: the halt is named, and the other
+	// hosts' ages are kept beside it. Empty reads BeadsSyncRemote.
+	SyncMode BeadsSyncMode
 
 	// NudgeAfter is how long a claimed story may run with nothing mailed about
 	// it before it is named. Zero reads DefaultNudgeAfter.
@@ -111,6 +120,15 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 	if n.SyncHalt != nil {
 		if info, there, err := n.SyncHalt.Read(ctx); err != nil {
 			return nil, fmt.Errorf("reading whether %s's own sync is halted: %w", n.Host, err)
+		} else if there && n.SyncMode.OneDatabase() {
+			what := "own sync"
+			if n.SyncMode == BeadsSyncBackup {
+				what = "beads backup"
+			}
+			clauses = append(clauses, NudgeClause{
+				Key:  "sync:" + n.Host,
+				Text: fmt.Sprintf("%s's %s halted since %s (%s)", n.Host, what, info.At.UTC().Format(LastSyncFormat), info.Said),
+			})
 		} else if there {
 			clauses = append(clauses, NudgeClause{
 				Key: "sync:" + n.Host,

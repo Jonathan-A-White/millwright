@@ -23,7 +23,9 @@ func newNudgeCmd() *cobra.Command {
 			"and, of each, whether its last recorded sync is older than nudge_sync_stale_minutes\n" +
 			"(default 20). When this host's own sync is halted, the other hosts' ages are read off notes\n" +
 			"this host cannot currently refresh, so they are left out in favour of one clause naming\n" +
-			"this host's own halt instead. For each clause that holds, it prints one line, tab-separated:\n" +
+			"this host's own halt instead — unless beads_sync is backup or shared, where every host's note\n" +
+			"is read live out of the one database and the ages are kept beside the halt. For each clause\n" +
+			"that holds, it prints one line, tab-separated:\n" +
 			"a key a caller can damp a condition still holding by, and the clause itself. contrib/mail-notify\n" +
 			"is the only caller: it composes the clauses into the one line it types into the Mayor's\n" +
 			"window, damped to at most once a condition an hour.\n\n" +
@@ -46,6 +48,10 @@ func newNudgeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			mode, err := hostBeadsSync()
+			if err != nil {
+				return err
+			}
 
 			tracker := mwGateway(dir, host)
 			clauses, err := application.Nudge{
@@ -53,6 +59,7 @@ func newNudgeCmd() *cobra.Command {
 				Notes:      tracker,
 				Host:       host,
 				SyncHalt:   hostSyncHalt(),
+				SyncMode:   mode,
 				NudgeAfter: time.Duration(after) * time.Minute,
 				SyncStale:  time.Duration(stale) * time.Minute,
 			}.Run(cmd.Context())
