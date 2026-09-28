@@ -5,6 +5,7 @@
 
 GO ?= go
 BIN ?= bin/mw
+HANDS_ROOT_BIN ?= bin/mw-hands-root
 PKG ?= ./...
 # The build tags make test and make lint compile in. beads_integration is the
 # real-bd cases of infrastructure/beads, most of the suite's clock, which a
@@ -20,6 +21,7 @@ all: build test lint
 
 build:
 	$(GO) build -o $(BIN) ./cmd/mw
+	$(GO) build -o $(HANDS_ROOT_BIN) ./cmd/mw-hands-root
 
 test:
 	$(GO) test -tags $(TAGS) $(PKG)
