@@ -48,6 +48,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeDispatchScenario(ctx)
 	steps.InitializeDoctorScenario(ctx)
 	steps.InitializeFilePlanScenario(ctx)
+	steps.InitializeHandsScenario(ctx)
 	steps.InitializeInitScenario(ctx)
 	steps.InitializeMailBeadsScenario(ctx)
 	steps.InitializeMailScenario(ctx)
