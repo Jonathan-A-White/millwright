@@ -399,6 +399,14 @@ func (g *Gateway) SetStoryPriority(ctx context.Context, id string, priority int)
 	return err
 }
 
+// AddLabel implements application.WorkTracker: one bd update --add-label,
+// which leaves the bead's other labels alone and one it already carries as
+// it is.
+func (g *Gateway) AddLabel(ctx context.Context, id, label string) error {
+	_, err := g.call(ctx, "update", id, "--add-label", label)
+	return err
+}
+
 // HoldStory implements application.WorkTracker: the story goes back to
 // deferred, beads' own way of holding work, the status CreateStory files it
 // in.

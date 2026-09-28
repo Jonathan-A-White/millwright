@@ -346,3 +346,26 @@ func TestSetStoryPriorityAndHoldStoryWriteTheStory(t *testing.T) {
 		t.Fatal("expected priority 5 to be refused: priorities run 0 to 4")
 	}
 }
+
+func TestAddLabelPutsALabelOnOnce(t *testing.T) {
+	f := trackerWithOneStory(t)
+	ctx := context.Background()
+	if err := f.SetLabels("mw-gq6.3", "demo"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := f.AddLabel(ctx, "mw-gq6.3", "hitl"); err != nil {
+			t.Fatalf("adding the label: %v", err)
+		}
+	}
+	detail, err := f.ShowStory(ctx, "mw-gq6.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Labels) != 2 || detail.Labels[0] != "demo" || detail.Labels[1] != "hitl" {
+		t.Fatalf("expected demo and hitl, once each, got %v", detail.Labels)
+	}
+	if err := f.AddLabel(ctx, "mw-nope", "hitl"); err == nil {
+		t.Fatal("expected a bead the fake does not hold refused")
+	}
+}

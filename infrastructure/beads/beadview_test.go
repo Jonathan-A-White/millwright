@@ -142,3 +142,17 @@ func TestNotesWithPrefixIsOneListAndReadsNothingPrintedAsNoNotes(t *testing.T) {
 		t.Fatalf("expected no notes and no error from a bd that printed nothing, got %v: %v", found, err)
 	}
 }
+
+func TestAddLabelIsOneBdUpdate(t *testing.T) {
+	gateway, log := recorder(t)
+	if err := gateway.AddLabel(context.Background(), "t-1", "hitl"); err != nil {
+		t.Fatalf("adding the label: %v", err)
+	}
+	asked, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(asked)); !strings.HasSuffix(got, "update t-1 --add-label hitl") || strings.Count(got, "\n") != 0 {
+		t.Fatalf("expected one bd update t-1 --add-label hitl, got %q", got)
+	}
+}

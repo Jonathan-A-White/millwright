@@ -681,6 +681,16 @@ func (f *FakeTracker) SetStoryPriority(_ context.Context, id string, priority in
 	return f.SetPriority(id, priority)
 }
 
+// AddLabel implements application.WorkTracker, for a story the fake holds.
+func (f *FakeTracker) AddLabel(_ context.Context, id, label string) error {
+	return f.write(id, func(s *fakeStory) error {
+		if !carries(s.detail.Labels, label) {
+			s.detail.Labels = append(append([]string(nil), s.detail.Labels...), label)
+		}
+		return nil
+	})
+}
+
 // HoldStory implements application.WorkTracker.
 func (f *FakeTracker) HoldStory(_ context.Context, id string) error {
 	return f.write(id, func(s *fakeStory) error {

@@ -446,6 +446,10 @@ type WorkTracker interface {
 	// the story is open and unclaimed is the caller's to check first.
 	HoldStory(ctx context.Context, id string) error
 
+	// AddLabel puts label on a bead, leaving its other labels as they are; a
+	// bead already carrying it is left as it is.
+	AddLabel(ctx context.Context, id, label string) error
+
 	// CommentOnStory appends one comment to a story.
 	CommentOnStory(ctx context.Context, id, text string) error
 
