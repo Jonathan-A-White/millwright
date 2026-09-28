@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 )
@@ -62,5 +63,45 @@ func TestExitCodeIsBeadsOwnWhenBeadsStoppedTheSync(t *testing.T) {
 	}
 	if got := exitCode(nil); got != 0 {
 		t.Fatalf("expected nothing wrong to leave with 0, got %d", got)
+	}
+}
+
+func TestHostSyncTakesTheModeAndBackupIntervalFromConfig(t *testing.T) {
+	t.Setenv("MW_BEADS_SYNC", "")
+	t.Setenv("MW_BEADS_BACKUP_MINUTES", "")
+	mwConfig(t, "vault = \"/v\"\nhost = \"desktop\"\nbeads_sync = \"backup\"\nbeads_backup_minutes = 45\n")
+
+	sync, err := hostSync(application.Sync{Host: "desktop"})
+	if err != nil {
+		t.Fatalf("reading the sync settings: %v", err)
+	}
+	if sync.Mode != application.BeadsSyncBackup || sync.BackupInterval != 45*time.Minute {
+		t.Fatalf("expected backup every 45m, got %q every %s", sync.Mode, sync.BackupInterval)
+	}
+
+	mwConfig(t, "vault = \"/v\"\nhost = \"laptop\"\n")
+	if sync, err = hostSync(application.Sync{Host: "laptop"}); err != nil || sync.Mode != application.BeadsSyncRemote {
+		t.Fatalf("expected remote when the config says nothing, got %q: %v", sync.Mode, err)
+	}
+}
+
+func TestSyncCommandRefusesABeadsSyncModeNamingTheThree(t *testing.T) {
+	t.Setenv("MW_BEADS_SYNC", "")
+	mwConfig(t, "vault = \""+t.TempDir()+"\"\nhost = \"desktop\"\nbeads_sync = \"server\"\n")
+
+	out := &bytes.Buffer{}
+	root := newRootCmd()
+	root.SetOut(out)
+	root.SetErr(out)
+	root.SetArgs([]string{"sync"})
+
+	err := root.Execute()
+	if err == nil {
+		t.Fatal("expected mw sync to refuse beads_sync = server")
+	}
+	for _, want := range []string{"remote", "backup", "shared"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected the refusal to name %q, got %q", want, err)
+		}
 	}
 }

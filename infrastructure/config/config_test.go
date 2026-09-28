@@ -44,6 +44,11 @@ func writeConfig(t *testing.T, contents string) string {
 	t.Setenv("MW_POSTERN_GOVERNOR_KEY", "")
 	t.Setenv("MW_POSTERN_KEY_FILE", "")
 	t.Setenv("MW_POSTERN_SNAPSHOT_PATH", "")
+	t.Setenv("MW_POSTERN_VIEW_PATH", "")
+	t.Setenv("MW_BEADS_SYNC", "")
+	t.Setenv("MW_BEADS_BACKUP_MINUTES", "")
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "")
+	t.Setenv("BEADS_DOLT_SERVER_PORT", "")
 	return home
 }
 
@@ -1038,5 +1043,111 @@ func TestPosternSnapshotPathRefusesARelativePath(t *testing.T) {
 	writeConfig(t, "postern_snapshot_path = \"relative/path\"\n")
 	if _, err := config.PosternSnapshotPath(); err == nil || !strings.Contains(err.Error(), "full path") {
 		t.Fatalf("expected a relative postern_snapshot_path to be refused, got %v", err)
+	}
+}
+
+func TestBeadsSyncIsRemoteUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, vpsConfig)
+	mode, err := config.BeadsSync()
+	if err != nil || mode != config.BeadsSyncRemote {
+		t.Fatalf("expected %q by default, got %q: %v", config.BeadsSyncRemote, mode, err)
+	}
+
+	writeConfig(t, "beads_sync = \"backup\"\n")
+	if mode, err = config.BeadsSync(); err != nil || mode != config.BeadsSyncBackup {
+		t.Fatalf("expected the file's backup, got %q: %v", mode, err)
+	}
+
+	t.Setenv(config.BeadsSyncEnv, "shared")
+	if mode, err = config.BeadsSync(); err != nil || mode != config.BeadsSyncShared {
+		t.Fatalf("expected %s's shared ahead of the file, got %q: %v", config.BeadsSyncEnv, mode, err)
+	}
+}
+
+func TestBeadsSyncRefusesAnythingButItsThreeChoicesNamingThem(t *testing.T) {
+	writeConfig(t, "beads_sync = \"server\"\n")
+	_, err := config.BeadsSync()
+	if err == nil {
+		t.Fatal("expected beads_sync = server to be refused")
+	}
+	for _, want := range []string{`"server"`, "remote", "backup", "shared", "beads_sync"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected the refusal to say %q, got %q", want, err)
+		}
+	}
+}
+
+func TestBeadsBackupMinutesIsThirtyUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, vpsConfig)
+	minutes, err := config.BeadsBackupMinutes()
+	if err != nil || minutes != 30 || config.DefaultBeadsBackupMinutes != 30 {
+		t.Fatalf("expected 30 minutes by default, got %d: %v", minutes, err)
+	}
+
+	writeConfig(t, "beads_backup_minutes = 60\n")
+	if minutes, err = config.BeadsBackupMinutes(); err != nil || minutes != 60 {
+		t.Fatalf("expected the file's 60, got %d: %v", minutes, err)
+	}
+
+	t.Setenv(config.BeadsBackupMinutesEnv, "15")
+	if minutes, err = config.BeadsBackupMinutes(); err != nil || minutes != 15 {
+		t.Fatalf("expected %s's 15 ahead of the file, got %d: %v", config.BeadsBackupMinutesEnv, minutes, err)
+	}
+}
+
+func TestBeadsBackupMinutesRefusesWhatIsNotANumberOrLessThanOne(t *testing.T) {
+	for _, bad := range []struct{ file, want string }{
+		{"beads_backup_minutes = 0\n", "1 or more"},
+		{"beads_backup_minutes = often\n", "not a whole number"},
+	} {
+		writeConfig(t, bad.file)
+		if _, err := config.BeadsBackupMinutes(); err == nil || !strings.Contains(err.Error(), bad.want) {
+			t.Errorf("expected %q to be refused, saying %q, got %v", bad.file, bad.want, err)
+		}
+	}
+}
+
+func TestBeadsServerAddressIsBdsOwnHostAndPort(t *testing.T) {
+	writeConfig(t, vpsConfig)
+	if addr, err := config.BeadsServerAddress(); err != nil || addr != "" {
+		t.Fatalf("expected no address with no %s, got %q: %v", config.BeadsDoltServerHostEnv, addr, err)
+	}
+
+	t.Setenv(config.BeadsDoltServerHostEnv, "10.88.0.3")
+	if addr, err := config.BeadsServerAddress(); err != nil || addr != "10.88.0.3:"+config.DefaultBeadsDoltServerPort {
+		t.Fatalf("expected the host on bd's default port, got %q: %v", addr, err)
+	}
+
+	t.Setenv(config.BeadsDoltServerPortEnv, "3306")
+	if addr, err := config.BeadsServerAddress(); err != nil || addr != "10.88.0.3:3306" {
+		t.Fatalf("expected 10.88.0.3:3306, got %q: %v", addr, err)
+	}
+
+	t.Setenv(config.BeadsDoltServerPortEnv, "a port")
+	if _, err := config.BeadsServerAddress(); err == nil || !strings.Contains(err.Error(), config.BeadsDoltServerPortEnv) {
+		t.Fatalf("expected a port that is not a number to be refused naming %s, got %v", config.BeadsDoltServerPortEnv, err)
+	}
+}
+
+func TestPosternViewPathIsUnderHomeUntilAHostSaysOtherwise(t *testing.T) {
+	home := writeConfig(t, vpsConfig)
+
+	path, err := config.PosternViewPath()
+	if err != nil {
+		t.Fatalf("reading the postern view path: %v", err)
+	}
+	if want := filepath.Join(home, ".local", "state", "postern", "view.b64"); path != want {
+		t.Fatalf("expected %q, got %q", want, path)
+	}
+
+	t.Setenv(config.PosternViewPathEnv, "/tmp/view.b64")
+	if path, err = config.PosternViewPath(); err != nil || path != "/tmp/view.b64" {
+		t.Fatalf("expected %s to win, got %q: %v", config.PosternViewPathEnv, path, err)
+	}
+
+	t.Setenv(config.PosternViewPathEnv, "")
+	writeConfig(t, "postern_view_path = \"relative/view.b64\"\n")
+	if _, err := config.PosternViewPath(); err == nil || !strings.Contains(err.Error(), "full path") {
+		t.Fatalf("expected a relative postern_view_path to be refused, got %v", err)
 	}
 }

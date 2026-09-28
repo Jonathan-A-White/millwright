@@ -165,6 +165,10 @@ func newDispatchCmd() *cobra.Command {
 			files := mwVault(dir, host)
 			logs := hostTickLogs()
 			worktrees := rig.New()
+			sync, err := hostSync(application.Sync{Vault: files, Tracker: gateway, Host: host, Ticks: logs, Lock: hostSyncLock()})
+			if err != nil {
+				return err
+			}
 			dispatch := application.Dispatch{
 				Tracker:     gateway,
 				Worktrees:   worktrees,
@@ -173,7 +177,7 @@ func newDispatchCmd() *cobra.Command {
 				Runner:      tmux.New(),
 				Boot:        builderBoot(files, host, tests),
 				Memory:      gateway,
-				Sync:        application.Sync{Vault: files, Tracker: gateway, Host: host, Ticks: logs, Lock: hostSyncLock()},
+				Sync:        sync,
 				SyncTries:   tries,
 				SyncWait:    wait,
 				SyncHalts:   hostSyncHalt(),

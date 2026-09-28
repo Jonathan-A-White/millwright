@@ -23,6 +23,63 @@ const (
 // the VPS is host.vps.last_sync.
 func LastSyncKey(host string) string { return "host." + host + ".last_sync" }
 
+// BeadsSyncMode is how mw sync treats this host's beads database: where the
+// database lives, and so what the tracker's remote is for.
+//
+// The notes a host leaves — when it was last level, its timers' counts, a
+// halt — mean the same in every mode: "last synced N min ago" is always "that
+// host's timers last got it level N min ago". What differs is only whether
+// the note reaches the other hosts through the tracker's remote (remote) or
+// is written straight into the one database they all read (backup, shared).
+type BeadsSyncMode string
+
+const (
+	// BeadsSyncRemote is every host keeping a copy of the database and
+	// bringing it level with the others through the tracker's remote on every
+	// sync. The default, and what every host did before the factory moved to
+	// one home.
+	BeadsSyncRemote BeadsSyncMode = "remote"
+
+	// BeadsSyncBackup is this host holding the one database every other host
+	// reaches. The tracker's remote is only a backup of it: one cycle every
+	// BackupInterval, never what keeps the hosts level, and a cycle that halts
+	// is said but stops nothing.
+	BeadsSyncBackup BeadsSyncMode = "backup"
+
+	// BeadsSyncShared is this host's tracker reaching another host's database
+	// over the network, with no copy of its own: there is nothing here to
+	// push, pull or collect, and the database's own host does all three.
+	BeadsSyncShared BeadsSyncMode = "shared"
+)
+
+// ParseBeadsSyncMode reads a mode as a config file says it. "" is
+// BeadsSyncRemote; anything but the three is refused, naming them.
+func ParseBeadsSyncMode(said string) (BeadsSyncMode, error) {
+	switch mode := BeadsSyncMode(strings.TrimSpace(said)); mode {
+	case "":
+		return BeadsSyncRemote, nil
+	case BeadsSyncRemote, BeadsSyncBackup, BeadsSyncShared:
+		return mode, nil
+	default:
+		return "", fmt.Errorf("the beads sync mode %q is none of %s, %s or %s", said, BeadsSyncRemote, BeadsSyncBackup, BeadsSyncShared)
+	}
+}
+
+// OneDatabase reports whether every host reads this mode's notes straight out
+// of the one database, rather than out of a copy that is a sync behind.
+func (m BeadsSyncMode) OneDatabase() bool { return m == BeadsSyncBackup || m == BeadsSyncShared }
+
+// DefaultBackupInterval is how long the host that holds the one database
+// waits between two backups of it to the tracker's remote, when nothing says
+// otherwise. infrastructure/config.DefaultBeadsBackupMinutes is the same
+// interval, in minutes.
+const DefaultBackupInterval = 30 * time.Minute
+
+// LastBackupKey is where the host that holds the one database records when a
+// backup of it last got through to the tracker's remote. It is written only
+// once a cycle has, so a backup that halts is tried again on the next sync.
+func LastBackupKey(host string) string { return "host." + host + ".last_backup" }
+
 // LastGCKey is where a host records when it last asked the tracker to
 // reclaim the disk space its own history piles up, so that mw sync does not
 // ask more often than GCInterval. Only this host ever reads its own key: no
@@ -118,6 +175,23 @@ func RecordSyncHalt(ctx context.Context, marker SyncHaltMarker, err error, now t
 		return false
 	}
 	return true
+}
+
+// KeepSyncHalt keeps marker level with one whole sync: err is what it failed
+// with, and report what it said. A sync that failed is RecordSyncHalt's; one
+// that got level clears the mark, unless it got level with its backup of the
+// one database halted (report.BackupErr), which is recorded the same way a
+// failed sync's halt is — the halt is real, it only stops nothing. It reports
+// whether this was the mark's first write, the one moment worth a notice.
+func KeepSyncHalt(ctx context.Context, marker SyncHaltMarker, report SyncReport, err error, now time.Time) bool {
+	if err == nil {
+		err = report.BackupErr
+	}
+	if err != nil {
+		return RecordSyncHalt(ctx, marker, err, now)
+	}
+	ClearSyncHalt(ctx, marker)
+	return false
 }
 
 // ClearSyncHalt takes marker back out once a sync is level again. A nil
@@ -375,6 +449,22 @@ type SyncReport struct {
 	// on the cadence GCInterval sets. False on most syncs: it is not that
 	// nothing needed reclaiming, only that it was not this sync's turn.
 	GCed bool
+
+	// Mode is how this sync treated the beads database. Empty reads
+	// BeadsSyncRemote.
+	Mode BeadsSyncMode
+
+	// BackedUp says this sync, on the host that holds the one database, ran
+	// the tracker's remote cycle as its backup and it got through. False on
+	// most syncs there: a backup is due only once every BackupInterval.
+	BackedUp bool
+
+	// BackupErr is why a backup this sync tried did not get through — a
+	// *SyncHalt carrying the tracker's own exit code, as a failed remote
+	// cycle's error would be. Nil when none was tried, or it got through. It
+	// is never the sync's own error: KeepSyncHalt is how a caller that marks
+	// halts reads it.
+	BackupErr error
 }
 
 // Quiet reports whether the sync found nothing to do: nothing to mark, nothing
@@ -399,7 +489,7 @@ func (r SyncReport) String() string {
 			fmt.Fprintf(&b, "; marked %s as %s (commit it, so the other host is covered too)", LedgerPattern, MergeUnion)
 		}
 	}
-	b.WriteString("; beads synced")
+	b.WriteString(r.beadsPhrase())
 	if r.Retried != "" {
 		fmt.Fprintf(&b, "; %s", r.Retried)
 	}
@@ -410,6 +500,26 @@ func (r SyncReport) String() string {
 		fmt.Fprintf(&b, "; level at %s", r.At.UTC().Format(LastSyncFormat))
 	}
 	return b.String()
+}
+
+// beadsPhrase is what the one line says of the beads half, in whichever mode
+// it ran.
+func (r SyncReport) beadsPhrase() string {
+	switch r.Mode {
+	case BeadsSyncBackup:
+		switch {
+		case r.BackedUp:
+			return "; beads kept here, backed up"
+		case r.BackupErr != nil:
+			return "; beads kept here, backup halted: " + r.BackupErr.Error()
+		default:
+			return "; beads kept here, backup not due"
+		}
+	case BeadsSyncShared:
+		return "; beads kept on another host, nothing to sync"
+	default:
+		return "; beads synced"
+	}
 }
 
 // Sync brings this host level with the other one: the vault's files, then the
@@ -432,10 +542,31 @@ func (r SyncReport) String() string {
 // naming the files. That is what lets a sync run on a timer — one forgotten
 // ledger edit no longer costs the hosts every later tick — and it is still a
 // stop, so nothing that must not run on a stale vault runs after it.
+//
+// All of that is the remote mode, the default. On a host whose Mode is
+// BeadsSyncBackup or BeadsSyncShared the notes are written straight into the
+// one database every host reads, so nothing waits on a cycle to carry them
+// and a cycle that halts takes none of them back: the vault half, the note of
+// when this host was level and its timers' counts are written on every sync,
+// exactly as before. What changes is the tracker's remote. On the host that
+// holds the database it is a backup, one cycle every BackupInterval, and a
+// backup that halts is said in the report and marked like any halt but stops
+// nothing, since no host's view of the work waits on it; the GC cadence is
+// the same as ever. On a host whose tracker reaches that database over the
+// network there is no cycle and no GC at all.
 type Sync struct {
 	Vault   VaultFiles
 	Tracker TrackerSync
 	Host    string
+
+	// Mode is how this host's beads database is treated. Empty reads
+	// BeadsSyncRemote; anything but the three is refused before anything runs.
+	Mode BeadsSyncMode
+
+	// BackupInterval is how long the host that holds the one database waits
+	// between two backups of it. Zero reads DefaultBackupInterval. It is read
+	// only when Mode is BeadsSyncBackup.
+	BackupInterval time.Duration
 
 	// Ticks are the logs this host's timers keep. Every sync that gets level
 	// leaves the counts of them beside the note of when it was, as TicksKey, so
@@ -480,7 +611,11 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 	case s.Host == "":
 		return SyncReport{}, fmt.Errorf("syncing: which host is this? set MW_HOST, or host in the config file")
 	}
-	report := SyncReport{Host: s.Host}
+	mode, err := ParseBeadsSyncMode(string(s.Mode))
+	if err != nil {
+		return SyncReport{}, fmt.Errorf("syncing on %s: %w", s.Host, err)
+	}
+	report := SyncReport{Host: s.Host, Mode: mode}
 
 	// A vault holding work nobody has committed cannot be rebased onto the
 	// other host's, and committing someone else's work is not a sync's job. So
@@ -509,12 +644,21 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 	// So nothing is recorded, the beads half runs anyway, and what is in the way
 	// is handed back afterwards — with a status of its own, because nothing here
 	// is broken.
+	//
+	// On the host that holds the one database the beads half is its backup,
+	// run if it is due; on a host whose database is another's, there is none.
 	if len(report.Blocked) > 0 {
-		retried, err := s.syncTrackerMarking(ctx)
-		if err != nil {
-			return report, fmt.Errorf("syncing the beads database on %s: %w", s.Host, err)
+		switch mode {
+		case BeadsSyncBackup:
+			s.backupIfDue(ctx, &report)
+		case BeadsSyncShared:
+		default:
+			retried, err := s.syncTrackerMarking(ctx)
+			if err != nil {
+				return report, fmt.Errorf("syncing the beads database on %s: %w", s.Host, err)
+			}
+			report.Retried = retried
 		}
-		report.Retried = retried
 		return report, &VaultBlocked{Host: s.Host, Files: report.Blocked}
 	}
 
@@ -531,7 +675,93 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 		return report, err
 	}
 	defer release()
+	if mode.OneDatabase() {
+		return s.recordLevelInTheOneDatabase(ctx, report)
+	}
 	return s.syncBeadsRecordingLevel(ctx, report)
+}
+
+// recordLevelInTheOneDatabase is the beads half on a host whose notes go
+// straight into the one database every host reads: the note of when this host
+// was level and its timers' counts, written on every sync because nothing has
+// to carry them anywhere; then, on the host that holds that database, a
+// backup if one is due and a GC on its usual cadence. A backup that halts
+// takes no note back — every other host already reads this one — and stops
+// nothing; it only holds this sync's GC back, since a database whose backup
+// has just halted may be part-way through a merge.
+//
+// On a host whose database is another's nothing here can halt, so a mark or
+// note of a halt left from before is cleared: it can only be stale.
+func (s Sync) recordLevelInTheOneDatabase(ctx context.Context, report SyncReport) (SyncReport, error) {
+	at := s.now()
+	noteErr := s.Tracker.SetNote(ctx, LastSyncKey(s.Host), at.UTC().Format(LastSyncFormat))
+	if held := ReadHostTicks(ctx, s.Ticks); held.Known() {
+		_ = s.Tracker.SetNote(ctx, TicksKey(s.Host), held.Note())
+	}
+
+	if report.Mode == BeadsSyncShared {
+		ClearSyncHalt(ctx, s.SyncHalts)
+		_ = s.Tracker.ClearNote(ctx, SyncHaltKey(s.Host))
+	} else {
+		s.backupIfDue(ctx, &report)
+	}
+
+	if noteErr != nil {
+		return report, fmt.Errorf("recording when %s was last level: %w", s.Host, noteErr)
+	}
+	report.At = at
+	if report.Mode == BeadsSyncBackup && report.BackupErr == nil {
+		report.GCed = s.maybeGC(ctx)
+	}
+	return report, nil
+}
+
+// backupIfDue runs the tracker's remote cycle as a backup of the one
+// database when it has been at least BackupInterval since the last one got
+// through, and says in report what came of it. A cycle that halts is marked
+// the way any halt is — this host's own mark, and the note in the database —
+// and its words kept for the report; one that gets through clears both and
+// records when, so that the next is due BackupInterval from now. A backup
+// that fails is never a failure of the sync: nothing any host reads waits on
+// it.
+func (s Sync) backupIfDue(ctx context.Context, report *SyncReport) {
+	if !s.dueForBackup(ctx) {
+		return
+	}
+	retried, err := s.syncTrackerMarking(ctx)
+	report.Retried = retried
+	if err != nil {
+		report.BackupErr = err
+		return
+	}
+	_ = s.Tracker.ClearNote(ctx, SyncHaltKey(s.Host))
+	_ = s.Tracker.SetNote(ctx, LastBackupKey(s.Host), s.now().UTC().Format(LastSyncFormat))
+	report.BackedUp = true
+}
+
+// dueForBackup reports whether it has been at least BackupInterval since the
+// last backup of the one database got through. Never having backed up, and a
+// note that cannot be read as a time, both read as due, the same as
+// dueForGC.
+func (s Sync) dueForBackup(ctx context.Context) bool {
+	last, err := s.Tracker.Note(ctx, LastBackupKey(s.Host))
+	if err != nil || last == "" {
+		return true
+	}
+	at, err := time.Parse(LastSyncFormat, last)
+	if err != nil {
+		return true
+	}
+	return s.now().Sub(at) >= s.backupInterval()
+}
+
+// backupInterval is how long the host that holds the one database waits
+// between two backups of it.
+func (s Sync) backupInterval() time.Duration {
+	if s.BackupInterval <= 0 {
+		return DefaultBackupInterval
+	}
+	return s.BackupInterval
 }
 
 // takeLock waits for this host's sync lock, when Lock is set, and reports the

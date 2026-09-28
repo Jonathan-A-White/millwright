@@ -37,7 +37,9 @@ func newStatusCmd() *cobra.Command {
 			"none is over.\n\n" +
 			"A BEADS line says how large this host's own beads database is on disk — its auto-commit\n" +
 			"history and auto-backups included, since both have grown unbounded before — and warns once\n" +
-			"it passes 1 GB, so the Mayor sees it without asking a Clerk to run du.\n\n" +
+			"it passes 1 GB, so the Mayor sees it without asking a Clerk to run du. A BEADS SYNC line\n" +
+			"under it says how this host's beads are synced (config `beads_sync`: remote, backup or\n" +
+			"shared) and, on the host that keeps the one database, when its last backup got through.\n\n" +
 			"Every line fits a phone-width terminal, at most 60 columns. Nothing is claimed, nothing is\n" +
 			"written and no session is started: status only reads.",
 		Args: cobra.NoArgs,
@@ -59,6 +61,10 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			mode, err := hostBeadsSync()
+			if err != nil {
+				return err
+			}
 
 			tracker := mwGateway(dir, host)
 			_, err = application.Status{
@@ -71,6 +77,7 @@ func newStatusCmd() *cobra.Command {
 				Ticks:          hostTickLogs(),
 				HostSilence:    time.Duration(hours) * time.Hour,
 				RigMemoryBytes: budget,
+				SyncMode:       mode,
 				Out:            cmd.OutOrStdout(),
 			}.Run(cmd.Context())
 			return err

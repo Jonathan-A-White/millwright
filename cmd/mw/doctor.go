@@ -87,6 +87,12 @@ func newDoctorCmd() *cobra.Command {
 				return err
 			}
 
+			// Read here but judged by the check itself: a beads_sync or a
+			// BEADS_DOLT_SERVER_PORT this host cannot read is beads-server's
+			// to say, never a reason every other check does not run.
+			beadsSync, beadsSyncErr := config.BeadsSync()
+			beadsServer, beadsServerErr := config.BeadsServerAddress()
+
 			store := doctor.New(dir)
 			tmpLeftovers := doctor.NewTmpLeftovers(os.TempDir())
 			tmpLeftovers.Budget = tmpLeftoversBudget
@@ -101,6 +107,7 @@ func newDoctorCmd() *cobra.Command {
 					doctor.NewBeadsSize(vault),
 					tmpLeftovers,
 					doctor.NewMayorGone(vault),
+					doctor.NewBeadsServer(beadsSync, beadsServer, beadsSyncErr, beadsServerErr),
 				},
 				State: store,
 				Log:   store,

@@ -329,7 +329,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			RecordSyncHalt(ctx, d.SyncHalts, err, d.now())
 			return report, fmt.Errorf("dispatching on %s: the hosts could not be brought level, so nothing was claimed: %w", d.Host, err)
 		}
-		ClearSyncHalt(ctx, d.SyncHalts)
+		KeepSyncHalt(ctx, d.SyncHalts, synced, nil, d.now())
 		report.Sync, report.Synced = synced, true
 		d.print(fmt.Sprintf("  synced  %s\n", synced))
 	}

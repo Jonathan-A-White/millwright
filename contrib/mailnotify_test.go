@@ -81,10 +81,20 @@ func newFactory(t *testing.T) *factory {
 		"\"vc status\") level=$(cat \"$MW_TEST_DIR/beads-level\" 2>/dev/null || echo lvl-1); "+
 		"printf '{\"branch\":\"main\",\"commit\":\"%s\"}\\n' \"$level\" ;;\n"+
 		"esac\nexit 0\n", 0o755)
+	// The stand-in mw answers `postern view --help` the way cobra does: with
+	// the view's own usage line when it has one, and with postern's own help
+	// — exit 0 either way — when it does not (a no-view file). A view-sleep
+	// file makes `postern view` take that many seconds, and a view-fails file
+	// makes it fail.
 	f.write("bin/mw", "#!/bin/sh\ncase \"$1\" in\n"+
 		"sync) echo \"$*\" >> \"$MW_TEST_DIR/mw.log\" ;;\n"+
 		"nudge) echo \"$*\" >> \"$MW_TEST_DIR/nudge.log\"; [ -f \"$MW_TEST_DIR/nudge-output\" ] && cat \"$MW_TEST_DIR/nudge-output\" ;;\n"+
-		"postern) echo \"$*\" >> \"$MW_TEST_DIR/postern.log\"; cat \"$MW_TEST_DIR/postern-count\" 2>/dev/null ;;\n"+
+		"postern) echo \"$*\" >> \"$MW_TEST_DIR/postern.log\"\n"+
+		"\tcase \"$2 ${3:-}\" in\n"+
+		"\t\"view --help\") if [ -f \"$MW_TEST_DIR/no-view\" ]; then printf 'Usage:\\n  mw postern [command]\\n'; else printf 'Usage:\\n  mw postern view [flags]\\n'; fi ;;\n"+
+		"\t\"view \") [ -f \"$MW_TEST_DIR/view-sleep\" ] && sleep \"$(cat \"$MW_TEST_DIR/view-sleep\")\"; [ -f \"$MW_TEST_DIR/view-fails\" ] && exit 1 ;;\n"+
+		"\t*) cat \"$MW_TEST_DIR/postern-count\" 2>/dev/null ;;\n"+
+		"\tesac ;;\n"+
 		"esac\nexit 0\n", 0o755)
 	f.write("vault/.mayor-acting", "", 0o644)
 	f.write("loadavg", "0.10 0.10 0.10 1/100 1\n", 0o644)
@@ -771,30 +781,46 @@ func TestPosternSnapshotChangedBeadsRunsOnceThenWaitsOutTheInterval(t *testing.T
 	}
 }
 
-// The interval is a hard cap in the script, not a knob a host can set
-// (mw-tfne4.16, amending mw-tfne4.12): MW_MAIL_SNAPSHOT_EVERY in the
-// environment has no effect on it.
-func TestMWMailSnapshotEveryInTheEnvironmentHasNoEffect(t *testing.T) {
+// The snapshot's interval is the host's to set (the Governor's decision of
+// 2026-09-28, reversing mw-tfne4.16's hard cap): MW_MAIL_SNAPSHOT_EVERY, 600
+// seconds when it says nothing, as TestPosternSnapshotChangedBeadsRunsOnceThenWaitsOutTheInterval
+// holds.
+func TestMWMailSnapshotEverySetsTheSnapshotInterval(t *testing.T) {
 	f := newFactory(t)
 	f.mayor("idle", actingByID)
 	f.posternKey()
 	f.posternCount(0)
-	f.env = append(f.env, "MW_MAIL_SNAPSHOT_EVERY=1")
+	f.env = append(f.env, "MW_MAIL_SNAPSHOT_EVERY=5")
 
 	f.tick()
 	if n := f.posternSubCalls("snapshot"); n != 1 {
 		t.Fatalf("mw postern snapshot was called %d times on the first tick, want 1", n)
 	}
 
-	// Well past a 1-second interval, and the beads have changed: a live
-	// MW_MAIL_SNAPSHOT_EVERY=1 would run this again. The hard 600s cap must
-	// not.
+	// Past a 5-second interval, and the beads have changed: it runs again.
 	f.beadsLevel("lvl-2")
-	f.setSnapshotLastAt(time.Now().Add(-2 * time.Second))
+	f.setSnapshotLastAt(time.Now().Add(-6 * time.Second))
+	f.tick()
+
+	if n := f.posternSubCalls("snapshot"); n != 2 {
+		t.Fatalf("mw postern snapshot was called %d times with MW_MAIL_SNAPSHOT_EVERY=5 and 6s gone, want 2", n)
+	}
+}
+
+func TestAnMWMailSnapshotEveryThatIsNotANumberReadsAsTheDefault(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.posternCount(0)
+	f.env = append(f.env, "MW_MAIL_SNAPSHOT_EVERY=often")
+
+	f.tick()
+	f.beadsLevel("lvl-2")
+	f.setSnapshotLastAt(time.Now().Add(-60 * time.Second))
 	f.tick()
 
 	if n := f.posternSubCalls("snapshot"); n != 1 {
-		t.Fatalf("mw postern snapshot was called %d times with MW_MAIL_SNAPSHOT_EVERY=1 set, want 1 (the interval is a hard 600s cap)", n)
+		t.Fatalf("mw postern snapshot was called %d times a minute apart, want 1 (the default 600s)", n)
 	}
 }
 
@@ -910,5 +936,207 @@ func TestTheScriptIsExecutableAndParses(t *testing.T) {
 	}
 	if out, err := exec.Command("sh", "-n", "mail-notify").CombinedOutput(); err != nil {
 		t.Fatalf("sh -n: %v\n%s", err, out)
+	}
+}
+
+// viewRuns counts the runs of `mw postern view` itself, not its --help probe.
+func (f *factory) viewRuns() int {
+	return strings.Count("\n"+f.read("postern.log"), "\npostern view\n")
+}
+
+// viewProbes counts the `mw postern view --help` probes.
+func (f *factory) viewProbes() int {
+	return strings.Count(f.read("postern.log"), "postern view --help\n")
+}
+
+// viewLevel is the marker the script last recorded for the view it wrote or
+// attempted.
+func (f *factory) viewLevel() string {
+	return strings.TrimSuffix(f.read("state/view-level"), "\n")
+}
+
+// setViewLastAt rewrites when the view was last attempted, so a test can put
+// the interval gate in the past without sleeping for it.
+func (f *factory) setViewLastAt(at time.Time) {
+	f.t.Helper()
+	f.write("state/view-last", strconv.FormatInt(at.Unix(), 10)+"\n", 0o644)
+}
+
+func TestPosternViewRunsOnTheFirstTickWithAKeyFile(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.posternCount(0)
+
+	f.tick()
+
+	if n := f.viewRuns(); n != 1 {
+		t.Fatalf("mw postern view ran %d times, want 1\n%s", n, f.read("postern.log"))
+	}
+	if got := f.viewLevel(); got != "lvl-1" {
+		t.Fatalf("recorded view level %q, want lvl-1", got)
+	}
+}
+
+func TestPosternViewDoesNotRunWithoutAKeyFile(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+
+	f.tick()
+
+	if f.viewRuns() != 0 || f.viewProbes() != 0 {
+		t.Fatalf("mw postern view was asked about with no postern key file: %q", f.read("postern.log"))
+	}
+}
+
+func TestPosternViewUnchangedBeadsRunsNothingEvenPastTheInterval(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.posternCount(0)
+
+	f.tick()
+	f.setViewLastAt(time.Now().Add(-1 * time.Hour))
+	f.tick()
+
+	if n := f.viewRuns(); n != 1 {
+		t.Fatalf("mw postern view ran %d times with the beads unchanged, want 1", n)
+	}
+}
+
+func TestPosternViewChangedBeadsRunsOnceThenWaitsOutItsInterval(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.posternCount(0)
+
+	f.tick()
+	// The beads change at once, but thirty seconds have not passed since the
+	// last attempt: nothing.
+	f.beadsLevel("lvl-2")
+	f.tick()
+	if n := f.viewRuns(); n != 1 {
+		t.Fatalf("mw postern view ran %d times inside its interval, want 1", n)
+	}
+
+	// Past the default thirty seconds, with the beads changed: it runs again.
+	f.setViewLastAt(time.Now().Add(-31 * time.Second))
+	f.tick()
+	if n := f.viewRuns(); n != 2 {
+		t.Fatalf("mw postern view ran %d times once 31s had passed with changed beads, want 2", n)
+	}
+	if got := f.viewLevel(); got != "lvl-2" {
+		t.Fatalf("recorded view level %q, want lvl-2", got)
+	}
+	// The snapshot keeps its own, far longer, interval.
+	if n := f.posternSubCalls("snapshot"); n != 1 {
+		t.Fatalf("mw postern snapshot ran %d times, want 1", n)
+	}
+}
+
+func TestMWMailViewEverySetsTheViewInterval(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.posternCount(0)
+	f.env = append(f.env, "MW_MAIL_VIEW_EVERY=120")
+
+	f.tick()
+	f.beadsLevel("lvl-2")
+	f.setViewLastAt(time.Now().Add(-60 * time.Second))
+	f.tick()
+
+	if n := f.viewRuns(); n != 1 {
+		t.Fatalf("mw postern view ran %d times a minute apart with MW_MAIL_VIEW_EVERY=120, want 1", n)
+	}
+}
+
+func TestTheBeadsLevelIsReadOnceATickForTheViewAndTheSnapshotBoth(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.posternCount(0)
+
+	f.tick()
+
+	if n := strings.Count(f.read("bd.log"), "vc status"); n != 1 {
+		t.Fatalf("bd vc status was asked %d times in one tick, want 1:\n%s", n, f.read("bd.log"))
+	}
+	if f.viewRuns() != 1 || f.posternSubCalls("snapshot") != 1 {
+		t.Fatalf("expected both the view and the snapshot on the first tick, got %q", f.read("postern.log"))
+	}
+}
+
+func TestPosternViewIsSkippedWhereMwHasNoViewCommand(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.posternCount(0)
+	f.write("no-view", "", 0o644)
+
+	out := f.tick()
+
+	if n := f.viewRuns(); n != 0 {
+		t.Fatalf("mw postern view ran %d times on an mw without it, want 0", n)
+	}
+	if n := f.viewProbes(); n != 1 {
+		t.Fatalf("mw postern view --help was asked %d times, want once a tick", n)
+	}
+	if f.read("state/view-last") != "" {
+		t.Fatal("recorded a view attempt for an mw that has no view to run")
+	}
+	if strings.Contains(out, "postern view") {
+		t.Fatalf("expected an mw without the view to be passed over silently, got %q", out)
+	}
+	// The snapshot still runs as ever.
+	if n := f.posternSubCalls("snapshot"); n != 1 {
+		t.Fatalf("mw postern snapshot ran %d times, want 1", n)
+	}
+}
+
+func TestAFailingPosternViewIsLoggedAndDoesNotStopTheTick(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.posternCount(0)
+	f.write("view-fails", "", 0o644)
+	f.inbox("mw-aaa")
+
+	out := f.tick()
+
+	f.typed(fmt.Sprintf(announcement, 1))
+	if n := f.viewRuns(); n != 1 {
+		t.Fatalf("mw postern view ran %d times, want 1 (even though it failed)", n)
+	}
+	if !strings.Contains(out, "mw postern view did not finish cleanly") {
+		t.Fatalf("output %q does not log the failed view", out)
+	}
+}
+
+func TestASlowPosternViewIsKilledByItsOwnTimeoutAndNotRetriedInsideItsInterval(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.posternCount(0)
+	f.env = append(f.env, "MW_MAIL_VIEW_TIMEOUT=1")
+	f.write("view-sleep", "5", 0o644)
+	f.inbox("mw-aaa")
+
+	start := time.Now()
+	out := f.tick()
+	elapsed := time.Since(start)
+
+	f.typed(fmt.Sprintf(announcement, 1))
+	if elapsed >= 4*time.Second {
+		t.Fatalf("the tick took %v; a view bounded to a 1s timeout should never have run near the 5s it tried to sleep", elapsed)
+	}
+	if !strings.Contains(out, "mw postern view exceeded 1s") || !killedElapsed.MatchString(out) {
+		t.Fatalf("output %q does not report the view's kill with its elapsed seconds", out)
+	}
+
+	f.beadsLevel("lvl-2")
+	f.tick()
+	if n := f.viewRuns(); n != 1 {
+		t.Fatalf("mw postern view ran %d times inside its interval after a kill, want 1", n)
 	}
 }

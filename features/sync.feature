@@ -10,6 +10,13 @@ Feature: Keeping the vault and beads in step between hosts
   while somebody's edit waits for them, and mw leaves with a status of its own
   for that.
 
+  All of that is beads_sync = remote, every host keeping a copy of its own. On
+  the host that keeps the one database (backup) the tracker's remote is only a
+  backup, pushed once one is due, and a halted backup stops nothing; on a host
+  whose beads live in another host's database (shared) there is no remote
+  cycle and no collection at all. In both the note of when this host was level
+  is written on every sync, straight into the one database every host reads.
+
   Background:
     Given a vault shared by both hosts
     And this host is "vps"
@@ -112,3 +119,38 @@ Feature: Keeping the vault and beads in step between hosts
       | merge conflict |
     And mw exits 2
     And nothing is recorded under host.vps.last_sync
+
+  Scenario: The host that keeps the one database records it was level, and backs up only once a backup is due
+    Given this host keeps the one beads database, backed up every 30 minutes
+    And its last backup of the beads database was 10 minutes ago
+    When this host syncs
+    Then the sync succeeds
+    And the beads database holds the time of the sync under host.vps.last_sync
+    And the beads database was never synced
+    And the sync says no backup was due
+
+  Scenario: The host that keeps the one database backs it up once the last backup is old enough
+    Given this host keeps the one beads database, backed up every 30 minutes
+    And its last backup of the beads database was 31 minutes ago
+    When this host syncs
+    Then the sync succeeds
+    And the beads database was synced once
+    And the beads database holds the time of the sync under host.vps.last_backup
+    And the sync says a backup ran
+
+  Scenario: A backup that halts is said, and stops nothing on the host that keeps the one database
+    Given this host keeps the one beads database, backed up every 30 minutes
+    And bd sync will exit 2
+    When this host syncs
+    Then the sync succeeds
+    And the sync says the backup halted on a merge conflict
+    And the beads database holds the time of the sync under host.vps.last_sync
+    And nothing is recorded under host.vps.last_backup
+
+  Scenario: A host whose beads live in another host's database never syncs or collects them
+    Given this host's beads live in another host's database
+    When this host syncs
+    Then the sync succeeds
+    And the beads database holds the time of the sync under host.vps.last_sync
+    And the beads database was never synced
+    And the beads database was never asked to reclaim its disk space

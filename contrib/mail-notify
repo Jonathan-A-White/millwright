@@ -10,7 +10,7 @@
 # Each tick:
 #   1. skips everything if the 1-minute load average is above a limit;
 #   2. runs `mw sync`, at nice 19 and idle I/O priority, if the last sync was
-#      five minutes ago or more;
+#      MW_MAIL_SYNC_EVERY seconds ago or more (default 300, five minutes);
 #   3. lists `bd mail inbox` for the mailbox and compares its ids with the ids
 #      it has already announced;
 #   4. when this host has a postern key file, runs `mw postern inbox
@@ -21,17 +21,29 @@
 #      recently than its damper: 1 h the first time, doubling on each repeat
 #      while the condition keeps holding, capped at 8 h, and reset once the
 #      condition clears (recorded per condition in the state directory);
-#   6. when this host has a postern key file, and the beads have changed since
-#      the last snapshot written or attempted and at least 600 seconds have
-#      passed since then, runs `mw postern snapshot` after the nudge, bounded
-#      to MW_MAIL_SNAPSHOT_TIMEOUT seconds (default 60) so a slow snapshot can
-#      never hold a tick past a minute (mw-tfne4.8): refreshing the brief of
-#      every live epic for the Governor's app. A run that fails, or that hits
-#      the timeout and is killed, is logged once with how long it ran and
-#      never stops the tick; either way the next attempt waits a full 600
-#      seconds, so a snapshot slower than its timeout is never retried every
-#      tick (mw-tfne4.12);
-#   7. if there is new mail, a postern count risen since last noted, or a
+#   6. when this host has a postern key file and its mw has `mw postern view`
+#      (asked once a tick, with `mw postern view --help`, only when a view is
+#      otherwise due), and the beads have changed since the last view written
+#      or attempted and at least MW_MAIL_VIEW_EVERY seconds (default 30) have
+#      passed since then, runs `mw postern view`, bounded to
+#      MW_MAIL_VIEW_TIMEOUT seconds (default 60): refreshing the live view the
+#      postern backend serves the Governor's app. A run that fails, or that
+#      hits the timeout and is killed, is logged once with how long it ran and
+#      never stops the tick; either way the next attempt waits a full
+#      MW_MAIL_VIEW_EVERY. An mw with no view is passed over silently;
+#   7. when this host has a postern key file, and the beads have changed since
+#      the last snapshot written or attempted and at least
+#      MW_MAIL_SNAPSHOT_EVERY seconds (default 600) have passed since then,
+#      runs `mw postern snapshot`, bounded to MW_MAIL_SNAPSHOT_TIMEOUT seconds
+#      (default 60) so a slow snapshot can never hold a tick past a minute
+#      (mw-tfne4.8): refreshing the brief of every live epic for the
+#      Governor's app. A run that fails, or that hits the timeout and is
+#      killed, is logged once with how long it ran and never stops the tick;
+#      either way the next attempt waits a full MW_MAIL_SNAPSHOT_EVERY, so a
+#      snapshot slower than its timeout is never retried every tick
+#      (mw-tfne4.12). The view and the snapshot read the beads' level once a
+#      tick between them;
+#   8. if there is new mail, a postern count risen since last noted, or a
 #      clause survived the damper, finds the Mayor's window from the vault's
 #      .mayor-acting and, once it is not working and its input line is empty,
 #      types "New mail for mayor: <n> message(s). Run bd mail inbox." and
@@ -39,7 +51,7 @@
 #      then "Quiet alarm for mayor: <clause>[; <clause> ...]. Run mw status."
 #      and Enter (checking the window is idle again first before each line
 #      after the first, since typing one may have woken it);
-#   8. records the mail ids as announced, the postern count as last noted,
+#   9. records the mail ids as announced, the postern count as last noted,
 #      and each clause's condition as fired, only after each is typed.
 # Otherwise it does nothing and the next tick tries again.
 #
@@ -49,10 +61,10 @@
 # It never syncs, nor asks bd, more than the mail check already did: the
 # quiet alarm reads only what that sync left in the vault, under the same lock.
 #
-# The postern poll (step 4) and the postern snapshot (step 6) are both
-# skipped silently, with no call to `mw`, on a host with no postern key file
-# (config's postern_key_file, default ~/.config/mw/postern.key): such a host
-# has no postern side.
+# The postern poll (step 4), the live view (step 6) and the postern snapshot
+# (step 7) are all skipped silently, with no call to `mw`, on a host with no
+# postern key file (config's postern_key_file, default
+# ~/.config/mw/postern.key): such a host has no postern side.
 #
 # The Mayor's window comes from .mayor-acting, which is free text. In it, the
 # first of these that names exactly one window on the tmux server wins:
@@ -70,12 +82,24 @@
 #   MW_MAIL_MAILBOX      whose inbox to watch                          (mayor)
 #   MW_MAIL_LOAD_LIMIT   skip the tick above this 1-minute load        (2.0)
 #   MW_MAIL_SYNC_EVERY   least seconds between two `mw sync`s          (300)
+#                        On the host that keeps the one beads database
+#                        (beads_sync = "backup") a sync is local writes and
+#                        a backup only once one is due, with no remote round
+#                        trip, so 60 is sensible there; a host whose beads
+#                        are a copy of its own (remote) keeps 300
 #   MW_MAIL_STATE_DIR    the ids announced, the quiet alarm's dampers,
-#                        the last sync, the last snapshot, the lock
+#                        the last sync, the last view, the last snapshot,
+#                        the lock
 #                        (${XDG_STATE_HOME:-~/.local/state}/mw-mail-notify)
 #   MW_MAIL_LOADAVG_FILE where the load average is read (/proc/loadavg; else uptime)
+#   MW_MAIL_VIEW_EVERY   least seconds between two `mw postern view`s  (30)
+#   MW_MAIL_VIEW_TIMEOUT seconds `mw postern view` (step 6) may run before
+#                        it is killed                                   (60)
+#   MW_MAIL_SNAPSHOT_EVERY
+#                        least seconds between two `mw postern snapshot`s
+#                                                                       (600)
 #   MW_MAIL_SNAPSHOT_TIMEOUT
-#                        seconds `mw postern snapshot` (step 6) may run before
+#                        seconds `mw postern snapshot` (step 7) may run before
 #                        it is killed, so a slow snapshot never holds a tick
 #                        past a minute (mw-tfne4.8); raise it on a host where
 #                        a snapshot takes longer than this to build (see
@@ -91,7 +115,16 @@ SYNC_EVERY=${MW_MAIL_SYNC_EVERY:-300}
 STATE=${MW_MAIL_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mw-mail-notify}
 LOADAVG=${MW_MAIL_LOADAVG_FILE:-/proc/loadavg}
 SNAPSHOT_TIMEOUT=${MW_MAIL_SNAPSHOT_TIMEOUT:-60}
-SNAPSHOT_EVERY=600
+SNAPSHOT_EVERY=${MW_MAIL_SNAPSHOT_EVERY:-600}
+VIEW_EVERY=${MW_MAIL_VIEW_EVERY:-30}
+VIEW_TIMEOUT=${MW_MAIL_VIEW_TIMEOUT:-60}
+
+# A setting that is not a whole number of seconds reads as its default.
+case $SYNC_EVERY in '' | *[!0-9]*) SYNC_EVERY=300 ;; esac
+case $SNAPSHOT_TIMEOUT in '' | *[!0-9]*) SNAPSHOT_TIMEOUT=60 ;; esac
+case $SNAPSHOT_EVERY in '' | *[!0-9]*) SNAPSHOT_EVERY=600 ;; esac
+case $VIEW_EVERY in '' | *[!0-9]*) VIEW_EVERY=30 ;; esac
+case $VIEW_TIMEOUT in '' | *[!0-9]*) VIEW_TIMEOUT=60 ;; esac
 
 # How long a quiet alarm condition, once typed, is left untyped again: 1 h the
 # first time, then doubled on each repeat while the condition keeps holding,
@@ -243,14 +276,65 @@ if [ -d "$STATE/nudged" ]; then
 	done
 fi
 
-# 6. The postern snapshot: on a host with a postern key file, refreshed only
+# The beads' level: `bd vc status`'s own commit, cheap beside the view or the
+# snapshot. Read at most once a tick, and only by a step that is otherwise due;
+# a bd too old to have it, or a call that fails, reads as "" — "changed" to
+# both steps, so their intervals alone still bound how often each is tried.
+level_read=0
+level=""
+beads_level() {
+	[ "$level_read" -eq 1 ] && return 0
+	level=$(cd "$vault" && bd vc status --json 2>/dev/null | sed -n 's/.*"commit"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+	level_read=1
+}
+
+# 6. The live view: on a host with a postern key file whose mw has `mw postern
+# view`, refreshed only when the beads have changed since the marker left by
+# the last attempt and at least VIEW_EVERY seconds have passed since then —
+# the postern backend serves the file to the Governor's app, and a view the
+# beads have not moved since is not worth rebuilding. Whether mw has the view
+# at all is asked once a tick, only when one is otherwise due: `mw postern
+# view --help` prints the view's own usage line when there is one, and
+# postern's own help, exit 0 all the same, when there is not — so it is that
+# line that is looked for, never the status. An mw without it is passed over
+# with nothing recorded, so it is asked again next tick. Bounded to
+# VIEW_TIMEOUT seconds, logged once with how long it ran when it fails or is
+# killed, and never stops the tick; the time and the level are recorded before
+# the attempt runs, so one that hangs or fails is not retried before
+# VIEW_EVERY has passed again.
+if [ -r "$keyfile" ]; then
+	view_last=$(cat "$STATE/view-last" 2>/dev/null || echo 0)
+	case $view_last in *[!0-9]* | "") view_last=0 ;; esac
+	if [ $((now - view_last)) -ge "$VIEW_EVERY" ]; then
+		beads_level
+		view_noted=$(cat "$STATE/view-level" 2>/dev/null || echo "")
+		if [ -z "$level" ] || [ "$level" != "$view_noted" ]; then
+			if (cd "$vault" && mw postern view --help 2>/dev/null) | grep -q 'mw postern view'; then
+				echo "$now" >"$STATE/view-last"
+				[ -n "$level" ] && echo "$level" >"$STATE/view-level"
+				start=$now
+				(cd "$vault" && timeout "$VIEW_TIMEOUT" mw postern view >/dev/null 2>&1)
+				status=$?
+				if [ "$status" -ne 0 ]; then
+					elapsed=$(($(date +%s) - start))
+					[ "$elapsed" -lt 0 ] && elapsed=0
+					if [ "$status" -eq 124 ]; then
+						say "mw postern view exceeded ${VIEW_TIMEOUT}s and was killed after ${elapsed}s; not retrying before ${VIEW_EVERY}s have passed"
+					else
+						say "mw postern view did not finish cleanly after ${elapsed}s; not retrying before ${VIEW_EVERY}s have passed"
+					fi
+				fi
+			fi
+		fi
+	fi
+fi
+
+# 7. The postern snapshot: on a host with a postern key file, refreshed only
 # when the beads have changed since the marker left by the last attempt and
 # at least SNAPSHOT_EVERY seconds have passed since then — the app reads it
 # independently of the tmux window, and a snapshot this host's beads have not
-# moved since is not worth rebuilding (mw-tfne4.12). The marker is `bd vc
-# status`'s own commit, cheap beside the snapshot itself; a bd too old to have
-# it, or a call that fails, reads as "changed", so the interval alone still
-# bounds how often it is tried. Bounded to SNAPSHOT_TIMEOUT seconds: a
+# moved since is not worth rebuilding (mw-tfne4.12). The marker is the beads'
+# level, read above, shared with the view. Bounded to SNAPSHOT_TIMEOUT seconds: a
 # snapshot that runs long is killed rather than starving every tick after it
 # (mw-tfne4.8), logged once with how long it ran either way, and never stops
 # the tick: the app simply serves the last good snapshot until the next one
@@ -261,7 +345,7 @@ if [ -r "$keyfile" ]; then
 	snap_last=$(cat "$STATE/snapshot-last" 2>/dev/null || echo 0)
 	case $snap_last in *[!0-9]* | "") snap_last=0 ;; esac
 	if [ $((now - snap_last)) -ge "$SNAPSHOT_EVERY" ]; then
-		level=$(cd "$vault" && bd vc status --json 2>/dev/null | sed -n 's/.*"commit"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+		beads_level
 		noted=$(cat "$STATE/snapshot-level" 2>/dev/null || echo "")
 		if [ -z "$level" ] || [ "$level" != "$noted" ]; then
 			echo "$now" >"$STATE/snapshot-last"
@@ -284,7 +368,7 @@ fi
 
 [ -n "$new" ] || [ -n "$postern_text" ] || [ -n "$nudge_texts" ] || exit 0
 
-# 7. The Mayor's window, from the vault's .mayor-acting.
+# 8. The Mayor's window, from the vault's .mayor-acting.
 acting=$(cat "$vault/.mayor-acting" 2>/dev/null) || acting=""
 [ -n "$acting" ] || { say "something to tell $MAILBOX, but $vault/.mayor-acting names no one; will try again"; exit 0; }
 windows=$(tmx list-windows -a -F "#{window_id}${tab}#{window_index}${tab}#{window_name}" 2>/dev/null) ||
@@ -342,7 +426,7 @@ typed_mail=0
 if [ -n "$new" ]; then
 	line="New mail for $MAILBOX: $count message(s). Run bd mail inbox."
 	if type_line "$line"; then
-		# 8. Only now are the ids announced. What is no longer in the inbox is
+		# 9. Only now are the ids announced. What is no longer in the inbox is
 		# dropped from the record, so it does not grow.
 		echo "$current" >"$STATE/announced"
 		say "typed into $target: $line"
@@ -362,7 +446,7 @@ if [ -n "$postern_text" ]; then
 	fi
 	if [ "$ready" -eq 1 ]; then
 		if type_line "$postern_text"; then
-			# 8. Only now is the count last noted, the same as the mail ids above.
+			# 9. Only now is the count last noted, the same as the mail ids above.
 			echo "$postern_count" >"$STATE/postern-count"
 			say "typed into $target: $postern_text"
 			typed_postern=1

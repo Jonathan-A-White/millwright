@@ -67,7 +67,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `Status` | `application/status.go` | `mw status` — `cmd/mw/status.go` | `features/status.feature` |
 | `Brief` | `application/brief.go` | `mw brief` — `cmd/mw/brief.go` | `features/brief.feature` |
 | `Sweep` | `application/sweep.go` | `mw sweep` — `cmd/mw/sweep.go` | `features/sweep.feature` |
-| `Sync` | `application/sync.go` | `mw sync` — `cmd/mw/sync.go` | `features/sync.feature` |
+| `Sync` | `application/sync.go` | `mw sync` (`beads_sync`) — `cmd/mw/sync.go` | `features/sync.feature` |
 | `Nudge` | `application/nudge.go` | `mw nudge` — `cmd/mw/nudge.go` | none |
 | `Mail` | `application/mail.go` | `mw mail` — `cmd/mw/mail.go` | `features/mail.feature` |
 | `SeatContext`, `SeatUp`, `SeatReap` | `application/seatcontext.go`, `application/seatup.go`, `application/seatreap.go` | `mw seat context`/`up`/`reap` — `cmd/mw/seat.go` | `features/seat_context.feature`, `features/seat_up.feature`, `features/seat_reap.feature` |
@@ -79,7 +79,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `Init` | `application/init.go` | `mw init` — `cmd/mw/init.go` | `features/init.feature` |
 | `PosternKeyInit`, `PosternKeyShow`, `PosternInbox`, `PosternSend` | `application/postern.go` | `mw postern key`/`inbox`/`send` (`--bead --recommend --option`; mails mayor; Release tap) | `features/postern_key.feature` |
 | `PosternSnapshot` | `application/posternsnapshot.go` | `mw postern snapshot` (`--json`; landed w/o `VERIFIED`) | none |
-| `PosternServe`, `PosternNginx` | `application/posternhand.go` | `mw postern serve`/`nginx` (`--dry-run`) — `cmd/mw/postern.go` | `features/postern_serve.feature` |
+| `PosternServe`, `PosternNginx` | `application/posternhand.go` | `mw postern serve`/`nginx` — `cmd/mw/postern.go` | `features/postern_serve.feature` |
 
 `cmd/mw/root.go` holds the tree; `cmd/mw/main.go` runs it; `cmd/mw/version.go` is
 `mw version`. `features/path_validation.feature` covers `domain/path.go`;
