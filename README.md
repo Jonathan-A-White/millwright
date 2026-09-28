@@ -626,7 +626,8 @@ bd reclaim mw-gq6.30                                        # or take it over fi
 `MW_NUDGE_AFTER_MINUTES`, `MW_NUDGE_SYNC_STALE_MINUTES`, `MW_POSTERN_BACKEND`,
 `MW_POSTERN_FLOAT_SATS`, `MW_POSTERN_GOVERNOR_KEY`, `MW_POSTERN_KEY_FILE`,
 `MW_POSTERN_SNAPSHOT_PATH`, `MW_POSTERN_VIEW_PATH`, `MW_POSTERN_CHANNEL`,
-`MW_POSTERN_TRANSCRIBE_CMD`, `MW_BEADS_SYNC` and `MW_BEADS_BACKUP_MINUTES` ahead of it:
+`MW_POSTERN_TRANSCRIBE_CMD`, `MW_BEADS_SYNC`, `MW_BEADS_BACKUP_MINUTES` and
+`MW_HANDS_ROOT_HELPER` ahead of it:
 
 ```toml
 vault = "/root/millwright-vault"   # the one beads database and the seats
@@ -654,6 +655,7 @@ postern_channel = "direct"         # how mw postern send delivers: direct to the
 postern_transcribe_cmd = ""        # what hears the Governor's voice notes, the audio's path appended, e.g. contrib/postern-transcribe (default empty: none are heard)
 beads_sync = "remote"              # remote (a copy of its own), backup (holds the one database) or shared (reaches another host's) (default remote)
 beads_backup_minutes = 30          # on a backup host, how long between two backups of the one database (default 30)
+hands_root_helper = "/usr/local/sbin/mw-hands-root"  # what a root hands step is handed to, through sudo -n, on every host (default shown)
 
 [rigs]
 millwright = "/root/millwright"    # where each rig is checked out here
@@ -663,6 +665,10 @@ millwright = "make test"           # how a close-out asks this rig if it is gree
 
 [after_landing]
 millwright = "make build"          # run in this rig's checkout once a landing has moved it (default: nothing)
+
+[hands_hosts]                      # how this host reaches another host a hands step is for; leave it out to run steps for this host only
+laptop = "ssh laptop"              # an ssh prefix, split on whitespace
+vps = "ssh root@allmymind.org"
 
 [watch]                            # what mw watch looks at; leave it out to watch nothing
 ssh = "vps"                        # the name ssh knows the watched host by
@@ -930,6 +936,80 @@ automatically if the test fails so a bad edit is never left live. Both print
 the backup path and the way back. `--backup-dir` defaults to `/root/tidy`,
 which is the VPS's; on the desktop, name one of your own. See
 `features/postern_serve.feature`.
+
+## Steps for his hands
+
+A step only the Governor's hands could take — a `sudo` line, a unit to
+enable, a file to move between hosts — is written down by the Mayor, not
+typed as a `!` line for him to copy (postern's docs/protocol.md §17):
+
+```sh
+mw hands add <bead> --id <id> --host <host> --as user|root [--way-back '<commands>'] [--replace] -- '<commands>'
+mw hands list <bead>
+```
+
+`mw hands add` keeps the step in the bead's note `hands.<bead>` (a JSON array
+of `{id, host, as, run, way_back, added_at}`), comments it on the bead exactly
+as it will run (`HANDS STEP <id> on <host> as <as>:`, then the commands and the
+way back, fenced), and labels the bead `hitl`. The commands are one quoted
+argument after `--`. An id is used once per bead; `--replace` changes a step,
+which changes its hash and so voids any approval of the old one. `mw hands
+list` prints each step with its sha256 and whether it has run.
+
+Postern shows a `hitl` bead's steps under his hands (the view's `hands` need
+carries each with its §17 sha256 and, once run, `ran`). He approves a step with
+his key — a fresh fingerprint, then a signature over its hash and the time —
+and the approval arrives as a `run` action. `mw postern inbox --apply` runs it
+only when every check holds: it came from `postern_governor_key` and the
+backend vouched for its signer; the step on the bead still hashes to what he
+approved ("the step changed since you approved it" otherwise); the signature
+verifies; the approval is under 15 minutes old and not over 2 minutes ahead;
+and that approval has not run before (a `hands.approval.<hash>.<time>` note,
+written before the step starts). A step for this host (`host`) runs here; a
+step for another runs over that host's ssh prefix in `[hands_hosts]`, and one
+with no entry is refused naming the key to add. `as: user` runs `sh -c` as
+this host's user for at most 10 minutes; `as: root` hands the whole request, on
+standard input, to `sudo -n` `hands_root_helper`. The run is recorded in
+`hands.ran.<bead>.<id>` (`{at, exit, host}`), commented on the bead (`RAN step
+<id> on <host> as <as>, exit <n> (approved by the Governor via postern, txid
+…)` and the last 4000 characters of output), sent back to him in the bead's
+thread, and mailed to the Mayor. A refusal goes out the same three ways, says
+why, and is never tried again.
+
+A root step runs through `mw-hands-root` (`make build` builds it into `bin/`),
+a small program that takes nothing from its arguments or environment. It
+refuses unless it runs as root; reads the request (at most 64 KiB) from
+standard input; trusts only `/etc/mw-hands/governor.pub` and
+`/etc/mw-hands/host`, and only when they and their directory are root's and
+writable by no one else; refuses a step for another host, a step that is not
+`as: root`, a hash that does not match, a signature that does not verify, an
+approval over 15 minutes old or 2 ahead, and an approval already in
+`/var/lib/mw-hands/used` — where it records the approval before it runs
+anything. Then it runs `/bin/sh -c` as root, with a fixed environment and a
+10-minute limit, streams the output, and leaves with the step's own status; a
+refusal is exit 126 and one line on standard error. So the host's own account
+can run nothing as root without his signature, and an approval runs once, on
+the host it was given for.
+
+He installs it once, by his own hands, on each host that should run root
+steps:
+
+```sh
+sudo ~/millwright/contrib/install-hands-root <user> [<governor public key hex>] [--yes]
+```
+
+It refuses unless run as root and until `bin/mw-hands-root` is built (`make -C
+~/millwright build`); takes the key, when not given, from `postern_governor_key`
+in `<user>`'s own mw config (its home from the password database, never
+`$HOME`), and this host's name from `host` there; checks the key is 66 hex
+starting 02 or 03, shows it with a fingerprint, and asks before writing
+anything (`--yes` skips the question). It installs `/usr/local/sbin/mw-hands-root`
+(0755), `/etc/mw-hands/governor.pub` and `/etc/mw-hands/host` (0644) and
+`/etc/sudoers.d/mw-hands` (0440) holding exactly `<user> ALL=(root) NOPASSWD:
+/usr/local/sbin/mw-hands-root`, checked with `visudo -cf` before it is moved into
+place, all root's; makes `/var/lib/mw-hands` (0700); and prints the way back.
+Re-running it replaces the same files and keeps the record of approvals run.
+See `features/hands.feature` and `features/postern_inbox_apply.feature`.
 
 ## Making a fresh vault
 

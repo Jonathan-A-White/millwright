@@ -37,7 +37,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `ReapArmer` | `application/seatreap.go` | `infrastructure/reaper/arm.go` | `apptest.FakeReapArmer` |
 | `Transcripts` | `application/seatcontext.go` | `infrastructure/claude/transcripts.go` | none |
 | `WatchProbes` | `application/watch.go` | `infrastructure/watch/watch.go` | `apptest.FakeWatch` |
-| `DoctorCheck`, `DoctorState`, `DoctorLog`, `DoctorNotes` | `application/doctor.go` | `infrastructure/doctor` | none |
+| `Doctor{Check,State,Log,Notes}` | `application/doctor.go` | `infrastructure/doctor` | none |
 | `TickLog` | `application/millhandtick.go` | `infrastructure/ticklog/ticklog.go` | `apptest.FakeTickLog` |
 | `Worktrees` | `application/worktrees.go` | `infrastructure/rig/worktree.go` | `application/dispatch_test.go` |
 | `SyncHaltMarker` | `application/sync.go` | `infrastructure/synchalt/synchalt.go` | `apptest.FakeSyncHaltMarker` |
@@ -49,7 +49,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/slot.go` | none |
 | `Dispatcher` | `application/landing.go` | `application.Dispatch` | — |
 | `HostSync` | `application/dispatch.go` | `application.Sync` | — |
-| Postern ports | `application/postern*.go` | `infrastructure/postern` | `apptest.Fake{Postern,Cipher,SnapshotFile,NginxRunner,Transcriber}` |
+| Postern, hands | `application/{postern*,hands}.go` | `infrastructure/{postern,hands*}` | `apptest.Fake{Postern,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*}` |
 
 `infrastructure/config/config.go` is not a port: read by `cmd/mw/`.
 
@@ -70,19 +70,20 @@ Every adapter: `var _ application.<Port> = ...`.
 | `Sync` | `application/sync.go` | `mw sync` (`beads_sync`) — `cmd/mw/sync.go` | `features/sync.feature` |
 | `Nudge` | `application/nudge.go` | `mw nudge` — `cmd/mw/nudge.go` | none |
 | `Mail` | `application/mail.go` | `mw mail` — `cmd/mw/mail.go` | `features/mail.feature` |
-| `SeatContext`, `SeatUp`, `SeatReap` | `application/seatcontext.go`, `application/seatup.go`, `application/seatreap.go` | `mw seat context`/`up`/`reap` — `cmd/mw/seat.go` | `features/seat_context.feature`, `features/seat_up.feature`, `features/seat_reap.feature` |
+| `Seat{Context,Up,Reap}` | `application/seatcontext.go`, `application/seatup.go`, `application/seatreap.go` | `mw seat context`/`up`/`reap` — `cmd/mw/seat.go` | `features/seat_{context,up,reap}.feature` |
 | `Millhand` | `application/millhand.go` | `mw millhand` — `cmd/mw/millhand.go` | `features/millhand.feature` |
 | `MillhandTick` | `application/millhandtick.go` | `mw millhand tick` — `cmd/mw/millhandtick.go` | `features/millhand_tick.feature` |
 | `Watch` | `application/watch.go` | `mw watch` — `cmd/mw/watch.go` | `features/watch.feature` |
 | `Doctor` | `application/doctor.go` | `mw doctor` — `cmd/mw/doctor.go` | `features/doctor.feature` |
 | `SeatBoot` | `application/seatboot.go` | none: `Dispatch`, `Next` call it | `features/seat_boot.feature` |
 | `Init` | `application/init.go` | `mw init` — `cmd/mw/init.go` | `features/init.feature` |
-| PosternKey*, PosternInbox (Apply), PosternSend, PosternSnapshot, PosternView, PosternBead | application/postern.go, application/posternvoice.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern key/inbox/send/snapshot/view/bead — cmd/mw/posternview.go, cmd/mw/posternbead.go | `features/postern_*.feature` |
+| Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern key/inbox/send/snapshot/view/bead — cmd/mw/posternview.go, cmd/mw/posternbead.go | `features/postern_*.feature` |
+| Hands{Add,List} | application/hands.go | mw hands add/list — cmd/mw/hands.go; `cmd/mw-hands-root` | `features/hands.feature` |
 | `PosternServe`, `PosternNginx` | `application/posternhand.go` | `mw postern serve`/`nginx` — `cmd/mw/postern.go` | `features/postern_serve.feature` |
 
 `cmd/mw/root.go` holds the tree; `cmd/mw/main.go` runs it; `cmd/mw/version.go` is
 `mw version`. `features/path_validation.feature` covers `domain/path.go`;
-`features/ready_stories.feature`, `features/claim_lease.feature` the `WorkTracker` contract.
+`features/{ready_stories,claim_lease}.feature` the `WorkTracker` contract.
 
 Add a command: `docs/adding-a-command.md`.
 

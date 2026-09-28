@@ -6,16 +6,6 @@ import (
 	"strings"
 )
 
-// PosternTranscriber hears a voice note: postern's docs/protocol.md section
-// 14, the Governor's decision 11 — on this host, never by a third party.
-// The real adapter runs config postern_transcribe_cmd
-// (infrastructure/postern's CommandTranscriber, contrib/postern-transcribe).
-type PosternTranscriber interface {
-	// Transcribe reports the words heard in the audio file at audioPath, as
-	// plain text.
-	Transcribe(ctx context.Context, audioPath string) (string, error)
-}
-
 // posternAudioMimes are the voice notes section 14 names.
 var posternAudioMimes = map[string]bool{
 	"audio/webm": true, "audio/ogg": true, "audio/mp4": true, "audio/mpeg": true,

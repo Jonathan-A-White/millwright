@@ -195,6 +195,16 @@ type Cipher interface {
 	Decrypt(privKey, ciphertext string) (text string, envelopeFrom string, err error)
 }
 
+// PosternTranscriber hears a voice note: postern's docs/protocol.md section
+// 14, the Governor's decision 11 — on this host, never by a third party.
+// The real adapter runs config postern_transcribe_cmd
+// (infrastructure/postern's CommandTranscriber, contrib/postern-transcribe).
+type PosternTranscriber interface {
+	// Transcribe reports the words heard in the audio file at audioPath, as
+	// plain text.
+	Transcribe(ctx context.Context, audioPath string) (string, error)
+}
+
 // PosternNotes is the part of the tracker's key-value store Inbox remembers
 // its cursor in between runs: it is TrackerSync's own Note, SetNote and
 // ClearNote, narrowed, the same pattern SweepNotes uses — reading mail moves
