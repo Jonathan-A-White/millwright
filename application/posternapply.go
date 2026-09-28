@@ -185,7 +185,13 @@ func (i PosternInbox) applyOne(ctx context.Context, m PosternInboxMessage, outco
 		return posternApplied{Kind: "answer", Bead: reply.Bead, Txid: m.Txid}, true, nil
 	}
 	if action, ok := decodePosternAction(m.Text); ok {
-		if !knownPosternAction(action.Action) {
+		// BRC-78 carries no replay protection (postern's docs/protocol.md
+		// section 1): an action is written as the Governor only when the
+		// backend vouched for the key that delivered or signed its record —
+		// a direct record's authenticated key, a transaction's signing key —
+		// so an old action carried again by someone else is never applied.
+		// One whose signer is unchecked is left for the Mayor to read.
+		if !knownPosternAction(action.Action) || !m.SignerChecked {
 			return posternApplied{}, false, nil
 		}
 		result, err := i.applyAction(ctx, m, action)

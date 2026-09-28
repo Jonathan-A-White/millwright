@@ -908,7 +908,7 @@ func (c *posternInboxContext) addAction(from, txid string, action map[string]any
 		return err
 	}
 	c.backend.AddRecord(application.PosternRecord{
-		Txid: txid, Class: "message", From: from, To: c.pubKey, Ts: posternReplyStamp, Ciphertext: ciphertext,
+		Txid: txid, Class: "message", From: from, To: c.pubKey, Signer: from, Ts: posternReplyStamp, Ciphertext: ciphertext,
 	})
 	return nil
 }

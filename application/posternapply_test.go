@@ -46,7 +46,7 @@ func (f *applyFixture) message(t *testing.T, from, txid, text string) {
 	f.cipher.From = from
 	ct, err := f.cipher.Encrypt(applyInboxKey, text)
 	mustDo(t, err)
-	f.backend.AddRecord(application.PosternRecord{Txid: txid, Class: "message", From: from, To: applyInboxKey, Ciphertext: ct})
+	f.backend.AddRecord(application.PosternRecord{Txid: txid, Class: "message", From: from, To: applyInboxKey, Signer: from, Ciphertext: ct})
 	f.cipher.From = releaseTapGovernorKey
 }
 
@@ -305,5 +305,30 @@ func TestInboxAppliesAnActionThePassHasNotAndSaysSo(t *testing.T) {
 	f.apply(t)
 	if got := f.tracker.Comments("mw-e.3"); len(got) != 1 {
 		t.Fatalf("expected the hold written once, got %v", got)
+	}
+}
+
+// BRC-78 carries no replay protection (postern's docs/protocol.md section
+// 1): an action is applied as the Governor only when the backend vouched for
+// who delivered or signed it. One whose signer is unchecked is left for the
+// Mayor to read.
+func TestApplyLeavesAnActionWhoseSignerIsUncheckedForTheMayor(t *testing.T) {
+	f := newApplyFixture(t)
+	raw, _ := json.Marshal(map[string]any{"action": "release", "bead": "mw-e.1"})
+	ct, err := f.cipher.Encrypt(applyInboxKey, string(raw))
+	mustDo(t, err)
+	f.backend.AddRecord(application.PosternRecord{Txid: "tx-unchecked", Class: "message", From: releaseTapGovernorKey, To: applyInboxKey, Ciphertext: ct})
+
+	f.apply(t)
+
+	if got := f.status(t, "mw-e.1"); got != apptest.StatusDeferred {
+		t.Fatalf("expected mw-e.1 still held, got %s", got)
+	}
+	f.out.Reset()
+	if _, err := f.inbox().Run(context.Background()); err != nil {
+		t.Fatalf("reading: %v", err)
+	}
+	if got := f.status(t, "mw-e.1"); got != apptest.StatusDeferred || !strings.Contains(f.out.String(), `"action":"release"`) {
+		t.Fatalf("expected the action left as text, unapplied, got status %s and %q", got, f.out.String())
 	}
 }

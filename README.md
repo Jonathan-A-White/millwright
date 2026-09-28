@@ -751,7 +751,10 @@ the Governor via postern, txid …`, `VERIFIED by the Governor via postern
 text. The Mayor's own `mw postern inbox` then shows an applied message as one
 line, `applied <kind> <bead> txid <id>`, and never applies it twice; an action
 this host does not know is left as text, and one it cannot apply (a hold on a
-claimed story, say) is refused and the Mayor told why. See
+claimed story, say) is refused and the Mayor told why. BRC-78 has no replay
+protection, so an action is applied only when the backend vouched for the
+record's signer (the key that delivered it, or signed its transaction);
+otherwise it too is left as text. See
 `features/postern_inbox_apply.feature`.
 
 A voice note — a Governor's message whose attachment is audio — is heard on
