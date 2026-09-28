@@ -19,9 +19,11 @@ export GOMAXPROCS := 1
 
 all: build test lint
 
+# mw-hands-root runs as root through sudo: built static, so no loader or
+# library outside the binary has any say in what it does.
 build:
 	$(GO) build -o $(BIN) ./cmd/mw
-	$(GO) build -o $(HANDS_ROOT_BIN) ./cmd/mw-hands-root
+	CGO_ENABLED=0 $(GO) build -o $(HANDS_ROOT_BIN) ./cmd/mw-hands-root
 
 test:
 	$(GO) test -tags $(TAGS) $(PKG)
