@@ -3,6 +3,8 @@ package postern
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -69,6 +71,11 @@ type apiRecord struct {
 	Seq       int64  `json:"seq"`
 	Txid      string `json:"txid"`
 	ScriptHex string `json:"scriptHex"`
+	// Signer is the key that signed the carrying transaction's first input,
+	// or — for a record delivered directly (postern's docs/protocol.md
+	// section 9) — the key that authenticated its delivery. Absent when the
+	// backend cannot say.
+	Signer string `json:"signer"`
 }
 
 // Messages implements application.Postern: GET /api/messages?since=. A
@@ -84,7 +91,7 @@ func (h *HTTP) Messages(ctx context.Context, since int64) ([]application.Postern
 	}
 	records := make([]application.PosternRecord, 0, len(body.Records))
 	for _, r := range body.Records {
-		record := application.PosternRecord{Seq: r.Seq, Txid: r.Txid}
+		record := application.PosternRecord{Seq: r.Seq, Txid: r.Txid, Signer: r.Signer}
 		if raw, ok := DecodeRecordScript(r.ScriptHex); ok {
 			var p application.PosternPayload
 			if json.Unmarshal(raw, &p) == nil && p.Kind == application.PosternMessageKind {
@@ -149,6 +156,58 @@ func (h *HTTP) Broadcast(ctx context.Context, rawtx string) (string, error) {
 	return body.Txid, nil
 }
 
+// Deliver implements application.Postern: POST /api/messages
+// {"scriptHex": <the record script carrying payload>}, postern's
+// docs/protocol.md section 9, answered {"txid": "direct:…", "seq": n} — 201
+// for a new record, 200 for bytes already delivered.
+func (h *HTTP) Deliver(ctx context.Context, payload []byte) (string, error) {
+	record, err := RecordScript(payload)
+	if err != nil {
+		return "", fmt.Errorf("building the record script: %w", err)
+	}
+	req, err := json.Marshal(struct {
+		ScriptHex string `json:"scriptHex"`
+	}{hex.EncodeToString(*record)})
+	if err != nil {
+		return "", err
+	}
+	var body struct {
+		Txid string `json:"txid"`
+		Seq  int64  `json:"seq"`
+	}
+	if err := h.authDo(ctx, http.MethodPost, "/api/messages", req, &body); err != nil {
+		return "", err
+	}
+	if body.Txid == "" {
+		return "", fmt.Errorf("the postern backend at %s took the message but reported no txid", h.base)
+	}
+	return body.Txid, nil
+}
+
+// UploadBlob implements application.Postern: POST /api/blobs with the
+// ciphertext as the body, postern's docs/protocol.md section 8, answered
+// {"hash", "size"} — 201 for new bytes, 200 for bytes already stored. A hash
+// that is not the body's own sha256 is refused: a message must never
+// announce a blob other than the one sent.
+func (h *HTTP) UploadBlob(ctx context.Context, blob []byte) (string, int64, error) {
+	raw, err := h.authFetchAs(ctx, http.MethodPost, "/api/blobs", blob, "application/octet-stream")
+	if err != nil {
+		return "", 0, err
+	}
+	var body struct {
+		Hash string `json:"hash"`
+		Size int64  `json:"size"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return "", 0, fmt.Errorf("the postern backend at %s answered POST /api/blobs with something that is not its JSON: %w", h.base, err)
+	}
+	sum := sha256.Sum256(blob)
+	if want := hex.EncodeToString(sum[:]); !strings.EqualFold(body.Hash, want) {
+		return "", 0, fmt.Errorf("the postern backend at %s stored the attachment under the hash %q, not its sha256 %s", h.base, body.Hash, want)
+	}
+	return strings.ToLower(body.Hash), body.Size, nil
+}
+
 // authDo is do, proven to the backend first: it asks for a fresh challenge
 // (postern's docs/api.md Authentication section — a nonce is consumed the
 // moment it is presented, so every call needs its own), signs it with keys,
@@ -169,11 +228,16 @@ func (h *HTTP) authDo(ctx context.Context, method, path string, body []byte, int
 // authFetch is fetch, proven to the backend first exactly as authDo is, and
 // reporting the raw body rather than unmarshaling it.
 func (h *HTTP) authFetch(ctx context.Context, method, path string, body []byte) ([]byte, error) {
+	return h.authFetchAs(ctx, method, path, body, "application/json")
+}
+
+// authFetchAs is authFetch with a body of contentType rather than JSON.
+func (h *HTTP) authFetchAs(ctx context.Context, method, path string, body []byte, contentType string) ([]byte, error) {
 	pubKeyHex, header, err := h.authHeader(ctx)
 	if err != nil {
 		return nil, err
 	}
-	raw, err := h.fetch(ctx, method, path, body, header)
+	raw, err := h.fetchAs(ctx, method, path, body, header, contentType)
 	if err != nil {
 		if strings.Contains(err.Error(), posternNoLicenceError) {
 			return nil, fmt.Errorf("the postern key %s holds no licence: mint one before mw can use the postern backend at %s", pubKeyHex, h.base)
@@ -245,9 +309,15 @@ func (h *HTTP) do(ctx context.Context, method, path string, body []byte, into an
 
 // fetch makes one call to the backend and reports its raw body, carrying
 // authHeader as the request's Authorization header when it is not empty. An
-// answer other than 200 is an error carrying the status and the backend's
-// own {"error": ...} message.
+// answer outside 2xx is an error carrying the status and the backend's own
+// {"error": ...} message: 201 is how a POST that stored something new
+// answers (postern's docs/protocol.md sections 8 and 9).
 func (h *HTTP) fetch(ctx context.Context, method, path string, body []byte, authHeader string) ([]byte, error) {
+	return h.fetchAs(ctx, method, path, body, authHeader, "application/json")
+}
+
+// fetchAs is fetch with a body of contentType.
+func (h *HTTP) fetchAs(ctx context.Context, method, path string, body []byte, authHeader, contentType string) ([]byte, error) {
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)
@@ -257,7 +327,7 @@ func (h *HTTP) fetch(ctx context.Context, method, path string, body []byte, auth
 		return nil, fmt.Errorf("asking the postern backend at %s: %w", h.base, err)
 	}
 	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Content-Type", contentType)
 	}
 	if authHeader != "" {
 		req.Header.Set("Authorization", authHeader)
@@ -271,7 +341,7 @@ func (h *HTTP) fetch(ctx context.Context, method, path string, body []byte, auth
 	if err != nil {
 		return nil, fmt.Errorf("reading the postern backend's answer to %s %s: %w", method, path, err)
 	}
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		var said struct {
 			Error string `json:"error"`
 		}

@@ -311,3 +311,95 @@ func TestAnyOtherUnauthorizedIsLeftAsTheBackendSaidIt(t *testing.T) {
 		t.Fatalf("expected the backend's own message and status, got: %v", err)
 	}
 }
+
+// Deliver posts a message's record script straight to the backend, postern's
+// docs/protocol.md section 9: {scriptHex} of the very script a transaction
+// would carry, signed like every call, and reports the direct: id the backend
+// names it by — on a first delivery (201) and on a harmless retry (200) alike.
+func TestDeliverPostsTheRecordScriptAndReportsItsDirectID(t *testing.T) {
+	f := loadProtocolFixture(t)
+	payload, ok := postern.DecodeRecordScript(f.RecordScriptHex)
+	if !ok {
+		t.Fatal("the fixture's record script does not decode")
+	}
+	for _, status := range []int{201, 200} {
+		b, backend := serve(t, map[string]answer{"POST /api/messages": {status, `{"txid":"direct:ab12","seq":7}`}})
+
+		txid, err := backend.Deliver(context.Background(), payload)
+		if err != nil {
+			t.Fatalf("delivering (answered %d): %v", status, err)
+		}
+		if txid != "direct:ab12" {
+			t.Fatalf("expected the direct id, got %q", txid)
+		}
+		if len(b.requests) != 2 || !strings.HasPrefix(b.requests[1].Header.Get("Authorization"), "Postern ") {
+			t.Fatalf("expected a challenge then a signed POST, got %d requests", len(b.requests))
+		}
+		var body struct {
+			ScriptHex string `json:"scriptHex"`
+		}
+		if err := json.Unmarshal([]byte(b.bodies[1]), &body); err != nil {
+			t.Fatalf("the body is not JSON: %v", err)
+		}
+		if body.ScriptHex != f.RecordScriptHex {
+			t.Fatalf("expected the fixture's record script\n%s\ngot\n%s", f.RecordScriptHex, body.ScriptHex)
+		}
+	}
+}
+
+func TestDeliverRefusesAnAnswerWithNoTxid(t *testing.T) {
+	_, backend := serve(t, map[string]answer{"POST /api/messages": {201, `{"seq":7}`}})
+	if _, err := backend.Deliver(context.Background(), []byte(`{}`)); err == nil {
+		t.Fatal("expected an answer with no txid to be an error")
+	}
+}
+
+// UploadBlob posts the ciphertext as it is, section 8, and reports the hash
+// and size the backend stored it under — after checking the hash is the
+// body's own sha256, so a message never announces a blob that is not the one
+// sent.
+func TestUploadBlobPostsTheBytesAndChecksTheHash(t *testing.T) {
+	body := []byte{0x42, 0x42, 0x10, 0x33, 0x00, 0xff}
+	sum := sha256.Sum256(body)
+	hash := hex.EncodeToString(sum[:])
+	b, backend := serve(t, map[string]answer{"POST /api/blobs": {201, fmt.Sprintf(`{"hash":%q,"size":6}`, hash)}})
+
+	gotHash, size, err := backend.UploadBlob(context.Background(), body)
+	if err != nil {
+		t.Fatalf("uploading: %v", err)
+	}
+	if gotHash != hash || size != 6 {
+		t.Fatalf("expected %s and 6 bytes, got %s and %d", hash, gotHash, size)
+	}
+	if b.bodies[1] != string(body) {
+		t.Fatalf("expected the raw bytes as the body, got %x", b.bodies[1])
+	}
+	if got := b.requests[1].Header.Get("Content-Type"); got != "application/octet-stream" {
+		t.Fatalf("expected an octet-stream body, got %q", got)
+	}
+
+	_, liar := serve(t, map[string]answer{"POST /api/blobs": {200, `{"hash":"` + strings.Repeat("0", 64) + `","size":6}`}})
+	if _, _, err := liar.UploadBlob(context.Background(), body); err == nil || !strings.Contains(err.Error(), "hash") {
+		t.Fatalf("expected a hash that is not the body's to be refused, got %v", err)
+	}
+}
+
+// A record's signer, when the backend supplies it — a transaction's signing
+// key, or the key that authenticated a direct delivery — is read, so the
+// sender is checked against it.
+func TestMessagesReadsTheSignerTheBackendSupplies(t *testing.T) {
+	f := loadProtocolFixture(t)
+	records, _ := json.Marshal(map[string]any{
+		"records": []map[string]any{{"seq": 1, "txid": "direct:ab", "vout": 0, "scriptHex": f.RecordScriptHex,
+			"height": 0, "signer": f.EncryptMessage.From}},
+	})
+	_, backend := serve(t, map[string]answer{"GET /api/messages?since=0": {200, string(records)}})
+
+	got, err := backend.Messages(context.Background(), 0)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("reading messages: %+v %v", got, err)
+	}
+	if got[0].Signer != f.EncryptMessage.From || got[0].Txid != "direct:ab" {
+		t.Fatalf("expected the signer %s on the direct record, got %+v", f.EncryptMessage.From, got[0])
+	}
+}

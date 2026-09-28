@@ -157,6 +157,17 @@ type Postern interface {
 	// backend's blob store, postern's docs/protocol.md section 8: the raw
 	// ciphertext bytes an attachment was uploaded as, untouched.
 	Blob(ctx context.Context, hash string) ([]byte, error)
+	// Deliver hands a message's record payload straight to the postern
+	// backend, postern's docs/protocol.md section 9: the adapter wraps it in
+	// the very record script a transaction would carry and posts that, and
+	// the backend indexes it beside the chain's records. It reports the
+	// "direct:<sha256>" id the record goes by from then on, a txid
+	// everywhere one appears. Delivering the same bytes twice is harmless.
+	Deliver(ctx context.Context, payload []byte) (string, error)
+	// UploadBlob uploads an attachment's ciphertext, as it is, to the
+	// backend's blob store, section 8, and reports the sha256 (hex) and size
+	// it is stored under — what the message announcing it names.
+	UploadBlob(ctx context.Context, body []byte) (hash string, size int64, err error)
 }
 
 // Cipher is the port that encrypts and decrypts a message's text between the
