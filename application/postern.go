@@ -474,9 +474,22 @@ type PosternInbox struct {
 	// docs/protocol.md section 14 — config postern_transcribe_cmd. Nil hears
 	// none: a voice note is then read like any message with an attachment.
 	Transcriber PosternTranscriber
-	// Sender sends what was heard in a voice note back to the Governor, in
-	// the note's own thread. Nil sends nothing back.
+	// Sender sends what was heard in a voice note, and how a hands step ran,
+	// back to the Governor in its own thread. Nil sends nothing back.
 	Sender *PosternSend
+
+	// HandsRunner and HandsVerifier run the hands steps the Governor
+	// approves (§17), checking each approval first; with either nil, a run
+	// action is left for the Mayor to read.
+	HandsRunner   HandsRunner
+	HandsVerifier HandsVerifier
+	// HandsHosts is the ssh prefix that reaches each other host a step may
+	// be for — config [hands_hosts]. A step for this host (Host) runs here.
+	HandsHosts map[string]string
+
+	// Now is the clock an approval's age is read by. The zero value reads
+	// the real one.
+	Now func() time.Time
 
 	// Out is where a full read's messages are printed, and where UnreadCount
 	// prints the count. A nil Out prints nothing.
@@ -1063,6 +1076,10 @@ type PosternSendRequest struct {
 	// PosternRoleTranscript for what this host heard in a voice note.
 	Re   string
 	Role string
+
+	// Recorded says Text is already written on the bead its thread names —
+	// a hands step's outcome, say — so it is not commented there again.
+	Recorded bool
 }
 
 // PosternRoleTranscript is the role of a message whose text is what the
@@ -1105,7 +1122,7 @@ func (r PosternSendRequest) setsThread() bool {
 // commentsThread reports whether, once sent, this request is written to the
 // bead its thread names: the Mayor's own words are; a transcript is not.
 func (r PosternSendRequest) commentsThread() bool {
-	return strings.TrimSpace(r.Thread) != "" && r.Role != PosternRoleTranscript
+	return strings.TrimSpace(r.Thread) != "" && r.Role != PosternRoleTranscript && !r.Recorded
 }
 
 // validate reports why this request cannot be sent, before anything is spent

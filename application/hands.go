@@ -225,3 +225,37 @@ func (l HandsList) Run(ctx context.Context, bead string) ([]HandsStepRecord, err
 	}
 	return steps, nil
 }
+
+// HandsVerifier checks the Governor's approval of a step: that sigDERHex is
+// governorKeyHex's signature over domain.HandsApprovalDigest(sha256Hex,
+// approvedAt). The real adapter is infrastructure/hands's, the same check
+// mw-hands-root makes (infrastructure/handsroot).
+type HandsVerifier interface {
+	VerifyApproval(governorKeyHex, sha256Hex string, approvedAt int64, sigDERHex string) error
+}
+
+// HandsJob is one approved step to run: the request mw-hands-root is handed
+// for a root step — the step, its bead and the Governor's approval — and how
+// its host is reached.
+type HandsJob struct {
+	Request domain.HandsRequest
+	// Remote is the ssh prefix, split on whitespace, that reaches the step's
+	// host — config [hands_hosts]; empty runs the step on this host.
+	Remote []string
+}
+
+// HandsOutcome is how a step ran: its exit status and what it printed, its
+// standard output and error together.
+type HandsOutcome struct {
+	Exit   int
+	Output string
+}
+
+// HandsRunner runs an approved hands step where it belongs: as the host's own
+// user, sh -c, or as root, by handing the request to mw-hands-root through
+// sudo -n, which checks the approval again itself. A step that runs and
+// fails is an outcome, not an error; an error is a step that could not be
+// started at all. The real adapter is infrastructure/hands's Runner.
+type HandsRunner interface {
+	Run(ctx context.Context, job HandsJob) (HandsOutcome, error)
+}

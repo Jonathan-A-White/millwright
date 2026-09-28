@@ -31,6 +31,14 @@ type PosternAction struct {
 	Action   string `json:"action"`
 	Bead     string `json:"bead"`
 	Priority *int   `json:"priority,omitempty"`
+
+	// Step, SHA256, ApprovedAt and Sig are a run action's (§17): the step
+	// approved, its hash as he saw it, when he approved it (Unix seconds),
+	// and his key's signature over both.
+	Step       string `json:"step,omitempty"`
+	SHA256     string `json:"sha256,omitempty"`
+	ApprovedAt int64  `json:"approved_at,omitempty"`
+	Sig        string `json:"sig,omitempty"`
 }
 
 // decodePosternAction reads text as a PosternAction, reporting false when it
@@ -51,7 +59,7 @@ func decodePosternAction(text string) (PosternAction, bool) {
 // it does not is left for the Mayor to read as text.
 func knownPosternAction(action string) bool {
 	switch action {
-	case PosternActionRelease, PosternActionHold, PosternActionPriority, PosternActionVerified:
+	case PosternActionRelease, PosternActionHold, PosternActionPriority, PosternActionVerified, PosternActionRun:
 		return true
 	}
 	return false
@@ -191,7 +199,7 @@ func (i PosternInbox) applyOne(ctx context.Context, m PosternInboxMessage, outco
 		// a direct record's authenticated key, a transaction's signing key —
 		// so an old action carried again by someone else is never applied.
 		// One whose signer is unchecked is left for the Mayor to read.
-		if !knownPosternAction(action.Action) || !m.SignerChecked {
+		if !knownPosternAction(action.Action) || !m.SignerChecked || (action.Action == PosternActionRun && !i.runsHands()) {
 			return posternApplied{}, false, nil
 		}
 		result, err := i.applyAction(ctx, m, action)
@@ -229,6 +237,9 @@ func (i PosternInbox) applyOne(ctx context.Context, m PosternInboxMessage, outco
 // range — is refused, and the Mayor is mailed why. Either way it is applied,
 // so it is never tried again.
 func (i PosternInbox) applyAction(ctx context.Context, m PosternInboxMessage, action PosternAction) (posternApplied, error) {
+	if action.Action == PosternActionRun {
+		return i.applyRun(ctx, m, action)
+	}
 	result := posternApplied{Kind: action.Action, Bead: action.Bead, Txid: m.Txid}
 	refuse := func(why string) (posternApplied, error) {
 		result.Refused, result.Detail = true, why
