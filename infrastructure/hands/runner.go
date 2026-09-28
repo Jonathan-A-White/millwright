@@ -112,6 +112,9 @@ func (r Runner) command(job application.HandsJob) ([]string, []byte, time.Durati
 	switch req.As {
 	case domain.HandsAsUser:
 		if remote {
+			if logsInAsRoot(job.Remote) {
+				return nil, nil, 0, fmt.Errorf("the [hands_hosts] prefix for %s logs in as root, so a user step there would run as root without mw-hands-root's checks: give it a non-root login", req.Host)
+			}
 			return append(append([]string(nil), job.Remote...), "sh -c "+shellQuote(req.Run)), nil, r.UserLimit, nil
 		}
 		return []string{r.Shell, "-c", req.Run}, nil, r.UserLimit, nil
@@ -127,6 +130,18 @@ func (r Runner) command(job application.HandsJob) ([]string, []byte, time.Durati
 	default:
 		return nil, nil, 0, fmt.Errorf("a step runs as %s or %s, not %q", domain.HandsAsUser, domain.HandsAsRoot, req.As)
 	}
+}
+
+// logsInAsRoot reports whether an ssh prefix names root as its login, as
+// root@host or -l root: over such a prefix a user step would be a root step
+// that no mw-hands-root ever checked.
+func logsInAsRoot(prefix []string) bool {
+	for i, word := range prefix {
+		if strings.HasPrefix(word, "root@") || (word == "-l" && i+1 < len(prefix) && prefix[i+1] == "root") || word == "-lroot" {
+			return true
+		}
+	}
+	return false
 }
 
 // shellQuote is text as one single-quoted word of sh: whatever it holds, the

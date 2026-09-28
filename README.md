@@ -668,7 +668,7 @@ millwright = "make build"          # run in this rig's checkout once a landing h
 
 [hands_hosts]                      # how this host reaches another host a hands step is for; leave it out to run steps for this host only
 laptop = "ssh laptop"              # an ssh prefix, split on whitespace
-vps = "ssh root@allmymind.org"
+vps = "ssh mw@allmymind.org"       # a NON-root login: over a root login a user step would run as root unchecked, so mw refuses it
 
 [watch]                            # what mw watch looks at; leave it out to watch nothing
 ssh = "vps"                        # the name ssh knows the watched host by

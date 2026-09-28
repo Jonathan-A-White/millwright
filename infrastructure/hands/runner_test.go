@@ -161,3 +161,21 @@ func TestVerifierIsTheOneCheckMwHandsRootMakes(t *testing.T) {
 		t.Fatal("expected another time refused")
 	}
 }
+
+// A user step over a prefix that logs in as root would be a root step no
+// mw-hands-root ever checked: the runner refuses it before running anything.
+func TestRunnerRefusesAUserStepOverARootLogin(t *testing.T) {
+	for _, prefix := range [][]string{
+		{"ssh", "root@allmymind.org"},
+		{"ssh", "-l", "root", "allmymind.org"},
+		{"ssh", "-lroot", "allmymind.org"},
+	} {
+		job := userJob("id -u")
+		job.Request.Host = "vps"
+		job.Remote = prefix
+		_, err := hands.NewRunner("/usr/local/sbin/mw-hands-root").Run(context.Background(), job)
+		if err == nil || !strings.Contains(err.Error(), "non-root login") {
+			t.Fatalf("%v: expected a user step over a root login to be refused, got %v", prefix, err)
+		}
+	}
+}
