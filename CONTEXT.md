@@ -75,7 +75,7 @@ _Avoid_: Runtime, CLI, provider
 How an epic's stories are allowed to overlap: serial, parallel, or hybrid (parallel within stages, serial between them).
 
 **Host**:
-A machine that runs sessions. Today: the Laptop (powerful, intermittently on) and the VPS (small, always on).
+A machine that runs sessions. Today: the desktop (the factory's home, always on), the Laptop (powerful, intermittently on, extra Builders on demand) and the VPS (small, always on: the front door).
 _Avoid_: Node, server, box
 
 ### Economy

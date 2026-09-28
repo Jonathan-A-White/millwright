@@ -91,6 +91,71 @@ checks on its branch, `mw status` reports what a host is doing, `mw brief`
 prints the live children of a bead for a seat to boot from, and `mw sweep`
 marks the claimed stories whose session has gone or gone quiet.
 
+### The factory on one host (the desktop)
+
+The factory has one home, the desktop: the Mayor, the one beads database, the
+mail notifier and the postern backend all live there, always on. The database
+runs as a Dolt server (`dolt sql-server` on the desktop), so every host's `bd`
+writes the same rows and a claim is atomic across hosts; GitHub stops being how
+the hosts see each other's beads and becomes a backup of them, pushed on a
+timer. Each host's `beads_sync` says which side of that it is on:
+
+| `beads_sync` | The host | What `mw sync` does with beads |
+| --- | --- | --- |
+| `remote` (default) | keeps a copy of its own | one `bd sync` every sync, carrying the notes: *Keeping two hosts level* |
+| `backup` | holds the one database: the desktop | writes the notes straight into it every sync; one `bd sync` as a backup only once the last got through `beads_backup_minutes` ago (30), recorded as `host.<name>.last_backup`; GC on its usual daily cadence |
+| `shared` | reaches the desktop's database: the Laptop on a boost | writes the notes straight into it every sync; never a `bd sync` and never a GC, which are the desktop's |
+
+In every mode the vault half runs exactly as before, and every sync that gets
+the vault level writes the note of when the host was level, with its timers'
+counts — so "laptop last synced 12 min ago" still means the Laptop's timers
+last got it level 12 minutes ago. A backup that fails is said on the sync's one
+line (and a merge conflict or a stuck working set is marked the way any such
+halt is, for `mw status` and `mw nudge` to show), but it stops nothing and takes
+no note back: no host's view of the work waits on it, and the next sync tries
+again. `mw status` says the mode on its `BEADS SYNC` line
+— with, on the desktop, how long ago the last backup got through — and no
+longer calls another host's last sync "a cycle behind" once it is read live
+out of the one database; `mw nudge` keeps the other hosts' ages beside this
+host's own halt rather than dropping them. Any other `beads_sync` is refused,
+naming the three.
+
+**The desktop**, once the Mayor has moved there (above):
+
+1. The beads database in Dolt's server mode, listening on the desktop's
+   WireGuard address (10.88.0.3), with the desktop's own `bd` pointed at it
+   too: once a server holds the database, no `bd` opens it on its own.
+2. `beads_sync = "backup"` in `~/.config/mw/config.toml`, and
+   `beads_backup_minutes` to change the half hour.
+3. `MW_MAIL_SYNC_EVERY=60` in `~/.config/mw/mail-notify.env`: a sync there is a
+   few local writes, with no remote round trip unless a backup is due.
+4. The postern backend's environment, `mw postern serve --env-file <file>
+   --addr 10.88.0.3:8787` (*The postern key*, below), then a restart of the
+   backend.
+
+**A boost on the Laptop**, when the Governor wants more Builders at once:
+
+1. `beads_sync = "shared"` in the Laptop's config, and bd's own
+   `BEADS_DOLT_SERVER_HOST=10.88.0.3`, `BEADS_DOLT_SERVER_PORT` and
+   `BEADS_DOLT_SERVER_PASSWORD` in its `~/.config/mw/dispatch.env` — which every
+   timer reads — and in the shell anything runs `bd` from. It keeps no beads of
+   its own and never syncs them.
+2. Raise its `cap`, arm `mw-dispatch`, and path stories to `host=laptop`.
+3. `mw doctor beads-server` says whether it reaches the database (*mw doctor*).
+
+To end the boost, stop the Laptop dispatching. `mw` refuses a `cap` below 1
+today, so rather than a cap of 0 that is `systemctl --user disable --now
+mw-dispatch.timer` there; the sessions already running finish, and whatever is
+still pathed to the Laptop is re-pathed (`bd update <id> --set-metadata
+host=desktop`).
+
+**What stays on the VPS**: nginx and its TLS, the WireGuard hub, the Governor's
+blog, and a watchdog. nginx proxies the postern's `/api` — and `/api/events`,
+the backend's event stream, unbuffered — to the backend on the desktop,
+`http://desktop.mw:8787`: `mw postern nginx --conf <site>` there, whose
+`--backend` defaults to `postern_backend`. Every factory timer the VPS ran for
+the Mayor is turned off by the move itself, step 2 above.
+
 ## Installing
 
 See *Quick start*, above, for the one line. It needs apt packages (git, tmux, jq,
@@ -559,8 +624,9 @@ bd reclaim mw-gq6.30                                        # or take it over fi
 `MW_PUSH_WAIT_SECONDS`, `MW_MAX_ATTEMPTS`,
 `MW_MILLHAND_ROUTINE_MODEL`, `MW_MILLHAND_REVIEW_MODEL`,
 `MW_NUDGE_AFTER_MINUTES`, `MW_NUDGE_SYNC_STALE_MINUTES`, `MW_POSTERN_BACKEND`,
-`MW_POSTERN_FLOAT_SATS`, `MW_POSTERN_GOVERNOR_KEY`, `MW_POSTERN_KEY_FILE` and
-`MW_POSTERN_SNAPSHOT_PATH` ahead of it:
+`MW_POSTERN_FLOAT_SATS`, `MW_POSTERN_GOVERNOR_KEY`, `MW_POSTERN_KEY_FILE`,
+`MW_POSTERN_SNAPSHOT_PATH`, `MW_POSTERN_VIEW_PATH`, `MW_BEADS_SYNC` and
+`MW_BEADS_BACKUP_MINUTES` ahead of it:
 
 ```toml
 vault = "/root/millwright-vault"   # the one beads database and the seats
@@ -583,6 +649,9 @@ postern_float_sats = 100000        # the postern's float cap, in testnet satoshi
 postern_governor_key = ""          # the Governor's compressed public key, as hex, the postern backend answers to (default empty)
 postern_key_file = "~/.config/mw/postern.key"  # where the Mayor's postern key is kept, outside the vault (default shown)
 postern_snapshot_path = "~/.local/state/mw/snapshot.bin"  # where mw postern snapshot writes the encrypted snapshot (default shown)
+postern_view_path = "~/.local/state/postern/view.b64"  # the live view mw postern view writes and the postern backend serves (default shown)
+beads_sync = "remote"              # remote (a copy of its own), backup (holds the one database) or shared (reaches another host's) (default remote)
+beads_backup_minutes = 30          # on a backup host, how long between two backups of the one database (default 30)
 
 [rigs]
 millwright = "/root/millwright"    # where each rig is checked out here
@@ -683,7 +752,14 @@ Ledgers are appended to by both hosts and edited by neither, so the vault's
 `.gitattributes` must carry `seats/*/ledger.md merge=union` — two hosts' appends
 then merge by keeping every line instead of conflicting. `mw sync` writes that
 line if it is missing and says so; committing it is a seat's job, and until
-someone does, only this host is covered. See `features/sync.feature`.
+someone does, only this host is covered.
+
+All of that is `beads_sync = "remote"`, the default: every host keeping a copy
+of its own. On the host that holds the one database (`backup`) the `bd sync` is
+only a backup, run once one is due, and on a host that reaches it (`shared`)
+there is none; in both the note is written straight into the database every
+sync. See *The factory on one host (the desktop)*, above, and
+`features/sync.feature`.
 
 ## The postern key
 
@@ -739,25 +815,63 @@ inspection. The notifier tick (`contrib/mail-notify`) calls it once after `mw
 nudge`, only on a host with a postern key file, and a failing snapshot is
 logged but never stops the tick.
 
-The postern's VPS-local hand steps — this host's config lines and the nginx
-site — are `mw postern serve` and `mw postern nginx`, both idempotent, both
-backing up what they are about to change first, and both taking `--dry-run`:
+The postern's hand steps — this host's config lines and the postern backend's
+environment, on the desktop, and the nginx site, on the VPS — are `mw postern
+serve` and `mw postern nginx`, both idempotent, both backing up what they are
+about to change first, and both taking `--dry-run`, which prints everything
+they would write:
 
 ```sh
-mw postern serve --backend <url> --snapshot-path <path> --governor-key <hex> [--backup-dir <dir>] [--dry-run]
-mw postern nginx --conf <path> --backend <url> [--backup-dir <dir>] [--dry-run]
+mw postern serve [--backend <url>] [--snapshot-path <path>] [--governor-key <hex>] [--env-file <path> [--addr <host:port>] [--view-path <path>] [--mw <path>] [--mayor-key <hex>]] [--backup-dir <dir>] [--dry-run]
+mw postern nginx --conf <path> [--backend <url>] [--backup-dir <dir>] [--dry-run]
 ```
 
 `mw postern serve` writes or replaces `postern_backend`, `postern_snapshot_path`
 and `postern_governor_key` in this host's config file — a re-run with the same
-values changes nothing — and makes the snapshot's own directory. `mw postern
-nginx` ensures a `location = /snapshot` block (aliased to the config's own
-`postern_snapshot_path`, no-store, nosniff, served as an opaque octet stream)
-and points the `/api` upstream(s) at `--backend`, both marker-based so a re-run
-is a no-op; it then runs `nginx -t` and, only once that passes, `systemctl
-reload nginx`, restoring the backup automatically if the test fails so a bad
-edit is never left live. Both print the backup path and the way back.
-`--backup-dir` defaults to `/root/tidy`. See `features/postern_serve.feature`.
+values changes nothing — and makes the snapshot's own directory. Each defaults
+to what the config already says, so a flag is only needed to change one; the
+Governor's key has no default, so it is said once. With `--env-file`, naming the
+backend's environment file (a systemd `EnvironmentFile`), it also writes or
+replaces the backend's own lines there, every other line — `POSTERN_ANCHOR`,
+`POSTERN_DATA` and the rest — left as it was:
+
+| Line | From |
+| --- | --- |
+| `POSTERN_ADDR` | `--addr`: `127.0.0.1:8787` by default, `10.88.0.3:8787` on the desktop |
+| `POSTERN_VIEW_FILE` | `--view-path`: `postern_view_path`, which serve writes into the config too |
+| `POSTERN_BEAD_CMD` | `<--mw> postern bead`; `--mw` is the mw running serve by default |
+| `POSTERN_ON_MESSAGE` | `<--mw> postern inbox --apply` |
+| `POSTERN_MAYOR_KEY` | `--mayor-key`: this host's postern key's public half by default |
+| `POSTERN_ISSUER_KEY` | the Governor's key: he issues the licence |
+
+It makes the view's directory, and says to restart the backend, which reads its
+environment only when it starts.
+
+`mw postern nginx` ensures a `location = /api/events` block ahead of the
+general `/api/` location — the backend's event stream, held open for as long as
+the app is:
+
+```nginx
+    # mw-api-events
+    location = /api/events {
+        proxy_pass http://desktop.mw:8787;
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 1h;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+    }
+```
+
+and a `location = /snapshot` block (aliased to the config's own
+`postern_snapshot_path`, no-store, nosniff, served as an opaque octet stream),
+and points every `/api` upstream at `--backend` (`postern_backend` by
+default), all marker-based so a re-run is a no-op; it then runs `nginx -t` and,
+only once that passes, `systemctl reload nginx`, restoring the backup
+automatically if the test fails so a bad edit is never left live. Both print
+the backup path and the way back. `--backup-dir` defaults to `/root/tidy`,
+which is the VPS's; on the desktop, name one of your own. See
+`features/postern_serve.feature`.
 
 ## Making a fresh vault
 
@@ -1056,7 +1170,9 @@ script that a second `systemd --user` timer runs every minute
 `contrib/systemd/`). It reads no mail and starts nothing: at most it types two
 fixed-shape lines into the live Mayor's tmux window, and Enter after each.
 Each tick it skips everything if the 1-minute load is above 2.0; runs `mw sync`
-at `nice 19` and idle I/O priority if the last was five minutes ago or more;
+at `nice 19` and idle I/O priority if the last was `MW_MAIL_SYNC_EVERY` seconds
+ago or more (300, five minutes; 60 on the desktop, where a sync is a few local
+writes);
 lists `bd mail inbox` and compares its ids with the ones it has announced; and
 runs `mw nudge` (below), reusing the same synced beads. For new mail, it types
 `New mail for mayor: <n> message(s). Run bd mail inbox.`; for whatever `mw
@@ -1089,6 +1205,7 @@ The service reads the same `~/.config/mw/dispatch.env` as the dispatch timer for
 its `PATH`, which must reach `mw`, `bd`, `tmux`, `flock` and `~/.local/bin`; and
 the vault from `~/.config/mw/config.toml`. Its settings (`MW_MAIL_MAILBOX`,
 `MW_MAIL_LOAD_LIMIT`, `MW_MAIL_SYNC_EVERY`, `MW_MAIL_STATE_DIR`,
+`MW_MAIL_VIEW_EVERY`, `MW_MAIL_VIEW_TIMEOUT`, `MW_MAIL_SNAPSHOT_EVERY`,
 `MW_MAIL_SNAPSHOT_TIMEOUT`, `MW_TMUX_SOCKET`) go in an optional
 `~/.config/mw/mail-notify.env`, as `NAME=value` lines; the script's header
 lists them. A tmux server other than the default is named with
@@ -1096,12 +1213,21 @@ lists them. A tmux server other than the default is named with
 
 On a host with a postern key file, the tick also refreshes the postern
 snapshot (`mw postern snapshot`, above) once the vault's beads have changed
-since the last attempt and at most once every ten minutes — never
-unconditionally. Each attempt is bounded to `MW_MAIL_SNAPSHOT_TIMEOUT` seconds
-(default 60) and killed past that, logged once with how long it ran; a slow
-host whose beads take longer than the default to snapshot should raise
-`MW_MAIL_SNAPSHOT_TIMEOUT` — a snapshot that never finishes inside its timeout
-is never worth retrying more often (mw-tfne4.12).
+since the last attempt and at most once every `MW_MAIL_SNAPSHOT_EVERY` seconds
+(default 600, ten minutes) — never unconditionally. Each attempt is bounded to
+`MW_MAIL_SNAPSHOT_TIMEOUT` seconds (default 60) and killed past that, logged
+once with how long it ran; a slow host whose beads take longer than the default
+to snapshot should raise `MW_MAIL_SNAPSHOT_TIMEOUT` — a snapshot that never
+finishes inside its timeout is never worth retrying more often (mw-tfne4.12).
+
+Just before it, on the same host, the tick refreshes the live view the postern
+backend serves — `mw postern view` — once the beads have changed and at most
+once every `MW_MAIL_VIEW_EVERY` seconds (default 30), bounded to
+`MW_MAIL_VIEW_TIMEOUT` seconds (default 60) and logged the same way. It first
+asks `mw postern view --help` whether this mw has the view at all (looking for
+the view's own usage line: cobra exits 0 for a subcommand it does not know),
+and passes over an mw without it silently. The view and the snapshot read the
+beads' level once a tick between them.
 
 **Undo it**:
 
@@ -1240,7 +1366,11 @@ The OTHER HOSTS part is the whole of the factory's safety net for a host that
 has gone quiet. There is no failover: a host that stops syncing does not hand
 its work back. Each host is shown with when it last recorded itself level (the
 `host.<name>.last_sync` note `mw sync` leaves, as this host last read it), and
-the stories pathed to it that are ready or already claimed. A host is **ASLEEP** when that note is older than `host_silent_hours` — two by default,
+the stories pathed to it that are ready or already claimed. On a host whose
+`beads_sync` is `backup` or `shared` that note is read live out of the one
+database rather than a cycle behind, and the report's `BEADS SYNC` line says
+which mode this host is in and, on the desktop, how long ago its last backup
+got through. A host is **ASLEEP** when that note is older than `host_silent_hours` — two by default,
 so that the lag alone does not call a host asleep — set in the config file or by
 `MW_HOST_SILENT_HOURS`, whole hours and at least 1. It is also `ASLEEP, never
 synced` when it has left no note at all, and `ASLEEP, last sync unreadable` when
@@ -1272,8 +1402,8 @@ a row` — without a tunnel to it. A host that keeps no log leaves no note. Noth
 wakes anyone on a count: it is only shown.
 
 `mw status` only ever says this. Re-pathing a story is a person's act, never a
-report's. The config keys it reads are `vault`, `host`, `host_silent_hours` and
-`rig_memory_bytes` (*What a host is told*). See `features/status.feature`.
+report's. The config keys it reads are `vault`, `host`, `host_silent_hours`,
+`rig_memory_bytes` and `beads_sync` (*What a host is told*). See `features/status.feature`.
 
 ## Briefing a seat from a bead
 
@@ -1812,6 +1942,17 @@ not installed on this host is skipped, not faulted) but not active, its cure
 is `systemctl --user start <timer>`, its damper 30 minutes with a cap of 3,
 and its way back `systemctl --user stop <timer>` for exactly the timers the
 cure started.
+
+**beads-server** is for a host whose `beads_sync` is `shared` — the Laptop on a
+boost — whose `bd` reaches the desktop's database over the network: one TCP
+dial, with a 3 s timeout, of `BEADS_DOLT_SERVER_HOST` on
+`BEADS_DOLT_SERVER_PORT` (3307 when unset) as `mw doctor`'s own environment has
+them, from `dispatch.env`. It is faulty when the database does not answer, and
+there is no cure from here — the database runs on another host — so, as with
+**beads-size**, the second faulty run writes the note that wakes the Millhand;
+**wg** is the check that restarts this host's end of the link. Every other host
+reads it ok, saying why there is nothing to reach; a `shared` host with no
+`BEADS_DOLT_SERVER_HOST` in that environment reads cannot-tell.
 
 **beads-size** watches `.beads` against the same 1 GB budget `mw status`'s
 BEADS line warns on; past it there is no cure — repacking would delete packs
