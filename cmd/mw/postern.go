@@ -12,6 +12,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/hostlock"
 	"github.com/Jonathan-A-White/millwright/infrastructure/postern"
 )
 
@@ -136,7 +137,7 @@ func posternGateway() (gateway *beads.Gateway, host string, err error) {
 // newPosternInboxCmd builds `mw postern inbox`, reading from the postern
 // backend at postern_backend and decrypting with the postern key.
 func newPosternInboxCmd() *cobra.Command {
-	var unreadCount bool
+	var unreadCount, apply bool
 
 	cmd := &cobra.Command{
 		Use:   "inbox",
@@ -164,7 +165,15 @@ func newPosternInboxCmd() *cobra.Command {
 			"inbox's own state directory, named by the message's txid; its path is printed under the\n" +
 			"message, and a bead comment naming it ends with \" [image: <path>]\".\n\n" +
 			"--unread-count prints only how many are unread, without reading them, so a notifier can\n" +
-			"poll it without consuming anything.",
+			"poll it without consuming anything.\n\n" +
+			"--apply is the zero-token pass the postern backend's on-message hook runs: every message\n" +
+			"since the cursor that the Governor verifiably sent and this host knows how to apply is\n" +
+			"applied at once, as the Governor — a reply, a comment in a bead's thread, or an action\n" +
+			"(postern's docs/protocol.md section 13: release, hold, priority, verified) — each at most\n" +
+			"once per txid, commented on its bead and mailed to the Mayor. It moves no cursor and\n" +
+			"prints no message's text, only one line per message applied. A plain read then shows an\n" +
+			"applied message as that one line: applied <kind> <bead> txid <id>. An action this host\n" +
+			"does not know is left for the Mayor to read as text.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			keys, err := posternKeys()
@@ -197,10 +206,15 @@ func newPosternInboxCmd() *cobra.Command {
 				Host:          host,
 				GovernorKey:   governorKey,
 				AttachmentDir: attachmentDir,
+				Lock:          posternInboxLock(attachmentDir),
 				Out:           cmd.OutOrStdout(),
 			}
 			if unreadCount {
 				_, err = inbox.UnreadCount(cmd.Context())
+				return err
+			}
+			if apply {
+				_, err = inbox.Apply(cmd.Context())
 				return err
 			}
 			_, err = inbox.Run(cmd.Context())
@@ -208,7 +222,20 @@ func newPosternInboxCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&unreadCount, "unread-count", false, "print only how many messages are unread")
+	cmd.Flags().BoolVar(&apply, "apply", false, "apply the Governor's replies, bead comments and actions at once, moving no cursor")
+	cmd.MarkFlagsMutuallyExclusive("unread-count", "apply")
 	return cmd
+}
+
+// posternInboxLockWait is how long a pass waits for another to finish: longer
+// than the five minutes a voice note's transcription may take.
+const posternInboxLockWait = 6 * time.Minute
+
+// posternInboxLock is the lock every postern inbox read and apply pass takes
+// on this host, kept beside the attachments it writes, so that two passes
+// never apply one message together.
+func posternInboxLock(attachmentDir string) *hostlock.Lock {
+	return hostlock.New(filepath.Dir(attachmentDir), hostlock.WithWait(posternInboxLockWait))
 }
 
 // newPosternSendCmd builds `mw postern send`, encrypting from the postern key

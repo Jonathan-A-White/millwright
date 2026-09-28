@@ -465,6 +465,11 @@ type PosternInbox struct {
 	// reads it.
 	AttachmentDir string
 
+	// Lock, when set, is taken for the whole of Run and Apply, so that two
+	// of them — the on-message hook run twice at once, or the hook and the
+	// Mayor's own read — never apply the same message together.
+	Lock HostLock
+
 	// Out is where a full read's messages are printed, and where UnreadCount
 	// prints the count. A nil Out prints nothing.
 	Out io.Writer
@@ -492,31 +497,58 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 	if err := i.wired(); err != nil {
 		return nil, err
 	}
+	release, err := i.lock(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	mine, newest, cursor, err := i.fetch(ctx)
 	if err != nil {
 		return nil, err
 	}
+	applied := map[string]string{}
+	if i.Tracker != nil {
+		if applied, err = i.appliedNotes(ctx); err != nil {
+			return nil, err
+		}
+	}
 	newestFirst := reversePosternInbox(mine)
 	for _, m := range newestFirst {
+		// A message a pass already applied (Apply, the on-message hook's)
+		// is one line: what was done, never its text, never done again.
+		if done, ok := applied[m.Txid]; ok && m.Txid != "" {
+			i.printf("%s\n", done)
+			continue
+		}
 		line, path := i.attachmentOutcome(ctx, m)
 		// A record whose sender is not verified is never read as a reply,
 		// however its plaintext decodes: recording its answer on a bead
 		// would take a forged or unverifiable claim as someone's word.
-		if m.Verified {
+		switch {
+		case m.Verified && i.isGovernor(m) && i.Tracker != nil:
+			result, handled, err := i.applyOne(ctx, m, line, path)
+			if err != nil {
+				return nil, err
+			}
+			if handled {
+				if err := i.markApplied(ctx, applied, result); err != nil {
+					return nil, err
+				}
+				switch {
+				case result.Kind == "answer", result.Kind == "comment" && m.Attachment == nil:
+					continue
+				case result.Kind != "comment":
+					i.printf("%s\n", result.line())
+					continue
+				}
+			}
+		case m.Verified:
 			if reply, ok := decodePosternReply(m.Text); ok {
 				recorded, err := i.recordAnswer(ctx, m, reply)
 				if err != nil {
 					return nil, err
 				}
-				if recorded && m.Attachment == nil {
-					continue
-				}
-			} else if m.ThreadIsBead && i.isGovernor(m) {
-				recorded, err := i.recordThreadComment(ctx, m, path)
-				if err != nil {
-					return nil, err
-				}
-				if recorded && m.Attachment == nil {
+				if recorded {
 					continue
 				}
 			}
@@ -576,26 +608,50 @@ func (i PosternInbox) downloadAttachment(ctx context.Context, m PosternInboxMess
 	if err := os.MkdirAll(i.AttachmentDir, 0o700); err != nil {
 		return "", fmt.Errorf("making %s: %w", i.AttachmentDir, err)
 	}
-	path := filepath.Join(i.AttachmentDir, m.Txid+posternAttachmentExtension(m.Attachment.Mime))
+	path := filepath.Join(i.AttachmentDir, posternFileName(m.Txid)+posternAttachmentExtension(m.Attachment.Mime))
 	if err := os.WriteFile(path, []byte(plain), 0o600); err != nil {
 		return "", fmt.Errorf("writing the attachment: %w", err)
 	}
 	return path, nil
 }
 
-// posternAttachmentExtension is the file extension mime's image writes under:
-// postern's docs/protocol.md section 8 names image/png, image/jpeg and
-// image/webp; anything else — which the phone never sends — falls back to
-// .png rather than refusing a file already safely downloaded and decrypted.
+// posternAttachmentExtension is the file extension an attachment of mime is
+// written under: postern's docs/protocol.md section 14's list — images,
+// voice notes, a PDF or plain text. Anything else — which the phone never
+// sends — is written .bin rather than refusing a file already safely
+// downloaded and decrypted. A mime's parameters (audio/webm;codecs=opus)
+// are no part of its type.
 func posternAttachmentExtension(mime string) string {
-	switch strings.ToLower(strings.TrimSpace(mime)) {
+	kind, _, _ := strings.Cut(strings.ToLower(strings.TrimSpace(mime)), ";")
+	switch strings.TrimSpace(kind) {
+	case "image/png":
+		return ".png"
 	case "image/jpeg":
 		return ".jpg"
 	case "image/webp":
 		return ".webp"
+	case "audio/webm":
+		return ".webm"
+	case "audio/ogg":
+		return ".ogg"
+	case "audio/mp4":
+		return ".m4a"
+	case "audio/mpeg":
+		return ".mp3"
+	case "application/pdf":
+		return ".pdf"
+	case "text/plain":
+		return ".txt"
 	default:
-		return ".png"
+		return ".bin"
 	}
+}
+
+// posternFileName is txid as a file name: a direct record's "direct:<hash>"
+// with its colon made a dash, so that no program reading the file takes the
+// name for a URL.
+func posternFileName(txid string) string {
+	return strings.ReplaceAll(txid, ":", "-")
 }
 
 // recordAnswer appends reply's answer to the bead it names, clears the note
@@ -765,28 +821,48 @@ func (i PosternInbox) isGovernor(m PosternInboxMessage) bool {
 // set, is a decrypted attachment's path: the comment ends with " [image:
 // <imagePath>]".
 func (i PosternInbox) recordThreadComment(ctx context.Context, m PosternInboxMessage, imagePath string) (bool, error) {
+	recorded, _, err := i.recordThreadCommentOnce(ctx, m, imagePath)
+	return recorded, err
+}
+
+// recordThreadCommentOnce is recordThreadComment, saying besides whether the
+// comment was written now (fresh) rather than found written already.
+func (i PosternInbox) recordThreadCommentOnce(ctx context.Context, m PosternInboxMessage, imagePath string) (recorded, fresh bool, err error) {
 	if i.Tracker == nil {
-		return false, nil
+		return false, false, nil
 	}
 	key := PosternThreadCommentKey(m.Txid)
 	already, err := i.Memory.Note(ctx, key)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	if already != "" {
-		return true, nil
+		return true, false, nil
 	}
 	comment := fmt.Sprintf("The Governor by postern %s: %s", sentInFull(m.Ts), m.Text)
 	if imagePath != "" {
-		comment += fmt.Sprintf(" [image: %s]", imagePath)
+		comment += fmt.Sprintf(" [%s: %s]", posternAttachmentLabel(m.Attachment.Mime), imagePath)
 	}
 	if err := i.Tracker.CommentOnStory(ctx, m.Thread, comment); err != nil {
-		return false, nil
+		return false, false, nil
 	}
 	if err := i.Memory.SetNote(ctx, key, m.Txid); err != nil {
-		return false, err
+		return false, false, err
 	}
-	return true, nil
+	return true, true, nil
+}
+
+// posternAttachmentLabel is what a comment calls a file of mime: an image,
+// an audio note, or a file.
+func posternAttachmentLabel(mime string) string {
+	switch kind, _, _ := strings.Cut(strings.ToLower(strings.TrimSpace(mime)), "/"); kind {
+	case "image":
+		return "image"
+	case "audio":
+		return "audio"
+	default:
+		return "file"
+	}
 }
 
 // fromLabel is the text mw postern inbox prints for m's sender: m.From

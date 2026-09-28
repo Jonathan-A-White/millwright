@@ -110,6 +110,15 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a postern message from "([^"]*)" on topic "([^"]*)" with text "([^"]*)" and txid "([^"]*)"$`,
 		c.aPosternMessageFromOnTopic)
 
+	ctx.Given(`^a postern action "([^"]*)" on bead "([^"]*)" from "([^"]*)" with txid "([^"]*)"$`, c.aPosternActionOnBeadFrom)
+	ctx.Given(`^a postern priority (\d+) action on bead "([^"]*)" from the Governor with txid "([^"]*)"$`, c.aPosternPriorityActionFromTheGovernor)
+	ctx.Given(`^bead "([^"]*)" is claimed by "([^"]*)"$`, c.beadIsClaimedBy)
+	ctx.When(`^mw postern inbox --apply is run$`, c.mwPosternInboxApplyIsRun)
+	ctx.Then(`^bead "([^"]*)" now stands "([^"]*)"$`, c.beadNowStands)
+	ctx.Then(`^bead "([^"]*)" now has priority (\d+)$`, c.beadNowHasPriority)
+	ctx.Then(`^bead "([^"]*)"'s last comment reads "([^"]*)"$`, c.beadsLastCommentReads)
+	ctx.Then(`^the txid "([^"]*)" is marked applied$`, c.theTxidIsMarkedApplied)
+	ctx.Then(`^the postern inbox cursor has not moved$`, c.thePosternInboxCursorHasNotMoved)
 	ctx.When(`^mw postern inbox is run$`, c.mwPosternInboxIsRun)
 	ctx.When(`^mw postern inbox --unread-count is run$`, c.mwPosternInboxUnreadCountIsRun)
 
@@ -802,6 +811,99 @@ func (c *posternInboxContext) beadsLastCommentNamesTheDecryptedImagesPath(bead s
 	got := comments[len(comments)-1].Text
 	if !strings.HasSuffix(got, want) {
 		return fmt.Errorf("expected the comment on %s to end with %q, got %q", bead, want, got)
+	}
+	return nil
+}
+
+// aPosternActionOnBeadFrom adds a record whose plaintext is postern's
+// docs/protocol.md section 13 action, genuinely sent by from.
+func (c *posternInboxContext) aPosternActionOnBeadFrom(action, bead, from, txid string) error {
+	return c.addAction(from, txid, map[string]any{"action": action, "bead": bead})
+}
+
+func (c *posternInboxContext) aPosternPriorityActionFromTheGovernor(priority int, bead, txid string) error {
+	return c.addAction(c.governorKey, txid, map[string]any{"action": "priority", "bead": bead, "priority": priority})
+}
+
+func (c *posternInboxContext) addAction(from, txid string, action map[string]any) error {
+	text, err := json.Marshal(action)
+	if err != nil {
+		return err
+	}
+	c.cipher.From = from
+	ciphertext, err := c.cipher.Encrypt(c.pubKey, string(text))
+	if err != nil {
+		return err
+	}
+	c.backend.AddRecord(application.PosternRecord{
+		Txid: txid, Class: "message", From: from, To: c.pubKey, Ts: posternReplyStamp, Ciphertext: ciphertext,
+	})
+	return nil
+}
+
+func (c *posternInboxContext) beadIsClaimedBy(bead, holder string) error {
+	return c.memory.ClaimAs(bead, holder, posternReplyStamp.Add(time.Hour))
+}
+
+func (c *posternInboxContext) mwPosternInboxApplyIsRun() error {
+	_, c.err = c.inbox().Apply(context.Background())
+	return nil
+}
+
+func (c *posternInboxContext) beadNowStands(bead, status string) error {
+	if err := c.itSucceeds(); err != nil {
+		return err
+	}
+	detail, err := c.memory.ShowStory(context.Background(), bead)
+	if err != nil {
+		return err
+	}
+	if detail.Status != status {
+		return fmt.Errorf("expected %s to stand %s, got %s", bead, status, detail.Status)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) beadNowHasPriority(bead string, priority int) error {
+	detail, err := c.memory.ShowStory(context.Background(), bead)
+	if err != nil {
+		return err
+	}
+	if detail.Priority != priority {
+		return fmt.Errorf("expected %s at priority %d, got %d", bead, priority, detail.Priority)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) beadsLastCommentReads(bead, want string) error {
+	comments, err := c.memory.StoryComments(context.Background(), bead)
+	if err != nil {
+		return err
+	}
+	if len(comments) == 0 || comments[len(comments)-1].Text != want {
+		return fmt.Errorf("expected %s's last comment %q, got %+v", bead, want, comments)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) theTxidIsMarkedApplied(txid string) error {
+	note, err := c.memory.Note(context.Background(), application.PosternAppliedKey(txid))
+	if err != nil {
+		return err
+	}
+	if !strings.HasPrefix(note, "applied ") {
+		return fmt.Errorf("expected %s marked applied, got %q", txid, note)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) thePosternInboxCursorHasNotMoved() error {
+	saved, err := c.memory.Note(context.Background(), application.PosternCursorKey)
+	if err != nil {
+		return err
+	}
+	if saved != "" {
+		return fmt.Errorf("expected the cursor not to move, it reads %q", saved)
 	}
 	return nil
 }
