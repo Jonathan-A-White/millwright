@@ -19,6 +19,7 @@ func TestAnEpisodeRoundTripsThroughItsStateFile(t *testing.T) {
 		Cures:                2,
 		LastCure:             time.Date(2026, 9, 23, 10, 20, 0, 0, time.UTC),
 		LastCannotTellReason: "powershell not found: this host is not Windows-backed",
+		DampedNoted:          true,
 	}
 
 	if err := store.Save(ctx, "daemon-reload", want); err != nil {
@@ -28,7 +29,7 @@ func TestAnEpisodeRoundTripsThroughItsStateFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loading: %v", err)
 	}
-	if !got.FirstFaulty.Equal(want.FirstFaulty) || got.Cures != want.Cures || !got.LastCure.Equal(want.LastCure) || got.LastCannotTellReason != want.LastCannotTellReason {
+	if !got.FirstFaulty.Equal(want.FirstFaulty) || got.Cures != want.Cures || !got.LastCure.Equal(want.LastCure) || got.LastCannotTellReason != want.LastCannotTellReason || got.DampedNoted != want.DampedNoted {
 		t.Fatalf("expected %+v back, got %+v", want, got)
 	}
 }
