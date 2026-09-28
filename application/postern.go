@@ -501,6 +501,12 @@ type PosternInbox struct {
 // hash it was announced under, or a download or decrypt failure — is printed
 // on its own line under the message, and a bead comment naming it ends with
 // " [image: <path>]" once it is written.
+//
+// Whatever of the Governor's Apply would apply — an action (section 13), a
+// voice note (section 14) — Run applies too, once per txid, when no pass
+// has yet, and prints the one line saying what it did. A message a pass has
+// already applied is that one line, "applied <kind> <bead> txid <id>" (or
+// "refused …: <why>"), never its text, and is never applied twice.
 func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 	if err := i.wired(); err != nil {
 		return nil, err
