@@ -142,7 +142,7 @@ func (r PosternServeRequest) addr() string {
 }
 
 // validateEnv refuses an environment file request that could not be
-// written, or that would leave the backend unable to do its job.
+// written, or that would leave the backend short of what it needs.
 func (r PosternServeRequest) validateEnv() error {
 	switch {
 	case !filepath.IsAbs(r.EnvFile):
