@@ -41,6 +41,8 @@ type posternInboxContext struct {
 	governorKey string
 	attachDir   string
 	transcriber *apptest.FakeTranscriber
+	runner      *apptest.FakeHandsRunner
+	handsSteps  map[string]domain.HandsStep
 
 	// attachImage and attachTxid are what the last "carrying a screenshot"
 	// step built, so a later Then step can compute the path mw postern
@@ -116,6 +118,12 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^bead "([^"]*)" is claimed by "([^"]*)"$`, c.beadIsClaimedBy)
 	ctx.When(`^mw postern inbox --apply is run$`, c.mwPosternInboxApplyIsRun)
 	ctx.Given(`^the postern inbox hears voice notes as "([^"]*)"$`, c.thePosternInboxHearsVoiceNotesAs)
+	ctx.Given(`^bead "([^"]*)" has the hands step "([^"]*)" on "([^"]*)" as "([^"]*)" running "([^"]*)"$`, c.beadHasTheHandsStep)
+	ctx.Given(`^the Governor approves the hands step "([^"]*)" on "([^"]*)" with txid "([^"]*)"$`, c.theGovernorApprovesTheHandsStep)
+	ctx.Given(`^the Governor approves the hands step "([^"]*)" on "([^"]*)" as it read before it changed, with txid "([^"]*)"$`, c.theGovernorApprovesTheHandsStepAsItWas)
+	ctx.Then(`^the hands step "([^"]*)" on "([^"]*)" ran with exit (\d+)$`, c.theHandsStepRanWithExit)
+	ctx.Then(`^the hands step "([^"]*)" on "([^"]*)" did not run$`, c.theHandsStepDidNotRun)
+	ctx.Then(`^bead "([^"]*)"'s last comment starts "([^"]*)"$`, c.beadsLastCommentStarts)
 	ctx.Given(`^a postern voice note from "([^"]*)" threaded on bead "([^"]*)" with txid "([^"]*)"$`, c.aPosternVoiceNoteThreadedOnBead)
 	ctx.Then(`^the transcript "([^"]*)" was sent back to the Governor in bead "([^"]*)"'s thread, re "([^"]*)"$`, c.theTranscriptWasSentBack)
 	ctx.Then(`^bead "([^"]*)" now stands "([^"]*)"$`, c.beadNowStands)
@@ -537,13 +545,93 @@ func (c *posternInboxContext) inbox() application.PosternInbox {
 		AttachmentDir: c.attachDir,
 		Out:           c.out,
 	}
-	if c.transcriber != nil {
-		inbox.Transcriber = c.transcriber
+	if c.transcriber != nil || c.runner != nil {
 		inbox.Sender = &application.PosternSend{
 			Postern: c.backend, Cipher: c.cipher, Keys: c.keys, GovernorKey: c.governorKey,
 		}
 	}
+	if c.transcriber != nil {
+		inbox.Transcriber = c.transcriber
+	}
+	if c.runner != nil {
+		inbox.Host = "desktop"
+		inbox.HandsRunner = c.runner
+		inbox.HandsVerifier = apptest.FakeHandsVerifier{}
+	}
 	return inbox
+}
+
+// beadHasTheHandsStep keeps one hands step on bead, as mw hands add would,
+// and readies a runner that runs nothing but answers exit 0.
+func (c *posternInboxContext) beadHasTheHandsStep(bead, id, host, as, run string) error {
+	step := domain.HandsStep{ID: id, Host: host, As: as, Run: run}
+	if c.handsSteps == nil {
+		c.handsSteps = map[string]domain.HandsStep{}
+	}
+	c.handsSteps[id] = step
+	c.runner = &apptest.FakeHandsRunner{Outcome: application.HandsOutcome{Exit: 0, Output: "done\n"}}
+	raw, err := json.Marshal([]application.HandsStepRecord{{HandsStep: step, AddedAt: "2026-09-28T11:00:00Z"}})
+	if err != nil {
+		return err
+	}
+	return c.memory.SetNote(context.Background(), application.HandsStepsKey(bead), string(raw))
+}
+
+func (c *posternInboxContext) approveHands(bead, id, txid, sha string) error {
+	at := time.Now().Unix()
+	return c.addAction(c.governorKey, txid, map[string]any{
+		"action": "run", "bead": bead, "step": id, "sha256": sha, "approved_at": at,
+		"sig": apptest.FakeHandsSig(c.governorKey, sha, at),
+	})
+}
+
+func (c *posternInboxContext) theGovernorApprovesTheHandsStep(id, bead, txid string) error {
+	return c.approveHands(bead, id, txid, domain.HandsSHA256(bead, c.handsSteps[id]))
+}
+
+func (c *posternInboxContext) theGovernorApprovesTheHandsStepAsItWas(id, bead, txid string) error {
+	before := c.handsSteps[id]
+	before.Run += " (as it read before)"
+	return c.approveHands(bead, id, txid, domain.HandsSHA256(bead, before))
+}
+
+func (c *posternInboxContext) theHandsStepRanWithExit(id, bead string, exit int) error {
+	if err := c.itSucceeds(); err != nil {
+		return err
+	}
+	jobs := c.runner.Jobs()
+	if len(jobs) != 1 || jobs[0].Request.ID != id || jobs[0].Request.Bead != bead {
+		return fmt.Errorf("expected %s on %s run once, got %+v", id, bead, jobs)
+	}
+	ran, err := c.memory.Note(context.Background(), application.HandsRanKey(bead, id))
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(ran, fmt.Sprintf(`"exit":%d`, exit)) {
+		return fmt.Errorf("expected %s's run recorded with exit %d, got %q", id, exit, ran)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) theHandsStepDidNotRun(id, bead string) error {
+	if jobs := c.runner.Jobs(); len(jobs) != 0 {
+		return fmt.Errorf("expected nothing run, got %+v", jobs)
+	}
+	if ran, _ := c.memory.Note(context.Background(), application.HandsRanKey(bead, id)); ran != "" {
+		return fmt.Errorf("expected no run recorded, got %q", ran)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) beadsLastCommentStarts(bead, want string) error {
+	comments, err := c.memory.StoryComments(context.Background(), bead)
+	if err != nil {
+		return err
+	}
+	if len(comments) == 0 || !strings.HasPrefix(comments[len(comments)-1].Text, want) {
+		return fmt.Errorf("expected %s's last comment to start %q, got %+v", bead, want, comments)
+	}
+	return nil
 }
 
 func (c *posternInboxContext) thePosternInboxHearsVoiceNotesAs(transcript string) error {

@@ -82,3 +82,20 @@ Feature: mw postern inbox --apply
     And the transcript "ship the storage engine as planned" was sent back to the Governor in bead "mw-act.3"'s thread, re "direct:voice"
     And mail "Voice: mw-act.3: ship the storage engine as planned" was sent to mayor
     And the txid "direct:voice" is marked applied
+
+  Scenario: A hands step the Governor approved runs, and how it ran is written, sent back and mailed
+    Given bead "mw-act.3" has the hands step "echo" on "desktop" as "user" running "echo done"
+    And the Governor approves the hands step "echo" on "mw-act.3" with txid "tx-run"
+    When mw postern inbox --apply is run
+    Then the hands step "echo" on "mw-act.3" ran with exit 0
+    And bead "mw-act.3"'s last comment starts "RAN step echo on desktop as user, exit 0 (approved by the Governor via postern, txid tx-run)"
+    And mail "Ran: mw-act.3 echo, exit 0" was sent to mayor
+    And the txid "tx-run" is marked applied
+
+  Scenario: An approval of a step that has changed since is refused, and the step does not run
+    Given bead "mw-act.3" has the hands step "echo" on "desktop" as "user" running "echo done"
+    And the Governor approves the hands step "echo" on "mw-act.3" as it read before it changed, with txid "tx-stale"
+    When mw postern inbox --apply is run
+    Then the hands step "echo" on "mw-act.3" did not run
+    And bead "mw-act.3"'s last comment starts "NOT RUN step echo (approved by the Governor via postern, txid tx-stale): the step changed since you approved it"
+    And mail "Not run: mw-act.3 echo" was sent to mayor
