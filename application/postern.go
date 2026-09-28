@@ -191,6 +191,12 @@ type PosternNotes interface {
 	Note(ctx context.Context, key string) (string, error)
 	SetNote(ctx context.Context, key, value string) error
 	ClearNote(ctx context.Context, key string) error
+
+	// NotesWithPrefix reports every note whose key has the given prefix, key
+	// to value, in one read — DoctorNotes' own — so that a reader wanting
+	// many notes (every open question, every host's last sync, every txid
+	// already applied) spends one call on them rather than one each.
+	NotesWithPrefix(ctx context.Context, prefix string) (map[string]string, error)
 }
 
 // PosternCursorKey is the note key Inbox keeps its cursor under: the highest
@@ -619,6 +625,15 @@ func isReleaseTap(answer string) bool {
 type posternQuestionNote struct {
 	Txid    string   `json:"txid"`
 	Options []string `json:"options,omitempty"`
+
+	// Asked, Q and Rec are when the question was asked (RFC 3339), what it
+	// asked and what it recommended: what mw postern view shows of an open
+	// question without reading back its QUESTION comment. A note written
+	// before they existed carries none of them, and its question is read
+	// from the comment instead.
+	Asked string `json:"asked,omitempty"`
+	Q     string `json:"q,omitempty"`
+	Rec   string `json:"rec,omitempty"`
 }
 
 // posternQuestionOfferedRelease reports whether noteValue — a bead's
@@ -1063,7 +1078,10 @@ func (s PosternSend) recordQuestion(ctx context.Context, req PosternSendRequest,
 	if err := s.Tracker.CommentOnStory(ctx, req.Bead, comment); err != nil {
 		return fmt.Errorf("recording the question on %s: %w", req.Bead, err)
 	}
-	note, err := json.Marshal(posternQuestionNote{Txid: txid, Options: req.Options})
+	note, err := json.Marshal(posternQuestionNote{
+		Txid: txid, Options: req.Options,
+		Asked: s.now().UTC().Format(time.RFC3339), Q: req.Text, Rec: req.Recommend,
+	})
 	if err != nil {
 		return fmt.Errorf("building %s's question note: %w", req.Bead, err)
 	}

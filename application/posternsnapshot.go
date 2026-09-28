@@ -134,7 +134,62 @@ type PosternSnapshotWorking struct {
 // posternQuestionComment reads back what PosternSend's recordQuestion wrote:
 // "QUESTION <asked_at> asked by postern, txid <txid>: <text> (recommended
 // <rec>; options <a, b, ...>)".
-var posternQuestionComment = regexp.MustCompile(`^QUESTION (\S+) asked by postern, txid \S+: .*\(recommended ([^;]*); options (.*)\)$`)
+var posternQuestionComment = regexp.MustCompile(`^QUESTION (\S+) asked by postern, txid \S+: (.*) \(recommended ([^;]*); options (.*)\)$`)
+
+// posternQuestionFacts is what an open question asked over the postern says:
+// when it was asked, what it asked, what it recommended and every option it
+// offered. PosternSnapshot's needs_you and PosternView's question needs are
+// both built from it.
+type posternQuestionFacts struct {
+	AskedAt     time.Time
+	Text        string
+	Recommended string
+	Options     []string
+}
+
+// questionFromComments reads the newest QUESTION comment among comments
+// (oldest first, as the tracker lists them): asked_at from the comment's own
+// recorded time when the tracker gives one, or else from the timestamp its
+// text carries; the question, recommended and options from its text. ok is
+// false when no comment is a QUESTION.
+func questionFromComments(comments []Comment) (posternQuestionFacts, bool) {
+	for i := len(comments) - 1; i >= 0; i-- {
+		m := posternQuestionComment.FindStringSubmatch(comments[i].Text)
+		if m == nil {
+			continue
+		}
+		askedAt := comments[i].Created
+		if askedAt.IsZero() {
+			if parsed, err := time.Parse(time.RFC3339, m[1]); err == nil {
+				askedAt = parsed
+			}
+		}
+		return posternQuestionFacts{
+			AskedAt:     askedAt,
+			Text:        m[2],
+			Recommended: strings.TrimSpace(m[3]),
+			Options:     splitOptions(m[4]),
+		}, true
+	}
+	return posternQuestionFacts{}, false
+}
+
+// questionFromNote reads a bead's PosternQuestionKey note, when it records
+// what was asked (posternQuestionNote's Q): no comment need be read to know
+// the question then. ok is false for a note that does not — a bare txid, or
+// one written before those fields existed — whose question is read from its
+// comment instead.
+func questionFromNote(noteValue string) (posternQuestionFacts, bool) {
+	var note posternQuestionNote
+	if err := json.Unmarshal([]byte(noteValue), &note); err != nil || strings.TrimSpace(note.Q) == "" {
+		return posternQuestionFacts{}, false
+	}
+	facts := posternQuestionFacts{Text: note.Q, Recommended: note.Rec, Options: append([]string{}, note.Options...)}
+	if asked, err := time.Parse(time.RFC3339, note.Asked); err == nil {
+		facts.AskedAt = asked
+	}
+	return facts, true
+}
 
 // PosternSnapshot builds the §7 snapshot of every live epic — open or in
 // progress — and, once built, encrypts it to the Governor's key and writes it
@@ -334,6 +389,13 @@ func (s PosternSnapshot) readLandedMemory(ctx context.Context) (map[string]poste
 	if err != nil {
 		return nil, fmt.Errorf("reading the landed comment memory: %w", err)
 	}
+	return parseLandedMemory(raw), nil
+}
+
+// parseLandedMemory reads PosternSnapshotMemoryKey's value as id ->
+// posternSnapshotMemoryEntry; an empty or unreadable value remembers
+// nothing. PosternView reads the same note, from its one read of every note.
+func parseLandedMemory(raw string) map[string]posternSnapshotMemoryEntry {
 	memory := map[string]posternSnapshotMemoryEntry{}
 	if strings.TrimSpace(raw) != "" {
 		var parsed map[string]posternSnapshotMemoryEntry
@@ -341,7 +403,7 @@ func (s PosternSnapshot) readLandedMemory(ctx context.Context) (map[string]poste
 			memory = parsed
 		}
 	}
-	return memory, nil
+	return memory
 }
 
 // writeLandedMemory rewrites PosternSnapshotMemoryKey to newMemory, unless it
@@ -351,6 +413,15 @@ func (s PosternSnapshot) readLandedMemory(ctx context.Context) (map[string]poste
 // that has aged out of PosternSnapshotWindow since oldMemory was read is
 // dropped here.
 func (s PosternSnapshot) writeLandedMemory(ctx context.Context, oldMemory, newMemory map[string]posternSnapshotMemoryEntry) error {
+	return saveLandedMemory(ctx, s.Notes, oldMemory, newMemory)
+}
+
+// saveLandedMemory rewrites PosternSnapshotMemoryKey to newMemory through
+// notes, unless it holds exactly what oldMemory already did. PosternSnapshot
+// and PosternView both keep it: their landed and verify candidates are the
+// same stories — closed within PosternSnapshotWindow under a live epic — so
+// either one's read spares the other one.
+func saveLandedMemory(ctx context.Context, notes PosternNotes, oldMemory, newMemory map[string]posternSnapshotMemoryEntry) error {
 	if reflect.DeepEqual(oldMemory, newMemory) {
 		return nil
 	}
@@ -358,7 +429,7 @@ func (s PosternSnapshot) writeLandedMemory(ctx context.Context, oldMemory, newMe
 	if err != nil {
 		return fmt.Errorf("building the landed comment memory: %w", err)
 	}
-	if err := s.Notes.SetNote(ctx, PosternSnapshotMemoryKey, string(encoded)); err != nil {
+	if err := notes.SetNote(ctx, PosternSnapshotMemoryKey, string(encoded)); err != nil {
 		return fmt.Errorf("writing the landed comment memory: %w", err)
 	}
 	return nil
@@ -509,21 +580,10 @@ func needsYouFromComments(child StoryDetail, comments []Comment) PosternSnapshot
 		Description: clippedTo(child.Description, PosternSnapshotTextLimit),
 		Comments:    snapshotComments(comments),
 	}
-	for i := len(comments) - 1; i >= 0; i-- {
-		m := posternQuestionComment.FindStringSubmatch(comments[i].Text)
-		if m == nil {
-			continue
-		}
-		askedAt := comments[i].Created
-		if askedAt.IsZero() {
-			if parsed, err := time.Parse(time.RFC3339, m[1]); err == nil {
-				askedAt = parsed
-			}
-		}
-		question.AskedAt = formatOrEmpty(askedAt)
-		question.Recommended = strings.TrimSpace(m[2])
-		question.Options = splitOptions(m[3])
-		break
+	if facts, ok := questionFromComments(comments); ok {
+		question.AskedAt = formatOrEmpty(facts.AskedAt)
+		question.Recommended = facts.Recommended
+		question.Options = facts.Options
 	}
 	return question
 }
