@@ -15,6 +15,8 @@
 //	push_wait_seconds = 20
 //	millhand_routine_model = "sonnet"
 //	millhand_review_model = "opus"
+//	beads_sync = "remote"
+//	beads_backup_minutes = 30
 //
 //	[rigs]
 //	millwright = "/root/millwright"
@@ -41,6 +43,7 @@ package config
 import (
 	"bufio"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -79,6 +82,19 @@ const (
 	PosternGovernorKeyEnv  = "MW_POSTERN_GOVERNOR_KEY"
 	PosternKeyFileEnv      = "MW_POSTERN_KEY_FILE"
 	PosternSnapshotPathEnv = "MW_POSTERN_SNAPSHOT_PATH"
+	PosternViewPathEnv     = "MW_POSTERN_VIEW_PATH"
+
+	BeadsSyncEnv          = "MW_BEADS_SYNC"
+	BeadsBackupMinutesEnv = "MW_BEADS_BACKUP_MINUTES"
+)
+
+// The environment variables bd itself reads to reach a Dolt database server
+// rather than a database of its own: a host whose beads_sync is shared sets
+// them, and mw doctor's beads-server check dials what they name. They are
+// bd's, not mw's, so they have no key in the config file.
+const (
+	BeadsDoltServerHostEnv = "BEADS_DOLT_SERVER_HOST"
+	BeadsDoltServerPortEnv = "BEADS_DOLT_SERVER_PORT"
 )
 
 // RigsTable is the table of the config file that says where each rig is checked
@@ -263,6 +279,34 @@ func PosternSnapshotPath() (string, error) {
 		return said, nil
 	}
 	return filepath.Join(home, DefaultPosternSnapshotPath), nil
+}
+
+// DefaultPosternViewPath is where mw postern view writes the encrypted live
+// view under the home directory when nothing says otherwise, and so where
+// mw postern serve tells the postern backend to read it from
+// (POSTERN_VIEW_FILE): state, beside the backend's own.
+var DefaultPosternViewPath = filepath.Join(".local", "state", "postern", "view.b64")
+
+// PosternViewPath reports where the encrypted live view is written and read:
+// $MW_POSTERN_VIEW_PATH if it is set, otherwise the root-table
+// `postern_view_path` key of ~/.config/mw/config.toml, a full path either
+// way, and DefaultPosternViewPath under the home directory when neither says.
+func PosternViewPath() (string, error) {
+	said, err := optionalSetting("postern_view_path", PosternViewPathEnv, "")
+	if err != nil {
+		return "", err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("no %s is set and there is no home directory to read %s in: %w", PosternViewPathEnv, File, err)
+	}
+	if said != "" {
+		if !filepath.IsAbs(said) {
+			return "", fmt.Errorf("the postern view path is %q in %s: it must be a full path", said, filepath.Join(home, File))
+		}
+		return said, nil
+	}
+	return filepath.Join(home, DefaultPosternViewPath), nil
 }
 
 // PosternInboxDir reports the full path to the directory mw postern inbox
@@ -642,6 +686,94 @@ func PushWaitSeconds() (int, error) {
 		return 0, fmt.Errorf("the wait between push tries is %d seconds, which is negative: set it to 0 or more", seconds)
 	}
 	return seconds, nil
+}
+
+// The ways `mw sync` may treat this host's beads database, the root-table
+// `beads_sync` key of the config file. application.BeadsSyncMode names the
+// same three.
+//
+//   - remote: every host keeps a copy of its own and brings it level with the
+//     others through the tracker's remote on every sync. The default: what
+//     every host did before the factory moved to one home.
+//   - backup: this host holds the one database every other host reaches. The
+//     tracker's remote is a backup of it, pushed every beads_backup_minutes,
+//     and never what keeps the hosts level.
+//   - shared: this host's bd reaches another host's database over the
+//     network (BEADS_DOLT_SERVER_HOST and the rest) and keeps no copy of its
+//     own, so it has nothing to push, pull or collect.
+const (
+	BeadsSyncRemote  = "remote"
+	BeadsSyncBackup  = "backup"
+	BeadsSyncShared  = "shared"
+	DefaultBeadsSync = BeadsSyncRemote
+)
+
+// DefaultBeadsBackupMinutes is how long a host whose beads_sync is backup
+// waits between two backups of the one database, when nothing says otherwise.
+const DefaultBeadsBackupMinutes = 30
+
+// DefaultBeadsDoltServerPort is the port bd reaches a Dolt database server
+// on when BEADS_DOLT_SERVER_PORT says nothing: bd's own server mode default
+// (docs/research/beads-hosts-and-rigs.md, section 5).
+const DefaultBeadsDoltServerPort = "3307"
+
+// BeadsSync reports how `mw sync` treats this host's beads database:
+// $MW_BEADS_SYNC if it is set, otherwise the root-table `beads_sync` key of
+// ~/.config/mw/config.toml, and DefaultBeadsSync when neither says. Anything
+// but the three choices is refused, naming them.
+func BeadsSync() (string, error) {
+	said, err := optionalSetting("beads_sync", BeadsSyncEnv, DefaultBeadsSync)
+	if err != nil {
+		return "", err
+	}
+	switch said {
+	case BeadsSyncRemote, BeadsSyncBackup, BeadsSyncShared:
+		return said, nil
+	}
+	return "", fmt.Errorf("beads_sync is %q, which is not one of its three choices: %q (every host keeps a copy, level through the remote), %q (this host holds the one database, the remote a backup) or %q (this host's bd reaches another host's database); set %s=<choice>, or `beads_sync = \"<choice>\"` in %s",
+		said, BeadsSyncRemote, BeadsSyncBackup, BeadsSyncShared, BeadsSyncEnv, File)
+}
+
+// BeadsBackupMinutes reports how many minutes a host whose beads_sync is
+// backup waits between two backups: $MW_BEADS_BACKUP_MINUTES if it is set,
+// otherwise the root-table `beads_backup_minutes` key of
+// ~/.config/mw/config.toml, and DefaultBeadsBackupMinutes when neither says.
+func BeadsBackupMinutes() (int, error) {
+	said, err := optionalSetting("beads_backup_minutes", BeadsBackupMinutesEnv, "")
+	if err != nil {
+		return 0, err
+	}
+	if said == "" {
+		return DefaultBeadsBackupMinutes, nil
+	}
+	minutes, err := strconv.Atoi(said)
+	if err != nil {
+		return 0, fmt.Errorf("the beads backup interval is %q, which is not a whole number of minutes: set %s=<n>, or `beads_backup_minutes = <n>` in %s", said, BeadsBackupMinutesEnv, File)
+	}
+	if minutes < 1 {
+		return 0, fmt.Errorf("the beads backup interval is %d minutes, so every sync would push a backup: set it to 1 or more", minutes)
+	}
+	return minutes, nil
+}
+
+// BeadsServerAddress reports the host:port this host's bd reaches its Dolt
+// database server on: $BEADS_DOLT_SERVER_HOST, on $BEADS_DOLT_SERVER_PORT or
+// DefaultBeadsDoltServerPort. Both are bd's own environment, so the config
+// file has no say; "" when no host is set, which is every host whose
+// beads_sync is not shared.
+func BeadsServerAddress() (string, error) {
+	host := strings.TrimSpace(os.Getenv(BeadsDoltServerHostEnv))
+	if host == "" {
+		return "", nil
+	}
+	port := strings.TrimSpace(os.Getenv(BeadsDoltServerPortEnv))
+	if port == "" {
+		port = DefaultBeadsDoltServerPort
+	}
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		return "", fmt.Errorf("%s is %q, which is not a port number", BeadsDoltServerPortEnv, port)
+	}
+	return net.JoinHostPort(host, port), nil
 }
 
 // MillhandRoutineModel reports the model a routine wake, and a wake by hand, of
