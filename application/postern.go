@@ -167,6 +167,11 @@ type Cipher interface {
 	// Encrypt encrypts text for the holder of toPubKey (compressed, hex) and
 	// reports the ciphertext, base64.
 	Encrypt(toPubKey, text string) (ciphertext string, err error)
+	// EncryptBytes is Encrypt over raw bytes rather than a string's UTF-8:
+	// what the live view's gzip stream (postern's docs/protocol.md section
+	// 11) and an attachment's file bytes (sections 8 and 14) are encrypted
+	// as, byte for byte. Encrypt(to, text) is EncryptBytes(to, []byte(text)).
+	EncryptBytes(toPubKey string, plain []byte) (ciphertext string, err error)
 	// Decrypt decrypts ciphertext (base64) with privKey (WIF) and reports its
 	// plaintext text, along with envelopeFrom: the sender's compressed
 	// public key, hex, that BRC-78 itself binds into the ciphertext.

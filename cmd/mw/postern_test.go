@@ -192,7 +192,8 @@ func TestPosternInboxPrintsTheTextOfARecordFromTheBackend(t *testing.T) {
 // send builds can be compared with the fixture byte for byte.
 type fixedCipher struct{ ct string }
 
-func (c fixedCipher) Encrypt(string, string) (string, error) { return c.ct, nil }
+func (c fixedCipher) Encrypt(string, string) (string, error)      { return c.ct, nil }
+func (c fixedCipher) EncryptBytes(string, []byte) (string, error) { return c.ct, nil }
 func (c fixedCipher) Decrypt(string, string) (string, string, error) {
 	return "", "", fmt.Errorf("fixedCipher does not decrypt")
 }
