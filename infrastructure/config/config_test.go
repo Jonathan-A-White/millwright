@@ -51,6 +51,7 @@ func writeConfig(t *testing.T, contents string) string {
 	t.Setenv("BEADS_DOLT_SERVER_PORT", "")
 	t.Setenv("MW_POSTERN_CHANNEL", "")
 	t.Setenv("MW_POSTERN_TRANSCRIBE_CMD", "")
+	t.Setenv("MW_HANDS_ROOT_HELPER", "")
 	return home
 }
 
@@ -1204,5 +1205,40 @@ func TestPosternTranscribeCmdIsEmptyUntilAHostSaysOtherwise(t *testing.T) {
 	writeConfig(t, "postern_transcribe_cmd = \"postern-transcribe --quiet\"\n")
 	if cmd, err = config.PosternTranscribeCmd(); err != nil || cmd != "postern-transcribe --quiet" {
 		t.Fatalf("expected the file's postern_transcribe_cmd, got %q: %v", cmd, err)
+	}
+}
+
+func TestHandsHostsIsTheHandsHostsTable(t *testing.T) {
+	writeConfig(t, vpsConfig)
+	hosts, err := config.HandsHosts()
+	if err != nil || len(hosts) != 0 {
+		t.Fatalf("expected no hands hosts by default, got %v: %v", hosts, err)
+	}
+
+	writeConfig(t, "host = \"desktop\"\n\n[hands_hosts]\nlaptop = \"ssh laptop\"\nvps = \"ssh root@allmymind.org\"  # the VPS\n")
+	hosts, err = config.HandsHosts()
+	if err != nil {
+		t.Fatalf("reading the hands hosts: %v", err)
+	}
+	if len(hosts) != 2 || hosts["laptop"] != "ssh laptop" || hosts["vps"] != "ssh root@allmymind.org" {
+		t.Fatalf("expected the laptop and the vps, got %v", hosts)
+	}
+}
+
+func TestHandsRootHelperIsTheInstalledPathUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, vpsConfig)
+	path, err := config.HandsRootHelper()
+	if err != nil || path != "/usr/local/sbin/mw-hands-root" || config.DefaultHandsRootHelper != "/usr/local/sbin/mw-hands-root" {
+		t.Fatalf("expected /usr/local/sbin/mw-hands-root, got %q: %v", path, err)
+	}
+
+	writeConfig(t, "hands_root_helper = \"/opt/mw/mw-hands-root\"\n")
+	if path, err = config.HandsRootHelper(); err != nil || path != "/opt/mw/mw-hands-root" {
+		t.Fatalf("expected the file's hands_root_helper, got %q: %v", path, err)
+	}
+
+	writeConfig(t, "hands_root_helper = \"mw-hands-root\"\n")
+	if _, err := config.HandsRootHelper(); err == nil || !strings.Contains(err.Error(), "full path") {
+		t.Fatalf("expected a relative hands_root_helper refused, got %v", err)
 	}
 }

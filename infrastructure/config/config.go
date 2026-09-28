@@ -86,6 +86,8 @@ const (
 	PosternChannelEnv       = "MW_POSTERN_CHANNEL"
 	PosternTranscribeCmdEnv = "MW_POSTERN_TRANSCRIBE_CMD"
 
+	HandsRootHelperEnv = "MW_HANDS_ROOT_HELPER"
+
 	BeadsSyncEnv          = "MW_BEADS_SYNC"
 	BeadsBackupMinutesEnv = "MW_BEADS_BACKUP_MINUTES"
 )
@@ -111,6 +113,11 @@ const (
 	TestsTable        = "tests"
 	AfterLandingTable = "after_landing"
 )
+
+// HandsHostsTable is the table of the config file that says how this host
+// reaches each other host a hands step may be for: host name on the left, an
+// ssh prefix on the right (`laptop = "ssh laptop"`).
+const HandsHostsTable = "hands_hosts"
 
 // WatchTable is the table of the config file that says what `mw watch` looks at.
 const WatchTable = "watch"
@@ -349,6 +356,40 @@ func PosternChannel() (string, error) {
 		return "", fmt.Errorf("the postern channel is %q, which is neither %s nor %s: set %s=<channel>, or `postern_channel = \"<channel>\"` in %s",
 			said, PosternChannelDirect, PosternChannelChain, PosternChannelEnv, File)
 	}
+}
+
+// DefaultHandsRootHelper is where contrib/install-hands-root installs
+// mw-hands-root on every host, and where mw looks for it through sudo -n.
+const DefaultHandsRootHelper = "/usr/local/sbin/mw-hands-root"
+
+// HandsRootHelper reports the path mw hands a root step to, through sudo -n,
+// on whichever host it runs (postern's docs/protocol.md §17):
+// $MW_HANDS_ROOT_HELPER if it is set, otherwise the root-table
+// `hands_root_helper` key of ~/.config/mw/config.toml, a full path either
+// way, and DefaultHandsRootHelper when neither says. The sudoers line
+// contrib/install-hands-root writes names only the default.
+func HandsRootHelper() (string, error) {
+	said, err := optionalSetting("hands_root_helper", HandsRootHelperEnv, DefaultHandsRootHelper)
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(said) {
+		return "", fmt.Errorf("the hands root helper is %q: it must be a full path, as sudo names it", said)
+	}
+	return said, nil
+}
+
+// HandsHosts reports how this host reaches each other host a hands step may
+// be for, read from the `[hands_hosts]` table of ~/.config/mw/config.toml:
+// host name to an ssh prefix, split on whitespace when it is used. A host not
+// in it is one no step is run on from here, and a machine with no such table
+// runs steps for itself only.
+func HandsHosts() (map[string]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	return tableIn(filepath.Join(home, File), HandsHostsTable)
 }
 
 // PosternTranscribeCmd reports the command mw postern inbox transcribes a
