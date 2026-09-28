@@ -439,3 +439,81 @@ func contains(lines []string, substr string) bool {
 	}
 	return false
 }
+
+func TestACappedFaultWhoseReasonChangesEveryRunIsNotedOncePerEpisode(t *testing.T) {
+	state := apptest.NewFakeDoctorState()
+	log := &apptest.FakeDoctorLog{}
+	notes := apptest.NewFakeDoctorNotes()
+	now := doctorNow
+	check := &apptest.FakeDoctorCheck{
+		CheckName: "beads-size", Verdict: application.DoctorFaulty,
+		Wait: 0, Cap: 1,
+	}
+	d := application.Doctor{
+		Checks: application.DoctorChecks{check},
+		State:  state,
+		Log:    log,
+		Notes:  notes,
+		Host:   "laptop",
+		Now:    func() time.Time { return now },
+	}
+	ctx := context.Background()
+	key := application.DoctorNoteKey("laptop", "beads-size")
+	dampedLines := func() int {
+		n := 0
+		for _, line := range log.Lines() {
+			if strings.Contains(line, "beads-size damped") {
+				n++
+			}
+		}
+		return n
+	}
+
+	// The cap is already spent when the three runs begin. Each finds the
+	// fault with a reason whose numbers have moved, as a size in bytes does.
+	if err := state.Save(ctx, "beads-size", application.DoctorEpisode{Cures: 1, LastCure: now}); err != nil {
+		t.Fatalf("saving: %v", err)
+	}
+	for i := 1; i <= 3; i++ {
+		check.Reason = "the vault is " + strings.Repeat("9", i) + " bytes"
+		now = now.Add(5 * time.Minute)
+		if _, err := d.Run(ctx, "", false); application.ExitStatus(err) != application.DoctorFaultExit {
+			t.Fatalf("run %d: expected the fault exit, got %v", i, err)
+		}
+	}
+	if got := dampedLines(); got != 3 {
+		t.Errorf("expected three damped log lines, got %d in %v", got, log.Lines())
+	}
+	if got := notes.Sets(); got != 1 {
+		t.Errorf("expected one SetNote across three damped runs, got %d", got)
+	}
+	if value, _ := notes.Get(key); !strings.Contains(value, "9 bytes") {
+		t.Errorf("expected the note to hold the first damped reason, got %q", value)
+	}
+
+	// The probe says ok: the episode ends and the note is cleared.
+	check.Verdict = application.DoctorOK
+	check.Reason = ""
+	now = now.Add(5 * time.Minute)
+	if _, err := d.Run(ctx, "", false); err != nil {
+		t.Fatalf("ok run: %v", err)
+	}
+	if _, ok := notes.Get(key); ok {
+		t.Errorf("expected the note cleared once the probe said ok")
+	}
+
+	// The fault returns: cured once, then capped again, and a new episode
+	// notes again.
+	check.Verdict = application.DoctorFaulty
+	for i := 1; i <= 2; i++ {
+		check.Reason = "the vault is back at " + strings.Repeat("8", i) + " bytes"
+		now = now.Add(5 * time.Minute)
+		d.Run(ctx, "", false)
+	}
+	if got := notes.Sets(); got != 2 {
+		t.Errorf("expected a second SetNote for the new episode, got %d in all", got)
+	}
+	if _, ok := notes.Get(key); !ok {
+		t.Errorf("expected the new episode's note to be written")
+	}
+}

@@ -99,6 +99,16 @@ type DoctorEpisode struct {
 	// while the reason repeats. Empty for a check whose last logged
 	// cannot-tell carried no reason, or whose episode has never been saved.
 	LastCannotTellReason string
+
+	// DampedNoted is whether this episode's note for reaching its cap has been
+	// written. The cap ending an episode is noted once, when it is first
+	// reached, not on every run after it: a reason that carries a number
+	// which moves between runs — a size in bytes, say — would otherwise
+	// rewrite the note each time and wake the Millhand again for the same
+	// fault. The log line is still appended every run. The episode ending,
+	// when the probe next says ok, forgets it, so the next episode notes
+	// again.
+	DampedNoted bool
 }
 
 // DoctorState is where mw doctor keeps each check's episode between runs.
@@ -480,8 +490,13 @@ func (d Doctor) faulty(ctx context.Context, check DoctorCheck, reason string, dr
 			// Only the cap ending an episode is a person's to look at: the
 			// ordinary cooldown between two cures is expected, and passes on
 			// its own.
-			if capped {
-				d.writeNote(ctx, name, result)
+			if capped && !episode.DampedNoted {
+				if d.writeNote(ctx, name, result) {
+					episode.DampedNoted = true
+					if err := d.State.Save(ctx, name, episode); err != nil {
+						return DoctorResult{}, fmt.Errorf("saving %s's doctor state: %w", name, err)
+					}
+				}
 			}
 		}
 		return result, nil
@@ -534,10 +549,11 @@ func (d Doctor) append(ctx context.Context, result DoctorResult) error {
 // DoctorNoteLogLines lines from the log beside it. The doctor may be
 // offline: a write that fails is logged as note-failed, and the run goes on
 // unchanged — the exit status is decided already, by the result's own
-// Faulty, not by whether the note got written. The next run retries.
-func (d Doctor) writeNote(ctx context.Context, check string, result DoctorResult) {
+// Faulty, not by whether the note got written. The next run retries. It says
+// whether the note is written, or there is nowhere to write one.
+func (d Doctor) writeNote(ctx context.Context, check string, result DoctorResult) bool {
 	if d.Notes == nil {
-		return
+		return true
 	}
 	value := d.now().UTC().Format(time.RFC3339) + " " + result.Verdict
 	if result.Reason != "" {
@@ -546,7 +562,9 @@ func (d Doctor) writeNote(ctx context.Context, check string, result DoctorResult
 	value += " | last log lines: " + strings.Join(d.checkLogLines(ctx, check), " | ")
 	if err := d.Notes.SetNote(ctx, DoctorNoteKey(d.Host, check), value); err != nil {
 		_ = d.append(ctx, DoctorResult{Check: check, Verdict: "note-failed", Reason: oneLine(err.Error())})
+		return false
 	}
+	return true
 }
 
 // clearNote takes back a check's own note, now that its probe says ok. A
