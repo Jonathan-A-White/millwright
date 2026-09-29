@@ -30,7 +30,9 @@
 #    does not catch up; its review pair a oneshot that treats exit 5 ("already
 #    up") as success, on a timer at 07:30 and 19:30 that does catch up. The doctor
 #    pair is a oneshot run straight from ~/.local/bin (not through `env`) on a timer
-#    at 2, 7, 12, ... that does not catch up. And the scripts those two run
+#    at 2, 7, 12, ... that does not catch up. The postern mirror pair is a
+#    oneshot that runs `mw postern mirror` (through `env`) on a timer at 3, 13,
+#    23, ... that does not catch up. And the scripts those two run
 #    (contrib/mail-notify, contrib/health/mw-health.sh) are executable and parse.
 #    The system pair carries the same shape, run as root; mw-seat-tmux is
 #    simple (not forking — see check-seat-tmux-respawn.sh for why), never
@@ -63,6 +65,8 @@ REVIEW_SERVICE=$DIR/mw-millhand-review.service
 REVIEW_TIMER=$DIR/mw-millhand-review.timer
 DOCTOR_SERVICE=$DIR/mw-doctor.service
 DOCTOR_TIMER=$DIR/mw-doctor.timer
+MIRROR_SERVICE=$DIR/mw-postern-mirror.service
+MIRROR_TIMER=$DIR/mw-postern-mirror.timer
 SEAT_TMUX_SERVICE=$DIR/system/mw-seat-tmux.service
 SYS_DOCTOR_SERVICE=$DIR/system/mw-doctor.service
 SYS_DOCTOR_TIMER=$DIR/system/mw-doctor.timer
@@ -88,6 +92,8 @@ fail() {
 [ -f "$REVIEW_TIMER" ] || fail "$REVIEW_TIMER does not exist"
 [ -f "$DOCTOR_SERVICE" ] || fail "$DOCTOR_SERVICE does not exist"
 [ -f "$DOCTOR_TIMER" ] || fail "$DOCTOR_TIMER does not exist"
+[ -f "$MIRROR_SERVICE" ] || fail "$MIRROR_SERVICE does not exist"
+[ -f "$MIRROR_TIMER" ] || fail "$MIRROR_TIMER does not exist"
 [ -f "$SEAT_TMUX_SERVICE" ] || fail "$SEAT_TMUX_SERVICE does not exist"
 [ -f "$SYS_DOCTOR_SERVICE" ] || fail "$SYS_DOCTOR_SERVICE does not exist"
 [ -f "$SYS_DOCTOR_TIMER" ] || fail "$SYS_DOCTOR_TIMER does not exist"
@@ -99,7 +105,7 @@ if command -v systemd-analyze >/dev/null 2>&1; then
 	# and complains about them (not the rig's to change): those lines are noted
 	# and do not fail. A line names a rig unit by its path or, as systemd does for
 	# some faults, by its file name alone.
-	UNITS="$SERVICE $TIMER $MAIL_SERVICE $MAIL_TIMER $HEALTH_SERVICE $HEALTH_TIMER $TICK_SERVICE $TICK_TIMER $REVIEW_SERVICE $REVIEW_TIMER $DOCTOR_SERVICE $DOCTOR_TIMER"
+	UNITS="$SERVICE $TIMER $MAIL_SERVICE $MAIL_TIMER $HEALTH_SERVICE $HEALTH_TIMER $TICK_SERVICE $TICK_TIMER $REVIEW_SERVICE $REVIEW_TIMER $DOCTOR_SERVICE $DOCTOR_TIMER $MIRROR_SERVICE $MIRROR_TIMER"
 	# shellcheck disable=SC2086 # the unit paths hold no spaces; word splitting is the point
 	out=$(systemd-analyze --user verify $UNITS 2>&1) || {
 		echo "$out" >&2
@@ -203,6 +209,11 @@ need "$DOCTOR_SERVICE" "Type=oneshot"
 need "$DOCTOR_SERVICE" "ExecStart=/usr/bin/env %h/.local/bin/mw doctor"
 need "$DOCTOR_TIMER" "OnCalendar=*:2/5"
 need "$DOCTOR_TIMER" "Persistent=false"
+# The postern mirror pair.
+need "$MIRROR_SERVICE" "Type=oneshot"
+need "$MIRROR_SERVICE" "ExecStart=/usr/bin/env mw postern mirror"
+need "$MIRROR_TIMER" "OnCalendar=*:3/10"
+need "$MIRROR_TIMER" "Persistent=false"
 # The seat's tmux server, a system unit. No RemainAfterExit=yes: that marked
 # the unit active (exited) the instant its tracked server died instead of
 # restarting it. scripts/check-seat-tmux-respawn.sh proves the restart live.

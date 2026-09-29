@@ -85,6 +85,8 @@ const (
 	PosternViewPathEnv      = "MW_POSTERN_VIEW_PATH"
 	PosternChannelEnv       = "MW_POSTERN_CHANNEL"
 	PosternTranscribeCmdEnv = "MW_POSTERN_TRANSCRIBE_CMD"
+	PosternDataEnv          = "MW_POSTERN_DATA"
+	PosternWatchdogEnv      = "MW_POSTERN_WATCHDOG_TARGET"
 
 	HandsRootHelperEnv = "MW_HANDS_ROOT_HELPER"
 
@@ -395,6 +397,33 @@ func HandsHosts() (map[string]string, error) {
 		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
 	}
 	return tableIn(filepath.Join(home, File), HandsHostsTable)
+}
+
+// PosternData reports the postern backend's data directory, its POSTERN_DATA:
+// $MW_POSTERN_DATA if it is set, otherwise the root-table `postern_data` key of
+// ~/.config/mw/config.toml, a full path either way. It is an error for neither to
+// say: mw postern mirror has no default to copy.
+func PosternData() (string, error) {
+	said, err := optionalSetting("postern_data", PosternDataEnv, "")
+	if err != nil {
+		return "", err
+	}
+	if said == "" {
+		return "", fmt.Errorf("no postern data directory: set %s=<path>, or `postern_data = \"<path>\"` in %s (the backend's POSTERN_DATA)", PosternDataEnv, File)
+	}
+	if !filepath.IsAbs(said) {
+		return "", fmt.Errorf("the postern data directory is %q: it must be a full path, the same on both hosts", said)
+	}
+	return strings.TrimRight(said, "/"), nil
+}
+
+// PosternWatchdogTarget reports where the VPS watchdog's copy of the postern's
+// vapid keys and push subscriptions goes, an rsync destination
+// (`root@vps:/var/lib/postern-watchdog/`): $MW_POSTERN_WATCHDOG_TARGET if it is
+// set, otherwise the root-table `postern_watchdog_target` key of
+// ~/.config/mw/config.toml. Empty when neither says, and then none is copied.
+func PosternWatchdogTarget() (string, error) {
+	return optionalSetting("postern_watchdog_target", PosternWatchdogEnv, "")
 }
 
 // PosternTranscribeCmd reports the command mw postern inbox transcribes a

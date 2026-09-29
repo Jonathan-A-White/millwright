@@ -952,6 +952,44 @@ the backup path and the way back. `--backup-dir` defaults to `tidy` under
 the caller's home (`/root/tidy` on the VPS, run as root). See
 `features/postern_serve.feature`.
 
+### mw postern mirror
+
+```sh
+mw postern mirror
+```
+
+The home copies the postern backend's data to the boost, so that a dead home
+loses at most the last ten minutes of it. On the home, `mw postern mirror` runs
+one `rsync -rpR` of `postern_data` (the backend's `POSTERN_DATA`, a full path,
+the same on both hosts: `postern-index.jsonl`, `postern-vapid.json`,
+`postern-push-subscriptions.json` and `blobs/`) to the same path on the other
+host, reached as that host's line of `[hands_hosts]` says (`desktop = "ssh
+desktop"`; the last word is the host rsync copies to). When `postern_watchdog_target`
+is set, an rsync destination such as `root@vps:/var/lib/postern-watchdog/`, it
+also copies `postern-vapid.json` and `postern-push-subscriptions.json` there:
+the VPS watchdog's copy, which `postern-watchdog-sync.timer` makes by hand on the
+desktop today.
+
+```toml
+postern_data = "/home/me/postern-data"
+postern_watchdog_target = "root@allmymind.org:/var/lib/postern-watchdog/"
+[hands_hosts]
+desktop = "ssh desktop"
+```
+
+A host that is not home does nothing, says so and leaves with 0: every host may
+run the timer. A boost whose index's last line (its `firstSeen`) is newer than
+this host's is left alone, so an older index never overwrites a newer one: the
+run says so and leaves with 1, after it has made the watchdog's copy. Nothing
+here writes to this host's own data. `$MW_POSTERN_DATA` and
+`$MW_POSTERN_WATCHDOG_TARGET` say the two settings in place of the file.
+
+**Install**, once per host: `sh scripts/install-units.sh --enable
+mw-postern-mirror` (see *Running a host on a timer*), which runs
+`mw-postern-mirror.timer` at 3, 13, 23, ... minutes past the hour. It is covered
+by `scripts/check-timer-units.sh` and `cmd/mw/postern_mirror_test.go`, which run
+it against a stand-in rsync and ssh.
+
 ## Steps for his hands
 
 A step only the Governor's hands could take — a `sudo` line, a unit to

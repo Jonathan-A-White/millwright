@@ -1242,3 +1242,38 @@ func TestHandsRootHelperIsTheInstalledPathUntilAHostSaysOtherwise(t *testing.T) 
 		t.Fatalf("expected a relative hands_root_helper refused, got %v", err)
 	}
 }
+
+func TestPosternDataIsAFullPathAHostMustSay(t *testing.T) {
+	t.Setenv(config.PosternDataEnv, "")
+	writeConfig(t, "")
+	if _, err := config.PosternData(); err == nil || !strings.Contains(err.Error(), "postern_data") {
+		t.Fatalf("expected a missing postern_data to be refused, naming it, got %v", err)
+	}
+
+	writeConfig(t, "postern_data = \"/srv/postern/\"\n")
+	if path, err := config.PosternData(); err != nil || path != "/srv/postern" {
+		t.Fatalf("expected the file's postern_data without its trailing slash, got %q: %v", path, err)
+	}
+
+	t.Setenv(config.PosternDataEnv, "/tmp/data")
+	if path, err := config.PosternData(); err != nil || path != "/tmp/data" {
+		t.Fatalf("expected %s to win, got %q: %v", config.PosternDataEnv, path, err)
+	}
+
+	t.Setenv(config.PosternDataEnv, "relative")
+	if _, err := config.PosternData(); err == nil || !strings.Contains(err.Error(), "full path") {
+		t.Fatalf("expected a relative postern_data to be refused, got %v", err)
+	}
+}
+
+func TestPosternWatchdogTargetIsEmptyUntilAHostSaysOne(t *testing.T) {
+	t.Setenv(config.PosternWatchdogEnv, "")
+	writeConfig(t, "")
+	if target, err := config.PosternWatchdogTarget(); err != nil || target != "" {
+		t.Fatalf("expected no target, got %q: %v", target, err)
+	}
+	writeConfig(t, "postern_watchdog_target = \"root@vps:/var/lib/postern-watchdog/\"\n")
+	if target, err := config.PosternWatchdogTarget(); err != nil || target != "root@vps:/var/lib/postern-watchdog/" {
+		t.Fatalf("expected the file's target, got %q: %v", target, err)
+	}
+}
