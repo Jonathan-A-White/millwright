@@ -18,6 +18,10 @@
 # for this host, before it runs anything: <user> can run nothing as root
 # without his signature.
 #
+# A host mw reaches as root (the VPS) runs mw as root: there <user> is root,
+# the key and host come from root's own mw config, and no sudoers file is
+# written, since root runs `sudo -n` with none. The rest is the same.
+#
 # The key, when not given, is `postern_governor_key` in <user>'s mw config
 # (~/.config/mw/config.toml, root table), and the host is `host` there; the
 # home directory is <user>'s from the password database, never $HOME. It
@@ -56,7 +60,6 @@ helper="$rig/bin/mw-hands-root"
 [ -f "$helper" ] && [ -x "$helper" ] || die "mw-hands-root is not built: run make -C $rig build, then this again"
 
 case $user in
-root) die "name the user mw runs as, not root" ;;
 *[!A-Za-z0-9_.-]* | [!A-Za-z_]*) die "$user is not a user name" ;;
 esac
 entry=$(getent passwd "$user") || die "there is no user $user"
@@ -93,7 +96,21 @@ sbin="$prefix/usr/local/sbin"
 etc="$prefix/etc/mw-hands"
 sudoers="$prefix/etc/sudoers.d"
 used="$prefix/var/lib/mw-hands"
-line="$user ALL=(root) NOPASSWD: /usr/local/sbin/mw-hands-root"
+# Root needs no sudoers line to run sudo -n: for root, none is written.
+if [ "$user" = root ]; then
+	line=
+	shown="none: root needs no sudoers line"
+	writes="and keeps $used; no sudoers file."
+	gone=
+	none="
+  (no sudoers file to remove: root needs none)"
+else
+	line="$user ALL=(root) NOPASSWD: /usr/local/sbin/mw-hands-root"
+	shown=$line
+	writes="and $sudoers/mw-hands, and keeps $used."
+	gone=" $sudoers/mw-hands"
+	none=
+fi
 
 cat <<EOF
 This lets $user on $host run the Governor's approved root steps:
@@ -101,10 +118,10 @@ This lets $user on $host run the Governor's approved root steps:
   Governor's key  $key
   fingerprint     sha256 $fingerprint
   host            $host
-  sudoers         $line
+  sudoers         $shown
 
 It writes $sbin/mw-hands-root, $etc/governor.pub, $etc/host
-and $sudoers/mw-hands, and keeps $used.
+$writes
 EOF
 if [ "$yes" != 1 ]; then
 	printf 'Install? [y/N] '
@@ -118,12 +135,14 @@ fi
 # The sudoers file first, checked before anything is written: sudo never
 # reads a file in sudoers.d whose name holds a dot, so the check's copy is
 # never live.
-mkdir -p "$sudoers"
-check="$sudoers/.mw-hands.new"
-trap 'rm -f "$check"' EXIT
-printf '%s\n' "$line" >"$check"
-chmod 0440 "$check"
-visudo -cf "$check" >/dev/null || die "visudo refused the sudoers line; nothing written"
+if [ -n "$line" ]; then
+	mkdir -p "$sudoers"
+	check="$sudoers/.mw-hands.new"
+	trap 'rm -f "$check"' EXIT
+	printf '%s\n' "$line" >"$check"
+	chmod 0440 "$check"
+	visudo -cf "$check" >/dev/null || die "visudo refused the sudoers line; nothing written"
+fi
 
 # place writes $1's content to $2, mode $3, root's, in one move.
 place() {
@@ -146,15 +165,17 @@ rm -f "$etc/.host"
 mkdir -p "$used"
 chmod 0700 "$used"
 chown root:root "$used"
-chown root:root "$check"
-mv -f "$check" "$sudoers/mw-hands"
-trap - EXIT
+if [ -n "$line" ]; then
+	chown root:root "$check"
+	mv -f "$check" "$sudoers/mw-hands"
+	trap - EXIT
+fi
 
 cat <<EOF
 Installed. $user can now run root steps the Governor approves, on $host.
 
 The way back:
-  sudo rm -f $sudoers/mw-hands $sbin/mw-hands-root
+  sudo rm -f$gone $sbin/mw-hands-root
   sudo rm -rf $etc
-  sudo rm -rf $used   # the record of approvals already run
+  sudo rm -rf $used   # the record of approvals already run$none
 EOF

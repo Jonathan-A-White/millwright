@@ -1185,7 +1185,10 @@ anything (`--yes` skips the question). It installs `/usr/local/sbin/mw-hands-roo
 `/etc/sudoers.d/mw-hands` (0440) holding exactly `<user> ALL=(root) NOPASSWD:
 /usr/local/sbin/mw-hands-root`, checked with `visudo -cf` before it is moved into
 place, all root's; makes `/var/lib/mw-hands` (0700); and prints the way back.
-Re-running it replaces the same files and keeps the record of approvals run.
+On a host reached as root (the VPS), `<user>` is `root`: the key and host come
+from root's own mw config, and no sudoers file is written, since root runs
+`sudo -n` with none; the rest is the same. It still refuses a malformed user
+name. Re-running it replaces the same files and keeps the record of approvals run.
 See `features/hands.feature` and `features/postern_inbox_apply.feature`.
 
 ## Making a fresh vault

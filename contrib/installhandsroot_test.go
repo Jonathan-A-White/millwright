@@ -18,27 +18,28 @@ import (
 const installKey = "03f01d6b9018ab421dd410404cb869072065522bf85734008f105cf385a023a80f"
 
 // installRig is a throwaway rig holding the installer and a built helper, a
-// home for the user jwhite with mw's config, a prefix to install under, and
-// stand-in commands.
+// home for the user jwhite with mw's config, one for root with its own, a
+// prefix to install under, and stand-in commands.
 type installRig struct {
-	script, prefix, home, bin, log string
+	script, prefix, home, rootHome, bin, log string
 }
 
 func newInstallRig(t *testing.T, config string) *installRig {
 	t.Helper()
 	dir := t.TempDir()
 	r := &installRig{
-		script: filepath.Join(dir, "rig", "contrib", "install-hands-root"),
-		prefix: filepath.Join(dir, "root"),
-		home:   filepath.Join(dir, "home", "jwhite"),
-		bin:    filepath.Join(dir, "stand-ins"),
-		log:    filepath.Join(dir, "calls.log"),
+		script:   filepath.Join(dir, "rig", "contrib", "install-hands-root"),
+		prefix:   filepath.Join(dir, "root"),
+		home:     filepath.Join(dir, "home", "jwhite"),
+		rootHome: filepath.Join(dir, "home", "root"),
+		bin:      filepath.Join(dir, "stand-ins"),
+		log:      filepath.Join(dir, "calls.log"),
 	}
 	source, err := os.ReadFile("install-hands-root")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, d := range []string{filepath.Dir(r.script), filepath.Join(dir, "rig", "bin"), filepath.Join(r.home, ".config", "mw"), r.bin} {
+	for _, d := range []string{filepath.Dir(r.script), filepath.Join(dir, "rig", "bin"), filepath.Join(r.home, ".config", "mw"), filepath.Join(r.rootHome, ".config", "mw"), r.bin} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -52,7 +53,8 @@ func newInstallRig(t *testing.T, config string) *installRig {
 	write(filepath.Join(dir, "rig", "bin", "mw-hands-root"), "the helper, built\n", 0o755)
 	write(filepath.Join(r.home, ".config", "mw", "config.toml"), config, 0o644)
 	write(filepath.Join(r.bin, "id"), "#!/bin/sh\necho \"${STAND_IN_UID:-0}\"\n", 0o755)
-	write(filepath.Join(r.bin, "getent"), "#!/bin/sh\n[ \"$2\" = jwhite ] || exit 2\necho \"jwhite:x:1000:1000::"+r.home+":/bin/bash\"\n", 0o755)
+	write(filepath.Join(r.rootHome, ".config", "mw", "config.toml"), rootConfig, 0o644)
+	write(filepath.Join(r.bin, "getent"), "#!/bin/sh\ncase $2 in\njwhite) echo \"jwhite:x:1000:1000::"+r.home+":/bin/bash\" ;;\nroot) echo \"root:x:0:0:root:"+r.rootHome+":/bin/bash\" ;;\n*) exit 2 ;;\nesac\n", 0o755)
 	write(filepath.Join(r.bin, "chown"), "#!/bin/sh\necho \"chown $*\" >> "+r.log+"\n", 0o755)
 	write(filepath.Join(r.bin, "visudo"), "#!/bin/sh\necho \"visudo $*\" >> "+r.log+"\nexit ${STAND_IN_VISUDO:-0}\n", 0o755)
 	return r
@@ -88,6 +90,9 @@ func (r *installRig) nothingWritten(t *testing.T) {
 }
 
 const installConfig = "vault = \"/home/jwhite/millwright-vault\"\nhost = \"desktop\"  # this one\npostern_governor_key = \"03F01D6B9018AB421DD410404CB869072065522BF85734008F105CF385A023A80F\"\n\n[doctor]\npostern_governor_key = \"02ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\"\n"
+
+// rootConfig is root's own mw config, on a host reached as root.
+const rootConfig = "vault = \"/root/millwright-vault\"\nhost = \"vps\"\npostern_governor_key = \"" + installKey + "\"\n"
 
 // One line installs the helper, the Governor's key from the user's own mw
 // config (root table only), this host's name and the sudoers line naming
@@ -128,6 +133,56 @@ func TestInstallHandsRootInstallsFromTheUsersConfig(t *testing.T) {
 			t.Errorf("expected %q in the output, got:\n%s", want, out)
 		}
 	}
+}
+
+// On a host reached as root, mw runs as root: the installer takes root's own
+// mw config and installs the helper, the key, the host and the record's
+// directory exactly as for any user, and no sudoers file, since root runs
+// `sudo -n` with none. Its question and its way back say so.
+func TestInstallHandsRootForRootWritesNoSudoers(t *testing.T) {
+	r := newInstallRig(t, installConfig)
+
+	out, err := r.run(t, "", nil, "root", "--yes")
+	if err != nil {
+		t.Fatalf("install-hands-root root failed: %v\n%s", err, out)
+	}
+	if body, mode := r.read(t, "usr/local/sbin/mw-hands-root"); body != "the helper, built\n" || mode != 0o755 {
+		t.Errorf("expected the built helper, 0755, got %q %o", body, mode)
+	}
+	if body, mode := r.read(t, "etc/mw-hands/governor.pub"); body != installKey+"\n" || mode != 0o644 {
+		t.Errorf("expected root's config's key, 0644, got %q %o", body, mode)
+	}
+	if body, mode := r.read(t, "etc/mw-hands/host"); body != "vps\n" || mode != 0o644 {
+		t.Errorf("expected root's config's host, 0644, got %q %o", body, mode)
+	}
+	if _, mode := r.read(t, "var/lib/mw-hands"); mode != 0o700 {
+		t.Errorf("expected the record's directory 0700, got %o", mode)
+	}
+	if _, err := os.Stat(filepath.Join(r.prefix, "etc", "sudoers.d")); err == nil {
+		t.Error("expected no sudoers file, nor its directory, for root")
+	}
+	calls, _ := os.ReadFile(r.log)
+	if strings.Count(string(calls), "chown root:root") < 4 || strings.Contains(string(calls), "visudo") {
+		t.Errorf("expected every file made root's and no visudo, got:\n%s", calls)
+	}
+	for _, want := range []string{"no sudoers", "The way back", "vps"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in the output, got:\n%s", want, out)
+		}
+	}
+	if _, back, _ := strings.Cut(out, "The way back"); !strings.Contains(back, "no sudoers") {
+		t.Errorf("expected the way back to say there is no sudoers file, got:\n%s", out)
+	}
+	if strings.Contains(out, "sudoers.d") {
+		t.Errorf("expected no sudoers file named for root, got:\n%s", out)
+	}
+
+	s := newInstallRig(t, installConfig)
+	out, err = s.run(t, "n\n", nil, "root")
+	if err == nil || !strings.Contains(out, "no sudoers") || !strings.Contains(out, "Nothing written.") {
+		t.Fatalf("expected the question to say no sudoers and a no to write nothing, got %v\n%s", err, out)
+	}
+	s.nothingWritten(t)
 }
 
 // Without --yes it asks, and writes nothing unless told yes.
@@ -178,7 +233,8 @@ func TestInstallHandsRootRefusesBeforeWritingAnything(t *testing.T) {
 		"not root":         {installConfig, []string{"STAND_IN_UID=1000"}, []string{"jwhite", "--yes"}, false, "sudo"},
 		"no helper built":  {installConfig, nil, []string{"jwhite", "--yes"}, true, "make -C "},
 		"no such user":     {installConfig, nil, []string{"nobody-here", "--yes"}, false, "no user"},
-		"root as the user": {installConfig, nil, []string{"root", "--yes"}, false, "not root"},
+		"not a user name":  {installConfig, nil, []string{"jw/hite", "--yes"}, false, "not a user name"},
+		"a leading digit":  {installConfig, nil, []string{"1jwhite", "--yes"}, false, "not a user name"},
 		"no key anywhere":  {"host = \"desktop\"\n", nil, []string{"jwhite", "--yes"}, false, "postern_governor_key"},
 		"no host":          {"postern_governor_key = \"" + installKey + "\"\n", nil, []string{"jwhite", "--yes"}, false, "no host"},
 		"visudo refuses":   {installConfig, []string{"STAND_IN_VISUDO=1"}, []string{"jwhite", "--yes"}, false, "visudo"},
