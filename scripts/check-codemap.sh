@@ -2,7 +2,7 @@
 # Keep docs/codemap.md honest. Reads only files inside this repository, writes
 # nothing, and never touches the vault, the beads database or any other rig.
 #
-# Three checks, each with a deliberately simple rule so the next Builder can
+# Four checks, each with a deliberately simple rule so the next Builder can
 # predict what will trip it:
 #
 # 1. SIZE. docs/codemap.md must be at most 8192 bytes. It is one page: if it
@@ -29,6 +29,12 @@
 #      - a non-test .go file under cmd/mw/ that is "a command file": it has a
 #        line matching  ^func new<Name>Cmd(
 #    Files under application/apptest/ are skipped: they are fakes, not ports.
+#
+# 4. DUPLICATES. .gitattributes merges the map by union, so two branches that
+#    each add a row both keep it. The price is that two branches which edit one
+#    row differently keep both versions. So no non-blank line may appear twice,
+#    and no two table rows may start with the same first cell. The separator
+#    row (| --- | --- |) of each table is skipped: every table has one.
 
 set -eu
 
@@ -102,4 +108,31 @@ for file in $(find application cmd/mw -name '*.go' ! -name '*_test.go' | sort); 
 done
 [ "$uncovered" -eq 0 ] || exit 1
 
-echo "OK: $MAP is $size bytes, names only paths that exist, and covers every port, use case and cmd/mw command"
+# --- 4. no line or table row is repeated ---------------------------------
+# Reports every repeat, then fails once.
+dupes=$(awk -v map="$MAP" '
+	/^[[:space:]]*$/ || /^\|[ |:-]*$/ { next }
+	{
+		if ($0 in seen) {
+			printf "check-codemap: %s line %d repeats line %d: %s\n", map, FNR, seen[$0], $0
+			next
+		}
+		seen[$0] = FNR
+	}
+	/^\|/ {
+		cell = $0
+		sub(/^\|[ \t]*/, "", cell)
+		sub(/[ \t]*\|.*$/, "", cell)
+		if (cell in first) {
+			printf "check-codemap: %s line %d starts with the same first cell as line %d (%s): %s\n", map, FNR, first[cell], cell, $0
+		} else {
+			first[cell] = FNR
+		}
+	}
+' "$MAP")
+if [ -n "$dupes" ]; then
+	echo "$dupes" >&2
+	exit 1
+fi
+
+echo "OK: $MAP is $size bytes, names only paths that exist, covers every port, use case and cmd/mw command, and repeats no row"
