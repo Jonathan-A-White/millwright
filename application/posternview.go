@@ -597,9 +597,12 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 			needs = append(needs, b.need(PosternNeedDemo, e, since, viewSummary(d.Description)))
 		}
 		if hasLabel(d.Labels, LabelHitl) {
-			need := b.need(PosternNeedHands, e, since, viewSummary(d.Description))
-			need.Steps = viewHandsSteps(id, notes)
-			needs = append(needs, need)
+			steps := viewHandsSteps(id, notes)
+			if !allStepsRanClean(steps) {
+				need := b.need(PosternNeedHands, e, since, viewSummary(d.Description))
+				need.Steps = steps
+				needs = append(needs, need)
+			}
 		}
 		if !d.IsEpic && d.Exhausted {
 			needs = append(needs, b.need(PosternNeedAlarm, e, firstKnown(d.Updated, d.Created),
@@ -839,6 +842,22 @@ func viewHandsSteps(bead string, notes map[string]string) []PosternViewHandsStep
 		steps = append(steps, step)
 	}
 	return steps
+}
+
+// allStepsRanClean reports whether steps is not empty and every one has a
+// last run with exit 0: the bead then waits on the Mayor's acceptance check,
+// not on the Governor's hands. A failed step, one not yet run, or no steps at
+// all leaves the hands need standing.
+func allStepsRanClean(steps []PosternViewHandsStep) bool {
+	if len(steps) == 0 {
+		return false
+	}
+	for _, step := range steps {
+		if step.Ran == nil || step.Ran.Exit != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // workable reports whether a bead is open or in progress: neither held nor

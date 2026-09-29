@@ -247,11 +247,21 @@ func (c *posternViewContext) theViewReadNoCommentsOf(a, b string) error {
 }
 
 func (c *posternViewContext) theViewsBeadHasTheHandsStep(bead, id, host, as, run string) error {
-	steps, err := json.Marshal([]application.HandsStepRecord{{HandsStep: domain.HandsStep{ID: id, Host: host, As: as, Run: run}}})
+	ctx := context.Background()
+	var records []application.HandsStepRecord
+	if raw, err := c.tracker.Note(ctx, application.HandsStepsKey(bead)); err != nil {
+		return err
+	} else if raw != "" {
+		if err := json.Unmarshal([]byte(raw), &records); err != nil {
+			return err
+		}
+	}
+	records = append(records, application.HandsStepRecord{HandsStep: domain.HandsStep{ID: id, Host: host, As: as, Run: run}})
+	steps, err := json.Marshal(records)
 	if err != nil {
 		return err
 	}
-	return c.tracker.SetNote(context.Background(), application.HandsStepsKey(bead), string(steps))
+	return c.tracker.SetNote(ctx, application.HandsStepsKey(bead), string(steps))
 }
 
 func (c *posternViewContext) theViewsHandsStepRan(id, bead string, exit int) error {
