@@ -316,3 +316,76 @@ func TestApplyRunRecordsWhyAFailedStepFailed(t *testing.T) {
 		})
 	}
 }
+
+// A step that already ran OK is not run again by a fresh approval of it — a
+// stale screen's Approve — but one whose last run failed may be; and a step
+// the Mayor re-adds with --replace, which forgets its run, runs again.
+func TestApplyHandsRefusesAStepThatAlreadyRanOK(t *testing.T) {
+	ctx := context.Background()
+	f := newRunFixture(t)
+	mustDo(t, f.tracker.SetNote(ctx, application.HandsRanKey("mw-e.3", "echo"), `{"at":"2026-09-28T10:00:00Z","exit":0,"host":"desktop"}`))
+	f.approve(t, "tx-stale", "echo", runNow, "")
+
+	f.apply(t)
+	f.apply(t)
+
+	if jobs := f.runner.Jobs(); len(jobs) != 0 {
+		t.Fatalf("expected nothing run, got %+v", jobs)
+	}
+	for _, want := range []string{"NOT RUN step echo", "already ran OK at 2026-09-28T10:00:00Z on desktop", "mw hands add --replace"} {
+		if comments := f.tracker.Comments("mw-e.3"); len(comments) != 1 || !strings.Contains(comments[0], want) {
+			t.Fatalf("expected one NOT RUN comment saying %q, got %q", want, comments)
+		}
+	}
+	if back := f.sentBack(t, 0); back.Re != "tx-stale" || !strings.Contains(back.Text, "already ran OK") || len(f.backend.Delivered()) != 1 {
+		t.Fatalf("expected the refusal sent back once, got %+v", back)
+	}
+	if subjects := f.subjects(t); len(subjects) != 1 || subjects[0] != "Not run: mw-e.3 echo" {
+		t.Fatalf("expected one Not run mail, got %v", subjects)
+	}
+	sha := domain.HandsSHA256("mw-e.3", f.steps["echo"])
+	if note, _ := f.tracker.Note(ctx, application.HandsApprovalKey(domain.HandsApprovalID(sha, runNow.Unix()))); note != "" {
+		t.Fatalf("expected the approval left unspent, got %q", note)
+	}
+	if ran, _ := f.tracker.Note(ctx, application.HandsRanKey("mw-e.3", "echo")); ran != `{"at":"2026-09-28T10:00:00Z","exit":0,"host":"desktop"}` {
+		t.Fatalf("expected the ran record untouched, got %q", ran)
+	}
+}
+
+func TestApplyHandsRunsAgainAStepWhoseLastRunFailed(t *testing.T) {
+	f := newRunFixture(t)
+	mustDo(t, f.tracker.SetNote(context.Background(), application.HandsRanKey("mw-e.3", "echo"), `{"at":"2026-09-28T10:00:00Z","exit":1,"host":"desktop","why":"nope"}`))
+	f.approve(t, "tx-again", "echo", runNow, "")
+
+	f.apply(t)
+
+	if jobs := f.runner.Jobs(); len(jobs) != 1 {
+		t.Fatalf("expected the failed step run again, got %+v", jobs)
+	}
+	if ran, _ := f.tracker.Note(context.Background(), application.HandsRanKey("mw-e.3", "echo")); ran != `{"at":"2026-09-28T12:10:00Z","exit":0,"host":"desktop"}` {
+		t.Fatalf("expected the new run recorded, got %q", ran)
+	}
+}
+
+func TestApplyHandsRunsAReplacedStepThatRanOKBefore(t *testing.T) {
+	ctx := context.Background()
+	f := newRunFixture(t)
+	mustDo(t, f.tracker.SetNote(ctx, application.HandsRanKey("mw-e.3", "echo"), `{"at":"2026-09-28T10:00:00Z","exit":0,"host":"desktop"}`))
+
+	// mw hands add --replace: new text in place, the old run forgotten.
+	f.steps["echo"] = domain.HandsStep{ID: "echo", Host: "desktop", As: "user", Run: "echo hello again"}
+	var records []application.HandsStepRecord
+	for _, id := range []string{"echo", "linger", "far", "nowhere"} {
+		records = append(records, application.HandsStepRecord{HandsStep: f.steps[id], AddedAt: "2026-09-28T11:00:00Z"})
+	}
+	raw, _ := json.Marshal(records)
+	mustDo(t, f.tracker.SetNote(ctx, application.HandsStepsKey("mw-e.3"), string(raw)))
+	mustDo(t, f.tracker.ClearNote(ctx, application.HandsRanKey("mw-e.3", "echo")))
+	f.approve(t, "tx-new", "echo", runNow, "")
+
+	f.apply(t)
+
+	if jobs := f.runner.Jobs(); len(jobs) != 1 || jobs[0].Request.Run != "echo hello again" {
+		t.Fatalf("expected the replaced step run, got %+v", jobs)
+	}
+}

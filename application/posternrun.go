@@ -27,8 +27,9 @@ func (i PosternInbox) runsHands() bool {
 // applyRun runs the hands step the Governor approved (§17), once every check
 // holds: the step is on the bead and still hashes to what he approved, the
 // approval is his key's signature over that hash and time, it is under
-// fifteen minutes old (and not over two ahead), it has not run before, and
-// the step's host is this one or one [hands_hosts] reaches. The approval is
+// fifteen minutes old (and not over two ahead), it has not run before, the
+// step has not already run OK (a stale screen's Approve; --replace forgets a
+// run), and the step's host is this one or one [hands_hosts] reaches. The approval is
 // marked spent before the step starts, so a crash cannot run it twice. How
 // it ran — or why it did not — is commented on the bead, sent back to him in
 // the bead's thread, re the approval's txid, and mailed to the Mayor.
@@ -74,6 +75,13 @@ func (i PosternInbox) applyRun(ctx context.Context, m PosternInboxMessage, actio
 	}
 	if strings.TrimSpace(spent) != "" {
 		return refuse(fmt.Sprintf("this approval has already run (txid %s): approve the step again to run it again", strings.TrimSpace(spent)))
+	}
+	rawRan, err := i.Memory.Note(ctx, HandsRanKey(action.Bead, step.ID))
+	if err != nil {
+		return posternApplied{}, err
+	}
+	if ran, ok := parseHandsRan(rawRan); ok && ran.Exit == 0 {
+		return refuse(fmt.Sprintf("the step already ran OK at %s on %s: the Mayor re-adds it with mw hands add --replace if it must run again", ran.At, ran.Host))
 	}
 	var remote []string
 	if step.Host != i.Host {
