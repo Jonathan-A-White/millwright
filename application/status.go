@@ -110,6 +110,11 @@ type Status struct {
 	// BeadsSyncRemote.
 	SyncMode BeadsSyncMode
 
+	// Home reads the vault's home file, to turn a SyncMode of BeadsSyncAuto
+	// into backup (this host is home) or shared (it is not). Nil, or a home
+	// that cannot be told, leaves it auto and unresolved.
+	Home HomeFile
+
 	// Ticks are this host's logs of its timers' runs, counted for the TICKS
 	// section. A log that is not there, or that no line was ever written to,
 	// leaves its timer out; with neither there is no section.
@@ -241,6 +246,9 @@ type StatusReport struct {
 	// line only when BeadsKnown is: a report with no Notes says nothing of
 	// the beads at all.
 	SyncMode BeadsSyncMode
+	// SyncWhy says how an auto SyncMode was resolved ("auto: home"), or, when
+	// SyncMode is still auto, why it could not be.
+	SyncWhy string
 	// LastBackup is when a backup of the one database last got through, on
 	// the host that keeps it, and BackupAge how long ago that was. Both are
 	// zero when it never has, and when LastBackupSaid, the note as the
@@ -258,6 +266,16 @@ type StatusReport struct {
 // from it. Nothing is claimed, nothing is poured, nothing is written.
 func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	report := StatusReport{Host: s.Host, SyncMode: s.syncMode()}
+	if report.SyncMode == BeadsSyncAuto {
+		resolved, err := ResolveBeadsSync(ctx, s.Home, s.Host, BeadsSyncAuto)
+		if unknown, ok := HomeUnknownIn(err); ok {
+			report.SyncWhy = "home unknown: " + unknown.Why.Error()
+		} else if err != nil {
+			report.SyncWhy = "home unknown: " + err.Error()
+		} else {
+			report.SyncMode, report.SyncWhy = resolved.Mode, resolved.Why
+		}
+	}
 	switch {
 	case s.Tracker == nil:
 		return report, fmt.Errorf("reading status: there is no work tracker to read it from")
@@ -699,6 +717,19 @@ func backupHaltLine(host string, halt SyncHaltInfo) string {
 // syncModeLine is the one line how this host's beads are synced is worth,
 // and on the host that keeps the one database, when it last backed it up.
 func (r StatusReport) syncModeLine() string {
+	line := r.syncModeSaid()
+	if r.SyncMode == BeadsSyncShared && r.SyncWhy != "" {
+		// "boost of desktop" already says the database is kept elsewhere, and
+		// both together would not fit a phone.
+		return "BEADS SYNC shared · " + r.SyncWhy
+	}
+	if r.SyncWhy != "" {
+		line += " · " + r.SyncWhy
+	}
+	return line
+}
+
+func (r StatusReport) syncModeSaid() string {
 	switch r.SyncMode {
 	case BeadsSyncBackup:
 		switch {
@@ -711,6 +742,8 @@ func (r StatusReport) syncModeLine() string {
 		}
 	case BeadsSyncShared:
 		return "BEADS SYNC shared · kept on another host"
+	case BeadsSyncAuto:
+		return "BEADS SYNC auto"
 	default:
 		return "BEADS SYNC remote"
 	}

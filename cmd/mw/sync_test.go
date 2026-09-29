@@ -2,12 +2,15 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 )
 
 // mw sync is never run against a real vault here: it would reach the factory's
@@ -103,5 +106,78 @@ func TestSyncCommandRefusesABeadsSyncModeNamingTheThree(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("expected the refusal to name %q, got %q", want, err)
 		}
+	}
+}
+
+func homeText(host string) string { return host + " 2026-09-29T12:00:00Z mayor@laptop\n" }
+
+func TestHostSyncOnAutoLeavesTheBackupIntervalToTheModeUnlessSaid(t *testing.T) {
+	t.Setenv("MW_BEADS_SYNC", "")
+	t.Setenv("MW_BEADS_BACKUP_MINUTES", "")
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "")
+	mwConfig(t, "vault = \"/v\"\nhost = \"laptop\"\nbeads_sync = \"auto\"\n")
+	sync, err := hostSync(application.Sync{Host: "laptop"})
+	if err != nil || sync.Mode != application.BeadsSyncAuto || sync.BackupInterval != 0 {
+		t.Fatalf("expected auto with no interval said, got %q %s: %v", sync.Mode, sync.BackupInterval, err)
+	}
+
+	mwConfig(t, "vault = \"/v\"\nhost = \"laptop\"\nbeads_sync = \"auto\"\nbeads_backup_minutes = 10\n")
+	if sync, err = hostSync(application.Sync{Host: "laptop"}); err != nil || sync.BackupInterval != 10*time.Minute {
+		t.Fatalf("expected the said 10 minutes, got %s: %v", sync.BackupInterval, err)
+	}
+}
+
+func TestHostBeadsOnABoostPointsBdAtTheHomesServer(t *testing.T) {
+	t.Setenv("MW_BEADS_SYNC", "")
+	t.Setenv("MW_BEADS_SERVER_HOST", "")
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "stale.example")
+	mwConfig(t, "beads_sync = \"auto\"\n")
+	files := &apptest.FakeHomeFile{Text: homeText("desktop")}
+
+	setting, err := hostBeads(context.Background(), files, "laptop")
+	if err != nil || setting.Mode() != application.BeadsSyncShared || setting.Resolved.Why != "auto: boost of desktop" {
+		t.Fatalf("expected shared as a boost of desktop, got %+v: %v", setting, err)
+	}
+	if got := os.Getenv("BEADS_DOLT_SERVER_HOST"); got != "desktop.mw" {
+		t.Errorf("expected bd pointed at desktop.mw, got %q", got)
+	}
+
+	mwConfig(t, "beads_sync = \"auto\"\nbeads_server_host = \"10.88.0.2\"\n")
+	if _, err = hostBeads(context.Background(), files, "laptop"); err != nil || os.Getenv("BEADS_DOLT_SERVER_HOST") != "10.88.0.2" {
+		t.Errorf("expected the configured server host, got %q: %v", os.Getenv("BEADS_DOLT_SERVER_HOST"), err)
+	}
+}
+
+func TestHostBeadsOnTheHomeAndWithNoHomeLeavesBdsServerAlone(t *testing.T) {
+	t.Setenv("MW_BEADS_SYNC", "")
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "elsewhere")
+	mwConfig(t, "beads_sync = \"auto\"\n")
+
+	setting, err := hostBeads(context.Background(), &apptest.FakeHomeFile{Text: homeText("laptop")}, "laptop")
+	if err != nil || setting.Mode() != application.BeadsSyncBackup {
+		t.Fatalf("expected backup on the home, got %+v: %v", setting, err)
+	}
+	setting, err = hostBeads(context.Background(), &apptest.FakeHomeFile{Missing: true}, "laptop")
+	if err != nil || setting.Unknown == nil || setting.Mode() != application.BeadsSyncAuto {
+		t.Fatalf("expected an unknown home and no guess, got %+v: %v", setting, err)
+	}
+	if got := os.Getenv("BEADS_DOLT_SERVER_HOST"); got != "elsewhere" {
+		t.Errorf("expected the server host left alone, got %q", got)
+	}
+}
+
+func TestSyncCommandOnAutoWithNoHomeFileRefusesSayingWhy(t *testing.T) {
+	t.Setenv("MW_BEADS_SYNC", "")
+	mwConfig(t, "vault = \""+t.TempDir()+"\"\nhost = \"laptop\"\nbeads_sync = \"auto\"\n")
+
+	out := &bytes.Buffer{}
+	root := newRootCmd()
+	root.SetOut(out)
+	root.SetErr(out)
+	root.SetArgs([]string{"sync"})
+
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "no home file") {
+		t.Fatalf("expected mw sync on auto to refuse for want of a home file, got %v", err)
 	}
 }

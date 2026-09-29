@@ -98,3 +98,15 @@ func TestBeadsServerDialsForRealWithAShortTimeout(t *testing.T) {
 		t.Fatalf("expected the check named beads-server, got %q", check.Name())
 	}
 }
+
+func TestBeadsServerNamesWhyAutoChoseTheMode(t *testing.T) {
+	var asked string
+	check := &doctor.BeadsServer{Mode: "shared", Why: "auto: boost of laptop", Address: "laptop.mw:3307", Dial: dialing(false, &asked)}
+	if _, why := check.Probe(context.Background()); !strings.Contains(why, "laptop.mw:3307") {
+		t.Errorf("expected the address named, got %q", why)
+	}
+	inert := &doctor.BeadsServer{Mode: "backup", Why: "auto: home"}
+	if verdict, why := inert.Probe(context.Background()); verdict != application.DoctorOK || !strings.Contains(why, "backup (auto: home)") {
+		t.Errorf("expected ok naming backup (auto: home), got %v %q", verdict, why)
+	}
+}

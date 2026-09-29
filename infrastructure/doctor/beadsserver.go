@@ -45,6 +45,9 @@ type BeadsServer struct {
 	// AddressErr why it could not be read.
 	Address    string
 	AddressErr error
+	// Why says how Mode was chosen when beads_sync is auto ("auto: boost of
+	// laptop"), and is named beside it wherever the check speaks of the mode.
+	Why string
 
 	// Dial reports whether address answered a TCP dial. The zero value dials
 	// for real, with a short timeout.
@@ -70,11 +73,11 @@ func (b *BeadsServer) Probe(ctx context.Context) (application.Verdict, string) {
 	case b.ModeErr != nil:
 		return application.DoctorCannotTell, b.ModeErr.Error()
 	case b.Mode != beadsServerShared:
-		return application.DoctorOK, fmt.Sprintf("beads_sync is %s: this host keeps its beads itself, so there is no database elsewhere to reach", b.Mode)
+		return application.DoctorOK, fmt.Sprintf("beads_sync is %s: this host keeps its beads itself, so there is no database elsewhere to reach", b.said())
 	case b.AddressErr != nil:
 		return application.DoctorCannotTell, b.AddressErr.Error()
 	case b.Address == "":
-		return application.DoctorCannotTell, "beads_sync is shared but no BEADS_DOLT_SERVER_HOST is set in mw doctor's environment (dispatch.env): nothing to dial"
+		return application.DoctorCannotTell, fmt.Sprintf("beads_sync is %s but no BEADS_DOLT_SERVER_HOST is set in mw doctor's environment (dispatch.env): nothing to dial", b.said())
 	}
 	if b.dial(ctx, b.Address) {
 		return application.DoctorOK, ""
@@ -94,6 +97,15 @@ func (b *BeadsServer) Damper() (time.Duration, int) {
 
 // WayBack implements application.DoctorCheck: nothing ever changes.
 func (b *BeadsServer) WayBack() string { return "none: no cure runs" }
+
+// said is the mode as the check names it: with the reason auto chose it, when
+// it did.
+func (b *BeadsServer) said() string {
+	if b.Why == "" {
+		return b.Mode
+	}
+	return fmt.Sprintf("%s (%s)", b.Mode, b.Why)
+}
 
 // dial reports whether address answers a TCP dial, over Dial when it is set,
 // otherwise for real with a short timeout.

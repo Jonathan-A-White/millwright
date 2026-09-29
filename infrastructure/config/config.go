@@ -17,6 +17,7 @@
 //	millhand_review_model = "opus"
 //	beads_sync = "remote"
 //	beads_backup_minutes = 30
+//	beads_server_host = "laptop.mw"    # only for beads_sync = "auto" on a boost
 //
 //	[rigs]
 //	millwright = "/root/millwright"
@@ -92,6 +93,7 @@ const (
 
 	BeadsSyncEnv          = "MW_BEADS_SYNC"
 	BeadsBackupMinutesEnv = "MW_BEADS_BACKUP_MINUTES"
+	BeadsServerHostEnv    = "MW_BEADS_SERVER_HOST"
 )
 
 // The environment variables bd itself reads to reach a Dolt database server
@@ -806,7 +808,7 @@ func PushWaitSeconds() (int, error) {
 
 // The ways `mw sync` may treat this host's beads database, the root-table
 // `beads_sync` key of the config file. application.BeadsSyncMode names the
-// same three.
+// same four.
 //
 //   - remote: every host keeps a copy of its own and brings it level with the
 //     others through the tracker's remote on every sync. The default: what
@@ -817,10 +819,16 @@ func PushWaitSeconds() (int, error) {
 //   - shared: this host's bd reaches another host's database over the
 //     network (BEADS_DOLT_SERVER_HOST and the rest) and keeps no copy of its
 //     own, so it has nothing to push, pull or collect.
+//   - auto: backup on the home and shared on a boost, read off the vault's
+//     home file, so that moving the home needs no edit to either host. On
+//     the home the backup runs every beads_backup_minutes, 5 when unset; on
+//     a boost bd reaches the Dolt server at beads_server_host, the home's
+//     name on WireGuard (<home>.mw) when unset.
 const (
 	BeadsSyncRemote  = "remote"
 	BeadsSyncBackup  = "backup"
 	BeadsSyncShared  = "shared"
+	BeadsSyncAuto    = "auto"
 	DefaultBeadsSync = BeadsSyncRemote
 )
 
@@ -843,11 +851,11 @@ func BeadsSync() (string, error) {
 		return "", err
 	}
 	switch said {
-	case BeadsSyncRemote, BeadsSyncBackup, BeadsSyncShared:
+	case BeadsSyncRemote, BeadsSyncBackup, BeadsSyncShared, BeadsSyncAuto:
 		return said, nil
 	}
-	return "", fmt.Errorf("beads_sync is %q, which is not one of its three choices: %q (every host keeps a copy, level through the remote), %q (this host holds the one database, the remote a backup) or %q (this host's bd reaches another host's database); set %s=<choice>, or `beads_sync = \"<choice>\"` in %s",
-		said, BeadsSyncRemote, BeadsSyncBackup, BeadsSyncShared, BeadsSyncEnv, File)
+	return "", fmt.Errorf("beads_sync is %q, which is not one of its four choices: %q (every host keeps a copy, level through the remote), %q (this host holds the one database, the remote a backup), %q (this host's bd reaches another host's database) or %q (backup on the home, shared on a boost); set %s=<choice>, or `beads_sync = \"<choice>\"` in %s",
+		said, BeadsSyncRemote, BeadsSyncBackup, BeadsSyncShared, BeadsSyncAuto, BeadsSyncEnv, File)
 }
 
 // BeadsBackupMinutes reports how many minutes a host whose beads_sync is
@@ -855,21 +863,48 @@ func BeadsSync() (string, error) {
 // otherwise the root-table `beads_backup_minutes` key of
 // ~/.config/mw/config.toml, and DefaultBeadsBackupMinutes when neither says.
 func BeadsBackupMinutes() (int, error) {
-	said, err := optionalSetting("beads_backup_minutes", BeadsBackupMinutesEnv, "")
+	minutes, said, err := BeadsBackupMinutesSaid()
 	if err != nil {
 		return 0, err
 	}
-	if said == "" {
+	if !said {
 		return DefaultBeadsBackupMinutes, nil
 	}
+	return minutes, nil
+}
+
+// BeadsBackupMinutesSaid is BeadsBackupMinutes for a caller with a default of
+// its own: said is false when neither the environment nor the config file
+// says, and minutes is then zero.
+func BeadsBackupMinutesSaid() (minutes int, said bool, err error) {
+	text, err := optionalSetting("beads_backup_minutes", BeadsBackupMinutesEnv, "")
+	if err != nil {
+		return 0, false, err
+	}
+	if text == "" {
+		return 0, false, nil
+	}
+	return parseBackupMinutes(text)
+}
+
+func parseBackupMinutes(said string) (int, bool, error) {
 	minutes, err := strconv.Atoi(said)
 	if err != nil {
-		return 0, fmt.Errorf("the beads backup interval is %q, which is not a whole number of minutes: set %s=<n>, or `beads_backup_minutes = <n>` in %s", said, BeadsBackupMinutesEnv, File)
+		return 0, false, fmt.Errorf("the beads backup interval is %q, which is not a whole number of minutes: set %s=<n>, or `beads_backup_minutes = <n>` in %s", said, BeadsBackupMinutesEnv, File)
 	}
 	if minutes < 1 {
-		return 0, fmt.Errorf("the beads backup interval is %d minutes, so every sync would push a backup: set it to 1 or more", minutes)
+		return 0, false, fmt.Errorf("the beads backup interval is %d minutes, so every sync would push a backup: set it to 1 or more", minutes)
 	}
-	return minutes, nil
+	return minutes, true, nil
+}
+
+// BeadsServerHost reports the host a boost's bd reaches the home's Dolt
+// server on, when beads_sync is auto and the home's name on WireGuard will
+// not do: $MW_BEADS_SERVER_HOST if it is set, otherwise the root-table
+// `beads_server_host` key of ~/.config/mw/config.toml, and "" when neither
+// says.
+func BeadsServerHost() (string, error) {
+	return optionalSetting("beads_server_host", BeadsServerHostEnv, "")
 }
 
 // BeadsServerAddress reports the host:port this host's bd reaches its Dolt

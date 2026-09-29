@@ -50,18 +50,24 @@ const (
 	// over the network, with no copy of its own: there is nothing here to
 	// push, pull or collect, and the database's own host does all three.
 	BeadsSyncShared BeadsSyncMode = "shared"
+
+	// BeadsSyncAuto is a mode chosen by where the home is: backup on the home,
+	// shared on the boost, so that moving the home needs no edit to either
+	// host's config. It is never what a sync or a report says it did: Run and
+	// ResolveBeadsSync turn it into one of the other two, or refuse.
+	BeadsSyncAuto BeadsSyncMode = "auto"
 )
 
 // ParseBeadsSyncMode reads a mode as a config file says it. "" is
-// BeadsSyncRemote; anything but the three is refused, naming them.
+// BeadsSyncRemote; anything but the four is refused, naming them.
 func ParseBeadsSyncMode(said string) (BeadsSyncMode, error) {
 	switch mode := BeadsSyncMode(strings.TrimSpace(said)); mode {
 	case "":
 		return BeadsSyncRemote, nil
-	case BeadsSyncRemote, BeadsSyncBackup, BeadsSyncShared:
+	case BeadsSyncRemote, BeadsSyncBackup, BeadsSyncShared, BeadsSyncAuto:
 		return mode, nil
 	default:
-		return "", fmt.Errorf("the beads sync mode %q is none of %s, %s or %s", said, BeadsSyncRemote, BeadsSyncBackup, BeadsSyncShared)
+		return "", fmt.Errorf("the beads sync mode %q is none of %s, %s, %s or %s", said, BeadsSyncRemote, BeadsSyncBackup, BeadsSyncShared, BeadsSyncAuto)
 	}
 }
 
@@ -458,6 +464,10 @@ type SyncReport struct {
 	// BeadsSyncRemote.
 	Mode BeadsSyncMode
 
+	// Why says how Mode was chosen when beads_sync is auto ("auto: home",
+	// "auto: boost of laptop"); empty for a mode that was configured.
+	Why string
+
 	// BackedUp says this sync, on the host that holds the one database, ran
 	// the tracker's remote cycle as its backup and it got through. False on
 	// most syncs there: a backup is due only once every BackupInterval.
@@ -509,6 +519,14 @@ func (r SyncReport) String() string {
 // beadsPhrase is what the one line says of the beads half, in whichever mode
 // it ran.
 func (r SyncReport) beadsPhrase() string {
+	phrase := r.beadsMode()
+	if r.Why != "" {
+		phrase += " (" + r.Why + ")"
+	}
+	return phrase
+}
+
+func (r SyncReport) beadsMode() string {
 	switch r.Mode {
 	case BeadsSyncBackup:
 		switch {
@@ -564,13 +582,19 @@ type Sync struct {
 	Host    string
 
 	// Mode is how this host's beads database is treated. Empty reads
-	// BeadsSyncRemote; anything but the three is refused before anything runs.
+	// BeadsSyncRemote; anything but the four is refused before anything runs.
+	// BeadsSyncAuto is read off Home, and on the home that holds the database
+	// reads a zero BackupInterval as AutoBackupInterval.
 	Mode BeadsSyncMode
 
 	// BackupInterval is how long the host that holds the one database waits
 	// between two backups of it. Zero reads DefaultBackupInterval. It is read
-	// only when Mode is BeadsSyncBackup.
+	// only when the host acts as backup.
 	BackupInterval time.Duration
+
+	// Home reads the vault's home file. It is needed only when Mode is
+	// BeadsSyncAuto, which is decided by it: with none, auto refuses.
+	Home HomeFile
 
 	// Ticks are the logs this host's timers keep. Every sync that gets level
 	// leaves the counts of them beside the note of when it was, as TicksKey, so
@@ -620,6 +644,18 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 		return SyncReport{}, fmt.Errorf("syncing on %s: %w", s.Host, err)
 	}
 	report := SyncReport{Host: s.Host, Mode: mode}
+	if mode == BeadsSyncAuto {
+		// Decided before anything is touched: a host that cannot tell which
+		// side of the move it is on must not guess, and does nothing.
+		resolved, err := s.resolveAuto(ctx)
+		if err != nil {
+			return SyncReport{}, fmt.Errorf("syncing on %s: %w", s.Host, err)
+		}
+		mode, report.Mode, report.Why = resolved.Mode, resolved.Mode, resolved.Why
+		if s.BackupInterval <= 0 {
+			s.BackupInterval = AutoBackupInterval
+		}
+	}
 
 	// A vault holding work nobody has committed cannot be rebased onto the
 	// other host's, and committing someone else's work is not a sync's job. So

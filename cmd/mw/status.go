@@ -38,8 +38,9 @@ func newStatusCmd() *cobra.Command {
 			"A BEADS line says how large this host's own beads database is on disk — its auto-commit\n" +
 			"history and auto-backups included, since both have grown unbounded before — and warns once\n" +
 			"it passes 1 GB, so the Mayor sees it without asking a Clerk to run du. A BEADS SYNC line\n" +
-			"under it says how this host's beads are synced (config `beads_sync`: remote, backup or\n" +
-			"shared) and, on the host that keeps the one database, when its last backup got through.\n\n" +
+			"under it says how this host's beads are synced (config `beads_sync`: remote, backup, shared or\n" +
+			"auto, which says whether this host is the home or a boost, and why) and, on the host that\n" +
+			"keeps the one database, when its last backup got through.\n\n" +
 			"Every line fits a phone-width terminal, at most 60 columns. Nothing is claimed, nothing is\n" +
 			"written and no session is started: status only reads.",
 		Args: cobra.NoArgs,
@@ -61,7 +62,8 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mode, err := hostBeadsSync()
+			files := mwVault(dir, host)
+			setting, err := hostBeads(cmd.Context(), files, host)
 			if err != nil {
 				return err
 			}
@@ -77,7 +79,8 @@ func newStatusCmd() *cobra.Command {
 				Ticks:          hostTickLogs(),
 				HostSilence:    time.Duration(hours) * time.Hour,
 				RigMemoryBytes: budget,
-				SyncMode:       mode,
+				SyncMode:       setting.Configured,
+				Home:           files,
 				Out:            cmd.OutOrStdout(),
 			}.Run(cmd.Context())
 			return err

@@ -48,7 +48,7 @@ func newNudgeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mode, err := hostBeadsSync()
+			setting, err := hostBeads(cmd.Context(), mwVault(dir, host), host)
 			if err != nil {
 				return err
 			}
@@ -59,7 +59,7 @@ func newNudgeCmd() *cobra.Command {
 				Notes:      tracker,
 				Host:       host,
 				SyncHalt:   hostSyncHalt(),
-				SyncMode:   mode,
+				SyncMode:   setting.Mode(),
 				NudgeAfter: time.Duration(after) * time.Minute,
 				SyncStale:  time.Duration(stale) * time.Minute,
 			}.Run(cmd.Context())
