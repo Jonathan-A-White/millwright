@@ -21,6 +21,10 @@ const (
 	GrindFile = "grind.lock"
 )
 
+// DispatchFile is the lock a whole `mw dispatch` run holds, by its name inside
+// the dispatch state directory.
+const DispatchFile = "lock"
+
 // DefaultSettle is how long TryTake keeps trying before it says the lock is
 // held: long enough to outlast a Held look taken at the same instant, short
 // enough to be no wait at all beside a grind.

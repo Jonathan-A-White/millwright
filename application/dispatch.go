@@ -113,6 +113,12 @@ type Dispatch struct {
 	// A nil Grinding counts none.
 	Grinding GristLock
 
+	// Exclusive is this host's dispatch lock, taken without waiting and held for
+	// the whole of a real run: a second dispatch that cannot take it says so and
+	// does nothing, since two would claim the same story and race to cut its
+	// worktree (mw-gq6.140). A nil Exclusive takes none, and a dry run needs none.
+	Exclusive GristLock
+
 	// MaxAttempts is how many times a story may be started in all; a story tried
 	// that many times is not started again, and the Mayor is told. Fewer than one
 	// is DefaultMaxAttempts.
@@ -261,6 +267,21 @@ func inStartOrder(ready []StoryDetail) []StoryDetail {
 // ready, most urgent and oldest first, so that when the cap is smaller than what
 // is ready it is the right stories that wait. Only then is anything claimed.
 func (d Dispatch) Run(ctx context.Context) (DispatchReport, error) {
+	// One real dispatch at a time on a host. A second one, started while the first
+	// runs, would claim the same stories under the same actor, pour their formulas
+	// twice and race to cut their worktrees: it says so and does nothing, and is
+	// no failure. Nor is it logged, for the run that holds the lock logs itself.
+	if d.Exclusive != nil && !d.DryRun {
+		release, taken, err := d.Exclusive.TryTake(ctx)
+		if err != nil {
+			return DispatchReport{}, fmt.Errorf("taking this host's dispatch lock: %w", err)
+		}
+		if !taken {
+			d.print("another mw dispatch is running here; nothing done\n")
+			return DispatchReport{Host: d.Host, Cap: d.Cap}, nil
+		}
+		defer release()
+	}
 	report, err := d.run(ctx)
 	if d.Log != nil && !d.DryRun {
 		line := d.now().UTC().Format(time.RFC3339) + " " + dispatchLogWords(report, err)
@@ -569,7 +590,13 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 	undo := func(what string, why error, worktree bool) (Started, bool, error) {
 		failed := fmt.Errorf("%s of %s: %w", what, id, why)
 		if worktree {
-			if err := d.Worktrees.Remove(ctx, rigDir, started.Worktree, started.Branch); err != nil {
+			// A session of the story's name running now is another dispatcher's, who
+			// won the race for the story: the worktree and branch are its, and
+			// removing them would pull the ground from under a live session
+			// (mw-gq6.140). release, below, keeps the claim for the same reason.
+			if status, err := d.Runner.Status(context.WithoutCancel(ctx), SessionName(id)); err == nil && status.Running() {
+				failed = fmt.Errorf("%w (the session %s of %s is running here, so no worktree or branch was removed)", failed, status.Name, id)
+			} else if err := d.Worktrees.Remove(ctx, rigDir, started.Worktree, started.Branch); err != nil {
 				failed = fmt.Errorf("%w (and the worktree %s is still there: %v)", failed, started.Worktree, err)
 			}
 		}

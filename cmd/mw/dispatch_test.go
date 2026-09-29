@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Jonathan-A-White/millwright/infrastructure/hostlock"
 )
 
 // mw dispatch is never run for real here: it would claim stories in the
@@ -80,5 +83,33 @@ func TestDispatchStopsOnACapThatWouldStartNothing(t *testing.T) {
 
 	if err := dispatchFails(t, "--dry-run"); !strings.Contains(err.Error(), "cap") {
 		t.Fatalf("expected the reason to be the cap, got %q", err)
+	}
+}
+
+// mw-gq6.140: a second mw dispatch, run while another holds this host's dispatch
+// lock, says so, claims nothing and is not a failure. The lock is a real flock
+// in the dispatch state directory; the vault is nowhere, so any attempt at the
+// tracker would fail loudly.
+func TestDispatchLeavesQuietlyWhileAnotherDispatchHoldsTheHostLock(t *testing.T) {
+	mwConfig(t, "vault = \"/nowhere/vault\"\nhost = \"vps\"\n\n[rigs]\nmillwright = \"/nowhere/millwright\"\n")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("finding the home directory: %v", err)
+	}
+	_, taken, err := hostlock.NewTry(filepath.Join(home, DispatchStateDir), hostlock.DispatchFile).TryTake(context.Background())
+	if err != nil || !taken {
+		t.Fatalf("expected to take the dispatch lock first, got taken %v, error %v", taken, err)
+	}
+
+	out := &bytes.Buffer{}
+	root := newRootCmd()
+	root.SetOut(out)
+	root.SetErr(out)
+	root.SetArgs([]string{"dispatch"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("expected a dispatch that finds another running to exit 0, got %v: %s", err, out)
+	}
+	if !strings.Contains(out.String(), "another mw dispatch is running here; nothing done") {
+		t.Fatalf("expected it to say another dispatch is running, got %q", out)
 	}
 }
