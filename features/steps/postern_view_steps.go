@@ -47,6 +47,7 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" waits on "([^"]*)"$`, c.theViewsBeadWaitsOn)
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" landed an hour ago$`, c.theViewsBeadLandedAnHourAgo)
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" landed a month ago$`, c.theViewsBeadLandedAMonthAgo)
+	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" landed two hours ago with the Mayor's comment "([^"]*)"$`, c.theViewsBeadLandedTwoHoursAgoChecked)
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" has a postern question open since two hours ago$`, c.theViewsBeadHasAQuestionOpen)
 
 	ctx.Given(`^the view's bead "([^"]*)" has the hands step "([^"]*)" on "([^"]*)" as "([^"]*)" running "([^"]*)"$`, c.theViewsBeadHasTheHandsStep)
@@ -56,6 +57,7 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^the live view is run and written$`, c.theLiveViewIsRunAndWritten)
 
 	ctx.Then(`^the view's needs are "([^"]*)"$`, c.theViewsNeedsAre)
+	ctx.Then(`^the view's verify need on "([^"]*)" says "([^"]*)"$`, c.theViewsVerifyNeedSays)
 	ctx.Then(`^the view's need on "([^"]*)" blocks (\d+) beads?$`, c.theViewsNeedBlocks)
 	ctx.Then(`^the view's bead "([^"]*)" waits on "([^"]*)"$`, c.theViewsBeadWaitsOnInTheView)
 	ctx.Then(`^the view has no bead "([^"]*)"$`, c.theViewHasNoBead)
@@ -96,6 +98,25 @@ func (c *posternViewContext) closeAt(id, epic string, at time.Time) error {
 
 func (c *posternViewContext) theViewsBeadLandedAnHourAgo(id, epic string) error {
 	return c.closeAt(id, epic, posternViewFeatureNow.Add(-time.Hour))
+}
+
+func (c *posternViewContext) theViewsBeadLandedTwoHoursAgoChecked(id, epic, comment string) error {
+	if err := c.closeAt(id, epic, posternViewFeatureNow.Add(-2*time.Hour)); err != nil {
+		return err
+	}
+	return c.tracker.CommentOnStory(context.Background(), id, comment)
+}
+
+func (c *posternViewContext) theViewsVerifyNeedSays(bead, want string) error {
+	for _, n := range c.doc.Needs {
+		if n.Kind == application.PosternNeedVerify && n.Bead == bead {
+			if n.Text != want {
+				return fmt.Errorf("expected the verify need on %s to say %q, got %q", bead, want, n.Text)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("the view has no verify need on %s", bead)
 }
 
 func (c *posternViewContext) theViewsBeadLandedAMonthAgo(id, epic string) error {

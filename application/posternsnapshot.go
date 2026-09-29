@@ -57,6 +57,10 @@ type posternSnapshotMemoryEntry struct {
 	Count    int                      `json:"count"`
 	Verified bool                     `json:"verified"`
 	Comments []PosternSnapshotComment `json:"comments,omitempty"`
+	// Check is the first sentence of the Mayor's landing-check comment, kept
+	// beside Comments because that comment may be older than the newest few
+	// they hold; "" when none was found.
+	Check string `json:"check,omitempty"`
 }
 
 // PosternSnapshotFile is where mw postern snapshot writes the encrypted
@@ -620,6 +624,7 @@ func landedVerdict(child StoryDetail, comments map[string][]Comment, memory, new
 	entry := posternSnapshotMemoryEntry{Count: child.CommentCount, Verified: !ok}
 	if ok {
 		entry.Comments = result.Comments
+		entry.Check = landingCheck(comments[child.Story.ID])
 	}
 	newMemory[child.Story.ID] = entry
 	return result, ok
