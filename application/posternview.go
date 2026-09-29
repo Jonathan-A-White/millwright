@@ -88,6 +88,12 @@ type PosternViewNeed struct {
 	Blocks      int      `json:"blocks"`
 	// Steps are a hands need's steps (§17), absent on any other need.
 	Steps []PosternViewHandsStep `json:"steps,omitempty"`
+	// NotReady marks a hands or demo need that cannot be acted on yet, and
+	// WaitingOn says what it waits on: the titles of its open blockers, and
+	// for hands with no steps, the Mayor to write them. A card so marked
+	// offers neither Approve nor Done. Both are absent on a ready need.
+	NotReady  bool     `json:"not_ready,omitempty"`
+	WaitingOn []string `json:"waiting_on,omitempty"`
 }
 
 // PosternViewHandsStep is one hands step as a hands need carries it: the
@@ -594,13 +600,16 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 		}
 		since := firstKnown(d.Created, d.Updated)
 		if hasLabel(d.Labels, LabelDemo) {
-			needs = append(needs, b.need(PosternNeedDemo, e, since, viewSummary(d.Description)))
+			need := b.need(PosternNeedDemo, e, since, viewSummary(d.Description))
+			b.markNotReady(&need, e, false)
+			needs = append(needs, need)
 		}
 		if hasLabel(d.Labels, LabelHitl) {
 			steps := viewHandsSteps(id, notes)
 			if !allStepsRanClean(steps) {
 				need := b.need(PosternNeedHands, e, since, viewSummary(d.Description))
 				need.Steps = steps
+				b.markNotReady(&need, e, len(steps) == 0)
 				needs = append(needs, need)
 			}
 		}
@@ -718,6 +727,37 @@ func (b *viewBuild) need(kind string, e *viewEntry, since time.Time, text string
 		Since: formatOrEmpty(since), Text: text, Options: []string{},
 		Blocks: b.blocks(false, d.Story.ID),
 	}
+}
+
+// viewMayorWritesSteps is what a hands need with no steps yet waits on.
+const viewMayorWritesSteps = "the Mayor to write the steps"
+
+// markNotReady marks need, a hands or demo need on e, not ready when e waits
+// on an open bead or, with noSteps, has no hands steps yet: WaitingOn names the
+// blockers' titles (their ids when a title is empty), then the Mayor writing
+// the steps, and the text says so instead of the bead's summary.
+func (b *viewBuild) markNotReady(need *PosternViewNeed, e *viewEntry, noSteps bool) {
+	var waiting []string
+	for _, w := range e.waits {
+		blocker := b.outside[w]
+		if in, ok := b.entries[w]; ok {
+			blocker = in.detail
+		}
+		title := strings.TrimSpace(blocker.Story.Title)
+		if title == "" {
+			title = w
+		}
+		waiting = append(waiting, title)
+	}
+	if noSteps {
+		waiting = append(waiting, viewMayorWritesSteps)
+	}
+	if len(waiting) == 0 {
+		return
+	}
+	need.NotReady = true
+	need.WaitingOn = waiting
+	need.Text = "Not ready yet: waiting on " + strings.Join(waiting, ", ")
 }
 
 // hosts lists every host that has recorded a last sync, and this host, in
