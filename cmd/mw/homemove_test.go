@@ -96,7 +96,7 @@ func TestHomeMoveRefusesAnOldHomeThatIsUpBeforeTouchingAnything(t *testing.T) {
 
 	out, err := runHomeMove(t, "laptop", "--old-home-dead")
 
-	if err == nil || !strings.Contains(err.Error(), "old home is up: use --planned when it exists") {
+	if err == nil || !strings.Contains(err.Error(), "old home is up: use --planned") {
 		t.Fatalf("expected the planned-path line, got %v\n%s", err, out)
 	}
 	if got := ranWhat(t, calls); !strings.HasPrefix(got, "ssh -o BatchMode=yes -o ConnectTimeout=10 desktop true") || strings.Count(got, "\n") != 1 {
@@ -147,5 +147,63 @@ func TestHomeMoveIsListedUnderHome(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "move") {
 		t.Errorf("mw home --help does not list move:\n%s", out)
+	}
+}
+
+func TestHomeMovePlannedDryRunPrintsSevenStepsAndRunsNothing(t *testing.T) {
+	calls := moveHost(t, 0)
+
+	out, err := runHomeMove(t, "laptop", "--planned", "--dry-run")
+
+	if err != nil {
+		t.Fatalf("mw home move --planned --dry-run: %v\n%s", err, out)
+	}
+	for _, want := range []string{"Step 1 of 7", "Step 7 of 7", "the old home stands down", "Hand off now: the home moves to laptop", "planned move"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in:\n%s", want, out)
+		}
+	}
+	if got := ranWhat(t, calls); got != "" {
+		t.Errorf("a dry run ran programs:\n%s", got)
+	}
+}
+
+func TestHomeMovePlannedAndOldHomeDeadRefuseTogether(t *testing.T) {
+	calls := moveHost(t, 0)
+
+	_, err := runHomeMove(t, "laptop", "--planned", "--old-home-dead")
+
+	if err == nil || !strings.Contains(err.Error(), "--planned") || !strings.Contains(err.Error(), "--old-home-dead") {
+		t.Fatalf("expected a refusal naming both flags, got %v", err)
+	}
+	if got := ranWhat(t, calls); got != "" {
+		t.Errorf("ran programs for a contradiction:\n%s", got)
+	}
+}
+
+func TestHomeMovePlannedRunsTheOldHomesStepsBeforeAnyOfThisHosts(t *testing.T) {
+	calls := moveHost(t, 0)
+
+	out, err := runHomeMove(t, "laptop", "--planned")
+
+	// The stand-in bd counts nothing, so the move stops at step 3, beads: after
+	// the old home stood down, before anything reached the vault.
+	if err == nil || !strings.Contains(err.Error(), "step 3") {
+		t.Fatalf("expected the move to stop at step 3, got %v\n%s", err, out)
+	}
+	got := ranWhat(t, calls)
+	// The stand-in ssh prints nothing, so neither unit is listed on the old home
+	// and there is nothing to stop. What it was asked, in order:
+	at := 0
+	for _, want := range []string{"desktop true", "mw mail send mayor", ".mayor-acting", "mw sync", "postern-backend.service", "mw postern mirror", "dolt-beads.service"} {
+		found := strings.Index(got[at:], want)
+		if found < 0 {
+			t.Fatalf("expected %q asked of the old home, in order, in:\n%s", want, got)
+		}
+		at += found + len(want)
+	}
+	lastSSH := strings.LastIndex(got, "ssh ")
+	if bd := strings.Index(got, "bd "); bd >= 0 && bd < lastSSH {
+		t.Errorf("bd ran before the old home stood down:\n%s", got)
 	}
 }

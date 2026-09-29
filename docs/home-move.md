@@ -5,17 +5,19 @@ database, the Mayor and the live Postern backend (`CONTEXT.md`: Home, Boost). Th
 vault's tracked `home` file says which. `mw home move <host>` makes another host the
 home, in one line, run by the Governor and never by the factory on its own.
 
-This page is the design of the **dead old home** path: the old home does not answer,
-and the new home takes over from what GitHub, the Postern mirror and the vault hold.
-The **planned** path, both hosts up, the old one flushing and standing down first, is
-a story of its own (`mw-43v9x.7`); until it lands, a move onto a home that answers ssh
-is refused with `old home is up: use --planned when it exists`.
+This page is the design of two paths. The **dead old home** path: the old home does not
+answer, and the new home takes over from what GitHub, the Postern mirror and the vault
+hold. The **planned** path (`--planned`, *The planned path* below): both hosts are up,
+and the old one hands off, flushes and stands down first, so that nothing is lost. A move
+onto a home that answers ssh, without `--planned`, is refused with `old home is up: use
+--planned`.
 
 ## The line
 
 ```sh
 mw home move laptop --dry-run                 # on the Laptop: every step and its way back, none run
-mw home move laptop --old-home-dead           # on the Laptop: the move
+mw home move laptop --old-home-dead           # on the Laptop: the move, the desktop being dead
+mw home move laptop --planned                 # on the Laptop: the move, the desktop being up
 ```
 
 - It runs **on the host that becomes home.** `mw home move desktop` on the Laptop is
@@ -23,7 +25,11 @@ mw home move laptop --old-home-dead           # on the Laptop: the move
 - `--old-home-dead` is the Governor's word that the old home is dead. Without it a move
   onto an old home that does not answer stops at step 1. The tap in Postern passes it
   when the old home does not answer ssh, and `--planned` when it does (below).
-- `--dry-run` prints the six steps, what each does and each way back, and runs **none** of
+- `--planned` is for an old home that answers ssh, and `--old-home-dead` for one that does
+  not: giving both is refused, and `--planned` onto a home that does not answer stops at
+  step 1 and names `--old-home-dead`.
+- `--dry-run` prints the six steps (seven with `--planned`), what each does and each way
+  back, and runs **none** of
   them: no ssh, bd, git, systemctl, mayor-up, no mail, no write. It reads the vault's
   `home` file and the config, nothing else.
 - It takes a minute or so, most of it the bootstrap (736 MB on 2026-09-28: 32 s). Run it
@@ -61,8 +67,9 @@ Asks whether the old home answers ssh: `ssh -o BatchMode=yes -o ConnectTimeout=1
 failure and a refused key included; only a connection that never comes up (timed out, no
 route, no such name, nothing listening) is "does not answer".
 
-- Answers: stop. `old home is up: use --planned when it exists`. `--old-home-dead` does
-  not override this: it is the word for a host that does not answer.
+- Answers: stop. `old home is up: use --planned`. `--old-home-dead` does not override
+  this: it is the word for a host that does not answer. With `--planned` an answer is what
+  it wants: see *The planned path*.
 - Does not answer, no `--old-home-dead`: stop, naming the flag.
 - Does not answer, `--old-home-dead`: go on.
 
@@ -154,6 +161,64 @@ It changes nothing and never fails the move: an index it cannot read says so.
 If `beads_sync` is not `auto` on this host the move ends with a note to set it: the
 sync would not follow the home file otherwise.
 
+## The planned path
+
+`mw home move <host> --planned`, run on the new home with **both hosts up**: the Governor
+moves the home on purpose, say the desktop's Mayor to the Laptop. It is the six steps
+above with a step put in after step 1, so seven, and with beads that come from what the
+old home has just pushed rather than from whenever its last backup ran. Nothing is lost.
+
+Step 1 asks the same question, and a planned move wants the answer yes: `--planned` onto
+a home that does not answer stops with `--planned needs the old home up`, naming
+`--old-home-dead`. Nothing has changed.
+
+### 2. The old home stands down
+
+Everything here runs **on the old home, over its `[hands_hosts]` ssh alias**, as its own
+`mw`, so it uses that host's own config, vault and beads (the environment of
+`~/.config/mw/beads.env` included). Nothing on the new home has changed yet: if anything
+here fails the move stops with the new home as it was, and the ways back below are printed.
+
+1. **Hand-off.** Mail to the old home's Mayor, filed in the old home's beads (where that
+   Mayor reads), signed `mw@<new host>`: `Hand off now: the home moves to <host>`, with
+   what to do: write the handoff, `mw sync`, clear `.mayor-acting`, stop.
+2. **Wait, up to 15 minutes**, asking every 15 s for `.mayor-acting` in its vault to be
+   empty, or for its Mayor process to be gone (`bin/respawn-mayor`'s own markers: the
+   `.mayor-acting` file, and a `claude ... -n "Mayor (after ..."` process). The vault is
+   `$MW_VAULT` there, or the `vault` line of its config. **If the Mayor does not go, the
+   move stops** and says what it saw: a Mayor is never killed. Ask it to hand off (or stop
+   it yourself), then run the move again; the mail is sent once more, which is harmless.
+3. **`mw sync`** there: a final backup push of the beads (GitHub's `refs/dolt/data`) and the
+   vault, with the Mayor's handoff in it.
+4. **Stop its `postern-backend`** user unit (a unit it does not have, or that is not
+   running, is left), then **`mw postern mirror`** there, a final copy of the backend's
+   data to this host. The mirror is what a home does every ten minutes; run after the
+   backend has stopped, it is complete.
+5. **Stop its `dolt-beads`** user unit, the Dolt server's writers, if it has one. Once the
+   `home` file changes (step 4) it is a boost, and `beads_sync = auto` reads `shared` there.
+
+**Way back:** the hand-off mail stays sent: mail the Mayor on the old home to carry on.
+`ssh <old> systemctl --user start postern-backend` and `... start dolt-beads` for what was
+stopped (the backend also goes back to standby by itself while the home is elsewhere). The
+sync and the mirror change nothing that needs undoing.
+
+### Steps 3 to 7: as in the dead path (its 2 to 6)
+
+Beads from GitHub (`bd bootstrap`), the vault's `home` file (`home: <host> (planned move
+from <old>)`), the backend, the Mayor, what was lost: the same, numbered one higher, with
+these differences:
+
+- Beads are the old home's final push from step 2, so the **Mayor mail says `planned move`**
+  (`Home moved to <host> at <time>: planned move; <old> handed off and flushed first, beads
+  from its final push ...`), not that the old home is dead.
+- The Mayor on the new home boots from **the handoff the old one wrote**: step 2 made the old
+  Mayor write it and push it, and step 4's `git pull --rebase` brought it in, so
+  `bin/mayor-up` starts from the newest handoff.
+- Step 7 says nothing is lost, and prints the same two ages as a record.
+- The old home is a **boost** afterwards, not a dead machine: its Dolt server is stopped, its
+  backend is in standby, its Mayor is gone, and it can be a home again by `mw home move` the
+  other way.
+
 ## When the old home comes back
 
 The fence is the `home` file in the vault, read by everything that acts as a home:
@@ -173,8 +238,9 @@ compared with the Laptop's, and there was nothing to bring across).
 
 A second `mw home move` is refused once the home file names this host, because step 2 would
 set the fresh database aside again. So a move that stopped is finished from here. The
-failing step named in the error says where to start; steps 4 to 6 do not depend on each
-other and are safe to repeat:
+failing step named in the error says where to start (with `--planned` the numbers are one
+higher, from the beads step on); steps 4 to 6 do not depend on each other and are safe to
+repeat:
 
 | Stopped at | Finish with |
 | --- | --- |
@@ -215,8 +281,9 @@ See `features/postern_move_home.feature`.
 
 Checked with stand-ins for ssh, bd, systemctl, git, the backend and `bin/mayor-up`
 (`application/homemove_test.go`, `infrastructure/homemove/homemove_test.go`,
-`cmd/mw/homemove_test.go`): the order of the six steps, `--dry-run` running none of them, a
-dead old home refused without `--old-home-dead`, a live one refused with the planned-path
+`cmd/mw/homemove_test.go`; the planned path in `application/homemoveplanned_test.go` and
+`infrastructure/homemove/oldhome_test.go`): the order of the six steps, `--dry-run` running none of them, a
+dead old home refused without `--old-home-dead`, a live one refused with the `--planned`
 line, a failing step stopping the move and printing the ways back of what was done, and
 the ways back themselves (the vault revert and the database restore were run for real
 against scratch repositories). The date of `refs/dolt/data` was read from the real vault's
@@ -231,3 +298,14 @@ GitHub remote, read-only: 0.6 s, 148 KB.
   starts, so an empty server stops the move (with the ways back), but the first real move
   onto a host with the unit, the demo (`mw-43v9x.13`), is where this is learned.
 - **`bd bootstrap` with the server-mode environment set.** As above.
+
+The planned path was checked the same way: the old home's steps run before any of the new
+home's, in the order above; a Mayor that does not go within the wait stops the move with
+the new home untouched (nothing but the mail on the old home has run); each stand-down step
+that fails stops the move there; the new Mayor's mail says `planned move`. The remote script
+that asks whether the Mayor has gone (`.mayor-acting`, `pgrep`) was run for real by a stand-in
+ssh against a temporary vault. **Not checked: a real planned move**, with a real Mayor on the
+old home handing off in 15 minutes; and that `mw`, `mw postern mirror` and `systemctl --user`
+work as run by a non-login ssh command on the desktop and the Laptop (the command sets `PATH`,
+`beads.env` and `XDG_RUNTIME_DIR` itself, but the WSL Laptop has not been asked). The demo
+(`mw-43v9x.13`) is where that is learned.

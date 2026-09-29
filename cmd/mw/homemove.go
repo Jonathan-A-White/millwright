@@ -15,16 +15,17 @@ import (
 // newHomeMoveCmd builds `mw home move <host>`: run on the host that becomes home,
 // it takes the home over from an old home that is dead.
 func newHomeMoveCmd() *cobra.Command {
-	var oldHomeDead, dryRun bool
+	var oldHomeDead, planned, dryRun bool
 
 	cmd := &cobra.Command{
 		Use:   "move <host>",
-		Short: "Make this host home, taking over from an old home that is dead",
+		Short: "Make this host home, taking over from an old home that is dead (or, with --planned, up)",
 		Long: "move runs ON the host that becomes home (`mw home move laptop` on the Laptop) and takes\n" +
-			"the home over from the other one, which must not answer ssh (its [hands_hosts] line).\n" +
+			"the home over from the other one. By default the other one must not answer ssh (its\n" +
+			"[hands_hosts] line); with --planned it must answer.\n" +
 			"The steps, each printed with its way back:\n\n" +
 			"  1. asks whether the old home answers ssh (10 s). If it does, stops: old home is up: use\n" +
-			"     --planned when it exists. If it does not, goes on only with --old-home-dead.\n" +
+			"     --planned. If it does not, goes on only with --old-home-dead.\n" +
 			"  2. beads: reads when GitHub's refs/dolt/data was written, sets the embedded database\n" +
 			"     aside in a dated directory (never deleted), runs `bd bootstrap --yes` and restores\n" +
 			"     .beads/config.yaml, and starts the dolt-beads user unit if this host has one.\n" +
@@ -34,6 +35,10 @@ func newHomeMoveCmd() *cobra.Command {
 			"     as home. Never `mw postern serve` here: it writes POSTERN_ISSUER_KEY back.\n" +
 			"  5. the Mayor: mails the Mayor, then runs the vault's bin/mayor-up.\n" +
 			"  6. prints what was lost: the age of GitHub's backup and of the Postern data here.\n\n" +
+			"--planned (both hosts up) puts a step after 1: over ssh the old home's Mayor is mailed\n" +
+			"'Hand off now' and waited for (up to 15 min; a Mayor is never killed), a final mw sync\n" +
+			"runs there, its postern-backend stops and a final mw postern mirror copies its data here,\n" +
+			"and its dolt-beads unit stops. Steps 2 to 6 then follow, the mail saying 'planned move'.\n\n" +
 			"--dry-run prints every step and its way back and runs none of them. A step that fails\n" +
 			"stops the move and prints the ways back of what was already done, last first. The design\n" +
 			"is docs/home-move.md.",
@@ -69,11 +74,13 @@ func newHomeMoveCmd() *cobra.Command {
 			}
 
 			vault := mwVault(dir, host)
+			machine := homemove.Host{Vault: dir, Home: home}
 			return application.HomeMove{
 				Files:       vault,
 				Writer:      vault,
 				Vault:       vault,
-				Machine:     homemove.Host{Vault: dir, Home: home},
+				Machine:     machine,
+				Old:         machine,
 				Mailbox:     mwGateway(dir, host),
 				Index:       postern.Mirrorer{},
 				Lock:        hostSyncLock(),
@@ -87,11 +94,13 @@ func newHomeMoveCmd() *cobra.Command {
 				Actor:       application.SeatIdentity(application.MwSeat, host),
 				BeadsSync:   beadsSync,
 				OldHomeDead: oldHomeDead,
+				Planned:     planned,
 				DryRun:      dryRun,
 			}.Run(cmd.Context())
 		},
 	}
 	cmd.Flags().BoolVar(&oldHomeDead, "old-home-dead", false, "say that the old home is dead: go on when it does not answer ssh")
+	cmd.Flags().BoolVar(&planned, "planned", false, "both hosts are up: the old home hands off, flushes and stands down first")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print every step and its way back, and run none of them")
 	return cmd
 }
