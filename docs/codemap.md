@@ -1,6 +1,6 @@
 # Code map
 
-Where everything is; `CONTEXT.md` has the vocabulary, ADRs why.
+`CONTEXT.md` has the vocabulary.
 
 ## Layers
 
@@ -80,7 +80,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `Init` | `application/init.go` | `mw init` — `cmd/mw/init.go` | `features/init.feature` |
 | Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern key/inbox/send/snapshot/view/bead — cmd/mw/posternview.go, cmd/mw/posternbead.go | `features/postern_*.feature` |
 | Hands{Add,List} | application/hands.go | mw hands add/list — cmd/mw/hands.go; `cmd/mw-hands-root` | `features/hands.feature` |
-| `PosternServe`, `PosternNginx` | `application/posternhand.go` | `mw postern serve`/`nginx` — `cmd/mw/postern.go` | `features/postern_serve.feature` |
+| `PosternServe`, `PosternNginx`, `PosternMirror` | `application/posternhand.go`, `application/posternmirror.go` | `mw postern serve`/`nginx`/`mirror` — `cmd/mw/postern.go`, `cmd/mw/posternmirror.go` | `features/postern_serve.feature` |
 
 `cmd/mw/root.go` holds the tree, `cmd/mw/main.go` runs it, `cmd/mw/version.go` is `mw version`.
 `features/path_validation.feature` covers `domain/path.go`;
@@ -92,15 +92,13 @@ Add a command: `docs/adding-a-command.md`.
 
 | Helper | Where | What it gives |
 | --- | --- | --- |
-| `throwawayVault` | `infrastructure/beads/beads_integration_test.go` | Real bd DB, temp dir. |
-| `installFormula` | same file | Copies a formula in. |
+| `throwawayVault`, `installFormula` | `infrastructure/beads/beads_integration_test.go` | Real bd DB in a temp dir; a formula copied in. |
 | `standIn` | `infrastructure/beads/sync_test.go` | Stands in for `bd`. |
 | `privateRunner` | `infrastructure/tmux/tmux_integration_test.go` | Private tmux server. |
 | `privateWindows` | `infrastructure/tmux/window_integration_test.go` | Tmux server + seat. |
 | `aVault` | `infrastructure/vault/vault_test.go` | Vault with a seat. |
 | `twoHosts` | `infrastructure/vault/git_test.go` | Two vault clones. |
 | `aRig` | `infrastructure/rig/worktree_test.go` | Rig, real origin. |
-| `aRigDir` | `infrastructure/rig/slot_test.go` | Merge-slot dir. |
 | `mwConfig` | `cmd/mw/dispatch_test.go` | `config.toml`, temp HOME. |
 | `aFactory` | `application/dispatch_test.go` | Faked `Dispatch`, temp vault. |
 
