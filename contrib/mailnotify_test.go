@@ -717,6 +717,56 @@ func TestPosternPollRepeatsNothingForTheSameCount(t *testing.T) {
 	}
 }
 
+// The count last noted was 1 (announced), the Mayor read the inbox (a tick sees
+// 0), and a new message arrives (the next tick sees 1): that is a first message
+// after a read, and is announced (mw-gq6.133).
+func TestPosternPollAnnouncesTheFirstMessageAfterTheInboxWasRead(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.write("state/postern-count", "1\n", 0o644)
+
+	f.posternCount(0)
+	f.tick()
+	f.nothingMoreTyped("")
+
+	f.posternCount(1)
+	f.tick()
+	f.typed(fmt.Sprintf(posternAnnouncement, 1))
+
+	f.tick()
+	f.nothingMoreTyped(fmt.Sprintf(posternAnnouncement, 1))
+}
+
+// With the stored count of 1 and no fall seen, a count of 1 is not announced.
+func TestPosternPollSaysNothingForTheStoredCountWithNoFall(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.write("state/postern-count", "1\n", 0o644)
+	f.posternCount(1)
+
+	f.tick()
+	f.tick()
+
+	f.nothingMoreTyped("")
+}
+
+// A poll that fails is not a fall: the unread messages are still there.
+func TestPosternPollFailureIsNotNotedAsAFall(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.write("state/postern-count", "1\n", 0o644)
+	f.write("postern-count", "", 0o644)
+	f.tick()
+
+	f.posternCount(1)
+	f.tick()
+
+	f.nothingMoreTyped("")
+}
+
 func TestPosternSnapshotRunsOnceOnTheFirstTickWithAKeyFile(t *testing.T) {
 	f := newFactory(t)
 	f.mayor("idle", actingByID)
