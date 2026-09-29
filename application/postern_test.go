@@ -28,6 +28,7 @@ func (k stubPosternKeys) Sign(_ []application.PosternUtxo, _ []byte) (string, er
 }
 
 func (k stubPosternKeys) MarkSpent(_ []application.PosternUtxo) error { return nil }
+func (k stubPosternKeys) MarkSent(_ string) error                     { return nil }
 
 const (
 	releaseTapInboxPubKey = "inbox-pubkey-hex"

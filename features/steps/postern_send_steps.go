@@ -68,6 +68,15 @@ func InitializePosternSendScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the postern float cap is (\d+) satoshis$`, c.thePosternFloatCapIsSatoshis)
 	ctx.Given(`^the postern key's balance is (\d+) satoshis$`, c.thePosternKeysBalanceIsSatoshis)
 	ctx.Given(`^the postern key holds a spendable utxo of (\d+) satoshis$`, c.thePosternKeyHoldsASpendableUtxoOfSatoshis)
+	ctx.Given(`^the postern key holds a confirmed utxo of (\d+) satoshis$`, c.thePosternKeyHoldsASpendableUtxoOfSatoshis)
+	ctx.Given(`^the postern key holds an unconfirmed utxo of (\d+) satoshis$`, c.thePosternKeyHoldsAnUnconfirmedUtxoOfSatoshis)
+	ctx.Given(`^the postern key also holds a confirmed utxo of (\d+) satoshis$`, c.thePosternKeyAlsoHoldsAConfirmedUtxoOfSatoshis)
+	ctx.Given(`^the postern key holds (\d+) confirmed utxos of (\d+) satoshis$`, c.thePosternKeyHoldsConfirmedUtxosOfSatoshis)
+	ctx.Then(`^the last broadcast pays its change to (\d+) outputs$`, c.theLastBroadcastPaysItsChangeToOutputs)
+	ctx.Then(`^there were (\d+) broadcasts$`, c.thereWereBroadcasts)
+	ctx.Then(`^no outpoint was spent by two broadcasts$`, c.noOutpointWasSpentByTwoBroadcasts)
+	ctx.Then(`^the second broadcast spends only the first one's change$`, c.theSecondBroadcastSpendsOnlyTheFirstOnesChange)
+	ctx.Then(`^the last broadcast spends the utxo of (\d+) satoshis$`, c.theLastBroadcastSpendsTheUtxoOfSatoshis)
 	ctx.Given(`^the postern backend will report the txid "([^"]*)"$`, c.thePosternBackendWillReportTheTxid)
 	ctx.Given(`^the clock reads (\d+) for sending$`, c.theClockReadsForSending)
 	ctx.Given(`^the bead "([^"]*)" exists$`, c.theBeadExists)
@@ -146,8 +155,126 @@ func (c *posternSendContext) thePosternKeysBalanceIsSatoshis(sats int64) error {
 }
 
 func (c *posternSendContext) thePosternKeyHoldsASpendableUtxoOfSatoshis(sats int64) error {
+	c.backend.SetUtxos(c.address, application.PosternUtxo{Txid: posternSendDummyTxid, Vout: 0, Satoshis: sats, Height: 100})
+	return nil
+}
+
+func (c *posternSendContext) thePosternKeyHoldsAnUnconfirmedUtxoOfSatoshis(sats int64) error {
 	c.backend.SetUtxos(c.address, application.PosternUtxo{Txid: posternSendDummyTxid, Vout: 0, Satoshis: sats})
 	return nil
+}
+
+func (c *posternSendContext) thePosternKeyAlsoHoldsAConfirmedUtxoOfSatoshis(sats int64) error {
+	held, err := c.backend.Utxos(context.Background(), c.address)
+	if err != nil {
+		return err
+	}
+	c.backend.SetUtxos(c.address, append(held, application.PosternUtxo{Txid: posternSendDummyTxid, Vout: len(held), Satoshis: sats, Height: 100})...)
+	return nil
+}
+
+func (c *posternSendContext) thePosternKeyHoldsConfirmedUtxosOfSatoshis(n int, sats int64) error {
+	var held []application.PosternUtxo
+	for i := 0; i < n; i++ {
+		held = append(held, application.PosternUtxo{Txid: posternSendDummyTxid, Vout: i, Satoshis: sats, Height: 100})
+	}
+	c.backend.SetUtxos(c.address, held...)
+	return nil
+}
+
+// broadcastTransactions parses every transaction the backend was asked to
+// broadcast, oldest first.
+func (c *posternSendContext) broadcastTransactions() ([]*transaction.Transaction, error) {
+	var txs []*transaction.Transaction
+	for _, raw := range c.backend.Broadcasts() {
+		tx, err := transaction.NewTransactionFromHex(raw)
+		if err != nil {
+			return nil, fmt.Errorf("parsing a broadcast transaction: %w", err)
+		}
+		txs = append(txs, tx)
+	}
+	return txs, nil
+}
+
+func (c *posternSendContext) theLastBroadcastPaysItsChangeToOutputs(want int) error {
+	txs, err := c.broadcastTransactions()
+	if err != nil {
+		return err
+	}
+	if len(txs) == 0 {
+		return fmt.Errorf("expected a broadcast, got none")
+	}
+	// Outputs 0 and 1 are the record and the anchor; the rest are change.
+	if got := len(txs[len(txs)-1].Outputs) - 2; got != want {
+		return fmt.Errorf("expected %d change outputs, got %d", want, got)
+	}
+	return nil
+}
+
+func (c *posternSendContext) thereWereBroadcasts(want int) error {
+	if got := len(c.backend.Broadcasts()); got != want {
+		return fmt.Errorf("expected %d broadcasts, got %d", want, got)
+	}
+	return nil
+}
+
+func (c *posternSendContext) noOutpointWasSpentByTwoBroadcasts() error {
+	txs, err := c.broadcastTransactions()
+	if err != nil {
+		return err
+	}
+	spentBy := map[string]int{}
+	for i, tx := range txs {
+		for _, in := range tx.Inputs {
+			point := fmt.Sprintf("%s:%d", in.SourceTXID, in.SourceTxOutIndex)
+			if first, ok := spentBy[point]; ok {
+				return fmt.Errorf("broadcasts %d and %d both spend %s", first+1, i+1, point)
+			}
+			spentBy[point] = i
+		}
+	}
+	return nil
+}
+
+func (c *posternSendContext) theSecondBroadcastSpendsOnlyTheFirstOnesChange() error {
+	txs, err := c.broadcastTransactions()
+	if err != nil {
+		return err
+	}
+	if len(txs) < 2 {
+		return fmt.Errorf("expected two broadcasts, got %d", len(txs))
+	}
+	if len(txs[1].Inputs) != 1 || txs[1].Inputs[0].SourceTXID.String() != txs[0].TxID().String() {
+		return fmt.Errorf("expected the second broadcast to spend one output of the first (%s), got %d inputs", txs[0].TxID(), len(txs[1].Inputs))
+	}
+	if idx := txs[1].Inputs[0].SourceTxOutIndex; idx < 2 {
+		return fmt.Errorf("the second broadcast spends output %d of the first, not a change output", idx)
+	}
+	return nil
+}
+
+func (c *posternSendContext) theLastBroadcastSpendsTheUtxoOfSatoshis(sats int64) error {
+	held, err := c.backend.Utxos(context.Background(), c.address)
+	if err != nil {
+		return err
+	}
+	txs, err := c.broadcastTransactions()
+	if err != nil {
+		return err
+	}
+	if len(txs) == 0 {
+		return fmt.Errorf("expected a broadcast, got none")
+	}
+	last := txs[len(txs)-1]
+	for _, u := range held {
+		if u.Satoshis == sats {
+			if len(last.Inputs) != 1 || last.Inputs[0].SourceTXID.String() != u.Txid || int(last.Inputs[0].SourceTxOutIndex) != u.Vout {
+				return fmt.Errorf("expected the last broadcast to spend only %s:%d (%d satoshis), got %d inputs", u.Txid, u.Vout, sats, len(last.Inputs))
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("no utxo of %d satoshis is held", sats)
 }
 
 func (c *posternSendContext) thePosternBackendWillReportTheTxid(txid string) error {

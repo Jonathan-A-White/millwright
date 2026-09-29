@@ -41,12 +41,21 @@ type PosternKeyFile interface {
 	// payload as the postern's on-chain record; output 1 paying 1 satoshi to
 	// the postern anchor; output 2 the change back to this key's own address
 	// — and reports it signed, as raw transaction hex ready to broadcast.
-	// Sign leaves out the outputs MarkSpent has remembered for the last two
-	// hours, and spends an output listed twice once.
+	// Sign spends no more of utxos than covers the anchor and the fee, a
+	// confirmed one before an unconfirmed one, and when that would leave
+	// fewer than four spendable coins it splits the change into up to four
+	// outputs. It leaves out the outputs MarkSpent has remembered for the
+	// last two hours, adds the change MarkSent has remembered, and spends an
+	// output listed twice once.
 	Sign(utxos []PosternUtxo, payload []byte) (rawtx string, err error)
 	// MarkSpent remembers that a send just spent utxos, for two hours, so
 	// that Sign skips them while the block explorer still lists them.
 	MarkSpent(utxos []PosternUtxo) error
+	// MarkSent remembers what a send just broadcast as rawtx, for two hours:
+	// the outputs it spent, as MarkSpent does, and the change it paid back
+	// to this key, which Sign may spend while the block explorer does not
+	// yet list it, so that sends need not wait for a block, one each.
+	MarkSent(rawtx string) error
 }
 
 // PosternKeyInit makes the Mayor's postern key, once. It refuses to
@@ -141,6 +150,9 @@ type PosternUtxo struct {
 	Txid     string
 	Vout     int
 	Satoshis int64
+	// Height is the block that confirmed this output; 0 while it is
+	// unconfirmed, as the postern backend's /api/utxos reports it.
+	Height int
 }
 
 // Postern is the port to the postern backend: reading indexed message
@@ -1417,7 +1429,7 @@ func (s PosternSend) sendOne(ctx context.Context, channel, class, from, address,
 	if err != nil {
 		return "", err
 	}
-	if err := s.Keys.MarkSpent(utxos); err != nil && s.Out != nil {
+	if err := s.Keys.MarkSent(rawtx); err != nil && s.Out != nil {
 		fmt.Fprintf(s.Out, "warning: the record was broadcast, but mw could not remember what it spent, so a send within the next block may fail: %v\n", err)
 	}
 	return txid, nil

@@ -111,6 +111,7 @@ func (h *HTTP) Utxos(ctx context.Context, address string) ([]application.Postern
 			Txid     string `json:"txid"`
 			Vout     int    `json:"vout"`
 			Satoshis int64  `json:"satoshis"`
+			Height   int    `json:"height"`
 		} `json:"utxos"`
 	}
 	if err := h.authDo(ctx, http.MethodGet, "/api/utxos/"+url.PathEscape(address), nil, &body); err != nil {
@@ -118,7 +119,7 @@ func (h *HTTP) Utxos(ctx context.Context, address string) ([]application.Postern
 	}
 	utxos := make([]application.PosternUtxo, 0, len(body.Utxos))
 	for _, u := range body.Utxos {
-		utxos = append(utxos, application.PosternUtxo{Txid: u.Txid, Vout: u.Vout, Satoshis: u.Satoshis})
+		utxos = append(utxos, application.PosternUtxo{Txid: u.Txid, Vout: u.Vout, Satoshis: u.Satoshis, Height: u.Height})
 	}
 	return utxos, nil
 }
