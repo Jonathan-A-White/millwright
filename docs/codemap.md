@@ -4,12 +4,12 @@
 
 | Layer | Directory | Rule |
 | --- | --- | --- |
-| domain | `domain/` | Value types, validation; stdlib only. |
+| domain | `domain/` | Value types, validation; stdlib only |
 | application | `application/` | One file per use case, plus ports; imports no adapter. |
-| fakes | `application/apptest/` | Port stand-ins. |
-| infrastructure | `infrastructure/` | One subpackage per adapter. |
+| fakes | `application/apptest/` | Port stand-ins |
+| infrastructure | `infrastructure/` | One subpackage per adapter |
 | command line | `cmd/mw/` | Cobra wiring: read config, run the use case. |
-| features | `features/` | Gherkin; step code in `features/steps/`. |
+| features | `features/` | Gherkin; steps in `features/steps/` |
 | template | `template/` | Born from `embed.go`; no host detail. |
 
 ## Ports
