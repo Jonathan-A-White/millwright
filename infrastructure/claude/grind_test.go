@@ -48,7 +48,7 @@ func TestGrindArgsAreExactlyTheVerifiedFlags(t *testing.T) {
 	want := []string{
 		"--print", "--output-format", "json", "--model", "sonnet", "--effort", "low",
 		"--restricted", "--tools", "Read", "--strict-mcp-config", "--permission-prompts", "none",
-		"--no-session-persistence", "--disable-slash-commands",
+		"--no-session-persistence", "--disable-slash-commands", "--safe-mode",
 		"--system-prompt", call.System, "--json-schema", schema, call.Prompt,
 	}
 	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {

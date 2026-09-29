@@ -26,8 +26,8 @@ const GrindTools = "Read"
 // Grinder runs a grind as one Claude Code session, synchronously, with no
 // seat and no tmux: the adapter behind application.Grinder. The session
 // runs in the grind's private directory, may Read the photos there and
-// nothing else, runs no command, loads no MCP server, skill, settings file
-// or saved session, asks nobody anything, and answers only through a
+// nothing else, runs no command, loads no MCP server, skill, settings file,
+// CLAUDE.md or saved session, asks nobody anything, and answers only through a
 // structured output held to the grind's schema.
 type Grinder struct {
 	program string
@@ -71,6 +71,12 @@ func GrindArgs(call application.GrindCall) ([]string, error) {
 		"--permission-prompts", "none",
 		"--no-session-persistence",
 		"--disable-slash-commands",
+		// --safe-mode is claude's documented switch (claude --help: "all
+		// customizations (CLAUDE.md, skills, plugins, hooks, MCP servers ...)
+		// disabled"). --restricted ignores settings files but its help does
+		// not promise it stops CLAUDE.md discovery in the directory's
+		// ancestors or ~/.claude. --bare would too, but reads no OAuth login.
+		"--safe-mode",
 		"--system-prompt", call.System,
 		"--json-schema", schema,
 		call.Prompt,
