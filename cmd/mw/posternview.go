@@ -50,6 +50,7 @@ func newPosternViewCmd() *cobra.Command {
 				Notes:   gateway,
 				Host:    host,
 				Now:     posternViewClock,
+				Err:     cmd.ErrOrStderr(),
 			}
 			if jsonOut {
 				doc, err := view.Build(cmd.Context())

@@ -49,6 +49,19 @@ const PosternSnapshotVerifiedMarker = "VERIFIED"
 // SweepNotes uses.
 const PosternSnapshotMemoryKey = "postern.snapshot.landed"
 
+// PosternLandedMemoryTextLimit is the most runes of one remembered comment's
+// text: the landed card in the snapshot and the verify card in the view show
+// no more of a comment than this, whether it was just read or remembered.
+const PosternLandedMemoryTextLimit = 600
+
+// PosternLandedMemoryLimit is the most bytes PosternSnapshotMemoryKey's value
+// may encode to; saveLandedMemory drops the oldest-closed beads until it
+// fits. bd 1.3.0 (embedded Dolt) keeps a kv value in a TEXT column, so
+// `bd kv set` refuses a value of 65536 bytes or more ("Error 1105: string
+// '...' is too large for column 'value'"; 65535 bytes were accepted, checked
+// 2026-09-29): this is well under that, leaving room for the JSON's growth.
+const PosternLandedMemoryLimit = 48 * 1024
+
 // posternSnapshotMemoryEntry is what PosternSnapshotMemoryKey remembers of
 // one landed candidate: its comment_count and verdict, and — only when it is
 // not verified, so worth showing — the comments a fresh read of it built,
@@ -61,6 +74,9 @@ type posternSnapshotMemoryEntry struct {
 	// beside Comments because that comment may be older than the newest few
 	// they hold; "" when none was found.
 	Check string `json:"check,omitempty"`
+	// Closed is when the candidate closed, in Unix seconds: the oldest are
+	// dropped first when the memory outgrows PosternLandedMemoryLimit.
+	Closed int64 `json:"closed,omitempty"`
 }
 
 // PosternSnapshotFile is where mw postern snapshot writes the encrypted
@@ -215,6 +231,9 @@ type PosternSnapshot struct {
 
 	// Out is where Run prints what it wrote. A nil Out prints nothing.
 	Out io.Writer
+	// Err is where a failure to write the landed memory is said; the
+	// snapshot is built regardless. A nil Err says nothing.
+	Err io.Writer
 }
 
 // Run builds the snapshot, encrypts it to GovernorKey and writes it through
@@ -378,7 +397,7 @@ func (s PosternSnapshot) Build(ctx context.Context) (PosternSnapshotDoc, error) 
 	}
 
 	if err := s.writeLandedMemory(ctx, memory, newMemory); err != nil {
-		return PosternSnapshotDoc{}, err
+		sayLandedMemoryFailed(s.Err, err)
 	}
 
 	return doc, nil
@@ -424,19 +443,97 @@ func (s PosternSnapshot) writeLandedMemory(ctx context.Context, oldMemory, newMe
 // notes, unless it holds exactly what oldMemory already did. PosternSnapshot
 // and PosternView both keep it: their landed and verify candidates are the
 // same stories — closed within PosternSnapshotWindow under a live epic — so
-// either one's read spares the other one.
+// either one's read spares the other one. It is only a cache: a caller says
+// an error from here (sayLandedMemoryFailed) and carries on.
 func saveLandedMemory(ctx context.Context, notes PosternNotes, oldMemory, newMemory map[string]posternSnapshotMemoryEntry) error {
-	if reflect.DeepEqual(oldMemory, newMemory) {
-		return nil
-	}
-	encoded, err := json.Marshal(newMemory)
+	newMemory, encoded, err := boundLandedMemory(newMemory)
 	if err != nil {
 		return fmt.Errorf("building the landed comment memory: %w", err)
 	}
-	if err := notes.SetNote(ctx, PosternSnapshotMemoryKey, string(encoded)); err != nil {
+	if reflect.DeepEqual(oldMemory, newMemory) {
+		return nil
+	}
+	if err := notes.SetNote(ctx, PosternSnapshotMemoryKey, encoded); err != nil {
 		return fmt.Errorf("writing the landed comment memory: %w", err)
 	}
 	return nil
+}
+
+// boundLandedMemory reports memory as encoded within PosternLandedMemoryLimit
+// bytes, dropping the oldest-closed beads first (a bead dropped is only read
+// again by a later run), and that encoding.
+func boundLandedMemory(memory map[string]posternSnapshotMemoryEntry) (map[string]posternSnapshotMemoryEntry, string, error) {
+	encoded, err := json.Marshal(memory)
+	if err != nil {
+		return nil, "", err
+	}
+	if len(encoded) <= PosternLandedMemoryLimit {
+		return memory, string(encoded), nil
+	}
+
+	ids := make([]string, 0, len(memory))
+	size := 2 + len(memory) - 1 // the braces and the commas between entries
+	for id, entry := range memory {
+		key, err := json.Marshal(id)
+		if err != nil {
+			return nil, "", err
+		}
+		value, err := json.Marshal(entry)
+		if err != nil {
+			return nil, "", err
+		}
+		size += len(key) + 1 + len(value)
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool {
+		if a, b := memory[ids[i]].Closed, memory[ids[j]].Closed; a != b {
+			return a < b
+		}
+		return ids[i] < ids[j]
+	})
+	kept := make(map[string]posternSnapshotMemoryEntry, len(memory))
+	for id, entry := range memory {
+		kept[id] = entry
+	}
+	for _, id := range ids {
+		if size <= PosternLandedMemoryLimit || len(kept) == 0 {
+			break
+		}
+		key, _ := json.Marshal(id)
+		value, _ := json.Marshal(kept[id])
+		size -= len(key) + 1 + len(value) + 1
+		delete(kept, id)
+	}
+	encoded, err = json.Marshal(kept)
+	if err != nil {
+		return nil, "", err
+	}
+	return kept, string(encoded), nil
+}
+
+// sayLandedMemoryFailed says on w, in one line, that the landed memory could
+// not be kept and the run goes on without it. The error may carry the whole
+// value bd refused, so it is cut short. A nil w says nothing.
+func sayLandedMemoryFailed(w io.Writer, err error) {
+	if w == nil {
+		return
+	}
+	line := strings.Join(strings.Fields(err.Error()), " ")
+	fmt.Fprintf(w, "mw postern: %s (carrying on without it)\n", clippedTo(line, 240))
+}
+
+// clippedMemoryComments is comments with each text cut to
+// PosternLandedMemoryTextLimit runes, in a slice of its own: the memory
+// keeps no more of a comment than a card shows.
+func clippedMemoryComments(comments []PosternSnapshotComment) []PosternSnapshotComment {
+	if comments == nil {
+		return nil
+	}
+	out := make([]PosternSnapshotComment, len(comments))
+	for i, c := range comments {
+		out[i] = PosternSnapshotComment{At: c.At, Text: clippedTo(c.Text, PosternLandedMemoryTextLimit)}
+	}
+	return out
 }
 
 // workingCandidate is one child working or on the open frontier, before its
@@ -614,15 +711,25 @@ func landedVerdict(child StoryDetail, comments map[string][]Comment, memory, new
 		return landed, true
 	}
 
+	var closed int64
+	if !child.ClosedAt.IsZero() {
+		closed = child.ClosedAt.Unix()
+	}
+
 	if mem, known := memory[child.Story.ID]; known && mem.Count == child.CommentCount {
+		// A memory written before comments were cut is cut here, and stamped
+		// with its close time, on its way to being written back.
+		mem.Comments = clippedMemoryComments(mem.Comments)
+		mem.Closed = closed
 		newMemory[child.Story.ID] = mem
 		landed.Comments = mem.Comments
 		return landed, !mem.Verified
 	}
 
 	result, ok := landedFromComments(child, comments[child.Story.ID])
-	entry := posternSnapshotMemoryEntry{Count: child.CommentCount, Verified: !ok}
+	entry := posternSnapshotMemoryEntry{Count: child.CommentCount, Verified: !ok, Closed: closed}
 	if ok {
+		result.Comments = clippedMemoryComments(result.Comments)
 		entry.Comments = result.Comments
 		entry.Check = landingCheck(comments[child.Story.ID])
 	}

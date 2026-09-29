@@ -465,6 +465,7 @@ func newPosternSnapshotCmd() *cobra.Command {
 				Tracker: gateway,
 				Notes:   gateway,
 				Now:     posternSnapshotClock,
+				Err:     cmd.ErrOrStderr(),
 			}
 			if jsonOut {
 				doc, err := snapshot.Build(cmd.Context())
