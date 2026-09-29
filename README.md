@@ -685,6 +685,7 @@ postern_key_file = "~/.config/mw/postern.key"  # where the Mayor's postern key i
 postern_snapshot_path = "~/.local/state/mw/snapshot.bin"  # where mw postern snapshot writes the encrypted snapshot (default shown)
 postern_view_path = "~/.local/state/postern/view.b64"  # the live view mw postern view writes and the postern backend serves (default shown)
 postern_channel = "direct"         # how mw postern send delivers: direct to the backend, or chain, a funded transaction (default chain)
+home_move_bead = "mw-43v9x"        # the bead the Governor's Move home tap, its start and result, is written on (default shown)
 postern_transcribe_cmd = ""        # what hears the Governor's voice notes, the audio's path appended, e.g. contrib/postern-transcribe (default empty: none are heard)
 beads_sync = "remote"              # remote (a copy of its own), backup (holds the one database) or shared (reaches another host's) (default remote)
 beads_backup_minutes = 30          # on a backup host, how long between two backups of the one database (default 30)
@@ -871,6 +872,13 @@ protection, so an action is applied only when the backend vouched for the
 record's signer (the key that delivered it, or signed its transaction);
 otherwise it too is left as text. See
 `features/postern_inbox_apply.feature`.
+
+The Governor's *Move home* tap (§18, class `move-home`) is run by the same
+pass on the host it names, `mw home move <host>` with `--planned` or
+`--old-home-dead`, only when its signer is `postern_governor_key` and it is
+under 30 minutes old, and written on `home_move_bead`. On a host that is not
+home, `--apply` applies nothing else. See `docs/home-move.md`, *The tap in
+Postern*.
 
 A voice note — a Governor's message whose attachment is audio — is heard on
 this host, never by a third party (§14): with `postern_transcribe_cmd` set,

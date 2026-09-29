@@ -21,7 +21,8 @@ mw home move laptop --old-home-dead           # on the Laptop: the move
 - It runs **on the host that becomes home.** `mw home move desktop` on the Laptop is
   refused, and so is a move to `vps`: the home is the desktop or the Laptop, never the VPS.
 - `--old-home-dead` is the Governor's word that the old home is dead. Without it a move
-  onto an old home that does not answer stops at step 1. The tap in Postern passes it.
+  onto an old home that does not answer stops at step 1. The tap in Postern passes it
+  when the old home does not answer ssh, and `--planned` when it does (below).
 - `--dry-run` prints the six steps, what each does and each way back, and runs **none** of
   them: no ssh, bd, git, systemctl, mayor-up, no mail, no write. It reads the vault's
   `home` file and the config, nothing else.
@@ -184,6 +185,31 @@ other and are safe to repeat:
 | 4 | `systemctl --user start postern-backend`; `curl <backend>/healthz` says `standby` until `mw home --check` passes |
 | 5 | `mw mail send mayor` for the note, then `<vault>/bin/mayor-up` (`MW_MAYOR_UP_DRY=1` first shows what it would do) |
 | 6 | nothing to finish: it only reads |
+
+## The tap in Postern
+
+The Governor's *Move home to <host>* on the Me screen sends a message of class `move-home`,
+`{"host": "<host>"}` (postern's `docs/protocol.md` §18). The backend that indexes it runs
+its on-message hook, `mw postern inbox --apply`, and that pass (`application/posternmovehome.go`):
+
+- **refuses** it, and runs nothing, unless the record's signer, the key the backend vouches
+  for (it signed the transaction, or delivered the record), is `postern_governor_key`; and
+  unless it is under **30 minutes** old (older is a replay). A refusal is marked on the
+  txid (`postern.applied.<txid>`, `refused move-home …`), written on `home_move_bead` and
+  mailed to the Mayor.
+- naming **the other host**, does nothing: it is that host's to run.
+- naming **this host**, asks the old home over ssh (its `[hands_hosts]` line, 10 s), marks the
+  txid started on this host's own disk (`move-home.<txid>` beside the inbox's attachments, so
+  no txid is ever started twice, whatever the tracker says) and runs
+  `mw home move <host> --planned` when it answers, `--old-home-dead` when it does not;
+  its start and its result (exit status, the last of its output) are written on
+  `home_move_bead` (config or `$MW_HOME_MOVE_BEAD`, default `mw-43v9x`) and mailed.
+
+On a host that is not home the pass applies **nothing but a move-home**, so a boost's hook
+never records what the home's records too. On a boost the beads server is the old home's:
+each bd call before the move is given 20 s, and one that fails is printed, never a reason to
+stop; a boost that cannot read the tracker at all writes nothing until the move has run.
+See `features/postern_move_home.feature`.
 
 ## What was checked, and what was not
 

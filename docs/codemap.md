@@ -42,7 +42,7 @@ Each adapter: `var _ application.<Port> = ...`.
 | `AfterLanding` | `application/afterlanding.go` | `infrastructure/rig/afterlanding.go` | none |
 | `Dispatcher` | `application/landing.go` | `application.Dispatch` | — |
 | `HostSync` | `application/dispatch.go` | `application.Sync` | — |
-| Postern, hands | `application/{postern*,hands}.go` | `infrastructure/{postern,hands*}` | `apptest.Fake{Postern,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*}` |
+| Postern, hands | `application/{postern*,hands}.go` | `infrastructure/{postern,hands*,homemove}` | `apptest.Fake{Postern,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*,HomeMover}` |
 | `Grinder`, `GrindSource`, `GristState`, `GristLock` | `application/grist.go` | `infrastructure/{claude/grind,rig/grinds,hostlock/try}.go`, `infrastructure/grist` | `apptest.Fake{Grinder,Grinds,GristState,GristLock}` |
 
 ## Use cases
@@ -71,7 +71,7 @@ Each adapter: `var _ application.<Port> = ...`.
 | `Doctor` | `application/doctor.go` | `mw doctor` — `cmd/mw/doctor.go` | `features/doctor.feature` |
 | `SeatBoot` | `application/seatboot.go` | none: called by `Dispatch`, `Next` | `features/seat_boot.feature` |
 | `Init` | `application/init.go` | `mw init` — `cmd/mw/init.go` | `features/init.feature` |
-| Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern key/inbox/send/snapshot/view/bead — cmd/mw/posternview.go, cmd/mw/posternbead.go | `features/postern_*.feature` |
+| Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern key/inbox/send/snapshot/view/bead — cmd/mw/posternview.go, cmd/mw/posternbead.go | `features/postern_*.feature` |
 | Hands{Add,List} | application/hands.go | mw hands add /list — cmd/mw/hands.go; `cmd/mw-hands-root` | `features/hands.feature` |
 | `PosternServe`, `PosternNginx`, `PosternMirror` | `application/posternhand.go`, `application/posternmirror.go` | `mw postern serve`/`nginx`/`mirror` — `cmd/mw/postern.go`, `cmd/mw/posternmirror.go` | `features/postern_serve.feature` |
 | `GristKey`, `GristGrind` | `application/grist.go`, `application/gristgrind.go` | `mw grist key`/`grind` — `cmd/mw/grist.go` | `features/grist.feature` |
