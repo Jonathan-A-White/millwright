@@ -70,6 +70,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `Sync` | `application/sync.go` | `mw sync` (`beads_sync`) — `cmd/mw/sync.go` | `features/sync.feature` |
 | `Nudge` | `application/nudge.go` | `mw nudge` — `cmd/mw/nudge.go` | none |
 | `Mail` | `application/mail.go` | `mw mail` — `cmd/mw/mail.go` | `features/mail.feature` |
+| `Home` | `application/home.go` | `mw home` — `cmd/mw/home.go` | `features/home.feature` |
 | `Seat{Context,Up,Reap}` | `application/seatcontext.go`, `application/seatup.go`, `application/seatreap.go` | `mw seat context`/`up`/`reap` — `cmd/mw/seat.go` | `features/seat_{context,up,reap}.feature` |
 | `Millhand` | `application/millhand.go` | `mw millhand` — `cmd/mw/millhand.go` | `features/millhand.feature` |
 | `MillhandTick` | `application/millhandtick.go` | `mw millhand tick` — `cmd/mw/millhandtick.go` | `features/millhand_tick.feature` |
@@ -81,8 +82,8 @@ Every adapter: `var _ application.<Port> = ...`.
 | Hands{Add,List} | application/hands.go | mw hands add/list — cmd/mw/hands.go; `cmd/mw-hands-root` | `features/hands.feature` |
 | `PosternServe`, `PosternNginx` | `application/posternhand.go` | `mw postern serve`/`nginx` — `cmd/mw/postern.go` | `features/postern_serve.feature` |
 
-`cmd/mw/root.go` holds the tree; `cmd/mw/main.go` runs it; `cmd/mw/version.go` is
-`mw version`. `features/path_validation.feature` covers `domain/path.go`;
+`cmd/mw/root.go` holds the tree, `cmd/mw/main.go` runs it, `cmd/mw/version.go` is `mw version`.
+`features/path_validation.feature` covers `domain/path.go`;
 `features/{ready_stories,claim_lease}.feature` the `WorkTracker` contract.
 
 Add a command: `docs/adding-a-command.md`.
@@ -102,8 +103,6 @@ Add a command: `docs/adding-a-command.md`.
 | `aRigDir` | `infrastructure/rig/slot_test.go` | Merge-slot dir. |
 | `mwConfig` | `cmd/mw/dispatch_test.go` | `config.toml`, temp HOME. |
 | `aFactory` | `application/dispatch_test.go` | Faked `Dispatch`, temp vault. |
-
-`features/steps/next_steps.go`: rig; fakes tracker, runner, vault git.
 
 ## Build and test
 
