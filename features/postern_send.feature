@@ -148,3 +148,40 @@ Feature: mw postern send
     When mw postern send "message" "Second." is run
     Then sending succeeds
     And the second broadcast does not spend what the first one spent
+
+  Scenario: A send with one confirmed coin splits its change into four coins
+    Given the postern key holds a confirmed utxo of 5000 satoshis
+    When mw postern send "message" "First." is run
+    Then sending succeeds
+    And the last broadcast pays its change to 4 outputs
+
+  Scenario: Three sends in a row, with no block between, spend distinct coins
+    Given the postern key holds a confirmed utxo of 5000 satoshis
+    When mw postern send "message" "First." is run
+    Then sending succeeds
+    When mw postern send "message" "Second." is run
+    Then sending succeeds
+    When mw postern send "message" "Third." is run
+    Then sending succeeds
+    And there were 3 broadcasts
+    And no outpoint was spent by two broadcasts
+    And the second broadcast spends only the first one's change
+
+  Scenario: With only its own unconfirmed change to spend, a send spends it
+    Given the postern key holds an unconfirmed utxo of 4000 satoshis
+    When mw postern send "message" "From change." is run
+    Then sending succeeds
+    And the last broadcast spends the utxo of 4000 satoshis
+
+  Scenario: A send prefers a confirmed coin to an unconfirmed one
+    Given the postern key holds an unconfirmed utxo of 9000 satoshis
+    And the postern key also holds a confirmed utxo of 3000 satoshis
+    When mw postern send "message" "Confirmed first." is run
+    Then sending succeeds
+    And the last broadcast spends the utxo of 3000 satoshis
+
+  Scenario: Four confirmed coins are enough, so a send keeps one change output
+    Given the postern key holds 4 confirmed utxos of 3000 satoshis
+    When mw postern send "message" "Enough coins." is run
+    Then sending succeeds
+    And the last broadcast pays its change to 1 outputs

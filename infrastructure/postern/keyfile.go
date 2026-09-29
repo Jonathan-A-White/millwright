@@ -11,12 +11,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	ec "github.com/bsv-blockchain/go-sdk/primitives/ec"
 	"github.com/bsv-blockchain/go-sdk/script"
+	"github.com/bsv-blockchain/go-sdk/transaction"
+	"github.com/bsv-blockchain/go-sdk/transaction/template/p2pkh"
 
 	"github.com/Jonathan-A-White/millwright/application"
 )
@@ -105,7 +108,11 @@ func (k *KeyFile) PrivateKeyWIF() (string, error) {
 // Sign builds a record transaction, postern's docs/protocol.md section 4
 // (buildRecordTransaction), and reports it signed, as raw transaction hex
 // ready to broadcast. It leaves out the outputs MarkSpent remembers a send
-// spent in the last two hours, which the block explorer may still list.
+// spent in the last two hours, which the block explorer may still list, and
+// counts among the coins to spend the change MarkSent remembers, which the
+// block explorer may not list until a block confirms it. It spends a
+// confirmed coin, the largest first, before an unconfirmed one, the oldest
+// first.
 func (k *KeyFile) Sign(utxos []application.PosternUtxo, payload []byte) (string, error) {
 	priv, err := k.privateKey()
 	if err != nil {
@@ -115,17 +122,134 @@ func (k *KeyFile) Sign(utxos []application.PosternUtxo, payload []byte) (string,
 	if err != nil {
 		return "", err
 	}
-	unspent := make([]application.PosternUtxo, 0, len(utxos))
+	own, err := k.readOwnChange()
+	if err != nil {
+		return "", err
+	}
+	age := map[string]int64{}
+	listed := map[string]bool{}
+	for _, u := range utxos {
+		listed[outpoint(u)] = true
+	}
+	candidates := make([]application.PosternUtxo, 0, len(utxos)+len(own))
 	for _, u := range utxos {
 		if _, ok := spent[outpoint(u)]; !ok {
-			unspent = append(unspent, u)
+			candidates = append(candidates, u)
 		}
 	}
-	tx, err := buildRecordTransaction(priv, unspent, payload)
+	for point, coin := range own {
+		if _, ok := spent[point]; !ok && !listed[point] {
+			candidates = append(candidates, coin.utxo)
+			age[point] = coin.at
+		}
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		a, b := candidates[i], candidates[j]
+		if (a.Height > 0) != (b.Height > 0) {
+			return a.Height > 0
+		}
+		if a.Height == 0 && age[outpoint(a)] != age[outpoint(b)] {
+			return age[outpoint(a)] < age[outpoint(b)]
+		}
+		if a.Satoshis != b.Satoshis {
+			return a.Satoshis > b.Satoshis
+		}
+		return outpoint(a) < outpoint(b)
+	})
+	tx, err := buildRecordTransaction(priv, candidates, payload)
 	if err != nil {
 		return "", err
 	}
 	return tx.Hex(), nil
+}
+
+// ownChange is a change output a send of this key made: the coin, and when
+// (unix seconds) it was made.
+type ownChange struct {
+	utxo application.PosternUtxo
+	at   int64
+}
+
+// ownChangePath is the file that remembers the change this key's sends made,
+// beside the key file like spentPath.
+func (k *KeyFile) ownChangePath() string { return k.path + ".change" }
+
+// readOwnChange reads the change outputs a send made in the last two hours,
+// by outpoint. No file is none.
+func (k *KeyFile) readOwnChange() (map[string]ownChange, error) {
+	own := map[string]ownChange{}
+	raw, err := os.ReadFile(k.ownChangePath())
+	if os.IsNotExist(err) {
+		return own, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading the change this key made at %s: %w", k.ownChangePath(), err)
+	}
+	cutoff := k.now().Add(-spentMemory).Unix()
+	for _, line := range strings.Split(string(raw), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 3 {
+			continue
+		}
+		at, aerr := strconv.ParseInt(fields[0], 10, 64)
+		sats, serr := strconv.ParseInt(fields[2], 10, 64)
+		txid, vout, ok := strings.Cut(fields[1], ":")
+		n, verr := strconv.Atoi(vout)
+		if !ok || aerr != nil || serr != nil || verr != nil || at <= cutoff {
+			continue
+		}
+		own[fields[1]] = ownChange{utxo: application.PosternUtxo{Txid: txid, Vout: n, Satoshis: sats}, at: at}
+	}
+	return own, nil
+}
+
+// MarkSent remembers what a send just broadcast as rawtx: the outputs it
+// spent (as MarkSpent does), and the change it paid back to this key, which
+// a later send may spend while it is unconfirmed.
+func (k *KeyFile) MarkSent(rawtx string) error {
+	priv, err := k.privateKey()
+	if err != nil {
+		return err
+	}
+	tx, err := transaction.NewTransactionFromHex(rawtx)
+	if err != nil {
+		return fmt.Errorf("reading the broadcast transaction to remember its change: %w", err)
+	}
+	var spent []application.PosternUtxo
+	for _, in := range tx.Inputs {
+		spent = append(spent, application.PosternUtxo{Txid: in.SourceTXID.String(), Vout: int(in.SourceTxOutIndex)})
+	}
+	if err := k.MarkSpent(spent); err != nil {
+		return err
+	}
+	own, err := script.NewAddressFromPublicKey(priv.PubKey(), false)
+	if err != nil {
+		return fmt.Errorf("deriving the postern key's testnet address: %w", err)
+	}
+	ownLock, err := p2pkh.Lock(own)
+	if err != nil {
+		return fmt.Errorf("building the postern key's own locking script: %w", err)
+	}
+	coins, err := k.readOwnChange()
+	if err != nil {
+		return err
+	}
+	now := k.now().Unix()
+	for vout, o := range tx.Outputs {
+		if vout >= 2 && o.LockingScript.Equals(ownLock) && o.Satoshis > 1 {
+			coins[fmt.Sprintf("%s:%d", tx.TxID(), vout)] = ownChange{
+				utxo: application.PosternUtxo{Txid: tx.TxID().String(), Vout: vout, Satoshis: int64(o.Satoshis)}, at: now,
+			}
+		}
+	}
+	var out strings.Builder
+	for point, c := range coins {
+		fmt.Fprintf(&out, "%d %s %d\n", c.at, point, c.utxo.Satoshis)
+	}
+	if err := os.WriteFile(k.ownChangePath(), []byte(out.String()), 0o600); err != nil {
+		return fmt.Errorf("writing the change this key made to %s: %w", k.ownChangePath(), err)
+	}
+	return nil
 }
 
 // spentPath is the file that remembers what this key's sends spent: beside

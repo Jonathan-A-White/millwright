@@ -57,8 +57,9 @@ func TestSignBuildsTheProtocolsTransaction(t *testing.T) {
 	if len(tx.Inputs) != 1 || tx.Inputs[0].SourceTXID.String() != fundingTxid || tx.Inputs[0].SourceTxOutIndex != 0 {
 		t.Fatalf("expected one input spending %s:0 and not the 1-satoshi token, got %d inputs", fundingTxid, len(tx.Inputs))
 	}
-	if len(tx.Outputs) != 3 {
-		t.Fatalf("expected three outputs (record, anchor, change), got %d", len(tx.Outputs))
+	// One coin left to spend, so the change is split into four outputs.
+	if len(tx.Outputs) != 6 {
+		t.Fatalf("expected six outputs (record, anchor, four change), got %d", len(tx.Outputs))
 	}
 	record, anchor, change := tx.Outputs[0], tx.Outputs[1], tx.Outputs[2]
 	if got := hex.EncodeToString(*record.LockingScript); got != f.RecordScriptHex || record.Satoshis != 0 {
@@ -70,7 +71,14 @@ func TestSignBuildsTheProtocolsTransaction(t *testing.T) {
 	if got := hex.EncodeToString(*change.LockingScript); got != p2pkhScriptHex(t, senderAddress) {
 		t.Errorf("expected output 2 to pay change to %s, got %s", senderAddress, got)
 	}
-	fee := int64(10000) - 1 - int64(change.Satoshis)
+	var changeTotal int64
+	for _, o := range tx.Outputs[2:] {
+		if hex.EncodeToString(*o.LockingScript) != p2pkhScriptHex(t, senderAddress) {
+			t.Errorf("expected every output from 2 on to pay change to %s", senderAddress)
+		}
+		changeTotal += int64(o.Satoshis)
+	}
+	fee := int64(10000) - 1 - changeTotal
 	if fee < 1 || fee > 10 {
 		t.Errorf("expected a fee of a few satoshis at 1 sat/kB, got %d", fee)
 	}
@@ -79,17 +87,20 @@ func TestSignBuildsTheProtocolsTransaction(t *testing.T) {
 	}
 }
 
-// go-sdk signs deterministically (RFC 6979), the same as @bsv/sdk: with the
-// fixture's own fake UTXO as the only coin to spend, the Go-built,
-// Go-signed transaction is byte-identical to the one postern's TypeScript
-// built and signed, raw hex and txid both.
+// go-sdk signs deterministically (RFC 6979), the same as @bsv/sdk: spending
+// the fixture's own fake UTXO with three more coins to spare (so the change
+// is not split), the Go-built, Go-signed transaction is byte-identical to the
+// one postern's TypeScript built and signed, raw hex and txid both.
 func TestSignReproducesTheFixturesTransactionByteForByte(t *testing.T) {
 	f := loadProtocolFixture(t)
 	senderWIF := wifFromHex(t, f.Inputs.SenderPrivateKeyHex)
 	keys := postern.New(keyFileHolding(t, senderWIF))
 
 	rawtx, err := keys.Sign([]application.PosternUtxo{
-		{Txid: f.Inputs.Utxo.Txid, Vout: f.Inputs.Utxo.Vout, Satoshis: f.Inputs.Utxo.Satoshis},
+		{Txid: f.Inputs.Utxo.Txid, Vout: f.Inputs.Utxo.Vout, Satoshis: f.Inputs.Utxo.Satoshis, Height: 100},
+		{Txid: fundingTxid, Vout: 0, Satoshis: 5000, Height: 100},
+		{Txid: fundingTxid, Vout: 1, Satoshis: 5000, Height: 100},
+		{Txid: fundingTxid, Vout: 2, Satoshis: 5000, Height: 100},
 	}, fixturePayload(t, f))
 	if err != nil {
 		t.Fatalf("signing: %v", err)
@@ -232,5 +243,141 @@ func TestMarkSpentAddsToWhatIsRemembered(t *testing.T) {
 	}
 	if got := spentInputs(t, rawtx); len(got) != 1 || got[0] != tokenTxid+":0" {
 		t.Fatalf("expected only %s:0 spent, got %v", tokenTxid, got)
+	}
+}
+
+func changeOutputs(t *testing.T, rawtx string) []uint64 {
+	t.Helper()
+	tx, err := transaction.NewTransactionFromHex(rawtx)
+	if err != nil {
+		t.Fatalf("parsing the signed transaction: %v", err)
+	}
+	var change []uint64
+	for _, o := range tx.Outputs[2:] {
+		change = append(change, o.Satoshis)
+	}
+	return change
+}
+
+// A send spends one coin, a confirmed one, largest first, before an
+// unconfirmed one, however many are listed.
+func TestSignSpendsOneConfirmedCoinBeforeAnUnconfirmedOne(t *testing.T) {
+	f := loadProtocolFixture(t)
+	keys := postern.New(keyFileHolding(t, wifFromHex(t, f.Inputs.SenderPrivateKeyHex)))
+
+	rawtx, err := keys.Sign([]application.PosternUtxo{
+		{Txid: fundingTxid, Vout: 0, Satoshis: 9000},
+		{Txid: fundingTxid, Vout: 1, Satoshis: 2000, Height: 100},
+		{Txid: fundingTxid, Vout: 2, Satoshis: 3000, Height: 100},
+	}, fixturePayload(t, f))
+	if err != nil {
+		t.Fatalf("signing: %v", err)
+	}
+	if got := spentInputs(t, rawtx); len(got) != 1 || got[0] != fundingTxid+":2" {
+		t.Fatalf("expected only the 3000-satoshi confirmed coin %s:2 spent, got %v", fundingTxid, got)
+	}
+}
+
+// A send takes more coins only when one cannot cover the anchor and the fee.
+func TestSignAddsCoinsUntilTheyCoverTheFee(t *testing.T) {
+	f := loadProtocolFixture(t)
+	keys := postern.New(keyFileHolding(t, wifFromHex(t, f.Inputs.SenderPrivateKeyHex)))
+
+	rawtx, err := keys.Sign([]application.PosternUtxo{
+		{Txid: fundingTxid, Vout: 0, Satoshis: 2, Height: 100},
+		{Txid: fundingTxid, Vout: 1, Satoshis: 2, Height: 100},
+		{Txid: fundingTxid, Vout: 2, Satoshis: 2, Height: 100},
+	}, fixturePayload(t, f))
+	if err != nil {
+		t.Fatalf("signing: %v", err)
+	}
+	if got := spentInputs(t, rawtx); len(got) != 2 {
+		t.Fatalf("expected two of the three 2-satoshi coins spent, got %v", got)
+	}
+}
+
+// One coin left means the change is split so later sends each have a coin;
+// coins that already number four mean one change output; and a coin too
+// small to split gets one.
+func TestSignSplitsTheChangeToLeaveFourCoins(t *testing.T) {
+	f := loadProtocolFixture(t)
+	keys := postern.New(keyFileHolding(t, wifFromHex(t, f.Inputs.SenderPrivateKeyHex)))
+	payload := fixturePayload(t, f)
+
+	rawtx, err := keys.Sign([]application.PosternUtxo{{Txid: fundingTxid, Vout: 0, Satoshis: 10000, Height: 100}}, payload)
+	if err != nil {
+		t.Fatalf("signing: %v", err)
+	}
+	change := changeOutputs(t, rawtx)
+	if len(change) != 4 {
+		t.Fatalf("expected four change outputs from the only coin, got %v", change)
+	}
+	for _, sats := range change {
+		if sats < 547 {
+			t.Errorf("expected each change output above the dust limit plus a fee, got %v", change)
+		}
+	}
+
+	rawtx, err = keys.Sign([]application.PosternUtxo{
+		{Txid: fundingTxid, Vout: 0, Satoshis: 10000, Height: 100},
+		{Txid: fundingTxid, Vout: 1, Satoshis: 5000, Height: 100},
+	}, payload)
+	if err != nil {
+		t.Fatalf("signing: %v", err)
+	}
+	if change := changeOutputs(t, rawtx); len(change) != 3 {
+		t.Fatalf("expected three change outputs to leave four coins with one to spare, got %v", change)
+	}
+
+	rawtx, err = keys.Sign([]application.PosternUtxo{{Txid: fundingTxid, Vout: 0, Satoshis: 1000, Height: 100}}, payload)
+	if err != nil {
+		t.Fatalf("signing: %v", err)
+	}
+	if change := changeOutputs(t, rawtx); len(change) != 1 {
+		t.Fatalf("expected one change output where a split would go below the dust limit, got %v", change)
+	}
+}
+
+// Change a send made is spendable at once, though the listing does not show
+// it until a block confirms it, and is never spent twice.
+func TestSignSpendsChangeMarkSentRemembers(t *testing.T) {
+	f := loadProtocolFixture(t)
+	now := time.Unix(1758700000, 0)
+	keys := postern.New(keyFileHolding(t, wifFromHex(t, f.Inputs.SenderPrivateKeyHex))).
+		WithClock(func() time.Time { return now })
+	payload := fixturePayload(t, f)
+	listing := []application.PosternUtxo{{Txid: fundingTxid, Vout: 0, Satoshis: 10000, Height: 100}}
+
+	first, err := keys.Sign(listing, payload)
+	if err != nil {
+		t.Fatalf("signing: %v", err)
+	}
+	if err := keys.MarkSent(first); err != nil {
+		t.Fatalf("marking sent: %v", err)
+	}
+	firstTx, _ := transaction.NewTransactionFromHex(first)
+
+	// The listing still shows only the spent coin; the first send's four
+	// change coins are spent oldest first, one to a send.
+	spentBefore := map[string]bool{fundingTxid + ":0": true}
+	for i := 0; i < 4; i++ {
+		next, err := keys.Sign(listing, payload)
+		if err != nil {
+			t.Fatalf("send %d: %v", i+2, err)
+		}
+		got := spentInputs(t, next)
+		if len(got) != 1 || spentBefore[got[0]] || !strings.HasPrefix(got[0], firstTx.TxID().String()+":") {
+			t.Fatalf("send %d: expected one change output of the first send, not spent before, got %v", i+2, got)
+		}
+		spentBefore[got[0]] = true
+		now = now.Add(time.Second)
+		if err := keys.MarkSent(next); err != nil {
+			t.Fatalf("marking sent: %v", err)
+		}
+	}
+
+	now = now.Add(3 * time.Hour)
+	if _, err := keys.Sign(nil, payload); err == nil || !strings.Contains(err.Error(), "no spendable") {
+		t.Fatalf("expected remembered change to be forgotten after two hours, got: %v", err)
 	}
 }

@@ -174,7 +174,7 @@ func TestUtxosAndBalanceReadTheAddress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading utxos: %v", err)
 	}
-	if len(utxos) != 1 || utxos[0] != (application.PosternUtxo{Txid: "3af1", Vout: 2, Satoshis: 1000}) {
+	if len(utxos) != 1 || utxos[0] != (application.PosternUtxo{Txid: "3af1", Vout: 2, Satoshis: 1000, Height: 100}) {
 		t.Fatalf("expected the one utxo, got %+v", utxos)
 	}
 	balance, err := backend.Balance(context.Background(), "mtAddr")
