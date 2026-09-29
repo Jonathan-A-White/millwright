@@ -108,3 +108,23 @@ func TestPosternNginxDefaultsItsBackendFromThisHostsConfig(t *testing.T) {
 		t.Fatalf("expected the events location, got:\n%s", out)
 	}
 }
+
+func TestPosternNginxTakesTwoBackendFlagsAndWritesAnUpstream(t *testing.T) {
+	home := posternHandConfig(t)
+	conf := filepath.Join(home, "postern.conf")
+	site := "server {\n    location /api/ {\n        proxy_pass http://laptop.mw:8787;\n    }\n    # mw-api end\n}\n"
+	if err := os.WriteFile(conf, []byte(site), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runPosternHandCmd(t, "postern", "nginx", "--dry-run", "--conf", conf,
+		"--backend", "http://laptop.mw:8787", "--backend", "http://desktop.mw:8787")
+	if err != nil {
+		t.Fatalf("mw postern nginx --dry-run: %v\n%s", err, out)
+	}
+	for _, want := range []string{"upstream postern_api {", "server laptop.mw:8787;", "server desktop.mw:8787;", "proxy_pass http://postern_api;"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected %q in:\n%s", want, out)
+		}
+	}
+}

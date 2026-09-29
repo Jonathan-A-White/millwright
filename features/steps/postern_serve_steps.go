@@ -73,10 +73,13 @@ func InitializePosternServeScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^mw postern nginx is run with the backend "([^"]*)"$`, c.mwPosternNginxIsRunWithBackend)
 	ctx.When(`^mw postern nginx is run with --dry-run and the backend "([^"]*)"$`, c.mwPosternNginxIsRunWithDryRunBackend)
 	ctx.When(`^mw postern nginx is run again with the backend "([^"]*)"$`, c.mwPosternNginxIsRunWithBackend)
+	ctx.When(`^mw postern nginx is run with the backends "([^"]*)" and "([^"]*)"$`, c.mwPosternNginxIsRunWithBackends)
+	ctx.When(`^mw postern nginx is run again with the backends "([^"]*)" and "([^"]*)"$`, c.mwPosternNginxIsRunWithBackends)
 
 	ctx.Then(`^serving succeeds$`, c.servingSucceeds)
 	ctx.Then(`^nginxing succeeds$`, c.nginxingSucceeds)
 	ctx.Then(`^nginxing fails, saying nginx -t failed$`, c.nginxingFailsNginxT)
+	ctx.Then(`^nginxing fails, saying the backends must share a scheme$`, c.nginxingFailsOnScheme)
 	ctx.Then(`^the postern config file says:$`, c.theConfigFileSays)
 	ctx.Then(`^there is no config file$`, c.thereIsNoConfigFile)
 	ctx.Then(`^the snapshot directory exists$`, c.theSnapshotDirectoryExists)
@@ -206,12 +209,17 @@ func (c *posternServeContext) runNginx(req application.PosternNginxRequest) {
 }
 
 func (c *posternServeContext) mwPosternNginxIsRunWithBackend(backend string) error {
-	c.runNginx(application.PosternNginxRequest{Backend: backend})
+	c.runNginx(application.PosternNginxRequest{Backends: []string{backend}})
+	return nil
+}
+
+func (c *posternServeContext) mwPosternNginxIsRunWithBackends(first, second string) error {
+	c.runNginx(application.PosternNginxRequest{Backends: []string{first, second}})
 	return nil
 }
 
 func (c *posternServeContext) mwPosternNginxIsRunWithDryRunBackend(backend string) error {
-	c.runNginx(application.PosternNginxRequest{Backend: backend, DryRun: true})
+	c.runNginx(application.PosternNginxRequest{Backends: []string{backend}, DryRun: true})
 	return nil
 }
 
@@ -225,6 +233,16 @@ func (c *posternServeContext) servingSucceeds() error {
 func (c *posternServeContext) nginxingSucceeds() error {
 	if c.err != nil {
 		return fmt.Errorf("nginxing failed: %w", c.err)
+	}
+	return nil
+}
+
+func (c *posternServeContext) nginxingFailsOnScheme() error {
+	if c.err == nil {
+		return fmt.Errorf("nginxing succeeded; wanted it to refuse backends of two schemes")
+	}
+	if !strings.Contains(c.err.Error(), "share a scheme") {
+		return fmt.Errorf("nginxing failed with %q, not saying the backends must share a scheme", c.err)
 	}
 	return nil
 }

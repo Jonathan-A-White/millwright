@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/url"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -13,9 +14,15 @@ import (
 
 // DefaultPosternHandBackupDir is where mw postern serve and mw postern nginx
 // back up the file they are about to change, when --backup-dir says
-// nothing: the VPS's own scratch backup directory, the same one the hand
-// steps this pair replaces already backed up to.
-const DefaultPosternHandBackupDir = "/root/tidy"
+// nothing: tidy under the caller's own home (the VPS's /root/tidy when run
+// as root, where the hand steps this pair replaces already backed up to).
+func DefaultPosternHandBackupDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return "/root/tidy"
+	}
+	return filepath.Join(home, "tidy")
+}
 
 // PosternHandFile is what mw postern serve and mw postern nginx ask of the
 // disk to edit one text file on the VPS in place: read what is there, back
@@ -210,7 +217,7 @@ type PosternServe struct {
 	Files      PosternHandFile
 	ConfigPath string
 	// BackupDir names where the config file is backed up before it is
-	// changed. Empty reads DefaultPosternHandBackupDir.
+	// changed. Empty reads DefaultPosternHandBackupDir().
 	BackupDir string
 
 	// Out is where the report is printed. A nil Out prints nothing.
@@ -376,7 +383,7 @@ func (s PosternServe) backupDir() string {
 	if strings.TrimSpace(s.BackupDir) != "" {
 		return s.BackupDir
 	}
-	return DefaultPosternHandBackupDir
+	return DefaultPosternHandBackupDir()
 }
 
 func (s PosternServe) printf(text string) {
@@ -498,33 +505,59 @@ const (
 	posternAPIEndMarker   = "# mw-api end"
 	posternSnapshotMarker = "# mw-snapshot"
 	posternEventsMarker   = "# mw-api-events"
+	// posternUpstreamMarker opens the upstream block a run with two or more
+	// backends writes at the top of the site file.
+	posternUpstreamMarker = "# mw-api-upstream"
+	// posternFailoverTag ends every line a multi-backend run adds inside an
+	// /api location, so a later run can take them out before writing again.
+	posternFailoverTag = "# mw-failover"
+	// posternUpstreamName is the upstream every /api location passes to when
+	// there is more than one backend.
+	posternUpstreamName = "postern_api"
 )
 
 // PosternNginxRequest is what mw postern nginx is asked to ensure in the
 // nginx site file: the /api/events location, the /snapshot location,
 // aliased to SnapshotPath, and the /api upstream — the events location's
-// among them — set to Backend.
+// among them — set to Backends: to that one backend, or, with two or more,
+// to an upstream block over them that fails over to whichever answers.
 type PosternNginxRequest struct {
-	Backend      string
+	Backends     []string
 	SnapshotPath string
 	DryRun       bool
 }
 
 // validate refuses a request that could not be turned into nginx config,
-// reporting Backend's scheme and host (what proxy_pass is set to) once it
-// does not.
-func (r PosternNginxRequest) validate() (authority string, err error) {
+// reporting the authority proxy_pass is set to — the one backend's scheme
+// and host, or, with two or more backends, the upstream's name — and, for
+// two or more, the hosts the upstream block names.
+func (r PosternNginxRequest) validate() (authority string, hosts []string, err error) {
 	if strings.TrimSpace(r.SnapshotPath) == "" {
-		return "", fmt.Errorf("mw postern nginx: no snapshot path is configured (postern_snapshot_path)")
+		return "", nil, fmt.Errorf("mw postern nginx: no snapshot path is configured (postern_snapshot_path)")
 	}
-	if strings.TrimSpace(r.Backend) == "" {
-		return "", fmt.Errorf("mw postern nginx: --backend is required")
+	if len(r.Backends) == 0 {
+		return "", nil, fmt.Errorf("mw postern nginx: --backend is required")
 	}
-	u, err := url.Parse(r.Backend)
-	if err != nil || u.Scheme == "" || u.Host == "" {
-		return "", fmt.Errorf("mw postern nginx: --backend %q is not a URL of the form http://host:port", r.Backend)
+	var scheme string
+	for _, backend := range r.Backends {
+		if strings.TrimSpace(backend) == "" {
+			return "", nil, fmt.Errorf("mw postern nginx: --backend is required")
+		}
+		u, err := url.Parse(backend)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return "", nil, fmt.Errorf("mw postern nginx: --backend %q is not a URL of the form http://host:port", backend)
+		}
+		if scheme != "" && u.Scheme != scheme {
+			return "", nil, fmt.Errorf("mw postern nginx: the --backend URLs must share a scheme, an upstream has one: got %s and %s", scheme, u.Scheme)
+		}
+		scheme = u.Scheme
+		hosts = append(hosts, u.Host)
+		authority = u.Scheme + "://" + u.Host
 	}
-	return u.Scheme + "://" + u.Host, nil
+	if len(hosts) == 1 {
+		return authority, nil, nil
+	}
+	return scheme + "://" + posternUpstreamName, hosts, nil
 }
 
 // PosternNginx ensures the postern's /api/events location, its /snapshot
@@ -541,7 +574,7 @@ type PosternNginx struct {
 	Conf     PosternHandFile
 	ConfPath string
 	// BackupDir names where the site file is backed up before it is
-	// changed. Empty reads DefaultPosternHandBackupDir.
+	// changed. Empty reads DefaultPosternHandBackupDir().
 	BackupDir string
 	Runner    PosternNginxRunner
 
@@ -588,7 +621,7 @@ func (n PosternNginx) Run(ctx context.Context, req PosternNginxRequest) (Postern
 	if strings.TrimSpace(n.ConfPath) == "" {
 		return PosternNginxReport{}, fmt.Errorf("mw postern nginx: no nginx site file path is set")
 	}
-	authority, err := req.validate()
+	authority, upstreamHosts, err := req.validate()
 	if err != nil {
 		return PosternNginxReport{}, err
 	}
@@ -601,7 +634,7 @@ func (n PosternNginx) Run(ctx context.Context, req PosternNginxRequest) (Postern
 		return PosternNginxReport{}, fmt.Errorf("mw postern nginx: no nginx site file at %s", n.ConfPath)
 	}
 
-	withEvents, err := ensureEventsLocation(text, authority)
+	withEvents, err := ensureEventsLocation(stripFailoverLines(text), authority)
 	if err != nil {
 		return PosternNginxReport{}, err
 	}
@@ -609,7 +642,7 @@ func (n PosternNginx) Run(ctx context.Context, req PosternNginxRequest) (Postern
 	if err != nil {
 		return PosternNginxReport{}, err
 	}
-	newText := setAPIBackend(withSnapshot, authority)
+	newText := ensureUpstreamBlock(setAPIBackend(withSnapshot, authority, len(upstreamHosts) > 1), upstreamHosts)
 
 	report := PosternNginxReport{ConfPath: n.ConfPath, Changed: newText != text, DryRun: req.DryRun, NewText: newText}
 	if !report.Changed || req.DryRun {
@@ -656,7 +689,7 @@ func (n PosternNginx) backupDir() string {
 	if strings.TrimSpace(n.BackupDir) != "" {
 		return n.BackupDir
 	}
-	return DefaultPosternHandBackupDir
+	return DefaultPosternHandBackupDir()
 }
 
 func (n PosternNginx) printf(text string) {
@@ -802,29 +835,97 @@ var posternProxyPassRe = regexp.MustCompile(`^(\s*proxy_pass\s+)(https?://[^/;\s
 // the path — skipping past an optional modifier (=, ^~, ~, ~*) ahead of it.
 var posternLocationRe = regexp.MustCompile(`^\s*location\s+(?:(?:=|\^~|~\*|~)\s+)?(\S+)\s*\{`)
 
+// posternFailoverLines are the directives that follow the proxy_pass of
+// every /api location when there is more than one backend: retry the next
+// backend on a connect error, a timeout or a 503 — even for a POST — and
+// give up on a dead backend quickly.
+var posternFailoverLines = []string{
+	"proxy_next_upstream error timeout http_503 non_idempotent; " + posternFailoverTag,
+	"proxy_connect_timeout 2s; " + posternFailoverTag,
+}
+
+// stripFailoverLines returns text without the lines an earlier run added
+// under posternFailoverTag.
+func stripFailoverLines(text string) string {
+	lines := strings.Split(text, "\n")
+	kept := lines[:0:0]
+	for _, line := range lines {
+		if strings.HasSuffix(strings.TrimSpace(line), posternFailoverTag) {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
+}
+
+// upstreamBlock is the upstream block written ahead of the site's server
+// block when there are two or more backends. The comment says why a retry on
+// the next backend is safe.
+func upstreamBlock(hosts []string) []string {
+	block := []string{
+		posternUpstreamMarker,
+		"# A standby backend answers 503 before it does anything (story postern-standby),",
+		"# so a request retried on the next backend, a POST too, has run nowhere twice.",
+		"upstream " + posternUpstreamName + " {",
+	}
+	for _, host := range hosts {
+		block = append(block, "    server "+host+";")
+	}
+	return append(block, "}")
+}
+
+// ensureUpstreamBlock returns text with the upstream block over hosts at its
+// top — replacing its own block, marked with posternUpstreamMarker, when one
+// is there — or, when hosts is empty (one backend), with any such block taken
+// out again, so one backend's output is the same as it was before there was
+// an upstream.
+func ensureUpstreamBlock(text string, hosts []string) string {
+	lines := strings.Split(text, "\n")
+	start, end, found := findBlock(lines, posternUpstreamMarker)
+	if found {
+		if end+1 < len(lines) && lines[end+1] == "" {
+			end++
+		}
+		lines = append(append([]string{}, lines[:start]...), lines[end+1:]...)
+	}
+	if len(hosts) == 0 {
+		return strings.Join(lines, "\n")
+	}
+	block := append(upstreamBlock(hosts), "")
+	return strings.Join(append(block, lines...), "\n")
+}
+
 // setAPIBackend returns text with every proxy_pass line inside a `location`
 // block whose path names /api pointed at authority (a URL's scheme and
-// host), its own path suffix — /healthz, say — left exactly as it was.
-func setAPIBackend(text, authority string) string {
+// host), its own path suffix — /healthz, say — left exactly as it was. With
+// failover set, each such line is followed by posternFailoverLines.
+func setAPIBackend(text, authority string, failover bool) string {
 	lines := strings.Split(text, "\n")
+	out := make([]string, 0, len(lines))
 	depth := 0
 	inAPI := false
 	apiDepth := 0
 
-	for i, line := range lines {
+	for _, line := range lines {
 		if m := posternLocationRe.FindStringSubmatch(line); m != nil && !inAPI && strings.Contains(m[1], "/api") {
 			inAPI = true
 			apiDepth = depth + strings.Count(line, "{") - strings.Count(line, "}")
 		}
-		if inAPI {
-			if m := posternProxyPassRe.FindStringSubmatch(line); m != nil {
-				lines[i] = m[1] + authority + m[3] + m[4]
+		if m := posternProxyPassRe.FindStringSubmatch(line); inAPI && m != nil {
+			out = append(out, m[1]+authority+m[3]+m[4])
+			if failover {
+				indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+				for _, directive := range posternFailoverLines {
+					out = append(out, indent+directive)
+				}
 			}
+		} else {
+			out = append(out, line)
 		}
 		depth += strings.Count(line, "{") - strings.Count(line, "}")
 		if inAPI && depth < apiDepth {
 			inAPI = false
 		}
 	}
-	return strings.Join(lines, "\n")
+	return strings.Join(out, "\n")
 }

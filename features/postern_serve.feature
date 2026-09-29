@@ -142,6 +142,138 @@ Feature: mw postern serve / mw postern nginx
     And nginx was tested 1 time and reloaded 1 time
     And the nginx site file was backed up exactly 1 time
 
+  Scenario: mw postern nginx with two backends writes an upstream block and points every /api location at it
+    Given an nginx site file that says:
+      """
+      server {
+          location /api/ {
+              proxy_pass http://laptop.mw:8787;
+          }
+          location = /api/healthz {
+              proxy_pass http://laptop.mw:8787/healthz;
+          }
+          # mw-api end
+      }
+      """
+    And the postern snapshot path is "/var/www/postern-snapshot/snapshot.bin"
+    When mw postern nginx is run with the backends "http://laptop.mw:8787" and "http://desktop.mw:8787"
+    Then nginxing succeeds
+    And the nginx site file holds:
+      """
+      # mw-api-upstream
+      # A standby backend answers 503 before it does anything (story postern-standby),
+      # so a request retried on the next backend, a POST too, has run nowhere twice.
+      upstream postern_api {
+          server laptop.mw:8787;
+          server desktop.mw:8787;
+      }
+
+      server {
+          # mw-api-events
+          location = /api/events {
+              proxy_pass http://postern_api;
+              proxy_next_upstream error timeout http_503 non_idempotent; # mw-failover
+              proxy_connect_timeout 2s; # mw-failover
+              proxy_buffering off;
+              proxy_cache off;
+              proxy_read_timeout 1h;
+              proxy_http_version 1.1;
+              proxy_set_header Connection "";
+          }
+          location /api/ {
+              proxy_pass http://postern_api;
+              proxy_next_upstream error timeout http_503 non_idempotent; # mw-failover
+              proxy_connect_timeout 2s; # mw-failover
+          }
+          location = /api/healthz {
+              proxy_pass http://postern_api/healthz;
+              proxy_next_upstream error timeout http_503 non_idempotent; # mw-failover
+              proxy_connect_timeout 2s; # mw-failover
+          }
+          # mw-api end
+          # mw-snapshot
+          location = /snapshot {
+              alias /var/www/postern-snapshot/snapshot.bin;
+              add_header Cache-Control "no-store" always;
+              add_header X-Content-Type-Options "nosniff" always;
+              default_type application/octet-stream;
+          }
+      }
+      """
+    And nginx was tested 1 time and reloaded 1 time
+
+  Scenario: A second run with the same two backends changes nothing more
+    Given an nginx site file that says:
+      """
+      server {
+          location /api/ {
+              proxy_pass http://laptop.mw:8787;
+          }
+          # mw-api end
+      }
+      """
+    And the postern snapshot path is "/var/www/postern-snapshot/snapshot.bin"
+    When mw postern nginx is run with the backends "http://laptop.mw:8787" and "http://desktop.mw:8787"
+    And mw postern nginx is run again with the backends "http://laptop.mw:8787" and "http://desktop.mw:8787"
+    Then nginxing succeeds
+    And nginx was tested 1 time and reloaded 1 time
+    And the nginx site file was backed up exactly 1 time
+
+  Scenario: Going back to one backend takes the upstream block and the failover lines out again
+    Given an nginx site file that says:
+      """
+      server {
+          location /api/ {
+              proxy_pass http://laptop.mw:8787;
+          }
+          # mw-api end
+      }
+      """
+    And the postern snapshot path is "/var/www/postern-snapshot/snapshot.bin"
+    When mw postern nginx is run with the backends "http://laptop.mw:8787" and "http://desktop.mw:8787"
+    And mw postern nginx is run again with the backend "http://desktop.mw:8787"
+    Then nginxing succeeds
+    And the nginx site file holds:
+      """
+      server {
+          # mw-api-events
+          location = /api/events {
+              proxy_pass http://desktop.mw:8787;
+              proxy_buffering off;
+              proxy_cache off;
+              proxy_read_timeout 1h;
+              proxy_http_version 1.1;
+              proxy_set_header Connection "";
+          }
+          location /api/ {
+              proxy_pass http://desktop.mw:8787;
+          }
+          # mw-api end
+          # mw-snapshot
+          location = /snapshot {
+              alias /var/www/postern-snapshot/snapshot.bin;
+              add_header Cache-Control "no-store" always;
+              add_header X-Content-Type-Options "nosniff" always;
+              default_type application/octet-stream;
+          }
+      }
+      """
+
+  Scenario: Backends that do not share a scheme cannot be one upstream
+    Given an nginx site file that says:
+      """
+      server {
+          location /api/ {
+              proxy_pass http://laptop.mw:8787;
+          }
+          # mw-api end
+      }
+      """
+    And the postern snapshot path is "/var/www/postern-snapshot/snapshot.bin"
+    When mw postern nginx is run with the backends "http://laptop.mw:8787" and "https://desktop.mw:8787"
+    Then nginxing fails, saying the backends must share a scheme
+    And the nginx site file is unchanged
+
   Scenario: --dry-run prints what mw postern nginx would do and touches nothing
     Given an nginx site file that says:
       """

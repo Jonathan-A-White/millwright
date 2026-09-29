@@ -567,7 +567,7 @@ func newPosternServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&viewPath, "view-path", "", "the live view the backend serves, POSTERN_VIEW_FILE (default: postern_view_path)")
 	cmd.Flags().StringVar(&mwPath, "mw", "", "the full path of the mw the backend runs (default: this mw)")
 	cmd.Flags().StringVar(&mayorKey, "mayor-key", "", "the Mayor's postern public key, as hex (default: this host's postern key)")
-	cmd.Flags().StringVar(&backupDir, "backup-dir", application.DefaultPosternHandBackupDir, "where the files are backed up before they are changed")
+	cmd.Flags().StringVar(&backupDir, "backup-dir", "", "where the files are backed up before they are changed (default: tidy under your home)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what would change without touching anything")
 	return cmd
 }
@@ -595,7 +595,8 @@ func posternMayorKey() (string, error) {
 // upstream in the nginx site, backed up, tested and reloaded, printing the
 // way back.
 func newPosternNginxCmd() *cobra.Command {
-	var conf, backend, backupDir string
+	var conf, backupDir string
+	var backends []string
 	var dryRun bool
 
 	cmd := &cobra.Command{
@@ -605,7 +606,10 @@ func newPosternNginxCmd() *cobra.Command {
 			"backend's event stream, with proxy_buffering and proxy_cache off, proxy_read_timeout 1h,\n" +
 			"proxy_http_version 1.1 and the Connection header cleared — and a `location = /snapshot`\n" +
 			"block, aliased to postern_snapshot_path, and points the /api upstream(s) at --backend\n" +
-			"(default: postern_backend, http://desktop.mw:8787), in the nginx site named by --conf —\n" +
+			"(default: postern_backend, http://desktop.mw:8787), in the nginx site named by --conf.\n" +
+			"Given --backend twice or more, it writes an upstream block over them instead, so nginx\n" +
+			"fails over to whichever backend answers and needs no edit on a move — a standby backend\n" +
+			"answers 503 before doing anything, so a retried POST is safe. It is\n" +
 			"idempotent, so a re-run that would change nothing touches nothing. It backs the site file\n" +
 			"up first, writes it, then runs `nginx -t` and, only once that passes, `systemctl reload\n" +
 			"nginx`, printing every command and the way back. A failed nginx -t restores the backup, so\n" +
@@ -617,10 +621,12 @@ func newPosternNginxCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if backend == "" {
-				if backend, err = config.PosternBackend(); err != nil {
+			if len(backends) == 0 {
+				backend, err := config.PosternBackend()
+				if err != nil {
 					return err
 				}
+				backends = []string{backend}
 			}
 			nginx := application.PosternNginx{
 				Conf:      postern.NewHandFile(),
@@ -630,14 +636,14 @@ func newPosternNginxCmd() *cobra.Command {
 				Out:       cmd.OutOrStdout(),
 			}
 			_, err = nginx.Run(cmd.Context(), application.PosternNginxRequest{
-				Backend: backend, SnapshotPath: snapshotPath, DryRun: dryRun,
+				Backends: backends, SnapshotPath: snapshotPath, DryRun: dryRun,
 			})
 			return err
 		},
 	}
 	cmd.Flags().StringVar(&conf, "conf", "", "the nginx site file to edit (required)")
-	cmd.Flags().StringVar(&backend, "backend", "", "the /api upstream's URL (default: postern_backend)")
-	cmd.Flags().StringVar(&backupDir, "backup-dir", application.DefaultPosternHandBackupDir, "where the site file is backed up before it is changed")
+	cmd.Flags().StringArrayVar(&backends, "backend", nil, "the /api upstream's URL; give it twice or more to fail over between backends (default: postern_backend)")
+	cmd.Flags().StringVar(&backupDir, "backup-dir", "", "where the site file is backed up before it is changed (default: tidy under your home)")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what would change without touching anything")
 	_ = cmd.MarkFlagRequired("conf")
 	return cmd

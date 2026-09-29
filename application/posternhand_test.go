@@ -1,6 +1,7 @@
 package application
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -21,7 +22,7 @@ func TestSetAPIBackendLeavesModifiedNonAPILocationsAlone(t *testing.T) {
 		"    }\n" +
 		"}"
 
-	got := setAPIBackend(text, "http://desktop.mw:8787")
+	got := setAPIBackend(text, "http://desktop.mw:8787", false)
 
 	want := "server {\n" +
 		"    location ^~ /static/ {\n" +
@@ -117,5 +118,25 @@ func TestServeRefusesAnEnvironmentValueThatCannotBeWritten(t *testing.T) {
 	req.Mw = "/bin/mw"
 	if err := req.validate(); err != nil {
 		t.Fatalf("expected an empty --addr to read %s, got %v", DefaultPosternAddr, err)
+	}
+}
+
+// TestTheDefaultBackupDirIsUnderTheCallersHome covers mw-43v9x.5: the default
+// was /root/tidy even when run as another user.
+func TestTheDefaultBackupDirIsUnderTheCallersHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	if got, want := DefaultPosternHandBackupDir(), filepath.Join(home, "tidy"); got != want {
+		t.Errorf("DefaultPosternHandBackupDir() = %q, want %q", got, want)
+	}
+	if got, want := (PosternNginx{}).backupDir(), filepath.Join(home, "tidy"); got != want {
+		t.Errorf("PosternNginx{}.backupDir() = %q, want %q", got, want)
+	}
+	if got, want := (PosternServe{}).backupDir(), filepath.Join(home, "tidy"); got != want {
+		t.Errorf("PosternServe{}.backupDir() = %q, want %q", got, want)
+	}
+	if got := (PosternNginx{BackupDir: "/elsewhere"}).backupDir(); got != "/elsewhere" {
+		t.Errorf("an explicit BackupDir was not kept: %q", got)
 	}
 }
