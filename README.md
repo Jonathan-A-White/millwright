@@ -940,11 +940,16 @@ the app is:
 and a `location = /snapshot` block (aliased to the config's own
 `postern_snapshot_path`, no-store, nosniff, served as an opaque octet stream),
 and points every `/api` upstream at `--backend` (`postern_backend` by
-default), all marker-based so a re-run is a no-op; it then runs `nginx -t` and,
+default). Given `--backend` twice, it writes an `upstream postern_api` block over
+both instead, points every `/api` location at it with `proxy_next_upstream error
+timeout http_503 non_idempotent` and a short `proxy_connect_timeout` (a standby
+backend answers 503 before doing anything, so a retried POST is safe), so a move
+needs no nginx edit; one `--backend` writes what it always did. All
+marker-based, so a re-run is a no-op; it then runs `nginx -t` and,
 only once that passes, `systemctl reload nginx`, restoring the backup
 automatically if the test fails so a bad edit is never left live. Both print
-the backup path and the way back. `--backup-dir` defaults to `/root/tidy`,
-which is the VPS's; on the desktop, name one of your own. See
+the backup path and the way back. `--backup-dir` defaults to `tidy` under
+the caller's home (`/root/tidy` on the VPS, run as root). See
 `features/postern_serve.feature`.
 
 ## Steps for his hands
