@@ -89,6 +89,7 @@ const (
 	PosternDataEnv          = "MW_POSTERN_DATA"
 	PosternWatchdogEnv      = "MW_POSTERN_WATCHDOG_TARGET"
 	PosternLocalURLEnv      = "MW_POSTERN_LOCAL_URL"
+	HomeMoveBeadEnv         = "MW_HOME_MOVE_BEAD"
 
 	HandsRootHelperEnv = "MW_HANDS_ROOT_HELPER"
 
@@ -459,6 +460,18 @@ func PosternLocalURL(host string) (string, error) {
 		return fmt.Sprintf("http://%s.mw:%d", host, DefaultPosternLocalPort), nil
 	}
 	return strings.TrimRight(said, "/"), nil
+}
+
+// DefaultHomeMoveBead is the bead a move of the home the Governor asks for by
+// postern is written on when nothing says another: the epic that made the move.
+const DefaultHomeMoveBead = "mw-43v9x"
+
+// HomeMoveBead reports the bead the start and the result of a move-home the
+// Governor sent by postern are written on (postern's docs/protocol.md §18):
+// $MW_HOME_MOVE_BEAD if it is set, otherwise the root-table `home_move_bead`
+// key of ~/.config/mw/config.toml, otherwise DefaultHomeMoveBead.
+func HomeMoveBead() (string, error) {
+	return optionalSetting("home_move_bead", HomeMoveBeadEnv, DefaultHomeMoveBead)
 }
 
 // PosternTranscribeCmd reports the command mw postern inbox transcribes a
