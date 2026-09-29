@@ -399,6 +399,7 @@ func Blocked(err error) (*VaultBlocked, bool) {
 // wrong but somebody's uncommitted vault work, MillhandUpExit when the Millhand
 // was not started because one is up, WatchWakeExit when mw watch calls for a
 // wake, DoctorFaultExit when mw doctor leaves a check faulty and uncured,
+// HomeUnknownExit when mw home --check cannot tell which host is home,
 // NetworkFaultExit when a dispatch waited out the network and it did not
 // come back, 1 for anything else, and 0 for nothing wrong at all. cmd/mw leaves with it.
 func ExitStatus(err error) int {
@@ -419,6 +420,9 @@ func ExitStatus(err error) int {
 	}
 	if _, fault := DoctorFaults(err); fault {
 		return DoctorFaultExit
+	}
+	if _, unknown := HomeUnknownIn(err); unknown {
+		return HomeUnknownExit
 	}
 	if _, fault := LocalFault(err); fault {
 		return NetworkFaultExit
