@@ -33,6 +33,15 @@ Feature: mw postern inbox --apply
     Then bead "mw-act.3" has 1 comment
     And bead "mw-act.3"'s last comment reads "VERIFIED by the Governor via postern (tx-verified)"
 
+  Scenario: A second verified tap on a bead already verified is refused, and no second comment is written
+    Given a postern action "verified" on bead "mw-act.3" from "governor-pubkey-hex" with txid "tx-verified-1"
+    And a postern action "verified" on bead "mw-act.3" from "governor-pubkey-hex" with txid "tx-verified-2"
+    When mw postern inbox --apply is run
+    Then bead "mw-act.3" has 1 comment
+    And bead "mw-act.3"'s last comment reads "VERIFIED by the Governor via postern (tx-verified-1)"
+    And mail "Verified: mw-act.3" was sent to mayor
+    And mail "Not applied: verified mw-act.3" was sent to mayor
+
   Scenario: The Mayor's read shows an applied message as one line and never applies it twice
     Given a postern action "release" on bead "mw-act.2" from "governor-pubkey-hex" with txid "tx-once"
     When mw postern inbox --apply is run

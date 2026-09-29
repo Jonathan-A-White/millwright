@@ -310,6 +310,15 @@ func (i PosternInbox) applyAction(ctx context.Context, m PosternInboxMessage, ac
 			fmt.Sprintf("PRIORITY %d set by the Governor via postern, txid %s", *action.Priority, m.Txid))
 
 	default: // PosternActionVerified
+		comments, err := i.Tracker.StoryComments(ctx, action.Bead)
+		if err != nil {
+			return posternApplied{}, fmt.Errorf("reading %s's comments for the Governor's verified: %w", action.Bead, err)
+		}
+		for _, c := range comments {
+			if strings.Contains(c.Text, PosternSnapshotVerifiedMarker) {
+				return refuse("it is already verified")
+			}
+		}
 		return done(fmt.Sprintf("Verified: %s", action.Bead), fmt.Sprintf("VERIFIED by the Governor via postern (%s)", m.Txid))
 	}
 }
