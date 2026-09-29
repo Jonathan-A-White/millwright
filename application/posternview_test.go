@@ -627,3 +627,58 @@ func TestPosternViewHandsNeedCarriesItsStepsAndHowTheyRan(t *testing.T) {
 		}
 	}
 }
+
+// A hitl bead whose every hands step has run with exit 0 no longer waits on
+// his hands, only on the Mayor's acceptance check: it leaves the hands needs.
+// A step that failed or has not run keeps it; a hitl bead with no steps at
+// all keeps it as before.
+func TestPosternViewHandsNeedLeavesOnceEveryStepRanWithExitZero(t *testing.T) {
+	ranZero := `{"at":"2026-09-28T12:03:00Z","exit":0,"host":"desktop"}`
+	ranOne := `{"at":"2026-09-28T12:03:00Z","exit":1,"host":"desktop"}`
+	cases := []struct {
+		name  string
+		steps []string
+		ran   map[string]string
+		want  bool
+	}{
+		{"one step ran with exit 0", []string{"a"}, map[string]string{"a": ranZero}, false},
+		{"two steps both ran with exit 0", []string{"a", "b"}, map[string]string{"a": ranZero, "b": ranZero}, false},
+		{"one step ran with exit 1", []string{"a"}, map[string]string{"a": ranOne}, true},
+		{"one step has not run", []string{"a"}, nil, true},
+		{"one of two has not run", []string{"a", "b"}, map[string]string{"a": ranZero}, true},
+		{"one of two failed", []string{"a", "b"}, map[string]string{"a": ranZero, "b": ranOne}, true},
+		{"no steps at all", nil, nil, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			tracker := apptest.NewFakeTracker()
+			liveEpic(tracker, "mw-f758y", domain.Path{})
+			tracker.AddStory("mw-f758y", domain.Story{ID: "mw-f758y.8", Title: "Hands"})
+			mustDo(t, tracker.SetLabels("mw-f758y.8", "hitl"))
+			var records []application.HandsStepRecord
+			for _, id := range tc.steps {
+				records = append(records, application.HandsStepRecord{HandsStep: domain.HandsStep{ID: id, Host: "desktop", As: "user", Run: "true"}})
+			}
+			if records != nil {
+				raw, _ := json.Marshal(records)
+				mustDo(t, tracker.SetNote(ctx, application.HandsStepsKey("mw-f758y.8"), string(raw)))
+			}
+			for id, ran := range tc.ran {
+				mustDo(t, tracker.SetNote(ctx, application.HandsRanKey("mw-f758y.8", id), ran))
+			}
+
+			doc := viewDoc(t, tracker)
+
+			var got bool
+			for _, n := range doc.Needs {
+				if n.Kind == "hands" && n.Bead == "mw-f758y.8" {
+					got = true
+				}
+			}
+			if got != tc.want {
+				t.Fatalf("expected a hands need: %v, got %v (needs %+v)", tc.want, got, doc.Needs)
+			}
+		})
+	}
+}

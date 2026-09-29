@@ -35,6 +35,7 @@ Feature: mw postern view
 
   Scenario: A hands need carries its steps, each with the hash his approval binds and how it ran
     Given the view's bead "mw-v.1" has the hands step "linger" on "desktop" as "root" running "loginctl enable-linger jwhite"
+    And the view's bead "mw-v.1" has the hands step "restart" on "vps" as "user" running "systemctl --user restart mw-dispatch"
     And the view's hands step "linger" on "mw-v.1" ran with exit 0
     When the live view is built
     Then the view's hands need on "mw-v.1" carries the step "linger" with its sha256, run with exit 0
@@ -47,3 +48,21 @@ Feature: mw postern view
   Scenario: A verify need on a landing the Mayor has not checked says not yet
     When the live view is built
     Then the view's verify need on "mw-v.3" says "Landed 28 Sep 11:00 UTC: Story mw-v.3. Checked by the Mayor: not yet. Tap Verified if you have looked; optional, clears by itself 29 Sep 11:00 UTC."
+
+  Scenario: A hands need leaves the view once its one step has run with exit 0
+    Given the view's bead "mw-v.1" has the hands step "linger" on "desktop" as "root" running "loginctl enable-linger jwhite"
+    And the view's hands step "linger" on "mw-v.1" ran with exit 0
+    When the live view is built
+    Then the view's needs are "question:mw-v.4, verify:mw-v.3"
+
+  Scenario: A hands need stays when its step ran with a non-zero exit
+    Given the view's bead "mw-v.1" has the hands step "linger" on "desktop" as "root" running "loginctl enable-linger jwhite"
+    And the view's hands step "linger" on "mw-v.1" ran with exit 1
+    When the live view is built
+    Then the view's needs are "hands:mw-v.1, question:mw-v.4, verify:mw-v.3"
+    And the view's hands need on "mw-v.1" carries the step "linger" with its sha256, run with exit 1
+
+  Scenario: A hands need stays when its step has not run
+    Given the view's bead "mw-v.1" has the hands step "linger" on "desktop" as "root" running "loginctl enable-linger jwhite"
+    When the live view is built
+    Then the view's needs are "hands:mw-v.1, question:mw-v.4, verify:mw-v.3"
