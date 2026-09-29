@@ -659,7 +659,7 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 			unrecorded = append(unrecorded, fmt.Errorf("what mw sweep remembered of the last attempt could not be cleared: %w", err))
 		}
 	}
-	if err := d.Tracker.SetStoryMetadata(ctx, id, attemptFields(detail, started.Attempt)); err != nil {
+	if err := d.Tracker.SetStoryMetadata(ctx, id, attemptFields(detail, started.Attempt, d.now())); err != nil {
 		unrecorded = append(unrecorded, fmt.Errorf("the attempt could not be recorded as %s=%d: %w", AttemptsField, started.Attempt, err))
 	}
 	where := fmt.Sprintf("dispatched by mw on %s: session %s in %s on %s", d.Host, spec.Name, started.Worktree, started.Branch)

@@ -205,6 +205,17 @@ func (b bead) started() time.Time {
 	return claimed
 }
 
+// claimedAt is when a dispatch recorded the latest claim of this bead, or the
+// zero time when none did or what is there is not a time.
+func (b bead) claimedAt() time.Time {
+	text, _ := b.Metadata[application.ClaimedAtField].(string)
+	at, err := time.Parse(time.RFC3339, strings.TrimSpace(text))
+	if err != nil {
+		return time.Time{}
+	}
+	return at
+}
+
 // updated is when bd says the bead was last changed, or the zero time when it
 // says nothing or something that is not a time.
 func (b bead) updated() time.Time {
@@ -256,6 +267,7 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		Priority:        b.priority(),
 		Created:         b.created(),
 		Started:         b.started(),
+		ClaimedAt:       b.claimedAt(),
 		Updated:         b.updated(),
 		ClosedAt:        b.closedAt(),
 		LeaseExpires:    b.leaseExpires(),

@@ -1038,3 +1038,29 @@ func TestDispatchGivesBackAClaimCancelledBetweenTheClaimAndTheLaunch(t *testing.
 		t.Fatalf("expected the claim given back and the story left open, got status %q assignee %q", detail.Status, detail.Assignee)
 	}
 }
+
+// mw-43v9x.3: bd keeps started_at from the first claim ever, so a story
+// re-claimed by another host reads as running since the old claim. A dispatch
+// records when this claim was made, for whoever measures how long it has run.
+func TestDispatchRecordsWhenTheClaimWasMade(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, _, _ := aFactory(t)
+	at := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
+	dispatch.Now = func() time.Time { return at }
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+
+	if _, err := dispatch.Run(ctx); err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+
+	if got, want := tracker.Metadata("mw-gq6.1")[application.ClaimedAtField], "2026-09-29T12:00:00Z"; got != want {
+		t.Fatalf("expected the claim recorded as %s=%s, got %q", application.ClaimedAtField, want, got)
+	}
+	detail, err := tracker.ShowStory(ctx, "mw-gq6.1")
+	if err != nil {
+		t.Fatalf("showing the story: %v", err)
+	}
+	if !detail.ClaimedAt.Equal(at) {
+		t.Fatalf("expected the story to read back claimed at %v, got %v", at, detail.ClaimedAt)
+	}
+}

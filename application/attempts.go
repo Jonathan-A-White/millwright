@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // AttemptsField is the metadata a story carries to say how many times a session
@@ -21,6 +22,13 @@ const (
 	AttemptsField          = "attempts"
 	AttemptsExhaustedField = "attempts_exhausted"
 )
+
+// ClaimedAtField is the metadata a story carries to say when the claim it is
+// held under was made, as UTC RFC 3339. bd keeps started_at from the first
+// claim ever made, so a story given back and claimed again by another host
+// still reads as started long ago; this is the time of the latest claim a
+// dispatch made, written with the attempt it counts.
+const ClaimedAtField = "claimed_at"
 
 // DefaultMaxAttempts is how many times a story is tried when the config file
 // says nothing: infrastructure/config.DefaultMaxAttempts is the same number.
@@ -44,10 +52,15 @@ func (d Dispatch) maxAttempts() int {
 }
 
 // attemptFields is what a story is given when its attempt-th session has
-// started: the count, and, when a tick had said the story used up its attempts,
-// that mark cleared, because it is being tried again.
-func attemptFields(detail StoryDetail, attempt int) map[string]string {
+// started: the count, when a dispatch made the claim it runs under (at, the
+// zero time for a session that is not a new claim), and, when a tick had said
+// the story used up its attempts, that mark cleared, because it is being tried
+// again.
+func attemptFields(detail StoryDetail, attempt int, at time.Time) map[string]string {
 	fields := map[string]string{AttemptsField: strconv.Itoa(attempt)}
+	if !at.IsZero() {
+		fields[ClaimedAtField] = at.UTC().Format(time.RFC3339)
+	}
 	if detail.Exhausted {
 		fields[AttemptsExhaustedField] = ""
 	}
@@ -59,7 +72,7 @@ func attemptFields(detail StoryDetail, attempt int) map[string]string {
 // reports what could not be written.
 func recordAttempt(ctx context.Context, tracker WorkTracker, detail StoryDetail) error {
 	next := detail.Attempts + 1
-	if err := tracker.SetStoryMetadata(ctx, detail.Story.ID, attemptFields(detail, next)); err != nil {
+	if err := tracker.SetStoryMetadata(ctx, detail.Story.ID, attemptFields(detail, next, time.Time{})); err != nil {
 		return fmt.Errorf("the attempt could not be recorded as %s=%d: %w", AttemptsField, next, err)
 	}
 	return nil

@@ -79,6 +79,11 @@ type StoryDetail struct {
 	// Started is when the story was claimed, as the tracker recorded it; zero
 	// when it was never claimed or the tracker did not say.
 	Started time.Time
+	// ClaimedAt is when the latest claim of the story was made, as a dispatch
+	// recorded it (ClaimedAtField); zero when none did. Started is bd's and
+	// stays at the first claim ever, so ClaimStarted is what to measure a run
+	// from.
+	ClaimedAt time.Time
 	// Updated is when the tracker last recorded a change to the story; zero
 	// when the tracker did not say.
 	Updated time.Time
@@ -184,6 +189,16 @@ type Comment struct {
 	Author  string
 	Created time.Time
 	Text    string
+}
+
+// ClaimStarted is when the claim the story is held under began: the latest
+// claim a dispatch recorded, else bd's started_at, which an older claim by
+// another host may have set. Zero when neither is known.
+func (d StoryDetail) ClaimStarted() time.Time {
+	if !d.ClaimedAt.IsZero() {
+		return d.ClaimedAt
+	}
+	return d.Started
 }
 
 // Held reports whether the tracker is holding this story back from every
