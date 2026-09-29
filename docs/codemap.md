@@ -79,7 +79,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `SeatBoot` | `application/seatboot.go` | none: `Dispatch`, `Next` call it | `features/seat_boot.feature` |
 | `Init` | `application/init.go` | `mw init` — `cmd/mw/init.go` | `features/init.feature` |
 | Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern key/inbox/send/snapshot/view/bead — cmd/mw/posternview.go, cmd/mw/posternbead.go | `features/postern_*.feature` |
-| Hands{Add,List} | application/hands.go | mw hands add/list — cmd/mw/hands.go; `cmd/mw-hands-root` | `features/hands.feature` |
+| Hands{Add,List} | application/hands.go | mw hands add (pushes)/list — cmd/mw/hands.go; `cmd/mw-hands-root` | `features/hands.feature` |
 | `PosternServe`, `PosternNginx`, `PosternMirror` | `application/posternhand.go`, `application/posternmirror.go` | `mw postern serve`/`nginx`/`mirror` — `cmd/mw/postern.go`, `cmd/mw/posternmirror.go` | `features/postern_serve.feature` |
 
 `cmd/mw/root.go` holds the tree, `cmd/mw/main.go` runs it, `cmd/mw/version.go` is `mw version`.

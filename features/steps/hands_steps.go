@@ -18,7 +18,9 @@ import (
 // what the last add or list said.
 type handsContext struct {
 	tracker *apptest.FakeTracker
+	push    *apptest.FakePosternSender
 	out     bytes.Buffer
+	errOut  bytes.Buffer
 	err     error
 }
 
@@ -34,7 +36,15 @@ func InitializeHandsScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a bead "([^"]*)" for the Governor's hands$`, c.aBeadForTheGovernorsHands)
 	ctx.Given(`^the Mayor added the step "([^"]*)" to "([^"]*)" on "([^"]*)" as "([^"]*)" running "([^"]*)"$`, c.theMayorAddedTheStep)
 	ctx.Given(`^the step "([^"]*)" on "([^"]*)" ran on "([^"]*)" with exit (\d+)$`, c.theStepRan)
+	ctx.Given(`^a working push to the Governor$`, c.aWorkingPush)
+	ctx.Given(`^a failing push to the Governor$`, c.aFailingPush)
 	ctx.When(`^the Mayor adds the step "([^"]*)" to "([^"]*)" on "([^"]*)" as "([^"]*)" running "([^"]*)"$`, c.theMayorAddsTheStep)
+	ctx.When(`^the Mayor adds the step "([^"]*)" to "([^"]*)" on "([^"]*)" as "([^"]*)" running "([^"]*)" with --no-push$`, c.theMayorAddsTheStepWithNoPush)
+	ctx.Then(`^exactly one push was sent, on the thread of "([^"]*)", saying "([^"]*)"$`, c.exactlyOnePushWasSent)
+	ctx.Then(`^that push's class opens Needs you$`, c.thatPushOpensNeeds)
+	ctx.Then(`^no push was sent$`, c.noPushWasSent)
+	ctx.Then(`^the failed push is reported on stderr$`, c.theFailedPushIsReported)
+	ctx.Then(`^bead "([^"]*)"'s last comment says the push failed$`, c.lastCommentSaysPushFailed)
 	ctx.When(`^the Mayor replaces the step "([^"]*)" on "([^"]*)" on "([^"]*)" as "([^"]*)" running "([^"]*)"$`, c.theMayorReplacesTheStep)
 	ctx.When(`^the Mayor lists the hands steps of "([^"]*)"$`, c.theMayorListsTheHandsSteps)
 	ctx.Then(`^adding the step succeeds$`, c.addingTheStepSucceeds)
@@ -53,28 +63,95 @@ func (c *handsContext) aBeadForTheGovernorsHands(bead string) error {
 	return nil
 }
 
-func (c *handsContext) add(id, bead, host, as, run string, replace bool) error {
+func (c *handsContext) add(id, bead, host, as, run string, replace, noPush bool) error {
 	c.out.Reset()
-	_, err := application.HandsAdd{
-		Tracker: c.tracker, Notes: c.tracker, Out: &c.out,
+	c.errOut.Reset()
+	adder := application.HandsAdd{
+		Tracker: c.tracker, Notes: c.tracker, Out: &c.out, Err: &c.errOut, NoPush: noPush,
 		Now: func() time.Time { return time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC) },
-	}.Run(context.Background(), application.HandsAddRequest{
+	}
+	if c.push != nil {
+		adder.Push = c.push
+	}
+	_, err := adder.Run(context.Background(), application.HandsAddRequest{
 		Bead: bead, Step: domain.HandsStep{ID: id, Host: host, As: as, Run: run}, Replace: replace,
 	})
 	return err
 }
 
+func (c *handsContext) aWorkingPush() error {
+	c.push = &apptest.FakePosternSender{}
+	return nil
+}
+
+func (c *handsContext) aFailingPush() error {
+	c.push = &apptest.FakePosternSender{Err: fmt.Errorf("the backend is down")}
+	return nil
+}
+
+func (c *handsContext) theMayorAddsTheStepWithNoPush(id, bead, host, as, run string) error {
+	c.err = c.add(id, bead, host, as, run, false, true)
+	return nil
+}
+
+func (c *handsContext) exactlyOnePushWasSent(bead, text string) error {
+	sent := c.push.Sent()
+	if len(sent) != 1 {
+		return fmt.Errorf("expected exactly one push, got %d: %+v", len(sent), sent)
+	}
+	if sent[0].Thread != bead || sent[0].Text != text {
+		return fmt.Errorf("expected a push on the thread of %s saying %q, got %+v", bead, text, sent[0])
+	}
+	return nil
+}
+
+// thatPushOpensNeeds holds the class to the classes postern's
+// src/push/classOptions.ts CLASS_URLS sends to /?v=needs.
+func (c *handsContext) thatPushOpensNeeds() error {
+	sent := c.push.Sent()
+	if len(sent) == 0 {
+		return fmt.Errorf("no push was sent")
+	}
+	switch sent[0].Class {
+	case "decision-needed", "landing", "alarm":
+		return nil
+	}
+	return fmt.Errorf("class %q does not open Needs you", sent[0].Class)
+}
+
+func (c *handsContext) noPushWasSent() error {
+	if sent := c.push.Sent(); len(sent) != 0 {
+		return fmt.Errorf("expected no push, got %+v", sent)
+	}
+	return nil
+}
+
+func (c *handsContext) theFailedPushIsReported() error {
+	if !strings.Contains(c.errOut.String(), "push") || !strings.Contains(c.errOut.String(), "failed") {
+		return fmt.Errorf("expected stderr to say the push failed, got %q", c.errOut.String())
+	}
+	return nil
+}
+
+func (c *handsContext) lastCommentSaysPushFailed(bead string) error {
+	comments := c.tracker.Comments(bead)
+	if len(comments) == 0 || !strings.HasPrefix(comments[len(comments)-1], "PUSH FAILED") {
+		return fmt.Errorf("expected the last comment to start PUSH FAILED, got %q", comments)
+	}
+	return nil
+}
+
 func (c *handsContext) theMayorAddedTheStep(id, bead, host, as, run string) error {
-	return c.add(id, bead, host, as, run, false)
+	return c.add(id, bead, host, as, run, false, false)
 }
 
 func (c *handsContext) theMayorAddsTheStep(id, bead, host, as, run string) error {
-	c.err = c.add(id, bead, host, as, run, false)
+	c.err = c.add(id, bead, host, as, run, false, false)
 	return nil
 }
 
 func (c *handsContext) theMayorReplacesTheStep(id, bead, host, as, run string) error {
-	c.err = c.add(id, bead, host, as, run, true)
+	c.err = c.add(id, bead, host, as, run, true, false)
 	return nil
 }
 

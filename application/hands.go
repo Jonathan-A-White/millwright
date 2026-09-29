@@ -71,6 +71,19 @@ type HandsAddRequest struct {
 	Replace bool
 }
 
+// PosternSender sends one message to the Governor: PosternSend, narrowed to
+// the one call a use case that pushes needs.
+type PosternSender interface {
+	Run(ctx context.Context, req PosternSendRequest) (string, error)
+}
+
+// HandsPushClass is the class of the push a new hands step sends. Postern's
+// src/push/classOptions.ts CLASS_URLS opens decision-needed, landing and
+// alarm at /?v=needs — Needs you — and message at /?v=talk. The step waits on
+// his decision, so decision-needed; alarm would sound and stay until
+// dismissed.
+const HandsPushClass = "decision-needed"
+
 // HandsAdd writes down a step only the Governor's hands could take (postern's
 // docs/protocol.md §17) — what the Mayor used to write as a `!` line for him
 // to type — on a bead: kept in the bead's hands note, commented on the bead
@@ -83,6 +96,15 @@ type HandsAdd struct {
 	Now func() time.Time
 	// Out is where the step's hash is printed. A nil Out prints nothing.
 	Out io.Writer
+
+	// Push sends the Governor a message that a step is waiting, on the bead's
+	// thread, once the step is written. A nil Push, or NoPush, sends none. A
+	// push that fails is said on Err and on the bead, and undoes nothing.
+	Push   PosternSender
+	NoPush bool
+	// Err is where a failed push is reported. A nil Err reports it on the
+	// bead only.
+	Err io.Writer
 }
 
 // Run adds req's step, refusing an invalid one, a bead the tracker does not
@@ -148,7 +170,38 @@ func (h HandsAdd) Run(ctx context.Context, req HandsAddRequest) (HandsStepRecord
 	if h.Out != nil {
 		fmt.Fprintf(h.Out, "added step %s to %s, on %s as %s: sha256 %s\n", req.Step.ID, req.Bead, req.Step.Host, req.Step.As, domain.HandsSHA256(req.Bead, req.Step))
 	}
+	h.push(ctx, req.Bead, found[0].Story.Title)
 	return record, nil
+}
+
+// push tells the Governor a step is waiting: one message of HandsPushClass on
+// bead's thread. The step is already kept, so a failure is only reported, on
+// Err and on the bead, never returned. The message is Recorded: the step's
+// own comment is already on the bead.
+func (h HandsAdd) push(ctx context.Context, bead, title string) {
+	if h.Push == nil || h.NoPush {
+		return
+	}
+	_, err := h.Push.Run(ctx, PosternSendRequest{
+		Class:    HandsPushClass,
+		Text:     fmt.Sprintf("New hands step on %s: %s", bead, title),
+		Thread:   bead,
+		Recorded: true,
+	})
+	if err == nil {
+		return
+	}
+	h.report("the push to the Governor failed: %v (the step is kept)", err)
+	comment := fmt.Sprintf("PUSH FAILED: the Governor was not told of the new hands step: %v", err)
+	if err := h.Tracker.CommentOnStory(ctx, bead, comment); err != nil {
+		h.report("commenting the failed push on %s failed: %v", bead, err)
+	}
+}
+
+func (h HandsAdd) report(format string, args ...any) {
+	if h.Err != nil {
+		fmt.Fprintf(h.Err, "mw hands add: "+format+"\n", args...)
+	}
 }
 
 // handsStepComment is what a step is recorded on its bead as: who runs it

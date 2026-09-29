@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -8,6 +9,8 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
+	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 )
 
 // newHandsCmd builds `mw hands`: the steps only the Governor's hands could
@@ -27,10 +30,53 @@ func newHandsCmd() *cobra.Command {
 // handsClock stamps a step mw hands add writes down. A test fixes it.
 var handsClock = time.Now
 
+// newHandsPush is the sender mw hands add pushes through: the very
+// application.PosternSend mw postern send builds, set up when a push is sent
+// so that a rig without a postern key still adds its step. A test swaps it.
+var newHandsPush = func(gateway *beads.Gateway) application.PosternSender {
+	return handsPush{gateway: gateway}
+}
+
+type handsPush struct{ gateway *beads.Gateway }
+
+func (p handsPush) Run(ctx context.Context, req application.PosternSendRequest) (string, error) {
+	keys, err := posternKeys()
+	if err != nil {
+		return "", err
+	}
+	governorKey, err := config.PosternGovernorKey()
+	if err != nil {
+		return "", err
+	}
+	floatSats, err := config.PosternFloatSats()
+	if err != nil {
+		return "", err
+	}
+	channel, err := config.PosternChannel()
+	if err != nil {
+		return "", err
+	}
+	backend, err := posternBackend(keys)
+	if err != nil {
+		return "", err
+	}
+	return application.PosternSend{
+		Postern:     backend,
+		Cipher:      posternCipher(keys),
+		Keys:        keys,
+		Tracker:     p.gateway,
+		Notes:       p.gateway,
+		GovernorKey: governorKey,
+		FloatSats:   int64(floatSats),
+		Channel:     channel,
+		Now:         posternClock,
+	}.Run(ctx, req)
+}
+
 // newHandsAddCmd builds `mw hands add`.
 func newHandsAddCmd() *cobra.Command {
 	var id, host, as, wayBack string
-	var replace bool
+	var replace, noPush bool
 
 	cmd := &cobra.Command{
 		Use:   "add <bead> --id <id> --host <host> --as user|root [--way-back '<commands>'] [--replace] -- '<commands>'",
@@ -42,7 +88,10 @@ func newHandsAddCmd() *cobra.Command {
 			"host runs it on --host, as the host's own user or, --as root, through mw-hands-root.\n\n" +
 			"The commands are one argument after --, quoted. --way-back says how to undo them. An id\n" +
 			"is used once per bead: --replace changes a step already there, which changes its hash\n" +
-			"and so voids any approval of the old one.",
+			"and so voids any approval of the old one.\n\n" +
+			"Once the step is kept, one Postern message is sent to the Governor on the bead's thread,\n" +
+			"whose tap opens Needs you. A push that fails is said on stderr and on the bead, and the\n" +
+			"step stays: mw hands add still exits 0. --no-push sends none.",
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 2 {
 				return fmt.Errorf("mw hands add takes the bead and then, after --, the commands as one quoted argument; got %d argument(s)", len(args))
@@ -59,6 +108,9 @@ func newHandsAddCmd() *cobra.Command {
 				Notes:   gateway,
 				Now:     handsClock,
 				Out:     cmd.OutOrStdout(),
+				Push:    newHandsPush(gateway),
+				NoPush:  noPush,
+				Err:     cmd.ErrOrStderr(),
 			}.Run(cmd.Context(), application.HandsAddRequest{
 				Bead:    args[0],
 				Step:    domain.HandsStep{ID: id, Host: host, As: as, Run: args[1], WayBack: wayBack},
@@ -72,6 +124,7 @@ func newHandsAddCmd() *cobra.Command {
 	cmd.Flags().StringVar(&as, "as", "", "who the step runs as: user or root (required)")
 	cmd.Flags().StringVar(&wayBack, "way-back", "", "the commands that undo the step")
 	cmd.Flags().BoolVar(&replace, "replace", false, "replace the bead's step of this id, voiding any approval of it")
+	cmd.Flags().BoolVar(&noPush, "no-push", false, "do not send the Governor a Postern push about the step")
 	for _, name := range []string{"id", "host", "as"} {
 		_ = cmd.MarkFlagRequired(name)
 	}
