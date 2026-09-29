@@ -121,6 +121,35 @@ func TestHelperRunsAnApprovedStepAndLeavesWithItsStatus(t *testing.T) {
 	}
 }
 
+// On a host reached as root, root itself runs the helper through sudo -n,
+// so the helper sees root's own environment, with sudo's SUDO_* naming root,
+// or none at all. It reads nothing of its environment: the step runs, in
+// the helper's fixed environment alone, either way.
+func TestHelperRunsTheStepWhateverSudoLeftInTheEnvironment(t *testing.T) {
+	cases := map[string]map[string]string{
+		"root through sudo -n": {"SUDO_USER": "root", "SUDO_UID": "0", "SUDO_GID": "0", "SUDO_COMMAND": "/usr/local/sbin/mw-hands-root", "HOME": "/root", "USER": "root"},
+		"no SUDO_ at all":      {"SUDO_USER": "", "SUDO_UID": "", "SUDO_GID": "", "SUDO_COMMAND": ""},
+	}
+	for name, env := range cases {
+		t.Run(name, func(t *testing.T) {
+			for key, value := range env {
+				t.Setenv(key, value)
+				if value == "" {
+					os.Unsetenv(key)
+				}
+			}
+			h := install(t)
+			code, out, errs := h.run(t, h.request(t, "env"))
+			if code != 0 {
+				t.Fatalf("expected the approved step run, got %d: %s", code, errs)
+			}
+			if strings.Contains(out, "SUDO_") || !strings.Contains(out, "PATH=/usr/bin:/bin") {
+				t.Fatalf("expected the step in the helper's fixed environment only, got %q", out)
+			}
+		})
+	}
+}
+
 // An approval runs once: a second request carrying it is refused.
 func TestHelperRefusesAnApprovalAlreadyUsed(t *testing.T) {
 	h := install(t)
