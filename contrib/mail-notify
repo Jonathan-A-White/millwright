@@ -57,6 +57,10 @@
 #      after the first, since typing one may have woken it);
 #   9. records the mail ids as announced, the postern count as last noted,
 #      and each clause's condition as fired, only after each is typed.
+#      While a wait is armed (contrib/mail-wait's stamp in the state directory
+#      is under MW_MAIL_WAIT_STALE seconds old, 180), the mail line and the
+#      postern line are the wait's to tell, whatever sits on the prompt line,
+#      and are neither typed nor recorded; the quiet alarm is typed as ever.
 # Otherwise it does nothing and the next tick tries again.
 #
 # It never types mail content, never clears an input line, and never starts a
@@ -112,6 +116,7 @@
 #                        a snapshot takes longer than this to build (see
 #                        README.md, "Telling the Mayor's window when mail
 #                        arrives")                                      (60)
+#   MW_MAIL_WAIT_STALE   seconds a wait's stamp counts as armed          (180)
 #   MW_TMUX_SOCKET       a tmux server other than the default, as `tmux -L`
 
 set -u
@@ -125,6 +130,7 @@ SNAPSHOT_TIMEOUT=${MW_MAIL_SNAPSHOT_TIMEOUT:-60}
 SNAPSHOT_EVERY=${MW_MAIL_SNAPSHOT_EVERY:-600}
 VIEW_EVERY=${MW_MAIL_VIEW_EVERY:-}
 VIEW_TIMEOUT=${MW_MAIL_VIEW_TIMEOUT:-60}
+WAIT_STALE=${MW_MAIL_WAIT_STALE:-180}
 
 # A setting that is not a whole number of seconds reads as its default.
 case $SYNC_EVERY in '' | *[!0-9]*) SYNC_EVERY=300 ;; esac
@@ -134,6 +140,7 @@ case $SNAPSHOT_EVERY in '' | *[!0-9]*) SNAPSHOT_EVERY=600 ;; esac
 # set but not a number, it reads as 30.
 case $VIEW_EVERY in '') ;; *[!0-9]*) VIEW_EVERY=30 ;; esac
 case $VIEW_TIMEOUT in '' | *[!0-9]*) VIEW_TIMEOUT=60 ;; esac
+case $WAIT_STALE in '' | *[!0-9]*) WAIT_STALE=180 ;; esac
 
 # How long a quiet alarm condition, once typed, is left untyped again: 1 h the
 # first time, then doubled on each repeat while the condition keeps holding,
@@ -382,6 +389,24 @@ if [ -r "$keyfile" ]; then
 			fi
 		fi
 	fi
+fi
+
+# A wait armed by the Mayor's harness (contrib/mail-wait, which stamps
+# $STATE/wait-armed each poll) tells the Mayor of mail and of a postern message
+# itself, whatever sits on its prompt line: while its stamp is under
+# MW_MAIL_WAIT_STALE seconds old (180), neither is typed here, nor recorded, so
+# the wait finds them still new. With no wait armed this types them as before.
+# The quiet alarm is not the wait's and is typed either way.
+wait_armed=0
+if [ -r "$STATE/wait-armed" ]; then
+	read -r beat <"$STATE/wait-armed" || beat=""
+	case $beat in '' | *[!0-9]*) beat=0 ;; esac
+	[ $((now - beat)) -lt "$WAIT_STALE" ] && wait_armed=1
+fi
+if [ "$wait_armed" -eq 1 ] && { [ -n "$new" ] || [ -n "$postern_text" ]; }; then
+	say "a wait is armed; leaving the mail and the postern message to it"
+	new=""
+	postern_text=""
 fi
 
 [ -n "$new" ] || [ -n "$postern_text" ] || [ -n "$nudge_texts" ] || exit 0
