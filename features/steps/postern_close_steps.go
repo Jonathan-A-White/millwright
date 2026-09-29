@@ -23,6 +23,8 @@ func (c *posternInboxContext) registerPosternCloseSteps(ctx *godog.ScenarioConte
 	ctx.Then(`^the postern view raises no stale need on "([^"]*)"$`, c.thePosternViewRaisesNoStaleNeed)
 	ctx.Then(`^the note "([^"]*)" reads "([^"]*)"$`, c.theNoteReads)
 	ctx.Then(`^the note "([^"]*)" is not set$`, c.theNoteIsNotSet)
+	ctx.Given(`^epic "([^"]*)" has an open, unclaimed story "([^"]*)"$`, c.epicHasAnOpenStory)
+	ctx.Then(`^nothing under epic "([^"]*)" was closed with the reason "([^"]*)"$`, c.nothingUnderEpicWasClosed)
 	ctx.Then(`^bead "([^"]*)" was closed with the reason "([^"]*)"$`, c.beadWasClosedWithTheReason)
 	ctx.Then(`^mail "([^"]*)" was sent to mayor saying "([^"]*)"$`, c.mailWasSentToMayorSaying)
 }
@@ -123,4 +125,30 @@ func (c *posternInboxContext) mailWasSentToMayorSaying(subject, words string) er
 		}
 	}
 	return fmt.Errorf("expected mail %q to mayor mentioning %q, got: %+v", subject, words, unread)
+}
+
+// epicHasAnOpenStory files an open, unclaimed story under epic: released, or
+// waiting for dispatch.
+func (c *posternInboxContext) epicHasAnOpenStory(epic, id string) error {
+	c.memory.AddStory(epic, domain.Story{ID: id, Title: "Story " + id})
+	return nil
+}
+
+// nothingUnderEpicWasClosed checks the epic and every story filed under it
+// against a close carrying reason.
+func (c *posternInboxContext) nothingUnderEpicWasClosed(epic, reason string) error {
+	detail, err := c.memory.ShowEpic(context.Background(), epic)
+	if err != nil {
+		return err
+	}
+	ids := []string{epic}
+	for _, story := range detail.Stories {
+		ids = append(ids, story.Story.ID)
+	}
+	for _, id := range ids {
+		if c.memory.CloseReason(id) == reason {
+			return fmt.Errorf("expected nothing under %s closed with the reason %q, but %s was", epic, reason, id)
+		}
+	}
+	return nil
 }

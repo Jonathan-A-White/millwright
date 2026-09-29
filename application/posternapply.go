@@ -418,9 +418,9 @@ func (i PosternInbox) applyAction(ctx context.Context, m PosternInboxMessage, ac
 // applyClose closes bead for the Governor: a story, ticket or hitl bead
 // itself; an epic or map its held children first, at any depth, then itself,
 // each with the Governor's reason. Nothing is closed when any child is
-// in_progress or claimed: the Mayor is told, naming it, and the bead is left
-// without a comment (section 13). A bead already closed, or a story someone
-// holds, is refused likewise.
+// in_progress, claimed or open and not held: the Mayor is told, naming it, and
+// the bead is left without a comment (section 13). A bead already closed, or a
+// story someone holds, is refused likewise.
 func (i PosternInbox) applyClose(ctx context.Context, m PosternInboxMessage, bead StoryDetail,
 	refuse func(string) (posternApplied, error), done func(subject, comment string) (posternApplied, error)) (posternApplied, error) {
 	if bead.Closed() {
@@ -428,12 +428,12 @@ func (i PosternInbox) applyClose(ctx context.Context, m PosternInboxMessage, bea
 	}
 	closes := []string{bead.Story.ID}
 	if bead.IsEpic {
-		held, busy, err := i.heldUnder(ctx, bead.Story.ID, map[string]bool{})
+		held, refusal, err := i.heldUnder(ctx, bead.Story.ID, map[string]bool{})
 		if err != nil {
 			return posternApplied{}, err
 		}
-		if busy != "" {
-			return refuse(fmt.Sprintf("%s is being worked", busy))
+		if refusal != "" {
+			return refuse(refusal)
 		}
 		closes = append(held, closes...)
 	} else if isClaimed(bead) {
@@ -455,9 +455,11 @@ func (i PosternInbox) applyClose(ctx context.Context, m PosternInboxMessage, bea
 	return result, nil
 }
 
-// heldUnder is the held (deferred) beads under epic, deepest first, or the
-// first bead under it that is in_progress or claimed.
-func (i PosternInbox) heldUnder(ctx context.Context, epic string, seen map[string]bool) (held []string, busy string, err error) {
+// heldUnder is the held (deferred) beads under epic, deepest first, or why
+// the close is refused: the first bead under it is in_progress or claimed, or
+// is open and not held — released work the Governor's close is not for, and
+// which beads would refuse the epic's own close for.
+func (i PosternInbox) heldUnder(ctx context.Context, epic string, seen map[string]bool) (held []string, refusal string, err error) {
 	if seen[epic] {
 		return nil, "", nil
 	}
@@ -470,18 +472,20 @@ func (i PosternInbox) heldUnder(ctx context.Context, epic string, seen map[strin
 		if child.Closed() {
 			continue
 		}
+		if isClaimed(child) {
+			return nil, child.Story.ID + " is being worked", nil
+		}
+		if !child.Held() {
+			return nil, child.Story.ID + " is open: close or hold it first", nil
+		}
 		if child.IsEpic {
-			below, busy, err := i.heldUnder(ctx, child.Story.ID, seen)
-			if err != nil || busy != "" {
-				return nil, busy, err
+			below, why, err := i.heldUnder(ctx, child.Story.ID, seen)
+			if err != nil || why != "" {
+				return nil, why, err
 			}
 			held = append(held, below...)
-		} else if isClaimed(child) {
-			return nil, child.Story.ID, nil
 		}
-		if child.Held() {
-			held = append(held, child.Story.ID)
-		}
+		held = append(held, child.Story.ID)
 	}
 	return held, "", nil
 }

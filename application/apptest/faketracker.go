@@ -1274,6 +1274,10 @@ func (f *FakeTracker) RefuseToClose(id, why string) {
 // CloseStory implements application.WorkTracker.
 func (f *FakeTracker) CloseStory(_ context.Context, id, reason string) error {
 	f.mu.Lock()
+	if open := f.openChildren(id); f.Err == nil && open > 0 {
+		f.mu.Unlock()
+		return fmt.Errorf("cannot close %s: %d open child issues", id, open)
+	}
 	if _, isStory := f.stories[id]; !isStory && f.Err == nil {
 		if _, isEpic := f.defaults[id]; isEpic {
 			// A root epic has no story entry: it reads as closed by what it says.
@@ -1298,6 +1302,18 @@ func (f *FakeTracker) CloseStory(_ context.Context, id, reason string) error {
 		s.closeReason = reason
 		return nil
 	})
+}
+
+// openChildren is how many of the stories filed under epic id are not closed,
+// the lock held by the caller: beads will not close an epic while it has any.
+func (f *FakeTracker) openChildren(id string) int {
+	open := 0
+	for _, s := range f.stories {
+		if s.detail.EpicID == id && s.detail.Status != StatusClosed {
+			open++
+		}
+	}
+	return open
 }
 
 // StaleClaims implements application.WorkTracker.

@@ -168,6 +168,18 @@ Feature: mw postern inbox --apply
     And bead "mw-act" has no comment
     And mail "Not applied: close mw-act" was sent to mayor saying "mw-act.2"
 
+  Scenario: A close tap on an epic with an open (released, unclaimed) child closes nothing and names the child
+    Given epic "mw-act" has an open, unclaimed story "mw-act.4"
+    And a postern action "close" on bead "mw-act" from "governor-pubkey-hex" with txid "tx-close-open"
+    When mw postern inbox --apply is run
+    Then bead "mw-act.1" now stands "deferred"
+    And bead "mw-act.2" now stands "deferred"
+    And bead "mw-act.4" now stands "open"
+    And bead "mw-act" now stands "open"
+    And bead "mw-act" has no comment
+    And nothing under epic "mw-act" was closed with the reason "Closed by the Governor via postern (tx-close-open)"
+    And mail "Not applied: close mw-act" was sent to mayor saying "mw-act.4"
+
   Scenario: A close tap from anyone but the Governor does nothing
     Given a postern action "close" on bead "mw-act.1" from "someone-else-pubkey-hex" with txid "tx-close-other"
     When mw postern inbox --apply is run
