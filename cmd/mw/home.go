@@ -22,7 +22,7 @@ func newHomeCmd() *cobra.Command {
 			"home file, or one that is not understood, it says the home is unknown and leaves with 0.\n\n" +
 			"--check prints nothing on success and leaves with 0 when this host is home, 1 when it is\n" +
 			"not and 2 when it cannot tell (no file, or one not understood): what to do then is for the\n" +
-			"caller to decide. It only reads: it never moves the home.",
+			"caller to decide. Both only read: `mw home move <host>` is what moves the home.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := config.Vault()
@@ -47,5 +47,6 @@ func newHomeCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&check, "check", false, "leave with 0 when this host is home, 1 when it is not, 2 when it cannot tell")
+	cmd.AddCommand(newHomeMoveCmd())
 	return cmd
 }

@@ -79,8 +79,33 @@ Which host is home is recorded in the vault: a tracked file, `home`, of one line
 last change). `mw home` prints the home, this host and whether this host is home;
 `mw home --check` says nothing and leaves with 0 when it is, 1 when it is not
 and 2 when it cannot tell (no file, or one that is not understood: the caller
-decides what that means). `mw home move <host>` is coming: today nothing writes
-the file but a person. See `features/home.feature`.
+decides what that means). `mw home move <host>` writes it (below). See
+`features/home.feature`.
+
+### mw home move
+
+```sh
+mw home move laptop --dry-run       # on the Laptop: six steps and their ways back, none run
+mw home move laptop --old-home-dead # on the Laptop: make it home, the desktop being dead
+```
+
+Run **on the host that becomes home**, by the Governor, never by the factory on its
+own. It asks whether the old home answers ssh (its `[hands_hosts]` line, 10 s): if it
+does, it stops (`old home is up: use --planned when it exists`); if it does not, it
+goes on only with `--old-home-dead`. Then, each step printed with its way back:
+beads cloned from GitHub's `refs/dolt/data` (the embedded database is set aside in a
+dated directory, never deleted; the `dolt-beads` unit is started if the host has one);
+the vault's `home` file written, committed and pushed (the fence: an old home that
+comes back stays quiet); the `postern-backend` unit started and its `/healthz` awaited
+(never `mw postern serve` here: it writes `POSTERN_ISSUER_KEY` back); mail to the Mayor
+and the vault's `bin/mayor-up`; and, last, the age of GitHub's backup and of the
+Postern data, which is what the dead home took with it. A step that fails stops the
+move and prints the ways back of what was done, last first. A move takes a minute or
+so: run it in tmux, since a dropped ssh session kills it silently. `postern_data` (the
+backend's data directory) is needed; `postern_local_url` (or `$MW_POSTERN_LOCAL_URL`)
+says where this host's backend answers when that is not `http://<host>.mw:8787`. The
+design, every step's way back and what was and was not checked is `docs/home-move.md`;
+the tests are `application/homemove_test.go` and `cmd/mw/homemove_test.go`.
 
 What this does **not** move: any other timer the old host still runs (a
 dispatcher's, another seat's), any rig only it has checked out, and anything

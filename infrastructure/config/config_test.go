@@ -1289,6 +1289,22 @@ func TestPosternDataIsAFullPathAHostMustSay(t *testing.T) {
 	}
 }
 
+func TestPosternLocalURLIsThisHostsOwnNameUnlessSaid(t *testing.T) {
+	t.Setenv(config.PosternLocalURLEnv, "")
+	writeConfig(t, "postern_backend = \"http://desktop.mw:8787\"\n")
+	if url, err := config.PosternLocalURL("laptop"); err != nil || url != "http://laptop.mw:8787" {
+		t.Fatalf("expected this host's own name, not postern_backend, got %q: %v", url, err)
+	}
+	writeConfig(t, "postern_local_url = \"http://10.88.0.2:8787/\"\n")
+	if url, err := config.PosternLocalURL("laptop"); err != nil || url != "http://10.88.0.2:8787" {
+		t.Fatalf("expected the file's url without its trailing slash, got %q: %v", url, err)
+	}
+	t.Setenv(config.PosternLocalURLEnv, "http://127.0.0.1:9000")
+	if url, err := config.PosternLocalURL("laptop"); err != nil || url != "http://127.0.0.1:9000" {
+		t.Fatalf("expected %s to win, got %q: %v", config.PosternLocalURLEnv, url, err)
+	}
+}
+
 func TestPosternWatchdogTargetIsEmptyUntilAHostSaysOne(t *testing.T) {
 	t.Setenv(config.PosternWatchdogEnv, "")
 	writeConfig(t, "")
