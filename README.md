@@ -74,6 +74,14 @@ Moving a seat's home — the Mayor's, say — to a new host:
    the vault's `CLAUDE.md` naming which one host runs `bd migrate` — every
    other clone stays on `bd bootstrap`, never `bd migrate`, forever.
 
+Which host is home is recorded in the vault: a tracked file, `home`, of one line
+(the home host's name, `desktop` or `laptop`, then the UTC time and actor of the
+last change). `mw home` prints the home, this host and whether this host is home;
+`mw home --check` says nothing and leaves with 0 when it is, 1 when it is not
+and 2 when it cannot tell (no file, or one that is not understood: the caller
+decides what that means). `mw home move <host>` is coming: today nothing writes
+the file but a person. See `features/home.feature`.
+
 What this does **not** move: any other timer the old host still runs (a
 dispatcher's, another seat's), any rig only it has checked out, and anything
 else it serves that millwright did not start. Those stay exactly where they

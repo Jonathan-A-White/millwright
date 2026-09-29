@@ -75,8 +75,14 @@ _Avoid_: Runtime, CLI, provider
 How an epic's stories are allowed to overlap: serial, parallel, or hybrid (parallel within stages, serial between them).
 
 **Host**:
-A machine that runs sessions. Today: the desktop (the factory's home, always on), the Laptop (powerful, intermittently on, extra Builders on demand) and the VPS (small, always on: the front door).
+A machine that runs sessions. Today: the desktop and the Laptop (either can be Home, the other is the Boost) and the VPS (small, always on: the front door).
 _Avoid_: Node, server, box
+
+**Home**:
+The one host, the desktop or the Laptop, that holds the beads server, the Mayor and the live Postern backend. The vault's tracked `home` file records which, with the UTC time and actor of the last change; `mw home` reads it. The VPS is never home.
+
+**Boost**:
+The host that is not home. It builds, dispatching against the home's beads server, whenever it is on, and holds nothing that must stay up.
 
 ### Economy
 
