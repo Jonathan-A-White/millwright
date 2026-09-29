@@ -38,3 +38,12 @@ Feature: mw postern view
     And the view's hands step "linger" on "mw-v.1" ran with exit 0
     When the live view is built
     Then the view's hands need on "mw-v.1" carries the step "linger" with its sha256, run with exit 0
+
+  Scenario: A verify need says what landed, that the Mayor checked it, and that the tap is optional
+    Given the view's bead "mw-v.6" under "mw-v" landed two hours ago with the Mayor's comment "Landing checked: the gate passes on main and the card reads right. Nothing else to do."
+    When the live view is built
+    Then the view's verify need on "mw-v.6" says "Landed 28 Sep 10:00 UTC: Story mw-v.6. Checked by the Mayor: the gate passes on main and the card reads right. Tap Verified if you have looked; optional, clears by itself 29 Sep 10:00 UTC."
+
+  Scenario: A verify need on a landing the Mayor has not checked says not yet
+    When the live view is built
+    Then the view's verify need on "mw-v.3" says "Landed 28 Sep 11:00 UTC: Story mw-v.3. Checked by the Mayor: not yet. Tap Verified if you have looked; optional, clears by itself 29 Sep 11:00 UTC."

@@ -573,7 +573,7 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 		if _, unverified := landedVerdict(e.detail, comments, memory, newMemory); !unverified {
 			continue
 		}
-		need := b.need(PosternNeedVerify, e, e.detail.ClosedAt, viewSummary(e.detail.Description))
+		need := b.need(PosternNeedVerify, e, e.detail.ClosedAt, verifyText(e.detail, newMemory[e.detail.Story.ID]))
 		need.Options = []string{"Verified"}
 		needs = append(needs, need)
 	}
@@ -607,6 +607,63 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 		}
 	}
 	return needs, newMemory, nil
+}
+
+// viewLandingCheckedMarker is the words the Mayor's comment on a landing he
+// has checked opens with.
+const viewLandingCheckedMarker = "Landing checked"
+
+// viewCheckLimit is the most runes of the Mayor's check a verify need quotes.
+const viewCheckLimit = 200
+
+// verifyText is the words of a verify need on the landed story d, whose
+// landed memory is mem: what landed and when, what the Mayor made of it, that
+// the tap is optional, and when the need clears by itself.
+func verifyText(d StoryDetail, mem posternSnapshotMemoryEntry) string {
+	check := mem.Check
+	if check == "" {
+		comments := make([]Comment, 0, len(mem.Comments))
+		for i := len(mem.Comments) - 1; i >= 0; i-- {
+			comments = append(comments, Comment{Text: mem.Comments[i].Text})
+		}
+		check = landingCheck(comments)
+	}
+	if check == "" {
+		check = "not yet"
+	}
+	return fmt.Sprintf("Landed %s: %s. Checked by the Mayor: %s. Tap Verified if you have looked; optional, clears by itself %s.",
+		viewClock(d.ClosedAt), strings.TrimRight(d.Story.Title, ". "), check,
+		viewClock(d.ClosedAt.Add(PosternViewVerifyWindow)))
+}
+
+// viewClock is t as a phone card writes a moment, in UTC.
+func viewClock(t time.Time) string { return t.UTC().Format("2 Jan 15:04 UTC") }
+
+// landingCheck is the first sentence after "Landing checked" in the newest of
+// comments (oldest first) that carries those words, without its closing
+// full stop and cut to viewCheckLimit runes; "" when no comment carries them
+// or the words are all it says.
+func landingCheck(comments []Comment) string {
+	for i := len(comments) - 1; i >= 0; i-- {
+		_, after, found := strings.Cut(comments[i].Text, viewLandingCheckedMarker)
+		if !found {
+			continue
+		}
+		after = strings.TrimLeft(after, " \t\r\n:;,.-\u2013\u2014")
+		end := len(after)
+		for j := 0; j < len(after); j++ {
+			if after[j] == '\n' || (after[j] == '.' && (j+1 == len(after) || strings.ContainsRune(" \t\r\n", rune(after[j+1])))) {
+				end = j
+				break
+			}
+		}
+		sentence := strings.Join(strings.Fields(after[:end]), " ")
+		if len([]rune(sentence)) > viewCheckLimit {
+			sentence = string([]rune(sentence)[:viewCheckLimit]) + "…"
+		}
+		return sentence
+	}
+	return ""
 }
 
 // approve is the approve need of a live epic with stories held for the
