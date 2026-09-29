@@ -180,6 +180,9 @@ type PosternView struct {
 
 	// Out is where Run says what it wrote. A nil Out prints nothing.
 	Out io.Writer
+	// Err is where a failure to write the landed memory is said; the view is
+	// built regardless. A nil Err says nothing.
+	Err io.Writer
 }
 
 // Run builds the view, seals it to GovernorKey and writes it through File,
@@ -312,7 +315,7 @@ func (v PosternView) Build(ctx context.Context) (PosternViewDoc, error) {
 		return PosternViewDoc{}, err
 	}
 	if err := saveLandedMemory(ctx, v.Notes, memory, newMemory); err != nil {
-		return PosternViewDoc{}, err
+		sayLandedMemoryFailed(v.Err, err)
 	}
 
 	hosts, hostNeeds := v.hosts(b, notes)
