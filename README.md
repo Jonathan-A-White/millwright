@@ -1041,8 +1041,12 @@ for the mill key and answers each grist once, sealed back to its sender with
 The grind is `grinds/<kind>.json` at the app rig's local `main`, read with its
 instructions and schema at that commit, and the commit is stamped on the
 answer. A grind takes one of the host's `cap` slots, first come first served.
-When no slot is free the grist waits for the next pass. `mw dispatch` counts a
-running grind as one of its sessions. After answering, the grist's photos are
+When no slot is free the grist waits for the next pass: the next grist's hook,
+or the next `mw dispatch` tick, which on the host that is home (`mw home`) and
+where the config file has a `[grist]` table runs one pass after its claims. A
+dispatch holds the grind lock while it claims, so a grind and a claim starting
+together never take the same slot. `mw dispatch` counts a running grind as one
+of its sessions. After answering, the grist's photos are
 deleted from the backend. Each grist handled adds one line to
 `grinds.jsonl` in `grist_state_dir` (default `~/.local/state/mw/grist`): time,
 txid, app, kind, sender fingerprint, model, status, reason, Fuel, seconds and

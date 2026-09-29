@@ -1413,3 +1413,30 @@ func TestGristAppsMustBeFullPaths(t *testing.T) {
 		t.Fatalf("expected no apps and no error, got %v %v", apps, err)
 	}
 }
+
+// A host runs the mill only where the config file has a [grist] table, an
+// empty one included; [grist-apps] alone is not it.
+func TestGristConfiguredIsATableInTheConfigFile(t *testing.T) {
+	for name, text := range map[string]string{
+		"no file":       "",
+		"no table":      "host = \"laptop\"\n",
+		"only the apps": "[grist-apps]\ncairn = \"/rigs/cairn\"\n",
+		"a comment":     "# [grist]\n",
+	} {
+		writeConfig(t, text)
+		if got, err := config.GristConfigured(); err != nil || got {
+			t.Errorf("%s: expected [grist] not configured, got %v %v", name, got, err)
+		}
+	}
+	for name, text := range map[string]string{
+		"empty":   "host = \"laptop\"\n[grist]\n",
+		"filled":  "[grist]\nmodels = \"sonnet\"\n[grist-apps]\n",
+		"spaced":  "  [ grist ]  \n",
+		"trailer": "[grist]",
+	} {
+		writeConfig(t, text)
+		if got, err := config.GristConfigured(); err != nil || !got {
+			t.Errorf("%s: expected [grist] configured, got %v %v", name, got, err)
+		}
+	}
+}

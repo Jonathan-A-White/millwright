@@ -1,6 +1,8 @@
 package main
 
 import (
+	"io"
+
 	"github.com/spf13/cobra"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -78,68 +80,79 @@ func newGristGrindCmd() *cobra.Command {
 			"unknown, or the grist is past a grind's or the factory's limits (config [grist]); otherwise\n" +
 			"ground in one short Claude Code session with no seat, answered or failed. A grind takes one\n" +
 			"of this host's cap, first come first served: with none free, the grist waits for the next\n" +
-			"pass. Each grist handled is one line of grinds.jsonl in grist_state_dir, and its photos are\n" +
+			"pass, or for the next mw dispatch tick on the host that is home. Each grist handled is one line of grinds.jsonl in grist_state_dir, and its photos are\n" +
 			"deleted from the backend once it is answered. The backend's POSTERN_ON_GRIST runs it.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			dir, err := config.Vault()
+			mill, err := newMill(cmd.OutOrStdout())
 			if err != nil {
 				return err
 			}
-			host, err := config.Host()
-			if err != nil {
-				return err
-			}
-			atOnce, err := config.Cap()
-			if err != nil {
-				return err
-			}
-			keys, err := gristKeys()
-			if err != nil {
-				return err
-			}
-			backend, err := posternBackend(keys)
-			if err != nil {
-				return err
-			}
-			stateDir, err := config.GristStateDir()
-			if err != nil {
-				return err
-			}
-			apps, err := config.GristApps()
-			if err != nil {
-				return err
-			}
-			ceilings, err := config.Grist()
-			if err != nil {
-				return err
-			}
-			governorKey, err := config.PosternGovernorKey()
-			if err != nil {
-				return err
-			}
-			_, err = application.GristGrind{
-				Postern:     backend,
-				Cipher:      postern.NewCipher(keys),
-				Keys:        keys,
-				State:       grist.New(stateDir),
-				Grinds:      rig.NewGrinds(),
-				Grinder:     claude.NewGrinder(),
-				Tracker:     mwGateway(dir, host),
-				Pass:        hostlock.NewTry(stateDir, hostlock.PassFile),
-				Grinding:    hostlock.NewTry(stateDir, hostlock.GrindFile),
-				Host:        host,
-				Cap:         atOnce,
-				Apps:        apps,
-				GovernorKey: governorKey,
-				Ceilings: application.GristCeilings{
-					Models: ceilings.Models, MaxAttachments: ceilings.MaxAttachments,
-					MaxAttachmentBytes: ceilings.MaxAttachmentBytes, DailyLimit: ceilings.DailyLimit,
-					Timeout: ceilings.Timeout,
-				},
-				Out: cmd.OutOrStdout(),
-			}.Run(cmd.Context())
+			_, err = mill.Run(cmd.Context())
 			return err
 		},
 	}
+}
+
+// newMill is the mill as this host is configured to run it: what
+// `mw grist grind` runs, and what the dispatch tick runs on the host that is
+// home. It prints its report to out.
+func newMill(out io.Writer) (application.GristGrind, error) {
+	dir, err := config.Vault()
+	if err != nil {
+		return application.GristGrind{}, err
+	}
+	host, err := config.Host()
+	if err != nil {
+		return application.GristGrind{}, err
+	}
+	atOnce, err := config.Cap()
+	if err != nil {
+		return application.GristGrind{}, err
+	}
+	keys, err := gristKeys()
+	if err != nil {
+		return application.GristGrind{}, err
+	}
+	backend, err := posternBackend(keys)
+	if err != nil {
+		return application.GristGrind{}, err
+	}
+	stateDir, err := config.GristStateDir()
+	if err != nil {
+		return application.GristGrind{}, err
+	}
+	apps, err := config.GristApps()
+	if err != nil {
+		return application.GristGrind{}, err
+	}
+	ceilings, err := config.Grist()
+	if err != nil {
+		return application.GristGrind{}, err
+	}
+	governorKey, err := config.PosternGovernorKey()
+	if err != nil {
+		return application.GristGrind{}, err
+	}
+	return application.GristGrind{
+		Postern:     backend,
+		Cipher:      postern.NewCipher(keys),
+		Keys:        keys,
+		State:       grist.New(stateDir),
+		Grinds:      rig.NewGrinds(),
+		Grinder:     claude.NewGrinder(),
+		Tracker:     mwGateway(dir, host),
+		Pass:        hostlock.NewTry(stateDir, hostlock.PassFile),
+		Grinding:    hostlock.NewTry(stateDir, hostlock.GrindFile),
+		Host:        host,
+		Cap:         atOnce,
+		Apps:        apps,
+		GovernorKey: governorKey,
+		Ceilings: application.GristCeilings{
+			Models: ceilings.Models, MaxAttachments: ceilings.MaxAttachments,
+			MaxAttachmentBytes: ceilings.MaxAttachmentBytes, DailyLimit: ceilings.DailyLimit,
+			Timeout: ceilings.Timeout,
+		},
+		Out: out,
+	}, nil
 }

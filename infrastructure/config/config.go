@@ -507,6 +507,33 @@ func GristStateDir() (string, error) {
 	return fullPathSetting("grist_state_dir", GristStateDirEnv, DefaultGristStateDir, "the mill's state directory")
 }
 
+// GristConfigured reports whether ~/.config/mw/config.toml has a `[grist]`
+// table, even an empty one: a host that has one runs the mill, and a host
+// that has none does not.
+func GristConfigured() (bool, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	file, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("reading %s: %w", path, err)
+	}
+	defer file.Close()
+	lines := bufio.NewScanner(file)
+	for lines.Scan() {
+		line := strings.TrimSpace(lines.Text())
+		if strings.HasPrefix(line, "[") && strings.TrimSpace(strings.Trim(line, "[]")) == GristTable {
+			return true, nil
+		}
+	}
+	return false, lines.Err()
+}
+
 // GristSettings are the factory's ceilings above every grind.
 type GristSettings struct {
 	Models             []string

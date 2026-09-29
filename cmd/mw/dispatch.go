@@ -129,6 +129,10 @@ func newDispatchCmd() *cobra.Command {
 			"Only one real dispatch runs on a host at a time: one started while another holds the\n" +
 			"host's dispatch lock (~/.local/state/mw-dispatch/lock) prints \"another mw dispatch is running\n" +
 			"here; nothing done\" and leaves with 0.\n\n" +
+			"On the host that is home (mw home), and where the config file has a [grist] table, it then\n" +
+			"runs one pass of the grist mill (mw grist grind), so a grist left waiting for a slot is\n" +
+			"answered by this tick. While it claims it holds the grind lock, so a grind starting in the\n" +
+			"same tick cannot take the slot it takes.\n\n" +
 			"--dry-run prints what it would start and writes nothing: nothing is synced, claimed, cut,\n" +
 			"poured or started.",
 		Args: cobra.NoArgs,
@@ -202,8 +206,21 @@ func newDispatchCmd() *cobra.Command {
 				Rigs:        rigs,
 				Grinding:    gristGrindLock(),
 				Exclusive:   hostDispatchLock(),
+				Home:        files,
 				DryRun:      dryRun,
 				Out:         cmd.OutOrStdout(),
+			}
+			// The mill answers what it left waiting, on the host that is home and
+			// where a [grist] table says so. A mill that cannot be set up costs
+			// the tick its grist pass and nothing else.
+			if configured, err := config.GristConfigured(); err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "no grist pass this tick: %v\n", err)
+			} else if configured && !dryRun {
+				if mill, err := newMill(cmd.OutOrStdout()); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "no grist pass this tick: %v\n", err)
+				} else {
+					dispatch.Mill = mill
+				}
 			}
 			// A rehearsal is not a run: it leaves nothing in the log.
 			if !dryRun {
