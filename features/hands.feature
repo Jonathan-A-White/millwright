@@ -18,6 +18,28 @@ Feature: mw hands
     And bead "mw-h.1"'s last comment is the HANDS STEP "linger" on "desktop" as "root"
     And bead "mw-h.1" carries the label "hitl"
 
+  Scenario: A new step sends the Governor one push that opens Needs you
+    Given a working push to the Governor
+    When the Mayor adds the step "linger" to "mw-h.1" on "desktop" as "root" running "loginctl enable-linger jwhite"
+    Then adding the step succeeds
+    And exactly one push was sent, on the thread of "mw-h.1", saying "New hands step on mw-h.1: For his hands"
+    And that push's class opens Needs you
+
+  Scenario: A push that fails is reported, and the step is still kept
+    Given a failing push to the Governor
+    When the Mayor adds the step "linger" to "mw-h.1" on "desktop" as "root" running "loginctl enable-linger jwhite"
+    Then adding the step succeeds
+    And bead "mw-h.1" keeps the step "linger" running "loginctl enable-linger jwhite"
+    And the failed push is reported on stderr
+    And bead "mw-h.1"'s last comment says the push failed
+
+  Scenario: --no-push sends nothing
+    Given a working push to the Governor
+    When the Mayor adds the step "linger" to "mw-h.1" on "desktop" as "root" running "loginctl enable-linger jwhite" with --no-push
+    Then adding the step succeeds
+    And no push was sent
+    And bead "mw-h.1" keeps the step "linger" running "loginctl enable-linger jwhite"
+
   Scenario: A second step of the same id is refused unless it replaces the first
     Given the Mayor added the step "linger" to "mw-h.1" on "desktop" as "root" running "loginctl enable-linger jwhite"
     When the Mayor adds the step "linger" to "mw-h.1" on "desktop" as "root" running "loginctl enable-linger other"
