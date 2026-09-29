@@ -41,7 +41,12 @@ type PosternKeyFile interface {
 	// payload as the postern's on-chain record; output 1 paying 1 satoshi to
 	// the postern anchor; output 2 the change back to this key's own address
 	// — and reports it signed, as raw transaction hex ready to broadcast.
+	// Sign leaves out the outputs MarkSpent has remembered for the last two
+	// hours, and spends an output listed twice once.
 	Sign(utxos []PosternUtxo, payload []byte) (rawtx string, err error)
+	// MarkSpent remembers that a send just spent utxos, for two hours, so
+	// that Sign skips them while the block explorer still lists them.
+	MarkSpent(utxos []PosternUtxo) error
 }
 
 // PosternKeyInit makes the Mayor's postern key, once. It refuses to
@@ -1408,7 +1413,14 @@ func (s PosternSend) sendOne(ctx context.Context, channel, class, from, address,
 	if err != nil {
 		return "", err
 	}
-	return s.Postern.Broadcast(ctx, rawtx)
+	txid, err := s.Postern.Broadcast(ctx, rawtx)
+	if err != nil {
+		return "", err
+	}
+	if err := s.Keys.MarkSpent(utxos); err != nil && s.Out != nil {
+		fmt.Fprintf(s.Out, "warning: the record was broadcast, but mw could not remember what it spent, so a send within the next block may fail: %v\n", err)
+	}
+	return txid, nil
 }
 
 // channel is how this send travels: Channel, direct when empty; anything

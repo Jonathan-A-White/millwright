@@ -88,6 +88,8 @@ func InitializePosternSendScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" threaded on bead "([^"]*)" and on topic "([^"]*)" is run$`, c.mwPosternSendThreadedOnBeadAndTopicIsRun)
 	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" for bead "([^"]*)" recommending "([^"]*)" with options "([^"]*)" threaded on bead "([^"]*)" is run$`, c.mwPosternSendAsksAQuestionThreadedOnBeadIsRun)
 
+	ctx.Given(`^the backend still lists what that send spent, and its change$`, c.theBackendStillListsWhatThatSendSpentAndItsChange)
+	ctx.Then(`^the second broadcast does not spend what the first one spent$`, c.theSecondBroadcastDoesNotSpendWhatTheFirstSpent)
 	ctx.Then(`^sending succeeds$`, c.itSucceeds)
 	ctx.Then(`^it prints "([^"]*)"$`, c.itPrints)
 	ctx.Then(`^it is refused, naming the excess of (\d+)$`, c.itIsRefusedNamingTheExcessOf)
@@ -524,6 +526,48 @@ func (c *posternSendContext) itIsRefusedSayingThreadRefusedWithQuestion() error 
 	}
 	if !strings.Contains(c.err.Error(), "--thread") || !strings.Contains(c.err.Error(), "decision-needed question") {
 		return fmt.Errorf("expected the refusal to say --thread is refused with a decision-needed question, got: %q", c.err.Error())
+	}
+	return nil
+}
+
+// theBackendStillListsWhatThatSendSpentAndItsChange makes the fake backend
+// lag the way WhatsOnChain does within a block: the utxo the last send spent
+// is still listed, beside the unconfirmed change it made.
+func (c *posternSendContext) theBackendStillListsWhatThatSendSpentAndItsChange() error {
+	sent := c.backend.Broadcasts()
+	if len(sent) == 0 {
+		return fmt.Errorf("expected a send before the backend lags, got none")
+	}
+	tx, err := transaction.NewTransactionFromHex(sent[len(sent)-1])
+	if err != nil {
+		return fmt.Errorf("parsing the broadcast transaction: %w", err)
+	}
+	c.backend.SetUtxos(c.address,
+		application.PosternUtxo{Txid: posternSendDummyTxid, Vout: 0, Satoshis: 5000},
+		application.PosternUtxo{Txid: tx.TxID().String(), Vout: 2, Satoshis: int64(tx.Outputs[2].Satoshis)},
+	)
+	return nil
+}
+
+func (c *posternSendContext) theSecondBroadcastDoesNotSpendWhatTheFirstSpent() error {
+	sent := c.backend.Broadcasts()
+	if len(sent) != 2 {
+		return fmt.Errorf("expected two broadcasts, got %d", len(sent))
+	}
+	first, err := transaction.NewTransactionFromHex(sent[0])
+	if err != nil {
+		return err
+	}
+	second, err := transaction.NewTransactionFromHex(sent[1])
+	if err != nil {
+		return err
+	}
+	for _, spentByFirst := range first.Inputs {
+		for _, in := range second.Inputs {
+			if in.SourceTXID.String() == spentByFirst.SourceTXID.String() && in.SourceTxOutIndex == spentByFirst.SourceTxOutIndex {
+				return fmt.Errorf("the second broadcast spends %s:%d again", in.SourceTXID, in.SourceTxOutIndex)
+			}
+		}
 	}
 	return nil
 }

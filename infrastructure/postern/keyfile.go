@@ -11,7 +11,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	ec "github.com/bsv-blockchain/go-sdk/primitives/ec"
 	"github.com/bsv-blockchain/go-sdk/script"
@@ -21,14 +23,26 @@ import (
 
 var _ application.PosternKeyFile = (*KeyFile)(nil)
 
+// spentMemory is how long a send remembers the outputs it spent: a block
+// (about ten minutes on testnet) surely confirms the spend within it, after
+// which the block explorer stops listing them.
+const spentMemory = 2 * time.Hour
+
 // KeyFile is the postern key file on this host, at path.
 type KeyFile struct {
 	path string
+	now  func() time.Time
 }
 
 // New is the postern key file at path.
 func New(path string) *KeyFile {
-	return &KeyFile{path: path}
+	return &KeyFile{path: path, now: time.Now}
+}
+
+// WithClock reads the time from now, to remember spent outputs against.
+func (k *KeyFile) WithClock(now func() time.Time) *KeyFile {
+	k.now = now
+	return k
 }
 
 // Path reports where the key file is.
@@ -90,17 +104,83 @@ func (k *KeyFile) PrivateKeyWIF() (string, error) {
 
 // Sign builds a record transaction, postern's docs/protocol.md section 4
 // (buildRecordTransaction), and reports it signed, as raw transaction hex
-// ready to broadcast.
+// ready to broadcast. It leaves out the outputs MarkSpent remembers a send
+// spent in the last two hours, which the block explorer may still list.
 func (k *KeyFile) Sign(utxos []application.PosternUtxo, payload []byte) (string, error) {
 	priv, err := k.privateKey()
 	if err != nil {
 		return "", err
 	}
-	tx, err := buildRecordTransaction(priv, utxos, payload)
+	spent, err := k.readSpent()
+	if err != nil {
+		return "", err
+	}
+	unspent := make([]application.PosternUtxo, 0, len(utxos))
+	for _, u := range utxos {
+		if _, ok := spent[outpoint(u)]; !ok {
+			unspent = append(unspent, u)
+		}
+	}
+	tx, err := buildRecordTransaction(priv, unspent, payload)
 	if err != nil {
 		return "", err
 	}
 	return tx.Hex(), nil
+}
+
+// spentPath is the file that remembers what this key's sends spent: beside
+// the key file, so it is host-local and outside the vault and its backups too.
+func (k *KeyFile) spentPath() string { return k.path + ".spent" }
+
+// readSpent reads the outpoints a send spent in the last two hours, each
+// with when it was spent (unix seconds). No file is none spent.
+func (k *KeyFile) readSpent() (map[string]int64, error) {
+	spent := map[string]int64{}
+	raw, err := os.ReadFile(k.spentPath())
+	if os.IsNotExist(err) {
+		return spent, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading the outputs this key spent at %s: %w", k.spentPath(), err)
+	}
+	cutoff := k.now().Add(-spentMemory).Unix()
+	for _, line := range strings.Split(string(raw), "\n") {
+		at, point, ok := strings.Cut(strings.TrimSpace(line), " ")
+		when, perr := strconv.ParseInt(at, 10, 64)
+		if !ok || perr != nil || when <= cutoff {
+			continue
+		}
+		spent[point] = when
+	}
+	return spent, nil
+}
+
+// MarkSpent remembers that a send just spent utxos (but a 1-satoshi one,
+// which Sign never spends), so that Sign leaves them out for the next two
+// hours, while the block explorer may still list them. It forgets the ones
+// older than that.
+func (k *KeyFile) MarkSpent(utxos []application.PosternUtxo) error {
+	spent, err := k.readSpent()
+	if err != nil {
+		return err
+	}
+	now := k.now().Unix()
+	for _, u := range utxos {
+		if u.Satoshis != 1 {
+			spent[outpoint(u)] = now
+		}
+	}
+	var out strings.Builder
+	for point, when := range spent {
+		fmt.Fprintf(&out, "%d %s\n", when, point)
+	}
+	if err := os.MkdirAll(filepath.Dir(k.spentPath()), 0o700); err != nil {
+		return fmt.Errorf("making the directory for the outputs this key spent at %s: %w", k.spentPath(), err)
+	}
+	if err := os.WriteFile(k.spentPath(), []byte(out.String()), 0o600); err != nil {
+		return fmt.Errorf("writing the outputs this key spent to %s: %w", k.spentPath(), err)
+	}
+	return nil
 }
 
 // SignNonce signs nonce with the postern key, for the Authorization header

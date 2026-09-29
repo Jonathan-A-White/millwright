@@ -20,12 +20,18 @@ const recordFeeRateSatPerKB = 1
 // anchorSatoshis is what every record transaction pays the anchor.
 const anchorSatoshis = 1
 
+// outpoint is u's txid:vout, the key a spent output is known by.
+func outpoint(u application.PosternUtxo) string {
+	return fmt.Sprintf("%s:%d", u.Txid, u.Vout)
+}
+
 // buildRecordTransaction builds and signs a record transaction the way
 // postern's src/services/send.ts does (docs/protocol.md section 4): one P2PKH
 // input per utxo of priv's own but a 1-satoshi one (that is a token, not fee
 // money); output 0 the record carrying payload, 0 satoshis; output 1 one
 // satoshi to AnchorAddress; output 2 the change back to priv's own address,
-// the fee taken at 1 sat/kB.
+// the fee taken at 1 sat/kB. An outpoint listed twice is spent once: the
+// listing lists one twice while a block confirms it.
 func buildRecordTransaction(priv *ec.PrivateKey, utxos []application.PosternUtxo, payload []byte) (*transaction.Transaction, error) {
 	own, err := script.NewAddressFromPublicKey(priv.PubKey(), false)
 	if err != nil {
@@ -53,10 +59,12 @@ func buildRecordTransaction(priv *ec.PrivateKey, utxos []application.PosternUtxo
 	}
 
 	tx := transaction.NewTransaction()
+	seen := map[string]bool{}
 	for _, u := range utxos {
-		if u.Satoshis == 1 {
+		if u.Satoshis == 1 || seen[outpoint(u)] {
 			continue
 		}
+		seen[outpoint(u)] = true
 		if err := tx.AddInputFrom(u.Txid, uint32(u.Vout), ownLock.String(), uint64(u.Satoshis), unlocker); err != nil {
 			return nil, fmt.Errorf("adding %s:%d as an input: %w", u.Txid, u.Vout, err)
 		}

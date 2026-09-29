@@ -27,6 +27,8 @@ func (k stubPosternKeys) Sign(_ []application.PosternUtxo, _ []byte) (string, er
 	return "", nil
 }
 
+func (k stubPosternKeys) MarkSpent(_ []application.PosternUtxo) error { return nil }
+
 const (
 	releaseTapInboxPubKey = "inbox-pubkey-hex"
 	releaseTapGovernorKey = "governor-pubkey-hex"
