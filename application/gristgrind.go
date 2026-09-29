@@ -164,15 +164,16 @@ func shortTxid(txid string) string {
 
 // gristWork is one grist on its way to an answer.
 type gristWork struct {
-	record  PosternRecord
-	to      string // who the answer is sealed to
-	sender  string // their fingerprint
-	plain   GristPlaintext
-	grind   GrindFile
-	commit  string
-	system  string
-	schema  string
-	foreign map[string]bool // photos proven sealed by someone else: never deleted
+	record   PosternRecord
+	to       string // who the answer is sealed to
+	sender   string // their fingerprint
+	plain    GristPlaintext
+	grind    GrindFile
+	commit   string
+	system   string
+	schema   string
+	verified bool            // the backend's signer is the key that sealed the grist
+	sealed   map[string]bool // photos (lower-case hash) the pass proved w.to sealed: the only ones it deletes
 
 	status, reason string
 	answer         json.RawMessage
@@ -279,7 +280,7 @@ func (g GristGrind) keepCursor(ctx context.Context, cursor, next int64, report *
 
 // one answers one grist, or reports that it waits for a slot.
 func (g GristGrind) one(ctx context.Context, r PosternRecord, privKey, millKey string, lines []GrindLine, report *GristReport) (GrindLine, bool, error) {
-	w := &gristWork{record: r, started: g.now(), foreign: map[string]bool{}}
+	w := &gristWork{record: r, started: g.now(), sealed: map[string]bool{}}
 	g.judge(ctx, w, privKey, lines)
 	if w.status == "" {
 		release, why, err := g.slot(ctx)
@@ -294,7 +295,7 @@ func (g GristGrind) one(ctx context.Context, r PosternRecord, privKey, millKey s
 		g.grindOne(ctx, w, privKey)
 		release()
 	}
-	line, err := g.answer(ctx, w, millKey, report)
+	line, err := g.answer(ctx, w, privKey, millKey, report)
 	return line, false, err
 }
 
@@ -303,7 +304,13 @@ func (g GristGrind) one(ctx context.Context, r PosternRecord, privKey, millKey s
 // unsettled is ready to grind.
 func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lines []GrindLine) {
 	r := w.record
-	w.to, w.sender = r.From, KeyFingerprint(r.From)
+	// The payload's own "from" is anyone's to write, so it is only where an
+	// answer would go; an unopened grist is counted against the key the
+	// backend proved signed it, or against nobody.
+	w.to = r.From
+	if r.Signer != "" {
+		w.sender = KeyFingerprint(r.Signer)
+	}
 	text, envelopeFrom, err := g.Cipher.Decrypt(privKey, r.Ciphertext)
 	if err != nil {
 		w.settle(GristRefused, GristReasonUnopened)
@@ -311,7 +318,8 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 	}
 	// The answer goes to whoever sealed the grist: only they can read it.
 	w.to, w.sender = envelopeFrom, KeyFingerprint(envelopeFrom)
-	if _, verified, _ := posternVerifySender(envelopeFrom, r.From, r.Signer); !verified {
+	_, w.verified, _ = posternVerifySender(envelopeFrom, r.From, r.Signer)
+	if !w.verified {
 		w.settle(GristRefused, GristReasonUnproven)
 		return
 	}
@@ -566,10 +574,10 @@ func (g GristGrind) openPhotos(ctx context.Context, w *gristWork, privKey, dir s
 			return nil
 		}
 		if sealedBy != w.to {
-			w.foreign[a.Hash] = true
 			w.settle(GristRefused, GristReasonPhotoForged)
 			return nil
 		}
+		w.sealed[strings.ToLower(a.Hash)] = true
 		if int64(len(plain)) > limit {
 			w.settle(GristRefused, GristReasonTooLarge)
 			return nil
@@ -656,7 +664,7 @@ func gristPrompt(plain GristPlaintext, photos []string, tag string) string {
 // from the backend, and records the line. An answer the backend will not
 // take is kept for the next pass; only a record that cannot be written stops
 // the pass.
-func (g GristGrind) answer(ctx context.Context, w *gristWork, millKey string, report *GristReport) (GrindLine, error) {
+func (g GristGrind) answer(ctx context.Context, w *gristWork, privKey, millKey string, report *GristReport) (GrindLine, error) {
 	name := w.plain.Grist
 	body := GristAnswer{
 		Re: w.record.Txid, Status: w.status, Reason: w.reason, Answer: w.answer,
@@ -665,12 +673,7 @@ func (g GristGrind) answer(ctx context.Context, w *gristWork, millKey string, re
 	if w.status == GristAnswered {
 		body.Reason = ""
 	}
-	blobs := make([]string, 0, len(w.plain.Attachments))
-	for _, a := range w.plain.Attachments {
-		if gristBlobHash.MatchString(a.Hash) && !w.foreign[a.Hash] {
-			blobs = append(blobs, strings.ToLower(a.Hash))
-		}
-	}
+	blobs := g.provenBlobs(ctx, w, privKey)
 	delivered, err := g.deliver(ctx, millKey, w.to, body, blobs)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the answer to %s could not be sent: %v", shortTxid(w.record.Txid), err))
@@ -703,6 +706,47 @@ func (g GristGrind) answer(ctx context.Context, w *gristWork, millKey string, re
 	}
 	report.Grist = append(report.Grist, GristHandled{Txid: w.record.Txid, Name: name, Status: w.status, Reason: w.reason, Delivered: delivered})
 	return line, nil
+}
+
+// gristProofMax is the most photos a refused grist's sender is asked to
+// prove it sealed: past it, the rest are left on the backend.
+const gristProofMax = 16
+
+// provenBlobs is the photos of w the pass has proved w.to sealed, and so may
+// delete. A grist refused before its photos were opened has its photos looked
+// at now, when its sender was verified: a hash the grist merely names may be
+// someone else's blob, and is never deleted for it.
+func (g GristGrind) provenBlobs(ctx context.Context, w *gristWork, privKey string) []string {
+	blobs := make([]string, 0, len(w.plain.Attachments))
+	for i, a := range w.plain.Attachments {
+		hash := strings.ToLower(a.Hash)
+		if !gristBlobHash.MatchString(a.Hash) {
+			continue
+		}
+		if !w.sealed[hash] && w.verified && i < gristProofMax {
+			g.proveBlob(ctx, w, privKey, a.Hash)
+		}
+		if w.sealed[hash] {
+			blobs = append(blobs, hash)
+		}
+	}
+	return blobs
+}
+
+// proveBlob marks the blob sealed when it is the blob announced and w.to
+// sealed it.
+func (g GristGrind) proveBlob(ctx context.Context, w *gristWork, privKey, hash string) {
+	raw, err := g.Postern.Blob(ctx, hash)
+	if err != nil {
+		return
+	}
+	sum := sha256.Sum256(raw)
+	if !strings.EqualFold(hex.EncodeToString(sum[:]), hash) {
+		return
+	}
+	if _, sealedBy, err := g.Cipher.Decrypt(privKey, base64.StdEncoding.EncodeToString(raw)); err == nil && sealedBy == w.to {
+		w.sealed[strings.ToLower(hash)] = true
+	}
 }
 
 // deliver seals body from the mill key to the key to and hands it to the

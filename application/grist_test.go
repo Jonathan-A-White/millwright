@@ -317,3 +317,122 @@ func TestGristGrindRefusesAGrindItCannotTrust(t *testing.T) {
 		})
 	}
 }
+
+const (
+	gristPhoneKey    = "02466d7fcae563e5cb09a0d1870bb580344804617879a14949cf22285f1bae3f27"
+	gristStrangerKey = "032c0b7cf95324a07d05398b240174dc0c2be444d96b159aa6c7f7b1e668680991"
+)
+
+// A grist the mill cannot open, whose payload claims somebody else's key as
+// its sender, is not counted against that somebody: the payload's own "from"
+// is anyone's to write. It is counted against the key the backend proved
+// signed it, or against nobody when the backend proved none.
+func TestGristGrindDoesNotCountAnUnopenableGristAgainstItsClaimedSender(t *testing.T) {
+	for name, signer := range map[string]string{"a proven signer": gristStrangerKey, "no proven signer": ""} {
+		t.Run(name, func(t *testing.T) {
+			mill, backend, grinder := aSmallMill(t)
+			mill.Ceilings = application.GristCeilings{DailyLimit: 2}
+			grinder.Result = application.SessionResult{Subtype: "success", Answer: json.RawMessage(`{"items":[],"placeName":"x"}`)}
+			records, _ := backend.Messages(context.Background(), 0)
+			// After the phone's first grist, junk claiming its key, then a second grist of its own
+			// (its photo is gone by then, which fails it: only a refusal is the limit).
+			backend.AddRecord(application.PosternRecord{Txid: "direct:junk", Class: application.GristClass, From: gristPhoneKey,
+				To: mustMillKey(t, mill), Signer: signer, Ciphertext: "not a ciphertext"})
+			second := records[0]
+			second.Txid, second.Seq = "direct:g3", 0
+			backend.AddRecord(second)
+
+			if _, err := mill.Run(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			lines, _ := mill.State.Lines(context.Background())
+			if len(lines) != 3 || lines[1].Txid != "direct:junk" || lines[1].Status != application.GristRefused {
+				t.Fatalf("expected the junk refused second, got %+v", lines)
+			}
+			want := ""
+			if signer != "" {
+				want = application.KeyFingerprint(signer)
+			}
+			if lines[1].Sender != want {
+				t.Errorf("the junk was counted against %q, want %q", lines[1].Sender, want)
+			}
+			if lines[2].Status == application.GristRefused {
+				t.Fatalf("the phone's own second grist was refused after junk claiming its key: %+v", lines[2])
+			}
+		})
+	}
+}
+
+func mustMillKey(t *testing.T, mill application.GristGrind) string {
+	t.Helper()
+	key, _, err := mill.Keys.PublicKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return key
+}
+
+// aGristNaming is a grist from sender, sealed with cipher's identity, that
+// names the blob hash as its one photo, added to backend as txid.
+func aGristNaming(t *testing.T, mill application.GristGrind, backend *apptest.FakePostern, txid, claimedFrom string, sealer *apptest.FakeCipher, signerApps []string, hash string, size int64) {
+	t.Helper()
+	plain, _ := json.Marshal(application.GristPlaintext{
+		Grist: application.GristName{App: "cairn", Kind: "sweep", V: "1.1"}, Input: json.RawMessage(`{}`),
+		Attachments: []application.PosternAttachment{{Hash: hash, Size: size, Mime: "image/webp"}},
+	})
+	millKey := mustMillKey(t, mill)
+	ct, _ := sealer.Encrypt(millKey, string(plain))
+	backend.AddRecord(application.PosternRecord{Txid: txid, Class: application.GristClass, From: claimedFrom, To: millKey,
+		Signer: claimedFrom, SignerApps: signerApps, Ciphertext: ct})
+}
+
+// A refused grist has the photos it names deleted only when the pass proved
+// the grist's own sender sealed them: a grist that names somebody else's
+// photo, refused before any photo is opened, leaves it where it is.
+func TestGristGrindLeavesAPhotoItCouldNotProveTheSenderSealed(t *testing.T) {
+	stranger := &apptest.FakeCipher{From: gristStrangerKey}
+	phone := &apptest.FakeCipher{From: gristPhoneKey}
+	for name, tc := range map[string]struct {
+		claimedFrom string // the payload's "from"
+		signerApps  []string
+	}{
+		"refused for its licence":      {gristPhoneKey, nil},
+		"refused, its sender unproven": {gristStrangerKey, []string{"cairn"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			mill, backend, _ := aSmallMill(t)
+			records, _ := backend.Messages(context.Background(), 0)
+			sealed, _ := stranger.EncryptBytes(records[0].To, []byte("the stranger's photo"))
+			hash, size, _ := backend.UploadBlob(context.Background(), mustBase64(t, sealed))
+			aGristNaming(t, mill, backend, "direct:g2", tc.claimedFrom, phone, tc.signerApps, hash, size)
+
+			if _, err := mill.Run(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if answer := openFakeAnswer(t, backend.Delivered()[1]); answer.Status != application.GristRefused {
+				t.Fatalf("expected the grist refused, got %+v", answer)
+			}
+			if !backend.HasBlob(hash) {
+				t.Fatalf("a photo the sender did not seal was deleted: %v", backend.Deleted())
+			}
+		})
+	}
+}
+
+// A refused grist's own photos, sealed by its own sender, are still deleted
+// once the pass has proved them.
+func TestGristGrindDeletesTheSendersOwnPhotosOfARefusedGrist(t *testing.T) {
+	mill, backend, _ := aSmallMill(t)
+	records, _ := backend.Messages(context.Background(), 0)
+	phone := &apptest.FakeCipher{From: gristPhoneKey}
+	sealed, _ := phone.EncryptBytes(records[0].To, []byte("the phone's photo"))
+	hash, size, _ := backend.UploadBlob(context.Background(), mustBase64(t, sealed))
+	aGristNaming(t, mill, backend, "direct:g2", gristPhoneKey, phone, nil, hash, size)
+
+	if _, err := mill.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if backend.HasBlob(hash) {
+		t.Fatalf("the sender's own photo was left on the backend")
+	}
+}
