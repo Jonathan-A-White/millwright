@@ -63,6 +63,8 @@ type nextContext struct {
 	signed       string         // the short hash of the commit a scenario signed
 	commentsWere map[string]int // how many comments a story held before the close-out ran
 
+	lease *landingLease // the lease watch of features/next_lease.feature, when a scenario asks for one
+
 	afterCommands map[string]string // the [after_landing] table this scenario's rig host has
 	afterLimit    time.Duration     // how long an after-landing command may run; zero is the adapter's own
 
@@ -205,6 +207,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the comment on "([^"]*)" quotes every line the origin said$`, c.theCommentQuotesTheWholeRefusal)
 
 	registerCheckSteps(ctx, c)
+	registerNextLeaseSteps(ctx, c)
 }
 
 // workspace makes the temp directory a scenario keeps everything in, once.
@@ -769,18 +772,25 @@ func (c *nextContext) mwClosesOut(id string) error {
 		filesPort = files
 	}
 
+	var tracker application.WorkTracker = c.tracker
+	var heartbeatWait func(context.Context, time.Duration) error
+	if c.lease != nil {
+		tracker, heartbeatWait = c.lease.watch(c.tracker), c.lease.wait
+	}
+
 	c.report, c.err = application.Next{
-		Tracker:   c.tracker,
-		Worktrees: worktrees,
-		Landing:   worktrees,
-		Checks:    rig.NewChecks(rig.WithCommand(c.checkCommand)),
-		Slot:      rig.NewSlots(rig.WithSlotWait(5*time.Second), rig.WithSlotPoll(20*time.Millisecond)),
-		Vault:     files,
-		Files:     filesPort,
-		Mailbox:   c.mailbox,
-		Runner:    c.runner,
-		Memory:    c.tracker,
-		Sync:      application.Sync{Vault: c.files, Tracker: c.tracker, Host: nextHost},
+		Tracker:       tracker,
+		HeartbeatWait: heartbeatWait,
+		Worktrees:     worktrees,
+		Landing:       worktrees,
+		Checks:        rig.NewChecks(rig.WithCommand(c.checkCommand)),
+		Slot:          rig.NewSlots(rig.WithSlotWait(5*time.Second), rig.WithSlotPoll(20*time.Millisecond)),
+		Vault:         files,
+		Files:         filesPort,
+		Mailbox:       c.mailbox,
+		Runner:        c.runner,
+		Memory:        c.tracker,
+		Sync:          application.Sync{Vault: c.files, Tracker: c.tracker, Host: nextHost},
 		Dispatch: application.Dispatch{
 			Tracker:   c.tracker,
 			Worktrees: worktrees,

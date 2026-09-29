@@ -347,7 +347,12 @@ func (c *closeOut) attempt() int {
 // reason the story did not land; the report says what was recorded anyway,
 // because a close-out that lands nothing still writes down what happened.
 func (n Next) Run(ctx context.Context, storyID string) (NextReport, error) {
+	// The session that held the claim's lease alive has ended by now; the merge
+	// queue and the rig's tests that follow can outlast bd's five-minute TTL, and
+	// a lapsed lease is what mw sweep marks run=stuck (mw-gq6.138).
+	release := n.holdLease(ctx, storyID)
 	report, err := n.closeOut(ctx, storyID)
+	report.Notes = append(report.Notes, release()...)
 	n.print(report.String())
 	n.closeSession(ctx, report)
 	return report, err
@@ -407,6 +412,39 @@ func (n Next) Heartbeat(ctx context.Context, storyID string) error {
 		if err := n.Tracker.HeartbeatClaim(ctx, storyID); err != nil {
 			n.print(fmt.Sprintf("mw next: the claim on %s could not be heartbeated: %v\n", storyID, err))
 		}
+	}
+}
+
+// holdLease renews storyID's claim's lease every HeartbeatInterval from now
+// until the function it returns is called, whatever the story's session is
+// doing: Heartbeat stops with the session, and a close-out that waits its turn
+// in the merge slot and re-runs the rig's tests would otherwise let the lease
+// lapse under a landing that is alive. The function it returns stops the loop,
+// waits for it to be gone — so that no renewal happens after it returns — and
+// gives back what could not be renewed, for the report. A renewal that fails
+// does not stop the loop, as in Heartbeat.
+func (n Next) holdLease(ctx context.Context, storyID string) (release func() []string) {
+	if n.Tracker == nil || strings.TrimSpace(storyID) == "" {
+		return func() []string { return nil }
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	var failed []string
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for n.wait(ctx, HeartbeatInterval) == nil {
+			if ctx.Err() != nil {
+				return
+			}
+			if err := n.Tracker.HeartbeatClaim(ctx, storyID); err != nil && ctx.Err() == nil {
+				failed = append(failed, fmt.Sprintf("the claim on %s could not be heartbeated while it was landed: %v", storyID, err))
+			}
+		}
+	}()
+	return func() []string {
+		cancel()
+		<-done
+		return failed
 	}
 }
 
