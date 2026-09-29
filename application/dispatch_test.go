@@ -1165,3 +1165,103 @@ func TestDispatchRecordsWhenTheClaimWasMade(t *testing.T) {
 		t.Fatalf("expected the story to read back claimed at %v, got %v", at, detail.ClaimedAt)
 	}
 }
+
+// signalTracker tells a test when a dispatch has counted what is running here
+// (it asks what is ready right after) and when it has claimed a story; and
+// holds a claim back, for a moment, until the mill has counted what is
+// running here too.
+type signalTracker struct {
+	*apptest.FakeTracker
+	counted, claimed, millCounted chan struct{}
+	once1, once2, once3           sync.Once
+}
+
+// millTracker is the mill's view of a signalTracker: it says when the mill
+// has counted what is running.
+type millTracker struct{ *signalTracker }
+
+func (t millTracker) RunningStories(ctx context.Context, host string) ([]application.StoryDetail, error) {
+	running, err := t.signalTracker.FakeTracker.RunningStories(ctx, host)
+	t.once3.Do(func() { close(t.millCounted) })
+	return running, err
+}
+
+func (t *signalTracker) ReadyForHost(ctx context.Context, host string) ([]application.StoryDetail, error) {
+	t.once1.Do(func() { close(t.counted) })
+	return t.FakeTracker.ReadyForHost(ctx, host)
+}
+
+func (t *signalTracker) ClaimStory(ctx context.Context, id string) error {
+	select {
+	case <-t.millCounted:
+	case <-time.After(200 * time.Millisecond):
+	}
+	err := t.FakeTracker.ClaimStory(ctx, id)
+	t.once2.Do(func() { close(t.claimed) })
+	return err
+}
+
+// crowdedGrinder is a grinder that gives a dispatch a moment to claim, then
+// notes how many sessions were running here beside it.
+type crowdedGrinder struct {
+	inner   *apptest.FakeGrinder
+	tracker *signalTracker
+	host    string
+	mu      sync.Mutex
+	most    int
+}
+
+func (g *crowdedGrinder) Grind(ctx context.Context, call application.GrindCall) (application.SessionResult, error) {
+	select {
+	case <-g.tracker.claimed:
+	case <-time.After(200 * time.Millisecond):
+	}
+	running, err := g.tracker.RunningStories(ctx, g.host)
+	if err != nil {
+		return application.SessionResult{}, err
+	}
+	g.mu.Lock()
+	g.most = max(g.most, len(running)+1)
+	g.mu.Unlock()
+	return g.inner.Grind(ctx, call)
+}
+
+// A dispatch and the mill that start in the same tick with one slot free
+// never run more sessions than the cap: the mill starts once the dispatch
+// has counted what is running, the moment the unlocked pair would let both
+// through.
+func TestDispatchAndTheMillNeverExceedTheCapStartedInTheSameTick(t *testing.T) {
+	d, tracker, _, _, _ := aFactory(t)
+	mill, _, grinder := aSmallMill(t)
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	seen := &signalTracker{FakeTracker: tracker, counted: make(chan struct{}), claimed: make(chan struct{}), millCounted: make(chan struct{})}
+	crowded := &crowdedGrinder{inner: grinder, tracker: seen, host: "vps"}
+
+	grinding := &apptest.FakeGristLock{}
+	d.Tracker, d.Grinding = seen, grinding
+	mill.Tracker, mill.Grinding, mill.Grinder, mill.Host, mill.Cap = millTracker{seen}, grinding, crowded, "vps", d.Cap
+
+	var wg sync.WaitGroup
+	var millErr error
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-seen.counted
+		_, millErr = mill.Run(context.Background())
+	}()
+	if _, err := d.Run(context.Background()); err != nil {
+		t.Fatalf("dispatch: %v", err)
+	}
+	wg.Wait()
+	if millErr != nil {
+		t.Fatalf("mill: %v", millErr)
+	}
+
+	running, err := seen.RunningStories(context.Background(), "vps")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if crowded.most > d.Cap || len(running) > d.Cap {
+		t.Errorf("a cap of %d, and %d sessions ran together during the grind, %d after", d.Cap, crowded.most, len(running))
+	}
+}

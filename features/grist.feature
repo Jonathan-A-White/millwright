@@ -149,3 +149,36 @@ Feature: mw grist grind, the mill
     When mw dispatch runs on "laptop" with a cap of 1
     Then dispatch started nothing, since "laptop has taken 1 of the 1 sessions it may run at once"
     And dispatch says a grist grind holds one of its sessions
+
+  Scenario: A grist left waiting is answered by the next dispatch tick, with no new grist and no hook
+    Given a story is already running on "laptop"
+    And "laptop" is home
+    And [grist] is configured
+    And the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
+    And the grind answers with a sweep result
+    When the mill grinds
+    Then the mill answered 0, refused 0, failed 0, and left 1 waiting
+    When the running story finishes
+    And mw dispatch runs on "laptop" with a cap of 1
+    Then the dispatch's grist pass answered 1, refused 0, failed 0, and left 0 waiting
+    And 1 grind was run
+    And 1 answer was delivered
+
+  Scenario: A dispatch tick on a host that is not home runs no grist pass
+    Given "desktop" is home
+    And [grist] is configured
+    And the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
+    And the grind answers with a sweep result
+    When mw dispatch runs on "laptop" with a cap of 1
+    Then the dispatch ran no grist pass
+    And no grind was run
+    And no answer was delivered
+
+  Scenario: A dispatch tick with no [grist] runs no grist pass
+    Given "laptop" is home
+    And the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
+    And the grind answers with a sweep result
+    When mw dispatch runs on "laptop" with a cap of 1
+    Then the dispatch ran no grist pass
+    And no grind was run
+    And no answer was delivered

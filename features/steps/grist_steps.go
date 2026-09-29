@@ -81,10 +81,12 @@ type gristContext struct {
 	grist  application.PosternRecord
 	photos map[string][]byte // blob hash to the photo it seals
 
-	report   application.GristReport
-	err      error
-	out      bytes.Buffer
-	dispatch application.DispatchReport
+	report     application.GristReport
+	homeIs     string // the host the vault's home file names; empty is no home file
+	configured bool   // a [grist] table is in the config file
+	err        error
+	out        bytes.Buffer
+	dispatch   application.DispatchReport
 }
 
 // InitializeGristScenario registers the steps of features/grist.feature.
@@ -128,6 +130,8 @@ func InitializeGristScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^another pass of the mill is running$`, c.anotherPassIsRunning)
 	ctx.Given(`^a grind is running on "([^"]*)"$`, c.aGrindIsRunningOn)
 	ctx.Given(`^a story is ready on "([^"]*)"$`, c.aStoryIsReadyOn)
+	ctx.Given(`^"([^"]*)" is home$`, c.hostIsHome)
+	ctx.Given(`^\[grist\] is configured$`, c.gristIsConfigured)
 
 	ctx.When(`^the mill grinds$`, c.theMillGrinds)
 	ctx.When(`^the mill grinds again$`, c.theMillGrinds)
@@ -155,6 +159,8 @@ func InitializeGristScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the mill says another pass is running$`, c.theMillSaysAnotherPass)
 	ctx.Then(`^dispatch started nothing, since "([^"]*)"$`, c.dispatchStartedNothing)
 	ctx.Then(`^dispatch says a grist grind holds one of its sessions$`, c.dispatchSaysGrinding)
+	ctx.Then(`^the dispatch's grist pass answered (\d+), refused (\d+), failed (\d+), and left (\d+) waiting$`, c.dispatchGristPassCounted)
+	ctx.Then(`^the dispatch ran no grist pass$`, c.dispatchRanNoGristPass)
 }
 
 // vectorKey is the vectors' key by name: its public hex, and its private
@@ -417,14 +423,53 @@ func (noWorktrees) Remove(context.Context, string, string, string) error        
 func (noWorktrees) RemoveWithoutForce(context.Context, string, string) error     { return nil }
 func (noWorktrees) DeleteBranch(context.Context, string, string) error           { return nil }
 
+func (c *gristContext) hostIsHome(host string) error {
+	c.homeIs = host
+	return nil
+}
+
+func (c *gristContext) gristIsConfigured() error {
+	c.configured = true
+	return nil
+}
+
+// mwDispatchRuns is one dispatch tick, as cmd/mw wires it: the mill is given
+// only where a [grist] table is configured, and the vault's home file says
+// which host is home.
 func (c *gristContext) mwDispatchRuns(host string, cap int) error {
 	c.out.Reset()
-	c.dispatch, c.err = application.Dispatch{
+	tick := application.Dispatch{
 		Tracker: c.tracker, Worktrees: noWorktrees{}, Runner: apptest.NewFakeRunner(),
 		Host: host, Cap: cap, Rigs: map[string]string{"millwright": "/rigs/millwright"},
 		Grinding: c.grinding, Out: &c.out,
-	}.Run(context.Background())
+	}
+	if c.homeIs != "" {
+		tick.Home = &apptest.FakeHomeFile{Text: c.homeIs + " 2026-09-29T09:00:00Z mw@" + c.homeIs + "\n"}
+	}
+	if c.configured {
+		tick.Mill = c.mill()
+	}
+	c.dispatch, c.err = tick.Run(context.Background())
 	return c.err
+}
+
+func (c *gristContext) dispatchGristPassCounted(answered, refused, failed, waiting int) error {
+	r := c.dispatch.Grist
+	if r == nil {
+		return fmt.Errorf("expected the dispatch to run a grist pass, it said:\n%s", c.out.String())
+	}
+	if r.Answered != answered || r.Refused != refused || r.Failed != failed || r.Waiting != waiting {
+		return fmt.Errorf("the dispatch's grist pass counted %d answered, %d refused, %d failed, %d waiting; expected %d, %d, %d, %d",
+			r.Answered, r.Refused, r.Failed, r.Waiting, answered, refused, failed, waiting)
+	}
+	return nil
+}
+
+func (c *gristContext) dispatchRanNoGristPass() error {
+	if c.dispatch.Grist != nil {
+		return fmt.Errorf("expected no grist pass, the dispatch ran one: %+v", *c.dispatch.Grist)
+	}
+	return nil
 }
 
 // delivered opens every answer the mill delivered: its envelope, who the

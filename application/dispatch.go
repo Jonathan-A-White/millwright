@@ -119,6 +119,14 @@ type Dispatch struct {
 	// worktree (mw-gq6.140). A nil Exclusive takes none, and a dry run needs none.
 	Exclusive GristLock
 
+	// Mill and Home make the tick answer what the mill left waiting: after
+	// its own claims, on the host that is home, one pass of the mill runs
+	// (mw grist grind's own use case, with its own lock and its own cap
+	// check). A nil Mill, or a Home that says another host is home or cannot
+	// be read, runs none. A dry run runs none either.
+	Mill GristMill
+	Home HomeFile
+
 	// MaxAttempts is how many times a story may be started in all; a story tried
 	// that many times is not started again, and the Mayor is told. Fewer than one
 	// is DefaultMaxAttempts.
@@ -215,6 +223,8 @@ type DispatchReport struct {
 	// Grinding says one of them is a grist grind.
 	Running  int
 	Grinding bool
+	// Grist is what the mill's pass after the claims did, when one ran.
+	Grist *GristReport
 	// Reclaimed is every claim this dispatch took back from a dead pane and an
 	// expired lease before it read what is ready.
 	Reclaimed []Reclaimed
@@ -386,8 +396,19 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		}
 		report.Running++
 	}
+	// A real run takes the grind lock and keeps it while it claims, so that a
+	// grind starting in the same tick reads the cap after the claims are made
+	// (or is turned away and waits for the next tick), never before them: the
+	// two cannot both take the last slot. A dry run only looks.
+	var unlock func()
+	defer func() {
+		if unlock != nil {
+			unlock()
+		}
+	}()
 	if d.Grinding != nil {
-		if grinding, err := d.Grinding.Held(ctx); err != nil {
+		grinding, err := d.grindRunning(ctx, &unlock)
+		if err != nil {
 			report.Notes = append(report.Notes, fmt.Sprintf("whether a grist grind is running here could not be read: %v", err))
 		} else if grinding {
 			report.Running++
@@ -513,10 +534,65 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	}
 
 	d.print(report.String())
+	if unlock != nil {
+		unlock()
+		unlock = nil
+	}
+	d.answerWaitingGrist(ctx, &report)
 	if len(report.Failed) > 0 {
 		return report, fmt.Errorf("dispatching on %s: %s", d.Host, report.failures())
 	}
 	return report, nil
+}
+
+// grindRunning says whether a grist grind holds a session here. A real run
+// that finds none has taken the grind lock, and leaves its release in unlock.
+func (d Dispatch) grindRunning(ctx context.Context, unlock *func()) (bool, error) {
+	if d.DryRun {
+		return d.Grinding.Held(ctx)
+	}
+	release, taken, err := d.Grinding.TryTake(ctx)
+	if err != nil {
+		return false, err
+	}
+	if taken {
+		*unlock = release
+	}
+	return !taken, nil
+}
+
+// answerWaitingGrist runs one pass of the mill after the claims, on the host
+// that is home: a grist left waiting for a slot, or for a busy pass, is
+// answered by the next tick and not only when another grist arrives. The pass
+// is the mill's own, with its own lock and its own cap check. What goes wrong
+// in it is a note: the tick's claims have been made and stand.
+func (d Dispatch) answerWaitingGrist(ctx context.Context, report *DispatchReport) {
+	if d.Mill == nil || d.Home == nil || d.DryRun {
+		return
+	}
+	home, err := IsHome(ctx, d.Home, d.Host)
+	if unknown, ok := HomeUnknownIn(err); ok {
+		note := "no grist pass was run: " + unknown.Error()
+		report.Notes = append(report.Notes, note)
+		d.print("  note    " + note + "\n")
+		return
+	}
+	if err != nil {
+		note := fmt.Sprintf("no grist pass was run: %v", err)
+		report.Notes = append(report.Notes, note)
+		d.print("  note    " + note + "\n")
+		return
+	}
+	if !home {
+		return
+	}
+	grist, err := d.Mill.Run(ctx)
+	report.Grist = &grist
+	if err != nil {
+		note := fmt.Sprintf("the grist pass failed: %v", err)
+		report.Notes = append(report.Notes, note)
+		d.print("  note    " + note + "\n")
+	}
 }
 
 // syncWaitingForTheNetwork runs the sync, and runs it again after SyncWait while

@@ -220,6 +220,12 @@ type GristLock interface {
 	Held(ctx context.Context) (bool, error)
 }
 
+// GristMill is one pass of the mill: what mw grist grind runs, and what the
+// dispatch tick runs after its own claims (GristGrind is the use case).
+type GristMill interface {
+	Run(ctx context.Context) (GristReport, error)
+}
+
 // RunningHere is what the mill reads the host's cap against: the stories
 // running on a host, exactly as mw dispatch counts them. WorkTracker has it.
 type RunningHere interface {
