@@ -285,7 +285,7 @@ func (g *Gateway) childrenOf(ctx context.Context, id string, defaults domain.Pat
 		return nil, fmt.Errorf("reading the stories of %s: %w", id, err)
 	}
 	var filed []application.StoryDetail
-	for _, story := range inFiledOrder(stories) {
+	for _, story := range inSiblingOrder(stories) {
 		filed = append(filed, story.detail(defaults))
 	}
 	return filed, nil
