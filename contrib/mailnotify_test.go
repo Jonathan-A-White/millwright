@@ -37,6 +37,11 @@ var panes = map[string]string{
 	"idle":     emptyPrompt,
 	"busy":     `printf 'working (esc to interrupt)\n'; ` + emptyPrompt,
 	"has-text": `printf '\342\235\257 a half-written thought'`,
+
+	// The screens tmux captured, shared with infrastructure/tmux's test: Claude
+	// Code's dim suggested next prompt after the mark, and text a person typed.
+	"ghost": `cat "$MW_FIXTURES/ghost-suggestion.txt"`,
+	"draft": `cat "$MW_FIXTURES/real-draft.txt"`,
 }
 
 // factory is one throwaway world for the script to run in.
@@ -216,7 +221,7 @@ func (f *factory) mayor(state, acting string) string {
 	// first the server lists.
 	f.tmux("new-session", "-d", "-s", "factory", "-n", "shell", "-x", "100", "-y", "20", "sleep 600")
 	out := f.tmux("new-window", "-d", "-P", "-F", "#{window_id} #{window_index}", "-n", "mayor-2026-09-19-10",
-		"env", "MW_TEST_DIR="+f.dir, f.path("pane.sh"))
+		"env", "MW_TEST_DIR="+f.dir, "MW_FIXTURES="+fixtures(f.t), f.path("pane.sh"))
 	var id, index string
 	if _, err := fmt.Sscan(out, &id, &index); err != nil {
 		f.t.Fatalf("reading the new window from %q: %v", out, err)
@@ -330,6 +335,40 @@ func TestASecondTickAfterAnnouncingTypesNothingAgain(t *testing.T) {
 func TestTextOnTheInputLineIsNeverTypedOverAndTheIdsAreNotRecorded(t *testing.T) {
 	f := newFactory(t)
 	f.mayor("has-text", actingByID)
+	f.inbox("mw-aaa")
+
+	f.tick()
+
+	f.nothingMoreTyped("")
+	if got := f.announced(); got != "" {
+		t.Fatalf("recorded %q for mail that was never announced", got)
+	}
+}
+
+// fixtures is the directory of captured screens that infrastructure/tmux's own
+// test reads too.
+func fixtures(t *testing.T) string {
+	t.Helper()
+	dir, err := filepath.Abs("../infrastructure/tmux/testdata")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestADimSuggestionOnTheInputLineIsNotADraftAndIsTypedOver(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("ghost", actingByID)
+	f.inbox("mw-aaa")
+
+	f.tick()
+
+	f.typed(fmt.Sprintf(announcement, 1))
+}
+
+func TestATypedDraftOnACapturedScreenIsNeverTypedOver(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("draft", actingByID)
 	f.inbox("mw-aaa")
 
 	f.tick()
