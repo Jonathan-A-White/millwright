@@ -200,6 +200,28 @@ func TestApplyCommentsVerifiedExactlyAsTheProtocolSays(t *testing.T) {
 	}
 }
 
+// A second Verified tap on a bead already carrying a VERIFIED comment is
+// refused, two taps being two transactions: nothing is written, and the
+// Mayor is told it was not applied.
+func TestApplyRefusesASecondVerified(t *testing.T) {
+	f := newApplyFixture(t)
+	f.action(t, "tx-first", map[string]any{"action": "verified", "bead": "mw-e.3"})
+	f.action(t, "tx-second", map[string]any{"action": "verified", "bead": "mw-e.3"})
+
+	f.apply(t)
+
+	if got := f.tracker.Comments("mw-e.3"); len(got) != 1 || got[0] != "VERIFIED by the Governor via postern (tx-first)" {
+		t.Fatalf("expected only the first VERIFIED comment, got %v", got)
+	}
+	got := f.subjects(t)
+	if len(got) != 2 || got[0] != "Verified: mw-e.3" || got[1] != "Not applied: verified mw-e.3" {
+		t.Fatalf("expected a Verified mail then a Not applied mail, got %v", got)
+	}
+	if note, _ := f.tracker.Note(context.Background(), application.PosternAppliedKey("tx-second")); !strings.Contains(note, "it is already verified") {
+		t.Fatalf("expected the second txid marked refused because it is already verified, got %q", note)
+	}
+}
+
 // Each message is applied at most once, however many passes see it.
 func TestApplyAppliesEachTxidOnce(t *testing.T) {
 	f := newApplyFixture(t)
