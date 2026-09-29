@@ -21,6 +21,9 @@ const (
 	PosternBackendUnit = "postern-backend"
 	// HomeMoveAnswerWait is how long the move waits for the old home to answer ssh.
 	HomeMoveAnswerWait = 10 * time.Second
+	// HomeMoveHandoffWait is how long a planned move waits for the old home's Mayor
+	// to hand off before it gives up. It never kills the Mayor.
+	HomeMoveHandoffWait = 15 * time.Minute
 	// HomeMoveBackendWait is how long the move waits for the backend to answer as
 	// home. A backend on a host that is not home is in standby and re-reads
 	// `mw home --check` every 30 seconds.
@@ -72,6 +75,35 @@ type HomeMoveHost interface {
 	MayorUp(ctx context.Context) (started bool, said string, err error)
 }
 
+// OldHome is what a planned move asks of the old home, which is up: the mw, the
+// systemctl and the vault there, reached over the ssh prefix. The real one runs them
+// over ssh; a test stands in for them.
+type OldHome interface {
+	// MailMayor sends mail to the Mayor in the old home's own beads database, signed
+	// from, so that the Mayor there finds it where it is looking.
+	MailMayor(ctx context.Context, ssh []string, from, subject, body string) error
+
+	// MayorGone waits up to wait for the old home's Mayor to have handed off: its
+	// .mayor-acting empty, or its Mayor process gone (bin/respawn-mayor's own
+	// markers). A Mayor still there when wait is up is (false, what it sees, nil).
+	// It never stops a Mayor.
+	MayorGone(ctx context.Context, ssh []string, wait time.Duration) (gone bool, said string, err error)
+
+	// Sync runs mw sync there: the final backup push of the beads and the vault.
+	Sync(ctx context.Context, ssh []string) error
+
+	// OldUnitInstalled reports whether the old home has the user unit.
+	OldUnitInstalled(ctx context.Context, ssh []string, unit string) (bool, error)
+
+	// OldStopUnit stops the user unit there, and reports whether it did: a unit
+	// that was not running is (false, nil).
+	OldStopUnit(ctx context.Context, ssh []string, unit string) (stopped bool, err error)
+
+	// Mirror runs mw postern mirror there: the final copy of the backend's data to
+	// this host.
+	Mirror(ctx context.Context, ssh []string) error
+}
+
 // AsideMove is a database directory set aside: From is where it was, To where it
 // is now. The zero value is that there was nothing to set aside.
 type AsideMove struct{ From, To string }
@@ -96,6 +128,8 @@ type HomeMove struct {
 	Writer  HomeWriter
 	Vault   VaultFiles
 	Machine HomeMoveHost
+	// Old is the old home, for a planned move.
+	Old     OldHome
 	Mailbox Mailbox
 	Index   PosternIndexTime
 	// Lock, when set, is held while the beads database is swapped, so that no
@@ -122,6 +156,9 @@ type HomeMove struct {
 
 	// OldHomeDead is the Governor's word that the old home is dead.
 	OldHomeDead bool
+	// Planned is a move with both hosts up: the old home hands off, flushes and
+	// stands down first. It needs the old home to answer, and Old.
+	Planned bool
 	// DryRun prints the steps and their ways back and runs none of them.
 	DryRun bool
 	// Now is the clock; time.Now when nil.
@@ -208,6 +245,12 @@ func (m HomeMove) refuse(ctx context.Context) (old string, prefix []string, prev
 	}
 	if m.Host != m.Target {
 		return "", nil, nil, false, fmt.Errorf("this host is %s, not %s: mw home move runs on the host that becomes home, so run it on %s. Nothing was changed", m.Host, m.Target, m.Target)
+	}
+	if m.Planned && m.OldHomeDead {
+		return "", nil, nil, false, errors.New("--planned is a move with the old home up and --old-home-dead says it is dead: give one of them. Nothing was changed")
+	}
+	if m.Planned && m.Old == nil {
+		return "", nil, nil, false, errors.New("a planned move has no way to reach the old home. Nothing was changed")
 	}
 	for _, host := range domain.HomeHosts {
 		if host != m.Target {
@@ -338,12 +381,12 @@ func (r *homeMoveRun) run(ctx context.Context, steps []homeMoveStep) error {
 
 func (r *homeMoveRun) steps() []homeMoveStep {
 	m := r.m
-	return []homeMoveStep{
+	dead := []homeMoveStep{
 		{
 			title: "the old home",
 			plan: []string{
 				fmt.Sprintf("asks whether %s answers `%s` within %s.", r.old, strings.Join(r.prefix, " "), HomeMoveAnswerWait),
-				"If it does, the move stops: old home is up: use --planned when it exists.",
+				"If it does, the move stops: old home is up: use --planned.",
 				"If it does not, the move goes on only with --old-home-dead, the Governor's word that it is dead.",
 			},
 			back: "nothing is changed.",
@@ -397,6 +440,10 @@ func (r *homeMoveRun) steps() []homeMoveStep {
 			run:  (*homeMoveRun).lost,
 		},
 	}
+	if m.Planned {
+		return r.plannedSteps(dead)
+	}
+	return dead
 }
 
 func (r *homeMoveRun) oldHome(ctx context.Context) error {
@@ -407,7 +454,7 @@ func (r *homeMoveRun) oldHome(ctx context.Context) error {
 		return fmt.Errorf("asking whether %s answers: %w", r.old, err)
 	}
 	if up {
-		return fmt.Errorf("old home is up: use --planned when it exists (%s answered `%s`)", r.old, strings.Join(r.prefix, " "))
+		return fmt.Errorf("old home is up: use --planned (%s answered `%s`)", r.old, strings.Join(r.prefix, " "))
 	}
 	if !m.OldHomeDead {
 		return fmt.Errorf("old home %s did not answer `%s` within %s. If it is dead, say so: mw home move %s --old-home-dead",
@@ -508,6 +555,9 @@ func (r *homeMoveRun) vault(ctx context.Context) error {
 	r.say("wrote the home file: %s", strings.TrimSpace(record.String()))
 
 	message := fmt.Sprintf("home: %s (moved from %s: the old home is dead)", m.Target, r.old)
+	if m.Planned {
+		message = fmt.Sprintf("home: %s (planned move from %s)", m.Target, r.old)
+	}
 	committed, err := m.Vault.Commit(ctx, message, []string{HomeFileName})
 	if err != nil {
 		return fmt.Errorf("committing the home file: %w", err)
@@ -561,6 +611,10 @@ func (r *homeMoveRun) mayor(ctx context.Context) error {
 	m := r.m
 	body := fmt.Sprintf("Home moved to %s at %s: the old home is dead; beads from GitHub as of %s",
 		m.Target, r.at.Format(time.RFC3339), r.backupAt.UTC().Format(time.RFC3339))
+	if m.Planned {
+		body = fmt.Sprintf("Home moved to %s at %s: planned move; %s handed off and flushed first, beads from its final push (GitHub's refs/dolt/data as of %s)",
+			m.Target, r.at.Format(time.RFC3339), r.old, r.backupAt.UTC().Format(time.RFC3339))
+	}
 	id, err := m.Mailbox.Send(ctx, NewMessage{From: m.Actor, To: "mayor", Subject: "Home moved to " + m.Target, Body: body})
 	if err != nil {
 		return fmt.Errorf("sending the Mayor mail: %w", err)
@@ -583,14 +637,21 @@ func (r *homeMoveRun) mayor(ctx context.Context) error {
 
 func (r *homeMoveRun) lost(ctx context.Context) error {
 	m := r.m
-	r.say("GitHub's copy of the beads was written %s, %s ago: whatever %s wrote to beads after that is not here.",
-		r.backupAt.UTC().Format(time.RFC3339), homeMoveAgo(r.at.Sub(r.backupAt)), r.old)
+	if m.Planned {
+		r.say("planned move: %s flushed before it stood down, so nothing is lost. GitHub's beads were written %s (%s ago), the old home's final push.",
+			r.old, r.backupAt.UTC().Format(time.RFC3339), homeMoveAgo(r.at.Sub(r.backupAt)))
+	} else {
+		r.say("GitHub's copy of the beads was written %s, %s ago: whatever %s wrote to beads after that is not here.",
+			r.backupAt.UTC().Format(time.RFC3339), homeMoveAgo(r.at.Sub(r.backupAt)), r.old)
+	}
 	at, ok, err := m.Index.LastIndexTime(ctx, nil, m.DataDir)
 	switch {
 	case err != nil:
 		r.say("the age of the Postern data here is not known: %v", err)
 	case !ok:
 		r.say("this host has no postern index in %s: no message from the old home is here.", m.DataDir)
+	case m.Planned:
+		r.say("the Postern data here ends at %s, %s ago, as of the old home's final mirror.", at.UTC().Format(time.RFC3339), homeMoveAgo(r.at.Sub(at)))
 	default:
 		r.say("the Postern data here ends at %s, %s ago: whatever %s got after that is not here (it copies here every ten minutes).",
 			at.UTC().Format(time.RFC3339), homeMoveAgo(r.at.Sub(at)), r.old)
