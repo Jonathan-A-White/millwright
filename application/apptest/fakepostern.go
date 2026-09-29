@@ -29,6 +29,9 @@ type FakePostern struct {
 	// Broadcast reports "fake-txid-<n>" and Deliver "direct:fake-<n>".
 	NextTxid string
 
+	// Mine is what Me reports.
+	Mine application.PosternMe
+
 	// Err, when set, is returned by every method instead of doing the work.
 	Err error
 	// DeliverErr, when set, is returned by Deliver alone: a backend that
@@ -237,4 +240,14 @@ func (f *FakePostern) HasBlob(hash string) bool {
 	defer f.mu.Unlock()
 	_, ok := f.blobs[hash]
 	return ok
+}
+
+// Me implements application.Postern: Mine, as it is set.
+func (f *FakePostern) Me(_ context.Context) (application.PosternMe, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return application.PosternMe{}, f.Err
+	}
+	return f.Mine, nil
 }

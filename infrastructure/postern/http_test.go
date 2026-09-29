@@ -445,3 +445,27 @@ func TestDeleteBlobDeletesAndAGoneBlobIsNoError(t *testing.T) {
 		t.Fatal("expected a hash that is not one refused")
 	}
 }
+
+func TestMeReportsTheCallerAndTheMill(t *testing.T) {
+	b, backend := serve(t, map[string]answer{"GET /api/me": {200, `{"pubkey":"02aa","mill":"03bb","network":"testnet","features":["grist"],"apps":["cairn"]}`}})
+
+	me, err := backend.Me(context.Background())
+	if err != nil {
+		t.Fatalf("reading /api/me: %v", err)
+	}
+	if want := (application.PosternMe{Pubkey: "02aa", Mill: "03bb", Network: "testnet"}); me != want {
+		t.Fatalf("expected %+v, got %+v", want, me)
+	}
+	if len(b.requests) != 2 || !strings.HasPrefix(b.requests[1].Header.Get("Authorization"), "Postern ") {
+		t.Fatalf("expected a challenge then a signed GET, got %d requests", len(b.requests))
+	}
+}
+
+func TestMeWithNoMillNamesNone(t *testing.T) {
+	_, backend := serve(t, map[string]answer{"GET /api/me": {200, `{"pubkey":"02aa","mayor":"","network":"testnet","features":["direct"]}`}})
+
+	me, err := backend.Me(context.Background())
+	if err != nil || me.Mill != "" {
+		t.Fatalf("expected no mill key, got %+v: %v", me, err)
+	}
+}
