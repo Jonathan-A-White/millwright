@@ -262,23 +262,93 @@ func (g *Gateway) ShowEpic(ctx context.Context, id string) (application.EpicDeta
 	}
 	defaults := domain.PathFromMetadata(epic.pathMetadata())
 
-	out, err := g.call(ctx, "list", "--parent", id, "--limit", "0", "--all", "--json")
+	stories, err := g.childrenOf(ctx, id, defaults)
 	if err != nil {
 		return application.EpicDetail{}, err
 	}
+	return application.EpicDetail{
+		ID: epic.ID, Title: epic.Title, Status: epic.Status, Priority: epic.priority(), Defaults: defaults,
+		Bead: epic.ownBead(), Stories: stories,
+	}, nil
+}
+
+// childrenOf lists every story filed under an epic, in the order they were
+// filed, each with the epic's defaults overlaid: one bd list, closed and
+// claimed stories included.
+func (g *Gateway) childrenOf(ctx context.Context, id string, defaults domain.Path) ([]application.StoryDetail, error) {
+	out, err := g.call(ctx, "list", "--parent", id, "--limit", "0", "--all", "--json")
+	if err != nil {
+		return nil, err
+	}
 	stories, err := decodeBeads(out)
 	if err != nil {
-		return application.EpicDetail{}, fmt.Errorf("reading the stories of %s: %w", id, err)
+		return nil, fmt.Errorf("reading the stories of %s: %w", id, err)
 	}
-
-	filed := application.EpicDetail{
-		ID: epic.ID, Title: epic.Title, Status: epic.Status, Priority: epic.priority(), Defaults: defaults,
-		Bead: epic.ownBead(),
-	}
+	var filed []application.StoryDetail
 	for _, story := range inFiledOrder(stories) {
-		filed.Stories = append(filed.Stories, story.detail(defaults))
+		filed = append(filed, story.detail(defaults))
 	}
 	return filed, nil
+}
+
+// ShowBeadPage implements application.WorkTracker: one bd show
+// --include-comments reads the bead, its comments, and the copy of its parent
+// bd embeds (the parent's type and default Path), and one bd list --parent
+// reads the children of the bead if it is an epic, and of its parent. A parent
+// bd did not embed is read the way ShowEpic reads it. A parent that cannot be
+// read as an epic is left out of the page rather than failing it.
+func (g *Gateway) ShowBeadPage(ctx context.Context, id string) (application.BeadPage, bool, error) {
+	out, err := g.call(ctx, "show", id, "--include-comments", "--json")
+	if err != nil {
+		if beadMissing(err) {
+			return application.BeadPage{}, false, nil
+		}
+		return application.BeadPage{}, false, err
+	}
+	found, err := decodeBeads(out)
+	if err != nil {
+		return application.BeadPage{}, false, fmt.Errorf("reading %s: %w", id, err)
+	}
+	said, err := decodeCommentsByID(out)
+	if err != nil {
+		return application.BeadPage{}, false, fmt.Errorf("reading the comments of %s: %w", id, err)
+	}
+	var b bead
+	var shown bool
+	for _, one := range found {
+		if one.ID == id {
+			b, shown = one, true
+			break
+		}
+	}
+	if !shown {
+		return application.BeadPage{}, false, nil
+	}
+
+	parentKind, parentDefaults, embedded := b.parentLink()
+	page := application.BeadPage{Bead: b.detail(parentDefaults), Comments: said[id]}
+	if b.Type == TypeEpic {
+		page.Children, err = g.childrenOf(ctx, id, domain.PathFromMetadata(b.pathMetadata()))
+		if err != nil {
+			return application.BeadPage{}, false, fmt.Errorf("reading the children of %s: %w", id, err)
+		}
+	}
+	if b.Parent == "" {
+		return page, true, nil
+	}
+	if !embedded {
+		if parent, err := g.ShowEpic(ctx, b.Parent); err == nil {
+			page.Parent = &parent
+		}
+		return page, true, nil
+	}
+	if parentKind != "" && parentKind != TypeEpic {
+		return page, true, nil
+	}
+	if stories, err := g.childrenOf(ctx, b.Parent, parentDefaults); err == nil {
+		page.Parent = &application.EpicDetail{ID: b.Parent, Defaults: parentDefaults, Stories: stories}
+	}
+	return page, true, nil
 }
 
 // ShowEpics implements application.WorkTracker: ShowEpic for several epics at
@@ -311,23 +381,14 @@ func (g *Gateway) ShowEpics(ctx context.Context, ids []string) ([]application.Ep
 		}
 		defaults := domain.PathFromMetadata(epic.pathMetadata())
 
-		listed, err := g.call(ctx, "list", "--parent", id, "--limit", "0", "--all", "--json")
+		stories, err := g.childrenOf(ctx, id, defaults)
 		if err != nil {
 			return nil, err
 		}
-		stories, err := decodeBeads(listed)
-		if err != nil {
-			return nil, fmt.Errorf("reading the stories of %s: %w", id, err)
-		}
-
-		filed := application.EpicDetail{
+		out = append(out, application.EpicDetail{
 			ID: epic.ID, Title: epic.Title, Status: epic.Status, Priority: epic.priority(), Defaults: defaults,
-			Bead: epic.ownBead(),
-		}
-		for _, story := range inFiledOrder(stories) {
-			filed.Stories = append(filed.Stories, story.detail(defaults))
-		}
-		out = append(out, filed)
+			Bead: epic.ownBead(), Stories: stories,
+		})
 	}
 	return out, nil
 }

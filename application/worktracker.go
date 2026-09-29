@@ -290,6 +290,21 @@ type NewStory struct {
 	Needs           []string
 }
 
+// BeadPage is one bead as ShowBeadPage reads it.
+type BeadPage struct {
+	// Bead is the bead as ShowBeads reports it.
+	Bead StoryDetail
+	// Comments are the bead's, oldest first, as StoryComments lists them.
+	Comments []Comment
+	// Children are the direct children of a bead that is an epic, in the order
+	// they were filed, as ShowEpic lists its Stories; nil for anything else.
+	Children []StoryDetail
+	// Parent is the bead's parent read as an epic, only its Defaults and
+	// Stories filled in; nil when the bead has none, or its parent cannot be
+	// read as an epic.
+	Parent *EpicDetail
+}
+
 // WorkTracker is the port the factory reads and writes stories through. One
 // adapter talks to beads; an in-memory one stands in for it in tests.
 //
@@ -339,6 +354,14 @@ type WorkTracker interface {
 	// read, empty otherwise. An id the tracker does not know is left out
 	// rather than failing the whole read. It reads and writes nothing.
 	ShowBeads(ctx context.Context, ids []string) ([]StoryDetail, error)
+
+	// ShowBeadPage reads one bead with everything a page of its own shows, in as
+	// few calls as the tracker allows — two for a story with a parent, three
+	// for an epic with one: the bead as ShowBeads reads it, its comments as
+	// StoryComments does, its children when it is an epic, and its parent's
+	// (see BeadPage). False, with nothing else, when the tracker does not know
+	// the bead. It reads and writes nothing.
+	ShowBeadPage(ctx context.Context, id string) (BeadPage, bool, error)
 
 	// LiveEpics lists the ids of every epic that is open or in progress, in
 	// the order the tracker files them — what a project view means by "live":

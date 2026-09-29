@@ -74,7 +74,8 @@ type PosternBeadComment struct {
 // docs/protocol.md §12: the postern backend runs mw postern bead per request
 // (POSTERN_BEAD_CMD), so it only reads, and reads little — the bead itself,
 // its epic's children (to say what waits on it) or its own (for an epic),
-// and its comments: four bd calls for a story.
+// and its comments: two bd calls for a story with an epic, three for an epic
+// with one (Tracker.ShowBeadPage).
 type PosternBead struct {
 	Tracker WorkTracker
 	// Cipher and GovernorKey seal the detail, as the view is sealed. Required
@@ -118,14 +119,14 @@ func (p PosternBead) Build(ctx context.Context, id string) (PosternBeadDetail, e
 	if !posternBeadID.MatchString(id) {
 		return PosternBeadDetail{}, &PosternBeadMissing{ID: id}
 	}
-	found, err := p.Tracker.ShowBeads(ctx, []string{id})
+	page, found, err := p.Tracker.ShowBeadPage(ctx, id)
 	if err != nil {
 		return PosternBeadDetail{}, fmt.Errorf("reading %s: %w", id, err)
 	}
-	if len(found) == 0 {
+	if !found {
 		return PosternBeadDetail{}, &PosternBeadMissing{ID: id}
 	}
-	d := found[0]
+	d := page.Bead
 
 	kind := strings.TrimSpace(d.Type)
 	if kind == "" {
@@ -148,26 +149,20 @@ func (p PosternBead) Build(ctx context.Context, id string) (PosternBeadDetail, e
 	// and — for an epic — its own.
 	var tree []StoryDetail
 	if d.IsEpic {
-		epic, err := p.Tracker.ShowEpic(ctx, id)
-		if err != nil {
-			return PosternBeadDetail{}, fmt.Errorf("reading the children of %s: %w", id, err)
-		}
-		for _, child := range epic.Stories {
+		for _, child := range page.Children {
 			detail.Children = append(detail.Children, child.Story.ID)
 		}
-		detail.Path = viewPathOrNil(epic.Defaults)
-		tree = append(tree, epic.Stories...)
+		detail.Path = viewPathOrNil(d.Story.Overrides)
+		tree = append(tree, page.Children...)
 	} else {
 		detail.Path = viewPathOf(d.Merged())
 	}
-	if d.EpicID != "" {
+	if page.Parent != nil {
 		// A parent that cannot be read as an epic leaves blocks as far as
 		// the bead's own children know, and the path as the bead said it.
-		if parent, err := p.Tracker.ShowEpic(ctx, d.EpicID); err == nil {
-			tree = append(tree, parent.Stories...)
-			if !d.IsEpic {
-				detail.Path = viewPathOf(parent.Defaults.Overlay(d.Story.Overrides))
-			}
+		tree = append(tree, page.Parent.Stories...)
+		if !d.IsEpic {
+			detail.Path = viewPathOf(page.Parent.Defaults.Overlay(d.Story.Overrides))
 		}
 	}
 	seen := map[string]bool{}
@@ -184,11 +179,7 @@ func (p PosternBead) Build(ctx context.Context, id string) (PosternBeadDetail, e
 		}
 	}
 
-	comments, err := p.Tracker.StoryComments(ctx, id)
-	if err != nil {
-		return PosternBeadDetail{}, fmt.Errorf("reading the comments of %s: %w", id, err)
-	}
-	for _, c := range comments {
+	for _, c := range page.Comments {
 		detail.Comments = append(detail.Comments, PosternBeadComment{
 			At: formatOrEmpty(c.Created), Author: c.Author, Text: clippedTo(c.Text, PosternBeadCommentLimit),
 		})

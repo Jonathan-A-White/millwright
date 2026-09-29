@@ -43,6 +43,7 @@ type bead struct {
 // none of these fields and so decode to nothing useful.
 type linked struct {
 	ID       string          `json:"id"`
+	Type     string          `json:"issue_type"`
 	Kind     string          `json:"dependency_type"`
 	Status   string          `json:"status"`
 	Metadata json.RawMessage `json:"metadata"`
@@ -153,11 +154,12 @@ func (b bead) exhausted() bool {
 	return false
 }
 
-// parentPath is the default Path of this bead's parent, read from the copy of
-// the parent bd embeds in a shown bead. It reports whether that copy was there.
-func (b bead) parentPath() (domain.Path, bool) {
+// parentLink is the copy of this bead's parent bd embeds in a shown bead: the
+// parent's own type and the default Path read from its metadata. It reports
+// whether that copy was there.
+func (b bead) parentLink() (kind string, path domain.Path, found bool) {
 	if b.Parent == "" {
-		return domain.Path{}, false
+		return "", domain.Path{}, false
 	}
 	for _, raw := range b.Dependencies {
 		var link linked
@@ -171,9 +173,16 @@ func (b bead) parentPath() (domain.Path, bool) {
 		if err := json.Unmarshal(link.Metadata, &metadata); err != nil {
 			continue
 		}
-		return domain.PathFromMetadata(bead{Metadata: metadata}.pathMetadata()), true
+		return link.Type, domain.PathFromMetadata(bead{Metadata: metadata}.pathMetadata()), true
 	}
-	return domain.Path{}, false
+	return "", domain.Path{}, false
+}
+
+// parentPath is the default Path of this bead's parent, read from the copy of
+// the parent bd embeds in a shown bead. It reports whether that copy was there.
+func (b bead) parentPath() (domain.Path, bool) {
+	_, path, found := b.parentLink()
+	return path, found
 }
 
 // priority is the bead's priority, 0 being the most urgent. bd always prints

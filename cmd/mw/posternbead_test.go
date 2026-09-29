@@ -14,9 +14,13 @@ import (
 )
 
 // bdShowing puts a stand-in for bd first on PATH that answers bd show with
-// shown, bd list with an empty list and bd comments with comments.
+// shown — carrying comments inline, as bd show --include-comments does — bd
+// list with an empty list and bd comments with comments.
 func bdShowing(t *testing.T, shown, comments string) {
 	t.Helper()
+	if trimmed := strings.TrimSpace(shown); strings.HasSuffix(trimmed, "}]") {
+		shown = strings.TrimSuffix(trimmed, "}]") + `, "comments": ` + comments + "}]"
+	}
 	bin := t.TempDir()
 	script := fmt.Sprintf(`#!/bin/sh
 for a in "$@"; do
