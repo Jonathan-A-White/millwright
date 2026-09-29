@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -37,7 +39,9 @@ func newSyncCmd() *cobra.Command {
 			"`beads_backup_minutes` old (default 30); one that halts is said and marked but stops nothing.\n" +
 			"On a host whose bd reaches another host's database (`shared`) there is no beads cycle and no\n" +
 			"collection. In both the note of when this host was level is written on every sync, straight\n" +
-			"into the one database.",
+			"into the one database. `auto` is backup on the home and shared on a boost, read off the\n" +
+			"vault's home file (backup every 5 minutes unless beads_backup_minutes says; the boost's\n" +
+			"server is beads_server_host or <home>.mw); with no home file it refuses and does nothing.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := config.Vault()
@@ -71,7 +75,8 @@ func newSyncCmd() *cobra.Command {
 }
 
 // hostBeadsSync is how this host's beads database is treated: config
-// beads_sync, remote when it says nothing.
+// beads_sync, remote when it says nothing. It is as configured: auto stays
+// auto, for hostBeads to read off the home.
 func hostBeadsSync() (application.BeadsSyncMode, error) {
 	said, err := config.BeadsSync()
 	if err != nil {
@@ -80,20 +85,80 @@ func hostBeadsSync() (application.BeadsSyncMode, error) {
 	return application.ParseBeadsSyncMode(said)
 }
 
+// hostBeadsSetting is what this host's beads_sync comes to.
+type hostBeadsSetting struct {
+	// Configured is the mode as config says it, auto included.
+	Configured application.BeadsSyncMode
+	// Resolved is the mode this host acts on. For auto whose home cannot be
+	// told it is still auto, and Unknown says why: nothing may be done on it.
+	Resolved application.ResolvedBeadsSync
+	Unknown  error
+}
+
+// Mode is the mode this host acts on: Configured, or the one auto came to.
+func (h hostBeadsSetting) Mode() application.BeadsSyncMode {
+	if h.Resolved.Mode == "" {
+		return h.Configured
+	}
+	return h.Resolved.Mode
+}
+
+// hostBeads reads this host's beads_sync and, when it is auto, the vault's
+// home file with it. On a boost it also points bd at the home's Dolt server —
+// beads_server_host or <home>.mw — in this process's environment, where every
+// bd this command starts reads it; the rest of the server's settings stay in
+// the environment as they were. Nothing is guessed: a home that cannot be told
+// leaves the environment alone and comes back as Unknown.
+func hostBeads(ctx context.Context, files application.HomeFile, host string) (hostBeadsSetting, error) {
+	configured, err := hostBeadsSync()
+	if err != nil {
+		return hostBeadsSetting{}, err
+	}
+	setting := hostBeadsSetting{Configured: configured}
+	resolved, err := application.ResolveBeadsSync(ctx, files, host, configured)
+	if _, unknown := application.HomeUnknownIn(err); unknown {
+		setting.Unknown = err
+		return setting, nil
+	}
+	if err != nil {
+		return hostBeadsSetting{}, err
+	}
+	setting.Resolved = resolved
+	if configured == application.BeadsSyncAuto && resolved.Mode == application.BeadsSyncShared {
+		override, err := config.BeadsServerHost()
+		if err != nil {
+			return hostBeadsSetting{}, err
+		}
+		if err := os.Setenv(config.BeadsDoltServerHostEnv, application.BoostServerHost(resolved.Home, override)); err != nil {
+			return hostBeadsSetting{}, err
+		}
+	}
+	return setting, nil
+}
+
 // hostSync is sync with this host's beads_sync mode and backup interval set
 // from config, so that every command that brings this host level — mw sync,
 // dispatch, next and the Millhand's tick — treats the beads database alike.
+// A beads_backup_minutes that is not said is the mode's own default: 30, and
+// 5 for auto, which the sync applies once it knows it is on the home.
 func hostSync(sync application.Sync) (application.Sync, error) {
-	mode, err := hostBeadsSync()
+	files, _ := sync.Vault.(application.HomeFile)
+	setting, err := hostBeads(context.Background(), files, sync.Host)
 	if err != nil {
 		return sync, err
 	}
-	minutes, err := config.BeadsBackupMinutes()
+	minutes, said, err := config.BeadsBackupMinutesSaid()
 	if err != nil {
 		return sync, err
 	}
-	sync.Mode = mode
-	sync.BackupInterval = time.Duration(minutes) * time.Minute
+	sync.Mode = setting.Configured
+	sync.Home = files
+	switch {
+	case said:
+		sync.BackupInterval = time.Duration(minutes) * time.Minute
+	case setting.Configured != application.BeadsSyncAuto:
+		sync.BackupInterval = time.Duration(config.DefaultBeadsBackupMinutes) * time.Minute
+	}
 	return sync, nil
 }
 

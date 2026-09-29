@@ -1067,6 +1067,29 @@ func TestBeadsSyncIsRemoteUntilAHostSaysOtherwise(t *testing.T) {
 	}
 }
 
+func TestBeadsSyncKnowsAutoAndTheServerHostAndBackupMinutesAreSaidOrNot(t *testing.T) {
+	t.Setenv(config.BeadsServerHostEnv, "")
+	t.Setenv(config.BeadsBackupMinutesEnv, "")
+	writeConfig(t, "beads_sync = \"auto\"\n")
+	if mode, err := config.BeadsSync(); err != nil || mode != config.BeadsSyncAuto {
+		t.Fatalf("expected auto, got %q: %v", mode, err)
+	}
+	if host, err := config.BeadsServerHost(); err != nil || host != "" {
+		t.Fatalf("expected no server host said, got %q: %v", host, err)
+	}
+	if _, said, err := config.BeadsBackupMinutesSaid(); err != nil || said {
+		t.Fatalf("expected no backup minutes said, got said=%v: %v", said, err)
+	}
+
+	writeConfig(t, "beads_sync = \"auto\"\nbeads_server_host = \"10.88.0.2\"\nbeads_backup_minutes = 7\n")
+	if host, err := config.BeadsServerHost(); err != nil || host != "10.88.0.2" {
+		t.Fatalf("expected the file's server host, got %q: %v", host, err)
+	}
+	if minutes, said, err := config.BeadsBackupMinutesSaid(); err != nil || !said || minutes != 7 {
+		t.Fatalf("expected 7 said, got %d %v: %v", minutes, said, err)
+	}
+}
+
 func TestBeadsSyncRefusesAnythingButItsThreeChoicesNamingThem(t *testing.T) {
 	writeConfig(t, "beads_sync = \"server\"\n")
 	_, err := config.BeadsSync()

@@ -90,8 +90,13 @@ func newDoctorCmd() *cobra.Command {
 			// Read here but judged by the check itself: a beads_sync or a
 			// BEADS_DOLT_SERVER_PORT this host cannot read is beads-server's
 			// to say, never a reason every other check does not run.
-			beadsSync, beadsSyncErr := config.BeadsSync()
+			setting, beadsSyncErr := hostBeads(cmd.Context(), mwVault(vault, host), host)
+			if beadsSyncErr == nil && setting.Unknown != nil {
+				beadsSyncErr = fmt.Errorf("beads_sync is auto but %w: nothing to judge", setting.Unknown)
+			}
 			beadsServer, beadsServerErr := config.BeadsServerAddress()
+			beadsServerCheck := doctor.NewBeadsServer(string(setting.Mode()), beadsServer, beadsSyncErr, beadsServerErr)
+			beadsServerCheck.Why = setting.Resolved.Why
 
 			store := doctor.New(dir)
 			tmpLeftovers := doctor.NewTmpLeftovers(os.TempDir())
@@ -107,7 +112,7 @@ func newDoctorCmd() *cobra.Command {
 					doctor.NewBeadsSize(vault),
 					tmpLeftovers,
 					doctor.NewMayorGone(vault),
-					doctor.NewBeadsServer(beadsSync, beadsServer, beadsSyncErr, beadsServerErr),
+					beadsServerCheck,
 				},
 				State: store,
 				Log:   store,
