@@ -172,7 +172,7 @@ func newPosternInboxCmd() *cobra.Command {
 			"--apply is the zero-token pass the postern backend's on-message hook runs: every message\n" +
 			"since the cursor that the Governor verifiably sent and this host knows how to apply is\n" +
 			"applied at once, as the Governor — a reply, a comment in a bead's thread, or an action\n" +
-			"(postern's docs/protocol.md section 13: release, hold, priority, verified) — each at most\n" +
+			"(postern's docs/protocol.md section 13: release, hold, priority, verified, keep, close) — each at most\n" +
 			"once per txid, commented on its bead and mailed to the Mayor. It moves no cursor and\n" +
 			"prints no message's text, only one line per message applied. A plain read then shows an\n" +
 			"applied message as that one line: applied <kind> <bead> txid <id>. An action this host\n" +

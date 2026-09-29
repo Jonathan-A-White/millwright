@@ -52,6 +52,9 @@ type posternInboxContext struct {
 	mover    *apptest.FakeHomeMover
 	moveBead string
 	now      time.Time
+	// clock is the time the keep and close scenarios read; zero leaves
+	// the inbox on the real one.
+	clock time.Time
 
 	// attachImage and attachTxid are what the last "carrying a screenshot"
 	// step built, so a later Then step can compute the path mw postern
@@ -92,6 +95,8 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 		}
 		return ctx, nil
 	})
+
+	c.registerPosternCloseSteps(ctx)
 
 	ctx.Given(`^a throwaway postern key$`, c.aThrowawayPosternKey)
 	ctx.Given(`^a postern record of class "([^"]*)" addressed to this key$`, c.aPosternRecordAddressedToThisKey)
@@ -576,6 +581,9 @@ func (c *posternInboxContext) inbox() application.PosternInbox {
 		inbox.HandsHosts = map[string]string{"laptop": "ssh laptop", "desktop": "ssh desktop"}
 		inbox.Now = func() time.Time { return c.now }
 	}
+	if !c.clock.IsZero() {
+		inbox.Now = func() time.Time { return c.clock }
+	}
 	return inbox
 }
 
@@ -1032,10 +1040,15 @@ func (c *posternInboxContext) beadNowStands(bead, status string) error {
 	if err := c.itSucceeds(); err != nil {
 		return err
 	}
-	detail, err := c.memory.ShowStory(context.Background(), bead)
+	// ShowBeads, not ShowStory: the bead may be an epic.
+	found, err := c.memory.ShowBeads(context.Background(), []string{bead})
 	if err != nil {
 		return err
 	}
+	if len(found) == 0 {
+		return fmt.Errorf("no bead %q", bead)
+	}
+	detail := found[0]
 	if detail.Status != status {
 		return fmt.Errorf("expected %s to stand %s, got %s", bead, status, detail.Status)
 	}

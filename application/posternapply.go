@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // PosternAppliedPrefix is the prefix of every note PosternAppliedKey writes.
@@ -23,7 +24,13 @@ const (
 	PosternActionHold     = "hold"
 	PosternActionPriority = "priority"
 	PosternActionVerified = "verified"
+	PosternActionKeep     = "keep"
+	PosternActionClose    = "close"
 )
+
+// PosternKeepDays is how many days a keep action that names none keeps a
+// stale bead for.
+const PosternKeepDays = 30
 
 // PosternAction is an action's plaintext, section 13: a JSON object naming
 // what to do and the bead to do it to, and — for a priority — the priority.
@@ -31,6 +38,10 @@ type PosternAction struct {
 	Action   string `json:"action"`
 	Bead     string `json:"bead"`
 	Priority *int   `json:"priority,omitempty"`
+
+	// Days is a keep's: how many days more the bead is kept, PosternKeepDays
+	// when it names none.
+	Days *int `json:"days,omitempty"`
 
 	// Step, SHA256, ApprovedAt and Sig are a run action's (§17): the step
 	// approved, its hash as he saw it, when he approved it (Unix seconds),
@@ -59,7 +70,8 @@ func decodePosternAction(text string) (PosternAction, bool) {
 // it does not is left for the Mayor to read as text.
 func knownPosternAction(action string) bool {
 	switch action {
-	case PosternActionRelease, PosternActionHold, PosternActionPriority, PosternActionVerified, PosternActionRun:
+	case PosternActionRelease, PosternActionHold, PosternActionPriority, PosternActionVerified, PosternActionRun,
+		PosternActionKeep, PosternActionClose:
 		return true
 	}
 	return false
@@ -293,11 +305,11 @@ func (i PosternInbox) applyOne(ctx context.Context, m PosternInboxMessage, outco
 }
 
 // applyAction applies one of the Governor's section 13 actions to its bead,
-// as the Governor, at zero tokens: release, hold, priority or verified. Each
-// done is commented on its bead and mailed to the Mayor; each that cannot be
-// done — no such bead, a hold on a story already claimed, a priority out of
-// range — is refused, and the Mayor is mailed why. Either way it is applied,
-// so it is never tried again.
+// as the Governor, at zero tokens: release, hold, priority, verified, keep or
+// close. Each done is commented on its bead and mailed to the Mayor; each that
+// cannot be done — no such bead, a hold on a story already claimed, a priority
+// out of range — is refused, and the Mayor is mailed why. Either way it is
+// applied, so it is never tried again.
 func (i PosternInbox) applyAction(ctx context.Context, m PosternInboxMessage, action PosternAction) (posternApplied, error) {
 	if action.Action == PosternActionRun {
 		return i.applyRun(ctx, m, action)
@@ -371,6 +383,24 @@ func (i PosternInbox) applyAction(ctx context.Context, m PosternInboxMessage, ac
 		return done(fmt.Sprintf("Priority %d: %s", *action.Priority, action.Bead),
 			fmt.Sprintf("PRIORITY %d set by the Governor via postern, txid %s", *action.Priority, m.Txid))
 
+	case PosternActionKeep:
+		days := PosternKeepDays
+		if action.Days != nil {
+			days = *action.Days
+		}
+		if days < 1 {
+			return refuse(fmt.Sprintf("it keeps the bead for %d days", days))
+		}
+		until := i.now().UTC().Add(time.Duration(days) * 24 * time.Hour)
+		if err := i.Memory.SetNote(ctx, PosternKeepKey(action.Bead), until.Format(time.RFC3339)); err != nil {
+			return posternApplied{}, fmt.Errorf("keeping %s for the Governor: %w", action.Bead, err)
+		}
+		return done(fmt.Sprintf("Kept: %s", action.Bead),
+			fmt.Sprintf("KEPT by the Governor via postern (%s) until %s", m.Txid, until.Format("2006-01-02")))
+
+	case PosternActionClose:
+		return i.applyClose(ctx, m, bead, refuse, done)
+
 	default: // PosternActionVerified
 		comments, err := i.Tracker.StoryComments(ctx, action.Bead)
 		if err != nil {
@@ -383,6 +413,83 @@ func (i PosternInbox) applyAction(ctx context.Context, m PosternInboxMessage, ac
 		}
 		return done(fmt.Sprintf("Verified: %s", action.Bead), fmt.Sprintf("VERIFIED by the Governor via postern (%s)", m.Txid))
 	}
+}
+
+// applyClose closes bead for the Governor: a story, ticket or hitl bead
+// itself; an epic or map its held children first, at any depth, then itself,
+// each with the Governor's reason. Nothing is closed when any child is
+// in_progress or claimed: the Mayor is told, naming it, and the bead is left
+// without a comment (section 13). A bead already closed, or a story someone
+// holds, is refused likewise.
+func (i PosternInbox) applyClose(ctx context.Context, m PosternInboxMessage, bead StoryDetail,
+	refuse func(string) (posternApplied, error), done func(subject, comment string) (posternApplied, error)) (posternApplied, error) {
+	if bead.Closed() {
+		return refuse("it is already closed")
+	}
+	closes := []string{bead.Story.ID}
+	if bead.IsEpic {
+		held, busy, err := i.heldUnder(ctx, bead.Story.ID, map[string]bool{})
+		if err != nil {
+			return posternApplied{}, err
+		}
+		if busy != "" {
+			return refuse(fmt.Sprintf("%s is being worked", busy))
+		}
+		closes = append(held, closes...)
+	} else if isClaimed(bead) {
+		return refuse(fmt.Sprintf("it is %s%s", bead.Status, claimedBy(bead.Assignee)))
+	}
+	reason := fmt.Sprintf("Closed by the Governor via postern (%s)", m.Txid)
+	// The comment first: the epic's own is the record of the close, and a
+	// close that fails part-way leaves no bead the Governor's word is not on.
+	subject := fmt.Sprintf("Closed: %s", bead.Story.ID)
+	result, err := done(subject, reason)
+	if err != nil {
+		return posternApplied{}, err
+	}
+	for _, id := range closes {
+		if err := i.Tracker.CloseStory(ctx, id, reason); err != nil {
+			return refuse(fmt.Sprintf("closing %s failed: %v", id, err))
+		}
+	}
+	return result, nil
+}
+
+// heldUnder is the held (deferred) beads under epic, deepest first, or the
+// first bead under it that is in_progress or claimed.
+func (i PosternInbox) heldUnder(ctx context.Context, epic string, seen map[string]bool) (held []string, busy string, err error) {
+	if seen[epic] {
+		return nil, "", nil
+	}
+	seen[epic] = true
+	detail, err := i.Tracker.ShowEpic(ctx, epic)
+	if err != nil {
+		return nil, "", fmt.Errorf("reading %s's children for the Governor's close: %w", epic, err)
+	}
+	for _, child := range detail.Stories {
+		if child.Closed() {
+			continue
+		}
+		if child.IsEpic {
+			below, busy, err := i.heldUnder(ctx, child.Story.ID, seen)
+			if err != nil || busy != "" {
+				return nil, busy, err
+			}
+			held = append(held, below...)
+		} else if isClaimed(child) {
+			return nil, child.Story.ID, nil
+		}
+		if child.Held() {
+			held = append(held, child.Story.ID)
+		}
+	}
+	return held, "", nil
+}
+
+// isClaimed reports whether someone is working bead: it is in_progress, or is
+// open with an assignee.
+func isClaimed(bead StoryDetail) bool {
+	return strings.EqualFold(strings.TrimSpace(bead.Status), StatusInProgress) || strings.TrimSpace(bead.Assignee) != ""
 }
 
 // claimedBy is ", claimed by <who>" for a story someone holds, "" otherwise.

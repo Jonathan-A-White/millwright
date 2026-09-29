@@ -46,6 +46,7 @@ type FakeTracker struct {
 	titles   map[string]string      // epic id -> what it is called
 	epicSays map[string]epicFacts   // epic id -> its status and priority, when set
 	epicSaid map[string][]string    // epic id -> the comments on it, oldest first
+	epicShut map[string]string      // root epic id -> the reason it was closed for
 	stories  map[string]*fakeStory
 	order    []string
 	epics    []string
@@ -155,6 +156,7 @@ func NewFakeTracker() *FakeTracker {
 		titles:    map[string]string{},
 		epicSays:  map[string]epicFacts{},
 		epicSaid:  map[string][]string{},
+		epicShut:  map[string]string{},
 		stories:   map[string]*fakeStory{},
 		formulas:  map[string][]application.FormulaStep{},
 		poured:    map[string]string{},
@@ -515,7 +517,7 @@ func (f *FakeTracker) CloseReason(id string) string {
 	if s, ok := f.stories[id]; ok {
 		return s.closeReason
 	}
-	return ""
+	return f.epicShut[id]
 }
 
 // Metadata reports the metadata fields written onto a story.
@@ -1271,6 +1273,23 @@ func (f *FakeTracker) RefuseToClose(id, why string) {
 
 // CloseStory implements application.WorkTracker.
 func (f *FakeTracker) CloseStory(_ context.Context, id, reason string) error {
+	f.mu.Lock()
+	if _, isStory := f.stories[id]; !isStory && f.Err == nil {
+		if _, isEpic := f.defaults[id]; isEpic {
+			// A root epic has no story entry: it reads as closed by what it says.
+			says, described := f.epicSays[id]
+			if !described {
+				says = epicFacts{priority: application.DefaultPriority}
+			}
+			says.status = StatusClosed
+			f.epicSays[id] = says
+			f.epicShut[id] = reason
+			f.writes++
+			f.mu.Unlock()
+			return nil
+		}
+	}
+	f.mu.Unlock()
 	return f.write(id, func(s *fakeStory) error {
 		if why := f.refused[id]; why != "" {
 			return fmt.Errorf("%s", why)

@@ -108,3 +108,68 @@ Feature: mw postern inbox --apply
     Then the hands step "echo" on "mw-act.3" did not run
     And bead "mw-act.3"'s last comment starts "NOT RUN step echo (approved by the Governor via postern, txid tx-stale): the step changed since you approved it"
     And mail "Not run: mw-act.3 echo" was sent to mayor
+
+  # keep and close answer a stale card (protocol section 11): keep hides the
+  # bead from the view for a while, close finishes it. Both are applied only
+  # as the Governor (section 13).
+  Scenario: A keep tap writes the note and the comment, and the bead leaves the view
+    Given the postern inbox clock reads "2026-09-28T12:00:00Z"
+    And the stale epic "mw-old" has a held story filed 8 days ago
+    And the postern view raises a stale need on "mw-old"
+    And a postern keep action on bead "mw-old" for 14 days from the Governor with txid "tx-keep"
+    When mw postern inbox --apply is run
+    Then reading succeeds
+    And the note "postern.keep.mw-old" reads "2026-10-12T12:00:00Z"
+    And bead "mw-old"'s last comment reads "KEPT by the Governor via postern (tx-keep) until 2026-10-12"
+    And mail "Kept: mw-old" was sent to mayor
+    And the txid "tx-keep" is marked applied
+    And the postern view raises no stale need on "mw-old"
+
+  Scenario: A keep tap that names no days keeps the bead for 30
+    Given the postern inbox clock reads "2026-09-28T12:00:00Z"
+    And a postern action "keep" on bead "mw-act.3" from "governor-pubkey-hex" with txid "tx-keep30"
+    When mw postern inbox --apply is run
+    Then the note "postern.keep.mw-act.3" reads "2026-10-28T12:00:00Z"
+    And bead "mw-act.3"'s last comment reads "KEPT by the Governor via postern (tx-keep30) until 2026-10-28"
+
+  Scenario: A keep tap from anyone but the Governor does nothing
+    Given the postern inbox clock reads "2026-09-28T12:00:00Z"
+    And a postern action "keep" on bead "mw-act.3" from "someone-else-pubkey-hex" with txid "tx-keep-other"
+    When mw postern inbox --apply is run
+    Then the note "postern.keep.mw-act.3" is not set
+    And bead "mw-act.3" has no comment
+
+  Scenario: A close tap on a held story closes it with the Governor's reason
+    Given a postern action "close" on bead "mw-act.1" from "governor-pubkey-hex" with txid "tx-close"
+    When mw postern inbox --apply is run
+    Then bead "mw-act.1" now stands "closed"
+    And bead "mw-act.1" was closed with the reason "Closed by the Governor via postern (tx-close)"
+    And mail "Closed: mw-act.1" was sent to mayor
+    And the txid "tx-close" is marked applied
+
+  Scenario: A close tap on an epic closes its two held stories, then the epic
+    Given a postern action "close" on bead "mw-act" from "governor-pubkey-hex" with txid "tx-close-epic"
+    When mw postern inbox --apply is run
+    Then bead "mw-act.1" now stands "closed"
+    And bead "mw-act.2" now stands "closed"
+    And bead "mw-act" now stands "closed"
+    And bead "mw-act.1" was closed with the reason "Closed by the Governor via postern (tx-close-epic)"
+    And bead "mw-act.2" was closed with the reason "Closed by the Governor via postern (tx-close-epic)"
+    And bead "mw-act" was closed with the reason "Closed by the Governor via postern (tx-close-epic)"
+    And mail "Closed: mw-act" was sent to mayor
+
+  Scenario: A close tap on an epic with an in_progress story closes nothing and names the story
+    Given bead "mw-act.2" is claimed by "mw@laptop"
+    And a postern action "close" on bead "mw-act" from "governor-pubkey-hex" with txid "tx-close-busy"
+    When mw postern inbox --apply is run
+    Then bead "mw-act.1" now stands "deferred"
+    And bead "mw-act.2" now stands "in_progress"
+    And bead "mw-act" now stands "open"
+    And bead "mw-act" has no comment
+    And mail "Not applied: close mw-act" was sent to mayor saying "mw-act.2"
+
+  Scenario: A close tap from anyone but the Governor does nothing
+    Given a postern action "close" on bead "mw-act.1" from "someone-else-pubkey-hex" with txid "tx-close-other"
+    When mw postern inbox --apply is run
+    Then bead "mw-act.1" now stands "deferred"
+    And no mail was sent for the reply
