@@ -14,11 +14,13 @@ import (
 )
 
 // SlotSuffix names a rig's merge slot, which lives beside the rig's story
-// worktrees. SlotWait is how long a close-out waits for the slot before giving
-// up, and SlotPoll is how often it looks.
+// worktrees. SlotWait is how long a close-out waits on one holder of the slot
+// before giving up, SlotCap is how long it waits in all however often the slot
+// changes hands, and SlotPoll is how often it looks.
 const (
 	SlotSuffix = ".merge-slot"
 	SlotWait   = 20 * time.Minute
+	SlotCap    = 2 * time.Hour
 	SlotPoll   = 2 * time.Second
 )
 
@@ -39,6 +41,7 @@ const (
 // refusing the second push.
 type Slots struct {
 	wait time.Duration
+	cap  time.Duration
 	poll time.Duration
 }
 
@@ -48,9 +51,15 @@ var _ application.MergeSlot = (*Slots)(nil)
 // SlotOption is a setting of a Slots, given to NewSlots.
 type SlotOption func(*Slots)
 
-// WithSlotWait sets how long taking a slot waits before giving up.
+// WithSlotWait sets how long taking a slot waits on one holder before giving up.
 func WithSlotWait(wait time.Duration) SlotOption {
 	return func(s *Slots) { s.wait = wait }
+}
+
+// WithSlotCap sets how long taking a slot waits in all, whoever has it, before
+// giving up.
+func WithSlotCap(cap time.Duration) SlotOption {
+	return func(s *Slots) { s.cap = cap }
 }
 
 // WithSlotPoll sets how often a wait looks to see whether the slot is free.
@@ -60,7 +69,7 @@ func WithSlotPoll(poll time.Duration) SlotOption {
 
 // NewSlots returns the merge slots of this host's rigs.
 func NewSlots(opts ...SlotOption) *Slots {
-	s := &Slots{wait: SlotWait, poll: SlotPoll}
+	s := &Slots{wait: SlotWait, cap: SlotCap, poll: SlotPoll}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -101,10 +110,14 @@ func (s *Slots) Take(ctx context.Context, rigDir, holder string) (application.Ho
 	return &holding{file: file, holder: holder}, nil
 }
 
-// flock waits for the lock on the slot file, looking every poll until the wait
-// runs out or the context gives up.
+// flock waits for the lock on the slot file, looking every poll until one
+// holder has kept it for the wait, or the cap has passed in all, or the context
+// gives up. The wait is per holder: it starts again whenever what the slot says
+// changes, because a slot that keeps changing hands is a queue of close-outs all
+// landing, not one stuck.
 func (s *Slots) flock(ctx context.Context, file *os.File, path string) error {
 	started := time.Now()
+	since, said := started, readSlot(path)
 	for {
 		err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		if err == nil {
@@ -113,8 +126,17 @@ func (s *Slots) flock(ctx context.Context, file *os.File, path string) error {
 		if !errors.Is(err, syscall.EWOULDBLOCK) {
 			return fmt.Errorf("taking the merge slot %s: %w", path, err)
 		}
-		if waited := time.Since(started); waited >= s.wait {
-			return fmt.Errorf("the merge slot %s is still held by %q after %s: another close-out is landing work on this rig, or one is stuck",
+
+		now := time.Now()
+		if again := readSlot(path); again != said {
+			since, said = now, again
+		}
+		if waited := now.Sub(started); waited >= s.cap {
+			return fmt.Errorf("the merge slot %s kept changing hands and was still held by %q after %s, the overall most a close-out waits: close-outs are landing work on this rig one after another",
+				path, held(path), waited.Round(time.Second))
+		}
+		if waited := now.Sub(since); waited >= s.wait {
+			return fmt.Errorf("the merge slot %s is still held by %q after %s: one holder has had it that long, so that close-out is stuck or is landing a great deal of work",
 				path, held(path), waited.Round(time.Second))
 		}
 
@@ -172,14 +194,21 @@ func unlock(file *os.File) error {
 	return syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
 }
 
+// readSlot is all the slot file says: who has it, which process, and since when,
+// so that it differs from one holding to the next. It is empty when nobody has it
+// or the file cannot be read.
+func readSlot(path string) string {
+	said, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(said)
+}
+
 // held is whoever the slot file says has it, for a message to somebody waiting.
 // It reads without taking anything, so it is a courtesy and never a decision.
 func held(path string) string {
-	said, err := os.ReadFile(path)
-	if err != nil {
-		return "somebody"
-	}
-	if first := strings.TrimSpace(strings.SplitN(string(said), "\n", 2)[0]); first != "" {
+	if first := strings.TrimSpace(strings.SplitN(readSlot(path), "\n", 2)[0]); first != "" {
 		return first
 	}
 	return "somebody"
