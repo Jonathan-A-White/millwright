@@ -1307,6 +1307,22 @@ func TestPosternLocalURLIsThisHostsOwnNameUnlessSaid(t *testing.T) {
 	}
 }
 
+func TestHomeMoveBeadIsTheEpicUnlessSaid(t *testing.T) {
+	t.Setenv(config.HomeMoveBeadEnv, "")
+	writeConfig(t, "")
+	if bead, err := config.HomeMoveBead(); err != nil || bead != config.DefaultHomeMoveBead {
+		t.Fatalf("expected %s, got %q: %v", config.DefaultHomeMoveBead, bead, err)
+	}
+	writeConfig(t, "home_move_bead = \"mw-demo\"\n")
+	if bead, err := config.HomeMoveBead(); err != nil || bead != "mw-demo" {
+		t.Fatalf("expected the file's bead, got %q: %v", bead, err)
+	}
+	t.Setenv(config.HomeMoveBeadEnv, "mw-env")
+	if bead, err := config.HomeMoveBead(); err != nil || bead != "mw-env" {
+		t.Fatalf("expected %s to win, got %q: %v", config.HomeMoveBeadEnv, bead, err)
+	}
+}
+
 func TestPosternWatchdogTargetIsEmptyUntilAHostSaysOne(t *testing.T) {
 	t.Setenv(config.PosternWatchdogEnv, "")
 	writeConfig(t, "")

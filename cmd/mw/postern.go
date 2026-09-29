@@ -13,6 +13,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hands"
+	"github.com/Jonathan-A-White/millwright/infrastructure/homemove"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostlock"
 	"github.com/Jonathan-A-White/millwright/infrastructure/postern"
 )
@@ -189,7 +190,14 @@ func newPosternInboxCmd() *cobra.Command {
 			"postern_governor_key, the approval is under 15 minutes old and has not run before: here\n" +
 			"or over the step host's [hands_hosts] ssh prefix, as this host's user (sh -c) or as root\n" +
 			"through sudo -n hands_root_helper. How it ran, or why not, is commented on the bead, sent\n" +
-			"back to him in the bead's thread and mailed to the Mayor.",
+			"back to him in the bead's thread and mailed to the Mayor.\n\n" +
+			"A move-home (section 18, the Governor's tap: {\"host\": \"<host>\"}) is run by --apply only\n" +
+			"when the record's signer, the key the backend vouches for, is postern_governor_key and it\n" +
+			"is under 30 minutes old; anything else is refused and nothing runs. Naming this host, it\n" +
+			"runs mw home move <host> --planned when the old home answers ssh ([hands_hosts]), else\n" +
+			"--old-home-dead, writes the start and the result on home_move_bead and mails the Mayor.\n" +
+			"Naming the other host, it does nothing here. On a host the vault's home file says is not\n" +
+			"home, --apply applies nothing but a move-home, so a boost's hook never records twice.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			keys, err := posternKeys()
@@ -233,6 +241,9 @@ func newPosternInboxCmd() *cobra.Command {
 				return err
 			}
 			if apply {
+				if err := moveHomeOnTheGovernorsTap(&inbox, host, attachmentDir); err != nil {
+					return err
+				}
 				_, err = inbox.Apply(cmd.Context())
 				return err
 			}
@@ -289,6 +300,30 @@ func answerTheGovernor(inbox *application.PosternInbox, backend application.Post
 	inbox.HandsVerifier = hands.Verifier{}
 	inbox.HandsHosts = handsHosts
 	inbox.Now = posternClock
+	return nil
+}
+
+// moveHomeOnTheGovernorsTap gives an --apply pass what a move-home needs
+// (postern's docs/protocol.md §18): the vault's home file, which also keeps a
+// boost's pass from applying anything else; ssh to the old home and this mw
+// to run mw home move with, marking each move started beside the inbox's
+// attachments; and home_move_bead to write the move on.
+func moveHomeOnTheGovernorsTap(inbox *application.PosternInbox, host, attachmentDir string) error {
+	dir, err := config.Vault()
+	if err != nil {
+		return err
+	}
+	bead, err := config.HomeMoveBead()
+	if err != nil {
+		return err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("there is no home directory for mw home move to set the old database aside in: %w", err)
+	}
+	inbox.Home = mwVault(dir, host)
+	inbox.HomeMover = homemove.Command{Host: homemove.Host{Vault: dir, Home: home}, Spent: filepath.Dir(attachmentDir)}
+	inbox.HomeMoveBead = bead
 	return nil
 }
 

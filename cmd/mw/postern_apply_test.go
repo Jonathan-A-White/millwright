@@ -190,3 +190,49 @@ func TestPosternInboxApplyHearsAVoiceNote(t *testing.T) {
 		t.Fatalf("expected section 14's transcript body, got %s", text)
 	}
 }
+
+// On a host the vault's home file says is not home, mw postern inbox --apply
+// applies nothing but a move-home: the Governor's release tap is left to the
+// home's own pass, so that it is never recorded twice.
+func TestPosternInboxApplyOnABoostLeavesTheGovernorsTapToTheHome(t *testing.T) {
+	f := loadPosternRecordFixture(t)
+	governorKeyFile := filepath.Join(t.TempDir(), "governor.key")
+	if err := os.WriteFile(governorKeyFile, []byte(f.SenderWIF+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ct, err := postern.NewCipher(postern.New(governorKeyFile)).Encrypt(f.RecipientPubKey, `{"action":"release","bead":"mw-e.1"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(application.PosternPayload{V: 1, Kind: "msg", Class: "message",
+		To: f.RecipientPubKey, From: f.SenderPubKey, Ts: 1758800000, Ct: ct})
+	script, err := postern.RecordScript(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages, _ := json.Marshal(map[string]any{"records": []map[string]any{{
+		"seq": 1, "txid": "direct:tap", "vout": 0, "scriptHex": hex.EncodeToString(*script), "signer": f.SenderPubKey,
+	}}})
+	url, _ := fakePosternBackend(t, map[string]string{"/api/messages?since=0": string(messages)})
+	posternHome(t, url, f.RecipientWIF, f.SenderPubKey)
+	vault := t.TempDir()
+	if err := os.WriteFile(filepath.Join(vault, application.HomeFileName), []byte("desktop 2026-09-29T12:00:00Z mw@desktop\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MW_VAULT", vault)
+	log := bdRecording(t, `[{"id": "mw-e.1", "title": "Held", "status": "deferred", "issue_type": "task", "parent": "mw-e"}]`)
+
+	out, err := runPostern(t, "inbox", "--apply")
+	if err != nil {
+		t.Fatalf("mw postern inbox --apply failed: %v\n%s", err, out)
+	}
+	if strings.TrimSpace(out) != "" {
+		t.Fatalf("expected nothing applied, got %q", out)
+	}
+	calls, _ := os.ReadFile(log)
+	for _, never := range []string{"update", "comment", "create", "kv set"} {
+		if strings.Contains(string(calls), never) {
+			t.Errorf("expected no bd %s on a boost, got:\n%s", never, calls)
+		}
+	}
+}

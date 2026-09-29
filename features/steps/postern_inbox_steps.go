@@ -44,6 +44,15 @@ type posternInboxContext struct {
 	runner      *apptest.FakeHandsRunner
 	handsSteps  map[string]domain.HandsStep
 
+	// host, homeFile, mover, moveBead and now are a move-home scenario's:
+	// this host, the vault's home file, the stand-in for ssh and mw home
+	// move, the bead the move is written on, and the clock.
+	host     string
+	homeFile *apptest.FakeHomeFile
+	mover    *apptest.FakeHomeMover
+	moveBead string
+	now      time.Time
+
 	// attachImage and attachTxid are what the last "carrying a screenshot"
 	// step built, so a later Then step can compute the path mw postern
 	// inbox should have written it to, without hardcoding it in the feature.
@@ -154,6 +163,7 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^bead "([^"]*)" is commented a RELEASED with txid "([^"]*)"$`, c.beadIsCommentedARELEASEDWithTxid)
 	ctx.Then(`^the decrypted image is written under the attachment directory$`, c.theDecryptedImageIsWrittenUnderTheAttachmentDirectory)
 	ctx.Then(`^bead "([^"]*)"'s last comment names the decrypted image's path$`, c.beadsLastCommentNamesTheDecryptedImagesPath)
+	registerPosternMoveHomeSteps(ctx, c)
 }
 
 func (c *posternInboxContext) aThrowawayPosternKey() error {
@@ -557,6 +567,14 @@ func (c *posternInboxContext) inbox() application.PosternInbox {
 		inbox.Host = "desktop"
 		inbox.HandsRunner = c.runner
 		inbox.HandsVerifier = apptest.FakeHandsVerifier{}
+	}
+	if c.mover != nil {
+		inbox.Host = c.host
+		inbox.Home = c.homeFile
+		inbox.HomeMover = c.mover
+		inbox.HomeMoveBead = c.moveBead
+		inbox.HandsHosts = map[string]string{"laptop": "ssh laptop", "desktop": "ssh desktop"}
+		inbox.Now = func() time.Time { return c.now }
 	}
 	return inbox
 }

@@ -105,6 +105,13 @@ func (a posternApplied) line() string {
 // every message, and never prints what a message says: only one line per
 // message applied. Anything else — another sender, an action this host does
 // not know, a message with no txid to mark — is left for the Mayor.
+//
+// A move-home (§18) is applyMoveHome's: run here when the Governor signed it
+// and it names this host, refused when he did not sign it or it is a replay.
+// On a host the vault's home file says is not home — a boost — a move-home is
+// all a pass applies, so that nothing the home's own pass records is recorded
+// twice, and a tracker the boost cannot reach (the old home's, dead) does not
+// stop it: see toApply.
 func (i PosternInbox) Apply(ctx context.Context) ([]string, error) {
 	if err := i.wired(); err != nil {
 		return nil, err
@@ -118,20 +125,35 @@ func (i PosternInbox) Apply(ctx context.Context) ([]string, error) {
 	}
 	defer release()
 
-	mine, _, _, err := i.fetch(ctx)
+	home, err := i.homeHost(ctx)
 	if err != nil {
 		return nil, err
 	}
-	applied, err := i.appliedNotes(ctx)
+	pass := moveHomePass{home: home}
+	mine, applied, err := i.toApply(ctx, &pass)
 	if err != nil {
 		return nil, err
 	}
+	pass.applied = applied
 	var lines []string
 	for _, m := range mine {
-		if m.Txid == "" || !m.Verified || !i.isGovernor(m) {
+		if m.Txid == "" {
 			continue
 		}
 		if _, done := applied[m.Txid]; done {
+			continue
+		}
+		if m.Class == PosternClassMoveHome {
+			if i.HomeMover == nil {
+				continue
+			}
+			if result, handled := i.applyMoveHome(ctx, m, pass); handled {
+				lines = append(lines, result.summary())
+				i.printf("%s\n", result.line())
+			}
+			continue
+		}
+		if pass.onBoost(i.Host) || !m.Verified || !i.isGovernor(m) {
 			continue
 		}
 		var outcome, path string
@@ -152,6 +174,46 @@ func (i PosternInbox) Apply(ctx context.Context) ([]string, error) {
 		i.printf("%s\n", result.summary())
 	}
 	return lines, nil
+}
+
+// toApply reads what a pass may apply and the txids already applied. On the
+// home a failure to read either is the pass's failure. On a boost, whose beads
+// server is the home's and may be dead, each read is bounded by
+// PosternBoostWait, and one that fails is said and set aside rather than
+// stopping the pass: every record is read from the start, none is taken for
+// applied, and the pass is dark (a move-home then writes nothing before its
+// move), so that a move the Governor asked for is never held up by the host
+// it moves away from.
+func (i PosternInbox) toApply(ctx context.Context, pass *moveHomePass) ([]PosternInboxMessage, map[string]string, error) {
+	if !pass.onBoost(i.Host) {
+		mine, _, _, err := i.fetch(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		applied, err := i.appliedNotes(ctx)
+		return mine, applied, err
+	}
+	bounded, cancel := i.bounded(ctx, *pass)
+	cursor, err := i.readCursor(bounded)
+	cancel()
+	if err != nil {
+		i.printf("this host is not home and the postern inbox cursor could not be read (%v): every record is read for a move-home\n", err)
+		cursor, pass.dark = 0, true
+	}
+	mine, _, err := i.fetchSince(ctx, cursor)
+	if err != nil {
+		return nil, nil, err
+	}
+	applied := map[string]string{}
+	if !pass.dark {
+		bounded, cancel := i.bounded(ctx, *pass)
+		defer cancel()
+		if applied, err = i.appliedNotes(bounded); err != nil {
+			i.printf("this host is not home and %v: none is taken for applied\n", err)
+			applied, pass.dark = map[string]string{}, true
+		}
+	}
+	return mine, applied, nil
 }
 
 // appliedNotes reads every PosternAppliedKey note at once, txid to line.
