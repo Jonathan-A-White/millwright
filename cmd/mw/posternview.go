@@ -31,7 +31,9 @@ func newPosternViewCmd() *cobra.Command {
 			"root, and the needs waiting on the Governor, most blocking first, then oldest: an open\n" +
 			"postern question, a live epic with held stories (approve), a story closed in the last 24\n" +
 			"hours with no VERIFIED comment (verify), an open bead labelled demo or hitl (demo, hands),\n" +
-			"a story out of attempts or a host whose last sync is over 20 minutes old with work pathed\n" +
+			"an approve need over 7 days old or a hands need over 3 days old, which becomes one stale\n" +
+			"need (Keep or Close) unless a postern.keep note holds a time still ahead, a\n" +
+			"story out of attempts or a host whose last sync is over 20 minutes old with work pathed\n" +
 			"to it (alarm). It gzips that JSON, encrypts it with BRC-78 to postern_governor_key, and\n" +
 			"writes it base64, atomically, to postern_view_path (default\n" +
 			"~/.local/state/postern/view.b64).\n\n" +
