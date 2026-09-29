@@ -795,3 +795,27 @@ func TestPosternViewStaleNeedSortsBySinceItWentStaleAndReadsItsComments(t *testi
 		t.Fatalf("expected one comment read for the stale need, got %d", reads)
 	}
 }
+
+// A step's why rides to the app on steps[].ran.why, only when it has one.
+func TestPosternViewHandsStepCarriesWhyItFailed(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	liveEpic(tracker, "mw-f758y", domain.Path{})
+	tracker.AddStory("mw-f758y", domain.Story{ID: "mw-f758y.8", Title: "Reload nginx"})
+	mustDo(t, tracker.SetLabels("mw-f758y.8", "hitl"))
+	steps, _ := json.Marshal([]application.HandsStepRecord{
+		{HandsStep: domain.HandsStep{ID: "dry", Host: "vps", As: "user", Run: "nginx -t"}},
+		{HandsStep: domain.HandsStep{ID: "ok", Host: "vps", As: "user", Run: "true"}},
+	})
+	mustDo(t, tracker.SetNote(ctx, application.HandsStepsKey("mw-f758y.8"), string(steps)))
+	mustDo(t, tracker.SetNote(ctx, application.HandsRanKey("mw-f758y.8", "dry"), `{"at":"2026-09-29T18:52:00Z","exit":-1,"host":"vps","why":"the step could not be started: root"}`))
+	mustDo(t, tracker.SetNote(ctx, application.HandsRanKey("mw-f758y.8", "ok"), `{"at":"2026-09-29T18:52:00Z","exit":0,"host":"vps"}`))
+
+	hands := viewNeed(t, viewDoc(t, tracker), "hands", "mw-f758y.8")
+
+	raw, _ := json.Marshal(hands.Steps)
+	if !strings.Contains(string(raw), `"ran":{"at":"2026-09-29T18:52:00Z","exit":-1,"host":"vps","why":"the step could not be started: root"}`) ||
+		strings.Count(string(raw), `"why"`) != 1 {
+		t.Fatalf("expected why on the failed step only, got %s", raw)
+	}
+}
