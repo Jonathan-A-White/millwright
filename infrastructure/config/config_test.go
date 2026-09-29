@@ -1354,6 +1354,27 @@ func TestGristKeyFileMustBeAFullPath(t *testing.T) {
 	}
 }
 
+// The mill key is never the Mayor's postern key: named the same, or through a link.
+func TestGristKeyFileRefusesTheMayorsPosternKey(t *testing.T) {
+	home := writeConfig(t, "")
+	t.Setenv("MW_POSTERN_KEY_FILE", "")
+	t.Setenv("MW_GRIST_KEY_FILE", filepath.Join(home, ".config", "mw", "postern.key"))
+	if _, err := config.GristKeyFile(); err == nil || !strings.Contains(err.Error(), "Mayor's postern key") {
+		t.Fatalf("expected the Mayor's key refused, got %v", err)
+	}
+	if err := os.Symlink(filepath.Join(home, ".config", "mw", "postern.key"), filepath.Join(home, "link.key")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MW_GRIST_KEY_FILE", filepath.Join(home, "link.key"))
+	if _, err := config.GristKeyFile(); err == nil {
+		t.Fatal("expected a link to the Mayor's key refused")
+	}
+	t.Setenv("MW_GRIST_KEY_FILE", filepath.Join(home, "elsewhere", "mill.key"))
+	if _, err := config.GristKeyFile(); err != nil {
+		t.Fatalf("expected a key of its own allowed, got %v", err)
+	}
+}
+
 // With no [grist] table the ceilings are the defaults.
 func TestGristCeilingsDefault(t *testing.T) {
 	writeConfig(t, "host = \"laptop\"\n")

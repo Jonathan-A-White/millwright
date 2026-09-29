@@ -73,3 +73,38 @@ func TestGristGrindStopsWhenTheMachineDoesNotKnowItsVault(t *testing.T) {
 		t.Fatalf("expected the reason to say how to set the vault, got %v\n%s", err, out)
 	}
 }
+
+// mw grist key refuses, and writes nothing, when grist_key_file is the
+// Mayor's postern key file: the mill must have a key of its own, and the
+// Mayor's key must never be the one that opens the phone's grist.
+func TestGristKeyRefusesTheMayorsKeyFile(t *testing.T) {
+	for name, tc := range map[string]struct {
+		grist string
+		link  bool
+	}{
+		"the same path":             {"$HOME/.config/mw/postern.key", false},
+		"the same path, unclean":    {"$HOME/.config/mw/../mw/./postern.key", false},
+		"a link to the Mayor's key": {"$HOME/mill-link.key", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			mwConfig(t, "host = \"laptop\"\n")
+			t.Setenv("MW_POSTERN_KEY_FILE", "")
+			home, _ := os.UserHomeDir()
+			mayors := filepath.Join(home, ".config", "mw", "postern.key")
+			if tc.link {
+				if err := os.Symlink(mayors, filepath.Join(home, "mill-link.key")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Setenv("MW_GRIST_KEY_FILE", strings.ReplaceAll(tc.grist, "$HOME", home))
+
+			out, err := runGrist(t, "key")
+			if err == nil || !strings.Contains(err.Error(), "Mayor's postern key") {
+				t.Fatalf("expected a refusal saying it is the Mayor's key, got %v\n%s", err, out)
+			}
+			if _, err := os.Lstat(mayors); err == nil {
+				t.Errorf("mw grist key wrote %s", mayors)
+			}
+		})
+	}
+}

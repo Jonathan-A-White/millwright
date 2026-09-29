@@ -495,8 +495,57 @@ const (
 // is set, otherwise the root-table `grist_key_file` key of
 // ~/.config/mw/config.toml, a full path either way, and DefaultGristKeyFile
 // under the home directory when neither says.
+//
+// It is an error for the path to be the Mayor's postern key file, by name, by
+// link or by hard link: the mill's key is its own, and the Mayor's must never
+// be the one that opens the phone's grist.
 func GristKeyFile() (string, error) {
-	return fullPathSetting("grist_key_file", GristKeyFileEnv, DefaultGristKeyFile, "the mill key file")
+	path, err := fullPathSetting("grist_key_file", GristKeyFileEnv, DefaultGristKeyFile, "the mill key file")
+	if err != nil {
+		return "", err
+	}
+	mayors, err := PosternKeyFile()
+	if err != nil {
+		return "", err
+	}
+	if sameFile(path, mayors) {
+		return "", fmt.Errorf("the mill key file %s is the Mayor's postern key file %s: give the mill a key of its own (grist_key_file in %s, or $%s)",
+			path, mayors, File, GristKeyFileEnv)
+	}
+	return path, nil
+}
+
+// sameFile reports whether a and b name one file: the same path once every
+// link in them is followed (a link to a file not yet there included), or one
+// file on disk.
+func sameFile(a, b string) bool {
+	if resolveLinks(a, 0) == resolveLinks(b, 0) {
+		return true
+	}
+	infoA, errA := os.Stat(a)
+	infoB, errB := os.Stat(b)
+	return errA == nil && errB == nil && os.SameFile(infoA, infoB)
+}
+
+// resolveLinks is p made clean, with every symbolic link in it followed,
+// whether or not what it points at exists.
+func resolveLinks(p string, depth int) string {
+	p = filepath.Clean(p)
+	if depth > 40 {
+		return p
+	}
+	if info, err := os.Lstat(p); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		if target, err := os.Readlink(p); err == nil {
+			if !filepath.IsAbs(target) {
+				target = filepath.Join(filepath.Dir(p), target)
+			}
+			return resolveLinks(target, depth+1)
+		}
+	}
+	if parent := filepath.Dir(p); parent != p {
+		return filepath.Join(resolveLinks(parent, depth+1), filepath.Base(p))
+	}
+	return p
 }
 
 // GristStateDir reports where the mill keeps its state: $MW_GRIST_STATE_DIR
