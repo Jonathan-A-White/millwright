@@ -134,6 +134,8 @@ func (k *fakeMillKey) PrivateKeyWIF() (string, error) { return "the-private-key"
 func (k *fakeMillKey) Sign([]application.PosternUtxo, []byte) (string, error) {
 	return "", errors.New("the mill signs no transaction")
 }
+func (k *fakeMillKey) MarkSpent([]application.PosternUtxo) error { return nil }
+func (k *fakeMillKey) MarkSent(string) error                     { return nil }
 
 // mw grist key makes the key once, then only says its public half.
 func TestGristKeyMakesTheKeyOnceAndPrintsItsPublicHalf(t *testing.T) {
