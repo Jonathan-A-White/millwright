@@ -527,6 +527,19 @@ type PosternInbox struct {
 	// be for — config [hands_hosts]. A step for this host (Host) runs here.
 	HandsHosts map[string]string
 
+	// Home is the vault's home file. On a host it says is not home, Apply
+	// applies nothing but a move-home, so that a boost's hook never records
+	// what the home's records too. Nil, or a home that cannot be told, is
+	// taken for home.
+	Home HomeFile
+	// HomeMover asks whether the old home answers and runs mw home move, for
+	// a move-home the Governor signed naming this host (§18). Nil leaves a
+	// move-home for the Mayor to read.
+	HomeMover PosternHomeMover
+	// HomeMoveBead is the bead a move's start and result are written on —
+	// config home_move_bead. Empty writes them on no bead.
+	HomeMoveBead string
+
 	// Now is the clock an approval's age is read by. The zero value reads
 	// the real one.
 	Now func() time.Time
@@ -971,21 +984,27 @@ func (i PosternInbox) UnreadCount(ctx context.Context) (int, error) {
 // the highest sequence number among every record read, ours or not, so a
 // cursor moved past it never re-reads a record addressed to someone else.
 func (i PosternInbox) fetch(ctx context.Context) (mine []PosternInboxMessage, newest, cursor int64, err error) {
-	pubKeyHex, _, err := i.Keys.PublicKey()
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	privKey, err := i.Keys.PrivateKeyWIF()
-	if err != nil {
-		return nil, 0, 0, err
-	}
 	cursor, err = i.readCursor(ctx)
 	if err != nil {
 		return nil, 0, 0, err
 	}
+	mine, newest, err = i.fetchSince(ctx, cursor)
+	return mine, newest, cursor, err
+}
+
+// fetchSince is fetch from cursor, however it was come by.
+func (i PosternInbox) fetchSince(ctx context.Context, cursor int64) (mine []PosternInboxMessage, newest int64, err error) {
+	pubKeyHex, _, err := i.Keys.PublicKey()
+	if err != nil {
+		return nil, 0, err
+	}
+	privKey, err := i.Keys.PrivateKeyWIF()
+	if err != nil {
+		return nil, 0, err
+	}
 	records, err := i.Postern.Messages(ctx, cursor)
 	if err != nil {
-		return nil, 0, 0, err
+		return nil, 0, err
 	}
 	newest = cursor
 	for _, r := range records {
@@ -997,7 +1016,7 @@ func (i PosternInbox) fetch(ctx context.Context) (mine []PosternInboxMessage, ne
 		}
 		text, envelopeFrom, err := i.Cipher.Decrypt(privKey, r.Ciphertext)
 		if err != nil {
-			return nil, 0, 0, fmt.Errorf("decrypting record %d (%s): %w", r.Seq, r.Txid, err)
+			return nil, 0, fmt.Errorf("decrypting record %d (%s): %w", r.Seq, r.Txid, err)
 		}
 		from, verified, signerChecked := posternVerifySender(envelopeFrom, r.From, r.Signer)
 		thread, display, threadIsBead, attachment := posternThreadAndText(r.Class, text)
@@ -1008,7 +1027,7 @@ func (i PosternInbox) fetch(ctx context.Context) (mine []PosternInboxMessage, ne
 			Attachment: attachment,
 		})
 	}
-	return mine, newest, cursor, nil
+	return mine, newest, nil
 }
 
 // posternVerifySender is the sender mw trusts for a record whose ciphertext
