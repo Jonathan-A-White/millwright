@@ -29,6 +29,14 @@ const PosternViewRecentWindow = 7 * 24 * time.Hour
 // PosternSnapshotWindow gives a landing.
 const PosternViewVerifyWindow = PosternSnapshotWindow
 
+// PosternViewStaleApprove is how long a live epic's oldest held story may wait
+// for the Governor's word before its approve need becomes a stale one: §11.
+const PosternViewStaleApprove = 7 * 24 * time.Hour
+
+// PosternViewStaleHands is how long a hands bead may wait for his hands before
+// its hands need becomes a stale one: §11.
+const PosternViewStaleHands = 3 * 24 * time.Hour
+
 // PosternViewSummaryLimit is the most runes of a bead's description its
 // summary carries, as plain text: §11.
 const PosternViewSummaryLimit = 280
@@ -45,6 +53,7 @@ const (
 	PosternNeedVerify   = "verify"
 	PosternNeedDemo     = "demo"
 	PosternNeedHands    = "hands"
+	PosternNeedStale    = "stale"
 	PosternNeedAlarm    = "alarm"
 )
 
@@ -56,7 +65,7 @@ const LabelDemo = "demo"
 // since, so the view comes out the same every run.
 var posternNeedRank = map[string]int{
 	PosternNeedAlarm: 0, PosternNeedQuestion: 1, PosternNeedApprove: 2,
-	PosternNeedHands: 3, PosternNeedVerify: 4, PosternNeedDemo: 5,
+	PosternNeedHands: 3, PosternNeedVerify: 4, PosternNeedStale: 5, PosternNeedDemo: 6,
 }
 
 // PosternViewDoc is the live view's plaintext, postern's docs/protocol.md §11.
@@ -554,6 +563,37 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 		needComments = append(needComments, id)
 	}
 
+	// An approve or hands need older than its window is read as a stale one,
+	// which quotes its bead's newest comment, so that comment is read here
+	// too.
+	var waiting []waitingNeed
+	for _, id := range b.order {
+		e := b.entries[id]
+		if !b.inView(id) || b.kept(e, notes) {
+			continue
+		}
+		d := e.detail
+		if b.live[id] {
+			if need, held, ok := b.approve(e); ok {
+				waiting = append(waiting, waitingNeed{need: need, entry: e, window: PosternViewStaleApprove, fact: heldFact(held)})
+			}
+		}
+		if workable(d) && hasLabel(d.Labels, LabelHitl) {
+			steps := viewHandsSteps(id, notes)
+			if !allStepsRanClean(steps) {
+				need := b.need(PosternNeedHands, e, firstKnown(d.Created, d.Updated), viewSummary(d.Description))
+				need.Steps = steps
+				b.markNotReady(&need, e, len(steps) == 0)
+				waiting = append(waiting, waitingNeed{need: need, entry: e, window: PosternViewStaleHands, fact: handsFact(steps)})
+			}
+		}
+	}
+	for _, w := range waiting {
+		if w.stale(b.now) && w.entry.detail.CommentCount > 0 {
+			needComments = append(needComments, w.entry.detail.Story.ID)
+		}
+	}
+
 	comments := map[string][]Comment{}
 	if len(needComments) > 0 {
 		read, err := v.Tracker.StoriesComments(ctx, needComments)
@@ -587,34 +627,24 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 		needs = append(needs, need)
 	}
 
+	for _, w := range waiting {
+		if w.stale(b.now) {
+			needs = append(needs, w.staleNeed(b, comments[w.entry.detail.Story.ID]))
+			continue
+		}
+		needs = append(needs, w.need)
+	}
+
 	for _, id := range b.order {
 		e := b.entries[id]
-		if !b.inView(id) {
+		if !b.inView(id) || !workable(e.detail) {
 			continue
 		}
 		d := e.detail
-		if b.live[id] {
-			if need, ok := b.approve(e); ok {
-				needs = append(needs, need)
-			}
-		}
-		if !workable(d) {
-			continue
-		}
-		since := firstKnown(d.Created, d.Updated)
 		if hasLabel(d.Labels, LabelDemo) {
-			need := b.need(PosternNeedDemo, e, since, viewSummary(d.Description))
+			need := b.need(PosternNeedDemo, e, firstKnown(d.Created, d.Updated), viewSummary(d.Description))
 			b.markNotReady(&need, e, false)
 			needs = append(needs, need)
-		}
-		if hasLabel(d.Labels, LabelHitl) {
-			steps := viewHandsSteps(id, notes)
-			if !allStepsRanClean(steps) {
-				need := b.need(PosternNeedHands, e, since, viewSummary(d.Description))
-				need.Steps = steps
-				b.markNotReady(&need, e, len(steps) == 0)
-				needs = append(needs, need)
-			}
 		}
 		if !d.IsEpic && d.Exhausted {
 			needs = append(needs, b.need(PosternNeedAlarm, e, firstKnown(d.Updated, d.Created),
@@ -685,10 +715,10 @@ func landingCheck(comments []Comment) string {
 // Governor's word, if it has any: bead and epic are the epic itself, since
 // is when the oldest of them was filed, and it blocks the held stories and
 // everything waiting on them.
-func (b *viewBuild) approve(e *viewEntry) (PosternViewNeed, bool) {
+func (b *viewBuild) approve(e *viewEntry) (PosternViewNeed, int, bool) {
 	epic, read := b.epics[e.detail.Story.ID]
 	if !read {
-		return PosternViewNeed{}, false
+		return PosternViewNeed{}, 0, false
 	}
 	var held []string
 	var since time.Time
@@ -702,7 +732,7 @@ func (b *viewBuild) approve(e *viewEntry) (PosternViewNeed, bool) {
 		}
 	}
 	if len(held) == 0 {
-		return PosternViewNeed{}, false
+		return PosternViewNeed{}, 0, false
 	}
 	if since.IsZero() {
 		since = firstKnown(e.detail.Updated, e.detail.Created)
@@ -714,7 +744,103 @@ func (b *viewBuild) approve(e *viewEntry) (PosternViewNeed, bool) {
 	need := b.need(PosternNeedApprove, e, since, text)
 	need.Options = []string{"Release"}
 	need.Blocks = b.blocks(true, held...)
-	return need, true
+	return need, len(held), true
+}
+
+// waitingNeed is an approve or hands need on entry, with the window it may
+// wait in before it is a stale one and the fact of what it waits on that the
+// stale need states.
+type waitingNeed struct {
+	need   PosternViewNeed
+	entry  *viewEntry
+	window time.Duration
+	fact   string
+}
+
+// since is when the need began to wait, the zero time when unknown.
+func (w waitingNeed) since() time.Time {
+	at, _ := time.Parse(time.RFC3339, w.need.Since)
+	return at
+}
+
+// stale reports whether the need has waited past its window at now.
+func (w waitingNeed) stale(now time.Time) bool {
+	since := w.since()
+	return !since.IsZero() && now.Sub(since) > w.window
+}
+
+// staleNeed is the one stale need that stands in for w's approve or hands
+// need: since is when it went stale, and the text only states facts — what it
+// was, its title, what it waits on, its age and the newest of comments (oldest
+// first).
+func (w waitingNeed) staleNeed(b *viewBuild, comments []Comment) PosternViewNeed {
+	d := w.entry.detail
+	newest := "no comments"
+	if len(comments) > 0 {
+		last := comments[len(comments)-1]
+		text := strings.Join(strings.Fields(last.Text), " ")
+		if r := []rune(text); len(r) > PosternViewStaleQuote {
+			text = string(r[:PosternViewStaleQuote])
+		}
+		newest = "newest comment: " + text
+		if !last.Created.IsZero() {
+			newest = "newest comment " + last.Created.UTC().Format("2 Jan 2006") + ": " + text
+		}
+	}
+	since := w.since()
+	need := b.need(PosternNeedStale, w.entry, since.Add(w.window),
+		fmt.Sprintf("%s: %s; %s; waiting %s; %s", w.need.Kind, d.Story.Title, w.fact, viewAge(b.now.Sub(since)), newest))
+	need.Options = []string{"Keep", "Close"}
+	need.Blocks = w.need.Blocks
+	return need
+}
+
+// PosternViewStaleQuote is the most runes of a bead's newest comment a stale
+// need quotes: §11.
+const PosternViewStaleQuote = 200
+
+// viewAge is d as whole days, the unit a stale need waits in.
+func viewAge(d time.Duration) string {
+	days := int(d / (24 * time.Hour))
+	if days == 1 {
+		return "1 day"
+	}
+	return fmt.Sprintf("%d days", days)
+}
+
+// heldFact is what an approve need waits on, n held stories.
+func heldFact(n int) string {
+	if n == 1 {
+		return "1 held story"
+	}
+	return fmt.Sprintf("%d held stories", n)
+}
+
+// handsFact is what a hands need waits on: the steps that have not run.
+func handsFact(steps []PosternViewHandsStep) string {
+	var notRun []string
+	for _, step := range steps {
+		if step.Ran == nil {
+			notRun = append(notRun, step.ID)
+		}
+	}
+	switch {
+	case len(steps) == 0:
+		return "no step filed"
+	case len(notRun) == 0:
+		return "every step run"
+	case len(notRun) == 1:
+		return "step " + notRun[0] + " not run"
+	}
+	return "steps " + strings.Join(notRun, ", ") + " not run"
+}
+
+// kept reports whether the Governor has kept e's bead past now: its
+// postern.keep note holds a time still ahead, which hides the stale, approve
+// and hands needs it would make. A note that is not a time keeps nothing.
+func (b *viewBuild) kept(e *viewEntry, notes map[string]string) bool {
+	until, err := time.Parse(time.RFC3339, strings.TrimSpace(notes[PosternKeepKey(e.detail.Story.ID)]))
+	return err == nil && until.After(b.now)
 }
 
 // need is a need of kind on e's bead: its epic (the bead itself when it is an

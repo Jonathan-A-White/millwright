@@ -53,6 +53,17 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the view's bead "([^"]*)" has the hands step "([^"]*)" on "([^"]*)" as "([^"]*)" running "([^"]*)"$`, c.theViewsBeadHasTheHandsStep)
 	ctx.Given(`^the view's hands step "([^"]*)" on "([^"]*)" ran with exit (\d+)$`, c.theViewsHandsStepRan)
 	ctx.Then(`^the view's hands need on "([^"]*)" carries the step "([^"]*)" with its sha256, run with exit (\d+)$`, c.theViewsHandsNeedCarriesTheStep)
+	ctx.Given(`^the view's held story "([^"]*)" under "([^"]*)" was filed (\d+) days? ago$`, c.theViewsHeldStoryWasFiled)
+	ctx.Given(`^the view's hitl bead "([^"]*)" under "([^"]*)" was filed (\d+) days? ago$`, c.theViewsHitlBeadWasFiled)
+	ctx.Given(`^the view's bead "([^"]*)" has the comment "([^"]*)"$`, c.theViewsBeadHasTheComment)
+	ctx.Given(`^the view's bead "([^"]*)" has the comment "([^"]*)" dated (\d+) days? ago$`, c.theViewsBeadHasTheCommentDated)
+	ctx.Given(`^the view's bead "([^"]*)" has a comment of (\d+) letters$`, c.theViewsBeadHasALongComment)
+	ctx.Given(`^the view's bead "([^"]*)" is kept until (\d+) days? ahead$`, c.theViewsBeadIsKeptAhead)
+	ctx.Given(`^the view's bead "([^"]*)" is kept until (\d+) days? ago$`, c.theViewsBeadIsKeptAgo)
+	ctx.Then(`^the view's needs on "([^"]*)" are "([^"]*)"$`, c.theViewsNeedsOnAre)
+	ctx.Then(`^the view's stale need on "([^"]*)" says "([^"]*)"$`, c.theViewsStaleNeedSays)
+	ctx.Then(`^the view's stale need on "([^"]*)" has the options "([^"]*)" and has been stale since "([^"]*)"$`, c.theViewsStaleNeedOptions)
+	ctx.Then(`^the view's stale need on "([^"]*)" quotes (\d+) letters of its newest comment$`, c.theViewsStaleNeedQuotes)
 	ctx.When(`^the live view is built$`, c.theLiveViewIsBuilt)
 	ctx.When(`^the live view is run and written$`, c.theLiveViewIsRunAndWritten)
 
@@ -289,4 +300,109 @@ func (c *posternViewContext) theViewsHandsNeedCarriesTheStep(bead, id string, ex
 		return fmt.Errorf("the hands need on %s carries no step %s: %+v", bead, id, n.Steps)
 	}
 	return fmt.Errorf("the view has no hands need on %s", bead)
+}
+
+func posternViewDaysAgo(days int) time.Time {
+	return posternViewFeatureNow.Add(-time.Duration(days) * 24 * time.Hour)
+}
+
+func (c *posternViewContext) theViewsHeldStoryWasFiled(id, epic string, days int) error {
+	c.tracker.AddStory(epic, domain.Story{ID: id, Title: "Story " + id})
+	if err := c.tracker.SetStatus(id, apptest.StatusDeferred); err != nil {
+		return err
+	}
+	return c.tracker.SetCreated(id, posternViewDaysAgo(days))
+}
+
+func (c *posternViewContext) theViewsHitlBeadWasFiled(id, epic string, days int) error {
+	c.tracker.AddStory(epic, domain.Story{ID: id, Title: "Story " + id})
+	if err := c.tracker.SetLabels(id, "hitl"); err != nil {
+		return err
+	}
+	return c.tracker.SetCreated(id, posternViewDaysAgo(days))
+}
+
+func (c *posternViewContext) theViewsBeadHasTheComment(id, text string) error {
+	return c.tracker.CommentOnStory(context.Background(), id, text)
+}
+
+func (c *posternViewContext) theViewsBeadHasTheCommentDated(id, text string, days int) error {
+	return c.tracker.CommentOnStoryAt(id, text, posternViewDaysAgo(days))
+}
+
+func (c *posternViewContext) theViewsBeadHasALongComment(id string, letters int) error {
+	return c.tracker.CommentOnStory(context.Background(), id, strings.Repeat("x", letters))
+}
+
+func (c *posternViewContext) keep(id string, until time.Time) error {
+	return c.tracker.SetNote(context.Background(), application.PosternKeepKey(id), until.Format(time.RFC3339))
+}
+
+func (c *posternViewContext) theViewsBeadIsKeptAhead(id string, days int) error {
+	return c.keep(id, posternViewFeatureNow.Add(time.Duration(days)*24*time.Hour))
+}
+
+func (c *posternViewContext) theViewsBeadIsKeptAgo(id string, days int) error {
+	return c.keep(id, posternViewDaysAgo(days))
+}
+
+func (c *posternViewContext) theViewsNeedsOnAre(bead, want string) error {
+	var got []string
+	for _, n := range c.doc.Needs {
+		if n.Bead == bead {
+			got = append(got, n.Kind+":"+n.Bead)
+		}
+	}
+	if want == "none" {
+		want = ""
+	}
+	if strings.Join(got, ", ") != want {
+		return fmt.Errorf("expected the needs on %s to be %q, got %q", bead, want, strings.Join(got, ", "))
+	}
+	return nil
+}
+
+func (c *posternViewContext) staleNeed(bead string) (application.PosternViewNeed, error) {
+	for _, n := range c.doc.Needs {
+		if n.Kind == application.PosternNeedStale && n.Bead == bead {
+			return n, nil
+		}
+	}
+	return application.PosternViewNeed{}, fmt.Errorf("the view has no stale need on %s", bead)
+}
+
+func (c *posternViewContext) theViewsStaleNeedSays(bead, want string) error {
+	n, err := c.staleNeed(bead)
+	if err != nil {
+		return err
+	}
+	if n.Text != want {
+		return fmt.Errorf("expected the stale need on %s to say %q, got %q", bead, want, n.Text)
+	}
+	return nil
+}
+
+func (c *posternViewContext) theViewsStaleNeedOptions(bead, options, since string) error {
+	n, err := c.staleNeed(bead)
+	if err != nil {
+		return err
+	}
+	if strings.Join(n.Options, ", ") != options {
+		return fmt.Errorf("expected the options %q, got %v", options, n.Options)
+	}
+	if n.Since != since {
+		return fmt.Errorf("expected the stale need stale since %s, got %s", since, n.Since)
+	}
+	return nil
+}
+
+func (c *posternViewContext) theViewsStaleNeedQuotes(bead string, letters int) error {
+	n, err := c.staleNeed(bead)
+	if err != nil {
+		return err
+	}
+	if got := strings.Count(n.Text, "x"); got != letters {
+		return fmt.Errorf("expected %d letters of the comment in %q, got %d", letters, n.Text, got)
+	}
+	return nil
 }
