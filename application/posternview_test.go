@@ -763,3 +763,35 @@ func TestPosternViewNeedNotReadyNamesWhatItWaitsOn(t *testing.T) {
 		}
 	})
 }
+
+// A stale need's since is when it went stale, so it sorts by that; and only a
+// need past its window reads its comments.
+func TestPosternViewStaleNeedSortsBySinceItWentStaleAndReadsItsComments(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	liveEpic(tracker, "mw-a", domain.Path{})
+	at := viewNow.Add(-4 * 24 * time.Hour)
+	for _, id := range []string{"mw-a.1", "mw-a.2"} {
+		tracker.AddStory("mw-a", domain.Story{ID: id, Title: "Story " + id})
+		mustDo(t, tracker.SetCreated(id, at))
+		mustDo(t, tracker.CommentOnStory(context.Background(), id, "a word"))
+	}
+	mustDo(t, tracker.SetLabels("mw-a.1", "hitl"))
+	mustDo(t, tracker.SetLabels("mw-a.2", "demo"))
+	tracker.AddStory("mw-a", domain.Story{ID: "mw-a.3", Title: "Young hands"})
+	mustDo(t, tracker.SetLabels("mw-a.3", "hitl"))
+	mustDo(t, tracker.SetCreated("mw-a.3", viewNow.Add(-time.Hour)))
+	mustDo(t, tracker.CommentOnStory(context.Background(), "mw-a.3", "a word"))
+
+	doc := viewDoc(t, tracker)
+
+	// The stale need's since is created + 3 days, a day after the demo's.
+	if got, want := viewNeeds(doc), []string{"demo:mw-a.2", "stale:mw-a.1", "hands:mw-a.3"}; !equalStrings(got, want) {
+		t.Fatalf("expected needs %v, got %v", want, got)
+	}
+	if reads := tracker.CommentReads("mw-a.3"); reads != 0 {
+		t.Fatalf("expected no comment read for a hands need inside its window, got %d", reads)
+	}
+	if reads := tracker.CommentReads("mw-a.1"); reads != 1 {
+		t.Fatalf("expected one comment read for the stale need, got %d", reads)
+	}
+}

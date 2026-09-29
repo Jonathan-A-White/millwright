@@ -271,6 +271,11 @@ const PosternCursorKey = "postern.inbox.cursor"
 // 6.
 func PosternQuestionKey(bead string) string { return "postern.question." + bead }
 
+// PosternKeepKey is the note key holding an RFC 3339 time until which a
+// stale bead is kept: the view raises no stale, approve or hands need for it
+// while that time is ahead (§11, §13's keep action).
+func PosternKeepKey(bead string) string { return "postern.keep." + bead }
+
 // PosternQuestion is a decision-needed message's plaintext, postern's
 // docs/protocol.md section 6: a JSON object naming the bead it is asked
 // about, the question, the recommended option and every option offered.

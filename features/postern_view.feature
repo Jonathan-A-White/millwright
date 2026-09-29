@@ -66,3 +66,71 @@ Feature: mw postern view
     Given the view's bead "mw-v.1" has the hands step "linger" on "desktop" as "root" running "loginctl enable-linger jwhite"
     When the live view is built
     Then the view's needs are "hands:mw-v.1, question:mw-v.4, verify:mw-v.3"
+
+  # A held story left over a week, or a hands step left over three days, is
+  # no longer a plain approve or hands card: it is one stale card that says
+  # the facts and asks Keep or Close (protocol section 11).
+  Scenario: An epic whose oldest held story is 8 days old gives one stale need and no approve need
+    Given the view's epic "mw-old" is live
+    And the view's held story "mw-old.1" under "mw-old" was filed 8 days ago
+    And the view's held story "mw-old.2" under "mw-old" was filed 2 days ago
+    And the view's bead "mw-old" has the comment "Waiting on the Governor's word about the new formula, which is a long sentence."
+    When the live view is built
+    Then the view's needs on "mw-old" are "stale:mw-old"
+    And the view's stale need on "mw-old" says "approve: Epic mw-old; 2 held stories; waiting 8 days; newest comment: Waiting on the Governor's word about the new formula, which is a long sentence."
+    And the view's stale need on "mw-old" has the options "Keep, Close" and has been stale since "2026-09-27T12:00:00Z"
+
+  Scenario: An epic whose oldest held story is 6 days old still gives approve
+    Given the view's epic "mw-fresh" is live
+    And the view's held story "mw-fresh.1" under "mw-fresh" was filed 6 days ago
+    When the live view is built
+    Then the view's needs on "mw-fresh" are "approve:mw-fresh"
+
+  Scenario: A hitl bead 4 days old gives stale in place of hands, naming the step not run
+    Given the view's epic "mw-hnd" is live
+    And the view's hitl bead "mw-hnd.1" under "mw-hnd" was filed 4 days ago
+    And the view's bead "mw-hnd.1" has the hands step "linger" on "desktop" as "root" running "loginctl enable-linger jwhite"
+    And the view's bead "mw-hnd.1" has the comment "Please run the step when you are at the desk" dated 3 days ago
+    When the live view is built
+    Then the view's needs on "mw-hnd.1" are "stale:mw-hnd.1"
+    And the view's stale need on "mw-hnd.1" says "hands: Story mw-hnd.1; step linger not run; waiting 4 days; newest comment 25 Sep 2026: Please run the step when you are at the desk"
+
+  Scenario: A hitl bead 2 days old still gives hands
+    Given the view's epic "mw-hnd" is live
+    And the view's hitl bead "mw-hnd.1" under "mw-hnd" was filed 2 days ago
+    When the live view is built
+    Then the view's needs on "mw-hnd.1" are "hands:mw-hnd.1"
+
+  Scenario: A newest comment is cut to its first 200 characters
+    Given the view's epic "mw-hnd" is live
+    And the view's hitl bead "mw-hnd.1" under "mw-hnd" was filed 4 days ago
+    And the view's bead "mw-hnd.1" has a comment of 300 letters
+    When the live view is built
+    Then the view's stale need on "mw-hnd.1" quotes 200 letters of its newest comment
+
+  Scenario: A keep note ahead of now hides the stale, approve and hands needs of a bead
+    Given the view's epic "mw-kept" is live
+    And the view's held story "mw-kept.1" under "mw-kept" was filed 8 days ago
+    And the view's hitl bead "mw-kept.2" under "mw-kept" was filed 4 days ago
+    And the view's bead "mw-kept" is kept until 10 days ahead
+    And the view's bead "mw-kept.2" is kept until 10 days ahead
+    When the live view is built
+    Then the view's needs on "mw-kept" are "none"
+    And the view's needs on "mw-kept.2" are "none"
+
+  Scenario: A keep note ahead of now hides an approve need that is not yet stale
+    Given the view's epic "mw-kept" is live
+    And the view's held story "mw-kept.1" under "mw-kept" was filed 2 days ago
+    And the view's bead "mw-kept" is kept until 10 days ahead
+    When the live view is built
+    Then the view's needs on "mw-kept" are "none"
+
+  Scenario: A keep note in the past hides nothing
+    Given the view's epic "mw-kept" is live
+    And the view's held story "mw-kept.1" under "mw-kept" was filed 8 days ago
+    And the view's hitl bead "mw-kept.2" under "mw-kept" was filed 4 days ago
+    And the view's bead "mw-kept" is kept until 1 day ago
+    And the view's bead "mw-kept.2" is kept until 1 day ago
+    When the live view is built
+    Then the view's needs on "mw-kept" are "stale:mw-kept"
+    And the view's needs on "mw-kept.2" are "stale:mw-kept.2"
