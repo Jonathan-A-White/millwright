@@ -63,6 +63,11 @@ type MayorGone struct {
 	// window name matches .mayor-acting, to tell a Mayor resumed into a
 	// window of another name from one that is really gone. Empty reads "ps".
 	PS string
+	// Home and Host are the vault's home file and this host's name. A host the
+	// file says is not home holds no Mayor, so the probe finds nothing wrong
+	// there. A nil Home, or a home that cannot be told, judges as before.
+	Home application.HomeFile
+	Host string
 	// Timeout bounds Cure's run of bin/mayor-up. Empty reads
 	// MayorGoneCureTimeout.
 	Timeout time.Duration
@@ -80,7 +85,8 @@ func NewMayorGone(vault string) *MayorGone { return &MayorGone{Vault: vault} }
 // Name implements application.DoctorCheck.
 func (m *MayorGone) Name() string { return MayorGoneName }
 
-// Probe implements application.DoctorCheck: cannot-tell naming whichever of
+// Probe implements application.DoctorCheck: ok on a host that is not home;
+// otherwise cannot-tell naming whichever of
 // .mayor-acting or bin/mayor-up is missing or not executable; otherwise
 // faulty naming the acting file when no open tmux window matches what it
 // names and no window's pane runs a process carrying a session id the acting
@@ -89,6 +95,12 @@ func (m *MayorGone) Name() string { return MayorGoneName }
 // open but its pane holds nothing live but a bare shell, and ok when a live
 // process is found there.
 func (m *MayorGone) Probe(ctx context.Context) (application.Verdict, string) {
+	if m.Home != nil {
+		if home, err := application.IsHome(ctx, m.Home, m.Host); err == nil && !home {
+			return application.DoctorOK, ""
+		}
+	}
+
 	actingPath := m.actingPath()
 	acting, err := os.ReadFile(actingPath)
 	if err != nil {

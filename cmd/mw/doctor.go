@@ -98,6 +98,9 @@ func newDoctorCmd() *cobra.Command {
 			beadsServerCheck := doctor.NewBeadsServer(string(setting.Mode()), beadsServer, beadsSyncErr, beadsServerErr)
 			beadsServerCheck.Why = setting.Resolved.Why
 
+			mayorGone := doctor.NewMayorGone(vault)
+			mayorGone.Home, mayorGone.Host = mwVault(vault, host), host
+
 			store := doctor.New(dir)
 			tmpLeftovers := doctor.NewTmpLeftovers(os.TempDir())
 			tmpLeftovers.Budget = tmpLeftoversBudget
@@ -111,7 +114,7 @@ func newDoctorCmd() *cobra.Command {
 					doctor.NewTimers(units),
 					doctor.NewBeadsSize(vault),
 					tmpLeftovers,
-					doctor.NewMayorGone(vault),
+					mayorGone,
 					beadsServerCheck,
 				},
 				State: store,

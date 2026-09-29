@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 )
 
@@ -156,5 +157,35 @@ func TestTheMayorGoneProbeIsNotFaultyWhenTheSessionIDMatchesAWindowOfADifferentN
 	verdict, reason := check.Probe(context.Background())
 	if verdict != application.DoctorOK {
 		t.Fatalf("expected ok: the resumed session's pid carries the acting file's session id, got %s (%s)", verdict, reason)
+	}
+}
+
+// mw-43v9x.3: a host that is not home holds no Mayor, so the one that is
+// missing there is nothing to cure.
+func TestTheMayorGoneProbeIsOKOnAHostThatIsNotHome(t *testing.T) {
+	vault := mayorGoneVault(t, "mayor-2026-09-23-40")
+	tmux := fakeMayorGoneTmux(t, "@2|some-other-window", "0 claude")
+	home := &apptest.FakeHomeFile{Text: "desktop 2026-09-29T00:10:00Z mw@desktop"}
+	check := &doctor.MayorGone{Vault: vault, Tmux: tmux, Home: home, Host: "laptop"}
+
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorOK {
+		t.Fatalf("expected ok on a host that is not home, got %s (%s)", verdict, reason)
+	}
+}
+
+func TestTheMayorGoneProbeStillJudgesTheHome(t *testing.T) {
+	vault := mayorGoneVault(t, "mayor-2026-09-23-40")
+	tmux := fakeMayorGoneTmux(t, "@2|some-other-window", "0 claude")
+	for name, home := range map[string]*apptest.FakeHomeFile{
+		"the home":     {Text: "laptop 2026-09-29T00:10:00Z mw@laptop"},
+		"no home file": {Missing: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			check := &doctor.MayorGone{Vault: vault, Tmux: tmux, Home: home, Host: "laptop"}
+			if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorFaulty {
+				t.Fatalf("expected faulty, got %s (%s)", verdict, reason)
+			}
+		})
 	}
 }
