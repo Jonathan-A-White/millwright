@@ -76,6 +76,17 @@ func hostSyncLock() application.HostLock {
 	return hostlock.New(filepath.Join(home, SyncLockStateDir))
 }
 
+// hostDispatchLock is this host's dispatch lock, kept in DispatchStateDir: held
+// for the whole of a real mw dispatch, so that two never run at once. A host
+// with no home directory keeps none.
+func hostDispatchLock() application.GristLock {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	return hostlock.NewTry(filepath.Join(home, DispatchStateDir), hostlock.DispatchFile)
+}
+
 // hostTickLogs are the logs this host's timers keep, in the home directory. A
 // host with no home directory has none.
 func hostTickLogs() application.TickLogs {
@@ -115,6 +126,9 @@ func newDispatchCmd() *cobra.Command {
 			"dispatch_sync_wait apart. If the name still cannot be resolved it claims nothing, prints one\n" +
 			"line beginning \"local network fault\" and leaves with " + fmt.Sprint(application.NetworkFaultExit) + ", which a timer may\n" +
 			"treat as a wait. Every other sync failure is not retried.\n\n" +
+			"Only one real dispatch runs on a host at a time: one started while another holds the\n" +
+			"host's dispatch lock (~/.local/state/mw-dispatch/lock) prints \"another mw dispatch is running\n" +
+			"here; nothing done\" and leaves with 0.\n\n" +
 			"--dry-run prints what it would start and writes nothing: nothing is synced, claimed, cut,\n" +
 			"poured or started.",
 		Args: cobra.NoArgs,
@@ -187,6 +201,7 @@ func newDispatchCmd() *cobra.Command {
 				Mailbox:     gateway,
 				Rigs:        rigs,
 				Grinding:    gristGrindLock(),
+				Exclusive:   hostDispatchLock(),
 				DryRun:      dryRun,
 				Out:         cmd.OutOrStdout(),
 			}

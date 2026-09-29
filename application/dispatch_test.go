@@ -682,6 +682,107 @@ func TestDispatchLeavesTheClaimWhenAnotherDispatcherStartedTheStoryInTheSameInst
 	}
 }
 
+// racedRunner is a runner on which another dispatcher's session takes the name
+// in the instant before this dispatch's own Start.
+type racedRunner struct {
+	*apptest.FakeRunner
+	first application.SessionSpec
+}
+
+func (r *racedRunner) Start(ctx context.Context, spec application.SessionSpec) error {
+	if err := r.FakeRunner.Start(ctx, r.first); err != nil {
+		return err
+	}
+	return r.FakeRunner.Start(ctx, spec)
+}
+
+// mw-gq6.140: the loser of a race between two dispatchers, whose own session
+// start fails because the winner's session holds the name, must leave the
+// winner's worktree and branch where they are, and its claim with it.
+func TestDispatchRemovesNoWorktreeWhenTheSessionStartFailsUnderAnotherDispatchersSession(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, worktrees, runner, _ := aFactory(t)
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	session := application.SessionName("mw-gq6.1")
+	// The other dispatcher's session appears after this one has looked for a
+	// namesake and before it starts its own.
+	dispatch.Runner = &racedRunner{FakeRunner: runner, first: application.SessionSpec{Name: session, Dir: "/other", Command: []string{"claude"}}}
+
+	report, err := dispatch.Run(ctx)
+	if err == nil || !strings.Contains(err.Error(), session) || !strings.Contains(err.Error(), "no worktree or branch was removed") {
+		t.Fatalf("expected the failure to name the running session and say nothing was removed, got %v", err)
+	}
+	if len(report.Failed) != 1 || report.Failed[0].Released {
+		t.Fatalf("expected one failure that left the claim alone, got %+v", report.Failed)
+	}
+	if _, removed := worktrees.was(); len(removed) != 0 {
+		t.Fatalf("expected the running session's worktree to stay, but removed %q", removed)
+	}
+	detail, err := tracker.ShowStory(ctx, "mw-gq6.1")
+	if err != nil {
+		t.Fatalf("showing the story: %v", err)
+	}
+	if detail.Status != apptest.StatusInProgress {
+		t.Fatalf("expected the story to stay claimed under the running session, got %q", detail.Status)
+	}
+}
+
+// mw-gq6.140: a second dispatch on the host, run while one holds the host's
+// dispatch lock, does nothing at all and is not a failure.
+func TestDispatchDoesNothingWhileAnotherDispatchHoldsTheHostLock(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, worktrees, runner, _ := aFactory(t)
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	lock := &apptest.FakeGristLock{}
+	lock.Hold()
+	var out strings.Builder
+	dispatch.Exclusive, dispatch.Out = lock, &out
+
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatalf("expected a dispatch that finds another running to leave quietly, got %v", err)
+	}
+	if !strings.Contains(out.String(), "another mw dispatch is running here; nothing done") {
+		t.Fatalf("expected it to say another dispatch is running, got %q", out.String())
+	}
+	if len(report.Started) != 0 || len(runner.Names()) != 0 {
+		t.Fatalf("expected nothing started, got %+v", report)
+	}
+	if added, _ := worktrees.was(); len(added) != 0 {
+		t.Fatalf("expected no worktree cut, got %q", added)
+	}
+	if asked := tracker.Asked(); len(asked) != 0 {
+		t.Fatalf("expected the tracker not to be asked to write anything, got %q", asked)
+	}
+	detail, err := tracker.ShowStory(ctx, "mw-gq6.1")
+	if err != nil {
+		t.Fatalf("showing the story: %v", err)
+	}
+	if detail.Status == apptest.StatusInProgress {
+		t.Fatalf("expected nothing claimed, got %q", detail.Status)
+	}
+}
+
+// mw-gq6.140: a dispatch that does take the lock holds it for the whole run
+// and lets it go at the end.
+func TestDispatchHoldsTheHostLockForItsRunAndLetsItGo(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, runner, _ := aFactory(t)
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	lock := &apptest.FakeGristLock{}
+	dispatch.Exclusive = lock
+
+	if _, err := dispatch.Run(ctx); err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if lock.Taken != 1 || len(runner.Names()) != 1 {
+		t.Fatalf("expected the lock taken once and the story started, got taken %d, sessions %q", lock.Taken, runner.Names())
+	}
+	if held, _ := lock.Held(ctx); held {
+		t.Fatal("expected the lock let go when the run ended")
+	}
+}
+
 // mw-gq6.96: the same worktree failure, but with no session of the story's
 // name running anywhere — the ordinary case, where this dispatcher really is
 // the only one, and the claim it took is given back exactly as before.
