@@ -74,7 +74,7 @@ Each adapter: `var _ application.<Port> = ...`.
 | Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern key/inbox/send/snapshot/view/bead — cmd/mw/posternview.go, cmd/mw/posternbead.go | `features/postern_*.feature` |
 | Hands{Add,List} | application/hands.go | mw hands add /list — cmd/mw/hands.go; `cmd/mw-hands-root` | `features/hands.feature` |
 | `PosternServe`, `PosternNginx`, `PosternMirror` | `application/posternhand.go`, `application/posternmirror.go` | `mw postern serve`/`nginx`/`mirror` — `cmd/mw/postern.go`, `cmd/mw/posternmirror.go` | `features/postern_serve.feature` |
-| `GristKey`, `GristGrind` | `application/grist.go`, `application/gristgrind.go` | `mw grist key`/`grind` — `cmd/mw/grist.go` | `features/grist.feature` |
+| `GristKey`, `GristGrind`, `GristSend` | `application/grist.go`, `application/gristgrind.go`, `application/gristsend.go` | `mw grist key`/`grind`/`send` — `cmd/mw/grist.go` | `features/grist.feature`, `features/grist_send.feature` |
 
 `cmd/mw/root.go` holds the tree, `cmd/mw/main.go` runs it, `cmd/mw/version.go` is `mw version`.
 `features/path_validation.feature` covers `domain/path.go`;
