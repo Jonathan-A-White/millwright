@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"os"
 	"testing"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -38,6 +39,60 @@ func TestClassifyPane(t *testing.T) {
 				t.Errorf("classifyPane(%q) = %q, want %q", tc.screen, got, tc.want)
 			}
 		})
+	}
+}
+
+// Claude Code paints a suggested next prompt on an empty input line as dim
+// text. It is not something a person typed: capture-pane -e keeps the dim
+// escape, and only undimmed text after the mark is a draft.
+func TestClassifyPaneReadsGhostSuggestionsAsAnEmptyInputLine(t *testing.T) {
+	cases := []struct {
+		name   string
+		screen string
+		want   application.PaneState
+	}{
+		{"a dim suggestion after the mark is an empty input line",
+			"❯\u00a0\x1b[2mWait for the Mayor's next mail.\x1b[0m\n", application.PaneIdle},
+		{"a dim suggestion after a coloured mark is an empty input line",
+			"\x1b[38;5;153m❯\x1b[39m\u00a0\x1b[2mthe dot is green\x1b[0m\n", application.PaneIdle},
+		{"a dim suggestion ended by normal intensity is an empty input line",
+			"❯ \x1b[1;2mthe dot is green\x1b[22m\n", application.PaneIdle},
+		{"a colour's own 2 is not dim: text in 38;2;r;g;b is a draft",
+			"❯ \x1b[38;2;10;20;30mhalf a sente\x1b[0m\n", application.PaneInput},
+		{"undimmed text after the mark is a draft",
+			"❯\u00a0half a sente\n", application.PaneInput},
+		{"undimmed text after a reset is a draft",
+			"❯ \x1b[2mthe dot is green\x1b[0m and more\n", application.PaneInput},
+		{"dim text with a typed draft before it is a draft",
+			"❯ half\x1b[2m a suggestion\x1b[0m\n", application.PaneInput},
+		{"an escape that draws no text leaves the input line empty",
+			"❯\x1b[7m \x1b[27m\x1b[0m\n", application.PaneIdle},
+		{"a working session with a dim word in its marker is still working",
+			"✻ Thinking… (12s · \x1b[2mesc\x1b[0m to interrupt)\n❯\u00a0\n", application.PaneWorking},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyPane(tc.screen); got != tc.want {
+				t.Errorf("classifyPane(%q) = %q, want %q", tc.screen, got, tc.want)
+			}
+		})
+	}
+}
+
+// The captured screens in testdata are shared with contrib/mail-notify's own
+// test, so that the notifier and the tick and reaper answer the same.
+func TestClassifyPaneOnCapturedScreens(t *testing.T) {
+	for file, want := range map[string]application.PaneState{
+		"testdata/ghost-suggestion.txt": application.PaneIdle,
+		"testdata/real-draft.txt":       application.PaneInput,
+	} {
+		screen, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := classifyPane(string(screen)); got != want {
+			t.Errorf("classifyPane(%s) = %q, want %q", file, got, want)
+		}
 	}
 }
 

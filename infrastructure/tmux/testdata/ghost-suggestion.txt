@@ -1,0 +1,6 @@
+● Waiting on the Mayor.
+
+[2m────────────────────────────────────────[0m
+[38;5;153m❯[39m [2mWait for the Mayor's next mail.[0m
+[2m────────────────────────────────────────[0m
+  ? for shortcuts

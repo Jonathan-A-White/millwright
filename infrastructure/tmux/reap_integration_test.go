@@ -40,6 +40,9 @@ const (
 	emptyInput  = `\342\235\257\302\240`
 	typedInput  = `\342\235\257\302\240half a sente`
 	workingLine = `esc to interrupt`
+
+	// An empty input line with Claude Code's suggested next prompt after the mark, dim.
+	ghostInput = `\342\235\257\302\240\033[2mWait for the Mayor'"'"'s next mail.\033[0m`
 )
 
 // openStandIn opens a window running a stand-in and returns its id.
@@ -84,8 +87,10 @@ func TestPaneStateReadsWhatTheScreenSays(t *testing.T) {
 	idle := openStandIn(t, windows, dir, "idle", emptyInput)
 	typed := openStandIn(t, windows, dir, "typed", typedInput)
 	working := openStandIn(t, windows, dir, "working", workingLine)
+	ghost := openStandIn(t, windows, dir, "ghost", ghostInput)
 
 	waitForPane(t, windows, idle, application.PaneIdle)
+	waitForPane(t, windows, ghost, application.PaneIdle)
 	waitForPane(t, windows, typed, application.PaneInput)
 	waitForPane(t, windows, working, application.PaneWorking)
 }

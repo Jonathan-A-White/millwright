@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/Jonathan-A-White/millwright/application"
 )
@@ -115,7 +117,7 @@ func (w *Windows) PaneState(ctx context.Context, window string) (application.Pan
 	if err := windowID(window); err != nil {
 		return "", err
 	}
-	printed, err := w.call(ctx, "capture-pane", "-p", "-t", window)
+	printed, err := w.call(ctx, "capture-pane", "-p", "-e", "-t", window)
 	if err != nil {
 		return "", err
 	}
@@ -124,25 +126,27 @@ func (w *Windows) PaneState(ctx context.Context, window string) (application.Pan
 
 // classifyPane says what a screen of Claude Code is doing. A session that says
 // how to interrupt it is working. One with a prompt mark on a line of its own
-// is at an empty input line, and idle. One that shows a firstRunMarkers line
+// is at an empty input line, and idle; so is one whose input line holds only
+// dim text, which is Claude Code's suggested next prompt and not a draft
+// (inputLineHoldsDraft). The screen is read with its escapes, capture-pane -e. One that shows a firstRunMarkers line
 // is at Claude Code's own first-run screen, not yet a prompt at all. Anything
 // else is not to be closed over: the mark has text after it, or there is no
 // prompt on the screen at all — a question being asked, a menu, a session
 // that has not started.
 func classifyPane(screen string) application.PaneState {
-	// An empty input line is the mark and a no-break space, which a pattern for
-	// blank space does not always take for one.
-	screen = strings.ReplaceAll(screen, noBreakSpace, " ")
-	if strings.Contains(screen, workingMarker) {
+	// Markers are matched on the screen's text, not on the escapes drawn
+	// around it.
+	text := stripEscapes(screen)
+	if strings.Contains(text, workingMarker) {
 		return application.PaneWorking
 	}
 	for _, line := range strings.Split(screen, "\n") {
-		if rest, isPrompt := strings.CutPrefix(line, promptMark); isPrompt && strings.TrimSpace(rest) == "" {
+		if isPrompt, holdsDraft := inputLineHoldsDraft(line); isPrompt && !holdsDraft {
 			return application.PaneIdle
 		}
 	}
 	for _, marker := range firstRunMarkers {
-		if strings.Contains(screen, marker) {
+		if strings.Contains(text, marker) {
 			return application.PaneFirstRun
 		}
 	}
@@ -189,4 +193,106 @@ func (w *Windows) Close(ctx context.Context, window string) error {
 func noServer(err error) bool {
 	said := err.Error()
 	return strings.Contains(said, "no server running") || strings.Contains(said, "error connecting to")
+}
+
+// inputLineHoldsDraft reads one line of a capture-pane -e screen. isPrompt is
+// whether the line, its escapes aside, starts with the prompt mark. holdsDraft
+// is whether anything undimmed and not blank follows the mark: an empty input
+// line is the mark and blank space (Claude Code's is a no-break space), and
+// Claude Code's suggested next prompt is drawn after it as dim text, SGR 2,
+// which is not a draft either. This is the one rule for "is the input line
+// empty"; contrib/mail-notify's pane_idle is the same rule in shell.
+func inputLineHoldsDraft(line string) (isPrompt, holdsDraft bool) {
+	dim := false
+	seenMark := false
+	for i := 0; i < len(line); {
+		if line[i] == 0x1b {
+			n, params, isSGR := escapeAt(line[i:])
+			if isSGR {
+				dim = sgrDim(params, dim)
+			}
+			i += n
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(line[i:])
+		i += size
+		switch {
+		case !seenMark:
+			if r != []rune(promptMark)[0] {
+				return false, false
+			}
+			seenMark = true
+		case !unicode.IsSpace(r) && !dim:
+			return true, true
+		}
+	}
+	return seenMark, false
+}
+
+// escapeAt reads the escape sequence at the start of s and says how long it is;
+// for a CSI ending in m, an SGR, it gives the parameters as well.
+func escapeAt(s string) (n int, params string, isSGR bool) {
+	if len(s) < 2 {
+		return len(s), "", false
+	}
+	switch s[1] {
+	case '[':
+		for n = 2; n < len(s); n++ {
+			if s[n] >= 0x40 && s[n] <= 0x7e {
+				return n + 1, s[2:n], s[n] == 'm'
+			}
+		}
+		return len(s), "", false
+	case ']': // an operating system command, to a bell or ESC \
+		for n = 2; n < len(s); n++ {
+			if s[n] == 0x07 {
+				return n + 1, "", false
+			}
+			if s[n] == 0x1b && n+1 < len(s) && s[n+1] == '\\' {
+				return n + 2, "", false
+			}
+		}
+		return len(s), "", false
+	}
+	return 2, "", false
+}
+
+// sgrDim is whether text is dim after an SGR sequence with these parameters,
+// given whether it was before. The colour codes 38 and 48 carry arguments that
+// are not attributes of their own: 38;2;r;g;b holds a 2 that is no dim.
+func sgrDim(params string, dim bool) bool {
+	args := strings.FieldsFunc(params, func(r rune) bool { return r == ';' || r == ':' })
+	if len(args) == 0 {
+		return false
+	}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "0", "00", "22":
+			dim = false
+		case "2", "02":
+			dim = true
+		case "38", "48", "58":
+			if i+1 < len(args) && args[i+1] == "5" {
+				i += 2
+			} else if i+1 < len(args) && args[i+1] == "2" {
+				i += 4
+			}
+		}
+	}
+	return dim
+}
+
+// stripEscapes is the text of a screen without the escape sequences drawn in it.
+func stripEscapes(screen string) string {
+	var text strings.Builder
+	for i := 0; i < len(screen); {
+		if screen[i] == 0x1b {
+			n, _, _ := escapeAt(screen[i:])
+			i += n
+			continue
+		}
+		text.WriteByte(screen[i])
+		i++
+	}
+	return text.String()
 }
