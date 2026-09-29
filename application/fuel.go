@@ -71,6 +71,15 @@ type SessionResult struct {
 	// something. A session that was stopped from working says so here.
 	Denials int
 	Fuel    Fuel
+
+	// Answer is the harness's `structured_output`: the answer a session run
+	// with a JSON schema (`--json-schema`) gave, already held to that schema
+	// by the harness. Empty when the session was given no schema, or gave no
+	// such answer.
+	Answer json.RawMessage
+	// StopReason is why the model stopped, when the harness says:
+	// `refusal` is the model declining the work.
+	StopReason string
 }
 
 // Finished reports whether the session got where it was going. Anything else —
@@ -182,6 +191,8 @@ type resultFile struct {
 	TotalCostUSD   *float64          `json:"total_cost_usd"`
 	Cost           *float64          `json:"cost"`
 	Denials        []json.RawMessage `json:"permission_denials"`
+	Structured     json.RawMessage   `json:"structured_output"`
+	StopReason     string            `json:"stop_reason"`
 	Usage          struct {
 		Input      int `json:"input_tokens"`
 		Output     int `json:"output_tokens"`
@@ -253,6 +264,10 @@ func ReadSessionResult(printed string) (SessionResult, error) {
 		Woken:            file.ResultIndex > 0,
 		WholeSessionFuel: wholeSession,
 		Fuel:             fuel,
+		StopReason:       file.StopReason,
+	}
+	if answer := strings.TrimSpace(string(file.Structured)); answer != "" && answer != "null" {
+		result.Answer = json.RawMessage(answer)
 	}
 	switch {
 	case file.TotalCostUSD != nil:

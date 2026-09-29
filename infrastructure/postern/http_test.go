@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -149,7 +150,7 @@ func TestMessagesReadsTheRecordsSinceTheCursorFromTheirScripts(t *testing.T) {
 		t.Fatalf("expected %d records, got %d: %+v", len(want), len(got), got)
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if !reflect.DeepEqual(got[i], want[i]) {
 			t.Errorf("record %d: expected %+v, got %+v", i, want[i], got[i])
 		}
 	}
@@ -401,5 +402,46 @@ func TestMessagesReadsTheSignerTheBackendSupplies(t *testing.T) {
 	}
 	if got[0].Signer != f.EncryptMessage.From || got[0].Txid != "direct:ab" {
 		t.Fatalf("expected the signer %s on the direct record, got %+v", f.EncryptMessage.From, got[0])
+	}
+}
+
+// The apps a direct record's signer holds licences for, stamped by the
+// backend (postern's docs/protocol.md section 18), are read with the record.
+func TestMessagesReadsTheSignerApps(t *testing.T) {
+	f := loadProtocolFixture(t)
+	records, _ := json.Marshal(map[string]any{
+		"records": []map[string]any{{"seq": 1, "txid": "direct:ab", "scriptHex": f.RecordScriptHex,
+			"signer": f.EncryptMessage.From, "signer_apps": []string{"cairn"}}},
+	})
+	_, backend := serve(t, map[string]answer{"GET /api/messages?since=0": {200, string(records)}})
+	got, err := backend.Messages(context.Background(), 0)
+	if err != nil || len(got) != 1 || strings.Join(got[0].SignerApps, ",") != "cairn" {
+		t.Fatalf("expected the record's signer apps [cairn], got %+v %v", got, err)
+	}
+}
+
+// DeleteBlob asks the backend, proven, to delete a blob; one already gone is
+// not an error, anything else the backend refuses is.
+func TestDeleteBlobDeletesAndAGoneBlobIsNoError(t *testing.T) {
+	hash := strings.Repeat("ab", 32)
+	b, backend := serve(t, map[string]answer{"DELETE /api/blobs/" + hash: {204, ""}})
+	if err := backend.DeleteBlob(context.Background(), hash); err != nil {
+		t.Fatalf("deleting a blob: %v", err)
+	}
+	last := b.requests[len(b.requests)-1]
+	if last.Method != http.MethodDelete || !strings.HasPrefix(last.Header.Get("Authorization"), "Postern ") {
+		t.Fatalf("expected a proven DELETE, got %s %q", last.Method, last.Header.Get("Authorization"))
+	}
+
+	_, gone := serve(t, map[string]answer{})
+	if err := gone.DeleteBlob(context.Background(), hash); err != nil {
+		t.Fatalf("expected a blob already gone to be no error, got %v", err)
+	}
+	_, refusing := serve(t, map[string]answer{"DELETE /api/blobs/" + hash: {403, `{"error":"not the mill"}`}})
+	if err := refusing.DeleteBlob(context.Background(), hash); err == nil || !strings.Contains(err.Error(), "not the mill") {
+		t.Fatalf("expected the backend's refusal, got %v", err)
+	}
+	if err := refusing.DeleteBlob(context.Background(), "../etc"); err == nil {
+		t.Fatal("expected a hash that is not one refused")
 	}
 }

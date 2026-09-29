@@ -29,12 +29,8 @@ Every adapter: `var _ application.<Port> = ...`.
 | `Vault` | `application/seatboot.go` | `infrastructure/vault/vault.go` | `application/seatboot_test.go` |
 | `Runner` | `application/runner.go` | `infrastructure/tmux/tmux.go` | `apptest.FakeRunner` |
 | `Harness` | `application/harness.go` | `infrastructure/claude/claude.go` | `application/seatboot_test.go` |
-| `SeatFiles` | `application/seatup.go` | `infrastructure/vault/seat.go` | none |
-| `Windows` | `application/seatup.go` | `infrastructure/tmux/window.go` | `apptest.FakeWindows` |
-| `SeatHarness` | `application/seatup.go` | `infrastructure/claude/claude.go` | none |
-| `ReapTerminal` | `application/seatreap.go` | `infrastructure/tmux/reap.go` | `apptest.FakeWindows` |
-| `ReapLog` | `application/seatreap.go` | `infrastructure/vault/reaplog.go` | none |
-| `ReapArmer` | `application/seatreap.go` | `infrastructure/reaper/arm.go` | `apptest.FakeReapArmer` |
+| `SeatFiles`, `Windows`, `SeatHarness` | `application/seatup.go` | `infrastructure/{vault/seat,tmux/window,claude/claude}.go` | `apptest.FakeWindows` |
+| `ReapTerminal`, `ReapLog`, `ReapArmer` | `application/seatreap.go` | `infrastructure/{tmux/reap,vault/reaplog,reaper/arm}.go` | `apptest.Fake{Windows,ReapArmer}` |
 | `Transcripts` | `application/seatcontext.go` | `infrastructure/claude/transcripts.go` | none |
 | `WatchProbes` | `application/watch.go` | `infrastructure/watch/watch.go` | `apptest.FakeWatch` |
 | `Doctor{Check,State,Log,Notes}` | `application/doctor.go` | `infrastructure/doctor` | none |
@@ -42,14 +38,13 @@ Every adapter: `var _ application.<Port> = ...`.
 | `Worktrees` | `application/worktrees.go` | `infrastructure/rig/worktree.go` | `application/dispatch_test.go` |
 | `SyncHaltMarker` | `application/sync.go` | `infrastructure/synchalt/synchalt.go` | `apptest.FakeSyncHaltMarker` |
 | `Notifier` | `application/millhandtick.go` | `infrastructure/notify/notify.go` | none |
-| `VaultBirth`, `TrackerBirth` | `application/init.go` | `infrastructure/vault/birth.go`, `infrastructure/beads/init.go` | none |
-| `Landing` | `application/landing.go` | `infrastructure/rig/landing.go` | none |
-| `Checks` | `application/landing.go` | `infrastructure/rig/checks.go` | none |
+| `VaultBirth`, `TrackerBirth` | `application/init.go` | `infrastructure/{vault/birth,beads/init}.go` | none |
+| `Landing`, `Checks`, `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/{landing,checks,slot}.go` | none |
 | `AfterLanding` | `application/afterlanding.go` | `infrastructure/rig/afterlanding.go` | none |
-| `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/slot.go` | none |
 | `Dispatcher` | `application/landing.go` | `application.Dispatch` | — |
 | `HostSync` | `application/dispatch.go` | `application.Sync` | — |
 | Postern, hands | `application/{postern*,hands}.go` | `infrastructure/{postern,hands*}` | `apptest.Fake{Postern,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*}` |
+| `Grinder`, `GrindSource`, `GristState`, `GristLock` | `application/grist.go` | `infrastructure/{claude/grind,rig/grinds,hostlock/try}.go`, `infrastructure/grist` | `apptest.Fake{Grinder,Grinds,GristState,GristLock}` |
 
 `infrastructure/config/config.go` is not a port: read by `cmd/mw/`.
 
@@ -80,6 +75,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern key/inbox/send/snapshot/view/bead — cmd/mw/posternview.go, cmd/mw/posternbead.go | `features/postern_*.feature` |
 | Hands{Add,List} | application/hands.go | mw hands add/list — cmd/mw/hands.go; `cmd/mw-hands-root` | `features/hands.feature` |
 | `PosternServe`, `PosternNginx` | `application/posternhand.go` | `mw postern serve`/`nginx` — `cmd/mw/postern.go` | `features/postern_serve.feature` |
+| `GristKey`, `GristGrind` | application/grist.go, application/gristgrind.go | mw grist key/grind — `cmd/mw/grist.go` | `features/grist.feature` |
 
 `cmd/mw/root.go` holds the tree; `cmd/mw/main.go` runs it; `cmd/mw/version.go` is
 `mw version`. `features/path_validation.feature` covers `domain/path.go`;

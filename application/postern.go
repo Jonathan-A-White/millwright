@@ -129,6 +129,13 @@ type PosternRecord struct {
 	// not, so it is never compared — an unchecked signer is not evidence for
 	// or against a record's sender.
 	Signer string
+
+	// SignerApps are the apps the signer's licences open, as the backend
+	// stamped them when a direct record arrived: postern's docs/protocol.md
+	// section 18. The mill trusts this stamp, never a grist's own plaintext,
+	// to say whether its sender may use an app's grinds. Empty for a record
+	// whose signer holds no app licence, and for every record on chain.
+	SignerApps []string
 }
 
 // PosternUtxo is one unspent output the postern key's balance is built from.
@@ -169,6 +176,11 @@ type Postern interface {
 	// backend's blob store, section 8, and reports the sha256 (hex) and size
 	// it is stored under — what the message announcing it names.
 	UploadBlob(ctx context.Context, body []byte) (hash string, size int64, err error)
+	// DeleteBlob deletes the body stored under hash from the backend's blob
+	// store, section 18: the mill deletes a grist's photos once it has
+	// answered it, rather than leaving them for section 8's 30 days. A hash
+	// the backend no longer holds is already gone, and not an error.
+	DeleteBlob(ctx context.Context, hash string) error
 }
 
 // Cipher is the port that encrypts and decrypts a message's text between the
@@ -376,8 +388,9 @@ func posternThreadAndText(class, text string) (thread, display string, isBead bo
 	return PosternGeneralThread, text, false, nil
 }
 
-// PosternClasses is the set of classes mw postern send accepts.
-var PosternClasses = []string{"message", "decision-needed", "landing", "alarm"}
+// PosternClasses is the set of classes mw postern send accepts: section 1's,
+// grist (section 18) among them.
+var PosternClasses = []string{"message", "decision-needed", "landing", "alarm", GristClass}
 
 func validPosternClass(class string) bool {
 	for _, c := range PosternClasses {
