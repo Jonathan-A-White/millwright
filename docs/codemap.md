@@ -4,24 +4,24 @@
 
 | Layer | Directory | Rule |
 | --- | --- | --- |
-| domain | `domain/` | Value types, validation; stdlib only |
-| application | `application/` | One file per use case, plus ports; imports no adapter. |
-| fakes | `application/apptest/` | Port stand-ins |
-| infrastructure | `infrastructure/` | One subpackage per adapter |
-| command line | `cmd/mw/` | Cobra wiring: read config, run the use case. |
-| features | `features/` | Gherkin; steps in `features/steps/` |
-| template | `template/` | Born from `embed.go`; no host detail. |
+| domain | `domain/` | Value types, validation; stdlib only. |
+| application | `application/` | One file per use case, plus ports. |
+| fakes | `application/apptest/` | Port stand-ins. |
+| infrastructure | `infrastructure/` | One subpackage per adapter. |
+| command line | `cmd/mw/` | Cobra wiring. |
+| features | `features/` | Gherkin; steps in `features/steps/`. |
+| template | `template/` | Born from `embed.go`. |
 
 ## Ports
 
-Every adapter: `var _ application.<Port> = ...`.
+Each adapter: `var _ application.<Port> = ...`.
 
 | Port | Declared in | Real adapter | Fake |
 | --- | --- | --- | --- |
 | `WorkTracker` | `application/worktracker.go` | `infrastructure/beads/beads.go` | `apptest.FakeTracker` |
 | `TrackerSync` | `application/sync.go` | `infrastructure/beads/sync.go` | `apptest.FakeTracker` |
 | `TrackerNotes` | `application/status.go` | same, read half | same |
-| `SweepNotes` | `application/sweep.go` | same, `Note`s | same |
+| `SweepNotes` | `application/sweep.go` | same | same |
 | `VaultFiles` | `application/sync.go` | `infrastructure/vault/git.go` | `apptest.FakeVaultFiles` |
 | `Mailbox` | `application/mail.go` | `infrastructure/beads/mail.go` | `apptest.FakeMailbox` |
 | `Vault` | `application/seatboot.go` | `infrastructure/vault/vault.go` | `application/seatboot_test.go` |
@@ -59,7 +59,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `Status` | `application/status.go` | `mw status` — `cmd/mw/status.go` | `features/status.feature` |
 | `Brief` | `application/brief.go` | `mw brief` — `cmd/mw/brief.go` | `features/brief.feature` |
 | `Sweep` | `application/sweep.go` | `mw sweep` — `cmd/mw/sweep.go` | `features/sweep.feature` |
-| `Sync` | `application/sync.go` | `mw sync` (`beads_sync`) — `cmd/mw/sync.go` | `features/sync.feature` |
+| `Sync` | `application/sync.go` | `mw sync` — `cmd/mw/sync.go` | `features/sync.feature` |
 | `Nudge` | `application/nudge.go` | `mw nudge` — `cmd/mw/nudge.go` | none |
 | `Mail` | `application/mail.go` | `mw mail` — `cmd/mw/mail.go` | `features/mail.feature` |
 | `Home` | `application/home.go` | `mw home` — `cmd/mw/home.go` | `features/home.feature` |
@@ -69,10 +69,10 @@ Every adapter: `var _ application.<Port> = ...`.
 | `MillhandTick` | `application/millhandtick.go` | `mw millhand tick` — `cmd/mw/millhandtick.go` | `features/millhand_tick.feature` |
 | `Watch` | `application/watch.go` | `mw watch` — `cmd/mw/watch.go` | `features/watch.feature` |
 | `Doctor` | `application/doctor.go` | `mw doctor` — `cmd/mw/doctor.go` | `features/doctor.feature` |
-| `SeatBoot` | `application/seatboot.go` | none: `Dispatch`, `Next` call it | `features/seat_boot.feature` |
+| `SeatBoot` | `application/seatboot.go` | none: called by `Dispatch`, `Next` | `features/seat_boot.feature` |
 | `Init` | `application/init.go` | `mw init` — `cmd/mw/init.go` | `features/init.feature` |
 | Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern key/inbox/send/snapshot/view/bead — cmd/mw/posternview.go, cmd/mw/posternbead.go | `features/postern_*.feature` |
-| Hands{Add,List} | application/hands.go | mw hands add (pushes)/list — cmd/mw/hands.go; `cmd/mw-hands-root` | `features/hands.feature` |
+| Hands{Add,List} | application/hands.go | mw hands add /list — cmd/mw/hands.go; `cmd/mw-hands-root` | `features/hands.feature` |
 | `PosternServe`, `PosternNginx`, `PosternMirror` | `application/posternhand.go`, `application/posternmirror.go` | `mw postern serve`/`nginx`/`mirror` — `cmd/mw/postern.go`, `cmd/mw/posternmirror.go` | `features/postern_serve.feature` |
 | `GristKey`, `GristGrind` | `application/grist.go`, `application/gristgrind.go` | `mw grist key`/`grind` — `cmd/mw/grist.go` | `features/grist.feature` |
 
@@ -84,20 +84,20 @@ Every adapter: `var _ application.<Port> = ...`.
 
 | Helper | Where | What it gives |
 | --- | --- | --- |
-| `throwawayVault`, `installFormula` | `infrastructure/beads/beads_integration_test.go` | Real bd DB in a temp dir; a formula copied in. |
-| `standIn` | `infrastructure/beads/sync_test.go` | Stands in for `bd`. |
-| `privateRunner` | `infrastructure/tmux/tmux_integration_test.go` | Private tmux server. |
-| `privateWindows` | `infrastructure/tmux/window_integration_test.go` | Tmux server + seat. |
-| `aVault` | `infrastructure/vault/vault_test.go` | Vault with a seat. |
-| `twoHosts` | `infrastructure/vault/git_test.go` | Two vault clones. |
-| `aRig` | `infrastructure/rig/worktree_test.go` | Rig, real origin. |
-| `mwConfig` | `cmd/mw/dispatch_test.go` | `config.toml`, temp HOME. |
-| `aFactory` | `application/dispatch_test.go` | Faked `Dispatch`, temp vault. |
+| `throwawayVault`, `installFormula` | `infrastructure/beads/beads_integration_test.go` | Real bd DB, temp dir; formula copied in. |
+| `standIn` | `infrastructure/beads/sync_test.go` | Stand-in `bd`. |
+| `privateRunner` | `infrastructure/tmux/tmux_integration_test.go` | Private tmux. |
+| `privateWindows` | `infrastructure/tmux/window_integration_test.go` | Tmux + seat. |
+| `aVault` | `infrastructure/vault/vault_test.go` | Seat vault. |
+| `twoHosts` | `infrastructure/vault/git_test.go` | Two clones. |
+| `aRig` | `infrastructure/rig/worktree_test.go` | Rig + origin. |
+| `mwConfig` | `cmd/mw/dispatch_test.go` | Temp-HOME config. |
+| `aFactory` | `application/dispatch_test.go` | Fake `Dispatch`. |
 
 ## Build and test
 
 See `CLAUDE.md`; then:
 
 - One package: `go test ./application/...` (`-run`, `-tags beads_integration`).
-- One feature: `MW_FEATURE=sweep.feature go test ./features` (`:17` for a scenario).
-- `make lint` runs `scripts/check-*.sh`; `make check-formulas` needs `bd`, `jq` (not in `make test`).
+- One feature: `MW_FEATURE=sweep.feature go test ./features` (`:17`: a scenario).
+- `make lint` runs `scripts/check-*.sh`; `make check-formulas` needs `bd`, `jq`.
