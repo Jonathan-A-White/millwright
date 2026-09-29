@@ -1015,6 +1015,61 @@ mw-postern-mirror` (see *Running a host on a timer*), which runs
 by `scripts/check-timer-units.sh` and `cmd/mw/postern_mirror_test.go`, which run
 it against a stand-in rsync and ssh.
 
+## Grist: apps' AI work
+
+An app (Cairn first) sends the factory grist: AI work to be answered, not
+built, sealed to the **mill key** and carried by the postern backend as a
+`grist` record (postern's `docs/protocol.md` §18). The mill runs on the
+factory's home host.
+
+`mw grist key` makes the mill key once, 0600 at `grist_key_file` (default
+`~/.config/mw/mill.key`; never the Mayor's key), and prints its public key and
+fingerprint. It never overwrites a key or prints the private half.
+
+`mw grist grind` is one pass, then it exits. It reads what the backend holds
+for the mill key and answers each grist once, sealed back to its sender with
+`re` set to the grist's txid:
+
+- **refused**, with no session, when the backend's `signer_apps` stamp does not
+  name the grist's app (the Governor's `postern_governor_key` may use any app),
+  the app has no grind for the grist's kind and version, its model is not
+  allowed, or its photos or the sender's grist today are over a limit;
+- **answered** or **failed** otherwise, after one short Claude Code session
+  with no seat. The session runs in a private temp directory holding the
+  opened photos, may only Read them, and must answer in the grind's schema.
+
+The grind is `grinds/<kind>.json` at the app rig's local `main`, read with its
+instructions and schema at that commit, and the commit is stamped on the
+answer. A grind takes one of the host's `cap` slots, first come first served.
+When no slot is free the grist waits for the next pass. `mw dispatch` counts a
+running grind as one of its sessions. After answering, the grist's photos are
+deleted from the backend. Each grist handled adds one line to
+`grinds.jsonl` in `grist_state_dir` (default `~/.local/state/mw/grist`): time,
+txid, app, kind, sender fingerprint, model, status, reason, Fuel, seconds and
+commit, never the grist's content.
+
+```toml
+grist_key_file  = "/home/jwhite/.config/mw/mill.key"   # MW_GRIST_KEY_FILE
+grist_state_dir = "/home/jwhite/.local/state/mw/grist" # MW_GRIST_STATE_DIR
+
+[grist]                  # the ceilings above every grind; these are the defaults
+models = "haiku,sonnet,opus"
+max_attachments = 4
+max_attachment_bytes = 8388608
+daily_limit = 50         # grist a day from one key
+timeout = "10m"
+
+[grist-apps]             # where each app's rig is checked out here
+cairn = "/home/jwhite/rigs/Cairn"
+```
+
+The postern backend pairs with it through three environment lines:
+`POSTERN_MILL_KEY` (the public key `mw grist key` prints), `POSTERN_ON_GRIST`
+(`mw grist grind`, by full path) and `POSTERN_APPS` (`cairn=cairn`, each app's
+licence collection to its name). `mw postern serve` does not write these yet,
+so add them to the backend's environment file by hand. See
+`features/grist.feature`.
+
 ## Steps for his hands
 
 A step only the Governor's hands could take — a `sudo` line, a unit to

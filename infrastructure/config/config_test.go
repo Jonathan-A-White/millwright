@@ -52,6 +52,8 @@ func writeConfig(t *testing.T, contents string) string {
 	t.Setenv("MW_POSTERN_CHANNEL", "")
 	t.Setenv("MW_POSTERN_TRANSCRIBE_CMD", "")
 	t.Setenv("MW_HANDS_ROOT_HELPER", "")
+	t.Setenv("MW_GRIST_KEY_FILE", "")
+	t.Setenv("MW_GRIST_STATE_DIR", "")
 	return home
 }
 
@@ -1314,5 +1316,100 @@ func TestPosternWatchdogTargetIsEmptyUntilAHostSaysOne(t *testing.T) {
 	writeConfig(t, "postern_watchdog_target = \"root@vps:/var/lib/postern-watchdog/\"\n")
 	if target, err := config.PosternWatchdogTarget(); err != nil || target != "root@vps:/var/lib/postern-watchdog/" {
 		t.Fatalf("expected the file's target, got %q: %v", target, err)
+	}
+}
+
+// The mill key and the mill's state live under the home directory unless
+// config or the environment says otherwise, and a path said is a full one.
+func TestGristKeyFileAndStateDirDefaultUnderTheHome(t *testing.T) {
+	home := writeConfig(t, "")
+	key, err := config.GristKeyFile()
+	if err != nil || key != filepath.Join(home, ".config", "mw", "mill.key") {
+		t.Fatalf("expected ~/.config/mw/mill.key, got %q %v", key, err)
+	}
+	state, err := config.GristStateDir()
+	if err != nil || state != filepath.Join(home, ".local", "state", "mw", "grist") {
+		t.Fatalf("expected ~/.local/state/mw/grist, got %q %v", state, err)
+	}
+}
+
+func TestGristKeyFileAndStateDirAreRead(t *testing.T) {
+	writeConfig(t, "grist_key_file = \"/keys/mill.key\"\ngrist_state_dir = \"/state/grist\"\n")
+	if key, err := config.GristKeyFile(); err != nil || key != "/keys/mill.key" {
+		t.Fatalf("expected the config's key file, got %q %v", key, err)
+	}
+	if state, err := config.GristStateDir(); err != nil || state != "/state/grist" {
+		t.Fatalf("expected the config's state dir, got %q %v", state, err)
+	}
+	t.Setenv("MW_GRIST_KEY_FILE", "/env/mill.key")
+	if key, _ := config.GristKeyFile(); key != "/env/mill.key" {
+		t.Fatalf("expected the environment ahead of the file, got %q", key)
+	}
+}
+
+func TestGristKeyFileMustBeAFullPath(t *testing.T) {
+	writeConfig(t, "grist_key_file = \"mill.key\"\n")
+	if _, err := config.GristKeyFile(); err == nil || !strings.Contains(err.Error(), "full path") {
+		t.Fatalf("expected a relative key file refused, got %v", err)
+	}
+}
+
+// With no [grist] table the ceilings are the defaults.
+func TestGristCeilingsDefault(t *testing.T) {
+	writeConfig(t, "host = \"laptop\"\n")
+	got, err := config.Grist()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got.Models, ",") != "haiku,sonnet,opus" || got.MaxAttachments != 4 || got.MaxAttachmentBytes != 8388608 ||
+		got.DailyLimit != 50 || got.Timeout != 10*time.Minute {
+		t.Fatalf("expected the default ceilings, got %+v", got)
+	}
+}
+
+func TestGristCeilingsAreReadFromTheTable(t *testing.T) {
+	writeConfig(t, `host = "laptop"
+
+[grist]
+models = ["haiku", "sonnet"]
+max_attachments = 2
+max_attachment_bytes = 4194304
+daily_limit = 20
+timeout = "5m"
+
+[grist-apps]
+cairn = "/home/jwhite/rigs/Cairn"
+`)
+	got, err := config.Grist()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got.Models, ",") != "haiku,sonnet" || got.MaxAttachments != 2 || got.MaxAttachmentBytes != 4194304 ||
+		got.DailyLimit != 20 || got.Timeout != 5*time.Minute {
+		t.Fatalf("expected the table's ceilings, got %+v", got)
+	}
+	apps, err := config.GristApps()
+	if err != nil || len(apps) != 1 || apps["cairn"] != "/home/jwhite/rigs/Cairn" {
+		t.Fatalf("expected cairn's checkout, got %v %v", apps, err)
+	}
+}
+
+func TestGristCeilingsThatAreNotNumbersAreRefused(t *testing.T) {
+	for _, bad := range []string{"daily_limit = 0", "max_attachments = four", `timeout = "soon"`} {
+		writeConfig(t, "[grist]\n"+bad+"\n")
+		if _, err := config.Grist(); err == nil {
+			t.Errorf("expected %q refused", bad)
+		}
+	}
+}
+
+func TestGristAppsMustBeFullPaths(t *testing.T) {
+	writeConfig(t, "[grist-apps]\ncairn = \"rigs/Cairn\"\n")
+	if _, err := config.GristApps(); err == nil || !strings.Contains(err.Error(), "full path") {
+		t.Fatalf("expected a relative checkout refused, got %v", err)
+	}
+	writeConfig(t, "")
+	if apps, err := config.GristApps(); err != nil || len(apps) != 0 {
+		t.Fatalf("expected no apps and no error, got %v %v", apps, err)
 	}
 }

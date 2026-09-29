@@ -186,6 +186,7 @@ func newDispatchCmd() *cobra.Command {
 				MaxAttempts: maxAttempts,
 				Mailbox:     gateway,
 				Rigs:        rigs,
+				Grinding:    gristGrindLock(),
 				DryRun:      dryRun,
 				Out:         cmd.OutOrStdout(),
 			}

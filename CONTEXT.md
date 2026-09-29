@@ -84,6 +84,20 @@ The one host, the desktop or the Laptop, that holds the beads server, the Mayor 
 **Boost**:
 The host that is not home. It builds, dispatching against the home's beads server, whenever it is on, and holds nothing that must stay up.
 
+### Apps
+
+**Grist**:
+AI work an app sends the factory to be answered, not built: its inputs (the app's request, maybe photos), the grind it asks for, and the key that sent it. Rides the Postern backend as a `grist` record (postern docs/protocol.md §18).
+_Avoid_: Job, task, request, story
+
+**Grind**:
+An app's standing instructions for one kind of grist: what it accepts, the model and effort, the instructions, the answer's schema. The app's rig owns it (`grinds/<kind>.json`); the factory's config caps it.
+_Avoid_: Spec, recipe, prompt, template
+
+**Mill**:
+The factory's side of grist: `mw grist grind` on the home host, holding the mill key. Not a seat: each grind is one short harness session with no seat.
+_Avoid_: Worker, service, daemon
+
 ### Economy
 
 **Fuel**:

@@ -23,6 +23,7 @@ type FakePostern struct {
 	blobs     map[string][]byte
 	delivered [][]byte
 	uploaded  [][]byte
+	deleted   []string
 
 	// NextTxid is the txid Broadcast and Deliver report. When empty,
 	// Broadcast reports "fake-txid-<n>" and Deliver "direct:fake-<n>".
@@ -30,6 +31,9 @@ type FakePostern struct {
 
 	// Err, when set, is returned by every method instead of doing the work.
 	Err error
+	// DeliverErr, when set, is returned by Deliver alone: a backend that
+	// reads but will not take a record.
+	DeliverErr error
 }
 
 // FakePostern satisfies the port.
@@ -160,6 +164,9 @@ func (f *FakePostern) Deliver(_ context.Context, payload []byte) (string, error)
 	if f.Err != nil {
 		return "", f.Err
 	}
+	if f.DeliverErr != nil {
+		return "", f.DeliverErr
+	}
 	f.delivered = append(f.delivered, append([]byte(nil), payload...))
 	if f.NextTxid != "" {
 		return f.NextTxid, nil
@@ -202,4 +209,32 @@ func (f *FakePostern) Uploaded() [][]byte {
 		out[i] = append([]byte(nil), b...)
 	}
 	return out
+}
+
+// DeleteBlob implements application.Postern: the blob is gone, and the hash
+// is kept for Deleted to report. A hash not held is already gone.
+func (f *FakePostern) DeleteBlob(_ context.Context, hash string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return f.Err
+	}
+	delete(f.blobs, hash)
+	f.deleted = append(f.deleted, hash)
+	return nil
+}
+
+// Deleted reports the hashes DeleteBlob was asked to delete, in order.
+func (f *FakePostern) Deleted() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.deleted...)
+}
+
+// HasBlob reports whether a blob is still held under hash.
+func (f *FakePostern) HasBlob(hash string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	_, ok := f.blobs[hash]
+	return ok
 }

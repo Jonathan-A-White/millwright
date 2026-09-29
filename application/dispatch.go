@@ -108,6 +108,11 @@ type Dispatch struct {
 	Cap  int
 	Rigs map[string]string
 
+	// Grinding is held while the mill grinds a grist here (mw grist grind):
+	// a grind takes one of the sessions Cap counts, first come first served.
+	// A nil Grinding counts none.
+	Grinding GristLock
+
 	// MaxAttempts is how many times a story may be started in all; a story tried
 	// that many times is not started again, and the Mayor is told. Fewer than one
 	// is DefaultMaxAttempts.
@@ -200,8 +205,10 @@ type Reclaimed struct {
 type DispatchReport struct {
 	Host string
 	Cap  int
-	// Running is how many sessions this host already had in flight.
-	Running int
+	// Running is how many sessions this host already had in flight;
+	// Grinding says one of them is a grist grind.
+	Running  int
+	Grinding bool
 	// Reclaimed is every claim this dispatch took back from a dead pane and an
 	// expired lease before it read what is ready.
 	Reclaimed []Reclaimed
@@ -357,6 +364,14 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			}
 		}
 		report.Running++
+	}
+	if d.Grinding != nil {
+		if grinding, err := d.Grinding.Held(ctx); err != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf("whether a grist grind is running here could not be read: %v", err))
+		} else if grinding {
+			report.Running++
+			report.Grinding = true
+		}
 	}
 	free := d.Cap - report.Running
 
@@ -946,6 +961,9 @@ func (r DispatchReport) String() string {
 		what = "dispatch (dry run: nothing was synced, claimed or started)"
 	}
 	fmt.Fprintf(&b, "%s on %s: %d of %d sessions were already running\n", what, r.Host, r.Running, r.Cap)
+	if r.Grinding {
+		b.WriteString("  grinding: a grist grind holds one of those sessions\n")
+	}
 	if r.Synced {
 		fmt.Fprintf(&b, "  synced  %s\n", r.Sync)
 	}

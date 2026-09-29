@@ -92,6 +92,9 @@ const (
 
 	HandsRootHelperEnv = "MW_HANDS_ROOT_HELPER"
 
+	GristKeyFileEnv  = "MW_GRIST_KEY_FILE"
+	GristStateDirEnv = "MW_GRIST_STATE_DIR"
+
 	BeadsSyncEnv          = "MW_BEADS_SYNC"
 	BeadsBackupMinutesEnv = "MW_BEADS_BACKUP_MINUTES"
 	BeadsServerHostEnv    = "MW_BEADS_SERVER_HOST"
@@ -129,6 +132,15 @@ const WatchTable = "watch"
 
 // DoctorTable is the table of the config file that says what `mw doctor` checks.
 const DoctorTable = "doctor"
+
+// GristTable is the table of the factory's ceilings above every grind, and
+// GristAppsTable the one that says where each app's rig is checked out for
+// the mill to read its grinds from: app name on the left, a full path on the
+// right (`cairn = "/home/jwhite/rigs/Cairn"`).
+const (
+	GristTable     = "grist"
+	GristAppsTable = "grist-apps"
+)
 
 // DefaultCap is how many sessions may run at once on a host that does not say.
 // One, because the smaller of the factory's two hosts has a single core and
@@ -457,6 +469,148 @@ func PosternLocalURL(host string) (string, error) {
 // appended. Empty when neither says, and then no voice note is transcribed.
 func PosternTranscribeCmd() (string, error) {
 	return optionalSetting("postern_transcribe_cmd", PosternTranscribeCmdEnv, "")
+}
+
+// DefaultGristKeyFile is where the mill key is kept under the home
+// directory when nothing says otherwise: beside the Mayor's postern key,
+// never the same key.
+var DefaultGristKeyFile = filepath.Join(".config", "mw", "mill.key")
+
+// DefaultGristStateDir is where the mill keeps its cursor, its record and
+// any answer not yet delivered, under the home directory, when nothing says
+// otherwise.
+var DefaultGristStateDir = filepath.Join(".local", "state", "mw", "grist")
+
+// The ceilings above every grind when the [grist] table says nothing:
+// application's own defaults are the same.
+const (
+	DefaultGristModels             = "haiku,sonnet,opus"
+	DefaultGristMaxAttachments     = 4
+	DefaultGristMaxAttachmentBytes = 8388608
+	DefaultGristDailyLimit         = 50
+	DefaultGristTimeout            = 10 * time.Minute
+)
+
+// GristKeyFile reports where the mill key is kept: $MW_GRIST_KEY_FILE if it
+// is set, otherwise the root-table `grist_key_file` key of
+// ~/.config/mw/config.toml, a full path either way, and DefaultGristKeyFile
+// under the home directory when neither says.
+func GristKeyFile() (string, error) {
+	return fullPathSetting("grist_key_file", GristKeyFileEnv, DefaultGristKeyFile, "the mill key file")
+}
+
+// GristStateDir reports where the mill keeps its state: $MW_GRIST_STATE_DIR
+// if it is set, otherwise the root-table `grist_state_dir` key of
+// ~/.config/mw/config.toml, a full path either way, and DefaultGristStateDir
+// under the home directory when neither says.
+func GristStateDir() (string, error) {
+	return fullPathSetting("grist_state_dir", GristStateDirEnv, DefaultGristStateDir, "the mill's state directory")
+}
+
+// GristSettings are the factory's ceilings above every grind.
+type GristSettings struct {
+	Models             []string
+	MaxAttachments     int
+	MaxAttachmentBytes int64
+	DailyLimit         int
+	Timeout            time.Duration
+}
+
+// Grist reports the ceilings of the `[grist]` table of
+// ~/.config/mw/config.toml: `models` (a list, or one string with commas),
+// `max_attachments`, `max_attachment_bytes`, `daily_limit` (grist a day from
+// one key) and `timeout` (a Go duration, "10m"), each its default when the
+// table says nothing.
+func Grist() (GristSettings, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return GristSettings{}, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	table, err := tableIn(path, GristTable)
+	if err != nil {
+		return GristSettings{}, err
+	}
+	settings := GristSettings{Models: list(DefaultGristModels), Timeout: DefaultGristTimeout}
+	if models := list(table["models"]); len(models) > 0 {
+		settings.Models = models
+	}
+	most, err := countIn(table, "max_attachments", DefaultGristMaxAttachments, path)
+	if err != nil {
+		return GristSettings{}, err
+	}
+	if settings.MaxAttachmentBytes, err = countIn(table, "max_attachment_bytes", DefaultGristMaxAttachmentBytes, path); err != nil {
+		return GristSettings{}, err
+	}
+	daily, err := countIn(table, "daily_limit", DefaultGristDailyLimit, path)
+	if err != nil {
+		return GristSettings{}, err
+	}
+	settings.MaxAttachments, settings.DailyLimit = int(most), int(daily)
+	if said := strings.TrimSpace(table["timeout"]); said != "" {
+		timeout, err := time.ParseDuration(said)
+		if err != nil || timeout <= 0 {
+			return GristSettings{}, fmt.Errorf("the [%s] table of %s says timeout = %q: it must be a duration, \"10m\"", GristTable, path, said)
+		}
+		settings.Timeout = timeout
+	}
+	return settings, nil
+}
+
+// GristApps reports where each app's rig is checked out on this machine, by
+// app name, read from the `[grist-apps]` table of ~/.config/mw/config.toml:
+// the mill reads an app's grinds from there. A machine with no such table
+// grinds for no app, which is not an error: the mill refuses such grist.
+func GristApps() (map[string]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	apps, err := tableIn(path, GristAppsTable)
+	if err != nil {
+		return nil, err
+	}
+	for name, dir := range apps {
+		if !filepath.IsAbs(dir) {
+			return nil, fmt.Errorf("the app %s is at %q in the [%s] table of %s: an app's checkout is named by its full path", name, dir, GristAppsTable, path)
+		}
+	}
+	return apps, nil
+}
+
+// countIn reads a [grist] key that is a whole number, 1 or more, and
+// fallback when the table says nothing about it.
+func countIn(table map[string]string, key string, fallback int64, path string) (int64, error) {
+	said := strings.TrimSpace(table[key])
+	if said == "" {
+		return fallback, nil
+	}
+	n, err := strconv.ParseInt(said, 10, 64)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("the [%s] table of %s says %s = %q: it must be a whole number, 1 or more", GristTable, path, key, said)
+	}
+	return n, nil
+}
+
+// fullPathSetting is optionalSetting for a path: what is said must be a full
+// path, and fallback is under the home directory. what names it in an error.
+func fullPathSetting(key, env, fallback, what string) (string, error) {
+	said, err := optionalSetting(key, env, "")
+	if err != nil {
+		return "", err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("no %s is set and there is no home directory to read %s in: %w", env, File, err)
+	}
+	if said != "" {
+		if !filepath.IsAbs(said) {
+			return "", fmt.Errorf("%s is %q in %s: it must be a full path", what, said, filepath.Join(home, File))
+		}
+		return said, nil
+	}
+	return filepath.Join(home, fallback), nil
 }
 
 // What `mw dispatch` does when its sync cannot resolve a name, which is what a

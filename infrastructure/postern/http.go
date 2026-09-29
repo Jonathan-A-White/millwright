@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -76,6 +77,9 @@ type apiRecord struct {
 	// section 9) — the key that authenticated its delivery. Absent when the
 	// backend cannot say.
 	Signer string `json:"signer"`
+	// SignerApps are the apps the signer's licences open, stamped on a
+	// direct record as it arrived (postern's docs/protocol.md section 18).
+	SignerApps []string `json:"signer_apps"`
 }
 
 // Messages implements application.Postern: GET /api/messages?since=. A
@@ -91,7 +95,7 @@ func (h *HTTP) Messages(ctx context.Context, since int64) ([]application.Postern
 	}
 	records := make([]application.PosternRecord, 0, len(body.Records))
 	for _, r := range body.Records {
-		record := application.PosternRecord{Seq: r.Seq, Txid: r.Txid, Signer: r.Signer}
+		record := application.PosternRecord{Seq: r.Seq, Txid: r.Txid, Signer: r.Signer, SignerApps: r.SignerApps}
 		if raw, ok := DecodeRecordScript(r.ScriptHex); ok {
 			var p application.PosternPayload
 			if json.Unmarshal(raw, &p) == nil && p.Kind == application.PosternMessageKind {
@@ -259,6 +263,31 @@ func (h *HTTP) Blob(ctx context.Context, hash string) ([]byte, error) {
 	return h.authFetch(ctx, http.MethodGet, "/api/blobs/"+url.PathEscape(hash), nil)
 }
 
+// DeleteBlob implements application.Postern: DELETE /api/blobs/{hash}
+// (postern's docs/protocol.md section 18), answered 204. A 404 is a blob
+// already gone, and not an error. A hash that is not 64 hex characters is
+// refused before any network call.
+func (h *HTTP) DeleteBlob(ctx context.Context, hash string) error {
+	if !posternBlobHash.MatchString(hash) {
+		return fmt.Errorf("%q is not a sha256 hash, 64 hex characters: refusing to ask the postern backend to delete it", hash)
+	}
+	_, err := h.authFetch(ctx, http.MethodDelete, "/api/blobs/"+url.PathEscape(hash), nil)
+	var status *statusError
+	if errors.As(err, &status) && status.code == http.StatusNotFound {
+		return nil
+	}
+	return err
+}
+
+// statusError is the backend answering outside 2xx: its status, and what it
+// said.
+type statusError struct {
+	code int
+	said string
+}
+
+func (e *statusError) Error() string { return e.said }
+
 // authHeader asks the backend for a fresh challenge nonce and signs it with
 // keys, reporting the caller's own public key alongside the Authorization
 // header value it built, postern's docs/api.md Authentication section:
@@ -349,7 +378,7 @@ func (h *HTTP) fetchAs(ctx context.Context, method, path string, body []byte, au
 		if json.Unmarshal(raw, &said) != nil || said.Error == "" {
 			said.Error = strings.TrimSpace(string(raw))
 		}
-		return nil, fmt.Errorf("the postern backend at %s said %d to %s %s: %s", h.base, resp.StatusCode, method, path, said.Error)
+		return nil, &statusError{code: resp.StatusCode, said: fmt.Sprintf("the postern backend at %s said %d to %s %s: %s", h.base, resp.StatusCode, method, path, said.Error)}
 	}
 	return raw, nil
 }
