@@ -23,7 +23,7 @@ Each adapter: `var _ application.<Port> = ...`.
 | `TrackerNotes` | `application/status.go` | same, read half | same |
 | `SweepNotes` | `application/sweep.go` | same | same |
 | `VaultFiles` | `application/sync.go` | `infrastructure/vault/git.go` | `apptest.FakeVaultFiles` |
-| `Mailbox` | `application/mail.go` | `infrastructure/beads/mail.go` | `apptest.FakeMailbox` |
+| `Mailbox`, `TidyMailbox` | `application/{mail,tidy}.go` | `infrastructure/beads/mail.go` | `apptest.FakeMailbox` |
 | `Vault` | `application/seatboot.go` | `infrastructure/vault/vault.go` | `application/seatboot_test.go` |
 | `Runner` | `application/runner.go` | `infrastructure/tmux/tmux.go` | `apptest.FakeRunner` |
 | `Harness` | `application/harness.go` | `infrastructure/claude/claude.go` | `application/seatboot_test.go` |
@@ -59,6 +59,7 @@ Each adapter: `var _ application.<Port> = ...`.
 | `Status` | `application/status.go` | `mw status` — `cmd/mw/status.go` | `features/status.feature` |
 | `Brief` | `application/brief.go` | `mw brief` — `cmd/mw/brief.go` | `features/brief.feature` |
 | `Sweep` | `application/sweep.go` | `mw sweep` — `cmd/mw/sweep.go` | `features/sweep.feature` |
+| `Tidy` | `application/tidy.go` | `mw tidy` — `cmd/mw/tidy.go` | `features/tidy.feature` |
 | `Sync` | `application/sync.go` | `mw sync` — `cmd/mw/sync.go` | `features/sync.feature` |
 | `Nudge` | `application/nudge.go` | `mw nudge` — `cmd/mw/nudge.go` | none |
 | `Mail` | `application/mail.go` | `mw mail` — `cmd/mw/mail.go` | `features/mail.feature` |
@@ -84,15 +85,14 @@ Each adapter: `var _ application.<Port> = ...`.
 
 | Helper | Where | What it gives |
 | --- | --- | --- |
-| `throwawayVault`, `installFormula` | `infrastructure/beads/beads_integration_test.go` | Real bd DB, temp dir; formula copied in. |
+| `throwawayVault`, `installFormula` | `infrastructure/beads/beads_integration_test.go` | Real bd DB in a temp dir. |
 | `standIn` | `infrastructure/beads/sync_test.go` | Stand-in `bd`. |
 | `privateRunner` | `infrastructure/tmux/tmux_integration_test.go` | Private tmux. |
-| `privateWindows` | `infrastructure/tmux/window_integration_test.go` | Tmux + seat. |
+| `privateWindows` | `infrastructure/tmux/window_integration_test.go` | Tmux, seat. |
 | `aVault` | `infrastructure/vault/vault_test.go` | Seat vault. |
 | `twoHosts` | `infrastructure/vault/git_test.go` | Two clones. |
 | `aRig` | `infrastructure/rig/worktree_test.go` | Rig + origin. |
 | `mwConfig` | `cmd/mw/dispatch_test.go` | Temp-HOME config. |
-| `aFactory` | `application/dispatch_test.go` | Fake `Dispatch`. |
 
 ## Build and test
 

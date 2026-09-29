@@ -1815,6 +1815,21 @@ claim is a separate command. One story's trouble — a write that fails — is
 reported on a `!` line and the rest are still examined. See
 `features/sweep.feature`.
 
+## Closing what is plainly finished
+
+```sh
+bin/mw tidy [--dry-run]
+```
+
+`mw tidy` closes an `Answer: ...` mail bead over a day old, closes a mail bead
+the mailbox holds read and over seven days old, and clears a postern question
+note whose bead is closed. It does nothing else: it never closes a story, an
+epic, a map or a hitl bead, and never deletes. Each act writes
+`Tidied by mw tidy: <why>` on what it touched, and one line to the Millhand's
+tick log. The tick runs it after its sweep; `--dry-run` lists what it would do
+and changes nothing. The bounds are the table in `docs/tidy.md`; see
+`features/tidy.feature`.
+
 ## Asking a seat how full its session is
 
 ```sh

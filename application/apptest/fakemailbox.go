@@ -32,7 +32,9 @@ type FakeMailbox struct {
 
 type fakeMessage struct {
 	application.Message
-	read bool
+	read        bool
+	closed      bool
+	closeReason string
 }
 
 // FakeMailbox satisfies the port.
@@ -82,7 +84,7 @@ func (f *FakeMailbox) Inbox(_ context.Context, mailbox string) ([]application.Me
 	}
 	var unread []application.Message
 	for _, message := range f.messages {
-		if message.To == mailbox && !message.read {
+		if message.To == mailbox && !message.read && !message.closed {
 			unread = append(unread, message.Message)
 		}
 	}
@@ -120,4 +122,71 @@ func (f *FakeMailbox) Read(_ context.Context, id, _ string) (application.Message
 		f.writes++
 	}
 	return message.Message, nil
+}
+
+// FakeMailbox also satisfies the part of the mailbox mw tidy works through.
+var _ application.TidyMailbox = (*FakeMailbox)(nil)
+
+// SetSent sets when a message was sent, as a fixture: the fake stamps each
+// message a minute after the last, and a test of ages needs its own.
+func (f *FakeMailbox) SetSent(id string, sent time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	message, ok := f.messages[id]
+	if !ok {
+		return fmt.Errorf("no mail %s", id)
+	}
+	message.Sent = sent
+	return nil
+}
+
+// OpenMail implements application.TidyMailbox: every message not closed, read
+// or not. Unlike the beads mailbox, which closes a message when it is read,
+// the fake keeps a read message open until it is closed by CloseMail, so that
+// a message the mailbox holds read and open can be tried.
+func (f *FakeMailbox) OpenMail(_ context.Context) ([]application.TidyMail, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	var open []application.TidyMail
+	for _, message := range f.messages {
+		if !message.closed {
+			open = append(open, application.TidyMail{ID: message.ID, Subject: message.Subject, Sent: message.Sent, Read: message.read})
+		}
+	}
+	sort.Slice(open, func(i, j int) bool { return open[i].ID < open[j].ID })
+	return open, nil
+}
+
+// CloseMail implements application.TidyMailbox.
+func (f *FakeMailbox) CloseMail(_ context.Context, id, reason string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return f.Err
+	}
+	message, ok := f.messages[id]
+	if !ok {
+		return fmt.Errorf("%s is not mail", id)
+	}
+	if !message.closed {
+		message.closed = true
+		message.closeReason = reason
+		f.writes++
+	}
+	return nil
+}
+
+// Closed reports whether a message was closed by CloseMail, and the reason it
+// was given.
+func (f *FakeMailbox) Closed(id string) (closed bool, reason string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	message, ok := f.messages[id]
+	if !ok {
+		return false, ""
+	}
+	return message.closed, message.closeReason
 }

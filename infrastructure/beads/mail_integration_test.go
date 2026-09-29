@@ -183,3 +183,62 @@ func TestGatewayLinksAReplyToTheMessageItAnswersAsTheStandInDid(t *testing.T) {
 		t.Errorf("expected getting %s to be refused, naming it, got %v", story, err)
 	}
 }
+
+func TestGatewayClosesMailForTidyAndNothingElse(t *testing.T) {
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	bdRun(t, vault, beads.Program, "config", "set", "types.custom", "mail")
+	gateway := beads.New(vault)
+
+	answer, err := gateway.Send(ctx, application.NewMessage{From: "mw@laptop", To: "mayor", Subject: "Answer: t-1: Release", Body: "b"})
+	if err != nil {
+		t.Fatalf("sending mail: %v", err)
+	}
+	other, err := gateway.Send(ctx, application.NewMessage{From: "mayor", To: "builder", Subject: "For the builder", Body: "b"})
+	if err != nil {
+		t.Fatalf("sending mail: %v", err)
+	}
+	story := strings.TrimSpace(bdRun(t, vault, beads.Program, "create", "A story", "-t", "task", "--silent"))
+	hitl := strings.TrimSpace(bdRun(t, vault, beads.Program, "create", "A hitl bead", "-t", "task", "-l", "hitl", "--silent"))
+
+	open, err := gateway.OpenMail(ctx)
+	if err != nil {
+		t.Fatalf("listing the open mail: %v", err)
+	}
+	if len(open) != 2 {
+		t.Fatalf("expected the open mail of every mailbox and nothing else, got %+v", open)
+	}
+	for _, mail := range open {
+		if mail.Sent.IsZero() || mail.Read || (mail.ID != answer && mail.ID != other) {
+			t.Errorf("unexpected open mail %+v", mail)
+		}
+	}
+
+	// Beads that are not mail are refused, and stay as they were.
+	for _, id := range []string{story, hitl} {
+		if err := gateway.CloseMail(ctx, id, "Tidied by mw tidy: test"); err == nil {
+			t.Errorf("expected closing %s, which is not mail, to be refused", id)
+		}
+		if got := showMail(t, vault, id); got.Status != "open" {
+			t.Errorf("expected %s to stay open, got %q", id, got.Status)
+		}
+	}
+
+	if err := gateway.CloseMail(ctx, answer, "Tidied by mw tidy: test"); err != nil {
+		t.Fatalf("closing the mail: %v", err)
+	}
+	if got := showMail(t, vault, answer); got.Status != "closed" {
+		t.Errorf("expected the mail closed, got %q", got.Status)
+	}
+	if open, _ := gateway.OpenMail(ctx); len(open) != 1 || open[0].ID != other {
+		t.Errorf("expected only %s still open, got %+v", other, open)
+	}
+
+	// mw tidy comments on a bead that is closed, saying what it cleared.
+	bdRun(t, vault, beads.Program, "close", story, "--reason", "done")
+	if err := gateway.CommentOnStory(ctx, story, "Tidied by mw tidy: test"); err != nil {
+		t.Errorf("expected a closed bead to take a comment: %v", err)
+	}
+}

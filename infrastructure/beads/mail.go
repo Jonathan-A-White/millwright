@@ -12,6 +12,9 @@ import (
 // Gateway also carries the factory's mail, which is beads.
 var _ application.Mailbox = (*Gateway)(nil)
 
+// And the two things mw tidy may do to it.
+var _ application.TidyMailbox = (*Gateway)(nil)
+
 // TypeMail is beads' name for the type of bead a message is filed as. It is a
 // custom type the vault declares (`types.custom`), and not beads' own message
 // type: bd makes a message ephemeral, and an ephemeral bead never syncs, so
@@ -120,6 +123,40 @@ func (g *Gateway) Read(ctx context.Context, id, reader string) (application.Mess
 		}
 	}
 	return mail.message(), nil
+}
+
+// OpenMail implements application.TidyMailbox: every open bead of type mail,
+// whoever it is assigned to. A message is read by closing it, so an open
+// message is never one the mailbox holds read: Read is false for all of them,
+// and mw tidy's read row has nothing here to act on until mail carries a read
+// state of its own.
+func (g *Gateway) OpenMail(ctx context.Context) ([]application.TidyMail, error) {
+	out, err := g.call(ctx, "list", "--type", TypeMail, "--status", StatusOpen, "--limit", "0", "--json")
+	if err != nil {
+		return nil, err
+	}
+	found, err := decodeBeads(out)
+	if err != nil {
+		return nil, fmt.Errorf("reading the open mail: %w", err)
+	}
+	open := make([]application.TidyMail, 0, len(found))
+	for _, mail := range inFiledOrder(found) {
+		open = append(open, application.TidyMail{ID: mail.ID, Subject: mail.Title, Sent: mail.created()})
+	}
+	return open, nil
+}
+
+// CloseMail implements application.TidyMailbox. A bead that is not mail is
+// refused before anything is closed, as Read refuses it: a story, an epic, a
+// map or a hitl bead is never closed by this path. bd closes a bead only as the
+// seat it is assigned to unless forced, and tidy is not the recipient, so the
+// close is forced: safe only because the bead was just shown to be mail.
+func (g *Gateway) CloseMail(ctx context.Context, id, reason string) error {
+	if _, err := g.mailBead(ctx, id); err != nil {
+		return err
+	}
+	_, err := g.call(ctx, "close", id, "--force", "--reason", reason)
+	return err
 }
 
 // describeType is what to call a bead's type in a sentence: a bead bd printed no
