@@ -29,21 +29,44 @@ var unattendedSSH = []string{"ssh", "-o", "BatchMode=yes"}
 // line's firstSeen; a line without one, or not JSON, is an error rather than an
 // answer, so that it is never taken for an old index.
 func (Mirrorer) LastIndexTime(ctx context.Context, ssh []string, dir string) (time.Time, bool, error) {
-	index := filepath.Join(dir, application.PosternIndexFile)
+	return lastRecordTime(ctx, ssh, filepath.Join(dir, application.PosternIndexFile), "firstSeen")
+}
+
+// LastGrindTime implements application.PosternMirrorer. The time is the last
+// line's time, under the same rule as LastIndexTime's.
+func (Mirrorer) LastGrindTime(ctx context.Context, ssh []string, dir string) (time.Time, bool, error) {
+	return lastRecordTime(ctx, ssh, filepath.Join(dir, application.GristRecordFile), "time")
+}
+
+// DirExists implements application.PosternMirrorer.
+func (Mirrorer) DirExists(_ context.Context, dir string) (bool, error) {
+	info, err := os.Stat(dir)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return info.IsDir(), nil
+}
+
+// lastRecordTime is the time in field of the last line of the JSON-lines file
+// at path, on the host reached by ssh (this one when ssh is empty).
+func lastRecordTime(ctx context.Context, ssh []string, path, field string) (time.Time, bool, error) {
 	var last string
 	if len(ssh) == 0 {
 		var err error
-		if last, err = lastLine(index); err != nil {
+		if last, err = lastLine(path); err != nil {
 			return time.Time{}, false, err
 		}
 	} else {
-		args := append(append([]string{}, ssh[1:]...), "test -f '"+index+"' && tail -n 1 '"+index+"'")
+		args := append(append([]string{}, ssh[1:]...), "test -f '"+path+"' && tail -n 1 '"+path+"'")
 		cmd := exec.CommandContext(ctx, ssh[0], args...)
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
 		out, err := cmd.Output()
 		if err != nil {
-			// test -f failing is the answer "no index", and it says nothing.
+			// test -f failing is the answer "no file", and it says nothing.
 			if _, exited := err.(*exec.ExitError); exited && strings.TrimSpace(stderr.String()) == "" && len(out) == 0 {
 				return time.Time{}, false, nil
 			}
@@ -54,13 +77,16 @@ func (Mirrorer) LastIndexTime(ctx context.Context, ssh []string, dir string) (ti
 	if last == "" {
 		return time.Time{}, false, nil
 	}
-	var line struct {
-		FirstSeen time.Time `json:"firstSeen"`
+	var line map[string]any
+	if err := json.Unmarshal([]byte(last), &line); err != nil {
+		return time.Time{}, false, fmt.Errorf("the last line of %s has no %s time", path, field)
 	}
-	if err := json.Unmarshal([]byte(last), &line); err != nil || line.FirstSeen.IsZero() {
-		return time.Time{}, false, fmt.Errorf("the last line of %s has no firstSeen time", index)
+	raw, _ := line[field].(string)
+	at, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil || at.IsZero() {
+		return time.Time{}, false, fmt.Errorf("the last line of %s has no %s time", path, field)
 	}
-	return line.FirstSeen, true, nil
+	return at, true, nil
 }
 
 // lastLine is the last non-empty line of path, "" when there is none or no file.

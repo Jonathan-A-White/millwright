@@ -18,6 +18,10 @@ type mirrorWorld struct {
 	data       string
 	remoteLast string
 	vault      string
+	// state is the mill's state directory, which does not exist until withMillState.
+	state string
+	// remoteGrind is what the boost answers for the last line of the mill's grinds.jsonl.
+	remoteGrind string
 }
 
 // mirrorHost sets up this host as host, with the vault's home file saying home,
@@ -33,6 +37,11 @@ func mirrorHost(t *testing.T, host, home, watchdog, remoteLast string) *mirrorWo
 	dir := t.TempDir()
 	w.calls = filepath.Join(dir, "calls")
 	w.remoteLast = filepath.Join(dir, "remote-last")
+	w.remoteGrind = filepath.Join(dir, "remote-grind")
+	w.state = filepath.Join(dir, "mill-state")
+	if err := os.WriteFile(w.remoteGrind, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(w.remoteLast, []byte(remoteLast), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +58,7 @@ func mirrorHost(t *testing.T, host, home, watchdog, remoteLast string) *mirrorWo
 		t.Fatal(err)
 	}
 	rsync := "#!/bin/sh\nprintf 'rsync' >> " + w.calls + "\nfor a in \"$@\"; do printf ' [%s]' \"$a\" >> " + w.calls + "; done\necho >> " + w.calls + "\n"
-	ssh := "#!/bin/sh\nprintf 'ssh' >> " + w.calls + "\nfor a in \"$@\"; do printf ' [%s]' \"$a\" >> " + w.calls + "; done\necho >> " + w.calls + "\ncat " + w.remoteLast + "\n"
+	ssh := "#!/bin/sh\nprintf 'ssh' >> " + w.calls + "\nfor a in \"$@\"; do printf ' [%s]' \"$a\" >> " + w.calls + "; done\necho >> " + w.calls + "\ncase \"$*\" in *grinds.jsonl*) cat " + w.remoteGrind + " ;; *) cat " + w.remoteLast + " ;; esac\n"
 	for name, script := range map[string]string{"rsync": rsync, "ssh": ssh} {
 		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil {
 			t.Fatal(err)
@@ -71,7 +80,39 @@ func mirrorHost(t *testing.T, host, home, watchdog, remoteLast string) *mirrorWo
 	t.Setenv("MW_VAULT", vault)
 	t.Setenv("MW_HOST", host)
 	t.Setenv("MW_POSTERN_DATA", "")
+	t.Setenv("MW_GRIST_STATE_DIR", w.state)
 	return w
+}
+
+// withMillState gives this host a mill state directory whose grinds.jsonl ends
+// at ours, and the boost one that ends at theirs (empty: the boost has none).
+func (w *mirrorWorld) withMillState(t *testing.T, ours, theirs string) {
+	t.Helper()
+	if err := os.MkdirAll(w.state, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"time":"` + ours + `","txid":"aa","status":"answered"}` + "\n"
+	if err := os.WriteFile(filepath.Join(w.state, "grinds.jsonl"), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if theirs != "" {
+		theirs = `{"time":"` + theirs + `","txid":"bb","status":"answered"}` + "\n"
+	}
+	if err := os.WriteFile(w.remoteGrind, []byte(theirs), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// rsyncs is the rsync calls among w's calls.
+func (w *mirrorWorld) rsyncs(t *testing.T) []string {
+	t.Helper()
+	var out []string
+	for _, c := range w.called(t) {
+		if strings.HasPrefix(c, "rsync") {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 func (w *mirrorWorld) called(t *testing.T) []string {
@@ -208,5 +249,98 @@ func TestPosternMirrorWithNoWayToReachTheBoostFails(t *testing.T) {
 	out, status := runMirror(t)
 	if status != 1 || !strings.Contains(out, "desktop") || !strings.Contains(out, "hands_hosts") {
 		t.Errorf("expected status 1 naming the missing host and its table, got %d:\n%s", status, out)
+	}
+}
+
+func TestPosternMirrorWithAMillStateCopiesItToTheBoostToo(t *testing.T) {
+	w := mirrorHost(t, "laptop", "laptop", "", "")
+	w.withMillState(t, "2026-09-29T10:00:00Z", "2026-09-29T09:00:00Z")
+
+	out, status := runMirror(t)
+	if status != 0 {
+		t.Fatalf("expected status 0, got %d:\n%s", status, out)
+	}
+	rsyncs := w.rsyncs(t)
+	if len(rsyncs) != 2 {
+		t.Fatalf("expected two rsyncs (the data and the mill's state), got calls:\n%s", strings.Join(w.called(t), "\n"))
+	}
+	if strings.Contains(rsyncs[0], w.state) || !strings.Contains(rsyncs[0], "[desktop:"+w.data+"/]") {
+		t.Errorf("the first rsync should be the postern data's:\n%s", rsyncs[0])
+	}
+	for _, want := range []string{"[-rpR]", "[ssh]", "[desktop:" + w.state + "/]"} {
+		if !strings.Contains(rsyncs[1], want) {
+			t.Errorf("the mill state's rsync lacks %s:\n%s", want, rsyncs[1])
+		}
+	}
+	if strings.Contains(rsyncs[1], "postern-index.jsonl") {
+		t.Errorf("the mill state's rsync must not carry the postern data:\n%s", rsyncs[1])
+	}
+	if !strings.Contains(out, w.state) {
+		t.Errorf("expected the run to say it copied the mill's state, got:\n%s", out)
+	}
+}
+
+func TestPosternMirrorCopiesAMillStateOverABoostWithNoRecord(t *testing.T) {
+	w := mirrorHost(t, "laptop", "laptop", "", "")
+	w.withMillState(t, "2026-09-29T10:00:00Z", "")
+
+	if out, status := runMirror(t); status != 0 {
+		t.Fatalf("expected status 0, got %d:\n%s", status, out)
+	}
+	if rsyncs := w.rsyncs(t); len(rsyncs) != 2 {
+		t.Errorf("expected two rsyncs, got calls:\n%s", strings.Join(w.called(t), "\n"))
+	}
+}
+
+func TestPosternMirrorWithNoMillStateMakesTheSameCallsAsBefore(t *testing.T) {
+	w := mirrorHost(t, "laptop", "laptop", "", "")
+
+	out, status := runMirror(t)
+	if status != 0 {
+		t.Fatalf("expected status 0, got %d:\n%s", status, out)
+	}
+	if calls := w.called(t); len(calls) != 2 || !strings.HasPrefix(calls[0], "ssh") || !strings.HasPrefix(calls[1], "rsync") || strings.Contains(strings.Join(calls, "\n"), "grinds.jsonl") {
+		t.Errorf("expected the ssh question about the index and one rsync, got:\n%s", strings.Join(calls, "\n"))
+	}
+}
+
+func TestPosternMirrorLeavesABoostWhoseMillRecordIsNewerAloneAndSaysWhy(t *testing.T) {
+	w := mirrorHost(t, "laptop", "laptop", "root@vps.example:/var/lib/postern-watchdog/", "")
+	w.withMillState(t, "2026-09-29T10:00:00Z", "2026-09-29T10:00:01Z")
+
+	out, status := runMirror(t)
+	if status != 1 {
+		t.Errorf("expected status 1 (the mill's state was not copied), got %d:\n%s", status, out)
+	}
+	for _, want := range []string{"newer", "desktop", "grinds.jsonl", "2026-09-29T10:00:01Z"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected the run to say the boost's mill record is newer (%s), got:\n%s", want, out)
+		}
+	}
+	for _, r := range w.rsyncs(t) {
+		if strings.Contains(r, w.state) {
+			t.Errorf("the mill's state must not be copied over a newer record:\n%s", r)
+		}
+	}
+	if rsyncs := w.rsyncs(t); len(rsyncs) != 2 {
+		t.Errorf("expected the data's and the watchdog's copies to run all the same, got:\n%s", strings.Join(rsyncs, "\n"))
+	}
+}
+
+func TestPosternMirrorLeavesABoostAloneWhenThisHostHasNoMillRecord(t *testing.T) {
+	w := mirrorHost(t, "laptop", "laptop", "", "")
+	w.withMillState(t, "2026-09-29T10:00:00Z", "2026-09-29T09:00:00Z")
+	if err := os.Remove(filepath.Join(w.state, "grinds.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, status := runMirror(t)
+	if status != 1 || !strings.Contains(out, "newer") || !strings.Contains(out, "no records") {
+		t.Errorf("expected status 1 and a line saying why, got %d:\n%s", status, out)
+	}
+	for _, r := range w.rsyncs(t) {
+		if strings.Contains(r, w.state) {
+			t.Errorf("the mill's state must not be copied:\n%s", r)
+		}
 	}
 }

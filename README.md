@@ -1008,6 +1008,12 @@ also copies `postern-vapid.json` and `postern-push-subscriptions.json` there:
 the VPS watchdog's copy, which `postern-watchdog-sync.timer` makes by hand on the
 desktop today.
 
+It also copies the mill's state (`grist_state_dir`, default
+`~/.local/state/mw/grist`: the cursor, `grinds.jsonl` and `undelivered/`, a full
+path, the same on both hosts) to the boost by a second rsync, so that a home move
+keeps the daily counts and the answers not yet delivered. When that directory is not
+there it copies nothing and says nothing; there is no new timer and no new setting.
+
 ```toml
 postern_data = "/home/me/postern-data"
 postern_watchdog_target = "root@allmymind.org:/var/lib/postern-watchdog/"
@@ -1018,7 +1024,9 @@ desktop = "ssh desktop"
 A host that is not home does nothing, says so and leaves with 0: every host may
 run the timer. A boost whose index's last line (its `firstSeen`) is newer than
 this host's is left alone, so an older index never overwrites a newer one: the
-run says so and leaves with 1, after it has made the watchdog's copy. Nothing
+run says so and leaves with 1, after it has made the watchdog's copy. The mill's
+state has the same rule, keyed on the `time` of the last line of `grinds.jsonl`:
+a boost whose last grind is newer is left alone, and the run says so. Nothing
 here writes to this host's own data. `$MW_POSTERN_DATA` and
 `$MW_POSTERN_WATCHDOG_TARGET` say the two settings in place of the file.
 

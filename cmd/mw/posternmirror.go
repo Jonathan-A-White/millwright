@@ -20,10 +20,12 @@ func newPosternMirrorCmd() *cobra.Command {
 			"subscriptions and blobs/) to the same path on the boost with rsync over ssh, reached as\n" +
 			"the other host's line of [hands_hosts] says (`desktop = \"ssh desktop\"`). When\n" +
 			"postern_watchdog_target is set, an rsync destination, it also copies the vapid keys and\n" +
-			"push subscriptions there: the VPS watchdog's copy.\n\n" +
+			"push subscriptions there: the VPS watchdog's copy. It also copies the mill's state\n" +
+			"directory (grist_state_dir) to the same path on the boost, when it exists on this host.\n\n" +
 			"A host that is not home does nothing, says so and leaves with 0. A boost whose index's\n" +
 			"last line is newer than this host's is left alone: the run says so and leaves with 1,\n" +
-			"once the watchdog's copy is done. It never writes to this host's own data.",
+			"once the other copies are done; the mill's state is kept the same way by the time of\n" +
+			"the last line of its grinds.jsonl. It never writes to this host's own data.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := config.Vault()
@@ -35,6 +37,10 @@ func newPosternMirrorCmd() *cobra.Command {
 				return err
 			}
 			data, err := config.PosternData()
+			if err != nil {
+				return err
+			}
+			state, err := config.GristStateDir()
 			if err != nil {
 				return err
 			}
@@ -52,6 +58,7 @@ func newPosternMirrorCmd() *cobra.Command {
 				Out:            cmd.OutOrStdout(),
 				Host:           host,
 				DataDir:        data,
+				MillStateDir:   state,
 				Reach:          reach,
 				WatchdogTarget: watchdog,
 			}.Run(cmd.Context())
