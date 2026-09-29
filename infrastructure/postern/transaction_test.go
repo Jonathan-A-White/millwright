@@ -2,8 +2,10 @@ package postern_test
 
 import (
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/bsv-blockchain/go-sdk/script"
 	"github.com/bsv-blockchain/go-sdk/transaction"
@@ -121,5 +123,114 @@ func TestSignRefusesWhenTheCoinsDoNotCoverTheAnchorAndTheFee(t *testing.T) {
 	_, err := keys.Sign([]application.PosternUtxo{{Txid: fundingTxid, Vout: 0, Satoshis: 2}}, fixturePayload(t, f))
 	if err == nil || !strings.Contains(err.Error(), "not enough") {
 		t.Fatalf("expected a refusal naming not enough satoshis, got: %v", err)
+	}
+}
+
+// WhatsOnChain lists an outpoint twice while a block confirms it
+// (bad-txns-inputs-duplicate): the transaction spends it once.
+func TestSignSpendsAnOutpointListedTwiceOnce(t *testing.T) {
+	f := loadProtocolFixture(t)
+	keys := postern.New(keyFileHolding(t, wifFromHex(t, f.Inputs.SenderPrivateKeyHex)))
+
+	rawtx, err := keys.Sign([]application.PosternUtxo{
+		{Txid: fundingTxid, Vout: 2, Satoshis: 10000},
+		{Txid: fundingTxid, Vout: 2, Satoshis: 10000},
+	}, fixturePayload(t, f))
+	if err != nil {
+		t.Fatalf("signing: %v", err)
+	}
+	tx, err := transaction.NewTransactionFromHex(rawtx)
+	if err != nil {
+		t.Fatalf("parsing the signed transaction: %v", err)
+	}
+	if len(tx.Inputs) != 1 {
+		t.Fatalf("expected one input for the outpoint listed twice, got %d", len(tx.Inputs))
+	}
+}
+
+func spentInputs(t *testing.T, rawtx string) []string {
+	t.Helper()
+	tx, err := transaction.NewTransactionFromHex(rawtx)
+	if err != nil {
+		t.Fatalf("parsing the signed transaction: %v", err)
+	}
+	var spent []string
+	for _, in := range tx.Inputs {
+		spent = append(spent, fmt.Sprintf("%s:%d", in.SourceTXID.String(), in.SourceTxOutIndex))
+	}
+	return spent
+}
+
+// WhatsOnChain keeps listing an output the last send spent until a block
+// confirms the spend (txn-mempool-conflict): once a send is broadcast, the
+// next does not spend what it spent.
+func TestSignSkipsOutpointsAPriorSendSpent(t *testing.T) {
+	f := loadProtocolFixture(t)
+	keys := postern.New(keyFileHolding(t, wifFromHex(t, f.Inputs.SenderPrivateKeyHex)))
+	spent := application.PosternUtxo{Txid: fundingTxid, Vout: 2, Satoshis: 10000}
+	fresh := application.PosternUtxo{Txid: tokenTxid, Vout: 2, Satoshis: 9000}
+	if err := keys.MarkSpent([]application.PosternUtxo{spent}); err != nil {
+		t.Fatalf("marking spent: %v", err)
+	}
+
+	rawtx, err := keys.Sign([]application.PosternUtxo{spent, fresh}, fixturePayload(t, f))
+	if err != nil {
+		t.Fatalf("signing: %v", err)
+	}
+	if got := spentInputs(t, rawtx); len(got) != 1 || got[0] != tokenTxid+":2" {
+		t.Fatalf("expected only %s:2 spent, got %v", tokenTxid, got)
+	}
+
+	_, err = keys.Sign([]application.PosternUtxo{spent}, fixturePayload(t, f))
+	if err == nil || !strings.Contains(err.Error(), "no spendable") {
+		t.Fatalf("expected a refusal naming no spendable coins when only a spent outpoint is listed, got: %v", err)
+	}
+}
+
+// A remembered spend is forgotten after two hours: by then a block has
+// surely confirmed it, and the outpoint is no longer listed.
+func TestSignIgnoresSpentOutpointsOlderThanTwoHours(t *testing.T) {
+	f := loadProtocolFixture(t)
+	now := time.Unix(1758700000, 0)
+	keys := postern.New(keyFileHolding(t, wifFromHex(t, f.Inputs.SenderPrivateKeyHex))).
+		WithClock(func() time.Time { return now })
+	coin := application.PosternUtxo{Txid: fundingTxid, Vout: 2, Satoshis: 10000}
+	if err := keys.MarkSpent([]application.PosternUtxo{coin}); err != nil {
+		t.Fatalf("marking spent: %v", err)
+	}
+
+	now = now.Add(2*time.Hour - time.Minute)
+	if _, err := keys.Sign([]application.PosternUtxo{coin}, fixturePayload(t, f)); err == nil {
+		t.Fatal("expected the outpoint spent under two hours ago to still be skipped")
+	}
+	now = now.Add(2 * time.Minute)
+	rawtx, err := keys.Sign([]application.PosternUtxo{coin}, fixturePayload(t, f))
+	if err != nil {
+		t.Fatalf("expected the outpoint spent over two hours ago to be spendable again: %v", err)
+	}
+	if got := spentInputs(t, rawtx); len(got) != 1 || got[0] != fundingTxid+":2" {
+		t.Fatalf("expected %s:2 spent, got %v", fundingTxid, got)
+	}
+}
+
+// Marking spent adds to what is already remembered.
+func TestMarkSpentAddsToWhatIsRemembered(t *testing.T) {
+	f := loadProtocolFixture(t)
+	keys := postern.New(keyFileHolding(t, wifFromHex(t, f.Inputs.SenderPrivateKeyHex)))
+	a := application.PosternUtxo{Txid: fundingTxid, Vout: 0, Satoshis: 10000}
+	b := application.PosternUtxo{Txid: fundingTxid, Vout: 1, Satoshis: 10000}
+	c := application.PosternUtxo{Txid: tokenTxid, Vout: 0, Satoshis: 10000}
+	if err := keys.MarkSpent([]application.PosternUtxo{a}); err != nil {
+		t.Fatal(err)
+	}
+	if err := keys.MarkSpent([]application.PosternUtxo{b}); err != nil {
+		t.Fatal(err)
+	}
+	rawtx, err := keys.Sign([]application.PosternUtxo{a, b, c}, fixturePayload(t, f))
+	if err != nil {
+		t.Fatalf("signing: %v", err)
+	}
+	if got := spentInputs(t, rawtx); len(got) != 1 || got[0] != tokenTxid+":0" {
+		t.Fatalf("expected only %s:0 spent, got %v", tokenTxid, got)
 	}
 }

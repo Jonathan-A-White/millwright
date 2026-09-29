@@ -138,3 +138,13 @@ Feature: mw postern send
     And a file "huge.png" of 9 MiB to attach
     When mw postern send "message" "too big" attaching "huge.png" is run
     Then it is refused, and nothing was uploaded or sent
+
+  Scenario: Two sends in a row both succeed while the backend still lists what the first spent
+    Given the postern key's balance is 1000 satoshis
+    And the postern key holds a spendable utxo of 5000 satoshis
+    When mw postern send "message" "First." is run
+    Then sending succeeds
+    Given the backend still lists what that send spent, and its change
+    When mw postern send "message" "Second." is run
+    Then sending succeeds
+    And the second broadcast does not spend what the first one spent
