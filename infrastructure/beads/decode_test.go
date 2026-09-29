@@ -347,6 +347,33 @@ func TestChildrenComeBackInTheOrderTheyWereFiled(t *testing.T) {
 	}
 }
 
+// A host's wall clock can step back between two `bd create`s (WSL2 does, a
+// fraction of a second at a time), so a later child can carry an earlier
+// created_at. Siblings are numbered as bd files them: their ids are the order.
+func TestSiblingsComeBackInIdOrderWhateverTheirClockSaid(t *testing.T) {
+	siblings := []bead{
+		{ID: "t-a.10", CreatedAt: "2026-09-18T22:05:50Z"},
+		{ID: "t-a.2", CreatedAt: "2026-09-18T22:05:44Z"},
+		{ID: "t-a.1", CreatedAt: "2026-09-18T22:05:45Z"},
+		{ID: "t-a.9", CreatedAt: "2026-09-18T22:05:44Z"},
+	}
+	want := []string{"t-a.1", "t-a.2", "t-a.9", "t-a.10"}
+	for i, b := range inSiblingOrder(siblings) {
+		if b.ID != want[i] {
+			t.Fatalf("expected %v, got %s in place %d", want, b.ID, i)
+		}
+	}
+
+	// Children whose ids do not count up fall back to when they were filed.
+	unnumbered := []bead{
+		{ID: "t-a.zz", CreatedAt: "2026-09-18T22:05:45Z"},
+		{ID: "t-a.aa", CreatedAt: "2026-09-18T22:05:44Z"},
+	}
+	if got := inSiblingOrder(unnumbered); got[0].ID != "t-a.aa" {
+		t.Fatalf("expected the oldest first when ids are not numbers, got %s", got[0].ID)
+	}
+}
+
 func TestPathMetadataIgnoresValuesThatAreNotStrings(t *testing.T) {
 	b := bead{Metadata: map[string]any{"rig": "millwright", "priority": 2.0}}
 	if got := b.pathMetadata(); len(got) != 1 || got["rig"] != "millwright" {

@@ -314,6 +314,37 @@ func inFiledOrder(beads []bead) []bead {
 	return beads
 }
 
+// inSiblingOrder puts the children of one parent in the order they were filed.
+// bd numbers children as it files them, so the number is the order, and a host
+// whose wall clock stepped back between two creates cannot swap them the way
+// created_at can. Children whose ids are not numbered fall back to inFiledOrder.
+func inSiblingOrder(beads []bead) []bead {
+	sort.SliceStable(beads, func(i, j int) bool {
+		if left, right := childNumber(beads[i].ID), childNumber(beads[j].ID); left >= 0 && right >= 0 && left != right {
+			return left < right
+		}
+		if beads[i].CreatedAt != beads[j].CreatedAt {
+			return beads[i].CreatedAt < beads[j].CreatedAt
+		}
+		return lessID(beads[i].ID, beads[j].ID)
+	})
+	return beads
+}
+
+// childNumber is the number after the last dot of a child's id, or -1 when the
+// id has none.
+func childNumber(id string) int {
+	dot := strings.LastIndex(id, ".")
+	if dot < 0 {
+		return -1
+	}
+	n, err := strconv.Atoi(id[dot+1:])
+	if err != nil {
+		return -1
+	}
+	return n
+}
+
 // lessID orders two bead ids the way a person reads them: the parts between the
 // dots compare as numbers where both are numbers, so t-a.9 comes before t-a.10
 // rather than after it, which is what plain string order would say.
