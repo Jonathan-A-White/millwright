@@ -198,6 +198,18 @@ type Postern interface {
 	// answered it, rather than leaving them for section 8's 30 days. A hash
 	// the backend no longer holds is already gone, and not an error.
 	DeleteBlob(ctx context.Context, hash string) error
+	// Me reports who the backend says the caller is, and who the mill is:
+	// postern's docs/protocol.md section 15, GET /api/me.
+	Me(ctx context.Context) (PosternMe, error)
+}
+
+// PosternMe is the part of GET /api/me mw reads: the key that authenticated
+// the call, and the mill key the backend names as POSTERN_MILL_KEY, which is
+// empty when the backend has no mill.
+type PosternMe struct {
+	Pubkey  string
+	Mill    string
+	Network string
 }
 
 // Cipher is the port that encrypts and decrypts a message's text between the

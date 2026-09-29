@@ -213,6 +213,21 @@ func (h *HTTP) UploadBlob(ctx context.Context, blob []byte) (string, int64, erro
 	return strings.ToLower(body.Hash), body.Size, nil
 }
 
+// Me implements application.Postern: GET /api/me (postern's
+// docs/protocol.md section 15), who the caller is and who the mill is. The
+// mill is absent from the answer when the backend has none.
+func (h *HTTP) Me(ctx context.Context) (application.PosternMe, error) {
+	var body struct {
+		Pubkey  string `json:"pubkey"`
+		Mill    string `json:"mill"`
+		Network string `json:"network"`
+	}
+	if err := h.authDo(ctx, http.MethodGet, "/api/me", nil, &body); err != nil {
+		return application.PosternMe{}, err
+	}
+	return application.PosternMe{Pubkey: body.Pubkey, Mill: body.Mill, Network: body.Network}, nil
+}
+
 // authDo is do, proven to the backend first: it asks for a fresh challenge
 // (postern's docs/api.md Authentication section — a nonce is consumed the
 // moment it is presented, so every call needs its own), signs it with keys,

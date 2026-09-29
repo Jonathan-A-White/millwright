@@ -2,6 +2,7 @@ package main
 
 import (
 	"io"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -24,6 +25,7 @@ func newGristCmd() *cobra.Command {
 	}
 	root.AddCommand(newGristKeyCmd())
 	root.AddCommand(newGristGrindCmd())
+	root.AddCommand(newGristSendCmd())
 	return root
 }
 
@@ -92,6 +94,62 @@ func newGristGrindCmd() *cobra.Command {
 			return err
 		},
 	}
+}
+
+// newGristSendCmd builds `mw grist send`: a grist sent from the terminal as
+// the key it is given, and, with --wait, its answer.
+func newGristSendCmd() *cobra.Command {
+	var keyFile, app, kind, request, backend, version string
+	var photos []string
+	var wait time.Duration
+
+	cmd := &cobra.Command{
+		Use:   "send",
+		Short: "Send a grist as a given key, with photos, and wait for the answer",
+		Long: "send does what an app's phone does, from a terminal (postern's docs/protocol.md section 19):\n" +
+			"it proves --key to the postern backend, asks it (GET /api/me) which key is the mill's, seals\n" +
+			"each --photo and the --request to that key, uploads the photos (POST /api/blobs) and posts\n" +
+			"the grist (class grist). Without --wait it prints the grist's id and stops. With --wait it\n" +
+			"pages the backend for the answer whose re is that id, opens it and prints it as JSON, and\n" +
+			"leaves with 0 when it is answered, 1 when it is refused or failed (saying why on standard\n" +
+			"error), and 2 when no answer came in time; the grist keeps waiting at the backend.\n\n" +
+			"It reads no key but --key, which has no default and is a file holding the key to send as\n" +
+			"(a key the backend holds a licence for), and it never prints a private key.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			keys := postern.New(keyFile)
+			if backend == "" {
+				var err error
+				if backend, err = config.PosternBackend(); err != nil {
+					return err
+				}
+			}
+			send := application.GristSend{
+				Postern: postern.NewHTTP(backend, keys),
+				Cipher:  posternCipher(keys),
+				Keys:    keys,
+				Now:     posternClock,
+				Out:     cmd.OutOrStdout(),
+				Log:     cmd.ErrOrStderr(),
+			}
+			_, err := send.Run(cmd.Context(), application.GristSendRequest{
+				App: app, Kind: kind, Version: version, RequestFile: request, Photos: photos, Wait: wait,
+			})
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&keyFile, "key", "", "the key file to send as, a WIF key the backend holds a licence for (required; no default)")
+	cmd.Flags().StringVar(&app, "app", "", "the app the grist is for, as its licence names it, e.g. cairn (required)")
+	cmd.Flags().StringVar(&kind, "kind", "", "the kind of grist, which grind of the app to run, e.g. sweep (required)")
+	cmd.Flags().StringVar(&request, "request", "", "a JSON file holding the app's request, in the app's own schema (required)")
+	cmd.Flags().StringArrayVar(&photos, "photo", nil, "a photo to send with it, .jpg, .png or .webp, sealed to the mill key (repeatable, at most 4)")
+	cmd.Flags().StringVar(&backend, "backend", "", "the postern backend's URL (default: postern_backend)")
+	cmd.Flags().DurationVar(&wait, "wait", 0, "how long to wait for the answer, e.g. 5m; 0 sends and does not wait")
+	cmd.Flags().StringVar(&version, "schema-version", "", "the version of the app's request schema (default: the request's schemaVersion)")
+	for _, name := range []string{"key", "app", "kind", "request"} {
+		_ = cmd.MarkFlagRequired(name)
+	}
+	return cmd
 }
 
 // newMill is the mill as this host is configured to run it: what

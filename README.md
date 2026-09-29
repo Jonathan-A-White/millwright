@@ -1087,6 +1087,25 @@ licence collection to its name). `mw postern serve` does not write these yet,
 so add them to the backend's environment file by hand. See
 `features/grist.feature`.
 
+`mw grist send` is the terminal's sender: it sends a grist as a key it is
+given, as an app's phone would, and can wait for the answer.
+
+```sh
+mw grist send --key <file> --app cairn --kind sweep --request request.json \
+  [--photo drawer.jpg]... [--backend <url>] [--wait 5m] [--schema-version 1.1]
+```
+
+It proves `--key` to the backend, learns the mill key from `GET /api/me`, seals
+each photo (`.jpg`, `.png` or `.webp`, at most four) and the request to it,
+uploads the photos and posts the grist. The version of the app's schema is the
+request's `schemaVersion` unless `--schema-version` says otherwise. Without
+`--wait` it prints the grist's id. With `--wait` it pages the backend for the
+answer whose `re` is that id and prints it as JSON, leaving with 0 when it is
+answered, 1 when it is refused or failed (the reason on standard error), and 2
+when none came in time. `--key` has no default, so it never reads the Mayor's
+key unless told to, and nothing prints a private key; `--backend` defaults to
+`postern_backend`. See `features/grist_send.feature`.
+
 ## Steps for his hands
 
 A step only the Governor's hands could take — a `sudo` line, a unit to

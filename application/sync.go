@@ -407,7 +407,9 @@ func Blocked(err error) (*VaultBlocked, bool) {
 // wake, DoctorFaultExit when mw doctor leaves a check faulty and uncured,
 // HomeUnknownExit when mw home --check cannot tell which host is home,
 // NetworkFaultExit when a dispatch waited out the network and it did not
-// come back, 1 for anything else, and 0 for nothing wrong at all. cmd/mw leaves with it.
+// come back, GristUnanswered's own 1 or 2 when a grist was refused, failed or
+// not answered in time, 1 for anything else, and 0 for nothing wrong at all.
+// cmd/mw leaves with it.
 func ExitStatus(err error) int {
 	if err == nil {
 		return 0
@@ -432,6 +434,9 @@ func ExitStatus(err error) int {
 	}
 	if _, fault := LocalFault(err); fault {
 		return NetworkFaultExit
+	}
+	if unanswered, ok := GristUnansweredIn(err); ok {
+		return unanswered.Code()
 	}
 	return 1
 }
