@@ -1,14 +1,12 @@
 # Code map
 
-`CONTEXT.md` has the vocabulary.
-
 ## Layers
 
 | Layer | Directory | Rule |
 | --- | --- | --- |
 | domain | `domain/` | Value types, validation; stdlib only. |
 | application | `application/` | One file per use case, plus ports; imports no adapter. |
-| fakes | `application/apptest/` | In-memory port stand-ins. |
+| fakes | `application/apptest/` | Port stand-ins. |
 | infrastructure | `infrastructure/` | One subpackage per adapter. |
 | command line | `cmd/mw/` | Cobra wiring: read config, run the use case. |
 | features | `features/` | Gherkin; step code in `features/steps/`. |
@@ -42,6 +40,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `Worktrees` | `application/worktrees.go` | `infrastructure/rig/worktree.go` | `application/dispatch_test.go` |
 | `SyncHaltMarker` | `application/sync.go` | `infrastructure/synchalt/synchalt.go` | `apptest.FakeSyncHaltMarker` |
 | `Notifier` | `application/millhandtick.go` | `infrastructure/notify/notify.go` | none |
+| `HomeMoveHost` | `application/homemove.go` | `infrastructure/homemove/homemove.go` | none |
 | `VaultBirth`, `TrackerBirth` | `application/init.go` | `infrastructure/vault/birth.go`, `infrastructure/beads/init.go` | none |
 | `Landing` | `application/landing.go` | `infrastructure/rig/landing.go` | none |
 | `Checks` | `application/landing.go` | `infrastructure/rig/checks.go` | none |
@@ -50,8 +49,6 @@ Every adapter: `var _ application.<Port> = ...`.
 | `Dispatcher` | `application/landing.go` | `application.Dispatch` | — |
 | `HostSync` | `application/dispatch.go` | `application.Sync` | — |
 | Postern, hands | `application/{postern*,hands}.go` | `infrastructure/{postern,hands*}` | `apptest.Fake{Postern,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*}` |
-
-`infrastructure/config/config.go` is not a port: read by `cmd/mw/`.
 
 ## Use cases
 
@@ -71,6 +68,7 @@ Every adapter: `var _ application.<Port> = ...`.
 | `Nudge` | `application/nudge.go` | `mw nudge` — `cmd/mw/nudge.go` | none |
 | `Mail` | `application/mail.go` | `mw mail` — `cmd/mw/mail.go` | `features/mail.feature` |
 | `Home` | `application/home.go` | `mw home` — `cmd/mw/home.go` | `features/home.feature` |
+| `HomeMove` | `application/homemove.go` | `mw home move` — `cmd/mw/homemove.go` | none: `docs/home-move.md` |
 | `Seat{Context,Up,Reap}` | `application/seatcontext.go`, `application/seatup.go`, `application/seatreap.go` | `mw seat context`/`up`/`reap` — `cmd/mw/seat.go` | `features/seat_{context,up,reap}.feature` |
 | `Millhand` | `application/millhand.go` | `mw millhand` — `cmd/mw/millhand.go` | `features/millhand.feature` |
 | `MillhandTick` | `application/millhandtick.go` | `mw millhand tick` — `cmd/mw/millhandtick.go` | `features/millhand_tick.feature` |
@@ -85,8 +83,6 @@ Every adapter: `var _ application.<Port> = ...`.
 `cmd/mw/root.go` holds the tree, `cmd/mw/main.go` runs it, `cmd/mw/version.go` is `mw version`.
 `features/path_validation.feature` covers `domain/path.go`;
 `features/{ready_stories,claim_lease}.feature` the `WorkTracker` contract.
-
-Add a command: `docs/adding-a-command.md`.
 
 ## Test helpers
 
@@ -104,7 +100,7 @@ Add a command: `docs/adding-a-command.md`.
 
 ## Build and test
 
-`make build`, `test`, `lint`: see `CLAUDE.md`.
+See `CLAUDE.md`; then:
 
 - One package: `go test ./application/...` (`-run`, `-tags beads_integration`).
 - One feature: `MW_FEATURE=sweep.feature go test ./features` (`:17` for a scenario).
