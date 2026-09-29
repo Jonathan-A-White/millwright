@@ -19,9 +19,11 @@ func newNudgeCmd() *cobra.Command {
 		Short: "Print the quiet alarm's clauses for this host, one a line",
 		Long: "nudge reads this host's claimed stories and, of each, whether it has run longer than\n" +
 			"nudge_after_minutes (default 60) with nothing landed, refused or blocked mailed to the\n" +
-			"Mayor about it since it was claimed. It then reads every other host a story is pathed to\n" +
-			"and, of each, whether its last recorded sync is older than nudge_sync_stale_minutes\n" +
-			"(default 20). When this host's own sync is halted, the other hosts' ages are read off notes\n" +
+			"Mayor about it since it was claimed, counted from the latest claim a dispatch recorded. It\n" +
+			"then reads every other host that holds a claim and, of each, whether its last recorded sync\n" +
+			"is older than nudge_sync_stale_minutes (default 20): a host that is simply off, holding no\n" +
+			"claim, is not an alarm. On a host the vault's home file says is not home, it prints nothing.\n" +
+			"When this host's own sync is halted, the other hosts' ages are read off notes\n" +
 			"this host cannot currently refresh, so they are left out in favour of one clause naming\n" +
 			"this host's own halt instead — unless beads_sync is backup or shared, where every host's note\n" +
 			"is read live out of the one database and the ages are kept beside the halt. For each clause\n" +
@@ -58,6 +60,7 @@ func newNudgeCmd() *cobra.Command {
 				Tracker:    tracker,
 				Notes:      tracker,
 				Host:       host,
+				Home:       mwVault(dir, host),
 				SyncHalt:   hostSyncHalt(),
 				SyncMode:   setting.Mode(),
 				NudgeAfter: time.Duration(after) * time.Minute,

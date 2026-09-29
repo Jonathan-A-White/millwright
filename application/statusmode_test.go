@@ -125,6 +125,7 @@ func TestNudgeOnAHostThatReadsTheOneDatabaseKeepsOtherHostsAgesBesideItsOwnHalt(
 		t.Run(string(mode), func(t *testing.T) {
 			tracker := aTrackerPathedToVPS(t)
 			storyOn(t, tracker, "mw-gq6.31", "Something pathed to the laptop", "laptop")
+			claim(t, tracker, "mw-gq6.31", 5*time.Minute)
 			syncedAt(t, tracker, "laptop", 31*time.Minute)
 			marker := apptest.NewFakeSyncHaltMarker()
 			if err := marker.Write(context.Background(), application.SyncHaltInfo{At: statusNow.Add(-15 * time.Minute), Said: "conflict"}); err != nil {

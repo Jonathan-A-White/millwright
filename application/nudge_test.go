@@ -18,7 +18,9 @@ func nudgeReport(t *testing.T, tracker *apptest.FakeTracker, nudge application.N
 	if nudge.Notes == nil {
 		nudge.Notes = tracker
 	}
-	nudge.Host = "vps"
+	if nudge.Host == "" {
+		nudge.Host = "vps"
+	}
 	if nudge.Now == nil {
 		nudge.Now = func() time.Time { return statusNow }
 	}
@@ -118,6 +120,7 @@ func TestNudgeRespectsItsOwnConfiguredLimit(t *testing.T) {
 func TestNudgeNamesAHostWhoseLastSyncIsStale(t *testing.T) {
 	tracker := aTrackerPathedToVPS(t)
 	storyOn(t, tracker, "mw-gq6.30", "Something pathed to the laptop", "laptop")
+	claim(t, tracker, "mw-gq6.30", 5*time.Minute)
 	syncedAt(t, tracker, "laptop", 31*time.Minute)
 
 	clauses := nudgeReport(t, tracker, application.Nudge{})
@@ -161,6 +164,7 @@ func TestNudgeCombinesAStaleStoryAndAStaleHostInOneReport(t *testing.T) {
 	storyOn(t, tracker, "mw-gq6.30", "A story that hangs here", "vps")
 	claim(t, tracker, "mw-gq6.30", 73*time.Minute)
 	storyOn(t, tracker, "mw-gq6.31", "Something pathed to the laptop", "laptop")
+	claim(t, tracker, "mw-gq6.31", 5*time.Minute)
 	syncedAt(t, tracker, "laptop", 31*time.Minute)
 
 	clauses := nudgeReport(t, tracker, application.Nudge{})
@@ -213,6 +217,7 @@ func TestNudgeNamesThisHostsOwnSyncHaltInPlaceOfOtherHostsAges(t *testing.T) {
 func TestNudgeSaysNothingSpecialWhenTheMarkerHoldsNoHalt(t *testing.T) {
 	tracker := aTrackerPathedToVPS(t)
 	storyOn(t, tracker, "mw-gq6.31", "Something pathed to the laptop", "laptop")
+	claim(t, tracker, "mw-gq6.31", 5*time.Minute)
 	syncedAt(t, tracker, "laptop", 29*time.Minute)
 
 	clauses := nudgeReport(t, tracker, application.Nudge{SyncHalt: apptest.NewFakeSyncHaltMarker()})
@@ -222,5 +227,101 @@ func TestNudgeSaysNothingSpecialWhenTheMarkerHoldsNoHalt(t *testing.T) {
 	}
 	if clauses[0].Key != "host:laptop" {
 		t.Fatalf("expected the clause keyed by the host, got %q", clauses[0].Key)
+	}
+}
+
+// mw-43v9x.3: a host that is not home stays quiet.
+func TestNudgeSaysNothingOnAHostThatIsNotHome(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.30", "A story that hangs", "laptop")
+	claim(t, tracker, "mw-gq6.30", 88*time.Minute)
+	storyOn(t, tracker, "mw-gq6.31", "Something pathed to the desktop", "desktop")
+	claim(t, tracker, "mw-gq6.31", 5*time.Minute)
+	syncedAt(t, tracker, "desktop", 90*time.Minute)
+	home := &apptest.FakeHomeFile{Text: "desktop 2026-09-29T00:10:00Z mw@desktop"}
+
+	clauses := nudgeReport(t, tracker, application.Nudge{Host: "laptop", Home: home})
+
+	if len(clauses) != 0 {
+		t.Fatalf("expected a host that is not home to raise nothing, got %+v", clauses)
+	}
+}
+
+func TestNudgeSpeaksAsBeforeWhenTheHomeCannotBeTold(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.30", "A story that hangs", "laptop")
+	claim(t, tracker, "mw-gq6.30", 88*time.Minute)
+
+	for name, home := range map[string]*apptest.FakeHomeFile{
+		"no file":        {Missing: true},
+		"not understood": {Text: "somewhere else entirely"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			clauses := nudgeReport(t, tracker, application.Nudge{Host: "laptop", Home: home})
+			if len(clauses) != 1 {
+				t.Fatalf("expected the story named as before, got %+v", clauses)
+			}
+		})
+	}
+}
+
+func TestNudgeSpeaksOnTheHome(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.30", "A story that hangs", "laptop")
+	claim(t, tracker, "mw-gq6.30", 88*time.Minute)
+	home := &apptest.FakeHomeFile{Text: "laptop 2026-09-29T00:10:00Z mw@laptop"}
+
+	clauses := nudgeReport(t, tracker, application.Nudge{Host: "laptop", Home: home})
+
+	if len(clauses) != 1 || clauses[0].Key != "mw-gq6.30" {
+		t.Fatalf("expected the long-running story named on the home, got %+v", clauses)
+	}
+}
+
+// Tonight's desktop alarm fired every hour for a boost that was simply off: no
+// claim of its own, so nothing of the home's is waiting on it.
+func TestNudgeSaysNothingOfABoostThatHoldsNoClaim(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.30", "Ready on the desktop, nobody has it", "desktop")
+	syncedAt(t, tracker, "desktop", 90*time.Minute)
+	home := &apptest.FakeHomeFile{Text: "laptop 2026-09-29T00:10:00Z mw@laptop"}
+
+	clauses := nudgeReport(t, tracker, application.Nudge{Host: "laptop", Home: home})
+
+	if len(clauses) != 0 {
+		t.Fatalf("expected no sync alarm for a host holding no claim, got %+v", clauses)
+	}
+}
+
+func TestNudgeNamesABoostThatHoldsAClaimAndHasGoneQuiet(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.30", "Claimed on the desktop", "desktop")
+	claim(t, tracker, "mw-gq6.30", 10*time.Minute)
+	syncedAt(t, tracker, "desktop", 90*time.Minute)
+	home := &apptest.FakeHomeFile{Text: "laptop 2026-09-29T00:10:00Z mw@laptop"}
+
+	clauses := nudgeReport(t, tracker, application.Nudge{Host: "laptop", Home: home})
+
+	if len(clauses) != 1 || clauses[0].Text != "desktop last synced 90 min ago" {
+		t.Fatalf("expected the boost named while it holds a claim, got %+v", clauses)
+	}
+}
+
+// 2026-09-28: bd keeps started_at from the first claim ever, so a story the
+// Laptop re-claimed a minute ago alarmed '88 min'. The claim a dispatch
+// recorded is the one measured from.
+func TestNudgeCountsAStoryFromItsLatestClaim(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.30", "Claimed 88 minutes ago, again a minute ago", "vps")
+	claim(t, tracker, "mw-gq6.30", 88*time.Minute)
+	reclaimed := statusNow.Add(-time.Minute).UTC().Format(time.RFC3339)
+	if err := tracker.SetStoryMetadata(context.Background(), "mw-gq6.30", map[string]string{application.ClaimedAtField: reclaimed}); err != nil {
+		t.Fatalf("recording the latest claim: %v", err)
+	}
+
+	clauses := nudgeReport(t, tracker, application.Nudge{})
+
+	if len(clauses) != 0 {
+		t.Fatalf("expected a story claimed a minute ago not to alarm, got %+v", clauses)
 	}
 }

@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -47,6 +48,11 @@ type Nudge struct {
 	// Host is which of the factory's hosts this is read for.
 	Host string
 
+	// Home is the vault's home file. The alarm is the home's: on a host the
+	// file says is not home, Run says nothing at all. A nil Home, or a home
+	// that cannot be told, leaves the alarm running as it always did.
+	Home HomeFile
+
 	// SyncHalt is this host's own mark of a halted sync, read straight rather
 	// than through the tracker, the same as Status.SyncHalt: the one thing a
 	// halt cannot carry is word of itself, since nothing it writes is
@@ -78,13 +84,24 @@ type Nudge struct {
 }
 
 // Run reads the clauses currently true, this host's claimed stories first,
-// then the other hosts, in no particular further order within each.
+// then the other hosts, in no particular further order within each. A host the
+// vault's home file says is not home has none.
 func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 	switch {
 	case n.Tracker == nil:
 		return nil, fmt.Errorf("reading the quiet alarm: there is no work tracker to read it from")
 	case n.Host == "":
 		return nil, fmt.Errorf("reading the quiet alarm: which host is this? set MW_HOST, or host in the config file")
+	}
+
+	if n.Home != nil {
+		home, err := IsHome(ctx, n.Home, n.Host)
+		if _, unknown := HomeUnknownIn(err); err != nil && !unknown {
+			return nil, err
+		}
+		if err == nil && !home {
+			return nil, nil
+		}
 	}
 
 	s := Status{Tracker: n.Tracker, Notes: n.Notes, Host: n.Host, Now: n.Now}
@@ -96,7 +113,8 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 	var clauses []NudgeClause
 	now := s.now()
 	for _, detail := range work.RunningOn(n.Host) {
-		if detail.Hitl() || detail.Started.IsZero() {
+		since := detail.ClaimStarted()
+		if detail.Hitl() || since.IsZero() {
 			continue
 		}
 		rs, err := s.running(ctx, detail)
@@ -109,7 +127,7 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 		if rs.Run == RunBlocked {
 			continue
 		}
-		if elapsed := now.Sub(detail.Started); elapsed > n.nudgeAfter() {
+		if elapsed := now.Sub(since); elapsed > n.nudgeAfter() {
 			clauses = append(clauses, NudgeClause{
 				Key:  detail.Story.ID,
 				Text: fmt.Sprintf("%s in progress %d min, no mail", detail.Story.ID, minutes(elapsed)),
@@ -144,7 +162,7 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 		return nil, err
 	}
 	for _, w := range others {
-		if w.LastSync.IsZero() || w.Silent <= n.syncStale() {
+		if w.LastSync.IsZero() || w.Silent <= n.syncStale() || !w.holdsClaim() {
 			continue
 		}
 		clauses = append(clauses, NudgeClause{
@@ -154,6 +172,18 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 	}
 
 	return clauses, nil
+}
+
+// holdsClaim reports whether any of the stories pathed to this host is claimed:
+// a host that is simply off, with nothing of the home's in its hands, is not an
+// alarm however long it has been silent.
+func (w HostWork) holdsClaim() bool {
+	for _, d := range w.Stories {
+		if strings.EqualFold(strings.TrimSpace(d.Status), StatusInProgress) {
+			return true
+		}
+	}
+	return false
 }
 
 // nudgeAfter is how long a claimed story may run with nothing mailed about it.
