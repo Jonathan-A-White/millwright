@@ -1153,6 +1153,18 @@ standard input, to `sudo -n` `hands_root_helper`. The run is recorded in
 thread, and mailed to the Mayor. A refusal goes out the same three ways, says
 why, and is never tried again.
 
+The postern backend starts `mw postern inbox --apply` as its on-message hook, so
+a step that restarts the backend (`systemctl --user restart postern-backend`)
+would kill the pass that runs it, its ran record and its Ran mail with it. When
+systemd started `mw` (`INVOCATION_ID` is set) and `systemd-run` is on `PATH`,
+the `--apply` pass therefore runs itself again in a transient unit of its own
+(`systemd-run --user --collect --wait --pipe`, without `--user` as root),
+outside the service's cgroup: the copy left in the service relays its output
+and exit status while it lives, and the pass finishes, records and mails
+whatever happens to the service. This covers a root step too, which `sudo`
+starts in a new session but not out of the cgroup. Where no unit can be
+started, the pass runs where it is, as before.
+
 A root step runs through `mw-hands-root` (`make build` builds it into `bin/`),
 a small program that takes nothing from its arguments or environment. It
 refuses unless it runs as root; reads the request (at most 64 KiB) from

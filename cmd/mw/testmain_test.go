@@ -12,6 +12,12 @@ import (
 // the host's shared server instead of in the temp directory. A test that wants
 // one of them sets it with t.Setenv.
 func TestMain(m *testing.M) {
+	// A test that runs on a host where a service started this session must not
+	// find mw postern inbox --apply handing its pass to a real systemd-run.
+	if selfPath := os.Getenv("MW_TEST_HANDOFF"); selfPath != "" {
+		handOffAsTheServiceStartedIt(selfPath)
+	}
+	os.Unsetenv("INVOCATION_ID")
 	for _, kv := range os.Environ() {
 		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "BEADS_DOLT_") {
 			os.Unsetenv(name)

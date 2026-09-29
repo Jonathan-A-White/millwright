@@ -191,6 +191,10 @@ func newPosternInboxCmd() *cobra.Command {
 			"or over the step host's [hands_hosts] ssh prefix, as this host's user (sh -c) or as root\n" +
 			"through sudo -n hands_root_helper. How it ran, or why not, is commented on the bead, sent\n" +
 			"back to him in the bead's thread and mailed to the Mayor.\n\n" +
+			"When systemd started this mw (the backend's hook) and systemd-run is on PATH, --apply runs\n" +
+			"itself again in a transient unit of its own, outside the service's cgroup, so a step that\n" +
+			"restarts the backend cannot kill the pass before it records and mails how the step ran.\n" +
+			"The copy left in the service relays the pass's output and exit status.\n\n" +
 			"A move-home (section 18, the Governor's tap: {\"host\": \"<host>\"}) is run by --apply only\n" +
 			"when the record's signer, the key the backend vouches for, is postern_governor_key and it\n" +
 			"is under 30 minutes old; anything else is refused and nothing runs. Naming this host, it\n" +
@@ -200,6 +204,14 @@ func newPosternInboxCmd() *cobra.Command {
 			"home, --apply applies nothing but a move-home, so a boost's hook never records twice.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if apply {
+				markHandedOff()
+				if self, err := os.Executable(); err == nil {
+					if handled, err := handOff(self, cmd.OutOrStdout(), cmd.ErrOrStderr()); handled {
+						return err
+					}
+				}
+			}
 			keys, err := posternKeys()
 			if err != nil {
 				return err

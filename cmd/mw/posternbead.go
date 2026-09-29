@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -15,6 +16,10 @@ import (
 // backend answers 404 (postern's docs/protocol.md §12); anything else is as
 // exitCode says.
 func exitStatus(err error) int {
+	var handedOff *handedOffExit
+	if errors.As(err, &handedOff) {
+		return handedOff.code
+	}
 	if application.PosternBeadIsMissing(err) {
 		return application.PosternBeadMissingExit
 	}
