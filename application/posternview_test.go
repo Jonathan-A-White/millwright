@@ -682,3 +682,84 @@ func TestPosternViewHandsNeedLeavesOnceEveryStepRanWithExitZero(t *testing.T) {
 		})
 	}
 }
+
+// A hands or demo need that is not ready says what it waits on and is marked
+// not ready, so the app offers neither Approve nor Done; a ready one is as it
+// always was.
+func TestPosternViewNeedNotReadyNamesWhatItWaitsOn(t *testing.T) {
+	ctx := context.Background()
+	oneStep := func(t *testing.T, tracker *apptest.FakeTracker, bead string) {
+		raw, _ := json.Marshal([]application.HandsStepRecord{{HandsStep: domain.HandsStep{ID: "a", Host: "desktop", As: "user", Run: "true"}}})
+		mustDo(t, tracker.SetNote(ctx, application.HandsStepsKey(bead), string(raw)))
+	}
+	build := func(t *testing.T, label string, blocked, closeBlocker, steps bool) application.PosternViewNeed {
+		tracker := apptest.NewFakeTracker()
+		liveEpic(tracker, "mw-a", domain.Path{})
+		tracker.AddStory("mw-a", domain.Story{ID: "mw-a.1", Title: "Wire the relay"})
+		tracker.AddStory("mw-a", domain.Story{ID: "mw-a.2", Title: "Flash the board"})
+		tracker.AddStory("mw-a", domain.Story{ID: "mw-a.3", Title: "The card"})
+		mustDo(t, tracker.SetLabels("mw-a.3", label))
+		if blocked {
+			tracker.Needs("mw-a.3", "mw-a.1", "mw-a.2")
+			if closeBlocker {
+				closedAt(t, tracker, "mw-a.1", viewNow.Add(-time.Hour))
+				closedAt(t, tracker, "mw-a.2", viewNow.Add(-time.Hour))
+			}
+		}
+		if steps {
+			oneStep(t, tracker, "mw-a.3")
+		}
+		kind := "hands"
+		if label == "demo" {
+			kind = "demo"
+		}
+		return viewNeed(t, viewDoc(t, tracker), kind, "mw-a.3")
+	}
+
+	t.Run("hands with no steps waits on the Mayor to write them", func(t *testing.T) {
+		n := build(t, "hitl", false, false, false)
+		if !n.NotReady || !equalStrings(n.WaitingOn, []string{"the Mayor to write the steps"}) ||
+			n.Text != "Not ready yet: waiting on the Mayor to write the steps" {
+			t.Fatalf("expected a not-ready need waiting on the Mayor, got %+v", n)
+		}
+		if len(n.Options) != 0 {
+			t.Fatalf("expected no action on a not-ready need, got %v", n.Options)
+		}
+	})
+	t.Run("hands with steps but an open blocker names the blocker's title", func(t *testing.T) {
+		n := build(t, "hitl", true, false, true)
+		if !n.NotReady || !equalStrings(n.WaitingOn, []string{"Wire the relay", "Flash the board"}) ||
+			n.Text != "Not ready yet: waiting on Wire the relay, Flash the board" {
+			t.Fatalf("expected a not-ready need naming both blockers, got %+v", n)
+		}
+	})
+	t.Run("hands with no steps and an open blocker names the blockers and the Mayor", func(t *testing.T) {
+		n := build(t, "hitl", true, false, false)
+		if !n.NotReady || !equalStrings(n.WaitingOn, []string{"Wire the relay", "Flash the board", "the Mayor to write the steps"}) {
+			t.Fatalf("expected the blockers then the Mayor, got %+v", n)
+		}
+	})
+	t.Run("demo with an open blocker is not ready", func(t *testing.T) {
+		n := build(t, "demo", true, false, false)
+		if !n.NotReady || !equalStrings(n.WaitingOn, []string{"Wire the relay", "Flash the board"}) ||
+			n.Text != "Not ready yet: waiting on Wire the relay, Flash the board" || len(n.Options) != 0 {
+			t.Fatalf("expected a not-ready demo naming both blockers, got %+v", n)
+		}
+	})
+	t.Run("demo with no blocker is ready as today", func(t *testing.T) {
+		n := build(t, "demo", false, false, false)
+		if n.NotReady || n.WaitingOn != nil {
+			t.Fatalf("expected a ready demo, got %+v", n)
+		}
+	})
+	t.Run("hands with the blockers closed and a step is ready as today", func(t *testing.T) {
+		n := build(t, "hitl", true, true, true)
+		if n.NotReady || n.WaitingOn != nil || len(n.Steps) != 1 {
+			t.Fatalf("expected a ready hands need with its step, got %+v", n)
+		}
+		raw, _ := json.Marshal(n)
+		if strings.Contains(string(raw), "not_ready") || strings.Contains(string(raw), "waiting_on") {
+			t.Fatalf("expected a ready need to carry neither field, got %s", raw)
+		}
+	})
+}
