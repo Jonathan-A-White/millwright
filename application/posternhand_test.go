@@ -140,3 +140,63 @@ func TestTheDefaultBackupDirIsUnderTheCallersHome(t *testing.T) {
 		t.Errorf("an explicit BackupDir was not kept: %q", got)
 	}
 }
+
+// liveShapedSite is a site text shaped like the live one: /api/healthz and
+// /api/ set their own proxy_connect_timeout, /api/events sets none.
+const liveShapedSite = "server {\n" +
+	"    location = /api/healthz {\n" +
+	"        proxy_pass http://laptop.mw:8787/healthz;\n" +
+	"        proxy_connect_timeout 5s;\n" +
+	"    }\n" +
+	"    location /api/events {\n" +
+	"        proxy_pass http://laptop.mw:8787;\n" +
+	"    }\n" +
+	"    location /api/ {\n" +
+	"        proxy_connect_timeout 5s;\n" +
+	"        proxy_pass http://laptop.mw:8787;\n" +
+	"    }\n" +
+	"}"
+
+const nginxNextUpstream = "        proxy_next_upstream error timeout http_503 non_idempotent; " + posternFailoverTag + "\n"
+const nginxTaggedTimeout = "        proxy_connect_timeout 2s; " + posternFailoverTag + "\n"
+
+func TestNginxFailoverKeepsASitesOwnConnectTimeout(t *testing.T) {
+	got := setAPIBackend(liveShapedSite, "http://desktop.mw:8787", true)
+
+	want := "server {\n" +
+		"    location = /api/healthz {\n" +
+		"        proxy_pass http://desktop.mw:8787/healthz;\n" +
+		nginxNextUpstream +
+		"        proxy_connect_timeout 5s;\n" +
+		"    }\n" +
+		"    location /api/events {\n" +
+		"        proxy_pass http://desktop.mw:8787;\n" +
+		nginxNextUpstream +
+		nginxTaggedTimeout +
+		"    }\n" +
+		"    location /api/ {\n" +
+		"        proxy_connect_timeout 5s;\n" +
+		"        proxy_pass http://desktop.mw:8787;\n" +
+		nginxNextUpstream +
+		"    }\n" +
+		"}"
+	if got != want {
+		t.Errorf("setAPIBackend() =\n%s\nwant:\n%s", got, want)
+	}
+	if n := strings.Count(got, "proxy_connect_timeout"); n != 3 {
+		t.Errorf("%d proxy_connect_timeout lines, want 3 (two the site's own, one tagged)", n)
+	}
+}
+
+func TestNginxFailoverIsIdempotentAndOneBackendRemovesOnlyTaggedLines(t *testing.T) {
+	once := setAPIBackend(liveShapedSite, "http://desktop.mw:8787", true)
+	if again := setAPIBackend(once, "http://desktop.mw:8787", true); again != once {
+		t.Errorf("a second pass changed\n%s\ninto\n%s", once, again)
+	}
+
+	one := setAPIBackend(once, "http://desktop.mw:8787", false)
+	want := strings.ReplaceAll(liveShapedSite, "laptop.mw", "desktop.mw")
+	if one != want {
+		t.Errorf("one backend gave\n%s\nwant:\n%s", one, want)
+	}
+}

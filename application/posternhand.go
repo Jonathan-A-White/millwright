@@ -898,17 +898,21 @@ func ensureUpstreamBlock(text string, hosts []string) string {
 // setAPIBackend returns text with every proxy_pass line inside a `location`
 // block whose path names /api pointed at authority (a URL's scheme and
 // host), its own path suffix — /healthz, say — left exactly as it was. With
-// failover set, each such line is followed by posternFailoverLines.
+// failover set, each such line is followed by posternFailoverLines, less any
+// directive the same location block already sets by hand (an untagged line,
+// before or after the proxy_pass), which is left exactly as it is.
 func setAPIBackend(text, authority string, failover bool) string {
-	lines := strings.Split(text, "\n")
+	lines := strings.Split(stripFailoverLines(text), "\n")
 	out := make([]string, 0, len(lines))
 	depth := 0
 	inAPI := false
 	apiDepth := 0
+	var own map[string]bool
 
-	for _, line := range lines {
+	for i, line := range lines {
 		if m := posternLocationRe.FindStringSubmatch(line); m != nil && !inAPI && strings.Contains(m[1], "/api") {
 			inAPI = true
+			own = locationDirectives(lines, i)
 			apiDepth = depth + strings.Count(line, "{") - strings.Count(line, "}")
 		}
 		if m := posternProxyPassRe.FindStringSubmatch(line); inAPI && m != nil {
@@ -916,7 +920,9 @@ func setAPIBackend(text, authority string, failover bool) string {
 			if failover {
 				indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
 				for _, directive := range posternFailoverLines {
-					out = append(out, indent+directive)
+					if !own[strings.Fields(directive)[0]] {
+						out = append(out, indent+directive)
+					}
 				}
 			}
 		} else {
@@ -928,4 +934,24 @@ func setAPIBackend(text, authority string, failover bool) string {
 		}
 	}
 	return strings.Join(out, "\n")
+}
+
+// locationDirectives returns the first word of every line inside the block
+// whose `location` line is lines[start], the nested blocks' too, so a
+// directive the site sets by hand can be told from one still to be added.
+func locationDirectives(lines []string, start int) map[string]bool {
+	own := map[string]bool{}
+	depth := 0
+	for i := start; i < len(lines); i++ {
+		if i > start {
+			if fields := strings.Fields(strings.TrimSuffix(strings.TrimSpace(lines[i]), ";")); len(fields) > 0 && !strings.HasPrefix(fields[0], "#") {
+				own[fields[0]] = true
+			}
+		}
+		depth += strings.Count(lines[i], "{") - strings.Count(lines[i], "}")
+		if depth <= 0 {
+			break
+		}
+	}
+	return own
 }
