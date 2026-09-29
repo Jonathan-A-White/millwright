@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -1063,6 +1064,86 @@ func TestGatewayReadsSeveralEpicsAndStoriesCommentsInOneCallEach(t *testing.T) {
 
 	if empty, err := gateway.StoriesComments(ctx, nil); err != nil || len(empty) != 0 {
 		t.Errorf("expected no ids to read nothing without failing, got %+v: %v", empty, err)
+	}
+}
+
+// mw-t64a3.12: a bead's page is read in one bd show and a bd list per tree, and
+// says what the separate reads — ShowBeads, StoryComments, ShowEpic — say.
+func TestGatewayReadsABeadPageAsTheSeparateReadsDo(t *testing.T) {
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	epic := bdRun(t, vault, beads.Program, "create", "The epic", "-t", "epic", "--silent",
+		"--metadata", `{"rig":"postern","model":"sonnet"}`)
+	story := bdRun(t, vault, beads.Program, "create", "The story", "--parent", epic, "--silent",
+		"--metadata", `{"model":"opus"}`)
+	after := bdRun(t, vault, beads.Program, "create", "After", "--parent", epic, "--silent", "--deps", "blocked-by:"+story)
+	child := bdRun(t, vault, beads.Program, "create", "Sub-epic", "-t", "epic", "--parent", epic, "--silent")
+	grandchild := bdRun(t, vault, beads.Program, "create", "Grandchild", "--parent", child, "--silent")
+	bdRun(t, vault, beads.Program, "comments", "add", story, "First word.")
+	bdRun(t, vault, beads.Program, "comments", "add", story, "Second word.")
+
+	gateway := beads.New(vault)
+
+	page, found, err := gateway.ShowBeadPage(ctx, story)
+	if err != nil || !found {
+		t.Fatalf("reading the page of %s: found %v, %v", story, found, err)
+	}
+	wantBead, err := gateway.ShowBeads(ctx, []string{story})
+	if err != nil || len(wantBead) != 1 {
+		t.Fatalf("reading %s on its own: %+v, %v", story, wantBead, err)
+	}
+	if !reflect.DeepEqual(page.Bead, wantBead[0]) {
+		t.Errorf("expected the page's bead to be ShowBeads's, got %+v want %+v", page.Bead, wantBead[0])
+	}
+	wantComments, err := gateway.StoryComments(ctx, story)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(wantComments) != 2 || !reflect.DeepEqual(page.Comments, wantComments) {
+		t.Errorf("expected the page's comments to be StoryComments's, got %+v want %+v", page.Comments, wantComments)
+	}
+	wantParent, err := gateway.ShowEpic(ctx, epic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Parent == nil || page.Parent.Defaults != wantParent.Defaults || !reflect.DeepEqual(page.Parent.Stories, wantParent.Stories) {
+		t.Errorf("expected the page's parent to be ShowEpic's, got %+v want %+v", page.Parent, wantParent)
+	}
+	if page.Children != nil {
+		t.Errorf("expected a story to have no children, got %+v", page.Children)
+	}
+	if len(page.Parent.Stories) != 3 || page.Parent.Stories[1].Story.ID != after {
+		t.Errorf("expected the epic's three children in filed order, got %+v", page.Parent.Stories)
+	}
+
+	// An epic with a parent: its own children and its parent's.
+	subPage, found, err := gateway.ShowBeadPage(ctx, child)
+	if err != nil || !found {
+		t.Fatalf("reading the page of %s: found %v, %v", child, found, err)
+	}
+	wantChildren, err := gateway.ShowEpic(ctx, child)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(subPage.Children) != 1 || subPage.Children[0].Story.ID != grandchild ||
+		!reflect.DeepEqual(subPage.Children, wantChildren.Stories) {
+		t.Errorf("expected %s's one child, got %+v", child, subPage.Children)
+	}
+	if subPage.Parent == nil || len(subPage.Parent.Stories) != 3 {
+		t.Errorf("expected the sub-epic's parent's children, got %+v", subPage.Parent)
+	}
+
+	// A story whose parent is not an epic leaves the parent off the page.
+	orphaned := bdRun(t, vault, beads.Program, "create", "Under a task", "--parent", story, "--silent")
+	under, found, err := gateway.ShowBeadPage(ctx, orphaned)
+	if err != nil || !found || under.Parent != nil {
+		t.Errorf("expected a page with no parent for a story under a task, got %+v found %v: %v", under.Parent, found, err)
+	}
+
+	if _, found, err := gateway.ShowBeadPage(ctx, "t-nope"); err != nil || found {
+		t.Errorf("expected a bead nobody filed to be not found without failing, got %v: %v", found, err)
 	}
 }
 

@@ -650,6 +650,33 @@ func (f *FakeTracker) ShowBeads(ctx context.Context, ids []string) ([]applicatio
 	return found, nil
 }
 
+// ShowBeadPage implements application.WorkTracker, from the reads the fake
+// already has: ShowBeads, StoryComments and ShowEpic. A parent ShowEpic
+// refuses is left off the page, as the real tracker leaves it.
+func (f *FakeTracker) ShowBeadPage(ctx context.Context, id string) (application.BeadPage, bool, error) {
+	found, err := f.ShowBeads(ctx, []string{id})
+	if err != nil || len(found) == 0 {
+		return application.BeadPage{}, false, err
+	}
+	page := application.BeadPage{Bead: found[0]}
+	if page.Comments, err = f.StoryComments(ctx, id); err != nil {
+		return application.BeadPage{}, false, err
+	}
+	if page.Bead.IsEpic {
+		epic, err := f.ShowEpic(ctx, id)
+		if err != nil {
+			return application.BeadPage{}, false, err
+		}
+		page.Children = epic.Stories
+	}
+	if page.Bead.EpicID != "" {
+		if parent, err := f.ShowEpic(ctx, page.Bead.EpicID); err == nil {
+			page.Parent = &parent
+		}
+	}
+	return page, true, nil
+}
+
 // SetType sets the tracker's word for what kind of bead a story is — bug,
 // feature, chore — as a fixture. A story added without one reports none.
 func (f *FakeTracker) SetType(id, kind string) error {
