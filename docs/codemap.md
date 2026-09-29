@@ -36,7 +36,7 @@ Each adapter: `var _ application.<Port> = ...`.
 | `Worktrees` | `application/worktrees.go` | `infrastructure/rig/worktree.go` | `application/dispatch_test.go` |
 | `SyncHaltMarker` | `application/sync.go` | `infrastructure/synchalt/synchalt.go` | `apptest.FakeSyncHaltMarker` |
 | `Notifier` | `application/millhandtick.go` | `infrastructure/notify/notify.go` | none |
-| `HomeMoveHost` | `application/homemove.go` | `infrastructure/homemove/homemove.go` | none |
+| `HomeMoveHost`, `OldHome` | `application/homemove.go` | `infrastructure/homemove/homemove.go` | none |
 | `VaultBirth`, `TrackerBirth` | `application/init.go` | `infrastructure/{vault/birth,beads/init}.go` | none |
 | `Landing`, `Checks`, `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/{landing,checks,slot}.go` | none |
 | `AfterLanding` | `application/afterlanding.go` | `infrastructure/rig/afterlanding.go` | none |

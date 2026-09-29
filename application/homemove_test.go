@@ -42,6 +42,11 @@ type moveWorld struct {
 	beads        int
 	mayorStarted bool
 	hasIndex     bool
+	// The old home, when the move is planned: whether its Mayor hands off, and the
+	// units it has.
+	mayorStays   bool
+	handoffMail  string
+	oldInstalled map[string]bool
 	// failAt is a call that fails, once it has been made and written down.
 	failAt string
 	// written is the last home file written.
@@ -58,6 +63,7 @@ func newMoveWorld() *moveWorld {
 		beads:          4422,
 		mayorStarted:   true,
 		hasIndex:       true,
+		oldInstalled:   map[string]bool{application.DoltBeadsUnit: true, application.PosternBackendUnit: true},
 	}
 }
 
@@ -345,7 +351,7 @@ func TestAReachableOldHomeRefusesWithThePlannedPathLine(t *testing.T) {
 
 		err := m.Run(context.Background())
 
-		if err == nil || !strings.Contains(err.Error(), "old home is up: use --planned when it exists") {
+		if err == nil || !strings.Contains(err.Error(), "old home is up: use --planned") {
 			t.Fatalf("with --old-home-dead=%v: expected the planned-path line, got %v", dead, err)
 		}
 		wantCalls(t, w, "ssh desktop")

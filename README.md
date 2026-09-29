@@ -87,12 +87,17 @@ decides what that means). `mw home move <host>` writes it (below). See
 ```sh
 mw home move laptop --dry-run       # on the Laptop: six steps and their ways back, none run
 mw home move laptop --old-home-dead # on the Laptop: make it home, the desktop being dead
+mw home move laptop --planned       # on the Laptop: make it home, both hosts up, the desktop flushes first
 ```
 
 Run **on the host that becomes home**, by the Governor, never by the factory on its
 own. It asks whether the old home answers ssh (its `[hands_hosts]` line, 10 s): if it
-does, it stops (`old home is up: use --planned when it exists`); if it does not, it
-goes on only with `--old-home-dead`. Then, each step printed with its way back:
+does, it stops (`old home is up: use --planned`); if it does not, it goes on only with
+`--old-home-dead`. With `--planned` (both hosts up) a step follows: over ssh the old home's
+Mayor is mailed `Hand off now` and waited for, up to 15 minutes (a Mayor is never killed;
+if it does not go, the move stops with this host untouched), a final `mw sync` runs there,
+its `postern-backend` stops and a final `mw postern mirror` copies its data here, and its
+`dolt-beads` stops: nothing is lost, and the Mayor mail says `planned move`. Then, each step printed with its way back:
 beads cloned from GitHub's `refs/dolt/data` (the embedded database is set aside in a
 dated directory, never deleted; the `dolt-beads` unit is started if the host has one);
 the vault's `home` file written, committed and pushed (the fence: an old home that
