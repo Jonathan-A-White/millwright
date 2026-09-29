@@ -25,8 +25,8 @@
 #      sync — the notifier's own last-sync marker — is MW_MAIL_SYNC_EVERY
 #      seconds old or more, under the notifier's lock so that the two never
 #      sync at once. On a host whose bd is the Dolt server itself, or reaches
-#      it (beads_sync backup or shared), mail arrives with no sync and it runs
-#      none;
+#      it (beads_sync backup, shared or auto, which is always one of those two),
+#      mail arrives with no sync and it runs none;
 #   2. lists `bd mail inbox` and compares its ids with those announced;
 #   3. on a host with a postern key file, runs `mw postern inbox
 #      --unread-count` and compares it with the count last noted.
@@ -80,10 +80,11 @@ keyfile=${MW_POSTERN_KEY_FILE:-}
 [ -n "$keyfile" ] || keyfile=$(config_key postern_key_file)
 [ -n "$keyfile" ] || keyfile="$HOME/.config/mw/postern.key"
 
-# A host whose bd is the Dolt server, or reaches it, needs no sync for mail.
+# A host whose bd is the Dolt server, or reaches it (auto is always backup or
+# shared), needs no sync for mail.
 beads_sync=${MW_BEADS_SYNC:-}
 [ -n "$beads_sync" ] || beads_sync=$(config_key beads_sync)
-case $beads_sync in backup | shared) syncs=0 ;; *) syncs=1 ;; esac
+case $beads_sync in backup | shared | auto) syncs=0 ;; *) syncs=1 ;; esac
 
 command -v flock >/dev/null 2>&1 || die "flock is not installed"
 command -v timeout >/dev/null 2>&1 || die "timeout is not installed"

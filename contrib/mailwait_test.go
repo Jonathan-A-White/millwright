@@ -173,7 +173,7 @@ func TestTheWaitMakesNoPosternCallOnAHostWithNoKeyFile(t *testing.T) {
 }
 
 func TestTheWaitRunsNoSyncWhereBeadsIsTheDoltServerItself(t *testing.T) {
-	for _, mode := range []string{"backup", "shared"} {
+	for _, mode := range []string{"backup", "shared", "auto"} {
 		t.Run(mode, func(t *testing.T) {
 			f := newFactory(t)
 			f.env = append(f.env, "MW_MAIL_WAIT_LIMIT=2", "MW_BEADS_SYNC="+mode)
@@ -194,6 +194,29 @@ func TestTheWaitReadsTheBeadsSyncModeFromTheConfigFile(t *testing.T) {
 
 	if f.syncs() != 0 {
 		t.Fatalf("the wait ran mw sync on a backup host: %q", f.read("mw.log"))
+	}
+}
+
+func TestTheWaitRunsNoSyncOnAnAutoModeFromTheConfigFile(t *testing.T) {
+	f := newFactory(t)
+	f.write(".config/mw/config.toml", "vault = \"/x\"\nbeads_sync = \"auto\"\n", 0o644)
+	f.env = append(f.env, "MW_MAIL_WAIT_LIMIT=2")
+
+	f.wait().ends(15 * time.Second)
+
+	if f.syncs() != 0 {
+		t.Fatalf("the wait ran mw sync on an auto host: %q", f.read("mw.log"))
+	}
+}
+
+func TestTheWaitStillSyncsWhenBeadsSyncIsRemote(t *testing.T) {
+	f := newFactory(t)
+	f.env = append(f.env, "MW_MAIL_WAIT_LIMIT=2", "MW_BEADS_SYNC=remote")
+
+	f.wait().ends(15 * time.Second)
+
+	if f.syncs() != 1 {
+		t.Fatalf("the wait ran mw sync %d times on a remote host, want once: %q", f.syncs(), f.read("mw.log"))
 	}
 }
 
