@@ -1,0 +1,27 @@
+# One `mw postern mirror`, run as the user, then it exits: no daemon. For
+# `systemctl --user`; see README.md, "mw postern mirror".
+#
+# Started by mw-postern-mirror.timer. A oneshot unit is never started twice at
+# once. On the home it copies the postern backend's data to the boost with rsync
+# over ssh, and the watchdog's two files to the VPS when postern_watchdog_target
+# is set; anywhere else it says so and does nothing. It never writes to this
+# host's own data.
+[Unit]
+Description=Copy the postern's data to the boost, and the watchdog's files to the VPS (mw postern mirror)
+
+[Service]
+Type=oneshot
+
+# A user unit gets a bare PATH. The host says where mw, rsync and ssh are in the
+# file below, the same one line `PATH=...` mw-dispatch.service reads. The leading
+# "-" makes it optional. `env` finds mw through the PATH that file sets, which
+# ExecStart on its own would not.
+EnvironmentFile=-%h/.config/mw/dispatch.env
+ExecStart=/usr/bin/env mw postern mirror
+
+# Type=oneshot has no start timeout by default, and a hung ssh would then block
+# every later run.
+TimeoutStartSec=5min
+
+# A copy is meant to be cheap and to step aside for real work.
+Nice=19
