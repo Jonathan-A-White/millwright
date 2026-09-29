@@ -280,3 +280,39 @@ func TestApplyLeavesARunForTheMayorWhenNoRunnerIsConfigured(t *testing.T) {
 		t.Fatalf("expected the run left unapplied, got %q", note)
 	}
 }
+
+// A step that exits non-zero records why in its ran note: the last non-empty
+// line of what it printed, or the start error, at most 200 characters; one
+// that exits 0 records none.
+func TestApplyRunRecordsWhyAFailedStepFailed(t *testing.T) {
+	cases := map[string]struct {
+		outcome application.HandsOutcome
+		err     error
+		want    string
+	}{
+		"exit 0 records none":       {outcome: application.HandsOutcome{Exit: 0, Output: "fine\nall done\n"}, want: ""},
+		"the last non-empty line":   {outcome: application.HandsOutcome{Exit: 1, Output: "first\nnginx: bad config\n\n  \n"}, want: "nginx: bad config"},
+		"no output at all":          {outcome: application.HandsOutcome{Exit: 3}, want: ""},
+		"a line clipped to 200":     {outcome: application.HandsOutcome{Exit: 1, Output: "x\n" + strings.Repeat("é", 300)}, want: strings.Repeat("é", 200)},
+		"a step that did not start": {err: fmt.Errorf("the prefix logs in as root"), want: "the step could not be started: the prefix logs in as root"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newRunFixture(t)
+			f.runner.Outcome, f.runner.Err = c.outcome, c.err
+			f.approve(t, "tx", "echo", runNow, "")
+
+			f.apply(t)
+
+			raw, _ := f.tracker.Note(context.Background(), application.HandsRanKey("mw-e.3", "echo"))
+			var ran application.HandsRan
+			mustDo(t, json.Unmarshal([]byte(raw), &ran))
+			if ran.Why != c.want {
+				t.Fatalf("expected why %q, got %q (note %s)", c.want, ran.Why, raw)
+			}
+			if c.want == "" && strings.Contains(raw, `"why"`) {
+				t.Fatalf("expected no why key, got %s", raw)
+			}
+		})
+	}
+}

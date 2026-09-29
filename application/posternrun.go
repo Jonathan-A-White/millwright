@@ -96,7 +96,7 @@ func (i PosternInbox) applyRun(ctx context.Context, m PosternInboxMessage, actio
 	if err != nil {
 		outcome = HandsOutcome{Exit: -1, Output: fmt.Sprintf("the step could not be started: %v", err)}
 	}
-	ran, err := json.Marshal(HandsRan{At: i.now().UTC().Format(time.RFC3339), Exit: outcome.Exit, Host: step.Host})
+	ran, err := json.Marshal(HandsRan{At: i.now().UTC().Format(time.RFC3339), Exit: outcome.Exit, Host: step.Host, Why: handsWhy(outcome.Exit, outcome.Output)})
 	if err != nil {
 		return posternApplied{}, err
 	}

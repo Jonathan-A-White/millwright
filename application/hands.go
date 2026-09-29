@@ -30,11 +30,38 @@ type HandsStepRecord struct {
 	AddedAt string `json:"added_at"`
 }
 
-// HandsRan is a step's last run: when, with what exit status, on which host.
+// HandsWhyLimit is the most characters of a failed step's why.
+const HandsWhyLimit = 200
+
+// HandsRan is a step's last run: when, with what exit status, on which host,
+// and — when the exit was not 0 — why: the last non-empty line the step
+// printed, or the error that kept it from starting.
 type HandsRan struct {
 	At   string `json:"at"`
 	Exit int    `json:"exit"`
 	Host string `json:"host"`
+	Why  string `json:"why,omitempty"`
+}
+
+// handsWhy is why a step that exited with exit failed, out of its output:
+// the last non-empty line, clipped to HandsWhyLimit characters. A step that
+// exited 0, or printed nothing, has none.
+func handsWhy(exit int, output string) string {
+	if exit == 0 {
+		return ""
+	}
+	lines := strings.Split(output, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		if runes := []rune(line); len(runes) > HandsWhyLimit {
+			line = string(runes[:HandsWhyLimit])
+		}
+		return line
+	}
+	return ""
 }
 
 // parseHandsSteps reads a bead's hands note. An empty note is no steps; one
