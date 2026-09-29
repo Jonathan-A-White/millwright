@@ -160,3 +160,23 @@ func TestANoteWithNoLogsIsEmptyAndReadsBackAsNone(t *testing.T) {
 		}
 	}
 }
+
+func TestTheLinesMwTidyAddsAreNotRunsOfTheTick(t *testing.T) {
+	tidy := "2026-09-21T12:20:00Z tidy: answer mail mail-1: Tidied by mw tidy: an Answer mail over 1 day old"
+	if _, got := application.MillhandTickOutcome(tidy); got != application.TickUnread {
+		t.Errorf("expected a tidy line to be no run, got %s", got)
+	}
+
+	// A tidy line is neither the newest run nor a sign the host was awake: the
+	// resume rules judge by the tick's own line before it.
+	log := heldLog(t, "2026-09-21T09:00:00Z quiet", tidy)
+	now := time.Date(2026, 9, 21, 12, 30, 0, 0, time.UTC)
+	if announce, resumed := application.TickResumed(context.Background(), log, now); !resumed {
+		t.Errorf("expected a resume after 3.5 hours despite the tidy line, got %q", announce)
+	}
+	resumedLine := "2026-09-21T12:00:00Z quiet; resumed after 3h0m0s"
+	grace := application.ReadResumeGrace(context.Background(), heldLog(t, resumedLine, tidy), time.Date(2026, 9, 21, 12, 1, 0, 0, time.UTC))
+	if !grace.Open(time.Date(2026, 9, 21, 12, 1, 0, 0, time.UTC)) {
+		t.Errorf("expected a tidy line after a resume line to leave its grace open, got %+v", grace)
+	}
+}

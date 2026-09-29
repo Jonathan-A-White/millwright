@@ -75,6 +75,22 @@ Feature: mw millhand tick
     And the tick did not sync
     And the tick log holds that line
 
+  Scenario: A tick tidies after its sweep, says so in its line and gives each act a line of its own in the log
+    Given tick mail for "mayor" with the subject "Answer: mw-x.1: Release" sent 2 days before today
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "tidied 1 thing"
+    And the tick's mail "Answer: mw-x.1: Release" is closed
+    And the tick log holds a tidy line saying "Tidied by mw tidy: an Answer mail over 1 day old"
+    And the tick log holds 2 lines
+
+  Scenario: A dry run of the tick says what it would tidy and tidies nothing
+    Given tick mail for "mayor" with the subject "Answer: mw-x.1: Release" sent 2 days before today
+    When mw millhand tick is run as a dry run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "would tidy 1 thing"
+    And the tick log holds that line
+
   Scenario: A finished Millhand's window is closed and the same tick wakes a fresh Millhand for waiting mail
     Given the window "millhand-2026-09-19-04" was opened at "2026-09-19T05:00:00Z"
     And unread tick mail for "millhand@laptop" with the subject "Please look at the queue"

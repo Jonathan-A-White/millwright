@@ -149,7 +149,7 @@ func DispatchOutcome(line string) (time.Time, TickOutcome) {
 // verdict — quiet, already up, woke the Millhand — are good runs.
 func MillhandTickOutcome(line string) (time.Time, TickOutcome) {
 	at, words, ok := splitTickLine(line)
-	if !ok {
+	if !ok || strings.HasPrefix(words, TidyLogPrefix) {
 		return time.Time{}, TickUnread
 	}
 	parts := strings.Split(words, "; ")
@@ -313,6 +313,19 @@ const (
 	tickResumingPrefix = "resuming: "
 )
 
+// newestTickLine is the time and words of the newest line of a tick log that
+// is a run of the tick: the lines mw tidy adds between runs are read past.
+func newestTickLine(lines []string) (at time.Time, words string, ok bool) {
+	for i := len(lines) - 1; i >= 0; i-- {
+		at, words, ok = splitTickLine(lines[i])
+		if ok && strings.HasPrefix(words, TidyLogPrefix) {
+			continue
+		}
+		return at, words, ok
+	}
+	return time.Time{}, "", false
+}
+
 // TickResumed reports, from a Millhand tick log's newest line, whether now is
 // a resume — the host slept through the timer that runs the tick, so the gap
 // since that line is more than ResumeGap — and, when it is, the words to
@@ -323,10 +336,10 @@ func TickResumed(ctx context.Context, log TickLog, now time.Time) (announce stri
 		return "", false
 	}
 	lines, err := log.Read(ctx)
-	if err != nil || len(lines) == 0 {
+	if err != nil {
 		return "", false
 	}
-	when, _, ok := splitTickLine(lines[len(lines)-1])
+	when, _, ok := newestTickLine(lines)
 	if !ok {
 		return "", false
 	}
@@ -370,10 +383,10 @@ func ReadResumeGrace(ctx context.Context, log TickLog, now time.Time) ResumeStat
 		return ResumeState{}
 	}
 	lines, err := log.Read(ctx)
-	if err != nil || len(lines) == 0 {
+	if err != nil {
 		return ResumeState{}
 	}
-	when, words, ok := splitTickLine(lines[len(lines)-1])
+	when, words, ok := newestTickLine(lines)
 	if !ok || !resumeGraceLine(words) {
 		return ResumeState{}
 	}

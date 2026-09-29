@@ -101,6 +101,7 @@ func (c *seatUpContext) tickWorld() *tickWorld {
 // the seat up scenario.
 func registerMillhandTickSteps(ctx *godog.ScenarioContext, c *seatUpContext) {
 	ctx.Given(`^unread tick mail for "([^"]*)" with the subject "([^"]*)"$`, c.unreadTickMail)
+	ctx.Given(`^tick mail for "([^"]*)" with the subject "([^"]*)" sent (\d+) days before today$`, c.oldTickMail)
 	ctx.Given(`^(\d+) unread tick messages for "([^"]*)" with the subjects "([^"]*)" to "([^"]*)"$`, c.unreadTickMessages)
 	ctx.Given(`^the story "([^"]*)" titled "([^"]*)" is claimed here with no session behind it$`, c.aStuckStory)
 	ctx.Given(`^(\d+) claimed stories with no session behind them, titled "([^"]*)" to "([^"]*)"$`, c.stuckStories)
@@ -136,6 +137,8 @@ func registerMillhandTickSteps(ctx *godog.ScenarioContext, c *seatUpContext) {
 	ctx.Then(`^the tick synced once$`, c.theTickSyncedTimes(1))
 	ctx.Then(`^the tick log holds that line$`, c.theLogHoldsThatLine)
 	ctx.Then(`^the tick log holds (\d+) lines$`, c.theLogHoldsLines)
+	ctx.Then(`^the tick log holds a tidy line saying "([^"]*)"$`, c.theLogHoldsATidyLineSaying)
+	ctx.Then(`^the tick's mail "([^"]*)" is closed$`, c.theTicksMailIsClosed)
 	ctx.Then(`^the tick log counts as (a good run|a failed run|a local network fault)$`, c.theLogCountsAs)
 	ctx.Then(`^no tick mail was marked read$`, c.noTickMailWasMarkedRead)
 	ctx.Then(`^the story "([^"]*)" is not recorded as stuck by the tick$`, c.theStoryIsNotRecordedStuck)
@@ -192,6 +195,41 @@ func (c *seatUpContext) unreadTickMail(mailbox, subject string) error {
 		From: "mayor", To: mailbox, Subject: subject, Body: "A message a tick test left.",
 	})
 	return err
+}
+
+// oldTickMail leaves mail sent some days before today.
+func (c *seatUpContext) oldTickMail(mailbox, subject string, days int) error {
+	mailbox2 := c.tickWorld().mailbox
+	id, err := mailbox2.Send(context.Background(), application.NewMessage{
+		From: "mw@laptop", To: mailbox, Subject: subject, Body: "A message a tick test left.",
+	})
+	if err != nil {
+		return err
+	}
+	return mailbox2.SetSent(id, c.today.AddDate(0, 0, -days))
+}
+
+func (c *seatUpContext) theLogHoldsATidyLineSaying(text string) error {
+	for _, line := range c.tickWorld().log.Lines() {
+		if _, words, _ := strings.Cut(line, " "); strings.HasPrefix(words, application.TidyLogPrefix) && strings.Contains(words, text) {
+			return nil
+		}
+	}
+	return fmt.Errorf("no tidy line in the tick log says %q: %q", text, c.tickWorld().log.Lines())
+}
+
+func (c *seatUpContext) theTicksMailIsClosed(subject string) error {
+	world := c.tickWorld()
+	open, err := world.mailbox.OpenMail(context.Background())
+	if err != nil {
+		return err
+	}
+	for _, mail := range open {
+		if mail.Subject == subject {
+			return fmt.Errorf("the mail %q is still open", subject)
+		}
+	}
+	return nil
 }
 
 // letters is the run of subjects or titles from the first to the last: "Mail A"
@@ -372,6 +410,7 @@ func (c *seatUpContext) runTheTick(dryRun bool) error {
 			Host:    seatUpHost,
 			Now:     now,
 		},
+		Tidy: application.Tidy{Mail: world.mailbox, Notes: world.tracker, Beads: world.tracker},
 		Watch: application.Watch{
 			Probes: world.watch, Settings: world.watching, Notes: world.tracker, Now: now,
 		},

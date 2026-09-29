@@ -123,6 +123,8 @@ func (r MillhandTickReport) String() string { return r.Line + "\n" }
 //     Millhand reads once it is up — or a story Sweep newly finds stuck on this
 //     host, or a watched host that is unwell, stale or down. The mail is only
 //     listed: it stays unread until the Millhand reads it.
+//     After the sweep the tick runs Tidy, which closes what is plainly finished
+//     within its fixed bounds (docs/tidy.md), and says how many things it did.
 //  5. No need is "quiet" and nothing is started; need is ONE routine wake whose
 //     reason names each mailbox's unread mail, box by box, the stuck story
 //     titles and the watch line, verbatim. When the watch says the host is down
@@ -147,6 +149,13 @@ type MillhandTick struct {
 	Mail     Mailbox
 	Sweep    Sweep
 	Log      TickLog
+
+	// Tidy is what runs after the sweep: it closes what is plainly finished,
+	// within its fixed bounds. Its Log, DryRun and Now are the tick's own,
+	// and it prints nothing of its own; a tick with none wired (no Mail) does
+	// not tidy. What it did is in the tick's line, and each act has a line of
+	// its own in the log.
+	Tidy Tidy
 
 	// DoctorNotes is where mw doctor leaves the note that a check needs a
 	// person's attention, one key per check under DoctorNotePrefix; the tick
@@ -322,6 +331,7 @@ func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err err
 		}
 		notes = append(notes, sweepNotes...)
 	}
+	notes = append(notes, t.tidy(ctx)...)
 
 	var doctor []string
 	pending := 0
@@ -380,6 +390,27 @@ func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err err
 		}
 	}
 	return joinNotes(verdict, notes), woke, nil
+}
+
+// tidy runs mw tidy once, after the sweep, and says in words for the line what
+// it did, when it did anything or could not. Tidy is housekeeping: a fault of
+// its own is a note and never a reason the tick could not tell whether the
+// Millhand is needed.
+func (t MillhandTick) tidy(ctx context.Context) []string {
+	if t.Tidy.Mail == nil {
+		return nil
+	}
+	tidy := t.Tidy
+	tidy.Log, tidy.DryRun, tidy.Now, tidy.Out = t.Log, t.DryRun, t.Now, nil
+	report, err := tidy.Run(ctx)
+	var notes []string
+	if len(report.Acts) > 0 {
+		notes = append(notes, report.Summary())
+	}
+	if err != nil {
+		notes = append(notes, "tidy failed: "+oneLine(err.Error()))
+	}
+	return notes
 }
 
 // heal asks whether the Millhand whose window is open is finished, and closes

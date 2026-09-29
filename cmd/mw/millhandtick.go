@@ -122,6 +122,7 @@ func newMillhandTickCmd() *cobra.Command {
 					Tracker: gateway,
 					Host:    host,
 				},
+				Tidy:      application.Tidy{Mail: gateway, Notes: gateway, Beads: gateway},
 				Reach:     doctor.NetReach{Hosts: reach},
 				ReapLog:   files,
 				Recheck:   time.Duration(recheck) * time.Second,
