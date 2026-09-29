@@ -125,18 +125,49 @@ echo "ok: $NAME"
 # --- d. a lock held elsewhere blocks mw-heavy until it is released -----------
 NAME="a held lock blocks mw-heavy until it is released"
 LOCK=$T/state/lock-d
-( "$REAL/flock" "$LOCK" "$REAL/sleep" 2 ) &
+# Time from /proc/uptime, in hundredths of a second: it never steps backwards,
+# where the wall clock can (WSL2 steps it back by about a quarter second every
+# half minute, which made `date +%s` report a real wait as 0 s).
+centis() {
+	read -r up _ </proc/uptime
+	echo "${up%.*}${up#*.}"
+}
+HELD=$T/state/held-d
+RELEASE=$T/state/release-d
+RAN=$T/state/ran-d
+# The holder writes HELD once it is inside the lock, then keeps the lock until
+# RELEASE appears (or 30 s pass, so it never outlives the check). The check
+# starts mw-heavy only after HELD, and it is this check, not a timer in the
+# holder, that decides how long the lock is held: no host is too busy for it.
+( "$REAL/flock" "$LOCK" "$REAL/sh" -c "
+	\"$REAL/touch\" \"$HELD\"
+	n=0
+	while [ ! -f \"$RELEASE\" ] && [ \$n -lt 300 ]; do n=\$((n + 1)); \"$REAL/sleep\" 0.1; done" ) &
 holder=$!
-# Give the holder a moment to actually take the lock first.
-"$REAL/sleep" 0.3
-start=$("$REAL/date" +%s)
+tries=0
+while [ ! -f "$HELD" ]; do
+	tries=$((tries + 1))
+	[ "$tries" -le 100 ] || fail "$NAME: the holder had not taken the lock after 10 s"
+	"$REAL/sleep" 0.1
+done
+start=$(centis)
+PATH="$NO_SR" MW_HEAVY_LOCK="$LOCK" "$SCRIPT" sh -c "touch '$RAN'" &
+heavy=$!
+"$REAL/sleep" 1
+if [ -f "$RAN" ]; then
+	touch "$RELEASE"
+	fail "$NAME: mw-heavy ran while the lock was held, did not wait for it"
+fi
+touch "$RELEASE"
 RC=0
-PATH="$NO_SR" MW_HEAVY_LOCK="$LOCK" "$SCRIPT" true || RC=$?
-end=$("$REAL/date" +%s)
+wait "$heavy" || RC=$?
+end=$(centis)
 wait "$holder" 2>/dev/null || true
 [ "$RC" = 0 ] || fail "$NAME: mw-heavy exited $RC"
+[ -f "$RAN" ] || fail "$NAME: mw-heavy never ran its command after the lock was released"
 elapsed=$((end - start))
-[ "$elapsed" -ge 1 ] || fail "$NAME: mw-heavy ran after only ${elapsed}s, did not wait for the lock"
+# At least 1 s, less the two truncations to a hundredth.
+[ "$elapsed" -ge 99 ] || fail "$NAME: mw-heavy finished after only ${elapsed} hundredths of a second, did not wait for the lock"
 echo "ok: $NAME"
 
 # --- e. MW_HEAVY_DRY prints the line and runs nothing -------------------------
