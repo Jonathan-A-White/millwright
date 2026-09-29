@@ -88,6 +88,7 @@ const (
 	PosternTranscribeCmdEnv = "MW_POSTERN_TRANSCRIBE_CMD"
 	PosternDataEnv          = "MW_POSTERN_DATA"
 	PosternWatchdogEnv      = "MW_POSTERN_WATCHDOG_TARGET"
+	PosternLocalURLEnv      = "MW_POSTERN_LOCAL_URL"
 
 	HandsRootHelperEnv = "MW_HANDS_ROOT_HELPER"
 
@@ -426,6 +427,26 @@ func PosternData() (string, error) {
 // ~/.config/mw/config.toml. Empty when neither says, and then none is copied.
 func PosternWatchdogTarget() (string, error) {
 	return optionalSetting("postern_watchdog_target", PosternWatchdogEnv, "")
+}
+
+// DefaultPosternLocalPort is the port the postern backend listens on, on either host.
+const DefaultPosternLocalPort = 8787
+
+// PosternLocalURL reports where the postern backend on this host answers, which
+// mw home move asks /healthz of once it has started the unit: $MW_POSTERN_LOCAL_URL
+// if it is set, otherwise the root-table `postern_local_url` key of
+// ~/.config/mw/config.toml, and this host's own name on the factory's network,
+// http://<host>.mw:8787, when neither says. It is not postern_backend, which on a
+// boost names the home's backend.
+func PosternLocalURL(host string) (string, error) {
+	said, err := optionalSetting("postern_local_url", PosternLocalURLEnv, "")
+	if err != nil {
+		return "", err
+	}
+	if said == "" {
+		return fmt.Sprintf("http://%s.mw:%d", host, DefaultPosternLocalPort), nil
+	}
+	return strings.TrimRight(said, "/"), nil
 }
 
 // PosternTranscribeCmd reports the command mw postern inbox transcribes a
