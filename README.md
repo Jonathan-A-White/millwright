@@ -1324,6 +1324,34 @@ records the ids as announced, and each clause's condition as fired, only after
 each is typed. It never clears an input line, and a second tick while one runs
 does nothing (`flock`).
 
+**A draft on the prompt line blocks the typed lines** (mw-gq6.131): the
+notifier never types over an unsent line, so while one sits in the Mayor's
+prompt, nothing it would type is ever announced. The route that does not care
+what is on the prompt is a wait the Mayor's own harness runs. `contrib/mail-wait`
+is a zero-token script the Mayor arms at boot, in the background, and arms again
+each time it ends (on new mail, or after `MW_MAIL_WAIT_LIMIT`, 3000 seconds):
+every `MW_MAIL_WAIT_EVERY` seconds (30) it lists `bd mail inbox` and, on a host
+with a postern key file, reads `mw postern inbox --unread-count`, and ends as
+soon as an id the notifier has not announced turns up or the count rises above
+the one last noted. Its output — the inbox, or the postern line — is what wakes
+the Mayor, so mail reaches it within about a minute whatever the prompt holds,
+and nothing is typed into the window. It records the ids as announced and the
+count as noted when it ends, so the notifier never repeats them. It runs `mw
+sync` only on a host whose beads are a copy of its own (`beads_sync` remote), no
+oftener than `MW_MAIL_SYNC_EVERY` and under the notifier's lock, sharing its
+`last-sync`; on a host whose `bd` is the Dolt server or reaches it (`backup` or
+`shared`, the desktop) mail arrives with no sync and it runs none. While armed
+it stamps `wait-armed` in the notifier's state directory each poll; the
+notifier reads a stamp under `MW_MAIL_WAIT_STALE` seconds old (180) as "a wait
+is armed" and types neither the mail nor the postern line, leaving them still
+new for the wait. With no wait armed (none started, or the stamp gone stale)
+the notifier types as before, as the fallback. It still types the quiet alarm
+either way, and it still does the sync, the view and the snapshot. **Arm it**:
+`ln -s ~/millwright/contrib/mail-wait ~/.local/bin/mw-mail-wait` once per host,
+then run `mw-mail-wait` in the background from the Mayor's session and re-arm it
+whenever it ends (`seats/mayor/procedures.md`, Boot step 7). A second one, with
+one armed, says so and ends.
+
 `mw nudge` is the zero-token, read-only use case behind the second line: it
 reads this host's claimed stories for one running longer than
 `nudge_after_minutes` (default 60) with nothing landed, refused or blocked
@@ -1346,7 +1374,7 @@ its `PATH`, which must reach `mw`, `bd`, `tmux`, `flock` and `~/.local/bin`; and
 the vault from `~/.config/mw/config.toml`. Its settings (`MW_MAIL_MAILBOX`,
 `MW_MAIL_LOAD_LIMIT`, `MW_MAIL_SYNC_EVERY`, `MW_MAIL_STATE_DIR`,
 `MW_MAIL_VIEW_EVERY`, `MW_MAIL_VIEW_TIMEOUT`, `MW_MAIL_SNAPSHOT_EVERY`,
-`MW_MAIL_SNAPSHOT_TIMEOUT`, `MW_TMUX_SOCKET`) go in an optional
+`MW_MAIL_SNAPSHOT_TIMEOUT`, `MW_MAIL_WAIT_STALE`, `MW_TMUX_SOCKET`) go in an optional
 `~/.config/mw/mail-notify.env`, as `NAME=value` lines; the script's header
 lists them. A tmux server other than the default is named with
 `MW_TMUX_SOCKET`.
@@ -1384,7 +1412,8 @@ systemctl --user daemon-reload
 `disable --now` alone stops it at once. Its output is in the journal:
 `journalctl --user -u mw-mail-notify`. The ids it has announced are in
 `~/.local/state/mw-mail-notify/announced`; deleting that file makes it announce
-whatever is unread again. `contrib/mailnotify_test.go` runs it against a private
+whatever is unread again. `contrib/mailnotify_test.go` and
+`contrib/mailwait_test.go` run them against a private
 tmux server with stand-ins for `bd` and `mw`, and `scripts/check-timer-units.sh`
 verifies the units with `systemd-analyze` and starts nothing.
 
