@@ -43,6 +43,11 @@ type doctorContext struct {
 	mayorGoneVault string
 	mayorUpCalls   string
 
+	// posternChannelEnv is HOME and MW_POSTERN_CHANNEL as they were before a
+	// postern-channel scenario pointed them at a temp dir, put back by the
+	// After hook; nil when this scenario never touched them.
+	posternChannelEnv map[string]string
+
 	tmpLeftoversTmp       string
 	tmpLeftoversProc      string
 	tmpLeftoversFDCounter int
@@ -62,6 +67,13 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 			log:   &apptest.FakeDoctorLog{},
 			notes: apptest.NewFakeDoctorNotes(),
 			now:   time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC),
+		}
+		return ctx, nil
+	})
+
+	ctx.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
+		for key, value := range c.posternChannelEnv {
+			os.Setenv(key, value)
 		}
 		return ctx, nil
 	})
@@ -93,6 +105,9 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a fake host with an unrelated file "([^"]*)" of (\d+) bytes$`, c.aFakeHostWithAnUnrelatedFile)
 	ctx.Given(`^the tmp-leftovers check's budget is (\d+) bytes$`, c.theTmpLeftoversChecksBudgetIsBytes)
 	ctx.Given(`^the fake host's /proc does not exist$`, c.theFakeHostsProcDoesNotExist)
+	ctx.Given(`^the home host's config has no postern_channel$`, c.theHomeHostsConfigHasNoPosternChannel)
+	ctx.Given(`^the home host's config says postern_channel = "([^"]*)"$`, c.theHomeHostsConfigSaysPosternChannel)
+	ctx.Given(`^a host that is not home whose config has no postern_channel$`, c.aHostThatIsNotHomeWhoseConfigHasNoPosternChannel)
 
 	ctx.When(`^the check "([^"]*)"'s probe says ok$`, c.theChecksProbeSaysOK)
 	ctx.When(`^the check "([^"]*)"'s probe says faulty "([^"]*)" again$`, c.theChecksProbeSaysFaultyAgain)
@@ -105,6 +120,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^mw doctor's timers check runs for real$`, c.mwDoctorsTimersCheckRunsForReal)
 	ctx.When(`^mw doctor's beads-size check runs for real$`, c.mwDoctorsBeadsSizeCheckRunsForReal)
 	ctx.When(`^mw doctor's mayor-gone check runs for real$`, c.mwDoctorsMayorGoneCheckRunsForReal)
+	ctx.When(`^mw doctor's postern-channel check runs for real$`, c.mwDoctorsPosternChannelCheckRunsForReal)
 	ctx.When(`^mw doctor's tmp-leftovers check runs for real$`, c.mwDoctorsTmpLeftoversCheckRunsForReal)
 	ctx.When(`^(\d+) minutes? go(?:es)? by$`, c.minutesPass)
 	ctx.When(`^(\d+) hours? go(?:es)? by$`, c.hoursPass)
@@ -1012,3 +1028,47 @@ func (c *doctorContext) mayorUpCallCount(want int) error {
 	}
 	return nil
 }
+
+// posternChannelHost points HOME at a temp dir holding a config.toml with the
+// given text (none when it is empty), clears MW_POSTERN_CHANNEL, and wires the
+// real postern-channel check to a vault home file naming home. What the
+// process's environment was is kept for the After hook to put back.
+func (c *doctorContext) posternChannelHost(home, config string) error {
+	dir, err := os.MkdirTemp("", "mw-doctor-postern-channel")
+	if err != nil {
+		return err
+	}
+	if config != "" {
+		path := filepath.Join(dir, ".config", "mw", "config.toml")
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(path, []byte(config), 0o644); err != nil {
+			return err
+		}
+	}
+	if c.posternChannelEnv == nil {
+		c.posternChannelEnv = map[string]string{
+			"HOME":               os.Getenv("HOME"),
+			"MW_POSTERN_CHANNEL": os.Getenv("MW_POSTERN_CHANNEL"),
+		}
+	}
+	os.Setenv("HOME", dir)
+	os.Setenv("MW_POSTERN_CHANNEL", "")
+	c.real = doctor.NewPosternChannel(&apptest.FakeHomeFile{Text: home + " 2026-09-29T00:10:00Z mw@" + home}, seatUpHost)
+	return nil
+}
+
+func (c *doctorContext) theHomeHostsConfigHasNoPosternChannel() error {
+	return c.posternChannelHost(seatUpHost, "")
+}
+
+func (c *doctorContext) theHomeHostsConfigSaysPosternChannel(channel string) error {
+	return c.posternChannelHost(seatUpHost, "postern_channel = \""+channel+"\"\n")
+}
+
+func (c *doctorContext) aHostThatIsNotHomeWhoseConfigHasNoPosternChannel() error {
+	return c.posternChannelHost("desktop", "")
+}
+
+func (c *doctorContext) mwDoctorsPosternChannelCheckRunsForReal() error { return c.run(false) }
