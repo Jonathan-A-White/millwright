@@ -15,6 +15,13 @@ import (
 // say so, in the same words.
 const proposeNotesHeading = "For the rig memory:"
 
+// The closing comment also tells the Governor how to check what he can see,
+// ahead of the rig-memory section.
+const (
+	howToCheckHeading  = "HOW TO CHECK IT, for the Governor"
+	howToCheckInternal = "Internal: nothing for the Governor to look at"
+)
+
 func TestClosingStepOfEachFormulaTellsTheBuilderToProposeRigMemoryNotes(t *testing.T) {
 	for _, tc := range []struct{ file, step string }{
 		{"tdd-feature.formula.json", "close"},
@@ -52,6 +59,47 @@ func TestClosingStepOfEachFormulaTellsTheBuilderToProposeRigMemoryNotes(t *testi
 		}
 		if !found {
 			t.Errorf("%s: no step %q", tc.file, tc.step)
+		}
+	}
+}
+
+func TestClosingStepOfEachFormulaAsksForHowToCheckItBeforeTheRigMemoryNotes(t *testing.T) {
+	for _, file := range []string{"tdd-feature.formula.json", "chore.formula.json"} {
+		raw, err := os.ReadFile(filepath.Join("..", "formulas", file))
+		if err != nil {
+			t.Fatalf("reading %s: %v", file, err)
+		}
+		var formula struct {
+			Steps []struct {
+				ID          string `json:"id"`
+				Description string `json:"description"`
+			} `json:"steps"`
+		}
+		if err := json.Unmarshal(raw, &formula); err != nil {
+			t.Fatalf("decoding %s: %v", file, err)
+		}
+		found := false
+		for _, s := range formula.Steps {
+			if s.ID != "close" {
+				continue
+			}
+			found = true
+			at := strings.Index(s.Description, howToCheckHeading)
+			if at < 0 {
+				t.Errorf("%s: expected the closing step to name the %q section, got %q", file, howToCheckHeading, s.Description)
+			}
+			if !strings.Contains(s.Description, howToCheckInternal) {
+				t.Errorf("%s: expected the closing step to give the line %q, got %q", file, howToCheckInternal, s.Description)
+			}
+			if !strings.Contains(s.Description, "at most six") {
+				t.Errorf("%s: expected the closing step to cap the steps at six, got %q", file, s.Description)
+			}
+			if notes := strings.Index(s.Description, proposeNotesHeading); at >= 0 && notes >= 0 && at > notes {
+				t.Errorf("%s: expected %q before %q, got %q", file, howToCheckHeading, proposeNotesHeading, s.Description)
+			}
+		}
+		if !found {
+			t.Errorf("%s: no step %q", file, "close")
 		}
 	}
 }
