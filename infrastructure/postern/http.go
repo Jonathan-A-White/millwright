@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -252,12 +253,17 @@ func (h *HTTP) authFetch(ctx context.Context, method, path string, body []byte) 
 }
 
 // authFetchAs is authFetch with a body of contentType rather than JSON.
+//
+// A GET that times out is tried once more, from a fresh challenge (the first
+// one was spent): a backend just restarted walks its licence chain on the
+// first call, outlasting the timeout, and has the answer cached for the
+// second. A POST or DELETE is never repeated, and neither is a call whose
+// own ctx is done.
 func (h *HTTP) authFetchAs(ctx context.Context, method, path string, body []byte, contentType string) ([]byte, error) {
-	pubKeyHex, header, err := h.authHeader(ctx)
-	if err != nil {
-		return nil, err
+	pubKeyHex, raw, err := h.authFetchOnce(ctx, method, path, body, contentType)
+	if err != nil && method == http.MethodGet && ctx.Err() == nil && isTimeout(err) {
+		pubKeyHex, raw, err = h.authFetchOnce(ctx, method, path, body, contentType)
 	}
-	raw, err := h.fetchAs(ctx, method, path, body, header, contentType)
 	if err != nil {
 		if strings.Contains(err.Error(), posternNoLicenceError) {
 			return nil, fmt.Errorf("the postern key %s holds no licence: mint one before mw can use the postern backend at %s", pubKeyHex, h.base)
@@ -265,6 +271,24 @@ func (h *HTTP) authFetchAs(ctx context.Context, method, path string, body []byte
 		return nil, err
 	}
 	return raw, nil
+}
+
+// isTimeout reports whether err, however wrapped, is a network timeout: the
+// client's own Timeout running out.
+func isTimeout(err error) bool {
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
+// authFetchOnce is one challenge, signature and call, reporting the caller's
+// public key beside the raw body.
+func (h *HTTP) authFetchOnce(ctx context.Context, method, path string, body []byte, contentType string) (pubKeyHex string, raw []byte, err error) {
+	pubKeyHex, header, err := h.authHeader(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	raw, err = h.fetchAs(ctx, method, path, body, header, contentType)
+	return pubKeyHex, raw, err
 }
 
 // Blob implements application.Postern: GET /api/blobs/{hash} (postern's
