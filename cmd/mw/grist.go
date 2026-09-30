@@ -2,6 +2,7 @@ package main
 
 import (
 	"io"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -26,6 +27,7 @@ func newGristCmd() *cobra.Command {
 	root.AddCommand(newGristKeyCmd())
 	root.AddCommand(newGristGrindCmd())
 	root.AddCommand(newGristSendCmd())
+	root.AddCommand(newGristEvalCmd())
 	return root
 }
 
@@ -147,6 +149,63 @@ func newGristSendCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&wait, "wait", 0, "how long to wait for the answer, e.g. 5m; 0 sends and does not wait")
 	cmd.Flags().StringVar(&version, "schema-version", "", "the version of the app's request schema (default: the request's schemaVersion)")
 	for _, name := range []string{"key", "app", "kind", "request"} {
+		_ = cmd.MarkFlagRequired(name)
+	}
+	return cmd
+}
+
+// newGristEvalCmd builds `mw grist eval`: a grind tried on photos whose
+// answers are known, on each model named, and scored.
+func newGristEvalCmd() *cobra.Command {
+	var grind, photos, effort, out string
+	var models []string
+
+	cmd := &cobra.Command{
+		Use:   "eval",
+		Short: "Try a grind on photos with known answers, on each model named, and score it",
+		Long: "eval runs one grind over a directory of photos, each with a <name>.txt beside it listing what\n" +
+			"is really in it (one name a line; a \"Container: X\" line names a container whose indented\n" +
+			"lines are its items), on each model named, one session at a time through the same grinder\n" +
+			"and with the same prompt the mill gives one photo. Each answer is scored against its .txt:\n" +
+			"hits, misses (expected, not answered), extras (answered, not expected), items it was unsure\n" +
+			"of (still answered), seconds, cost and tokens, per photo and model, then per model. A grind\n" +
+			"that fails is a row with its error and counts of zero. A photo with no .txt is skipped.\n\n" +
+			"It writes eval-<UTC timestamp>.jsonl (every row, with the full answer) and .md (the tables)\n" +
+			"under --out. It never touches the postern backend, the mill's state or the dispatch cap, and\n" +
+			"the photos and answers never enter a bead or the vault.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			ceilings, err := config.Grist()
+			if err != nil {
+				return err
+			}
+			if out == "" {
+				stateDir, err := config.GristStateDir()
+				if err != nil {
+					return err
+				}
+				out = filepath.Join(stateDir, "eval")
+			}
+			_, err = application.GristEval{
+				Grinder: claude.NewGrinder(),
+				Ceilings: application.GristCeilings{
+					Models: ceilings.Models, MaxAttachments: ceilings.MaxAttachments,
+					MaxAttachmentBytes: ceilings.MaxAttachmentBytes, DailyLimit: ceilings.DailyLimit,
+					Timeout: ceilings.Timeout,
+				},
+				Out: cmd.OutOrStdout(),
+			}.Run(cmd.Context(), application.GristEvalRequest{
+				Grind: grind, Photos: photos, Models: models, Effort: effort, Out: out,
+			})
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&grind, "grind", "", "a grinds/<kind>.json in a rig checkout, read from its working tree; its instructions and schema are read from the same checkout (required)")
+	cmd.Flags().StringVar(&photos, "photos", "", "a directory of .jpg, .jpeg, .png or .webp photos, each with a <name>.txt beside it (required)")
+	cmd.Flags().StringSliceVar(&models, "models", nil, "the models to try, comma separated, each one the [grist] models allows (default: the grind file's model)")
+	cmd.Flags().StringVar(&effort, "effort", "", "the effort to run at: low, medium, high, xhigh or max (default: the grind file's)")
+	cmd.Flags().StringVar(&out, "out", "", "the directory the .jsonl and .md are written to (default: eval under grist_state_dir, ~/.local/state/mw/grist/eval)")
+	for _, name := range []string{"grind", "photos"} {
 		_ = cmd.MarkFlagRequired(name)
 	}
 	return cmd

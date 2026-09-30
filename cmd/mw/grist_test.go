@@ -108,3 +108,20 @@ func TestGristKeyRefusesTheMayorsKeyFile(t *testing.T) {
 		})
 	}
 }
+
+// mw grist eval documents every flag in its help and refuses to start
+// without the two it needs.
+func TestGristEvalHelpNamesEveryFlagAndTheTwoRequired(t *testing.T) {
+	help, err := runGrist(t, "eval", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, flag := range []string{"--grind", "--photos", "--models", "--effort", "--out"} {
+		if !strings.Contains(help, flag) {
+			t.Errorf("expected the help to document %s, got:\n%s", flag, help)
+		}
+	}
+	if _, err := runGrist(t, "eval", "--photos", t.TempDir()); err == nil || !strings.Contains(err.Error(), "grind") {
+		t.Fatalf("expected --grind required, got %v", err)
+	}
+}

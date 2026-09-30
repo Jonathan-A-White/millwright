@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | domain | `domain/` | Value types, validation; stdlib only. |
 | application | `application/` | One file per use case, plus ports. |
-| fakes | `application/apptest/` | Port stand-ins. |
+| fakes | `application/apptest/` | Port fakes. |
 | infrastructure | `infrastructure/` | One subpackage per adapter. |
 | command line | `cmd/mw/` | Cobra wiring. |
 | features | `features/` | Gherkin; steps in `features/steps/`. |
@@ -75,17 +75,17 @@ Each adapter: `var _ application.<Port> = ...`.
 | Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern key/inbox/send/snapshot/view/bead — cmd/mw/posternview.go, cmd/mw/posternbead.go | `features/postern_*.feature` |
 | Hands{Add,List} | application/hands.go | mw hands add /list — cmd/mw/hands.go; `cmd/mw-hands-root` | `features/hands.feature` |
 | `PosternServe`, `PosternNginx`, `PosternMirror` | `application/posternhand.go`, `application/posternmirror.go` | `mw postern serve`/`nginx`/`mirror` — `cmd/mw/postern.go`, `cmd/mw/posternmirror.go` | `features/postern_serve.feature` |
-| `GristKey`, `GristGrind`, `GristSend` | `application/grist.go`, `application/gristgrind.go`, `application/gristsend.go` | `mw grist key`/`grind`/`send` — `cmd/mw/grist.go` | `features/grist.feature`, `features/grist_send.feature` |
+| `GristKey`, `GristGrind`, `GristSend`, `GristEval` | `application/grist.go`, `application/gristgrind.go`, `application/gristsend.go`, `application/gristeval.go` | `mw grist key`/`grind`/`send`/`eval` — `cmd/mw/grist.go` | `features/grist{,_send,_eval}.feature` |
 
 `cmd/mw/root.go` holds the tree, `cmd/mw/main.go` runs it, `cmd/mw/version.go` is `mw version`.
 `features/path_validation.feature` covers `domain/path.go`;
-`features/{ready_stories,claim_lease}.feature` the `WorkTracker` contract.
+`features/{ready_stories,claim_lease}.feature`: `WorkTracker`.
 
 ## Test helpers
 
 | Helper | Where | What it gives |
 | --- | --- | --- |
-| `throwawayVault`, `installFormula` | `infrastructure/beads/beads_integration_test.go` | Real bd DB in a temp dir. |
+| `throwawayVault`, `installFormula` | `infrastructure/beads/beads_integration_test.go` | Real bd, temp dir. |
 | `standIn` | `infrastructure/beads/sync_test.go` | Stand-in `bd`. |
 | `privateRunner` | `infrastructure/tmux/tmux_integration_test.go` | Private tmux. |
 | `privateWindows` | `infrastructure/tmux/window_integration_test.go` | Tmux, seat. |
