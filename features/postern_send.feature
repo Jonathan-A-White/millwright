@@ -185,3 +185,107 @@ Feature: mw postern send
     When mw postern send "message" "Enough coins." is run
     Then sending succeeds
     And the last broadcast pays its change to 1 outputs
+
+  Scenario: A question sent directly carries the summary "Answer:" and the bead's title
+    Given the postern channel is "direct"
+    And the bead "mw-abc.1" titled "Pick the colour" exists
+    When mw postern send "decision-needed" "Is it red or blue, secret words?" for bead "mw-abc.1" recommending "A" with options "A, B" is run
+    Then sending succeeds
+    And the delivered record's summary is "Answer: Pick the colour"
+    And the delivered record's summary does not contain "secret words"
+
+  Scenario: A landing threaded on a bead carries the summary "Check:" and the bead's title
+    Given the postern channel is "direct"
+    And the bead "mw-abc.1" titled "Pick the colour" exists
+    When mw postern send "landing" "Landed, secret words." threaded on bead "mw-abc.1" is run
+    Then sending succeeds
+    And the delivered record's summary is "Check: Pick the colour"
+    And the delivered record's summary does not contain "secret words"
+
+  Scenario: A message threaded on a bead carries the summary "Message on" and the bead's title
+    Given the postern channel is "direct"
+    And the bead "mw-abc.1" titled "Pick the colour" exists
+    When mw postern send "message" "Some secret words." threaded on bead "mw-abc.1" is run
+    Then sending succeeds
+    And the delivered record's summary is "Message on Pick the colour"
+    And the delivered record's summary does not contain "secret words"
+
+  Scenario: A bare message carries the summary "Message"
+    Given the postern channel is "direct"
+    When mw postern send "message" "Some secret words." is run
+    Then sending succeeds
+    And the delivered record's summary is "Message"
+
+  Scenario: A message on a topic thread carries the summary "Message"
+    Given the postern channel is "direct"
+    When mw postern send "message" "Some secret words." on topic "roadmap" is run
+    Then sending succeeds
+    And the delivered record's summary is "Message"
+
+  Scenario: An alarm carries no summary key
+    Given the postern channel is "direct"
+    When mw postern send "alarm" "Some secret words." is run
+    Then sending succeeds
+    And the delivered record has no summary key
+
+  Scenario: Grist carries no summary key
+    Given the postern channel is "direct"
+    When mw postern send "grist" "Some secret words." is run
+    Then sending succeeds
+    And the delivered record has no summary key
+
+  Scenario: A send whose bead title cannot be read carries the bead id in its place
+    Given the postern channel is "direct"
+    And the bead "mw-abc.1" exists
+    When mw postern send "landing" "Landed." threaded on bead "mw-abc.1" is run
+    Then sending succeeds
+    And the delivered record's summary is "Check: mw-abc.1"
+
+  Scenario: A message on a bead the tracker does not hold still sends, naming the bead id
+    Given the postern channel is "direct"
+    When mw postern send "message" "Some secret words." threaded on bead "mw-gone.1" is run
+    Then the delivered record's summary is "Message on mw-gone.1"
+
+  Scenario: A title over 80 runes is cut to 80, an ellipsis as the 80th
+    Given the postern channel is "direct"
+    And the bead "mw-abc.1" titled with 100 letters exists
+    When mw postern send "decision-needed" "Which?" for bead "mw-abc.1" recommending "A" with options "A, B" is run
+    Then sending succeeds
+    And the delivered record's summary is 80 runes, ending in an ellipsis
+
+  Scenario: Every record of several attachments carries the summary
+    Given the postern channel is "direct"
+    And the bead "mw-abc.1" titled "Pick the colour" exists
+    And a file "one.pdf" to attach
+    And a file "two.pdf" to attach
+    When mw postern send "message" "the reports" threaded on bead "mw-abc.1" attaching "one.pdf" and "two.pdf" is run
+    Then sending succeeds
+    And every delivered record's summary is "Message on Pick the colour"
+
+  Scenario Outline: The chain channel never carries a summary
+    Given the postern key's balance is 1000 satoshis
+    And the postern key holds a spendable utxo of 5000 satoshis
+    And the bead "mw-abc.1" titled "Pick the colour" exists
+    When mw postern send "<class>" "Some secret words." threaded on bead "mw-abc.1" is run
+    Then sending succeeds
+    And the broadcast record has no summary key
+
+    Examples:
+      | class   |
+      | landing |
+      | message |
+
+  Scenario: A question sent by the chain channel carries no summary key
+    Given the postern key's balance is 1000 satoshis
+    And the postern key holds a spendable utxo of 5000 satoshis
+    And the bead "mw-abc.1" titled "Pick the colour" exists
+    When mw postern send "decision-needed" "Ship it?" for bead "mw-abc.1" recommending "A" with options "A, B" is run
+    Then sending succeeds
+    And the broadcast record has no summary key
+
+  Scenario: A bare message by the chain channel carries no summary key
+    Given the postern key's balance is 1000 satoshis
+    And the postern key holds a spendable utxo of 5000 satoshis
+    When mw postern send "message" "Ready." is run
+    Then sending succeeds
+    And the broadcast record has no summary key

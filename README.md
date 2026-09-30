@@ -851,7 +851,10 @@ straight to the postern backend (postern's docs/protocol.md §9), its txid
 `direct:<sha256>`, with no coins, no float cap and no broadcast; `chain`, the
 default, is the funded transaction above. A host says `direct` only once the
 backend it reaches takes direct records (`POST /api/messages`): an older
-backend answers 404 to it, and there is no falling back to the chain. A message sent in a bead's thread
+backend answers 404 to it, and there is no falling back to the chain. A
+direct record also carries a short clear `summary` for the push's body, naming
+the bead's title (`Answer: …`, `Check: …`, `Message on …`, or `Message`),
+never a word of the text; a chain record carries none. A message sent in a bead's thread
 (`--thread`) is commented on that bead too, `MAYOR via postern, txid <id>:
 <text>`, so the whole exchange lives on the bead. `--attach <file>`
 (repeatable) encrypts a file to the Governor, uploads it to the backend's blob

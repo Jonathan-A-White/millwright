@@ -80,7 +80,16 @@ func InitializePosternSendScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the postern backend will report the txid "([^"]*)"$`, c.thePosternBackendWillReportTheTxid)
 	ctx.Given(`^the clock reads (\d+) for sending$`, c.theClockReadsForSending)
 	ctx.Given(`^the bead "([^"]*)" exists$`, c.theBeadExists)
+	ctx.Given(`^the bead "([^"]*)" titled "([^"]*)" exists$`, c.theBeadTitledExists)
+	ctx.Given(`^the bead "([^"]*)" titled with (\d+) letters exists$`, c.theBeadTitledWithLettersExists)
 	ctx.Given(`^the postern channel is "([^"]*)"$`, c.thePosternChannelIs)
+	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" threaded on bead "([^"]*)" attaching "([^"]*)" and "([^"]*)" is run$`, c.mwPosternSendThreadedAttachingTwoIsRun)
+	ctx.Then(`^the delivered record's summary is "([^"]*)"$`, c.theDeliveredRecordsSummaryIs)
+	ctx.Then(`^the delivered record's summary does not contain "([^"]*)"$`, c.theDeliveredRecordsSummaryDoesNotContain)
+	ctx.Then(`^the delivered record has no summary key$`, c.theDeliveredRecordHasNoSummaryKey)
+	ctx.Then(`^the delivered record's summary is 80 runes, ending in an ellipsis$`, c.theDeliveredRecordsSummaryIsCut)
+	ctx.Then(`^every delivered record's summary is "([^"]*)"$`, c.everyDeliveredRecordsSummaryIs)
+	ctx.Then(`^the broadcast record has no summary key$`, c.theBroadcastRecordHasNoSummaryKey)
 	ctx.Given(`^a file "([^"]*)" to attach$`, c.aFileToAttach)
 	ctx.Given(`^a file "([^"]*)" of (\d+) MiB to attach$`, c.aFileOfMiBToAttach)
 	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" attaching "([^"]*)" is run$`, c.mwPosternSendAttachingIsRun)
@@ -695,6 +704,153 @@ func (c *posternSendContext) theSecondBroadcastDoesNotSpendWhatTheFirstSpent() e
 				return fmt.Errorf("the second broadcast spends %s:%d again", in.SourceTXID, in.SourceTxOutIndex)
 			}
 		}
+	}
+	return nil
+}
+
+func (c *posternSendContext) theBeadTitledExists(id, title string) error {
+	c.tracker.AddStory("epic", domain.Story{ID: id, Title: title})
+	return nil
+}
+
+func (c *posternSendContext) theBeadTitledWithLettersExists(id string, n int) error {
+	return c.theBeadTitledExists(id, strings.Repeat("é", n))
+}
+
+func (c *posternSendContext) mwPosternSendThreadedAttachingTwoIsRun(class, text, thread, first, second string) error {
+	c.txid, c.err = c.send().Run(context.Background(), application.PosternSendRequest{
+		Class: class, Text: text, Thread: thread,
+		Attachments: []string{filepath.Join(c.home, first), filepath.Join(c.home, second)},
+	})
+	return nil
+}
+
+// summaryOf reads the summary key of one record's clear JSON, reporting
+// whether the key is there at all.
+func summaryOf(payload []byte) (string, bool, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		return "", false, fmt.Errorf("the record is not JSON: %w", err)
+	}
+	raw, ok := fields["summary"]
+	if !ok {
+		return "", false, nil
+	}
+	var summary string
+	if err := json.Unmarshal(raw, &summary); err != nil {
+		return "", true, fmt.Errorf("the summary is not a string: %w", err)
+	}
+	return summary, true, nil
+}
+
+// deliveredSummaries is the summary of every record delivered directly.
+func (c *posternSendContext) deliveredSummaries() ([]string, error) {
+	delivered := c.backend.Delivered()
+	if len(delivered) == 0 {
+		return nil, fmt.Errorf("nothing was delivered (send error: %v)", c.err)
+	}
+	out := make([]string, 0, len(delivered))
+	for _, payload := range delivered {
+		summary, ok, err := summaryOf(payload)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("the record has no summary key: %s", payload)
+		}
+		out = append(out, summary)
+	}
+	return out, nil
+}
+
+func (c *posternSendContext) lastDeliveredSummary() (string, error) {
+	summaries, err := c.deliveredSummaries()
+	if err != nil {
+		return "", err
+	}
+	return summaries[len(summaries)-1], nil
+}
+
+func (c *posternSendContext) theDeliveredRecordsSummaryIs(want string) error {
+	got, err := c.lastDeliveredSummary()
+	if err != nil {
+		return err
+	}
+	if got != want {
+		return fmt.Errorf("expected the summary %q, got %q", want, got)
+	}
+	return nil
+}
+
+func (c *posternSendContext) theDeliveredRecordsSummaryDoesNotContain(word string) error {
+	got, err := c.lastDeliveredSummary()
+	if err != nil {
+		return err
+	}
+	if strings.Contains(got, word) {
+		return fmt.Errorf("the summary %q holds %q from the message", got, word)
+	}
+	return nil
+}
+
+func (c *posternSendContext) theDeliveredRecordHasNoSummaryKey() error {
+	delivered := c.backend.Delivered()
+	if len(delivered) != 1 {
+		return fmt.Errorf("expected one delivery, got %d (send error: %v)", len(delivered), c.err)
+	}
+	if summary, ok, err := summaryOf(delivered[0]); err != nil {
+		return err
+	} else if ok {
+		return fmt.Errorf("expected no summary key, got %q in %s", summary, delivered[0])
+	}
+	return nil
+}
+
+func (c *posternSendContext) theDeliveredRecordsSummaryIsCut() error {
+	got, err := c.lastDeliveredSummary()
+	if err != nil {
+		return err
+	}
+	runes := []rune(got)
+	if len(runes) != 80 || runes[79] != '…' {
+		return fmt.Errorf("expected 80 runes ending in an ellipsis, got %d: %q", len(runes), got)
+	}
+	return nil
+}
+
+func (c *posternSendContext) everyDeliveredRecordsSummaryIs(want string) error {
+	summaries, err := c.deliveredSummaries()
+	if err != nil {
+		return err
+	}
+	if len(summaries) < 2 {
+		return fmt.Errorf("expected several records, got %d", len(summaries))
+	}
+	for _, got := range summaries {
+		if got != want {
+			return fmt.Errorf("expected every summary %q, got %q", want, got)
+		}
+	}
+	return nil
+}
+
+func (c *posternSendContext) theBroadcastRecordHasNoSummaryKey() error {
+	sent := c.backend.Broadcasts()
+	if len(sent) != 1 {
+		return fmt.Errorf("expected one broadcast, got %d (send error: %v)", len(sent), c.err)
+	}
+	tx, err := transaction.NewTransactionFromHex(sent[0])
+	if err != nil {
+		return fmt.Errorf("parsing the broadcast transaction: %w", err)
+	}
+	payload, ok := postern.DecodeRecordScript(tx.Outputs[0].LockingScript.String())
+	if !ok {
+		return fmt.Errorf("expected output 0 to be a version-1 record")
+	}
+	if summary, ok, err := summaryOf(payload); err != nil {
+		return err
+	} else if ok {
+		return fmt.Errorf("the chain record carries a summary %q: %s", summary, payload)
 	}
 	return nil
 }

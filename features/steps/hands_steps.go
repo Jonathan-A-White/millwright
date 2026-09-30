@@ -44,6 +44,8 @@ func InitializeHandsScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a working push to the Governor$`, c.aWorkingPush)
 	ctx.Given(`^a failing push to the Governor$`, c.aFailingPush)
 	ctx.Given(`^a bead "([^"]*)" titled "([^"]*)"$`, c.aBeadTitled)
+	ctx.Given(`^a bead "([^"]*)" with no title$`, c.aBeadWithNoTitle)
+	ctx.Then(`^the push carries the summary "([^"]*)"$`, c.thePushCarriesTheSummary)
 	ctx.Given(`^a view the add publishes$`, c.aViewTheAddPublishes)
 	ctx.Given(`^the notifier holds the view lock$`, c.theNotifierHoldsTheViewLock)
 	ctx.Given(`^the view cannot be written$`, c.theViewCannotBeWritten)
@@ -131,6 +133,21 @@ func (l *fakeViewLock) TryTake(context.Context) (func(), bool, error) {
 
 func (c *handsContext) aBeadTitled(bead, title string) error {
 	c.tracker.AddStory("mw-h", domain.Story{ID: bead, Title: title})
+	return nil
+}
+
+func (c *handsContext) aBeadWithNoTitle(bead string) error {
+	return c.aBeadTitled(bead, "")
+}
+
+func (c *handsContext) thePushCarriesTheSummary(want string) error {
+	sent := c.push.Sent()
+	if len(sent) != 1 {
+		return fmt.Errorf("expected exactly one push, got %d: %+v", len(sent), sent)
+	}
+	if sent[0].Summary != want {
+		return fmt.Errorf("expected the summary %q, got %q", want, sent[0].Summary)
+	}
 	return nil
 }
 

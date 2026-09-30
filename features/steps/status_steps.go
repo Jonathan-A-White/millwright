@@ -132,6 +132,7 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^mw status reads the host$`, c.mwStatusReadsTheHost)
 
 	ctx.Given(`^the status story "([^"]*)" was filed (\d+) minutes ago$`, c.theStatusStoryWasFiledMinutesAgo)
+	ctx.Given(`^the status story "([^"]*)" carries a question card$`, c.theStatusStoryCarriesAQuestionCard)
 	ctx.Then(`^reading status succeeds$`, c.readingStatusSucceeds)
 	ctx.Then(`^the report lists "([^"]*)" under WAITING ON THE MAYOR aged "([^"]*)"$`, c.theReportListsUnderWaitingOnTheMayor)
 	ctx.Then(`^the report has no heading for needs waiting on the Mayor$`, c.theReportHasNoHeadingForTheMayor)
@@ -1044,6 +1045,12 @@ func (c *statusContext) theReportShowsNoAttempts(id string) error {
 
 func (c *statusContext) theStatusStoryWasFiledMinutesAgo(id string, minutes int) error {
 	return c.tracker.SetCreated(id, c.now.Add(-time.Duration(minutes)*time.Minute))
+}
+
+// theStatusStoryCarriesAQuestionCard marks the bead's question open the way
+// a question sent for it does: the note under PosternQuestionKey.
+func (c *statusContext) theStatusStoryCarriesAQuestionCard(id string) error {
+	return c.tracker.SetNote(context.Background(), application.PosternQuestionKey(id), "txid-"+id)
 }
 
 // theReportListsUnderWaitingOnTheMayor checks the printed heading for needs
