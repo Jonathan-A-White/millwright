@@ -305,3 +305,59 @@ func TestAdvanceRefusesAHalfQuestion(t *testing.T) {
 		t.Error("expected advancing to no commit to be refused")
 	}
 }
+
+// TestMergedIntoSeesABranchTheCloseOutMerged drives real git through the four
+// shapes a story's branch is found in after its session died (mw-gq6.161).
+func TestMergedIntoSeesABranchTheCloseOutMerged(t *testing.T) {
+	here, _ := aRig(t)
+	ctx := context.Background()
+	worktrees := rig.New()
+
+	// Cut through the worktree port, as a dispatch cuts it, and never committed to.
+	cut := filepath.Join(filepath.Dir(here), "cut")
+	if err := worktrees.Add(ctx, here, cut, "mw/cut", "origin/main"); err != nil {
+		t.Fatalf("cutting the worktree: %v", err)
+	}
+	if tip, merged, err := worktrees.MergedInto(ctx, here, "mw/cut", "origin/main"); err != nil || merged || tip == "" {
+		t.Fatalf("expected a branch that holds no work of its own not merged, got %q %v %v", tip, merged, err)
+	}
+
+	if tip, merged, err := worktrees.MergedInto(ctx, here, "mw/absent", "origin/main"); err != nil || merged || tip != "" {
+		t.Fatalf("expected an absent branch not merged and no error, got %q %v %v", tip, merged, err)
+	}
+
+	// Work committed but not landed.
+	work := filepath.Join(filepath.Dir(here), "work")
+	if err := worktrees.Add(ctx, here, work, "mw/story", "origin/main"); err != nil {
+		t.Fatalf("cutting the worktree: %v", err)
+	}
+	write(t, work, "story.md", "the story's work\n")
+	run(t, work, "git", "add", "-A")
+	run(t, work, "git", "commit", "-qm", "The story's work")
+	if _, merged, err := worktrees.MergedInto(ctx, here, "mw/story", "origin/main"); err != nil || merged {
+		t.Fatalf("expected a branch with commits main lacks not merged, got %v %v", merged, err)
+	}
+
+	// Landed, as a close-out does it.
+	dir, err := worktrees.OpenLanding(ctx, here, "origin/main")
+	if err != nil {
+		t.Fatalf("opening the landing: %v", err)
+	}
+	if _, err := worktrees.Merge(ctx, dir, "mw/story"); err != nil {
+		t.Fatalf("merging the story: %v", err)
+	}
+	if err := worktrees.Push(ctx, dir, "origin", "main"); err != nil {
+		t.Fatalf("pushing the landing: %v", err)
+	}
+	if err := worktrees.CloseLanding(ctx, here, dir); err != nil {
+		t.Fatalf("closing the landing: %v", err)
+	}
+	want := strings.TrimSpace(run(t, here, "git", "rev-parse", "mw/story"))
+	if tip, merged, err := worktrees.MergedInto(ctx, here, "mw/story", "origin/main"); err != nil || !merged || tip != want {
+		t.Fatalf("expected the landed branch merged at %s, got %q %v %v", want, tip, merged, err)
+	}
+
+	if _, _, err := worktrees.MergedInto(ctx, here, "", "origin/main"); err == nil {
+		t.Fatalf("expected a half question refused")
+	}
+}

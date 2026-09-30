@@ -20,6 +20,11 @@ type fakeRetryLanding struct {
 	AheadCount int
 	AheadErr   error
 
+	// MergedTip is the tip MergedInto reports the story's branch has, contained
+	// in the base; empty means the branch is absent or not merged.
+	MergedTip string
+	MergedErr error
+
 	UncommittedPaths []string
 	UncommittedErr   error
 	LeftoversSHA     string
@@ -76,6 +81,15 @@ func (f *fakeRetryLanding) Ahead(context.Context, string, string, string) (int, 
 		return 0, f.AheadErr
 	}
 	return f.AheadCount, nil
+}
+
+func (f *fakeRetryLanding) MergedInto(context.Context, string, string, string) (string, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.MergedErr != nil {
+		return "", false, f.MergedErr
+	}
+	return f.MergedTip, f.MergedTip != "", nil
 }
 
 func (f *fakeRetryLanding) Uncommitted(context.Context, string) ([]string, error) {

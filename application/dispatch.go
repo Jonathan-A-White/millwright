@@ -215,6 +215,20 @@ type Reclaimed struct {
 	LeaseExpired time.Time
 }
 
+// LandedAlready is one story this dispatch found claimed here with a dead pane
+// and an expired lease whose branch was already merged into its target branch
+// (mw-gq6.161): the close-out got as far as the merge and only the close of the
+// story was lost. It was closed, not given back, so it is never worked a
+// second time on top of its own landed commits.
+type LandedAlready struct {
+	StoryID string
+	Session string
+	// Tip is the commit at the branch's tip, the one the target branch holds;
+	// Target is the branch that holds it.
+	Tip    string
+	Target string
+}
+
 // DispatchReport is what one dispatch did.
 type DispatchReport struct {
 	Host string
@@ -228,9 +242,12 @@ type DispatchReport struct {
 	// Reclaimed is every claim this dispatch took back from a dead pane and an
 	// expired lease before it read what is ready.
 	Reclaimed []Reclaimed
-	Started   []Started
-	Passed    []Passed
-	Failed    []Failed
+	// LandedAlready is every dead-pane story found already merged into its
+	// target branch and closed rather than given back.
+	LandedAlready []LandedAlready
+	Started       []Started
+	Passed        []Passed
+	Failed        []Failed
 	// Notes are what could not be written when a story was found to have used up
 	// its attempts: the story is left as it was, and a later tick tries again.
 	Notes  []string
@@ -882,6 +899,18 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 		return false, nil
 	}
 
+	// A claim whose lease has run out and whose branch is already on the target
+	// branch is a close-out that got past the merge and lost only the close
+	// (mw-gq6.161). It is closed, never given back: a fresh attempt would work
+	// the story a second time on top of its own landed commits. Whether the
+	// lease ran out is read here from the story, not from ReclaimStory, because
+	// that one gives the claim back as it answers.
+	if !detail.LeaseExpires.IsZero() && d.now().After(detail.LeaseExpires) {
+		if tip, target, landed := d.landedBranch(ctx, detail); landed {
+			return d.closeLanded(ctx, detail, name, tip, target, report), nil
+		}
+	}
+
 	reclaimed, err := d.Tracker.ReclaimStory(ctx, id)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf(
@@ -909,6 +938,64 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 	}
 	report.Reclaimed = append(report.Reclaimed, Reclaimed{StoryID: id, Session: name, LeaseExpired: detail.LeaseExpires})
 	return true, nil
+}
+
+// landedBranch reports the tip of the story's branch when that branch has work
+// of its own and every commit of it is already on the story's target branch,
+// as the rig's origin has it or as this checkout has it. Anything it cannot
+// tell — no Landing wired in, a path or rig it cannot resolve, git failing — is
+// not landed: the claim is judged as it was before this was asked.
+func (d Dispatch) landedBranch(ctx context.Context, detail StoryDetail) (tip, target string, landed bool) {
+	if d.Landing == nil {
+		return "", "", false
+	}
+	path, err := detail.Path()
+	if err != nil {
+		return "", "", false
+	}
+	rigDir, checkedOut := d.Rigs[path.Rig]
+	if !checkedOut {
+		return "", "", false
+	}
+	branch := StoryBranch(detail.Story.ID)
+	for _, base := range []string{StartPoint(d.remote(), path.Branch), path.Branch} {
+		if tip, merged, err := d.Landing.MergedInto(ctx, rigDir, branch, base); err == nil && merged {
+			return tip, path.Branch, true
+		}
+	}
+	return "", "", false
+}
+
+// closeLanded closes a story found already merged, the way a finished close-out
+// would have, and reports it. The claim is never given back. A close that fails
+// leaves the claim exactly as it was, counted running, for the next tick to try
+// again; nothing else is written until it has gone through, so a server that
+// stays unreachable is not written to over and over.
+func (d Dispatch) closeLanded(ctx context.Context, detail StoryDetail, session, tip, target string, report *DispatchReport) bool {
+	id := detail.Story.ID
+	outcome := fmt.Sprintf("landed on %s already: its branch %s, tip %s, is contained in %s; closed by mw dispatch on %s, "+
+		"which found the claim with a dead pane (%s) and its lease run out",
+		target, StoryBranch(id), shortCommit(tip), target, d.Host, session)
+	if err := d.Tracker.CloseStory(ctx, id, outcome); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf(
+			"%s: its branch %s is already merged into %s, but the story could not be closed, so its claim was kept: %v",
+			id, StoryBranch(id), target, err))
+		return false
+	}
+	if err := d.Runner.Close(ctx, session); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s: its session %s had a dead pane, but the window could not be closed: %v", id, session, err))
+	}
+	if err := d.Tracker.SetStoryState(ctx, id, RunState, RunLanded, outcome); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be recorded as %s=%s: %v", id, RunState, RunLanded, err))
+	}
+	said := "mw dispatch on " + d.Host + " found " + id + " claimed here with a dead pane (" + session + ") and its lease run out, " +
+		"and its branch " + StoryBranch(id) + " (tip " + shortCommit(tip) + ") is already contained in " + target + ": " +
+		"the close-out merged it and only the close of the story was lost, so the story was closed rather than dispatched again."
+	if err := d.Tracker.CommentOnStory(ctx, id, said); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s: the landed close could not be commented on: %v", id, err))
+	}
+	report.LandedAlready = append(report.LandedAlready, LandedAlready{StoryID: id, Session: session, Tip: tip, Target: target})
+	return true
 }
 
 // namesake looks for a session already called name, the one a story is worked
@@ -1076,6 +1163,10 @@ func (r DispatchReport) String() string {
 			times = "time"
 		}
 		fmt.Fprintf(&b, "  retried the sync %d %s: a name could not be resolved until the network came back\n", r.SyncRetries, times)
+	}
+	for _, landed := range r.LandedAlready {
+		fmt.Fprintf(&b, "  closed %s · %s · already landed: its branch tip %s is contained in %s\n", landed.StoryID, landed.Session,
+			shortCommit(landed.Tip), landed.Target)
 	}
 	for _, reclaim := range r.Reclaimed {
 		fmt.Fprintf(&b, "  reclaimed %s · %s · dead pane, lease expired %s\n", reclaim.StoryID, reclaim.Session,

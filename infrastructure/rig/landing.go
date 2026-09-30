@@ -38,6 +38,43 @@ func (w *Worktrees) Ahead(ctx context.Context, rigDir, branch, base string) (int
 	return commits, nil
 }
 
+// MergedInto implements application.Landing. A branch that is not there is not
+// merged. The branch's reflog is what says it has work of its own: a branch cut
+// and never committed to sits at the commit it was cut from, which every target
+// branch contains, so ancestry alone would call it merged. A reflog that is gone
+// says nothing, and is taken as not merged.
+func (w *Worktrees) MergedInto(ctx context.Context, rigDir, branch, base string) (string, bool, error) {
+	switch {
+	case branch == "":
+		return "", false, fmt.Errorf("asking whether a branch is merged in %s: which branch?", rigDir)
+	case base == "":
+		return "", false, fmt.Errorf("asking whether %s is merged in %s: into what?", branch, rigDir)
+	}
+	said, err := w.git(ctx, rigDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch)
+	if err != nil {
+		return "", false, nil
+	}
+	tip := strings.TrimSpace(said)
+
+	if _, err := w.git(ctx, rigDir, "merge-base", "--is-ancestor", tip, base); err != nil {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) && exit.ExitCode() == 1 {
+			return tip, false, nil
+		}
+		return "", false, err
+	}
+
+	reflog, err := w.git(ctx, rigDir, "reflog", "show", "--format=%H", "refs/heads/"+branch)
+	if err != nil {
+		return tip, false, nil
+	}
+	tips := strings.Fields(reflog)
+	if len(tips) < 2 || tips[len(tips)-1] == tip {
+		return tip, false, nil
+	}
+	return tip, true, nil
+}
+
 // Uncommitted implements application.Landing: what `git status` finds changed
 // in the worktree at dir. -uall lists each untracked file, not the directory
 // that holds it, so the paths are files a person can open; -z keeps a path with

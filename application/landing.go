@@ -52,6 +52,14 @@ type Landing interface {
 	// committed nothing, and there is nothing to land.
 	Ahead(ctx context.Context, rigDir, branch, base string) (int, error)
 
+	// MergedInto reports the commit at branch's tip and whether branch has work
+	// of its own that base already holds: the branch is there, it has moved on
+	// from where it was cut, and its tip is an ancestor of base. It is the sign
+	// that a close-out got past its merge, asked of a story whose session died
+	// before the story was closed (mw-gq6.161). A branch that is absent, or
+	// that holds nothing of its own, is not merged, and is no error.
+	MergedInto(ctx context.Context, rigDir, branch, base string) (tip string, merged bool, err error)
+
 	// Uncommitted lists the paths the working tree at dir has changed and not
 	// committed — modified, added, deleted and untracked alike, each file on its
 	// own line of the list, ignored files not at all. Empty means the worktree
