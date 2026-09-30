@@ -58,7 +58,7 @@ func TestHandsCanonicalBytesTellFieldsApart(t *testing.T) {
 	}
 }
 
-// An approval is good for 15 minutes, and may be up to 2 minutes ahead of
+// An approval is good for 5 minutes, and may be up to 2 minutes ahead of
 // this host's clock; nothing else.
 func TestHandsApprovalAge(t *testing.T) {
 	approved := time.Unix(vectorApprovedAt, 0)
@@ -67,8 +67,8 @@ func TestHandsApprovalAge(t *testing.T) {
 		good bool
 	}{
 		{approved, true},
-		{approved.Add(15 * time.Minute), true},
-		{approved.Add(15*time.Minute + time.Second), false},
+		{approved.Add(5 * time.Minute), true},
+		{approved.Add(5*time.Minute + time.Second), false},
 		{approved.Add(-2 * time.Minute), true},
 		{approved.Add(-2*time.Minute - time.Second), false},
 	} {

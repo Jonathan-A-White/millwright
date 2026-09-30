@@ -31,9 +31,10 @@ const (
 
 // HandsApprovalMaxAge is how old an approval may be when its step runs, and
 // HandsApprovalMaxAhead how far ahead of the running host's clock it may be
-// stamped: §17's fifteen minutes, and two for clocks that disagree.
+// stamped: five minutes (§17 said fifteen; the Governor's to confirm), and
+// two for clocks that disagree. The one place either is set.
 const (
-	HandsApprovalMaxAge   = 15 * time.Minute
+	HandsApprovalMaxAge   = 5 * time.Minute
 	HandsApprovalMaxAhead = 2 * time.Minute
 )
 
