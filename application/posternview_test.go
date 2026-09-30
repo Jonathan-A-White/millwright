@@ -314,6 +314,11 @@ func TestPosternViewListsEveryKindOfNeed(t *testing.T) {
 
 	doc := viewDoc(t, tracker)
 
+	for _, n := range doc.Needs {
+		if n.WaitsFor != "you" && n.WaitsFor != "mayor" && n.WaitsFor != "factory" {
+			t.Errorf("expected every need to say who it waits on, got %q on %s:%s", n.WaitsFor, n.Kind, n.Bead)
+		}
+	}
 	q := viewNeed(t, doc, "question", "mw-a.1")
 	if q.Epic != "mw-a" || q.Title != "Which storage engine?" || q.Text != "Which storage engine?" ||
 		q.Recommended != "A" || !equalStrings(q.Options, []string{"A", "B"}) || q.Since != "2026-09-28T10:00:00Z" {
@@ -799,6 +804,9 @@ func TestPosternViewStaleNeedSortsBySinceItWentStaleAndReadsItsComments(t *testi
 	mustDo(t, tracker.SetLabels("mw-a.3", "hitl"))
 	mustDo(t, tracker.SetCreated("mw-a.3", viewNow.Add(-time.Hour)))
 	mustDo(t, tracker.CommentOnStory(context.Background(), "mw-a.3", "a word"))
+	// It has a step, so its comments are not read for a BY HAND instruction.
+	raw, _ := json.Marshal([]application.HandsStepRecord{{HandsStep: domain.HandsStep{ID: "a", Host: "desktop", As: "user", Run: "true"}}})
+	mustDo(t, tracker.SetNote(context.Background(), application.HandsStepsKey("mw-a.3"), string(raw)))
 
 	doc := viewDoc(t, tracker)
 

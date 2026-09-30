@@ -29,6 +29,7 @@ Feature: mw postern view
     And the view's epic "mw-v" has 1 done earlier
 
   Scenario: The written view is sealed, and opens from gzip to the view that was built
+    Given the view's bead "mw-v.1" has the hands step "linger" on "desktop" as "root" running "loginctl enable-linger jwhite"
     When the live view is run and written
     Then the written view opens, from gzip, to a v 2 view holding "mw-v.1"
     And the view read no comments of "mw-v.1" or "mw-v.2"
@@ -140,3 +141,54 @@ Feature: mw postern view
     When the live view is built
     Then the view's needs on "mw-kept" are "stale:mw-kept"
     And the view's needs on "mw-kept.2" are "stale:mw-kept.2"
+
+  # Every need says who it waits on: you, mayor or factory (protocol section 11).
+  Scenario: A hands bead with no step waits on the Mayor
+    Given the view's epic "mw-who" is live
+    And the view's hitl bead "mw-who.1" under "mw-who" was filed 2 days ago
+    When the live view is built
+    Then the view's hands need on "mw-who.1" waits for "mayor"
+    And the view's hands need on "mw-who.1" is not ready, waiting on "the Mayor to write the steps"
+
+  Scenario: A hands bead with a BY HAND comment is his, with Done
+    Given the view's epic "mw-who" is live
+    And the view's hitl bead "mw-who.1" under "mw-who" was filed 2 days ago
+    And the view's bead "mw-who.1" has the comment "BY HAND: open the router page and switch the guest network off."
+    When the live view is built
+    Then the view's hands need on "mw-who.1" waits for "you"
+    And the view's hands need on "mw-who.1" is ready, saying "open the router page and switch the guest network off."
+
+  Scenario: A hands step whose bead waits on an open story waits on the factory, naming it
+    Given the view's epic "mw-who" is live
+    And the view's story "mw-who.1" under "mw-who" is open
+    And the view's hitl bead "mw-who.2" under "mw-who" waits on "mw-who.1"
+    And the view's bead "mw-who.2" has the hands step "linger" on "desktop" as "root" running "loginctl enable-linger jwhite"
+    When the live view is built
+    Then the view's hands need on "mw-who.2" waits for "factory"
+    And the view's hands need on "mw-who.2" is not ready, waiting on "Story mw-who.1"
+
+  Scenario: A hands bead with a step and nothing open before it is his
+    Given the view's epic "mw-who" is live
+    And the view's hitl bead "mw-who.1" under "mw-who" was filed 2 days ago
+    And the view's bead "mw-who.1" has the hands step "linger" on "desktop" as "root" running "loginctl enable-linger jwhite"
+    When the live view is built
+    Then the view's hands need on "mw-who.1" waits for "you"
+    And the view's hands need on "mw-who.1" is ready
+
+  Scenario: A question, a landing to verify and a stale card wait on him
+    Given the view's epic "mw-old" is live
+    And the view's held story "mw-old.1" under "mw-old" was filed 8 days ago
+    When the live view is built
+    Then the view's need "question" on "mw-v.4" waits for "you"
+    And the view's need "verify" on "mw-v.3" waits for "you"
+    And the view's need "stale" on "mw-old" waits for "you"
+
+  Scenario: A host alarm waits on the factory
+    Given the view's host "laptop" last synced 34 minutes ago with work pathed to it
+    When the live view is built
+    Then the view's alarm for "laptop" waits for "factory"
+
+  Scenario: A story out of attempts waits on the Mayor
+    Given the view's story "mw-v.6" under "mw-v" has used all 3 attempts
+    When the live view is built
+    Then the view's need "alarm" on "mw-v.6" waits for "mayor"

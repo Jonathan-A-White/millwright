@@ -65,6 +65,16 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the view's stale need on "([^"]*)" says "([^"]*)"$`, c.theViewsStaleNeedSays)
 	ctx.Then(`^the view's stale need on "([^"]*)" has the options "([^"]*)" and has been stale since "([^"]*)"$`, c.theViewsStaleNeedOptions)
 	ctx.Then(`^the view's stale need on "([^"]*)" quotes (\d+) letters of its newest comment$`, c.theViewsStaleNeedQuotes)
+	ctx.Given(`^the view's story "([^"]*)" under "([^"]*)" is open$`, c.theViewsStoryIsOpen)
+	ctx.Given(`^the view's hitl bead "([^"]*)" under "([^"]*)" waits on "([^"]*)"$`, c.theViewsHitlBeadWaitsOn)
+	ctx.Given(`^the view's host "([^"]*)" last synced (\d+) minutes ago with work pathed to it$`, c.theViewsHostLastSynced)
+	ctx.Given(`^the view's story "([^"]*)" under "([^"]*)" has used all (\d+) attempts$`, c.theViewsStoryUsedAllAttempts)
+	ctx.Then(`^the view's hands need on "([^"]*)" waits for "([^"]*)"$`, c.theViewsHandsNeedWaitsFor)
+	ctx.Then(`^the view's need "([^"]*)" on "([^"]*)" waits for "([^"]*)"$`, c.theViewsNeedWaitsFor)
+	ctx.Then(`^the view's alarm for "([^"]*)" waits for "([^"]*)"$`, c.theViewsAlarmWaitsFor)
+	ctx.Then(`^the view's hands need on "([^"]*)" is not ready, waiting on "([^"]*)"$`, c.theViewsHandsNeedIsNotReady)
+	ctx.Then(`^the view's hands need on "([^"]*)" is ready, saying "([^"]*)"$`, c.theViewsHandsNeedIsReadySaying)
+	ctx.Then(`^the view's hands need on "([^"]*)" is ready$`, c.theViewsHandsNeedIsReady)
 	ctx.When(`^the live view is built$`, c.theLiveViewIsBuilt)
 	ctx.When(`^the live view is run and written$`, c.theLiveViewIsRunAndWritten)
 
@@ -411,6 +421,103 @@ func (c *posternViewContext) theViewsStaleNeedQuotes(bead string, letters int) e
 	}
 	if got := strings.Count(n.Text, "x"); got != letters {
 		return fmt.Errorf("expected %d letters of the comment in %q, got %d", letters, n.Text, got)
+	}
+	return nil
+}
+
+func (c *posternViewContext) theViewsStoryIsOpen(id, epic string) error {
+	c.story(id, epic)
+	return nil
+}
+
+func (c *posternViewContext) theViewsHitlBeadWaitsOn(id, epic, on string) error {
+	c.story(id, epic)
+	c.tracker.Needs(id, on)
+	return c.tracker.SetLabels(id, "hitl")
+}
+
+func (c *posternViewContext) theViewsHostLastSynced(host string, minutes int) error {
+	c.tracker.AddStory("mw-v", domain.Story{ID: "mw-" + host + ".1", Title: "On the " + host, Overrides: domain.Path{Host: host}})
+	at := posternViewFeatureNow.Add(-time.Duration(minutes) * time.Minute)
+	return c.tracker.SetNote(context.Background(), application.LastSyncKey(host), at.Format(time.RFC3339))
+}
+
+func (c *posternViewContext) theViewsStoryUsedAllAttempts(id, epic string, attempts int) error {
+	c.tracker.AddStory(epic, domain.Story{ID: id, Title: "Story " + id})
+	n := fmt.Sprint(attempts)
+	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{
+		application.AttemptsField: n, application.AttemptsExhaustedField: n})
+}
+
+func (c *posternViewContext) needOf(kind, bead string) (application.PosternViewNeed, error) {
+	for _, n := range c.doc.Needs {
+		if n.Kind == kind && n.Bead == bead {
+			return n, nil
+		}
+	}
+	return application.PosternViewNeed{}, fmt.Errorf("the view has no %s need on %q", kind, bead)
+}
+
+func (c *posternViewContext) needWaitsFor(kind, bead, want string) error {
+	n, err := c.needOf(kind, bead)
+	if err != nil {
+		return err
+	}
+	if n.WaitsFor != want {
+		return fmt.Errorf("expected the %s need on %s to wait for %q, got %q", kind, bead, want, n.WaitsFor)
+	}
+	return nil
+}
+
+func (c *posternViewContext) theViewsHandsNeedWaitsFor(bead, want string) error {
+	return c.needWaitsFor(application.PosternNeedHands, bead, want)
+}
+
+func (c *posternViewContext) theViewsNeedWaitsFor(kind, bead, want string) error {
+	return c.needWaitsFor(kind, bead, want)
+}
+
+func (c *posternViewContext) theViewsAlarmWaitsFor(host, want string) error {
+	for _, n := range c.doc.Needs {
+		if n.Kind == application.PosternNeedAlarm && n.Bead == "" && strings.Contains(n.Title, host) {
+			if n.WaitsFor != want {
+				return fmt.Errorf("expected the alarm for %s to wait for %q, got %q", host, want, n.WaitsFor)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("the view has no alarm for host %s", host)
+}
+
+func (c *posternViewContext) theViewsHandsNeedIsNotReady(bead, waitingOn string) error {
+	n, err := c.needOf(application.PosternNeedHands, bead)
+	if err != nil {
+		return err
+	}
+	if !n.NotReady || strings.Join(n.WaitingOn, ", ") != waitingOn {
+		return fmt.Errorf("expected the hands need on %s not ready, waiting on %q, got not_ready %v waiting on %q", bead, waitingOn, n.NotReady, n.WaitingOn)
+	}
+	return nil
+}
+
+func (c *posternViewContext) theViewsHandsNeedIsReadySaying(bead, text string) error {
+	n, err := c.needOf(application.PosternNeedHands, bead)
+	if err != nil {
+		return err
+	}
+	if n.NotReady || len(n.WaitingOn) != 0 || n.Text != text {
+		return fmt.Errorf("expected the hands need on %s ready, saying %q, got not_ready %v waiting on %q saying %q", bead, text, n.NotReady, n.WaitingOn, n.Text)
+	}
+	return nil
+}
+
+func (c *posternViewContext) theViewsHandsNeedIsReady(bead string) error {
+	n, err := c.needOf(application.PosternNeedHands, bead)
+	if err != nil {
+		return err
+	}
+	if n.NotReady || len(n.WaitingOn) != 0 {
+		return fmt.Errorf("expected the hands need on %s ready, got not_ready %v waiting on %q", bead, n.NotReady, n.WaitingOn)
 	}
 	return nil
 }

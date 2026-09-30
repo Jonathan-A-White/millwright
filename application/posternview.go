@@ -57,6 +57,13 @@ const (
 	PosternNeedAlarm    = "alarm"
 )
 
+// Who a need waits on, its waits_for: the Governor, the Mayor or the factory.
+const (
+	PosternWaitsYou     = "you"
+	PosternWaitsMayor   = "mayor"
+	PosternWaitsFactory = "factory"
+)
+
 // LabelDemo is the label on a bead the Governor is to be shown working: a
 // demo need while it is open.
 const LabelDemo = "demo"
@@ -95,6 +102,9 @@ type PosternViewNeed struct {
 	Recommended string   `json:"recommended"`
 	Options     []string `json:"options"`
 	Blocks      int      `json:"blocks"`
+	// WaitsFor says who the need waits on: PosternWaitsYou, PosternWaitsMayor
+	// or PosternWaitsFactory. Only a need waiting on him is one he can act on.
+	WaitsFor string `json:"waits_for"`
 	// Steps are a hands need's steps (§17), absent on any other need.
 	Steps []PosternViewHandsStep `json:"steps,omitempty"`
 	// NotReady marks a hands or demo need that cannot be acted on yet, and
@@ -588,8 +598,12 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 			if !allStepsRanClean(steps) {
 				need := b.need(PosternNeedHands, e, firstKnown(d.Created, d.Updated), viewSummary(d.Description))
 				need.Steps = steps
-				b.markNotReady(&need, e, len(steps) == 0)
 				waiting = append(waiting, waitingNeed{need: need, entry: e, window: PosternViewStaleHands, fact: handsFact(steps)})
+				// A hands bead with no steps may hold his instructions in a
+				// BY HAND comment, so its comments are read.
+				if len(steps) == 0 && d.CommentCount > 0 {
+					needComments = append(needComments, id)
+				}
 			}
 		}
 	}
@@ -600,6 +614,7 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 	}
 
 	comments := map[string][]Comment{}
+	needComments = uniqueStrings(needComments)
 	if len(needComments) > 0 {
 		read, err := v.Tracker.StoriesComments(ctx, needComments)
 		if err != nil {
@@ -632,7 +647,19 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 		needs = append(needs, need)
 	}
 
-	for _, w := range waiting {
+	for i := range waiting {
+		w := &waiting[i]
+		if w.need.Kind == PosternNeedHands && !w.stale(b.now) {
+			steps := w.need.Steps
+			byHand := ""
+			if len(steps) == 0 {
+				byHand = byHandInstructions(comments[w.entry.detail.Story.ID])
+			}
+			b.markNotReady(&w.need, w.entry, len(steps) == 0 && byHand == "")
+			if byHand != "" && !w.need.NotReady {
+				w.need.Text = byHand
+			}
+		}
 		if w.stale(b.now) {
 			needs = append(needs, w.staleNeed(b, comments[w.entry.detail.Story.ID]))
 			continue
@@ -652,8 +679,10 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 			needs = append(needs, need)
 		}
 		if !d.IsEpic && d.Exhausted {
-			needs = append(needs, b.need(PosternNeedAlarm, e, firstKnown(d.Updated, d.Created),
-				fmt.Sprintf("used all %d attempts", d.Attempts)))
+			alarm := b.need(PosternNeedAlarm, e, firstKnown(d.Updated, d.Created),
+				fmt.Sprintf("used all %d attempts", d.Attempts))
+			alarm.WaitsFor = PosternWaitsMayor
+			needs = append(needs, alarm)
 		}
 	}
 	return needs, newMemory, nil
@@ -859,8 +888,42 @@ func (b *viewBuild) need(kind string, e *viewEntry, since time.Time, text string
 	return PosternViewNeed{
 		Kind: kind, Bead: d.Story.ID, Epic: epic, Title: d.Story.Title,
 		Since: formatOrEmpty(since), Text: text, Options: []string{},
-		Blocks: b.blocks(false, d.Story.ID),
+		Blocks: b.blocks(false, d.Story.ID), WaitsFor: PosternWaitsYou,
 	}
+}
+
+// viewByHandMarker is the words a comment opens with when it holds the
+// Governor's own instructions for a hands bead that has no steps.
+const viewByHandMarker = "BY HAND"
+
+// byHandInstructions is what the newest of comments (oldest first) that opens
+// with BY HAND says after those words, without the colon or dash that follows
+// them; "" when no comment does or it says nothing more.
+func byHandInstructions(comments []Comment) string {
+	for i := len(comments) - 1; i >= 0; i-- {
+		text := strings.TrimSpace(comments[i].Text)
+		if len(text) < len(viewByHandMarker) || !strings.EqualFold(text[:len(viewByHandMarker)], viewByHandMarker) {
+			continue
+		}
+		text = strings.Trim(text[len(viewByHandMarker):], " \t\r\n:-–—")
+		if text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+// uniqueStrings is ids without repeats, in first-seen order.
+func uniqueStrings(ids []string) []string {
+	seen := map[string]bool{}
+	out := ids[:0:0]
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // viewMayorWritesSteps is what a hands need with no steps yet waits on.
@@ -869,7 +932,8 @@ const viewMayorWritesSteps = "the Mayor to write the steps"
 // markNotReady marks need, a hands or demo need on e, not ready when e waits
 // on an open bead or, with noSteps, has no hands steps yet: WaitingOn names the
 // blockers' titles (their ids when a title is empty), then the Mayor writing
-// the steps, and the text says so instead of the bead's summary.
+// the steps, and the text says so instead of the bead's summary. It waits for
+// the factory while a blocker is open, else for the Mayor.
 func (b *viewBuild) markNotReady(need *PosternViewNeed, e *viewEntry, noSteps bool) {
 	var waiting []string
 	for _, w := range e.waits {
@@ -890,6 +954,10 @@ func (b *viewBuild) markNotReady(need *PosternViewNeed, e *viewEntry, noSteps bo
 		return
 	}
 	need.NotReady = true
+	need.WaitsFor = PosternWaitsFactory
+	if len(e.waits) == 0 {
+		need.WaitsFor = PosternWaitsMayor
+	}
 	need.WaitingOn = waiting
 	need.Text = "Not ready yet: waiting on " + strings.Join(waiting, ", ")
 }
@@ -950,7 +1018,7 @@ func (v PosternView) hosts(b *viewBuild, notes map[string]string) ([]PosternView
 		alarms = append(alarms, PosternViewNeed{
 			Kind: PosternNeedAlarm, Title: fmt.Sprintf("%s has not synced for %d min", name, minutes(silent)),
 			Since: formatOrEmpty(at), Text: fmt.Sprintf("%s last synced %s, with work pathed to it", name, formatOrEmpty(at)),
-			Options: []string{},
+			Options: []string{}, WaitsFor: PosternWaitsFactory,
 		})
 	}
 	return hosts, alarms
