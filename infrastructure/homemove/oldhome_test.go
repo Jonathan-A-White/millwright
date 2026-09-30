@@ -62,6 +62,29 @@ func TestSyncAndMirrorRunMwOnTheOldHome(t *testing.T) {
 	}
 }
 
+func TestOldBeadsCountRunsBDCountInTheOldHomesVault(t *testing.T) {
+	vault, dir := ranOnOld(t, map[string]string{"bd": `echo 10; pwd >> "$(dirname "$0")/bd.pwd"`})
+
+	count, err := Host{}.OldBeadsCount(context.Background(), oldHome)
+
+	if err != nil || count != 10 {
+		t.Fatalf("got %d, %v", count, err)
+	}
+	if got := strings.TrimSpace(logOf(t, dir, "bd")); got != "count" {
+		t.Errorf("bd was run as %q", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "bd.pwd")); strings.TrimSpace(string(got)) != vault {
+		t.Errorf("bd ran in %q, want the vault %s", got, vault)
+	}
+}
+
+func TestOldBeadsCountThatIsNotANumberIsAnError(t *testing.T) {
+	ranOnOld(t, map[string]string{"bd": "echo 'no database'"})
+	if _, err := (Host{}).OldBeadsCount(context.Background(), oldHome); err == nil || !strings.Contains(err.Error(), "not a number") {
+		t.Fatalf("expected an error, got %v", err)
+	}
+}
+
 func TestACommandThatFailsOnTheOldHomeSaysWhatItSaid(t *testing.T) {
 	ranOnOld(t, map[string]string{"mw": "echo 'mw: the sync halt marker is set' >&2; exit 1"})
 

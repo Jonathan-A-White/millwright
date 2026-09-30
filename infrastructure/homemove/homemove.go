@@ -36,7 +36,7 @@ var answerGrace = 5 * time.Second
 type Host struct {
 	// Vault is the vault's directory: bd, git and bin/mayor-up run in it.
 	Vault string
-	// Home is the home directory, where the database set aside goes.
+	// Home is the home directory, where the directories set aside go.
 	Home string
 	// Poll is how often the backend is asked again while the move waits for it;
 	// two seconds when zero.
@@ -141,13 +141,24 @@ func (h Host) absolute(url string) string {
 // SetBeadsAside implements application.HomeMoveHost: a rename, so that nothing is
 // copied and nothing is lost, within the same disk as the vault.
 func (h Host) SetBeadsAside(_ context.Context, stamp string) (application.AsideMove, error) {
-	from := filepath.Join(h.Vault, ".beads", "embeddeddolt")
+	return h.setAside(filepath.Join(h.Vault, ".beads", "embeddeddolt"), "beads-embeddeddolt-aside-"+stamp)
+}
+
+// SetDoltAside implements application.HomeMoveHost: the directory dolt-beads
+// serves, set aside the same way, in a dated sibling of the embedded one.
+func (h Host) SetDoltAside(_ context.Context, stamp string) (application.AsideMove, error) {
+	return h.setAside(filepath.Join(h.Vault, ".beads", "dolt"), "beads-dolt-aside-"+stamp)
+}
+
+// setAside renames from to name in the home directory. Nothing at from is the zero
+// move; something already at the new name is a refusal.
+func (h Host) setAside(from, name string) (application.AsideMove, error) {
 	if _, err := os.Stat(from); errors.Is(err, os.ErrNotExist) {
 		return application.AsideMove{}, nil
 	} else if err != nil {
 		return application.AsideMove{}, err
 	}
-	to := filepath.Join(h.Home, "beads-embeddeddolt-aside-"+stamp)
+	to := filepath.Join(h.Home, name)
 	if _, err := os.Lstat(to); err == nil {
 		return application.AsideMove{}, fmt.Errorf("%s is already there: nothing was moved", to)
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -214,6 +225,19 @@ func (Host) StartUnit(ctx context.Context, unit string) (bool, error) {
 		return false, nil
 	}
 	if _, err := run(ctx, "", "systemctl", "--user", "start", unit); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// StopUnit implements application.HomeMoveHost: a unit that is not active is left
+// alone.
+func (Host) StopUnit(ctx context.Context, unit string) (bool, error) {
+	active, _ := exec.CommandContext(ctx, "systemctl", "--user", "is-active", unit).Output()
+	if strings.TrimSpace(string(active)) != "active" {
+		return false, nil
+	}
+	if _, err := run(ctx, "", "systemctl", "--user", "stop", unit); err != nil {
 		return false, err
 	}
 	return true, nil

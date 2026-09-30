@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,13 +27,17 @@ const remoteEnv = `PATH="$PATH:/usr/local/go/bin:$HOME/.local/go/bin:$HOME/.loca
 	`[ -r "$HOME/.config/mw/beads.env" ] && { set -a; . "$HOME/.config/mw/beads.env"; set +a; }; ` +
 	`export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"; `
 
+// vaultLookup sets V to the old home's vault, as mayorGoneScript and the count
+// need it: $MW_VAULT, or the vault line of its config; exit 2 when there is none.
+const vaultLookup = `V="${MW_VAULT:-$(sed -n 's/^vault *= *"\(.*\)".*/\1/p' "$HOME/.config/mw/config.toml" 2>/dev/null | head -n 1)}"
+[ -n "$V" ] || { echo "no vault: neither MW_VAULT nor a vault key in ~/.config/mw/config.toml" >&2; exit 2; }`
+
 // mayorGoneScript answers, on the old home, whether its Mayor has handed off: exit
 // 0 when .mayor-acting in its vault is empty or no Mayor process runs
 // (bin/respawn-mayor's own markers, "-n Mayor (after ..."), 1 when one is still
 // there, 2 when it could not tell. It says what it saw on stdout. The `[r]` keeps
 // the pgrep pattern from matching the shell that runs this text.
-const mayorGoneScript = `V="${MW_VAULT:-$(sed -n 's/^vault *= *"\(.*\)".*/\1/p' "$HOME/.config/mw/config.toml" 2>/dev/null | head -n 1)}"
-[ -n "$V" ] || { echo "no vault: neither MW_VAULT nor a vault key in ~/.config/mw/config.toml" >&2; exit 2; }
+const mayorGoneScript = vaultLookup + `
 ACTING="$(cat "$V/.mayor-acting" 2>/dev/null)"
 if [ -z "$(printf %s "$ACTING" | tr -d ' \t\r\n')" ]; then echo ".mayor-acting is empty"; exit 0; fi
 command -v pgrep >/dev/null 2>&1 || { echo "no pgrep to look for the Mayor process with" >&2; exit 2; }
@@ -127,6 +132,22 @@ func (h Host) MayorGone(ctx context.Context, ssh []string, wait time.Duration) (
 func (h Host) Sync(ctx context.Context, ssh []string) error {
 	_, err := h.ok(ctx, ssh, "mw sync")
 	return err
+}
+
+// OldBeadsCount implements application.OldHome: `bd count` in the old home's vault,
+// with beads.env sourced (remoteEnv), so it counts what the old home's own server
+// holds.
+func (h Host) OldBeadsCount(ctx context.Context, ssh []string) (int, error) {
+	out, err := h.ok(ctx, ssh, vaultLookup+`
+cd "$V" && bd count`)
+	if err != nil {
+		return 0, err
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return 0, fmt.Errorf("bd count on the old home printed %q, not a number", strings.TrimSpace(out))
+	}
+	return count, nil
 }
 
 // OldUnitInstalled implements application.OldHome: whether `systemctl --user

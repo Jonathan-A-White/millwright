@@ -444,3 +444,82 @@ func TestMayorUpThatCannotSaysWhy(t *testing.T) {
 		}
 	}
 }
+
+func TestSetDoltAsideMovesTheServedDirectoryAndKeepsIt(t *testing.T) {
+	root := t.TempDir()
+	vault, home := filepath.Join(root, "vault"), filepath.Join(root, "home")
+	db := filepath.Join(vault, ".beads", "dolt")
+	for _, dir := range []string{db, home} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(db, "data"), []byte("7 beads, stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	moved, err := Host{Vault: vault, Home: home}.SetDoltAside(context.Background(), "20260929T140000Z")
+
+	if err != nil {
+		t.Fatalf("SetDoltAside: %v", err)
+	}
+	want := filepath.Join(home, "beads-dolt-aside-20260929T140000Z")
+	if moved.From != db || moved.To != want {
+		t.Errorf("got %+v, want from %s to %s", moved, db, want)
+	}
+	if _, err := os.Stat(db); !os.IsNotExist(err) {
+		t.Errorf("the directory is still where it was: %v", err)
+	}
+	if kept, err := os.ReadFile(filepath.Join(want, "data")); err != nil || string(kept) != "7 beads, stale" {
+		t.Errorf("the directory was not kept whole: %q, %v", kept, err)
+	}
+}
+
+func TestSetDoltAsideWithNoDirectoryIsNothingToDo(t *testing.T) {
+	root := t.TempDir()
+	moved, err := Host{Vault: filepath.Join(root, "vault"), Home: root}.SetDoltAside(context.Background(), "20260929T140000Z")
+	if err != nil || moved.From != "" {
+		t.Errorf("got %+v, %v", moved, err)
+	}
+}
+
+func TestSetDoltAsideNeverWritesOverAnAsideThatIsThere(t *testing.T) {
+	root := t.TempDir()
+	vault, home := filepath.Join(root, "vault"), filepath.Join(root, "home")
+	db := filepath.Join(vault, ".beads", "dolt")
+	aside := filepath.Join(home, "beads-dolt-aside-20260929T140000Z")
+	for _, dir := range []string{db, aside} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	_, err := Host{Vault: vault, Home: home}.SetDoltAside(context.Background(), "20260929T140000Z")
+
+	if err == nil || !strings.Contains(err.Error(), "already there") {
+		t.Fatalf("expected a refusal, got %v", err)
+	}
+	if _, err := os.Stat(db); err != nil {
+		t.Errorf("the directory was moved anyway: %v", err)
+	}
+}
+
+func TestStopUnitStopsOnlyAUnitThatIsRunning(t *testing.T) {
+	dir := onPath(t, map[string]string{"systemctl": systemctl("dolt-beads", "dolt-beads")})
+
+	stopped, err := Host{}.StopUnit(context.Background(), "postern-backend")
+	if err != nil || stopped {
+		t.Errorf("a unit that is not running is left alone: %v, %v", stopped, err)
+	}
+	if strings.Contains(logOf(t, dir, "systemctl"), "stop") {
+		t.Errorf("stopped a unit that was not running: %s", logOf(t, dir, "systemctl"))
+	}
+
+	stopped, err = Host{}.StopUnit(context.Background(), "dolt-beads")
+	if err != nil || !stopped {
+		t.Errorf("an active unit is stopped: %v, %v", stopped, err)
+	}
+	if !strings.Contains(logOf(t, dir, "systemctl"), "--user stop dolt-beads") {
+		t.Errorf("systemctl was run as %q", logOf(t, dir, "systemctl"))
+	}
+}
