@@ -571,7 +571,7 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 		}
 		// A story closed without landing, dropped on his word, has nothing to
 		// verify: mw next records run:landed before it closes what it landed.
-		if !hasLabel(d.Labels, RunState+":"+RunLanded) {
+		if !hasLanded(d) {
 			continue
 		}
 		verifies = append(verifies, e)
@@ -1280,6 +1280,12 @@ func allStepsRanClean(steps []PosternViewHandsStep) bool {
 func workable(d StoryDetail) bool {
 	status := strings.ToLower(strings.TrimSpace(d.Status))
 	return status == StatusOpen || status == StatusInProgress
+}
+
+// hasLanded reports whether d was landed, not closed as dropped: mw next
+// records run:landed before it closes what it landed.
+func hasLanded(d StoryDetail) bool {
+	return hasLabel(d.Labels, RunState+":"+RunLanded)
 }
 
 // hasLabel reports whether labels carries label, as the tracker spells it or

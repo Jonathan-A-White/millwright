@@ -88,6 +88,9 @@ func (c *posternSnapshotContext) theBeadLandedThreeDaysAgo(beadID, epicID string
 
 func (c *posternSnapshotContext) closeBeadAt(beadID, epicID string, closedAt time.Time) error {
 	c.tracker.AddStory(epicID, domain.Story{ID: beadID, Title: beadID})
+	if err := c.tracker.SetStoryState(context.Background(), beadID, application.RunState, application.RunLanded, "landed on main"); err != nil {
+		return fmt.Errorf("recording %s as landed: %w", beadID, err)
+	}
 	if err := c.tracker.SetStatus(beadID, apptest.StatusClosed); err != nil {
 		return fmt.Errorf("closing %s: %w", beadID, err)
 	}

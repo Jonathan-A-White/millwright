@@ -41,8 +41,19 @@ func askQuestion(t *testing.T, tracker *apptest.FakeTracker, id, askedAt, text, 
 	}
 }
 
-// closeLanded closes id, closed at the given time, with no VERIFIED comment.
+// closeLanded closes id as mw next lands one, run:landed recorded, closed at
+// the given time, with no VERIFIED comment.
 func closeLanded(t *testing.T, tracker *apptest.FakeTracker, id string, closedAt time.Time) {
+	t.Helper()
+	if err := tracker.SetStoryState(context.Background(), id, application.RunState, application.RunLanded, "landed on main"); err != nil {
+		t.Fatalf("recording %s as landed: %v", id, err)
+	}
+	closeWithoutLanding(t, tracker, id, closedAt)
+}
+
+// closeWithoutLanding closes id at the given time with no run state: a story
+// the Governor dropped.
+func closeWithoutLanding(t *testing.T, tracker *apptest.FakeTracker, id string, closedAt time.Time) {
 	t.Helper()
 	if err := tracker.SetStatus(id, apptest.StatusClosed); err != nil {
 		t.Fatalf("closing %s: %v", id, err)
@@ -820,4 +831,22 @@ func equalStrings(got, want []string) bool {
 		}
 	}
 	return true
+}
+
+// A story closed without landing, dropped, is not in the Landed group: only a
+// child that carries run:landed is (mw-tbx1n.21).
+func TestPosternSnapshotLandedGroupLeavesOutAStoryClosedAsDropped(t *testing.T) {
+	tracker := aSnapshotTracker()
+	tracker.AddEpic("mw-a", domain.Path{})
+	tracker.DescribeEpic("mw-a", "Epic A", apptest.StatusOpen, 2)
+	addChild(tracker, "mw-a", "mw-a.1", "Landed recently")
+	closeLanded(t, tracker, "mw-a.1", snapshotNow.Add(-2*time.Hour))
+	addChild(tracker, "mw-a", "mw-a.2", "Dropped recently")
+	closeWithoutLanding(t, tracker, "mw-a.2", snapshotNow.Add(-3*time.Hour))
+
+	e := epicOf(t, snapshotDoc(t, tracker), "mw-a")
+
+	if len(e.Landed) != 1 || e.Landed[0].ID != "mw-a.1" {
+		t.Fatalf("expected the landed group to hold only mw-a.1, got %+v", e.Landed)
+	}
 }
