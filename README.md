@@ -2445,3 +2445,7 @@ works it. An epic carries default path values and each story may override any
 of them; `Story.PathFrom` overlays the two and rejects what is not a path — no
 rig, no target branch, or a harness, model or effort the factory does not
 know. See `features/path_validation.feature`.
+
+## Licence
+
+millwright is released under the MIT licence; see [LICENSE](LICENSE).
