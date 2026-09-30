@@ -21,17 +21,55 @@ func dialing(answers bool, asked *string) func(context.Context, string) bool {
 }
 
 func TestBeadsServerIsOKAndInertOnAHostThatKeepsItsOwnDatabase(t *testing.T) {
-	for _, mode := range []string{"remote", "backup"} {
+	for name, check := range map[string]*doctor.BeadsServer{
+		"remote":                 {Mode: "remote", Address: "10.88.0.3:3307"},
+		"backup with no address": {Mode: "backup"},
+		"remote with no address": {Mode: "remote"},
+	} {
 		asked := ""
-		check := &doctor.BeadsServer{Mode: mode, Address: "10.88.0.3:3307", Dial: dialing(false, &asked)}
+		check.Dial = dialing(false, &asked)
 
 		verdict, reason := check.Probe(context.Background())
-		if verdict != application.DoctorOK || !strings.Contains(reason, mode) {
-			t.Errorf("mode %s: expected ok, saying why there is nothing to reach, got %s (%s)", mode, verdict, reason)
+		if verdict != application.DoctorOK || !strings.Contains(reason, check.Mode) {
+			t.Errorf("%s: expected ok, saying why there is nothing to reach, got %s (%s)", name, verdict, reason)
 		}
 		if asked != "" {
-			t.Errorf("mode %s: expected no dial at all, got one to %s", mode, asked)
+			t.Errorf("%s: expected no dial at all, got one to %s", name, asked)
 		}
+	}
+}
+
+func TestBeadsServerIsOKWhenTheHomesOwnDatabaseAnswers(t *testing.T) {
+	asked := ""
+	check := &doctor.BeadsServer{Mode: "backup", Why: "auto: home", Address: "127.0.0.1:3307", Dial: dialing(true, &asked)}
+
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK || reason != "" {
+		t.Fatalf("expected a plain ok, got %s (%s)", verdict, reason)
+	}
+	if asked != "127.0.0.1:3307" {
+		t.Fatalf("expected a dial of 127.0.0.1:3307, got %q", asked)
+	}
+}
+
+func TestBeadsServerIsFaultyWhenTheHomesOwnDatabaseDoesNotAnswer(t *testing.T) {
+	asked := ""
+	check := &doctor.BeadsServer{Mode: "backup", Why: "auto: home", Address: "127.0.0.1:3307", Dial: dialing(false, &asked)}
+
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorFaulty {
+		t.Fatalf("expected faulty, got %s (%s)", verdict, reason)
+	}
+	for _, want := range []string{"127.0.0.1:3307", "dolt-beads", "this host"} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("expected the reason to name %q, got %q", want, reason)
+		}
+	}
+	err := check.Cure(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "dolt-beads") || strings.Contains(err.Error(), "wg") {
+		t.Fatalf("expected no cure, naming dolt-beads and not wg, got %v", err)
+	}
+	if wait, cap := check.Damper(); wait != 0 || cap != 1 {
+		t.Fatalf("expected one try an episode, got %s and %d", wait, cap)
 	}
 }
 
@@ -68,9 +106,10 @@ func TestBeadsServerIsFaultyWhenTheSharedDatabaseDoesNotAnswerAndHasNoCure(t *te
 
 func TestBeadsServerCannotTellWithNoAddressOrASettingItCannotRead(t *testing.T) {
 	for name, check := range map[string]*doctor.BeadsServer{
-		"no host":         {Mode: "shared"},
-		"a bad port":      {Mode: "shared", AddressErr: errors.New("BEADS_DOLT_SERVER_PORT is \"x\"")},
-		"an unknown mode": {ModeErr: errors.New("beads_sync is \"server\"")},
+		"no host":                {Mode: "shared"},
+		"a bad port":             {Mode: "shared", AddressErr: errors.New("BEADS_DOLT_SERVER_PORT is \"x\"")},
+		"a home with a bad port": {Mode: "backup", AddressErr: errors.New("BEADS_DOLT_SERVER_PORT is \"x\"")},
+		"an unknown mode":        {ModeErr: errors.New("beads_sync is \"server\"")},
 	} {
 		verdict, reason := check.Probe(context.Background())
 		if verdict != application.DoctorCannotTell || reason == "" {

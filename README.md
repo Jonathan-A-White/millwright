@@ -2345,16 +2345,22 @@ is `systemctl --user start <timer>`, its damper 30 minutes with a cap of 3,
 and its way back `systemctl --user stop <timer>` for exactly the timers the
 cure started.
 
-**beads-server** is for a host whose `beads_sync` is `shared` — the Laptop on a
-boost — whose `bd` reaches the desktop's database over the network: one TCP
-dial, with a 3 s timeout, of `BEADS_DOLT_SERVER_HOST` on
-`BEADS_DOLT_SERVER_PORT` (3307 when unset) as `mw doctor`'s own environment has
-them, from `dispatch.env`. It is faulty when the database does not answer, and
-there is no cure from here — the database runs on another host — so, as with
-**beads-size**, the second faulty run writes the note that wakes the Millhand;
-**wg** is the check that restarts this host's end of the link. Every other host
-reads it ok, saying why there is nothing to reach; a `shared` host with no
-`BEADS_DOLT_SERVER_HOST` in that environment reads cannot-tell.
+**beads-server** is for a host whose `bd` talks to a Dolt server: a `shared` host
+(the Laptop on a boost) reaching the desktop's database, and the home
+(`backup`) reaching its own `dolt-beads` server. It is one TCP dial, with a 3 s
+timeout, of `BEADS_DOLT_SERVER_HOST` on `BEADS_DOLT_SERVER_PORT` (3307 when
+unset) as `mw doctor`'s own environment has them, from `dispatch.env`. It is
+faulty when the server does not answer — on the home the reason says it is this
+host's own `dolt-beads` and to check `systemctl --user status dolt-beads` — and
+there is no cure from here (starting the unit is for a person to ask for), so,
+as with **beads-size**, the second faulty run writes the note that wakes the
+Millhand; **wg** is the check that restarts a shared host's end of the link. A
+`remote` host, and a `backup` host with no `BEADS_DOLT_SERVER_HOST` in that
+environment (beads still embedded), read ok, saying why there is nothing to
+reach; a `shared` host with none reads cannot-tell. `mw-doctor.service` reads
+`dispatch.env` and not `beads.env`, so on the home `dispatch.env` must also carry
+`BEADS_DOLT_SERVER_HOST` (and `BEADS_DOLT_SERVER_PORT` when it is not 3307), as
+the Laptop's does: otherwise the check reads ok and never dials.
 
 **beads-size** watches `.beads` against the same 1 GB budget `mw status`'s
 BEADS line warns on; past it there is no cure — repacking would delete packs

@@ -79,6 +79,35 @@ func TestDoctorTableHasTheBeadsServerCheck(t *testing.T) {
 	}
 }
 
+// The home dials its own dolt-beads server: a home (beads_sync backup) whose
+// server is stopped is faulty, and the dry run says it is this host's own.
+func TestDoctorBeadsServerIsFaultyOnAHomeWhoseServerIsStopped(t *testing.T) {
+	closed := closedDoctorPort(t)
+	host, port, err := net.SplitHostPort(closed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vault := t.TempDir()
+	mwConfig(t, fmt.Sprintf("vault = %q\nhost = \"desktop\"\nbeads_sync = \"backup\"\n\n[doctor]\nreach = [%q]\n", vault, closed))
+	t.Setenv("MW_BEADS_SYNC", "")
+	t.Setenv("BEADS_DOLT_SERVER_HOST", host)
+	t.Setenv("BEADS_DOLT_SERVER_PORT", port)
+
+	out := &bytes.Buffer{}
+	root := newRootCmd()
+	root.SetOut(out)
+	root.SetErr(out)
+	root.SetArgs([]string{"doctor", "--dry-run", "beads-server"})
+	_ = root.Execute()
+
+	report := out.String()
+	for _, want := range []string{"beads-server", closed, "dolt-beads", "this host"} {
+		if !strings.Contains(report, want) {
+			t.Fatalf("expected the report to name %q, got:\n%s", want, report)
+		}
+	}
+}
+
 // The beads-stores check is in the table: a vault holding both .beads/dolt and
 // .beads/embeddeddolt is faulty, and the dry run names the stray store.
 func TestDoctorTableHasTheBeadsStoresCheck(t *testing.T) {
