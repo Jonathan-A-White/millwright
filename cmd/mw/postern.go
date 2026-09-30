@@ -187,7 +187,8 @@ func newPosternInboxCmd() *cobra.Command {
 			"whichever sees it first. contrib/postern-transcribe is the command this rig ships.\n\n" +
 			"A run action (section 17) runs a hands step the Governor approved (mw hands add), once\n" +
 			"the step still hashes to what he approved, his signature verifies against\n" +
-			"postern_governor_key, the approval is under 15 minutes old and has not run before: here\n" +
+			"postern_governor_key, the bead waits on no open bead, the approval is under 5 minutes old,\n" +
+			"was not signed before the step was added and has not run before: here\n" +
 			"or over the step host's [hands_hosts] ssh prefix, as this host's user (sh -c) or as root\n" +
 			"through sudo -n hands_root_helper. How it ran, or why not, is commented on the bead, sent\n" +
 			"back to him in the bead's thread and mailed to the Mayor.\n\n" +

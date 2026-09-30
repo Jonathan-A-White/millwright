@@ -109,6 +109,43 @@ Feature: mw postern inbox --apply
     And bead "mw-act.3"'s last comment starts "NOT RUN step echo (approved by the Governor via postern, txid tx-stale): the step changed since you approved it"
     And mail "Not run: mw-act.3 echo" was sent to mayor
 
+  Scenario: a step whose bead waits on an open story is not run, and he is told what it waits on
+    Given bead "mw-act.3" has the hands step "echo" on "desktop" as "user" running "echo done"
+    And bead "mw-act.3" waits on the open story "mw-blk" titled "Install the unit"
+    And the Governor approves the hands step "echo" on "mw-act.3" with txid "tx-wait"
+    When mw postern inbox --apply is run
+    Then the hands step "echo" on "mw-act.3" did not run
+    And bead "mw-act.3"'s last comment starts "NOT RUN step echo (approved by the Governor via postern, txid tx-wait): it waits on Install the unit (mw-blk). Approve it again once that is done."
+    And the Governor was told "it waits on Install the unit (mw-blk). Approve it again once that is done." in bead "mw-act.3"'s thread
+    And mail "Not run: mw-act.3 echo" was sent to mayor
+
+  Scenario: the same step runs once the blocker closes and he approves again
+    Given bead "mw-act.3" has the hands step "echo" on "desktop" as "user" running "echo done"
+    And bead "mw-act.3" waits on the open story "mw-blk" titled "Install the unit"
+    And the Governor approves the hands step "echo" on "mw-act.3" with txid "tx-early"
+    When mw postern inbox --apply is run
+    And the blocker "mw-blk" is closed
+    And the Governor approves the hands step "echo" on "mw-act.3" again, with txid "tx-again"
+    And mw postern inbox --apply is run
+    Then the hands step "echo" on "mw-act.3" ran with exit 0
+    And bead "mw-act.3"'s last comment starts "RAN step echo on desktop as user, exit 0 (approved by the Governor via postern, txid tx-again)"
+
+  Scenario: an approval older than the limit is refused
+    Given the postern inbox clock reads "2026-09-28T12:00:00Z"
+    And bead "mw-act.3" has the hands step "echo" on "desktop" as "user" running "echo done"
+    And the Governor approves the hands step "echo" on "mw-act.3" 6 minutes before the clock, with txid "tx-late"
+    When mw postern inbox --apply is run
+    Then the hands step "echo" on "mw-act.3" did not run
+    And bead "mw-act.3"'s last comment starts "NOT RUN step echo (approved by the Governor via postern, txid tx-late): the approval is 6m0s old, over the 5m0s an approval is good for"
+
+  Scenario: an approval signed before the step was added is refused
+    Given the postern inbox clock reads "2026-09-28T11:02:00Z"
+    And bead "mw-act.3" has the hands step "echo" on "desktop" as "user" running "echo done"
+    And the Governor approves the hands step "echo" on "mw-act.3" 3 minutes before the clock, with txid "tx-before"
+    When mw postern inbox --apply is run
+    Then the hands step "echo" on "mw-act.3" did not run
+    And bead "mw-act.3"'s last comment starts "NOT RUN step echo (approved by the Governor via postern, txid tx-before): you approved it at 2026-09-28T10:59:00Z, before the step was added at 2026-09-28T11:00:00Z"
+
   # keep and close answer a stale card (protocol section 11): keep hides the
   # bead from the view for a while, close finishes it. Both are applied only
   # as the Governor (section 13).

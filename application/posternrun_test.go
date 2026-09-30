@@ -174,9 +174,18 @@ func TestApplyRefusesAnApprovalThatCannotRun(t *testing.T) {
 			f.action(t, "tx", map[string]any{"action": "run", "bead": "mw-e.3", "step": "echo", "sha256": sha,
 				"approved_at": runNow.Unix(), "sig": apptest.FakeHandsSig("someone-else", sha, runNow.Unix())})
 		}, "signature"},
-		"an approval 16 minutes old": {func(t *testing.T, f *runFixture) {
-			f.approve(t, "tx", "echo", runNow.Add(-16*time.Minute), "")
+		"an approval just over the age limit": {func(t *testing.T, f *runFixture) {
+			f.approve(t, "tx", "echo", runNow.Add(-domain.HandsApprovalMaxAge-time.Second), "")
 		}, "old"},
+		"an approval signed before the step was added": {func(t *testing.T, f *runFixture) {
+			raw, _ := json.Marshal([]application.HandsStepRecord{{HandsStep: f.steps["echo"], AddedAt: "2026-09-28T12:09:00Z"}})
+			mustDo(t, f.tracker.SetNote(context.Background(), application.HandsStepsKey("mw-e.3"), string(raw)))
+			f.approve(t, "tx", "echo", runNow.Add(-2*time.Minute), "")
+		}, "before the step was added at 2026-09-28T12:09:00Z"},
+		"a step whose bead waits on an open bead": {func(t *testing.T, f *runFixture) {
+			f.tracker.Needs("mw-e.3", "mw-e.2", "mw-e.1")
+			f.approve(t, "tx", "echo", runNow, "")
+		}, "it waits on Story mw-e.2 (mw-e.2), Story mw-e.1 (mw-e.1). Approve it again once they are done."},
 		"an approval from 3 minutes ahead": {func(t *testing.T, f *runFixture) {
 			f.approve(t, "tx", "echo", runNow.Add(3*time.Minute), "")
 		}, "ahead"},
@@ -218,6 +227,24 @@ func TestApplyRefusesAnApprovalThatCannotRun(t *testing.T) {
 				t.Fatalf("expected the refusal marked, got %q", note)
 			}
 		})
+	}
+}
+
+// A step waits only on what is still open: a closed blocker, or one the
+// tracker has no record of, keeps nothing from running; nor does an approval
+// signed the second the step was added.
+func TestApplyRunsAStepWhoseBlockersAreDone(t *testing.T) {
+	f := newRunFixture(t)
+	mustDo(t, f.tracker.CloseStory(context.Background(), "mw-e.1", "done"))
+	f.tracker.Needs("mw-e.3", "mw-e.1", "mw-gone")
+	raw, _ := json.Marshal([]application.HandsStepRecord{{HandsStep: f.steps["echo"], AddedAt: "2026-09-28T12:08:00Z"}})
+	mustDo(t, f.tracker.SetNote(context.Background(), application.HandsStepsKey("mw-e.3"), string(raw)))
+	f.approve(t, "tx", "echo", runNow.Add(-2*time.Minute), "")
+
+	f.apply(t)
+
+	if jobs := f.runner.Jobs(); len(jobs) != 1 {
+		t.Fatalf("expected the step run, got %+v and comments %q", jobs, f.tracker.Comments("mw-e.3"))
 	}
 }
 

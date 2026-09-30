@@ -195,9 +195,9 @@ func TestHelperRefusesAnythingNotApprovedExactly(t *testing.T) {
 			req.Sig = sign(t, other, req.SHA256, req.ApprovedAt)
 			return req
 		},
-		"an approval over 15 minutes old": func(t *testing.T, h *installedHelper) any {
+		"an approval over the age limit": func(t *testing.T, h *installedHelper) any {
 			req := h.request(t, "touch "+marker(h))
-			req.ApprovedAt = helperNow.Add(-16 * time.Minute).Unix()
+			req.ApprovedAt = helperNow.Add(-domain.HandsApprovalMaxAge - time.Second).Unix()
 			req.Sig = sign(t, h.governor, req.SHA256, req.ApprovedAt)
 			return req
 		},

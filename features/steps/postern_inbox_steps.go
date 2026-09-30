@@ -135,6 +135,11 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^bead "([^"]*)" has the hands step "([^"]*)" on "([^"]*)" as "([^"]*)" running "([^"]*)"$`, c.beadHasTheHandsStep)
 	ctx.Given(`^the Governor approves the hands step "([^"]*)" on "([^"]*)" with txid "([^"]*)"$`, c.theGovernorApprovesTheHandsStep)
 	ctx.Given(`^the Governor approves the hands step "([^"]*)" on "([^"]*)" as it read before it changed, with txid "([^"]*)"$`, c.theGovernorApprovesTheHandsStepAsItWas)
+	ctx.Given(`^bead "([^"]*)" waits on the open story "([^"]*)" titled "([^"]*)"$`, c.beadWaitsOnTheOpenStory)
+	ctx.When(`^the blocker "([^"]*)" is closed$`, c.theBlockerIsClosed)
+	ctx.When(`^the Governor approves the hands step "([^"]*)" on "([^"]*)" again, with txid "([^"]*)"$`, c.theGovernorApprovesTheHandsStep)
+	ctx.Given(`^the Governor approves the hands step "([^"]*)" on "([^"]*)" (\d+) minutes before the clock, with txid "([^"]*)"$`, c.theGovernorApprovesTheHandsStepMinutesBefore)
+	ctx.Then(`^the Governor was told "([^"]*)" in bead "([^"]*)"'s thread$`, c.theGovernorWasToldInBeadsThread)
 	ctx.Then(`^the hands step "([^"]*)" on "([^"]*)" ran with exit (\d+)$`, c.theHandsStepRanWithExit)
 	ctx.Then(`^the hands step "([^"]*)" on "([^"]*)" did not run$`, c.theHandsStepDidNotRun)
 	ctx.Then(`^bead "([^"]*)"'s last comment starts "([^"]*)"$`, c.beadsLastCommentStarts)
@@ -605,6 +610,13 @@ func (c *posternInboxContext) beadHasTheHandsStep(bead, id, host, as, run string
 
 func (c *posternInboxContext) approveHands(bead, id, txid, sha string) error {
 	at := time.Now().Unix()
+	if !c.clock.IsZero() {
+		at = c.clock.Unix()
+	}
+	return c.approveHandsAt(bead, id, txid, sha, at)
+}
+
+func (c *posternInboxContext) approveHandsAt(bead, id, txid, sha string, at int64) error {
 	return c.addAction(c.governorKey, txid, map[string]any{
 		"action": "run", "bead": bead, "step": id, "sha256": sha, "approved_at": at,
 		"sig": apptest.FakeHandsSig(c.governorKey, sha, at),
@@ -619,6 +631,53 @@ func (c *posternInboxContext) theGovernorApprovesTheHandsStepAsItWas(id, bead, t
 	before := c.handsSteps[id]
 	before.Run += " (as it read before)"
 	return c.approveHands(bead, id, txid, domain.HandsSHA256(bead, before))
+}
+
+// theGovernorApprovesTheHandsStepMinutesBefore approves the step as it
+// stands, signed minutes before the postern inbox's clock.
+func (c *posternInboxContext) theGovernorApprovesTheHandsStepMinutesBefore(id, bead string, minutes int, txid string) error {
+	if c.clock.IsZero() {
+		return fmt.Errorf("set the postern inbox clock first")
+	}
+	at := c.clock.Add(-time.Duration(minutes) * time.Minute).Unix()
+	return c.approveHandsAt(bead, id, txid, domain.HandsSHA256(bead, c.handsSteps[id]), at)
+}
+
+// beadWaitsOnTheOpenStory files an open story blocker and makes bead wait
+// on it, as a dependency named when bead was filed would.
+func (c *posternInboxContext) beadWaitsOnTheOpenStory(bead, blocker, title string) error {
+	c.memory.AddStory("epic", domain.Story{ID: blocker, Title: title})
+	c.memory.Needs(bead, blocker)
+	return nil
+}
+
+func (c *posternInboxContext) theBlockerIsClosed(blocker string) error {
+	return c.memory.CloseStory(context.Background(), blocker, "done")
+}
+
+// theGovernorWasToldInBeadsThread checks that a message sent back to the
+// Governor in bead's thread says want.
+func (c *posternInboxContext) theGovernorWasToldInBeadsThread(want, bead string) error {
+	var told []string
+	for _, raw := range c.backend.Delivered() {
+		var payload application.PosternPayload
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return err
+		}
+		text, _, err := c.cipher.Decrypt("governor", payload.Ct)
+		if err != nil {
+			return err
+		}
+		var body application.PosternThreadedMessage
+		if err := json.Unmarshal([]byte(text), &body); err != nil {
+			return err
+		}
+		if body.Thread.Bead == bead && strings.Contains(body.Text, want) {
+			return nil
+		}
+		told = append(told, text)
+	}
+	return fmt.Errorf("expected the Governor told %q in %s's thread, got %q", want, bead, told)
 }
 
 func (c *posternInboxContext) theHandsStepRanWithExit(id, bead string, exit int) error {

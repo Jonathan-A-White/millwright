@@ -45,7 +45,7 @@ const (
 )
 
 // Helper runs one root hands step, once, and only once the Governor has
-// approved exactly that step with his key within the last fifteen minutes.
+// approved exactly that step with his key within domain.HandsApprovalMaxAge.
 // Every field is fixed by Installed in the program root runs; a test lays
 // the same files out in a temporary directory and stands its own uid in for
 // root's.
