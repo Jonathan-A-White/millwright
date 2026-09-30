@@ -1144,7 +1144,10 @@ and the approval arrives as a `run` action. `mw postern inbox --apply` runs it
 only when every check holds: it came from `postern_governor_key` and the
 backend vouched for its signer; the step on the bead still hashes to what he
 approved ("the step changed since you approved it" otherwise); the signature
-verifies; the approval is under 15 minutes old and not over 2 minutes ahead;
+verifies; the bead waits on no open bead ("it waits on <title> (<id>).
+Approve it again once that is done." otherwise); the approval is under 5
+minutes old (`HandsApprovalMaxAge` in `domain/hands.go`) and not over 2
+minutes ahead; it was not signed before the step was added (its `added_at`);
 and that approval has not run before (a `hands.approval.<hash>.<time>` note,
 written before the step starts). A step for this host (`host`) runs here; a
 step for another runs over that host's ssh prefix in `[hands_hosts]`, and one
@@ -1176,7 +1179,7 @@ standard input; trusts only `/etc/mw-hands/governor.pub` and
 `/etc/mw-hands/host`, and only when they and their directory are root's and
 writable by no one else; refuses a step for another host, a step that is not
 `as: root`, a hash that does not match, a signature that does not verify, an
-approval over 15 minutes old or 2 ahead, and an approval already in
+approval over 5 minutes old or 2 ahead, and an approval already in
 `/var/lib/mw-hands/used` — where it records the approval before it runs
 anything. Then it runs `/bin/sh -c` as root, with a fixed environment and a
 10-minute limit, streams the output, and leaves with the step's own status; a
