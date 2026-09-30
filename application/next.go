@@ -1102,6 +1102,14 @@ func (n Next) signedByAMachine(ctx context.Context, c *closeOut) (bool, Reason, 
 func (n Next) closeALanding(ctx context.Context, c *closeOut, report *NextReport) (NextReport, error) {
 	report.Landed, report.LandedEarlier = true, true
 	outcome := fmt.Sprintf("landed on %s by an earlier mw next on %s; closed by a later run", c.target, n.Host)
+	// A story found by its ledger line carries no run=landed, because writing it
+	// is what failed. The Verify card is built from it, so it is written now,
+	// before the close; failing to write it never stops the close.
+	if was, err := n.Tracker.StoryState(ctx, c.id, RunState); err != nil || was != RunLanded {
+		if err := n.Tracker.SetStoryState(ctx, c.id, RunState, RunLanded, outcome); err != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf("%s could not be recorded as %s=%s: %v", c.id, RunState, RunLanded, err))
+		}
+	}
 	return n.finish(ctx, c, report, outcome, true)
 }
 
