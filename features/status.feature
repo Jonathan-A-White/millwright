@@ -434,3 +434,18 @@ Feature: mw status
     When mw status reads the host
     Then reading status succeeds
     And nothing was written through the tracker, the ledger or the runner
+
+  Scenario: A hands bead with no step is listed under WAITING ON THE MAYOR with its age
+    Given a status story "mw-gq6.40" filed under it
+    And the status story "mw-gq6.40" is labelled "hitl"
+    And the status story "mw-gq6.40" was filed 90 minutes ago
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "mw-gq6.40" under WAITING ON THE MAYOR aged "1h30m"
+    And the landed memory was not written
+
+  Scenario: With nothing waiting on the Mayor the report has no heading for him
+    Given a status story "mw-gq6.41" filed under it
+    When mw status reads the host
+    Then reading status succeeds
+    And the report has no heading for needs waiting on the Mayor

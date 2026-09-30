@@ -54,13 +54,14 @@ func readAll(t *testing.T, path string) string {
 }
 
 // standInBeads puts a `bd` on PATH that answers every question with an empty
-// list, so a read-only command can be run without a beads database, and points
+// list — and `kv list`, which status now reads for the Mayor's needs, with an
+// empty map — so a read-only command can be run without a beads database, and points
 // mw at an empty vault as the host `vps`.
 func standInBeads(t *testing.T) {
 	t.Helper()
 
 	bin := t.TempDir()
-	script := "#!/bin/sh\necho '[]'\n"
+	script := "#!/bin/sh\ncase \"$*\" in *\"kv list\"*) echo '{}'; exit 0;; esac\necho '[]'\n"
 	if err := os.WriteFile(filepath.Join(bin, "bd"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

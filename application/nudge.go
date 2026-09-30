@@ -19,6 +19,10 @@ const DefaultNudgeAfter = 60 * time.Minute
 // minutes.
 const DefaultNudgeSyncStale = 20 * time.Minute
 
+// MayorNeedAfter is how long a need may wait on the Mayor before the quiet
+// alarm names it.
+const MayorNeedAfter = 30 * time.Minute
+
 // NudgeClause is one reason the quiet alarm has to speak: a story that has run
 // long with nothing mailed about it, or another host whose last sync has gone
 // stale.
@@ -47,6 +51,11 @@ type Nudge struct {
 
 	// Host is which of the factory's hosts this is read for.
 	Host string
+
+	// Mayor is where the needs waiting on the Mayor are read from: one older
+	// than MayorNeedAfter is a clause of its own, keyed "mayor.<bead>". A nil
+	// Mayor leaves them out.
+	Mayor MayorNeeds
 
 	// Home is the vault's home file. The alarm is the home's: on a host the
 	// file says is not home, Run says nothing at all. A nil Home, or a home
@@ -135,6 +144,24 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 		}
 	}
 
+	if n.Mayor != nil {
+		// Needs that cannot be read are left out rather than every other
+		// clause: the alarm must still name a stale host.
+		needs, _ := n.Mayor.MayorNeeds(ctx, n.hitlBeads(ctx, work))
+		for _, need := range needs {
+			since, err := time.Parse(time.RFC3339, need.Since)
+			if err != nil || need.Bead == "" {
+				continue
+			}
+			if waited := now.Sub(since); waited > MayorNeedAfter {
+				clauses = append(clauses, NudgeClause{
+					Key:  "mayor." + need.Bead,
+					Text: fmt.Sprintf("%s waiting on the Mayor %d min (%s)", need.Bead, minutes(waited), need.Kind),
+				})
+			}
+		}
+	}
+
 	if n.SyncHalt != nil {
 		if info, there, err := n.SyncHalt.Read(ctx); err != nil {
 			return nil, fmt.Errorf("reading whether %s's own sync is halted: %w", n.Host, err)
@@ -172,6 +199,23 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 	}
 
 	return clauses, nil
+}
+
+// hitlBeads are the beads labelled hitl that are open and ready anywhere or
+// claimed on this host: the ones a person must be present for, the same as
+// Status lists. A list that cannot be read is empty.
+func (n Nudge) hitlBeads(ctx context.Context, work WorkInHand) []StoryDetail {
+	var hitl []StoryDetail
+	for _, d := range work.RunningOn(n.Host) {
+		if d.Hitl() {
+			hitl = append(hitl, d)
+		}
+	}
+	ready, err := n.Tracker.ReadyWithLabel(ctx, LabelHitl)
+	if err != nil {
+		return hitl
+	}
+	return append(hitl, ready...)
 }
 
 // holdsClaim reports whether any of the stories pathed to this host is claimed:

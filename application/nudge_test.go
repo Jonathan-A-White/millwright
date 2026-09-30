@@ -325,3 +325,80 @@ func TestNudgeCountsAStoryFromItsLatestClaim(t *testing.T) {
 		t.Fatalf("expected a story claimed a minute ago not to alarm, got %+v", clauses)
 	}
 }
+
+// aHandsBeadFiledAgo files a bead labelled hitl with no hands step under the
+// epic — a need that waits on the Mayor — created ago before statusNow.
+func aHandsBeadFiledAgo(t *testing.T, tracker *apptest.FakeTracker, id string, ago time.Duration) {
+	t.Helper()
+	storyOn(t, tracker, id, "Something only he can do", "vps")
+	if err := tracker.SetLabels(id, application.LabelHitl); err != nil {
+		t.Fatalf("labelling %s: %v", id, err)
+	}
+	if err := tracker.SetCreated(id, statusNow.Add(-ago)); err != nil {
+		t.Fatalf("dating %s: %v", id, err)
+	}
+}
+
+func mayorNudge(tracker *apptest.FakeTracker) application.Nudge {
+	return application.Nudge{
+		Mayor: application.MayorReader{Tracker: tracker, Notes: tracker, Now: func() time.Time { return statusNow }},
+	}
+}
+
+func TestNudgeNamesAMayorNeedOlderThanThirtyMinutes(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	aHandsBeadFiledAgo(t, tracker, "mw-gq6.50", 31*time.Minute)
+
+	clauses := nudgeReport(t, tracker, mayorNudge(tracker))
+
+	if len(clauses) != 1 {
+		t.Fatalf("expected one clause, got %+v", clauses)
+	}
+	if clauses[0].Key != "mayor.mw-gq6.50" {
+		t.Fatalf("expected the clause keyed mayor.mw-gq6.50, got %q", clauses[0].Key)
+	}
+	if !strings.Contains(clauses[0].Text, "mw-gq6.50") || !strings.Contains(clauses[0].Text, "31 min") {
+		t.Fatalf("expected the clause to name the bead and its 31 min, got %q", clauses[0].Text)
+	}
+}
+
+func TestNudgeSaysNothingOfAMayorNeedYoungerThanThirtyMinutes(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	aHandsBeadFiledAgo(t, tracker, "mw-gq6.50", 29*time.Minute)
+
+	clauses := nudgeReport(t, tracker, mayorNudge(tracker))
+
+	if len(clauses) != 0 {
+		t.Fatalf("expected no clause for a mayor need 29 min old, got %+v", clauses)
+	}
+}
+
+func TestNudgeLeavesTheLandedMemoryAloneWhenItReadsMayorNeeds(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	aHandsBeadFiledAgo(t, tracker, "mw-gq6.50", 31*time.Minute)
+
+	nudgeReport(t, tracker, mayorNudge(tracker))
+
+	if note, _ := tracker.Note(context.Background(), application.PosternSnapshotMemoryKey); note != "" {
+		t.Fatalf("expected no landed-memory note written, got %q", note)
+	}
+}
+
+func TestNudgeStillNamesAStaleHostWhenTheMayorNeedsCannotBeRead(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.60", "Held by a host gone quiet", "laptop")
+	claim(t, tracker, "mw-gq6.60", 10*time.Minute)
+	syncedAt(t, tracker, "laptop", 45*time.Minute)
+
+	clauses := nudgeReport(t, tracker, application.Nudge{Mayor: brokenMayor{}})
+
+	if len(clauses) != 1 || clauses[0].Key != "host:laptop" {
+		t.Fatalf("expected the stale host clause alone, got %+v", clauses)
+	}
+}
+
+type brokenMayor struct{}
+
+func (brokenMayor) MayorNeeds(context.Context, []application.StoryDetail) ([]application.PosternViewNeed, error) {
+	return nil, context.DeadlineExceeded
+}

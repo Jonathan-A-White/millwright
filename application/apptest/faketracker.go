@@ -992,7 +992,9 @@ func (f *FakeTracker) ReadyWithLabel(_ context.Context, label string) ([]applica
 		if s.detail.Status != StatusOpen || f.waiting(s) || !carries(s.detail.Labels, label) {
 			continue
 		}
-		ready = append(ready, s.detail)
+		detail := s.detail
+		detail.CommentCount = len(s.comments) // bd ready carries it, as bd show does
+		ready = append(ready, detail)
 	}
 	return ready, nil
 }
