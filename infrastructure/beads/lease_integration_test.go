@@ -44,17 +44,26 @@ func TestAClaimIsALeaseInARealBd(t *testing.T) {
 		t.Fatalf("expected the claim to carry a lease of some minutes from %v, got %v", claimed, first.LeaseExpires)
 	}
 
-	// bd prints the lease to the second.
-	time.Sleep(1100 * time.Millisecond)
-	if err := vps.HeartbeatClaim(ctx, storyID); err != nil {
-		t.Fatalf("heartbeating %s: %v", storyID, err)
-	}
-	beaten, err := vps.ShowStory(ctx, storyID)
-	if err != nil {
-		t.Fatalf("showing %s after the heartbeat: %v", storyID, err)
-	}
-	if !beaten.LeaseExpires.After(first.LeaseExpires) {
-		t.Fatalf("expected the heartbeat to push the lease past %v, got %v", first.LeaseExpires, beaten.LeaseExpires)
+	// bd prints the lease to the second, and under load a heartbeat can land in
+	// the same printed second as the claim: heartbeat again, a second apart,
+	// until the printed lease moves, for up to ten seconds.
+	var beaten application.StoryDetail
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		time.Sleep(1100 * time.Millisecond)
+		if err := vps.HeartbeatClaim(ctx, storyID); err != nil {
+			t.Fatalf("heartbeating %s: %v", storyID, err)
+		}
+		beaten, err = vps.ShowStory(ctx, storyID)
+		if err != nil {
+			t.Fatalf("showing %s after the heartbeat: %v", storyID, err)
+		}
+		if beaten.LeaseExpires.After(first.LeaseExpires) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected the heartbeat to push the lease past %v within ten seconds, got %v", first.LeaseExpires, beaten.LeaseExpires)
+		}
 	}
 
 	if err := laptop.HeartbeatClaim(ctx, storyID); err == nil {
