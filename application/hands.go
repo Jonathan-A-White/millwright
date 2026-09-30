@@ -96,6 +96,10 @@ type HandsAddRequest struct {
 	// its id: its hash changes, so any approval of the old one no longer
 	// matches it.
 	Replace bool
+	// After are beads that must finish before the step is worth his hands:
+	// each is made to block Bead (AddBlocker) before the step is kept, so the
+	// view marks the step waiting and the push says what it waits on.
+	After []string
 }
 
 // PosternSender sends one message to the Governor: PosternSend, narrowed to
@@ -111,11 +115,25 @@ type PosternSender interface {
 // dismissed.
 const HandsPushClass = "decision-needed"
 
+// PosternViewPublisher builds, seals and writes the live view: PosternView,
+// narrowed to the one call a use case that refreshes it needs.
+type PosternViewPublisher interface {
+	Run(ctx context.Context) (PosternViewDoc, error)
+}
+
+// ViewLock is the lock the mail notifier holds for a whole tick, taken
+// without waiting. hostlock.Try is the real adapter.
+type ViewLock interface {
+	TryTake(ctx context.Context) (release func(), taken bool, err error)
+}
+
 // HandsAdd writes down a step only the Governor's hands could take (postern's
 // docs/protocol.md §17) — what the Mayor used to write as a `!` line for him
 // to type — on a bead: kept in the bead's hands note, commented on the bead
 // exactly as it will run, and the bead labelled hitl so the view shows it as
-// his. It runs nothing: the step runs only once he approves it.
+// his. It runs nothing: the step runs only once he approves it. Once it is
+// kept the live view is published, so his phone shows the step, or the new
+// hash of a replaced one, without waiting for the notifier's next tick.
 type HandsAdd struct {
 	Tracker WorkTracker
 	Notes   PosternNotes
@@ -129,7 +147,15 @@ type HandsAdd struct {
 	// push that fails is said on Err and on the bead, and undoes nothing.
 	Push   PosternSender
 	NoPush bool
-	// Err is where a failed push is reported. A nil Err reports it on the
+
+	// View publishes the live view once the step is kept, under ViewLock so
+	// that it never runs beside the notifier's own. A nil View, or NoView,
+	// publishes none; a nil ViewLock takes no lock. A view that is busy or
+	// fails is said on Err, and undoes nothing.
+	View     PosternViewPublisher
+	ViewLock ViewLock
+	NoView   bool
+	// Err is where a failed push or view is reported. A nil Err reports a push on the
 	// bead only.
 	Err io.Writer
 }
@@ -143,12 +169,16 @@ func (h HandsAdd) Run(ctx context.Context, req HandsAddRequest) (HandsStepRecord
 	if err := domain.ValidateHandsStep(req.Bead, req.Step); err != nil {
 		return HandsStepRecord{}, fmt.Errorf("mw hands add: %w", err)
 	}
-	found, err := h.Tracker.ShowBeads(ctx, []string{req.Bead})
+	found, err := h.Tracker.ShowBeads(ctx, append([]string{req.Bead}, req.After...))
 	if err != nil {
 		return HandsStepRecord{}, fmt.Errorf("mw hands add: reading %s: %w", req.Bead, err)
 	}
-	if len(found) == 0 {
+	if len(found) == 0 || found[0].Story.ID != req.Bead {
 		return HandsStepRecord{}, fmt.Errorf("mw hands add: there is no bead %s", req.Bead)
+	}
+	waits, err := handsBlockers(req, found[1:])
+	if err != nil {
+		return HandsStepRecord{}, err
 	}
 	raw, err := h.Notes.Note(ctx, HandsStepsKey(req.Bead))
 	if err != nil {
@@ -174,6 +204,11 @@ func (h HandsAdd) Run(ctx context.Context, req HandsAddRequest) (HandsStepRecord
 	if !replaced {
 		steps = append(steps, record)
 	}
+	for _, blocker := range req.After {
+		if err := h.Tracker.AddBlocker(ctx, req.Bead, blocker); err != nil {
+			return HandsStepRecord{}, fmt.Errorf("mw hands add: making %s block %s: %w", blocker, req.Bead, err)
+		}
+	}
 	encoded, err := json.Marshal(steps)
 	if err != nil {
 		return HandsStepRecord{}, err
@@ -197,21 +232,81 @@ func (h HandsAdd) Run(ctx context.Context, req HandsAddRequest) (HandsStepRecord
 	if h.Out != nil {
 		fmt.Fprintf(h.Out, "added step %s to %s, on %s as %s: sha256 %s\n", req.Step.ID, req.Bead, req.Step.Host, req.Step.As, domain.HandsSHA256(req.Bead, req.Step))
 	}
-	h.push(ctx, req.Bead, found[0].Story.Title)
+	h.publish(ctx)
+	h.push(ctx, req.Bead, found[0].Story.Title, waits)
 	return record, nil
+}
+
+// handsBlockers checks the beads req.After names against what the tracker
+// found of them — every one there, none the bead itself — and reports the
+// titles of those still open, what the push says the step waits on (an id
+// stands for a title that is empty).
+func handsBlockers(req HandsAddRequest, found []StoryDetail) ([]string, error) {
+	byID := map[string]StoryDetail{}
+	for _, d := range found {
+		byID[d.Story.ID] = d
+	}
+	var waits []string
+	for _, id := range req.After {
+		d, ok := byID[id]
+		switch {
+		case id == req.Bead:
+			return nil, fmt.Errorf("mw hands add: %s cannot wait on itself", id)
+		case !ok:
+			return nil, fmt.Errorf("mw hands add: --after %s: there is no such bead", id)
+		case d.Closed():
+			continue
+		}
+		title := strings.TrimSpace(d.Story.Title)
+		if title == "" {
+			title = id
+		}
+		waits = append(waits, title)
+	}
+	return waits, nil
+}
+
+// publish refreshes the live view once a step is kept: the very view mw
+// postern view writes, under the notifier's lock so that the two never write
+// it together. A busy lock skips it — the notifier's own tick is publishing
+// it — and a failure is said; the step is kept either way, so neither is
+// returned.
+func (h HandsAdd) publish(ctx context.Context) {
+	if h.View == nil || h.NoView {
+		return
+	}
+	if h.ViewLock != nil {
+		release, taken, err := h.ViewLock.TryTake(ctx)
+		if err != nil {
+			h.report("the view was not published: taking the notifier's lock: %v (the step is kept)", err)
+			return
+		}
+		if !taken {
+			h.report("the view was skipped: the notifier is publishing it, and its next tick shows the step")
+			return
+		}
+		defer release()
+	}
+	if _, err := h.View.Run(ctx); err != nil {
+		h.report("the view was not published: %v (the step is kept; mw postern view publishes it)", err)
+	}
 }
 
 // push tells the Governor a step is waiting: one message of HandsPushClass on
 // bead's thread. The step is already kept, so a failure is only reported, on
 // Err and on the bead, never returned. The message is Recorded: the step's
 // own comment is already on the bead.
-func (h HandsAdd) push(ctx context.Context, bead, title string) {
+func (h HandsAdd) push(ctx context.Context, bead, title string, waits []string) {
 	if h.Push == nil || h.NoPush {
 		return
 	}
+	text := fmt.Sprintf("New hands step on %s: %s", bead, title)
+	if len(waits) > 0 {
+		text += " (waits on " + strings.Join(waits, ", ") + ")"
+	}
 	_, err := h.Push.Run(ctx, PosternSendRequest{
 		Class:    HandsPushClass,
-		Text:     fmt.Sprintf("New hands step on %s: %s", bead, title),
+		Text:     text,
 		Thread:   bead,
 		Recorded: true,
 	})

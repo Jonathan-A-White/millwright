@@ -67,28 +67,10 @@ func newPosternViewCmd() *cobra.Command {
 				return nil
 			}
 
-			keys, err := posternKeys()
+			view, err = sealedPosternView(view)
 			if err != nil {
 				return err
 			}
-			governorKey, err := config.PosternGovernorKey()
-			if err != nil {
-				return err
-			}
-			// Checked before Build: a key file not there yet would otherwise
-			// surface only once the view is sealed, after every read.
-			if exists, err := keys.Exists(); err != nil {
-				return err
-			} else if !exists {
-				return fmt.Errorf("no postern key at %s: run mw postern key init first", keys.Path())
-			}
-			path, err := config.PosternViewPath()
-			if err != nil {
-				return err
-			}
-			view.Cipher = posternCipher(keys)
-			view.File = postern.NewSnapshotFile(path)
-			view.GovernorKey = governorKey
 			view.Out = cmd.OutOrStdout()
 			_, err = view.Run(cmd.Context())
 			return err
@@ -96,4 +78,34 @@ func newPosternViewCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print the plaintext view JSON instead of writing the sealed file")
 	return cmd
+}
+
+// sealedPosternView is view with what Run needs to write it: the postern key
+// to seal with, the Governor's key to seal to, and the file the backend
+// serves. It is what `mw postern view` and the view mw hands add publishes
+// are both made of.
+func sealedPosternView(view application.PosternView) (application.PosternView, error) {
+	keys, err := posternKeys()
+	if err != nil {
+		return view, err
+	}
+	governorKey, err := config.PosternGovernorKey()
+	if err != nil {
+		return view, err
+	}
+	// Checked before Build: a key file not there yet would otherwise
+	// surface only once the view is sealed, after every read.
+	if exists, err := keys.Exists(); err != nil {
+		return view, err
+	} else if !exists {
+		return view, fmt.Errorf("no postern key at %s: run mw postern key init first", keys.Path())
+	}
+	path, err := config.PosternViewPath()
+	if err != nil {
+		return view, err
+	}
+	view.Cipher = posternCipher(keys)
+	view.File = postern.NewSnapshotFile(path)
+	view.GovernorKey = governorKey
+	return view, nil
 }
