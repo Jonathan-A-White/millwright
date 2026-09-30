@@ -1,7 +1,8 @@
 # millwright — build, test and lint.
 #
-# The VPS is small (1 vCPU, ~1 GB RAM), so every go command here is pinned to
-# one process and one CPU. Run one target at a time; do not use make -j.
+# Every go command here runs as many processes as JOBS, which defaults to the
+# host's cores (the gate was once pinned to one for the 1 vCPU, ~1 GB VPS; on a
+# small box run `make test JOBS=1`). Run one target at a time; do not use make -j.
 
 GO ?= go
 BIN ?= bin/mw
@@ -12,8 +13,10 @@ PKG ?= ./...
 # plain `go test` therefore skips.
 TAGS ?= beads_integration
 
-export GOFLAGS := -p=1
-export GOMAXPROCS := 1
+JOBS ?= $(shell nproc)
+
+export GOFLAGS := -p=$(JOBS)
+export GOMAXPROCS := $(JOBS)
 
 .PHONY: all build test lint clean check-formulas check-bootstrap
 
@@ -41,7 +44,8 @@ test:
 # its pins. Then the unit installer, run against a stand-in systemctl and a
 # throwaway HOME. Then mw-heavy, against a stand-in systemd-run and a real
 # flock on a throwaway lock file. Then wg-enrol, against temp files with
-# WG_SYNC=0 (and, for the syncconf scenario, stand-in wg and wg-quick). Every
+# WG_SYNC=0 (and, for the syncconf scenario, stand-in wg and wg-quick). Then the
+# gate's parallelism: GOFLAGS and GOMAXPROCS must follow JOBS. Every
 # other check here reads only this repository (and a temporary directory)
 # and starts nothing.
 lint:
@@ -55,6 +59,7 @@ lint:
 	scripts/check-install-units.sh
 	scripts/check-heavy.sh
 	scripts/check-wg-enrol.sh
+	scripts/check-gate-jobs.sh
 
 clean:
 	rm -rf bin
