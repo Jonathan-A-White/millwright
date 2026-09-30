@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 
@@ -35,6 +36,11 @@ type sessionEnvContext struct {
 	kickoff string // the last argument the seat stand-in was given
 	line    string // the story session's shell line
 	seat    []string
+
+	homeFile *apptest.FakeHomeFile // the vault's home file, as the scenario says it
+	thisHost string                // this host's name
+	vaultDir string                // the vault the scenario made, where .beads/ may be
+	hostOut  string                // where the stand-ins write the host they were started with
 }
 
 // InitializeSessionEnvScenario registers the steps of features/session_env.feature.
@@ -56,10 +62,18 @@ func InitializeSessionEnvScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a home directory with no beads\.env$`, c.aHomeWithNoBeadsEnv)
 	ctx.Given(`^a home directory whose beads\.env is empty$`, c.aHomeWithAnEmptyBeadsEnv)
 
+	ctx.Given(`^a home directory whose beads\.env names the server host "([^"]*)"$`, c.aHomeWhoseBeadsEnvNames)
+	ctx.Given(`^the vault's home file names "([^"]*)" as the home and this host is "([^"]*)"$`, c.theHomeFileNames)
+	ctx.Given(`^the vault holds \.beads/dolt$`, c.theVaultHoldsDolt)
+	ctx.Given(`^the vault holds no \.beads/dolt$`, c.theVaultHoldsNoDolt)
+
+	ctx.When(`^a Builder session is started and its line runs, with a stand-in for the harness$`, c.aBuilderSessionRuns)
+	ctx.When(`^a seat window is started and its command runs, with a stand-in for the harness$`, c.aSeatWindowRuns)
 	ctx.When(`^the story session's line runs, with stand-ins for the harness, the heartbeat and the close-out$`, c.theStoryLineRuns)
 	ctx.When(`^the seat window's command runs, with a stand-in for the harness and a kickoff full of quotes$`, c.theSeatCommandRuns)
 	ctx.When(`^the story session and the seat window are assembled$`, c.bothAreAssembled)
 
+	ctx.Then(`^the harness saw the server host "([^"]*)"$`, c.theHarnessSawHost)
 	ctx.Then(`^the harness, the heartbeat and the close-out each recorded the name ([A-Z_]+)$`, c.eachRecorded)
 	ctx.Then(`^the harness recorded the name ([A-Z_]+)$`, c.theHarnessRecorded)
 	ctx.Then(`^the harness was handed the kickoff exactly as it was written$`, c.theKickoffArrived)
@@ -310,6 +324,107 @@ func (c *sessionEnvContext) noBeadsNameRecorded() error {
 		if _, name, _ := strings.Cut(line, " "); strings.HasPrefix(name, "BEADS_DOLT_") {
 			return fmt.Errorf("%s recorded a BEADS_DOLT_ name", strings.SplitN(line, " ", 2)[0])
 		}
+	}
+	return nil
+}
+
+// aHomeWhoseBeadsEnvNames writes a beads.env that says host, as it did when
+// the home was somewhere else, and a password that must never be seen.
+func (c *sessionEnvContext) aHomeWhoseBeadsEnvNames(host string) error {
+	if err := c.aHome(); err != nil {
+		return err
+	}
+	c.hostOut = filepath.Join(c.dir, "host.out")
+	body := "BEADS_DOLT_SERVER_HOST=" + host + "\nBEADS_DOLT_PASSWORD=" + sessionEnvPassword + "\n"
+	return os.WriteFile(c.envFile, []byte(body), 0o600)
+}
+
+// theHomeFileNames resolves, as cmd/mw does for a host whose beads_sync is
+// auto, the host the session is to be given from the home file the vault holds.
+// Whether the vault holds .beads/dolt is said by the steps after this one, so
+// the resolution waits until the session is started.
+func (c *sessionEnvContext) theHomeFileNames(home, host string) error {
+	c.homeFile = &apptest.FakeHomeFile{Text: home + " 2026-09-30T12:00:00Z mayor@" + home + "\n"}
+	c.thisHost = host
+	return nil
+}
+
+func (c *sessionEnvContext) theVaultHoldsDolt() error {
+	c.vaultDir = filepath.Join(c.dir, "vault")
+	return os.MkdirAll(filepath.Join(c.vaultDir, ".beads", "dolt"), 0o755)
+}
+
+func (c *sessionEnvContext) theVaultHoldsNoDolt() error {
+	c.vaultDir = filepath.Join(c.dir, "vault")
+	return os.MkdirAll(filepath.Join(c.vaultDir, ".beads", "embeddeddolt"), 0o755)
+}
+
+// resolveHost is the host the harness under test is given.
+func (c *sessionEnvContext) resolveHost() string {
+	info, err := os.Stat(filepath.Join(c.vaultDir, ".beads", "dolt"))
+	return application.SessionServerHost(context.Background(), c.homeFile, c.thisHost,
+		application.BeadsSyncAuto, "", err == nil && info.IsDir())
+}
+
+func (c *sessionEnvContext) hostStandIn() (string, error) {
+	return c.standIn("hostharness", "for a; do last=$a; done\nprintf %s \"$BEADS_DOLT_SERVER_HOST\" > "+c.hostOut+"\n")
+}
+
+func (c *sessionEnvContext) aBuilderSessionRuns() error {
+	harness, err := c.hostStandIn()
+	if err != nil {
+		return err
+	}
+	spec, err := claude.New(claude.WithProgram(harness), claude.WithEnvFile(c.envFile),
+		claude.WithBeadsServerHost(c.resolveHost())).Session(application.Launch{
+		StoryID: "mw-gq6.1",
+		Path: domain.Path{
+			Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude,
+			Model: domain.ModelSonnet, Effort: domain.EffortHigh,
+			Formula: "tdd-feature", Host: c.thisHost,
+		},
+		Seat:       "builder",
+		BootFile:   filepath.Join(c.dir, "boot.md"),
+		ResultFile: filepath.Join(c.dir, "result.json"),
+		Kickoff:    "kickoff",
+	})
+	if err != nil {
+		return fmt.Errorf("assembling the session: %w", err)
+	}
+	c.line = spec.Command[len(spec.Command)-1]
+	if err := exec.Command(spec.Command[0], spec.Command[1:]...).Run(); err != nil {
+		return fmt.Errorf("running the assembled shell line: %w", err)
+	}
+	return nil
+}
+
+func (c *sessionEnvContext) aSeatWindowRuns() error {
+	harness, err := c.hostStandIn()
+	if err != nil {
+		return err
+	}
+	spec, err := claude.New(claude.WithProgram(harness), claude.WithEnvFile(c.envFile),
+		claude.WithBeadsServerHost(c.resolveHost())).SeatSession(application.SeatLaunch{
+		Seat: "mayor", Name: "mayor", Dir: c.dir,
+		Charter: filepath.Join(c.dir, "charter.md"), Kickoff: "kickoff", Attended: true,
+	})
+	if err != nil {
+		return fmt.Errorf("assembling the seat window: %w", err)
+	}
+	c.seat = spec.Command
+	if err := exec.Command(spec.Command[0], spec.Command[1:]...).Run(); err != nil {
+		return fmt.Errorf("running the seat window's command: %w", err)
+	}
+	return nil
+}
+
+func (c *sessionEnvContext) theHarnessSawHost(want string) error {
+	got, err := os.ReadFile(c.hostOut)
+	if err != nil {
+		return fmt.Errorf("reading the host the harness saw: %w", err)
+	}
+	if string(got) != want {
+		return fmt.Errorf("the harness saw the server host %q, not %q", got, want)
 	}
 	return nil
 }
