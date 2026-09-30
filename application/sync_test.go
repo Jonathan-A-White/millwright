@@ -849,6 +849,62 @@ func TestTwoSyncsOnOneHostNeverInterleaveTheirBeadsCycle(t *testing.T) {
 	}
 }
 
+// delayedVault wraps a FakeVaultFiles but makes each Pull take a measurable
+// amount of real time and records when each one started and ended, so that a
+// test can tell whether two syncs' vault pulls overlapped.
+type delayedVault struct {
+	*apptest.FakeVaultFiles
+	delay time.Duration
+
+	mu    stdsync.Mutex
+	pulls []span
+}
+
+func (d *delayedVault) Pull(ctx context.Context) (int, error) {
+	start := time.Now()
+	time.Sleep(d.delay)
+	n, err := d.FakeVaultFiles.Pull(ctx)
+	d.mu.Lock()
+	d.pulls = append(d.pulls, span{start: start, end: time.Now()})
+	d.mu.Unlock()
+	return n, err
+}
+
+func TestTwoSyncsOnOneHostNeverInterleaveTheirVaultPulls(t *testing.T) {
+	lock := hostlock.New(t.TempDir(), hostlock.WithPoll(5*time.Millisecond))
+	vault := &delayedVault{FakeVaultFiles: &apptest.FakeVaultFiles{}, delay: 100 * time.Millisecond}
+
+	var wg stdsync.WaitGroup
+	errs := make([]error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_, errs[i] = application.Sync{
+				Vault:   vault,
+				Tracker: apptest.NewFakeTracker(),
+				Host:    "vps",
+				Lock:    lock,
+				Now:     func() time.Time { return level },
+			}.Run(context.Background())
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("sync %d: %v", i, err)
+		}
+	}
+	if len(vault.pulls) != 2 {
+		t.Fatalf("expected two vault pulls, got %d", len(vault.pulls))
+	}
+	first, second := vault.pulls[0], vault.pulls[1]
+	if first.start.Before(second.end) && second.start.Before(first.end) {
+		t.Fatalf("expected the two vault pulls not to overlap, got %+v and %+v", first, second)
+	}
+}
+
 func TestASyncLockHeldPastItsBoundNamesTheLockFile(t *testing.T) {
 	lockDir := t.TempDir()
 	holding, err := hostlock.New(lockDir, hostlock.WithWait(50*time.Millisecond), hostlock.WithPoll(5*time.Millisecond)).
