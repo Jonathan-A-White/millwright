@@ -237,3 +237,97 @@ func TestOldUnitNotInstalledIsNoUnit(t *testing.T) {
 		t.Fatalf("expected no unit, got %v, %v", installed, err)
 	}
 }
+
+func TestOldDisableUnitDisablesAndStopsAnEnabledUnit(t *testing.T) {
+	_, dir := ranOnOld(t, map[string]string{"systemctl": `case "$2" in
+  is-enabled) echo enabled ;;
+  is-active) echo active ;;
+esac`})
+
+	disabled, err := Host{}.OldDisableUnit(context.Background(), oldHome, "dolt-beads")
+
+	if err != nil || !disabled {
+		t.Fatalf("expected the unit disabled, got %v, %v", disabled, err)
+	}
+	if got := logOf(t, dir, "systemctl"); !strings.Contains(got, "--user disable --now dolt-beads") {
+		t.Errorf("systemctl was run as %q", got)
+	}
+}
+
+func TestOldDisableUnitDisablesAUnitThatIsEnabledButNotRunning(t *testing.T) {
+	_, dir := ranOnOld(t, map[string]string{"systemctl": `case "$2" in
+  is-enabled) echo enabled ;;
+  is-active) echo inactive; exit 3 ;;
+esac`})
+
+	disabled, err := Host{}.OldDisableUnit(context.Background(), oldHome, "dolt-beads")
+
+	if err != nil || !disabled {
+		t.Fatalf("expected the unit disabled, got %v, %v", disabled, err)
+	}
+	if got := logOf(t, dir, "systemctl"); !strings.Contains(got, "--user disable --now dolt-beads") {
+		t.Errorf("systemctl was run as %q", got)
+	}
+}
+
+func TestOldDisableUnitLeavesAUnitThatIsNeitherEnabledNorRunning(t *testing.T) {
+	_, dir := ranOnOld(t, map[string]string{"systemctl": `case "$2" in
+  is-enabled) echo disabled ;;
+  is-active) echo inactive ;;
+esac
+exit 3`})
+
+	disabled, err := Host{}.OldDisableUnit(context.Background(), oldHome, "dolt-beads")
+
+	if err != nil || disabled {
+		t.Fatalf("expected nothing disabled, got %v, %v", disabled, err)
+	}
+	if got := logOf(t, dir, "systemctl"); strings.Contains(got, "disable") {
+		t.Errorf("disabled a unit that was neither enabled nor running: %q", got)
+	}
+}
+
+func TestOldDisableUnitThatFailsIsAnError(t *testing.T) {
+	ranOnOld(t, map[string]string{"systemctl": `case "$2" in
+  is-enabled) echo enabled ;;
+  is-active) echo active ;;
+  disable) echo 'Failed to connect to bus' >&2; exit 1 ;;
+esac`})
+
+	if _, err := (Host{}).OldDisableUnit(context.Background(), oldHome, "dolt-beads"); err == nil || !strings.Contains(err.Error(), "Failed to connect") {
+		t.Fatalf("expected the failure with what systemctl said, got %v", err)
+	}
+}
+
+func TestOldPushRunsBDDoltPushInTheOldHomesVaultWithBeadsEnvSourced(t *testing.T) {
+	vault, dir := ranOnOld(t, map[string]string{"bd": `echo "fsck=$BEADS_FSCK_TIMEOUT" >> "$(dirname "$0")/bd.env"; pwd >> "$(dirname "$0")/bd.pwd"`})
+	config := filepath.Join(os.Getenv("HOME"), ".config", "mw")
+	if err := os.MkdirAll(config, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(config, "beads.env"), []byte("BEADS_FSCK_TIMEOUT=10m\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := (Host{}).OldPush(context.Background(), oldHome); err != nil {
+		t.Fatalf("push: %v", err)
+	}
+
+	if got := strings.TrimSpace(logOf(t, dir, "bd")); got != "dolt push" {
+		t.Errorf("bd was run as %q", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "bd.env")); strings.TrimSpace(string(got)) != "fsck=10m" {
+		t.Errorf("bd ran without beads.env sourced: %q", got)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "bd.pwd")); strings.TrimSpace(string(got)) != vault {
+		t.Errorf("bd ran in %q, want the vault %s", got, vault)
+	}
+}
+
+func TestOldPushThatFailsSaysWhatBDSaid(t *testing.T) {
+	ranOnOld(t, map[string]string{"bd": "echo 'fsck timed out' >&2; exit 1"})
+
+	if err := (Host{}).OldPush(context.Background(), oldHome); err == nil || !strings.Contains(err.Error(), "fsck timed out") {
+		t.Fatalf("expected the failure with what bd said, got %v", err)
+	}
+}

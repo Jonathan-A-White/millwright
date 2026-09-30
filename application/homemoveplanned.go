@@ -41,9 +41,10 @@ func (r *homeMoveRun) plannedSteps(dead []homeMoveStep) []homeMoveStep {
 		plan: []string{
 			fmt.Sprintf("over ssh, on %s: mails its Mayor '%s' and waits up to %s for .mayor-acting there to be empty or its Mayor process gone. If it does not go, the move stops: a Mayor is never killed.", r.old, r.plannedHandoffSubject(), HomeMoveHandoffWait),
 			fmt.Sprintf("runs a final mw sync there (a backup push of the beads and the vault), stops its %s user unit, then runs a final mw postern mirror to this host, and takes bd count there: the number the new home's database must answer with.", PosternBackendUnit),
-			fmt.Sprintf("stops its %s user unit, so nothing there writes to beads: once the home changes, beads_sync = auto makes it a boost.", DoltBeadsUnit),
+			fmt.Sprintf("runs bd dolt push there, with beads.env sourced, while its %s is still serving and nothing else writes: mw sync pushes only when a backup is due, and this push is forced. If it fails the move stops with the new home untouched.", DoltBeadsUnit),
+			fmt.Sprintf("then runs `systemctl --user disable --now %s` there, so nothing there writes to beads and a reboot or a WSL restart does not serve its stale database again: once the home changes, beads_sync = auto makes it a boost.", DoltBeadsUnit),
 		},
-		back: fmt.Sprintf("mail its Mayor to carry on, and start the %s and %s units there again.", PosternBackendUnit, DoltBeadsUnit),
+		back: fmt.Sprintf("mail its Mayor to carry on, start the %s unit there again, and run `systemctl --user enable --now %s` there.", PosternBackendUnit, DoltBeadsUnit),
 		run:  (*homeMoveRun).standDown,
 	}
 	return append([]homeMoveStep{first, stand}, rest...)
@@ -112,7 +113,36 @@ func (r *homeMoveRun) standDown(ctx context.Context) error {
 	r.oldCount, r.haveOldCount = count, true
 	r.say("%s counts %d beads after its final flush: the new home's database has to answer with as many.", old, count)
 
-	return r.stopOld(ctx, DoltBeadsUnit)
+	// The server is still up: bd dolt push in server mode goes through it, so the
+	// push comes after the other writers have stopped (the Mayor at the wait, the
+	// backend above) and before dolt-beads is disabled. A push that fails stops the
+	// move with nothing changed here; the way back names enable --now for the unit.
+	installed, err := m.Old.OldUnitInstalled(ctx, ssh, DoltBeadsUnit)
+	if err != nil {
+		return fmt.Errorf("asking whether the %s unit is installed on %s: %w", DoltBeadsUnit, old, err)
+	}
+	if installed {
+		r.undo(fmt.Sprintf("%s systemctl --user enable --now %s (it is left serving when the push fails, and disabled only after the push; run this if anything there stopped it)", strings.Join(ssh, " "), DoltBeadsUnit))
+	}
+	if err := m.Old.OldPush(ctx, ssh); err != nil {
+		return fmt.Errorf("the final bd dolt push on %s: %w. The new home is untouched; the old home is still home, and its %s is left running. The ways back are below", old, err, DoltBeadsUnit)
+	}
+	r.say("ran the final bd dolt push on %s: refs/dolt/data holds its last writes.", old)
+
+	if !installed {
+		r.say("no %s unit on %s: nothing to disable.", DoltBeadsUnit, old)
+		return nil
+	}
+	disabled, err := m.Old.OldDisableUnit(ctx, ssh, DoltBeadsUnit)
+	if err != nil {
+		return fmt.Errorf("disabling the %s unit on %s: %w", DoltBeadsUnit, old, err)
+	}
+	if !disabled {
+		r.say("the %s unit on %s was neither enabled nor running.", DoltBeadsUnit, old)
+		return nil
+	}
+	r.say("disabled and stopped the %s user unit on %s: a reboot does not start it again.", DoltBeadsUnit, old)
+	return nil
 }
 
 // stopOld stops a user unit on the old home, if it has one, noting how to start

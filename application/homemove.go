@@ -111,6 +111,17 @@ type OldHome interface {
 	// that was not running is (false, nil).
 	OldStopUnit(ctx context.Context, ssh []string, unit string) (stopped bool, err error)
 
+	// OldDisableUnit disables the user unit there and stops it (`systemctl --user
+	// disable --now`), so that a reboot of the old home does not bring it back. It
+	// reports whether it did: a unit that was neither enabled nor running is
+	// (false, nil).
+	OldDisableUnit(ctx context.Context, ssh []string, unit string) (disabled bool, err error)
+
+	// OldPush runs bd dolt push in the old home's vault, with the server mode it
+	// runs in: the forced last flush of the beads database to refs/dolt/data, which
+	// mw sync's backup only does when it is due. The server has to be running.
+	OldPush(ctx context.Context, ssh []string) error
+
 	// Mirror runs mw postern mirror there: the final copy of the backend's data to
 	// this host.
 	Mirror(ctx context.Context, ssh []string) error

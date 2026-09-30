@@ -217,13 +217,25 @@ here fails the move stops with the new home as it was, and the ways back below a
 5. **`bd count`** there (in its vault, with `beads.env` sourced, so it asks the server the old
    home itself uses): the number the new home's database has to answer with, compared in
    the beads step. The move keeps it in memory only.
-6. **Stop its `dolt-beads`** user unit, the Dolt server's writers, if it has one. Once the
-   `home` file changes (step 4) it is a boost, and `beads_sync = auto` reads `shared` there.
+6. **`bd dolt push`** there (in its vault, with `beads.env` sourced, so `BEADS_FSCK_TIMEOUT`
+   applies: a served push at bd's default fsck timeout fails): the forced last flush of the
+   beads to GitHub's `refs/dolt/data`. Step 3's `mw sync` pushes only when a backup is due
+   (every 5 minutes under `auto`), so writes after the last backup could be missing when the
+   new home bootstraps from GitHub. The push goes through the server, so it runs while
+   `dolt-beads` is still up, after the writers have stopped (the Mayor at step 2, the backend
+   at step 4). **If it fails the move stops** with the new home untouched, and the way back
+   below is printed.
+7. **Disable its `dolt-beads`** user unit, if it has one: `systemctl --user disable --now
+   dolt-beads`, so nothing there writes to beads and a reboot or a WSL restart does not
+   serve its stale database again in the face of the new home (a unit that was neither
+   enabled nor running is left). Once the `home` file changes (step 4) it is a boost, and
+   `beads_sync = auto` reads `shared` there.
 
 **Way back:** the hand-off mail stays sent: mail the Mayor on the old home to carry on.
-`ssh <old> systemctl --user start postern-backend` and `... start dolt-beads` for what was
-stopped (the backend also goes back to standby by itself while the home is elsewhere). The
-sync and the mirror change nothing that needs undoing.
+`ssh <old> systemctl --user start postern-backend` for what was stopped (the backend also
+goes back to standby by itself while the home is elsewhere), and `ssh <old> systemctl --user
+enable --now dolt-beads`: it is disabled as well as stopped, so `start` alone would leave it
+off at the next reboot. The sync, the push and the mirror change nothing that needs undoing.
 
 ### Steps 3 to 7: as in the dead path (its 2 to 6)
 

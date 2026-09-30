@@ -172,6 +172,26 @@ func (h Host) OldStopUnit(ctx context.Context, ssh []string, unit string) (bool,
 	return strings.Contains(out, "stopped"), nil
 }
 
+// OldDisableUnit implements application.OldHome: `systemctl --user disable --now`,
+// for a unit that is enabled or running; one that is neither is left alone.
+func (h Host) OldDisableUnit(ctx context.Context, ssh []string, unit string) (bool, error) {
+	u := quote(unit)
+	out, err := h.ok(ctx, ssh, `[ "$(systemctl --user is-enabled `+u+` 2>/dev/null)" = enabled ] || [ "$(systemctl --user is-active `+u+` 2>/dev/null)" = active ] || { echo nothing-to-disable; exit 0; }; systemctl --user disable --now `+u+` && echo disabled`)
+	if err != nil {
+		return false, err
+	}
+	return strings.Contains(out, "disabled"), nil
+}
+
+// OldPush implements application.OldHome: `bd dolt push` in the old home's vault,
+// with beads.env sourced (remoteEnv), so BEADS_FSCK_TIMEOUT applies: a served push
+// at bd's default fsck timeout fails.
+func (h Host) OldPush(ctx context.Context, ssh []string) error {
+	_, err := h.ok(ctx, ssh, vaultLookup+`
+cd "$V" && bd dolt push`)
+	return err
+}
+
 // Mirror implements application.OldHome: mw postern mirror on the old home, which
 // is still home, copies its data to this host.
 func (h Host) Mirror(ctx context.Context, ssh []string) error {

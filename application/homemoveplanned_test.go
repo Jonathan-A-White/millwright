@@ -48,6 +48,12 @@ func (w *moveWorld) OldStopUnit(_ context.Context, _ []string, unit string) (boo
 	return true, w.did("old: systemctl --user stop " + unit)
 }
 
+func (w *moveWorld) OldDisableUnit(_ context.Context, _ []string, unit string) (bool, error) {
+	return true, w.did("old: systemctl --user disable --now " + unit)
+}
+
+func (w *moveWorld) OldPush(context.Context, []string) error { return w.did("old: bd dolt push") }
+
 func (w *moveWorld) Mirror(context.Context, []string) error { return w.did("old: mw postern mirror") }
 
 // planned is a move, told to be planned, of a home whose old end answers.
@@ -79,7 +85,8 @@ func TestAPlannedMoveStandsTheOldHomeDownBeforeTouchingTheNewOne(t *testing.T) {
 		"old: mw postern mirror",
 		"old: bd count",
 		"old: systemctl installed? dolt-beads",
-		"old: systemctl --user stop dolt-beads",
+		"old: bd dolt push",
+		"old: systemctl --user disable --now dolt-beads",
 		// 3. beads, from the old home's final push
 		"git: read refs/dolt/data time",
 		"host lock taken",
@@ -156,7 +163,8 @@ func TestAPlannedMoveStopsWhereTheOldHomeStandDownFails(t *testing.T) {
 		{"old: systemctl --user stop postern-backend", "step 2", "old: systemctl --user stop postern-backend"},
 		{"old: mw postern mirror", "step 2", "old: mw postern mirror"},
 		{"old: bd count", "step 2", "old: bd count"},
-		{"old: systemctl --user stop dolt-beads", "step 2", "old: systemctl --user stop dolt-beads"},
+		{"old: bd dolt push", "step 2", "old: bd dolt push"},
+		{"old: systemctl --user disable --now dolt-beads", "step 2", "old: systemctl --user disable --now dolt-beads"},
 	}
 	for _, c := range cases {
 		t.Run(c.failAt, func(t *testing.T) {
@@ -193,6 +201,32 @@ func TestAPlannedMoveGivesTheWayBackOfWhatStoppedOnTheOldHome(t *testing.T) {
 		"ssh desktop systemctl --user start postern-backend", "carry on")
 }
 
+// The flush that matters is the last one: bd dolt push, after the writers have
+// stopped and before dolt-beads is gone, since a server-mode push goes through
+// the server. A push that fails leaves the new home untouched and gives the way
+// back, which names enable --now for dolt-beads.
+func TestAPlannedMoveThatCannotPushStopsOnTheOldHomeAndNamesTheWayBackToDoltBeads(t *testing.T) {
+	w, out := newMoveWorld(), &bytes.Buffer{}
+	w.failAt = "old: bd dolt push"
+
+	err := planned(w, out).Run(context.Background())
+
+	stopped, ok := application.HomeMoveStoppedIn(err)
+	if !ok || stopped.Step != 2 {
+		t.Fatalf("expected the move to stop at step 2, got %v", err)
+	}
+	for _, call := range w.calls {
+		if !strings.HasPrefix(call, "old: ") && call != "ssh desktop" {
+			t.Errorf("the new home was touched (%q) though the final push failed", call)
+		}
+		if strings.Contains(call, "disable --now dolt-beads") {
+			t.Errorf("dolt-beads was disabled after a push that failed")
+		}
+	}
+	mustContain(t, "error", err.Error(), "bd dolt push", "new home")
+	mustContain(t, "ways back", out.String(), "Ways back", "ssh desktop systemctl --user enable --now dolt-beads")
+}
+
 func TestAPlannedMoveSkipsTheUnitsTheOldHomeDoesNotHave(t *testing.T) {
 	w, out := newMoveWorld(), &bytes.Buffer{}
 	w.oldInstalled[application.DoltBeadsUnit] = false
@@ -201,8 +235,8 @@ func TestAPlannedMoveSkipsTheUnitsTheOldHomeDoesNotHave(t *testing.T) {
 		t.Fatalf("planned move: %v\n%s", err, out)
 	}
 	for _, call := range w.calls {
-		if call == "old: systemctl --user stop dolt-beads" {
-			t.Errorf("stopped a unit the old home does not have")
+		if call == "old: systemctl --user disable --now dolt-beads" {
+			t.Errorf("disabled a unit the old home does not have")
 		}
 	}
 	mustContain(t, "report", out.String(), "no dolt-beads unit on desktop")
@@ -247,7 +281,7 @@ func TestAPlannedDryRunSaysTheOldHomeStepsAndRunsNone(t *testing.T) {
 	wantCalls(t, w)
 	mustContain(t, "dry run", out.String(),
 		"Step 1 of 7", "Step 7 of 7", "Hand off now: the home moves to laptop", "15m0s", "mw sync",
-		"mw postern mirror", "postern-backend", "dolt-beads", "planned move", "never killed")
+		"mw postern mirror", "postern-backend", "dolt-beads", "bd dolt push", "disable --now", "enable --now", "planned move", "never killed")
 	if n := strings.Count(out.String(), "Way back:"); n != 7 {
 		t.Errorf("expected a way back for each of the seven steps, got %d:\n%s", n, out)
 	}
