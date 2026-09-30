@@ -418,6 +418,7 @@ func TestLoadAboveTheLimitRunsNothing(t *testing.T) {
 	f.mayor("idle", actingByID)
 	f.inbox("mw-aaa")
 	f.load("3.50")
+	f.env = append(f.env, "MW_MAIL_LOAD_LIMIT=2")
 
 	f.tick()
 
@@ -437,6 +438,50 @@ func TestTheLimitIsTheHostsToSet(t *testing.T) {
 	f.tick()
 
 	f.typed(fmt.Sprintf(announcement, 1))
+}
+
+// cores is what nproc says, the limit the notifier defaults to.
+func cores(t *testing.T) int {
+	t.Helper()
+	out, err := exec.Command("nproc").Output()
+	if err != nil {
+		t.Skipf("nproc: %v", err)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil || n < 1 {
+		t.Skipf("nproc printed %q", out)
+	}
+	return n
+}
+
+func TestTheLimitDefaultsToTheCoreCount(t *testing.T) {
+	n := cores(t)
+	for _, tc := range []struct {
+		name    string
+		load    string
+		skipped bool
+	}{
+		{"above the core count", fmt.Sprintf("%d.50", n), true},
+		{"below the core count", fmt.Sprintf("%d.50", n-1), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFactory(t)
+			f.mayor("idle", actingByID)
+			f.inbox("mw-aaa")
+			f.load(tc.load)
+
+			out := f.tick()
+
+			if tc.skipped {
+				f.nothingMoreTyped("")
+				if !strings.Contains(out, fmt.Sprintf("is above %d; skipping this tick", n)) {
+					t.Fatalf("output %q does not name the core count %d as the limit", out, n)
+				}
+				return
+			}
+			f.typed(fmt.Sprintf(announcement, 1))
+		})
+	}
 }
 
 func TestSyncsNoMoreOftenThanEveryFiveMinutes(t *testing.T) {
@@ -1256,5 +1301,98 @@ func TestASlowPosternViewIsKilledByItsOwnTimeoutAndNotRetriedInsideItsInterval(t
 	f.tick()
 	if n := f.viewRuns(); n != 1 {
 		t.Fatalf("mw postern view ran %d times inside its interval after a kill, want 1", n)
+	}
+}
+
+// aboveTheLimit puts the host over a limit of 2 with mail waiting and a view
+// due, so a test can see what a tick skipped for load still does.
+func (f *factory) aboveTheLimit() {
+	f.mayor("idle", actingByID)
+	f.servesTheView()
+	f.posternKey()
+	f.posternCount(0)
+	f.inbox("mw-aaa")
+	f.load("3.50")
+	f.env = append(f.env, "MW_MAIL_LOAD_LIMIT=2")
+}
+
+func TestASkippedTickPublishesAViewGoneStale(t *testing.T) {
+	f := newFactory(t)
+	f.aboveTheLimit()
+	f.setViewLastAt(time.Now().Add(-6 * time.Minute))
+	f.beadsLevel("lvl-2")
+
+	out := f.tick()
+
+	if n := f.viewRuns(); n != 1 {
+		t.Fatalf("mw postern view ran %d times on a tick skipped for load with a view 6 minutes old, want 1\n%s", n, f.read("postern.log"))
+	}
+	if got := f.viewLevel(); got != "lvl-2" {
+		t.Fatalf("recorded view level %q, want lvl-2", got)
+	}
+	if !regexp.MustCompile(`load 3\.50 is above 2; skipping this tick but publishing the view, \d+s stale`).MatchString(out) {
+		t.Fatalf("output %q does not say the view is published on a skipped tick", out)
+	}
+	f.nothingMoreTyped("")
+	if f.syncs() != 0 || f.bdCalls() != 1 || f.posternSubCalls("inbox") != 0 || f.posternSubCalls("snapshot") != 0 || f.read("nudge.log") != "" {
+		t.Fatalf("a tick skipped for load did more than the view: mw %q, bd %q, postern %q", f.read("mw.log"), f.read("bd.log"), f.read("postern.log"))
+	}
+}
+
+func TestASkippedTickLeavesAFreshViewAlone(t *testing.T) {
+	f := newFactory(t)
+	f.aboveTheLimit()
+	f.setViewLastAt(time.Now().Add(-2 * time.Minute))
+	f.beadsLevel("lvl-2")
+
+	out := f.tick()
+
+	f.nothingMoreTyped("")
+	if f.viewRuns() != 0 || f.viewProbes() != 0 || f.syncs() != 0 || f.bdCalls() != 0 || f.posternCalls() != 0 {
+		t.Fatalf("a tick skipped for load with a fresh view ran mw %q, bd %q, postern %q", f.read("mw.log"), f.read("bd.log"), f.read("postern.log"))
+	}
+	if strings.Contains(out, "publishing the view") {
+		t.Fatalf("output %q says it publishes a fresh view", out)
+	}
+}
+
+func TestASkippedTickPublishesNothingWhenTheBeadsHaveNotChanged(t *testing.T) {
+	f := newFactory(t)
+	f.aboveTheLimit()
+	f.setViewLastAt(time.Now().Add(-6 * time.Minute))
+	f.write("state/view-level", "lvl-1\n", 0o644)
+
+	f.tick()
+
+	if f.viewRuns() != 0 {
+		t.Fatalf("mw postern view ran with the beads unchanged: %q", f.read("postern.log"))
+	}
+}
+
+func TestTheViewMaxAgeIsTheHostsToSet(t *testing.T) {
+	f := newFactory(t)
+	f.aboveTheLimit()
+	f.env = append(f.env, "MW_MAIL_VIEW_MAX_AGE=60")
+	f.setViewLastAt(time.Now().Add(-2 * time.Minute))
+	f.beadsLevel("lvl-2")
+
+	f.tick()
+
+	if n := f.viewRuns(); n != 1 {
+		t.Fatalf("mw postern view ran %d times with MW_MAIL_VIEW_MAX_AGE=60 and a view 2 minutes old, want 1", n)
+	}
+}
+
+func TestASkippedTickHasNoViewOnAHostThatDoesNotServeIt(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.posternKey()
+	f.load("3.50")
+	f.env = append(f.env, "MW_MAIL_LOAD_LIMIT=2")
+
+	out := f.tick()
+
+	if f.posternCalls() != 0 || strings.Contains(out, "publishing the view") {
+		t.Fatalf("a host with no MW_MAIL_VIEW_EVERY ran postern %q, said %q", f.read("postern.log"), out)
 	}
 }

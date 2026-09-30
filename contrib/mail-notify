@@ -8,7 +8,12 @@
 # tmux screen, and types nothing but the two fixed-shape lines below.
 #
 # Each tick:
-#   1. skips everything if the 1-minute load average is above a limit;
+#   1. skips everything if the 1-minute load average is above a limit (the
+#      host's core count unless MW_MAIL_LOAD_LIMIT says otherwise), except
+#      the view of step 6: a tick skipped for load still publishes it when the
+#      beads have changed and the last view is at least MW_MAIL_VIEW_MAX_AGE
+#      seconds old (default 300), and says so in its log line. Nothing else
+#      runs, and no mail line is typed (mw-gq6.150);
 #   2. runs `mw sync`, at nice 19 and idle I/O priority, if the last sync was
 #      MW_MAIL_SYNC_EVERY seconds ago or more (default 300, five minutes);
 #   3. lists `bd mail inbox` for the mailbox and compares its ids with the ids
@@ -88,7 +93,8 @@
 # The host may set, in the unit's environment or in mail-notify.env beside it:
 #   MW_VAULT             the vault (else the `vault` key of ~/.config/mw/config.toml)
 #   MW_MAIL_MAILBOX      whose inbox to watch                          (mayor)
-#   MW_MAIL_LOAD_LIMIT   skip the tick above this 1-minute load        (2.0)
+#   MW_MAIL_LOAD_LIMIT   skip the tick above this 1-minute load     (nproc)
+#                        (2.0 where the cores cannot be counted)
 #   MW_MAIL_SYNC_EVERY   least seconds between two `mw sync`s          (300)
 #                        On the host that keeps the one beads database
 #                        (beads_sync = "backup") a sync is local writes and
@@ -106,6 +112,9 @@
 #                        unset, no view step                         (unset)
 #   MW_MAIL_VIEW_TIMEOUT seconds `mw postern view` (step 6) may run before
 #                        it is killed                                   (60)
+#   MW_MAIL_VIEW_MAX_AGE seconds the last view may age, with the beads
+#                        changed, before a tick skipped for load publishes
+#                        it anyway (step 1)                            (300)
 #   MW_MAIL_SNAPSHOT_EVERY
 #                        least seconds between two `mw postern snapshot`s
 #                                                                       (600)
@@ -122,7 +131,7 @@
 set -u
 
 MAILBOX=${MW_MAIL_MAILBOX:-mayor}
-LOAD_LIMIT=${MW_MAIL_LOAD_LIMIT:-2.0}
+LOAD_LIMIT=${MW_MAIL_LOAD_LIMIT:-}
 SYNC_EVERY=${MW_MAIL_SYNC_EVERY:-300}
 STATE=${MW_MAIL_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mw-mail-notify}
 LOADAVG=${MW_MAIL_LOADAVG_FILE:-/proc/loadavg}
@@ -130,6 +139,7 @@ SNAPSHOT_TIMEOUT=${MW_MAIL_SNAPSHOT_TIMEOUT:-60}
 SNAPSHOT_EVERY=${MW_MAIL_SNAPSHOT_EVERY:-600}
 VIEW_EVERY=${MW_MAIL_VIEW_EVERY:-}
 VIEW_TIMEOUT=${MW_MAIL_VIEW_TIMEOUT:-60}
+VIEW_MAX_AGE=${MW_MAIL_VIEW_MAX_AGE:-300}
 WAIT_STALE=${MW_MAIL_WAIT_STALE:-180}
 
 # A setting that is not a whole number of seconds reads as its default.
@@ -140,7 +150,16 @@ case $SNAPSHOT_EVERY in '' | *[!0-9]*) SNAPSHOT_EVERY=600 ;; esac
 # set but not a number, it reads as 30.
 case $VIEW_EVERY in '') ;; *[!0-9]*) VIEW_EVERY=30 ;; esac
 case $VIEW_TIMEOUT in '' | *[!0-9]*) VIEW_TIMEOUT=60 ;; esac
+case $VIEW_MAX_AGE in '' | *[!0-9]*) VIEW_MAX_AGE=300 ;; esac
 case $WAIT_STALE in '' | *[!0-9]*) WAIT_STALE=180 ;; esac
+
+# The load limit unset is this host's core count, so a host is only "busy" when
+# it has more running than it has cores (mw-gq6.150); a host whose cores cannot
+# be counted keeps 2.0.
+if [ -z "$LOAD_LIMIT" ]; then
+	LOAD_LIMIT=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo "")
+	case $LOAD_LIMIT in '' | *[!0-9]* | 0) LOAD_LIMIT=2.0 ;; esac
+fi
 
 # How long a quiet alarm condition, once typed, is left untyped again: 1 h the
 # first time, then doubled on each repeat while the condition keeps holding,
@@ -189,21 +208,100 @@ mkdir -p "$STATE" || die "cannot make $STATE"
 exec 9>"$STATE/lock"
 flock -n 9 || { say "another tick is running; nothing to do"; exit 0; }
 
-# 1. Load. A busy host is not asked to sync or to read beads.
+# The beads' level: `bd vc status`'s own commit, cheap beside the view or the
+# snapshot. Read at most once a tick, and only by a step that is otherwise due;
+# a bd too old to have it, or a call that fails, reads as "" — "changed" to
+# both steps, so their intervals alone still bound how often each is tried.
+level_read=0
+level=""
+beads_level() {
+	[ "$level_read" -eq 1 ] && return 0
+	level=$(cd "$vault" && bd vc status --json 2>/dev/null | sed -n 's/.*"commit"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+	level_read=1
+}
+
+# 6. The live view: on a host that serves it (MW_MAIL_VIEW_EVERY set) with a
+# postern key file whose mw has `mw postern view`, refreshed only when the beads
+# have changed since the marker left by the last attempt and at least VIEW_EVERY seconds have passed since then —
+# the postern backend serves the file to the Governor's app, and a view the
+# beads have not moved since is not worth rebuilding. Whether mw has the view
+# at all is asked once a tick, only when one is otherwise due: `mw postern
+# view --help` prints the view's own usage line when there is one, and
+# postern's own help, exit 0 all the same, when there is not — so it is that
+# line that is looked for, never the status. An mw without it is passed over
+# with nothing recorded, so it is asked again next tick. Bounded to
+# VIEW_TIMEOUT seconds, logged once with how long it ran when it fails or is
+# killed, and never stops the tick; the time and the level are recorded before
+# the attempt runs, so one that hangs or fails is not retried before
+# VIEW_EVERY has passed again. Returns 0 when it ran `mw postern view` (which
+# may have failed), else 1. Step 1 calls it too, on a tick skipped for load;
+# view_stale says whether that tick should.
+view_step() {
+	view_ran=1
+	[ -n "$VIEW_EVERY" ] && [ -r "$keyfile" ] || return 1
+	view_last=$(cat "$STATE/view-last" 2>/dev/null || echo 0)
+	case $view_last in *[!0-9]* | "") view_last=0 ;; esac
+	if [ $((now - view_last)) -ge "$VIEW_EVERY" ]; then
+		beads_level
+		view_noted=$(cat "$STATE/view-level" 2>/dev/null || echo "")
+		if [ -z "$level" ] || [ "$level" != "$view_noted" ]; then
+			if (cd "$vault" && mw postern view --help 2>/dev/null) | grep -q 'mw postern view'; then
+				echo "$now" >"$STATE/view-last"
+				[ -n "$level" ] && echo "$level" >"$STATE/view-level"
+				view_ran=0
+				start=$now
+				(cd "$vault" && timeout "$VIEW_TIMEOUT" mw postern view >/dev/null 2>&1)
+				status=$?
+				if [ "$status" -ne 0 ]; then
+					elapsed=$(($(date +%s) - start))
+					[ "$elapsed" -lt 0 ] && elapsed=0
+					if [ "$status" -eq 124 ]; then
+						say "mw postern view exceeded ${VIEW_TIMEOUT}s and was killed after ${elapsed}s; not retrying before ${VIEW_EVERY}s have passed"
+					else
+						say "mw postern view did not finish cleanly after ${elapsed}s; not retrying before ${VIEW_EVERY}s have passed"
+					fi
+				fi
+			fi
+		fi
+	fi
+	return "$view_ran"
+}
+
+# view_stale prints how many seconds old the last view is, and succeeds, only
+# when this host serves the view and that age is at least VIEW_MAX_AGE.
+view_stale() {
+	[ -n "$VIEW_EVERY" ] && [ -r "$keyfile" ] || return 1
+	stale_last=$(cat "$STATE/view-last" 2>/dev/null || echo 0)
+	case $stale_last in *[!0-9]* | "") stale_last=0 ;; esac
+	stale=$((now - stale_last))
+	[ "$stale" -ge "$VIEW_MAX_AGE" ] || return 1
+	echo "$stale"
+}
+
+# 1. Load. A busy host is not asked to sync or to read beads. It is still asked
+# to publish the live view (step 6, run by view_step above) when the beads have
+# changed and the last view is over VIEW_MAX_AGE seconds old: a host that
+# stays busy for hours would otherwise leave the Governor's app on a view that
+# old (mw-gq6.150). The mail, the postern poll, the quiet alarm and the
+# snapshot stay skipped.
+now=$(date +%s)
 if [ -r "$LOADAVG" ]; then
 	load=$(cut -d ' ' -f 1 "$LOADAVG")
 else
 	load=$(uptime | sed 's/.*load averages*: *//; s/[ ,].*//')
 fi
 if awk -v l="${load:-0}" -v m="$LOAD_LIMIT" 'BEGIN { exit !(l + 0 > m + 0) }'; then
-	say "load $load is above $LOAD_LIMIT; skipping this tick"
+	if view_stale_seconds=$(view_stale) && view_step; then
+		say "load $load is above $LOAD_LIMIT; skipping this tick but publishing the view, ${view_stale_seconds}s stale"
+	else
+		say "load $load is above $LOAD_LIMIT; skipping this tick"
+	fi
 	exit 0
 fi
 
 # 2. Sync, at low priority, and no oftener than every SYNC_EVERY seconds. The
 # time is written before the run so a sync that fails or hangs is not retried
 # at every tick.
-now=$(date +%s)
 last=$(cat "$STATE/last-sync" 2>/dev/null || echo 0)
 case $last in *[!0-9]* | "") last=0 ;; esac
 if [ $((now - last)) -ge "$SYNC_EVERY" ]; then
@@ -301,58 +399,8 @@ if [ -d "$STATE/nudged" ]; then
 	done
 fi
 
-# The beads' level: `bd vc status`'s own commit, cheap beside the view or the
-# snapshot. Read at most once a tick, and only by a step that is otherwise due;
-# a bd too old to have it, or a call that fails, reads as "" — "changed" to
-# both steps, so their intervals alone still bound how often each is tried.
-level_read=0
-level=""
-beads_level() {
-	[ "$level_read" -eq 1 ] && return 0
-	level=$(cd "$vault" && bd vc status --json 2>/dev/null | sed -n 's/.*"commit"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
-	level_read=1
-}
-
-# 6. The live view: on a host that serves it (MW_MAIL_VIEW_EVERY set) with a
-# postern key file whose mw has `mw postern view`, refreshed only when the beads have changed since the marker left by
-# the last attempt and at least VIEW_EVERY seconds have passed since then —
-# the postern backend serves the file to the Governor's app, and a view the
-# beads have not moved since is not worth rebuilding. Whether mw has the view
-# at all is asked once a tick, only when one is otherwise due: `mw postern
-# view --help` prints the view's own usage line when there is one, and
-# postern's own help, exit 0 all the same, when there is not — so it is that
-# line that is looked for, never the status. An mw without it is passed over
-# with nothing recorded, so it is asked again next tick. Bounded to
-# VIEW_TIMEOUT seconds, logged once with how long it ran when it fails or is
-# killed, and never stops the tick; the time and the level are recorded before
-# the attempt runs, so one that hangs or fails is not retried before
-# VIEW_EVERY has passed again.
-if [ -n "$VIEW_EVERY" ] && [ -r "$keyfile" ]; then
-	view_last=$(cat "$STATE/view-last" 2>/dev/null || echo 0)
-	case $view_last in *[!0-9]* | "") view_last=0 ;; esac
-	if [ $((now - view_last)) -ge "$VIEW_EVERY" ]; then
-		beads_level
-		view_noted=$(cat "$STATE/view-level" 2>/dev/null || echo "")
-		if [ -z "$level" ] || [ "$level" != "$view_noted" ]; then
-			if (cd "$vault" && mw postern view --help 2>/dev/null) | grep -q 'mw postern view'; then
-				echo "$now" >"$STATE/view-last"
-				[ -n "$level" ] && echo "$level" >"$STATE/view-level"
-				start=$now
-				(cd "$vault" && timeout "$VIEW_TIMEOUT" mw postern view >/dev/null 2>&1)
-				status=$?
-				if [ "$status" -ne 0 ]; then
-					elapsed=$(($(date +%s) - start))
-					[ "$elapsed" -lt 0 ] && elapsed=0
-					if [ "$status" -eq 124 ]; then
-						say "mw postern view exceeded ${VIEW_TIMEOUT}s and was killed after ${elapsed}s; not retrying before ${VIEW_EVERY}s have passed"
-					else
-						say "mw postern view did not finish cleanly after ${elapsed}s; not retrying before ${VIEW_EVERY}s have passed"
-					fi
-				fi
-			fi
-		fi
-	fi
-fi
+# 6. The live view, above; its result is not needed here.
+view_step
 
 # 7. The postern snapshot: on a host with a postern key file, refreshed only
 # when the beads have changed since the marker left by the last attempt and
