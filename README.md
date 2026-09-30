@@ -2358,6 +2358,14 @@ BEADS line warns on; past it there is no cure — repacking would delete packs
 — so it only ever writes the check's own `doctor.beads-size` note for the
 Millhand to look at.
 
+**beads-stores** looks only at the vault's files: faulty when `.beads/dolt` and
+`.beads/embeddeddolt` both exist, which is what a `bd` run without
+`BEADS_DOLT_*` leaves beside a server-mode database. The reason names the
+stray path; there is no cure — a person checks it is empty, removes it, and
+sources `~/.config/mw/beads.env` — so the second faulty run writes the note.
+mw's own `bd` runner now refuses a vault holding `.beads/dolt` while
+`BEADS_DOLT_SERVER_HOST` is empty.
+
 **postern-transcribe** watches, on the home host only, that a voice note the
 Governor sends can be heard: it is faulty when `postern_transcribe_cmd` is unset,
 when its program is not an executable, or — for `contrib/postern-transcribe` —

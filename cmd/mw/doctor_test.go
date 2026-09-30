@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -74,5 +76,28 @@ func TestDoctorTableHasTheBeadsServerCheck(t *testing.T) {
 
 	if report := out.String(); !strings.Contains(report, "beads-server") || !strings.Contains(report, closed) {
 		t.Fatalf("expected beads-server to name the database that does not answer, got:\n%s", report)
+	}
+}
+
+// The beads-stores check is in the table: a vault holding both .beads/dolt and
+// .beads/embeddeddolt is faulty, and the dry run names the stray store.
+func TestDoctorTableHasTheBeadsStoresCheck(t *testing.T) {
+	vault := t.TempDir()
+	for _, store := range []string{"dolt", "embeddeddolt"} {
+		if err := os.MkdirAll(filepath.Join(vault, ".beads", store), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mwConfig(t, fmt.Sprintf("vault = %q\nhost = \"laptop\"\n", vault))
+
+	out := &bytes.Buffer{}
+	root := newRootCmd()
+	root.SetOut(out)
+	root.SetErr(out)
+	root.SetArgs([]string{"doctor", "--dry-run", "beads-stores"})
+	_ = root.Execute()
+
+	if report := out.String(); !strings.Contains(report, "beads-stores") || !strings.Contains(report, "embeddeddolt") {
+		t.Fatalf("expected beads-stores to name the stray store, got:\n%s", report)
 	}
 }

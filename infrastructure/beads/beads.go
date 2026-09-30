@@ -10,7 +10,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -744,6 +746,10 @@ func (g *Gateway) run(ctx context.Context, args ...string) ([]byte, []byte, erro
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
+	if err := g.serverModeRefusal(); err != nil {
+		return nil, nil, err
+	}
+
 	full := []string{"-C", g.vault}
 	if g.actor != "" {
 		// --actor is a flag of every bd subcommand, and naming it on reads as
@@ -767,6 +773,23 @@ func (g *Gateway) run(ctx context.Context, args ...string) ([]byte, []byte, erro
 		err = fmt.Errorf("stopped: %w", ctx.Err())
 	}
 	return out.Bytes(), errs.Bytes(), err
+}
+
+// serverModeRefusal is why bd is not to be started in a vault in server mode
+// (one holding .beads/dolt) when BEADS_DOLT_SERVER_HOST is empty: a bd run
+// without BEADS_DOLT_* does not fail there, it exits 0 and makes a second,
+// empty database in .beads/embeddeddolt. A vault without .beads/dolt is
+// unaffected.
+func (g *Gateway) serverModeRefusal() error {
+	info, err := os.Stat(filepath.Join(g.vault, ".beads", "dolt"))
+	if err != nil || !info.IsDir() {
+		return nil
+	}
+	if strings.TrimSpace(os.Getenv("BEADS_DOLT_SERVER_HOST")) != "" {
+		return nil
+	}
+	return fmt.Errorf("%s is a beads server-mode vault (it holds .beads/dolt) but BEADS_DOLT_SERVER_HOST is empty: "+
+		"bd would make a second database in .beads/embeddeddolt; run source ~/.config/mw/beads.env first", g.vault)
 }
 
 // said is what bd told us about a failure: its error object if it printed one,

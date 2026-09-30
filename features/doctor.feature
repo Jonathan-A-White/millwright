@@ -187,6 +187,20 @@ Feature: mw doctor
     And the note "doctor.laptop.beads-size" holds "200"
     And the note "doctor.laptop.beads-size" holds "100"
 
+  Scenario: The real beads-stores check with both stores has no cure, and writes a note once damped
+    Given a vault holding both .beads/dolt and .beads/embeddeddolt
+    When mw doctor's beads-stores check runs for real
+    Then mw doctor leaves with the status 6
+    And the doctor log holds "beads-stores cure-failed"
+    And the doctor log holds "embeddeddolt"
+    And the doctor log holds "beads.env"
+    And the note "doctor.laptop.beads-stores" does not exist
+    When mw doctor's beads-stores check runs for real
+    Then mw doctor leaves with the status 6
+    And the doctor log holds "beads-stores damped"
+    And the note "doctor.laptop.beads-stores" holds "damped"
+    And the note "doctor.laptop.beads-stores" holds "embeddeddolt"
+
   Scenario: The real mayor-gone check with no .mayor-acting is cannot-tell, and mayor-up never runs
     Given a vault with no .mayor-acting
     When mw doctor's mayor-gone check runs for real

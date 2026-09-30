@@ -92,6 +92,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a vault with a modified tracked file "([^"]*)"$`, c.aVaultWithAModifiedTrackedFile)
 	ctx.Given(`^a fake systemctl reporting the timer "([^"]*)" enabled and inactive$`, c.aFakeSystemctlReportingTheTimerEnabledAndInactive)
 	ctx.Given(`^a vault whose \.beads is (\d+) bytes, past a (\d+) byte budget$`, c.aVaultWhoseBeadsIsBytesPastABudget)
+	ctx.Given(`^a vault holding both \.beads/dolt and \.beads/embeddeddolt$`, c.aVaultHoldingBothBeadsStores)
 	ctx.Given(`^a vault with no \.mayor-acting$`, c.aVaultWithNoMayorActing)
 	ctx.Given(`^a vault whose \.mayor-acting names the window "([^"]*)"$`, c.aVaultWhoseMayorActingNamesTheWindow)
 	ctx.Given(`^a stand-in tmux listing that window with a live claude process$`, c.aStandInTmuxListingThatWindowWithALiveProcess)
@@ -119,6 +120,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^mw doctor's vault-dirty check runs for real$`, c.mwDoctorsVaultDirtyCheckRunsForReal)
 	ctx.When(`^mw doctor's timers check runs for real$`, c.mwDoctorsTimersCheckRunsForReal)
 	ctx.When(`^mw doctor's beads-size check runs for real$`, c.mwDoctorsBeadsSizeCheckRunsForReal)
+	ctx.When(`^mw doctor's beads-stores check runs for real$`, c.mwDoctorsBeadsStoresCheckRunsForReal)
 	ctx.When(`^mw doctor's mayor-gone check runs for real$`, c.mwDoctorsMayorGoneCheckRunsForReal)
 	ctx.When(`^mw doctor's postern-channel check runs for real$`, c.mwDoctorsPosternChannelCheckRunsForReal)
 	ctx.When(`^mw doctor's tmp-leftovers check runs for real$`, c.mwDoctorsTmpLeftoversCheckRunsForReal)
@@ -442,6 +444,26 @@ func (c *doctorContext) aVaultWhoseBeadsIsBytesPastABudget(sizeText, budgetText 
 }
 
 func (c *doctorContext) mwDoctorsBeadsSizeCheckRunsForReal() error { return c.run(false) }
+
+// aVaultHoldingBothBeadsStores makes a temp dir standing in for a vault whose
+// .beads holds both a dolt and an embeddeddolt store, and wires up the real
+// infrastructure/doctor.BeadsStores check against it.
+func (c *doctorContext) aVaultHoldingBothBeadsStores() error {
+	dir, err := os.MkdirTemp("", "mw-doctor-beads-stores")
+	if err != nil {
+		return err
+	}
+	for _, store := range []string{"dolt", "embeddeddolt"} {
+		path := filepath.Join(dir, ".beads", store)
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			return fmt.Errorf("making %s: %w", path, err)
+		}
+	}
+	c.real = doctor.NewBeadsStores(dir)
+	return nil
+}
+
+func (c *doctorContext) mwDoctorsBeadsStoresCheckRunsForReal() error { return c.run(false) }
 
 func (c *doctorContext) systemctlWasRunWith(args string) error {
 	if c.systemctlCalls == "" {
