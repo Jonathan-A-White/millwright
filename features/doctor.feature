@@ -258,6 +258,26 @@ Feature: mw doctor
     And mayor-up was not run
     And the doctor log is empty
 
+  Scenario: The real postern-channel check on the home host whose config lacks the key has no cure, and names the key and the file
+    Given the home host's config has no postern_channel
+    When mw doctor's postern-channel check runs for real
+    Then mw doctor leaves with the status 6
+    And the doctor log holds "postern-channel cure-failed no cure"
+    And mw doctor printed "postern_channel"
+    And mw doctor printed "config.toml"
+
+  Scenario: The real postern-channel check on the home host whose config says direct is ok
+    Given the home host's config says postern_channel = "direct"
+    When mw doctor's postern-channel check runs for real
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "postern-channel ok"
+
+  Scenario: The real postern-channel check on a host that is not home is ok whatever its config says
+    Given a host that is not home whose config has no postern_channel
+    When mw doctor's postern-channel check runs for real
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "postern-channel ok"
+
   Scenario: The real tmp-leftovers check past its budget removes only the dead spool file and the stale claude session dir, leaving the live two and an unrelated file alone
     Given a fake host with a dead spool file "nbs-spool-dead" of 5000000 bytes
     And a fake host with a live spool file "nbs-spool-live" of 5000000 bytes

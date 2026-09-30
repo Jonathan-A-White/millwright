@@ -2387,6 +2387,15 @@ run or damped, it is the mayor-up line itself, there being no window id yet
 to know a kill from. `mw doctor mayor-gone` is the recovery by hand;
 `--dry-run` prints the line it would run and changes nothing.
 
+**postern-channel** faults the home host, and only it, when its config does not
+send the Mayor's postern messages directly: `postern_channel` reads chain
+(the default, when `~/.config/mw/config.toml` lacks the key) rather than
+direct, or `MW_POSTERN_CHANNEL` says so. Every send is then a chain
+transaction, and past WhatsOnChain's newest-100 history cap the Mayor is locked
+out. It names the key and the file and has no cure — the doctor never edits the
+config; a person adds `postern_channel = "direct"`. A host the vault's home file
+says is not home reads ok.
+
 **Install**, once per host: `sh scripts/install-units.sh --enable mw-doctor`
 (see *Running a host on a timer*), which runs `mw-doctor.timer` at 2, 7, 12,
 ... past the hour — off the dispatch timer's own minutes, so the two never

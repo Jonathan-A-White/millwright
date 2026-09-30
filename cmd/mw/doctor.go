@@ -105,6 +105,8 @@ func newDoctorCmd() *cobra.Command {
 			posternTranscribe := doctor.NewPosternTranscribe(transcribeCmd, transcribeErr)
 			posternTranscribe.Home, posternTranscribe.Host = mwVault(vault, host), host
 
+			posternChannel := doctor.NewPosternChannel(mwVault(vault, host), host)
+
 			store := doctor.New(dir)
 			tmpLeftovers := doctor.NewTmpLeftovers(os.TempDir())
 			tmpLeftovers.Budget = tmpLeftoversBudget
@@ -121,6 +123,7 @@ func newDoctorCmd() *cobra.Command {
 					mayorGone,
 					posternTranscribe,
 					beadsServerCheck,
+					posternChannel,
 				},
 				State: store,
 				Log:   store,
