@@ -136,7 +136,7 @@ mail notifier and the postern backend all live there, always on. The database
 runs as a Dolt server (`dolt sql-server` on the desktop), so every host's `bd`
 writes the same rows and a claim is atomic across hosts; GitHub stops being how
 the hosts see each other's beads and becomes a backup of them, pushed on a
-timer. Since 2026-09-30 the home host serves the vault's beads through a Dolt SQL server (`dolt-beads.service`, server mode), and `bd` on every host reads its connection from `~/.config/mw/beads.env`. Each host's `beads_sync` says which side of that it is on:
+timer. Since 2026-09-30 the home host serves the vault's beads through a Dolt SQL server (`dolt-beads.service`, server mode), and `bd` on every host reads its connection from `~/.config/mw/beads.env`. The Boost host (the one that is not home) reads and writes the same beads over the network: its `~/.config/mw/config.toml` names the home in `beads_server_host` and its `beads.env` points `BEADS_DOLT_SERVER_HOST` at it. Each host's `beads_sync` says which side of that it is on:
 
 | `beads_sync` | The host | What `mw sync` does with beads |
 | --- | --- | --- |
