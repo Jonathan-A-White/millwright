@@ -191,6 +191,7 @@ func (h HandsAdd) Run(ctx context.Context, req HandsAddRequest) (HandsStepRecord
 
 	record := HandsStepRecord{HandsStep: req.Step, AddedAt: h.now().UTC().Format(time.RFC3339)}
 	replaced := false
+	approved := false
 	for i, step := range steps {
 		if step.ID != req.Step.ID {
 			continue
@@ -198,6 +199,11 @@ func (h HandsAdd) Run(ctx context.Context, req HandsAddRequest) (HandsStepRecord
 		if !req.Replace {
 			return HandsStepRecord{}, fmt.Errorf("mw hands add: %s already has a step %s: --replace to change it, which voids any approval of the old one", req.Bead, req.Step.ID)
 		}
+		ran, err := h.Notes.Note(ctx, HandsRanKey(req.Bead, req.Step.ID))
+		if err != nil {
+			return HandsStepRecord{}, err
+		}
+		approved = strings.TrimSpace(ran) != ""
 		steps[i] = record
 		replaced = true
 	}
@@ -233,7 +239,9 @@ func (h HandsAdd) Run(ctx context.Context, req HandsAddRequest) (HandsStepRecord
 		fmt.Fprintf(h.Out, "added step %s to %s, on %s as %s: sha256 %s\n", req.Step.ID, req.Bead, req.Step.Host, req.Step.As, domain.HandsSHA256(req.Bead, req.Step))
 	}
 	h.publish(ctx)
-	h.push(ctx, req.Bead, found[0].Story.Title, waits)
+	if !replaced || approved {
+		h.push(ctx, req.Bead, found[0].Story.Title, waits, replaced)
+	}
 	return record, nil
 }
 
@@ -297,11 +305,19 @@ func (h HandsAdd) publish(ctx context.Context) {
 // Err and on the bead, never returned. The message is Recorded: the step's
 // own comment is already on the bead. Its summary, "Step ready: <bead> on
 // <title>", reads as a question's does; title is the bead's, empty when it has none.
-func (h HandsAdd) push(ctx context.Context, bead, title string, waits []string) {
+// changed is a replaced step he had approved: the push says his approval no
+// longer counts. A replaced step he had not approved is not pushed at all (Run):
+// the first push already told him, and the step's comment and the view carry
+// the change. The step's ran note is the record of an approval, for the approval
+// itself is kept only once its step starts.
+func (h HandsAdd) push(ctx context.Context, bead, title string, waits []string, changed bool) {
 	if h.Push == nil || h.NoPush {
 		return
 	}
 	text := fmt.Sprintf("New hands step on %s: %s", bead, title)
+	if changed {
+		text = fmt.Sprintf("Changed hands step on %s: %s (your approval of the old step no longer counts; approve again)", bead, title)
+	}
 	if len(waits) > 0 {
 		text += " (waits on " + strings.Join(waits, ", ") + ")"
 	}

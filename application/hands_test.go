@@ -167,3 +167,56 @@ func TestHandsListPrintsEveryStepWithItsHashAndRun(t *testing.T) {
 		}
 	}
 }
+
+func addHandsPushing(tracker *apptest.FakeTracker, push *apptest.FakePosternSender, req application.HandsAddRequest) error {
+	_, err := application.HandsAdd{Tracker: tracker, Notes: tracker, Push: push, Now: func() time.Time { return handsNow }}.Run(context.Background(), req)
+	return err
+}
+
+// A first add sends the Governor the one "New hands step" push.
+func TestHandsAddFirstAddPushesANewStep(t *testing.T) {
+	tracker := handsTracker()
+	push := &apptest.FakePosternSender{}
+	mustDo(t, addHandsPushing(tracker, push, application.HandsAddRequest{Bead: "mw-f758y.8", Step: lingerStep()}))
+	sent := push.Sent()
+	if len(sent) != 1 || !strings.HasPrefix(sent[0].Text, "New hands step on mw-f758y.8") {
+		t.Fatalf("expected one 'New hands step' push, got %+v", sent)
+	}
+}
+
+// Replacing a step he has not approved tells him nothing the first push did
+// not: the step's comment and the view carry the change.
+func TestHandsAddReplaceOfAnUnapprovedStepSendsNoSecondPush(t *testing.T) {
+	tracker := handsTracker()
+	push := &apptest.FakePosternSender{}
+	mustDo(t, addHandsPushing(tracker, push, application.HandsAddRequest{Bead: "mw-f758y.8", Step: lingerStep()}))
+	changed := lingerStep()
+	changed.Run = "loginctl enable-linger jwhite2"
+	mustDo(t, addHandsPushing(tracker, push, application.HandsAddRequest{Bead: "mw-f758y.8", Step: changed, Replace: true}))
+	if sent := push.Sent(); len(sent) != 1 {
+		t.Fatalf("expected exactly one push, got %+v", sent)
+	}
+	if steps := handsSteps(t, tracker, "mw-f758y.8"); len(steps) != 1 || steps[0].Run != changed.Run {
+		t.Fatalf("expected the step replaced all the same, got %+v", steps)
+	}
+}
+
+// Replacing a step he approved (it ran, which only an approval does) voids
+// that approval, and he is told so.
+func TestHandsAddReplaceOfAnApprovedStepPushesChangedStep(t *testing.T) {
+	tracker := handsTracker()
+	push := &apptest.FakePosternSender{}
+	mustDo(t, addHandsPushing(tracker, push, application.HandsAddRequest{Bead: "mw-f758y.8", Step: lingerStep()}))
+	mustDo(t, tracker.SetNote(context.Background(), application.HandsRanKey("mw-f758y.8", "linger"), `{"at":"x","exit":1,"host":"desktop","why":"no"}`))
+	changed := lingerStep()
+	changed.Run = "loginctl enable-linger jwhite2"
+	mustDo(t, addHandsPushing(tracker, push, application.HandsAddRequest{Bead: "mw-f758y.8", Step: changed, Replace: true}))
+	sent := push.Sent()
+	if len(sent) != 2 {
+		t.Fatalf("expected two pushes, got %+v", sent)
+	}
+	want := "Changed hands step on mw-f758y.8: Enable lingering (your approval of the old step no longer counts; approve again)"
+	if sent[1].Text != want {
+		t.Fatalf("expected %q, got %q", want, sent[1].Text)
+	}
+}

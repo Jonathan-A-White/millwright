@@ -139,7 +139,8 @@ func newHandsAddCmd() *cobra.Command {
 			"and so voids any approval of the old one.\n\n" +
 			"Once the step is kept, one Postern message is sent to the Governor on the bead's thread,\n" +
 			"whose tap opens Needs you. A push that fails is said on stderr and on the bead, and the\n" +
-			"step stays: mw hands add still exits 0. --no-push sends none.\n\n" +
+			"step stays: mw hands add still exits 0. --no-push sends none. A --replace sends one only\n" +
+			"if the old step had been approved (it says the approval no longer counts).\n\n" +
 			"Then the live view is published, the same as mw postern view, so his phone shows the\n" +
 			"step, or a replaced step's new hash, at once. It takes the mail notifier's lock\n" +
 			"(~/.local/state/mw-mail-notify/lock) without waiting: while the notifier's tick holds it,\n" +
