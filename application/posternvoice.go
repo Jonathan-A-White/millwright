@@ -25,6 +25,18 @@ func (i PosternInbox) isVoiceNote(m PosternInboxMessage) bool {
 	return i.Transcriber != nil && m.Attachment != nil && isPosternAudio(m.Attachment.Mime)
 }
 
+// posternNotTranscribed is what a voice note is said to be when this host has
+// no transcriber to hear it: the words the printed line and the bead comment
+// carry, so the audio's path is never the only sign that nothing was heard.
+const posternNotTranscribed = "voice note, not transcribed: postern_transcribe_cmd is not set"
+
+// isUntranscribedVoiceNote reports whether m is audio this host has no
+// transcriber for: the voice note isVoiceNote leaves to be read as a plain
+// attachment.
+func (i PosternInbox) isUntranscribedVoiceNote(m PosternInboxMessage) bool {
+	return i.Transcriber == nil && m.Attachment != nil && isPosternAudio(m.Attachment.Mime)
+}
+
 // applyVoice hears a voice note the Governor sent, section 14: the audio,
 // already downloaded and decrypted to path, is transcribed; in a bead's
 // thread the transcript is written on the bead as his words

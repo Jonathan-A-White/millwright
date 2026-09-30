@@ -148,6 +148,7 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^bead "([^"]*)" now stands "([^"]*)"$`, c.beadNowStands)
 	ctx.Then(`^bead "([^"]*)" now has priority (\d+)$`, c.beadNowHasPriority)
 	ctx.Then(`^bead "([^"]*)"'s last comment reads "([^"]*)"$`, c.beadsLastCommentReads)
+	ctx.Then(`^bead "([^"]*)"'s last comment contains "([^"]*)"$`, c.beadsLastCommentContains)
 	ctx.Then(`^the txid "([^"]*)" is marked applied$`, c.theTxidIsMarkedApplied)
 	ctx.Then(`^the postern inbox cursor has not moved$`, c.thePosternInboxCursorHasNotMoved)
 	ctx.When(`^mw postern inbox is run$`, c.mwPosternInboxIsRun)
@@ -1154,6 +1155,17 @@ func (c *posternInboxContext) thePosternInboxCursorHasNotMoved() error {
 	}
 	if saved != "" {
 		return fmt.Errorf("expected the cursor not to move, it reads %q", saved)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) beadsLastCommentContains(bead, want string) error {
+	comments, err := c.memory.StoryComments(context.Background(), bead)
+	if err != nil {
+		return err
+	}
+	if len(comments) == 0 || !strings.Contains(comments[len(comments)-1].Text, want) {
+		return fmt.Errorf("expected %s's last comment to contain %q, got %+v", bead, want, comments)
 	}
 	return nil
 }

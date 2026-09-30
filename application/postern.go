@@ -694,7 +694,8 @@ func appliedTxid(applied map[string]string, txid string) bool {
 // attachmentOutcome handles m's attachment, if it carries one: line is what
 // Run prints under the message — the written file's path on success,
 // "attachment refused: hash mismatch", or a download or decrypt failure's
-// error — and path is that file's path, set only on success, for
+// error; a voice note this host has no transcriber for adds why it was not
+// heard — and path is that file's path, set only on success, for
 // recordThreadComment to name in its bead comment. Both are empty for a
 // message with no attachment.
 func (i PosternInbox) attachmentOutcome(ctx context.Context, m PosternInboxMessage) (line, path string) {
@@ -704,6 +705,9 @@ func (i PosternInbox) attachmentOutcome(ctx context.Context, m PosternInboxMessa
 	path, err := i.downloadAttachment(ctx, m)
 	if err != nil {
 		return err.Error(), ""
+	}
+	if i.isUntranscribedVoiceNote(m) {
+		return fmt.Sprintf("%s (%s)", path, posternNotTranscribed), path
 	}
 	return path, path
 }
@@ -965,6 +969,9 @@ func (i PosternInbox) recordThreadCommentOnce(ctx context.Context, m PosternInbo
 		return true, false, nil
 	}
 	comment := fmt.Sprintf("The Governor by postern %s: %s", sentInFull(m.Ts), m.Text)
+	if imagePath != "" && i.isUntranscribedVoiceNote(m) {
+		comment += fmt.Sprintf(" (%s)", posternNotTranscribed)
+	}
 	if imagePath != "" {
 		comment += fmt.Sprintf(" [%s: %s]", posternAttachmentLabel(m.Attachment.Mime), imagePath)
 	}

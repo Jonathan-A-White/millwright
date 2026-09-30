@@ -204,3 +204,12 @@ Feature: mw postern inbox
     And it printed "check this out"
     And the decrypted image is written under the attachment directory
     And bead "mw-thread.4"'s last comment names the decrypted image's path
+
+  Scenario: a voice note on a host that has no transcriber says it was not heard, in the inbox and on the bead
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And bead "mw-thread.5" is known to the tracker
+    And a postern voice note from "governor-pubkey-hex" threaded on bead "mw-thread.5" with txid "voice-txid"
+    When mw postern inbox is run
+    Then reading succeeds
+    And it printed "voice note, not transcribed: postern_transcribe_cmd is not set"
+    And bead "mw-thread.5"'s last comment contains "voice note, not transcribed: postern_transcribe_cmd is not set"
