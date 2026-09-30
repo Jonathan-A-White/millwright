@@ -61,6 +61,8 @@ type posternInboxContext struct {
 	// inbox should have written it to, without hardcoding it in the feature.
 	attachImage []byte
 	attachTxid  string
+	// attachFiles are the files the last "carrying two files" step sent.
+	attachFiles []attachedFile
 
 	messages    []application.PosternInboxMessage
 	unreadCount int
@@ -126,6 +128,10 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 		c.aPosternMessageFromThreadedOnBeadCarryingAScreenshot)
 	ctx.Given(`^a postern message from "([^"]*)" on topic "([^"]*)" with text "([^"]*)" and txid "([^"]*)"$`,
 		c.aPosternMessageFromOnTopic)
+	ctx.Given(`^a postern message from "([^"]*)" with text "([^"]*)" and txid "([^"]*)" carrying two files$`,
+		c.aPosternMessageFromCarryingTwoFiles)
+	ctx.Then(`^both files of the post are written and printed under the attachment directory$`,
+		c.bothFilesOfThePostAreWrittenAndPrinted)
 
 	ctx.Given(`^a postern action "([^"]*)" on bead "([^"]*)" from "([^"]*)" with txid "([^"]*)"$`, c.aPosternActionOnBeadFrom)
 	ctx.Given(`^a postern priority (\d+) action on bead "([^"]*)" from the Governor with txid "([^"]*)"$`, c.aPosternPriorityActionFromTheGovernor)
@@ -356,6 +362,86 @@ func (c *posternInboxContext) aPosternMessageFromThreadedOnBeadCarryingAScreensh
 	})
 	c.attachImage = image
 	c.attachTxid = txid
+	return nil
+}
+
+// aPosternMessageFromCarryingTwoFiles adds a general-thread message whose
+// plaintext carries an `attachments` array of a stand-in PNG and a stand-in
+// JPEG, each encrypted to this key and stored under its sha256 hash.
+func (c *posternInboxContext) aPosternMessageFromCarryingTwoFiles(from, text, txid string) error {
+	c.cipher.From = from
+	c.attachTxid = txid
+	c.attachFiles = nil
+	var entries []*application.PosternAttachment
+	for _, file := range []struct {
+		mime, ext string
+		content   []byte
+	}{
+		{"image/png", ".png", bytes.Repeat([]byte{0x89, 0x50, 0x4e, 0x47}, 300)},
+		{"image/jpeg", ".jpg", bytes.Repeat([]byte{0xff, 0xd8, 0xff, 0xe0}, 300)},
+	} {
+		sealed, err := c.cipher.Encrypt(c.pubKey, string(file.content))
+		if err != nil {
+			return err
+		}
+		raw, err := base64.StdEncoding.DecodeString(sealed)
+		if err != nil {
+			return err
+		}
+		sum := sha256.Sum256(raw)
+		hash := hex.EncodeToString(sum[:])
+		c.backend.SetBlob(hash, raw)
+		entries = append(entries, &application.PosternAttachment{Hash: hash, Size: int64(len(raw)), Mime: file.mime})
+		name := fmt.Sprintf("%s-%d%s", txid, len(entries), file.ext)
+		c.attachFiles = append(c.attachFiles, attachedFile{filepath.Join(c.attachDir, name), file.content})
+	}
+	wrapped, err := json.Marshal(application.PosternThreadedMessage{Text: text, Attachments: entries})
+	if err != nil {
+		return err
+	}
+	ciphertext, err := c.cipher.Encrypt(c.pubKey, string(wrapped))
+	if err != nil {
+		return err
+	}
+	c.backend.AddRecord(application.PosternRecord{
+		Txid: txid, Class: "message", From: from, To: c.pubKey, Ts: posternReplyStamp, Ciphertext: ciphertext,
+	})
+	return nil
+}
+
+// attachedFile is a file a message carried: where mw postern inbox should have
+// written it, and what it should hold.
+type attachedFile struct {
+	path    string
+	content []byte
+}
+
+func (c *posternInboxContext) bothFilesOfThePostAreWrittenAndPrinted() error {
+	if err := c.itSucceeds(); err != nil {
+		return err
+	}
+	if len(c.attachFiles) == 0 {
+		return fmt.Errorf("no files were carried to check")
+	}
+	for _, file := range c.attachFiles {
+		info, err := os.Stat(file.path)
+		if err != nil {
+			return fmt.Errorf("expected %s to exist: %w", file.path, err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			return fmt.Errorf("expected %s to be mode 0600, got %o", file.path, info.Mode().Perm())
+		}
+		written, err := os.ReadFile(file.path)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(written, file.content) {
+			return fmt.Errorf("expected %s to hold the decrypted file, got %d bytes", file.path, len(written))
+		}
+		if !strings.Contains(c.out.String(), "\n"+file.path+"\n") {
+			return fmt.Errorf("expected the output to print %s on its own line, got:\n%s", file.path, c.out.String())
+		}
+	}
 	return nil
 }
 

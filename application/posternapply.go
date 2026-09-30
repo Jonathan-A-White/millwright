@@ -168,11 +168,12 @@ func (i PosternInbox) Apply(ctx context.Context) ([]string, error) {
 		if pass.onBoost(i.Host) || !m.Verified || !i.isGovernor(m) {
 			continue
 		}
-		var outcome, path string
-		if m.Attachment != nil && (m.ThreadIsBead || i.isVoiceNote(m)) {
-			outcome, path = i.attachmentOutcome(ctx, m)
+		var outcome string
+		var saved []posternSavedFile
+		if len(m.files()) > 0 && (m.ThreadIsBead || i.isVoiceNote(m)) {
+			outcome, saved = i.attachmentOutcome(ctx, m)
 		}
-		result, handled, err := i.applyOne(ctx, m, outcome, path)
+		result, handled, err := i.applyOne(ctx, m, outcome, saved)
 		if err != nil {
 			return lines, err
 		}
@@ -255,10 +256,10 @@ func (i PosternInbox) markApplied(ctx context.Context, applied map[string]string
 }
 
 // applyOne applies one verified message from the Governor, reporting what it
-// did and whether it was one to apply at all. outcome and path are its
-// attachment's download, when it has one and was downloaded: the line a
-// reader is shown, and the file written.
-func (i PosternInbox) applyOne(ctx context.Context, m PosternInboxMessage, outcome, path string) (posternApplied, bool, error) {
+// did and whether it was one to apply at all. outcome and saved are its
+// attachments' download, when it has any and they were downloaded: the lines
+// a reader is shown, and each file written.
+func (i PosternInbox) applyOne(ctx context.Context, m PosternInboxMessage, outcome string, saved []posternSavedFile) (posternApplied, bool, error) {
 	if reply, ok := decodePosternReply(m.Text); ok {
 		recorded, err := i.recordAnswer(ctx, m, reply)
 		if err != nil || !recorded {
@@ -280,11 +281,16 @@ func (i PosternInbox) applyOne(ctx context.Context, m PosternInboxMessage, outco
 		return result, err == nil, err
 	}
 	if i.isVoiceNote(m) {
+		// A voice note is one single attachment, so at most one file.
+		path := ""
+		if len(saved) > 0 {
+			path = saved[0].Path
+		}
 		result, err := i.applyVoice(ctx, m, outcome, path)
 		return result, err == nil, err
 	}
 	if m.ThreadIsBead {
-		recorded, fresh, err := i.recordThreadCommentOnce(ctx, m, path)
+		recorded, fresh, err := i.recordThreadCommentOnce(ctx, m, saved)
 		if err != nil || !recorded {
 			return posternApplied{}, false, err
 		}
@@ -296,8 +302,8 @@ func (i PosternInbox) applyOne(ctx context.Context, m PosternInboxMessage, outco
 			return posternApplied{}, false, err
 		}
 		result := posternApplied{Kind: "comment", Bead: m.Thread, Txid: m.Txid}
-		if path != "" {
-			result.Detail = fmt.Sprintf("[%s: %s]", posternAttachmentLabel(m.Attachment.Mime), path)
+		if len(saved) > 0 {
+			result.Detail = posternSavedNames(saved)
 		}
 		return result, true, nil
 	}

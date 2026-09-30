@@ -205,6 +205,14 @@ Feature: mw postern inbox
     And the decrypted image is written under the attachment directory
     And bead "mw-thread.4"'s last comment names the decrypted image's path
 
+  Scenario: a post with several files: each is saved and named
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And a postern message from "governor-pubkey-hex" with text "two shots" and txid "many-txid" carrying two files
+    When mw postern inbox is run
+    Then reading succeeds
+    And it printed "two shots"
+    And both files of the post are written and printed under the attachment directory
+
   Scenario: a voice note on a host that has no transcriber says it was not heard, in the inbox and on the bead
     Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
     And bead "mw-thread.5" is known to the tracker
