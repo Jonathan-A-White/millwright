@@ -216,6 +216,7 @@ type Harness struct {
 	permissionMode string
 	tests          map[string]string
 	envFile        string
+	serverHost     string
 }
 
 // Harness satisfies the port.
@@ -257,6 +258,16 @@ func WithTests(commands map[string]string) Option {
 // nothing. An empty path does nothing.
 func WithEnvFile(path string) Option {
 	return func(h *Harness) { h.envFile = path }
+}
+
+// WithBeadsServerHost names the host a session's bd reaches the beads database
+// server on: the session exports BEADS_DOLT_SERVER_HOST as this after reading
+// the env file, so the file's own host — right when it was written, wrong once
+// the home has moved — does not decide it (mw-j3iis.2). The host is a value,
+// not a secret, so it may be on the command line; nothing else from the file
+// ever is. An empty host does nothing, and the file's value stands.
+func WithBeadsServerHost(host string) Option {
+	return func(h *Harness) { h.serverHost = host }
 }
 
 // New returns a Harness that runs Claude Code as this host has it, unless an
@@ -351,6 +362,9 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 	// heartbeat and the harness, so that the close-out chained on after them
 	// inherits it too. Nothing reads the file here: the line holds only its
 	// path, and a file that is missing or unreadable is skipped (mw-43v9x.23).
+	if h.serverHost != "" {
+		line = "export BEADS_DOLT_SERVER_HOST=" + shellQuote(h.serverHost) + "; " + line
+	}
 	if h.envFile != "" {
 		q := shellQuote(h.envFile)
 		line = "if [ -r " + q + " ]; then set -a; . " + q + "; set +a; fi; " + line
@@ -510,13 +524,15 @@ func (h *Harness) SeatSession(l application.SeatLaunch) (application.WindowSpec,
 
 // withEnvFile puts the host's beads environment in front of a seat's argv
 // without a shell ever reading the argv: a fixed one-line script reads the
-// file if it is readable, then replaces itself with "$@". The file's path and
-// the program are arguments of it, so the kickoff still arrives untouched. No
-// file configured leaves the argv as it was.
+// file if it is readable, exports the server host when one was given, then
+// replaces itself with "$@". The file's path, the host and the program are
+// arguments of it, so the kickoff still arrives untouched. Neither a file nor
+// a host configured leaves the argv as it was.
 func (h *Harness) withEnvFile(argv []string) []string {
-	if h.envFile == "" {
+	if h.envFile == "" && h.serverHost == "" {
 		return argv
 	}
-	const script = `f=$1; shift; if [ -r "$f" ]; then set -a; . "$f"; set +a; fi; exec "$@"`
-	return append([]string{h.shell, "-c", script, "sh", h.envFile}, argv...)
+	const script = `f=$1; h=$2; shift 2; if [ -r "$f" ]; then set -a; . "$f"; set +a; fi; ` +
+		`if [ -n "$h" ]; then export BEADS_DOLT_SERVER_HOST="$h"; fi; exec "$@"`
+	return append([]string{h.shell, "-c", script, "sh", h.envFile, h.serverHost}, argv...)
 }

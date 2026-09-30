@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 
 	"github.com/spf13/cobra"
@@ -134,6 +136,32 @@ func hostBeads(ctx context.Context, files application.HomeFile, host string) (ho
 		}
 	}
 	return setting, nil
+}
+
+// sessionHarness is the Claude Code harness for the sessions this host starts:
+// reading beads.env first, then pointing bd at the server host the home says
+// (application.SessionServerHost), so that a move of the home is followed by
+// every session without anyone rewriting the file. That host is also set in
+// this process's environment, where the bd that mw runs itself reads it. A host
+// that cannot be told — no beads_sync auto, no home file, a config error that
+// the commands around this one report on their own — leaves both as they were.
+func sessionHarness(vaultDir, host string, opts ...claude.Option) *claude.Harness {
+	opts = append(opts, claude.WithEnvFile(beadsEnvFile()))
+	configured, err := hostBeadsSync()
+	if err != nil {
+		return claude.New(opts...)
+	}
+	override, err := config.BeadsServerHost()
+	if err != nil {
+		return claude.New(opts...)
+	}
+	info, statErr := os.Stat(filepath.Join(vaultDir, ".beads", "dolt"))
+	server := application.SessionServerHost(context.Background(), mwVault(vaultDir, host), host, configured, override, statErr == nil && info.IsDir())
+	if server != "" {
+		_ = os.Setenv(config.BeadsDoltServerHostEnv, server)
+		opts = append(opts, claude.WithBeadsServerHost(server))
+	}
+	return claude.New(opts...)
 }
 
 // hostSync is sync with this host's beads_sync mode and backup interval set

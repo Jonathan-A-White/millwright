@@ -312,6 +312,26 @@ the ways back themselves (the vault revert and the database restore were run for
 against scratch repositories). The date of `refs/dolt/data` was read from the real vault's
 GitHub remote, read-only: 0.6 s, 148 KB.
 
+## Which server host a session's bd reaches
+
+`beads.env` holds `BEADS_DOLT_SERVER_HOST` as it was when the file was written, and a move
+of the home makes that wrong (the desktop's file says `10.88.0.2`, the Laptop). Nothing
+rewrites the file. Instead every session `mw` starts (a Builder's, the Millhand's and its
+tick's, a seat's window) sources the file first, then exports the host `mw` resolved from
+the home file, which wins:
+
+- on a boost under `beads_sync = "auto"`: `beads_server_host`, or `<home>.mw`;
+- on the home under `auto`: `127.0.0.1` (`dolt-beads.service` binds `0.0.0.0:3307`), but only
+  when the vault holds `.beads/dolt`; a home that stayed embedded is left with the file's value;
+- any other `beads_sync`, or a home that cannot be told: nothing is exported, and the
+  file's value stands.
+
+`mw` sets the same host in its own environment, so the `bd` it runs itself agrees. The
+password and the file's other values are never put on a command line; the host is a value, not
+a secret. **A long-lived seat window (the Mayor's) keeps the host it was started with until it
+is respawned**: after a move, `mw seat up mayor` (or the handoff that does it) is what
+makes it reach the new home.
+
 **Not checked: a real move.** Two host facts are assumed from the story, not seen:
 
 - **The `dolt-beads` server's data directory.** Step 2 sets the *embedded* database and

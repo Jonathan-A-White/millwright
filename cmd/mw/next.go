@@ -211,7 +211,7 @@ func beadsEnvFile() string {
 func builderBoot(files *vault.Vault, host string, tests map[string]string) application.SeatBoot {
 	return application.SeatBoot{
 		Vault:     files,
-		Harness:   claude.New(claude.WithTests(tests), claude.WithEnvFile(beadsEnvFile())),
+		Harness:   sessionHarness(files.Dir(), host, claude.WithTests(tests)),
 		Seat:      BuilderSeat,
 		Host:      host,
 		After:     afterSession(),

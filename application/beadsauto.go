@@ -26,6 +26,34 @@ func BoostServerHost(home, override string) string {
 	return home + BoostServerSuffix
 }
 
+// HomeServerHost is the host the home's own bd reaches its Dolt server on:
+// dolt-beads.service binds every address, so the loopback one always answers.
+const HomeServerHost = "127.0.0.1"
+
+// SessionServerHost is the BEADS_DOLT_SERVER_HOST a session this host starts is
+// given, to follow the home as it moves rather than what beads.env said when it
+// was written (mw-j3iis.2). On a boost it is the home's server (BoostServerHost);
+// on the home it is HomeServerHost, but only when holdsServer says the vault is
+// in server mode (it holds .beads/dolt), so a home that stayed embedded has
+// nothing set. It is empty, and the session keeps what its environment had, for
+// any beads_sync but auto and for a home that cannot be told: nothing is guessed.
+func SessionServerHost(ctx context.Context, files HomeFile, host string, configured BeadsSyncMode, override string, holdsServer bool) string {
+	if configured != BeadsSyncAuto {
+		return ""
+	}
+	resolved, err := ResolveBeadsSync(ctx, files, host, configured)
+	if err != nil {
+		return ""
+	}
+	switch {
+	case resolved.Mode == BeadsSyncShared:
+		return BoostServerHost(resolved.Home, override)
+	case holdsServer:
+		return HomeServerHost
+	}
+	return ""
+}
+
 // ResolvedBeadsSync is a beads_sync mode as this host acts on it: never auto.
 type ResolvedBeadsSync struct {
 	// Mode is remote, backup or shared.

@@ -820,3 +820,93 @@ func TestASeatSessionRefusesAModelOrEffortItCannotRun(t *testing.T) {
 		}
 	}
 }
+
+// TestServerHostIsExportedAfterTheEnvFileIsSourced: beads.env names a server
+// host of its own, which a move of the home makes wrong, so the session's line
+// says the host mw resolved after reading the file — the later assignment wins
+// — and never holds the file's values (mw-j3iis.2).
+func TestServerHostIsExportedAfterTheEnvFileIsSourced(t *testing.T) {
+	const file = "/home/jwhite/.config/mw/beads.env"
+	spec, err := New(WithEnvFile(file), WithBeadsServerHost("laptop.mw")).Session(launch(nil))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	line := spec.Command[len(spec.Command)-1]
+	sourced := strings.Index(line, ". '"+file+"'")
+	if sourced < 0 {
+		sourced = strings.Index(line, ". "+file)
+	}
+	exported := strings.Index(line, "export BEADS_DOLT_SERVER_HOST=laptop.mw")
+	if sourced < 0 || exported < 0 || exported < sourced {
+		t.Fatalf("expected the export of the host after the file is sourced, got %q", line)
+	}
+	if strings.Contains(strings.ToLower(line), "password") {
+		t.Errorf("expected no password on the line, got %q", line)
+	}
+}
+
+func TestServerHostWithNoEnvFileIsStillExported(t *testing.T) {
+	spec, err := New(WithBeadsServerHost("127.0.0.1")).Session(launch(nil))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	if line := spec.Command[len(spec.Command)-1]; !strings.Contains(line, "export BEADS_DOLT_SERVER_HOST=127.0.0.1; ") {
+		t.Errorf("expected the host exported, got %q", line)
+	}
+}
+
+func TestNoServerHostLeavesTheEnvFileTheLastWord(t *testing.T) {
+	spec, err := New(WithEnvFile("/h/beads.env")).Session(launch(nil))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	if line := spec.Command[len(spec.Command)-1]; strings.Contains(line, "BEADS_DOLT_SERVER_HOST") {
+		t.Errorf("expected no export of a host that was not given, got %q", line)
+	}
+	window, err := New(WithEnvFile("/h/beads.env")).SeatSession(seatLaunch(nil))
+	if err != nil {
+		t.Fatalf("assembling the seat's session: %v", err)
+	}
+	if window.Command[5] != "" {
+		t.Errorf("expected the seat's command to be given no host, got %q", window.Command[5])
+	}
+}
+
+// TestServerHostReachesTheSeatWindowAfterTheEnvFile: the window's command is an
+// argv, so the host is an argument of the fixed script, which exports it after
+// sourcing the file and before it replaces itself with the program.
+func TestServerHostReachesTheSeatWindowAfterTheEnvFile(t *testing.T) {
+	spec, err := New(WithEnvFile("/h/beads.env"), WithBeadsServerHost("laptop.mw")).SeatSession(seatLaunch(nil))
+	if err != nil {
+		t.Fatalf("assembling the seat's session: %v", err)
+	}
+	if spec.Command[1] != "-c" || spec.Command[3] != "sh" {
+		t.Fatalf("expected a fixed script run by the shell, got %q", spec.Command)
+	}
+	script := spec.Command[2]
+	sourced := strings.Index(script, `. "$f"`)
+	exported := strings.Index(script, "BEADS_DOLT_SERVER_HOST")
+	execd := strings.Index(script, `exec "$@"`)
+	if sourced < 0 || exported < sourced || execd < exported {
+		t.Errorf("expected source, then export, then exec, got %q", script)
+	}
+	if strings.Contains(script, "laptop.mw") {
+		t.Errorf("expected the host to be an argument, not part of the script, got %q", script)
+	}
+	if !slices.Contains(spec.Command, "laptop.mw") {
+		t.Errorf("expected the host among the arguments, got %q", spec.Command)
+	}
+	if last := spec.Command[len(spec.Command)-1]; last != seatLaunch(nil).Kickoff {
+		t.Errorf("expected the kickoff still last, got %q", last)
+	}
+}
+
+func TestServerHostWithNoEnvFileReachesTheSeatWindow(t *testing.T) {
+	spec, err := New(WithBeadsServerHost("laptop.mw")).SeatSession(seatLaunch(nil))
+	if err != nil {
+		t.Fatalf("assembling the seat's session: %v", err)
+	}
+	if !slices.Contains(spec.Command, "laptop.mw") || spec.Command[0] == Program {
+		t.Errorf("expected the host carried by a script, got %q", spec.Command)
+	}
+}

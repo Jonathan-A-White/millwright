@@ -41,3 +41,35 @@ Feature: A session mw starts reads the host's beads environment first
     Then the stand-ins all ran
     And no name starting BEADS_DOLT_ was recorded
     And the harness was handed the kickoff exactly as it was written
+
+  # mw-j3iis.2: beads.env names the server host as it was when the file was
+  # written, and is read first. The host mw resolves from the home file is
+  # exported after it, so a move of the home is followed without the file being
+  # rewritten.
+  Scenario: A Builder session on a boost reaches the server of the home the home file names
+    Given a home directory whose beads.env names the server host "host-a"
+    And the vault's home file names "desktop" as the home and this host is "laptop"
+    And the vault holds .beads/dolt
+    When a Builder session is started and its line runs, with a stand-in for the harness
+    Then the harness saw the server host "desktop.mw"
+
+  Scenario: The same session, once this host is the home, reaches its own server
+    Given a home directory whose beads.env names the server host "host-a"
+    And the vault's home file names "laptop" as the home and this host is "laptop"
+    And the vault holds .beads/dolt
+    When a Builder session is started and its line runs, with a stand-in for the harness
+    Then the harness saw the server host "127.0.0.1"
+
+  Scenario: A home that holds no .beads/dolt leaves the session the file's host
+    Given a home directory whose beads.env names the server host "host-a"
+    And the vault's home file names "laptop" as the home and this host is "laptop"
+    And the vault holds no .beads/dolt
+    When a Builder session is started and its line runs, with a stand-in for the harness
+    Then the harness saw the server host "host-a"
+
+  Scenario: A seat window follows the home as a Builder session does
+    Given a home directory whose beads.env names the server host "host-a"
+    And the vault's home file names "desktop" as the home and this host is "laptop"
+    And the vault holds .beads/dolt
+    When a seat window is started and its command runs, with a stand-in for the harness
+    Then the harness saw the server host "desktop.mw"
