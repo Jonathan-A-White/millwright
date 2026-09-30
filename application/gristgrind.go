@@ -520,34 +520,33 @@ func (g GristGrind) grindOne(ctx context.Context, w *gristWork, privKey string) 
 	if w.status != "" {
 		return
 	}
-	tag := gristTag()
-	result, err := g.Grinder.Grind(ctx, GrindCall{
-		Dir:     dir,
-		Model:   w.grind.Model,
-		Effort:  w.grind.Effort,
-		System:  gristPreamble(w.plain.Grist, tag) + "\n\n" + w.system,
-		Schema:  w.schema,
-		Prompt:  gristPrompt(w.plain, photos, tag),
-		Timeout: g.Ceilings.filled().Timeout,
-	})
+	result, err := g.Grinder.Grind(ctx, gristGrindCall(dir, w.plain, photos, w.grind.Model, w.grind.Effort, w.system, w.schema, g.Ceilings.filled().Timeout))
 	w.result = result
+	status, reason := gristOutcome(result, err, w.schema)
+	if status == GristAnswered {
+		w.answer = result.Answer
+	}
+	w.settle(status, reason)
+}
+
+// gristOutcome is how a grind ended: answered, refused or failed, and the
+// reason when it was not answered.
+func gristOutcome(result SessionResult, err error, schema string) (status, reason string) {
 	switch {
 	case errors.Is(err, ErrGrindTimedOut):
-		w.settle(GristFailed, GristReasonTimedOut)
+		return GristFailed, GristReasonTimedOut
 	case err != nil:
-		w.settle(GristFailed, GristReasonSessionEnd)
+		return GristFailed, GristReasonSessionEnd
 	case result.StopReason == "refusal" || strings.Contains(strings.ToLower(result.Subtype), "refus"):
-		w.settle(GristRefused, GristReasonDeclined)
+		return GristRefused, GristReasonDeclined
 	case strings.Contains(result.Subtype, "structured_output"):
-		w.settle(GristFailed, GristReasonNoAnswer)
+		return GristFailed, GristReasonNoAnswer
 	case !result.Finished():
-		w.settle(GristFailed, GristReasonSessionEnd)
-	case !fitsSchema(result.Answer, w.schema):
-		w.settle(GristFailed, GristReasonNoAnswer)
-	default:
-		w.answer = result.Answer
-		w.settle(GristAnswered, "")
+		return GristFailed, GristReasonSessionEnd
+	case !fitsSchema(result.Answer, schema):
+		return GristFailed, GristReasonNoAnswer
 	}
+	return GristAnswered, ""
 }
 
 // openPhotos downloads each photo, checks it is the blob announced and was
@@ -612,6 +611,22 @@ func fitsSchema(answer json.RawMessage, schema string) bool {
 		}
 	}
 	return true
+}
+
+// gristGrindCall is the one grind the mill runs for one grist, and `mw grist
+// eval` runs for one photo: the mill's preamble then the grind's
+// instructions as the system prompt, and the prompt naming the photos.
+func gristGrindCall(dir string, plain GristPlaintext, photos []string, model, effort, instructions, schema string, timeout time.Duration) GrindCall {
+	tag := gristTag()
+	return GrindCall{
+		Dir:     dir,
+		Model:   model,
+		Effort:  effort,
+		System:  gristPreamble(plain.Grist, tag) + "\n\n" + instructions,
+		Schema:  schema,
+		Prompt:  gristPrompt(plain, photos, tag),
+		Timeout: timeout,
+	}
 }
 
 // gristTag is a fresh random tag for the lines the app's request sits
