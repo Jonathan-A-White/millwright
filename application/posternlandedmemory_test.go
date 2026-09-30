@@ -154,7 +154,7 @@ func TestLandedMemoryPastTheCapDropsTheOldestClosedFirst(t *testing.T) {
 
 // What the landed and verify cards show survives the memory: the newest three
 // comments, newest first, each cut to PosternLandedMemoryTextLimit runes, and
-// the first sentence of the Mayor's landing check even when that comment is
+// the HOW TO CHECK IT section of the closing comment even when that comment is
 // long, old, and outside those three — the same on the run that read the
 // comments and on the run that remembered them.
 func TestLandedAndVerifyCardsAreTheSameFromTheMemoryAsFromTheComments(t *testing.T) {
@@ -163,14 +163,13 @@ func TestLandedAndVerifyCardsAreTheSameFromTheMemoryAsFromTheComments(t *testing
 	liveEpic(tracker, "mw-a", domain.Path{})
 	tracker.AddStory("mw-a", domain.Story{ID: "mw-a.1", Title: "Landed thing."})
 	closedAt(t, tracker, "mw-a.1", viewNow.Add(-time.Hour))
-	check := "Landing checked: merged clean, tests green. " + strings.Repeat("More detail. ", 500)
+	check := "HOW TO CHECK IT, for the Governor:\n1. Open the app.\n2. Merged clean, tests green.\nFor the rig memory: nothing\n" + strings.Repeat("More detail. ", 500)
 	mustDo(t, tracker.CommentOnStory(ctx, "mw-a.1", check))
 	mustDo(t, tracker.CommentOnStory(ctx, "mw-a.1", "short"))
 	mustDo(t, tracker.CommentOnStory(ctx, "mw-a.1", strings.Repeat("é", 5000)))
 	mustDo(t, tracker.CommentOnStory(ctx, "mw-a.1", strings.Repeat("x", 600)))
 
-	wantVerify := "Landed 28 Sep 11:00 UTC: Landed thing. Checked by the Mayor: merged clean, tests green. " +
-		"Tap Verified if you have looked; optional, clears by itself 29 Sep 11:00 UTC."
+	wantVerify := "1. Open the app.\n2. Merged clean, tests green."
 	for _, run := range []string{"read from the comments", "remembered"} {
 		doc := viewDoc(t, tracker)
 		if got := viewNeed(t, doc, "verify", "mw-a.1").Text; got != wantVerify {

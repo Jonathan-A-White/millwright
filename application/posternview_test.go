@@ -292,6 +292,7 @@ func TestPosternViewListsEveryKindOfNeed(t *testing.T) {
 	// day and a half ago.
 	tracker.AddStory("mw-a", domain.Story{ID: "mw-a.4", Title: "Landed"})
 	closedAt(t, tracker, "mw-a.4", viewNow.Add(-time.Hour))
+	mustDo(t, tracker.CommentOnStory(ctx, "mw-a.4", "HOW TO CHECK IT: 1. Open the app."))
 	tracker.AddStory("mw-a", domain.Story{ID: "mw-a.5", Title: "Landed and verified"})
 	closedAt(t, tracker, "mw-a.5", viewNow.Add(-time.Hour))
 	mustDo(t, tracker.CommentOnStory(ctx, "mw-a.5", "VERIFIED by the Governor via postern (x)"))
