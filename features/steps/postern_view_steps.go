@@ -123,6 +123,10 @@ func (c *posternViewContext) theViewsBeadWaitsOn(id, epic, on string) error {
 
 func (c *posternViewContext) closeAt(id, epic string, at time.Time) error {
 	c.tracker.AddStory(epic, domain.Story{ID: id, Title: "Story " + id})
+	// Closed as mw next closes a landing: run:landed is recorded first.
+	if err := c.tracker.SetStoryState(context.Background(), id, application.RunState, application.RunLanded, "landed"); err != nil {
+		return err
+	}
 	if err := c.tracker.SetStatus(id, apptest.StatusClosed); err != nil {
 		return err
 	}

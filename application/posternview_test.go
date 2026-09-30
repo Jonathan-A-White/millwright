@@ -105,7 +105,16 @@ func liveEpic(tracker *apptest.FakeTracker, id string, defaults domain.Path) {
 	tracker.DescribeEpic(id, "Epic "+id, apptest.StatusOpen, 1)
 }
 
+// closedAt closes a story as mw next lands one: recorded run:landed.
 func closedAt(t *testing.T, tracker *apptest.FakeTracker, id string, at time.Time) {
+	t.Helper()
+	mustDo(t, tracker.SetStoryState(context.Background(), id, application.RunState, application.RunLanded, "landed on main"))
+	droppedAt(t, tracker, id, at)
+}
+
+// droppedAt closes a story that never landed: the Governor dropped it, so no
+// run state is recorded.
+func droppedAt(t *testing.T, tracker *apptest.FakeTracker, id string, at time.Time) {
 	t.Helper()
 	mustDo(t, tracker.SetStatus(id, apptest.StatusClosed))
 	mustDo(t, tracker.SetClosedAt(id, at))
@@ -924,4 +933,21 @@ func TestPosternViewOnlyACommentBeginningVERIFIEDClearsAVerifyNeed(t *testing.T)
 	viewLacksNeed(t, doc, "verify", "mw-a.3")
 	viewNeed(t, doc, "verify", "mw-a.4")
 	viewNeed(t, doc, "verify", "mw-a.5")
+}
+
+// A story closed without landing, dropped on his word, is not a landing for
+// him to check: only a story mw next landed, which it records as run:landed,
+// makes a verify need.
+func TestPosternViewADroppedStoryMakesNoVerifyNeed(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	liveEpic(tracker, "mw-a", domain.Path{})
+	tracker.AddStory("mw-a", domain.Story{ID: "mw-a.1", Title: "Landed"})
+	closedAt(t, tracker, "mw-a.1", viewNow.Add(-time.Hour))
+	tracker.AddStory("mw-a", domain.Story{ID: "mw-a.2", Title: "Dropped"})
+	droppedAt(t, tracker, "mw-a.2", viewNow.Add(-time.Hour))
+
+	doc := viewDoc(t, tracker)
+
+	viewNeed(t, doc, "verify", "mw-a.1")
+	viewLacksNeed(t, doc, "verify", "mw-a.2")
 }
