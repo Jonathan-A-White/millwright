@@ -77,6 +77,8 @@ type gristContext struct {
 	governor  string
 	phoneKey  string
 	phoneApps []string
+	askModel  string // what the next grist asks for; empty is nothing
+	askEffort string
 
 	grist  application.PosternRecord
 	photos map[string][]byte // blob hash to the photo it seals
@@ -121,6 +123,8 @@ func InitializeGristScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the grind finishes without a structured answer$`, c.theGrindGivesNoAnswer)
 	ctx.Given(`^the factory allows at most (\d+) photos a grist$`, c.theFactoryAllowsPhotos)
 	ctx.Given(`^the factory allows only the models "([^"]*)"$`, c.theFactoryAllowsModels)
+	ctx.Given(`^the factory allows only the efforts "([^"]*)"$`, c.theFactoryAllowsEfforts)
+	ctx.Given(`^the grist asks for the model "([^"]*)" and the effort "([^"]*)"$`, c.theGristAsksFor)
 	ctx.Given(`^the factory allows (\d+) grist a day from one key$`, c.theFactoryAllowsADay)
 	ctx.Given(`^the phone has already sent (\d+) grist today$`, c.thePhoneHasSent)
 	ctx.Given(`^a message to the mill key$`, c.aMessageToTheMill)
@@ -145,6 +149,8 @@ func InitializeGristScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the answer says "([^"]*)" with the grind's answer and the commit "([^"]*)"$`, c.theAnswerSaysAnswered)
 	ctx.Then(`^the answer says "([^"]*)" because "([^"]*)"$`, c.theAnswerSaysBecause)
 	ctx.Then(`^the grind ran on "([^"]*)" at "([^"]*)" effort, given the photo by its full path and the request between its markers$`, c.theGrindRan)
+	ctx.Then(`^the grind was called on "([^"]*)" at "([^"]*)" effort$`, c.theGrindWasCalledOn)
+	ctx.Then(`^the mill's record says the model "([^"]*)" came from the "([^"]*)" and the effort "([^"]*)" came from the "([^"]*)"$`, c.theRecordSaysWhere)
 	ctx.Then(`^the grind's private directory is gone$`, c.thePrivateDirectoryIsGone)
 	ctx.Then(`^the grist's photos were deleted from the backend$`, c.thePhotosWereDeleted)
 	ctx.Then(`^the grist's photos are still on the backend$`, c.thePhotosAreStillThere)
@@ -242,7 +248,7 @@ func (c *gristContext) theGovernorSends(app, kind, v string, photos int) error {
 func (c *gristContext) send(key string, apps []string, app, kind, v string, photos int) error {
 	sealer := &apptest.FakeCipher{From: key}
 	plain := c.vectors.Grist
-	plain.Grist = application.GristName{App: app, Kind: kind, V: v}
+	plain.Grist = application.GristName{App: app, Kind: kind, V: v, Model: c.askModel, Effort: c.askEffort}
 	plain.Attachments = nil
 	for i := 1; i <= photos; i++ {
 		photo := []byte(fmt.Sprintf("jpeg bytes of photo %d", i))
@@ -305,6 +311,42 @@ func (c *gristContext) theFactoryAllowsPhotos(n int) error {
 
 func (c *gristContext) theFactoryAllowsModels(models string) error {
 	c.ceilings.Models = strings.Split(models, ",")
+	return nil
+}
+
+func (c *gristContext) theFactoryAllowsEfforts(efforts string) error {
+	c.ceilings.Efforts = strings.Split(efforts, ",")
+	return nil
+}
+
+func (c *gristContext) theGristAsksFor(model, effort string) error {
+	c.askModel, c.askEffort = model, effort
+	return nil
+}
+
+func (c *gristContext) theGrindWasCalledOn(model, effort string) error {
+	seen, err := c.onlyGrind()
+	if err != nil {
+		return err
+	}
+	if seen.Call.Model != model || seen.Call.Effort != effort {
+		return fmt.Errorf("expected the grind called on %s at %s, got %s at %s", model, effort, seen.Call.Model, seen.Call.Effort)
+	}
+	return nil
+}
+
+func (c *gristContext) theRecordSaysWhere(model, modelFrom, effort, effortFrom string) error {
+	lines, err := c.state.Lines(context.Background())
+	if err != nil {
+		return err
+	}
+	if len(lines) != 1 {
+		return fmt.Errorf("expected one line in the record, got %d", len(lines))
+	}
+	line := lines[0]
+	if line.Model != model || line.ModelFrom != modelFrom || line.Effort != effort || line.EffortFrom != effortFrom {
+		return fmt.Errorf("expected model %s from the %s and effort %s from the %s, got %+v", model, modelFrom, effort, effortFrom, line)
+	}
 	return nil
 }
 

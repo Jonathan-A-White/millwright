@@ -70,6 +70,53 @@ Feature: mw grist grind, the mill
     Then the answer says "refused" because "The factory does not allow this grind's model."
     And no grind was run
 
+  Scenario: A grist that asks for a model and an effort is ground with them
+    Given the grist asks for the model "haiku" and the effort "medium"
+    And the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
+    And the grind answers with a sweep result
+    When the mill grinds
+    Then the mill answered 1, refused 0, failed 0, and left 0 waiting
+    And the grind was called on "haiku" at "medium" effort
+    And the mill's record says the model "haiku" came from the "grist" and the effort "medium" came from the "grist"
+
+  Scenario: A grist that asks for only a model takes the grind file's effort
+    Given the grist asks for the model "opus" and the effort ""
+    And the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
+    And the grind answers with a sweep result
+    When the mill grinds
+    Then the grind was called on "opus" at "low" effort
+    And the mill's record says the model "opus" came from the "grist" and the effort "low" came from the "grind file"
+
+  Scenario: A grist that asks for nothing is ground with the grind file's model and effort
+    Given the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
+    And the grind answers with a sweep result
+    When the mill grinds
+    Then the grind was called on "sonnet" at "low" effort
+    And the mill's record says the model "sonnet" came from the "grind file" and the effort "low" came from the "grind file"
+
+  Scenario: A grist asking for a model the factory does not allow is refused
+    Given the factory allows only the models "haiku,sonnet"
+    And the grist asks for the model "opus" and the effort ""
+    And the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
+    When the mill grinds
+    Then the answer says "refused" because "The factory does not allow the model opus this grist asks for."
+    And no grind was run
+
+  Scenario: A grist asking for an effort above the factory's cap is refused
+    Given the grist asks for the model "" and the effort "max"
+    And the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
+    When the mill grinds
+    Then the answer says "refused" because "The factory does not allow the effort max this grist asks for."
+    And no grind was run
+
+  Scenario: The factory's effort cap can be widened
+    Given the factory allows only the efforts "low,max"
+    And the grist asks for the model "" and the effort "max"
+    And the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
+    And the grind answers with a sweep result
+    When the mill grinds
+    Then the grind was called on "sonnet" at "max" effort
+
   Scenario: A sender over the daily limit is refused
     Given the factory allows 2 grist a day from one key
     And the phone has already sent 2 grist today

@@ -1070,8 +1070,11 @@ together never take the same slot. `mw dispatch` counts a running grind as one
 of its sessions. After answering, the grist's photos are
 deleted from the backend. Each grist handled adds one line to
 `grinds.jsonl` in `grist_state_dir` (default `~/.local/state/mw/grist`): time,
-txid, app, kind, sender fingerprint, model, status, reason, Fuel, seconds and
-commit, never the grist's content.
+txid, app, kind, sender fingerprint, model, effort, where each came from, status,
+reason, Fuel, seconds and commit, never the grist's content. A grist's `grist`
+header may carry `model` and `effort`: they replace the grind file's for that
+grist, and must be within `[grist]` `models` and `efforts`, else the grist is
+refused naming the value.
 
 ```toml
 grist_key_file  = "/home/jwhite/.config/mw/mill.key"   # MW_GRIST_KEY_FILE
@@ -1079,6 +1082,7 @@ grist_state_dir = "/home/jwhite/.local/state/mw/grist" # MW_GRIST_STATE_DIR
 
 [grist]                  # the ceilings above every grind; these are the defaults
 models = "haiku,sonnet,opus"
+efforts = "low,medium,high"   # what a grist may ask for; the grind file's own effort is not held to it
 max_attachments = 4
 max_attachment_bytes = 8388608
 daily_limit = 50         # grist a day from one key

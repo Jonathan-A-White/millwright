@@ -498,6 +498,7 @@ var DefaultGristStateDir = filepath.Join(".local", "state", "mw", "grist")
 // application's own defaults are the same.
 const (
 	DefaultGristModels             = "haiku,sonnet,opus"
+	DefaultGristEfforts            = "low,medium,high"
 	DefaultGristMaxAttachments     = 4
 	DefaultGristMaxAttachmentBytes = 8388608
 	DefaultGristDailyLimit         = 50
@@ -599,6 +600,7 @@ func GristConfigured() (bool, error) {
 // GristSettings are the factory's ceilings above every grind.
 type GristSettings struct {
 	Models             []string
+	Efforts            []string
 	MaxAttachments     int
 	MaxAttachmentBytes int64
 	DailyLimit         int
@@ -607,6 +609,7 @@ type GristSettings struct {
 
 // Grist reports the ceilings of the `[grist]` table of
 // ~/.config/mw/config.toml: `models` (a list, or one string with commas),
+// `efforts` (the efforts a grist may ask for, the same way),
 // `max_attachments`, `max_attachment_bytes`, `daily_limit` (grist a day from
 // one key) and `timeout` (a Go duration, "10m"), each its default when the
 // table says nothing.
@@ -620,9 +623,12 @@ func Grist() (GristSettings, error) {
 	if err != nil {
 		return GristSettings{}, err
 	}
-	settings := GristSettings{Models: list(DefaultGristModels), Timeout: DefaultGristTimeout}
+	settings := GristSettings{Models: list(DefaultGristModels), Efforts: list(DefaultGristEfforts), Timeout: DefaultGristTimeout}
 	if models := list(table["models"]); len(models) > 0 {
 		settings.Models = models
+	}
+	if efforts := list(table["efforts"]); len(efforts) > 0 {
+		settings.Efforts = efforts
 	}
 	most, err := countIn(table, "max_attachments", DefaultGristMaxAttachments, path)
 	if err != nil {

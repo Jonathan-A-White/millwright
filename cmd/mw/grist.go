@@ -189,7 +189,7 @@ func newGristEvalCmd() *cobra.Command {
 			_, err = application.GristEval{
 				Grinder: claude.NewGrinder(),
 				Ceilings: application.GristCeilings{
-					Models: ceilings.Models, MaxAttachments: ceilings.MaxAttachments,
+					Models: ceilings.Models, Efforts: ceilings.Efforts, MaxAttachments: ceilings.MaxAttachments,
 					MaxAttachmentBytes: ceilings.MaxAttachmentBytes, DailyLimit: ceilings.DailyLimit,
 					Timeout: ceilings.Timeout,
 				},
@@ -266,7 +266,7 @@ func newMill(out io.Writer) (application.GristGrind, error) {
 		Apps:        apps,
 		GovernorKey: governorKey,
 		Ceilings: application.GristCeilings{
-			Models: ceilings.Models, MaxAttachments: ceilings.MaxAttachments,
+			Models: ceilings.Models, Efforts: ceilings.Efforts, MaxAttachments: ceilings.MaxAttachments,
 			MaxAttachmentBytes: ceilings.MaxAttachmentBytes, DailyLimit: ceilings.DailyLimit,
 			Timeout: ceilings.Timeout,
 		},

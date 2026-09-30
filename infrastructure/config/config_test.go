@@ -1398,7 +1398,7 @@ func TestGristCeilingsDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(got.Models, ",") != "haiku,sonnet,opus" || got.MaxAttachments != 4 || got.MaxAttachmentBytes != 8388608 ||
+	if strings.Join(got.Models, ",") != "haiku,sonnet,opus" || strings.Join(got.Efforts, ",") != "low,medium,high" || got.MaxAttachments != 4 || got.MaxAttachmentBytes != 8388608 ||
 		got.DailyLimit != 50 || got.Timeout != 10*time.Minute {
 		t.Fatalf("expected the default ceilings, got %+v", got)
 	}
@@ -1409,6 +1409,7 @@ func TestGristCeilingsAreReadFromTheTable(t *testing.T) {
 
 [grist]
 models = ["haiku", "sonnet"]
+efforts = "low,xhigh"
 max_attachments = 2
 max_attachment_bytes = 4194304
 daily_limit = 20
@@ -1421,7 +1422,7 @@ cairn = "/home/jwhite/rigs/Cairn"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(got.Models, ",") != "haiku,sonnet" || got.MaxAttachments != 2 || got.MaxAttachmentBytes != 4194304 ||
+	if strings.Join(got.Models, ",") != "haiku,sonnet" || strings.Join(got.Efforts, ",") != "low,xhigh" || got.MaxAttachments != 2 || got.MaxAttachmentBytes != 4194304 ||
 		got.DailyLimit != 20 || got.Timeout != 5*time.Minute {
 		t.Fatalf("expected the table's ceilings, got %+v", got)
 	}
