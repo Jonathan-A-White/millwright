@@ -149,6 +149,8 @@ func newPosternInboxCmd() *cobra.Command {
 			"them, and prints them newest first: class, from, txid, thread, when and text. A message's\n" +
 			"thread is the bead a decision-needed question (or its reply) names, the bead or topic its\n" +
 			"own plaintext wrapper names (mw postern send --thread/--topic), or \"general\" otherwise.\n" +
+			"A message that answers another ends its line with \"re <txid>\": answer it with mw postern\n" +
+			"send --re <that txid>.\n" +
 			"Reading marks them read, by moving a cursor kept in a bd kv note, never an event of its own.\n\n" +
 			"A message's sender is the BRC-78 envelope's own key, not the payload's own claim: a\n" +
 			"payload — or, once the backend can supply one, a transaction signing key — that disagrees\n" +
@@ -356,7 +358,7 @@ func posternInboxLock(attachmentDir string) *hostlock.Lock {
 // to postern_governor_key and sending through the postern backend at
 // postern_backend, by postern_channel.
 func newPosternSendCmd() *cobra.Command {
-	var class, bead, recommend, thread, topic string
+	var class, bead, recommend, thread, topic, re string
 	var options, attach []string
 
 	cmd := &cobra.Command{
@@ -380,6 +382,11 @@ func newPosternSendCmd() *cobra.Command {
 			"general thread. They are mutually exclusive, and refused alongside --bead: a decision-needed\n" +
 			"question's own bead is already its thread. Once sent, a message in a bead's thread is\n" +
 			"commented on that bead too: MAYOR via postern, txid <id>: <text>.\n\n" +
+			"--re <txid> answers a post in the General thread: <text> goes to General with its re set to\n" +
+			"that message's txid, as mw postern inbox prints it (direct:<sha256>) or bare, so the app\n" +
+			"shows it in that post's thread. To answer inside a thread, give the root's txid, the same\n" +
+			"re the message you answer carried (mw postern inbox prints it as \"re <txid>\"). It is\n" +
+			"refused with --bead, --thread and --topic, which name another thread.\n\n" +
 			"--attach <file> (repeatable) encrypts the file to the Governor, uploads it to the\n" +
 			"backend's blob store and announces it in the message (sections 8 and 14): at most 8 MiB,\n" +
 			"typed by its extension — .png .jpg .jpeg .webp .webm .ogg .oga .opus .m4a .mp4 .mp3\n" +
@@ -393,6 +400,13 @@ func newPosternSendCmd() *cobra.Command {
 			}
 			if len(args) == 0 && len(attach) == 0 {
 				return fmt.Errorf("mw postern send: what should it say? give the text, or --attach a file")
+			}
+			request := application.PosternSendRequest{
+				Class: class, Text: text, Bead: bead, Recommend: recommend, Options: options,
+				Thread: thread, Topic: topic, Re: re, Attachments: attach,
+			}
+			if err := request.ValidateReplyFlags(); err != nil {
+				return err
 			}
 			keys, err := posternKeys()
 			if err != nil {
@@ -430,10 +444,7 @@ func newPosternSendCmd() *cobra.Command {
 				Now:         posternClock,
 				Out:         cmd.OutOrStdout(),
 			}
-			_, err = send.Run(cmd.Context(), application.PosternSendRequest{
-				Class: class, Text: text, Bead: bead, Recommend: recommend, Options: options,
-				Thread: thread, Topic: topic, Attachments: attach,
-			})
+			_, err = send.Run(cmd.Context(), request)
 			return err
 		},
 	}
@@ -444,6 +455,7 @@ func newPosternSendCmd() *cobra.Command {
 	cmd.Flags().StringArrayVar(&options, "option", nil, "an option a decision-needed question offers (repeatable)")
 	cmd.Flags().StringVar(&thread, "thread", "", "the bead this message's thread is (refused with --topic or a decision-needed question)")
 	cmd.Flags().StringVar(&topic, "topic", "", "the named topic this message's thread is (refused with --thread or a decision-needed question)")
+	cmd.Flags().StringVar(&re, "re", "", "the txid of the General post this message answers, printed form or bare (refused with --bead, --thread or --topic)")
 	return cmd
 }
 

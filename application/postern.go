@@ -385,10 +385,20 @@ func decodePosternThreadedMessage(text string) (PosternThreadedMessage, bool) {
 	if err := json.Unmarshal([]byte(text), &wrapped); err != nil {
 		return PosternThreadedMessage{}, false
 	}
-	if strings.TrimSpace(wrapped.Thread.Bead) == "" && strings.TrimSpace(wrapped.Thread.Topic) == "" && wrapped.Attachment == nil && wrapped.Role == "" {
+	answers := strings.TrimSpace(wrapped.Re) != "" && wrapped.Text != ""
+	if strings.TrimSpace(wrapped.Thread.Bead) == "" && strings.TrimSpace(wrapped.Thread.Topic) == "" && wrapped.Attachment == nil && wrapped.Role == "" && !answers {
 		return PosternThreadedMessage{}, false
 	}
 	return wrapped, true
+}
+
+// posternReOf is the txid a decrypted plaintext says it answers: the re of
+// its threaded body (section 14), or "" when it has none.
+func posternReOf(text string) string {
+	if wrapped, ok := decodePosternThreadedMessage(text); ok {
+		return strings.TrimSpace(wrapped.Re)
+	}
+	return ""
 }
 
 // posternThreadAndText reads a decrypted record's class and plaintext,
@@ -397,7 +407,8 @@ func decodePosternThreadedMessage(text string) (PosternThreadedMessage, bool) {
 // topic or the general thread, and the attachment it carries, if any. A
 // decision-needed question's or a reply's own bead IS its thread (postern's
 // docs/protocol.md section 6); anything else reads the plaintext's own
-// thread wrapper, unwrapping it to the text and the attachment (postern's
+// thread wrapper (a body that only carries a re and a text is the general
+// thread's), unwrapping it to the text and the attachment (postern's
 // docs/protocol.md section 8) it names; PosternGeneralThread when there is
 // no thread at all.
 func posternThreadAndText(class, text string) (thread, display string, isBead bool, attachment *PosternAttachment) {
@@ -480,6 +491,9 @@ type PosternInboxMessage struct {
 	// ThreadIsBead reports whether Thread names a bead, rather than a named
 	// topic or PosternGeneralThread.
 	ThreadIsBead bool
+	// Re is the txid of the message this one answers, from its plaintext's
+	// re (section 14); "" when it answers none.
+	Re string
 	// Attachment is the image this message carries, postern's
 	// docs/protocol.md section 8, or nil for a message with none.
 	Attachment *PosternAttachment
@@ -672,7 +686,11 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 				}
 			}
 		}
-		i.printf("%s  from %s  txid %s  thread %s  %s\n%s\n", m.Class, i.fromLabel(m), orUnknown(m.Txid), m.Thread, sentInFull(m.Ts), m.Text)
+		answers := ""
+		if m.Re != "" {
+			answers = "  re " + m.Re
+		}
+		i.printf("%s  from %s  txid %s  thread %s  %s%s\n%s\n", m.Class, i.fromLabel(m), orUnknown(m.Txid), m.Thread, sentInFull(m.Ts), answers, m.Text)
 		if line != "" {
 			i.printf("%s\n", line)
 		}
@@ -1076,7 +1094,7 @@ func (i PosternInbox) fetchSince(ctx context.Context, cursor int64) (mine []Post
 			Seq: r.Seq, Txid: r.Txid, Class: r.Class,
 			From: from, Verified: verified, SignerChecked: signerChecked,
 			Ts: r.Ts, Text: display, Thread: thread, ThreadIsBead: threadIsBead,
-			Attachment: attachment,
+			Attachment: attachment, Re: posternReOf(text),
 		})
 	}
 	return mine, newest, nil
@@ -1254,6 +1272,22 @@ func (r PosternSendRequest) validate() error {
 	}
 	if r.asksQuestion() && len(r.Attachments) > 0 {
 		return fmt.Errorf("mw postern send: --attach is refused with a decision-needed question: a question carries no attachment")
+	}
+	return nil
+}
+
+// ValidateReplyFlags refuses --re, an answer in the General thread, together
+// with --bead, --thread or --topic, each of which names another thread. It
+// is the command line's check: mw's own sends of a transcript or a hands
+// outcome carry a re inside a bead's thread.
+func (r PosternSendRequest) ValidateReplyFlags() error {
+	if strings.TrimSpace(r.Re) == "" {
+		return nil
+	}
+	for _, conflict := range []struct{ flag, value string }{{"--bead", r.Bead}, {"--thread", r.Thread}, {"--topic", r.Topic}} {
+		if strings.TrimSpace(conflict.value) != "" {
+			return fmt.Errorf("mw postern send: --re and %s cannot both be set: --re answers in the General thread, %s names another thread", conflict.flag, conflict.flag)
+		}
 	}
 	return nil
 }
@@ -1450,10 +1484,10 @@ func (r PosternSendRequest) plaintext(text string, attachment *PosternAttachment
 	switch {
 	case r.asksQuestion():
 		body = PosternQuestion{Bead: r.Bead, Q: text, Rec: r.Recommend, Options: r.Options}
-	case r.setsThread() || attachment != nil || r.Re != "" || r.Role != "":
+	case r.setsThread() || attachment != nil || strings.TrimSpace(r.Re) != "" || r.Role != "":
 		body = PosternThreadedMessage{
 			Thread: PosternThread{Bead: strings.TrimSpace(r.Thread), Topic: strings.TrimSpace(r.Topic)},
-			Text:   text, Attachment: attachment, Re: r.Re, Role: r.Role,
+			Text:   text, Attachment: attachment, Re: strings.TrimSpace(r.Re), Role: r.Role,
 		}
 	default:
 		return text, nil
