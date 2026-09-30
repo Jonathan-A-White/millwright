@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -642,8 +643,15 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 		if _, unverified := landedVerdict(e.detail, comments, memory, newMemory); !unverified {
 			continue
 		}
-		need := b.need(PosternNeedVerify, e, e.detail.ClosedAt, verifyText(e.detail, newMemory[e.detail.Story.ID]))
-		need.Options = []string{"Verified"}
+		howTo := landedHowTo(newMemory[e.detail.Story.ID])
+		need := b.need(PosternNeedVerify, e, e.detail.ClosedAt, verifyText(e.detail, howTo))
+		if howTo == "" {
+			need.WaitsFor = PosternWaitsMayor
+			need.NotReady = true
+			need.WaitingOn = []string{viewMayorChecksLanding}
+		} else {
+			need.Options = []string{"Verified"}
+		}
 		needs = append(needs, need)
 	}
 
@@ -695,24 +703,94 @@ const viewLandingCheckedMarker = "Landing checked"
 // viewCheckLimit is the most runes of the Mayor's check a verify need quotes.
 const viewCheckLimit = 200
 
-// verifyText is the words of a verify need on the landed story d, whose
-// landed memory is mem: what landed and when, what the Mayor made of it, that
-// the tap is optional, and when the need clears by itself.
-func verifyText(d StoryDetail, mem posternSnapshotMemoryEntry) string {
-	check := mem.Check
-	if check == "" {
-		comments := make([]Comment, 0, len(mem.Comments))
-		for i := len(mem.Comments) - 1; i >= 0; i-- {
-			comments = append(comments, Comment{Text: mem.Comments[i].Text})
-		}
-		check = landingCheck(comments)
+// viewMayorChecksLanding is what a landing with no HOW TO CHECK IT waits on.
+const viewMayorChecksLanding = "the Mayor to check the landing"
+
+// verifyText is the words of a verify need on the landed story d: howTo, the
+// steps its closing comment gives the Governor, when it has any; else that the
+// Mayor has to check the landing first, and when the need clears by itself.
+func verifyText(d StoryDetail, howTo string) string {
+	if howTo != "" {
+		return howTo
 	}
-	if check == "" {
-		check = "not yet"
-	}
-	return fmt.Sprintf("Landed %s: %s. Checked by the Mayor: %s. Tap Verified if you have looked; optional, clears by itself %s.",
-		viewClock(d.ClosedAt), strings.TrimRight(d.Story.Title, ". "), check,
+	return fmt.Sprintf("Landed %s: %s. Waiting on %s; clears by itself %s.",
+		viewClock(d.ClosedAt), strings.TrimRight(d.Story.Title, ". "), viewMayorChecksLanding,
 		viewClock(d.ClosedAt.Add(PosternViewVerifyWindow)))
+}
+
+// landedHowTo is the HOW TO CHECK IT of the landed story mem remembers: the
+// section itself, or for a memory written before it was kept, the section as
+// far as the remembered comments hold it; "" when there is none.
+func landedHowTo(mem posternSnapshotMemoryEntry) string {
+	if mem.HowTo != "" {
+		return mem.HowTo
+	}
+	comments := make([]Comment, 0, len(mem.Comments))
+	for i := len(mem.Comments) - 1; i >= 0; i-- {
+		comments = append(comments, Comment{Text: mem.Comments[i].Text})
+	}
+	return howToCheck(comments)
+}
+
+// viewHowToMarker is the words of the section of a closing comment that tells
+// the Governor how to check what landed.
+const viewHowToMarker = "HOW TO CHECK IT"
+
+// viewHowToLimit is the most runes of that section a verify need carries.
+const viewHowToLimit = 1500
+
+// viewForTheGovernor is the words a HOW TO CHECK IT heading may go on with.
+var viewForTheGovernor = regexp.MustCompile(`(?i)^[ \t]*,?[ \t]*for the governor`)
+
+// howToCheck is the section after HOW TO CHECK IT in the newest of comments
+// (oldest first) that carries those words, up to the next heading or
+// viewHowToLimit runes; "" when no comment does or the words are all it says.
+// The heading may go on ", for the Governor:" before the steps start. Markdown
+// image links stay in it, so a published screenshot shows on the card.
+func howToCheck(comments []Comment) string {
+	for i := len(comments) - 1; i >= 0; i-- {
+		_, after, found := strings.Cut(comments[i].Text, viewHowToMarker)
+		if !found {
+			continue
+		}
+		after = viewForTheGovernor.ReplaceAllString(after, "")
+		after = strings.TrimLeft(after, " \t\r\n:;,.-\u2013\u2014")
+		var kept []string
+		for j, line := range strings.Split(after, "\n") {
+			if j > 0 && isHeadingLine(line) {
+				break
+			}
+			kept = append(kept, line)
+		}
+		section := strings.TrimSpace(strings.Join(kept, "\n"))
+		if r := []rune(section); len(r) > viewHowToLimit {
+			section = strings.TrimSpace(string(r[:viewHowToLimit])) + "…"
+		}
+		if section != "" {
+			return section
+		}
+	}
+	return ""
+}
+
+// isHeadingLine reports whether line opens a new section of a comment: a
+// Markdown heading, the "For the rig memory:" line a closing comment ends
+// with, or a line of capital letters alone.
+func isHeadingLine(line string) bool {
+	line = strings.TrimSpace(line)
+	if strings.HasPrefix(line, "#") || strings.HasPrefix(line, "For the rig memory") {
+		return true
+	}
+	letters := 0
+	for _, r := range line {
+		switch {
+		case unicode.IsLower(r), unicode.IsDigit(r):
+			return false
+		case unicode.IsUpper(r):
+			letters++
+		}
+	}
+	return letters >= 4
 }
 
 // viewClock is t as a phone card writes a moment, in UTC.

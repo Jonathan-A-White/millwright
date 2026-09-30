@@ -41,14 +41,39 @@ Feature: mw postern view
     When the live view is built
     Then the view's hands need on "mw-v.1" carries the step "linger" with its sha256, run with exit 0
 
-  Scenario: A verify need says what landed, that the Mayor checked it, and that the tap is optional
-    Given the view's bead "mw-v.6" under "mw-v" landed two hours ago with the Mayor's comment "Landing checked: the gate passes on main and the card reads right. Nothing else to do."
+  # A Verify card is his only when the story's closing comment tells him how
+  # to check it (HOW TO CHECK IT); a landing without that waits on the Mayor.
+  Scenario: A landed story with HOW TO CHECK IT is a Verify card for the Governor carrying the steps
+    Given the view's bead "mw-v.6" under "mw-v" landed two hours ago with the Mayor's comment "Done and green. HOW TO CHECK IT, for the Governor: 1. Open the app and tap Needs you. 2. The card for mw-v.6 reads Verify, with a Verified button.\nFor the rig memory: nothing"
     When the live view is built
-    Then the view's verify need on "mw-v.6" says "Landed 28 Sep 10:00 UTC: Story mw-v.6. Checked by the Mayor: the gate passes on main and the card reads right. Tap Verified if you have looked; optional, clears by itself 29 Sep 10:00 UTC."
+    Then the view's verify need on "mw-v.6" says "1. Open the app and tap Needs you. 2. The card for mw-v.6 reads Verify, with a Verified button."
+    And the view's need "verify" on "mw-v.6" waits for "you"
+    And the view's verify need on "mw-v.6" offers "Verified"
 
-  Scenario: A verify need on a landing the Mayor has not checked says not yet
+  Scenario: A landed story without HOW TO CHECK IT waits on the Mayor
+    Given the view's bead "mw-v.6" under "mw-v" landed two hours ago with the Mayor's comment "Internal: nothing for the Governor to look at."
     When the live view is built
-    Then the view's verify need on "mw-v.3" says "Landed 28 Sep 11:00 UTC: Story mw-v.3. Checked by the Mayor: not yet. Tap Verified if you have looked; optional, clears by itself 29 Sep 11:00 UTC."
+    Then the view's need "verify" on "mw-v.6" waits for "mayor"
+    And the view's verify need on "mw-v.6" is waiting on "the Mayor to check the landing"
+    And the view's verify need on "mw-v.6" offers nothing
+    And the view's need "verify" on "mw-v.3" waits for "mayor"
+
+  Scenario: A VERIFIED comment still clears both
+    Given the view's bead "mw-v.6" under "mw-v" landed two hours ago with the Mayor's comment "HOW TO CHECK IT: 1. Open the app."
+    And the view's bead "mw-v.6" has the comment "VERIFIED by the Governor via postern"
+    And the view's bead "mw-v.7" under "mw-v" landed two hours ago with the Mayor's comment "Internal: nothing for the Governor to look at."
+    And the view's bead "mw-v.7" has the comment "VERIFIED by the Mayor"
+    When the live view is built
+    Then the view's needs on "mw-v.6" are "none"
+    And the view's needs on "mw-v.7" are "none"
+
+  Scenario: The memory answers a second run with no comment read
+    Given the view's bead "mw-v.6" under "mw-v" landed two hours ago with the Mayor's comment "HOW TO CHECK IT: 1. Open the app and tap Needs you."
+    When the live view is built
+    And the view's reads of the comments of "mw-v.6" are counted
+    And the live view is built
+    Then the view has read the comments of "mw-v.6" no more than counted
+    And the view's verify need on "mw-v.6" says "1. Open the app and tap Needs you."
 
   Scenario: A closed hands bead leaves Needs you with no Verify card
     Given the view's hands bead "mw-v.7" under "mw-v" closed an hour ago
@@ -178,9 +203,10 @@ Feature: mw postern view
   Scenario: A question, a landing to verify and a stale card wait on him
     Given the view's epic "mw-old" is live
     And the view's held story "mw-old.1" under "mw-old" was filed 8 days ago
+    And the view's bead "mw-v.6" under "mw-v" landed two hours ago with the Mayor's comment "HOW TO CHECK IT: 1. Open the app."
     When the live view is built
     Then the view's need "question" on "mw-v.4" waits for "you"
-    And the view's need "verify" on "mw-v.3" waits for "you"
+    And the view's need "verify" on "mw-v.6" waits for "you"
     And the view's need "stale" on "mw-old" waits for "you"
 
   Scenario: A host alarm waits on the factory

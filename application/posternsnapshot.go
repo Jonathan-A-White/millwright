@@ -74,6 +74,10 @@ type posternSnapshotMemoryEntry struct {
 	// beside Comments because that comment may be older than the newest few
 	// they hold; "" when none was found.
 	Check string `json:"check,omitempty"`
+	// HowTo is the HOW TO CHECK IT section of the candidate's comments, kept
+	// whole because it can run past the text a remembered comment keeps; ""
+	// when they have none.
+	HowTo string `json:"how_to,omitempty"`
 	// Closed is when the candidate closed, in Unix seconds: the oldest are
 	// dropped first when the memory outgrows PosternLandedMemoryLimit.
 	Closed int64 `json:"closed,omitempty"`
@@ -732,6 +736,7 @@ func landedVerdict(child StoryDetail, comments map[string][]Comment, memory, new
 		result.Comments = clippedMemoryComments(result.Comments)
 		entry.Comments = result.Comments
 		entry.Check = landingCheck(comments[child.Story.ID])
+		entry.HowTo = howToCheck(comments[child.Story.ID])
 	}
 	newMemory[child.Story.ID] = entry
 	return result, ok

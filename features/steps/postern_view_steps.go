@@ -26,6 +26,8 @@ type posternViewContext struct {
 	file    *apptest.FakeSnapshotFile
 	doc     application.PosternViewDoc
 	err     error
+	// readsCounted is the comment reads of a bead a scenario counted.
+	readsCounted int
 }
 
 // InitializePosternViewScenario registers the steps of
@@ -80,6 +82,11 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 
 	ctx.Then(`^the view's needs are "([^"]*)"$`, c.theViewsNeedsAre)
 	ctx.Then(`^the view's verify need on "([^"]*)" says "([^"]*)"$`, c.theViewsVerifyNeedSays)
+	ctx.Then(`^the view's verify need on "([^"]*)" offers "([^"]*)"$`, c.theViewsVerifyNeedOffers)
+	ctx.Then(`^the view's verify need on "([^"]*)" offers nothing$`, c.theViewsVerifyNeedOffersNothing)
+	ctx.Then(`^the view's verify need on "([^"]*)" is waiting on "([^"]*)"$`, c.theViewsVerifyNeedIsWaitingOn)
+	ctx.When(`^the view's reads of the comments of "([^"]*)" are counted$`, c.theViewsReadsAreCounted)
+	ctx.Then(`^the view has read the comments of "([^"]*)" no more than counted$`, c.theViewReadNoMoreThanCounted)
 	ctx.Then(`^the view's need on "([^"]*)" blocks (\d+) beads?$`, c.theViewsNeedBlocks)
 	ctx.Then(`^the view's bead "([^"]*)" waits on "([^"]*)"$`, c.theViewsBeadWaitsOnInTheView)
 	ctx.Then(`^the view has no bead "([^"]*)"$`, c.theViewHasNoBead)
@@ -133,7 +140,7 @@ func (c *posternViewContext) theViewsBeadLandedTwoHoursAgoChecked(id, epic, comm
 	if err := c.closeAt(id, epic, posternViewFeatureNow.Add(-2*time.Hour)); err != nil {
 		return err
 	}
-	return c.tracker.CommentOnStory(context.Background(), id, comment)
+	return c.tracker.CommentOnStory(context.Background(), id, strings.ReplaceAll(comment, `\n`, "\n"))
 }
 
 func (c *posternViewContext) theViewsVerifyNeedSays(bead, want string) error {
@@ -146,6 +153,60 @@ func (c *posternViewContext) theViewsVerifyNeedSays(bead, want string) error {
 		}
 	}
 	return fmt.Errorf("the view has no verify need on %s", bead)
+}
+
+func (c *posternViewContext) verifyNeed(bead string) (application.PosternViewNeed, error) {
+	for _, n := range c.doc.Needs {
+		if n.Kind == application.PosternNeedVerify && n.Bead == bead {
+			return n, nil
+		}
+	}
+	return application.PosternViewNeed{}, fmt.Errorf("the view has no verify need on %s", bead)
+}
+
+func (c *posternViewContext) theViewsVerifyNeedOffers(bead, option string) error {
+	n, err := c.verifyNeed(bead)
+	if err != nil {
+		return err
+	}
+	if strings.Join(n.Options, ", ") != option {
+		return fmt.Errorf("expected the verify need on %s to offer %q, got %q", bead, option, n.Options)
+	}
+	return nil
+}
+
+func (c *posternViewContext) theViewsVerifyNeedOffersNothing(bead string) error {
+	n, err := c.verifyNeed(bead)
+	if err != nil {
+		return err
+	}
+	if len(n.Options) != 0 {
+		return fmt.Errorf("expected the verify need on %s to offer nothing, got %q", bead, n.Options)
+	}
+	return nil
+}
+
+func (c *posternViewContext) theViewsVerifyNeedIsWaitingOn(bead, waitingOn string) error {
+	n, err := c.verifyNeed(bead)
+	if err != nil {
+		return err
+	}
+	if !n.NotReady || strings.Join(n.WaitingOn, ", ") != waitingOn {
+		return fmt.Errorf("expected the verify need on %s not ready, waiting on %q, got not_ready %v waiting on %q", bead, waitingOn, n.NotReady, n.WaitingOn)
+	}
+	return nil
+}
+
+func (c *posternViewContext) theViewsReadsAreCounted(bead string) error {
+	c.readsCounted = c.tracker.CommentReads(bead)
+	return nil
+}
+
+func (c *posternViewContext) theViewReadNoMoreThanCounted(bead string) error {
+	if reads := c.tracker.CommentReads(bead); reads != c.readsCounted {
+		return fmt.Errorf("expected %s's comments read %d times, got %d", bead, c.readsCounted, reads)
+	}
+	return nil
 }
 
 func (c *posternViewContext) theViewsBeadLandedAMonthAgo(id, epic string) error {
