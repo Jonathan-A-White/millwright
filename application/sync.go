@@ -613,10 +613,10 @@ type Sync struct {
 	// reclaim disk space. Zero reads DefaultGCInterval.
 	GCInterval time.Duration
 
-	// Lock keeps this host's beads half from running twice at once. A nil
-	// Lock runs it unlocked, which is never mw's own choice — every command
-	// that builds a Sync sets one — and is only ever a test's, for a test
-	// that has no stake in this race.
+	// Lock keeps this host's whole sync, vault and beads, from running twice at
+	// once. A nil Lock runs it unlocked, which is never mw's own choice — every
+	// command that builds a Sync sets one — and is only ever a test's, for a
+	// test that has no stake in this race.
 	Lock HostLock
 
 	// SyncHalts is this host's own mark of a halted sync: written once the
@@ -661,6 +661,16 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 			s.BackupInterval = AutoBackupInterval
 		}
 	}
+
+	// Two syncs on this host must not both be in here at once: the whole of it,
+	// the vault's git as much as the beads half, runs under this host's own lock,
+	// so that a second caller waits for the first rather than racing it in git or
+	// to write the note.
+	release, err := s.takeLock(ctx)
+	if err != nil {
+		return report, err
+	}
+	defer release()
 
 	// A vault holding work nobody has committed cannot be rebased onto the
 	// other host's, and committing someone else's work is not a sync's job. So
@@ -711,15 +721,6 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 	// in before the beads cycle, because that cycle is what pushes it: written
 	// after, it would wait for the next one. If the cycle then halts nothing was
 	// pushed, and the note is put back the way it was.
-	//
-	// Two syncs on this host must not both be in here at once: the whole of it
-	// runs under this host's own lock, so that a second caller waits for the
-	// first rather than racing it to write the note.
-	release, err := s.takeLock(ctx)
-	if err != nil {
-		return report, err
-	}
-	defer release()
 	if mode.OneDatabase() {
 		return s.recordLevelInTheOneDatabase(ctx, report)
 	}
