@@ -57,6 +57,10 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the view's hands step "([^"]*)" on "([^"]*)" ran with exit (\d+)$`, c.theViewsHandsStepRan)
 	ctx.Then(`^the view's hands need on "([^"]*)" carries the step "([^"]*)" with its sha256, run with exit (\d+)$`, c.theViewsHandsNeedCarriesTheStep)
 	ctx.Given(`^the view's held story "([^"]*)" under "([^"]*)" was filed (\d+) days? ago$`, c.theViewsHeldStoryWasFiled)
+	ctx.Given(`^the view's held story "([^"]*)" under "([^"]*)" waits on "([^"]*)"$`, c.theViewsHeldStoryWaitsOn)
+	ctx.Then(`^the view's approve need on "([^"]*)" says "([^"]*)"$`, c.theViewsApproveNeedSays)
+	ctx.Then(`^the view's approve need on "([^"]*)" offers "([^"]*)"$`, c.theViewsApproveNeedOffers)
+	ctx.Then(`^the view's approve need on "([^"]*)" offers nothing$`, c.theViewsApproveNeedOffersNothing)
 	ctx.Given(`^the view's hitl bead "([^"]*)" under "([^"]*)" was filed (\d+) days? ago$`, c.theViewsHitlBeadWasFiled)
 	ctx.Given(`^the view's bead "([^"]*)" has the comment "([^"]*)"$`, c.theViewsBeadHasTheComment)
 	ctx.Given(`^the view's bead "([^"]*)" has the comment "([^"]*)" dated (\d+) days? ago$`, c.theViewsBeadHasTheCommentDated)
@@ -391,6 +395,45 @@ func (c *posternViewContext) theViewsHeldStoryWasFiled(id, epic string, days int
 		return err
 	}
 	return c.tracker.SetCreated(id, posternViewDaysAgo(days))
+}
+
+func (c *posternViewContext) theViewsHeldStoryWaitsOn(id, epic, on string) error {
+	c.tracker.AddStory(epic, domain.Story{ID: id, Title: "Story " + id})
+	c.tracker.Needs(id, on)
+	return c.tracker.SetStatus(id, apptest.StatusDeferred)
+}
+
+func (c *posternViewContext) theViewsApproveNeedSays(bead, want string) error {
+	n, err := c.needOf(application.PosternNeedApprove, bead)
+	if err != nil {
+		return err
+	}
+	if n.Text != want {
+		return fmt.Errorf("expected the approve need on %s to say %q, got %q", bead, want, n.Text)
+	}
+	return nil
+}
+
+func (c *posternViewContext) theViewsApproveNeedOffers(bead, want string) error {
+	n, err := c.needOf(application.PosternNeedApprove, bead)
+	if err != nil {
+		return err
+	}
+	if strings.Join(n.Options, ", ") != want {
+		return fmt.Errorf("expected the approve need on %s to offer %q, got %v", bead, want, n.Options)
+	}
+	return nil
+}
+
+func (c *posternViewContext) theViewsApproveNeedOffersNothing(bead string) error {
+	n, err := c.needOf(application.PosternNeedApprove, bead)
+	if err != nil {
+		return err
+	}
+	if len(n.Options) != 0 {
+		return fmt.Errorf("expected the approve need on %s to offer nothing, got %v", bead, n.Options)
+	}
+	return nil
 }
 
 func (c *posternViewContext) theViewsHitlBeadWasFiled(id, epic string, days int) error {

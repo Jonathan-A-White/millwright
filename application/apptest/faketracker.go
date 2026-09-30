@@ -46,10 +46,13 @@ type FakeTracker struct {
 	titles   map[string]string      // epic id -> what it is called
 	epicSays map[string]epicFacts   // epic id -> its status and priority, when set
 	epicSaid map[string][]string    // epic id -> the comments on it, oldest first
-	epicShut map[string]string      // root epic id -> the reason it was closed for
-	stories  map[string]*fakeStory
-	order    []string
-	epics    []string
+	// epicSaidAt is when each of epicSaid was left, by position; a comment
+	// past its end, or added without a time, has none.
+	epicSaidAt map[string][]time.Time
+	epicShut   map[string]string // root epic id -> the reason it was closed for
+	stories    map[string]*fakeStory
+	order      []string
+	epics      []string
 
 	formulas    map[string][]application.FormulaStep // formula name -> its steps
 	molecules   []application.Molecule
@@ -152,16 +155,17 @@ type fakeStory struct {
 // NewFakeTracker returns an empty fake work tracker.
 func NewFakeTracker() *FakeTracker {
 	return &FakeTracker{
-		defaults:  map[string]domain.Path{},
-		titles:    map[string]string{},
-		epicSays:  map[string]epicFacts{},
-		epicSaid:  map[string][]string{},
-		epicShut:  map[string]string{},
-		stories:   map[string]*fakeStory{},
-		formulas:  map[string][]application.FormulaStep{},
-		poured:    map[string]string{},
-		notes:     map[string]string{},
-		published: map[string]string{},
+		defaults:   map[string]domain.Path{},
+		titles:     map[string]string{},
+		epicSays:   map[string]epicFacts{},
+		epicSaid:   map[string][]string{},
+		epicSaidAt: map[string][]time.Time{},
+		epicShut:   map[string]string{},
+		stories:    map[string]*fakeStory{},
+		formulas:   map[string][]application.FormulaStep{},
+		poured:     map[string]string{},
+		notes:      map[string]string{},
+		published:  map[string]string{},
 	}
 }
 
@@ -478,6 +482,8 @@ func (f *FakeTracker) StoryComments(_ context.Context, id string) ([]application
 		times = s.commentTimes
 	} else if _, epic := f.defaults[id]; !epic {
 		return nil, fmt.Errorf("no story %q", id)
+	} else {
+		times = f.epicSaidAt[id]
 	}
 	comments := make([]application.Comment, 0, len(texts))
 	for i, text := range texts {
@@ -1284,6 +1290,20 @@ func (f *FakeTracker) CommentOnStory(_ context.Context, id, text string) error {
 // needs a comment's own timestamp back — a snapshot's newest three, for
 // instance.
 func (f *FakeTracker) CommentOnStoryAt(id, text string, at time.Time) error {
+	f.mu.Lock()
+	if _, isStory := f.stories[id]; !isStory {
+		if _, isEpic := f.defaults[id]; isEpic {
+			for len(f.epicSaidAt[id]) < len(f.epicSaid[id]) {
+				f.epicSaidAt[id] = append(f.epicSaidAt[id], time.Time{})
+			}
+			f.epicSaid[id] = append(f.epicSaid[id], text)
+			f.epicSaidAt[id] = append(f.epicSaidAt[id], at)
+			f.writes++
+			f.mu.Unlock()
+			return nil
+		}
+	}
+	f.mu.Unlock()
 	return f.write(id, func(s *fakeStory) error {
 		s.comments = append(s.comments, text)
 		s.commentTimes = append(s.commentTimes, at)

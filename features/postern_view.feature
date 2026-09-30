@@ -99,6 +99,43 @@ Feature: mw postern view
     When the live view is built
     Then the view's needs are "hands:mw-v.1, question:mw-v.4, verify:mw-v.3"
 
+  # A Release card names each story it holds, with when it was filed; a held
+  # story still behind an open bead is the factory's to wait on, not his.
+  Scenario: a Release card lists its held stories with their filing times
+    Given the view's epic "mw-rel" is live
+    And the view's held story "mw-rel.1" under "mw-rel" was filed 2 days ago
+    And the view's held story "mw-rel.2" under "mw-rel" was filed 1 day ago
+    When the live view is built
+    Then the view's needs on "mw-rel" are "approve:mw-rel"
+    And the view's approve need on "mw-rel" says "2 held stories wait for your Release: mw-rel.1 Story mw-rel.1, filed 26 Sep 12:00 UTC; mw-rel.2 Story mw-rel.2, filed 27 Sep 12:00 UTC"
+    And the view's approve need on "mw-rel" offers "Release"
+
+  Scenario: a story held behind an open hitl bead makes no Release card
+    Given the view's epic "mw-r5s2i" is live
+    And the view's hitl bead "mw-r5s2i.1" under "mw-r5s2i" was filed 2 days ago
+    And the view's held story "mw-r5s2i.2" under "mw-r5s2i" waits on "mw-r5s2i.1"
+    When the live view is built
+    Then the view's needs on "mw-r5s2i" are "none"
+    And the view's need "approve" on "mw-r5s2i.2" waits for "factory"
+    And the view's approve need on "mw-r5s2i.2" says "held; waits on Story mw-r5s2i.1"
+    And the view's approve need on "mw-r5s2i.2" offers nothing
+
+  Scenario: a Release card holds only the stories whose blockers are closed
+    Given the view's epic "mw-mix" is live
+    And the view's hitl bead "mw-mix.1" under "mw-mix" was filed 2 days ago
+    And the view's held story "mw-mix.2" under "mw-mix" waits on "mw-mix.1"
+    And the view's held story "mw-mix.3" under "mw-mix" was filed 1 day ago
+    When the live view is built
+    Then the view's approve need on "mw-mix" says "1 held story waits for your Release: mw-mix.3 Story mw-mix.3, filed 27 Sep 12:00 UTC"
+    And the view's need "approve" on "mw-mix.2" waits for "factory"
+
+  Scenario: an epic released before says so
+    Given the view's epic "mw-again" is live
+    And the view's bead "mw-again" has the comment "RELEASED by the Governor via postern, txid abc123: 2 held stories, ready: mw-again.1" dated 2 days ago
+    And the view's held story "mw-again.3" under "mw-again" was filed 1 day ago
+    When the live view is built
+    Then the view's approve need on "mw-again" says "1 held story waits for your Release: mw-again.3 Story mw-again.3, filed 27 Sep 12:00 UTC. You released this epic on 26 Sep 12:00 UTC; this story was filed after."
+
   # A held story left over a week, or a hands step left over three days, is
   # no longer a plain approve or hands card: it is one stale card that says
   # the facts and asks Keep or Close (protocol section 11).

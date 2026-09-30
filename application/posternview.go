@@ -591,7 +591,10 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 		d := e.detail
 		if b.live[id] {
 			if need, held, ok := b.approve(e); ok {
-				waiting = append(waiting, waitingNeed{need: need, entry: e, window: PosternViewStaleApprove, fact: heldFact(held)})
+				waiting = append(waiting, waitingNeed{need: need, entry: e, window: PosternViewStaleApprove, fact: heldFact(len(held)), held: held})
+				if d.CommentCount > 0 {
+					needComments = append(needComments, id)
+				}
 			}
 		}
 		if workable(d) && hasLabel(d.Labels, LabelHitl) {
@@ -660,6 +663,9 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 
 	for i := range waiting {
 		w := &waiting[i]
+		if w.need.Kind == PosternNeedApprove {
+			w.need.Text = approveText(w.held, releasedAt(comments[w.entry.detail.Story.ID]))
+		}
 		if w.need.Kind == PosternNeedHands && !w.stale(b.now) {
 			steps := w.need.Steps
 			byHand := ""
@@ -677,6 +683,7 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 		}
 		needs = append(needs, w.need)
 	}
+	needs = append(needs, b.heldBehind(notes)...)
 
 	for _, id := range b.order {
 		e := b.entries[id]
@@ -827,39 +834,116 @@ func landingCheck(comments []Comment) string {
 }
 
 // approve is the approve need of a live epic with stories held for the
-// Governor's word, if it has any: bead and epic are the epic itself, since
-// is when the oldest of them was filed, and it blocks the held stories and
-// everything waiting on them.
-func (b *viewBuild) approve(e *viewEntry) (PosternViewNeed, int, bool) {
+// Governor's word, if it has any, and those stories: only a held story whose
+// own blockers are all closed is his to release; one still behind an open bead
+// is the factory's to wait on (heldBehind). bead and epic are the epic itself,
+// since is when the oldest of them was filed, and it blocks the held stories
+// and everything waiting on them. Its text is the plain count until
+// approveText names the stories.
+func (b *viewBuild) approve(e *viewEntry) (PosternViewNeed, []StoryDetail, bool) {
 	epic, read := b.epics[e.detail.Story.ID]
 	if !read {
-		return PosternViewNeed{}, 0, false
+		return PosternViewNeed{}, nil, false
 	}
-	var held []string
+	var held []StoryDetail
+	var ids []string
 	var since time.Time
 	for _, child := range epic.Stories {
 		if child.IsEpic || !child.Held() {
 			continue
 		}
-		held = append(held, child.Story.ID)
+		if entry, ok := b.entries[child.Story.ID]; ok && len(entry.waits) > 0 {
+			continue
+		}
+		held = append(held, child)
+		ids = append(ids, child.Story.ID)
 		if !child.Created.IsZero() && (since.IsZero() || child.Created.Before(since)) {
 			since = child.Created
 		}
 	}
 	if len(held) == 0 {
-		return PosternViewNeed{}, 0, false
+		return PosternViewNeed{}, nil, false
 	}
 	if since.IsZero() {
 		since = firstKnown(e.detail.Updated, e.detail.Created)
 	}
-	text := fmt.Sprintf("%d held stories wait for your word", len(held))
-	if len(held) == 1 {
-		text = "1 held story waits for your word"
-	}
-	need := b.need(PosternNeedApprove, e, since, text)
+	need := b.need(PosternNeedApprove, e, since, approveText(held, time.Time{}))
 	need.Options = []string{"Release"}
-	need.Blocks = b.blocks(true, held...)
-	return need, len(held), true
+	need.Blocks = b.blocks(true, ids...)
+	return need, held, true
+}
+
+// approveText is the words of an approve need on held, the stories he is to
+// release: how many wait for his Release and each one with its title and when
+// it was filed. When he released the epic before (released, not zero) and every
+// one of them was filed after, it says so.
+func approveText(held []StoryDetail, released time.Time) string {
+	text := fmt.Sprintf("%d held stories wait for your Release", len(held))
+	if len(held) == 1 {
+		text = "1 held story waits for your Release"
+	}
+	named := make([]string, 0, len(held))
+	after := !released.IsZero()
+	for _, d := range held {
+		item := strings.TrimSpace(d.Story.ID + " " + strings.TrimRight(strings.TrimSpace(d.Story.Title), ". "))
+		if !d.Created.IsZero() {
+			item += ", filed " + viewClock(d.Created)
+		}
+		named = append(named, item)
+		if d.Created.IsZero() || !d.Created.After(released) {
+			after = false
+		}
+	}
+	text += ": " + strings.Join(named, "; ")
+	if after {
+		text += ". You released this epic on " + viewClock(released) + "; "
+		if len(held) == 1 {
+			text += "this story was filed after."
+		} else {
+			text += "these stories were filed after."
+		}
+	}
+	return text
+}
+
+// viewReleasedMarker is the words the comment on an epic opens with when the
+// Governor released it by postern (applyPostern's RELEASED comment).
+const viewReleasedMarker = "RELEASED by the Governor via postern"
+
+// releasedAt is when the newest of comments (oldest first) that opens with
+// viewReleasedMarker was left, the zero time when none does or it carries no time.
+func releasedAt(comments []Comment) time.Time {
+	for i := len(comments) - 1; i >= 0; i-- {
+		if strings.HasPrefix(strings.TrimSpace(comments[i].Text), viewReleasedMarker) {
+			return comments[i].Created
+		}
+	}
+	return time.Time{}
+}
+
+// heldBehind is the factory card of every held story under a live epic that
+// still waits on an open bead: it is not his to release yet, so it waits for
+// the factory, and its text and WaitingOn name the open beads, as a hands or
+// demo card does. A card offers him nothing.
+func (b *viewBuild) heldBehind(notes map[string]string) []PosternViewNeed {
+	var cards []PosternViewNeed
+	for _, id := range b.order {
+		epic := b.entries[id]
+		if !b.live[id] || !b.inView(id) || b.kept(epic, notes) {
+			continue
+		}
+		for _, child := range b.epics[id].Stories {
+			e, ok := b.entries[child.Story.ID]
+			if child.IsEpic || !child.Held() || !ok || len(e.waits) == 0 {
+				continue
+			}
+			need := b.need(PosternNeedApprove, e, firstKnown(child.Created, child.Updated), "")
+			b.markNotReady(&need, e, false)
+			need.Text = "held; waits on " + strings.Join(need.WaitingOn, ", ")
+			cards = append(cards, need)
+		}
+	}
+	return cards
 }
 
 // waitingNeed is an approve or hands need on entry, with the window it may
@@ -870,6 +954,9 @@ type waitingNeed struct {
 	entry  *viewEntry
 	window time.Duration
 	fact   string
+	// held is the stories an approve need asks him to release: its text names
+	// them once the epic's comments are read.
+	held []StoryDetail
 }
 
 // since is when the need began to wait, the zero time when unknown.
