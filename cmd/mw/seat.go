@@ -91,7 +91,7 @@ func newSeatUpCmd() *cobra.Command {
 			_, err = application.SeatUp{
 				Seats:   vault.New(dir),
 				Windows: windows,
-				Harness: claude.New(),
+				Harness: claude.New(claude.WithEnvFile(beadsEnvFile())),
 				Seat:    args[0],
 				Host:    host,
 				Model:   domain.Model(model),

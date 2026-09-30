@@ -107,7 +107,7 @@ func newMillhandTickCmd() *cobra.Command {
 				Millhand: application.Millhand{
 					Seats:    files,
 					Windows:  windows,
-					Harness:  claude.New(),
+					Harness:  claude.New(claude.WithEnvFile(beadsEnvFile())),
 					Terminal: windows,
 					Armer:    reaper.New(exe),
 
