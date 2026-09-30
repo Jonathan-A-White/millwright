@@ -30,11 +30,19 @@ const PosternSnapshotTextLimit = 4000
 // docs/protocol.md §7, the Governor's decision (2) on mw-hy6f4.
 const PosternSnapshotCommentLimit = 3
 
-// PosternSnapshotVerifiedMarker is the word the Mayor's own comments carry
+// PosternSnapshotVerifiedMarker is the word the Mayor's own comments open with
 // once a landing has been checked out by hand (docs/codemap.md says so). A
-// closed child carrying it in any comment is not landed: somebody has already
-// looked.
+// closed child with a comment that begins with it is not landed: somebody has
+// already looked. A comment that merely contains it, a Builder's "VERIFIED by
+// running make test", or "NOT VERIFIED", is no mark (mw-gq6.152).
 const PosternSnapshotVerifiedMarker = "VERIFIED"
+
+// commentMarksVerified reports whether text marks a landing checked: it
+// begins, after any leading white space, with PosternSnapshotVerifiedMarker.
+// The one test the view, the snapshot and the Governor's Verified tap share.
+func commentMarksVerified(text string) bool {
+	return strings.HasPrefix(strings.TrimSpace(text), PosternSnapshotVerifiedMarker)
+}
 
 // PosternSnapshotMemoryKey is the note Build remembers, between runs, what it
 // last found of every landed candidate still worth reading — its
@@ -743,12 +751,12 @@ func landedVerdict(child StoryDetail, comments map[string][]Comment, memory, new
 }
 
 // landedFromComments reports child as a landed entry, unless it carries a
-// comment naming PosternSnapshotVerifiedMarker. The caller has already
+// comment that marks a landing verified. The caller has already
 // established child closed within PosternSnapshotWindow. ok is false for a
 // verified child.
 func landedFromComments(child StoryDetail, comments []Comment) (PosternSnapshotLanded, bool) {
 	for _, c := range comments {
-		if strings.Contains(c.Text, PosternSnapshotVerifiedMarker) {
+		if commentMarksVerified(c.Text) {
 			return PosternSnapshotLanded{}, false
 		}
 	}

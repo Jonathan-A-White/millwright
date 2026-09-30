@@ -893,3 +893,35 @@ func TestPosternViewHandsStepCarriesWhyItFailed(t *testing.T) {
 		t.Fatalf("expected why on the failed step only, got %s", raw)
 	}
 }
+
+// Only a comment that begins with VERIFIED marks a landing checked: a
+// Builder's closing comment saying it VERIFIED by running the tests, and a
+// NOT VERIFIED or UNVERIFIED, leave the verify need standing, while the
+// Mayor's and the Governor's marks (leading white space allowed) clear it
+// (mw-gq6.152).
+func TestPosternViewOnlyACommentBeginningVERIFIEDClearsAVerifyNeed(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	liveEpic(tracker, "mw-a", domain.Path{})
+	comments := []struct{ id, text string }{
+		{"mw-a.1", "Done. VERIFIED by running: make test ./... passed."},
+		{"mw-a.2", "VERIFIED by the Mayor's check of the landing."},
+		{"mw-a.3", "  \n\tVERIFIED by the Mayor's check of the landing."},
+		{"mw-a.4", "NOT VERIFIED yet."},
+		{"mw-a.5", "UNVERIFIED: nobody looked."},
+	}
+	for _, c := range comments {
+		tracker.AddStory("mw-a", domain.Story{ID: c.id, Title: "Landed " + c.id})
+		closedAt(t, tracker, c.id, viewNow.Add(-time.Hour))
+		mustDo(t, tracker.CommentOnStory(ctx, c.id, "HOW TO CHECK IT: 1. Open the app."))
+		mustDo(t, tracker.CommentOnStory(ctx, c.id, c.text))
+	}
+
+	doc := viewDoc(t, tracker)
+
+	viewNeed(t, doc, "verify", "mw-a.1")
+	viewLacksNeed(t, doc, "verify", "mw-a.2")
+	viewLacksNeed(t, doc, "verify", "mw-a.3")
+	viewNeed(t, doc, "verify", "mw-a.4")
+	viewNeed(t, doc, "verify", "mw-a.5")
+}
