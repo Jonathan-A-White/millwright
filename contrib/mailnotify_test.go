@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -53,6 +54,9 @@ type factory struct {
 	env    []string // more of the script's environment, for a test to set
 }
 
+// factories counts the factories made in this test binary, to name their sockets.
+var factories atomic.Int64
+
 func newFactory(t *testing.T) *factory {
 	t.Helper()
 	// Everything a factory owns is its own: a temp dir, a tmux socket and an
@@ -69,9 +73,11 @@ func newFactory(t *testing.T) *factory {
 		t.Fatal(err)
 	}
 	f := &factory{
-		t:      t,
-		dir:    t.TempDir(),
-		socket: fmt.Sprintf("mw-test-mailnotify-%d-%d", os.Getpid(), time.Now().UnixNano()),
+		t:   t,
+		dir: t.TempDir(),
+		// A count, not a clock: factories made side by side can read the same
+		// nanosecond (WSL2's clock is coarse), and then share one tmux server.
+		socket: fmt.Sprintf("mw-test-mailnotify-%d-%d", os.Getpid(), factories.Add(1)),
 		script: script,
 	}
 	t.Cleanup(func() {
