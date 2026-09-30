@@ -607,7 +607,10 @@ func (s PosternSnapshot) startEpic(ctx context.Context, detail EpicDetail) (*epi
 			if child.ClosedAt.IsZero() || now.Sub(child.ClosedAt) > PosternSnapshotWindow {
 				continue
 			}
-			b.landedCand = append(b.landedCand, child)
+			// Closed as dropped, not landed: no Landed entry (mw-tbx1n.21).
+			if hasLanded(child) {
+				b.landedCand = append(b.landedCand, child)
+			}
 			continue
 		}
 
