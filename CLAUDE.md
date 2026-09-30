@@ -16,8 +16,11 @@ make lint    # go vet -tags beads_integration ./...
 A plain `go test ./...` skips the real-`bd` cases of `infrastructure/beads`, most
 of the suite's clock; `make test` adds `-tags beads_integration` to run them.
 
-One `go` command at a time on the VPS (1 vCPU, ~1 GB RAM); the Makefile pins
-`GOFLAGS=-p=1` and `GOMAXPROCS=1`. The first build after adding a dependency
+One `make` target at a time. The Makefile runs go with `JOBS` processes (default
+`nproc`) for `GOFLAGS=-p` and `GOMAXPROCS`; on a small box, `make test JOBS=1`.
+The suite's real-bd, repack and mail-notify tests call `t.Parallel()` and each
+`features/` file runs in its own child process, so keep new tests off shared
+paths, sockets and process-wide state. The first build after adding a dependency
 takes minutes — wait it out rather than retrying.
 
 ## Layout
