@@ -28,7 +28,7 @@ func moveHost(t *testing.T, sshExit int) (calls string) {
 	dir := t.TempDir()
 	calls = filepath.Join(dir, "calls")
 	for name, body := range map[string]string{
-		"ssh":       "echo 'ssh: connect to host desktop port 22: Connection timed out' >&2; exit " + itoa(sshExit),
+		"ssh":       "echo 'ssh: connect to host desktop port 22: Connection timed out' >&2; echo 0; exit " + itoa(sshExit),
 		"bd":        "exit 0",
 		"git":       "exit 0",
 		"systemctl": "exit 0",
@@ -186,8 +186,9 @@ func TestHomeMovePlannedRunsTheOldHomesStepsBeforeAnyOfThisHosts(t *testing.T) {
 
 	out, err := runHomeMove(t, "laptop", "--planned")
 
-	// The stand-in bd counts nothing, so the move stops at step 3, beads: after
-	// the old home stood down, before anything reached the vault.
+	// The stand-in ssh answers every command with 0, the old home's count, and the
+	// stand-in bd counts nothing, so the move stops at step 3, beads: after the old
+	// home stood down, before anything reached the vault.
 	if err == nil || !strings.Contains(err.Error(), "step 3") {
 		t.Fatalf("expected the move to stop at step 3, got %v\n%s", err, out)
 	}
@@ -202,8 +203,9 @@ func TestHomeMovePlannedRunsTheOldHomesStepsBeforeAnyOfThisHosts(t *testing.T) {
 		}
 		at += found + len(want)
 	}
+	// This host's own bd is a line of its own; the old home's `bd count` is inside an ssh line.
 	lastSSH := strings.LastIndex(got, "ssh ")
-	if bd := strings.Index(got, "bd "); bd >= 0 && bd < lastSSH {
+	if bd := strings.Index("\n"+got, "\nbd "); bd >= 0 && bd < lastSSH {
 		t.Errorf("bd ran before the old home stood down:\n%s", got)
 	}
 }

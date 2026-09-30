@@ -36,6 +36,10 @@ func (w *moveWorld) MayorGone(_ context.Context, _ []string, wait time.Duration)
 
 func (w *moveWorld) Sync(context.Context, []string) error { return w.did("old: mw sync") }
 
+func (w *moveWorld) OldBeadsCount(context.Context, []string) (int, error) {
+	return w.oldBeads, w.did("old: bd count")
+}
+
 func (w *moveWorld) OldUnitInstalled(_ context.Context, _ []string, unit string) (bool, error) {
 	return w.oldInstalled[unit], w.did("old: systemctl installed? " + unit)
 }
@@ -73,6 +77,7 @@ func TestAPlannedMoveStandsTheOldHomeDownBeforeTouchingTheNewOne(t *testing.T) {
 		"old: systemctl installed? postern-backend",
 		"old: systemctl --user stop postern-backend",
 		"old: mw postern mirror",
+		"old: bd count",
 		"old: systemctl installed? dolt-beads",
 		"old: systemctl --user stop dolt-beads",
 		// 3. beads, from the old home's final push
@@ -150,6 +155,7 @@ func TestAPlannedMoveStopsWhereTheOldHomeStandDownFails(t *testing.T) {
 		{"old: mw sync", "step 2", "old: mw sync"},
 		{"old: systemctl --user stop postern-backend", "step 2", "old: systemctl --user stop postern-backend"},
 		{"old: mw postern mirror", "step 2", "old: mw postern mirror"},
+		{"old: bd count", "step 2", "old: bd count"},
 		{"old: systemctl --user stop dolt-beads", "step 2", "old: systemctl --user stop dolt-beads"},
 	}
 	for _, c := range cases {
@@ -257,4 +263,71 @@ func TestADeadMovesOldHomeUpIsStillRefusedAndPointsAtPlanned(t *testing.T) {
 		t.Fatalf("expected a refusal pointing at --planned, got %v", err)
 	}
 	wantCalls(t, w, "ssh desktop")
+}
+
+// A stale .beads/dolt on the new home is what dolt-beads would serve: the move
+// compares the old home's count, taken after its final flush, with the new home's.
+func TestAPlannedMoveThatFindsAStaleDoltDirectoryStopsAtTheBeadsStepWithBothCounts(t *testing.T) {
+	w, out := newMoveWorld(), &bytes.Buffer{}
+	w.hasDolt = true
+	w.oldBeads, w.beads = 10, 7
+
+	err := planned(w, out).Run(context.Background())
+
+	stopped, ok := application.HomeMoveStoppedIn(err)
+	if !ok || stopped.Step != 3 || !stopped.Changed {
+		t.Fatalf("expected the move to stop at step 3 with things changed, got %v", err)
+	}
+	mustContain(t, "error", err.Error(), "7", "10", "old home", doltMoved.To, asideMoved.To)
+	for _, call := range w.calls {
+		if call == "write home" {
+			t.Errorf("wrote the home file over a database that is not the old home's")
+		}
+	}
+	mustContain(t, "ways back", out.String(), "The move stopped", "Ways back", doltMoved.To, doltMoved.From, asideMoved.To)
+	if strings.Contains(out.String(), "Home is now laptop") {
+		t.Errorf("a move that stopped said it finished:\n%s", out)
+	}
+}
+
+func TestAPlannedMoveWhoseCountsAgreeGoesOnAndSaysTheyAgree(t *testing.T) {
+	w, out := newMoveWorld(), &bytes.Buffer{}
+	w.hasDolt = true
+	w.oldBeads, w.beads = 4422, 4422
+
+	if err := planned(w, out).Run(context.Background()); err != nil {
+		t.Fatalf("planned move: %v\n%s", err, out)
+	}
+	mustContain(t, "report", out.String(), "the old home counted 4422", doltMoved.To)
+}
+
+func TestADeadMoveSaysThereIsNoOldCountToCompareAndNeverGuesses(t *testing.T) {
+	w, out := newMoveWorld(), &bytes.Buffer{}
+	w.oldBeads, w.beads = 10, 7 // not asked: the old home is dead
+
+	if err := move(w, out).Run(context.Background()); err != nil {
+		t.Fatalf("a dead move has no count to fail on: %v\n%s", err, out)
+	}
+	for _, call := range w.calls {
+		if call == "old: bd count" {
+			t.Errorf("asked a dead home for its count")
+		}
+	}
+	mustContain(t, "report", out.String(), "no old count to compare", "dead")
+}
+
+func TestAnOldCountThatCannotBeTakenStopsThePlannedMoveOnTheOldHome(t *testing.T) {
+	w, out := newMoveWorld(), &bytes.Buffer{}
+	w.failAt = "old: bd count"
+
+	err := planned(w, out).Run(context.Background())
+
+	if err == nil || !strings.Contains(err.Error(), "step 2") {
+		t.Fatalf("expected the move to stop at step 2, got %v", err)
+	}
+	for _, call := range w.calls {
+		if !strings.HasPrefix(call, "old: ") && call != "ssh desktop" {
+			t.Errorf("the new home was touched (%q) with no count to compare", call)
+		}
+	}
 }

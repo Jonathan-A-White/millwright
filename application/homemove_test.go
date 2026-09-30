@@ -24,6 +24,11 @@ var (
 		From: vaultDir + "/.beads/embeddeddolt",
 		To:   "/home/jwhite/beads-embeddeddolt-aside-20260929T140000Z",
 	}
+	// doltMoved is the directory dolt-beads serves, set aside beside the other one.
+	doltMoved = application.AsideMove{
+		From: vaultDir + "/.beads/dolt",
+		To:   "/home/jwhite/beads-dolt-aside-20260929T140000Z",
+	}
 )
 
 // moveWorld is every machine a move reaches — ssh, GitHub, bd, git, systemctl,
@@ -35,11 +40,15 @@ type moveWorld struct {
 	calls []string
 
 	// What the machines answer.
-	oldHomeUp    bool
-	hasEmbedded  bool
-	installed    map[string]bool
-	running      map[string]bool
-	beads        int
+	oldHomeUp   bool
+	hasEmbedded bool
+	// hasDolt is a .beads/dolt on this host, the directory dolt-beads serves.
+	hasDolt   bool
+	installed map[string]bool
+	running   map[string]bool
+	beads     int
+	// oldBeads is what bd counts on the old home, in a planned move.
+	oldBeads     int
 	mayorStarted bool
 	hasIndex     bool
 	// The old home, when the move is planned: whether its Mayor hands off, and the
@@ -61,6 +70,7 @@ func newMoveWorld() *moveWorld {
 		installed:      map[string]bool{application.DoltBeadsUnit: true, application.PosternBackendUnit: true},
 		running:        map[string]bool{},
 		beads:          4422,
+		oldBeads:       4422,
 		mayorStarted:   true,
 		hasIndex:       true,
 		oldInstalled:   map[string]bool{application.DoltBeadsUnit: true, application.PosternBackendUnit: true},
@@ -97,6 +107,17 @@ func (w *moveWorld) SetBeadsAside(_ context.Context, stamp string) (application.
 	return asideMoved, nil
 }
 
+// SetDoltAside writes a call down only when there is a .beads/dolt to set aside.
+func (w *moveWorld) SetDoltAside(_ context.Context, stamp string) (application.AsideMove, error) {
+	if stamp != "20260929T140000Z" {
+		return application.AsideMove{}, errors.New("the stamp is the move's time: " + stamp)
+	}
+	if !w.hasDolt {
+		return application.AsideMove{}, nil
+	}
+	return doltMoved, w.did("aside .beads/dolt")
+}
+
 func (w *moveWorld) BootstrapBeads(context.Context) error { return w.did("bd bootstrap --yes") }
 
 func (w *moveWorld) RestoreBeadsConfig(context.Context) error {
@@ -115,6 +136,15 @@ func (w *moveWorld) StartUnit(_ context.Context, unit string) (bool, error) {
 	started := !w.running[unit]
 	w.running[unit] = true
 	return started, w.did("systemctl --user start " + unit)
+}
+
+// StopUnit writes a call down only when it stops a unit that was running.
+func (w *moveWorld) StopUnit(_ context.Context, unit string) (bool, error) {
+	if !w.running[unit] {
+		return false, nil
+	}
+	w.running[unit] = false
+	return true, w.did("systemctl --user stop " + unit)
 }
 
 func (w *moveWorld) BackendServing(_ context.Context, url string, wait time.Duration) error {
@@ -565,4 +595,56 @@ func TestACommitThatFailsPutsTheHomeFileBackAsItWas(t *testing.T) {
 			mustContain(t, "ways back", out.String(), "Ways back", c.back)
 		})
 	}
+}
+
+func TestADoltDirectoryIsSetAsideBesideTheEmbeddedOneAndItsWayBackIsPrinted(t *testing.T) {
+	w, out := newMoveWorld(), &bytes.Buffer{}
+	w.hasDolt = true
+	w.failAt = "bd bootstrap --yes"
+
+	err := move(w, out).Run(context.Background())
+
+	if err == nil {
+		t.Fatal("expected the move to stop")
+	}
+	wantCalls(t, w,
+		"ssh desktop", "git: read refs/dolt/data time", "host lock taken",
+		"aside .beads/embeddeddolt", "aside .beads/dolt", "bd bootstrap --yes", "host lock released")
+	mustContain(t, "ways back", out.String(), "Ways back",
+		"mv "+doltMoved.To+" "+doltMoved.From, "mv "+asideMoved.To+" "+asideMoved.From)
+}
+
+func TestARunningDoltBeadsIsStoppedBeforeTheRenameAndItsRestartIsAWayBack(t *testing.T) {
+	w, out := newMoveWorld(), &bytes.Buffer{}
+	w.hasDolt = true
+	w.running[application.DoltBeadsUnit] = true
+	w.failAt = "bd bootstrap --yes"
+
+	err := move(w, out).Run(context.Background())
+
+	if err == nil {
+		t.Fatal("expected the move to stop")
+	}
+	wantCalls(t, w,
+		"ssh desktop", "git: read refs/dolt/data time", "host lock taken",
+		"systemctl --user stop dolt-beads",
+		"aside .beads/embeddeddolt", "aside .beads/dolt", "bd bootstrap --yes", "host lock released")
+	text := out.String()
+	block := text[strings.Index(text, "The move stopped"):]
+	mustContain(t, "error", err.Error(), "stopped here", "cannot bootstrap into a stopped server")
+	restart := strings.Index(block, "systemctl --user start dolt-beads")
+	back := strings.Index(block, "mv "+doltMoved.To+" "+doltMoved.From)
+	if restart < 0 || back < 0 || restart < back {
+		t.Errorf("expected the asides moved back, and only then dolt-beads started, in:\n%s", block)
+	}
+}
+
+func TestTheReportNamesWhereTheDoltDirectoryWasSetAside(t *testing.T) {
+	w, out := newMoveWorld(), &bytes.Buffer{}
+	w.hasDolt = true
+
+	if err := move(w, out).Run(context.Background()); err != nil {
+		t.Fatalf("move: %v\n%s", err, out)
+	}
+	mustContain(t, "report", out.String(), doltMoved.To, "never deleted")
 }

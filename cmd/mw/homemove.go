@@ -26,9 +26,11 @@ func newHomeMoveCmd() *cobra.Command {
 			"The steps, each printed with its way back:\n\n" +
 			"  1. asks whether the old home answers ssh (10 s). If it does, stops: old home is up: use\n" +
 			"     --planned. If it does not, goes on only with --old-home-dead.\n" +
-			"  2. beads: reads when GitHub's refs/dolt/data was written, sets the embedded database\n" +
-			"     aside in a dated directory (never deleted), runs `bd bootstrap --yes` and restores\n" +
-			"     .beads/config.yaml, and starts the dolt-beads user unit if this host has one.\n" +
+			"  2. beads: reads when GitHub's refs/dolt/data was written, stops the dolt-beads unit if it\n" +
+			"     runs here, sets the embedded database and .beads/dolt aside in dated directories\n" +
+			"     (never deleted), runs `bd bootstrap --yes`, restores .beads/config.yaml, and starts\n" +
+			"     the dolt-beads unit if this host has one. A planned move stops if the count of\n" +
+			"     beads differs from the old home's; a dead old home has none to compare.\n" +
 			"  3. the vault: writes the home file, commits it and pushes. That is the fence: an old\n" +
 			"     home that comes back reads it and stays quiet.\n" +
 			"  4. Postern: starts the postern-backend user unit and waits for its /healthz to answer\n" +

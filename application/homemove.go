@@ -48,6 +48,10 @@ type HomeMoveHost interface {
 	// none is the zero move, not an error.
 	SetBeadsAside(ctx context.Context, stamp string) (AsideMove, error)
 
+	// SetDoltAside does the same for the vault's .beads/dolt, the directory the
+	// dolt-beads unit serves. The unit must not be running.
+	SetDoltAside(ctx context.Context, stamp string) (AsideMove, error)
+
 	// BootstrapBeads runs `bd bootstrap --yes`: a database cloned from GitHub's
 	// refs/dolt/data.
 	BootstrapBeads(ctx context.Context) error
@@ -65,6 +69,10 @@ type HomeMoveHost interface {
 	// StartUnit starts the user unit, and reports whether it did: a unit that was
 	// already running is left alone, and is (false, nil).
 	StartUnit(ctx context.Context, unit string) (started bool, err error)
+
+	// StopUnit stops the user unit, and reports whether it did: a unit that was
+	// not running is left alone, and is (false, nil).
+	StopUnit(ctx context.Context, unit string) (stopped bool, err error)
 
 	// BackendServing waits up to wait for the backend at url to answer /healthz
 	// as home: 200, and not in standby.
@@ -91,6 +99,10 @@ type OldHome interface {
 
 	// Sync runs mw sync there: the final backup push of the beads and the vault.
 	Sync(ctx context.Context, ssh []string) error
+
+	// OldBeadsCount is how many beads bd counts on the old home, in its vault and
+	// with the server mode it runs in.
+	OldBeadsCount(ctx context.Context, ssh []string) (int, error)
 
 	// OldUnitInstalled reports whether the old home has the user unit.
 	OldUnitInstalled(ctx context.Context, ssh []string, unit string) (bool, error)
@@ -213,6 +225,14 @@ type homeMoveRun struct {
 	at      time.Time
 	// backupAt is when GitHub's refs/dolt/data was written, read by step 2.
 	backupAt time.Time
+	// oldCount is the old home's `bd count` after its final flush, taken by a
+	// planned move's stand-down; haveOldCount is whether it was taken at all.
+	oldCount     int
+	haveOldCount bool
+	// saidNoOldCount is whether a dead move has said already that it has no old count.
+	saidNoOldCount bool
+	// asides are the directories set aside, for the error of a count that differs.
+	asides []AsideMove
 	// backs are the ways back of the step that is running, the first thing done
 	// first; nothing says why there is none to give in the dry-run's words.
 	backs   []string
@@ -396,11 +416,11 @@ func (r *homeMoveRun) steps() []homeMoveStep {
 			title: "beads, from GitHub",
 			plan: []string{
 				"reads when GitHub's refs/dolt/data, the beads backup, was written. If GitHub cannot be read the move stops there, with nothing touched.",
-				fmt.Sprintf("takes this host's sync lock, and sets %s/.beads/embeddeddolt aside in a dated directory in the home directory (beads-embeddeddolt-aside-<time>): it is never deleted.", m.VaultDir),
-				"runs `bd bootstrap --yes`, then `git checkout -- .beads/config.yaml` (bootstrap drops its trailing newline), and asks bd how many beads it holds: none is a stop.",
+				fmt.Sprintf("takes this host's sync lock, stops the %s unit here if it is running (it holds %s/.beads/dolt open), and sets %s/.beads/embeddeddolt and %s/.beads/dolt aside in dated directories in the home directory (beads-embeddeddolt-aside-<time>, beads-dolt-aside-<time>): neither is ever deleted, so a stale .beads/dolt is never served.", DoltBeadsUnit, m.VaultDir, m.VaultDir, m.VaultDir),
+				"runs `bd bootstrap --yes`, then `git checkout -- .beads/config.yaml` (bootstrap drops its trailing newline), and asks bd how many beads it holds: none is a stop, and so is a count that differs from the old home's own (a planned move takes that over ssh; a dead old home has none to compare).",
 				fmt.Sprintf("starts the %s user unit if this host has one; if not, stays embedded, and beads_sync = auto reads home as backup mode.", DoltBeadsUnit),
 			},
-			back: fmt.Sprintf("stop %s if it started, move the new .beads/embeddeddolt away and move the dated directory back in its place.", DoltBeadsUnit),
+			back: fmt.Sprintf("stop %s if the move started it, move the new .beads/embeddeddolt and .beads/dolt away (if bootstrap made them), move both dated directories back in their places, then start %s again if it was running before.", DoltBeadsUnit, DoltBeadsUnit),
 			run:  (*homeMoveRun).beads,
 		},
 		{
@@ -480,17 +500,30 @@ func (r *homeMoveRun) beads(ctx context.Context) error {
 		}
 		defer release()
 	}
-	aside, err := m.Machine.SetBeadsAside(ctx, r.at.Format("20060102T150405Z"))
+	// A running server holds .beads/dolt open: stop it first, and start it in the way back.
+	stopped, err := m.Machine.StopUnit(ctx, DoltBeadsUnit)
+	if err != nil {
+		return fmt.Errorf("stopping the %s unit before its directory is set aside: %w", DoltBeadsUnit, err)
+	}
+	if stopped {
+		r.say("stopped the %s user unit here: it holds .beads/dolt open.", DoltBeadsUnit)
+		r.undo("systemctl --user start " + DoltBeadsUnit + " (it was running before the move; start it once the directories above are back)")
+	}
+	stamp := r.at.Format("20060102T150405Z")
+	aside, err := m.Machine.SetBeadsAside(ctx, stamp)
 	if err != nil {
 		return fmt.Errorf("setting the embedded database aside: %w", err)
 	}
-	if aside.From == "" {
-		r.say("no embedded database here to set aside.")
-	} else {
-		r.say("set %s aside as %s (never deleted).", aside.From, aside.To)
-		r.undo(fmt.Sprintf("mv %s %s.from-github (only if bootstrap got as far as making it)\nmv %s %s", aside.From, aside.From, aside.To, aside.From))
+	r.setAside(aside, "embedded database")
+	dolt, err := m.Machine.SetDoltAside(ctx, stamp)
+	if err != nil {
+		return fmt.Errorf("setting the .beads/dolt directory aside: %w", err)
 	}
+	r.setAside(dolt, ".beads/dolt directory")
 	if err := m.Machine.BootstrapBeads(ctx); err != nil {
+		if stopped {
+			return fmt.Errorf("bootstrapping the beads database: %w. The %s unit is stopped here: a bd in server mode (BEADS_DOLT_* set, as beads.env does) cannot bootstrap into a stopped server, and bootstrap makes no .beads/dolt of its own: no stale directory is left to serve, and no new one was made. The ways back are below", err, DoltBeadsUnit)
+		}
 		return fmt.Errorf("bootstrapping the beads database: %w", err)
 	}
 	r.say("bd bootstrap --yes cloned refs/dolt/data.")
@@ -522,7 +555,21 @@ func (r *homeMoveRun) beads(ctx context.Context) error {
 	return r.beadsAnswer(ctx, "bd, with the "+DoltBeadsUnit+" unit up,")
 }
 
-// beadsAnswer is bd counting the beads: none is not a database to go on with.
+// setAside says what was set aside and notes the way back of it; the zero move is
+// nothing to set aside.
+func (r *homeMoveRun) setAside(aside AsideMove, what string) {
+	if aside.From == "" {
+		r.say("no %s here to set aside.", what)
+		return
+	}
+	r.asides = append(r.asides, aside)
+	r.say("set %s aside as %s (never deleted).", aside.From, aside.To)
+	r.undo(fmt.Sprintf("mv %s %s.from-github (only if bootstrap got as far as making it)\nmv %s %s", aside.From, aside.From, aside.To, aside.From))
+}
+
+// beadsAnswer is bd counting the beads: none is not a database to go on with, and
+// neither is one whose count is not the old home's, which a stale .beads/dolt, served
+// as it stood, would be. A dead old home has no count to compare, and the output says so.
 func (r *homeMoveRun) beadsAnswer(ctx context.Context, who string) error {
 	count, err := r.m.Machine.BeadsCount(ctx)
 	if err != nil {
@@ -532,7 +579,32 @@ func (r *homeMoveRun) beadsAnswer(ctx context.Context, who string) error {
 		return fmt.Errorf("%s holds no beads: the database is not one to make the home of", who)
 	}
 	r.say("%s answers with %d beads.", who, count)
+	switch {
+	case !r.haveOldCount:
+		if r.saidNoOldCount {
+			return nil
+		}
+		r.saidNoOldCount = true
+		r.say("no old count to compare: the old home is dead, so what it held is not known, and %d is not checked against it.", count)
+	case count != r.oldCount:
+		return fmt.Errorf("%s answers with %d beads, but the old home held %d after its final flush: what is served here is not the old home's database (a stale .beads/dolt, or a clone that is not level). %s. Put them back as the ways back below say, or look inside them, before running the move again",
+			who, count, r.oldCount, r.asideText())
+	default:
+		r.say("the old home counted %d too: the count agrees.", r.oldCount)
+	}
 	return nil
+}
+
+// asideText says where what was set aside is now.
+func (r *homeMoveRun) asideText() string {
+	if len(r.asides) == 0 {
+		return "Nothing was set aside on this host"
+	}
+	var told []string
+	for _, a := range r.asides {
+		told = append(told, fmt.Sprintf("%s is at %s", a.From, a.To))
+	}
+	return "Set aside, never deleted: " + strings.Join(told, "; ")
 }
 
 func (r *homeMoveRun) vault(ctx context.Context) error {

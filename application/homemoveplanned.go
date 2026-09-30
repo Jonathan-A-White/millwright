@@ -40,7 +40,7 @@ func (r *homeMoveRun) plannedSteps(dead []homeMoveStep) []homeMoveStep {
 		title: "the old home stands down",
 		plan: []string{
 			fmt.Sprintf("over ssh, on %s: mails its Mayor '%s' and waits up to %s for .mayor-acting there to be empty or its Mayor process gone. If it does not go, the move stops: a Mayor is never killed.", r.old, r.plannedHandoffSubject(), HomeMoveHandoffWait),
-			fmt.Sprintf("runs a final mw sync there (a backup push of the beads and the vault), stops its %s user unit, then runs a final mw postern mirror to this host.", PosternBackendUnit),
+			fmt.Sprintf("runs a final mw sync there (a backup push of the beads and the vault), stops its %s user unit, then runs a final mw postern mirror to this host, and takes bd count there: the number the new home's database must answer with.", PosternBackendUnit),
 			fmt.Sprintf("stops its %s user unit, so nothing there writes to beads: once the home changes, beads_sync = auto makes it a boost.", DoltBeadsUnit),
 		},
 		back: fmt.Sprintf("mail its Mayor to carry on, and start the %s and %s units there again.", PosternBackendUnit, DoltBeadsUnit),
@@ -102,6 +102,15 @@ func (r *homeMoveRun) standDown(ctx context.Context) error {
 		return fmt.Errorf("the final mw postern mirror on %s: %w", old, err)
 	}
 	r.say("ran the final mw postern mirror on %s: its data is copied here.", old)
+
+	// The count is taken after the final flush and before the server stops: it is
+	// what the new home's database has to answer with.
+	count, err := m.Old.OldBeadsCount(ctx, ssh)
+	if err != nil {
+		return fmt.Errorf("counting the beads on %s: %w", old, err)
+	}
+	r.oldCount, r.haveOldCount = count, true
+	r.say("%s counts %d beads after its final flush: the new home's database has to answer with as many.", old, count)
 
 	return r.stopOld(ctx, DoltBeadsUnit)
 }
