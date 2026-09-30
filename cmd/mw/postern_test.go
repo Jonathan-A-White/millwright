@@ -469,20 +469,3 @@ func TestPosternInboxDownloadsDecryptsAndWritesAnAttachment(t *testing.T) {
 		t.Errorf("expected mw postern inbox to print %s, got:\n%s", wantPath, out)
 	}
 }
-
-// --re answers in the General thread, so it is refused with each flag that
-// names another thread, before any key, backend or tracker is touched.
-func TestPosternSendRefusesReWithAnotherThreadFlag(t *testing.T) {
-	for _, other := range [][]string{
-		{"--class", "decision-needed", "--bead", "mw-a.1"},
-		{"--thread", "mw-a.1"},
-		{"--topic", "garden"},
-	} {
-		args := append([]string{"send", "--re", "direct:ab0d0cd9"}, other...)
-		out, err := runPostern(t, append(args, "hello")...)
-		flag := other[len(other)-2]
-		if err == nil || !strings.Contains(err.Error(), "--re") || !strings.Contains(err.Error(), flag) {
-			t.Errorf("expected a refusal naming --re and %s, got %v\n%s", flag, err, out)
-		}
-	}
-}

@@ -33,28 +33,22 @@ func TestPosternSendAnswersInGeneralWithRe(t *testing.T) {
 	}
 }
 
-// --re is an answer in General: it names no bead, so --bead, --thread and
-// --topic each conflict with it, and the refusal names both flags.
-func TestPosternSendRefusesReWithAnotherThread(t *testing.T) {
-	for _, flag := range []string{"--bead", "--thread", "--topic"} {
-		t.Run(flag, func(t *testing.T) {
-			req := application.PosternSendRequest{Text: "x", Re: "direct:" + reTxid}
-			switch flag {
-			case "--bead":
-				req.Class, req.Bead = "decision-needed", "mw-a.1"
-			case "--thread":
-				req.Thread = "mw-a.1"
-			case "--topic":
-				req.Topic = "garden"
-			}
-			err := req.ValidateReplyFlags()
-			if err == nil || !strings.Contains(err.Error(), "--re") || !strings.Contains(err.Error(), flag) {
-				t.Fatalf("expected a refusal naming --re and %s, got %v", flag, err)
-			}
-		})
+// --re answers inside a post's thread in any channel: it goes with
+// --bead-channel and --channel (Thread and Topic), and only --bead, which
+// asks a question of its own, conflicts with it.
+func TestPosternSendRefusesReWithABeadQuestionOnly(t *testing.T) {
+	req := application.PosternSendRequest{Text: "x", Class: "decision-needed", Bead: "mw-a.1", Re: "direct:" + reTxid}
+	if err := req.ValidateReplyFlags(); err == nil || !strings.Contains(err.Error(), "--re") || !strings.Contains(err.Error(), "--bead") {
+		t.Fatalf("expected a refusal naming --re and --bead, got %v", err)
 	}
-	if err := (application.PosternSendRequest{Text: "x", Re: "direct:" + reTxid}).ValidateReplyFlags(); err != nil {
-		t.Fatalf("expected --re alone accepted, got %v", err)
+	for name, req := range map[string]application.PosternSendRequest{
+		"general":      {Text: "x", Re: "direct:" + reTxid},
+		"bead channel": {Text: "x", Re: "direct:" + reTxid, Thread: "mw-a.1"},
+		"channel":      {Text: "x", Re: "direct:" + reTxid, Topic: "garden"},
+	} {
+		if err := req.ValidateReplyFlags(); err != nil {
+			t.Fatalf("%s: expected --re accepted, got %v", name, err)
+		}
 	}
 }
 
@@ -82,7 +76,7 @@ func reInbox(t *testing.T, plaintext string) string {
 // unwrapped; one without prints no re.
 func TestPosternInboxPrintsReOfAnAnswer(t *testing.T) {
 	out := reInbox(t, `{"text":"Thanks, looks right.","re":"direct:`+reTxid+`"}`)
-	if !strings.Contains(out, "thread general") || !strings.Contains(out, "re direct:"+reTxid) || !strings.Contains(out, "\nThanks, looks right.\n") {
+	if !strings.Contains(out, "channel general") || !strings.Contains(out, "re direct:"+reTxid) || !strings.Contains(out, "\nThanks, looks right.\n") {
 		t.Fatalf("expected the general thread, its re and the bare text, got:\n%s", out)
 	}
 	if first := strings.SplitN(out, "\n", 2)[0]; !strings.Contains(first, "re direct:"+reTxid) {
@@ -93,10 +87,10 @@ func TestPosternInboxPrintsReOfAnAnswer(t *testing.T) {
 	}
 
 	plain := reInbox(t, "Just saying hi.")
-	if strings.Contains(plain, " re ") || strings.Contains(plain, "re direct") {
+	if first := strings.SplitN(plain, "\n", 2)[0]; strings.Contains(first, " re ") {
 		t.Fatalf("expected no re on a plain message, got:\n%s", plain)
 	}
-	if !strings.Contains(plain, "thread general") {
+	if !strings.Contains(plain, "channel general") {
 		t.Fatalf("expected the plain message still printed, got:\n%s", plain)
 	}
 }

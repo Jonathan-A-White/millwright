@@ -83,7 +83,7 @@ func InitializePosternSendScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the bead "([^"]*)" titled "([^"]*)" exists$`, c.theBeadTitledExists)
 	ctx.Given(`^the bead "([^"]*)" titled with (\d+) letters exists$`, c.theBeadTitledWithLettersExists)
 	ctx.Given(`^the postern channel is "([^"]*)"$`, c.thePosternChannelIs)
-	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" threaded on bead "([^"]*)" attaching "([^"]*)" and "([^"]*)" is run$`, c.mwPosternSendThreadedAttachingTwoIsRun)
+	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" in the channel of bead "([^"]*)" attaching "([^"]*)" and "([^"]*)" is run$`, c.mwPosternSendThreadedAttachingTwoIsRun)
 	ctx.Then(`^the delivered record's summary is "([^"]*)"$`, c.theDeliveredRecordsSummaryIs)
 	ctx.Then(`^the delivered record's summary does not contain "([^"]*)"$`, c.theDeliveredRecordsSummaryDoesNotContain)
 	ctx.Then(`^the delivered record has no summary key$`, c.theDeliveredRecordHasNoSummaryKey)
@@ -101,10 +101,10 @@ func InitializePosternSendScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" is run$`, c.mwPosternSendIsRun)
 	ctx.When(`^mw postern send "([^"]*)" is run with no --class$`, c.mwPosternSendIsRunWithNoClass)
 	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" for bead "([^"]*)" recommending "([^"]*)" with options "([^"]*)" is run$`, c.mwPosternSendAsksAQuestionIsRun)
-	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" threaded on bead "([^"]*)" is run$`, c.mwPosternSendThreadedOnBeadIsRun)
-	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" on topic "([^"]*)" is run$`, c.mwPosternSendOnTopicIsRun)
-	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" threaded on bead "([^"]*)" and on topic "([^"]*)" is run$`, c.mwPosternSendThreadedOnBeadAndTopicIsRun)
-	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" for bead "([^"]*)" recommending "([^"]*)" with options "([^"]*)" threaded on bead "([^"]*)" is run$`, c.mwPosternSendAsksAQuestionThreadedOnBeadIsRun)
+	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" in the channel of bead "([^"]*)" is run$`, c.mwPosternSendThreadedOnBeadIsRun)
+	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" in channel "([^"]*)" is run$`, c.mwPosternSendOnTopicIsRun)
+	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" in the channel of bead "([^"]*)" and in channel "([^"]*)" is run$`, c.mwPosternSendThreadedOnBeadAndTopicIsRun)
+	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" for bead "([^"]*)" recommending "([^"]*)" with options "([^"]*)" in the channel of bead "([^"]*)" is run$`, c.mwPosternSendAsksAQuestionThreadedOnBeadIsRun)
 
 	ctx.Given(`^the backend still lists what that send spent, and its change$`, c.theBackendStillListsWhatThatSendSpentAndItsChange)
 	ctx.Then(`^the second broadcast does not spend what the first one spent$`, c.theSecondBroadcastDoesNotSpendWhatTheFirstSpent)
@@ -114,14 +114,19 @@ func InitializePosternSendScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^it is refused, saying "([^"]*)" is not a class postern knows$`, c.itIsRefusedSayingIsNotAClass)
 	ctx.Then(`^it is refused, saying postern_governor_key is not set$`, c.itIsRefusedSayingGovernorKeyNotSet)
 	ctx.Then(`^it is refused, saying --bead is only accepted with --class decision-needed$`, c.itIsRefusedSayingBeadOnlyWithDecisionNeeded)
+	ctx.Then(`^it is refused, saying --bead-channel <id> posts in a bead's channel$`, c.itIsRefusedSayingBeadChannelPostsInABeadsChannel)
+	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" in the channel of bead "([^"]*)" answering "([^"]*)" is run$`, c.mwPosternSendInBeadChannelAnsweringIsRun)
+	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" in channel "([^"]*)" answering "([^"]*)" is run$`, c.mwPosternSendInChannelAnsweringIsRun)
+	ctx.Then(`^the broadcast record's plaintext is in the channel of bead "([^"]*)" with text "([^"]*)" answering "([^"]*)"$`, c.theBroadcastRecordsPlaintextIsInBeadChannelAnswering)
+	ctx.Then(`^the broadcast record's plaintext is in channel "([^"]*)" with text "([^"]*)" answering "([^"]*)"$`, c.theBroadcastRecordsPlaintextIsInChannelAnswering)
 	ctx.Then(`^the broadcast record is postern's payload, classed "([^"]*)", stamped (\d+)$`, c.theBroadcastRecordIsPosternsPayload)
 	ctx.Then(`^the broadcast record is postern's question for bead "([^"]*)", "([^"]*)" recommending "([^"]*)" with options "([^"]*)"$`, c.theBroadcastRecordIsPosternsQuestion)
 	ctx.Then(`^bead "([^"]*)" is commented the QUESTION with txid "([^"]*)", "([^"]*)" recommending "([^"]*)" with options "([^"]*)"$`, c.beadIsCommentedTheQuestion)
 	ctx.Then(`^bead "([^"]*)"'s question note holds the txid "([^"]*)"$`, c.beadsQuestionNoteHoldsTheTxid)
-	ctx.Then(`^the broadcast record's plaintext is threaded on bead "([^"]*)" with text "([^"]*)"$`, c.theBroadcastRecordsPlaintextIsThreadedOnBead)
-	ctx.Then(`^the broadcast record's plaintext is on topic "([^"]*)" with text "([^"]*)"$`, c.theBroadcastRecordsPlaintextIsOnTopic)
-	ctx.Then(`^it is refused, saying --thread and --topic cannot both be set$`, c.itIsRefusedSayingThreadAndTopicCannotBothBeSet)
-	ctx.Then(`^it is refused, saying --thread and --topic are refused with a decision-needed question$`, c.itIsRefusedSayingThreadRefusedWithQuestion)
+	ctx.Then(`^the broadcast record's plaintext is in the channel of bead "([^"]*)" with text "([^"]*)"$`, c.theBroadcastRecordsPlaintextIsThreadedOnBead)
+	ctx.Then(`^the broadcast record's plaintext is in channel "([^"]*)" with text "([^"]*)"$`, c.theBroadcastRecordsPlaintextIsOnTopic)
+	ctx.Then(`^it is refused, saying --channel and --bead-channel cannot both be set$`, c.itIsRefusedSayingThreadAndTopicCannotBothBeSet)
+	ctx.Then(`^it is refused, saying --channel and --bead-channel are refused with a decision-needed question$`, c.itIsRefusedSayingThreadRefusedWithQuestion)
 }
 
 // splitOptions reads a comma-space-joined options list back into a slice, the
@@ -646,12 +651,55 @@ func (c *posternSendContext) theBroadcastRecordsPlaintextIsOnTopic(topic, text s
 	return nil
 }
 
+func (c *posternSendContext) mwPosternSendInBeadChannelAnsweringIsRun(class, text, bead, re string) error {
+	c.txid, c.err = c.send().Run(context.Background(), application.PosternSendRequest{Class: class, Text: text, Thread: bead, Re: re})
+	return nil
+}
+
+func (c *posternSendContext) mwPosternSendInChannelAnsweringIsRun(class, text, channel, re string) error {
+	c.txid, c.err = c.send().Run(context.Background(), application.PosternSendRequest{Class: class, Text: text, Topic: channel, Re: re})
+	return nil
+}
+
+func (c *posternSendContext) theBroadcastRecordsPlaintextIsInBeadChannelAnswering(bead, text, re string) error {
+	return c.plaintextIs(application.PosternThreadedMessage{Thread: application.PosternThread{Bead: bead}, Text: text, Re: re})
+}
+
+func (c *posternSendContext) theBroadcastRecordsPlaintextIsInChannelAnswering(channel, text, re string) error {
+	return c.plaintextIs(application.PosternThreadedMessage{Thread: application.PosternThread{Topic: channel}, Text: text, Re: re})
+}
+
+func (c *posternSendContext) plaintextIs(message application.PosternThreadedMessage) error {
+	got, err := c.decryptedBroadcastPlaintext()
+	if err != nil {
+		return err
+	}
+	want, err := json.Marshal(message)
+	if err != nil {
+		return err
+	}
+	if got != string(want) {
+		return fmt.Errorf("expected the plaintext\n%s\ngot\n%s", want, got)
+	}
+	return nil
+}
+
+func (c *posternSendContext) itIsRefusedSayingBeadChannelPostsInABeadsChannel() error {
+	if c.err == nil {
+		return fmt.Errorf("expected send to be refused, but it succeeded")
+	}
+	if !strings.Contains(c.err.Error(), "--bead-channel <id> posts in a bead's channel") {
+		return fmt.Errorf("expected the refusal to name --bead-channel, got: %q", c.err.Error())
+	}
+	return nil
+}
+
 func (c *posternSendContext) itIsRefusedSayingThreadAndTopicCannotBothBeSet() error {
 	if c.err == nil {
 		return fmt.Errorf("expected send to be refused, but it succeeded")
 	}
-	if !strings.Contains(c.err.Error(), "--thread") || !strings.Contains(c.err.Error(), "--topic") {
-		return fmt.Errorf("expected the refusal to name --thread and --topic, got: %q", c.err.Error())
+	if !strings.Contains(c.err.Error(), "--channel") || !strings.Contains(c.err.Error(), "--bead-channel") {
+		return fmt.Errorf("expected the refusal to name --channel and --bead-channel, got: %q", c.err.Error())
 	}
 	return nil
 }
@@ -660,8 +708,8 @@ func (c *posternSendContext) itIsRefusedSayingThreadRefusedWithQuestion() error 
 	if c.err == nil {
 		return fmt.Errorf("expected send to be refused, but it succeeded")
 	}
-	if !strings.Contains(c.err.Error(), "--thread") || !strings.Contains(c.err.Error(), "decision-needed question") {
-		return fmt.Errorf("expected the refusal to say --thread is refused with a decision-needed question, got: %q", c.err.Error())
+	if !strings.Contains(c.err.Error(), "--bead-channel") || !strings.Contains(c.err.Error(), "decision-needed question") {
+		return fmt.Errorf("expected the refusal to say --bead-channel is refused with a decision-needed question, got: %q", c.err.Error())
 	}
 	return nil
 }

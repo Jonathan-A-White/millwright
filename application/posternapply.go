@@ -298,7 +298,7 @@ func (i PosternInbox) applyOne(ctx context.Context, m PosternInboxMessage, outco
 			return posternApplied{Kind: "comment", Bead: m.Thread, Txid: m.Txid}, true, nil
 		}
 		if err := i.mail(ctx, fmt.Sprintf("Governor on %s: %s", m.Thread, clippedTo(strings.Join(strings.Fields(m.Text), " "), 60)),
-			fmt.Sprintf("The Governor by postern %s, txid %s, on %s:\n\n%s", sentInFull(m.Ts), m.Txid, m.Thread, m.Text)); err != nil {
+			fmt.Sprintf("The Governor by postern %s, txid %s, on %s:\n\n%s%s", sentInFull(m.Ts), m.Txid, m.Thread, m.Text, answerSuffix(m))); err != nil {
 			return posternApplied{}, false, err
 		}
 		result := posternApplied{Kind: "comment", Bead: m.Thread, Txid: m.Txid}
@@ -537,4 +537,13 @@ func (i PosternInbox) lock(ctx context.Context) (func(), error) {
 		return nil, fmt.Errorf("taking the postern inbox's lock: %w", err)
 	}
 	return release, nil
+}
+
+// answerSuffix is the answer command a mail body about message m ends with,
+// after a blank line; "" when there is none to give.
+func answerSuffix(m PosternInboxMessage) string {
+	if line := m.answerLine(); line != "" {
+		return "\n\n" + line
+	}
+	return ""
 }

@@ -113,8 +113,8 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a postern reply from "([^"]*)" for bead "([^"]*)" with answer "([^"]*)" and txid "([^"]*)" addressed to this key$`,
 		c.aPosternReplyFromAddressedToThisKey)
 	ctx.Given(`^a plain text postern record with text "([^"]*)" addressed to this key$`, c.aPlainTextRecordAddressedToThisKey)
-	ctx.Given(`^a postern record of class "([^"]*)" addressed to this key, threaded on bead "([^"]*)"$`, c.aPosternRecordAddressedToThisKeyThreadedOnBead)
-	ctx.Given(`^a postern record of class "([^"]*)" addressed to this key, on topic "([^"]*)"$`, c.aPosternRecordAddressedToThisKeyOnTopic)
+	ctx.Given(`^a postern record of class "([^"]*)" addressed to this key, in the channel of bead "([^"]*)"$`, c.aPosternRecordAddressedToThisKeyThreadedOnBead)
+	ctx.Given(`^a postern record of class "([^"]*)" addressed to this key, in channel "([^"]*)"$`, c.aPosternRecordAddressedToThisKeyOnTopic)
 	ctx.Given(`^a postern question for bead "([^"]*)" addressed to this key$`, c.aPosternQuestionForBeadAddressedToThisKey)
 	ctx.Given(`^a postern record of class "([^"]*)" addressed to this key signed by "([^"]*)"$`, c.aPosternRecordAddressedToThisKeySignedBy)
 	ctx.Given(`^a postern reply for bead "([^"]*)" with answer "([^"]*)" and txid "([^"]*)" addressed to this key claiming to be from "([^"]*)"$`,
@@ -122,12 +122,14 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a postern reply for bead "([^"]*)" with answer "([^"]*)" and txid "([^"]*)" addressed to this key signed by "([^"]*)"$`,
 		c.aPosternReplySignedBy)
 	ctx.Given(`^mw postern inbox trusts "([^"]*)" as the Governor's key$`, c.thePosternGovernorKeyIs)
-	ctx.Given(`^a postern message from "([^"]*)" threaded on bead "([^"]*)" with text "([^"]*)" and txid "([^"]*)"$`,
+	ctx.Given(`^a postern message from "([^"]*)" in the channel of bead "([^"]*)" with text "([^"]*)" and txid "([^"]*)"$`,
 		c.aPosternMessageFromThreadedOnBead)
-	ctx.Given(`^a postern message from "([^"]*)" threaded on bead "([^"]*)" with text "([^"]*)" and txid "([^"]*)" carrying a screenshot$`,
+	ctx.Given(`^a postern message from "([^"]*)" in the channel of bead "([^"]*)" with text "([^"]*)" and txid "([^"]*)" carrying a screenshot$`,
 		c.aPosternMessageFromThreadedOnBeadCarryingAScreenshot)
-	ctx.Given(`^a postern message from "([^"]*)" on topic "([^"]*)" with text "([^"]*)" and txid "([^"]*)"$`,
+	ctx.Given(`^a postern message from "([^"]*)" in channel "([^"]*)" with text "([^"]*)" and txid "([^"]*)"$`,
 		c.aPosternMessageFromOnTopic)
+	ctx.Given(`^a postern message from "([^"]*)" with text "([^"]*)" and txid "([^"]*)"$`, c.aPosternMessageFromInGeneral)
+	ctx.Given(`^a postern message from "([^"]*)" with text "([^"]*)" and txid "([^"]*)" answering "([^"]*)"$`, c.aPosternMessageFromAnswering)
 	ctx.Given(`^a postern message from "([^"]*)" with text "([^"]*)" and txid "([^"]*)" carrying two files$`,
 		c.aPosternMessageFromCarryingTwoFiles)
 	ctx.Then(`^both files of the post are written and printed under the attachment directory$`,
@@ -149,7 +151,7 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the hands step "([^"]*)" on "([^"]*)" ran with exit (\d+)$`, c.theHandsStepRanWithExit)
 	ctx.Then(`^the hands step "([^"]*)" on "([^"]*)" did not run$`, c.theHandsStepDidNotRun)
 	ctx.Then(`^bead "([^"]*)"'s last comment starts "([^"]*)"$`, c.beadsLastCommentStarts)
-	ctx.Given(`^a postern voice note from "([^"]*)" threaded on bead "([^"]*)" with txid "([^"]*)"$`, c.aPosternVoiceNoteThreadedOnBead)
+	ctx.Given(`^a postern voice note from "([^"]*)" in the channel of bead "([^"]*)" with txid "([^"]*)"$`, c.aPosternVoiceNoteThreadedOnBead)
 	ctx.Then(`^the transcript "([^"]*)" was sent back to the Governor in bead "([^"]*)"'s thread, re "([^"]*)"$`, c.theTranscriptWasSentBack)
 	ctx.Then(`^bead "([^"]*)" now stands "([^"]*)"$`, c.beadNowStands)
 	ctx.Then(`^bead "([^"]*)" now has priority (\d+)$`, c.beadNowHasPriority)
@@ -176,6 +178,12 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^it did not print "([^"]*)"$`, c.itDidNotPrintText)
 	ctx.Then(`^no mail was sent for the reply$`, c.noMailWasSent)
 	ctx.Then(`^it printed "([^"]*)"$`, c.itPrintedText)
+	ctx.Then(`^it printed the named channel "([^"]*)"$`, func(name string) error {
+		return c.itPrintedText(fmt.Sprintf("channel %q", name))
+	})
+	ctx.Then(`^it printed the answer command for the named channel "([^"]*)" re "([^"]*)"$`, func(name, re string) error {
+		return c.itPrintedText(fmt.Sprintf("answer in its thread: mw postern send --channel %q --re %s", name, re))
+	})
 	ctx.Then(`^epic "([^"]*)"'s held stories are released$`, c.epicsHeldStoriesAreReleased)
 	ctx.Then(`^bead "([^"]*)" is commented a RELEASED with txid "([^"]*)"$`, c.beadIsCommentedARELEASEDWithTxid)
 	ctx.Then(`^the decrypted image is written under the attachment directory$`, c.theDecryptedImageIsWrittenUnderTheAttachmentDirectory)
@@ -294,6 +302,33 @@ func (c *posternInboxContext) aPosternRecordAddressedToThisKeyOnTopic(class, top
 // envelope naming bead, its envelope sender (and its payload's claimed From)
 // both set to from, so a genuine, verified message is what these scenarios
 // need to exercise a Governor's reply landing as a bead comment.
+// aPosternMessageFromInGeneral is a Factory (General) post from a sender.
+func (c *posternInboxContext) aPosternMessageFromInGeneral(from, text, txid string) error {
+	return c.aPosternMessageFromAnswering(from, text, txid, "")
+}
+
+// aPosternMessageFromAnswering is a General message from a sender whose re
+// names the post it answers, bare when re is empty.
+func (c *posternInboxContext) aPosternMessageFromAnswering(from, text, txid, re string) error {
+	body := text
+	if re != "" {
+		wrapped, err := json.Marshal(application.PosternThreadedMessage{Text: text, Re: re})
+		if err != nil {
+			return err
+		}
+		body = string(wrapped)
+	}
+	c.cipher.From = from
+	ciphertext, err := c.cipher.Encrypt(c.pubKey, body)
+	if err != nil {
+		return err
+	}
+	c.backend.AddRecord(application.PosternRecord{
+		Txid: txid, Class: "message", From: from, To: c.pubKey, Ts: posternReplyStamp, Ciphertext: ciphertext,
+	})
+	return nil
+}
+
 func (c *posternInboxContext) aPosternMessageFromThreadedOnBead(from, bead, text, txid string) error {
 	wrapped, err := json.Marshal(application.PosternThreadedMessage{
 		Thread: application.PosternThread{Bead: bead},

@@ -146,11 +146,13 @@ func newPosternInboxCmd() *cobra.Command {
 		Use:   "inbox",
 		Short: "Read the postern's messages addressed to this host's key",
 		Long: "inbox reads the postern's message records addressed to this host's key, decrypts\n" +
-			"them, and prints them newest first: class, from, txid, thread, when and text. A message's\n" +
-			"thread is the bead a decision-needed question (or its reply) names, the bead or topic its\n" +
-			"own plaintext wrapper names (mw postern send --thread/--topic), or \"general\" otherwise.\n" +
-			"A message that answers another ends its line with \"re <txid>\": answer it with mw postern\n" +
-			"send --re <that txid>.\n" +
+			"them, and prints them newest first: class, from, txid, channel, when and text. A message's\n" +
+			"channel is Factory (\"channel general\"), a bead's (\"channel <bead-id>\": the bead a\n" +
+			"decision-needed question or its reply names, or mw postern send --bead-channel) or a named one\n" +
+			"(`channel \"<name>\"`, mw postern send --channel). A message that answers another ends its line\n" +
+			"with \"re <txid>\". Under each message from the Governor, an \"answer in its thread\" line gives\n" +
+			"the mw postern send command that answers inside its thread: --re is the message's own re when\n" +
+			"it has one (its post), or else its own txid.\n" +
 			"Reading marks them read, by moving a cursor kept in a bd kv note, never an event of its own.\n\n" +
 			"A message's sender is the BRC-78 envelope's own key, not the payload's own claim: a\n" +
 			"payload — or, once the backend can supply one, a transaction signing key — that disagrees\n" +
@@ -358,7 +360,7 @@ func posternInboxLock(attachmentDir string) *hostlock.Lock {
 // to postern_governor_key and sending through the postern backend at
 // postern_backend, by postern_channel.
 func newPosternSendCmd() *cobra.Command {
-	var class, bead, recommend, thread, topic, re string
+	var class, bead, recommend, thread, topic, beadChannel, channelName, re string
 	var options, attach []string
 
 	cmd := &cobra.Command{
@@ -379,16 +381,19 @@ func newPosternSendCmd() *cobra.Command {
 			"sent in its place. Once broadcast, the bead is commented QUESTION with the txid and\n" +
 			"marked open, so mw postern inbox knows a reply to it answers this bead. They are refused\n" +
 			"with any --class but decision-needed.\n\n" +
-			"--thread <bead-id> or --topic <name> wraps <text> in postern's docs/protocol.md section\n" +
-			"6 thread envelope, so mw postern inbox prints it under that bead or topic rather than the\n" +
-			"general thread. They are mutually exclusive, and refused alongside --bead: a decision-needed\n" +
-			"question's own bead is already its thread. Once sent, a message in a bead's thread is\n" +
-			"commented on that bead too: MAYOR via postern, txid <id>: <text>.\n\n" +
-			"--re <txid> answers a post in the General thread: <text> goes to General with its re set to\n" +
-			"that message's txid, as mw postern inbox prints it (direct:<sha256>) or bare, so the app\n" +
-			"shows it in that post's thread. To answer inside a thread, give the root's txid, the same\n" +
-			"re the message you answer carried (mw postern inbox prints it as \"re <txid>\"). It is\n" +
-			"refused with --bead, --thread and --topic, which name another thread.\n\n" +
+			"A channel is where the Governor and the Mayor talk: Factory (General, the default), a\n" +
+			"bead's, or a named one; a thread is the replies under one post in a channel.\n" +
+			"--bead-channel <bead-id> posts in that bead's channel and --channel <name> in a named one,\n" +
+			"wrapping <text> in postern's docs/protocol.md section 6 envelope, so mw postern inbox\n" +
+			"prints it under that channel rather than Factory. They are mutually exclusive, and refused\n" +
+			"alongside --bead: a decision-needed question's own bead is already its channel. Once sent,\n" +
+			"a message in a bead's channel is commented on that bead too: MAYOR via postern, txid <id>:\n" +
+			"<text>.\n\n" +
+			"--re <txid> answers inside a post's thread: <text> goes to the channel the other flags name\n" +
+			"(Factory when none) with its re set to the post's txid, as mw postern inbox prints it\n" +
+			"(direct:<sha256>) or bare, so the app shows it in that post's thread. Give the post's own\n" +
+			"txid, or the re of a message already in its thread (mw postern inbox prints the command).\n" +
+			"It is refused with --bead, which asks a question of its own.\n\n" +
 			"--attach <file> (repeatable) encrypts the file to the Governor, uploads it to the\n" +
 			"backend's blob store and announces it in the message (sections 8 and 14): at most 8 MiB,\n" +
 			"typed by its extension — .png .jpg .jpeg .webp .webm .ogg .oga .opus .m4a .mp4 .mp3\n" +
@@ -403,9 +408,15 @@ func newPosternSendCmd() *cobra.Command {
 			if len(args) == 0 && len(attach) == 0 {
 				return fmt.Errorf("mw postern send: what should it say? give the text, or --attach a file")
 			}
+			if thread != "" && beadChannel != "" {
+				return fmt.Errorf("mw postern send: --thread is the old name of --bead-channel: give only --bead-channel")
+			}
+			if topic != "" && channelName != "" {
+				return fmt.Errorf("mw postern send: --topic is the old name of --channel: give only --channel")
+			}
 			request := application.PosternSendRequest{
 				Class: class, Text: text, Bead: bead, Recommend: recommend, Options: options,
-				Thread: thread, Topic: topic, Re: re, Attachments: attach,
+				Thread: thread + beadChannel, Topic: topic + channelName, Re: re, Attachments: attach,
 			}
 			if err := request.ValidateReplyFlags(); err != nil {
 				return err
@@ -455,9 +466,14 @@ func newPosternSendCmd() *cobra.Command {
 	cmd.Flags().StringVar(&bead, "bead", "", "the bead a decision-needed question is about")
 	cmd.Flags().StringVar(&recommend, "recommend", "", "the option a decision-needed question recommends")
 	cmd.Flags().StringArrayVar(&options, "option", nil, "an option a decision-needed question offers (repeatable)")
-	cmd.Flags().StringVar(&thread, "thread", "", "the bead this message's thread is (refused with --topic or a decision-needed question)")
-	cmd.Flags().StringVar(&topic, "topic", "", "the named topic this message's thread is (refused with --thread or a decision-needed question)")
-	cmd.Flags().StringVar(&re, "re", "", "the txid of the General post this message answers, printed form or bare (refused with --bead, --thread or --topic)")
+	cmd.Flags().StringVar(&beadChannel, "bead-channel", "", "the bead whose channel this message goes to (refused with --channel or a decision-needed question)")
+	cmd.Flags().StringVar(&channelName, "channel", "", "the named channel this message goes to (refused with --bead-channel or a decision-needed question)")
+	cmd.Flags().StringVar(&thread, "thread", "", "the old name of --bead-channel")
+	cmd.Flags().StringVar(&topic, "topic", "", "the old name of --channel")
+	for flag, use := range map[string]string{"thread": "use --bead-channel", "topic": "use --channel"} {
+		_ = cmd.Flags().MarkDeprecated(flag, use)
+	}
+	cmd.Flags().StringVar(&re, "re", "", "the txid of the post whose thread this message answers in, printed form or bare (refused with --bead)")
 	return cmd
 }
 

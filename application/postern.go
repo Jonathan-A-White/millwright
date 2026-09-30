@@ -736,9 +736,14 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 		if m.Re != "" {
 			answers = "  re " + m.Re
 		}
-		i.printf("%s  from %s  txid %s  thread %s  %s%s\n%s\n", m.Class, i.fromLabel(m), orUnknown(m.Txid), m.Thread, sentInFull(m.Ts), answers, m.Text)
+		i.printf("%s  from %s  txid %s  %s  %s%s\n%s\n", m.Class, i.fromLabel(m), orUnknown(m.Txid), m.channelLabel(), sentInFull(m.Ts), answers, m.Text)
 		if line != "" {
 			i.printf("%s\n", line)
+		}
+		if m.Class == "message" && m.Verified && i.GovernorKey != "" && m.From == i.GovernorKey {
+			if answer := m.answerLine(); answer != "" {
+				i.printf("%s\n", answer)
+			}
 		}
 	}
 	if newest > cursor {
@@ -747,6 +752,42 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 		}
 	}
 	return newestFirst, nil
+}
+
+// channelLabel is the channel mw postern inbox prints a message under:
+// "channel general" for Factory, "channel <bead-id>" for a bead's channel,
+// and `channel "<name>"` for a named one.
+func (m PosternInboxMessage) channelLabel() string {
+	switch {
+	case m.ThreadIsBead:
+		return "channel " + m.Thread
+	case m.Thread == PosternGeneralThread:
+		return "channel " + PosternGeneralThread
+	default:
+		return fmt.Sprintf("channel %q", m.Thread)
+	}
+}
+
+// answerLine is the command that answers this message inside its thread: the
+// channel's flag, if it is not General, and --re naming the post the thread
+// hangs from — this message's own re when it answers one, else its own txid.
+// "" when the message has neither.
+func (m PosternInboxMessage) answerLine() string {
+	post := m.Re
+	if post == "" {
+		post = m.Txid
+	}
+	if post == "" {
+		return ""
+	}
+	channel := ""
+	switch {
+	case m.ThreadIsBead:
+		channel = " --bead-channel " + m.Thread
+	case m.Thread != PosternGeneralThread:
+		channel = fmt.Sprintf(" --channel %q", m.Thread)
+	}
+	return fmt.Sprintf("answer in its thread: mw postern send%s --re %s \"...\"", channel, post)
 }
 
 // appliedTxid reports whether txid is one a pass has applied.
@@ -1234,8 +1275,9 @@ type PosternSendRequest struct {
 	Recommend string
 	Options   []string
 
-	// Thread, set, wraps Text in postern's docs/protocol.md section 6
-	// thread envelope, naming the bead this message belongs to — distinct
+	// Thread (mw postern send --bead-channel), set, wraps Text in postern's
+	// docs/protocol.md section 6 thread envelope, naming the bead whose
+	// channel this message goes to — distinct
 	// from Bead, which only asks a question. Refused together with Topic,
 	// and together with a request that asks a question, whose own bead is
 	// already its thread. Once sent, the bead is commented with what the
@@ -1243,8 +1285,9 @@ type PosternSendRequest struct {
 	// written to the bead), unless Role says the text is not the Mayor's
 	// own.
 	Thread string
-	// Topic, set, wraps Text in the same envelope, naming a topic thread
-	// rather than a bead. Refused together with Thread.
+	// Topic (mw postern send --channel), set, wraps Text in the same
+	// envelope, naming a named channel rather than a bead's. Refused
+	// together with Thread.
 	Topic string
 
 	// Attachments are files to send with the message, postern's
@@ -1316,19 +1359,23 @@ func (r PosternSendRequest) commentsThread() bool {
 
 // validate reports why this request cannot be sent, before anything is spent
 // or broadcast: --bead, --recommend and --option are only for class
-// decision-needed; --thread and --topic are mutually exclusive, and refused
+// decision-needed; --bead-channel and --channel (Thread and Topic) are mutually exclusive, and refused
 // together with a question, whose own bead is already its thread; so is an
 // attachment, which a question's shape cannot carry.
 func (r PosternSendRequest) validate() error {
 	askedFor := strings.TrimSpace(r.Bead) != "" || strings.TrimSpace(r.Recommend) != "" || len(r.Options) > 0
 	if askedFor && r.Class != "decision-needed" {
-		return fmt.Errorf("mw postern send: --bead, --recommend and --option are only accepted with --class decision-needed")
+		hint := ""
+		if r.asksQuestion() {
+			hint = ": --bead-channel <id> posts in a bead's channel"
+		}
+		return fmt.Errorf("mw postern send: --bead, --recommend and --option are only accepted with --class decision-needed%s", hint)
 	}
 	if strings.TrimSpace(r.Thread) != "" && strings.TrimSpace(r.Topic) != "" {
-		return fmt.Errorf("mw postern send: --thread and --topic cannot both be set")
+		return fmt.Errorf("mw postern send: --channel and --bead-channel cannot both be set: a message goes to one channel")
 	}
 	if r.asksQuestion() && r.setsThread() {
-		return fmt.Errorf("mw postern send: --thread and --topic are refused with a decision-needed question: its own bead is already the thread")
+		return fmt.Errorf("mw postern send: --channel and --bead-channel are refused with a decision-needed question: its own bead is already its channel")
 	}
 	if r.asksQuestion() && len(r.Attachments) > 0 {
 		return fmt.Errorf("mw postern send: --attach is refused with a decision-needed question: a question carries no attachment")
@@ -1336,18 +1383,14 @@ func (r PosternSendRequest) validate() error {
 	return nil
 }
 
-// ValidateReplyFlags refuses --re, an answer in the General thread, together
-// with --bead, --thread or --topic, each of which names another thread. It
-// is the command line's check: mw's own sends of a transcript or a hands
-// outcome carry a re inside a bead's thread.
+// ValidateReplyFlags refuses --re, an answer inside a post's thread, together
+// with --bead: a question is its own post, not an answer. --re goes with
+// --channel, --bead-channel or neither (General). It is the command line's
+// check: mw's own sends of a transcript or a hands outcome carry a re inside
+// a bead's channel.
 func (r PosternSendRequest) ValidateReplyFlags() error {
-	if strings.TrimSpace(r.Re) == "" {
-		return nil
-	}
-	for _, conflict := range []struct{ flag, value string }{{"--bead", r.Bead}, {"--thread", r.Thread}, {"--topic", r.Topic}} {
-		if strings.TrimSpace(conflict.value) != "" {
-			return fmt.Errorf("mw postern send: --re and %s cannot both be set: --re answers in the General thread, %s names another thread", conflict.flag, conflict.flag)
-		}
+	if strings.TrimSpace(r.Re) != "" && strings.TrimSpace(r.Bead) != "" {
+		return fmt.Errorf("mw postern send: --re and --bead cannot both be set: --re answers inside a post's thread, --bead asks a question of its own")
 	}
 	return nil
 }

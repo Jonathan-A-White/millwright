@@ -8,11 +8,12 @@ Feature: mw postern send
   chain — when the key's balance would exceed the float cap mw enforces,
   naming the excess.
 
-  --thread <bead-id> or --topic <name> wraps the message's plaintext with an
-  explicit thread; a decision-needed question's own --bead is already its
-  thread, so --thread and --topic are refused alongside one. A message in a
-  bead's thread is written to that bead too, as the Mayor's side of the
-  exchange. --attach sends a file, encrypted to the Governor and uploaded to
+  --bead-channel <bead-id> or --channel <name> wraps the message's plaintext
+  with an explicit channel (a bead's, or a named one; Factory is the default);
+  a decision-needed question's own --bead is already its channel, so both are
+  refused alongside one. --re <txid> answers inside that post's thread in the
+  channel the other flags name. A message in a bead's channel is written to
+  that bead too, as the Mayor's side of the exchange. --attach sends a file, encrypted to the Governor and uploaded to
   the backend's blob store, announced in the message.
 
   Background:
@@ -79,33 +80,56 @@ Feature: mw postern send
     When mw postern send "message" "Ship it?" for bead "mw-abc.1" recommending "A" with options "A" is run
     Then it is refused, saying --bead is only accepted with --class decision-needed
 
-  Scenario: --thread wraps the message with a bead thread, and writes it to the bead
+  Scenario: --bead-channel wraps the message with a bead channel, and writes it to the bead
     Given the postern key's balance is 1000 satoshis
     And the postern key holds a spendable utxo of 5000 satoshis
     And the postern backend will report the txid "thread-txid"
     And the bead "mw-abc.1" exists
-    When mw postern send "message" "Ready for review." threaded on bead "mw-abc.1" is run
+    When mw postern send "message" "Ready for review." in the channel of bead "mw-abc.1" is run
     Then sending succeeds
-    And the broadcast record's plaintext is threaded on bead "mw-abc.1" with text "Ready for review."
+    And the broadcast record's plaintext is in the channel of bead "mw-abc.1" with text "Ready for review."
     And bead "mw-abc.1" is commented "MAYOR via postern, txid thread-txid: Ready for review."
 
-  Scenario: --topic wraps the message with a named topic thread
+  Scenario: --channel wraps the message with a named channel
     Given the postern key's balance is 1000 satoshis
     And the postern key holds a spendable utxo of 5000 satoshis
-    When mw postern send "message" "Ready for review." on topic "roadmap" is run
+    When mw postern send "message" "Ready for review." in channel "roadmap" is run
     Then sending succeeds
-    And the broadcast record's plaintext is on topic "roadmap" with text "Ready for review."
+    And the broadcast record's plaintext is in channel "roadmap" with text "Ready for review."
 
-  Scenario: --thread and --topic cannot both be set
+  Scenario: --channel and --bead-channel cannot both be set
     Given the postern key's balance is 1000 satoshis
-    When mw postern send "message" "Ready for review." threaded on bead "mw-abc.1" and on topic "roadmap" is run
-    Then it is refused, saying --thread and --topic cannot both be set
+    When mw postern send "message" "Ready for review." in the channel of bead "mw-abc.1" and in channel "roadmap" is run
+    Then it is refused, saying --channel and --bead-channel cannot both be set
 
-  Scenario: --thread is refused with a decision-needed question, whose own bead is already the thread
+  Scenario: --bead-channel is refused with a decision-needed question, whose own bead is already its channel
     Given the postern key's balance is 1000 satoshis
     And the bead "mw-abc.1" exists
-    When mw postern send "decision-needed" "Ship it?" for bead "mw-abc.1" recommending "A" with options "A" threaded on bead "mw-other.1" is run
-    Then it is refused, saying --thread and --topic are refused with a decision-needed question
+    When mw postern send "decision-needed" "Ship it?" for bead "mw-abc.1" recommending "A" with options "A" in the channel of bead "mw-other.1" is run
+    Then it is refused, saying --channel and --bead-channel are refused with a decision-needed question
+
+  Scenario: --re answers inside a post's thread in a bead's channel, and writes it to the bead
+    Given the postern key's balance is 1000 satoshis
+    And the postern key holds a spendable utxo of 5000 satoshis
+    And the postern backend will report the txid "answer-txid"
+    And the bead "mw-abc.1" exists
+    When mw postern send "message" "Yes, merged." in the channel of bead "mw-abc.1" answering "direct:post-txid" is run
+    Then sending succeeds
+    And the broadcast record's plaintext is in the channel of bead "mw-abc.1" with text "Yes, merged." answering "direct:post-txid"
+    And bead "mw-abc.1" is commented "MAYOR via postern, txid answer-txid: Yes, merged."
+
+  Scenario: --re answers inside a post's thread in a named channel
+    Given the postern key's balance is 1000 satoshis
+    And the postern key holds a spendable utxo of 5000 satoshis
+    When mw postern send "message" "Noted." in channel "roadmap" answering "direct:post-txid" is run
+    Then sending succeeds
+    And the broadcast record's plaintext is in channel "roadmap" with text "Noted." answering "direct:post-txid"
+
+  Scenario: --bead without --class decision-needed says where a bead's channel is posted to
+    Given the postern key's balance is 1000 satoshis
+    And the bead "mw-abc.1" exists
+    When mw postern send "message" "Ship it?" for bead "mw-abc.1" recommending "A" with options "A" is run
+    Then it is refused, saying --bead-channel <id> posts in a bead's channel
 
   Scenario: The direct channel delivers the record without spending anything
     Given the postern channel is "direct"
@@ -194,18 +218,18 @@ Feature: mw postern send
     And the delivered record's summary is "Answer: Pick the colour"
     And the delivered record's summary does not contain "secret words"
 
-  Scenario: A landing threaded on a bead carries the summary "Check:" and the bead's title
+  Scenario: A landing in a bead's channel carries the summary "Check:" and the bead's title
     Given the postern channel is "direct"
     And the bead "mw-abc.1" titled "Pick the colour" exists
-    When mw postern send "landing" "Landed, secret words." threaded on bead "mw-abc.1" is run
+    When mw postern send "landing" "Landed, secret words." in the channel of bead "mw-abc.1" is run
     Then sending succeeds
     And the delivered record's summary is "Check: Pick the colour"
     And the delivered record's summary does not contain "secret words"
 
-  Scenario: A message threaded on a bead carries the summary "Message on" and the bead's title
+  Scenario: A message in a bead's channel carries the summary "Message on" and the bead's title
     Given the postern channel is "direct"
     And the bead "mw-abc.1" titled "Pick the colour" exists
-    When mw postern send "message" "Some secret words." threaded on bead "mw-abc.1" is run
+    When mw postern send "message" "Some secret words." in the channel of bead "mw-abc.1" is run
     Then sending succeeds
     And the delivered record's summary is "Message on Pick the colour"
     And the delivered record's summary does not contain "secret words"
@@ -216,9 +240,9 @@ Feature: mw postern send
     Then sending succeeds
     And the delivered record's summary is "Message"
 
-  Scenario: A message on a topic thread carries the summary "Message"
+  Scenario: A message in a named channel carries the summary "Message"
     Given the postern channel is "direct"
-    When mw postern send "message" "Some secret words." on topic "roadmap" is run
+    When mw postern send "message" "Some secret words." in channel "roadmap" is run
     Then sending succeeds
     And the delivered record's summary is "Message"
 
@@ -237,13 +261,13 @@ Feature: mw postern send
   Scenario: A send whose bead title cannot be read carries the bead id in its place
     Given the postern channel is "direct"
     And the bead "mw-abc.1" exists
-    When mw postern send "landing" "Landed." threaded on bead "mw-abc.1" is run
+    When mw postern send "landing" "Landed." in the channel of bead "mw-abc.1" is run
     Then sending succeeds
     And the delivered record's summary is "Check: mw-abc.1"
 
   Scenario: A message on a bead the tracker does not hold still sends, naming the bead id
     Given the postern channel is "direct"
-    When mw postern send "message" "Some secret words." threaded on bead "mw-gone.1" is run
+    When mw postern send "message" "Some secret words." in the channel of bead "mw-gone.1" is run
     Then the delivered record's summary is "Message on mw-gone.1"
 
   Scenario: A title over 80 runes is cut to 80, an ellipsis as the 80th
@@ -258,7 +282,7 @@ Feature: mw postern send
     And the bead "mw-abc.1" titled "Pick the colour" exists
     And a file "one.pdf" to attach
     And a file "two.pdf" to attach
-    When mw postern send "message" "the reports" threaded on bead "mw-abc.1" attaching "one.pdf" and "two.pdf" is run
+    When mw postern send "message" "the reports" in the channel of bead "mw-abc.1" attaching "one.pdf" and "two.pdf" is run
     Then sending succeeds
     And every delivered record's summary is "Message on Pick the colour"
 
@@ -266,7 +290,7 @@ Feature: mw postern send
     Given the postern key's balance is 1000 satoshis
     And the postern key holds a spendable utxo of 5000 satoshis
     And the bead "mw-abc.1" titled "Pick the colour" exists
-    When mw postern send "<class>" "Some secret words." threaded on bead "mw-abc.1" is run
+    When mw postern send "<class>" "Some secret words." in the channel of bead "mw-abc.1" is run
     Then sending succeeds
     And the broadcast record has no summary key
 

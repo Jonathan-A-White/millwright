@@ -1,14 +1,16 @@
 Feature: mw postern inbox
   mw postern inbox reads the postern's message records addressed to this
   host's key, decrypts them, and prints them newest first: class, from, txid,
-  thread and when, then the text. A message's thread is the bead a
-  decision-needed question (or its reply) names, the bead or topic its own
-  plaintext wrapper names, or "general" when it names neither. Reading marks
+  channel and when, then the text. A message's channel is the bead a
+  decision-needed question (or its reply) names, the bead or named channel its
+  own plaintext wrapper names, or "general" (Factory) when it names neither.
+  Under each message from the Governor, it says how to answer inside that
+  post's thread: mw postern send --re <txid>, with the channel's flag. Reading marks
   them read, by moving a cursor kept in a bd kv note, never an event of its
   own. --unread-count prints only how many are unread, without reading them,
   so a notifier can poll it without consuming anything. A verified message
-  from the Governor whose thread is a bead lands as a comment on that bead
-  instead of printing in the inbox, once per txid; a topic thread, or a
+  from the Governor whose channel is a bead's lands as a comment on that bead
+  instead of printing in the inbox, once per txid; a named channel, or a
   sender who is not the Governor, is left in the inbox as before.
 
   Background:
@@ -107,35 +109,65 @@ Feature: mw postern inbox
     Then reading succeeds
     And it printed "from the Governor (signer unchecked)  txid"
 
-  Scenario: a message with no thread prints the general thread
+  Scenario: a message with no channel named prints channel general
     Given a plain text postern record with text "hello" addressed to this key
     When mw postern inbox is run
     Then reading succeeds
-    And it printed "thread general"
+    And it printed "channel general"
 
-  Scenario: a message threaded on a bead prints that bead as its thread
-    Given a postern record of class "message" addressed to this key, threaded on bead "mw-abc.1"
+  Scenario: a message in a bead's channel prints that bead as its channel
+    Given a postern record of class "message" addressed to this key, in the channel of bead "mw-abc.1"
     When mw postern inbox is run
     Then reading succeeds
-    And it printed "thread mw-abc.1"
+    And it printed "channel mw-abc.1"
     And it printed "message text"
 
-  Scenario: a message on a named topic prints that topic as its thread
-    Given a postern record of class "message" addressed to this key, on topic "roadmap"
+  Scenario: a message in a named channel prints that channel quoted
+    Given a postern record of class "message" addressed to this key, in channel "roadmap"
     When mw postern inbox is run
     Then reading succeeds
-    And it printed "thread roadmap"
+    And it printed the named channel "roadmap"
 
-  Scenario: a decision-needed question's own bead is its thread, without an explicit thread field
+  Scenario: a General post from the Governor says how to answer inside its thread
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And a postern message from "governor-pubkey-hex" with text "hello there" and txid "direct:post1"
+    When mw postern inbox is run
+    Then reading succeeds
+    And it printed "answer in its thread: mw postern send --re direct:post1"
+
+  Scenario: a reply in a thread is answered with the post it answers
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And a postern message from "governor-pubkey-hex" with text "and another thing" and txid "direct:reply1" answering "direct:post1"
+    When mw postern inbox is run
+    Then reading succeeds
+    And it printed "answer in its thread: mw postern send --re direct:post1"
+    And it did not print "--re direct:reply1"
+
+  Scenario: a post in a named channel is answered with that channel's flag
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And a postern message from "governor-pubkey-hex" in channel "roadmap" with text "topic update" and txid "direct:topic1"
+    When mw postern inbox is run
+    Then reading succeeds
+    And it printed the answer command for the named channel "roadmap" re "direct:topic1"
+
+  Scenario: a message from someone who is not the Governor is given no answer line
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And a postern message from "some-other-pubkey-hex" with text "hello" and txid "direct:other1"
+    When mw postern inbox is run
+    Then reading succeeds
+    And it printed "hello"
+    And it did not print "answer in its thread"
+
+  Scenario: a decision-needed question's own bead is its channel, without an explicit channel field
     Given a postern question for bead "mw-abc.2" addressed to this key
     When mw postern inbox is run
     Then reading succeeds
-    And it printed "thread mw-abc.2"
+    And it printed "channel mw-abc.2"
 
-  Scenario: a Governor's message in a bead thread lands as a comment on that bead, not in the inbox
+  Scenario: a Governor's message in a bead's channel lands as a comment on that bead, not in the inbox
     Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
     And bead "mw-thread.1" is known to the tracker
-    And a postern message from "governor-pubkey-hex" threaded on bead "mw-thread.1" with text "ship it" and txid "gov-txid-1"
+    And a postern message from "governor-pubkey-hex" in the channel of bead "mw-thread.1" with text "ship it" and txid "gov-txid-1"
     When mw postern inbox is run
     Then reading succeeds
     And bead "mw-thread.1" is commented by the Governor saying "ship it"
@@ -144,24 +176,24 @@ Feature: mw postern inbox
   Scenario: the same txid is never commented on a bead twice
     Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
     And bead "mw-thread.2" is known to the tracker
-    And a postern message from "governor-pubkey-hex" threaded on bead "mw-thread.2" with text "status" and txid "dup-txid"
-    And a postern message from "governor-pubkey-hex" threaded on bead "mw-thread.2" with text "status" and txid "dup-txid"
+    And a postern message from "governor-pubkey-hex" in the channel of bead "mw-thread.2" with text "status" and txid "dup-txid"
+    And a postern message from "governor-pubkey-hex" in the channel of bead "mw-thread.2" with text "status" and txid "dup-txid"
     When mw postern inbox is run
     Then reading succeeds
     And bead "mw-thread.2" has 1 comment
 
-  Scenario: a bead-threaded message from a sender who is not the Governor stays in the inbox
+  Scenario: a bead-channel message from a sender who is not the Governor stays in the inbox
     Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
     And bead "mw-thread.3" is known to the tracker
-    And a postern message from "some-other-pubkey-hex" threaded on bead "mw-thread.3" with text "not the boss" and txid "other-txid"
+    And a postern message from "some-other-pubkey-hex" in the channel of bead "mw-thread.3" with text "not the boss" and txid "other-txid"
     When mw postern inbox is run
     Then reading succeeds
     And it printed "not the boss"
     And bead "mw-thread.3" has no comment
 
-  Scenario: a Governor's message on a named topic stays in the inbox, not commented on any bead
+  Scenario: a Governor's message in a named channel stays in the inbox, not commented on any bead
     Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
-    And a postern message from "governor-pubkey-hex" on topic "roadmap" with text "topic update" and txid "topic-txid"
+    And a postern message from "governor-pubkey-hex" in channel "roadmap" with text "topic update" and txid "topic-txid"
     When mw postern inbox is run
     Then reading succeeds
     And it printed "topic update"
@@ -198,7 +230,7 @@ Feature: mw postern inbox
   Scenario: the Governor sends a screenshot with a caption, and it is downloaded, decrypted and its path recorded
     Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
     And bead "mw-thread.4" is known to the tracker
-    And a postern message from "governor-pubkey-hex" threaded on bead "mw-thread.4" with text "check this out" and txid "img-txid" carrying a screenshot
+    And a postern message from "governor-pubkey-hex" in the channel of bead "mw-thread.4" with text "check this out" and txid "img-txid" carrying a screenshot
     When mw postern inbox is run
     Then reading succeeds
     And it printed "check this out"
@@ -216,7 +248,7 @@ Feature: mw postern inbox
   Scenario: a voice note on a host that has no transcriber says it was not heard, in the inbox and on the bead
     Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
     And bead "mw-thread.5" is known to the tracker
-    And a postern voice note from "governor-pubkey-hex" threaded on bead "mw-thread.5" with txid "voice-txid"
+    And a postern voice note from "governor-pubkey-hex" in the channel of bead "mw-thread.5" with txid "voice-txid"
     When mw postern inbox is run
     Then reading succeeds
     And it printed "voice note, not transcribed: postern_transcribe_cmd is not set"
