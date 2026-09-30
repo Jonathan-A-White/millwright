@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -188,6 +189,20 @@ func newNextCmd() *cobra.Command {
 	return cmd
 }
 
+// beadsEnvFile is the file where this host keeps the names and values that
+// reach a served beads database, which a session mw starts reads before
+// anything else (claude.WithEnvFile). It is found under the home directory the
+// way dispatch finds its own state; a host with no home directory names none,
+// and so has no such file read. Only the path is ever used here, never the
+// file.
+func beadsEnvFile() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".config", "mw", "beads.env")
+}
+
 // builderBoot is how every dispatched session is assembled: into the Builder
 // seat, on this host, with this same mw chained on after the harness exits.
 // tests is the [tests] table, so the session may run its own rig's tests
@@ -196,7 +211,7 @@ func newNextCmd() *cobra.Command {
 func builderBoot(files *vault.Vault, host string, tests map[string]string) application.SeatBoot {
 	return application.SeatBoot{
 		Vault:     files,
-		Harness:   claude.New(claude.WithTests(tests)),
+		Harness:   claude.New(claude.WithTests(tests), claude.WithEnvFile(beadsEnvFile())),
 		Seat:      BuilderSeat,
 		Host:      host,
 		After:     afterSession(),

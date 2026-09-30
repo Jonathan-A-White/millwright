@@ -215,6 +215,7 @@ type Harness struct {
 	shell          string
 	permissionMode string
 	tests          map[string]string
+	envFile        string
 }
 
 // Harness satisfies the port.
@@ -247,6 +248,15 @@ func WithPermissionMode(mode string) Option {
 // asked (mw-gq6.83). A rig this does not name gets no such rule.
 func WithTests(commands map[string]string) Option {
 	return func(h *Harness) { h.tests = commands }
+}
+
+// WithEnvFile names a file of shell assignments, such as ~/.config/mw/beads.env
+// on a host whose beads database is served, for a session to read before
+// anything else it runs (mw-43v9x.23). The command line holds the file's path
+// and never anything in it; a file that is missing or unreadable changes
+// nothing. An empty path does nothing.
+func WithEnvFile(path string) Option {
+	return func(h *Harness) { h.envFile = path }
 }
 
 // New returns a Harness that runs Claude Code as this host has it, unless an
@@ -335,6 +345,15 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 	// must still happen, and `&&` would skip it.
 	if len(l.After) > 0 {
 		line += "; " + shellLine(l.After)
+	}
+
+	// The host's beads environment is read first of all, ahead of the
+	// heartbeat and the harness, so that the close-out chained on after them
+	// inherits it too. Nothing reads the file here: the line holds only its
+	// path, and a file that is missing or unreadable is skipped (mw-43v9x.23).
+	if h.envFile != "" {
+		q := shellQuote(h.envFile)
+		line = "if [ -r " + q + " ]; then set -a; . " + q + "; set +a; fi; " + line
 	}
 
 	identity := application.SeatIdentity(l.Seat, l.Host)
@@ -482,9 +501,22 @@ func (h *Harness) SeatSession(l application.SeatLaunch) (application.WindowSpec,
 			// wherever the session reading it happens to run.
 			application.SeatEnv: l.Seat,
 		},
-		// No shell reads this: the window runs the program itself, so that a
-		// kickoff holding quotes, newlines or a dollar sign reaches the session
-		// as it was written.
-		Command: argv,
+		// No shell reads the kickoff: the window runs the program itself, so
+		// that a kickoff holding quotes, newlines or a dollar sign reaches the
+		// session as it was written.
+		Command: h.withEnvFile(argv),
 	}, nil
+}
+
+// withEnvFile puts the host's beads environment in front of a seat's argv
+// without a shell ever reading the argv: a fixed one-line script reads the
+// file if it is readable, then replaces itself with "$@". The file's path and
+// the program are arguments of it, so the kickoff still arrives untouched. No
+// file configured leaves the argv as it was.
+func (h *Harness) withEnvFile(argv []string) []string {
+	if h.envFile == "" {
+		return argv
+	}
+	const script = `f=$1; shift; if [ -r "$f" ]; then set -a; . "$f"; set +a; fi; exec "$@"`
+	return append([]string{h.shell, "-c", script, "sh", h.envFile}, argv...)
 }

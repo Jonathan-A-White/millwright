@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"path/filepath"
 	"testing"
 )
 
@@ -58,5 +59,14 @@ func TestNextHeartbeatFlagStillNeedsAStoryID(t *testing.T) {
 
 	if err := root.Execute(); err == nil {
 		t.Fatalf("expected --heartbeat with no story id to fail, got none (%s)", out)
+	}
+}
+
+func TestBeadsEnvFileIsUnderTheHomeDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	want := filepath.Join(home, ".config", "mw", "beads.env")
+	if got := beadsEnvFile(); got != want {
+		t.Fatalf("beadsEnvFile() = %q, want %q", got, want)
 	}
 }

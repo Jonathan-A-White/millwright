@@ -61,7 +61,7 @@ func newMillhandCmd() *cobra.Command {
 			_, err = application.Millhand{
 				Seats:    vault.New(dir),
 				Windows:  windows,
-				Harness:  claude.New(),
+				Harness:  claude.New(claude.WithEnvFile(beadsEnvFile())),
 				Terminal: windows,
 				Armer:    reaper.New(exe),
 
