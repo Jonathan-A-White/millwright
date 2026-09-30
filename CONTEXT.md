@@ -98,6 +98,16 @@ _Avoid_: Spec, recipe, prompt, template
 The factory's side of grist: `mw grist grind` on the home host, holding the mill key. Not a seat: each grind is one short harness session with no seat.
 _Avoid_: Worker, service, daemon
 
+### Postern
+
+**Channel**:
+Where the Governor and the Mayor talk in Postern: Factory, one per bead, and named ones he opens. The protocol's `thread` field names it, for compatibility. `mw postern send --bead-channel <id>` posts in a bead's, `--channel <name>` in a named one.
+_Avoid_: Topic, conversation, thread (for a whole channel), #name
+
+**Thread**:
+The replies under one post in a channel, shown as "N replies". A reply's `re` names the post; it is one level deep. `mw postern send --re <txid>` answers inside one.
+_Avoid_: Sub-thread, reply chain
+
 ### Economy
 
 **Fuel**:

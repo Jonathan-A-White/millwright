@@ -854,8 +854,8 @@ backend it reaches takes direct records (`POST /api/messages`): an older
 backend answers 404 to it, and there is no falling back to the chain. A
 direct record also carries a short clear `summary` for the push's body, naming
 the bead's title (`Answer: …`, `Check: …`, `Message on …`, or `Message`),
-never a word of the text; a chain record carries none. A message sent in a bead's thread
-(`--thread`) is commented on that bead too, `MAYOR via postern, txid <id>:
+never a word of the text; a chain record carries none. A message sent in a bead's channel
+(`--bead-channel`; `--channel <name>` names another; `--re <txid>` answers inside a post's thread) is commented on that bead too, `MAYOR via postern, txid <id>:
 <text>`, so the whole exchange lives on the bead. `--attach <file>`
 (repeatable) encrypts a file to the Governor, uploads it to the backend's blob
 store and announces it in the message (§8, §14): at most 8 MiB, its type read
@@ -892,7 +892,7 @@ A voice note — a Governor's message whose attachment is audio — is heard on
 this host, never by a third party (§14): with `postern_transcribe_cmd` set,
 the decrypted audio's path is appended to it and it is given five minutes;
 what it prints is the transcript, written on the bead as `GOVERNOR (voice) via
-postern, txid …: <transcript>` (or printed, for a topic thread), sent back to
+postern, txid …: <transcript>` (or printed, for a named channel), sent back to
 the Governor in the same thread as a `role: "transcript"` message, and mailed
 to the Mayor. `contrib/postern-transcribe` is the command to set it to: it
 converts the note with ffmpeg to 16 kHz mono WAV in a temporary directory and
