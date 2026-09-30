@@ -85,21 +85,41 @@ Everything here is what was done by hand on 2026-09-28 (`mw-nrcbe`), in this ord
    be read the move stops here, before anything on this host is touched.**
 2. Take this host's sync lock (the one `mw sync`, dispatch and the Millhand's tick take),
    so that none of them runs in the middle of the swap.
-3. Set `<vault>/.beads/embeddeddolt` aside by a rename to
-   `~/beads-embeddeddolt-aside-<UTC time>`: never copied, never deleted. A vault with no
-   embedded database has nothing to set aside.
+3. If the `dolt-beads` unit is running here, stop it: it holds `<vault>/.beads/dolt` open.
+   Then set **both** directories aside by a rename: `<vault>/.beads/embeddeddolt` to
+   `~/beads-embeddeddolt-aside-<UTC time>` and `<vault>/.beads/dolt`, the directory the
+   unit serves, to `~/beads-dolt-aside-<UTC time>`: never copied, never deleted. A vault
+   with neither has nothing to set aside. Without the second, a stale `.beads/dolt` (the
+   desktop's, or the Laptop's after a WSL restart with the unit enabled) would be started
+   and reported as "answers with N beads".
 4. `bd bootstrap --yes`, which clones `refs/dolt/data`; then `git checkout --
    .beads/config.yaml`, because bootstrap drops that file's trailing newline.
 5. Ask bd how many beads it has: none is a stop (a database that is not one to make the
-   home of).
+   home of). **A planned move also compares it with the old home's own count**, taken over
+   ssh in the stand-down (below), after the final flush and before its `dolt-beads` stops:
+   a count that differs stops the move, saying both numbers and where the asides are. A
+   dead old home has no count to compare: the output says so, and the number is not
+   checked against anything.
 6. If this host has the `dolt-beads` user unit, start it (a unit already running is left
    alone) and count again. If not, stay embedded: `beads_sync = auto` then reads `home`
    as **backup** mode, pushing to GitHub every five minutes.
 
 **Way back:** `systemctl --user stop dolt-beads` if the move started it, then `mv
 <vault>/.beads/embeddeddolt <vault>/.beads/embeddeddolt.from-github` (only if bootstrap got
-as far as making one) and `mv ~/beads-embeddeddolt-aside-<time> <vault>/.beads/embeddeddolt`.
-The printed lines carry the real paths.
+as far as making one) and `mv ~/beads-embeddeddolt-aside-<time> <vault>/.beads/embeddeddolt`;
+the same for `.beads/dolt` (`.beads/dolt.from-github`, `~/beads-dolt-aside-<time>`); last,
+`systemctl --user start dolt-beads` if it was running before the move and the move stopped
+it. The printed lines carry the real paths and the order.
+
+**What bootstrap does about `.beads/dolt` (run for real with bd 1.3.0 on scratch repositories
+and a scratch Dolt server, 2026-09-30).** `bd bootstrap --yes` never makes `<vault>/.beads/dolt`.
+With `BEADS_DOLT_SERVER_*` set and a server answering, it clones into *that server's own data
+directory*; with the server stopped it fails, `connection refused`, and leaves no database.
+So a move on a host that runs `dolt-beads` and has `beads.env` in its shell stops at
+bootstrap once the unit is stopped, with the asides kept and the ways back printed: no stale
+directory is served, and a fresh one is not made either. The output says so. What the unit
+serves after such a move is whatever is in its `WorkingDirectory`: nothing, if `.beads/dolt`
+is gone, and the unit then fails to start loudly (runbook-CHECK Q7, still not seen).
 
 ### 3. The vault
 
@@ -194,7 +214,10 @@ here fails the move stops with the new home as it was, and the ways back below a
    running, is left), then **`mw postern mirror`** there, a final copy of the backend's
    data to this host. The mirror is what a home does every ten minutes; run after the
    backend has stopped, it is complete.
-5. **Stop its `dolt-beads`** user unit, the Dolt server's writers, if it has one. Once the
+5. **`bd count`** there (in its vault, with `beads.env` sourced, so it asks the server the old
+   home itself uses): the number the new home's database has to answer with, compared in
+   the beads step. The move keeps it in memory only.
+6. **Stop its `dolt-beads`** user unit, the Dolt server's writers, if it has one. Once the
    `home` file changes (step 4) it is a boost, and `beads_sync = auto` reads `shared` there.
 
 **Way back:** the hand-off mail stays sent: mail the Mayor on the old home to carry on.
@@ -291,12 +314,14 @@ GitHub remote, read-only: 0.6 s, 148 KB.
 
 **Not checked: a real move.** Two host facts are assumed from the story, not seen:
 
-- **The `dolt-beads` server's data directory.** Step 2 sets the *embedded* database aside
-  and bootstraps a new one, then starts the unit. On the desktop, where `beads.env` puts
-  every bd in server mode, whether that unit serves the bootstrapped database or a
-  directory of its own has not been run. The step counts beads again after the unit
-  starts, so an empty server stops the move (with the ways back), but the first real move
-  onto a host with the unit, the demo (`mw-43v9x.13`), is where this is learned.
+- **The `dolt-beads` server's data directory.** Step 2 sets the *embedded* database and
+  `.beads/dolt` aside and bootstraps a new one, then starts the unit. On the desktop, where
+  `beads.env` puts every bd in server mode, what that unit serves after a move (see *What
+  bootstrap does about `.beads/dolt`*: bootstrap makes no `.beads/dolt`) has not been run
+  against the real unit. The step counts beads after bootstrap and again after the unit
+  starts, and a planned move compares both with the old home's count, so an empty or stale
+  server stops the move (with the ways back); the demo (`mw-43v9x.13`) is where the rest is
+  learned.
 - **`bd bootstrap` with the server-mode environment set.** As above.
 
 The planned path was checked the same way: the old home's steps run before any of the new
