@@ -1066,6 +1066,15 @@ func (f *FakeTracker) SetStoryState(_ context.Context, id, dimension, value, rea
 			s.states = map[string]string{}
 		}
 		s.states[dimension] = value
+		// bd set-state keeps a state as a label, dimension:value, and a new
+		// value replaces the dimension's old one.
+		kept := s.detail.Labels[:0:0]
+		for _, label := range s.detail.Labels {
+			if !strings.HasPrefix(label, dimension+":") {
+				kept = append(kept, label)
+			}
+		}
+		s.detail.Labels = append(kept, dimension+":"+value)
 		if s.reasons == nil {
 			s.reasons = map[string]string{}
 		}

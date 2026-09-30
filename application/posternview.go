@@ -569,6 +569,11 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 		if hasLabel(d.Labels, LabelHitl) {
 			continue
 		}
+		// A story closed without landing, dropped on his word, has nothing to
+		// verify: mw next records run:landed before it closes what it landed.
+		if !hasLabel(d.Labels, RunState+":"+RunLanded) {
+			continue
+		}
 		verifies = append(verifies, e)
 		if d.CommentCount == 0 {
 			continue
