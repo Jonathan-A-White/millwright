@@ -24,11 +24,14 @@ const (
 )
 
 // GristName names the grind a grist asks for: the app, the kind of grist,
-// and the version of the app's own request schema.
+// and the version of the app's own request schema. Model and Effort are what
+// the sender asks the grind to run on; empty, the grind file's own are used.
 type GristName struct {
-	App  string `json:"app"`
-	Kind string `json:"kind"`
-	V    string `json:"v"`
+	App    string `json:"app"`
+	Kind   string `json:"kind"`
+	V      string `json:"v"`
+	Model  string `json:"model,omitempty"`
+	Effort string `json:"effort,omitempty"`
 }
 
 // String is the name as a report prints it: cairn/sweep 1.1.
@@ -105,10 +108,12 @@ var GristMimes = []string{"image/jpeg", "image/png", "image/webp"}
 var GrindEfforts = []string{"low", "medium", "high", "xhigh", "max"}
 
 // GristCeilings are the factory's limits above every grind (config [grist]):
-// the models a grind may name, how many photos and how large, how many
-// grist one key may send a day, and how long one grind may run.
+// the models a grind may name, the efforts a grist may ask for, how many
+// photos and how large, how many grist one key may send a day, and how long
+// one grind may run.
 type GristCeilings struct {
 	Models             []string
+	Efforts            []string
 	MaxAttachments     int
 	MaxAttachmentBytes int64
 	DailyLimit         int
@@ -128,10 +133,17 @@ const (
 // nothing.
 var DefaultGristModels = []string{"haiku", "sonnet", "opus"}
 
+// DefaultGristEfforts are the efforts a grist may ask for when config says
+// nothing.
+var DefaultGristEfforts = []string{"low", "medium", "high"}
+
 // filled is c with every ceiling it leaves unset at its default.
 func (c GristCeilings) filled() GristCeilings {
 	if len(c.Models) == 0 {
 		c.Models = DefaultGristModels
+	}
+	if len(c.Efforts) == 0 {
+		c.Efforts = DefaultGristEfforts
 	}
 	if c.MaxAttachments <= 0 {
 		c.MaxAttachments = DefaultGristMaxAttachments
@@ -236,19 +248,24 @@ type RunningHere interface {
 // the sender's fingerprint and never its key, never the grist's input,
 // photos or answer.
 type GrindLine struct {
-	Time    time.Time  `json:"time"`
-	Txid    string     `json:"txid"`
-	App     string     `json:"app,omitempty"`
-	Kind    string     `json:"kind,omitempty"`
-	V       string     `json:"v,omitempty"`
-	Sender  string     `json:"sender"`
-	Model   string     `json:"model,omitempty"`
-	Status  string     `json:"status"`
-	Reason  string     `json:"reason,omitempty"`
-	Tokens  int        `json:"tokens,omitempty"`
-	Fuel    *GrindFuel `json:"fuel,omitempty"`
-	CostUSD float64    `json:"total_cost_usd,omitempty"`
-	Turns   int        `json:"turns,omitempty"`
+	Time   time.Time `json:"time"`
+	Txid   string    `json:"txid"`
+	App    string    `json:"app,omitempty"`
+	Kind   string    `json:"kind,omitempty"`
+	V      string    `json:"v,omitempty"`
+	Sender string    `json:"sender"`
+	Model  string    `json:"model,omitempty"`
+	Effort string    `json:"effort,omitempty"`
+	// ModelFrom and EffortFrom say where Model and Effort came from: "grist"
+	// when the sender asked for them, "grind file" otherwise.
+	ModelFrom  string     `json:"model_from,omitempty"`
+	EffortFrom string     `json:"effort_from,omitempty"`
+	Status     string     `json:"status"`
+	Reason     string     `json:"reason,omitempty"`
+	Tokens     int        `json:"tokens,omitempty"`
+	Fuel       *GrindFuel `json:"fuel,omitempty"`
+	CostUSD    float64    `json:"total_cost_usd,omitempty"`
+	Turns      int        `json:"turns,omitempty"`
 	// Denials is how many times the session was refused a tool: a Read of
 	// a mistyped path, say. Not a failure by itself.
 	Denials   int     `json:"denials,omitempty"`

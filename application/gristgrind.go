@@ -118,6 +118,9 @@ type GristHandled struct {
 	Status    string
 	Reason    string
 	Delivered bool
+	// Ran is the model and effort the grind ran on and where each came from,
+	// empty when no grind ran.
+	Ran string
 }
 
 // String is the report as a person reads it.
@@ -136,6 +139,9 @@ func (r GristReport) String() string {
 		fmt.Fprintf(&b, "  %-8s %s · %s", g.Status, shortTxid(g.Txid), g.Name)
 		if g.Reason != "" {
 			fmt.Fprintf(&b, " · %s", g.Reason)
+		}
+		if g.Ran != "" {
+			fmt.Fprintf(&b, " · ran %s", g.Ran)
 		}
 		if !g.Delivered {
 			b.WriteString(" · the answer was not delivered")
@@ -164,16 +170,21 @@ func shortTxid(txid string) string {
 
 // gristWork is one grist on its way to an answer.
 type gristWork struct {
-	record   PosternRecord
-	to       string // who the answer is sealed to
-	sender   string // their fingerprint
-	plain    GristPlaintext
-	grind    GrindFile
-	commit   string
-	system   string
-	schema   string
-	verified bool            // the backend's signer is the key that sealed the grist
-	sealed   map[string]bool // photos (lower-case hash) the pass proved w.to sealed: the only ones it deletes
+	record PosternRecord
+	to     string // who the answer is sealed to
+	sender string // their fingerprint
+	plain  GristPlaintext
+	grind  GrindFile
+	commit string
+	// model and effort are what the grind runs on: the grist's own when it
+	// asks, else the grind file's; modelFrom and effortFrom say which.
+	model, effort         string
+	modelFrom, effortFrom string
+	ran                   bool // a grind was run
+	system                string
+	schema                string
+	verified              bool            // the backend's signer is the key that sealed the grist
+	sealed                map[string]bool // photos (lower-case hash) the pass proved w.to sealed: the only ones it deletes
 
 	status, reason string
 	answer         json.RawMessage
@@ -367,12 +378,20 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 		w.settle(GristRefused, GristReasonBrokenGrind)
 		return
 	}
+	w.model, w.modelFrom = w.grind.Model, gristFromGrind
+	w.effort, w.effortFrom = w.grind.Effort, gristFromGrind
+	if name.Model != "" {
+		w.model, w.modelFrom = name.Model, gristFromGrist
+	}
+	if name.Effort != "" {
+		w.effort, w.effortFrom = name.Effort, gristFromGrist
+	}
 	if !slices.Contains(w.grind.Versions, name.V) {
 		w.settle(GristRefused, GristReasonVersion)
 		return
 	}
-	if !slices.Contains(ceilings.Models, w.grind.Model) {
-		w.settle(GristRefused, GristReasonModel)
+	if reason := g.judgeRun(w, ceilings); reason != "" {
+		w.settle(GristRefused, reason)
 		return
 	}
 	if reason := g.judgePhotos(w, ceilings); reason != "" {
@@ -380,6 +399,29 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 		return
 	}
 	w.system, w.schema = g.readGrindText(ctx, w, checkout)
+}
+
+// Where the model and effort a grind ran on came from, as the record says.
+const (
+	gristFromGrist = "grist"
+	gristFromGrind = "grind file"
+)
+
+// judgeRun is why the model and effort the grind would run on are not allowed,
+// or "". The model, from either source, must be among the factory's models; an
+// effort the grist asks for must be among its efforts (the grind file's own
+// effort is only checked to be a level the harness has).
+func (g GristGrind) judgeRun(w *gristWork, ceilings GristCeilings) string {
+	if !slices.Contains(ceilings.Models, w.model) {
+		if w.modelFrom == gristFromGrist {
+			return fmt.Sprintf("The factory does not allow the model %s this grist asks for.", w.model)
+		}
+		return GristReasonModel
+	}
+	if w.effortFrom == gristFromGrist && (!slices.Contains(ceilings.Efforts, w.effort) || !slices.Contains(GrindEfforts, w.effort)) {
+		return fmt.Sprintf("The factory does not allow the effort %s this grist asks for.", w.effort)
+	}
+	return ""
 }
 
 // judgePhotos is why the grist's photos do not fit its grind, or "".
@@ -520,7 +562,8 @@ func (g GristGrind) grindOne(ctx context.Context, w *gristWork, privKey string) 
 	if w.status != "" {
 		return
 	}
-	result, err := g.Grinder.Grind(ctx, gristGrindCall(dir, w.plain, photos, w.grind.Model, w.grind.Effort, w.system, w.schema, g.Ceilings.filled().Timeout))
+	w.ran = true
+	result, err := g.Grinder.Grind(ctx, gristGrindCall(dir, w.plain, photos, w.model, w.effort, w.system, w.schema, g.Ceilings.filled().Timeout))
 	w.result = result
 	status, reason := gristOutcome(result, err, w.schema)
 	if status == GristAnswered {
@@ -700,7 +743,8 @@ func (g GristGrind) answer(ctx context.Context, w *gristWork, privKey, millKey s
 	now := g.now()
 	line := GrindLine{
 		Time: now.UTC(), Txid: w.record.Txid, App: name.App, Kind: name.Kind, V: name.V,
-		Sender: w.sender, Model: w.grind.Model, Status: w.status, Reason: w.reason,
+		Sender: w.sender, Model: w.model, Effort: w.effort, ModelFrom: w.modelFrom, EffortFrom: w.effortFrom,
+		Status: w.status, Reason: w.reason,
 		Tokens: w.result.Fuel.Total(), CostUSD: w.result.CostUSD, Turns: w.result.Turns,
 		Denials: w.result.Denials, Seconds: now.Sub(w.started).Seconds(), Commit: w.commit,
 		Delivered: delivered,
@@ -719,7 +763,11 @@ func (g GristGrind) answer(ctx context.Context, w *gristWork, privKey, millKey s
 	default:
 		report.Failed++
 	}
-	report.Grist = append(report.Grist, GristHandled{Txid: w.record.Txid, Name: name, Status: w.status, Reason: w.reason, Delivered: delivered})
+	handled := GristHandled{Txid: w.record.Txid, Name: name, Status: w.status, Reason: w.reason, Delivered: delivered}
+	if w.ran {
+		handled.Ran = fmt.Sprintf("%s (%s) at %s (%s)", w.model, w.modelFrom, w.effort, w.effortFrom)
+	}
+	report.Grist = append(report.Grist, handled)
 	return line, nil
 }
 
