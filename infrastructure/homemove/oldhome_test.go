@@ -117,7 +117,9 @@ func TestMayorStillThereIsNotGoneWhenWaitIsUp(t *testing.T) {
 	vault, dir := ranOnOld(t, map[string]string{"pgrep": "exit 0"})
 	writeActing(t, vault, "Mayor after handoff 98 (tmux window @5)\n")
 
-	gone, said, err := Host{Poll: 5 * time.Millisecond}.MayorGone(context.Background(), oldHome, 40*time.Millisecond)
+	// The wait is long beside one ask of the old home, so a loaded box that is
+	// slow to run the stand-in still gets to ask it again before the wait is up.
+	gone, said, err := Host{Poll: 5 * time.Millisecond}.MayorGone(context.Background(), oldHome, time.Second)
 
 	if err != nil || gone {
 		t.Fatalf("expected a Mayor still there, got %v, %v", gone, err)

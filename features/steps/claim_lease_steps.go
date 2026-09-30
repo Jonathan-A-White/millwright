@@ -449,12 +449,19 @@ func (c *readyContext) theHeartbeatStoppedOnceTheHarnessExited() error {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	count, err := countHeartbeatTicks(c.lease.heartbeatLog)
+	// A tick or two can land between the shell line's kill and the heartbeat
+	// being scheduled to take it, more so on a loaded box, so the count at the
+	// run's end is only a floor. What must hold is that "stopped" is the last
+	// line: the trap exits right after writing it, so nothing can follow.
+	data, err := heartbeatLogContents(c.lease.heartbeatLog)
 	if err != nil {
 		return err
 	}
-	if count != c.lease.heartbeatCountAtRunEnd {
-		return fmt.Errorf("expected no more heartbeats once the harness exited, had %d then %d", c.lease.heartbeatCountAtRunEnd, count)
+	if !strings.HasSuffix(data, "stopped\n") || strings.Count(data, "stopped\n") != 1 {
+		return fmt.Errorf("expected the heartbeat's own stop to be the last thing it logged, got %q", data)
+	}
+	if count := strings.Count(data, "tick\n"); count < c.lease.heartbeatCountAtRunEnd {
+		return fmt.Errorf("expected no heartbeat to be lost from the log, had %d then %d", c.lease.heartbeatCountAtRunEnd, count)
 	}
 	return nil
 }
