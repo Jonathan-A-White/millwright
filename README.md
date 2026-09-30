@@ -1510,7 +1510,7 @@ script that a second `systemd --user` timer runs every minute
 (`mw-mail-notify.timer`, running `mw-mail-notify.service`, both in
 `contrib/systemd/`). It reads no mail and starts nothing: at most it types two
 fixed-shape lines into the live Mayor's tmux window, and Enter after each.
-Each tick it skips everything if the 1-minute load is above 2.0; runs `mw sync`
+Each tick it skips everything (bar a stale view, below) if the 1-minute load is above `MW_MAIL_LOAD_LIMIT` (the core count); runs `mw sync`
 at `nice 19` and idle I/O priority if the last was `MW_MAIL_SYNC_EVERY` seconds
 ago or more (300, five minutes; 60 on the desktop, where a sync is a few local
 writes);
@@ -1574,7 +1574,8 @@ The service reads the same `~/.config/mw/dispatch.env` as the dispatch timer for
 its `PATH`, which must reach `mw`, `bd`, `tmux`, `flock` and `~/.local/bin`; and
 the vault from `~/.config/mw/config.toml`. Its settings (`MW_MAIL_MAILBOX`,
 `MW_MAIL_LOAD_LIMIT`, `MW_MAIL_SYNC_EVERY`, `MW_MAIL_STATE_DIR`,
-`MW_MAIL_VIEW_EVERY`, `MW_MAIL_VIEW_TIMEOUT`, `MW_MAIL_SNAPSHOT_EVERY`,
+`MW_MAIL_VIEW_EVERY`, `MW_MAIL_VIEW_TIMEOUT`, `MW_MAIL_VIEW_MAX_AGE`,
+`MW_MAIL_SNAPSHOT_EVERY`,
 `MW_MAIL_SNAPSHOT_TIMEOUT`, `MW_MAIL_WAIT_STALE`, `MW_TMUX_SOCKET`) go in an optional
 `~/.config/mw/mail-notify.env`, as `NAME=value` lines; the script's header
 lists them. A tmux server other than the default is named with
@@ -1601,6 +1602,15 @@ asks `mw postern view --help` whether this mw has the view at all (looking for
 the view's own usage line: cobra exits 0 for a subcommand it does not know),
 and passes over an mw without it silently. The view and the snapshot read the
 beads' level once a tick between them.
+
+A tick skipped for load (the 1-minute load average above `MW_MAIL_LOAD_LIMIT`,
+which defaults to the host's core count, `nproc`; 2.0 where the cores cannot be
+counted) still refreshes the view when the beads have changed and the last view
+is at least `MW_MAIL_VIEW_MAX_AGE` seconds old (default 300, five minutes), so a
+host kept busy by its Builders never leaves the app more than about that far
+behind. It logs `skipping this tick but publishing the view, Ns stale`. The
+mail line, the sync, the quiet alarm and the snapshot stay skipped, and the view
+runs under the same lock as ever (mw-gq6.150).
 
 **Undo it**:
 
