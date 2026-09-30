@@ -23,6 +23,8 @@ func newNudgeCmd() *cobra.Command {
 			"then reads every other host that holds a claim and, of each, whether its last recorded sync\n" +
 			"is older than nudge_sync_stale_minutes (default 20): a host that is simply off, holding no\n" +
 			"claim, is not an alarm. On a host the vault's home file says is not home, it prints nothing.\n" +
+			"A need that has waited on the Mayor more than 30 minutes (the ones mw status lists under\n" +
+			"WAITING ON THE MAYOR) is a clause too, keyed mayor.<bead>.\n" +
 			"When this host's own sync is halted, the other hosts' ages are read off notes\n" +
 			"this host cannot currently refresh, so they are left out in favour of one clause naming\n" +
 			"this host's own halt instead — unless beads_sync is backup or shared, where every host's note\n" +
@@ -59,6 +61,7 @@ func newNudgeCmd() *cobra.Command {
 			clauses, err := application.Nudge{
 				Tracker:    tracker,
 				Notes:      tracker,
+				Mayor:      application.MayorReader{Tracker: tracker, Notes: tracker},
 				Host:       host,
 				Home:       mwVault(dir, host),
 				SyncHalt:   hostSyncHalt(),

@@ -131,7 +131,11 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 
 	ctx.When(`^mw status reads the host$`, c.mwStatusReadsTheHost)
 
+	ctx.Given(`^the status story "([^"]*)" was filed (\d+) minutes ago$`, c.theStatusStoryWasFiledMinutesAgo)
 	ctx.Then(`^reading status succeeds$`, c.readingStatusSucceeds)
+	ctx.Then(`^the report lists "([^"]*)" under WAITING ON THE MAYOR aged "([^"]*)"$`, c.theReportListsUnderWaitingOnTheMayor)
+	ctx.Then(`^the report has no heading for needs waiting on the Mayor$`, c.theReportHasNoHeadingForTheMayor)
+	ctx.Then(`^the landed memory was not written$`, c.theLandedMemoryWasNotWritten)
 	ctx.Then(`^the report shows "([^"]*)" running with session "([^"]*)"$`, c.theReportShowsRunningWithSession)
 	ctx.Then(`^the report shows "([^"]*)" with (\d+) attempts$`, c.theReportShowsAttempts)
 	ctx.Then(`^the report shows no attempts for "([^"]*)"$`, c.theReportShowsNoAttempts)
@@ -431,6 +435,7 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 		HostSilence:    time.Duration(hours) * time.Hour,
 		RigMemoryBytes: budget,
 		Ticks:          logs,
+		Mayor:          application.MayorReader{Tracker: c.tracker, Notes: c.tracker, Now: func() time.Time { return c.now }},
 		Now:            func() time.Time { return c.now },
 	}.Run(context.Background())
 	return nil
@@ -1033,6 +1038,48 @@ func (c *statusContext) theReportShowsNoAttempts(id string) error {
 	}
 	if got != "" {
 		return fmt.Errorf("expected the block of %s to say nothing of attempts, got %q", id, got)
+	}
+	return nil
+}
+
+func (c *statusContext) theStatusStoryWasFiledMinutesAgo(id string, minutes int) error {
+	return c.tracker.SetCreated(id, c.now.Add(-time.Duration(minutes)*time.Minute))
+}
+
+// theReportListsUnderWaitingOnTheMayor checks the printed heading for needs
+// the Mayor must act on names the bead and how long it has waited.
+func (c *statusContext) theReportListsUnderWaitingOnTheMayor(id, age string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	section := headedBy(c.report.String(), application.WaitingOnMayorHeading)
+	for _, line := range strings.Split(section, "\n") {
+		if strings.Contains(line, id) && strings.Contains(line, age) {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected %s aged %s under %q, got:\n%s", id, age, application.WaitingOnMayorHeading, c.report.String())
+}
+
+func (c *statusContext) theReportHasNoHeadingForTheMayor() error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	if strings.Contains(c.report.String(), application.WaitingOnMayorHeading) {
+		return fmt.Errorf("expected no %s section, got:\n%s", application.WaitingOnMayorHeading, c.report.String())
+	}
+	return nil
+}
+
+// theLandedMemoryWasNotWritten says building the Mayor's needs left no
+// landed-memory note behind: mw status reads the view, it never keeps one.
+func (c *statusContext) theLandedMemoryWasNotWritten() error {
+	note, err := c.tracker.Note(context.Background(), application.PosternSnapshotMemoryKey)
+	if err != nil {
+		return err
+	}
+	if note != "" {
+		return fmt.Errorf("expected no landed-memory note, got %q", note)
 	}
 	return nil
 }

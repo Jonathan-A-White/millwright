@@ -26,6 +26,17 @@ const DefaultHostSilence = 2 * time.Hour
 // present for. The report leaves the section out when there are none.
 const WaitingHeading = "WAITING FOR THE GOVERNOR"
 
+// WaitingOnMayorHeading is what heads the section for needs that wait on the
+// Mayor: a hands bead with no step filed yet. The report leaves the section
+// out when there are none.
+const WaitingOnMayorHeading = "WAITING ON THE MAYOR"
+
+// MayorNeeds reads the needs that wait on the Mayor among the beads labelled
+// hitl, without writing anything. MayorReader is the one reader.
+type MayorNeeds interface {
+	MayorNeeds(ctx context.Context, hitl []StoryDetail) ([]PosternViewNeed, error)
+}
+
 // RigMemoryHeading is what heads the section naming the rigs whose memory has
 // outgrown its budget. The report leaves the section out when none has.
 const RigMemoryHeading = "RIG MEMORY"
@@ -87,6 +98,11 @@ type Status struct {
 
 	// Host is which of the factory's hosts this report is for.
 	Host string
+
+	// Mayor is where the needs waiting on the Mayor are read from, for the
+	// WAITING ON THE MAYOR section, from the beads labelled hitl the report
+	// lists. A nil Mayor leaves the section out.
+	Mayor MayorNeeds
 
 	// HostSilence is how long another host's recorded sync may be behind
 	// before its work is called stranded. Zero reads DefaultHostSilence.
@@ -213,7 +229,11 @@ type StatusReport struct {
 	// with the Governor present, so neither a dispatcher's to take nor a session
 	// for Running to show. They are in no other list, most urgent first.
 	Waiting []StoryDetail
-	Blocked []StoryDetail
+	// WaitingOnMayor are the needs the view says wait on the Mayor, oldest
+	// first (one with no known age last), and NeedsAt is the clock their age is read against.
+	WaitingOnMayor []PosternViewNeed
+	NeedsAt        time.Time
+	Blocked        []StoryDetail
 	// Others is what every other host named in a story's Path has in hand, one
 	// entry per host, in host order.
 	Others []HostWork
@@ -325,6 +345,18 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		return report.Waiting[i].Priority < report.Waiting[j].Priority
 	})
 
+	// What waits on the Mayor takes a read or two of its own, so it is read
+	// while the rest of the report is, and joined before it is printed.
+	var mayor chan mayorRead
+	if s.Mayor != nil {
+		mayor = make(chan mayorRead, 1)
+		hitl := append([]StoryDetail(nil), report.Waiting...)
+		go func() {
+			needs, err := s.Mayor.MayorNeeds(ctx, hitl)
+			mayor <- mayorRead{needs, err}
+		}()
+	}
+
 	blocked, err := s.Tracker.BlockedForHost(ctx, s.Host)
 	if err != nil {
 		return report, fmt.Errorf("reading what is blocked on %s: %w", s.Host, err)
@@ -382,8 +414,27 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		}
 	}
 
+	if mayor != nil {
+		read := <-mayor
+		if read.err != nil {
+			return report, fmt.Errorf("reading what waits on the Mayor: %w", read.err)
+		}
+		report.WaitingOnMayor = read.needs
+		sort.SliceStable(report.WaitingOnMayor, func(i, j int) bool {
+			a, b := report.WaitingOnMayor[i].Since, report.WaitingOnMayor[j].Since
+			return b == "" && a != "" || a != "" && b != "" && a < b
+		})
+		report.NeedsAt = s.now()
+	}
+
 	s.print(report.String())
 	return report, nil
+}
+
+// mayorRead is what reading the Mayor's needs came back with.
+type mayorRead struct {
+	needs []PosternViewNeed
+	err   error
 }
 
 // running reads what mw status shows about one story this host has claimed:
@@ -611,6 +662,15 @@ func (r StatusReport) String() string {
 		b.WriteString("\n")
 	}
 
+	if len(r.WaitingOnMayor) > 0 {
+		clip(&b, fmt.Sprintf("%s (%d)", WaitingOnMayorHeading, len(r.WaitingOnMayor)))
+		for _, need := range r.WaitingOnMayor {
+			clip(&b, "  "+need.Bead+" · "+needAge(need, r.NeedsAt))
+			clip(&b, "    "+needWhy(need))
+		}
+		b.WriteString("\n")
+	}
+
 	clip(&b, fmt.Sprintf("BLOCKED (%d)", len(r.Blocked)))
 	if len(r.Blocked) == 0 {
 		clip(&b, "  nothing blocked")
@@ -653,6 +713,24 @@ func (r StatusReport) String() string {
 	clip(&b, fmt.Sprintf("FUEL today: %s tokens", Thousands(r.FuelToday)))
 	b.WriteString("\n")
 	return b.String()
+}
+
+// needAge is how long a need has waited at now, or that it is not known.
+func needAge(need PosternViewNeed, now time.Time) string {
+	since, err := time.Parse(time.RFC3339, need.Since)
+	if err != nil || since.IsZero() {
+		return "age unknown"
+	}
+	return Clock(now.Sub(since))
+}
+
+// needWhy is the one line a need is worth: its kind, and what it waits on or,
+// where it names nothing, what it says.
+func needWhy(need PosternViewNeed) string {
+	if len(need.WaitingOn) > 0 {
+		return need.Kind + ": " + strings.Join(need.WaitingOn, ", ")
+	}
+	return need.Kind + ": " + need.Text
 }
 
 // write is one other host's block: the host and how long it has been quiet,

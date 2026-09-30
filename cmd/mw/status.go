@@ -26,6 +26,9 @@ func newStatusCmd() *cobra.Command {
 			"`host_silent_hours`, default 2), or that never synced at all, is marked asleep and its work\n" +
 			"is listed as stranded, with the one line that re-paths a story here. Re-pathing is a\n" +
 			"person's act: status only says which stories are waiting for one.\n\n" +
+			"A WAITING ON THE MAYOR section lists each hands bead (hitl) with no step filed yet, which\n" +
+			"the postern view says waits on the Mayor, with its bead, its age and what it waits on. It\n" +
+			"costs one read of the notes, and builds and keeps nothing of the view.\n\n" +
 			"A TICKS section says how this host's timers are doing, counted from the logs mw dispatch and\n" +
 			"mw millhand tick keep: the time of the last good run of each and how many runs since have\n" +
 			"failed, with local network faults counted apart. It is left out on a host that keeps no log.\n" +
@@ -74,6 +77,7 @@ func newStatusCmd() *cobra.Command {
 				Notes:          tracker,
 				Vault:          mwVault(dir, host),
 				SyncHalt:       hostSyncHalt(),
+				Mayor:          application.MayorReader{Tracker: tracker, Notes: tracker},
 				Host:           host,
 				Seat:           BuilderSeat,
 				Ticks:          hostTickLogs(),
