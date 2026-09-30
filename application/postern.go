@@ -589,7 +589,11 @@ type PosternInbox struct {
 // voice note (section 14) — Run applies too, once per txid, when no pass
 // has yet, and prints the one line saying what it did. A message a pass has
 // already applied is that one line, "applied <kind> <bead> txid <id>" (or
-// "refused …: <why>"), never its text, and is never applied twice.
+// "refused …: <why>"), prefixed "already applied earlier: " so it cannot be
+// read as new, never its text, and is never applied twice. The oldest such
+// messages, up to the first one not yet applied, are shown first and the
+// cursor is saved past them before the rest is tried, so a read that dies
+// midway does not show them again.
 func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 	if err := i.wired(); err != nil {
 		return nil, err
@@ -610,11 +614,29 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 		}
 	}
 	newestFirst := reversePosternInbox(mine)
-	for _, m := range newestFirst {
+	// The oldest messages a pass already applied are shown first, marked as
+	// old, and the cursor is saved past them before anything else is tried:
+	// a read that dies later — the cold timeout, a failed write — leaves the
+	// next one not meeting them again, and never skips one it has not shown.
+	settled := 0
+	for settled < len(mine) && appliedTxid(applied, mine[settled].Txid) {
+		settled++
+	}
+	if settled > 0 {
+		for _, m := range newestFirst[len(newestFirst)-settled:] {
+			i.printf("already applied earlier: %s\n", applied[m.Txid])
+		}
+		if last := mine[settled-1].Seq; last > cursor {
+			if err := i.Memory.SetNote(ctx, PosternCursorKey, strconv.FormatInt(last, 10)); err != nil {
+				return nil, err
+			}
+		}
+	}
+	for _, m := range newestFirst[:len(newestFirst)-settled] {
 		// A message a pass already applied (Apply, the on-message hook's)
 		// is one line: what was done, never its text, never done again.
 		if done, ok := applied[m.Txid]; ok && m.Txid != "" {
-			i.printf("%s\n", done)
+			i.printf("already applied earlier: %s\n", done)
 			continue
 		}
 		line, path := i.attachmentOutcome(ctx, m)
@@ -661,6 +683,12 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 		}
 	}
 	return newestFirst, nil
+}
+
+// appliedTxid reports whether txid is one a pass has applied.
+func appliedTxid(applied map[string]string, txid string) bool {
+	_, ok := applied[txid]
+	return ok && txid != ""
 }
 
 // attachmentOutcome handles m's attachment, if it carries one: line is what

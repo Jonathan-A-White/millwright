@@ -46,7 +46,7 @@ Feature: mw postern inbox --apply
     Given a postern action "release" on bead "mw-act.2" from "governor-pubkey-hex" with txid "tx-once"
     When mw postern inbox --apply is run
     And mw postern inbox is run
-    Then it printed "applied release mw-act.2 txid tx-once"
+    Then it printed "already applied earlier: applied release mw-act.2 txid tx-once"
     And bead "mw-act.2" has 1 comment
     And the postern inbox cursor is saved as a note
 

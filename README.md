@@ -870,7 +870,7 @@ bead's thread, voice notes — at most once per txid (a
 the Governor via postern, txid …`, `VERIFIED by the Governor via postern
 (<txid>)`) and mails the Mayor. It moves no cursor and prints no message's
 text. The Mayor's own `mw postern inbox` then shows an applied message as one
-line, `applied <kind> <bead> txid <id>`, and never applies it twice; an action
+line, `already applied earlier: applied <kind> <bead> txid <id>`, once, and never applies it twice; an action
 this host does not know is left as text, and one it cannot apply (a hold on a
 claimed story, say) is refused and the Mayor told why. BRC-78 has no replay
 protection, so an action is applied only when the backend vouched for the

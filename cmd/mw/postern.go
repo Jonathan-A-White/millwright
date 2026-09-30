@@ -175,7 +175,7 @@ func newPosternInboxCmd() *cobra.Command {
 			"(postern's docs/protocol.md section 13: release, hold, priority, verified, keep, close) — each at most\n" +
 			"once per txid, commented on its bead and mailed to the Mayor. It moves no cursor and\n" +
 			"prints no message's text, only one line per message applied. A plain read then shows an\n" +
-			"applied message as that one line: applied <kind> <bead> txid <id>. An action this host\n" +
+			"applied message as that one line, marked \"already applied earlier: \", once. An action this host\n" +
 			"does not know, or whose record's signer the backend did not vouch for, is left for the\n" +
 			"Mayor to read as text.\n\n" +
 			"A voice note from the Governor (an audio attachment, section 14) is heard on this host\n" +

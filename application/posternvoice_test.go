@@ -120,7 +120,7 @@ func TestApplyTranscribesAVoiceNoteInABeadsThread(t *testing.T) {
 	if _, err := f.inbox().Run(context.Background()); err != nil {
 		t.Fatalf("reading: %v", err)
 	}
-	if got := strings.TrimSpace(f.out.String()); !strings.HasPrefix(got, "applied voice mw-e.3 txid direct:v1") {
+	if got := strings.TrimSpace(f.out.String()); !strings.HasPrefix(got, "already applied earlier: applied voice mw-e.3 txid direct:v1") {
 		t.Fatalf("expected the Mayor's read to show the note as applied, got %q", got)
 	}
 }
@@ -141,7 +141,7 @@ func TestApplyTranscribesAVoiceNoteOnATopicAndTheMayorReadsIt(t *testing.T) {
 	if _, err := f.inbox().Run(context.Background()); err != nil {
 		t.Fatalf("reading: %v", err)
 	}
-	if got := strings.TrimSpace(f.out.String()); got != "applied voice roadmap txid direct:v2: ship the storage engine as planned" {
+	if got := strings.TrimSpace(f.out.String()); got != "already applied earlier: applied voice roadmap txid direct:v2: ship the storage engine as planned" {
 		t.Fatalf("expected the transcript in the applied line, got %q", got)
 	}
 }

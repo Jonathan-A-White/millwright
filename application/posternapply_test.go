@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -298,7 +299,7 @@ func TestInboxShowsAnAppliedMessageAsOneLineAndNeverAppliesItTwice(t *testing.T)
 	if _, err := f.inbox().Run(context.Background()); err != nil {
 		t.Fatalf("reading: %v", err)
 	}
-	if got := strings.TrimSpace(f.out.String()); got != "applied release mw-e.1 txid tx-rel" {
+	if got := strings.TrimSpace(f.out.String()); got != "already applied earlier: applied release mw-e.1 txid tx-rel" {
 		t.Fatalf("expected one line for the applied message, got %q", got)
 	}
 	if got := f.tracker.Comments("mw-e.1"); len(got) != 1 {
@@ -306,6 +307,62 @@ func TestInboxShowsAnAppliedMessageAsOneLineAndNeverAppliesItTwice(t *testing.T)
 	}
 	if cursor, _ := f.tracker.Note(context.Background(), application.PosternCursorKey); cursor == "" {
 		t.Fatal("expected the Mayor's read to move the cursor")
+	}
+}
+
+// An answer the pass applied is printed by the Mayor's next read once, marked
+// as old so it cannot be taken for the newest answer; the read after it does
+// not meet it at all (mw-gq6.148).
+func TestInboxPrintsAnAppliedAnswerOnceMarkedAsOld(t *testing.T) {
+	f := newApplyFixture(t)
+	reply, _ := json.Marshal(application.PosternReply{Bead: "mw-e.3", Answer: "B"})
+	f.message(t, releaseTapGovernorKey, "tx-answer", string(reply))
+	f.apply(t)
+	f.out.Reset()
+
+	if _, err := f.inbox().Run(context.Background()); err != nil {
+		t.Fatalf("first read: %v", err)
+	}
+	if got := strings.TrimSpace(f.out.String()); got != "already applied earlier: applied answer mw-e.3 txid tx-answer" {
+		t.Fatalf("expected the applied answer marked as old, once, got %q", got)
+	}
+	f.out.Reset()
+
+	if _, err := f.inbox().Run(context.Background()); err != nil {
+		t.Fatalf("second read: %v", err)
+	}
+	if got := f.out.String(); got != "" {
+		t.Fatalf("expected the second read to print nothing, got %q", got)
+	}
+}
+
+// A read that fails after it printed an applied answer does not print the
+// answer again in the read that follows: the cursor moved past it before the
+// message that failed was tried.
+func TestInboxThatFailsMidwayDoesNotPrintAnAppliedAnswerAgain(t *testing.T) {
+	f := newApplyFixture(t)
+	reply, _ := json.Marshal(application.PosternReply{Bead: "mw-e.3", Answer: "B"})
+	f.message(t, releaseTapGovernorKey, "tx-answer", string(reply))
+	f.apply(t)
+	f.out.Reset()
+	threaded, _ := json.Marshal(application.PosternThreadedMessage{Thread: application.PosternThread{Bead: "mw-e.2"}, Text: "looks good"})
+	f.message(t, releaseTapGovernorKey, "tx-comment", string(threaded))
+	f.mailbox.Err = errors.New("the mail store is locked")
+
+	if _, err := f.inbox().Run(context.Background()); err == nil {
+		t.Fatal("expected the first read to fail on the comment's mail")
+	}
+	if got := f.out.String(); !strings.Contains(got, "already applied earlier: applied answer mw-e.3 txid tx-answer") {
+		t.Fatalf("expected the first read to print the answer marked as old, got %q", got)
+	}
+	f.out.Reset()
+	f.mailbox.Err = nil
+
+	if _, err := f.inbox().Run(context.Background()); err != nil {
+		t.Fatalf("second read: %v", err)
+	}
+	if got := f.out.String(); strings.Contains(got, "tx-answer") {
+		t.Fatalf("expected the second read not to print the answer again, got %q", got)
 	}
 }
 
