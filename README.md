@@ -2341,6 +2341,15 @@ BEADS line warns on; past it there is no cure — repacking would delete packs
 — so it only ever writes the check's own `doctor.beads-size` note for the
 Millhand to look at.
 
+**postern-transcribe** watches, on the home host only, that a voice note the
+Governor sends can be heard: it is faulty when `postern_transcribe_cmd` is unset,
+when its program is not an executable, or — for `contrib/postern-transcribe` —
+when `ffmpeg`, the whisper CLI or the model file is missing, and the reason names
+which. There is no cure: installing them is host work. Without a transcriber
+`mw postern inbox` says "voice note, not transcribed: postern_transcribe_cmd is
+not set" on the line it prints and in the bead comment. `mw doctor postern-transcribe
+--dry-run` shows it.
+
 **tmp-leftovers** cures the fault behind the VPS reaching 94% disk on
 2026-09-25 from the factory's own dead leftovers: a killed bd's dolt spool
 files (`/tmp/nbs-spool-*`), `/tmp/bd`, and a stale Claude Code session

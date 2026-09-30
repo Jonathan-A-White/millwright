@@ -101,6 +101,10 @@ func newDoctorCmd() *cobra.Command {
 			mayorGone := doctor.NewMayorGone(vault)
 			mayorGone.Home, mayorGone.Host = mwVault(vault, host), host
 
+			transcribeCmd, transcribeErr := config.PosternTranscribeCmd()
+			posternTranscribe := doctor.NewPosternTranscribe(transcribeCmd, transcribeErr)
+			posternTranscribe.Home, posternTranscribe.Host = mwVault(vault, host), host
+
 			store := doctor.New(dir)
 			tmpLeftovers := doctor.NewTmpLeftovers(os.TempDir())
 			tmpLeftovers.Budget = tmpLeftoversBudget
@@ -115,6 +119,7 @@ func newDoctorCmd() *cobra.Command {
 					doctor.NewBeadsSize(vault),
 					tmpLeftovers,
 					mayorGone,
+					posternTranscribe,
 					beadsServerCheck,
 				},
 				State: store,
