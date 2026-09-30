@@ -444,6 +444,15 @@ Feature: mw status
     And the report lists "mw-gq6.40" under WAITING ON THE MAYOR aged "1h30m"
     And the landed memory was not written
 
+  Scenario: A hands bead with a question card is not listed under WAITING ON THE MAYOR
+    Given a status story "mw-gq6.42" filed under it
+    And the status story "mw-gq6.42" is labelled "hitl"
+    And the status story "mw-gq6.42" was filed 90 minutes ago
+    And the status story "mw-gq6.42" carries a question card
+    When mw status reads the host
+    Then reading status succeeds
+    And the report has no heading for needs waiting on the Mayor
+
   Scenario: With nothing waiting on the Mayor the report has no heading for him
     Given a status story "mw-gq6.41" filed under it
     When mw status reads the host
