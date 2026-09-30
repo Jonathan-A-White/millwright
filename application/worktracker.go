@@ -488,6 +488,11 @@ type WorkTracker interface {
 	// bead already carrying it is left as it is.
 	AddLabel(ctx context.Context, id, label string) error
 
+	// AddBlocker makes blocker block blocked: blocked waits on blocker, as if
+	// it had been filed with it in Needs. A blocker blocked already has is left
+	// as it is.
+	AddBlocker(ctx context.Context, blocked, blocker string) error
+
 	// CommentOnStory appends one comment to a story.
 	CommentOnStory(ctx context.Context, id, text string) error
 

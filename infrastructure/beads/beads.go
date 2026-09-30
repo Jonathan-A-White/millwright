@@ -468,6 +468,13 @@ func (g *Gateway) AddLabel(ctx context.Context, id, label string) error {
 	return err
 }
 
+// AddBlocker implements application.WorkTracker: one bd dep add, which takes
+// the blocked bead first, and leaves a dependency already there as it is.
+func (g *Gateway) AddBlocker(ctx context.Context, blocked, blocker string) error {
+	_, err := g.call(ctx, "dep", "add", blocked, blocker)
+	return err
+}
+
 // HoldStory implements application.WorkTracker: the story goes back to
 // deferred, beads' own way of holding work, the status CreateStory files it
 // in.

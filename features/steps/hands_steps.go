@@ -19,9 +19,14 @@ import (
 type handsContext struct {
 	tracker *apptest.FakeTracker
 	push    *apptest.FakePosternSender
-	out     bytes.Buffer
-	errOut  bytes.Buffer
-	err     error
+	// cipher and file are where a view the add publishes is sealed and kept,
+	// nil when the scenario publishes none; lock is the notifier's lock.
+	cipher *apptest.FakeCipher
+	file   *apptest.FakeSnapshotFile
+	lock   *fakeViewLock
+	out    bytes.Buffer
+	errOut bytes.Buffer
+	err    error
 }
 
 // InitializeHandsScenario registers the steps of features/hands.feature.
@@ -38,6 +43,18 @@ func InitializeHandsScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the step "([^"]*)" on "([^"]*)" ran on "([^"]*)" with exit (\d+)$`, c.theStepRan)
 	ctx.Given(`^a working push to the Governor$`, c.aWorkingPush)
 	ctx.Given(`^a failing push to the Governor$`, c.aFailingPush)
+	ctx.Given(`^a bead "([^"]*)" titled "([^"]*)"$`, c.aBeadTitled)
+	ctx.Given(`^a view the add publishes$`, c.aViewTheAddPublishes)
+	ctx.Given(`^the notifier holds the view lock$`, c.theNotifierHoldsTheViewLock)
+	ctx.Given(`^the view cannot be written$`, c.theViewCannotBeWritten)
+	ctx.When(`^the Mayor adds the step "([^"]*)" to "([^"]*)" on "([^"]*)" as "([^"]*)" running "([^"]*)" after "([^"]*)"$`, c.theMayorAddsTheStepAfter)
+	ctx.When(`^the Mayor adds the step "([^"]*)" to "([^"]*)" on "([^"]*)" as "([^"]*)" running "([^"]*)" with --no-view$`, c.theMayorAddsTheStepWithNoView)
+	ctx.Then(`^bead "([^"]*)" waits on "([^"]*)"$`, c.beadWaitsOn)
+	ctx.Then(`^the published view's hands need on "([^"]*)" is not ready, waiting on "([^"]*)"$`, c.publishedNeedIsWaitingOn)
+	ctx.Then(`^the published view's hands need on "([^"]*)" carries the step "([^"]*)" running "([^"]*)" with its sha256$`, c.publishedNeedCarriesTheStep)
+	ctx.Then(`^no view was published$`, c.noViewWasPublished)
+	ctx.Then(`^stderr warns the view was skipped$`, c.stderrWarnsViewSkipped)
+	ctx.Then(`^stderr warns the view was not published$`, c.stderrWarnsViewNotPublished)
 	ctx.When(`^the Mayor adds the step "([^"]*)" to "([^"]*)" on "([^"]*)" as "([^"]*)" running "([^"]*)"$`, c.theMayorAddsTheStep)
 	ctx.When(`^the Mayor adds the step "([^"]*)" to "([^"]*)" on "([^"]*)" as "([^"]*)" running "([^"]*)" with --no-push$`, c.theMayorAddsTheStepWithNoPush)
 	ctx.Then(`^exactly one push was sent, on the thread of "([^"]*)", saying "([^"]*)"$`, c.exactlyOnePushWasSent)
@@ -63,20 +80,166 @@ func (c *handsContext) aBeadForTheGovernorsHands(bead string) error {
 	return nil
 }
 
+// handsAddOpts are the flags of a scenario's add beyond the step itself.
+type handsAddOpts struct {
+	replace, noPush, noView bool
+	after                   []string
+}
+
 func (c *handsContext) add(id, bead, host, as, run string, replace, noPush bool) error {
+	return c.addWith(id, bead, host, as, run, handsAddOpts{replace: replace, noPush: noPush})
+}
+
+func (c *handsContext) addWith(id, bead, host, as, run string, o handsAddOpts) error {
 	c.out.Reset()
 	c.errOut.Reset()
 	adder := application.HandsAdd{
-		Tracker: c.tracker, Notes: c.tracker, Out: &c.out, Err: &c.errOut, NoPush: noPush,
+		Tracker: c.tracker, Notes: c.tracker, Out: &c.out, Err: &c.errOut, NoPush: o.noPush, NoView: o.noView,
 		Now: func() time.Time { return time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC) },
 	}
 	if c.push != nil {
 		adder.Push = c.push
 	}
+	if c.file != nil {
+		adder.View = c.view()
+		adder.ViewLock = c.lock
+	}
 	_, err := adder.Run(context.Background(), application.HandsAddRequest{
-		Bead: bead, Step: domain.HandsStep{ID: id, Host: host, As: as, Run: run}, Replace: replace,
+		Bead: bead, Step: domain.HandsStep{ID: id, Host: host, As: as, Run: run}, Replace: o.replace, After: o.after,
 	})
 	return err
+}
+
+// view is the live view the add publishes, sealed into the fake file.
+func (c *handsContext) view() application.PosternView {
+	return application.PosternView{
+		Tracker: c.tracker, Notes: c.tracker, Cipher: c.cipher, File: c.file,
+		GovernorKey: "governor-pubkey-hex", Host: "desktop",
+		Now: func() time.Time { return time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC) },
+	}
+}
+
+// fakeViewLock is the notifier's lock: free unless held.
+type fakeViewLock struct{ held bool }
+
+func (l *fakeViewLock) TryTake(context.Context) (func(), bool, error) {
+	if l.held {
+		return nil, false, nil
+	}
+	return func() {}, true, nil
+}
+
+func (c *handsContext) aBeadTitled(bead, title string) error {
+	c.tracker.AddStory("mw-h", domain.Story{ID: bead, Title: title})
+	return nil
+}
+
+func (c *handsContext) aViewTheAddPublishes() error {
+	c.tracker.DescribeEpic("mw-h", "Epic mw-h", apptest.StatusOpen, 1)
+	c.cipher = apptest.NewFakeCipher()
+	c.file = apptest.NewFakeSnapshotFile("/state/postern/view.b64")
+	c.lock = &fakeViewLock{}
+	return nil
+}
+
+func (c *handsContext) theNotifierHoldsTheViewLock() error {
+	c.lock.held = true
+	return nil
+}
+
+func (c *handsContext) theViewCannotBeWritten() error {
+	c.file.Err = fmt.Errorf("the disk is full")
+	return nil
+}
+
+func (c *handsContext) theMayorAddsTheStepAfter(id, bead, host, as, run, after string) error {
+	c.err = c.addWith(id, bead, host, as, run, handsAddOpts{after: []string{after}})
+	return nil
+}
+
+func (c *handsContext) theMayorAddsTheStepWithNoView(id, bead, host, as, run string) error {
+	c.err = c.addWith(id, bead, host, as, run, handsAddOpts{noView: true})
+	return nil
+}
+
+func (c *handsContext) beadWaitsOn(bead, on string) error {
+	found, err := c.tracker.ShowBeads(context.Background(), []string{bead})
+	if err != nil || len(found) != 1 {
+		return fmt.Errorf("reading %s: %v (%d found)", bead, err, len(found))
+	}
+	detail := found[0]
+	for _, n := range detail.Needs {
+		if n == on {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected %s to wait on %s, got %v", bead, on, detail.Needs)
+}
+
+// publishedNeed is the hands need on bead in the view the add last wrote.
+func (c *handsContext) publishedNeed(bead string) (application.PosternViewNeed, error) {
+	if c.file == nil || c.file.Writes() == 0 {
+		return application.PosternViewNeed{}, fmt.Errorf("no view was published")
+	}
+	var opened application.PosternViewDoc
+	if err := application.OpenPosternDoc(c.cipher, "any", string(c.file.Written()), &opened); err != nil {
+		return application.PosternViewNeed{}, err
+	}
+	for _, n := range opened.Needs {
+		if n.Kind == application.PosternNeedHands && n.Bead == bead {
+			return n, nil
+		}
+	}
+	return application.PosternViewNeed{}, fmt.Errorf("the published view has no hands need on %s: %+v", bead, opened.Needs)
+}
+
+func (c *handsContext) publishedNeedIsWaitingOn(bead, title string) error {
+	need, err := c.publishedNeed(bead)
+	if err != nil {
+		return err
+	}
+	if !need.NotReady || len(need.WaitingOn) != 1 || need.WaitingOn[0] != title {
+		return fmt.Errorf("expected the need on %s not ready, waiting on %q, got %+v", bead, title, need)
+	}
+	return nil
+}
+
+func (c *handsContext) publishedNeedCarriesTheStep(bead, id, run string) error {
+	need, err := c.publishedNeed(bead)
+	if err != nil {
+		return err
+	}
+	for _, step := range need.Steps {
+		if step.ID != id {
+			continue
+		}
+		if step.Run != run || step.SHA256 != domain.HandsSHA256(bead, step.HandsStep) {
+			return fmt.Errorf("expected step %s running %q with its own sha256, got %+v", id, run, step)
+		}
+		return nil
+	}
+	return fmt.Errorf("the published need on %s carries no step %s: %+v", bead, id, need.Steps)
+}
+
+func (c *handsContext) noViewWasPublished() error {
+	if c.file != nil && c.file.Writes() != 0 {
+		return fmt.Errorf("expected no view published, got %d write(s)", c.file.Writes())
+	}
+	return nil
+}
+
+func (c *handsContext) stderrWarnsViewSkipped() error {
+	if !strings.Contains(c.errOut.String(), "view") || !strings.Contains(c.errOut.String(), "skipped") {
+		return fmt.Errorf("expected stderr to say the view was skipped, got %q", c.errOut.String())
+	}
+	return nil
+}
+
+func (c *handsContext) stderrWarnsViewNotPublished() error {
+	if !strings.Contains(c.errOut.String(), "view") || !strings.Contains(c.errOut.String(), "not published") {
+		return fmt.Errorf("expected stderr to say the view was not published, got %q", c.errOut.String())
+	}
+	return nil
 }
 
 func (c *handsContext) aWorkingPush() error {
