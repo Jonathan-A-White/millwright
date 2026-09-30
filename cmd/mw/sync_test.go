@@ -5,12 +5,14 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // mw sync is never run against a real vault here: it would reach the factory's
@@ -179,5 +181,60 @@ func TestSyncCommandOnAutoWithNoHomeFileRefusesSayingWhy(t *testing.T) {
 	err := root.Execute()
 	if err == nil || !strings.Contains(err.Error(), "no home file") {
 		t.Fatalf("expected mw sync on auto to refuse for want of a home file, got %v", err)
+	}
+}
+
+// sessionLine is the shell line a session assembled by sessionHarness would run.
+func sessionLine(t *testing.T, vaultDir string) string {
+	t.Helper()
+	spec, err := sessionHarness(vaultDir, "laptop").Session(application.Launch{
+		StoryID: "mw-gq6.1",
+		Path: domain.Path{
+			Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude,
+			Model: domain.ModelSonnet, Effort: domain.EffortHigh,
+			Formula: "tdd-feature", Host: "laptop",
+		},
+		Seat: "builder", Host: "laptop", Dir: "/w", BootFile: "/b.md", ResultFile: "/r.json", Kickoff: "k",
+	})
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	return spec.Command[len(spec.Command)-1]
+}
+
+func TestSessionHarnessFollowsTheHomeOnBothRoles(t *testing.T) {
+	t.Setenv("MW_BEADS_SYNC", "")
+	t.Setenv("MW_BEADS_SERVER_HOST", "")
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "old.example")
+	mwConfig(t, "beads_sync = \"auto\"\n")
+	vaultDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(vaultDir, ".beads", "dolt"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeHome := func(host string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(vaultDir, application.HomeFileName), []byte(homeText(host)), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	writeHome("desktop")
+	if line := sessionLine(t, vaultDir); !strings.Contains(line, "export BEADS_DOLT_SERVER_HOST=desktop.mw; ") {
+		t.Errorf("expected the boost's line to point at desktop.mw, got %q", line)
+	}
+	writeHome("laptop")
+	if line := sessionLine(t, vaultDir); !strings.Contains(line, "export BEADS_DOLT_SERVER_HOST=127.0.0.1; ") {
+		t.Errorf("expected the home's line to point at 127.0.0.1, got %q", line)
+	}
+	if got := os.Getenv("BEADS_DOLT_SERVER_HOST"); got != "127.0.0.1" {
+		t.Errorf("expected mw's own bd pointed at the home's server too, got %q", got)
+	}
+
+	// A home that stayed embedded is left alone.
+	if err := os.RemoveAll(filepath.Join(vaultDir, ".beads", "dolt")); err != nil {
+		t.Fatal(err)
+	}
+	if line := sessionLine(t, vaultDir); strings.Contains(line, "BEADS_DOLT_SERVER_HOST") {
+		t.Errorf("expected no host for a home with no .beads/dolt, got %q", line)
 	}
 }

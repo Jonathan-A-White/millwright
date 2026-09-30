@@ -6,7 +6,6 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
-	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/reaper"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
@@ -61,7 +60,7 @@ func newMillhandCmd() *cobra.Command {
 			_, err = application.Millhand{
 				Seats:    vault.New(dir),
 				Windows:  windows,
-				Harness:  claude.New(claude.WithEnvFile(beadsEnvFile())),
+				Harness:  sessionHarness(dir, host),
 				Terminal: windows,
 				Armer:    reaper.New(exe),
 
