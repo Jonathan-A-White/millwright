@@ -344,6 +344,24 @@ func TestPosternViewListsEveryKindOfNeed(t *testing.T) {
 	}
 }
 
+// A closed bead labelled hitl is his own hands, a step he ran or a bead he
+// closed, not a landing for him to check: it makes no verify need, while a
+// landing closed in the same window keeps its own.
+func TestPosternViewAClosedHandsBeadMakesNoVerifyNeed(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	liveEpic(tracker, "mw-a", domain.Path{})
+	tracker.AddStory("mw-a", domain.Story{ID: "mw-a.1", Title: "Hands, done"})
+	mustDo(t, tracker.SetLabels("mw-a.1", "hitl"))
+	closedAt(t, tracker, "mw-a.1", viewNow.Add(-time.Hour))
+	tracker.AddStory("mw-a", domain.Story{ID: "mw-a.2", Title: "Landed"})
+	closedAt(t, tracker, "mw-a.2", viewNow.Add(-time.Hour))
+
+	doc := viewDoc(t, tracker)
+
+	viewLacksNeed(t, doc, "verify", "mw-a.1")
+	viewNeed(t, doc, "verify", "mw-a.2")
+}
+
 // A question whose note is a bare txid, written before the note said what
 // was asked, is read back from its QUESTION comment — one read, shared with
 // the verify candidates.

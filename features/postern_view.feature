@@ -49,6 +49,12 @@ Feature: mw postern view
     When the live view is built
     Then the view's verify need on "mw-v.3" says "Landed 28 Sep 11:00 UTC: Story mw-v.3. Checked by the Mayor: not yet. Tap Verified if you have looked; optional, clears by itself 29 Sep 11:00 UTC."
 
+  Scenario: A closed hands bead leaves Needs you with no Verify card
+    Given the view's hands bead "mw-v.7" under "mw-v" closed an hour ago
+    When the live view is built
+    Then the view's needs on "mw-v.7" are "none"
+    And the view's needs are "hands:mw-v.1, question:mw-v.4, verify:mw-v.3"
+
   Scenario: A hands need leaves the view once its one step has run with exit 0
     Given the view's bead "mw-v.1" has the hands step "linger" on "desktop" as "root" running "loginctl enable-linger jwhite"
     And the view's hands step "linger" on "mw-v.1" ran with exit 0

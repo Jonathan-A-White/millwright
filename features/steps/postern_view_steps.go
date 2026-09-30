@@ -46,6 +46,7 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" is labelled "([^"]*)"$`, c.theViewsBeadIsLabelled)
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" waits on "([^"]*)"$`, c.theViewsBeadWaitsOn)
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" landed an hour ago$`, c.theViewsBeadLandedAnHourAgo)
+	ctx.Given(`^the view's hands bead "([^"]*)" under "([^"]*)" closed an hour ago$`, c.theViewsHandsBeadClosedAnHourAgo)
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" landed a month ago$`, c.theViewsBeadLandedAMonthAgo)
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" landed two hours ago with the Mayor's comment "([^"]*)"$`, c.theViewsBeadLandedTwoHoursAgoChecked)
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" has a postern question open since two hours ago$`, c.theViewsBeadHasAQuestionOpen)
@@ -109,6 +110,13 @@ func (c *posternViewContext) closeAt(id, epic string, at time.Time) error {
 
 func (c *posternViewContext) theViewsBeadLandedAnHourAgo(id, epic string) error {
 	return c.closeAt(id, epic, posternViewFeatureNow.Add(-time.Hour))
+}
+
+func (c *posternViewContext) theViewsHandsBeadClosedAnHourAgo(id, epic string) error {
+	if err := c.closeAt(id, epic, posternViewFeatureNow.Add(-time.Hour)); err != nil {
+		return err
+	}
+	return c.tracker.SetLabels(id, "hitl")
 }
 
 func (c *posternViewContext) theViewsBeadLandedTwoHoursAgoChecked(id, epic, comment string) error {

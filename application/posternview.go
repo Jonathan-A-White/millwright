@@ -553,6 +553,11 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 		if !e.underLive || d.IsEpic || !d.Closed() || d.ClosedAt.IsZero() || b.now.Sub(d.ClosedAt) > PosternViewVerifyWindow {
 			continue
 		}
+		// A closed hands bead is his own doing, a step he approved and ran or a
+		// bead he closed: only a landing asks him to verify.
+		if hasLabel(d.Labels, LabelHitl) {
+			continue
+		}
 		verifies = append(verifies, e)
 		if d.CommentCount == 0 {
 			continue
