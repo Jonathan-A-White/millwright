@@ -56,7 +56,9 @@ func (d *directBackend) serve(t *testing.T) string {
 }
 
 // On the direct channel mw postern send delivers the fixture's very record
-// script straight to the backend: no balance, no coins, no broadcast.
+// straight to the backend: no balance, no coins, no broadcast. The fixture's
+// own fields are the same byte for byte; the direct record adds only the
+// clear summary a bare message carries, at the end.
 func TestPosternSendDeliversTheFixturesRecordScriptDirectly(t *testing.T) {
 	f := loadPosternRecordFixture(t)
 	backend := &directBackend{}
@@ -74,8 +76,19 @@ func TestPosternSendDeliversTheFixturesRecordScriptDirectly(t *testing.T) {
 	if !strings.HasPrefix(strings.TrimSpace(out), "direct:") {
 		t.Fatalf("expected the direct id printed, got %q", out)
 	}
-	if len(backend.scripts) != 1 || backend.scripts[0] != f.ScriptHex {
-		t.Fatalf("expected the fixture's record script delivered once, got %v", backend.scripts)
+	if len(backend.scripts) != 1 {
+		t.Fatalf("expected the fixture's record delivered once, got %v", backend.scripts)
+	}
+	fixture, ok := postern.DecodeRecordScript(f.ScriptHex)
+	if !ok {
+		t.Fatalf("the fixture's script is not a record: %s", f.ScriptHex)
+	}
+	sent, ok := postern.DecodeRecordScript(backend.scripts[0])
+	if !ok {
+		t.Fatalf("the delivered script is not a record: %s", backend.scripts[0])
+	}
+	if want := strings.TrimSuffix(string(fixture), "}") + `,"summary":"Message"}`; string(sent) != want {
+		t.Fatalf("expected the fixture's record plus its summary\n%s\ngot\n%s", want, sent)
 	}
 }
 

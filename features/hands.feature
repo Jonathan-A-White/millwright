@@ -104,3 +104,17 @@ Feature: mw hands
     Then adding the step succeeds
     And stderr warns the view was not published
     And bead "mw-h.1" keeps the step "linger" running "loginctl enable-linger jwhite"
+
+  Scenario: The push carries a summary naming the step's bead, as a question's does
+    Given a bead "mw-h.2" titled "Fetch the key first"
+    And a working push to the Governor
+    When the Mayor adds the step "linger" to "mw-h.2" on "desktop" as "root" running "loginctl enable-linger jwhite"
+    Then adding the step succeeds
+    And the push carries the summary "Step ready: mw-h.2 on Fetch the key first"
+
+  Scenario: The push's summary names the bead alone when its title cannot be read
+    Given a bead "mw-h.3" with no title
+    And a working push to the Governor
+    When the Mayor adds the step "linger" to "mw-h.3" on "desktop" as "root" running "loginctl enable-linger jwhite"
+    Then adding the step succeeds
+    And the push carries the summary "Step ready: mw-h.3"

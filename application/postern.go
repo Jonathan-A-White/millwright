@@ -453,7 +453,10 @@ const PosternMessageKind = "msg"
 // docs/protocol.md section 1 (github.com/Jonathan-A-White/postern): UTF-8
 // JSON, fields in this order — the order postern's own TypeScript writes them
 // in, so the two build the same bytes — carried as version 1 of the nftgate
-// record framing. Everything but Ct travels in the clear.
+// record framing. Everything but Ct travels in the clear. Summary is the one
+// extra, omitted when empty, so a record without one is byte for byte what it
+// was: a short clear line a direct record carries for the push's body, never
+// a word of the text, and never on a record the chain carries.
 type PosternPayload struct {
 	V     int    `json:"v"`     // always 1
 	Kind  string `json:"kind"`  // always PosternMessageKind
@@ -462,6 +465,8 @@ type PosternPayload struct {
 	From  string `json:"from"`  // sender's compressed public key, hex
 	Ts    int64  `json:"ts"`    // Unix seconds, when the sender built it
 	Ct    string `json:"ct"`    // the BRC-78 ciphertext of the text, base64
+
+	Summary string `json:"summary,omitempty"` // direct records only: what the push says
 }
 
 // PosternInboxMessage is one record as Inbox reports it: decrypted, and only
@@ -1209,6 +1214,11 @@ type PosternSendRequest struct {
 	// Recorded says Text is already written on the bead its thread names —
 	// a hands step's outcome, say — so it is not commented there again.
 	Recorded bool
+
+	// Summary is a summary its caller already made, sent as it stands — the
+	// hands push's "Step ready: ...". Empty, PosternSend writes one by the
+	// request's class. Only the direct channel carries it.
+	Summary string
 }
 
 // PosternRoleTranscript is the role of a message whose text is what the
@@ -1407,6 +1417,12 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 	if err != nil {
 		return "", err
 	}
+	// The summary is worked out once, and only the direct channel carries it:
+	// the chain record is public for good.
+	summary := ""
+	if channel == PosternChannelDirect {
+		summary = s.summary(ctx, req)
+	}
 	from, address, err := s.Keys.PublicKey()
 	if err != nil {
 		return "", err
@@ -1440,7 +1456,7 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 		if err != nil {
 			return "", err
 		}
-		if txid, err = s.sendOne(ctx, channel, req.Class, from, address, text); err != nil {
+		if txid, err = s.sendOne(ctx, channel, req.Class, summary, from, address, text); err != nil {
 			return "", err
 		}
 	}
@@ -1453,7 +1469,7 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 		if err != nil {
 			return "", err
 		}
-		if txid, err = s.sendOne(ctx, channel, req.Class, from, address, text); err != nil {
+		if txid, err = s.sendOne(ctx, channel, req.Class, summary, from, address, text); err != nil {
 			return "", err
 		}
 		if i < len(attachments)-1 {
@@ -1518,16 +1534,74 @@ func (s PosternSend) upload(ctx context.Context, file posternFile) (*PosternAtta
 	return &PosternAttachment{Hash: hash, Size: size, Mime: file.mime}, nil
 }
 
+// PosternSummaryRunes is the most runes a direct record's summary holds.
+const PosternSummaryRunes = 80
+
+// summary is the clear line a direct record of req carries, which the push
+// shows as its body: Summary when the caller made one; otherwise, by class,
+// "Answer: <title>" for a question, "Check: <title>" for a landing on a
+// bead's thread, "Message on <title>" for a message on one, "Message" for any
+// other message; none for any other class. It holds the bead's title and
+// never a word of req.Text. A title the tracker cannot give is the bead id.
+func (s PosternSend) summary(ctx context.Context, req PosternSendRequest) string {
+	if strings.TrimSpace(req.Summary) != "" {
+		return cutSummary(req.Summary)
+	}
+	thread := strings.TrimSpace(req.Thread)
+	switch {
+	case req.asksQuestion():
+		return cutSummary("Answer: " + s.beadTitle(ctx, req.Bead))
+	case req.Class == "landing" && thread != "":
+		return cutSummary("Check: " + s.beadTitle(ctx, thread))
+	case req.Class == "message" && thread != "":
+		return cutSummary("Message on " + s.beadTitle(ctx, thread))
+	case req.Class == "message":
+		return "Message"
+	}
+	return ""
+}
+
+// beadTitle is the title of bead, or bead itself when there is no tracker,
+// the read fails or the bead has no title: a send never fails over a title.
+func (s PosternSend) beadTitle(ctx context.Context, bead string) string {
+	if s.Tracker == nil {
+		return bead
+	}
+	detail, err := s.Tracker.ShowStory(ctx, bead)
+	if err != nil {
+		return bead
+	}
+	return titleOrID(detail.Story.Title, bead)
+}
+
+// titleOrID is title on one line, or id when there is none.
+func titleOrID(title, id string) string {
+	if title = strings.Join(strings.Fields(title), " "); title != "" {
+		return title
+	}
+	return id
+}
+
+// cutSummary cuts summary to PosternSummaryRunes, an ellipsis the last.
+func cutSummary(summary string) string {
+	runes := []rune(summary)
+	if len(runes) <= PosternSummaryRunes {
+		return summary
+	}
+	return string(runes[:PosternSummaryRunes-1]) + "…"
+}
+
 // sendOne encrypts text to the Governor as one message record, classed
-// class, and sends it by channel, reporting its txid.
-func (s PosternSend) sendOne(ctx context.Context, channel, class, from, address, text string) (string, error) {
+// class, and sends it by channel, reporting its txid. summary rides in the
+// clear beside the ciphertext, and is empty on the chain.
+func (s PosternSend) sendOne(ctx context.Context, channel, class, summary, from, address, text string) (string, error) {
 	ciphertext, err := s.Cipher.Encrypt(s.GovernorKey, text)
 	if err != nil {
 		return "", err
 	}
 	payload, err := json.Marshal(PosternPayload{
 		V: 1, Kind: PosternMessageKind, Class: class,
-		To: s.GovernorKey, From: from, Ts: s.now().Unix(), Ct: ciphertext,
+		To: s.GovernorKey, From: from, Ts: s.now().Unix(), Ct: ciphertext, Summary: summary,
 	})
 	if err != nil {
 		return "", fmt.Errorf("building the record's payload: %w", err)

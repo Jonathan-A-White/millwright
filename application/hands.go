@@ -295,7 +295,8 @@ func (h HandsAdd) publish(ctx context.Context) {
 // push tells the Governor a step is waiting: one message of HandsPushClass on
 // bead's thread. The step is already kept, so a failure is only reported, on
 // Err and on the bead, never returned. The message is Recorded: the step's
-// own comment is already on the bead.
+// own comment is already on the bead. Its summary, "Step ready: <bead> on
+// <title>", reads as a question's does; title is the bead's, empty when it has none.
 func (h HandsAdd) push(ctx context.Context, bead, title string, waits []string) {
 	if h.Push == nil || h.NoPush {
 		return
@@ -304,9 +305,14 @@ func (h HandsAdd) push(ctx context.Context, bead, title string, waits []string) 
 	if len(waits) > 0 {
 		text += " (waits on " + strings.Join(waits, ", ") + ")"
 	}
+	summary := "Step ready: " + bead
+	if title = titleOrID(title, ""); title != "" {
+		summary += " on " + title
+	}
 	_, err := h.Push.Run(ctx, PosternSendRequest{
 		Class:    HandsPushClass,
 		Text:     text,
+		Summary:  summary,
 		Thread:   bead,
 		Recorded: true,
 	})
