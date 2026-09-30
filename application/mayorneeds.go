@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -15,9 +16,10 @@ import (
 //
 // It leaves out what the view makes a need of another kind: a bead older than
 // PosternViewStaleHands, which the view turns into a stale need waiting on the
-// Governor, one he has kept, a demo-only bead, and one whose BY HAND comment
-// gives him his instructions. Nor does it see a landing with no HOW TO CHECK
-// IT or a story out of attempts: those take the view's whole tree.
+// Governor, one he has kept, a demo-only bead, one whose BY HAND comment gives
+// him his instructions, and one whose question card stands (it waits on his
+// answer). Nor does it see a landing with no HOW TO CHECK IT or a story out of
+// attempts: those take the view's whole tree.
 //
 // It writes nothing: the landed memory the view keeps is not touched.
 type MayorReader struct {
@@ -84,6 +86,11 @@ func (r MayorReader) MayorNeeds(ctx context.Context, hitl []StoryDetail) ([]Post
 			continue
 		}
 		seen[id] = true
+		// A standing question card — the view's question need, the same note —
+		// waits on the Governor, not the Mayor.
+		if strings.TrimSpace(notes[PosternQuestionKey(id)]) != "" {
+			continue
+		}
 		if len(viewHandsSteps(id, notes)) > 0 {
 			continue
 		}

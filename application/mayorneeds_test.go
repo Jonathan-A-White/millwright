@@ -61,3 +61,18 @@ func TestMayorReaderLeavesOutWhatTheViewMakesSomeoneElsesNeed(t *testing.T) {
 		t.Fatalf("expected none of them to wait on the Mayor, got %+v", needs)
 	}
 }
+
+func TestMayorReaderLeavesOutAHandsBeadWhoseQuestionCardStands(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	aHandsBeadFiledAgo(t, tracker, "mw-gq6.75", time.Hour)
+	aHandsBeadFiledAgo(t, tracker, "mw-gq6.76", time.Hour)
+	if err := tracker.SetNote(context.Background(), application.PosternQuestionKey("mw-gq6.75"), "txid-mw-gq6.75"); err != nil {
+		t.Fatalf("asking: %v", err)
+	}
+
+	needs := mayorNeedsFor(t, tracker)
+
+	if len(needs) != 1 || needs[0].Bead != "mw-gq6.76" {
+		t.Fatalf("expected only the bead with no question card to wait on the Mayor, got %+v", needs)
+	}
+}

@@ -373,6 +373,20 @@ func TestNudgeSaysNothingOfAMayorNeedYoungerThanThirtyMinutes(t *testing.T) {
 	}
 }
 
+func TestNudgeSaysNothingOfAHandsBeadWhoseQuestionCardStands(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	aHandsBeadFiledAgo(t, tracker, "mw-gq6.50", 31*time.Minute)
+	if err := tracker.SetNote(context.Background(), application.PosternQuestionKey("mw-gq6.50"), "txid-mw-gq6.50"); err != nil {
+		t.Fatalf("asking: %v", err)
+	}
+
+	clauses := nudgeReport(t, tracker, mayorNudge(tracker))
+
+	if len(clauses) != 0 {
+		t.Fatalf("expected no clause for a hands bead waiting on his answer, got %+v", clauses)
+	}
+}
+
 func TestNudgeLeavesTheLandedMemoryAloneWhenItReadsMayorNeeds(t *testing.T) {
 	tracker := aTrackerPathedToVPS(t)
 	aHandsBeadFiledAgo(t, tracker, "mw-gq6.50", 31*time.Minute)
