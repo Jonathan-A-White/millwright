@@ -37,6 +37,7 @@ func showMail(t *testing.T, vault, id string) shownMail {
 }
 
 func TestGatewaySendsMailAsTheStandInDidAndReadsMailTheStandInSent(t *testing.T) {
+	t.Parallel()
 	vault := throwawayVault(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -124,6 +125,7 @@ func TestGatewaySendsMailAsTheStandInDidAndReadsMailTheStandInSent(t *testing.T)
 }
 
 func TestGatewayLinksAReplyToTheMessageItAnswersAsTheStandInDid(t *testing.T) {
+	t.Parallel()
 	vault := throwawayVault(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -185,6 +187,7 @@ func TestGatewayLinksAReplyToTheMessageItAnswersAsTheStandInDid(t *testing.T) {
 }
 
 func TestGatewayClosesMailForTidyAndNothingElse(t *testing.T) {
+	t.Parallel()
 	vault := throwawayVault(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()

@@ -19,6 +19,7 @@ import (
 // not settable, so a lease actually running out is the feature's and the
 // stand-in's to show, not this case's: it would take five minutes of waiting.
 func TestAClaimIsALeaseInARealBd(t *testing.T) {
+	t.Parallel()
 	vault := throwawayVault(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -107,6 +108,7 @@ func TestAClaimIsALeaseInARealBd(t *testing.T) {
 // so a give-back by a host that is not the current holder can never clear
 // another host's claim.
 func TestReleaseClaimByAnotherActorLeavesTheClaimUntouched(t *testing.T) {
+	t.Parallel()
 	vault := throwawayVault(t)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()

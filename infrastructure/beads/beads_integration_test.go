@@ -165,6 +165,7 @@ func installFormula(t *testing.T, vault, name string) {
 }
 
 func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
+	t.Parallel()
 	vault := throwawayVault(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -504,6 +505,7 @@ func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 // set-state files an event, and that the claim time Sweep counts its first
 // silence from is read back off a claimed story.
 func TestGatewayKeepsWhatSweepSawWithoutFilingEvents(t *testing.T) {
+	t.Parallel()
 	vault := throwawayVault(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -576,6 +578,7 @@ func TestGatewayKeepsWhatSweepSawWithoutFilingEvents(t *testing.T) {
 // shows that round trip against a real database: writing two checks' notes
 // and a note outside the prefix, and reading back only the two that match.
 func TestGatewayNotesWithPrefixFindsTheDoctorsNotes(t *testing.T) {
+	t.Parallel()
 	vault := throwawayVault(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -622,6 +625,7 @@ func TestGatewayNotesWithPrefixFindsTheDoctorsNotes(t *testing.T) {
 // Filing a plan is the other half of the gateway: it writes beads rather than
 // reading them. Everything here goes into one throwaway database too.
 func TestGatewayFilesAnEpicWithItsStoriesHeld(t *testing.T) {
+	t.Parallel()
 	vault := throwawayVault(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -898,6 +902,7 @@ func TestAStoryClaimedTheWayDispatchDoesIsClosedTheWayNextDoes(t *testing.T) {
 // has to tell that label on every way it reads a story that a dispatch reads:
 // one story shown, an epic's listing, what is ready, and what is running.
 func TestGatewayTellsAStorysLabels(t *testing.T) {
+	t.Parallel()
 	vault := throwawayVault(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -963,6 +968,7 @@ func TestGatewayTellsAStorysLabels(t *testing.T) {
 // the Governor — is found by its label alone, if it is open and not blocked;
 // one that is closed, blocked, claimed or unlabelled is not.
 func TestGatewayListsWhatIsReadyUnderALabelWhateverItsPath(t *testing.T) {
+	t.Parallel()
 	vault := throwawayVault(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -1014,6 +1020,7 @@ func TestGatewayListsWhatIsReadyUnderALabelWhateverItsPath(t *testing.T) {
 // epics with children and comments, and that they report exactly what
 // calling ShowEpic and StoryComments once per id would have.
 func TestGatewayReadsSeveralEpicsAndStoriesCommentsInOneCallEach(t *testing.T) {
+	t.Parallel()
 	vault := throwawayVault(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -1070,6 +1077,7 @@ func TestGatewayReadsSeveralEpicsAndStoriesCommentsInOneCallEach(t *testing.T) {
 // mw-t64a3.12: a bead's page is read in one bd show and a bd list per tree, and
 // says what the separate reads — ShowBeads, StoryComments, ShowEpic — say.
 func TestGatewayReadsABeadPageAsTheSeparateReadsDo(t *testing.T) {
+	t.Parallel()
 	vault := throwawayVault(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -1176,6 +1184,7 @@ func hitlIDs(stories []application.StoryDetail) []string {
 }
 
 func TestGatewayReportsWhatBeadsRefused(t *testing.T) {
+	t.Parallel()
 	vault := throwawayVault(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -1192,6 +1201,7 @@ func TestGatewayReportsWhatBeadsRefused(t *testing.T) {
 // A brief reads an epic's status and priority beside its stories, and the
 // comments of any bead, whole and oldest first. Reading writes nothing.
 func TestGatewayReadsAnEpicsStatusPriorityAndComments(t *testing.T) {
+	t.Parallel()
 	vault := throwawayVault(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()

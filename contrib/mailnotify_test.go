@@ -55,6 +55,10 @@ type factory struct {
 
 func newFactory(t *testing.T) *factory {
 	t.Helper()
+	// Everything a factory owns is its own: a temp dir, a tmux socket and an
+	// environment passed to the script, never the test process's. So its tests
+	// run side by side, and each factory's test calls this exactly once.
+	t.Parallel()
 	for _, program := range []string{"tmux", "flock"} {
 		if _, err := exec.LookPath(program); err != nil {
 			t.Skipf("%s is not on PATH", program)

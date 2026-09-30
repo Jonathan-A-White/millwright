@@ -146,6 +146,7 @@ func largeRemoteCacheFixture(t *testing.T, vault string, pushes, bytesPerPush in
 }
 
 func TestRepackRemoteCachesCollapsesEveryPackIntoOneAndKeepsEveryRefResolving(t *testing.T) {
+	t.Parallel()
 	vault := t.TempDir()
 	repo, refs := remoteCacheFixture(t, vault, 5)
 
@@ -169,6 +170,7 @@ func TestRepackRemoteCachesCollapsesEveryPackIntoOneAndKeepsEveryRefResolving(t 
 }
 
 func TestRepackRemoteCachesFindsEveryDoltDatabaseUnderTheVault(t *testing.T) {
+	t.Parallel()
 	vault := t.TempDir()
 	firstRepo, _ := remoteCacheFixture(t, vault, 2)
 	secondRepo := filepath.Join(vault, beadsDir, "embeddeddolt", "y", ".dolt", "git-remote-cache", "h2", "repo.git")
@@ -186,6 +188,7 @@ func TestRepackRemoteCachesFindsEveryDoltDatabaseUnderTheVault(t *testing.T) {
 }
 
 func TestRepackRemoteCachesWithNoneUnderTheVaultDoesNothing(t *testing.T) {
+	t.Parallel()
 	gateway := New(t.TempDir())
 	if err := gateway.repackRemoteCaches(context.Background()); err != nil {
 		t.Fatalf("expected a vault with no remote cache yet not to fail, got %v", err)
@@ -197,6 +200,7 @@ func TestRepackRemoteCachesWithNoneUnderTheVaultDoesNothing(t *testing.T) {
 // .beads/embeddeddolt/<db>/.dolt/git-remote-cache/<hash>/repo.git, one full
 // pack per `bd dolt push`/pull, so it is repacked here beside it.
 func TestGCAlsoRepacksTheGitRemoteCache(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("the stand-in for bd is a shell script")
 	}
@@ -248,6 +252,7 @@ func standInBD(t *testing.T, dir string) string {
 // only the once-a-day GC, checks each cache's pack count and repacks the ones
 // that have grown past remoteCacheRepackThreshold.
 func TestSyncAlsoRepacksACacheThatHasGrownPastTheThreshold(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := standInBD(t, dir)
 	gateway := New(dir, WithProgram(path))
@@ -275,6 +280,7 @@ func TestSyncAlsoRepacksACacheThatHasGrownPastTheThreshold(t *testing.T) {
 // not yet grown past remoteCacheRepackThreshold packs costs nothing extra on
 // a sync that runs every few minutes.
 func TestSyncLeavesACacheAtTheThresholdAlone(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := standInBD(t, dir)
 	gateway := New(dir, WithProgram(path))
@@ -299,6 +305,7 @@ func TestSyncLeavesACacheAtTheThresholdAlone(t *testing.T) {
 // turn a sync itself into a halt — the sync already got through, and this
 // housekeeping is not worth losing that over.
 func TestSyncSwallowsAFailureRepackingACrowdedCache(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := standInBD(t, dir)
 	gateway := New(dir, WithProgram(path))
@@ -322,6 +329,7 @@ func TestSyncSwallowsAFailureRepackingACrowdedCache(t *testing.T) {
 // the count-based rule above, so a sync also checks the total bytes a
 // cache's packs hold.
 func TestSyncAlsoRepacksACacheWhosePacksTotalMoreThanTheByteThreshold(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := standInBD(t, dir)
 	gateway := New(dir, WithProgram(path))
@@ -352,6 +360,7 @@ func TestSyncAlsoRepacksACacheWhosePacksTotalMoreThanTheByteThreshold(t *testing
 // mw-gq6.123's fix: a cache with only a few small packs, under both the
 // pack-count and byte thresholds, costs nothing extra on a sync.
 func TestSyncLeavesACacheUnderTheByteThresholdAlone(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := standInBD(t, dir)
 	gateway := New(dir, WithProgram(path))
