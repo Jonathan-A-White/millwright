@@ -143,6 +143,20 @@ func TestNotesWithPrefixIsOneListAndReadsNothingPrintedAsNoNotes(t *testing.T) {
 	}
 }
 
+func TestAddBlockerIsOneBdDepAddBlockedFirst(t *testing.T) {
+	gateway, log := recorder(t)
+	if err := gateway.AddBlocker(context.Background(), "t-1", "t-0"); err != nil {
+		t.Fatalf("adding the blocker: %v", err)
+	}
+	asked, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(asked)); !strings.HasSuffix(got, "dep add t-1 t-0") || strings.Count(got, "\n") != 0 {
+		t.Fatalf("expected one bd dep add t-1 t-0, got %q", got)
+	}
+}
+
 func TestAddLabelIsOneBdUpdate(t *testing.T) {
 	gateway, log := recorder(t)
 	if err := gateway.AddLabel(context.Background(), "t-1", "hitl"); err != nil {

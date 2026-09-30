@@ -720,6 +720,16 @@ func (f *FakeTracker) AddLabel(_ context.Context, id, label string) error {
 	})
 }
 
+// AddBlocker implements application.WorkTracker, for a story the fake holds.
+func (f *FakeTracker) AddBlocker(_ context.Context, blocked, blocker string) error {
+	return f.write(blocked, func(s *fakeStory) error {
+		if !carries(s.needs, blocker) {
+			s.needs = append(append([]string(nil), s.needs...), blocker)
+		}
+		return nil
+	})
+}
+
 // HoldStory implements application.WorkTracker.
 func (f *FakeTracker) HoldStory(_ context.Context, id string) error {
 	return f.write(id, func(s *fakeStory) error {
