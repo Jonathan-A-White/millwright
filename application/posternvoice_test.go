@@ -181,8 +181,43 @@ func TestAVoiceNoteWithNoTranscriberIsAnOrdinaryComment(t *testing.T) {
 		t.Fatalf("applying: %v", err)
 	}
 	got := f.tracker.Comments("mw-e.3")
-	if len(got) != 1 || !strings.HasSuffix(got[0], fmt.Sprintf("listen [audio: %s]", filepath.Join(f.dir, "direct-v4.webm"))) {
-		t.Fatalf("expected an ordinary comment naming the audio, got %v", got)
+	if len(got) != 1 || !strings.HasSuffix(got[0], fmt.Sprintf("listen (voice note, not transcribed: postern_transcribe_cmd is not set) [audio: %s]", filepath.Join(f.dir, "direct-v4.webm"))) {
+		t.Fatalf("expected a comment naming the audio and why it was not heard, got %v", got)
+	}
+}
+
+// With no transcriber, the inbox says on the line it prints why the audio
+// was not heard, not only where the file is.
+func TestAVoiceNoteWithNoTranscriberIsPrintedAsNotTranscribed(t *testing.T) {
+	f := newVoiceFixture(t)
+	f.voiceNote(t, "someone-else-pubkey-hex", "direct:v6", application.PosternThread{Topic: "roadmap"}, "audio/ogg", "")
+	inbox := f.inbox()
+	inbox.Transcriber = nil
+	var out strings.Builder
+	inbox.Out = &out
+
+	if _, err := inbox.Run(context.Background()); err != nil {
+		t.Fatalf("reading: %v", err)
+	}
+	want := filepath.Join(f.dir, "direct-v6.ogg") + " (voice note, not transcribed: postern_transcribe_cmd is not set)"
+	if !strings.Contains(out.String(), want) {
+		t.Fatalf("expected the inbox to print %q, got %q", want, out.String())
+	}
+}
+
+// A picture with no transcriber is not a voice note: nothing is said of one.
+func TestAnImageWithNoTranscriberIsNotSaidToBeUntranscribed(t *testing.T) {
+	f := newVoiceFixture(t)
+	f.voiceNote(t, releaseTapGovernorKey, "direct:v7", application.PosternThread{Bead: "mw-e.3"}, "image/png", "look")
+	inbox := f.inbox()
+	inbox.Transcriber = nil
+
+	if _, err := inbox.Apply(context.Background()); err != nil {
+		t.Fatalf("applying: %v", err)
+	}
+	got := f.tracker.Comments("mw-e.3")
+	if len(got) != 1 || strings.Contains(got[0], "not transcribed") {
+		t.Fatalf("expected a plain image comment, got %v", got)
 	}
 }
 
