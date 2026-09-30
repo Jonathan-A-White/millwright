@@ -407,7 +407,7 @@ func (i PosternInbox) applyAction(ctx context.Context, m PosternInboxMessage, ac
 			return posternApplied{}, fmt.Errorf("reading %s's comments for the Governor's verified: %w", action.Bead, err)
 		}
 		for _, c := range comments {
-			if strings.Contains(c.Text, PosternSnapshotVerifiedMarker) {
+			if commentMarksVerified(c.Text) {
 				return refuse("it is already verified")
 			}
 		}

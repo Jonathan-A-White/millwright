@@ -411,3 +411,27 @@ func TestApplyLeavesAnActionWhoseSignerIsUncheckedForTheMayor(t *testing.T) {
 		t.Fatalf("expected the action left as text, unapplied, got status %s and %q", got, f.out.String())
 	}
 }
+
+// A VERIFIED in the middle of a comment (a Builder's "VERIFIED by running")
+// is no mark: the tap writes its comment. One beginning with VERIFIED, after
+// white space, refuses it (mw-gq6.152).
+func TestApplyVerifiedIsRefusedOnlyWhenACommentBeginsWithVERIFIED(t *testing.T) {
+	ctx := context.Background()
+	f := newApplyFixture(t)
+	mustDo(t, f.tracker.CommentOnStory(ctx, "mw-e.3", "Done. VERIFIED by running: make test"))
+	mustDo(t, f.tracker.CommentOnStory(ctx, "mw-e.4", " \nVERIFIED by the Mayor's check"))
+	f.action(t, "tx-mid", map[string]any{"action": "verified", "bead": "mw-e.3"})
+	f.action(t, "tx-begins", map[string]any{"action": "verified", "bead": "mw-e.4"})
+
+	f.apply(t)
+
+	if got := f.tracker.Comments("mw-e.3"); len(got) != 2 || got[1] != "VERIFIED by the Governor via postern (tx-mid)" {
+		t.Fatalf("expected the tap's comment after the mid-text VERIFIED, got %v", got)
+	}
+	if got := f.tracker.Comments("mw-e.4"); len(got) != 1 {
+		t.Fatalf("expected no comment written beside one beginning VERIFIED, got %v", got)
+	}
+	if note, _ := f.tracker.Note(ctx, application.PosternAppliedKey("tx-begins")); !strings.Contains(note, "it is already verified") {
+		t.Fatalf("expected the refusal to say it is already verified, got %q", note)
+	}
+}
