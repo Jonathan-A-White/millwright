@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -702,6 +703,52 @@ func TestPosternViewHandsNeedLeavesOnceEveryStepRanWithExitZero(t *testing.T) {
 			}
 			if got != tc.want {
 				t.Fatalf("expected a hands need: %v, got %v (needs %+v)", tc.want, got, doc.Needs)
+			}
+		})
+	}
+}
+
+// A demo bead is filed labelled demo and hitl so dispatch leaves it alone, but
+// it is his to look at once: it gets the demo card only, and a hands card as
+// well only when it carries a hands step. A hitl bead without the demo label
+// keeps its hands card.
+func TestPosternViewADemoBeadGetsAHandsNeedOnlyWhenItHasAHandsStep(t *testing.T) {
+	cases := []struct {
+		name   string
+		labels []string
+		step   bool
+		want   []string
+	}{
+		{"demo and hitl, no hands step", []string{"demo", "hitl"}, false, []string{"demo"}},
+		{"demo and hitl, one step not yet run", []string{"demo", "hitl"}, true, []string{"demo", "hands"}},
+		{"hitl alone, no hands step", []string{"hitl"}, false, []string{"hands"}},
+		{"demo alone", []string{"demo"}, false, []string{"demo"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			tracker := apptest.NewFakeTracker()
+			liveEpic(tracker, "mw-a", domain.Path{})
+			tracker.AddStory("mw-a", domain.Story{ID: "mw-a.1", Title: "Show it"})
+			mustDo(t, tracker.SetLabels("mw-a.1", tc.labels...))
+			if tc.step {
+				raw, _ := json.Marshal([]application.HandsStepRecord{{HandsStep: domain.HandsStep{ID: "s", Host: "desktop", As: "user", Run: "true"}}})
+				mustDo(t, tracker.SetNote(ctx, application.HandsStepsKey("mw-a.1"), string(raw)))
+			}
+
+			doc := viewDoc(t, tracker)
+
+			var got []string
+			for _, n := range doc.Needs {
+				if n.Bead == "mw-a.1" {
+					got = append(got, n.Kind)
+				}
+			}
+			sort.Strings(got)
+			want := append([]string(nil), tc.want...)
+			sort.Strings(want)
+			if !equalStrings(got, want) {
+				t.Fatalf("expected the needs %v on the bead, got %v", want, got)
 			}
 		})
 	}

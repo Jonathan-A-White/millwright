@@ -596,7 +596,10 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 		}
 		if workable(d) && hasLabel(d.Labels, LabelHitl) {
 			steps := viewHandsSteps(id, notes)
-			if !allStepsRanClean(steps) {
+			// A demo bead is labelled hitl only to keep it from dispatch; it
+			// is his demo card alone unless it also carries a hands step.
+			demoOnly := hasLabel(d.Labels, LabelDemo) && len(steps) == 0
+			if !demoOnly && !allStepsRanClean(steps) {
 				need := b.need(PosternNeedHands, e, firstKnown(d.Created, d.Updated), viewSummary(d.Description))
 				need.Steps = steps
 				waiting = append(waiting, waitingNeed{need: need, entry: e, window: PosternViewStaleHands, fact: handsFact(steps)})
