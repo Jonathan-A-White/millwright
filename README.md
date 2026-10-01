@@ -683,6 +683,7 @@ push_wait_seconds = 20             # how long it waits between those tries (defa
 max_attempts = 3                   # how many times a story is started in all before mw dispatch stops and mails the Mayor (default 3)
 millhand_routine_model = "sonnet"  # the model of a routine wake, and of a wake by hand, of the Millhand (default sonnet)
 millhand_review_model = "opus"     # the model of a review wake of the Millhand (default opus)
+deputy_model = "sonnet"            # the model mw deputy brings the Deputy up on (default sonnet)
 nudge_after_minutes = 60           # how long a claimed story may run with nothing mailed about it before mw nudge names it (default 60)
 nudge_sync_stale_minutes = 20      # how stale another host's last sync may be before mw nudge names it (default 20)
 postern_backend = "http://desktop.mw:8787"  # where the postern's backend is reached (default shown)

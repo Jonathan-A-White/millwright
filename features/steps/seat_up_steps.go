@@ -133,6 +133,7 @@ func InitializeSeatUpScenario(ctx *godog.ScenarioContext) {
 
 	registerMillhandSteps(ctx, c)
 	registerMillhandTickSteps(ctx, c)
+	registerDeputySteps(ctx, c)
 }
 
 // write puts one file in the vault, making the directories above it.
