@@ -20,8 +20,7 @@ Adapters assert `var _ application.<Port>`.
 | --- | --- | --- | --- |
 | `WorkTracker` | `application/worktracker.go` | `infrastructure/beads/beads.go` | `apptest.FakeTracker` |
 | `TrackerSync` | `application/sync.go` | `infrastructure/beads/sync.go` | `apptest.FakeTracker` |
-| `TrackerNotes` | `application/status.go` | same, read half | same |
-| `SweepNotes` | `application/sweep.go` | same | same |
+| `TrackerNotes`, `SweepNotes` | `application/{status,sweep}.go` | same | same |
 | `VaultFiles` | `application/sync.go` | `infrastructure/vault/git.go` | `apptest.FakeVaultFiles` |
 | `Mailbox`, `TidyMailbox` | `application/{mail,tidy}.go` | `infrastructure/beads/mail.go` | `apptest.FakeMailbox` |
 | `EpicRules` | `application/epicrules.go` | `infrastructure/vault/epicrules.go` | `apptest.FakeEpicRules` |
@@ -37,8 +36,7 @@ Adapters assert `var _ application.<Port>`.
 | `Worktrees` | `application/worktrees.go` | `infrastructure/rig/worktree.go` | `application/dispatch_test.go` |
 | `HostLoad` | `application/hostload.go` | `infrastructure/hostload/hostload.go` | `apptest.FakeHostLoad` |
 | `SyncHaltMarker` | `application/sync.go` | `infrastructure/synchalt/synchalt.go` | `apptest.FakeSyncHaltMarker` |
-| `Notifier`, `HomeMoveHost`, `OldHome` | `application/{millhandtick,homemove}.go` | `infrastructure/{notify/notify,homemove/homemove}.go` | none |
-| `VaultBirth`, `TrackerBirth` | `application/init.go` | `infrastructure/{vault/birth,beads/init}.go` | none |
+| `Notifier`, `HomeMoveHost`, `OldHome`, `VaultBirth`, `TrackerBirth` | `application/{millhandtick,homemove,init}.go` | `infrastructure/{notify/notify,homemove/homemove,vault/birth,beads/init}.go` | none |
 | `Landing`, `Checks`, `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/{landing,checks,slot}.go` | none |
 | `AfterLanding`, `SelfUpdate`, `BuiltMarks`, `BackendBuilds` | `application/afterlanding.go`, `application/selfupdate.go`, `application/backendstage.go` | `infrastructure/rig/{afterlanding,built,backend}.go` | `features/self_update.feature` |
 | Postern, hands | `application/{postern*,hands}.go` | `infrastructure/{postern,hands*,homemove}` | `apptest.Fake{Postern*,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*,HomeMover}` |
@@ -73,7 +71,7 @@ Adapters assert `var _ application.<Port>`.
 | `Doctor` | `application/doctor.go` | `mw doctor` — `cmd/mw/doctor.go` | `features/doctor.feature` |
 | `SeatBoot` | `application/seatboot.go` | none: called by `Dispatch`, `Next` | `features/seat_boot.feature` |
 | `Init` | `application/init.go` | `mw init` — `cmd/mw/init.go` | `features/init.feature` |
-| Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern key/inbox/send/snapshot/view/bead — cmd/mw/posternview.go, cmd/mw/posternbead.go | `features/postern_*.feature` |
+| Postern{Key*,Inbox,Send,Snapshot,View,ViewFollow,Bead} | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternviewfollow.go, application/posternbead.go | mw postern key/inbox/send/snapshot/view [--follow]/bead — cmd/mw/posternview.go, cmd/mw/posternbead.go; --follow: mw-view-follow.service | `features/postern_*.feature` |
 | Hands{Add,List} | application/hands.go | mw hands add/list — cmd/mw/hands.go; `cmd/mw-hands-root` | `features/hands.feature` |
 | `Postern{Serve,Nginx,Mirror}` | `application/posternhand.go`, `application/posternmirror.go` | `mw postern serve`/`nginx`/`mirror` — `cmd/mw/postern.go`, `cmd/mw/posternmirror.go` | `features/postern_serve.feature` |
 | `Grist{Key,Grind,Send,Eval}` | `application/grist.go`, `application/gristgrind.go`, `application/gristsend.go`, `application/gristeval.go` | `mw grist key`/`grind`/`send`/`eval` — `cmd/mw/grist.go` | `features/grist{,_send,_eval}.feature` |

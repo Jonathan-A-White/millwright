@@ -1001,6 +1001,27 @@ bead in full (§12), sealed the same way, for the backend's
 `GET /api/beads/{id}` (`POSTERN_BEAD_CMD`); an unknown bead leaves with status
 3. See `features/postern_view.feature` and `features/postern_bead.feature`.
 
+#### mw postern view --follow
+
+`mw postern view --follow [--every 1s]` does not exit. Every `--every` (default
+one second) it reads the beads' head — Dolt's hash of the whole database, one
+`bd sql "select dolt_hashof_db()"` call of about a tenth of a second, no tokens
+— and writes the view again only when that hash has changed since the last
+successful write, so a tap of the Governor's shows in the app within two
+seconds with no refresh. The hash moves on every bd write at once, the working
+set included (`bd vc status` names only the last commit, which bd's writes
+reach later). A failure, of the read or of the write, is logged and the loop
+goes on: a failed write is tried again next pass, and a failure that repeats
+word for word is logged once. SIGTERM or SIGINT stops it cleanly. It cannot be
+used with `--json`.
+
+It is the user service `contrib/systemd/mw-view-follow.service` (a daemon, so
+no timer; `Restart=on-failure`, `WantedBy=default.target`), which reads
+`~/.config/mw/beads.env` for the home's `BEADS_DOLT_*` and, optionally,
+`dispatch.env` for `PATH`. **Install**, once, on the host that serves the view
+(the home): `sh scripts/install-units.sh --enable mw-view-follow`. While it is
+active the mail-notify tick's view step is retired (below) and runs nothing.
+
 `mw postern snapshot` writes the brief of every live epic (open or in
 progress) as postern's docs/protocol.md §7 JSON: each epic's children still
 waiting on a decision-needed question (`needs_you`), closed in the last 24
@@ -1691,7 +1712,9 @@ the backend that serves the view installs its notifier with
 `MW_MAIL_VIEW_TIMEOUT` seconds (default 60) and logged the same way. It first
 asks `mw postern view --help` whether this mw has the view at all (looking for
 the view's own usage line: cobra exits 0 for a subcommand it does not know),
-and passes over an mw without it silently. The view and the snapshot read the
+and passes over an mw without it silently. The step is retired — it says
+"retired, mw postern view --follow does it" once and runs nothing, in a tick
+skipped for load as well — whenever `mw-view-follow.service` is active. The view and the snapshot read the
 beads' level once a tick between them.
 
 A tick skipped for load (the 1-minute load average above `MW_MAIL_LOAD_LIMIT`,
