@@ -104,7 +104,8 @@
 #   MW_MAIL_STATE_DIR    the ids announced, the quiet alarm's dampers,
 #                        the last sync, the last view, the last snapshot,
 #                        the lock
-#                        (${XDG_STATE_HOME:-~/.local/state}/mw-mail-notify)
+#                        (${XDG_STATE_HOME:-~/.local/state}/mw-mail-notify);
+#                        a mailbox but the mayor's keeps its own in <dir>/<mailbox>
 #   MW_MAIL_LOADAVG_FILE where the load average is read (/proc/loadavg; else uptime)
 #   MW_MAIL_VIEW_EVERY   least seconds between two `mw postern view`s; set
 #                        only on the host that serves the live view (30
@@ -134,6 +135,9 @@ MAILBOX=${MW_MAIL_MAILBOX:-mayor}
 LOAD_LIMIT=${MW_MAIL_LOAD_LIMIT:-}
 SYNC_EVERY=${MW_MAIL_SYNC_EVERY:-300}
 STATE=${MW_MAIL_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mw-mail-notify}
+# Every mailbox but the Mayor's keeps its own state under $STATE/<mailbox>, so the
+# Deputy's wait never overwrites what the Mayor's notifier has announced.
+[ "$MAILBOX" = mayor ] || STATE=$STATE/$MAILBOX
 LOADAVG=${MW_MAIL_LOADAVG_FILE:-/proc/loadavg}
 SNAPSHOT_TIMEOUT=${MW_MAIL_SNAPSHOT_TIMEOUT:-60}
 SNAPSHOT_EVERY=${MW_MAIL_SNAPSHOT_EVERY:-600}

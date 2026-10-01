@@ -92,7 +92,7 @@ func newFactory(t *testing.T) *factory {
 
 	f.write("bin/bd", "#!/bin/sh\necho \"$*\" >> \"$MW_TEST_DIR/bd.log\"\n"+
 		"case \"$1 $2\" in\n"+
-		"\"mail inbox\") cat \"$MW_TEST_DIR/inbox\" ;;\n"+
+		"\"mail inbox\") cat \"$MW_TEST_DIR/inbox-$3\" 2>/dev/null || cat \"$MW_TEST_DIR/inbox\" ;;\n"+
 		"\"vc status\") level=$(cat \"$MW_TEST_DIR/beads-level\" 2>/dev/null || echo lvl-1); "+
 		"printf '{\"branch\":\"main\",\"commit\":\"%s\"}\\n' \"$level\" ;;\n"+
 		"esac\nexit 0\n", 0o755)
@@ -141,12 +141,20 @@ func (f *factory) read(rel string) string {
 
 // inbox sets what `bd mail inbox` lists, one message id a line, each followed
 // by a subject as the real one prints it.
-func (f *factory) inbox(ids ...string) {
+func (f *factory) inbox(ids ...string) { f.inboxOf("", ids...) }
+
+// inboxOf sets what `bd mail inbox <mailbox>` lists for one mailbox; with no
+// mailbox it sets the listing every mailbox without its own gets.
+func (f *factory) inboxOf(mailbox string, ids ...string) {
 	var b strings.Builder
 	for _, id := range ids {
 		b.WriteString(id + "  a subject that is not to be typed\n")
 	}
-	f.write("inbox", b.String(), 0o644)
+	name := "inbox"
+	if mailbox != "" {
+		name += "-" + mailbox
+	}
+	f.write(name, b.String(), 0o644)
 }
 
 func (f *factory) load(l string) { f.write("loadavg", l+" 0.10 0.10 1/100 1\n", 0o644) }

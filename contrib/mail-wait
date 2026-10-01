@@ -40,7 +40,8 @@
 #   MW_MAIL_WAIT_LIMIT   seconds before it ends with nothing new       (3000)
 #   MW_MAIL_SYNC_EVERY   least seconds between two `mw sync`s          (300)
 #   MW_MAIL_STATE_DIR    the notifier's state directory
-#                        (${XDG_STATE_HOME:-~/.local/state}/mw-mail-notify)
+#                        (${XDG_STATE_HOME:-~/.local/state}/mw-mail-notify);
+#                        a mailbox but the mayor's keeps its own in <dir>/<mailbox>
 #   MW_BEADS_SYNC        beads_sync, as `mw` itself reads it
 
 set -u
@@ -50,6 +51,9 @@ EVERY=${MW_MAIL_WAIT_EVERY:-30}
 LIMIT=${MW_MAIL_WAIT_LIMIT:-3000}
 SYNC_EVERY=${MW_MAIL_SYNC_EVERY:-300}
 STATE=${MW_MAIL_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mw-mail-notify}
+# Every mailbox but the Mayor's keeps its own state under $STATE/<mailbox>, so the
+# Deputy's wait never overwrites what the Mayor's notifier has announced.
+[ "$MAILBOX" = mayor ] || STATE=$STATE/$MAILBOX
 
 case $EVERY in '' | *[!0-9]*) EVERY=30 ;; esac
 [ "$EVERY" -ge 1 ] || EVERY=1

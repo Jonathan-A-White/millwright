@@ -102,6 +102,48 @@ func TestTheWaitEndsOnNewMailWhateverSitsOnThePromptAndTypesNothing(t *testing.T
 	}
 }
 
+func TestTheDeputysWaitLeavesTheMayorsAnnouncedMailAndStateAlone(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.write("state/announced", "mw-m1\nmw-m2\n", 0o644)
+	f.write("state/postern-count", "1\n", 0o644)
+	f.inboxOf("mayor", "mw-m1", "mw-m2")
+	f.inboxOf("deputy", "mw-d1")
+	f.env = append(f.env, "MW_MAIL_MAILBOX=deputy")
+
+	out := f.wait().ends(10 * time.Second)
+
+	if !strings.Contains(out, "NEW MAIL for deputy") || !strings.Contains(out, "mw-d1") {
+		t.Fatalf("the Deputy's wait printed %q, want its new mail named", out)
+	}
+	if got := f.announced(); got != "mw-m1\nmw-m2\n" {
+		t.Fatalf("the Mayor's announced record became %q: the Deputy's wait wrote it", got)
+	}
+	if got := f.read("state/postern-count"); got != "1\n" {
+		t.Fatalf("the Mayor's postern count became %q", got)
+	}
+	if got := f.read("state/deputy/announced"); got != "mw-d1\n" {
+		t.Fatalf("the Deputy's own announced record is %q", got)
+	}
+
+	// The Mayor's next tick types only what is new for the Mayor.
+	f.env = nil
+	f.inboxOf("mayor", "mw-m1", "mw-m2", "mw-m3")
+	f.tick()
+	f.typed("New mail for mayor: 1 message(s). Run bd mail inbox.\n")
+}
+
+func TestTheDeputysArmedWaitDoesNotHoldBackTheMayorsNotifier(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.inboxOf("mayor", "mw-m1")
+	f.write("state/deputy/wait-armed", strconv.FormatInt(time.Now().Unix(), 10)+"\n", 0o644)
+
+	f.tick()
+
+	f.typed("New mail for mayor: 1 message(s). Run bd mail inbox.\n")
+}
+
 func TestTheWaitEndsAtOnceOnMailTheNotifierNeverAnnounced(t *testing.T) {
 	f := newFactory(t)
 	f.write("state/announced", "mw-old\n", 0o644)
