@@ -158,3 +158,35 @@ func Transition(machine Machine, from, to string) error {
 	}
 	return refused
 }
+
+// Path is the states a shortest run of machine's transitions from from to to
+// passes through, to included and from not: what a watcher that saw only the
+// two ends records, one event per step. It is nil when from and to are the
+// same, or when the table has no way between them.
+func Path(machine Machine, from, to string) []string {
+	t, ok := tables[machine]
+	if !ok || from == to || !HasState(machine, to) {
+		return nil
+	}
+	came := map[string]string{from: from}
+	queue := []string{from}
+	for len(queue) > 0 {
+		at := queue[0]
+		queue = queue[1:]
+		for _, next := range t.next[at] {
+			if _, seen := came[next]; seen {
+				continue
+			}
+			came[next] = at
+			if next == to {
+				var path []string
+				for s := to; s != from; s = came[s] {
+					path = append([]string{s}, path...)
+				}
+				return path
+			}
+			queue = append(queue, next)
+		}
+	}
+	return nil
+}
