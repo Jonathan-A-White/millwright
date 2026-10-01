@@ -34,6 +34,10 @@ _Avoid_: Helper, worker, watcher, deacon
 A cheap helper the Mayor hands clerical work to within its own session. Not a seat: it has no charter, no ledger and no memory of its own.
 _Avoid_: Assistant, secretary, sub-mayor
 
+**Deputy**:
+The seat that runs the factory's clerical and orchestration work (bead writes, landings, releases, mail) for the Mayor while he talks. It is woken on need and decides nothing.
+_Avoid_: Sub-mayor, assistant, Clerk (a Clerk is not a seat)
+
 **Charter**:
 The part of a seat that is always read at boot: who the seat is, its scope and authority, what it must and must never do. Only the Governor approves changes to it.
 _Avoid_: Prompt, persona, system prompt
@@ -107,6 +111,14 @@ _Avoid_: Topic, conversation, thread (for a whole channel), #name
 **Thread**:
 The replies under one post in a channel, shown as "N replies". A reply's `re` names the post; it is one level deep. `mw postern send --re <txid>` answers inside one.
 _Avoid_: Sub-thread, reply chain
+
+**Talk**:
+A spoken conversation between the Governor and the Mayor on Postern's Talk line, made of turns. It opens with his first turn and ends on End or after a quiet spell.
+_Avoid_: Call, voice chat, session
+
+**Turn**:
+One hold-speak-release from the Governor and the Mayor's spoken answer to it. A turn carries no tool work.
+_Avoid_: Message, exchange
 
 ### Economy
 

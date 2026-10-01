@@ -2098,6 +2098,35 @@ elapsed 41 ms
 
 See `features/talk_say.feature`.
 
+## The Talk line and the Deputy
+
+A Talk is a spoken conversation between the Governor and the Mayor on
+Postern's Talk line, made of turns. Four commands serve it, each described in
+its own section above or below:
+
+| Command | What it does |
+| --- | --- |
+| `mw talk wait` | Holds the event stream open and ends at the first turn (or end) the Governor sends the Mayor's key; prints it. `--limit` (default 50m, `$MW_TALK_WAIT_LIMIT`), `--min-backoff`, `--max-backoff`. |
+| `mw talk say <text> --talk <id> --turn <n>` | Sends the Mayor's spoken answer, class `talk`, no summary. `--holding` for a short answer while the real one comes, `--end` to end the talk. |
+| `mw talk model opus\|sonnet\|fable` | Switches the acting Mayor's model from the next turn. `--foreground` watches in-process and exits non-zero when it gave up; `--interval`, `--limit`. |
+| `mw deputy [--reason text]` | Brings up the Deputy, who does the clerical and orchestration work while the Mayor talks. |
+
+```sh
+bin/mw deputy --reason "the Governor is in a talk; land mw-abc.1"
+```
+
+`mw deputy` starts the Deputy's next session on this host, as `mw seat up
+deputy` does, in a window named `deputy-*` that closes itself once the session
+has handed off, at high effort on config `deputy_model` (`sonnet`, or
+`$MW_DEPUTY_MODEL`). Its kickoff tells it to arm mail-wait with
+`MW_MAIL_MAILBOX=deputy`, work the mail, report by mail and hand off when idle,
+then gives the `--reason`. It refuses and starts nothing when
+`seats/deputy/charter.md` is missing. If a `deputy-*` window is already open it
+starts nothing, says so in one line and exits **8**, so the Mayor can mail the
+Deputy and fire, and tell "already up" from a failure (1). See
+`features/deputy.feature`, `features/talk_wait.feature`, `features/talk_say.feature`
+and `features/talk_model.feature`.
+
 ## Waking the Millhand
 
 ```sh
