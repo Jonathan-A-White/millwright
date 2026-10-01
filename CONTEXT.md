@@ -129,7 +129,7 @@ A card of items, each with links and an expectation, that ticks itself off from 
 _Avoid_: Checklist, todo, widget
 
 **Call**:
-The Governor's Call me (a call request, a `call` record the Mayor's `mw talk wait` prints) and the Mayor's call-back (a ring, sent with `mw talk call`). A ring goes direct to the backend; `--chain`, or a chain-borne last record from the Governor, also broadcasts it on chain for a phone that cannot reach the backend.
+The Governor's Call me (a call request, a `call` record the Mayor's `mw talk wait` prints) and the Mayor's call-back (a ring, sent with `mw talk call`). A ring goes direct to the backend; `--chain`, or a chain-borne last record from the Governor, also broadcasts it on chain for a phone that cannot reach the backend; `mw postern send` does the same for a reply to a chain-borne post.
 _Avoid_: Page, ping, alert
 
 **Turn**:

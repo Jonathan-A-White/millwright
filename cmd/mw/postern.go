@@ -381,6 +381,7 @@ func posternInboxLock(attachmentDir string) *hostlock.Lock {
 // postern_backend, by postern_channel.
 func newPosternSendCmd() *cobra.Command {
 	var class, bead, recommend, thread, topic, beadChannel, channelName, re string
+	var chain bool
 	var options, attach []string
 
 	cmd := &cobra.Command{
@@ -417,6 +418,11 @@ func newPosternSendCmd() *cobra.Command {
 			"silently to Factory; a root mw has not seen is refused, saying to give --bead-channel <id>\n" +
 			"or --channel <name>. A channel flag given with --re wins. It is refused with --bead,\n" +
 			"which asks a question of its own.\n\n" +
+			"--chain also broadcasts the message on chain, beside the direct delivery, for a phone that\n" +
+			"cannot reach the backend: the record has no summary, and the postern_float_sats cap applies.\n" +
+			"It is added without the flag when the post --re names came by chain (a bare txid, not\n" +
+			"direct:<sha256>), or the Governor's newest record, as mw talk wait last heard it, did; a\n" +
+			"chain that will not take such a copy is only said. Several files are refused with --chain.\n\n" +
 			"--attach <file> (repeatable) encrypts the file to the Governor, uploads it to the\n" +
 			"backend's blob store and announces it in the message (sections 8 and 14): at most 8 MiB,\n" +
 			"typed by its extension — .png .jpg .jpeg .webp .webm .ogg .oga .opus .m4a .mp4 .mp3\n" +
@@ -439,7 +445,7 @@ func newPosternSendCmd() *cobra.Command {
 			}
 			request := application.PosternSendRequest{
 				Class: class, Text: text, Bead: bead, Recommend: recommend, Options: options,
-				Thread: thread + beadChannel, Topic: topic + channelName, Re: re, Attachments: attach,
+				Thread: thread + beadChannel, Topic: topic + channelName, Re: re, Attachments: attach, Chain: chain,
 			}
 			if err := request.ValidateReplyFlags(); err != nil {
 				return err
@@ -501,6 +507,7 @@ func newPosternSendCmd() *cobra.Command {
 	for flag, use := range map[string]string{"thread": "use --bead-channel", "topic": "use --channel"} {
 		_ = cmd.Flags().MarkDeprecated(flag, use)
 	}
+	cmd.Flags().BoolVar(&chain, "chain", false, "also broadcast the message on chain, for a phone that cannot reach the backend")
 	cmd.Flags().StringVar(&re, "re", "", "the txid of the post whose thread this message answers in, printed form or bare; with no channel flag the reply goes to its channel (refused with --bead)")
 	return cmd
 }
