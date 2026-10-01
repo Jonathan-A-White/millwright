@@ -87,6 +87,11 @@ type FollowCursors interface {
 	Save(ctx context.Context, c FollowCursor) error
 }
 
+// EventShipper sends the log's new events to the Governor: EventShip.
+type EventShipper interface {
+	Ship(ctx context.Context) error
+}
+
 // EventFollow is the home's follower, the one process that writes the beads'
 // events: each pass reads the beads' head and, when it has moved, reads the
 // changes since the cursor, turns each into events by kind, appends them to
@@ -109,6 +114,10 @@ type FollowCursors interface {
 // since the head it was made at is not recorded until it succeeds, and a
 // failure that repeats word for word is said once. An event its machine
 // forbids is said and left out. With no Log, it only republishes.
+//
+// With a Shipper, every pass ends by calling it, whether or not the beads'
+// head moved: it sends the events written since its last batch, and retries
+// the batches waiting for the chain (EventShip).
 type EventFollow struct {
 	Head    BeadsHead
 	Feed    BeadFeed
@@ -116,6 +125,8 @@ type EventFollow struct {
 	Cursors FollowCursors
 	// Publish builds the view and writes it where the backend serves it.
 	Publish func(ctx context.Context) error
+	// Shipper, when set, is called at the end of each pass.
+	Shipper EventShipper
 	// Aside publishes in a goroutine of its own, one publish at a time and
 	// the newest head next, so a view that takes longer than a pass (25 s on
 	// the Laptop on 2026-10-01) never holds up the events. Without it each
@@ -228,6 +239,15 @@ func (f EventFollow) Run(ctx context.Context) error {
 			default:
 			}
 			kick <- head
+		}
+		if f.Shipper != nil && ctx.Err() == nil {
+			if err := f.Shipper.Ship(ctx); err != nil {
+				if ctx.Err() == nil {
+					say("sending events", err)
+				}
+			} else {
+				quiet("sending events")
+			}
 		}
 		if sleep(ctx, every) != nil {
 			break

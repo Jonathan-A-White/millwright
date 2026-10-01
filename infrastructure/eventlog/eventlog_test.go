@@ -179,3 +179,19 @@ func readFile(t *testing.T, path string) string {
 	}
 	return string(data)
 }
+
+func TestShipStatesAreEmptyBeforeTheFirstSaveAndKeepWhatIsSaved(t *testing.T) {
+	states := eventlog.NewShipStates(filepath.Join(t.TempDir(), "events", "log.jsonl"))
+	got, err := states.Load(context.Background())
+	if err != nil || got.Shipped != 0 || len(got.Pending) != 0 {
+		t.Fatalf("expected the zero state before a save, got %+v %v", got, err)
+	}
+	want := application.ShipState{Shipped: 9, Pending: []application.ShipRange{{From: 4, To: 6}, {From: 7, To: 9}}, Day: "2026-10-01", Chain: 3, Alarmed: true}
+	if err := states.Save(context.Background(), want); err != nil {
+		t.Fatal(err)
+	}
+	got, err = states.Load(context.Background())
+	if err != nil || got.Shipped != 9 || len(got.Pending) != 2 || got.Pending[1] != want.Pending[1] || got.Day != want.Day || got.Chain != 3 || !got.Alarmed {
+		t.Fatalf("expected %+v back, got %+v %v", want, got, err)
+	}
+}

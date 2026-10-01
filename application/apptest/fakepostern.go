@@ -16,14 +16,15 @@ import (
 type FakePostern struct {
 	mu sync.Mutex
 
-	records   []application.PosternRecord
-	utxos     map[string][]application.PosternUtxo
-	balance   map[string]int64
-	broadcast []string
-	blobs     map[string][]byte
-	delivered [][]byte
-	uploaded  [][]byte
-	deleted   []string
+	records    []application.PosternRecord
+	chainCalls int
+	utxos      map[string][]application.PosternUtxo
+	balance    map[string]int64
+	broadcast  []string
+	blobs      map[string][]byte
+	delivered  [][]byte
+	uploaded   [][]byte
+	deleted    []string
 
 	// NextTxid is the txid Broadcast and Deliver report. When empty,
 	// Broadcast reports "fake-txid-<n>" and Deliver "direct:fake-<n>".
@@ -34,6 +35,9 @@ type FakePostern struct {
 
 	// Err, when set, is returned by every method instead of doing the work.
 	Err error
+	// ChainErr, when set, is returned by Utxos and Broadcast alone: the
+	// chain road down while the direct line is up.
+	ChainErr error
 	// DeliverErr, when set, is returned by Deliver alone: a backend that
 	// reads but will not take a record.
 	DeliverErr error
@@ -94,6 +98,13 @@ func (f *FakePostern) Broadcasts() []string {
 	return append([]string(nil), f.broadcast...)
 }
 
+// ChainCalls is how many times Utxos or Broadcast was called, failed or not.
+func (f *FakePostern) ChainCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.chainCalls
+}
+
 // Messages implements application.Postern.
 func (f *FakePostern) Messages(_ context.Context, since int64) ([]application.PosternRecord, error) {
 	f.mu.Lock()
@@ -115,8 +126,12 @@ func (f *FakePostern) Messages(_ context.Context, since int64) ([]application.Po
 func (f *FakePostern) Utxos(_ context.Context, address string) ([]application.PosternUtxo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.chainCalls++
 	if f.Err != nil {
 		return nil, f.Err
+	}
+	if f.ChainErr != nil {
+		return nil, f.ChainErr
 	}
 	return append([]application.PosternUtxo(nil), f.utxos[address]...), nil
 }
@@ -135,8 +150,12 @@ func (f *FakePostern) Balance(_ context.Context, address string) (int64, error) 
 func (f *FakePostern) Broadcast(_ context.Context, rawtx string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.chainCalls++
 	if f.Err != nil {
 		return "", f.Err
+	}
+	if f.ChainErr != nil {
+		return "", f.ChainErr
 	}
 	f.broadcast = append(f.broadcast, rawtx)
 	if f.NextTxid != "" {

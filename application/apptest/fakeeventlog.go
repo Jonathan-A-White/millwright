@@ -115,3 +115,29 @@ func copyCursor(c application.FollowCursor) application.FollowCursor {
 	}
 	return out
 }
+
+// FakeShipStates is an in-memory application.ShipStates.
+type FakeShipStates struct {
+	mu    sync.Mutex
+	saved application.ShipState
+}
+
+var _ application.ShipStates = (*FakeShipStates)(nil)
+
+// Load implements application.ShipStates.
+func (f *FakeShipStates) Load(context.Context) (application.ShipState, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := f.saved
+	out.Pending = append([]application.ShipRange(nil), f.saved.Pending...)
+	return out, nil
+}
+
+// Save implements application.ShipStates.
+func (f *FakeShipStates) Save(_ context.Context, s application.ShipState) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.saved = s
+	f.saved.Pending = append([]application.ShipRange(nil), s.Pending...)
+	return nil
+}
