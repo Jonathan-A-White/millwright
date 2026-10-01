@@ -35,6 +35,16 @@
 # reachable --user systemd instance or no tmux: the static checks in
 # check-timer-units.sh still cover the file's directives there.
 #
+# mw-gq6.195: a run killed with SIGKILL (a gate timeout) cannot run its cleanup
+# trap, and once left a unit polling the host's REAL session "0" for 24 h. Two
+# defences: each test unit runs the file's ExecStart with its bare `tmux`
+# rewritten to the real tmux's absolute path and -L this run's socket, so no
+# PATH lookup can ever land on the default socket; and each unit carries a
+# bound that outlives no run (RuntimeMaxSec plus a start limit: under
+# Restart=always, RuntimeMaxSec alone only restarts the unit). The start of
+# every run also sweeps stale mw-seat-*-test-* units and sockets. The kill is
+# proven by scripts/check-seat-tmux-leak.sh.
+#
 # mw-gq6.112: with Type=simple, systemd marks the unit active/running the
 # instant /bin/sh is exec'd -- before ExecStart's `tmux new-session` has
 # actually made the session. A single list-sessions check made right after
@@ -99,6 +109,46 @@ UNIT_KILL="mw-seat-tmux-respawn-test-$RUNID"
 SOCK_SLOW="mw-seat-slow-test-$RUNID"
 UNIT_SLOW="mw-seat-tmux-slow-test-$RUNID"
 
+# How long a test unit may live however its run ends, and the start limit that
+# makes it stick: Restart=always restarts a unit that hit RuntimeMaxSec, so
+# only StartLimitBurst starts in all (this run needs two for the one unit it
+# restarts, plus a spare) ends it, after about BURST * (RuntimeMaxSec +
+# RestartSec). A run's own scenarios take well under a minute.
+BOUND="-p RuntimeMaxSec=90 -p StartLimitBurst=3 -p StartLimitIntervalSec=infinity"
+# A run is stale once it is older than the units' whole bound, with room.
+STALE_AFTER=600
+
+TMUXDIR=${TMUX_TMPDIR:-/tmp/tmux-$(id -u)}
+
+# Sweep what a killed earlier run left (mw-gq6.195): any mw-seat-*-test-* unit
+# or tmux socket whose run id (the epoch seconds the name ends with) is older
+# than STALE_AFTER. A fresh one may be a run going on right now; leave it.
+now=$(date +%s)
+is_stale() { # <name>
+	stamp=${1##*-}
+	case $stamp in
+	"" | *[!0-9]*) return 1 ;;
+	esac
+	[ $((now - stamp)) -gt "$STALE_AFTER" ]
+}
+for unit in $(systemctl --user list-units 'mw-seat-*-test-*' --all --plain --no-legend 2>/dev/null | awk '{print $1}'); do
+	name=${unit%.service}
+	is_stale "$name" || continue
+	systemctl --user stop "$unit" >/dev/null 2>&1 || true
+done
+for f in "$TMUXDIR"/mw-seat-*-test-*; do
+	[ -e "$f" ] || continue
+	name=${f##*/}
+	is_stale "$name" || continue
+	tmux -L "$name" kill-server >/dev/null 2>&1 || true
+	rm -f "$f"
+done
+# For scripts/check-seat-tmux-leak.sh: stop here, after the sweep.
+if [ -n "${MW_SEAT_RESPAWN_SWEEP_ONLY:-}" ]; then
+	echo "OK: swept stale test units and sockets"
+	exit 0
+fi
+
 T=$(mktemp -d)
 cleanup() {
 	systemctl --user stop "$UNIT_PRE.service" >/dev/null 2>&1 || true
@@ -109,23 +159,32 @@ cleanup() {
 	tmux -L "$SOCK_SLOW" kill-server >/dev/null 2>&1 || true
 	# tmux does not always unlink its socket file on a killed server; take the
 	# stale files with it rather than leaving them in the tmpdir run after run.
-	rm -f "${TMUX_TMPDIR:-/tmp/tmux-$(id -u)}/$SOCK_PRE" "${TMUX_TMPDIR:-/tmp/tmux-$(id -u)}/$SOCK_KILL" "${TMUX_TMPDIR:-/tmp/tmux-$(id -u)}/$SOCK_SLOW"
+	rm -f "$TMUXDIR/$SOCK_PRE" "$TMUXDIR/$SOCK_KILL" "$TMUXDIR/$SOCK_SLOW"
 	rm -rf "$T"
 }
 trap cleanup EXIT INT TERM
 
-# A stand-in "tmux" ahead of the real one on PATH, so the file's own
-# ExecStart line runs unmodified against a socket this run picks (via
-# $MW_TEST_SEAT_SOCK, set per scenario below) instead of the host's real
-# session "0". The real tmux is called by absolute path: a bare "tmux" here
-# would resolve back to this same wrapper first on PATH.
+# The file's own ExecStart command with every bare `tmux` rewritten to
+# "<tmux> -L <sock>", the tmux an absolute path: it runs against a socket this
+# run picks instead of the host's real session "0", and nothing it depends on
+# (not a PATH wrapper dir this run deletes, not PATH at all) can send it to the
+# default socket (mw-gq6.195). The real tmux is called by absolute path.
 REALTMUX=$(command -v tmux)
-mkdir -p "$T/bin"
-{
-	echo '#!/bin/sh'
-	echo "exec $REALTMUX -L \"\$MW_TEST_SEAT_SOCK\" \"\$@\""
-} >"$T/bin/tmux"
-chmod +x "$T/bin/tmux"
+case $REALTMUX in
+/*) ;;
+*) fail "tmux resolved to $REALTMUX, not an absolute path" ;;
+esac
+unit_cmd() { # <tmux> <sock>
+	cmd=$(printf '%s' "$execcmd" | sed "s#tmux #$1 -L $2 #g")
+	# Anything left that is still a bare tmux would reach the default socket.
+	if printf '%s' "$cmd" | grep -Eq '(^|[^/])tmux '; then
+		fail "a bare tmux is left in the command to run: $cmd"
+	fi
+	printf '%s' "$cmd"
+}
+cmd_pre=$(unit_cmd "$REALTMUX" "$SOCK_PRE") || exit 1
+cmd_kill=$(unit_cmd "$REALTMUX" "$SOCK_KILL") || exit 1
+cmd_slow=$(unit_cmd "$T/bin-slow/tmux" "$SOCK_SLOW") || exit 1
 
 # systemctl show's `Name=Value` lines, one property per line: unambiguous
 # regardless of how many -p names are asked for in one call (unlike --value,
@@ -165,8 +224,8 @@ tmux -L "$SOCK_PRE" set-environment -t =0 MW_TEST_MARKER "$RUNID"
 systemd-run --user --collect --unit="$UNIT_PRE" \
 	--service-type=simple \
 	-p "Restart=always" -p "RestartSec=$restartsec" -p "KillMode=process" -p "ExecStop=/bin/true" \
-	-E "PATH=$T/bin:/usr/bin:/bin" -E "MW_TEST_SEAT_SOCK=$SOCK_PRE" \
-	/bin/sh -c "$execcmd" >/dev/null
+	$BOUND -E "PATH=/usr/bin:/bin" \
+	/bin/sh -c "$cmd_pre" >/dev/null
 
 sleep 10
 as=$(show_field "$UNIT_PRE" ActiveState)
@@ -187,8 +246,8 @@ systemctl --user stop "$UNIT_PRE.service" >/dev/null 2>&1 || true
 systemd-run --user --collect --unit="$UNIT_KILL" \
 	--service-type=simple \
 	-p "Restart=always" -p "RestartSec=$restartsec" -p "KillMode=process" -p "ExecStop=/bin/true" \
-	-E "PATH=$T/bin:/usr/bin:/bin" -E "MW_TEST_SEAT_SOCK=$SOCK_KILL" \
-	/bin/sh -c "$execcmd" >/dev/null
+	$BOUND -E "PATH=/usr/bin:/bin" \
+	/bin/sh -c "$cmd_kill" >/dev/null
 
 # Waits for ActiveState/SubState to read active/running with NRestarts above
 # the given threshold -- not just active/running by itself, which a stale
@@ -226,24 +285,26 @@ systemctl --user stop "$UNIT_KILL.service" >/dev/null 2>&1 || true
 
 # --- 3. does the check itself survive a slow new-session? -------------------
 # mw-gq6.112 live: a stand-in tmux that sleeps before running new-session,
-# standing in for a new-session slowed by host load. Right after the unit
-# reports active/running, its own session is not there yet -- proving
-# wait_for_session's poll, not a single read, is what makes this check pass.
+# standing in for a new-session slowed by host load. The unit calls it by
+# absolute path with -L, so it passes its arguments straight to the real tmux.
+# Right after the unit reports active/running, its own session is not there
+# yet -- proving wait_for_session's poll, not a single read, is what makes
+# this check pass.
 mkdir -p "$T/bin-slow"
 {
 	echo '#!/bin/sh'
-	echo 'case "$1" in'
-	echo '	new-session) sleep 3 ;;'
+	echo 'case " $* " in'
+	echo '	*" new-session "*) sleep 3 ;;'
 	echo 'esac'
-	echo "exec $REALTMUX -L \"\$MW_TEST_SEAT_SOCK\" \"\$@\""
+	echo "exec $REALTMUX \"\$@\""
 } >"$T/bin-slow/tmux"
 chmod +x "$T/bin-slow/tmux"
 
 systemd-run --user --collect --unit="$UNIT_SLOW" \
 	--service-type=simple \
 	-p "Restart=always" -p "RestartSec=$restartsec" -p "KillMode=process" -p "ExecStop=/bin/true" \
-	-E "PATH=$T/bin-slow:/usr/bin:/bin" -E "MW_TEST_SEAT_SOCK=$SOCK_SLOW" \
-	/bin/sh -c "$execcmd" >/dev/null
+	$BOUND -E "PATH=/usr/bin:/bin" \
+	/bin/sh -c "$cmd_slow" >/dev/null
 
 as=$(show_field "$UNIT_SLOW" ActiveState)
 ss=$(show_field "$UNIT_SLOW" SubState)

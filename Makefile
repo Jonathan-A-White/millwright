@@ -38,7 +38,9 @@ test:
 # --user systemd unit on its own tmux socket (never the host's real session
 # "0"): killing its server must bring a new one up within RestartSec; it
 # skips this live proof, rather than failing, where no --user systemd or no
-# tmux is reachable. Then the health script, run against stand-in commands
+# tmux is reachable; then scripts/check-seat-tmux-leak.sh kills a run of that
+# check with SIGKILL and proves it leaves only bounded units that cannot reach
+# the real socket. Then the health script, run against stand-in commands
 # for every reading it takes. Then template/, which must hold no personal or
 # host-bound detail. Then the installer, run against stand-in commands, and
 # its pins. Then the unit installer, run against a stand-in systemctl and a
@@ -53,6 +55,7 @@ lint:
 	scripts/check-codemap.sh
 	scripts/check-timer-units.sh
 	scripts/check-seat-tmux-respawn.sh
+	scripts/check-seat-tmux-leak.sh
 	scripts/check-health.sh
 	scripts/check-template.sh
 	scripts/check-install.sh
