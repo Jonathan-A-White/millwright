@@ -116,7 +116,7 @@ func newDoctorCmd() *cobra.Command {
 					doctor.NewWifi(reach, powershell, store),
 					doctor.NewTunnel(tunnelHost, reach, tunnelUnit, tunnelProbe),
 					doctor.NewWg(wgHub, reach, wgUnit, store),
-					doctor.NewVaultDirty(vault, host),
+					doctor.NewVaultDirty(vault, host, store),
 					doctor.NewTimers(units),
 					doctor.NewBeadsSize(vault),
 					doctor.NewBeadsStores(vault),

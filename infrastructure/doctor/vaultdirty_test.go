@@ -83,7 +83,7 @@ func vdCommitted(t *testing.T, dir, revision string) []string {
 
 func TestVaultDirtyProbeIsOKOnAClean(t *testing.T) {
 	clone, _ := aVaultDirtyVault(t)
-	check := doctor.NewVaultDirty(clone, "laptop")
+	check := doctor.NewVaultDirty(clone, "laptop", doctor.New(t.TempDir()))
 
 	verdict, reason := check.Probe(context.Background())
 	if verdict != application.DoctorOK {
@@ -96,7 +96,7 @@ func TestVaultDirtyCuresATruncatedRunFileByItsExactPath(t *testing.T) {
 	vdWrite(t, clone, "runs/mw-i80dx.3/result.json", "")
 	vdWrite(t, clone, "runs/mw-i80dx.3/untracked.txt", "nobody's business\n")
 
-	check := doctor.NewVaultDirty(clone, "laptop")
+	check := doctor.NewVaultDirty(clone, "laptop", doctor.New(t.TempDir()))
 	verdict, reason := check.Probe(context.Background())
 	if verdict != application.DoctorFaulty {
 		t.Fatalf("expected faulty, got %s (%s)", verdict, reason)
@@ -147,7 +147,7 @@ func TestVaultDirtyCuresTwoDirtyPathsWithTwoCommits(t *testing.T) {
 	vdWrite(t, clone, "runs/mw-i80dx.3/result.json", "")
 	vdWrite(t, clone, "runs/mw-i80dx.3/boot.md", "rewritten by a re-dispatch\n")
 
-	check := doctor.NewVaultDirty(clone, "laptop")
+	check := doctor.NewVaultDirty(clone, "laptop", doctor.New(t.TempDir()))
 	verdict, reason := check.Probe(context.Background())
 	if verdict != application.DoctorFaulty {
 		t.Fatalf("expected faulty, got %s (%s)", verdict, reason)
@@ -173,7 +173,10 @@ func TestVaultDirtyProbeIsCannotTellForAPathOutsideRuns(t *testing.T) {
 	clone, _ := aVaultDirtyVault(t)
 	vdWrite(t, clone, "seats/builder/rigs/millwright.md", "changed by hand\n")
 
-	check := doctor.NewVaultDirty(clone, "laptop")
+	check := doctor.NewVaultDirty(clone, "laptop", doctor.New(t.TempDir()))
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK {
+		t.Fatalf("expected the first sighting to be ok, got %s (%s)", verdict, reason)
+	}
 	verdict, reason := check.Probe(context.Background())
 	if verdict != application.DoctorCannotTell {
 		t.Fatalf("expected cannot-tell, got %s (%s)", verdict, reason)
@@ -196,7 +199,10 @@ func TestVaultDirtyProbeIsCannotTellWhenPathsAreMixed(t *testing.T) {
 	vdWrite(t, clone, "runs/mw-i80dx.3/result.json", "")
 	vdWrite(t, clone, "seats/builder/rigs/millwright.md", "changed by hand\n")
 
-	check := doctor.NewVaultDirty(clone, "laptop")
+	check := doctor.NewVaultDirty(clone, "laptop", doctor.New(t.TempDir()))
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorFaulty || strings.Contains(reason, "millwright.md") {
+		t.Fatalf("expected the first sighting to count only the run file, got %s (%s)", verdict, reason)
+	}
 	verdict, reason := check.Probe(context.Background())
 	if verdict != application.DoctorCannotTell {
 		t.Fatalf("expected cannot-tell, got %s (%s)", verdict, reason)
@@ -214,11 +220,49 @@ func TestVaultDirtyProbeIsCannotTellWhenPathsAreMixed(t *testing.T) {
 	}
 }
 
+func TestVaultDirtyProbeIsOKWhenAPathOutsideRunsIsDirtyOnOneRunAndCleanOnTheNext(t *testing.T) {
+	clone, _ := aVaultDirtyVault(t)
+	check := doctor.NewVaultDirty(clone, "laptop", doctor.New(t.TempDir()))
+	ctx := context.Background()
+
+	vdWrite(t, clone, "seats/builder/rigs/millwright.md", "a seat's commit is on its way\n")
+	if verdict, reason := check.Probe(ctx); verdict != application.DoctorOK {
+		t.Fatalf("expected ok on the first sighting, got %s (%s)", verdict, reason)
+	}
+
+	// The seat's commit lands.
+	vdRun(t, clone, "git", "commit", "-qam", "the seat commits")
+	if verdict, reason := check.Probe(ctx); verdict != application.DoctorOK {
+		t.Fatalf("expected ok once the file is clean, got %s (%s)", verdict, reason)
+	}
+
+	// Dirty again later is a first sighting again, not the second.
+	vdWrite(t, clone, "seats/builder/rigs/millwright.md", "dirty once more\n")
+	if verdict, reason := check.Probe(ctx); verdict != application.DoctorOK {
+		t.Fatalf("expected ok on a fresh first sighting, got %s (%s)", verdict, reason)
+	}
+}
+
+func TestVaultDirtyProbeIsCannotTellWhenTheSamePathIsDirtyOnTwoConsecutiveRuns(t *testing.T) {
+	clone, _ := aVaultDirtyVault(t)
+	// A new check over the same state each run, as separate mw doctor runs are.
+	state := doctor.New(t.TempDir())
+	vdWrite(t, clone, "seats/builder/rigs/millwright.md", "changed by hand\n")
+
+	if verdict, reason := doctor.NewVaultDirty(clone, "laptop", state).Probe(context.Background()); verdict != application.DoctorOK {
+		t.Fatalf("expected ok on the first run, got %s (%s)", verdict, reason)
+	}
+	verdict, reason := doctor.NewVaultDirty(clone, "laptop", state).Probe(context.Background())
+	if verdict != application.DoctorCannotTell || !strings.Contains(reason, "seats/builder/rigs/millwright.md") {
+		t.Fatalf("expected cannot-tell naming the path on the second run, got %s (%s)", verdict, reason)
+	}
+}
+
 func TestVaultDirtyWayBackNamesTheCommitAfterACure(t *testing.T) {
 	clone, _ := aVaultDirtyVault(t)
 	vdWrite(t, clone, "runs/mw-i80dx.3/result.json", "")
 
-	check := doctor.NewVaultDirty(clone, "laptop")
+	check := doctor.NewVaultDirty(clone, "laptop", doctor.New(t.TempDir()))
 	if _, reason := check.Probe(context.Background()); reason == "" {
 		t.Fatal("expected a reason from a faulty probe")
 	}
@@ -234,7 +278,7 @@ func TestVaultDirtyWayBackNamesTheCommitAfterACure(t *testing.T) {
 }
 
 func TestVaultDirtyDamperIsFiveMinutesCapFive(t *testing.T) {
-	check := doctor.NewVaultDirty("", "")
+	check := doctor.NewVaultDirty("", "", nil)
 	wait, capPerEpisode := check.Damper()
 	if wait != doctor.VaultDirtyDamperWait || capPerEpisode != doctor.VaultDirtyDamperCap {
 		t.Fatalf("expected %s/%d, got %s/%d", doctor.VaultDirtyDamperWait, doctor.VaultDirtyDamperCap, wait, capPerEpisode)

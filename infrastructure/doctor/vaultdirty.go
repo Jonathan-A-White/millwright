@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -41,7 +42,9 @@ const (
 // truncates its result.json or rewrites its boot.md — it commits that path
 // exactly as found, one commit per path, and pushes nothing: the next sync
 // does that. A modified tracked file outside runs/ is cannot-tell, never
-// cured here.
+// cured here, but only once the same file has been seen modified on two
+// consecutive runs: a seat's commit can land seconds after a run looked, and
+// one sighting is not worth waking anyone for.
 type VaultDirty struct {
 	// Dir is the vault's directory.
 	Dir string
@@ -49,6 +52,10 @@ type VaultDirty struct {
 	Host string
 	// Program is the program run for git. Empty reads "git".
 	Program string
+	// State is where the check keeps the paths outside runs/ it saw modified
+	// last run, under a key of its own (vaultDirtySeenStateName), apart from
+	// the episode key Doctor keeps this check's cure state under.
+	State application.DoctorState
 
 	// cured is what the last Cure committed, path to commit hash, read by
 	// WayBack once Cure has run. Empty before any cure runs in this process.
@@ -62,10 +69,14 @@ type vaultDirtyCommit struct {
 	hash string
 }
 
+// vaultDirtySeenStateName is where the check remembers, between runs, the
+// modified paths outside runs/ it has seen once.
+const vaultDirtySeenStateName = "vault-dirty-seen"
+
 // NewVaultDirty is the check over the vault at dir, its cures attributed to
-// host, run through the real git.
-func NewVaultDirty(dir, host string) *VaultDirty {
-	return &VaultDirty{Dir: dir, Host: host}
+// host, run through the real git, remembering what it has seen in state.
+func NewVaultDirty(dir, host string, state application.DoctorState) *VaultDirty {
+	return &VaultDirty{Dir: dir, Host: host, State: state}
 }
 
 // Name implements application.DoctorCheck.
@@ -76,16 +87,15 @@ func (v *VaultDirty) Name() string { return VaultDirtyName }
 // naming every changed path, when every one of them is under runs/;
 // cannot-tell, naming only the paths outside runs/, when any changed path is
 // not under runs/ — never this check's to commit, whatever else changed
-// alongside it.
+// alongside it — but only the paths that were also modified on the previous
+// run. A path outside runs/ seen for the first time is remembered and the
+// run says ok: the next run settles it, clean or still modified.
 func (v *VaultDirty) Probe(ctx context.Context) (application.Verdict, string) {
 	out, err := v.git(ctx, "status", "--porcelain", "--untracked-files=no")
 	if err != nil {
 		return application.DoctorCannotTell, fmt.Sprintf("git status: %v", err)
 	}
 	paths := vaultDirtyChangedPaths(out)
-	if len(paths) == 0 {
-		return application.DoctorOK, ""
-	}
 
 	var outside []string
 	for _, path := range paths {
@@ -93,11 +103,59 @@ func (v *VaultDirty) Probe(ctx context.Context) (application.Verdict, string) {
 			outside = append(outside, path)
 		}
 	}
-	if len(outside) > 0 {
-		return application.DoctorCannotTell, "modified tracked files outside runs/: " + strings.Join(outside, ", ")
+
+	previous, err := v.remember(ctx, outside)
+	if err != nil {
+		return application.DoctorCannotTell, err.Error()
+	}
+	var persisting []string
+	for _, path := range outside {
+		if slices.Contains(previous, path) {
+			persisting = append(persisting, path)
+		}
+	}
+	if len(persisting) > 0 {
+		return application.DoctorCannotTell, "modified tracked files outside runs/: " + strings.Join(persisting, ", ")
 	}
 
-	return application.DoctorFaulty, fmt.Sprintf("%d modified tracked files: %s", len(paths), strings.Join(paths, ", "))
+	var inRuns []string
+	for _, path := range paths {
+		if strings.HasPrefix(path, vaultDirtyRunsPrefix) {
+			inRuns = append(inRuns, path)
+		}
+	}
+	if len(inRuns) == 0 {
+		// Whatever is outside runs/ has been seen once: wait a run.
+		return application.DoctorOK, ""
+	}
+
+	return application.DoctorFaulty, fmt.Sprintf("%d modified tracked files: %s", len(inRuns), strings.Join(inRuns, ", "))
+}
+
+// remember saves outside as the paths seen this run and returns the ones the
+// run before saved. Nothing seen forgets the state altogether.
+func (v *VaultDirty) remember(ctx context.Context, outside []string) ([]string, error) {
+	if v.State == nil {
+		// Nothing to remember with: every sighting counts as the second.
+		return outside, nil
+	}
+	episode, err := v.State.Load(ctx, vaultDirtySeenStateName)
+	if err != nil {
+		return nil, fmt.Errorf("reading this check's own state: %w", err)
+	}
+	if len(outside) == 0 {
+		if len(episode.SeenPaths) == 0 {
+			return nil, nil
+		}
+		if err := v.State.Reset(ctx, vaultDirtySeenStateName); err != nil {
+			return nil, fmt.Errorf("forgetting this check's own state: %w", err)
+		}
+		return episode.SeenPaths, nil
+	}
+	if err := v.State.Save(ctx, vaultDirtySeenStateName, application.DoctorEpisode{SeenPaths: outside}); err != nil {
+		return nil, fmt.Errorf("saving this check's own state: %w", err)
+	}
+	return episode.SeenPaths, nil
 }
 
 // Cure implements application.DoctorCheck: one `git -C <vault> commit -q -m

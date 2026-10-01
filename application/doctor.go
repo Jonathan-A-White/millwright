@@ -109,6 +109,13 @@ type DoctorEpisode struct {
 	// when the probe next says ok, forgets it, so the next episode notes
 	// again.
 	DampedNoted bool
+
+	// SeenPaths is a check's own memory of paths it saw last run and is
+	// waiting to see again before it says anything: vault-dirty keeps the
+	// tracked files outside runs/ it found modified, so a seat's commit
+	// landing a few seconds after one run does not wake the Millhand. Empty
+	// when the last run saw none.
+	SeenPaths []string
 }
 
 // DoctorState is where mw doctor keeps each check's episode between runs.
