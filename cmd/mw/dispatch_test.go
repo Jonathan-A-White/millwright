@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -96,10 +97,17 @@ func TestDispatchLeavesQuietlyWhileAnotherDispatchHoldsTheHostLock(t *testing.T)
 	if err != nil {
 		t.Fatalf("finding the home directory: %v", err)
 	}
-	_, taken, err := hostlock.NewTry(filepath.Join(home, DispatchStateDir), hostlock.DispatchFile).TryTake(context.Background())
+	release, taken, err := hostlock.NewTry(filepath.Join(home, DispatchStateDir), hostlock.DispatchFile).TryTake(context.Background())
 	if err != nil || !taken {
 		t.Fatalf("expected to take the dispatch lock first, got taken %v, error %v", taken, err)
 	}
+	// The flock lives as long as the *os.File behind release: drop release and a
+	// garbage collection closes the file and frees the lock under the test's feet
+	// (mw-gq6.197). Holding it to the end of the test keeps the lock; the
+	// collections here make sure a lock that was not held would have been lost.
+	defer release()
+	runtime.GC()
+	runtime.GC()
 
 	out := &bytes.Buffer{}
 	root := newRootCmd()
