@@ -4,7 +4,7 @@
 
 | Layer | Directory | Rule |
 | --- | --- | --- |
-| domain | `domain/` | Value types; stdlib only. |
+| domain | `domain/`, `domain/events` | Value types; stdlib only. |
 | application | `application/` | Use cases and ports, a file each. |
 | fakes | `application/apptest/` | Port fakes. |
 | infrastructure | `infrastructure/` | One subpackage per adapter. |
