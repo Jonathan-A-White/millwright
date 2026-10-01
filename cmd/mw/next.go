@@ -177,6 +177,7 @@ func newNextCmd() *cobra.Command {
 				Err:       cmd.ErrOrStderr(),
 
 				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding)),
+				Backend:      hostBackend(gateway, files, host, rigs, cmd.ErrOrStderr()),
 			}.Run(cmd.Context(), args[0])
 			return err
 		},

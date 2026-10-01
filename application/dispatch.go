@@ -132,6 +132,11 @@ type Dispatch struct {
 	// nothing, and a dry run runs none.
 	SelfUpdate SelfUpdate
 
+	// Backend is the other thing the home's tick does first: stage the backend of
+	// a landing made on the other host (mw-gq6.185), which left a note for it.
+	// A zero Backend, a host that is not home and a dry run do nothing.
+	Backend BackendStage
+
 	// Mill and Home make the tick answer what the mill left waiting: after
 	// its own claims, on the host that is home, one pass of the mill runs
 	// (mw grist grind's own use case, with its own lock and its own cap
@@ -342,6 +347,9 @@ func (d Dispatch) Run(ctx context.Context) (DispatchReport, error) {
 	// what it says is printed. A build that fails costs the tick nothing.
 	if !d.DryRun {
 		for _, note := range d.SelfUpdate.Run(ctx) {
+			d.print(note + "\n")
+		}
+		for _, note := range d.Backend.Pending(ctx) {
 			d.print(note + "\n")
 		}
 	}

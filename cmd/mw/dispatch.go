@@ -242,6 +242,7 @@ func newDispatchCmd() *cobra.Command {
 				} else {
 					dispatch.SelfUpdate = hostSelfUpdate(rigs, afterLanding, home)
 				}
+				dispatch.Backend = hostBackend(gateway, files, host, rigs, cmd.ErrOrStderr())
 			}
 			// A rehearsal is not a run: it leaves nothing in the log.
 			if !dryRun {

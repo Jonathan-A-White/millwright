@@ -161,6 +161,10 @@ type MillhandTick struct {
 	// is looked at first on every tick, and a tick with none wired does not.
 	SelfUpdate SelfUpdate
 
+	// Backend stages the backend of a landing the other host made, when this
+	// host is home (mw-gq6.185); a tick with none wired does not.
+	Backend BackendStage
+
 	// DoctorNotes is where mw doctor leaves the note that a check needs a
 	// person's attention, one key per check under DoctorNotePrefix; the tick
 	// reads every one of them and remembers, in the same store, which it has
@@ -238,7 +242,7 @@ func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err err
 	// hours does not keep this host on an old mw.
 	var updated []string
 	if !t.DryRun {
-		updated = t.SelfUpdate.Run(ctx)
+		updated = append(t.SelfUpdate.Run(ctx), t.Backend.Pending(ctx)...)
 	}
 	line, woke, err = t.lookAround(ctx)
 	if len(updated) > 0 {

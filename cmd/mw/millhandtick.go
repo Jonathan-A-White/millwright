@@ -151,6 +151,7 @@ func newMillhandTickCmd() *cobra.Command {
 					Host:    host,
 				},
 				SelfUpdate: hostSelfUpdate(rigs, afterLanding, home),
+				Backend:    hostBackend(gateway, mwVault(dir, host), host, rigs, cmd.ErrOrStderr()),
 				Tidy:       application.Tidy{Mail: gateway, Notes: gateway, Beads: gateway},
 				Reach:      doctor.NetReach{Hosts: reach},
 				ReapLog:    files,

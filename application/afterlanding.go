@@ -139,3 +139,37 @@ func (n Next) afterLanding(ctx context.Context, c *closeOut, report *NextReport)
 		report.Notes = append(report.Notes, fmt.Sprintf("the after-landing command's failure could not be written on the story: %v", err))
 	}
 }
+
+// readBackend looks, before the story is merged, at whether its own commits
+// changed what the rig's backend is built from: afterwards the commits are on the
+// target branch and no longer the story's alone. A look that fails counts as a
+// change, because a backend half wrongly staged costs one card, and one left
+// undeployed is what this exists to prevent.
+func (n Next) readBackend(ctx context.Context, c *closeOut, report *NextReport) {
+	if !n.Backend.Wants(c.path.Rig) {
+		return
+	}
+	changed, err := n.Backend.Touches(ctx, c.path.Rig, StartPoint(n.remote(), c.target), c.branch)
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("backend: whether %s changed the backend of %s could not be read, so it is staged to be safe: %s", c.id, c.path.Rig, firstLine(err.Error())))
+		changed = true
+	}
+	c.backendChanged = changed
+}
+
+// stageBackend, once the story is landed, builds the backend the landing changed
+// on the home and writes its swap as a hands step, or leaves a note for the
+// home's next tick when this host is not home. It restarts nothing: the swap
+// runs when the Governor approves the step.
+func (n Next) stageBackend(ctx context.Context, c *closeOut, report *NextReport) {
+	if !c.backendChanged {
+		return
+	}
+	report.Notes = append(report.Notes, n.Backend.Landed(ctx, BackendLanding{
+		Rig:    c.path.Rig,
+		Story:  c.id,
+		Title:  c.detail.Story.Title,
+		Epic:   c.detail.EpicID,
+		Commit: report.How.Commit,
+	})...)
+}

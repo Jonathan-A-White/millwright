@@ -165,6 +165,12 @@ type Next struct {
 	// from the rig by itself. A nil AfterLanding runs nothing.
 	AfterLanding AfterLanding
 
+	// Backend stages the backend of a landing whose story changed it, on the
+	// home, and writes its swap as a hands step for the Governor to approve
+	// (mw-gq6.185). A zero Backend, or a rig it names no backend for, does
+	// nothing, and nothing it does can stop a story being landed or closed.
+	Backend BackendStage
+
 	// Files is the vault as a git clone: what a close-out commits its own
 	// ledger line and the session's rig memory through, so that the sync it
 	// then runs is not stopped by the work it has just done. A nil Files leaves
@@ -324,6 +330,10 @@ type closeOut struct {
 	branch   string
 	target   string
 	result   SessionResult
+
+	// backendChanged says the story's own commits changed what the rig's backend
+	// is built from, so that the landing is followed by staging it.
+	backendChanged bool
 
 	// landingError says this run kept the whole error of a failed landing in the
 	// vault, so the close-out commits it.
@@ -582,6 +592,8 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		return n.stop(ctx, c, report, found[0].Reason, found[0].Why, found[0].Said)
 	}
 
+	n.readBackend(ctx, c, report)
+
 	// Only one close-out at a time may touch a rig's target branch on this host.
 	// The other host's races are settled by the remote itself, below.
 	holding, err := n.Slot.Take(ctx, c.rigDir, Holders(n.Seat, n.Host, c.id))
@@ -627,6 +639,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	// After the story is recorded as landed, so that a command that is killed
 	// with the session it runs in leaves a story a later run can tell is landed.
 	n.afterLanding(ctx, c, report)
+	n.stageBackend(ctx, c, report)
 	return n.finish(ctx, c, report, outcome, false)
 }
 

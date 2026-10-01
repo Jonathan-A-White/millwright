@@ -68,6 +68,9 @@ type nextContext struct {
 	afterCommands map[string]string // the [after_landing] table this scenario's rig host has
 	afterLimit    time.Duration     // how long an after-landing command may run; zero is the adapter's own
 
+	backend   *backendFixture // the [backend] table this scenario's host has, when it has one
+	worktrees *rig.Worktrees  // the git adapter mw next is given, so that the backend is built through it
+
 	report  application.NextReport
 	checked application.CheckReport // what mw check reported, in the check scenarios
 	err     error
@@ -147,6 +150,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerNextMailSteps(ctx, c)
 	registerNextRigSteps(ctx, c)
 	registerNextAfterLandingSteps(ctx, c)
+	registerNextBackendSteps(ctx, c)
 	registerNextRebaseSteps(ctx, c)
 	registerNextMergeFixSteps(ctx, c)
 	registerNextReattemptSteps(ctx, c)
@@ -757,6 +761,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 	c.originBefore = before
 
 	worktrees := rig.New(rig.WithProgram(c.gitProgram))
+	c.worktrees = worktrees
 	rigs := map[string]string{"millwright": c.rig}
 	files := vault.New(c.vault)
 	boot := application.SeatBoot{
@@ -809,6 +814,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 		Err:  &c.stderr,
 
 		AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(c.afterCommands), rig.WithAfterLimit(c.afterLimit)),
+		Backend:      c.backendStage(),
 	}.Run(context.Background(), id)
 
 	if c.afterFirst == nil {

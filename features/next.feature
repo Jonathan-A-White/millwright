@@ -767,3 +767,32 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.1" carries no comment quoting: after landing
     And exactly one mail was sent, to "mayor" from "mw@vps"
     And that mail's body says: after landing: none: this host names no command for millwright
+
+  Scenario: A landing that changed the backend stages it on the home and writes its swap as a hands step
+    Given this host names a backend for the rig, built in "server", and is the home
+    And the work of "mw-gq6.1" also changes "server/route.txt"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the story "mw-gq6.1" is closed
+    And the backend was staged for the commit that landed on "main", built from that commit
+    And a new open hitl bead under "mw-gq6" holds one hands step that swaps it, with the check, backup, install, restart, four tries and way back
+    And one message was sent on that bead's channel
+    And the close-out returned no error
+
+  Scenario: A landing that left the backend alone stages nothing and files nothing
+    Given this host names a backend for the rig, built in "server", and is the home
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed
+    And no backend was built, no bead filed and no message sent
+    And the close-out returned no error
+
+  Scenario: A landing that changed the backend on a host that is not home leaves it for the home's next tick
+    Given this host names a backend for the rig, built in "server", and "laptop" is the home
+    And the work of "mw-gq6.1" also changes "server/route.txt"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed
+    And the landing is left as a note for the home "laptop" and nothing was built
+    And the close-out returned no error
