@@ -23,7 +23,7 @@ import (
 
 // privateRunner returns a Runner onto a tmux server of this test's own, and
 // kills that server when the test ends.
-func privateRunner(t *testing.T) *tmux.Runner {
+func privateRunner(t *testing.T, extra ...tmux.Option) *tmux.Runner {
 	t.Helper()
 	if !tmux.Available() {
 		t.Skipf("%s is not on PATH", tmux.Program)
@@ -39,7 +39,7 @@ func privateRunner(t *testing.T) *tmux.Runner {
 		}
 		_ = os.Remove(socketPath(socket))
 	})
-	return tmux.New(tmux.WithSocket(socket), tmux.WithPollInterval(20*time.Millisecond))
+	return tmux.New(append([]tmux.Option{tmux.WithSocket(socket), tmux.WithPollInterval(20 * time.Millisecond)}, extra...)...)
 }
 
 // expectExit checks how a command that has ended is reported: with the status it
@@ -207,7 +207,17 @@ func TestRunnerCarriesTheDirectoryTheEnvironmentAndWhatIsTypedIn(t *testing.T) {
 }
 
 func TestRunnerWaitGivesUpWhenTheContextDoes(t *testing.T) {
-	runner := privateRunner(t)
+	// The context is cancelled by the test, not by a clock, once Wait has asked
+	// tmux a second time: a deadline can pass before Wait has read any status
+	// when the machine is loaded, and then there is no last status to check.
+	// tmux is reached through a script that notes each call it is given.
+	calls := filepath.Join(t.TempDir(), "calls")
+	script := filepath.Join(t.TempDir(), "tmux")
+	body := fmt.Sprintf("#!/bin/sh\necho call >> %q\nexec %s \"$@\"\n", calls, tmux.Program)
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatalf("writing the script that counts tmux calls: %v", err)
+	}
+	runner := privateRunner(t, tmux.WithProgram(script))
 	name := application.SessionName("mw-gq6.4")
 	if err := runner.Start(context.Background(), application.SessionSpec{Name: name, Command: []string{"sleep", "30"}}); err != nil {
 		t.Fatalf("starting %s: %v", name, err)
@@ -217,11 +227,32 @@ func TestRunnerWaitGivesUpWhenTheContextDoes(t *testing.T) {
 			t.Errorf("closing %s: %v", name, err)
 		}
 	}()
+	// Start was one call; the first status read is the next, and a call after
+	// that means the first has been read and kept as the last status seen.
+	const callsBeforeSecondRead = 2
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	watch := make(chan struct{})
+	go func() {
+		defer close(watch)
+		giveUp := time.After(30 * time.Second)
+		for {
+			if data, _ := os.ReadFile(calls); strings.Count(string(data), "call") > callsBeforeSecondRead {
+				break
+			}
+			select {
+			case <-giveUp:
+				cancel()
+				return
+			case <-time.After(5 * time.Millisecond):
+			}
+		}
+		cancel()
+	}()
 	status, err := runner.Wait(ctx, name)
-	if !errors.Is(err, context.DeadlineExceeded) {
+	<-watch
+	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected waiting to give up with the context, got %v", err)
 	}
 	if !status.Running() {
