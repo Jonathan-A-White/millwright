@@ -470,7 +470,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			continue
 		}
 		if !d.DryRun {
-			reclaimed, err := d.reclaimDeadPane(ctx, detail, &report)
+			reclaimed, held, err := d.reclaimDeadPane(ctx, detail, &report)
 			if err != nil {
 				return report, fmt.Errorf("dispatching on %s: %w", d.Host, err)
 			}
@@ -480,6 +480,14 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 				// still holding a session.
 				continue
 			}
+			if held {
+				// Refused and waiting on the Mayor: it holds no session, so it
+				// does not take one of the cap's slots (mw-gq6.211).
+				continue
+			}
+		} else if d.refusedWithoutSession(ctx, detail) {
+			report.HeldRefused = append(report.HeldRefused, HeldRefused{StoryID: detail.Story.ID, Session: SessionName(detail.Story.ID)})
+			continue
 		}
 		report.Running++
 	}
@@ -1023,13 +1031,15 @@ func (d Dispatch) refuseLeftover(ctx context.Context, id string, err error) (Sta
 // A story its close-out refused (mw next recorded run=blocked) is left exactly
 // as it is however dead its pane: its claim, worktree and branch are the
 // evidence of the refusal, and giving the claim back would run it again
-// without the Mayor or the Governor having said so (mw-gq6.182).
+// without the Mayor or the Governor having said so (mw-gq6.182). Its session
+// is not alive, so it is reported held, and the caller does not count it toward
+// the cap (mw-gq6.211); the same holds when its window is gone outright.
 //
 // Nothing is cut or removed here: only the window, whose pane is already
 // dead, is closed, and the claim given back. What the story's worktree and
 // branch still hold from the attempt that died is left for the next attempt
 // to run into, or for a person to settle by hand with mw retry.
-func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, report *DispatchReport) (bool, error) {
+func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, report *DispatchReport) (reclaimed, held bool, err error) {
 	id := detail.Story.ID
 	name := SessionName(id)
 	status, err := d.Runner.Status(ctx, name)
@@ -1037,11 +1047,12 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 		// A runner that cannot say cannot be trusted to say the pane is dead
 		// either: leave the claim counted as running, as if this check were
 		// never made.
-		return false, nil
+		return false, false, nil
 	}
-	if status.State != StateExited && status.State != StateExitUnknown {
-		return false, nil
+	if status.Running() {
+		return false, false, nil
 	}
+	dead := status.State == StateExited || status.State == StateExitUnknown
 
 	// A claim whose lease has run out and whose branch is already on the target
 	// branch is a close-out that got past the merge and lost only the close
@@ -1049,9 +1060,9 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 	// the story a second time on top of its own landed commits. Whether the
 	// lease ran out is read here from the story, not from ReclaimStory, because
 	// that one gives the claim back as it answers.
-	if !detail.LeaseExpires.IsZero() && d.now().After(detail.LeaseExpires) {
+	if dead && !detail.LeaseExpires.IsZero() && d.now().After(detail.LeaseExpires) {
 		if tip, target, landed := d.landedBranch(ctx, detail); landed {
-			return d.closeLanded(ctx, detail, name, tip, target, report), nil
+			return d.closeLanded(ctx, detail, name, tip, target, report), false, nil
 		}
 	}
 
@@ -1059,25 +1070,30 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 	// state that cannot be read is no licence to give the claim back.
 	run, err := d.Tracker.StoryState(ctx, id, RunState)
 	if err != nil {
-		report.Notes = append(report.Notes, fmt.Sprintf(
-			"%s: its session %s has a dead pane, but whether its close-out refused it could not be read, so its claim was kept: %v", id, name, err))
-		return false, nil
+		if dead {
+			report.Notes = append(report.Notes, fmt.Sprintf(
+				"%s: its session %s has a dead pane, but whether its close-out refused it could not be read, so its claim was kept: %v", id, name, err))
+		}
+		return false, false, nil
 	}
 	if run == RunBlocked {
 		report.HeldRefused = append(report.HeldRefused, HeldRefused{StoryID: id, Session: name})
-		return false, nil
+		return false, true, nil
+	}
+	if !dead {
+		return false, false, nil
 	}
 
-	reclaimed, err := d.Tracker.ReclaimStory(ctx, id)
+	reclaimed, err = d.Tracker.ReclaimStory(ctx, id)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf(
 			"%s: its session %s has a dead pane, but whether its lease had run out could not be read: %v", id, name, err))
-		return false, nil
+		return false, false, nil
 	}
 	if !reclaimed {
 		// The lease still holds: left alone for one more tick, exactly as a
 		// live session is.
-		return false, nil
+		return false, false, nil
 	}
 
 	why := fmt.Sprintf(
@@ -1094,7 +1110,20 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 		report.Notes = append(report.Notes, fmt.Sprintf("%s: the dead-pane reclaim could not be commented on: %v", id, err))
 	}
 	report.Reclaimed = append(report.Reclaimed, Reclaimed{StoryID: id, Session: name, LeaseExpired: detail.LeaseExpires})
-	return true, nil
+	return true, false, nil
+}
+
+// refusedWithoutSession says whether a claimed story's close-out refused it
+// (run=blocked) and its session is not alive, the read-only look a dry run
+// takes where a real one calls reclaimDeadPane. Anything it cannot read is not
+// refused: the claim is counted as running, as before.
+func (d Dispatch) refusedWithoutSession(ctx context.Context, detail StoryDetail) bool {
+	status, err := d.Runner.Status(ctx, SessionName(detail.Story.ID))
+	if err != nil || status.Running() {
+		return false
+	}
+	run, err := d.Tracker.StoryState(ctx, detail.Story.ID, RunState)
+	return err == nil && run == RunBlocked
 }
 
 // landedBranch reports the tip of the story's branch when that branch has work
@@ -1326,7 +1355,7 @@ func (r DispatchReport) String() string {
 			shortCommit(landed.Tip), landed.Target)
 	}
 	for _, held := range r.HeldRefused {
-		fmt.Fprintf(&b, "  held    %s · %s · its close-out refused it, so its claim, worktree and branch are kept; it waits for the Mayor (mw retry)\n",
+		fmt.Fprintf(&b, "  held    %s · %s · refused, waiting on the Mayor: not counted; its claim, worktree and branch are kept (mw retry)\n",
 			held.StoryID, held.Session)
 	}
 	for _, reclaim := range r.Reclaimed {
