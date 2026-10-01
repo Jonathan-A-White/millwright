@@ -1332,7 +1332,7 @@ network fault: <what git said>; nothing dispatched`, and leaves with 7, which th
 unit lists in `SuccessExitStatus=5 7`, so a sleeping network does not show as a
 failed unit and the next tick simply tries again. The tries and the waits together
 may not run past 90 seconds (`mw dispatch` refuses a config that would), because
-the unit is stopped at two minutes. Every other sync failure is not retried and
+the unit is stopped at ten minutes. Every other sync failure is not retried and
 fails as before, and `mw sync` by hand never waits. After changing the unit file,
 copy it again and `systemctl --user daemon-reload`.
 
@@ -1340,9 +1340,10 @@ copy it again and `systemctl --user daemon-reload`.
 is never started while it is already running, so ticks do not overlap; the tick
 is dropped. The real damper on spending is not the timer but mw's cap: however
 often `mw dispatch` runs, it never has more sessions in flight than `cap`
-allows. The unit stops a run that takes longer than two minutes
+allows. The unit stops a run that takes longer than ten minutes
 (`TimeoutStartSec`), because a oneshot otherwise waits for ever on a hung `git`
-or `bd`.
+or `bd`. Ten, not two: on the Boost every `bd` call crosses the tunnel, so a
+tick that launches a story can run past two minutes.
 
 `Persistent=false`: a host that was asleep or off does not catch up on the ticks
 it missed, and is not woken for them. The next tick on the clock is the next

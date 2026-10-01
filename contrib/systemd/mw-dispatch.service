@@ -24,8 +24,12 @@ ExecStart=/usr/bin/env mw dispatch
 KillMode=process
 
 # Type=oneshot has no start timeout by default, and a hung git or bd would
-# then block every later tick. Two minutes is many times a normal dispatch.
-TimeoutStartSec=2min
+# then block every later tick. Ten minutes: on the Boost every bd call crosses the
+# tunnel to the Laptop's Dolt and takes seconds, so one tick that claims and
+# launches a story runs past two minutes, and a kill mid-tick leaves a launched
+# Builder with no attempts and no run=running. The timer never starts a second
+# tick while one runs, so a long tick blocks only itself.
+TimeoutStartSec=10min
 
 # mw dispatch leaves with 5 when the vault holds uncommitted work: it stopped
 # before claiming anything and says which files, and only a person can commit
