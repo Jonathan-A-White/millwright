@@ -2824,10 +2824,13 @@ to know a kill from. `mw doctor mayor-gone` is the recovery by hand;
 `--dry-run` prints the line it would run and changes nothing.
 
 **mayor-stale** is the Mayor's heartbeat. A held Mayor's pane is redrawn
-while it works or waits (a spinner, an elapsed clock), so the check keeps a
-hash of `tmux capture-pane` in its own state and faults once the pane of the
-window `.mayor-acting` names has stood unchanged for `mayor_stale_minutes`
-(the `[doctor]` table; default 15, checked every 5 minutes by the timer). A
+while a turn runs (an elapsed clock beside "esc to interrupt"), so the check
+keeps a hash of `tmux capture-pane` in its own state and faults once the pane
+of the window `.mayor-acting` names has stood unchanged for
+`mayor_stale_minutes` (the `[doctor]` table; default 15, checked every 5
+minutes by the timer) while it shows "esc to interrupt" (a frozen turn) or
+text on the input line (a nudge nobody took). A Mayor waiting at an empty
+`❯` prompt redraws nothing and is alive however long it stands. A
 seat not held — no `.mayor-acting`, a host that is not home, a window gone or
 holding only a bare shell — says ok; the last two are `mayor-gone`'s to
 judge. A fresh beat (the pane changes) clears it and starts the count again.

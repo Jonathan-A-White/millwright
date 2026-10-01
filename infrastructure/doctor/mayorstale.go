@@ -46,11 +46,21 @@ const mayorStalePrompt = "Do you want to proceed?"
 // alarm about a prompt carries: the question and its numbered options.
 const mayorStalePromptLines = 12
 
+// mayorStaleBusy is what a harness draws while a turn runs. Its elapsed clock
+// redraws the pane, so a pane that shows it and has not changed is a frozen turn.
+const mayorStaleBusy = "esc to interrupt"
+
+// mayorStaleInput is the mark that begins the harness's input line.
+const mayorStaleInput = "❯"
+
 // MayorStale is the check that notices a Mayor which still holds the seat but
-// has stopped. The heartbeat is the seat's own pane: a working or waiting
-// harness redraws it (a spinner, an elapsed clock), so a held Mayor whose
-// pane text has not changed for Limit is stuck or dead, whatever its window
-// still says. It finds the window the way MayorGone does and leaves the
+// has stopped. The heartbeat is the seat's own pane, read only where the
+// harness redraws it: a running turn (the pane shows "esc to interrupt"), or
+// input left on the prompt line that no turn took, or a prompt waiting on a
+// person. A pane unchanged for Limit in one of those states is stuck or dead,
+// whatever its window still says. A Mayor whose turn has ended and who waits
+// at an empty prompt redraws nothing and is alive, however long the pane
+// stands. It finds the window the way MayorGone does and leaves the
 // seats MayorGone judges — no .mayor-acting, a host that is not home, a window
 // gone or holding only a bare shell — to it: those are not held, and this
 // check says ok.
@@ -110,8 +120,9 @@ func (m *MayorStale) held() *MayorGone {
 
 // Probe implements application.DoctorCheck: ok when the seat is not held (see
 // MayorStale), and when it is held, ok while the pane differs from the last
-// look or has stood still less than Limit; faulty, naming the minutes, once
-// it has stood still that long. It writes one thing: the pane it saw, in its
+// look, has stood still less than Limit, or shows an idle Mayor at an empty
+// prompt; faulty, naming the minutes, once a pane in a state that should
+// redraw (see paneStalls) has stood still that long. It writes one thing: the pane it saw, in its
 // own state key, as vault-dirty remembers its sightings.
 func (m *MayorStale) Probe(ctx context.Context) (application.Verdict, string) {
 	window, name, held, verdict, reason := m.window(ctx)
@@ -126,6 +137,9 @@ func (m *MayorStale) Probe(ctx context.Context) (application.Verdict, string) {
 	since, err := m.since(ctx, window, pane)
 	if err != nil {
 		return application.DoctorCannotTell, err.Error()
+	}
+	if !paneStalls(pane) {
+		return application.DoctorOK, ""
 	}
 	if still := m.now().Sub(since); still >= m.limit() {
 		return application.DoctorFaulty, fmt.Sprintf("the pane of window %s (%s) has not changed for %d minutes", name, window, int(still/time.Minute))
@@ -163,6 +177,27 @@ func (m *MayorStale) window(ctx context.Context) (id, name string, held bool, ve
 		return "", "", false, application.DoctorOK, ""
 	}
 	return byName[name], name, true, application.DoctorOK, ""
+}
+
+// paneStalls is whether a pane that stands unchanged is a fault: a turn
+// running (its clock stopped redrawing), text on the input line that nobody
+// took, or a prompt waiting for an answer. A pane at an empty input line with
+// no turn running is a Mayor waiting for its next word, and any other pane is
+// not one this check can call dead.
+func paneStalls(pane string) bool {
+	pane = strings.ReplaceAll(pane, "\u00a0", " ")
+	if strings.Contains(pane, mayorStaleBusy) || strings.Contains(pane, mayorStalePrompt) {
+		return true
+	}
+	// The input line is the lowest line that begins with the mark: earlier
+	// ones are the Governor's past words in the transcript.
+	lines := strings.Split(pane, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if rest, ok := strings.CutPrefix(lines[i], mayorStaleInput); ok {
+			return strings.TrimSpace(rest) != ""
+		}
+	}
+	return false
 }
 
 // since is when the pane of window last changed, as far as this check has
