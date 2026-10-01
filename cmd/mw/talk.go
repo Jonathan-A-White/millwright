@@ -132,21 +132,10 @@ func talkWaitLimit() time.Duration {
 	return application.DefaultTalkWaitLimit
 }
 
-// talkHoldingReply is the holding answer mw talk wait sends: the configured
-// text when --hold is on, none otherwise.
-func talkHoldingReply(hold bool, configured string) string {
-	if !hold {
-		return ""
-	}
-	return configured
-}
-
 // newTalkWaitCmd builds `mw talk wait`: the zero-token wait for the Governor's
 // next turn, which the Mayor's harness runs in the background.
 func newTalkWaitCmd() *cobra.Command {
 	var limit, minBackoff, maxBackoff time.Duration
-	var hold bool
-	holdingConfigured, holdingErr := config.TalkHoldingReply()
 	cmd := &cobra.Command{
 		Use:   "wait",
 		Short: "Wait, spending no tokens, for the Governor's next turn in a talk",
@@ -167,11 +156,6 @@ func newTalkWaitCmd() *cobra.Command {
 			"stream that drops is opened again after a pause that doubles from --min-backoff to --max-backoff.\n" +
 			"It ends, saying so, after --limit with no turn: arm it again. $" + TalkWaitLimitEnv + " (seconds)\n" +
 			"sets the default of --limit, as MW_MAIL_WAIT_LIMIT does for mail-wait.\n\n" +
-			"With --hold (on when config talk_holding_reply, or $" + config.TalkHoldingReplyEnv + ", is set) a\n" +
-			"turn is answered the moment it is heard, before it is printed: the configured text is sent, at\n" +
-			"zero tokens, as the section 20 holding answer to that talk and turn, exactly what mw talk say\n" +
-			"--holding sends, and a line 'holding sent in N ms' follows the turn. The end of a talk gets no\n" +
-			"holding reply, nor does a wait with nothing configured; --hold=false turns it off for one wait.\n\n" +
 			"The Mayor's key is let onto the event stream without a licence, but reading the records takes a\n" +
 			"cockpit licence on it.",
 		Args: cobra.NoArgs,
@@ -192,28 +176,23 @@ func newTalkWaitCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if holdingErr != nil {
-				return holdingErr
-			}
 			_, err = application.TalkWait{
-				Stream:       backend,
-				Postern:      backend,
-				Cipher:       posternCipher(keys),
-				Keys:         keys,
-				Memory:       gateway,
-				Mailbox:      gateway,
-				GovernorKey:  governorKey,
-				HoldingReply: talkHoldingReply(hold, holdingConfigured),
-				Limit:        limit,
-				MinBackoff:   minBackoff,
-				MaxBackoff:   maxBackoff,
-				Out:          cmd.OutOrStdout(),
-				Err:          cmd.ErrOrStderr(),
+				Stream:      backend,
+				Postern:     backend,
+				Cipher:      posternCipher(keys),
+				Keys:        keys,
+				Memory:      gateway,
+				Mailbox:     gateway,
+				GovernorKey: governorKey,
+				Limit:       limit,
+				MinBackoff:  minBackoff,
+				MaxBackoff:  maxBackoff,
+				Out:         cmd.OutOrStdout(),
+				Err:         cmd.ErrOrStderr(),
 			}.Run(cmd.Context())
 			return err
 		},
 	}
-	cmd.Flags().BoolVar(&hold, "hold", holdingConfigured != "", "send the configured holding reply (talk_holding_reply) the moment a turn arrives")
 	cmd.Flags().DurationVar(&limit, "limit", talkWaitLimit(), "how long to wait for a turn before ending, saying so")
 	cmd.Flags().DurationVar(&minBackoff, "min-backoff", application.DefaultTalkWaitMinBackoff, "the first pause before opening a dropped stream again")
 	cmd.Flags().DurationVar(&maxBackoff, "max-backoff", application.DefaultTalkWaitMaxBackoff, "the longest pause before opening a dropped stream again")

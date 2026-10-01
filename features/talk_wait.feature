@@ -132,27 +132,3 @@ Feature: mw talk wait
     When mw postern inbox is run against the backend
     Then the backend inbox printed "message text"
     And the backend inbox did not print "A talk turn"
-
-  Scenario: with a holding reply set, a Governor turn is answered at once, before the wait prints it
-    Given mw talk wait has the holding reply "One moment."
-    And mw talk wait is armed
-    When the Governor's turn 3 of talk "talk-7" saying "What landed today?" is indexed
-    Then mw talk wait ends within 1 second
-    And the wait sent one holding record "One moment." for talk "talk-7" turn 3 before it printed
-    And the wait printed "What landed today?"
-    And the wait printed a holding-sent time in milliseconds
-
-  Scenario: with no holding reply set, nothing is sent
-    Given mw talk wait is armed
-    When the Governor's turn 3 of talk "talk-7" saying "What landed today?" is indexed
-    Then mw talk wait ends within 1 second
-    And the wait sent no holding record
-    And the wait did not print "holding sent"
-
-  Scenario: the Governor's end of a talk gets no holding reply
-    Given mw talk wait has the holding reply "One moment."
-    And mw talk wait is armed
-    When the Governor ends talk "talk-3"
-    Then mw talk wait ends within 1 second
-    And the wait sent no holding record
-    And the wait did not print "holding sent"

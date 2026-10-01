@@ -12,6 +12,22 @@ import (
 	"github.com/Jonathan-A-White/millwright/application/apptest"
 )
 
+const (
+	talkWaitMayorKey    = "mayor-pubkey-hex"
+	talkWaitGovernorKey = "governor-pubkey-hex"
+)
+
+// talkWaitStream is a PosternStream that says hello at a head of 0 and then
+// announces one indexed record, like the backend does.
+type talkWaitStream struct{ seq int64 }
+
+func (s talkWaitStream) Events(_ context.Context, onEvent func(application.PosternEvent) error) error {
+	if err := onEvent(application.PosternEvent{Kind: application.PosternEventHello}); err != nil {
+		return err
+	}
+	return onEvent(application.PosternEvent{Kind: application.PosternEventMessage, Seq: s.seq})
+}
+
 // talkPosternFixture is a fake postern holding records for the Mayor's key,
 // and a TalkWait over it that sees a hello and then a message event for head.
 type talkPosternFixture struct {
@@ -24,7 +40,7 @@ type talkPosternFixture struct {
 func newTalkPosternFixture(t *testing.T) *talkPosternFixture {
 	t.Helper()
 	cipher := apptest.NewFakeCipher()
-	cipher.From = talkHoldGovernorKey
+	cipher.From = talkWaitGovernorKey
 	return &talkPosternFixture{t: t, postern: apptest.NewFakePostern(), tracker: apptest.NewFakeTracker(), cipher: cipher}
 }
 
@@ -37,12 +53,12 @@ func (f *talkPosternFixture) addMessage(txid, topic, text string) int64 {
 		wrapped, _ := json.Marshal(map[string]any{"thread": map[string]any{"topic": topic}, "text": text})
 		plain = string(wrapped)
 	}
-	ct, err := f.cipher.Encrypt(talkHoldMayorKey, plain)
+	ct, err := f.cipher.Encrypt(talkWaitMayorKey, plain)
 	if err != nil {
 		f.t.Fatal(err)
 	}
 	return f.postern.AddRecord(application.PosternRecord{
-		Txid: txid, Class: "message", To: talkHoldMayorKey, From: talkHoldGovernorKey, Ciphertext: ct,
+		Txid: txid, Class: "message", To: talkWaitMayorKey, From: talkWaitGovernorKey, Ciphertext: ct,
 	}).Seq
 }
 
@@ -52,12 +68,12 @@ func (f *talkPosternFixture) addTurn(text string) int64 {
 	plain, _ := json.Marshal(map[string]any{
 		"talk": map[string]any{"id": "talk-7", "turn": 3}, "text": text, "role": application.TalkRoleTurn,
 	})
-	ct, err := f.cipher.Encrypt(talkHoldMayorKey, string(plain))
+	ct, err := f.cipher.Encrypt(talkWaitMayorKey, string(plain))
 	if err != nil {
 		f.t.Fatal(err)
 	}
 	return f.postern.AddRecord(application.PosternRecord{
-		Txid: "direct:turn", Class: "talk", To: talkHoldMayorKey, From: talkHoldGovernorKey, Ciphertext: ct,
+		Txid: "direct:turn", Class: "talk", To: talkWaitMayorKey, From: talkWaitGovernorKey, Ciphertext: ct,
 	}).Seq
 }
 
@@ -67,12 +83,12 @@ func (f *talkPosternFixture) run(head int64) (application.TalkWaitReport, string
 	f.t.Helper()
 	var out strings.Builder
 	report, err := application.TalkWait{
-		Stream:      talkHoldStream{seq: head},
+		Stream:      talkWaitStream{seq: head},
 		Postern:     f.postern,
 		Cipher:      apptest.NewFakeCipher(),
-		Keys:        stubPosternKeys{pubKey: talkHoldMayorKey},
+		Keys:        stubPosternKeys{pubKey: talkWaitMayorKey},
 		Memory:      f.tracker,
-		GovernorKey: talkHoldGovernorKey,
+		GovernorKey: talkWaitGovernorKey,
 		Limit:       200 * time.Millisecond,
 		MinBackoff:  5 * time.Millisecond,
 		MaxBackoff:  5 * time.Millisecond,
@@ -146,7 +162,7 @@ func TestTalkWaitIgnoresAPosternMessageForAnotherKey(t *testing.T) {
 	f := newTalkPosternFixture(t)
 	ct, _ := f.cipher.Encrypt("someone-else", "not yours")
 	seq := f.postern.AddRecord(application.PosternRecord{
-		Txid: "direct:other", Class: "message", To: "someone-else", From: talkHoldGovernorKey, Ciphertext: ct,
+		Txid: "direct:other", Class: "message", To: "someone-else", From: talkWaitGovernorKey, Ciphertext: ct,
 	}).Seq
 
 	report, printed := f.run(seq)
