@@ -32,8 +32,11 @@ func ptTools(t *testing.T, command string, names ...string) (*doctor.PosternTran
 		Home:    &apptest.FakeHomeFile{Text: "laptop 2026-09-28T00:00:00Z mw@laptop"},
 		Host:    "laptop",
 		PathEnv: dir,
-		Getenv:  func(key string) string { return map[string]string{"POSTERN_WHISPER_MODEL": model}[key] },
-		HomeDir: dir,
+		// The service PATH here is the same directory, so only the tests of
+		// the service PATH narrow it.
+		ServicePath: dir,
+		Getenv:      func(key string) string { return map[string]string{"POSTERN_WHISPER_MODEL": model}[key] },
+		HomeDir:     dir,
 	}
 	return check, dir
 }
@@ -117,5 +120,39 @@ func TestPosternTranscribeHasNoCure(t *testing.T) {
 	}
 	if check.Name() != "postern-transcribe" {
 		t.Fatalf("unexpected name %q", check.Name())
+	}
+}
+
+func TestPosternTranscribeIsFaultyWhenWhisperCliIsOnlyOnTheLoginPath(t *testing.T) {
+	check, dir := ptTools(t, "", "ffmpeg", "whisper-cli", "postern-transcribe")
+	check.Command = filepath.Join(dir, "postern-transcribe")
+	check.ServicePath = "/usr/bin:/bin"
+	check.HomeDir = t.TempDir()
+	check.Getenv = func(key string) string {
+		if key == "POSTERN_WHISPER_MODEL" {
+			return filepath.Join(dir, "ggml-base.en.bin")
+		}
+		return ""
+	}
+
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorFaulty || !strings.Contains(reason, "service PATH") || !strings.Contains(reason, "whisper-cli") {
+		t.Fatalf("expected faulty naming the service PATH, got %s (%s)", verdict, reason)
+	}
+}
+
+func TestPosternTranscribeIsOKWhenWhisperCliIsInHomeLocalBin(t *testing.T) {
+	check, dir := ptTools(t, "", "ffmpeg", "postern-transcribe")
+	check.Command = filepath.Join(dir, "postern-transcribe")
+	local := filepath.Join(dir, ".local", "bin")
+	if err := os.MkdirAll(local, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(local, "whisper-cli"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if verdict, reason := check.Probe(context.Background()); verdict != application.DoctorOK {
+		t.Fatalf("expected ok, got %s (%s)", verdict, reason)
 	}
 }

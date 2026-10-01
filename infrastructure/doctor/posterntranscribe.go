@@ -55,6 +55,11 @@ type PosternTranscribe struct {
 	Host string
 	// PathEnv is the PATH searched for a bare program name; empty reads $PATH.
 	PathEnv string
+	// ServicePath is the PATH the hook runs under in postern-backend.service,
+	// a systemd user service's, with no ~/.local/bin; empty reads
+	// DefaultServicePath. ffmpeg and whisper-cli must be found there (whisper-cli
+	// also at ~/.local/bin, where the script looks), not only on PathEnv.
+	ServicePath string
 	// Getenv reads POSTERN_WHISPER_CLI and POSTERN_WHISPER_MODEL; nil reads
 	// the process environment.
 	Getenv func(string) string
@@ -62,6 +67,9 @@ type PosternTranscribe struct {
 	// home directory.
 	HomeDir string
 }
+
+// DefaultServicePath is the PATH a systemd user service starts with.
+const DefaultServicePath = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin"
 
 // NewPosternTranscribe is the check over command, as this host's config
 // reads it.
@@ -99,13 +107,19 @@ func (p *PosternTranscribe) Probe(ctx context.Context) (application.Verdict, str
 	var missing []string
 	if !p.executable("ffmpeg") {
 		missing = append(missing, "ffmpeg is not on PATH")
+	} else if !p.onServicePath("ffmpeg") {
+		missing = append(missing, "ffmpeg is on your login PATH but not on the service PATH ("+p.servicePath()+")")
 	}
-	cli := p.getenv("POSTERN_WHISPER_CLI")
-	if cli == "" {
-		cli = "whisper-cli"
-	}
-	if !p.executable(cli) {
-		missing = append(missing, cli+" is not on PATH")
+	if cli := p.getenv("POSTERN_WHISPER_CLI"); cli != "" {
+		if !p.executable(cli) {
+			missing = append(missing, cli+" is not on PATH")
+		}
+	} else if !isExecutable(filepath.Join(p.homeDir(), ".local", "bin", "whisper-cli")) && !p.onServicePath("whisper-cli") {
+		if p.executable("whisper-cli") {
+			missing = append(missing, "whisper-cli is on your login PATH but not on the service PATH ("+p.servicePath()+") nor at "+filepath.Join(p.homeDir(), ".local", "bin", "whisper-cli"))
+		} else {
+			missing = append(missing, "whisper-cli is not on PATH")
+		}
 	}
 	if model := p.model(); !readable(model) {
 		missing = append(missing, "no whisper model at "+model)
@@ -141,11 +155,28 @@ func (p *PosternTranscribe) model() string {
 	if model := p.getenv("POSTERN_WHISPER_MODEL"); model != "" {
 		return model
 	}
-	home := p.HomeDir
-	if home == "" {
-		home, _ = os.UserHomeDir()
+	return filepath.Join(p.homeDir(), ".local", "share", "whisper", "ggml-base.en.bin")
+}
+
+func (p *PosternTranscribe) homeDir() string {
+	if p.HomeDir != "" {
+		return p.HomeDir
 	}
-	return filepath.Join(home, ".local", "share", "whisper", "ggml-base.en.bin")
+	home, _ := os.UserHomeDir()
+	return home
+}
+
+func (p *PosternTranscribe) servicePath() string {
+	if p.ServicePath != "" {
+		return p.ServicePath
+	}
+	return DefaultServicePath
+}
+
+// onServicePath reports whether the bare name program is found on the
+// service PATH.
+func (p *PosternTranscribe) onServicePath(program string) bool {
+	return lookPath(p.servicePath(), program)
 }
 
 // executable reports whether program — a path, or a bare name looked up on
@@ -158,6 +189,10 @@ func (p *PosternTranscribe) executable(program string) bool {
 	if path == "" {
 		path = os.Getenv("PATH")
 	}
+	return lookPath(path, program)
+}
+
+func lookPath(path, program string) bool {
 	for _, dir := range filepath.SplitList(path) {
 		if dir != "" && isExecutable(filepath.Join(dir, program)) {
 			return true
