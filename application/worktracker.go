@@ -298,6 +298,8 @@ type NewStory struct {
 	EstimateMinutes int
 	Overrides       domain.Path
 	Needs           []string
+	// Labels are tags the story is filed with.
+	Labels []string
 }
 
 // BeadPage is one bead as ShowBeadPage reads it.

@@ -49,7 +49,9 @@ type FakeTracker struct {
 	// epicSaidAt is when each of epicSaid was left, by position; a comment
 	// past its end, or added without a time, has none.
 	epicSaidAt map[string][]time.Time
-	epicShut   map[string]string // root epic id -> the reason it was closed for
+	epicDesc   map[string]string   // root epic id -> its description
+	epicLabels map[string][]string // root epic id -> its labels
+	epicShut   map[string]string   // root epic id -> the reason it was closed for
 	stories    map[string]*fakeStory
 	order      []string
 	epics      []string
@@ -161,6 +163,8 @@ func NewFakeTracker() *FakeTracker {
 		epicSaid:   map[string][]string{},
 		epicSaidAt: map[string][]time.Time{},
 		epicShut:   map[string]string{},
+		epicDesc:   map[string]string{},
+		epicLabels: map[string][]string{},
 		stories:    map[string]*fakeStory{},
 		formulas:   map[string][]application.FormulaStep{},
 		poured:     map[string]string{},
@@ -187,6 +191,29 @@ func (f *FakeTracker) DescribeEpic(id, title, status string, priority int) {
 	defer f.mu.Unlock()
 	f.titles[id] = title
 	f.epicSays[id] = epicFacts{status: status, priority: priority}
+}
+
+// DescribeEpicText gives a root epic the description a reading of it reports,
+// and EpicLabels reports the labels it carries. They are fixtures for a
+// scenario that filed an epic without CreateEpic.
+func (f *FakeTracker) DescribeEpicText(id, description string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.epicDesc[id] = description
+}
+
+// EpicLabels reports the labels a root epic carries, as AddLabel put them.
+func (f *FakeTracker) EpicLabels(id string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.epicLabels[id]...)
+}
+
+// EpicComments reports the comments left on a root epic, oldest first.
+func (f *FakeTracker) EpicComments(id string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.epicSaid[id]...)
 }
 
 // AddEpicComment records a comment already left on an epic, after those before
@@ -332,6 +359,7 @@ func (f *FakeTracker) CreateEpic(_ context.Context, epic application.NewEpic) (s
 	f.epics = append(f.epics, id)
 	f.defaults[id] = epic.Defaults
 	f.titles[id] = epic.Title
+	f.epicDesc[id] = epic.Description
 	return id, nil
 }
 
@@ -379,6 +407,7 @@ func (f *FakeTracker) CreateStory(_ context.Context, story application.NewStory)
 			Description:     story.Description,
 			Acceptance:      story.Acceptance,
 			EstimateMinutes: story.EstimateMinutes,
+			Labels:          append([]string(nil), story.Labels...),
 		},
 		metadata: story.Overrides.Metadata(),
 		needs:    append([]string(nil), story.Needs...),
@@ -607,6 +636,10 @@ func (f *FakeTracker) epicBead(id string, epic application.EpicDetail) applicati
 	} else {
 		bead.CommentCount = len(f.epicSaid[id])
 	}
+	if _, filed := f.stories[id]; !filed {
+		bead.Description = f.epicDesc[id]
+		bead.Labels = append([]string(nil), f.epicLabels[id]...)
+	}
 	bead.Story.Title = epic.Title
 	bead.Story.Overrides = epic.Defaults
 	bead.Status = epic.Status
@@ -718,6 +751,18 @@ func (f *FakeTracker) SetStoryPriority(_ context.Context, id string, priority in
 
 // AddLabel implements application.WorkTracker, for a story the fake holds.
 func (f *FakeTracker) AddLabel(_ context.Context, id, label string) error {
+	f.mu.Lock()
+	if _, isStory := f.stories[id]; !isStory {
+		if _, isEpic := f.defaults[id]; isEpic {
+			if !carries(f.epicLabels[id], label) {
+				f.epicLabels[id] = append(f.epicLabels[id], label)
+			}
+			f.writes++
+			f.mu.Unlock()
+			return nil
+		}
+	}
+	f.mu.Unlock()
 	return f.write(id, func(s *fakeStory) error {
 		if !carries(s.detail.Labels, label) {
 			s.detail.Labels = append(append([]string(nil), s.detail.Labels...), label)

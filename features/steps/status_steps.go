@@ -34,6 +34,8 @@ type statusContext struct {
 
 	tracker *apptest.FakeTracker
 	runner  *apptest.FakeRunner
+	// epicRules is what each rig requires of its epics.
+	epicRules *apptest.FakeEpicRules
 
 	lastEpic string
 	now      time.Time
@@ -69,6 +71,7 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 		*c = statusContext{
 			tracker:        apptest.NewFakeTracker(),
 			runner:         apptest.NewFakeRunner(),
+			epicRules:      apptest.NewFakeEpicRules(),
 			now:            time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC),
 			silentHoursWas: was,
 			silentHoursSet: set,
@@ -128,6 +131,7 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the configuration says a rig's memory may be (\d+) bytes$`, c.theConfigurationSaysARigsMemoryMayBe)
 
 	c.registerTickSteps(ctx)
+	c.registerEpicSteps(ctx)
 
 	ctx.When(`^mw status reads the host$`, c.mwStatusReadsTheHost)
 
@@ -432,6 +436,7 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 	c.report, c.err = application.Status{
 		Tracker:        c.tracker,
 		Notes:          c.tracker,
+		Rules:          c.epicRules,
 		Vault:          vault.New(dir),
 		Host:           statusHost,
 		Seat:           statusSeat,
@@ -976,7 +981,8 @@ func (c *statusContext) nothingWasWritten() error {
 		return err
 	}
 	for _, call := range c.tracker.Asked()[c.askedBefore:] {
-		if call != "WorkInHand" && call != "ReadyWithLabel" {
+		// ShowBeads reads the live epics for the rig requirements they are held to.
+		if call != "WorkInHand" && call != "ReadyWithLabel" && call != "ShowBeads" {
 			return fmt.Errorf("expected mw status to only read the tracker, but it called %s", call)
 		}
 	}

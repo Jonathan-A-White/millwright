@@ -186,6 +186,9 @@ func (g *Gateway) CreateStory(ctx context.Context, story application.NewStory) (
 	for _, need := range story.Needs {
 		args = append(args, "--deps", "blocked-by:"+need)
 	}
+	if len(story.Labels) > 0 {
+		args = append(args, "--labels", strings.Join(story.Labels, ","))
+	}
 	return g.created(ctx, "the story "+story.Title, args)
 }
 
