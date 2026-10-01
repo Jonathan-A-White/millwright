@@ -55,14 +55,17 @@ func (r TalkCallRequest) validate() error {
 // TalkCall sends the Mayor's call-back: it encrypts postern's
 // docs/protocol.md section 21 ring plaintext to the Governor and hands the
 // record straight to the postern backend (section 9), as TalkSay does for a
-// turn. The record's class is call and it carries no summary, so no word of it
-// is pushed, handed to a hook or logged by the backend. It reads one note,
-// the channel TalkWait last heard the Governor by, and writes none.
+// turn. The record's class is call and it carries, in the clear beside class
+// and ct, the role ring, which is what makes the backend push "The Mayor is
+// calling". A direct record also carries the reason as its summary, the body
+// of that push, cut to 80 runes. It reads one note, the channel TalkWait last
+// heard the Governor by, and writes none.
 //
 // On chain — the request's Chain, or the Governor's newest record having come
-// by chain — the very same record is also broadcast, through the backend's
-// broadcast, which is local to the Mayor, so a phone that cannot reach the
-// backend still sees it. The direct delivery goes first; a chain that was
+// by chain — the ring is also broadcast, through the backend's broadcast,
+// which is local to the Mayor, so a phone that cannot reach the backend still
+// sees it. The chain record carries the role and no summary: it is public for
+// good, so the reason is never on it. The direct delivery goes first; a chain that was
 // asked for and fails is an error naming the txid that did go direct, one
 // added by itself is only said.
 type TalkCall struct {
@@ -122,10 +125,16 @@ func (c TalkCall) Run(ctx context.Context, req TalkCallRequest) (TalkCallReport,
 	if err != nil {
 		return TalkCallReport{}, err
 	}
-	payload, err := json.Marshal(PosternPayload{
-		V: 1, Kind: PosternMessageKind, Class: callRecordClass,
+	record := PosternPayload{
+		V: 1, Kind: PosternMessageKind, Class: callRecordClass, Role: CallRoleRing,
 		To: c.GovernorKey, From: from, Ts: c.now().Unix(), Ct: ciphertext,
-	})
+	}
+	chainRecord, err := json.Marshal(record)
+	if err != nil {
+		return TalkCallReport{}, fmt.Errorf("building the record's payload: %w", err)
+	}
+	record.Summary = ringSummary(req.Text)
+	payload, err := json.Marshal(record)
 	if err != nil {
 		return TalkCallReport{}, fmt.Errorf("building the record's payload: %w", err)
 	}
@@ -137,7 +146,7 @@ func (c TalkCall) Run(ctx context.Context, req TalkCallRequest) (TalkCallReport,
 	report := TalkCallReport{Txid: txid}
 	chainNote := ""
 	if wanted, automatic := c.wantsChain(ctx, req); wanted {
-		chainTxid, err := c.broadcast(ctx, payload)
+		chainTxid, err := c.broadcast(ctx, chainRecord)
 		switch {
 		case err == nil:
 			report.ChainTxid = chainTxid
@@ -158,6 +167,17 @@ func (c TalkCall) Run(ctx context.Context, req TalkCallRequest) (TalkCallReport,
 		fmt.Fprintf(c.Out, "elapsed %d ms\n", report.Elapsed.Milliseconds())
 	}
 	return report, nil
+}
+
+// ringSummary is the reason as the clear summary of a direct ring: on one
+// line and cut to PosternSummaryRunes, an ellipsis the last, with no space
+// before it.
+func ringSummary(reason string) string {
+	line := strings.Join(strings.Fields(reason), " ")
+	if cut := cutSummary(line); cut != line {
+		return strings.TrimRight(strings.TrimSuffix(cut, "…"), " ") + "…"
+	}
+	return line
 }
 
 // wantsChain reports whether the ring goes on chain too, and whether that is

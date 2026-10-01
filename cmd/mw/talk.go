@@ -239,10 +239,12 @@ func newTalkCallCmd() *cobra.Command {
 			"docs/protocol.md section 21 ring plaintext and hands the record straight to the postern backend\n" +
 			"(section 9), printing the txid and the milliseconds it took. It is the Mayor's answer to a call\n" +
 			"request that mw talk wait printed ('call <txid> at <time>: <text>'). The record's class is call\n" +
-			"and it carries no summary: the backend never pushes or logs a word of it. It uses the direct\n" +
-			"channel whatever postern_channel says, and touches no bead and writes no note.\n\n" +
-			"--chain also broadcasts the same record on chain, through the backend's broadcast (local to the\n" +
-			"Mayor), so a phone that cannot reach the backend still rings; both txids are printed. Without it\n" +
+			"and it carries the clear role ring, which makes the backend push 'The Mayor is calling', and the\n" +
+			"text, cut to 80 runes, as its clear summary, the push's body. It uses the direct channel whatever\n" +
+			"postern_channel says, and touches no bead and writes no note.\n\n" +
+			"--chain also broadcasts the ring on chain, with the role and no summary, through the backend's\n" +
+			"broadcast (local to the Mayor), so a phone that cannot reach the backend still rings; both txids\n" +
+			"are printed. Without it\n" +
 			"the chain is added by itself when the newest record mw talk wait heard from the Governor came by\n" +
 			"chain (a bare txid); one that came direct does not add it.\n\n" +
 			"--link <bead> (repeatable) puts a bead id in the record's links field, beside the text and never\n" +

@@ -464,7 +464,9 @@ const PosternMessageKind = "msg"
 // record framing. Everything but Ct travels in the clear. Summary is the one
 // extra, omitted when empty, so a record without one is byte for byte what it
 // was: a short clear line a direct record carries for the push's body, never
-// a word of the text, and never on a record the chain carries.
+// a word of the text, and never on a record the chain carries. Role is the
+// other, and the sender's alone to put: only a call record carries it (§21),
+// the Mayor's ring as "ring", so the backend can push a ring and nothing else.
 type PosternPayload struct {
 	V     int    `json:"v"`     // always 1
 	Kind  string `json:"kind"`  // always PosternMessageKind
@@ -474,6 +476,7 @@ type PosternPayload struct {
 	Ts    int64  `json:"ts"`    // Unix seconds, when the sender built it
 	Ct    string `json:"ct"`    // the BRC-78 ciphertext of the text, base64
 
+	Role    string `json:"role,omitempty"`    // a call record's role, in the clear: "ring"
 	Summary string `json:"summary,omitempty"` // direct records only: what the push says
 }
 

@@ -2,13 +2,15 @@ Feature: mw talk call
   mw talk call is the Mayor's call-back: it encrypts a short line to the
   Governor as postern's docs/protocol.md section 21 ring plaintext and hands
   the record straight to the postern backend (section 9), as mw talk say does.
-  The record's class is call and it carries no summary, so no word of it is
-  pushed or logged by the backend. It prints the txid and the milliseconds it
-  took.
+  The record's class is call, and beside the class and ct it carries the clear
+  role "ring", which is how the backend knows to push "The Mayor is calling";
+  a direct record also carries the reason as its summary, cut to 80 runes, the
+  body of that push. It prints the txid and the milliseconds it took.
 
   A phone that cannot reach the backend still sees the chain, so --chain also
-  broadcasts the same record on chain, through the backend's broadcast (which
-  is local to the Mayor), and prints both txids. Without the flag the chain is
+  broadcasts the ring on chain, through the backend's broadcast (which is local
+  to the Mayor), and prints both txids. The chain record carries the role but no
+  summary: a record on chain is public for good, so the reason is never on it. Without the flag the chain is
   added by itself when the newest record from the Governor that mw talk wait
   heard carried a bare txid, which is how a record that came by chain goes; a
   direct one, "direct:<id>", does not add it.
@@ -17,15 +19,20 @@ Feature: mw talk call
     Given a throwaway Mayor postern key for talking
     And a throwaway Governor key for talking
 
-  Scenario: a call-back is a call ring record the Governor can read, with no summary
+  Scenario: a call-back is a call ring record the Governor can read, with its role and reason in the clear
     When mw talk call "Back now: two landings." is run
     Then the talk record was delivered directly, and nothing was broadcast
     And the delivered talk record's class is "call"
-    And the delivered talk record carries no summary
+    And the delivered talk record's clear role is "ring"
+    And the delivered talk record's summary is "Back now: two landings."
     And the delivered talk record is addressed to the Governor from the Mayor
     And the Governor decrypts the call record's plaintext to role "ring" saying "Back now: two landings."
     And the call record says when it was sent
     And it prints "txid direct:" and the elapsed milliseconds
+
+  Scenario: a reason longer than 80 runes is cut to 80 in the summary
+    When mw talk call with a reason of 81 runes is run
+    Then the delivered talk record's summary is 80 runes of the reason
 
   Scenario: --link carries bead ids in the record and never in the text
     When mw talk call "Back now." is run with links "mw-x.1" and "mw-x.2"
@@ -52,7 +59,9 @@ Feature: mw talk call
     Given the Mayor's postern key holds a spendable output of 100000 satoshis
     When mw talk call "Back now." is run on chain
     Then the talk record was delivered directly
-    And the ring was broadcast once, carrying the delivered record
+    And the ring was broadcast once, carrying the delivered record without its summary
+    And the broadcast ring's clear role is "ring"
+    And the broadcast ring carries no summary
     And it prints "txid direct:" and the elapsed milliseconds
     And it prints the chain txid "fake-txid-1"
 
@@ -61,7 +70,8 @@ Feature: mw talk call
     And the newest record mw talk wait heard from the Governor came by chain
     When mw talk call "Back now." is run
     Then the talk record was delivered directly
-    And the ring was broadcast once, carrying the delivered record
+    And the ring was broadcast once, carrying the delivered record without its summary
+    And the broadcast ring's clear role is "ring"
     And it prints the chain txid "fake-txid-1"
 
   Scenario: after a Governor record that came direct the call-back is not broadcast

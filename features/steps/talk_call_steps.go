@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,7 +37,39 @@ func (c *talkSayContext) registerCall(ctx *godog.ScenarioContext) {
 		_, err := c.delivered()
 		return err
 	})
-	ctx.Then(`^the ring was broadcast once, carrying the delivered record$`, c.ringBroadcastOnce)
+	ctx.Then(`^the ring was broadcast once, carrying the delivered record without its summary$`, c.ringBroadcastOnce)
+	ctx.Then(`^the broadcast ring's clear role is "([^"]*)"$`, func(role string) error {
+		return c.broadcastRingHas(func(p map[string]json.RawMessage) error { return wantRole(p, role) })
+	})
+	ctx.Then(`^the broadcast ring carries no summary$`, func() error {
+		return c.broadcastRingHas(func(p map[string]json.RawMessage) error {
+			if _, ok := p["summary"]; ok {
+				return fmt.Errorf("expected no summary on the chain ring, got %s", p["summary"])
+			}
+			return nil
+		})
+	})
+	ctx.Then(`^the delivered talk record's clear role is "([^"]*)"$`, func(role string) error {
+		return c.deliveredHas(func(p map[string]json.RawMessage) error { return wantRole(p, role) })
+	})
+	ctx.Then(`^the delivered talk record's summary is "([^"]*)"$`, func(want string) error {
+		return c.deliveredHas(func(p map[string]json.RawMessage) error { return wantSummary(p, want) })
+	})
+	ctx.When(`^mw talk call with a reason of 81 runes is run$`, func() error {
+		return c.runCall(application.TalkCallRequest{Text: strings.Repeat("é", 81)})
+	})
+	ctx.Then(`^the delivered talk record's summary is 80 runes of the reason$`, func() error {
+		return c.deliveredHas(func(p map[string]json.RawMessage) error {
+			var summary string
+			if err := json.Unmarshal(p["summary"], &summary); err != nil {
+				return fmt.Errorf("expected a summary string: %w", err)
+			}
+			if n := len([]rune(summary)); n != 80 || !strings.HasPrefix(summary, strings.Repeat("é", 79)) {
+				return fmt.Errorf("expected 80 runes of the reason, got %d: %q", n, summary)
+			}
+			return nil
+		})
+	})
 	ctx.Then(`^it prints the chain txid "([^"]*)"$`, func(txid string) error {
 		return c.printsLine("chain txid " + txid)
 	})
@@ -76,24 +109,85 @@ func (c *talkSayContext) theMayorHoldsAnOutput(sats int64) error {
 	return nil
 }
 
-// ringBroadcastOnce is the transaction broadcast holding the very bytes that
-// were delivered directly.
-func (c *talkSayContext) ringBroadcastOnce() error {
-	if c.err != nil {
-		return fmt.Errorf("expected it to succeed, got: %w", c.err)
+func wantRole(p map[string]json.RawMessage, want string) error {
+	if got := string(p["role"]); got != strconv.Quote(want) {
+		return fmt.Errorf("expected clear role %q, got %s", want, got)
 	}
+	return nil
+}
+
+func wantSummary(p map[string]json.RawMessage, want string) error {
+	if got := string(p["summary"]); got != strconv.Quote(want) {
+		return fmt.Errorf("expected summary %q, got %s", want, got)
+	}
+	return nil
+}
+
+// deliveredHas runs check on the clear fields of the record delivered directly.
+func (c *talkSayContext) deliveredHas(check func(map[string]json.RawMessage) error) error {
 	payload, err := c.delivered()
 	if err != nil {
 		return err
 	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		return err
+	}
+	return check(fields)
+}
+
+// broadcastPayload is the record the one broadcast transaction carries.
+func (c *talkSayContext) broadcastPayload() ([]byte, error) {
 	broadcasts := c.backend.Broadcasts()
 	if len(broadcasts) != 1 {
-		return fmt.Errorf("expected one broadcast, got %d", len(broadcasts))
+		return nil, fmt.Errorf("expected one broadcast, got %d", len(broadcasts))
+	}
+	payload, err := c.withoutSummary()
+	if err != nil {
+		return nil, err
 	}
 	if !strings.Contains(broadcasts[0], hex.EncodeToString(payload)) {
-		return fmt.Errorf("the broadcast transaction does not carry the delivered record")
+		return nil, fmt.Errorf("the broadcast transaction does not carry the delivered record without its summary")
 	}
-	return nil
+	return payload, nil
+}
+
+// withoutSummary is the delivered record with its summary left off, the bytes
+// the chain copy must be.
+func (c *talkSayContext) withoutSummary() ([]byte, error) {
+	delivered, err := c.delivered()
+	if err != nil {
+		return nil, err
+	}
+	var record application.PosternPayload
+	if err := json.Unmarshal(delivered, &record); err != nil {
+		return nil, err
+	}
+	record.Summary = ""
+	return json.Marshal(record)
+}
+
+// broadcastRingHas runs check on the clear fields of the broadcast ring.
+func (c *talkSayContext) broadcastRingHas(check func(map[string]json.RawMessage) error) error {
+	payload, err := c.broadcastPayload()
+	if err != nil {
+		return err
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		return err
+	}
+	return check(fields)
+}
+
+// ringBroadcastOnce is the transaction broadcast holding the bytes that were
+// delivered directly, less the summary a chain record never carries.
+func (c *talkSayContext) ringBroadcastOnce() error {
+	if c.err != nil {
+		return fmt.Errorf("expected it to succeed, got: %w", c.err)
+	}
+	_, err := c.broadcastPayload()
+	return err
 }
 
 func (c *talkSayContext) printsLine(want string) error {
