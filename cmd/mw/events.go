@@ -61,7 +61,12 @@ func newEventsFollowCmd() *cobra.Command {
 			"(seats/<seat>/subscribe.toml, see `mw events wait --help`): a seat whose window is up and idle at an empty\n" +
 			"input line is typed \"New events for <seat>: N. Run mw events tail --since <seq>.\" (and the mail line when mail\n" +
 			"is among them), a busy pane is left alone and told on a later pass, and a seat whose window is down and\n" +
-			"marked spring = true is brought up (mw deputy, mw millhand). It is what\n" +
+			"marked spring = true is brought up (mw deputy, mw millhand). It also runs the jobs the events call for,\n" +
+			"each as the unit its timer starts, at most one in flight: a bead opened or landed runs\n" +
+			"mw-dispatch.service, an alarm (an emergency-lane event), mail for the Millhand or a failed doctor\n" +
+			"mw-millhand-tick.service; each with an [events] heartbeat (default 1h) as fallback; and mw-mail-notify.service\n" +
+			"on its own [events] clock (default 5m). Every pass writes job events: scheduled, running, done or failed.\n" +
+			"It is what\n" +
 			"contrib/systemd/mw-view-follow.service runs; `mw postern view --follow` is the same loop.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -131,15 +136,21 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 		Host:     host,
 		Err:      cmd.ErrOrStderr(),
 	}
+	spring, err := homeSpring(path, host, cmd.ErrOrStderr())
+	if err != nil {
+		return err
+	}
 	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
+	defer spring.Wait()
 	return application.EventFollow{
-		Shipper: shipper,
-		Nudger:  nudger,
-		Head:    gateway,
-		Feed:    gateway,
-		Log:     eventlog.New(path),
-		Cursors: eventlog.NewCursors(path),
+		Shipper:  shipper,
+		Nudger:   nudger,
+		Springer: spring,
+		Head:     gateway,
+		Feed:     gateway,
+		Log:      eventlog.New(path),
+		Cursors:  eventlog.NewCursors(path),
 		Publish: func(ctx context.Context) error {
 			sealed, err := sealedPosternView(view)
 			if err != nil {
