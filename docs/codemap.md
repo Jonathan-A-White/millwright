@@ -65,7 +65,7 @@ Each adapter: `var _ application.<Port> = ...`.
 | `Home` | `application/home.go` | `mw home` — `cmd/mw/home.go` | `features/home.feature` |
 | `HomeMove` | `application/homemove.go` | `mw home move` — `cmd/mw/homemove.go` | none: `docs/home-move.md` |
 | `Seat{Context,Up,Reap}` | `application/seat{context,up,reap}.go` | `mw seat context`/`up`/`reap` — `cmd/mw/seat.go` | `features/seat_{context,up,reap}.feature` |
-| `Talk{Model,Say,Wait}` | `application/talkmodel.go`, `application/talksay.go`, `application/talkwait.go` | mw talk say, mw talk wait, mw talk model — `cmd/mw/talk.go` | `features/talk_*.feature` |
+| Talk{Call,Model,Say,Wait} | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go | mw talk call/say/wait/model cmd/mw/talk.go | features/talk_*.feature |
 | `Millhand` | `application/millhand.go` | `mw millhand` — `cmd/mw/millhand.go` | `features/millhand.feature` |
 | `Deputy` | `application/deputy.go` | `mw deputy` — `cmd/mw/deputy.go` | `features/deputy.feature` |
 | `MillhandTick` | `application/millhandtick.go` | `mw millhand tick` — `cmd/mw/millhandtick.go` | `features/millhand_tick.feature` |

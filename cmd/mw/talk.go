@@ -22,6 +22,7 @@ func newTalkCmd() *cobra.Command {
 		Long:  "talk holds the commands the Mayor uses in a talk with the Governor.",
 		Args:  cobra.NoArgs,
 	}
+	talk.AddCommand(newTalkCallCmd())
 	talk.AddCommand(newTalkModelCmd())
 	talk.AddCommand(newTalkSayCmd())
 	talk.AddCommand(newTalkWaitCmd())
@@ -122,6 +123,8 @@ func newTalkWaitCmd() *cobra.Command {
 			"It also ends at a new postern message for the Mayor's key, one past the postern inbox's cursor\n" +
 			"(which it only reads), printing 'new postern message' with each one's channel, txid and first\n" +
 			"line; a message already read does not wake it, and a Governor turn that arrives with one wins.\n\n" +
+			"It also ends the instant the Governor's call record arrives, printing a request as 'call <txid> at\n" +
+			"<time>: <text>' and a later on a ring as 'later <ring txid>'; answer a request with mw talk call.\n\n" +
 			"The first run starts at the index's head: a turn from before it ever ran is not waited for. A\n" +
 			"stream that drops is opened again after a pause that doubles from --min-backoff to --max-backoff.\n" +
 			"It ends, saying so, after --limit with no turn: arm it again. $" + TalkWaitLimitEnv + " (seconds)\n" +
@@ -220,6 +223,50 @@ func newTalkSayCmd() *cobra.Command {
 	cmd.Flags().IntVar(&turn, "turn", 0, "the number of the Governor's turn this answers")
 	cmd.Flags().BoolVar(&holding, "holding", false, "send a short holding answer; the real answer follows")
 	cmd.Flags().BoolVar(&end, "end", false, "send the end of the talk")
+	cmd.Flags().StringArrayVar(&links, "link", nil, "a bead id to carry in the record's links field, not the text (repeatable)")
+	return cmd
+}
+
+// newTalkCallCmd builds `mw talk call`: the Mayor's call-back, a ring record
+// encrypted to the Governor and delivered direct.
+func newTalkCallCmd() *cobra.Command {
+	var links []string
+	cmd := &cobra.Command{
+		Use:   "call <text> [--link <bead>]...",
+		Short: "Call the Governor back: send a ring",
+		Long: "call encrypts <text>, the short line shown with the ring, to the Governor as postern's\n" +
+			"docs/protocol.md section 21 ring plaintext and hands the record straight to the postern backend\n" +
+			"(section 9), printing the txid and the milliseconds it took. It is the Mayor's answer to a call\n" +
+			"request that mw talk wait printed ('call <txid> at <time>: <text>'). The record's class is call\n" +
+			"and it carries no summary: the backend never pushes or logs a word of it. It uses the direct\n" +
+			"channel whatever postern_channel says, and touches no bead and no note.\n\n" +
+			"--link <bead> (repeatable) puts a bead id in the record's links field, beside the text and never\n" +
+			"in it. It refuses when postern_governor_key is not set.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			keys, err := posternKeys()
+			if err != nil {
+				return err
+			}
+			governorKey, err := config.PosternGovernorKey()
+			if err != nil {
+				return err
+			}
+			backend, err := posternBackend(keys)
+			if err != nil {
+				return err
+			}
+			_, err = application.TalkCall{
+				Postern:     backend,
+				Cipher:      posternCipher(keys),
+				Keys:        keys,
+				GovernorKey: governorKey,
+				Now:         posternClock,
+				Out:         cmd.OutOrStdout(),
+			}.Run(cmd.Context(), application.TalkCallRequest{Text: args[0], Links: links})
+			return err
+		},
+	}
 	cmd.Flags().StringArrayVar(&links, "link", nil, "a bead id to carry in the record's links field, not the text (repeatable)")
 	return cmd
 }

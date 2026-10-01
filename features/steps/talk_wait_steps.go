@@ -194,6 +194,19 @@ func talkTurnPlaintext(id string, turn int, role, text, model string, cut bool) 
 	return string(raw)
 }
 
+// callPlaintext is a section 21 call plaintext: a request or a ring carries
+// text and a time, a later names the ring it puts off.
+func callPlaintext(role, text, ringTxid string) string {
+	plain := map[string]any{"role": role}
+	if role == "later" {
+		plain["ring_txid"] = ringTxid
+	} else {
+		plain["text"], plain["at"] = text, time.Now().Unix()
+	}
+	raw, _ := json.Marshal(plain)
+	return string(raw)
+}
+
 func (c *talkWaitContext) governorTurn(turn int, id, text, model string, cut, announce bool) error {
 	return c.record("talk", c.mayor, c.governorKey, talkTurnPlaintext(id, turn, "turn", text, model, cut), announce)
 }
@@ -263,6 +276,21 @@ func InitializeTalkWaitScenario(ctx *godog.ScenarioContext) {
 	})
 	ctx.When(`^a talk record with role "([^"]*)" from the Governor to the Mayor is indexed$`, func(role string) error {
 		return c.record("talk", c.mayor, c.governorKey, talkTurnPlaintext("talk-x", 1, role, "not a turn", "", false), true)
+	})
+	ctx.When(`^the Governor's call request "([^"]*)" is indexed$`, func(text string) error {
+		return c.record("call", c.mayor, c.governorKey, callPlaintext("request", text, ""), true)
+	})
+	ctx.Given(`^the Governor's call request "([^"]*)" has been indexed$`, func(text string) error {
+		return c.record("call", c.mayor, c.governorKey, callPlaintext("request", text, ""), false)
+	})
+	ctx.When(`^the Governor's later on the ring "([^"]*)" is indexed$`, func(ring string) error {
+		return c.record("call", c.mayor, c.governorKey, callPlaintext("later", "", ring), true)
+	})
+	ctx.When(`^a call request to another key is indexed$`, func() error {
+		return c.record("call", "another-key", c.governorKey, callPlaintext("request", "not for the Mayor", ""), true)
+	})
+	ctx.When(`^a call request from "([^"]*)" to the Mayor is indexed$`, func(from string) error {
+		return c.record("call", c.mayor, from, callPlaintext("request", "not the Governor's", ""), true)
 	})
 	ctx.When(`^the stream drops$`, func() error {
 		before := c.backend.connections()

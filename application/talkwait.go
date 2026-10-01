@@ -90,7 +90,8 @@ const (
 // the Mayor's harness to run in the background. It holds the event stream open
 // and, on a message event, pages the records since its own cursor. It ends at
 // the first talk record the Governor sent the Mayor's key — a turn, or the end
-// of the talk — printing it, the time from the event to the print, and any new
+// of the talk — or the first call record he sent it — a request, or a later on
+// a ring — printing it, the time from the event to the print, and any new
 // mail the Deputy sent the Mayor. It ends on Limit with nothing to say. It
 // spends no model: it is the Mayor's harness that wakes on its exit.
 type TalkWait struct {
@@ -124,9 +125,14 @@ type TalkWait struct {
 	Err io.Writer
 }
 
-// TalkWaitReport is how a wait ended: Turn is nil when it ended on its limit.
+// TalkWaitReport is how a wait ended: Turn and Call are both nil when it ended
+// on its limit.
 type TalkWaitReport struct {
 	Turn *TalkTurn
+	// Call is the Governor's call record the wait ended on, a request or a
+	// later; CallTxid is its txid.
+	Call     *CallRecord
+	CallTxid string
 	// IndexToPrint is the time from the event that told the wait of the turn
 	// to the moment it printed it.
 	IndexToPrint time.Duration
@@ -218,6 +224,8 @@ type talkWaitRun struct {
 	// paged past before it reached the turn included.
 	turn      *TalkTurn
 	turnSeq   int64
+	call      *CallRecord
+	callTxid  string
 	posts     []PosternInboxMessage
 	heardAt   time.Time
 	printedAt time.Time
@@ -267,7 +275,13 @@ func (r *talkWaitRun) page(arrived time.Time) error {
 		if record.Seq <= r.cursor {
 			continue
 		}
-		if record.Class == talkRecordClass && record.To == pubKey {
+		if record.Class == callRecordClass && record.To == pubKey {
+			if call, ok := r.governorsCall(record, privKey); ok {
+				r.call, r.callTxid, r.heardAt = call, record.Txid, arrived
+				r.cursor = record.Seq
+				return errTalkHeard
+			}
+		} else if record.Class == talkRecordClass && record.To == pubKey {
 			turn, ok := r.governorsTurn(record, privKey)
 			if ok {
 				r.turn, r.turnSeq, r.heardAt = turn, record.Seq, arrived
@@ -337,13 +351,8 @@ func (r *talkWaitRun) unreadMessage(record PosternRecord, privKey string) (Poste
 // payload and the signer say. A record that is not, or is not a turn or an
 // end, is not the Governor's word.
 func (r *talkWaitRun) governorsTurn(record PosternRecord, privKey string) (*TalkTurn, bool) {
-	text, envelopeFrom, err := r.Cipher.Decrypt(privKey, record.Ciphertext)
-	if err != nil {
-		r.printf(r.Err, "mw talk wait: record %d (%s) would not decrypt: %v\n", record.Seq, record.Txid, err)
-		return nil, false
-	}
-	from, verified, _ := posternVerifySender(envelopeFrom, record.From, record.Signer)
-	if !verified || from != r.GovernorKey {
+	text, ok := r.governorsPlaintext(record, privKey)
+	if !ok {
 		return nil, false
 	}
 	var turn TalkTurn
@@ -356,10 +365,61 @@ func (r *talkWaitRun) governorsTurn(record PosternRecord, privKey string) (*Talk
 	return &turn, true
 }
 
-// finish prints the turn, if there is one, then the new postern messages and the
+// governorsPlaintext decrypts record and returns its plaintext when its
+// envelope's sender, the one the cipher binds, is the Governor's key, and so is
+// what the payload and the signer say. One that would not decrypt is said on
+// Err and passed over.
+func (r *talkWaitRun) governorsPlaintext(record PosternRecord, privKey string) (string, bool) {
+	text, envelopeFrom, err := r.Cipher.Decrypt(privKey, record.Ciphertext)
+	if err != nil {
+		r.printf(r.Err, "mw talk wait: record %d (%s) would not decrypt: %v\n", record.Seq, record.Txid, err)
+		return "", false
+	}
+	from, verified, _ := posternVerifySender(envelopeFrom, record.From, record.Signer)
+	if !verified || from != r.GovernorKey {
+		return "", false
+	}
+	return text, true
+}
+
+// governorsCall reads record as a call record the Governor sent: a request
+// with its words, or a later naming the ring it puts off. Anything else, a
+// ring included, is not his word to the Mayor.
+func (r *talkWaitRun) governorsCall(record PosternRecord, privKey string) (*CallRecord, bool) {
+	text, ok := r.governorsPlaintext(record, privKey)
+	if !ok {
+		return nil, false
+	}
+	var call CallRecord
+	if json.Unmarshal([]byte(text), &call) != nil {
+		return nil, false
+	}
+	switch call.Role {
+	case CallRoleRequest:
+		if call.At == 0 {
+			call.At = record.Ts.Unix()
+		}
+	case CallRoleLater:
+		if call.RingTxid == "" {
+			return nil, false
+		}
+	default:
+		return nil, false
+	}
+	return &call, true
+}
+
+// finish prints the turn or the call, if there is one, then the new postern messages and the
 // Deputy's mail, and saves the cursor.
 func (r *talkWaitRun) finish(ctx context.Context) (TalkWaitReport, error) {
-	report := TalkWaitReport{Turn: r.turn, Postern: r.posts}
+	report := TalkWaitReport{Turn: r.turn, Call: r.call, CallTxid: r.callTxid, Postern: r.posts}
+	if r.call != nil {
+		if r.call.Role == CallRoleLater {
+			r.printf(r.Out, "later %s\n", r.call.RingTxid)
+		} else {
+			r.printf(r.Out, "call %s at %s: %s\n", r.callTxid, time.Unix(r.call.At, 0).UTC().Format(time.RFC3339), r.call.Text)
+		}
+	}
 	if r.turn != nil {
 		r.printedAt = r.now()
 		report.IndexToPrint = r.printedAt.Sub(r.heardAt)

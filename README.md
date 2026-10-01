@@ -2132,8 +2132,19 @@ new postern message: 1 unread, read them with mw postern inbox
 A Governor turn that arrives with one wins: the turn is printed first and the
 messages after it.
 
-`mw postern inbox` and its `--unread-count` skip talk records, so `mail-wait`
-never wakes the Mayor a second time for one turn. A first run starts at the
+It also ends the instant the Governor's **Call me** arrives: a `call` record
+(postern's `docs/protocol.md` section 21) whose plaintext is a `request` from
+him is printed as `call <txid> at <time>: <text>`, and one whose plaintext is a
+`later` on a ring prints `later <ring txid>`. The Mayor answers a request with
+`mw talk call` (below) or on the Talk line. A call record to another key, from
+anyone else, or a ring, is passed over.
+
+```
+call direct:3f2a… at 2026-10-01T14:03:11Z: Call me
+```
+
+`mw postern inbox` and its `--unread-count` skip talk and call records, so
+`mail-wait` never wakes the Mayor a second time for one turn. A first run starts at the
 index's head, so a turn from before it ever ran is not waited for. It ends,
 saying so, after `--limit` (`MW_TALK_WAIT_LIMIT` seconds, 3000 by default,
 like `mail-wait`): arm it again. The Mayor's key is let onto the event stream
@@ -2170,15 +2181,43 @@ elapsed 41 ms
 
 See `features/talk_say.feature`.
 
+## Calling the Governor back
+
+```sh
+bin/mw talk call "Back now: two landings."
+bin/mw talk call "Back now: two landings." --link mw-x.1 --link mw-x.2
+```
+
+`mw talk call` is the Mayor's call-back, the answer to a call request that
+`mw talk wait` printed. It encrypts the text to the Governor as postern's
+`docs/protocol.md` section 21 `ring` plaintext (`role`, `text`, and `at`, the
+Unix seconds now) and delivers the record straight to the backend, whatever
+`postern_channel` says, exactly as `mw talk say` does. The record's class is
+`call` and it carries no summary, so the backend never pushes or logs a word of
+it. It touches no bead and no note, prints the txid and the milliseconds it
+took, and refuses when `postern_governor_key` is not set. `--link <bead>`
+(repeatable) adds the ids to a `links` array in the plaintext, beside `text`
+and never in it; section 21 does not yet define `links`, as it did not for a
+talk turn.
+
+```
+call ring sent
+txid direct:3f2a…
+elapsed 41 ms
+```
+
+See `features/talk_call.feature` and `features/talk_wait.feature`.
+
 ## The Talk line and the Deputy
 
 A Talk is a spoken conversation between the Governor and the Mayor on
-Postern's Talk line, made of turns. Four commands serve it, each described in
+Postern's Talk line, made of turns. Five commands serve it, each described in
 its own section above or below:
 
 | Command | What it does |
 | --- | --- |
-| `mw talk wait` | Holds the event stream open and ends at the first turn (or end) the Governor sends the Mayor's key; prints it. `--limit` (default 50m, `$MW_TALK_WAIT_LIMIT`), `--min-backoff`, `--max-backoff`. |
+| `mw talk wait` | Holds the event stream open and ends at the first turn (or end), or call request, the Governor sends the Mayor's key; prints it. `--limit` (default 50m, `$MW_TALK_WAIT_LIMIT`), `--min-backoff`, `--max-backoff`. |
+| `mw talk call <text> [--link <bead>]...` | Sends the Mayor's call-back, a `ring` in a class `call` record, direct, no summary. |
 | `mw talk say <text> --talk <id> --turn <n>` | Sends the Mayor's spoken answer, class `talk`, no summary. `--holding` for a short answer while the real one comes, `--end` to end the talk. |
 | `mw talk model opus\|sonnet\|fable\|haiku --talk <id> --turn <n>` | Answers a model chip: speaks the switch, logs it, prints `hand off, then: bin/respawn-mayor high <full id>` for a fresh Mayor. Types into no window. |
 | `mw deputy [--reason text]` | Brings up the Deputy, who does the clerical and orchestration work while the Mayor talks. |
