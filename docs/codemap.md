@@ -64,7 +64,7 @@ Each adapter: `var _ application.<Port> = ...`.
 | `Home` | `application/home.go` | `mw home` — `cmd/mw/home.go` | `features/home.feature` |
 | `HomeMove` | `application/homemove.go` | `mw home move` — `cmd/mw/homemove.go` | none: `docs/home-move.md` |
 | `Seat{Context,Up,Reap}` | `application/seat{context,up,reap}.go` | `mw seat context`/`up`/`reap` — `cmd/mw/seat.go` | `features/seat_{context,up,reap}.feature` |
-| `TalkModel`, port `TalkLog` | `application/talkmodel.go` | `mw talk model` — `cmd/mw/talk.go` | `features/talk_model.feature` |
+| `TalkModel`, `TalkWait` | `application/talkmodel.go`, `application/talkwait.go` | `mw talk model`/`wait` — `cmd/mw/talk.go` | `features/talk_{model,wait}.feature` |
 | `Millhand` | `application/millhand.go` | `mw millhand` — `cmd/mw/millhand.go` | `features/millhand.feature` |
 | `Deputy` | `application/deputy.go` | `mw deputy` — `cmd/mw/deputy.go` | `features/deputy.feature` |
 | `MillhandTick` | `application/millhandtick.go` | `mw millhand tick` — `cmd/mw/millhandtick.go` | `features/millhand_tick.feature` |
@@ -78,7 +78,6 @@ Each adapter: `var _ application.<Port> = ...`.
 | `Grist{Key,Grind,Send,Eval}` | `application/grist.go`, `application/gristgrind.go`, `application/gristsend.go`, `application/gristeval.go` | `mw grist key`/`grind`/`send`/`eval` — `cmd/mw/grist.go` | `features/grist{,_send,_eval}.feature` |
 
 `cmd/mw/root.go` holds the tree, `cmd/mw/main.go` runs it, `cmd/mw/version.go` is `mw version`.
-`features/path_validation.feature` covers `domain/path.go`;
 `features/{ready_stories,claim_lease}.feature`: `WorkTracker`.
 
 ## Test helpers

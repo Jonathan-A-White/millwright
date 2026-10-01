@@ -1137,7 +1137,7 @@ func (i PosternInbox) fromLabel(m PosternInboxMessage) string {
 
 // UnreadCount reports how many messages addressed to this key are unread,
 // without reading them: it moves the cursor nowhere, so a notifier can call
-// it as often as it likes.
+// it as often as it likes. A talk record is not counted: mw talk wait's.
 func (i PosternInbox) UnreadCount(ctx context.Context) (int, error) {
 	if err := i.wired(); err != nil {
 		return 0, err
@@ -1182,7 +1182,9 @@ func (i PosternInbox) fetchSince(ctx context.Context, cursor int64) (mine []Post
 		if r.Seq > newest {
 			newest = r.Seq
 		}
-		if r.To != pubKeyHex {
+		// A talk turn is mw talk wait's to hear, never the inbox's: it would
+		// wake the Mayor a second time, from mail-wait, for one turn.
+		if r.Class == talkRecordClass || r.To != pubKeyHex {
 			continue
 		}
 		text, envelopeFrom, err := i.Cipher.Decrypt(privKey, r.Ciphertext)

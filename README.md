@@ -2034,6 +2034,40 @@ typing and giving up each append one dated line to `.mayor-talk.log`:
 `--foreground` watches in the calling process and exits non-zero when it gave
 up. See `features/talk_model.feature`.
 
+## Waiting for the Governor's next turn in a talk
+
+```sh
+bin/mw talk wait
+```
+
+`mw talk wait` is a zero-token wait, for the Mayor's harness to run in the
+background: it holds the postern backend's `/api/events` stream open, opening
+it again after a pause that doubles from `--min-backoff` to `--max-backoff`,
+and on a `message` event reads the records since its own cursor (the bd kv note
+`postern.talk.cursor`, never the postern inbox's). It ends at the first talk
+record that decrypts, is verifiably the Governor's and is a turn or the end of
+the talk, and prints the turn (talk id, turn, role, model, cut, text), the
+milliseconds from the event to the print, and any new Deputy mail to the Mayor
+(each message once, noted under `postern.talk.mail`; nothing is marked read).
+A record of another class, to another key or from anyone else is passed over.
+
+```
+talk talk-7 turn 3 (role turn)
+model sonnet
+cut yes
+text: What landed today?
+index-to-print 12 ms
+```
+
+`mw postern inbox` and its `--unread-count` skip talk records, so `mail-wait`
+never wakes the Mayor a second time for one turn. A first run starts at the
+index's head, so a turn from before it ever ran is not waited for. It ends,
+saying so, after `--limit` (`MW_TALK_WAIT_LIMIT` seconds, 3000 by default,
+like `mail-wait`): arm it again. The Mayor's key is let onto the event stream
+without a licence (postern's `docs/protocol.md` section 20), but reading the
+records behind an event needs a cockpit licence on it. See
+`features/talk_wait.feature`.
+
 ## Waking the Millhand
 
 ```sh

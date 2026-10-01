@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -26,6 +27,7 @@ func newTalkCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 	}
 	talk.AddCommand(newTalkModelCmd())
+	talk.AddCommand(newTalkWaitCmd())
 	return talk
 }
 
@@ -113,5 +115,82 @@ func newTalkModelCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&foreground, "foreground", false, "watch in this process instead of starting the watch detached")
 	cmd.Flags().DurationVar(&interval, "interval", application.DefaultTalkModelInterval, "how long between looks")
 	cmd.Flags().DurationVar(&limit, "limit", application.DefaultTalkModelLimit, "how long to keep looking before giving up")
+	return cmd
+}
+
+// TalkWaitLimitEnv is the environment variable that sets, in seconds, how long
+// mw talk wait waits, as contrib/mail-wait's MW_MAIL_WAIT_LIMIT does.
+const TalkWaitLimitEnv = "MW_TALK_WAIT_LIMIT"
+
+// talkWaitLimit is the default of mw talk wait's --limit: $MW_TALK_WAIT_LIMIT
+// seconds when that is a whole number, else application.DefaultTalkWaitLimit.
+func talkWaitLimit() time.Duration {
+	if seconds, err := strconv.Atoi(os.Getenv(TalkWaitLimitEnv)); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	return application.DefaultTalkWaitLimit
+}
+
+// newTalkWaitCmd builds `mw talk wait`: the zero-token wait for the Governor's
+// next turn, which the Mayor's harness runs in the background.
+func newTalkWaitCmd() *cobra.Command {
+	var limit, minBackoff, maxBackoff time.Duration
+	cmd := &cobra.Command{
+		Use:   "wait",
+		Short: "Wait, spending no tokens, for the Governor's next turn in a talk",
+		Long: "wait holds the postern backend's event stream open and ends at the first talk turn the Governor\n" +
+			"sends the Mayor's key, so that the Mayor's harness, running it in the background, wakes the\n" +
+			"Mayor the instant a turn is indexed. It uses no model and types into no window.\n\n" +
+			"On a message event it reads the records since its own cursor, a bd kv note of its own that the\n" +
+			"postern inbox's never moves. It ends at the first talk record that decrypts, is verifiably the\n" +
+			"Governor's, and is a turn or the end of the talk; a record of another class, to another key, or\n" +
+			"from anyone else is passed over. It prints the turn (talk id, turn, role, model, cut, text), the\n" +
+			"milliseconds from the event to the print, and any new mail the Deputy sent the Mayor since the\n" +
+			"last turn, each message once. mw postern inbox and its --unread-count leave talk records alone, so\n" +
+			"mail-wait never wakes the Mayor a second time for one turn.\n\n" +
+			"The first run starts at the index's head: a turn from before it ever ran is not waited for. A\n" +
+			"stream that drops is opened again after a pause that doubles from --min-backoff to --max-backoff.\n" +
+			"It ends, saying so, after --limit with no turn: arm it again. $" + TalkWaitLimitEnv + " (seconds)\n" +
+			"sets the default of --limit, as MW_MAIL_WAIT_LIMIT does for mail-wait.\n\n" +
+			"The Mayor's key is let onto the event stream without a licence, but reading the records takes a\n" +
+			"cockpit licence on it.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			keys, err := posternKeys()
+			if err != nil {
+				return err
+			}
+			gateway, _, err := posternGateway()
+			if err != nil {
+				return err
+			}
+			backend, err := posternBackend(keys)
+			if err != nil {
+				return err
+			}
+			governorKey, err := config.PosternGovernorKey()
+			if err != nil {
+				return err
+			}
+			_, err = application.TalkWait{
+				Stream:      backend,
+				Postern:     backend,
+				Cipher:      posternCipher(keys),
+				Keys:        keys,
+				Memory:      gateway,
+				Mailbox:     gateway,
+				GovernorKey: governorKey,
+				Limit:       limit,
+				MinBackoff:  minBackoff,
+				MaxBackoff:  maxBackoff,
+				Out:         cmd.OutOrStdout(),
+				Err:         cmd.ErrOrStderr(),
+			}.Run(cmd.Context())
+			return err
+		},
+	}
+	cmd.Flags().DurationVar(&limit, "limit", talkWaitLimit(), "how long to wait for a turn before ending, saying so")
+	cmd.Flags().DurationVar(&minBackoff, "min-backoff", application.DefaultTalkWaitMinBackoff, "the first pause before opening a dropped stream again")
+	cmd.Flags().DurationVar(&maxBackoff, "max-backoff", application.DefaultTalkWaitMaxBackoff, "the longest pause before opening a dropped stream again")
 	return cmd
 }

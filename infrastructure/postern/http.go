@@ -1,6 +1,7 @@
 package postern
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -25,6 +26,7 @@ import (
 var posternBlobHash = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
 
 var _ application.Postern = (*HTTP)(nil)
+var _ application.PosternStream = (*HTTP)(nil)
 
 // httpTimeout bounds each call to the backend: it sits at the far end of a
 // WireGuard tunnel, and a broadcast waits on WhatsOnChain behind it.
@@ -58,13 +60,16 @@ type ChallengeSigner interface {
 type HTTP struct {
 	base   string
 	client *http.Client
+	// stream is the client the event stream is read with: no Timeout, which
+	// would cut a stream that is meant to stay open; its ctx ends it.
+	stream *http.Client
 	keys   ChallengeSigner
 }
 
 // NewHTTP is the postern backend at base, e.g. http://desktop.mw:8787,
 // authenticating every call with keys — the Mayor's postern key.
 func NewHTTP(base string, keys ChallengeSigner) *HTTP {
-	return &HTTP{base: strings.TrimRight(base, "/"), client: &http.Client{Timeout: httpTimeout}, keys: keys}
+	return &HTTP{base: strings.TrimRight(base, "/"), client: &http.Client{Timeout: httpTimeout}, stream: &http.Client{}, keys: keys}
 }
 
 // apiRecord is one record as GET /api/messages returns it. Its payload is
@@ -420,4 +425,79 @@ func (h *HTTP) fetchAs(ctx context.Context, method, path string, body []byte, au
 		return nil, &statusError{code: resp.StatusCode, said: fmt.Sprintf("the postern backend at %s said %d to %s %s: %s", h.base, resp.StatusCode, method, path, said.Error)}
 	}
 	return raw, nil
+}
+
+// Events implements application.PosternStream: GET /api/events, postern's
+// docs/protocol.md section 10, read as server-sent events. A hello's head and
+// a message's seq both come back as the event's Seq; a comment (the ping) and
+// an event it does not know are skipped.
+func (h *HTTP) Events(ctx context.Context, onEvent func(application.PosternEvent) error) error {
+	_, header, err := h.authHeader(ctx)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, h.base+"/api/events", nil)
+	if err != nil {
+		return fmt.Errorf("asking the postern backend at %s for its event stream: %w", h.base, err)
+	}
+	req.Header.Set("Authorization", header)
+	req.Header.Set("Accept", "text/event-stream")
+	resp, err := h.stream.Do(req)
+	if err != nil {
+		return fmt.Errorf("reaching the postern backend at %s: %w", h.base, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		said, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("the postern backend at %s said %d to GET /api/events: %s", h.base, resp.StatusCode, strings.TrimSpace(string(said)))
+	}
+
+	reader := bufio.NewReader(resp.Body)
+	var kind, data string
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return fmt.Errorf("the postern backend's event stream at %s ended: %w", h.base, err)
+		}
+		line = strings.TrimRight(line, "\r\n")
+		switch {
+		case line == "":
+			event, ok := parseStreamEvent(kind, data)
+			kind, data = "", ""
+			if !ok {
+				continue
+			}
+			if err := onEvent(event); err != nil {
+				return err
+			}
+		case strings.HasPrefix(line, ":"):
+		case strings.HasPrefix(line, "event:"):
+			kind = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
+		case strings.HasPrefix(line, "data:"):
+			data += strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		}
+	}
+}
+
+// parseStreamEvent reads one event of the stream: a hello or a message, the
+// two TalkWait looks at. ok is false for any other, or one whose data is not
+// the JSON the docs show.
+func parseStreamEvent(kind, data string) (event application.PosternEvent, ok bool) {
+	var body struct {
+		Head int64 `json:"head"`
+		Seq  int64 `json:"seq"`
+	}
+	if json.Unmarshal([]byte(data), &body) != nil {
+		return application.PosternEvent{}, false
+	}
+	switch kind {
+	case application.PosternEventHello:
+		return application.PosternEvent{Kind: kind, Seq: body.Head}, true
+	case application.PosternEventMessage:
+		return application.PosternEvent{Kind: kind, Seq: body.Seq}, true
+	}
+	return application.PosternEvent{}, false
 }
