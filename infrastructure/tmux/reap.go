@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -153,14 +154,24 @@ func classifyPane(screen string) application.PaneState {
 	return application.PaneInput
 }
 
+// enterPause is how long Type waits between the text and the Enter key: Claude
+// Code's input line reads the text first, and an Enter sent right behind it is
+// not taken as a submit (contrib/mail-notify's type_line pauses the same).
+var enterPause = 500 * time.Millisecond
+
 // Type implements application.ReapTerminal: the text, typed literally into the
-// window's pane, followed by the Enter key.
+// window's pane, a short pause, then the Enter key.
 func (w *Windows) Type(ctx context.Context, window, text string) error {
 	if err := windowID(window); err != nil {
 		return err
 	}
 	if _, err := w.call(ctx, "send-keys", "-t", window, "-l", "--", text); err != nil {
 		return err
+	}
+	select {
+	case <-time.After(enterPause):
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 	_, err := w.call(ctx, "send-keys", "-t", window, "Enter")
 	return err

@@ -28,7 +28,10 @@ func newDeputyCmd() *cobra.Command {
 			"when idle, and then the --reason it was brought up.\n\n" +
 			"It refuses and starts nothing when seats/deputy has no charter.md. If a window named deputy-* is\n" +
 			"already open, it starts nothing, says so in one line and leaves with status " + fmt.Sprint(application.DeputyUpExit) + ",\n" +
-			"so the Mayor can mail the Deputy and fire, and tell \"already up\" from a failure.",
+			"so the Mayor can mail the Deputy and fire, and tell \"already up\" from a failure. If that window's pane\n" +
+			"is idle at an empty input line and the Deputy's box holds unread mail, it types the mail nudge into it\n" +
+			"instead and says it nudged the Deputy (status 0); a busy pane is left alone: \"the Deputy is busy in\n" +
+			"window <name>; the mail waits\" (status " + fmt.Sprint(application.DeputyUpExit) + ").",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := config.Vault()
@@ -55,6 +58,7 @@ func newDeputyCmd() *cobra.Command {
 				Harness:  sessionHarness(dir, host),
 				Terminal: windows,
 				Armer:    reaper.New(exe),
+				Mail:     mwGateway(dir, host),
 
 				Host:   host,
 				Reason: reason,
