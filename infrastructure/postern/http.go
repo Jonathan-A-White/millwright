@@ -197,24 +197,76 @@ func (h *HTTP) Deliver(ctx context.Context, payload []byte) (string, error) {
 	return body.Txid, nil
 }
 
-// List implements application.Prompts: GET /api/prompts, answered
-// {"prompts": [{name, summary, signature, body}]}, authenticated as every
-// call here is.
-func (h *HTTP) List(ctx context.Context) ([]domain.Prompt, error) {
-	var body struct {
-		Prompts []domain.Prompt `json:"prompts"`
+// promptWire is a prompt as the backend sends and takes it (postern's
+// server/README.md, 'Saved prompts'): the signature is a list of option
+// objects, and updatedAt and updatedBy are the backend's own stamps, which
+// are read past and never sent.
+type promptWire struct {
+	Name      string       `json:"name"`
+	Summary   string       `json:"summary"`
+	Signature []optionWire `json:"signature"`
+	Body      string       `json:"body"`
+}
+
+// optionWire is one option of a prompt's signature: the flag with its leading
+// "--", its type (duration, string, int or bool), its default as a string,
+// and whether it must be given.
+type optionWire struct {
+	Flag     string `json:"flag"`
+	Type     string `json:"type"`
+	Default  string `json:"default,omitempty"`
+	Required bool   `json:"required,omitempty"`
+	Help     string `json:"help,omitempty"`
+}
+
+// wirePrompt is p as the backend takes it. A spec that does not read is an
+// error: the backend would refuse it anyway.
+func wirePrompt(p domain.Prompt) (promptWire, error) {
+	options, err := p.Options()
+	if err != nil {
+		return promptWire{}, err
 	}
+	wire := promptWire{Name: p.Name, Summary: p.Summary, Body: p.Body, Signature: make([]optionWire, len(options))}
+	for i, o := range options {
+		wire.Signature[i] = optionWire{Flag: "--" + o.Flag, Type: o.Type, Default: o.Default, Required: o.Required}
+	}
+	return wire, nil
+}
+
+// prompt is the wire prompt as the rest of mw holds it: each option as its
+// spec. A required option keeps no default, as a spec cannot have both.
+func (w promptWire) prompt() domain.Prompt {
+	p := domain.Prompt{Name: w.Name, Summary: w.Summary, Body: w.Body, Signature: make([]string, len(w.Signature))}
+	for i, o := range w.Signature {
+		option := domain.PromptOption{Flag: strings.TrimPrefix(o.Flag, "--"), Type: o.Type, Default: o.Default, Required: o.Required}
+		if option.Required {
+			option.Default = ""
+		}
+		p.Signature[i] = option.String()
+	}
+	return p
+}
+
+// List implements application.Prompts: GET /api/prompts, answered a bare JSON
+// array of prompts sorted by name ([] when none), authenticated as every call
+// here is.
+func (h *HTTP) List(ctx context.Context) ([]domain.Prompt, error) {
+	var body []promptWire
 	if err := h.authDo(ctx, http.MethodGet, "/api/prompts", nil, &body); err != nil {
 		return nil, err
 	}
-	return body.Prompts, nil
+	prompts := make([]domain.Prompt, len(body))
+	for i, w := range body {
+		prompts[i] = w.prompt()
+	}
+	return prompts, nil
 }
 
 // Get implements application.Prompts: GET /api/prompts/{name}, answered the
 // prompt itself; a 404 is a prompt not saved, and not an error.
 func (h *HTTP) Get(ctx context.Context, name string) (domain.Prompt, bool, error) {
-	var prompt domain.Prompt
-	err := h.authDo(ctx, http.MethodGet, "/api/prompts/"+url.PathEscape(name), nil, &prompt)
+	var wire promptWire
+	err := h.authDo(ctx, http.MethodGet, "/api/prompts/"+url.PathEscape(name), nil, &wire)
 	var status *statusError
 	if errors.As(err, &status) && status.code == http.StatusNotFound {
 		return domain.Prompt{}, false, nil
@@ -222,14 +274,18 @@ func (h *HTTP) Get(ctx context.Context, name string) (domain.Prompt, bool, error
 	if err != nil {
 		return domain.Prompt{}, false, err
 	}
-	return prompt, true, nil
+	return wire.prompt(), true, nil
 }
 
 // Put implements application.Prompts: PUT /api/prompts/{name} with
 // {name, summary, signature, body}, saving the prompt whole in place of any
 // of that name.
 func (h *HTTP) Put(ctx context.Context, p domain.Prompt) error {
-	req, err := json.Marshal(p)
+	wire, err := wirePrompt(p)
+	if err != nil {
+		return err
+	}
+	req, err := json.Marshal(wire)
 	if err != nil {
 		return err
 	}

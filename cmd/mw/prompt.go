@@ -49,7 +49,7 @@ func newPromptSaveCmd() *cobra.Command {
 		Long: "save keeps the prompt <name> on the postern backend, whole, in place of one of that name:\n" +
 			"its --summary, its signature (each --option, repeatable) and its body, read from\n" +
 			"--body-file, a draft in the vault. An option is <flag>:<type>=<default>, the type string,\n" +
-			"int or bool; <flag>:<type>:required has no default and must be given. In the body each\n" +
+			"int, bool or duration (30m); <flag>:<type>:required has no default and must be given. In the body each\n" +
 			"<flag> is replaced by the option's value when the prompt is run.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

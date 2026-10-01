@@ -476,11 +476,13 @@ func TestMeWithNoMillNamesNone(t *testing.T) {
 // all; Delete takes a 404 as already gone.
 func TestPromptsAreSavedReadAndDeletedThroughTheBackend(t *testing.T) {
 	prompt := domain.Prompt{Name: "top5", Summary: "The five next", Signature: []string{"count:int=5"}, Body: "Top <count>."}
-	saved, _ := json.Marshal(prompt)
+	// What the backend stores and answers (postern's server/README.md, 'Saved
+	// prompts'): the signature is a list of option objects, the stamps are its own.
+	saved := `{"name":"top5","summary":"The five next","signature":[{"flag":"--count","type":"int","default":"5"}],"body":"Top <count>.","updatedAt":"2026-10-01T12:00:00Z","updatedBy":"02aa"}`
 	b, backend := serve(t, map[string]answer{
-		"PUT /api/prompts/top5":    {200, `{}`},
-		"GET /api/prompts/top5":    {200, string(saved)},
-		"GET /api/prompts":         {200, `{"prompts":[` + string(saved) + `]}`},
+		"PUT /api/prompts/top5":    {200, saved},
+		"GET /api/prompts/top5":    {200, saved},
+		"GET /api/prompts":         {200, `[` + saved + `]`},
 		"DELETE /api/prompts/top5": {204, ""},
 	})
 	ctx := context.Background()
@@ -499,6 +501,10 @@ func TestPromptsAreSavedReadAndDeletedThroughTheBackend(t *testing.T) {
 		if _, ok := sent[field]; !ok {
 			t.Fatalf("expected the PUT body to carry %q, got %v", field, sent)
 		}
+	}
+	wantSignature := []any{map[string]any{"flag": "--count", "type": "int", "default": "5"}}
+	if !reflect.DeepEqual(sent["signature"], wantSignature) {
+		t.Fatalf("expected the signature as option objects %v, got %v", wantSignature, sent["signature"])
 	}
 	got, found, err := backend.Get(ctx, "top5")
 	if err != nil || !found || !reflect.DeepEqual(got, prompt) {
@@ -520,5 +526,29 @@ func TestPromptsAreSavedReadAndDeletedThroughTheBackend(t *testing.T) {
 	_, refusing := serve(t, map[string]answer{"PUT /api/prompts/top5": {403, `{"error":"not the mayor"}`}})
 	if err := refusing.Put(ctx, prompt); err == nil || !strings.Contains(err.Error(), "not the mayor") {
 		t.Fatalf("expected the backend's refusal, got %v", err)
+	}
+}
+
+// GET /api/prompts answers a bare JSON array, [] when none are saved
+// (postern's server/README.md): List reads one prompt and none.
+func TestPromptListReadsTheBackendsBareArray(t *testing.T) {
+	one := `[{"name":"sweep","summary":"Sweep a place","signature":[{"flag":"--duration","type":"duration","default":"30m"},{"flag":"--who","type":"string","required":true,"help":"whom"}],"body":"Sweep <who>.","updatedAt":"2026-10-01T12:00:00Z","updatedBy":"02aa"}]`
+	_, backend := serve(t, map[string]answer{"GET /api/prompts": {200, one}})
+	list, err := backend.List(context.Background())
+	if err != nil || len(list) != 1 {
+		t.Fatalf("expected the one prompt listed, got %+v err %v", list, err)
+	}
+	want := domain.Prompt{Name: "sweep", Summary: "Sweep a place", Signature: []string{"duration:duration=30m", "who:string:required"}, Body: "Sweep <who>."}
+	if !reflect.DeepEqual(list[0], want) {
+		t.Fatalf("expected %+v, got %+v", want, list[0])
+	}
+	if _, err := list[0].Options(); err != nil {
+		t.Fatalf("expected the listed signature to read, got %v", err)
+	}
+
+	_, empty := serve(t, map[string]answer{"GET /api/prompts": {200, `[]`}})
+	list, err = empty.List(context.Background())
+	if err != nil || len(list) != 0 {
+		t.Fatalf("expected no prompts and no error, got %+v err %v", list, err)
 	}
 }

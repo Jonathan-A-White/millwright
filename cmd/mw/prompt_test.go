@@ -11,15 +11,27 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/Jonathan-A-White/millwright/domain"
 )
+
+// wirePrompt is a prompt as the backend holds it (postern's server/README.md,
+// 'Saved prompts'): the signature is a list of option objects.
+type wirePrompt struct {
+	Name      string `json:"name"`
+	Summary   string `json:"summary"`
+	Signature []struct {
+		Flag     string `json:"flag"`
+		Type     string `json:"type"`
+		Default  string `json:"default"`
+		Required bool   `json:"required"`
+	} `json:"signature"`
+	Body string `json:"body"`
+}
 
 // promptBackend stands in for the postern backend's /api/prompts, keeping what
 // is PUT, and answering the challenge every call is proven with.
-func promptBackend(t *testing.T) (url string, kept map[string]domain.Prompt) {
+func promptBackend(t *testing.T) (url string, kept map[string]wirePrompt) {
 	t.Helper()
-	kept = map[string]domain.Prompt{}
+	kept = map[string]wirePrompt{}
 	var challenges int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -27,7 +39,7 @@ func promptBackend(t *testing.T) (url string, kept map[string]domain.Prompt) {
 			challenges++
 			fmt.Fprintf(w, `{"nonce":"nonce-%d"}`, challenges)
 		case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/api/prompts/"):
-			var p domain.Prompt
+			var p wirePrompt
 			raw, _ := io.ReadAll(r.Body)
 			if err := json.Unmarshal(raw, &p); err != nil {
 				w.WriteHeader(http.StatusBadRequest)
@@ -36,11 +48,11 @@ func promptBackend(t *testing.T) (url string, kept map[string]domain.Prompt) {
 			kept[strings.TrimPrefix(r.URL.Path, "/api/prompts/")] = p
 			io.WriteString(w, `{}`)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/prompts":
-			list := []domain.Prompt{}
+			list := []wirePrompt{}
 			for _, p := range kept {
 				list = append(list, p)
 			}
-			json.NewEncoder(w).Encode(map[string]any{"prompts": list})
+			json.NewEncoder(w).Encode(list)
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/prompts/"):
 			p, ok := kept[strings.TrimPrefix(r.URL.Path, "/api/prompts/")]
 			if !ok {
@@ -81,9 +93,10 @@ func TestPromptSaveListShowAndARunWithABadOptionAreRefusedByTheSignature(t *test
 	if err != nil {
 		t.Fatalf("mw prompt save failed: %v\n%s", err, out)
 	}
-	want := domain.Prompt{Name: "top5", Summary: "The five next", Signature: []string{"count:int=5"}, Body: "Name the top <count> things.\n"}
-	if got := kept["top5"]; got.Name != want.Name || got.Summary != want.Summary || got.Body != want.Body || strings.Join(got.Signature, ",") != "count:int=5" {
-		t.Fatalf("expected the backend to hold %+v, got %+v", want, got)
+	got := kept["top5"]
+	if got.Name != "top5" || got.Summary != "The five next" || got.Body != "Name the top <count> things.\n" ||
+		len(got.Signature) != 1 || got.Signature[0].Flag != "--count" || got.Signature[0].Type != "int" || got.Signature[0].Default != "5" {
+		t.Fatalf("expected the backend to hold top5 with option --count int 5, got %+v", got)
 	}
 
 	out, err = runPrompt(t, "list")
