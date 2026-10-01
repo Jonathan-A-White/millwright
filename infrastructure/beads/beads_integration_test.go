@@ -964,6 +964,48 @@ func TestGatewayTellsAStorysLabels(t *testing.T) {
 	}
 }
 
+// A story whose Path says host=auto is ready on every host, while one that names
+// a host is ready only there; once claimed and given this host's name it is
+// running on that host alone.
+func TestGatewayOffersAnAutoStoryToEveryHost(t *testing.T) {
+	t.Parallel()
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	epicID := bdRun(t, vault, beads.Program, "create", "An epic", "-t", "epic",
+		"--metadata", `{"rig":"millwright","branch":"main","harness":"claude","model":"opus","effort":"high","host":"vps"}`,
+		"--silent")
+	anywhere := bdRun(t, vault, beads.Program, "create", "Runs anywhere", "--parent", epicID,
+		"--metadata", `{"host":"auto"}`, "--silent")
+	bdRun(t, vault, beads.Program, "create", "Runs on the vps", "--parent", epicID, "--silent")
+
+	gateway := beads.New(vault)
+	laptop, err := gateway.ReadyForHost(ctx, "laptop")
+	if err != nil {
+		t.Fatalf("listing what is ready on laptop: %v", err)
+	}
+	if len(laptop) != 1 || laptop[0].Story.ID != anywhere {
+		t.Fatalf("expected only %s ready on laptop, got %+v", anywhere, laptop)
+	}
+	if vps, err := gateway.ReadyForHost(ctx, "vps"); err != nil || len(vps) != 2 {
+		t.Fatalf("expected both stories ready on vps, got %+v: %v", vps, err)
+	}
+
+	if err := gateway.ClaimStory(ctx, anywhere); err != nil {
+		t.Fatalf("claiming %s: %v", anywhere, err)
+	}
+	if err := gateway.SetStoryMetadata(ctx, anywhere, map[string]string{"host": "laptop"}); err != nil {
+		t.Fatalf("writing the host of %s: %v", anywhere, err)
+	}
+	if running, err := gateway.RunningStories(ctx, "laptop"); err != nil || len(running) != 1 {
+		t.Fatalf("expected %s running on laptop, got %+v: %v", anywhere, running, err)
+	}
+	if running, err := gateway.RunningStories(ctx, "vps"); err != nil || len(running) != 0 {
+		t.Fatalf("expected nothing running on vps, got %+v: %v", running, err)
+	}
+}
+
 // A bead labelled hitl that no epic gave a Path — the ticket a Mayor files for
 // the Governor — is found by its label alone, if it is open and not blocked;
 // one that is closed, blocked, claimed or unlabelled is not.
