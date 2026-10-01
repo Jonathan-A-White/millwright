@@ -72,6 +72,38 @@ func TestEventsEmitRefusesWhatTheMachineForbids(t *testing.T) {
 	}
 }
 
+// mw events emit --kind control carries a word to the factory, refusing a word
+// it does not know or one that names the wrong thing; a seat subscribed to
+// control hears it.
+func TestEventsEmitCarriesControlWords(t *testing.T) {
+	eventsHome(t)
+	for _, args := range [][]string{
+		{"emit", "--kind", "control", "--detail", "pause-host laptop"},
+		{"emit", "--kind", "control", "--bead", "mw-1", "--detail", "cancel"},
+		{"emit", "--kind", "control", "--bead", "mw-1", "--detail", "priority 0"},
+	} {
+		if out, err := runEvents(t, args...); err != nil {
+			t.Fatalf("mw events %v: %v\n%s", args, err, out)
+		}
+	}
+	for _, args := range [][]string{
+		{"emit", "--kind", "control", "--detail", "explode"},
+		{"emit", "--kind", "control", "--detail", "cancel"},
+		{"emit", "--kind", "control", "--bead", "mw-1", "--detail", "pause-host laptop"},
+	} {
+		if out, err := runEvents(t, args...); err == nil {
+			t.Fatalf("mw events %v: expected a refusal, got\n%s", args, out)
+		}
+	}
+	out, err := runEvents(t, "wait", "--for", "builder", "--kinds", "control", "--since", "0", "--limit", "5s")
+	if err != nil {
+		t.Fatalf("wait: %v\n%s", err, out)
+	}
+	if strings.Count(out, " control ") != 3 || !strings.Contains(out, "pause-host laptop") {
+		t.Fatalf("a seat subscribed to control heard %q, want the three words", out)
+	}
+}
+
 func TestEventsWaitReturnsOnTheFirstMatchingEventAfterThoseItIgnores(t *testing.T) {
 	eventsHome(t)
 	for _, args := range [][]string{

@@ -251,6 +251,7 @@ func newPosternInboxCmd() *cobra.Command {
 				Memory:        gateway,
 				Tracker:       gateway,
 				Mailbox:       gateway,
+				Events:        homeEventLog(),
 				Host:          host,
 				GovernorKey:   governorKey,
 				AttachmentDir: attachmentDir,

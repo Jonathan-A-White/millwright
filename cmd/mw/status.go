@@ -106,6 +106,7 @@ func newStatusCmd() *cobra.Command {
 				Log:            idleLog,
 				IdleAfter:      idleAfter,
 				Harness:        procs.Harness{},
+				Control:        homeEventLog(),
 				HostSilence:    time.Duration(hours) * time.Hour,
 				RigMemoryBytes: budget,
 				SyncMode:       setting.Configured,

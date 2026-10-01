@@ -214,6 +214,7 @@ func newDispatchCmd() *cobra.Command {
 				Rigs:        rigs,
 				Grinding:    gristGrindLock(),
 				Exclusive:   hostDispatchLock(),
+				Events:      homeEventLog(),
 				Home:        files,
 				DryRun:      dryRun,
 				Out:         cmd.OutOrStdout(),

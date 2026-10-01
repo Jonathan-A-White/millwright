@@ -17,6 +17,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
+	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 )
 
@@ -143,14 +144,23 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
 	defer spring.Wait()
+	controller := &application.EventControl{
+		Log:     eventlog.New(path),
+		Cursors: eventlog.NewNudgeCursors(path),
+		Tracker: gateway,
+		Runner:  tmux.New(),
+		Host:    host,
+		Err:     cmd.ErrOrStderr(),
+	}
 	return application.EventFollow{
-		Shipper:  shipper,
-		Nudger:   nudger,
-		Springer: spring,
-		Head:     gateway,
-		Feed:     gateway,
-		Log:      eventlog.New(path),
-		Cursors:  eventlog.NewCursors(path),
+		Shipper:    shipper,
+		Nudger:     nudger,
+		Springer:   spring,
+		Controller: controller,
+		Head:       gateway,
+		Feed:       gateway,
+		Log:        eventlog.New(path),
+		Cursors:    eventlog.NewCursors(path),
 		Publish: func(ctx context.Context) error {
 			sealed, err := sealedPosternView(view)
 			if err != nil {
@@ -164,6 +174,18 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 		Every: every,
 		Err:   cmd.ErrOrStderr(),
 	}.Run(ctx)
+}
+
+// homeEventLog is this host's event log for a command that only reads it (a
+// pause for dispatch, the cancelled runs for status) or adds one event to it
+// (a hold's cancel). A path that cannot be settled is no log: the command goes
+// on without one, as it did before the log existed.
+func homeEventLog() application.EventLog {
+	path, err := config.EventsLogPath()
+	if err != nil {
+		return nil
+	}
+	return eventlog.New(path)
 }
 
 // eventShip is the shipper for the log in the file path, with the log, its
@@ -195,6 +217,10 @@ func newEventsEmitCmd() *cobra.Command {
 			"--kind is one of docs/events.md's kinds; --from and --to are its machine's states, and an\n" +
 			"event its machine forbids is refused before anything is written. --actor defaults to\n" +
 			"mw@<host>.\n\n" +
+			"--kind control carries a word to the factory, in --detail (docs/events.md, \"Control\"): cancel (with --bead:\n" +
+			"the follower ends that story's session and holds it), pause-host <host> and resume-host <host> (dispatch\n" +
+			"passes on that host stop and start), cap <host> <n>, priority <n> (with --bead):\n\n" +
+			"  mw events emit --kind control --detail \"pause-host laptop\"\n\n" +
 			"--emergency puts the event in the emergency lane: the follower sends it alone, as a record of one\n" +
 			"event, on chain and direct at once, ahead of the pending batches and of the 2 s window, and mw status\n" +
 			"counts it among today's emergencies.",

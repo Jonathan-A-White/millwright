@@ -150,6 +150,7 @@ func newNextCmd() *cobra.Command {
 					Mailbox:     gateway,
 					Load:        hostload.Proc{},
 					Rigs:        rigs,
+					Events:      homeEventLog(),
 					Out:         cmd.OutOrStdout(),
 				})
 			}

@@ -1090,6 +1090,16 @@ prints the events after seq N (default the whole log), one per line — `41
 2026-10-01T13:02:07Z bead_changed mw-1 mw@laptop open->claimed status` — and
 with `--follow` goes on printing what is appended.
 
+`mw events emit --kind control --detail "pause-host laptop"` carries a word to the factory
+(mw-jrx0s.16; docs/events.md, "Control"): `cancel` (with `--bead <id>`), `pause-host <host>`,
+`resume-host <host>`, `cap <host> <n>` and `priority <n>` (with `--bead`). The Governor's hold tap
+on a story a session has claimed writes a `cancel` (actor `governor@postern`); the follower, each
+pass, closes that story's session, gives the claim back, holds the story, records `run=cancelled`
+and comments `cancelled by <actor> at <time>`, leaving the worktree for `mw retry`. A
+`pause-host` makes that host's `mw dispatch` do nothing, saying it is paused, until a
+`resume-host`. `mw status` shows a `PAUSED` line and a `CANCELLED` section for the last day.
+Both act on the home's log, so they reach the host whose follower and dispatch read it.
+
 No seat polls (mw-jrx0s.6, Q7 rule 2 of mw-6ww.55). A seat says which events it hears in
 `seats/<seat>/subscribe.toml` in the vault:
 
