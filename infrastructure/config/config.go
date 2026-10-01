@@ -95,6 +95,7 @@ const (
 	PosternKeyFileEnv       = "MW_POSTERN_KEY_FILE"
 	PosternSnapshotPathEnv  = "MW_POSTERN_SNAPSHOT_PATH"
 	PosternViewPathEnv      = "MW_POSTERN_VIEW_PATH"
+	EventsLogPathEnv        = "MW_EVENTS_LOG_PATH"
 	PosternChannelEnv       = "MW_POSTERN_CHANNEL"
 	PosternTranscribeCmdEnv = "MW_POSTERN_TRANSCRIBE_CMD"
 	PosternDataEnv          = "MW_POSTERN_DATA"
@@ -349,6 +350,19 @@ func PosternViewPath() (string, error) {
 		return said, nil
 	}
 	return filepath.Join(home, DefaultPosternViewPath), nil
+}
+
+// DefaultEventsLogPath is where the home's event log is kept under the home
+// directory when nothing says otherwise: state, one file per home, its .seq
+// sidecar and the follower's cursor beside it.
+var DefaultEventsLogPath = filepath.Join(".local", "state", "mw", "events", "log.jsonl")
+
+// EventsLogPath reports where the home's event log is written and read:
+// $MW_EVENTS_LOG_PATH if it is set, otherwise the root-table
+// `events_log_path` key of ~/.config/mw/config.toml, a full path either way,
+// and DefaultEventsLogPath under the home directory when neither says.
+func EventsLogPath() (string, error) {
+	return fullPathSetting("events_log_path", EventsLogPathEnv, DefaultEventsLogPath, "the event log's path")
 }
 
 // PosternInboxDir reports the full path to the directory mw postern inbox
