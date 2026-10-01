@@ -41,6 +41,7 @@ func InitializeHandsScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a bead "([^"]*)" for the Governor's hands$`, c.aBeadForTheGovernorsHands)
 	ctx.Given(`^the Mayor added the step "([^"]*)" to "([^"]*)" on "([^"]*)" as "([^"]*)" running "([^"]*)"$`, c.theMayorAddedTheStep)
 	ctx.Given(`^the step "([^"]*)" on "([^"]*)" ran on "([^"]*)" with exit (\d+)$`, c.theStepRan)
+	ctx.Given(`^the step "([^"]*)" on "([^"]*)" is superseded by "([^"]*)"$`, c.theStepIsSupersededBy)
 	ctx.Given(`^a working push to the Governor$`, c.aWorkingPush)
 	ctx.Given(`^a failing push to the Governor$`, c.aFailingPush)
 	ctx.Given(`^a bead "([^"]*)" titled "([^"]*)"$`, c.aBeadTitled)
@@ -416,4 +417,8 @@ func (c *handsContext) theListShows(id, state string) error {
 		return fmt.Errorf("expected the list to show %s, its sha256 and %q, got:\n%s", id, state, text)
 	}
 	return nil
+}
+
+func (c *handsContext) theStepIsSupersededBy(id, bead, newer string) error {
+	return c.tracker.SetNote(context.Background(), application.HandsSupersededKey(bead, id), newer)
 }

@@ -68,6 +68,13 @@ func (i PosternInbox) applyRun(ctx context.Context, m PosternInboxMessage, actio
 	if err := i.HandsVerifier.VerifyApproval(i.GovernorKey, action.SHA256, action.ApprovedAt, action.Sig); err != nil {
 		return refuse(err.Error())
 	}
+	superseded, err := i.Memory.Note(ctx, HandsSupersededKey(action.Bead, step.ID))
+	if err != nil {
+		return posternApplied{}, err
+	}
+	if by := strings.TrimSpace(superseded); by != "" {
+		return refuse(fmt.Sprintf("it is superseded by %s, a newer step that took its place, so it never runs.", by))
+	}
 	waits, err := i.handsWaits(ctx, action.Bead)
 	if err != nil {
 		return posternApplied{}, err

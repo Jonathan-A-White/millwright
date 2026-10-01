@@ -123,6 +123,9 @@ type PosternViewHandsStep struct {
 	domain.HandsStep
 	SHA256 string    `json:"sha256"`
 	Ran    *HandsRan `json:"ran,omitempty"`
+	// SupersededBy is the bead holding the newer step that took this one's place:
+	// it cannot be approved (mw-gq6.190).
+	SupersededBy string `json:"superseded_by,omitempty"`
 }
 
 // PosternViewPath is a bead's merged Path as §11 writes it: every field, empty
@@ -697,6 +700,7 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 				byHand = byHandInstructions(comments[w.entry.detail.Story.ID])
 			}
 			b.markNotReady(&w.need, w.entry, len(steps) == 0 && byHand == "")
+			markSuperseded(&w.need, steps)
 			if byHand != "" && !w.need.NotReady {
 				w.need.Text = byHand
 			}
@@ -1273,9 +1277,37 @@ func viewHandsSteps(bead string, notes map[string]string) []PosternViewHandsStep
 		if ran, ok := parseHandsRan(notes[HandsRanKey(bead, record.ID)]); ok {
 			step.Ran = &ran
 		}
+		step.SupersededBy = strings.TrimSpace(notes[HandsSupersededKey(bead, record.ID)])
 		steps = append(steps, step)
 	}
 	return steps
+}
+
+// markSuperseded marks the hands need not ready, for the Mayor, when every step
+// of it that has not run clean was superseded by a newer one: there is nothing
+// left on it for his hands, and it waits for the Mayor to close it.
+func markSuperseded(need *PosternViewNeed, steps []PosternViewHandsStep) {
+	if need.NotReady {
+		return
+	}
+	var by []string
+	for _, step := range steps {
+		if step.Ran != nil && step.Ran.Exit == 0 {
+			continue
+		}
+		if step.SupersededBy == "" {
+			return
+		}
+		by = append(by, step.SupersededBy)
+	}
+	if len(by) == 0 {
+		return
+	}
+	waiting := "superseded by " + strings.Join(uniqueStrings(by), ", ")
+	need.NotReady = true
+	need.WaitsFor = PosternWaitsMayor
+	need.WaitingOn = []string{waiting}
+	need.Text = "Not ready yet: " + waiting
 }
 
 // allStepsRanClean reports whether steps is not empty and every one has a
