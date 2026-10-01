@@ -37,7 +37,7 @@ func (c *seatUpContext) isolateConfig() error {
 	}
 	c.home, c.homeWas = home, os.Getenv("HOME")
 	c.modelEnvWas = map[string]*string{}
-	for _, env := range []string{config.MillhandRoutineModelEnv, config.MillhandReviewModelEnv} {
+	for _, env := range []string{config.MillhandRoutineModelEnv, config.MillhandReviewModelEnv, config.DeputyModelEnv} {
 		if was, set := os.LookupEnv(env); set {
 			c.modelEnvWas[env] = &was
 		} else {
