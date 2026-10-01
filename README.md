@@ -2212,6 +2212,7 @@ See `features/talk_say.feature`.
 ```sh
 bin/mw talk call "Back now: two landings."
 bin/mw talk call "Back now: two landings." --link mw-x.1 --link mw-x.2
+bin/mw talk call "Back now: two landings." --chain
 ```
 
 `mw talk call` is the Mayor's call-back, the answer to a call request that
@@ -2226,11 +2227,26 @@ took, and refuses when `postern_governor_key` is not set. `--link <bead>`
 and never in it; section 21 does not yet define `links`, as it did not for a
 talk turn.
 
+`--chain` is for a phone that cannot reach the backend: the same record is
+also broadcast on chain, through the backend's broadcast (the backend is local
+to the Mayor, so this works whatever the phone can reach), under the same
+`postern_float_sats` cap as `mw postern send`, and both txids are printed. You
+do not have to remember it: `mw talk wait` notes, under the bd note
+`postern.talk.channel`, how the Governor's newest talk or call record came, and
+when it came by chain (a bare txid) `mw talk call` broadcasts without the flag;
+after a direct one (`direct:<id>`), or before any, it does not. The direct
+delivery goes first. A `--chain` that fails is an error naming the txid that
+did go direct; a chain added by itself that fails is only said, on a
+`chain: not sent: ...` line, and the call still succeeds.
+
 ```
 call ring sent
 txid direct:3f2a…
+chain txid 9c1e…
 elapsed 41 ms
 ```
+
+(The `chain txid` line is there only when the ring was broadcast.)
 
 See `features/talk_call.feature` and `features/talk_wait.feature`.
 
@@ -2243,7 +2259,7 @@ its own section above or below:
 | Command | What it does |
 | --- | --- |
 | `mw talk wait` | Holds the event stream open and ends at the first turn (or end), or call request, the Governor sends the Mayor's key; prints it. `--limit` (default 50m, `$MW_TALK_WAIT_LIMIT`), `--min-backoff`, `--max-backoff`. |
-| `mw talk call <text> [--link <bead>]...` | Sends the Mayor's call-back, a `ring` in a class `call` record, direct, no summary. |
+| `mw talk call <text> [--chain] [--link <bead>]...` | Sends the Mayor's call-back, a `ring` in a class `call` record, direct, no summary; `--chain` (or a chain-borne last Governor record) also broadcasts it. |
 | `mw talk say <text> --talk <id> --turn <n>` | Sends the Mayor's spoken answer, class `talk`, no summary. `--holding` for a short answer while the real one comes, `--end` to end the talk. |
 | `mw talk model opus\|sonnet\|fable\|haiku --talk <id> --turn <n>` | Answers a model chip: speaks the switch, logs it, prints `hand off, then: bin/respawn-mayor high <full id>` for a fresh Mayor. Types into no window. |
 | `mw deputy [--reason text]` | Brings up the Deputy, who does the clerical and orchestration work while the Mayor talks. |
