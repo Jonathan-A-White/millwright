@@ -44,7 +44,10 @@ type seatUpContext struct {
 	dir     string // the vault
 	windows *apptest.FakeWindows
 	armer   *apptest.FakeReapArmer
-	today   time.Time
+	// mail is the Deputy's box, made when a scenario first needs it: see
+	// deputyMail.
+	mail  *apptest.FakeMailbox
+	today time.Time
 	// written is how many handoffs have been written, so that each is newer
 	// than the one before it.
 	written int
