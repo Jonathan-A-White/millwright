@@ -2006,6 +2006,32 @@ It replaces the vault's `bin/mayor-reap-window`, which did the same in bash.
 See `features/seat_reap.feature`, and `infrastructure/tmux/reap.go` for how a
 pane is read and a window closed.
 
+## Switching the Mayor's model in a talk
+
+```sh
+bin/mw talk model sonnet
+```
+
+`mw talk model opus|sonnet|fable` switches the acting Mayor's session to that
+model from the next turn, so that the Governor's "use Sonnet" takes effect. It
+types `/model <model>` and Enter into the window `.mayor-acting` names, the way
+a person at the keyboard would. The Mayor runs it mid-turn, so it starts a
+zero-token watch detached and returns at once.
+
+The watch types only once the window is idle at an empty input line on two
+looks in a row, by the reaper's rule (`inputLineHoldsDraft`): never over a
+draft, though Claude Code's dim suggested prompt is no draft. It looks every
+`--interval` (2s) and gives up after `--limit` (10m), typing nothing. Arming,
+typing and giving up each append one dated line to `.mayor-talk.log`:
+
+```
+2026-10-01T03:00:50Z talk model sonnet: armed; waiting for the mayor's window to be idle at an empty input line to type /model sonnet
+2026-10-01T03:00:51Z talk model sonnet: typed /model sonnet into mayor-2026-10-01-141 (@2)
+```
+
+`--foreground` watches in the calling process and exits non-zero when it gave
+up. See `features/talk_model.feature`.
+
 ## Waking the Millhand
 
 ```sh

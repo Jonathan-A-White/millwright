@@ -28,7 +28,7 @@ Each adapter: `var _ application.<Port> = ...`.
 | `Runner` | `application/runner.go` | `infrastructure/tmux/tmux.go` | `apptest.FakeRunner` |
 | `Harness` | `application/harness.go` | `infrastructure/claude/claude.go` | `application/seatboot_test.go` |
 | `SeatFiles`, `Windows`, `SeatHarness` | `application/seatup.go` | `infrastructure/{vault/seat,tmux/window,claude/claude}.go` | `apptest.FakeWindows` |
-| `ReapTerminal`, `ReapLog`, `ReapArmer` | `application/seatreap.go` | `infrastructure/{tmux/reap,vault/reaplog,reaper/arm}.go` | `apptest.Fake{Windows,ReapArmer}` |
+| `Reap{Terminal,Log,Armer}` | `application/seatreap.go` | `infrastructure/{tmux/reap,vault/reaplog,reaper/arm}.go` | `apptest.Fake{Windows,ReapArmer}` |
 | `Transcripts` | `application/seatcontext.go` | `infrastructure/claude/transcripts.go` | none |
 | `WatchProbes` | `application/watch.go` | `infrastructure/watch/watch.go` | `apptest.FakeWatch` |
 | `Doctor{Check,State,Log,Notes}` | `application/doctor.go` | `infrastructure/doctor` | none |
@@ -40,8 +40,7 @@ Each adapter: `var _ application.<Port> = ...`.
 | `VaultBirth`, `TrackerBirth` | `application/init.go` | `infrastructure/{vault/birth,beads/init}.go` | none |
 | `Landing`, `Checks`, `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/{landing,checks,slot}.go` | none |
 | `AfterLanding` | `application/afterlanding.go` | `infrastructure/rig/afterlanding.go` | none |
-| `Dispatcher` | `application/landing.go` | `application.Dispatch` | — |
-| `HostSync` | `application/dispatch.go` | `application.Sync` | — |
+| `Dispatcher`, `HostSync` | `application/{landing,dispatch}.go` | `application.{Dispatch,Sync}` | — |
 | Postern, hands | `application/{postern*,hands}.go` | `infrastructure/{postern,hands*,homemove}` | `apptest.Fake{Postern*,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*,HomeMover}` |
 | `Grinder`, `GrindSource`, `GristState`, `GristLock` | `application/grist.go` | `infrastructure/{claude/grind,rig/grinds,hostlock/try}.go`, `infrastructure/grist` | `apptest.Fake{Grinder,Grinds,GristState,GristLock}` |
 
@@ -65,7 +64,8 @@ Each adapter: `var _ application.<Port> = ...`.
 | `Mail` | `application/mail.go` | `mw mail` — `cmd/mw/mail.go` | `features/mail.feature` |
 | `Home` | `application/home.go` | `mw home` — `cmd/mw/home.go` | `features/home.feature` |
 | `HomeMove` | `application/homemove.go` | `mw home move` — `cmd/mw/homemove.go` | none: `docs/home-move.md` |
-| `Seat{Context,Up,Reap}` | `application/seatcontext.go`, `application/seatup.go`, `application/seatreap.go` | `mw seat context`/`up`/`reap` — `cmd/mw/seat.go` | `features/seat_{context,up,reap}.feature` |
+| `Seat{Context,Up,Reap}` | `application/seat{context,up,reap}.go` | `mw seat context`/`up`/`reap` — `cmd/mw/seat.go` | `features/seat_{context,up,reap}.feature` |
+| `TalkModel`, port `TalkLog` | `application/talkmodel.go` | `mw talk model` — `cmd/mw/talk.go` | `features/talk_model.feature` |
 | `Millhand` | `application/millhand.go` | `mw millhand` — `cmd/mw/millhand.go` | `features/millhand.feature` |
 | `MillhandTick` | `application/millhandtick.go` | `mw millhand tick` — `cmd/mw/millhandtick.go` | `features/millhand_tick.feature` |
 | `Watch` | `application/watch.go` | `mw watch` — `cmd/mw/watch.go` | `features/watch.feature` |
@@ -74,8 +74,8 @@ Each adapter: `var _ application.<Port> = ...`.
 | `Init` | `application/init.go` | `mw init` — `cmd/mw/init.go` | `features/init.feature` |
 | Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern key/inbox/send (--re)/snapshot/view/bead — cmd/mw/posternview.go, cmd/mw/posternbead.go | `features/postern_*.feature` |
 | Hands{Add,List} | application/hands.go | mw hands add /list — cmd/mw/hands.go; `cmd/mw-hands-root` | `features/hands.feature` |
-| `PosternServe`, `PosternNginx`, `PosternMirror` | `application/posternhand.go`, `application/posternmirror.go` | `mw postern serve`/`nginx`/`mirror` — `cmd/mw/postern.go`, `cmd/mw/posternmirror.go` | `features/postern_serve.feature` |
-| `GristKey`, `GristGrind`, `GristSend`, `GristEval` | `application/grist.go`, `application/gristgrind.go`, `application/gristsend.go`, `application/gristeval.go` | `mw grist key`/`grind`/`send`/`eval` — `cmd/mw/grist.go` | `features/grist{,_send,_eval}.feature` |
+| `Postern{Serve,Nginx,Mirror}` | `application/posternhand.go`, `application/posternmirror.go` | `mw postern serve`/`nginx`/`mirror` — `cmd/mw/postern.go`, `cmd/mw/posternmirror.go` | `features/postern_serve.feature` |
+| `Grist{Key,Grind,Send,Eval}` | `application/grist.go`, `application/gristgrind.go`, `application/gristsend.go`, `application/gristeval.go` | `mw grist key`/`grind`/`send`/`eval` — `cmd/mw/grist.go` | `features/grist{,_send,_eval}.feature` |
 
 `cmd/mw/root.go` holds the tree, `cmd/mw/main.go` runs it, `cmd/mw/version.go` is `mw version`.
 `features/path_validation.feature` covers `domain/path.go`;
