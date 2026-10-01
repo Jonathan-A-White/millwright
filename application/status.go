@@ -25,6 +25,9 @@ const Width = 60
 // the freshest reading of it can already be a cycle old.
 const DefaultHostSilence = 2 * time.Hour
 
+// CancelledWindow is how far back mw status shows a cancelled run.
+const CancelledWindow = 24 * time.Hour
+
 // WaitingHeading is what heads the section for stories the Governor must be
 // present for. The report leaves the section out when there are none.
 const WaitingHeading = "WAITING FOR THE GOVERNOR"
@@ -163,6 +166,10 @@ type Status struct {
 	Log       EventLog
 	IdleAfter time.Duration
 	Harness   HarnessCount
+	// Control, when set, is the home's event log, read for the CANCELLED
+	// section (the cancel events of the last day) and the PAUSED line. Nil
+	// leaves both out.
+	Control EventLog
 
 	// Now is the clock "today" is read by, for picking out the ledger's lines
 	// dated today. The zero value reads the real one.
@@ -293,6 +300,10 @@ type StatusReport struct {
 	// Harness is the count of harness processes, when HarnessKnown.
 	Harness      int
 	HarnessKnown bool
+	// Cancelled are the runs a cancel event ended in the last day, and Paused
+	// the pause-host event this host is under, if any.
+	Cancelled []Cancel
+	Paused    *HostPause
 	// MillhandResume is the "resumed ... (grace until ...)" line shown under
 	// the Millhand tick while its resume grace still holds; "" once it does
 	// not.
@@ -449,6 +460,24 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	if s.Harness != nil {
 		if n, err := s.Harness.Count(ctx); err == nil {
 			report.Harness, report.HarnessKnown = n, true
+		}
+	}
+	if s.Control != nil {
+		// Like the shipper, a log that cannot be read is left out of the
+		// report, not a reason to refuse the rest of it.
+		if cancels, err := CancelsSince(ctx, s.Control, s.now().Add(-CancelledWindow)); err == nil {
+			running := map[string]bool{}
+			for _, rs := range report.Running {
+				running[rs.Detail.Story.ID] = true
+			}
+			for _, cancel := range cancels {
+				if !running[cancel.Bead] {
+					report.Cancelled = append(report.Cancelled, cancel)
+				}
+			}
+		}
+		if pause, paused, err := PausedHost(ctx, s.Control, s.Host); err == nil && paused {
+			report.Paused = &pause
 		}
 	}
 
@@ -719,6 +748,19 @@ func (r StatusReport) String() string {
 		rs.write(&b)
 	}
 	b.WriteString("\n")
+
+	if r.Paused != nil {
+		clip(&b, fmt.Sprintf("PAUSED by %s %s: no story is started", r.Paused.Actor, r.Paused.At.UTC().Format("01-02 15:04Z")))
+		b.WriteString("\n")
+	}
+
+	if len(r.Cancelled) > 0 {
+		clip(&b, fmt.Sprintf("CANCELLED (%d)", len(r.Cancelled)))
+		for _, cancel := range r.Cancelled {
+			clip(&b, fmt.Sprintf("  %s · cancelled by %s %s", cancel.Bead, cancel.Actor, cancel.At.UTC().Format("01-02 15:04Z")))
+		}
+		b.WriteString("\n")
+	}
 
 	clip(&b, fmt.Sprintf("READY (%d)", len(r.Ready)))
 	if len(r.Ready) == 0 {
