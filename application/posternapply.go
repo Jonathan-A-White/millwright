@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/domain/events"
 )
 
 // PosternAppliedPrefix is the prefix of every note PosternAppliedKey writes.
@@ -367,6 +369,20 @@ func (i PosternInbox) applyAction(ctx context.Context, m PosternInboxMessage, ac
 	case PosternActionHold:
 		if bead.IsEpic {
 			return refuse("it is an epic; hold its stories one by one")
+		}
+		if i.Events != nil && strings.EqualFold(strings.TrimSpace(bead.Status), StatusInProgress) && strings.TrimSpace(bead.Assignee) != "" {
+			// A claimed story has a session at work: the hold is a cancel, and
+			// ending the session, giving the claim back and holding the story
+			// are the follower's, which a bead written here would only race.
+			cancel, err := EventEmit{Log: i.Events, Now: i.now, Event: events.Event{
+				Kind: events.KindControl, Bead: action.Bead, Actor: GovernorPosternActor, Detail: events.ControlCancel,
+			}}.Run(ctx)
+			if err != nil {
+				return refuse(fmt.Sprintf("it is claimed%s, and its cancel could not be written: %v", claimedBy(bead.Assignee), err))
+			}
+			return done(fmt.Sprintf("Held: %s", action.Bead), fmt.Sprintf(
+				"HELD by the Governor via postern, txid %s: the story is claimed%s, so its session is being cancelled (control event %d)",
+				m.Txid, claimedBy(bead.Assignee), cancel.Seq))
 		}
 		if !strings.EqualFold(strings.TrimSpace(bead.Status), StatusOpen) || strings.TrimSpace(bead.Assignee) != "" {
 			return refuse(fmt.Sprintf("it is %s%s, not open and unclaimed", bead.Status, claimedBy(bead.Assignee)))

@@ -569,6 +569,11 @@ type PosternInbox struct {
 	// note the question it answers was marked open under. A nil Tracker
 	// leaves every reply printed as text, exactly as an unknown bead does.
 	Tracker WorkTracker
+	// Events, when set, is the home's event log: the Governor's hold tap on a
+	// story a session has claimed appends a cancel event to it, which the
+	// follower acts on (mw-jrx0s.16). Nil leaves such a hold refused, as it
+	// always was.
+	Events EventLog
 	// Mailbox, when set, is sent a message to the Mayor's mailbox for every
 	// reply recorded, so the notifier wakes the seat. A nil Mailbox records
 	// the reply but sends nothing.
