@@ -123,6 +123,16 @@ func (i PosternInbox) applyRun(ctx context.Context, m PosternInboxMessage, actio
 	if err := i.Memory.SetNote(ctx, approval, m.Txid); err != nil {
 		return posternApplied{}, fmt.Errorf("marking the approval of %s on %s spent: %w", step.ID, action.Bead, err)
 	}
+	// A step that restarts the service this pass was started by may take the
+	// pass down before it records anything: say it started first, so that mw
+	// hands list never calls a step that ran "not run" (mw-gq6.209).
+	started, err := json.Marshal(HandsRan{At: i.now().UTC().Format(time.RFC3339), Exit: -1, Host: step.Host, Why: HandsStartedWhy})
+	if err != nil {
+		return posternApplied{}, err
+	}
+	if err := i.Memory.SetNote(ctx, HandsRanKey(action.Bead, step.ID), string(started)); err != nil {
+		return posternApplied{}, fmt.Errorf("recording that %s on %s started: %w", step.ID, action.Bead, err)
+	}
 	outcome, err := i.HandsRunner.Run(ctx, HandsJob{
 		Request: domain.HandsRequest{
 			Bead: action.Bead, ID: step.ID, Host: step.Host, As: step.As, Run: step.Run, WayBack: step.WayBack,

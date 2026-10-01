@@ -773,7 +773,7 @@ stage = "/home/jwhite/.local/share/postern"   # built binaries wait here as <nam
 live = "/home/jwhite/.local/bin/postern"      # the binary the service runs; only the approved hands step touches it
 service = "postern-backend"        # its systemd user unit
 health = "https://postern.example.org/api/healthz"
-check = "/home/jwhite/.local/bin/mw postern inbox --unread-count"  # optional; must also succeed after the swap
+check = "/home/jwhite/.local/bin/backend-smoke"  # optional; run once the backend answers, 60 s at most; if it fails the step fails but the new backend stays. A command that reads `mw postern inbox` is left out of the step: the step runs inside that pass
 
 [hands_hosts]                      # how this host reaches another host a hands step is for; leave it out to run steps for this host only
 laptop = "ssh laptop"              # an ssh prefix, split on whitespace
@@ -1399,7 +1399,9 @@ standard input, to `sudo -n` `hands_root_helper`. The run is recorded in
 `hands.ran.<bead>.<id>` (`{at, exit, host}`), commented on the bead (`RAN step
 <id> on <host> as <as>, exit <n> (approved by the Governor via postern, txid
 …)` and the last 4000 characters of output), sent back to him in the bead's
-thread, and mailed to the Mayor. A refusal goes out the same three ways, says
+thread, and mailed to the Mayor. The record is first written as started (exit -1,
+`mw hands list` says "started … has not reported back") before the step runs, and
+the finished one replaces it, so a pass cut off mid-step never leaves "not run". A refusal goes out the same three ways, says
 why, and is never tried again.
 
 The postern backend starts `mw postern inbox --apply` as its on-message hook, so

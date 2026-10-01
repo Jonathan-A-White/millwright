@@ -48,6 +48,11 @@ type HandsRan struct {
 	Why  string `json:"why,omitempty"`
 }
 
+// HandsStartedWhy is the why of a ran record written when a step starts, which
+// the finished record replaces: one left standing says the pass that ran the
+// step never reported how it ended.
+const HandsStartedWhy = "started; the pass that ran it has not reported back"
+
 // handsWhy is why a step that exited with exit failed, out of its output:
 // the last non-empty line, clipped to HandsWhyLimit characters. A step that
 // exited 0, or printed nothing, has none.
@@ -423,6 +428,9 @@ func (l HandsList) Run(ctx context.Context, bead string) ([]HandsStepRecord, err
 		state := "not run"
 		if r, ok := parseHandsRan(ran[HandsRanKey(bead, step.ID)]); ok {
 			state = fmt.Sprintf("ran %s on %s, exit %d", r.At, r.Host, r.Exit)
+			if r.Why == HandsStartedWhy {
+				state = fmt.Sprintf("started %s on %s, %s", r.At, r.Host, strings.TrimPrefix(r.Why, "started; "))
+			}
 		} else if by := strings.TrimSpace(superseded[HandsSupersededKey(bead, step.ID)]); by != "" {
 			state = "superseded by " + by + " (cannot be approved)"
 		}
