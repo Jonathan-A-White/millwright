@@ -1,8 +1,12 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -20,7 +24,8 @@ var posternViewClock = time.Now
 // sealed to the Governor's key and written where the postern backend serves
 // it as GET /api/view.
 func newPosternViewCmd() *cobra.Command {
-	var jsonOut bool
+	var jsonOut, follow bool
+	var every time.Duration
 
 	cmd := &cobra.Command{
 		Use:   "view",
@@ -40,9 +45,23 @@ func newPosternViewCmd() *cobra.Command {
 			"It costs one bd call per live epic for its children and a handful besides — the live\n" +
 			"epics, their own fields, every note at once, and comments only for a question or landing\n" +
 			"that needs them — so it can run every half minute.\n\n" +
-			"--json prints the plaintext JSON instead of writing anything, for inspection.",
+			"--json prints the plaintext JSON instead of writing anything, for inspection.\n\n" +
+			"--follow does not exit: every --every (default 1s) it reads the beads' head, Dolt's hash of\n" +
+			"the whole database (one `bd sql` call, tokenless), and writes the view again only when it\n" +
+			"has changed since the last write, so a tap of the Governor's shows within two seconds.\n" +
+			"A failure is logged and the loop goes on; SIGTERM or SIGINT stops it. It is what\n" +
+			"contrib/systemd/mw-view-follow.service runs.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if follow && jsonOut {
+				return fmt.Errorf("--follow writes the sealed view, so it cannot be used with --json")
+			}
+			if !follow && cmd.Flags().Changed("every") {
+				return fmt.Errorf("--every is how often --follow reads the beads' head: it needs --follow")
+			}
+			if every <= 0 {
+				return fmt.Errorf("--every must be a positive duration, like 1s")
+			}
 			gateway, host, err := posternGateway()
 			if err != nil {
 				return err
@@ -53,6 +72,24 @@ func newPosternViewCmd() *cobra.Command {
 				Host:    host,
 				Now:     posternViewClock,
 				Err:     cmd.ErrOrStderr(),
+			}
+			if follow {
+				ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGTERM, os.Interrupt)
+				defer stop()
+				return application.PosternViewFollow{
+					Head: gateway,
+					Publish: func(ctx context.Context) error {
+						sealed, err := sealedPosternView(view)
+						if err != nil {
+							return err
+						}
+						sealed.Out = cmd.OutOrStdout()
+						_, err = sealed.Run(ctx)
+						return err
+					},
+					Every: every,
+					Err:   cmd.ErrOrStderr(),
+				}.Run(ctx)
 			}
 			if jsonOut {
 				doc, err := view.Build(cmd.Context())
@@ -76,6 +113,8 @@ func newPosternViewCmd() *cobra.Command {
 			return err
 		},
 	}
+	cmd.Flags().BoolVar(&follow, "follow", false, "keep running: write the view again whenever the beads change")
+	cmd.Flags().DurationVar(&every, "every", application.DefaultViewFollowEvery, "with --follow, how often to read the beads' head")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print the plaintext view JSON instead of writing the sealed file")
 	return cmd
 }

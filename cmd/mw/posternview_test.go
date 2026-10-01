@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
@@ -76,5 +79,49 @@ func TestPosternViewWritesTheSealedViewAtomically(t *testing.T) {
 	}
 	if !strings.Contains(out, viewPath) {
 		t.Fatalf("expected mw postern view to say where it wrote, got %q", out)
+	}
+}
+
+func TestPosternViewFollowRefusesJSONAndAnEveryWithoutFollowBeforeCallingBd(t *testing.T) {
+	for _, c := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"view", "--follow", "--json"}, "--json"},
+		{[]string{"view", "--every", "2s"}, "needs --follow"},
+		{[]string{"view", "--follow", "--every", "0s"}, "positive"},
+	} {
+		posternHome(t, "http://unused", "unused-wif", "governor-pubkey-hex")
+		callLog := noBdCalls(t)
+		out, err := runPostern(t, c.args...)
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Fatalf("mw postern %v: expected a refusal naming %q, got %v\n%s", c.args, c.want, err, out)
+		}
+		assertNoBdCalls(t, callLog)
+	}
+}
+
+// --follow publishes on its first pass and then stops cleanly when told to:
+// the stand-in bd prints nothing, so the head read fails, which is said and
+// does not end the loop.
+func TestPosternViewFollowSaysAFailedReadAndStopsCleanlyWhenToldTo(t *testing.T) {
+	posternHome(t, "http://unused", "", "governor-pubkey-hex")
+	callLog := noBdCalls(t)
+
+	ctx, stop := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+	defer stop()
+	out := &bytes.Buffer{}
+	root := newRootCmd()
+	root.SetOut(out)
+	root.SetErr(out)
+	root.SetArgs([]string{"postern", "view", "--follow", "--every", "100ms"})
+	if err := root.ExecuteContext(ctx); err != nil {
+		t.Fatalf("expected --follow to stop cleanly when its context ended, got %v\n%s", err, out)
+	}
+	if !strings.Contains(out.String(), "mw postern view --follow:") {
+		t.Fatalf("expected the failure to be said, got %q", out)
+	}
+	if data, _ := os.ReadFile(callLog); !strings.Contains(string(data), "sql --json") {
+		t.Fatalf("expected the loop to read the head with bd sql, bd was asked:\n%s", data)
 	}
 }
