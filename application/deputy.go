@@ -26,15 +26,25 @@ const DeputyEffort = domain.EffortHigh
 // DeputyMailbox is the mailbox the Deputy's mail-wait is armed on.
 const DeputyMailbox = "deputy"
 
+// DeputyNudgeFormat is the line typed into an idle Deputy's window when its box
+// holds unread mail: the words the Mayor's notifier (contrib/mail-notify) types
+// for its own box, naming the Deputy. Type presses Enter of its own.
+const DeputyNudgeFormat = "New mail for " + DeputyMailbox + ": %d message(s). Run bd mail inbox."
+
 // DeputyAlreadyUp is a Deputy bring-up that started nothing because a window of
 // the Deputy's is already open. It is not a fault: it carries DeputyUpExit and
-// says so in one line.
+// says so in one line. Busy says the pane was at work and unread mail was left
+// waiting for it.
 type DeputyAlreadyUp struct {
 	Window string
+	Busy   bool
 }
 
 // Error is the one line that says nothing was started and why.
 func (u *DeputyAlreadyUp) Error() string {
+	if u.Busy {
+		return fmt.Sprintf("the Deputy is busy in window %s; the mail waits", u.Window)
+	}
 	return fmt.Sprintf("the Deputy is already up in the window %s: nothing was started", u.Window)
 }
 
@@ -53,13 +63,20 @@ func DeputyIsUp(err error) (*DeputyAlreadyUp, bool) {
 //
 // It starts nothing, and says so with DeputyAlreadyUp, when a window of the
 // Deputy's is already open: the Mayor mails a Deputy that is up and fires one
-// only when none is.
+// only when none is. Given a Terminal and a Mail, an open window whose pane is
+// idle at an empty input line while its box holds unread mail is typed the
+// mail nudge instead, and Run says it nudged; a pane at work is left alone and
+// the refusal says the mail waits.
 type Deputy struct {
 	Seats    SeatFiles
 	Windows  Windows
 	Harness  SeatHarness
 	Terminal ReapTerminal
 	Armer    ReapArmer
+
+	// Mail is the box the Deputy's unread mail is counted in, to wake an idle
+	// Deputy with. Without it a Deputy that is up is only said to be.
+	Mail Mailbox
 
 	// Host is the host the Deputy is brought up on.
 	Host string
@@ -94,7 +111,7 @@ func (d Deputy) Run(ctx context.Context) (SeatUpReport, error) {
 		return SeatUpReport{}, err
 	}
 	if up != "" {
-		return SeatUpReport{}, &DeputyAlreadyUp{Window: up}
+		return d.wakeIdle(ctx, up)
 	}
 
 	told := DeputyStanding
@@ -117,4 +134,47 @@ func (d Deputy) Run(ctx context.Context) (SeatUpReport, error) {
 		Armer:        d.Armer,
 		ReapWhenIdle: true,
 	}.Run(ctx)
+}
+
+// wakeIdle is what Run does with a Deputy that is up. When its box holds unread
+// mail and its pane sits idle at an empty input line, it types the nudge and
+// says so; when the pane is not idle it leaves it alone and says the mail
+// waits. Anything it cannot tell — no terminal or mail wired, no mail, a pane
+// or box that cannot be read — is the plain "already up" refusal it always was.
+func (d Deputy) wakeIdle(ctx context.Context, name string) (SeatUpReport, error) {
+	up := &DeputyAlreadyUp{Window: name}
+	if d.Terminal == nil || d.Mail == nil {
+		return SeatUpReport{}, up
+	}
+	open, err := d.Terminal.OpenWindows(ctx)
+	if err != nil {
+		return SeatUpReport{}, up
+	}
+	id := ""
+	for _, window := range open {
+		if window.Name == name {
+			id = window.ID
+		}
+	}
+	if id == "" {
+		return SeatUpReport{}, up
+	}
+	inbox, err := d.Mail.Inbox(ctx, DeputyMailbox)
+	if err != nil || len(inbox) == 0 {
+		return SeatUpReport{}, up
+	}
+	state, err := d.Terminal.PaneState(ctx, id)
+	if err != nil {
+		return SeatUpReport{}, up
+	}
+	if state != PaneIdle {
+		return SeatUpReport{}, &DeputyAlreadyUp{Window: name, Busy: true}
+	}
+	if err := d.Terminal.Type(ctx, id, fmt.Sprintf(DeputyNudgeFormat, len(inbox))); err != nil {
+		return SeatUpReport{}, fmt.Errorf("typing the mail nudge into the window %s: %w", name, err)
+	}
+	if d.Out != nil {
+		fmt.Fprintf(d.Out, "nudged the Deputy in window %s\n", name)
+	}
+	return SeatUpReport{}, nil
 }

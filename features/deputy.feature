@@ -10,6 +10,12 @@ Feature: mw deputy
   leaves with status 8, so the Mayor can mail the Deputy and fire, knowing one
   is there to read it. mw refuses to start a Deputy that has no charter.
 
+  A Deputy that is up and sitting idle at an empty input line, with unread mail
+  in its box, is woken: mw types the mail nudge into its pane, as the Mayor's
+  notifier does, and says so. A pane that is busy is left alone and mw says the
+  mail waits (status 8 as well, for nothing was started). With no mail to wake
+  it for, an idle Deputy is just already up.
+
   Background:
     Given a vault holding the "deputy" seat
     And the "deputy" seat's charter
@@ -45,6 +51,32 @@ Feature: mw deputy
     And mw deputy leaves with the status 8
     And no window was opened
     And no reaper was armed
+
+  Scenario: An idle Deputy with unread mail is woken by the mail nudge
+    Given the window "deputy-2026-09-30-02" was opened at "2026-09-30T08:00:00Z"
+    And the Deputy's box holds 2 unread messages
+    When mw deputy is run
+    Then mw deputy succeeds
+    And mw deputy says it nudged the Deputy in the window "deputy-2026-09-30-02"
+    And the line "New mail for deputy: 2 message(s). Run bd mail inbox." was typed into the window "deputy-2026-09-30-02"
+    And no window was opened
+    And no reaper was armed
+
+  Scenario: A busy Deputy is left alone and told of the mail waiting
+    Given the window "deputy-2026-09-30-02" was opened at "2026-09-30T08:00:00Z"
+    And the pane of the window "deputy-2026-09-30-02" is busy
+    And the Deputy's box holds 1 unread messages
+    When mw deputy is run
+    Then mw deputy is refused saying the Deputy is busy in "deputy-2026-09-30-02" and the mail waits
+    And mw deputy leaves with the status 8
+    And nothing was typed into the window "deputy-2026-09-30-02"
+    And no window was opened
+
+  Scenario: An idle Deputy with no unread mail is already up and is typed nothing
+    Given the window "deputy-2026-09-30-02" was opened at "2026-09-30T08:00:00Z"
+    When mw deputy is run
+    Then mw deputy is refused saying the Deputy is already up in "deputy-2026-09-30-02"
+    And nothing was typed into the window "deputy-2026-09-30-02"
 
   Scenario: Another seat's window does not count as the Deputy's
     Given the window "millhand-2026-09-30-05" was opened at "2026-09-30T08:00:00Z"

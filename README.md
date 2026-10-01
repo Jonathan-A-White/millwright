@@ -2281,7 +2281,19 @@ has handed off, at high effort on config `deputy_model` (`sonnet`, or
 then gives the `--reason`. It refuses and starts nothing when
 `seats/deputy/charter.md` is missing. If a `deputy-*` window is already open it
 starts nothing, says so in one line and exits **8**, so the Mayor can mail the
-Deputy and fire, and tell "already up" from a failure (1). See
+Deputy and fire, and tell "already up" from a failure (1).
+
+An open window is not always a Deputy that is reading its mail: one that
+finished a brief and sits at an empty prompt will not see mail until something
+wakes it. So when the window is up and the Deputy's box holds unread mail, `mw
+deputy` looks at the pane. If it is idle at an empty input line, `mw deputy`
+types the same line the Mayor's notifier types, `New mail for deputy: N
+message(s). Run bd mail inbox.`, with the half-second pause before Enter that
+the notifier uses, prints `nudged the Deputy in window <name>` and exits 0. If
+the pane is busy (`esc to interrupt` on screen, or text already on the input
+line) it types nothing, says `the Deputy is busy in window <name>; the mail
+waits` and exits **8**. With no unread mail, or a pane or box it cannot read,
+it says "already up" as above. See
 `features/deputy.feature`, `features/talk_wait.feature`, `features/talk_say.feature`
 and `features/talk_model.feature`.
 
