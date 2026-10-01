@@ -111,6 +111,9 @@ func newFactory(t *testing.T) *factory {
 		"\t*) cat \"$MW_TEST_DIR/postern-count\" 2>/dev/null ;;\n"+
 		"\tesac ;;\n"+
 		"esac\nexit 0\n", 0o755)
+	// The stand-in systemctl says mw-view-follow.service is active only when a
+	// view-follow-active file exists; never the real host's user manager.
+	f.write("bin/systemctl", "#!/bin/sh\n[ \"$1 $2\" = \"--user is-active\" ] && [ -f \"$MW_TEST_DIR/view-follow-active\" ]\n", 0o755)
 	f.write("vault/.mayor-acting", "", 0o644)
 	f.write("loadavg", "0.10 0.10 0.10 1/100 1\n", 0o644)
 	f.inbox()
@@ -1445,5 +1448,48 @@ func TestASkippedTickHasNoViewOnAHostThatDoesNotServeIt(t *testing.T) {
 
 	if f.posternCalls() != 0 || strings.Contains(out, "publishing the view") {
 		t.Fatalf("a host with no MW_MAIL_VIEW_EVERY ran postern %q, said %q", f.read("postern.log"), out)
+	}
+}
+
+// With mw-view-follow.service active the view step is retired: it says so
+// once, and runs nothing and asks mw nothing, tick after tick.
+func TestPosternViewStepIsRetiredWhileTheFollowServiceIsActive(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.servesTheView()
+	f.posternKey()
+	f.posternCount(0)
+	f.write("view-follow-active", "", 0o644)
+
+	out := f.tick()
+	f.beadsLevel("lvl-2")
+	f.setViewLastAt(time.Now().Add(-1 * time.Hour))
+	out += f.tick()
+
+	if f.viewRuns() != 0 || f.viewProbes() != 0 {
+		t.Fatalf("the view step ran with the follow service active: %q", f.read("postern.log"))
+	}
+	if n := strings.Count(out, "retired, mw postern view --follow does it"); n != 1 {
+		t.Fatalf("said the step is retired %d times over two ticks, want once:\n%s", n, out)
+	}
+}
+
+// The step comes back, and says nothing, once the service is not active.
+func TestPosternViewStepRunsAgainWhenTheFollowServiceStops(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	f.servesTheView()
+	f.posternKey()
+	f.posternCount(0)
+	f.write("view-follow-active", "", 0o644)
+	f.tick()
+	if err := os.Remove(f.path("view-follow-active")); err != nil {
+		t.Fatal(err)
+	}
+
+	f.tick()
+
+	if n := f.viewRuns(); n != 1 {
+		t.Fatalf("mw postern view ran %d times after the service stopped, want 1", n)
 	}
 }

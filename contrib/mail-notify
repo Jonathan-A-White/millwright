@@ -39,7 +39,10 @@
 #      postern backend serves the Governor's app. A run that fails, or that
 #      hits the timeout and is killed, is logged once with how long it ran and
 #      never stops the tick; either way the next attempt waits a full
-#      MW_MAIL_VIEW_EVERY. An mw with no view is passed over silently;
+#      MW_MAIL_VIEW_EVERY. An mw with no view is passed over silently. The
+#      step is retired, and says so once, whenever mw-view-follow.service
+#      (`mw postern view --follow`) is active: that service republishes the
+#      view within seconds of any bead change, so nothing runs here;
 #   7. when this host has a postern key file, and the beads have changed since
 #      the last snapshot written or attempted and at least
 #      MW_MAIL_SNAPSHOT_EVERY seconds (default 600) have passed since then,
@@ -243,6 +246,7 @@ beads_level() {
 view_step() {
 	view_ran=1
 	[ -n "$VIEW_EVERY" ] && [ -r "$keyfile" ] || return 1
+	view_followed && return 1
 	view_last=$(cat "$STATE/view-last" 2>/dev/null || echo 0)
 	case $view_last in *[!0-9]* | "") view_last=0 ;; esac
 	if [ $((now - view_last)) -ge "$VIEW_EVERY" ]; then
@@ -271,10 +275,27 @@ view_step() {
 	return "$view_ran"
 }
 
+# view_followed succeeds when mw-view-follow.service (`mw postern view
+# --follow`, which republishes the view within seconds of any bead change) is
+# active on this host: this step is then retired and runs nothing. It says so
+# once each time it finds the service active, and forgets it when it is not.
+view_followed() {
+	if systemctl --user is-active --quiet mw-view-follow.service >/dev/null 2>&1; then
+		if [ ! -f "$STATE/view-retired" ]; then
+			say "the view step is retired, mw postern view --follow does it (mw-view-follow.service is active)"
+			: >"$STATE/view-retired"
+		fi
+		return 0
+	fi
+	rm -f "$STATE/view-retired"
+	return 1
+}
+
 # view_stale prints how many seconds old the last view is, and succeeds, only
 # when this host serves the view and that age is at least VIEW_MAX_AGE.
 view_stale() {
 	[ -n "$VIEW_EVERY" ] && [ -r "$keyfile" ] || return 1
+	view_followed && return 1
 	stale_last=$(cat "$STATE/view-last" 2>/dev/null || echo 0)
 	case $stale_last in *[!0-9]* | "") stale_last=0 ;; esac
 	stale=$((now - stale_last))
