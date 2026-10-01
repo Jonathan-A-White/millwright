@@ -1686,6 +1686,38 @@ func DoctorTmpLeftoversBudgetBytes() (int64, error) {
 	return bytes, nil
 }
 
+// DefaultDoctorMayorStaleMinutes is how long a held Mayor's pane may stand
+// unchanged before mw doctor's mayor-stale check respawns it, when the
+// [doctor] table says nothing. It is the same 15 minutes
+// doctor.DefaultMayorStaleLimit reads as.
+const DefaultDoctorMayorStaleMinutes = 15
+
+// DoctorMayorStaleMinutes reports that limit: the `[doctor]` table's
+// `mayor_stale_minutes` key of ~/.config/mw/config.toml, and
+// DefaultDoctorMayorStaleMinutes when the table says nothing.
+func DoctorMayorStaleMinutes() (int, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return 0, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	table, err := tableIn(filepath.Join(home, File), DoctorTable)
+	if err != nil {
+		return 0, err
+	}
+	said := strings.TrimSpace(table["mayor_stale_minutes"])
+	if said == "" {
+		return DefaultDoctorMayorStaleMinutes, nil
+	}
+	minutes, err := strconv.Atoi(said)
+	if err != nil {
+		return 0, fmt.Errorf("the doctor's mayor_stale_minutes is %q, which is not a whole number of minutes: set `mayor_stale_minutes = <n>` in %s", said, File)
+	}
+	if minutes < 1 {
+		return 0, fmt.Errorf("the doctor's mayor_stale_minutes is %d, so a Mayor would be stale the moment it was looked at: set it to 1 or more", minutes)
+	}
+	return minutes, nil
+}
+
 // DoctorTunnelHost reports the VPS's ssh name mw doctor's tunnel check
 // connects to: the `[doctor]` table's `tunnel_host` key of
 // ~/.config/mw/config.toml, and the `[watch]` table's `host` when the

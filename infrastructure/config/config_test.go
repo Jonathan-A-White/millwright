@@ -1598,3 +1598,24 @@ func TestEventsKnobsThatAreNotUnderstoodAreRefused(t *testing.T) {
 		}
 	}
 }
+
+func TestDoctorMayorStaleMinutesIsTheShippedDefaultUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, "")
+	if minutes, err := config.DoctorMayorStaleMinutes(); err != nil || minutes != config.DefaultDoctorMayorStaleMinutes {
+		t.Fatalf("expected the default, got %d: %v", minutes, err)
+	}
+
+	writeConfig(t, "[doctor]\nmayor_stale_minutes = 25\n")
+	if minutes, err := config.DoctorMayorStaleMinutes(); err != nil || minutes != 25 {
+		t.Fatalf("expected the file's mayor_stale_minutes, got %d: %v", minutes, err)
+	}
+
+	writeConfig(t, "[doctor]\nmayor_stale_minutes = 0\n")
+	if _, err := config.DoctorMayorStaleMinutes(); err == nil {
+		t.Fatalf("expected zero to be refused")
+	}
+	writeConfig(t, "[doctor]\nmayor_stale_minutes = \"soon\"\n")
+	if _, err := config.DoctorMayorStaleMinutes(); err == nil {
+		t.Fatalf("expected a non-number to be refused")
+	}
+}

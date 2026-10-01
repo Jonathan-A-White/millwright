@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
@@ -13,9 +15,10 @@ import (
 
 // newDoctorCmd builds `mw doctor`: a table of checks, each its own probe,
 // cure, damper and way back, run on this host and logged here. It calls
-// nothing but a check's own probe or cure, and never AI, mail or a push
-// notice itself: a check left needing a person is a beads note, one key per
-// check, and `mw millhand tick` is what wakes the Millhand for it.
+// nothing but a check's own probe or cure, and never AI or mail itself: a
+// check left needing a person is a beads note, one key per check, and
+// `mw millhand tick` is what wakes the Millhand for it. The one push is
+// mayor-stale's alarm to the Governor, sent from its own cure.
 func newDoctorCmd() *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
@@ -107,7 +110,19 @@ func newDoctorCmd() *cobra.Command {
 
 			posternChannel := doctor.NewPosternChannel(mwVault(vault, host), host)
 
+			staleMinutes, err := config.DoctorMayorStaleMinutes()
+			if err != nil {
+				return err
+			}
+
 			store := doctor.New(dir)
+			mayorStale := doctor.NewMayorStale(vault, store)
+			mayorStale.Home, mayorStale.Host = mwVault(vault, host), host
+			mayorStale.Limit = time.Duration(staleMinutes) * time.Minute
+			mayorStale.Alarm = func(ctx context.Context, text string) error {
+				_, err := handsPush{gateway: mwGateway(vault, host)}.Run(ctx, application.PosternSendRequest{Class: "alarm", Text: text})
+				return err
+			}
 			tmpLeftovers := doctor.NewTmpLeftovers(os.TempDir())
 			tmpLeftovers.Budget = tmpLeftoversBudget
 			return runDoctor(cmd, application.Doctor{
@@ -121,6 +136,7 @@ func newDoctorCmd() *cobra.Command {
 					doctor.NewBeadsSize(vault),
 					doctor.NewBeadsStores(vault),
 					tmpLeftovers,
+					mayorStale,
 					mayorGone,
 					posternTranscribe,
 					beadsServerCheck,

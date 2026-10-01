@@ -2812,6 +2812,25 @@ run or damped, it is the mayor-up line itself, there being no window id yet
 to know a kill from. `mw doctor mayor-gone` is the recovery by hand;
 `--dry-run` prints the line it would run and changes nothing.
 
+**mayor-stale** is the Mayor's heartbeat. A held Mayor's pane is redrawn
+while it works or waits (a spinner, an elapsed clock), so the check keeps a
+hash of `tmux capture-pane` in its own state and faults once the pane of the
+window `.mayor-acting` names has stood unchanged for `mayor_stale_minutes`
+(the `[doctor]` table; default 15, checked every 5 minutes by the timer). A
+seat not held — no `.mayor-acting`, a host that is not home, a window gone or
+holding only a bare shell — says ok; the last two are `mayor-gone`'s to
+judge. A fresh beat (the pane changes) clears it and starts the count again.
+Its cure closes the stale window, runs the vault's `bin/mayor-up` (up to
+three tries, as the old Mayor's process may take a moment to go) and sends
+one `alarm`-class Postern push naming the window, the minutes and the new
+window, or that no Mayor could be started. A pane showing the harness's
+"Do you want to proceed?" is a Mayor waiting on a person, not a dead one:
+the window is left alone and the alarm carries the prompt and its options.
+Damper: 30 minutes, cap 1 per episode, so one respawn and one alarm to a
+stall. Its way back is `tmux kill-window -t '<window id mayor-up started>'`.
+`mw doctor mayor-stale` runs it by hand; `--dry-run` reports a stale seat
+and changes nothing but its own record of the pane.
+
 **postern-channel** faults the home host, and only it, when its config does not
 send the Mayor's postern messages directly: `postern_channel` reads chain
 (the default, when `~/.config/mw/config.toml` lacks the key) rather than
