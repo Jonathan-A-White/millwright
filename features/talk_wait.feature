@@ -27,6 +27,19 @@ Feature: mw talk wait
     And the wait printed "What landed today?"
     And the wait printed an index-to-print time in milliseconds
 
+  Scenario: a talk opened from a bead says what it is about
+    Given mw talk wait is armed
+    When the Governor's turn 1 of talk "talk-10" saying "Why is this blocked?" is indexed, about the bead "mw-xyz.1" titled "Fix the login form"
+    Then mw talk wait ends within 1 second
+    And the wait printed "text: Why is this blocked?"
+    And the wait printed "about: bead mw-xyz.1 Fix the login form"
+
+  Scenario: a talk record with no about prints no about line
+    Given mw talk wait is armed
+    When the Governor's turn 1 of talk "talk-11" saying "Plain question" is indexed
+    Then mw talk wait ends within 1 second
+    And the wait did not print "about:"
+
   Scenario: a turn that changes no model and cuts nothing says so
     Given mw talk wait is armed
     When the Governor's turn 1 of talk "talk-8" saying "Hello" is indexed

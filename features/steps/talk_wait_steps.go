@@ -214,6 +214,16 @@ func callPlaintext(role, text, ringTxid string) string {
 	return string(raw)
 }
 
+// governorTurnAbout is a turn whose record carries an about field: what the
+// talk was opened from.
+func (c *talkWaitContext) governorTurnAbout(turn int, id, text, kind, aboutID, title string) error {
+	var plain map[string]any
+	_ = json.Unmarshal([]byte(talkTurnPlaintext(id, turn, "turn", text, "", false)), &plain)
+	plain["about"] = map[string]any{"kind": kind, "id": aboutID, "title": title}
+	raw, _ := json.Marshal(plain)
+	return c.record("talk", c.mayor, c.governorKey, string(raw), true)
+}
+
 func (c *talkWaitContext) governorTurn(turn int, id, text, model string, cut, announce bool) error {
 	return c.record("talk", c.mayor, c.governorKey, talkTurnPlaintext(id, turn, "turn", text, model, cut), announce)
 }
@@ -262,6 +272,10 @@ func InitializeTalkWaitScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^the Governor's turn (\d+) of talk "([^"]*)" saying "([^"]*)" is indexed, on model "([^"]*)", cutting the last answer$`,
 		func(turn int, id, text, model string) error {
 			return c.governorTurn(turn, id, text, model, true, true)
+		})
+	ctx.When(`^the Governor's turn (\d+) of talk "([^"]*)" saying "([^"]*)" is indexed, about the (\w+) "([^"]*)" titled "([^"]*)"$`,
+		func(turn int, id, text, kind, aboutID, title string) error {
+			return c.governorTurnAbout(turn, id, text, kind, aboutID, title)
 		})
 	ctx.Given(`^the Governor's turn (\d+) of talk "([^"]*)" saying "([^"]*)" has been indexed$`, func(turn int, id, text string) error {
 		return c.governorTurn(turn, id, text, "", false, false)
