@@ -133,3 +133,44 @@ func TestAGatewayWithNoNameAddsNoActor(t *testing.T) {
 		t.Fatalf("expected no actor to be named, got %q", asked)
 	}
 }
+
+// standInHead writes a stand-in bd that prints out for any call and returns a
+// Gateway that runs it.
+func standInHead(t *testing.T, out string, status int) *beads.Gateway {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in for bd is a shell script")
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bd-head")
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s' '%s'\nexit %d\n", out, status)
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return beads.New(t.TempDir(), beads.WithProgram(path))
+}
+
+func TestHeadReadsTheDatabasesHashFromBd(t *testing.T) {
+	gateway := standInHead(t, `[{"head": "sgdjqln173tdc08q"}]`, 0)
+	head, err := gateway.Head(context.Background())
+	if err != nil {
+		t.Fatalf("reading the head: %v", err)
+	}
+	if head != "sgdjqln173tdc08q" {
+		t.Fatalf("head = %q, want the hash bd printed", head)
+	}
+}
+
+func TestHeadRefusesAnAnswerThatHoldsNoHash(t *testing.T) {
+	for _, out := range []string{`[]`, `[{"head": ""}]`, `not json`} {
+		if head, err := standInHead(t, out, 0).Head(context.Background()); err == nil {
+			t.Errorf("Head over %q = %q, nil; want an error", out, head)
+		}
+	}
+}
+
+func TestHeadReportsABdThatFails(t *testing.T) {
+	if _, err := standInHead(t, `Error: no database`, 1).Head(context.Background()); err == nil {
+		t.Fatal("expected a failing bd to be an error")
+	}
+}
