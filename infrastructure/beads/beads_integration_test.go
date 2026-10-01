@@ -1319,7 +1319,7 @@ func countingProgram(t *testing.T) (program, log string) {
 }
 
 // mw-jrx0s.17: the view built through the gateway's snapshot is the very view
-// the per-call reads build, in a few bd calls however many epics are live.
+// the per-call reads build, in a few bd calls however many epics are live. The throwaway vault is embedded, where bd has no sql, so the second call falls back to the separate reads; the two-call build is TestSnapshotReadsTheNotesAndTheCommentsInOneSqlCall's.
 func TestGatewaySnapshotBuildsTheViewTheSeparateReadsBuild(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
@@ -1348,6 +1348,14 @@ func TestGatewaySnapshotBuildsTheViewTheSeparateReadsBuild(t *testing.T) {
 	bdRun(t, vault, beads.Program, "update", waiting, "--status", "deferred")
 	gone := create("Closed epic", "-t", "epic")
 	bdRun(t, vault, beads.Program, "close", gone, "--reason", "done")
+	// The view reads comments for a hands bead with no steps and for a landing
+	// the memory does not hold; those comments ride the same call as the notes.
+	hands := create("By hand", "--parent", first, "--label", "hitl")
+	bdRun(t, vault, beads.Program, "comments", "add", hands, "BY HAND: do the thing.")
+	landed := create("Landed", "--parent", first)
+	bdRun(t, vault, beads.Program, "comments", "add", landed, "HOW TO CHECK IT\n1. Look.")
+	bdRun(t, vault, beads.Program, "set-state", landed, "run=landed", "--reason", "landed")
+	bdRun(t, vault, beads.Program, "close", landed, "--reason", "done")
 
 	program, log := countingProgram(t)
 	gateway := beads.New(vault, beads.WithProgram(program))
@@ -1377,10 +1385,22 @@ func TestGatewaySnapshotBuildsTheViewTheSeparateReadsBuild(t *testing.T) {
 		want, _ := json.Marshal(before)
 		t.Fatalf("expected the snapshot to build the same view\n got: %s\nwant: %s", got, want)
 	}
+	if !strings.Contains(string(mustJSON(t, after)), "do the thing") {
+		t.Errorf("expected the hands bead's BY HAND comment in the view, got %s", mustJSON(t, after))
+	}
 	if len(after.Beads) < 6 {
 		t.Fatalf("expected the fixture to put its beads in the view, got %d", len(after.Beads))
 	}
 	if calls := len(strings.Split(strings.TrimSpace(string(asked)), "\n")); calls > 4 {
 		t.Errorf("expected the view in at most four bd calls, got %d:\n%s", calls, asked)
 	}
+}
+
+func mustJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	encoded, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("encoding %T: %v", v, err)
+	}
+	return encoded
 }

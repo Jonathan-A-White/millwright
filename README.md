@@ -995,8 +995,8 @@ with held stories, a story landed in the last day without `VERIFIED`, an open
 unsynced for 20 minutes — most blocking first, then oldest. It gzips the JSON,
 seals it with BRC-78 to `postern_governor_key` and writes it base64,
 atomically, to `postern_view_path`, for the backend's `GET /api/view`. It
-reads every bead in one bd list and a few more calls besides (about a second
-on the live vault), so it can run every few seconds; `--json` prints the plaintext. `mw postern bead <id>` prints one
+reads every bead in one bd list and every note and needed comment in one bd sql
+(two bd calls, about 0.7 s on the live vault), so it can run every few seconds; `--json` prints the plaintext. `mw postern bead <id>` prints one
 bead in full (§12), sealed the same way, for the backend's
 `GET /api/beads/{id}` (`POSTERN_BEAD_CMD`); an unknown bead leaves with status
 3. See `features/postern_view.feature` and `features/postern_bead.feature`.

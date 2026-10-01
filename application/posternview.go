@@ -172,6 +172,13 @@ type TrackerSnapshot interface {
 	Snapshot(ctx context.Context) (WorkTracker, error)
 }
 
+// SnapshotNotes is a snapshot that read every note along with the beads, in the
+// same call as the comments it holds, so the view need not read the notes
+// again: ok is false when it did not.
+type SnapshotNotes interface {
+	AllNotes() (notes map[string]string, ok bool)
+}
+
 // PosternView builds the live view of the factory, postern's docs/protocol.md
 // §11 — every live epic, every bead under one at any depth, every live bead's
 // parent chain, and everything waiting on the Governor — and, once built,
@@ -185,9 +192,11 @@ type TrackerSnapshot interface {
 //     TrackerSnapshot needs; one that has takes a snapshot first, one read of
 //     every bead, and answers all of these from it;
 //   - NotesWithPrefix, once, for every question, every host's last sync and
-//     the landed memory at the same time;
+//     the landed memory at the same time — or none, when the snapshot read the
+//     notes with the beads (SnapshotNotes);
 //   - StoriesComments, at most once, only for an open question whose note does
-//     not say what it asked and a landing the memory cannot answer;
+//     not say what it asked and a landing the memory cannot answer — and none
+//     for a bead whose comments the snapshot read (SnapshotNotes' call);
 //   - ShowEpics again only for a child epic that is not live (held, or closed
 //     within the week), and ShowBeads only for a parent or a blocker that no
 //     epic read already holds — neither in the usual run.
@@ -310,12 +319,16 @@ func (v PosternView) Build(ctx context.Context) (PosternViewDoc, error) {
 	if v.Notes == nil {
 		return PosternViewDoc{}, fmt.Errorf("mw postern view: nowhere to read the notes from")
 	}
+	var snapshotted map[string]string
 	if snapshotter, ok := v.Tracker.(TrackerSnapshot); ok {
 		snapshot, err := snapshotter.Snapshot(ctx)
 		if err != nil {
 			return PosternViewDoc{}, fmt.Errorf("reading the beads: %w", err)
 		}
 		v.Tracker = snapshot
+		if withNotes, ok := snapshot.(SnapshotNotes); ok {
+			snapshotted, _ = withNotes.AllNotes()
+		}
 	}
 	b := &viewBuild{
 		now: v.now(), entries: map[string]*viewEntry{},
@@ -323,10 +336,14 @@ func (v PosternView) Build(ctx context.Context) (PosternViewDoc, error) {
 	}
 
 	// Every note at once: bd keeps them in one table and lists it whole, so
-	// one read serves the questions, the hosts and the landed memory.
-	notes, err := v.Notes.NotesWithPrefix(ctx, "")
-	if err != nil {
-		return PosternViewDoc{}, fmt.Errorf("reading the notes: %w", err)
+	// one read serves the questions, the hosts and the landed memory — the
+	// snapshot's own, when it read them with the beads.
+	notes := snapshotted
+	if notes == nil {
+		var err error
+		if notes, err = v.Notes.NotesWithPrefix(ctx, ""); err != nil {
+			return PosternViewDoc{}, fmt.Errorf("reading the notes: %w", err)
+		}
 	}
 	memory := parseLandedMemory(notes[PosternSnapshotMemoryKey])
 
