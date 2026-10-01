@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -378,4 +380,151 @@ func TestSyncLeavesACacheUnderTheByteThresholdAlone(t *testing.T) {
 	if after := mustPackCount(t, repo); after != before {
 		t.Fatalf("expected a cache under both thresholds to be left untouched, had %d packs, now %d", before, after)
 	}
+}
+
+// looseRemoteCacheFixture makes a bare repo at the path a Dolt git-remote-cache
+// sits at under the given store of a vault's .beads (embeddeddolt or dolt),
+// holding blobs loose objects of bytesPerBlob pseudo-random bytes each and a
+// ref to a commit that reaches them — the shape a host that only pulls leaves
+// behind, since a fetch lands as loose objects, never a new pack.
+func looseRemoteCacheFixture(t *testing.T, vault, store string, blobs, bytesPerBlob int) (repo string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("this fixture shells out to git")
+	}
+	ctx := context.Background()
+	repo = filepath.Join(vault, beadsDir, store, "sf", ".dolt", "git-remote-cache", "h", "repo.git")
+	if _, err := runGit(ctx, "", "init", "--bare", "-q", repo); err != nil {
+		t.Fatalf("making the bare remote cache: %v", err)
+	}
+	if _, err := runGit(ctx, repo, "config", "gc.auto", "0"); err != nil {
+		t.Fatalf("disabling auto gc on the bare remote cache: %v", err)
+	}
+	source := rand.New(rand.NewSource(2))
+	var tree strings.Builder
+	for i := 0; i < blobs; i++ {
+		blob := make([]byte, bytesPerBlob)
+		if _, err := source.Read(blob); err != nil {
+			t.Fatalf("filling a %d-byte blob: %v", bytesPerBlob, err)
+		}
+		file := filepath.Join(t.TempDir(), "blob")
+		if err := os.WriteFile(file, blob, 0o644); err != nil {
+			t.Fatalf("writing a blob: %v", err)
+		}
+		sha, err := runGit(ctx, repo, "hash-object", "-w", file)
+		if err != nil {
+			t.Fatalf("storing a loose blob: %v", err)
+		}
+		fmt.Fprintf(&tree, "100644 blob %s\tfile%d\n", strings.TrimSpace(string(sha)), i)
+	}
+	mktree := exec.CommandContext(ctx, "git", "mktree")
+	mktree.Dir = repo
+	mktree.Stdin = strings.NewReader(tree.String())
+	treeSHA, err := mktree.Output()
+	if err != nil {
+		t.Fatalf("making a tree over the blobs: %v", err)
+	}
+	commit, err := runGit(ctx, repo,
+		"-c", "user.email=test@example.com", "-c", "user.name=test",
+		"commit-tree", "-m", "pulled", strings.TrimSpace(string(treeSHA)))
+	if err != nil {
+		t.Fatalf("committing the tree: %v", err)
+	}
+	if _, err := runGit(ctx, repo, "update-ref", "refs/remotes/origin/main", strings.TrimSpace(string(commit))); err != nil {
+		t.Fatalf("pointing a ref at the commit: %v", err)
+	}
+	return repo
+}
+
+// TestSyncRepacksLooseObjectsInAServedModeCache is mw-gq6.181's fix: a host
+// that serves beads keeps its database at .beads/dolt/<db>, not
+// .beads/embeddeddolt/<db>, and its `bd dolt pull` leaves loose objects in the
+// git-remote-cache rather than packs. Neither the sync's repack nor the daily
+// GC's looked under .beads/dolt, so the cache only grew.
+func TestSyncRepacksLooseObjectsInAServedModeCache(t *testing.T) {
+	// A vault holding .beads/dolt is refused unless the server is named, as on
+	// every served host; setting the environment rules out t.Parallel.
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "desktop.mw")
+	for _, store := range []string{"dolt", "embeddeddolt"} {
+		t.Run(store, func(t *testing.T) {
+			dir := t.TempDir()
+			gateway := New(dir, WithProgram(standInBD(t, dir)))
+
+			repo := looseRemoteCacheFixture(t, dir, store, 3, 25_000_000)
+			if loose := mustLooseBytes(t, repo); loose <= remoteCacheLooseThresholdBytes {
+				t.Fatalf("expected the fixture to leave more than %d bytes of loose objects, got %d", remoteCacheLooseThresholdBytes, loose)
+			}
+			if before := mustPackCount(t, repo); before != 0 {
+				t.Fatalf("expected the fixture to hold no pack yet, got %d", before)
+			}
+
+			if err := gateway.Sync(context.Background()); err != nil {
+				t.Fatalf("syncing: %v", err)
+			}
+
+			if after := mustPackCount(t, repo); after != 1 {
+				t.Fatalf("expected a sync to pack the loose objects into one pack, got %d packs", after)
+			}
+			if loose := mustLooseBytes(t, repo); loose > remoteCacheLooseThresholdBytes/10 {
+				t.Fatalf("expected the packed loose objects to be pruned, %d bytes remain", loose)
+			}
+			if _, err := runGit(context.Background(), repo, "rev-parse", "refs/remotes/origin/main"); err != nil {
+				t.Fatalf("expected the ref to still resolve after the repack, got %v", err)
+			}
+		})
+	}
+}
+
+// TestSyncLeavesAServedModeCacheWithFewLooseObjectsAlone is the other half: a
+// few loose objects, and a lone settled pack however large, cost a sync
+// nothing.
+func TestSyncLeavesAServedModeCacheWithFewLooseObjectsAlone(t *testing.T) {
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "desktop.mw")
+	dir := t.TempDir()
+	gateway := New(dir, WithProgram(standInBD(t, dir)))
+
+	repo := looseRemoteCacheFixture(t, dir, "dolt", 2, 1_000)
+	if err := gateway.Sync(context.Background()); err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	if after := mustPackCount(t, repo); after != 0 {
+		t.Fatalf("expected a cache with a few loose objects to be left alone, got %d packs", after)
+	}
+}
+
+// TestOneSettledPackOverTheByteThresholdIsNotCrowded: after a repack leaves one
+// big pack, the next sync must not do it all again.
+func TestOneSettledPackOverTheByteThresholdIsNotCrowded(t *testing.T) {
+	t.Parallel()
+	crowded, err := isRemoteCacheCrowded(settledBigPack(t))
+	if err != nil {
+		t.Fatalf("checking: %v", err)
+	}
+	if crowded {
+		t.Fatalf("expected a lone pack with no loose objects not to count as crowded")
+	}
+}
+
+// settledBigPack is a cache holding one pack over remoteCacheRepackThresholdBytes
+// and no loose objects.
+func settledBigPack(t *testing.T) string {
+	t.Helper()
+	repo, _ := largeRemoteCacheFixture(t, t.TempDir(), 3, 100_000_000)
+	if err := repackOneRemoteCache(context.Background(), repo); err != nil {
+		t.Fatalf("settling the cache: %v", err)
+	}
+	if n, b := mustPackCount(t, repo), mustPackBytes(t, repo); n != 1 || b <= remoteCacheRepackThresholdBytes {
+		t.Fatalf("expected one pack over the byte threshold, got %d packs, %d bytes", n, b)
+	}
+	return repo
+}
+
+// mustLooseBytes totals the loose objects a bare repo holds.
+func mustLooseBytes(t *testing.T, repo string) int64 {
+	t.Helper()
+	total, err := looseBytes(repo)
+	if err != nil {
+		t.Fatalf("totalling loose bytes in %s: %v", repo, err)
+	}
+	return total
 }

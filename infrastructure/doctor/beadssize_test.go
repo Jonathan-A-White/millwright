@@ -108,3 +108,30 @@ func TestBeadsSizeDamperIsZeroWaitCapOne(t *testing.T) {
 		t.Fatalf("expected %s/%d, got %s/%d", doctor.BeadsSizeDamperWait, doctor.BeadsSizeDamperCap, wait, capPerEpisode)
 	}
 }
+
+func TestBeadsSizeCureSaysItFoundNoCache(t *testing.T) {
+	t.Parallel()
+	check := &doctor.BeadsSize{Dir: bsVault(t, 200), Budget: 100}
+	err := check.Cure(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "no git-remote-cache found") {
+		t.Fatalf("expected the cure to say no cache was found, got %v", err)
+	}
+}
+
+func TestBeadsSizeCureSaysWhatCachesItFoundUnderEitherLayout(t *testing.T) {
+	t.Parallel()
+	for _, store := range []string{"dolt", "embeddeddolt"} {
+		dir := bsVault(t, 10)
+		repo := filepath.Join(dir, ".beads", store, "sf", ".dolt", "git-remote-cache", "h", "repo.git")
+		if err := os.MkdirAll(repo, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(repo, "pack"), make([]byte, 300), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		err := (&doctor.BeadsSize{Dir: dir, Budget: 100}).Cure(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "found 1 git-remote-cache clone(s) holding 300 bytes") {
+			t.Fatalf("%s: expected the cure to name the cache it found, got %v", store, err)
+		}
+	}
+}
