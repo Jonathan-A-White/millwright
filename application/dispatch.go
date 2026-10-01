@@ -125,6 +125,13 @@ type Dispatch struct {
 	// worktree (mw-gq6.140). A nil Exclusive takes none, and a dry run needs none.
 	Exclusive GristLock
 
+	// SelfUpdate is run first by a real tick, once the dispatch lock is held: it
+	// keeps this host's mw level with the factory rig's main, as the Millhand's
+	// tick does, so a host that dispatches and runs no Millhand tick is kept
+	// level too (mw-gq6.184). What it did is printed. A zero SelfUpdate does
+	// nothing, and a dry run runs none.
+	SelfUpdate SelfUpdate
+
 	// Mill and Home make the tick answer what the mill left waiting: after
 	// its own claims, on the host that is home, one pass of the mill runs
 	// (mw grist grind's own use case, with its own lock and its own cap
@@ -329,6 +336,14 @@ func (d Dispatch) Run(ctx context.Context) (DispatchReport, error) {
 			return DispatchReport{Host: d.Host, Cap: d.Cap}, nil
 		}
 		defer release()
+	}
+	// First, before the sync or any claim, so that a host with a Millhand that
+	// never ticks keeps its mw level: the same look as the Millhand tick's, and
+	// what it says is printed. A build that fails costs the tick nothing.
+	if !d.DryRun {
+		for _, note := range d.SelfUpdate.Run(ctx) {
+			d.print(note + "\n")
+		}
 	}
 	report, err := d.run(ctx)
 	if d.Log != nil && !d.DryRun {

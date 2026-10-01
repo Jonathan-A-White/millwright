@@ -24,6 +24,19 @@ import (
 // directory. It is this host's own: nothing in it is synced anywhere.
 var MillhandTickStateDir = filepath.Join(".local", "state", "mw-millhand-tick")
 
+// hostSelfUpdate is how this host keeps its mw level with the factory rig's
+// main (application.SelfUpdate), shared by the Millhand's tick and the dispatch
+// tick: the built marker is kept in SyncHaltStateDir under home, so that a host
+// running both builds a commit once.
+func hostSelfUpdate(rigs, afterLanding map[string]string, home string) application.SelfUpdate {
+	return application.SelfUpdate{
+		Rigs:     rigs,
+		Checkout: rig.New(),
+		After:    rig.NewAfterLanding(rig.WithAfterCommands(afterLanding)),
+		Built:    rig.NewBuiltMarks(filepath.Join(home, SyncHaltStateDir)),
+	}
+}
+
 // newMillhandTickCmd builds `mw millhand tick`: what the routine timer runs.
 func newMillhandTickCmd() *cobra.Command {
 	var dryRun bool
@@ -137,21 +150,16 @@ func newMillhandTickCmd() *cobra.Command {
 					Tracker: gateway,
 					Host:    host,
 				},
-				SelfUpdate: application.SelfUpdate{
-					Rigs:     rigs,
-					Checkout: rig.New(),
-					After:    rig.NewAfterLanding(rig.WithAfterCommands(afterLanding)),
-					Built:    rig.NewBuiltMarks(filepath.Join(home, SyncHaltStateDir)),
-				},
-				Tidy:      application.Tidy{Mail: gateway, Notes: gateway, Beads: gateway},
-				Reach:     doctor.NetReach{Hosts: reach},
-				ReapLog:   files,
-				Recheck:   time.Duration(recheck) * time.Second,
-				SyncHalts: hostSyncHalt(),
-				Notify:    notify.New(),
-				Host:      host,
-				DryRun:    dryRun,
-				Out:       cmd.OutOrStdout(),
+				SelfUpdate: hostSelfUpdate(rigs, afterLanding, home),
+				Tidy:       application.Tidy{Mail: gateway, Notes: gateway, Beads: gateway},
+				Reach:      doctor.NetReach{Hosts: reach},
+				ReapLog:    files,
+				Recheck:    time.Duration(recheck) * time.Second,
+				SyncHalts:  hostSyncHalt(),
+				Notify:     notify.New(),
+				Host:       host,
+				DryRun:     dryRun,
+				Out:        cmd.OutOrStdout(),
 			}
 			watching := application.WatchSettings{
 				SSH: settings.SSH, Host: settings.Host, Outside: settings.Outside, Blog: settings.Blog,

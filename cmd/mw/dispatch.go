@@ -130,6 +130,12 @@ func newDispatchCmd() *cobra.Command {
 			"Only one real dispatch runs on a host at a time: one started while another holds the\n" +
 			"host's dispatch lock (~/.local/state/mw-dispatch/lock) prints \"another mw dispatch is running\n" +
 			"here; nothing done\" and leaves with 0.\n\n" +
+			"Once it holds that lock, before the sync, a real dispatch keeps this host's mw level with the\n" +
+			"factory rig's main as mw millhand tick does, so a host that runs no Millhand tick stays level too:\n" +
+			"on a host whose [after_landing] table names a command for the millwright rig, a clean checkout\n" +
+			"behind origin's main is fast-forwarded and the command run in it, and it prints \"self-update:\n" +
+			"millwright <old> → <new>, built\". A commit already built (by either tick) is not built again; a\n" +
+			"dirty checkout is left alone, and a build that fails keeps the old mw and is tried by the next tick.\n\n" +
 			"On the host that is home (mw home), and where the config file has a [grist] table, it then\n" +
 			"runs one pass of the grist mill (mw grist grind), so a grist left waiting for a slot is\n" +
 			"answered by this tick. While it claims it holds the grind lock, so a grind starting in the\n" +
@@ -222,6 +228,19 @@ func newDispatchCmd() *cobra.Command {
 					fmt.Fprintf(cmd.ErrOrStderr(), "no grist pass this tick: %v\n", err)
 				} else {
 					dispatch.Mill = mill
+				}
+			}
+			// The tick keeps this host's mw level with the factory rig's main
+			// first, as the Millhand's tick does, for a host that runs no
+			// Millhand tick. A config or home that cannot be read costs the tick
+			// that look and nothing else.
+			if !dryRun {
+				if afterLanding, err := config.AfterLanding(); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "no self-update this tick: %v\n", err)
+				} else if home, err := os.UserHomeDir(); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "no self-update this tick: there is no home directory to remember a build in: %v\n", err)
+				} else {
+					dispatch.SelfUpdate = hostSelfUpdate(rigs, afterLanding, home)
 				}
 			}
 			// A rehearsal is not a run: it leaves nothing in the log.

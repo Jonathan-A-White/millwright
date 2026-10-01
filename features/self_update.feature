@@ -10,6 +10,10 @@ Feature: a host keeps the mw it runs level with the factory rig's main
   tried again by the next tick. A host that names no command builds nothing and
   its checkout is not touched.
 
+  The dispatch tick does the same first, so that a host that dispatches and runs
+  no Millhand tick (the desktop) keeps its mw level too (mw-gq6.184). A host that
+  runs both ticks builds a commit once: the first tick remembers it.
+
   Background:
     Given a millwright rig whose origin's main has moved on since this host's checkout
 
@@ -60,3 +64,24 @@ Feature: a host keeps the mw it runs level with the factory rig's main
     When the host's tick looks at its mw
     Then the checkout is still at its old commit
     And the tick's line says nothing
+
+  Scenario: A dispatch tick on a host with no Millhand tick rebuilds as well
+    Given the host's build command makes bin/mw
+    When the host's dispatch tick looks at its mw
+    Then the checkout is at origin's main
+    And the build ran once, in the checkout, at origin's main
+    And bin/mw was rebuilt
+    And the tick's line says: self-update: millwright <old> → <new>, built
+
+  Scenario: A dispatch tick does not build what the Millhand tick already built
+    Given the host's build command makes bin/mw
+    And the host's tick has looked at its mw
+    When the host's dispatch tick looks at its mw
+    Then the build ran once, in the checkout, at origin's main
+    And the tick's line says nothing
+
+  Scenario: A dispatch tick's dry run leaves the checkout alone
+    Given the host's build command makes bin/mw
+    When the host's dispatch tick looks at its mw as a dry run
+    Then the checkout is still at its old commit
+    And the build did not run

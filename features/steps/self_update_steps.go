@@ -64,6 +64,8 @@ func InitializeSelfUpdateScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the checkout has a commit of its own$`, c.theCheckoutHasACommit)
 	ctx.Given(`^the host's tick has looked at its mw$`, c.theTickLooks)
 	ctx.When(`^the host's tick looks at its mw$`, c.theTickLooks)
+	ctx.When(`^the host's dispatch tick looks at its mw$`, func() error { return c.theDispatchTickLooks(false) })
+	ctx.When(`^the host's dispatch tick looks at its mw as a dry run$`, func() error { return c.theDispatchTickLooks(true) })
 
 	ctx.Then(`^the checkout is at origin's main$`, func() error { return c.checkoutIs(c.newHead) })
 	ctx.Then(`^the checkout is still at its old commit$`, func() error { return c.checkoutIs(c.oldHead) })
@@ -208,6 +210,34 @@ func (c *selfUpdateContext) theTickLooks() error {
 	}
 	if _, err := tick.Run(context.Background()); err != nil {
 		return fmt.Errorf("the tick failed: %w", err)
+	}
+	c.line = strings.TrimSpace(out.String())
+	return nil
+}
+
+// theDispatchTickLooks runs a real dispatch with nothing ready, on a host that
+// runs no Millhand tick, and keeps what it printed.
+func (c *selfUpdateContext) theDispatchTickLooks(dryRun bool) error {
+	worktrees := rig.New()
+	var out bytes.Buffer
+	dispatch := application.Dispatch{
+		Tracker:   apptest.NewFakeTracker(),
+		Worktrees: worktrees,
+		Runner:    apptest.NewFakeRunner(),
+		SelfUpdate: application.SelfUpdate{
+			Rigs:     map[string]string{application.FactoryRig: c.rig},
+			Checkout: worktrees,
+			After:    rig.NewAfterLanding(rig.WithAfterCommands(c.commands)),
+			Built:    rig.NewBuiltMarks(filepath.Join(c.root, "state")),
+		},
+		Host:   "desktop",
+		Cap:    1,
+		DryRun: dryRun,
+		Out:    &out,
+		Now:    func() time.Time { return time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC) },
+	}
+	if _, err := dispatch.Run(context.Background()); err != nil {
+		return fmt.Errorf("the dispatch failed: %w", err)
 	}
 	c.line = strings.TrimSpace(out.String())
 	return nil
