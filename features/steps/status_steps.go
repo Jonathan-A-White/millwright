@@ -149,6 +149,8 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the report lists "([^"]*)" before "([^"]*)" under the heading for the Governor$`,
 		c.theReportListsBeforeUnderWaiting)
 	ctx.Then(`^the report does not list "([^"]*)" as ready$`, c.theReportDoesNotListAsReady)
+	ctx.Then(`^the report says "([^"]*)" is "([^"]*)"$`, c.theReportSaysTheStoryIs)
+	ctx.Then(`^the report does not list "([^"]*)" under any other host$`, c.theReportDoesNotListUnderAnyOtherHost)
 	ctx.Then(`^the report does not show "([^"]*)" as running$`, c.theReportDoesNotShowAsRunning)
 	ctx.Then(`^the report has no heading for stories waiting for the Governor$`, c.theReportHasNoHeadingForTheGovernor)
 	ctx.Then(`^the report shows "([^"]*)" on the rig "([^"]*)"$`, c.theReportShowsOnTheRig)
@@ -524,6 +526,32 @@ func (c *statusContext) theReportListsAsReady(id string) error {
 		}
 	}
 	return fmt.Errorf("%s is not listed as ready:\n%s", id, c.report.String())
+}
+
+// theReportSaysTheStoryIs says the line the report prints under the story's
+// title is the words given, as in "host auto".
+func (c *statusContext) theReportSaysTheStoryIs(id, words string) error {
+	lines := strings.Split(c.report.String(), "\n")
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), id) && i+2 < len(lines) {
+			if got := strings.TrimSpace(lines[i+2]); got != words {
+				return fmt.Errorf("expected the block of %s to say %q, got %q:\n%s", id, words, got, c.report.String())
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("%s is not in the report:\n%s", id, c.report.String())
+}
+
+func (c *statusContext) theReportDoesNotListUnderAnyOtherHost(id string) error {
+	for _, other := range c.report.Others {
+		for _, d := range other.Stories {
+			if d.Story.ID == id {
+				return fmt.Errorf("%s is listed under the other host %s:\n%s", id, other.Host, c.report.String())
+			}
+		}
+	}
+	return nil
 }
 
 func (c *statusContext) theReportListsAsBlocked(id string) error {

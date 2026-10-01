@@ -32,6 +32,14 @@ Feature: mw status
     And the report lists "mw-gq6.2" as ready
     And the report lists "mw-gq6.3" as blocked
 
+  Scenario: A ready story that any host may take is listed under ready, and says so
+    Given a status story "mw-gq6.30" filed under it, overriding "host" with "auto"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "mw-gq6.30" as ready
+    And the report says "mw-gq6.30" is "host auto"
+    And the report does not list "mw-gq6.30" under any other host
+
   Scenario: A ready story labelled hitl is listed under its own heading, not under ready
     Given a status story "mw-gq6.23" filed under it
     And the status story "mw-gq6.23" is labelled "hitl"

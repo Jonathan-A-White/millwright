@@ -34,9 +34,9 @@ Each adapter: `var _ application.<Port> = ...`.
 | `Doctor{Check,State,Log,Notes}` | `application/doctor.go` | `infrastructure/doctor` | none |
 | `TickLog` | `application/millhandtick.go` | `infrastructure/ticklog/ticklog.go` | `apptest.FakeTickLog` |
 | `Worktrees` | `application/worktrees.go` | `infrastructure/rig/worktree.go` | `application/dispatch_test.go` |
+| `HostLoad` | `application/hostload.go` | `infrastructure/hostload/hostload.go` | `apptest.FakeHostLoad` |
 | `SyncHaltMarker` | `application/sync.go` | `infrastructure/synchalt/synchalt.go` | `apptest.FakeSyncHaltMarker` |
-| `Notifier` | `application/millhandtick.go` | `infrastructure/notify/notify.go` | none |
-| `HomeMoveHost`, `OldHome` | `application/homemove.go` | `infrastructure/homemove/homemove.go` | none |
+| `Notifier`, `HomeMoveHost`, `OldHome` | `application/{millhandtick,homemove}.go` | `infrastructure/{notify/notify,homemove/homemove}.go` | none |
 | `VaultBirth`, `TrackerBirth` | `application/init.go` | `infrastructure/{vault/birth,beads/init}.go` | none |
 | `Landing`, `Checks`, `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/{landing,checks,slot}.go` | none |
 | `AfterLanding` | `application/afterlanding.go` | `infrastructure/rig/afterlanding.go` | none |
@@ -87,8 +87,7 @@ Each adapter: `var _ application.<Port> = ...`.
 | --- | --- | --- |
 | `throwawayVault`, `installFormula` | `infrastructure/beads/beads_integration_test.go` | Real bd, temp dir. |
 | `standIn` | `infrastructure/beads/sync_test.go` | Stand-in `bd`. |
-| `privateRunner` | `infrastructure/tmux/tmux_integration_test.go` | Private tmux. |
-| `privateWindows` | `infrastructure/tmux/window_integration_test.go` | Tmux, seat. |
+| `privateRunner`, `privateWindows` | `infrastructure/tmux/{tmux,window}_integration_test.go` | Private tmux. |
 | `aVault` | `infrastructure/vault/vault_test.go` | Seat vault. |
 | `twoHosts` | `infrastructure/vault/git_test.go` | Two clones. |
 | `aRig` | `infrastructure/rig/worktree_test.go` | Rig + origin. |

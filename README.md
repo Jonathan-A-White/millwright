@@ -282,6 +282,12 @@ under it the stories, in an order where none comes before what it waits on,
 each with its acceptance criteria and estimate in their own fields, its Path
 overrides as metadata, and what it waits on as a blocked-by dependency.
 
+A Path's `host` names the one host that works the story. `host = "auto"` means
+whichever host is under its cap and its load takes it: a host takes an `auto`
+story only while its 1-minute load average is below its core count, and the claim
+writes that host's name over `auto`, so every later reader sees a concrete host.
+`mw status` lists a ready `auto` story under READY on every host, as `host auto`.
+
 Every story is filed **held** — beads' `deferred` status — so that nothing can
 be dispatched from a plan nobody has approved. `mw file` prints the tree it
 filed, with each story's Path and what it waits on, and then asks. `--approve`

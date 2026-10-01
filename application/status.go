@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // Width is the terminal `mw status` is designed for: a phone screen in a
@@ -650,7 +652,11 @@ func (r StatusReport) String() string {
 		clip(&b, "  nothing ready")
 	}
 	for _, d := range r.Ready {
-		writeStory(&b, d, "")
+		note := ""
+		if d.Merged().Host == domain.HostAuto {
+			note = "host " + domain.HostAuto
+		}
+		writeStory(&b, d, note)
 	}
 	b.WriteString("\n")
 
