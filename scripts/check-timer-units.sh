@@ -181,7 +181,7 @@ need "$SERVICE" "KillMode=process"
 need "$SERVICE" "TimeoutStartSec=10min"
 need "$SERVICE" "ExecStart=/usr/bin/env mw dispatch"
 need "$TIMER" "Persistent=false"
-need "$TIMER" "OnCalendar=*:0/5"
+need "$TIMER" "OnCalendar=hourly"
 # The mail-notify pair.
 need "$MAIL_SERVICE" "Type=oneshot"
 need "$MAIL_SERVICE" "ExecStart=/usr/bin/env mw-mail-notify"
@@ -197,7 +197,7 @@ need "$TICK_SERVICE" "Type=oneshot"
 need "$TICK_SERVICE" "ExecStart=/usr/bin/env mw millhand tick"
 need "$TICK_SERVICE" "KillMode=process"
 need "$TICK_SERVICE" "TimeoutStartSec=10min"
-need "$TICK_TIMER" "OnCalendar=*:7/15"
+need "$TICK_TIMER" "OnCalendar=*:07"
 need "$TICK_TIMER" "Persistent=false"
 # The Millhand's review pair. KillMode=process is here too: the wake it starts
 # is a tmux window that must outlive the unit's main process.

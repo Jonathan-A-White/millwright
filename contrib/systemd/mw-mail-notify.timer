@@ -1,6 +1,11 @@
 # Runs mw-mail-notify.service every minute. For `systemctl --user`; see
 # README.md, "Telling the Mayor's window when mail arrives".
 #
+# RETIRED where the event follower runs (mw-jrx0s.14): the follower runs
+# mw-mail-notify.service itself on its own clock ([events] clock, 5m) and says
+# each run as job events, so `sh scripts/install-units.sh --enable
+# mw-view-follow` disables this timer. Only a host with no follower keeps it.
+#
 # A tick that finds nothing to do costs a load reading and one `bd mail inbox`.
 # The sync inside it happens at most every five minutes whatever this says; a
 # tick every minute means a sync is never more than a minute late.

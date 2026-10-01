@@ -8,6 +8,14 @@
 # The home runs it, where the postern backend serves the view file. A daemon,
 # so there is no timer: `sh scripts/install-units.sh --enable mw-view-follow`.
 # Once it is active the mail-notify tick's view step is retired and runs nothing.
+#
+# It also springs the factory's jobs (mw-jrx0s.14): it starts mw-dispatch.service
+# when a bead is opened or has landed, mw-millhand-tick.service on an alarm, mail
+# for the Millhand or a failed doctor, and mw-mail-notify.service on its own
+# clock, each as `systemctl --user start` of the unit the timer starts, so the
+# timers are only hourly heartbeats and mw-mail-notify.timer is retired. A
+# Builder session's tmux server stays in the dispatch unit's control group, not
+# this one. Each pass is told in the log as job events (mw events tail).
 [Unit]
 Description=Follow the beads into the event log and republish the live view (mw events follow)
 

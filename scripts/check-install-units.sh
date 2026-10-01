@@ -94,7 +94,7 @@ is-active)
 		case " $FAKE_ACTIVE " in *" $a "*) exit 0 ;; esac
 	done
 	exit 3 ;;
-daemon-reload | enable) exit 0 ;;
+daemon-reload | enable | disable) exit 0 ;;
 *) exit 99 ;;
 esac
 EOF
@@ -164,7 +164,7 @@ $(cat "$W/calls")"
 }
 not_called() { calls_are 0 "$1"; }
 # The calls that would change something; loginctl of any kind is one.
-MUTATING='^(systemctl --user (daemon-reload|enable)|loginctl)'
+MUTATING='^(systemctl --user (daemon-reload|enable|disable)|loginctl)'
 only_reads() { not_called "$MUTATING"; }
 unchanged() { # <before>
 	[ "$(snap)" = "$1" ] || fail "$NAME: the run changed the world:
@@ -293,6 +293,20 @@ calls_are 0 '^loginctl'
 [ "$(grep -n 'daemon-reload' "$W/calls" | cut -d: -f1)" -lt "$(grep -n 'enable' "$W/calls" | cut -d: -f1)" ] || fail "$NAME: enable came before the reload"
 lacks 'not enabled'
 has 'loginctl enable-linger tester'
+ok
+
+NAME="--enable mw-view-follow retires the mail-notify timer, and another pair does not"
+world
+run --enable mw-view-follow
+rc_is 0
+calls_are 1 '^systemctl --user enable --now mw-view-follow.service$'
+calls_are 1 '^systemctl --user disable --now mw-mail-notify.timer$'
+world
+run --enable mw-health
+calls_are 0 'disable'
+world
+run mw-view-follow
+calls_are 0 'disable'
 ok
 
 NAME="--enable is accepted after the unit name"

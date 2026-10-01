@@ -1051,6 +1051,33 @@ next UTC day. `mw status` has an `EVENTS` line: the log's head seq, the last seq
 sent, the batches pending on chain and today's chain records of the cap. With no
 postern key the follower writes events but sends none, and says so.
 
+Springing the jobs (mw-jrx0s.14). The follower also keeps an idle factory at zero tokens: each pass
+it reads the events written since the last and runs, with `systemctl --user start`, the unit a
+timer would have started. A bead opened or landed (a step of a story's own molecule does not count)
+runs `mw-dispatch.service`; an alarm (an event in the emergency lane), mail for the Millhand or a
+failed `doctor` job runs `mw-millhand-tick.service`; and `mw-mail-notify.service`, whose sync and
+backup the minutely timer drove, runs on the follower's own clock. A job is in flight at most
+once: an event that springs it during a pass starts no second one beside it, and one more pass
+follows the first, so a story opened just after the ready list was read is not left for the
+heartbeat. Each pass is told in the log as `job` events, actor `dispatch@<host>`,
+`millhand-tick@<host>` or `mail-notify@<host>`: `scheduled` (its detail says why: `bead mw-x opened`,
+`heartbeat`, `clock`), `running`, `done` or `failed`. The timers of `contrib/systemd` are now
+hourly heartbeats (a host with no follower gives them their old cadence with a drop-in), and
+`install-units.sh --enable mw-view-follow` disables `mw-mail-notify.timer`. Three more knobs:
+
+```toml
+[events]
+heartbeat = "1h"    # a job unrun this long is run anyway: the fallback for a missed event
+clock = "5m"        # how often the follower runs mw-mail-notify.service
+idle_after = "10m"  # no event but the jobs' this long: mw status says IDLE since HH:MM
+```
+
+`mw status` prints `IDLE since 14:05 · 0 harness processes` once the log has held nothing but
+jobs' events since then for `idle_after` and no job is in flight; the count is the `claude`
+processes alive (the seat reapers close an idle window), and is shown as `HARNESS n processes`
+when the factory is not idle. Only the home's follower sees the beads' events, so another host
+keeps its own timer at the pace it needs.
+
 `mw events emit --kind job --actor dispatch@laptop --from scheduled --to running
 [--bead <id>] [--detail ...]` appends one event of a job's own, stamped now, and
 prints its seq; an event its machine forbids is refused and nothing is written.
@@ -1463,11 +1490,13 @@ Moving a seat's home to a new host with this command needs more besides — see
 ## Running a host on a timer
 
 A host that only works stories needs no session of its own to keep it going: a
-`systemd --user` timer runs `mw dispatch` every five minutes, and each run
+`systemd --user` timer runs `mw dispatch` (every five minutes on a host with no event
+follower; on the home, where the follower runs the unit the moment a bead is opened or
+lands, the timer is an hourly heartbeat, see "mw events: follow, emit, tail, wait"), and each run
 starts, spends and ends with that one command. No daemon, and no tokens spent
 between ticks. The units are in `contrib/systemd/`: `mw-dispatch.service` (a
-oneshot that runs `mw dispatch` as you) and `mw-dispatch.timer` (every five
-minutes, on the clock).
+oneshot that runs `mw dispatch` as you) and `mw-dispatch.timer` (hourly, on the
+clock; a drop-in with `OnCalendar=*:0/5` restores five minutes).
 
 **Install**, once per host. Write `~/.config/mw/dispatch.env` (the one line
 below), then:

@@ -18,6 +18,11 @@ Type=oneshot
 # script (MW_MAIL_LOAD_LIMIT and the rest, listed in contrib/mail-notify); the
 # leading "-" makes each file optional. `env` finds mw-mail-notify through the
 # PATH the first sets, which ExecStart on its own would not.
+#
+# Run on the follower's five-minute clock, a run's sync was done a few seconds
+# into the last one, so a limit of exactly 300 s would skip every second run:
+# a little under it lets each run sync (mail-notify.env, below, may set it).
+Environment=MW_MAIL_SYNC_EVERY=240
 EnvironmentFile=-%h/.config/mw/dispatch.env
 EnvironmentFile=-%h/.config/mw/mail-notify.env
 ExecStart=/usr/bin/env mw-mail-notify

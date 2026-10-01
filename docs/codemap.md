@@ -2,7 +2,7 @@
 
 ## Layers
 
-`domain/`, `domain/events`: stdlib · `application/`: use cases, ports · `application/apptest/`: fakes · `infrastructure/`: an adapter each · `cmd/mw/`: cobra · `features/`: Gherkin, `features/steps/` · `template/`: `embed.go`.
+`domain/`, `domain/events`: stdlib · `application/`: use cases, ports · `application/apptest/`: fakes · `infrastructure/`: adapters · `cmd/mw/`: cobra · `features/`: Gherkin, `features/steps/` · `template/`: embed.
 
 ## Ports
 
@@ -29,7 +29,7 @@
 | `Notifier`, `HomeMoveHost`, `OldHome`, `VaultBirth`, `TrackerBirth` | `application/{millhandtick,homemove,init}.go` | `infrastructure/{notify/notify,homemove/homemove,vault/birth,beads/init}.go` | none |
 | `Landing`, `Checks`, `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/{landing,checks,slot}.go` | none |
 | `AfterLanding`, `SelfUpdate`, `BuiltMarks`, `BackendBuilds` | `application/afterlanding.go`, `application/selfupdate.go`, `application/backendstage.go` | `infrastructure/rig/{afterlanding,built,backend}.go` | `features/self_update.feature` |
-| EventLog, BeadFeed, FollowCursors, ShipStates, SubscribeFiles, NudgeCursors | application/event{log,follow,ship,subscribe,nudge}.go | infrastructure/eventlog, vault/subscribe.go, beads/feed.go | apptest.Fake{EventLog,FollowCursors,Ship*,Tracker,Subscribe*,Nudge*} |
+| EventLog, BeadFeed, FollowCursors, ShipStates, SubscribeFiles, NudgeCursors, EventSpringer, HarnessCount | application/event{log,follow,ship,subscribe,nudge,spring}.go, status.go | infrastructure/{eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go | apptest.Fake{EventLog,FollowCursors,Ship*,Tracker,Subscribe*,Nudge*} |
 | Postern, hands | `application/{postern*,hands}.go` | `infrastructure/{postern,hands*,homemove}` | `apptest.Fake{Postern*,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*,HomeMover}` |
 | `Grinder`, `GrindSource`, `GristState`, `GristLock` | `application/grist.go` | `infrastructure/{claude/grind,rig/grinds,hostlock/try}.go`, `infrastructure/grist` | `apptest.Fake{Grinder,Grinds,GristState,GristLock}` |
 
@@ -63,20 +63,19 @@
 | `SeatBoot` | `application/seatboot.go` | none: called by `Dispatch`, `Next` | `features/seat_boot.feature` |
 | `Init` | `application/init.go` | `mw init` — `cmd/mw/init.go` | `features/init.feature` |
 | Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern key/inbox/send/snapshot/view/bead — cmd/mw/posternview.go, cmd/mw/posternbead.go | `features/postern_*.feature` |
-| Event{Follow,Emit,Tail,Ship,Wait,Nudge} | application/eventfollow.go, application/eventlog.go, application/eventship.go, application/eventwait.go, application/eventnudge.go, application/eventsubscribe.go | mw events follow/emit/tail/wait — cmd/mw/events.go | none |
+| Event{Follow,Emit,Tail,Ship,Wait,Nudge,Spring} | application/eventfollow.go, application/eventlog.go, application/eventship.go, application/eventwait.go, application/eventnudge.go, application/eventsubscribe.go, application/eventspring.go | mw events follow/emit/tail/wait — cmd/mw/events.go | none |
 | Hands{Add,List} | application/hands.go | mw hands add/list — cmd/mw/hands.go; `cmd/mw-hands-root` | `features/hands.feature` |
 | `Postern{Serve,Nginx,Mirror}` | `application/posternhand.go`, `application/posternmirror.go` | `mw postern serve`/`nginx`/`mirror` — `cmd/mw/postern.go`, `cmd/mw/posternmirror.go` | `features/postern_serve.feature` |
 | `Grist{Key,Grind,Send,Eval}` | `application/grist.go`, `application/gristgrind.go`, `application/gristsend.go`, `application/gristeval.go` | `mw grist key`/`grind`/`send`/`eval` — `cmd/mw/grist.go` | `features/grist{,_send,_eval}.feature` |
 
-`cmd/mw/root.go`: the tree; `cmd/mw/version.go`.
-
 ## Test helpers
 
-`throwawayVault`, `installFormula` (real bd), `standIn` (fake bd): `infrastructure/beads/`; `privateRunner`, `privateWindows` (own tmux): `infrastructure/tmux/`; `aVault`, `twoHosts`: `infrastructure/vault/`; `aRig`: `infrastructure/rig/`; `mwConfig` (temp HOME): `cmd/mw/dispatch_test.go`.
+`throwawayVault`, `installFormula` (real bd), `standIn` (fake bd): `infrastructure/beads/`; `privateRunner`, `privateWindows` (tmux): `infrastructure/tmux/`; `aVault`, `twoHosts`: `infrastructure/vault/`; `aRig`: `infrastructure/rig/`; `mwConfig` (temp HOME): `cmd/mw/`.
 
 ## Build and test
 
-See `CLAUDE.md`; then:
+See `CLAUDE.md`.
 
-- One feature: `MW_FEATURE=sweep.feature go test ./features` (`:17`: a scenario).
-- `make lint` runs `scripts/check-*.sh`; `make check-formulas` needs `bd`, `jq`.
+- One feature: `MW_FEATURE=sweep.feature go test ./features`.
+
+`cmd/mw/root.go`: the tree; `cmd/mw/version.go`.

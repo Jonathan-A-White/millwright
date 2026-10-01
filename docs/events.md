@@ -73,6 +73,17 @@ window but the successor's, ends at once on it with "handed over at N"; the succ
 `mw events wait` ends on it with "you hold the seat from N", and one begun `--since N` or
 later ignores it. The old session reads and answers up to N, the successor from N on.
 
+## Springing the jobs
+
+The follower runs the factory's jobs (mw-jrx0s.14): `dispatch` (a bead_changed to open, or to
+landed, of a bead that is no step of a molecule), `millhand-tick` (an emergency-lane event, a
+mail whose box is the millhand, a job event `doctor@<host>` ending failed) and `mail-notify` (its
+own clock only), each by starting its systemd unit. Every pass is a run of the job machine under
+the actor `<job>@<host>`: scheduled, whose detail says why (`bead mw-x opened`, `bead mw-x landed`,
+`alarm`, `heartbeat`, `clock`), running, then done, or failed with the failure as its detail. A
+job unrun for `[events] heartbeat` is run for `heartbeat`; the pass is in flight at most once,
+and an event that springs it meanwhile earns one more pass after it.
+
 ## The machines
 
 "(start)" is before the first state: the empty `from`. Anything not listed

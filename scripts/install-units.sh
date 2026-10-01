@@ -16,7 +16,9 @@
 #
 # A unit with a .service and no .timer beside it (mw-view-follow) is a daemon:
 # it is named the same way, only its .service is linked, and --enable runs
-# `systemctl --user enable --now <name>.service` for it.
+# `systemctl --user enable --now <name>.service` for it. Enabling mw-view-follow
+# also disables mw-mail-notify.timer: the follower is what runs that job now,
+# on its own clock (mw-jrx0s.14).
 #
 # A live timer starts real work and spends fuel, so a timer is enabled ONLY when
 # --enable is given, and then with `systemctl --user enable --now`. Without it
@@ -278,6 +280,13 @@ run systemctl --user daemon-reload
 if [ "$ENABLE" = 1 ]; then
 	# shellcheck disable=SC2086 # the timer names hold no spaces; word splitting is the point
 	run systemctl --user enable --now $TIMERS
+	# The follower runs mw-mail-notify.service itself on its own clock, so the
+	# minutely timer is retired where the follower is armed (mw-jrx0s.14).
+	case " $NAMED " in
+	*" mw-view-follow "*)
+		run systemctl --user disable --now mw-mail-notify.timer ||
+			echo "note: mw-mail-notify.timer could not be disabled (not installed?); the follower runs mw-mail-notify.service itself" ;;
+	esac
 else
 	echo "not enabled: nothing is armed. To arm, run again with --enable, or:"
 	echo "  systemctl --user enable --now$TIMERS"

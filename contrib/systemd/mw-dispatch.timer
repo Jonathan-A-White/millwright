@@ -1,10 +1,17 @@
-# Runs mw-dispatch.service every five minutes. For `systemctl --user`; see
-# README.md, "Running a host on a timer".
+# Runs mw-dispatch.service once an hour: the heartbeat. For `systemctl --user`;
+# see README.md, "Running a host on a timer".
+#
+# On the home, the event follower (mw-view-follow.service) runs this same
+# service the moment a bead is opened or has landed, so an idle factory costs
+# nothing and an hour is only the fallback for an event it missed (mw-jrx0s.14).
+# A host with no follower keeps the old pace with a drop-in (`systemctl --user
+# edit mw-dispatch.timer`: `OnCalendar=` then `OnCalendar=*:0/5`), never by
+# editing this file.
 [Unit]
-Description=Every five minutes, dispatch ready stories (mw dispatch)
+Description=Hourly heartbeat: dispatch ready stories (mw dispatch)
 
 [Timer]
-OnCalendar=*:0/5
+OnCalendar=hourly
 # No catch-up: a host that was asleep or off does not run the ticks it missed,
 # and it is not woken to run them. The next tick on the clock is the next run.
 Persistent=false
