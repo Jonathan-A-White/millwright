@@ -10,7 +10,7 @@
 | infrastructure | `infrastructure/` | One subpackage per adapter. |
 | command line | `cmd/mw/` | Cobra wiring. |
 | features | `features/` | Gherkin; steps in `features/steps/`. |
-| template | `template/` | Born from `embed.go`. |
+| template | `template/` | `embed.go`. |
 
 ## Ports
 
@@ -24,6 +24,7 @@ Each adapter: `var _ application.<Port> = ...`.
 | `SweepNotes` | `application/sweep.go` | same | same |
 | `VaultFiles` | `application/sync.go` | `infrastructure/vault/git.go` | `apptest.FakeVaultFiles` |
 | `Mailbox`, `TidyMailbox` | `application/{mail,tidy}.go` | `infrastructure/beads/mail.go` | `apptest.FakeMailbox` |
+| `EpicRules` | `application/epicrules.go` | `infrastructure/vault/epicrules.go` | `apptest.FakeEpicRules` |
 | `Vault` | `application/seatboot.go` | `infrastructure/vault/vault.go` | `application/seatboot_test.go` |
 | `Runner` | `application/runner.go` | `infrastructure/tmux/tmux.go` | `apptest.FakeRunner` |
 | `Harness` | `application/harness.go` | `infrastructure/claude/claude.go` | `application/seatboot_test.go` |
@@ -77,7 +78,7 @@ Each adapter: `var _ application.<Port> = ...`.
 | `Postern{Serve,Nginx,Mirror}` | `application/posternhand.go`, `application/posternmirror.go` | `mw postern serve`/`nginx`/`mirror` — `cmd/mw/postern.go`, `cmd/mw/posternmirror.go` | `features/postern_serve.feature` |
 | `Grist{Key,Grind,Send,Eval}` | `application/grist.go`, `application/gristgrind.go`, `application/gristsend.go`, `application/gristeval.go` | `mw grist key`/`grind`/`send`/`eval` — `cmd/mw/grist.go` | `features/grist{,_send,_eval}.feature` |
 
-`cmd/mw/root.go` holds the tree, `cmd/mw/main.go` runs it, `cmd/mw/version.go` is `mw version`.
+`cmd/mw/root.go` holds the tree; `cmd/mw/version.go` is `mw version`.
 `features/{ready_stories,claim_lease}.feature`: `WorkTracker`.
 
 ## Test helpers
@@ -85,10 +86,9 @@ Each adapter: `var _ application.<Port> = ...`.
 | Helper | Where | What it gives |
 | --- | --- | --- |
 | `throwawayVault`, `installFormula` | `infrastructure/beads/beads_integration_test.go` | Real bd, temp dir. |
-| `standIn` | `infrastructure/beads/sync_test.go` | Stand-in `bd`. |
+| `standIn` | `infrastructure/beads/sync_test.go` | Fake `bd`. |
 | `privateRunner`, `privateWindows` | `infrastructure/tmux/{tmux,window}_integration_test.go` | Private tmux. |
-| `aVault` | `infrastructure/vault/vault_test.go` | Seat vault. |
-| `twoHosts` | `infrastructure/vault/git_test.go` | Two clones. |
+| `aVault`, `twoHosts` | `infrastructure/vault/{vault,git}_test.go` | Seat vault; two clones. |
 | `aRig` | `infrastructure/rig/worktree_test.go` | Rig + origin. |
 | `mwConfig` | `cmd/mw/dispatch_test.go` | Temp-HOME config. |
 
@@ -96,6 +96,6 @@ Each adapter: `var _ application.<Port> = ...`.
 
 See `CLAUDE.md`; then:
 
-- One package: `go test ./application/...` (`-run`, `-tags beads_integration`).
+- One package: `go test ./application/...`.
 - One feature: `MW_FEATURE=sweep.feature go test ./features` (`:17`: a scenario).
 - `make lint` runs `scripts/check-*.sh`; `make check-formulas` needs `bd`, `jq`.

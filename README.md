@@ -269,7 +269,7 @@ bin/mw file plans/0001-walking-skeleton.json --approve  # filed and released
 
 A plan is JSON: one epic with the default Path its stories inherit, and the
 stories, each with its acceptance criteria, its estimate, whatever it overrides
-of that Path, and the keys of the stories it needs done first. `mw file` reads
+of that Path, optionally labels, and the keys of the stories it needs done first. `mw file` reads
 the whole plan before it writes any of it — every story must resolve to a Path,
 carry acceptance criteria, and wait only on stories the plan has, never on
 itself or in a circle — and reports every reason it will not file a plan, not
@@ -296,6 +296,41 @@ with nobody there, the plan stays held. Releasing sets every story back to open,
 and beads then keeps back the ones still waiting on another, so the stories that
 wait on nothing are exactly what a dispatcher can take. See
 `features/file_plan.feature`.
+
+### What a rig requires of its epics
+
+A rig can ask more of its epics than the plan format does. Put a file in the
+vault, `rigs/<rig>.toml`, and both hosts read it alike (it travels with the
+vault's own sync, and nothing is rebuilt to change it):
+
+```toml
+epic_sections          = ["Demo"]   # headings the epic's description must contain
+epic_last_story_labels = ["demo"]   # labels a story must carry that waits on every other story
+```
+
+Both keys are optional lists, and a rig with neither (or no file) is not
+checked; millwright sets none. A section is matched as a markdown heading or as
+a line starting `<Name>:`, ignoring case. A last story is a story carrying the
+label that waits, directly or through others, on every other story of the epic;
+in a plan, a story takes `"labels": ["demo"]`. `mw file` refuses a plan that
+lacks any of them, naming each, and writes nothing. `mw status` lists every
+open epic of such a rig that lacks one under EPICS MISSING REQUIREMENTS, which
+reports an existing epic and never blocks it. Nothing here is loaded into any
+seat's boot.
+
+There is no off switch. Only the Governor's word waives one, once for each name,
+with the words he said (names are case-sensitive, so `Demo` is the section and
+`demo` the label):
+
+```sh
+bin/mw file plan.json --waive Demo --waive demo --because "no demo, it is a rename"
+```
+
+`--waive` without `--because` is refused, and so is naming something the rig does
+not require. The epic gets an `epic-waiver:section:<name>` or `epic-waiver:story:<name>` label for each name and a
+comment quoting his words, and `mw status` lists it under EPICS WAIVED, never as
+missing. See `features/epic_requirements.feature` and
+`features/status_epic_requirements.feature`.
 
 ## Showing a plan filed earlier
 

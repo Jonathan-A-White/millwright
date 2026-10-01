@@ -12,6 +12,8 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
+	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
 )
@@ -21,6 +23,8 @@ import (
 // writes is held back from every dispatcher until somebody approves it.
 func newFileCmd() *cobra.Command {
 	var approved bool
+	var waive []string
+	var because string
 
 	cmd := &cobra.Command{
 		Use:   "file <plan.json>",
@@ -32,7 +36,12 @@ func newFileCmd() *cobra.Command {
 			"plan has and not on itself, directly or in a circle.\n\n" +
 			"Every story is filed held, so that nothing can be dispatched from a plan nobody has\n" +
 			"approved. --approve releases them all as they are filed; without it, mw asks, and an\n" +
-			"unattended run leaves them held.",
+			"unattended run leaves them held.\n\n" +
+			"A rig's file in the vault (rigs/<rig>.toml) may list epic_sections, headings the epic's\n" +
+			"description must contain, and epic_last_story_labels, labels the epic must carry on a story\n" +
+			"that waits on every other: a plan that lacks either is refused, naming each, and nothing is\n" +
+			"written. Only the Governor's word excuses one: --waive <name> (once for each) with --because\n" +
+			"\"<his words>\", which are written on the epic.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			written, err := os.ReadFile(args[0])
@@ -48,9 +57,15 @@ func newFileCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			dir, err := config.Vault()
+			if err != nil {
+				return err
+			}
 
 			_, err = application.File{
 				Tracker: gateway,
+				Rules:   vault.New(dir),
+				Waive:   application.EpicWaiver{Names: waive, Because: because},
 				Out:     cmd.OutOrStdout(),
 				Approve: approval(cmd, approved),
 			}.Run(cmd.Context(), plan)
@@ -60,6 +75,10 @@ func newFileCmd() *cobra.Command {
 
 	cmd.Flags().BoolVar(&approved, "approve", false,
 		"release the stories as they are filed, instead of leaving them held")
+	cmd.Flags().StringArrayVar(&waive, "waive", nil,
+		"a requirement of the rig the Governor waived for this epic, by name; needs --because")
+	cmd.Flags().StringVar(&because, "because", "",
+		"the Governor's own words for waiving it, written on the epic")
 	return cmd
 }
 
