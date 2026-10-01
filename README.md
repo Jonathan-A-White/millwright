@@ -1452,6 +1452,28 @@ from root's own mw config, and no sudoers file is written, since root runs
 name. Re-running it replaces the same files and keeps the record of approvals run.
 See `features/hands.feature` and `features/postern_inbox_apply.feature`.
 
+## Saved prompts
+
+The Mayor keeps prompts on the postern backend, so the Governor can run one by
+name from the app. The draft is a file in the vault (`seats/mayor/prompts/`);
+`mw prompt` keeps it, reads it back and runs it. Each call is authenticated as
+the home's postern key is for `/api/messages`, against `/api/prompts`.
+
+| Command | Does |
+| --- | --- |
+| `mw prompt save <name> --summary <text> --body-file <path> [--option '<flag>:<type>=<default>']...` | PUTs `{name, summary, signature, body}`, in place of a prompt of that name. The type is `string`, `int` or `bool`; `<flag>:<type>:required` has no default and must be given |
+| `mw prompt list` | one line a prompt: name, summary, signature, tab-separated |
+| `mw prompt show <name>` | the whole prompt: summary, signature and body |
+| `mw prompt run <name> [--<flag> <value>]...` | checks the call against the signature (an unknown flag, a value not of its type or a required option left out is refused, naming the signature), then prints `PROMPT /<name>` and the options as given, the body with each `<flag>` replaced by its value, and `FACTS` |
+
+`FACTS` is read from the tracker and its notes and spends no tokens, one section
+each, `none` when empty, a bead always as its id: `WAITING FOR THE GOVERNOR`
+(ready beads labelled `hitl`), `LANDED NOT VERIFIED` (each landed story with its
+closing comment's `HOW TO CHECK IT`, as the view's verify need has it), `OPEN
+CARDS` (the `postern.question.*` notes), `OPEN DEMOS` (open beads labelled
+`demo`) and `HANDS STEPS THAT WAIT` (the `hands.<bead>` steps with no run).
+See `features/prompt.feature`.
+
 ## Making a fresh vault
 
 ```sh

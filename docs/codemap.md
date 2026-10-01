@@ -30,7 +30,7 @@
 | `Landing`, `Checks`, `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/{landing,checks,slot}.go` | none |
 | `AfterLanding`, `SelfUpdate`, `BuiltMarks`, `BackendBuilds` | `application/afterlanding.go`, `application/selfupdate.go`, `application/backendstage.go` | `infrastructure/rig/{afterlanding,built,backend}.go` | `features/self_update.feature` |
 | EventLog, BeadFeed, FollowCursors, ShipStates, SubscribeFiles, NudgeCursors, EventSpringer, EventController, HarnessCount | application/event*.go, status.go | infrastructure/{eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go | apptest.Fake{EventLog,FollowCursors,Ship*,Tracker,Subscribe*,Nudge*} |
-| Postern, hands | `application/{postern*,hands}.go` | `infrastructure/{postern,hands*,homemove}` | `apptest.Fake{Postern*,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*,HomeMover}` |
+| Postern, hands, `Prompts` | `application/{postern*,hands,prompt}.go` | `infrastructure/{postern,hands*,homemove}` | `apptest.Fake{Postern*,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*,HomeMover,Prompts}` |
 | `Grinder`, `GrindSource`, `GristState`, `GristLock` | `application/grist.go` | `infrastructure/{claude/grind,rig/grinds,hostlock/try}.go`, `infrastructure/grist` | `apptest.Fake{Grinder,Grinds,GristState,GristLock}` |
 
 ## Use cases
@@ -66,15 +66,12 @@
 | Event{Follow,Emit,Tail,Ship,Wait,Nudge,Spring,Control} | application/eventfollow.go, application/eventlog.go, application/eventship.go, application/eventwait.go, application/eventnudge.go, application/eventsubscribe.go, application/eventspring.go, application/eventcontrol.go | mw events follow/emit/tail/wait — cmd/mw/events.go | none |
 | Hands{Add,List} | application/hands.go | mw hands add/list — cmd/mw/hands.go; `cmd/mw-hands-root` | `features/hands.feature` |
 | `Postern{Serve,Nginx,Mirror}` | `application/posternhand.go`, `application/posternmirror.go` | `mw postern serve`/`nginx`/`mirror` — `cmd/mw/postern.go`, `cmd/mw/posternmirror.go` | `features/postern_serve.feature` |
+| `Prompt{Save,List,Show,Run}` | `application/prompt.go` | `mw prompt` — `cmd/mw/prompt.go` | `features/prompt.feature` |
 | `Grist{Key,Grind,Send,Eval}` | `application/grist.go`, `application/gristgrind.go`, `application/gristsend.go`, `application/gristeval.go` | `mw grist key`/`grind`/`send`/`eval` — `cmd/mw/grist.go` | `features/grist{,_send,_eval}.feature` |
 
-## Test helpers
+## Tests
 
-`throwawayVault`, `installFormula` (real bd), `standIn` (fake bd): `infrastructure/beads/`; `privateRunner`, `privateWindows` (tmux): `infrastructure/tmux/`; `aVault`, `twoHosts`: `infrastructure/vault/`; `aRig`: `infrastructure/rig/`; `mwConfig` (temp HOME): `cmd/mw/`.
-
-## Build and test
-
-See `CLAUDE.md`.
+`throwawayVault`, `installFormula`, `standIn`: `infrastructure/beads/`; `privateRunner`: `infrastructure/tmux/`; `aVault`, `aRig`: `infrastructure/{vault,rig}/`; `mwConfig`: `cmd/mw/`.
 
 - One feature: `MW_FEATURE=sweep.feature go test ./features`.
 
