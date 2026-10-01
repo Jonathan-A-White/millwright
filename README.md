@@ -78,8 +78,10 @@ Which host is home is recorded in the vault: a tracked file, `home`, of one line
 (the home host's name, `desktop` or `laptop`, then the UTC time and actor of the
 last change). `mw home` prints the home, this host and whether this host is home;
 `mw home --check` says nothing and leaves with 0 when it is, 1 when it is not
-and 2 when it cannot tell (no file, or one that is not understood: the caller
-decides what that means). `mw home move <host>` writes it (below). See
+(then it prints the home's name alone on stdout, one line, for a caller that
+must know where to go; the explanation goes to stderr) and 2 when it cannot
+tell (no file, or one that is not understood: the caller decides what that
+means). `mw home move <host>` writes it (below). See
 `features/home.feature`.
 
 ### mw home move
