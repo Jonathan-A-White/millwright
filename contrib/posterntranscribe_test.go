@@ -119,3 +119,56 @@ func TestPosternTranscribeNeedsExactlyOneFile(t *testing.T) {
 		t.Fatalf("expected usage, got %q / %v", errs, err)
 	}
 }
+
+// bareHome is a HOME with a model, a note and the stand-in whisper-cli at
+// bin/whisper-cli; the stand-in ffmpeg is moved to a directory of its own, so
+// PATH can be that directory plus the bare /usr/bin:/bin.
+func bareHome(t *testing.T) (home, bin, ffbin, note string) {
+	t.Helper()
+	home, bin = transcribeHome(t)
+	ffbin = filepath.Join(home, "ffonly")
+	if err := os.MkdirAll(ffbin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(bin, "ffmpeg"), filepath.Join(ffbin, "ffmpeg")); err != nil {
+		t.Fatal(err)
+	}
+	note = filepath.Join(home, "note.ogg")
+	if err := os.WriteFile(note, []byte("ogg"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return home, bin, ffbin, note
+}
+
+func TestPosternTranscribeFindsWhisperCliInHomeLocalBin(t *testing.T) {
+	home, bin, ffbin, note := bareHome(t)
+	local := filepath.Join(home, ".local", "bin")
+	if err := os.MkdirAll(local, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(bin, "whisper-cli"), filepath.Join(local, "whisper-cli")); err != nil {
+		t.Fatal(err)
+	}
+
+	out, errs, err := runTranscribe(t, home, ffbin, note)
+	if err != nil {
+		t.Fatalf("postern-transcribe failed: %v\n%s", err, errs)
+	}
+	if out != "Ship the storage engine as planned.\n" {
+		t.Fatalf("expected the fake whisper-cli in ~/.local/bin to be called, got %q", out)
+	}
+}
+
+func TestPosternTranscribeNamesEveryPlaceItLookedForWhisperCli(t *testing.T) {
+	home, _, ffbin, note := bareHome(t)
+
+	out, errs, err := runTranscribe(t, home, ffbin, note)
+	if err == nil || out != "" {
+		t.Fatalf("expected a refusal, got %q / %v", out, err)
+	}
+	for _, want := range []string{"PATH", filepath.Join(home, ".local", "bin"), "POSTERN_WHISPER_CLI"} {
+		if !strings.Contains(errs, want) {
+			t.Errorf("expected the error to name %q, got %q", want, errs)
+		}
+	}
+}

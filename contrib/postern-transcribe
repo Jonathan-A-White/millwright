@@ -20,7 +20,9 @@
 #
 # Needs:
 #   ffmpeg        on PATH
-#   whisper-cli   whisper.cpp's command line, on PATH, or $POSTERN_WHISPER_CLI
+#   whisper-cli   whisper.cpp's command line: $POSTERN_WHISPER_CLI, else on
+#                 PATH, else ~/.local/bin/whisper-cli (a systemd user service's
+#                 PATH does not hold ~/.local/bin)
 #   a ggml model  $POSTERN_WHISPER_MODEL, default
 #                 ~/.local/share/whisper/ggml-base.en.bin — fetch it with
 #                 whisper.cpp's models/download-ggml-model.sh base.en
@@ -42,7 +44,17 @@ if [ ! -r "$input" ]; then
 fi
 
 model=${POSTERN_WHISPER_MODEL:-$HOME/.local/share/whisper/ggml-base.en.bin}
-cli=${POSTERN_WHISPER_CLI:-whisper-cli}
+cli=${POSTERN_WHISPER_CLI:-}
+if [ -z "$cli" ]; then
+  if command -v whisper-cli >/dev/null 2>&1; then
+    cli=whisper-cli
+  elif [ -x "$HOME/.local/bin/whisper-cli" ]; then
+    cli=$HOME/.local/bin/whisper-cli
+  else
+    echo "postern-transcribe: whisper-cli not found: looked on PATH ($PATH) and at $HOME/.local/bin/whisper-cli, and \$POSTERN_WHISPER_CLI is unset" >&2
+    exit 2
+  fi
+fi
 if [ ! -r "$model" ]; then
   echo "postern-transcribe: no whisper model at $model: fetch one, or set POSTERN_WHISPER_MODEL" >&2
   exit 2
