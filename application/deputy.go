@@ -23,7 +23,7 @@ const DeputyUpExit = 8
 // DeputyEffort is how hard the Deputy is asked to think.
 const DeputyEffort = domain.EffortHigh
 
-// DeputyMailbox is the mailbox the Deputy's mail-wait is armed on.
+// DeputyMailbox is the mailbox the Deputy's events wait is armed on.
 const DeputyMailbox = "deputy"
 
 // DeputyNudgeFormat is the line typed into an idle Deputy's window when its box
@@ -57,7 +57,7 @@ func DeputyIsUp(err error) (*DeputyAlreadyUp, bool) {
 
 // Deputy brings up the Deputy: `mw seat up deputy`, on the model config names,
 // at high effort, with the reaper armed to close the window once the session
-// has handed off. The kickoff is told to arm mail-wait on the Deputy's own
+// has handed off. The kickoff is told to arm mw events wait on the Deputy's own
 // mailbox, work what comes, report by mail and hand off when idle, and then the
 // reason it was brought up.
 //
@@ -96,8 +96,8 @@ type Deputy struct {
 
 // DeputyStanding is what the Deputy's kickoff is always told, ahead of the
 // reason it was brought up.
-const DeputyStanding = "Standing instructions: arm mail-wait with MW_MAIL_MAILBOX=" + DeputyMailbox +
-	" (contrib/mail-wait) so that mail for the Deputy wakes you; work the mail; report by mail, never by typing " +
+const DeputyStanding = "Standing instructions: arm `mw events wait --for " + DeputyMailbox + " --kinds mail`" +
+	" in the background (it blocks at no cost until mail for the Deputy arrives) so that mail wakes you; work the mail; report by mail, never by typing " +
 	"into another seat's window; and hand off when you are idle."
 
 // Run brings the Deputy up, or says that one is. Every refusal happens before

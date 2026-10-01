@@ -71,3 +71,69 @@ func TestEventsEmitRefusesWhatTheMachineForbids(t *testing.T) {
 		t.Fatalf("a refused emit wrote the log: %v", err)
 	}
 }
+
+func TestEventsWaitReturnsOnTheFirstMatchingEventAfterThoseItIgnores(t *testing.T) {
+	eventsHome(t)
+	for _, args := range [][]string{
+		{"emit", "--kind", "job", "--from", "scheduled", "--to", "running"},
+		{"emit", "--kind", "message", "--bead", "mw-1", "--detail", "direct:abc"},
+		{"emit", "--kind", "mail", "--bead", "mw-m1", "--detail", "mayor"},
+	} {
+		if out, err := runEvents(t, args...); err != nil {
+			t.Fatalf("mw events %v: %v\n%s", args, err, out)
+		}
+	}
+	out, err := runEvents(t, "wait", "--for", "mayor", "--kinds", "mail,card-answered", "--since", "0", "--limit", "5s")
+	if err != nil {
+		t.Fatalf("wait: %v\n%s", err, out)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 2 || lines[0] != "New events for mayor: 1. Run mw events tail --since 2." || !strings.HasPrefix(lines[1], "3 ") {
+		t.Fatalf("wait printed %q, want the header and seq 3 only", out)
+	}
+}
+
+func TestEventsWaitRefusesABadKindListingTheKinds(t *testing.T) {
+	eventsHome(t)
+	out, err := runEvents(t, "wait", "--for", "mayor", "--kinds", "mail,pigeon")
+	if err == nil {
+		t.Fatalf("a bad kind was accepted:\n%s", out)
+	}
+	for _, want := range []string{"pigeon", "mail", "card_answered", "landing"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal %q does not say %q", err, want)
+		}
+	}
+	if _, err := runEvents(t, "wait"); err == nil {
+		t.Fatal("wait with no --for was accepted")
+	}
+}
+
+func TestEventsWaitReadsTheKindsFromTheSeatsSubscribeFile(t *testing.T) {
+	eventsHome(t)
+	vaultDir := t.TempDir()
+	mwConfig(t, "vault = \""+vaultDir+"\"\nhost = \"laptop\"\n")
+	if err := os.MkdirAll(filepath.Join(vaultDir, "seats", "deputy"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(vaultDir, "seats", "deputy", "subscribe.toml")
+	if err := os.WriteFile(file, []byte("kinds = [\"message\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runEvents(t, "emit", "--kind", "mail", "--bead", "mw-m1", "--detail", "deputy"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runEvents(t, "emit", "--kind", "message", "--bead", "mw-1", "--detail", "direct:abc"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runEvents(t, "wait", "--for", "deputy", "--since", "0", "--limit", "5s")
+	if err != nil || !strings.HasPrefix(out, "New events for deputy: 1. Run mw events tail --since 1.") {
+		t.Fatalf("got %q, %v; want the message alone, as the file says", out, err)
+	}
+	if err := os.WriteFile(file, []byte("kinds = [\"smoke\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runEvents(t, "wait", "--for", "deputy", "--since", "0"); err == nil || !strings.Contains(err.Error(), "smoke") || !strings.Contains(err.Error(), "card_answered") {
+		t.Fatalf("a bad kind in the file: %v", err)
+	}
+}

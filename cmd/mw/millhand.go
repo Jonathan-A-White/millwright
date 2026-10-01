@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -34,44 +36,7 @@ func newMillhandCmd() *cobra.Command {
 			"with status " + fmt.Sprint(application.MillhandUpExit) + ", so a timer can tell \"already up\" from a failure.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			dir, err := config.Vault()
-			if err != nil {
-				return err
-			}
-			host, err := config.Host()
-			if err != nil {
-				return err
-			}
-			routine, err := config.MillhandRoutineModel()
-			if err != nil {
-				return err
-			}
-			review, err := config.MillhandReviewModel()
-			if err != nil {
-				return err
-			}
-
-			exe, err := os.Executable()
-			if err != nil {
-				return fmt.Errorf("finding the mw that is running, to arm a reaper with: %w", err)
-			}
-
-			windows := seatWindows()
-			_, err = application.Millhand{
-				Seats:    vault.New(dir),
-				Windows:  windows,
-				Harness:  sessionHarness(dir, host),
-				Terminal: windows,
-				Armer:    reaper.New(exe),
-
-				Host:         host,
-				Wake:         application.Wake(wake),
-				Reason:       reason,
-				RoutineModel: domain.Model(routine),
-				ReviewModel:  domain.Model(review),
-
-				Out: cmd.OutOrStdout(),
-			}.Run(cmd.Context())
+			_, err := bringUpMillhand(cmd.Context(), application.Wake(wake), reason, cmd.OutOrStdout())
 			return err
 		},
 	}
@@ -79,4 +44,47 @@ func newMillhandCmd() *cobra.Command {
 	cmd.Flags().StringVar(&wake, "wake", string(application.WakeHand), "the kind of wake: hand, routine or review")
 	cmd.Flags().StringVar(&reason, "reason", "", "why the Millhand is being woken, told to it after the kind of wake")
 	return cmd
+}
+
+// bringUpMillhand is `mw millhand`: what the command and the follower's spring
+// of the Millhand both run.
+func bringUpMillhand(ctx context.Context, wake application.Wake, reason string, out io.Writer) (application.SeatUpReport, error) {
+	dir, err := config.Vault()
+	if err != nil {
+		return application.SeatUpReport{}, err
+	}
+	host, err := config.Host()
+	if err != nil {
+		return application.SeatUpReport{}, err
+	}
+	routine, err := config.MillhandRoutineModel()
+	if err != nil {
+		return application.SeatUpReport{}, err
+	}
+	review, err := config.MillhandReviewModel()
+	if err != nil {
+		return application.SeatUpReport{}, err
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		return application.SeatUpReport{}, fmt.Errorf("finding the mw that is running, to arm a reaper with: %w", err)
+	}
+
+	windows := seatWindows()
+	return application.Millhand{
+		Seats:    vault.New(dir),
+		Windows:  windows,
+		Harness:  sessionHarness(dir, host),
+		Terminal: windows,
+		Armer:    reaper.New(exe),
+
+		Host:         host,
+		Wake:         wake,
+		Reason:       reason,
+		RoutineModel: domain.Model(routine),
+		ReviewModel:  domain.Model(review),
+
+		Out: out,
+	}.Run(ctx)
 }

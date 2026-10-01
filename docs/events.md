@@ -54,6 +54,16 @@ label says running, landed, or refused (blocked, stopped, stuck). A status move 
 saw only the two ends of is one event per step of the bead machine between them. Verified
 is never read from the beads yet.
 
+## Subscriptions
+
+A seat hears its events without polling (mw-jrx0s.6). `seats/<seat>/subscribe.toml` in
+the vault names the kinds it hears (`kinds = ["mail", "landing", "card_answered",
+"message"]`; any kind above, and `landing`, a `bead_changed` that ends in `landed`) and,
+for the deputy and the millhand, `spring = true`. `mw events wait --for <seat>` blocks on
+the log until one comes; the follower types a nudge into the seat's idle pane, or runs
+its up command when its window is down and it is marked spring. A `mail` event is the
+seat's only when its detail, the box, is the seat.
+
 ## The machines
 
 "(start)" is before the first state: the empty `from`. Anything not listed

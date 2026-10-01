@@ -1001,7 +1001,7 @@ bead in full (§12), sealed the same way, for the backend's
 `GET /api/beads/{id}` (`POSTERN_BEAD_CMD`); an unknown bead leaves with status
 3. See `features/postern_view.feature` and `features/postern_bead.feature`.
 
-#### mw events: follow, emit, tail
+#### mw events: follow, emit, tail, wait
 
 The home keeps one sequenced, append-only log of the factory's events
 (`docs/events.md`): one JSON event per line in `events_log_path` (default
@@ -1058,6 +1058,34 @@ prints its seq; an event its machine forbids is refused and nothing is written.
 prints the events after seq N (default the whole log), one per line — `41
 2026-10-01T13:02:07Z bead_changed mw-1 mw@laptop open->claimed status` — and
 with `--follow` goes on printing what is appended.
+
+No seat polls (mw-jrx0s.6, Q7 rule 2 of mw-6ww.55). A seat says which events it hears in
+`seats/<seat>/subscribe.toml` in the vault:
+
+```toml
+kinds = ["mail", "landing", "card_answered", "message"]   # one line; any event kind, or landing
+spring = true   # deputy and millhand only: bring the seat up when its window is down
+```
+
+`landing` is a `bead_changed` that ends in `landed`; a `mail` event is the seat's only when its
+box is the seat's. Each pass the follower reads these files and, for a seat with new matching
+events: when the seat's window (`<seat>-*`, of several the one its acting file names) is up
+and its pane idle at an empty input line, types `New events for <seat>: N. Run mw events tail
+--since <seq>.` and, when mail is among them, `New mail for <seat>: N message(s). Run bd mail
+inbox.`; leaves a busy pane alone and tells it on a later pass; and when the window is down
+and the seat is marked `spring = true`, runs its up command (`mw deputy`, `mw millhand`) with
+the same line as its reason. A seat whose window is down and not marked is told nothing: it
+reads the log from its handoff. A seat starts at the log's head the first time it is seen
+(history is not told); the cursors are `nudge.json` beside the log. A bad file is logged and
+that seat left out. `mw events wait --for <seat> [--kinds k1,k2] [--since N] [--limit 50m]` is the
+same subscription as a background call: it blocks, looking at the log's head once a second
+and calling no bd, until a matching event, prints `New events for <seat>: N. Run mw events
+tail --since <seq>.` and the matching lines, and exits so the harness wakes the seat; with
+no event by `--limit` it says so and exits 0 (arm it again). `--kinds` defaults to the seat's
+file, or `mail`; hyphens may stand for underscores; a bad kind is refused, with the kinds
+listed. `contrib/mail-wait` is retired: it prints `retired: mw events wait` and runs it with
+`--for $MW_MAIL_MAILBOX` and `--limit $MW_MAIL_WAIT_LIMIT`s. While the follower is active
+the mail-notify tick no longer types the mail line for a seat whose file names mail.
 
 The follower is the user service `contrib/systemd/mw-view-follow.service`
 (the name kept from when it only republished the view; a daemon, so no timer;
@@ -1686,8 +1714,10 @@ does nothing (`flock`).
 **A draft on the prompt line blocks the typed lines** (mw-gq6.131): the
 notifier never types over an unsent line, so while one sits in the Mayor's
 prompt, nothing it would type is ever announced. The route that does not care
-what is on the prompt is a wait the Mayor's own harness runs. `contrib/mail-wait`
-is a zero-token script the Mayor arms at boot, in the background, and arms again
+what is on the prompt is a wait the Mayor's own harness runs: `mw events wait`
+(above) now, and `contrib/mail-wait` before it, retired and running it. What
+follows is how `contrib/mail-wait` worked, for a host that still has the old
+script: a zero-token script the Mayor arms at boot, in the background, and arms again
 each time it ends (on new mail, or after `MW_MAIL_WAIT_LIMIT`, 3000 seconds):
 every `MW_MAIL_WAIT_EVERY` seconds (30) it lists `bd mail inbox` and, on a host
 with a postern key file, reads `mw postern inbox --unread-count`, and ends as
@@ -2347,8 +2377,8 @@ bin/mw deputy --reason "the Governor is in a talk; land mw-abc.1"
 `mw deputy` starts the Deputy's next session on this host, as `mw seat up
 deputy` does, in a window named `deputy-*` that closes itself once the session
 has handed off, at high effort on config `deputy_model` (`sonnet`, or
-`$MW_DEPUTY_MODEL`). Its kickoff tells it to arm mail-wait with
-`MW_MAIL_MAILBOX=deputy`, work the mail, report by mail and hand off when idle,
+`$MW_DEPUTY_MODEL`). Its kickoff tells it to arm `mw events wait --for deputy
+--kinds mail`, work the mail, report by mail and hand off when idle,
 then gives the `--reason`. It refuses and starts nothing when
 `seats/deputy/charter.md` is missing. If a `deputy-*` window is already open it
 starts nothing, says so in one line and exits **8**, so the Mayor can mail the

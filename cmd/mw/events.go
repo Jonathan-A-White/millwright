@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
+	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 )
 
 // eventsClock stamps an emitted event. A test fixes it.
@@ -29,9 +32,10 @@ func newEventsCmd() *cobra.Command {
 		Long: "events is the home's sequenced, append-only log of the factory's events (docs/events.md):\n" +
 			"one JSON event per line in events_log_path (default ~/.local/state/mw/events/log.jsonl),\n" +
 			"its head in log.seq beside it. `mw events follow` writes the beads' events into it,\n" +
-			"`mw events emit` adds a job's own, and `mw events tail` reads it.",
+			"`mw events emit` adds a job's own, `mw events tail` reads it, and `mw events wait` blocks on it\n" +
+			"until a seat's subscribed event comes.",
 	}
-	cmd.AddCommand(newEventsFollowCmd(), newEventsEmitCmd(), newEventsTailCmd())
+	cmd.AddCommand(newEventsFollowCmd(), newEventsEmitCmd(), newEventsTailCmd(), newEventsWaitCmd())
 	return cmd
 }
 
@@ -53,7 +57,11 @@ func newEventsFollowCmd() *cobra.Command {
 			"it on chain and delivers it direct in the same pass. With the chain unreachable, off ([events]\n" +
 			"chain = false) or past [events] chain_daily_cap records today, it goes direct only, in the\n" +
 			"fallback lane, and is put on chain later, oldest first. A failure is logged and the loop goes\n" +
-			"on; SIGTERM or SIGINT stops it. It is what\n" +
+			"on; SIGTERM or SIGINT stops it. Each pass also tells the seats of the events they subscribed to\n" +
+			"(seats/<seat>/subscribe.toml, see `mw events wait --help`): a seat whose window is up and idle at an empty\n" +
+			"input line is typed \"New events for <seat>: N. Run mw events tail --since <seq>.\" (and the mail line when mail\n" +
+			"is among them), a busy pane is left alone and told on a later pass, and a seat whose window is down and\n" +
+			"marked spring = true is brought up (mw deputy, mw millhand). It is what\n" +
 			"contrib/systemd/mw-view-follow.service runs; `mw postern view --follow` is the same loop.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -107,10 +115,27 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 		ship.Postern, ship.Cipher, ship.Keys, ship.Err = backend, posternCipher(keys), keys, cmd.ErrOrStderr()
 		shipper = ship
 	}
+	vaultDir, err := config.Vault()
+	if err != nil {
+		return err
+	}
+	vlt := vault.New(vaultDir)
+	terminal := seatWindows()
+	nudger := &application.EventNudge{
+		Log:      eventlog.New(path),
+		Subs:     vlt,
+		Cursors:  eventlog.NewNudgeCursors(path),
+		Terminal: terminal,
+		Seats:    vlt,
+		Spring:   springSeat,
+		Host:     host,
+		Err:      cmd.ErrOrStderr(),
+	}
 	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
 	return application.EventFollow{
 		Shipper: shipper,
+		Nudger:  nudger,
 		Head:    gateway,
 		Feed:    gateway,
 		Log:     eventlog.New(path),
@@ -214,5 +239,95 @@ func newEventsTailCmd() *cobra.Command {
 	}
 	cmd.Flags().Uint64Var(&since, "since", 0, "print only the events after this seq")
 	cmd.Flags().BoolVar(&follow, "follow", false, "keep printing what is appended")
+	return cmd
+}
+
+// springSeat brings up a seat whose window is down, as its own command does,
+// for the reason given: the follower's spring. A seat whose window turned out
+// to be up already is not a failure.
+func springSeat(ctx context.Context, seat, reason string) error {
+	var err error
+	switch seat {
+	case application.DeputySeat:
+		_, err = bringUpDeputy(ctx, reason, io.Discard)
+	case application.MillhandSeat:
+		_, err = bringUpMillhand(ctx, application.WakeHand, reason, io.Discard)
+	default:
+		return fmt.Errorf("the %s seat has no up command to spring it with", seat)
+	}
+	if _, up := application.DeputyIsUp(err); up {
+		return nil
+	}
+	if _, up := application.MillhandIsUp(err); up {
+		return nil
+	}
+	return err
+}
+
+func newEventsWaitCmd() *cobra.Command {
+	var seat string
+	var kinds []string
+	var since uint64
+	var limit time.Duration
+	cmd := &cobra.Command{
+		Use:   "wait --for <seat> [--kinds k1,k2] [--since N] [--limit 50m]",
+		Short: "Block until an event the seat subscribed to is in the log, print it and exit",
+		Long: "wait blocks, at zero tokens, until the home's log holds an event of one of the --kinds, then prints\n" +
+			"\"New events for <seat>: N. Run mw events tail --since <seq>.\" and one line per matching event (the\n" +
+			"lines mw events tail prints) and exits 0, so a seat's harness, running it in the background, wakes\n" +
+			"on its exit. While it waits it looks at the log's head once a second and calls no bd. Only events\n" +
+			"after the log's head when it began count unless --since names a seq, after which they do; a mail\n" +
+			"event is the seat's only when its box is the seat. With no event by --limit (default 50m) it says\n" +
+			"so and exits 0: arm it again.\n\n" +
+			"--kinds is a list of " + strings.Join(application.SubscribableKinds(), ", ") + " (hyphens may stand for underscores;\n" +
+			"landing is a bead_changed to landed). Without it, the kinds are those of seats/<seat>/subscribe.toml\n" +
+			"in the vault, or mail alone when the seat has none. That file is also what mw events follow reads to tell\n" +
+			"the seat in its pane, and to spring it:\n\n" +
+			"  kinds = [\"mail\", \"landing\", \"card_answered\", \"message\"]\n" +
+			"  spring = true   # deputy and millhand only: bring the seat up when its window is down\n\n" +
+			"A kind that is none of these is refused, with the kinds listed.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if seat == "" {
+				return fmt.Errorf("--for is needed: the seat that waits, like mayor or deputy")
+			}
+			sub := application.Subscription{Seat: seat}
+			var err error
+			if len(kinds) > 0 {
+				if sub.Kinds, err = application.ParseKinds(kinds); err != nil {
+					return err
+				}
+			} else {
+				dir, err := config.Vault()
+				if err != nil {
+					return err
+				}
+				file, found, err := application.ReadSubscription(cmd.Context(), vault.New(dir), seat)
+				if err != nil {
+					return err
+				}
+				sub.Kinds = []string{events.KindMail}
+				if found {
+					sub = file
+				}
+			}
+			path, err := config.EventsLogPath()
+			if err != nil {
+				return err
+			}
+			wait := application.EventWait{Log: eventlog.New(path), Subscription: sub, Limit: limit, Out: cmd.OutOrStdout()}
+			if cmd.Flags().Changed("since") {
+				wait.Since = &since
+			}
+			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGTERM, os.Interrupt)
+			defer stop()
+			_, err = wait.Run(ctx)
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&seat, "for", "", "the seat that waits")
+	cmd.Flags().StringSliceVar(&kinds, "kinds", nil, "the kinds that end the wait, comma separated (default: the seat's subscribe.toml)")
+	cmd.Flags().Uint64Var(&since, "since", 0, "count the events after this seq, so those already in the log end the wait at once")
+	cmd.Flags().DurationVar(&limit, "limit", application.DefaultEventWaitLimit, "how long to wait before saying nothing came")
 	return cmd
 }

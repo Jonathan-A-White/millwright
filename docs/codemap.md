@@ -20,8 +20,8 @@ Adapters assert `var _ application.<Port>`.
 | `Runner` | `application/runner.go` | `infrastructure/tmux/tmux.go` | `apptest.FakeRunner` |
 | `Harness` | `application/harness.go` | `infrastructure/claude/claude.go` | `application/seatboot_test.go` |
 | `SeatFiles`, `Windows`, `SeatHarness` | `application/seatup.go` | `infrastructure/{vault/seat,tmux/window,claude/claude}.go` | `apptest.FakeWindows` |
-| `Reap{Terminal,Log,Armer}` | `application/seatreap.go` | `infrastructure/{tmux/reap,vault/reaplog,reaper/arm}.go` | `apptest.Fake{Windows,ReapArmer}` |
 | `Transcripts` | `application/seatcontext.go` | `infrastructure/claude/transcripts.go` | none |
+| `Reap{Terminal,Log,Armer}` | `application/seatreap.go` | `infrastructure/{tmux/reap,vault/reaplog,reaper/arm}.go` | `apptest.Fake{Windows,ReapArmer}` |
 | `WatchProbes` | `application/watch.go` | `infrastructure/watch/watch.go` | `apptest.FakeWatch` |
 | `Doctor{Check,State,Log,Notes}` | `application/doctor.go` | `infrastructure/doctor` | none |
 | `TickLog` | `application/millhandtick.go` | `infrastructure/ticklog/ticklog.go` | `apptest.FakeTickLog` |
@@ -31,7 +31,7 @@ Adapters assert `var _ application.<Port>`.
 | `Notifier`, `HomeMoveHost`, `OldHome`, `VaultBirth`, `TrackerBirth` | `application/{millhandtick,homemove,init}.go` | `infrastructure/{notify/notify,homemove/homemove,vault/birth,beads/init}.go` | none |
 | `Landing`, `Checks`, `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/{landing,checks,slot}.go` | none |
 | `AfterLanding`, `SelfUpdate`, `BuiltMarks`, `BackendBuilds` | `application/afterlanding.go`, `application/selfupdate.go`, `application/backendstage.go` | `infrastructure/rig/{afterlanding,built,backend}.go` | `features/self_update.feature` |
-| EventLog, BeadFeed, FollowCursors, ShipStates | application/event{log,follow,ship}.go | infrastructure/eventlog, beads/feed.go | apptest.Fake{EventLog,FollowCursors,Ship*,Tracker} |
+| EventLog, BeadFeed, FollowCursors, ShipStates, SubscribeFiles, NudgeCursors | application/event{log,follow,ship,subscribe,nudge}.go | infrastructure/eventlog, vault/subscribe.go, beads/feed.go | apptest.Fake{EventLog,FollowCursors,Ship*,Tracker,Subscribe*,Nudge*} |
 | Postern, hands | `application/{postern*,hands}.go` | `infrastructure/{postern,hands*,homemove}` | `apptest.Fake{Postern*,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*,HomeMover}` |
 | `Grinder`, `GrindSource`, `GristState`, `GristLock` | `application/grist.go` | `infrastructure/{claude/grind,rig/grinds,hostlock/try}.go`, `infrastructure/grist` | `apptest.Fake{Grinder,Grinds,GristState,GristLock}` |
 
@@ -65,7 +65,7 @@ Adapters assert `var _ application.<Port>`.
 | `SeatBoot` | `application/seatboot.go` | none: called by `Dispatch`, `Next` | `features/seat_boot.feature` |
 | `Init` | `application/init.go` | `mw init` — `cmd/mw/init.go` | `features/init.feature` |
 | Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern key/inbox/send/snapshot/view/bead — cmd/mw/posternview.go, cmd/mw/posternbead.go | `features/postern_*.feature` |
-| Event{Follow,Emit,Tail,Ship} | application/eventfollow.go, application/eventlog.go, application/eventship.go | mw events follow/emit/tail — cmd/mw/events.go | none |
+| Event{Follow,Emit,Tail,Ship,Wait,Nudge} | application/eventfollow.go, application/eventlog.go, application/eventship.go, application/eventwait.go, application/eventnudge.go, application/eventsubscribe.go | mw events follow/emit/tail/wait — cmd/mw/events.go | none |
 | Hands{Add,List} | application/hands.go | mw hands add/list — cmd/mw/hands.go; `cmd/mw-hands-root` | `features/hands.feature` |
 | `Postern{Serve,Nginx,Mirror}` | `application/posternhand.go`, `application/posternmirror.go` | `mw postern serve`/`nginx`/`mirror` — `cmd/mw/postern.go`, `cmd/mw/posternmirror.go` | `features/postern_serve.feature` |
 | `Grist{Key,Grind,Send,Eval}` | `application/grist.go`, `application/gristgrind.go`, `application/gristsend.go`, `application/gristeval.go` | `mw grist key`/`grind`/`send`/`eval` — `cmd/mw/grist.go` | `features/grist{,_send,_eval}.feature` |
@@ -74,14 +74,7 @@ Adapters assert `var _ application.<Port>`.
 
 ## Test helpers
 
-| Helper | Where | What it gives |
-| --- | --- | --- |
-| `throwawayVault`, `installFormula` | `infrastructure/beads/beads_integration_test.go` | Real bd |
-| `standIn` | `infrastructure/beads/sync_test.go` | Fake bd |
-| `privateRunner`, `privateWindows` | `infrastructure/tmux/*_integration_test.go` | Own tmux |
-| `aVault`, `twoHosts` | `infrastructure/vault/*_test.go` | Vault, clones. |
-| `aRig` | `infrastructure/rig/worktree_test.go` | Rig, origin. |
-| `mwConfig` | `cmd/mw/dispatch_test.go` | Temp HOME. |
+`throwawayVault`, `installFormula` (real bd), `standIn` (fake bd): `infrastructure/beads/`; `privateRunner`, `privateWindows` (own tmux): `infrastructure/tmux/`; `aVault`, `twoHosts` (vault, clones): `infrastructure/vault/`; `aRig` (rig, origin): `infrastructure/rig/`; `mwConfig` (temp HOME): `cmd/mw/dispatch_test.go`.
 
 ## Build and test
 

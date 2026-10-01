@@ -1,183 +1,23 @@
 #!/bin/sh
-# A zero-token wait for new mail to the Mayor, for the Mayor's harness to run in
-# the background: it ends, printing what is new, when new mail reaches the
-# Mayor's inbox or the postern unread count rises, and the harness then wakes
-# the Mayor with that output whatever sits on its prompt line. It types nothing
-# and never looks at tmux (see README.md, "Telling the Mayor's window when mail
-# arrives"). Run it in the background, and arm it again each time it ends.
+# Retired: the wait a seat arms for its mail is `mw events wait` now, which
+# blocks on the home's event log (a look at its head once a second, no bd, no
+# sync, no tokens) instead of polling the inbox every 30 seconds, and is told
+# of the mail the moment mw events follow writes it. This script says so and
+# runs it, so a seat whose standing instructions still say mail-wait keeps
+# working: the seat is MW_MAIL_MAILBOX (mayor), the limit is MW_MAIL_WAIT_LIMIT
+# seconds when set (3000, 50m, otherwise), and any arguments are passed on to
+# `mw events wait`. Without --kinds the kinds are those of the seat's
+# seats/<seat>/subscribe.toml in the vault, or mail alone when it has none.
+# Arm it in the background and arm it again each time it ends, as before.
 #
-# What counts as new is what contrib/mail-notify counts: mail ids not yet in
-# its `announced` record, and a postern unread count above zero and higher than
-# the `postern-count` it last noted, both in the notifier's state directory. So
-# mail that arrived while nothing was armed ends this at once, and once it has
-# ended, having said so, it records the ids as announced and the count as noted
-# — the notifier has nothing left to say about them. A fall in the postern
-# count (the Mayor read the inbox) is noted as it goes by.
-#
-# While it runs, it writes the time to $STATE/wait-armed each poll; the
-# notifier reads that as "a wait is armed" for as long as it is under three
-# minutes old, and types no mail or postern line into the window. It removes
-# the file when it ends. A second one, while one is armed, says so and ends.
-#
-# Each poll:
-#   1. on a host whose beads are a copy of its own (beads_sync remote, the
-#      default), runs `mw sync`, at nice 19 and idle I/O priority, if the last
-#      sync — the notifier's own last-sync marker — is MW_MAIL_SYNC_EVERY
-#      seconds old or more, under the notifier's lock so that the two never
-#      sync at once. On a host whose bd is the Dolt server itself, or reaches
-#      it (beads_sync backup, shared or auto, which is always one of those two),
-#      mail arrives with no sync and it runs none;
-#   2. lists `bd mail inbox` and compares its ids with those announced;
-#   3. on a host with a postern key file, runs `mw postern inbox
-#      --unread-count` and compares it with the count last noted.
-# It ends after MW_MAIL_WAIT_LIMIT seconds with nothing new, saying so.
-#
-# The host may set, in the environment or in mail-notify.env beside the
-# notifier's:
-#   MW_VAULT             the vault (else the `vault` key of ~/.config/mw/config.toml)
-#   MW_MAIL_MAILBOX      whose inbox to watch                          (mayor)
-#   MW_MAIL_WAIT_EVERY   seconds between two polls                       (30)
-#   MW_MAIL_WAIT_LIMIT   seconds before it ends with nothing new       (3000)
-#   MW_MAIL_SYNC_EVERY   least seconds between two `mw sync`s          (300)
-#   MW_MAIL_STATE_DIR    the notifier's state directory
-#                        (${XDG_STATE_HOME:-~/.local/state}/mw-mail-notify);
-#                        a mailbox but the mayor's keeps its own in <dir>/<mailbox>
-#   MW_BEADS_SYNC        beads_sync, as `mw` itself reads it
+# The mail-notify timer still types the mail line into the Mayor's window on a
+# host where mw events follow is not running (see README.md, "Telling the
+# Mayor's window when mail arrives"), and defers to the follower where it is.
 
 set -u
 
-MAILBOX=${MW_MAIL_MAILBOX:-mayor}
-EVERY=${MW_MAIL_WAIT_EVERY:-30}
-LIMIT=${MW_MAIL_WAIT_LIMIT:-3000}
-SYNC_EVERY=${MW_MAIL_SYNC_EVERY:-300}
-STATE=${MW_MAIL_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local/state}/mw-mail-notify}
-# Every mailbox but the Mayor's keeps its own state under $STATE/<mailbox>, so the
-# Deputy's wait never overwrites what the Mayor's notifier has announced.
-[ "$MAILBOX" = mayor ] || STATE=$STATE/$MAILBOX
-
-case $EVERY in '' | *[!0-9]*) EVERY=30 ;; esac
-[ "$EVERY" -ge 1 ] || EVERY=1
-case $LIMIT in '' | *[!0-9]*) LIMIT=3000 ;; esac
-case $SYNC_EVERY in '' | *[!0-9]*) SYNC_EVERY=300 ;; esac
-
-say() { echo "mail-wait: $*"; }
-die() { echo "mail-wait: $*" >&2; exit 1; }
-
-# A root-table key of mw's config file, as the notifier reads its own.
-config_key() {
-	[ -r "$HOME/.config/mw/config.toml" ] || return 0
-	value=$(sed -n "/^[[:space:]]*\[/q; s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$HOME/.config/mw/config.toml" | head -n 1)
-	case $value in
-	\"*) value=${value#\"}; value=${value%%\"*} ;;
-	\'*) value=${value#\'}; value=${value%%\'*} ;;
-	*) value=${value%%#*}; value=${value%"${value##*[![:space:]]}"} ;;
-	esac
-	printf '%s' "$value"
-}
-
-vault=${MW_VAULT:-}
-[ -n "$vault" ] || vault=$(config_key vault)
-[ -n "$vault" ] || die "no vault: set MW_VAULT, or \`vault = \"...\"\` in ~/.config/mw/config.toml"
-[ -d "$vault" ] || die "the vault $vault is not a directory"
-
-keyfile=${MW_POSTERN_KEY_FILE:-}
-[ -n "$keyfile" ] || keyfile=$(config_key postern_key_file)
-[ -n "$keyfile" ] || keyfile="$HOME/.config/mw/postern.key"
-
-# A host whose bd is the Dolt server, or reaches it (auto is always backup or
-# shared), needs no sync for mail.
-beads_sync=${MW_BEADS_SYNC:-}
-[ -n "$beads_sync" ] || beads_sync=$(config_key beads_sync)
-case $beads_sync in backup | shared | auto) syncs=0 ;; *) syncs=1 ;; esac
-
-command -v flock >/dev/null 2>&1 || die "flock is not installed"
-command -v timeout >/dev/null 2>&1 || die "timeout is not installed"
-mkdir -p "$STATE" || die "cannot make $STATE"
-
-# One armed wait at a time. The descriptor is closed for what it starts, so a
-# child that outlives it never holds the lock.
-exec 8>"$STATE/wait-lock"
-flock -n 8 || { say "a wait is already armed; nothing to do"; exit 0; }
-trap 'rm -f "$STATE/wait-armed"; exit 0' INT TERM HUP
-trap 'rm -f "$STATE/wait-armed"' EXIT
-
-beat() { date +%s >"$STATE/wait-armed"; }
-
-# sync_if_due runs the notifier's own sync step, under the notifier's lock.
-sync_if_due() {
-	[ "$syncs" -eq 1 ] || return 0
-	now=$(date +%s)
-	last=$(cat "$STATE/last-sync" 2>/dev/null || echo 0)
-	case $last in *[!0-9]* | "") last=0 ;; esac
-	[ $((now - last)) -ge "$SYNC_EVERY" ] || return 0
-	slow=""
-	command -v ionice >/dev/null 2>&1 && slow="ionice -c 3"
-	(
-		flock -w 60 9 || exit 0
-		# The notifier may have synced while this waited for its lock.
-		last=$(cat "$STATE/last-sync" 2>/dev/null || echo 0)
-		case $last in *[!0-9]* | "") last=0 ;; esac
-		[ $(($(date +%s) - last)) -ge "$SYNC_EVERY" ] || exit 0
-		date +%s >"$STATE/last-sync"
-		# shellcheck disable=SC2086
-		cd "$vault" && timeout 120 nice -n 19 $slow mw sync >/dev/null 2>&1
-	) 9>"$STATE/lock" 8>&- || say "mw sync did not finish cleanly; carrying on with what the vault holds"
-}
-
-end=$(($(date +%s) + LIMIT))
-while :; do
-	beat
-	sync_if_due
-	beat
-
-	# The inbox: only lines that start with a bead id count.
-	new=""
-	current=""
-	if listing=$(cd "$vault" && bd mail inbox "$MAILBOX" 2>/dev/null); then
-		current=$(echo "$listing" | awk 'NF { print $1 }' | grep -E '^[[:alnum:]]+(-[[:alnum:].]+)+$' | sort -u)
-		if [ -n "$current" ]; then
-			if [ -f "$STATE/announced" ]; then
-				new=$(echo "$current" | grep -vxFf "$STATE/announced" 2>/dev/null || true)
-			else
-				new=$current
-			fi
-		fi
-	fi
-
-	# The postern inbox, on a host with a postern key file.
-	postern_count=0
-	postern_new=0
-	if [ -r "$keyfile" ]; then
-		postern_count=$(cd "$vault" && mw postern inbox --unread-count 2>/dev/null) || postern_count=""
-		polled=1
-		case $postern_count in *[!0-9]* | "") postern_count=0 polled=0 ;; esac
-		last_count=$(cat "$STATE/postern-count" 2>/dev/null || echo 0)
-		case $last_count in *[!0-9]* | "") last_count=0 ;; esac
-		if [ "$polled" -eq 1 ] && [ "$postern_count" -lt "$last_count" ]; then
-			echo "$postern_count" >"$STATE/postern-count"
-			last_count=$postern_count
-		fi
-		[ "$postern_count" -gt 0 ] && [ "$postern_count" -gt "$last_count" ] && postern_new=1
-	fi
-
-	if [ -n "$new" ] || [ "$postern_new" -eq 1 ]; then
-		if [ -n "$new" ]; then
-			count=$(echo "$new" | wc -l | tr -d ' ')
-			echo "NEW MAIL for $MAILBOX at $(date -u +%FT%TZ): $count message(s)."
-			(cd "$vault" && bd mail inbox "$MAILBOX" 2>/dev/null)
-			# The ids are announced: the notifier has nothing left to type.
-			echo "$current" >"$STATE/announced"
-		fi
-		if [ "$postern_new" -eq 1 ]; then
-			echo "New postern message for $MAILBOX ($postern_count unread) at $(date -u +%FT%TZ). Run mw postern inbox."
-			echo "$postern_count" >"$STATE/postern-count"
-		fi
-		exit 0
-	fi
-
-	if [ "$(date +%s)" -ge "$end" ]; then
-		echo "No new mail by $(date -u +%FT%TZ); the wait ended on its time limit. Arm it again."
-		exit 0
-	fi
-	sleep "$EVERY" 8>&-
-done
+echo "retired: mw events wait"
+case ${MW_MAIL_WAIT_LIMIT:-} in
+'' | *[!0-9]*) exec mw events wait --for "${MW_MAIL_MAILBOX:-mayor}" "$@" ;;
+*) exec mw events wait --for "${MW_MAIL_MAILBOX:-mayor}" --limit "${MW_MAIL_WAIT_LIMIT}s" "$@" ;;
+esac

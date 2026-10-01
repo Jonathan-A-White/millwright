@@ -69,6 +69,9 @@
 #      is under MW_MAIL_WAIT_STALE seconds old, 180), the mail line and the
 #      postern line are the wait's to tell, whatever sits on the prompt line,
 #      and are neither typed nor recorded; the quiet alarm is typed as ever.
+#      The mail line is likewise left to mw events follow, and neither typed
+#      nor recorded, while mw-view-follow.service is active and the seat's
+#      seats/<seat>/subscribe.toml names mail (mw-jrx0s.6).
 # Otherwise it does nothing and the next tick tries again.
 #
 # It never types mail content, never clears an input line, and never starts a
@@ -480,6 +483,22 @@ if [ "$wait_armed" -eq 1 ] && { [ -n "$new" ] || [ -n "$postern_text" ]; }; then
 	say "a wait is armed; leaving the mail and the postern message to it"
 	new=""
 	postern_text=""
+fi
+
+# mw events follow (mw-view-follow.service) tells a seat of its mail itself,
+# typing the nudge into an idle pane or springing the seat, when the seat's
+# seats/<seat>/subscribe.toml names mail among its kinds: while it is active the
+# mail line is its to type, and is neither typed nor recorded here. The postern
+# line and the quiet alarm are not the follower's, and are typed as ever.
+if [ -n "$new" ] && grep -Eq '^[[:space:]]*kinds[[:space:]]*=.*mail' "$vault/seats/$MAILBOX/subscribe.toml" 2>/dev/null &&
+	systemctl --user is-active --quiet mw-view-follow.service >/dev/null 2>&1; then
+	if [ ! -f "$STATE/mail-deferred" ]; then
+		say "the mail line is retired, mw events follow tells $MAILBOX of its mail (mw-view-follow.service is active)"
+		: >"$STATE/mail-deferred"
+	fi
+	new=""
+else
+	rm -f "$STATE/mail-deferred"
 fi
 
 [ -n "$new" ] || [ -n "$postern_text" ] || [ -n "$nudge_texts" ] || exit 0

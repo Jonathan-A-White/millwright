@@ -103,6 +103,7 @@ func newFactory(t *testing.T) *factory {
 	// makes it fail.
 	f.write("bin/mw", "#!/bin/sh\ncase \"$1\" in\n"+
 		"sync) echo \"$*\" >> \"$MW_TEST_DIR/mw.log\" ;;\n"+
+		"events) echo \"$*\" >> \"$MW_TEST_DIR/events.log\" ;;\n"+
 		"nudge) echo \"$*\" >> \"$MW_TEST_DIR/nudge.log\"; [ -f \"$MW_TEST_DIR/nudge-output\" ] && cat \"$MW_TEST_DIR/nudge-output\" ;;\n"+
 		"postern) echo \"$*\" >> \"$MW_TEST_DIR/postern.log\"\n"+
 		"\tcase \"$2 ${3:-}\" in\n"+
