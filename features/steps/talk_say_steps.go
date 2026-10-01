@@ -29,7 +29,9 @@ type talkSayContext struct {
 
 	out    strings.Builder
 	report application.TalkSayReport
-	err    error
+	// callReport is what the last mw talk call did.
+	callReport application.TalkCallReport
+	err        error
 }
 
 // InitializeTalkSayScenario registers the steps of features/talk_say.feature.
@@ -78,6 +80,8 @@ func InitializeTalkSayScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^it prints the txid and the elapsed milliseconds$`, c.itPrintsTxidAndElapsed)
 	ctx.Then(`^talk say is refused saying "([^"]*)"$`, c.refusedSaying)
 	ctx.Then(`^nothing was delivered for talking$`, c.nothingDelivered)
+
+	c.registerCall(ctx)
 }
 
 func (c *talkSayContext) aThrowawayMayorKey() error {
