@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // posternBlobHash matches a sha256 hash, hex: 64 hex characters, postern's
@@ -27,6 +28,7 @@ var posternBlobHash = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
 
 var _ application.Postern = (*HTTP)(nil)
 var _ application.PosternStream = (*HTTP)(nil)
+var _ application.Prompts = (*HTTP)(nil)
 
 // httpTimeout bounds each call to the backend: it sits at the far end of a
 // WireGuard tunnel, and a broadcast waits on WhatsOnChain behind it.
@@ -193,6 +195,57 @@ func (h *HTTP) Deliver(ctx context.Context, payload []byte) (string, error) {
 		return "", fmt.Errorf("the postern backend at %s took the message but reported no txid", h.base)
 	}
 	return body.Txid, nil
+}
+
+// List implements application.Prompts: GET /api/prompts, answered
+// {"prompts": [{name, summary, signature, body}]}, authenticated as every
+// call here is.
+func (h *HTTP) List(ctx context.Context) ([]domain.Prompt, error) {
+	var body struct {
+		Prompts []domain.Prompt `json:"prompts"`
+	}
+	if err := h.authDo(ctx, http.MethodGet, "/api/prompts", nil, &body); err != nil {
+		return nil, err
+	}
+	return body.Prompts, nil
+}
+
+// Get implements application.Prompts: GET /api/prompts/{name}, answered the
+// prompt itself; a 404 is a prompt not saved, and not an error.
+func (h *HTTP) Get(ctx context.Context, name string) (domain.Prompt, bool, error) {
+	var prompt domain.Prompt
+	err := h.authDo(ctx, http.MethodGet, "/api/prompts/"+url.PathEscape(name), nil, &prompt)
+	var status *statusError
+	if errors.As(err, &status) && status.code == http.StatusNotFound {
+		return domain.Prompt{}, false, nil
+	}
+	if err != nil {
+		return domain.Prompt{}, false, err
+	}
+	return prompt, true, nil
+}
+
+// Put implements application.Prompts: PUT /api/prompts/{name} with
+// {name, summary, signature, body}, saving the prompt whole in place of any
+// of that name.
+func (h *HTTP) Put(ctx context.Context, p domain.Prompt) error {
+	req, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	_, err = h.authFetch(ctx, http.MethodPut, "/api/prompts/"+url.PathEscape(p.Name), req)
+	return err
+}
+
+// Delete implements application.Prompts: DELETE /api/prompts/{name}; a 404 is
+// a prompt already gone, and not an error.
+func (h *HTTP) Delete(ctx context.Context, name string) error {
+	_, err := h.authFetch(ctx, http.MethodDelete, "/api/prompts/"+url.PathEscape(name), nil)
+	var status *statusError
+	if errors.As(err, &status) && status.code == http.StatusNotFound {
+		return nil
+	}
+	return err
 }
 
 // UploadBlob implements application.Postern: POST /api/blobs with the

@@ -17,6 +17,7 @@ import (
 	ec "github.com/bsv-blockchain/go-sdk/primitives/ec"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/postern"
 )
 
@@ -467,5 +468,57 @@ func TestMeWithNoMillNamesNone(t *testing.T) {
 	me, err := backend.Me(context.Background())
 	if err != nil || me.Mill != "" {
 		t.Fatalf("expected no mill key, got %+v: %v", me, err)
+	}
+}
+
+// The prompts are kept by the backend: Put sends the prompt whole, proven, to
+// its own path; Get reads one back and takes a 404 as none; List reads them
+// all; Delete takes a 404 as already gone.
+func TestPromptsAreSavedReadAndDeletedThroughTheBackend(t *testing.T) {
+	prompt := domain.Prompt{Name: "top5", Summary: "The five next", Signature: []string{"count:int=5"}, Body: "Top <count>."}
+	saved, _ := json.Marshal(prompt)
+	b, backend := serve(t, map[string]answer{
+		"PUT /api/prompts/top5":    {200, `{}`},
+		"GET /api/prompts/top5":    {200, string(saved)},
+		"GET /api/prompts":         {200, `{"prompts":[` + string(saved) + `]}`},
+		"DELETE /api/prompts/top5": {204, ""},
+	})
+	ctx := context.Background()
+	if err := backend.Put(ctx, prompt); err != nil {
+		t.Fatalf("saving a prompt: %v", err)
+	}
+	put := b.requests[len(b.requests)-1]
+	if put.Method != http.MethodPut || !strings.HasPrefix(put.Header.Get("Authorization"), "Postern ") {
+		t.Fatalf("expected a proven PUT, got %s %q", put.Method, put.Header.Get("Authorization"))
+	}
+	var sent map[string]any
+	if err := json.Unmarshal([]byte(b.bodies[len(b.bodies)-1]), &sent); err != nil {
+		t.Fatalf("the PUT body is not JSON: %v", err)
+	}
+	for _, field := range []string{"name", "summary", "signature", "body"} {
+		if _, ok := sent[field]; !ok {
+			t.Fatalf("expected the PUT body to carry %q, got %v", field, sent)
+		}
+	}
+	got, found, err := backend.Get(ctx, "top5")
+	if err != nil || !found || !reflect.DeepEqual(got, prompt) {
+		t.Fatalf("expected the saved prompt back, got %+v found %v err %v", got, found, err)
+	}
+	if _, found, err := backend.Get(ctx, "nope"); err != nil || found {
+		t.Fatalf("expected a 404 to be no prompt and no error, got found %v err %v", found, err)
+	}
+	list, err := backend.List(ctx)
+	if err != nil || len(list) != 1 || list[0].Name != "top5" {
+		t.Fatalf("expected the one prompt listed, got %+v err %v", list, err)
+	}
+	if err := backend.Delete(ctx, "top5"); err != nil {
+		t.Fatalf("deleting a prompt: %v", err)
+	}
+	if err := backend.Delete(ctx, "nope"); err != nil {
+		t.Fatalf("expected a prompt already gone to be no error, got %v", err)
+	}
+	_, refusing := serve(t, map[string]answer{"PUT /api/prompts/top5": {403, `{"error":"not the mayor"}`}})
+	if err := refusing.Put(ctx, prompt); err == nil || !strings.Contains(err.Error(), "not the mayor") {
+		t.Fatalf("expected the backend's refusal, got %v", err)
 	}
 }
