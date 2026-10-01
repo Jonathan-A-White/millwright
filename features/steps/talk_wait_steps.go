@@ -38,6 +38,9 @@ type talkBackend struct {
 	records   []map[string]any
 	conns     map[*talkConn]bool
 	connected int
+	// bareTxid, when set, is the txid the next record indexed goes by, as one
+	// that came by chain does; empty gives "direct:<seq>".
+	bareTxid string
 }
 
 func (b *talkBackend) handler(w http.ResponseWriter, r *http.Request) {
@@ -102,8 +105,12 @@ func (b *talkBackend) index(scriptHex string, announce bool) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	seq := int64(len(b.records) + 1)
+	txid := fmt.Sprintf("direct:%d", seq)
+	if b.bareTxid != "" {
+		txid, b.bareTxid = b.bareTxid, ""
+	}
 	b.records = append(b.records, map[string]any{
-		"seq": seq, "txid": fmt.Sprintf("direct:%d", seq), "scriptHex": scriptHex,
+		"seq": seq, "txid": txid, "scriptHex": scriptHex,
 	})
 	if !announce {
 		return
@@ -279,6 +286,22 @@ func InitializeTalkWaitScenario(ctx *godog.ScenarioContext) {
 	})
 	ctx.When(`^the Governor's call request "([^"]*)" is indexed$`, func(text string) error {
 		return c.record("call", c.mayor, c.governorKey, callPlaintext("request", text, ""), true)
+	})
+	ctx.When(`^the Governor's call request "([^"]*)" is indexed with the bare txid "([^"]*)"$`, func(text, txid string) error {
+		c.backend.mu.Lock()
+		c.backend.bareTxid = txid
+		c.backend.mu.Unlock()
+		return c.record("call", c.mayor, c.governorKey, callPlaintext("request", text, ""), true)
+	})
+	ctx.Then(`^mw talk wait remembered the Governor's newest record came by "([^"]*)"$`, func(channel string) error {
+		got, err := c.memory.Note(context.Background(), application.TalkWaitChannelKey)
+		if err != nil {
+			return err
+		}
+		if got != channel {
+			return fmt.Errorf("expected the remembered channel %q, got %q", channel, got)
+		}
+		return nil
 	})
 	ctx.Given(`^the Governor's call request "([^"]*)" has been indexed$`, func(text string) error {
 		return c.record("call", c.mayor, c.governorKey, callPlaintext("request", text, ""), false)

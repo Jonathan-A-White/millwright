@@ -1816,20 +1816,28 @@ func (s PosternSend) sendOne(ctx context.Context, channel, class, summary, from,
 	if channel == PosternChannelDirect {
 		return s.Postern.Deliver(ctx, payload)
 	}
-	utxos, err := s.Postern.Utxos(ctx, address)
+	return broadcastRecord(ctx, s.Postern, s.Keys, address, payload, s.Out)
+}
+
+// broadcastRecord puts payload on the chain: it signs a record transaction
+// from address's unspent outputs and has the backend broadcast it, reporting
+// its txid. A failure to remember what it spent is said on out, when there is
+// one, and fails nothing.
+func broadcastRecord(ctx context.Context, backend Postern, keys PosternKeyFile, address string, payload []byte, out io.Writer) (string, error) {
+	utxos, err := backend.Utxos(ctx, address)
 	if err != nil {
 		return "", err
 	}
-	rawtx, err := s.Keys.Sign(utxos, payload)
+	rawtx, err := keys.Sign(utxos, payload)
 	if err != nil {
 		return "", err
 	}
-	txid, err := s.Postern.Broadcast(ctx, rawtx)
+	txid, err := backend.Broadcast(ctx, rawtx)
 	if err != nil {
 		return "", err
 	}
-	if err := s.Keys.MarkSent(rawtx); err != nil && s.Out != nil {
-		fmt.Fprintf(s.Out, "warning: the record was broadcast, but mw could not remember what it spent, so a send within the next block may fail: %v\n", err)
+	if err := keys.MarkSent(rawtx); err != nil && out != nil {
+		fmt.Fprintf(out, "warning: the record was broadcast, but mw could not remember what it spent, so a send within the next block may fail: %v\n", err)
 	}
 	return txid, nil
 }

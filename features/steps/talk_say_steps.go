@@ -26,6 +26,7 @@ type talkSayContext struct {
 	governor    *postern.KeyFile
 	governorKey string
 	backend     *apptest.FakePostern
+	memory      *apptest.FakeTracker
 
 	out    strings.Builder
 	report application.TalkSayReport
@@ -39,7 +40,7 @@ func InitializeTalkSayScenario(ctx *godog.ScenarioContext) {
 	c := &talkSayContext{}
 
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
-		*c = talkSayContext{backend: apptest.NewFakePostern()}
+		*c = talkSayContext{backend: apptest.NewFakePostern(), memory: apptest.NewFakeTracker()}
 		return ctx, nil
 	})
 	ctx.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {

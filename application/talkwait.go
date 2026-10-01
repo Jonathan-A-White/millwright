@@ -22,6 +22,12 @@ const talkRecordClass = "talk"
 // that the postern inbox's cursor and this one never move each other.
 const TalkWaitCursorKey = "postern.talk.cursor"
 
+// TalkWaitChannelKey is the note key holding how the Governor's newest talk or
+// call record came: PosternChannelChain when its txid is bare, and
+// PosternChannelDirect when it is "direct:<id>". mw talk call reads it, to
+// answer a record that came by chain on chain too.
+const TalkWaitChannelKey = "postern.talk.channel"
+
 // TalkWaitMailKey is the note key holding the ids of the Deputy's mail to the
 // Mayor already reported, one to a line, so a message is reported once.
 const TalkWaitMailKey = "postern.talk.mail"
@@ -222,10 +228,13 @@ type talkWaitRun struct {
 	// turn is the Governor's turn the wait ends on, nil when it ends on new
 	// postern messages alone; posts are those messages, the ones the wait
 	// paged past before it reached the turn included.
-	turn      *TalkTurn
-	turnSeq   int64
-	call      *CallRecord
-	callTxid  string
+	turn     *TalkTurn
+	turnSeq  int64
+	call     *CallRecord
+	callTxid string
+	// channel is how the Governor's record the wait ends on came, empty when
+	// it ends on none.
+	channel   string
 	posts     []PosternInboxMessage
 	heardAt   time.Time
 	printedAt time.Time
@@ -278,6 +287,7 @@ func (r *talkWaitRun) page(arrived time.Time) error {
 		if record.Class == callRecordClass && record.To == pubKey {
 			if call, ok := r.governorsCall(record, privKey); ok {
 				r.call, r.callTxid, r.heardAt = call, record.Txid, arrived
+				r.channel = recordChannel(record.Txid)
 				r.cursor = record.Seq
 				return errTalkHeard
 			}
@@ -285,6 +295,7 @@ func (r *talkWaitRun) page(arrived time.Time) error {
 			turn, ok := r.governorsTurn(record, privKey)
 			if ok {
 				r.turn, r.turnSeq, r.heardAt = turn, record.Seq, arrived
+				r.channel = recordChannel(record.Txid)
 				r.cursor = record.Seq
 				return errTalkHeard
 			}
@@ -307,6 +318,15 @@ func (r *talkWaitRun) page(arrived time.Time) error {
 		return errTalkHeard
 	}
 	return nil
+}
+
+// recordChannel is how a record came, by its txid: a direct one is
+// "direct:<id>", one from the chain a bare txid.
+func recordChannel(txid string) string {
+	if strings.HasPrefix(txid, "direct:") {
+		return PosternChannelDirect
+	}
+	return PosternChannelChain
 }
 
 // inboxCursor is the postern inbox's own cursor, the mark of what mw postern
@@ -448,6 +468,11 @@ func (r *talkWaitRun) finish(ctx context.Context) (TalkWaitReport, error) {
 	ctx = context.WithoutCancel(ctx)
 	if err := r.save(ctx); err != nil {
 		return report, err
+	}
+	if r.channel != "" {
+		if err := r.Memory.SetNote(ctx, TalkWaitChannelKey, r.channel); err != nil {
+			return report, fmt.Errorf("saving the channel the Governor's record came by: %w", err)
+		}
 	}
 	mail, err := r.deputyMail(ctx)
 	if err != nil {

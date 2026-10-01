@@ -34,10 +34,14 @@ type CallRecord struct {
 }
 
 // TalkCallRequest is what mw talk call is asked to send: Text, the short line
-// shown with the ring, and the bead ids Links carried beside it.
+// shown with the ring, and the bead ids Links carried beside it. Chain also
+// broadcasts the ring on chain, beside the direct delivery, for a phone that
+// cannot reach the backend; TalkCall.Notes adds it by itself when the
+// Governor's newest record came that way.
 type TalkCallRequest struct {
 	Text  string
 	Links []string
+	Chain bool
 }
 
 // validate refuses what cannot be a ring.
@@ -52,8 +56,15 @@ func (r TalkCallRequest) validate() error {
 // docs/protocol.md section 21 ring plaintext to the Governor and hands the
 // record straight to the postern backend (section 9), as TalkSay does for a
 // turn. The record's class is call and it carries no summary, so no word of it
-// is pushed, handed to a hook or logged by the backend. It touches no chain,
-// tracker or note.
+// is pushed, handed to a hook or logged by the backend. It reads one note,
+// the channel TalkWait last heard the Governor by, and writes none.
+//
+// On chain — the request's Chain, or the Governor's newest record having come
+// by chain — the very same record is also broadcast, through the backend's
+// broadcast, which is local to the Mayor, so a phone that cannot reach the
+// backend still sees it. The direct delivery goes first; a chain that was
+// asked for and fails is an error naming the txid that did go direct, one
+// added by itself is only said.
 type TalkCall struct {
 	Postern Postern
 	Cipher  Cipher
@@ -62,6 +73,12 @@ type TalkCall struct {
 	// GovernorKey is the Governor's compressed public key, hex — config
 	// postern_governor_key.
 	GovernorKey string
+
+	// Notes holds TalkWaitChannelKey. Nil never adds the chain by itself.
+	Notes PosternNotes
+	// FloatSats is the balance cap mw enforces before a broadcast — config
+	// postern_float_sats.
+	FloatSats int64
 
 	// Now is the clock; the zero value reads the real one.
 	Now func() time.Time
@@ -73,6 +90,8 @@ type TalkCall struct {
 // TalkCallReport is what a call did.
 type TalkCallReport struct {
 	Txid string
+	// ChainTxid is the ring's txid on chain, empty when it was not broadcast.
+	ChainTxid string
 	// Elapsed is the time from the start of the run to the backend's
 	// acceptance: the key read, the encryption and the delivery.
 	Elapsed time.Duration
@@ -115,11 +134,64 @@ func (c TalkCall) Run(ctx context.Context, req TalkCallRequest) (TalkCallReport,
 		return TalkCallReport{}, fmt.Errorf("mw talk call: the postern backend would not take the ring: %w", err)
 	}
 
-	report := TalkCallReport{Txid: txid, Elapsed: c.now().Sub(started)}
+	report := TalkCallReport{Txid: txid}
+	chainNote := ""
+	if wanted, automatic := c.wantsChain(ctx, req); wanted {
+		chainTxid, err := c.broadcast(ctx, payload)
+		switch {
+		case err == nil:
+			report.ChainTxid = chainTxid
+		case !automatic:
+			return report, fmt.Errorf("mw talk call: the ring went direct as %s, but the chain broadcast failed: %w", txid, err)
+		default:
+			chainNote = fmt.Sprintf("chain: not sent: %v\n", err)
+		}
+	}
+
+	report.Elapsed = c.now().Sub(started)
 	if c.Out != nil {
-		fmt.Fprintf(c.Out, "call ring sent\ntxid %s\nelapsed %d ms\n", txid, report.Elapsed.Milliseconds())
+		fmt.Fprintf(c.Out, "call ring sent\ntxid %s\n", txid)
+		if report.ChainTxid != "" {
+			fmt.Fprintf(c.Out, "chain txid %s\n", report.ChainTxid)
+		}
+		fmt.Fprint(c.Out, chainNote)
+		fmt.Fprintf(c.Out, "elapsed %d ms\n", report.Elapsed.Milliseconds())
 	}
 	return report, nil
+}
+
+// wantsChain reports whether the ring goes on chain too, and whether that is
+// by itself rather than asked for: the Governor's newest record, as TalkWait
+// last heard it, came by chain.
+func (c TalkCall) wantsChain(ctx context.Context, req TalkCallRequest) (wanted, automatic bool) {
+	if req.Chain {
+		return true, false
+	}
+	if c.Notes == nil {
+		return false, false
+	}
+	channel, err := c.Notes.Note(ctx, TalkWaitChannelKey)
+	if err != nil || channel != PosternChannelChain {
+		return false, false
+	}
+	return true, true
+}
+
+// broadcast puts payload on chain under the float cap, as mw postern send does.
+func (c TalkCall) broadcast(ctx context.Context, payload []byte) (string, error) {
+	_, address, err := c.Keys.PublicKey()
+	if err != nil {
+		return "", err
+	}
+	balance, err := c.Postern.Balance(ctx, address)
+	if err != nil {
+		return "", err
+	}
+	if balance > c.FloatSats {
+		return "", fmt.Errorf("the postern key's balance is %d satoshis, over the float cap of %d by %d",
+			balance, c.FloatSats, balance-c.FloatSats)
+	}
+	return broadcastRecord(ctx, c.Postern, c.Keys, address, payload, c.Out)
 }
 
 func (c TalkCall) now() time.Time {

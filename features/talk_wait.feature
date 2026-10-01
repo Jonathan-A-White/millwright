@@ -160,3 +160,15 @@ Feature: mw talk wait
     And a "message" record to the Mayor has been indexed
     When mw postern inbox --unread-count is run against the backend
     Then the backend inbox counts 1 unread
+
+  Scenario: it remembers which way the Governor's newest record came, for mw talk call
+    Given mw talk wait is armed
+    When the Governor's call request "Call me" is indexed with the bare txid "ab12cd34"
+    Then mw talk wait ends within 1 second
+    And mw talk wait remembered the Governor's newest record came by "chain"
+
+  Scenario: a record that came direct is remembered as direct
+    Given mw talk wait is armed
+    When the Governor's turn 1 of talk "talk-9" saying "Hello" is indexed
+    Then mw talk wait ends within 1 second
+    And mw talk wait remembered the Governor's newest record came by "direct"

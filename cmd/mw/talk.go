@@ -231,15 +231,20 @@ func newTalkSayCmd() *cobra.Command {
 // encrypted to the Governor and delivered direct.
 func newTalkCallCmd() *cobra.Command {
 	var links []string
+	var chain bool
 	cmd := &cobra.Command{
-		Use:   "call <text> [--link <bead>]...",
+		Use:   "call <text> [--chain] [--link <bead>]...",
 		Short: "Call the Governor back: send a ring",
 		Long: "call encrypts <text>, the short line shown with the ring, to the Governor as postern's\n" +
 			"docs/protocol.md section 21 ring plaintext and hands the record straight to the postern backend\n" +
 			"(section 9), printing the txid and the milliseconds it took. It is the Mayor's answer to a call\n" +
 			"request that mw talk wait printed ('call <txid> at <time>: <text>'). The record's class is call\n" +
 			"and it carries no summary: the backend never pushes or logs a word of it. It uses the direct\n" +
-			"channel whatever postern_channel says, and touches no bead and no note.\n\n" +
+			"channel whatever postern_channel says, and touches no bead and writes no note.\n\n" +
+			"--chain also broadcasts the same record on chain, through the backend's broadcast (local to the\n" +
+			"Mayor), so a phone that cannot reach the backend still rings; both txids are printed. Without it\n" +
+			"the chain is added by itself when the newest record mw talk wait heard from the Governor came by\n" +
+			"chain (a bare txid); one that came direct does not add it.\n\n" +
 			"--link <bead> (repeatable) puts a bead id in the record's links field, beside the text and never\n" +
 			"in it. It refuses when postern_governor_key is not set.",
 		Args: cobra.ExactArgs(1),
@@ -252,7 +257,15 @@ func newTalkCallCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			floatSats, err := config.PosternFloatSats()
+			if err != nil {
+				return err
+			}
 			backend, err := posternBackend(keys)
+			if err != nil {
+				return err
+			}
+			gateway, _, err := posternGateway()
 			if err != nil {
 				return err
 			}
@@ -261,12 +274,15 @@ func newTalkCallCmd() *cobra.Command {
 				Cipher:      posternCipher(keys),
 				Keys:        keys,
 				GovernorKey: governorKey,
+				Notes:       gateway,
+				FloatSats:   int64(floatSats),
 				Now:         posternClock,
 				Out:         cmd.OutOrStdout(),
-			}.Run(cmd.Context(), application.TalkCallRequest{Text: args[0], Links: links})
+			}.Run(cmd.Context(), application.TalkCallRequest{Text: args[0], Links: links, Chain: chain})
 			return err
 		},
 	}
 	cmd.Flags().StringArrayVar(&links, "link", nil, "a bead id to carry in the record's links field, not the text (repeatable)")
+	cmd.Flags().BoolVar(&chain, "chain", false, "also broadcast the ring on chain, for a phone that cannot reach the backend")
 	return cmd
 }

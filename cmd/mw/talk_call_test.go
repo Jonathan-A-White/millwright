@@ -15,7 +15,9 @@ func TestTalkCallHelpRunsAndListsItsFlags(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("mw talk call --help: %v", err)
 	}
-	if !strings.Contains(buf.String(), "--link") {
-		t.Errorf("expected the help to name --link, got:\n%s", buf.String())
+	for _, flag := range []string{"--link", "--chain"} {
+		if !strings.Contains(buf.String(), flag) {
+			t.Errorf("expected the help to name %s, got:\n%s", flag, buf.String())
+		}
 	}
 }

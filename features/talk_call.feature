@@ -6,6 +6,13 @@ Feature: mw talk call
   pushed or logged by the backend. It prints the txid and the milliseconds it
   took.
 
+  A phone that cannot reach the backend still sees the chain, so --chain also
+  broadcasts the same record on chain, through the backend's broadcast (which
+  is local to the Mayor), and prints both txids. Without the flag the chain is
+  added by itself when the newest record from the Governor that mw talk wait
+  heard carried a bare txid, which is how a record that came by chain goes; a
+  direct one, "direct:<id>", does not add it.
+
   Background:
     Given a throwaway Mayor postern key for talking
     And a throwaway Governor key for talking
@@ -40,3 +47,38 @@ Feature: mw talk call
     Given the postern backend will not take a talk record
     When mw talk call "Hi" is run
     Then talk call is refused saying "backend said no"
+
+  Scenario: --chain sends the ring record directly and broadcasts the same record, printing both ids
+    Given the Mayor's postern key holds a spendable output of 100000 satoshis
+    When mw talk call "Back now." is run on chain
+    Then the talk record was delivered directly
+    And the ring was broadcast once, carrying the delivered record
+    And it prints "txid direct:" and the elapsed milliseconds
+    And it prints the chain txid "fake-txid-1"
+
+  Scenario: after a Governor record that came by chain the call-back is broadcast without the flag
+    Given the Mayor's postern key holds a spendable output of 100000 satoshis
+    And the newest record mw talk wait heard from the Governor came by chain
+    When mw talk call "Back now." is run
+    Then the talk record was delivered directly
+    And the ring was broadcast once, carrying the delivered record
+    And it prints the chain txid "fake-txid-1"
+
+  Scenario: after a Governor record that came direct the call-back is not broadcast
+    Given the Mayor's postern key holds a spendable output of 100000 satoshis
+    And the newest record mw talk wait heard from the Governor came direct
+    When mw talk call "Back now." is run
+    Then the talk record was delivered directly, and nothing was broadcast
+    And it prints "txid direct:" and the elapsed milliseconds
+
+  Scenario: --chain that cannot broadcast is refused, naming the ring that did go direct
+    When mw talk call "Back now." is run on chain
+    Then talk call is refused saying "went direct as direct:"
+    And talk call is refused saying "chain"
+
+  Scenario: a chain added by itself that cannot broadcast does not fail a call that rang direct
+    Given the newest record mw talk wait heard from the Governor came by chain
+    When mw talk call "Back now." is run
+    Then the talk record was delivered directly, and nothing was broadcast
+    And it prints "txid direct:" and the elapsed milliseconds
+    And the call output says "chain: not sent"

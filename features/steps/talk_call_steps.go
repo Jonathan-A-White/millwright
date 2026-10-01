@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -21,6 +22,25 @@ func (c *talkSayContext) registerCall(ctx *godog.ScenarioContext) {
 	ctx.When(`^mw talk call "([^"]*)" is run$`, func(text string) error {
 		return c.runCall(application.TalkCallRequest{Text: text})
 	})
+	ctx.Given(`^the Mayor's postern key holds a spendable output of (\d+) satoshis$`, c.theMayorHoldsAnOutput)
+	ctx.Given(`^the newest record mw talk wait heard from the Governor came by chain$`, func() error {
+		return c.memory.SetNote(context.Background(), application.TalkWaitChannelKey, application.PosternChannelChain)
+	})
+	ctx.Given(`^the newest record mw talk wait heard from the Governor came direct$`, func() error {
+		return c.memory.SetNote(context.Background(), application.TalkWaitChannelKey, application.PosternChannelDirect)
+	})
+	ctx.When(`^mw talk call "([^"]*)" is run on chain$`, func(text string) error {
+		return c.runCall(application.TalkCallRequest{Text: text, Chain: true})
+	})
+	ctx.Then(`^the talk record was delivered directly$`, func() error {
+		_, err := c.delivered()
+		return err
+	})
+	ctx.Then(`^the ring was broadcast once, carrying the delivered record$`, c.ringBroadcastOnce)
+	ctx.Then(`^it prints the chain txid "([^"]*)"$`, func(txid string) error {
+		return c.printsLine("chain txid " + txid)
+	})
+	ctx.Then(`^the call output says "([^"]*)"$`, c.printsLine)
 	ctx.When(`^mw talk call "([^"]*)" is run with links "([^"]*)" and "([^"]*)"$`, func(text, first, second string) error {
 		return c.runCall(application.TalkCallRequest{Text: text, Links: []string{first, second}})
 	})
@@ -39,8 +59,47 @@ func (c *talkSayContext) runCall(request application.TalkCallRequest) error {
 		Cipher:      postern.NewCipher(c.mayor),
 		Keys:        c.mayor,
 		GovernorKey: c.governorKey,
+		Notes:       c.memory,
+		FloatSats:   200000,
 		Out:         &c.out,
 	}.Run(context.Background(), request)
+	return nil
+}
+
+func (c *talkSayContext) theMayorHoldsAnOutput(sats int64) error {
+	_, address, err := c.mayor.PublicKey()
+	if err != nil {
+		return err
+	}
+	c.backend.SetBalance(address, sats)
+	c.backend.SetUtxos(address, application.PosternUtxo{Txid: strings.Repeat("1", 64), Vout: 0, Satoshis: sats, Height: 100})
+	return nil
+}
+
+// ringBroadcastOnce is the transaction broadcast holding the very bytes that
+// were delivered directly.
+func (c *talkSayContext) ringBroadcastOnce() error {
+	if c.err != nil {
+		return fmt.Errorf("expected it to succeed, got: %w", c.err)
+	}
+	payload, err := c.delivered()
+	if err != nil {
+		return err
+	}
+	broadcasts := c.backend.Broadcasts()
+	if len(broadcasts) != 1 {
+		return fmt.Errorf("expected one broadcast, got %d", len(broadcasts))
+	}
+	if !strings.Contains(broadcasts[0], hex.EncodeToString(payload)) {
+		return fmt.Errorf("the broadcast transaction does not carry the delivered record")
+	}
+	return nil
+}
+
+func (c *talkSayContext) printsLine(want string) error {
+	if !strings.Contains(c.out.String(), want) {
+		return fmt.Errorf("expected %q in %q", want, c.out.String())
+	}
 	return nil
 }
 
