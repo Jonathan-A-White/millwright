@@ -195,3 +195,22 @@ func TestShipStatesAreEmptyBeforeTheFirstSaveAndKeepWhatIsSaved(t *testing.T) {
 		t.Fatalf("expected %+v back, got %+v %v", want, got, err)
 	}
 }
+
+func TestNudgeCursorsRoundTripBesideTheLog(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events", "log.jsonl")
+	c := eventlog.NewNudgeCursors(path)
+	got, err := c.Load(context.Background())
+	if err != nil || len(got) != 0 {
+		t.Fatalf("no file: got %v, %v", got, err)
+	}
+	if err := c.Save(context.Background(), map[string]uint64{"mayor": 12, "deputy": 7}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(path), "nudge.json")); err != nil {
+		t.Fatalf("the cursors are not in nudge.json beside the log: %v", err)
+	}
+	got, err = eventlog.NewNudgeCursors(path).Load(context.Background())
+	if err != nil || got["mayor"] != 12 || got["deputy"] != 7 {
+		t.Fatalf("got %v, %v", got, err)
+	}
+}

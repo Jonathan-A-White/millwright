@@ -117,7 +117,8 @@ type EventShipper interface {
 //
 // With a Shipper, every pass ends by calling it, whether or not the beads'
 // head moved: it sends the events written since its last batch, and retries
-// the batches waiting for the chain (EventShip).
+// the batches waiting for the chain (EventShip). With a Nudger it then calls
+// that, to tell the seats of the events they subscribed to (EventNudge).
 type EventFollow struct {
 	Head    BeadsHead
 	Feed    BeadFeed
@@ -127,6 +128,9 @@ type EventFollow struct {
 	Publish func(ctx context.Context) error
 	// Shipper, when set, is called at the end of each pass.
 	Shipper EventShipper
+	// Nudger, when set, is called at the end of each pass, after the
+	// Shipper: it tells the seats of their events.
+	Nudger EventNudger
 	// Aside publishes in a goroutine of its own, one publish at a time and
 	// the newest head next, so a view that takes longer than a pass (25 s on
 	// the Laptop on 2026-10-01) never holds up the events. Without it each
@@ -247,6 +251,15 @@ func (f EventFollow) Run(ctx context.Context) error {
 				}
 			} else {
 				quiet("sending events")
+			}
+		}
+		if f.Nudger != nil && f.Log != nil && ctx.Err() == nil {
+			if err := f.Nudger.Nudge(ctx); err != nil {
+				if ctx.Err() == nil {
+					say("telling the seats", err)
+				}
+			} else {
+				quiet("telling the seats")
 			}
 		}
 		if sleep(ctx, every) != nil {
