@@ -8,6 +8,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
@@ -123,6 +124,9 @@ func newTalkWaitCmd() *cobra.Command {
 			"It also ends at a new postern message for the Mayor's key, one past the postern inbox's cursor\n" +
 			"(which it only reads), printing 'new postern message' with each one's channel, txid and first\n" +
 			"line; a message already read does not wake it, and a Governor turn that arrives with one wins.\n\n" +
+			"A handover of the Mayor (mw seat handover) ends it at once, in the old Mayor's window, saying 'handed over\n" +
+			"at N': the old Mayor answers nothing after event N of the log, so a turn the Governor sent after\n" +
+			"it is left unprinted and the cursor unmoved, and the successor's wait hears it.\n\n" +
 			"It also ends the instant the Governor's call record arrives, printing a request as 'call <txid> at\n" +
 			"<time>: <text>' and a later on a ring as 'later <ring txid>'; answer a request with mw talk call.\n\n" +
 			"The first run starts at the index's head: a turn from before it ever ran is not waited for. A\n" +
@@ -149,6 +153,10 @@ func newTalkWaitCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			logPath, err := config.EventsLogPath()
+			if err != nil {
+				return err
+			}
 			_, err = application.TalkWait{
 				Stream:      backend,
 				Postern:     backend,
@@ -157,6 +165,8 @@ func newTalkWaitCmd() *cobra.Command {
 				Memory:      gateway,
 				Mailbox:     gateway,
 				GovernorKey: governorKey,
+				Log:         eventlog.New(logPath),
+				Self:        thisWindowName(cmd.Context()),
 				Limit:       limit,
 				MinBackoff:  minBackoff,
 				MaxBackoff:  maxBackoff,

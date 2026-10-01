@@ -35,6 +35,7 @@ Every field is always present in the JSON, an empty string where unset.
 | `hands_ran` | none | the hitl bead | the step's id |
 | `mail` | none | the mail bead | its box: the seat it is sent to |
 | `job` | job | empty, or the bead the job worked on | the outcome, on `done` or `failed` |
+| `handover` | none | empty | `<seat> to <successor window> at <N>`: the old session answers nothing past event N |
 
 A `bead_changed` event whose from and to are the same state is a change that
 left the status alone (a comment, an edited field). Every other event of a
@@ -63,6 +64,14 @@ for the deputy and the millhand, `spring = true`. `mw events wait --for <seat>` 
 the log until one comes; the follower types a nudge into the seat's idle pane, or runs
 its up command when its window is down and it is marked spring. A `mail` event is the
 seat's only when its detail, the box, is the seat.
+
+A seat is handed over on the log (mw-jrx0s.11): the successor boots while the old
+session still answers, and `mw seat handover --at <N>` (default: the log's head) emits a
+`handover` event and writes the successor's name and N into the seat's acting file. A
+`mw events wait --for <seat>` or `mw talk wait` that began before the event, in any
+window but the successor's, ends at once on it with "handed over at N"; the successor's
+`mw events wait` ends on it with "you hold the seat from N", and one begun `--since N` or
+later ignores it. The old session reads and answers up to N, the successor from N on.
 
 ## The machines
 

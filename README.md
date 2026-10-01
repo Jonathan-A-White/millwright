@@ -1087,6 +1087,17 @@ listed. `contrib/mail-wait` is retired: it prints `retired: mw events wait` and 
 `--for $MW_MAIL_MAILBOX` and `--limit $MW_MAIL_WAIT_LIMIT`s. While the follower is active
 the mail-notify tick no longer types the mail line for a seat whose file names mail.
 
+A Mayor handover is a cursor on this log (mw-jrx0s.11): the successor boots, with
+`bin/respawn-mayor`, while the old Mayor still answers; the old Mayor then runs `mw seat
+handover [--at N] [--to <window>]` last. It emits a `handover` event, marks event N (default:
+the log's head) as the last the old Mayor answers, and writes the successor's window name and N
+into `.mayor-acting`, which the reaper on the old window waits for. From then on `mw events wait
+--for mayor` and `mw talk wait` in the old window end at once, saying `handed over at N`, and
+a Talk turn that arrives after it is left unprinted and the talk cursor unmoved, for the
+successor to read. The successor's own `mw events wait` ends on the handover, saying it holds
+the seat from N, and a wait begun `--since N` ignores it. A wait tells which window it is in
+by `--as <window name>`, by default the tmux window it runs in; with none it is the old one.
+
 The follower is the user service `contrib/systemd/mw-view-follow.service`
 (the name kept from when it only republished the view; a daemon, so no timer;
 `Restart=on-failure`, `WantedBy=default.target`), which reads

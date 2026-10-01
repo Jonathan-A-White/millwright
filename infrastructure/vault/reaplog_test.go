@@ -42,3 +42,25 @@ func TestNoteWritesOneLineAndOnlyInsideTheVault(t *testing.T) {
 		t.Errorf("expected a refused note to leave the vault as it was, got %v", entries)
 	}
 }
+
+func TestWriteActingReplacesTheActingFileWholeAndOnlyInsideTheVault(t *testing.T) {
+	dir := t.TempDir()
+	v := New(dir)
+	ctx := context.Background()
+
+	for _, text := range []string{"Mayor after handoff 159, a long first line\n", "Mayor mayor-160 (handed over at event 7)\n"} {
+		if err := v.WriteActing(ctx, "mayor", text); err != nil {
+			t.Fatalf("writing %q: %v", text, err)
+		}
+		got, err := os.ReadFile(filepath.Join(dir, ".mayor-acting"))
+		if err != nil || string(got) != text {
+			t.Fatalf("the acting file holds %q, %v; want %q", got, err, text)
+		}
+	}
+	if left, _ := filepath.Glob(filepath.Join(dir, ".mayor-acting.*")); len(left) != 0 {
+		t.Errorf("a temporary file was left behind: %v", left)
+	}
+	if err := v.WriteActing(ctx, "../mayor", "x"); err == nil {
+		t.Errorf("expected a seat that reaches outside the vault to be refused")
+	}
+}

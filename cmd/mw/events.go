@@ -265,7 +265,7 @@ func springSeat(ctx context.Context, seat, reason string) error {
 }
 
 func newEventsWaitCmd() *cobra.Command {
-	var seat string
+	var seat, window string
 	var kinds []string
 	var since uint64
 	var limit time.Duration
@@ -285,7 +285,11 @@ func newEventsWaitCmd() *cobra.Command {
 			"the seat in its pane, and to spring it:\n\n" +
 			"  kinds = [\"mail\", \"landing\", \"card_answered\", \"message\"]\n" +
 			"  spring = true   # deputy and millhand only: bring the seat up when its window is down\n\n" +
-			"A kind that is none of these is refused, with the kinds listed.",
+			"A kind that is none of these is refused, with the kinds listed.\n\n" +
+			"A handover of the seat (mw seat handover) ends the wait whatever the kinds. In the old session's\n" +
+			"window it prints the events up to N, then 'handed over at N: answer nothing after event N'; in the\n" +
+			"successor's window, whose name is --as (default: this tmux window's), 'You hold the seat from event N'.\n" +
+			"A wait begun --since N or later ignores a handover that marked N.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if seat == "" {
@@ -315,7 +319,10 @@ func newEventsWaitCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			wait := application.EventWait{Log: eventlog.New(path), Subscription: sub, Limit: limit, Out: cmd.OutOrStdout()}
+			wait := application.EventWait{Log: eventlog.New(path), Subscription: sub, Self: window, Limit: limit, Out: cmd.OutOrStdout()}
+			if window == "" {
+				wait.Self = thisWindowName(cmd.Context())
+			}
 			if cmd.Flags().Changed("since") {
 				wait.Since = &since
 			}
@@ -326,6 +333,7 @@ func newEventsWaitCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&seat, "for", "", "the seat that waits")
+	cmd.Flags().StringVar(&window, "as", "", "the name of the window this wait runs in, to tell a handover to it from one away from it (default: this tmux window's)")
 	cmd.Flags().StringSliceVar(&kinds, "kinds", nil, "the kinds that end the wait, comma separated (default: the seat's subscribe.toml)")
 	cmd.Flags().Uint64Var(&since, "since", 0, "count the events after this seq, so those already in the log end the wait at once")
 	cmd.Flags().DurationVar(&limit, "limit", application.DefaultEventWaitLimit, "how long to wait before saying nothing came")

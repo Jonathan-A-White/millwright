@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/domain/events"
 )
 
 // talkRecordClass is the clear class of a talk turn, postern's
@@ -111,6 +112,20 @@ type TalkWait struct {
 	// read. Nil reports none.
 	Mailbox Mailbox
 
+	// Log, when set, is the home's event log, which the wait looks at once a
+	// second, spending no token, for the Mayor's handover (mw-jrx0s.11). A
+	// handover to another window than Self ends the wait at once with
+	// "handed over at N": the old Mayor answers nothing after N, so a turn
+	// the wait had not yet handed on is left unprinted and the talk cursor
+	// unmoved, for the successor to read from. Nil is no look.
+	Log EventLog
+	// Self is the name of the window the wait runs in, empty when it is not
+	// known: a wait that does not know its window is the old Mayor's.
+	Self string
+	// HandoverEvery is the wait between two looks at the log; zero is
+	// DefaultEventWaitEvery.
+	HandoverEvery time.Duration
+
 	// GovernorKey is the Governor's compressed public key, hex — config
 	// postern_governor_key. Only a verified record from it ends the wait.
 	GovernorKey string
@@ -142,6 +157,9 @@ type TalkWaitReport struct {
 	// IndexToPrint is the time from the event that told the wait of the turn
 	// to the moment it printed it.
 	IndexToPrint time.Duration
+	// HandedOver is the handover that ended the wait, nil when it ended on
+	// anything else.
+	HandedOver *events.Handover
 	// Mail is the Deputy's new mail to the Mayor.
 	Mail []Message
 	// Postern is the new postern messages for the Mayor's key the wait ended
@@ -172,12 +190,25 @@ func (w TalkWait) Run(ctx context.Context) (TalkWaitReport, error) {
 	started := w.now()
 	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
+	ctx, stop := context.WithCancelCause(ctx)
+	defer stop(nil)
+
+	watch := HandoverWatch{Log: w.Log, Seat: MayorSeat, Self: w.Self}
+	var logStart uint64
+	if w.Log != nil {
+		head, err := w.Log.Head(ctx)
+		if err != nil {
+			return TalkWaitReport{}, err
+		}
+		logStart = head
+		go watchHandover(ctx, watch, head, w.HandoverEvery, stop)
+	}
 
 	cursor, known, err := w.readCursor(ctx)
 	if err != nil {
 		return TalkWaitReport{}, err
 	}
-	run := &talkWaitRun{TalkWait: w, ctx: ctx, cursor: cursor, known: known, saved: -1}
+	run := &talkWaitRun{TalkWait: w, ctx: ctx, cursor: cursor, known: known, saved: -1, watch: watch, logStart: logStart}
 	if known {
 		run.saved = cursor
 	}
@@ -189,6 +220,10 @@ func (w TalkWait) Run(ctx context.Context) (TalkWaitReport, error) {
 		case errors.Is(err, errTalkHeard):
 			return run.finish(ctx)
 		case ctx.Err() != nil:
+			var handed *talkHandedOver
+			if errors.As(context.Cause(ctx), &handed) {
+				return run.handedOver(handed.h), nil
+			}
 			if err := run.save(context.WithoutCancel(ctx)); err != nil {
 				return TalkWaitReport{}, err
 			}
@@ -213,11 +248,51 @@ func (w TalkWait) Run(ctx context.Context) (TalkWaitReport, error) {
 	}
 }
 
+// talkHandedOver is why a wait's context was ended: the seat was handed over.
+type talkHandedOver struct{ h events.Handover }
+
+func (e *talkHandedOver) Error() string { return HandedOverLine(e.h) }
+
+// watchHandover looks at the log every `every` for a handover that ends this
+// window's session, and ends ctx with it as the cause when it finds one. It
+// reads the head only, until the head has moved.
+func watchHandover(ctx context.Context, watch HandoverWatch, since uint64, every time.Duration, stop context.CancelCauseFunc) {
+	if every <= 0 {
+		every = DefaultEventWaitEvery
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(every):
+		}
+		head, err := watch.Log.Head(ctx)
+		if err != nil || head <= since {
+			continue
+		}
+		evs, err := watch.Log.Since(ctx, since)
+		if err != nil {
+			continue
+		}
+		if len(evs) > 0 {
+			since = evs[len(evs)-1].Seq
+		}
+		if _, h, ok := watch.Ends(evs); ok {
+			stop(&talkHandedOver{h})
+			return
+		}
+	}
+}
+
 // talkWaitRun is what one Run carries from stream to stream.
 type talkWaitRun struct {
 	TalkWait
-	ctx    context.Context
-	cursor int64
+	// watch and logStart are the look at the log for a handover, and the
+	// head it began at.
+	watch    HandoverWatch
+	logStart uint64
+	ctx      context.Context
+	cursor   int64
 	// known is whether the cursor has ever been set, here or on an earlier
 	// run; a first run takes the stream's head as its cursor.
 	known bool
@@ -432,6 +507,13 @@ func (r *talkWaitRun) governorsCall(record PosternRecord, privKey string) (*Call
 // finish prints the turn or the call, if there is one, then the new postern messages and the
 // Deputy's mail, and saves the cursor.
 func (r *talkWaitRun) finish(ctx context.Context) (TalkWaitReport, error) {
+	// A turn the Governor sent after the handover is the successor's, even
+	// when the look at the log has not come round to it yet.
+	if r.Log != nil {
+		if h, ok, err := r.watch.Since(context.WithoutCancel(ctx), r.logStart); err == nil && ok {
+			return r.handedOver(h), nil
+		}
+	}
 	report := TalkWaitReport{Turn: r.turn, Call: r.call, CallTxid: r.callTxid, Postern: r.posts}
 	if r.call != nil {
 		if r.call.Role == CallRoleLater {
@@ -480,6 +562,13 @@ func (r *talkWaitRun) finish(ctx context.Context) (TalkWaitReport, error) {
 	}
 	report.Mail = mail
 	return report, nil
+}
+
+// handedOver is how a wait ends on the seat's handover: it says so, and moves
+// no cursor, so that what the Governor sent past N is read by the successor.
+func (r *talkWaitRun) handedOver(h events.Handover) TalkWaitReport {
+	r.printf(r.Out, "%s\n", HandedOverLine(h))
+	return TalkWaitReport{HandedOver: &h}
 }
 
 // postFirstLine is the first line of text that has any words, "(no text)" when
