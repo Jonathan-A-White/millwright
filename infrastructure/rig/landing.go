@@ -443,3 +443,21 @@ func shortCommit(commit string) string {
 	}
 	return commit
 }
+
+// Tip implements application.FactoryCheckout: the commit branch is at on the
+// remote, as the last fetch saw it.
+func (w *Worktrees) Tip(ctx context.Context, rigDir, remote, branch string) (string, error) {
+	out, err := w.git(ctx, rigDir, "rev-parse", "--verify", "--quiet", application.StartPoint(remote, branch)+"^{commit}")
+	return strings.TrimSpace(out), err
+}
+
+// Head implements application.FactoryCheckout: the commit the checkout has
+// checked out.
+func (w *Worktrees) Head(ctx context.Context, rigDir string) (string, error) {
+	out, err := w.git(ctx, rigDir, "rev-parse", "HEAD")
+	return strings.TrimSpace(out), err
+}
+
+// Worktrees satisfies the port a host's own checkout of the factory rig is
+// looked at through.
+var _ application.FactoryCheckout = (*Worktrees)(nil)
