@@ -54,6 +54,7 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" has a postern question open since two hours ago$`, c.theViewsBeadHasAQuestionOpen)
 
 	ctx.Given(`^the view's bead "([^"]*)" has the hands step "([^"]*)" on "([^"]*)" as "([^"]*)" running "([^"]*)"$`, c.theViewsBeadHasTheHandsStep)
+	ctx.Given(`^the view's hands step "([^"]*)" on "([^"]*)" is superseded by "([^"]*)"$`, c.theViewsHandsStepIsSupersededBy)
 	ctx.Given(`^the view's hands step "([^"]*)" on "([^"]*)" ran with exit (\d+)$`, c.theViewsHandsStepRan)
 	ctx.Then(`^the view's hands need on "([^"]*)" carries the step "([^"]*)" with its sha256, run with exit (\d+)$`, c.theViewsHandsNeedCarriesTheStep)
 	ctx.Given(`^the view's held story "([^"]*)" under "([^"]*)" was filed (\d+) days? ago$`, c.theViewsHeldStoryWasFiled)
@@ -628,4 +629,8 @@ func (c *posternViewContext) theViewsHandsNeedIsReady(bead string) error {
 		return fmt.Errorf("expected the hands need on %s ready, got not_ready %v waiting on %q", bead, n.NotReady, n.WaitingOn)
 	}
 	return nil
+}
+
+func (c *posternViewContext) theViewsHandsStepIsSupersededBy(id, bead, newer string) error {
+	return c.tracker.SetNote(context.Background(), application.HandsSupersededKey(bead, id), newer)
 }

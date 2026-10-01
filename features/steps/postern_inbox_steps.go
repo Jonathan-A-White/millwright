@@ -155,6 +155,7 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^bead "([^"]*)" has the hands step "([^"]*)" on "([^"]*)" as "([^"]*)" running "([^"]*)"$`, c.beadHasTheHandsStep)
 	ctx.Given(`^the Governor approves the hands step "([^"]*)" on "([^"]*)" with txid "([^"]*)"$`, c.theGovernorApprovesTheHandsStep)
 	ctx.Given(`^the Governor approves the hands step "([^"]*)" on "([^"]*)" as it read before it changed, with txid "([^"]*)"$`, c.theGovernorApprovesTheHandsStepAsItWas)
+	ctx.Given(`^the hands step "([^"]*)" on "([^"]*)" is superseded by "([^"]*)"$`, c.theHandsStepIsSupersededBy)
 	ctx.Given(`^bead "([^"]*)" waits on the open story "([^"]*)" titled "([^"]*)"$`, c.beadWaitsOnTheOpenStory)
 	ctx.When(`^the blocker "([^"]*)" is closed$`, c.theBlockerIsClosed)
 	ctx.When(`^the Governor approves the hands step "([^"]*)" on "([^"]*)" again, with txid "([^"]*)"$`, c.theGovernorApprovesTheHandsStep)
@@ -1318,4 +1319,8 @@ func (c *posternInboxContext) rememberedThread(txid string, want application.Pos
 		return fmt.Errorf("expected %s to be remembered in %+v, got %+v", txid, want, got)
 	}
 	return nil
+}
+
+func (c *posternInboxContext) theHandsStepIsSupersededBy(id, bead, newer string) error {
+	return c.memory.SetNote(context.Background(), application.HandsSupersededKey(bead, id), newer)
 }

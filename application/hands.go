@@ -19,6 +19,11 @@ func HandsStepsKey(bead string) string { return "hands." + bead }
 // JSON.
 func HandsRanKey(bead, id string) string { return "hands.ran." + bead + "." + id }
 
+// HandsSupersededKey is the note that marks a step as superseded, holding the
+// bead whose newer step took its place: a superseded step cannot be approved to
+// run (mw-gq6.190).
+func HandsSupersededKey(bead, id string) string { return "hands.superseded." + bead + "." + id }
+
 // HandsApprovalKey is the note an approval is marked run under once mw has
 // started its step, holding the txid that carried it: an approval runs once.
 func HandsApprovalKey(approvalID string) string { return "hands.approval." + approvalID }
@@ -226,6 +231,9 @@ func (h HandsAdd) Run(ctx context.Context, req HandsAddRequest) (HandsStepRecord
 		if err := h.Notes.ClearNote(ctx, HandsRanKey(req.Bead, req.Step.ID)); err != nil {
 			return HandsStepRecord{}, fmt.Errorf("mw hands add: forgetting the old step's run: %w", err)
 		}
+		if err := h.Notes.ClearNote(ctx, HandsSupersededKey(req.Bead, req.Step.ID)); err != nil {
+			return HandsStepRecord{}, fmt.Errorf("mw hands add: forgetting that the old step was superseded: %w", err)
+		}
 	}
 	if err := h.Tracker.CommentOnStory(ctx, req.Bead, handsStepComment(req.Step, replaced)); err != nil {
 		return HandsStepRecord{}, fmt.Errorf("mw hands add: commenting the step on %s: %w", req.Bead, err)
@@ -401,6 +409,10 @@ func (l HandsList) Run(ctx context.Context, bead string) ([]HandsStepRecord, err
 	if err != nil {
 		return nil, err
 	}
+	superseded, err := l.Notes.NotesWithPrefix(ctx, "hands.superseded."+bead+".")
+	if err != nil {
+		return nil, err
+	}
 	if l.Out == nil {
 		return steps, nil
 	}
@@ -411,6 +423,8 @@ func (l HandsList) Run(ctx context.Context, bead string) ([]HandsStepRecord, err
 		state := "not run"
 		if r, ok := parseHandsRan(ran[HandsRanKey(bead, step.ID)]); ok {
 			state = fmt.Sprintf("ran %s on %s, exit %d", r.At, r.Host, r.Exit)
+		} else if by := strings.TrimSpace(superseded[HandsSupersededKey(bead, step.ID)]); by != "" {
+			state = "superseded by " + by + " (cannot be approved)"
 		}
 		fmt.Fprintf(l.Out, "%s on %s as %s  sha256 %s  %s\n", step.ID, step.Host, step.As, domain.HandsSHA256(bead, step.HandsStep), state)
 		for _, line := range strings.Split(strings.TrimRight(step.Run, "\n"), "\n") {

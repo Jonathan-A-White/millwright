@@ -118,3 +118,9 @@ Feature: mw hands
     When the Mayor adds the step "linger" to "mw-h.3" on "desktop" as "root" running "loginctl enable-linger jwhite"
     Then adding the step succeeds
     And the push carries the summary "Step ready: mw-h.3"
+
+  Scenario: The list says a step that a newer one took the place of is superseded
+    Given the Mayor added the step "linger" to "mw-h.1" on "desktop" as "root" running "loginctl enable-linger jwhite"
+    And the step "linger" on "mw-h.1" is superseded by "mw-h.9"
+    When the Mayor lists the hands steps of "mw-h.1"
+    Then the list shows "linger" with its sha256 and "superseded by mw-h.9"

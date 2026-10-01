@@ -124,6 +124,16 @@ Feature: mw postern inbox --apply
     And the Governor was told "it waits on Install the unit (mw-blk). Approve it again once that is done." in bead "mw-act.3"'s thread
     And mail "Not run: mw-act.3 echo" was sent to mayor
 
+  Scenario: a step that a newer one took the place of is not run, and he is told which
+    Given bead "mw-act.3" has the hands step "echo" on "desktop" as "user" running "echo done"
+    And the hands step "echo" on "mw-act.3" is superseded by "mw-act.9"
+    And the Governor approves the hands step "echo" on "mw-act.3" with txid "tx-old"
+    When mw postern inbox --apply is run
+    Then the hands step "echo" on "mw-act.3" did not run
+    And bead "mw-act.3"'s last comment starts "NOT RUN step echo (approved by the Governor via postern, txid tx-old): it is superseded by mw-act.9, a newer step that took its place, so it never runs."
+    And the Governor was told "it is superseded by mw-act.9, a newer step that took its place, so it never runs." in bead "mw-act.3"'s thread
+    And mail "Not run: mw-act.3 echo" was sent to mayor
+
   Scenario: the same step runs once the blocker closes and he approves again
     Given bead "mw-act.3" has the hands step "echo" on "desktop" as "user" running "echo done"
     And bead "mw-act.3" waits on the open story "mw-blk" titled "Install the unit"

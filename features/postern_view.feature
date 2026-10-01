@@ -229,6 +229,14 @@ Feature: mw postern view
     Then the view's hands need on "mw-who.2" waits for "factory"
     And the view's hands need on "mw-who.2" is not ready, waiting on "Story mw-who.1"
 
+  Scenario: A hands bead whose only unrun step a newer one took the place of is not his to tap
+    Given the view's epic "mw-who" is live
+    And the view's hitl bead "mw-who.1" under "mw-who" was filed 2 days ago
+    And the view's bead "mw-who.1" has the hands step "swap" on "desktop" as "user" running "echo swap"
+    And the view's hands step "swap" on "mw-who.1" is superseded by "mw-who.9"
+    When the live view is built
+    Then the view's hands need on "mw-who.1" is not ready, waiting on "superseded by mw-who.9"
+
   Scenario: A hands bead with a step and nothing open before it is his
     Given the view's epic "mw-who" is live
     And the view's hitl bead "mw-who.1" under "mw-who" was filed 2 days ago
