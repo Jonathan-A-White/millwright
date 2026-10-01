@@ -120,6 +120,7 @@ type EventShipper interface {
 // the batches waiting for the chain (EventShip). With a Nudger it then calls
 // that, to tell the seats of the events they subscribed to (EventNudge); and
 // with a Springer, that, to run the jobs those events call for (EventSpring).
+// With a Controller it acts, before the Shipper, on the cancel events in the log.
 type EventFollow struct {
 	Head    BeadsHead
 	Feed    BeadFeed
@@ -136,6 +137,10 @@ type EventFollow struct {
 	// Nudger: it starts the jobs the pass's events, or the clock, call for
 	// (EventSpring).
 	Springer EventSpringer
+	// Controller, when set, is called each pass once the beads' events are
+	// written and before anything is sent: it acts on the cancel events in the
+	// log (EventControl), so a hold shows in seconds, not behind a slow send.
+	Controller EventController
 	// Aside publishes in a goroutine of its own, one publish at a time and
 	// the newest head next, so a view that takes longer than a pass (25 s on
 	// the Laptop on 2026-10-01) never holds up the events. Without it each
@@ -248,6 +253,15 @@ func (f EventFollow) Run(ctx context.Context) error {
 			default:
 			}
 			kick <- head
+		}
+		if f.Controller != nil && f.Log != nil && ctx.Err() == nil {
+			if err := f.Controller.Control(ctx); err != nil {
+				if ctx.Err() == nil {
+					say("acting on control events", err)
+				}
+			} else {
+				quiet("acting on control events")
+			}
 		}
 		if f.Shipper != nil && ctx.Err() == nil {
 			if err := f.Shipper.Ship(ctx); err != nil {
