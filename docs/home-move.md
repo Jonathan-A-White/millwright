@@ -100,7 +100,15 @@ Everything here is what was done by hand on 2026-09-28 (`mw-nrcbe`), in this ord
    wait up to 30 s until the server answers a connection (`BEADS_DOLT_SERVER_HOST` on
    `BEADS_DOLT_SERVER_PORT`, `127.0.0.1:3307` when unset). A unit that fails to start, or a
    server that never answers, stops the move here with the ways back. **A host without the
-   unit skips this step** and bootstraps embedded, as before.
+   unit skips this step** and bootstraps embedded, as before. Then make the user bd logs in
+   as: a server on an empty data directory knows only root, so `dolt --host 127.0.0.1 --port
+   <port> --user root --no-tls sql` runs `CREATE USER IF NOT EXISTS '<user>'@'%' IDENTIFIED BY
+   '<password>'` and `GRANT ALL PRIVILEGES ON *.* TO '<user>'@'%' WITH GRANT OPTION` from
+   stdin, with `BEADS_DOLT_SERVER_USER` and `BEADS_DOLT_PASSWORD` (`BEADS_DOLT_SERVER_PASSWORD`
+   when that is not set) as the move's own environment has them. The password is in no
+   argument and no line printed, and is struck out of what dolt says on a failure. A user of
+   root, or none set, skips the step and says so; a failure stops the move before bootstrap,
+   naming the user, with the same ways back.
 5. `bd bootstrap --yes`, which clones `refs/dolt/data` (into the server just started, on a
    host that has one: bootstrap makes no `.beads/dolt` of its own); then `git checkout --
    .beads/config.yaml`, because bootstrap drops that file's trailing newline.
