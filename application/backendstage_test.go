@@ -1,8 +1,12 @@
 package application_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -306,4 +310,230 @@ type failingHands struct{}
 
 func (failingHands) Run(context.Context, application.HandsAddRequest) (application.HandsStepRecord, error) {
 	return application.HandsStepRecord{}, errors.New("the tracker is busy")
+}
+
+// swapSandbox is a live binary and a stage in a temp directory, with a systemctl,
+// curl and sleep on PATH that only record or succeed: the swap step runs for real
+// in sh, and nothing of the host's is reached.
+type swapSandbox struct {
+	cfg     application.BackendRig
+	bin     string
+	logFile string
+}
+
+func aSwapSandbox(t *testing.T) swapSandbox {
+	t.Helper()
+	root := t.TempDir()
+	box := swapSandbox{bin: filepath.Join(root, "fakebin"), logFile: filepath.Join(root, "systemctl.log")}
+	for _, dir := range []string{box.bin, filepath.Join(root, "stage"), filepath.Join(root, "live")} {
+		mustDo(t, os.MkdirAll(dir, 0o755))
+	}
+	for name, body := range map[string]string{
+		"systemctl": "echo \"$@\" >> " + box.logFile,
+		"curl":      "echo answered",
+		"sleep":     "true",
+	} {
+		mustDo(t, os.WriteFile(filepath.Join(box.bin, name), []byte("#!/bin/sh\n"+body+"\n"), 0o755))
+	}
+	box.cfg = application.BackendRig{
+		Stage: filepath.Join(root, "stage"), Live: filepath.Join(root, "live", "postern"),
+		Service: "postern-backend", Health: "http://127.0.0.1:1/api/healthz",
+	}
+	return box
+}
+
+// stageBinary leaves a staged binary named for short, built at when.
+func (b swapSandbox) stageBinary(t *testing.T, short string, when time.Time) string {
+	t.Helper()
+	path := filepath.Join(b.cfg.Stage, "postern-"+short)
+	mustDo(t, os.WriteFile(path, []byte("binary "+short+"\n"), 0o755))
+	mustDo(t, os.Chtimes(path, when, when))
+	return path
+}
+
+func (b swapSandbox) goLive(t *testing.T, short string) {
+	t.Helper()
+	mustDo(t, os.WriteFile(b.cfg.Live, []byte("binary "+short+"\n"), 0o755))
+}
+
+// tap runs the swap step of short as the runner does, in sh.
+func (b swapSandbox) tap(t *testing.T, short string) (string, error) {
+	t.Helper()
+	step := application.BackendSwap(b.cfg, "laptop", short, filepath.Join(b.cfg.Stage, "postern-"+short))
+	cmd := exec.Command("sh", "-c", step.Run)
+	cmd.Env = append(os.Environ(), "PATH="+b.bin+":"+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func (b swapSandbox) restarts(t *testing.T) int {
+	t.Helper()
+	raw, err := os.ReadFile(b.logFile)
+	if os.IsNotExist(err) {
+		return 0
+	}
+	mustDo(t, err)
+	return strings.Count(string(raw), "\n")
+}
+
+func (b swapSandbox) liveIs(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile(b.cfg.Live)
+	mustDo(t, err)
+	return strings.TrimSpace(string(raw))
+}
+
+// A swap step whose binary was built before the one that is live installs nothing:
+// it says which is newer and leaves the live binary and the service alone
+// (mw-gq6.190: the two-day-old backend that ran two minutes after the new one).
+func TestASwapStepWithAnOlderBinaryThanTheLiveOneChangesNothing(t *testing.T) {
+	box := aSwapSandbox(t)
+	box.stageBinary(t, "419ee98", time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC))
+	box.stageBinary(t, "b563092", time.Date(2026, 10, 1, 13, 0, 0, 0, time.UTC))
+	box.goLive(t, "b563092")
+
+	out, err := box.tap(t, "419ee98")
+
+	if err != nil {
+		t.Fatalf("expected the stale tap to end cleanly, got %v: %s", err, out)
+	}
+	if !strings.Contains(out, "live backend b563092 is newer than 419ee98: nothing was changed") {
+		t.Fatalf("expected the step to say the live backend is newer, got %q", out)
+	}
+	if got := box.liveIs(t); got != "binary b563092" {
+		t.Fatalf("expected the live binary left alone, got %q", got)
+	}
+	if n := box.restarts(t); n != 0 {
+		t.Fatalf("expected no restart, got %d", n)
+	}
+	if _, err := os.Stat(box.cfg.Live + ".prev-before-419ee98"); err == nil {
+		t.Fatal("expected no backup taken by a step that changed nothing")
+	}
+}
+
+// The same step with nothing newer live is still the swap: the guard only holds
+// back a step that would go backwards.
+func TestASwapStepWithANewerBinaryThanTheLiveOneStillSwaps(t *testing.T) {
+	box := aSwapSandbox(t)
+	box.stageBinary(t, "419ee98", time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC))
+	box.stageBinary(t, "b563092", time.Date(2026, 10, 1, 13, 0, 0, 0, time.UTC))
+	box.goLive(t, "419ee98")
+
+	out, err := box.tap(t, "b563092")
+
+	if err != nil || !strings.Contains(out, "backend b563092 is live and answering") {
+		t.Fatalf("expected the swap to run, got %v: %s", err, out)
+	}
+	if got := box.liveIs(t); got != "binary b563092" {
+		t.Fatalf("expected the staged binary installed, got %q", got)
+	}
+	if n := box.restarts(t); n != 1 {
+		t.Fatalf("expected one restart, got %d", n)
+	}
+}
+
+// A live binary nobody staged (built by hand) or a stage with nothing newer is not
+// a reason to refuse.
+func TestASwapStepIsNotHeldBackByAStagedBinaryThatIsNotLive(t *testing.T) {
+	box := aSwapSandbox(t)
+	box.stageBinary(t, "aaaaaaa", time.Date(2026, 10, 1, 14, 0, 0, 0, time.UTC))
+	box.stageBinary(t, "419ee98", time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC))
+	box.goLive(t, "something else")
+
+	out, err := box.tap(t, "419ee98")
+
+	if err != nil || !strings.Contains(out, "backend 419ee98 is live and answering") {
+		t.Fatalf("expected the swap to run, got %v: %s", err, out)
+	}
+}
+
+func swapLanding(story, commit string) application.BackendLanding {
+	return application.BackendLanding{Rig: "postern", Story: story, Title: "Story " + story, Epic: "mw-j0f2d", Commit: commit}
+}
+
+// beadOfSwap is the bead whose hands step is backend-<short>.
+func beadOfSwap(t *testing.T, tracker *apptest.FakeTracker, short string) string {
+	t.Helper()
+	notes, err := tracker.NotesWithPrefix(context.Background(), "hands.")
+	mustDo(t, err)
+	for key, raw := range notes {
+		if strings.HasPrefix(key, "hands.ran.") || strings.HasPrefix(key, "hands.superseded.") {
+			continue
+		}
+		if strings.Contains(raw, `"id":"backend-`+short+`"`) {
+			return strings.TrimPrefix(key, "hands.")
+		}
+	}
+	t.Fatalf("no bead holds the step backend-%s", short)
+	return ""
+}
+
+func supersededBy(t *testing.T, tracker *apptest.FakeTracker, bead, step string) string {
+	t.Helper()
+	got, err := tracker.Note(context.Background(), application.HandsSupersededKey(bead, step))
+	mustDo(t, err)
+	return strings.TrimSpace(got)
+}
+
+// Writing a newer swap step of a rig marks the swap steps written before it, that
+// have not run, as superseded by the bead that holds the new one: they can no
+// longer be tapped, and mw hands list says so.
+func TestANewerSwapStepSupersedesTheOlderOnesOfTheSameRig(t *testing.T) {
+	r := aBackendRig(t, "laptop", "laptop")
+	r.tracker.AddStory("mw-j0f2d", domain.Story{ID: "mw-j0f2d.29", Title: "Another story"})
+	ctx := context.Background()
+
+	r.stage.Landed(ctx, swapLanding("mw-j0f2d.28", "419ee98aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+	older := beadOfSwap(t, r.tracker, "419ee98")
+	if got := supersededBy(t, r.tracker, older, "backend-419ee98"); got != "" {
+		t.Fatalf("expected the first swap superseded by nothing, got %q", got)
+	}
+
+	r.stage.Landed(ctx, swapLanding("mw-j0f2d.29", "b563092bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
+	newer := beadOfSwap(t, r.tracker, "b563092")
+
+	if got := supersededBy(t, r.tracker, older, "backend-419ee98"); got != newer {
+		t.Fatalf("expected the older swap superseded by %s, got %q", newer, got)
+	}
+	if got := supersededBy(t, r.tracker, newer, "backend-b563092"); got != "" {
+		t.Fatalf("expected the newer swap not superseded, got %q", got)
+	}
+
+	var out bytes.Buffer
+	_, err := application.HandsList{Notes: r.tracker, Out: &out}.Run(ctx, older)
+	mustDo(t, err)
+	if !strings.Contains(out.String(), "superseded by "+newer) {
+		t.Fatalf("expected the list to say superseded by %s, got:\n%s", newer, out.String())
+	}
+	out.Reset()
+	_, err = application.HandsList{Notes: r.tracker, Out: &out}.Run(ctx, newer)
+	mustDo(t, err)
+	if strings.Contains(out.String(), "superseded") {
+		t.Fatalf("expected the newer step's list not to say superseded, got:\n%s", out.String())
+	}
+}
+
+// A swap step that already ran clean is history, and another rig's, or any other
+// hands step, is not a swap of this one: none of them is superseded.
+func TestANewerSwapStepLeavesRanAndForeignStepsAlone(t *testing.T) {
+	r := aBackendRig(t, "laptop", "laptop")
+	r.tracker.AddStory("mw-j0f2d", domain.Story{ID: "mw-j0f2d.29", Title: "Another story"})
+	ctx := context.Background()
+
+	r.stage.Landed(ctx, swapLanding("mw-j0f2d.28", "419ee98aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+	ranBead := beadOfSwap(t, r.tracker, "419ee98")
+	mustDo(t, r.tracker.SetNote(ctx, application.HandsRanKey(ranBead, "backend-419ee98"), `{"at":"2026-09-30T12:03:00Z","exit":0,"host":"laptop"}`))
+
+	foreign := application.BackendSwap(application.BackendRig{Live: "/home/j/.local/bin/other", Stage: "/s", Service: "other", Health: "http://x"}, "laptop", "1111111", "/s/other-1111111")
+	_, err := application.HandsAdd{Tracker: r.tracker, Notes: r.tracker, Now: func() time.Time { return handsNow }}.Run(ctx, application.HandsAddRequest{Bead: "mw-j0f2d.28", Step: foreign})
+	mustDo(t, err)
+
+	r.stage.Landed(ctx, swapLanding("mw-j0f2d.29", "b563092bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
+
+	if got := supersededBy(t, r.tracker, ranBead, "backend-419ee98"); got != "" {
+		t.Errorf("expected a swap that already ran left alone, got superseded by %q", got)
+	}
+	if got := supersededBy(t, r.tracker, "mw-j0f2d.28", "backend-1111111"); got != "" {
+		t.Errorf("expected another rig's swap left alone, got superseded by %q", got)
+	}
 }

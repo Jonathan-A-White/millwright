@@ -284,7 +284,50 @@ func (b BackendStage) stage(ctx context.Context, l *BackendLanding, home string)
 	if _, err := b.Hands.Run(ctx, HandsAddRequest{Bead: l.Bead, Step: step, Replace: true}); err != nil {
 		return "", fmt.Errorf("writing the swap on %s: %w", l.Bead, err)
 	}
+	if err := b.supersedeOlder(ctx, cfg, l.Bead, step.ID); err != nil {
+		return "", fmt.Errorf("superseding the older swaps of %s: %w", l.Rig, err)
+	}
 	return fmt.Sprintf("backend: %s at %s staged at %s; the swap is a hands step on %s, for the Governor to approve", l.Rig, short, out, l.Bead), nil
+}
+
+// supersedeOlder marks every other swap step of cfg's live binary that has not run
+// clean as superseded by bead, now that bead holds a newer one: a swap step that
+// ran after a newer one put the older backend back on the home (mw-gq6.190). A
+// swap is a step named backend-<commit> whose text swaps cfg.Live; a step of any
+// other kind or rig is left alone.
+func (b BackendStage) supersedeOlder(ctx context.Context, cfg BackendRig, bead, id string) error {
+	notes, err := b.Notes.NotesWithPrefix(ctx, "hands.")
+	if err != nil {
+		return err
+	}
+	keys := make([]string, 0, len(notes))
+	for key := range notes {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	swaps := "l=" + shQuote(cfg.Live) + ";"
+	for _, key := range keys {
+		holder := strings.TrimPrefix(key, "hands.")
+		if strings.HasPrefix(holder, "ran.") || strings.HasPrefix(holder, "approval.") || strings.HasPrefix(holder, "superseded.") {
+			continue
+		}
+		steps, err := parseHandsSteps(notes[key])
+		if err != nil {
+			continue
+		}
+		for _, step := range steps {
+			if !strings.HasPrefix(step.ID, "backend-") || !strings.Contains(step.Run, swaps) || (holder == bead && step.ID == id) {
+				continue
+			}
+			if ran, ok := parseHandsRan(notes[HandsRanKey(holder, step.ID)]); ok && ran.Exit == 0 {
+				continue
+			}
+			if err := b.Notes.SetNote(ctx, HandsSupersededKey(holder, step.ID), bead); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func backendBeadText(l BackendLanding, cfg BackendRig, short, out string) string {
@@ -307,12 +350,13 @@ func BackendSwap(cfg BackendRig, host, short, out string) domain.HandsStep {
 		check = " && " + strings.TrimSpace(cfg.Check)
 	}
 	run := fmt.Sprintf(`set -e; l=%s; n=%s; b=%s; [ -x "$n" ]; `+
+		`for f in %s/"$(basename "$l")"-*; do if [ -f "$f" ] && [ "$f" -nt "$n" ] && cmp -s "$f" "$l"; then echo live backend "${f##*-}" is newer than %s: nothing was changed by this tap; exit 0; fi; done; `+
 		`if cmp -s "$l" "$n"; then echo backend %s is already live: nothing was changed by this tap; exit 0; fi; `+
 		`[ -e "$b" ] || cp -p "$l" "$b"; install -m 755 "$n" "$l"; systemctl --user restart %s; sleep 8; ok=0; `+
 		`for i in 1 2 3 4; do if curl -fsS -m 20 %s%s; then ok=1; break; fi; echo try $i failed, waiting 15 s; sleep 15; done; `+
 		`if [ $ok = 1 ]; then echo backend %s is live and answering; `+
 		`else echo FAILED after 4 tries: putting the old backend back; install -m 755 "$b" "$l"; systemctl --user restart %s; exit 1; fi`,
-		live, shQuote(out), shQuote(cfg.Live+".prev-before-"+short), short, service, shQuote(cfg.Health), check, short, service)
+		live, shQuote(out), shQuote(cfg.Live+".prev-before-"+short), shQuote(cfg.Stage), short, short, service, shQuote(cfg.Health), check, short, service)
 	wayBack := fmt.Sprintf("install -m 755 %s %s; systemctl --user restart %s", shQuote(cfg.Live+".prev-before-"+short), live, service)
 	return domain.HandsStep{ID: "backend-" + short, Host: host, As: domain.HandsAsUser, Run: run, WayBack: wayBack}
 }
