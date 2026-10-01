@@ -2068,6 +2068,30 @@ without a licence (postern's `docs/protocol.md` section 20), but reading the
 records behind an event needs a cockpit licence on it. See
 `features/talk_wait.feature`.
 
+## Answering the Governor in a talk
+
+```sh
+bin/mw talk say "Two stories landed." --talk talk-7 --turn 3
+bin/mw talk say "One moment." --talk talk-7 --turn 3 --holding
+bin/mw talk say "Goodbye." --talk talk-7 --turn 4 --end
+```
+
+`mw talk say` encrypts the words to the Governor as postern's `docs/protocol.md`
+section 20 turn plaintext (role `answer`, `holding` or `end`, with the `--talk`
+and `--turn` of the Governor's turn it answers, as `mw talk wait` printed them)
+and delivers the record straight to the backend, whatever `postern_channel`
+says. The record's class is `talk` and it carries no summary, so no word of it
+is pushed or logged. It touches no bead and no note, and prints the txid and the
+milliseconds it took, which the Governor's eight seconds are spent against:
+
+```
+talk talk-7 turn 3 (role answer) sent
+txid direct:3f2a…
+elapsed 41 ms
+```
+
+See `features/talk_say.feature`.
+
 ## Waking the Millhand
 
 ```sh

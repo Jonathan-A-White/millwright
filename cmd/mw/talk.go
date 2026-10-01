@@ -27,6 +27,7 @@ func newTalkCmd() *cobra.Command {
 		Args:  cobra.NoArgs,
 	}
 	talk.AddCommand(newTalkModelCmd())
+	talk.AddCommand(newTalkSayCmd())
 	talk.AddCommand(newTalkWaitCmd())
 	return talk
 }
@@ -192,5 +193,56 @@ func newTalkWaitCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&limit, "limit", talkWaitLimit(), "how long to wait for a turn before ending, saying so")
 	cmd.Flags().DurationVar(&minBackoff, "min-backoff", application.DefaultTalkWaitMinBackoff, "the first pause before opening a dropped stream again")
 	cmd.Flags().DurationVar(&maxBackoff, "max-backoff", application.DefaultTalkWaitMaxBackoff, "the longest pause before opening a dropped stream again")
+	return cmd
+}
+
+// newTalkSayCmd builds `mw talk say`: the Mayor's answer, encrypted to the
+// Governor and delivered direct.
+func newTalkSayCmd() *cobra.Command {
+	var talkID string
+	var turn int
+	var holding, end bool
+	cmd := &cobra.Command{
+		Use:   "say <text> --talk <id> --turn <n> [--holding|--end]",
+		Short: "Answer the Governor in a talk",
+		Long: "say encrypts <text> to the Governor as postern's docs/protocol.md section 20 turn plaintext and\n" +
+			"hands the record straight to the postern backend (section 9), printing the txid and the\n" +
+			"milliseconds it took. The record's class is talk and it carries no summary: no word of the\n" +
+			"answer is ever pushed, handed to a hook or logged. It uses the direct channel whatever\n" +
+			"postern_channel says, and touches no bead and no note, so that it is as quick as it can be.\n\n" +
+			"--talk and --turn name the Governor's turn it answers, as mw talk wait printed them. The role is\n" +
+			"answer; --holding makes it the short answer sent while the real one is still coming, and --end\n" +
+			"the end of the talk. It refuses when postern_governor_key is not set.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			keys, err := posternKeys()
+			if err != nil {
+				return err
+			}
+			governorKey, err := config.PosternGovernorKey()
+			if err != nil {
+				return err
+			}
+			backend, err := posternBackend(keys)
+			if err != nil {
+				return err
+			}
+			_, err = application.TalkSay{
+				Postern:     backend,
+				Cipher:      posternCipher(keys),
+				Keys:        keys,
+				GovernorKey: governorKey,
+				Now:         posternClock,
+				Out:         cmd.OutOrStdout(),
+			}.Run(cmd.Context(), application.TalkSayRequest{
+				Text: args[0], TalkID: talkID, Turn: turn, Holding: holding, End: end,
+			})
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&talkID, "talk", "", "the id of the talk, as mw talk wait printed it")
+	cmd.Flags().IntVar(&turn, "turn", 0, "the number of the Governor's turn this answers")
+	cmd.Flags().BoolVar(&holding, "holding", false, "send a short holding answer; the real answer follows")
+	cmd.Flags().BoolVar(&end, "end", false, "send the end of the talk")
 	return cmd
 }
