@@ -19,6 +19,11 @@ Feature: mw talk say
     And the Governor decrypts the talk record's plaintext to talk "talk-7" turn 3 role "answer" saying "Two stories landed."
     And it prints the txid and the elapsed milliseconds
 
+  Scenario: --link carries bead ids in the record and never in the text
+    When mw talk say "Two stories landed." is run with links "mw-x.1" and "mw-x.2" for talk "talk-7" turn 3
+    Then the Governor decrypts the talk record's plaintext to talk "talk-7" turn 3 role "answer" saying "Two stories landed."
+    And the talk record's links are "mw-x.1" and "mw-x.2"
+
   Scenario: --holding sends a holding answer
     When mw talk say "One moment." is run holding for talk "talk-7" turn 3
     Then the Governor decrypts the talk record's plaintext to talk "talk-7" turn 3 role "holding" saying "One moment."

@@ -19,13 +19,15 @@ const (
 // TalkSayRequest is what mw talk say is asked to send: Text, the Mayor's words,
 // as the answer to turn Turn of talk TalkID. Holding makes it the short answer
 // sent while the real one is still coming, End the end of the talk; they are
-// not given together.
+// not given together. Links are bead ids carried in the record's links field,
+// beside the text and never spoken in it.
 type TalkSayRequest struct {
 	Text    string
 	TalkID  string
 	Turn    int
 	Holding bool
 	End     bool
+	Links   []string
 }
 
 // role is the section 20 role the request sends.
@@ -103,7 +105,7 @@ func (s TalkSay) Run(ctx context.Context, req TalkSayRequest) (TalkSayReport, er
 	}
 	var turn TalkTurn
 	turn.Talk.ID, turn.Talk.Turn = req.TalkID, req.Turn
-	turn.Text, turn.Role = req.Text, req.role()
+	turn.Text, turn.Role, turn.Links = req.Text, req.role(), req.Links
 	plaintext, err := json.Marshal(turn)
 	if err != nil {
 		return TalkSayReport{}, fmt.Errorf("building the turn: %w", err)

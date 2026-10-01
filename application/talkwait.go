@@ -73,6 +73,9 @@ type TalkTurn struct {
 	Role  string `json:"role"`
 	Model string `json:"model"`
 	Cut   bool   `json:"cut"`
+	// Links are bead ids the Governor may want to open from the answer, sent
+	// beside the text and never in it. Absent when there are none.
+	Links []string `json:"links,omitempty"`
 }
 
 // The roles of a talk record.
