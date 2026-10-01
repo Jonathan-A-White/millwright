@@ -32,6 +32,15 @@ type staleRig struct {
 	doc     application.Doctor
 }
 
+// frozenPane is a pane whose turn is running, as the harness draws it: the
+// elapsed clock n is what a live pane would redraw and a frozen one stops at.
+func frozenPane(n int) string {
+	return fmt.Sprintf("● Working on it...\n\n✻ Pondering… (%ds · esc to interrupt)\n\n❯\u00a0\n", n)
+}
+
+// idlePane is a Mayor whose turn has ended, waiting at an empty prompt.
+const idlePane = "● Handed off.\n\n──────────────\n❯\u00a0\n──────────────\n  done 11:44 AM\n"
+
 func newStaleRig(t *testing.T) *staleRig {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -44,7 +53,7 @@ func newStaleRig(t *testing.T) *staleRig {
 	r.kills = filepath.Join(dir, "kills")
 	r.upRuns = filepath.Join(dir, "up-runs")
 	r.upExit = filepath.Join(dir, "up-exit")
-	r.write(r.pane, "working... 1\n")
+	r.write(r.pane, frozenPane(1))
 	r.write(r.upExit, "0")
 
 	tmux := filepath.Join(dir, "tmux-stand-in")
@@ -156,7 +165,7 @@ func TestAFreshBeatClearsItAndTheClockStartsAgain(t *testing.T) {
 		t.Fatalf("expected the first episode to alarm once, got %d", len(r.alarms))
 	}
 
-	r.write(r.pane, "working... 2\n")
+	r.write(r.pane, frozenPane(2))
 	if got := r.run(1); got.Verdict != "ok" {
 		t.Fatalf("a changed pane is a beat: expected ok, got %+v", got)
 	}
@@ -259,5 +268,59 @@ func TestAMayorUpThatStillFindsTheClosedMayorAliveIsTriedAgain(t *testing.T) {
 	}
 	if len(r.alarms) != 1 {
 		t.Errorf("expected one alarm, got %d", len(r.alarms))
+	}
+}
+
+func TestAnIdleMayorAtAnEmptyPromptIsAliveHoweverLongItStands(t *testing.T) {
+	r := newStaleRig(t)
+	r.write(r.pane, idlePane)
+	r.run(0)
+	for _, minutes := range []int{30, 60, 600} {
+		if got := r.run(minutes); got.Verdict != "ok" {
+			t.Fatalf("an empty prompt is a Mayor waiting: expected ok after %d more minutes, got %+v", minutes, got)
+		}
+	}
+	if r.lines(r.kills) != 0 || r.lines(r.upRuns) != 0 || len(r.alarms) != 0 {
+		t.Errorf("an idle Mayor raises nothing: kills %d, mayor-up %d, alarms %d", r.lines(r.kills), r.lines(r.upRuns), len(r.alarms))
+	}
+}
+
+func TestAFrozenTurnIsClosedRespawnedOnceAndAlarmedOnce(t *testing.T) {
+	r := newStaleRig(t)
+	r.write(r.pane, frozenPane(41))
+	r.run(0)
+	got := r.run(16)
+	if got.Verdict != "cured" {
+		t.Fatalf("expected cured, got %+v", got)
+	}
+	if r.lines(r.kills) != 1 || r.lines(r.upRuns) != 1 || len(r.alarms) != 1 {
+		t.Errorf("expected one kill, one respawn, one alarm: kills %d, mayor-up %d, alarms %d", r.lines(r.kills), r.lines(r.upRuns), len(r.alarms))
+	}
+}
+
+func TestInputLeftUntakenOnThePromptIsStale(t *testing.T) {
+	r := newStaleRig(t)
+	r.write(r.pane, "● Handed off.\n\n──────────────\n❯ New events for mayor: 1. Run mw next\n──────────────\n  done 11:44 AM\n")
+	r.run(0)
+	if got := r.run(14); got.Verdict != "ok" {
+		t.Fatalf("under the limit: expected ok, got %+v", got)
+	}
+	got := r.run(2)
+	if got.Verdict != "cured" {
+		t.Fatalf("expected cured, got %+v", got)
+	}
+	if r.lines(r.kills) != 1 || r.lines(r.upRuns) != 1 || len(r.alarms) != 1 {
+		t.Errorf("expected one kill, one respawn, one alarm: kills %d, mayor-up %d, alarms %d", r.lines(r.kills), r.lines(r.upRuns), len(r.alarms))
+	}
+}
+
+func TestAnIdleMayorWhoseInputIsTakenIsAliveAgain(t *testing.T) {
+	r := newStaleRig(t)
+	r.write(r.pane, "❯ nudge text\n")
+	r.run(0)
+	r.run(10)
+	r.write(r.pane, idlePane)
+	if got := r.run(20); got.Verdict != "ok" {
+		t.Fatalf("the input was taken and the prompt is empty: expected ok, got %+v", got)
 	}
 }
