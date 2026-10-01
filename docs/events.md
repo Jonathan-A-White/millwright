@@ -28,12 +28,12 @@ Every field is always present in the JSON, an empty string where unset.
 | --- | --- | --- | --- |
 | `bead_changed` | bead | the bead | what changed: `status`, `comment`, a field's name |
 | `card_asked` | card (to `asked`) | the bead the card is on | the question's txid |
-| `card_answered` | card (to `answered`) | same | the question's txid |
+| `card_answered` | card (to `answered`) | same | the txid its ANSWER comment names: the answer's |
 | `card_applied` | card (to `applied`) | same | the question's txid |
 | `message` | none | the bead whose channel it is in, else empty | the message's txid |
 | `talk_turn` | talk | empty | the turn's txid |
 | `hands_ran` | none | the hitl bead | the step's id |
-| `mail` | none | the mail bead | its subject |
+| `mail` | none | the mail bead | its box: the seat it is sent to |
 | `job` | job | empty, or the bead the job worked on | the outcome, on `done` or `failed` |
 
 A `bead_changed` event whose from and to are the same state is a change that
@@ -43,6 +43,16 @@ kind with none has empty from and to. A seat or a screen subscribes by kind
 and bead; `mail` is how a seat hears a bd mail bead sent to it. The scheduled
 jobs are the dispatch pass, the millhand tick, mail notify, backup,
 self-update and prune (`dispatch@laptop`, `millhand-tick@desktop`, ...).
+
+## The log
+
+The home numbers every event in its log, `mw events` (README, "mw events: follow, emit,
+tail"): `mw events follow` writes the beads' events, reading bd's own audit of the beads and
+their comments every second, and `mw events emit` a job's. A bead's state is read from its
+status and its run label: deferred is held, an in-progress bead is claimed until its run
+label says running, landed, or refused (blocked, stopped, stuck). A status move the follower
+saw only the two ends of is one event per step of the bead machine between them. Verified
+is never read from the beads yet.
 
 ## The machines
 
