@@ -112,17 +112,9 @@ func (m *MayorGone) Probe(ctx context.Context) (application.Verdict, string) {
 		return application.DoctorCannotTell, mayorUp + " is missing or not executable"
 	}
 
-	names, byName, err := m.windows(ctx)
+	name, byName, found, err := m.locate(ctx, string(acting), actingPath)
 	if err != nil {
-		return application.DoctorCannotTell, fmt.Sprintf("asking tmux for its windows: %v", err)
-	}
-	name, found := application.MatchActingName(string(acting), names)
-	if !found {
-		sessionName, sessionFound, sessionErr := m.matchBySession(ctx, string(acting), byName)
-		if sessionErr != nil {
-			return application.DoctorCannotTell, fmt.Sprintf("asking the process tree whether a window carries %s's session: %v", actingPath, sessionErr)
-		}
-		name, found = sessionName, sessionFound
+		return application.DoctorCannotTell, err.Error()
 	}
 	if !found {
 		return application.DoctorFaulty, "no open tmux window matches " + actingPath
@@ -175,6 +167,26 @@ func (m *MayorGone) WayBack() string {
 		return fmt.Sprintf("would run: MW_DOCTOR=1 %s; its way back, once it starts a Mayor, is: tmux kill-window -t '<window id it prints>'", m.mayorUpPath())
 	}
 	return fmt.Sprintf("tmux kill-window -t '%s'", m.window)
+}
+
+// locate finds the open window acting names: its name, the window id each
+// open window's name is found under, and whether one was found at all —
+// MatchActingName first, then a process carrying a session id acting names.
+// An error is already worded for a cannot-tell reason.
+func (m *MayorGone) locate(ctx context.Context, acting, actingPath string) (name string, byName map[string]string, found bool, err error) {
+	names, byName, err := m.windows(ctx)
+	if err != nil {
+		return "", nil, false, fmt.Errorf("asking tmux for its windows: %v", err)
+	}
+	name, found = application.MatchActingName(acting, names)
+	if !found {
+		sessionName, sessionFound, sessionErr := m.matchBySession(ctx, acting, byName)
+		if sessionErr != nil {
+			return "", nil, false, fmt.Errorf("asking the process tree whether a window carries %s's session: %v", actingPath, sessionErr)
+		}
+		name, found = sessionName, sessionFound
+	}
+	return name, byName, found, nil
 }
 
 func (m *MayorGone) actingPath() string {
