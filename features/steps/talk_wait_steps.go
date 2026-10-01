@@ -36,6 +36,7 @@ type talkConn struct {
 type talkBackend struct {
 	mu        sync.Mutex
 	records   []map[string]any
+	delivered [][]byte
 	conns     map[*talkConn]bool
 	connected int
 }
@@ -45,6 +46,10 @@ func (b *talkBackend) handler(w http.ResponseWriter, r *http.Request) {
 	case "/api/challenge":
 		fmt.Fprint(w, `{"nonce":"a-nonce"}`)
 	case "/api/messages":
+		if r.Method == http.MethodPost {
+			b.take(w, r)
+			return
+		}
 		since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
 		b.mu.Lock()
 		var found []map[string]any
@@ -60,6 +65,34 @@ func (b *talkBackend) handler(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// take is POST /api/messages: a record delivered direct. It is kept, not
+// indexed, so the wait's own holding reply never wakes it.
+func (b *talkBackend) take(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ScriptHex string `json:"scriptHex"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	payload, ok := postern.DecodeRecordScript(body.ScriptHex)
+	if !ok {
+		http.Error(w, "not a record script", http.StatusBadRequest)
+		return
+	}
+	b.mu.Lock()
+	b.delivered = append(b.delivered, payload)
+	n := len(b.delivered)
+	b.mu.Unlock()
+	fmt.Fprintf(w, `{"txid":"direct:held-%d","seq":0}`, n)
+}
+
+func (b *talkBackend) deliveries() [][]byte {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return append([][]byte(nil), b.delivered...)
 }
 
 // stream is GET /api/events: it subscribes before it says hello, as the real
@@ -128,10 +161,32 @@ func (b *talkBackend) dropAll() {
 	}
 }
 
+// printedBuffer is what the wait printed, and how many records had been
+// delivered to the backend when it first printed.
+type printedBuffer struct {
+	bytes.Buffer
+	deliveries     func() [][]byte
+	mu             sync.Mutex
+	started        bool
+	deliveredFirst int
+}
+
+func (p *printedBuffer) Write(b []byte) (int, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.started {
+		p.started = true
+		if p.deliveries != nil {
+			p.deliveredFirst = len(p.deliveries())
+		}
+	}
+	return p.Buffer.Write(b)
+}
+
 // talkWaitRun is one run of mw talk wait.
 type talkWaitRun struct {
 	done    chan struct{}
-	out     bytes.Buffer
+	out     printedBuffer
 	errOut  bytes.Buffer
 	armedAt time.Time
 	err     error
@@ -149,6 +204,7 @@ type talkWaitContext struct {
 	memory      *apptest.FakeTracker
 	mailbox     *apptest.FakeMailbox
 	limit       time.Duration
+	holding     string
 
 	run       *talkWaitRun
 	lastEvent time.Time
@@ -229,6 +285,10 @@ func InitializeTalkWaitScenario(ctx *godog.ScenarioContext) {
 		c.limit = time.Duration(ms) * time.Millisecond
 		return nil
 	})
+	ctx.Given(`^mw talk wait has the holding reply "([^"]*)"$`, func(text string) error {
+		c.holding = text
+		return nil
+	})
 	ctx.Given(`^mw talk wait's cursor is at the start of the index$`, func() error {
 		return c.memory.SetNote(context.Background(), application.TalkWaitCursorKey, "0")
 	})
@@ -283,6 +343,19 @@ func InitializeTalkWaitScenario(ctx *godog.ScenarioContext) {
 	})
 	ctx.Then(`^the wait did not print "([^"]*)"$`, func(text string) error {
 		return c.printed(text, false)
+	})
+	ctx.Then(`^the wait sent one holding record "([^"]*)" for talk "([^"]*)" turn (\d+) before it printed$`, c.sentHolding)
+	ctx.Then(`^the wait sent no holding record$`, func() error {
+		if n := len(c.backend.deliveries()); n != 0 {
+			return fmt.Errorf("expected no holding record, %d were delivered", n)
+		}
+		return nil
+	})
+	ctx.Then(`^the wait printed a holding-sent time in milliseconds$`, func() error {
+		if !regexp.MustCompile(`(?m)^holding sent in \d+ ms$`).MatchString(c.run.out.String()) {
+			return fmt.Errorf("expected a holding-sent time in ms, it printed:\n%s", c.run.out.String())
+		}
+		return nil
 	})
 	ctx.Then(`^the wait printed an index-to-print time in milliseconds$`, func() error {
 		if !regexp.MustCompile(`index-to-print \d+ ms`).MatchString(c.run.out.String()) {
@@ -362,19 +435,21 @@ func (c *talkWaitContext) arm() error {
 	c.run = run
 	cipher := apptest.NewFakeCipher()
 	wait := application.TalkWait{
-		Stream:      c.client,
-		Postern:     c.client,
-		Cipher:      cipher,
-		Keys:        c.keys,
-		Memory:      c.memory,
-		Mailbox:     c.mailbox,
-		GovernorKey: c.governorKey,
-		Limit:       c.limit,
-		MinBackoff:  5 * time.Millisecond,
-		MaxBackoff:  20 * time.Millisecond,
-		Out:         &run.out,
-		Err:         &run.errOut,
+		Stream:       c.client,
+		Postern:      c.client,
+		Cipher:       cipher,
+		Keys:         c.keys,
+		Memory:       c.memory,
+		Mailbox:      c.mailbox,
+		GovernorKey:  c.governorKey,
+		HoldingReply: c.holding,
+		Limit:        c.limit,
+		MinBackoff:   5 * time.Millisecond,
+		MaxBackoff:   20 * time.Millisecond,
+		Out:          &run.out,
+		Err:          &run.errOut,
 	}
+	run.out.deliveries = c.backend.deliveries
 	if wait.Limit == 0 {
 		wait.Limit = time.Minute
 	}
@@ -458,4 +533,35 @@ func (c *talkWaitContext) inbox(unreadCount bool) (string, error) {
 		_, err = inbox.Run(context.Background())
 	}
 	return out.String(), err
+}
+
+// sentHolding checks the one record the backend was handed: a holding answer
+// from the Mayor to the Governor, delivered before the wait printed anything.
+func (c *talkWaitContext) sentHolding(text, talk string, turn int) error {
+	delivered := c.backend.deliveries()
+	if len(delivered) != 1 {
+		return fmt.Errorf("expected one holding record, %d were delivered", len(delivered))
+	}
+	if c.run.out.deliveredFirst != 1 {
+		return fmt.Errorf("expected the holding record delivered before the wait printed, %d had been", c.run.out.deliveredFirst)
+	}
+	var payload application.PosternPayload
+	if err := json.Unmarshal(delivered[0], &payload); err != nil {
+		return err
+	}
+	if payload.Class != "talk" || payload.To != c.governorKey || payload.From != c.mayor {
+		return fmt.Errorf("expected a talk record from the Mayor to the Governor, got class %q to %q from %q", payload.Class, payload.To, payload.From)
+	}
+	plain, _, err := apptest.NewFakeCipher().Decrypt("priv", payload.Ct)
+	if err != nil {
+		return err
+	}
+	var held application.TalkTurn
+	if err := json.Unmarshal([]byte(plain), &held); err != nil {
+		return err
+	}
+	if held.Role != application.TalkRoleHolding || held.Text != text || held.Talk.ID != talk || held.Talk.Turn != turn {
+		return fmt.Errorf("expected a holding %q for %s turn %d, got %+v", text, talk, turn, held)
+	}
+	return nil
 }

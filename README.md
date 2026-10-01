@@ -2074,6 +2074,17 @@ without a licence (postern's `docs/protocol.md` section 20), but reading the
 records behind an event needs a cockpit licence on it. See
 `features/talk_wait.feature`.
 
+With a holding reply configured, `mw talk wait` answers at once. Set
+`talk_holding_reply = "One moment."` in `~/.config/mw/config.toml` (or
+`MW_TALK_HOLDING_REPLY`): when the wait ends at a Governor turn it first sends
+that text, at zero tokens, as the section 20 holding answer to that talk and
+turn (exactly what `mw talk say --holding` sends), then prints the turn as
+above plus a line `holding sent in 12 ms`. `--hold` (on whenever the reply is
+set; `--hold=false` turns it off for one wait) governs it. The end of a talk
+gets no holding reply, and neither does a wait with nothing configured. A
+holding reply that would not send is said on stderr and the turn is printed all
+the same; the Mayor's real answer is sent with `mw talk say` as ever.
+
 ## Answering the Governor in a talk
 
 ```sh
@@ -2106,7 +2117,7 @@ its own section above or below:
 
 | Command | What it does |
 | --- | --- |
-| `mw talk wait` | Holds the event stream open and ends at the first turn (or end) the Governor sends the Mayor's key; prints it. `--limit` (default 50m, `$MW_TALK_WAIT_LIMIT`), `--min-backoff`, `--max-backoff`. |
+| `mw talk wait` | Holds the event stream open and ends at the first turn (or end) the Governor sends the Mayor's key; prints it, first sending the opt-in holding reply (`--hold`, config `talk_holding_reply`). `--limit` (default 50m, `$MW_TALK_WAIT_LIMIT`), `--min-backoff`, `--max-backoff`. |
 | `mw talk say <text> --talk <id> --turn <n>` | Sends the Mayor's spoken answer, class `talk`, no summary. `--holding` for a short answer while the real one comes, `--end` to end the talk. |
 | `mw talk model opus\|sonnet\|fable` | Switches the acting Mayor's model from the next turn. `--foreground` watches in-process and exits non-zero when it gave up; `--interval`, `--limit`. |
 | `mw deputy [--reason text]` | Brings up the Deputy, who does the clerical and orchestration work while the Mayor talks. |
