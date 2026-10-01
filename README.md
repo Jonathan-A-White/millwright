@@ -1625,7 +1625,12 @@ the unit `failed`: it always tries again. This is why there is no
 once its tracked process is gone instead of restarting it, which is exactly
 how the tmux server going missing once went unnoticed until the next login.
 `scripts/check-seat-tmux-respawn.sh` proves the restart live, on a throwaway
-`--user` unit and tmux socket so the real session `0` is never touched.
+`--user` unit and tmux socket so the real session `0` is never touched. Its
+units run `tmux` by absolute path with `-L` their own socket, and carry
+`RuntimeMaxSec` with a start limit (a bare `RuntimeMaxSec` only restarts a
+`Restart=always` unit), so a run killed with SIGKILL leaves nothing that can
+outlive it or reach the default socket; the next run's start sweeps what is
+stale, and `scripts/check-seat-tmux-leak.sh` proves all three.
 
 The unit is `Type=simple`, not `forking`: `ExecStart` runs `has-session ||
 new-session`, then settles into a loop that polls `has-session` and sleeps
