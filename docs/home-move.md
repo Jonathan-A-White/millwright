@@ -286,6 +286,18 @@ Nothing reads them back. If they matter, they are looked at by hand before its d
 set aside; on 2026-09-29 the Mayor did that for the desktop's (`mw-nrcbe`: its rows were
 compared with the Laptop's, and there was nothing to bring across).
 
+## The event log
+
+The home keeps the factory's event log (`mw events`, README "mw events: follow, emit,
+tail"): `~/.local/state/mw/events/log.jsonl`, its head in `log.seq` and the follower's
+cursor in `follow.json` beside it (mw-jrx0s.4). `mw home move` does **not** move it yet;
+a later story does. Until then, after a move, stop `mw-view-follow.service` on the old home
+if it answers, copy the three files to the same place on the new home before enabling the
+service there (`sh scripts/install-units.sh --enable mw-view-follow`), and the seqs go on
+from where they stopped. With the old home dead, the new home's follower starts a fresh
+log at seq 1: its first run reads where every bead stands and appends nothing, so an app
+that reads by seq must start again from 0.
+
 ## Finishing by hand
 
 A second `mw home move` is refused once the home file names this host, because step 2 would

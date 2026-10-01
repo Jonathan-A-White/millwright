@@ -2,15 +2,7 @@
 
 ## Layers
 
-| Layer | Directory | Rule |
-| --- | --- | --- |
-| domain | `domain/`, `domain/events` | Value types; stdlib only. |
-| application | `application/` | Use cases and ports, a file each. |
-| fakes | `application/apptest/` | Port fakes. |
-| infrastructure | `infrastructure/` | One subpackage per adapter. |
-| command line | `cmd/mw/` | Cobra wiring. |
-| features | `features/` | Gherkin; steps in `features/steps/`. |
-| template | `template/` | `embed.go`. |
+`domain/`, `domain/events`: stdlib only · `application/`: use cases, ports · `application/apptest/`: fakes · `infrastructure/`: an adapter each · `cmd/mw/`: cobra · `features/`: Gherkin, steps in `features/steps/` · `template/`: `embed.go`.
 
 ## Ports
 
@@ -39,6 +31,7 @@ Adapters assert `var _ application.<Port>`.
 | `Notifier`, `HomeMoveHost`, `OldHome`, `VaultBirth`, `TrackerBirth` | `application/{millhandtick,homemove,init}.go` | `infrastructure/{notify/notify,homemove/homemove,vault/birth,beads/init}.go` | none |
 | `Landing`, `Checks`, `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/{landing,checks,slot}.go` | none |
 | `AfterLanding`, `SelfUpdate`, `BuiltMarks`, `BackendBuilds` | `application/afterlanding.go`, `application/selfupdate.go`, `application/backendstage.go` | `infrastructure/rig/{afterlanding,built,backend}.go` | `features/self_update.feature` |
+| EventLog, BeadFeed, FollowCursors | application/event{log,follow}.go | infrastructure/eventlog, beads/feed.go | apptest.Fake{EventLog,FollowCursors,Tracker} |
 | Postern, hands | `application/{postern*,hands}.go` | `infrastructure/{postern,hands*,homemove}` | `apptest.Fake{Postern*,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*,HomeMover}` |
 | `Grinder`, `GrindSource`, `GristState`, `GristLock` | `application/grist.go` | `infrastructure/{claude/grind,rig/grinds,hostlock/try}.go`, `infrastructure/grist` | `apptest.Fake{Grinder,Grinds,GristState,GristLock}` |
 
@@ -71,7 +64,8 @@ Adapters assert `var _ application.<Port>`.
 | `Doctor` | `application/doctor.go` | `mw doctor` — `cmd/mw/doctor.go` | `features/doctor.feature` |
 | `SeatBoot` | `application/seatboot.go` | none: called by `Dispatch`, `Next` | `features/seat_boot.feature` |
 | `Init` | `application/init.go` | `mw init` — `cmd/mw/init.go` | `features/init.feature` |
-| Postern{Key*,Inbox,Send,Snapshot,View,ViewFollow,Bead} | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternviewfollow.go, application/posternbead.go | mw postern key/inbox/send/snapshot/view [--follow]/bead — cmd/mw/posternview.go, cmd/mw/posternbead.go; --follow: mw-view-follow.service | `features/postern_*.feature` |
+| Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern key/inbox/send/snapshot/view/bead — cmd/mw/posternview.go, cmd/mw/posternbead.go | `features/postern_*.feature` |
+| Event{Follow,Emit,Tail} | application/eventfollow.go, application/eventlog.go | mw events follow/emit/tail — cmd/mw/events.go | none |
 | Hands{Add,List} | application/hands.go | mw hands add/list — cmd/mw/hands.go; `cmd/mw-hands-root` | `features/hands.feature` |
 | `Postern{Serve,Nginx,Mirror}` | `application/posternhand.go`, `application/posternmirror.go` | `mw postern serve`/`nginx`/`mirror` — `cmd/mw/postern.go`, `cmd/mw/posternmirror.go` | `features/postern_serve.feature` |
 | `Grist{Key,Grind,Send,Eval}` | `application/grist.go`, `application/gristgrind.go`, `application/gristsend.go`, `application/gristeval.go` | `mw grist key`/`grind`/`send`/`eval` — `cmd/mw/grist.go` | `features/grist{,_send,_eval}.feature` |

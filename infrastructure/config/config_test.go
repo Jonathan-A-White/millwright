@@ -1541,3 +1541,24 @@ health = "http://h"
 		}
 	}
 }
+
+func TestEventsLogPathIsUnderHomeUntilAHostSaysOtherwise(t *testing.T) {
+	home := writeConfig(t, vpsConfig)
+	t.Setenv(config.EventsLogPathEnv, "")
+	path, err := config.EventsLogPath()
+	if err != nil {
+		t.Fatalf("reading the event log's path: %v", err)
+	}
+	if want := filepath.Join(home, ".local", "state", "mw", "events", "log.jsonl"); path != want {
+		t.Fatalf("expected %q, got %q", want, path)
+	}
+	t.Setenv(config.EventsLogPathEnv, "/tmp/events/log.jsonl")
+	if path, err = config.EventsLogPath(); err != nil || path != "/tmp/events/log.jsonl" {
+		t.Fatalf("expected %s to win, got %q: %v", config.EventsLogPathEnv, path, err)
+	}
+	t.Setenv(config.EventsLogPathEnv, "")
+	writeConfig(t, "events_log_path = \"relative/log.jsonl\"\n")
+	if _, err := config.EventsLogPath(); err == nil || !strings.Contains(err.Error(), "full path") {
+		t.Fatalf("expected a relative events_log_path to be refused, got %v", err)
+	}
+}

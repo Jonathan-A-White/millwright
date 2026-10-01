@@ -1001,26 +1001,47 @@ bead in full (§12), sealed the same way, for the backend's
 `GET /api/beads/{id}` (`POSTERN_BEAD_CMD`); an unknown bead leaves with status
 3. See `features/postern_view.feature` and `features/postern_bead.feature`.
 
-#### mw postern view --follow
+#### mw events: follow, emit, tail
 
-`mw postern view --follow [--every 1s]` does not exit. Every `--every` (default
-one second) it reads the beads' head — Dolt's hash of the whole database, one
-`bd sql "select dolt_hashof_db()"` call of about a tenth of a second, no tokens
-— and writes the view again only when that hash has changed since the last
-successful write, so a tap of the Governor's shows in the app within two
-seconds with no refresh. The hash moves on every bd write at once, the working
-set included (`bd vc status` names only the last commit, which bd's writes
-reach later). A failure, of the read or of the write, is logged and the loop
-goes on: a failed write is tried again next pass, and a failure that repeats
-word for word is logged once. SIGTERM or SIGINT stops it cleanly. It cannot be
-used with `--json`.
+The home keeps one sequenced, append-only log of the factory's events
+(`docs/events.md`): one JSON event per line in `events_log_path` (default
+`~/.local/state/mw/events/log.jsonl`), fsynced on every append, its head in
+`log.seq` beside it. Its seq is the cursor a handover or the app reads from.
 
-It is the user service `contrib/systemd/mw-view-follow.service` (a daemon, so
-no timer; `Restart=on-failure`, `WantedBy=default.target`), which reads
+`mw events follow [--every 1s]` does not exit. Every `--every` (default one
+second) it reads the beads' head — Dolt's hash of the whole database, one
+`bd sql "select dolt_hashof_db()"` call of about a tenth of a second, no tokens.
+When the hash has moved (it moves on every bd write at once, the working set
+included), it reads bd's own audit of the beads (its `events` table) and the
+comments since its cursor, two more `bd sql` calls, and appends one event per
+change by kind: a status move is `bead_changed` with from and to (one event per
+step of the bead machine, so a claim and a start seen together are two), a
+comment beginning `QUESTION` is `card_asked`, `ANSWER` `card_answered`, `RAN`
+`hands_ran`, `The Governor by postern` `message`, any other comment or change
+`bead_changed` with the state left alone, and a new mail bead is `mail` with
+its box as the detail. It saves its cursor (`follow.json` beside the log) and
+writes the sealed live view again, so a tap of the Governor's shows in the app
+within two seconds. Its first run only reads where every bead stands and
+appends nothing. A failure is logged and the loop goes on, tried again next
+pass; one that repeats word for word is logged once. SIGTERM or SIGINT stops it
+cleanly. `mw postern view --follow` is the same loop by its old name.
+
+`mw events emit --kind job --actor dispatch@laptop --from scheduled --to running
+[--bead <id>] [--detail ...]` appends one event of a job's own, stamped now, and
+prints its seq; an event its machine forbids is refused and nothing is written.
+`--actor` defaults to `mw@<host>`. `mw events tail [--since N] [--follow]`
+prints the events after seq N (default the whole log), one per line — `41
+2026-10-01T13:02:07Z bead_changed mw-1 mw@laptop open->claimed status` — and
+with `--follow` goes on printing what is appended.
+
+The follower is the user service `contrib/systemd/mw-view-follow.service`
+(the name kept from when it only republished the view; a daemon, so no timer;
+`Restart=on-failure`, `WantedBy=default.target`), which reads
 `~/.config/mw/beads.env` for the home's `BEADS_DOLT_*` and, optionally,
-`dispatch.env` for `PATH`. **Install**, once, on the host that serves the view
-(the home): `sh scripts/install-units.sh --enable mw-view-follow`. While it is
-active the mail-notify tick's view step is retired (below) and runs nothing.
+`dispatch.env` for `PATH`. **Install**, once, on the home: `sh
+scripts/install-units.sh --enable mw-view-follow`. While it is active the
+mail-notify tick's view step is retired (below) and runs nothing. A home move
+moves the log by hand: see `docs/home-move.md`.
 
 `mw postern snapshot` writes the brief of every live epic (open or in
 progress) as postern's docs/protocol.md §7 JSON: each epic's children still

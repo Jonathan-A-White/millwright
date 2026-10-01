@@ -108,6 +108,12 @@ type FakeTracker struct {
 	noteReads  map[string]int
 	noteWrites map[string]int
 
+	// beadStates, beadNewest and beadChanges are what the fake's BeadFeed
+	// reports (fakebeadfeed.go).
+	beadStates  []application.BeadNow
+	beadNewest  time.Time
+	beadChanges []application.BeadChange
+
 	// showEpicsCalls counts each call to ShowEpics, and storiesCommentsCalls
 	// each call to StoriesComments, so that a test can say a batch of epics or
 	// stories was read in one tracker call rather than one per epic or story.

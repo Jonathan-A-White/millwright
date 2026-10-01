@@ -141,3 +141,33 @@ func TestAnUnknownStateOrMachineIsRefusedByName(t *testing.T) {
 }
 
 func quoted(s string) string { return `"` + s + `"` }
+
+func TestPathIsTheShortestRunOfAllowedTransitions(t *testing.T) {
+	cases := []struct {
+		machine  events.Machine
+		from, to string
+		want     []string
+	}{
+		{events.MachineBead, "open", "claimed", []string{"claimed"}},
+		{events.MachineBead, "open", "running", []string{"claimed", "running"}},
+		{events.MachineBead, "running", "closed", []string{"landed", "closed"}},
+		{events.MachineBead, events.Start, "claimed", []string{"open", "claimed"}},
+		{events.MachineBead, "open", "open", nil},
+		{events.MachineBead, "open", "merged", nil},
+		{events.MachineCard, "applied", "asked", nil},
+		{"ship", "a", "b", nil},
+	}
+	for _, c := range cases {
+		got := events.Path(c.machine, c.from, c.to)
+		if strings.Join(got, " ") != strings.Join(c.want, " ") || (got == nil) != (c.want == nil) {
+			t.Errorf("Path(%s, %q, %q) = %q, want %q", c.machine, c.from, c.to, got, c.want)
+		}
+		from := c.from
+		for _, to := range got {
+			if err := events.Transition(c.machine, from, to); err != nil {
+				t.Errorf("Path(%s, %q, %q) takes a step the machine refuses: %v", c.machine, c.from, c.to, err)
+			}
+			from = to
+		}
+	}
+}
