@@ -37,11 +37,12 @@ func (i PosternInbox) runsHands() bool {
 // the bead's thread, re the approval's txid, and mailed to the Mayor.
 func (i PosternInbox) applyRun(ctx context.Context, m PosternInboxMessage, action PosternAction) (posternApplied, error) {
 	result := posternApplied{Kind: PosternActionRun, Bead: action.Bead, Txid: m.Txid}
-	refuse := func(why string) (posternApplied, error) {
+	refuseTelling := func(why, told string) (posternApplied, error) {
 		result.Refused, result.Detail = true, why
 		text := fmt.Sprintf("NOT RUN step %s (approved by the Governor via postern, txid %s): %s", action.Step, m.Txid, why)
-		return result, i.reportRun(ctx, action.Bead, m.Txid, text, fmt.Sprintf("Not run: %s %s", action.Bead, action.Step))
+		return result, i.reportRun(ctx, action.Bead, m.Txid, text, told, fmt.Sprintf("Not run: %s %s", action.Bead, action.Step))
 	}
+	refuse := func(why string) (posternApplied, error) { return refuseTelling(why, "") }
 
 	raw, err := i.Memory.Note(ctx, HandsStepsKey(action.Bead))
 	if err != nil {
@@ -73,7 +74,12 @@ func (i PosternInbox) applyRun(ctx context.Context, m PosternInboxMessage, actio
 		return posternApplied{}, err
 	}
 	if by := strings.TrimSpace(superseded); by != "" {
-		return refuse(fmt.Sprintf("it is superseded by %s, a newer step that took its place, so it never runs.", by))
+		replacement, err := i.replacementOf(ctx, by)
+		if err != nil {
+			return posternApplied{}, err
+		}
+		return refuseTelling(fmt.Sprintf("it is superseded by %s, a newer step that took its place, so it never runs.", by),
+			fmt.Sprintf("Not run: replaced by %s; tap that one.", replacement))
 	}
 	waits, err := i.handsWaits(ctx, action.Bead)
 	if err != nil {
@@ -153,7 +159,43 @@ func (i PosternInbox) applyRun(ctx context.Context, m PosternInboxMessage, actio
 	result.Detail = fmt.Sprintf("exit %d", outcome.Exit)
 	text := fmt.Sprintf("RAN step %s on %s as %s, exit %d (approved by the Governor via postern, txid %s)\n\n%s",
 		step.ID, step.Host, step.As, outcome.Exit, m.Txid, handsOutputBlock(outcome.Output))
-	return result, i.reportRun(ctx, action.Bead, m.Txid, text, fmt.Sprintf("Ran: %s %s, exit %d", action.Bead, step.ID, outcome.Exit))
+	return result, i.reportRun(ctx, action.Bead, m.Txid, text, "", fmt.Sprintf("Ran: %s %s, exit %d", action.Bead, step.ID, outcome.Exit))
+}
+
+// replacementOf names the step to tap in place of a superseded one, as
+// "<bead> (<step>)": the steps on bead that have not run clean and are not
+// themselves superseded. When there is none to name, it is the bead alone.
+func (i PosternInbox) replacementOf(ctx context.Context, bead string) (string, error) {
+	raw, err := i.Memory.Note(ctx, HandsStepsKey(bead))
+	if err != nil {
+		return "", err
+	}
+	steps, err := parseHandsSteps(raw)
+	if err != nil {
+		return bead, nil
+	}
+	var open []string
+	for _, step := range steps {
+		ranRaw, err := i.Memory.Note(ctx, HandsRanKey(bead, step.ID))
+		if err != nil {
+			return "", err
+		}
+		if ran, ok := parseHandsRan(ranRaw); ok && ran.Exit == 0 {
+			continue
+		}
+		by, err := i.Memory.Note(ctx, HandsSupersededKey(bead, step.ID))
+		if err != nil {
+			return "", err
+		}
+		if strings.TrimSpace(by) != "" {
+			continue
+		}
+		open = append(open, step.ID)
+	}
+	if len(open) == 0 {
+		return bead, nil
+	}
+	return fmt.Sprintf("%s (%s)", bead, strings.Join(open, ", ")), nil
 }
 
 // handsWaits names the open beads bead waits on, each as "<title> (<id>)":
@@ -202,15 +244,20 @@ func handsOutputBlock(output string) string {
 // reportRun says text — how a step ran, or why it did not — by all three
 // channels §17 names: a comment on the bead, a message back to the Governor
 // in the bead's thread re the approval's txid, and a mail to the Mayor,
-// which also says whichever of the other two could not be made.
-func (i PosternInbox) reportRun(ctx context.Context, bead, txid, text, subject string) error {
+// which also says whichever of the other two could not be made. told, when
+// not empty, is what the Governor is sent in place of text: the short answer a
+// tap on a superseded step needs on his phone.
+func (i PosternInbox) reportRun(ctx context.Context, bead, txid, text, told, subject string) error {
+	if told == "" {
+		told = text
+	}
 	var problems []string
 	if err := i.Tracker.CommentOnStory(ctx, bead, text); err != nil {
 		problems = append(problems, fmt.Sprintf("it could not be written on %s: %v", bead, err))
 	}
 	if i.Sender == nil {
 		problems = append(problems, "no sender is configured to tell the Governor")
-	} else if _, err := i.Sender.Run(ctx, PosternSendRequest{Class: "message", Text: text, Thread: bead, Re: txid, Recorded: true}); err != nil {
+	} else if _, err := i.Sender.Run(ctx, PosternSendRequest{Class: "message", Text: told, Thread: bead, Re: txid, Recorded: true}); err != nil {
 		problems = append(problems, fmt.Sprintf("it could not be sent back to the Governor: %v", err))
 	}
 	body := text

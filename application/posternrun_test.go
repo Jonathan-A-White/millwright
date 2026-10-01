@@ -416,3 +416,48 @@ func TestApplyHandsRunsAReplacedStepThatRanOKBefore(t *testing.T) {
 		t.Fatalf("expected the replaced step run, got %+v", jobs)
 	}
 }
+
+// A tap on a step a newer one took the place of runs nothing, and the reply in
+// that card's thread names the bead and step to tap instead (mw-gq6.216).
+func TestApplyAnswersATapOnASupersededStepWithTheStepThatReplacedIt(t *testing.T) {
+	f := newRunFixture(t)
+	ctx := context.Background()
+	newer := domain.HandsStep{ID: "echo-2", Host: "desktop", As: "user", Run: "echo newer"}
+	raw, _ := json.Marshal([]application.HandsStepRecord{{HandsStep: newer, AddedAt: "2026-09-28T12:00:00Z"}})
+	mustDo(t, f.tracker.SetNote(ctx, application.HandsStepsKey("mw-e.9"), string(raw)))
+	mustDo(t, f.tracker.SetNote(ctx, application.HandsSupersededKey("mw-e.3", "echo"), "mw-e.9"))
+	f.approve(t, "tx-old", "echo", runNow, "")
+
+	f.apply(t)
+
+	if jobs := f.runner.Jobs(); len(jobs) != 0 {
+		t.Fatalf("expected nothing run, got %+v", jobs)
+	}
+	delivered := f.backend.Delivered()
+	if len(delivered) != 1 {
+		t.Fatalf("expected one reply to the Governor, got %d", len(delivered))
+	}
+	back := f.sentBack(t, 0)
+	if want := "Not run: replaced by mw-e.9 (echo-2); tap that one."; back.Text != want {
+		t.Fatalf("expected the reply %q, got %q", want, back.Text)
+	}
+	if back.Thread.Bead != "mw-e.3" || back.Re != "tx-old" {
+		t.Fatalf("expected the reply in the card's thread, re the tap, got %+v", back)
+	}
+	if got := f.tracker.Comments("mw-e.3"); len(got) != 1 || !strings.Contains(got[0], "superseded by mw-e.9") {
+		t.Fatalf("expected the NOT RUN comment kept on the bead, got %q", got)
+	}
+}
+
+// With no step left on the replacing bead to name, the reply names the bead.
+func TestApplyAnswersATapOnASupersededStepNamingTheBeadWhenItHoldsNoOpenStep(t *testing.T) {
+	f := newRunFixture(t)
+	mustDo(t, f.tracker.SetNote(context.Background(), application.HandsSupersededKey("mw-e.3", "echo"), "mw-e.9"))
+	f.approve(t, "tx-old", "echo", runNow, "")
+
+	f.apply(t)
+
+	if back := f.sentBack(t, 0); back.Text != "Not run: replaced by mw-e.9; tap that one." {
+		t.Fatalf("expected the reply to name the bead, got %q", back.Text)
+	}
+}

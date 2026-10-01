@@ -131,7 +131,7 @@ Feature: mw postern inbox --apply
     When mw postern inbox --apply is run
     Then the hands step "echo" on "mw-act.3" did not run
     And bead "mw-act.3"'s last comment starts "NOT RUN step echo (approved by the Governor via postern, txid tx-old): it is superseded by mw-act.9, a newer step that took its place, so it never runs."
-    And the Governor was told "it is superseded by mw-act.9, a newer step that took its place, so it never runs." in bead "mw-act.3"'s thread
+    And the Governor was told "Not run: replaced by mw-act.9; tap that one." in bead "mw-act.3"'s thread
     And mail "Not run: mw-act.3 echo" was sent to mayor
 
   Scenario: the same step runs once the blocker closes and he approves again
