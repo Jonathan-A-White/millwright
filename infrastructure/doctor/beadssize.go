@@ -30,17 +30,50 @@ const (
 	BeadsSizeDamperCap  = 1
 )
 
-// errBeadsSizeNoCure is what Cure always returns: a repack that would shrink
+// beadsSizeCacheGlobs find the git-remote-cache clones Dolt keeps beside the
+// vault's database, under either layout: embeddeddolt for a bd that opens the
+// database itself, dolt for a host that serves beads. The same two places
+// infrastructure/beads's sync repacks.
+var beadsSizeCacheGlobs = []string{
+	"embeddeddolt/*/.dolt/git-remote-cache/*/repo.git",
+	"dolt/*/.dolt/git-remote-cache/*/repo.git",
+}
+
+// beadsSizeNoCure is what Cure always returns: a repack that would shrink
 // .beads deletes packs, held back by the Doctor-checks approval (mw-6ww.40),
 // so this check can only ever report the fault, never fix it. It says what
-// already relieves this without a cure, so a person reading it is not left
-// thinking nothing is being done: a crowded git-remote-cache repacks itself
-// on the next sync, and the tracker's own GC keeps to its cadence regardless.
-var errBeadsSizeNoCure = fmt.Errorf(
-	"no cure: a crowded git-remote-cache now repacks itself with the next sync; "+
-		"the tracker's own GC also runs at least every %dh; a person clears space by hand only if both still fall behind",
-	int(application.DefaultGCInterval.Hours()),
-)
+// it found, and what already relieves this without a cure, so a person
+// reading it is not left thinking nothing is being done: a crowded
+// git-remote-cache repacks itself on the next sync, and the tracker's own GC
+// keeps to its cadence regardless.
+func (b *BeadsSize) beadsSizeNoCure() error {
+	return fmt.Errorf(
+		"no cure: changed nothing; %s; a crowded git-remote-cache now repacks itself with the next sync; "+
+			"the tracker's own GC also runs at least every %dh; a person clears space by hand only if both still fall behind",
+		b.cachesFound(), int(application.DefaultGCInterval.Hours()),
+	)
+}
+
+// cachesFound says how many git-remote-cache clones the vault holds and how
+// many bytes they take, or that none was found, so the log tells a person
+// whether the repack has anything to work on.
+func (b *BeadsSize) cachesFound() string {
+	var caches []string
+	for _, glob := range beadsSizeCacheGlobs {
+		found, _ := filepath.Glob(filepath.Join(b.Dir, beadsSizeDir, glob))
+		caches = append(caches, found...)
+	}
+	if len(caches) == 0 {
+		return fmt.Sprintf("no git-remote-cache found under %s", filepath.Join(b.Dir, beadsSizeDir))
+	}
+	var total int64
+	for _, cache := range caches {
+		if size, err := beadsSizeOf(cache); err == nil {
+			total += size
+		}
+	}
+	return fmt.Sprintf("found %d git-remote-cache clone(s) holding %d bytes", len(caches), total)
+}
 
 // BeadsSize is the check that watches this host's own .beads against the
 // same budget mw status warns against: past it, an unattended sync or
@@ -82,8 +115,9 @@ func (b *BeadsSize) Probe(context.Context) (application.Verdict, string) {
 	return application.DoctorOK, ""
 }
 
-// Cure implements application.DoctorCheck: there is none.
-func (b *BeadsSize) Cure(context.Context) error { return errBeadsSizeNoCure }
+// Cure implements application.DoctorCheck: there is none; the error says what
+// was found.
+func (b *BeadsSize) Cure(context.Context) error { return b.beadsSizeNoCure() }
 
 // Damper implements application.DoctorCheck.
 func (b *BeadsSize) Damper() (time.Duration, int) { return BeadsSizeDamperWait, BeadsSizeDamperCap }
