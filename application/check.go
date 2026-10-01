@@ -14,8 +14,11 @@ import (
 // cheap to fix, and worded as mw next would word it.
 //
 // It is read-only, and that is the point of it. It writes nothing to the
-// tracker, the ledger, the vault or git: no comment, no run state, no fetch, no
-// merge slot. It does not fetch, so the commits are counted against the target
+// tracker, the ledger, the vault or git: no comment, no run state, no fetch. The
+// one thing it takes is the rig's merge slot, around the rig's tests only, so
+// that a close-out's gate and a check's gate on one rig never run at once and
+// starve each other; it waits for the slot, and the slot is given back when the
+// tests are done. It does not fetch, so the commits are counted against the target
 // branch as the rig last saw the remote's; it does not read the session's
 // result, which does not exist until the session ends; and it does not try the
 // merge, so a branch it passes can still be stopped by a conflict.
@@ -27,6 +30,10 @@ type Check struct {
 	Tracker WorkTracker
 	Landing Landing
 	Checks  Checks
+
+	// Slot is the merge slot of the rig, taken around the rig's tests so that
+	// one gate per rig runs at a time on this host. Nil takes no slot.
+	Slot MergeSlot
 
 	// Host is which host this is, and Rigs is where each rig is checked out.
 	Host string
@@ -111,6 +118,18 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	}
 	report.Branch, report.Target = c.branch, c.target
 
+	// The rig's tests are run holding the rig's merge slot, as a close-out's
+	// are, so that one gate per rig runs at a time on this host.
+	checks := k.Checks
+	if k.Slot != nil {
+		checks = slottedChecks{
+			checks: k.Checks,
+			slot:   k.Slot,
+			rigDir: rigDir,
+			holder: fmt.Sprintf("%s checking %s", SeatIdentity("", k.Host), storyID),
+		}
+	}
+
 	// The checks are mw next's own, run by the part of it that reads and never
 	// writes, so that what a session is told here and what it is told at
 	// close-out cannot come apart.
@@ -118,7 +137,7 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 	report.Refusals = Next{
 		Tracker: k.Tracker,
 		Landing: k.Landing,
-		Checks:  k.Checks,
+		Checks:  checks,
 		Remote:  k.Remote,
 	}.refusals(ctx, c, &read, true)
 	report.Commits, report.Notes = read.Commits, read.Notes
@@ -127,6 +146,23 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		return report, fmt.Errorf("checking %s: %d check(s) failed, so mw next would not land it", storyID, len(report.Refusals))
 	}
 	return report, nil
+}
+
+// slottedChecks runs the rig's tests while holding the rig's merge slot.
+type slottedChecks struct {
+	checks Checks
+	slot   MergeSlot
+	rigDir string
+	holder string
+}
+
+func (s slottedChecks) Run(ctx context.Context, rig, dir string) (Checked, error) {
+	holding, err := s.slot.Take(ctx, s.rigDir, s.holder)
+	if err != nil {
+		return Checked{}, fmt.Errorf("the merge slot of %s could not be taken: %w", rig, err)
+	}
+	defer holding.Release(ctx)
+	return s.checks.Run(ctx, rig, dir)
 }
 
 // String is the check as a person reads it.

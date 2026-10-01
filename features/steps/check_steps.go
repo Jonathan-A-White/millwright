@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
@@ -25,10 +26,16 @@ import (
 // registerCheckSteps registers the steps of features/check.feature.
 func registerCheckSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the story "([^"]*)" has already been closed$`, c.theStoryWasAlreadyClosed)
+	ctx.Given(`^another close-out is holding the merge slot of the rig$`, c.anotherCloseOutHoldsTheSlot)
 
 	ctx.When(`^a session checks "([^"]*)"$`, c.aSessionChecks)
+	ctx.When(`^a session checks "([^"]*)" while the other close-out finishes after (\d+) milliseconds$`, c.aSessionChecksWhileTheSlotIsHeld)
+	ctx.When(`^a session checks "([^"]*)" without the merge slot$`, c.aSessionChecksWithoutTheSlot)
 
 	ctx.Then(`^the check passes$`, c.theCheckPasses)
+	ctx.Then(`^the check waited at least (\d+) milliseconds for the merge slot$`, c.theCheckWaited)
+	ctx.Then(`^the check did not wait for the merge slot$`, c.theCheckDidNotWait)
+	ctx.Then(`^the check said it was waiting for the merge slot, held by the other close-out$`, c.theCheckSaidItWasWaiting)
 	ctx.Then(`^the check fails$`, c.theCheckFails)
 	ctx.Then(`^the check fails, saying: (.+)$`, c.theCheckFailsSaying)
 	ctx.Then(`^the check says the branch would be landed$`, c.theCheckSaysItWouldLand)
@@ -107,7 +114,82 @@ func (c *nextContext) theStoryWasAlreadyClosed(id string) error {
 	return c.tracker.CloseStory(context.Background(), id, "landed by hand")
 }
 
+// otherCloseOut is the holder another close-out writes into the merge slot.
+const otherCloseOut = "builder@vps closing out mw-gq6.99"
+
+// slotHeldMilliseconds is how long a scenario that does not release the slot
+// keeps it, far longer than a check that does not wait takes.
+const slotHeldMilliseconds = 30000
+
+func (c *nextContext) anotherCloseOutHoldsTheSlot() error {
+	held, err := rig.NewSlots().Take(context.Background(), c.rig, otherCloseOut)
+	if err != nil {
+		return err
+	}
+	c.otherHolding = held
+	return nil
+}
+
+// releaseTheOtherCloseOut gives the slot back, once, whenever it is asked to.
+func (c *nextContext) releaseTheOtherCloseOut() {
+	c.holdingMu.Lock()
+	defer c.holdingMu.Unlock()
+	if c.otherHolding != nil {
+		_ = c.otherHolding.Release(context.Background())
+		c.otherHolding = nil
+	}
+}
+
+func (c *nextContext) aSessionChecksWhileTheSlotIsHeld(id string, millis int) error {
+	if c.otherHolding == nil {
+		return fmt.Errorf("no other close-out holds the merge slot in this scenario")
+	}
+	timer := time.AfterFunc(time.Duration(millis)*time.Millisecond, c.releaseTheOtherCloseOut)
+	defer timer.Stop()
+	started := time.Now()
+	err := c.checkWith(id, rig.NewSlots(
+		rig.WithSlotPoll(20*time.Millisecond),
+		rig.WithSlotNotice(func(said string) { c.stderr.WriteString(said) }),
+	))
+	c.checkWaited = time.Since(started)
+	return err
+}
+
+func (c *nextContext) aSessionChecksWithoutTheSlot(id string) error {
+	started := time.Now()
+	err := c.checkWith(id, nil)
+	c.checkWaited = time.Since(started)
+	return err
+}
+
+func (c *nextContext) theCheckWaited(millis int) error {
+	if want := time.Duration(millis) * time.Millisecond; c.checkWaited < want {
+		return fmt.Errorf("expected the check to wait at least %s for the merge slot, it took %s", want, c.checkWaited)
+	}
+	return nil
+}
+
+func (c *nextContext) theCheckDidNotWait() error {
+	if limit := time.Duration(slotHeldMilliseconds/2) * time.Millisecond; c.checkWaited >= limit {
+		return fmt.Errorf("expected the check not to wait for the merge slot, it took %s", c.checkWaited)
+	}
+	return nil
+}
+
+func (c *nextContext) theCheckSaidItWasWaiting() error {
+	said := c.stderr.String()
+	if !strings.Contains(said, "waiting for the merge slot") || !strings.Contains(said, otherCloseOut) {
+		return fmt.Errorf("expected the check to say it was waiting for the merge slot held by %q, got:\n%s", otherCloseOut, said)
+	}
+	return nil
+}
+
 func (c *nextContext) aSessionChecks(id string) error {
+	return c.checkWith(id, rig.NewSlots())
+}
+
+// checkWith runs mw check with the given merge slot, nil for none.
+func (c *nextContext) checkWith(id string, slots *rig.Slots) error {
 	before, err := c.snapshot(id)
 	if err != nil {
 		return err
@@ -121,8 +203,13 @@ func (c *nextContext) aSessionChecks(id string) error {
 	}
 	worktrees := rig.New(rig.WithProgram(c.gitProgram))
 	c.printed.Reset()
+	var slot application.MergeSlot
+	if slots != nil {
+		slot = slots
+	}
 	c.checked, c.err = application.Check{
 		Tracker: c.tracker,
+		Slot:    slot,
 		Landing: worktrees,
 		Checks:  rig.NewChecks(rig.WithCommand(c.checkCommand)),
 		Host:    nextHost,

@@ -43,6 +43,10 @@ type Slots struct {
 	wait time.Duration
 	cap  time.Duration
 	poll time.Duration
+
+	// notice is told, in a sentence, who has the slot when taking it has to
+	// wait, and again whenever it changes hands. Nil says nothing.
+	notice func(said string)
 }
 
 // Slots satisfies the port.
@@ -65,6 +69,12 @@ func WithSlotCap(cap time.Duration) SlotOption {
 // WithSlotPoll sets how often a wait looks to see whether the slot is free.
 func WithSlotPoll(poll time.Duration) SlotOption {
 	return func(s *Slots) { s.poll = poll }
+}
+
+// WithSlotNotice sets who is told, once a wait for a held slot has begun, whose
+// slot it is waiting on: a person at a terminal sees why nothing is happening.
+func WithSlotNotice(notice func(said string)) SlotOption {
+	return func(s *Slots) { s.notice = notice }
 }
 
 // NewSlots returns the merge slots of this host's rigs.
@@ -118,6 +128,7 @@ func (s *Slots) Take(ctx context.Context, rigDir, holder string) (application.Ho
 func (s *Slots) flock(ctx context.Context, file *os.File, path string) error {
 	started := time.Now()
 	since, said := started, readSlot(path)
+	told := ""
 	for {
 		err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		if err == nil {
@@ -130,6 +141,10 @@ func (s *Slots) flock(ctx context.Context, file *os.File, path string) error {
 		now := time.Now()
 		if again := readSlot(path); again != said {
 			since, said = now, again
+		}
+		if s.notice != nil && told != held(path) {
+			told = held(path)
+			s.notice(fmt.Sprintf("waiting for the merge slot: held by %s\n", told))
 		}
 		if waited := now.Sub(started); waited >= s.cap {
 			return fmt.Errorf("the merge slot %s kept changing hands and was still held by %q after %s, the overall most a close-out waits: close-outs are landing work on this rig one after another",

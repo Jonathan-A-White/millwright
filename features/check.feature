@@ -87,3 +87,18 @@ Feature: Checking a branch before its session ends
     Given the story "mw-gq6.1" has already been closed
     When a session checks "mw-gq6.1"
     Then the check fails, saying: closed already
+
+  Scenario: A check waits for the merge slot of its rig and runs the tests once it is free
+    Given another close-out is holding the merge slot of the rig
+    When a session checks "mw-gq6.1" while the other close-out finishes after 400 milliseconds
+    Then the check waited at least 300 milliseconds for the merge slot
+    And the check passes
+    And the rig's tests were run 1 times
+    And the check said it was waiting for the merge slot, held by the other close-out
+
+  Scenario: A check told to skip the merge slot does not wait for it
+    Given another close-out is holding the merge slot of the rig
+    When a session checks "mw-gq6.1" without the merge slot
+    Then the check passes
+    And the check did not wait for the merge slot
+    And the rig's tests were run 1 times

@@ -256,3 +256,23 @@ func TestACancelledContextStopsAWaiterAtOnce(t *testing.T) {
 		t.Errorf("expected the waiter to give up at once, waited %s", waited)
 	}
 }
+
+func TestWaitingForAHeldSlotSaysWhoHasIt(t *testing.T) {
+	ctx, dir := context.Background(), aRigDir(t)
+
+	first, err := impatient().Take(ctx, dir, "builder@laptop closing out mw-gq6.8")
+	if err != nil {
+		t.Fatalf("taking a free merge slot: %v", err)
+	}
+	defer first.Release(ctx)
+
+	var said []string
+	waiting := rig.NewSlots(rig.WithSlotWait(100*time.Millisecond), rig.WithSlotPoll(10*time.Millisecond),
+		rig.WithSlotNotice(func(s string) { said = append(said, s) }))
+	if _, err := waiting.Take(ctx, dir, "builder@laptop checking mw-gq6.9"); err == nil {
+		t.Fatal("expected the wait to give up while the slot is held")
+	}
+	if len(said) != 1 || !strings.Contains(said[0], "waiting for the merge slot: held by builder@laptop closing out mw-gq6.8") {
+		t.Errorf("expected one notice naming the holder, got %q", said)
+	}
+}

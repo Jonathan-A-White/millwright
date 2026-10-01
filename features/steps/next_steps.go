@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -79,6 +80,10 @@ type nextContext struct {
 
 	touchedBefore *touched // what a check scenario found before it ran mw check
 	touchedFor    string
+
+	holdingMu    sync.Mutex
+	otherHolding application.Holding // the merge slot another close-out holds, in the check scenarios
+	checkWaited  time.Duration       // how long mw check took, in the merge slot scenarios
 }
 
 // What a scenario's fixtures hold.
@@ -106,6 +111,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 		return ctx, nil
 	})
 	ctx.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
+		c.releaseTheOtherCloseOut()
 		if c.root != "" {
 			_ = os.RemoveAll(c.root)
 		}

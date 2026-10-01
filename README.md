@@ -649,13 +649,19 @@ check that fails, not only the first: a session that fixes one and asks again
 pays for the tests each time.
 
 It is read-only. It writes no comment, run state or ledger line, commits nothing
-in the vault, and asks git for nothing that writes — no fetch, no merge slot, no
-landing worktree — so the commits are counted against `origin/<target>` as the
+in the vault, and asks git for nothing that writes — no fetch, no landing
+worktree — so the commits are counted against `origin/<target>` as the
 rig last saw it. It does not read the session's result, which is not written
 until the session ends, and it does not try the merge, so a branch that passes
 can still be stopped by a conflict or by the other host's work. The last formula
 step is normally still open when a session runs it; the session's kickoff prompt
 names the command and says so. See `features/check.feature`.
+
+The one thing it takes is the rig's merge slot, around the rig's tests only: a
+close-out's gate holds that slot, so a check on the same rig waits for it
+(`waiting for the merge slot: held by ...` on stderr) rather than running its
+whole gate on top of the close-out's, where both fail from load. `--no-slot`
+skips the wait.
 
 ### What a session may run without asking
 
@@ -3008,7 +3014,7 @@ When `systemd-run` is on `PATH` it runs the command as a transient, capped
 scope (`--scope -p MemoryMax=... -p MemorySwapMax=...`, `--user` added unless
 it is root); without `systemd-run` it runs the command plainly, under the
 same lock, and says so in one line on stderr. Its exit status is always the
-command's. `MW_HEAVY_MEMORY_MAX` (default `512M`) and `MW_HEAVY_SWAP_MAX`
+command's. `MW_HEAVY_MEMORY_MAX` (default `512M`, the VPS's; half of `MemTotal` on a host with more than 8 GB) and `MW_HEAVY_SWAP_MAX`
 (default `1G`) are the two caps; `MW_HEAVY_LOCK` overrides the lock file
 (else the same one `contrib/mail-notify` locks, above); `MW_HEAVY_DRY=1`
 prints the `systemd-run` line it would run and runs nothing. A Mayor's

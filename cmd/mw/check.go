@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
@@ -13,7 +15,8 @@ import (
 // it writes nothing to the tracker, the ledger, the vault or git — and it exits
 // non-zero when any check fails.
 func newCheckCmd() *cobra.Command {
-	return &cobra.Command{
+	var noSlot bool
+	cmd := &cobra.Command{
 		Use:   "check <story-id>",
 		Short: "Run the checks mw next makes before landing a story, on its branch, and change nothing",
 		Long: "check runs what mw next would refuse a story's branch for, while the session that is working the\n" +
@@ -22,7 +25,9 @@ func newCheckCmd() *cobra.Command {
 			"must pass in the story's worktree. Each refusal is printed as mw next would word it, all of them\n" +
 			"at once rather than the first only, and check exits non-zero when there is any.\n\n" +
 			"check is read-only: it writes no comment, run state or ledger line, commits nothing in the vault,\n" +
-			"and does not fetch, merge or push. It does not read the session's result, which is not written\n" +
+			"and does not fetch, merge or push. The one thing it takes is the rig's merge slot, around the\n" +
+			"rig's tests, so that a close-out's tests and a check's on one rig do not run at once and starve\n" +
+			"each other: it waits for the slot, saying who holds it, and --no-slot skips the wait. It does not read the session's result, which is not written\n" +
 			"until the session ends, and it does not try the merge, so a branch that passes here can still be\n" +
 			"stopped by a conflict or by the other host's work. The commits are counted against the target\n" +
 			"branch as the rig last saw the remote's.\n\n" +
@@ -47,11 +52,16 @@ func newCheckCmd() *cobra.Command {
 				return err
 			}
 
+			var slot application.MergeSlot
+			if !noSlot {
+				slot = rig.NewSlots(rig.WithSlotNotice(func(said string) { fmt.Fprint(cmd.ErrOrStderr(), said) }))
+			}
 			worktrees := rig.New()
 			_, err = application.Check{
 				Tracker: mwGateway(dir, host),
 				Landing: worktrees,
 				Checks:  rig.NewChecks(rig.WithCommands(tests)),
+				Slot:    slot,
 				Host:    host,
 				Rigs:    rigs,
 				Out:     cmd.OutOrStdout(),
@@ -59,4 +69,6 @@ func newCheckCmd() *cobra.Command {
 			return err
 		},
 	}
+	cmd.Flags().BoolVar(&noSlot, "no-slot", false, "run the rig's tests without taking the rig's merge slot, so without waiting for a close-out's gate")
+	return cmd
 }
