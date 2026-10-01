@@ -1303,3 +1303,53 @@ func TestDispatchAndTheMillNeverExceedTheCapStartedInTheSameTick(t *testing.T) {
 		t.Errorf("a cap of %d, and %d sessions ran together during the grind, %d after", d.Cap, crowded.most, len(running))
 	}
 }
+
+// racedClaimTracker is a tracker on which another dispatcher pours the story's
+// formula and records the molecule in the instant between this dispatch's look at
+// the ready list and its claim (mw-gq6.193).
+type racedClaimTracker struct {
+	*apptest.FakeTracker
+	other application.Molecule
+}
+
+func (r *racedClaimTracker) ClaimStory(ctx context.Context, id string) error {
+	molecule, err := r.FakeTracker.PourFormula(ctx, "tdd-feature", id, "A story")
+	if err != nil {
+		return err
+	}
+	r.other = molecule
+	if err := r.FakeTracker.SetStoryMetadata(ctx, id, map[string]string{application.MoleculeField: molecule.RootID}); err != nil {
+		return err
+	}
+	return r.FakeTracker.ClaimStory(ctx, id)
+}
+
+// mw-gq6.193: a story whose molecule was recorded by another dispatcher after
+// this one read the ready list is worked on that molecule: no second pour, and
+// metadata.molecule is left naming the first.
+func TestDispatchDoesNotPourOverAMoleculeRecordedAfterItReadTheReadyList(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, runner, _ := aFactory(t)
+	tracker.AddFormula("tdd-feature", application.FormulaStep{Title: "One"}, application.FormulaStep{Title: "Two"})
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	raced := &racedClaimTracker{FakeTracker: tracker}
+	dispatch.Tracker = raced
+
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if tracker.Molecules() != 1 {
+		t.Fatalf("expected the molecule the other dispatcher poured to be the only one, got %d", tracker.Molecules())
+	}
+	detail, err := tracker.ShowStory(ctx, "mw-gq6.1")
+	if err != nil {
+		t.Fatalf("showing the story: %v", err)
+	}
+	if detail.Molecule.RootID != raced.other.RootID {
+		t.Fatalf("expected metadata.molecule to stay %q, got %q", raced.other.RootID, detail.Molecule.RootID)
+	}
+	if len(report.Started) != 1 || !report.Started[0].Reused || len(runner.Names()) != 1 {
+		t.Fatalf("expected one start working the first molecule again, got %+v", report.Started)
+	}
+}

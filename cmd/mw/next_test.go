@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/Jonathan-A-White/millwright/application"
 )
 
 // mw next --heartbeat is never run for real here: it would reach the real bd
@@ -68,5 +71,35 @@ func TestBeadsEnvFileIsUnderTheHomeDirectory(t *testing.T) {
 	want := filepath.Join(home, ".config", "mw", "beads.env")
 	if got := beadsEnvFile(); got != want {
 		t.Fatalf("beadsEnvFile() = %q, want %q", got, want)
+	}
+}
+
+// mw-gq6.193: the dispatch that ends a landing takes the host's dispatch lock,
+// as the timer's dispatch does: with another holder, it does nothing.
+func TestNextEndOfLandingDispatchDoesNothingWhileTheHostDispatchLockIsHeld(t *testing.T) {
+	mwConfig(t, "vault = \"/nowhere/vault\"\nhost = \"vps\"\n")
+	ctx := context.Background()
+
+	other := hostDispatchLock()
+	release, taken, err := other.TryTake(ctx)
+	if err != nil || !taken {
+		t.Fatalf("expected to take the host's dispatch lock, got taken=%v err=%v", taken, err)
+	}
+	defer release()
+
+	var out bytes.Buffer
+	dispatch := withHostDispatchLocks(application.Dispatch{Host: "vps", Cap: 1, Out: &out})
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatalf("expected a dispatch that finds another running to leave quietly, got %v", err)
+	}
+	if !strings.Contains(out.String(), "another mw dispatch is running here; nothing done") {
+		t.Fatalf("expected it to say another dispatch is running, got %q", out.String())
+	}
+	if len(report.Started) != 0 {
+		t.Fatalf("expected nothing started, got %+v", report)
+	}
+	if dispatch.Grinding == nil {
+		t.Fatal("expected the grind lock to be counted too")
 	}
 }

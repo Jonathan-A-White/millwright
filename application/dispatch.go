@@ -753,6 +753,19 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 	}
 	d.print(fmt.Sprintf("  claimed %s\n", id))
 
+	// The ready list was read before the claim, and another dispatcher may have
+	// poured this story's formula and recorded the molecule since: its session
+	// may even be started. The molecule is read again, now that the claim is held,
+	// so that a second start never pours over one already handed out
+	// (mw-gq6.193); a session of the story's name that has appeared since is
+	// release's to find, and release keeps the claim for it.
+	fresh, err := d.Tracker.ShowStory(ctx, id)
+	if err != nil {
+		released, relErr := d.release(ctx, id, fmt.Errorf("reading %s again after claiming it: %w", id, err))
+		return Started{}, released, relErr
+	}
+	detail.Molecule = fresh.Molecule
+
 	// The claim is what makes the story this host's, so it is also what writes
 	// this host's name over "auto": mw status, the landing and the ledger all see
 	// a concrete host from here on. The one writer of that field is this line.

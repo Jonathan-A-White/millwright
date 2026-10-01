@@ -138,7 +138,7 @@ func newNextCmd() *cobra.Command {
 			// a closed story rather than a claimed one.
 			var dispatcher application.Dispatcher
 			if !noDispatch {
-				dispatcher = application.Dispatch{
+				dispatcher = withHostDispatchLocks(application.Dispatch{
 					Tracker:     gateway,
 					Worktrees:   worktrees,
 					Runner:      runner,
@@ -151,7 +151,7 @@ func newNextCmd() *cobra.Command {
 					Load:        hostload.Proc{},
 					Rigs:        rigs,
 					Out:         cmd.OutOrStdout(),
-				}
+				})
 			}
 
 			_, err = application.Next{
@@ -211,6 +211,18 @@ func beadsEnvFile() string {
 // tests is the [tests] table, so the session may run its own rig's tests
 // without being asked, exactly as `mw next` would run them (see
 // claude.WithTests).
+// withHostDispatchLocks gives a dispatch the two locks the timer's dispatch
+// takes: this host's dispatch lock, so that the dispatch that ends a landing
+// and a timer tick never claim, pour and start the same story at once
+// (mw-gq6.193), and the grind lock, so that a grist grind keeps its session
+// among those the cap counts. A dispatch that cannot take the dispatch lock
+// says so and does nothing; the timer's next tick starts what is ready.
+func withHostDispatchLocks(d application.Dispatch) application.Dispatch {
+	d.Grinding = gristGrindLock()
+	d.Exclusive = hostDispatchLock()
+	return d
+}
+
 func builderBoot(files *vault.Vault, host string, tests map[string]string) application.SeatBoot {
 	return application.SeatBoot{
 		Vault:     files,
