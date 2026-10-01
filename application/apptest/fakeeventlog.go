@@ -2,6 +2,7 @@ package apptest
 
 import (
 	"context"
+	"sort"
 	"sync"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -139,5 +140,74 @@ func (f *FakeShipStates) Save(_ context.Context, s application.ShipState) error 
 	defer f.mu.Unlock()
 	f.saved = s
 	f.saved.Pending = append([]application.ShipRange(nil), s.Pending...)
+	return nil
+}
+
+// FakeSubscribeFiles is an in-memory application.SubscribeFiles: the text of
+// each seat's subscribe file, by seat.
+type FakeSubscribeFiles struct {
+	mu    sync.Mutex
+	files map[string]string
+}
+
+var _ application.SubscribeFiles = (*FakeSubscribeFiles)(nil)
+
+// Set puts a seat's subscribe file in place.
+func (f *FakeSubscribeFiles) Set(seat, text string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.files == nil {
+		f.files = map[string]string{}
+	}
+	f.files[seat] = text
+}
+
+// SubscribedSeats implements application.SubscribeFiles.
+func (f *FakeSubscribeFiles) SubscribedSeats(context.Context) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var seats []string
+	for seat := range f.files {
+		seats = append(seats, seat)
+	}
+	sort.Strings(seats)
+	return seats, nil
+}
+
+// SubscribeFile implements application.SubscribeFiles.
+func (f *FakeSubscribeFiles) SubscribeFile(_ context.Context, seat string) (string, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	text, ok := f.files[seat]
+	return text, ok, nil
+}
+
+// FakeNudgeCursors is an in-memory application.NudgeCursors.
+type FakeNudgeCursors struct {
+	mu    sync.Mutex
+	saved map[string]uint64
+}
+
+var _ application.NudgeCursors = (*FakeNudgeCursors)(nil)
+
+// Load implements application.NudgeCursors.
+func (f *FakeNudgeCursors) Load(context.Context) (map[string]uint64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make(map[string]uint64, len(f.saved))
+	for k, v := range f.saved {
+		out[k] = v
+	}
+	return out, nil
+}
+
+// Save implements application.NudgeCursors.
+func (f *FakeNudgeCursors) Save(_ context.Context, cursors map[string]uint64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.saved = make(map[string]uint64, len(cursors))
+	for k, v := range cursors {
+		f.saved[k] = v
+	}
 	return nil
 }
