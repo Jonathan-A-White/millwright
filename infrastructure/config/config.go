@@ -83,6 +83,7 @@ const (
 	PosternBackendEnv       = "MW_POSTERN_BACKEND"
 	PosternFloatSatsEnv     = "MW_POSTERN_FLOAT_SATS"
 	PosternGovernorKeyEnv   = "MW_POSTERN_GOVERNOR_KEY"
+	TalkHoldingReplyEnv     = "MW_TALK_HOLDING_REPLY"
 	PosternKeyFileEnv       = "MW_POSTERN_KEY_FILE"
 	PosternSnapshotPathEnv  = "MW_POSTERN_SNAPSHOT_PATH"
 	PosternViewPathEnv      = "MW_POSTERN_VIEW_PATH"
@@ -267,6 +268,14 @@ func PosternFloatSats() (int, error) {
 // ~/.config/mw/config.toml, and empty when neither says.
 func PosternGovernorKey() (string, error) {
 	return optionalSetting("postern_governor_key", PosternGovernorKeyEnv, "")
+}
+
+// TalkHoldingReply reports the holding answer mw talk wait sends the moment a
+// Governor turn arrives: $MW_TALK_HOLDING_REPLY if it is set, otherwise the
+// root-table `talk_holding_reply` key of ~/.config/mw/config.toml, and empty,
+// which sends none, when neither says.
+func TalkHoldingReply() (string, error) {
+	return optionalSetting("talk_holding_reply", TalkHoldingReplyEnv, "")
 }
 
 // PosternKeyFile reports where the Mayor's postern key is kept:

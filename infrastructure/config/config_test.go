@@ -997,6 +997,29 @@ func TestPosternGovernorKeyIsEmptyUntilAHostSaysOtherwise(t *testing.T) {
 	}
 }
 
+func TestTalkHoldingReplyIsEmptyUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, vpsConfig)
+
+	reply, err := config.TalkHoldingReply()
+	if err != nil {
+		t.Fatalf("reading the talk holding reply: %v", err)
+	}
+	if reply != "" {
+		t.Fatalf("expected no talk holding reply by default, got %q", reply)
+	}
+
+	t.Setenv(config.TalkHoldingReplyEnv, "Hold on.")
+	if reply, err = config.TalkHoldingReply(); err != nil || reply != "Hold on." {
+		t.Fatalf("expected %s to win, got %q: %v", config.TalkHoldingReplyEnv, reply, err)
+	}
+
+	t.Setenv(config.TalkHoldingReplyEnv, "")
+	writeConfig(t, "talk_holding_reply = \"One moment.\"\n")
+	if reply, err = config.TalkHoldingReply(); err != nil || reply != "One moment." {
+		t.Fatalf("expected the config file's talk_holding_reply to read back, got %q: %v", reply, err)
+	}
+}
+
 func TestPosternKeyFileIsUnderHomeUntilAHostSaysOtherwise(t *testing.T) {
 	home := writeConfig(t, vpsConfig)
 

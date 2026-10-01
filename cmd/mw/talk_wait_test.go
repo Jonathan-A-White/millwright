@@ -18,7 +18,7 @@ func TestTalkWaitHelpRunsAndListsItsFlags(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("mw talk wait --help: %v", err)
 	}
-	for _, want := range []string{"--limit", "--min-backoff", "--max-backoff", TalkWaitLimitEnv} {
+	for _, want := range []string{"--limit", "--min-backoff", "--max-backoff", "--hold", "talk_holding_reply", TalkWaitLimitEnv} {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("expected the help to name %s, got:\n%s", want, buf.String())
 		}
@@ -39,6 +39,23 @@ func TestTalkWaitLimitIsSecondsFromTheEnvironmentElseTheDefault(t *testing.T) {
 		t.Setenv(TalkWaitLimitEnv, tc.env)
 		if got := talkWaitLimit(); got != tc.want {
 			t.Errorf("%s=%q: expected a limit of %s, got %s", TalkWaitLimitEnv, tc.env, tc.want, got)
+		}
+	}
+}
+
+func TestTalkWaitHoldingReplyIsSentOnlyWhenConfiguredAndHeld(t *testing.T) {
+	for _, tc := range []struct {
+		hold       bool
+		configured string
+		want       string
+	}{
+		{true, "One moment.", "One moment."},
+		{false, "One moment.", ""},
+		{true, "", ""},
+		{false, "", ""},
+	} {
+		if got := talkHoldingReply(tc.hold, tc.configured); got != tc.want {
+			t.Errorf("hold %v, configured %q: expected %q, got %q", tc.hold, tc.configured, tc.want, got)
 		}
 	}
 }
