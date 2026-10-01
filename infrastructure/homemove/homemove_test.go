@@ -622,3 +622,117 @@ func TestBeadsServerThatNeverAnswersSaysSoWhenWaitIsUp(t *testing.T) {
 		t.Errorf("expected the address in the error, got %v", err)
 	}
 }
+
+// beadsEnv sets what bd is told about the server it logs in to.
+func beadsEnv(t *testing.T, user, password, port string) {
+	t.Helper()
+	t.Setenv("BEADS_DOLT_SERVER_USER", user)
+	t.Setenv("BEADS_DOLT_PASSWORD", password)
+	t.Setenv("BEADS_DOLT_SERVER_PASSWORD", "")
+	t.Setenv("BEADS_DOLT_SERVER_PORT", port)
+}
+
+const throwaway = "p4ss'w\\ord-Zq93-distinct"
+
+func TestCreateBeadsUserFeedsTheSQLOnStdinAndNeverPutsThePasswordInAnArgument(t *testing.T) {
+	dir := onPath(t, map[string]string{"dolt": `cat > "$(dirname "$0")/dolt.stdin"`})
+	beadsEnv(t, "beads", throwaway, "3399")
+
+	user, created, err := Host{}.CreateBeadsUser(context.Background())
+
+	if err != nil || !created || user != "beads" {
+		t.Fatalf("got %q, %v, %v", user, created, err)
+	}
+	argv := strings.TrimSpace(logOf(t, dir, "dolt"))
+	if argv != "--host 127.0.0.1 --port 3399 --user root --no-tls sql" {
+		t.Errorf("dolt was run as %q", argv)
+	}
+	if strings.Contains(argv, "p4ss") {
+		t.Errorf("the password is in an argument: %q", argv)
+	}
+	stdin, err := os.ReadFile(filepath.Join(dir, "dolt.stdin"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustHave := []string{
+		`CREATE USER IF NOT EXISTS 'beads'@'%' IDENTIFIED BY 'p4ss''w\\ord-Zq93-distinct';`,
+		`GRANT ALL PRIVILEGES ON *.* TO 'beads'@'%' WITH GRANT OPTION;`,
+	}
+	for _, want := range mustHave {
+		if !strings.Contains(string(stdin), want) {
+			t.Errorf("expected %q on stdin, got:\n%s", want, stdin)
+		}
+	}
+}
+
+func TestCreateBeadsUserPortIs3307WhenUnset(t *testing.T) {
+	dir := onPath(t, map[string]string{"dolt": "cat >/dev/null"})
+	beadsEnv(t, "beads", "pw", "")
+
+	if _, _, err := (Host{}).CreateBeadsUser(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(logOf(t, dir, "dolt")); !strings.Contains(got, "--port 3307") {
+		t.Errorf("dolt was run as %q", got)
+	}
+}
+
+func TestCreateBeadsUserIsSkippedForRootAndForNoUser(t *testing.T) {
+	for _, user := range []string{"root", ""} {
+		dir := onPath(t, map[string]string{"dolt": "cat >/dev/null"})
+		beadsEnv(t, user, "pw", "3399")
+
+		_, created, err := Host{}.CreateBeadsUser(context.Background())
+
+		if err != nil || created {
+			t.Errorf("user %q: got created=%v, %v", user, created, err)
+		}
+		if got := logOf(t, dir, "dolt"); got != "" {
+			t.Errorf("user %q: dolt ran: %q", user, got)
+		}
+	}
+}
+
+func TestCreateBeadsUserFailureNamesTheUserAndNeverSaysThePassword(t *testing.T) {
+	// dolt that echoes what it was fed, as an error would quote the statement.
+	onPath(t, map[string]string{"dolt": "cat >&2; echo 'Error 1105: no' >&2; exit 1"})
+	beadsEnv(t, "beads", throwaway, "3399")
+
+	_, _, err := Host{}.CreateBeadsUser(context.Background())
+
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	if strings.Contains(err.Error(), "p4ss") || strings.Contains(err.Error(), "ord-Zq93") {
+		t.Errorf("the error says the password: %v", err)
+	}
+	if !strings.Contains(err.Error(), "beads") || !strings.Contains(err.Error(), "Error 1105") {
+		t.Errorf("expected the user and what dolt said: %v", err)
+	}
+}
+
+func TestCreateBeadsUserDropsAnAmbientDoltPassword(t *testing.T) {
+	dir := onPath(t, map[string]string{"dolt": `echo "set=[${DOLT_CLI_PASSWORD+yes}] pw=[$DOLT_CLI_PASSWORD]" >> "$(dirname "$0")/env.log"; cat >/dev/null`})
+	beadsEnv(t, "beads", "pw", "3399")
+	t.Setenv("DOLT_CLI_PASSWORD", "ambient")
+
+	if _, _, err := (Host{}).CreateBeadsUser(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "env.log")); strings.TrimSpace(string(got)) != "set=[yes] pw=[]" {
+		t.Errorf("root was not given an empty password: %s", got)
+	}
+}
+
+func TestCreateBeadsUserReadsTheServerPasswordNameWhenBdsOwnIsNotSet(t *testing.T) {
+	dir := onPath(t, map[string]string{"dolt": `cat > "$(dirname "$0")/dolt.stdin"`})
+	beadsEnv(t, "beads", "", "3399")
+	t.Setenv("BEADS_DOLT_SERVER_PASSWORD", "from-server-name")
+
+	if _, _, err := (Host{}).CreateBeadsUser(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if stdin, _ := os.ReadFile(filepath.Join(dir, "dolt.stdin")); !strings.Contains(string(stdin), "IDENTIFIED BY 'from-server-name'") {
+		t.Errorf("stdin: %s", stdin)
+	}
+}

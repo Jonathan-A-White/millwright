@@ -96,6 +96,7 @@ func TestAPlannedMoveStandsTheOldHomeDownBeforeTouchingTheNewOne(t *testing.T) {
 		"empty data dir /home/jwhite/millwright-vault/.beads/dolt",
 		"systemctl --user start dolt-beads",
 		"wait for the beads server",
+		"create beads user",
 		"bd bootstrap --yes",
 		"git checkout -- .beads/config.yaml",
 		"bd count",

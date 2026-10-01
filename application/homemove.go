@@ -81,6 +81,14 @@ type HomeMoveHost interface {
 	// (BEADS_DOLT_SERVER_HOST on BEADS_DOLT_SERVER_PORT) to take a connection.
 	BeadsServerAnswers(ctx context.Context, wait time.Duration) error
 
+	// CreateBeadsUser makes, on the fresh server, the user bd logs in as
+	// (BEADS_DOLT_SERVER_USER, with BEADS_DOLT_PASSWORD), with all privileges: a
+	// server on an empty data directory knows only root. user is the name, for the
+	// words around it; created is false when there was nothing to make (the user is
+	// root, or none is set). The password is never returned, printed or put in an
+	// argument.
+	CreateBeadsUser(ctx context.Context) (user string, created bool, err error)
+
 	// StartUnit starts the user unit, and reports whether it did: a unit that was
 	// already running is left alone, and is (false, nil).
 	StartUnit(ctx context.Context, unit string) (started bool, err error)
@@ -601,6 +609,19 @@ func (r *homeMoveRun) serveFresh(ctx context.Context, dolt string) error {
 		return fmt.Errorf("waiting for the %s server to answer: %w", DoltBeadsUnit, err)
 	}
 	r.say("the %s server answers.", DoltBeadsUnit)
+	user, created, err := m.Machine.CreateBeadsUser(ctx)
+	if err != nil {
+		return fmt.Errorf("making the beads user %q on the fresh %s server, which knows only root: %w. bd cannot log in without it, so the move stops before bootstrap. %s; the ways back are below",
+			user, DoltBeadsUnit, err, r.asideText())
+	}
+	switch {
+	case created:
+		r.say("made the beads user %q on the %s server, with all privileges.", user, DoltBeadsUnit)
+	case user == "":
+		r.say("BEADS_DOLT_SERVER_USER is not set: no user is made on the fresh server.")
+	default:
+		r.say("BEADS_DOLT_SERVER_USER is %s: the fresh server has that user already.", user)
+	}
 	return nil
 }
 

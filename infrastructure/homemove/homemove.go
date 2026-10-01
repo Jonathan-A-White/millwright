@@ -289,6 +289,63 @@ func (h Host) BeadsServerAnswers(ctx context.Context, wait time.Duration) error 
 	}
 }
 
+// CreateBeadsUser implements application.HomeMoveHost: `dolt --host 127.0.0.1 --port
+// <p> --user root --no-tls sql` with the two statements on stdin, so that the
+// password is in no argument. The port is BEADS_DOLT_SERVER_PORT, 3307 when unset. A
+// fresh server lets root in without a password, but dolt asks for one on a terminal
+// unless DOLT_CLI_PASSWORD is set: it is set empty, which also drops an ambient one.
+// The password is bd's own BEADS_DOLT_PASSWORD (the name beads.env carries and bd
+// reads), or BEADS_DOLT_SERVER_PASSWORD when that is not set. What dolt says on a
+// failure may quote the statement, so the password is struck out of it.
+func (Host) CreateBeadsUser(ctx context.Context) (string, bool, error) {
+	user, password := os.Getenv("BEADS_DOLT_SERVER_USER"), os.Getenv("BEADS_DOLT_PASSWORD")
+	if password == "" {
+		password = os.Getenv("BEADS_DOLT_SERVER_PASSWORD")
+	}
+	if user == "" || user == "root" {
+		return user, false, nil
+	}
+	port := os.Getenv("BEADS_DOLT_SERVER_PORT")
+	if port == "" {
+		port = "3307"
+	}
+	sql := fmt.Sprintf("CREATE USER IF NOT EXISTS %s@'%%' IDENTIFIED BY %s;\nGRANT ALL PRIVILEGES ON *.* TO %s@'%%' WITH GRANT OPTION;\n",
+		sqlString(user), sqlString(password), sqlString(user))
+
+	cmd := exec.CommandContext(ctx, "dolt", "--host", "127.0.0.1", "--port", port, "--user", "root", "--no-tls", "sql")
+	cmd.WaitDelay = time.Second
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "DOLT_CLI_PASSWORD=") {
+			cmd.Env = append(cmd.Env, kv)
+		}
+	}
+	cmd.Env = append(cmd.Env, "DOLT_CLI_PASSWORD=")
+	cmd.Stdin = strings.NewReader(sql)
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return user, false, fmt.Errorf("dolt sql: stopped: %w", ctx.Err())
+		}
+		said := strings.TrimSpace(out.String())
+		if password != "" {
+			said = strings.ReplaceAll(said, sqlString(password), "'<password>'")
+			said = strings.ReplaceAll(said, password, "<password>")
+		}
+		if said == "" {
+			return user, false, fmt.Errorf("dolt sql as root on 127.0.0.1:%s: %w", port, err)
+		}
+		return user, false, fmt.Errorf("dolt sql as root on 127.0.0.1:%s: %w: %s", port, err, said)
+	}
+	return user, true, nil
+}
+
+// sqlString is s as a single-quoted SQL string: a quote is doubled and a backslash
+// escaped, as Dolt (MySQL) reads them.
+func sqlString(s string) string {
+	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `''`).Replace(s) + "'"
+}
+
 // StartUnit implements application.HomeMoveHost: a unit that is active is left
 // alone.
 func (Host) StartUnit(ctx context.Context, unit string) (bool, error) {

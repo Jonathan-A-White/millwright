@@ -59,6 +59,9 @@ type moveWorld struct {
 	// workDir is the unit's WorkingDirectory, the data dir it serves; the vault's
 	// .beads/dolt when empty.
 	workDir string
+	// beadsUser is the BEADS_DOLT_SERVER_USER the move sees: "beads" when empty, "none"
+	// for no user set.
+	beadsUser string
 	// failAt is a call that fails, once it has been made and written down.
 	failAt string
 	// written is the last home file written.
@@ -152,6 +155,20 @@ func (w *moveWorld) BeadsServerAnswers(_ context.Context, wait time.Duration) er
 		return errors.New("the wait is 30 s")
 	}
 	return w.did("wait for the beads server")
+}
+
+// CreateBeadsUser writes one call down; the user it answers with is beadsUser, "beads"
+// when unset, and the root user or none is the step skipped.
+func (w *moveWorld) CreateBeadsUser(context.Context) (string, bool, error) {
+	user := w.beadsUser
+	switch user {
+	case "":
+		user = "beads"
+	case "none":
+		user = ""
+	}
+	err := w.did("create beads user")
+	return user, user != "" && user != "root", err
 }
 
 func (w *moveWorld) StartUnit(_ context.Context, unit string) (bool, error) {
@@ -279,6 +296,7 @@ func TestMoveRunsTheSixStepsInOrder(t *testing.T) {
 		"empty data dir "+doltMoved.From,
 		"systemctl --user start dolt-beads",
 		"wait for the beads server",
+		"create beads user",
 		"bd bootstrap --yes",
 		"git checkout -- .beads/config.yaml",
 		"bd count",
@@ -637,7 +655,7 @@ func TestADoltDirectoryIsSetAsideBesideTheEmbeddedOneAndItsWayBackIsPrinted(t *t
 		"aside .beads/embeddeddolt", "aside .beads/dolt",
 		"systemctl show dolt-beads WorkingDirectory", "empty data dir "+doltMoved.From,
 		"systemctl --user start dolt-beads", "wait for the beads server",
-		"bd bootstrap --yes", "host lock released")
+		"create beads user", "bd bootstrap --yes", "host lock released")
 	mustContain(t, "ways back", out.String(), "Ways back",
 		"mv "+doltMoved.To+" "+doltMoved.From, "mv "+asideMoved.To+" "+asideMoved.From)
 }
@@ -659,7 +677,7 @@ func TestARunningDoltBeadsIsStoppedBeforeTheRenameAndItsRestartIsAWayBack(t *tes
 		"aside .beads/embeddeddolt", "aside .beads/dolt",
 		"systemctl show dolt-beads WorkingDirectory", "empty data dir "+doltMoved.From,
 		"systemctl --user start dolt-beads", "wait for the beads server",
-		"bd bootstrap --yes", "host lock released")
+		"create beads user", "bd bootstrap --yes", "host lock released")
 	text := out.String()
 	block := text[strings.Index(text, "The move stopped"):]
 	mustContain(t, "error", err.Error(), "into the dolt-beads server", "fresh data directory")
@@ -704,6 +722,7 @@ func TestAMoveOntoAHostThatServesBeadsStartsTheUnitOnAFreshDataDirBeforeBootstra
 		"empty data dir " + doltMoved.From,
 		"systemctl --user start dolt-beads",
 		"wait for the beads server",
+		"create beads user",
 		"bd bootstrap --yes",
 		"git checkout -- .beads/config.yaml",
 		"bd count",
@@ -790,6 +809,64 @@ func TestABeadsServerThatNeverAnswersStopsTheMoveBeforeBootstrap(t *testing.T) {
 	for _, call := range w.calls {
 		if call == "bd bootstrap --yes" {
 			t.Errorf("bootstrapped with no server answering")
+		}
+	}
+	mustContain(t, "ways back", out.String(), "Ways back", "systemctl --user stop dolt-beads")
+}
+
+// A fresh server holds only root: the user bd logs in as is made there before bootstrap.
+func TestTheBeadsUserIsMadeOnTheFreshServerBetweenItsAnswerAndBootstrap(t *testing.T) {
+	w, out := newMoveWorld(), &bytes.Buffer{}
+
+	if err := move(w, out).Run(context.Background()); err != nil {
+		t.Fatalf("move: %v\n%s", err, out)
+	}
+
+	var seen []string
+	for _, call := range w.calls {
+		switch call {
+		case "systemctl --user start dolt-beads", "wait for the beads server", "create beads user", "bd bootstrap --yes":
+			seen = append(seen, call)
+		}
+	}
+	wantSeen := []string{"systemctl --user start dolt-beads", "wait for the beads server", "create beads user", "bd bootstrap --yes"}
+	if !reflect.DeepEqual(seen, wantSeen) {
+		t.Errorf("order:\n got  %q\n want %q", seen, wantSeen)
+	}
+	mustContain(t, "report", out.String(), "made the beads user \"beads\" on the dolt-beads server")
+}
+
+func TestARootOrMissingBeadsUserSkipsTheStepAndSaysSo(t *testing.T) {
+	for user, said := range map[string]string{
+		"root": "BEADS_DOLT_SERVER_USER is root: the fresh server has that user already",
+		"none": "BEADS_DOLT_SERVER_USER is not set: no user is made on the fresh server",
+	} {
+		w, out := newMoveWorld(), &bytes.Buffer{}
+		w.beadsUser = user
+
+		if err := move(w, out).Run(context.Background()); err != nil {
+			t.Fatalf("%s: move: %v\n%s", user, err, out)
+		}
+		mustContain(t, user, out.String(), said)
+		if strings.Contains(out.String(), "made the beads user") {
+			t.Errorf("%s: said it made a user:\n%s", user, out)
+		}
+	}
+}
+
+func TestAFailingUserStepStopsBeforeBootstrapNamingTheUserAndTheWayBack(t *testing.T) {
+	w, out := newMoveWorld(), &bytes.Buffer{}
+	w.failAt = "create beads user"
+
+	err := move(w, out).Run(context.Background())
+
+	if err == nil {
+		t.Fatal("expected the move to stop")
+	}
+	mustContain(t, "error", err.Error(), "step 2", `"beads"`, "dolt-beads")
+	for _, call := range w.calls {
+		if call == "bd bootstrap --yes" {
+			t.Errorf("bootstrapped with no user to log in as")
 		}
 	}
 	mustContain(t, "ways back", out.String(), "Ways back", "systemctl --user stop dolt-beads")
