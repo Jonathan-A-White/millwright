@@ -1478,3 +1478,66 @@ func TestGristConfiguredIsATableInTheConfigFile(t *testing.T) {
 		}
 	}
 }
+
+func TestBackendsReadsEachRigsBackendTable(t *testing.T) {
+	writeConfig(t, `host = "laptop"
+
+[rigs]
+postern = "/home/j/postern"
+millwright = "/home/j/millwright"
+
+[backend.postern]
+build = "go build -o {out} ./cmd/postern"
+stage = "/home/j/.local/share/postern"
+live = "/home/j/.local/bin/postern"
+service = "postern-backend"
+health = "https://postern.example.org/api/healthz"
+check = "/home/j/.local/bin/mw postern inbox --unread-count"
+`)
+
+	backends, err := config.Backends()
+	if err != nil {
+		t.Fatalf("reading the backends: %v", err)
+	}
+	if len(backends) != 1 {
+		t.Fatalf("expected only postern to have a backend, got %+v", backends)
+	}
+	got := backends["postern"]
+	if got.Dir != "server" || got.Build != "go build -o {out} ./cmd/postern" || got.Service != "postern-backend" ||
+		got.Live != "/home/j/.local/bin/postern" || got.Stage != "/home/j/.local/share/postern" ||
+		got.Health != "https://postern.example.org/api/healthz" || got.Check != "/home/j/.local/bin/mw postern inbox --unread-count" {
+		t.Errorf("expected the table read back with dir defaulted to server, got %+v", got)
+	}
+}
+
+func TestAHostThatSaysNothingAboutBackendsHasNone(t *testing.T) {
+	writeConfig(t, vpsConfig)
+	backends, err := config.Backends()
+	if err != nil || len(backends) != 0 {
+		t.Fatalf("expected no backend, got %+v, %v", backends, err)
+	}
+}
+
+func TestAHalfSetBackendTableIsRefusedNamingWhatIsMissing(t *testing.T) {
+	base := `[rigs]
+postern = "/home/j/postern"
+
+[backend.postern]
+build = "go build -o {out} ./cmd/postern"
+stage = "/s"
+live = "/l"
+service = "u"
+health = "http://h"
+`
+	for name, c := range map[string]struct{ from, to, want string }{
+		"no service":    {"service = \"u\"\n", "", "no service"},
+		"no health":     {"health = \"http://h\"\n", "", "no health"},
+		"no {out}":      {"{out}", "x", "{out}"},
+		"relative live": {"live = \"/l\"", "live = \"bin/l\"", "full path"},
+	} {
+		writeConfig(t, strings.Replace(base, c.from, c.to, 1))
+		if _, err := config.Backends(); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: expected a refusal naming %q, got %v", name, c.want, err)
+		}
+	}
+}

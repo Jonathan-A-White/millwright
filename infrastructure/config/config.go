@@ -23,6 +23,15 @@
 //	[rigs]
 //	millwright = "/root/millwright"
 //
+//	[backend.postern]
+//	dir     = "server"
+//	build   = "go build -o {out} ./cmd/postern"
+//	stage   = "/home/jwhite/.local/share/postern"
+//	live    = "/home/jwhite/.local/bin/postern"
+//	service = "postern-backend"
+//	health  = "https://postern.example.org/api/healthz"
+//	check   = "/home/jwhite/.local/bin/mw postern inbox --unread-count"
+//
 //	[watch]
 //	ssh     = "vps"
 //	host    = "vps"
@@ -1295,6 +1304,81 @@ func AfterLanding() (map[string]string, error) {
 		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
 	}
 	return tableIn(filepath.Join(home, File), AfterLandingTable)
+}
+
+// BackendTablePrefix starts the name of the table that says how a rig's own
+// backend is built and swapped on this host: `[backend.postern]`.
+const BackendTablePrefix = "backend."
+
+// DefaultBackendDir is the directory of a rig its backend is built in, and the
+// one whose changes count, when the table does not say.
+const DefaultBackendDir = "server"
+
+// BackendSettings is one rig's `[backend.<rig>]` table: Dir (default
+// DefaultBackendDir) the directory a landing must have changed for the backend to
+// need staging, Build the command line that builds it, run in Dir with {out}
+// where the binary goes, Stage the directory built binaries wait in, Live the
+// binary the service runs, Service its user unit, Health a URL that answers once
+// it is up, and Check an optional command that must succeed beside it.
+type BackendSettings struct {
+	Dir, Build, Stage, Live, Service, Health, Check string
+}
+
+// Backends reports the backend each rig has on this host, by rig name, read from
+// a `[backend.<rig>]` table for every rig of the `[rigs]` table: a landing of a
+// story that changed the rig's Dir is then built and staged on the home, and its
+// swap written as a hands step. A rig with no such table has no backend, and a
+// machine with none is not an error. A table that leaves out build, stage, live,
+// service or health, or names stage or live by anything but a full path, is
+// refused saying which, so that a half-set table never stages half a swap.
+func Backends() (map[string]BackendSettings, error) {
+	rigs, err := Rigs()
+	if err != nil {
+		return nil, err
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+
+	backends := map[string]BackendSettings{}
+	for _, name := range RigNames(rigs) {
+		table, err := tableIn(path, BackendTablePrefix+name)
+		if err != nil {
+			return nil, err
+		}
+		if len(table) == 0 {
+			continue
+		}
+		b := BackendSettings{
+			Dir:     strings.TrimSpace(table["dir"]),
+			Build:   strings.TrimSpace(table["build"]),
+			Stage:   strings.TrimSpace(table["stage"]),
+			Live:    strings.TrimSpace(table["live"]),
+			Service: strings.TrimSpace(table["service"]),
+			Health:  strings.TrimSpace(table["health"]),
+			Check:   strings.TrimSpace(table["check"]),
+		}
+		if b.Dir == "" {
+			b.Dir = DefaultBackendDir
+		}
+		for key, value := range map[string]string{"build": b.Build, "stage": b.Stage, "live": b.Live, "service": b.Service, "health": b.Health} {
+			if value == "" {
+				return nil, fmt.Errorf("[%s%s] in %s has no %s: a backend is built, staged and swapped from all of dir, build, stage, live, service and health", BackendTablePrefix, name, path, key)
+			}
+		}
+		if !strings.Contains(b.Build, "{out}") {
+			return nil, fmt.Errorf("[%s%s] build is %q, which says nowhere to leave the binary: write {out} where it goes", BackendTablePrefix, name, b.Build)
+		}
+		for key, value := range map[string]string{"stage": b.Stage, "live": b.Live} {
+			if !filepath.IsAbs(value) {
+				return nil, fmt.Errorf("[%s%s] %s is %q in %s: it must be a full path", BackendTablePrefix, name, key, value, path)
+			}
+		}
+		backends[name] = b
+	}
+	return backends, nil
 }
 
 // WatchSettings is what the `[watch]` table says: how to reach the host that is
