@@ -27,9 +27,9 @@ func TestAIAttributionFindsTheLineThatSignsTheWork(t *testing.T) {
 	}
 
 	honest := map[string]string{
-		"a plain message":                "Do the thing\n\nBecause it needed doing.",
-		"an empty message":               "",
-		"a message naming the seat":      "Do the thing\n\nWorked by the builder seat on vps.",
+		"a plain message":              "Do the thing\n\nBecause it needed doing.",
+		"an empty message":             "",
+		"a message naming the seat":    "Do the thing\n\nWorked by the builder seat on vps.",
 		"a message about attribution":  "Refuse a branch whose commits carry a Co-Authored-By trailer",
 		"a trailer that is not a line": "Do the thing (the Co-Authored-By trailer is what we refuse)",
 	}
