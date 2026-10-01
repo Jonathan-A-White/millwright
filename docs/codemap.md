@@ -40,8 +40,6 @@ Each adapter: `var _ application.<Port> = ...`.
 | `VaultBirth`, `TrackerBirth` | `application/init.go` | `infrastructure/{vault/birth,beads/init}.go` | none |
 | `Landing`, `Checks`, `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/{landing,checks,slot}.go` | none |
 | `AfterLanding` | `application/afterlanding.go` | `infrastructure/rig/afterlanding.go` | none |
-| `Dispatcher` | `application/landing.go` | `application.Dispatch` | — |
-| `HostSync` | `application/dispatch.go` | `application.Sync` | — |
 | Postern, hands | `application/{postern*,hands}.go` | `infrastructure/{postern,hands*,homemove}` | `apptest.Fake{Postern*,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*,HomeMover}` |
 | `Grinder`, `GrindSource`, `GristState`, `GristLock` | `application/grist.go` | `infrastructure/{claude/grind,rig/grinds,hostlock/try}.go`, `infrastructure/grist` | `apptest.Fake{Grinder,Grinds,GristState,GristLock}` |
 
@@ -67,6 +65,7 @@ Each adapter: `var _ application.<Port> = ...`.
 | `HomeMove` | `application/homemove.go` | `mw home move` — `cmd/mw/homemove.go` | none: `docs/home-move.md` |
 | `Seat{Context,Up,Reap}` | `application/seatcontext.go`, `application/seatup.go`, `application/seatreap.go` | `mw seat context`/`up`/`reap` — `cmd/mw/seat.go` | `features/seat_{context,up,reap}.feature` |
 | `Millhand` | `application/millhand.go` | `mw millhand` — `cmd/mw/millhand.go` | `features/millhand.feature` |
+| `Deputy` | `application/deputy.go` | `mw deputy` — `cmd/mw/deputy.go` | `features/deputy.feature` |
 | `MillhandTick` | `application/millhandtick.go` | `mw millhand tick` — `cmd/mw/millhandtick.go` | `features/millhand_tick.feature` |
 | `Watch` | `application/watch.go` | `mw watch` — `cmd/mw/watch.go` | `features/watch.feature` |
 | `Doctor` | `application/doctor.go` | `mw doctor` — `cmd/mw/doctor.go` | `features/doctor.feature` |
