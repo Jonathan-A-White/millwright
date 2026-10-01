@@ -2055,7 +2055,7 @@ record that decrypts, is verifiably the Governor's and is a turn or the end of
 the talk, and prints the turn (talk id, turn, role, model, cut, text), the
 milliseconds from the event to the print, and any new Deputy mail to the Mayor
 (each message once, noted under `postern.talk.mail`; nothing is marked read).
-A record of another class, to another key or from anyone else is passed over.
+A talk record to another key or from anyone else is passed over.
 
 ```
 talk talk-7 turn 3 (role turn)
@@ -2064,6 +2064,21 @@ cut yes
 text: What landed today?
 index-to-print 12 ms
 ```
+
+It also ends when a new postern message for the Mayor's key arrives, so the
+Governor's words in a channel are not left unread while a talk runs. A message
+is new when it is past the postern inbox's cursor (read, in the wait's own
+terms, with `mw postern inbox`, which this wait only reads and never moves);
+each is reported once, under its channel, txid and first line, and left unread
+for `mw postern inbox` to read:
+
+```
+new postern message: 1 unread, read them with mw postern inbox
+  channel general, txid direct:e1065e4e...: I think the deputy has stopped answering me here
+```
+
+A Governor turn that arrives with one wins: the turn is printed first and the
+messages after it.
 
 `mw postern inbox` and its `--unread-count` skip talk records, so `mail-wait`
 never wakes the Mayor a second time for one turn. A first run starts at the

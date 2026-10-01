@@ -5,10 +5,12 @@ Feature: mw talk wait
   its own cursor. It ends at the first talk turn the Governor sent to the
   Mayor's key, printing the turn (talk id, turn, model, cut and text), how long
   from the event to the print, and any new mail the Deputy sent the Mayor. It
-  ends on its time limit like contrib/mail-wait. Records of other classes, to
-  other keys, or from anyone but the Governor do not end it; and mw postern
-  inbox and its --unread-count leave talk records alone, so that a turn never
-  wakes the Mayor twice.
+  ends on its time limit like contrib/mail-wait. It also ends at a new postern
+  message for the Mayor's key that mw postern inbox has not read, printing its
+  channel, txid and first line; a Governor turn wins if both arrive. Talk
+  records to other keys, or from anyone but the Governor, do not end it; and mw
+  postern inbox and its --unread-count leave talk records alone, so that a turn
+  never wakes the Mayor twice.
 
   Background:
     Given a postern backend that streams its events
@@ -33,14 +35,39 @@ Feature: mw talk wait
 
   Scenario: it ignores records that are not the Governor's talk turns to the Mayor
     Given mw talk wait is armed
-    When a "message" record to the Mayor is indexed
-    And a talk turn to another key is indexed
+    When a talk turn to another key is indexed
     And a talk turn from "stranger-key" to the Mayor is indexed
     And a talk record with role "answer" from the Governor to the Mayor is indexed
     Then mw talk wait is still waiting
     When the Governor's turn 2 of talk "talk-7" saying "The real one" is indexed
     Then mw talk wait ends within 1 second
     And the wait printed "The real one"
+
+  Scenario: a new postern message to the Mayor ends it, printing its channel, txid and first line
+    Given mw talk wait is armed
+    When a "message" record to the Mayor is indexed
+    Then mw talk wait ends within 1 second
+    And the wait printed "new postern message"
+    And the wait printed "channel general"
+    And the wait printed "direct:1"
+    And the wait printed "message text"
+
+  Scenario: a postern message mw postern inbox has read does not wake it
+    Given mw talk wait's cursor is at the start of the index
+    And a "message" record to the Mayor has been indexed
+    When mw postern inbox is run against the backend
+    And mw talk wait is armed
+    Then mw talk wait is still waiting
+
+  Scenario: a Governor turn that arrives with a postern message wins
+    Given mw talk wait's cursor is at the start of the index
+    And a "message" record to the Mayor has been indexed
+    And the Governor's turn 2 of talk "talk-6" saying "The turn wins" has been indexed
+    When mw talk wait is armed
+    Then mw talk wait ends within 1 second
+    And the wait printed "talk talk-6 turn 2"
+    And the wait printed "The turn wins"
+    And the wait printed "new postern message"
 
   Scenario: it resumes from its cursor, so one turn wakes it once
     Given mw talk wait's cursor is at the start of the index
