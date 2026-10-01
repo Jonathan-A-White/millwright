@@ -902,6 +902,11 @@ func posternFileName(txid string) string {
 	return strings.ReplaceAll(txid, ":", "-")
 }
 
+// PosternAnswerSubjectLimit is the most runes of an answer the Mayor's mail
+// subject carries; bd refuses a title over 500 characters, and the whole
+// answer stands in the mail's body (mw-gq6.188).
+const PosternAnswerSubjectLimit = 200
+
 // recordAnswer appends reply's answer to the bead it names, clears the note
 // that bead's question was marked open under, and mails the Mayor, reporting
 // true once done. A bead the tracker does not know — including no tracker at
@@ -934,10 +939,13 @@ func (i PosternInbox) recordAnswer(ctx context.Context, m PosternInboxMessage, r
 		if _, err := i.Mailbox.Send(ctx, NewMessage{
 			From:    SeatIdentity(MwSeat, i.Host),
 			To:      MayorMailbox,
-			Subject: fmt.Sprintf("Answer: %s: %s", reply.Bead, reply.Answer),
+			Subject: fmt.Sprintf("Answer: %s: %s", reply.Bead, clippedTo(strings.Join(strings.Fields(reply.Answer), " "), PosternAnswerSubjectLimit)),
 			Body:    comment,
 		}); err != nil {
-			return false, err
+			// The answer is already on the bead: a mail that cannot be sent
+			// must not make a later pass apply it again, so it is said, not
+			// returned (mw-gq6.188).
+			i.printf("mw postern inbox: the answer to %s is recorded, but mailing the Mayor failed: %v\n", reply.Bead, err)
 		}
 	}
 	if isReleaseTap(reply.Answer) {

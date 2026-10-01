@@ -435,3 +435,66 @@ func TestApplyVerifiedIsRefusedOnlyWhenACommentBeginsWithVERIFIED(t *testing.T) 
 		t.Fatalf("expected the refusal to say it is already verified, got %q", note)
 	}
 }
+
+// An answer whose option text is far longer than bd's title limit is mailed
+// under a clipped subject, the whole answer standing in the body (mw-gq6.188).
+func TestApplyClipsALongAnswersMailSubjectAndKeepsItWholeInTheBody(t *testing.T) {
+	f := newApplyFixture(t)
+	long := strings.Repeat("word ", 153) + "end"
+	if len(long) != 768 {
+		t.Fatalf("fixture: expected a long answer of 768 characters, got %d", len(long))
+	}
+	reply, _ := json.Marshal(application.PosternReply{Bead: "mw-e.3", Answer: long})
+	f.message(t, releaseTapGovernorKey, "tx-long", string(reply))
+
+	f.apply(t)
+
+	mail, err := f.mailbox.Inbox(context.Background(), application.MayorMailbox)
+	mustDo(t, err)
+	if len(mail) != 1 {
+		t.Fatalf("expected one mail, got %d", len(mail))
+	}
+	if n := len([]rune(mail[0].Subject)); n >= 500 {
+		t.Fatalf("expected a subject under 500 characters, got %d", n)
+	}
+	if !strings.HasPrefix(mail[0].Subject, "Answer: mw-e.3: word word") || !strings.HasSuffix(mail[0].Subject, "…") {
+		t.Fatalf("expected the subject clipped and marked, got %q", mail[0].Subject)
+	}
+	if !strings.Contains(mail[0].Body, long) {
+		t.Fatalf("expected the whole answer in the body, got %q", mail[0].Body)
+	}
+}
+
+// When the answer's mail cannot be sent, the ANSWER comment stands, the txid
+// is marked applied so no later pass retries it, the error is printed and the
+// pass succeeds (mw-gq6.188).
+func TestApplyMarksAnAnswerAppliedEvenWhenItsMailFails(t *testing.T) {
+	f := newApplyFixture(t)
+	reply, _ := json.Marshal(application.PosternReply{Bead: "mw-e.3", Answer: "B"})
+	f.message(t, releaseTapGovernorKey, "tx-answer", string(reply))
+	f.mailbox.Err = errors.New("title must be 500 characters or less")
+
+	f.out.Reset()
+	if _, err := f.inbox().Apply(context.Background()); err != nil {
+		t.Fatalf("expected the pass to succeed though the mail failed, got %v", err)
+	}
+
+	if got := f.tracker.Comments("mw-e.3"); len(got) != 1 || !strings.HasPrefix(got[0], "ANSWER ") {
+		t.Fatalf("expected the ANSWER on mw-e.3, got %v", got)
+	}
+	if note, _ := f.tracker.Note(context.Background(), application.PosternAppliedKey("tx-answer")); note == "" {
+		t.Fatal("expected tx-answer marked applied")
+	}
+	if got := f.out.String(); !strings.Contains(got, "title must be 500 characters or less") {
+		t.Fatalf("expected the mail error printed, got %q", got)
+	}
+
+	f.mailbox.Err = nil
+	f.out.Reset()
+	if _, err := f.inbox().Apply(context.Background()); err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	if got := f.tracker.Comments("mw-e.3"); len(got) != 1 {
+		t.Fatalf("expected the answer recorded once, got %v", got)
+	}
+}
