@@ -28,7 +28,10 @@ KillMode=process
 # tunnel to the Laptop's Dolt and takes seconds, so one tick that claims and
 # launches a story runs past two minutes, and a kill mid-tick leaves a launched
 # Builder with no attempts and no run=running. The timer never starts a second
-# tick while one runs, so a long tick blocks only itself.
+# tick while one runs, so a long tick blocks only itself. The tick also keeps
+# this host's mw level with the factory rig's main (mw-gq6.184), and that build
+# (`make build` with the host's Go) runs inside this limit, as in the
+# Millhand's tick unit: a first build after a Go update can take minutes.
 TimeoutStartSec=10min
 
 # mw dispatch leaves with 5 when the vault holds uncommitted work: it stopped

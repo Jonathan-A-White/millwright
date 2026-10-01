@@ -787,6 +787,12 @@ and is tried again by the next tick (the commit last built is kept in
 `~/.local/state/mw/built-millwright`). A dry run does none of it. The command
 is stopped after five minutes, so the tick's unit allows ten.
 
+`mw dispatch` does the same look first (mw-gq6.184), once it holds the dispatch
+lock and before it syncs, so a host that dispatches and runs no Millhand tick
+keeps its `mw` level too; it prints the same `self-update:` line. A host that runs
+both ticks builds a commit once, because both keep the one built marker. The
+dispatch unit's `TimeoutStartSec` is ten minutes for the same reason.
+
 ## Recovering a story after a refused landing
 
 ```sh

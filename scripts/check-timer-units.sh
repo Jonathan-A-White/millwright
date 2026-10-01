@@ -175,6 +175,8 @@ need() {
 need "$SERVICE" "Type=oneshot"
 need "$SERVICE" "SuccessExitStatus=5 7"
 need "$SERVICE" "KillMode=process"
+# The tick's self-update builds mw inside the unit, so the limit must hold a build.
+need "$SERVICE" "TimeoutStartSec=10min"
 need "$SERVICE" "ExecStart=/usr/bin/env mw dispatch"
 need "$TIMER" "Persistent=false"
 need "$TIMER" "OnCalendar=*:0/5"
