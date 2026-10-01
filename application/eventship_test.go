@@ -52,17 +52,18 @@ func newShipFixture(t *testing.T) *shipFixture {
 // state: what a restarted follower is.
 func (f *shipFixture) newShip() *application.EventShip {
 	return &application.EventShip{
-		Log:         f.log,
-		State:       f.state,
-		Postern:     f.backend,
-		Cipher:      f.cipher,
-		Keys:        shipKeys{stubPosternKeys{pubKey: "mayor-key"}},
-		GovernorKey: "governor-key",
-		Chain:       true,
-		DailyCap:    500,
-		Host:        "laptop",
-		Now:         func() time.Time { return f.at },
-		Err:         &f.said,
+		Log:               f.log,
+		State:             f.state,
+		Postern:           f.backend,
+		Cipher:            f.cipher,
+		Keys:              shipKeys{stubPosternKeys{pubKey: "mayor-key"}},
+		GovernorKey:       "governor-key",
+		Chain:             true,
+		DailyCap:          500,
+		EmergencyDailyCap: 20,
+		Host:              "laptop",
+		Now:               func() time.Time { return f.at },
+		Err:               &f.said,
 	}
 }
 
@@ -631,5 +632,56 @@ func TestShipStatusCountsTodaysEmergenciesAndStartsAgainTomorrow(t *testing.T) {
 	f.at = f.at.Add(24 * time.Hour)
 	if got, _ := f.ship.Status(context.Background()); got.EmergencyToday != 0 || strings.Contains(got.Line(), "emergency") {
 		t.Fatalf("tomorrow's status is %+v / %q, want no emergencies", got, got.Line())
+	}
+}
+
+func TestShipTheTwentyFirstEmergencyOfADayGoesDirectOnlyAndSaysSo(t *testing.T) {
+	f := newShipFixture(t)
+	for i := 0; i < 21; i++ {
+		f.addEmergency(t)
+	}
+	f.run(t)
+	if chain := f.chainPayloads(t); len(chain) != 20 {
+		t.Fatalf("%d emergencies on chain, want the 20 the allowance holds", len(chain))
+	}
+	if direct := f.backend.Delivered(); len(direct) != 21 {
+		t.Fatalf("%d emergencies direct, want all 21", len(direct))
+	}
+	if said := f.said.String(); !strings.Contains(said, "emergency daily cap of 20") || !strings.Contains(said, "event 21") {
+		t.Fatalf("the shipper said %q, want that emergency 21 went direct only past the cap of 20", said)
+	}
+	st, _ := f.state.Load(context.Background())
+	if st.Shipped != 21 || len(st.Pending) != 0 || st.Chain != 0 {
+		t.Fatalf("state is %+v, want shipped 21, nothing pending for the chain and no ordinary chain record counted", st)
+	}
+	f.at = f.at.Add(24 * time.Hour)
+	f.addEmergency(t)
+	f.run(t)
+	if chain := f.chainPayloads(t); len(chain) != 21 {
+		t.Fatalf("%d on chain after the day turned, want the new day's emergency on chain too", len(chain))
+	}
+}
+
+func TestShipEmergenciesPastTheOrdinaryCapDoNotStarveTheOrdinaryRetries(t *testing.T) {
+	f := newShipFixture(t)
+	f.ship.EmergencyDailyCap = 1000
+	f.backend.ChainErr = errors.New("down")
+	f.add(t, 1)
+	f.run(t)
+	if st, _ := f.state.Load(context.Background()); len(st.Pending) != 1 {
+		t.Fatalf("state is %+v, want the batch pending for the chain", st)
+	}
+	f.backend.ChainErr = nil
+	for i := 0; i < 501; i++ {
+		f.addEmergency(t)
+	}
+	f.at = f.at.Add(time.Second)
+	f.run(t)
+	st, _ := f.state.Load(context.Background())
+	if len(st.Pending) != 0 {
+		t.Fatalf("state is %+v: 501 emergencies on chain starved the ordinary retry", st)
+	}
+	if st.Chain != 1 {
+		t.Fatalf("%d ordinary chain records counted, want only the retried batch", st.Chain)
 	}
 }

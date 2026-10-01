@@ -727,6 +727,12 @@ const EventsTable = "events"
 // it guards the satoshis.
 const DefaultEventsChainDailyCap = 500
 
+// DefaultEventsEmergencyDailyCap is how many emergency events the follower
+// sends in a UTC day when nothing says otherwise, apart from the chain's
+// daily cap; past it, an emergency goes direct only and is not kept for the
+// chain.
+const DefaultEventsEmergencyDailyCap = 20
+
 // DefaultEventsHeartbeat is how long the follower lets the dispatch pass and
 // the Millhand's tick go unrun before it runs them anyway, and
 // DefaultEventsClock how often it runs the sync job it keeps on its own clock.
@@ -746,6 +752,9 @@ type EventsSettings struct {
 	Chain bool
 	// ChainDailyCap is the most events records put on chain in a UTC day.
 	ChainDailyCap int
+	// EmergencyDailyCap is the most emergency events sent on chain in a UTC
+	// day, counted apart from ChainDailyCap.
+	EmergencyDailyCap int
 	// Heartbeat is how long the follower lets the dispatch pass and the
 	// Millhand's tick go unrun before it runs them anyway: the fallback for
 	// an event it missed. The timers' own cadence is the same fallback.
@@ -760,7 +769,8 @@ type EventsSettings struct {
 
 // Events reports the `[events]` table of ~/.config/mw/config.toml: `chain`
 // (true or false, default true) and `chain_daily_cap` (a whole number, 1 or
-// more, default DefaultEventsChainDailyCap), `heartbeat` (a duration, default
+// more, default DefaultEventsChainDailyCap), `emergency_daily_cap` (the same, default
+// DefaultEventsEmergencyDailyCap), `heartbeat` (a duration, default
 // an hour), `clock` (a duration, default 5m) and `idle_after` (a duration,
 // default 10m), each its default when the table says nothing.
 func Events() (EventsSettings, error) {
@@ -774,7 +784,7 @@ func Events() (EventsSettings, error) {
 		return EventsSettings{}, err
 	}
 	settings := EventsSettings{
-		Chain: true, ChainDailyCap: DefaultEventsChainDailyCap,
+		Chain: true, ChainDailyCap: DefaultEventsChainDailyCap, EmergencyDailyCap: DefaultEventsEmergencyDailyCap,
 		Heartbeat: DefaultEventsHeartbeat, Clock: DefaultEventsClock, IdleAfter: DefaultEventsIdleAfter,
 	}
 	for key, into := range map[string]*time.Duration{"heartbeat": &settings.Heartbeat, "clock": &settings.Clock, "idle_after": &settings.IdleAfter} {
@@ -801,6 +811,13 @@ func Events() (EventsSettings, error) {
 			return EventsSettings{}, fmt.Errorf("the [%s] table of %s says chain_daily_cap = %q: it must be a whole number, 1 or more", EventsTable, path, said)
 		}
 		settings.ChainDailyCap = n
+	}
+	if said := strings.TrimSpace(table["emergency_daily_cap"]); said != "" {
+		n, err := strconv.Atoi(said)
+		if err != nil || n < 1 {
+			return EventsSettings{}, fmt.Errorf("the [%s] table of %s says emergency_daily_cap = %q: it must be a whole number, 1 or more", EventsTable, path, said)
+		}
+		settings.EmergencyDailyCap = n
 	}
 	return settings, nil
 }

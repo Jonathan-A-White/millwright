@@ -1570,8 +1570,8 @@ func TestEventsKnobsDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !got.Chain || got.ChainDailyCap != 500 {
-		t.Fatalf("expected chain on and a cap of 500, got %+v", got)
+	if !got.Chain || got.ChainDailyCap != 500 || got.EmergencyDailyCap != 20 {
+		t.Fatalf("expected chain on, a cap of 500 and an emergency allowance of 20, got %+v", got)
 	}
 }
 
@@ -1583,6 +1583,14 @@ func TestEventsKnobsAreReadFromTheTable(t *testing.T) {
 	}
 	if got.Chain || got.ChainDailyCap != 20 {
 		t.Fatalf("expected chain off and a cap of 20, got %+v", got)
+	}
+	writeConfig(t, "[events]\nemergency_daily_cap = 5\n")
+	if got, err = config.Events(); err != nil || got.EmergencyDailyCap != 5 {
+		t.Fatalf("expected an emergency allowance of 5, got %+v %v", got, err)
+	}
+	writeConfig(t, "[events]\nemergency_daily_cap = 0\n")
+	if _, err = config.Events(); err == nil || !strings.Contains(err.Error(), "emergency_daily_cap") {
+		t.Fatalf("expected an emergency_daily_cap of 0 to be refused, got %v", err)
 	}
 	writeConfig(t, "[events]\nchain = \"true\"\n")
 	if got, err = config.Events(); err != nil || !got.Chain {

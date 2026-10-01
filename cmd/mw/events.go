@@ -197,11 +197,12 @@ func eventShip(path, host string) (*application.EventShip, error) {
 		return nil, err
 	}
 	return &application.EventShip{
-		Log:      eventlog.New(path),
-		State:    eventlog.NewShipStates(path),
-		Chain:    knobs.Chain,
-		DailyCap: knobs.ChainDailyCap,
-		Host:     host,
+		Log:               eventlog.New(path),
+		State:             eventlog.NewShipStates(path),
+		Chain:             knobs.Chain,
+		DailyCap:          knobs.ChainDailyCap,
+		EmergencyDailyCap: knobs.EmergencyDailyCap,
+		Host:              host,
 	}, nil
 }
 

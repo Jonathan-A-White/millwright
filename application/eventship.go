@@ -75,9 +75,13 @@ type ShipStates interface {
 // An event in the emergency lane (mw events emit --emergency) does not wait
 // for the window: each pass sends it first, alone as a batch of one in the
 // emergency lane, on chain and direct at once and before the pending batches
-// are retried. It goes on chain even past the day's cap. With the chain
-// unreachable it goes direct and is kept pending, to be put on chain later in
-// the normal lane. The batches that follow leave it out.
+// are retried. It has an allowance of its own, EmergencyDailyCap a UTC day,
+// apart from the ordinary cap: it goes on chain even past DailyCap and does
+// not count toward it, so a flood of emergencies never stalls the ordinary
+// retries. Past its own allowance an emergency goes direct only, is said so on
+// Err and is not kept for the chain. With the chain unreachable it goes direct
+// and is kept pending, to be put on chain later in the normal lane. The
+// batches that follow leave it out.
 //
 // A batch no road took is not sent: the next pass builds it again.
 type EventShip struct {
@@ -92,6 +96,9 @@ type EventShip struct {
 	// that do in a UTC day.
 	Chain    bool
 	DailyCap int
+	// EmergencyDailyCap is the most emergency records sent in a UTC day,
+	// counted apart from DailyCap: the emergencies past it go direct only.
+	EmergencyDailyCap int
 	// Host names the actor of the cap alarm event.
 	Host string
 	// Now is the clock; nil is time.Now.
@@ -211,14 +218,18 @@ func (s *EventShip) sendEmergencies(ctx context.Context, st *ShipState, unsent [
 		if err != nil {
 			return chainDown, err
 		}
+		overAllowance := st.Emergency >= s.EmergencyDailyCap
+		if overAllowance && s.Chain {
+			s.say("an emergency past the day's allowance",
+				fmt.Errorf("emergency event %d goes direct only: the emergency daily cap of %d records is reached", e.Seq, s.EmergencyDailyCap))
+		}
 		onChain := false
-		if s.Chain && !chainDown {
+		if s.Chain && !chainDown && !overAllowance {
 			if _, err := s.putOnChain(ctx, payload); err != nil {
 				s.say("putting an emergency on chain", err)
 				chainDown = true
 			} else {
 				onChain = true
-				st.Chain++
 				s.quiet("putting an emergency on chain")
 			}
 		}
@@ -238,7 +249,7 @@ func (s *EventShip) sendEmergencies(ctx context.Context, st *ShipState, unsent [
 		} else {
 			st.Urgent = append(st.Urgent, e.Seq)
 		}
-		if !onChain && s.Chain {
+		if !onChain && s.Chain && !overAllowance {
 			st.Pending = append(st.Pending, ShipRange{From: e.Seq, To: e.Seq})
 		}
 		if err := s.save(ctx, st); err != nil {

@@ -1043,6 +1043,7 @@ satoshis:
 [events]
 chain = true            # false: never touch the chain; every batch goes direct as fallback
 chain_daily_cap = 500   # records put on chain in a UTC day; past it, batches go direct as fallback
+emergency_daily_cap = 20  # emergency records put on chain in a UTC day, counted apart; past it, direct only
 ```
 
 Past the cap the follower appends one `job` event (actor `events-follow@<host>`,
