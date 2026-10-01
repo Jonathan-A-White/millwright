@@ -121,6 +121,7 @@ func TestEveryKindIsNamedWithItsMachine(t *testing.T) {
 		events.KindMessage:      "",
 		events.KindHandsRan:     "",
 		events.KindMail:         "",
+		events.KindHandover:     "",
 	}
 	got := events.Kinds()
 	if len(got) != len(want) {

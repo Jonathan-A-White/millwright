@@ -36,9 +36,10 @@ const (
 	KindHandsRan     = "hands_ran"     // a step for his hands ran
 	KindMail         = "mail"          // a bd mail bead sent to a seat
 	KindJob          = "job"           // a scheduled job's transition
+	KindHandover     = "handover"      // a seat's session hands the seat to its successor at a seq
 )
 
-var kinds = []string{KindBeadChanged, KindCardAsked, KindCardAnswered, KindCardApplied, KindMessage, KindTalkTurn, KindHandsRan, KindMail, KindJob}
+var kinds = []string{KindBeadChanged, KindCardAsked, KindCardAnswered, KindCardApplied, KindMessage, KindTalkTurn, KindHandsRan, KindMail, KindJob, KindHandover}
 
 // kindMachine is the machine each kind is a transition of; a kind missing
 // here has none.
