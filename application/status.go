@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/domain/events"
 )
 
 // Width is the terminal `mw status` is designed for: a phone screen in a
@@ -155,12 +156,26 @@ type Status struct {
 	// for the EVENTS line. Nil leaves the line out.
 	Events EventsShipping
 
+	// Log, when set, is read for the IDLE line: how long it has held no
+	// event but the jobs' own. IdleAfter is how long that is before the
+	// factory is called idle; Harness, when set, counts the harness
+	// processes alive, which is none when it is.
+	Log       EventLog
+	IdleAfter time.Duration
+	Harness   HarnessCount
+
 	// Now is the clock "today" is read by, for picking out the ledger's lines
 	// dated today. The zero value reads the real one.
 	Now func() time.Time
 
 	// Out is where the report is printed. A nil Out prints nothing.
 	Out io.Writer
+}
+
+// HarnessCount counts the processes of the harness alive on this host: what an
+// idle factory has none of, since a seat's reaper closes an idle window.
+type HarnessCount interface {
+	Count(ctx context.Context) (int, error)
 }
 
 // EventsShipping says where the follower's sending of events stands.
@@ -270,6 +285,14 @@ type StatusReport struct {
 	// Events is where the event follower stands; nil when it was not asked
 	// or could not be read.
 	Events *ShipStatus
+	// Idle is when the factory fell idle: the time of the last event that
+	// was no job's, once none but jobs' events have come for IdleAfter and
+	// no job is in flight. Zero when the factory is not idle, or the log was
+	// not asked or could not be read.
+	Idle time.Time
+	// Harness is the count of harness processes, when HarnessKnown.
+	Harness      int
+	HarnessKnown bool
 	// MillhandResume is the "resumed ... (grace until ...)" line shown under
 	// the Millhand tick while its resume grace still holds; "" once it does
 	// not.
@@ -417,6 +440,15 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		// reason to refuse the rest of it.
 		if shipping, err := s.Events.Status(ctx); err == nil {
 			report.Events = &shipping
+		}
+	}
+
+	if s.Log != nil {
+		report.Idle = s.idleSince(ctx)
+	}
+	if s.Harness != nil {
+		if n, err := s.Harness.Count(ctx); err == nil {
+			report.Harness, report.HarnessKnown = n, true
 		}
 	}
 
@@ -764,6 +796,18 @@ func (r StatusReport) String() string {
 		b.WriteString("\n")
 	}
 
+	if !r.Idle.IsZero() {
+		line := "IDLE since " + r.Idle.Format("15:04")
+		if r.HarnessKnown {
+			line += fmt.Sprintf(" · %d harness processes", r.Harness)
+		}
+		clip(&b, line)
+		b.WriteString("\n")
+	} else if r.HarnessKnown {
+		clip(&b, fmt.Sprintf("HARNESS %d processes", r.Harness))
+		b.WriteString("\n")
+	}
+
 	clip(&b, fmt.Sprintf("FUEL today: %s tokens", Thousands(r.FuelToday)))
 	b.WriteString("\n")
 	return b.String()
@@ -1014,4 +1058,51 @@ func clippedTo(text string, n int) string {
 		return string(r[:n])
 	}
 	return string(r[:n-1]) + "…"
+}
+
+// idleLookback is how many of the log's last events idleSince reads.
+const idleLookback = 200
+
+// idleSince is when the factory fell idle, or the zero time when it has not:
+// the time of the last event no job wrote, when every event since is a job's,
+// the last non-job event is IdleAfter old, and no job has begun a pass it has not
+// ended. A log it cannot read says nothing.
+func (s Status) idleSince(ctx context.Context) time.Time {
+	after := s.IdleAfter
+	if after <= 0 {
+		return time.Time{}
+	}
+	head, err := s.Log.Head(ctx)
+	if err != nil || head == 0 {
+		return time.Time{}
+	}
+	var from uint64
+	if head > idleLookback {
+		from = head - idleLookback
+	}
+	evs, err := s.Log.Since(ctx, from)
+	if err != nil || len(evs) == 0 {
+		return time.Time{}
+	}
+	var since time.Time
+	state := map[string]string{}
+	for _, e := range evs {
+		if e.Kind != events.KindJob {
+			since = e.Ts
+			continue
+		}
+		state[e.Actor] = e.To
+	}
+	if since.IsZero() {
+		since = evs[0].Ts
+	}
+	for _, to := range state {
+		if to == events.JobScheduled || to == events.JobRunning {
+			return time.Time{}
+		}
+	}
+	if s.now().Sub(since) < after {
+		return time.Time{}
+	}
+	return since.In(s.now().Location())
 }

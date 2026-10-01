@@ -5,6 +5,8 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
+	"github.com/Jonathan-A-White/millwright/infrastructure/procs"
 
 	"github.com/spf13/cobra"
 )
@@ -38,6 +40,10 @@ func newStatusCmd() *cobra.Command {
 			"`rig_memory_bytes`, default 8000), a RIG MEMORY section says which and by how much: every\n" +
 			"session pays for that file at boot, so the Mayor is due to prune it. It is left out when\n" +
 			"none is over.\n\n" +
+			"An IDLE line, 'IDLE since HH:MM', says the home's event log has held no event but the jobs' own\n" +
+			"(dispatch, tick and sync passes) since then, for longer than [events] idle_after (default 10m), and\n" +
+			"that no job is in flight, with the count of harness processes alive: none when the factory is idle.\n" +
+			"Otherwise a HARNESS line gives the count. Both are left out on a host with no event log.\n\n" +
 			"A BEADS line says how large this host's own beads database is on disk — its auto-commit\n" +
 			"history and auto-backups included, since both have grown unbounded before — and warns once\n" +
 			"it passes 1 GB, so the Mayor sees it without asking a Clerk to run du. A BEADS SYNC line\n" +
@@ -82,6 +88,10 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			idleLog, idleAfter, err := idleSource()
+			if err != nil {
+				return err
+			}
 			_, err = application.Status{
 				Tracker:        tracker,
 				Notes:          tracker,
@@ -93,6 +103,9 @@ func newStatusCmd() *cobra.Command {
 				Seat:           BuilderSeat,
 				Ticks:          hostTickLogs(),
 				Events:         events,
+				Log:            idleLog,
+				IdleAfter:      idleAfter,
+				Harness:        procs.Harness{},
 				HostSilence:    time.Duration(hours) * time.Hour,
 				RigMemoryBytes: budget,
 				SyncMode:       setting.Configured,
@@ -116,4 +129,19 @@ func eventsShipping(host string) (application.EventsShipping, error) {
 		return nil, err
 	}
 	return ship, nil
+}
+
+// idleSource is the event log mw status reads the IDLE line from, with how
+// long it may hold no event but the jobs' before it is idle: nil, with no
+// error, when the host has no event log path to read.
+func idleSource() (application.EventLog, time.Duration, error) {
+	path, err := config.EventsLogPath()
+	if err != nil {
+		return nil, 0, nil
+	}
+	knobs, err := config.Events()
+	if err != nil {
+		return nil, 0, err
+	}
+	return eventlog.New(path), knobs.IdleAfter, nil
 }
