@@ -650,7 +650,7 @@ func (c *doctorContext) aVaultWithAModifiedTrackedFile(path string) error {
 	}
 
 	c.vaultDirtyDir = dir
-	c.real = doctor.NewVaultDirty(dir, "laptop")
+	c.real = doctor.NewVaultDirty(dir, "laptop", doctor.New(filepath.Join(root, "doctor-state")))
 	return nil
 }
 

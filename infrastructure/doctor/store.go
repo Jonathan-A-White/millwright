@@ -71,6 +71,10 @@ func (s *Store) Load(_ context.Context, check string) (application.DoctorEpisode
 			episode.LastCannotTellReason = value
 		case "dampedNoted":
 			episode.DampedNoted = value == "true"
+		case "seenPaths":
+			if value != "" {
+				episode.SeenPaths = strings.Split(value, "\t")
+			}
 		}
 	}
 	return episode, nil
@@ -84,8 +88,8 @@ func (s *Store) Save(_ context.Context, check string, episode application.Doctor
 	}
 	path := s.stateFile(check)
 	whole := path + ".new"
-	body := fmt.Sprintf("firstFaulty=%s\ncures=%d\nlastCure=%s\nlastOKReason=%s\nlastCannotTellReason=%s\ndampedNoted=%t\n",
-		formatTime(episode.FirstFaulty), episode.Cures, formatTime(episode.LastCure), episode.LastOKReason, episode.LastCannotTellReason, episode.DampedNoted)
+	body := fmt.Sprintf("firstFaulty=%s\ncures=%d\nlastCure=%s\nlastOKReason=%s\nlastCannotTellReason=%s\ndampedNoted=%t\nseenPaths=%s\n",
+		formatTime(episode.FirstFaulty), episode.Cures, formatTime(episode.LastCure), episode.LastOKReason, episode.LastCannotTellReason, episode.DampedNoted, strings.Join(episode.SeenPaths, "\t"))
 	if err := os.WriteFile(whole, []byte(body), 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", whole, err)
 	}
