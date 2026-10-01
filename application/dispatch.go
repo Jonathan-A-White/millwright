@@ -244,17 +244,22 @@ type Reclaimed struct {
 }
 
 // LandedAlready is one story this dispatch found claimed here with a dead pane
-// and an expired lease whose branch was already merged into its target branch
-// (mw-gq6.161): the close-out got as far as the merge and only the close of the
-// story was lost. It was closed, not given back, so it is never worked a
-// second time on top of its own landed commits.
+// and an expired lease that had already landed: its branch merged into its
+// target branch (mw-gq6.161), its last run recorded run=landed, or the newest
+// line its seat's ledger holds for it saying landed (mw-gq6.191). The close-out
+// got as far as the landing and only the close of the story was lost. It was
+// closed, not given back, so it is never worked a second time on top of its
+// own landed commits.
 type LandedAlready struct {
 	StoryID string
 	Session string
-	// Tip is the commit at the branch's tip, the one the target branch holds;
-	// Target is the branch that holds it.
+	// Tip is the commit at the branch's tip, the one the target branch holds,
+	// when the branch is how it was found landed; Target is the story's target
+	// branch.
 	Tip    string
 	Target string
+	// By is how it was known to have landed, as a person reads it.
+	By string
 }
 
 // HeldRefused is one story this dispatch found claimed here with a dead pane
@@ -279,8 +284,8 @@ type DispatchReport struct {
 	// Reclaimed is every claim this dispatch took back from a dead pane and an
 	// expired lease before it read what is ready.
 	Reclaimed []Reclaimed
-	// LandedAlready is every dead-pane story found already merged into its
-	// target branch and closed rather than given back.
+	// LandedAlready is every dead-pane story found already landed and closed
+	// rather than given back.
 	LandedAlready []LandedAlready
 	// HeldRefused is every dead-pane story left claimed because its close-out
 	// refused it.
@@ -560,6 +565,16 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 				report.Passed = append(report.Passed, Passed{StoryID: id, Why: why})
 				continue
 			}
+		}
+
+		// A story whose last run landed it is finished but for its close, which
+		// was lost: claiming it would work it again on top of its own landed
+		// commits (mw-gq6.191). The run state is read off the listing.
+		if hasLabel(detail.Labels, RunState+":"+RunLanded) {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
+				"its last run landed it (%s=%s) and only its close was lost, so it is not claimed again: `mw next %s` closes it, and more work on it is a new story",
+				RunState, RunLanded, id)})
+			continue
 		}
 
 		// bd's own ready set is trusted for everything except this: a dependency
@@ -1035,6 +1050,12 @@ func (d Dispatch) refuseLeftover(ctx context.Context, id string, err error) (Sta
 // is not alive, so it is reported held, and the caller does not count it toward
 // the cap (mw-gq6.211); the same holds when its window is gone outright.
 //
+// A story that landed is never given back either (mw-gq6.191): one whose last
+// run recorded run=landed, or, where that record was lost or written over, the
+// newest line its seat's ledger holds for it says landed, is closed once its
+// pane is dead and its lease lapsed, exactly as a merged branch is. A close
+// that fails keeps the claim, and the next tick tries it again.
+//
 // Nothing is cut or removed here: only the window, whose pane is already
 // dead, is closed, and the claim given back. What the story's worktree and
 // branch still hold from the attempt that died is left for the next attempt
@@ -1060,9 +1081,11 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 	// the story a second time on top of its own landed commits. Whether the
 	// lease ran out is read here from the story, not from ReclaimStory, because
 	// that one gives the claim back as it answers.
-	if dead && !detail.LeaseExpires.IsZero() && d.now().After(detail.LeaseExpires) {
+	lapsed := dead && !detail.LeaseExpires.IsZero() && d.now().After(detail.LeaseExpires)
+	if lapsed {
 		if tip, target, landed := d.landedBranch(ctx, detail); landed {
-			return d.closeLanded(ctx, detail, name, tip, target, report), false, nil
+			by := fmt.Sprintf("its branch %s (tip %s) is already contained in %s", StoryBranch(id), shortCommit(tip), target)
+			return d.closeLanded(ctx, detail, name, LandedAlready{Tip: tip, Target: target, By: by}, report), false, nil
 		}
 	}
 
@@ -1082,6 +1105,20 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 	}
 	if !dead {
 		return false, false, nil
+	}
+	if run == RunLanded {
+		// Never given back: closed once the lease has lapsed, and until then
+		// left for one more tick, exactly as a live session is.
+		if !lapsed {
+			return false, false, nil
+		}
+		by := fmt.Sprintf("its last run was recorded %s=%s", RunState, RunLanded)
+		return d.closeLanded(ctx, detail, name, LandedAlready{Target: d.target(detail), By: by}, report), false, nil
+	}
+	if lapsed {
+		if by, landed := d.ledgeredAsLanded(ctx, detail); landed {
+			return d.closeLanded(ctx, detail, name, LandedAlready{Target: d.target(detail), By: by}, report), false, nil
+		}
 	}
 
 	reclaimed, err = d.Tracker.ReclaimStory(ctx, id)
@@ -1152,20 +1189,67 @@ func (d Dispatch) landedBranch(ctx context.Context, detail StoryDetail) (tip, ta
 	return "", "", false
 }
 
-// closeLanded closes a story found already merged, the way a finished close-out
-// would have, and reports it. The claim is never given back. A close that fails
-// leaves the claim exactly as it was, counted running, for the next tick to try
-// again; nothing else is written until it has gone through, so a server that
-// stays unreachable is not written to over and over.
-func (d Dispatch) closeLanded(ctx context.Context, detail StoryDetail, session, tip, target string, report *DispatchReport) bool {
+// ledgeredAsLanded reports whether the newest line the seat's ledger holds for
+// a claimed story says it landed while its branch has nothing left to land:
+// the landing's own record, for when its run=landed was never written or a
+// sweep wrote over it. A branch with commits beyond the target is new work on
+// a story landed once before, and is not landed. A ledger that cannot be read,
+// or no vault to read it from, says no: the claim is judged as before.
+func (d Dispatch) ledgeredAsLanded(ctx context.Context, detail StoryDetail) (by string, landed bool) {
+	if d.Boot.Vault == nil || d.Boot.Seat == "" {
+		return "", false
+	}
+	lines, err := d.Boot.Vault.ReadLedger(ctx, d.Boot.Seat)
+	if err != nil {
+		return "", false
+	}
 	id := detail.Story.ID
-	outcome := fmt.Sprintf("landed on %s already: its branch %s, tip %s, is contained in %s; closed by mw dispatch on %s, "+
+	newest := ""
+	for _, line := range lines {
+		if LedgerNamesStory(line, id) {
+			newest = line
+		}
+	}
+	if !LedgerLandsStory(newest, id) {
+		return "", false
+	}
+	if d.Landing != nil {
+		if path, err := detail.Path(); err == nil {
+			if rigDir, checkedOut := d.Rigs[path.Rig]; checkedOut {
+				ahead, err := d.Landing.Ahead(ctx, rigDir, StoryBranch(id), StartPoint(d.remote(), path.Branch))
+				if err == nil && ahead > 0 {
+					return "", false
+				}
+			}
+		}
+	}
+	return fmt.Sprintf("the newest line the %s seat's ledger holds for it says it landed", d.Boot.Seat), true
+}
+
+// target is the branch a story lands on, as a sentence names it.
+func (d Dispatch) target(detail StoryDetail) string {
+	if path, err := detail.Path(); err == nil && path.Branch != "" {
+		return path.Branch
+	}
+	return "its target branch"
+}
+
+// closeLanded closes a story found already landed, the way a finished close-out
+// would have, and reports it; found says how it was known. The claim is never
+// given back. A close that fails leaves the claim exactly as it was, counted
+// running, for the next tick to try again; nothing else is written until it
+// has gone through, so a server that stays unreachable is not written to over
+// and over.
+func (d Dispatch) closeLanded(ctx context.Context, detail StoryDetail, session string, found LandedAlready, report *DispatchReport) bool {
+	id := detail.Story.ID
+	found.StoryID, found.Session = id, session
+	outcome := fmt.Sprintf("landed on %s already: %s; closed by mw dispatch on %s, "+
 		"which found the claim with a dead pane (%s) and its lease run out",
-		target, StoryBranch(id), shortCommit(tip), target, d.Host, session)
+		found.Target, found.By, d.Host, session)
 	if err := d.Tracker.CloseStory(ctx, id, outcome); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf(
-			"%s: its branch %s is already merged into %s, but the story could not be closed, so its claim was kept: %v",
-			id, StoryBranch(id), target, err))
+			"%s: it landed already (%s), but the story could not be closed, so its claim was kept: %v",
+			id, found.By, err))
 		return false
 	}
 	if err := d.Runner.Close(ctx, session); err != nil {
@@ -1175,12 +1259,12 @@ func (d Dispatch) closeLanded(ctx context.Context, detail StoryDetail, session, 
 		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be recorded as %s=%s: %v", id, RunState, RunLanded, err))
 	}
 	said := "mw dispatch on " + d.Host + " found " + id + " claimed here with a dead pane (" + session + ") and its lease run out, " +
-		"and its branch " + StoryBranch(id) + " (tip " + shortCommit(tip) + ") is already contained in " + target + ": " +
-		"the close-out merged it and only the close of the story was lost, so the story was closed rather than dispatched again."
+		"and " + found.By + ": the close-out landed it on " + found.Target + " and only the close of the story was lost, " +
+		"so the story was closed rather than dispatched again."
 	if err := d.Tracker.CommentOnStory(ctx, id, said); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s: the landed close could not be commented on: %v", id, err))
 	}
-	report.LandedAlready = append(report.LandedAlready, LandedAlready{StoryID: id, Session: session, Tip: tip, Target: target})
+	report.LandedAlready = append(report.LandedAlready, found)
 	return true
 }
 
@@ -1351,8 +1435,7 @@ func (r DispatchReport) String() string {
 		fmt.Fprintf(&b, "  retried the sync %d %s: a name could not be resolved until the network came back\n", r.SyncRetries, times)
 	}
 	for _, landed := range r.LandedAlready {
-		fmt.Fprintf(&b, "  closed %s · %s · already landed: its branch tip %s is contained in %s\n", landed.StoryID, landed.Session,
-			shortCommit(landed.Tip), landed.Target)
+		fmt.Fprintf(&b, "  closed %s · %s · already landed: %s\n", landed.StoryID, landed.Session, landed.By)
 	}
 	for _, held := range r.HeldRefused {
 		fmt.Fprintf(&b, "  held    %s · %s · refused, waiting on the Mayor: not counted; its claim, worktree and branch are kept (mw retry)\n",
