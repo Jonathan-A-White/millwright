@@ -2297,6 +2297,10 @@ text: What landed today?
 index-to-print 12 ms
 ```
 
+A talk the Governor opened from a card, a thread or a prompt carries an `about`
+field, and the wait prints it after the text line as `about: bead mw-xxx <title>`
+(no such line when the record has none), so the first answer is about the right thing.
+
 It also ends when a new postern message for the Mayor's key arrives, so the
 Governor's words in a channel are not left unread while a talk runs. A message
 is new when it is past the postern inbox's cursor (read, in the wait's own

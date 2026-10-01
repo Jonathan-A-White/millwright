@@ -85,6 +85,17 @@ type TalkTurn struct {
 	// Links are bead ids the Governor may want to open from the answer, sent
 	// beside the text and never in it. Absent when there are none.
 	Links []string `json:"links,omitempty"`
+	// About is what the talk was opened from, a card, a thread or a prompt:
+	// the Mayor's first answer is about it. Nil when the record carries none.
+	About *TalkAbout `json:"about,omitempty"`
+}
+
+// TalkAbout is the optional about field of a talk record: the kind of thing the
+// talk was opened from ("bead"), its id and its title.
+type TalkAbout struct {
+	Kind  string `json:"kind"`
+	ID    string `json:"id"`
+	Title string `json:"title"`
 }
 
 // The roles of a talk record.
@@ -537,8 +548,12 @@ func (r *talkWaitRun) finish(ctx context.Context) (TalkWaitReport, error) {
 		if line, ok := respawnMayorLine(domain.Model(r.turn.Model)); ok {
 			switched = line + "\n"
 		}
-		r.printf(r.Out, "talk %s turn %d (role %s)\nmodel %s\n%scut %s\ntext: %s\nindex-to-print %d ms\n",
-			r.turn.Talk.ID, r.turn.Talk.Turn, r.turn.Role, model, switched, cut, r.turn.Text, report.IndexToPrint.Milliseconds())
+		about := ""
+		if a := r.turn.About; a != nil && (a.Kind != "" || a.ID != "" || a.Title != "") {
+			about = strings.TrimSpace(fmt.Sprintf("about: %s %s %s", a.Kind, a.ID, a.Title)) + "\n"
+		}
+		r.printf(r.Out, "talk %s turn %d (role %s)\nmodel %s\n%scut %s\ntext: %s\n%sindex-to-print %d ms\n",
+			r.turn.Talk.ID, r.turn.Talk.Turn, r.turn.Role, model, switched, cut, r.turn.Text, about, report.IndexToPrint.Milliseconds())
 	}
 	if len(r.posts) > 0 {
 		r.printf(r.Out, "new postern message: %d unread, read them with mw postern inbox\n", len(r.posts))
