@@ -134,3 +134,29 @@ Feature: mw talk wait
     When mw postern inbox is run against the backend
     Then the backend inbox printed "message text"
     And the backend inbox did not print "A talk turn"
+
+  Scenario: the Governor's call request ends it at once, printing it
+    Given mw talk wait is armed
+    When the Governor's call request "Call me" is indexed
+    Then mw talk wait ends within 1 second
+    And the wait printed "call direct:1 at "
+    And the wait printed ": Call me"
+    And the wait did not print "talk "
+
+  Scenario: the Governor's later on a ring ends it, naming the ring
+    Given mw talk wait is armed
+    When the Governor's later on the ring "direct:ring9" is indexed
+    Then mw talk wait ends within 1 second
+    And the wait printed "later direct:ring9"
+
+  Scenario: a call record to another key, or from anyone else, does not end it
+    Given mw talk wait is armed
+    When a call request to another key is indexed
+    And a call request from "stranger-key" to the Mayor is indexed
+    Then mw talk wait is still waiting
+
+  Scenario: mw postern inbox leaves call records alone
+    Given the Governor's call request "Call me" has been indexed
+    And a "message" record to the Mayor has been indexed
+    When mw postern inbox --unread-count is run against the backend
+    Then the backend inbox counts 1 unread
