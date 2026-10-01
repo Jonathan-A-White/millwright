@@ -42,9 +42,9 @@ func newPosternViewCmd() *cobra.Command {
 			"to it (alarm). It gzips that JSON, encrypts it with BRC-78 to postern_governor_key, and\n" +
 			"writes it base64, atomically, to postern_view_path (default\n" +
 			"~/.local/state/postern/view.b64).\n\n" +
-			"It costs one bd call per live epic for its children and a handful besides — the live\n" +
-			"epics, their own fields, every note at once, and comments only for a question or landing\n" +
-			"that needs them — so it can run every half minute.\n\n" +
+			"It reads every bead in one bd list, every note at once, and comments only for a question\n" +
+			"or landing that needs them — about a second on the live vault — so it can run every few\n" +
+			"seconds.\n\n" +
 			"--json prints the plaintext JSON instead of writing anything, for inspection.\n\n" +
 			"--follow does not exit: every --every (default 1s) it reads the beads' head, Dolt's hash of\n" +
 			"the whole database (one `bd sql` call, tokenless), and writes the view again only when it\n" +

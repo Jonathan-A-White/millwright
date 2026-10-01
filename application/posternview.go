@@ -159,6 +159,16 @@ type PosternViewBead struct {
 	DoneEarlier int              `json:"done_earlier"`
 }
 
+// TrackerSnapshot is a tracker that can read every bead at once and answer the
+// view's reads from that one read: bd costs a process a call, so the view takes
+// a snapshot, when the tracker offers one, instead of a call per epic. The
+// snapshot answers LiveEpics, ShowEpics and ShowBeads as the tracker's own
+// reads do; it is good for one build, and what it does not hold it asks the
+// tracker for.
+type TrackerSnapshot interface {
+	Snapshot(ctx context.Context) (WorkTracker, error)
+}
+
 // PosternView builds the live view of the factory, postern's docs/protocol.md
 // §11 — every live epic, every bead under one at any depth, every live bead's
 // parent chain, and everything waiting on the Governor — and, once built,
@@ -168,7 +178,9 @@ type PosternViewBead struct {
 //
 //   - LiveEpics, once;
 //   - ShowEpics, once for every live epic — one call for their own fields and
-//     one per epic for its children, the one call per epic the tracker needs;
+//     one per epic for its children, the one call per epic a tracker with no
+//     TrackerSnapshot needs; one that has takes a snapshot first, one read of
+//     every bead, and answers all of these from it;
 //   - NotesWithPrefix, once, for every question, every host's last sync and
 //     the landed memory at the same time;
 //   - StoriesComments, at most once, only for an open question whose note does
@@ -294,6 +306,13 @@ func (v PosternView) Build(ctx context.Context) (PosternViewDoc, error) {
 	}
 	if v.Notes == nil {
 		return PosternViewDoc{}, fmt.Errorf("mw postern view: nowhere to read the notes from")
+	}
+	if snapshotter, ok := v.Tracker.(TrackerSnapshot); ok {
+		snapshot, err := snapshotter.Snapshot(ctx)
+		if err != nil {
+			return PosternViewDoc{}, fmt.Errorf("reading the beads: %w", err)
+		}
+		v.Tracker = snapshot
 	}
 	b := &viewBuild{
 		now: v.now(), entries: map[string]*viewEntry{},

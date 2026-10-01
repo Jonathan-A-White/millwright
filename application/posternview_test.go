@@ -951,3 +951,47 @@ func TestPosternViewADroppedStoryMakesNoVerifyNeed(t *testing.T) {
 	viewNeed(t, doc, "verify", "mw-a.1")
 	viewLacksNeed(t, doc, "verify", "mw-a.2")
 }
+
+// snapshotting is a tracker that offers a snapshot of itself, as the beads
+// gateway does, and counts how often it was asked for one.
+type snapshotting struct {
+	*apptest.FakeTracker
+	snap  application.WorkTracker
+	taken int
+}
+
+func (s *snapshotting) Snapshot(context.Context) (application.WorkTracker, error) {
+	s.taken++
+	return s.snap, nil
+}
+
+// mw-jrx0s.17: a tracker that can hand out a snapshot is read through it, once
+// per build, and not at all through its own per-call reads.
+func TestPosternViewReadsThroughTheTrackersSnapshotWhenItOffersOne(t *testing.T) {
+	fill := func() *apptest.FakeTracker {
+		tracker := apptest.NewFakeTracker()
+		liveEpic(tracker, "mw-a", domain.Path{})
+		tracker.AddStory("mw-a", domain.Story{ID: "mw-a.1", Title: "one"})
+		return tracker
+	}
+	live, snap := fill(), fill()
+	offering := &snapshotting{FakeTracker: live, snap: snap}
+
+	doc, err := application.PosternView{
+		Tracker: offering, Notes: live, Host: "desktop", Now: func() time.Time { return viewNow },
+	}.Build(context.Background())
+	if err != nil {
+		t.Fatalf("building the view: %v", err)
+	}
+	viewBead(t, doc, "mw-a.1")
+
+	if offering.taken != 1 {
+		t.Errorf("expected one snapshot per build, got %d", offering.taken)
+	}
+	if calls := snap.ShowEpicsCalls(); calls != 1 {
+		t.Errorf("expected the view read through the snapshot, got %d ShowEpics calls on it", calls)
+	}
+	if calls := live.ShowEpicsCalls(); calls != 0 {
+		t.Errorf("expected the tracker's own reads left alone, got %d ShowEpics calls", calls)
+	}
+}

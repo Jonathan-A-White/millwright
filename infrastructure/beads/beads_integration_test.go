@@ -17,6 +17,7 @@ package beads_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"os"
@@ -1292,5 +1293,94 @@ func TestGatewayReadsAnEpicsStatusPriorityAndComments(t *testing.T) {
 
 	if _, err := gateway.StoryComments(ctx, "no-such-bead"); err == nil {
 		t.Error("expected the comments of a bead that does not exist to be an error")
+	}
+}
+
+// plainTracker is the gateway with its Snapshot hidden: the per-call reads the
+// view was built from before mw-jrx0s.17.
+type plainTracker struct{ application.WorkTracker }
+
+// countingProgram writes a stand-in for bd that writes down every argv and
+// runs the real one, and returns it with the file it writes to.
+func countingProgram(t *testing.T) (program, log string) {
+	t.Helper()
+	real, err := exec.LookPath(beads.Program)
+	if err != nil {
+		t.Skip(beads.Program + " is not on PATH")
+	}
+	dir := t.TempDir()
+	log = filepath.Join(dir, "asked.log")
+	program = filepath.Join(dir, "bd-counting")
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$*\" >> %s\nexec %s \"$@\"\n", log, real)
+	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing the stand-in: %v", err)
+	}
+	return program, log
+}
+
+// mw-jrx0s.17: the view built through the gateway's snapshot is the very view
+// the per-call reads build, in a few bd calls however many epics are live.
+func TestGatewaySnapshotBuildsTheViewTheSeparateReadsBuild(t *testing.T) {
+	t.Parallel()
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	create := func(args ...string) string {
+		return bdRun(t, vault, beads.Program, append([]string{"create"}, append(args, "--silent")...)...)
+	}
+
+	// A live epic with defaults, a child epic under it, a story that waits on a
+	// finished story and on an unfinished one in another epic, a story with a
+	// comment, and a held story; and a second live epic and a closed one.
+	first := create("First epic", "-t", "epic", "-p", "1", "--metadata", `{"rig":"millwright","model":"sonnet"}`)
+	done := create("Finished", "--parent", first, "--metadata", `{"host":"laptop"}`)
+	bdRun(t, vault, beads.Program, "close", done, "--reason", "done")
+	second := create("Second epic", "-t", "epic", "-p", "2")
+	other := create("Elsewhere", "--parent", second, "--metadata", `{"model":"opus"}`)
+	waiting := create("Waiting", "--parent", first)
+	bdRun(t, vault, beads.Program, "dep", "add", waiting, done)
+	bdRun(t, vault, beads.Program, "dep", "add", waiting, other)
+	bdRun(t, vault, beads.Program, "comments", "add", waiting, "A comment.")
+	sub := create("Sub epic", "-t", "epic", "--parent", first)
+	create("Deep", "--parent", sub, "--label", "demo")
+	holder := create("Holder", "--parent", second)
+	bdRun(t, vault, beads.Program, "dep", "add", holder, waiting)
+	bdRun(t, vault, beads.Program, "update", waiting, "--status", "deferred")
+	gone := create("Closed epic", "-t", "epic")
+	bdRun(t, vault, beads.Program, "close", gone, "--reason", "done")
+
+	program, log := countingProgram(t)
+	gateway := beads.New(vault, beads.WithProgram(program))
+	now := time.Now().UTC().Truncate(time.Second)
+	view := func(tracker application.WorkTracker) application.PosternViewDoc {
+		doc, err := application.PosternView{
+			Tracker: tracker, Notes: gateway, Host: "laptop", Now: func() time.Time { return now },
+		}.Build(ctx)
+		if err != nil {
+			t.Fatalf("building the view: %v", err)
+		}
+		return doc
+	}
+
+	before := view(plainTracker{gateway})
+	if err := os.Remove(log); err != nil {
+		t.Fatalf("clearing the log: %v", err)
+	}
+	after := view(gateway)
+	asked, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatalf("reading what bd was asked for: %v", err)
+	}
+
+	if !reflect.DeepEqual(before, after) {
+		got, _ := json.Marshal(after)
+		want, _ := json.Marshal(before)
+		t.Fatalf("expected the snapshot to build the same view\n got: %s\nwant: %s", got, want)
+	}
+	if len(after.Beads) < 6 {
+		t.Fatalf("expected the fixture to put its beads in the view, got %d", len(after.Beads))
+	}
+	if calls := len(strings.Split(strings.TrimSpace(string(asked)), "\n")); calls > 4 {
+		t.Errorf("expected the view in at most four bd calls, got %d:\n%s", calls, asked)
 	}
 }
