@@ -727,6 +727,18 @@ const EventsTable = "events"
 // it guards the satoshis.
 const DefaultEventsChainDailyCap = 500
 
+// DefaultEventsHeartbeat is how long the follower lets the dispatch pass and
+// the Millhand's tick go unrun before it runs them anyway, and
+// DefaultEventsClock how often it runs the sync job it keeps on its own clock.
+const (
+	DefaultEventsHeartbeat = time.Hour
+	DefaultEventsClock     = 5 * time.Minute
+)
+
+// DefaultEventsIdleAfter is how long the log may hold no event but the jobs'
+// before mw status calls the factory idle.
+const DefaultEventsIdleAfter = 10 * time.Minute
+
 // EventsSettings are the follower's knobs for sending batches.
 type EventsSettings struct {
 	// Chain is whether batches go on chain beside the direct line. False
@@ -734,12 +746,23 @@ type EventsSettings struct {
 	Chain bool
 	// ChainDailyCap is the most events records put on chain in a UTC day.
 	ChainDailyCap int
+	// Heartbeat is how long the follower lets the dispatch pass and the
+	// Millhand's tick go unrun before it runs them anyway: the fallback for
+	// an event it missed. The timers' own cadence is the same fallback.
+	Heartbeat time.Duration
+	// Clock is how often the follower runs the sync and backup job that
+	// mail-notify's minutely tick used to.
+	Clock time.Duration
+	// IdleAfter is how long the log may hold no event but the jobs' before
+	// mw status calls the factory idle.
+	IdleAfter time.Duration
 }
 
 // Events reports the `[events]` table of ~/.config/mw/config.toml: `chain`
 // (true or false, default true) and `chain_daily_cap` (a whole number, 1 or
-// more, default DefaultEventsChainDailyCap), each its default when the table
-// says nothing.
+// more, default DefaultEventsChainDailyCap), `heartbeat` (a duration, default
+// an hour), `clock` (a duration, default 5m) and `idle_after` (a duration,
+// default 10m), each its default when the table says nothing.
 func Events() (EventsSettings, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -750,7 +773,21 @@ func Events() (EventsSettings, error) {
 	if err != nil {
 		return EventsSettings{}, err
 	}
-	settings := EventsSettings{Chain: true, ChainDailyCap: DefaultEventsChainDailyCap}
+	settings := EventsSettings{
+		Chain: true, ChainDailyCap: DefaultEventsChainDailyCap,
+		Heartbeat: DefaultEventsHeartbeat, Clock: DefaultEventsClock, IdleAfter: DefaultEventsIdleAfter,
+	}
+	for key, into := range map[string]*time.Duration{"heartbeat": &settings.Heartbeat, "clock": &settings.Clock, "idle_after": &settings.IdleAfter} {
+		said := strings.TrimSpace(table[key])
+		if said == "" {
+			continue
+		}
+		d, err := time.ParseDuration(said)
+		if err != nil || d <= 0 {
+			return EventsSettings{}, fmt.Errorf("the [%s] table of %s says %s = %q: it must be a duration above zero, like 30m", EventsTable, path, key, said)
+		}
+		*into = d
+	}
 	if said := strings.TrimSpace(table["chain"]); said != "" {
 		on, err := strconv.ParseBool(said)
 		if err != nil {

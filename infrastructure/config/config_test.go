@@ -1590,6 +1590,36 @@ func TestEventsKnobsAreReadFromTheTable(t *testing.T) {
 	}
 }
 
+// An idle factory's jobs are sprung by events with an hour's heartbeat, the
+// sync job runs on a clock of five minutes, and the factory is called idle
+// after ten minutes with no event but its jobs'.
+func TestEventsHeartbeatKnobsDefaultAndAreReadFromTheTable(t *testing.T) {
+	writeConfig(t, "host = \"laptop\"\n")
+	got, err := config.Events()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Heartbeat != time.Hour || got.Clock != 5*time.Minute || got.IdleAfter != 10*time.Minute {
+		t.Fatalf("expected an hour, 5m and 10m, got %v %v %v", got.Heartbeat, got.Clock, got.IdleAfter)
+	}
+	writeConfig(t, "[events]\nheartbeat = \"30m\"\nclock = 1m\nidle_after = \"20m\"\n")
+	if got, err = config.Events(); err != nil {
+		t.Fatal(err)
+	}
+	if got.Heartbeat != 30*time.Minute || got.Clock != time.Minute || got.IdleAfter != 20*time.Minute {
+		t.Fatalf("expected 30m, 1m and 20m, got %v %v %v", got.Heartbeat, got.Clock, got.IdleAfter)
+	}
+}
+
+func TestEventsHeartbeatKnobsThatAreNotUnderstoodAreRefused(t *testing.T) {
+	for _, bad := range []string{"heartbeat = soon", "heartbeat = 0s", "heartbeat = -5m", "clock = 0", "idle_after = lots"} {
+		writeConfig(t, "[events]\n"+bad+"\n")
+		if _, err := config.Events(); err == nil {
+			t.Errorf("expected %q refused", bad)
+		}
+	}
+}
+
 func TestEventsKnobsThatAreNotUnderstoodAreRefused(t *testing.T) {
 	for _, bad := range []string{"chain = maybe", "chain_daily_cap = 0", "chain_daily_cap = lots"} {
 		writeConfig(t, "[events]\n"+bad+"\n")
