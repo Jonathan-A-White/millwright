@@ -166,3 +166,23 @@ type failingEventLog struct{ apptest.FakeEventLog }
 func (*failingEventLog) Append(context.Context, []events.Event) (uint64, error) {
 	return 0, errors.New("disk full")
 }
+
+// The home's battery is in the table: a host with no battery reads ok, naming
+// that there is none, so this runs the same on the VPS.
+func TestDoctorTableHasTheBatteryCheck(t *testing.T) {
+	closed := closedDoctorPort(t)
+	vault := t.TempDir()
+	mwConfig(t, fmt.Sprintf("vault = %q\nhost = \"laptop\"\n\n[doctor]\nreach = [%q]\n", vault, closed))
+
+	out := &bytes.Buffer{}
+	root := newRootCmd()
+	root.SetOut(out)
+	root.SetErr(out)
+	root.SetArgs([]string{"doctor", "--dry-run", "battery"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("mw doctor battery: %v\n%s", err, out)
+	}
+	if report := out.String(); !strings.HasPrefix(report, "battery: ok") {
+		t.Fatalf("expected the battery check to run and read ok, got:\n%s", report)
+	}
+}

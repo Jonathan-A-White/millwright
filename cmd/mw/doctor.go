@@ -127,9 +127,22 @@ func newDoctorCmd() *cobra.Command {
 				// The alarm also rides the emergency lane of the event log, so the
 				// Governor's app hears it at once; the push is the alarm proper.
 				if logPath, pathErr := config.EventsLogPath(); pathErr == nil {
-					emitDoctorEmergency(ctx, eventlog.New(logPath), eventsClock, host, text, cmd.ErrOrStderr())
+					_ = emitDoctorEmergency(ctx, eventlog.New(logPath), eventsClock, host, text, cmd.ErrOrStderr())
 				}
 				return err
+			}
+			batteryLow, batteryCritical, err := config.DoctorBatteryThresholds()
+			if err != nil {
+				return err
+			}
+			battery := doctor.NewBattery(doctor.DefaultBatteryDir, store)
+			battery.Low, battery.Critical = batteryLow, batteryCritical
+			battery.Alarm = func(ctx context.Context, text string) error {
+				logPath, err := config.EventsLogPath()
+				if err != nil {
+					return err
+				}
+				return emitDoctorEmergency(ctx, eventlog.New(logPath), eventsClock, host, text, cmd.ErrOrStderr())
 			}
 			tmpLeftovers := doctor.NewTmpLeftovers(os.TempDir())
 			tmpLeftovers.Budget = tmpLeftoversBudget
@@ -149,6 +162,7 @@ func newDoctorCmd() *cobra.Command {
 					posternTranscribe,
 					beadsServerCheck,
 					posternChannel,
+					battery,
 				},
 				State: store,
 				Log:   store,
@@ -175,8 +189,9 @@ func runDoctor(cmd *cobra.Command, doc application.Doctor, name string, dryRun b
 
 // emitDoctorEmergency puts an alarm's text in the emergency lane of log, cut
 // to what an emergency event may carry. A write that is refused or fails is
-// said on errOut: the push is the alarm proper, so it does not fail the cure.
-func emitDoctorEmergency(ctx context.Context, log application.EventLog, now func() time.Time, host, text string, errOut io.Writer) {
+// said on errOut and returned: mayor-stale's push is its alarm proper, so it
+// drops the error, while the battery check, whose alarm this is, retries.
+func emitDoctorEmergency(ctx context.Context, log application.EventLog, now func() time.Time, host, text string, errOut io.Writer) error {
 	_, err := application.EventEmit{
 		Log: log, Now: now, Emergency: true,
 		Event: events.Event{Kind: events.KindJob, Actor: "doctor@" + host, From: events.JobRunning, To: events.JobFailed, Detail: events.CutDetail(text)},
@@ -184,4 +199,5 @@ func emitDoctorEmergency(ctx context.Context, log application.EventLog, now func
 	if err != nil {
 		fmt.Fprintf(errOut, "mw doctor: emergency event: not written: %v\n", err)
 	}
+	return err
 }

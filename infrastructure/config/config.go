@@ -1772,6 +1772,54 @@ func DoctorMayorStaleMinutes() (int, error) {
 	return minutes, nil
 }
 
+// The percents mw doctor's battery check alarms at, when the [doctor] table
+// says nothing: once on a fall to the low line, again on a fall to the
+// critical one. They are the same 25 and 10 doctor.DefaultBatteryLow and
+// DefaultBatteryCritical read as.
+const (
+	DefaultDoctorBatteryLow      = 25
+	DefaultDoctorBatteryCritical = 10
+)
+
+// DoctorBatteryThresholds reports those two lines, low then critical: the
+// `[doctor]` table's `battery_low_percent` and `battery_critical_percent`
+// keys of ~/.config/mw/config.toml, and the defaults when the table says
+// nothing. Each is a whole percent from 1 to 99, and critical is under low.
+func DoctorBatteryThresholds() (low, critical int, err error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return 0, 0, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	table, err := tableIn(filepath.Join(home, File), DoctorTable)
+	if err != nil {
+		return 0, 0, err
+	}
+	low, err = batteryPercent(table, "battery_low_percent", DefaultDoctorBatteryLow)
+	if err != nil {
+		return 0, 0, err
+	}
+	critical, err = batteryPercent(table, "battery_critical_percent", DefaultDoctorBatteryCritical)
+	if err != nil {
+		return 0, 0, err
+	}
+	if critical >= low {
+		return 0, 0, fmt.Errorf("the doctor's battery_critical_percent is %d and battery_low_percent is %d: the critical line must be under the low one, in %s", critical, low, File)
+	}
+	return low, critical, nil
+}
+
+func batteryPercent(table map[string]string, key string, fallback int) (int, error) {
+	said := strings.TrimSpace(table[key])
+	if said == "" {
+		return fallback, nil
+	}
+	percent, err := strconv.Atoi(said)
+	if err != nil || percent < 1 || percent > 99 {
+		return 0, fmt.Errorf("the doctor's %s is %q, which is not a whole percent from 1 to 99: set `%s = <n>` in %s", key, said, key, File)
+	}
+	return percent, nil
+}
+
 // DoctorTunnelHost reports the VPS's ssh name mw doctor's tunnel check
 // connects to: the `[doctor]` table's `tunnel_host` key of
 // ~/.config/mw/config.toml, and the `[watch]` table's `host` when the

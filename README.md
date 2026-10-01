@@ -2769,6 +2769,8 @@ tunnel_probe   = "ss -ltn sport = :2222"          # default; run over ssh on tun
 doctor_wg_hub  = "10.88.0.1:22"                   # default; the hub's ssh host:port, dialed over wg0
 doctor_wg_unit = "wg-quick@wg0"                   # default; the unit wg restarts
 tmp_leftovers_budget_bytes = 200000000            # default (200 MB); tmp-leftovers' and go-build's own budget
+battery_low_percent        = 25                   # default; battery alarms on a fall to this, discharging
+battery_critical_percent   = 10                   # default; and again on a fall to this
 ```
 
 **daemon-reload** asks `systemctl --user show <unit> -p NeedDaemonReload` for
@@ -2902,6 +2904,18 @@ is `tmux kill-window -t '<window id mayor-up started>'` — before that, dry
 run or damped, it is the mayor-up line itself, there being no window id yet
 to know a kill from. `mw doctor mayor-gone` is the recovery by hand;
 `--dry-run` prints the line it would run and changes nothing.
+
+**battery** is the warning the home never got before it slept on a flat
+battery (2026-10-01, 17:54-18:09Z; mw-gq6.206). It reads the first
+`/sys/class/power_supply/BAT*`: faulty only while the status is `Discharging`
+and the capacity is at or under `battery_low_percent`, and then only once per
+fall below each line, the low one and then `battery_critical_percent`. Its cure
+is the alarm itself, in the emergency lane of the event log (`mw events emit
+--emergency`) — "Laptop battery 24%, discharging: plug it in or it sleeps" — so
+the Governor's phone buzzes within one 5-minute doctor run. What it has alarmed
+at is forgotten when the battery next charges or rises above the low line; an
+alarm that could not be written is tried again, 3 times at most. Charging, Full,
+and a host with no battery are ok. It changes nothing on the host.
 
 **mayor-stale** is the Mayor's heartbeat. A held Mayor's pane is redrawn
 while a turn runs (an elapsed clock beside "esc to interrupt"), so the check

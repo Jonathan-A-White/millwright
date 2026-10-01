@@ -1657,3 +1657,27 @@ func TestDoctorMayorStaleMinutesIsTheShippedDefaultUntilAHostSaysOtherwise(t *te
 		t.Fatalf("expected a non-number to be refused")
 	}
 }
+
+func TestDoctorBatteryThresholdsAreTheShippedDefaultsUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, "")
+	if low, critical, err := config.DoctorBatteryThresholds(); err != nil || low != 25 || critical != 10 {
+		t.Fatalf("expected 25 and 10, got %d and %d: %v", low, critical, err)
+	}
+
+	writeConfig(t, "[doctor]\nbattery_low_percent = 30\nbattery_critical_percent = 15\n")
+	if low, critical, err := config.DoctorBatteryThresholds(); err != nil || low != 30 || critical != 15 {
+		t.Fatalf("expected the file's 30 and 15, got %d and %d: %v", low, critical, err)
+	}
+
+	for _, bad := range []string{
+		"battery_low_percent = 0",
+		"battery_low_percent = \"soon\"",
+		"battery_critical_percent = 100",
+		"battery_low_percent = 10\nbattery_critical_percent = 10",
+	} {
+		writeConfig(t, "[doctor]\n"+bad+"\n")
+		if _, _, err := config.DoctorBatteryThresholds(); err == nil {
+			t.Fatalf("expected %q to be refused", bad)
+		}
+	}
+}
