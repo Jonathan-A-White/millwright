@@ -150,6 +150,17 @@ Feature: mw postern inbox
     Then reading succeeds
     And it printed the answer command for the named channel "roadmap" re "direct:topic1"
 
+  Scenario: every post read is remembered with its channel, for mw postern send --re
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And a postern message from "governor-pubkey-hex" in the channel of bead "mw-x" with text "bead post" and txid "direct:bead1"
+    And a postern message from "governor-pubkey-hex" in channel "roadmap" with text "topic post" and txid "direct:topic2"
+    And a postern message from "governor-pubkey-hex" with text "general post" and txid "direct:general1"
+    When mw postern inbox is run
+    Then reading succeeds
+    And mw remembers the post "direct:bead1" is in the channel of bead "mw-x"
+    And mw remembers the post "direct:topic2" is in channel "roadmap"
+    And mw remembers the post "direct:general1" is in the general channel
+
   Scenario: a message from someone who is not the Governor is given no answer line
     Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
     And a postern message from "some-other-pubkey-hex" with text "hello" and txid "direct:other1"

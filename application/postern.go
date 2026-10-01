@@ -557,6 +557,11 @@ type PosternInbox struct {
 	Keys    PosternKeyFile
 	Memory  PosternNotes
 
+	// Threads, when set, is told the channel of every post read, so that
+	// mw postern send --re <that post> finds it. A failure to remember one
+	// is printed, and stops no read.
+	Threads PosternThreadIndex
+
 	// Tracker records a reply's answer on the bead it names, and clears the
 	// note the question it answers was marked open under. A nil Tracker
 	// leaves every reply printed as text, exactly as an unknown bead does.
@@ -1192,8 +1197,28 @@ func (i PosternInbox) fetchSince(ctx context.Context, cursor int64) (mine []Post
 			Ts: r.Ts, Text: display, Thread: thread, ThreadIsBead: threadIsBead,
 			Attachment: attachment, Attachments: attachments, Re: posternReOf(text),
 		})
+		i.rememberThread(r.Txid, thread, threadIsBead)
 	}
 	return mine, newest, nil
+}
+
+// rememberThread tells Threads which channel the post txid is in: thread is
+// the label posternThreadAndText reports, a bead's id, a named channel, or
+// PosternGeneralThread.
+func (i PosternInbox) rememberThread(txid, thread string, isBead bool) {
+	if i.Threads == nil || strings.TrimSpace(txid) == "" {
+		return
+	}
+	remembered := PosternThread{}
+	switch {
+	case isBead:
+		remembered.Bead = thread
+	case thread != PosternGeneralThread:
+		remembered.Topic = thread
+	}
+	if err := i.Threads.Remember(txid, remembered); err != nil {
+		i.printf("could not remember the channel of %s: %v\n", txid, err)
+	}
 }
 
 // posternVerifySender is the sender mw trusts for a record whose ciphertext
@@ -1255,6 +1280,22 @@ func reversePosternInbox(mine []PosternInboxMessage) []PosternInboxMessage {
 		out[len(mine)-1-idx] = m
 	}
 	return out
+}
+
+// PosternThreadIndex is where mw remembers which channel each post it has
+// seen or sent is in, by txid: what mw postern inbox read, and what mw postern
+// send sent. It is how --re <root> with no channel flag finds the root's
+// channel. A txid is the key bare or as "direct:<sha256>", the same post
+// either way. The real adapter, infrastructure/postern's ThreadFile, is a
+// file under the state directory; apptest.FakePosternThreadIndex is the
+// fake.
+type PosternThreadIndex interface {
+	// Remember records that the post txid is in thread: the zero
+	// PosternThread is the general channel (Factory).
+	Remember(txid string, thread PosternThread) error
+	// Lookup reports the channel of the post txid, false when mw has not
+	// seen it.
+	Lookup(txid string) (thread PosternThread, found bool, err error)
 }
 
 // PosternSendRequest is what mw postern send is asked to do: text, classed
@@ -1385,7 +1426,8 @@ func (r PosternSendRequest) validate() error {
 
 // ValidateReplyFlags refuses --re, an answer inside a post's thread, together
 // with --bead: a question is its own post, not an answer. --re goes with
-// --channel, --bead-channel or neither (General). It is the command line's
+// --channel, --bead-channel or neither (the root's channel, PosternSend's
+// inRootsChannel). It is the command line's
 // check: mw's own sends of a transcript or a hands outcome carry a re inside
 // a bead's channel.
 func (r PosternSendRequest) ValidateReplyFlags() error {
@@ -1479,11 +1521,22 @@ type PosternSend struct {
 	// Out is where each txid is printed, one a line. A nil Out prints
 	// nothing.
 	Out io.Writer
+
+	// Threads is where the channel of each post is remembered. Set, a send
+	// with --re and no channel flag goes to the root's channel, or is
+	// refused when the root is not there; and every message sent is
+	// remembered. Nil, a send is exactly as it was: Factory when no flag
+	// names a channel.
+	Threads PosternThreadIndex
 }
 
 // Run sends req, and reports the txid of the message carrying its text: the
 // last, when several files make several messages.
 func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, error) {
+	req, err := s.inRootsChannel(req)
+	if err != nil {
+		return "", err
+	}
 	if err := s.wired(req.asksQuestion(), req.commentsThread()); err != nil {
 		return "", err
 	}
@@ -1543,6 +1596,16 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 		attachments = append(attachments, attachment)
 	}
 
+	// Every post sent is remembered with its channel, so that a later --re
+	// naming it finds where it is; a failure to remember it is reported once
+	// everything is sent, and stops nothing.
+	var rememberErr error
+	remember := func(txid string) {
+		if err := s.rememberThread(txid, req.thread()); err != nil && rememberErr == nil {
+			rememberErr = err
+		}
+	}
+
 	var txid string
 	if len(attachments) == 0 {
 		text, err := req.plaintext(req.Text, nil)
@@ -1552,6 +1615,7 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 		if txid, err = s.sendOne(ctx, channel, req.Class, summary, from, address, text); err != nil {
 			return "", err
 		}
+		remember(txid)
 	}
 	for i, attachment := range attachments {
 		caption := ""
@@ -1565,6 +1629,7 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 		if txid, err = s.sendOne(ctx, channel, req.Class, summary, from, address, text); err != nil {
 			return "", err
 		}
+		remember(txid)
 		if i < len(attachments)-1 {
 			s.printf("%s\n", txid)
 		}
@@ -1581,7 +1646,53 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 			return txid, fmt.Errorf("mw postern send: sent as %s, but %w", txid, err)
 		}
 	}
+	if rememberErr != nil {
+		return txid, fmt.Errorf("mw postern send: sent as %s, but %w", txid, rememberErr)
+	}
 	return txid, nil
+}
+
+// thread is the channel this request's message goes to: a question's own
+// bead, else the Thread or Topic it names; the zero PosternThread, Factory,
+// when it names none.
+func (r PosternSendRequest) thread() PosternThread {
+	if r.asksQuestion() {
+		return PosternThread{Bead: strings.TrimSpace(r.Bead)}
+	}
+	return PosternThread{Bead: strings.TrimSpace(r.Thread), Topic: strings.TrimSpace(r.Topic)}
+}
+
+// inRootsChannel is req with the channel of the post its Re names filled in,
+// when it answers a post (Re) and names no channel of its own: the reply
+// belongs under the root, never silently in Factory. A post mw has not seen
+// is refused, naming the flags that say where the reply goes. A request that
+// names a channel, asks a question, or says what its text is (Role: mw's own
+// transcripts), or a send with no Threads, is returned as it is.
+func (s PosternSend) inRootsChannel(req PosternSendRequest) (PosternSendRequest, error) {
+	re := strings.TrimSpace(req.Re)
+	if re == "" || s.Threads == nil || req.setsThread() || req.asksQuestion() || req.Role != "" {
+		return req, nil
+	}
+	thread, found, err := s.Threads.Lookup(re)
+	if err != nil {
+		return req, fmt.Errorf("mw postern send: looking up the channel of %s: %w", re, err)
+	}
+	if !found {
+		return req, fmt.Errorf("mw postern send: --re <root> needs the root's channel: give --bead-channel <id> or --channel <name>")
+	}
+	req.Thread, req.Topic = thread.Bead, thread.Topic
+	return req, nil
+}
+
+// rememberThread records thread under txid when there is somewhere to.
+func (s PosternSend) rememberThread(txid string, thread PosternThread) error {
+	if s.Threads == nil || strings.TrimSpace(txid) == "" {
+		return nil
+	}
+	if err := s.Threads.Remember(txid, thread); err != nil {
+		return fmt.Errorf("remembering the channel of %s: %w", txid, err)
+	}
+	return nil
 }
 
 // plaintext is what a message of this request carries, before it is

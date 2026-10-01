@@ -25,29 +25,38 @@ func (c plainCipher) Decrypt(string, string) (string, string, error) {
 	return "", "", fmt.Errorf("plainCipher does not decrypt")
 }
 
-// channelSend runs mw postern send with args on the direct channel, reporting
-// the plaintexts sent, what bd was asked (one call per line) and the output.
-func channelSend(t *testing.T, args ...string) (plaintexts []string, bdCalls string, out string, err error) {
+// channelHome sets up a home, a direct-channel backend and a stand-in bd for
+// mw postern send, reporting the plaintexts every send carries and the file bd
+// logs what it is asked to.
+func channelHome(t *testing.T) (plaintexts *[]string, bdLog string) {
 	t.Helper()
 	f := loadPosternRecordFixture(t)
 	backend := &directBackend{}
 	posternHome(t, backend.serve(t), f.SenderWIF, f.RecipientPubKey)
 	t.Setenv("MW_POSTERN_CHANNEL", "direct")
-	log := filepath.Join(t.TempDir(), "bd.log")
+	bdLog = filepath.Join(t.TempDir(), "bd.log")
 	bin := t.TempDir()
-	stub := fmt.Sprintf("#!/bin/sh\necho \"$@\" >> %q\nexit 0\n", log)
-	if werr := os.WriteFile(filepath.Join(bin, "bd"), []byte(stub), 0o755); werr != nil {
-		t.Fatal(werr)
+	stub := fmt.Sprintf("#!/bin/sh\necho \"$@\" >> %q\nexit 0\n", bdLog)
+	if err := os.WriteFile(filepath.Join(bin, "bd"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	plaintexts = new([]string)
 	realCipher, realClock := posternCipher, posternClock
 	t.Cleanup(func() { posternCipher, posternClock = realCipher, realClock })
-	posternCipher = func(*postern.KeyFile) application.Cipher { return plainCipher{plaintexts: &plaintexts} }
+	posternCipher = func(*postern.KeyFile) application.Cipher { return plainCipher{plaintexts: plaintexts} }
 	posternClock = func() time.Time { return time.Unix(f.Ts, 0) }
+	return plaintexts, bdLog
+}
 
+// channelSend runs mw postern send with args on the direct channel, reporting
+// the plaintexts sent, what bd was asked (one call per line) and the output.
+func channelSend(t *testing.T, args ...string) (plaintexts []string, bdCalls string, out string, err error) {
+	t.Helper()
+	sent, log := channelHome(t)
 	out, err = runPostern(t, append([]string{"send"}, args...)...)
 	calls, _ := os.ReadFile(log)
-	return plaintexts, string(calls), out, err
+	return *sent, string(calls), out, err
 }
 
 const channelRe = "direct:ab0d0cd9f1e2d3c4b5a697887766554433221100ffeeddccbbaa99887766a8b6"
@@ -135,6 +144,68 @@ func TestPosternSendHelpSpeaksOfChannelsAndThreads(t *testing.T) {
 		}
 	}
 	for _, want := range []string{"--bead-channel", "--channel", "answers inside a post's thread"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expected the help to say %q, got:\n%s", want, out)
+		}
+	}
+}
+
+// A reply to a post mw sent, with no channel flag, goes to that post's channel.
+func TestPosternSendReWithNoChannelFlagAnswersInTheRootsChannel(t *testing.T) {
+	for name, c := range map[string]struct {
+		flags  []string
+		thread string
+	}{
+		"bead channel":  {[]string{"--bead-channel", "mw-a.1"}, `{"bead":"mw-a.1"}`},
+		"named channel": {[]string{"--channel", "roadmap"}, `{"topic":"roadmap"}`},
+	} {
+		sent, bdLog := channelHome(t)
+		out, err := runPostern(t, append(append([]string{"send"}, c.flags...), "the root")...)
+		if err != nil {
+			t.Fatalf("%s: the root failed to send: %v\n%s", name, err, out)
+		}
+		root := strings.TrimSpace(out)
+		if !strings.HasPrefix(root, "direct:") {
+			t.Fatalf("%s: expected the root's txid first, got:\n%s", name, out)
+		}
+		out, err = runPostern(t, "send", "--re", root, "the reply")
+		if err != nil {
+			t.Fatalf("%s: the reply failed to send: %v\n%s", name, err, out)
+		}
+		want := `{"thread":` + c.thread + `,"text":"the reply","re":"` + root + `"}`
+		if len(*sent) != 2 || (*sent)[1] != want {
+			t.Fatalf("%s: expected the reply %s, got %v", name, want, *sent)
+		}
+		if name == "bead channel" {
+			if calls, _ := os.ReadFile(bdLog); !strings.Contains(string(calls), ": the reply") {
+				t.Fatalf("expected the reply commented on the bead, bd was asked:\n%s", calls)
+			}
+		}
+	}
+}
+
+// A root mw has not seen is refused, with the flags that would say where, and
+// nothing is sent; a channel flag with --re still goes where it says.
+func TestPosternSendReWithNoChannelFlagRefusesAnUnseenRoot(t *testing.T) {
+	plaintexts, _, out, err := channelSend(t, "--re", channelRe, "x")
+	if err == nil {
+		t.Fatalf("expected a refusal, sent %v\n%s", plaintexts, out)
+	}
+	want := "--re <root> needs the root's channel: give --bead-channel <id> or --channel <name>"
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("expected the refusal to say %q, got %v", want, err)
+	}
+	if len(plaintexts) != 0 {
+		t.Errorf("expected nothing sent, got %v", plaintexts)
+	}
+}
+
+func TestPosternSendHelpSaysWhereAReplyGoes(t *testing.T) {
+	out, err := runPostern(t, "send", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"ROOT's\nchannel", "never\nsilently to Factory", "A channel flag given with --re wins"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected the help to say %q, got:\n%s", want, out)
 		}

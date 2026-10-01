@@ -36,6 +36,7 @@ type posternInboxContext struct {
 	backend     *apptest.FakePostern
 	cipher      *apptest.FakeCipher
 	memory      *apptest.FakeTracker
+	threads     *apptest.FakePosternThreadIndex
 	mailbox     *apptest.FakeMailbox
 	out         *bytes.Buffer
 	governorKey string
@@ -86,6 +87,7 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 			backend: apptest.NewFakePostern(),
 			cipher:  cipher,
 			memory:  apptest.NewFakeTracker(),
+			threads: apptest.NewFakePosternThreadIndex(),
 			mailbox: apptest.NewFakeMailbox(),
 			out:     &bytes.Buffer{},
 		}
@@ -99,6 +101,16 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	})
 
 	c.registerPosternCloseSteps(ctx)
+
+	ctx.Then(`^mw remembers the post "([^"]*)" is in the channel of bead "([^"]*)"$`, func(txid, bead string) error {
+		return c.rememberedThread(txid, application.PosternThread{Bead: bead})
+	})
+	ctx.Then(`^mw remembers the post "([^"]*)" is in channel "([^"]*)"$`, func(txid, channel string) error {
+		return c.rememberedThread(txid, application.PosternThread{Topic: channel})
+	})
+	ctx.Then(`^mw remembers the post "([^"]*)" is in the general channel$`, func(txid string) error {
+		return c.rememberedThread(txid, application.PosternThread{})
+	})
 
 	ctx.Given(`^a throwaway postern key$`, c.aThrowawayPosternKey)
 	ctx.Given(`^a postern record of class "([^"]*)" addressed to this key$`, c.aPosternRecordAddressedToThisKey)
@@ -681,6 +693,7 @@ func (c *posternInboxContext) inbox() application.PosternInbox {
 		Cipher:        c.cipher,
 		Keys:          c.keys,
 		Memory:        c.memory,
+		Threads:       c.threads,
 		Tracker:       c.memory,
 		Mailbox:       c.mailbox,
 		GovernorKey:   c.governorKey,
@@ -1287,6 +1300,22 @@ func (c *posternInboxContext) beadsLastCommentContains(bead, want string) error 
 	}
 	if len(comments) == 0 || !strings.Contains(comments[len(comments)-1].Text, want) {
 		return fmt.Errorf("expected %s's last comment to contain %q, got %+v", bead, want, comments)
+	}
+	return nil
+}
+
+// rememberedThread checks that the inbox told the thread index the post txid
+// is in want.
+func (c *posternInboxContext) rememberedThread(txid string, want application.PosternThread) error {
+	got, found, err := c.threads.Lookup(txid)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("expected mw to remember the channel of %s, but it never saw the post", txid)
+	}
+	if got != want {
+		return fmt.Errorf("expected %s to be remembered in %+v, got %+v", txid, want, got)
 	}
 	return nil
 }

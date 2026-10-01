@@ -347,6 +347,20 @@ func PosternInboxDir() (string, error) {
 	return filepath.Join(home, DefaultPosternInboxDir), nil
 }
 
+// DefaultPosternThreadsFile is where mw remembers the channel of each post it
+// has read or sent, under the home directory, beside the inbox directory: host
+// state, never the vault. There is no setting for it.
+var DefaultPosternThreadsFile = filepath.Join(".local", "state", "mw", "postern", "threads.jsonl")
+
+// PosternThreadsFile reports the full path to DefaultPosternThreadsFile.
+func PosternThreadsFile() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("there is no home directory to remember a postern channel in: %w", err)
+	}
+	return filepath.Join(home, DefaultPosternThreadsFile), nil
+}
+
 // The channels mw postern send delivers a message by: straight to the
 // postern backend (postern's docs/protocol.md §9), or in a funded testnet
 // transaction (§4). DefaultPosternChannel is chain, what every host did
