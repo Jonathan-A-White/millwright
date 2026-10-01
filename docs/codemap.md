@@ -18,7 +18,7 @@ Adapters assert `var _ application.<Port>`.
 
 | Port | Declared in | Real adapter | Fake |
 | --- | --- | --- | --- |
-| `WorkTracker` | `application/worktracker.go` | `infrastructure/beads/beads.go` | `apptest.FakeTracker` |
+| `WorkTracker` | `application/worktracker.go` | `infrastructure/beads/{beads,snapshot}.go` | `apptest.FakeTracker` |
 | `TrackerSync` | `application/sync.go` | `infrastructure/beads/sync.go` | `apptest.FakeTracker` |
 | `TrackerNotes`, `SweepNotes` | `application/{status,sweep}.go` | same | same |
 | `VaultFiles` | `application/sync.go` | `infrastructure/vault/git.go` | `apptest.FakeVaultFiles` |
