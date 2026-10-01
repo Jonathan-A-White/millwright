@@ -226,7 +226,8 @@ type Next struct {
 	// fault at the remote itself, worth trying again — never a stated refusal,
 	// and never the race with the other host, which Tries governs on its own.
 	// Zero is DefaultPushTries. PushWait is how long it waits between those
-	// tries; the zero value is no wait, so that a test never sleeps.
+	// tries; the zero value is no wait, so that a test never sleeps. A close of
+	// the landed story that fails is tried again the same way (closeStory).
 	PushTries int
 	PushWait  time.Duration
 
@@ -1155,7 +1156,7 @@ func (n Next) finish(ctx context.Context, c *closeOut, report *NextReport, outco
 	// every sync until somebody commits it, and this is the run that can.
 	n.commit(ctx, c, report)
 
-	closeErr := n.Tracker.CloseStory(ctx, c.id, outcome)
+	closeErr := n.closeStory(ctx, c.id, outcome)
 	if closeErr != nil {
 		report.NotClosed = closeErr.Error()
 	} else {
@@ -1173,6 +1174,35 @@ func (n Next) finish(ctx context.Context, c *closeOut, report *NextReport, outco
 
 	report.Abandoned = n.abandoned(ctx, c.id, report)
 	return n.carryOn(ctx, c, report)
+}
+
+// closeStory closes a landed story, and when the close fails tries it again the
+// way a push is tried: PushTries times in all, PushWait apart (mw-gq6.191). The
+// tracker's server can be out of reach just as a landing ends, and a landed
+// story left in_progress is one a later dispatch could take for work in
+// flight. A close whose answer was lost but whose write went through is read
+// back, and counts as closed.
+func (n Next) closeStory(ctx context.Context, id, outcome string) error {
+	tries := n.pushTries()
+	var last error
+	for try := 1; try <= tries; try++ {
+		if try > 1 {
+			if err := waitFor(ctx, n.PushWait); err != nil {
+				return fmt.Errorf("%w (and waiting %s to try the close again: %v)", last, n.PushWait, err)
+			}
+		}
+		last = n.Tracker.CloseStory(ctx, id, outcome)
+		if last == nil {
+			return nil
+		}
+		if detail, err := n.Tracker.ShowStory(ctx, id); err == nil && detail.Closed() {
+			return nil
+		}
+	}
+	if tries == 1 {
+		return last
+	}
+	return fmt.Errorf("the close failed on each of its %d tries, the last saying: %w", tries, last)
 }
 
 // ledgered reports whether the seat's ledger already holds this story's line.
