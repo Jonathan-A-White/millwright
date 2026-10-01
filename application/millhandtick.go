@@ -157,6 +157,10 @@ type MillhandTick struct {
 	// its own in the log.
 	Tidy Tidy
 
+	// SelfUpdate keeps this host's mw level with the factory rig's main: it
+	// is looked at first on every tick, and a tick with none wired does not.
+	SelfUpdate SelfUpdate
+
 	// DoctorNotes is where mw doctor leaves the note that a check needs a
 	// person's attention, one key per check under DoctorNotePrefix; the tick
 	// reads every one of them and remembers, in the same store, which it has
@@ -230,6 +234,22 @@ func (t MillhandTick) Run(ctx context.Context) (MillhandTickReport, error) {
 // look is the rule itself: what the tick found and did, as the words of its
 // line, and the error if it could not do it.
 func (t MillhandTick) look(ctx context.Context) (line string, woke bool, err error) {
+	// First, before any early return, so that a Millhand that stays up for
+	// hours does not keep this host on an old mw.
+	var updated []string
+	if !t.DryRun {
+		updated = t.SelfUpdate.Run(ctx)
+	}
+	line, woke, err = t.lookAround(ctx)
+	if len(updated) > 0 {
+		line = joinNotes(line, updated)
+	}
+	return line, woke, err
+}
+
+// lookAround is the rest of the rule: everything the tick finds out about the
+// Millhand, the mail and the stories.
+func (t MillhandTick) lookAround(ctx context.Context) (line string, woke bool, err error) {
 	up, err := MillhandWindow(ctx, t.Millhand.Windows)
 	if err != nil {
 		return TickCouldNotLook + oneLine(err.Error()), false, err

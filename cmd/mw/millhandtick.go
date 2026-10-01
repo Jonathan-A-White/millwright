@@ -12,6 +12,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 	"github.com/Jonathan-A-White/millwright/infrastructure/notify"
 	"github.com/Jonathan-A-White/millwright/infrastructure/reaper"
+	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/ticklog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 	"github.com/Jonathan-A-White/millwright/infrastructure/watch"
@@ -55,7 +56,14 @@ func newMillhandTickCmd() *cobra.Command {
 			"own, a wake that could not be started included. With --dry-run it says what it would do and\n" +
 			"starts nothing; it runs neither the sweep, the watch nor the doctor note look-up, since each\n" +
 			"records what it finds and would leave nobody to wake for it, and it writes nothing to the log.\n" +
-			"With no [watch] table it does not consult mw watch.",
+			"With no [watch] table it does not consult mw watch.\n\n" +
+			"First of all, before any of that and whether or not a Millhand is up, it keeps this host's mw level\n" +
+			"with the factory rig's main, on a host whose [after_landing] table names a command for the millwright\n" +
+			"rig (README, [after_landing]): a clean checkout behind origin's main is fast-forwarded and the command\n" +
+			"run in it, and the line says \"self-update: millwright <old> → <new>, built\". A dirty checkout, one on\n" +
+			"another branch or one with commits of its own is left alone, and the line says why. A build that\n" +
+			"fails keeps the old bin/mw, is said in the line, and is tried again by the next tick. A dry run\n" +
+			"does none of it.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := config.Vault()
@@ -83,6 +91,14 @@ func newMillhandTickCmd() *cobra.Command {
 				return err
 			}
 			reach, err := config.DoctorReach()
+			if err != nil {
+				return err
+			}
+			rigs, err := config.Rigs()
+			if err != nil {
+				return err
+			}
+			afterLanding, err := config.AfterLanding()
 			if err != nil {
 				return err
 			}
@@ -120,6 +136,12 @@ func newMillhandTickCmd() *cobra.Command {
 				Sweep: application.Sweep{
 					Tracker: gateway,
 					Host:    host,
+				},
+				SelfUpdate: application.SelfUpdate{
+					Rigs:     rigs,
+					Checkout: rig.New(),
+					After:    rig.NewAfterLanding(rig.WithAfterCommands(afterLanding)),
+					Built:    rig.NewBuiltMarks(filepath.Join(home, SyncHaltStateDir)),
 				},
 				Tidy:      application.Tidy{Mail: gateway, Notes: gateway, Beads: gateway},
 				Reach:     doctor.NetReach{Hosts: reach},

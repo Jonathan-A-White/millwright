@@ -119,6 +119,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeReleaseScenario(ctx)
 	steps.InitializeRetryScenario(ctx)
 	steps.InitializeSeatBootScenario(ctx)
+	steps.InitializeSelfUpdateScenario(ctx)
 	steps.InitializeSeatContextScenario(ctx)
 	steps.InitializeSeatReapScenario(ctx)
 	steps.InitializeSessionEnvScenario(ctx)
