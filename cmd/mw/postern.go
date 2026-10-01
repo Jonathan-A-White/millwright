@@ -246,6 +246,7 @@ func newPosternInboxCmd() *cobra.Command {
 			inbox := application.PosternInbox{
 				Threads:       threads,
 				Postern:       backend,
+				Prompts:       backend,
 				Cipher:        posternCipher(keys),
 				Keys:          keys,
 				Memory:        gateway,

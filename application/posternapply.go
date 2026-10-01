@@ -87,10 +87,15 @@ type posternApplied struct {
 	Kind, Bead, Txid string
 	Refused          bool
 	Detail           string
+	// Said, when set, is the whole summary: a prompt call is printed as a call.
+	Said string
 }
 
 // summary is the line a pass prints for it: never a message's text.
 func (a posternApplied) summary() string {
+	if a.Said != "" {
+		return a.Said
+	}
 	verb := "applied"
 	if a.Refused {
 		verb = "refused"
@@ -130,6 +135,7 @@ func (i PosternInbox) Apply(ctx context.Context) ([]string, error) {
 	if err := i.wired(); err != nil {
 		return nil, err
 	}
+	i.prompts = &promptCache{}
 	if i.Tracker == nil {
 		return nil, fmt.Errorf("mw postern inbox --apply: no work tracker is configured to apply anything to")
 	}
@@ -290,6 +296,9 @@ func (i PosternInbox) applyOne(ctx context.Context, m PosternInboxMessage, outco
 		}
 		result, err := i.applyVoice(ctx, m, outcome, path)
 		return result, err == nil, err
+	}
+	if result, handled, err := i.applyPromptCall(ctx, m); handled || err != nil {
+		return result, handled && err == nil, err
 	}
 	if m.ThreadIsBead {
 		recorded, fresh, err := i.recordThreadCommentOnce(ctx, m, saved)

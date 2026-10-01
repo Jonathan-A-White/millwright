@@ -595,6 +595,12 @@ type PosternInbox struct {
 	// reads it.
 	AttachmentDir string
 
+	// Prompts, when set, is the backend's saved prompts: a Governor message
+	// that begins '/' is checked against them, as a call of one. Nil reads
+	// every such message as it always was.
+	Prompts Prompts
+	prompts *promptCache
+
 	// Lock, when set, is taken for the whole of Run and Apply, so that two
 	// of them — the on-message hook run twice at once, or the hook and the
 	// Mayor's own read — never apply the same message together.
@@ -671,6 +677,7 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 	if err := i.wired(); err != nil {
 		return nil, err
 	}
+	i.prompts = &promptCache{}
 	release, err := i.lock(ctx)
 	if err != nil {
 		return nil, err
