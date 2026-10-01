@@ -56,6 +56,9 @@ type moveWorld struct {
 	mayorStays   bool
 	handoffMail  string
 	oldInstalled map[string]bool
+	// workDir is the unit's WorkingDirectory, the data dir it serves; the vault's
+	// .beads/dolt when empty.
+	workDir string
 	// failAt is a call that fails, once it has been made and written down.
 	failAt string
 	// written is the last home file written.
@@ -130,6 +133,25 @@ func (w *moveWorld) BeadsCount(context.Context) (int, error) {
 
 func (w *moveWorld) UnitInstalled(_ context.Context, unit string) (bool, error) {
 	return w.installed[unit], w.did("systemctl installed? " + unit)
+}
+
+func (w *moveWorld) UnitWorkingDirectory(_ context.Context, unit string) (string, error) {
+	dir := w.workDir
+	if dir == "" {
+		dir = vaultDir + "/.beads/dolt"
+	}
+	return dir, w.did("systemctl show " + unit + " WorkingDirectory")
+}
+
+func (w *moveWorld) EmptyDataDir(_ context.Context, dir string) error {
+	return w.did("empty data dir " + dir)
+}
+
+func (w *moveWorld) BeadsServerAnswers(_ context.Context, wait time.Duration) error {
+	if wait != 30*time.Second {
+		return errors.New("the wait is 30 s")
+	}
+	return w.did("wait for the beads server")
 }
 
 func (w *moveWorld) StartUnit(_ context.Context, unit string) (bool, error) {
@@ -251,12 +273,14 @@ func TestMoveRunsTheSixStepsInOrder(t *testing.T) {
 		// 2. beads: GitHub's time first, then the swap under the lock
 		"git: read refs/dolt/data time",
 		"host lock taken",
+		"systemctl installed? dolt-beads",
 		"aside .beads/embeddeddolt",
+		"systemctl show dolt-beads WorkingDirectory",
+		"empty data dir "+doltMoved.From,
+		"systemctl --user start dolt-beads",
+		"wait for the beads server",
 		"bd bootstrap --yes",
 		"git checkout -- .beads/config.yaml",
-		"bd count",
-		"systemctl installed? dolt-beads",
-		"systemctl --user start dolt-beads",
 		"bd count",
 		"host lock released",
 		// 3. the vault
@@ -471,6 +495,7 @@ func TestGitHubThatCannotBeReadStopsBeforeTheDatabaseIsTouched(t *testing.T) {
 
 func TestABootstrapThatFailsStopsWithTheDatabaseSetAsideAndSaysHowToPutItBack(t *testing.T) {
 	w, out := newMoveWorld(), &bytes.Buffer{}
+	w.installed[application.DoltBeadsUnit] = false
 	w.failAt = "bd bootstrap --yes"
 
 	err := move(w, out).Run(context.Background())
@@ -479,7 +504,7 @@ func TestABootstrapThatFailsStopsWithTheDatabaseSetAsideAndSaysHowToPutItBack(t 
 		t.Fatalf("expected the move to stop at step 2 with bd's failure, got %v", err)
 	}
 	wantCalls(t, w,
-		"ssh desktop", "git: read refs/dolt/data time", "host lock taken",
+		"ssh desktop", "git: read refs/dolt/data time", "host lock taken", "systemctl installed? dolt-beads",
 		"aside .beads/embeddeddolt", "bd bootstrap --yes", "host lock released")
 	mustContain(t, "ways back", out.String(), "Ways back", asideMoved.To, asideMoved.From)
 }
@@ -608,8 +633,11 @@ func TestADoltDirectoryIsSetAsideBesideTheEmbeddedOneAndItsWayBackIsPrinted(t *t
 		t.Fatal("expected the move to stop")
 	}
 	wantCalls(t, w,
-		"ssh desktop", "git: read refs/dolt/data time", "host lock taken",
-		"aside .beads/embeddeddolt", "aside .beads/dolt", "bd bootstrap --yes", "host lock released")
+		"ssh desktop", "git: read refs/dolt/data time", "host lock taken", "systemctl installed? dolt-beads",
+		"aside .beads/embeddeddolt", "aside .beads/dolt",
+		"systemctl show dolt-beads WorkingDirectory", "empty data dir "+doltMoved.From,
+		"systemctl --user start dolt-beads", "wait for the beads server",
+		"bd bootstrap --yes", "host lock released")
 	mustContain(t, "ways back", out.String(), "Ways back",
 		"mv "+doltMoved.To+" "+doltMoved.From, "mv "+asideMoved.To+" "+asideMoved.From)
 }
@@ -626,16 +654,20 @@ func TestARunningDoltBeadsIsStoppedBeforeTheRenameAndItsRestartIsAWayBack(t *tes
 		t.Fatal("expected the move to stop")
 	}
 	wantCalls(t, w,
-		"ssh desktop", "git: read refs/dolt/data time", "host lock taken",
+		"ssh desktop", "git: read refs/dolt/data time", "host lock taken", "systemctl installed? dolt-beads",
 		"systemctl --user stop dolt-beads",
-		"aside .beads/embeddeddolt", "aside .beads/dolt", "bd bootstrap --yes", "host lock released")
+		"aside .beads/embeddeddolt", "aside .beads/dolt",
+		"systemctl show dolt-beads WorkingDirectory", "empty data dir "+doltMoved.From,
+		"systemctl --user start dolt-beads", "wait for the beads server",
+		"bd bootstrap --yes", "host lock released")
 	text := out.String()
 	block := text[strings.Index(text, "The move stopped"):]
-	mustContain(t, "error", err.Error(), "stopped here", "cannot bootstrap into a stopped server")
-	restart := strings.Index(block, "systemctl --user start dolt-beads")
+	mustContain(t, "error", err.Error(), "into the dolt-beads server", "fresh data directory")
+	stop := strings.Index(block, "systemctl --user stop dolt-beads")
 	back := strings.Index(block, "mv "+doltMoved.To+" "+doltMoved.From)
-	if restart < 0 || back < 0 || restart < back {
-		t.Errorf("expected the asides moved back, and only then dolt-beads started, in:\n%s", block)
+	restart := strings.LastIndex(block, "systemctl --user start dolt-beads")
+	if stop < 0 || back < stop || restart < back {
+		t.Errorf("expected the fresh server stopped, the asides moved back, and only then dolt-beads started on the old data, in:\n%s", block)
 	}
 }
 
@@ -647,4 +679,118 @@ func TestTheReportNamesWhereTheDoltDirectoryWasSetAside(t *testing.T) {
 		t.Fatalf("move: %v\n%s", err, out)
 	}
 	mustContain(t, "report", out.String(), doltMoved.To, "never deleted")
+}
+
+// A new home that runs dolt-beads: bootstrap clones into the server and never makes
+// .beads/dolt itself, so the unit is started on a fresh, empty data dir first.
+func TestAMoveOntoAHostThatServesBeadsStartsTheUnitOnAFreshDataDirBeforeBootstrap(t *testing.T) {
+	w, out := newMoveWorld(), &bytes.Buffer{}
+	w.hasDolt = true
+	w.running[application.DoltBeadsUnit] = true
+
+	if err := move(w, out).Run(context.Background()); err != nil {
+		t.Fatalf("move: %v\n%s", err, out)
+	}
+
+	want := []string{
+		"ssh desktop",
+		"git: read refs/dolt/data time",
+		"host lock taken",
+		"systemctl installed? dolt-beads",
+		"systemctl --user stop dolt-beads",
+		"aside .beads/embeddeddolt",
+		"aside .beads/dolt",
+		"systemctl show dolt-beads WorkingDirectory",
+		"empty data dir " + doltMoved.From,
+		"systemctl --user start dolt-beads",
+		"wait for the beads server",
+		"bd bootstrap --yes",
+		"git checkout -- .beads/config.yaml",
+		"bd count",
+		"host lock released",
+	}
+	if len(w.calls) < len(want) || !reflect.DeepEqual(w.calls[:len(want)], want) {
+		t.Errorf("what ran, in order:\n got  %q\n want it to begin %q", w.calls, want)
+	}
+	mustContain(t, "report", out.String(), doltMoved.To, asideMoved.To, "fresh", "answers with 4422 beads")
+}
+
+// A host without the unit keeps the embedded path: the one count, no server.
+func TestAMoveOntoAHostWithoutDoltBeadsKeepsTheEmbeddedOrder(t *testing.T) {
+	w, out := newMoveWorld(), &bytes.Buffer{}
+	w.installed[application.DoltBeadsUnit] = false
+
+	if err := move(w, out).Run(context.Background()); err != nil {
+		t.Fatalf("move: %v\n%s", err, out)
+	}
+
+	want := []string{
+		"ssh desktop",
+		"git: read refs/dolt/data time",
+		"host lock taken",
+		"systemctl installed? dolt-beads",
+		"aside .beads/embeddeddolt",
+		"bd bootstrap --yes",
+		"git checkout -- .beads/config.yaml",
+		"bd count",
+		"host lock released",
+	}
+	if len(w.calls) < len(want) || !reflect.DeepEqual(w.calls[:len(want)], want) {
+		t.Errorf("what ran, in order:\n got  %q\n want it to begin %q", w.calls, want)
+	}
+	for _, call := range w.calls {
+		if strings.Contains(call, "WorkingDirectory") || strings.Contains(call, "empty data dir") || strings.Contains(call, "beads server") {
+			t.Errorf("a host without dolt-beads asked about a server: %q", call)
+		}
+	}
+}
+
+// The unit that will not start on the fresh data dir stops the move with every
+// aside to move back and the unit to start again on the old data.
+func TestAUnitThatFailsToStartOnTheFreshDataDirStopsTheMoveWithTheWaysBack(t *testing.T) {
+	w, out := newMoveWorld(), &bytes.Buffer{}
+	w.hasDolt = true
+	w.running[application.DoltBeadsUnit] = true
+	w.failAt = "systemctl --user start dolt-beads"
+
+	err := move(w, out).Run(context.Background())
+
+	stopped, ok := application.HomeMoveStoppedIn(err)
+	if !ok || stopped.Step != 2 || !stopped.Changed {
+		t.Fatalf("expected the move to stop at step 2 with things changed, got %v", err)
+	}
+	if last := w.calls[len(w.calls)-2]; last != "systemctl --user start dolt-beads" {
+		t.Errorf("nothing runs after the failed start but the lock's release: %q", w.calls)
+	}
+	for _, call := range w.calls {
+		if call == "bd bootstrap --yes" {
+			t.Errorf("bootstrapped with no server up")
+		}
+	}
+	text := out.String()
+	block := text[strings.Index(text, "Ways back"):]
+	stop := strings.Index(block, "systemctl --user stop dolt-beads")
+	dolt := strings.Index(block, "mv "+doltMoved.To+" "+doltMoved.From)
+	embedded := strings.Index(block, "mv "+asideMoved.To+" "+asideMoved.From)
+	restart := strings.LastIndex(block, "systemctl --user start dolt-beads")
+	if stop < 0 || dolt < stop || embedded < dolt || restart < embedded {
+		t.Errorf("expected: stop the unit, move both asides back, start the unit on the old data, in:\n%s", block)
+	}
+}
+
+func TestABeadsServerThatNeverAnswersStopsTheMoveBeforeBootstrap(t *testing.T) {
+	w, out := newMoveWorld(), &bytes.Buffer{}
+	w.failAt = "wait for the beads server"
+
+	err := move(w, out).Run(context.Background())
+
+	if err == nil || !strings.Contains(err.Error(), "step 2") {
+		t.Fatalf("expected the move to stop at step 2, got %v", err)
+	}
+	for _, call := range w.calls {
+		if call == "bd bootstrap --yes" {
+			t.Errorf("bootstrapped with no server answering")
+		}
+	}
+	mustContain(t, "ways back", out.String(), "Ways back", "systemctl --user stop dolt-beads")
 }

@@ -24,6 +24,9 @@ const (
 	// HomeMoveHandoffWait is how long a planned move waits for the old home's Mayor
 	// to hand off before it gives up. It never kills the Mayor.
 	HomeMoveHandoffWait = 15 * time.Minute
+	// HomeMoveBeadsServerWait is how long the move waits for dolt-beads, started on
+	// a fresh data dir, to answer before it bootstraps into it.
+	HomeMoveBeadsServerWait = 30 * time.Second
 	// HomeMoveBackendWait is how long the move waits for the backend to answer as
 	// home. A backend on a host that is not home is in standby and re-reads
 	// `mw home --check` every 30 seconds.
@@ -65,6 +68,18 @@ type HomeMoveHost interface {
 
 	// UnitInstalled reports whether this host has the user unit.
 	UnitInstalled(ctx context.Context, unit string) (bool, error)
+
+	// UnitWorkingDirectory is the unit's WorkingDirectory, read from systemd: for
+	// dolt-beads, the data directory its server serves.
+	UnitWorkingDirectory(ctx context.Context, unit string) (string, error)
+
+	// EmptyDataDir makes sure dir exists and is empty, so that a server started in
+	// it has no database. A directory with anything in it is refused, never cleared.
+	EmptyDataDir(ctx context.Context, dir string) error
+
+	// BeadsServerAnswers waits up to wait for the beads database server bd is told
+	// (BEADS_DOLT_SERVER_HOST on BEADS_DOLT_SERVER_PORT) to take a connection.
+	BeadsServerAnswers(ctx context.Context, wait time.Duration) error
 
 	// StartUnit starts the user unit, and reports whether it did: a unit that was
 	// already running is left alone, and is (false, nil).
@@ -428,10 +443,10 @@ func (r *homeMoveRun) steps() []homeMoveStep {
 			plan: []string{
 				"reads when GitHub's refs/dolt/data, the beads backup, was written. If GitHub cannot be read the move stops there, with nothing touched.",
 				fmt.Sprintf("takes this host's sync lock, stops the %s unit here if it is running (it holds %s/.beads/dolt open), and sets %s/.beads/embeddeddolt and %s/.beads/dolt aside in dated directories in the home directory (beads-embeddeddolt-aside-<time>, beads-dolt-aside-<time>): neither is ever deleted, so a stale .beads/dolt is never served.", DoltBeadsUnit, m.VaultDir, m.VaultDir, m.VaultDir),
+				fmt.Sprintf("if this host has the %s unit: reads its WorkingDirectory from systemd, makes sure that directory is empty, starts the unit on it and waits for the server to answer, because bootstrap makes no .beads/dolt of its own and clones into the server it is told. A host without the unit stays embedded, and beads_sync = auto reads home as backup mode.", DoltBeadsUnit),
 				"runs `bd bootstrap --yes`, then `git checkout -- .beads/config.yaml` (bootstrap drops its trailing newline), and asks bd how many beads it holds: none is a stop, and so is a count that differs from the old home's own (a planned move takes that over ssh; a dead old home has none to compare).",
-				fmt.Sprintf("starts the %s user unit if this host has one; if not, stays embedded, and beads_sync = auto reads home as backup mode.", DoltBeadsUnit),
 			},
-			back: fmt.Sprintf("stop %s if the move started it, move the new .beads/embeddeddolt and .beads/dolt away (if bootstrap made them), move both dated directories back in their places, then start %s again if it was running before.", DoltBeadsUnit, DoltBeadsUnit),
+			back: fmt.Sprintf("stop %s if the move started it, move the new .beads/embeddeddolt and .beads/dolt (the fresh data directory) away, move both dated directories back in their places, then start %s again if it was running before.", DoltBeadsUnit, DoltBeadsUnit),
 			run:  (*homeMoveRun).beads,
 		},
 		{
@@ -511,6 +526,13 @@ func (r *homeMoveRun) beads(ctx context.Context) error {
 		}
 		defer release()
 	}
+	// Whether this host serves beads decides the order: bootstrap makes no
+	// .beads/dolt of its own, it clones into the server bd is told, so a host with
+	// the unit starts it on a fresh data dir first.
+	installed, err := m.Machine.UnitInstalled(ctx, DoltBeadsUnit)
+	if err != nil {
+		return fmt.Errorf("asking whether the %s unit is installed: %w", DoltBeadsUnit, err)
+	}
 	// A running server holds .beads/dolt open: stop it first, and start it in the way back.
 	stopped, err := m.Machine.StopUnit(ctx, DoltBeadsUnit)
 	if err != nil {
@@ -531,9 +553,14 @@ func (r *homeMoveRun) beads(ctx context.Context) error {
 		return fmt.Errorf("setting the .beads/dolt directory aside: %w", err)
 	}
 	r.setAside(dolt, ".beads/dolt directory")
+	if installed {
+		if err := r.serveFresh(ctx, dolt.From); err != nil {
+			return err
+		}
+	}
 	if err := m.Machine.BootstrapBeads(ctx); err != nil {
-		if stopped {
-			return fmt.Errorf("bootstrapping the beads database: %w. The %s unit is stopped here: a bd in server mode (BEADS_DOLT_* set, as beads.env does) cannot bootstrap into a stopped server, and bootstrap makes no .beads/dolt of its own: no stale directory is left to serve, and no new one was made. The ways back are below", err, DoltBeadsUnit)
+		if installed {
+			return fmt.Errorf("bootstrapping the beads database into the %s server: %w. The server runs on a fresh data directory, the old ones are set aside. The ways back are below", DoltBeadsUnit, err)
 		}
 		return fmt.Errorf("bootstrapping the beads database: %w", err)
 	}
@@ -541,29 +568,40 @@ func (r *homeMoveRun) beads(ctx context.Context) error {
 	if err := m.Machine.RestoreBeadsConfig(ctx); err != nil {
 		return fmt.Errorf("restoring .beads/config.yaml: %w", err)
 	}
-	if err := r.beadsAnswer(ctx, "bd"); err != nil {
-		return err
+	if installed {
+		return r.beadsAnswer(ctx, "bd, with the "+DoltBeadsUnit+" unit up,")
 	}
+	r.say("no %s unit here: staying embedded; beads_sync = auto reads home as backup mode.", DoltBeadsUnit)
+	return r.beadsAnswer(ctx, "bd")
+}
 
-	installed, err := m.Machine.UnitInstalled(ctx, DoltBeadsUnit)
+// serveFresh starts the dolt-beads unit on an empty data directory and waits for it
+// to answer, so that bootstrap has a server to clone into. dolt is where the
+// .beads/dolt that was set aside stood, "" if there was none.
+func (r *homeMoveRun) serveFresh(ctx context.Context, dolt string) error {
+	m := r.m
+	dir, err := m.Machine.UnitWorkingDirectory(ctx, DoltBeadsUnit)
 	if err != nil {
-		return fmt.Errorf("asking whether the %s unit is installed: %w", DoltBeadsUnit, err)
+		return fmt.Errorf("reading the %s unit's WorkingDirectory: %w", DoltBeadsUnit, err)
 	}
-	if !installed {
-		r.say("no %s unit here: staying embedded; beads_sync = auto reads home as backup mode.", DoltBeadsUnit)
-		return nil
+	if err := m.Machine.EmptyDataDir(ctx, dir); err != nil {
+		return fmt.Errorf("making an empty data directory %s for the %s unit: %w", dir, DoltBeadsUnit, err)
 	}
-	started, err := m.Machine.StartUnit(ctx, DoltBeadsUnit)
-	if err != nil {
-		return fmt.Errorf("starting the %s unit: %w", DoltBeadsUnit, err)
+	r.say("%s serves %s: a fresh, empty data directory.", DoltBeadsUnit, dir)
+	if dir != dolt {
+		r.undo(fmt.Sprintf("rmdir %s (the empty data directory the move made for %s; only if it is still empty)", dir, DoltBeadsUnit))
 	}
-	if started {
-		r.say("started the %s user unit.", DoltBeadsUnit)
-		r.undo("systemctl --user stop " + DoltBeadsUnit)
-	} else {
-		r.say("the %s user unit was already running.", DoltBeadsUnit)
+	// Noted before the start: a unit that fails to start is left failed, and stopped in the way back.
+	r.undo("systemctl --user stop " + DoltBeadsUnit)
+	if _, err := m.Machine.StartUnit(ctx, DoltBeadsUnit); err != nil {
+		return fmt.Errorf("starting the %s unit on the fresh data directory %s: %w. %s", DoltBeadsUnit, dir, err, r.asideText())
 	}
-	return r.beadsAnswer(ctx, "bd, with the "+DoltBeadsUnit+" unit up,")
+	r.say("started the %s user unit.", DoltBeadsUnit)
+	if err := m.Machine.BeadsServerAnswers(ctx, HomeMoveBeadsServerWait); err != nil {
+		return fmt.Errorf("waiting for the %s server to answer: %w", DoltBeadsUnit, err)
+	}
+	r.say("the %s server answers.", DoltBeadsUnit)
+	return nil
 }
 
 // setAside says what was set aside and notes the way back of it; the zero move is

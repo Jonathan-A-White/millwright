@@ -2,6 +2,7 @@ package homemove
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -521,5 +522,103 @@ func TestStopUnitStopsOnlyAUnitThatIsRunning(t *testing.T) {
 	}
 	if !strings.Contains(logOf(t, dir, "systemctl"), "--user stop dolt-beads") {
 		t.Errorf("systemctl was run as %q", logOf(t, dir, "systemctl"))
+	}
+}
+
+// UnitWorkingDirectory is read from systemd, never assumed: `systemctl --user show
+// <unit> -p WorkingDirectory` prints WorkingDirectory=<path>.
+func TestUnitWorkingDirectoryIsReadFromSystemctlShow(t *testing.T) {
+	dir := onPath(t, map[string]string{"systemctl": `echo "WorkingDirectory=/srv/beads/data"`})
+
+	got, err := Host{}.UnitWorkingDirectory(context.Background(), "dolt-beads")
+
+	if err != nil || got != "/srv/beads/data" {
+		t.Errorf("got %q, %v", got, err)
+	}
+	if log := strings.TrimSpace(logOf(t, dir, "systemctl")); log != "--user show dolt-beads -p WorkingDirectory" {
+		t.Errorf("systemctl was run as %q", log)
+	}
+}
+
+func TestUnitWorkingDirectoryDropsSystemdsOptionalMark(t *testing.T) {
+	onPath(t, map[string]string{"systemctl": `echo "WorkingDirectory=!/srv/beads/data"`})
+	if got, err := (Host{}).UnitWorkingDirectory(context.Background(), "dolt-beads"); err != nil || got != "/srv/beads/data" {
+		t.Errorf("got %q, %v", got, err)
+	}
+}
+
+func TestUnitWorkingDirectoryThatIsNotAPathIsAnError(t *testing.T) {
+	for _, said := range []string{"WorkingDirectory=", "WorkingDirectory=~", "WorkingDirectory=relative/dir", "nothing useful"} {
+		onPath(t, map[string]string{"systemctl": `echo "` + said + `"`})
+		if got, err := (Host{}).UnitWorkingDirectory(context.Background(), "dolt-beads"); err == nil {
+			t.Errorf("%q: expected an error, got %q", said, got)
+		}
+	}
+}
+
+func TestUnitWorkingDirectoryThatSystemctlCannotAskIsAnError(t *testing.T) {
+	onPath(t, map[string]string{"systemctl": "echo 'Failed to connect to bus' >&2; exit 1"})
+	if _, err := (Host{}).UnitWorkingDirectory(context.Background(), "dolt-beads"); err == nil {
+		t.Error("expected an error")
+	}
+}
+
+func TestEmptyDataDirMakesTheDirectoryTheUnitWillServe(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), ".beads", "dolt")
+	if err := (Host{}).EmptyDataDir(context.Background(), dir); err != nil {
+		t.Fatalf("EmptyDataDir: %v", err)
+	}
+	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
+		t.Errorf("expected an empty directory, got %v, %v", entries, err)
+	}
+	if err := (Host{}).EmptyDataDir(context.Background(), dir); err != nil {
+		t.Errorf("a directory that is already empty is fine: %v", err)
+	}
+}
+
+// What is in the directory is somebody's database: it is never cleared.
+func TestEmptyDataDirNeverClearsADirectoryWithSomethingInIt(t *testing.T) {
+	dir := t.TempDir()
+	keep := filepath.Join(dir, "beads")
+	if err := os.WriteFile(keep, []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := (Host{}).EmptyDataDir(context.Background(), dir); err == nil {
+		t.Error("expected a refusal")
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Errorf("what was there was touched: %v", err)
+	}
+}
+
+func TestBeadsServerAnswersWhenTheAddressTakesADial(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	host, port, _ := net.SplitHostPort(ln.Addr().String())
+	t.Setenv("BEADS_DOLT_SERVER_HOST", host)
+	t.Setenv("BEADS_DOLT_SERVER_PORT", port)
+
+	if err := (Host{Poll: 10 * time.Millisecond}).BeadsServerAnswers(context.Background(), 2*time.Second); err != nil {
+		t.Errorf("a listening server: %v", err)
+	}
+}
+
+func TestBeadsServerThatNeverAnswersSaysSoWhenWaitIsUp(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	host, port, _ := net.SplitHostPort(ln.Addr().String())
+	ln.Close()
+	t.Setenv("BEADS_DOLT_SERVER_HOST", host)
+	t.Setenv("BEADS_DOLT_SERVER_PORT", port)
+
+	err = (Host{Poll: 10 * time.Millisecond}).BeadsServerAnswers(context.Background(), 200*time.Millisecond)
+
+	if err == nil || !strings.Contains(err.Error(), host+":"+port) {
+		t.Errorf("expected the address in the error, got %v", err)
 	}
 }
