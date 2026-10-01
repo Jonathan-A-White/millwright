@@ -1,0 +1,31 @@
+# `mw postern view --follow`, run as the user and kept running: it reads the
+# beads' head every second and writes the sealed live view again whenever it
+# has changed, so the Governor's tap shows in the app within two seconds with
+# no refresh. For `systemctl --user`; see README.md, "mw postern view --follow".
+#
+# The home runs it, where the postern backend serves the view file. A daemon,
+# so there is no timer: `sh scripts/install-units.sh --enable mw-view-follow`.
+# Once it is active the mail-notify tick's view step is retired and runs nothing.
+[Unit]
+Description=Republish the live view when the beads change (mw postern view --follow)
+
+[Service]
+# bd reaches the home's Dolt server through BEADS_DOLT_* in beads.env; without
+# them it would make a second, empty database. The host says where mw and bd
+# are in dispatch.env, the same one line `PATH=...` mw-dispatch.service reads
+# (its leading "-" makes it optional); `env` finds mw through that PATH.
+EnvironmentFile=%h/.config/mw/beads.env
+EnvironmentFile=-%h/.config/mw/dispatch.env
+ExecStart=/usr/bin/env mw postern view --follow
+
+# Every failure inside the loop is logged and the loop goes on; this restarts
+# it only if the process itself dies. SIGTERM, which is how systemd stops it,
+# ends it cleanly.
+Restart=on-failure
+RestartSec=5
+
+# A pass is cheap and steps aside for real work.
+Nice=19
+
+[Install]
+WantedBy=default.target

@@ -14,6 +14,10 @@
 # unit needs only `systemctl --user daemon-reload` on a host. Run it from the
 # rig's own checkout: the links point there.
 #
+# A unit with a .service and no .timer beside it (mw-view-follow) is a daemon:
+# it is named the same way, only its .service is linked, and --enable runs
+# `systemctl --user enable --now <name>.service` for it.
+#
 # A live timer starts real work and spends fuel, so a timer is enabled ONLY when
 # --enable is given, and then with `systemctl --user enable --now`. Without it
 # the pairs are linked and the host is told the command to arm them.
@@ -169,13 +173,29 @@ for t in "$SRC"/*.timer; do
 done
 [ -n "$PAIRS" ] || die "$SRC holds no timer/service pair"
 
+# Every daemon the rig ships: a .service with no .timer beside it.
+DAEMONS=""
+for sv in "$SRC"/*.service; do
+	[ -f "$sv" ] || continue
+	n=$(basename "$sv" .service)
+	[ -f "$SRC/$n.timer" ] || DAEMONS="$DAEMONS $n"
+done
+
 is_pair() { case " $PAIRS " in *" $1 "*) return 0 ;; esac; return 1; }
+is_daemon() { case " $DAEMONS " in *" $1 "*) return 0 ;; esac; return 1; }
+
+# unit_files <name>: the files a unit is made of.
+unit_files() {
+	if is_daemon "$1"; then echo "$1.service"; else echo "$1.service $1.timer"; fi
+}
 
 # state <name>: how a pair stands in DEST: linked, copied, partial or no.
 state() {
 	linked=0
 	present=0
-	for f in "$1.service" "$1.timer"; do
+	total=0
+	for f in $(unit_files "$1"); do
+		total=$((total + 1))
 		if [ -L "$DEST/$f" ]; then
 			present=$((present + 1))
 			[ "$(readlink "$DEST/$f")" = "$SRC/$f" ] && linked=$((linked + 1))
@@ -183,9 +203,9 @@ state() {
 			present=$((present + 1))
 		fi
 	done
-	if [ "$linked" = 2 ]; then echo linked
+	if [ "$linked" = "$total" ]; then echo linked
 	elif [ "$present" = 0 ]; then echo no
-	elif [ "$present" = 2 ]; then echo copied
+	elif [ "$present" = "$total" ]; then echo copied
 	else echo partial
 	fi
 }
@@ -194,10 +214,12 @@ state() {
 if [ -z "$UNITS" ]; then
 	[ "$ENABLE" = 0 ] || { echo "install-units.sh: --enable needs a unit named" >&2; usage >&2; exit 2; }
 	printf '%-22s %-10s %s\n' UNIT INSTALLED ACTIVE
-	for n in $PAIRS; do
+	for n in $PAIRS $DAEMONS; do
 		active=unknown
+		armed=$n.timer
+		is_daemon "$n" && armed=$n.service
 		if command -v systemctl >/dev/null 2>&1; then
-			if systemctl --user is-active --quiet "$n.timer" >/dev/null 2>&1; then active=yes; else active=no; fi
+			if systemctl --user is-active --quiet "$armed" >/dev/null 2>&1; then active=yes; else active=no; fi
 		fi
 		printf '%-22s %-10s %s\n' "$n" "$(state "$n")" "$active"
 	done
@@ -212,12 +234,12 @@ NAMED=""
 for u in $UNITS; do
 	n=${u%.timer}
 	n=${n%.service}
-	is_pair "$n" || die "no such unit: $u (the pairs are:$PAIRS)"
+	is_pair "$n" || is_daemon "$n" || die "no such unit: $u (the units are:$PAIRS$DAEMONS)"
 	case " $NAMED " in *" $n "*) ;; *) NAMED="$NAMED $n" ;; esac
 done
 
 for n in $NAMED; do
-	for f in "$n.service" "$n.timer"; do
+	for f in $(unit_files "$n"); do
 		if [ -L "$DEST/$f" ]; then
 			[ "$(readlink "$DEST/$f")" = "$SRC/$f" ] ||
 				die "$DEST/$f is a link to $(readlink "$DEST/$f"), not to this rig; remove it by hand first. Nothing was changed"
@@ -239,7 +261,7 @@ run() { # <command>...: run it, or say it would be
 if [ "$DRY" = 1 ]; then echo "would make: $DEST"; else mkdir -p "$DEST"; fi
 TIMERS=""
 for n in $NAMED; do
-	for f in "$n.service" "$n.timer"; do
+	for f in $(unit_files "$n"); do
 		if [ -L "$DEST/$f" ]; then
 			echo "skip: $DEST/$f already links to $SRC/$f"
 		elif [ "$DRY" = 1 ]; then
@@ -249,7 +271,7 @@ for n in $NAMED; do
 			echo "linked: $DEST/$f -> $SRC/$f"
 		fi
 	done
-	TIMERS="$TIMERS $n.timer"
+	if is_daemon "$n"; then TIMERS="$TIMERS $n.service"; else TIMERS="$TIMERS $n.timer"; fi
 done
 
 run systemctl --user daemon-reload
@@ -276,6 +298,10 @@ for n in $NAMED; do
 	case $n in
 	mw-mail-notify) script=$RIG/contrib/mail-notify; cmd=mw-mail-notify ;;
 	mw-health) script=$RIG/contrib/health/mw-health.sh; cmd=mw-health ;;
+	mw-view-follow)
+		echo "  [env]      the service reads $HOME/.config/mw/beads.env (BEADS_DOLT_*) and dispatch.env (PATH); it needs"
+		echo "             both, and a postern key (mw postern key init) and postern_governor_key in config.toml"
+		continue ;;
 	*) continue ;;
 	esac
 	echo "  [$cmd] the service runs \`$cmd\` from PATH; link the script in:"

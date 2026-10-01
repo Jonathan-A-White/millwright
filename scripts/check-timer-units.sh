@@ -67,6 +67,7 @@ DOCTOR_SERVICE=$DIR/mw-doctor.service
 DOCTOR_TIMER=$DIR/mw-doctor.timer
 MIRROR_SERVICE=$DIR/mw-postern-mirror.service
 MIRROR_TIMER=$DIR/mw-postern-mirror.timer
+FOLLOW_SERVICE=$DIR/mw-view-follow.service
 SEAT_TMUX_SERVICE=$DIR/system/mw-seat-tmux.service
 SYS_DOCTOR_SERVICE=$DIR/system/mw-doctor.service
 SYS_DOCTOR_TIMER=$DIR/system/mw-doctor.timer
@@ -94,6 +95,7 @@ fail() {
 [ -f "$DOCTOR_TIMER" ] || fail "$DOCTOR_TIMER does not exist"
 [ -f "$MIRROR_SERVICE" ] || fail "$MIRROR_SERVICE does not exist"
 [ -f "$MIRROR_TIMER" ] || fail "$MIRROR_TIMER does not exist"
+[ -f "$FOLLOW_SERVICE" ] || fail "$FOLLOW_SERVICE does not exist"
 [ -f "$SEAT_TMUX_SERVICE" ] || fail "$SEAT_TMUX_SERVICE does not exist"
 [ -f "$SYS_DOCTOR_SERVICE" ] || fail "$SYS_DOCTOR_SERVICE does not exist"
 [ -f "$SYS_DOCTOR_TIMER" ] || fail "$SYS_DOCTOR_TIMER does not exist"
@@ -105,7 +107,7 @@ if command -v systemd-analyze >/dev/null 2>&1; then
 	# and complains about them (not the rig's to change): those lines are noted
 	# and do not fail. A line names a rig unit by its path or, as systemd does for
 	# some faults, by its file name alone.
-	UNITS="$SERVICE $TIMER $MAIL_SERVICE $MAIL_TIMER $HEALTH_SERVICE $HEALTH_TIMER $TICK_SERVICE $TICK_TIMER $REVIEW_SERVICE $REVIEW_TIMER $DOCTOR_SERVICE $DOCTOR_TIMER $MIRROR_SERVICE $MIRROR_TIMER"
+	UNITS="$SERVICE $TIMER $MAIL_SERVICE $MAIL_TIMER $HEALTH_SERVICE $HEALTH_TIMER $TICK_SERVICE $TICK_TIMER $REVIEW_SERVICE $REVIEW_TIMER $DOCTOR_SERVICE $DOCTOR_TIMER $MIRROR_SERVICE $MIRROR_TIMER $FOLLOW_SERVICE"
 	# shellcheck disable=SC2086 # the unit paths hold no spaces; word splitting is the point
 	out=$(systemd-analyze --user verify $UNITS 2>&1) || {
 		echo "$out" >&2
@@ -216,6 +218,11 @@ need "$MIRROR_SERVICE" "Type=oneshot"
 need "$MIRROR_SERVICE" "ExecStart=/usr/bin/env mw postern mirror"
 need "$MIRROR_TIMER" "OnCalendar=*:3/10"
 need "$MIRROR_TIMER" "Persistent=false"
+# The view follower, a daemon with no timer.
+need "$FOLLOW_SERVICE" "ExecStart=/usr/bin/env mw postern view --follow"
+need "$FOLLOW_SERVICE" "Restart=on-failure"
+need "$FOLLOW_SERVICE" "EnvironmentFile=%h/.config/mw/beads.env"
+need "$FOLLOW_SERVICE" "WantedBy=default.target"
 # The seat's tmux server, a system unit. No RemainAfterExit=yes: that marked
 # the unit active (exited) the instant its tracked server died instead of
 # restarting it. scripts/check-seat-tmux-respawn.sh proves the restart live.

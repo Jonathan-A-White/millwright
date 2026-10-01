@@ -330,6 +330,24 @@ has 'contrib/mail-notify'
 has 'contrib/health/mw-health.sh'
 ok
 
+NAME="a daemon (a .service with no timer) links one file and enables the service"
+world
+run --enable mw-view-follow
+rc_is 0
+is_link_to_rig "$USERDIR/mw-view-follow.service" mw-view-follow.service
+[ "$(nlinks "$W/home")" = 1 ] || fail "$NAME: $(nlinks "$W/home") symlinks, wanted 1"
+calls_are 1 '^systemctl --user daemon-reload$'
+calls_are 1 '^systemctl --user enable --now mw-view-follow.service$'
+has 'beads.env'
+ok
+
+NAME="a daemon is listed with its service's state"
+ENVX="FAKE_ACTIVE=mw-view-follow.service"
+run
+printf '%s\n' "$OUT" | grep -E '^mw-view-follow +linked +yes$' >/dev/null || fail "$NAME: mw-view-follow is not shown as linked and active
+$OUT"
+ok
+
 # --- 8. --dry-run ---------------------------------------------------------------------------
 NAME="--dry-run --enable changes nothing and calls nothing that would"
 world
