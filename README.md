@@ -1026,6 +1026,31 @@ appends nothing. A failure is logged and the loop goes on, tried again next
 pass; one that repeats word for word is logged once. SIGTERM or SIGINT stops it
 cleanly. `mw postern view --follow` is the same loop by its old name.
 
+Sending. Each pass of the follower also ends by sending the events written since
+its last batch to the Governor: it seals them as one `events` record to his key
+(`docs/events.md`, "The batch") and puts it on chain (UTXOs, sign,
+`/api/broadcast`) and delivers it direct (`POST /api/messages`) in the same pass.
+The first event after a quiet spell goes at once; a burst goes as one batch per
+2 seconds, or 50 events (and no more than fits a record) at once. When the chain
+road fails (no UTXOs, the block explorer or `/api/broadcast` down) the batch goes
+direct only, in the `fallback` lane, and is kept pending in `ship.json` beside
+the log; every later pass puts the pending batches on chain first, oldest first,
+in the `normal` lane with the same seq range, until they clear. The app dedupes
+by seq. Two knobs in the `[events]` table of `~/.config/mw/config.toml` guard the
+satoshis:
+
+```toml
+[events]
+chain = true            # false: never touch the chain; every batch goes direct as fallback
+chain_daily_cap = 500   # records put on chain in a UTC day; past it, batches go direct as fallback
+```
+
+Past the cap the follower appends one `job` event (actor `events-follow@<host>`,
+running to failed) saying so, once a day, and the pending batches wait for the
+next UTC day. `mw status` has an `EVENTS` line: the log's head seq, the last seq
+sent, the batches pending on chain and today's chain records of the cap. With no
+postern key the follower writes events but sends none, and says so.
+
 `mw events emit --kind job --actor dispatch@laptop --from scheduled --to running
 [--bead <id>] [--detail ...]` appends one event of a job's own, stamped now, and
 prints its seq; an event its machine forbids is refused and nothing is written.

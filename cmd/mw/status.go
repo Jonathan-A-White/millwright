@@ -47,6 +47,9 @@ func newStatusCmd() *cobra.Command {
 			"When a rig's file in the vault (rigs/<rig>.toml) requires something of its epics, an EPICS\n" +
 			"MISSING REQUIREMENTS section names each open epic that lacks it, and an EPICS WAIVED section\n" +
 			"each epic the Governor waived it for. Both are left out when there are none.\n\n" +
+			"An EVENTS line says where the event follower stands: the log's head seq, the last seq sent,\n" +
+			"the batches that went direct as fallback and wait to go on chain, and today's records on\n" +
+			"chain of the daily cap ([events] chain_daily_cap).\n\n" +
 			"Every line fits a phone-width terminal, at most 60 columns. Nothing is claimed, nothing is\n" +
 			"written and no session is started: status only reads.",
 		Args: cobra.NoArgs,
@@ -75,6 +78,10 @@ func newStatusCmd() *cobra.Command {
 			}
 
 			tracker := mwGateway(dir, host)
+			events, err := eventsShipping(host)
+			if err != nil {
+				return err
+			}
 			_, err = application.Status{
 				Tracker:        tracker,
 				Notes:          tracker,
@@ -85,6 +92,7 @@ func newStatusCmd() *cobra.Command {
 				Host:           host,
 				Seat:           BuilderSeat,
 				Ticks:          hostTickLogs(),
+				Events:         events,
 				HostSilence:    time.Duration(hours) * time.Hour,
 				RigMemoryBytes: budget,
 				SyncMode:       setting.Configured,
@@ -94,4 +102,18 @@ func newStatusCmd() *cobra.Command {
 			return err
 		},
 	}
+}
+
+// eventsShipping is where mw status reads the event follower's sending from,
+// or nil, with no error, when the host has no event log path to read.
+func eventsShipping(host string) (application.EventsShipping, error) {
+	path, err := config.EventsLogPath()
+	if err != nil {
+		return nil, nil
+	}
+	ship, err := eventShip(path, host)
+	if err != nil {
+		return nil, err
+	}
+	return ship, nil
 }

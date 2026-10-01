@@ -151,12 +151,22 @@ type Status struct {
 	// leaves its timer out; with neither there is no section.
 	Ticks TickLogs
 
+	// Events, when set, is where the event follower's sending is read from,
+	// for the EVENTS line. Nil leaves the line out.
+	Events EventsShipping
+
 	// Now is the clock "today" is read by, for picking out the ledger's lines
 	// dated today. The zero value reads the real one.
 	Now func() time.Time
 
 	// Out is where the report is printed. A nil Out prints nothing.
 	Out io.Writer
+}
+
+// EventsShipping says where the follower's sending of events stands.
+// EventShip is the one reader.
+type EventsShipping interface {
+	Status(ctx context.Context) (ShipStatus, error)
 }
 
 // RunningStory is one story this host has claimed, with what a person needs
@@ -257,6 +267,9 @@ type StatusReport struct {
 	EpicShortfalls []EpicShortfall
 	// Ticks are how this host's own timers are doing, counted from their logs.
 	Ticks HostTicks
+	// Events is where the event follower stands; nil when it was not asked
+	// or could not be read.
+	Events *ShipStatus
 	// MillhandResume is the "resumed ... (grace until ...)" line shown under
 	// the Millhand tick while its resume grace still holds; "" once it does
 	// not.
@@ -398,6 +411,14 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		return report, fmt.Errorf("summing today's fuel from the %s seat's ledger: %w", s.Seat, err)
 	}
 	report.FuelToday = fuel
+
+	if s.Events != nil {
+		// A shipper that cannot be read is left out of the report, not a
+		// reason to refuse the rest of it.
+		if shipping, err := s.Events.Status(ctx); err == nil {
+			report.Events = &shipping
+		}
+	}
 
 	over, err := s.rigMemoryOverBudget(ctx)
 	if err != nil {
@@ -735,6 +756,11 @@ func (r StatusReport) String() string {
 		for _, size := range r.RigMemory {
 			clip(&b, fmt.Sprintf("  %s %d/%d bytes: prune (Mayor)", size.Rig, size.Bytes, r.RigMemoryBudget))
 		}
+		b.WriteString("\n")
+	}
+
+	if r.Events != nil {
+		clip(&b, r.Events.Line())
 		b.WriteString("\n")
 	}
 

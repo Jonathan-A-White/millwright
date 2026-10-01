@@ -48,7 +48,12 @@ func newEventsFollowCmd() *cobra.Command {
 			"bead mail with its box as the detail — saves its cursor (follow.json beside the log), and\n" +
 			"writes the sealed live view again, as `mw postern view` does, so a tap of the Governor's\n" +
 			"shows within two seconds. Its first run only reads where every bead stands: it appends\n" +
-			"nothing. A failure is logged and the loop goes on; SIGTERM or SIGINT stops it. It is what\n" +
+			"nothing. Each pass also seals the events not yet sent as one `events` record to the Governor's\n" +
+			"key (docs/events.md, \"The batch\"), at most one batch every 2 s or 50 events at once, and puts\n" +
+			"it on chain and delivers it direct in the same pass. With the chain unreachable, off ([events]\n" +
+			"chain = false) or past [events] chain_daily_cap records today, it goes direct only, in the\n" +
+			"fallback lane, and is put on chain later, oldest first. A failure is logged and the loop goes\n" +
+			"on; SIGTERM or SIGINT stops it. It is what\n" +
 			"contrib/systemd/mw-view-follow.service runs; `mw postern view --follow` is the same loop.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -80,9 +85,32 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 		Now:     posternViewClock,
 		Err:     cmd.ErrOrStderr(),
 	}
+	ship, err := eventShip(path, host)
+	if err != nil {
+		return err
+	}
+	var shipper application.EventShipper
+	if keys, err := posternKeys(); err != nil {
+		return err
+	} else if exists, err := keys.Exists(); err != nil {
+		return err
+	} else if !exists {
+		fmt.Fprintf(cmd.ErrOrStderr(), "mw events follow: no postern key at %s, so no event is sent (mw postern key init)\n", keys.Path())
+	} else {
+		backend, err := posternBackend(keys)
+		if err != nil {
+			return err
+		}
+		if ship.GovernorKey, err = config.PosternGovernorKey(); err != nil {
+			return err
+		}
+		ship.Postern, ship.Cipher, ship.Keys, ship.Err = backend, posternCipher(keys), keys, cmd.ErrOrStderr()
+		shipper = ship
+	}
 	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
 	return application.EventFollow{
+		Shipper: shipper,
 		Head:    gateway,
 		Feed:    gateway,
 		Log:     eventlog.New(path),
@@ -100,6 +128,23 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 		Every: every,
 		Err:   cmd.ErrOrStderr(),
 	}.Run(ctx)
+}
+
+// eventShip is the shipper for the log in the file path, with the log, its
+// state and the [events] knobs but no road to the backend: enough to read
+// where sending stands, and what runEventsFollow fills in to send.
+func eventShip(path, host string) (*application.EventShip, error) {
+	knobs, err := config.Events()
+	if err != nil {
+		return nil, err
+	}
+	return &application.EventShip{
+		Log:      eventlog.New(path),
+		State:    eventlog.NewShipStates(path),
+		Chain:    knobs.Chain,
+		DailyCap: knobs.ChainDailyCap,
+		Host:     host,
+	}, nil
 }
 
 func newEventsEmitCmd() *cobra.Command {

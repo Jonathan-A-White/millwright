@@ -124,8 +124,12 @@ One `events` record's plaintext is one batch: the events numbered `from` to
 
 - `normal`: the ~2 s batch, on chain and direct.
 - `emergency`: one event sent alone and at once; `from` equals `to`.
-- `fallback`: a batch sent direct only while the chain could not be reached,
-  re-sent on chain later unchanged, so the app dedupes it by seq.
+- `fallback`: a batch sent direct only while the chain could not be reached
+  or the day's `chain_daily_cap` was spent, re-sent on chain later in the
+  `normal` lane with the same seq range and events, so the app dedupes it by
+  seq. With `[events] chain = false` every batch is `fallback` and none is
+  re-sent. A batch holds at most 50 events and
+  what fits a record (about 7 KB of text), the rest following in the next.
 
 ```json
 {
