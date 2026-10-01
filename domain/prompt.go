@@ -5,20 +5,22 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // The types an option of a saved prompt may have.
 const (
-	PromptTypeString = "string"
-	PromptTypeInt    = "int"
-	PromptTypeBool   = "bool"
+	PromptTypeString   = "string"
+	PromptTypeInt      = "int"
+	PromptTypeBool     = "bool"
+	PromptTypeDuration = "duration"
 )
 
 // promptRequiredSuffix ends an option's spec when the caller must give it.
 const promptRequiredSuffix = ":required"
 
 var (
-	promptNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+	promptNamePattern = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 	promptFlagPattern = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 )
 
@@ -48,12 +50,12 @@ type PromptArg struct {
 }
 
 // ValidPromptName reports whether name can name a prompt: lower-case letters,
-// digits, hyphens and underscores, starting with a letter or digit.
+// digits and hyphens, 1 to 32 of them, as the backend keeps them.
 func ValidPromptName(name string) bool { return promptNamePattern.MatchString(name) }
 
 // ParsePromptOption reads spec, `<flag>:<type>[=<default>][:required]`. The
-// flag is lower-case words joined by hyphens, the type is string, int or
-// bool, and a default must be a value of the type. An option is required or
+// flag is lower-case words joined by hyphens, the type is string, int, bool or
+// duration, and a default must be a value of the type. An option is required or
 // has a default, never both.
 func ParsePromptOption(spec string) (PromptOption, error) {
 	rest := spec
@@ -74,9 +76,9 @@ func ParsePromptOption(spec string) (PromptOption, error) {
 		return PromptOption{}, fmt.Errorf("option %q is required, so it has no default", spec)
 	}
 	switch kind {
-	case PromptTypeString, PromptTypeInt, PromptTypeBool:
+	case PromptTypeString, PromptTypeInt, PromptTypeBool, PromptTypeDuration:
 	default:
-		return PromptOption{}, fmt.Errorf("option %q: %q is not a type: string, int or bool", spec, kind)
+		return PromptOption{}, fmt.Errorf("option %q: %q is not a type: string, int, bool or duration", spec, kind)
 	}
 	if def != "" {
 		if err := option.check(def); err != nil {
@@ -96,6 +98,10 @@ func (o PromptOption) check(value string) error {
 	case PromptTypeBool:
 		if _, err := strconv.ParseBool(value); err != nil {
 			return fmt.Errorf("%q is not a bool", value)
+		}
+	case PromptTypeDuration:
+		if _, err := time.ParseDuration(value); err != nil {
+			return fmt.Errorf("%q is not a duration", value)
 		}
 	}
 	return nil

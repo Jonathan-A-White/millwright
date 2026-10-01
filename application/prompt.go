@@ -53,7 +53,7 @@ func (s PromptSave) Run(ctx context.Context, req PromptSaveRequest) (domain.Prom
 	case s.Prompts == nil:
 		return prompt, fmt.Errorf("mw prompt save: there is no backend to save the prompt to")
 	case !domain.ValidPromptName(prompt.Name):
-		return prompt, fmt.Errorf("mw prompt save: %q is not a prompt name: lower-case letters, digits, - and _", req.Name)
+		return prompt, fmt.Errorf("mw prompt save: %q is not a prompt name: 1 to 32 of lower-case letters, digits and -", req.Name)
 	case prompt.Summary == "":
 		return prompt, fmt.Errorf("mw prompt save: /%s needs a --summary: the line the list shows", prompt.Name)
 	case strings.TrimSpace(prompt.Body) == "":

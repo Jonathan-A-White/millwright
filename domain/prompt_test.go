@@ -14,6 +14,7 @@ func TestParsePromptOptionReadsTypeDefaultAndRequired(t *testing.T) {
 		"all:bool=true":         {Flag: "all", Type: "bool", Default: "true"},
 		"note:string":           {Flag: "note", Type: "string"},
 		"where:string=a:b":      {Flag: "where", Type: "string", Default: "a:b"},
+		"for:duration=30m":      {Flag: "for", Type: "duration", Default: "30m"},
 	} {
 		got, err := domain.ParsePromptOption(spec)
 		if err != nil || got != want {
@@ -32,6 +33,7 @@ func TestParsePromptOptionRefusesWhatIsNotASpec(t *testing.T) {
 		"count:float=5":        "is not a type",
 		"count:int=many":       "is not an int",
 		"all:bool=maybe":       "is not a bool",
+		"for:duration=soon":    "is not a duration",
 		"count:int=5:required": "required, so it has no default",
 	} {
 		if _, err := domain.ParsePromptOption(spec); err == nil || !strings.Contains(err.Error(), why) {
@@ -59,6 +61,18 @@ func TestFillReplacesEachFlagAndNamesTheSignatureWhenTheCallIsWrong(t *testing.T
 		_, err := p.Fill(c.args)
 		if err == nil || !strings.Contains(err.Error(), c.why) || !strings.Contains(err.Error(), "its signature is --count:int=5 --since:string:required --all:bool=false") {
 			t.Errorf("expected %q naming the signature, got %v", c.why, err)
+		}
+	}
+}
+
+// The backend keeps names of a-z, 0-9 and - only, 1 to 32 characters.
+func TestValidPromptNameIsWhatTheBackendKeeps(t *testing.T) {
+	for name, want := range map[string]bool{
+		"top5": true, "a-b": true, "9": true, strings.Repeat("a", 32): true,
+		"": false, "top_5": false, "Top5": false, strings.Repeat("a", 33): false,
+	} {
+		if got := domain.ValidPromptName(name); got != want {
+			t.Errorf("%q: expected %v, got %v", name, want, got)
 		}
 	}
 }
