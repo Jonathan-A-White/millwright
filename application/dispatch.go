@@ -102,6 +102,12 @@ type Dispatch struct {
 	// The zero value waits for real, and stops when the context does.
 	Wait func(ctx context.Context, d time.Duration) error
 
+	// Load is how busy this host is, read before a story pathed to domain.HostAuto
+	// is taken: such a story is passed over while the 1-minute load is at or above
+	// the core count. A story that names this host is never braked by load. A nil
+	// Load, or a load that cannot be read, does not brake: the cap still applies.
+	Load HostLoad
+
 	// Host is which of the factory's hosts this is, Cap is how many sessions
 	// may be running here at once, and Rigs is where each rig is checked out.
 	Host string
@@ -165,6 +171,9 @@ type Started struct {
 	Path     domain.Path
 	Worktree string
 	Branch   string
+	// Auto is true when the story's path said host=auto, so that this host was
+	// free to take it; Path.Host is this host once the claim has written it.
+	Auto bool
 	// Start is the commit the branch was cut from.
 	Start string
 	// Session is the runner's name for the session, not the story's id.
@@ -444,6 +453,8 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	// dry run reads them too, so that it reports the same refusal a real run
 	// would, without writing anything.
 	var formulas map[string]bool
+	// The load is read once, and only if a story may run on any host.
+	var load *LoadReading
 	for _, detail := range ready {
 		id := detail.Story.ID
 		// First, so that a story that is not a session's to take is never passed
@@ -466,9 +477,20 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Why: "its path names no host, so no host may take it"})
 			continue
 		}
-		if path.Host != d.Host {
+		// A story that may run on any host passes the host check on every host,
+		// provided this one is not already busy: the cap is checked below as it
+		// is for any story, and the load only here, for stories nobody else has
+		// a claim to.
+		auto := path.Host == domain.HostAuto
+		if path.Host != d.Host && !auto {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Why: "it is worked on " + path.Host})
 			continue
+		}
+		if auto {
+			if busy, why := d.busy(ctx, &load); busy {
+				report.Passed = append(report.Passed, Passed{StoryID: id, Why: why})
+				continue
+			}
 		}
 
 		// bd's own ready set is trusted for everything except this: a dependency
@@ -638,6 +660,26 @@ func (d Dispatch) syncWaitingForTheNetwork(ctx context.Context) (SyncReport, int
 	}
 }
 
+// busy says whether this host is too busy to take a story that may run on any
+// host, and why. The load is read the first time it is asked for and kept for the
+// rest of the run. What cannot be read is not busy: the cap is still the limit.
+func (d Dispatch) busy(ctx context.Context, read **LoadReading) (bool, string) {
+	if d.Load == nil {
+		return false, ""
+	}
+	if *read == nil {
+		reading, err := d.Load.Load(ctx)
+		if err != nil {
+			return false, ""
+		}
+		*read = &reading
+	}
+	if reading := **read; reading.Busy() {
+		return true, fmt.Sprintf("host=%s and %s is at load %.1f of %d cores", domain.HostAuto, d.Host, reading.Load, reading.Cores)
+	}
+	return false, ""
+}
+
 // start dispatches one story: claim, worktree, formula, boot, session, and the
 // record of it on the story. It reports what was started, whether the claim was
 // given back, and what went wrong.
@@ -657,6 +699,7 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 		Branch:   StoryBranch(id),
 		Start:    StartPoint(d.remote(), path.Branch),
 		Session:  SessionName(id),
+		Auto:     path.Host == domain.HostAuto,
 	}
 	if d.DryRun {
 		return started, false, nil
@@ -674,6 +717,25 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 		return Started{}, false, fmt.Errorf("claiming %s: %w", id, err)
 	}
 	d.print(fmt.Sprintf("  claimed %s\n", id))
+
+	// The claim is what makes the story this host's, so it is also what writes
+	// this host's name over "auto": mw status, the landing and the ledger all see
+	// a concrete host from here on. The one writer of that field is this line.
+	if started.Auto {
+		if err := d.Tracker.SetStoryMetadata(ctx, id, map[string]string{"host": d.Host}); err != nil {
+			released, relErr := d.release(ctx, id, fmt.Errorf("recording the host of %s as %s: %w", id, d.Host, err))
+			return Started{}, released, relErr
+		}
+		path.Host, started.Path.Host = d.Host, d.Host
+		detail.Story.Overrides.Host = d.Host
+	}
+	// A claim given back leaves the story as ready as it was found, and a story
+	// that was free to run on any host is still free to.
+	handedBack := func(released bool) {
+		if released && started.Auto {
+			_ = d.Tracker.SetStoryMetadata(context.WithoutCancel(ctx), id, map[string]string{"host": domain.HostAuto})
+		}
+	}
 
 	// recorded is whether the story names the molecule this dispatch poured, and
 	// so whether the next dispatch will find it.
@@ -706,6 +768,7 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 			}
 		}
 		released, err := d.release(ctx, id, failed)
+		handedBack(released)
 		return Started{}, released, err
 	}
 
@@ -726,7 +789,9 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 		}
 		salvaged, err := salvageBranch(ctx, d.Worktrees, d.Landing, d.Files, d.Boot.Vault, rigDir, id, started.Worktree, started.Branch, started.Start, leftoverAttempt)
 		if err != nil {
-			return d.refuseLeftover(ctx, id, err)
+			refused, released, err := d.refuseLeftover(ctx, id, err)
+			handedBack(released)
+			return refused, released, err
 		}
 		started.SalvagedBundle = salvaged.BundlePath
 	}
@@ -1178,8 +1243,13 @@ func (r DispatchReport) String() string {
 		verb = "would start"
 	}
 	for _, started := range r.Started {
-		fmt.Fprintf(&b, "  %s %s · %s · %s on %s cut from %s", verb, started.StoryID, started.Session,
-			started.Worktree, started.Branch, started.Start)
+		if started.Auto && r.DryRun {
+			fmt.Fprintf(&b, "  would take %s (host=%s) here · %s · %s on %s cut from %s", started.StoryID, domain.HostAuto,
+				started.Session, started.Worktree, started.Branch, started.Start)
+		} else {
+			fmt.Fprintf(&b, "  %s %s · %s · %s on %s cut from %s", verb, started.StoryID, started.Session,
+				started.Worktree, started.Branch, started.Start)
+		}
 		if started.Attempt > 1 {
 			fmt.Fprintf(&b, " · attempt %d", started.Attempt)
 		}

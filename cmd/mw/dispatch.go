@@ -8,6 +8,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostlock"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/synchalt"
@@ -203,6 +204,7 @@ func newDispatchCmd() *cobra.Command {
 				Cap:         atOnce,
 				MaxAttempts: maxAttempts,
 				Mailbox:     gateway,
+				Load:        hostload.Proc{},
 				Rigs:        rigs,
 				Grinding:    gristGrindLock(),
 				Exclusive:   hostDispatchLock(),

@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,6 +54,11 @@ type dispatchContext struct {
 	// them; otherwise the dispatch is run with the defaults the config would.
 	configured *syncKnobs
 	lastEpic   string
+	// load is the load a scenario gave this host, when it gave one; otherwise
+	// the dispatch reads none. offersAll is whether the tracker hands dispatch
+	// stories of every host.
+	load      *apptest.FakeHostLoad
+	offersAll bool
 	// earlier is the molecule a scenario poured for a story before the dispatch
 	// ran, so that it can say whether the dispatch reused it or poured another.
 	earlier application.Molecule
@@ -127,6 +133,10 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the story "([^"]*)" has the formula "([^"]*)" poured and recorded, with every step closed$`, c.theStoryHasAMoleculeWithEveryStepClosed)
 	ctx.Given(`^the story "([^"]*)" records a molecule that does not exist$`, c.theStoryRecordsAMissingMolecule)
 
+	ctx.Given(`^this host is at load ([0-9.]+) of (\d+) cores$`, c.thisHostIsAtLoad)
+	ctx.Given(`^the work tracker offers dispatch every ready story, whichever host it names$`, c.theTrackerOffersEveryStory)
+	ctx.Given(`^the story "([^"]*)" was claimed by the other host before the sync$`, c.theOtherHostClaimedFirst)
+
 	ctx.When(`^dispatch runs on "([^"]*)" with a cap of (\d+)$`, c.dispatchRuns)
 	ctx.When(`^dispatch runs on "([^"]*)" with a cap of (\d+) as a dry run$`, c.dispatchRunsDry)
 	ctx.When(`^the story "([^"]*)" is given back once its session has ended$`, c.theStoryIsGivenBack)
@@ -166,6 +176,9 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the story "([^"]*)" records the molecule it was poured as$`, c.theStoryRecordsTheMoleculeItWasPouredAs)
 	ctx.Then(`^the boot file of "([^"]*)" holds only the steps still open, in order$`, c.theBootFileHoldsOnlyTheOpenSteps)
 	ctx.Then(`^there is no boot file for "([^"]*)"$`, c.thereIsNoBootFileFor)
+	ctx.Then(`^the metadata of the story "([^"]*)" names the host "([^"]*)"$`, c.theMetadataNamesTheHost)
+	ctx.Then(`^the story "([^"]*)" is still held by the other host$`, c.theStoryIsStillHeldByTheOtherHost)
+	ctx.Then(`^dispatch says it would take "([^"]*)" \(host=auto\) here$`, c.dispatchWouldTakeAuto)
 	ctx.Then(`^dispatch would start "([^"]*)"$`, c.dispatchWouldStart)
 	ctx.Then(`^dispatch would start, in this order:$`, c.dispatchWouldStartInOrder)
 	ctx.Then(`^the dry run report lists them in that order$`, c.theReportListsThemInOrder)
@@ -575,6 +588,63 @@ func (c *dispatchContext) theStoryRecordsAMissingMolecule(id string) error {
 	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.MoleculeField: "f-mol-gone"})
 }
 
+func (c *dispatchContext) thisHostIsAtLoad(load string, cores int) error {
+	value, err := strconv.ParseFloat(load, 64)
+	if err != nil {
+		return fmt.Errorf("%q is not a load: %w", load, err)
+	}
+	c.load = &apptest.FakeHostLoad{Reading: application.LoadReading{Load: value, Cores: cores}}
+	return nil
+}
+
+// theTrackerOffersEveryStory makes the tracker hand dispatch every ready story,
+// not only the ones pathed to this host, so that the door's own host check is
+// what a scenario tests: the tracker filters by host too, the second lock on
+// the same door.
+func (c *dispatchContext) theTrackerOffersEveryStory() error {
+	c.offersAll = true
+	return nil
+}
+
+// theOtherHostClaimedFirst is the other host's claim, as this host sees it once
+// the sync has brought it level: held, with a lease that has not run out.
+func (c *dispatchContext) theOtherHostClaimedFirst(id string) error {
+	return c.tracker.ClaimAs(id, "mw@laptop", dispatchNow.Add(5*time.Minute))
+}
+
+func (c *dispatchContext) theMetadataNamesTheHost(id, host string) error {
+	detail, err := c.tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	if got := detail.Merged().Host; got != host {
+		return fmt.Errorf("expected the host of %s to be %q, got %q", id, host, got)
+	}
+	return nil
+}
+
+func (c *dispatchContext) theStoryIsStillHeldByTheOtherHost(id string) error {
+	detail, err := c.tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	if detail.Assignee != "mw@laptop" {
+		return fmt.Errorf("expected %s to be held by mw@laptop, got %q", id, detail.Assignee)
+	}
+	return nil
+}
+
+func (c *dispatchContext) dispatchWouldTakeAuto(id string) error {
+	report, err := c.dispatched()
+	if err != nil {
+		return err
+	}
+	if printed := report.String(); !strings.Contains(printed, "would take "+id+" (host=auto) here") {
+		return fmt.Errorf("expected the dry run to say it would take %s (host=auto) here, got:\n%s", id, printed)
+	}
+	return nil
+}
+
 func (c *dispatchContext) dispatchRuns(host string, cap int) error {
 	return c.dispatch(host, cap, false)
 }
@@ -596,8 +666,12 @@ func (c *dispatchContext) dispatch(host string, cap int, dryRun bool) error {
 		knobs = *c.configured
 	}
 	worktrees := rig.New()
-	c.report, c.err = application.Dispatch{
-		Tracker:   c.tracker,
+	var tracker application.WorkTracker = c.tracker
+	if c.offersAll {
+		tracker = offersEveryStory{c.tracker}
+	}
+	dispatcher := application.Dispatch{
+		Tracker:   tracker,
 		Worktrees: worktrees,
 		Landing:   worktrees,
 		Files:     c.bundleFiles,
@@ -625,8 +699,21 @@ func (c *dispatchContext) dispatch(host string, cap int, dryRun bool) error {
 		Out:         &c.out,
 		Log:         ticklog.New(c.dispatchLogDir()),
 		Now:         func() time.Time { return dispatchNow },
-	}.Run(context.Background())
+	}
+	if c.load != nil {
+		dispatcher.Load = c.load
+	}
+	c.report, c.err = dispatcher.Run(context.Background())
 	return nil
+}
+
+// offersEveryStory is the fake tracker answering "what is ready here" with what
+// is ready anywhere, as a tracker that did not filter by host would.
+type offersEveryStory struct{ *apptest.FakeTracker }
+
+func (o offersEveryStory) ReadyForHost(ctx context.Context, _ string) ([]application.StoryDetail, error) {
+	work, err := o.FakeTracker.WorkInHand(ctx)
+	return work.Ready, err
 }
 
 // dispatchNow is the time every dispatch scenario runs at, so that a line of
