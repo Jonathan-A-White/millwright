@@ -995,3 +995,92 @@ func TestPosternViewReadsThroughTheTrackersSnapshotWhenItOffersOne(t *testing.T)
 		t.Errorf("expected the tracker's own reads left alone, got %d ShowEpics calls", calls)
 	}
 }
+
+// The follower runs the view on every beads change, and every run is a new
+// sealed file with a new ETag the Governor's phone downloads again: with a
+// memo, a run whose view differs from the last written only in written_at
+// writes nothing, and one whose view changed writes again.
+func TestPosternViewRunWritesOnlyWhenTheViewChangedApartFromWrittenAt(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	liveEpic(tracker, "mw-a", domain.Path{})
+	tracker.AddStory("mw-a", domain.Story{ID: "mw-a.1", Title: "Do it"})
+	cipher := apptest.NewFakeCipher()
+	file := apptest.NewFakeSnapshotFile("/state/postern/view.b64")
+	clock := viewNow
+	var out strings.Builder
+	memo := &application.PosternViewMemo{}
+	run := func() {
+		t.Helper()
+		_, err := application.PosternView{
+			Tracker: tracker, Notes: tracker, Cipher: cipher, File: file,
+			GovernorKey: "governor-pubkey-hex", Host: "desktop", Memo: memo,
+			Now: func() time.Time { return clock }, Out: &out,
+		}.Run(ctx)
+		if err != nil {
+			t.Fatalf("running the view: %v", err)
+		}
+	}
+
+	run()
+	if file.Writes() != 1 {
+		t.Fatalf("expected the first run to write, got %d writes", file.Writes())
+	}
+	first := file.Written()
+	wrote := out.String()
+
+	clock = clock.Add(5 * time.Second)
+	run()
+	if file.Writes() != 1 || string(file.Written()) != string(first) {
+		t.Fatalf("expected an unchanged view to leave the file alone, got %d writes", file.Writes())
+	}
+	if out.String() != wrote {
+		t.Fatalf("expected a skipped run to say nothing, got %q after %q", out.String(), wrote)
+	}
+
+	mustDo(t, tracker.SetStatus("mw-a.1", apptest.StatusInProgress))
+	clock = clock.Add(5 * time.Second)
+	run()
+	if file.Writes() != 2 {
+		t.Fatalf("expected a changed bead to write the view again, got %d writes", file.Writes())
+	}
+	var opened application.PosternViewDoc
+	if err := application.OpenPosternDoc(cipher, "any-private-key", string(file.Written()), &opened); err != nil {
+		t.Fatal(err)
+	}
+	if opened.WrittenAt != clock.Format(time.RFC3339) {
+		t.Fatalf("expected the new view stamped %s, got %s", clock.Format(time.RFC3339), opened.WrittenAt)
+	}
+
+	clock = clock.Add(5 * time.Second)
+	run()
+	if file.Writes() != 2 {
+		t.Fatalf("expected the changed view, once written, to be left alone, got %d writes", file.Writes())
+	}
+}
+
+// A write that failed is not remembered, so the next run tries again.
+func TestPosternViewRunRetriesAWriteThatFailedEvenWhenTheViewIsUnchanged(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	liveEpic(tracker, "mw-a", domain.Path{})
+	file := apptest.NewFakeSnapshotFile("/state/postern/view.b64")
+	memo := &application.PosternViewMemo{}
+	view := application.PosternView{
+		Tracker: tracker, Notes: tracker, Cipher: apptest.NewFakeCipher(), File: file,
+		GovernorKey: "governor-pubkey-hex", Host: "desktop", Memo: memo,
+		Now: func() time.Time { return viewNow },
+	}
+
+	file.Err = fmt.Errorf("disk full")
+	if _, err := view.Run(ctx); err == nil {
+		t.Fatal("expected the failed write to be reported")
+	}
+	file.Err = nil
+	if _, err := view.Run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if file.Writes() != 1 {
+		t.Fatalf("expected the retry to write, got %d writes", file.Writes())
+	}
+}

@@ -98,6 +98,9 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 		Host:    host,
 		Now:     posternViewClock,
 		Err:     cmd.ErrOrStderr(),
+		// Held across the passes, so a beads change that leaves the view as
+		// it was does not give the Governor's phone a new file to download.
+		Memo: &application.PosternViewMemo{},
 	}
 	ship, err := eventShip(path, host)
 	if err != nil {
