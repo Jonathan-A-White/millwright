@@ -99,11 +99,17 @@ type HomeReport struct {
 	Host   string
 	Record *domain.HomeRecord
 	Why    error
+	// ElsewhereHome is set by Check when this host is not home: the home's name,
+	// which is all Check prints then.
+	ElsewhereHome string
 }
 
 // String is the report as it is printed: home, this host, and whether this host
 // is home (yes, no or unknown).
 func (r HomeReport) String() string {
+	if r.ElsewhereHome != "" {
+		return r.ElsewhereHome + "\n"
+	}
 	if r.Record == nil && r.Why == nil {
 		return ""
 	}
@@ -136,15 +142,16 @@ func (h Home) Run(ctx context.Context) (HomeReport, error) {
 }
 
 // Check is mw home --check: nil when this host is home, a *HomeElsewhere when it
-// is not and a *HomeUnknown when it cannot be told. The report is empty: the
-// error is what is said.
+// is not and a *HomeUnknown when it cannot be told. The report is empty, except
+// when this host is not home: then it is the home's name alone, for a caller that
+// reads it from stdout (postern's standby), beside the error that explains.
 func (h Home) Check(ctx context.Context) (HomeReport, error) {
 	record, err := WhereIsHome(ctx, h.Files)
 	if err != nil {
 		return HomeReport{}, err
 	}
 	if record.Host != h.Host {
-		return HomeReport{}, &HomeElsewhere{Home: record.Host, Host: h.Host}
+		return HomeReport{Host: h.Host, ElsewhereHome: record.Host}, &HomeElsewhere{Home: record.Host, Host: h.Host}
 	}
 	return HomeReport{}, nil
 }

@@ -17,7 +17,8 @@ type homeContext struct {
 	files *apptest.FakeHomeFile
 	host  string
 
-	said   string
+	out    string // what goes to stdout
+	errs   string // what goes to stderr
 	status int
 }
 
@@ -38,6 +39,8 @@ func InitializeHomeScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^mw home --check runs$`, func() error { return c.run(true) })
 
 	ctx.Then(`^mw home prints:$`, c.mwHomePrints)
+	ctx.Then(`^mw home prints nothing$`, c.mwHomePrintsNothing)
+	ctx.Then(`^mw home prints only the line "([^"]*)"$`, c.mwHomePrintsOnlyTheLine)
 	ctx.Then(`^mw home says "([^"]*)"$`, c.mwHomeSays)
 	ctx.Then(`^mw home leaves with the status (\d+)$`, c.mwHomeLeavesWith)
 }
@@ -64,31 +67,45 @@ func (c *homeContext) run(check bool) error {
 		run = home.Check
 	}
 	report, err := run(context.Background())
-	c.said = report.String()
+	c.out = report.String()
 	c.status = application.ExitStatus(err)
 	if err != nil {
-		c.said += err.Error() + "\n"
+		c.errs = err.Error() + "\n"
 	}
 	return nil
 }
 
 func (c *homeContext) mwHomePrints(want *godog.DocString) error {
-	if got := strings.TrimSpace(c.said); got != strings.TrimSpace(want.Content) {
+	if got := strings.TrimSpace(c.out); got != strings.TrimSpace(want.Content) {
 		return fmt.Errorf("mw home printed:\n%s\nwanted:\n%s", got, want.Content)
 	}
 	return nil
 }
 
+func (c *homeContext) mwHomePrintsNothing() error {
+	if c.out != "" {
+		return fmt.Errorf("mw home printed %q on stdout, wanted nothing", c.out)
+	}
+	return nil
+}
+
+func (c *homeContext) mwHomePrintsOnlyTheLine(want string) error {
+	if c.out != want+"\n" {
+		return fmt.Errorf("mw home printed %q on stdout, wanted exactly %q", c.out, want+"\n")
+	}
+	return nil
+}
+
 func (c *homeContext) mwHomeSays(want string) error {
-	if !strings.Contains(c.said, want) {
-		return fmt.Errorf("mw home said %q, which has no %q", c.said, want)
+	if !strings.Contains(c.errs, want) {
+		return fmt.Errorf("mw home said %q on stderr, which has no %q", c.errs, want)
 	}
 	return nil
 }
 
 func (c *homeContext) mwHomeLeavesWith(want int) error {
 	if c.status != want {
-		return fmt.Errorf("mw home left with status %d, wanted %d (it said %q)", c.status, want, c.said)
+		return fmt.Errorf("mw home left with status %d, wanted %d (it said %q)", c.status, want, c.errs)
 	}
 	return nil
 }

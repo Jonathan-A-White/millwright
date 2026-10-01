@@ -20,9 +20,11 @@ func newHomeCmd() *cobra.Command {
 			"this host and whether this host is home: yes or no. Home is the one host that holds the\n" +
 			"beads server, the Mayor and the live Postern backend; the other host is the boost. With no\n" +
 			"home file, or one that is not understood, it says the home is unknown and leaves with 0.\n\n" +
-			"--check prints nothing on success and leaves with 0 when this host is home, 1 when it is\n" +
-			"not and 2 when it cannot tell (no file, or one not understood): what to do then is for the\n" +
-			"caller to decide. Both only read: `mw home move <host>` is what moves the home.",
+			"--check leaves with 0 when this host is home, 1 when it is not and 2 when it cannot tell (no\n" +
+			"file, or one not understood): what to do then is for the caller to decide. It prints nothing\n" +
+			"on stdout, except when this host is not home: then it prints the home's name alone, one line\n" +
+			"(laptop), for a caller that must know where to go, and the explanation goes to stderr. Both\n" +
+			"only read: `mw home move <host>` is what moves the home.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := config.Vault()
@@ -39,14 +41,15 @@ func newHomeCmd() *cobra.Command {
 				run = home.Check
 			}
 			report, err := run(cmd.Context())
-			if err != nil {
-				return err
+			// A report comes with an error only from --check on a host that is
+			// not home: the home's name goes to stdout, the error to stderr.
+			if _, werr := cmd.OutOrStdout().Write([]byte(report.String())); err == nil {
+				err = werr
 			}
-			_, err = cmd.OutOrStdout().Write([]byte(report.String()))
 			return err
 		},
 	}
-	cmd.Flags().BoolVar(&check, "check", false, "leave with 0 when this host is home, 1 when it is not, 2 when it cannot tell")
+	cmd.Flags().BoolVar(&check, "check", false, "leave with 0 when this host is home, 1 (printing the home's name) when it is not, 2 when it cannot tell")
 	cmd.AddCommand(newHomeMoveCmd())
 	return cmd
 }
