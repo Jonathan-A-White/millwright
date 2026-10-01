@@ -1,0 +1,40 @@
+{
+  "from": 41,
+  "to": 43,
+  "lane": "normal",
+  "events": [
+    {
+      "seq": 41,
+      "ts": "2026-10-01T13:02:07Z",
+      "kind": "bead_changed",
+      "bead": "mw-jrx0s.4",
+      "actor": "mw@laptop",
+      "from": "open",
+      "to": "claimed",
+      "detail": "status",
+      "lane": "normal"
+    },
+    {
+      "seq": 42,
+      "ts": "2026-10-01T13:02:07Z",
+      "kind": "card_answered",
+      "bead": "mw-6ww.55",
+      "actor": "mw@laptop",
+      "from": "asked",
+      "to": "answered",
+      "detail": "direct:a79d45422283b7f73c07ca4b61c81220ea469c85f5d781bfec668cf3a152e933",
+      "lane": "normal"
+    },
+    {
+      "seq": 43,
+      "ts": "2026-10-01T13:02:08Z",
+      "kind": "job",
+      "bead": "",
+      "actor": "dispatch@laptop",
+      "from": "scheduled",
+      "to": "running",
+      "detail": "",
+      "lane": "normal"
+    }
+  ]
+}
