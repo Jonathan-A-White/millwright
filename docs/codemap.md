@@ -6,8 +6,6 @@
 
 ## Ports
 
-Adapters assert `var _ application.<Port>`.
-
 | Port | Declared in | Real adapter | Fake |
 | --- | --- | --- | --- |
 | `WorkTracker` | `application/worktracker.go` | `infrastructure/beads/` | `apptest.FakeTracker` |
@@ -19,7 +17,7 @@ Adapters assert `var _ application.<Port>`.
 | `Vault` | `application/seatboot.go` | `infrastructure/vault/vault.go` | `application/seatboot_test.go` |
 | `Runner` | `application/runner.go` | `infrastructure/tmux/tmux.go` | `apptest.FakeRunner` |
 | `Harness` | `application/harness.go` | `infrastructure/claude/claude.go` | `application/seatboot_test.go` |
-| `SeatFiles`, `Windows`, `SeatHarness` | `application/seatup.go` | `infrastructure/{vault/seat,tmux/window,claude/claude}.go` | `apptest.FakeWindows` |
+| `SeatFiles`, `Windows`, `SeatHarness`, `ActingFile` | `application/seatup.go`, `application/seathandover.go` | `infrastructure/{vault/{seat,reaplog},tmux/window,claude/claude}.go` | `apptest.Fake{Windows,ActingFile}` |
 | `Transcripts` | `application/seatcontext.go` | `infrastructure/claude/transcripts.go` | none |
 | `Reap{Terminal,Log,Armer}` | `application/seatreap.go` | `infrastructure/{tmux/reap,vault/reaplog,reaper/arm}.go` | `apptest.Fake{Windows,ReapArmer}` |
 | `WatchProbes` | `application/watch.go` | `infrastructure/watch/watch.go` | `apptest.FakeWatch` |
@@ -55,7 +53,7 @@ Adapters assert `var _ application.<Port>`.
 | `Mail` | `application/mail.go` | `mw mail` — `cmd/mw/mail.go` | `features/mail.feature` |
 | `Home` | `application/home.go` | `mw home` — `cmd/mw/home.go` | `features/home.feature` |
 | `HomeMove` | `application/homemove.go` | `mw home move` — `cmd/mw/homemove.go` | none: `docs/home-move.md` |
-| `Seat{Context,Up,Reap}` | `application/seat{context,up,reap}.go` | `mw seat context`/`up`/`reap` — `cmd/mw/seat.go` | `features/seat_{context,up,reap}.feature` |
+| `Seat{Context,Up,Reap,Handover}` | `application/seat{context,up,reap,handover}.go` | `mw seat context`/`up`/`reap`/`handover` — `cmd/mw/seat.go` | `features/seat_{context,up,reap}.feature` |
 | Talk{Call,Model,Say,Wait} | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go | mw talk call/say/wait/model cmd/mw/talk.go | features/talk_*.feature |
 | `Millhand` | `application/millhand.go` | `mw millhand` — `cmd/mw/millhand.go` | `features/millhand.feature` |
 | `Deputy` | `application/deputy.go` | `mw deputy` — `cmd/mw/deputy.go` | `features/deputy.feature` |
@@ -70,11 +68,11 @@ Adapters assert `var _ application.<Port>`.
 | `Postern{Serve,Nginx,Mirror}` | `application/posternhand.go`, `application/posternmirror.go` | `mw postern serve`/`nginx`/`mirror` — `cmd/mw/postern.go`, `cmd/mw/posternmirror.go` | `features/postern_serve.feature` |
 | `Grist{Key,Grind,Send,Eval}` | `application/grist.go`, `application/gristgrind.go`, `application/gristsend.go`, `application/gristeval.go` | `mw grist key`/`grind`/`send`/`eval` — `cmd/mw/grist.go` | `features/grist{,_send,_eval}.feature` |
 
-`cmd/mw/root.go`: the tree; `cmd/mw/version.go`: `mw version`.
+`cmd/mw/root.go`: the tree; `cmd/mw/version.go`.
 
 ## Test helpers
 
-`throwawayVault`, `installFormula` (real bd), `standIn` (fake bd): `infrastructure/beads/`; `privateRunner`, `privateWindows` (own tmux): `infrastructure/tmux/`; `aVault`, `twoHosts` (vault, clones): `infrastructure/vault/`; `aRig` (rig, origin): `infrastructure/rig/`; `mwConfig` (temp HOME): `cmd/mw/dispatch_test.go`.
+`throwawayVault`, `installFormula` (real bd), `standIn` (fake bd): `infrastructure/beads/`; `privateRunner`, `privateWindows` (own tmux): `infrastructure/tmux/`; `aVault`, `twoHosts`: `infrastructure/vault/`; `aRig`: `infrastructure/rig/`; `mwConfig` (temp HOME): `cmd/mw/dispatch_test.go`.
 
 ## Build and test
 
