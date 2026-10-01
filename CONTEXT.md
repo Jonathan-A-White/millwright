@@ -55,6 +55,10 @@ _Avoid_: Issue, ticket (except a wayfinder ticket, below), card
 **Epic**:
 A bead that groups the stories needed to deliver one thing the Governor asked for. May span rigs.
 
+**Epic requirement**:
+What a Rig asks of every epic filed in it, listed in the rig's own file in the vault (`rigs/<rig>.toml`): description sections the epic must have (`epic_sections`) and labels the epic's last story must carry (`epic_last_story_labels`). `mw file` refuses a plan that lacks one; `mw status` lists open epics that do. Only the Governor's word, written on the epic as a waiver, excuses one.
+_Avoid_: Policy, lint rule, gate
+
 **Story**:
 A bead sized to be worked start to finish by one session in one rig, within one context window.
 _Avoid_: Task, job, subtask

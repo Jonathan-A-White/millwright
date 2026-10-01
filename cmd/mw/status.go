@@ -44,6 +44,9 @@ func newStatusCmd() *cobra.Command {
 			"under it says how this host's beads are synced (config `beads_sync`: remote, backup, shared or\n" +
 			"auto, which says whether this host is the home or a boost, and why) and, on the host that\n" +
 			"keeps the one database, when its last backup got through.\n\n" +
+			"When a rig's file in the vault (rigs/<rig>.toml) requires something of its epics, an EPICS\n" +
+			"MISSING REQUIREMENTS section names each open epic that lacks it, and an EPICS WAIVED section\n" +
+			"each epic the Governor waived it for. Both are left out when there are none.\n\n" +
 			"Every line fits a phone-width terminal, at most 60 columns. Nothing is claimed, nothing is\n" +
 			"written and no session is started: status only reads.",
 		Args: cobra.NoArgs,
@@ -76,6 +79,7 @@ func newStatusCmd() *cobra.Command {
 				Tracker:        tracker,
 				Notes:          tracker,
 				Vault:          mwVault(dir, host),
+				Rules:          files,
 				SyncHalt:       hostSyncHalt(),
 				Mayor:          application.MayorReader{Tracker: tracker, Notes: tracker},
 				Host:           host,

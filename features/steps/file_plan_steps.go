@@ -17,6 +17,8 @@ import (
 // into, what came of filing it and what was printed while it was.
 type fileContext struct {
 	tracker *apptest.FakeTracker
+	rules   *apptest.FakeEpicRules
+	waive   application.EpicWaiver
 	plan    domain.Plan
 	read    error
 
@@ -35,9 +37,11 @@ func InitializeFilePlanScenario(ctx *godog.ScenarioContext) {
 		// formula neither of them is testing the refusal itself.
 		tracker.AddFormula("tdd-feature")
 		tracker.AddFormula("chore")
-		*c = fileContext{tracker: tracker}
+		*c = fileContext{tracker: tracker, rules: apptest.NewFakeEpicRules()}
 		return ctx, nil
 	})
+
+	c.registerRequirementSteps(ctx)
 
 	ctx.Given(`^the plan:$`, c.thePlan)
 	ctx.When(`^the plan is filed$`, c.thePlanIsFiled)
@@ -73,6 +77,8 @@ func (c *fileContext) file(approve func(context.Context, application.FiledPlan) 
 	}
 	c.filed, c.err = application.File{
 		Tracker: c.tracker,
+		Rules:   c.rules,
+		Waive:   c.waive,
 		Out:     &c.printed,
 		Approve: approve,
 	}.Run(context.Background(), c.plan)

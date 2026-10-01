@@ -136,3 +136,45 @@ func TestNobodyIsAskedWhenNobodyIsThere(t *testing.T) {
 		t.Fatalf("expected --approve to approve, got %v (%v)", approved, err)
 	}
 }
+
+// A rig's file in the vault makes mw file refuse a plan before it reaches beads:
+// PATH has no bd here, so a plan that got as far as the tracker would fail
+// differently.
+func TestFileRefusesAPlanThatLacksWhatTheRigsFileRequires(t *testing.T) {
+	vaultDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(vaultDir, "rigs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	rules := "epic_sections = [\"Demo\"]\nepic_last_story_labels = [\"demo\"]\n"
+	if err := os.WriteFile(filepath.Join(vaultDir, "rigs", "spell-forge.toml"), []byte(rules), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MW_VAULT", vaultDir)
+	t.Setenv("MW_HOST", "vps")
+	t.Setenv("PATH", t.TempDir())
+
+	plan := filepath.Join(t.TempDir(), "plan.json")
+	written := `{"epic":{"key":"e","title":"E","description":"Cast.","defaults":{"rig":"spell-forge","branch":"main","harness":"claude","model":"opus","effort":"high","host":"vps"}},` +
+		`"stories":[{"key":"s","title":"S","acceptance":"it passes","needs":[]}]}`
+	if err := os.WriteFile(plan, []byte(written), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	run := func(args ...string) error {
+		root := newRootCmd()
+		root.SetOut(&bytes.Buffer{})
+		root.SetErr(&bytes.Buffer{})
+		root.SetArgs(append([]string{"file", plan}, args...))
+		return root.Execute()
+	}
+
+	err := run()
+	if err == nil || !strings.Contains(err.Error(), "the Demo section") || !strings.Contains(err.Error(), "the last story labelled demo") {
+		t.Fatalf("expected both missing requirements to be named, got %v", err)
+	}
+	err = run("--waive", "Demo", "--waive", "demo")
+	if err == nil || !strings.Contains(err.Error(), "--because") {
+		t.Fatalf("expected a waiver without the Governor's words to be refused, got %v", err)
+	}
+}

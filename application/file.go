@@ -24,6 +24,14 @@ import (
 type File struct {
 	Tracker WorkTracker
 
+	// Rules is where the plan's rig's requirements of its epics are read from.
+	// A nil Rules checks nothing.
+	Rules EpicRules
+
+	// Waive is the Governor's word that some of what the rig requires is
+	// waived for this epic. The zero value waives nothing.
+	Waive EpicWaiver
+
 	// Out is where the tree is printed. A nil Out prints nothing.
 	Out io.Writer
 
@@ -125,6 +133,10 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	if err := f.validateFormulas(ctx, plan, order); err != nil {
 		return FiledPlan{}, err
 	}
+	rules, err := f.requirementsOf(ctx, plan)
+	if err != nil {
+		return FiledPlan{}, err
+	}
 
 	epicID, err := f.Tracker.CreateEpic(ctx, NewEpic{
 		Title:           plan.Epic.Title,
@@ -160,6 +172,7 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 			EstimateMinutes: story.Estimate,
 			Overrides:       story.Overrides,
 			Needs:           needs,
+			Labels:          story.Labels,
 		})
 		if err != nil {
 			return filed, fmt.Errorf("filing story %s under %s (the epic and %d of its stories are filed and held): %w",
@@ -177,7 +190,16 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 		})
 	}
 
+	if len(f.Waive.Names) > 0 {
+		if err := f.recordWaiver(ctx, epicID, rules); err != nil {
+			return filed, err
+		}
+	}
+
 	f.print(filed.Tree())
+	if len(f.Waive.Names) > 0 {
+		f.print(fmt.Sprintf("\nWaived for %s: %s. The Governor's word is on the epic.\n", epicID, strings.Join(f.Waive.Names, ", ")))
+	}
 
 	if f.Approve == nil {
 		f.print(filed.holdings())

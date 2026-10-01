@@ -39,6 +39,14 @@ type MayorNeeds interface {
 	MayorNeeds(ctx context.Context, hitl []StoryDetail) ([]PosternViewNeed, error)
 }
 
+// EpicsMissingHeading heads the section naming the open epics that do not meet
+// what their rig requires of an epic, and EpicsWaivedHeading the one naming the
+// epics the Governor waived it for. Each is left out when it has none.
+const (
+	EpicsMissingHeading = "EPICS MISSING REQUIREMENTS"
+	EpicsWaivedHeading  = "EPICS WAIVED"
+)
+
 // RigMemoryHeading is what heads the section naming the rigs whose memory has
 // outgrown its budget. The report leaves the section out when none has.
 const RigMemoryHeading = "RIG MEMORY"
@@ -105,6 +113,11 @@ type Status struct {
 	// WAITING ON THE MAYOR section, from the beads labelled hitl the report
 	// lists. A nil Mayor leaves the section out.
 	Mayor MayorNeeds
+
+	// Rules is where each rig's requirements of its epics are read from, for
+	// the EPICS MISSING REQUIREMENTS and EPICS WAIVED sections. A nil Rules
+	// leaves both out.
+	Rules EpicRules
 
 	// HostSilence is how long another host's recorded sync may be behind
 	// before its work is called stranded. Zero reads DefaultHostSilence.
@@ -239,6 +252,9 @@ type StatusReport struct {
 	// Others is what every other host named in a story's Path has in hand, one
 	// entry per host, in host order.
 	Others []HostWork
+	// EpicShortfalls are the open epics of rigs that require something which do
+	// not meet it or were waived, in the order the tracker lists them.
+	EpicShortfalls []EpicShortfall
 	// Ticks are how this host's own timers are doing, counted from their logs.
 	Ticks HostTicks
 	// MillhandResume is the "resumed ... (grace until ...)" line shown under
@@ -372,6 +388,10 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	report.Others = others
 	report.Ticks = ReadHostTicks(ctx, s.Ticks)
 	report.MillhandResume = MillhandResumeLine(ctx, s.Ticks.Millhand, s.now())
+
+	if report.EpicShortfalls, err = s.epicShortfalls(ctx); err != nil {
+		return report, err
+	}
 
 	fuel, err := s.fuelToday(ctx)
 	if err != nil {
@@ -708,6 +728,8 @@ func (r StatusReport) String() string {
 		b.WriteString("\n")
 	}
 
+	r.writeEpicShortfalls(&b)
+
 	if len(r.RigMemory) > 0 {
 		clip(&b, RigMemoryHeading)
 		for _, size := range r.RigMemory {
@@ -719,6 +741,44 @@ func (r StatusReport) String() string {
 	clip(&b, fmt.Sprintf("FUEL today: %s tokens", Thousands(r.FuelToday)))
 	b.WriteString("\n")
 	return b.String()
+}
+
+// writeEpicShortfalls is the two sections about epics and their rig's
+// requirements: the epics still missing something, then the ones the Governor
+// waived. Each is left out when there is nothing to put in it.
+func (r StatusReport) writeEpicShortfalls(b *strings.Builder) {
+	for _, section := range []struct {
+		heading string
+		waived  bool
+	}{{EpicsMissingHeading, false}, {EpicsWaivedHeading, true}} {
+		var lines []string
+		for _, epic := range r.EpicShortfalls {
+			lacks := epic.Missing
+			if section.waived {
+				lacks = epic.Waived
+			}
+			if len(lacks) == 0 {
+				continue
+			}
+			var names []string
+			for _, lack := range lacks {
+				if lack.Section {
+					names = append(names, lack.Name+" section")
+				} else {
+					names = append(names, lack.Name+" story")
+				}
+			}
+			lines = append(lines, "  "+epic.ID+" · "+strings.Join(names, ", "))
+		}
+		if len(lines) == 0 {
+			continue
+		}
+		clip(b, fmt.Sprintf("%s (%d)", section.heading, len(lines)))
+		for _, line := range lines {
+			clip(b, line)
+		}
+		b.WriteString("\n")
+	}
 }
 
 // needAge is how long a need has waited at now, or that it is not known.

@@ -665,6 +665,7 @@ func TestGatewayFilesAnEpicWithItsStoriesHeld(t *testing.T) {
 		Priority:   2,
 		Overrides:  domain.Path{Model: domain.ModelSonnet, Formula: "chore"},
 		Needs:      []string{first},
+		Labels:     []string{"demo"},
 	})
 	if err != nil {
 		t.Fatalf("filing the second story: %v", err)
@@ -686,6 +687,25 @@ func TestGatewayFilesAnEpicWithItsStoriesHeld(t *testing.T) {
 	}
 	if detail.Acceptance != "Both formulas cook." || detail.EpicID != epicID {
 		t.Errorf("expected the filed story's acceptance criteria and epic, got %+v", detail)
+	}
+	if len(detail.Labels) != 1 || detail.Labels[0] != "demo" {
+		t.Errorf("expected the filed story to carry the label demo, got %v", detail.Labels)
+	}
+
+	// A waiver is a label and a comment on the epic, and the epic reads back
+	// with its description and the label, as mw status needs.
+	if err := gateway.AddLabel(ctx, epicID, domain.WaiverLabel(true, "Demo")); err != nil {
+		t.Fatalf("labelling the epic: %v", err)
+	}
+	if err := gateway.CommentOnStory(ctx, epicID, `Epic requirement waived: Demo. The Governor's word: "no demo"`); err != nil {
+		t.Fatalf("commenting on the epic: %v", err)
+	}
+	shown, err := gateway.ShowBeads(ctx, []string{epicID})
+	if err != nil || len(shown) != 1 {
+		t.Fatalf("reading the epic as a bead: %v, %d beads", err, len(shown))
+	}
+	if !domain.Waives(shown[0].Labels, domain.Shortfall{Name: "Demo", Section: true}) || !strings.Contains(shown[0].Description, "The smallest mw") {
+		t.Errorf("expected the epic to read back with its waiver label and description, got %+v", shown[0])
 	}
 	path, err := detail.Path()
 	if err != nil {
