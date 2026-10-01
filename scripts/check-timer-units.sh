@@ -218,8 +218,8 @@ need "$MIRROR_SERVICE" "Type=oneshot"
 need "$MIRROR_SERVICE" "ExecStart=/usr/bin/env mw postern mirror"
 need "$MIRROR_TIMER" "OnCalendar=*:3/10"
 need "$MIRROR_TIMER" "Persistent=false"
-# The view follower, a daemon with no timer.
-need "$FOLLOW_SERVICE" "ExecStart=/usr/bin/env mw postern view --follow"
+# The events follower (it republishes the view too), a daemon with no timer.
+need "$FOLLOW_SERVICE" "ExecStart=/usr/bin/env mw events follow"
 need "$FOLLOW_SERVICE" "Restart=on-failure"
 need "$FOLLOW_SERVICE" "EnvironmentFile=%h/.config/mw/beads.env"
 need "$FOLLOW_SERVICE" "WantedBy=default.target"

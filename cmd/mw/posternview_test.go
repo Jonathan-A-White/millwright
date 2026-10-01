@@ -118,7 +118,7 @@ func TestPosternViewFollowSaysAFailedReadAndStopsCleanlyWhenToldTo(t *testing.T)
 	if err := root.ExecuteContext(ctx); err != nil {
 		t.Fatalf("expected --follow to stop cleanly when its context ended, got %v\n%s", err, out)
 	}
-	if !strings.Contains(out.String(), "mw postern view --follow:") {
+	if !strings.Contains(out.String(), "mw events follow:") {
 		t.Fatalf("expected the failure to be said, got %q", out)
 	}
 	if data, _ := os.ReadFile(callLog); !strings.Contains(string(data), "sql --json") {
