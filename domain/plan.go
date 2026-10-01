@@ -42,6 +42,8 @@ type PlanStory struct {
 	Acceptance  string   `json:"acceptance"`
 	Overrides   Path     `json:"path"`
 	Needs       []string `json:"needs"`
+	// Labels are the tags the story is filed with, as the tracker spells them.
+	Labels []string `json:"labels"`
 }
 
 // PathFrom is the Path this planned story would be worked by: the epic's
@@ -244,4 +246,14 @@ func canBeFiled(story PlanStory, filed map[string]bool) bool {
 		}
 	}
 	return true
+}
+
+// Shape is the plan as an epic's requirements read it: the epic's description
+// and the stories, which name each other by their plan keys.
+func (p Plan) Shape() EpicShape {
+	shape := EpicShape{Description: p.Epic.Description}
+	for _, story := range p.Stories {
+		shape.Stories = append(shape.Stories, StoryShape{Key: story.Key, Labels: story.Labels, Needs: story.Needs})
+	}
+	return shape
 }
