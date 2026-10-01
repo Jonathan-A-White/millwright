@@ -4,8 +4,8 @@
 
 | Layer | Directory | Rule |
 | --- | --- | --- |
-| domain | `domain/` | Value types, validation; stdlib only. |
-| application | `application/` | One file per use case, plus ports. |
+| domain | `domain/` | Value types; stdlib only. |
+| application | `application/` | Use cases and ports, a file each. |
 | fakes | `application/apptest/` | Port fakes. |
 | infrastructure | `infrastructure/` | One subpackage per adapter. |
 | command line | `cmd/mw/` | Cobra wiring. |
@@ -40,7 +40,7 @@ Each adapter: `var _ application.<Port> = ...`.
 | `Notifier`, `HomeMoveHost`, `OldHome` | `application/{millhandtick,homemove}.go` | `infrastructure/{notify/notify,homemove/homemove}.go` | none |
 | `VaultBirth`, `TrackerBirth` | `application/init.go` | `infrastructure/{vault/birth,beads/init}.go` | none |
 | `Landing`, `Checks`, `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/{landing,checks,slot}.go` | none |
-| `AfterLanding` | `application/afterlanding.go` | `infrastructure/rig/afterlanding.go` | none |
+| `AfterLanding`, `SelfUpdate`, `BuiltMarks` | `application/afterlanding.go`, `application/selfupdate.go` | `infrastructure/rig/{afterlanding,built}.go` | `features/self_update.feature` |
 | Postern, hands | `application/{postern*,hands}.go` | `infrastructure/{postern,hands*,homemove}` | `apptest.Fake{Postern*,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*,HomeMover}` |
 | `Grinder`, `GrindSource`, `GristState`, `GristLock` | `application/grist.go` | `infrastructure/{claude/grind,rig/grinds,hostlock/try}.go`, `infrastructure/grist` | `apptest.Fake{Grinder,Grinds,GristState,GristLock}` |
 
@@ -78,17 +78,17 @@ Each adapter: `var _ application.<Port> = ...`.
 | `Postern{Serve,Nginx,Mirror}` | `application/posternhand.go`, `application/posternmirror.go` | `mw postern serve`/`nginx`/`mirror` — `cmd/mw/postern.go`, `cmd/mw/posternmirror.go` | `features/postern_serve.feature` |
 | `Grist{Key,Grind,Send,Eval}` | `application/grist.go`, `application/gristgrind.go`, `application/gristsend.go`, `application/gristeval.go` | `mw grist key`/`grind`/`send`/`eval` — `cmd/mw/grist.go` | `features/grist{,_send,_eval}.feature` |
 
-`cmd/mw/root.go` holds the tree; `cmd/mw/version.go` is `mw version`.
+`cmd/mw/root.go`: the tree; `cmd/mw/version.go`: `mw version`.
 `features/{ready_stories,claim_lease}.feature`: `WorkTracker`.
 
 ## Test helpers
 
 | Helper | Where | What it gives |
 | --- | --- | --- |
-| `throwawayVault`, `installFormula` | `infrastructure/beads/beads_integration_test.go` | Real bd, temp dir. |
-| `standIn` | `infrastructure/beads/sync_test.go` | Fake `bd`. |
-| `privateRunner`, `privateWindows` | `infrastructure/tmux/{tmux,window}_integration_test.go` | Private tmux. |
-| `aVault`, `twoHosts` | `infrastructure/vault/{vault,git}_test.go` | Seat vault; two clones. |
+| `throwawayVault`, `installFormula` | `infrastructure/beads/beads_integration_test.go` | Real bd. |
+| `standIn` | `infrastructure/beads/sync_test.go` | Fake bd. |
+| `privateRunner`, `privateWindows` | `infrastructure/tmux/{tmux,window}_integration_test.go` | Own tmux. |
+| `aVault`, `twoHosts` | `infrastructure/vault/{vault,git}_test.go` | Vault; clones. |
 | `aRig` | `infrastructure/rig/worktree_test.go` | Rig + origin. |
 | `mwConfig` | `cmd/mw/dispatch_test.go` | Temp-HOME config. |
 
@@ -96,6 +96,5 @@ Each adapter: `var _ application.<Port> = ...`.
 
 See `CLAUDE.md`; then:
 
-- One package: `go test ./application/...`.
 - One feature: `MW_FEATURE=sweep.feature go test ./features` (`:17`: a scenario).
 - `make lint` runs `scripts/check-*.sh`; `make check-formulas` needs `bd`, `jq`.

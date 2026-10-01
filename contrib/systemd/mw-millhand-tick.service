@@ -24,6 +24,7 @@ ExecStart=/usr/bin/env mw millhand tick
 KillMode=process
 
 # Type=oneshot has no start timeout by default, and a hung git or bd would
-# then block every later tick. The tick runs a sync first, so this is longer
-# than the dispatch unit's two minutes.
-TimeoutStartSec=5min
+# then block every later tick. The tick may rebuild this host's mw first
+# (mw-gq6.183), a command stopped at five minutes, and then runs a sync, so this
+# is longer than the dispatch unit's two minutes.
+TimeoutStartSec=10min

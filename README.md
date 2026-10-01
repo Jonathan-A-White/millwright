@@ -776,6 +776,17 @@ checkout, which a landing leaves one commit stale until the command rebuilds it.
 The command is one line, read by `/bin/sh` in the rig's checkout like a `[tests]`
 line, and is stopped after five minutes.
 
+That same command keeps the host's mw level without a landing of its own
+(mw-gq6.183): on a host that names one for `millwright`, every `mw millhand
+tick` first fetches that rig, fast-forwards a clean checkout that is behind
+origin's `main` and runs the command in it, and says so once in the tick's line
+(`self-update: millwright 027f977 → bfd385c, built`). A dirty checkout, one on
+another branch or one with commits of its own is left exactly as it is, and the
+line says why. A build that fails leaves the old `bin/mw`, is said in the line
+and is tried again by the next tick (the commit last built is kept in
+`~/.local/state/mw/built-millwright`). A dry run does none of it. The command
+is stopped after five minutes, so the tick's unit allows ten.
+
 ## Recovering a story after a refused landing
 
 ```sh
