@@ -1562,3 +1562,39 @@ func TestEventsLogPathIsUnderHomeUntilAHostSaysOtherwise(t *testing.T) {
 		t.Fatalf("expected a relative events_log_path to be refused, got %v", err)
 	}
 }
+
+// With no [events] table the follower sends on chain, up to 500 records a day.
+func TestEventsKnobsDefault(t *testing.T) {
+	writeConfig(t, "host = \"laptop\"\n")
+	got, err := config.Events()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Chain || got.ChainDailyCap != 500 {
+		t.Fatalf("expected chain on and a cap of 500, got %+v", got)
+	}
+}
+
+func TestEventsKnobsAreReadFromTheTable(t *testing.T) {
+	writeConfig(t, "[events]\nchain = false\nchain_daily_cap = 20\n")
+	got, err := config.Events()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Chain || got.ChainDailyCap != 20 {
+		t.Fatalf("expected chain off and a cap of 20, got %+v", got)
+	}
+	writeConfig(t, "[events]\nchain = \"true\"\n")
+	if got, err = config.Events(); err != nil || !got.Chain {
+		t.Fatalf("expected chain on from the quoted word, got %+v %v", got, err)
+	}
+}
+
+func TestEventsKnobsThatAreNotUnderstoodAreRefused(t *testing.T) {
+	for _, bad := range []string{"chain = maybe", "chain_daily_cap = 0", "chain_daily_cap = lots"} {
+		writeConfig(t, "[events]\n"+bad+"\n")
+		if _, err := config.Events(); err == nil {
+			t.Errorf("expected %q refused", bad)
+		}
+	}
+}

@@ -717,6 +717,57 @@ func GristApps() (map[string]string, error) {
 	return apps, nil
 }
 
+// EventsTable is the table of the config file that says how the event
+// follower sends its batches.
+const EventsTable = "events"
+
+// DefaultEventsChainDailyCap is how many events records the follower puts on
+// chain in a UTC day when nothing says otherwise; past it, a batch goes
+// direct only, as the fallback lane. Each record costs a transaction fee, so
+// it guards the satoshis.
+const DefaultEventsChainDailyCap = 500
+
+// EventsSettings are the follower's knobs for sending batches.
+type EventsSettings struct {
+	// Chain is whether batches go on chain beside the direct line. False
+	// sends direct only, in the fallback lane, always.
+	Chain bool
+	// ChainDailyCap is the most events records put on chain in a UTC day.
+	ChainDailyCap int
+}
+
+// Events reports the `[events]` table of ~/.config/mw/config.toml: `chain`
+// (true or false, default true) and `chain_daily_cap` (a whole number, 1 or
+// more, default DefaultEventsChainDailyCap), each its default when the table
+// says nothing.
+func Events() (EventsSettings, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return EventsSettings{}, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	table, err := tableIn(path, EventsTable)
+	if err != nil {
+		return EventsSettings{}, err
+	}
+	settings := EventsSettings{Chain: true, ChainDailyCap: DefaultEventsChainDailyCap}
+	if said := strings.TrimSpace(table["chain"]); said != "" {
+		on, err := strconv.ParseBool(said)
+		if err != nil {
+			return EventsSettings{}, fmt.Errorf("the [%s] table of %s says chain = %q: it must be true or false", EventsTable, path, said)
+		}
+		settings.Chain = on
+	}
+	if said := strings.TrimSpace(table["chain_daily_cap"]); said != "" {
+		n, err := strconv.Atoi(said)
+		if err != nil || n < 1 {
+			return EventsSettings{}, fmt.Errorf("the [%s] table of %s says chain_daily_cap = %q: it must be a whole number, 1 or more", EventsTable, path, said)
+		}
+		settings.ChainDailyCap = n
+	}
+	return settings, nil
+}
+
 // countIn reads a [grist] key that is a whole number, 1 or more, and
 // fallback when the table says nothing about it.
 func countIn(table map[string]string, key string, fallback int64, path string) (int64, error) {
