@@ -1390,6 +1390,12 @@ type PosternSendRequest struct {
 	// hands push's "Step ready: ...". Empty, PosternSend writes one by the
 	// request's class. Only the direct channel carries it.
 	Summary string
+
+	// Chain (mw postern send --chain) also broadcasts the message on chain,
+	// beside the direct delivery, for a phone that cannot reach the backend.
+	// PosternSend adds it by itself when the post Re names came by chain, or
+	// the Governor's newest record did (Notes' TalkWaitChannelKey).
+	Chain bool
 }
 
 // PosternRoleTranscript is the role of a message whose text is what the
@@ -1600,6 +1606,17 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 	if err != nil {
 		return "", err
 	}
+	copyMode := chainCopyNone
+	if channel == PosternChannelDirect {
+		copyMode = s.chainCopyOf(ctx, req)
+	}
+	if copyMode != chainCopyNone && len(files) > 1 {
+		if copyMode == chainCopyAsked {
+			return "", fmt.Errorf("mw postern send: several files are several transactions, which would spend the same coins on the chain: attach one at a time, or send without --chain")
+		}
+		s.printf("chain: not sent: several files are several transactions\n")
+		copyMode = chainCopyNone
+	}
 	// The summary is worked out once, and only the direct channel carries it:
 	// the chain record is public for good.
 	summary := ""
@@ -1637,14 +1654,21 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 		}
 	}
 
+	// A chain copy that was asked for and failed is reported once everything
+	// is sent, as a failure to remember is: the message did go direct.
+	var chainFailure error
 	var txid string
 	if len(attachments) == 0 {
 		text, err := req.plaintext(req.Text, nil)
 		if err != nil {
 			return "", err
 		}
-		if txid, err = s.sendOne(ctx, channel, req.Class, summary, from, address, text); err != nil {
+		var chainErr error
+		if txid, chainErr, err = s.sendRecord(ctx, channel, copyMode, req.Class, summary, from, address, text); err != nil {
 			return "", err
+		}
+		if chainFailure == nil {
+			chainFailure = chainErr
 		}
 		remember(txid)
 	}
@@ -1657,8 +1681,12 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 		if err != nil {
 			return "", err
 		}
-		if txid, err = s.sendOne(ctx, channel, req.Class, summary, from, address, text); err != nil {
+		var chainErr error
+		if txid, chainErr, err = s.sendRecord(ctx, channel, copyMode, req.Class, summary, from, address, text); err != nil {
 			return "", err
+		}
+		if chainFailure == nil {
+			chainFailure = chainErr
 		}
 		remember(txid)
 		if i < len(attachments)-1 {
@@ -1676,6 +1704,9 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 		if err := s.recordThreadMessage(ctx, req, txid, files); err != nil {
 			return txid, fmt.Errorf("mw postern send: sent as %s, but %w", txid, err)
 		}
+	}
+	if chainFailure != nil {
+		return txid, fmt.Errorf("mw postern send: sent direct as %s, but %w", txid, chainFailure)
 	}
 	if rememberErr != nil {
 		return txid, fmt.Errorf("mw postern send: sent as %s, but %w", txid, rememberErr)
@@ -1830,21 +1861,87 @@ func cutSummary(summary string) string {
 // class, and sends it by channel, reporting its txid. summary rides in the
 // clear beside the ciphertext, and is empty on the chain.
 func (s PosternSend) sendOne(ctx context.Context, channel, class, summary, from, address, text string) (string, error) {
+	txid, _, err := s.sendRecord(ctx, channel, chainCopyNone, class, summary, from, address, text)
+	return txid, err
+}
+
+// chainCopy says whether a direct message is also put on chain, and whether
+// that was asked for.
+type chainCopy int
+
+const (
+	chainCopyNone chainCopy = iota
+	// chainCopyAuto: the post answered, or the Governor's newest record, came
+	// by chain. A chain that will not take it is only said.
+	chainCopyAuto
+	// chainCopyAsked: PosternSendRequest.Chain. A chain that will not take it
+	// fails the send, which names the txid that did go direct.
+	chainCopyAsked
+)
+
+// chainCopyOf is how req's direct message is also put on chain: asked for by
+// Chain; or by itself, when the post Re names came by chain (a bare txid, not
+// direct:...), or the Governor's newest record, as TalkWait last heard it,
+// did.
+func (s PosternSend) chainCopyOf(ctx context.Context, req PosternSendRequest) chainCopy {
+	if req.Chain {
+		return chainCopyAsked
+	}
+	if re := strings.TrimSpace(req.Re); re != "" && recordChannel(re) == PosternChannelChain {
+		return chainCopyAuto
+	}
+	if s.Notes == nil {
+		return chainCopyNone
+	}
+	if channel, err := s.Notes.Note(ctx, TalkWaitChannelKey); err == nil && channel == PosternChannelChain {
+		return chainCopyAuto
+	}
+	return chainCopyNone
+}
+
+// sendRecord is sendOne, and on the direct channel, when mode asks, the same
+// record without its summary is broadcast too, under the float cap. Its txid
+// is the direct one; the chain txid is printed on Out. A chain that will not
+// take the copy is only said, unless it was asked for (chainCopyAsked): then
+// chainErr names it, beside the direct txid and a nil err.
+func (s PosternSend) sendRecord(ctx context.Context, channel string, mode chainCopy, class, summary, from, address, text string) (txid string, chainErr, err error) {
 	ciphertext, err := s.Cipher.Encrypt(s.GovernorKey, text)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
-	payload, err := json.Marshal(PosternPayload{
+	record := PosternPayload{
 		V: 1, Kind: PosternMessageKind, Class: class,
 		To: s.GovernorKey, From: from, Ts: s.now().Unix(), Ct: ciphertext, Summary: summary,
-	})
+	}
+	payload, err := json.Marshal(record)
 	if err != nil {
-		return "", fmt.Errorf("building the record's payload: %w", err)
+		return "", nil, fmt.Errorf("building the record's payload: %w", err)
 	}
-	if channel == PosternChannelDirect {
-		return s.Postern.Deliver(ctx, payload)
+	if channel != PosternChannelDirect {
+		txid, err = broadcastRecord(ctx, s.Postern, s.Keys, address, payload, s.Out)
+		return txid, nil, err
 	}
-	return broadcastRecord(ctx, s.Postern, s.Keys, address, payload, s.Out)
+	if txid, err = s.Postern.Deliver(ctx, payload); err != nil || mode == chainCopyNone {
+		return txid, nil, err
+	}
+	// The chain record is public for good: no summary.
+	record.Summary = ""
+	chainRecord, err := json.Marshal(record)
+	var chainTxid string
+	if err == nil {
+		if err = s.underFloat(ctx, "mw postern send", address); err == nil {
+			chainTxid, err = broadcastRecord(ctx, s.Postern, s.Keys, address, chainRecord, s.Out)
+		}
+	}
+	switch {
+	case err == nil:
+		s.printf("chain txid %s\n", chainTxid)
+	case mode == chainCopyAsked:
+		return txid, fmt.Errorf("the chain broadcast failed: %w", err), nil
+	default:
+		s.printf("chain: not sent: %v\n", err)
+	}
+	return txid, nil, nil
 }
 
 // broadcastRecord puts payload on the chain: it signs a record transaction

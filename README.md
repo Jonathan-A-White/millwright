@@ -948,7 +948,12 @@ backend it reaches takes direct records (`POST /api/messages`): an older
 backend answers 404 to it, and there is no falling back to the chain. A
 direct record also carries a short clear `summary` for the push's body, naming
 the bead's title (`Answer: …`, `Check: …`, `Message on …`, or `Message`),
-never a word of the text; a chain record carries none. A message sent in a bead's channel
+never a word of the text; a chain record carries none. `--chain` also
+broadcasts the message on chain, beside the direct delivery (no summary, the
+same `postern_float_sats` cap), for a phone that cannot reach the backend; it
+is added without the flag when the post `--re` names came by chain (a bare
+txid) or the Governor's newest record did (the `postern.talk.channel` note
+below), and then a chain that fails is only said. A message sent in a bead's channel
 (`--bead-channel`; `--channel <name>` names another; `--re <txid>` answers inside a post's thread) is commented on that bead too, `MAYOR via postern, txid <id>:
 <text>`, so the whole exchange lives on the bead. `--attach <file>`
 (repeatable) encrypts a file to the Governor, uploads it to the backend's blob
