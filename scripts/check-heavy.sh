@@ -5,13 +5,17 @@
 # (used for real, against a lock file inside the temporary directory) — a real
 # systemd-run is never reached, even when one is installed on this host.
 #
-# The five scenarios are the story's acceptance criteria:
-#   a. the default caps and (unless root) --user reach systemd-run
+# The scenarios are the story's acceptance criteria:
+#   a. the default caps (512M on a host of 8 GB or less) and (unless root) --user
+#      reach systemd-run
 #   b. MW_HEAVY_MEMORY_MAX overrides the cap
 #   c. without systemd-run on PATH, the command still runs, under its own exit
 #      status, with exactly one line on stderr
 #   d. a lock held elsewhere blocks mw-heavy until it is released
 #   e. MW_HEAVY_DRY prints the systemd-run line and runs nothing
+#   g. on a host with more than 8 GB the default MemoryMax is half of MemTotal
+#   h. at 8 GB exactly, with no readable meminfo, or with MW_HEAVY_MEMORY_MAX
+#      set, it is 512M or the setting
 #
 # Then two checks that are not about the script's own behaviour: exactly three
 # of contrib/systemd/*.service carry OOMScoreAdjust, and none of them is
@@ -58,6 +62,15 @@ for c in sh flock id dirname mkdir cat true touch sleep date; do
 	done
 	[ -n "$found" ] || fail "no $c in /usr/bin or /bin to build the sandbox PATH"
 done
+
+# The host's memory is read from a file this check controls, never /proc/meminfo,
+# so that what the default cap is does not depend on the box it runs on.
+meminfo() {
+	printf 'MemTotal:       %s kB\nMemFree:         1024 kB\n' "$1" >"$T/meminfo-$1"
+	echo "$T/meminfo-$1"
+}
+MW_HEAVY_MEMINFO=$(meminfo 4194304)
+export MW_HEAVY_MEMINFO
 
 FAKE_CALLS=$T/calls
 export FAKE_CALLS
@@ -180,6 +193,24 @@ printf '%s\n' "$OUT" | grep -Fq 'systemd-run' || fail "$NAME: no systemd-run lin
 printf '%s\n' "$OUT" | grep -Fq -- '-p MemoryMax=512M' || fail "$NAME: line lacks the memory cap: $OUT"
 printf '%s\n' "$OUT" | grep -Fq -- 'make test' || fail "$NAME: line lacks the command: $OUT"
 [ ! -s "$FAKE_CALLS" ] || fail "$NAME: something was actually run: $(cat "$FAKE_CALLS")"
+echo "ok: $NAME"
+
+# --- g. a host over 8 GB defaults MemoryMax to half of MemTotal ---------------
+NAME="a host over 8 GB defaults MemoryMax to half of MemTotal"
+RC=0
+OUT=$(PATH="$WITH_SR" MW_HEAVY_MEMINFO="$(meminfo 16777216)" MW_HEAVY_DRY=1 "$SCRIPT" make test 2>&1) || RC=$?
+[ "$RC" = 0 ] || fail "$NAME: exit $RC: $OUT"
+printf '%s\n' "$OUT" | grep -Fq -- '-p MemoryMax=8388608K ' || fail "$NAME: 16 GB host did not get half (8388608K): $OUT"
+echo "ok: $NAME"
+
+# --- h. 8 GB exactly, no meminfo, or a setting: the 512M default or the setting
+NAME="MemoryMax stays 512M at 8 GB or without meminfo, and the setting wins"
+OUT=$(PATH="$WITH_SR" MW_HEAVY_MEMINFO="$(meminfo 8388608)" MW_HEAVY_DRY=1 "$SCRIPT" make test 2>&1)
+printf '%s\n' "$OUT" | grep -Fq -- '-p MemoryMax=512M ' || fail "$NAME: an 8 GB host did not get 512M: $OUT"
+OUT=$(PATH="$WITH_SR" MW_HEAVY_MEMINFO="$T/no-such-meminfo" MW_HEAVY_DRY=1 "$SCRIPT" make test 2>&1)
+printf '%s\n' "$OUT" | grep -Fq -- '-p MemoryMax=512M ' || fail "$NAME: an unreadable meminfo did not give 512M: $OUT"
+OUT=$(PATH="$WITH_SR" MW_HEAVY_MEMINFO="$(meminfo 16777216)" MW_HEAVY_MEMORY_MAX=300M MW_HEAVY_DRY=1 "$SCRIPT" make test 2>&1)
+printf '%s\n' "$OUT" | grep -Fq -- '-p MemoryMax=300M ' || fail "$NAME: the setting did not beat the half-of-MemTotal default: $OUT"
 echo "ok: $NAME"
 
 # --- f. exactly three units carry OOMScoreAdjust, and not the tmux-starting three

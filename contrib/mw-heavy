@@ -18,7 +18,9 @@
 #
 # Settings:
 #   MW_HEAVY_LOCK          the lock file (else the mail-notify one, above)
-#   MW_HEAVY_MEMORY_MAX    systemd-run's MemoryMax                (512M)
+#   MW_HEAVY_MEMORY_MAX    systemd-run's MemoryMax    (512M, the VPS's; half of
+#                          MemTotal on a host with more than 8 GB)
+#   MW_HEAVY_MEMINFO       where MemTotal is read from       (/proc/meminfo)
 #   MW_HEAVY_SWAP_MAX      systemd-run's MemorySwapMax            (1G)
 #   MW_HEAVY_DRY            1: print the systemd-run line and run nothing
 
@@ -31,7 +33,31 @@ die() {
 
 [ "$#" -ge 1 ] || die "usage: mw-heavy <command> [args...]"
 
-memory_max=${MW_HEAVY_MEMORY_MAX:-512M}
+# 512M is the VPS's cap. A host with more than 8 GB (MemTotal is in kB) can give
+# a test run, vitest's workers included, half its memory instead.
+default_memory_max() {
+	total=""
+	if [ -r "${MW_HEAVY_MEMINFO:-/proc/meminfo}" ]; then
+		while read -r key value _; do
+			if [ "$key" = "MemTotal:" ]; then
+				total=$value
+				break
+			fi
+		done <"${MW_HEAVY_MEMINFO:-/proc/meminfo}"
+	fi
+	case $total in
+	"" | *[!0-9]*) echo 512M ;;
+	*)
+		if [ "$total" -gt 8388608 ]; then
+			echo "$((total / 2))K"
+		else
+			echo 512M
+		fi
+		;;
+	esac
+}
+
+memory_max=${MW_HEAVY_MEMORY_MAX:-$(default_memory_max)}
 swap_max=${MW_HEAVY_SWAP_MAX:-1G}
 
 user_flag=""
