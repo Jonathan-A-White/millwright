@@ -91,11 +91,6 @@ const (
 // of the talk — printing it, the time from the event to the print, and any new
 // mail the Deputy sent the Mayor. It ends on Limit with nothing to say. It
 // spends no model: it is the Mayor's harness that wakes on its exit.
-//
-// With HoldingReply set it also answers a turn (not an end) the moment it is
-// heard, before printing it, with that text as the section 20 holding answer
-// mw talk say --holding sends: the Governor hears something at once, and the
-// Mayor's real answer follows.
 type TalkWait struct {
 	Stream  PosternStream
 	Postern Postern
@@ -110,10 +105,6 @@ type TalkWait struct {
 	// GovernorKey is the Governor's compressed public key, hex — config
 	// postern_governor_key. Only a verified record from it ends the wait.
 	GovernorKey string
-
-	// HoldingReply is the holding answer sent at once to a Governor turn,
-	// config talk_holding_reply; empty sends none.
-	HoldingReply string
 
 	// Limit is how long to wait; zero is DefaultTalkWaitLimit. MinBackoff and
 	// MaxBackoff bound the pause before the stream is opened again; zero is
@@ -137,10 +128,6 @@ type TalkWaitReport struct {
 	// IndexToPrint is the time from the event that told the wait of the turn
 	// to the moment it printed it.
 	IndexToPrint time.Duration
-	// HoldingSent is whether the holding reply went out, and HoldingElapsed
-	// how long sending it took.
-	HoldingSent    bool
-	HoldingElapsed time.Duration
 	// Mail is the Deputy's new mail to the Mayor.
 	Mail []Message
 	// Postern is the new postern messages for the Mayor's key the wait ended
@@ -372,7 +359,6 @@ func (r *talkWaitRun) governorsTurn(record PosternRecord, privKey string) (*Talk
 func (r *talkWaitRun) finish(ctx context.Context) (TalkWaitReport, error) {
 	report := TalkWaitReport{Turn: r.turn, Postern: r.posts}
 	if r.turn != nil {
-		report.HoldingSent, report.HoldingElapsed = r.hold(ctx)
 		r.printedAt = r.now()
 		report.IndexToPrint = r.printedAt.Sub(r.heardAt)
 		cut := "no"
@@ -385,9 +371,6 @@ func (r *talkWaitRun) finish(ctx context.Context) (TalkWaitReport, error) {
 		}
 		r.printf(r.Out, "talk %s turn %d (role %s)\nmodel %s\ncut %s\ntext: %s\nindex-to-print %d ms\n",
 			r.turn.Talk.ID, r.turn.Talk.Turn, r.turn.Role, model, cut, r.turn.Text, report.IndexToPrint.Milliseconds())
-		if report.HoldingSent {
-			r.printf(r.Out, "holding sent in %d ms\n", report.HoldingElapsed.Milliseconds())
-		}
 	}
 	if len(r.posts) > 0 {
 		r.printf(r.Out, "new postern message: %d unread, read them with mw postern inbox\n", len(r.posts))
@@ -417,27 +400,6 @@ func postFirstLine(text string) string {
 		}
 	}
 	return "(no text)"
-}
-
-// hold sends the holding reply to the turn in hand, when there is one to send
-// and the turn is a turn rather than the end of the talk. A holding reply that
-// would not go is said on Err and the turn is printed all the same: the
-// Mayor's real answer is what matters.
-func (r *talkWaitRun) hold(ctx context.Context) (sent bool, elapsed time.Duration) {
-	if strings.TrimSpace(r.HoldingReply) == "" || r.turn.Role != TalkRoleTurn {
-		return false, 0
-	}
-	started := r.now()
-	_, err := TalkSay{
-		Postern: r.Postern, Cipher: r.Cipher, Keys: r.Keys, GovernorKey: r.GovernorKey, Now: r.Now,
-	}.Run(context.WithoutCancel(ctx), TalkSayRequest{
-		Text: r.HoldingReply, TalkID: r.turn.Talk.ID, Turn: r.turn.Talk.Turn, Holding: true,
-	})
-	if err != nil {
-		r.printf(r.Err, "mw talk wait: the holding reply: %v\n", err)
-		return false, 0
-	}
-	return true, r.now().Sub(started)
 }
 
 // save moves the stored cursor to the one in hand.
