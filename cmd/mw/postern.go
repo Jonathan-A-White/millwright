@@ -173,6 +173,8 @@ func newPosternInboxCmd() *cobra.Command {
 			"message, and a bead comment naming it ends with \" [image: <path>]\".\n\n" +
 			"--unread-count prints only how many are unread, without reading them, so a notifier can\n" +
 			"poll it without consuming anything.\n\n" +
+			"A talk record (class talk, postern's docs/protocol.md section 20) is neither read nor counted\n" +
+			"here: mw talk wait hears it, so that one turn never wakes the Mayor twice.\n\n" +
 			"--apply is the zero-token pass the postern backend's on-message hook runs: every message\n" +
 			"since the cursor that the Governor verifiably sent and this host knows how to apply is\n" +
 			"applied at once, as the Governor — a reply, a comment in a bead's thread, or an action\n" +
