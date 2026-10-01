@@ -142,7 +142,15 @@ One `events` record's plaintext is one batch: the events numbered `from` to
 `to`, every one, in seq order, all in the batch's `lane`.
 
 - `normal`: the ~2 s batch, on chain and direct.
-- `emergency`: one event sent alone and at once; `from` equals `to`.
+- `emergency`: one event sent alone and at once; `from` equals `to`. A writer asks for it
+  by putting the event in the log in this lane: `mw events emit --emergency`, `mw talk call`
+  (a `message` whose detail is the ring's txid), and mayor-stale's alarm in `mw doctor` (a
+  `job` event, running to failed, actor `doctor@<host>`, the alarm's text as detail). Each
+  pass of the follower's sender sends these first: on chain and direct together, before the
+  pending fallback batches are retried and without waiting for the 2 s window, and on chain
+  even past `chain_daily_cap`. With the chain unreachable it goes direct in this lane and is
+  put on chain later in the `normal` lane, as a fallback batch is. The batches that follow
+  leave it out, so the app has it once. `mw status` counts the day's emergencies.
 - `fallback`: a batch sent direct only while the chain could not be reached
   or the day's `chain_daily_cap` was spent, re-sent on chain later in the
   `normal` lane with the same seq range and events, so the app dedupes it by

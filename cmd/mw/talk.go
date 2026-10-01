@@ -7,6 +7,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
@@ -258,7 +259,10 @@ func newTalkCallCmd() *cobra.Command {
 			"the chain is added by itself when the newest record mw talk wait heard from the Governor came by\n" +
 			"chain (a bare txid); one that came direct does not add it.\n\n" +
 			"--link <bead> (repeatable) puts a bead id in the record's links field, beside the text and never\n" +
-			"in it. It refuses when postern_governor_key is not set.",
+			"in it. It refuses when postern_governor_key is not set.\n\n" +
+			"The ring is also written to the home's event log as one event in the emergency lane (a message,\n" +
+			"its detail the ring's txid), which the follower sends alone and at once; a failure to write it is\n" +
+			"said and does not fail the call.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			keys, err := posternKeys()
@@ -281,7 +285,17 @@ func newTalkCallCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			logPath, err := config.EventsLogPath()
+			if err != nil {
+				return err
+			}
+			actor, err := beads.ActorFromConfig()
+			if err != nil {
+				return err
+			}
 			_, err = application.TalkCall{
+				Log:         eventlog.New(logPath),
+				Actor:       actor,
 				Postern:     backend,
 				Cipher:      posternCipher(keys),
 				Keys:        keys,

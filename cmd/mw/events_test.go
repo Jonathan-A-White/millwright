@@ -137,3 +137,21 @@ func TestEventsWaitReadsTheKindsFromTheSeatsSubscribeFile(t *testing.T) {
 		t.Fatalf("a bad kind in the file: %v", err)
 	}
 }
+
+func TestEventsEmitEmergencyWritesTheEventInTheEmergencyLane(t *testing.T) {
+	path := eventsHome(t)
+	if out, err := runEvents(t, "emit", "--kind", "job", "--from", "running", "--to", "failed", "--emergency"); err != nil {
+		t.Fatalf("mw events emit --emergency: %v\n%s", err, out)
+	}
+	if _, err := runEvents(t, "emit", "--kind", "job", "--from", "scheduled", "--to", "running"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 || !strings.Contains(lines[0], `"lane":"emergency"`) || !strings.Contains(lines[1], `"lane":"normal"`) {
+		t.Fatalf("expected an emergency then a normal event, got %q", data)
+	}
+}

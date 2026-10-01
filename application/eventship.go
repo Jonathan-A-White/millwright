@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"sync"
 	"time"
 
@@ -44,6 +45,12 @@ type ShipState struct {
 	Chain int    `json:"chain"`
 	// Alarmed says the day's cap alarm has been raised.
 	Alarmed bool `json:"alarmed"`
+	// Urgent are the emergency events already sent alone that lie past
+	// Shipped, because events before them have not gone in a batch yet: the
+	// batches leave them out, and Shipped steps over them.
+	Urgent []uint64 `json:"urgent,omitempty"`
+	// Emergency is how many emergency records were sent in Day.
+	Emergency int `json:"emergency"`
 }
 
 // ShipStates keeps EventShip's state between runs.
@@ -64,6 +71,13 @@ type ShipStates interface {
 // Chain is on). Each pass puts the pending batches on chain first, oldest
 // first, in the normal lane with the same seq range, until they clear. The
 // first batch over the cap in a day also appends one alarm event to the log.
+//
+// An event in the emergency lane (mw events emit --emergency) does not wait
+// for the window: each pass sends it first, alone as a batch of one in the
+// emergency lane, on chain and direct at once and before the pending batches
+// are retried. It goes on chain even past the day's cap. With the chain
+// unreachable it goes direct and is kept pending, to be put on chain later in
+// the normal lane. The batches that follow leave it out.
 //
 // A batch no road took is not sent: the next pass builds it again.
 type EventShip struct {
@@ -107,23 +121,32 @@ func (s *EventShip) Ship(ctx context.Context) error {
 	now := s.now().UTC()
 	s.rollDay(st, now)
 
-	chainDown := s.retryPending(ctx, st)
-
 	head, err := s.Log.Head(ctx)
 	if err != nil {
 		return fmt.Errorf("reading the event log's head: %w", err)
 	}
-	if head <= st.Shipped || !s.due(head-st.Shipped, now) {
-		return nil
+	var unsent []events.Event
+	if head > st.Shipped {
+		if unsent, err = s.Log.Since(ctx, st.Shipped); err != nil {
+			return fmt.Errorf("reading the events after %d: %w", st.Shipped, err)
+		}
 	}
-	evs, err := s.Log.Since(ctx, st.Shipped)
+	chainDown, err := s.sendEmergencies(ctx, st, unsent, now)
 	if err != nil {
-		return fmt.Errorf("reading the events after %d: %w", st.Shipped, err)
+		return err
 	}
-	if len(evs) == 0 {
+	if !chainDown {
+		chainDown = s.retryPending(ctx, st)
+	}
+
+	was := st.Shipped
+	evs := cutBatch(unsentBatch(st, unsent))
+	if len(evs) == 0 || !s.due(uint64(len(evs)), now) {
+		if st.Shipped != was {
+			return s.save(ctx, st)
+		}
 		return nil
 	}
-	evs = cutBatch(evs)
 	r := ShipRange{From: evs[0].Seq, To: evs[len(evs)-1].Seq}
 
 	onChain := false
@@ -163,6 +186,7 @@ func (s *EventShip) Ship(ctx context.Context) error {
 		s.quiet("delivering a batch direct")
 	}
 	st.Shipped = r.To
+	stepOver(st)
 	if !onChain && s.Chain {
 		st.Pending = append(st.Pending, r)
 	}
@@ -171,6 +195,91 @@ func (s *EventShip) Ship(ctx context.Context) error {
 		s.alarm(ctx, st, now)
 	}
 	return s.save(ctx, st)
+}
+
+// sendEmergencies sends each event of unsent that is in the emergency lane
+// and not sent yet, alone, in the emergency lane, on chain and direct, oldest
+// first. It reports whether the chain failed one, so the pass leaves the
+// chain alone. It returns an error only when no road took an emergency: the
+// next pass builds it again.
+func (s *EventShip) sendEmergencies(ctx context.Context, st *ShipState, unsent []events.Event, now time.Time) (chainDown bool, err error) {
+	for _, e := range unsent {
+		if e.Lane != events.LaneEmergency || slices.Contains(st.Urgent, e.Seq) {
+			continue
+		}
+		payload, err := s.seal([]events.Event{e}, events.LaneEmergency, now)
+		if err != nil {
+			return chainDown, err
+		}
+		onChain := false
+		if s.Chain && !chainDown {
+			if _, err := s.putOnChain(ctx, payload); err != nil {
+				s.say("putting an emergency on chain", err)
+				chainDown = true
+			} else {
+				onChain = true
+				st.Chain++
+				s.quiet("putting an emergency on chain")
+			}
+		}
+		if _, err := s.Postern.Deliver(ctx, payload); err != nil {
+			if !onChain {
+				s.keep(ctx, st)
+				return chainDown, fmt.Errorf("delivering emergency event %d: %w", e.Seq, err)
+			}
+			s.say("delivering an emergency direct", err)
+		} else {
+			s.quiet("delivering an emergency direct")
+		}
+		st.Emergency++
+		if e.Seq == st.Shipped+1 {
+			st.Shipped = e.Seq
+			stepOver(st)
+		} else {
+			st.Urgent = append(st.Urgent, e.Seq)
+		}
+		if !onChain && s.Chain {
+			st.Pending = append(st.Pending, ShipRange{From: e.Seq, To: e.Seq})
+		}
+		if err := s.save(ctx, st); err != nil {
+			return chainDown, err
+		}
+	}
+	return chainDown, nil
+}
+
+// unsentBatch is the events of unsent a batch may hold: the run from the
+// first not yet in a record to just before the next emergency event already
+// sent alone. It steps Shipped over the emergency events at the front.
+func unsentBatch(st *ShipState, unsent []events.Event) []events.Event {
+	stepOver(st)
+	for i, e := range unsent {
+		if e.Seq <= st.Shipped {
+			continue
+		}
+		unsent = unsent[i:]
+		for j, f := range unsent {
+			if slices.Contains(st.Urgent, f.Seq) {
+				return unsent[:j]
+			}
+		}
+		return unsent
+	}
+	return nil
+}
+
+// stepOver moves Shipped past the emergency events sent alone that come
+// right after it, and forgets those it has passed.
+func stepOver(st *ShipState) {
+	for {
+		i := slices.Index(st.Urgent, st.Shipped+1)
+		if i < 0 {
+			break
+		}
+		st.Shipped++
+		st.Urgent = slices.Delete(st.Urgent, i, i+1)
+	}
+	st.Urgent = slices.DeleteFunc(st.Urgent, func(n uint64) bool { return n <= st.Shipped })
 }
 
 // retryPending puts the pending batches on chain, oldest first, while the
@@ -299,7 +408,7 @@ func (s *EventShip) alarm(ctx context.Context, st *ShipState, now time.Time) {
 // rollDay starts a new count when the UTC day has turned.
 func (s *EventShip) rollDay(st *ShipState, now time.Time) {
 	if day := now.Format("2006-01-02"); st.Day != day {
-		st.Day, st.Chain, st.Alarmed = day, 0, false
+		st.Day, st.Chain, st.Alarmed, st.Emergency = day, 0, false, 0
 	}
 }
 
@@ -346,6 +455,8 @@ type ShipStatus struct {
 	// whether the chain is used at all.
 	ChainToday, Cap int
 	Chain           bool
+	// EmergencyToday is the emergency records sent today (UTC).
+	EmergencyToday int
 }
 
 // Status reads where the shipper stands. It writes nothing.
@@ -359,7 +470,7 @@ func (s *EventShip) Status(ctx context.Context) (ShipStatus, error) {
 		return ShipStatus{}, fmt.Errorf("reading the event log's head: %w", err)
 	}
 	s.rollDay(&st, s.now().UTC())
-	return ShipStatus{Head: head, Shipped: st.Shipped, Pending: st.Pending, ChainToday: st.Chain, Cap: s.DailyCap, Chain: s.Chain}, nil
+	return ShipStatus{Head: head, Shipped: st.Shipped, Pending: st.Pending, ChainToday: st.Chain, Cap: s.DailyCap, Chain: s.Chain, EmergencyToday: st.Emergency}, nil
 }
 
 // Line is the status on one line of the phone-width report.
@@ -368,5 +479,9 @@ func (t ShipStatus) Line() string {
 	if !t.Chain {
 		chain = "chain off"
 	}
-	return fmt.Sprintf("EVENTS head %d shipped %d pending %d %s", t.Head, t.Shipped, len(t.Pending), chain)
+	line := fmt.Sprintf("EVENTS head %d shipped %d pending %d %s", t.Head, t.Shipped, len(t.Pending), chain)
+	if t.EmergencyToday > 0 {
+		line += fmt.Sprintf(" emergency %d", t.EmergencyToday)
+	}
+	return line
 }

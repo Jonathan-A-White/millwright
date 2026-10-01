@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain/events"
 )
 
 // echoKeys signs a record as the hex of its payload, so a test reads back
@@ -129,5 +131,27 @@ func TestPosternSendCarriesNoRole(t *testing.T) {
 	}
 	if _, fields := clearOf(t, f.backend.Delivered()[0]); fields["role"] != nil {
 		t.Errorf("expected no role on a posted message, got %s", fields["role"])
+	}
+}
+
+func TestTalkCallAlsoEmitsOneEmergencyEventNamingTheRing(t *testing.T) {
+	log := &apptest.FakeEventLog{}
+	backend := apptest.NewFakePostern()
+	backend.NextTxid = "ring-txid"
+	_, err := application.TalkCall{
+		Postern: backend, Cipher: apptest.NewFakeCipher(),
+		Keys: echoKeys{stubPosternKeys{pubKey: "mayor-pubkey-hex"}}, GovernorKey: "governor-pubkey-hex",
+		FloatSats: 100000, Log: log, Actor: "mayor@laptop",
+		Now: func() time.Time { return time.Date(2026, 10, 1, 13, 0, 0, 0, time.UTC) },
+	}.Run(context.Background(), application.TalkCallRequest{Text: "Back now."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := log.Since(context.Background(), 0)
+	if len(got) != 1 {
+		t.Fatalf("%d events in the log, want one", len(got))
+	}
+	if e := got[0]; e.Lane != events.LaneEmergency || e.Kind != events.KindMessage || e.Actor != "mayor@laptop" || e.Detail != "ring-txid" {
+		t.Fatalf("the event is %+v, want an emergency message by mayor@laptop whose detail is the ring's txid", e)
 	}
 }

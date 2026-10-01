@@ -1054,7 +1054,11 @@ postern key the follower writes events but sends none, and says so.
 `mw events emit --kind job --actor dispatch@laptop --from scheduled --to running
 [--bead <id>] [--detail ...]` appends one event of a job's own, stamped now, and
 prints its seq; an event its machine forbids is refused and nothing is written.
-`--actor` defaults to `mw@<host>`. `mw events tail [--since N] [--follow]`
+`--actor` defaults to `mw@<host>`. `--emergency` puts the event in the emergency lane: the
+follower sends it at once, alone, as a record of one event on chain and direct, ahead of the
+pending batches and the 2 s window (past the day's cap too), and `mw status` adds `emergency N`
+to its `EVENTS` line when N went today. `mw talk call` and mayor-stale's alarm (mw doctor)
+each emit one. `mw events tail [--since N] [--follow]`
 prints the events after seq N (default the whole log), one per line — `41
 2026-10-01T13:02:07Z bead_changed mw-1 mw@laptop open->claimed status` — and
 with `--follow` goes on printing what is appended.
@@ -2350,6 +2354,11 @@ after a direct one (`direct:<id>`), or before any, it does not. The direct
 delivery goes first. A `--chain` that fails is an error naming the txid that
 did go direct; a chain added by itself that fails is only said, on a
 `chain: not sent: ...` line, and the call still succeeds.
+
+The ring also rides the emergency lane (mw-jrx0s.12): `mw talk call` writes one `message`
+event, in that lane, to the home's event log, its detail the ring's txid, so the follower
+sends the Governor's app a record of it at once. A failure to write it is said and the call
+still succeeds.
 
 ```
 call ring sent
