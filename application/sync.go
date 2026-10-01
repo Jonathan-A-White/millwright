@@ -403,7 +403,7 @@ func Blocked(err error) (*VaultBlocked, bool) {
 // ExitStatus is the status mw leaves with when a command reports err: beads'
 // own exit code when beads stopped a sync, VaultBlockedExit when nothing was
 // wrong but somebody's uncommitted vault work, MillhandUpExit when the Millhand
-// was not started because one is up, WatchWakeExit when mw watch calls for a
+// was not started because one is up, DeputyUpExit likewise for the Deputy, WatchWakeExit when mw watch calls for a
 // wake, DoctorFaultExit when mw doctor leaves a check faulty and uncured,
 // HomeUnknownExit when mw home --check cannot tell which host is home,
 // NetworkFaultExit when a dispatch waited out the network and it did not
@@ -422,6 +422,9 @@ func ExitStatus(err error) int {
 	}
 	if _, up := MillhandIsUp(err); up {
 		return MillhandUpExit
+	}
+	if _, up := DeputyIsUp(err); up {
+		return DeputyUpExit
 	}
 	if _, wake := WatchWakes(err); wake {
 		return WatchWakeExit

@@ -15,6 +15,7 @@
 //	push_wait_seconds = 20
 //	millhand_routine_model = "sonnet"
 //	millhand_review_model = "opus"
+//	deputy_model = "sonnet"
 //	beads_sync = "remote"
 //	beads_backup_minutes = 30
 //	beads_server_host = "laptop.mw"    # only for beads_sync = "auto" on a boost
@@ -77,6 +78,7 @@ const (
 
 	MillhandRoutineModelEnv = "MW_MILLHAND_ROUTINE_MODEL"
 	MillhandReviewModelEnv  = "MW_MILLHAND_REVIEW_MODEL"
+	DeputyModelEnv          = "MW_DEPUTY_MODEL"
 
 	PosternBackendEnv       = "MW_POSTERN_BACKEND"
 	PosternFloatSatsEnv     = "MW_POSTERN_FLOAT_SATS"
@@ -199,6 +201,10 @@ const (
 	DefaultMillhandRoutineModel = "sonnet"
 	DefaultMillhandReviewModel  = "opus"
 )
+
+// DefaultDeputyModel is the model `mw deputy` brings the Deputy up on when
+// nothing says otherwise.
+const DefaultDeputyModel = "sonnet"
 
 // DefaultPosternBackend is where the postern's backend is reached when
 // nothing says otherwise: the Governor's Desktop, on this factory's own
@@ -1226,6 +1232,13 @@ func MillhandRoutineModel() (string, error) {
 // DefaultMillhandReviewModel when neither says.
 func MillhandReviewModel() (string, error) {
 	return optionalSetting("millhand_review_model", MillhandReviewModelEnv, DefaultMillhandReviewModel)
+}
+
+// DeputyModel reports the model the Deputy runs on: $MW_DEPUTY_MODEL if it is
+// set, otherwise the root-table `deputy_model` key of ~/.config/mw/config.toml,
+// and DefaultDeputyModel when neither says.
+func DeputyModel() (string, error) {
+	return optionalSetting("deputy_model", DeputyModelEnv, DefaultDeputyModel)
 }
 
 // Rigs reports where each rig the factory works is checked out on this machine,

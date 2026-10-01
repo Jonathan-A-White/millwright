@@ -100,12 +100,18 @@ type Millhand struct {
 // MillhandWindow is the name of the window of the Millhand's that is open in the
 // terminal, or "" when there is none. The Millhand is up when there is one.
 func MillhandWindow(ctx context.Context, windows Windows) (string, error) {
+	return seatWindowOpen(ctx, windows, MillhandSeat)
+}
+
+// seatWindowOpen is the name of the first open window of a seat's — one named
+// <seat>-… — or "" when the seat has none.
+func seatWindowOpen(ctx context.Context, windows Windows, seat string) (string, error) {
 	open, err := windows.List(ctx)
 	if err != nil {
 		return "", err
 	}
 	for _, window := range open {
-		if strings.HasPrefix(window.Name, MillhandSeat+"-") {
+		if strings.HasPrefix(window.Name, seat+"-") {
 			return window.Name, nil
 		}
 	}
