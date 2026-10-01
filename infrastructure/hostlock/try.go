@@ -53,6 +53,10 @@ func (t *Try) path() string { return filepath.Join(t.Dir, t.Name) }
 // TryTake implements application.GristLock. A lock somebody holds is
 // reported not taken, never waited for: only a moment's Held look is waited
 // out.
+//
+// The lock lives only as long as release is reachable: the open file is held
+// by release alone, and the garbage collector closes a file nothing refers to,
+// which lets go of the lock. Keep release and always defer it.
 func (t *Try) TryTake(ctx context.Context) (func(), bool, error) {
 	if err := os.MkdirAll(t.Dir, 0o700); err != nil {
 		return nil, false, fmt.Errorf("making the directory the lock %s belongs in: %w", t.path(), err)
