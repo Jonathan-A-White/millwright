@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -222,6 +224,11 @@ type PosternView struct {
 	// measured against. The zero value reads the real one.
 	Now func() time.Time
 
+	// Memo, when set, is what Run keeps of the view it last wrote: a view
+	// that differs from it only in written_at is not written again. Nil
+	// writes every run.
+	Memo *PosternViewMemo
+
 	// Out is where Run says what it wrote. A nil Out prints nothing.
 	Out io.Writer
 	// Err is where a failure to write the landed memory is said; the view is
@@ -229,9 +236,31 @@ type PosternView struct {
 	Err io.Writer
 }
 
+// PosternViewMemo is the digest of the view a follower last wrote, with its
+// written_at left out. Every sealed file is new bytes and so a new ETag, and
+// the Governor's phone downloads it again; a follower that holds a memo
+// across its runs writes only when the view itself changed. The zero value is
+// ready, and it is safe for concurrent use.
+type PosternViewMemo struct {
+	mu     sync.Mutex
+	digest [sha256.Size]byte
+	set    bool
+}
+
+// digestOf is the digest of doc as it reads apart from written_at.
+func digestOf(doc PosternViewDoc) ([sha256.Size]byte, error) {
+	doc.WrittenAt = ""
+	plain, err := json.Marshal(doc)
+	if err != nil {
+		return [sha256.Size]byte{}, fmt.Errorf("building the JSON: %w", err)
+	}
+	return sha256.Sum256(plain), nil
+}
+
 // Run builds the view, seals it to GovernorKey and writes it through File,
-// reporting the view it wrote. What writing needs is checked before the
-// tracker is read.
+// reporting the view it built. What writing needs is checked before the
+// tracker is read. With a Memo, a view equal to the last one written apart
+// from written_at is not sealed or written, and nothing is said.
 func (v PosternView) Run(ctx context.Context) (PosternViewDoc, error) {
 	if err := v.checkWritable(); err != nil {
 		return PosternViewDoc{}, err
@@ -240,12 +269,26 @@ func (v PosternView) Run(ctx context.Context) (PosternViewDoc, error) {
 	if err != nil {
 		return PosternViewDoc{}, err
 	}
+	var digest [sha256.Size]byte
+	if v.Memo != nil {
+		v.Memo.mu.Lock()
+		defer v.Memo.mu.Unlock()
+		if digest, err = digestOf(doc); err != nil {
+			return PosternViewDoc{}, err
+		}
+		if v.Memo.set && digest == v.Memo.digest {
+			return doc, nil
+		}
+	}
 	sealed, plain, zipped, err := SealPosternDoc(v.Cipher, v.GovernorKey, doc)
 	if err != nil {
 		return PosternViewDoc{}, err
 	}
 	if err := v.File.Write(ctx, []byte(sealed)); err != nil {
 		return PosternViewDoc{}, err
+	}
+	if v.Memo != nil {
+		v.Memo.digest, v.Memo.set = digest, true
 	}
 	if v.Out != nil {
 		fmt.Fprintf(v.Out, "wrote the view of %d bead(s) and %d need(s), %d plaintext byte(s), %d gzipped, to %s\n",
