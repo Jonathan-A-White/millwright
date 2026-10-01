@@ -1,8 +1,10 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -92,5 +94,59 @@ func TestStatusReportsOnStdoutAndNothingOnStderr(t *testing.T) {
 	}
 	if stderr != "" {
 		t.Fatalf("expected nothing on stderr, got %q", stderr)
+	}
+}
+
+// writeBeadsBudget gives the host a config.toml whose beads_budget_bytes is
+// budget, and a vault whose .beads holds size bytes.
+func writeBeadsBudget(t *testing.T, budget, size int64) {
+	t.Helper()
+
+	home := os.Getenv("HOME")
+	conf := filepath.Join(home, ".config", "mw", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(conf), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(conf, []byte("beads_budget_bytes = "+strconv.FormatInt(budget, 10)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	beads := filepath.Join(os.Getenv("MW_VAULT"), ".beads")
+	if err := os.MkdirAll(beads, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(beads, "data"), make([]byte, size), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStatusWarnsPastTheBeadsBudgetTheConfigSays(t *testing.T) {
+	standInBeads(t)
+	t.Setenv("MW_BEADS_BUDGET_BYTES", "")
+	writeBeadsBudget(t, 3_000_000, 2_000_000)
+
+	stdout, _ := runSeparately(t, "status")
+	if !strings.Contains(stdout, "BEADS 2MB") || strings.Contains(stdout, "past the") {
+		t.Fatalf("expected 2MB under a 3MB budget to draw no warning, got %q", stdout)
+	}
+
+	writeBeadsBudget(t, 1_000_000, 2_000_000)
+	stdout, _ = runSeparately(t, "status")
+	if !strings.Contains(stdout, "BEADS 2MB: past the 1MB budget") {
+		t.Fatalf("expected the warning to name the configured 1MB budget, got %q", stdout)
+	}
+}
+
+func TestStatusRefusesABeadsBudgetNamingTheKey(t *testing.T) {
+	standInBeads(t)
+	t.Setenv("MW_BEADS_BUDGET_BYTES", "")
+	writeBeadsBudget(t, 0, 10)
+
+	root := newRootCmd()
+	root.SetArgs([]string{"status"})
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "beads_budget_bytes") {
+		t.Fatalf("expected status to refuse a zero budget naming beads_budget_bytes, got %v", err)
 	}
 }

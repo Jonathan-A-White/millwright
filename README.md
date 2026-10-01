@@ -734,6 +734,7 @@ cap   = 1                          # sessions running here at once (default 1)
 host_silent_hours = 2              # how long another host may go unsynced (default 2)
 handoff_at = 180000                # the context size, in tokens, at which mw seat context says handoff (default 180000)
 rig_memory_bytes = 8000            # how large the Builder's memory of one rig may grow before mw status says prune (default 8000)
+beads_budget_bytes = 1500000000    # how large this host's .beads may grow before mw status warns and mw doctor's beads-size goes faulty (default 1.5 GB; raise it on a host that serves every rig's beads)
 dispatch_sync_tries = 3            # how many times mw dispatch tries its sync when a name cannot be resolved (default 3)
 dispatch_sync_wait = "15s"         # how long it waits between those tries (default 15s, at most 90s in all)
 push_tries = 3                     # how many times mw next tries a push again after a fault at the remote itself (default 3)
@@ -2071,7 +2072,7 @@ wakes anyone on a count: it is only shown.
 
 `mw status` only ever says this. Re-pathing a story is a person's act, never a
 report's. The config keys it reads are `vault`, `host`, `host_silent_hours`,
-`rig_memory_bytes` and `beads_sync` (*What a host is told*). See `features/status.feature`.
+`rig_memory_bytes`, `beads_budget_bytes` and `beads_sync` (*What a host is told*). See `features/status.feature`.
 
 ## Briefing a seat from a bead
 
@@ -2861,8 +2862,9 @@ reach; a `shared` host with none reads cannot-tell. `mw-doctor.service` reads
 `BEADS_DOLT_SERVER_HOST` (and `BEADS_DOLT_SERVER_PORT` when it is not 3307), as
 the Laptop's does: otherwise the check reads ok and never dials.
 
-**beads-size** watches `.beads` against the same 1 GB budget `mw status`'s
-BEADS line warns on; past it there is no cure — repacking would delete packs
+**beads-size** watches `.beads` against the same budget `mw status`'s
+BEADS line warns on, 1.5 GB unless `beads_budget_bytes` (or `MW_BEADS_BUDGET_BYTES`)
+says otherwise; past it there is no cure — repacking would delete packs
 — so it only ever writes the check's own `doctor.beads-size` note for the
 Millhand to look at.
 

@@ -511,6 +511,48 @@ func TestRigMemoryBytesRefusesWhatWouldCallEveryRigOverBudgetOrIsNotANumber(t *t
 	}
 }
 
+func TestBeadsBudgetBytesIsOneAndAHalfGigabytesUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\nhost = \"vps\"\n")
+
+	bytes, err := config.BeadsBudgetBytes()
+	if err != nil {
+		t.Fatalf("reading how large the beads database may be: %v", err)
+	}
+	if config.DefaultBeadsBudgetBytes != 1_500_000_000 || bytes != config.DefaultBeadsBudgetBytes {
+		t.Fatalf("expected the default of 1.5 GB, got %d", bytes)
+	}
+
+	t.Setenv(config.BeadsBudgetEnv, "500")
+	if bytes, err = config.BeadsBudgetBytes(); err != nil || bytes != 500 {
+		t.Fatalf("expected %s to win with 500, got %d: %v", config.BeadsBudgetEnv, bytes, err)
+	}
+
+	t.Setenv(config.BeadsBudgetEnv, "")
+	writeConfig(t, "beads_budget_bytes = 3000000000\n")
+	if bytes, err = config.BeadsBudgetBytes(); err != nil || bytes != 3_000_000_000 {
+		t.Fatalf("expected the config file's beads_budget_bytes to read back as 3000000000, got %d: %v", bytes, err)
+	}
+}
+
+func TestBeadsBudgetBytesRefusesZeroOrANonNumberNamingTheKey(t *testing.T) {
+	for _, text := range []string{"0", "\"plenty\"", "-5", "1.5"} {
+		writeConfig(t, "beads_budget_bytes = "+text+"\n")
+		_, err := config.BeadsBudgetBytes()
+		if err == nil {
+			t.Fatalf("expected a beads budget of %s to be refused", text)
+		}
+		if !strings.Contains(err.Error(), "beads_budget_bytes") {
+			t.Fatalf("expected the error for %s to name beads_budget_bytes, got: %v", text, err)
+		}
+	}
+
+	writeConfig(t, "")
+	t.Setenv(config.BeadsBudgetEnv, "lots")
+	if _, err := config.BeadsBudgetBytes(); err == nil || !strings.Contains(err.Error(), "beads_budget_bytes") {
+		t.Fatalf("expected a bad %s to be refused naming beads_budget_bytes, got: %v", config.BeadsBudgetEnv, err)
+	}
+}
+
 func TestMaxAttemptsIsThreeUntilAHostSaysOtherwise(t *testing.T) {
 	writeConfig(t, "vault = \"/v\"\nhost = \"vps\"\n")
 

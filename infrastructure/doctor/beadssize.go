@@ -85,7 +85,8 @@ type BeadsSize struct {
 	// Dir is the vault's directory.
 	Dir string
 	// Budget is how many bytes .beads may hold before this check is faulty.
-	// The zero value reads application.DefaultBeadsBudgetBytes.
+	// mw doctor sets it from config.BeadsBudgetBytes; the zero value reads
+	// application.DefaultBeadsBudgetBytes.
 	Budget int64
 }
 

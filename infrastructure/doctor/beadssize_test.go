@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 )
 
@@ -133,5 +134,65 @@ func TestBeadsSizeCureSaysWhatCachesItFoundUnderEitherLayout(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "found 1 git-remote-cache clone(s) holding 300 bytes") {
 			t.Fatalf("%s: expected the cure to name the cache it found, got %v", store, err)
 		}
+	}
+}
+
+// bsSparseVault is bsVault for sizes too large to write out: the .beads file
+// is truncated to size, which reads as that many bytes without using the disk.
+func bsSparseVault(t *testing.T, size int64) string {
+	t.Helper()
+	dir := bsVault(t, 0)
+	if err := os.Truncate(filepath.Join(dir, ".beads", "data"), size); err != nil {
+		t.Fatalf("sizing the .beads fixture: %v", err)
+	}
+	return dir
+}
+
+// bsConfigured points HOME at a config.toml holding text and returns the
+// check over dir with the budget the config says, the way mw doctor builds it.
+func bsConfigured(t *testing.T, text, dir string) *doctor.BeadsSize {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv(config.BeadsBudgetEnv, "")
+	if text != "" {
+		path := filepath.Join(home, config.File)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("making the config dir: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			t.Fatalf("writing the config file: %v", err)
+		}
+	}
+	budget, err := config.BeadsBudgetBytes()
+	if err != nil {
+		t.Fatalf("reading the beads budget: %v", err)
+	}
+	return &doctor.BeadsSize{Dir: dir, Budget: budget}
+}
+
+func TestBeadsSizeHoldsToTheBudgetTheConfigSays(t *testing.T) {
+	text := "beads_budget_bytes = 3000000000\n"
+
+	verdict, reason := bsConfigured(t, text, bsSparseVault(t, 2_000_000_000)).Probe(context.Background())
+	if verdict != application.DoctorOK {
+		t.Fatalf("expected ok at 2 GB under a 3 GB budget, got %v: %s", verdict, reason)
+	}
+
+	verdict, reason = bsConfigured(t, text, bsSparseVault(t, 3_100_000_000)).Probe(context.Background())
+	if verdict != application.DoctorFaulty || !strings.Contains(reason, "3000000000") {
+		t.Fatalf("expected faulty at 3.1 GB naming the 3000000000 budget, got %v: %s", verdict, reason)
+	}
+}
+
+func TestBeadsSizeKeepsOneAndAHalfGigabytesWhenTheConfigSaysNothing(t *testing.T) {
+	verdict, reason := bsConfigured(t, "", bsSparseVault(t, 1_400_000_000)).Probe(context.Background())
+	if verdict != application.DoctorOK {
+		t.Fatalf("expected ok at 1.4 GB under the default budget, got %v: %s", verdict, reason)
+	}
+
+	verdict, _ = bsConfigured(t, "", bsSparseVault(t, 1_600_000_000)).Probe(context.Background())
+	if verdict != application.DoctorFaulty {
+		t.Fatalf("expected faulty at 1.6 GB past the default budget, got %v", verdict)
 	}
 }

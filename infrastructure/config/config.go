@@ -9,6 +9,7 @@
 //	host_silent_hours = 2
 //	handoff_at = 180000
 //	rig_memory_bytes = 8000
+//	beads_budget_bytes = 1500000000
 //	dispatch_sync_tries = 3
 //	dispatch_sync_wait = "15s"
 //	push_tries = 3
@@ -71,6 +72,7 @@ const (
 	HostSilenceEnv = "MW_HOST_SILENT_HOURS"
 	HandoffAtEnv   = "MW_HANDOFF_AT"
 	RigMemoryEnv   = "MW_RIG_MEMORY_BYTES"
+	BeadsBudgetEnv = "MW_BEADS_BUDGET_BYTES"
 
 	NudgeAfterMinutesEnv     = "MW_NUDGE_AFTER_MINUTES"
 	NudgeSyncStaleMinutesEnv = "MW_NUDGE_SYNC_STALE_MINUTES"
@@ -203,6 +205,12 @@ const DefaultHandoffAt = 180000
 // Every Builder reads that file at boot, so its size is fuel paid on every
 // story.
 const DefaultRigMemoryBytes = 8000
+
+// DefaultBeadsBudgetBytes is how large a host's own beads database may grow
+// before `mw status` warns and `mw doctor`'s beads-size check goes faulty, when
+// nothing says otherwise. It is the same 1.5 GB application.DefaultBeadsBudgetBytes
+// reads as; a host that serves every rig's beads raises it with beads_budget_bytes.
+const DefaultBeadsBudgetBytes int64 = 1_500_000_000
 
 // The models `mw millhand` wakes the Millhand on when nothing says otherwise: a
 // routine wake and a wake by hand on Sonnet, a review wake on Opus. They are
@@ -1091,6 +1099,36 @@ func RigMemoryBytes() (int, error) {
 	}
 	if bytes < 1 {
 		return 0, fmt.Errorf("the rig memory budget is %d bytes, so every rig's memory would be over it: set it to 1 or more", bytes)
+	}
+	return bytes, nil
+}
+
+// BeadsBudgetBytes reports how large this host's own beads database may grow
+// before `mw status` warns and `mw doctor`'s beads-size check goes faulty:
+// $MW_BEADS_BUDGET_BYTES if it is set, otherwise the root-table
+// `beads_budget_bytes` key of ~/.config/mw/config.toml, and
+// DefaultBeadsBudgetBytes when neither says.
+func BeadsBudgetBytes() (int64, error) {
+	said := strings.TrimSpace(os.Getenv(BeadsBudgetEnv))
+	if said == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return 0, fmt.Errorf("no %s is set and there is no home directory to read %s in: %w", BeadsBudgetEnv, File, err)
+		}
+		if said, err = valueIn(filepath.Join(home, File), "beads_budget_bytes"); err != nil {
+			return 0, err
+		}
+	}
+	if said == "" {
+		return DefaultBeadsBudgetBytes, nil
+	}
+
+	bytes, err := strconv.ParseInt(said, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("the beads budget is %q, which is not a whole number of bytes: set %s=<n>, or `beads_budget_bytes = <n>` in %s", said, BeadsBudgetEnv, File)
+	}
+	if bytes < 1 {
+		return 0, fmt.Errorf("the beads budget (beads_budget_bytes) is %d bytes, so the beads database would always be over it: set it to 1 or more", bytes)
 	}
 	return bytes, nil
 }

@@ -84,6 +84,10 @@ func newDoctorCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			beadsBudget, err := config.BeadsBudgetBytes()
+			if err != nil {
+				return err
+			}
 			vault, err := config.Vault()
 			if err != nil {
 				return err
@@ -154,7 +158,7 @@ func newDoctorCmd() *cobra.Command {
 					doctor.NewWg(wgHub, reach, wgUnit, store),
 					doctor.NewVaultDirty(vault, host, store),
 					doctor.NewTimers(units),
-					doctor.NewBeadsSize(vault),
+					&doctor.BeadsSize{Dir: vault, Budget: beadsBudget},
 					doctor.NewBeadsStores(vault),
 					tmpLeftovers,
 					mayorStale,

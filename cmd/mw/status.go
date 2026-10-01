@@ -40,6 +40,8 @@ func newStatusCmd() *cobra.Command {
 			"`rig_memory_bytes`, default 8000), a RIG MEMORY section says which and by how much: every\n" +
 			"session pays for that file at boot, so the Mayor is due to prune it. It is left out when\n" +
 			"none is over.\n\n" +
+			"The BEADS line warns when this host's beads database is past its budget (config\n" +
+			"`beads_budget_bytes`, default 1500000000).\n\n" +
 			"An IDLE line, 'IDLE since HH:MM', says the home's event log has held no event but the jobs' own\n" +
 			"(dispatch, tick and sync passes) since then, for longer than [events] idle_after (default 10m), and\n" +
 			"that no job is in flight, with the count of harness processes alive: none when the factory is idle.\n" +
@@ -77,6 +79,10 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			beadsBudget, err := config.BeadsBudgetBytes()
+			if err != nil {
+				return err
+			}
 			files := mwVault(dir, host)
 			setting, err := hostBeads(cmd.Context(), files, host)
 			if err != nil {
@@ -93,25 +99,26 @@ func newStatusCmd() *cobra.Command {
 				return err
 			}
 			_, err = application.Status{
-				Tracker:        tracker,
-				Notes:          tracker,
-				Vault:          mwVault(dir, host),
-				Rules:          files,
-				SyncHalt:       hostSyncHalt(),
-				Mayor:          application.MayorReader{Tracker: tracker, Notes: tracker},
-				Host:           host,
-				Seat:           BuilderSeat,
-				Ticks:          hostTickLogs(),
-				Events:         events,
-				Log:            idleLog,
-				IdleAfter:      idleAfter,
-				Harness:        procs.Harness{},
-				Control:        homeEventLog(),
-				HostSilence:    time.Duration(hours) * time.Hour,
-				RigMemoryBytes: budget,
-				SyncMode:       setting.Configured,
-				Home:           files,
-				Out:            cmd.OutOrStdout(),
+				Tracker:          tracker,
+				Notes:            tracker,
+				Vault:            mwVault(dir, host),
+				Rules:            files,
+				SyncHalt:         hostSyncHalt(),
+				Mayor:            application.MayorReader{Tracker: tracker, Notes: tracker},
+				Host:             host,
+				Seat:             BuilderSeat,
+				Ticks:            hostTickLogs(),
+				Events:           events,
+				Log:              idleLog,
+				IdleAfter:        idleAfter,
+				Harness:          procs.Harness{},
+				Control:          homeEventLog(),
+				HostSilence:      time.Duration(hours) * time.Hour,
+				RigMemoryBytes:   budget,
+				BeadsBudgetBytes: beadsBudget,
+				SyncMode:         setting.Configured,
+				Home:             files,
+				Out:              cmd.OutOrStdout(),
 			}.Run(cmd.Context())
 			return err
 		},

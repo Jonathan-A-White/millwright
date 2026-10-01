@@ -223,6 +223,37 @@ func TestStatusWarnsPastTheBeadsBudget(t *testing.T) {
 	}
 }
 
+// TestStatusHoldsTheBeadsSizeToTheBudgetItIsGiven: the budget comes from the
+// configuration, so a size past the default but under the given budget is no
+// warning, and one past the given budget is.
+func TestStatusHoldsTheBeadsSizeToTheBudgetItIsGiven(t *testing.T) {
+	for _, tc := range []struct {
+		size int64
+		want string
+	}{
+		{2_000_000_000, "BEADS 2.0GB\n"},
+		{3_100_000_000, "BEADS 3.1GB: past the 3.0GB budget"},
+	} {
+		tracker := aTrackerPathedToVPS(t)
+		tracker.SetSize(tc.size)
+		report, err := application.Status{
+			Tracker:          tracker,
+			Notes:            tracker,
+			Host:             "vps",
+			Seat:             "builder",
+			HostSilence:      2 * time.Hour,
+			BeadsBudgetBytes: 3_000_000_000,
+			Now:              func() time.Time { return statusNow },
+		}.Run(context.Background())
+		if err != nil {
+			t.Fatalf("reading status: %v", err)
+		}
+		if !strings.Contains(report.String(), tc.want) {
+			t.Fatalf("expected %q at %d bytes, got:\n%s", tc.want, tc.size, report.String())
+		}
+	}
+}
+
 // TestStatusWithoutNotesLeavesTheBeadsSizeOut mirrors
 // TestStatusWithoutNotesLeavesTheOtherHostsOut: Size is TrackerNotes', so a
 // report with no Notes to read it from says nothing of it, rather than
