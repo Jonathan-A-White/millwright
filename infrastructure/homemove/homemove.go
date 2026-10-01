@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -215,6 +216,77 @@ func (Host) UnitInstalled(ctx context.Context, unit string) (bool, error) {
 		return false, fmt.Errorf("running systemctl: %w", err)
 	}
 	return false, nil
+}
+
+// UnitWorkingDirectory implements application.HomeMoveHost: `systemctl --user show
+// <unit> -p WorkingDirectory`, which prints WorkingDirectory=<path>, with a "!" in
+// front of the path when the unit's own setting was "-" (it may be missing).
+func (Host) UnitWorkingDirectory(ctx context.Context, unit string) (string, error) {
+	out, err := run(ctx, "", "systemctl", "--user", "show", unit, "-p", "WorkingDirectory")
+	if err != nil {
+		return "", err
+	}
+	line := strings.TrimSpace(out)
+	value, ok := strings.CutPrefix(line, "WorkingDirectory=")
+	if !ok {
+		return "", fmt.Errorf("systemctl show %s printed %q, not WorkingDirectory=<path>", unit, line)
+	}
+	dir := strings.TrimPrefix(value, "!")
+	if !filepath.IsAbs(dir) {
+		return "", fmt.Errorf("the %s unit's WorkingDirectory is %q, not a directory to serve", unit, value)
+	}
+	return dir, nil
+}
+
+// EmptyDataDir implements application.HomeMoveHost.
+func (Host) EmptyDataDir(_ context.Context, dir string) error {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	if len(entries) != 0 {
+		return fmt.Errorf("%s has %d entries in it: it is not cleared, and a server started in it would serve them", dir, len(entries))
+	}
+	return nil
+}
+
+// BeadsServerAnswers implements application.HomeMoveHost: a TCP dial of the address
+// bd is told, every Poll, until one connects or wait is up. With no
+// BEADS_DOLT_SERVER_HOST bd's own default is 127.0.0.1, and 3307 is the port the
+// dolt-beads unit binds.
+func (h Host) BeadsServerAnswers(ctx context.Context, wait time.Duration) error {
+	host, port := os.Getenv("BEADS_DOLT_SERVER_HOST"), os.Getenv("BEADS_DOLT_SERVER_PORT")
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if port == "" {
+		port = "3307"
+	}
+	address := net.JoinHostPort(host, port)
+	poll := h.Poll
+	if poll == 0 {
+		poll = 2 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	var last error
+	for {
+		dialer := net.Dialer{Timeout: 3 * time.Second}
+		conn, err := dialer.DialContext(ctx, "tcp", address)
+		if err == nil {
+			conn.Close()
+			return nil
+		}
+		last = err
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("%s did not answer within %s: %w", address, wait, last)
+		case <-time.After(poll):
+		}
+	}
 }
 
 // StartUnit implements application.HomeMoveHost: a unit that is active is left

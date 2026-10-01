@@ -90,12 +90,14 @@ func TestAPlannedMoveStandsTheOldHomeDownBeforeTouchingTheNewOne(t *testing.T) {
 		// 3. beads, from the old home's final push
 		"git: read refs/dolt/data time",
 		"host lock taken",
+		"systemctl installed? dolt-beads",
 		"aside .beads/embeddeddolt",
+		"systemctl show dolt-beads WorkingDirectory",
+		"empty data dir /home/jwhite/millwright-vault/.beads/dolt",
+		"systemctl --user start dolt-beads",
+		"wait for the beads server",
 		"bd bootstrap --yes",
 		"git checkout -- .beads/config.yaml",
-		"bd count",
-		"systemctl installed? dolt-beads",
-		"systemctl --user start dolt-beads",
 		"bd count",
 		"host lock released",
 		// 4. the vault
