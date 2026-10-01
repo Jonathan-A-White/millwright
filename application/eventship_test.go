@@ -493,3 +493,143 @@ func TestStatusShowsTheFollowersHeadPendingBatchesAndTodaysChainCount(t *testing
 		t.Fatalf("a report with no shipper named has no EVENTS line, got:\n%s %v", bare.String(), err)
 	}
 }
+
+// addEmergency appends one emergency-lane event, as mw events emit --emergency does.
+func (f *shipFixture) addEmergency(t *testing.T) {
+	t.Helper()
+	ev := events.Event{Ts: f.at, Kind: events.KindJob, Actor: "doctor@laptop", From: events.JobRunning, To: events.JobFailed, Detail: "mayor-stale", Lane: events.LaneEmergency}
+	if _, err := f.log.Append(context.Background(), []events.Event{ev}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestShipSendsAnEmergencyAloneAndAtOnceOnBothRoadsInsideTheWindow(t *testing.T) {
+	f := newShipFixture(t)
+	f.add(t, 1)
+	f.run(t) // a normal batch: the 2 s window is now shut
+	f.at = f.at.Add(100 * time.Millisecond)
+	f.add(t, 1)
+	f.addEmergency(t)
+	f.add(t, 1)
+	f.run(t)
+
+	chain, direct := f.chainPayloads(t), f.backend.Delivered()
+	if len(chain) != 2 || len(direct) != 2 {
+		t.Fatalf("%d records on chain and %d direct, want the first batch and the emergency on each", len(chain), len(direct))
+	}
+	for name, payload := range map[string][]byte{"chain": chain[1], "direct": direct[1]} {
+		_, b := f.open(t, payload)
+		if b.Lane != events.LaneEmergency || b.From != 3 || b.To != 3 || len(b.Events) != 1 {
+			t.Fatalf("the %s record is %d to %d in lane %s with %d events, want 3 to 3 in emergency", name, b.From, b.To, b.Lane, len(b.Events))
+		}
+		if err := b.Validate(); err != nil {
+			t.Fatalf("the %s emergency is not a batch the factory sends: %v", name, err)
+		}
+	}
+	st, _ := f.state.Load(context.Background())
+	if st.Shipped != 1 || st.Emergency != 1 {
+		t.Fatalf("state is %+v, want shipped 1 (the window holds events 2 and 4) and 1 emergency", st)
+	}
+
+	// The window opens: the batch holds the events around the emergency, never it twice.
+	f.at = f.at.Add(3 * time.Second)
+	f.run(t)
+	f.run(t)
+	var seen []string
+	for _, p := range f.chainPayloads(t)[2:] {
+		_, b := f.open(t, p)
+		seen = append(seen, strings.Join([]string{b.Lane, string(rune('0' + b.From)), string(rune('0' + b.To))}, " "))
+	}
+	if strings.Join(seen, ",") != "normal 2 2" {
+		t.Fatalf("after the window the chain got %v, want normal 2 2 first", seen)
+	}
+}
+
+func TestShipSendsTheEmergencyBeforePendingFallbackBatches(t *testing.T) {
+	f := newShipFixture(t)
+	f.backend.ChainErr = errors.New("down")
+	f.add(t, 1)
+	f.run(t)
+	f.backend.ChainErr = nil
+	f.at = f.at.Add(10 * time.Millisecond)
+	f.addEmergency(t)
+	f.run(t)
+
+	var lanes []string
+	for _, p := range f.chainPayloads(t) {
+		_, b := f.open(t, p)
+		lanes = append(lanes, b.Lane)
+	}
+	if len(lanes) != 2 || lanes[0] != events.LaneEmergency || lanes[1] != events.LaneNormal {
+		t.Fatalf("the chain got lanes %v, want the emergency then the pending batch re-sent as normal", lanes)
+	}
+	if direct := f.backend.Delivered(); len(direct) != 2 {
+		t.Fatalf("%d records direct, want the fallback batch and the emergency", len(direct))
+	}
+}
+
+func TestShipEmergencyWithTheChainDownGoesDirectAndIsPutOnChainLater(t *testing.T) {
+	f := newShipFixture(t)
+	f.backend.ChainErr = errors.New("down")
+	f.addEmergency(t)
+	f.run(t)
+	direct := f.backend.Delivered()
+	if len(direct) != 1 {
+		t.Fatalf("%d records direct, want the emergency", len(direct))
+	}
+	if _, b := f.open(t, direct[0]); b.Lane != events.LaneEmergency || b.From != 1 || b.To != 1 {
+		t.Fatalf("the direct record is %d to %d in lane %s, want 1 to 1 in emergency", b.From, b.To, b.Lane)
+	}
+	st, _ := f.state.Load(context.Background())
+	if st.Shipped != 1 || len(st.Pending) != 1 {
+		t.Fatalf("state is %+v, want shipped 1 and the emergency pending for the chain", st)
+	}
+	f.backend.ChainErr = nil
+	f.at = f.at.Add(time.Second)
+	f.run(t)
+	if chain := f.chainPayloads(t); len(chain) != 1 || len(f.backend.Delivered()) != 1 {
+		t.Fatalf("%d on chain, %d direct, want the one retry on chain only", len(chain), len(f.backend.Delivered()))
+	}
+}
+
+func TestShipEmergencyIgnoresTheDailyCapAndLeavesWhenNoRoadTookIt(t *testing.T) {
+	f := newShipFixture(t)
+	f.ship.DailyCap = 0
+	f.addEmergency(t)
+	f.run(t)
+	if len(f.chainPayloads(t)) != 1 {
+		t.Fatalf("an emergency waited on the daily cap")
+	}
+
+	g := newShipFixture(t)
+	g.backend.DeliverErr = errors.New("backend down")
+	g.backend.ChainErr = errors.New("chain down")
+	g.addEmergency(t)
+	if err := g.ship.Ship(context.Background()); err == nil {
+		t.Fatal("expected an error when no road took the emergency")
+	}
+	g.backend.DeliverErr, g.backend.ChainErr = nil, nil
+	g.run(t)
+	if len(g.backend.Delivered()) != 1 {
+		t.Fatalf("the emergency was not sent next pass")
+	}
+}
+
+func TestShipStatusCountsTodaysEmergenciesAndStartsAgainTomorrow(t *testing.T) {
+	f := newShipFixture(t)
+	f.addEmergency(t)
+	f.run(t)
+	f.addEmergency(t)
+	f.run(t)
+	got, err := f.ship.Status(context.Background())
+	if err != nil || got.EmergencyToday != 2 {
+		t.Fatalf("status is %+v (%v), want 2 emergencies today", got, err)
+	}
+	if line := got.Line(); !strings.Contains(line, "emergency 2") || len(line) > application.Width {
+		t.Fatalf("the status line %q should say emergency 2 within %d wide", line, application.Width)
+	}
+	f.at = f.at.Add(24 * time.Hour)
+	if got, _ := f.ship.Status(context.Background()); got.EmergencyToday != 0 || strings.Contains(got.Line(), "emergency") {
+		t.Fatalf("tomorrow's status is %+v / %q, want no emergencies", got, got.Line())
+	}
+}
