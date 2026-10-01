@@ -66,6 +66,19 @@ the log until one comes; the follower types a nudge into the seat's idle pane, o
 its up command when its window is down and it is marked spring. A `mail` event is the
 seat's only when its detail, the box, is the seat.
 
+The subscribe file is TOML, two keys, both optional but `kinds`:
+
+```toml
+kinds = ["mail", "landing", "card_answered", "message"]
+spring = true
+```
+
+`kinds` is one line of event kinds (hyphens may stand for underscores) or `landing`; a bad
+name leaves the seat out and is logged. `spring = true` is for the deputy and the millhand
+only: the follower brings the seat up when its window is down. Without a file a seat hears
+`mail`. The follower keeps each seat's cursor in `nudge.json` beside the log; a seat first
+seen starts at the head.
+
 A seat is handed over on the log (mw-jrx0s.11): the successor boots while the old
 session still answers, and `mw seat handover --at <N>` (default: the log's head) emits a
 `handover` event and writes the successor's name and N into the seat's acting file. A

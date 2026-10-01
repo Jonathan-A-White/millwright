@@ -128,6 +128,28 @@ _Avoid_: Page, ping, alert
 One hold-speak-release from the Governor and the Mayor's spoken answer to it. A turn carries no tool work.
 _Avoid_: Message, exchange
 
+### Events
+
+**Event**:
+A transition of one of the factory's state machines (bead, card, talk, job), or a word to the factory, numbered with a seq in the home's log. See `docs/events.md`.
+_Avoid_: Notification, message (a Message is a Postern record), webhook
+
+**Batch**:
+The events of about 2 seconds, sealed as one `events` record to the Governor, numbered `from` to `to` by seq.
+_Avoid_: Bundle, digest, packet
+
+**Lane**:
+How a batch is sent: `normal` (on chain and direct), `emergency` (one event, alone and at once) or `fallback` (direct only, put on chain later in `normal`).
+_Avoid_: Channel (a Channel is a Postern thing), priority, queue
+
+**Follower**:
+The home's zero-token loop, `mw events follow`, that writes the log, publishes the view, ships batches and springs seats and jobs.
+_Avoid_: Daemon, poller, watcher, watchdog
+
+**Cursor**:
+A seq a seat reads the log from. A Mayor handover is one: the old session answers up to N, the successor from N on.
+_Avoid_: Offset, bookmark, checkpoint
+
 ### Economy
 
 **Fuel**:

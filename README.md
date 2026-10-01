@@ -1140,6 +1140,16 @@ successor to read. The successor's own `mw events wait` ends on the handover, sa
 the seat from N, and a wait begun `--since N` ignores it. A wait tells which window it is in
 by `--as <window name>`, by default the tmux window it runs in; with none it is the old one.
 
+The Mayor's commands on the log:
+
+| Command | What it does |
+| --- | --- |
+| `mw events follow [--every 1s]` | The follower: writes the log, publishes the view, ships batches, nudges and springs seats and jobs. Never exits. |
+| `mw events tail [--since N] [--follow]` | Prints the events after seq N, one per line; `--follow` keeps going. |
+| `mw events emit --kind <k> [--bead <id>] [--emergency] ...` | Appends one event of its own, stamped now, and prints its seq; `--emergency` puts it in the emergency lane. |
+| `mw events wait --for <seat> [--kinds ...] [--since N] [--limit 50m]` | Blocks on the log, no polling and no bd, until an event the seat subscribed to; ends on a handover. |
+| `mw seat handover [--at N] [--to <window>]` | The old Mayor's last act: marks event N as the last it answers and names the successor. |
+
 The follower is the user service `contrib/systemd/mw-view-follow.service`
 (the name kept from when it only republished the view; a daemon, so no timer;
 `Restart=on-failure`, `WantedBy=default.target`), which reads
