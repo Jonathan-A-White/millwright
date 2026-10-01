@@ -37,9 +37,10 @@ const (
 	KindMail         = "mail"          // a bd mail bead sent to a seat
 	KindJob          = "job"           // a scheduled job's transition
 	KindHandover     = "handover"      // a seat's session hands the seat to its successor at a seq
+	KindControl      = "control"       // a word to the factory: cancel a story's session, pause a host, cap, priority
 )
 
-var kinds = []string{KindBeadChanged, KindCardAsked, KindCardAnswered, KindCardApplied, KindMessage, KindTalkTurn, KindHandsRan, KindMail, KindJob, KindHandover}
+var kinds = []string{KindBeadChanged, KindCardAsked, KindCardAnswered, KindCardApplied, KindMessage, KindTalkTurn, KindHandsRan, KindMail, KindJob, KindHandover, KindControl}
 
 // kindMachine is the machine each kind is a transition of; a kind missing
 // here has none.
@@ -125,6 +126,11 @@ func (e Event) Validate() error {
 		return fmt.Errorf("a %s event names no bead", e.Kind)
 	}
 	if machine == "" {
+		if e.Kind == KindControl {
+			if err := checkControl(e); err != nil {
+				return err
+			}
+		}
 		if e.From != "" || e.To != "" {
 			return fmt.Errorf("a %s event is no transition: its from and to stay empty, not %q and %q", e.Kind, e.From, e.To)
 		}

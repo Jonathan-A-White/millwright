@@ -36,6 +36,7 @@ Every field is always present in the JSON, an empty string where unset.
 | `mail` | none | the mail bead | its box: the seat it is sent to |
 | `job` | job | empty, or the bead the job worked on | the outcome, on `done` or `failed` |
 | `handover` | none | empty | `<seat> to <successor window> at <N>`: the old session answers nothing past event N |
+| `control` | none | the bead for `cancel` and `priority`, else empty | the word and what it takes: `cancel`, `pause-host <host>`, `resume-host <host>`, `cap <host> <n>`, `priority <n>` |
 
 A `bead_changed` event whose from and to are the same state is a change that
 left the status alone (a comment, an edited field). Every other event of a
@@ -83,6 +84,33 @@ the actor `<job>@<host>`: scheduled, whose detail says why (`bead mw-x opened`, 
 `alarm`, `heartbeat`, `clock`), running, then done, or failed with the failure as its detail. A
 job unrun for `[events] heartbeat` is run for `heartbeat`; the pass is in flight at most once,
 and an event that springs it meanwhile earns one more pass after it.
+
+## Control
+
+A `control` event is a word to the factory (mw-jrx0s.16), not a thing that happened:
+`mw events emit --kind control --detail "pause-host laptop"`, with `--bead <id>` for the words
+about a bead. An unknown word, or a bead where the word is about a host, is refused before
+anything is written. A seat subscribes to `control` like any kind, and hears every word.
+
+| Word | Bead | Who acts on it |
+| --- | --- | --- |
+| `cancel` | the story | the follower of the host that holds the claim |
+| `pause-host <host>` | none | that host's dispatch passes, until `resume-host <host>` |
+| `resume-host <host>` | none | undoes the latest pause |
+| `cap <host> <n>` | none | no one yet: carried to the seats that subscribe |
+| `priority <n>` | the story | no one yet: carried to the seats that subscribe |
+
+A `cancel` is what the Governor's hold tap on a claimed story writes (actor
+`governor@postern`; the story must be in progress and assigned). Each pass the follower
+reads the cancels since its cursor, kept as `control` in `nudge.json` beside the log; a
+follower with no cursor starts at the head, so a cancel from before it began is history. For
+a story claimed on its own host it closes the story's session as the reaper closes a window,
+gives the claim back, holds the story, sets its run state to `cancelled`, and comments
+`cancelled by <actor> at <time>`. The worktree and branch stay for a Clerk or `mw retry`. A
+cancel of a story that is not claimed, or is claimed on another host, is left and said on the
+follower's stderr. Only the home's log is read, so a pause or a cancel reaches the host whose
+follower and dispatch read that log. `mw status` shows a `PAUSED` line and the runs cancelled
+in the last day.
 
 ## The machines
 
