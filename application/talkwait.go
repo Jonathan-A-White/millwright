@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // talkRecordClass is the clear class of a talk turn, postern's
@@ -369,8 +371,12 @@ func (r *talkWaitRun) finish(ctx context.Context) (TalkWaitReport, error) {
 		if model == "" {
 			model = "unchanged"
 		}
-		r.printf(r.Out, "talk %s turn %d (role %s)\nmodel %s\ncut %s\ntext: %s\nindex-to-print %d ms\n",
-			r.turn.Talk.ID, r.turn.Talk.Turn, r.turn.Role, model, cut, r.turn.Text, report.IndexToPrint.Milliseconds())
+		switched := ""
+		if line, ok := respawnMayorLine(domain.Model(r.turn.Model)); ok {
+			switched = line + "\n"
+		}
+		r.printf(r.Out, "talk %s turn %d (role %s)\nmodel %s\n%scut %s\ntext: %s\nindex-to-print %d ms\n",
+			r.turn.Talk.ID, r.turn.Talk.Turn, r.turn.Role, model, switched, cut, r.turn.Text, report.IndexToPrint.Milliseconds())
 	}
 	if len(r.posts) > 0 {
 		r.printf(r.Out, "new postern message: %d unread, read them with mw postern inbox\n", len(r.posts))

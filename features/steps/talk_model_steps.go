@@ -2,6 +2,8 @@ package steps
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,72 +11,30 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
-	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
+	"github.com/Jonathan-A-White/millwright/infrastructure/postern"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/cucumber/godog"
 )
 
-// talkModelHost is the host the talk model scenarios run on.
-const talkModelHost = "laptop"
-
-// talkModelTmux is the fake terminal: a tmux that knows only the three things
-// mw talk model asks of one. list-windows prints the windows file, capture-pane
-// prints the screen file of the window named by -t, and send-keys appends its
-// arguments, a call to a line, to the keys file. Anything else fails, so that a
-// command the watch should never send is noticed.
-const talkModelTmux = `#!/bin/sh
-dir=$(dirname "$0")
-while [ "$1" = "-L" ]; do shift 2; done
-what=$1
-shift
-case $what in
-list-windows) cat "$dir/windows" ;;
-capture-pane)
-	target=""
-	while [ $# -gt 0 ]; do
-		[ "$1" = "-t" ] && target=$2
-		shift
-	done
-	cat "$dir/screen-$target"
-	;;
-send-keys) echo "$what $*" >>"$dir/keys" ;;
-*) echo "the fake tmux does not do $what" >&2; exit 1 ;;
-esac
-`
-
-// talkModelContext holds the vault a scenario's watch reads the Mayor's acting
-// file in, the directory of the fake tmux, and the clock the watch keeps. As
-// in seat_reap_steps.go, a sleep does not wait: it moves the clock on and lets
-// what the scenario scheduled for that look happen.
+// talkModelContext holds two throwaway keys, as talk_say_steps.go does, so that
+// the spoken switch is encrypted and decrypted with the real cipher; a vault
+// for the talk log; and a fake terminal with the Mayor's window open, which
+// must be handed no key.
 type talkModelContext struct {
-	vault string
-	term  string
-	now   time.Time
+	home        string
+	vault       string
+	mayor       *postern.KeyFile
+	governor    *postern.KeyFile
+	governorKey string
+	backend     *apptest.FakePostern
+	windows     *apptest.FakeWindows
+	window      string
 
-	look   int
-	events map[int][]func() error
-	// typedOnLook is the look the watch typed on, 0 for none.
-	typedOnLook int
-
-	report application.TalkModelReport
-	err    error
-}
-
-// talkModelTerminal is the real tmux adapter on the fake tmux, noting on which
-// look it was typed into.
-type talkModelTerminal struct {
-	*tmux.Windows
-	c *talkModelContext
-}
-
-func (t talkModelTerminal) Type(ctx context.Context, window, text string) error {
-	if err := t.Windows.Type(ctx, window, text); err != nil {
-		return err
-	}
-	t.c.typedOnLook = t.c.look
-	return nil
+	out strings.Builder
+	err error
 }
 
 // InitializeTalkModelScenario registers the steps of features/talk_model.feature.
@@ -82,14 +42,11 @@ func InitializeTalkModelScenario(ctx *godog.ScenarioContext) {
 	c := &talkModelContext{}
 
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
-		*c = talkModelContext{
-			events: map[int][]func() error{},
-			now:    time.Date(2026, 10, 1, 3, 0, 0, 0, time.UTC),
-		}
+		*c = talkModelContext{backend: apptest.NewFakePostern(), windows: apptest.NewFakeWindows()}
 		return ctx, nil
 	})
 	ctx.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
-		for _, dir := range []string{c.vault, c.term} {
+		for _, dir := range []string{c.home, c.vault} {
 			if dir != "" {
 				_ = os.RemoveAll(dir)
 			}
@@ -97,186 +54,160 @@ func InitializeTalkModelScenario(ctx *godog.ScenarioContext) {
 		return ctx, nil
 	})
 
-	ctx.Given(`^a vault where the Mayor acts as "([^"]*)"$`, c.aVaultWhereTheMayorActsAs)
-	ctx.Given(`^the Mayor's acting file now says "([^"]*)"$`, c.theActingFileNowSays)
-	ctx.Given(`^a fake terminal with the window "([^"]*)" named "([^"]*)"$`, c.aFakeTerminalWithTheWindow)
-	ctx.Given(`^the window "([^"]*)" shows an empty input line$`, c.theWindowShowsAnEmptyInputLine)
-	ctx.Given(`^the window "([^"]*)" shows the suggestion "([^"]*)"$`, c.theWindowShowsTheSuggestion)
-	ctx.Given(`^the window "([^"]*)" shows the draft "([^"]*)"$`, c.theWindowShowsTheDraft)
-	ctx.Given(`^the window "([^"]*)" shows a question with no prompt$`, c.theWindowShowsAQuestion)
-	ctx.Given(`^the window "([^"]*)" is working$`, c.theWindowIsWorking)
-	ctx.Given(`^before look (\d+) the window "([^"]*)" shows an empty input line$`, c.beforeLookAnEmptyInputLine)
-	ctx.Given(`^before look (\d+) the window "([^"]*)" shows the draft "([^"]*)"$`, c.beforeLookTheDraft)
+	ctx.Given(`^a throwaway Mayor postern key for the model switch$`, c.aThrowawayMayorKey)
+	ctx.Given(`^a throwaway Governor key for the model switch$`, c.aThrowawayGovernorKey)
+	ctx.Given(`^a vault for the model switch$`, c.aVault)
+	ctx.Given(`^the Mayor's window "([^"]*)" is open in a fake terminal$`, c.theMayorsWindowIsOpen)
+	ctx.Given(`^the postern backend will not take the switch$`, c.theBackendWillNotTakeIt)
 
-	ctx.When(`^mw talk model "([^"]*)" watches, looking every (\d+) seconds for up to (\d+) minutes$`, c.mwTalkModelWatches)
+	ctx.When(`^mw talk model "([^"]*)" is run for talk "([^"]*)" turn (\d+)$`, c.run)
 
-	ctx.Then(`^the keys sent to the terminal are "([^"]*)" and Enter, into "([^"]*)", on look (\d+)$`, c.theKeysSentAre)
-	ctx.Then(`^no key was sent to the terminal$`, c.noKeyWasSent)
-	ctx.Then(`^mw talk model gave up$`, c.mwTalkModelGaveUp)
-	ctx.Then(`^mw talk model is refused saying "([^"]*)"$`, c.mwTalkModelIsRefused)
+	ctx.Then(`^no key was typed into any window$`, c.noKeyTyped)
+	ctx.Then(`^the Governor hears "([^"]*)" on talk "([^"]*)" turn (\d+)$`, c.governorHears)
+	ctx.Then(`^mw talk model printed "([^"]*)"$`, c.printed)
+	ctx.Then(`^mw talk model printed nothing$`, c.printedNothing)
+	ctx.Then(`^mw talk model is refused saying "([^"]*)"$`, c.refusedSaying)
+	ctx.Then(`^nothing was spoken on the talk$`, c.nothingSpoken)
+	ctx.Then(`^the model switch was not logged$`, c.notLogged)
 	ctx.Then(`^the talk log's last line says "([^"]*)"$`, c.theTalkLogsLastLineSays)
-	ctx.Then(`^the talk log's line (\d+) says "([^"]*)"$`, c.theTalkLogsLineSays)
 }
 
-func (c *talkModelContext) aVaultWhereTheMayorActsAs(acting string) error {
+func (c *talkModelContext) aThrowawayMayorKey() error {
+	home, err := os.MkdirTemp("", "mw-talk-model-")
+	if err != nil {
+		return err
+	}
+	c.home = home
+	c.mayor = postern.New(filepath.Join(home, "mayor.key"))
+	return c.mayor.Generate()
+}
+
+func (c *talkModelContext) aThrowawayGovernorKey() error {
+	c.governor = postern.New(filepath.Join(c.home, "governor.key"))
+	if err := c.governor.Generate(); err != nil {
+		return err
+	}
+	pub, _, err := c.governor.PublicKey()
+	c.governorKey = pub
+	return err
+}
+
+func (c *talkModelContext) aVault() error {
 	dir, err := os.MkdirTemp("", "mw-talk-model-vault-")
-	if err != nil {
-		return fmt.Errorf("making a vault: %w", err)
-	}
 	c.vault = dir
-	return c.theActingFileNowSays(acting)
+	return err
 }
 
-func (c *talkModelContext) theActingFileNowSays(acting string) error {
-	return os.WriteFile(filepath.Join(c.vault, application.ActingFileName("mayor")), []byte(acting+"\n"), 0o644)
-}
-
-func (c *talkModelContext) aFakeTerminalWithTheWindow(id, name string) error {
-	dir, err := os.MkdirTemp("", "mw-talk-model-tmux-")
-	if err != nil {
-		return fmt.Errorf("making a fake terminal: %w", err)
-	}
-	c.term = dir
-	if err := os.WriteFile(filepath.Join(dir, "tmux"), []byte(talkModelTmux), 0o755); err != nil {
-		return err
-	}
-	// The pane's pid is left empty: nothing dates the window, and no ps runs.
-	return os.WriteFile(filepath.Join(dir, "windows"), []byte(id+"||"+name+"\n"), 0o644)
-}
-
-// show puts a screen in the window's pane: lines of Claude Code's screen as
-// capture-pane -e prints them, between the rules around its input line.
-func (c *talkModelContext) show(id string, lines ...string) error {
-	const rule = "────────────────────────────────────────"
-	screen := "● Done.\n\n" + rule + "\n" + strings.Join(lines, "\n") + "\n" + rule + "\n  ? for shortcuts\n"
-	return os.WriteFile(filepath.Join(c.term, "screen-"+id), []byte(screen), 0o644)
-}
-
-func (c *talkModelContext) theWindowShowsAnEmptyInputLine(id string) error {
-	return c.show(id, "❯ ")
-}
-
-func (c *talkModelContext) theWindowShowsTheSuggestion(id, suggestion string) error {
-	return c.show(id, "❯ \x1b[2m"+suggestion+"\x1b[0m")
-}
-
-func (c *talkModelContext) theWindowShowsTheDraft(id, draft string) error {
-	return c.show(id, "❯ "+draft)
-}
-
-func (c *talkModelContext) theWindowShowsAQuestion(id string) error {
-	return c.show(id, "Do you want to proceed?", " 1. Yes", " 2. No")
-}
-
-func (c *talkModelContext) theWindowIsWorking(id string) error {
-	return c.show(id, "✻ Thinking… (12s · esc to interrupt)", "", "❯ ")
-}
-
-// before schedules what happens just before a look.
-func (c *talkModelContext) before(look int, event func() error) {
-	c.events[look] = append(c.events[look], event)
-}
-
-func (c *talkModelContext) beforeLookAnEmptyInputLine(look int, id string) error {
-	c.before(look, func() error { return c.theWindowShowsAnEmptyInputLine(id) })
+func (c *talkModelContext) theMayorsWindowIsOpen(id string) error {
+	c.window = id
+	c.windows.HoldsWithID(id, "mayor-2026-10-01-141", time.Time{})
 	return nil
 }
 
-func (c *talkModelContext) beforeLookTheDraft(look int, id, draft string) error {
-	c.before(look, func() error { return c.theWindowShowsTheDraft(id, draft) })
+func (c *talkModelContext) theBackendWillNotTakeIt() error {
+	c.backend.DeliverErr = errors.New("backend said no")
 	return nil
 }
 
-// sleep is the watch's sleep: no waiting, the clock moves on by the interval
-// and what the scenario scheduled for the look it leads to happens.
-func (c *talkModelContext) sleep(_ context.Context, d time.Duration) error {
-	c.look++
-	c.now = c.now.Add(d)
-	for _, event := range c.events[c.look] {
-		if err := event(); err != nil {
-			return fmt.Errorf("making something happen before look %d: %w", c.look, err)
-		}
-	}
-	return nil
-}
-
-func (c *talkModelContext) mwTalkModelWatches(model string, seconds, minutes int) error {
+func (c *talkModelContext) run(chip, talk string, turn int) error {
+	c.out.Reset()
 	files := vault.New(c.vault)
-	windows := tmux.NewWindows(tmux.WithProgram(filepath.Join(c.term, "tmux")), tmux.WithSocket("mw-talk-model-fake"))
-	c.report, c.err = application.TalkModel{
-		Seats:    files,
-		Terminal: talkModelTerminal{Windows: windows, c: c},
-		Log:      files,
-		Seat:     "mayor",
-		Host:     talkModelHost,
-		Model:    domain.Model(model),
-		Interval: time.Duration(seconds) * time.Second,
-		Limit:    time.Duration(minutes) * time.Minute,
-		Now:      func() time.Time { return c.now },
-		Sleep:    c.sleep,
-	}.Run(context.Background())
+	_, c.err = application.TalkModel{
+		Say: application.TalkSay{
+			Postern:     c.backend,
+			Cipher:      postern.NewCipher(c.mayor),
+			Keys:        c.mayor,
+			GovernorKey: c.governorKey,
+		},
+		Log:   files,
+		Seat:  "mayor",
+		Model: domain.Model(chip),
+		Out:   &c.out,
+	}.Run(context.Background(), application.TalkModelRequest{TalkID: talk, Turn: turn})
 	return nil
 }
 
-// keys is every send-keys call the fake tmux was given, a line each.
-func (c *talkModelContext) keys() ([]string, error) {
-	raw, err := os.ReadFile(filepath.Join(c.term, "keys"))
-	if os.IsNotExist(err) {
-		return nil, nil
+func (c *talkModelContext) noKeyTyped() error {
+	if typed := c.windows.Typed(c.window); len(typed) != 0 {
+		return fmt.Errorf("expected nothing typed into the Mayor's window, it was typed %q", typed)
 	}
-	if err != nil {
-		return nil, err
-	}
-	return strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n"), nil
+	return nil
 }
 
-func (c *talkModelContext) theKeysSentAre(text, id string, look int) error {
-	keys, err := c.keys()
+// spoken is the one turn handed to the backend, as the Governor reads it.
+func (c *talkModelContext) spoken() (application.TalkTurn, error) {
+	var none application.TalkTurn
+	if c.err != nil {
+		return none, fmt.Errorf("expected the switch to succeed, got: %w", c.err)
+	}
+	delivered := c.backend.Delivered()
+	if len(delivered) != 1 {
+		return none, fmt.Errorf("expected one turn spoken, got %d", len(delivered))
+	}
+	var record application.PosternPayload
+	if err := json.Unmarshal(delivered[0], &record); err != nil {
+		return none, err
+	}
+	wif, err := c.governor.PrivateKeyWIF()
+	if err != nil {
+		return none, err
+	}
+	plain, _, err := postern.NewCipher(c.governor).Decrypt(wif, record.Ct)
+	if err != nil {
+		return none, fmt.Errorf("the Governor could not decrypt the record: %w", err)
+	}
+	var turn application.TalkTurn
+	if err := json.Unmarshal([]byte(plain), &turn); err != nil {
+		return none, fmt.Errorf("the plaintext %q is not section 20 JSON: %w", plain, err)
+	}
+	return turn, nil
+}
+
+func (c *talkModelContext) governorHears(text, talk string, turn int) error {
+	heard, err := c.spoken()
 	if err != nil {
 		return err
 	}
-	want := []string{"send-keys -t " + id + " -l -- " + text, "send-keys -t " + id + " Enter"}
-	if strings.Join(keys, "\n") != strings.Join(want, "\n") {
-		return fmt.Errorf("expected the keys %q, the terminal was sent %q (%v, %q)", want, keys, c.err, c.report.Said)
-	}
-	if c.typedOnLook != look {
-		return fmt.Errorf("expected the keys to be sent on look %d, they were sent on look %d", look, c.typedOnLook)
-	}
-	if c.err != nil || c.report.Outcome != application.TalkModelTyped {
-		return fmt.Errorf("expected the watch to end typed, it ended %q with %v", c.report.Outcome, c.err)
+	if heard.Talk.ID != talk || heard.Talk.Turn != turn || heard.Role != application.TalkRoleAnswer || heard.Text != text {
+		return fmt.Errorf("expected talk %q turn %d answer %q, got %+v", talk, turn, text, heard)
 	}
 	return nil
 }
 
-func (c *talkModelContext) noKeyWasSent() error {
-	keys, err := c.keys()
-	if err != nil {
-		return err
+func (c *talkModelContext) printed(want string) error {
+	if c.err != nil {
+		return fmt.Errorf("expected the switch to succeed, got: %w", c.err)
 	}
-	if len(keys) != 0 {
-		return fmt.Errorf("expected no key sent to the terminal, it was sent %q", keys)
+	if got := strings.TrimSuffix(c.out.String(), "\n"); got != want && !strings.HasSuffix(got, want) {
+		return fmt.Errorf("expected mw talk model to print %q, it printed %q", want, c.out.String())
 	}
-	return nil
-}
-
-func (c *talkModelContext) mwTalkModelGaveUp() error {
-	if c.report.Outcome != application.TalkModelGaveUp || c.err == nil {
-		return fmt.Errorf("expected mw talk model to give up, it ended with %q and %v", c.report.Outcome, c.err)
+	if strings.Count(c.out.String(), "\n") != 1 {
+		return fmt.Errorf("expected one line printed, it printed %q", c.out.String())
 	}
 	return nil
 }
 
-func (c *talkModelContext) mwTalkModelIsRefused(want string) error {
+func (c *talkModelContext) printedNothing() error {
+	if c.out.Len() != 0 {
+		return fmt.Errorf("expected nothing printed, it printed %q", c.out.String())
+	}
+	return nil
+}
+
+func (c *talkModelContext) refusedSaying(want string) error {
 	if c.err == nil || !strings.Contains(c.err.Error(), want) {
 		return fmt.Errorf("expected mw talk model to be refused saying %q, it ended with %v", want, c.err)
 	}
-	if c.look != 0 {
-		return fmt.Errorf("expected nothing watched, the watch made %d looks", c.look)
+	return nil
+}
+
+func (c *talkModelContext) nothingSpoken() error {
+	if n := len(c.backend.Delivered()); n != 0 {
+		return fmt.Errorf("expected nothing spoken, %d turns were delivered", n)
 	}
 	return nil
 }
 
-// logLines is what the Mayor's talk log holds, a string a line.
 func (c *talkModelContext) logLines() ([]string, error) {
 	raw, err := os.ReadFile(filepath.Join(c.vault, application.TalkLogFileName("mayor")))
 	if err != nil {
@@ -285,9 +216,21 @@ func (c *talkModelContext) logLines() ([]string, error) {
 	return strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n"), nil
 }
 
-// talkLogLine checks one line of the log: dated, named for the watch, then
-// saying what it did.
-func talkLogLine(line, want string) error {
+func (c *talkModelContext) notLogged() error {
+	if _, err := os.Stat(filepath.Join(c.vault, application.TalkLogFileName("mayor"))); !os.IsNotExist(err) {
+		return fmt.Errorf("expected no talk log, got %v", err)
+	}
+	return nil
+}
+
+// theTalkLogsLastLineSays checks the last line of the log: dated, named for
+// the switch, then saying what it did.
+func (c *talkModelContext) theTalkLogsLastLineSays(want string) error {
+	lines, err := c.logLines()
+	if err != nil {
+		return err
+	}
+	line := lines[len(lines)-1]
 	stamp, rest, ok := strings.Cut(line, " talk model ")
 	if _, err := time.Parse(time.RFC3339, stamp); !ok || err != nil {
 		return fmt.Errorf("expected a dated talk model line, got %q", line)
@@ -296,23 +239,4 @@ func talkLogLine(line, want string) error {
 		return fmt.Errorf("expected the talk log to say %q, it says %q", want, line)
 	}
 	return nil
-}
-
-func (c *talkModelContext) theTalkLogsLastLineSays(want string) error {
-	lines, err := c.logLines()
-	if err != nil {
-		return err
-	}
-	return talkLogLine(lines[len(lines)-1], want)
-}
-
-func (c *talkModelContext) theTalkLogsLineSays(n int, want string) error {
-	lines, err := c.logLines()
-	if err != nil {
-		return err
-	}
-	if n < 1 || n > len(lines) {
-		return fmt.Errorf("expected the talk log to have a line %d, it holds %q", n, lines)
-	}
-	return talkLogLine(lines[n-1], want)
 }

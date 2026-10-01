@@ -22,6 +22,7 @@ Feature: mw talk wait
     Then mw talk wait ends within 1 second
     And the wait printed "talk talk-7 turn 3"
     And the wait printed "model sonnet"
+    And the wait printed "hand off, then: bin/respawn-mayor high claude-sonnet-5-5"
     And the wait printed "cut yes"
     And the wait printed "What landed today?"
     And the wait printed an index-to-print time in milliseconds
@@ -31,6 +32,7 @@ Feature: mw talk wait
     When the Governor's turn 1 of talk "talk-8" saying "Hello" is indexed
     Then mw talk wait ends within 1 second
     And the wait printed "model unchanged"
+    And the wait did not print "bin/respawn-mayor"
     And the wait printed "cut no"
 
   Scenario: it ignores records that are not the Governor's talk turns to the Mayor

@@ -2052,28 +2052,28 @@ pane is read and a window closed.
 ## Switching the Mayor's model in a talk
 
 ```sh
-bin/mw talk model sonnet
+bin/mw talk model sonnet --talk talk-7 --turn 3
 ```
 
-`mw talk model opus|sonnet|fable` switches the acting Mayor's session to that
-model from the next turn, so that the Governor's "use Sonnet" takes effect. It
-types `/model <model>` and Enter into the window `.mayor-acting` names, the way
-a person at the keyboard would. The Mayor runs it mid-turn, so it starts a
-zero-token watch detached and returns at once.
-
-The watch types only once the window is idle at an empty input line on two
-looks in a row, by the reaper's rule (`inputLineHoldsDraft`): never over a
-draft, though Claude Code's dim suggested prompt is no draft. It looks every
-`--interval` (2s) and gives up after `--limit` (10m), typing nothing. Arming,
-typing and giving up each append one dated line to `.mayor-talk.log`:
+`mw talk model opus|sonnet|fable|haiku` answers the Governor's model chip in a
+talk. A session cannot change its own model, and typing `/model` into a live
+Claude Code window failed and froze the seat on a dialog, so the switch is a
+fresh Mayor on the chosen model. The command types into no window and starts
+nothing. It maps the chip name to the full model id (`sonnet` is
+`claude-sonnet-5-5`, `opus` `claude-opus-5-5`, `fable` `claude-fable-5-1`,
+`haiku` `claude-haiku-4-5-20251001`), speaks on the talk "Switching to Sonnet:
+a fresh Mayor takes the line in about a minute", appends a dated line to
+`.mayor-talk.log` in the vault, and prints the one line the Mayor runs next:
 
 ```
-2026-10-01T03:00:50Z talk model sonnet: armed; waiting for the mayor's window to be idle at an empty input line to type /model sonnet
-2026-10-01T03:00:51Z talk model sonnet: typed /model sonnet into mayor-2026-10-01-141 (@2)
+hand off, then: bin/respawn-mayor high claude-sonnet-5-5
 ```
 
-`--foreground` watches in the calling process and exits non-zero when it gave
-up. See `features/talk_model.feature`.
+`--talk` and `--turn` name the Governor's turn it answers, as `mw talk wait`
+printed them. An unknown chip name is refused, non-zero, before anything is
+said. If the answer cannot be sent, that is logged and no respawn line is
+printed. `mw talk wait` names the same `hand off, then:` line under a turn that
+changes the model. See `features/talk_model.feature`.
 
 ## Waiting for the Governor's next turn in a talk
 
@@ -2163,7 +2163,7 @@ its own section above or below:
 | --- | --- |
 | `mw talk wait` | Holds the event stream open and ends at the first turn (or end) the Governor sends the Mayor's key; prints it. `--limit` (default 50m, `$MW_TALK_WAIT_LIMIT`), `--min-backoff`, `--max-backoff`. |
 | `mw talk say <text> --talk <id> --turn <n>` | Sends the Mayor's spoken answer, class `talk`, no summary. `--holding` for a short answer while the real one comes, `--end` to end the talk. |
-| `mw talk model opus\|sonnet\|fable` | Switches the acting Mayor's model from the next turn. `--foreground` watches in-process and exits non-zero when it gave up; `--interval`, `--limit`. |
+| `mw talk model opus\|sonnet\|fable\|haiku --talk <id> --turn <n>` | Answers a model chip: speaks the switch, logs it, prints `hand off, then: bin/respawn-mayor high <full id>` for a fresh Mayor. Types into no window. |
 | `mw deputy [--reason text]` | Brings up the Deputy, who does the clerical and orchestration work while the Mayor talks. |
 
 ```sh

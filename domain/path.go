@@ -321,6 +321,22 @@ func KnownModel(m Model) bool {
 	return false
 }
 
+// FullModelID is the model's full id, the one a session is started on, or ""
+// for a model the factory does not know the id of.
+func FullModelID(m Model) string {
+	switch m {
+	case ModelFable:
+		return "claude-fable-5-1"
+	case ModelOpus:
+		return "claude-opus-5-5"
+	case ModelSonnet:
+		return "claude-sonnet-5-5"
+	case ModelHaiku:
+		return "claude-haiku-4-5-20251001"
+	}
+	return ""
+}
+
 // KnownEffort reports whether an effort is one a session can be asked for.
 func KnownEffort(e Effort) bool {
 	switch e {
