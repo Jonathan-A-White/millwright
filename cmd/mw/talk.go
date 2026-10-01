@@ -223,8 +223,9 @@ func newTalkSayCmd() *cobra.Command {
 	var talkID string
 	var turn int
 	var holding, end bool
+	var links []string
 	cmd := &cobra.Command{
-		Use:   "say <text> --talk <id> --turn <n> [--holding|--end]",
+		Use:   "say <text> --talk <id> --turn <n> [--holding|--end] [--link <bead>]...",
 		Short: "Answer the Governor in a talk",
 		Long: "say encrypts <text> to the Governor as postern's docs/protocol.md section 20 turn plaintext and\n" +
 			"hands the record straight to the postern backend (section 9), printing the txid and the\n" +
@@ -233,7 +234,9 @@ func newTalkSayCmd() *cobra.Command {
 			"postern_channel says, and touches no bead and no note, so that it is as quick as it can be.\n\n" +
 			"--talk and --turn name the Governor's turn it answers, as mw talk wait printed them. The role is\n" +
 			"answer; --holding makes it the short answer sent while the real one is still coming, and --end\n" +
-			"the end of the talk. It refuses when postern_governor_key is not set.",
+			"the end of the talk. --link <bead> (repeatable) puts a bead id in the record's links field, for\n" +
+			"the Governor to open from the answer; it is never put in the spoken text. It refuses when\n" +
+			"postern_governor_key is not set.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			keys, err := posternKeys()
@@ -256,7 +259,7 @@ func newTalkSayCmd() *cobra.Command {
 				Now:         posternClock,
 				Out:         cmd.OutOrStdout(),
 			}.Run(cmd.Context(), application.TalkSayRequest{
-				Text: args[0], TalkID: talkID, Turn: turn, Holding: holding, End: end,
+				Text: args[0], TalkID: talkID, Turn: turn, Holding: holding, End: end, Links: links,
 			})
 			return err
 		},
@@ -265,5 +268,6 @@ func newTalkSayCmd() *cobra.Command {
 	cmd.Flags().IntVar(&turn, "turn", 0, "the number of the Governor's turn this answers")
 	cmd.Flags().BoolVar(&holding, "holding", false, "send a short holding answer; the real answer follows")
 	cmd.Flags().BoolVar(&end, "end", false, "send the end of the talk")
+	cmd.Flags().StringArrayVar(&links, "link", nil, "a bead id to carry in the record's links field, not the text (repeatable)")
 	return cmd
 }

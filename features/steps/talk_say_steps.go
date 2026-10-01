@@ -65,6 +65,11 @@ func InitializeTalkSayScenario(ctx *godog.ScenarioContext) {
 		return c.run(application.TalkSayRequest{Text: text, TalkID: talk, Turn: turn, Holding: true, End: true})
 	})
 
+	ctx.When(`^mw talk say "([^"]*)" is run with links "([^"]*)" and "([^"]*)" for talk "([^"]*)" turn (\d+)$`, func(text, first, second, talk string, turn int) error {
+		return c.run(application.TalkSayRequest{Text: text, TalkID: talk, Turn: turn, Links: []string{first, second}})
+	})
+
+	ctx.Then(`^the talk record's links are "([^"]*)" and "([^"]*)"$`, c.linksAre)
 	ctx.Then(`^the talk record was delivered directly, and nothing was broadcast$`, c.deliveredDirectly)
 	ctx.Then(`^the delivered talk record's class is "([^"]*)"$`, c.deliveredClassIs)
 	ctx.Then(`^the delivered talk record carries no summary$`, c.deliveredHasNoSummary)
@@ -189,37 +194,58 @@ func (c *talkSayContext) deliveredAddressing() error {
 }
 
 func (c *talkSayContext) governorDecrypts(talk string, turn int, role, text string) error {
-	payload, err := c.delivered()
+	turnPlain, err := c.plaintext()
 	if err != nil {
 		return err
-	}
-	var record application.PosternPayload
-	if err := json.Unmarshal(payload, &record); err != nil {
-		return err
-	}
-	wif, err := c.governor.PrivateKeyWIF()
-	if err != nil {
-		return err
-	}
-	plain, from, err := postern.NewCipher(c.governor).Decrypt(wif, record.Ct)
-	if err != nil {
-		return fmt.Errorf("the Governor could not decrypt the record: %w", err)
-	}
-	mayor, _, err := c.mayor.PublicKey()
-	if err != nil {
-		return err
-	}
-	if from != mayor {
-		return fmt.Errorf("expected the envelope from the Mayor's key %s, got %s", mayor, from)
-	}
-	var turnPlain application.TalkTurn
-	if err := json.Unmarshal([]byte(plain), &turnPlain); err != nil {
-		return fmt.Errorf("the plaintext %q is not section 20 JSON: %w", plain, err)
 	}
 	if turnPlain.Talk.ID != talk || turnPlain.Talk.Turn != turn || turnPlain.Role != role || turnPlain.Text != text {
 		return fmt.Errorf("expected talk %q turn %d role %q text %q, got %+v", talk, turn, role, text, turnPlain)
 	}
 	return nil
+}
+
+func (c *talkSayContext) linksAre(first, second string) error {
+	turnPlain, err := c.plaintext()
+	if err != nil {
+		return err
+	}
+	if len(turnPlain.Links) != 2 || turnPlain.Links[0] != first || turnPlain.Links[1] != second {
+		return fmt.Errorf("expected links [%s %s], got %v", first, second, turnPlain.Links)
+	}
+	return nil
+}
+
+// plaintext is the delivered record's plaintext as the Governor reads it.
+func (c *talkSayContext) plaintext() (application.TalkTurn, error) {
+	var none application.TalkTurn
+	payload, err := c.delivered()
+	if err != nil {
+		return none, err
+	}
+	var record application.PosternPayload
+	if err := json.Unmarshal(payload, &record); err != nil {
+		return none, err
+	}
+	wif, err := c.governor.PrivateKeyWIF()
+	if err != nil {
+		return none, err
+	}
+	plain, from, err := postern.NewCipher(c.governor).Decrypt(wif, record.Ct)
+	if err != nil {
+		return none, fmt.Errorf("the Governor could not decrypt the record: %w", err)
+	}
+	mayor, _, err := c.mayor.PublicKey()
+	if err != nil {
+		return none, err
+	}
+	if from != mayor {
+		return none, fmt.Errorf("expected the envelope from the Mayor's key %s, got %s", mayor, from)
+	}
+	var turnPlain application.TalkTurn
+	if err := json.Unmarshal([]byte(plain), &turnPlain); err != nil {
+		return none, fmt.Errorf("the plaintext %q is not section 20 JSON: %w", plain, err)
+	}
+	return turnPlain, nil
 }
 
 func (c *talkSayContext) itPrintsTxidAndElapsed() error {

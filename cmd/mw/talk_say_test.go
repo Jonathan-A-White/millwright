@@ -15,7 +15,7 @@ func TestTalkSayHelpRunsAndListsItsFlags(t *testing.T) {
 	if err := root.Execute(); err != nil {
 		t.Fatalf("mw talk say --help: %v", err)
 	}
-	for _, want := range []string{"--talk", "--turn", "--holding", "--end"} {
+	for _, want := range []string{"--talk", "--turn", "--holding", "--end", "--link"} {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("expected the help to name %s, got:\n%s", want, buf.String())
 		}

@@ -2091,6 +2091,7 @@ the same; the Mayor's real answer is sent with `mw talk say` as ever.
 bin/mw talk say "Two stories landed." --talk talk-7 --turn 3
 bin/mw talk say "One moment." --talk talk-7 --turn 3 --holding
 bin/mw talk say "Goodbye." --talk talk-7 --turn 4 --end
+bin/mw talk say "Two stories landed." --talk talk-7 --turn 3 --link mw-x.1 --link mw-x.2
 ```
 
 `mw talk say` encrypts the words to the Governor as postern's `docs/protocol.md`
@@ -2099,7 +2100,11 @@ and `--turn` of the Governor's turn it answers, as `mw talk wait` printed them)
 and delivers the record straight to the backend, whatever `postern_channel`
 says. The record's class is `talk` and it carries no summary, so no word of it
 is pushed or logged. It touches no bead and no note, and prints the txid and the
-milliseconds it took, which the Governor's eight seconds are spent against:
+milliseconds it took, which the Governor's eight seconds are spent against.
+`--link <bead>` (repeatable) adds the ids to a `links` array in the plaintext,
+beside `text` and never in it, so the Governor can open them from the answer
+without hearing them read; with no `--link` the plaintext has no `links` key.
+Postern's section 20 does not yet define `links`: that is the postern side's story.
 
 ```
 talk talk-7 turn 3 (role answer) sent
