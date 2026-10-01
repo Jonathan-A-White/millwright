@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -126,10 +127,7 @@ func newDoctorCmd() *cobra.Command {
 				// The alarm also rides the emergency lane of the event log, so the
 				// Governor's app hears it at once; the push is the alarm proper.
 				if logPath, pathErr := config.EventsLogPath(); pathErr == nil {
-					_, _ = application.EventEmit{
-						Log: eventlog.New(logPath), Now: eventsClock, Emergency: true,
-						Event: events.Event{Kind: events.KindJob, Actor: "doctor@" + host, From: events.JobRunning, To: events.JobFailed, Detail: text},
-					}.Run(ctx)
+					emitDoctorEmergency(ctx, eventlog.New(logPath), eventsClock, host, text, cmd.ErrOrStderr())
 				}
 				return err
 			}
@@ -173,4 +171,17 @@ func runDoctor(cmd *cobra.Command, doc application.Doctor, name string, dryRun b
 		cmd.SilenceErrors = true
 	}
 	return err
+}
+
+// emitDoctorEmergency puts an alarm's text in the emergency lane of log, cut
+// to what an emergency event may carry. A write that is refused or fails is
+// said on errOut: the push is the alarm proper, so it does not fail the cure.
+func emitDoctorEmergency(ctx context.Context, log application.EventLog, now func() time.Time, host, text string, errOut io.Writer) {
+	_, err := application.EventEmit{
+		Log: log, Now: now, Emergency: true,
+		Event: events.Event{Kind: events.KindJob, Actor: "doctor@" + host, From: events.JobRunning, To: events.JobFailed, Detail: events.CutDetail(text)},
+	}.Run(ctx)
+	if err != nil {
+		fmt.Fprintf(errOut, "mw doctor: emergency event: not written: %v\n", err)
+	}
 }

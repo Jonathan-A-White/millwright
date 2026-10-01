@@ -1,9 +1,11 @@
 package application_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -153,5 +155,50 @@ func TestTalkCallAlsoEmitsOneEmergencyEventNamingTheRing(t *testing.T) {
 	}
 	if e := got[0]; e.Lane != events.LaneEmergency || e.Kind != events.KindMessage || e.Actor != "mayor@laptop" || e.Detail != "ring-txid" {
 		t.Fatalf("the event is %+v, want an emergency message by mayor@laptop whose detail is the ring's txid", e)
+	}
+}
+
+// failingLog is an event log that refuses every write.
+type failingLog struct{ apptest.FakeEventLog }
+
+func (*failingLog) Append(context.Context, []events.Event) (uint64, error) {
+	return 0, errors.New("log disk full")
+}
+
+func TestTalkCallPrintsBothNotesWhenTheEmergencyEventAndTheChainFail(t *testing.T) {
+	backend := apptest.NewFakePostern()
+	backend.ChainErr = errors.New("chain down")
+	notes := apptest.NewFakeTracker()
+	if err := notes.SetNote(context.Background(), application.TalkWaitChannelKey, application.PosternChannelChain); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	_, err := application.TalkCall{
+		Postern: backend, Cipher: apptest.NewFakeCipher(),
+		Keys: echoKeys{stubPosternKeys{pubKey: "mayor-pubkey-hex"}}, GovernorKey: "governor-pubkey-hex",
+		FloatSats: 100000, Log: &failingLog{}, Actor: "mayor@laptop", Notes: notes, Out: &out,
+	}.Run(context.Background(), application.TalkCallRequest{Text: "Back now."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); !strings.Contains(got, "emergency event: not written: log disk full") || !strings.Contains(got, "chain: not sent:") {
+		t.Fatalf("output %q should carry both the emergency note and the chain note", got)
+	}
+}
+
+func TestTalkCallAskedForChainThatFailsStillPrintsTheEmergencyNote(t *testing.T) {
+	backend := apptest.NewFakePostern()
+	backend.ChainErr = errors.New("chain down")
+	var out bytes.Buffer
+	_, err := application.TalkCall{
+		Postern: backend, Cipher: apptest.NewFakeCipher(),
+		Keys: echoKeys{stubPosternKeys{pubKey: "mayor-pubkey-hex"}}, GovernorKey: "governor-pubkey-hex",
+		FloatSats: 100000, Log: &failingLog{}, Actor: "mayor@laptop", Out: &out,
+	}.Run(context.Background(), application.TalkCallRequest{Text: "Back now.", Chain: true})
+	if err == nil || !strings.Contains(err.Error(), "chain broadcast failed") {
+		t.Fatalf("expected the chain failure as the error, got %v", err)
+	}
+	if got := out.String(); !strings.Contains(got, "emergency event: not written: log disk full") {
+		t.Fatalf("output %q should still carry the emergency note", got)
 	}
 }

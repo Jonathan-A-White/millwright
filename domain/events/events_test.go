@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Jonathan-A-White/millwright/domain/events"
 )
@@ -229,5 +230,32 @@ func TestABatchIsItsSeqRangeInOrderInOneLane(t *testing.T) {
 				t.Fatalf("expected an error containing %q, got %v", c.want, err)
 			}
 		})
+	}
+}
+
+// An emergency event is sent alone in a record that must stay under postern's
+// payload limit, so its detail has a ceiling; CutDetail brings a longer text
+// down to it.
+func TestEmergencyDetailPastTheCeilingIsRefusedAndCutDetailFitsIt(t *testing.T) {
+	ev := events.Event{Seq: 1, Ts: time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC), Kind: events.KindJob, Actor: "doctor@laptop",
+		From: events.JobRunning, To: events.JobFailed, Lane: events.LaneEmergency}
+	pane := strings.Repeat(strings.Repeat("é", 200)+"\n", 12)
+	ev.Detail = pane
+	if err := ev.Validate(); err == nil || !strings.Contains(err.Error(), "detail") {
+		t.Fatalf("expected an emergency detail of %d bytes to be refused, got %v", len(pane), err)
+	}
+	ev.Detail = events.CutDetail(pane)
+	if err := ev.Validate(); err != nil {
+		t.Fatalf("the cut detail (%d bytes) was refused: %v", len(ev.Detail), err)
+	}
+	if !utf8.ValidString(ev.Detail) || !strings.HasSuffix(ev.Detail, "…") {
+		t.Fatalf("the cut detail should be whole runes ending in an ellipsis, got %q", ev.Detail)
+	}
+	if short := "short"; events.CutDetail(short) != short {
+		t.Fatalf("a short detail should be kept whole")
+	}
+	ev.Lane, ev.Detail = events.LaneNormal, pane
+	if err := ev.Validate(); err != nil {
+		t.Fatalf("a normal event has no ceiling on its detail, got %v", err)
 	}
 }

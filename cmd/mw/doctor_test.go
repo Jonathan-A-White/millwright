@@ -2,12 +2,18 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain/events"
 )
 
 // closedDoctorPort is a host:port nothing listens on, refusing every
@@ -129,4 +135,34 @@ func TestDoctorTableHasTheBeadsStoresCheck(t *testing.T) {
 	if report := out.String(); !strings.Contains(report, "beads-stores") || !strings.Contains(report, "embeddeddolt") {
 		t.Fatalf("expected beads-stores to name the stray store, got:\n%s", report)
 	}
+}
+
+// The doctor's emergency copy of an alarm cuts a long pane to what an
+// emergency event may carry, and a refused or failed write is said, not
+// discarded.
+func TestEmitDoctorEmergencyCutsAPaneAndSaysARefusal(t *testing.T) {
+	log := &apptest.FakeEventLog{}
+	at := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	pane := strings.Repeat(strings.Repeat("x", 200)+"\n", 12)
+	var said bytes.Buffer
+	emitDoctorEmergency(context.Background(), log, func() time.Time { return at }, "laptop", pane, &said)
+	got, _ := log.Since(context.Background(), 0)
+	if len(got) != 1 || got[0].Lane != events.LaneEmergency || got[0].Validate() != nil {
+		t.Fatalf("log holds %+v, want one valid emergency event", got)
+	}
+	if said.Len() != 0 {
+		t.Fatalf("a good emit said %q", said.String())
+	}
+
+	// A host that makes the actor unwritable by the log stands in for a refusal.
+	emitDoctorEmergency(context.Background(), &failingEventLog{}, func() time.Time { return at }, "laptop", "text", &said)
+	if !strings.Contains(said.String(), "emergency event: not written") || !strings.Contains(said.String(), "disk full") {
+		t.Fatalf("a failed emit said %q, want it logged", said.String())
+	}
+}
+
+type failingEventLog struct{ apptest.FakeEventLog }
+
+func (*failingEventLog) Append(context.Context, []events.Event) (uint64, error) {
+	return 0, errors.New("disk full")
 }

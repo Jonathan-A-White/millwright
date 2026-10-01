@@ -154,14 +154,14 @@ func (c TalkCall) Run(ctx context.Context, req TalkCallRequest) (TalkCallReport,
 	}
 
 	report := TalkCallReport{Txid: txid}
-	chainNote := ""
+	var notes strings.Builder
 	if c.Log != nil {
 		_, err := EventEmit{
 			Log: c.Log, Now: c.now, Emergency: true,
 			Event: events.Event{Kind: events.KindMessage, Actor: c.Actor, Detail: txid},
 		}.Run(ctx)
 		if err != nil {
-			chainNote = fmt.Sprintf("emergency event: not written: %v\n", err)
+			fmt.Fprintf(&notes, "emergency event: not written: %v\n", err)
 		}
 	}
 	if wanted, automatic := c.wantsChain(ctx, req); wanted {
@@ -170,9 +170,12 @@ func (c TalkCall) Run(ctx context.Context, req TalkCallRequest) (TalkCallReport,
 		case err == nil:
 			report.ChainTxid = chainTxid
 		case !automatic:
+			if c.Out != nil {
+				fmt.Fprint(c.Out, notes.String())
+			}
 			return report, fmt.Errorf("mw talk call: the ring went direct as %s, but the chain broadcast failed: %w", txid, err)
 		default:
-			chainNote = fmt.Sprintf("chain: not sent: %v\n", err)
+			fmt.Fprintf(&notes, "chain: not sent: %v\n", err)
 		}
 	}
 
@@ -182,7 +185,7 @@ func (c TalkCall) Run(ctx context.Context, req TalkCallRequest) (TalkCallReport,
 		if report.ChainTxid != "" {
 			fmt.Fprintf(c.Out, "chain txid %s\n", report.ChainTxid)
 		}
-		fmt.Fprint(c.Out, chainNote)
+		fmt.Fprint(c.Out, notes.String())
 		fmt.Fprintf(c.Out, "elapsed %d ms\n", report.Elapsed.Milliseconds())
 	}
 	return report, nil

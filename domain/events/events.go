@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"unicode/utf8"
 )
 
 // Event is one transition of one machine, numbered by the home's log: the
@@ -95,6 +96,25 @@ const (
 	LaneFallback  = "fallback"
 )
 
+// MaxEmergencyDetail is the most bytes an emergency event's detail may hold:
+// it is sent alone, in a record of one that must stay under postern's payload
+// limit, and the shipper cannot split it.
+const MaxEmergencyDetail = 2000
+
+// CutDetail is text brought down to MaxEmergencyDetail bytes at a rune
+// boundary, an ellipsis the last, or text itself when it already fits.
+func CutDetail(text string) string {
+	if len(text) <= MaxEmergencyDetail {
+		return text
+	}
+	const ellipsis = "…"
+	cut := text[:MaxEmergencyDetail-len(ellipsis)]
+	for len(cut) > 0 && !utf8.ValidString(cut) {
+		cut = cut[:len(cut)-1]
+	}
+	return cut + ellipsis
+}
+
 func checkLane(lane string) error {
 	switch lane {
 	case LaneNormal, LaneEmergency, LaneFallback:
@@ -104,7 +124,7 @@ func checkLane(lane string) error {
 }
 
 // Validate reports why e is not an event the factory writes: it has no seq or
-// time, an unknown kind or lane, names no bead where its kind needs one, or is
+// time, an unknown kind or lane, an emergency detail past MaxEmergencyDetail, names no bead where its kind needs one, or is
 // not a transition its kind's machine allows. A bead_changed event whose From
 // and To are the same state is a change that left the status alone (a
 // comment, an edited field).
@@ -117,6 +137,9 @@ func (e Event) Validate() error {
 	}
 	if err := checkLane(e.Lane); err != nil {
 		return err
+	}
+	if e.Lane == LaneEmergency && len(e.Detail) > MaxEmergencyDetail {
+		return fmt.Errorf("an emergency event's detail is at most %d bytes, not %d", MaxEmergencyDetail, len(e.Detail))
 	}
 	machine, ok := KindMachine(e.Kind)
 	if !ok {
