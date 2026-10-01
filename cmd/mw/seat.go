@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/reaper"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
@@ -29,6 +31,7 @@ func newSeatCmd() *cobra.Command {
 	seat.AddCommand(newSeatContextCmd())
 	seat.AddCommand(newSeatUpCmd())
 	seat.AddCommand(newSeatReapCmd())
+	seat.AddCommand(newSeatHandoverCmd())
 	return seat
 }
 
@@ -169,6 +172,66 @@ func newSeatReapCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&whenIdle, "when-idle", false, "close once a handoff newer than the window exists and its pane is idle, with no successor needed")
 	cmd.Flags().DurationVar(&interval, "interval", application.DefaultReapInterval, "how long between looks")
 	cmd.Flags().DurationVar(&limit, "limit", application.DefaultReapLimit, "how long to keep looking before giving up")
+	return cmd
+}
+
+// thisWindowName is the name of the tmux window the calling process runs in,
+// empty when it runs in none or tmux cannot say: how a wait knows whether a
+// handover is to its own window.
+func thisWindowName(ctx context.Context) string {
+	here, in, err := seatWindows().ThisWindow(ctx)
+	if err != nil || !in {
+		return ""
+	}
+	return here.Name
+}
+
+// newSeatHandoverCmd builds `mw seat handover`: the old Mayor's last command,
+// which marks event N of the log and hands the seat to the successor already up.
+func newSeatHandoverCmd() *cobra.Command {
+	var at uint64
+	var to string
+	cmd := &cobra.Command{
+		Use:   "handover [--at <seq>] [--to <window>]",
+		Short: "Hand the Mayor's seat to the successor that is already up, at event N of the log",
+		Long: "handover is what the old Mayor runs last, once the successor (bin/respawn-mayor) is up beside it.\n" +
+			"It marks event N of the home's event log, --at (default: the log's head), the last event the old\n" +
+			"Mayor answers. It emits a handover event, and writes the successor's window name and N into the\n" +
+			"acting file (.mayor-acting in the vault), which is what the reaper bin/respawn-mayor armed on the\n" +
+			"old window waits for before it closes it.\n\n" +
+			"The successor is --to, a window name, or by default the newest other window of the Mayor. From\n" +
+			"the event on, mw events wait --for mayor and mw talk wait in the old window end at once with\n" +
+			"'handed over at N', and the old Mayor answers nothing after N; the successor's mw events wait,\n" +
+			"begun before it, ends with 'You hold the mayor seat from event N', and its waits then read from\n" +
+			"N (mw events wait --since N; mw talk wait, from the talk cursor), so nothing the Governor sends\n" +
+			"falls between the two. It works on tmux's default server unless $" + TmuxSocketEnv + " names another.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			dir, err := config.Vault()
+			if err != nil {
+				return err
+			}
+			path, err := config.EventsLogPath()
+			if err != nil {
+				return err
+			}
+			req := application.SeatHandoverRequest{Successor: to}
+			if cmd.Flags().Changed("at") {
+				req.At = &at
+			}
+			_, err = application.SeatHandover{
+				Seat:     application.MayorSeat,
+				Log:      eventlog.New(path),
+				Terminal: seatWindows(),
+				Acting:   vault.New(dir),
+				Now:      eventsClock,
+				Out:      cmd.OutOrStdout(),
+			}.Run(cmd.Context(), req)
+			return err
+		},
+	}
+	cmd.Flags().Uint64Var(&at, "at", 0, "the seq of the last event the old Mayor answers (default: the log's head)")
+	cmd.Flags().StringVar(&to, "to", "", "the successor's window name (default: the newest other window of the Mayor)")
 	return cmd
 }
 
