@@ -138,6 +138,34 @@ Feature: Dispatching the stories this host is ready to work
     And the story "mw-gq6.9" records 2 attempts
     And dispatch reclaimed "mw-gq6.9" for a dead pane with an expired lease
 
+  # mw-gq6.182: a story its close-out refused is evidence, not a dead session.
+  # The claim, the worktree and the branch stay as the session left them until
+  # a person acts (mw retry, a hold, a give-back by hand).
+
+  Scenario: A story its close-out refused is not reclaimed for its dead pane
+    Given a story "mw-gq6.9" of that epic was dispatched and left its worktree with 2 commits
+    And the story "mw-gq6.9" has been tried 2 times
+    And the close-out of "mw-gq6.9" refused it
+    And the session of "mw-gq6.9" has a dead pane and its lease has expired
+    When dispatch runs on "vps" with a cap of 1
+    Then dispatch started nothing, leaving the dead window of "mw-gq6.9" as it was
+    And nothing was closed
+    And the story "mw-gq6.9" is claimed by this host
+    And the story "mw-gq6.9" records 2 attempts
+    And the worktree of "mw-gq6.9" is a checkout of the rig on branch "mw/mw-gq6.9"
+    And the branch of "mw-gq6.9" still has its 2 commits
+    And dispatch said once that "mw-gq6.9" is refused and waits for the Mayor
+    And dispatch leaves with status 0
+
+  Scenario: A crashed session with no refusal recorded is still reclaimed and started again
+    Given a story "mw-gq6.9" of that epic was dispatched and left its worktree with 1 commit
+    And the story "mw-gq6.9" has been tried 1 time
+    And the session of "mw-gq6.9" has a dead pane and its lease has expired
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.9"
+    And the story "mw-gq6.9" records 2 attempts
+    And dispatch reclaimed "mw-gq6.9" for a dead pane with an expired lease
+
   # mw-gq6.107: a dead-pane reclaim gives the claim back but leaves the
   # worktree and branch an earlier attempt cut exactly as they were, so the
   # fresh attempt below finds them in the way of its own cut.

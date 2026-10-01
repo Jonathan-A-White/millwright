@@ -238,6 +238,15 @@ type LandedAlready struct {
 	Target string
 }
 
+// HeldRefused is one story this dispatch found claimed here with a dead pane
+// and a lapsed lease whose close-out had refused it (mw-gq6.182). Its claim,
+// worktree and branch are the evidence of the refusal, so nothing was given
+// back: it waits for a person (mw retry, a hold, a give-back by hand).
+type HeldRefused struct {
+	StoryID string
+	Session string
+}
+
 // DispatchReport is what one dispatch did.
 type DispatchReport struct {
 	Host string
@@ -254,9 +263,12 @@ type DispatchReport struct {
 	// LandedAlready is every dead-pane story found already merged into its
 	// target branch and closed rather than given back.
 	LandedAlready []LandedAlready
-	Started       []Started
-	Passed        []Passed
-	Failed        []Failed
+	// HeldRefused is every dead-pane story left claimed because its close-out
+	// refused it.
+	HeldRefused []HeldRefused
+	Started     []Started
+	Passed      []Passed
+	Failed      []Failed
 	// Notes are what could not be written when a story was found to have used up
 	// its attempts: the story is left as it was, and a later tick tries again.
 	Notes  []string
@@ -946,6 +958,11 @@ func (d Dispatch) refuseLeftover(ctx context.Context, id string, err error) (Sta
 // before this existed — because either sign alone is not enough to act on
 // without a person's word.
 //
+// A story its close-out refused (mw next recorded run=blocked) is left exactly
+// as it is however dead its pane: its claim, worktree and branch are the
+// evidence of the refusal, and giving the claim back would run it again
+// without the Mayor or the Governor having said so (mw-gq6.182).
+//
 // Nothing is cut or removed here: only the window, whose pane is already
 // dead, is closed, and the claim given back. What the story's worktree and
 // branch still hold from the attempt that died is left for the next attempt
@@ -974,6 +991,19 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 		if tip, target, landed := d.landedBranch(ctx, detail); landed {
 			return d.closeLanded(ctx, detail, name, tip, target, report), nil
 		}
+	}
+
+	// Read before ReclaimStory, which gives the claim back as it answers. A
+	// state that cannot be read is no licence to give the claim back.
+	run, err := d.Tracker.StoryState(ctx, id, RunState)
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf(
+			"%s: its session %s has a dead pane, but whether its close-out refused it could not be read, so its claim was kept: %v", id, name, err))
+		return false, nil
+	}
+	if run == RunBlocked {
+		report.HeldRefused = append(report.HeldRefused, HeldRefused{StoryID: id, Session: name})
+		return false, nil
 	}
 
 	reclaimed, err := d.Tracker.ReclaimStory(ctx, id)
@@ -1232,6 +1262,10 @@ func (r DispatchReport) String() string {
 	for _, landed := range r.LandedAlready {
 		fmt.Fprintf(&b, "  closed %s · %s · already landed: its branch tip %s is contained in %s\n", landed.StoryID, landed.Session,
 			shortCommit(landed.Tip), landed.Target)
+	}
+	for _, held := range r.HeldRefused {
+		fmt.Fprintf(&b, "  held    %s · %s · its close-out refused it, so its claim, worktree and branch are kept; it waits for the Mayor (mw retry)\n",
+			held.StoryID, held.Session)
 	}
 	for _, reclaim := range r.Reclaimed {
 		fmt.Fprintf(&b, "  reclaimed %s · %s · dead pane, lease expired %s\n", reclaim.StoryID, reclaim.Session,

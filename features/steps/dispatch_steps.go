@@ -111,6 +111,7 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a story "([^"]*)" of that epic is already running here$`, c.aStoryAlreadyRunningHere)
 	ctx.Given(`^a story "([^"]*)" of that epic was dispatched and left its worktree with (\d+) commits?$`, c.aStoryLeftAWorktreeWithCommits)
 	ctx.Given(`^the vault cannot push the bundle$`, c.theVaultCannotPushTheBundle)
+	ctx.Given(`^the close-out of "([^"]*)" refused it$`, c.theCloseOutRefusedIt)
 	ctx.Given(`^the session of "([^"]*)" has a dead pane and its lease has expired$`, c.theSessionHasADeadPaneAndLeaseExpired)
 	ctx.Given(`^the session of "([^"]*)" has a dead pane but its lease has not expired$`, c.theSessionHasADeadPaneButLeaseNotExpired)
 	ctx.Given(`^a story "([^"]*)" of that epic labelled "([^"]*)" is already running here$`, c.aLabelledStoryAlreadyRunningHere)
@@ -183,6 +184,9 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^dispatch would start, in this order:$`, c.dispatchWouldStartInOrder)
 	ctx.Then(`^the dry run report lists them in that order$`, c.theReportListsThemInOrder)
 	ctx.Then(`^dispatch passed over "([^"]*)", saying: (.+)$`, c.dispatchPassedOver)
+	ctx.Then(`^dispatch started nothing, leaving the dead window of "([^"]*)" as it was$`, c.dispatchStartedNothingNewAt)
+	ctx.Then(`^the branch of "([^"]*)" still has its (\d+) commits?$`, c.theBranchStillHasItsCommits)
+	ctx.Then(`^dispatch said once that "([^"]*)" is refused and waits for the Mayor$`, c.dispatchSaidOnceItIsRefused)
 	ctx.Then(`^dispatch reclaimed "([^"]*)" for a dead pane with an expired lease$`, c.dispatchReclaimedForADeadPane)
 	ctx.Then(`^the leftover branch of "([^"]*)" was saved as a bundle under "([^"]*)" in the vault$`, c.theLeftoverBranchWasSavedAsABundleUnder)
 	ctx.Then(`^the dispatch line for "([^"]*)" names the bundle and the attempt$`, c.theDispatchLineNamesTheBundleAndTheAttempt)
@@ -1492,6 +1496,61 @@ func (c *dispatchContext) theMailSays(words string) error {
 	last := mails[len(mails)-1]
 	if !strings.Contains(last.Subject+"\n"+last.Body, words) {
 		return fmt.Errorf("expected the mail to the Mayor to say %q, got subject %q and body:\n%s", words, last.Subject, last.Body)
+	}
+	return nil
+}
+
+// theCloseOutRefusedIt records what mw next's stop records when it refuses a
+// story's close-out: the run state blocked, with the reason (mw-gq6.182).
+func (c *dispatchContext) theCloseOutRefusedIt(id string) error {
+	return c.tracker.SetStoryState(context.Background(), id, application.RunState, application.RunBlocked,
+		"(tests-fail) the rig's tests fail in the worktree")
+}
+
+// theBranchStillHasItsCommits checks the story's branch was not cleared away
+// and still holds the commits the session left on it.
+func (c *dispatchContext) theBranchStillHasItsCommits(id string, want int) error {
+	said, err := gitSay(c.rig, "rev-list", "--count", application.StartPoint(application.DefaultRemote, "main")+".."+application.StoryBranch(id))
+	if err != nil {
+		return fmt.Errorf("the branch of %s is gone: %w", id, err)
+	}
+	if said != fmt.Sprint(want) {
+		return fmt.Errorf("expected the branch of %s to hold %d commits, got %s", id, want, said)
+	}
+	return nil
+}
+
+// dispatchSaidOnceItIsRefused checks the printed report names the story as
+// refused and waiting for the Mayor exactly once, and that it was not
+// reclaimed.
+func (c *dispatchContext) dispatchSaidOnceItIsRefused(id string) error {
+	report, err := c.dispatched()
+	if err != nil {
+		return err
+	}
+	if len(report.Reclaimed) != 0 {
+		return fmt.Errorf("expected nothing to be reclaimed, got %+v", report.Reclaimed)
+	}
+	printed := report.String()
+	if n := strings.Count(printed, id+" · "); n != 1 || strings.Count(printed, "refused") != 1 || !strings.Contains(printed, "Mayor") {
+		return fmt.Errorf("expected the report to say once that %s is refused and waits for the Mayor, got:\n%s", id, printed)
+	}
+	return nil
+}
+
+// dispatchStartedNothingNewAt checks the report started nothing and the only
+// window the runner knows is still the dead one the story's earlier session
+// left.
+func (c *dispatchContext) dispatchStartedNothingNewAt(id string) error {
+	report, err := c.dispatched()
+	if err != nil {
+		return err
+	}
+	if len(report.Started) != 0 {
+		return fmt.Errorf("expected nothing to be started, got %+v", report.Started)
+	}
+	if names := c.runner.Names(); len(names) != 1 || names[0] != application.SessionName(id) {
+		return fmt.Errorf("expected only the dead window %s, got %q", application.SessionName(id), names)
 	}
 	return nil
 }

@@ -529,6 +529,44 @@ func TestDispatchLeavesADeadPaneCountedRunningUntilItsLeaseExpires(t *testing.T)
 	}
 }
 
+func TestDispatchLeavesARefusedStoryClaimedWhateverItsDeadPaneAndLease(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, runner, _ := aFactory(t)
+	now := time.Date(2026, 9, 24, 23, 30, 0, 0, time.UTC)
+	dispatch.Now = func() time.Time { return now }
+	tracker.Clock = func() time.Time { return now }
+	claimedStory(t, tracker, "mw-gq6.9", 2)
+	if err := tracker.SetLeaseExpires("mw-gq6.9", now.Add(-time.Hour)); err != nil {
+		t.Fatalf("setting the lease: %v", err)
+	}
+	if err := tracker.SetStoryState(ctx, "mw-gq6.9", application.RunState, application.RunBlocked, "(tests-fail) the tests fail"); err != nil {
+		t.Fatalf("recording the refusal: %v", err)
+	}
+	session := startOldSession(t, runner, "mw-gq6.9")
+	runner.Exit(session, 1)
+
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatalf("expected the dispatch to run cleanly, got %v", err)
+	}
+	if report.Running != 1 || len(report.Reclaimed) != 0 || len(report.Started) != 0 {
+		t.Fatalf("expected the refused story left counted running and nothing started, got %+v", report)
+	}
+	if len(report.HeldRefused) != 1 || report.HeldRefused[0].StoryID != "mw-gq6.9" {
+		t.Fatalf("expected the refused story reported held, got %+v", report.HeldRefused)
+	}
+	if closed := runner.Closed(); len(closed) != 0 {
+		t.Fatalf("expected the window left alone, got %q closed", closed)
+	}
+	detail, err := tracker.ShowStory(ctx, "mw-gq6.9")
+	if err != nil {
+		t.Fatalf("showing the story: %v", err)
+	}
+	if detail.Status != apptest.StatusInProgress || detail.Assignee == "" {
+		t.Fatalf("expected the claim kept, got status %q assignee %q", detail.Status, detail.Assignee)
+	}
+}
+
 func TestDispatchLeavesAClaimWithNoWindowAtAllCountedRunningAsBefore(t *testing.T) {
 	ctx := context.Background()
 	dispatch, tracker, _, runner, _ := aFactory(t)
