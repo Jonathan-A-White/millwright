@@ -467,6 +467,8 @@ const PosternMessageKind = "msg"
 // a word of the text, and never on a record the chain carries. Role is the
 // other, and the sender's alone to put: only a call record carries it (§21),
 // the Mayor's ring as "ring", so the backend can push a ring and nothing else.
+// Lane is the third: only an emergency events record carries it, "emergency"
+// beside the sealed copy, so the backend can push an emergency and nothing else.
 type PosternPayload struct {
 	V     int    `json:"v"`     // always 1
 	Kind  string `json:"kind"`  // always PosternMessageKind
@@ -477,6 +479,7 @@ type PosternPayload struct {
 	Ct    string `json:"ct"`    // the BRC-78 ciphertext of the text, base64
 
 	Role    string `json:"role,omitempty"`    // a call record's role, in the clear: "ring"
+	Lane    string `json:"lane,omitempty"`    // an events record's lane, in the clear, only "emergency" (§1, §22)
 	Summary string `json:"summary,omitempty"` // direct records only: what the push says
 }
 

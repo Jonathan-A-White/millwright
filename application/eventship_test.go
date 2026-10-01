@@ -546,6 +546,37 @@ func TestShipSendsAnEmergencyAloneAndAtOnceOnBothRoadsInsideTheWindow(t *testing
 	}
 }
 
+// A push is decided on the clear copy of the lane (postern docs/protocol.md
+// section 1): the emergency record carries it beside class, and no other does.
+func TestShipPutsTheEmergencyLaneInTheClearAndNoOtherLane(t *testing.T) {
+	f := newShipFixture(t)
+	f.add(t, 1)
+	f.run(t) // a normal batch
+	f.at = f.at.Add(100 * time.Millisecond)
+	f.addEmergency(t)
+	f.run(t)
+
+	chain, direct := f.chainPayloads(t), f.backend.Delivered()
+	if len(chain) != 2 || len(direct) != 2 {
+		t.Fatalf("%d records on chain and %d direct, want the normal batch and the emergency on each", len(chain), len(direct))
+	}
+	for name, payloads := range map[string][][]byte{"chain": chain, "direct": direct} {
+		var normal, emergency map[string]any
+		if err := json.Unmarshal(payloads[0], &normal); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(payloads[1], &emergency); err != nil {
+			t.Fatal(err)
+		}
+		if _, has := normal["lane"]; has {
+			t.Errorf("the %s normal batch carries a clear lane %v, want none", name, normal["lane"])
+		}
+		if emergency["lane"] != "emergency" {
+			t.Errorf("the %s emergency's clear lane is %v, want \"emergency\"", name, emergency["lane"])
+		}
+	}
+}
+
 func TestShipSendsTheEmergencyBeforePendingFallbackBatches(t *testing.T) {
 	f := newShipFixture(t)
 	f.backend.ChainErr = errors.New("down")

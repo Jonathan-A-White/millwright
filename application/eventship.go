@@ -384,10 +384,14 @@ func (s *EventShip) seal(evs []events.Event, lane string, now time.Time) ([]byte
 	if err != nil {
 		return nil, err
 	}
-	payload, err := json.Marshal(PosternPayload{
+	record := PosternPayload{
 		V: 1, Kind: PosternMessageKind, Class: EventsClass,
 		To: s.GovernorKey, From: from, Ts: now.Unix(), Ct: ciphertext,
-	})
+	}
+	if lane == events.LaneEmergency {
+		record.Lane = events.LaneEmergency // the clear copy is the one the backend pushes on
+	}
+	payload, err := json.Marshal(record)
 	if err != nil {
 		return nil, fmt.Errorf("building the record's payload: %w", err)
 	}
