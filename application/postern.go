@@ -445,6 +445,14 @@ func posternThreadAndText(class, text string) (thread, display string, isBead bo
 // grist (section 18) among them.
 var PosternClasses = []string{"message", "decision-needed", "landing", "alarm", GristClass}
 
+// The classes of a live card's records: a card (domain.Card sealed) and an
+// update to one (domain.CardUpdate sealed). mw card sends them, never mw
+// postern send, whose text is not a card.
+const (
+	CardClass       = "card"
+	CardUpdateClass = "card-update"
+)
+
 func validPosternClass(class string) bool {
 	for _, c := range PosternClasses {
 		if c == class {
@@ -1603,14 +1611,8 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 		return "", err
 	}
 	if channel == PosternChannelChain {
-		balance, err := s.Postern.Balance(ctx, address)
-		if err != nil {
+		if err := s.underFloat(ctx, "mw postern send", address); err != nil {
 			return "", err
-		}
-		if balance > s.FloatSats {
-			return "", fmt.Errorf(
-				"mw postern send: the postern key's balance is %d satoshis, over the float cap of %d by %d: it refuses to send until the balance is back under the cap",
-				balance, s.FloatSats, balance-s.FloatSats)
 		}
 	}
 
@@ -1871,14 +1873,38 @@ func broadcastRecord(ctx context.Context, backend Postern, keys PosternKeyFile, 
 // channel is how this send travels: Channel, direct when empty; anything
 // else is refused.
 func (s PosternSend) channel() (string, error) {
-	switch channel := strings.ToLower(strings.TrimSpace(s.Channel)); channel {
+	channel, err := posternChannel(s.Channel)
+	if err != nil {
+		return "", fmt.Errorf("mw postern send: %w", err)
+	}
+	return channel, nil
+}
+
+// posternChannel is the channel config names, empty being direct.
+func posternChannel(name string) (string, error) {
+	switch channel := strings.ToLower(strings.TrimSpace(name)); channel {
 	case "", PosternChannelDirect:
 		return PosternChannelDirect, nil
 	case PosternChannelChain:
 		return PosternChannelChain, nil
 	default:
-		return "", fmt.Errorf("mw postern send: %q is not a channel postern knows: %s or %s", s.Channel, PosternChannelDirect, PosternChannelChain)
+		return "", fmt.Errorf("%q is not a channel postern knows: %s or %s", name, PosternChannelDirect, PosternChannelChain)
 	}
+}
+
+// underFloat refuses, as command, when address's balance is over the float
+// cap, which a send on the chain is checked against first.
+func (s PosternSend) underFloat(ctx context.Context, command, address string) error {
+	balance, err := s.Postern.Balance(ctx, address)
+	if err != nil {
+		return err
+	}
+	if balance > s.FloatSats {
+		return fmt.Errorf(
+			"%s: the postern key's balance is %d satoshis, over the float cap of %d by %d: it refuses to send until the balance is back under the cap",
+			command, balance, s.FloatSats, balance-s.FloatSats)
+	}
+	return nil
 }
 
 // recordThreadMessage comments the bead req's thread names with what the

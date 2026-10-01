@@ -95,6 +95,7 @@ func runFeatures(t *testing.T, paths []string) {
 // initializeScenarios registers the step definitions of every feature.
 func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeBriefScenario(ctx)
+	steps.InitializeCardScenario(ctx)
 	steps.InitializeDispatchScenario(ctx)
 	steps.InitializeDoctorScenario(ctx)
 	steps.InitializeFilePlanScenario(ctx)
