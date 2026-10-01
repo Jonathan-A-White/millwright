@@ -18,7 +18,9 @@ import (
 //
 // A story whose Path names no host is not offered to any host. A dispatcher
 // that took one would be guessing, and the cheapest guess to get wrong on a
-// two-host factory is which machine a story belongs on.
+// two-host factory is which machine a story belongs on. A story whose Path
+// names domain.HostAuto is offered to every host: whichever takes it writes
+// its own name in place of "auto" when it claims.
 func (g *Gateway) ReadyForHost(ctx context.Context, host string) ([]application.StoryDetail, error) {
 	if host == "" {
 		return nil, fmt.Errorf("which host are the ready stories for?")
@@ -31,7 +33,7 @@ func (g *Gateway) ReadyForHost(ctx context.Context, host string) ([]application.
 	if err != nil {
 		return nil, fmt.Errorf("reading what is ready on %s: %w", host, err)
 	}
-	return g.onHost(ctx, stories, host)
+	return g.onHost(ctx, stories, host, true)
 }
 
 // ReadyWithLabel implements application.WorkTracker. It is `bd ready` narrowed
@@ -67,7 +69,7 @@ func (g *Gateway) RunningStories(ctx context.Context, host string) ([]applicatio
 	if err != nil {
 		return nil, fmt.Errorf("reading what is running on %s: %w", host, err)
 	}
-	return g.onHost(ctx, stories, host)
+	return g.onHost(ctx, stories, host, false)
 }
 
 // WorkInHand implements application.WorkTracker: everything ready and
@@ -106,15 +108,18 @@ func (g *Gateway) WorkInHand(ctx context.Context) (application.WorkInHand, error
 }
 
 // onHost narrows beads to the stories worked on one host, with each story's
-// epic defaults overlaid.
-func (g *Gateway) onHost(ctx context.Context, stories []bead, host string) ([]application.StoryDetail, error) {
+// epic defaults overlaid. A story that may be worked on any host is admitted
+// only when anyHost says so: what is ready may be taken anywhere, but what is
+// running is on the host that claimed it, which wrote its name on it.
+func (g *Gateway) onHost(ctx context.Context, stories []bead, host string, anyHost bool) ([]application.StoryDetail, error) {
 	details, err := g.overlaid(ctx, stories)
 	if err != nil {
 		return nil, err
 	}
 	var on []application.StoryDetail
 	for _, detail := range details {
-		if merged := detail.Merged().Host; merged == "" || merged != host {
+		merged := detail.Merged().Host
+		if merged == "" || merged != host && !(anyHost && merged == domain.HostAuto) {
 			continue
 		}
 		on = append(on, detail)

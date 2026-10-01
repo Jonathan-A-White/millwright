@@ -129,20 +129,30 @@ type WorkInHand struct {
 	Running []StoryDetail
 }
 
-// ReadyOn is the ready stories whose Path names this host. A story whose Path
-// names no host is not offered to any host.
-func (w WorkInHand) ReadyOn(host string) []StoryDetail { return pathedTo(w.Ready, host) }
+// ReadyOn is the ready stories whose Path names this host, or domain.HostAuto,
+// which any host may take. A story whose Path names no host is not offered to
+// any host.
+func (w WorkInHand) ReadyOn(host string) []StoryDetail {
+	var on []StoryDetail
+	for _, detail := range w.Ready {
+		if merged := detail.Merged().Host; merged == domain.HostAuto || merged != "" && merged == host {
+			on = append(on, detail)
+		}
+	}
+	return on
+}
 
 // RunningOn is the claimed stories whose Path names this host.
 func (w WorkInHand) RunningOn(host string) []StoryDetail { return pathedTo(w.Running, host) }
 
 // Elsewhere is every story, ready and then claimed, whose Path names some host
-// other than this one. A story whose Path names no host is nobody's.
+// other than this one. A story whose Path names no host is nobody's, and one
+// that names domain.HostAuto is not elsewhere: any host may take it.
 func (w WorkInHand) Elsewhere(host string) []StoryDetail {
 	var away []StoryDetail
 	for _, list := range [][]StoryDetail{w.Ready, w.Running} {
 		for _, detail := range list {
-			if on := detail.Merged().Host; on != "" && on != host {
+			if on := detail.Merged().Host; on != "" && on != host && on != domain.HostAuto {
 				away = append(away, detail)
 			}
 		}

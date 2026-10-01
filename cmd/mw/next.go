@@ -9,6 +9,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
@@ -147,6 +148,7 @@ func newNextCmd() *cobra.Command {
 					Cap:         atOnce,
 					MaxAttempts: maxAttempts,
 					Mailbox:     gateway,
+					Load:        hostload.Proc{},
 					Rigs:        rigs,
 					Out:         cmd.OutOrStdout(),
 				}

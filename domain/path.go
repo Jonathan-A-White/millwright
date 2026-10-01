@@ -40,6 +40,11 @@ const (
 	EffortMax    Effort = "max"
 )
 
+// HostAuto is the host a story's Path names when it does not matter which host
+// works it: whichever host is under its cap and its load takes it, and the
+// claim then writes that host in its place.
+const HostAuto = "auto"
+
 // Path is the plan for how one story gets worked: the rig it is worked in, the
 // branch it targets, and the harness, model, effort, formula and host of the
 // session that works it. A story without a rig and a target branch has no path.

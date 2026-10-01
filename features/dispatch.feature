@@ -180,6 +180,83 @@ Feature: Dispatching the stories this host is ready to work
     Then no session was started
     And the story "mw-gq6.2" is not claimed
 
+  # host=auto: it does not matter which host works the story, so whichever is
+  # under its cap and its load takes it. The claim is what writes the host.
+
+  Scenario: A story that may run on any host is taken here when this host is under its cap and its load
+    Given a ready story "mw-gq6.1" of that epic that overrides "host" with "auto"
+    And this host is at load 3.0 of 16 cores
+    When dispatch runs on "vps" with a cap of 4
+    Then one session was started, for "mw-gq6.1"
+    And the story "mw-gq6.1" is claimed by this host
+
+  Scenario: A story that may run on any host is passed over while this host's load has reached its cores
+    Given a ready story "mw-gq6.1" of that epic that overrides "host" with "auto"
+    And this host is at load 16.5 of 16 cores
+    When dispatch runs on "vps" with a cap of 4
+    Then no session was started
+    And the story "mw-gq6.1" is not claimed
+    And dispatch passed over "mw-gq6.1", saying: host=auto and vps is at load 16.5 of 16 cores
+
+  Scenario: A story that may run on any host is still passed over when this host is at its cap
+    Given a ready story "mw-gq6.1" of that epic that overrides "host" with "auto"
+    And a story "mw-gq6.9" of that epic is already running here
+    And this host is at load 3.0 of 16 cores
+    When dispatch runs on "vps" with a cap of 1
+    Then no session was started
+    And the story "mw-gq6.1" is not claimed
+    And dispatch passed over "mw-gq6.1", saying: vps has taken 1 of the 1 sessions it may run at once
+
+  Scenario: A story that names this host is not braked by load
+    Given a ready story "mw-gq6.1" of that epic
+    And this host is at load 16.5 of 16 cores
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.1"
+
+  Scenario: A story that names another host is passed over whatever the tracker offers
+    Given a ready story "mw-gq6.1" of that epic that overrides "host" with "desktop"
+    And the work tracker offers dispatch every ready story, whichever host it names
+    When dispatch runs on "laptop" with a cap of 4
+    Then no session was started
+    And the story "mw-gq6.1" is not claimed
+    And dispatch passed over "mw-gq6.1", saying: it is worked on desktop
+
+  Scenario: The claim of a story that may run on any host writes this host as its host
+    Given a ready story "mw-gq6.1" of that epic that overrides "host" with "auto"
+    And this host is at load 3.0 of 16 cores
+    When dispatch runs on "vps" with a cap of 4
+    Then the story "mw-gq6.1" is claimed by this host
+    And the metadata of the story "mw-gq6.1" names the host "vps"
+
+  Scenario: A story that may run on any host is given back as it was when its session cannot start
+    Given a ready story "mw-gq6.1" of that epic that overrides "host" with "auto"
+    And this host is at load 3.0 of 16 cores
+    And the runner refuses to start anything
+    When dispatch runs on "vps" with a cap of 4
+    Then the story "mw-gq6.1" is not claimed
+    And the metadata of the story "mw-gq6.1" names the host "auto"
+
+  # A claim is a lease (features/claim_lease.feature: "A conditional claim fails
+  # cleanly when another assignee holds the story"), so once the sync has shown
+  # this host the other host's claim, the story is no longer ready here.
+  Scenario: A story that may run on any host and was claimed by the other host is not taken here
+    Given a ready story "mw-gq6.1" of that epic that overrides "host" with "auto"
+    And this host is at load 3.0 of 16 cores
+    And the story "mw-gq6.1" was claimed by the other host before the sync
+    When dispatch runs on "vps" with a cap of 4
+    Then no session was started
+    And the story "mw-gq6.1" is still held by the other host
+    And the metadata of the story "mw-gq6.1" names the host "auto"
+
+  Scenario: A dry run names a story that may run on any host as takeable and writes nothing
+    Given a ready story "mw-gq6.1" of that epic that overrides "host" with "auto"
+    And this host is at load 3.0 of 16 cores
+    When dispatch runs on "vps" with a cap of 4 as a dry run
+    Then dispatch says it would take "mw-gq6.1" (host=auto) here
+    And no session was started
+    And the story "mw-gq6.1" is not claimed
+    And the metadata of the story "mw-gq6.1" names the host "auto"
+
   Scenario: A story whose path names no host is not dispatchable
     Given an epic "mw-abc" whose stories are planned with the path:
       | rig     | millwright |

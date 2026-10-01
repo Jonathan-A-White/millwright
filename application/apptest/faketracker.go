@@ -895,7 +895,8 @@ func (f *FakeTracker) Asked() []string {
 // caught up with a dependency filed moments before (mw-gq6.93) — so a story is
 // offered here open, unassigned and pathed to the host, whatever it still
 // waits on, with every one of its needs carried on it for Dispatch's own guard
-// to read back and judge for itself.
+// to read back and judge for itself. A story pathed to domain.HostAuto is
+// offered to every host.
 func (f *FakeTracker) ReadyForHost(_ context.Context, host string) ([]application.StoryDetail, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -912,7 +913,7 @@ func (f *FakeTracker) ReadyForHost(_ context.Context, host string) ([]applicatio
 		switch {
 		case s.detail.Status != StatusOpen,
 			s.detail.Assignee != "",
-			s.detail.Merged().Host != host:
+			s.detail.Merged().Host != host && s.detail.Merged().Host != domain.HostAuto:
 			continue
 		}
 		detail := s.detail
