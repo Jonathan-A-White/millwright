@@ -177,7 +177,7 @@ naming the three.
 
 1. `beads_sync = "shared"` in the Laptop's config, and bd's own
    `BEADS_DOLT_SERVER_HOST=10.88.0.3`, `BEADS_DOLT_SERVER_PORT` and
-   `BEADS_DOLT_SERVER_PASSWORD` in its `~/.config/mw/dispatch.env` — which every
+   `BEADS_DOLT_PASSWORD` in its `~/.config/mw/dispatch.env` — which every
    timer reads — and in the shell anything runs `bd` from. It keeps no beads of
    its own and never syncs them.
 2. Raise its `cap`, arm `mw-dispatch`, and path stories to `host=laptop`.
