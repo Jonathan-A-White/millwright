@@ -1478,6 +1478,9 @@ the home's postern key is for `/api/messages`, against `/api/prompts`.
 | `mw prompt list` | one line a prompt: name, summary, signature, tab-separated |
 | `mw prompt show <name>` | the whole prompt: summary, signature and body |
 | `mw prompt run <name> [--<flag> <value>]...` | checks the call against the signature (an unknown flag, a value not of its type or a required option left out is refused, naming the signature), then prints `PROMPT /<name>` and the options as given, the body with each `<flag>` replaced by its value, and `FACTS` |
+| `mw prompt run <name> --card --title <title> --item <item>... [--bead-channel <id>]` | sends the answer the Mayor composed from those facts as a live card, as `mw card send` does, with the prompt's name on the card; prints the card's txid, not the facts |
+| `mw card send --title <title> --item '<text>\|<links csv>\|<bead>:<state>'... [--bead-channel <id>]` | posts a `card` record sealed to the Governor as a message is, by `postern_channel`, with no summary; prints its txid, then each item numbered |
+| `mw card update <txid> [--item '<n>. <text>\|...']... [--link <n> <bead>]... [--tick <n>]...` | posts a `card-update` record naming the card: items added or replaced by number, links added (`--link <n>:<bead>` too), items ticked off |
 
 `FACTS` is read from the tracker and its notes and spends no tokens, one section
 each, `none` when empty, a bead always as its id: `WAITING FOR THE GOVERNOR`
@@ -1486,6 +1489,17 @@ closing comment's `HOW TO CHECK IT`, as the view's verify need has it), `OPEN
 CARDS` (the `postern.question.*` notes), `OPEN DEMOS` (open beads labelled
 `demo`) and `HANDS STEPS THAT WAIT` (the `hands.<bead>` steps with no run).
 See `features/prompt.feature`.
+
+A live card is the answer kept current: each item has its text, the beads it
+links to and what it expects of a bead (`open`, `landed`, `verified`, `closed`
+or `answered`), and the card subscribes to those beads and the event kinds the
+expectations need (`bead_changed`, `card_answered`), so the app ticks an item off
+when its event arrives. An item that gives no expectation has one derived from
+its ask: `VERIFIED on X` expects X verified, `Looks good on X` X closed, `Approve
+X` and `Answer X` X answered, `Release X` X open. X is the first bead id after
+the ask that the item links to, else its first link, else the first bead id. A
+state outside those five is refused and nothing is sent. The card's plaintext is
+`domain.Card`, an update's `domain.CardUpdate`. See `features/card.feature`.
 
 ## Making a fresh vault
 

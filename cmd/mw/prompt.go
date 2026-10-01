@@ -115,14 +115,17 @@ func newPromptShowCmd() *cobra.Command {
 // against the signature.
 func newPromptRunCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "run <name> [--<flag> <value>]...",
+		Use:   "run <name> [--<flag> <value>]... | run <name> --card --title <title> --item <item>...",
 		Short: "Print a saved prompt with its options filled, then the facts it answers from",
 		Long: "run checks the call against the prompt's signature (an option it does not name, a value\n" +
 			"that is not of its type or a required option left out is refused, naming the signature), then\n" +
 			"prints PROMPT /<name> and the options as given, the body with each <flag> replaced by its\n" +
 			"value, and FACTS: what waits for the Governor, what landed and is not yet VERIFIED (with\n" +
 			"its HOW TO CHECK IT), the open cards, the open demos and the hands steps that wait.\n" +
-			"Every fact is read from the tracker and its notes: it spends no tokens.",
+			"Every fact is read from the tracker and its notes: it spends no tokens.\n\n" +
+			"run <name> --card --title <title> --item '<text>|<links csv>|<bead>:<state>'... [--bead-channel <id>]\n" +
+			"sends the answer the Mayor composed from those facts as a live card, exactly as mw card send\n" +
+			"does, with the prompt's name recorded on the card; it prints the card's txid, not the facts.",
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
@@ -130,6 +133,11 @@ func newPromptRunCmd() *cobra.Command {
 			}
 			if len(args) == 0 {
 				return fmt.Errorf("mw prompt run: which prompt? give its name; mw prompt list says which there are")
+			}
+			for _, token := range args[1:] {
+				if token == "--card" {
+					return promptRunCard(cmd, args[0], args[1:])
+				}
 			}
 			backend, err := promptsBackend()
 			if err != nil {
