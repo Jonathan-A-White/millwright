@@ -14,7 +14,7 @@
 
 ## Ports
 
-Each adapter: `var _ application.<Port> = ...`.
+Adapters assert `var _ application.<Port>`.
 
 | Port | Declared in | Real adapter | Fake |
 | --- | --- | --- | --- |
@@ -40,7 +40,7 @@ Each adapter: `var _ application.<Port> = ...`.
 | `Notifier`, `HomeMoveHost`, `OldHome` | `application/{millhandtick,homemove}.go` | `infrastructure/{notify/notify,homemove/homemove}.go` | none |
 | `VaultBirth`, `TrackerBirth` | `application/init.go` | `infrastructure/{vault/birth,beads/init}.go` | none |
 | `Landing`, `Checks`, `MergeSlot`, `Holding` | `application/landing.go` | `infrastructure/rig/{landing,checks,slot}.go` | none |
-| `AfterLanding`, `SelfUpdate`, `BuiltMarks` | `application/afterlanding.go`, `application/selfupdate.go` | `infrastructure/rig/{afterlanding,built}.go` | `features/self_update.feature` |
+| `AfterLanding`, `SelfUpdate`, `BuiltMarks`, `BackendBuilds` | `application/afterlanding.go`, `application/selfupdate.go`, `application/backendstage.go` | `infrastructure/rig/{afterlanding,built,backend}.go` | `features/self_update.feature` |
 | Postern, hands | `application/{postern*,hands}.go` | `infrastructure/{postern,hands*,homemove}` | `apptest.Fake{Postern*,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*,HomeMover}` |
 | `Grinder`, `GrindSource`, `GristState`, `GristLock` | `application/grist.go` | `infrastructure/{claude/grind,rig/grinds,hostlock/try}.go`, `infrastructure/grist` | `apptest.Fake{Grinder,Grinds,GristState,GristLock}` |
 
@@ -65,7 +65,7 @@ Each adapter: `var _ application.<Port> = ...`.
 | `Home` | `application/home.go` | `mw home` — `cmd/mw/home.go` | `features/home.feature` |
 | `HomeMove` | `application/homemove.go` | `mw home move` — `cmd/mw/homemove.go` | none: `docs/home-move.md` |
 | `Seat{Context,Up,Reap}` | `application/seat{context,up,reap}.go` | `mw seat context`/`up`/`reap` — `cmd/mw/seat.go` | `features/seat_{context,up,reap}.feature` |
-| `Talk{Model,Say,Wait}` | `application/talkmodel.go`, `application/talksay.go`, `application/talkwait.go` | mw talk say, mw talk wait, mw talk model — `cmd/mw/talk.go` | `features/talk_*.feature` |
+| `Talk{Model,Say,Wait}` | `application/talkmodel.go`, `application/talksay.go`, `application/talkwait.go` | `mw talk say`/`wait`/`model` — `cmd/mw/talk.go` | `features/talk_*.feature` |
 | `Millhand` | `application/millhand.go` | `mw millhand` — `cmd/mw/millhand.go` | `features/millhand.feature` |
 | `Deputy` | `application/deputy.go` | `mw deputy` — `cmd/mw/deputy.go` | `features/deputy.feature` |
 | `MillhandTick` | `application/millhandtick.go` | `mw millhand tick` — `cmd/mw/millhandtick.go` | `features/millhand_tick.feature` |
@@ -79,7 +79,6 @@ Each adapter: `var _ application.<Port> = ...`.
 | `Grist{Key,Grind,Send,Eval}` | `application/grist.go`, `application/gristgrind.go`, `application/gristsend.go`, `application/gristeval.go` | `mw grist key`/`grind`/`send`/`eval` — `cmd/mw/grist.go` | `features/grist{,_send,_eval}.feature` |
 
 `cmd/mw/root.go`: the tree; `cmd/mw/version.go`: `mw version`.
-`features/{ready_stories,claim_lease}.feature`: `WorkTracker`.
 
 ## Test helpers
 
