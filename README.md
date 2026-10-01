@@ -2248,6 +2248,11 @@ elapsed 41 ms
 
 (The `chain txid` line is there only when the ring was broadcast.)
 
+What the phone does: on a direct ring it reads the record from the backend; on a
+ring that was also broadcast it can read the chain record when the backend is out
+of reach. Either way it is the same ring, and it is class `call`, never pushed
+with words.
+
 See `features/talk_call.feature` and `features/talk_wait.feature`.
 
 ## The Talk line and the Deputy

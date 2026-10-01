@@ -118,7 +118,11 @@ _Avoid_: Sub-thread, reply chain
 
 **Talk**:
 A spoken conversation between the Governor and the Mayor on Postern's Talk line, made of turns. It opens with his first turn and ends on End or after a quiet spell.
-_Avoid_: Call, voice chat, session
+_Avoid_: Voice chat, session (a Call is a different thing, below)
+
+**Call**:
+The Governor's Call me (a call request, a `call` record the Mayor's `mw talk wait` prints) and the Mayor's call-back (a ring, sent with `mw talk call`). A ring goes direct to the backend; `--chain`, or a chain-borne last record from the Governor, also broadcasts it on chain for a phone that cannot reach the backend.
+_Avoid_: Page, ping, alert
 
 **Turn**:
 One hold-speak-release from the Governor and the Mayor's spoken answer to it. A turn carries no tool work.
