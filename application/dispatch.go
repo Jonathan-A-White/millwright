@@ -158,6 +158,13 @@ type Dispatch struct {
 	// and whatever it says must be the remote the Worktrees adapter fetches.
 	Remote string
 
+	// Events is the home's event log, read at the start of a pass for a
+	// pause-host event that no resume-host has undone (mw-jrx0s.16): a paused
+	// host's pass claims and starts nothing. A nil Events never pauses; a log
+	// that cannot be read is a note and the pass goes on, since a fault of the
+	// log is no reason to stop the factory.
+	Events EventLog
+
 	// DryRun prints what would be started and writes nothing at all: nothing is
 	// synced, nothing claimed, no worktree made, no formula poured, no session
 	// started.
@@ -278,9 +285,11 @@ type DispatchReport struct {
 	// HeldRefused is every dead-pane story left claimed because its close-out
 	// refused it.
 	HeldRefused []HeldRefused
-	Started     []Started
-	Passed      []Passed
-	Failed      []Failed
+	// Paused is the pause-host event that stopped this pass, nil when none did.
+	Paused  *HostPause
+	Started []Started
+	Passed  []Passed
+	Failed  []Failed
 	// Notes are what could not be written when a story was found to have used up
 	// its attempts: the story is left as it was, and a later tick tries again.
 	Notes  []string
@@ -370,6 +379,7 @@ func (d Dispatch) Run(ctx context.Context) (DispatchReport, error) {
 const (
 	DispatchLogOK           = "ok: "
 	DispatchLogNothingReady = DispatchLogOK + "nothing ready"
+	DispatchLogPaused       = DispatchLogOK + "paused"
 	DispatchLogFault        = "local network fault"
 	DispatchLogFailed       = "failed: "
 )
@@ -386,6 +396,8 @@ func dispatchLogWords(report DispatchReport, err error) string {
 			return DispatchLogFault
 		}
 		return DispatchLogFailed + clippedTo(oneLine(err.Error()), DispatchLogReasonLimit)
+	case report.Paused != nil:
+		return DispatchLogPaused + " by " + report.Paused.Actor
 	case len(report.Started) == 0 && len(report.Passed) == 0:
 		return DispatchLogNothingReady
 	}
@@ -411,6 +423,20 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		return DispatchReport{}, fmt.Errorf("dispatching on %s: the cap on sessions running at once is %d, so nothing could be started; set cap in the config file", d.Host, d.Cap)
 	}
 	report := DispatchReport{Host: d.Host, Cap: d.Cap, DryRun: d.DryRun}
+
+	// A paused host starts nothing, and is not even synced: a pause is a word
+	// that the host is to be left alone until a resume-host says otherwise.
+	if d.Events != nil {
+		pause, paused, err := PausedHost(ctx, d.Events, d.Host)
+		if err != nil {
+			report.Notes = append(report.Notes, err.Error())
+		} else if paused {
+			report.Paused = &pause
+			d.print(fmt.Sprintf("dispatch on %s: paused by %s at %s (control event %d); nothing done until a resume-host event\n",
+				d.Host, pause.Actor, pause.At.UTC().Format(time.RFC3339), pause.Seq))
+			return report, nil
+		}
+	}
 
 	// A dry run writes nothing at all, and a sync writes: it pushes this host's
 	// commits and pulls the other's. So a dry run reads the view this host
