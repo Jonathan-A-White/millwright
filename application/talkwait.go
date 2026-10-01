@@ -140,10 +140,14 @@ type TalkWaitReport struct {
 	HoldingElapsed time.Duration
 	// Mail is the Deputy's new mail to the Mayor.
 	Mail []Message
+	// Postern is the new postern messages for the Mayor's key the wait ended
+	// on, or that came with the turn it ended on.
+	Postern []PosternInboxMessage
 }
 
-// errTalkTurnHeard ends the stream once the turn is in hand.
-var errTalkTurnHeard = errors.New("the Governor's turn was heard")
+// errTalkHeard ends the stream once there is something to report: the
+// Governor's turn, or a new postern message.
+var errTalkHeard = errors.New("the Governor's turn or a new postern message was heard")
 
 // Run waits for the Governor's next talk record, or the limit.
 func (w TalkWait) Run(ctx context.Context) (TalkWaitReport, error) {
@@ -178,7 +182,7 @@ func (w TalkWait) Run(ctx context.Context) (TalkWaitReport, error) {
 	for {
 		err := w.Stream.Events(ctx, run.onEvent)
 		switch {
-		case errors.Is(err, errTalkTurnHeard):
+		case errors.Is(err, errTalkHeard):
 			return run.finish(ctx)
 		case ctx.Err() != nil:
 			if err := run.save(context.WithoutCancel(ctx)); err != nil {
@@ -217,8 +221,12 @@ type talkWaitRun struct {
 	saved     int64
 	connected bool
 
+	// turn is the Governor's turn the wait ends on, nil when it ends on new
+	// postern messages alone; posts are those messages, the ones the wait
+	// paged past before it reached the turn included.
 	turn      *TalkTurn
 	turnSeq   int64
+	posts     []PosternInboxMessage
 	heardAt   time.Time
 	printedAt time.Time
 }
@@ -242,7 +250,10 @@ func (r *talkWaitRun) onEvent(event PosternEvent) error {
 }
 
 // page reads the records since the cursor, oldest first, moving the cursor past
-// each, and stops at the first the Governor sent the Mayor.
+// each, and stops at the first talk record the Governor sent the Mayor. Along
+// the way it notes each postern message for the Mayor's key that the postern
+// inbox has not read; if the page ends on no turn, those messages end the wait,
+// and a turn found on the page always wins over them.
 func (r *talkWaitRun) page(arrived time.Time) error {
 	records, err := r.Postern.Messages(r.ctx, r.cursor)
 	if err != nil {
@@ -259,6 +270,7 @@ func (r *talkWaitRun) page(arrived time.Time) error {
 	if err != nil {
 		return err
 	}
+	inboxCursor := int64(-1) // read once, when a record that could be unread mail turns up
 	for _, record := range records {
 		if record.Seq <= r.cursor {
 			continue
@@ -268,12 +280,64 @@ func (r *talkWaitRun) page(arrived time.Time) error {
 			if ok {
 				r.turn, r.turnSeq, r.heardAt = turn, record.Seq, arrived
 				r.cursor = record.Seq
-				return errTalkTurnHeard
+				return errTalkHeard
+			}
+		} else if record.Class != talkRecordClass && record.To == pubKey {
+			if inboxCursor < 0 {
+				if inboxCursor, err = r.inboxCursor(); err != nil {
+					return err
+				}
+			}
+			if record.Seq > inboxCursor {
+				if message, ok := r.unreadMessage(record, privKey); ok {
+					r.posts = append(r.posts, message)
+				}
 			}
 		}
 		r.cursor = record.Seq
 	}
+	if len(r.posts) > 0 {
+		r.heardAt = arrived
+		return errTalkHeard
+	}
 	return nil
+}
+
+// inboxCursor is the postern inbox's own cursor, the mark of what mw postern
+// inbox has read: a message at or below it is read. It is only read, never
+// moved. Zero when the inbox has never read.
+func (r *talkWaitRun) inboxCursor() (int64, error) {
+	saved, err := r.Memory.Note(r.ctx, PosternCursorKey)
+	if err != nil {
+		return 0, err
+	}
+	if saved == "" {
+		return 0, nil
+	}
+	cursor, err := strconv.ParseInt(saved, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("the postern inbox cursor is %q, not a whole number: %w", saved, err)
+	}
+	return cursor, nil
+}
+
+// unreadMessage reads record, a non-talk record for the Mayor's key, as the
+// postern inbox would. One that would not decrypt is said on Err and passed
+// over, as a talk record that would not is.
+func (r *talkWaitRun) unreadMessage(record PosternRecord, privKey string) (PosternInboxMessage, bool) {
+	text, envelopeFrom, err := r.Cipher.Decrypt(privKey, record.Ciphertext)
+	if err != nil {
+		r.printf(r.Err, "mw talk wait: record %d (%s) would not decrypt: %v\n", record.Seq, record.Txid, err)
+		return PosternInboxMessage{}, false
+	}
+	from, verified, signerChecked := posternVerifySender(envelopeFrom, record.From, record.Signer)
+	thread, display, threadIsBead, attachment, attachments := posternThreadAndText(record.Class, text)
+	return PosternInboxMessage{
+		Seq: record.Seq, Txid: record.Txid, Class: record.Class,
+		From: from, Verified: verified, SignerChecked: signerChecked,
+		Ts: record.Ts, Text: display, Thread: thread, ThreadIsBead: threadIsBead,
+		Attachment: attachment, Attachments: attachments, Re: posternReOf(text),
+	}, true
 }
 
 // governorsTurn reads record as a talk record the Governor sent: its envelope's
@@ -300,24 +364,33 @@ func (r *talkWaitRun) governorsTurn(record PosternRecord, privKey string) (*Talk
 	return &turn, true
 }
 
-// finish prints the turn, then the Deputy's mail, and saves the cursor.
+// finish prints the turn, if there is one, then the new postern messages and the
+// Deputy's mail, and saves the cursor.
 func (r *talkWaitRun) finish(ctx context.Context) (TalkWaitReport, error) {
-	report := TalkWaitReport{Turn: r.turn}
-	report.HoldingSent, report.HoldingElapsed = r.hold(ctx)
-	r.printedAt = r.now()
-	report.IndexToPrint = r.printedAt.Sub(r.heardAt)
-	cut := "no"
-	if r.turn.Cut {
-		cut = "yes"
+	report := TalkWaitReport{Turn: r.turn, Postern: r.posts}
+	if r.turn != nil {
+		report.HoldingSent, report.HoldingElapsed = r.hold(ctx)
+		r.printedAt = r.now()
+		report.IndexToPrint = r.printedAt.Sub(r.heardAt)
+		cut := "no"
+		if r.turn.Cut {
+			cut = "yes"
+		}
+		model := r.turn.Model
+		if model == "" {
+			model = "unchanged"
+		}
+		r.printf(r.Out, "talk %s turn %d (role %s)\nmodel %s\ncut %s\ntext: %s\nindex-to-print %d ms\n",
+			r.turn.Talk.ID, r.turn.Talk.Turn, r.turn.Role, model, cut, r.turn.Text, report.IndexToPrint.Milliseconds())
+		if report.HoldingSent {
+			r.printf(r.Out, "holding sent in %d ms\n", report.HoldingElapsed.Milliseconds())
+		}
 	}
-	model := r.turn.Model
-	if model == "" {
-		model = "unchanged"
-	}
-	r.printf(r.Out, "talk %s turn %d (role %s)\nmodel %s\ncut %s\ntext: %s\nindex-to-print %d ms\n",
-		r.turn.Talk.ID, r.turn.Talk.Turn, r.turn.Role, model, cut, r.turn.Text, report.IndexToPrint.Milliseconds())
-	if report.HoldingSent {
-		r.printf(r.Out, "holding sent in %d ms\n", report.HoldingElapsed.Milliseconds())
+	if len(r.posts) > 0 {
+		r.printf(r.Out, "new postern message: %d unread, read them with mw postern inbox\n", len(r.posts))
+		for _, message := range r.posts {
+			r.printf(r.Out, "  %s, txid %s: %s\n", message.channelLabel(), message.Txid, postFirstLine(message.Text))
+		}
 	}
 
 	ctx = context.WithoutCancel(ctx)
@@ -330,6 +403,17 @@ func (r *talkWaitRun) finish(ctx context.Context) (TalkWaitReport, error) {
 	}
 	report.Mail = mail
 	return report, nil
+}
+
+// postFirstLine is the first line of text that has any words, "(no text)" when
+// none does: a post that is only a file.
+func postFirstLine(text string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			return line
+		}
+	}
+	return "(no text)"
 }
 
 // hold sends the holding reply to the turn in hand, when there is one to send

@@ -515,14 +515,15 @@ func (c *talkWaitContext) printed(text string, want bool) error {
 }
 
 // inbox runs mw postern inbox, or its --unread-count, against the backend,
-// with a cursor note of its own.
+// keeping its cursor in the same notes the wait keeps its own in, as the real
+// ones do under bd.
 func (c *talkWaitContext) inbox(unreadCount bool) (string, error) {
 	var out bytes.Buffer
 	inbox := application.PosternInbox{
 		Postern:     c.client,
 		Cipher:      apptest.NewFakeCipher(),
 		Keys:        c.keys,
-		Memory:      apptest.NewFakeTracker(),
+		Memory:      c.memory,
 		GovernorKey: c.governorKey,
 		Out:         &out,
 	}

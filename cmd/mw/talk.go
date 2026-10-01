@@ -160,6 +160,9 @@ func newTalkWaitCmd() *cobra.Command {
 			"milliseconds from the event to the print, and any new mail the Deputy sent the Mayor since the\n" +
 			"last turn, each message once. mw postern inbox and its --unread-count leave talk records alone, so\n" +
 			"mail-wait never wakes the Mayor a second time for one turn.\n\n" +
+			"It also ends at a new postern message for the Mayor's key, one past the postern inbox's cursor\n" +
+			"(which it only reads), printing 'new postern message' with each one's channel, txid and first\n" +
+			"line; a message already read does not wake it, and a Governor turn that arrives with one wins.\n\n" +
 			"The first run starts at the index's head: a turn from before it ever ran is not waited for. A\n" +
 			"stream that drops is opened again after a pause that doubles from --min-backoff to --max-backoff.\n" +
 			"It ends, saying so, after --limit with no turn: arm it again. $" + TalkWaitLimitEnv + " (seconds)\n" +
