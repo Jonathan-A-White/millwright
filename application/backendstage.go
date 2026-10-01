@@ -96,7 +96,7 @@ type BackendLanding struct {
 // step. This does that clerical half: it builds the backend at the landed commit
 // on the home, and files a new hitl bead under the landed story's epic whose one
 // hands step swaps the live binary — the already-live check, one backup, the
-// install, the restart, four tries at the health and inbox checks, and the way
+// install, the restart, four tries at the health URL, and the way
 // back — and sends the Governor one message on that bead's channel.
 //
 // It never restarts a service, installs a binary or touches the live one: the
@@ -334,8 +334,8 @@ func backendBeadText(l BackendLanding, cfg BackendRig, short, out string) string
 	return fmt.Sprintf("%s landed (%s) with a change under %s/ of %s, but the landing ships the app only: the live backend, %s, "+
 		"is still the one built before it, so what the story added there is not live.\n\n"+
 		"mw built %s at %s and staged it at %s. One hands step on this bead swaps it in: it does nothing if the staged binary is already live, "+
-		"keeps one backup of the old one, installs, restarts %s, and reads %s and the Mayor's inbox up to four times; "+
-		"if it cannot, it puts the old binary back by itself. The step runs only when the Governor approves it.",
+		"keeps one backup of the old one, installs, restarts %s, and reads %s up to four times; "+
+		"if it never answers, it puts the old binary back by itself. The step runs only when the Governor approves it.",
 		l.Story, l.Title, cfg.Dir, l.Rig, cfg.Live, l.Rig, short, out, cfg.Service, cfg.Health)
 }
 
@@ -343,23 +343,40 @@ func backendBeadText(l BackendLanding, cfg BackendRig, short, out string) string
 // exactly what the Mayor wrote by hand for postern's presence mark (mw-j0f2d.35).
 // It is text for a person to approve and the factory to run once they do; nothing
 // in the factory runs it unapproved.
+//
+// The step is run by mw postern inbox --apply, which holds the inbox's lock for
+// as long as it runs, and the backend it restarts is the one that pass reads, so
+// the step reads neither: a configured check that reads the inbox is left out
+// (checkReadsInbox). What puts the old backend back is the backend not answering
+// its health URL, and only that: a new backend that answers is not replaced
+// because a check of the host's own failed or hung, which only ends the step in
+// failure for the Governor to see (mw-gq6.209).
 func BackendSwap(cfg BackendRig, host, short, out string) domain.HandsStep {
 	live, service := shQuote(cfg.Live), shQuote(cfg.Service)
 	check := ""
-	if strings.TrimSpace(cfg.Check) != "" {
-		check = " && " + strings.TrimSpace(cfg.Check)
+	if command := strings.TrimSpace(cfg.Check); command != "" && !checkReadsInbox(command) {
+		check = fmt.Sprintf(`if ! timeout %d sh -c %s; then echo backend %s answers %s but its check failed: leaving it live; exit 1; fi; `,
+			BackendCheckSeconds, shQuote(command), short, shQuote(cfg.Health))
 	}
 	run := fmt.Sprintf(`set -e; l=%s; n=%s; b=%s; [ -x "$n" ]; `+
 		`for f in %s/"$(basename "$l")"-*; do if [ -f "$f" ] && [ "$f" -nt "$n" ] && cmp -s "$f" "$l"; then echo live backend "${f##*-}" is newer than %s: nothing was changed by this tap; exit 0; fi; done; `+
 		`if cmp -s "$l" "$n"; then echo backend %s is already live: nothing was changed by this tap; exit 0; fi; `+
 		`[ -e "$b" ] || cp -p "$l" "$b"; install -m 755 "$n" "$l"; systemctl --user restart %s; sleep 8; ok=0; `+
-		`for i in 1 2 3 4; do if curl -fsS -m 20 %s%s; then ok=1; break; fi; echo try $i failed, waiting 15 s; sleep 15; done; `+
-		`if [ $ok = 1 ]; then echo backend %s is live and answering; `+
+		`for i in 1 2 3 4; do if curl -fsS -m 20 %s; then ok=1; break; fi; echo try $i failed, waiting 15 s; sleep 15; done; `+
+		`if [ $ok = 1 ]; then %secho backend %s is live and answering; `+
 		`else echo FAILED after 4 tries: putting the old backend back; install -m 755 "$b" "$l"; systemctl --user restart %s; exit 1; fi`,
 		live, shQuote(out), shQuote(cfg.Live+".prev-before-"+short), shQuote(cfg.Stage), short, short, service, shQuote(cfg.Health), check, short, service)
 	wayBack := fmt.Sprintf("install -m 755 %s %s; systemctl --user restart %s", shQuote(cfg.Live+".prev-before-"+short), live, service)
 	return domain.HandsStep{ID: "backend-" + short, Host: host, As: domain.HandsAsUser, Run: run, WayBack: wayBack}
 }
+
+// BackendCheckSeconds is how long a rig's own check may run before the swap step
+// cuts it off and counts it failed.
+const BackendCheckSeconds = 60
+
+// checkReadsInbox reports whether a check command reads the postern inbox, which
+// the swap step is run from and may not wait on.
+func checkReadsInbox(command string) bool { return strings.Contains(command, "postern inbox") }
 
 // shQuote is s as one word of a shell command line.
 func shQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }

@@ -158,7 +158,7 @@ func TestALandingThatChangedTheServerStagesTheBinaryAndWritesTheSwapAsAHandsStep
 		"the one backup":         `[ -e "$b" ] || cp -p`,
 		"the install":            "install -m 755",
 		"the restart":            "systemctl --user restart 'postern-backend'",
-		"the health check":       "curl -fsS -m 20 'https://postern.example.org/api/healthz' && /home/j/.local/bin/mw postern inbox --unread-count",
+		"the health check":       "curl -fsS -m 20 'https://postern.example.org/api/healthz'; then ok=1",
 		"the four tries":         "for i in 1 2 3 4",
 		"the roll back":          "putting the old backend back",
 	} {
