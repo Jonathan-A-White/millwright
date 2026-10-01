@@ -30,7 +30,9 @@ const DefaultEventWaitEvery = time.Second
 // old session's wait is told "handed over at N" after the events it
 // subscribed to up to N, and none past it; the successor's wait, begun
 // before the handover, is told it holds the seat from N, with the events
-// past N; a successor's wait begun at or after N does not see it.
+// past N; a successor's wait begun at or after N does not see it. That holds
+// for a wait given --since; a wait begun at the head with no --since takes the
+// seat from any handover appended after it began, whatever its N.
 type EventWait struct {
 	Log EventLog
 	// Subscription is the seat and the kinds that end the wait.
@@ -92,6 +94,11 @@ func (w EventWait) Run(ctx context.Context) ([]events.Event, error) {
 		cursor = head
 	}
 	start := cursor
+	// A wait begun at the head (no --since) reads only events appended after it
+	// began, so a handover it reads is its own to take even when it marked the
+	// head (At == start, a quiet log: mw-gq6.210). A wait given --since N
+	// ignores a handover that marked N or earlier.
+	atHead := w.Since == nil
 	watch := HandoverWatch{Seat: w.Subscription.Seat, Self: w.Self}
 	for {
 		head, err := w.Log.Head(ctx)
@@ -107,7 +114,7 @@ func (w EventWait) Run(ctx context.Context) ([]events.Event, error) {
 						if _, _, ends := watch.Ends([]events.Event{ev}); ends {
 							return w.handedOver(ev, h, matched), nil
 						}
-						if h.At > start && taking == nil {
+						if (atHead || h.At > start) && taking == nil {
 							ev := ev
 							taking, took = &ev, h
 						}

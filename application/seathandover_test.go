@@ -3,6 +3,7 @@ package application_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -285,6 +286,74 @@ func TestAnOldWaitArmedAgainSinceBeforeTheHandoverIsTold(t *testing.T) {
 	var out bytes.Buffer
 	got, err := mayorWait(log, oldMayorWindow, &at, nil, &out).Run(context.Background())
 	if err != nil || len(got) != 2 {
+		t.Fatalf("got %+v, %v", got, err)
+	}
+	if !strings.Contains(out.String(), "handed over at 2") {
+		t.Errorf("printed %q", out.String())
+	}
+}
+
+// The first live handover (mw-gq6.210): the successor armed its wait at head N
+// with nothing since, and the handover marked At = N, landing as N+1. A wait
+// begun at the head takes the seat from a handover appended after it began.
+func TestASuccessorWaitArmedAtTheHeadTakesTheSeatFromAHandoverThatMarkedTheHead(t *testing.T) {
+	log := logWith(t, jobEvent, mailEvent) // head 2
+	var out bytes.Buffer
+	polls := 0
+	sleep := func(context.Context, time.Duration) error {
+		if polls++; polls > 3 {
+			return errors.New("the wait is still going: it never took the seat")
+		}
+		if polls == 1 {
+			handoverAt(t, log, 2) // marks the head the wait began at; lands as 3
+		}
+		return nil
+	}
+	got, err := mayorWait(log, newMayorWindow, nil, sleep, &out).Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Kind != events.KindHandover || got[0].Seq != 3 {
+		t.Fatalf("returned %+v, want only the handover at 3", got)
+	}
+	if !strings.Contains(out.String(), "You hold the mayor seat from event 2") {
+		t.Errorf("printed %q", out.String())
+	}
+}
+
+// A wait given --since N keeps its rule: a handover that marked N is the
+// one the wait was armed past, and it is ignored.
+func TestAWaitGivenSinceNIgnoresAHandoverThatMarkedN(t *testing.T) {
+	log := logWith(t, jobEvent, mailEvent)
+	handoverAt(t, log, 2) // seq 3
+	at := uint64(2)
+	var out bytes.Buffer
+	polls := 0
+	sleep := func(context.Context, time.Duration) error {
+		if polls++; polls == 1 {
+			handoverAt(t, log, 2) // a second one marking N, seq 4: still ignored
+			return nil
+		}
+		appendAll(t, log, events.Event{Kind: events.KindMail, Bead: "mw-m2", Detail: "mayor"})
+		return nil
+	}
+	got, err := mayorWait(log, newMayorWindow, &at, sleep, &out).Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Bead != "mw-m2" || strings.Contains(out.String(), "hold the") {
+		t.Fatalf("returned %+v, printed %q: the handovers that marked N are not the wait's to take", got, out.String())
+	}
+}
+
+// The old window's wait, armed at the head with nothing since, is still told
+// "handed over at N" when the handover marks the head.
+func TestAnOldWaitArmedAtTheHeadIsToldHandedOverAtTheHead(t *testing.T) {
+	log := logWith(t, jobEvent, mailEvent)
+	var out bytes.Buffer
+	sleep := func(context.Context, time.Duration) error { handoverAt(t, log, 2); return nil }
+	got, err := mayorWait(log, oldMayorWindow, nil, sleep, &out).Run(context.Background())
+	if err != nil || len(got) != 1 || got[0].Kind != events.KindHandover {
 		t.Fatalf("got %+v, %v", got, err)
 	}
 	if !strings.Contains(out.String(), "handed over at 2") {
