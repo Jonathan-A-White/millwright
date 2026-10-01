@@ -342,6 +342,39 @@ func TestASecondTickAfterAnnouncingTypesNothingAgain(t *testing.T) {
 	}
 }
 
+func TestTheLineCountsTheNewMessagesNotTheWholeInbox(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	var ids, old []string
+	for i := 0; i < 231; i++ {
+		old = append(old, fmt.Sprintf("mw-old%03d", i))
+	}
+	ids = append(ids, old...)
+	ids = append(ids, "mw-new1", "mw-new2")
+	f.inbox(ids...)
+	f.write("state/announced", strings.Join(old, "\n")+"\n", 0o644)
+
+	f.tick()
+
+	f.typed(fmt.Sprintf(announcement, 2))
+}
+
+// With no record of what was announced, every id in the inbox is new: this is
+// the one way the line says the whole inbox's size (mw-gq6.179).
+func TestWithNoRecordOfAnnouncedMailEveryIdIsNew(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("idle", actingByID)
+	var ids []string
+	for i := 0; i < 233; i++ {
+		ids = append(ids, fmt.Sprintf("mw-old%03d", i))
+	}
+	f.inbox(ids...)
+
+	f.tick()
+
+	f.typed(fmt.Sprintf(announcement, 233))
+}
+
 func TestTextOnTheInputLineIsNeverTypedOverAndTheIdsAreNotRecorded(t *testing.T) {
 	f := newFactory(t)
 	f.mayor("has-text", actingByID)
