@@ -519,6 +519,23 @@ a comment on the story and the `Landed:` mail to the Mayor, so that they know
 this host's binary is old; success is `after landing: make build: ok` in the
 report and the mail. A rig the table does not name runs nothing.
 
+A rig whose backend is a program the home runs (postern's `server/`) names it in a
+`[backend.<rig>]` table, and a landing that changed it is not left half deployed
+(mw-gq6.185). `mw next` asks, before it merges, whether the story's own commits
+changed anything under the table's `dir`; if they did, then once the story is
+landed — on the home, at once; on any other host, by leaving a `backend.pending.*`
+note that the home's next `mw dispatch` or `mw millhand tick` picks up — mw builds
+the backend at the landed commit in a throwaway worktree (`build`, run in `dir`,
+`{out}` where the binary goes), leaves it at `stage/<name of live>-<short commit>`,
+files a new open `hitl` bead under the landed story's epic, writes the swap on it as
+a hands step (nothing if the staged binary is already live; one backup of the old
+one; install; restart; the health URL and `check` up to four times; the old binary
+put back if they never answer) and sends the Governor one message on that bead's
+channel. mw never restarts the service and never touches `live`: the Governor's Approve
+tap on the card is what runs the swap. A build or filing that fails is tried again by
+each tick, three tries in all, and then said on the landed story. A landing that left
+`dir` alone does nothing new.
+
 Only then: the worktree and its branch go, one line is appended to the seat's
 ledger, that line and the seat's memory of the rig are committed in the vault,
 the story is closed with the reason, `mw sync` brings the hosts level so that
@@ -748,6 +765,15 @@ millwright = "make test"           # how a close-out asks this rig if it is gree
 
 [after_landing]
 millwright = "make build"          # run in this rig's checkout once a landing has moved it (default: nothing)
+
+[backend.postern]                  # a rig whose backend the home runs; leave it out for none (see mw next)
+dir = "server"                     # a landing that changed anything here stages the backend (default server)
+build = "go build -o {out} ./cmd/postern"  # run in dir of a throwaway worktree; {out} is where the binary goes
+stage = "/home/jwhite/.local/share/postern"   # built binaries wait here as <name of live>-<short commit>
+live = "/home/jwhite/.local/bin/postern"      # the binary the service runs; only the approved hands step touches it
+service = "postern-backend"        # its systemd user unit
+health = "https://postern.example.org/api/healthz"
+check = "/home/jwhite/.local/bin/mw postern inbox --unread-count"  # optional; must also succeed after the swap
 
 [hands_hosts]                      # how this host reaches another host a hands step is for; leave it out to run steps for this host only
 laptop = "ssh laptop"              # an ssh prefix, split on whitespace
