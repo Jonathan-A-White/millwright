@@ -10,12 +10,17 @@ import (
 	"strings"
 )
 
-// remoteCacheGlob finds every git-remote-cache bare clone Dolt keeps beside a
-// vault's embedded database, one per Dolt remote a host has ever pushed to or
-// pulled from: .beads/embeddeddolt/<db>/.dolt/git-remote-cache/<hash>/repo.git.
-// Each `bd dolt push` or `pull` leaves a new full pack there; it is the one
-// thing `bd gc` never touches.
-const remoteCacheGlob = "embeddeddolt/*/.dolt/git-remote-cache/*/repo.git"
+// remoteCacheGlobs find every git-remote-cache bare clone Dolt keeps beside a
+// vault's database, one per Dolt remote a host has ever pushed to or pulled
+// from: .beads/<store>/<db>/.dolt/git-remote-cache/<hash>/repo.git. The store is
+// embeddeddolt on a host whose bd opens the database itself, and dolt on a host
+// that serves beads (mw-43v9x.21); each `bd dolt push` or `pull` leaves a new
+// full pack or a run of loose objects there, and it is the one thing `bd gc`
+// never touches.
+var remoteCacheGlobs = []string{
+	"embeddeddolt/*/.dolt/git-remote-cache/*/repo.git",
+	"dolt/*/.dolt/git-remote-cache/*/repo.git",
+}
 
 // remoteCacheRepackThreshold is how many packs a git-remote-cache clone may
 // hold before a sync repacks it on its own, between the daily GCs: on a host
@@ -29,8 +34,19 @@ const remoteCacheRepackThreshold = 8
 // remoteCacheRepackThreshold packs: a handful of large `bd dolt push`/pull
 // cycles can carry the cache well past this long before it has piled up
 // enough packs to trip the count-based rule, which is what let it cross the
-// doctor's own byte budget between GCs before this existed.
+// doctor's own byte budget between GCs before this existed. It only counts
+// when there are at least two packs to collapse: one settled pack has nothing
+// left to gain from a repack, and repacking it on every sync costs a minute.
 const remoteCacheRepackThresholdBytes = 256_000_000
+
+// remoteCacheLooseThresholdBytes is how many bytes of loose objects a
+// git-remote-cache clone may hold before a sync repacks it. A host that only
+// pulls (a served-mode vault's `bd dolt pull`) never gains a pack: every fetch
+// lands as loose objects, a quarter of a megabyte apiece, which is what let the
+// Laptop's cache grow by hundreds of megabytes a day (mw-gq6.181). Bytes, not a
+// count, because a repack leaves behind the few unreachable loose objects it
+// cannot pack, and those must not keep it looking crowded forever.
+const remoteCacheLooseThresholdBytes = 64_000_000
 
 // repackRemoteCaches repacks every git-remote-cache bare clone under the
 // vault's .beads, low-memory (pack.threads=1, a 32m window) to fit a host as
@@ -56,9 +72,13 @@ func (g *Gateway) repackCrowdedRemoteCaches(ctx context.Context) error {
 // Every cache found is tried even after one fails, so that one broken cache
 // does not hide another's failure; their errors come back joined.
 func (g *Gateway) repackRemoteCachesMatching(ctx context.Context, crowded func(repo string) (bool, error)) error {
-	matches, err := filepath.Glob(filepath.Join(g.vault, beadsDir, remoteCacheGlob))
-	if err != nil {
-		return fmt.Errorf("finding the git-remote-cache under %s: %w", g.vault, err)
+	var matches []string
+	for _, glob := range remoteCacheGlobs {
+		found, err := filepath.Glob(filepath.Join(g.vault, beadsDir, glob))
+		if err != nil {
+			return fmt.Errorf("finding the git-remote-cache under %s: %w", g.vault, err)
+		}
+		matches = append(matches, found...)
 	}
 	var failures []error
 	for _, repo := range matches {
@@ -80,11 +100,13 @@ func (g *Gateway) repackRemoteCachesMatching(ctx context.Context, crowded func(r
 }
 
 // isRemoteCacheCrowded reports whether a git-remote-cache clone has grown
-// past remoteCacheRepackThreshold packs or remoteCacheRepackThresholdBytes of
-// packs — either is enough on its own, since a handful of large pushes can
-// cross the byte threshold long before the pack count does, and a great many
-// small ones can cross the pack-count threshold long before the byte total
-// does.
+// past remoteCacheRepackThreshold packs, past remoteCacheLooseThresholdBytes
+// of loose objects, or — with at least two packs to collapse — past
+// remoteCacheRepackThresholdBytes of packs. Any one is enough on its own: a
+// handful of large pushes can cross the byte threshold long before the pack
+// count does, a great many small ones can cross the pack-count threshold long
+// before the byte total does, and a host that only pulls piles up loose
+// objects without ever adding a pack.
 func isRemoteCacheCrowded(repo string) (bool, error) {
 	count, err := packCount(repo)
 	if err != nil {
@@ -93,11 +115,48 @@ func isRemoteCacheCrowded(repo string) (bool, error) {
 	if count > remoteCacheRepackThreshold {
 		return true, nil
 	}
+	loose, err := looseBytes(repo)
+	if err != nil {
+		return false, err
+	}
+	if loose > remoteCacheLooseThresholdBytes {
+		return true, nil
+	}
+	if count < 2 {
+		return false, nil
+	}
 	size, err := packBytes(repo)
 	if err != nil {
 		return false, err
 	}
 	return size > remoteCacheRepackThresholdBytes, nil
+}
+
+// looseBytes totals the size of the loose objects a bare git-remote-cache
+// clone holds: the files under objects/<two hex digits>/.
+func looseBytes(repo string) (int64, error) {
+	dirs, err := os.ReadDir(filepath.Join(repo, "objects"))
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	for _, dir := range dirs {
+		if !dir.IsDir() || len(dir.Name()) != 2 {
+			continue
+		}
+		entries, err := os.ReadDir(filepath.Join(repo, "objects", dir.Name()))
+		if err != nil {
+			return 0, err
+		}
+		for _, entry := range entries {
+			info, err := entry.Info()
+			if err != nil {
+				return 0, err
+			}
+			total += info.Size()
+		}
+	}
+	return total, nil
 }
 
 // packCount counts the pack files a bare git-remote-cache clone holds.
