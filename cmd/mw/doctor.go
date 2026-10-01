@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain/events"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
+	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
 
 	"github.com/spf13/cobra"
 )
@@ -121,6 +123,14 @@ func newDoctorCmd() *cobra.Command {
 			mayorStale.Limit = time.Duration(staleMinutes) * time.Minute
 			mayorStale.Alarm = func(ctx context.Context, text string) error {
 				_, err := handsPush{gateway: mwGateway(vault, host)}.Run(ctx, application.PosternSendRequest{Class: "alarm", Text: text})
+				// The alarm also rides the emergency lane of the event log, so the
+				// Governor's app hears it at once; the push is the alarm proper.
+				if logPath, pathErr := config.EventsLogPath(); pathErr == nil {
+					_, _ = application.EventEmit{
+						Log: eventlog.New(logPath), Now: eventsClock, Emergency: true,
+						Event: events.Event{Kind: events.KindJob, Actor: "doctor@" + host, From: events.JobRunning, To: events.JobFailed, Detail: text},
+					}.Run(ctx)
+				}
 				return err
 			}
 			tmpLeftovers := doctor.NewTmpLeftovers(os.TempDir())

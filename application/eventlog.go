@@ -27,11 +27,14 @@ type EventLog interface {
 // EventEmit appends one event of a writer's own: a scheduled job's
 // transition, which no bead records (mw-6ww.55, Q7 rule 1). It is stamped
 // now, in the normal lane, and refused before anything is written when its
-// kind's machine forbids it.
+// kind's machine forbids it. With Emergency it is in the emergency lane,
+// which the follower's shipper sends alone and at once (docs/events.md, "The
+// batch") instead of in the next 2 s batch.
 type EventEmit struct {
-	Log   EventLog
-	Now   func() time.Time
-	Event events.Event
+	Log       EventLog
+	Now       func() time.Time
+	Event     events.Event
+	Emergency bool
 }
 
 // Run appends the event and returns it as written, seq and all.
@@ -39,6 +42,9 @@ func (e EventEmit) Run(ctx context.Context) (events.Event, error) {
 	ev := e.Event
 	ev.Ts = e.Now().UTC()
 	ev.Lane = events.LaneNormal
+	if e.Emergency {
+		ev.Lane = events.LaneEmergency
+	}
 	// Seq 1 stands in for the seq Append gives, so Validate can be asked
 	// before anything is written.
 	check := ev

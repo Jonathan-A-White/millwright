@@ -7,6 +7,8 @@ import (
 	"io"
 	"strings"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/domain/events"
 )
 
 // callRecordClass is the clear class of a call record, postern's
@@ -67,7 +69,8 @@ func (r TalkCallRequest) validate() error {
 // sees it. The chain record carries the role and no summary: it is public for
 // good, so the reason is never on it. The direct delivery goes first; a chain that was
 // asked for and fails is an error naming the txid that did go direct, one
-// added by itself is only said.
+// added by itself is only said. The ring also rides the emergency lane of
+// the event log when Log is set.
 type TalkCall struct {
 	Postern Postern
 	Cipher  Cipher
@@ -82,6 +85,13 @@ type TalkCall struct {
 	// FloatSats is the balance cap mw enforces before a broadcast — config
 	// postern_float_sats.
 	FloatSats int64
+
+	// Log, when set, is the home's event log: the ring is also one event in
+	// the emergency lane (a message by Actor, its detail the ring's txid), so
+	// the Governor's app is told at once, ahead of any batch. A failure to
+	// write it is said on Out and does not fail the call.
+	Log   EventLog
+	Actor string
 
 	// Now is the clock; the zero value reads the real one.
 	Now func() time.Time
@@ -145,6 +155,15 @@ func (c TalkCall) Run(ctx context.Context, req TalkCallRequest) (TalkCallReport,
 
 	report := TalkCallReport{Txid: txid}
 	chainNote := ""
+	if c.Log != nil {
+		_, err := EventEmit{
+			Log: c.Log, Now: c.now, Emergency: true,
+			Event: events.Event{Kind: events.KindMessage, Actor: c.Actor, Detail: txid},
+		}.Run(ctx)
+		if err != nil {
+			chainNote = fmt.Sprintf("emergency event: not written: %v\n", err)
+		}
+	}
 	if wanted, automatic := c.wantsChain(ctx, req); wanted {
 		chainTxid, err := c.broadcast(ctx, chainRecord)
 		switch {

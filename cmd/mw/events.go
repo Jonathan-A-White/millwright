@@ -174,6 +174,7 @@ func eventShip(path, host string) (*application.EventShip, error) {
 
 func newEventsEmitCmd() *cobra.Command {
 	var e events.Event
+	var emergency bool
 	cmd := &cobra.Command{
 		Use:   "emit",
 		Short: "Append one event of a job's own to the home's event log",
@@ -182,7 +183,10 @@ func newEventsEmitCmd() *cobra.Command {
 			"  mw events emit --kind job --actor dispatch@laptop --from scheduled --to running\n\n" +
 			"--kind is one of docs/events.md's kinds; --from and --to are its machine's states, and an\n" +
 			"event its machine forbids is refused before anything is written. --actor defaults to\n" +
-			"mw@<host>.",
+			"mw@<host>.\n\n" +
+			"--emergency puts the event in the emergency lane: the follower sends it alone, as a record of one\n" +
+			"event, on chain and direct at once, ahead of the pending batches and of the 2 s window, and mw status\n" +
+			"counts it among today's emergencies.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if e.Kind == "" {
@@ -199,7 +203,7 @@ func newEventsEmitCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			got, err := application.EventEmit{Log: eventlog.New(path), Now: eventsClock, Event: e}.Run(cmd.Context())
+			got, err := application.EventEmit{Log: eventlog.New(path), Now: eventsClock, Event: e, Emergency: emergency}.Run(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -213,6 +217,7 @@ func newEventsEmitCmd() *cobra.Command {
 	cmd.Flags().StringVar(&e.To, "to", "", "the state after")
 	cmd.Flags().StringVar(&e.Detail, "detail", "", "what happened: a job's outcome on done or failed")
 	cmd.Flags().StringVar(&e.Actor, "actor", "", "who: <job>@<host> for a job (default mw@<host>)")
+	cmd.Flags().BoolVar(&emergency, "emergency", false, "send it alone and at once, ahead of the batches (the emergency lane)")
 	return cmd
 }
 

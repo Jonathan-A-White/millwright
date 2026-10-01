@@ -122,3 +122,20 @@ func TestTailFollowPrintsWhatIsAppendedLater(t *testing.T) {
 		t.Fatalf("expected the third line to be seq 3, got:\n%s", out.String())
 	}
 }
+
+func TestEventEmitEmergencyWritesTheEventInTheEmergencyLane(t *testing.T) {
+	log := &apptest.FakeEventLog{}
+	got, err := application.EventEmit{
+		Log: log, Now: func() time.Time { return time.Date(2026, 10, 1, 13, 0, 0, 0, time.UTC) }, Emergency: true,
+		Event: events.Event{Kind: events.KindJob, Actor: "doctor@laptop", From: events.JobRunning, To: events.JobFailed, Detail: "mayor-stale"},
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Lane != events.LaneEmergency {
+		t.Fatalf("lane is %q, want emergency", got.Lane)
+	}
+	if in, _ := log.Since(context.Background(), 0); len(in) != 1 || in[0].Lane != events.LaneEmergency {
+		t.Fatalf("the log holds %+v, want one emergency event", in)
+	}
+}
