@@ -11,8 +11,9 @@ Feature: mw postern send
   --bead-channel <bead-id> or --channel <name> wraps the message's plaintext
   with an explicit channel (a bead's, or a named one; Factory is the default);
   a decision-needed question's own --bead is already its channel, so both are
-  refused alongside one. --re <txid> answers inside that post's thread in the
-  channel the other flags name. A message in a bead's channel is written to
+  refused alongside one. --re <txid> answers inside that post's thread, in the
+  channel a flag names or, with none, the root's own channel (a root mw has
+  not seen is refused, never sent to Factory). A message in a bead's channel is written to
   that bead too, as the Mayor's side of the exchange. --attach sends a file, encrypted to the Governor and uploaded to
   the backend's blob store, announced in the message.
 
@@ -124,6 +125,46 @@ Feature: mw postern send
     When mw postern send "message" "Noted." in channel "roadmap" answering "direct:post-txid" is run
     Then sending succeeds
     And the broadcast record's plaintext is in channel "roadmap" with text "Noted." answering "direct:post-txid"
+
+  Scenario: --re with no channel flag answers in the channel of a root mw has seen in a bead's channel
+    Given the postern channel is "direct"
+    And the bead "mw-x" exists
+    And mw has seen the post "direct:root-txid" in the channel of bead "mw-x"
+    And the postern backend will report the txid "direct:answer-txid"
+    When mw postern send "message" "On it." answering "direct:root-txid" is run
+    Then sending succeeds
+    And the broadcast record's plaintext is in the channel of bead "mw-x" with text "On it." answering "direct:root-txid"
+    And bead "mw-x" is commented "MAYOR via postern, txid direct:answer-txid: On it."
+
+  Scenario: --re with no channel flag answers in the named channel of a root mw has seen there, given bare or prefixed
+    Given the postern channel is "direct"
+    And mw has seen the post "direct:root-txid" in channel "roadmap"
+    When mw postern send "message" "Noted." answering "root-txid" is run
+    Then sending succeeds
+    And the broadcast record's plaintext is in channel "roadmap" with text "Noted." answering "root-txid"
+
+  Scenario: --re with no channel flag is refused for a root mw has not seen, never sent to Factory
+    Given the postern channel is "direct"
+    When mw postern send "message" "Lost." answering "direct:unknown-txid" is run
+    Then it is refused, saying --re needs the root's channel and naming --bead-channel and --channel
+    And it is refused, and nothing was uploaded or sent
+
+  Scenario: --re with a channel flag goes where the flag says, whatever channel the root was seen in
+    Given the postern channel is "direct"
+    And the bead "mw-y" exists
+    And mw has seen the post "direct:root-txid" in channel "roadmap"
+    When mw postern send "message" "Over here." in the channel of bead "mw-y" answering "direct:root-txid" is run
+    Then sending succeeds
+    And the broadcast record's plaintext is in the channel of bead "mw-y" with text "Over here." answering "direct:root-txid"
+
+  Scenario: --re with no channel flag answers a root mw itself sent, wherever it went
+    Given the postern channel is "direct"
+    And the bead "mw-z" exists
+    And the postern backend will report the txid "direct:card-txid"
+    When mw postern send "message" "The card." in the channel of bead "mw-z" is run
+    And mw postern send "message" "More." answering "direct:card-txid" is run
+    Then sending succeeds
+    And the broadcast record's plaintext is in the channel of bead "mw-z" with text "More." answering "direct:card-txid"
 
   Scenario: --bead without --class decision-needed says where a bead's channel is posted to
     Given the postern key's balance is 1000 satoshis

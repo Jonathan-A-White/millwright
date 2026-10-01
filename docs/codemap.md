@@ -42,7 +42,7 @@ Each adapter: `var _ application.<Port> = ...`.
 | `AfterLanding` | `application/afterlanding.go` | `infrastructure/rig/afterlanding.go` | none |
 | `Dispatcher` | `application/landing.go` | `application.Dispatch` | — |
 | `HostSync` | `application/dispatch.go` | `application.Sync` | — |
-| Postern, hands | `application/{postern*,hands}.go` | `infrastructure/{postern,hands*,homemove}` | `apptest.Fake{Postern,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*,HomeMover}` |
+| Postern, hands | `application/{postern*,hands}.go` | `infrastructure/{postern,hands*,homemove}` | `apptest.Fake{Postern*,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*,HomeMover}` |
 | `Grinder`, `GrindSource`, `GristState`, `GristLock` | `application/grist.go` | `infrastructure/{claude/grind,rig/grinds,hostlock/try}.go`, `infrastructure/grist` | `apptest.Fake{Grinder,Grinds,GristState,GristLock}` |
 
 ## Use cases

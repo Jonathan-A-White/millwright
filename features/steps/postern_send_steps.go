@@ -33,6 +33,7 @@ type posternSendContext struct {
 	backend *apptest.FakePostern
 	cipher  *apptest.FakeCipher
 	tracker *apptest.FakeTracker
+	threads *apptest.FakePosternThreadIndex
 
 	governorKey string
 	floatSats   int64
@@ -53,6 +54,7 @@ func InitializePosternSendScenario(ctx *godog.ScenarioContext) {
 			backend: apptest.NewFakePostern(),
 			cipher:  apptest.NewFakeCipher(),
 			tracker: apptest.NewFakeTracker(),
+			threads: apptest.NewFakePosternThreadIndex(),
 		}
 		return ctx, nil
 	})
@@ -125,6 +127,11 @@ func InitializePosternSendScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^bead "([^"]*)"'s question note holds the txid "([^"]*)"$`, c.beadsQuestionNoteHoldsTheTxid)
 	ctx.Then(`^the broadcast record's plaintext is in the channel of bead "([^"]*)" with text "([^"]*)"$`, c.theBroadcastRecordsPlaintextIsThreadedOnBead)
 	ctx.Then(`^the broadcast record's plaintext is in channel "([^"]*)" with text "([^"]*)"$`, c.theBroadcastRecordsPlaintextIsOnTopic)
+	ctx.Given(`^mw has seen the post "([^"]*)" in the channel of bead "([^"]*)"$`, c.mwHasSeenThePostInBeadChannel)
+	ctx.Given(`^mw has seen the post "([^"]*)" in channel "([^"]*)"$`, c.mwHasSeenThePostInChannel)
+	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" answering "([^"]*)" is run$`, c.mwPosternSendAnsweringIsRun)
+	ctx.Then(`^it is refused, saying --re needs the root's channel and naming --bead-channel and --channel$`, c.itIsRefusedSayingReNeedsTheRootsChannel)
+	ctx.Then(`^the broadcast record's plaintext answers "([^"]*)" with text "([^"]*)" in no channel$`, c.theBroadcastRecordsPlaintextAnswersInNoChannel)
 	ctx.Then(`^it is refused, saying --channel and --bead-channel cannot both be set$`, c.itIsRefusedSayingThreadAndTopicCannotBothBeSet)
 	ctx.Then(`^it is refused, saying --channel and --bead-channel are refused with a decision-needed question$`, c.itIsRefusedSayingThreadRefusedWithQuestion)
 }
@@ -317,6 +324,7 @@ func (c *posternSendContext) send() application.PosternSend {
 		FloatSats:   c.floatSats,
 		Channel:     c.channel,
 		Now:         c.now,
+		Threads:     c.threads,
 	}
 }
 
@@ -594,17 +602,23 @@ func (c *posternSendContext) beadsQuestionNoteHoldsTheTxid(bead, txid string) er
 // decryptedBroadcastPlaintext reads the one transaction broadcast back off
 // the fake backend and decrypts its record's plaintext.
 func (c *posternSendContext) decryptedBroadcastPlaintext() (string, error) {
-	sent := c.backend.Broadcasts()
-	if len(sent) != 1 {
-		return "", fmt.Errorf("expected one broadcast, got %d", len(sent))
-	}
-	tx, err := transaction.NewTransactionFromHex(sent[0])
-	if err != nil {
-		return "", fmt.Errorf("parsing the broadcast transaction: %w", err)
-	}
-	payload, ok := postern.DecodeRecordScript(tx.Outputs[0].LockingScript.String())
-	if !ok {
-		return "", fmt.Errorf("expected output 0 to be a version-1 record, got %s", tx.Outputs[0].LockingScript.String())
+	var payload []byte
+	if delivered := c.backend.Delivered(); len(delivered) > 0 {
+		payload = delivered[len(delivered)-1]
+	} else {
+		sent := c.backend.Broadcasts()
+		if len(sent) != 1 {
+			return "", fmt.Errorf("expected one broadcast, got %d", len(sent))
+		}
+		tx, err := transaction.NewTransactionFromHex(sent[0])
+		if err != nil {
+			return "", fmt.Errorf("parsing the broadcast transaction: %w", err)
+		}
+		var ok bool
+		payload, ok = postern.DecodeRecordScript(tx.Outputs[0].LockingScript.String())
+		if !ok {
+			return "", fmt.Errorf("expected output 0 to be a version-1 record, got %s", tx.Outputs[0].LockingScript.String())
+		}
 	}
 	var record application.PosternPayload
 	if err := json.Unmarshal(payload, &record); err != nil {
@@ -901,4 +915,32 @@ func (c *posternSendContext) theBroadcastRecordHasNoSummaryKey() error {
 		return fmt.Errorf("the chain record carries a summary %q: %s", summary, payload)
 	}
 	return nil
+}
+
+func (c *posternSendContext) mwHasSeenThePostInBeadChannel(txid, bead string) error {
+	return c.threads.Remember(txid, application.PosternThread{Bead: bead})
+}
+
+func (c *posternSendContext) mwHasSeenThePostInChannel(txid, channel string) error {
+	return c.threads.Remember(txid, application.PosternThread{Topic: channel})
+}
+
+func (c *posternSendContext) mwPosternSendAnsweringIsRun(class, text, re string) error {
+	c.txid, c.err = c.send().Run(context.Background(), application.PosternSendRequest{Class: class, Text: text, Re: re})
+	return nil
+}
+
+func (c *posternSendContext) itIsRefusedSayingReNeedsTheRootsChannel() error {
+	want := "--re <root> needs the root's channel: give --bead-channel <id> or --channel <name>"
+	if c.err == nil {
+		return fmt.Errorf("expected send to be refused, but it succeeded")
+	}
+	if !strings.Contains(c.err.Error(), want) {
+		return fmt.Errorf("expected the refusal to say %q, got: %q", want, c.err.Error())
+	}
+	return nil
+}
+
+func (c *posternSendContext) theBroadcastRecordsPlaintextAnswersInNoChannel(re, text string) error {
+	return c.plaintextIs(application.PosternThreadedMessage{Text: text, Re: re})
 }

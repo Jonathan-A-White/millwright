@@ -237,7 +237,12 @@ func newPosternInboxCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			threads, err := posternThreads()
+			if err != nil {
+				return err
+			}
 			inbox := application.PosternInbox{
+				Threads:       threads,
 				Postern:       backend,
 				Cipher:        posternCipher(keys),
 				Keys:          keys,
@@ -290,6 +295,7 @@ func answerTheGovernor(inbox *application.PosternInbox, backend application.Post
 		return err
 	}
 	inbox.Sender = &application.PosternSend{
+		Threads:     inbox.Threads,
 		Postern:     backend,
 		Cipher:      inbox.Cipher,
 		Keys:        keys,
@@ -344,6 +350,16 @@ func moveHomeOnTheGovernorsTap(inbox *application.PosternInbox, host, attachment
 	return nil
 }
 
+// posternThreads is the file mw remembers the channel of each post in, for
+// mw postern send --re.
+func posternThreads() (*postern.ThreadFile, error) {
+	path, err := config.PosternThreadsFile()
+	if err != nil {
+		return nil, err
+	}
+	return postern.NewThreadFile(path), nil
+}
+
 // posternInboxLockWait is how long a pass waits for another to finish: longer
 // than the ten minutes a hands step may run, and the five a voice note's
 // transcription may take.
@@ -389,11 +405,14 @@ func newPosternSendCmd() *cobra.Command {
 			"alongside --bead: a decision-needed question's own bead is already its channel. Once sent,\n" +
 			"a message in a bead's channel is commented on that bead too: MAYOR via postern, txid <id>:\n" +
 			"<text>.\n\n" +
-			"--re <txid> answers inside a post's thread: <text> goes to the channel the other flags name\n" +
-			"(Factory when none) with its re set to the post's txid, as mw postern inbox prints it\n" +
-			"(direct:<sha256>) or bare, so the app shows it in that post's thread. Give the post's own\n" +
-			"txid, or the re of a message already in its thread (mw postern inbox prints the command).\n" +
-			"It is refused with --bead, which asks a question of its own.\n\n" +
+			"--re <txid> answers inside a post's thread: <text> goes with its re set to the post's txid,\n" +
+			"as mw postern inbox prints it (direct:<sha256>) or bare, so the app shows it in that\n" +
+			"post's thread. Give the post's own txid, or the re of a message already in its thread\n" +
+			"(mw postern inbox prints the command). With no channel flag the reply goes to the ROOT's\n" +
+			"channel — the one mw postern inbox read it in, or mw postern send sent it to — never\n" +
+			"silently to Factory; a root mw has not seen is refused, saying to give --bead-channel <id>\n" +
+			"or --channel <name>. A channel flag given with --re wins. It is refused with --bead,\n" +
+			"which asks a question of its own.\n\n" +
 			"--attach <file> (repeatable) encrypts the file to the Governor, uploads it to the\n" +
 			"backend's blob store and announces it in the message (sections 8 and 14): at most 8 MiB,\n" +
 			"typed by its extension — .png .jpg .jpeg .webp .webm .ogg .oga .opus .m4a .mp4 .mp3\n" +
@@ -445,7 +464,12 @@ func newPosternSendCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			threads, err := posternThreads()
+			if err != nil {
+				return err
+			}
 			send := application.PosternSend{
+				Threads:     threads,
 				Postern:     backend,
 				Cipher:      posternCipher(keys),
 				Keys:        keys,
@@ -473,7 +497,7 @@ func newPosternSendCmd() *cobra.Command {
 	for flag, use := range map[string]string{"thread": "use --bead-channel", "topic": "use --channel"} {
 		_ = cmd.Flags().MarkDeprecated(flag, use)
 	}
-	cmd.Flags().StringVar(&re, "re", "", "the txid of the post whose thread this message answers in, printed form or bare (refused with --bead)")
+	cmd.Flags().StringVar(&re, "re", "", "the txid of the post whose thread this message answers in, printed form or bare; with no channel flag the reply goes to its channel (refused with --bead)")
 	return cmd
 }
 
