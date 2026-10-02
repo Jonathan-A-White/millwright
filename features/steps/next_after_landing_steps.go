@@ -31,6 +31,7 @@ func registerNextAfterLandingSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^the report says: (.+)$`, c.theReportSays)
 	ctx.Then(`^the comment on "([^"]*)" says: (.+)$`, c.theCommentSays)
 	ctx.Then(`^that mail's body says: (.+)$`, c.thatMailsBodySays)
+	ctx.Then(`^that mail's first line is: (.+)$`, c.thatMailsFirstLineIs)
 	ctx.Then(`^the story "([^"]*)" is closed exactly as it is without an after-landing command$`, c.theStoryIsClosedAsWithout)
 }
 
@@ -144,6 +145,18 @@ func (c *nextContext) thatMailsBodySays(line string) error {
 	}
 	if want := c.spoken(line); !strings.Contains(mail.Body, want) {
 		return fmt.Errorf("expected the mail's body to say %q, got:\n%s", want, mail.Body)
+	}
+	return nil
+}
+
+func (c *nextContext) thatMailsFirstLineIs(line string) error {
+	mail, err := c.theOneMail()
+	if err != nil {
+		return err
+	}
+	first, _, _ := strings.Cut(mail.Body, "\n")
+	if want := c.spoken(line); first != want {
+		return fmt.Errorf("expected the mail's first line to be %q, got %q", want, first)
 	}
 	return nil
 }

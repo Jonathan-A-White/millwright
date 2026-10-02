@@ -28,11 +28,11 @@ var MillhandTickStateDir = filepath.Join(".local", "state", "mw-millhand-tick")
 // main (application.SelfUpdate), shared by the Millhand's tick and the dispatch
 // tick: the built marker is kept in SyncHaltStateDir under home, so that a host
 // running both builds a commit once.
-func hostSelfUpdate(rigs, afterLanding map[string]string, home string) application.SelfUpdate {
+func hostSelfUpdate(rigs, afterLanding map[string]string, afterLimits map[string]time.Duration, home string) application.SelfUpdate {
 	return application.SelfUpdate{
 		Rigs:     rigs,
 		Checkout: rig.New(),
-		After:    rig.NewAfterLanding(rig.WithAfterCommands(afterLanding)),
+		After:    rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits)),
 		Built:    rig.NewBuiltMarks(filepath.Join(home, SyncHaltStateDir)),
 	}
 }
@@ -115,6 +115,10 @@ func newMillhandTickCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			afterLimits, err := config.AfterLandingLimits()
+			if err != nil {
+				return err
+			}
 			home, err := os.UserHomeDir()
 			if err != nil {
 				return fmt.Errorf("there is no home directory to keep the tick log in: %w", err)
@@ -150,7 +154,7 @@ func newMillhandTickCmd() *cobra.Command {
 					Tracker: gateway,
 					Host:    host,
 				},
-				SelfUpdate: hostSelfUpdate(rigs, afterLanding, home),
+				SelfUpdate: hostSelfUpdate(rigs, afterLanding, afterLimits, home),
 				Backend:    hostBackend(gateway, mwVault(dir, host), host, rigs, cmd.ErrOrStderr()),
 				Tidy:       application.Tidy{Mail: gateway, Notes: gateway, Beads: gateway},
 				Reach:      doctor.NetReach{Hosts: reach},

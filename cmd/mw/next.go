@@ -99,6 +99,10 @@ func newNextCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			afterLimits, err := config.AfterLandingLimits()
+			if err != nil {
+				return err
+			}
 			maxAttempts, err := config.MaxAttempts()
 			if err != nil {
 				return err
@@ -177,7 +181,7 @@ func newNextCmd() *cobra.Command {
 				Out:       cmd.OutOrStdout(),
 				Err:       cmd.ErrOrStderr(),
 
-				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding)),
+				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits)),
 				Backend:      hostBackend(gateway, files, host, rigs, cmd.ErrOrStderr()),
 			}.Run(cmd.Context(), args[0])
 			return err

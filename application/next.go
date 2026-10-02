@@ -313,6 +313,11 @@ type NextReport struct {
 	Abandoned []string
 	// Notes are the things that went sideways without changing the outcome.
 	Notes []string
+	// AfterLandingStopped is the limit the rig's after-landing command outlived
+	// and was stopped at, zero when it was not: a command cut off in the middle
+	// of its work may have left the rig half done, which the mail to the Mayor
+	// says first (AfterLandingStoppedLine).
+	AfterLandingStopped time.Duration
 
 	Synced     bool
 	Sync       SyncReport
@@ -1416,6 +1421,9 @@ func (n Next) mailTheMayor(ctx context.Context, c *closeOut, report *NextReport,
 		title = c.id
 	}
 	body := report.String()
+	if report.AfterLandingStopped > 0 {
+		body = AfterLandingStoppedLine + "\n" + body
+	}
 	if said != "" {
 		body += "\n" + said + "\n"
 	}

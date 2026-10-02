@@ -105,6 +105,38 @@ func TestACommandIsGivenFiveMinutesUnlessTheHostIsToldOtherwise(t *testing.T) {
 	}
 }
 
+func TestARigsOwnLimitReplacesTheDefaultForThatRigAlone(t *testing.T) {
+	// The default is short, as 5m is next to a slow uplink; the rig that names a
+	// longer limit gets it and another rig keeps the default.
+	after := rig.NewAfterLanding(
+		rig.WithAfterLimit(200*time.Millisecond),
+		rig.WithAfterLimits(map[string]time.Duration{"postern": 5 * time.Second}),
+		rig.WithAfterCommands(map[string]string{"postern": "sleep 1; echo deployed", "millwright": "sleep 1; echo built"}),
+	)
+
+	ran, err := after.Run(context.Background(), "postern", t.TempDir())
+	if err != nil || !ran.Succeeded() || !strings.Contains(ran.Output, "deployed") {
+		t.Errorf("expected the rig with a 5s limit to run its 1s command to the end, got %+v, %v", ran, err)
+	}
+	ran, err = after.Run(context.Background(), "millwright", t.TempDir())
+	if err != nil || ran.TimedOut != 200*time.Millisecond {
+		t.Errorf("expected a rig with no limit of its own to be stopped at the default 200ms, got %+v, %v", ran, err)
+	}
+}
+
+func TestTheLimitOfARigIsItsOwnOrTheDefault(t *testing.T) {
+	after := rig.NewAfterLanding(rig.WithAfterLimits(map[string]time.Duration{"postern": 20 * time.Minute, "zero": 0, "negative": -time.Minute}))
+
+	if got := after.Limit("postern"); got != 20*time.Minute {
+		t.Errorf("expected postern's 20m, got %s", got)
+	}
+	for _, name := range []string{"millwright", "zero", "negative"} {
+		if got := after.Limit(name); got != 5*time.Minute {
+			t.Errorf("expected %s to keep the default five minutes, got %s", name, got)
+		}
+	}
+}
+
 func TestAnAfterLandingCommandThatCannotBeRunAtAllIsAnError(t *testing.T) {
 	after := rig.NewAfterLanding(rig.WithAfterCommands(map[string]string{"millwright": "true"}))
 

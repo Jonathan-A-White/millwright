@@ -738,6 +738,24 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.1" carries a comment quoting: stopped after 300ms
     And the close-out returned no error
 
+  Scenario: An after-landing command stopped at its limit is said loudly, first, in the mail to the Mayor
+    Given the rig names a command to run after a landing, which runs far too long
+    And after-landing commands are stopped after 300 milliseconds
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed exactly as it is without an after-landing command
+    And exactly one mail was sent, to "mayor" from "mw@vps"
+    And that mail's subject is "Landed: The story mw-gq6.1"
+    And that mail's first line is: after landing STOPPED at the limit: the site may be half-deployed
+    And that mail's body says: after landing: <the command>: stopped after 300ms, still running
+
+  Scenario: An after-landing command that fails and is not stopped has no loud first line
+    Given the rig names a command to run after a landing, which prints "boom" and exits 2
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then exactly one mail was sent, to "mayor" from "mw@vps"
+    And that mail's first line is: next on vps: mw-gq6.1
+
   Scenario: An after-landing command does not run when the rig checkout was left on another branch
     Given the rig checkout is on a branch of its own, "wip"
     And the rig names a command to run after a landing

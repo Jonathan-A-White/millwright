@@ -464,6 +464,47 @@ millwright = "make build"
 	}
 }
 
+func TestAfterLandingLimitSaysHowLongEachRigsCommandMayRun(t *testing.T) {
+	writeConfig(t, `host = "laptop"
+
+[after_landing]
+postern = "deploy"
+
+[after_landing_limit]
+postern = "20m"
+millwright = "90s"
+`)
+
+	limits, err := config.AfterLandingLimits()
+	if err != nil {
+		t.Fatalf("reading the after-landing limits: %v", err)
+	}
+	if len(limits) != 2 || limits["postern"] != 20*time.Minute || limits["millwright"] != 90*time.Second {
+		t.Errorf("expected each rig's own limit, got %+v", limits)
+	}
+}
+
+func TestAHostThatNamesNoAfterLandingLimitLeavesTheDefault(t *testing.T) {
+	writeConfig(t, vpsConfig)
+
+	limits, err := config.AfterLandingLimits()
+	if err != nil {
+		t.Fatalf("reading the after-landing limits: %v", err)
+	}
+	if len(limits) != 0 {
+		t.Errorf("expected no limit, got %+v", limits)
+	}
+}
+
+func TestAnAfterLandingLimitThatIsNotADurationIsRefusedByName(t *testing.T) {
+	writeConfig(t, "[after_landing_limit]\npostern = \"soon\"\n")
+
+	_, err := config.AfterLandingLimits()
+	if err == nil || !strings.Contains(err.Error(), "postern") {
+		t.Errorf("expected an error naming the rig whose limit is not a duration, got %v", err)
+	}
+}
+
 func TestAHostThatSaysNothingAboutAfterALandingRunsNothing(t *testing.T) {
 	writeConfig(t, vpsConfig)
 

@@ -130,11 +130,13 @@ const (
 // the left, a command line on the right. A rig that is not in it is tested the
 // way DefaultTests says. AfterLandingTable is the table of the command each rig
 // has run once a landing has moved this host's checkout of it; a rig that is not
-// in it has none.
+// in it has none. AfterLandingLimitTable is the table of how long that command
+// may run, per rig; a rig that is not in it gets application.AfterLandingLimit.
 const (
-	RigsTable         = "rigs"
-	TestsTable        = "tests"
-	AfterLandingTable = "after_landing"
+	RigsTable              = "rigs"
+	TestsTable             = "tests"
+	AfterLandingTable      = "after_landing"
+	AfterLandingLimitTable = "after_landing_limit"
 )
 
 // HandsHostsTable is the table of the config file that says how this host
@@ -1461,6 +1463,34 @@ func AfterLanding() (map[string]string, error) {
 		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
 	}
 	return tableIn(filepath.Join(home, File), AfterLandingTable)
+}
+
+// AfterLandingLimits reports how long each rig's after-landing command may run
+// before it is stopped, by rig name, read from the `[after_landing_limit]` table
+// of ~/.config/mw/config.toml: `postern = "20m"` for a rig whose command copies a
+// site over a slow uplink. A rig that is not named has application.AfterLandingLimit,
+// and a machine with no such table is not an error. A value that is not a
+// duration (`90s`, `20m`) or is not longer than zero is an error naming the rig:
+// a limit mw read as the default would stop the very deploy the table was
+// written to let finish.
+func AfterLandingLimits() (map[string]time.Duration, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	table, err := tableIn(filepath.Join(home, File), AfterLandingLimitTable)
+	if err != nil {
+		return nil, err
+	}
+	limits := make(map[string]time.Duration, len(table))
+	for rig, value := range table {
+		limit, err := time.ParseDuration(strings.TrimSpace(value))
+		if err != nil || limit <= 0 {
+			return nil, fmt.Errorf("%s: [%s] %s = %q is not a time longer than zero, such as \"20m\"", File, AfterLandingLimitTable, rig, value)
+		}
+		limits[rig] = limit
+	}
+	return limits, nil
 }
 
 // BackendTablePrefix starts the name of the table that says how a rig's own

@@ -19,6 +19,7 @@ import (
 type AfterLanding struct {
 	commands map[string]string
 	limit    time.Duration
+	limits   map[string]time.Duration
 	shell    string
 }
 
@@ -41,9 +42,24 @@ func WithAfterCommands(commands map[string]string) AfterLandingOption {
 	}
 }
 
+// WithAfterLimits names the limit each rig has, by rig name, as the
+// [after_landing_limit] table of the config file has it: a rig that deploys over
+// a slow uplink is given longer than the default. A rig the table does not name,
+// or names with no time, keeps the default.
+func WithAfterLimits(limits map[string]time.Duration) AfterLandingOption {
+	return func(a *AfterLanding) {
+		for rig, limit := range limits {
+			if limit > 0 {
+				a.limits[rig] = limit
+			}
+		}
+	}
+}
+
 // WithAfterLimit is how long a command may run before it is stopped, instead of
-// application.AfterLandingLimit. It is how a test makes a command that outlives
-// its limit without waiting minutes for it.
+// application.AfterLandingLimit, for every rig whose own limit is not named. It
+// is how a test makes a command that outlives its limit without waiting minutes
+// for it.
 func WithAfterLimit(limit time.Duration) AfterLandingOption {
 	return func(a *AfterLanding) {
 		if limit > 0 {
@@ -60,7 +76,7 @@ func WithAfterShell(path string) AfterLandingOption {
 // NewAfterLanding returns an AfterLanding that runs nothing until it is told
 // which rigs have a command.
 func NewAfterLanding(opts ...AfterLandingOption) *AfterLanding {
-	a := &AfterLanding{commands: map[string]string{}, limit: application.AfterLandingLimit, shell: Shell}
+	a := &AfterLanding{commands: map[string]string{}, limits: map[string]time.Duration{}, limit: application.AfterLandingLimit, shell: Shell}
 	for _, opt := range opts {
 		opt(a)
 	}
@@ -69,6 +85,15 @@ func NewAfterLanding(opts ...AfterLandingOption) *AfterLanding {
 
 // Command implements application.AfterLanding.
 func (a *AfterLanding) Command(rig string) string { return a.commands[rig] }
+
+// Limit is how long the rig's command may run: the limit the host names for it,
+// else the default.
+func (a *AfterLanding) Limit(rig string) time.Duration {
+	if limit, ok := a.limits[rig]; ok {
+		return limit
+	}
+	return a.limit
+}
 
 // Run implements application.AfterLanding.
 func (a *AfterLanding) Run(ctx context.Context, rig, dir string) (application.Ran, error) {
@@ -83,7 +108,8 @@ func (a *AfterLanding) Run(ctx context.Context, rig, dir string) (application.Ra
 		return application.Ran{}, fmt.Errorf("running `%s`: %w", command, err)
 	}
 
-	limited, cancel := context.WithTimeout(ctx, a.limit)
+	limit := a.Limit(rig)
+	limited, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	output, err := runLine(limited, a.shell, command, dir)
 	ran := application.Ran{Command: command, Output: output}
@@ -95,7 +121,7 @@ func (a *AfterLanding) Run(ctx context.Context, rig, dir string) (application.Ra
 	// command stopped because mw itself was told to stop is not one that took
 	// too long.
 	if limited.Err() != nil && ctx.Err() == nil {
-		ran.Status, ran.TimedOut = -1, a.limit
+		ran.Status, ran.TimedOut = -1, limit
 		return ran, nil
 	}
 	var exited *exec.ExitError

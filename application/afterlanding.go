@@ -13,6 +13,12 @@ import (
 // that would hold the baton for good.
 const AfterLandingLimit = 5 * time.Minute
 
+// AfterLandingStoppedLine is the first line of the mail to the Mayor when the
+// rig's after-landing command outlived its limit and was stopped. A command that
+// ships a site was cut off between its first file and its last: the report's
+// quiet note is not enough for what a person has to go and look at.
+const AfterLandingStoppedLine = "after landing STOPPED at the limit: the site may be half-deployed"
+
 // afterTail is how much of a failed command's output the one line about it
 // quotes: the last lines, which are where a build says what broke, and no more
 // than afterTailRunes of them, because the line goes into a ledger, a comment and
@@ -131,6 +137,10 @@ func (n Next) afterLanding(ctx context.Context, c *closeOut, report *NextReport)
 	report.Notes = append(report.Notes, line)
 	if err == nil && ran.Succeeded() {
 		return
+	}
+	if err == nil && ran.TimedOut > 0 {
+		report.AfterLandingStopped = ran.TimedOut
+		line = AfterLandingStoppedLine + "\n" + line
 	}
 
 	comment := fmt.Sprintf("mw next on %s landed this story, and the command this host runs in the rig's checkout %s after a landing did not go well, "+
