@@ -60,6 +60,33 @@ func TestHowToCheckIsTheSectionAfterTheMarker(t *testing.T) {
 	}
 }
 
+func TestHowToCheckCountsTheRealHeadingsWithQualifiers(t *testing.T) {
+	steps := "1. Open Postern.\n2. See it."
+	headings := map[string]string{
+		"mw-j0f2d.14":  "HOW TO CHECK IT (for the Governor)\n\n",
+		"mw-gq6.206":   "HOW TO CHECK IT (for the Governor): ",
+		"mw-j0f2d.29":  "HOW TO CHECK IT (for the Governor, on his phone, after the build is live): ",
+		"mw-j0f2d.38":  "HOW TO CHECK IT, for the Governor (after the backend is swapped and the new site is live):\n\n",
+		"mw-nqur1n.11": "HOW TO CHECK IT, for the Governor (after the backend is swapped and the new\nsite is live):\n\n",
+		"mw-a0ih0.12":  "HOW TO CHECK IT (for the Governor):\n\n",
+	}
+	for id, heading := range headings {
+		got := howToCheck([]Comment{{Text: "Done.\n" + heading + steps + "\nFor the rig memory: nothing"}})
+		if got != steps {
+			t.Errorf("%s: expected the steps, got %q", id, got)
+		}
+	}
+	if got := howToCheck([]Comment{{Text: "HOW TO CHECK IT (for the Governor, on his phone):\n\nInternal: nothing for the Governor to look at."}}); got != "Internal: nothing for the Governor to look at." {
+		t.Errorf("expected the Internal line, got %q", got)
+	}
+	if got := howToCheck([]Comment{{Text: "HOW TO CHECK IT is in the closing comment).\n1. Not this."}}); got != "" {
+		t.Errorf("a mention is not the steps, got %q", got)
+	}
+	if got := howToCheck([]Comment{{Text: "HOW TO CHECK IT\n1. Open it: then see it."}}); got != "1. Open it: then see it." {
+		t.Errorf("a colon inside the first step must stay, got %q", got)
+	}
+}
+
 func TestLandedHowToFindsTheSectionInTheMemoryOfAnOlderRun(t *testing.T) {
 	mem := posternSnapshotMemoryEntry{Comments: []PosternSnapshotComment{{Text: "newest"}, {Text: "HOW TO CHECK IT: 1. Look."}}}
 	if got := landedHowTo(mem); got != "1. Look." {

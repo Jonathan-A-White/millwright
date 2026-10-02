@@ -842,8 +842,37 @@ const viewHowToMarker = "HOW TO CHECK IT"
 // viewHowToLimit is the most runes of that section a verify need carries.
 const viewHowToLimit = 1500
 
-// viewForTheGovernor is the words a HOW TO CHECK IT heading may go on with.
-var viewForTheGovernor = regexp.MustCompile(`(?i)^[ \t]*,?[ \t]*for the governor`)
+// viewHowToQualifierLimit is how many bytes after HOW TO CHECK IT a heading's
+// qualifier ("(for the Governor, on his phone):") may take before its colon.
+const viewHowToQualifierLimit = 200
+
+// viewParenHeading is a heading that ends in a parenthetical with no colon:
+// "(for the Governor)" alone on its line, the steps on the next.
+var viewParenHeading = regexp.MustCompile(`^[ \t]*[(,][^\n]*\)[ \t]*\r?\n`)
+
+// howToAfterHeading is text, which follows HOW TO CHECK IT, without the
+// heading's qualifier: nothing is dropped when the steps start at once;
+// otherwise a parenthetical heading's line, or everything up to the first colon
+// within viewHowToQualifierLimit bytes. ok is false when no steps follow.
+func howToAfterHeading(text string) (string, bool) {
+	trim := func(s string) string { return strings.TrimLeft(s, " \t\r\n:;,.-\u2013\u2014") }
+	if after := trim(text); viewHowToSteps.MatchString(after) {
+		return after, true
+	}
+	head := text
+	if len(head) > viewHowToQualifierLimit {
+		head = head[:viewHowToQualifierLimit]
+	}
+	if loc := viewParenHeading.FindStringIndex(text); loc != nil {
+		after := trim(text[loc[1]:])
+		return after, viewHowToSteps.MatchString(after)
+	}
+	if at := strings.Index(head, ":"); at >= 0 {
+		after := trim(text[at+1:])
+		return after, viewHowToSteps.MatchString(after)
+	}
+	return "", false
+}
 
 // viewHowToSteps is how a real HOW TO CHECK IT section starts: a numbered
 // step, or the closing step's "Internal" line. A comment that only
@@ -859,7 +888,8 @@ func howToIsInternal(howTo string) bool {
 // howToCheck is the section after HOW TO CHECK IT in the newest of comments
 // (oldest first) whose heading goes on with numbered steps or the Internal
 // line, up to the next heading or viewHowToLimit runes; "" when no comment
-// does. The heading may go on ", for the Governor:" before the steps start.
+// does. The heading may carry a qualifier before the steps start, as in
+// " (for the Governor, on his phone):" (howToAfterHeading).
 // Markdown image links stay in it, so a published screenshot shows on the card.
 func howToCheck(comments []Comment) string {
 	for i := len(comments) - 1; i >= 0; i-- {
@@ -867,9 +897,8 @@ func howToCheck(comments []Comment) string {
 		if !found {
 			continue
 		}
-		after = viewForTheGovernor.ReplaceAllString(after, "")
-		after = strings.TrimLeft(after, " \t\r\n:;,.-\u2013\u2014")
-		if !viewHowToSteps.MatchString(after) {
+		after, steps := howToAfterHeading(after)
+		if !steps {
 			continue
 		}
 		var kept []string
