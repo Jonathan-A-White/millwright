@@ -121,3 +121,33 @@ func TestDefaultProjectsRootIsUnderTheHomeDirectory(t *testing.T) {
 		t.Fatalf("expected %s, got %s", want, got)
 	}
 }
+
+func TestTailShowsTheNewestSessionsLastEntriesOneToALine(t *testing.T) {
+	root, dir := t.TempDir(), "/home/jwhite/.mw-worktrees/mw-9.1"
+	now := time.Now()
+	writeTranscript(t, root, dir, "old", now.Add(-time.Hour), `{"type":"user","message":{"role":"user","content":"stale"}}`)
+	writeTranscript(t, root, dir, "new", now,
+		userLine,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"reading\nthe code"},{"type":"tool_use","name":"Bash","input":{"command":"make test"}}]}}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"ok   all"}]}}`,
+		`{"type":"assistant","isSidechain":true,"message":{"role":"assistant","content":[{"type":"text","text":"a subagent"}]}}`,
+		`{"type":"assistant","mess`)
+
+	got, err := NewTranscripts(root).Tail(context.Background(), dir, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "assistant: reading the code\n" +
+		`tool Bash: {"command":"make test"}` + "\n" +
+		"result: ok all"
+	if got != want {
+		t.Fatalf("expected\n%s\ngot\n%s", want, got)
+	}
+}
+
+func TestTailOfADirectoryWithNoTranscriptIsEmptyNotAnError(t *testing.T) {
+	got, err := NewTranscripts(t.TempDir()).Tail(context.Background(), "/nowhere", 20)
+	if err != nil || got != "" {
+		t.Fatalf("expected nothing and no error, got %q, %v", got, err)
+	}
+}
