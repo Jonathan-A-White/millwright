@@ -79,6 +79,13 @@ Feature: mw postern view
     And the view's need "verify" on "mw-v.6" waits for "you"
     And the view's verify need on "mw-v.6" offers "Verified"
 
+  Scenario: A HOW TO CHECK IT heading with no colon still counts
+    Given the view's bead "mw-v.6" under "mw-v" landed two hours ago with the Mayor's comment "Done.\nHOW TO CHECK IT, for the Governor\n\n1. Open the app and tap Needs you.\nFor the rig memory: nothing"
+    When the live view is built
+    Then the view's verify need on "mw-v.6" says "1. Open the app and tap Needs you."
+    And the view's need "verify" on "mw-v.6" waits for "you"
+    And the view's verify need on "mw-v.6" offers "Verified"
+
   Scenario: A VERIFIED comment still clears both
     Given the view's bead "mw-v.6" under "mw-v" landed two hours ago with the Mayor's comment "HOW TO CHECK IT: 1. Open the app."
     And the view's bead "mw-v.6" has the comment "VERIFIED by the Governor via postern"
