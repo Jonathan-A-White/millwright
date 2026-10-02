@@ -16,6 +16,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // PosternKeyFile is where the Mayor's postern key lives on this host: a
@@ -1025,6 +1027,12 @@ type posternQuestionNote struct {
 	Txid    string   `json:"txid"`
 	Options []string `json:"options,omitempty"`
 
+	// Expect is what each option, by its text, expects of beads for the
+	// Governor's own acts to have answered it (mw postern send --option
+	// '<text>|<bead>:<state>,...'): see answerByActs. An option with none
+	// has no key.
+	Expect map[string][]domain.Expectation `json:"expect,omitempty"`
+
 	// Asked, Q and Rec are when the question was asked (RFC 3339), what it
 	// asked and what it recommended: what mw postern view shows of an open
 	// question without reading back its QUESTION comment. A note written
@@ -1550,6 +1558,34 @@ func (r PosternSendRequest) validate() error {
 	return nil
 }
 
+// splitOptionExpectations is req with each option cut to the text a card shows
+// and the expectations each one ended with ('<text>|<bead>:<state>,...',
+// domain.SplitOption), keyed by that text; nil when none expects anything. A
+// request with no option is returned as it is. An option that cannot be read
+// is refused, before anything is sent.
+func (r PosternSendRequest) splitOptionExpectations() (PosternSendRequest, map[string][]domain.Expectation, error) {
+	if len(r.Options) == 0 {
+		return r, nil, nil
+	}
+	texts := make([]string, 0, len(r.Options))
+	var expect map[string][]domain.Expectation
+	for _, option := range r.Options {
+		text, expected, err := domain.SplitOption(option)
+		if err != nil {
+			return r, nil, fmt.Errorf("mw postern send: %w", err)
+		}
+		texts = append(texts, text)
+		if len(expected) > 0 {
+			if expect == nil {
+				expect = map[string][]domain.Expectation{}
+			}
+			expect[text] = expected
+		}
+	}
+	r.Options = texts
+	return r, expect, nil
+}
+
 // ValidateReplyFlags refuses --re, an answer inside a post's thread, together
 // with --bead: a question is its own post, not an answer. --re goes with
 // --channel, --bead-channel or neither (the root's channel, PosternSend's
@@ -1672,6 +1708,10 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 	if err := req.validate(); err != nil {
 		return "", err
 	}
+	req, expect, err := req.splitOptionExpectations()
+	if err != nil {
+		return "", err
+	}
 	if strings.TrimSpace(s.GovernorKey) == "" {
 		return "", fmt.Errorf("mw postern send: postern_governor_key is not set, so there is nowhere to send to")
 	}
@@ -1778,7 +1818,7 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 	}
 
 	if req.asksQuestion() {
-		if err := s.recordQuestion(ctx, req, txid); err != nil {
+		if err := s.recordQuestion(ctx, req, txid, expect); err != nil {
 			return "", err
 		}
 	}
@@ -2111,14 +2151,14 @@ func (s PosternSend) recordThreadMessage(ctx context.Context, req PosternSendReq
 // this bead. The note holds the txid and the options offered
 // (posternQuestionNote), so a Release tap can be checked against what the
 // question actually offered.
-func (s PosternSend) recordQuestion(ctx context.Context, req PosternSendRequest, txid string) error {
+func (s PosternSend) recordQuestion(ctx context.Context, req PosternSendRequest, txid string, expect map[string][]domain.Expectation) error {
 	comment := fmt.Sprintf("QUESTION %s asked by postern, txid %s: %s (recommended %s; options %s)",
 		s.now().UTC().Format(time.RFC3339), txid, req.Text, req.Recommend, strings.Join(req.Options, ", "))
 	if err := s.Tracker.CommentOnStory(ctx, req.Bead, comment); err != nil {
 		return fmt.Errorf("recording the question on %s: %w", req.Bead, err)
 	}
 	note, err := json.Marshal(posternQuestionNote{
-		Txid: txid, Options: req.Options,
+		Txid: txid, Options: req.Options, Expect: expect,
 		Asked: s.now().UTC().Format(time.RFC3339), Q: req.Text, Rec: req.Recommend,
 	})
 	if err != nil {

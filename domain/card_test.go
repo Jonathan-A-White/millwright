@@ -63,7 +63,7 @@ func TestParseCardItemReadsTextLinksAndExpectation(t *testing.T) {
 
 func TestParseCardItemRefusesABadExpectation(t *testing.T) {
 	for spec, want := range map[string]string{
-		"Check it|mw-x|mw-x:done":  "open, landed, verified, closed or answered",
+		"Check it|mw-x|mw-x:done":  "open, landed, verified, closed, answered or held",
 		"Check it|mw-x|mw-x":       "<bead>:<state>",
 		"Check it|mw-x|:landed":    "<bead>:<state>",
 		"   |mw-x|mw-x:landed":     "no text",
@@ -194,6 +194,36 @@ func TestNewCardUpdateRefusesWhatCannotBeAnUpdate(t *testing.T) {
 		_, err := NewCardUpdate(tc.re, tc.items, tc.links, tc.tick)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("NewCardUpdate(%q, %+v, %v, %v): expected a refusal saying %q, got %v", tc.re, tc.items, tc.links, tc.tick, tc.want, err)
+		}
+	}
+}
+
+func TestSplitOptionReadsTheTextAndWhatItExpects(t *testing.T) {
+	text, expect, err := SplitOption("A: Release both|mw-x.1:open, mw-x.2:held")
+	if err != nil || text != "A: Release both" {
+		t.Fatalf("got %q, %v", text, err)
+	}
+	want := []Expectation{{Bead: "mw-x.1", State: ExpectOpen}, {Bead: "mw-x.2", State: ExpectHeld}}
+	if len(expect) != 2 || expect[0] != want[0] || expect[1] != want[1] {
+		t.Fatalf("expected %v, got %v", want, expect)
+	}
+	text, expect, err = SplitOption("B: Wait")
+	if err != nil || text != "B: Wait" || expect != nil {
+		t.Fatalf("an option with no | expects nothing: got %q, %v, %v", text, expect, err)
+	}
+}
+
+func TestSplitOptionRefusesWhatItCannotRead(t *testing.T) {
+	for option, want := range map[string]string{
+		"A|mw-x.1:bogus":    "open, landed, verified, closed or held",
+		"A|mw-x.1:answered": "open, landed, verified, closed or held",
+		"A|mw-x.1":          "give <bead>:<state>",
+		"A|":                "give <bead>:<state>",
+		"|mw-x.1:open":      "no text",
+		"A|not a bead:open": "not a bead id",
+	} {
+		if _, _, err := SplitOption(option); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%q: expected a refusal saying %q, got %v", option, want, err)
 		}
 	}
 }

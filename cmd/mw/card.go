@@ -26,7 +26,7 @@ func newCardCmd() *cobra.Command {
 }
 
 // cardItemHelp says how an item is given, for every command that takes one.
-const cardItemHelp = "an item, '<text>|<links csv>|<bead>:<state>' (repeatable); the state is open, landed, verified, closed or answered, derived from the text's ask when left out"
+const cardItemHelp = "an item, '<text>|<links csv>|<bead>:<state>' (repeatable); the state is open, landed, verified, closed, answered or held, derived from the text's ask when left out"
 
 // posternCards is the Cards config wires: the home's postern key sealing to
 // postern_governor_key, sent through postern_backend by postern_channel.
@@ -69,7 +69,7 @@ func newCardSendCmd() *cobra.Command {
 		Long: "send posts a card record (class card), sealed to the Governor as a message is and sent by\n" +
 			"postern_channel, and prints its txid, then each item. Each --item is numbered in the order\n" +
 			"given (or by a leading '<n>. '), links the beads in its csv, and expects <bead> to reach\n" +
-			"<state>: open, landed, verified, closed or answered. An item that gives no expectation has\n" +
+			"<state>: open, landed, verified, closed, answered or held. An item that gives no expectation has\n" +
 			"one derived from its ask: VERIFIED on X expects X verified, Looks good on X expects X closed,\n" +
 			"Approve X and Answer X expect X answered, Release X expects X open. The card subscribes to\n" +
 			"the beads its items name and the event kinds their expectations need, so the app ticks an\n" +

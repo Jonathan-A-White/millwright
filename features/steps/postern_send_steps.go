@@ -125,6 +125,9 @@ func InitializePosternSendScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the broadcast record is postern's question for bead "([^"]*)", "([^"]*)" recommending "([^"]*)" with options "([^"]*)"$`, c.theBroadcastRecordIsPosternsQuestion)
 	ctx.Then(`^bead "([^"]*)" is commented the QUESTION with txid "([^"]*)", "([^"]*)" recommending "([^"]*)" with options "([^"]*)"$`, c.beadIsCommentedTheQuestion)
 	ctx.Then(`^bead "([^"]*)"'s question note holds the txid "([^"]*)"$`, c.beadsQuestionNoteHoldsTheTxid)
+	ctx.Then(`^bead "([^"]*)"'s question note expects "([^"]*)" of the option "([^"]*)"$`, c.beadsQuestionNoteExpects)
+	ctx.Then(`^bead "([^"]*)"'s question note expects nothing of the option "([^"]*)"$`, c.beadsQuestionNoteExpectsNothing)
+	ctx.Then(`^it is refused, saying "([^"]*)"$`, c.itIsRefusedSaying)
 	ctx.Then(`^the broadcast record's plaintext is in the channel of bead "([^"]*)" with text "([^"]*)"$`, c.theBroadcastRecordsPlaintextIsThreadedOnBead)
 	ctx.Then(`^the broadcast record's plaintext is in channel "([^"]*)" with text "([^"]*)"$`, c.theBroadcastRecordsPlaintextIsOnTopic)
 	ctx.Given(`^mw has seen the post "([^"]*)" in the channel of bead "([^"]*)"$`, c.mwHasSeenThePostInBeadChannel)
@@ -943,4 +946,56 @@ func (c *posternSendContext) itIsRefusedSayingReNeedsTheRootsChannel() error {
 
 func (c *posternSendContext) theBroadcastRecordsPlaintextAnswersInNoChannel(re, text string) error {
 	return c.plaintextIs(application.PosternThreadedMessage{Text: text, Re: re})
+}
+
+// questionNoteExpect reads the expectations a bead's question note holds of
+// option, as "<bead>:<state>" joined by commas; "" when it holds none.
+func (c *posternSendContext) questionNoteExpect(bead, option string) (string, error) {
+	saved, err := c.tracker.Note(context.Background(), application.PosternQuestionKey(bead))
+	if err != nil {
+		return "", err
+	}
+	var note struct {
+		Expect map[string][]domain.Expectation `json:"expect"`
+	}
+	if err := json.Unmarshal([]byte(saved), &note); err != nil {
+		return "", fmt.Errorf("expected the question note to decode, got %q: %w", saved, err)
+	}
+	var specs []string
+	for _, e := range note.Expect[option] {
+		specs = append(specs, e.Bead+":"+e.State)
+	}
+	return strings.Join(specs, ","), nil
+}
+
+func (c *posternSendContext) beadsQuestionNoteExpects(bead, want, option string) error {
+	got, err := c.questionNoteExpect(bead, option)
+	if err != nil {
+		return err
+	}
+	if got != want {
+		return fmt.Errorf("expected the note to expect %q of %q, got %q", want, option, got)
+	}
+	return nil
+}
+
+func (c *posternSendContext) beadsQuestionNoteExpectsNothing(bead, option string) error {
+	got, err := c.questionNoteExpect(bead, option)
+	if err != nil {
+		return err
+	}
+	if got != "" {
+		return fmt.Errorf("expected the note to expect nothing of %q, got %q", option, got)
+	}
+	return nil
+}
+
+func (c *posternSendContext) itIsRefusedSaying(words string) error {
+	if c.err == nil {
+		return fmt.Errorf("expected send to be refused, but it succeeded")
+	}
+	if !strings.Contains(c.err.Error(), words) {
+		return fmt.Errorf("expected the refusal to say %q, got: %q", words, c.err.Error())
+	}
+	return nil
 }

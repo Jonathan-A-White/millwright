@@ -1,7 +1,7 @@
 Feature: mw card
   A live card is the Mayor's numbered list for the Governor that keeps itself
   current: each item has its text, the beads it links to and what it expects
-  of a bead (open, landed, verified, closed or answered), and the card says
+  of a bead (open, landed, verified, closed, answered or held), and the card says
   which event kinds and beads it subscribes to, so the app can tick an item off
   when the expected event arrives. mw card send posts a card record and
   mw card update a card-update record naming the card by its txid, each sealed
@@ -41,7 +41,7 @@ Feature: mw card
     When the Mayor sends the card "Top 5" with the items:
       | item                     |
       | Check it\|mw-a\|mw-a:done |
-    Then the card is refused, saying "open, landed, verified, closed or answered"
+    Then the card is refused, saying "open, landed, verified, closed, answered or held"
     And no card record is delivered
 
   Scenario: An update is a sealed card-update record naming its card

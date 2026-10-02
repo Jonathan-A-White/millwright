@@ -12,17 +12,28 @@ import (
 
 // The states an item of a live card may expect of a bead. Answered is the
 // card machine's (a question on the bead answered); the rest are the bead's.
+// Held is a bead whose status is deferred.
 const (
 	ExpectOpen     = "open"
 	ExpectLanded   = "landed"
 	ExpectVerified = "verified"
 	ExpectClosed   = "closed"
 	ExpectAnswered = "answered"
+	ExpectHeld     = "held"
 )
 
 // ExpectStates are the states an expectation may name, in the order a refusal
 // lists them.
-var ExpectStates = []string{ExpectOpen, ExpectLanded, ExpectVerified, ExpectClosed, ExpectAnswered}
+var ExpectStates = []string{ExpectOpen, ExpectLanded, ExpectVerified, ExpectClosed, ExpectAnswered, ExpectHeld}
+
+// OptionExpectStates are the states an option of a question may expect of a
+// bead: ExpectStates less answered, which is not a state of the bead.
+var OptionExpectStates = []string{ExpectOpen, ExpectLanded, ExpectVerified, ExpectClosed, ExpectHeld}
+
+// listStates joins states as a refusal names them: "a, b or c".
+func listStates(states []string) string {
+	return strings.Join(states[:len(states)-1], ", ") + " or " + states[len(states)-1]
+}
 
 // Card is a live card: the Mayor's numbered list for the Governor, each item
 // with the beads it links to and what it expects of a bead, and the events
@@ -178,7 +189,7 @@ func (e Expectation) validate() error {
 		return fmt.Errorf("%q is not a bead id", e.Bead)
 	}
 	if !ValidExpectState(e.State) {
-		return fmt.Errorf("%q is not a state an item may expect: open, landed, verified, closed or answered", e.State)
+		return fmt.Errorf("%q is not a state an item may expect: %s", e.State, listStates(ExpectStates))
 	}
 	return nil
 }
@@ -357,4 +368,34 @@ func containsString(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// SplitOption reads an option as mw postern send --option gives it,
+// `<text>[|<bead>:<state>[,<bead>:<state>...]]`: the text the card shows, and
+// what the option expects of beads for the Governor's own acts to have
+// answered it. An option with no '|' expects nothing. A bead that is not
+// one, or a state that is not among OptionExpectStates, is refused.
+func SplitOption(option string) (text string, expect []Expectation, err error) {
+	text, specs, found := strings.Cut(option, "|")
+	text = strings.TrimSpace(text)
+	if !found {
+		return text, nil, nil
+	}
+	if text == "" {
+		return "", nil, fmt.Errorf("%q: the option has no text before the |", option)
+	}
+	for _, spec := range strings.Split(specs, ",") {
+		bead, state, ok := strings.Cut(strings.TrimSpace(spec), ":")
+		bead, state = strings.TrimSpace(bead), strings.TrimSpace(state)
+		switch {
+		case !ok || bead == "" || state == "":
+			return "", nil, fmt.Errorf("option %q: %q is not an expectation: give <bead>:<state>", text, spec)
+		case !validBeadID(bead):
+			return "", nil, fmt.Errorf("option %q: %q is not a bead id", text, bead)
+		case !containsString(OptionExpectStates, state):
+			return "", nil, fmt.Errorf("option %q: %q is not a state an option may expect: %s", text, state, listStates(OptionExpectStates))
+		}
+		expect = append(expect, Expectation{Bead: bead, State: state})
+	}
+	return text, expect, nil
 }

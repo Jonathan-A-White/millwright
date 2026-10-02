@@ -401,7 +401,10 @@ func newPosternSendCmd() *cobra.Command {
 			"--bead, --recommend and --option (repeatable) ask a decision-needed question about a\n" +
 			"bead: <text> becomes the question, and postern's docs/protocol.md section 6 question is\n" +
 			"sent in its place. Once broadcast, the bead is commented QUESTION with the txid and\n" +
-			"marked open, so mw postern inbox knows a reply to it answers this bead. They are refused\n" +
+			"marked open, so mw postern inbox knows a reply to it answers this bead. An --option may end\n" +
+			"'|<bead>:<state>[,<bead>:<state>...]' (open, landed, verified, closed or held): the card shows the\n" +
+			"text alone, and once mw postern inbox --apply applies one of his acts and one option's\n" +
+			"expectations all hold, the card is answered with it, by his acts. All three are refused\n" +
 			"with any --class but decision-needed.\n\n" +
 			"A channel is where the Governor and the Mayor talk: Factory (General, the default), a\n" +
 			"bead's, or a named one; a thread is the replies under one post in a channel.\n" +

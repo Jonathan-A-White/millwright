@@ -106,7 +106,7 @@ func TestCardSendRefusesABadExpectationStateAndSendsNothing(t *testing.T) {
 	_, _, err := newCards(backend, &bytes.Buffer{}).Send(context.Background(), application.CardSendRequest{
 		Title: "Top 5", Items: []string{"Check it|mw-a|mw-a:done"},
 	})
-	if err == nil || !strings.Contains(err.Error(), "mw card send:") || !strings.Contains(err.Error(), "open, landed, verified, closed or answered") {
+	if err == nil || !strings.Contains(err.Error(), "mw card send:") || !strings.Contains(err.Error(), "open, landed, verified, closed, answered or held") {
 		t.Fatalf("expected the state refused, naming the states, got %v", err)
 	}
 	if n := len(backend.Delivered()); n != 0 {
