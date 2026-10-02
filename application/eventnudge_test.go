@@ -166,3 +166,76 @@ func TestNudgeSaysABadSubscribeFileAndTellsTheOthers(t *testing.T) {
 		t.Fatalf("said %q, want the bad kind and the kinds", w.err.String())
 	}
 }
+
+func TestNudgeSubmitsWithASecondEnterWhenTheFirstWasLostAndSaysSo(t *testing.T) {
+	w := newNudgeWorld(t)
+	w.subs.Set("mayor", `kinds = ["message"]`)
+	w.windows.HoldsWithID("@1", "mayor-2026-10-01-02", time.Time{})
+	w.pass(t)
+	w.windows.LoseEnters("@1", 1)
+	appendAll(t, w.log, jobEvent, msgEvent)
+	w.pass(t)
+	if got := w.windows.Enters("@1"); got != 2 {
+		t.Fatalf("Enter pressed %d times, want 2 (the first was lost)", got)
+	}
+	if line := w.windows.InputLineOf("@1"); line != "" {
+		t.Fatalf("the nudge is still on the input line: %q", line)
+	}
+	if got := w.windows.Typed("@1"); len(got) != 1 {
+		t.Fatalf("typed %q, want the nudge once", got)
+	}
+	if log := w.err.String(); strings.Count(log, "\n") != 1 || !strings.Contains(log, "again") || !strings.Contains(log, "mayor") {
+		t.Fatalf("the log should say once that Enter was pressed again for mayor, got %q", log)
+	}
+}
+
+func TestNudgeAPaneThatNeverTakesEnterIsRetriedOnceSaidOnceAndNotTypedIntoAgain(t *testing.T) {
+	w := newNudgeWorld(t)
+	w.subs.Set("mayor", `kinds = ["message"]`)
+	w.windows.HoldsWithID("@1", "mayor-2026-10-01-02", time.Time{})
+	w.pass(t)
+	w.windows.LoseEnters("@1", -1)
+	appendAll(t, w.log, jobEvent, msgEvent)
+	w.pass(t)
+	if got := w.windows.Enters("@1"); got != 2 {
+		t.Fatalf("Enter pressed %d times, want 2 (one retry)", got)
+	}
+	log := w.err.String()
+	if strings.Count(log, "\n") != 1 || !strings.Contains(log, "still") {
+		t.Fatalf("the log should say once that the nudge is still on the line, got %q", log)
+	}
+	// More events while the line still holds the first nudge: nothing typed.
+	appendAll(t, w.log, msgEvent)
+	w.pass(t)
+	w.pass(t)
+	if got := w.windows.Typed("@1"); len(got) != 1 {
+		t.Fatalf("a second copy of the nudge was typed: %q", got)
+	}
+	if got := w.windows.Enters("@1"); got != 2 {
+		t.Fatalf("Enter pressed %d times, want still 2", got)
+	}
+	if got := strings.Count(w.err.String(), "\n"); got != 1 {
+		t.Fatalf("the log grew to %d lines: %q", got, w.err.String())
+	}
+	// The line is emptied by someone: the waiting events are told.
+	w.windows.ClearInputLine("@1")
+	w.pass(t)
+	if got := w.windows.Typed("@1"); len(got) != 2 {
+		t.Fatalf("typed %q, want the second nudge once the line was empty", got)
+	}
+}
+
+func TestNudgeAnEnterThatTookIsNotPressedAgain(t *testing.T) {
+	w := newNudgeWorld(t)
+	w.subs.Set("mayor", `kinds = ["message"]`)
+	w.windows.HoldsWithID("@1", "mayor-2026-10-01-02", time.Time{})
+	w.pass(t)
+	appendAll(t, w.log, jobEvent, msgEvent)
+	w.pass(t)
+	if got := w.windows.Enters("@1"); got != 1 {
+		t.Fatalf("Enter pressed %d times, want 1", got)
+	}
+	if w.err.Len() != 0 {
+		t.Fatalf("nothing to say, got %q", w.err.String())
+	}
+}

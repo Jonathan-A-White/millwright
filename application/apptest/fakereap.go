@@ -149,6 +149,9 @@ func (f *FakeWindows) PaneState(_ context.Context, id string) (application.PaneS
 	if i < 0 {
 		return "", fmt.Errorf("no window %s is open", id)
 	}
+	if f.lines[id] != "" && f.panes[i] == application.PaneIdle {
+		return application.PaneInput, nil
+	}
 	return f.panes[i], nil
 }
 
@@ -158,9 +161,43 @@ type typedInto struct {
 	text string
 }
 
+// LoseEnters makes the next n Enter keys the window is sent do nothing, as
+// when a hung session ignores them: the text stays on the input line. A
+// negative n loses every one.
+func (f *FakeWindows) LoseEnters(id string, n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.lost == nil {
+		f.lost = map[string]int{}
+	}
+	f.lost[id] = n
+}
+
+// Enters is how many Enter keys the window was sent, those Type sends included.
+func (f *FakeWindows) Enters(id string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.enters[id]
+}
+
+// InputLineOf is the text on the window's input line.
+func (f *FakeWindows) InputLineOf(id string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lines[id]
+}
+
+// ClearInputLine empties the window's input line, as a person would.
+func (f *FakeWindows) ClearInputLine(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.lines, id)
+}
+
 // Type implements application.ReapTerminal. What is recorded holds the
 // newline Enter would really leave on a captured pane, though Type itself is
-// given the line without one.
+// given the line without one. Like the real one it presses Enter after the
+// text, and that Enter may be lost (LoseEnters).
 func (f *FakeWindows) Type(_ context.Context, id, text string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -171,7 +208,58 @@ func (f *FakeWindows) Type(_ context.Context, id, text string) error {
 		return fmt.Errorf("no window %s is open", id)
 	}
 	f.typed = append(f.typed, typedInto{id: id, text: text + "\n"})
+	if f.lines == nil {
+		f.lines = map[string]string{}
+	}
+	f.lines[id] += text
+	f.enter(id)
 	return nil
+}
+
+// enter presses Enter in the window: the input line is submitted unless the
+// key is lost. The caller holds the lock.
+func (f *FakeWindows) enter(id string) {
+	if f.enters == nil {
+		f.enters = map[string]int{}
+	}
+	f.enters[id]++
+	if f.lost[id] != 0 {
+		if f.lost[id] > 0 {
+			f.lost[id]--
+		}
+		return
+	}
+	delete(f.lines, id)
+}
+
+// Enter implements application.ReapTerminal.
+func (f *FakeWindows) Enter(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return f.Err
+	}
+	if f.index(id) < 0 {
+		return fmt.Errorf("no window %s is open", id)
+	}
+	f.enter(id)
+	return nil
+}
+
+// InputLine implements application.ReapTerminal.
+func (f *FakeWindows) InputLine(_ context.Context, id string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return "", f.Err
+	}
+	if f.PaneErr != nil {
+		return "", f.PaneErr
+	}
+	if f.index(id) < 0 {
+		return "", fmt.Errorf("no window %s is open", id)
+	}
+	return f.lines[id], nil
 }
 
 // Typed is the text of every call Type made into the window of that id, as it

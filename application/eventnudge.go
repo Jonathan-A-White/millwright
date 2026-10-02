@@ -6,6 +6,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain/events"
 )
@@ -33,7 +34,11 @@ type EventNudger interface {
 //
 //   - a window that is up and idle at an empty input line is typed
 //     EventsNudgeLine, then, when mail is among the events, MailNudgeFormat,
-//     the second only if the pane is idle still;
+//     the second only if the pane is idle still.
+//     After a line is typed the input line is read once Settle has passed: if
+//     the line is still on it, Enter is pressed once more, and the log says so
+//     (and says if the line is on it still). The pane is then not typed into
+//     again until the line is empty. A line a busy pane queued is delivered.
 //   - a window that is up and not idle is left alone: the events are told
 //     again on the next Nudge;
 //   - a window that is down is brought up with Spring when the seat is marked
@@ -54,8 +59,12 @@ type EventNudge struct {
 	// Spring brings the seat up, for the reason given. Nil springs none.
 	Spring func(ctx context.Context, seat, reason string) error
 	Host   string
-	// Err is where failures are said, each one once while it repeats.
+	// Err is where failures are said, each one once while it repeats, and
+	// where a nudge that needed Enter pressed again is said.
 	Err io.Writer
+	// Settle is how long after typing a nudge the input line is read, to see
+	// that Enter took it. Zero reads it at once.
+	Settle time.Duration
 
 	mu   sync.Mutex
 	said map[string]string
@@ -175,7 +184,7 @@ func (n *EventNudge) tell(ctx context.Context, window ReapWindow, seat, line str
 	if state != PaneIdle {
 		return false, nil
 	}
-	if err := n.Terminal.Type(ctx, window.ID, line); err != nil {
+	if err := n.typeAndConfirm(ctx, window, line); err != nil {
 		return false, fmt.Errorf("typing the nudge into %s: %w", window.Name, err)
 	}
 	if mail == 0 {
@@ -186,10 +195,56 @@ func (n *EventNudge) tell(ctx context.Context, window ReapWindow, seat, line str
 	if state, err := n.Terminal.PaneState(ctx, window.ID); err != nil || state != PaneIdle {
 		return true, nil
 	}
-	if err := n.Terminal.Type(ctx, window.ID, fmt.Sprintf(MailNudgeFormat, seat, mail)); err != nil {
+	if err := n.typeAndConfirm(ctx, window, fmt.Sprintf(MailNudgeFormat, seat, mail)); err != nil {
 		return true, fmt.Errorf("typing the mail nudge into %s: %w", window.Name, err)
 	}
 	return true, nil
+}
+
+// typeAndConfirm types the line and, once Settle has passed, reads the input
+// line: a line still on it was not submitted (a session hung mid-turn drops
+// the Enter), so Enter is pressed once more and the line is read again. One
+// log line says what came of it. A pane that cannot be read is left as it is.
+func (n *EventNudge) typeAndConfirm(ctx context.Context, window ReapWindow, line string) error {
+	if err := n.Terminal.Type(ctx, window.ID, line); err != nil {
+		return err
+	}
+	if !n.stuck(ctx, window, line) {
+		return nil
+	}
+	if err := n.Terminal.Enter(ctx, window.ID); err != nil {
+		return fmt.Errorf("pressing Enter again in %s: %w", window.Name, err)
+	}
+	still := n.stuck(ctx, window, line)
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.Err != nil {
+		if still {
+			fmt.Fprintf(n.Err, "mw events follow: pressed Enter again in %s and the nudge %q is on its input line still; not typing into it until the line is empty\n", window.Name, line)
+		} else {
+			fmt.Fprintf(n.Err, "mw events follow: the nudge %q was not submitted by Enter in %s; pressed Enter again and it went\n", line, window.Name)
+		}
+	}
+	return nil
+}
+
+// stuck reports whether, after Settle, the line typed is on the window's input
+// line. A line the pane has not read is not stuck: nothing is pressed over a
+// pane that cannot be seen.
+func (n *EventNudge) stuck(ctx context.Context, window ReapWindow, line string) bool {
+	if n.Settle > 0 {
+		select {
+		case <-time.After(n.Settle):
+		case <-ctx.Done():
+			return false
+		}
+	}
+	held, err := n.Terminal.InputLine(ctx, window.ID)
+	if err != nil {
+		return false
+	}
+	held = strings.TrimSpace(held)
+	return held != "" && (strings.Contains(held, line) || strings.HasPrefix(line, held))
 }
 
 // windowOf is the seat's window: the only open one named <seat>-*, or, of

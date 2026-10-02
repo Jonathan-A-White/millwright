@@ -82,6 +82,13 @@ type ReapTerminal interface {
 	// an idle Millhand of mail waiting for it without opening a fresh session.
 	Type(ctx context.Context, window, text string) error
 
+	// Enter presses the Enter key in the window's pane, nothing typed first.
+	Enter(ctx context.Context, window string) error
+
+	// InputLine reports the text on the window's input line, "" when it is
+	// empty. Dim text, which is a suggestion and not a draft, is not read.
+	InputLine(ctx context.Context, window string) (string, error)
+
 	// Close closes the window and what runs in it. Closing a window that is
 	// already gone is not a failure.
 	Close(ctx context.Context, window string) error
