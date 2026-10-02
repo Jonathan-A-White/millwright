@@ -1,0 +1,123 @@
+#!/bin/sh
+# Deploy a built static site so that the live tree is always one complete build.
+# Usage:
+#
+#   site-deploy <dist> <host> <dir>
+#
+# <dist> is the local build (it must hold an index.html), <host> is the ssh name
+# of the machine that serves the site, or `local` for a directory on this one,
+# and <dir> is the absolute path the web server serves.
+#
+# What it does, in order, and why:
+#   1. rsync <dist> to <dir>.next, which is first emptied. rsync is given
+#      --link-dest=<dir>, so a file that did not change is a hard link to the
+#      live one and only what changed travels. Nothing under <dir> is touched.
+#   2. check that <dir>.next/index.html exists and that every /assets/... file it
+#      names is there. A page that points at a script that never arrived is the
+#      black screen this exists to prevent.
+#   3. swap, on the host, with renames: <dir> -> <dir>.prev, then <dir>.next ->
+#      <dir>. <dir>.prev is the last complete tree, so a rollback is two renames.
+#
+# A copy that is killed or fails (step 1) or a tree that fails the check (step 2)
+# exits non-zero and leaves <dir> and <dir>.prev exactly as they were; a stale
+# <dir>.next is removed by the next run. Run it as the last word of an
+# [after_landing] line, which is stopped if it outlives its limit: a stop in
+# step 1 or 2 costs nothing, which a copy straight into <dir> does not.
+#
+# Exit status: 0 deployed; 1 the copy, the check or the swap failed; 2 usage.
+
+set -u
+
+die() {
+	echo "site-deploy: $*" >&2
+	exit 1
+}
+
+usage() {
+	echo "usage: site-deploy <dist> <host> <dir>" >&2
+	exit 2
+}
+
+[ "$#" -eq 3 ] || usage
+dist=${1%/}
+host=$2
+dir=${3%/}
+
+# The host and directory are put into commands run through ssh, so only plain
+# characters are allowed in either.
+case $dir in
+/*) ;;
+*) echo "site-deploy: <dir> must be an absolute path, got $dir" >&2; exit 2 ;;
+esac
+[ -n "$dir" ] && [ "$dir" != "/" ] || usage
+case $dir in
+*[!A-Za-z0-9/._-]*) echo "site-deploy: <dir> may hold only letters, digits and / . _ -, got $dir" >&2; exit 2 ;;
+esac
+case $host in
+-* | '' | *[!A-Za-z0-9@._:-]*) echo "site-deploy: <host> may hold only letters, digits and @ . _ : -, and not start with -, got $host" >&2; exit 2 ;;
+esac
+
+[ -f "$dist/index.html" ] || die "$dist holds no index.html: is it the build?"
+
+next=$dir.next
+prev=$dir.prev
+
+# remote runs the script on stdin on the host, with the arguments given.
+remote() {
+	if [ "$host" = local ]; then
+		sh -s -- "$@"
+	else
+		ssh "$host" sh -s -- "$@"
+	fi
+}
+
+# 1. copy to the side folder
+remote "$next" <<'SCRIPT' || die "could not clear $next"
+rm -rf "$1"
+SCRIPT
+
+if [ "$host" = local ]; then
+	rsync -a --delete --link-dest="$dir" "$dist"/ "$next"/
+else
+	rsync -az --delete --link-dest="$dir" "$dist"/ "$host:$next"/
+fi
+status=$?
+if [ "$status" -ne 0 ]; then
+	remote "$next" <<'SCRIPT' || true
+rm -rf "$1"
+SCRIPT
+	die "the copy to $next failed (rsync exit $status): $dir is untouched"
+fi
+
+# 2. every asset the page names must have arrived
+remote "$next" <<'SCRIPT'
+cd "$1" || exit 1
+[ -f index.html ] || { echo "no index.html in $1"; exit 1; }
+missing=""
+for asset in $(grep -oE '/assets/[^"'\''<>() ?#]+' index.html | sort -u); do
+	[ -f ".$asset" ] || missing="$missing $asset"
+done
+[ -z "$missing" ] || { echo "index.html names files that are not in $1:$missing"; exit 1; }
+SCRIPT
+status=$?
+if [ "$status" -ne 0 ]; then
+	remote "$next" <<'SCRIPT' || true
+rm -rf "$1"
+SCRIPT
+	die "the copy in $next is not a complete build: $dir is untouched"
+fi
+
+# 3. swap with renames; if the second fails, put the first back
+remote "$dir" "$next" "$prev" <<'SCRIPT' || die "the swap failed; look at $dir, $prev and $next"
+dir=$1 next=$2 prev=$3
+rm -rf "$prev"
+if [ -e "$dir" ]; then
+	mv "$dir" "$prev" || exit 1
+fi
+if ! mv "$next" "$dir"; then
+	[ ! -e "$prev" ] || mv "$prev" "$dir"
+	exit 1
+fi
+SCRIPT
+
+echo "site-deploy: $dir is now the build from $dist; the last one is in $prev"
