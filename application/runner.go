@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // SessionSpec is everything needed to start one runner session: what to call
@@ -137,10 +139,12 @@ type Runner interface {
 }
 
 // RecentLines is the tail of what a session printed: at most lines lines, with
-// the blank padding a terminal leaves below the output trimmed off. Runner
+// the blank padding a terminal leaves below the output trimmed off, and the
+// terminal's escape sequences (colour, cursor movement) taken out, because it is
+// what mw writes into a report, a mail or a comment for a person to read. Runner
 // adapters share it, so that Output means the same thing behind every backend.
 func RecentLines(output string, lines int) string {
-	printed := strings.Split(strings.ReplaceAll(output, "\r\n", "\n"), "\n")
+	printed := strings.Split(strings.ReplaceAll(domain.StripANSI(output), "\r\n", "\n"), "\n")
 	for len(printed) > 0 && strings.TrimSpace(printed[len(printed)-1]) == "" {
 		printed = printed[:len(printed)-1]
 	}

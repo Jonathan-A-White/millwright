@@ -163,3 +163,49 @@ func TestTheWaitBeforeTheGateEndsAsSoonAsTheHostCalms(t *testing.T) {
 		t.Fatalf("expected two waits and one run, landed; got %d waits, %d runs, err %v", run.waits, checks.runs, run.err)
 	}
 }
+
+// colouredChecks is a rig whose tests print ANSI colour, as vitest does on a
+// terminal, and fail.
+type colouredChecks struct{}
+
+func (colouredChecks) Run(context.Context, string, string) (application.Checked, error) {
+	return application.Checked{Command: "npm test", Output: "\x1b[32m✓\x1b[39m one \x1b[2m(4)\x1b[22m\n\x1b[31m✗\x1b[39m two\x1b[33m 998\x1b[2mms\x1b[22m\x1b[39m\n"}, nil
+}
+
+func TestARefusedLandingReportsTheTestTailAsPlainText(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-x", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: "sonnet", Effort: "high", Formula: "tdd-feature", Host: "laptop"})
+	tracker.AddStory("mw-x", domain.Story{ID: "mw-x.1", Title: "A story"})
+	vault := newFakeVault()
+	vault.written["mw-x.1/"+application.ResultFileNameForAttempt(1)] = `{"subtype":"success"}`
+	lands := &aLandingLanding{fakeRetryLanding{AheadCount: 1}}
+	mailbox := apptest.NewFakeMailbox()
+	report, err := application.Next{
+		Tracker: tracker, Vault: vault, Worktrees: lands, Landing: lands,
+		Checks: colouredChecks{}, Slot: aSlot{}, Mailbox: mailbox,
+		Seat: "builder", Host: "laptop",
+		Rigs: map[string]string{"millwright": "/rigs/millwright"},
+		Out:  io.Discard, Err: io.Discard,
+	}.Run(context.Background(), "mw-x.1")
+	if err == nil || report.Reason != application.ReasonTestsFail {
+		t.Fatalf("expected a tests-fail refusal, got err %v and %+v", err, report)
+	}
+
+	comments := tracker.Comments("mw-x.1")
+	mail, _ := mailbox.Inbox(context.Background(), application.MayorMailbox)
+	texts := append([]string{}, comments...)
+	for _, m := range mail {
+		texts = append(texts, m.Body)
+	}
+	if len(comments) == 0 || len(mail) == 0 {
+		t.Fatalf("expected a comment and a mail, got %q and %+v", comments, mail)
+	}
+	for _, text := range texts {
+		if strings.Contains(text, "\x1b") || strings.Contains(text, "[32m") || strings.Contains(text, "[2m") {
+			t.Errorf("expected no colour codes in %q", text)
+		}
+		if !strings.Contains(text, "✓ one (4)") || !strings.Contains(text, "✗ two 998ms") {
+			t.Errorf("expected the plain tail in %q", text)
+		}
+	}
+}

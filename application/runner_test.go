@@ -144,6 +144,12 @@ func TestRecentLinesIsTheTailWithoutTheTerminalsPadding(t *testing.T) {
 			lines:  5,
 			want:   "hello",
 		},
+		{
+			why:    "colour codes are not output a person reads",
+			output: "\x1b[32m✓\x1b[39m one\n\x1b[2m(4)\x1b[22m\n",
+			lines:  5,
+			want:   "✓ one\n(4)",
+		},
 	}
 	for _, c := range cases {
 		if got := application.RecentLines(c.output, c.lines); got != c.want {
