@@ -939,7 +939,7 @@ options offered. `mw postern inbox` reads a reply to it and appends ANSWER to
 the bead, clears the note, and mails the Mayor.
 
 If the answer is a Release tap — its text, trimmed and case-folded, is
-"release" — and the bead is an epic, `mw postern inbox` releases its held
+"release", with or without a card's "A: " letter prefix — and the bead is an epic, `mw postern inbox` releases its held
 stories itself, exactly as `mw release <epic>` would, with no Mayor turn: it
 appends a RELEASED comment naming the stories now ready and mails the Mayor
 what was released. This only happens when every guard holds: the reply's
@@ -949,6 +949,10 @@ still recorded as above, but releases nothing; a signer that is not the
 Governor's key (including an unconfigured `postern_governor_key`), a question
 that never offered Release, a bead that is not an epic, or an epic with
 nothing held, also releases nothing — the Mayor is always mailed why.
+
+A Hold answer ("hold", "B: Hold") to a question that offered Hold is held under
+the same guards, as the postern hold action does: a story is held (a claimed
+one is cancelled), and an epic has its open, unclaimed stories held.
 
 A message carrying an attachment (postern's docs/protocol.md §8) is
 downloaded — `GET /api/blobs/{hash}` with the same signed challenge every

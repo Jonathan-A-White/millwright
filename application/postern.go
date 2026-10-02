@@ -14,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 )
 
 // PosternKeyFile is where the Mayor's postern key lives on this host: a
@@ -939,13 +941,15 @@ const PosternAnswerSubjectLimit = 200
 // all — reports false and changes nothing, so the reply is left for Run to
 // print as text.
 //
-// When the answer is itself a Release tap (its text, trimmed and
-// case-folded, is "release"), the epic it names is released as `mw release`
-// would — but only when the question it answers offered Release as one of
-// its options, and m's verified sender is this host's configured
-// GovernorKey. Any other signer, a question that never offered Release, a
-// bead that is not an epic, or one with nothing held, releases nothing; the
-// Mayor is always mailed what happened, so a refusal is never silent.
+// When the answer is itself a Release tap (its word, per posternAnswerWord,
+// is "release": a card's "A: Release" counts), the epic it names is released
+// as `mw release` would — but only when the question it answers offered
+// Release as one of its options, and m's verified sender is this host's
+// configured GovernorKey. Any other signer, a question that never offered
+// Release, a bead that is not an epic, or one with nothing held, releases
+// nothing; the Mayor is always mailed what happened, so a refusal is never
+// silent. A Hold tap is the same under the same guards, and holds the bead as
+// the hold action does (holdOnTap).
 func (i PosternInbox) recordAnswer(ctx context.Context, m PosternInboxMessage, reply PosternReply) (bool, error) {
 	if i.Tracker == nil {
 		return false, nil
@@ -979,13 +983,35 @@ func (i PosternInbox) recordAnswer(ctx context.Context, m PosternInboxMessage, r
 			return false, err
 		}
 	}
+	if isHoldTap(reply.Answer) {
+		if err := i.holdOnTap(ctx, m, reply.Bead, noteValue); err != nil {
+			return false, err
+		}
+	}
 	return true, nil
 }
 
-// isReleaseTap reports whether answer, trimmed and case-folded, asks for the
+// posternAnswerWord reduces an answer, or an option a question offered, to its
+// word: trimmed, a leading "<one letter or digit>: " dropped (a card's
+// "A: Release" is Release), and case-folded. "A: Release both" is not
+// Release: only that one prefix goes.
+func posternAnswerWord(text string) string {
+	text = strings.TrimSpace(text)
+	if r, size := utf8.DecodeRuneInString(text); (unicode.IsLetter(r) || unicode.IsDigit(r)) && strings.HasPrefix(text[size:], ": ") {
+		text = strings.TrimSpace(text[size+2:])
+	}
+	return strings.ToLower(text)
+}
+
+// isReleaseTap reports whether answer's word is "release": it asks for the
 // epic it answers to be released.
 func isReleaseTap(answer string) bool {
-	return strings.EqualFold(strings.TrimSpace(answer), "release")
+	return posternAnswerWord(answer) == "release"
+}
+
+// isHoldTap reports whether answer's word is "hold".
+func isHoldTap(answer string) bool {
+	return posternAnswerWord(answer) == "hold"
 }
 
 // posternQuestionNote is what a bead's PosternQuestionKey note holds while its
@@ -1013,16 +1039,73 @@ type posternQuestionNote struct {
 // PosternQuestionKey note — recorded Release among the options its question
 // offered.
 func posternQuestionOfferedRelease(noteValue string) bool {
+	return posternQuestionOffered(noteValue, "release")
+}
+
+// posternQuestionOffered reports whether noteValue recorded an option whose
+// word (posternAnswerWord) is word among those its question offered.
+func posternQuestionOffered(noteValue, word string) bool {
 	var note posternQuestionNote
 	if err := json.Unmarshal([]byte(noteValue), &note); err != nil {
 		return false
 	}
 	for _, option := range note.Options {
-		if strings.EqualFold(strings.TrimSpace(option), "release") {
+		if posternAnswerWord(option) == word {
 			return true
 		}
 	}
 	return false
+}
+
+// holdOnTap holds bead on the Governor's Hold answer, as the hold action does,
+// once the guards of releaseOnTap hold: m's verified sender is this host's
+// GovernorKey, and noteValue shows the question offered Hold. A story is held
+// by applyAction's hold (a claimed one is cancelled, and it comments and mails
+// itself); an epic has its open, unclaimed stories held, one HELD comment on
+// the epic naming them. The Mayor is always mailed what happened, or why not.
+func (i PosternInbox) holdOnTap(ctx context.Context, m PosternInboxMessage, bead, noteValue string) error {
+	notApplied := func(why string) error {
+		return i.mail(ctx, fmt.Sprintf("Hold not applied: %s", bead), fmt.Sprintf("%s: not held, %s", bead, why))
+	}
+	if !i.isGovernor(m) {
+		return notApplied("the tap's signer unchecked")
+	}
+	if !posternQuestionOffered(noteValue, "hold") {
+		return notApplied("its question never offered Hold")
+	}
+	found, err := i.Tracker.ShowBeads(ctx, []string{bead})
+	if err != nil {
+		return fmt.Errorf("reading %s for the Governor's Hold: %w", bead, err)
+	}
+	if len(found) == 0 {
+		return notApplied("there is no such bead")
+	}
+	if !found[0].IsEpic {
+		_, err := i.applyAction(ctx, m, PosternAction{Action: PosternActionHold, Bead: bead})
+		return err
+	}
+	epic, err := i.Tracker.ShowEpic(ctx, bead)
+	if err != nil {
+		return notApplied(err.Error())
+	}
+	var held []string
+	for _, story := range epic.Stories {
+		if story.IsEpic || !strings.EqualFold(strings.TrimSpace(story.Status), StatusOpen) || isClaimed(story) {
+			continue
+		}
+		if err := i.Tracker.HoldStory(ctx, story.Story.ID); err != nil {
+			return notApplied(fmt.Sprintf("holding %s failed: %v", story.Story.ID, err))
+		}
+		held = append(held, story.Story.ID)
+	}
+	if len(held) == 0 {
+		return notApplied("it has no open, unclaimed stories")
+	}
+	comment := fmt.Sprintf("HELD by the Governor via postern, txid %s: %d open stories held: %s", m.Txid, len(held), strings.Join(held, ", "))
+	if err := i.Tracker.CommentOnStory(ctx, bead, comment); err != nil {
+		return err
+	}
+	return i.mail(ctx, fmt.Sprintf("Held: %s", bead), comment)
 }
 
 // releaseOnTap runs Release{Tracker: i.Tracker} against bead, exactly as `mw

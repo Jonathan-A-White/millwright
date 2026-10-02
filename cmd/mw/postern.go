@@ -162,7 +162,8 @@ func newPosternInboxCmd() *cobra.Command {
 			"answer is appended to the bead verbatim, with the txid and the sender's public key, the\n" +
 			"question's note is cleared, and the Mayor is mailed so the notifier wakes the seat. A\n" +
 			"reply naming a bead the tracker does not know is printed as text, and nothing is written.\n\n" +
-			"A Release tap — an answer, trimmed and case-folded, of \"release\" — releases the epic's\n" +
+			"A Release tap — an answer, trimmed and case-folded, of \"release\" (a card's \"A: \" letter\n" +
+			"prefix is dropped first) — releases the epic's\n" +
 			"held stories itself, exactly as mw release would, but only when the reply's verified\n" +
 			"sender is postern_governor_key and the question it answers offered Release among its\n" +
 			"options. Any other signer, a question that never offered Release, a bead that is not an\n" +

@@ -229,6 +229,49 @@ Feature: mw postern inbox
     Then reading succeeds
     And bead "mw-epic.2" has 1 comment
 
+  Scenario: a card answer 'A: Release' to a card offering 'A: Release' and 'B: Hold' releases the epic
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And epic "mw-epic.4" has 2 held stories
+    And epic "mw-epic.4" has an open question offering "A: Release, B: Hold", txid "question-txid"
+    And a postern reply for bead "mw-epic.4" with answer "A: Release" and txid "tap-txid" addressed to this key
+    When mw postern inbox is run
+    Then reading succeeds
+    And epic "mw-epic.4"'s held stories are released
+    And bead "mw-epic.4" is commented a RELEASED with txid "tap-txid"
+    And mail "Released: mw-epic.4" was sent to mayor
+
+  Scenario: a card answer 'B: Hold' to a card offering 'A: Release' and 'B: Hold' holds the open story
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And epic "mw-epic.5" has 1 open stories
+    And bead "mw-epic.5.1" has an open question offering "A: Release, B: Hold", txid "question-txid"
+    And a postern reply for bead "mw-epic.5.1" with answer "B: Hold" and txid "hold-txid" addressed to this key
+    When mw postern inbox is run
+    Then reading succeeds
+    And bead "mw-epic.5.1" now stands "deferred"
+    And bead "mw-epic.5.1" is commented a HELD with txid "hold-txid"
+    And mail "Held: mw-epic.5.1" was sent to mayor
+
+  Scenario: a card answer 'B: Hold' to an epic's card holds its open stories
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And epic "mw-epic.6" has 2 open stories
+    And bead "mw-epic.6" has an open question offering "A: Release, B: Hold", txid "question-txid"
+    And a postern reply for bead "mw-epic.6" with answer "B: Hold" and txid "hold-txid" addressed to this key
+    When mw postern inbox is run
+    Then reading succeeds
+    And bead "mw-epic.6.1" now stands "deferred"
+    And bead "mw-epic.6.2" now stands "deferred"
+    And bead "mw-epic.6" is commented a HELD with txid "hold-txid"
+
+  Scenario: a card answer 'A: Release' to a card that did not offer Release releases nothing
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And epic "mw-epic.7" has 2 held stories
+    And epic "mw-epic.7" has an open question offering "B: Hold, C: Change", txid "question-txid"
+    And a postern reply for bead "mw-epic.7" with answer "A: Release" and txid "tap-txid" addressed to this key
+    When mw postern inbox is run
+    Then reading succeeds
+    And bead "mw-epic.7" has 1 comment
+    And bead "mw-epic.7.1" now stands "deferred"
+
   Scenario: a Release tap from a signer who is not the Governor releases nothing
     Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
     And epic "mw-epic.3" has 2 held stories

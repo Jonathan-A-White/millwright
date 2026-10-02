@@ -119,6 +119,9 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^bead "([^"]*)" is known to the tracker$`, c.beadIsKnownToTheTracker)
 	ctx.Given(`^bead "([^"]*)" has an open question, txid "([^"]*)"$`, c.beadHasAnOpenQuestion)
 	ctx.Given(`^epic "([^"]*)" has (\d+) held stories$`, c.epicHasNHeldStories)
+	ctx.Given(`^epic "([^"]*)" has (\d+) open stories$`, c.epicHasNOpenStories)
+	ctx.Given(`^bead "([^"]*)" has an open question offering "([^"]*)", txid "([^"]*)"$`, c.epicHasAnOpenQuestionOffering)
+	ctx.Then(`^bead "([^"]*)" is commented a HELD with txid "([^"]*)"$`, c.beadIsCommentedAHELDWithTxid)
 	ctx.Given(`^epic "([^"]*)" has an open question offering "([^"]*)", txid "([^"]*)"$`, c.epicHasAnOpenQuestionOffering)
 	ctx.Given(`^a postern reply for bead "([^"]*)" with answer "([^"]*)" and txid "([^"]*)" addressed to this key$`,
 		c.aPosternReplyAddressedToThisKey)
@@ -562,6 +565,33 @@ func (c *posternInboxContext) epicHasNHeldStories(id string, n int) error {
 		if err := c.memory.SetStatus(storyID, apptest.StatusDeferred); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// epicHasNOpenStories files epic id with n open, unclaimed stories under it,
+// named "<id>.1", "<id>.2" and so on, so a Hold answer has something to hold.
+func (c *posternInboxContext) epicHasNOpenStories(id string, n int) error {
+	c.memory.AddEpic(id, domain.Path{})
+	for i := 1; i <= n; i++ {
+		c.memory.AddStory(id, domain.Story{ID: fmt.Sprintf("%s.%d", id, i), Title: fmt.Sprintf("Story %d", i)})
+	}
+	return nil
+}
+
+// beadIsCommentedAHELDWithTxid checks bead's last comment is the HELD comment
+// a Hold answer leaves, naming txid.
+func (c *posternInboxContext) beadIsCommentedAHELDWithTxid(bead, txid string) error {
+	comments, err := c.memory.StoryComments(context.Background(), bead)
+	if err != nil {
+		return err
+	}
+	if len(comments) == 0 {
+		return fmt.Errorf("expected a comment on %s, found none", bead)
+	}
+	got := comments[len(comments)-1].Text
+	if !strings.HasPrefix(got, "HELD by the Governor via postern, txid "+txid) {
+		return fmt.Errorf("expected the last comment on %s to be a HELD naming %s, got %q", bead, txid, got)
 	}
 	return nil
 }
