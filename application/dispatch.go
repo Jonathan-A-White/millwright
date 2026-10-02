@@ -457,6 +457,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		}
 		if err != nil {
 			RecordSyncHalt(ctx, d.SyncHalts, err, d.now())
+			d.tellVaultBlocked(ctx, err, &report)
 			return report, fmt.Errorf("dispatching on %s: the hosts could not be brought level, so nothing was claimed: %w", d.Host, err)
 		}
 		KeepSyncHalt(ctx, d.SyncHalts, synced, nil, d.now())
