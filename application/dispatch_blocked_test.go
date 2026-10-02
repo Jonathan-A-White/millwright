@@ -17,6 +17,13 @@ func (s *blockedSync) Run(context.Context) (application.SyncReport, error) {
 	return application.SyncReport{Host: "vps"}, &application.VaultBlocked{Host: "vps", Files: s.files}
 }
 
+// cleanSync is a HostSync that finds the vault clean and the hosts level.
+type cleanSync struct{}
+
+func (cleanSync) Run(context.Context) (application.SyncReport, error) {
+	return application.SyncReport{Host: "vps"}, nil
+}
+
 // aBlockedDispatch is a dispatch whose sync refuses on a dirty vault, with a
 // mailbox, a note store and a clock the test moves.
 func aBlockedDispatch(t *testing.T, files ...string) (application.Dispatch, *apptest.FakeMailbox, *time.Time) {
@@ -38,6 +45,11 @@ func TestDispatchMailsTheMayorOnceAnHourWhenTheVaultIsDirty(t *testing.T) {
 	if _, err := dispatch.Run(ctx); err == nil {
 		t.Fatalf("expected a dispatch on a dirty vault to be refused")
 	}
+	if mailbox.Writes() != 0 {
+		t.Fatalf("expected the first sighting to send nothing, got %d writes", mailbox.Writes())
+	}
+	*now = now.Add(time.Minute)
+	_, _ = dispatch.Run(ctx)
 	inbox, _ := mailbox.Inbox(ctx, application.MayorMailbox)
 	if len(inbox) != 1 {
 		t.Fatalf("expected one mail to the mayor, got %d", len(inbox))
@@ -65,14 +77,43 @@ func TestDispatchMailsAgainAtOnceForADifferentDirtyFile(t *testing.T) {
 	ctx := context.Background()
 	dispatch, mailbox, now := aBlockedDispatch(t, ".mayor-up.log")
 	_, _ = dispatch.Run(ctx)
+	*now = now.Add(time.Minute)
+	_, _ = dispatch.Run(ctx)
 
 	*now = now.Add(time.Minute)
 	dispatch.Sync = &blockedSync{files: []string{"CHARTER.md"}}
+	_, _ = dispatch.Run(ctx)
+	if inbox, _ := mailbox.Inbox(ctx, application.MayorMailbox); len(inbox) != 1 {
+		t.Fatalf("expected a different file set to wait for its second sighting, got %d mails", len(inbox))
+	}
+	*now = now.Add(time.Minute)
 	_, _ = dispatch.Run(ctx)
 
 	inbox, _ := mailbox.Inbox(ctx, application.MayorMailbox)
 	if len(inbox) != 2 || !strings.Contains(inbox[1].Body, "CHARTER.md") {
 		t.Errorf("expected a second mail naming CHARTER.md, got %+v", inbox)
+	}
+}
+
+func TestDispatchSendsNoMailWhenTheVaultIsCleanAtTheNextTick(t *testing.T) {
+	ctx := context.Background()
+	dispatch, mailbox, now := aBlockedDispatch(t, "runs/mw-gq6.230/result.json")
+	_, _ = dispatch.Run(ctx)
+
+	// the close-out committed its files: the next tick finds the vault clean
+	*now = now.Add(time.Minute)
+	dispatch.Sync = cleanSync{}
+	if _, err := dispatch.Run(ctx); err != nil {
+		t.Fatalf("expected a clean tick to dispatch, got %v", err)
+	}
+	// the same files dirty again are a first sighting once more, not a second
+	*now = now.Add(time.Minute)
+	dispatch.Sync = &blockedSync{files: []string{"runs/mw-gq6.230/result.json"}}
+	_, _ = dispatch.Run(ctx)
+
+	if mailbox.Writes() != 0 {
+		inbox, _ := mailbox.Inbox(ctx, application.MayorMailbox)
+		t.Errorf("expected no mail when the vault was clean between two sightings, got %d writes: %+v", mailbox.Writes(), inbox)
 	}
 }
 
