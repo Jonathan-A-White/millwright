@@ -301,6 +301,9 @@ func (i PosternInbox) applyOne(ctx context.Context, m PosternInboxMessage, outco
 		return result, handled && err == nil, err
 	}
 	if m.ThreadIsBead {
+		if result, handled, err := i.applyLooksGood(ctx, m); handled || err != nil {
+			return result, handled && err == nil, err
+		}
 		recorded, fresh, err := i.recordThreadCommentOnce(ctx, m, saved)
 		if err != nil || !recorded {
 			return posternApplied{}, false, err
@@ -319,6 +322,61 @@ func (i PosternInbox) applyOne(ctx context.Context, m PosternInboxMessage, outco
 		return result, true, nil
 	}
 	return posternApplied{}, false, nil
+}
+
+// isLooksGood reports whether text is only the words "looks good": trimmed,
+// in any case, with one final '.' or '!' allowed. The Postern app's Looks good
+// tap on a demo card sends exactly these words into the demo's channel.
+func isLooksGood(text string) bool {
+	text = strings.TrimSpace(text)
+	text = strings.TrimSpace(strings.TrimSuffix(strings.TrimSuffix(text, "."), "!"))
+	if strings.HasSuffix(text, ".") || strings.HasSuffix(text, "!") {
+		return false
+	}
+	return strings.EqualFold(strings.Join(strings.Fields(text), " "), "looks good")
+}
+
+// isDemo reports whether bead is one the Governor is to be shown working: it
+// carries LabelDemo, or its title starts "Demo" as the demo stories' do.
+func isDemo(bead StoryDetail) bool {
+	title := strings.TrimSpace(bead.Story.Title)
+	return hasLabel(bead.Labels, LabelDemo) || strings.HasPrefix(title, "Demo") || strings.HasPrefix(title, "DEMO")
+}
+
+// applyLooksGood closes a demo on the Governor's "Looks good", as the close
+// action closes a story: m is a message in a bead's channel whose whole text
+// is those words, and the bead is an open, unclaimed demo. Any other message,
+// or bead, is not its: it reports false and changes nothing, so the message
+// takes the ordinary path.
+func (i PosternInbox) applyLooksGood(ctx context.Context, m PosternInboxMessage) (posternApplied, bool, error) {
+	if i.Tracker == nil || !isLooksGood(m.Text) {
+		return posternApplied{}, false, nil
+	}
+	found, err := i.Tracker.ShowBeads(ctx, []string{m.Thread})
+	if err != nil {
+		return posternApplied{}, false, fmt.Errorf("reading %s for the Governor's Looks good: %w", m.Thread, err)
+	}
+	if len(found) == 0 {
+		return posternApplied{}, false, nil
+	}
+	bead := found[0]
+	if bead.IsEpic || bead.Closed() || isClaimed(bead) || !isDemo(bead) {
+		return posternApplied{}, false, nil
+	}
+	reason := fmt.Sprintf("Demo accepted on the Governor's 'Looks good' (txid %s)", m.Txid)
+	comment := fmt.Sprintf("The Governor by postern %s, on the demo: %q (txid %s). %s", sentInFull(m.Ts), strings.TrimSpace(m.Text), m.Txid, reason)
+	// The comment first, as applyClose writes it: a close that fails leaves no
+	// bead the Governor's word is not on.
+	if err := i.Tracker.CommentOnStory(ctx, bead.Story.ID, comment); err != nil {
+		return posternApplied{}, false, fmt.Errorf("recording the Governor's Looks good on %s: %w", bead.Story.ID, err)
+	}
+	result := posternApplied{Kind: PosternActionClose, Bead: bead.Story.ID, Txid: m.Txid}
+	if err := i.Tracker.CloseStory(ctx, bead.Story.ID, reason); err != nil {
+		result.Refused, result.Detail = true, fmt.Sprintf("closing %s failed: %v", bead.Story.ID, err)
+		return result, true, i.mail(ctx, fmt.Sprintf("Not applied: Looks good on %s", bead.Story.ID),
+			fmt.Sprintf("The Governor said Looks good by postern (txid %s) to %s; not applied: %s.", m.Txid, bead.Story.ID, result.Detail))
+	}
+	return result, true, i.mail(ctx, fmt.Sprintf("Closed: %s on his Looks good", bead.Story.ID), comment)
 }
 
 // applyAction applies one of the Governor's section 13 actions to its bead,

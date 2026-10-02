@@ -26,6 +26,10 @@ func (c *posternInboxContext) registerPosternCloseSteps(ctx *godog.ScenarioConte
 	ctx.Given(`^epic "([^"]*)" has an open, unclaimed story "([^"]*)"$`, c.epicHasAnOpenStory)
 	ctx.Then(`^nothing under epic "([^"]*)" was closed with the reason "([^"]*)"$`, c.nothingUnderEpicWasClosed)
 	ctx.Then(`^bead "([^"]*)" was closed with the reason "([^"]*)"$`, c.beadWasClosedWithTheReason)
+	ctx.Then(`^bead "([^"]*)" was not closed with the reason "([^"]*)"$`, c.beadWasNotClosedWithTheReason)
+	ctx.Given(`^a demo story "([^"]*)" is known to the tracker$`, c.aDemoStoryIsKnown)
+	ctx.Given(`^a story "([^"]*)" titled "([^"]*)" is known to the tracker$`, c.aStoryTitledIsKnown)
+	ctx.Given(`^bead "([^"]*)" is already closed$`, c.beadIsAlreadyClosed)
 	ctx.Then(`^mail "([^"]*)" was sent to mayor saying "([^"]*)"$`, c.mailWasSentToMayorSaying)
 }
 
@@ -151,4 +155,28 @@ func (c *posternInboxContext) nothingUnderEpicWasClosed(epic, reason string) err
 		}
 	}
 	return nil
+}
+
+func (c *posternInboxContext) beadWasNotClosedWithTheReason(bead, reason string) error {
+	if got := c.memory.CloseReason(bead); got == reason {
+		return fmt.Errorf("expected %s not closed with the reason %q, but it was", bead, reason)
+	}
+	return nil
+}
+
+// aDemoStoryIsKnown files a story carrying the demo label, as the Governor's
+// demo cards are.
+func (c *posternInboxContext) aDemoStoryIsKnown(id string) error {
+	c.memory.AddStory("epic", domain.Story{ID: id, Title: "Show it working"})
+	return c.memory.SetLabels(id, application.LabelDemo)
+}
+
+// aStoryTitledIsKnown files a story with title and no labels.
+func (c *posternInboxContext) aStoryTitledIsKnown(id, title string) error {
+	c.memory.AddStory("epic", domain.Story{ID: id, Title: title})
+	return nil
+}
+
+func (c *posternInboxContext) beadIsAlreadyClosed(id string) error {
+	return c.memory.SetStatus(id, apptest.StatusClosed)
 }

@@ -88,6 +88,81 @@ Feature: mw postern inbox --apply
     When mw postern inbox --apply is run
     Then mail "Governor on mw-act.3: ship it" was sent to mayor saying "answer in its thread: mw postern send --bead-channel mw-act.3 --re direct:ch1"
 
+  # The demo card's Looks good tap sends those two words into the demo's
+  # channel; on a demo bead, a message that is only those words closes it.
+  Scenario: Looks good in a demo's channel closes the demo, quoting him, and the Mayor is mailed
+    Given a demo story "mw-demo.1" is known to the tracker
+    And a postern message from "governor-pubkey-hex" in the channel of bead "mw-demo.1" with text "Looks good" and txid "direct:lg1"
+    When mw postern inbox --apply is run
+    Then bead "mw-demo.1" now stands "closed"
+    And bead "mw-demo.1" was closed with the reason "Demo accepted on the Governor's 'Looks good' (txid direct:lg1)"
+    And bead "mw-demo.1"'s last comment contains "The Governor by postern"
+    And bead "mw-demo.1"'s last comment contains "Looks good"
+    And bead "mw-demo.1"'s last comment contains "(txid direct:lg1)"
+    And mail "Closed: mw-demo.1 on his Looks good" was sent to mayor
+    And the txid "direct:lg1" is marked applied
+
+  Scenario: A demo story known by its title is closed too
+    Given a story "mw-demo.2" titled "Demo: the card shows" is known to the tracker
+    And a postern message from "governor-pubkey-hex" in the channel of bead "mw-demo.2" with text "Looks good" and txid "direct:lg2"
+    When mw postern inbox --apply is run
+    Then bead "mw-demo.2" now stands "closed"
+
+  Scenario Outline: Case, spaces and one final full stop or exclamation mark do not matter
+    Given a demo story "mw-demo.3" is known to the tracker
+    And a postern message from "governor-pubkey-hex" in the channel of bead "mw-demo.3" with text "<text>" and txid "direct:lg3"
+    When mw postern inbox --apply is run
+    Then bead "mw-demo.3" now stands "closed"
+    And mail "Closed: mw-demo.3 on his Looks good" was sent to mayor
+
+    Examples:
+      | text           |
+      | looks good.    |
+      |   LOOKS GOOD!  |
+      | Looks  Good    |
+
+  Scenario Outline: Anything more than the words takes the ordinary path, and the demo stays open
+    Given a demo story "mw-demo.4" is known to the tracker
+    And a postern message from "governor-pubkey-hex" in the channel of bead "mw-demo.4" with text "<text>" and txid "direct:lg4"
+    When mw postern inbox --apply is run
+    Then bead "mw-demo.4" now stands "open"
+    And bead "mw-demo.4" is commented by the Governor saying "<text>"
+    And mail "Governor on mw-demo.4: <text>" was sent to mayor
+
+    Examples:
+      | text                         |
+      | Looks good, but the colour is off |
+      | This looks good              |
+      | Looks good!!                 |
+
+  Scenario: Looks good on a bead that is not a demo does not close it
+    Given a postern message from "governor-pubkey-hex" in the channel of bead "mw-act.3" with text "Looks good" and txid "direct:lg5"
+    When mw postern inbox --apply is run
+    Then bead "mw-act.3" now stands "open"
+    And mail "Governor on mw-act.3: Looks good" was sent to mayor
+
+  Scenario: Looks good on a demo already closed takes the ordinary path
+    Given a demo story "mw-demo.6" is known to the tracker
+    And bead "mw-demo.6" is already closed
+    And a postern message from "governor-pubkey-hex" in the channel of bead "mw-demo.6" with text "Looks good" and txid "direct:lg6"
+    When mw postern inbox --apply is run
+    Then mail "Governor on mw-demo.6: Looks good" was sent to mayor
+    And bead "mw-demo.6" was not closed with the reason "Demo accepted on the Governor's 'Looks good' (txid direct:lg6)"
+
+  Scenario: A second pass over the same Looks good does nothing
+    Given a demo story "mw-demo.7" is known to the tracker
+    And a postern message from "governor-pubkey-hex" in the channel of bead "mw-demo.7" with text "Looks good" and txid "direct:lg7"
+    When mw postern inbox --apply is run
+    And mw postern inbox --apply is run
+    Then bead "mw-demo.7" has 1 comment
+    And bead "mw-demo.7" now stands "closed"
+
+  Scenario: Looks good from anyone but the Governor does not close the demo
+    Given a demo story "mw-demo.8" is known to the tracker
+    And a postern message from "someone-else-pubkey-hex" in the channel of bead "mw-demo.8" with text "Looks good" and txid "direct:lg8"
+    When mw postern inbox --apply is run
+    Then bead "mw-demo.8" now stands "open"
+
   Scenario: A voice note from the Governor is heard on this host, written on its bead, and sent back to him
     Given the postern inbox hears voice notes as "ship the storage engine as planned"
     And a postern voice note from "governor-pubkey-hex" in the channel of bead "mw-act.3" with txid "direct:voice"

@@ -997,7 +997,11 @@ this host does not know is left as text, and one it cannot apply (a hold on a
 claimed story, say) is refused and the Mayor told why. BRC-78 has no replay
 protection, so an action is applied only when the backend vouched for the
 record's signer (the key that delivered it, or signed its transaction);
-otherwise it too is left as text. See
+otherwise it too is left as text. A message in an open demo bead's channel
+(label `demo`, or a title starting `Demo`) whose whole text is `Looks good` —
+any case, one final `.` or `!` — closes the demo as the `close` action does,
+the comment quoting him and the Mayor mailed `Closed: <bead> on his Looks good`;
+anything else, or any other bead, is an ordinary comment. See
 `features/postern_inbox_apply.feature`.
 
 The Governor's *Move home* tap (§18, class `move-home`) is run by the same
