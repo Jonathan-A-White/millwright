@@ -330,3 +330,90 @@ Feature: mw doctor
     And the note "doctor.laptop.tmp-leftovers" holds "cannot-tell"
     And the tmp file "nbs-spool-dead" exists
     And the tmp file "notes.txt" exists
+
+  Scenario: The real boost-reach check says nothing when the Boost has been silent for 29 minutes
+    Given the home host's boost-reach check, reaching the Boost by "ssh desktop"
+    And the Boost does not answer ssh
+    When mw doctor's boost-reach check runs
+    And 29 minutes go by
+    And mw doctor's boost-reach check runs
+    Then mw doctor leaves with the status 0
+    And no boost-reach alarm was sent
+
+  Scenario: The real boost-reach check alarms once when the Boost has been silent for 31 minutes, and not again
+    Given the home host's boost-reach check, reaching the Boost by "ssh desktop"
+    And the Boost does not answer ssh
+    When mw doctor's boost-reach check runs
+    And 31 minutes go by
+    And mw doctor's boost-reach check runs
+    Then exactly 1 boost-reach alarm was sent
+    And the boost-reach alarm says "The desktop (Boost) has not answered ssh since 2026-09-23 12:00 UTC"
+    And the boost-reach alarm says "wsl --shutdown (mw-6ww.60)"
+    When 5 minutes go by
+    And mw doctor's boost-reach check runs
+    And 5 minutes go by
+    And mw doctor's boost-reach check runs
+    Then exactly 1 boost-reach alarm was sent
+
+  Scenario: The real boost-reach check alarms once when the Boost answers again after an alarm, and forgets
+    Given the home host's boost-reach check, reaching the Boost by "ssh desktop"
+    And the Boost does not answer ssh
+    When mw doctor's boost-reach check runs
+    And 31 minutes go by
+    And mw doctor's boost-reach check runs
+    And 10 minutes go by
+    And the Boost answers ssh
+    And mw doctor's boost-reach check runs
+    Then exactly 2 boost-reach alarms were sent
+    And the boost-reach alarm says "The desktop (Boost) answers again (down 2026-09-23 12:00 to 2026-09-23 12:41 UTC)"
+    And the boost-reach check keeps nothing
+    When 5 minutes go by
+    And mw doctor's boost-reach check runs
+    Then exactly 2 boost-reach alarms were sent
+
+  Scenario: The real boost-reach check forgets a short outage without an alarm when the Boost answers again
+    Given the home host's boost-reach check, reaching the Boost by "ssh desktop"
+    And the Boost does not answer ssh
+    When mw doctor's boost-reach check runs
+    And 10 minutes go by
+    And the Boost answers ssh
+    And mw doctor's boost-reach check runs
+    Then no boost-reach alarm was sent
+    And the boost-reach check keeps nothing
+
+  Scenario: The real boost-reach check records nothing and alarms nothing while the home's wg hub check is faulty
+    Given the home host's boost-reach check, reaching the Boost by "ssh desktop"
+    And the Boost does not answer ssh
+    And the home's wg hub check is faulty
+    When mw doctor's boost-reach check runs
+    And 45 minutes go by
+    And mw doctor's boost-reach check runs
+    Then mw doctor leaves with the status 0
+    And no boost-reach alarm was sent
+    And the boost-reach check keeps nothing
+
+  Scenario: The real boost-reach check on the Boost itself is n/a
+    Given the boost-reach check run on the Boost itself, reaching the other by "ssh laptop"
+    And the Boost does not answer ssh
+    When mw doctor's boost-reach check runs
+    And 45 minutes go by
+    And mw doctor's boost-reach check runs
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "boost-reach ok n/a"
+    And no boost-reach alarm was sent
+    And the boost-reach check keeps nothing
+
+  Scenario: The real boost-reach check with no hands_hosts entry for the Boost is n/a
+    Given the home host's boost-reach check, with no hands_hosts entry for the Boost
+    And the Boost does not answer ssh
+    When mw doctor's boost-reach check runs
+    And 45 minutes go by
+    And mw doctor's boost-reach check runs
+    Then the doctor log holds "boost-reach ok n/a"
+    And no boost-reach alarm was sent
+    And the boost-reach check keeps nothing
+
+  Scenario: The real boost-reach check probes with BatchMode and a ten second connect timeout
+    Given the home host's boost-reach check, reaching the Boost by "ssh desktop"
+    When mw doctor's boost-reach check runs
+    Then the boost-reach probe ran "ssh desktop -o BatchMode=yes -o ConnectTimeout=10 true"

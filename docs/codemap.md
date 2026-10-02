@@ -21,7 +21,7 @@
 | `Transcripts` | `application/seatcontext.go` | `infrastructure/claude/transcripts.go` | none |
 | Reap{Terminal,Log,Armer} | `application/seatreap.go` | `infrastructure/{tmux/reap,vault/reaplog,reaper/arm}.go` | `apptest.Fake{Windows,ReapArmer}` |
 | `WatchProbes` | `application/watch.go` | `infrastructure/watch/watch.go` | `apptest.FakeWatch` |
-| `Doctor{Check,State,Log,Notes}` | `application/doctor.go` | `infrastructure/doctor` | none |
+| `Doctor{Check,State,Log,Notes}` | `application/doctor.go` | `infrastructure/doctor` (boostreach.go: boost-reach) | none |
 | `TickLog` | `application/millhandtick.go` | `infrastructure/ticklog/ticklog.go` | `apptest.FakeTickLog` |
 | `Worktrees` | `application/worktrees.go` | `infrastructure/rig/worktree.go` | `application/dispatch_test.go` |
 | `HostLoad` | `application/hostload.go` | `infrastructure/hostload/hostload.go` | `apptest.FakeHostLoad` |
@@ -37,21 +37,21 @@
 
 | Use case | File | Command | Feature |
 | --- | --- | --- | --- |
-| `File` | `application/file.go` | `mw file` — `cmd/mw/file.go` | `features/file_plan.feature` |
-| `Release` | `application/release.go` | `mw release` — `cmd/mw/release.go` | `features/release.feature` |
-| `Retry` | `application/retry.go` | `mw retry` — `cmd/mw/retry.go` | `features/retry.feature` |
-| `Show` | `application/show.go` | `mw show` — `cmd/mw/show.go` | `features/show.feature` |
-| `Dispatch` | `application/dispatch.go` | `mw dispatch` — `cmd/mw/dispatch.go` | `features/dispatch.feature` |
-| `Next` | `application/next.go` | `mw next` — `cmd/mw/next.go` | `features/next.feature` |
-| `Check` | `application/check.go` | `mw check` — `cmd/mw/check.go` | `features/check.feature` |
-| `Status` | `application/status.go` | `mw status` — `cmd/mw/status.go` | `features/status.feature` |
-| `Brief` | `application/brief.go` | `mw brief` — `cmd/mw/brief.go` | `features/brief.feature` |
-| `Sweep` | `application/sweep.go` | `mw sweep` — `cmd/mw/sweep.go` | `features/sweep.feature` |
-| `Tidy` | `application/tidy.go` | `mw tidy` — `cmd/mw/tidy.go` | `features/tidy.feature` |
-| `Sync` | `application/sync.go` | `mw sync` — `cmd/mw/sync.go` | `features/sync.feature` |
-| `Nudge` | `application/nudge.go` | `mw nudge` — `cmd/mw/nudge.go` | none |
-| `Mail` | `application/mail.go` | `mw mail` — `cmd/mw/mail.go` | `features/mail.feature` |
-| `Home` | `application/home.go` | `mw home` — `cmd/mw/home.go` | `features/home.feature` |
+| File | `application/file.go` | `mw file` — `cmd/mw/file.go` | `features/file_plan.feature` |
+| Release | `application/release.go` | `mw release` — `cmd/mw/release.go` | `features/release.feature` |
+| Retry | `application/retry.go` | `mw retry` — `cmd/mw/retry.go` | `features/retry.feature` |
+| Show | `application/show.go` | `mw show` — `cmd/mw/show.go` | `features/show.feature` |
+| Dispatch | `application/dispatch.go` | `mw dispatch` — `cmd/mw/dispatch.go` | `features/dispatch.feature` |
+| Next | `application/next.go` | `mw next` — `cmd/mw/next.go` | `features/next.feature` |
+| Check | `application/check.go` | `mw check` — `cmd/mw/check.go` | `features/check.feature` |
+| Status | `application/status.go` | `mw status` — `cmd/mw/status.go` | `features/status.feature` |
+| Brief | `application/brief.go` | `mw brief` — `cmd/mw/brief.go` | `features/brief.feature` |
+| Sweep | `application/sweep.go` | `mw sweep` — `cmd/mw/sweep.go` | `features/sweep.feature` |
+| Tidy | `application/tidy.go` | `mw tidy` — `cmd/mw/tidy.go` | `features/tidy.feature` |
+| Sync | `application/sync.go` | `mw sync` — `cmd/mw/sync.go` | `features/sync.feature` |
+| Nudge | `application/nudge.go` | `mw nudge` — `cmd/mw/nudge.go` | none |
+| Mail | `application/mail.go` | `mw mail` — `cmd/mw/mail.go` | `features/mail.feature` |
+| Home | `application/home.go` | `mw home` — `cmd/mw/home.go` | `features/home.feature` |
 | `HomeMove` | `application/homemove.go` | `mw home move` — `cmd/mw/homemove.go` | none: `docs/home-move.md` |
 | `Seat{Context,Up,Reap,Handover}` | `application/seat{context,up,reap,handover}.go` | `mw seat context`/`up`/`reap`/`handover` — `cmd/mw/seat.go` | `features/seat_{context,up,reap}.feature` |
 | Talk{Call,Model,Say,Wait} | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go | mw talk call/say/wait/model cmd/mw/talk.go | features/talk_*.feature |

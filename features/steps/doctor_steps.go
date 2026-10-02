@@ -52,6 +52,9 @@ type doctorContext struct {
 	tmpLeftoversProc      string
 	tmpLeftoversFDCounter int
 
+	// boost is the fixture of the boost-reach scenarios; nil in any other.
+	boost *boostReachFixture
+
 	out    bytes.Buffer
 	report application.DoctorReport
 	err    error
@@ -77,6 +80,8 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 		}
 		return ctx, nil
 	})
+
+	c.registerBoostReachSteps(ctx)
 
 	ctx.Given(`^a doctor check "([^"]*)" whose probe says ok$`, c.aCheckWhoseProbeSaysOK)
 	ctx.Given(`^a doctor check "([^"]*)" whose probe says faulty "([^"]*)"$`, c.aCheckWhoseProbeSaysFaulty)

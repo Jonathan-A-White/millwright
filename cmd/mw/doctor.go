@@ -20,8 +20,8 @@ import (
 // cure, damper and way back, run on this host and logged here. It calls
 // nothing but a check's own probe or cure, and never AI or mail itself: a
 // check left needing a person is a beads note, one key per check, and
-// `mw millhand tick` is what wakes the Millhand for it. The one push is
-// mayor-stale's alarm to the Governor, sent from its own cure.
+// `mw millhand tick` is what wakes the Millhand for it. The only pushes are
+// the alarms to the Governor, mayor-stale's and boost-reach's, sent from their cures.
 func newDoctorCmd() *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
@@ -126,7 +126,9 @@ func newDoctorCmd() *cobra.Command {
 			mayorStale := doctor.NewMayorStale(vault, store)
 			mayorStale.Home, mayorStale.Host = mwVault(vault, host), host
 			mayorStale.Limit = time.Duration(staleMinutes) * time.Minute
-			mayorStale.Alarm = func(ctx context.Context, text string) error {
+			// One alarm, shared by every check that tells the Governor in its own
+			// words: a Postern push of class alarm, and the emergency event.
+			alarm := func(ctx context.Context, text string) error {
 				_, err := handsPush{gateway: mwGateway(vault, host)}.Run(ctx, application.PosternSendRequest{Class: "alarm", Text: text})
 				// The alarm also rides the emergency lane of the event log, so the
 				// Governor's app hears it at once; the push is the alarm proper.
@@ -135,6 +137,7 @@ func newDoctorCmd() *cobra.Command {
 				}
 				return err
 			}
+			mayorStale.Alarm = alarm
 			batteryLow, batteryCritical, err := config.DoctorBatteryThresholds()
 			if err != nil {
 				return err
@@ -148,6 +151,17 @@ func newDoctorCmd() *cobra.Command {
 				}
 				return emitDoctorEmergency(ctx, eventlog.New(logPath), eventsClock, host, text, cmd.ErrOrStderr())
 			}
+			handsHosts, err := config.HandsHosts()
+			if err != nil {
+				return err
+			}
+			wg := doctor.NewWg(wgHub, reach, wgUnit, store)
+			boostReach := doctor.NewBoostReach(mwVault(vault, host), host, handsHosts, store)
+			boostReach.Alarm = alarm
+			boostReach.WgFaulty = func(ctx context.Context) bool {
+				verdict, _ := wg.Probe(ctx)
+				return verdict == application.DoctorFaulty
+			}
 			tmpLeftovers := doctor.NewTmpLeftovers(os.TempDir())
 			tmpLeftovers.Budget = tmpLeftoversBudget
 			return runDoctor(cmd, application.Doctor{
@@ -155,7 +169,7 @@ func newDoctorCmd() *cobra.Command {
 					doctor.NewDaemonReload(units),
 					doctor.NewWifi(reach, powershell, store),
 					doctor.NewTunnel(tunnelHost, reach, tunnelUnit, tunnelProbe),
-					doctor.NewWg(wgHub, reach, wgUnit, store),
+					wg,
 					doctor.NewVaultDirty(vault, host, store),
 					doctor.NewTimers(units),
 					&doctor.BeadsSize{Dir: vault, Budget: beadsBudget},
@@ -167,6 +181,7 @@ func newDoctorCmd() *cobra.Command {
 					beadsServerCheck,
 					posternChannel,
 					battery,
+					boostReach,
 				},
 				State: store,
 				Log:   store,
