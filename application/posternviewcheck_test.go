@@ -76,6 +76,17 @@ func TestHowToCheckCountsTheRealHeadingsWithQualifiers(t *testing.T) {
 			t.Errorf("%s: expected the steps, got %q", id, got)
 		}
 	}
+	// mw-j0f2d.37: the heading is ", for the Governor" alone on its line, no colon, no parenthesis.
+	talk := "Done.\nHOW TO CHECK IT, for the Governor\n\n1. Reload Postern on the phone and open the Talk line (Channels, then Talk\nto the Mayor).\n2. Press and hold 'Hold to talk'. It reads 'Release to send'.\n\nFor the rig memory: nothing"
+	if got, want := howToCheck([]Comment{{Text: talk}}), "1. Reload Postern on the phone and open the Talk line (Channels, then Talk\nto the Mayor).\n2. Press and hold 'Hold to talk'. It reads 'Release to send'."; got != want {
+		t.Errorf("a heading with no colon must count, got %q", got)
+	}
+	if got := howToCheck([]Comment{{Text: "HOW TO CHECK IT, for the Governor\n\nInternal: nothing for the Governor to look at."}}); got != "Internal: nothing for the Governor to look at." {
+		t.Errorf("a colonless heading before the Internal line must count, got %q", got)
+	}
+	if got := howToCheck([]Comment{{Text: "HOW TO CHECK IT, for the Governor\n\nNothing yet.\n1. Not this."}}); got != "" {
+		t.Errorf("a colonless heading must be followed at once by steps, got %q", got)
+	}
 	if got := howToCheck([]Comment{{Text: "HOW TO CHECK IT (for the Governor, on his phone):\n\nInternal: nothing for the Governor to look at."}}); got != "Internal: nothing for the Governor to look at." {
 		t.Errorf("expected the Internal line, got %q", got)
 	}

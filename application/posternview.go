@@ -850,9 +850,14 @@ const viewHowToQualifierLimit = 200
 // "(for the Governor)" alone on its line, the steps on the next.
 var viewParenHeading = regexp.MustCompile(`^[ \t]*[(,][^\n]*\)[ \t]*\r?\n`)
 
+// viewCommaHeading is a heading that goes on after a comma with no colon on its
+// line: ", for the Governor" alone on its line, the steps after a blank line.
+var viewCommaHeading = regexp.MustCompile(`^[ \t]*,[^\n:]*\r?\n`)
+
 // howToAfterHeading is text, which follows HOW TO CHECK IT, without the
 // heading's qualifier: nothing is dropped when the steps start at once;
-// otherwise a parenthetical heading's line, or everything up to the first colon
+// otherwise a parenthetical heading's line, a comma heading's colonless line
+// when steps follow it, or everything up to the first colon
 // within viewHowToQualifierLimit bytes. ok is false when no steps follow.
 func howToAfterHeading(text string) (string, bool) {
 	trim := func(s string) string { return strings.TrimLeft(s, " \t\r\n:;,.-\u2013\u2014") }
@@ -866,6 +871,11 @@ func howToAfterHeading(text string) (string, bool) {
 	if loc := viewParenHeading.FindStringIndex(text); loc != nil {
 		after := trim(text[loc[1]:])
 		return after, viewHowToSteps.MatchString(after)
+	}
+	if loc := viewCommaHeading.FindStringIndex(text); loc != nil {
+		if after := trim(text[loc[1]:]); viewHowToSteps.MatchString(after) {
+			return after, true
+		}
 	}
 	if at := strings.Index(head, ":"); at >= 0 {
 		after := trim(text[at+1:])
