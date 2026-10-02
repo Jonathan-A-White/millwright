@@ -2196,6 +2196,27 @@ claim is a separate command. One story's trouble — a write that fails — is
 reported on a `!` line and the rest are still examined. See
 `features/sweep.feature`.
 
+## Peeking at a running Builder
+
+```sh
+bin/mw peek mw-3evcnk.1
+```
+
+`mw peek <story>` is how to see where a Builder has got to without guessing
+from a tmux target name (which dots in a story id break: the session of
+`mw-3evcnk.1` is `mw-3evcnk_1`). It prints the host, the session and whether it
+is running, exited or gone, when the story was launched and how long ago, the
+formula's current step, and the last 20 lines of what the harness has recorded
+of the session, or of its pane when it has recorded none. A closed story says
+so, and how long it ran.
+
+The step is the first open step of the story's molecule with how many are still
+open; a story with no molecule recorded is a `print-mode run, steps not
+tracked`. A story pathed to another host is read there: mw runs `mw peek
+--here` on it over the ssh line `[hands_hosts]` gives, and prints what comes
+back. `--here` reads this host's session whoever the story is pathed to. Peek
+writes nothing and costs no fuel. See `features/peek.feature`.
+
 ## Closing what is plainly finished
 
 ```sh

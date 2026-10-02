@@ -2,7 +2,7 @@
 
 ## Layers
 
-`domain/`, `domain/events`: stdlib · `application/`: use cases, ports · `application/apptest/`: fakes · infrastructure/: adapters · cmd/mw/: cobra · features/: Gherkin, features/steps/ · template/: embed
+domain/, domain/events: stdlib · application/: use cases, ports; apptest/: fakes · infrastructure/: adapters · cmd/mw/: cobra · features/: Gherkin, steps/ · template/: embed
 
 ## Ports
 
@@ -18,7 +18,7 @@
 | `Runner` | `application/runner.go` | `infrastructure/tmux/tmux.go` | `apptest.FakeRunner` |
 | `Harness` | `application/harness.go` | `infrastructure/claude/claude.go` | `application/seatboot_test.go` |
 | `SeatFiles`, `Windows`, `SeatHarness`, `ActingFile` | `application/seatup.go`, `application/seathandover.go` | `infrastructure/{vault/{seat,reaplog},tmux/window,claude/claude}.go` | `apptest.Fake{Windows,ActingFile}` |
-| `Transcripts` | `application/seatcontext.go` | `infrastructure/claude/transcripts.go` | none |
+| Transcripts, TranscriptTail, PeekRemote | application/seatcontext.go, application/peek.go | infrastructure/{claude,peekremote} | apptest/fakepeek.go |
 | Reap{Terminal,Log,Armer} | `application/seatreap.go` | `infrastructure/{tmux/reap,vault/reaplog,reaper/arm}.go` | `apptest.Fake{Windows,ReapArmer}` |
 | `WatchProbes` | `application/watch.go` | `infrastructure/watch/watch.go` | `apptest.FakeWatch` |
 | `Doctor{Check,State,Log,Notes}` | `application/doctor.go` | `infrastructure/doctor` | none |
@@ -40,7 +40,7 @@
 | File | `application/file.go` | `mw file` — `cmd/mw/file.go` | `features/file_plan.feature` |
 | Release | `application/release.go` | `mw release` — `cmd/mw/release.go` | `features/release.feature` |
 | Retry | `application/retry.go` | `mw retry` — `cmd/mw/retry.go` | `features/retry.feature` |
-| Show | `application/show.go` | `mw show` — `cmd/mw/show.go` | `features/show.feature` |
+| Show, Peek | application/show.go, application/peek.go | mw show/peek — cmd/mw/show.go, cmd/mw/peek.go | features/{show,peek}.feature |
 | Dispatch | `application/dispatch.go` | `mw dispatch` — `cmd/mw/dispatch.go` | `features/dispatch.feature` |
 | Next | `application/next.go` | `mw next` — `cmd/mw/next.go` | `features/next.feature` |
 | Check | `application/check.go` | `mw check` — `cmd/mw/check.go` | `features/check.feature` |
@@ -71,8 +71,6 @@
 
 ## Tests
 
-throwawayVault, installFormula, standIn: infrastructure/beads/; privateRunner: infrastructure/tmux/; aVault, aRig: infrastructure/{vault,rig}/; mwConfig: cmd/mw/.
-
-- One feature: `MW_FEATURE=sweep.feature go test ./features`.
+Helpers: throwawayVault, installFormula, standIn (infrastructure/beads), privateRunner (tmux), aVault, aRig (vault, rig), mwConfig (cmd/mw).
 
 `cmd/mw/root.go`: the tree; `cmd/mw/version.go`.

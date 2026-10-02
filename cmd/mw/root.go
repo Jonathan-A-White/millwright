@@ -28,6 +28,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newDeputyCmd())
 	root.AddCommand(newNextCmd())
 	root.AddCommand(newNudgeCmd())
+	root.AddCommand(newPeekCmd())
 	root.AddCommand(newPosternCmd())
 	root.AddCommand(newPromptCmd())
 	root.AddCommand(newReleaseCmd())
