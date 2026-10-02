@@ -136,7 +136,9 @@ func newSeatReapCmd() *cobra.Command {
 			"and the window's pane is idle. With --when-idle, for a session with nobody to hand over to, it closes\n" +
 			"the window once a handoff newer than the window exists and its pane is idle. Idle means an empty\n" +
 			"input line with nothing running, on two looks in a row; a window whose input line holds text is never\n" +
-			"closed, in either mode.\n\n" +
+			"closed, in either mode. The Deputy's window, with --when-idle, is not closed over unread mail in the\n" +
+			"Deputy's box: the reaper types the mail nudge into the idle pane, logs it, and waits for a handoff\n" +
+			"written after it; a mail count that fails closes nothing.\n\n" +
 			"It looks every --interval (30s) and gives up after --limit (3h), closing nothing and saying so. Arming,\n" +
 			"closing and giving up each append one dated line to .<seat>-reaper.log in the vault. It works on\n" +
 			"tmux's default server unless $" + TmuxSocketEnv + " names another.\n\n" +
@@ -153,7 +155,7 @@ func newSeatReapCmd() *cobra.Command {
 			}
 
 			files := vault.New(dir)
-			_, err = application.SeatReap{
+			reap := application.SeatReap{
 				Seats:    files,
 				Terminal: seatWindows(),
 				Log:      files,
@@ -164,7 +166,14 @@ func newSeatReapCmd() *cobra.Command {
 				Interval: interval,
 				Limit:    limit,
 				Out:      cmd.OutOrStdout(),
-			}.Run(cmd.Context())
+			}
+			// The Deputy's window is not closed over mail waiting in its box.
+			if args[0] == application.DeputySeat {
+				reap.Mail = mwGateway(dir, host)
+				reap.Mailbox = application.DeputyMailbox
+				reap.NudgeFormat = application.DeputyNudgeFormat
+			}
+			_, err = reap.Run(cmd.Context())
 			return err
 		},
 	}

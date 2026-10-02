@@ -11,6 +11,12 @@ Feature: mw seat reap
   the window closes once a handoff newer than the window has been written and
   the pane is idle on two looks in a row.
 
+  A seat with a mailbox, the Deputy's, is not closed over unread mail. In idle
+  mode, once the window would close, the reaper counts the box's unread mail:
+  with some, it types the mail nudge into the idle pane, logs that it nudged and
+  goes on waiting, closing only for a handoff written after the nudge with the
+  box empty; a count that fails closes nothing and is tried again.
+
   The watch gives up after its limit and says so. Arming, closing and giving up
   each append one dated line to the seat's reaper log in the vault.
 
@@ -102,6 +108,39 @@ Feature: mw seat reap
     When the reaper watches "@3" in idle mode, looking every 30 seconds for up to 10 minutes
     Then the reaper closed no window
     And the reaper gave up
+
+  Scenario: Idle mode nudges a seat whose box holds unread mail instead of closing, and closes once it hands off again with the box empty
+    Given the seat has written the handoff "2026-09-19-11" at "2026-09-19T11:00:00Z"
+    And the seat has a mailbox "deputy" holding 2 unread messages
+    And before look 4 the mailbox is empty
+    And before look 4 the seat writes the handoff "2026-09-19-13"
+    When the reaper watches "@3" in idle mode, looking every 30 seconds for up to 10 minutes
+    Then the reaper closed the window "@3" on look 5
+    And the nudge "New mail for deputy: 2 message(s). Run bd mail inbox." was typed into "@3" once
+    And the reaper log holds 3 lines
+    And the reaper log's line 2 says "reap @3: nudged: 2 unread mail(s) for deputy; not closing"
+    And the reaper log's line 3 says "reap @3: closed"
+
+  Scenario: Idle mode does not close a seat whose box still holds mail, and nudges once
+    Given the seat has written the handoff "2026-09-19-11" at "2026-09-19T11:00:00Z"
+    And the seat has a mailbox "deputy" holding 2 unread messages
+    When the reaper watches "@3" in idle mode, looking every 30 seconds for up to 10 minutes
+    Then the reaper closed no window
+    And the nudge "New mail for deputy: 2 message(s). Run bd mail inbox." was typed into "@3" once
+    And the reaper gave up
+
+  Scenario: Idle mode does not close a seat whose mail count fails
+    Given the seat has written the handoff "2026-09-19-11" at "2026-09-19T11:00:00Z"
+    And the seat has a mailbox "deputy" whose count fails
+    When the reaper watches "@3" in idle mode, looking every 30 seconds for up to 10 minutes
+    Then the reaper closed no window
+    And the reaper log's line 2 says "could not be counted"
+    And the reaper gave up
+
+  Scenario: A seat with no mailbox is closed over no mail
+    Given the seat has written the handoff "2026-09-19-11" at "2026-09-19T11:00:00Z"
+    When the reaper watches "@3" in idle mode, looking every 30 seconds for up to 10 minutes
+    Then the reaper closed the window "@3" on look 2
 
   Scenario: A window nothing can date is treated as opened when the watch was armed
     Given the window "@5" named "millhand-2026-09-19-01" of no known age

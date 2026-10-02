@@ -39,6 +39,9 @@ type seatReapContext struct {
 	evented error
 	// closedOnLook is the look each window was closed on.
 	closedOnLook map[string]int
+	// box is the seat's mailbox, nil for a seat that has none, and boxName its name.
+	box     *apptest.FakeMailbox
+	boxName string
 
 	report application.ReapReport
 	err    error
@@ -93,10 +96,14 @@ func InitializeSeatReapScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^before look (\d+) the window "([^"]*)" is closed by someone else$`, c.beforeLookTheWindowIsClosed)
 	ctx.Given(`^before look (\d+) the pane of "([^"]*)" is (idle|working)$`, c.beforeLookThePaneIs)
 	ctx.Given(`^before look (\d+) the seat writes the handoff "([^"]*)"$`, c.beforeLookTheSeatWrites)
+	ctx.Given(`^the seat has a mailbox "([^"]*)" holding (\d+) unread messages$`, c.theSeatHasAMailbox)
+	ctx.Given(`^the seat has a mailbox "([^"]*)" whose count fails$`, c.theSeatHasAMailboxThatFails)
+	ctx.Given(`^before look (\d+) the mailbox is empty$`, c.beforeLookTheMailboxIsEmpty)
 
 	ctx.When(`^the reaper watches "([^"]*)" in (successor|idle) mode, looking every (\d+) seconds for up to (\d+) (minutes|hours)$`, c.theReaperWatches)
 
 	ctx.Then(`^the reaper closed the window "([^"]*)" on look (\d+)$`, c.theReaperClosedOnLook)
+	ctx.Then(`^the nudge "([^"]*)" was typed into "([^"]*)" once$`, c.theNudgeWasTypedOnce)
 	ctx.Then(`^the reaper closed no window$`, c.theReaperClosedNoWindow)
 	ctx.Then(`^the window "([^"]*)" is still open$`, c.theWindowIsStillOpen)
 	ctx.Then(`^the reaper gave up$`, c.theReaperGaveUp)
@@ -237,7 +244,7 @@ var seatReapDuration = map[string]time.Duration{"minutes": time.Minute, "hours":
 
 func (c *seatReapContext) theReaperWatches(window, mode string, seconds, limit int, unit string) error {
 	files := vault.New(c.dir)
-	c.report, c.err = application.SeatReap{
+	reap := application.SeatReap{
 		Seats:    files,
 		Terminal: seatReapTerminal{FakeWindows: c.windows, c: c},
 		Log:      files,
@@ -249,7 +256,49 @@ func (c *seatReapContext) theReaperWatches(window, mode string, seconds, limit i
 		Limit:    time.Duration(limit) * seatReapDuration[unit],
 		Now:      func() time.Time { return c.now },
 		Sleep:    c.sleep,
-	}.Run(context.Background())
+	}
+	if c.box != nil {
+		reap.Mail, reap.Mailbox, reap.NudgeFormat = c.box, c.boxName, application.DeputyNudgeFormat
+	}
+	c.report, c.err = reap.Run(context.Background())
+	return nil
+}
+
+func (c *seatReapContext) theSeatHasAMailbox(name string, unread int) error {
+	c.box, c.boxName = apptest.NewFakeMailbox(), name
+	for i := 0; i < unread; i++ {
+		if _, err := c.box.Send(context.Background(), application.NewMessage{From: "mayor", To: name, Subject: "work"}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *seatReapContext) theSeatHasAMailboxThatFails(name string) error {
+	c.box, c.boxName = apptest.NewFakeMailbox(), name
+	c.box.Err = fmt.Errorf("the tracker did not answer")
+	return nil
+}
+
+func (c *seatReapContext) beforeLookTheMailboxIsEmpty(look string) error {
+	return c.before(look, func() error {
+		inbox, err := c.box.Inbox(context.Background(), c.boxName)
+		if err != nil {
+			return err
+		}
+		for _, message := range inbox {
+			if _, err := c.box.Read(context.Background(), message.ID, c.boxName); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (c *seatReapContext) theNudgeWasTypedOnce(text, id string) error {
+	if typed := c.windows.Typed(id); len(typed) != 1 || typed[0] != text+"\n" {
+		return fmt.Errorf("expected %q typed into %s once, got %q", text, id, typed)
+	}
 	return nil
 }
 
