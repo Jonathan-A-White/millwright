@@ -510,14 +510,18 @@ left exactly as it was and the report's `rig` line says why.
 A host that runs its own `mw` from a rig's checkout says so in its config, and a
 moved checkout is then rebuilt by the landing itself: the command the
 `[after_landing]` table names for the rig is run once, in the rig's checkout,
-under a five-minute limit, after the checkout was moved and never otherwise (see
+under a five-minute limit (longer for a rig the `[after_landing_limit]` table names, `postern = "20m"`), after the checkout was moved and never otherwise (see
 *What a host is told*). It changes nothing about the landing: the story is recorded
 landed, ledgered and closed exactly as without it. A command that exits non-zero,
 is not found or outlives its limit is one plain line — `after landing: make
 build: exit status 2: <the tail of its output>` — in the report, the ledger line,
 a comment on the story and the `Landed:` mail to the Mayor, so that they know
 this host's binary is old; success is `after landing: make build: ok` in the
-report and the mail. A rig the table does not name runs nothing.
+report and the mail. A command stopped at its limit is also said first in the mail
+to the Mayor, `after landing STOPPED at the limit: the site may be half-deployed`,
+because a site copied by a command cut off midway is half-deployed; a rig that ships
+a site uses `contrib/site-deploy`, which cannot leave it so (`docs/site-deploy.md`).
+A rig the table does not name runs nothing.
 
 A rig whose backend is a program the home runs (postern's `server/`) names it in a
 `[backend.<rig>]` table, and a landing that changed it is not left half deployed
@@ -773,6 +777,9 @@ millwright = "make test"           # how a close-out asks this rig if it is gree
 [after_landing]
 millwright = "make build"          # run in this rig's checkout once a landing has moved it (default: nothing)
 
+[after_landing_limit]
+postern = "20m"                    # how long that command may run before it is stopped, per rig (default 5m); see docs/site-deploy.md
+
 [backend.postern]                  # a rig whose backend the home runs; leave it out for none (see mw next)
 dir = "server"                     # a landing that changed anything here stages the backend (default server)
 build = "go build -o {out} ./cmd/postern"  # run in dir of a throwaway worktree; {out} is where the binary goes
@@ -807,7 +814,8 @@ its own. A rig `[after_landing]` does not name has nothing run after a
 landing; the table is for a host whose timers run a binary built in a rig's
 checkout, which a landing leaves one commit stale until the command rebuilds it.
 The command is one line, read by `/bin/sh` in the rig's checkout like a `[tests]`
-line, and is stopped after five minutes.
+line, and is stopped after five minutes, or after the time the rig has in
+`[after_landing_limit]`.
 
 That same command keeps the host's mw level without a landing of its own
 (mw-gq6.183): on a host that names one for `millwright`, every `mw millhand
