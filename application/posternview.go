@@ -737,6 +737,11 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 			continue
 		}
 		howTo := landedHowTo(newMemory[e.detail.Story.ID])
+		if howToIsInternal(howTo) {
+			// The closing step's "Internal: nothing for the Governor to look
+			// at." gives him nothing to check: the Mayor checks the landing.
+			howTo = ""
+		}
 		need := b.need(PosternNeedVerify, e, e.detail.ClosedAt, verifyText(e.detail, howTo))
 		if howTo == "" {
 			need.WaitsFor = PosternWaitsMayor
@@ -840,11 +845,22 @@ const viewHowToLimit = 1500
 // viewForTheGovernor is the words a HOW TO CHECK IT heading may go on with.
 var viewForTheGovernor = regexp.MustCompile(`(?i)^[ \t]*,?[ \t]*for the governor`)
 
+// viewHowToSteps is how a real HOW TO CHECK IT section starts: a numbered
+// step, or the closing step's "Internal" line. A comment that only
+// mentions the words ("HOW TO CHECK IT is in the closing comment)") is not one.
+var viewHowToSteps = regexp.MustCompile(`(?i)^(\d+[.)]|internal\b)`)
+
+// howToIsInternal reports whether howTo is the closing step's internal line,
+// which gives the Governor nothing to check.
+func howToIsInternal(howTo string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(howTo)), "internal")
+}
+
 // howToCheck is the section after HOW TO CHECK IT in the newest of comments
-// (oldest first) that carries those words, up to the next heading or
-// viewHowToLimit runes; "" when no comment does or the words are all it says.
-// The heading may go on ", for the Governor:" before the steps start. Markdown
-// image links stay in it, so a published screenshot shows on the card.
+// (oldest first) whose heading goes on with numbered steps or the Internal
+// line, up to the next heading or viewHowToLimit runes; "" when no comment
+// does. The heading may go on ", for the Governor:" before the steps start.
+// Markdown image links stay in it, so a published screenshot shows on the card.
 func howToCheck(comments []Comment) string {
 	for i := len(comments) - 1; i >= 0; i-- {
 		_, after, found := strings.Cut(comments[i].Text, viewHowToMarker)
@@ -853,6 +869,9 @@ func howToCheck(comments []Comment) string {
 		}
 		after = viewForTheGovernor.ReplaceAllString(after, "")
 		after = strings.TrimLeft(after, " \t\r\n:;,.-\u2013\u2014")
+		if !viewHowToSteps.MatchString(after) {
+			continue
+		}
 		var kept []string
 		for j, line := range strings.Split(after, "\n") {
 			if j > 0 && isHeadingLine(line) {

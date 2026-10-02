@@ -58,6 +58,20 @@ Feature: mw postern view
     And the view's verify need on "mw-v.6" offers nothing
     And the view's need "verify" on "mw-v.3" waits for "mayor"
 
+  Scenario: A landing whose HOW TO CHECK IT is the Internal line waits on the Mayor
+    Given the view's bead "mw-v.6" under "mw-v" landed two hours ago with the Mayor's comment "Done. HOW TO CHECK IT: Internal: nothing for the Governor to look at.\nFor the rig memory: nothing"
+    When the live view is built
+    Then the view's need "verify" on "mw-v.6" waits for "mayor"
+    And the view's verify need on "mw-v.6" is waiting on "the Mayor to check the landing"
+    And the view's verify need on "mw-v.6" offers nothing
+
+  Scenario: A later comment that only mentions HOW TO CHECK IT does not replace the steps
+    Given the view's bead "mw-v.6" under "mw-v" landed two hours ago with the Mayor's comment "Done. HOW TO CHECK IT, for the Governor: 1. Open the app and tap Needs you.\nFor the rig memory: nothing"
+    And the view's bead "mw-v.6" has the comment "HOW TO CHECK IT is in the closing comment)."
+    When the live view is built
+    Then the view's verify need on "mw-v.6" says "1. Open the app and tap Needs you."
+    And the view's need "verify" on "mw-v.6" waits for "you"
+
   Scenario: A VERIFIED comment still clears both
     Given the view's bead "mw-v.6" under "mw-v" landed two hours ago with the Mayor's comment "HOW TO CHECK IT: 1. Open the app."
     And the view's bead "mw-v.6" has the comment "VERIFIED by the Governor via postern"

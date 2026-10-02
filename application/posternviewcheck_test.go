@@ -43,8 +43,11 @@ func TestHowToCheckIsTheSectionAfterTheMarker(t *testing.T) {
 		{"a Markdown heading ends it", []string{"HOW TO CHECK IT\n1. Open it.\n\n## Left undone\nnothing"}, "1. Open it."},
 		{"a line of capitals ends it", []string{"HOW TO CHECK IT\n1. Open it.\nWHAT IS LEFT\nnothing"}, "1. Open it."},
 		{"an image link stays", []string{"HOW TO CHECK IT\n1. Look: ![the card](https://example.test/card.png)"}, "1. Look: ![the card](https://example.test/card.png)"},
-		{"newest carrying the marker wins", []string{"HOW TO CHECK IT: old", "chatter", "HOW TO CHECK IT: new"}, "new"},
-		{"cut to the limit", []string{"HOW TO CHECK IT: " + long}, strings.Repeat("x", viewHowToLimit) + "…"},
+		{"newest carrying the marker wins", []string{"HOW TO CHECK IT: 1. old", "chatter", "HOW TO CHECK IT: 1. new"}, "1. new"},
+		{"a later mention is not the steps", []string{"HOW TO CHECK IT, for the Governor:\n1. Open it.\n2. See it.", "HOW TO CHECK IT is in the closing comment)."}, "1. Open it.\n2. See it."},
+		{"a mention alone says nothing", []string{"HOW TO CHECK IT is in the closing comment)."}, ""},
+		{"the Internal line is a section", []string{"HOW TO CHECK IT: Internal: nothing for the Governor to look at."}, "Internal: nothing for the Governor to look at."},
+		{"cut to the limit", []string{"HOW TO CHECK IT: 1. " + long}, "1. " + strings.Repeat("x", viewHowToLimit-3) + "…"},
 	}
 	for _, c := range cases {
 		var comments []Comment
