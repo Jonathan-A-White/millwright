@@ -157,6 +157,10 @@ const (
 // row, and a pane with anything on its input line is never closed, in either
 // mode: a person may be typing.
 //
+// A seat with a mailbox (Mail) is not closed over unread mail in idle mode: the
+// reaper types the mail nudge into the idle pane and goes on waiting, and closes
+// only for a handoff written after the nudge, with the box empty.
+//
 // It gives up after Limit, closing nothing. Arming, closing and giving up each
 // append one dated line to the seat's reaper log.
 type SeatReap struct {
@@ -173,6 +177,16 @@ type SeatReap struct {
 
 	// WhenIdle is idle mode; the default is successor mode.
 	WhenIdle bool
+
+	// Mail, when set, is the box of a seat that has one (the Deputy's): in idle
+	// mode, before closing, the reaper counts Mailbox's unread mail in it. Mail
+	// waiting is typed to the idle pane as NudgeFormat (given the count; a
+	// default when empty) and the window is left open, until the session hands
+	// off again; a count that fails is not a reason to close either. Nil, as for
+	// every seat without a box, closes as it always did.
+	Mail        Mailbox
+	Mailbox     string
+	NudgeFormat string
 
 	// Interval is how long between looks and Limit how long to keep looking;
 	// zero is DefaultReapInterval and DefaultReapLimit.
@@ -242,6 +256,10 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 	// over when it says anything else.
 	was := strings.TrimSpace(start.Acting)
 	idle := 0
+	// When the last nudge was typed: the handoff that lets the window close is
+	// one written after it. unknown is whether the last count already said so.
+	var nudged time.Time
+	unknown := false
 	for s.now().Before(deadline) {
 		if err := s.wait(ctx, interval); err != nil {
 			return ReapReport{}, err
@@ -256,7 +274,7 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 			return s.end(ctx, ReapGone, "the window is already gone; nothing to do")
 		}
 
-		held, err := s.held(ctx, window, was, armed)
+		held, err := s.held(ctx, window, was, armed, nudged)
 		if err != nil || !held {
 			idle = 0
 			continue
@@ -267,6 +285,35 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 		}
 		if idle++; idle < 2 {
 			continue
+		}
+
+		if s.WhenIdle && s.Mail != nil {
+			waiting, err := s.Mail.Inbox(ctx, s.Mailbox)
+			if err != nil {
+				idle = 0
+				if !unknown {
+					unknown = true
+					if _, err := s.say(ctx, fmt.Sprintf("the unread mail for %s could not be counted: %v; not closing", s.Mailbox, err)); err != nil {
+						return ReapReport{}, err
+					}
+				}
+				continue
+			}
+			unknown = false
+			if len(waiting) > 0 {
+				idle = 0
+				if err := s.Terminal.Type(ctx, s.Window, s.nudge(len(waiting))); err != nil {
+					if _, err := s.say(ctx, fmt.Sprintf("the mail nudge could not be typed: %v; not closing", err)); err != nil {
+						return ReapReport{}, err
+					}
+					continue
+				}
+				nudged = s.now()
+				if _, err := s.say(ctx, fmt.Sprintf("nudged: %d unread mail(s) for %s; not closing", len(waiting), s.Mailbox)); err != nil {
+					return ReapReport{}, err
+				}
+				continue
+			}
 		}
 
 		if err := s.Terminal.Close(ctx, s.Window); err != nil {
@@ -288,10 +335,11 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 
 // held reports whether what the watch waits for has happened: in successor
 // mode, the acting file names someone else whose window is open; in idle mode,
-// a handoff was written after the window was opened. A window nothing can date
+// a handoff was written after the window was opened, and after the last mail
+// nudge, nudged, when there was one. A window nothing can date
 // counts as opened when the watch was armed, so that only a handoff that is
 // surely newer than it can close it.
-func (s SeatReap) held(ctx context.Context, window ReapWindow, was string, armed time.Time) (bool, error) {
+func (s SeatReap) held(ctx context.Context, window ReapWindow, was string, armed, nudged time.Time) (bool, error) {
 	start, err := s.Seats.SeatStart(ctx, s.Seat, s.Host)
 	if err != nil {
 		return false, err
@@ -299,6 +347,9 @@ func (s SeatReap) held(ctx context.Context, window ReapWindow, was string, armed
 
 	if s.WhenIdle {
 		opened := openedOr(window, armed)
+		if nudged.After(opened) {
+			opened = nudged
+		}
 		_, since := newestHandoffSince(start.Handoffs, opened)
 		return since, nil
 	}
@@ -425,6 +476,14 @@ func (s SeatReap) closedLine() string {
 		return "closed: the seat has written a handoff since this window opened, and the pane was idle"
 	}
 	return "closed: the seat is held by someone else, and the pane was idle"
+}
+
+// nudge is the line typed to tell an idle session n messages wait for it.
+func (s SeatReap) nudge(n int) string {
+	if s.NudgeFormat == "" {
+		return fmt.Sprintf("New mail for %s: %d message(s). Run bd mail inbox.", s.Mailbox, n)
+	}
+	return fmt.Sprintf(s.NudgeFormat, n)
 }
 
 func (s SeatReap) now() time.Time {
