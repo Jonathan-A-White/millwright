@@ -461,6 +461,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			return report, fmt.Errorf("dispatching on %s: the hosts could not be brought level, so nothing was claimed: %w", d.Host, err)
 		}
 		KeepSyncHalt(ctx, d.SyncHalts, synced, nil, d.now())
+		d.clearVaultBlocked(ctx)
 		report.Sync, report.Synced = synced, true
 		d.print(fmt.Sprintf("  synced  %s\n", synced))
 	}
