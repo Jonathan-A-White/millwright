@@ -10,7 +10,7 @@ domain/, domain/events: stdlib · application/: use cases, ports; apptest/: fake
 | --- | --- | --- | --- |
 | `WorkTracker` | `application/worktracker.go` | `infrastructure/beads/` | `apptest.FakeTracker` |
 | `TrackerSync` | `application/sync.go` | `infrastructure/beads/sync.go` | `apptest.FakeTracker` |
-| `TrackerNotes`, `SweepNotes` | `application/{status,sweep}.go` | same | same |
+| `TrackerNotes`, `SweepNotes`, `BeadGraph` | `application/{status,sweep}.go` | same | same |
 | `VaultFiles` | `application/sync.go` | `infrastructure/vault/git.go` | `apptest.FakeVaultFiles` |
 | `Mailbox`, `TidyMailbox` | `application/{mail,tidy}.go` | `infrastructure/beads/mail.go` | `apptest.FakeMailbox` |
 | `EpicRules` | `application/epicrules.go` | `infrastructure/vault/epicrules.go` | `apptest.FakeEpicRules` |

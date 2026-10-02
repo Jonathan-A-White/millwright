@@ -55,6 +55,9 @@ func newStatusCmd() *cobra.Command {
 			"When a rig's file in the vault (rigs/<rig>.toml) requires something of its epics, an EPICS\n" +
 			"MISSING REQUIREMENTS section names each open epic that lacks it, and an EPICS WAIVED section\n" +
 			"each epic the Governor waived it for. Both are left out when there are none.\n\n" +
+			"A DONE, STILL OPEN section lists each open bead that looks finished, so the Mayor can close it:\n" +
+			"an epic or map whose children are all closed, and a grilling or research ticket linked to\n" +
+			"epics that are all closed. It costs one read of every bead, and closes nothing.\n\n" +
 			"An EVENTS line says where the event follower stands: the log's head seq, the last seq sent,\n" +
 			"the batches that went direct as fallback and wait to go on chain, and today's records on\n" +
 			"chain of the daily cap ([events] chain_daily_cap).\n\n" +
@@ -103,6 +106,7 @@ func newStatusCmd() *cobra.Command {
 				Notes:            tracker,
 				Vault:            mwVault(dir, host),
 				Rules:            files,
+				Graph:            tracker,
 				SyncHalt:         hostSyncHalt(),
 				Mayor:            application.MayorReader{Tracker: tracker, Notes: tracker},
 				Host:             host,

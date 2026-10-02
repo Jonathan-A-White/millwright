@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -395,5 +396,84 @@ func TestStatusReadsReadyAndRunningStoriesOnce(t *testing.T) {
 				t.Fatalf("expected the laptop's two stories listed, got %+v", report.Others)
 			}
 		})
+	}
+}
+
+func TestStatusListsWhatLooksDoneButIsStillOpen(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	graph := &apptest.FakeBeadGraph{}
+	child := func(parent string) domain.BeadEdge { return domain.BeadEdge{To: parent, Kind: domain.EdgeParentChild} }
+	related := func(other string) domain.BeadEdge { return domain.BeadEdge{To: other, Kind: domain.EdgeRelated} }
+	graph.Add("e-done", "An epic all of whose children are closed", "open", "epic", nil)
+	graph.Add("e-done.1", "one", "closed", "task", nil, child("e-done"))
+	graph.Add("e-live", "An epic with a child still open", "open", "epic", nil)
+	graph.Add("e-live.1", "one", "open", "task", nil, child("e-live"))
+	graph.Add("g-done", "Grilling: related to two closed epics", "open", "task", []string{"wayfinder:grilling"}, related("c-1"), related("c-2"))
+	graph.Add("g-half", "Grilling: related to a closed and an open epic", "open", "task", []string{"wayfinder:grilling"}, related("c-1"), related("e-live"))
+	graph.Add("g-none", "Grilling: no links", "open", "task", []string{"wayfinder:grilling"})
+	graph.Add("c-1", "closed epic one", "closed", "epic", nil)
+	graph.Add("c-2", "closed epic two", "closed", "epic", nil)
+
+	report, err := application.Status{
+		Tracker: tracker, Notes: tracker, Graph: graph, Host: "vps", Seat: "builder",
+		Now: func() time.Time { return statusNow },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatalf("reading status: %v", err)
+	}
+
+	var ids []string
+	for _, f := range report.Finished {
+		ids = append(ids, f.ID)
+	}
+	if strings.Join(ids, " ") != "e-done g-done" {
+		t.Fatalf("listed %v, want e-done and g-done", ids)
+	}
+	printed := report.String()
+	for _, want := range []string{
+		application.FinishedHeading + " (2)",
+		"e-done · An epic all of whose children are closed",
+		"all 1 children closed",
+		"its epics c-1, c-2 closed",
+	} {
+		if !strings.Contains(printed, want) {
+			t.Errorf("the report lacks %q:\n%s", want, printed)
+		}
+	}
+	for _, line := range strings.Split(printed, "\n") {
+		if n := utf8.RuneCountInString(line); n > application.Width {
+			t.Errorf("a line is %d runes, past %d: %q", n, application.Width, line)
+		}
+	}
+}
+
+func TestStatusSaysNothingWhenNothingLooksDone(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	report, err := application.Status{
+		Tracker: tracker, Notes: tracker, Graph: &apptest.FakeBeadGraph{}, Host: "vps", Seat: "builder",
+		Now: func() time.Time { return statusNow },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatalf("reading status: %v", err)
+	}
+	if want := application.FinishedHeading + " (0)\n  nothing\n"; !strings.Contains(report.String(), want) {
+		t.Fatalf("the report lacks %q:\n%s", want, report.String())
+	}
+}
+
+func TestStatusLeavesOutTheSectionWhenTheGraphIsNotGiven(t *testing.T) {
+	if strings.Contains(otherHostStatus(t, aTrackerPathedToVPS(t)).String(), application.FinishedHeading) {
+		t.Fatal("the report has the DONE, STILL OPEN section though no graph was given")
+	}
+}
+
+func TestStatusRefusesWhenTheGraphCannotBeRead(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	_, err := application.Status{
+		Tracker: tracker, Notes: tracker, Graph: &apptest.FakeBeadGraph{Err: errors.New("bd is down")},
+		Host: "vps", Seat: "builder", Now: func() time.Time { return statusNow },
+	}.Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "bd is down") {
+		t.Fatalf("got %v, want a refusal naming bd is down", err)
 	}
 }

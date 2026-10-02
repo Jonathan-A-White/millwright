@@ -51,6 +51,19 @@ const (
 	EpicsWaivedHeading  = "EPICS WAIVED"
 )
 
+// FinishedHeading is what heads the section naming the open beads that look
+// finished: an epic or map whose children are all closed, a grilling or
+// research ticket whose epics are all closed. Nothing is closed by it: the
+// Mayor decides.
+const FinishedHeading = "DONE, STILL OPEN"
+
+// BeadGraph reads every bead the tracker holds, closed ones included, with the
+// links each carries, for the DONE, STILL OPEN section. It reads and writes
+// nothing.
+type BeadGraph interface {
+	BeadGraph(ctx context.Context) ([]domain.GraphBead, error)
+}
+
 // RigMemoryHeading is what heads the section naming the rigs whose memory has
 // outgrown its budget. The report leaves the section out when none has.
 const RigMemoryHeading = "RIG MEMORY"
@@ -123,6 +136,10 @@ type Status struct {
 	// the EPICS MISSING REQUIREMENTS and EPICS WAIVED sections. A nil Rules
 	// leaves both out.
 	Rules EpicRules
+
+	// Graph is where the beads that look finished are found, for the DONE, STILL
+	// OPEN section. A nil Graph leaves the section out.
+	Graph BeadGraph
 
 	// HostSilence is how long another host's recorded sync may be behind
 	// before its work is called stranded. Zero reads DefaultHostSilence.
@@ -288,6 +305,11 @@ type StatusReport struct {
 	// EpicShortfalls are the open epics of rigs that require something which do
 	// not meet it or were waived, in the order the tracker lists them.
 	EpicShortfalls []EpicShortfall
+	// Finished are the open beads that look finished, in the order the tracker
+	// lists them; FinishedKnown says the tracker was asked, so that "nothing" is
+	// told from "not asked".
+	Finished      []domain.Finished
+	FinishedKnown bool
 	// Ticks are how this host's own timers are doing, counted from their logs.
 	Ticks HostTicks
 	// Events is where the event follower stands; nil when it was not asked
@@ -439,6 +461,14 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 
 	if report.EpicShortfalls, err = s.epicShortfalls(ctx); err != nil {
 		return report, err
+	}
+
+	if s.Graph != nil {
+		graph, err := s.Graph.BeadGraph(ctx)
+		if err != nil {
+			return report, fmt.Errorf("reading which open beads look finished: %w", err)
+		}
+		report.Finished, report.FinishedKnown = domain.FinishedStillOpen(graph), true
 	}
 
 	fuel, err := s.fuelToday(ctx)
@@ -825,6 +855,18 @@ func (r StatusReport) String() string {
 	}
 
 	r.writeEpicShortfalls(&b)
+
+	if r.FinishedKnown {
+		clip(&b, fmt.Sprintf("%s (%d)", FinishedHeading, len(r.Finished)))
+		if len(r.Finished) == 0 {
+			clip(&b, "  nothing")
+		}
+		for _, f := range r.Finished {
+			clip(&b, "  "+f.ID+" · "+f.Title)
+			clip(&b, "    "+f.Why)
+		}
+		b.WriteString("\n")
+	}
 
 	if len(r.RigMemory) > 0 {
 		clip(&b, RigMemoryHeading)
