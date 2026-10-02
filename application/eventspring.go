@@ -15,6 +15,20 @@ import (
 // the heartbeat sprang.
 const HeartbeatReason = "heartbeat"
 
+// SpringInterruptedDetail is the detail of the done event of a pass the
+// follower was stopped in the middle of, for the restart a landing of the
+// factory rig brings (mw-gq6.242): the pass is not a failure, and the follower
+// that comes back runs it again.
+const SpringInterruptedDetail = "cut short by the follower stopping; run again when it is back"
+
+// SpringRestartedReason is the detail of the scheduled event of a pass run
+// again because the follower before this one stopped in the middle of it.
+const SpringRestartedReason = "run again after the follower restarted"
+
+// springLookback is how many of the log's last events the first Spring reads
+// to find a pass its predecessor was cut short in.
+const springLookback = 200
+
 // ClockReason is the detail of the scheduled event of a pass on a job's own
 // clock.
 const ClockReason = "clock"
@@ -109,8 +123,13 @@ func ClockJob(name string, every time.Duration, run func(context.Context) error)
 // job event, actor <name>@<host>: scheduled (detail: why), running, then done
 // or failed (detail: the failure).
 //
-// The first Spring only reads where the log stands: history springs nothing,
-// and a job's clock runs from then. A failure to write a job event is said on
+// A pass that ends in an error while the follower is being stopped (a restart
+// after a landing terminates the systemctl it was waiting on) is not a failure:
+// it is written done, with SpringInterruptedDetail, and the first Spring of the
+// follower that comes back runs it again.
+//
+// The first Spring otherwise only reads where the log stands: history springs
+// nothing, and a job's clock runs from then. A failure to write a job event is said on
 // Err and the pass goes on.
 type EventSpring struct {
 	Log  EventLog
@@ -121,6 +140,10 @@ type EventSpring struct {
 	Now func() time.Time
 	// Err is where failures are said.
 	Err io.Writer
+	// Settle is how long a pass that ended in an error waits to see whether the
+	// follower is being stopped: the units' stop terminates a pass's systemctl
+	// a moment before the follower hears its own signal. Zero waits not at all.
+	Settle time.Duration
 
 	mu      sync.Mutex
 	started bool
@@ -154,8 +177,14 @@ func (s *EventSpring) Spring(ctx context.Context) error {
 		s.started = true
 		s.seen = head
 		s.jobs = map[string]*springState{}
+		interrupted := s.interruptedPasses(ctx, head)
 		for _, j := range s.Jobs {
-			s.jobs[j.Name] = &springState{last: events.Start, lastRun: now}
+			st := &springState{last: events.Start, lastRun: now}
+			s.jobs[j.Name] = st
+			if interrupted[j.Name] {
+				st.last = events.JobDone
+				s.launch(ctx, j, st, SpringRestartedReason)
+			}
 		}
 		return nil
 	}
@@ -203,9 +232,12 @@ func (s *EventSpring) launch(ctx context.Context, j SpringJob, st *springState, 
 		s.say(j, s.write(ctx, j, st, events.JobRunning, ""))
 		s.mu.Unlock()
 		err := j.Run(ctx)
+		cutShort := err != nil && s.stopping(ctx)
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if err != nil {
+		if cutShort {
+			s.say(j, s.write(ctx, j, st, events.JobDone, SpringInterruptedDetail))
+		} else if err != nil {
 			s.say(j, s.write(ctx, j, st, events.JobFailed, clippedTo(oneLine(err.Error()), DispatchLogReasonLimit)))
 		} else {
 			s.say(j, s.write(ctx, j, st, events.JobDone, ""))
@@ -216,6 +248,50 @@ func (s *EventSpring) launch(ctx context.Context, j SpringJob, st *springState, 
 			s.launch(ctx, j, st, again)
 		}
 	}()
+}
+
+// stopping says whether the follower is being stopped, waiting up to Settle
+// for it to be.
+func (s *EventSpring) stopping(ctx context.Context) bool {
+	if ctx.Err() != nil {
+		return true
+	}
+	if s.Settle <= 0 {
+		return false
+	}
+	select {
+	case <-ctx.Done():
+		return true
+	case <-time.After(s.Settle):
+		return false
+	}
+}
+
+// interruptedPasses names the jobs whose last event of this host, among the
+// log's last springLookback up to head, is a pass cut short. A log that cannot
+// be read says there are none: the heartbeat runs the job anyway.
+func (s *EventSpring) interruptedPasses(ctx context.Context, head uint64) map[string]bool {
+	from := uint64(0)
+	if head > springLookback {
+		from = head - springLookback
+	}
+	recent, err := s.Log.Since(ctx, from)
+	if err != nil {
+		return nil
+	}
+	last := map[string]events.Event{}
+	for _, e := range recent {
+		if e.Kind == events.KindJob {
+			last[e.Actor] = e
+		}
+	}
+	out := map[string]bool{}
+	for _, j := range s.Jobs {
+		if e, ok := last[j.Name+"@"+s.Host]; ok && e.To == events.JobDone && e.Detail == SpringInterruptedDetail {
+			out[j.Name] = true
+		}
+	}
+	return out
 }
 
 // write puts one job event in the log, the transition from the job's last

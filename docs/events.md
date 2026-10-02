@@ -99,7 +99,11 @@ own clock only), each by starting its systemd unit. Every pass is a run of the j
 the actor `<job>@<host>`: scheduled, whose detail says why (`bead mw-x opened`, `bead mw-x landed`,
 `alarm`, `heartbeat`, `clock`), running, then done, or failed with the failure as its detail. A
 job unrun for `[events] heartbeat` is run for `heartbeat`; the pass is in flight at most once,
-and an event that springs it meanwhile earns one more pass after it.
+and an event that springs it meanwhile earns one more pass after it. A pass cut short because the
+follower is stopping (a landing of millwright restarts it onto the new build, ending the systemctl
+the pass waited on) is not failed: it is `done` with the detail `cut short by the follower
+stopping; run again when it is back`, and the first look of the follower that comes back runs it
+again, scheduled for `run again after the follower restarted`.
 
 ## Control
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
@@ -56,5 +57,5 @@ func homeSpring(path, host string, out io.Writer) (*application.EventSpring, err
 		}
 		jobs = append(jobs, j.job)
 	}
-	return &application.EventSpring{Log: eventlog.New(path), Host: host, Jobs: jobs, Err: out}, nil
+	return &application.EventSpring{Log: eventlog.New(path), Host: host, Jobs: jobs, Err: out, Settle: 2 * time.Second}, nil
 }

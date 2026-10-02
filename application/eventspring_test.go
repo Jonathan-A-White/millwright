@@ -329,3 +329,157 @@ func TestSpringAFailureToWriteAJobEventIsSaidAndTheJobStillRuns(t *testing.T) {
 		t.Fatalf("the failure was not said: %q", errs.String())
 	}
 }
+
+// The follower is restarted after a millwright landing, and the systemctl it
+// had running to start the dispatch unit is terminated with it (mw-gq6.242):
+// that is a pass cut short, not a failed job.
+const terminatedByRestart = "starting mw-dispatch.service: signal: terminated"
+
+func (r *springRig) failWith(name string, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.fail[name] = err
+}
+
+func (r *springRig) lastJobEvent(t *testing.T) events.Event {
+	t.Helper()
+	var last events.Event
+	for _, e := range r.log.All() {
+		if e.Kind == events.KindJob {
+			last = e
+		}
+	}
+	return last
+}
+
+func TestSpringAPassTerminatedByTheFollowersRestartIsCutShortNotFailed(t *testing.T) {
+	r := newSpringRig(t)
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	if err := r.spring.Spring(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r.append(t, beadMoved("mw-a", events.BeadRunning, events.BeadLanded))
+	if err := r.spring.Spring(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r.started(t, "dispatch")
+	r.failWith("dispatch", errors.New(terminatedByRestart))
+	stop() // the follower is told to stop, and its systemctl ends with it
+	r.finish("dispatch")
+
+	for _, e := range r.log.All() {
+		if e.Kind == events.KindJob && e.To == events.JobFailed {
+			t.Fatalf("a restart wrote a failed job: %q", e.Detail)
+		}
+	}
+	last := r.lastJobEvent(t)
+	if last.To != events.JobDone || last.Detail != application.SpringInterruptedDetail {
+		t.Fatalf("the last job event is %s with detail %q, want done and the interruption", last.To, last.Detail)
+	}
+}
+
+func TestSpringAPassThatEndsAFewMomentsBeforeTheStopIsSeenIsStillCutShort(t *testing.T) {
+	r := newSpringRig(t)
+	r.spring.Settle = 5 * time.Second
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	if err := r.spring.Spring(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r.append(t, beadMoved("mw-a", events.BeadRunning, events.BeadLanded))
+	if err := r.spring.Spring(ctx); err != nil {
+		t.Fatal(err)
+	}
+	r.started(t, "dispatch")
+	// systemd terminates the systemctl a beat before the follower hears SIGTERM.
+	r.failWith("dispatch", errors.New(terminatedByRestart))
+	time.AfterFunc(50*time.Millisecond, stop)
+	r.finish("dispatch")
+
+	if last := r.lastJobEvent(t); last.To != events.JobDone || last.Detail != application.SpringInterruptedDetail {
+		t.Fatalf("the last job event is %s with detail %q, want done and the interruption", last.To, last.Detail)
+	}
+}
+
+func TestSpringAPassThatFailsWhileTheFollowerKeepsRunningStillFails(t *testing.T) {
+	r := newSpringRig(t)
+	r.spring.Settle = 20 * time.Millisecond
+	r.spin(t)
+	r.append(t, beadMoved("mw-a", events.BeadRunning, events.BeadLanded))
+	r.spin(t)
+	r.started(t, "dispatch")
+	r.failWith("dispatch", errors.New("exit status 1"))
+	r.finish("dispatch")
+
+	if last := r.lastJobEvent(t); last.To != events.JobFailed || last.Detail != "exit status 1" {
+		t.Fatalf("the last job event is %s with detail %q, want failed", last.To, last.Detail)
+	}
+}
+
+// successor is the follower the restart brings up: a new EventSpring over the
+// same log and jobs.
+func (r *springRig) successor() *application.EventSpring {
+	return &application.EventSpring{Log: r.log, Host: "laptop", Jobs: r.spring.Jobs, Now: r.spring.Now}
+}
+
+func TestSpringTheFollowerThatComesBackRunsAgainThePassItsPredecessorWasCutShortInOnce(t *testing.T) {
+	r := newSpringRig(t)
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	r.spring.Spring(ctx)
+	r.append(t, beadMoved("mw-a", events.BeadRunning, events.BeadLanded))
+	r.spring.Spring(ctx)
+	r.started(t, "dispatch")
+	r.failWith("dispatch", errors.New(terminatedByRestart))
+	stop()
+	r.finish("dispatch")
+	r.failWith("dispatch", nil)
+
+	next := r.successor()
+	if err := next.Spring(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	r.started(t, "dispatch")
+	r.release["dispatch"] <- struct{}{}
+	next.Wait()
+	if err := next.Spring(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	next.Wait()
+
+	if got := r.count("dispatch"); got != 2 {
+		t.Fatalf("the dispatch ran %d times, want the cut-short pass and one more", got)
+	}
+	var scheduled []string
+	for _, e := range r.log.All() {
+		if e.Kind == events.KindJob && e.To == events.JobScheduled {
+			scheduled = append(scheduled, e.Detail)
+		}
+	}
+	if len(scheduled) != 2 || scheduled[1] != application.SpringRestartedReason {
+		t.Fatalf("the passes were scheduled for %q", scheduled)
+	}
+	if last := r.lastJobEvent(t); last.To != events.JobDone || last.Detail != "" {
+		t.Fatalf("the last job event is %s with detail %q, want a plain done", last.To, last.Detail)
+	}
+}
+
+func TestSpringTheFollowerThatComesBackRunsNothingAfterAPassThatEndedOrFailed(t *testing.T) {
+	r := newSpringRig(t)
+	r.spin(t)
+	r.append(t, beadMoved("mw-a", events.BeadRunning, events.BeadLanded))
+	r.spin(t)
+	r.started(t, "dispatch")
+	r.failWith("dispatch", errors.New("exit status 1"))
+	r.finish("dispatch")
+
+	if err := r.successor().Spring(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case name := <-r.ran:
+		t.Fatalf("%s was run for a failure the log already says", name)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
