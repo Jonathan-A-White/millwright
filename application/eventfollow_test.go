@@ -404,3 +404,55 @@ func TestAChangeStampedAheadDoesNotMoveTheCursorPastTheFollowersClock(t *testing
 		t.Fatalf("the cursor is at %v, past the follower's clock %v", c.Since, w.clock)
 	}
 }
+
+func TestACommentThatMarksAClosedBeadVerifiedIsAVerifiedEventOncePerBead(t *testing.T) {
+	w := newEventsWorld()
+	w.tracker.SetBeadStates(w.t0,
+		application.BeadNow{ID: "mw-1", Type: "task", Status: application.StatusClosed},
+		application.BeadNow{ID: "mw-2", Type: "task", Status: application.StatusClosed},
+		application.BeadNow{ID: "mw-3", Type: "task", Status: application.StatusClosed},
+		application.BeadNow{ID: "mw-4", Type: "task", Status: application.StatusOpen},
+	)
+	comment := func(key string, at int, id, status, text string) application.BeadChange {
+		return application.BeadChange{Key: key, At: w.at(at), Actor: "mw@laptop", What: application.ChangeComment, Comment: text,
+			Bead: application.BeadNow{ID: id, Type: "task", Status: status}}
+	}
+	w.run(t, []string{"a", "b", "c"}, func(pass int) {
+		switch pass {
+		case 1:
+			w.tracker.AddBeadChange(comment("c1", 1, "mw-1", application.StatusClosed, "VERIFIED by the Governor 2026-10-01: it shows"))
+			w.tracker.AddBeadChange(comment("c2", 2, "mw-2", application.StatusClosed, "MAYOR via postern, txid direct:aa: Say VERIFIED on mw-2"))
+			w.tracker.AddBeadChange(comment("c3", 3, "mw-3", application.StatusClosed, "NOT VERIFIED: it broke"))
+			w.tracker.AddBeadChange(comment("c4", 4, "mw-4", application.StatusOpen, "VERIFIED by the Governor"))
+		case 2:
+			w.tracker.AddBeadChange(comment("c5", 5, "mw-1", application.StatusClosed, "VERIFIED again, by the Mayor"))
+		}
+	})
+	want := strings.Join([]string{
+		"1:bead_changed:mw-1:closed->verified:verified",
+		"2:bead_changed:mw-2:closed->closed:comment",
+		"3:bead_changed:mw-3:closed->closed:comment",
+		"4:bead_changed:mw-4:open->open:comment",
+		"5:bead_changed:mw-1:closed->closed:comment",
+	}, " ")
+	if got := kindsOf(w.log.All()); got != want {
+		t.Fatalf("the log holds\n%s\nwant\n%s", strings.ReplaceAll(got, " ", "\n"), strings.ReplaceAll(want, " ", "\n"))
+	}
+}
+
+func TestAVerifiedBeadIsRememberedByTheCursorSoAFollowerStartedAgainEmitsItOnce(t *testing.T) {
+	w := newEventsWorld()
+	w.tracker.SetBeadStates(w.t0, application.BeadNow{ID: "mw-1", Type: "task", Status: application.StatusClosed})
+	bead := application.BeadNow{ID: "mw-1", Type: "task", Status: application.StatusClosed}
+	w.run(t, []string{"a", "b"}, func(pass int) {
+		if pass == 1 {
+			w.tracker.AddBeadChange(application.BeadChange{Key: "c1", At: w.at(1), Actor: "mw@laptop", What: application.ChangeComment, Comment: "VERIFIED by the Governor", Bead: bead})
+		}
+	})
+	w.tracker.AddBeadChange(application.BeadChange{Key: "c2", At: w.at(2), Actor: "mw@laptop", What: application.ChangeComment, Comment: "VERIFIED once more", Bead: bead})
+	w.run(t, []string{"c", "d"}, nil)
+	want := "1:bead_changed:mw-1:closed->verified:verified 2:bead_changed:mw-1:closed->closed:comment"
+	if got := kindsOf(w.log.All()); got != want {
+		t.Fatalf("the log holds\n%s\nwant\n%s", strings.ReplaceAll(got, " ", "\n"), strings.ReplaceAll(want, " ", "\n"))
+	}
+}

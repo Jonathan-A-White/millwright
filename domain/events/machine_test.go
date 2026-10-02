@@ -21,7 +21,7 @@ var allowed = map[events.Machine][][2]string{
 		{"refused", "open"}, {"refused", "held"}, {"refused", "closed"},
 		{"landed", "verified"}, {"landed", "closed"}, {"landed", "open"}, {"landed", "held"},
 		{"verified", "closed"},
-		{"closed", "open"},
+		{"closed", "open"}, {"closed", "verified"},
 	},
 	events.MachineCard: {
 		{"", "asked"},

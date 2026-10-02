@@ -84,7 +84,8 @@ var tables = map[Machine]table{
 			// separate check closes straight away.
 			BeadLanded:   {BeadVerified, BeadClosed, BeadOpen, BeadHeld},
 			BeadVerified: {BeadClosed},
-			BeadClosed:   {BeadOpen},
+			// A closed bead is verified by the comment that says so.
+			BeadClosed: {BeadOpen, BeadVerified},
 		},
 	},
 	MachineCard: {

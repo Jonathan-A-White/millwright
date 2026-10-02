@@ -26,7 +26,7 @@ Every field is always present in the JSON, an empty string where unset.
 
 | Kind | Machine | Bead | Detail |
 | --- | --- | --- | --- |
-| `bead_changed` | bead | the bead | what changed: `status`, `comment`, a field's name |
+| `bead_changed` | bead | the bead | what changed: `status`, `comment`, `verified` (a comment marked it verified), a field's name |
 | `card_asked` | card (to `asked`) | the bead the card is on | the question's txid |
 | `card_answered` | card (to `answered`) | same | the txid its ANSWER comment names: the answer's |
 | `card_applied` | card (to `applied`) | same | the question's txid |
@@ -54,7 +54,10 @@ their comments every second, and `mw events emit` a job's. A bead's state is rea
 status and its run label: deferred is held, an in-progress bead is claimed until its run
 label says running, landed, or refused (blocked, stopped, stuck). A status move the follower
 saw only the two ends of is one event per step of the bead machine between them. Verified
-is never read from the beads yet.
+is read from one comment: the first on a bead that begins `VERIFIED` (the Governor's tap, the
+Mayor's check; the rule the postern view uses) is a `bead_changed` from the bead's state,
+usually `closed`, to `verified`, detail `verified`. A later one on the same bead, a comment
+that only mentions VERIFIED, and `NOT VERIFIED` are plain `comment` events.
 
 ## Subscriptions
 
@@ -145,10 +148,10 @@ States: held, open, claimed, running, landed, refused, verified, closed.
 | refused | open, held, closed |
 | landed | verified, closed, open, held |
 | verified | closed |
-| closed | open |
+| closed | open, verified |
 
 Claimed is a dispatch's claim, running a session at work, landed and refused
-what mw next did, verified the Mayor's check. A bad landing is reopened or
+what mw next did, verified the Mayor's check (a VERIFIED comment, even on a closed bead). A bad landing is reopened or
 held; a closed bead may be reopened.
 
 ### card

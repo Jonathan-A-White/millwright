@@ -114,6 +114,12 @@ func copyCursor(c application.FollowCursor) application.FollowCursor {
 	for k, v := range c.States {
 		out.States[k] = v
 	}
+	if len(c.Verified) > 0 {
+		out.Verified = map[string]bool{}
+		for k := range c.Verified {
+			out.Verified[k] = true
+		}
+	}
 	return out
 }
 

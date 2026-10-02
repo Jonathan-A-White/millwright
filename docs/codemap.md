@@ -21,7 +21,7 @@
 | `Transcripts` | `application/seatcontext.go` | `infrastructure/claude/transcripts.go` | none |
 | Reap{Terminal,Log,Armer} | `application/seatreap.go` | `infrastructure/{tmux/reap,vault/reaplog,reaper/arm}.go` | `apptest.Fake{Windows,ReapArmer}` |
 | `WatchProbes` | `application/watch.go` | `infrastructure/watch/watch.go` | `apptest.FakeWatch` |
-| `Doctor{Check,State,Log,Notes}` | `application/doctor.go` | `infrastructure/doctor` (boostreach.go: boost-reach) | none |
+| `Doctor{Check,State,Log,Notes}` | `application/doctor.go` | `infrastructure/doctor` | none |
 | `TickLog` | `application/millhandtick.go` | `infrastructure/ticklog/ticklog.go` | `apptest.FakeTickLog` |
 | `Worktrees` | `application/worktrees.go` | `infrastructure/rig/worktree.go` | `application/dispatch_test.go` |
 | `HostLoad` | `application/hostload.go` | `infrastructure/hostload/hostload.go` | `apptest.FakeHostLoad` |
@@ -63,7 +63,7 @@
 | `SeatBoot` | `application/seatboot.go` | none: called by `Dispatch`, `Next` | `features/seat_boot.feature` |
 | `Init` | `application/init.go` | `mw init` — `cmd/mw/init.go` | `features/init.feature` |
 | Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern key/inbox/send/snapshot/view/bead — cmd/mw/posternview.go, cmd/mw/posternbead.go | `features/postern_*.feature` |
-| Event{Follow,Emit,Tail,Ship,Wait,Nudge,Spring,Control} | application/eventfollow.go, application/eventlog.go, application/eventship.go, application/eventwait.go, application/eventnudge.go, application/eventsubscribe.go, application/eventspring.go, application/eventcontrol.go | mw events follow/emit/tail/wait — cmd/mw/events.go | none |
+| Event{Follow,Emit,Tail,Ship,Wait,Nudge,Spring,Control} | application/eventfollow.go, application/eventlog.go, application/eventship.go, application/eventwait.go, application/eventnudge.go, application/eventsubscribe.go, application/eventspring.go, application/eventcontrol.go | mw events follow/emit/tail/wait — cmd/mw/events.go | features/event_follow.feature |
 | Hands{Add,List} | application/hands.go | mw hands add/list — cmd/mw/hands.go; `cmd/mw-hands-root` | `features/hands.feature` |
 | `Postern{Serve,Nginx,Mirror}` | `application/posternhand.go`, `application/posternmirror.go` | `mw postern serve`/`nginx`/`mirror` — `cmd/mw/postern.go`, `cmd/mw/posternmirror.go` | `features/postern_serve.feature` |
 | Prompt{Save,List,Show,Run}, Cards | application/prompt.go, application/card.go | mw prompt/card — cmd/mw/prompt.go, cmd/mw/card.go | features/{prompt,card}.feature |

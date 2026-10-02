@@ -78,6 +78,9 @@ type FollowCursor struct {
 	Since  time.Time         `json:"since"`
 	Seen   []string          `json:"seen"`
 	States map[string]string `json:"states"`
+	// Verified is every bead a comment has marked verified (commentMarksVerified):
+	// only the first such comment of a bead is the move to verified.
+	Verified map[string]bool `json:"verified,omitempty"`
 }
 
 // FollowCursors keeps EventFollow's cursor between runs.
@@ -106,8 +109,10 @@ type EventShipper interface {
 // mail event, its box in Detail; any other change that left the state alone
 // is a bead_changed event from and to that state, Detail bd's word for it.
 // A comment beginning QUESTION is card_asked, ANSWER card_answered, RAN
-// hands_ran and 'The Governor by postern' message; any other comment is a
-// bead_changed event with Detail "comment".
+// hands_ran and 'The Governor by postern' message; the first comment of a bead
+// that begins VERIFIED (commentMarksVerified) is a bead_changed event from the
+// bead's state to verified, Detail "verified", when the bead machine allows it;
+// any other comment is a bead_changed event with Detail "comment".
 //
 // A failure — of the head read, the changes, the append or Publish — is said
 // on Err and the loop goes on; what failed is tried again on the next pass,
@@ -333,6 +338,10 @@ func (f EventFollow) pass(ctx context.Context, cursor **FollowCursor, say func(s
 	for id, s := range c.States {
 		next.States[id] = s
 	}
+	next.Verified = make(map[string]bool, len(c.Verified))
+	for id := range c.Verified {
+		next.Verified[id] = true
+	}
 	var fresh []BeadChange
 	for _, ch := range changes {
 		if ch.At.After(next.Since) {
@@ -361,7 +370,7 @@ func (f EventFollow) pass(ctx context.Context, cursor **FollowCursor, say func(s
 		return nil
 	}
 	var evs []events.Event
-	for _, e := range eventsOf(fresh, next.States) {
+	for _, e := range eventsOf(fresh, next.States, next.Verified) {
 		check := e
 		check.Seq = 1
 		if err := check.Validate(); err != nil {
@@ -432,8 +441,9 @@ func BeadState(b BeadNow) string {
 
 // eventsOf turns changes, oldest first, into events with no seq: each bead's
 // own changes first, at most one group of events per bead, then the comments.
-// states is every bead's state before, and is moved on to after.
-func eventsOf(changes []BeadChange, states map[string]string) []events.Event {
+// states is every bead's state before, and is moved on to after; verified is
+// the beads a comment has already marked verified, and gains each one that does.
+func eventsOf(changes []BeadChange, states map[string]string, verified map[string]bool) []events.Event {
 	sort.SliceStable(changes, func(i, j int) bool { return changes[i].At.Before(changes[j].At) })
 	event := func(ch BeadChange, kind, from, to, detail string) events.Event {
 		return events.Event{Ts: ch.At.UTC(), Kind: kind, Bead: ch.Bead.ID, Actor: ch.Actor, From: from, To: to, Detail: detail, Lane: events.LaneNormal}
@@ -488,6 +498,9 @@ func eventsOf(changes []BeadChange, states map[string]string) []events.Event {
 			evs = append(evs, event(ch, events.KindHandsRan, "", "", step))
 		case strings.HasPrefix(text, "The Governor by postern"):
 			evs = append(evs, event(ch, events.KindMessage, "", "", commentTxid(text)))
+		case commentMarksVerified(text) && !verified[ch.Bead.ID] && events.Transition(events.MachineBead, state, events.BeadVerified) == nil:
+			verified[ch.Bead.ID] = true
+			evs = append(evs, event(ch, events.KindBeadChanged, state, events.BeadVerified, "verified"))
 		default:
 			evs = append(evs, event(ch, events.KindBeadChanged, state, state, ChangeComment))
 		}
