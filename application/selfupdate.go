@@ -63,6 +63,11 @@ type SelfUpdate struct {
 	Checkout FactoryCheckout
 	After    AfterLanding
 	Built    BuiltMarks
+
+	// Units restarts this host's long-running mw user units once the build has
+	// succeeded, so that they run what was just built. A nil Units restarts
+	// nothing.
+	Units UnitRestarter
 }
 
 // selfUpdateWords is how every note about an update begins.
@@ -144,5 +149,6 @@ func (s SelfUpdate) Run(ctx context.Context) []string {
 	if err := s.Built.MarkBuilt(ctx, FactoryRig, head); err != nil {
 		notes = append(notes, "the build could not be remembered: "+firstLine(err.Error()))
 	}
-	return notes
+	said, _ := RestartFactoryUnits(ctx, s.Units, FactoryRig)
+	return append(notes, said...)
 }

@@ -2,7 +2,7 @@
 
 ## Layers
 
-`domain/`, `domain/events`: stdlib · `application/`: use cases, ports · `application/apptest/`: fakes · `infrastructure/`: adapters · `cmd/mw/`: cobra · `features/`: Gherkin, `features/steps/` · `template/`: embed.
+`domain/`, `domain/events`: stdlib · `application/`: use cases, ports · `application/apptest/`: fakes · infrastructure/: adapters · cmd/mw/: cobra · features/: Gherkin, features/steps/ · template/: embed
 
 ## Ports
 
@@ -28,7 +28,7 @@
 | `SyncHaltMarker` | `application/sync.go` | `infrastructure/synchalt/synchalt.go` | `apptest.FakeSyncHaltMarker` |
 | Notifier, HomeMoveHost, OldHome, VaultBirth, TrackerBirth | `application/{millhandtick,homemove,init}.go` | `infrastructure/{notify/notify,homemove/homemove,vault/birth,beads/init}.go` | none |
 | Landing, Checks, MergeSlot, Holding | `application/landing.go` | `infrastructure/rig/{landing,checks,slot}.go` | none |
-| AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds | `application/afterlanding.go`, `application/selfupdate.go`, `application/backendstage.go` | `infrastructure/rig/{afterlanding,built,backend}.go` | `features/self_update.feature` |
+| AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter | application/afterlanding.go, application/selfupdate.go, application/backendstage.go | infrastructure/{rig/{afterlanding,built,backend},userunits}.go | `features/self_update.feature` |
 | EventLog, BeadFeed, FollowCursors, ShipStates, SubscribeFiles, NudgeCursors, EventSpringer, EventController, HarnessCount | application/event*.go, status.go | infrastructure/{eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go | apptest.Fake{EventLog,FollowCursors,Ship*,Tracker,Subscribe*,Nudge*} |
 | Postern, hands, `Prompts` | `application/{postern*,hands,prompt}.go` | `infrastructure/{postern,hands*,homemove}` | `apptest.Fake{Postern*,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*,HomeMover,Prompts}` |
 | `Grinder`, `GrindSource`, `GristState`, `GristLock` | `application/grist.go` | `infrastructure/{claude/grind,rig/grinds,hostlock/try}.go`, `infrastructure/grist` | `apptest.Fake{Grinder,Grinds,GristState,GristLock}` |
@@ -71,7 +71,7 @@
 
 ## Tests
 
-throwawayVault, installFormula, standIn: `infrastructure/beads/`; privateRunner: `infrastructure/tmux/`; aVault, aRig: `infrastructure/{vault,rig}/`; mwConfig: `cmd/mw/`.
+throwawayVault, installFormula, standIn: infrastructure/beads/; privateRunner: infrastructure/tmux/; aVault, aRig: infrastructure/{vault,rig}/; mwConfig: cmd/mw/.
 
 - One feature: `MW_FEATURE=sweep.feature go test ./features`.
 

@@ -66,8 +66,9 @@ type nextContext struct {
 
 	lease *landingLease // the lease watch of features/next_lease.feature, when a scenario asks for one
 
-	afterCommands map[string]string // the [after_landing] table this scenario's rig host has
-	afterLimit    time.Duration     // how long an after-landing command may run; zero is the adapter's own
+	afterCommands map[string]string          // the [after_landing] table this scenario's rig host has
+	afterLimit    time.Duration              // how long an after-landing command may run; zero is the adapter's own
+	units         *apptest.FakeUnitRestarter // the user manager this host has, when a scenario names the follower
 
 	backend   *backendFixture // the [backend] table this scenario's host has, when it has one
 	worktrees *rig.Worktrees  // the git adapter mw next is given, so that the backend is built through it
@@ -821,6 +822,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 
 		AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(c.afterCommands), rig.WithAfterLimit(c.afterLimit)),
 		Backend:      c.backendStage(),
+		Units:        c.unitRestarter(),
 	}.Run(context.Background(), id)
 
 	if c.afterFirst == nil {

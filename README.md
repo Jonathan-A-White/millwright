@@ -523,6 +523,17 @@ because a site copied by a command cut off midway is half-deployed; a rig that s
 a site uses `contrib/site-deploy`, which cannot leave it so (`docs/site-deploy.md`).
 A rig the table does not name runs nothing.
 
+When the rig is `millwright` and its command succeeded, the landing then runs
+`systemctl --user try-restart mw-view-follow.service`, so that the follower
+publishes the Governor's view with the binary just built and not the one it
+started with (mw-gq6.232): a unit that is running is restarted and the report and
+the mail say `restarted mw-view-follow.service on the new build`; one that is
+stopped or not installed on this host is left alone and not mentioned. A
+restart that fails is said in the report, in a comment on the story and first in
+the mail to the Mayor, and the landing still counts. A failed build restarts
+nothing, and no other rig restarts anything. The self-update tick below does the
+same after its own successful build.
+
 A rig whose backend is a program the home runs (postern's `server/`) names it in a
 `[backend.<rig>]` table, and a landing that changed it is not left half deployed
 (mw-gq6.185). `mw next` asks, before it merges, whether the story's own commits
@@ -825,7 +836,8 @@ origin's `main` and runs the command in it, and says so once in the tick's line
 another branch or one with commits of its own is left exactly as it is, and the
 line says why. A build that fails leaves the old `bin/mw`, is said in the line
 and is tried again by the next tick (the commit last built is kept in
-`~/.local/state/mw/built-millwright`). A dry run does none of it. The command
+`~/.local/state/mw/built-millwright`). After a build that succeeds it restarts the
+running `mw-view-follow.service` and says so in the line. A dry run does none of it. The command
 is stopped after five minutes, so the tick's unit allows ten.
 
 `mw dispatch` does the same look first (mw-gq6.184), once it holds the dispatch

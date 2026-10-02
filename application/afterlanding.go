@@ -19,6 +19,51 @@ const AfterLandingLimit = 5 * time.Minute
 // quiet note is not enough for what a person has to go and look at.
 const AfterLandingStoppedLine = "after landing STOPPED at the limit: the site may be half-deployed"
 
+// UnitRestartFailedLine is the first line of the mail to the Mayor when a
+// long-running mw user unit could not be restarted on the new build: the
+// follower keeps publishing the Governor's view with the old binary until
+// somebody restarts it by hand.
+const UnitRestartFailedLine = "a user unit could not be restarted on the new build: the old mw is still running there"
+
+// FactoryUnits are the long-running user units that run the factory's own mw,
+// which a build of the factory rig leaves on the old binary until they are
+// restarted. mw-postern-mirror.service is a oneshot a timer starts, so it picks
+// up the new binary by itself.
+var FactoryUnits = []string{"mw-view-follow.service"}
+
+// UnitRestarter is the port a host's user manager is asked to restart a running
+// unit through.
+type UnitRestarter interface {
+	// TryRestart restarts unit if it is running, as `systemctl --user
+	// try-restart` does, and says whether it did: a unit that is stopped or not
+	// installed here is left as it is, with no error. An error is a unit that was
+	// running and could not be restarted.
+	TryRestart(ctx context.Context, unit string) (restarted bool, err error)
+}
+
+// RestartFactoryUnits restarts the long-running mw units of this host once a
+// build of rig has succeeded, so that they run the binary just built, and says
+// what it did, as notes: one for each unit restarted, and one for each that could
+// not be, which are also returned in failed. Nothing is done for a rig that is
+// not the factory rig, whose build changes no binary these units run, nor for a
+// nil units.
+func RestartFactoryUnits(ctx context.Context, units UnitRestarter, rig string) (notes, failed []string) {
+	if units == nil || rig != FactoryRig {
+		return nil, nil
+	}
+	for _, unit := range FactoryUnits {
+		restarted, err := units.TryRestart(ctx, unit)
+		switch {
+		case err != nil:
+			note := fmt.Sprintf("%s could not be restarted on the new build and still runs the old mw: %s", unit, firstLine(err.Error()))
+			notes, failed = append(notes, note), append(failed, note)
+		case restarted:
+			notes = append(notes, "restarted "+unit+" on the new build")
+		}
+	}
+	return notes, failed
+}
+
 // afterTail is how much of a failed command's output the one line about it
 // quotes: the last lines, which are where a build says what broke, and no more
 // than afterTailRunes of them, because the line goes into a ledger, a comment and
@@ -136,6 +181,7 @@ func (n Next) afterLanding(ctx context.Context, c *closeOut, report *NextReport)
 	}
 	report.Notes = append(report.Notes, line)
 	if err == nil && ran.Succeeded() {
+		n.restartUnits(ctx, c, report)
 		return
 	}
 	if err == nil && ran.TimedOut > 0 {
@@ -147,6 +193,23 @@ func (n Next) afterLanding(ctx context.Context, c *closeOut, report *NextReport)
 		"so the binary built there may be old. The landing is not undone.\n\n%s", n.Host, c.rigDir, line)
 	if err := n.Tracker.CommentOnStory(ctx, c.id, comment); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the after-landing command's failure could not be written on the story: %v", err))
+	}
+}
+
+// restartUnits restarts this host's long-running mw units on the build that just
+// succeeded and says so in the report. A restart that fails is said again on the
+// story and, first, in the mail to the Mayor: the landing is not undone by it.
+func (n Next) restartUnits(ctx context.Context, c *closeOut, report *NextReport) {
+	notes, failed := RestartFactoryUnits(ctx, n.Units, c.path.Rig)
+	report.Notes = append(report.Notes, notes...)
+	if len(failed) == 0 {
+		return
+	}
+	report.UnitRestartFailed = failed
+	comment := fmt.Sprintf("mw next on %s landed this story and built it, but %s The landing is not undone.\n\n%s",
+		n.Host, UnitRestartFailedLine+".", strings.Join(failed, "\n"))
+	if err := n.Tracker.CommentOnStory(ctx, c.id, comment); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the unit restart's failure could not be written on the story: %v", err))
 	}
 }
 

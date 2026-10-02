@@ -14,6 +14,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/reaper"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/ticklog"
+	"github.com/Jonathan-A-White/millwright/infrastructure/userunits"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 	"github.com/Jonathan-A-White/millwright/infrastructure/watch"
 
@@ -34,6 +35,7 @@ func hostSelfUpdate(rigs, afterLanding map[string]string, afterLimits map[string
 		Checkout: rig.New(),
 		After:    rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits)),
 		Built:    rig.NewBuiltMarks(filepath.Join(home, SyncHaltStateDir)),
+		Units:    userunits.Systemctl{},
 	}
 }
 
