@@ -938,6 +938,13 @@ commented QUESTION and marked open with a note that records the txid and the
 options offered. `mw postern inbox` reads a reply to it and appends ANSWER to
 the bead, clears the note, and mails the Mayor.
 
+An `--option` may end `|<bead>:<state>[,<bead>:<state>...]` (state: `open`,
+`held`, `landed`, `verified` or `closed`), as `--option 'A: Release both|mw-x.1:open,mw-x.2:open'`:
+the card shows the text alone, and once `mw postern inbox --apply` applies one of the
+Governor's acts and one option's expectations all hold, the card is answered with that
+option, `ANSWER (by his acts)`, its note cleared, the Mayor mailed and a reply posted
+under the card; nothing is released or held on it.
+
 If the answer is a Release tap — its text, trimmed and case-folded, is
 "release", with or without a card's "A: " letter prefix — and the bead is an epic, `mw postern inbox` releases its held
 stories itself, exactly as `mw release <epic>` would, with no Mayor turn: it

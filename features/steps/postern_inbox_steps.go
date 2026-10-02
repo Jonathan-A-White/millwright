@@ -65,6 +65,11 @@ type posternInboxContext struct {
 	// attachFiles are the files the last "carrying two files" step sent.
 	attachFiles []attachedFile
 
+	// cardTxid is the txid of the last card a "was asked, through mw postern
+	// send" step sent, and replies says the inbox is wired to post replies.
+	cardTxid string
+	replies  bool
+
 	messages    []application.PosternInboxMessage
 	unreadCount int
 	err         error
@@ -187,6 +192,11 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^no story state was set$`, c.noStoryStateWasSet)
 	ctx.Then(`^bead "([^"]*)" is commented an ANSWER with txid "([^"]*)" from "([^"]*)" saying "([^"]*)"$`, c.beadIsCommentedTheAnswer)
 	ctx.Then(`^bead "([^"]*)"'s question note is cleared$`, c.beadsQuestionNoteIsCleared)
+	ctx.Given(`^bead "([^"]*)" was asked, through mw postern send, with options "([^"]*)"$`, c.beadWasAskedWithOptions)
+	ctx.When(`^a seat releases "([^"]*)" and "([^"]*)"$`, c.aSeatReleases)
+	ctx.Then(`^bead "([^"]*)"'s question note is still open$`, c.beadsQuestionNoteIsStillOpen)
+	ctx.Then(`^the Governor was told "([^"]*)" under the card asking about "([^"]*)"$`, c.theGovernorWasToldUnderTheCard)
+	ctx.Then(`^nothing was told to the Governor$`, c.nothingWasToldToTheGovernor)
 	ctx.Then(`^mail "([^"]*)" was sent to mayor$`, c.mailWasSentToMayor)
 	ctx.Then(`^bead "([^"]*)" has no comment$`, c.beadHasNoComment)
 	ctx.Then(`^bead "([^"]*)" is commented by the Governor saying "([^"]*)"$`, c.beadIsCommentedByTheGovernor)
@@ -731,7 +741,7 @@ func (c *posternInboxContext) inbox() application.PosternInbox {
 		AttachmentDir: c.attachDir,
 		Out:           c.out,
 	}
-	if c.transcriber != nil || c.runner != nil {
+	if c.transcriber != nil || c.runner != nil || c.replies {
 		inbox.Sender = &application.PosternSend{
 			Postern: c.backend, Cipher: c.cipher, Keys: c.keys, GovernorKey: c.governorKey,
 		}
@@ -1353,4 +1363,77 @@ func (c *posternInboxContext) rememberedThread(txid string, want application.Pos
 
 func (c *posternInboxContext) theHandsStepIsSupersededBy(id, bead, newer string) error {
 	return c.memory.SetNote(context.Background(), application.HandsSupersededKey(bead, id), newer)
+}
+
+// beadWasAskedWithOptions sends bead's question through PosternSend, as mw
+// postern send --bead --option does, the options split at ", " and each
+// perhaps ending '|<bead>:<state>,...', so the note it leaves is the real one.
+// The inbox is then wired to post replies.
+func (c *posternInboxContext) beadWasAskedWithOptions(bead, optionsCSV string) error {
+	send := application.PosternSend{
+		Postern: c.backend, Cipher: c.cipher, Keys: c.keys, GovernorKey: c.governorKey,
+		Tracker: c.memory, Notes: c.memory,
+	}
+	txid, err := send.Run(context.Background(), application.PosternSendRequest{
+		Class: "decision-needed", Text: "Release them?", Bead: bead, Recommend: "A", Options: splitOptions(optionsCSV),
+	})
+	if err != nil {
+		return err
+	}
+	c.cardTxid, c.replies = txid, true
+	return nil
+}
+
+// aSeatReleases releases each bead as a seat does, straight on the tracker,
+// not through the Governor's actions.
+func (c *posternInboxContext) aSeatReleases(first, second string) error {
+	for _, id := range []string{first, second} {
+		if err := c.memory.ReleaseStory(context.Background(), id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *posternInboxContext) beadsQuestionNoteIsStillOpen(bead string) error {
+	saved, err := c.memory.Note(context.Background(), application.PosternQuestionKey(bead))
+	if err != nil {
+		return err
+	}
+	if saved == "" {
+		return fmt.Errorf("expected %s's question note to be still open, it is cleared", bead)
+	}
+	return nil
+}
+
+// theGovernorWasToldUnderTheCard checks the newest message delivered is a
+// reply in bead's channel, re the card's txid, saying text.
+func (c *posternInboxContext) theGovernorWasToldUnderTheCard(text, bead string) error {
+	delivered := c.backend.Delivered()
+	if len(delivered) < 2 {
+		return fmt.Errorf("expected the card and a reply delivered, got %d messages", len(delivered))
+	}
+	var payload application.PosternPayload
+	if err := json.Unmarshal(delivered[len(delivered)-1], &payload); err != nil {
+		return err
+	}
+	plain, _, err := c.cipher.Decrypt("governor", payload.Ct)
+	if err != nil {
+		return err
+	}
+	var body application.PosternThreadedMessage
+	if err := json.Unmarshal([]byte(plain), &body); err != nil {
+		return err
+	}
+	if body.Text != text || body.Thread.Bead != bead || body.Re != c.cardTxid {
+		return fmt.Errorf("expected %q in %s's channel re %s, got %s", text, bead, c.cardTxid, plain)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) nothingWasToldToTheGovernor() error {
+	if n := len(c.backend.Delivered()); n != 1 {
+		return fmt.Errorf("expected only the card delivered, got %d messages", n)
+	}
+	return nil
 }

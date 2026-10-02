@@ -273,6 +273,7 @@ func (i PosternInbox) applyOne(ctx context.Context, m PosternInboxMessage, outco
 		if err != nil || !recorded {
 			return posternApplied{}, false, err
 		}
+		i.answerByActs(ctx, m, i.actedBeads(ctx, reply.Bead)...)
 		return posternApplied{Kind: "answer", Bead: reply.Bead, Txid: m.Txid}, true, nil
 	}
 	if action, ok := decodePosternAction(m.Text); ok {
@@ -286,6 +287,9 @@ func (i PosternInbox) applyOne(ctx context.Context, m PosternInboxMessage, outco
 			return posternApplied{}, false, nil
 		}
 		result, err := i.applyAction(ctx, m, action)
+		if err == nil && !result.Refused && action.Action != PosternActionRun {
+			i.answerByActs(ctx, m, i.actedBeads(ctx, action.Bead)...)
+		}
 		return result, err == nil, err
 	}
 	if i.isVoiceNote(m) {
