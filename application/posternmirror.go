@@ -104,8 +104,12 @@ func (m PosternMirror) Run(ctx context.Context) error {
 }
 
 // boost is the other host that can be home.
-func (m PosternMirror) boost() string {
-	if m.Host == "desktop" {
+func (m PosternMirror) boost() string { return BoostOf(m.Host) }
+
+// BoostOf is the Boost of a host: the other of desktop and laptop, the one
+// that is not home while host is.
+func BoostOf(host string) string {
+	if host == "desktop" {
 		return "laptop"
 	}
 	return "desktop"
