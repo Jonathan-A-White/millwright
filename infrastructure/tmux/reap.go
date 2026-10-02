@@ -6,7 +6,6 @@ import (
 	"os"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -173,8 +172,42 @@ func (w *Windows) Type(ctx context.Context, window, text string) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+	return w.Enter(ctx, window)
+}
+
+// Enter implements application.ReapTerminal: the Enter key, pressed in the
+// window's pane.
+func (w *Windows) Enter(ctx context.Context, window string) error {
+	if err := windowID(window); err != nil {
+		return err
+	}
 	_, err := w.call(ctx, "send-keys", "-t", window, "Enter")
 	return err
+}
+
+// InputLine implements application.ReapTerminal: the undimmed text after the
+// last prompt mark on the window's screen, "" when the line is empty.
+func (w *Windows) InputLine(ctx context.Context, window string) (string, error) {
+	if err := windowID(window); err != nil {
+		return "", err
+	}
+	printed, err := w.call(ctx, "capture-pane", "-p", "-e", "-t", window)
+	if err != nil {
+		return "", err
+	}
+	return inputLineText(string(printed)), nil
+}
+
+// inputLineText is the draft on the last prompt line of a capture-pane -e
+// screen, read by the same rule as inputLineHoldsDraft.
+func inputLineText(screen string) string {
+	lines := strings.Split(screen, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if isPrompt, draft := readInputLine(lines[i]); isPrompt {
+			return strings.TrimSpace(draft)
+		}
+	}
+	return ""
 }
 
 // Close implements application.ReapTerminal: the window named by id, and what
@@ -214,8 +247,16 @@ func noServer(err error) bool {
 // which is not a draft either. This is the one rule for "is the input line
 // empty"; contrib/mail-notify's pane_idle is the same rule in shell.
 func inputLineHoldsDraft(line string) (isPrompt, holdsDraft bool) {
+	isPrompt, draft := readInputLine(line)
+	return isPrompt, strings.TrimSpace(draft) != ""
+}
+
+// readInputLine is inputLineHoldsDraft's reading, keeping the undimmed text
+// after the mark rather than only whether there is any.
+func readInputLine(line string) (isPrompt bool, draft string) {
 	dim := false
 	seenMark := false
+	var text strings.Builder
 	for i := 0; i < len(line); {
 		if line[i] == 0x1b {
 			n, params, isSGR := escapeAt(line[i:])
@@ -230,14 +271,14 @@ func inputLineHoldsDraft(line string) (isPrompt, holdsDraft bool) {
 		switch {
 		case !seenMark:
 			if r != []rune(promptMark)[0] {
-				return false, false
+				return false, ""
 			}
 			seenMark = true
-		case !unicode.IsSpace(r) && !dim:
-			return true, true
+		case !dim:
+			text.WriteRune(r)
 		}
 	}
-	return seenMark, false
+	return seenMark, text.String()
 }
 
 // escapeAt reads the escape sequence at the start of s and says how long it is;

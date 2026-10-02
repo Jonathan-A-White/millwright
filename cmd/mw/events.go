@@ -139,6 +139,7 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 		Spring:   springSeat,
 		Host:     host,
 		Err:      cmd.ErrOrStderr(),
+		Settle:   2 * time.Second,
 	}
 	spring, err := homeSpring(path, host, cmd.ErrOrStderr())
 	if err != nil {

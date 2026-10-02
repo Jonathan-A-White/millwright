@@ -32,6 +32,11 @@ type FakeWindows struct {
 	closed []string
 	// typed is every call Type has made, in order.
 	typed []typedInto
+	// lines is the text each window's input line holds, enters how many Enter
+	// keys each was sent, and lost how many more of them are lost (fakereap.go).
+	lines  map[string]string
+	enters map[string]int
+	lost   map[string]int
 
 	// Opened is every spec Open was asked for, in the order it was asked.
 	Opened []application.WindowSpec

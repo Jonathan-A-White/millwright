@@ -127,3 +127,17 @@ func TestOnlyAWindowIDIsClosable(t *testing.T) {
 		}
 	}
 }
+
+func TestInputLineTextIsTheUndimmedDraftOnTheLastPromptLine(t *testing.T) {
+	for name, tc := range map[string]struct{ screen, want string }{
+		"empty":                            {"❯ \n", ""},
+		"a draft":                          {"❯ New events for mayor: 2. Run mw events tail --since 3352.\n", "New events for mayor: 2. Run mw events tail --since 3352."},
+		"suggestion":                       {"❯ \x1b[2mrun the tests\x1b[0m\n", ""},
+		"an earlier prompt in the history": {"❯ old words\nreply\n❯ \n", ""},
+		"no prompt":                        {"working...\n", ""},
+	} {
+		if got := inputLineText(tc.screen); got != tc.want {
+			t.Errorf("%s: got %q, want %q", name, got, tc.want)
+		}
+	}
+}
