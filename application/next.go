@@ -208,6 +208,18 @@ type Next struct {
 	// sends nothing back: a conflict stops the close-out.
 	Boot SeatBoot
 
+	// Load is how busy this host is, read around the rig's tests: a close-out
+	// waits, up to LoadBound, for a busy host to calm before them, and runs them
+	// once more when they fail while it was busy (mw-gq6.228). A nil Load, or a
+	// load that cannot be read, does neither. LoadPoll is how often the wait looks
+	// again and LoadBound how long it waits in all; zero is GateLoadPoll and
+	// GateLoadBound. LoadWait is how it waits, the real clock unless a test
+	// replaces it.
+	Load      HostLoad
+	LoadPoll  time.Duration
+	LoadBound time.Duration
+	LoadWait  func(ctx context.Context, d time.Duration) error
+
 	// Seat is whose ledger the line is written in, Host is which host this is,
 	// and Rigs is where each rig is checked out.
 	Seat string
@@ -1006,7 +1018,8 @@ func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all
 	}
 
 	// What the rig itself says about the work, in the worktree the session left.
-	checked, err := n.Checks.Run(ctx, c.path.Rig, c.worktree)
+	gate := n.gate(ctx, c, report, c.worktree, "the rig's tests")
+	checked, err := gate.Checked, gate.Err
 	switch {
 	case err != nil:
 		refuse(ReasonTestsNotRun, fmt.Sprintf("the rig's tests could not be run in %s: %v", c.worktree, err), "")
@@ -1022,6 +1035,9 @@ func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all
 			reason = ReasonMergedTestsFail
 			why = fmt.Sprintf("second merged-tests-fail: %s and %s still do not pass the rig's tests together: `%s` did not pass",
 				c.branch, c.target, checked.Command)
+		}
+		if gate.Said != "" {
+			why += " (" + gate.Said + ")"
 		}
 		refuse(reason, why, "The last lines of `"+checked.Command+"` in "+c.worktree+":\n\n```\n"+checked.Tail(CheckLines)+"\n```")
 	}
@@ -1284,7 +1300,8 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 	// tested on: the story's tests passed on the story's branch, and the other
 	// host's passed on its own. Only this result matters now.
 	if !landed.FastForward {
-		checked, err := n.Checks.Run(ctx, c.path.Rig, dir)
+		gate := n.gate(ctx, c, report, dir, "the rig's tests on the merged result")
+		checked, err := gate.Checked, gate.Err
 		if err != nil {
 			return Landed{}, failedFor(ReasonTestsNotRun, fmt.Errorf("the rig's tests could not be run on the merged result in %s: %w", dir, err))
 		}
@@ -1293,8 +1310,12 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 				dir, checked.Command, checked.Tail(CheckLines)))
 		}
 		if !checked.Passed {
-			return Landed{}, failedFor(ReasonMergedTestsFail, fmt.Errorf("%s and %s do not pass the rig's tests together: `%s` failed on the merged result, so nothing was pushed\n\n```\n%s\n```",
-				c.branch, c.target, checked.Command, checked.Tail(CheckLines)))
+			ran := ""
+			if gate.Said != "" {
+				ran = " (" + gate.Said + ")"
+			}
+			return Landed{}, failedFor(ReasonMergedTestsFail, fmt.Errorf("%s and %s do not pass the rig's tests together: `%s` failed on the merged result, so nothing was pushed%s\n\n```\n%s\n```",
+				c.branch, c.target, checked.Command, ran, checked.Tail(CheckLines)))
 		}
 	}
 

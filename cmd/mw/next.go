@@ -164,6 +164,7 @@ func newNextCmd() *cobra.Command {
 				Worktrees: worktrees,
 				Landing:   worktrees,
 				Checks:    rig.NewChecks(rig.WithCommands(tests)),
+				Load:      hostload.Proc{},
 				Slot:      rig.NewSlots(),
 				Vault:     files,
 				Files:     files,
