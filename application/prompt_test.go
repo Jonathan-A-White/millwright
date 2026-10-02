@@ -65,3 +65,59 @@ func TestPromptRunTakesABoolFlagAloneAndTheEqualsForm(t *testing.T) {
 		t.Errorf("expected a stray word refused")
 	}
 }
+
+func TestPromptRunFillsAFreeTextOptionWithTheWordsNoFlagTook(t *testing.T) {
+	backend := apptest.NewFakePrompts()
+	_ = backend.Put(context.Background(), domain.Prompt{Name: "later", Summary: "park a want", Signature: []string{"x:int=0", "text:text:required"}, Body: "Park: <text> (x=<x>)"})
+	tracker := apptest.NewFakeTracker()
+	var out bytes.Buffer
+	run := application.PromptRun{Prompts: backend, Tracker: tracker, Notes: tracker, Host: "desktop", Out: &out}
+
+	if err := run.Run(context.Background(), "later", []string{"a", "licence", "for", "Luke"}); err != nil {
+		t.Fatalf("running: %v", err)
+	}
+	if !strings.Contains(out.String(), "Park: a licence for Luke (x=0)\n") {
+		t.Errorf("expected <text> filled with the words, got:\n%s", out.String())
+	}
+	out.Reset()
+	if err := run.Run(context.Background(), "later", []string{"--x", "1", "two", "words"}); err != nil {
+		t.Fatalf("running: %v", err)
+	}
+	if !strings.Contains(out.String(), "Park: two words (x=1)\n") {
+		t.Errorf("expected the flag taken and the text 'two words', got:\n%s", out.String())
+	}
+	if err := run.Run(context.Background(), "later", []string{"--x", "1"}); err == nil || !strings.Contains(err.Error(), "--text is required") {
+		t.Errorf("expected a required text left out refused, got %v", err)
+	}
+	if err := run.Run(context.Background(), "later", []string{"--text", "given", "and", "more"}); err == nil || !strings.Contains(err.Error(), "--text is given twice") {
+		t.Errorf("expected the text given both ways refused, got %v", err)
+	}
+}
+
+func TestPromptRunWithoutAFreeTextOptionStillRefusesAStrayWord(t *testing.T) {
+	backend := apptest.NewFakePrompts()
+	_ = backend.Put(context.Background(), domain.Prompt{Name: "p", Summary: "s", Signature: []string{"n:int=1"}, Body: "n=<n>"})
+	tracker := apptest.NewFakeTracker()
+	run := application.PromptRun{Prompts: backend, Tracker: tracker, Notes: tracker, Host: "desktop", Out: &bytes.Buffer{}}
+
+	err := run.Run(context.Background(), "p", []string{"stray"})
+	want := `mw prompt run: /p: "stray" is not --<flag> <value>; its signature is --n:int=1`
+	if err == nil || err.Error() != want {
+		t.Fatalf("expected %q, got %v", want, err)
+	}
+}
+
+func TestPromptSaveRefusesTwoFreeTextOptions(t *testing.T) {
+	backend := apptest.NewFakePrompts()
+	save := application.PromptSave{Prompts: backend}
+	if _, err := save.Run(context.Background(), application.PromptSaveRequest{
+		Name: "x", Summary: "x", Body: "b", Options: []string{"a:text", "b:text"},
+	}); err == nil || !strings.Contains(err.Error(), "free-text") {
+		t.Fatalf("expected two free-text options refused, got %v", err)
+	}
+	if _, err := save.Run(context.Background(), application.PromptSaveRequest{
+		Name: "x", Summary: "x", Body: "b", Options: []string{"text:text:required"},
+	}); err != nil {
+		t.Fatalf("expected one free-text option saved: %v", err)
+	}
+}

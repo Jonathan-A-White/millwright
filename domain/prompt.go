@@ -14,6 +14,9 @@ const (
 	PromptTypeInt      = "int"
 	PromptTypeBool     = "bool"
 	PromptTypeDuration = "duration"
+	// PromptTypeText is the free-text option: the words of a call that no flag
+	// took, joined by single spaces. A prompt has at most one.
+	PromptTypeText = "text"
 )
 
 // promptRequiredSuffix ends an option's spec when the caller must give it.
@@ -54,8 +57,8 @@ type PromptArg struct {
 func ValidPromptName(name string) bool { return promptNamePattern.MatchString(name) }
 
 // ParsePromptOption reads spec, `<flag>:<type>[=<default>][:required]`. The
-// flag is lower-case words joined by hyphens, the type is string, int, bool or
-// duration, and a default must be a value of the type. An option is required or
+// flag is lower-case words joined by hyphens, the type is string, int, bool,
+// duration or text, and a default must be a value of the type. An option is required or
 // has a default, never both.
 func ParsePromptOption(spec string) (PromptOption, error) {
 	rest := spec
@@ -76,9 +79,9 @@ func ParsePromptOption(spec string) (PromptOption, error) {
 		return PromptOption{}, fmt.Errorf("option %q is required, so it has no default", spec)
 	}
 	switch kind {
-	case PromptTypeString, PromptTypeInt, PromptTypeBool, PromptTypeDuration:
+	case PromptTypeString, PromptTypeInt, PromptTypeBool, PromptTypeDuration, PromptTypeText:
 	default:
-		return PromptOption{}, fmt.Errorf("option %q: %q is not a type: string, int, bool or duration", spec, kind)
+		return PromptOption{}, fmt.Errorf("option %q: %q is not a type: string, int, bool, duration or text", spec, kind)
 	}
 	if def != "" {
 		if err := option.check(def); err != nil {
@@ -122,6 +125,7 @@ func (o PromptOption) String() string {
 func (p Prompt) Options() ([]PromptOption, error) {
 	options := make([]PromptOption, 0, len(p.Signature))
 	seen := map[string]bool{}
+	text := ""
 	for _, spec := range p.Signature {
 		option, err := ParsePromptOption(spec)
 		if err != nil {
@@ -131,6 +135,12 @@ func (p Prompt) Options() ([]PromptOption, error) {
 			return nil, fmt.Errorf("option %q is given twice", option.Flag)
 		}
 		seen[option.Flag] = true
+		if option.Type == PromptTypeText {
+			if text != "" {
+				return nil, fmt.Errorf("options %q and %q are both free-text: a prompt has one", text, option.Flag)
+			}
+			text = option.Flag
+		}
 		options = append(options, option)
 	}
 	return options, nil

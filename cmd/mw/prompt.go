@@ -50,7 +50,8 @@ func newPromptSaveCmd() *cobra.Command {
 			"its --summary, its signature (each --option, repeatable) and its body, read from\n" +
 			"--body-file, a draft in the vault. An option is <flag>:<type>=<default>, the type string,\n" +
 			"int, bool or duration (30m); <flag>:<type>:required has no default and must be given. In the body each\n" +
-			"<flag> is replaced by the option's value when the prompt is run.",
+			"<flag> is replaced by the option's value when the prompt is run. One option may be of type text\n" +
+			"(--text:text): it takes every word of a call that no flag took, so '/later a licence' fills it.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if bodyFile == "" {

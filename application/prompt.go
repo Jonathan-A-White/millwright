@@ -310,19 +310,30 @@ func waitingHands(notes map[string]string) promptSection {
 }
 
 // parsePromptArgs reads a call's tokens against p's signature. A bool option
-// may stand alone: --flag alone is --flag true.
+// may stand alone: --flag alone is --flag true. When the signature has a
+// free-text option, every word no flag took is its value, in order, joined by
+// single spaces; otherwise such a word is refused.
 func parsePromptArgs(p domain.Prompt, tokens []string) ([]domain.PromptArg, error) {
 	options, err := p.Options()
 	if err != nil {
 		return nil, fmt.Errorf("mw prompt run: the saved prompt /%s has a signature that does not read: %w", p.Name, err)
 	}
 	isBool := map[string]bool{}
+	textFlag := ""
 	for _, o := range options {
 		isBool[o.Flag] = o.Type == domain.PromptTypeBool
+		if o.Type == domain.PromptTypeText {
+			textFlag = o.Flag
+		}
 	}
 	var given []domain.PromptArg
+	var words []string
 	for i := 0; i < len(tokens); i++ {
 		flag, ok := strings.CutPrefix(tokens[i], "--")
+		if (!ok || flag == "") && textFlag != "" {
+			words = append(words, tokens[i])
+			continue
+		}
 		if !ok || flag == "" {
 			return nil, fmt.Errorf("mw prompt run: /%s: %q is not --<flag> <value>; its signature is %s", p.Name, tokens[i], p.SignatureText())
 		}
@@ -339,6 +350,9 @@ func parsePromptArgs(p domain.Prompt, tokens []string) ([]domain.PromptArg, erro
 		default:
 			return nil, fmt.Errorf("mw prompt run: /%s: --%s needs a value; its signature is %s", p.Name, flag, p.SignatureText())
 		}
+	}
+	if len(words) > 0 {
+		given = append(given, domain.PromptArg{Flag: textFlag, Value: strings.Join(words, " ")})
 	}
 	return given, nil
 }

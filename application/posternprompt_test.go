@@ -27,6 +27,9 @@ func newPromptFixture(t *testing.T) *promptFixture {
 	mustDo(t, prompts.Put(context.Background(), domain.Prompt{
 		Name: "wrapup", Summary: "end of day", Signature: []string{}, Body: "Wrap up.",
 	}))
+	mustDo(t, prompts.Put(context.Background(), domain.Prompt{
+		Name: "later", Summary: "park a want", Signature: []string{"text:text:required"}, Body: "Park <text>.",
+	}))
 	return &promptFixture{applyFixture: newApplyFixture(t), prompts: prompts}
 }
 
@@ -112,6 +115,27 @@ func TestApplyCommentsAPromptCallOnTheThreadsBead(t *testing.T) {
 	}
 }
 
+// A prompt with a free-text option takes the words after its options: the call
+// is mailed with them whole and is not refused.
+func TestApplyMailsAFreeTextPromptCallWithTheWordsWhole(t *testing.T) {
+	f := newPromptFixture(t)
+	f.message(t, releaseTapGovernorKey, "tx-later", "/later some words")
+
+	f.apply(t)
+
+	subjects := f.subjects(t)
+	if len(subjects) != 1 || subjects[0] != "Prompt: /later --text 'some words'" {
+		t.Fatalf("expected one Prompt mail with the words whole, got %v", subjects)
+	}
+	mail, _ := f.mailbox.Inbox(context.Background(), application.MayorMailbox)
+	if !strings.Contains(mail[0].Body, "mw prompt run later --text 'some words'") {
+		t.Fatalf("expected the mail to name the line to run, got %q", mail[0].Body)
+	}
+	if got := f.answered(t); len(got) != 0 {
+		t.Fatalf("expected the call not refused, got %v", got)
+	}
+}
+
 // A prompt the backend does not keep is answered in the thread in one line,
 // and nothing is mailed.
 func TestApplyAnswersAnUnknownPromptInTheThread(t *testing.T) {
@@ -124,7 +148,7 @@ func TestApplyAnswersAnUnknownPromptInTheThread(t *testing.T) {
 		t.Fatalf("expected no mail, got %v", got)
 	}
 	sent := f.answered(t)
-	if len(sent) != 1 || sent[0].Text != "Unknown prompt /nope; saved prompts: /top5 /wrapup" || sent[0].Re != "tx-nope" {
+	if len(sent) != 1 || sent[0].Text != "Unknown prompt /nope; saved prompts: /later /top5 /wrapup" || sent[0].Re != "tx-nope" {
 		t.Fatalf("expected the one-line answer re the call, got %+v", sent)
 	}
 	if note, _ := f.tracker.Note(context.Background(), application.PosternAppliedKey("tx-nope")); !strings.HasPrefix(note, "refused ") {
