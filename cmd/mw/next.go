@@ -12,6 +12,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
+	"github.com/Jonathan-A-White/millwright/infrastructure/userunits"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
@@ -184,6 +185,7 @@ func newNextCmd() *cobra.Command {
 
 				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits)),
 				Backend:      hostBackend(gateway, files, host, rigs, cmd.ErrOrStderr()),
+				Units:        userunits.Systemctl{},
 			}.Run(cmd.Context(), args[0])
 			return err
 		},

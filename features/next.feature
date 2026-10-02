@@ -756,6 +756,47 @@ Feature: Closing out a finished story and carrying on
     Then exactly one mail was sent, to "mayor" from "mw@vps"
     And that mail's first line is: next on vps: mw-gq6.1
 
+  Scenario: A landing whose build succeeded restarts the follower on the new build, and says so
+    Given the rig names a command to run after a landing
+    And this host runs the follower, mw-view-follow.service
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed
+    And mw-view-follow.service was try-restarted once
+    And the report says: restarted mw-view-follow.service on the new build
+    And exactly one mail was sent, to "mayor" from "mw@vps"
+    And that mail's body says: restarted mw-view-follow.service on the new build
+
+  Scenario: A landing whose build failed restarts nothing
+    Given the rig names a command to run after a landing, which prints "boom" and exits 2
+    And this host runs the follower, mw-view-follow.service
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed
+    And no user unit was try-restarted
+
+  Scenario: A landing on a host that names no build command restarts nothing
+    Given another rig, and not this one, names a command to run after a landing
+    And this host runs the follower, mw-view-follow.service
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed
+    And no user unit was try-restarted
+
+  Scenario: A restart that fails is said loudly in the report, the comment and the mail, and the story is landed all the same
+    Given the rig names a command to run after a landing
+    And this host runs the follower, mw-view-follow.service, which fails to restart, saying: Job failed
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the story "mw-gq6.1" is closed
+    And the report says: mw-view-follow.service could not be restarted on the new build and still runs the old mw: Job failed
+    And the comment on "mw-gq6.1" says: mw-view-follow.service could not be restarted on the new build and still runs the old mw: Job failed
+    And exactly one mail was sent, to "mayor" from "mw@vps"
+    And that mail's first line is: a user unit could not be restarted on the new build: the old mw is still running there
+    And that mail's body says: mw-view-follow.service could not be restarted on the new build and still runs the old mw: Job failed
+    And the close-out returned no error
+
   Scenario: An after-landing command does not run when the rig checkout was left on another branch
     Given the rig checkout is on a branch of its own, "wip"
     And the rig names a command to run after a landing

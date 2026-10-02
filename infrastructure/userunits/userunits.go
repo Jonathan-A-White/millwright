@@ -44,3 +44,24 @@ func (s Systemctl) Start(ctx context.Context, unit string) error {
 	}
 	return nil
 }
+
+// TryRestart restarts unit when it is running, so that it runs the binary just
+// built. A unit the user manager does not know, or that is not running, is left
+// as it is and is not an error: a host runs only some of the factory's units.
+func (s Systemctl) TryRestart(ctx context.Context, unit string) (bool, error) {
+	if !s.Installed(ctx, unit) {
+		return false, nil
+	}
+	// is-active exits non-zero for a unit that is not running.
+	if _, err := s.run(ctx, "is-active", "--quiet", unit); err != nil {
+		return false, nil
+	}
+	out, err := s.run(ctx, "try-restart", unit)
+	if err != nil {
+		if said := strings.Join(strings.Fields(string(out)), " "); said != "" {
+			return false, fmt.Errorf("restarting %s: %v: %s", unit, err, said)
+		}
+		return false, fmt.Errorf("restarting %s: %w", unit, err)
+	}
+	return true, nil
+}

@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 
 	"github.com/cucumber/godog"
 )
@@ -24,9 +26,13 @@ func registerNextAfterLandingSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the rig names a command to run after a landing, which prints "([^"]*)" and exits (\d+)$`, c.theRigNamesAFailingCommand)
 	ctx.Given(`^the rig names a command to run after a landing, which runs far too long$`, c.theRigNamesASlowCommand)
 	ctx.Given(`^another rig, and not this one, names a command to run after a landing$`, c.anotherRigNamesACommand)
+	ctx.Given(`^this host runs the follower, mw-view-follow.service$`, c.thisHostRunsTheFollower)
+	ctx.Given(`^this host runs the follower, mw-view-follow.service, which fails to restart, saying: (.+)$`, c.theFollowerFailsToRestart)
 	ctx.Given(`^after-landing commands are stopped after (\d+) milliseconds$`, c.afterLandingCommandsAreStoppedAfter)
 
 	ctx.Then(`^the rig's after-landing command ran once, in the rig checkout, at the commit that landed on "([^"]*)"$`, c.theCommandRanOnce)
+	ctx.Then(`^mw-view-follow.service was try-restarted once$`, c.theFollowerWasRestartedOnce)
+	ctx.Then(`^no user unit was try-restarted$`, c.noUnitWasRestarted)
 	ctx.Then(`^the rig's after-landing command did not run$`, c.theCommandDidNotRun)
 	ctx.Then(`^the report says: (.+)$`, c.theReportSays)
 	ctx.Then(`^the comment on "([^"]*)" says: (.+)$`, c.theCommentSays)
@@ -176,4 +182,40 @@ func (c *nextContext) theStoryIsClosedAsWithout(id string) error {
 		return fmt.Errorf("expected %s closed with the reason of a plain landing, got %q", id, reason)
 	}
 	return nil
+}
+
+// thisHostRunsTheFollower gives the scenario's close-out a user manager that
+// has mw-view-follow.service running and restarts it without error.
+func (c *nextContext) thisHostRunsTheFollower() error {
+	c.units = &apptest.FakeUnitRestarter{}
+	return nil
+}
+
+func (c *nextContext) theFollowerFailsToRestart(saying string) error {
+	c.units = &apptest.FakeUnitRestarter{Fails: map[string]error{"mw-view-follow.service": errors.New(saying)}}
+	return nil
+}
+
+func (c *nextContext) theFollowerWasRestartedOnce() error {
+	if got := c.units.Asked; len(got) != 1 || got[0] != "mw-view-follow.service" {
+		return fmt.Errorf("expected mw-view-follow.service try-restarted once, got %v", got)
+	}
+	return nil
+}
+
+func (c *nextContext) noUnitWasRestarted() error {
+	if got := c.units.Asked; len(got) != 0 {
+		return fmt.Errorf("expected no user unit try-restarted, got %v", got)
+	}
+	return nil
+}
+
+// unitRestarter is the user manager mw next is given: the scenario's, and for
+// one that names no follower an empty one, so that a step can say nothing was
+// asked of it.
+func (c *nextContext) unitRestarter() application.UnitRestarter {
+	if c.units == nil {
+		c.units = &apptest.FakeUnitRestarter{}
+	}
+	return c.units
 }

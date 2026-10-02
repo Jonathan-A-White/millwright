@@ -165,6 +165,11 @@ type Next struct {
 	// from the rig by itself. A nil AfterLanding runs nothing.
 	AfterLanding AfterLanding
 
+	// Units restarts this host's long-running mw user units once a landing's
+	// build of the factory rig has succeeded, so that they run the new binary
+	// (mw-gq6.232). A nil Units restarts nothing.
+	Units UnitRestarter
+
 	// Backend stages the backend of a landing whose story changed it, on the
 	// home, and writes its swap as a hands step for the Governor to approve
 	// (mw-gq6.185). A zero Backend, or a rig it names no backend for, does
@@ -330,6 +335,10 @@ type NextReport struct {
 	// of its work may have left the rig half done, which the mail to the Mayor
 	// says first (AfterLandingStoppedLine).
 	AfterLandingStopped time.Duration
+
+	// UnitRestartFailed holds a line for each long-running unit that could not be
+	// restarted on the new build, which the mail to the Mayor says first.
+	UnitRestartFailed []string
 
 	Synced     bool
 	Sync       SyncReport
@@ -1444,6 +1453,9 @@ func (n Next) mailTheMayor(ctx context.Context, c *closeOut, report *NextReport,
 	body := report.String()
 	if report.AfterLandingStopped > 0 {
 		body = AfterLandingStoppedLine + "\n" + body
+	}
+	if len(report.UnitRestartFailed) > 0 {
+		body = UnitRestartFailedLine + "\n" + body
 	}
 	if said != "" {
 		body += "\n" + said + "\n"
