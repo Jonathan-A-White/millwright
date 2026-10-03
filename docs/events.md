@@ -19,8 +19,10 @@ docs/protocol.md section 22 uses exactly these.
 | To | `to` | The state after; empty for a kind with no machine. |
 | Detail | `detail` | What changed, per kind below. |
 | Lane | `lane` | `normal`, `emergency` or `fallback`: the lane of the batch it came in. |
+| Clears | `clears` | The seq of the emergency this event ends; present only when it ends one. An app takes that emergency as resolved. |
 
-Every field is always present in the JSON, an empty string where unset.
+Every field but `clears` is always present in the JSON, an empty string where unset. `clears` is
+left out of an event that ends no emergency, so an event without it reads as it always did.
 
 ## The kinds
 
@@ -204,7 +206,14 @@ One `events` record's plaintext is one batch: the events numbered `from` to
 - `emergency`: one event sent alone and at once; `from` equals `to`. A writer asks for it
   by putting the event in the log in this lane: `mw events emit --emergency`, `mw talk call`
   (a `message` whose detail is the ring's txid), and mayor-stale's alarm in `mw doctor` (a
-  `job` event, running to failed, actor `doctor@<host>`, the alarm's text as detail). Each
+  `job` event, running to failed, actor `doctor@<host>`, the alarm's text as detail; the
+  boost-reach and battery alarms too). When the alarm's condition ends (the Boost answers
+  again, the Mayor is fresh again, the battery recovers or is plugged in) `mw doctor` writes
+  ONE event in the `normal` lane, not an emergency: a `job` event, running to done, actor
+  `doctor@<host>`, the way back as detail, whose `clears` is the seq of the emergency it ends. The
+  doctor keeps that seq between runs; an alarm whose emergency could not be written has none, and
+  its end names no `clears` (or, for the Mayor and the battery, says nothing). A battery that fell to
+  Low and then to Critical wrote two emergencies and so clears both, one event each. Each
   pass of the follower's sender sends these first: on chain and direct together, before the
   pending fallback batches are retried and without waiting for the 2 s window, and on chain
   even past `chain_daily_cap`. They have an allowance of their own, `[events] emergency_daily_cap`

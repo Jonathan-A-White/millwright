@@ -23,6 +23,10 @@ type Event struct {
 	To     string    `json:"to"`
 	Detail string    `json:"detail"`
 	Lane   string    `json:"lane"`
+	// Clears is the seq of the emergency this event ends: 0 for an event that
+	// ends none, which the JSON leaves out. An app takes the emergency of that seq
+	// as resolved.
+	Clears uint64 `json:"clears,omitempty"`
 }
 
 // The kinds a seat or a screen subscribes to (mw-6ww.55, Q4 A, plus Q7's

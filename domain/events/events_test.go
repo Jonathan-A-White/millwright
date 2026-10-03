@@ -259,3 +259,23 @@ func TestEmergencyDetailPastTheCeilingIsRefusedAndCutDetailFitsIt(t *testing.T) 
 		t.Fatalf("a normal event has no ceiling on its detail, got %v", err)
 	}
 }
+
+func TestClearsIsLeftOutOfTheJSONUnlessItNamesAnEmergency(t *testing.T) {
+	e := events.Event{Seq: 9, Ts: time.Date(2026, 10, 3, 12, 17, 0, 0, time.UTC), Kind: events.KindJob,
+		From: events.JobRunning, To: events.JobDone, Lane: events.LaneNormal}
+	plain, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(plain), "clears") {
+		t.Errorf("an event that ends no emergency carries no clears: %s", plain)
+	}
+	e.Clears = 8
+	named, _ := json.Marshal(e)
+	if !strings.Contains(string(named), `"clears":8`) {
+		t.Errorf("expected clears 8 in %s", named)
+	}
+	if err := e.Validate(); err != nil {
+		t.Errorf("an event that clears an emergency is valid: %v", err)
+	}
+}
