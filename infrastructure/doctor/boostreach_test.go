@@ -3,6 +3,8 @@ package doctor_test
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -130,5 +132,37 @@ func TestBoostBackWithNoRecordedEmergencyClearsNothing(t *testing.T) {
 	r.run(5)
 	if len(r.clears) != 1 || r.clears[0].clears != 0 || !strings.Contains(r.clears[0].text, "answers again") {
 		t.Fatalf("expected the back said with clears 0, got %+v", r.clears)
+	}
+}
+
+// A real ssh whose remote command ends with the probe's write-failed status is
+// the "cannot write" alarm; any other failure stays "has not answered".
+func TestBoostRealSshExitOf73IsACannotWriteAlarm(t *testing.T) {
+	for status, want := range map[string]string{"73": "answers ssh but cannot write its disk", "255": "has not answered ssh"} {
+		dir := t.TempDir()
+		stub := filepath.Join(dir, "ssh")
+		if err := os.WriteFile(stub, []byte("#!/bin/sh\nexit "+status+"\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		now := time.Date(2026, 10, 3, 3, 22, 0, 0, time.UTC)
+		store := doctor.New(dir)
+		var alarms []string
+		run := func(at time.Time) {
+			check := doctor.NewBoostReach(&apptest.FakeHomeFile{Text: "laptop 2026-09-29T00:10:00Z mw@laptop"}, "laptop", map[string]string{"desktop": stub + " desktop"}, store)
+			check.Now = func() time.Time { return at }
+			check.Alarm = func(_ context.Context, text string) (uint64, error) {
+				alarms = append(alarms, text)
+				return 1, nil
+			}
+			check.Probe(context.Background())
+			if err := check.Cure(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		run(now)
+		run(now.Add(31 * time.Minute))
+		if len(alarms) != 1 || !strings.Contains(alarms[0], want) {
+			t.Errorf("exit %s: expected one alarm saying %q, got %q", status, want, alarms)
+		}
 	}
 }
