@@ -242,3 +242,38 @@ func TestInboxAppliesAPromptCallThePassHasNot(t *testing.T) {
 		t.Fatalf("expected one Prompt mail, got %v", got)
 	}
 }
+
+// A call whose text is long is mailed with its subject cut to the limit, in
+// runes, ending in an ellipsis; its body holds the whole call and the line that
+// runs it, and a second pass neither mails nor prints it again (mw-gq6.248).
+func TestApplyCutsALongPromptCallsSubjectAndKeepsItWholeInTheBody(t *testing.T) {
+	f := newPromptFixture(t)
+	words := strings.Repeat("é", 1200)
+	f.message(t, releaseTapGovernorKey, "tx-long", "/later "+words)
+
+	f.apply(t)
+
+	subjects := f.subjects(t)
+	if len(subjects) != 1 {
+		t.Fatalf("expected one mail, got %v", subjects)
+	}
+	if n := len([]rune(subjects[0])); n > application.PosternAnswerSubjectLimit {
+		t.Fatalf("expected a subject of at most %d runes, got %d", application.PosternAnswerSubjectLimit, n)
+	}
+	if !strings.HasPrefix(subjects[0], "Prompt: /later --text 'éé") || !strings.HasSuffix(subjects[0], "…") {
+		t.Fatalf("expected a cut Prompt subject ending in an ellipsis, got %q", subjects[0])
+	}
+	mail, _ := f.mailbox.Inbox(context.Background(), application.MayorMailbox)
+	if !strings.Contains(mail[0].Body, "/later --text '"+words+"'") || !strings.Contains(mail[0].Body, "Run it: mw prompt run later --text '"+words+"'") {
+		t.Fatalf("expected the body to hold the whole call and the Run it line, got %d bytes", len(mail[0].Body))
+	}
+
+	f.out.Reset()
+	f.apply(t)
+	if got := f.subjects(t); len(got) != 1 {
+		t.Fatalf("expected the call mailed once however many passes see it, got %v", got)
+	}
+	if got := strings.TrimSpace(f.out.String()); got != "" {
+		t.Fatalf("expected nothing printed on the second pass, got %q", got)
+	}
+}

@@ -90,7 +90,8 @@ func splitPromptCall(text string) ([]string, error) {
 // the backend's saved prompts, which the app lets him run by name. A call the
 // signature allows is printed as a call, written on its bead when its thread
 // is one, and mailed to the Mayor as "Prompt: /<name> <options>" with the line
-// that runs it. A call that names no saved prompt, or an option it does not
+// that runs it; a subject over PosternAnswerSubjectLimit runes is cut, the whole
+// call standing in the body (mw-gq6.248). A call that names no saved prompt, or an option it does not
 // take, is answered in its thread in one line and mails nothing. It reports
 // false, leaving the message for the Mayor to read, when it is no call this
 // host can check: no backend, one that cannot be read, no way to answer.
@@ -150,7 +151,7 @@ func (i PosternInbox) applyPromptCall(ctx context.Context, m PosternInboxMessage
 	for _, p := range problems {
 		body += "\n\nBut " + p + "."
 	}
-	return result, true, i.mail(ctx, "Prompt: "+call, body+answerSuffix(m))
+	return result, true, i.mail(ctx, clippedTo("Prompt: "+call, PosternAnswerSubjectLimit), body+answerSuffix(m))
 }
 
 // namesOrNone is names, or "none saved" when there are none.
