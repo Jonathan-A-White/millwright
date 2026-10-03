@@ -427,7 +427,9 @@ type WorkTracker interface {
 	// that a heartbeat renews. Claiming a story already claimed by this actor
 	// is harmless. The claim is conditional: a story another assignee already
 	// holds is not taken from them — it fails with a *ClaimHeldError, and
-	// nothing is written.
+	// nothing is written. A run state (RunStates) an earlier attempt left on the
+	// story is cleared by the claim, so a fresh claim is never read as refused
+	// before its session has started.
 	ClaimStory(ctx context.Context, id string) error
 
 	// HeartbeatClaim pushes the lease on a claim this actor holds forward by

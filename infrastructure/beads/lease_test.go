@@ -177,3 +177,28 @@ func TestReleaseClaimHeldByNamesTheHolderAsTheGuard(t *testing.T) {
 		t.Fatalf("expected bd to be asked %q, got %q", want, asked)
 	}
 }
+
+// A claim removes every run:* label in the update that makes it, so that a
+// story an earlier attempt left run:blocked on is not shown refused before its
+// session starts (mw-gq6.258); the real bd's side of it is
+// TestAClaimClearsTheRunStateAnEarlierAttemptLeft.
+func TestClaimStoryAsksBdToRemoveEveryRunLabel(t *testing.T) {
+	gateway, log := leaseStandIn(t, map[string]string{
+		"update": `[{"id": "t-1"}]`,
+	})
+	if err := gateway.ClaimStory(context.Background(), "t-1"); err != nil {
+		t.Fatalf("claiming: %v", err)
+	}
+	asked, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatalf("reading what bd was asked: %v", err)
+	}
+	if !strings.Contains(string(asked), "update t-1 --claim ") {
+		t.Fatalf("expected one update claiming t-1, got %q", asked)
+	}
+	for _, run := range application.RunStates {
+		if want := "--remove-label run:" + run; !strings.Contains(string(asked), want) {
+			t.Errorf("expected bd to be asked %q, got %q", want, asked)
+		}
+	}
+}

@@ -24,6 +24,12 @@ const (
 	RunRunning = "running"
 )
 
+// RunStates is every value a story's run state takes, those named here and in
+// next.go and eventcontrol.go: what a claim clears from a story an earlier
+// attempt left one on, since a fresh claim is not the refusal, landing or
+// cancel the label would still say.
+var RunStates = []string{RunRunning, RunLanded, RunBlocked, RunStopped, RunStuck, RunCancelled}
+
 // HostSync is this host being brought level with the other one. Sync is the
 // implementation; the port is here so that a dispatch can be tested without a
 // remote, and so that dispatch depends on the act rather than on the adapter.
