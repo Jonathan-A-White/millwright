@@ -56,7 +56,11 @@ func (c *doctorContext) boostReachCheck(host, home string, reach map[string]stri
 		return errors.New("ssh: connect to host: Connection timed out")
 	}
 	check.WgFaulty = func(context.Context) bool { return fixture.wgFaulty }
-	check.Alarm = func(_ context.Context, text string) error {
+	check.Alarm = func(_ context.Context, text string) (uint64, error) {
+		fixture.alarms = append(fixture.alarms, text)
+		return uint64(len(fixture.alarms)), nil
+	}
+	check.Clear = func(_ context.Context, text string, _ uint64) error {
 		fixture.alarms = append(fixture.alarms, text)
 		return nil
 	}

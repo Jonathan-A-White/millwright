@@ -29,8 +29,10 @@ const (
 
 // BoostReachSeenStateName is where the check keeps, between runs, when the
 // Boost first failed to answer (FirstFaulty) and, once the Governor has been
-// told, a latch (SeenPaths holding BoostReachAlarmed) so that the alarm is one
-// and the next that answers is the "answers again" one. It is a key of its own,
+// told, a latch (SeenPaths holding BoostReachAlarmed, then the seq of the
+// emergency event that told him, where there is one) so that the alarm is one
+// and the next that answers is the "answers again" one, which clears that seq.
+// It is a key of its own,
 // apart from the episode key Doctor keeps this check's cure state under.
 const BoostReachSeenStateName = "boost-reach-since"
 
@@ -69,18 +71,25 @@ type BoostReach struct {
 	Ssh func(ctx context.Context, argv []string) error
 	// Now is the clock. The zero value reads the real one.
 	Now func() time.Time
-	// Alarm sends the Governor the alarm text. A nil Alarm cannot cure.
-	Alarm func(ctx context.Context, text string) error
+	// Alarm sends the Governor the alarm text and gives the seq of the
+	// emergency event it was written as, 0 for none. A nil Alarm cannot cure.
+	Alarm func(ctx context.Context, text string) (uint64, error)
+	// Clear tells the Governor the Boost answers again, in the normal lane,
+	// naming in clears the emergency it ends (0 for none). A nil Clear cannot
+	// cure the "answers again" alarm.
+	Clear func(ctx context.Context, text string, clears uint64) error
 
 	// due is the alarm Probe found owing, for Cure to send.
 	due boostReachDue
 }
 
 // boostReachDue is an alarm Probe found owing: its text, and whether it is the
-// "answers again" one, which clears the state once sent.
+// "answers again" one, which clears the state once sent and the seq of the
+// emergency it ends.
 type boostReachDue struct {
 	text    string
 	back    bool
+	clears  uint64
 	first   time.Time
 	pending bool
 }
@@ -123,7 +132,7 @@ func (b *BoostReach) Probe(ctx context.Context) (application.Verdict, string) {
 	if err != nil {
 		return application.DoctorCannotTell, fmt.Sprintf("reading this check's own state: %v", err)
 	}
-	alarmed := len(episode.SeenPaths) == 1 && episode.SeenPaths[0] == BoostReachAlarmed
+	alarmed := len(episode.SeenPaths) >= 1 && episode.SeenPaths[0] == BoostReachAlarmed
 
 	if b.WgFaulty != nil && b.WgFaulty(ctx) {
 		if !alarmed && !episode.FirstFaulty.IsZero() {
@@ -138,7 +147,7 @@ func (b *BoostReach) Probe(ctx context.Context) (application.Verdict, string) {
 	if b.ssh(ctx, argv) == nil {
 		switch {
 		case alarmed:
-			b.due = boostReachDue{text: fmt.Sprintf("The %s (Boost) answers again (down %s to %s UTC)", boost, stamp(episode.FirstFaulty), stamp(b.now())), back: true, pending: true}
+			b.due = boostReachDue{text: fmt.Sprintf("The %s (Boost) answers again (down %s to %s UTC)", boost, stamp(episode.FirstFaulty), stamp(b.now())), back: true, clears: seqAt(episode.SeenPaths, 1), pending: true}
 			return application.DoctorFaulty, b.due.text
 		case !episode.FirstFaulty.IsZero():
 			if err := b.State.Reset(ctx, BoostReachSeenStateName); err != nil {
@@ -173,21 +182,29 @@ func (b *BoostReach) Cure(ctx context.Context) error {
 	if !b.due.pending {
 		return nil
 	}
-	if b.Alarm == nil {
-		return fmt.Errorf("there is no way to send the boost-reach alarm")
-	}
-	if err := b.Alarm(ctx, b.due.text); err != nil {
-		return fmt.Errorf("the boost-reach alarm could not be sent: %w", err)
-	}
 	due := b.due
-	b.due = boostReachDue{}
 	if due.back {
+		if b.Clear == nil {
+			return fmt.Errorf("there is no way to send the boost-reach \"answers again\" event")
+		}
+		if err := b.Clear(ctx, due.text, due.clears); err != nil {
+			return fmt.Errorf("the boost-reach alarm could not be sent: %w", err)
+		}
+		b.due = boostReachDue{}
 		if err := b.State.Reset(ctx, BoostReachSeenStateName); err != nil {
 			return fmt.Errorf("forgetting this check's own state: %w", err)
 		}
 		return nil
 	}
-	err := b.State.Save(ctx, BoostReachSeenStateName, application.DoctorEpisode{FirstFaulty: due.first, SeenPaths: []string{BoostReachAlarmed}})
+	if b.Alarm == nil {
+		return fmt.Errorf("there is no way to send the boost-reach alarm")
+	}
+	seq, err := b.Alarm(ctx, due.text)
+	if err != nil {
+		return fmt.Errorf("the boost-reach alarm could not be sent: %w", err)
+	}
+	b.due = boostReachDue{}
+	err = b.State.Save(ctx, BoostReachSeenStateName, application.DoctorEpisode{FirstFaulty: due.first, SeenPaths: withSeq([]string{BoostReachAlarmed}, seq)})
 	if err != nil {
 		return fmt.Errorf("saving this check's own state: %w", err)
 	}

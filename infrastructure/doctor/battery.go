@@ -59,8 +59,12 @@ type Battery struct {
 	Low, Critical int
 	// State is where the check keeps the threshold it last alarmed at.
 	State application.DoctorState
-	// Alarm sends the Governor the alarm text. A nil Alarm cannot cure.
-	Alarm func(ctx context.Context, text string) error
+	// Alarm sends the Governor the alarm text and gives the seq of the
+	// emergency event it was written as, 0 for none. A nil Alarm cannot cure.
+	Alarm func(ctx context.Context, text string) (uint64, error)
+	// Clear tells the Governor the battery has recovered, in the normal lane,
+	// naming in clears the emergency of the last alarm. A nil Clear sends none.
+	Clear func(ctx context.Context, text string, clears uint64) error
 }
 
 // NewBattery is the check over the power_supply directory dir, remembering
@@ -93,7 +97,7 @@ func (b *Battery) Probe(ctx context.Context) (application.Verdict, string) {
 		return application.DoctorOK, "n/a: no battery here"
 	}
 	if !reading.discharging || reading.capacity > b.low() {
-		if err := b.forget(ctx); err != nil {
+		if err := b.recovered(ctx, reading); err != nil {
 			return application.DoctorCannotTell, err.Error()
 		}
 		return application.DoctorOK, ""
@@ -124,13 +128,21 @@ func (b *Battery) Cure(ctx context.Context) error {
 	if b.Alarm == nil {
 		return fmt.Errorf("there is no way to send the battery alarm")
 	}
-	if err := b.Alarm(ctx, alarmText(reading.capacity)); err != nil {
+	seq, err := b.Alarm(ctx, alarmText(reading.capacity))
+	if err != nil {
 		return fmt.Errorf("the battery alarm could not be sent: %w", err)
 	}
 	if b.State == nil {
 		return nil
 	}
-	err = b.State.Save(ctx, batterySeenStateName, application.DoctorEpisode{SeenPaths: []string{strconv.Itoa(b.band(reading.capacity))}})
+	// A fall on from Low to Critical is a second emergency: the seqs of every
+	// alarm of the fall are kept, and the recovery clears each.
+	var earlier []string
+	if prior, err := b.State.Load(ctx, batterySeenStateName); err == nil && len(prior.SeenPaths) > 1 {
+		earlier = prior.SeenPaths[1:]
+	}
+	paths := append([]string{strconv.Itoa(b.band(reading.capacity))}, earlier...)
+	err = b.State.Save(ctx, batterySeenStateName, application.DoctorEpisode{SeenPaths: withSeq(paths, seq)})
 	if err != nil {
 		return fmt.Errorf("saving this check's own state: %w", err)
 	}
@@ -147,6 +159,13 @@ func (b *Battery) WayBack() string {
 
 func alarmText(capacity int) string {
 	return fmt.Sprintf("Laptop battery %d%%, discharging: plug it in or it sleeps", capacity)
+}
+
+func recoveredText(reading batteryReading) string {
+	if reading.discharging {
+		return fmt.Sprintf("Laptop battery %d%%: recovered above the alarm", reading.capacity)
+	}
+	return fmt.Sprintf("Laptop battery %d%%, no longer discharging: plugged in", reading.capacity)
 }
 
 // band is the threshold a capacity has fallen to: Critical at or under it,
@@ -168,7 +187,7 @@ func (b *Battery) seen(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, fmt.Errorf("reading this check's own state: %w", err)
 	}
-	if len(episode.SeenPaths) != 1 {
+	if len(episode.SeenPaths) < 1 {
 		return 0, nil
 	}
 	band, err := strconv.Atoi(episode.SeenPaths[0])
@@ -176,6 +195,39 @@ func (b *Battery) seen(ctx context.Context) (int, error) {
 		return 0, nil
 	}
 	return band, nil
+}
+
+// recovered ends a fall the battery alarmed about: it says so, once, naming
+// the emergency of the last alarm, then forgets what it alarmed about. With
+// no alarm recorded there is nothing to say, and in a dry run nothing is sent
+// or forgotten. The state is forgotten only once the event is sent, so one that
+// could not be sent is tried again.
+func (b *Battery) recovered(ctx context.Context, reading batteryReading) error {
+	if b.State == nil {
+		return nil
+	}
+	if application.DoctorDryRun(ctx) {
+		return nil
+	}
+	episode, err := b.State.Load(ctx, batterySeenStateName)
+	if err != nil {
+		return fmt.Errorf("reading this check's own state: %w", err)
+	}
+	if b.Clear != nil {
+		// One event for each emergency of the fall, the oldest first. A send
+		// that fails leaves every seq kept, so the next run sends them all
+		// again: the app dedupes by seq, and a clear of a cleared seq is harmless.
+		for i := 1; i < len(episode.SeenPaths); i++ {
+			clears := seqAt(episode.SeenPaths, i)
+			if clears == 0 {
+				continue
+			}
+			if err := b.Clear(ctx, recoveredText(reading), clears); err != nil {
+				return fmt.Errorf("the battery recovery could not be sent: %w", err)
+			}
+		}
+	}
+	return b.forget(ctx)
 }
 
 func (b *Battery) forget(ctx context.Context) error {

@@ -317,6 +317,16 @@ type Doctor struct {
 	Out io.Writer
 }
 
+type doctorDryRunKey struct{}
+
+// DoctorDryRun says whether ctx is that of a dry run. Probe runs in a dry run
+// too, so a probe that tells the Governor something has ended (a check's way
+// back) asks this first and sends nothing.
+func DoctorDryRun(ctx context.Context) bool {
+	dry, _ := ctx.Value(doctorDryRunKey{}).(bool)
+	return dry
+}
+
 // Run works every check in the table, or, with name set, only the one it
 // names. With dryRun it prints what each faulty check would do — its reason
 // and its way back — and changes nothing: no cure runs, no state is written,
@@ -337,6 +347,9 @@ func (d Doctor) Run(ctx context.Context, name string, dryRun bool) (DoctorReport
 		return DoctorReport{}, err
 	}
 
+	if dryRun {
+		ctx = context.WithValue(ctx, doctorDryRunKey{}, true)
+	}
 	var report DoctorReport
 	for _, check := range checks {
 		result, err := d.one(ctx, check, dryRun)

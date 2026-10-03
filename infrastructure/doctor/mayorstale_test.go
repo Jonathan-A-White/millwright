@@ -27,6 +27,7 @@ type staleRig struct {
 	upExit  string
 	now     time.Time
 	alarms  []string
+	clears  []clearCall
 	alarmEr error
 	check   *doctor.MayorStale
 	doc     application.Doctor
@@ -81,9 +82,13 @@ exit "$code"
 	r.check = &doctor.MayorStale{
 		Vault: r.vault, Tmux: tmux, State: store, Limit: 15 * time.Minute,
 		Now: func() time.Time { return r.now },
-		Alarm: func(_ context.Context, text string) error {
+		Alarm: func(_ context.Context, text string) (uint64, error) {
 			r.alarms = append(r.alarms, text)
-			return r.alarmEr
+			return uint64(200 + len(r.alarms)), r.alarmEr
+		},
+		Clear: func(_ context.Context, text string, clears uint64) error {
+			r.clears = append(r.clears, clearCall{text, clears})
+			return nil
 		},
 	}
 	r.doc = application.Doctor{
@@ -322,5 +327,57 @@ func TestAnIdleMayorWhoseInputIsTakenIsAliveAgain(t *testing.T) {
 	r.write(r.pane, idlePane)
 	if got := r.run(20); got.Verdict != "ok" {
 		t.Fatalf("the input was taken and the prompt is empty: expected ok, got %+v", got)
+	}
+}
+
+func TestAFreshBeatAfterAnAlarmClearsTheEmergencyOnce(t *testing.T) {
+	r := newStaleRig(t)
+	r.run(0)
+	r.run(16)
+	if len(r.alarms) != 1 {
+		t.Fatalf("expected the alarm, got %d", len(r.alarms))
+	}
+	if len(r.clears) != 0 {
+		t.Fatalf("the Mayor is still stale: expected no clear, got %+v", r.clears)
+	}
+
+	r.write(r.pane, frozenPane(2))
+	r.run(1)
+	if len(r.clears) != 1 || r.clears[0].clears != 201 || !strings.Contains(r.clears[0].text, "Mayor") {
+		t.Fatalf("expected one clear of 201 naming the Mayor, got %+v", r.clears)
+	}
+	r.run(1)
+	r.run(1)
+	if len(r.clears) != 1 {
+		t.Errorf("the episode is over: expected the one clear, got %+v", r.clears)
+	}
+}
+
+func TestAMayorThatNeverAlarmedClearsNothing(t *testing.T) {
+	r := newStaleRig(t)
+	r.run(0)
+	r.write(r.pane, frozenPane(2))
+	r.run(1)
+	if len(r.clears) != 0 {
+		t.Fatalf("expected no clear without an alarm, got %+v", r.clears)
+	}
+}
+
+func TestADryRunSendsNoClearAndKeepsTheAlarmRecord(t *testing.T) {
+	r := newStaleRig(t)
+	r.run(0)
+	r.run(16)
+	r.write(r.pane, frozenPane(2))
+
+	r.now = r.now.Add(time.Minute)
+	if _, err := r.doc.Run(context.Background(), "", true); err != nil {
+		t.Fatal(err)
+	}
+	if len(r.clears) != 0 {
+		t.Fatalf("a dry run sends nothing, got %+v", r.clears)
+	}
+	r.run(1)
+	if len(r.clears) != 1 || r.clears[0].clears != 201 {
+		t.Fatalf("the real run after it still clears 201, got %+v", r.clears)
 	}
 }

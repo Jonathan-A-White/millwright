@@ -145,19 +145,54 @@ func TestEmitDoctorEmergencyCutsAPaneAndSaysARefusal(t *testing.T) {
 	at := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
 	pane := strings.Repeat(strings.Repeat("x", 200)+"\n", 12)
 	var said bytes.Buffer
-	emitDoctorEmergency(context.Background(), log, func() time.Time { return at }, "laptop", pane, &said)
+	seq, _ := emitDoctorEmergency(context.Background(), log, func() time.Time { return at }, "laptop", pane, &said)
 	got, _ := log.Since(context.Background(), 0)
 	if len(got) != 1 || got[0].Lane != events.LaneEmergency || got[0].Validate() != nil {
 		t.Fatalf("log holds %+v, want one valid emergency event", got)
+	}
+	if seq != got[0].Seq || seq == 0 {
+		t.Fatalf("emit returned seq %d, want the event's %d", seq, got[0].Seq)
 	}
 	if said.Len() != 0 {
 		t.Fatalf("a good emit said %q", said.String())
 	}
 
 	// A host that makes the actor unwritable by the log stands in for a refusal.
-	emitDoctorEmergency(context.Background(), &failingEventLog{}, func() time.Time { return at }, "laptop", "text", &said)
+	if seq, _ := emitDoctorEmergency(context.Background(), &failingEventLog{}, func() time.Time { return at }, "laptop", "text", &said); seq != 0 {
+		t.Fatalf("a failed emit returned seq %d, want 0", seq)
+	}
 	if !strings.Contains(said.String(), "emergency event: not written") || !strings.Contains(said.String(), "disk full") {
 		t.Fatalf("a failed emit said %q, want it logged", said.String())
+	}
+}
+
+// The doctor's way back is one event in the normal lane, a job going running to
+// done, that names the emergency it ends in `clears`: not a second emergency.
+func TestEmitDoctorClearIsANormalLaneEventNamingTheEmergency(t *testing.T) {
+	log := &apptest.FakeEventLog{}
+	at := time.Date(2026, 10, 3, 12, 17, 0, 0, time.UTC)
+	var said bytes.Buffer
+	emergency, _ := emitDoctorEmergency(context.Background(), log, func() time.Time { return at }, "laptop", "down", &said)
+	if err := emitDoctorClear(context.Background(), log, func() time.Time { return at }, "laptop", "answers again", emergency, &said); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := log.Since(context.Background(), 0)
+	if len(got) != 2 {
+		t.Fatalf("log holds %+v, want the emergency and its clear", got)
+	}
+	clear := got[1]
+	if clear.Lane != events.LaneNormal || clear.Clears != emergency || clear.Detail != "answers again" || clear.Actor != "doctor@laptop" || clear.Validate() != nil {
+		t.Fatalf("clear is %+v, want a valid normal-lane event clearing %d", clear, emergency)
+	}
+	if clear.From == events.JobRunning && clear.To == events.JobFailed {
+		t.Fatalf("clear is running->failed, which reads as a fault")
+	}
+	if said.Len() != 0 {
+		t.Fatalf("a good emit said %q", said.String())
+	}
+
+	if err := emitDoctorClear(context.Background(), &failingEventLog{}, func() time.Time { return at }, "laptop", "x", 0, &said); err == nil || !strings.Contains(said.String(), "clearing event: not written") {
+		t.Fatalf("a failed clear returned %v and said %q, want it said", err, said.String())
 	}
 }
 

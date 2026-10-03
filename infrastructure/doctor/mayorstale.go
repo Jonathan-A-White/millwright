@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +37,11 @@ const (
 // pane it last saw and since when, apart from the episode key Doctor keeps
 // this check's cure state under.
 const mayorStaleSeenStateName = "mayor-stale-seen"
+
+// mayorStaleAlarmStateName is where the check remembers, between runs, the
+// seq of the emergency its alarm was written as, until the Mayor is fresh
+// again and the check clears it.
+const mayorStaleAlarmStateName = "mayor-stale-alarm"
 
 // mayorStalePrompt is the line a harness puts above a question it will not go
 // on without. A stale pane showing it is a Mayor waiting on a person, not a
@@ -87,9 +93,13 @@ type MayorStale struct {
 	Limit time.Duration
 	// Now is the clock. The zero value reads the real one.
 	Now func() time.Time
-	// Alarm sends the Governor's phone the one alarm a cure ends with. A nil
-	// Alarm sends none.
-	Alarm func(ctx context.Context, text string) error
+	// Alarm sends the Governor's phone the one alarm a cure ends with and
+	// gives the seq of the emergency event it was written as, 0 for none. A
+	// nil Alarm sends none.
+	Alarm func(ctx context.Context, text string) (uint64, error)
+	// Clear tells the Governor the Mayor is fresh again, in the normal lane,
+	// naming in clears the emergency of the alarm. A nil Clear sends none.
+	Clear func(ctx context.Context, text string, clears uint64) error
 	// Timeout bounds each run of bin/mayor-up. Empty reads
 	// MayorGoneCureTimeout.
 	Timeout time.Duration
@@ -123,7 +133,9 @@ func (m *MayorStale) held() *MayorGone {
 // look, has stood still less than Limit, or shows an idle Mayor at an empty
 // prompt; faulty, naming the minutes, once a pane in a state that should
 // redraw (see paneStalls) has stood still that long. It writes one thing: the pane it saw, in its
-// own state key, as vault-dirty remembers its sightings.
+// own state key, as vault-dirty remembers its sightings. Once the Mayor is
+// fresh again after an alarm it also sends the one event that ends it (see
+// ended), except in a dry run.
 func (m *MayorStale) Probe(ctx context.Context) (application.Verdict, string) {
 	window, name, held, verdict, reason := m.window(ctx)
 	if !held {
@@ -138,13 +150,43 @@ func (m *MayorStale) Probe(ctx context.Context) (application.Verdict, string) {
 	if err != nil {
 		return application.DoctorCannotTell, err.Error()
 	}
-	if !paneStalls(pane) {
-		return application.DoctorOK, ""
+	if paneStalls(pane) {
+		if still := m.now().Sub(since); still >= m.limit() {
+			return application.DoctorFaulty, fmt.Sprintf("the pane of window %s (%s) has not changed for %d minutes", name, window, int(still/time.Minute))
+		}
 	}
-	if still := m.now().Sub(since); still >= m.limit() {
-		return application.DoctorFaulty, fmt.Sprintf("the pane of window %s (%s) has not changed for %d minutes", name, window, int(still/time.Minute))
+	if err := m.ended(ctx, name, window); err != nil {
+		return application.DoctorCannotTell, err.Error()
 	}
 	return application.DoctorOK, ""
+}
+
+// ended tells the Governor, once, that a Mayor the check alarmed about is
+// fresh again, naming the alarm's emergency, and forgets the alarm. With no
+// alarm recorded, or no way to send, there is nothing to say; the record is
+// kept until the event is sent, so one that could not be sent is tried again.
+func (m *MayorStale) ended(ctx context.Context, name, window string) error {
+	if m.State == nil || application.DoctorDryRun(ctx) {
+		return nil
+	}
+	episode, err := m.State.Load(ctx, mayorStaleAlarmStateName)
+	if err != nil {
+		return fmt.Errorf("reading this check's own state: %w", err)
+	}
+	clears := seqAt(episode.SeenPaths, 0)
+	if clears == 0 {
+		return nil
+	}
+	if m.Clear != nil {
+		text := fmt.Sprintf("The Mayor (window %s, %s) is fresh again: its pane is changing", name, window)
+		if err := m.Clear(ctx, text, clears); err != nil {
+			return fmt.Errorf("the Mayor-is-fresh event could not be sent: %w", err)
+		}
+	}
+	if err := m.State.Reset(ctx, mayorStaleAlarmStateName); err != nil {
+		return fmt.Errorf("forgetting this check's own state: %w", err)
+	}
+	return nil
 }
 
 // window is the id and name of the Mayor's window when the seat is held. When
@@ -268,11 +310,17 @@ func (m *MayorStale) alarm(ctx context.Context, text string, cause error) error 
 	if m.Alarm == nil {
 		return cause
 	}
-	if err := m.Alarm(ctx, text); err != nil {
+	seq, err := m.Alarm(ctx, text)
+	if err != nil {
 		if cause != nil {
 			return fmt.Errorf("%w (and the alarm could not be sent: %v)", cause, err)
 		}
 		return fmt.Errorf("the alarm could not be sent: %w", err)
+	}
+	if seq != 0 && m.State != nil {
+		if err := m.State.Save(ctx, mayorStaleAlarmStateName, application.DoctorEpisode{SeenPaths: []string{strconv.FormatUint(seq, 10)}}); err != nil {
+			return fmt.Errorf("saving this check's own state: %w", err)
+		}
 	}
 	return cause
 }

@@ -127,30 +127,42 @@ func newDoctorCmd() *cobra.Command {
 			mayorStale.Home, mayorStale.Host = mwVault(vault, host), host
 			mayorStale.Limit = time.Duration(staleMinutes) * time.Minute
 			// One alarm, shared by every check that tells the Governor in its own
-			// words: a Postern push of class alarm, and the emergency event.
-			alarm := func(ctx context.Context, text string) error {
+			// words: a Postern push of class alarm, and the emergency event. It
+			// gives the seq of the emergency event, 0 where none was written.
+			alarm := func(ctx context.Context, text string) (uint64, error) {
 				_, err := handsPush{gateway: mwGateway(vault, host)}.Run(ctx, application.PosternSendRequest{Class: "alarm", Text: text})
 				// The alarm also rides the emergency lane of the event log, so the
 				// Governor's app hears it at once; the push is the alarm proper.
+				var seq uint64
 				if logPath, pathErr := config.EventsLogPath(); pathErr == nil {
-					_ = emitDoctorEmergency(ctx, eventlog.New(logPath), eventsClock, host, text, cmd.ErrOrStderr())
+					seq, _ = emitDoctorEmergency(ctx, eventlog.New(logPath), eventsClock, host, text, cmd.ErrOrStderr())
 				}
-				return err
+				return seq, err
 			}
-			mayorStale.Alarm = alarm
+			// The way back of an alarm: one event in the normal lane, naming the
+			// emergency it ends, so the Governor's app takes the banner down.
+			clear := func(ctx context.Context, text string, clears uint64) error {
+				logPath, err := config.EventsLogPath()
+				if err != nil {
+					return err
+				}
+				return emitDoctorClear(ctx, eventlog.New(logPath), eventsClock, host, text, clears, cmd.ErrOrStderr())
+			}
+			mayorStale.Alarm, mayorStale.Clear = alarm, clear
 			batteryLow, batteryCritical, err := config.DoctorBatteryThresholds()
 			if err != nil {
 				return err
 			}
 			battery := doctor.NewBattery(doctor.DefaultBatteryDir, store)
 			battery.Low, battery.Critical = batteryLow, batteryCritical
-			battery.Alarm = func(ctx context.Context, text string) error {
+			battery.Alarm = func(ctx context.Context, text string) (uint64, error) {
 				logPath, err := config.EventsLogPath()
 				if err != nil {
-					return err
+					return 0, err
 				}
 				return emitDoctorEmergency(ctx, eventlog.New(logPath), eventsClock, host, text, cmd.ErrOrStderr())
 			}
+			battery.Clear = clear
 			handsHosts, err := config.HandsHosts()
 			if err != nil {
 				return err
@@ -158,6 +170,15 @@ func newDoctorCmd() *cobra.Command {
 			wg := doctor.NewWg(wgHub, reach, wgUnit, store)
 			boostReach := doctor.NewBoostReach(mwVault(vault, host), host, handsHosts, store)
 			boostReach.Alarm = alarm
+			// The Boost answering again is still pushed to the phone, as its
+			// alarm was; it is the event that rides the normal lane.
+			boostReach.Clear = func(ctx context.Context, text string, clears uint64) error {
+				_, pushErr := handsPush{gateway: mwGateway(vault, host)}.Run(ctx, application.PosternSendRequest{Class: "alarm", Text: text})
+				if err := clear(ctx, text, clears); err != nil {
+					return err
+				}
+				return pushErr
+			}
 			boostReach.WgFaulty = func(ctx context.Context) bool {
 				verdict, _ := wg.Probe(ctx)
 				return verdict == application.DoctorFaulty
@@ -207,16 +228,33 @@ func runDoctor(cmd *cobra.Command, doc application.Doctor, name string, dryRun b
 }
 
 // emitDoctorEmergency puts an alarm's text in the emergency lane of log, cut
-// to what an emergency event may carry. A write that is refused or fails is
-// said on errOut and returned: mayor-stale's push is its alarm proper, so it
-// drops the error, while the battery check, whose alarm this is, retries.
-func emitDoctorEmergency(ctx context.Context, log application.EventLog, now func() time.Time, host, text string, errOut io.Writer) error {
-	_, err := application.EventEmit{
+// to what an emergency event may carry, and gives the seq it was written at.
+// A write that is refused or fails is said on errOut and returned, with seq 0:
+// mayor-stale's push is its alarm proper, so it drops the error, while the
+// battery check, whose alarm this is, retries.
+func emitDoctorEmergency(ctx context.Context, log application.EventLog, now func() time.Time, host, text string, errOut io.Writer) (uint64, error) {
+	ev, err := application.EventEmit{
 		Log: log, Now: now, Emergency: true,
 		Event: events.Event{Kind: events.KindJob, Actor: "doctor@" + host, From: events.JobRunning, To: events.JobFailed, Detail: events.CutDetail(text)},
 	}.Run(ctx)
 	if err != nil {
 		fmt.Fprintf(errOut, "mw doctor: emergency event: not written: %v\n", err)
+		return 0, err
+	}
+	return ev.Seq, nil
+}
+
+// emitDoctorClear puts the end of an alarm in the normal lane of log: a job
+// going running to done, not the running to failed of the alarm, whose clears
+// names the seq of the emergency it ends (0 where the alarm kept none). A
+// write that is refused or fails is said on errOut and returned.
+func emitDoctorClear(ctx context.Context, log application.EventLog, now func() time.Time, host, text string, clears uint64, errOut io.Writer) error {
+	_, err := application.EventEmit{
+		Log: log, Now: now,
+		Event: events.Event{Kind: events.KindJob, Actor: "doctor@" + host, From: events.JobRunning, To: events.JobDone, Detail: events.CutDetail(text), Clears: clears},
+	}.Run(ctx)
+	if err != nil {
+		fmt.Fprintf(errOut, "mw doctor: clearing event: not written: %v\n", err)
 	}
 	return err
 }
