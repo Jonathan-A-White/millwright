@@ -564,8 +564,19 @@ func (g *Gateway) ReadyStories(ctx context.Context, epicID, host string) ([]appl
 // any other failure by reading the story back rather than by bd's wording: a
 // story found in progress under an assignee is held by someone else, since
 // bd would have let this actor's own claim stand.
+//
+// The same update removes every run:* label: a story given back by a failed
+// dispatch, or by a host that refused it, keeps the label it carried, and the
+// event follower reads an in-progress story carrying run:blocked, run:stopped
+// or run:stuck as refused, so a fresh claim would show as refused until start
+// wrote its own (mw-gq6.258). bd takes a label the story does not carry as
+// nothing to do, so the same call serves a story that has none.
 func (g *Gateway) ClaimStory(ctx context.Context, id string) error {
-	_, err := g.call(ctx, "update", id, "--claim")
+	args := []string{"update", id, "--claim"}
+	for _, run := range application.RunStates {
+		args = append(args, "--remove-label", application.RunState+":"+run)
+	}
+	_, err := g.call(ctx, args...)
 	if err == nil {
 		return nil
 	}

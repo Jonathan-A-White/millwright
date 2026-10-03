@@ -154,3 +154,51 @@ func TestReleaseClaimByAnotherActorLeavesTheClaimUntouched(t *testing.T) {
 		t.Fatalf("expected %s open and unassigned after its holder released it, got %q held by %q", storyID, given.Status, given.Assignee)
 	}
 }
+
+// A story given back keeps the run:* label its earlier attempt left, and a real
+// bd's claim of it clears that label in the same update, keeping the others
+// (mw-gq6.258): the event follower reads an in-progress story carrying
+// run:blocked as refused.
+func TestAClaimClearsTheRunStateAnEarlierAttemptLeft(t *testing.T) {
+	t.Parallel()
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	epicID := bdRun(t, vault, beads.Program, "create", "A walking skeleton", "-t", "epic", "--silent")
+	storyID := bdRun(t, vault, beads.Program, "create", "A story an earlier host gave back",
+		"--parent", epicID, "--labels", "needs-governor", "--silent")
+
+	vps := beads.New(vault, beads.WithActor("mw@vps"))
+	if err := vps.SetStoryState(ctx, storyID, application.RunState, application.RunBlocked, "left by an earlier host"); err != nil {
+		t.Fatalf("recording run=blocked on %s: %v", storyID, err)
+	}
+	if err := vps.ClaimStory(ctx, storyID); err != nil {
+		t.Fatalf("claiming %s: %v", storyID, err)
+	}
+
+	claimed, err := vps.ShowStory(ctx, storyID)
+	if err != nil {
+		t.Fatalf("showing %s: %v", storyID, err)
+	}
+	if claimed.Status != beads.StatusInProgress || claimed.Assignee != "mw@vps" {
+		t.Fatalf("expected %s claimed by mw@vps, got status %q assignee %q", storyID, claimed.Status, claimed.Assignee)
+	}
+	hasLabel := func(want string) bool {
+		for _, label := range claimed.Labels {
+			if label == want {
+				return true
+			}
+		}
+		return false
+	}
+	if hasLabel(application.RunState + ":" + application.RunBlocked) {
+		t.Errorf("expected the claim to clear run:%s, labels are %v", application.RunBlocked, claimed.Labels)
+	}
+	if !hasLabel("needs-governor") {
+		t.Errorf("expected the claim to leave the other labels alone, labels are %v", claimed.Labels)
+	}
+	if state := bdRun(t, vault, beads.Program, "state", storyID, application.RunState); state == application.RunBlocked {
+		t.Errorf("expected %s no longer to be recorded %s=%s", storyID, application.RunState, application.RunBlocked)
+	}
+}

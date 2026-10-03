@@ -69,6 +69,12 @@ type FakeTracker struct {
 	// reading wrote nothing.
 	writes int
 
+	// trails is, per story, the states of the bead machine it passed through
+	// as it was written (application.BeadState), the one it was in before its
+	// first write first, a repeat of the one before left out: what the event
+	// follower would have said of it, were it watching every write.
+	trails map[string][]string
+
 	notes map[string]string
 	// published is the notes as the last sync that got through left them: what
 	// the other host reads on its next sync. A note set after that sync is in
@@ -1229,6 +1235,17 @@ func (f *FakeTracker) ClaimStory(_ context.Context, id string) error {
 		s.detail.Assignee = Actor
 		s.detail.Status = StatusInProgress
 		s.detail.LeaseExpires = f.now().Add(LeaseTTL)
+		// A run state an earlier attempt left on the story is not this claim's:
+		// it would read as the claim being refused before anything started.
+		delete(s.states, application.RunState)
+		delete(s.reasons, application.RunState)
+		kept := s.detail.Labels[:0:0]
+		for _, label := range s.detail.Labels {
+			if !strings.HasPrefix(label, application.RunState+":") {
+				kept = append(kept, label)
+			}
+		}
+		s.detail.Labels = kept
 		return nil
 	})
 }
@@ -1765,11 +1782,38 @@ func (f *FakeTracker) write(id string, change func(*fakeStory) error) error {
 	if !ok {
 		return fmt.Errorf("no story %q", id)
 	}
+	before := beadStateOf(s)
 	if err := change(s); err != nil {
 		return err
 	}
 	f.writes++
+	if f.trails == nil {
+		f.trails = map[string][]string{}
+	}
+	trail := f.trails[id]
+	if len(trail) == 0 {
+		trail = append(trail, before)
+	}
+	if now := beadStateOf(s); now != trail[len(trail)-1] {
+		trail = append(trail, now)
+	}
+	f.trails[id] = trail
 	return nil
+}
+
+// beadStateOf is the state of the bead machine a story is in, as the event
+// follower reads it: its status and its run state.
+func beadStateOf(s *fakeStory) string {
+	return application.BeadState(application.BeadNow{Status: s.detail.Status, Run: s.states[application.RunState]})
+}
+
+// Trail reports the states of the bead machine a story passed through as it was
+// written, in order (open, claimed, running ...), the state it had before the
+// first write included.
+func (f *FakeTracker) Trail(id string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.trails[id]...)
 }
 
 // IDs reports the ids of the stories in a listing, in order — a convenience

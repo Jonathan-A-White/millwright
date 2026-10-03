@@ -159,6 +159,9 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the story "([^"]*)" is claimed by this host$`, c.theStoryIsClaimedByDispatch)
 	ctx.Then(`^the story "([^"]*)" is not claimed$`, c.theStoryIsNotClaimed)
 	ctx.Then(`^the story "([^"]*)" is recorded as running$`, c.theStoryIsRecordedAsRunning)
+	ctx.Given(`^the story "([^"]*)" still carries the run state "([^"]*)" from an earlier host$`, c.theStoryStillCarriesTheRunState)
+	ctx.Then(`^the story "([^"]*)" carries no run state$`, c.theStoryCarriesNoRunState)
+	ctx.Then(`^the story "([^"]*)" went from open to claimed to running, and was never refused$`, c.theStoryWentFromOpenToClaimedToRunning)
 	ctx.Then(`^the worktree of "([^"]*)" holds the later commit$`, c.theWorktreeHoldsTheLaterCommit)
 	ctx.Then(`^the work tracker was asked, in this order:$`, c.theTrackerWasAskedInThisOrder)
 	ctx.Then(`^dispatch failed, saying: (.+)$`, c.dispatchFailedSaying)
@@ -908,6 +911,39 @@ func (c *dispatchContext) theStoryIsNotClaimed(id string) error {
 	}
 	if detail.Assignee != "" || detail.Status == apptest.StatusInProgress {
 		return fmt.Errorf("expected %s to be unclaimed, got status %q assignee %q", id, detail.Status, detail.Assignee)
+	}
+	return nil
+}
+
+// theStoryStillCarriesTheRunState is what an earlier host's dispatch left on a
+// story it gave back: the run:* label, with the story open again.
+func (c *dispatchContext) theStoryStillCarriesTheRunState(id, run string) error {
+	return c.tracker.SetStoryState(context.Background(), id, application.RunState, run, "left by an earlier host")
+}
+
+func (c *dispatchContext) theStoryCarriesNoRunState(id string) error {
+	if got := c.tracker.State(id, application.RunState); got != "" {
+		return fmt.Errorf("expected %s to carry no run state, got %q", id, got)
+	}
+	detail, err := c.tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	for _, label := range detail.Labels {
+		if strings.HasPrefix(label, application.RunState+":") {
+			return fmt.Errorf("expected %s to carry no run label, got %q in %v", id, label, detail.Labels)
+		}
+	}
+	return nil
+}
+
+// theStoryWentFromOpenToClaimedToRunning reads the states the event follower
+// would have said the story was in, one write at a time: refused among them is
+// the false refusal of a claim that has not started.
+func (c *dispatchContext) theStoryWentFromOpenToClaimedToRunning(id string) error {
+	got := strings.Join(c.tracker.Trail(id), "->")
+	if want := "open->claimed->running"; got != want {
+		return fmt.Errorf("expected %s to go %s, got %s (dispatch said: %v)", id, want, got, c.err)
 	}
 	return nil
 }
