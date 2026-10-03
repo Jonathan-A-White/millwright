@@ -69,3 +69,13 @@ Feature: mw retry
     And the printed report names the bundle but nothing after it
     And the worktree of "mw-gq6.1" was left untouched
     And the story "mw-gq6.1" is still claimed
+
+  Scenario: A story that ran on another host is retried from here without reading a worktree this host does not have
+    Given the story "mw-gq6.1" ran on the host "desktop" and its worktree is there, not here
+    And the story "mw-gq6.1" has been tried 1 time in all
+    When mw retries "mw-gq6.1"
+    Then the retry succeeds
+    And no worktree of "mw-gq6.1" was read or made here
+    And the story "mw-gq6.1" is open and unassigned
+    And the story "mw-gq6.1" still records 1 attempt
+    And the story "mw-gq6.1" carries a comment saying "desktop" is where its worktree is left for the next dispatch there
