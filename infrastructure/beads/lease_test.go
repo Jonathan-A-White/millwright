@@ -158,3 +158,22 @@ func TestReleaseClaimNamesItsOwnActorAsTheGuard(t *testing.T) {
 		t.Fatalf("expected bd to be asked %q, got %q", want, asked)
 	}
 }
+
+// ReleaseClaimHeldBy names the holder it is given, not this Gateway's own
+// actor, so that a retry on one host can give back a claim another host made
+// (mw-gq6.257).
+func TestReleaseClaimHeldByNamesTheHolderAsTheGuard(t *testing.T) {
+	gateway, log := leaseStandIn(t, map[string]string{
+		"update": `[{"id": "t-1"}]`,
+	})
+	if err := gateway.ReleaseClaimHeldBy(context.Background(), "t-1", "mw@desktop"); err != nil {
+		t.Fatalf("releasing: %v", err)
+	}
+	asked, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatalf("reading what bd was asked: %v", err)
+	}
+	if want := "update t-1 --status open --assignee  --if-assignee mw@desktop"; !strings.Contains(string(asked), want) {
+		t.Fatalf("expected bd to be asked %q, got %q", want, asked)
+	}
+}

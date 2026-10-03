@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
@@ -75,6 +76,7 @@ func InitializeRetryScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the session of "([^"]*)" is still running$`, c.theSessionIsStillRunning)
 	ctx.Given(`^the story "([^"]*)" has been tried (\d+) times? in all$`, c.theStoryHasBeenTriedTimesInAll)
 	ctx.Given(`^the story "([^"]*)" ran on the host "([^"]*)" and its worktree is there, not here$`, c.theStoryRanOnAnotherHost)
+	ctx.Given(`^the story "([^"]*)" ran on the host "([^"]*)" and is claimed there by "([^"]*)"$`, c.theStoryIsClaimedByAnotherHostsActor)
 	ctx.Given(`^the vault cannot reach its origin$`, c.theVaultCannotReachItsOrigin)
 
 	ctx.When(`^mw retries "([^"]*)"$`, c.mwRetries)
@@ -274,6 +276,18 @@ func (c *retryContext) theStoryRanOnAnotherHost(id, host string) error {
 	c.tracker.AddStory(c.lastEpic, domain.Story{ID: id, Title: "The story " + id})
 	ctx := context.Background()
 	if err := c.tracker.ClaimStory(ctx, id); err != nil {
+		return err
+	}
+	return c.tracker.SetStoryMetadata(ctx, id, map[string]string{"host": host})
+}
+
+// theStoryIsClaimedByAnotherHostsActor is the same, with the claim held under
+// that host's own actor name, as bd records it: not this host's, and not the
+// fake's own.
+func (c *retryContext) theStoryIsClaimedByAnotherHostsActor(id, host, actor string) error {
+	c.tracker.AddStory(c.lastEpic, domain.Story{ID: id, Title: "The story " + id})
+	ctx := context.Background()
+	if err := c.tracker.ClaimAs(id, actor, time.Now().Add(time.Hour)); err != nil {
 		return err
 	}
 	return c.tracker.SetStoryMetadata(ctx, id, map[string]string{"host": host})

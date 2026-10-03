@@ -450,6 +450,13 @@ type WorkTracker interface {
 	// left exactly as it was, and reported as a failure, writing nothing.
 	ReleaseClaim(ctx context.Context, id string) error
 
+	// ReleaseClaimHeldBy is ReleaseClaim for a claim another actor holds: it is
+	// conditional on holder, the actor the story is assigned to, rather than on
+	// this actor. It is how a retry on one host gives back a claim a dispatch on
+	// another host made, whose actor is that host's. An empty holder asks for
+	// ReleaseClaim.
+	ReleaseClaimHeldBy(ctx context.Context, id, holder string) error
+
 	// SetStoryState records one dimension of a story's operational state — what
 	// it is doing right now, as against what it is — with the reason it changed.
 	// A dispatched story is run=running.

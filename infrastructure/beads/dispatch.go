@@ -217,9 +217,20 @@ func isPouredStep(id string) bool {
 // A Gateway with no actor of its own — the same case run guards with
 // --actor — has nothing to compare against and asks for none.
 func (g *Gateway) ReleaseClaim(ctx context.Context, id string) error {
+	return g.ReleaseClaimHeldBy(ctx, id, g.actor)
+}
+
+// ReleaseClaimHeldBy implements application.WorkTracker: ReleaseClaim with
+// --if-assignee naming holder, the actor the story is assigned to, which for a
+// claim made on another host is that host's and not this Gateway's. An empty
+// holder is this Gateway's own actor.
+func (g *Gateway) ReleaseClaimHeldBy(ctx context.Context, id, holder string) error {
+	if holder == "" {
+		holder = g.actor
+	}
 	args := []string{"update", id, "--status", StatusOpen, "--assignee", ""}
-	if g.actor != "" {
-		args = append(args, "--if-assignee", g.actor)
+	if holder != "" {
+		args = append(args, "--if-assignee", holder)
 	}
 	_, err := g.call(ctx, args...)
 	return err

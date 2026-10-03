@@ -290,7 +290,7 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	// bundles whatever it left, as it does for any leftover in the way of a
 	// fresh cut.
 	if elsewhere := path.Host; elsewhere != "" && elsewhere != domain.HostAuto && elsewhere != r.Host {
-		return r.handBack(ctx, report, elsewhere)
+		return r.handBack(ctx, report, elsewhere, detail.Assignee)
 	}
 
 	rigDir, checkedOut := r.Rigs[path.Rig]
@@ -361,10 +361,12 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 // and a comment says where the worktree and branch were left. Nothing on this
 // host's disk is read or changed, and whether that host's session still runs
 // is not asked, so it is for the person to have seen it end.
-func (r Retry) handBack(ctx context.Context, report RetryReport, elsewhere string) (RetryReport, error) {
+func (r Retry) handBack(ctx context.Context, report RetryReport, elsewhere, holder string) (RetryReport, error) {
 	storyID := report.StoryID
 	report.Elsewhere = elsewhere
-	if err := r.Tracker.ReleaseClaim(ctx, storyID); err != nil {
+	// That host's dispatch claimed it under its own actor, so the give-back
+	// expects whoever holds it now, not this host's actor.
+	if err := r.Tracker.ReleaseClaimHeldBy(ctx, storyID, holder); err != nil {
 		return report, fmt.Errorf("retrying %s: the claim could not be given back: %w", storyID, err)
 	}
 	report.ClaimReleased = true
