@@ -2870,6 +2870,8 @@ tunnel_probe   = "ss -ltn sport = :2222"          # default; run over ssh on tun
 doctor_wg_hub  = "10.88.0.1:22"                   # default; the hub's ssh host:port, dialed over wg0
 doctor_wg_unit = "wg-quick@wg0"                   # default; the unit wg restarts
 tmp_leftovers_budget_bytes = 200000000            # default (200 MB); tmp-leftovers' and go-build's own budget
+root_disk_budget_bytes     = 0                    # default 0 = root-disk-budget is inert; else the Windows drive's free bytes when the WSL vhdx was put there
+root_disk_margin_bytes     = 10000000000          # default (10 GB); headroom kept under that budget
 battery_low_percent        = 25                   # default; battery alarms on a fall to this, discharging
 battery_critical_percent   = 10                   # default; and again on a fall to this
 ```
@@ -2990,6 +2992,25 @@ total. A go-build cache past budget with a file open under it, or a `go`,
 `gotestsum`, `compile`, `link` or `vet` process running, is a live build or
 test rather than a leftover: Probe reports it ok instead of faulty, and Cure
 leaves it for a later tick rather than clearing it out from underneath.
+
+**root-disk-budget** watches the desktop's WSL root against the Windows
+drive that holds its `ext4.vhdx`. The vhdx is sparse: it grows as ext4
+allocates blocks and never shrinks by itself, and when that drive is full
+WSL's root goes read-only (the desktop was down about two hours on
+2026-10-03). WSL there is sealed from Windows, so the doctor cannot read the
+drive's free space; the nearest read-only signal from inside is the root's
+used bytes (`statfs` of `/`), a lower bound of the vhdx's size, since files
+deleted inside WSL do not shrink the vhdx and compaction is a hands step.
+`root_disk_budget_bytes` is the drive's free space at the time the vhdx was
+placed there; the check is faulty once used bytes pass that budget less
+`root_disk_margin_bytes`. With the budget at 0, the default, it is inert: it
+says ok, "n/a: no root_disk_budget_bytes set", and writes nothing. It changes
+nothing on the host: its cure is one note to the Mayor naming the figures and
+the hands step (free space on that drive, compact the vhdx with
+`Optimize-VHD`, or move it); its damper is 6 hours with no cap, so the Mayor
+hears again no more often than that, and its way back is "set
+`root_disk_budget_bytes = 0` in `[doctor]`". The check stays faulty until the
+budget is raised or the drive has room.
 
 **mayor-gone** respawns the Mayor when the window its own vault-local
 `.mayor-acting` names is gone, or is open but its pane holds nothing but a
