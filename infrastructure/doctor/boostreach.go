@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -36,6 +37,21 @@ const (
 // apart from the episode key Doctor keeps this check's cure state under.
 const BoostReachSeenStateName = "boost-reach-since"
 
+// ErrBoostCannotWrite is what the probe's ssh call reports when the Boost
+// answered ssh but the file the probe writes in the Boost's home could not be
+// written and removed (a disk gone read-only, mw-gq6.254).
+var ErrBoostCannotWrite = errors.New("the Boost answered ssh but could not write its disk")
+
+// boostReachWriteFailed is the exit status the probe's remote command ends
+// with when its write fails: ssh passes it through, and ssh's own failures are
+// 255.
+const boostReachWriteFailed = 73
+
+// boostReachProbeCommand is what the probe runs on the Boost, in one ssh call:
+// write one small file in its home and remove it, so a disk that has gone
+// read-only fails where a bare `true` would not.
+const boostReachProbeCommand = "mkdir -p ~/.local/state/mw-doctor && touch ~/.local/state/mw-doctor/reach-probe && rm -f ~/.local/state/mw-doctor/reach-probe || exit 73"
+
 // BoostReachAlarmed is the SeenPaths value that says the Governor has been
 // told the Boost is down.
 const BoostReachAlarmed = "alarmed"
@@ -48,7 +64,9 @@ const boostReachSSHTimeout = 30 * time.Second
 // not answered ssh for BoostReachAfter (mw-6ww.60: the desktop's WSL stalled
 // for 24 hours and nobody knew), and again when it does. It runs only on the
 // home host, and probes the Boost with the ssh prefix [hands_hosts] gives it:
-// `<prefix> -o BatchMode=yes -o ConnectTimeout=10 true`. Its cure is the
+// `<prefix> -o BatchMode=yes -o ConnectTimeout=10 <command>`, the command
+// writing and removing one small file in the Boost's home, so a Boost that
+// answers ssh on a read-only disk is down too. Its cure is the
 // alarm itself: it changes nothing on either host.
 //
 // While the home's own wg hub check is faulty the home is offline, not the
@@ -66,7 +84,8 @@ type BoostReach struct {
 	// WgFaulty reports whether the home's wg hub check is faulty. Nil says it
 	// is not.
 	WgFaulty func(ctx context.Context) bool
-	// Ssh runs one ssh command line and reports whether it succeeded. Nil
+	// Ssh runs one ssh command line and reports whether it succeeded, or
+	// ErrBoostCannotWrite when ssh answered but the probe's write failed. Nil
 	// runs the real ssh.
 	Ssh func(ctx context.Context, argv []string) error
 	// Now is the clock. The zero value reads the real one.
@@ -143,8 +162,9 @@ func (b *BoostReach) Probe(ctx context.Context) (application.Verdict, string) {
 		return application.DoctorOK, "n/a: the home's own wg hub check is faulty, so the home is offline, not the Boost"
 	}
 
-	argv := append(append([]string{}, prefix...), "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "true")
-	if b.ssh(ctx, argv) == nil {
+	argv := append(append([]string{}, prefix...), "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", boostReachProbeCommand)
+	probeErr := b.ssh(ctx, argv)
+	if probeErr == nil {
 		switch {
 		case alarmed:
 			b.due = boostReachDue{text: fmt.Sprintf("The %s (Boost) answers again (down %s to %s UTC)", boost, stamp(episode.FirstFaulty), stamp(b.now())), back: true, clears: seqAt(episode.SeenPaths, 1), pending: true}
@@ -166,8 +186,12 @@ func (b *BoostReach) Probe(ctx context.Context) (application.Verdict, string) {
 	if alarmed || b.now().Sub(episode.FirstFaulty) < BoostReachAfter {
 		return application.DoctorOK, ""
 	}
+	text := fmt.Sprintf("The %s (Boost) has not answered ssh since %s UTC: look at its screen; if WSL has stalled, run wsl --shutdown (mw-6ww.60).", boost, stamp(episode.FirstFaulty))
+	if errors.Is(probeErr, ErrBoostCannotWrite) {
+		text = fmt.Sprintf("The %s (Boost) answers ssh but cannot write its disk since %s UTC: look at its screen; run wsl --shutdown (mw-6ww.60).", boost, stamp(episode.FirstFaulty))
+	}
 	b.due = boostReachDue{
-		text:    fmt.Sprintf("The %s (Boost) has not answered ssh since %s UTC: look at its screen; if WSL has stalled, run wsl --shutdown (mw-6ww.60).", boost, stamp(episode.FirstFaulty)),
+		text:    text,
 		first:   episode.FirstFaulty,
 		pending: true,
 	}
@@ -232,7 +256,12 @@ func (b *BoostReach) ssh(ctx context.Context, argv []string) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, boostReachSSHTimeout)
 	defer cancel()
-	return exec.CommandContext(ctx, argv[0], argv[1:]...).Run()
+	err := exec.CommandContext(ctx, argv[0], argv[1:]...).Run()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == boostReachWriteFailed {
+		return ErrBoostCannotWrite
+	}
+	return err
 }
 
 // stamp is a time as the alarm says it: UTC, to the minute.

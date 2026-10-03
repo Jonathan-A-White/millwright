@@ -413,7 +413,53 @@ Feature: mw doctor
     And no boost-reach alarm was sent
     And the boost-reach check keeps nothing
 
-  Scenario: The real boost-reach check probes with BatchMode and a ten second connect timeout
+  Scenario: The real boost-reach check probes with BatchMode and a ten second connect timeout, writing and removing one small file
     Given the home host's boost-reach check, reaching the Boost by "ssh desktop"
     When mw doctor's boost-reach check runs
-    Then the boost-reach probe ran "ssh desktop -o BatchMode=yes -o ConnectTimeout=10 true"
+    Then the boost-reach probe ran "ssh desktop -o BatchMode=yes -o ConnectTimeout=10 mkdir -p ~/.local/state/mw-doctor && touch ~/.local/state/mw-doctor/reach-probe && rm -f ~/.local/state/mw-doctor/reach-probe || exit 73"
+
+  Scenario: The real boost-reach check raises nothing when the Boost answers ssh and writes its disk
+    Given the home host's boost-reach check, reaching the Boost by "ssh desktop"
+    When mw doctor's boost-reach check runs
+    And 31 minutes go by
+    And mw doctor's boost-reach check runs
+    And 31 minutes go by
+    And mw doctor's boost-reach check runs
+    Then mw doctor leaves with the status 0
+    And no boost-reach alarm was sent
+    And the boost-reach check keeps nothing
+
+  Scenario: The real boost-reach check says nothing when the Boost has answered ssh but not written its disk for 29 minutes
+    Given the home host's boost-reach check, reaching the Boost by "ssh desktop"
+    And the Boost answers ssh but cannot write its disk
+    When mw doctor's boost-reach check runs
+    And 29 minutes go by
+    And mw doctor's boost-reach check runs
+    Then mw doctor leaves with the status 0
+    And no boost-reach alarm was sent
+
+  Scenario: The real boost-reach check alarms once, saying so, when the Boost answers ssh but cannot write its disk for 31 minutes
+    Given the home host's boost-reach check, reaching the Boost by "ssh desktop"
+    And the Boost answers ssh but cannot write its disk
+    When mw doctor's boost-reach check runs
+    And 31 minutes go by
+    And mw doctor's boost-reach check runs
+    Then exactly 1 boost-reach alarm was sent
+    And the boost-reach alarm says "The desktop (Boost) answers ssh but cannot write its disk since 2026-09-23 12:00 UTC"
+    And the boost-reach alarm says "look at its screen; run wsl --shutdown (mw-6ww.60)"
+    When 5 minutes go by
+    And mw doctor's boost-reach check runs
+    Then exactly 1 boost-reach alarm was sent
+
+  Scenario: The real boost-reach check alarms once when the Boost writes its disk again after a cannot-write alarm, and forgets
+    Given the home host's boost-reach check, reaching the Boost by "ssh desktop"
+    And the Boost answers ssh but cannot write its disk
+    When mw doctor's boost-reach check runs
+    And 31 minutes go by
+    And mw doctor's boost-reach check runs
+    And 10 minutes go by
+    And the Boost answers ssh
+    And mw doctor's boost-reach check runs
+    Then exactly 2 boost-reach alarms were sent
+    And the boost-reach alarm says "The desktop (Boost) answers again (down 2026-09-23 12:00 to 2026-09-23 12:41 UTC)"
+    And the boost-reach check keeps nothing

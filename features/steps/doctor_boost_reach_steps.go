@@ -19,8 +19,11 @@ import (
 type boostReachFixture struct {
 	sshUp    bool
 	wgFaulty bool
-	ran      []string
-	alarms   []string
+	// diskReadOnly, with sshUp, is a Boost that answers ssh but whose probe
+	// write fails.
+	diskReadOnly bool
+	ran          []string
+	alarms       []string
 }
 
 // registerBoostReachSteps registers the steps of the boost-reach scenarios.
@@ -29,6 +32,7 @@ func (c *doctorContext) registerBoostReachSteps(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the home host's boost-reach check, with no hands_hosts entry for the Boost$`, c.theHomeHostsBoostReachCheckWithNoEntry)
 	ctx.Given(`^the boost-reach check run on the Boost itself, reaching the other by "([^"]*)"$`, c.theBoostReachCheckOnTheBoostItself)
 	ctx.Given(`^the Boost does not answer ssh$`, c.theBoostDoesNotAnswerSSH)
+	ctx.Given(`^the Boost answers ssh but cannot write its disk$`, c.theBoostAnswersSSHButCannotWrite)
 	ctx.Given(`^the home's wg hub check is faulty$`, c.theHomesWgHubCheckIsFaulty)
 
 	ctx.When(`^mw doctor's boost-reach check runs$`, c.mwDoctorsBoostReachCheckRuns)
@@ -51,6 +55,9 @@ func (c *doctorContext) boostReachCheck(host, home string, reach map[string]stri
 	check.Ssh = func(_ context.Context, argv []string) error {
 		fixture.ran = append(fixture.ran, strings.Join(argv, " "))
 		if fixture.sshUp {
+			if fixture.diskReadOnly {
+				return doctor.ErrBoostCannotWrite
+			}
 			return nil
 		}
 		return errors.New("ssh: connect to host: Connection timed out")
@@ -89,6 +96,13 @@ func (c *doctorContext) theBoostDoesNotAnswerSSH() error {
 
 func (c *doctorContext) theBoostAnswersSSH() error {
 	c.boost.sshUp = true
+	c.boost.diskReadOnly = false
+	return nil
+}
+
+func (c *doctorContext) theBoostAnswersSSHButCannotWrite() error {
+	c.boost.sshUp = true
+	c.boost.diskReadOnly = true
 	return nil
 }
 
