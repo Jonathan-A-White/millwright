@@ -331,6 +331,35 @@ Feature: mw doctor
     And the tmp file "nbs-spool-dead" exists
     And the tmp file "notes.txt" exists
 
+  Scenario: The real root-disk-budget check is inert with no root_disk_budget_bytes set, and writes nothing
+    Given the root-disk-budget check has no budget and the WSL root uses 500000000000 bytes
+    When mw doctor's root-disk-budget check runs for real
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "root-disk-budget ok n/a: no root_disk_budget_bytes set"
+    And the doctor notes were written 0 times
+    And the note "doctor.laptop.root-disk-budget" does not exist
+
+  Scenario: The real root-disk-budget check past its budget minus margin writes one note to the Mayor, changes nothing, and stays quiet inside its damper
+    Given the root-disk-budget check has a budget of 100000000000 bytes, a margin of 10000000000 bytes, and the WSL root uses 91000000000 bytes
+    When mw doctor's root-disk-budget check runs for real
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "root-disk-budget cured"
+    And the doctor notes were written 1 time
+    And the note "doctor.laptop.root-disk-budget" holds "the WSL root uses 91.0 GB of a 100.0 GB budget"
+    And the note "doctor.laptop.root-disk-budget" holds "Optimize-VHD"
+    When 1 hour goes by
+    And mw doctor's root-disk-budget check runs for real
+    Then mw doctor leaves with the status 6
+    And the doctor log holds "root-disk-budget damped"
+    And the doctor notes were written 1 time
+
+  Scenario: The real root-disk-budget check under its budget minus margin is ok and writes nothing
+    Given the root-disk-budget check has a budget of 100000000000 bytes, a margin of 10000000000 bytes, and the WSL root uses 60000000000 bytes
+    When mw doctor's root-disk-budget check runs for real
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "root-disk-budget ok the WSL root uses 60.0 GB of a 100.0 GB budget"
+    And the doctor notes were written 0 times
+
   Scenario: The real boost-reach check says nothing when the Boost has been silent for 29 minutes
     Given the home host's boost-reach check, reaching the Boost by "ssh desktop"
     And the Boost does not answer ssh

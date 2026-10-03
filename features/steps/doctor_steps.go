@@ -128,6 +128,10 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^mw doctor's beads-stores check runs for real$`, c.mwDoctorsBeadsStoresCheckRunsForReal)
 	ctx.When(`^mw doctor's mayor-gone check runs for real$`, c.mwDoctorsMayorGoneCheckRunsForReal)
 	ctx.When(`^mw doctor's postern-channel check runs for real$`, c.mwDoctorsPosternChannelCheckRunsForReal)
+	ctx.Given(`^the root-disk-budget check has no budget and the WSL root uses (\d+) bytes$`, c.theRootDiskBudgetCheckHasNoBudget)
+	ctx.Given(`^the root-disk-budget check has a budget of (\d+) bytes, a margin of (\d+) bytes, and the WSL root uses (\d+) bytes$`, c.theRootDiskBudgetCheckHasABudget)
+	ctx.When(`^mw doctor's root-disk-budget check runs for real$`, c.mwDoctorsRootDiskBudgetCheckRunsForReal)
+	ctx.Then(`^the doctor notes were written (\d+) times?$`, c.theDoctorNotesWereWrittenNTimes)
 	ctx.When(`^mw doctor's tmp-leftovers check runs for real$`, c.mwDoctorsTmpLeftoversCheckRunsForReal)
 	ctx.When(`^(\d+) minutes? go(?:es)? by$`, c.minutesPass)
 	ctx.When(`^(\d+) hours? go(?:es)? by$`, c.hoursPass)
@@ -1099,3 +1103,47 @@ func (c *doctorContext) aHostThatIsNotHomeWhoseConfigHasNoPosternChannel() error
 }
 
 func (c *doctorContext) mwDoctorsPosternChannelCheckRunsForReal() error { return c.run(false) }
+
+// theRootDiskBudgetCheckHasNoBudget wires the real root-disk-budget check with
+// the knob unset over a root of a stated size. Its note goes to the scenario's
+// fake notes port, under the key mw doctor writes the check's own note to.
+func (c *doctorContext) theRootDiskBudgetCheckHasNoBudget(usedText string) error {
+	return c.rootDiskBudgetCheck(0, 0, usedText)
+}
+
+func (c *doctorContext) theRootDiskBudgetCheckHasABudget(budgetText, marginText, usedText string) error {
+	budget, err := strconv.ParseInt(budgetText, 10, 64)
+	if err != nil {
+		return fmt.Errorf("parsing %q as a byte count: %w", budgetText, err)
+	}
+	margin, err := strconv.ParseInt(marginText, 10, 64)
+	if err != nil {
+		return fmt.Errorf("parsing %q as a byte count: %w", marginText, err)
+	}
+	return c.rootDiskBudgetCheck(budget, margin, usedText)
+}
+
+func (c *doctorContext) rootDiskBudgetCheck(budget, margin int64, usedText string) error {
+	used, err := strconv.ParseInt(usedText, 10, 64)
+	if err != nil {
+		return fmt.Errorf("parsing %q as a byte count: %w", usedText, err)
+	}
+	c.real = &doctor.RootDiskBudget{
+		Budget:    budget,
+		Margin:    margin,
+		UsedBytes: func() (int64, error) { return used, nil },
+		Note: func(ctx context.Context, text string) error {
+			return c.notes.SetNote(ctx, application.DoctorNoteKey(seatUpHost, doctor.RootDiskBudgetName), text)
+		},
+	}
+	return nil
+}
+
+func (c *doctorContext) mwDoctorsRootDiskBudgetCheckRunsForReal() error { return c.run(false) }
+
+func (c *doctorContext) theDoctorNotesWereWrittenNTimes(want int) error {
+	if got := c.notes.Sets(); got != want {
+		return fmt.Errorf("expected the notes port to be written %d time(s), it was written %d", want, got)
+	}
+	return nil
+}
