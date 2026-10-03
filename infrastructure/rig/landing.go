@@ -405,7 +405,7 @@ func (w *Worktrees) Advance(ctx context.Context, rigDir, branch, commit string) 
 		return application.Advanced{}, err
 	}
 	if len(dirty) > 0 {
-		return application.Advanced{Left: fmt.Sprintf("it has %d uncommitted path(s): %s", len(dirty), strings.Join(dirty, ", "))}, nil
+		return application.Advanced{Left: describeUncommitted(dirty)}, nil
 	}
 
 	behind, err := w.contains(ctx, rigDir, commit, "HEAD")
@@ -419,6 +419,46 @@ func (w *Worktrees) Advance(ctx context.Context, rigDir, branch, commit string) 
 		return application.Advanced{}, err
 	}
 	return application.Advanced{Moved: true}, nil
+}
+
+// namedUncommitted is how many uncommitted paths a report names before it
+// settles for a count of the rest: a checkout with hundreds of stray files
+// must not put them all in a mail.
+const namedUncommitted = 10
+
+// describeUncommitted says what a checkout with uncommitted work has: the
+// count, the top-level directory every path is under when they share one, and
+// the first few paths with "and N more" for the rest.
+func describeUncommitted(dirty []string) string {
+	named := dirty
+	more := ""
+	if len(dirty) > namedUncommitted {
+		named = dirty[:namedUncommitted]
+		more = fmt.Sprintf(", and %d more", len(dirty)-namedUncommitted)
+	}
+	under := ""
+	if top, ok := sharedTopDir(dirty); ok {
+		under = fmt.Sprintf(", all under %s", top)
+	}
+	return fmt.Sprintf("it has %d uncommitted path(s)%s: %s%s", len(dirty), under, strings.Join(named, ", "), more)
+}
+
+// sharedTopDir returns the top-level directory (with its trailing slash) that
+// every path is inside, or false when a path is at the top or they differ.
+func sharedTopDir(paths []string) (string, bool) {
+	top := ""
+	for _, path := range paths {
+		i := strings.Index(path, "/")
+		if i <= 0 {
+			return "", false
+		}
+		if dir := path[:i+1]; top == "" {
+			top = dir
+		} else if dir != top {
+			return "", false
+		}
+	}
+	return top, top != ""
 }
 
 // contains reports whether the commit that outer names has the one inner names

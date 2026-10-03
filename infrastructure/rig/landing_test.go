@@ -2,6 +2,7 @@ package rig_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -359,5 +360,59 @@ func TestMergedIntoSeesABranchTheCloseOutMerged(t *testing.T) {
 
 	if _, _, err := worktrees.MergedInto(ctx, here, "", "origin/main"); err == nil {
 		t.Fatalf("expected a half question refused")
+	}
+}
+
+// TestAdvanceNamesAtMostTenOfAManyUncommittedPaths: a rig checkout with a
+// hundred and sixty-five stray files gets a count, the first ten paths and the
+// number left over, not a mail with every one of them in it.
+func TestAdvanceNamesAtMostTenOfAManyUncommittedPaths(t *testing.T) {
+	cases := []struct {
+		name     string
+		dirs     func(i int) string
+		count    int
+		want     []string
+		wantNot  []string
+		wantMore string
+	}{
+		{"a hundred and sixty-five under one directory", func(i int) string { return "coverage-stage3a/" }, 165,
+			[]string{"it has 165 uncommitted path(s)", "all under coverage-stage3a/", "coverage-stage3a/f000.txt", "coverage-stage3a/f009.txt", "and 155 more"},
+			[]string{"coverage-stage3a/f010.txt", "coverage-stage3a/f164.txt"}, "and 155 more"},
+		{"a hundred and sixty-five in two directories", func(i int) string { return []string{"a/", "b/"}[i%2] }, 165,
+			[]string{"it has 165 uncommitted path(s): ", "and 155 more"},
+			[]string{"all under", "b/f001.txt"}, "and 155 more"},
+		{"three under one directory", func(i int) string { return "scratch/" }, 3,
+			[]string{"it has 3 uncommitted path(s), all under scratch/: ", "scratch/f000.txt", "scratch/f001.txt", "scratch/f002.txt"},
+			[]string{"more"}, ""},
+		{"three at the top", func(i int) string { return "" }, 3,
+			[]string{"it has 3 uncommitted path(s): f000.txt, f001.txt, f002.txt"},
+			[]string{"more", "all under"}, ""},
+		{"exactly ten", func(i int) string { return "" }, 10,
+			[]string{"it has 10 uncommitted path(s): ", "f009.txt"},
+			[]string{"more"}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			here, _ := aRig(t)
+			merged := landed(t, here)
+			for i := 0; i < tc.count; i++ {
+				write(t, here, fmt.Sprintf("%sf%03d.txt", tc.dirs(i), i), "stray\n")
+			}
+
+			advanced, err := rig.New().Advance(context.Background(), here, "main", merged.Commit)
+			if err != nil {
+				t.Fatalf("advancing a dirty checkout is left alone, not an error: %v", err)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(advanced.Left, want) {
+					t.Errorf("expected the reason to contain %q, got %q", want, advanced.Left)
+				}
+			}
+			for _, not := range tc.wantNot {
+				if strings.Contains(advanced.Left, not) {
+					t.Errorf("expected the reason not to contain %q, got %q", not, advanced.Left)
+				}
+			}
+		})
 	}
 }
