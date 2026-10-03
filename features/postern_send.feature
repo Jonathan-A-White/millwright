@@ -375,3 +375,34 @@ Feature: mw postern send
     When mw postern send "message" "Ready." is run
     Then sending succeeds
     And the broadcast record has no summary key
+
+  Scenario: A direct message in a named channel names it in the clear
+    Given the postern channel is "direct"
+    When mw postern send "message" "Some secret words." in channel "general" is run
+    Then sending succeeds
+    And the delivered record names the clear key "channel" as "general"
+    And the delivered record has no "bead" key
+
+  Scenario: A direct message in a bead's channel names the bead in the clear
+    Given the postern channel is "direct"
+    And the bead "mw-abc.1" titled "Pick the colour" exists
+    When mw postern send "message" "Some secret words." in the channel of bead "mw-abc.1" is run
+    Then sending succeeds
+    And the delivered record names the clear key "bead" as "mw-abc.1"
+    And the delivered record has no "channel" key
+
+  Scenario: A direct message in Factory names no channel
+    Given the postern channel is "direct"
+    When mw postern send "message" "Some secret words." is run
+    Then sending succeeds
+    And the delivered record has no "channel" key
+    And the delivered record has no "bead" key
+
+  Scenario: The chain channel names neither channel nor bead
+    Given the postern key's balance is 1000 satoshis
+    And the postern key holds a spendable utxo of 5000 satoshis
+    And the bead "mw-abc.1" titled "Pick the colour" exists
+    When mw postern send "message" "Some secret words." in the channel of bead "mw-abc.1" is run
+    Then sending succeeds
+    And the broadcast record has no "channel" key
+    And the broadcast record has no "bead" key

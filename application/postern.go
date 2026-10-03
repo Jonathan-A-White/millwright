@@ -337,6 +337,16 @@ type PosternThread struct {
 	Topic string `json:"topic,omitempty"`
 }
 
+// clearNames is the bead and the channel name a record carries in the clear
+// to say where its message is: the bead alone when there is one, which
+// outranks a name, else the name; both empty for Factory.
+func (t PosternThread) clearNames() (bead, channel string) {
+	if bead = strings.TrimSpace(t.Bead); bead != "" {
+		return bead, ""
+	}
+	return "", strings.TrimSpace(t.Topic)
+}
+
 // PosternThreadedMessage is the plaintext a message carries when it names an
 // explicit thread, an attachment, or both, rather than plain text: postern's
 // docs/protocol.md sections 6 (Threads), 8 (Attachments) and 14 (re and
@@ -481,6 +491,12 @@ const PosternMessageKind = "msg"
 // the Mayor's ring as "ring", so the backend can push a ring and nothing else.
 // Lane is the third: only an emergency events record carries it, "emergency"
 // beside the sealed copy, so the backend can push an emergency and nothing else.
+// Channel and Bead are the fourth and fifth (§1): the name of the channel a
+// message belongs to, or the id of the bead whose channel it is (the bead
+// outranks the name), so the push's title can say "Message in general" or
+// "Message on mw-xyz". Like Summary they are public, so only a direct record
+// carries them, never a chain one, until the Governor says a chain record may
+// name its channel.
 type PosternPayload struct {
 	V     int    `json:"v"`     // always 1
 	Kind  string `json:"kind"`  // always PosternMessageKind
@@ -493,6 +509,8 @@ type PosternPayload struct {
 	Role    string `json:"role,omitempty"`    // a call record's role, in the clear: "ring"
 	Lane    string `json:"lane,omitempty"`    // an events record's lane, in the clear, only "emergency" (§1, §22)
 	Summary string `json:"summary,omitempty"` // direct records only: what the push says
+	Channel string `json:"channel,omitempty"` // direct records only: the named channel the message is in
+	Bead    string `json:"bead,omitempty"`    // direct records only: the bead whose channel the message is in
 }
 
 // PosternInboxMessage is one record as Inbox reports it: decrypted, and only
@@ -1787,7 +1805,7 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 			return "", err
 		}
 		var chainErr error
-		if txid, chainErr, err = s.sendRecord(ctx, channel, copyMode, req.Class, summary, from, address, text); err != nil {
+		if txid, chainErr, err = s.sendRecord(ctx, channel, copyMode, req.Class, summary, req.thread(), from, address, text); err != nil {
 			return "", err
 		}
 		if chainFailure == nil {
@@ -1805,7 +1823,7 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 			return "", err
 		}
 		var chainErr error
-		if txid, chainErr, err = s.sendRecord(ctx, channel, copyMode, req.Class, summary, from, address, text); err != nil {
+		if txid, chainErr, err = s.sendRecord(ctx, channel, copyMode, req.Class, summary, req.thread(), from, address, text); err != nil {
 			return "", err
 		}
 		if chainFailure == nil {
@@ -1984,7 +2002,7 @@ func cutSummary(summary string) string {
 // class, and sends it by channel, reporting its txid. summary rides in the
 // clear beside the ciphertext, and is empty on the chain.
 func (s PosternSend) sendOne(ctx context.Context, channel, class, summary, from, address, text string) (string, error) {
-	txid, _, err := s.sendRecord(ctx, channel, chainCopyNone, class, summary, from, address, text)
+	txid, _, err := s.sendRecord(ctx, channel, chainCopyNone, class, summary, PosternThread{}, from, address, text)
 	return txid, err
 }
 
@@ -2026,8 +2044,10 @@ func (s PosternSend) chainCopyOf(ctx context.Context, req PosternSendRequest) ch
 // record without its summary is broadcast too, under the float cap. Its txid
 // is the direct one; the chain txid is printed on Out. A chain that will not
 // take the copy is only said, unless it was asked for (chainCopyAsked): then
-// chainErr names it, beside the direct txid and a nil err.
-func (s PosternSend) sendRecord(ctx context.Context, channel string, mode chainCopy, class, summary, from, address, text string) (txid string, chainErr, err error) {
+// chainErr names it, beside the direct txid and a nil err. thread is the
+// channel the message is in: a direct record names it in the clear (Bead, or
+// else Channel), the chain one, public for good, names nothing.
+func (s PosternSend) sendRecord(ctx context.Context, channel string, mode chainCopy, class, summary string, thread PosternThread, from, address, text string) (txid string, chainErr, err error) {
 	ciphertext, err := s.Cipher.Encrypt(s.GovernorKey, text)
 	if err != nil {
 		return "", nil, err
@@ -2035,6 +2055,9 @@ func (s PosternSend) sendRecord(ctx context.Context, channel string, mode chainC
 	record := PosternPayload{
 		V: 1, Kind: PosternMessageKind, Class: class,
 		To: s.GovernorKey, From: from, Ts: s.now().Unix(), Ct: ciphertext, Summary: summary,
+	}
+	if channel == PosternChannelDirect {
+		record.Bead, record.Channel = thread.clearNames()
 	}
 	payload, err := json.Marshal(record)
 	if err != nil {
@@ -2047,8 +2070,8 @@ func (s PosternSend) sendRecord(ctx context.Context, channel string, mode chainC
 	if txid, err = s.Postern.Deliver(ctx, payload); err != nil || mode == chainCopyNone {
 		return txid, nil, err
 	}
-	// The chain record is public for good: no summary.
-	record.Summary = ""
+	// The chain record is public for good: no summary, channel or bead.
+	record.Summary, record.Channel, record.Bead = "", "", ""
 	chainRecord, err := json.Marshal(record)
 	var chainTxid string
 	if err == nil {

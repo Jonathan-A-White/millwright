@@ -92,6 +92,9 @@ func InitializePosternSendScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the delivered record's summary is 80 runes, ending in an ellipsis$`, c.theDeliveredRecordsSummaryIsCut)
 	ctx.Then(`^every delivered record's summary is "([^"]*)"$`, c.everyDeliveredRecordsSummaryIs)
 	ctx.Then(`^the broadcast record has no summary key$`, c.theBroadcastRecordHasNoSummaryKey)
+	ctx.Then(`^the delivered record names the clear key "([^"]*)" as "([^"]*)"$`, c.theDeliveredRecordNamesTheClearKey)
+	ctx.Then(`^the delivered record has no "([^"]*)" key$`, c.theDeliveredRecordHasNoKey)
+	ctx.Then(`^the broadcast record has no "([^"]*)" key$`, c.theBroadcastRecordHasNoKey)
 	ctx.Given(`^a file "([^"]*)" to attach$`, c.aFileToAttach)
 	ctx.Given(`^a file "([^"]*)" of (\d+) MiB to attach$`, c.aFileOfMiBToAttach)
 	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" attaching "([^"]*)" is run$`, c.mwPosternSendAttachingIsRun)
@@ -895,6 +898,66 @@ func (c *posternSendContext) everyDeliveredRecordsSummaryIs(want string) error {
 		if got != want {
 			return fmt.Errorf("expected every summary %q, got %q", want, got)
 		}
+	}
+	return nil
+}
+
+// theDeliveredRecordNamesTheClearKey: the one record delivered carries key,
+// a string, in the clear, equal to want.
+func (c *posternSendContext) theDeliveredRecordNamesTheClearKey(key, want string) error {
+	fields, err := c.deliveredFields()
+	if err != nil {
+		return err
+	}
+	if got := strings.Trim(string(fields[key]), `"`); got != want {
+		return fmt.Errorf("expected %s %q, got %q", key, want, got)
+	}
+	return nil
+}
+
+func (c *posternSendContext) theDeliveredRecordHasNoKey(key string) error {
+	fields, err := c.deliveredFields()
+	if err != nil {
+		return err
+	}
+	if _, ok := fields[key]; ok {
+		return fmt.Errorf("the delivered record carries %q: %s", key, c.backend.Delivered()[0])
+	}
+	return nil
+}
+
+// deliveredFields is the first delivered record's top-level fields.
+func (c *posternSendContext) deliveredFields() (map[string]json.RawMessage, error) {
+	delivered := c.backend.Delivered()
+	if len(delivered) == 0 {
+		return nil, fmt.Errorf("nothing was delivered (send error: %v)", c.err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(delivered[0], &fields); err != nil {
+		return nil, fmt.Errorf("the record is not JSON: %w", err)
+	}
+	return fields, nil
+}
+
+func (c *posternSendContext) theBroadcastRecordHasNoKey(key string) error {
+	sent := c.backend.Broadcasts()
+	if len(sent) != 1 {
+		return fmt.Errorf("expected one broadcast, got %d (send error: %v)", len(sent), c.err)
+	}
+	tx, err := transaction.NewTransactionFromHex(sent[0])
+	if err != nil {
+		return fmt.Errorf("parsing the broadcast transaction: %w", err)
+	}
+	payload, ok := postern.DecodeRecordScript(tx.Outputs[0].LockingScript.String())
+	if !ok {
+		return fmt.Errorf("expected output 0 to be a version-1 record")
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		return fmt.Errorf("the record is not JSON: %w", err)
+	}
+	if _, ok := fields[key]; ok {
+		return fmt.Errorf("the chain record carries %q: %s", key, payload)
 	}
 	return nil
 }
