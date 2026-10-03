@@ -481,6 +481,10 @@ type SyncReport struct {
 	// most syncs there: a backup is due only once every BackupInterval.
 	BackedUp bool
 
+	// BackupSkipped says this sync, on the host that holds the one database,
+	// was told to leave the backup to another run and did.
+	BackupSkipped bool
+
 	// BackupErr is why a backup this sync tried did not get through — a
 	// *SyncHalt carrying the tracker's own exit code, as a failed remote
 	// cycle's error would be. Nil when none was tried, or it got through. It
@@ -538,6 +542,8 @@ func (r SyncReport) beadsMode() string {
 	switch r.Mode {
 	case BeadsSyncBackup:
 		switch {
+		case r.BackupSkipped:
+			return "; beads kept here, backup left to another run"
 		case r.BackedUp:
 			return "; beads kept here, backed up"
 		case r.BackupErr != nil:
@@ -599,6 +605,15 @@ type Sync struct {
 	// between two backups of it. Zero reads DefaultBackupInterval. It is read
 	// only when the host acts as backup.
 	BackupInterval time.Duration
+
+	// SkipBackup leaves the backup of the one database, and the collection
+	// that follows a backup, to some other run, even when one is due: the
+	// push to the tracker's remote can outlast a caller that is cheap by design
+	// (the mail notifier, whose unit is killed at its timeout). Nothing is
+	// recorded, so the backup is still due on the next sync that does not skip
+	// it. It changes nothing on a host that is not the one holding the
+	// database: there the beads cycle is the sync itself.
+	SkipBackup bool
 
 	// Home reads the vault's home file. It is needed only when Mode is
 	// BeadsSyncAuto, which is decided by it: with none, auto refuses.
@@ -759,7 +774,7 @@ func (s Sync) recordLevelInTheOneDatabase(ctx context.Context, report SyncReport
 		return report, fmt.Errorf("recording when %s was last level: %w", s.Host, noteErr)
 	}
 	report.At = at
-	if report.Mode == BeadsSyncBackup && report.BackupErr == nil {
+	if report.Mode == BeadsSyncBackup && report.BackupErr == nil && !s.SkipBackup {
 		report.GCed = s.maybeGC(ctx)
 	}
 	return report, nil
@@ -774,6 +789,10 @@ func (s Sync) recordLevelInTheOneDatabase(ctx context.Context, report SyncReport
 // that fails is never a failure of the sync: nothing any host reads waits on
 // it.
 func (s Sync) backupIfDue(ctx context.Context, report *SyncReport) {
+	if s.SkipBackup {
+		report.BackupSkipped = true
+		return
+	}
 	if !s.dueForBackup(ctx) {
 		return
 	}

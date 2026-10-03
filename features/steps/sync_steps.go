@@ -45,6 +45,7 @@ type syncContext struct {
 
 	mode           application.BeadsSyncMode
 	backupInterval time.Duration
+	skipBackup     bool
 
 	headBefore   string // this host's HEAD before the sync
 	remoteBefore string // the shared remote's main before the sync
@@ -80,6 +81,7 @@ func InitializeSyncScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^this host keeps the one beads database, backed up every (\d+) minutes$`, c.thisHostKeepsTheOneDatabase)
 	ctx.Given(`^its last backup of the beads database was (\d+) minutes ago$`, c.itsLastBackupWas)
 	ctx.Given(`^this host's beads live in another host's database$`, c.thisHostsBeadsLiveElsewhere)
+	ctx.Given(`^the sync is asked to leave the backup to another run$`, c.theSyncIsAskedToSkipTheBackup)
 
 	ctx.When(`^this host syncs$`, c.thisHostSyncs)
 
@@ -110,6 +112,7 @@ func InitializeSyncScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the beads database was never asked to reclaim its disk space$`, c.theDatabaseWasNeverCollected)
 	ctx.Then(`^the sync says no backup was due$`, c.theSyncSaysNoBackupWasDue)
 	ctx.Then(`^the sync says a backup ran$`, c.theSyncSaysABackupRan)
+	ctx.Then(`^the sync says the backup was left to another run$`, c.theSyncSaysTheBackupWasLeft)
 	ctx.Then(`^the sync says the backup halted on a merge conflict$`, c.theSyncSaysTheBackupHalted)
 }
 
@@ -290,6 +293,7 @@ func (c *syncContext) thisHostSyncs() error {
 
 		Mode:           c.mode,
 		BackupInterval: c.backupInterval,
+		SkipBackup:     c.skipBackup,
 	}
 	c.report, c.err = sync.Run(context.Background())
 	return nil
@@ -606,6 +610,18 @@ func (c *syncContext) thisHostKeepsTheOneDatabase(minutes int) error {
 func (c *syncContext) itsLastBackupWas(minutes int) error {
 	at := syncedAt.Add(-time.Duration(minutes) * time.Minute).Format(application.LastSyncFormat)
 	return c.tracker.SetNote(context.Background(), application.LastBackupKey(c.host), at)
+}
+
+func (c *syncContext) theSyncIsAskedToSkipTheBackup() error {
+	c.skipBackup = true
+	return nil
+}
+
+func (c *syncContext) theSyncSaysTheBackupWasLeft() error {
+	if c.report.BackedUp || !strings.Contains(c.report.String(), "backup left to another run") {
+		return fmt.Errorf("expected the sync to say the backup was left to another run, got %q", c.report.String())
+	}
+	return nil
 }
 
 func (c *syncContext) thisHostsBeadsLiveElsewhere() error {

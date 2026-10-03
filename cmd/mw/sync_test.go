@@ -52,6 +52,20 @@ func TestSyncCommandIsPartOfMw(t *testing.T) {
 	t.Fatal("expected mw to have a sync command")
 }
 
+func TestSyncCommandHasANoBackupFlagThatIsOffByDefault(t *testing.T) {
+	cmd, _, err := newRootCmd().Find([]string{"sync"})
+	if err != nil {
+		t.Fatalf("finding mw sync: %v", err)
+	}
+	flag := cmd.Flags().Lookup("no-backup")
+	if flag == nil {
+		t.Fatal("expected mw sync to have a --no-backup flag")
+	}
+	if flag.DefValue != "false" {
+		t.Fatalf("--no-backup defaults to %q, want false: a plain mw sync still backs up", flag.DefValue)
+	}
+}
+
 func TestExitCodeIsBeadsOwnWhenBeadsStoppedTheSync(t *testing.T) {
 	for code, want := range map[int]int{0: 1, 1: 1, 2: 2, 3: 3, 4: 4} {
 		halted := &application.SyncHalt{Code: code}

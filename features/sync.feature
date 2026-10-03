@@ -138,6 +138,17 @@ Feature: Keeping the vault and beads in step between hosts
     And the beads database holds the time of the sync under host.vps.last_backup
     And the sync says a backup ran
 
+  Scenario: A sync asked to leave the backup alone does not push one, though one is due
+    Given this host keeps the one beads database, backed up every 30 minutes
+    And its last backup of the beads database was 31 minutes ago
+    And the sync is asked to leave the backup to another run
+    When this host syncs
+    Then the sync succeeds
+    And the beads database holds the time of the sync under host.vps.last_sync
+    And the beads database was never synced
+    And the beads database was never asked to reclaim its disk space
+    And the sync says the backup was left to another run
+
   Scenario: A backup that halts is said, and stops nothing on the host that keeps the one database
     Given this host keeps the one beads database, backed up every 30 minutes
     And bd sync will exit 2

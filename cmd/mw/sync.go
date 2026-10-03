@@ -18,7 +18,8 @@ import (
 // the other one. It is safe to run by hand, from the dispatcher, or on a timer,
 // and it says in one line what it did.
 func newSyncCmd() *cobra.Command {
-	return &cobra.Command{
+	var noBackup bool
+	cmd := &cobra.Command{
 		Use:   "sync",
 		Short: "Bring this host level with the other one: the vault, then beads",
 		Long: "sync pulls the other host's vault commits and pushes this host's, then runs one beads\n" +
@@ -43,7 +44,10 @@ func newSyncCmd() *cobra.Command {
 			"collection. In both the note of when this host was level is written on every sync, straight\n" +
 			"into the one database. `auto` is backup on the home and shared on a boost, read off the\n" +
 			"vault's home file (backup every 5 minutes unless beads_backup_minutes says; the boost's\n" +
-			"server is beads_server_host or <home>.mw); with no home file it refuses and does nothing.",
+			"server is beads_server_host or <home>.mw); with no home file it refuses and does nothing.\n\n" +
+			"--no-backup leaves that backup, and the collection after it, to the next sync that does not\n" +
+			"say so, even when one is due: for a caller that must stay cheap, like the mail notifier,\n" +
+			"whose run is killed at its unit's timeout. Nothing is recorded, so the backup stays due.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			dir, err := config.Vault()
@@ -62,6 +66,8 @@ func newSyncCmd() *cobra.Command {
 				Ticks:     hostTickLogs(),
 				Lock:      hostSyncLock(),
 				SyncHalts: hostSyncHalt(),
+
+				SkipBackup: noBackup,
 			})
 			if err != nil {
 				return err
@@ -74,6 +80,8 @@ func newSyncCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&noBackup, "no-backup", false, "leave the backup of the beads database to another sync, even if one is due")
+	return cmd
 }
 
 // hostBeadsSync is how this host's beads database is treated: config
