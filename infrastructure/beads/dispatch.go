@@ -155,9 +155,15 @@ func (g *Gateway) overlaid(ctx context.Context, stories []bead) ([]application.S
 // BlockedForHost implements application.WorkTracker. `bd blocked --json` finds
 // the stories a dependency holds back, but not their epic: its rows carry
 // neither a parent nor metadata, unlike `bd list` and `bd ready`. So each
-// candidate is read back with ShowStory, which already knows how to overlay an
-// epic's defaults onto a story read on its own — the same call `mw status`
-// makes for a story by id, reused here rather than a second way of doing it.
+// candidate is read back with `bd show`, as ShowStory does, and the epics'
+// defaults are overlaid once for all of them, each epic read once however many
+// stories hang from it.
+//
+// The poured steps of every running story are in `bd blocked` too, each waiting
+// on the step before it, and there are far more of them than stories. A row
+// carries nothing to tell a step by but its id, whose "-mol-" bd gives every
+// bead of a molecule (the same mark the event spring reads), so steps are left
+// out before any read: over a slow link each read is seconds.
 func (g *Gateway) BlockedForHost(ctx context.Context, host string) ([]application.StoryDetail, error) {
 	if host == "" {
 		return nil, fmt.Errorf("which host are the blocked stories for?")
@@ -171,21 +177,35 @@ func (g *Gateway) BlockedForHost(ctx context.Context, host string) ([]applicatio
 		return nil, fmt.Errorf("reading what is blocked on %s: %w", host, err)
 	}
 
-	var blocked []application.StoryDetail
-	for _, story := range candidates {
-		if story.Type == TypeEpic || story.Status != StatusOpen || story.Assignee != "" {
+	var shown []bead
+	for _, candidate := range candidates {
+		if candidate.Type == TypeEpic || candidate.Status != StatusOpen || candidate.Assignee != "" || isPouredStep(candidate.ID) {
 			continue
 		}
-		detail, err := g.ShowStory(ctx, story.ID)
+		story, err := g.showOne(ctx, candidate.ID)
 		if err != nil {
-			return nil, fmt.Errorf("reading the blocked story %s: %w", story.ID, err)
+			return nil, fmt.Errorf("reading the blocked story %s: %w", candidate.ID, err)
 		}
-		if detail.Merged().Host != host {
-			continue
+		shown = append(shown, story)
+	}
+	details, err := g.overlaid(ctx, shown)
+	if err != nil {
+		return nil, err
+	}
+
+	var blocked []application.StoryDetail
+	for _, detail := range details {
+		if detail.Merged().Host == host {
+			blocked = append(blocked, detail)
 		}
-		blocked = append(blocked, detail)
 	}
 	return blocked, nil
+}
+
+// isPouredStep says whether a bead's id is that of a bead bd made by pouring a
+// formula: a molecule's root or one of its steps, which bd names <prefix>-mol-<id>.
+func isPouredStep(id string) bool {
+	return strings.Contains(id, "-mol-")
 }
 
 // ReleaseClaim implements application.WorkTracker. The story goes back to open
