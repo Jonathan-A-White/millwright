@@ -50,6 +50,8 @@
 //	doctor_wg_hub  = "10.88.0.1:22"
 //	doctor_wg_unit = "wg-quick@wg0"
 //	tmp_leftovers_budget_bytes = 200000000
+//	root_disk_budget_bytes = 280000000000
+//	root_disk_margin_bytes = 10000000000
 package config
 
 import (
@@ -1804,6 +1806,57 @@ func DoctorTmpLeftoversBudgetBytes() (int64, error) {
 	}
 	if bytes < 1 {
 		return 0, fmt.Errorf("the doctor's tmp_leftovers_budget_bytes is %d, so every host would be over budget: set it to 1 or more", bytes)
+	}
+	return bytes, nil
+}
+
+// DefaultDoctorRootDiskBudgetBytes is the Windows drive's free space mw
+// doctor's root-disk-budget check holds the WSL root to when the [doctor] table
+// says nothing: 0, which makes the check inert.
+const DefaultDoctorRootDiskBudgetBytes int64 = 0
+
+// DefaultDoctorRootDiskMarginBytes is the headroom root-disk-budget keeps under
+// its budget when the [doctor] table says nothing: 10 GB. It is the same
+// 10_000_000_000 doctor.DefaultRootDiskMarginBytes reads as.
+const DefaultDoctorRootDiskMarginBytes int64 = 10_000_000_000
+
+// DoctorRootDiskBudgetBytes reports the free bytes the Windows drive holding
+// the WSL vhdx had when the vhdx was placed there: the `[doctor]` table's
+// `root_disk_budget_bytes` key of ~/.config/mw/config.toml, and
+// DefaultDoctorRootDiskBudgetBytes (0, inert) when the table says nothing.
+func DoctorRootDiskBudgetBytes() (int64, error) {
+	return doctorByteSetting("root_disk_budget_bytes", DefaultDoctorRootDiskBudgetBytes)
+}
+
+// DoctorRootDiskMarginBytes reports the headroom root-disk-budget keeps under
+// its budget: the `[doctor]` table's `root_disk_margin_bytes` key of
+// ~/.config/mw/config.toml, and DefaultDoctorRootDiskMarginBytes when the table
+// says nothing.
+func DoctorRootDiskMarginBytes() (int64, error) {
+	return doctorByteSetting("root_disk_margin_bytes", DefaultDoctorRootDiskMarginBytes)
+}
+
+// doctorByteSetting reads a whole, non-negative number of bytes from the
+// `[doctor]` table, fallback when the table says nothing.
+func doctorByteSetting(key string, fallback int64) (int64, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return 0, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	table, err := tableIn(filepath.Join(home, File), DoctorTable)
+	if err != nil {
+		return 0, err
+	}
+	said := strings.TrimSpace(table[key])
+	if said == "" {
+		return fallback, nil
+	}
+	bytes, err := strconv.ParseInt(said, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("the doctor's %s is %q, which is not a whole number of bytes: set `%s = <n>` in %s", key, said, key, File)
+	}
+	if bytes < 0 {
+		return 0, fmt.Errorf("the doctor's %s is %d, which is negative: set it to 0 or more", key, bytes)
 	}
 	return bytes, nil
 }

@@ -84,6 +84,14 @@ func newDoctorCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			rootDiskBudget, err := config.DoctorRootDiskBudgetBytes()
+			if err != nil {
+				return err
+			}
+			rootDiskMargin, err := config.DoctorRootDiskMarginBytes()
+			if err != nil {
+				return err
+			}
 			beadsBudget, err := config.BeadsBudgetBytes()
 			if err != nil {
 				return err
@@ -185,6 +193,11 @@ func newDoctorCmd() *cobra.Command {
 			}
 			tmpLeftovers := doctor.NewTmpLeftovers(os.TempDir())
 			tmpLeftovers.Budget = tmpLeftoversBudget
+			rootDisk := doctor.NewRootDiskBudget()
+			rootDisk.Budget, rootDisk.Margin = rootDiskBudget, rootDiskMargin
+			rootDisk.Note = func(ctx context.Context, text string) error {
+				return mwGateway(vault, host).SetNote(ctx, application.DoctorNoteKey(host, doctor.RootDiskBudgetName), text)
+			}
 			return runDoctor(cmd, application.Doctor{
 				Checks: application.DoctorChecks{
 					doctor.NewDaemonReload(units),
@@ -196,6 +209,7 @@ func newDoctorCmd() *cobra.Command {
 					&doctor.BeadsSize{Dir: vault, Budget: beadsBudget},
 					doctor.NewBeadsStores(vault),
 					tmpLeftovers,
+					rootDisk,
 					mayorStale,
 					mayorGone,
 					posternTranscribe,

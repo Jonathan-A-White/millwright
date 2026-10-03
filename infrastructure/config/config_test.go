@@ -883,6 +883,58 @@ func TestDoctorTmpLeftoversBudgetRefusesANonNumberOrLessThanOne(t *testing.T) {
 	}
 }
 
+func TestDoctorRootDiskBudgetIsZeroUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, "")
+
+	budget, err := config.DoctorRootDiskBudgetBytes()
+	if err != nil || budget != 0 {
+		t.Fatalf("expected the default root-disk budget of 0 (inert), got %d: %v", budget, err)
+	}
+
+	writeConfig(t, "[doctor]\nroot_disk_budget_bytes = 280000000000\n")
+	if budget, err = config.DoctorRootDiskBudgetBytes(); err != nil || budget != 280_000_000_000 {
+		t.Fatalf("expected the file's root_disk_budget_bytes, got %d: %v", budget, err)
+	}
+}
+
+func TestDoctorRootDiskBudgetRefusesANonNumberOrANegative(t *testing.T) {
+	writeConfig(t, "[doctor]\nroot_disk_budget_bytes = \"a lot\"\n")
+	if _, err := config.DoctorRootDiskBudgetBytes(); err == nil || !strings.Contains(err.Error(), "whole number") {
+		t.Fatalf("expected a non-number to be refused, got %v", err)
+	}
+
+	writeConfig(t, "[doctor]\nroot_disk_budget_bytes = -1\n")
+	if _, err := config.DoctorRootDiskBudgetBytes(); err == nil || !strings.Contains(err.Error(), "negative") {
+		t.Fatalf("expected a negative to be refused, got %v", err)
+	}
+}
+
+func TestDoctorRootDiskMarginIsTenGigabytesUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, "")
+
+	margin, err := config.DoctorRootDiskMarginBytes()
+	if err != nil || margin != 10_000_000_000 {
+		t.Fatalf("expected the default root-disk margin of 10 GB, got %d: %v", margin, err)
+	}
+
+	writeConfig(t, "[doctor]\nroot_disk_margin_bytes = 5000000000\n")
+	if margin, err = config.DoctorRootDiskMarginBytes(); err != nil || margin != 5_000_000_000 {
+		t.Fatalf("expected the file's root_disk_margin_bytes, got %d: %v", margin, err)
+	}
+}
+
+func TestDoctorRootDiskMarginRefusesANonNumberOrANegative(t *testing.T) {
+	writeConfig(t, "[doctor]\nroot_disk_margin_bytes = \"plenty\"\n")
+	if _, err := config.DoctorRootDiskMarginBytes(); err == nil || !strings.Contains(err.Error(), "whole number") {
+		t.Fatalf("expected a non-number to be refused, got %v", err)
+	}
+
+	writeConfig(t, "[doctor]\nroot_disk_margin_bytes = -5\n")
+	if _, err := config.DoctorRootDiskMarginBytes(); err == nil || !strings.Contains(err.Error(), "negative") {
+		t.Fatalf("expected a negative to be refused, got %v", err)
+	}
+}
+
 func TestDoctorTunnelHostWithNoWatchTableIsEmpty(t *testing.T) {
 	writeConfig(t, vpsConfig)
 
