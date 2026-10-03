@@ -189,3 +189,27 @@ func asPlanRefused(err error, target **domain.PlanRefused) bool {
 	}
 	return ok
 }
+
+func TestTitlesOverTheTrackersLimitAreRefused(t *testing.T) {
+	defaults := domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude, Model: domain.ModelOpus, Effort: domain.EffortHigh}
+	plan := func(epicTitle, storyTitle string) domain.Plan {
+		return domain.Plan{
+			Epic:    domain.PlanEpic{Title: epicTitle, Defaults: defaults},
+			Stories: []domain.PlanStory{{Key: "a", Title: storyTitle, Acceptance: "it passes"}},
+		}
+	}
+	long := strings.Repeat("t", domain.MaxTitleLength+1)
+	atLimit := strings.Repeat("t", domain.MaxTitleLength)
+
+	if err := plan(atLimit, atLimit).Validate(); err != nil {
+		t.Errorf("titles at the limit should be filable, got %v", err)
+	}
+	err := plan("Loop", long).Validate()
+	if err == nil || !strings.Contains(err.Error(), "story a has a title 501 bytes long") || strings.Contains(err.Error(), long) {
+		t.Errorf("expected the story's title length named without the title, got %v", err)
+	}
+	err = plan(long, "A").Validate()
+	if err == nil || !strings.Contains(err.Error(), "the epic has a title 501 bytes long") {
+		t.Errorf("expected the epic's title length named, got %v", err)
+	}
+}

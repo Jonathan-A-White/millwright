@@ -78,8 +78,14 @@ func ParsePlan(written []byte) (Plan, error) {
 	return plan, nil
 }
 
+// MaxTitleLength is the longest title bd will take for an epic or a story, as
+// bd counts it: bytes. A longer one is refused by bd at the create, after the
+// epic may already be filed, so a plan is refused for it before anything is
+// written.
+const MaxTitleLength = 500
+
 // Validate reports every reason this plan cannot be filed: an epic with no
-// title, a story with no key, no title, no acceptance criteria or no Path, a
+// title, a story with no key, no title, a title over MaxTitleLength, no acceptance criteria or no Path, a
 // story waiting on a key no story in the plan has, and stories waiting on each
 // other. It comes back as a *PlanRefused, or nil when the plan is filable.
 func (p Plan) Validate() error {
@@ -87,6 +93,9 @@ func (p Plan) Validate() error {
 
 	if strings.TrimSpace(p.Epic.Title) == "" {
 		reasons = append(reasons, "the epic has no title")
+	}
+	if n := len(p.Epic.Title); n > MaxTitleLength {
+		reasons = append(reasons, fmt.Sprintf("the epic has a title %d bytes long, and the tracker takes at most %d", n, MaxTitleLength))
 	}
 	if len(p.Stories) == 0 {
 		reasons = append(reasons, "the plan has no stories")
@@ -105,6 +114,9 @@ func (p Plan) Validate() error {
 
 		if strings.TrimSpace(story.Title) == "" {
 			reasons = append(reasons, name+" has no title")
+		}
+		if n := len(story.Title); n > MaxTitleLength {
+			reasons = append(reasons, fmt.Sprintf("%s has a title %d bytes long, and the tracker takes at most %d", story.nameByKey(i), n, MaxTitleLength))
 		}
 		if strings.TrimSpace(story.Acceptance) == "" {
 			reasons = append(reasons, name+" has no acceptance criteria, so nobody could say it was done")
@@ -228,6 +240,15 @@ func (p Plan) cycle() []string {
 
 // name is what a reason calls this story: its key, or its place in the plan
 // when it has no key to be called by.
+// nameByKey is name without the title: a refusal about an over-long title must
+// not print the title.
+func (s PlanStory) nameByKey(i int) string {
+	if key := strings.TrimSpace(s.Key); key != "" {
+		return "story " + key
+	}
+	return fmt.Sprintf("story %d", i+1)
+}
+
 func (s PlanStory) name(i int) string {
 	if key := strings.TrimSpace(s.Key); key != "" {
 		return "story " + key

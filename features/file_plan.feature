@@ -168,6 +168,25 @@ Feature: Filing the Mayor's plan
     Then filing is refused, saying: has no acceptance criteria
     And nothing is written
 
+  Scenario: A story whose title is over the tracker's limit is rejected and nothing is written
+    Given the story "gateway" has a title of 501 characters
+    When the plan is filed
+    Then filing is refused, saying: story gateway has a title 501 bytes long, and the tracker takes at most 500
+    And nothing is written
+
+  Scenario: An epic whose title is over the tracker's limit is rejected and nothing is written
+    Given the epic has a title of 501 characters
+    When the plan is filed
+    Then filing is refused, saying: the epic has a title 501 bytes long, and the tracker takes at most 500
+    And nothing is written
+
+  Scenario: Titles at the tracker's limit are filed
+    Given the story "gateway" has a title of 500 characters
+    And the epic has a title of 500 characters
+    When the plan is filed
+    Then filing succeeds
+    And the stories are filed in the order module, gateway, formulas
+
   Scenario: An unapproved plan leaves nothing to dispatch
     When the plan is filed
     Then filing succeeds

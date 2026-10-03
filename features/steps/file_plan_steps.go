@@ -44,6 +44,8 @@ func InitializeFilePlanScenario(ctx *godog.ScenarioContext) {
 	c.registerRequirementSteps(ctx)
 
 	ctx.Given(`^the plan:$`, c.thePlan)
+	ctx.Given(`^the story "([^"]*)" has a title of (\d+) characters$`, c.theStoryHasATitleOf)
+	ctx.Given(`^the epic has a title of (\d+) characters$`, c.theEpicHasATitleOf)
 	ctx.When(`^the plan is filed$`, c.thePlanIsFiled)
 	ctx.When(`^the plan is filed and approved$`, c.thePlanIsFiledAndApproved)
 	ctx.When(`^the story "([^"]*)" is closed$`, c.theStoryIsDone)
@@ -66,6 +68,21 @@ func InitializeFilePlanScenario(ctx *godog.ScenarioContext) {
 
 func (c *fileContext) thePlan(written *godog.DocString) error {
 	c.plan, c.read = domain.ParsePlan([]byte(written.Content))
+	return nil
+}
+
+func (c *fileContext) theStoryHasATitleOf(key string, length int) error {
+	for i := range c.plan.Stories {
+		if c.plan.Stories[i].Key == key {
+			c.plan.Stories[i].Title = strings.Repeat("t", length)
+			return nil
+		}
+	}
+	return fmt.Errorf("the plan has no story %q", key)
+}
+
+func (c *fileContext) theEpicHasATitleOf(length int) error {
+	c.plan.Epic.Title = strings.Repeat("t", length)
 	return nil
 }
 
