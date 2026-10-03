@@ -3,6 +3,7 @@ package steps
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -127,6 +128,7 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the story "([^"]*)" has been tried (\d+) times?$`, c.theStoryHasBeenTried)
 	ctx.Given(`^the story "([^"]*)" carries the comment "([^"]*)"$`, c.theStoryCarriesTheComment)
 	ctx.Given(`^the runner refuses to start anything$`, c.theRunnerRefuses)
+	ctx.Given(`^the runner refuses to start anything, saying "([^"]*)"$`, c.theRunnerRefusesSaying)
 	ctx.Given(`^an earlier session for "([^"]*)" lies dead$`, c.anEarlierSessionLiesDead)
 	ctx.Given(`^a session for "([^"]*)" is still running in its worktree$`, c.aSessionIsRunningInItsWorktree)
 	ctx.Given(`^the story "([^"]*)" has the formula "([^"]*)" poured and recorded, with its first step closed$`, c.theStoryHasAMoleculeWithItsFirstStepClosed)
@@ -141,6 +143,8 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^dispatch runs on "([^"]*)" with a cap of (\d+)$`, c.dispatchRuns)
 	ctx.When(`^dispatch runs on "([^"]*)" with a cap of (\d+) as a dry run$`, c.dispatchRunsDry)
 	ctx.When(`^the story "([^"]*)" is given back once its session has ended$`, c.theStoryIsGivenBack)
+	ctx.When(`^the runner refuses to start anything, saying "([^"]*)"$`, c.theRunnerRefusesSaying)
+	ctx.When(`^the runner starts sessions again$`, c.theRunnerStartsAgain)
 	ctx.When(`^the counter of "([^"]*)" is reset by hand$`, c.theCounterIsResetByHand)
 	ctx.When(`^the counter of "([^"]*)" is reset by hand to (\d+)$`, c.theCounterIsResetByHandTo)
 
@@ -201,6 +205,7 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the story "([^"]*)" carries exactly one comment saying its formula is not installed$`, c.theStoryCarriesOneFormulaNotInstalledComment)
 	ctx.Then(`^the Mayor has (\d+) mails?$`, c.theMayorHasMails)
 	ctx.Then(`^the mail to the Mayor says "([^"]*)"$`, c.theMailSays)
+	ctx.Then(`^the subject of the mail to the Mayor is "([^"]*)"$`, c.theMailSubjectIs)
 }
 
 // workspace makes the temp directory a scenario keeps its vault, its origin and
@@ -516,6 +521,16 @@ func (c *dispatchContext) theConfigSaysTheSyncKnobs(tries int, wait string) erro
 
 func (c *dispatchContext) theRunnerRefuses() error {
 	c.runner.Err = fmt.Errorf("this runner starts nothing")
+	return nil
+}
+
+func (c *dispatchContext) theRunnerRefusesSaying(words string) error {
+	c.runner.Err = errors.New(words)
+	return nil
+}
+
+func (c *dispatchContext) theRunnerStartsAgain() error {
+	c.runner.Err = nil
 	return nil
 }
 
@@ -1481,6 +1496,20 @@ func (c *dispatchContext) theMayorHasMails(want int) error {
 	}
 	if len(mails) != want {
 		return fmt.Errorf("expected the Mayor to have %d mails, got %d: %+v", want, len(mails), mails)
+	}
+	return nil
+}
+
+func (c *dispatchContext) theMailSubjectIs(want string) error {
+	mails, err := c.mailsToTheMayor()
+	if err != nil {
+		return err
+	}
+	if len(mails) == 0 {
+		return fmt.Errorf("expected a mail to the Mayor with the subject %q, but there is none", want)
+	}
+	if got := mails[len(mails)-1].Subject; got != want {
+		return fmt.Errorf("expected the subject of the mail to the Mayor to be %q, got %q", want, got)
 	}
 	return nil
 }

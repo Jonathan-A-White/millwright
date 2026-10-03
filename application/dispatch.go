@@ -660,7 +660,10 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 				report.Passed = append(report.Passed, Passed{StoryID: id, Why: refusal.Error()})
 			} else {
 				report.Failed = append(report.Failed, Failed{StoryID: id, Err: err, Released: released})
+				d.tellStuck(ctx, id, err, &report)
 			}
+		} else if started.StoryID != "" {
+			d.clearStuck(ctx, id)
 		}
 	}
 

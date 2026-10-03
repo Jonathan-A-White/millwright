@@ -535,6 +535,48 @@ Feature: Dispatching the stories this host is ready to work
     Then no session was started
     And the story "mw-gq6.1" records 0 attempts
 
+  # A story that fails to start with the same error tick after tick tells nobody
+  # by itself (mw-gq6.259): the second identical failure mails the Mayor once.
+
+  Scenario: One failure to start a story tells the Mayor nothing yet
+    Given a ready story "mw-gq6.1" of that epic
+    And the runner refuses to start anything, saying "bad object refs/heads/mw/mw-gq6.1"
+    When dispatch runs on "vps" with a cap of 1
+    Then the Mayor has 0 mails
+
+  Scenario: The same failure to start a story twice tells the Mayor once, and not a third time
+    Given a ready story "mw-gq6.1" of that epic
+    And the runner refuses to start anything, saying "bad object refs/heads/mw/mw-gq6.1"
+    When dispatch runs on "vps" with a cap of 1
+    And dispatch runs on "vps" with a cap of 1
+    Then the Mayor has 1 mail
+    And the subject of the mail to the Mayor is "Stuck: mw-gq6.1 on vps: starting the session of mw-gq6.1: bad object refs/heads/mw/mw-gq6.1"
+    When dispatch runs on "vps" with a cap of 1
+    Then the Mayor has 1 mail
+
+  Scenario: A different failure to start the same story is told again, once it repeats
+    Given a ready story "mw-gq6.1" of that epic
+    And the runner refuses to start anything, saying "bad object refs/heads/mw/mw-gq6.1"
+    When dispatch runs on "vps" with a cap of 1
+    And dispatch runs on "vps" with a cap of 1
+    And the runner refuses to start anything, saying "invalid gitfile format"
+    And dispatch runs on "vps" with a cap of 1
+    Then the Mayor has 1 mail
+    When dispatch runs on "vps" with a cap of 1
+    Then the Mayor has 2 mails
+    And the subject of the mail to the Mayor is "Stuck: mw-gq6.1 on vps: starting the session of mw-gq6.1: invalid gitfile format"
+
+  Scenario: A story that starts between two failures is not stuck
+    Given a ready story "mw-gq6.1" of that epic
+    And the runner refuses to start anything, saying "disk is read-only"
+    When dispatch runs on "vps" with a cap of 1
+    And the runner starts sessions again
+    And dispatch runs on "vps" with a cap of 1
+    And the story "mw-gq6.1" is given back once its session has ended
+    And the runner refuses to start anything, saying "disk is read-only"
+    And dispatch runs on "vps" with a cap of 1
+    Then the Mayor has 0 mails
+
   Scenario: A story tried once and then failed before its session starts is still tried once
     Given a ready story "mw-gq6.1" of that epic
     And the story "mw-gq6.1" has been tried 1 time
