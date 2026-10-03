@@ -33,7 +33,7 @@ Nice=19
 
 # Type=oneshot has no start timeout by default, and a hung mw sync or bd would
 # then block every later tick.
-TimeoutStartSec=2min
+TimeoutStartSec=4min
 
 # A tick starts no tmux server (it only ever reads an existing one), so a
 # memory squeeze may kill it first, before the seat or the blog it shares the

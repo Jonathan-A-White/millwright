@@ -1973,7 +1973,11 @@ systemctl --user daemon-reload
 ```
 
 `disable --now` alone stops it at once. Its output is in the journal:
-`journalctl --user -u mw-mail-notify`. The ids it has announced are in
+`journalctl --user -u mw-mail-notify`, with a line as each of steps 2, 3 and 5
+starts, so a tick systemd kills shows where. Its sync is `mw sync --no-backup`: the
+beads backup (a dolt push) is left to the follower's own sync and dispatch, so a tick
+never outlasts its `TimeoutStartSec=4min`, which is above the sync lock's 120 s wait.
+The ids it has announced are in
 `~/.local/state/mw-mail-notify/announced`; deleting that file makes it announce
 whatever is unread again. `contrib/mailnotify_test.go` and
 `contrib/mailwait_test.go` run them against a private

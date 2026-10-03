@@ -14,8 +14,12 @@
 #      beads have changed and the last view is at least MW_MAIL_VIEW_MAX_AGE
 #      seconds old (default 300), and says so in its log line. Nothing else
 #      runs, and no mail line is typed (mw-gq6.150);
-#   2. runs `mw sync`, at nice 19 and idle I/O priority, if the last sync was
-#      MW_MAIL_SYNC_EVERY seconds ago or more (default 300, five minutes);
+#   2. runs `mw sync --no-backup`, at nice 19 and idle I/O priority, if the
+#      last sync was MW_MAIL_SYNC_EVERY seconds ago or more (default 300, five
+#      minutes). It is told to leave the beads backup (a dolt push, which can
+#      outlast the unit's TimeoutStartSec) to the follower's own sync and
+#      dispatch (mw-gq6.260). Steps 2, 3 and 5 each log their name as they
+#      start, so a tick that systemd kills leaves a trace of where;
 #   3. lists `bd mail inbox` for the mailbox and compares its ids with the ids
 #      it has already announced;
 #   4. when this host has a postern key file, runs `mw postern inbox
@@ -334,10 +338,11 @@ last=$(cat "$STATE/last-sync" 2>/dev/null || echo 0)
 case $last in *[!0-9]* | "") last=0 ;; esac
 if [ $((now - last)) -ge "$SYNC_EVERY" ]; then
 	echo "$now" >"$STATE/last-sync"
+	say "step 2: mw sync --no-backup"
 	slow=""
 	command -v ionice >/dev/null 2>&1 && slow="ionice -c 3"
 	# shellcheck disable=SC2086
-	(cd "$vault" && nice -n 19 $slow mw sync >/dev/null 2>&1) || say "mw sync did not finish cleanly; carrying on with what the vault holds"
+	(cd "$vault" && nice -n 19 $slow mw sync --no-backup >/dev/null 2>&1) || say "mw sync did not finish cleanly; carrying on with what the vault holds"
 fi
 
 # 3. The inbox. Only lines that start with a bead id count: an empty inbox
@@ -345,6 +350,7 @@ fi
 # rather than stopping the tick: the quiet alarm below still gets its turn.
 new=""
 count=0
+say "step 3: the mail inbox"
 if listing=$(cd "$vault" && bd mail inbox "$MAILBOX" 2>/dev/null); then
 	current=$(echo "$listing" | awk 'NF { print $1 }' | grep -E '^[[:alnum:]]+(-[[:alnum:].]+)+$' | sort -u)
 	if [ -n "$current" ]; then
@@ -383,6 +389,7 @@ fi
 # typed less and less often (see NUDGE_DAMPER_SECONDS above), so a sleeping
 # host is not re-announced every tick all night.
 tab=$(printf '\t')
+say "step 5: the quiet alarm"
 nudge_texts=""
 nudge_fired=""
 nudge_keys=""

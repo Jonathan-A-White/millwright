@@ -323,11 +323,24 @@ func TestNewMailAndAnIdlePromptTypesOneLineAndRecordsTheIds(t *testing.T) {
 	if got := f.announced(); got != "mw-aaa\nmw-bbb\n" {
 		t.Fatalf("recorded ids %q", got)
 	}
-	if got := f.read("mw.log"); got != "sync\n" {
-		t.Fatalf("mw was run as %q, want one `mw sync`", got)
+	if got := f.read("mw.log"); got != "sync --no-backup\n" {
+		t.Fatalf("mw was run as %q, want one `mw sync --no-backup`: a tick must not push the backup", got)
 	}
 	if got := f.read("bd.log"); got != "mail inbox mayor\n" {
 		t.Fatalf("bd was run as %q, want one `bd mail inbox mayor`", got)
+	}
+}
+
+func TestATickLogsTheStepItIsIn(t *testing.T) {
+	f := newFactory(t)
+
+	out := f.tick()
+
+	// A tick that systemd kills leaves no other trace of where it was.
+	for _, want := range []string{"step 2: mw sync", "step 3: the mail inbox"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("the tick's log lacks %q:\n%s", want, out)
+		}
 	}
 }
 

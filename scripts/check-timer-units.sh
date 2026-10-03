@@ -185,6 +185,8 @@ need "$TIMER" "OnCalendar=hourly"
 # The mail-notify pair.
 need "$MAIL_SERVICE" "Type=oneshot"
 need "$MAIL_SERVICE" "ExecStart=/usr/bin/env mw-mail-notify"
+# A tick may wait the whole 120 s of the sync lock, so its timeout is above that.
+need "$MAIL_SERVICE" "TimeoutStartSec=4min"
 need "$MAIL_TIMER" "Persistent=false"
 need "$MAIL_TIMER" "OnCalendar=minutely"
 # The health pair.
