@@ -329,10 +329,16 @@ func (g *Gateway) PourFormula(ctx context.Context, formula, storyID, title strin
 		return application.Molecule{}, fmt.Errorf("pouring %s: which story?", formula)
 	}
 
-	out, err := g.call(ctx, "mol", "pour", formula,
-		"--var", "story="+storyID, "--var", "title="+title, "--json")
+	args := []string{"mol", "pour", formula, "--var", "story=" + storyID, "--var", "title=" + title, "--json"}
+	out, errs, err := g.run(ctx, args...)
 	if err != nil {
-		return application.Molecule{}, err
+		// bd refusing what it was asked to make (a step title over its limit) is
+		// the story's fault and will be the same next time; a bd that could not
+		// be run, or reached its database, is not, and is reported as before.
+		if reason := said(out, errs); refusedAtPour(reason) {
+			return application.Molecule{}, &application.PourRefused{Formula: formula, Story: storyID, Reason: reason}
+		}
+		return application.Molecule{}, g.failed(err, out, errs, args)
 	}
 	var poured struct {
 		Root string `json:"new_epic_id"`
@@ -349,6 +355,36 @@ func (g *Gateway) PourFormula(ctx context.Context, formula, storyID, title strin
 		return application.Molecule{}, fmt.Errorf("reading the steps of %s poured for %s: %w", formula, storyID, err)
 	}
 	return application.Molecule{Formula: formula, RootID: poured.Root, Steps: steps}, nil
+}
+
+// refusedAtPour says whether what bd said on failing to pour is a refusal of
+// the beads it would make, rather than a fault of bd or its database: its
+// limit on the length of a title, which a step title with the story's title
+// in it can pass although the story's own does not (mw-gq6.244).
+func refusedAtPour(said string) bool {
+	return strings.Contains(said, "characters or less")
+}
+
+// FormulaStepTitles implements application.FormulaTitles: the titles of an
+// installed formula's steps, with {{story}} and {{title}} still in them.
+func (g *Gateway) FormulaStepTitles(ctx context.Context, formula string) ([]string, error) {
+	out, err := g.call(ctx, "formula", "show", formula, "--json")
+	if err != nil {
+		return nil, err
+	}
+	var shown struct {
+		Steps []struct {
+			Title string `json:"title"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal(out, &shown); err != nil {
+		return nil, fmt.Errorf("reading the steps of the formula %s: %w", formula, err)
+	}
+	titles := make([]string, 0, len(shown.Steps))
+	for _, step := range shown.Steps {
+		titles = append(titles, step.Title)
+	}
+	return titles, nil
 }
 
 // steps reads a molecule's step beads and puts them in the order they are

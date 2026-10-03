@@ -213,3 +213,14 @@ func TestTitlesOverTheTrackersLimitAreRefused(t *testing.T) {
 		t.Errorf("expected the epic's title length named, got %v", err)
 	}
 }
+
+func TestStepTitleOverheadIsTheLongestWordingAStepPutsBeforeTheTitle(t *testing.T) {
+	titles := []string{"Understand {{story}}: {{title}}", "Commit", "Write the failing test first"}
+	want := len("Understand ") + domain.StoryIDReserve + len(": ")
+	if got := domain.StepTitleOverhead(titles); got != want {
+		t.Errorf("StepTitleOverhead = %d, want %d", got, want)
+	}
+	if got := domain.StepTitleOverhead([]string{"Commit"}); got != 0 {
+		t.Errorf("a step that does not carry the title adds nothing, got %d", got)
+	}
+}

@@ -862,6 +862,22 @@ func (f *FakeTracker) AddFormula(name string, steps ...application.FormulaStep) 
 	f.formulas[name] = append([]application.FormulaStep(nil), steps...)
 }
 
+// FormulaStepTitles implements application.FormulaTitles: the titles of the
+// steps of an installed formula, as they were given to AddFormula.
+func (f *FakeTracker) FormulaStepTitles(_ context.Context, formula string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	steps, installed := f.formulas[formula]
+	if !installed {
+		return nil, fmt.Errorf("no formula %q is installed", formula)
+	}
+	titles := make([]string, 0, len(steps))
+	for _, step := range steps {
+		titles = append(titles, step.Title)
+	}
+	return titles, nil
+}
+
 // Formulas implements application.WorkTracker.
 func (f *FakeTracker) Formulas(_ context.Context) ([]string, error) {
 	f.mu.Lock()
@@ -886,6 +902,9 @@ func (f *FakeTracker) PourFormula(_ context.Context, formula, storyID, title str
 	f.asked = append(f.asked, "PourFormula")
 	if f.Err != nil {
 		return application.Molecule{}, f.Err
+	}
+	if err := f.failing["PourFormula"]; err != nil {
+		return application.Molecule{}, err
 	}
 	steps, installed := f.formulas[formula]
 	if !installed {
@@ -1254,7 +1273,7 @@ func (f *FakeTracker) CloseStep(stepID string) {
 
 // FailOn makes one method, named as Asked names it, fail with err instead of
 // doing its work, and leaves every other method alone. A nil err lets it work
-// again. Only OpenMolecule and SetStoryState look at it so far.
+// again. Only OpenMolecule, PourFormula and SetStoryState look at it so far.
 func (f *FakeTracker) FailOn(method string, err error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

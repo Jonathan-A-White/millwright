@@ -724,12 +724,18 @@ func (g *Gateway) showOne(ctx context.Context, id string) (bead, error) {
 func (g *Gateway) call(ctx context.Context, args ...string) ([]byte, error) {
 	out, errs, err := g.run(ctx, args...)
 	if err != nil {
-		if said := said(out, errs); said != "" {
-			return nil, fmt.Errorf("%s %s: %w: %s", g.program, strings.Join(args, " "), err, said)
-		}
-		return nil, fmt.Errorf("%s %s: %w", g.program, strings.Join(args, " "), err)
+		return nil, g.failed(err, out, errs, args)
 	}
 	return out, nil
+}
+
+// failed is the error call makes of a bd that failed: the command, bd's own
+// error and what it said.
+func (g *Gateway) failed(err error, out, errs []byte, args []string) error {
+	if said := said(out, errs); said != "" {
+		return fmt.Errorf("%s %s: %w: %s", g.program, strings.Join(args, " "), err, said)
+	}
+	return fmt.Errorf("%s %s: %w", g.program, strings.Join(args, " "), err)
 }
 
 // killGrace is how long a bd that has been told to stop is given to let go of

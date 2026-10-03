@@ -225,10 +225,20 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	return filed, nil
 }
 
+// FormulaTitles is the port by which a tracker says what a formula's step
+// titles are, as the formula's file words them: {{story}} and {{title}} still
+// in them. A tracker that is not one cannot be asked, and the title check that
+// uses it is skipped (mw-gq6.244).
+type FormulaTitles interface {
+	FormulaStepTitles(ctx context.Context, formula string) ([]string, error)
+}
+
 // validateFormulas refuses the whole plan, naming the story key, when a
 // story's path names a formula this tracker has not installed — before
 // anything is written, the same as plan.Validate does for the rest of a
-// path. The tracker is asked only when some story in the plan names a
+// path. It also refuses a story whose title, with what its formula's step
+// titles add to it at the pour, is over the tracker's limit: such a story is
+// filed fine and then can never be dispatched (mw-gq6.244). The tracker is asked only when some story in the plan names a
 // formula at all, so a plan that never mentions one costs nothing extra.
 func (f File) validateFormulas(ctx context.Context, plan domain.Plan, order []domain.PlanStory) error {
 	var needsCheck bool
@@ -247,6 +257,7 @@ func (f File) validateFormulas(ctx context.Context, plan domain.Plan, order []do
 	if err != nil {
 		return fmt.Errorf("checking which formulas are installed: %w", err)
 	}
+	overheads := map[string]int{}
 	for _, story := range order {
 		path, err := story.PathFrom(plan.Epic.Defaults)
 		if err != nil {
@@ -255,6 +266,34 @@ func (f File) validateFormulas(ctx context.Context, plan domain.Plan, order []do
 		if err := path.ValidateFormula(installed); err != nil {
 			return fmt.Errorf("filing story %s: %w", story.Key, err)
 		}
+		if err := f.validateStepTitles(ctx, story, path.Formula, overheads); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateStepTitles refuses a story whose title, plus the most its formula's
+// step titles put before it, is over domain.MaxTitleLength. The titles of a
+// formula are read once however many stories name it.
+func (f File) validateStepTitles(ctx context.Context, story domain.PlanStory, formula string, overheads map[string]int) error {
+	reader, ok := f.Tracker.(FormulaTitles)
+	if !ok || formula == "" {
+		return nil
+	}
+	overhead, known := overheads[formula]
+	if !known {
+		titles, err := reader.FormulaStepTitles(ctx, formula)
+		if err != nil {
+			return fmt.Errorf("reading the step titles of the formula %s: %w", formula, err)
+		}
+		overhead = domain.StepTitleOverhead(titles)
+		overheads[formula] = overhead
+	}
+	if n := len(story.Title); n+overhead > domain.MaxTitleLength {
+		return fmt.Errorf("filing story %s: its title is %d bytes, and pouring the formula %s adds up to %d to it in a step title, "+
+			"%d in all, and the tracker takes at most %d: shorten the title by %d",
+			story.Key, n, formula, overhead, n+overhead, domain.MaxTitleLength, n+overhead-domain.MaxTitleLength)
 	}
 	return nil
 }

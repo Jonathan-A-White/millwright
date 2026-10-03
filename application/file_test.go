@@ -149,3 +149,37 @@ func TestFilingNeedsAWorkTracker(t *testing.T) {
 		t.Fatal("expected filing with no work tracker to be refused")
 	}
 }
+
+// mw-gq6.244: bd takes a title of at most 500 bytes, and pouring a formula
+// puts a step's own words before the story's title, so a title that fits can
+// still be refused at the pour. The plan is refused before anything is filed.
+func TestAPlanWhoseTitleOverflowsAStepTitleIsRefusedBeforeAnythingIsFiled(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	tracker.AddFormula("tdd-feature",
+		application.FormulaStep{ID: "understand", Title: "Understand {{story}}: {{title}}"},
+		application.FormulaStep{ID: "red", Title: "Write the failing feature or test first"},
+	)
+	plan := twoStoryPlan()
+	plan.Stories[0].Title = strings.Repeat("t", 480)
+
+	_, err := application.File{Tracker: tracker}.Run(context.Background(), plan)
+	if err == nil {
+		t.Fatal("expected a 480-character title on tdd-feature to be refused")
+	}
+	for _, want := range []string{"module", "480", "tdd-feature", "500"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected the refusal to say %q, got %v", want, err)
+		}
+	}
+	if strings.Contains(err.Error(), plan.Stories[0].Title) {
+		t.Errorf("expected the title not to be repeated in the refusal")
+	}
+	if asked := tracker.Asked(); len(asked) != 0 {
+		t.Errorf("expected nothing written, tracker was asked %v", asked)
+	}
+
+	plan.Stories[0].Title = strings.Repeat("t", 450)
+	if _, err := (application.File{Tracker: tracker}).Run(context.Background(), plan); err != nil {
+		t.Errorf("expected a 450-character title to be filed, got %v", err)
+	}
+}

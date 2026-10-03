@@ -84,6 +84,33 @@ func ParsePlan(written []byte) (Plan, error) {
 // written.
 const MaxTitleLength = 500
 
+// StoryIDReserve is how many bytes a story's id is reckoned to take where a
+// formula's step title names it as {{story}}. The id is not known until the
+// story is filed, and the ids this tracker gives are well under it.
+const StoryIDReserve = 16
+
+// StepTitleOverhead is how many bytes a formula's step titles add to a story's
+// title when the formula is poured: for the longest step title that carries
+// {{title}}, what it says besides the title, with {{story}} reckoned at
+// StoryIDReserve. A step title without {{title}} does not grow with the
+// story's, so adds nothing here. bd counts the step's whole title against
+// MaxTitleLength, so a story's title is filable only up to MaxTitleLength less
+// this (mw-gq6.244).
+func StepTitleOverhead(stepTitles []string) int {
+	var longest int
+	for _, title := range stepTitles {
+		if !strings.Contains(title, "{{title}}") {
+			continue
+		}
+		bare := strings.ReplaceAll(title, "{{title}}", "")
+		bare = strings.ReplaceAll(bare, "{{story}}", strings.Repeat("x", StoryIDReserve))
+		if len(bare) > longest {
+			longest = len(bare)
+		}
+	}
+	return longest
+}
+
 // Validate reports every reason this plan cannot be filed: an epic with no
 // title, a story with no key, no title, a title over MaxTitleLength, no acceptance criteria or no Path, a
 // story waiting on a key no story in the plan has, and stories waiting on each
