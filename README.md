@@ -460,6 +460,13 @@ bd update <story-id> --status open --assignee "" --set-metadata attempts=0   # a
 
 The next dispatch then starts it as a first attempt.
 
+A story whose formula bd refuses to pour (a step title, which carries the story's
+title after the step's own words, over bd's 500-byte limit) is blocked the same
+way, under the reason code `pour-refused`: `mw dispatch` keeps the claim, marks it
+`run=blocked`, comments, writes a failed `dispatch-pour@<host>` job event, and
+goes on to the next story rather than exiting 1. `mw file` refuses such a plan up
+front, counting the longest step title of the story's formula with its `{{title}}`.
+
 `--dry-run` prints what it would start, in that same order, and writes nothing:
 nothing is synced, claimed, fetched, cut, poured or started. See `features/dispatch.feature`.
 

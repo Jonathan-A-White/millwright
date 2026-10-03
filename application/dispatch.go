@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/domain/events"
 )
 
 // MoleculeField is the metadata a dispatched story carries so that whoever
@@ -647,7 +648,12 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		}
 		if err != nil {
 			var refusal *leftoverRefusal
-			if errors.As(err, &refusal) {
+			var pour *pourRefusal
+			if errors.As(err, &pour) {
+				// Not a failed run either: the story is blocked with the reason on
+				// it, the claim kept, and the next dispatch holds it as refused.
+				report.Passed = append(report.Passed, Passed{StoryID: id, Why: pour.Error()})
+			} else if errors.As(err, &refusal) {
 				// Not a failed run: only this story is refused, its own leftover
 				// is somebody's to settle with mw retry, and the stories after it
 				// are still worked (mw-gq6.107).
@@ -915,6 +921,10 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 
 	if !started.Reused && path.Formula != "" && formulas[path.Formula] {
 		molecule, err := d.Tracker.PourFormula(ctx, path.Formula, id, detail.Story.Title)
+		var refused *PourRefused
+		if errors.As(err, &refused) {
+			return d.refusePour(ctx, id, started, rigDir, refused)
+		}
 		if err != nil {
 			return undo("pouring the formula "+path.Formula, err, true)
 		}
@@ -1023,6 +1033,85 @@ type leftoverRefusal struct{ err error }
 
 func (e *leftoverRefusal) Error() string { return e.err.Error() }
 func (e *leftoverRefusal) Unwrap() error { return e.err }
+
+// ReasonPourRefused is the code a story is marked blocked under when the
+// tracker refused to pour its formula.
+const ReasonPourRefused Reason = "pour-refused"
+
+// PourRefused is the tracker refusing to pour a formula for a story for a
+// reason of the story's own, one that pouring again will not cure: a title that
+// with a step's wording before it is over the limit (mw-gq6.244). A tracker
+// that merely could not be reached is no such refusal, and returns its own
+// error.
+type PourRefused struct {
+	Formula string
+	Story   string
+	Reason  string
+}
+
+func (e *PourRefused) Error() string {
+	return fmt.Sprintf("the tracker refused to pour the formula %s for %s: %s", e.Formula, e.Story, e.Reason)
+}
+
+// pourRefusal is what start returns for a PourRefused, so that run passes the
+// story over instead of failing: only this story is stuck, and the stories
+// after it are still worked.
+type pourRefusal struct{ err error }
+
+func (e *pourRefusal) Error() string { return e.err.Error() }
+func (e *pourRefusal) Unwrap() error { return e.err }
+
+// JobPourRefused is the actor of the job event a refused pour writes, kept
+// apart from "dispatch", which is the follower's job of springing dispatches
+// and keeps its own state in the log.
+const JobPourRefused = "dispatch-pour"
+
+// refusePour leaves a story whose pour the tracker refused blocked, the claim
+// kept: giving it back would have the next dispatch claim, cut and pour it
+// again for the same refusal, as it did five times in a row on 2026-10-03. The
+// story is marked run=blocked with the reason, which is what the next dispatch
+// reads to pass it over (reclaimDeadPane), a comment says why, and a failed job
+// event tells the home. The worktree cut for it is removed, since nothing ran
+// in it. What could not be written is said in the error.
+func (d Dispatch) refusePour(ctx context.Context, id string, started Started, rigDir string, refused *PourRefused) (Started, bool, error) {
+	// Nothing here may be cut short by the tick that ended: the story is owed
+	// its record whatever became of the tick.
+	record := context.WithoutCancel(ctx)
+	why := fmt.Sprintf("%v", refused)
+	var unsaid []string
+
+	if err := d.Worktrees.Remove(record, rigDir, started.Worktree, started.Branch); err != nil {
+		unsaid = append(unsaid, fmt.Sprintf("the worktree %s is still there: %v", started.Worktree, err))
+	}
+	if err := d.Tracker.SetStoryState(record, id, RunState, RunBlocked, "("+string(ReasonPourRefused)+") "+why); err != nil {
+		unsaid = append(unsaid, fmt.Sprintf("it could not be recorded as %s=%s: %v", RunState, RunBlocked, err))
+	}
+	comment := fmt.Sprintf("mw dispatch on %s did not start this story (%s): %s. It is left claimed and blocked, and is not tried again by dispatch "+
+		"until whoever cures the cause (its title, or its formula) gives the claim back.", d.Host, ReasonPourRefused, why)
+	if err := d.Tracker.CommentOnStory(record, id, comment); err != nil {
+		unsaid = append(unsaid, fmt.Sprintf("the comment could not be written: %v", err))
+	}
+	if d.Events != nil {
+		_, err := EventEmit{
+			Log: d.Events, Now: d.now,
+			Event: events.Event{
+				Kind: events.KindJob, Actor: JobPourRefused + "@" + d.Host,
+				From: events.JobRunning, To: events.JobFailed,
+				Detail: events.CutDetail(fmt.Sprintf("%s blocked: %s", id, why)),
+			},
+		}.Run(record)
+		if err != nil {
+			unsaid = append(unsaid, fmt.Sprintf("the job event could not be written: %v", err))
+		}
+	}
+	d.print(fmt.Sprintf("  blocked %s: %s\n", id, why))
+
+	result := fmt.Errorf("%s: blocked, claim kept: %s", id, why)
+	if len(unsaid) > 0 {
+		result = fmt.Errorf("%w (%s)", result, strings.Join(unsaid, "; "))
+	}
+	return Started{}, false, &pourRefusal{err: result}
+}
 
 // refuseLeftover gives the claim back and notes on the story that a leftover
 // from an earlier attempt could not be saved, so this dispatch tick moves on
