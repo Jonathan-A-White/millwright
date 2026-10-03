@@ -1105,11 +1105,24 @@ func (f *FakeTracker) WorkInHand(_ context.Context) (application.WorkInHand, err
 // ReleaseClaim implements application.WorkTracker. It is conditional on the
 // fake's own Actor, mirroring the real gateway's --if-assignee guard: a claim
 // another actor holds — set up with ClaimAs — is left exactly as it is.
-func (f *FakeTracker) ReleaseClaim(_ context.Context, id string) error {
-	f.note("ReleaseClaim")
+func (f *FakeTracker) ReleaseClaim(ctx context.Context, id string) error {
+	return f.release(ctx, id, Actor, "ReleaseClaim")
+}
+
+// ReleaseClaimHeldBy implements application.WorkTracker. It is conditional on
+// the holder named, not the fake's own Actor; an empty holder is the Actor.
+func (f *FakeTracker) ReleaseClaimHeldBy(ctx context.Context, id, holder string) error {
+	if holder == "" {
+		holder = Actor
+	}
+	return f.release(ctx, id, holder, "ReleaseClaimHeldBy")
+}
+
+func (f *FakeTracker) release(_ context.Context, id, holder, noted string) error {
+	f.note(noted)
 	return f.write(id, func(s *fakeStory) error {
-		if s.detail.Assignee != Actor {
-			return fmt.Errorf("release %s: held by %q, not %s", id, s.detail.Assignee, Actor)
+		if s.detail.Assignee != holder {
+			return fmt.Errorf("release %s: held by %q, not %s", id, s.detail.Assignee, holder)
 		}
 		if s.detail.Status == StatusInProgress {
 			s.detail.Status = StatusOpen

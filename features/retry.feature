@@ -79,3 +79,11 @@ Feature: mw retry
     And the story "mw-gq6.1" is open and unassigned
     And the story "mw-gq6.1" still records 1 attempt
     And the story "mw-gq6.1" carries a comment saying "desktop" is where its worktree is left for the next dispatch there
+
+  Scenario: A story claimed by another host's actor has that claim given back, not refused as another actor's
+    Given the story "mw-gq6.1" ran on the host "desktop" and is claimed there by "mw@desktop"
+    And the story "mw-gq6.1" has been tried 1 time in all
+    When mw retries "mw-gq6.1"
+    Then the retry succeeds
+    And no worktree of "mw-gq6.1" was read or made here
+    And the story "mw-gq6.1" is open and unassigned
