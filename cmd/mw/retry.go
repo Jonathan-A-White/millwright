@@ -29,6 +29,9 @@ func newRetryCmd() *cobra.Command {
 			"and branch taken away — the worktree never forced, the branch deleted safely and forced only\n" +
 			"when that refuses it — and the claim given back with the story set open again, so the next\n" +
 			"dispatch tick claims it as a fresh attempt. A refusal changes nothing at all.\n\n" +
+			"A story worked on another host has its worktree there, so run from anywhere else, retry reads\n" +
+			"no worktree: it gives the claim back and leaves that host's worktree and branch to be bundled\n" +
+			"by that host's next dispatch.\n\n" +
 			"It never resets a story's attempts, and a story already started max_attempts times is refused\n" +
 			"with \"attempts exhausted\" rather than retried — resetting the counter by hand is what allows\n" +
 			"another attempt.",

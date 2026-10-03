@@ -73,7 +73,8 @@ func InitializeRetryScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the worktree of "([^"]*)" also holds uncommitted work$`, c.theWorktreeAlsoHoldsUncommittedWork)
 	ctx.Given(`^the session of "([^"]*)" has ended$`, c.theSessionHasEnded)
 	ctx.Given(`^the session of "([^"]*)" is still running$`, c.theSessionIsStillRunning)
-	ctx.Given(`^the story "([^"]*)" has been tried (\d+) times in all$`, c.theStoryHasBeenTriedTimesInAll)
+	ctx.Given(`^the story "([^"]*)" has been tried (\d+) times? in all$`, c.theStoryHasBeenTriedTimesInAll)
+	ctx.Given(`^the story "([^"]*)" ran on the host "([^"]*)" and its worktree is there, not here$`, c.theStoryRanOnAnotherHost)
 	ctx.Given(`^the vault cannot reach its origin$`, c.theVaultCannotReachItsOrigin)
 
 	ctx.When(`^mw retries "([^"]*)"$`, c.mwRetries)
@@ -87,6 +88,8 @@ func InitializeRetryScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the vault committed and pushed the bundle of "([^"]*)"$`, c.theVaultCommittedAndPushedTheBundle)
 	ctx.Then(`^the worktree and branch of "([^"]*)" are both gone$`, c.retryNothingIsLeftOfTheWorktree)
 	ctx.Then(`^the worktree of "([^"]*)" was left untouched$`, c.retryTheWorktreeIsStillThere)
+	ctx.Then(`^no worktree of "([^"]*)" was read or made here$`, c.noWorktreeWasReadOrMadeHere)
+	ctx.Then(`^the story "([^"]*)" carries a comment saying "([^"]*)" is where its worktree is left for the next dispatch there$`, c.theStoryCarriesTheOtherHostComment)
 	ctx.Then(`^the story "([^"]*)" is open and unassigned$`, c.theStoryIsOpenAndUnassigned)
 	ctx.Then(`^the story "([^"]*)" is still claimed$`, c.theStoryIsStillClaimed)
 	ctx.Then(`^the story "([^"]*)" still records (\d+) attempts?$`, c.theStoryStillRecordsAttempts)
@@ -262,6 +265,38 @@ func (c *retryContext) theStoryWasDispatchedWithNoCommits(id string) error {
 		return err
 	}
 	return gitIdentify(dir)
+}
+
+// theStoryRanOnAnotherHost leaves the world as a dispatch on another host
+// would: the story claimed and its first attempt recorded, its host recorded as
+// that host, and no worktree or branch of it on this host at all.
+func (c *retryContext) theStoryRanOnAnotherHost(id, host string) error {
+	c.tracker.AddStory(c.lastEpic, domain.Story{ID: id, Title: "The story " + id})
+	ctx := context.Background()
+	if err := c.tracker.ClaimStory(ctx, id); err != nil {
+		return err
+	}
+	return c.tracker.SetStoryMetadata(ctx, id, map[string]string{"host": host})
+}
+
+// noWorktreeWasReadOrMadeHere proves the retry never reached for a worktree
+// on this host: none is there, and no bundle was made of one.
+func (c *retryContext) noWorktreeWasReadOrMadeHere(id string) error {
+	if _, err := os.Stat(application.WorktreeDir(c.rig, id)); err == nil {
+		return fmt.Errorf("expected no worktree of %s here, but one is", id)
+	}
+	if c.report.Bundled || c.report.CommittedLeftovers || c.report.WorktreeGone || c.report.BranchGone {
+		return fmt.Errorf("expected the retry to touch no worktree or branch here, got %+v", c.report)
+	}
+	return nil
+}
+
+func (c *retryContext) theStoryCarriesTheOtherHostComment(id, host string) error {
+	joined := strings.Join(c.tracker.Comments(id), "\n")
+	if !strings.Contains(joined, host) || !strings.Contains(joined, "next dispatch") {
+		return fmt.Errorf("expected a comment on %s naming %s and the next dispatch there, got %q", id, host, c.tracker.Comments(id))
+	}
+	return nil
 }
 
 // theVaultCannotReachItsOrigin breaks the vault's remote by taking its bare

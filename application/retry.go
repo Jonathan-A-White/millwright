@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // BundleFileName is the name a retry's bundle of one attempt's branch is kept
@@ -132,6 +134,10 @@ func salvageBranch(ctx context.Context, worktrees Worktrees, landing Landing, fi
 // bundled or removed. An error partway through leaves the report naming only
 // what actually happened before it, never what was only planned.
 //
+// A story pathed to another host is not read here at all: its worktree is on
+// that host, so the claim is given back and a comment says so, and that host's
+// next dispatch bundles what it left (mw-gq6.256).
+//
 // It never resets a story's attempts count, and a story already started
 // MaxAttempts times is refused rather than retried — that is the Mayor's
 // decision to make, not a retry's to take for them.
@@ -170,6 +176,11 @@ type RetryReport struct {
 	// session, or a story already tried the most times it may be.
 	Refused bool
 	Why     string
+
+	// Elsewhere is the other host the story was worked on, when this retry
+	// only gave the claim back and left that host's worktree and branch for its
+	// own next dispatch; empty when the worktree was here.
+	Elsewhere string
 
 	Worktree string
 	Branch   string
@@ -262,23 +273,33 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	if err != nil {
 		return report, fmt.Errorf("retrying %s: %w", storyID, err)
 	}
-	rigDir, checkedOut := r.Rigs[path.Rig]
-	if !checkedOut {
-		return report, fmt.Errorf("retrying %s: the rig %s is not checked out on %s: add it under [rigs] in the config file",
-			storyID, path.Rig, r.Host)
-	}
-
 	attempt := detail.Attempts
 	if attempt < 1 {
 		attempt = 1
 	}
-	report.Attempt, report.RigDir, report.Target = attempt, rigDir, path.Branch
-	report.Worktree, report.Branch = WorktreeDir(rigDir, storyID), StoryBranch(storyID)
+	report.Attempt, report.Target = attempt, path.Branch
 
 	if tried, most := detail.Attempts, r.maxAttempts(); tried >= most {
 		return r.refuse(report, fmt.Sprintf(
 			"it has been started %d times, the most a story may be (max_attempts is %d): attempts exhausted", tried, most))
 	}
+
+	// A story worked on another host has its worktree and branch there, not
+	// here: reading them would fail before anything was done. The claim is given
+	// back without touching any worktree, and the next dispatch on that host
+	// bundles whatever it left, as it does for any leftover in the way of a
+	// fresh cut.
+	if elsewhere := path.Host; elsewhere != "" && elsewhere != domain.HostAuto && elsewhere != r.Host {
+		return r.handBack(ctx, report, elsewhere)
+	}
+
+	rigDir, checkedOut := r.Rigs[path.Rig]
+	if !checkedOut {
+		return report, fmt.Errorf("retrying %s: the rig %s is not checked out on %s: add it under [rigs] in the config file",
+			storyID, path.Rig, r.Host)
+	}
+	report.RigDir = rigDir
+	report.Worktree, report.Branch = WorktreeDir(rigDir, storyID), StoryBranch(storyID)
 
 	name := SessionName(storyID)
 	status, err := r.Runner.Status(ctx, name)
@@ -336,6 +357,29 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	return report, nil
 }
 
+// handBack is a retry of a story another host worked: the claim is given back
+// and a comment says where the worktree and branch were left. Nothing on this
+// host's disk is read or changed, and whether that host's session still runs
+// is not asked, so it is for the person to have seen it end.
+func (r Retry) handBack(ctx context.Context, report RetryReport, elsewhere string) (RetryReport, error) {
+	storyID := report.StoryID
+	report.Elsewhere = elsewhere
+	if err := r.Tracker.ReleaseClaim(ctx, storyID); err != nil {
+		return report, fmt.Errorf("retrying %s: the claim could not be given back: %w", storyID, err)
+	}
+	report.ClaimReleased = true
+
+	comment := fmt.Sprintf(
+		"mw retry on %s gave back the claim on attempt %d of %s without reading a worktree: the story was worked on %s, "+
+			"so its worktree and branch are left there, and the next dispatch on %s bundles whatever they hold before it cuts a fresh one. "+
+			"The story is open again and the next dispatch tick takes it as attempt %d of %d.",
+		r.Host, report.Attempt, storyID, elsewhere, elsewhere, report.Attempt+1, r.maxAttempts())
+	if err := r.Tracker.CommentOnStory(ctx, storyID, comment); err != nil {
+		return report, fmt.Errorf("retrying %s: the claim was given back, but the comment naming what happened could not be written: %w", storyID, err)
+	}
+	return report, nil
+}
+
 // refuse is a retry that changes nothing at all, saying why.
 func (r Retry) refuse(report RetryReport, why string) (RetryReport, error) {
 	report.Refused, report.Why = true, why
@@ -367,6 +411,13 @@ func (r RetryReport) String() string {
 	fmt.Fprintf(&b, "retry on %s: %s\n", r.Host, r.StoryID)
 	if r.Refused {
 		fmt.Fprintf(&b, "  REFUSED %s\n", r.Why)
+		return b.String()
+	}
+	if r.Elsewhere != "" {
+		fmt.Fprintf(&b, "  there   the story was worked on %s; its worktree and branch are left there, not read from here\n", r.Elsewhere)
+		if r.ClaimReleased {
+			fmt.Fprintf(&b, "  open    the claim was given back; the next dispatch tick takes it as attempt %d\n", r.Attempt+1)
+		}
 		return b.String()
 	}
 	if r.CommittedLeftovers {
