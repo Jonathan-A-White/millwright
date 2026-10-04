@@ -160,6 +160,14 @@ func newNextCmd() *cobra.Command {
 				})
 			}
 
+			// A stamp queue that cannot be placed is said, and queues nothing: no
+			// landing waits on a chain stamp.
+			stamps, err := stampQueue()
+			if err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "chain stamp: not queued for this landing: %v\n", err)
+				stamps = nil
+			}
+
 			_, err = application.Next{
 				Tracker:   gateway,
 				Worktrees: worktrees,
@@ -186,6 +194,7 @@ func newNextCmd() *cobra.Command {
 				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits)),
 				Backend:      hostBackend(gateway, files, host, rigs, cmd.ErrOrStderr()),
 				Units:        userunits.Systemctl{},
+				Stamps:       stamps,
 			}.Run(cmd.Context(), args[0])
 			return err
 		},

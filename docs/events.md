@@ -107,6 +107,15 @@ the pass waited on) is not failed: it is `done` with the detail `cut short by th
 stopping; run again when it is back`, and the first look of the follower that comes back runs it
 again, scheduled for `run again after the follower restarted`.
 
+The `chain-stamp` job (docs/chain-stamps.md) runs in the follower itself, not in a unit, and on its
+own clock only: every minute, reason `clock`. `mw next` queues a stamp of each commit it lands in
+`~/.local/state/mw/stamps/pending.jsonl` (setting `stamps_dir`, `$MW_STAMPS_DIR`); a pass takes each
+pending stamp, seals it, broadcasts it on testnet through the backend as a public chain record and
+moves it to `sent.jsonl` beside its txid, then comments `STAMP <txid> for <commit> (testnet)` on the
+story. A stamp the backend would not take stays in `pending.jsonl` with its failed tries counted
+(`attempts`, no limit) and is tried again on the next pass; the pass is `done` all the same, its
+failures said on the follower's stderr. A pass over an empty queue reads nothing but the queue.
+
 ## Control
 
 A `control` event is a word to the factory (mw-jrx0s.16), not a thing that happened:

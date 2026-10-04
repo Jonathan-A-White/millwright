@@ -33,8 +33,9 @@ func TestHomeSpringRunsTheTimersOwnUnitsForTheInstalledJobsAndSaysWhatIsMissing(
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(spring.Jobs) != 2 || spring.Jobs[0].Name != "dispatch" || spring.Jobs[1].Name != "mail-notify" {
-		t.Fatalf("the jobs are %+v, want dispatch and mail-notify", spring.Jobs)
+	if len(spring.Jobs) != 3 || spring.Jobs[0].Name != "dispatch" || spring.Jobs[1].Name != "mail-notify" ||
+		spring.Jobs[2].Name != "chain-stamp" || spring.Jobs[2].Every != chainStampEvery {
+		t.Fatalf("the jobs are %+v, want dispatch, mail-notify and chain-stamp", spring.Jobs)
 	}
 	if !strings.Contains(said.String(), "mw-millhand-tick.service is not installed here") {
 		t.Fatalf("the missing unit was not said: %q", said.String())

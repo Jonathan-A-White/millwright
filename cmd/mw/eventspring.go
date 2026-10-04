@@ -32,7 +32,8 @@ const (
 // homeSpring is the follower's springer for the log in the file path: the
 // dispatch pass, the Millhand's tick and the sync job of mail-notify, each
 // only when its unit is installed here (a host with none is told on out, and
-// left to its timers).
+// left to its timers), and the chain-stamp job, which runs in the follower
+// itself and so is always there.
 func homeSpring(path, host string, out io.Writer) (*application.EventSpring, error) {
 	knobs, err := config.Events()
 	if err != nil {
@@ -57,5 +58,6 @@ func homeSpring(path, host string, out io.Writer) (*application.EventSpring, err
 		}
 		jobs = append(jobs, j.job)
 	}
+	jobs = append(jobs, application.ChainStampJob(chainStampEvery, chainStampRun(out)))
 	return &application.EventSpring{Log: eventlog.New(path), Host: host, Jobs: jobs, Err: out, Settle: 2 * time.Second}, nil
 }
