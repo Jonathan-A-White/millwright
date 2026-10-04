@@ -48,6 +48,18 @@ type StampQueue interface {
 	MarkSent(ctx context.Context, stamp domain.Stamp, txid string, at time.Time) error
 }
 
+// ChainNoteRef is the notes ref (refs/notes/chain) a sent stamp's txid is
+// written to, on the stamped commit, in the rig's checkout.
+const ChainNoteRef = "chain"
+
+// CommitNotes writes a git note on a commit in a rig's checkout. The adapter is
+// the rig's git.
+type CommitNotes interface {
+	// AddNote sets the note of commit under refs/notes/<ref> in the checkout
+	// at rigDir to note, replacing one that is there.
+	AddNote(ctx context.Context, rigDir, ref, commit, note string) error
+}
+
 // ChainStamp broadcasts the stamps that are queued, on testnet through the
 // postern backend: for each, the sealed record SealStamp builds is signed and
 // broadcast exactly as a message's public chain copy is (broadcastRecord), its
@@ -62,6 +74,12 @@ type ChainStamp struct {
 	Cipher      Cipher
 	Tracker     WorkTracker
 	GovernorKey string
+	// Notes and Rigs write a sent stamp's txid as a git note on the stamped
+	// commit, in the checkout Rigs names for the stamp's rig on this host. A
+	// nil Notes, or a rig Rigs does not hold, writes none. A note that cannot
+	// be written is said and never un-sends the stamp.
+	Notes CommitNotes
+	Rigs  map[string]string
 
 	// Now is the clock a stamp's record is dated by. The zero value reads the
 	// real one.
@@ -122,12 +140,25 @@ func (c ChainStamp) send(ctx context.Context, queued QueuedStamp, from, address 
 		c.say("chain-stamp: %s was broadcast as %s but could not be recorded as sent: %v\n", stamp.Commit, txid, err)
 		return
 	}
+	c.note(ctx, stamp, txid)
 	if stamp.Story == "" {
 		return
 	}
 	comment := fmt.Sprintf("STAMP %s for %s (testnet)", txid, stamp.Commit)
 	if err := c.Tracker.CommentOnStory(ctx, stamp.Story, comment); err != nil {
 		c.say("chain-stamp: %s was sent as %s but could not be commented on %s: %v\n", stamp.Commit, txid, stamp.Story, err)
+	}
+}
+
+// note writes the txid on the stamped commit in this host's checkout of the
+// stamp's rig, when there is one.
+func (c ChainStamp) note(ctx context.Context, stamp domain.Stamp, txid string) {
+	dir := c.Rigs[stamp.Rig]
+	if c.Notes == nil || dir == "" {
+		return
+	}
+	if err := c.Notes.AddNote(ctx, dir, ChainNoteRef, stamp.Commit, txid); err != nil {
+		c.say("chain-stamp: %s was sent as %s but the note could not be written in %s: %v\n", stamp.Commit, txid, dir, err)
 	}
 }
 

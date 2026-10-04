@@ -37,6 +37,7 @@ type Worktrees struct {
 
 // Worktrees satisfies the port.
 var _ application.Worktrees = (*Worktrees)(nil)
+var _ application.CommitNotes = (*Worktrees)(nil)
 
 // Option is a setting of a Worktrees, given to New.
 type Option func(*Worktrees)
@@ -165,6 +166,13 @@ func (w *Worktrees) DeleteBranch(ctx context.Context, rigDir, branch string) err
 		return nil
 	}
 	_, err := w.git(ctx, rigDir, "branch", "-D", branch)
+	return err
+}
+
+// AddNote implements application.CommitNotes: `git notes --ref=<ref> add -f -m
+// <note> <commit>` in the rig's checkout.
+func (w *Worktrees) AddNote(ctx context.Context, rigDir, ref, commit, note string) error {
+	_, err := w.git(ctx, rigDir, "notes", "--ref="+ref, "add", "-f", "-m", note, commit)
 	return err
 }
 

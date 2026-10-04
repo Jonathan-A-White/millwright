@@ -142,3 +142,34 @@ func TestAWorktreeNeedsSomewhereToBeCutFrom(t *testing.T) {
 		t.Fatal("expected a worktree cut from a branch that is not there to be refused")
 	}
 }
+
+func TestAddNoteWritesTheTxidAsANoteOnTheCommitUnderRefsNotesChain(t *testing.T) {
+	here, _ := aRig(t)
+	commit := run(t, here, "git", "rev-parse", "HEAD")
+	w := rig.New()
+
+	if err := w.AddNote(context.Background(), here, "chain", commit, "txid-one"); err != nil {
+		t.Fatalf("AddNote: %v", err)
+	}
+	if got := run(t, here, "git", "notes", "--ref=chain", "show", commit); got != "txid-one" {
+		t.Fatalf("note = %q, want txid-one", got)
+	}
+	if got := run(t, here, "git", "rev-parse", "--verify", "refs/notes/chain"); got == "" {
+		t.Fatal("refs/notes/chain is not there")
+	}
+
+	// A second note replaces the first: -f.
+	if err := w.AddNote(context.Background(), here, "chain", commit, "txid-two"); err != nil {
+		t.Fatalf("AddNote again: %v", err)
+	}
+	if got := run(t, here, "git", "notes", "--ref=chain", "show", commit); got != "txid-two" {
+		t.Fatalf("note = %q, want txid-two", got)
+	}
+}
+
+func TestAddNoteOnARevisionThatIsNotThereFails(t *testing.T) {
+	here, _ := aRig(t)
+	if err := rig.New().AddNote(context.Background(), here, "chain", "no-such-commit", "txid"); err == nil {
+		t.Fatal("a note on a missing commit was written")
+	}
+}

@@ -31,38 +31,38 @@ domain/, domain/events: stdlib · application/: use cases, ports; apptest/: fake
 | AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter | application/afterlanding.go, application/selfupdate.go, application/backendstage.go | infrastructure/{rig/{afterlanding,built,backend},userunits}.go | `features/self_update.feature` |
 | EventLog, BeadFeed, FollowCursors, ShipStates, SubscribeFiles, NudgeCursors, EventSpringer, EventController, HarnessCount | application/event*.go, status.go | infrastructure/{eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go | apptest.Fake{EventLog,FollowCursors,Ship*,Tracker,Subscribe*,Nudge*} |
 | Postern, hands, Prompts | `application/{postern*,hands,prompt}.go` | `infrastructure/{postern,hands*,homemove}` | `apptest.Fake{Postern*,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*,HomeMover,Prompts}` |
-| StampQueue | application/chainstamp.go | infrastructure/stampqueue/ | apptest.FakeStampQueue |
+| StampQueue, StampStore, CommitNotes, ChainLookup | application/chainstamp.go, application/prove.go | infrastructure/{stampqueue,chainlookup}, rig/worktree.go | apptest.Fake{StampQueue,CommitNotes,ChainLookup} |
 | Grinder, GrindSource, GristState, GristLock | `application/grist.go` | `infrastructure/{claude/grind,rig/grinds,hostlock/try}.go`, `infrastructure/grist` | `apptest.Fake{Grinder,Grinds,GristState,GristLock}` |
 
 ## Use cases
 
 | Use case | File | Command | Feature |
 | --- | --- | --- | --- |
-| File | `application/file.go` | `mw file` — `cmd/mw/file.go` | `features/file_plan.feature` |
-| Release | `application/release.go` | `mw release` — `cmd/mw/release.go` | `features/release.feature` |
-| Retry | `application/retry.go` | `mw retry` — `cmd/mw/retry.go` | `features/retry.feature` |
-| Show, Peek | application/show.go, application/peek.go | mw show/peek — cmd/mw/show.go, cmd/mw/peek.go | features/{show,peek}.feature |
-| Dispatch | `application/dispatch.go` | `mw dispatch` — `cmd/mw/dispatch.go` | `features/dispatch.feature` |
-| Next | `application/next.go` | `mw next` — `cmd/mw/next.go` | `features/next.feature` |
-| Check | `application/check.go` | `mw check` — `cmd/mw/check.go` | `features/check.feature` |
-| Status | `application/status.go` | `mw status` — `cmd/mw/status.go` | `features/status.feature` |
-| Brief | `application/brief.go` | `mw brief` — `cmd/mw/brief.go` | `features/brief.feature` |
-| Sweep | `application/sweep.go` | `mw sweep` — `cmd/mw/sweep.go` | `features/sweep.feature` |
-| Tidy | `application/tidy.go` | `mw tidy` — `cmd/mw/tidy.go` | `features/tidy.feature` |
-| Sync | `application/sync.go` | `mw sync` — `cmd/mw/sync.go` | `features/sync.feature` |
+| File | application/file.go | mw file — cmd/mw/file.go | features/file_plan.feature |
+| Release | application/release.go | mw release — cmd/mw/release.go | features/release.feature |
+| Retry | application/retry.go | mw retry — cmd/mw/retry.go | features/retry.feature |
+| Show, Peek, Prove | application/show.go, application/peek.go, application/prove.go | mw show/peek/prove — cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go | features/{show,peek,prove}.feature |
+| Dispatch | application/dispatch.go | mw dispatch — cmd/mw/dispatch.go | features/dispatch.feature |
+| Next | application/next.go | mw next — cmd/mw/next.go | features/next.feature |
+| Check | application/check.go | mw check — cmd/mw/check.go | features/check.feature |
+| Status | application/status.go | mw status — cmd/mw/status.go | features/status.feature |
+| Brief | application/brief.go | mw brief — cmd/mw/brief.go | features/brief.feature |
+| Sweep | application/sweep.go | mw sweep — cmd/mw/sweep.go | features/sweep.feature |
+| Tidy | application/tidy.go | mw tidy — cmd/mw/tidy.go | features/tidy.feature |
+| Sync | application/sync.go | mw sync — cmd/mw/sync.go | features/sync.feature |
 | Nudge | `application/nudge.go` | `mw nudge` — `cmd/mw/nudge.go` | none |
-| Mail | `application/mail.go` | `mw mail` — `cmd/mw/mail.go` | `features/mail.feature` |
-| Home | `application/home.go` | `mw home` — `cmd/mw/home.go` | `features/home.feature` |
+| Mail | application/mail.go | mw mail — cmd/mw/mail.go | features/mail.feature |
+| Home | application/home.go | mw home — cmd/mw/home.go | features/home.feature |
 | HomeMove | `application/homemove.go` | `mw home move` — `cmd/mw/homemove.go` | none: `docs/home-move.md` |
 | Seat{Context,Up,Reap,Handover} | `application/seat{context,up,reap,handover}.go` | `mw seat context`/`up`/`reap`/`handover` — `cmd/mw/seat.go` | `features/seat_{context,up,reap}.feature` |
 | Talk{Call,Model,Say,Wait} | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go | mw talk call/say/wait/model cmd/mw/talk.go | features/talk_*.feature |
-| Millhand | `application/millhand.go` | `mw millhand` — `cmd/mw/millhand.go` | `features/millhand.feature` |
-| Deputy | `application/deputy.go` | `mw deputy` — `cmd/mw/deputy.go` | `features/deputy.feature` |
+| Millhand | application/millhand.go | mw millhand — cmd/mw/millhand.go | features/millhand.feature |
+| Deputy | application/deputy.go | mw deputy — cmd/mw/deputy.go | features/deputy.feature |
 | MillhandTick | `application/millhandtick.go` | `mw millhand tick` — `cmd/mw/millhandtick.go` | `features/millhand_tick.feature` |
-| Watch | `application/watch.go` | `mw watch` — `cmd/mw/watch.go` | `features/watch.feature` |
-| Doctor | `application/doctor.go` | `mw doctor` — `cmd/mw/doctor.go` | `features/doctor.feature` |
+| Watch | application/watch.go | mw watch — cmd/mw/watch.go | features/watch.feature |
+| Doctor | application/doctor.go | mw doctor — cmd/mw/doctor.go | features/doctor.feature |
 | SeatBoot | `application/seatboot.go` | none: called by `Dispatch`, `Next` | `features/seat_boot.feature` |
-| Init | `application/init.go` | `mw init` — `cmd/mw/init.go` | `features/init.feature` |
+| Init | application/init.go | mw init — cmd/mw/init.go | features/init.feature |
 | Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern key/inbox/send/snapshot/view/bead — cmd/mw/posternview.go, cmd/mw/posternbead.go | `features/postern_*.feature` |
 | Event{Follow,Emit,Tail,Ship,Wait,Nudge,Spring,Control} | application/eventfollow.go, application/eventlog.go, application/eventship.go, application/eventwait.go, application/eventnudge.go, application/eventsubscribe.go, application/eventspring.go, application/eventcontrol.go | mw events follow/emit/tail/wait — cmd/mw/events.go | features/event_follow.feature |
 | Hands{Add,List} | application/hands.go | mw hands add/list — cmd/mw/hands.go; `cmd/mw-hands-root` | `features/hands.feature` |
@@ -72,6 +72,6 @@ domain/, domain/events: stdlib · application/: use cases, ports; apptest/: fake
 
 ## Tests
 
-Helpers: throwawayVault, installFormula, standIn (beads), privateRunner (tmux), aVault, aRig, mwConfig.
+Helpers: throwawayVault, installFormula, standIn, privateRunner, aVault, aRig, mwConfig.
 
 cmd/mw/root.go: the tree; cmd/mw/version.go.

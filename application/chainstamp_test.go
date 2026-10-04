@@ -256,3 +256,77 @@ func TestChainStampJobIsAClockJobOnItsOwnName(t *testing.T) {
 		t.Fatalf("job = %+v", job)
 	}
 }
+
+func TestChainStampNotesTheTxidOnTheCommitInTheRigsCheckout(t *testing.T) {
+	f := newChainStampFixture("mw-a.1")
+	f.queue.Append(context.Background(), stampFor("mw-a.1", "aaaa"))
+	notes := apptest.NewFakeCommitNotes()
+	job := f.job()
+	job.Notes = notes
+	job.Rigs = map[string]string{"millwright": "/rigs/millwright"}
+
+	if err := job.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := notes.Added()
+	want := apptest.AddedNote{RigDir: "/rigs/millwright", Ref: "chain", Commit: "aaaa", Note: "fake-txid-1"}
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("notes = %+v, want [%+v]", got, want)
+	}
+}
+
+func TestChainStampANoteThatFailsIsSaidAndDoesNotUnsendTheStamp(t *testing.T) {
+	f := newChainStampFixture("mw-a.1")
+	f.queue.Append(context.Background(), stampFor("mw-a.1", "aaaa"))
+	notes := apptest.NewFakeCommitNotes()
+	notes.Err = errors.New("bad object aaaa")
+	job := f.job()
+	job.Notes = notes
+	job.Rigs = map[string]string{"millwright": "/rigs/millwright"}
+
+	if err := job.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(f.queue.Sent()) != 1 || len(f.queue.Queued()) != 0 {
+		t.Fatalf("pending %+v sent %+v: a note must not unsend the stamp", f.queue.Queued(), f.queue.Sent())
+	}
+	if !strings.Contains(f.said.String(), "bad object aaaa") {
+		t.Fatalf("the failed note was not said: %q", f.said.String())
+	}
+	if got := f.tracker.Comments("mw-a.1"); len(got) != 1 {
+		t.Fatalf("the story was not commented after a failed note: %q", got)
+	}
+}
+
+func TestChainStampNotesNothingForARigWithNoCheckoutHere(t *testing.T) {
+	f := newChainStampFixture("mw-a.1")
+	f.queue.Append(context.Background(), stampFor("mw-a.1", "aaaa"))
+	notes := apptest.NewFakeCommitNotes()
+	job := f.job()
+	job.Notes = notes
+	job.Rigs = map[string]string{"another": "/rigs/another"}
+
+	if err := job.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := notes.Added(); len(got) != 0 {
+		t.Fatalf("a note was written for a rig with no checkout here: %+v", got)
+	}
+}
+
+func TestChainStampNotesNothingForAFailedBroadcast(t *testing.T) {
+	f := newChainStampFixture("mw-a.1")
+	f.queue.Append(context.Background(), stampFor("mw-a.1", "aaaa"))
+	f.backend.ChainErr = errors.New("backend down")
+	notes := apptest.NewFakeCommitNotes()
+	job := f.job()
+	job.Notes = notes
+	job.Rigs = map[string]string{"millwright": "/rigs/millwright"}
+
+	if err := job.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := notes.Added(); len(got) != 0 {
+		t.Fatalf("a note for a stamp that was not sent: %+v", got)
+	}
+}

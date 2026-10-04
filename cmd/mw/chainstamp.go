@@ -7,6 +7,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/stampqueue"
 )
 
@@ -15,7 +16,7 @@ import (
 const chainStampEvery = time.Minute
 
 // stampQueue is this host's chain stamp queue, in the directory config names.
-func stampQueue() (application.StampQueue, error) {
+func stampQueue() (*stampqueue.Queue, error) {
 	dir, err := config.StampsDir()
 	if err != nil {
 		return nil, err
@@ -56,6 +57,10 @@ func chainStampRun(out io.Writer) func(context.Context) error {
 		if err != nil {
 			return err
 		}
+		rigs, err := config.Rigs()
+		if err != nil {
+			return err
+		}
 		return application.ChainStamp{
 			Queue:       queue,
 			Postern:     backend,
@@ -63,6 +68,8 @@ func chainStampRun(out io.Writer) func(context.Context) error {
 			Cipher:      posternCipher(keys),
 			Tracker:     gateway,
 			GovernorKey: governorKey,
+			Notes:       rig.New(),
+			Rigs:        rigs,
 			Err:         out,
 		}.Run(ctx)
 	}
