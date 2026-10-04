@@ -31,6 +31,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newPeekCmd())
 	root.AddCommand(newPosternCmd())
 	root.AddCommand(newPromptCmd())
+	root.AddCommand(newProveCmd())
 	root.AddCommand(newReleaseCmd())
 	root.AddCommand(newRetryCmd())
 	root.AddCommand(newSeatCmd())

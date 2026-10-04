@@ -24,6 +24,7 @@ type FakeStampQueue struct {
 
 // FakeStampQueue satisfies the port.
 var _ application.StampQueue = (*FakeStampQueue)(nil)
+var _ application.StampStore = (*FakeStampQueue)(nil)
 
 // NewFakeStampQueue returns an empty queue.
 func NewFakeStampQueue() *FakeStampQueue { return &FakeStampQueue{} }
@@ -82,6 +83,22 @@ func (f *FakeStampQueue) MarkSent(_ context.Context, stamp domain.Stamp, txid st
 		}
 	}
 	return nil
+}
+
+// FindSent implements application.StampStore.
+func (f *FakeStampQueue) FindSent(_ context.Context, rig, commitPrefix string) ([]application.SentStamp, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	var found []application.SentStamp
+	for _, s := range f.sent {
+		if application.SentStampMatches(s, rig, commitPrefix) {
+			found = append(found, s)
+		}
+	}
+	return found, nil
 }
 
 // Queued reports what is pending, oldest first.

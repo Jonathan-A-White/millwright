@@ -102,3 +102,42 @@ func TestAnAppendBetweenTwoRewritesIsNotLost(t *testing.T) {
 		t.Fatalf("pending = %+v", got)
 	}
 }
+
+func TestFindSentReadsSentStampsOfARigByCommitPrefix(t *testing.T) {
+	q := stampqueue.New(t.TempDir())
+	ctx := context.Background()
+	a := domain.Stamp{Rig: "millwright", Commit: "7b4430c1f2", Story: "mw-a.1"}
+	b := domain.Stamp{Rig: "millwright", Commit: "9999999999", Story: "mw-b.1"}
+	pending := domain.Stamp{Rig: "millwright", Commit: "7b44ffffff", Story: "mw-c.1"}
+	for _, s := range []domain.Stamp{a, b, pending} {
+		if err := q.Append(ctx, s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, s := range []domain.Stamp{a, b} {
+		if err := q.MarkSent(ctx, s, "txid-"+s.Story, time.Date(2026, 10, 4, 9, 0, 0, 0, time.UTC)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := q.FindSent(ctx, "millwright", "7B4430C")
+	if err != nil || len(got) != 1 || got[0].Stamp != a || got[0].Txid != "txid-mw-a.1" {
+		t.Fatalf("FindSent = %+v, %v", got, err)
+	}
+	if got, _ := q.FindSent(ctx, "millwright", "7b44"); len(got) != 1 {
+		t.Fatalf("a pending stamp was found: %+v", got)
+	}
+	if got, _ := q.FindSent(ctx, "other", "7b44"); len(got) != 0 {
+		t.Fatalf("another rig's lookup found %+v", got)
+	}
+	if got, _ := q.FindSent(ctx, "millwright", ""); len(got) != 0 {
+		t.Fatalf("an empty prefix found %+v", got)
+	}
+}
+
+func TestFindSentOnAQueueThatSentNothingFindsNothing(t *testing.T) {
+	got, err := stampqueue.New(t.TempDir()).FindSent(context.Background(), "millwright", "7b44")
+	if err != nil || len(got) != 0 {
+		t.Fatalf("FindSent = %+v, %v", got, err)
+	}
+}

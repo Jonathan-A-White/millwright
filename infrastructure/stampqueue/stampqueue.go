@@ -18,6 +18,7 @@ import (
 )
 
 var _ application.StampQueue = (*Queue)(nil)
+var _ application.StampStore = (*Queue)(nil)
 
 const (
 	pendingFile = "pending.jsonl"
@@ -56,6 +57,21 @@ func (q *Queue) Pending(_ context.Context) ([]application.QueuedStamp, error) {
 		return err
 	})
 	return pending, err
+}
+
+// FindSent implements application.StampStore. sent.jsonl is read, oldest
+// first; a line that is not JSON is skipped.
+func (q *Queue) FindSent(_ context.Context, rig, commitPrefix string) ([]application.SentStamp, error) {
+	var found []application.SentStamp
+	err := q.locked(func() error {
+		return eachLine(filepath.Join(q.dir, sentFile), func(raw []byte) {
+			var s application.SentStamp
+			if json.Unmarshal(raw, &s) == nil && application.SentStampMatches(s, rig, commitPrefix) {
+				found = append(found, s)
+			}
+		})
+	})
+	return found, err
 }
 
 // MarkFailed implements application.StampQueue.
