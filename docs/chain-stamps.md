@@ -21,8 +21,8 @@ version 1 like a message. Fields, in this order:
 | `commitment` | yes | Lower-case hex SHA-256 of the rig, a newline, then the full commit id. |
 | `ct` | no | The body, sealed to `to` by the same Cipher as a message's text. |
 
-The body is JSON: `rig`, `branch`, `commit`, `story`, `title` (the commit's
-subject), `host`, `at` (UTC, RFC 3339). Nothing of it but the commitment is in the
+The body is JSON: `rig`, `branch`, `commit`, `story`, `title` (the story's
+title), `host`, `at` (UTC, RFC 3339). Nothing of it but the commitment is in the
 clear, so the chain shows neither the rig nor the commit.
 
 ## Verifying

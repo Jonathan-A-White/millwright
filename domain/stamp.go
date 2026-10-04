@@ -16,7 +16,7 @@ type Stamp struct {
 	Branch string    `json:"branch"`
 	Commit string    `json:"commit"` // the full commit id
 	Story  string    `json:"story"`
-	Title  string    `json:"title"` // the commit's subject line
+	Title  string    `json:"title"` // the story's title
 	Host   string    `json:"host"`
 	At     time.Time `json:"at"` // UTC
 }

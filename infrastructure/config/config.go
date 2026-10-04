@@ -100,6 +100,7 @@ const (
 	PosternSnapshotPathEnv  = "MW_POSTERN_SNAPSHOT_PATH"
 	PosternViewPathEnv      = "MW_POSTERN_VIEW_PATH"
 	EventsLogPathEnv        = "MW_EVENTS_LOG_PATH"
+	StampsDirEnv            = "MW_STAMPS_DIR"
 	PosternChannelEnv       = "MW_POSTERN_CHANNEL"
 	PosternTranscribeCmdEnv = "MW_POSTERN_TRANSCRIBE_CMD"
 	PosternDataEnv          = "MW_POSTERN_DATA"
@@ -375,6 +376,19 @@ var DefaultEventsLogPath = filepath.Join(".local", "state", "mw", "events", "log
 // and DefaultEventsLogPath under the home directory when neither says.
 func EventsLogPath() (string, error) {
 	return fullPathSetting("events_log_path", EventsLogPathEnv, DefaultEventsLogPath, "the event log's path")
+}
+
+// DefaultStampsDir is where the chain stamps a landing queues and the ones
+// sent are kept under the home directory when nothing says otherwise: state,
+// pending.jsonl and sent.jsonl in it.
+var DefaultStampsDir = filepath.Join(".local", "state", "mw", "stamps")
+
+// StampsDir reports the directory of the chain stamp queue:
+// $MW_STAMPS_DIR if it is set, otherwise the root-table `stamps_dir` key of
+// ~/.config/mw/config.toml, a full path either way, and DefaultStampsDir under
+// the home directory when neither says.
+func StampsDir() (string, error) {
+	return fullPathSetting("stamps_dir", StampsDirEnv, DefaultStampsDir, "the chain stamp directory")
 }
 
 // PosternInboxDir reports the full path to the directory mw postern inbox
