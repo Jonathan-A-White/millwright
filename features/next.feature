@@ -703,6 +703,32 @@ Feature: Closing out a finished story and carrying on
     And the rig checkout is left where it was, on "wip"
     And the report says the rig checkout was left, quoting: it is on wip, not main
 
+  Scenario: A landing queues one chain stamp for the commit that landed
+    Given the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And one stamp is queued for the commit that landed on "main", for the story "mw-gq6.1"
+    And the story "mw-gq6.1" is closed
+
+  Scenario: A landing whose push fails queues no chain stamp
+    Given the origin refuses every push, saying:
+      """
+      remote: error: GH013: Repository rule violations found
+      """
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And no stamp is queued
+
+  Scenario: A stamp queue that cannot take the stamp is said and changes nothing about the landing
+    Given the stamp queue refuses to take a stamp, saying: the disk is full
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the story "mw-gq6.1" is closed
+    And no stamp is queued
+    And the report says: chain stamp: not queued: the disk is full
+
   Scenario: A rig's own after-landing command runs once, in the rig checkout, once the landing has moved it
     Given the rig names a command to run after a landing
     And the session of "mw-gq6.1" reported a plain success

@@ -248,6 +248,11 @@ type Next struct {
 	PushTries int
 	PushWait  time.Duration
 
+	// Stamps is where a landing leaves a chain stamp for the follower to
+	// broadcast (docs/chain-stamps.md). A nil Stamps queues none, and a queue
+	// that fails is said on the report and changes nothing about the landing.
+	Stamps StampQueue
+
 	// Now is the clock the ledger line is dated by. The zero value reads the
 	// real one.
 	Now func() time.Time
@@ -663,11 +668,30 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	if err := n.Tracker.SetStoryState(ctx, c.id, RunState, RunLanded, outcome); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be recorded as %s=%s: %v", c.id, RunState, RunLanded, err))
 	}
+	// Before the after-landing command, which may be killed with the session it
+	// runs in: the stamp is queued as soon as the work is known to be landed.
+	n.queueStamp(ctx, c, report, landed)
 	// After the story is recorded as landed, so that a command that is killed
 	// with the session it runs in leaves a story a later run can tell is landed.
 	n.afterLanding(ctx, c, report)
 	n.stageBackend(ctx, c, report)
 	return n.finish(ctx, c, report, outcome, false)
+}
+
+// queueStamp leaves a chain stamp of the landed commit for the follower's
+// chain-stamp job. It never fails the landing: a queue that will not take the
+// stamp is a note on the report, and the landing stands.
+func (n Next) queueStamp(ctx context.Context, c *closeOut, report *NextReport, landed Landed) {
+	if n.Stamps == nil {
+		return
+	}
+	stamp := domain.Stamp{
+		Rig: c.path.Rig, Branch: c.target, Commit: landed.Commit,
+		Story: c.id, Title: c.detail.Story.Title, Host: n.Host, At: n.now().UTC(),
+	}
+	if err := n.Stamps.Append(ctx, stamp); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("chain stamp: not queued: %s", firstLine(err.Error())))
+	}
 }
 
 // PaneTailLines is how many of a session's last printed lines are shown

@@ -39,6 +39,7 @@ type nextContext struct {
 	runner  *apptest.FakeRunner
 	files   *apptest.FakeVaultFiles
 	mailbox *apptest.FakeMailbox
+	stamps  *apptest.FakeStampQueue
 
 	// realVault says the vault is a real git clone (mw-gq6.87's own scenarios),
 	// so that mw next commits to it for real and a scenario can read git's own
@@ -108,6 +109,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 			runner:  apptest.NewFakeRunner(),
 			files:   &apptest.FakeVaultFiles{},
 			mailbox: apptest.NewFakeMailbox(),
+			stamps:  apptest.NewFakeStampQueue(),
 		}
 		return ctx, nil
 	})
@@ -161,6 +163,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerNextRebaseSteps(ctx, c)
 	registerNextMergeFixSteps(ctx, c)
 	registerNextReattemptSteps(ctx, c)
+	registerNextStampSteps(ctx, c)
 
 	ctx.When(`^mw closes out "([^"]*)"$`, c.mwClosesOut)
 	ctx.When(`^mw closes out "([^"]*)" a second time$`, c.mwClosesOut)
@@ -823,6 +826,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 		AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(c.afterCommands), rig.WithAfterLimit(c.afterLimit)),
 		Backend:      c.backendStage(),
 		Units:        c.unitRestarter(),
+		Stamps:       c.stamps,
 	}.Run(context.Background(), id)
 
 	if c.afterFirst == nil {
