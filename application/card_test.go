@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -13,8 +14,21 @@ import (
 	"github.com/Jonathan-A-White/millwright/domain"
 )
 
+// cardBeads is the tracker a card is checked against: the epic mw-epic and the
+// stories mw-a, mw-a.1, mw-b, mw-c and mw-f under it.
+func cardBeads() *apptest.FakeTracker {
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-epic", domain.Path{})
+	for _, id := range []string{"mw-a", "mw-a.1", "mw-b", "mw-c", "mw-f"} {
+		tracker.AddStory("mw-epic", domain.Story{ID: id, Title: id})
+	}
+	return tracker
+}
+
 func newCards(backend *apptest.FakePostern, out *bytes.Buffer) application.Cards {
 	return application.Cards{
+		Beads:       cardBeads(),
+		Log:         apptest.NewFakeCardLog(),
 		Postern:     backend,
 		Cipher:      &apptest.FakeCipher{From: "mayor-key"},
 		Keys:        stubPosternKeys{pubKey: "mayor-key"},
@@ -200,5 +214,177 @@ func TestPromptCardRecordsThePromptsNameOnTheCard(t *testing.T) {
 		context.Background(), "nope", application.CardSendRequest{Title: "Top 5", Items: []string{"Approve mw-a"}})
 	if err == nil || !strings.Contains(err.Error(), "no saved prompt /nope") {
 		t.Fatalf("expected a prompt that is not saved refused, got %v", err)
+	}
+}
+
+func TestCardSendRefusesAnEpicExpectedLandedOrVerifiedAndSendsNothing(t *testing.T) {
+	for _, state := range []string{"verified", "landed"} {
+		backend := apptest.NewFakePostern()
+		cards := newCards(backend, &bytes.Buffer{})
+		_, _, err := cards.Send(context.Background(), application.CardSendRequest{
+			Title: "Top 5", Items: []string{"Read it|mw-epic|mw-epic:" + state},
+		})
+		for _, want := range []string{"mw card send:", "mw-epic", "epic", "expect closed"} {
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("expected %s refused saying %q, got %v", state, want, err)
+			}
+		}
+		if n := len(backend.Delivered()); n != 0 {
+			t.Fatalf("expected nothing delivered, got %d", n)
+		}
+		if records, _ := cards.Log.List(context.Background()); len(records) != 0 {
+			t.Fatalf("expected nothing recorded, got %+v", records)
+		}
+	}
+}
+
+func TestCardSendRefusesAnEpicVerifiedByItsAskToo(t *testing.T) {
+	_, _, err := newCards(apptest.NewFakePostern(), &bytes.Buffer{}).Send(context.Background(), application.CardSendRequest{
+		Title: "Top 5", Items: []string{"VERIFIED on mw-epic"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "expect closed") {
+		t.Fatalf("expected the derived expectation refused, got %v", err)
+	}
+}
+
+func TestCardSendAcceptsAnEpicClosedAndAStoryVerified(t *testing.T) {
+	backend := apptest.NewFakePostern()
+	_, _, err := newCards(backend, &bytes.Buffer{}).Send(context.Background(), application.CardSendRequest{
+		Title: "Top 5", Items: []string{"Close it|mw-epic|mw-epic:closed", "Check it|mw-a|mw-a:verified", "Land it|mw-b|mw-b:landed"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(backend.Delivered()); n != 1 {
+		t.Fatalf("expected one record delivered, got %d", n)
+	}
+}
+
+func TestCardSendRefusesABeadItCannotRead(t *testing.T) {
+	backend := apptest.NewFakePostern()
+	cards := newCards(backend, &bytes.Buffer{})
+	_, _, err := cards.Send(context.Background(), application.CardSendRequest{
+		Title: "Top 5", Items: []string{"Check it|mw-nope|mw-nope:verified"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot read mw-nope") {
+		t.Fatalf("expected a bead that is not there refused, got %v", err)
+	}
+
+	tracker := cardBeads()
+	tracker.Err = errors.New("bd is down")
+	cards.Beads = tracker
+	_, _, err = cards.Send(context.Background(), application.CardSendRequest{
+		Title: "Top 5", Items: []string{"Check it|mw-a|mw-a:verified"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot read mw-a") || !strings.Contains(err.Error(), "bd is down") {
+		t.Fatalf("expected a bead the tracker fails on refused, got %v", err)
+	}
+	if n := len(backend.Delivered()); n != 0 {
+		t.Fatalf("expected nothing delivered, got %d", n)
+	}
+}
+
+func TestCardSendReadsNoBeadForAnExpectationThatCanTick(t *testing.T) {
+	cards := newCards(apptest.NewFakePostern(), &bytes.Buffer{})
+	cards.Beads = nil
+	_, _, err := cards.Send(context.Background(), application.CardSendRequest{
+		Title: "Top 5", Items: []string{"Close it|mw-epic|mw-epic:closed", "Approve mw-q"},
+	})
+	if err != nil {
+		t.Fatalf("expected closed and answered to need no read of the bead, got %v", err)
+	}
+}
+
+func TestCardUpdateAndPromptCardRefuseAnEpicVerified(t *testing.T) {
+	backend := apptest.NewFakePostern()
+	cards := newCards(backend, &bytes.Buffer{})
+	_, _, err := cards.Update(context.Background(), application.CardUpdateRequest{
+		Re: "direct:abc", Items: []string{"3. Read it|mw-epic|mw-epic:verified"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "mw card update:") || !strings.Contains(err.Error(), "expect closed") {
+		t.Fatalf("expected the update refused, got %v", err)
+	}
+
+	prompts := apptest.NewFakePrompts()
+	if err := prompts.Put(context.Background(), domain.Prompt{Name: "top5", Summary: "x", Signature: []string{}, Body: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = application.PromptCard{Prompts: prompts, Cards: cards}.Run(context.Background(), "top5",
+		application.CardSendRequest{Title: "Top 5", Items: []string{"Read it|mw-epic|mw-epic:landed"}})
+	if err == nil || !strings.Contains(err.Error(), "mw prompt run --card:") || !strings.Contains(err.Error(), "expect closed") {
+		t.Fatalf("expected the prompt's card refused, got %v", err)
+	}
+	if n := len(backend.Delivered()); n != 0 {
+		t.Fatalf("expected nothing delivered, got %d", n)
+	}
+}
+
+func TestCardsKeepEverySentCardAndListThemNewestFirst(t *testing.T) {
+	backend := apptest.NewFakePostern()
+	cards := newCards(backend, &bytes.Buffer{})
+	clock := time.Unix(1790000000, 0)
+	cards.Now = func() time.Time { clock = clock.Add(time.Minute); return clock }
+	_, first, err := cards.Send(context.Background(), application.CardSendRequest{
+		Title: "Top 5", Items: []string{"Check it|mw-a|mw-a:verified", "Read it"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, second, err := cards.Update(context.Background(), application.CardUpdateRequest{Re: first, Items: []string{"3. Release mw-f|mw-f|"}, Tick: []int{1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, third, err := cards.Send(context.Background(), application.CardSendRequest{Title: "Later", Items: []string{"Look"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	records, err := cards.Log.List(context.Background())
+	if err != nil || len(records) != 3 {
+		t.Fatalf("expected three records kept, got %+v (%v)", records, err)
+	}
+	if records[0].Txid != first || records[0].Title != "Top 5" || len(records[0].Items) != 2 ||
+		records[0].Items[0].Expect == nil || records[0].Items[0].Expect.Bead != "mw-a" {
+		t.Errorf("expected the first card kept with its title and items, got %+v", records[0])
+	}
+	if records[1].Txid != second || records[1].Re != first || len(records[1].Tick) != 1 || len(records[1].Items) != 1 {
+		t.Errorf("expected the update kept naming its card, got %+v", records[1])
+	}
+
+	var out bytes.Buffer
+	cards.Out = &out
+	if err := cards.List(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	listed := out.String()
+	at3, at1 := strings.Index(listed, third), strings.Index(listed, first)
+	if at3 < 0 || at1 < 0 || at3 > at1 {
+		t.Fatalf("expected the newest card listed first, got:\n%s", listed)
+	}
+	for _, want := range []string{"Top 5", "Later", "1. Check it", "expects mw-a verified", "update of " + first, "ticks 1"} {
+		if !strings.Contains(listed, want) {
+			t.Errorf("expected the list to say %q, got:\n%s", want, listed)
+		}
+	}
+}
+
+func TestCardsKeepNothingOfACardThatWasNotSent(t *testing.T) {
+	cards := newCards(apptest.NewFakePostern(), &bytes.Buffer{})
+	cards.GovernorKey = ""
+	if _, _, err := cards.Send(context.Background(), application.CardSendRequest{Title: "Top 5", Items: []string{"Read it"}}); err == nil {
+		t.Fatal("expected a refusal")
+	}
+	if records, _ := cards.Log.List(context.Background()); len(records) != 0 {
+		t.Fatalf("expected nothing kept, got %+v", records)
+	}
+}
+
+func TestCardsListSaysSoWhenNoneWasSent(t *testing.T) {
+	var out bytes.Buffer
+	if err := newCards(apptest.NewFakePostern(), &out).List(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "no card") {
+		t.Fatalf("expected a line saying no card was sent, got %q", out.String())
 	}
 }

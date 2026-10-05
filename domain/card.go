@@ -399,3 +399,51 @@ func SplitOption(option string) (text string, expect []Expectation, err error) {
 	}
 	return text, expect, nil
 }
+
+// CardRecord is one line of the Mayor's own list of the cards and card
+// updates it has sent: what mw card list prints, so a card can be found, and
+// its txid used, after the one print of it is gone. An update names its card
+// in Re and has no title.
+type CardRecord struct {
+	Txid  string           `json:"txid"`
+	Re    string           `json:"re,omitempty"`
+	Title string           `json:"title,omitempty"`
+	At    string           `json:"at"`
+	Items []CardRecordItem `json:"items"`
+	Tick  []int            `json:"tick,omitempty"`
+}
+
+// CardRecordItem is an item as CardRecord keeps it: its number, text and what
+// it expects.
+type CardRecordItem struct {
+	N      int          `json:"n"`
+	Text   string       `json:"text"`
+	Expect *Expectation `json:"expect,omitempty"`
+}
+
+// RecordOfCard is the record of card as sent under txid at at.
+func RecordOfCard(card Card, txid, at string) CardRecord {
+	return CardRecord{Txid: txid, Title: card.Title, At: at, Items: recordItems(card.Items)}
+}
+
+// RecordOfUpdate is the record of update as sent under txid at at.
+func RecordOfUpdate(update CardUpdate, txid, at string) CardRecord {
+	return CardRecord{Txid: txid, Re: update.Re, At: at, Items: recordItems(update.Items), Tick: update.Tick}
+}
+
+func recordItems(items []CardItem) []CardRecordItem {
+	kept := make([]CardRecordItem, 0, len(items))
+	for _, item := range items {
+		kept = append(kept, CardRecordItem{N: item.N, Text: item.Text, Expect: item.Expect})
+	}
+	return kept
+}
+
+// NeverTicks says why e can never be met, or "" when it can: an epic never
+// reaches landed or verified, only closed.
+func (e Expectation) NeverTicks(isEpic bool) string {
+	if isEpic && (e.State == ExpectLanded || e.State == ExpectVerified) {
+		return fmt.Sprintf("%s is an epic: an epic is never landed or verified; expect closed", e.Bead)
+	}
+	return ""
+}
