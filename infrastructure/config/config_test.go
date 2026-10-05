@@ -1645,6 +1645,30 @@ check = "/home/j/.local/bin/mw postern inbox --unread-count"
 	}
 }
 
+func TestABackendSwapsItselfUnlessItsTableSaysHands(t *testing.T) {
+	base := `[rigs]
+postern = "/home/j/postern"
+
+[backend.postern]
+build = "go build -o {out} ./cmd/postern"
+stage = "/s"
+live = "/l"
+service = "u"
+health = "http://h"
+`
+	for swap, want := range map[string]string{"": "auto", `swap = "auto"`: "auto", `swap = "hands"`: "hands"} {
+		writeConfig(t, base+swap+"\n")
+		backends, err := config.Backends()
+		if err != nil || backends["postern"].Swap != want {
+			t.Errorf("swap %q: expected %q, got %+v, %v", swap, want, backends["postern"], err)
+		}
+	}
+	writeConfig(t, base+`swap = "sometimes"`+"\n")
+	if _, err := config.Backends(); err == nil || !strings.Contains(err.Error(), "swap") {
+		t.Errorf("expected a swap other than auto or hands refused, got %v", err)
+	}
+}
+
 func TestAHostThatSaysNothingAboutBackendsHasNone(t *testing.T) {
 	writeConfig(t, vpsConfig)
 	backends, err := config.Backends()

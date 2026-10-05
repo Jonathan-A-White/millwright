@@ -32,6 +32,7 @@
 //	service = "postern-backend"
 //	health  = "https://postern.example.org/api/healthz"
 //	check   = "/home/jwhite/.local/bin/mw postern inbox --unread-count"
+//	swap    = "auto"    # or "hands": the home swaps a staged backend itself, or leaves it to his tap
 //
 //	[watch]
 //	ssh     = "vps"
@@ -1522,9 +1523,11 @@ const DefaultBackendDir = "server"
 // need staging, Build the command line that builds it, run in Dir with {out}
 // where the binary goes, Stage the directory built binaries wait in, Live the
 // binary the service runs, Service its user unit, Health a URL that answers once
-// it is up, and Check an optional command that must succeed beside it.
+// it is up, Check an optional command that must succeed beside it, and Swap
+// "auto" (the default: the home swaps a staged backend itself when no Talk is
+// open) or "hands" (the swap waits for the Governor's tap).
 type BackendSettings struct {
-	Dir, Build, Stage, Live, Service, Health, Check string
+	Dir, Build, Stage, Live, Service, Health, Check, Swap string
 }
 
 // Backends reports the backend each rig has on this host, by rig name, read from
@@ -1562,9 +1565,17 @@ func Backends() (map[string]BackendSettings, error) {
 			Service: strings.TrimSpace(table["service"]),
 			Health:  strings.TrimSpace(table["health"]),
 			Check:   strings.TrimSpace(table["check"]),
+			Swap:    strings.TrimSpace(table["swap"]),
 		}
 		if b.Dir == "" {
 			b.Dir = DefaultBackendDir
+		}
+		switch b.Swap {
+		case "":
+			b.Swap = "auto"
+		case "auto", "hands":
+		default:
+			return nil, fmt.Errorf("[%s%s] swap is %q in %s: it is \"auto\" (the home swaps a staged backend itself) or \"hands\" (it waits for the Governor's tap)", BackendTablePrefix, name, b.Swap, path)
 		}
 		for key, value := range map[string]string{"build": b.Build, "stage": b.Stage, "live": b.Live, "service": b.Service, "health": b.Health} {
 			if value == "" {
