@@ -571,6 +571,16 @@ func (r *talkWaitRun) finish(ctx context.Context) (TalkWaitReport, error) {
 			return report, fmt.Errorf("saving the channel the Governor's record came by: %w", err)
 		}
 	}
+	if r.turn != nil {
+		// Best effort: the swap that reads it takes a Talk it cannot read for no Talk.
+		last, err := json.Marshal(TalkLast{ID: r.turn.Talk.ID, Role: r.turn.Role, At: r.now().Unix()})
+		if err == nil {
+			err = r.Memory.SetNote(ctx, TalkLastKey, string(last))
+		}
+		if err != nil {
+			r.printf(r.Err, "mw talk wait: keeping the talk's state: %v\n", err)
+		}
+	}
 	mail, err := r.deputyMail(ctx)
 	if err != nil {
 		r.printf(r.Err, "mw talk wait: the Deputy's mail to the Mayor: %v\n", err)
