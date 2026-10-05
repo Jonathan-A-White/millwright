@@ -1231,6 +1231,12 @@ func (i PosternInbox) recordThreadCommentOnce(ctx context.Context, m PosternInbo
 		return true, false, nil
 	}
 	comment := fmt.Sprintf("The Governor by postern %s: %s", sentInFull(m.Ts), m.Text)
+	if beginsWithVerifiedWord(m.Text) {
+		// A comment counts as the Verify word only when VERIFIED is its first
+		// word, so a typed 'VERIFIED. ...' leads with it (mw-gq6.262).
+		comment = fmt.Sprintf("%s by the Governor via postern %s, txid %s: %s",
+			PosternSnapshotVerifiedMarker, sentInFull(m.Ts), m.Txid, m.Text)
+	}
 	if len(saved) > 0 && i.isUntranscribedVoiceNote(m) {
 		comment += fmt.Sprintf(" (%s)", posternNotTranscribed)
 	}
@@ -1244,6 +1250,18 @@ func (i PosternInbox) recordThreadCommentOnce(ctx context.Context, m PosternInbo
 		return false, false, err
 	}
 	return true, true, nil
+}
+
+// beginsWithVerifiedWord reports whether text opens, after any leading white
+// space, with the word VERIFIED: the marker followed by the end of the text,
+// white space or punctuation, so 'VERIFIED. ok' counts and 'VERIFIEDLY' does not.
+func beginsWithVerifiedWord(text string) bool {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(text), PosternSnapshotVerifiedMarker)
+	if !ok || rest == "" {
+		return ok
+	}
+	r, _ := utf8.DecodeRuneInString(rest)
+	return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_'
 }
 
 // posternAttachmentLabel is what a comment calls a file of mime: an image,
