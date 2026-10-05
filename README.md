@@ -932,6 +932,21 @@ there is none; in both the note is written straight into the database every
 sync. See *The factory on one host (the desktop)*, above, and
 `features/sync.feature`.
 
+## Stamping a rig's head by hand
+
+A chain stamp (`docs/chain-stamps.md`) is queued on its own by each landing of
+`mw next` and each vault push of `mw sync`. A head that neither saw has none, and
+`mw stamp <rig> [<commit>]` queues one: the commit named, or by default the head
+of origin's default branch of the rig's checkout (from `[rigs]`), read after a
+fetch. The stamp has no story and the title `Head of <rig>: <subject>`; the
+`chain-stamp` job broadcasts it within the minute, as it does any queued stamp.
+`mw stamp` prints what it queued.
+
+A commit that is already stamped is refused with `already stamped: <txid>`, or
+`already stamped: queued, not yet sent` while it waits, and nothing is queued.
+`mw stamp --all` stamps the head of every rig in `[rigs]` that has no stamp,
+naming the rigs it skips. See `features/stamp.feature`.
+
 ## The postern key
 
 The postern is the Mayor's testnet payment key: a plain file on the VPS,

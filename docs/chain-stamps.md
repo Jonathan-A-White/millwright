@@ -12,8 +12,10 @@ job and `mw prove` are below.
 - Each commit `mw next` lands on a story's target branch: one stamp, queued after
   the push succeeds, never blocking the landing.
 - Each vault push of `mw sync` that sent at least one commit (rig `vault`; below).
+- Each commit `mw stamp` is told to (by hand; below).
 
-Nothing else: no git hooks, no commit that is not a landing or a vault push.
+Nothing else: no git hooks, no commit that is not a landing, a vault push or one
+`mw stamp` queued.
 
 ## The record
 
@@ -68,6 +70,23 @@ rig `vault`, the vault's branch, the pushed head commit, its subject as the
 title, and no story, so the job comments on none and the txid is only in
 `sent.jsonl`. A queue that will not take it is a `chain stamp: not queued` note
 on the sync's line; the sync stands.
+
+## Stamping a head by hand
+
+`mw stamp <rig> [<commit>]` queues one stamp of a rig's commit that no landing or
+vault push stamped: the commit named (in full or by its first characters), or by
+default the head of origin's default branch of the checkout the config's `[rigs]`
+table names, read after a fetch. The stamp has no story and the title `Head of
+<rig>: <subject>`, so the job comments on none. `mw stamp` prints what it queued.
+
+A commit that already has a stamp is refused, and nothing is queued:
+`already stamped: <txid>` when `sent.jsonl` holds it, `already stamped: queued,
+not yet sent` when it waits in `pending.jsonl`. `mw stamp --all` does this for
+every rig in `[rigs]` whose head has no stamp, says `skipped <rig>: already
+stamped: ...` for the others, and carries on past a rig it cannot read (the run
+then fails). The use case is `StampHead` (application/stamphead.go), the git
+reads are the `RigHeads` port (adapter infrastructure/rig), and
+features/stamp.feature is its feature.
 
 ## The git note
 
