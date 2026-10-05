@@ -393,8 +393,8 @@ func newPosternSendCmd() *cobra.Command {
 			"straight to the postern backend (postern's docs/protocol.md section 9), whose txid is\n" +
 			"direct:<sha256>; the chain channel signs a transaction spending the postern key's own\n" +
 			"testnet balance to carry it, and broadcasts it. A direct message also carries a short\n" +
-			"clear summary naming the bead's title (Answer, Check, Message on), never the text; the\n" +
-			"chain record carries none.\n\n" +
+			"clear summary naming the bead's title (Answer, Check) or the channel (In <name>, In Factory),\n" +
+			"never the text; the chain record carries none.\n\n" +
 			"It refuses when postern_governor_key is not set, when --class is not one of message,\n" +
 			"decision-needed, landing or alarm, or — on the chain channel only — when the key's\n" +
 			"balance would exceed postern_float_sats, naming the excess.\n\n" +

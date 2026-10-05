@@ -1965,9 +1965,10 @@ const PosternSummaryRunes = 80
 // summary is the clear line a direct record of req carries, which the push
 // shows as its body: Summary when the caller made one; otherwise, by class,
 // "Answer: <title>" for a question, "Check: <title>" for a landing on a
-// bead's thread, "Message on <title>" for a message on one, "Message" for any
-// other message; none for any other class. It holds the bead's title and
-// never a word of req.Text. A title the tracker cannot give is the bead id.
+// bead's thread, the bead's title alone for a message on one (the push's title
+// already says "Message on <bead>"), "In <name>" for a message in a named
+// channel, "In Factory" for any other message; none for any other class. It
+// holds the bead's title and never a word of req.Text. A title the tracker cannot give is the bead id.
 func (s PosternSend) summary(ctx context.Context, req PosternSendRequest) string {
 	if strings.TrimSpace(req.Summary) != "" {
 		return cutSummary(req.Summary)
@@ -1979,9 +1980,11 @@ func (s PosternSend) summary(ctx context.Context, req PosternSendRequest) string
 	case req.Class == "landing" && thread != "":
 		return cutSummary("Check: " + s.beadTitle(ctx, thread))
 	case req.Class == "message" && thread != "":
-		return cutSummary("Message on " + s.beadTitle(ctx, thread))
+		return cutSummary(s.beadTitle(ctx, thread))
+	case req.Class == "message" && strings.TrimSpace(req.Topic) != "":
+		return cutSummary("In " + strings.TrimSpace(req.Topic))
 	case req.Class == "message":
-		return "Message"
+		return "In Factory"
 	}
 	return ""
 }

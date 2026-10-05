@@ -108,6 +108,7 @@ func InitializePosternSendScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" for bead "([^"]*)" recommending "([^"]*)" with options "([^"]*)" is run$`, c.mwPosternSendAsksAQuestionIsRun)
 	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" in the channel of bead "([^"]*)" is run$`, c.mwPosternSendThreadedOnBeadIsRun)
 	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" in channel "([^"]*)" is run$`, c.mwPosternSendOnTopicIsRun)
+	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" in channel "([^"]*)" with summary "([^"]*)" is run$`, c.mwPosternSendOnTopicWithSummaryIsRun)
 	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" in the channel of bead "([^"]*)" and in channel "([^"]*)" is run$`, c.mwPosternSendThreadedOnBeadAndTopicIsRun)
 	ctx.When(`^mw postern send "([^"]*)" "([^"]*)" for bead "([^"]*)" recommending "([^"]*)" with options "([^"]*)" in the channel of bead "([^"]*)" is run$`, c.mwPosternSendAsksAQuestionThreadedOnBeadIsRun)
 
@@ -433,6 +434,11 @@ func (c *posternSendContext) mwPosternSendThreadedOnBeadIsRun(class, text, threa
 
 func (c *posternSendContext) mwPosternSendOnTopicIsRun(class, text, topic string) error {
 	c.txid, c.err = c.send().Run(context.Background(), application.PosternSendRequest{Class: class, Text: text, Topic: topic})
+	return nil
+}
+
+func (c *posternSendContext) mwPosternSendOnTopicWithSummaryIsRun(class, text, topic, summary string) error {
+	c.txid, c.err = c.send().Run(context.Background(), application.PosternSendRequest{Class: class, Text: text, Topic: topic, Summary: summary})
 	return nil
 }
 

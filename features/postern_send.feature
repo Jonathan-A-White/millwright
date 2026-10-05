@@ -288,25 +288,33 @@ Feature: mw postern send
     And the delivered record's summary is "Check: Pick the colour"
     And the delivered record's summary does not contain "secret words"
 
-  Scenario: A message in a bead's channel carries the summary "Message on" and the bead's title
+  Scenario: A message in a bead's channel carries the bead's title alone
     Given the postern channel is "direct"
     And the bead "mw-abc.1" titled "Pick the colour" exists
     When mw postern send "message" "Some secret words." in the channel of bead "mw-abc.1" is run
     Then sending succeeds
-    And the delivered record's summary is "Message on Pick the colour"
+    And the delivered record's summary is "Pick the colour"
     And the delivered record's summary does not contain "secret words"
 
-  Scenario: A bare message carries the summary "Message"
+  Scenario: A message in the Factory channel carries the summary "In Factory"
     Given the postern channel is "direct"
     When mw postern send "message" "Some secret words." is run
     Then sending succeeds
-    And the delivered record's summary is "Message"
+    And the delivered record's summary is "In Factory"
+    And the delivered record's summary does not contain "secret words"
 
-  Scenario: A message in a named channel carries the summary "Message"
+  Scenario: A message in a named channel carries the summary "In" and the channel's name
     Given the postern channel is "direct"
-    When mw postern send "message" "Some secret words." in channel "roadmap" is run
+    When mw postern send "message" "Some secret words." in channel "general" is run
     Then sending succeeds
-    And the delivered record's summary is "Message"
+    And the delivered record's summary is "In general"
+    And the delivered record's summary does not contain "secret words"
+
+  Scenario: An explicit summary wins over the channel's
+    Given the postern channel is "direct"
+    When mw postern send "message" "Some secret words." in channel "general" with summary "Look at this" is run
+    Then sending succeeds
+    And the delivered record's summary is "Look at this"
 
   Scenario: An alarm carries no summary key
     Given the postern channel is "direct"
@@ -330,7 +338,7 @@ Feature: mw postern send
   Scenario: A message on a bead the tracker does not hold still sends, naming the bead id
     Given the postern channel is "direct"
     When mw postern send "message" "Some secret words." in the channel of bead "mw-gone.1" is run
-    Then the delivered record's summary is "Message on mw-gone.1"
+    Then the delivered record's summary is "mw-gone.1"
 
   Scenario: A title over 80 runes is cut to 80, an ellipsis as the 80th
     Given the postern channel is "direct"
@@ -346,7 +354,7 @@ Feature: mw postern send
     And a file "two.pdf" to attach
     When mw postern send "message" "the reports" in the channel of bead "mw-abc.1" attaching "one.pdf" and "two.pdf" is run
     Then sending succeeds
-    And every delivered record's summary is "Message on Pick the colour"
+    And every delivered record's summary is "Pick the colour"
 
   Scenario Outline: The chain channel never carries a summary
     Given the postern key's balance is 1000 satoshis

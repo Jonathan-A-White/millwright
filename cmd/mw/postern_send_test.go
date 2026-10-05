@@ -87,7 +87,7 @@ func TestPosternSendDeliversTheFixturesRecordScriptDirectly(t *testing.T) {
 	if !ok {
 		t.Fatalf("the delivered script is not a record: %s", backend.scripts[0])
 	}
-	if want := strings.TrimSuffix(string(fixture), "}") + `,"summary":"Message"}`; string(sent) != want {
+	if want := strings.TrimSuffix(string(fixture), "}") + `,"summary":"In Factory"}`; string(sent) != want {
 		t.Fatalf("expected the fixture's record plus its summary\n%s\ngot\n%s", want, sent)
 	}
 }

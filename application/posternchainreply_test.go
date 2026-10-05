@@ -67,7 +67,7 @@ func TestPosternSendReplyToAChainPostAlsoGoesOnChain(t *testing.T) {
 	if _, has := fields["summary"]; has {
 		t.Errorf("expected no summary on the chain copy, got %s", fields["summary"])
 	}
-	if direct, _ := clearOf(t, f.backend.Delivered()[0]); direct.Summary != "Message" {
+	if direct, _ := clearOf(t, f.backend.Delivered()[0]); direct.Summary != "In Factory" {
 		t.Errorf("expected the direct copy to keep its summary, got %+v", direct)
 	}
 	if out := f.out.String(); !strings.Contains(out, txid) || !strings.Contains(out, "chain txid fake-txid-1") {

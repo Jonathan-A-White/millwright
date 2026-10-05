@@ -1003,7 +1003,8 @@ default, is the funded transaction above. A host says `direct` only once the
 backend it reaches takes direct records (`POST /api/messages`): an older
 backend answers 404 to it, and there is no falling back to the chain. A
 direct record also carries a short clear `summary` for the push's body, naming
-the bead's title (`Answer: …`, `Check: …`, `Message on …`, or `Message`),
+the bead's title (`Answer: …`, `Check: …`, or the title alone for a message in a
+bead's channel) or the channel (`In <name>`, `In Factory`),
 never a word of the text; a chain record carries none. `--chain` also
 broadcasts the message on chain, beside the direct delivery (no summary, the
 same `postern_float_sats` cap), for a phone that cannot reach the backend; it
