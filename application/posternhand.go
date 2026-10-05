@@ -866,10 +866,15 @@ func upstreamBlock(hosts []string) []string {
 		posternUpstreamMarker,
 		"# A standby backend answers 503 before it does anything (story postern-standby),",
 		"# so a request retried on the next backend, a POST too, has run nowhere twice.",
+		"# Only the first backend takes traffic; the rest are backups, used when it fails or answers 503.",
 		"upstream " + posternUpstreamName + " {",
 	}
-	for _, host := range hosts {
-		block = append(block, "    server "+host+";")
+	for i, host := range hosts {
+		if i == 0 {
+			block = append(block, "    server "+host+";")
+		} else {
+			block = append(block, "    server "+host+" backup;")
+		}
 	}
 	return append(block, "}")
 }

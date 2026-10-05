@@ -122,7 +122,7 @@ func TestPosternNginxTakesTwoBackendFlagsAndWritesAnUpstream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mw postern nginx --dry-run: %v\n%s", err, out)
 	}
-	for _, want := range []string{"upstream postern_api {", "server laptop.mw:8787;", "server desktop.mw:8787;", "proxy_pass http://postern_api;"} {
+	for _, want := range []string{"upstream postern_api {", "server laptop.mw:8787;", "server desktop.mw:8787 backup;", "proxy_pass http://postern_api;"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("expected %q in:\n%s", want, out)
 		}

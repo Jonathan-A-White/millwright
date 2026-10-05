@@ -1284,8 +1284,9 @@ and a `location = /snapshot` block (aliased to the config's own
 `postern_snapshot_path`, no-store, nosniff, served as an opaque octet stream),
 and points every `/api` upstream at `--backend` (`postern_backend` by
 default). Given `--backend` twice, it writes an `upstream postern_api` block over
-both instead, points every `/api` location at it with `proxy_next_upstream error
-timeout http_503 non_idempotent` and a short `proxy_connect_timeout` (a standby
+both instead (the first takes the traffic, the rest are written `backup`, so a
+down standby costs no connect timeout), points every `/api` location at it with
+`proxy_next_upstream error timeout http_503 non_idempotent` and a short `proxy_connect_timeout` (a standby
 backend answers 503 before doing anything, so a retried POST is safe), so a move
 needs no nginx edit; one `--backend` writes what it always did. All
 marker-based, so a re-run is a no-op; it then runs `nginx -t` and,

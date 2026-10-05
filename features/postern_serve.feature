@@ -163,9 +163,10 @@ Feature: mw postern serve / mw postern nginx
       # mw-api-upstream
       # A standby backend answers 503 before it does anything (story postern-standby),
       # so a request retried on the next backend, a POST too, has run nowhere twice.
+      # Only the first backend takes traffic; the rest are backups, used when it fails or answers 503.
       upstream postern_api {
           server laptop.mw:8787;
-          server desktop.mw:8787;
+          server desktop.mw:8787 backup;
       }
 
       server {
@@ -187,6 +188,69 @@ Feature: mw postern serve / mw postern nginx
           }
           location = /api/healthz {
               proxy_pass http://postern_api/healthz;
+              proxy_next_upstream error timeout http_503 non_idempotent; # mw-failover
+              proxy_connect_timeout 2s; # mw-failover
+          }
+          # mw-api end
+          # mw-snapshot
+          location = /snapshot {
+              alias /var/www/postern-snapshot/snapshot.bin;
+              add_header Cache-Control "no-store" always;
+              add_header X-Content-Type-Options "nosniff" always;
+              default_type application/octet-stream;
+          }
+      }
+      """
+    And nginx was tested 1 time and reloaded 1 time
+
+  Scenario: A site file written with equal backends gets its second backend rewritten as a backup
+    Given an nginx site file that says:
+      """
+      # mw-api-upstream
+      # A standby backend answers 503 before it does anything (story postern-standby),
+      # so a request retried on the next backend, a POST too, has run nowhere twice.
+      upstream postern_api {
+          server laptop.mw:8787;
+          server desktop.mw:8787;
+      }
+
+      server {
+          location /api/ {
+              proxy_pass http://postern_api;
+              proxy_next_upstream error timeout http_503 non_idempotent; # mw-failover
+              proxy_connect_timeout 2s; # mw-failover
+          }
+          # mw-api end
+      }
+      """
+    And the postern snapshot path is "/var/www/postern-snapshot/snapshot.bin"
+    When mw postern nginx is run with the backends "http://laptop.mw:8787" and "http://desktop.mw:8787"
+    Then nginxing succeeds
+    And the nginx site file holds:
+      """
+      # mw-api-upstream
+      # A standby backend answers 503 before it does anything (story postern-standby),
+      # so a request retried on the next backend, a POST too, has run nowhere twice.
+      # Only the first backend takes traffic; the rest are backups, used when it fails or answers 503.
+      upstream postern_api {
+          server laptop.mw:8787;
+          server desktop.mw:8787 backup;
+      }
+
+      server {
+          # mw-api-events
+          location = /api/events {
+              proxy_pass http://postern_api;
+              proxy_next_upstream error timeout http_503 non_idempotent; # mw-failover
+              proxy_connect_timeout 2s; # mw-failover
+              proxy_buffering off;
+              proxy_cache off;
+              proxy_read_timeout 1h;
+              proxy_http_version 1.1;
+              proxy_set_header Connection "";
+          }
+          location /api/ {
+              proxy_pass http://postern_api;
               proxy_next_upstream error timeout http_503 non_idempotent; # mw-failover
               proxy_connect_timeout 2s; # mw-failover
           }
