@@ -173,3 +173,53 @@ func TestAddNoteOnARevisionThatIsNotThereFails(t *testing.T) {
 		t.Fatal("a note on a missing commit was written")
 	}
 }
+
+func TestResolveReadsTheHeadOfTheRemotesDefaultBranchAfterAFetch(t *testing.T) {
+	here, other := aRig(t)
+	ctx := context.Background()
+
+	// The other host pushes while this host is not looking: Resolve fetches.
+	write(t, other, "later.md", "pushed later\n")
+	run(t, other, "git", "add", "-A")
+	run(t, other, "git", "commit", "-qm", "A later commit")
+	run(t, other, "git", "push", "-q", "origin", "main")
+	want := run(t, other, "git", "rev-parse", "HEAD")
+
+	got, err := rig.New().Resolve(ctx, here, "")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got.Commit != want || got.Branch != "main" || got.Subject != "A later commit" {
+		t.Fatalf("Resolve = %+v, want commit %s on main, subject %q", got, want, "A later commit")
+	}
+}
+
+func TestResolveFallsBackToTheRemotesWordWhenTheCloneHasNoOriginHead(t *testing.T) {
+	here, _ := aRig(t)
+	run(t, here, "git", "remote", "set-head", "origin", "-d")
+	want := run(t, here, "git", "rev-parse", "origin/main")
+
+	got, err := rig.New().Resolve(context.Background(), here, "")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got.Commit != want || got.Branch != "main" {
+		t.Fatalf("Resolve = %+v, want commit %s on main", got, want)
+	}
+}
+
+func TestResolveExpandsACommitNamedByItsFirstCharacters(t *testing.T) {
+	here, _ := aRig(t)
+	full := run(t, here, "git", "rev-parse", "origin/main")
+
+	got, err := rig.New().Resolve(context.Background(), here, full[:8])
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if got.Commit != full || got.Subject != "The rig opens" {
+		t.Fatalf("Resolve = %+v, want commit %s, subject %q", got, full, "The rig opens")
+	}
+	if _, err := rig.New().Resolve(context.Background(), here, "deadbeef"); err == nil {
+		t.Fatal("Resolve of a commit that is not there succeeded")
+	}
+}

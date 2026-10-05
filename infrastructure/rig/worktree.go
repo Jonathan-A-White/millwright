@@ -38,6 +38,7 @@ type Worktrees struct {
 // Worktrees satisfies the port.
 var _ application.Worktrees = (*Worktrees)(nil)
 var _ application.CommitNotes = (*Worktrees)(nil)
+var _ application.RigHeads = (*Worktrees)(nil)
 
 // Option is a setting of a Worktrees, given to New.
 type Option func(*Worktrees)
@@ -174,6 +175,53 @@ func (w *Worktrees) DeleteBranch(ctx context.Context, rigDir, branch string) err
 func (w *Worktrees) AddNote(ctx context.Context, rigDir, ref, commit, note string) error {
 	_, err := w.git(ctx, rigDir, "notes", "--ref="+ref, "add", "-f", "-m", note, commit)
 	return err
+}
+
+// Resolve implements application.RigHeads: the remote is fetched, then rev (an
+// empty one is the head of the remote's default branch) is read as a commit.
+func (w *Worktrees) Resolve(ctx context.Context, rigDir, rev string) (application.RigCommit, error) {
+	if err := w.Fetch(ctx, rigDir); err != nil {
+		return application.RigCommit{}, err
+	}
+	branch, err := w.defaultBranch(ctx, rigDir)
+	if err != nil {
+		return application.RigCommit{}, err
+	}
+	if rev == "" {
+		rev = w.remote + "/" + branch
+	}
+	commit, err := w.git(ctx, rigDir, "rev-parse", "--verify", "--quiet", rev+"^{commit}")
+	if err != nil {
+		return application.RigCommit{}, err
+	}
+	commit = strings.TrimSpace(commit)
+	subject, err := w.git(ctx, rigDir, "log", "-1", "--format=%s", commit)
+	if err != nil {
+		return application.RigCommit{}, err
+	}
+	return application.RigCommit{Branch: branch, Commit: commit, Subject: strings.TrimSpace(subject)}, nil
+}
+
+// defaultBranch is the branch the remote's HEAD names: the clone's own record
+// of it, or, for a clone made before there was one, what the remote says.
+func (w *Worktrees) defaultBranch(ctx context.Context, rigDir string) (string, error) {
+	if out, err := w.git(ctx, rigDir, "symbolic-ref", "--short", "refs/remotes/"+w.remote+"/HEAD"); err == nil {
+		if branch := strings.TrimPrefix(strings.TrimSpace(out), w.remote+"/"); branch != "" {
+			return branch, nil
+		}
+	}
+	out, err := w.git(ctx, rigDir, "ls-remote", "--symref", w.remote, "HEAD")
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if ref, ok := strings.CutPrefix(line, "ref: refs/heads/"); ok {
+			if branch, _, _ := strings.Cut(ref, "\t"); branch != "" {
+				return branch, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("%s has no default branch %s names", rigDir, w.remote)
 }
 
 // git runs one git command in a rig and returns its standard output. It never

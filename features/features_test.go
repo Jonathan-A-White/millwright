@@ -107,6 +107,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeHandsScenario(ctx)
 	steps.InitializePromptScenario(ctx)
 	steps.InitializeProveScenario(ctx)
+	steps.InitializeStampScenario(ctx)
 	steps.InitializeHomeScenario(ctx)
 	steps.InitializeInitScenario(ctx)
 	steps.InitializeMailBeadsScenario(ctx)
