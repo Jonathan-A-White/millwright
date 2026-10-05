@@ -553,10 +553,23 @@ files a new open `hitl` bead under the landed story's epic, writes the swap on i
 a hands step (nothing if the staged binary is already live; one backup of the old
 one; install; restart; the health URL and `check` up to four times; the old binary
 put back if they never answer) and sends the Governor one message on that bead's
-channel. mw never restarts the service and never touches `live`: the Governor's Approve
-tap on the card is what runs the swap. A build or filing that fails is tried again by
-each tick, three tries in all, and then said on the landed story. A landing that left
-`dir` alone does nothing new.
+channel. A build or filing that fails is tried again by each tick, three tries in all,
+and then said on the landed story. A landing that left `dir` alone does nothing new.
+
+The swap itself is automatic (mw-gq6.270), unless the table says `swap = "hands"`, which
+keeps today's tap: the Governor's Approve on the card is then what runs it. With `swap =
+"auto"`, the default, the home's next `mw dispatch` or `mw millhand tick` runs the staged
+swap step itself, as the host's own user and with no tap, once no Talk is open: the Talk
+is read from the Governor's last talk record `mw talk wait` heard, a turn that is under
+30 minutes old, and a swap that finds one waits for the first tick after it ends, since a
+restart in the middle of a Talk would drop his line. It never runs while another swap or
+`mw postern inbox --apply` holds the inbox lock, it begins each staged commit at most
+once, and a swap superseded by a newer staged one never runs. The result is said once on the
+swap bead's channel: `backend <short> is live and answering`, or that the swap failed and
+that the old backend was put back (the step does that itself when the health URL never
+answers). A good swap closes the bead; a failed one leaves it open and `hitl`, the step's
+output commented on it, and nothing retries it by itself. A host with no postern inbox
+directory configured cannot take the lock, and keeps the tap.
 
 Only then: the worktree and its branch go, one line is appended to the seat's
 ledger, that line and the seat's memory of the rig are committed in the vault,

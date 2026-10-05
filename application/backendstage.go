@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -16,6 +17,19 @@ import (
 // commit, BackendPendingPrefix + rig + "." + commit. A note, not a state, so
 // that it is never an event of its own (see PosternNotes).
 const BackendPendingPrefix = "backend.pending."
+
+// BackendSwapPrefix is the start of the note a staged swap is kept under until
+// the home's tick has run it, one note per staged commit, BackendSwapPrefix +
+// rig + "." + commit. A note, not a state, as BackendPendingPrefix is.
+const BackendSwapPrefix = "backend.swap."
+
+// The two ways a rig's staged swap is taken: BackendSwapAuto, the default, has
+// the home run it itself when no Talk is open (mw-gq6.270), BackendSwapHands
+// leaves it as a hands step for the Governor to tap.
+const (
+	BackendSwapAuto  = "auto"
+	BackendSwapHands = "hands"
+)
 
 // BackendTries is how many times a backend is built and filed before the
 // attempts stop and the landed story says why: a build that fails three times
@@ -48,12 +62,18 @@ type BackendRig struct {
 	Service string
 	Health  string
 	Check   string
+	// Swap is BackendSwapAuto or BackendSwapHands; empty is auto.
+	Swap string
 }
+
+// Automatic reports whether the home swaps this rig's staged backend itself.
+func (c BackendRig) Automatic() bool { return c.Swap != BackendSwapHands }
 
 // BackendBuilds is the port the backend is read and built through: git and the
 // rig's own build command, and nothing else. It has no way to install a binary,
 // restart a unit or reach a live path, and that is on purpose: the swap is a
-// hands step, run only once the Governor approves it.
+// hands step, run by the HandsRunner once the Governor approves it, or by the
+// home's tick itself when the rig's swap is automatic.
 type BackendBuilds interface {
 	// Changed reports whether the commits branch has beyond base change anything
 	// under subdir of the rig at rigDir: the story's own changes, not whatever the
@@ -71,6 +91,14 @@ type BackendBuilds interface {
 // step needs.
 type BackendHands interface {
 	Run(ctx context.Context, req HandsAddRequest) (HandsStepRecord, error)
+}
+
+// SwapLock is the lock a swap holds while it runs, taken without waiting: the
+// inbox lock, which mw postern inbox --apply holds for as long as it runs, so that
+// a swap never restarts the backend under a pass that reads it, nor runs beside
+// another swap.
+type SwapLock interface {
+	TryTake(ctx context.Context) (release func(), taken bool, err error)
 }
 
 // BackendLanding is a landed story whose backend half is to be staged.
@@ -99,10 +127,12 @@ type BackendLanding struct {
 // install, the restart, four tries at the health URL, and the way
 // back — and sends the Governor one message on that bead's channel.
 //
-// It never restarts a service, installs a binary or touches the live one: the
-// swap runs when the Governor approves the step, and only then. On a host that is
-// not home, a landing leaves a note and the home's next tick (Pending) does the
-// rest. A zero BackendStage, or a rig with no settings, does nothing.
+// It never restarts a service, installs a binary or touches the live one itself:
+// the swap is the step's, run when the Governor approves it, or by the home's
+// tick (Pending, swapStaged) once no Talk is open, unless the rig's swap is
+// "hands" (mw-gq6.270). On a host that is not home, a landing leaves a note and the
+// home's next tick does the rest. A zero BackendStage, or a rig with no settings,
+// does nothing.
 type BackendStage struct {
 	// Rigs is where each rig is checked out on this host, Settings how each rig's
 	// backend is built and swapped.
@@ -115,6 +145,15 @@ type BackendStage struct {
 	Tracker WorkTracker
 	Notes   PosternNotes
 	Hands   BackendHands
+
+	// Runner, Say, Lock and Now are what the home's tick swaps a staged backend with
+	// (mw-gq6.270): the runner that runs the step, the sender that says its result on
+	// the swap bead's channel, the inbox lock and the clock the Talk's quiet spell is
+	// read by. Without a Runner or a Lock every swap is left as a hands step for a tap.
+	Runner HandsRunner
+	Say    PosternSender
+	Lock   SwapLock
+	Now    func() time.Time
 }
 
 // Wants reports whether this host names a backend for rig.
@@ -151,8 +190,9 @@ func (b BackendStage) Landed(ctx context.Context, l BackendLanding) []string {
 }
 
 // Pending is the home's tick: every landed backend still waiting to be staged is
-// built and filed, as a landing on the home does. A host that is not home leaves
-// the notes where they are, and so does one that cannot tell.
+// built and filed, as a landing on the home does, and every staged swap of a rig
+// whose swap is automatic is run (swapStaged). A host that is not home leaves the
+// notes where they are, and so does one that cannot tell.
 func (b BackendStage) Pending(ctx context.Context) []string {
 	if len(b.Settings) == 0 || b.Notes == nil || b.Home == nil {
 		return nil
@@ -182,7 +222,7 @@ func (b BackendStage) Pending(ctx context.Context) []string {
 		}
 		notes = append(notes, b.attempt(ctx, l, home)...)
 	}
-	return notes
+	return append(notes, b.swapStaged(ctx)...)
 }
 
 func (b BackendStage) homeHost(ctx context.Context) (string, error) {
@@ -267,7 +307,7 @@ func (b BackendStage) stage(ctx context.Context, l *BackendLanding, home string)
 		bead, err := b.Tracker.CreateStory(ctx, NewStory{
 			EpicID:      l.Epic,
 			Title:       fmt.Sprintf("Swap the home's %s backend to %s so %s's backend half is live", l.Rig, short, l.Story),
-			Description: backendBeadText(*l, cfg, short, out),
+			Description: backendBeadText(*l, cfg, short, out, b.swapsItself(cfg)),
 			Acceptance:  fmt.Sprintf("cmp %s %s is equal; %s answers.", cfg.Live, out, cfg.Health),
 			Priority:    1,
 			Labels:      []string{LabelHitl},
@@ -287,7 +327,23 @@ func (b BackendStage) stage(ctx context.Context, l *BackendLanding, home string)
 	if err := b.supersedeOlder(ctx, cfg, l.Bead, step.ID); err != nil {
 		return "", fmt.Errorf("superseding the older swaps of %s: %w", l.Rig, err)
 	}
+	if b.swapsItself(cfg) {
+		text, err := json.Marshal(stagedSwap{Rig: l.Rig, Story: l.Story, Bead: l.Bead, Step: step.ID, Commit: l.Commit})
+		if err == nil {
+			err = b.Notes.SetNote(ctx, swapKey(l.Rig, l.Commit), string(text))
+		}
+		if err != nil {
+			return "", fmt.Errorf("keeping the swap of %s for the tick: %w", l.Rig, err)
+		}
+		return fmt.Sprintf("backend: %s at %s staged at %s; the swap is a hands step on %s, which the home's tick runs itself once no Talk is open", l.Rig, short, out, l.Bead), nil
+	}
 	return fmt.Sprintf("backend: %s at %s staged at %s; the swap is a hands step on %s, for the Governor to approve", l.Rig, short, out, l.Bead), nil
+}
+
+// swapsItself reports whether a swap of cfg's rig is run by the home's tick: the
+// rig has not kept the tap, and this stage has what running it takes.
+func (b BackendStage) swapsItself(cfg BackendRig) bool {
+	return cfg.Automatic() && b.Runner != nil && b.Lock != nil
 }
 
 // supersedeOlder marks every other swap step of cfg's live binary that has not run
@@ -330,19 +386,23 @@ func (b BackendStage) supersedeOlder(ctx context.Context, cfg BackendRig, bead, 
 	return nil
 }
 
-func backendBeadText(l BackendLanding, cfg BackendRig, short, out string) string {
+func backendBeadText(l BackendLanding, cfg BackendRig, short, out string, automatic bool) string {
+	itself := ""
+	if automatic {
+		itself = ", or by the home's tick on its own once no Talk is open, and the result is said on this bead's channel"
+	}
 	return fmt.Sprintf("%s landed (%s) with a change under %s/ of %s, but the landing ships the app only: the live backend, %s, "+
 		"is still the one built before it, so what the story added there is not live.\n\n"+
 		"mw built %s at %s and staged it at %s. One hands step on this bead swaps it in: it does nothing if the staged binary is already live, "+
 		"keeps one backup of the old one, installs, restarts %s, and reads %s up to four times; "+
-		"if it never answers, it puts the old binary back by itself. The step runs only when the Governor approves it.",
-		l.Story, l.Title, cfg.Dir, l.Rig, cfg.Live, l.Rig, short, out, cfg.Service, cfg.Health)
+		"if it never answers, it puts the old binary back by itself. The step runs when the Governor approves it%s.",
+		l.Story, l.Title, cfg.Dir, l.Rig, cfg.Live, l.Rig, short, out, cfg.Service, cfg.Health, itself)
 }
 
 // BackendSwap is the hands step that swaps staged binary out in for the live one:
 // exactly what the Mayor wrote by hand for postern's presence mark (mw-j0f2d.35).
-// It is text for a person to approve and the factory to run once they do; nothing
-// in the factory runs it unapproved.
+// It is text for a person to approve and the factory to run once they do; the one
+// thing that runs it unapproved is the home's tick, for a rig whose swap is "auto".
 //
 // The step is run by mw postern inbox --apply, which holds the inbox's lock for
 // as long as it runs, and the backend it restarts is the one that pass reads, so

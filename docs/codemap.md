@@ -8,28 +8,28 @@ domain/, domain/events: stdlib · application/ (apptest/: fakes): use cases, por
 
 | Port | Declared in | Real adapter | Fake |
 | --- | --- | --- | --- |
-| `WorkTracker` | `application/worktracker.go` | `infrastructure/beads/` | `apptest.FakeTracker` |
-| TrackerSync | `application/sync.go` | `infrastructure/beads/sync.go` | `apptest.FakeTracker` |
+| `WorkTracker` | application/worktracker.go | `infrastructure/beads/` | apptest.FakeTracker |
+| TrackerSync | application/sync.go | `infrastructure/beads/sync.go` | apptest.FakeTracker |
 | TrackerNotes, SweepNotes, BeadGraph | application/{status,sweep}.go | same | same |
-| VaultFiles | `application/sync.go` | `infrastructure/vault/git.go` | `apptest.FakeVaultFiles` |
-| Mailbox, TidyMailbox | application/{mail,tidy}.go | `infrastructure/beads/mail.go` | `apptest.FakeMailbox` |
-| EpicRules | `application/epicrules.go` | `infrastructure/vault/epicrules.go` | `apptest.FakeEpicRules` |
-| Vault | `application/seatboot.go` | `infrastructure/vault/vault.go` | `application/seatboot_test.go` |
-| Runner | `application/runner.go` | `infrastructure/tmux/tmux.go` | `apptest.FakeRunner` |
-| Harness | `application/harness.go` | `infrastructure/claude/claude.go` | `application/seatboot_test.go` |
-| SeatFiles, Windows, SeatHarness, ActingFile | `application/seatup.go`, `application/seathandover.go` | infrastructure/{vault/{seat,reaplog},tmux/window,claude/claude}.go | apptest.Fake{Windows,ActingFile} |
+| VaultFiles | application/sync.go | `infrastructure/vault/git.go` | apptest.FakeVaultFiles |
+| Mailbox, TidyMailbox | application/{mail,tidy}.go | `infrastructure/beads/mail.go` | apptest.FakeMailbox |
+| EpicRules | application/epicrules.go | `infrastructure/vault/epicrules.go` | apptest.FakeEpicRules |
+| Vault | application/seatboot.go | `infrastructure/vault/vault.go` | application/seatboot_test.go |
+| Runner | application/runner.go | `infrastructure/tmux/tmux.go` | apptest.FakeRunner |
+| Harness | application/harness.go | `infrastructure/claude/claude.go` | application/seatboot_test.go |
+| SeatFiles, Windows, SeatHarness, ActingFile | application/seatup.go, application/seathandover.go | infrastructure/{vault/{seat,reaplog},tmux/window,claude/claude}.go | apptest.Fake{Windows,ActingFile} |
 | Transcripts, TranscriptTail, PeekRemote | application/seatcontext.go, application/peek.go | infrastructure/{claude,peekremote} | apptest/fakepeek.go |
-| Reap{Terminal,Log,Armer} | `application/seatreap.go` | infrastructure/{tmux/reap,vault/reaplog,reaper/arm}.go | apptest.Fake{Windows,ReapArmer} |
-| WatchProbes | `application/watch.go` | `infrastructure/watch/watch.go` | `apptest.FakeWatch` |
-| Doctor{Check,State,Log,Notes} | `application/doctor.go` | `infrastructure/doctor` | none |
-| TickLog | `application/millhandtick.go` | `infrastructure/ticklog/ticklog.go` | `apptest.FakeTickLog` |
+| Reap{Terminal,Log,Armer} | application/seatreap.go | infrastructure/{tmux/reap,vault/reaplog,reaper/arm}.go | apptest.Fake{Windows,ReapArmer} |
+| WatchProbes | application/watch.go | `infrastructure/watch/watch.go` | apptest.FakeWatch |
+| Doctor{Check,State,Log,Notes} | application/doctor.go | `infrastructure/doctor` | none |
+| TickLog | application/millhandtick.go | `infrastructure/ticklog/ticklog.go` | apptest.FakeTickLog |
 | CardLog | application/card.go | infrastructure/cardlog | apptest.FakeCardLog |
-| Worktrees | `application/worktrees.go` | `infrastructure/rig/worktree.go` | `application/dispatch_test.go` |
-| HostLoad | `application/hostload.go` | `infrastructure/hostload/hostload.go` | `apptest.FakeHostLoad` |
-| SyncHaltMarker | `application/sync.go` | `infrastructure/synchalt/synchalt.go` | `apptest.FakeSyncHaltMarker` |
+| Worktrees | application/worktrees.go | `infrastructure/rig/worktree.go` | application/dispatch_test.go |
+| HostLoad | application/hostload.go | `infrastructure/hostload/hostload.go` | apptest.FakeHostLoad |
+| SyncHaltMarker | application/sync.go | `infrastructure/synchalt/synchalt.go` | apptest.FakeSyncHaltMarker |
 | Notifier, HomeMoveHost, OldHome, VaultBirth, TrackerBirth | application/{millhandtick,homemove,init}.go | infrastructure/{notify/notify,homemove/homemove,vault/birth,beads/init}.go | none |
-| Landing, Checks, MergeSlot, Holding | `application/landing.go` | infrastructure/rig/{landing,checks,slot}.go | none |
-| AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter | application/afterlanding.go, application/selfupdate.go, application/backendstage.go | infrastructure/{rig/{afterlanding,built,backend},userunits}.go | `features/self_update.feature` |
+| Landing, Checks, MergeSlot, Holding | application/landing.go | infrastructure/rig/{landing,checks,slot}.go | none |
+| AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter | application/afterlanding.go, application/selfupdate.go, application/backendstage.go | infrastructure/{rig/{afterlanding,built,backend},userunits}.go | `features/{self_update,backend_swap}.feature`; swaps are automatic unless swap = "hands" |
 | EventLog, BeadFeed, FollowCursors, ShipStates, SubscribeFiles, NudgeCursors, EventSpringer, EventController, HarnessCount | application/event*.go, status.go | infrastructure/{eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go | apptest.Fake{EventLog,FollowCursors,Ship*,Tracker,Subscribe*,Nudge*} |
 | Postern, hands, Prompts | application/{postern*,hands,prompt}.go | infrastructure/{postern,hands*,homemove} | apptest.Fake{Postern*,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*,HomeMover,Prompts} |
 | StampQueue, StampStore, CommitNotes, ChainLookup, RigHeads | application/chainstamp.go, application/prove.go | infrastructure/{stampqueue,chainlookup}, rig/worktree.go | apptest.Fake{StampQueue,CommitNotes,ChainLookup,RigHeads} |
