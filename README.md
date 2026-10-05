@@ -881,8 +881,11 @@ vault pushed it as.
 
 It never resets a story's attempts count, and a story already started
 `max_attempts` times is refused with "attempts exhausted" rather than retried
-— resetting the counter by hand is what allows another attempt. See
-`features/retry.feature`.
+— resetting the counter by hand is what allows another attempt.
+
+A story labelled `hitl` is still retried and its claim still given back, but
+dispatch passes a `hitl` story over, so the report adds a line naming the label
+and the cure: `bd update <id> --remove-label hitl`. See `features/retry.feature`.
 
 ## Keeping two hosts level
 

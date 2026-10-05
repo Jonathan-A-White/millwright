@@ -286,3 +286,65 @@ var errFailingPush = fakePushError{}
 type fakePushError struct{}
 
 func (fakePushError) Error() string { return "the vault's remote refused the connection" }
+
+// TestRetryOfAHitlStoryGivesTheClaimBackAndNamesTheLabelAndTheCure pins
+// mw-gq6.261: dispatch passes a story over while it carries hitl, so a retry
+// that gave the claim back and said nothing left the story waiting for a tick
+// that would never take it. The claim is still given back; the report says why
+// the retry will not run and how to let it.
+func TestRetryOfAHitlStoryGivesTheClaimBackAndNamesTheLabelAndTheCure(t *testing.T) {
+	const cure = "hitl: dispatch passes this story over while it carries hitl; to let it run: bd update mw-gq6.1 --remove-label hitl"
+
+	for _, elsewhere := range []bool{false, true} {
+		name := "worked here"
+		if elsewhere {
+			name = "worked on another host"
+		}
+		t.Run(name, func(t *testing.T) {
+			tracker := apptest.NewFakeTracker()
+			aRetryStory(t, tracker, "mw-gq6.1")
+			if err := tracker.SetLabels("mw-gq6.1", application.LabelHitl); err != nil {
+				t.Fatalf("labelling the story: %v", err)
+			}
+			var out strings.Builder
+
+			retry := aRetry(tracker, &fakeRetryLanding{AheadCount: 0}, &apptest.FakeVaultFiles{}, &out)
+			if elsewhere {
+				// The story is pathed to "vps", so a retry run elsewhere only hands it back.
+				retry.Host = "desktop"
+			}
+			report, err := retry.Run(context.Background(), "mw-gq6.1")
+			if err != nil {
+				t.Fatalf("expected the retry to succeed, got: %v\n%s", err, out.String())
+			}
+			if !report.ClaimReleased {
+				t.Errorf("expected the claim given back, got %+v", report)
+			}
+			detail, err := tracker.ShowStory(context.Background(), "mw-gq6.1")
+			if err != nil {
+				t.Fatalf("reading the story back: %v", err)
+			}
+			if detail.Status != application.StatusOpen || detail.Assignee != "" {
+				t.Errorf("expected the story open and unassigned, got status %q assignee %q", detail.Status, detail.Assignee)
+			}
+			if !strings.Contains(out.String(), cure) {
+				t.Errorf("expected the report to carry %q, got %q", cure, out.String())
+			}
+		})
+	}
+}
+
+// TestRetryOfAStoryWithoutHitlPrintsNoHitlLine is the other half of
+// mw-gq6.261: the warning is for the label alone.
+func TestRetryOfAStoryWithoutHitlPrintsNoHitlLine(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	aRetryStory(t, tracker, "mw-gq6.1")
+	var out strings.Builder
+
+	if _, err := aRetry(tracker, &fakeRetryLanding{AheadCount: 0}, &apptest.FakeVaultFiles{}, &out).Run(context.Background(), "mw-gq6.1"); err != nil {
+		t.Fatalf("expected the retry to succeed, got: %v\n%s", err, out.String())
+	}
+	if strings.Contains(out.String(), "hitl") {
+		t.Errorf("expected no line about hitl, got %q", out.String())
+	}
+}

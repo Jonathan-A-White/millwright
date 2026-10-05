@@ -224,6 +224,10 @@ type RetryReport struct {
 	WorktreeGone  bool
 	BranchGone    bool
 	ClaimReleased bool
+
+	// Hitl says the story carries the hitl label, so dispatch will pass it over
+	// and the retry will not run until the label is taken off (mw-gq6.261).
+	Hitl bool
 }
 
 // maxAttempts is how many times a story may be started.
@@ -278,6 +282,7 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 		attempt = 1
 	}
 	report.Attempt, report.Target = attempt, path.Branch
+	report.Hitl = detail.Hitl()
 
 	if tried, most := detail.Attempts, r.maxAttempts(); tried >= most {
 		return r.refuse(report, fmt.Sprintf(
@@ -419,6 +424,7 @@ func (r RetryReport) String() string {
 		fmt.Fprintf(&b, "  there   the story was worked on %s; its worktree and branch are left there, not read from here\n", r.Elsewhere)
 		if r.ClaimReleased {
 			fmt.Fprintf(&b, "  open    the claim was given back; the next dispatch tick takes it as attempt %d\n", r.Attempt+1)
+			r.writeHitl(&b)
 		}
 		return b.String()
 	}
@@ -439,6 +445,17 @@ func (r RetryReport) String() string {
 	}
 	if r.ClaimReleased {
 		fmt.Fprintf(&b, "  open    the claim was given back; the next dispatch tick takes it as attempt %d\n", r.Attempt+1)
+		r.writeHitl(&b)
 	}
 	return b.String()
+}
+
+// writeHitl says, for a story that carries hitl, why the next dispatch tick will
+// not take it and what lets it.
+func (r RetryReport) writeHitl(b *strings.Builder) {
+	if !r.Hitl {
+		return
+	}
+	fmt.Fprintf(b, "  %s: dispatch passes this story over while it carries %s; to let it run: bd update %s --remove-label %s\n",
+		LabelHitl, LabelHitl, r.StoryID, LabelHitl)
 }
