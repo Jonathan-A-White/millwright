@@ -1,14 +1,18 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/cardlog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 )
 
@@ -22,7 +26,51 @@ func newCardCmd() *cobra.Command {
 	}
 	root.AddCommand(newCardSendCmd())
 	root.AddCommand(newCardUpdateCmd())
+	root.AddCommand(newCardListCmd())
 	return root
+}
+
+// cardBeads is how a card reads the beads its items expect: the vault's
+// tracker, found only when an item needs reading. A test swaps it.
+var cardBeads = func() application.CardBeads { return vaultBeads{} }
+
+type vaultBeads struct{}
+
+func (vaultBeads) ShowBeads(ctx context.Context, ids []string) ([]application.StoryDetail, error) {
+	gateway, _, err := posternGateway()
+	if err != nil {
+		return nil, err
+	}
+	return gateway.ShowBeads(ctx, ids)
+}
+
+// sentCards is the list of cards this host has sent, ~/.local/state/mw/cards.jsonl.
+func sentCards() (application.CardLog, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	return cardlog.New(filepath.Join(home, cardlog.DefaultDir)), nil
+}
+
+// newCardListCmd builds `mw card list`.
+func newCardListCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list",
+		Short: "List the cards and updates sent from this host, newest first",
+		Long: "list prints each card and card update mw card send and mw card update have sent from this\n" +
+			"host, newest first, from ~/.local/state/mw/cards.jsonl: its txid, when, its title (or the\n" +
+			"card an update is of) and each item with what it expects. The txid is what mw card update\n" +
+			"takes. It only reads.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			log, err := sentCards()
+			if err != nil {
+				return err
+			}
+			return application.Cards{Log: log, Out: cmd.OutOrStdout()}.List(cmd.Context())
+		},
+	}
 }
 
 // cardItemHelp says how an item is given, for every command that takes one.
@@ -51,7 +99,12 @@ func posternCards(out io.Writer) (application.Cards, error) {
 	if err != nil {
 		return application.Cards{}, err
 	}
+	log, err := sentCards()
+	if err != nil {
+		return application.Cards{}, err
+	}
 	return application.Cards{
+		Beads: cardBeads(), Log: log,
 		Postern: backend, Cipher: posternCipher(keys), Keys: keys,
 		GovernorKey: governorKey, FloatSats: int64(floatSats), Channel: channel,
 		Now: posternClock, Out: out,
@@ -74,7 +127,9 @@ func newCardSendCmd() *cobra.Command {
 			"Approve X and Answer X expect X answered, Release X expects X open. The card subscribes to\n" +
 			"the beads its items name and the event kinds their expectations need, so the app ticks an\n" +
 			"item off when its event arrives. --bead-channel posts it in that bead's channel. The record\n" +
-			"carries no summary, so no word of it is pushed.",
+			"carries no summary, so no word of it is pushed. An item that expects an epic landed or\n" +
+			"verified is refused (an epic is only ever closed), as is one whose bead cannot be read; the\n" +
+			"card is kept in mw card list.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cards, err := posternCards(cmd.OutOrStdout())

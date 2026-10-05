@@ -125,7 +125,7 @@ A named ask of the Mayor with a signature, stored on the backend. The Governor c
 _Avoid_: Macro, slash command, template
 
 **Live card**:
-A card of items, each with links and an expectation, that ticks itself off from events. `mw card send` posts it and `mw card update` changes it.
+A card of items, each with links and an expectation, that ticks itself off from events. `mw card send` posts it and `mw card update` changes it; each is kept in `mw card list`, newest first, with its txid. An item expecting an epic landed or verified is refused: an epic is only ever closed.
 _Avoid_: Checklist, todo, widget
 
 **Call**:

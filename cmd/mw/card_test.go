@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/postern"
 )
@@ -64,6 +65,12 @@ func cardHome(t *testing.T) (sealed *[]string, delivered *int) {
 	posternHome(t, url, f.SenderWIF, f.RecipientPubKey)
 	t.Setenv("MW_POSTERN_CHANNEL", "direct") // the backend here takes direct records; the default is chain
 	sealed = &[]string{}
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-epic", domain.Path{})
+	tracker.AddStory("mw-epic", domain.Story{ID: "mw-b", Title: "b"})
+	realBeads := cardBeads
+	t.Cleanup(func() { cardBeads = realBeads })
+	cardBeads = func() application.CardBeads { return tracker }
 	realCipher := posternCipher
 	t.Cleanup(func() { posternCipher = realCipher })
 	posternCipher = func(*postern.KeyFile) application.Cipher { return recordingCipher{sealed: sealed} }
@@ -136,5 +143,34 @@ func TestPromptRunCardSendsTheCardWithThePromptsName(t *testing.T) {
 	if card.Prompt != "top5" || card.Title != "Top 5" || len(card.Items) != 1 ||
 		card.Items[0].Expect == nil || *card.Items[0].Expect != (domain.Expectation{Bead: "mw-a", State: domain.ExpectAnswered}) {
 		t.Fatalf("expected the card to record top5 and item 1 to expect mw-a answered, got %s", (*sealed)[0])
+	}
+}
+
+func TestCardSendRefusesAnEpicVerifiedAndMentionsNothingSentThenListShowsTheCardsSent(t *testing.T) {
+	_, delivered := cardHome(t)
+	out, err := runMw(t, "card", "send", "--title", "t", "--item", "x|mw-epic|mw-epic:verified")
+	if err == nil || !strings.Contains(err.Error(), "mw-epic is an epic: an epic is never landed or verified; expect closed") {
+		t.Fatalf("expected the epic refused, got %v\n%s", err, out)
+	}
+	if *delivered != 0 {
+		t.Fatalf("expected nothing delivered, got %d", *delivered)
+	}
+	if out, err := runMw(t, "card", "list"); err != nil || !strings.Contains(out, "no card") {
+		t.Fatalf("expected no card listed after a refusal, got %v\n%s", err, out)
+	}
+
+	if out, err := runMw(t, "card", "send", "--title", "First", "--item", "x|mw-b|mw-b:verified"); err != nil {
+		t.Fatalf("send failed: %v\n%s", err, out)
+	}
+	if out, err := runMw(t, "card", "send", "--title", "Second", "--item", "y|mw-epic|mw-epic:closed"); err != nil {
+		t.Fatalf("send failed: %v\n%s", err, out)
+	}
+	out, err = runMw(t, "card", "list")
+	if err != nil {
+		t.Fatalf("list failed: %v\n%s", err, out)
+	}
+	if !strings.HasPrefix(out, "direct:card-2  ") || strings.Index(out, "Second") > strings.Index(out, "First") ||
+		!strings.Contains(out, "expects mw-epic closed") {
+		t.Fatalf("expected the newest card first with its txid and expectation, got:\n%s", out)
 	}
 }

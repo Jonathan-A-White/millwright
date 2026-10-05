@@ -24,6 +24,8 @@ const (
 type cardContext struct {
 	backend *apptest.FakePostern
 	prompts *apptest.FakePrompts
+	tracker *apptest.FakeTracker
+	log     *apptest.FakeCardLog
 	out     strings.Builder
 	txid    string
 	err     error
@@ -34,7 +36,12 @@ func InitializeCardScenario(ctx *godog.ScenarioContext) {
 	c := &cardContext{}
 
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
-		*c = cardContext{backend: apptest.NewFakePostern(), prompts: apptest.NewFakePrompts()}
+		*c = cardContext{backend: apptest.NewFakePostern(), prompts: apptest.NewFakePrompts(),
+			tracker: apptest.NewFakeTracker(), log: apptest.NewFakeCardLog()}
+		c.tracker.AddEpic("mw-epic", domain.Path{})
+		for _, id := range []string{"mw-b", "mw-v.1"} {
+			c.tracker.AddStory("mw-epic", domain.Story{ID: id, Title: id})
+		}
 		return ctx, nil
 	})
 
@@ -43,6 +50,8 @@ func InitializeCardScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^the Mayor updates the card "([^"]*)" adding the item "([^"]*)", linking item (\d+) to "([^"]*)" and ticking item (\d+)$`, c.theMayorUpdatesTheCard)
 	ctx.When(`^the Mayor runs the prompt "([^"]*)" as the card "([^"]*)" with the item "([^"]*)"$`, c.theMayorRunsThePromptAsACard)
 
+	ctx.Then(`^the list of sent cards has (\d+) entr(?:y|ies)$`, c.theListHasEntries)
+	ctx.Then(`^listing the cards prints "([^"]*)" before "([^"]*)"$`, c.listingPrintsBefore)
 	ctx.Then(`^the card is delivered as one record of class "([^"]*)" from the Mayor to the Governor, with no summary$`, c.deliveredAsOneRecord)
 	ctx.Then(`^the sealed card is titled "([^"]*)"$`, c.theSealedCardIsTitled)
 	ctx.Then(`^sealed item (\d+) reads "([^"]*)", links "([^"]*)" and expects "([^"]*)" "([^"]*)"$`, c.sealedItemReads)
@@ -58,12 +67,36 @@ func InitializeCardScenario(ctx *godog.ScenarioContext) {
 func (c *cardContext) cards() application.Cards {
 	return application.Cards{
 		Postern:     c.backend,
+		Beads:       c.tracker,
+		Log:         c.log,
 		Cipher:      &apptest.FakeCipher{From: cardMayorKey},
 		Keys:        cardKeys{},
 		GovernorKey: cardGovernorKey,
 		Now:         func() time.Time { return time.Unix(1790000000, 0) },
 		Out:         &c.out,
 	}
+}
+
+func (c *cardContext) theListHasEntries(n int) error {
+	records, err := c.log.List(context.Background())
+	if err != nil || len(records) != n {
+		return fmt.Errorf("expected %d entries in the list of sent cards, got %+v (%v)", n, records, err)
+	}
+	return nil
+}
+
+func (c *cardContext) listingPrintsBefore(first, second string) error {
+	var listed strings.Builder
+	cards := c.cards()
+	cards.Out = &listed
+	if err := cards.List(context.Background()); err != nil {
+		return err
+	}
+	a, b := strings.Index(listed.String(), first), strings.Index(listed.String(), second)
+	if a < 0 || b < 0 || a > b {
+		return fmt.Errorf("expected %q before %q in:\n%s", first, second, listed.String())
+	}
+	return nil
 }
 
 func (c *cardContext) theBackendHoldsThePrompt(name string) error {

@@ -53,3 +53,40 @@ Feature: mw card
     Given the backend holds the prompt "top5" for a card
     When the Mayor runs the prompt "top5" as the card "Top 5" with the item "Approve mw-a"
     Then the sealed card records the prompt "top5"
+
+  Scenario Outline: An item that can never tick is refused and nothing is sent
+    When the Mayor sends the card "Top 5" with the items:
+      | item                                 |
+      | Check it\|mw-epic\|mw-epic:<state> |
+    Then the card is refused, saying "mw-epic is an epic: an epic is never landed or verified; expect closed"
+    And no card record is delivered
+    And the list of sent cards has 0 entries
+
+    Examples:
+      | state    |
+      | verified |
+      | landed   |
+
+  Scenario: A bead that cannot be read is refused
+    When the Mayor sends the card "Top 5" with the items:
+      | item                           |
+      | Check it\|mw-nope\|mw-nope:verified |
+    Then the card is refused, saying "cannot read mw-nope"
+    And no card record is delivered
+
+  Scenario: An epic expected closed and a story expected verified are accepted
+    When the Mayor sends the card "Top 5" with the items:
+      | item                             |
+      | Close it\|mw-epic\|mw-epic:closed |
+      | Check it\|mw-b\|mw-b:verified     |
+    Then the card is delivered as one record of class "card" from the Mayor to the Governor, with no summary
+
+  Scenario: Every card sent is kept, and mw card list prints them newest first
+    When the Mayor sends the card "First card" with the items:
+      | item     |
+      | Read it  |
+    And the Mayor sends the card "Second card" with the items:
+      | item     |
+      | Look     |
+    Then the list of sent cards has 2 entries
+    And listing the cards prints "Second card" before "First card"
