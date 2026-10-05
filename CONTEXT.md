@@ -136,6 +136,10 @@ _Avoid_: Page, ping, alert
 One hold-speak-release from the Governor and the Mayor's spoken answer to it. A turn carries no tool work.
 _Avoid_: Message, exchange
 
+**Stamp**:
+A record on chain, testnet for now, that a rig's branch held a commit: in the clear only the commitment (SHA-256 of the rig, a newline, the commit id), the body sealed to the Governor's key. `mw next` queues one for each landing and `mw sync` for each vault push; the `chain-stamp` job broadcasts it; `mw prove <rig> <commit>` shows its txid, block time and explorer URL. See `docs/chain-stamps.md`.
+_Avoid_: Timestamp, anchor, receipt, notarization
+
 ### Events
 
 **Event**:

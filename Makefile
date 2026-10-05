@@ -63,6 +63,7 @@ lint:
 	scripts/check-heavy.sh
 	scripts/check-wg-enrol.sh
 	scripts/check-gate-jobs.sh
+	scripts/check-chain-stamps-doc.sh
 
 clean:
 	rm -rf bin
