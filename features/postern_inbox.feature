@@ -184,6 +184,24 @@ Feature: mw postern inbox
     And bead "mw-thread.1" is commented by the Governor saying "ship it"
     And it did not print "ship it"
 
+  Scenario: a Governor's message in a bead's channel that begins VERIFIED is recorded with VERIFIED as the comment's first word
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And bead "mw-thread.v" is known to the tracker
+    And a postern message from "governor-pubkey-hex" in the channel of bead "mw-thread.v" with text "VERIFIED. I do wish close and reopen saved my history" and txid "ver-txid-1"
+    When mw postern inbox is run
+    Then reading succeeds
+    And bead "mw-thread.v" is commented VERIFIED by the Governor with txid "ver-txid-1" and text "VERIFIED. I do wish close and reopen saved my history"
+    And bead "mw-thread.v" counts as verified
+
+  Scenario: a Governor's message that only contains verified later is recorded as before
+    Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
+    And bead "mw-thread.w" is known to the tracker
+    And a postern message from "governor-pubkey-hex" in the channel of bead "mw-thread.w" with text "I verified it myself" and txid "ver-txid-2"
+    When mw postern inbox is run
+    Then reading succeeds
+    And bead "mw-thread.w" is commented by the Governor saying "I verified it myself"
+    And bead "mw-thread.w" does not count as verified
+
   Scenario: the same txid is never commented on a bead twice
     Given mw postern inbox trusts "governor-pubkey-hex" as the Governor's key
     And bead "mw-thread.2" is known to the tracker

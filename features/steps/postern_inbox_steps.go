@@ -200,6 +200,9 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^mail "([^"]*)" was sent to mayor$`, c.mailWasSentToMayor)
 	ctx.Then(`^bead "([^"]*)" has no comment$`, c.beadHasNoComment)
 	ctx.Then(`^bead "([^"]*)" is commented by the Governor saying "([^"]*)"$`, c.beadIsCommentedByTheGovernor)
+	ctx.Then(`^bead "([^"]*)" is commented VERIFIED by the Governor with txid "([^"]*)" and text "([^"]*)"$`, c.beadIsCommentedVerifiedByTheGovernor)
+	ctx.Then(`^bead "([^"]*)" counts as verified$`, func(bead string) error { return c.beadVerifiedIs(bead, true) })
+	ctx.Then(`^bead "([^"]*)" does not count as verified$`, func(bead string) error { return c.beadVerifiedIs(bead, false) })
 	ctx.Then(`^bead "([^"]*)" has (\d+) comments?$`, c.beadHasNComments)
 	ctx.Then(`^it did not print "([^"]*)"$`, c.itDidNotPrintText)
 	ctx.Then(`^no mail was sent for the reply$`, c.noMailWasSent)
@@ -1089,6 +1092,46 @@ func (c *posternInboxContext) beadHasNoComment(bead string) error {
 	}
 	if len(comments) != 0 {
 		return fmt.Errorf("expected no comment on %s, got: %+v", bead, comments)
+	}
+	return nil
+}
+
+// beadIsCommentedVerifiedByTheGovernor checks that bead's last comment opens
+// with the word VERIFIED and carries the time, the txid and the Governor's
+// whole text verbatim (mw-gq6.262).
+func (c *posternInboxContext) beadIsCommentedVerifiedByTheGovernor(bead, txid, text string) error {
+	if err := c.itSucceeds(); err != nil {
+		return err
+	}
+	comments, err := c.memory.StoryComments(context.Background(), bead)
+	if err != nil {
+		return err
+	}
+	if len(comments) == 0 {
+		return fmt.Errorf("expected a comment on %s, found none", bead)
+	}
+	want := fmt.Sprintf("VERIFIED by the Governor via postern %s, txid %s: %s", posternReplyStamp.UTC().Format(time.RFC3339), txid, text)
+	if got := comments[len(comments)-1].Text; got != want {
+		return fmt.Errorf("expected the comment\n%s\ngot\n%s", want, got)
+	}
+	return nil
+}
+
+// beadVerifiedIs checks whether any comment on bead begins with the Verify
+// word, the test the card and the snapshot apply.
+func (c *posternInboxContext) beadVerifiedIs(bead string, want bool) error {
+	comments, err := c.memory.StoryComments(context.Background(), bead)
+	if err != nil {
+		return err
+	}
+	got := false
+	for _, cm := range comments {
+		if strings.HasPrefix(strings.TrimSpace(cm.Text), application.PosternSnapshotVerifiedMarker) {
+			got = true
+		}
+	}
+	if got != want {
+		return fmt.Errorf("expected %s verified=%v, comments: %+v", bead, want, comments)
 	}
 	return nil
 }
