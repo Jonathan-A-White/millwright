@@ -16,6 +16,12 @@ Feature: mw deputy
   mail waits (status 8 as well, for nothing was started). With no mail to wake
   it for, an idle Deputy is just already up.
 
+  A Deputy whose session has already handed off — a handoff written after its
+  window was opened — will not work the mail, so nudging it leaves the mail
+  unread. When its pane is idle, mw closes that window and starts a fresh
+  Deputy, which reads the mail from its handoff. A handed-off Deputy that is
+  still busy is left alone, as any busy Deputy is.
+
   Background:
     Given a vault holding the "deputy" seat
     And the "deputy" seat's charter
@@ -69,6 +75,27 @@ Feature: mw deputy
     Then mw deputy is refused saying the Deputy is busy in "deputy-2026-09-30-02" and the mail waits
     And mw deputy leaves with the status 8
     And nothing was typed into the window "deputy-2026-09-30-02"
+    And no window was opened
+
+  Scenario: An idle Deputy that has handed off is closed and a fresh Deputy is started
+    Given the window "deputy-2026-09-29-02" was opened at "2026-09-29T08:00:00Z"
+    And the "deputy" seat's newest handoff was written at "2026-09-29T09:00:00Z"
+    And the Deputy's box holds 2 unread messages
+    When mw deputy is run
+    Then mw deputy succeeds
+    And the window "deputy-2026-09-29-02" was closed
+    And exactly one window was opened
+    And seat up says it started the seat in the window "deputy-2026-09-30-02"
+    And a reaper was armed on the window "deputy-2026-09-30-02" in when-idle mode for the "deputy" seat
+
+  Scenario: A Deputy that has handed off but is still busy is left alone
+    Given the window "deputy-2026-09-29-02" was opened at "2026-09-29T08:00:00Z"
+    And the "deputy" seat's newest handoff was written at "2026-09-29T09:00:00Z"
+    And the pane of the window "deputy-2026-09-29-02" is busy
+    And the Deputy's box holds 1 unread messages
+    When mw deputy is run
+    Then mw deputy is refused saying the Deputy is busy in "deputy-2026-09-29-02" and the mail waits
+    And the window "deputy-2026-09-29-02" was not closed
     And no window was opened
 
   Scenario: An idle Deputy with no unread mail is already up and is typed nothing

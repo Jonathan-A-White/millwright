@@ -33,7 +33,9 @@ func newDeputyCmd() *cobra.Command {
 			"so the Mayor can mail the Deputy and fire, and tell \"already up\" from a failure. If that window's pane\n" +
 			"is idle at an empty input line and the Deputy's box holds unread mail, it types the mail nudge into it\n" +
 			"instead and says it nudged the Deputy (status 0); a busy pane is left alone: \"the Deputy is busy in\n" +
-			"window <name>; the mail waits\" (status " + fmt.Sprint(application.DeputyUpExit) + ").",
+			"window <name>; the mail waits\" (status " + fmt.Sprint(application.DeputyUpExit) + "). A window whose session has\n" +
+			"already handed off (a handoff newer than the window) and whose pane is idle is closed instead, and a\n" +
+			"fresh Deputy is started.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			_, err := bringUpDeputy(cmd.Context(), reason, cmd.OutOrStdout())

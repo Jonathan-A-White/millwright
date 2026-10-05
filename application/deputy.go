@@ -66,7 +66,8 @@ func DeputyIsUp(err error) (*DeputyAlreadyUp, bool) {
 // only when none is. Given a Terminal and a Mail, an open window whose pane is
 // idle at an empty input line while its box holds unread mail is typed the
 // mail nudge instead, and Run says it nudged; a pane at work is left alone and
-// the refusal says the mail waits.
+// the refusal says the mail waits. An open window whose session has handed off
+// and whose pane is idle is closed instead, and a fresh Deputy is started.
 type Deputy struct {
 	Seats    SeatFiles
 	Windows  Windows
@@ -111,7 +112,13 @@ func (d Deputy) Run(ctx context.Context) (SeatUpReport, error) {
 		return SeatUpReport{}, err
 	}
 	if up != "" {
-		return d.wakeIdle(ctx, up)
+		closed, err := d.closeHandedOff(ctx, up)
+		if err != nil {
+			return SeatUpReport{}, err
+		}
+		if !closed {
+			return d.wakeIdle(ctx, up)
+		}
 	}
 
 	told := DeputyStanding
@@ -134,6 +141,55 @@ func (d Deputy) Run(ctx context.Context) (SeatUpReport, error) {
 		Armer:        d.Armer,
 		ReapWhenIdle: true,
 	}.Run(ctx)
+}
+
+// closeHandedOff closes the Deputy's window when its session has already handed
+// off — a handoff was written after the window was opened — and its pane sits
+// idle: a session that has handed off will not work the mail, so nudging it
+// would leave the mail unread. It says whether it closed the window, and Run
+// then starts a fresh Deputy. A window nothing can date, a pane that is not
+// idle, or a terminal or handoff that cannot be read is a Deputy that is up.
+func (d Deputy) closeHandedOff(ctx context.Context, name string) (bool, error) {
+	if d.Terminal == nil {
+		return false, nil
+	}
+	listed, err := d.Windows.List(ctx)
+	if err != nil {
+		return false, nil
+	}
+	var opened time.Time
+	for _, window := range listed {
+		if window.Name == name {
+			opened = window.Opened
+		}
+	}
+	if opened.IsZero() {
+		return false, nil
+	}
+	start, err := d.Seats.SeatStart(ctx, DeputySeat, d.Host)
+	if err != nil || !handedOffSince(start.Handoffs, opened) {
+		return false, nil
+	}
+	open, err := d.Terminal.OpenWindows(ctx)
+	if err != nil {
+		return false, nil
+	}
+	for _, window := range open {
+		if window.Name != name {
+			continue
+		}
+		if state, err := d.Terminal.PaneState(ctx, window.ID); err != nil || state != PaneIdle {
+			return false, nil
+		}
+		if err := d.Terminal.Close(ctx, window.ID); err != nil {
+			return false, fmt.Errorf("closing the window %s of the Deputy that has handed off: %w", name, err)
+		}
+		if d.Out != nil {
+			fmt.Fprintf(d.Out, "closed the window %s: its Deputy had handed off\n", name)
+		}
+		return true, nil
+	}
+	return false, nil
 }
 
 // wakeIdle is what Run does with a Deputy that is up. When its box holds unread

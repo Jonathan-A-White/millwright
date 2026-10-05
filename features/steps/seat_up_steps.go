@@ -101,6 +101,7 @@ func InitializeSeatUpScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the "([^"]*)" seat's acting file names that window$`, c.theActingFileNamesThatWindow)
 	ctx.Given(`^the "([^"]*)" seat's acting file names the window "([^"]*)"$`, c.theActingFileNamesTheWindow)
 	ctx.Given(`^the newest handoff was written at "([^"]*)"$`, c.theNewestHandoffWasWrittenAt)
+	ctx.Given(`^the "([^"]*)" seat's newest handoff was written at "([^"]*)"$`, c.theSeatsNewestHandoffWasWrittenAt)
 
 	ctx.Given(`^the seat up was run from the window "([^"]*)"$`, c.theSeatUpWasRunFromTheWindow)
 	ctx.Given(`^the reaper cannot be started$`, c.theReaperCannotBeStarted)
@@ -247,11 +248,15 @@ func (c *seatUpContext) theActingFileNamesTheWindow(seat, window string) error {
 }
 
 func (c *seatUpContext) theNewestHandoffWasWrittenAt(when string) error {
+	return c.theSeatsNewestHandoffWasWrittenAt("mayor", when)
+}
+
+func (c *seatUpContext) theSeatsNewestHandoffWasWrittenAt(seat, when string) error {
 	written, err := time.Parse(time.RFC3339, when)
 	if err != nil {
 		return fmt.Errorf("%q is not a time: %w", when, err)
 	}
-	start, err := c.seatFiles().SeatStart(context.Background(), "mayor", seatUpHost)
+	start, err := c.seatFiles().SeatStart(context.Background(), seat, seatUpHost)
 	if err != nil {
 		return err
 	}
