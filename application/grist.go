@@ -258,14 +258,17 @@ type GrindLine struct {
 	Effort string    `json:"effort,omitempty"`
 	// ModelFrom and EffortFrom say where Model and Effort came from: "grist"
 	// when the sender asked for them, "grind file" otherwise.
-	ModelFrom  string     `json:"model_from,omitempty"`
-	EffortFrom string     `json:"effort_from,omitempty"`
-	Status     string     `json:"status"`
-	Reason     string     `json:"reason,omitempty"`
-	Tokens     int        `json:"tokens,omitempty"`
-	Fuel       *GrindFuel `json:"fuel,omitempty"`
-	CostUSD    float64    `json:"total_cost_usd,omitempty"`
-	Turns      int        `json:"turns,omitempty"`
+	ModelFrom  string `json:"model_from,omitempty"`
+	EffortFrom string `json:"effort_from,omitempty"`
+	Status     string `json:"status"`
+	Reason     string `json:"reason,omitempty"`
+	// Photos is how many photos the grist carried, which the mill deletes once
+	// the answer is delivered. Always written: 0 is an answer.
+	Photos  int        `json:"photos"`
+	Tokens  int        `json:"tokens,omitempty"`
+	Fuel    *GrindFuel `json:"fuel,omitempty"`
+	CostUSD float64    `json:"total_cost_usd,omitempty"`
+	Turns   int        `json:"turns,omitempty"`
 	// Denials is how many times the session was refused a tool: a Read of
 	// a mistyped path, say. Not a failure by itself.
 	Denials   int     `json:"denials,omitempty"`

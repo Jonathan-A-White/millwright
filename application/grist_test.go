@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -434,5 +435,54 @@ func TestGristGrindDeletesTheSendersOwnPhotosOfARefusedGrist(t *testing.T) {
 	}
 	if backend.HasBlob(hash) {
 		t.Fatalf("the sender's own photo was left on the backend")
+	}
+}
+
+// aGristWithPhotos adds a grist from the phone carrying n photos, sealed by the
+// phone, to backend as txid.
+func aGristWithPhotos(t *testing.T, mill application.GristGrind, backend *apptest.FakePostern, txid string, n int) {
+	t.Helper()
+	phone := &apptest.FakeCipher{From: gristPhoneKey}
+	millKey := mustMillKey(t, mill)
+	var photos []application.PosternAttachment
+	for i := 0; i < n; i++ {
+		sealed, _ := phone.EncryptBytes(millKey, []byte(fmt.Sprintf("photo %s %d", txid, i)))
+		hash, size, _ := backend.UploadBlob(context.Background(), mustBase64(t, sealed))
+		photos = append(photos, application.PosternAttachment{Hash: hash, Size: size, Mime: "image/webp"})
+	}
+	plain, _ := json.Marshal(application.GristPlaintext{
+		Grist: application.GristName{App: "cairn", Kind: "sweep", V: "1.1"}, Input: json.RawMessage(`{}`), Attachments: photos,
+	})
+	ct, _ := phone.Encrypt(millKey, string(plain))
+	backend.AddRecord(application.PosternRecord{Txid: txid, Class: application.GristClass, From: gristPhoneKey, To: millKey,
+		Signer: gristPhoneKey, SignerApps: []string{"cairn"}, Ciphertext: ct})
+}
+
+// The mill's record of a grist says how many photos it carried, since the
+// photos are deleted once the answer is delivered: 0 is an answer, so the
+// field is written for a grist with none too.
+func TestGristGrindRecordsHowManyPhotosEachGristCarried(t *testing.T) {
+	mill, backend, grinder := aSmallMill(t)
+	mill.Cap = 3
+	mill.Ceilings = application.GristCeilings{DailyLimit: 10}
+	grinder.Result = application.SessionResult{Subtype: "success", Answer: json.RawMessage(`{"items":[],"placeName":"x"}`)}
+	mill.Grinds.(*apptest.FakeGrinds).SetFile("/rigs/cairn", "c0ffee", "grinds/sweep.json", []byte(`{"grind":1,"app":"cairn","kind":"sweep","versions":["1.1"],
+		"model":"sonnet","effort":"low","instructions":"grinds/sweep.md","answerSchema":"schema.json",
+		"attachments":{"min":0,"max":4,"mime":["image/webp"],"maxBytes":1000}}`))
+	aGristWithPhotos(t, mill, backend, "direct:g2", 2)
+	aGristWithPhotos(t, mill, backend, "direct:g3", 0)
+
+	if _, err := mill.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	lines, _ := mill.State.Lines(context.Background())
+	if len(lines) != 3 {
+		t.Fatalf("expected three lines, got %+v", lines)
+	}
+	for i, want := range []string{`"photos":1`, `"photos":2`, `"photos":0`} {
+		line, _ := json.Marshal(lines[i])
+		if !strings.Contains(string(line), want) || lines[i].Status != application.GristAnswered {
+			t.Errorf("line %d (%s) want %s and answered, got %s", i, lines[i].Txid, want, line)
+		}
 	}
 }
