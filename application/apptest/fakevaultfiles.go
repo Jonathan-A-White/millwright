@@ -41,6 +41,9 @@ type FakeVaultFiles struct {
 	HeadSHA string
 	HeadErr error
 
+	// BranchName is what Branch reports and HeadTitle what HeadSubject does.
+	BranchName, HeadTitle string
+
 	marks, pulls, pushes int
 	pullTries            int
 	commits              []VaultCommit
@@ -135,6 +138,20 @@ func (f *FakeVaultFiles) Head(_ context.Context) (string, error) {
 		return "", f.HeadErr
 	}
 	return f.HeadSHA, nil
+}
+
+// Branch implements application.VaultFiles.
+func (f *FakeVaultFiles) Branch(_ context.Context) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.BranchName, nil
+}
+
+// HeadSubject implements application.VaultFiles.
+func (f *FakeVaultFiles) HeadSubject(_ context.Context) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.HeadTitle, nil
 }
 
 // Commits is every commit the fake was asked to make, in order.

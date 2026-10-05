@@ -485,3 +485,20 @@ func TestAnyOtherGitFailureIsLeftExactlyAsGitSaidIt(t *testing.T) {
 		t.Fatalf("expected git's own words, got %v", err)
 	}
 }
+
+func TestBranchAndHeadSubjectNameTheCheckedOutBranchAndItsHeadsFirstLine(t *testing.T) {
+	here, _ := twoHosts(t)
+	files := vault.New(here)
+	write(t, here, "notes.md", "a note\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "Add a note", "-m", "and a body line")
+
+	branch, err := files.Branch(context.Background())
+	if err != nil || branch != "main" {
+		t.Fatalf("expected branch main, got %q, %v", branch, err)
+	}
+	subject, err := files.HeadSubject(context.Background())
+	if err != nil || subject != "Add a note" {
+		t.Fatalf("expected the head's subject, got %q, %v", subject, err)
+	}
+}

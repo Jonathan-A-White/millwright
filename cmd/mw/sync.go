@@ -189,6 +189,13 @@ func hostSync(sync application.Sync) (application.Sync, error) {
 	}
 	sync.Mode = setting.Configured
 	sync.Home = files
+	if sync.Stamps == nil {
+		// A stamp queue that cannot be placed queues nothing: no sync waits on a
+		// chain stamp.
+		if queue, err := stampQueue(); err == nil {
+			sync.Stamps = queue
+		}
+	}
 	switch {
 	case said:
 		sync.BackupInterval = time.Duration(minutes) * time.Minute

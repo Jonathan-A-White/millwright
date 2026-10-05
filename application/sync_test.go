@@ -925,3 +925,81 @@ func TestASyncLockHeldPastItsBoundNamesTheLockFile(t *testing.T) {
 		t.Fatalf("expected the failure to name the lock file %q, got %q", want, err)
 	}
 }
+
+func TestSyncQueuesAStampOfTheVaultsPushedHead(t *testing.T) {
+	sync, files, _ := syncing(t)
+	stamps := apptest.NewFakeStampQueue()
+	sync.Stamps = stamps
+	files.Outgoing = 2
+	files.HeadSHA = "0123456789abcdef0123456789abcdef01234567"
+	files.BranchName = "main"
+	files.HeadTitle = "vault: the day's ledgers"
+
+	report, err := sync.Run(context.Background())
+	if err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	if report.Pushed != 2 || report.StampNote != "" {
+		t.Fatalf("expected 2 pushed and no stamp note, got %+v", report)
+	}
+	pending, err := stamps.Pending(context.Background())
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("expected one pending stamp, got %v, %v", pending, err)
+	}
+	got := pending[0].Stamp
+	if got.Rig != "vault" || got.Branch != "main" || got.Commit != files.HeadSHA ||
+		got.Story != "" || got.Title != "vault: the day's ledgers" || got.Host != "vps" || !got.At.Equal(level) {
+		t.Fatalf("expected the vault's head stamped, got %+v", got)
+	}
+}
+
+func TestSyncThatPushesNothingQueuesNoStamp(t *testing.T) {
+	sync, files, _ := syncing(t)
+	stamps := apptest.NewFakeStampQueue()
+	sync.Stamps = stamps
+	files.Incoming = 3
+	files.HeadSHA = "0123456789abcdef0123456789abcdef01234567"
+
+	if _, err := sync.Run(context.Background()); err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	if pending, _ := stamps.Pending(context.Background()); len(pending) != 0 {
+		t.Fatalf("expected no stamp when nothing was pushed, got %v", pending)
+	}
+}
+
+func TestAStampQueueThatFailsNeitherFailsTheSyncNorChangesWhatItPushed(t *testing.T) {
+	sync, files, _ := syncing(t)
+	stamps := apptest.NewFakeStampQueue()
+	stamps.AppendErr = errors.New("disk full")
+	sync.Stamps = stamps
+	files.Outgoing = 2
+	files.HeadSHA = "0123456789abcdef0123456789abcdef01234567"
+
+	report, err := sync.Run(context.Background())
+	if err != nil {
+		t.Fatalf("expected the sync to stand, got %v", err)
+	}
+	if report.Pushed != 2 {
+		t.Fatalf("expected the push count to stay 2, got %d", report.Pushed)
+	}
+	if !strings.Contains(report.StampNote, "disk full") || !strings.Contains(report.String(), "chain stamp: not queued") {
+		t.Fatalf("expected the error noted on the report, got %q / %s", report.StampNote, report)
+	}
+}
+
+func TestAVaultHeadThatCannotBeReadIsNotedAndNothingIsQueued(t *testing.T) {
+	sync, files, _ := syncing(t)
+	stamps := apptest.NewFakeStampQueue()
+	sync.Stamps = stamps
+	files.Outgoing = 1
+	files.HeadErr = errors.New("no head")
+
+	report, err := sync.Run(context.Background())
+	if err != nil || report.Pushed != 1 || !strings.Contains(report.StampNote, "no head") {
+		t.Fatalf("expected a noted head error and the sync standing, got %+v, %v", report, err)
+	}
+	if pending, _ := stamps.Pending(context.Background()); len(pending) != 0 {
+		t.Fatalf("expected nothing queued, got %v", pending)
+	}
+}

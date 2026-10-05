@@ -25,6 +25,14 @@ The body is JSON: `rig`, `branch`, `commit`, `story`, `title` (the story's
 title), `host`, `at` (UTC, RFC 3339). Nothing of it but the commitment is in the
 clear, so the chain shows neither the rig nor the commit.
 
+## Vault pushes
+
+`mw sync` queues a stamp after every vault push that sent at least one commit:
+rig `vault`, the vault's branch, the pushed head commit, its subject as the
+title, and no story, so the job comments on none and the txid is only in
+`sent.jsonl`. A queue that will not take it is a `chain stamp: not queued` note
+on the sync's line; the sync stands.
+
 ## The git note
 
 When the chain-stamp job has broadcast a stamp and this host has a checkout of

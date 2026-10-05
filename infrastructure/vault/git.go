@@ -239,6 +239,26 @@ func (v *Vault) Head(ctx context.Context) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// Branch implements application.VaultFiles: the name of the branch this clone
+// has checked out.
+func (v *Vault) Branch(ctx context.Context) (string, error) {
+	out, err := v.git(ctx, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// HeadSubject implements application.VaultFiles: the first line of the message
+// of the commit this clone has checked out.
+func (v *Vault) HeadSubject(ctx context.Context) (string, error) {
+	out, err := v.git(ctx, "log", "-1", "--format=%s", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // upstream is the branch this clone tracks, and the reason there is none: a
 // vault whose branch tracks nothing has no other host to be level with.
 func (v *Vault) upstream(ctx context.Context) (string, error) {

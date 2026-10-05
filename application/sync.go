@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // LedgerPattern is the part of the vault both hosts append to and neither one
@@ -273,6 +275,13 @@ type VaultFiles interface {
 	// Head reports the commit the vault's clone has checked out right now, so
 	// that a caller that has just committed something there can name it by.
 	Head(ctx context.Context) (string, error)
+
+	// Branch reports the name of the branch the vault's clone has checked out.
+	Branch(ctx context.Context) (string, error)
+
+	// HeadSubject reports the first line of the message of the commit Head
+	// names.
+	HeadSubject(ctx context.Context) (string, error)
 }
 
 // TrackerSync is the port mw brings the one beads database level with the other
@@ -454,6 +463,10 @@ type SyncReport struct {
 	Pushed int
 	At     time.Time
 
+	// StampNote is why the chain stamp of what this sync pushed was not
+	// queued. Empty when it was, or when nothing was pushed.
+	StampNote string
+
 	// Blocked names the uncommitted tracked files that kept the vault half from
 	// running at all. It is empty for every sync that got to touch the vault.
 	Blocked []string
@@ -518,6 +531,9 @@ func (r SyncReport) String() string {
 	b.WriteString(r.beadsPhrase())
 	if r.Retried != "" {
 		fmt.Fprintf(&b, "; %s", r.Retried)
+	}
+	if r.StampNote != "" {
+		fmt.Fprintf(&b, "; chain stamp: not queued: %s", r.StampNote)
 	}
 	if r.GCed {
 		b.WriteString("; garbage collected")
@@ -637,6 +653,12 @@ type Sync struct {
 	// test that has no stake in this race.
 	Lock HostLock
 
+	// Stamps is where a vault push leaves a chain stamp of the pushed head for
+	// the follower's chain-stamp job to broadcast (docs/chain-stamps.md). A nil
+	// Stamps queues none, and a queue that will not take one is a note on the
+	// report, never a failed sync.
+	Stamps StampQueue
+
 	// SyncHalts is this host's own mark of a halted sync: written once the
 	// beads cycle halts on a merge conflict or a stuck working set, left alone
 	// on a halt that repeats, and cleared once the cycle is level again. It is
@@ -711,6 +733,9 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 		if report.Pushed, err = s.Vault.Push(ctx); err != nil {
 			return report, fmt.Errorf("syncing the vault on %s: %w", s.Host, err)
 		}
+		if report.Pushed > 0 {
+			s.queueStamp(ctx, &report)
+		}
 	}
 
 	// A host whose vault half never ran is not level, and the note says it was.
@@ -743,6 +768,32 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 		return s.recordLevelInTheOneDatabase(ctx, report)
 	}
 	return s.syncBeadsRecordingLevel(ctx, report)
+}
+
+// VaultRig is the rig name a stamp of a vault push carries: the vault is no
+// rig mw lands stories in, but it is stamped the way one is.
+const VaultRig = "vault"
+
+// queueStamp leaves a chain stamp of the vault's head, the commit a push has
+// just published, with no story: the chain-stamp job comments on none. It never
+// fails the sync: whatever stops it is a note on the report.
+func (s Sync) queueStamp(ctx context.Context, report *SyncReport) {
+	if s.Stamps == nil {
+		return
+	}
+	stamp := domain.Stamp{Rig: VaultRig, Host: s.Host, At: s.now().UTC()}
+	var err error
+	if stamp.Commit, err = s.Vault.Head(ctx); err == nil {
+		if stamp.Branch, err = s.Vault.Branch(ctx); err == nil {
+			stamp.Title, err = s.Vault.HeadSubject(ctx)
+		}
+	}
+	if err == nil {
+		err = s.Stamps.Append(ctx, stamp)
+	}
+	if err != nil {
+		report.StampNote = firstLine(err.Error())
+	}
 }
 
 // recordLevelInTheOneDatabase is the beads half on a host whose notes go
