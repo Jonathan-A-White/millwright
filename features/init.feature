@@ -12,6 +12,7 @@ Feature: mw init
     When mw init makes the vault "fresh" with the prefix "tst"
     Then initialising succeeds
     And the vault holds the three seat charters
+    And the vault holds the seat kit: the Deputy's charter, the Mayor's procedures and handoff template, and the seats page
     And the vault's vision and ledger are the template's blank ones
     And the vault is a git repository with one commit
     And the beads database was made with the prefix "tst"

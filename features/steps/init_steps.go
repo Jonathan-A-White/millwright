@@ -117,6 +117,7 @@ func InitializeInitScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^initialising is refused, saying --join and --prefix cannot both be given$`, c.refusedJoinAndPrefix)
 	ctx.Then(`^the beads database was picked up rather than made$`, c.databasePickedUp)
 	ctx.Then(`^the vault holds the three seat charters$`, c.theVaultHoldsTheCharters)
+	ctx.Then(`^the vault holds the seat kit: the Deputy's charter, the Mayor's procedures and handoff template, and the seats page$`, c.theVaultHoldsTheSeatKit)
 	ctx.Then(`^the vault's vision and ledger are the template's blank ones$`, c.blankVisionAndLedger)
 	ctx.Then(`^the vault is a git repository with one commit$`, c.oneCommit)
 	ctx.Then(`^the beads database was made with the prefix "([^"]*)"$`, c.databaseMadeWith)
@@ -338,6 +339,21 @@ func (c *initContext) theVaultHoldsTheCharters() error {
 		charter := filepath.Join(dir, "seats", seat, "charter.md")
 		if written, err := os.ReadFile(charter); err != nil || len(written) == 0 {
 			return fmt.Errorf("the %s's charter is not in the vault at %s (%v)", seat, charter, err)
+		}
+	}
+	return nil
+}
+
+func (c *initContext) theVaultHoldsTheSeatKit() error {
+	for _, file := range []string{
+		"seats/README.md",
+		"seats/deputy/charter.md",
+		"seats/mayor/procedures.md",
+		"seats/mayor/handoffs/TEMPLATE.md",
+		"seats/builder/rigs/README.md",
+	} {
+		if written, err := os.ReadFile(filepath.Join(c.vaultDir(), file)); err != nil || len(written) == 0 {
+			return fmt.Errorf("%s is not in the vault (%v)", file, err)
 		}
 	}
 	return nil
