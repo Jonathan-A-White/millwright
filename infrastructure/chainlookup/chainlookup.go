@@ -15,14 +15,12 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 )
 
-var _ application.ChainLookup = (*WhatsOnChain)(nil)
-
 // DefaultBase is WhatsOnChain's testnet API.
 const DefaultBase = "https://api.whatsonchain.com/v1/bsv/test"
 
 const timeout = 30 * time.Second
 
-// WhatsOnChain is the application.ChainLookup that reads
+// WhatsOnChain is the bsv.Lookup that reads
 // GET <base>/tx/hash/<txid>.
 type WhatsOnChain struct {
 	base   string
@@ -44,8 +42,8 @@ type txWire struct {
 	BlockTime   int64 `json:"blocktime"`
 }
 
-// Tx implements application.ChainLookup. A 404 is a transaction the explorer
-// has not heard of, not an error.
+// Tx implements bsv.Lookup, application.Chain's Tx. A 404 is a transaction
+// the explorer has not heard of, not an error.
 func (w *WhatsOnChain) Tx(ctx context.Context, txid string) (application.ChainTx, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, w.base+"/tx/hash/"+url.PathEscape(txid), nil)
 	if err != nil {

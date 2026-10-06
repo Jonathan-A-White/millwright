@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 )
 
 // A direct record names its channel in the clear, postern's docs/protocol.md
@@ -82,6 +83,7 @@ func TestPosternSendOnTheChainChannelNamesNeitherChannelNorBead(t *testing.T) {
 	f := newSendFixture()
 	send := f.send(application.PosternChannelChain)
 	send.Keys = echoKeys{stubPosternKeys{pubKey: sendMayorKey}}
+	send.Chain = apptest.NewFakeChain(f.backend, send.Keys)
 	if _, err := send.Run(context.Background(), application.PosternSendRequest{Text: "hi", Topic: "general"}); err != nil {
 		t.Fatal(err)
 	}

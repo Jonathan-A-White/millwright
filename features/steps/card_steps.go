@@ -67,6 +67,7 @@ func InitializeCardScenario(ctx *godog.ScenarioContext) {
 func (c *cardContext) cards() application.Cards {
 	return application.Cards{
 		Postern:     c.backend,
+		Chain:       apptest.NewFakeChain(c.backend, cardKeys{}),
 		Beads:       c.tracker,
 		Log:         c.log,
 		Cipher:      &apptest.FakeCipher{From: cardMayorKey},

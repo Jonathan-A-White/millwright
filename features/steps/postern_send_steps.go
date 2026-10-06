@@ -323,6 +323,7 @@ func (c *posternSendContext) theBeadExists(id string) error {
 func (c *posternSendContext) send() application.PosternSend {
 	return application.PosternSend{
 		Postern:     c.backend,
+		Chain:       apptest.NewFakeChain(c.backend, c.keys),
 		Cipher:      c.cipher,
 		Keys:        c.keys,
 		Tracker:     c.tracker,

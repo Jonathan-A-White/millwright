@@ -55,6 +55,7 @@ func (f *shipFixture) newShip() *application.EventShip {
 		Log:               f.log,
 		State:             f.state,
 		Postern:           f.backend,
+		ChainRoad:         apptest.NewFakeChain(f.backend, shipKeys{stubPosternKeys{pubKey: "mayor-key"}}),
 		Cipher:            f.cipher,
 		Keys:              shipKeys{stubPosternKeys{pubKey: "mayor-key"}},
 		GovernorKey:       "governor-key",

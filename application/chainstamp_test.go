@@ -55,7 +55,7 @@ func (f *chainStampFixture) job() application.ChainStamp {
 	cipher := apptest.NewFakeCipher()
 	cipher.From = stampTestSender
 	return application.ChainStamp{
-		Queue: f.queue, Postern: f.backend, Keys: f.keys, Cipher: cipher, Tracker: f.tracker,
+		Queue: f.queue, Chain: apptest.NewFakeChain(f.backend, f.keys), Keys: f.keys, Cipher: cipher, Tracker: f.tracker,
 		GovernorKey: stampTestKey,
 		Now:         func() time.Time { return time.Date(2026, 10, 4, 9, 0, 0, 0, time.UTC) },
 		Err:         &f.said,

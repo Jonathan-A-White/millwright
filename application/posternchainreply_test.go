@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 )
 
 // chainReplyFixture is a direct-channel send whose keys sign by echoing the
@@ -18,6 +19,7 @@ func chainReplyFixture() (*sendFixture, application.PosternSend) {
 	f := newSendFixture()
 	send := f.send("")
 	send.Keys = echoKeys{stubPosternKeys{pubKey: sendMayorKey}}
+	send.Chain = apptest.NewFakeChain(f.backend, send.Keys)
 	return f, send
 }
 

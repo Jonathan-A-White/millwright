@@ -30,6 +30,7 @@ func newCards(backend *apptest.FakePostern, out *bytes.Buffer) application.Cards
 		Beads:       cardBeads(),
 		Log:         apptest.NewFakeCardLog(),
 		Postern:     backend,
+		Chain:       apptest.NewFakeChain(backend, stubPosternKeys{pubKey: "mayor-key"}),
 		Cipher:      &apptest.FakeCipher{From: "mayor-key"},
 		Keys:        stubPosternKeys{pubKey: "mayor-key"},
 		GovernorKey: "governor-key",

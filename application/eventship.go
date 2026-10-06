@@ -88,8 +88,10 @@ type EventShip struct {
 	Log     EventLog
 	State   ShipStates
 	Postern Postern
-	Cipher  Cipher
-	Keys    PosternKeyFile
+	// ChainRoad is the chain a record goes on, when Chain says records do.
+	ChainRoad Chain
+	Cipher    Cipher
+	Keys      PosternKeyFile
 	// GovernorKey is who the records are sealed to.
 	GovernorKey string
 	// Chain is whether records go on chain at all, and DailyCap the most
@@ -399,11 +401,10 @@ func (s *EventShip) seal(evs []events.Event, lane string, now time.Time) ([]byte
 }
 
 func (s *EventShip) putOnChain(ctx context.Context, payload []byte) (string, error) {
-	_, address, err := s.Keys.PublicKey()
-	if err != nil {
-		return "", err
+	if s.ChainRoad == nil {
+		return "", fmt.Errorf("no chain is configured")
 	}
-	return broadcastRecord(ctx, s.Postern, s.Keys, address, payload, s.Err)
+	return s.ChainRoad.Send(ctx, payload)
 }
 
 // alarm appends the event that says the day's cap is reached, once a day.

@@ -61,15 +61,15 @@ type CommitNotes interface {
 }
 
 // ChainStamp broadcasts the stamps that are queued, on testnet through the
-// postern backend: for each, the sealed record SealStamp builds is signed and
-// broadcast exactly as a message's public chain copy is (broadcastRecord), its
+// postern backend: for each, the sealed record SealStamp builds is sent on the
+// Chain exactly as a message's public chain copy is (Chain.Send), its
 // txid is recorded with the stamp, and the story it was landed for is told.
 // A stamp that cannot be broadcast stays pending, with a failure counted, for
 // the next run; nothing a stamp does fails the run, because the job runs every
 // minute and each run is a retry. docs/chain-stamps.md.
 type ChainStamp struct {
 	Queue       StampQueue
-	Postern     Postern
+	Chain       Chain
 	Keys        PosternKeyFile
 	Cipher      Cipher
 	Tracker     WorkTracker
@@ -108,7 +108,10 @@ func (c ChainStamp) Run(ctx context.Context) error {
 	if strings.TrimSpace(c.GovernorKey) == "" {
 		return fmt.Errorf("%d stamp(s) wait, and there is no Governor key to seal them to: set postern_governor_key", len(pending))
 	}
-	from, address, err := c.Keys.PublicKey()
+	if c.Chain == nil {
+		return fmt.Errorf("%d stamp(s) wait, and there is no chain to send them on", len(pending))
+	}
+	from, _, err := c.Keys.PublicKey()
 	if err != nil {
 		return fmt.Errorf("%d stamp(s) wait, and the postern key could not be read: %w", len(pending), err)
 	}
@@ -116,18 +119,18 @@ func (c ChainStamp) Run(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		c.send(ctx, queued, from, address)
+		c.send(ctx, queued, from)
 	}
 	return nil
 }
 
 // send broadcasts one stamp and records how it went.
-func (c ChainStamp) send(ctx context.Context, queued QueuedStamp, from, address string) {
+func (c ChainStamp) send(ctx context.Context, queued QueuedStamp, from string) {
 	stamp := queued.Stamp
 	_, raw, err := SealStamp(c.Cipher, c.GovernorKey, from, stamp, c.now())
 	var txid string
 	if err == nil {
-		txid, err = broadcastRecord(ctx, c.Postern, c.Keys, address, raw, c.Err)
+		txid, err = c.Chain.Send(ctx, raw)
 	}
 	if err != nil {
 		c.say("chain-stamp: %s %s stays pending: %v\n", stamp.Rig, stamp.Commit, err)

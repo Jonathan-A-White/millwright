@@ -73,8 +73,10 @@ func (r TalkCallRequest) validate() error {
 // the event log when Log is set.
 type TalkCall struct {
 	Postern Postern
-	Cipher  Cipher
-	Keys    PosternKeyFile
+	// Chain is what the ring also goes on, when it goes on chain.
+	Chain  Chain
+	Cipher Cipher
+	Keys   PosternKeyFile
 
 	// GovernorKey is the Governor's compressed public key, hex — config
 	// postern_governor_key.
@@ -221,11 +223,10 @@ func (c TalkCall) wantsChain(ctx context.Context, req TalkCallRequest) (wanted, 
 
 // broadcast puts payload on chain under the float cap, as mw postern send does.
 func (c TalkCall) broadcast(ctx context.Context, payload []byte) (string, error) {
-	_, address, err := c.Keys.PublicKey()
-	if err != nil {
-		return "", err
+	if c.Chain == nil {
+		return "", fmt.Errorf("no chain is configured")
 	}
-	balance, err := c.Postern.Balance(ctx, address)
+	balance, err := c.Chain.Balance(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -233,7 +234,7 @@ func (c TalkCall) broadcast(ctx context.Context, payload []byte) (string, error)
 		return "", fmt.Errorf("the postern key's balance is %d satoshis, over the float cap of %d by %d",
 			balance, c.FloatSats, balance-c.FloatSats)
 	}
-	return broadcastRecord(ctx, c.Postern, c.Keys, address, payload, c.Out)
+	return c.Chain.Send(ctx, payload)
 }
 
 func (c TalkCall) now() time.Time {

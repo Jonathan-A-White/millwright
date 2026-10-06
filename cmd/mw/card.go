@@ -105,7 +105,7 @@ func posternCards(out io.Writer) (application.Cards, error) {
 	}
 	return application.Cards{
 		Beads: cardBeads(), Log: log,
-		Postern: backend, Cipher: posternCipher(keys), Keys: keys,
+		Postern: backend, Chain: newChain(backend, keys, out), Cipher: posternCipher(keys), Keys: keys,
 		GovernorKey: governorKey, FloatSats: int64(floatSats), Channel: channel,
 		Now: posternClock, Out: out,
 	}, nil

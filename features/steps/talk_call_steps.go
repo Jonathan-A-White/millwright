@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/postern"
 
 	"github.com/cucumber/godog"
@@ -89,6 +90,7 @@ func (c *talkSayContext) runCall(request application.TalkCallRequest) error {
 	c.err = nil
 	c.callReport, c.err = application.TalkCall{
 		Postern:     c.backend,
+		Chain:       apptest.NewFakeChain(c.backend, c.mayor),
 		Cipher:      postern.NewCipher(c.mayor),
 		Keys:        c.mayor,
 		GovernorKey: c.governorKey,

@@ -19,7 +19,7 @@ import (
 // Given, never in a Before hook, which would run for every feature's scenarios.
 type proveContext struct {
 	queue *apptest.FakeStampQueue
-	chain *apptest.FakeChainLookup
+	chain *apptest.FakeChain
 	out   bytes.Buffer
 	err   error
 }
@@ -56,7 +56,7 @@ func InitializeProveScenario(ctx *godog.ScenarioContext) {
 }
 
 func (c *proveContext) aStampedCommit(rig, commit, txid string) error {
-	*c = proveContext{queue: apptest.NewFakeStampQueue(), chain: apptest.NewFakeChainLookup()}
+	*c = proveContext{queue: apptest.NewFakeStampQueue(), chain: apptest.NewFakeChain(nil, nil)}
 	stamp := domain.Stamp{
 		Rig: rig, Branch: "main", Commit: commit, Story: "mw-a.1", Title: "A story",
 		Host: "laptop", At: time.Date(2026, 10, 4, 9, 0, 0, 0, time.UTC),

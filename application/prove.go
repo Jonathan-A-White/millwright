@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 )
 
 // ExplorerURL is where a testnet transaction is read on WhatsOnChain.
@@ -28,29 +27,12 @@ func SentStampMatches(sent SentStamp, rig, commitPrefix string) bool {
 		strings.HasPrefix(strings.ToLower(sent.Stamp.Commit), strings.ToLower(commitPrefix))
 }
 
-// ChainTx is what the chain says of one transaction.
-type ChainTx struct {
-	// Known is false when the explorer has not heard of the transaction.
-	Known bool
-	// Height is the block the transaction is in; 0 while it waits in the
-	// mempool.
-	Height int64
-	// Time is the block's time, UTC; zero while there is no block.
-	Time time.Time
-}
-
-// ChainLookup asks a block explorer about a transaction. The adapter is
-// WhatsOnChain's testnet API.
-type ChainLookup interface {
-	Tx(ctx context.Context, txid string) (ChainTx, error)
-}
-
 // Prove prints the proof of a stamped commit: the txid of the stamp that was
 // broadcast for it, the block it is in and when, the preimage its public
 // commitment was made of, and the explorer's URL. docs/chain-stamps.md.
 type Prove struct {
 	Stamps StampStore
-	Chain  ChainLookup
+	Chain  Chain
 	Out    io.Writer
 }
 

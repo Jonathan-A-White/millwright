@@ -15,7 +15,7 @@ import (
 
 type proveFixture struct {
 	queue *apptest.FakeStampQueue
-	chain *apptest.FakeChainLookup
+	chain *apptest.FakeChain
 	out   bytes.Buffer
 }
 
@@ -31,7 +31,7 @@ func (f *proveFixture) aSentStamp(t *testing.T, stamp domain.Stamp, txid string)
 }
 
 func newProveFixture() *proveFixture {
-	return &proveFixture{queue: apptest.NewFakeStampQueue(), chain: apptest.NewFakeChainLookup()}
+	return &proveFixture{queue: apptest.NewFakeStampQueue(), chain: apptest.NewFakeChain(nil, nil)}
 }
 
 func (f *proveFixture) prove(rig, commit string) error {
@@ -84,7 +84,7 @@ func TestProveWithNoStampSaysSoAndFails(t *testing.T) {
 	if err == nil || err.Error() != "no stamp for millwright deadbeef" {
 		t.Fatalf("err = %v, want 'no stamp for millwright deadbeef'", err)
 	}
-	if f.chain.Calls() != 0 {
+	if f.chain.TxCalls() != 0 {
 		t.Fatal("the chain was asked about a stamp there is not")
 	}
 }
@@ -140,7 +140,7 @@ func TestProveStillPrintsWhatItHoldsWhenTheLookupFails(t *testing.T) {
 	f := newProveFixture()
 	s := stampForTest()
 	f.aSentStamp(t, s, "abc123txid")
-	f.chain.Err = errors.New("connection refused")
+	f.chain.TxErr = errors.New("connection refused")
 
 	err := f.prove("millwright", s.Commit)
 	if err == nil || !strings.Contains(err.Error(), "connection refused") {

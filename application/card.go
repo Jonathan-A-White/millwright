@@ -55,8 +55,10 @@ type CardLog interface {
 // or verified, and keeps each card and update it sends in Log.
 type Cards struct {
 	Postern Postern
-	Cipher  Cipher
-	Keys    PosternKeyFile
+	// Chain is what a card on the chain channel goes on.
+	Chain  Chain
+	Cipher Cipher
+	Keys   PosternKeyFile
 	// Beads reads the beads an item expects landed or verified, to refuse an
 	// epic; Log keeps what is sent.
 	Beads CardBeads
@@ -267,20 +269,20 @@ func (c Cards) seal(ctx context.Context, command, class string, body any) (strin
 	if err != nil {
 		return "", fmt.Errorf("%s: building the record's plaintext: %w", command, err)
 	}
-	from, address, err := c.Keys.PublicKey()
+	from, _, err := c.Keys.PublicKey()
 	if err != nil {
 		return "", err
 	}
 	send := PosternSend{
-		Postern: c.Postern, Cipher: c.Cipher, Keys: c.Keys,
+		Postern: c.Postern, Chain: c.Chain, Cipher: c.Cipher, Keys: c.Keys,
 		GovernorKey: c.GovernorKey, FloatSats: c.FloatSats, Now: c.Now, Out: c.Out,
 	}
 	if channel == PosternChannelChain {
-		if err := send.underFloat(ctx, command, address); err != nil {
+		if err := send.underFloat(ctx, command); err != nil {
 			return "", err
 		}
 	}
-	txid, err := send.sendOne(ctx, channel, class, "", from, address, string(plaintext))
+	txid, err := send.sendOne(ctx, channel, class, "", from, string(plaintext))
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", command, err)
 	}

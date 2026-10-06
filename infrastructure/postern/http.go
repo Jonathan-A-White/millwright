@@ -116,7 +116,7 @@ func (h *HTTP) Messages(ctx context.Context, since int64) ([]application.Postern
 	return records, nil
 }
 
-// Utxos implements application.Postern: GET /api/utxos/{address}.
+// Utxos is one of bsv.Coins: GET /api/utxos/{address}.
 func (h *HTTP) Utxos(ctx context.Context, address string) ([]application.PosternUtxo, error) {
 	var body struct {
 		Utxos []struct {
@@ -136,7 +136,7 @@ func (h *HTTP) Utxos(ctx context.Context, address string) ([]application.Postern
 	return utxos, nil
 }
 
-// Balance implements application.Postern: GET /api/balance/{address},
+// Balance is one of bsv.Coins: GET /api/balance/{address},
 // confirmed and unconfirmed together.
 func (h *HTTP) Balance(ctx context.Context, address string) (int64, error) {
 	var body struct {
@@ -149,7 +149,7 @@ func (h *HTTP) Balance(ctx context.Context, address string) (int64, error) {
 	return body.Confirmed + body.Unconfirmed, nil
 }
 
-// Broadcast implements application.Postern: POST /api/broadcast.
+// Broadcast is one of bsv.Coins: POST /api/broadcast.
 func (h *HTTP) Broadcast(ctx context.Context, rawtx string) (string, error) {
 	req, err := json.Marshal(struct {
 		Rawtx string `json:"rawtx"`

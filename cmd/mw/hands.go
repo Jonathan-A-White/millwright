@@ -65,6 +65,7 @@ func (p handsPush) Run(ctx context.Context, req application.PosternSendRequest) 
 	}
 	return application.PosternSend{
 		Postern:     backend,
+		Chain:       newChain(backend, keys, nil),
 		Cipher:      posternCipher(keys),
 		Keys:        keys,
 		Tracker:     p.gateway,

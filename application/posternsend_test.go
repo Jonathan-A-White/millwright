@@ -40,7 +40,8 @@ func newSendFixture() *sendFixture {
 
 func (f *sendFixture) send(channel string) application.PosternSend {
 	return application.PosternSend{
-		Postern: f.backend, Cipher: f.cipher, Keys: stubPosternKeys{pubKey: sendMayorKey},
+		Postern: f.backend, Chain: apptest.NewFakeChain(f.backend, stubPosternKeys{pubKey: sendMayorKey}),
+		Cipher: f.cipher, Keys: stubPosternKeys{pubKey: sendMayorKey},
 		Tracker: f.tracker, Notes: f.tracker,
 		GovernorKey: releaseTapGovernorKey, FloatSats: 100000, Channel: channel,
 		Now: func() time.Time { return time.Unix(1758700000, 0) }, Out: &f.out,

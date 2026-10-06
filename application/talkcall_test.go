@@ -49,8 +49,9 @@ func ring(t *testing.T, req application.TalkCallRequest) *apptest.FakePostern {
 	backend := apptest.NewFakePostern()
 	backend.SetUtxos("", application.PosternUtxo{Txid: strings.Repeat("1", 64), Satoshis: 1000})
 	_, err := application.TalkCall{
-		Postern: backend, Cipher: apptest.NewFakeCipher(),
-		Keys: echoKeys{stubPosternKeys{pubKey: "mayor-pubkey-hex"}}, GovernorKey: "governor-pubkey-hex",
+		Postern: backend, Chain: apptest.NewFakeChain(backend, echoKeys{stubPosternKeys{pubKey: "mayor-pubkey-hex"}}),
+		Cipher: apptest.NewFakeCipher(),
+		Keys:   echoKeys{stubPosternKeys{pubKey: "mayor-pubkey-hex"}}, GovernorKey: "governor-pubkey-hex",
 		FloatSats: 100000,
 	}.Run(context.Background(), req)
 	if err != nil {
@@ -141,8 +142,9 @@ func TestTalkCallAlsoEmitsOneEmergencyEventNamingTheRing(t *testing.T) {
 	backend := apptest.NewFakePostern()
 	backend.NextTxid = "ring-txid"
 	_, err := application.TalkCall{
-		Postern: backend, Cipher: apptest.NewFakeCipher(),
-		Keys: echoKeys{stubPosternKeys{pubKey: "mayor-pubkey-hex"}}, GovernorKey: "governor-pubkey-hex",
+		Postern: backend, Chain: apptest.NewFakeChain(backend, echoKeys{stubPosternKeys{pubKey: "mayor-pubkey-hex"}}),
+		Cipher: apptest.NewFakeCipher(),
+		Keys:   echoKeys{stubPosternKeys{pubKey: "mayor-pubkey-hex"}}, GovernorKey: "governor-pubkey-hex",
 		FloatSats: 100000, Log: log, Actor: "mayor@laptop",
 		Now: func() time.Time { return time.Date(2026, 10, 1, 13, 0, 0, 0, time.UTC) },
 	}.Run(context.Background(), application.TalkCallRequest{Text: "Back now."})
@@ -174,8 +176,9 @@ func TestTalkCallPrintsBothNotesWhenTheEmergencyEventAndTheChainFail(t *testing.
 	}
 	var out bytes.Buffer
 	_, err := application.TalkCall{
-		Postern: backend, Cipher: apptest.NewFakeCipher(),
-		Keys: echoKeys{stubPosternKeys{pubKey: "mayor-pubkey-hex"}}, GovernorKey: "governor-pubkey-hex",
+		Postern: backend, Chain: apptest.NewFakeChain(backend, echoKeys{stubPosternKeys{pubKey: "mayor-pubkey-hex"}}),
+		Cipher: apptest.NewFakeCipher(),
+		Keys:   echoKeys{stubPosternKeys{pubKey: "mayor-pubkey-hex"}}, GovernorKey: "governor-pubkey-hex",
 		FloatSats: 100000, Log: &failingLog{}, Actor: "mayor@laptop", Notes: notes, Out: &out,
 	}.Run(context.Background(), application.TalkCallRequest{Text: "Back now."})
 	if err != nil {
@@ -191,8 +194,9 @@ func TestTalkCallAskedForChainThatFailsStillPrintsTheEmergencyNote(t *testing.T)
 	backend.ChainErr = errors.New("chain down")
 	var out bytes.Buffer
 	_, err := application.TalkCall{
-		Postern: backend, Cipher: apptest.NewFakeCipher(),
-		Keys: echoKeys{stubPosternKeys{pubKey: "mayor-pubkey-hex"}}, GovernorKey: "governor-pubkey-hex",
+		Postern: backend, Chain: apptest.NewFakeChain(backend, echoKeys{stubPosternKeys{pubKey: "mayor-pubkey-hex"}}),
+		Cipher: apptest.NewFakeCipher(),
+		Keys:   echoKeys{stubPosternKeys{pubKey: "mayor-pubkey-hex"}}, GovernorKey: "governor-pubkey-hex",
 		FloatSats: 100000, Log: &failingLog{}, Actor: "mayor@laptop", Out: &out,
 	}.Run(context.Background(), application.TalkCallRequest{Text: "Back now.", Chain: true})
 	if err == nil || !strings.Contains(err.Error(), "chain broadcast failed") {

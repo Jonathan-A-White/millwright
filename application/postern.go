@@ -166,22 +166,15 @@ type PosternUtxo struct {
 	Height int
 }
 
-// Postern is the port to the postern backend: reading indexed message
-// records since a sequence number, and reading and spending the postern
-// key's testnet balance. The real adapter, infrastructure/postern's HTTP,
-// talks to the Go backend's HTTP API (docs/api.md,
-// github.com/Jonathan-A-White/postern).
+// Postern is the port to the postern backend's direct line: reading indexed
+// message records since a sequence number, delivering one, and its blob
+// store. The chain is the Chain port's. The real adapter,
+// infrastructure/postern's HTTP, talks to the Go backend's HTTP API
+// (docs/api.md, github.com/Jonathan-A-White/postern).
 type Postern interface {
 	// Messages reports every indexed record after sequence number since,
 	// oldest first.
 	Messages(ctx context.Context, since int64) ([]PosternRecord, error)
-	// Utxos reports address's unspent outputs.
-	Utxos(ctx context.Context, address string) ([]PosternUtxo, error)
-	// Balance reports address's balance, in satoshis, confirmed and
-	// unconfirmed together — what the float cap is measured against.
-	Balance(ctx context.Context, address string) (int64, error)
-	// Broadcast forwards a raw signed transaction and reports its txid.
-	Broadcast(ctx context.Context, rawtx string) (string, error)
 	// Blob downloads the whole body stored under hash at the postern
 	// backend's blob store, postern's docs/protocol.md section 8: the raw
 	// ciphertext bytes an attachment was uploaded as, untouched.
@@ -1692,8 +1685,10 @@ func posternAttachmentExtensions() []string {
 // bead's thread is commented on that bead too.
 type PosternSend struct {
 	Postern Postern
-	Cipher  Cipher
-	Keys    PosternKeyFile
+	// Chain is what a send on the chain channel, and a chain copy, goes on.
+	Chain  Chain
+	Cipher Cipher
+	Keys   PosternKeyFile
 
 	// Tracker comments the bead a question is asked about, or a message is
 	// threaded on. Required only for a request that does either.
@@ -1782,12 +1777,12 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 	if channel == PosternChannelDirect {
 		summary = s.summary(ctx, req)
 	}
-	from, address, err := s.Keys.PublicKey()
+	from, _, err := s.Keys.PublicKey()
 	if err != nil {
 		return "", err
 	}
 	if channel == PosternChannelChain {
-		if err := s.underFloat(ctx, "mw postern send", address); err != nil {
+		if err := s.underFloat(ctx, "mw postern send"); err != nil {
 			return "", err
 		}
 	}
@@ -1823,7 +1818,7 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 			return "", err
 		}
 		var chainErr error
-		if txid, chainErr, err = s.sendRecord(ctx, channel, copyMode, req.Class, summary, req.thread(), from, address, text); err != nil {
+		if txid, chainErr, err = s.sendRecord(ctx, channel, copyMode, req.Class, summary, req.thread(), from, text); err != nil {
 			return "", err
 		}
 		if chainFailure == nil {
@@ -1841,7 +1836,7 @@ func (s PosternSend) Run(ctx context.Context, req PosternSendRequest) (string, e
 			return "", err
 		}
 		var chainErr error
-		if txid, chainErr, err = s.sendRecord(ctx, channel, copyMode, req.Class, summary, req.thread(), from, address, text); err != nil {
+		if txid, chainErr, err = s.sendRecord(ctx, channel, copyMode, req.Class, summary, req.thread(), from, text); err != nil {
 			return "", err
 		}
 		if chainFailure == nil {
@@ -2022,8 +2017,8 @@ func cutSummary(summary string) string {
 // sendOne encrypts text to the Governor as one message record, classed
 // class, and sends it by channel, reporting its txid. summary rides in the
 // clear beside the ciphertext, and is empty on the chain.
-func (s PosternSend) sendOne(ctx context.Context, channel, class, summary, from, address, text string) (string, error) {
-	txid, _, err := s.sendRecord(ctx, channel, chainCopyNone, class, summary, PosternThread{}, from, address, text)
+func (s PosternSend) sendOne(ctx context.Context, channel, class, summary, from, text string) (string, error) {
+	txid, _, err := s.sendRecord(ctx, channel, chainCopyNone, class, summary, PosternThread{}, from, text)
 	return txid, err
 }
 
@@ -2068,7 +2063,7 @@ func (s PosternSend) chainCopyOf(ctx context.Context, req PosternSendRequest) ch
 // chainErr names it, beside the direct txid and a nil err. thread is the
 // channel the message is in: a direct record names it in the clear (Bead, or
 // else Channel), the chain one, public for good, names nothing.
-func (s PosternSend) sendRecord(ctx context.Context, channel string, mode chainCopy, class, summary string, thread PosternThread, from, address, text string) (txid string, chainErr, err error) {
+func (s PosternSend) sendRecord(ctx context.Context, channel string, mode chainCopy, class, summary string, thread PosternThread, from, text string) (txid string, chainErr, err error) {
 	ciphertext, err := s.Cipher.Encrypt(s.GovernorKey, text)
 	if err != nil {
 		return "", nil, err
@@ -2085,7 +2080,7 @@ func (s PosternSend) sendRecord(ctx context.Context, channel string, mode chainC
 		return "", nil, fmt.Errorf("building the record's payload: %w", err)
 	}
 	if channel != PosternChannelDirect {
-		txid, err = broadcastRecord(ctx, s.Postern, s.Keys, address, payload, s.Out)
+		txid, err = s.Chain.Send(ctx, payload)
 		return txid, nil, err
 	}
 	if txid, err = s.Postern.Deliver(ctx, payload); err != nil || mode == chainCopyNone {
@@ -2096,8 +2091,8 @@ func (s PosternSend) sendRecord(ctx context.Context, channel string, mode chainC
 	chainRecord, err := json.Marshal(record)
 	var chainTxid string
 	if err == nil {
-		if err = s.underFloat(ctx, "mw postern send", address); err == nil {
-			chainTxid, err = broadcastRecord(ctx, s.Postern, s.Keys, address, chainRecord, s.Out)
+		if err = s.underFloat(ctx, "mw postern send"); err == nil {
+			chainTxid, err = s.Chain.Send(ctx, chainRecord)
 		}
 	}
 	switch {
@@ -2109,29 +2104,6 @@ func (s PosternSend) sendRecord(ctx context.Context, channel string, mode chainC
 		s.printf("chain: not sent: %v\n", err)
 	}
 	return txid, nil, nil
-}
-
-// broadcastRecord puts payload on the chain: it signs a record transaction
-// from address's unspent outputs and has the backend broadcast it, reporting
-// its txid. A failure to remember what it spent is said on out, when there is
-// one, and fails nothing.
-func broadcastRecord(ctx context.Context, backend Postern, keys PosternKeyFile, address string, payload []byte, out io.Writer) (string, error) {
-	utxos, err := backend.Utxos(ctx, address)
-	if err != nil {
-		return "", err
-	}
-	rawtx, err := keys.Sign(utxos, payload)
-	if err != nil {
-		return "", err
-	}
-	txid, err := backend.Broadcast(ctx, rawtx)
-	if err != nil {
-		return "", err
-	}
-	if err := keys.MarkSent(rawtx); err != nil && out != nil {
-		fmt.Fprintf(out, "warning: the record was broadcast, but mw could not remember what it spent, so a send within the next block may fail: %v\n", err)
-	}
-	return txid, nil
 }
 
 // channel is how this send travels: Channel, direct when empty; anything
@@ -2156,10 +2128,14 @@ func posternChannel(name string) (string, error) {
 	}
 }
 
-// underFloat refuses, as command, when address's balance is over the float
-// cap, which a send on the chain is checked against first.
-func (s PosternSend) underFloat(ctx context.Context, command, address string) error {
-	balance, err := s.Postern.Balance(ctx, address)
+// underFloat refuses, as command, when the postern key's balance is over the
+// float cap, which a send on the chain is checked against first. With no
+// Chain there is nothing to send on.
+func (s PosternSend) underFloat(ctx context.Context, command string) error {
+	if s.Chain == nil {
+		return fmt.Errorf("%s: no chain is configured", command)
+	}
+	balance, err := s.Chain.Balance(ctx)
 	if err != nil {
 		return err
 	}

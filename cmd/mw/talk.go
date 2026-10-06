@@ -297,6 +297,7 @@ func newTalkCallCmd() *cobra.Command {
 				Log:         eventlog.New(logPath),
 				Actor:       actor,
 				Postern:     backend,
+				Chain:       newChain(backend, keys, cmd.OutOrStdout()),
 				Cipher:      posternCipher(keys),
 				Keys:        keys,
 				GovernorKey: governorKey,

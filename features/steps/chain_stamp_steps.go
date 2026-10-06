@@ -136,7 +136,7 @@ func (c *chainStampContext) theBackendRefuses(said string) error {
 func (c *chainStampContext) theJobRuns() error {
 	cipher := apptest.NewFakeCipher()
 	c.err = application.ChainStamp{
-		Queue: c.queue, Postern: c.backend, Keys: chainStampKeys{}, Cipher: cipher, Tracker: c.tracker,
+		Queue: c.queue, Chain: apptest.NewFakeChain(c.backend, chainStampKeys{}), Keys: chainStampKeys{}, Cipher: cipher, Tracker: c.tracker,
 		GovernorKey: "02aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 		Now:         func() time.Time { return time.Date(2026, 10, 4, 9, 1, 0, 0, time.UTC) },
 		Err:         &c.said,

@@ -11,8 +11,9 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 )
 
-// FakePostern is an in-memory application.Postern: records, utxos and a
-// balance held by address, and a canned txid every broadcast returns.
+// FakePostern is an in-memory application.Postern: records, and the coin
+// calls a FakeChain sends through — utxos and a balance held by address, and
+// a canned txid every broadcast returns.
 type FakePostern struct {
 	mu sync.Mutex
 
@@ -122,7 +123,8 @@ func (f *FakePostern) Messages(_ context.Context, since int64) ([]application.Po
 	return found, nil
 }
 
-// Utxos implements application.Postern.
+// Utxos reports address's unspent outputs: the coin call FakeChain spends
+// through, as infrastructure/bsv does postern's /api/utxos.
 func (f *FakePostern) Utxos(_ context.Context, address string) ([]application.PosternUtxo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -136,7 +138,7 @@ func (f *FakePostern) Utxos(_ context.Context, address string) ([]application.Po
 	return append([]application.PosternUtxo(nil), f.utxos[address]...), nil
 }
 
-// Balance implements application.Postern.
+// Balance reports address's balance, as postern's /api/balance does.
 func (f *FakePostern) Balance(_ context.Context, address string) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -146,7 +148,7 @@ func (f *FakePostern) Balance(_ context.Context, address string) (int64, error) 
 	return f.balance[address], nil
 }
 
-// Broadcast implements application.Postern.
+// Broadcast takes a raw transaction, as postern's /api/broadcast does.
 func (f *FakePostern) Broadcast(_ context.Context, rawtx string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

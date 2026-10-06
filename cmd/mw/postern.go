@@ -290,7 +290,7 @@ func newPosternInboxCmd() *cobra.Command {
 // postern_transcribe_cmd names one; and the runner, verifier and
 // [hands_hosts] a hands step he approved is run by (postern's
 // docs/protocol.md §17).
-func answerTheGovernor(inbox *application.PosternInbox, backend application.Postern, keys *postern.KeyFile, governorKey string) error {
+func answerTheGovernor(inbox *application.PosternInbox, backend *postern.HTTP, keys *postern.KeyFile, governorKey string) error {
 	channel, err := config.PosternChannel()
 	if err != nil {
 		return err
@@ -302,6 +302,7 @@ func answerTheGovernor(inbox *application.PosternInbox, backend application.Post
 	inbox.Sender = &application.PosternSend{
 		Threads:     inbox.Threads,
 		Postern:     backend,
+		Chain:       newChain(backend, keys, nil),
 		Cipher:      inbox.Cipher,
 		Keys:        keys,
 		GovernorKey: governorKey,
@@ -485,6 +486,7 @@ func newPosternSendCmd() *cobra.Command {
 			send := application.PosternSend{
 				Threads:     threads,
 				Postern:     backend,
+				Chain:       newChain(backend, keys, cmd.OutOrStdout()),
 				Cipher:      posternCipher(keys),
 				Keys:        keys,
 				Tracker:     gateway,

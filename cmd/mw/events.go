@@ -122,6 +122,7 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 			return err
 		}
 		ship.Postern, ship.Cipher, ship.Keys, ship.Err = backend, posternCipher(keys), keys, cmd.ErrOrStderr()
+		ship.ChainRoad = newChain(backend, keys, cmd.ErrOrStderr())
 		shipper = ship
 	}
 	vaultDir, err := config.Vault()

@@ -746,7 +746,8 @@ func (c *posternInboxContext) inbox() application.PosternInbox {
 	}
 	if c.transcriber != nil || c.runner != nil || c.replies {
 		inbox.Sender = &application.PosternSend{
-			Postern: c.backend, Cipher: c.cipher, Keys: c.keys, GovernorKey: c.governorKey,
+			Postern: c.backend, Chain: apptest.NewFakeChain(c.backend, c.keys),
+			Cipher: c.cipher, Keys: c.keys, GovernorKey: c.governorKey,
 		}
 	}
 	if c.transcriber != nil {
@@ -1414,7 +1415,8 @@ func (c *posternInboxContext) theHandsStepIsSupersededBy(id, bead, newer string)
 // The inbox is then wired to post replies.
 func (c *posternInboxContext) beadWasAskedWithOptions(bead, optionsCSV string) error {
 	send := application.PosternSend{
-		Postern: c.backend, Cipher: c.cipher, Keys: c.keys, GovernorKey: c.governorKey,
+		Postern: c.backend, Chain: apptest.NewFakeChain(c.backend, c.keys),
+		Cipher: c.cipher, Keys: c.keys, GovernorKey: c.governorKey,
 		Tracker: c.memory, Notes: c.memory,
 	}
 	txid, err := send.Run(context.Background(), application.PosternSendRequest{

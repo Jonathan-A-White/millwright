@@ -2,7 +2,6 @@ package main
 
 import (
 	"github.com/Jonathan-A-White/millwright/application"
-	"github.com/Jonathan-A-White/millwright/infrastructure/chainlookup"
 
 	"github.com/spf13/cobra"
 )
@@ -27,9 +26,17 @@ func newProveCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			keys, err := posternKeys()
+			if err != nil {
+				return err
+			}
+			backend, err := posternBackend(keys)
+			if err != nil {
+				return err
+			}
 			return application.Prove{
 				Stamps: queue,
-				Chain:  chainlookup.New(""),
+				Chain:  newChain(backend, keys, nil),
 				Out:    cmd.OutOrStdout(),
 			}.Run(cmd.Context(), args[0], args[1])
 		},

@@ -63,7 +63,7 @@ func chainStampRun(out io.Writer) func(context.Context) error {
 		}
 		return application.ChainStamp{
 			Queue:       queue,
-			Postern:     backend,
+			Chain:       newChain(backend, keys, out),
 			Keys:        keys,
 			Cipher:      posternCipher(keys),
 			Tracker:     gateway,
