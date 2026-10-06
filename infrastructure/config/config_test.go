@@ -1881,3 +1881,38 @@ func TestHeavyNetNamesTheRigsThatInstallDependencies(t *testing.T) {
 		t.Fatalf("a value that is not a bool gave %v, want an error naming the rig", err)
 	}
 }
+
+func TestABackendTableMayNameTheVPSStandbyAndMustSetItWhole(t *testing.T) {
+	base := `[rigs]
+postern = "/home/j/postern"
+
+[backend.postern]
+build = "go build -o {out} ./cmd/postern"
+stage = "/s"
+live = "/l"
+service = "u"
+health = "http://h"
+vps_host = "vps"
+vps_stage = "/var/lib/postern"
+vps_live = "/usr/local/bin/postern"
+vps_service = "postern"
+vps_health = "http://vps.mw:8787/healthz"
+`
+	writeConfig(t, base)
+	backends, err := config.Backends()
+	got := backends["postern"]
+	if err != nil || got.VPSHost != "vps" || got.VPSStage != "/var/lib/postern" || got.VPSLive != "/usr/local/bin/postern" ||
+		got.VPSService != "postern" || got.VPSHealth != "http://vps.mw:8787/healthz" {
+		t.Fatalf("expected the standby read back, got %+v, %v", got, err)
+	}
+	for name, c := range map[string]struct{ from, to, want string }{
+		"no vps_service": {"vps_service = \"postern\"\n", "", "no vps_service"},
+		"no vps_health":  {"vps_health = \"http://vps.mw:8787/healthz\"\n", "", "no vps_health"},
+		"relative stage": {"vps_stage = \"/var/lib/postern\"", "vps_stage = \"stage\"", "full path"},
+	} {
+		writeConfig(t, strings.Replace(base, c.from, c.to, 1))
+		if _, err := config.Backends(); err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: expected a refusal naming %q, got %v", name, c.want, err)
+		}
+	}
+}

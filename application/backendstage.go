@@ -64,6 +64,23 @@ type BackendRig struct {
 	Check   string
 	// Swap is BackendSwapAuto or BackendSwapHands; empty is auto.
 	Swap string
+
+	// The VPS standby runs the same backend, behind the front door, and drifts when
+	// a landing leaves it on the old build (mw-gq6.189). VPSHost, the host's name in
+	// [hands_hosts], turns its staging on: the built binary is copied to VPSStage on
+	// that host and its swap written as a root hands step for VPSLive and the system
+	// unit VPSService, which VPSHealth, a URL that answers once it is up, checks. A
+	// root step needs the Governor's approval, so the standby's swap is always a tap.
+	VPSHost, VPSStage, VPSLive, VPSService, VPSHealth string
+}
+
+// Standby reports whether this rig's backend also runs on the VPS standby.
+func (c BackendRig) Standby() bool { return c.VPSHost != "" }
+
+// standbyRig is the VPS standby's side of c as a BackendRig, which the swap step
+// is written from.
+func (c BackendRig) standbyRig() BackendRig {
+	return BackendRig{Stage: c.VPSStage, Live: c.VPSLive, Service: c.VPSService, Health: c.VPSHealth}
 }
 
 // Automatic reports whether the home swaps this rig's staged backend itself.
@@ -85,6 +102,16 @@ type BackendBuilds interface {
 	// it then moves to out; the worktree is removed whatever happens. A binary
 	// already at out is left, so that building twice is building once.
 	Build(ctx context.Context, rigDir, commit, subdir, command, out string) error
+}
+
+// BackendShip is the port a built binary is copied to another host's stage
+// through: the standby's, and nothing else. Like BackendBuilds it cannot install a
+// binary or restart a unit; what it leaves at dest is a staged file for the swap
+// step to install once the Governor approves it.
+type BackendShip interface {
+	// Ship copies the file at src to dest on host, named as [hands_hosts] names it,
+	// leaving nothing half-written at dest.
+	Ship(ctx context.Context, host, src, dest string) error
 }
 
 // BackendHands is HandsAdd, narrowed to the one call a use case that writes a
@@ -115,6 +142,10 @@ type BackendLanding struct {
 	Bead  string `json:"bead,omitempty"`
 	Tries int    `json:"tries,omitempty"`
 	Why   string `json:"why,omitempty"`
+
+	// StandbyBead is the bead already filed for the VPS standby's swap, as Bead is
+	// for the home's.
+	StandbyBead string `json:"standby_bead,omitempty"`
 }
 
 // BackendStage keeps a rig's backend level with its landings (mw-gq6.185). A
@@ -140,6 +171,7 @@ type BackendStage struct {
 	Settings map[string]BackendRig
 
 	Builds  BackendBuilds
+	Ship    BackendShip
 	Home    HomeFile
 	Host    string
 	Tracker WorkTracker
@@ -262,9 +294,9 @@ func (b BackendStage) attempt(ctx context.Context, l BackendLanding, home string
 	staged, err := b.stage(ctx, &l, home)
 	if err == nil {
 		if err := b.Notes.ClearNote(ctx, backendKey(l)); err != nil {
-			return []string{staged, "backend: the pending note of " + l.Rig + " could not be cleared: " + firstLine(err.Error())}
+			return append(staged, "backend: the pending note of "+l.Rig+" could not be cleared: "+firstLine(err.Error()))
 		}
-		return []string{staged}
+		return staged
 	}
 
 	l.Tries++
@@ -286,58 +318,127 @@ func (b BackendStage) attempt(ctx context.Context, l BackendLanding, home string
 // stage builds the backend, files the bead if it is not already filed and writes
 // the swap on it. l carries the bead across a retry, so a step that failed to be
 // written is written on the bead already filed rather than on a second.
-func (b BackendStage) stage(ctx context.Context, l *BackendLanding, home string) (string, error) {
+func (b BackendStage) stage(ctx context.Context, l *BackendLanding, home string) ([]string, error) {
 	cfg := b.Settings[l.Rig]
 	rigDir := b.Rigs[l.Rig]
 	switch {
 	case rigDir == "":
-		return "", fmt.Errorf("this host has no checkout of %s", l.Rig)
+		return nil, fmt.Errorf("this host has no checkout of %s", l.Rig)
 	case l.Epic == "":
-		return "", fmt.Errorf("%s has no epic to file the swap under", l.Story)
+		return nil, fmt.Errorf("%s has no epic to file the swap under", l.Story)
 	}
 	short := updatedRevision(l.Commit)
 	out := filepath.Join(cfg.Stage, filepath.Base(cfg.Live)+"-"+short)
 
 	if err := b.Builds.Build(ctx, rigDir, l.Commit, cfg.Dir, cfg.Build, out); err != nil {
-		return "", fmt.Errorf("building %s: %w", l.Rig, err)
+		return nil, fmt.Errorf("building %s: %w", l.Rig, err)
 	}
 	step := BackendSwap(cfg, home, short, out)
 
 	if l.Bead == "" {
-		bead, err := b.Tracker.CreateStory(ctx, NewStory{
-			EpicID:      l.Epic,
+		bead, err := b.fileSwap(ctx, l.Epic, NewStory{
 			Title:       fmt.Sprintf("Swap the home's %s backend to %s so %s's backend half is live", l.Rig, short, l.Story),
 			Description: backendBeadText(*l, cfg, short, out, b.swapsItself(cfg)),
 			Acceptance:  fmt.Sprintf("cmp %s %s is equal; %s answers.", cfg.Live, out, cfg.Health),
-			Priority:    1,
-			Labels:      []string{LabelHitl},
 		})
-		if err != nil {
-			return "", fmt.Errorf("filing the swap under %s: %w", l.Epic, err)
-		}
 		l.Bead = bead
-		// Held stories are not shown to anybody: the swap is for the Governor now.
-		if err := b.Tracker.ReleaseStory(ctx, bead); err != nil {
-			return "", fmt.Errorf("releasing %s: %w", bead, err)
+		if err != nil {
+			return nil, err
 		}
 	}
-	if _, err := b.Hands.Run(ctx, HandsAddRequest{Bead: l.Bead, Step: step, Replace: true}); err != nil {
-		return "", fmt.Errorf("writing the swap on %s: %w", l.Bead, err)
+	if err := b.writeSwap(ctx, cfg, l.Bead, step); err != nil {
+		return nil, err
 	}
-	if err := b.supersedeOlder(ctx, cfg, l.Bead, step.ID); err != nil {
-		return "", fmt.Errorf("superseding the older swaps of %s: %w", l.Rig, err)
-	}
+	staged := fmt.Sprintf("backend: %s at %s staged at %s; the swap is a hands step on %s, for the Governor to approve", l.Rig, short, out, l.Bead)
 	if b.swapsItself(cfg) {
 		text, err := json.Marshal(stagedSwap{Rig: l.Rig, Story: l.Story, Bead: l.Bead, Step: step.ID, Commit: l.Commit})
 		if err == nil {
 			err = b.Notes.SetNote(ctx, swapKey(l.Rig, l.Commit), string(text))
 		}
 		if err != nil {
-			return "", fmt.Errorf("keeping the swap of %s for the tick: %w", l.Rig, err)
+			return nil, fmt.Errorf("keeping the swap of %s for the tick: %w", l.Rig, err)
 		}
-		return fmt.Sprintf("backend: %s at %s staged at %s; the swap is a hands step on %s, which the home's tick runs itself once no Talk is open", l.Rig, short, out, l.Bead), nil
+		staged = fmt.Sprintf("backend: %s at %s staged at %s; the swap is a hands step on %s, which the home's tick runs itself once no Talk is open", l.Rig, short, out, l.Bead)
 	}
-	return fmt.Sprintf("backend: %s at %s staged at %s; the swap is a hands step on %s, for the Governor to approve", l.Rig, short, out, l.Bead), nil
+	if !cfg.Standby() {
+		return []string{staged}, nil
+	}
+	standby, err := b.stageStandby(ctx, l, cfg, short, out)
+	if err != nil {
+		return nil, err
+	}
+	return []string{staged, standby}, nil
+}
+
+// fileSwap files a hitl bead under epic for a swap and releases it: held stories
+// are not shown to anybody, and the swap is for the Governor now. It returns the
+// bead's id, set even when releasing it failed.
+func (b BackendStage) fileSwap(ctx context.Context, epic string, story NewStory) (string, error) {
+	story.EpicID = epic
+	story.Priority = 1
+	story.Labels = []string{LabelHitl}
+	bead, err := b.Tracker.CreateStory(ctx, story)
+	if err != nil {
+		return "", fmt.Errorf("filing the swap under %s: %w", epic, err)
+	}
+	if err := b.Tracker.ReleaseStory(ctx, bead); err != nil {
+		// The bead is filed: a retry writes the step on it rather than on a second.
+		return bead, fmt.Errorf("releasing %s: %w", bead, err)
+	}
+	return bead, nil
+}
+
+// writeSwap writes step on bead and marks the older swaps of cfg's live binary as
+// superseded by it.
+func (b BackendStage) writeSwap(ctx context.Context, cfg BackendRig, bead string, step domain.HandsStep) error {
+	if _, err := b.Hands.Run(ctx, HandsAddRequest{Bead: bead, Step: step, Replace: true}); err != nil {
+		return fmt.Errorf("writing the swap on %s: %w", bead, err)
+	}
+	if err := b.supersedeOlder(ctx, cfg, bead, step.ID); err != nil {
+		return fmt.Errorf("superseding the older swaps of %s: %w", cfg.Live, err)
+	}
+	return nil
+}
+
+// stageStandby is the VPS half of a staging (mw-gq6.189): the binary just built is
+// copied to the standby's stage, and its swap written as a root hands step on a
+// bead of its own, so that the front door's backend is level with the home's once
+// the Governor taps it. A host with no way to copy leaves it out and says so.
+func (b BackendStage) stageStandby(ctx context.Context, l *BackendLanding, cfg BackendRig, short, built string) (string, error) {
+	if b.Ship == nil {
+		return "backend: " + l.Rig + "'s VPS standby is not staged: this host has no way to copy the binary there", nil
+	}
+	standby := cfg.standbyRig()
+	dest := filepath.Join(cfg.VPSStage, filepath.Base(cfg.VPSLive)+"-"+short)
+	if err := b.Ship.Ship(ctx, cfg.VPSHost, built, dest); err != nil {
+		return "", fmt.Errorf("copying %s to %s on %s: %w", built, dest, cfg.VPSHost, err)
+	}
+	step := backendSwapAs(standby, cfg.VPSHost, short, dest, domain.HandsAsRoot)
+
+	if l.StandbyBead == "" {
+		bead, err := b.fileSwap(ctx, l.Epic, NewStory{
+			Title:       fmt.Sprintf("Swap the VPS standby's %s backend to %s so the front door is level with the home", l.Rig, short),
+			Description: standbyBeadText(*l, cfg, short, dest),
+			Acceptance:  fmt.Sprintf("cmp %s %s is equal on %s; %s answers.", standby.Live, dest, cfg.VPSHost, standby.Health),
+		})
+		l.StandbyBead = bead
+		if err != nil {
+			return "", err
+		}
+	}
+	if err := b.writeSwap(ctx, standby, l.StandbyBead, step); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("backend: %s at %s staged on %s at %s; the standby's swap is a hands step on %s, for the Governor to approve", l.Rig, short, cfg.VPSHost, dest, l.StandbyBead), nil
+}
+
+func standbyBeadText(l BackendLanding, cfg BackendRig, short, dest string) string {
+	return fmt.Sprintf("%s landed (%s) with a change under %s/ of %s, and the VPS standby behind the front door runs the backend built before it: "+
+		"a phone served by the standby then lacks what the story added there.\n\n"+
+		"mw copied the backend built at %s to %s on %s. One root hands step on this bead swaps it in: it does nothing if the staged binary is already live, "+
+		"keeps one backup of the old one, installs, restarts %s, and reads %s up to four times; "+
+		"if it never answers, it puts the old binary back by itself. The step runs when the Governor approves it; nothing runs it before.",
+		l.Story, l.Title, cfg.Dir, l.Rig, short, dest, cfg.VPSHost, cfg.VPSService, cfg.VPSHealth)
 }
 
 // swapsItself reports whether a swap of cfg's rig is run by the home's tick: the
@@ -412,7 +513,17 @@ func backendBeadText(l BackendLanding, cfg BackendRig, short, out string, automa
 // because a check of the host's own failed or hung, which only ends the step in
 // failure for the Governor to see (mw-gq6.209).
 func BackendSwap(cfg BackendRig, host, short, out string) domain.HandsStep {
+	return backendSwapAs(cfg, host, short, out, domain.HandsAsUser)
+}
+
+// backendSwapAs is BackendSwap run as who: the host's own user, whose unit is a
+// user unit, or root, whose unit is a system unit, as the VPS standby's is.
+func backendSwapAs(cfg BackendRig, host, short, out, who string) domain.HandsStep {
 	live, service := shQuote(cfg.Live), shQuote(cfg.Service)
+	systemctl := "systemctl --user"
+	if who == domain.HandsAsRoot {
+		systemctl = "systemctl"
+	}
 	check := ""
 	if command := strings.TrimSpace(cfg.Check); command != "" && !checkReadsInbox(command) {
 		check = fmt.Sprintf(`if ! timeout %d sh -c %s; then echo backend %s answers %s but its check failed: leaving it live; exit 1; fi; `,
@@ -421,13 +532,13 @@ func BackendSwap(cfg BackendRig, host, short, out string) domain.HandsStep {
 	run := fmt.Sprintf(`set -e; l=%s; n=%s; b=%s; [ -x "$n" ]; `+
 		`for f in %s/"$(basename "$l")"-*; do if [ -f "$f" ] && [ "$f" -nt "$n" ] && cmp -s "$f" "$l"; then echo live backend "${f##*-}" is newer than %s: nothing was changed by this tap; exit 0; fi; done; `+
 		`if cmp -s "$l" "$n"; then echo backend %s is already live: nothing was changed by this tap; exit 0; fi; `+
-		`[ -e "$b" ] || cp -p "$l" "$b"; install -m 755 "$n" "$l"; systemctl --user restart %s; sleep 8; ok=0; `+
+		`[ -e "$b" ] || cp -p "$l" "$b"; install -m 755 "$n" "$l"; %s restart %s; sleep 8; ok=0; `+
 		`for i in 1 2 3 4; do if curl -fsS -m 20 %s; then ok=1; break; fi; echo try $i failed, waiting 15 s; sleep 15; done; `+
 		`if [ $ok = 1 ]; then %secho backend %s is live and answering; `+
-		`else echo FAILED after 4 tries: putting the old backend back; install -m 755 "$b" "$l"; systemctl --user restart %s; exit 1; fi`,
-		live, shQuote(out), shQuote(cfg.Live+".prev-before-"+short), shQuote(cfg.Stage), short, short, service, shQuote(cfg.Health), check, short, service)
-	wayBack := fmt.Sprintf("install -m 755 %s %s; systemctl --user restart %s", shQuote(cfg.Live+".prev-before-"+short), live, service)
-	return domain.HandsStep{ID: "backend-" + short, Host: host, As: domain.HandsAsUser, Run: run, WayBack: wayBack}
+		`else echo FAILED after 4 tries: putting the old backend back; install -m 755 "$b" "$l"; %s restart %s; exit 1; fi`,
+		live, shQuote(out), shQuote(cfg.Live+".prev-before-"+short), shQuote(cfg.Stage), short, short, systemctl, service, shQuote(cfg.Health), check, short, systemctl, service)
+	wayBack := fmt.Sprintf("install -m 755 %s %s; %s restart %s", shQuote(cfg.Live+".prev-before-"+short), live, systemctl, service)
+	return domain.HandsStep{ID: "backend-" + short, Host: host, As: who, Run: run, WayBack: wayBack}
 }
 
 // BackendCheckSeconds is how long a rig's own check may run before the swap step
