@@ -69,6 +69,10 @@ func newStatusCmd() *cobra.Command {
 			"FAULT: <what>', or 'VPS NGINX not checked (<why>)' when the VPS cannot be reached over ssh. It\n" +
 			"adds 'bin/mw lacks <commit>' when the VPS's mw binary was built without the commit the [doctor]\n" +
 			"table's vps_mw_needs names. The check is mw doctor's vps-nginx, which tells the Governor once.\n\n" +
+			"A standby line, when a [backend.<rig>] table names a VPS standby (vps_host), compares the commit\n" +
+			"the standby's /healthz says with the home's: 'standby behind: <standby commit|none> vs <home\n" +
+			"commit>', 'standby level at <commit>', or 'standby not checked (<why>)'. A landing that changed\n" +
+			"the backend stages the standby's swap as a hands step for the Governor's tap.\n\n" +
 			"Every line fits a phone-width terminal, at most 60 columns. Nothing is claimed, nothing is\n" +
 			"written and no session is started: status only reads.",
 		Args: cobra.NoArgs,
@@ -119,6 +123,10 @@ func newStatusCmd() *cobra.Command {
 			} else if guard != nil {
 				vps = guard
 			}
+			var standby application.StandbyReader
+			if reader := hostStandby(files); reader != nil {
+				standby = reader
+			}
 			_, err = application.Status{
 				Tracker:          tracker,
 				Notes:            tracker,
@@ -142,6 +150,7 @@ func newStatusCmd() *cobra.Command {
 				Home:             files,
 				Network:          net,
 				VPSNginx:         vps,
+				Standby:          standby,
 				Out:              cmd.OutOrStdout(),
 			}.Run(cmd.Context())
 			return err

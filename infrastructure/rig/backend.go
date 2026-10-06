@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 )
@@ -91,3 +93,42 @@ func (w *Worktrees) Build(ctx context.Context, rigDir, commit, subdir, command, 
 
 // shellWord is s as one word of a shell command line.
 func shellWord(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// ShipLimit bounds one copy of a staged binary to another host.
+const ShipLimit = 5 * time.Minute
+
+// BackendShip satisfies the port a staged binary is copied to another host
+// through (application.BackendShip, mw-gq6.189). Reach is [hands_hosts]: how this
+// host reaches each other host, an ssh prefix.
+type BackendShip struct {
+	Reach map[string]string
+}
+
+var _ application.BackendShip = BackendShip{}
+
+// Ship implements application.BackendShip: src is streamed over the host's ssh
+// prefix into a partial file beside dest, made executable and moved into place, so
+// that dest is never half a binary. Nothing live is touched.
+func (s BackendShip) Ship(ctx context.Context, host, src, dest string) error {
+	prefix := strings.Fields(s.Reach[host])
+	if len(prefix) == 0 {
+		return fmt.Errorf("no [hands_hosts] entry for %s to copy the binary over", host)
+	}
+	file, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("opening the binary to copy: %w", err)
+	}
+	defer file.Close()
+
+	partial := dest + ".partial"
+	remote := fmt.Sprintf("mkdir -p %s && cat > %s && chmod 755 %s && mv -f %s %s",
+		shellWord(filepath.Dir(dest)), shellWord(partial), shellWord(partial), shellWord(partial), shellWord(dest))
+	ctx, cancel := context.WithTimeout(ctx, ShipLimit)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, prefix[0], append(prefix[1:], remote)...)
+	cmd.Stdin = file
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%w: %s", err, application.RecentLines(string(out), 5))
+	}
+	return nil
+}

@@ -52,6 +52,16 @@ func hostBackend(gateway *beads.Gateway, files application.HomeFile, host string
 	for name, b := range settings {
 		stage.Settings[name] = application.BackendRig{
 			Dir: b.Dir, Build: b.Build, Stage: b.Stage, Live: b.Live, Service: b.Service, Health: b.Health, Check: b.Check, Swap: b.Swap,
+			VPSHost: b.VPSHost, VPSStage: b.VPSStage, VPSLive: b.VPSLive, VPSService: b.VPSService, VPSHealth: b.VPSHealth,
+		}
+		if b.VPSHost != "" && stage.Ship == nil {
+			reach, err := config.HandsHosts()
+			if err != nil && errs != nil {
+				fmt.Fprintf(errs, "no standby staging: %v\n", err)
+			}
+			if err == nil {
+				stage.Ship = rig.BackendShip{Reach: reach}
+			}
 		}
 	}
 	autoSwap(&stage, gateway, errs)

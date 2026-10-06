@@ -34,6 +34,8 @@
 //	health  = "https://postern.example.org/api/healthz"
 //	check   = "/home/jwhite/.local/bin/mw postern inbox --unread-count"
 //	swap    = "auto"    # or "hands": the home swaps a staged backend itself, or leaves it to his tap
+//	vps_host = "vps"    # optional: the VPS standby is kept level too, its swap always a tap;
+//	                    # with vps_stage, vps_live, vps_service and vps_health beside it
 //
 //	[watch]
 //	ssh     = "vps"
@@ -1579,8 +1581,15 @@ const DefaultBackendDir = "server"
 // it is up, Check an optional command that must succeed beside it, and Swap
 // "auto" (the default: the home swaps a staged backend itself when no Talk is
 // open) or "hands" (the swap waits for the Governor's tap).
+//
+// The VPS standby that serves the front door is kept level too (mw-gq6.189) when
+// vps_host, its name in [hands_hosts], is set: VPSStage, VPSLive, VPSService and
+// VPSHealth are then its stage directory, live binary, system unit and /healthz URL,
+// all four required, the two paths full ones.
 type BackendSettings struct {
 	Dir, Build, Stage, Live, Service, Health, Check, Swap string
+
+	VPSHost, VPSStage, VPSLive, VPSService, VPSHealth string
 }
 
 // Backends reports the backend each rig has on this host, by rig name, read from
@@ -1619,6 +1628,12 @@ func Backends() (map[string]BackendSettings, error) {
 			Health:  strings.TrimSpace(table["health"]),
 			Check:   strings.TrimSpace(table["check"]),
 			Swap:    strings.TrimSpace(table["swap"]),
+
+			VPSHost:    strings.TrimSpace(table["vps_host"]),
+			VPSStage:   strings.TrimSpace(table["vps_stage"]),
+			VPSLive:    strings.TrimSpace(table["vps_live"]),
+			VPSService: strings.TrimSpace(table["vps_service"]),
+			VPSHealth:  strings.TrimSpace(table["vps_health"]),
 		}
 		if b.Dir == "" {
 			b.Dir = DefaultBackendDir
@@ -1641,6 +1656,18 @@ func Backends() (map[string]BackendSettings, error) {
 		for key, value := range map[string]string{"stage": b.Stage, "live": b.Live} {
 			if !filepath.IsAbs(value) {
 				return nil, fmt.Errorf("[%s%s] %s is %q in %s: it must be a full path", BackendTablePrefix, name, key, value, path)
+			}
+		}
+		if b.VPSHost != "" {
+			for key, value := range map[string]string{"vps_stage": b.VPSStage, "vps_live": b.VPSLive, "vps_service": b.VPSService, "vps_health": b.VPSHealth} {
+				if value == "" {
+					return nil, fmt.Errorf("[%s%s] in %s names a vps_host but has no %s: the standby is staged and swapped from all of vps_host, vps_stage, vps_live, vps_service and vps_health", BackendTablePrefix, name, path, key)
+				}
+			}
+			for key, value := range map[string]string{"vps_stage": b.VPSStage, "vps_live": b.VPSLive} {
+				if !filepath.IsAbs(value) {
+					return nil, fmt.Errorf("[%s%s] %s is %q in %s: it must be a full path", BackendTablePrefix, name, key, value, path)
+				}
 			}
 		}
 		backends[name] = b

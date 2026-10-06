@@ -152,3 +152,45 @@ func TestBuildFetchesACommitThisCheckoutHasNotSeen(t *testing.T) {
 		t.Fatalf("expected the other host's backend built, got %q", got)
 	}
 }
+
+// fakeSSH is an ssh that runs the remote command line in sh, in a directory of
+// its own, so that a copy over it is real and reaches nothing.
+func fakeSSH(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "fakessh")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexec sh -c \"$*\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestShipCopiesTheBinaryExecutableAndLeavesNoPartialFile(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "postern-4c9db71")
+	if err := os.WriteFile(src, []byte("binary"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(dir, "remote", "stage", "postern-4c9db71")
+
+	err := rig.BackendShip{Reach: map[string]string{"vps": fakeSSH(t)}}.Ship(context.Background(), "vps", src, dest)
+	if err != nil {
+		t.Fatalf("Ship: %v", err)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil || string(got) != "binary" {
+		t.Fatalf("expected the binary at %s, got %q, %v", dest, got, err)
+	}
+	if info, _ := os.Stat(dest); info.Mode().Perm() != 0o755 {
+		t.Errorf("expected mode 755, got %v", info.Mode().Perm())
+	}
+	if _, err := os.Stat(dest + ".partial"); err == nil {
+		t.Error("a partial file was left behind")
+	}
+}
+
+func TestShipRefusesAHostNoHandsHostNames(t *testing.T) {
+	err := rig.BackendShip{}.Ship(context.Background(), "vps", "/nope", "/nope")
+	if err == nil || !strings.Contains(err.Error(), "hands_hosts") {
+		t.Fatalf("expected a refusal naming [hands_hosts], got %v", err)
+	}
+}
