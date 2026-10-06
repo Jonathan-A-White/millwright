@@ -1840,3 +1840,44 @@ func TestDoctorBatteryThresholdsAreTheShippedDefaultsUntilAHostSaysOtherwise(t *
 		}
 	}
 }
+
+func TestMeteredIsAutoUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, vpsConfig)
+	t.Setenv(config.MeteredEnv, "")
+	if got, err := config.Metered(); err != nil || got != "auto" {
+		t.Fatalf("metered = %q, %v; want auto", got, err)
+	}
+	writeConfig(t, "metered = \"yes\"\n")
+	if got, err := config.Metered(); err != nil || got != "yes" {
+		t.Fatalf("metered = %q, %v; want yes", got, err)
+	}
+	t.Setenv(config.MeteredEnv, "No")
+	if got, err := config.Metered(); err != nil || got != "no" {
+		t.Fatalf("MW_METERED=No gave %q, %v; want no", got, err)
+	}
+	t.Setenv(config.MeteredEnv, "maybe")
+	if _, err := config.Metered(); err == nil || !strings.Contains(err.Error(), "auto, yes or no") {
+		t.Fatalf("metered = maybe gave %v, want a refusal naming auto, yes and no", err)
+	}
+}
+
+func TestHeavyNetNamesTheRigsThatInstallDependencies(t *testing.T) {
+	writeConfig(t, "[heavy_net]\npostern = true\ncairn = true\nmillwright = false\n")
+	heavy, err := config.HeavyNet()
+	if err != nil {
+		t.Fatalf("reading heavy_net: %v", err)
+	}
+	if !heavy["postern"] || !heavy["cairn"] || heavy["millwright"] || heavy["argus"] {
+		t.Fatalf("heavy_net read as %+v", heavy)
+	}
+
+	writeConfig(t, vpsConfig)
+	if heavy, err := config.HeavyNet(); err != nil || len(heavy) != 0 {
+		t.Fatalf("no table read as %+v, %v; want none and no error", heavy, err)
+	}
+
+	writeConfig(t, "[heavy_net]\npostern = sometimes\n")
+	if _, err := config.HeavyNet(); err == nil || !strings.Contains(err.Error(), "postern") {
+		t.Fatalf("a value that is not a bool gave %v, want an error naming the rig", err)
+	}
+}

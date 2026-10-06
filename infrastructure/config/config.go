@@ -20,6 +20,7 @@
 //	beads_sync = "remote"
 //	beads_backup_minutes = 30
 //	beads_server_host = "laptop.mw"    # only for beads_sync = "auto" on a boost
+//	metered = "auto"                   # or "yes" / "no": whether the network is metered, instead of asking Windows
 //
 //	[rigs]
 //	millwright = "/root/millwright"
@@ -117,6 +118,8 @@ const (
 	BeadsSyncEnv          = "MW_BEADS_SYNC"
 	BeadsBackupMinutesEnv = "MW_BEADS_BACKUP_MINUTES"
 	BeadsServerHostEnv    = "MW_BEADS_SERVER_HOST"
+
+	MeteredEnv = "MW_METERED"
 )
 
 // The environment variables bd itself reads to reach a Dolt database server
@@ -141,6 +144,10 @@ const (
 	TestsTable             = "tests"
 	AfterLandingTable      = "after_landing"
 	AfterLandingLimitTable = "after_landing_limit"
+	// HeavyNetTable names the rigs whose gate or close-out installs dependencies
+	// (npm ci, go mod download): `postern = true`. A story on one waits while the
+	// network is metered.
+	HeavyNetTable = "heavy_net"
 )
 
 // HandsHostsTable is the table of the config file that says how this host
@@ -1508,6 +1515,48 @@ func AfterLandingLimits() (map[string]time.Duration, error) {
 		limits[rig] = limit
 	}
 	return limits, nil
+}
+
+// Metered reports config `metered`: "auto" (ask Windows, from WSL), "yes" or
+// "no" (the network is, or is not, metered whatever Windows says), or the
+// MW_METERED environment variable. Auto when nothing says; anything else is an
+// error naming the three.
+func Metered() (string, error) {
+	said, err := optionalSetting("metered", MeteredEnv, "auto")
+	if err != nil {
+		return "", err
+	}
+	switch said = strings.ToLower(said); said {
+	case "auto", "yes", "no":
+		return said, nil
+	}
+	return "", fmt.Errorf("metered is %q: set it to auto, yes or no, in %s or with %s", said, File, MeteredEnv)
+}
+
+// HeavyNet reports which rigs install dependencies in their gate or close-out,
+// read from the `[heavy_net]` table of ~/.config/mw/config.toml: `postern =
+// true`. A rig that is not named, or whose value is false, is not heavy; a
+// machine with no such table is not an error. A value that is not true or false
+// is an error naming the rig, since mw guessing would send a metered network's
+// data on an npm install.
+func HeavyNet() (map[string]bool, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	table, err := tableIn(filepath.Join(home, File), HeavyNetTable)
+	if err != nil {
+		return nil, err
+	}
+	heavy := make(map[string]bool, len(table))
+	for rig, value := range table {
+		on, err := strconv.ParseBool(strings.TrimSpace(value))
+		if err != nil {
+			return nil, fmt.Errorf("%s: [%s] %s = %q is not true or false", File, HeavyNetTable, rig, value)
+		}
+		heavy[rig] = on
+	}
+	return heavy, nil
 }
 
 // BackendTablePrefix starts the name of the table that says how a rig's own
