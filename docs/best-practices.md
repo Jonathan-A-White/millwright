@@ -285,7 +285,8 @@ how a handover is made exact. Events ship in batches by lane: `normal`, `emergen
 [*mw events*](../README.md#mw-events-follow-emit-tail-wait) has the commands.
 
 **If you have less.** No chain and no phone: keep the log and the follower and drop
-the lanes; every batch is direct, or there are no batches at all. Even a JSON-lines
+the lanes; every batch is direct, or there are no batches at all
+([*Swapping the chain*](swapping-the-chain.md) says how). Even a JSON-lines
 file and a loop that tails it, with each reader storing its last line number, gives
 you the wake-ups without the polling.
 

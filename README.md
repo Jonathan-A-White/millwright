@@ -4,7 +4,7 @@ A personal software factory: one human directs a small set of AI-occupied
 seats that turn conversations into tracked work and tracked work into commits,
 across several rigs and two hosts, on a tight fuel budget.
 
-Standing up your own? Start with [Setting up a vault](docs/setting-up-a-vault.md), a step-by-step guide, and [Best practices](docs/best-practices.md), the design lessons behind it.
+Standing up your own? Start with [Setting up a vault](docs/setting-up-a-vault.md), a step-by-step guide, and [Best practices](docs/best-practices.md), the design lessons behind it. To use another chain, or none, see [Swapping the chain](docs/swapping-the-chain.md).
 
 ## Quick start
 

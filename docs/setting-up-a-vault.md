@@ -259,7 +259,8 @@ Two features put records on the BSV chain (testnet only today, no real money):
 **Postern's chain delivery**, which broadcasts the events batches and Postern
 messages for a phone that cannot reach the backend directly. Neither is needed to
 run the factory. See [`docs/chain-stamps.md`](chain-stamps.md) for the stamp
-record, queue and `mw prove`.
+record, queue and `mw prove`. To supply another chain, or none, see
+[`docs/swapping-the-chain.md`](swapping-the-chain.md).
 
 **Running without the chain** (the default for a first vault):
 

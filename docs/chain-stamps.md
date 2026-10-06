@@ -5,7 +5,8 @@ commit, without saying which rig or which commit. Anyone who later holds the rig
 name and the commit id can show the stamp was on chain by its block's time; no one
 else can read what it stamps. Today it is testnet only. The record kind is built
 and verified in code (`domain/stamp.go`, `application/stamp.go`); the queue, the
-job and `mw prove` are below.
+job and `mw prove` are below. To use another chain, or none, see
+[Swapping the chain](swapping-the-chain.md).
 
 ## What gets stamped
 
