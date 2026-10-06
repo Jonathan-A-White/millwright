@@ -2,6 +2,7 @@ package doctor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -377,6 +378,13 @@ func (m *MayorGone) run(ctx context.Context, args ...string) (string, error) {
 		program = "tmux"
 	}
 	out, err := exec.CommandContext(ctx, program, args...).Output()
+	var exited *exec.ExitError
+	if errors.As(err, &exited) {
+		// tmux says why on stderr, which Output keeps apart from stdout.
+		if said := strings.TrimSpace(string(exited.Stderr)); said != "" {
+			err = fmt.Errorf("%w: %s", err, said)
+		}
+	}
 	return string(out), err
 }
 

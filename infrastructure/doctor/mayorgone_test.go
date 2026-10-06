@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -187,5 +188,57 @@ func TestTheMayorGoneProbeStillJudgesTheHome(t *testing.T) {
 				t.Fatalf("expected faulty, got %s (%s)", verdict, reason)
 			}
 		})
+	}
+}
+
+// fakeMayorGoneTmuxFailing writes a stand-in for tmux that, for every
+// subcommand, prints stderr to STDERR and exits 1, as the real tmux does when
+// there is no server to ask (mw-gq6.281).
+func fakeMayorGoneTmuxFailing(t *testing.T, stderr string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in for tmux is a shell script")
+	}
+	program := filepath.Join(t.TempDir(), "tmux-stand-in")
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' '%s' >&2\nexit 1\n", stderr)
+	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing the tmux stand-in: %v", err)
+	}
+	return program
+}
+
+// mw-gq6.281: tmux says it has no server on STDERR, which exec's Output() kept
+// out of the error, so a Mayor killed with the last window read cannot-tell
+// and was never respawned.
+func TestTheMayorGoneProbeIsFaultyWhenTmuxSaysThereIsNoServer(t *testing.T) {
+	for name, stderr := range map[string]string{
+		"no server running":   "no server running on /tmp/tmux-1000/default",
+		"error connecting to": "error connecting to /tmp/tmux-1000/default (No such file or directory)",
+	} {
+		t.Run(name, func(t *testing.T) {
+			vault := mayorGoneVault(t, "mayor-2026-09-23-40")
+			check := &doctor.MayorGone{Vault: vault, Tmux: fakeMayorGoneTmuxFailing(t, stderr)}
+
+			verdict, reason := check.Probe(context.Background())
+			if verdict != application.DoctorFaulty {
+				t.Fatalf("expected faulty, got %s (%s)", verdict, reason)
+			}
+			if !strings.Contains(reason, "no open tmux window matches") {
+				t.Errorf("expected a reason naming no matching window, got %q", reason)
+			}
+		})
+	}
+}
+
+func TestTheMayorGoneProbeCannotTellOtherTmuxFailuresAndSaysWhatTmuxSaid(t *testing.T) {
+	vault := mayorGoneVault(t, "mayor-2026-09-23-40")
+	check := &doctor.MayorGone{Vault: vault, Tmux: fakeMayorGoneTmuxFailing(t, "protocol version mismatch (client 8, server 7)")}
+
+	verdict, reason := check.Probe(context.Background())
+	if verdict != application.DoctorCannotTell {
+		t.Fatalf("expected cannot-tell, got %s (%s)", verdict, reason)
+	}
+	if !strings.Contains(reason, "protocol version mismatch (client 8, server 7)") {
+		t.Errorf("expected the reason to carry tmux's stderr, got %q", reason)
 	}
 }

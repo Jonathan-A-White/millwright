@@ -217,6 +217,24 @@ func TestASeatNotHeldRaisesNothing(t *testing.T) {
 	}
 }
 
+// mw-gq6.281: with no tmux server there is no Mayor window to look at, so
+// the check has nothing to judge: ok, not cannot-tell.
+func TestNoTmuxServerIsNothingForTheStaleCheckToLookAt(t *testing.T) {
+	for _, stderr := range []string{
+		"no server running on /tmp/tmux-1000/default",
+		"error connecting to /tmp/tmux-1000/default (No such file or directory)",
+	} {
+		t.Run(stderr, func(t *testing.T) {
+			r := newStaleRig(t)
+			r.check.Tmux = fakeMayorGoneTmuxFailing(t, stderr)
+			r.run(0)
+			if got := r.run(60); got.Verdict != "ok" {
+				t.Fatalf("expected ok, got %+v", got)
+			}
+		})
+	}
+}
+
 func TestAHarnessPromptIsAlarmedWithItsTextAndTheWindowIsLeftAlone(t *testing.T) {
 	r := newStaleRig(t)
 	r.write(r.pane, "cat /tmp/mayor154/talk.out\nAuto mode classifier requires confirmation for this command.\nDo you want to proceed?\n 1. Yes\n 2. Yes, allow reading from /tmp/mayor154\n 3. No\n")
