@@ -45,6 +45,8 @@ func newSyncCmd() *cobra.Command {
 			"into the one database. `auto` is backup on the home and shared on a boost, read off the\n" +
 			"vault's home file (backup every 5 minutes unless beads_backup_minutes says; the boost's\n" +
 			"server is beads_server_host or <home>.mw); with no home file it refuses and does nothing.\n\n" +
+			"While the network is metered (config `metered`, or Windows' own setting read from WSL), a\n" +
+			"backup that is due is skipped, as --no-backup would, with 'backup skipped: metered network'.\n\n" +
 			"--no-backup leaves that backup, and the collection after it, to the next sync that does not\n" +
 			"say so, even when one is due: for a caller that must stay cheap, like the mail notifier,\n" +
 			"whose run is killed at its unit's timeout. Nothing is recorded, so the backup stays due.",
@@ -176,7 +178,8 @@ func sessionHarness(vaultDir, host string, opts ...claude.Option) *claude.Harnes
 // from config, so that every command that brings this host level — mw sync,
 // dispatch, next and the Millhand's tick — treats the beads database alike.
 // A beads_backup_minutes that is not said is the mode's own default: 30, and
-// 5 for auto, which the sync applies once it knows it is on the home.
+// 5 for auto, which the sync applies once it knows it is on the home. It also
+// gives the sync the host's network, so that a backup waits out a metered one.
 func hostSync(sync application.Sync) (application.Sync, error) {
 	files, _ := sync.Vault.(application.HomeFile)
 	setting, err := hostBeads(context.Background(), files, sync.Host)
@@ -189,6 +192,11 @@ func hostSync(sync application.Sync) (application.Sync, error) {
 	}
 	sync.Mode = setting.Configured
 	sync.Home = files
+	if sync.Network == nil {
+		if sync.Network, err = hostNetwork(false); err != nil {
+			return sync, err
+		}
+	}
 	if sync.Stamps == nil {
 		// A stamp queue that cannot be placed queues nothing: no sync waits on a
 		// chain stamp.

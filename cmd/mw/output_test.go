@@ -150,3 +150,18 @@ func TestStatusRefusesABeadsBudgetNamingTheKey(t *testing.T) {
 		t.Fatalf("expected status to refuse a zero budget naming beads_budget_bytes, got %v", err)
 	}
 }
+
+func TestStatusSaysWhetherTheNetworkIsMetered(t *testing.T) {
+	standInBeads(t)
+
+	t.Setenv("MW_METERED", "yes")
+	stdout, stderr := runSeparately(t, "status")
+	if !strings.Contains(stdout, "NETWORK metered (config: metered = \"yes\")") || stderr != "" {
+		t.Fatalf("expected a metered NETWORK line, got %q (stderr %q)", stdout, stderr)
+	}
+
+	t.Setenv("MW_METERED", "no")
+	if stdout, _ = runSeparately(t, "status"); !strings.Contains(stdout, "NETWORK unmetered\n") {
+		t.Fatalf("expected an unmetered NETWORK line, got %q", stdout)
+	}
+}

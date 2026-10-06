@@ -498,6 +498,10 @@ type SyncReport struct {
 	// was told to leave the backup to another run and did.
 	BackupSkipped bool
 
+	// BackupMetered says a backup was due and was left alone because the
+	// network is metered; the next sync on an unmetered one takes it.
+	BackupMetered bool
+
 	// BackupErr is why a backup this sync tried did not get through — a
 	// *SyncHalt carrying the tracker's own exit code, as a failed remote
 	// cycle's error would be. Nil when none was tried, or it got through. It
@@ -560,6 +564,8 @@ func (r SyncReport) beadsMode() string {
 		switch {
 		case r.BackupSkipped:
 			return "; beads kept here, backup left to another run"
+		case r.BackupMetered:
+			return "; beads kept here, backup skipped: metered network"
 		case r.BackedUp:
 			return "; beads kept here, backed up"
 		case r.BackupErr != nil:
@@ -630,6 +636,12 @@ type Sync struct {
 	// it. It changes nothing on a host that is not the one holding the
 	// database: there the beads cycle is the sync itself.
 	SkipBackup bool
+
+	// Network says whether the network is metered. While it is, a backup that
+	// is due is skipped as SkipBackup would, and said so: the push to the
+	// tracker's remote is the one thing a sync sends that is not small. It is
+	// asked only when a backup is due. Nil asks nothing.
+	Network NetworkReader
 
 	// Home reads the vault's home file. It is needed only when Mode is
 	// BeadsSyncAuto, which is decided by it: with none, auto refuses.
@@ -825,7 +837,7 @@ func (s Sync) recordLevelInTheOneDatabase(ctx context.Context, report SyncReport
 		return report, fmt.Errorf("recording when %s was last level: %w", s.Host, noteErr)
 	}
 	report.At = at
-	if report.Mode == BeadsSyncBackup && report.BackupErr == nil && !s.SkipBackup {
+	if report.Mode == BeadsSyncBackup && report.BackupErr == nil && !s.SkipBackup && !report.BackupMetered {
 		report.GCed = s.maybeGC(ctx)
 	}
 	return report, nil
@@ -845,6 +857,10 @@ func (s Sync) backupIfDue(ctx context.Context, report *SyncReport) {
 		return
 	}
 	if !s.dueForBackup(ctx) {
+		return
+	}
+	if s.Network != nil && s.Network.Read(ctx).Metered {
+		report.BackupMetered = true
 		return
 	}
 	retried, err := s.syncTrackerMarking(ctx)

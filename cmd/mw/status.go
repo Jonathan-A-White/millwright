@@ -61,6 +61,9 @@ func newStatusCmd() *cobra.Command {
 			"An EVENTS line says where the event follower stands: the log's head seq, the last seq sent,\n" +
 			"the batches that went direct as fallback and wait to go on chain, and today's records on\n" +
 			"chain of the daily cap ([events] chain_daily_cap).\n\n" +
+			"A NETWORK line says whether the network is metered: 'NETWORK metered (Windows: <profile>, cost\n" +
+			"<type>)' or 'NETWORK unmetered', as Windows' own setting says it on WSL (config `metered`\n" +
+			"overrides). While metered, no beads backup runs and no story on a heavy_net rig starts.\n\n" +
 			"Every line fits a phone-width terminal, at most 60 columns. Nothing is claimed, nothing is\n" +
 			"written and no session is started: status only reads.",
 		Args: cobra.NoArgs,
@@ -101,6 +104,10 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			net, err := hostNetwork(true)
+			if err != nil {
+				return err
+			}
 			_, err = application.Status{
 				Tracker:          tracker,
 				Notes:            tracker,
@@ -122,6 +129,7 @@ func newStatusCmd() *cobra.Command {
 				BeadsBudgetBytes: beadsBudget,
 				SyncMode:         setting.Configured,
 				Home:             files,
+				Network:          net,
 				Out:              cmd.OutOrStdout(),
 			}.Run(cmd.Context())
 			return err

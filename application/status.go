@@ -184,6 +184,10 @@ type Status struct {
 	Log       EventLog
 	IdleAfter time.Duration
 	Harness   HarnessCount
+
+	// Network, when set, is asked for the NETWORK line: metered or not.
+	Network NetworkReader
+
 	// Control, when set, is the home's event log, read for the CANCELLED
 	// section (the cancel events of the last day) and the PAUSED line. Nil
 	// leaves both out.
@@ -323,6 +327,8 @@ type StatusReport struct {
 	// Harness is the count of harness processes, when HarnessKnown.
 	Harness      int
 	HarnessKnown bool
+	// Network is whether the network is metered; nil when not asked.
+	Network *NetworkReading
 	// Cancelled are the runs a cancel event ended in the last day, and Paused
 	// the pause-host event this host is under, if any.
 	Cancelled []Cancel
@@ -492,6 +498,10 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		if n, err := s.Harness.Count(ctx); err == nil {
 			report.Harness, report.HarnessKnown = n, true
 		}
+	}
+	if s.Network != nil {
+		reading := s.Network.Read(ctx)
+		report.Network = &reading
 	}
 	if s.Control != nil {
 		// Like the shipper, a log that cannot be read is left out of the
@@ -890,6 +900,11 @@ func (r StatusReport) String() string {
 		b.WriteString("\n")
 	} else if r.HarnessKnown {
 		clip(&b, fmt.Sprintf("HARNESS %d processes", r.Harness))
+		b.WriteString("\n")
+	}
+
+	if r.Network != nil {
+		clip(&b, r.Network.Line())
 		b.WriteString("\n")
 	}
 

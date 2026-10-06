@@ -18,6 +18,8 @@ func TestMain(m *testing.M) {
 		handOffAsTheServiceStartedIt(selfPath)
 	}
 	os.Unsetenv("INVOCATION_ID")
+	// A host that is WSL would ask Windows, for real, what its network costs.
+	os.Setenv("MW_METERED", "no")
 	for _, kv := range os.Environ() {
 		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "BEADS_DOLT_") {
 			os.Unsetenv(name)

@@ -140,6 +140,10 @@ func newDispatchCmd() *cobra.Command {
 			"runs one pass of the grist mill (mw grist grind), so a grist left waiting for a slot is\n" +
 			"answered by this tick. While it claims it holds the grind lock, so a grind starting in the\n" +
 			"same tick cannot take the slot it takes.\n\n" +
+			"While the network is metered (config `metered`, or Windows' own setting read from WSL) it\n" +
+			"starts no story whose rig is named under [heavy_net] in the config file (`postern = true`),\n" +
+			"because its gate or close-out installs dependencies: the story stays open, and the first tick\n" +
+			"after the network is unmetered takes it. Any change of the network's state is one event.\n\n" +
 			"--dry-run prints what it would start and writes nothing: nothing is synced, claimed, cut,\n" +
 			"poured or started.",
 		Args: cobra.NoArgs,
@@ -186,11 +190,21 @@ func newDispatchCmd() *cobra.Command {
 				return err
 			}
 
+			heavy, err := config.HeavyNet()
+			if err != nil {
+				return err
+			}
+			// A rehearsal only looks: it keeps no answer and writes no event.
+			net, err := hostNetwork(dryRun)
+			if err != nil {
+				return err
+			}
+
 			gateway := mwGateway(dir, host)
 			files := mwVault(dir, host)
 			logs := hostTickLogs()
 			worktrees := rig.New()
-			sync, err := hostSync(application.Sync{Vault: files, Tracker: gateway, Host: host, Ticks: logs, Lock: hostSyncLock()})
+			sync, err := hostSync(application.Sync{Vault: files, Tracker: gateway, Host: host, Ticks: logs, Lock: hostSyncLock(), Network: net})
 			if err != nil {
 				return err
 			}
@@ -212,6 +226,8 @@ func newDispatchCmd() *cobra.Command {
 				Mailbox:     gateway,
 				Load:        hostload.Proc{},
 				Rigs:        rigs,
+				Network:     net,
+				HeavyNet:    heavy,
 				Grinding:    gristGrindLock(),
 				Exclusive:   hostDispatchLock(),
 				Events:      homeEventLog(),

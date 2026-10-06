@@ -172,6 +172,15 @@ type Dispatch struct {
 	// log is no reason to stop the factory.
 	Events EventLog
 
+	// Network says whether the network is metered, and HeavyNet names the rigs
+	// whose gate or close-out installs dependencies (npm ci, go mod download).
+	// While the network is metered a story on such a rig is passed over and
+	// stays open, taken by the first tick after it is not. The network is asked
+	// once at the start of a real tick, so that a change of it is noticed whether
+	// or not a story waits on it. A nil Network is never metered.
+	Network  NetworkReader
+	HeavyNet map[string]bool
+
 	// DryRun prints what would be started and writes nothing at all: nothing is
 	// synced, nothing claimed, no worktree made, no formula poured, no session
 	// started.
@@ -450,6 +459,14 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		}
 	}
 
+	// Asked before the sync, so that the backup it may skip reads the answer
+	// this tick keeps rather than asking again.
+	var network *NetworkReading
+	if d.Network != nil {
+		reading := d.Network.Read(ctx)
+		network = &reading
+	}
+
 	// A dry run writes nothing at all, and a sync writes: it pushes this host's
 	// commits and pulls the other's. So a dry run reads the view this host
 	// already has, and says so.
@@ -602,6 +619,14 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		if !checkedOut {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
 				"the rig %s is not checked out on %s: add it under [rigs] in the config file", path.Rig, d.Host)})
+			continue
+		}
+
+		// A story on a rig that installs dependencies waits for a network that is
+		// not metered. It stays open and unclaimed, so no attempt is spent on it.
+		if network != nil && network.Metered && d.HeavyNet[path.Rig] {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
+				"the rig %s installs dependencies and the network is metered %s: it waits for one that is not", path.Rig, network.Why())})
 			continue
 		}
 
