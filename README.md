@@ -571,6 +571,18 @@ answers). A good swap closes the bead; a failed one leaves it open and `hitl`, t
 output commented on it, and nothing retries it by itself. A host with no postern inbox
 directory configured cannot take the lock, and keeps the tap.
 
+The VPS standby that the front door falls back to is kept level too (mw-gq6.189). A table
+that names `vps_host` (its name in `[hands_hosts]`) with `vps_stage`, `vps_live`,
+`vps_service` and `vps_health` has the same landing copy the binary it just built to
+`vps_stage/<name of vps_live>-<short commit>` on that host over the `[hands_hosts]` ssh
+prefix, and file a second `hitl` bead under the epic whose one hands step swaps it in,
+as a *root* step (the standby's unit is a system unit): the same already-live check, one
+backup, install, restart, four tries at `vps_health` and the way back. A root step needs
+the Governor's approval, so the standby's swap is always a tap, never the home's tick.
+A copy that fails is a failed try like a failed build. `mw status` then says `standby
+behind: <standby commit|none> vs <home commit>` when the two `/healthz` lines differ,
+`standby level at <commit>` when they match, or `standby not checked (<why>)`.
+
 Only then: the worktree and its branch go, one line is appended to the seat's
 ledger, that line and the seat's memory of the rig are committed in the vault,
 the story is closed with the reason, `mw sync` brings the hosts level so that
@@ -818,6 +830,7 @@ stage = "/home/jwhite/.local/share/postern"   # built binaries wait here as <nam
 live = "/home/jwhite/.local/bin/postern"      # the binary the service runs; only the approved hands step touches it
 service = "postern-backend"        # its systemd user unit
 health = "https://postern.example.org/api/healthz"
+vps_host = "vps"                   # optional: the VPS standby is kept level too (see mw next); with vps_stage, vps_live (full paths), vps_service (a system unit) and vps_health (its /healthz URL)
 check = "/home/jwhite/.local/bin/backend-smoke"  # optional; run once the backend answers, 60 s at most; if it fails the step fails but the new backend stays. A command that reads `mw postern inbox` is left out of the step: the step runs inside that pass
 
 [hands_hosts]                      # how this host reaches another host a hands step is for; leave it out to run steps for this host only

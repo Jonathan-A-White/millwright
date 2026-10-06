@@ -243,3 +243,92 @@ func (v VPSNginx) judge(servers []UpstreamServer, home string) VPSNginxReading {
 	fault.Fix = fmt.Sprintf("cp %s %s.bak && sed -i%s %s && nginx -t && systemctl reload nginx", conf, conf, sed, conf)
 	return fault
 }
+
+// CommitSource is what a backend's /healthz is asked its commit through.
+type CommitSource interface {
+	// Commit is the commit the backend answering at url says it was built from,
+	// empty when it answers with none, as a build older than its healthz's commit
+	// field does. An error is a backend that did not answer.
+	Commit(ctx context.Context, url string) (string, error)
+}
+
+// StandbyReader is what mw status asks for the standby line.
+type StandbyReader interface {
+	Read(ctx context.Context) StandbyReading
+}
+
+// StandbyReading is what one comparison of the standby's backend with the home's
+// found.
+type StandbyReading struct {
+	// Standby and Home are the two commits, Standby empty when it names none. Why is
+	// set instead when the comparison could not be made.
+	Standby, Home string
+	Why           string
+}
+
+// Behind says the standby runs a build other than the home's.
+func (r StandbyReading) Behind() bool {
+	return r.Why == "" && !sameCommit(r.Standby, r.Home)
+}
+
+// Line is the reading as mw status prints it.
+func (r StandbyReading) Line() string {
+	switch {
+	case r.Why != "":
+		return "standby not checked (" + r.Why + ")"
+	case r.Behind():
+		standby := r.Standby
+		if standby == "" {
+			standby = "none"
+		}
+		return "standby behind: " + standby + " vs " + r.Home
+	}
+	return "standby level at " + r.Home
+}
+
+// sameCommit says a and b name one commit, one of them being the other cut short.
+func sameCommit(a, b string) bool {
+	return a != "" && b != "" && (strings.HasPrefix(a, b) || strings.HasPrefix(b, a))
+}
+
+// Standby compares the backend the VPS standby runs with the home's, from the
+// commit each says at its /healthz (mw-gq6.189): the front door serves the
+// standby whenever the home is asleep, and a landing that staged only the home's
+// backend leaves the standby on whatever it was built from. It reads and changes
+// nothing; a backend that does not answer, or a home with no commit to compare,
+// is not checked, never behind.
+type Standby struct {
+	Home    HomeFile
+	Commits CommitSource
+
+	// HomeURL is the /healthz of the home's backend, given the home's name, and
+	// StandbyURL the standby's.
+	HomeURL    func(host string) string
+	StandbyURL string
+}
+
+var _ StandbyReader = Standby{}
+
+// Read is the comparison now.
+func (s Standby) Read(ctx context.Context) StandbyReading {
+	notChecked := func(why string) StandbyReading { return StandbyReading{Why: why} }
+	if s.Home == nil || s.Commits == nil || s.HomeURL == nil || s.StandbyURL == "" {
+		return notChecked("no home file or backend to read")
+	}
+	record, err := WhereIsHome(ctx, s.Home)
+	if err != nil {
+		return notChecked(oneLine(err.Error()))
+	}
+	home, err := s.Commits.Commit(ctx, s.HomeURL(record.Host))
+	if err != nil {
+		return notChecked("the home's backend: " + oneLine(err.Error()))
+	}
+	if home == "" || home == "dev" {
+		return notChecked("the home's backend names no commit")
+	}
+	standby, err := s.Commits.Commit(ctx, s.StandbyURL)
+	if err != nil {
+		return notChecked("the standby: " + oneLine(err.Error()))
+	}
+	return StandbyReading{Standby: standby, Home: home}
+}

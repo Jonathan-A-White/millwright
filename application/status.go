@@ -192,6 +192,10 @@ type Status struct {
 	// postern_api upstream sends the phone to the home first.
 	VPSNginx VPSNginxReader
 
+	// Standby, when set, is asked for the standby line: whether the VPS's backend
+	// runs the home's commit.
+	Standby StandbyReader
+
 	// Control, when set, is the home's event log, read for the CANCELLED
 	// section (the cancel events of the last day) and the PAUSED line. Nil
 	// leaves both out.
@@ -336,6 +340,9 @@ type StatusReport struct {
 	// VPSNginx is what the VPS's nginx upstream was found to be; nil when
 	// not asked.
 	VPSNginx *VPSNginxReading
+	// Standby is how the standby's backend compares with the home's; nil when not
+	// asked.
+	Standby *StandbyReading
 	// Cancelled are the runs a cancel event ended in the last day, and Paused
 	// the pause-host event this host is under, if any.
 	Cancelled []Cancel
@@ -513,6 +520,10 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	if s.VPSNginx != nil {
 		reading := s.VPSNginx.Read(ctx)
 		report.VPSNginx = &reading
+	}
+	if s.Standby != nil {
+		reading := s.Standby.Read(ctx)
+		report.Standby = &reading
 	}
 	if s.Control != nil {
 		// Like the shipper, a log that cannot be read is left out of the
@@ -921,6 +932,10 @@ func (r StatusReport) String() string {
 
 	if r.VPSNginx != nil {
 		clip(&b, r.VPSNginx.Line())
+		b.WriteString("\n")
+	}
+	if r.Standby != nil {
+		clip(&b, r.Standby.Line())
 		b.WriteString("\n")
 	}
 
