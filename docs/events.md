@@ -216,8 +216,8 @@ One `events` record's plaintext is one batch: the events numbered `from` to
   by putting the event in the log in this lane: `mw events emit --emergency`, `mw talk call`
   (a `message` whose detail is the ring's txid), and mayor-stale's alarm in `mw doctor` (a
   `job` event, running to failed, actor `doctor@<host>`, the alarm's text as detail; the
-  boost-reach and battery alarms too). When the alarm's condition ends (the Boost answers
-  again, the Mayor is fresh again, the battery recovers or is plugged in) `mw doctor` writes
+  boost-reach, vps-nginx and battery alarms too). When the alarm's condition ends (the Boost answers
+  again, the VPS upstream is right again, the Mayor is fresh again, the battery recovers or is plugged in) `mw doctor` writes
   ONE event in the `normal` lane, not an emergency: a `job` event, running to done, actor
   `doctor@<host>`, the way back as detail, whose `clears` is the seq of the emergency it ends. The
   doctor keeps that seq between runs; an alarm whose emergency could not be written has none, and

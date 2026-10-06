@@ -191,6 +191,25 @@ func newDoctorCmd() *cobra.Command {
 				verdict, _ := wg.Probe(ctx)
 				return verdict == application.DoctorFaulty
 			}
+			checks := application.DoctorChecks{}
+			vpsNginx, err := hostVPSNginx(mwVault(vault, host), false)
+			if err != nil {
+				return err
+			}
+			if vpsNginx != nil {
+				vpsCheck := doctor.NewVPSNginx(mwVault(vault, host), host, vpsNginx, store)
+				vpsCheck.Alarm = alarm
+				// The upstream put right is pushed to the phone, as its alarm was;
+				// the event rides the normal lane.
+				vpsCheck.Clear = func(ctx context.Context, text string, clears uint64) error {
+					_, pushErr := handsPush{gateway: mwGateway(vault, host)}.Run(ctx, application.PosternSendRequest{Class: "alarm", Text: text})
+					if err := clear(ctx, text, clears); err != nil {
+						return err
+					}
+					return pushErr
+				}
+				checks = append(checks, vpsCheck)
+			}
 			tmpLeftovers := doctor.NewTmpLeftovers(os.TempDir())
 			tmpLeftovers.Budget = tmpLeftoversBudget
 			rootDisk := doctor.NewRootDiskBudget()
@@ -199,7 +218,7 @@ func newDoctorCmd() *cobra.Command {
 				return mwGateway(vault, host).SetNote(ctx, application.DoctorNoteKey(host, doctor.RootDiskBudgetName), text)
 			}
 			return runDoctor(cmd, application.Doctor{
-				Checks: application.DoctorChecks{
+				Checks: append(application.DoctorChecks{
 					doctor.NewDaemonReload(units),
 					doctor.NewWifi(reach, powershell, store),
 					doctor.NewTunnel(tunnelHost, reach, tunnelUnit, tunnelProbe),
@@ -217,7 +236,7 @@ func newDoctorCmd() *cobra.Command {
 					posternChannel,
 					battery,
 					boostReach,
-				},
+				}, checks...),
 				State: store,
 				Log:   store,
 				Notes: mwGateway(vault, host),
