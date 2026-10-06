@@ -945,6 +945,29 @@ there is none; in both the note is written straight into the database every
 sync. See *The factory on one host (the desktop)*, above, and
 `features/sync.feature`.
 
+## Going easy on a metered network
+
+On a WSL host mw asks Windows whether the connection it is using is metered
+(`NetworkCostType` Fixed or Variable is; Unrestricted, Unknown, no profile, a failed
+call or one that takes over 10 s is not), by `powershell.exe` at its full `/mnt/c`
+path, and keeps the answer for about a minute in `~/.local/state/mw/network.json`. Config
+`metered = "auto"` (the default), `"yes"` or `"no"` (or `MW_METERED`) overrides it, for a
+host that is not WSL. While the network is metered:
+
+- `mw sync` skips a beads backup that is due, as `--no-backup` would, and says `backup
+  skipped: metered network`; the vault's git pull and push stay, and the backup is still
+  due on the next sync that finds the network unmetered.
+- `mw dispatch` starts no story whose rig is named in the config's `[heavy_net]` table
+  (`postern = true`), the rigs whose gate or close-out installs dependencies. The story
+  stays open and the first tick after the network is unmetered takes it. Other stories go
+  as before.
+- `mw status` shows `NETWORK metered (Windows: <profile>, cost <type>)`, or `NETWORK unmetered`.
+
+A change of state is written once, not per tick: an emergency-lane `job` event
+`network@<host>` (running to failed) when it turns metered, so the Governor gets one push,
+and one in the normal lane (running to done, `clears` that seq) when it turns back. See
+`application/network_test.go` and `application/dispatch_network_test.go`.
+
 ## Stamping a rig's head by hand
 
 A chain stamp (`docs/chain-stamps.md`) is queued on its own by each landing of

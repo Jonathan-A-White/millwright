@@ -228,7 +228,9 @@ One `events` record's plaintext is one batch: the events numbered `from` to
   even past `chain_daily_cap`. They have an allowance of their own, `[events] emergency_daily_cap`
   (default 20 a UTC day), which `chain_daily_cap` does not count: past it an emergency goes
   direct only, the follower says so, and it is not put on chain later. An emergency's detail is
-  at most 2000 bytes (`mw doctor` cuts its alarm's text to fit). With the chain unreachable it goes direct in this lane and is
+  at most 2000 bytes (`mw doctor` cuts its alarm's text to fit). The network going metered is one too:
+  a `job` event, running to failed, actor `network@<host>`; the way back is one normal-lane event,
+  running to done, whose `clears` is its seq. Each is written once per change, not per tick. With the chain unreachable it goes direct in this lane and is
   put on chain later in the `normal` lane, as a fallback batch is. The batches that follow
   leave it out, so the app has it once. `mw status` counts the day's emergencies.
 - `fallback`: a batch sent direct only while the chain could not be reached
