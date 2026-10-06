@@ -20,6 +20,8 @@ func TestMain(m *testing.M) {
 	os.Unsetenv("INVOCATION_ID")
 	// A host that is WSL would ask Windows, for real, what its network costs.
 	os.Setenv("MW_METERED", "no")
+	// ...and one that is not to ssh to the real VPS.
+	os.Setenv("MW_VPS_GUARD", "off")
 	for _, kv := range os.Environ() {
 		if name, _, _ := strings.Cut(kv, "="); strings.HasPrefix(name, "BEADS_DOLT_") {
 			os.Unsetenv(name)

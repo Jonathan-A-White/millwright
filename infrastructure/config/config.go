@@ -54,6 +54,10 @@
 //	tmp_leftovers_budget_bytes = 200000000
 //	root_disk_budget_bytes = 280000000000
 //	root_disk_margin_bytes = 10000000000
+//	vps_ssh        = "root@allmymind.org"
+//	vps_nginx_conf = "/etc/nginx/sites-enabled/postern.allmymind.org.conf"
+//	vps_mw         = "/root/millwright/bin/mw"
+//	vps_mw_needs   = "bd54ab8"
 package config
 
 import (
@@ -1821,6 +1825,45 @@ func DoctorTunnelUnit() (string, error) {
 // DefaultDoctorTunnelProbe when the table says nothing.
 func DoctorTunnelProbe() (string, error) {
 	return doctorTableSetting("tunnel_probe", DefaultDoctorTunnelProbe)
+}
+
+// The VPS guard's defaults, when the [doctor] table says nothing: where the
+// guard looks at the VPS's nginx upstream and mw binary (mw-gq6.274).
+const (
+	DefaultDoctorVPSSSH       = "root@allmymind.org"
+	DefaultDoctorVPSNginxConf = "/etc/nginx/sites-enabled/postern.allmymind.org.conf"
+	DefaultDoctorVPSMw        = "/root/millwright/bin/mw"
+	DefaultDoctorVPSMwNeeds   = "bd54ab8"
+)
+
+// VPSGuard is where mw doctor's vps-nginx check, and mw status's VPS NGINX
+// line, look at the VPS: the ssh target, the nginx site file, the mw binary,
+// and the commit that binary is said to need.
+type VPSGuard struct {
+	SSH, Conf, Mw, Needs string
+}
+
+// DoctorVPSGuard reports the VPS guard's settings: the `[doctor]` table's
+// `vps_ssh`, `vps_nginx_conf`, `vps_mw` and `vps_mw_needs` keys of
+// ~/.config/mw/config.toml, each with its default when the table says nothing.
+func DoctorVPSGuard() (VPSGuard, error) {
+	var guard VPSGuard
+	for _, setting := range []struct {
+		key, fallback string
+		into          *string
+	}{
+		{"vps_ssh", DefaultDoctorVPSSSH, &guard.SSH},
+		{"vps_nginx_conf", DefaultDoctorVPSNginxConf, &guard.Conf},
+		{"vps_mw", DefaultDoctorVPSMw, &guard.Mw},
+		{"vps_mw_needs", DefaultDoctorVPSMwNeeds, &guard.Needs},
+	} {
+		value, err := doctorTableSetting(setting.key, setting.fallback)
+		if err != nil {
+			return VPSGuard{}, err
+		}
+		*setting.into = value
+	}
+	return guard, nil
 }
 
 // DefaultDoctorWgHub is the hub's ssh host:port mw doctor's wg check dials

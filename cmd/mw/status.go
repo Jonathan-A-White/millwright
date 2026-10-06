@@ -64,6 +64,11 @@ func newStatusCmd() *cobra.Command {
 			"A NETWORK line says whether the network is metered: 'NETWORK metered (Windows: <profile>, cost\n" +
 			"<type>)' or 'NETWORK unmetered', as Windows' own setting says it on WSL (config `metered`\n" +
 			"overrides). While metered, no beads backup runs and no story on a heavy_net rig starts.\n\n" +
+			"A VPS NGINX line says whether the VPS's nginx postern_api upstream sends the phone to the home\n" +
+			"first and every other backend as `backup`: 'VPS NGINX ok (home first, N backup)', 'VPS NGINX\n" +
+			"FAULT: <what>', or 'VPS NGINX not checked (<why>)' when the VPS cannot be reached over ssh. It\n" +
+			"adds 'bin/mw lacks <commit>' when the VPS's mw binary was built without the commit the [doctor]\n" +
+			"table's vps_mw_needs names. The check is mw doctor's vps-nginx, which tells the Governor once.\n\n" +
 			"Every line fits a phone-width terminal, at most 60 columns. Nothing is claimed, nothing is\n" +
 			"written and no session is started: status only reads.",
 		Args: cobra.NoArgs,
@@ -108,6 +113,12 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			var vps application.VPSNginxReader
+			if guard, err := hostVPSNginx(files, true); err != nil {
+				return err
+			} else if guard != nil {
+				vps = guard
+			}
 			_, err = application.Status{
 				Tracker:          tracker,
 				Notes:            tracker,
@@ -130,6 +141,7 @@ func newStatusCmd() *cobra.Command {
 				SyncMode:         setting.Configured,
 				Home:             files,
 				Network:          net,
+				VPSNginx:         vps,
 				Out:              cmd.OutOrStdout(),
 			}.Run(cmd.Context())
 			return err

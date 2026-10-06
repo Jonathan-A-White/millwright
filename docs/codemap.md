@@ -8,29 +8,29 @@ domain/, domain/events: stdlib · application/ (apptest/: fakes): use cases, por
 
 | Port | Declared in | Real adapter | Fake |
 | --- | --- | --- | --- |
-| `WorkTracker` | application/worktracker.go | `infrastructure/beads/` | apptest.FakeTracker |
+| `WorkTracker` | application/worktracker.go | infrastructure/beads/ | apptest.FakeTracker |
 | TrackerSync | application/sync.go | `infrastructure/beads/sync.go` | apptest.FakeTracker |
 | TrackerNotes, SweepNotes, BeadGraph | application/{status,sweep}.go | same | same |
 | VaultFiles | application/sync.go | `infrastructure/vault/git.go` | apptest.FakeVaultFiles |
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | `infrastructure/beads/mail.go` | apptest.FakeMailbox |
 | EpicRules | application/epicrules.go | `infrastructure/vault/epicrules.go` | apptest.FakeEpicRules |
-| Vault | application/seatboot.go | `infrastructure/vault` | application/seatboot_test.go |
-| Runner | application/runner.go | `infrastructure/tmux` | apptest.FakeRunner |
-| Harness | application/harness.go | `infrastructure/claude` | application/seatboot_test.go |
+| Vault | application/seatboot.go | infrastructure/vault | application/seatboot_test.go |
+| Runner | application/runner.go | infrastructure/tmux | apptest.FakeRunner |
+| Harness | application/harness.go | infrastructure/claude | application/seatboot_test.go |
 | SeatFiles, Windows, SeatHarness, ActingFile | application/seatup.go, application/seathandover.go | infrastructure/{vault/{seat,reaplog},tmux/window,claude/claude}.go | apptest.Fake{Windows,ActingFile} |
 | Transcripts, TranscriptTail, PeekRemote | application/seatcontext.go, application/peek.go | infrastructure/{claude,peekremote} | apptest/fakepeek.go |
 | Reap{Terminal,Log,Armer} | application/seatreap.go | infrastructure/{tmux/reap,vault/reaplog,reaper/arm}.go | apptest.Fake{Windows,ReapArmer} |
-| WatchProbes | application/watch.go | `infrastructure/watch` | apptest.FakeWatch |
-| Doctor{Check,State,Log,Notes} | application/doctor.go | `infrastructure/doctor` | none |
-| Network{Probe,Store,Reader} | application/network.go | `infrastructure/network` | apptest.FakeNetwork* |
-| TickLog | application/millhandtick.go | `infrastructure/ticklog` | apptest.FakeTickLog |
+| WatchProbes | application/watch.go | infrastructure/watch | apptest.FakeWatch |
+| Doctor{Check,State,Log,Notes}, VPSProbe | application/doctor.go, application/vpsnginx.go | infra/{doctor,vpsnginx} | none |
+| Network{Probe,Store,Reader} | application/network.go | infrastructure/network | apptest.FakeNetwork* |
+| TickLog | application/millhandtick.go | infrastructure/ticklog | apptest.FakeTickLog |
 | CardLog | application/card.go | infrastructure/cardlog | apptest.FakeCardLog |
 | Worktrees | application/worktrees.go | `infrastructure/rig/worktree.go` | application/dispatch_test.go |
-| HostLoad | application/hostload.go | `infrastructure/hostload` | apptest.FakeHostLoad |
-| SyncHaltMarker | application/sync.go | `infrastructure/synchalt` | apptest.FakeSyncHaltMarker |
+| HostLoad | application/hostload.go | infrastructure/hostload | apptest.FakeHostLoad |
+| SyncHaltMarker | application/sync.go | infrastructure/synchalt | apptest.FakeSyncHaltMarker |
 | Notifier, HomeMoveHost, OldHome, VaultBirth, TrackerBirth | application/{millhandtick,homemove,init}.go | infrastructure/{notify/notify,homemove/homemove,vault/birth,beads/init}.go | none |
 | Landing, Checks, MergeSlot, Holding | application/landing.go | infrastructure/rig/{landing,checks,slot}.go | none |
-| AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter | application/afterlanding.go, application/selfupdate.go, application/backendstage.go | infrastructure/{rig/{afterlanding,built,backend},userunits}.go | `features/{self_update,backend_swap}.feature` |
+| AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter | application/afterlanding.go, application/selfupdate.go, application/backendstage.go | infrastructure/{rig/{afterlanding,built,backend},userunits}.go | features/{self_update,backend_swap}.feature |
 | EventLog, BeadFeed, FollowCursors, ShipStates, SubscribeFiles, NudgeCursors, EventSpringer, EventController, HarnessCount | application/event*.go, status.go | infrastructure/{eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go | apptest.Fake{EventLog,FollowCursors,Ship*,Tracker,Subscribe*,Nudge*} |
 | Postern, hands, Prompts | application/{postern*,hands,prompt}.go | infrastructure/{postern,hands*,homemove} | apptest.Fake{Postern*,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*,HomeMover,Prompts} |
 | StampQueue, StampStore, CommitNotes, ChainLookup, RigHeads | application/chainstamp.go, application/prove.go | infrastructure/{stampqueue,chainlookup}, rig/worktree.go | apptest.Fake{StampQueue,CommitNotes,ChainLookup,RigHeads} |
@@ -56,7 +56,7 @@ domain/, domain/events: stdlib · application/ (apptest/: fakes): use cases, por
 | Mail | application/mail.go | mw mail - cmd/mw/mail.go | features/mail.feature |
 | Home | application/home.go | mw home - cmd/mw/home.go | features/home.feature |
 | HomeMove | application/homemove.go | mw home move - cmd/mw/homemove.go | none: docs/home-move.md |
-| Seat{Context,Up,Reap,Handover} | application/seat{context,up,reap,handover}.go | mw seat context/up/reap/handover - `cmd/mw/seat.go` | features/seat_{context,up,reap}.feature |
+| Seat{Context,Up,Reap,Handover} | application/seat{context,up,reap,handover}.go | mw seat context/up/reap/handover - cmd/mw/seat.go | features/seat_{context,up,reap}.feature |
 | Talk{Call,Model,Say,Wait} | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go | mw talk call/say/wait/model cmd/mw/talk.go | features/talk_*.feature |
 | Millhand | application/millhand.go | mw millhand - cmd/mw/millhand.go | features/millhand.feature |
 | Deputy | application/deputy.go | mw deputy - cmd/mw/deputy.go | features/deputy.feature |

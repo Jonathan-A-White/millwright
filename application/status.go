@@ -188,6 +188,10 @@ type Status struct {
 	// Network, when set, is asked for the NETWORK line: metered or not.
 	Network NetworkReader
 
+	// VPSNginx, when set, is asked for the VPS NGINX line: whether the VPS's
+	// postern_api upstream sends the phone to the home first.
+	VPSNginx VPSNginxReader
+
 	// Control, when set, is the home's event log, read for the CANCELLED
 	// section (the cancel events of the last day) and the PAUSED line. Nil
 	// leaves both out.
@@ -329,6 +333,9 @@ type StatusReport struct {
 	HarnessKnown bool
 	// Network is whether the network is metered; nil when not asked.
 	Network *NetworkReading
+	// VPSNginx is what the VPS's nginx upstream was found to be; nil when
+	// not asked.
+	VPSNginx *VPSNginxReading
 	// Cancelled are the runs a cancel event ended in the last day, and Paused
 	// the pause-host event this host is under, if any.
 	Cancelled []Cancel
@@ -502,6 +509,10 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	if s.Network != nil {
 		reading := s.Network.Read(ctx)
 		report.Network = &reading
+	}
+	if s.VPSNginx != nil {
+		reading := s.VPSNginx.Read(ctx)
+		report.VPSNginx = &reading
 	}
 	if s.Control != nil {
 		// Like the shipper, a log that cannot be read is left out of the
@@ -905,6 +916,11 @@ func (r StatusReport) String() string {
 
 	if r.Network != nil {
 		clip(&b, r.Network.Line())
+		b.WriteString("\n")
+	}
+
+	if r.VPSNginx != nil {
+		clip(&b, r.VPSNginx.Line())
 		b.WriteString("\n")
 	}
 
