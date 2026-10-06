@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 )
 
 // SessionIDShown is how much of a session's id `mw seat context` prints: enough
@@ -19,6 +20,25 @@ type Transcripts interface {
 	// with no transcript, or a transcript with no assistant turn yet, is an
 	// error that says where it looked.
 	LiveContext(ctx context.Context, dir string) (TranscriptContext, error)
+}
+
+// TranscriptReplies is the same record read for what the harness answered: the
+// Mayor's session is stuck when every reply it got lately was an API error.
+// It is read-only and costs no fuel.
+type TranscriptReplies interface {
+	// Replies reports the harness's replies in the newest session run in dir,
+	// oldest first, that were recorded at or after since. A directory with no
+	// transcript has none, which is not an error.
+	Replies(ctx context.Context, dir string, since time.Time) ([]HarnessReply, error)
+}
+
+// HarnessReply is one reply the harness recorded in a session: what the model
+// answered, or the "API Error" the harness wrote down in its place.
+type HarnessReply struct {
+	At       time.Time
+	APIError bool
+	// Text is the reply's first line of text, cut short.
+	Text string
 }
 
 // TranscriptContext is one session's live context.
