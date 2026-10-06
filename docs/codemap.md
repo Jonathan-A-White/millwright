@@ -18,7 +18,7 @@ domain/, domain/events: stdlib · application/ (apptest/: fakes): use cases, por
 | Runner | application/runner.go | infrastructure/tmux | apptest.FakeRunner |
 | Harness | application/harness.go | infrastructure/claude | application/seatboot_test.go |
 | SeatFiles, Windows, SeatHarness, ActingFile | application/seatup.go, application/seathandover.go | infrastructure/{vault/{seat,reaplog},tmux/window,claude/claude}.go | apptest.Fake{Windows,ActingFile} |
-| Transcripts, TranscriptTail, PeekRemote | application/seatcontext.go, application/peek.go | infrastructure/{claude,peekremote} | apptest/fakepeek.go |
+| Transcripts{,Tail,Replies}, PeekRemote | application/seatcontext.go, application/peek.go | infrastructure/{claude,peekremote} | apptest/fakepeek.go |
 | Reap{Terminal,Log,Armer} | application/seatreap.go | infrastructure/{tmux/reap,vault/reaplog,reaper/arm}.go | apptest.Fake{Windows,ReapArmer} |
 | WatchProbes | application/watch.go | infrastructure/watch | apptest.FakeWatch |
 | Doctor{Check,State,Log,Notes}, VPSProbe | application/doctor.go, application/vpsnginx.go | infra/{doctor,vpsnginx} | none |

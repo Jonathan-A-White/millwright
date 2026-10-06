@@ -71,6 +71,9 @@ type MayorGone struct {
 	// Timeout bounds Cure's run of bin/mayor-up. Empty reads
 	// MayorGoneCureTimeout.
 	Timeout time.Duration
+	// Env, when non-nil, is the environment bin/mayor-up runs in, instead of
+	// this process's own; MW_DOCTOR=1 is added to it either way.
+	Env []string
 
 	// window is the id bin/mayor-up's cure printed on its last output line,
 	// read by WayBack once Cure has run. Empty before any cure has run in
@@ -142,7 +145,11 @@ func (m *MayorGone) Cure(ctx context.Context) error {
 	defer cancel()
 
 	cmd := exec.CommandContext(cctx, m.mayorUpPath())
-	cmd.Env = append(os.Environ(), "MW_DOCTOR=1")
+	env := m.Env
+	if env == nil {
+		env = os.Environ()
+	}
+	cmd.Env = append(append([]string(nil), env...), "MW_DOCTOR=1")
 	out, err := cmd.CombinedOutput()
 	lines := nonEmptyLines(string(out))
 

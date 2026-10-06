@@ -55,6 +55,9 @@ type doctorContext struct {
 	// boost is the fixture of the boost-reach scenarios; nil in any other.
 	boost *boostReachFixture
 
+	// stuck is the fixture of the mayor-stuck scenarios; nil in any other.
+	stuck *mayorStuckFixture
+
 	out    bytes.Buffer
 	report application.DoctorReport
 	err    error
@@ -82,6 +85,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	})
 
 	c.registerBoostReachSteps(ctx)
+	c.registerMayorStuckSteps(ctx)
 
 	ctx.Given(`^a doctor check "([^"]*)" whose probe says ok$`, c.aCheckWhoseProbeSaysOK)
 	ctx.Given(`^a doctor check "([^"]*)" whose probe says faulty "([^"]*)"$`, c.aCheckWhoseProbeSaysFaulty)

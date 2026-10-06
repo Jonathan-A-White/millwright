@@ -221,3 +221,23 @@ func TestDoctorTableHasTheBatteryCheck(t *testing.T) {
 		t.Fatalf("expected the battery check to run and read ok, got:\n%s", report)
 	}
 }
+
+// A Mayor stuck on API errors is in the table, ahead of mayor-stale: on a host
+// whose vault holds no .mayor-acting there is no seat held, which reads ok.
+func TestDoctorTableHasTheMayorStuckCheck(t *testing.T) {
+	closed := closedDoctorPort(t)
+	vault := t.TempDir()
+	mwConfig(t, fmt.Sprintf("vault = %q\nhost = \"laptop\"\n\n[doctor]\nreach = [%q]\n", vault, closed))
+
+	out := &bytes.Buffer{}
+	root := newRootCmd()
+	root.SetOut(out)
+	root.SetErr(out)
+	root.SetArgs([]string{"doctor", "--dry-run", "mayor-stuck"})
+	if err := root.Execute(); err != nil {
+		t.Fatalf("mw doctor mayor-stuck: %v\n%s", err, out)
+	}
+	if report := out.String(); !strings.HasPrefix(report, "mayor-stuck: ok") {
+		t.Fatalf("expected the mayor-stuck check to run and read ok, got:\n%s", report)
+	}
+}

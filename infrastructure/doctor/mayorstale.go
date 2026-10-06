@@ -107,6 +107,8 @@ type MayorStale struct {
 	// gone when bin/mayor-up still finds it alive (exit 3), and Cure tries
 	// three times. Zero reads two seconds.
 	Settle time.Duration
+	// Env is the environment bin/mayor-up runs in, as MayorGone's Env.
+	Env []string
 
 	// started is the window id bin/mayor-up printed on its last output line,
 	// read by WayBack once Cure has run.
@@ -125,7 +127,7 @@ func (m *MayorStale) Name() string { return MayorStaleName }
 // held is MayorGone's reading of the same vault, whose window search and
 // bare-shell test this check shares.
 func (m *MayorStale) held() *MayorGone {
-	return &MayorGone{Vault: m.Vault, Tmux: m.Tmux, PS: m.PS, Home: m.Home, Host: m.Host}
+	return &MayorGone{Vault: m.Vault, Tmux: m.Tmux, PS: m.PS, Home: m.Home, Host: m.Host, Env: m.Env}
 }
 
 // Probe implements application.DoctorCheck: ok when the seat is not held (see

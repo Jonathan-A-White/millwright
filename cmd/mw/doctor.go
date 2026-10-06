@@ -9,6 +9,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain/events"
+	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
@@ -21,7 +22,7 @@ import (
 // nothing but a check's own probe or cure, and never AI or mail itself: a
 // check left needing a person is a beads note, one key per check, and
 // `mw millhand tick` is what wakes the Millhand for it. The only pushes are
-// the alarms to the Governor, mayor-stale's and boost-reach's, sent from their cures.
+// the alarms to the Governor, mayor-stale's, mayor-stuck's and boost-reach's, sent from their cures.
 func newDoctorCmd() *cobra.Command {
 	var dryRun bool
 	cmd := &cobra.Command{
@@ -157,6 +158,15 @@ func newDoctorCmd() *cobra.Command {
 				return emitDoctorClear(ctx, eventlog.New(logPath), eventsClock, host, text, clears, cmd.ErrOrStderr())
 			}
 			mayorStale.Alarm, mayorStale.Clear = alarm, clear
+			// A Mayor whose every reply lately was an API error: its transcript
+			// is read from where Claude Code keeps it. Where that is unknown the
+			// check says it cannot tell.
+			mayorStuck := doctor.NewMayorStuck(vault, store)
+			mayorStuck.Home, mayorStuck.Host = mwVault(vault, host), host
+			if projects, projectsErr := claude.DefaultProjectsRoot(); projectsErr == nil {
+				mayorStuck.Replies = claude.NewTranscripts(projects)
+			}
+			mayorStuck.Alarm, mayorStuck.Clear = alarm, clear
 			batteryLow, batteryCritical, err := config.DoctorBatteryThresholds()
 			if err != nil {
 				return err
@@ -229,6 +239,7 @@ func newDoctorCmd() *cobra.Command {
 					doctor.NewBeadsStores(vault),
 					tmpLeftovers,
 					rootDisk,
+					mayorStuck,
 					mayorStale,
 					mayorGone,
 					posternTranscribe,

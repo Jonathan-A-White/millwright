@@ -3122,6 +3122,26 @@ stall. Its way back is `tmux kill-window -t '<window id mayor-up started>'`.
 `mw doctor mayor-stale` runs it by hand; `--dry-run` reports a stale seat
 and changes nothing but its own record of the pane.
 
+**mayor-stuck** finds a Mayor that holds the seat but cannot get an answer:
+the network under it changed (on 2026-10-06 the Laptop left the phone tether
+and the proxy the Mayor was started behind, an ssh tunnel, closed), so every
+reply is an "API Error" while the process lives and the pane redraws, which
+`mayor-gone` and `mayor-stale` both call fine. It reads the Mayor's transcript
+(the Transcripts port, as `mw seat context` does) and faults when the last 10
+minutes hold at least one harness reply and every one was an API Error; a
+single reply that worked, or no reply, is ok. A seat not held says ok, as for
+`mayor-stale`. Its cure first drops each of `HTTPS_PROXY`, `HTTP_PROXY`,
+`ALL_PROXY` and their lowercase forms whose host and port refuse a TCP connect
+from the environment `bin/mayor-up` runs in and from the tmux server's global
+environment (`tmux set-environment -g -u`), keeping a proxy that answers;
+then closes the Mayor's window and runs `bin/mayor-up`, which starts a
+successor from the newest handoff with no handover; then sends one alarm, on
+the emergency lane, naming the window it started and any proxy it dropped. The
+Governor is told once to an episode: damper 30 minutes, cap 1, and the alarm is
+cleared by a normal-lane event once the Mayor answers again. Its way back is
+`tmux kill-window -t '<window id mayor-up started>'`. `mw doctor mayor-stuck`
+runs it by hand; `--dry-run` names the finding and changes nothing.
+
 **postern-channel** faults the home host, and only it, when its config does not
 send the Mayor's postern messages directly: `postern_channel` reads chain
 (the default, when `~/.config/mw/config.toml` lacks the key) rather than
