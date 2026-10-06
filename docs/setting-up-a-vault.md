@@ -24,6 +24,9 @@ lands the branch. Between sessions nothing runs but timers and the **follower**,
 which costs no Fuel. The seat charters are plain files you own and may rewrite
 (see [`template/seats/README.md`](../template/seats/README.md)).
 
+Why the factory is built this way, rule by rule and with what to do on less, is
+[Best practices](best-practices.md).
+
 ## Prerequisites
 
 - A Linux host with systemd and a user manager. Debian or Ubuntu (WSL Ubuntu
