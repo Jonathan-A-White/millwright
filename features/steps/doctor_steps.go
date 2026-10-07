@@ -85,6 +85,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	})
 
 	c.registerBoostReachSteps(ctx)
+	c.registerBoostAsleepSteps(ctx)
 	c.registerMayorStuckSteps(ctx)
 
 	ctx.Given(`^a doctor check "([^"]*)" whose probe says ok$`, c.aCheckWhoseProbeSaysOK)

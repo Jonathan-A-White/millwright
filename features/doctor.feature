@@ -492,3 +492,17 @@ Feature: mw doctor
     Then exactly 2 boost-reach alarms were sent
     And the boost-reach alarm says "The desktop (Boost) answers again (down 2026-09-23 12:00 to 2026-09-23 12:41 UTC)"
     And the boost-reach check keeps nothing
+
+  Scenario: The real boost-asleep check on the home host is faulty when the Boost has been silent past the host-silence threshold, and names it
+    Given the home host's boost-asleep check, the desktop having last synced 49 hours ago
+    When mw doctor's boost-asleep check runs
+    Then mw doctor leaves with the status 6
+    And the doctor log holds "boost-asleep cure-failed desktop silent 49h00m (threshold 2h)"
+    And mw doctor printed "desktop silent 49h00m (threshold 2h)"
+
+  Scenario: The real boost-asleep check on the home host is ok when the Boost last synced within the threshold
+    Given the home host's boost-asleep check, the desktop having last synced 1 hour ago
+    When mw doctor's boost-asleep check runs
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "boost-asleep ok desktop silent 1h00m"
+    And mw doctor printed "boost-asleep: ok (desktop silent 1h00m (threshold 2h))"
