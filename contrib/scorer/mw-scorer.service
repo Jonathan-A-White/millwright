@@ -1,0 +1,21 @@
+# The local phoneme scorer that mw grist score's local engine talks to
+# (contrib/scorer, docs/scorers.md). A systemd --user unit, installed by
+# contrib/scorer/install.sh; README.md there says the way back.
+[Unit]
+Description=mw-scorer: the local phoneme scorer on 127.0.0.1:8765 (contrib/scorer)
+
+[Service]
+Type=simple
+Environment=PYTHONPATH=%h/.local/share/mw-scorer/app
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=HF_HUB_OFFLINE=1
+Environment=HF_HUB_DISABLE_TELEMETRY=1
+# Optional settings: MW_SCORER_HESITATION_SECONDS, MW_SCORER_THREADS.
+EnvironmentFile=-%h/.config/mw/scorer.env
+ExecStart=%h/.local/share/mw-scorer/venv/bin/python -m mw_scorer --host 127.0.0.1 --port 8765
+Restart=on-failure
+RestartSec=5
+Nice=5
+
+[Install]
+WantedBy=default.target

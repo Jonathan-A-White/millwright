@@ -57,8 +57,11 @@ An engine is a name in config and a file in `infrastructure/scorer/`.
 
 - **`local`** (`infrastructure/scorer/local.go`) is an HTTP client of the scorer
   in `contrib/scorer`, which runs on this host and listens with a local model.
-  Nothing leaves the host. `contrib/scorer` arrives in the next story of the
-  epic; until it does, the engine is a client of a server nobody has yet.
+  Nothing leaves the host. The scorer is a wav2vec2 phoneme model, espeak-ng
+  and an alignment, on CPU, run as the systemd user unit `mw-scorer`:
+  `contrib/scorer/install.sh` installs it (after the hand step
+  `sudo apt install espeak-ng`), and `contrib/scorer/README.md` says how it
+  scores, its limits and the way back.
 - **`azure`** is declared in config and used by a later story.
 
 ### Audio
