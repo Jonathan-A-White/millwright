@@ -54,3 +54,35 @@ func TestHomeSpringRunsTheTimersOwnUnitsForTheInstalledJobsAndSaysWhatIsMissing(
 	}
 	var _ application.EventSpringer = spring
 }
+
+func TestHomeSpringHasAGristJobOnlyWhereTheConfigHasAGristTable(t *testing.T) {
+	defer func(was userUnits) { springUnits = was }(springUnits)
+	springUnits = &fakeUnits{installed: map[string]bool{}}
+	for _, c := range []struct {
+		name, config string
+		want         bool
+	}{
+		{"no [grist] table", "host = \"laptop\"\n", false},
+		{"a [grist] table", "host = \"laptop\"\n\n[grist]\nconcurrency = 2\n", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			mwConfig(t, c.config)
+			spring, err := homeSpring(t.TempDir()+"/log.jsonl", "laptop", &bytes.Buffer{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			has := false
+			for _, j := range spring.Jobs {
+				if j.Name == application.GristJobName {
+					has = true
+					if j.Probe == nil || j.Every != 0 {
+						t.Fatalf("the grist job is %+v: it is sprung by a probe, on no clock", j)
+					}
+				}
+			}
+			if has != c.want {
+				t.Fatalf("the grist job is there: %v, want %v", has, c.want)
+			}
+		})
+	}
+}
