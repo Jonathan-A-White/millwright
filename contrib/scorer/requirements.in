@@ -1,0 +1,5 @@
+# The direct packages; requirements.txt pins these and everything under them.
+torch==2.14.1+cpu
+transformers==5.19.0
+phonemizer==3.4.0
+numpy==2.5.3

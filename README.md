@@ -1503,7 +1503,8 @@ its result as JSON: for each word the phonemes expected and produced, whether it
 was read right, left out, added, mispronounced or hesitated over, and its
 accuracy. Engines are the `[scorers]` table's `engines` (default `["local"]`),
 with `local_url` (default `http://127.0.0.1:8765`), `azure_key_file` and
-`azure_region` beside it; the local engine needs `ffmpeg`. The contract, with
+`azure_region` beside it; the local engine needs `ffmpeg` and the scorer of
+`contrib/scorer` (install and way back in its `README.md`). The contract, with
 the request and response JSON, is `docs/scorers.md`; see `features/scorer.feature`.
 
 A grist may carry a recording (`audio/webm`, `audio/ogg`, `audio/mp4`, `audio/mpeg`,
