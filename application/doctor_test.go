@@ -46,6 +46,17 @@ func TestAnOKProbeLogsOKAndCuresNothing(t *testing.T) {
 	}
 }
 
+func TestAnOKResultWithAReasonPrintsItAndOneWithoutDoesNot(t *testing.T) {
+	with := application.DoctorResult{Check: "widget", Verdict: "ok", Reason: "desktop silent 1h00m (threshold 2h)"}
+	if got, want := with.String(), "widget: ok (desktop silent 1h00m (threshold 2h))"; got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+	without := application.DoctorResult{Check: "widget", Verdict: "ok"}
+	if got, want := without.String(), "widget: ok"; got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+}
+
 func TestAFaultyProbeCuresOnceAndLeavesWithZero(t *testing.T) {
 	state := apptest.NewFakeDoctorState()
 	log := &apptest.FakeDoctorLog{}

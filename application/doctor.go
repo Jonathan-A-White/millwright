@@ -236,6 +236,9 @@ func (r DoctorResult) line() string {
 func (r DoctorResult) String() string {
 	switch r.Verdict {
 	case "ok":
+		if r.Reason != "" {
+			return r.Check + ": ok (" + r.Reason + ")"
+		}
 		return r.Check + ": ok"
 	case "cannot-tell":
 		return r.Check + ": cannot-tell (" + r.Reason + ")"
