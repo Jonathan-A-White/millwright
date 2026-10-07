@@ -44,6 +44,8 @@ type backendSwapContext struct {
 	said    *apptest.FakePosternSender
 	stage   application.BackendStage
 	bead    string
+	story   string
+	epic    string
 }
 
 // InitializeBackendSwapScenario registers the steps of features/backend_swap.feature.
@@ -51,11 +53,12 @@ func InitializeBackendSwapScenario(ctx *godog.ScenarioContext) {
 	c := &backendSwapContext{}
 
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
-		*c = backendSwapContext{}
+		*c = backendSwapContext{story: "mw-j0f2d.28", epic: "mw-j0f2d"}
 		return ctx, nil
 	})
 
 	ctx.Given(`^a home that has staged the swap of a Postern landing$`, c.aHomeThatHasStaged)
+	ctx.Given(`^the landed story is a standalone bug fix with no epic$`, c.theLandedStoryHasNoEpic)
 	ctx.Given(`^the Governor is in a Talk$`, c.theGovernorIsInATalk)
 	ctx.Given(`^the swap's health check will fail and put the old backend back$`, c.theHealthCheckWillFail)
 	ctx.Given(`^the rig keeps the tap$`, c.theRigKeepsTheTap)
@@ -65,6 +68,7 @@ func InitializeBackendSwapScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the swap did not run$`, c.theSwapDidNotRun)
 	ctx.Then(`^the Governor was told once, on the swap bead's channel, "([^"]*)"$`, c.toldOnce)
 	ctx.Then(`^the Governor was told once, on the swap bead's channel, that the swap failed and the old backend was put back$`, c.toldOfTheFailure)
+	ctx.Then(`^the swap bead is filed with no epic and its swap is written$`, c.theSwapIsFiledWithNoEpic)
 	ctx.Then(`^the swap bead is closed$`, c.theSwapBeadIsClosed)
 	ctx.Then(`^the swap bead is open, hitl, and carries the output as a comment$`, c.openHitlWithOutput)
 	ctx.Then(`^the swap bead is open, hitl, and carries no output$`, c.openHitlWithoutOutput)
@@ -101,20 +105,15 @@ func (c *backendSwapContext) landed() error {
 	if c.bead != "" {
 		return nil
 	}
+	before := len(c.tracker.Stories())
 	c.stage.Landed(context.Background(), application.BackendLanding{
-		Rig: "postern", Story: "mw-j0f2d.28", Title: "Show the Mayor's presence", Epic: "mw-j0f2d", Commit: swapCommit,
+		Rig: "postern", Story: c.story, Title: "Show the Mayor's presence", Epic: c.epic, Commit: swapCommit,
 	})
-	detail, err := c.tracker.ShowEpic(context.Background(), "mw-j0f2d")
-	if err != nil {
-		return err
-	}
-	for _, s := range detail.Stories {
-		if s.Story.ID != "mw-j0f2d.28" {
-			c.bead = s.Story.ID
-		}
+	if filed := c.tracker.Stories(); len(filed) > before {
+		c.bead = filed[before]
 	}
 	if c.bead == "" {
-		return fmt.Errorf("expected the landing to file a swap bead under the epic")
+		return fmt.Errorf("expected the landing to file a swap bead")
 	}
 	return nil
 }
@@ -126,6 +125,33 @@ func (c *backendSwapContext) talk(role string) error {
 
 func (c *backendSwapContext) theGovernorIsInATalk() error { return c.talk(application.TalkRoleTurn) }
 func (c *backendSwapContext) theTalkEnds() error          { return c.talk(application.TalkRoleEnd) }
+
+func (c *backendSwapContext) theLandedStoryHasNoEpic() error {
+	c.story, c.epic = "mw-me7kx5", ""
+	c.tracker.AddStory("", domain.Story{ID: c.story, Title: "Postern WoC client timeout"})
+	return nil
+}
+
+func (c *backendSwapContext) theSwapIsFiledWithNoEpic() error {
+	if err := c.landed(); err != nil {
+		return err
+	}
+	d, err := c.detail()
+	if err != nil {
+		return err
+	}
+	if d.EpicID != "" {
+		return fmt.Errorf("expected %s filed under no epic, it is under %q", c.bead, d.EpicID)
+	}
+	if !d.Hitl() {
+		return fmt.Errorf("expected %s hitl, got labels %v", c.bead, d.Labels)
+	}
+	key := "hands." + c.bead
+	if text, _ := c.tracker.Note(context.Background(), key); !strings.Contains(text, "backend-4c9db71") {
+		return fmt.Errorf("expected the swap step written on %s, note %s is %q", c.bead, key, text)
+	}
+	return nil
+}
 
 func (c *backendSwapContext) theHealthCheckWillFail() error {
 	c.runner.Outcome = application.HandsOutcome{Exit: 1, Output: "curl: (22) the health url said 502\nFAILED after 4 tries: putting the old backend back\n"}

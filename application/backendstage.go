@@ -153,7 +153,7 @@ type BackendLanding struct {
 // leave the live backend as it was, so the app's new half could not work until
 // the Mayor built the backend by hand, staged it and wrote the swap as a hands
 // step. This does that clerical half: it builds the backend at the landed commit
-// on the home, and files a new hitl bead under the landed story's epic whose one
+// on the home, and files a new hitl bead under the landed story's epic (none, for a standalone story) whose one
 // hands step swaps the live binary — the already-live check, one backup, the
 // install, the restart, four tries at the health URL, and the way
 // back — and sends the Governor one message on that bead's channel.
@@ -324,8 +324,6 @@ func (b BackendStage) stage(ctx context.Context, l *BackendLanding, home string)
 	switch {
 	case rigDir == "":
 		return nil, fmt.Errorf("this host has no checkout of %s", l.Rig)
-	case l.Epic == "":
-		return nil, fmt.Errorf("%s has no epic to file the swap under", l.Story)
 	}
 	short := updatedRevision(l.Commit)
 	out := filepath.Join(cfg.Stage, filepath.Base(cfg.Live)+"-"+short)
@@ -371,14 +369,19 @@ func (b BackendStage) stage(ctx context.Context, l *BackendLanding, home string)
 }
 
 // fileSwap files a hitl bead under epic for a swap and releases it: held stories
-// are not shown to anybody, and the swap is for the Governor now. It returns the
-// bead's id, set even when releasing it failed.
+// are not shown to anybody, and the swap is for the Governor now. A landing whose
+// story had no epic (a bug fix is filed standalone) has its swap filed with no
+// parent. It returns the bead's id, set even when releasing it failed.
 func (b BackendStage) fileSwap(ctx context.Context, epic string, story NewStory) (string, error) {
 	story.EpicID = epic
+	story.Standalone = epic == ""
 	story.Priority = 1
 	story.Labels = []string{LabelHitl}
 	bead, err := b.Tracker.CreateStory(ctx, story)
 	if err != nil {
+		if epic == "" {
+			return "", fmt.Errorf("filing the swap: %w", err)
+		}
 		return "", fmt.Errorf("filing the swap under %s: %w", epic, err)
 	}
 	if err := b.Tracker.ReleaseStory(ctx, bead); err != nil {

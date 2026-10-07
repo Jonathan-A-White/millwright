@@ -43,3 +43,11 @@ Feature: The home swaps a staged backend itself
     When the home's tick runs
     Then the swap did not run
     And the swap bead is open, hitl, and carries no output
+
+  Scenario: A story with no epic has its backend staged and its swap filed under nothing
+    Given the landed story is a standalone bug fix with no epic
+    When the home's tick runs
+    Then the swap bead is filed with no epic and its swap is written
+    And the swap ran once
+    And the Governor was told once, on the swap bead's channel, "backend 4c9db71 is live and answering"
+    And the swap bead is closed
