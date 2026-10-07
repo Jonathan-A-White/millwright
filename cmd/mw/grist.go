@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"path/filepath"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostlock"
 	"github.com/Jonathan-A-White/millwright/infrastructure/postern"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
+	"github.com/Jonathan-A-White/millwright/infrastructure/scorer"
 )
 
 // newGristCmd builds `mw grist`: the mill, the factory's side of the AI work
@@ -28,6 +30,7 @@ func newGristCmd() *cobra.Command {
 	root.AddCommand(newGristGrindCmd())
 	root.AddCommand(newGristSendCmd())
 	root.AddCommand(newGristEvalCmd())
+	root.AddCommand(newGristScoreCmd())
 	return root
 }
 
@@ -209,6 +212,63 @@ func newGristEvalCmd() *cobra.Command {
 		_ = cmd.MarkFlagRequired(name)
 	}
 	return cmd
+}
+
+// newGristScoreCmd builds `mw grist score`: one reading scored word by word
+// by one engine, the result printed as JSON.
+func newGristScoreCmd() *cobra.Command {
+	var engine, target, audio, lang string
+
+	cmd := &cobra.Command{
+		Use:   "score",
+		Short: "Score a recording of someone reading a text aloud, word by word, and print it as JSON",
+		Long: "score hands --audio, a recording of someone reading --target aloud, to the scoring engine\n" +
+			"named by --engine and prints its ReadingResult as JSON: for each word the phonemes expected\n" +
+			"and produced, whether it was read right, left out, added, mispronounced or hesitated over,\n" +
+			"and its accuracy, then the reading's accuracy as a whole. The engines are the ones the\n" +
+			"[scorers] table of the config file names (engines, default local); a name that is not one of\n" +
+			"them is refused, saying which are. The local engine needs ffmpeg and the scorer of\n" +
+			"contrib/scorer running at local_url. The contract is docs/scorers.md.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			scorers, err := newScorers()
+			if err != nil {
+				return err
+			}
+			_, err = application.GristScore{Scorers: scorers, Out: cmd.OutOrStdout()}.Run(cmd.Context(), application.GristScoreRequest{
+				Engine: engine, Target: target, AudioFile: audio, Lang: lang,
+			})
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&engine, "engine", "", "the scoring engine, one of the [scorers] engines of the config file, e.g. local (required)")
+	cmd.Flags().StringVar(&target, "target", "", "the text the reader was asked to read aloud (required)")
+	cmd.Flags().StringVar(&audio, "audio", "", "the recording of the reading, e.g. clip.webm; anything ffmpeg reads (required)")
+	cmd.Flags().StringVar(&lang, "lang", "en", "the language of the target, as a language code")
+	for _, name := range []string{"engine", "target", "audio"} {
+		_ = cmd.MarkFlagRequired(name)
+	}
+	return cmd
+}
+
+// newScorers is the registry of the engines the [scorers] table of the config
+// file names. An engine this mw has no adapter for is an error, so a
+// misspelt name in the config is not mistaken for one that is merely down.
+func newScorers() (application.ScorerRegistry, error) {
+	settings, err := config.Scorers()
+	if err != nil {
+		return application.ScorerRegistry{}, err
+	}
+	engines := map[string]application.Scorer{}
+	for _, name := range settings.Engines {
+		switch name {
+		case "local":
+			engines[name] = scorer.NewLocal(settings.LocalURL)
+		default:
+			return application.ScorerRegistry{}, fmt.Errorf("the [%s] table of %s names the engine %q: this mw has no such engine (it has local)", config.ScorersTable, config.File, name)
+		}
+	}
+	return application.NewScorerRegistry(engines), nil
 }
 
 // newMill is the mill as this host is configured to run it: what

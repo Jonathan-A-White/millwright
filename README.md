@@ -1497,6 +1497,15 @@ key unless told to, and nothing prints a private key; `--backend` defaults to
 that has a `<name>.txt` of expected names once per model, serially, as the mill would, and scores hits, misses, extras and unsure items with seconds, cost and tokens per photo and model.
 It writes `eval-<UTC>.jsonl` and `.md` under `--out` and never touches the backend, the mill's counts or the cap; `--help` says the rest. See `features/grist_eval.feature`.
 
+`mw grist score --engine local --target "the cat sat" --audio clip.webm [--lang en]`
+hands a recording of someone reading a text aloud to a scoring engine and prints
+its result as JSON: for each word the phonemes expected and produced, whether it
+was read right, left out, added, mispronounced or hesitated over, and its
+accuracy. Engines are the `[scorers]` table's `engines` (default `["local"]`),
+with `local_url` (default `http://127.0.0.1:8765`), `azure_key_file` and
+`azure_region` beside it; the local engine needs `ffmpeg`. The contract, with
+the request and response JSON, is `docs/scorers.md`; see `features/scorer.feature`.
+
 ## Steps for his hands
 
 A step only the Governor's hands could take — a `sudo` line, a unit to

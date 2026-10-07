@@ -9,9 +9,8 @@ domain/, domain/events: stdlib · application/ (apptest/: fakes): use cases, por
 | Port | Declared in | Real adapter | Fake |
 | --- | --- | --- | --- |
 | `WorkTracker` | application/worktracker.go | infrastructure/beads/ | apptest.FakeTracker |
-| TrackerSync | application/sync.go | `infrastructure/beads/sync.go` | apptest.FakeTracker |
 | TrackerNotes, SweepNotes, BeadGraph | application/{status,sweep}.go | same | same |
-| VaultFiles | application/sync.go | `infrastructure/vault/git.go` | apptest.FakeVaultFiles |
+| VaultFiles, TrackerSync | application/sync.go | `infrastructure/{vault/git,beads/sync}.go` | apptest.Fake{VaultFiles,Tracker} |
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | `infrastructure/beads/mail.go` | apptest.FakeMailbox |
 | EpicRules | application/epicrules.go | `infrastructure/vault/epicrules.go` | apptest.FakeEpicRules |
 | Vault | application/seatboot.go | infrastructure/vault | application/seatboot_test.go |
@@ -35,6 +34,7 @@ domain/, domain/events: stdlib · application/ (apptest/: fakes): use cases, por
 | Postern, hands, Prompts | application/{postern*,hands,prompt}.go | infrastructure/{postern,hands*,homemove} | apptest.Fake{Postern*,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*,HomeMover,Prompts} |
 | Chain, StampQueue, StampStore, CommitNotes, RigHeads | application/chain.go, application/chainstamp.go, application/prove.go | infra/{bsv,stampqueue,chainlookup}, rig/worktree.go | apptest.Fake{Chain,StampQueue,CommitNotes,RigHeads} |
 | Grinder, GrindSource, GristState, GristLock | application/grist.go | infrastructure/{claude/grind,rig/grinds,hostlock/try}.go, infrastructure/grist | apptest.Fake{Grinder,Grinds,GristState,GristLock} |
+| Scorer | application/scorer.go | infrastructure/scorer/ | apptest.FakeScorer |
 
 ## Use cases
 
@@ -70,10 +70,6 @@ domain/, domain/events: stdlib · application/ (apptest/: fakes): use cases, por
 | Hands{Add,List} | application/hands.go | mw hands add/list - cmd/mw/hands.go; cmd/mw-hands-root | features/hands.feature |
 | Postern{Serve,Nginx,Mirror} | application/posternhand.go, application/posternmirror.go | mw postern serve/nginx/mirror - cmd/mw/postern.go, cmd/mw/posternmirror.go | features/postern_serve.feature |
 | Prompt{Save,List,Show,Run}, Cards | application/prompt.go, application/card.go | mw prompt/card - cmd/mw/prompt.go, cmd/mw/card.go | features/{prompt,card}.feature |
-| Grist{Key,Grind,Send,Eval} | application/grist.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go | mw grist key/grind/send/eval - cmd/mw/grist.go | features/grist{,_send,_eval}.feature |
-
-## Tests
-
-Helpers: throwawayVault, installFormula, standIn, privateRunner, aVault, aRig, mwConfig.
+| Grist{Key,Grind,Send,Eval,Score} | application/grist.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go | mw grist key/grind/send/eval/score - cmd/mw/grist.go | features/grist{,_send,_eval}.feature, features/scorer.feature |
 
 cmd/mw/root.go: the tree; cmd/mw/version.go.
