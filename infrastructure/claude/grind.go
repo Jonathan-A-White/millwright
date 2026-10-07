@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -60,7 +61,7 @@ func GrindArgs(call application.GrindCall) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []string{
+	args := []string{
 		"--print",
 		"--output-format", "json",
 		"--model", call.Model,
@@ -79,8 +80,13 @@ func GrindArgs(call application.GrindCall) ([]string, error) {
 		"--safe-mode",
 		"--system-prompt", call.System,
 		"--json-schema", schema,
-		call.Prompt,
-	}, nil
+	}
+	// The one limit a grind file may set. Nothing else is forbidden here: no
+	// flag turns subagents off.
+	if call.MaxTurns > 0 {
+		args = append(args, "--max-turns", strconv.Itoa(call.MaxTurns))
+	}
+	return append(args, call.Prompt), nil
 }
 
 // GrindSchema is the grind's answer schema as --json-schema takes it: its

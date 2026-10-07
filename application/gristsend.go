@@ -242,7 +242,7 @@ func (s GristSend) prepare(req GristSendRequest) (GristPlaintext, []gristPhoto, 
 func readGristPhoto(path string) (gristPhoto, error) {
 	mime := PosternAttachmentMimes[strings.ToLower(filepath.Ext(path))]
 	if !slices.Contains(GristMimes, mime) {
-		return gristPhoto{}, fmt.Errorf("mw grist send: %s is not a photo a grist carries: use .jpg, .png or .webp", path)
+		return gristPhoto{}, fmt.Errorf("mw grist send: %s is not a photo a grist carries: use .jpg, .png or .webp, or a recording (.webm, .ogg, .m4a, .mp3 or .wav)", path)
 	}
 	info, err := os.Stat(path)
 	if err != nil {

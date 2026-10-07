@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 )
@@ -86,10 +87,15 @@ type GrindFile struct {
 	Instructions string           `json:"instructions"`
 	AnswerSchema string           `json:"answerSchema"`
 	Attachments  GrindAttachments `json:"attachments"`
+	// Scoring says what the mill does with a recording the grist carries.
+	Scoring GrindScoring `json:"scoring"`
+	// MaxTurns is the most turns the grind's session may take; 0 leaves it to
+	// the harness's own limit.
+	MaxTurns int `json:"maxTurns"`
 }
 
-// GrindAttachments is what a grind takes in photos. A grind that says
-// nothing takes none.
+// GrindAttachments is what a grind takes in attachments: photos, and with
+// Scoring on, recordings. A grind that says nothing takes none.
 type GrindAttachments struct {
 	Min      int      `json:"min"`
 	Max      int      `json:"max"`
@@ -97,12 +103,34 @@ type GrindAttachments struct {
 	MaxBytes int64    `json:"maxBytes"`
 }
 
+// GrindScoring is a grind's say over the recordings of its grist. With Audio
+// on, the mill scores each recording with every engine this host runs
+// (docs/scorers.md), against the text the app's request holds in TargetField,
+// before the harness session, and the session is given the results as text.
+// With it off, the grind takes no recording at all.
+type GrindScoring struct {
+	Audio       bool   `json:"audio"`
+	TargetField string `json:"target_field"`
+}
+
 // GrindFileFormat is the grind file format the mill reads.
 const GrindFileFormat = 1
 
-// GristMimes are the photo types section 18 lets a grist carry. A grind may
-// take fewer, never more.
-var GristMimes = []string{"image/jpeg", "image/png", "image/webp"}
+// GristImageMimes are the photo types section 18 lets a grist carry.
+var GristImageMimes = []string{"image/jpeg", "image/png", "image/webp"}
+
+// GristAudioMimes are the recording types a grist may carry for a grind that
+// scores them: what the phone's browser makes.
+var GristAudioMimes = []string{"audio/webm", "audio/ogg", "audio/mp4", "audio/mpeg", "audio/wav"}
+
+// GristMimes are the attachment types the factory lets a grist carry, photos
+// and recordings. A grind may take fewer, never more.
+var GristMimes = append(append([]string(nil), GristImageMimes...), GristAudioMimes...)
+
+// isGristAudio reports whether mime, as a grist names it, is a recording.
+func isGristAudio(mime string) bool {
+	return slices.Contains(GristAudioMimes, strings.ToLower(strings.TrimSpace(mime)))
+}
 
 // GrindEfforts are the efforts a grind may name: the harness's own levels.
 var GrindEfforts = []string{"low", "medium", "high", "xhigh", "max"}
@@ -177,7 +205,7 @@ var ErrGrindTimedOut = errors.New("the grind ran out of time")
 // the session's working directory; the model and effort; the system prompt
 // (the mill's preamble, then the grind's instructions); the answer's schema,
 // JSON; the prompt naming the photos and carrying the app's request; and how
-// long it may run.
+// long it may run, and the most turns it may take when the grind says.
 type GrindCall struct {
 	Dir     string
 	Model   string
@@ -186,6 +214,8 @@ type GrindCall struct {
 	Schema  string
 	Prompt  string
 	Timeout time.Duration
+	// MaxTurns is the most turns the session may take; 0 sets no limit.
+	MaxTurns int
 }
 
 // GrindSource reads an app's grinds from its rig's checkout on this host, at

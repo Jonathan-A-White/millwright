@@ -200,3 +200,23 @@ func mustEval(t *testing.T, path string) string {
 	}
 	return got
 }
+
+// A grind file's maxTurns is the one limit the command line carries; with none
+// the command line is the verified one, and nothing in it turns subagents off.
+func TestGrindArgsCarryMaxTurnsOnlyWhenTheGrindSetsIt(t *testing.T) {
+	call := aGrindCall(t, "/tmp/mw-grist-1")
+	call.MaxTurns = 6
+	args, err := claude.GrindArgs(call)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(args, "\x00")
+	if !strings.Contains(joined, "--max-turns\x006\x00"+call.Prompt) || args[len(args)-1] != call.Prompt {
+		t.Fatalf("expected --max-turns 6 before the prompt, got %q", args)
+	}
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--disallow") {
+			t.Fatalf("expected nothing that forbids a tool, got %q", arg)
+		}
+	}
+}

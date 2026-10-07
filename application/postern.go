@@ -984,6 +984,8 @@ func posternAttachmentExtension(mime string) string {
 		return ".m4a"
 	case "audio/mpeg":
 		return ".mp3"
+	case "audio/wav":
+		return ".wav"
 	case "application/pdf":
 		return ".pdf"
 	case "text/plain":
@@ -1601,7 +1603,7 @@ const PosternAttachmentLimit = 8 << 20
 var PosternAttachmentMimes = map[string]string{
 	".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
 	".webm": "audio/webm", ".ogg": "audio/ogg", ".oga": "audio/ogg", ".opus": "audio/ogg",
-	".m4a": "audio/mp4", ".mp4": "audio/mp4", ".mp3": "audio/mpeg",
+	".m4a": "audio/mp4", ".mp4": "audio/mp4", ".mp3": "audio/mpeg", ".wav": "audio/wav",
 	".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/plain", ".log": "text/plain",
 }
 
