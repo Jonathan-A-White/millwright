@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -31,6 +32,7 @@ func newGristCmd() *cobra.Command {
 	root.AddCommand(newGristSendCmd())
 	root.AddCommand(newGristEvalCmd())
 	root.AddCommand(newGristScoreCmd())
+	root.AddCommand(newGristRunsCmd())
 	return root
 }
 
@@ -251,6 +253,55 @@ func newGristScoreCmd() *cobra.Command {
 	return cmd
 }
 
+// newGristRunsCmd builds `mw grist runs`: the raw record the mill keeps of
+// every grind, listed.
+func newGristRunsCmd() *cobra.Command {
+	var since string
+
+	cmd := &cobra.Command{
+		Use:   "runs",
+		Short: "List the raw records the mill keeps of its grinds",
+		Long: "runs lists every grind the mill has kept a record of, oldest first: its txid, the kind of grist,\n" +
+			"the model, the seconds it took from the grist taken up to the answer, and whether it was\n" +
+			"answered, refused or failed. Each is a directory runs/<txid>/ of grist_state_dir holding the\n" +
+			"request the session was given, the attachments, what the scorers said, the answer and the\n" +
+			"timing; mw never deletes them. --since is how far back to look: a duration (24h), a date\n" +
+			"(2026-10-07) or a time (2026-10-07T09:00:00Z).",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			from, err := parseRunsSince(since, time.Now())
+			if err != nil {
+				return err
+			}
+			stateDir, err := config.GristStateDir()
+			if err != nil {
+				return err
+			}
+			_, err = application.GristRuns{Runs: grist.NewRuns(stateDir), Out: cmd.OutOrStdout()}.Run(cmd.Context(), from)
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&since, "since", "", "list only the runs since this: a duration such as 24h, a date, or an RFC 3339 time (default: all)")
+	return cmd
+}
+
+// parseRunsSince is --since as a time: empty is the beginning of time.
+func parseRunsSince(text string, now time.Time) (time.Time, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return time.Time{}, nil
+	}
+	if d, err := time.ParseDuration(text); err == nil {
+		return now.Add(-d), nil
+	}
+	for _, layout := range []string{time.RFC3339, "2006-01-02"} {
+		if t, err := time.Parse(layout, text); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("mw grist runs: --since %q is not a duration (24h), a date (2026-10-07) or an RFC 3339 time", text)
+}
+
 // newScorers is the registry of the engines the [scorers] table of the config
 // file names. An engine this mw has no adapter for is an error, so a
 // misspelt name in the config is not mistaken for one that is merely down.
@@ -311,11 +362,17 @@ func newMill(out io.Writer) (application.GristGrind, error) {
 	if err != nil {
 		return application.GristGrind{}, err
 	}
+	scorers, err := newScorers()
+	if err != nil {
+		return application.GristGrind{}, err
+	}
 	return application.GristGrind{
 		Postern:     backend,
 		Cipher:      postern.NewCipher(keys),
 		Keys:        keys,
 		State:       grist.New(stateDir),
+		Scorers:     scorers,
+		Runs:        grist.NewRuns(stateDir),
 		Grinds:      rig.NewGrinds(),
 		Grinder:     claude.NewGrinder(),
 		Tracker:     mwGateway(dir, host),

@@ -83,6 +83,8 @@ type gristContext struct {
 	grist  application.PosternRecord
 	photos map[string][]byte // blob hash to the photo it seals
 
+	audio audioContext // features/grist_audio.feature
+
 	report     application.GristReport
 	homeIs     string // the host the vault's home file names; empty is no home file
 	configured bool   // a [grist] table is in the config file
@@ -112,6 +114,8 @@ func InitializeGristScenario(ctx *godog.ScenarioContext) {
 		}
 		return ctx, nil
 	})
+	// After the reset above: it must not clear what the audio steps keep.
+	registerGristAudio(ctx, c)
 
 	ctx.Given(`^a mill on the host "([^"]*)" with a cap of (\d+)$`, c.aMill)
 	ctx.Given(`^the app "([^"]*)" is checked out here, its main at commit "([^"]*)" with the grind "([^"]*)"$`, c.theAppIsCheckedOut)
@@ -246,13 +250,18 @@ func (c *gristContext) theGovernorSends(app, kind, v string, photos int) error {
 // sealed to the mill as section 18 says, and adds it to the backend's index
 // stamped with the apps key's licences open.
 func (c *gristContext) send(key string, apps []string, app, kind, v string, photos int) error {
+	return c.sendAttached(key, apps, app, kind, v, photos, nil)
+}
+
+// sendAttached is send, with a recording sealed and uploaded after the photos
+// when one is given, and the request replaced by its input.
+func (c *gristContext) sendAttached(key string, apps []string, app, kind, v string, photos int, clip *sentClip) error {
 	sealer := &apptest.FakeCipher{From: key}
 	plain := c.vectors.Grist
 	plain.Grist = application.GristName{App: app, Kind: kind, V: v, Model: c.askModel, Effort: c.askEffort}
 	plain.Attachments = nil
-	for i := 1; i <= photos; i++ {
-		photo := []byte(fmt.Sprintf("jpeg bytes of photo %d", i))
-		sealed, err := sealer.EncryptBytes(c.millKey, photo)
+	upload := func(body []byte, mime string) error {
+		sealed, err := sealer.EncryptBytes(c.millKey, body)
 		if err != nil {
 			return err
 		}
@@ -260,8 +269,20 @@ func (c *gristContext) send(key string, apps []string, app, kind, v string, phot
 		sum := sha256.Sum256(raw)
 		hash := hex.EncodeToString(sum[:])
 		c.backend.SetBlob(hash, raw)
-		c.photos[hash] = photo
-		plain.Attachments = append(plain.Attachments, application.PosternAttachment{Hash: hash, Size: int64(len(raw)), Mime: "image/jpeg"})
+		c.photos[hash] = body
+		plain.Attachments = append(plain.Attachments, application.PosternAttachment{Hash: hash, Size: int64(len(raw)), Mime: mime})
+		return nil
+	}
+	for i := 1; i <= photos; i++ {
+		if err := upload([]byte(fmt.Sprintf("jpeg bytes of photo %d", i)), "image/jpeg"); err != nil {
+			return err
+		}
+	}
+	if clip != nil {
+		if err := upload(clip.data, clip.mime); err != nil {
+			return err
+		}
+		plain.Input = clip.input
 	}
 	text, err := json.Marshal(plain)
 	if err != nil {
@@ -432,7 +453,9 @@ func (c *gristContext) mill() application.GristGrind {
 		Ceilings:    c.ceilings,
 		GovernorKey: c.governor,
 		TempDir:     c.home,
-		Now:         func() time.Time { return gristNow },
+		Scorers:     c.audio.registry(),
+		Runs:        c.audio.runs(),
+		Now:         c.audio.now,
 		Out:         &c.out,
 	}
 }

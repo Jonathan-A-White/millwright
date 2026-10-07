@@ -81,6 +81,12 @@ type GristGrind struct {
 	// Host and Cap are this host and how many sessions may run here at once.
 	Host string
 	Cap  int
+	// Scorers are the engines this host runs; every one of them scores each
+	// recording a scoring grind's grist carries. Runs keeps every grind's raw
+	// record; nil keeps none.
+	Scorers ScorerRegistry
+	Runs    GristRunStore
+
 	// Apps is where each app's rig is checked out here (config
 	// [grist-apps]); Ceilings are the factory's limits above every grind.
 	Apps     map[string]string
@@ -190,6 +196,26 @@ type gristWork struct {
 	answer         json.RawMessage
 	result         SessionResult
 	started        time.Time
+
+	// received is when the mill took the grist up; clips are every attachment
+	// as it was opened; scores, input, scoredAt and harnessStarted are the
+	// scoring step and the request the session was given; answered is when the
+	// session ended; notes are what the pass says of the run's record.
+	received       time.Time
+	clips          []gristClip
+	scores         []GristRunScore
+	input          json.RawMessage
+	scoredAt       *time.Time
+	scoringSeconds float64
+	harnessStarted time.Time
+	answered       time.Time
+	notes          []string
+}
+
+// gristClip is one attachment of a grist, opened: its type and its bytes.
+type gristClip struct {
+	mime string
+	data []byte
 }
 
 func (w *gristWork) settle(status, reason string) {
@@ -292,6 +318,7 @@ func (g GristGrind) keepCursor(ctx context.Context, cursor, next int64, report *
 // one answers one grist, or reports that it waits for a slot.
 func (g GristGrind) one(ctx context.Context, r PosternRecord, privKey, millKey string, lines []GrindLine, report *GristReport) (GrindLine, bool, error) {
 	w := &gristWork{record: r, started: g.now(), sealed: map[string]bool{}}
+	w.received = w.started
 	g.judge(ctx, w, privKey, lines)
 	if w.status == "" {
 		release, why, err := g.slot(ctx)
@@ -398,6 +425,10 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 		w.settle(GristRefused, reason)
 		return
 	}
+	if !w.scoringFits() {
+		w.settle(GristRefused, GristReasonMalformed)
+		return
+	}
 	w.system, w.schema = g.readGrindText(ctx, w, checkout)
 }
 
@@ -439,6 +470,10 @@ func (g GristGrind) judgePhotos(w *gristWork, ceilings GristCeilings) string {
 	for _, a := range w.plain.Attachments {
 		mime := strings.ToLower(strings.TrimSpace(a.Mime))
 		if !slices.Contains(GristMimes, mime) || (len(took.Mime) > 0 && !slices.Contains(took.Mime, mime)) {
+			return GristReasonMime
+		}
+		// A recording is only ever taken to be scored.
+		if isGristAudio(mime) && !w.grind.Scoring.Audio {
 			return GristReasonMime
 		}
 		if a.Size > limit+gristEnvelopeOverhead {
@@ -563,13 +598,21 @@ func (g GristGrind) grindOne(ctx context.Context, w *gristWork, privKey string) 
 		return
 	}
 	w.ran = true
-	result, err := g.Grinder.Grind(ctx, gristGrindCall(dir, w.plain, photos, w.model, w.effort, w.system, w.schema, g.Ceilings.filled().Timeout))
+	plain := w.plain
+	g.scoreRecordings(ctx, w, &plain)
+	w.input = plain.Input
+	call := gristGrindCall(dir, plain, photos, w.model, w.effort, w.system, w.schema, g.Ceilings.filled().Timeout)
+	call.MaxTurns = w.grind.MaxTurns
+	w.harnessStarted = g.now()
+	result, err := g.Grinder.Grind(ctx, call)
+	w.answered = g.now()
 	w.result = result
 	status, reason := gristOutcome(result, err, w.schema)
 	if status == GristAnswered {
 		w.answer = result.Answer
 	}
 	w.settle(status, reason)
+	g.keepRun(ctx, w)
 }
 
 // gristOutcome is how a grind ended: answered, refused or failed, and the
@@ -592,10 +635,12 @@ func gristOutcome(result SessionResult, err error, schema string) (status, reaso
 	return GristAnswered, ""
 }
 
-// openPhotos downloads each photo, checks it is the blob announced and was
-// sealed by the grist's own sender, opens it with the mill key and writes it
-// 0600 into dir as photo-1.jpg, photo-2.webp and so on. It reports their
-// full paths, settling the grist when one cannot be opened.
+// openPhotos downloads each attachment, checks it is the blob announced and
+// was sealed by the grist's own sender, opens it with the mill key and writes
+// each photo 0600 into dir as photo-1.jpg, photo-2.webp and so on. A recording
+// is kept in memory (w.clips) and never written there: the session is never
+// given audio. It reports the photos' full paths, settling the grist when an
+// attachment cannot be opened.
 func (g GristGrind) openPhotos(ctx context.Context, w *gristWork, privKey, dir string) []string {
 	limit := photoLimit(w.grind.Attachments, g.Ceilings.filled())
 	var photos []string
@@ -623,6 +668,10 @@ func (g GristGrind) openPhotos(ctx context.Context, w *gristWork, privKey, dir s
 		if int64(len(plain)) > limit {
 			w.settle(GristRefused, GristReasonTooLarge)
 			return nil
+		}
+		w.clips = append(w.clips, gristClip{mime: strings.ToLower(strings.TrimSpace(a.Mime)), data: []byte(plain)})
+		if isGristAudio(a.Mime) {
+			continue
 		}
 		photo := filepath.Join(dir, fmt.Sprintf("photo-%d%s", i+1, posternAttachmentExtension(a.Mime)))
 		if err := os.WriteFile(photo, []byte(plain), 0o600); err != nil {
@@ -731,6 +780,7 @@ func (g GristGrind) answer(ctx context.Context, w *gristWork, privKey, millKey s
 	if w.status == GristAnswered {
 		body.Reason = ""
 	}
+	report.Notes = append(report.Notes, w.notes...)
 	blobs := g.provenBlobs(ctx, w, privKey)
 	delivered, err := g.deliver(ctx, millKey, w.to, body, blobs)
 	if err != nil {

@@ -1506,6 +1506,20 @@ with `local_url` (default `http://127.0.0.1:8765`), `azure_key_file` and
 `azure_region` beside it; the local engine needs `ffmpeg`. The contract, with
 the request and response JSON, is `docs/scorers.md`; see `features/scorer.feature`.
 
+A grist may carry a recording (`audio/webm`, `audio/ogg`, `audio/mp4`, `audio/mpeg`,
+`audio/wav`) for a grind whose file says `"scoring": {"audio": true, "target_field":
+"target_text"}` and lists the type under `attachments.mime`; a grind that does not
+score refuses it. The mill scores each recording with every `[scorers]` engine
+against the text in the request's `target_field`, before the harness session, and
+adds `reading_result` to the request as text: `{<engine>: <ReadingResult> | {"error":
+"..."}}`. An engine that fails never fails the grind, and the audio is never in the
+session's directory or its prompt. A grind file may set `maxTurns` (default: the
+harness's own). Every grind that ran is kept under `grist_state_dir`'s
+`runs/<txid>/`: `input.json` (the request as the session was given it),
+`attachment-N.<ext>`, `scorers.json`, `answer.json` and `timing.json`, 0600, never
+deleted by `mw`; `mw grist runs [--since 24h|2026-10-07]` lists them (txid, kind, model,
+seconds, answered|refused|failed). See `docs/scorers.md` and `features/grist_audio.feature`.
+
 ## Steps for his hands
 
 A step only the Governor's hands could take — a `sudo` line, a unit to

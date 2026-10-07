@@ -33,7 +33,7 @@ domain/, domain/events: stdlib · application/ (apptest/: fakes): use cases, por
 | EventLog, BeadFeed, FollowCursors, ShipStates, SubscribeFiles, NudgeCursors, EventSpringer, EventController, HarnessCount | application/event*.go, status.go | infrastructure/{eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go | apptest.Fake{EventLog,FollowCursors,Ship*,Tracker,Subscribe*,Nudge*} |
 | Postern, hands, Prompts | application/{postern*,hands,prompt}.go | infrastructure/{postern,hands*,homemove} | apptest.Fake{Postern*,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*,HomeMover,Prompts} |
 | Chain, StampQueue, StampStore, CommitNotes, RigHeads | application/chain.go, application/chainstamp.go, application/prove.go | infra/{bsv,stampqueue,chainlookup}, rig/worktree.go | apptest.Fake{Chain,StampQueue,CommitNotes,RigHeads} |
-| Grinder, GrindSource, GristState, GristLock | application/grist.go | infrastructure/{claude/grind,rig/grinds,hostlock/try}.go, infrastructure/grist | apptest.Fake{Grinder,Grinds,GristState,GristLock} |
+| Grinder, GrindSource, GristState, GristLock, GristRunStore | application/grist.go, application/gristruns.go | infrastructure/{claude/grind,rig/grinds,hostlock/try}.go, infrastructure/grist | apptest.Fake{Grinder,Grinds,GristState,GristLock} |
 | Scorer | application/scorer.go | infrastructure/scorer/ | apptest.FakeScorer |
 
 ## Use cases
@@ -49,8 +49,7 @@ domain/, domain/events: stdlib · application/ (apptest/: fakes): use cases, por
 | Check | application/check.go | mw check - cmd/mw/check.go | features/check.feature |
 | Status | application/status.go | mw status - cmd/mw/status.go | features/status.feature |
 | Brief | application/brief.go | mw brief - cmd/mw/brief.go | features/brief.feature |
-| Sweep | application/sweep.go | mw sweep - cmd/mw/sweep.go | features/sweep.feature |
-| Tidy | application/tidy.go | mw tidy - cmd/mw/tidy.go | features/tidy.feature |
+| Sweep, Tidy | application/sweep.go, application/tidy.go | mw sweep/tidy - cmd/mw/sweep.go, cmd/mw/tidy.go | features/{sweep,tidy}.feature |
 | Sync | application/sync.go | mw sync - cmd/mw/sync.go | features/sync.feature |
 | Nudge | application/nudge.go | mw nudge - cmd/mw/nudge.go | none |
 | Mail | application/mail.go | mw mail - cmd/mw/mail.go | features/mail.feature |
@@ -58,8 +57,7 @@ domain/, domain/events: stdlib · application/ (apptest/: fakes): use cases, por
 | HomeMove | application/homemove.go | mw home move - cmd/mw/homemove.go | none: docs/home-move.md |
 | Seat{Context,Up,Reap,Handover} | application/seat{context,up,reap,handover}.go | mw seat context/up/reap/handover - cmd/mw/seat.go | features/seat_{context,up,reap}.feature |
 | Talk{Call,Model,Say,Wait} | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go | mw talk call/say/wait/model cmd/mw/talk.go | features/talk_*.feature |
-| Millhand | application/millhand.go | mw millhand - cmd/mw/millhand.go | features/millhand.feature |
-| Deputy | application/deputy.go | mw deputy - cmd/mw/deputy.go | features/deputy.feature |
+| Millhand, Deputy | application/millhand.go, application/deputy.go | mw millhand/deputy - cmd/mw/millhand.go, cmd/mw/deputy.go | features/{millhand,deputy}.feature |
 | MillhandTick | application/millhandtick.go | mw millhand tick - cmd/mw/millhandtick.go | features/millhand_tick.feature |
 | Watch | application/watch.go | mw watch - cmd/mw/watch.go | features/watch.feature |
 | Doctor | application/doctor.go | mw doctor - cmd/mw/doctor.go | features/doctor.feature |
@@ -70,6 +68,6 @@ domain/, domain/events: stdlib · application/ (apptest/: fakes): use cases, por
 | Hands{Add,List} | application/hands.go | mw hands add/list - cmd/mw/hands.go; cmd/mw-hands-root | features/hands.feature |
 | Postern{Serve,Nginx,Mirror} | application/posternhand.go, application/posternmirror.go | mw postern serve/nginx/mirror - cmd/mw/postern.go, cmd/mw/posternmirror.go | features/postern_serve.feature |
 | Prompt{Save,List,Show,Run}, Cards | application/prompt.go, application/card.go | mw prompt/card - cmd/mw/prompt.go, cmd/mw/card.go | features/{prompt,card}.feature |
-| Grist{Key,Grind,Send,Eval,Score} | application/grist.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go | mw grist key/grind/send/eval/score - cmd/mw/grist.go | features/grist{,_send,_eval}.feature, features/scorer.feature |
+| Grist{Key,Grind,Send,Eval,Score,Runs} | application/grist.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go | mw grist key/grind/send/eval/score/runs - cmd/mw/grist.go | features/{grist{,_send,_eval,_audio},scorer}.feature |
 
 cmd/mw/root.go: the tree; cmd/mw/version.go.
