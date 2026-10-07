@@ -37,6 +37,19 @@ const WaitingHeading = "WAITING FOR THE GOVERNOR"
 // out when there are none.
 const WaitingOnMayorHeading = "WAITING ON THE MAYOR"
 
+// HeldHandsHeading is what heads the section for held beads that keep a hands
+// step: the view offers no Run until the bead is open. The report leaves the
+// section out when there are none.
+const HeldHandsHeading = "HELD, WITH A HANDS STEP"
+
+// HeldHandsReader finds the beads that are held yet keep a hands step not yet
+// run: the view offers the Governor a Run only on a workable bead (workable),
+// so his phone shows none until the bead is open. MayorReader is the one
+// reader.
+type HeldHandsReader interface {
+	HeldHands(ctx context.Context) ([]StoryDetail, error)
+}
+
 // MayorNeeds reads the needs that wait on the Mayor among the beads labelled
 // hitl, without writing anything. MayorReader is the one reader.
 type MayorNeeds interface {
@@ -131,6 +144,10 @@ type Status struct {
 	// WAITING ON THE MAYOR section, from the beads labelled hitl the report
 	// lists. A nil Mayor leaves the section out.
 	Mayor MayorNeeds
+
+	// HeldHands is where the held beads that keep a hands step are read from,
+	// for the HELD, WITH A HANDS STEP section. A nil HeldHands leaves it out.
+	HeldHands HeldHandsReader
 
 	// Rules is where each rig's requirements of its epics are read from, for
 	// the EPICS MISSING REQUIREMENTS and EPICS WAIVED sections. A nil Rules
@@ -309,8 +326,10 @@ type StatusReport struct {
 	// WaitingOnMayor are the needs the view says wait on the Mayor, oldest
 	// first (one with no known age last), and NeedsAt is the clock their age is read against.
 	WaitingOnMayor []PosternViewNeed
-	NeedsAt        time.Time
-	Blocked        []StoryDetail
+	// HeldHands are the held beads that keep a hands step, in id order.
+	HeldHands []StoryDetail
+	NeedsAt   time.Time
+	Blocked   []StoryDetail
 	// Others is what every other host named in a story's Path has in hand, one
 	// entry per host, in host order.
 	Others []HostWork
@@ -465,6 +484,15 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		}()
 	}
 
+	var heldHands chan heldHandsRead
+	if s.HeldHands != nil {
+		heldHands = make(chan heldHandsRead, 1)
+		go func() {
+			held, err := s.HeldHands.HeldHands(ctx)
+			heldHands <- heldHandsRead{held, err}
+		}()
+	}
+
 	blocked, err := s.Tracker.BlockedForHost(ctx, s.Host)
 	if err != nil {
 		return report, fmt.Errorf("reading what is blocked on %s: %w", s.Host, err)
@@ -594,8 +622,22 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		report.NeedsAt = s.now()
 	}
 
+	if heldHands != nil {
+		read := <-heldHands
+		if read.err != nil {
+			return report, fmt.Errorf("reading the held beads that keep hands steps: %w", read.err)
+		}
+		report.HeldHands = read.held
+	}
+
 	s.print(report.String())
 	return report, nil
+}
+
+// heldHandsRead is what reading the held beads that keep hands steps came back with.
+type heldHandsRead struct {
+	held []StoryDetail
+	err  error
 }
 
 // mayorRead is what reading the Mayor's needs came back with.
@@ -851,6 +893,14 @@ func (r StatusReport) String() string {
 		for _, need := range r.WaitingOnMayor {
 			clip(&b, "  "+need.Bead+" · "+needAge(need, r.NeedsAt))
 			clip(&b, "    "+needWhy(need))
+		}
+		b.WriteString("\n")
+	}
+
+	if len(r.HeldHands) > 0 {
+		clip(&b, fmt.Sprintf("%s (%d)", HeldHandsHeading, len(r.HeldHands)))
+		for _, d := range r.HeldHands {
+			writeStory(&b, d, "no Run until it is open")
 		}
 		b.WriteString("\n")
 	}

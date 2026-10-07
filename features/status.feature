@@ -466,3 +466,21 @@ Feature: mw status
     When mw status reads the host
     Then reading status succeeds
     And the report has no heading for needs waiting on the Mayor
+
+  Scenario: A held bead with a hands step is listed under HELD, WITH A HANDS STEP
+    Given a status story "mw-gq6.50" filed under it
+    And the status story "mw-gq6.50" is labelled "hitl"
+    And the status story "mw-gq6.50" is held
+    And the status story "mw-gq6.50" keeps the hands step "speak"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "mw-gq6.50" under HELD, WITH A HANDS STEP
+    And the report has no heading for needs waiting on the Mayor
+
+  Scenario: An open bead with a hands step is not listed under HELD, WITH A HANDS STEP
+    Given a status story "mw-gq6.51" filed under it
+    And the status story "mw-gq6.51" is labelled "hitl"
+    And the status story "mw-gq6.51" keeps the hands step "speak"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report has no heading for held beads with a hands step

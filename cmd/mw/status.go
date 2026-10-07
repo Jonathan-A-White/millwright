@@ -55,6 +55,8 @@ func newStatusCmd() *cobra.Command {
 			"When a rig's file in the vault (rigs/<rig>.toml) requires something of its epics, an EPICS\n" +
 			"MISSING REQUIREMENTS section names each open epic that lacks it, and an EPICS WAIVED section\n" +
 			"each epic the Governor waived it for. Both are left out when there are none.\n\n" +
+			"A HELD, WITH A HANDS STEP section lists each held bead that keeps a hands step not yet run: the\n" +
+			"Governor is offered no Run on it until it is open. It is left out when there are none.\n\n" +
 			"A DONE, STILL OPEN section lists each open bead that looks finished, so the Mayor can close it:\n" +
 			"an epic or map whose children are all closed, and a grilling or research ticket linked to\n" +
 			"epics that are all closed. It costs one read of every bead, and closes nothing.\n\n" +
@@ -127,6 +129,7 @@ func newStatusCmd() *cobra.Command {
 			if reader := hostStandby(files); reader != nil {
 				standby = reader
 			}
+			mayor := application.MayorReader{Tracker: tracker, Notes: tracker}
 			_, err = application.Status{
 				Tracker:          tracker,
 				Notes:            tracker,
@@ -134,7 +137,8 @@ func newStatusCmd() *cobra.Command {
 				Rules:            files,
 				Graph:            tracker,
 				SyncHalt:         hostSyncHalt(),
-				Mayor:            application.MayorReader{Tracker: tracker, Notes: tracker},
+				Mayor:            mayor,
+				HeldHands:        mayor,
 				Host:             host,
 				Seat:             BuilderSeat,
 				Ticks:            hostTickLogs(),

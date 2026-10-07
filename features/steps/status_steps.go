@@ -2,6 +2,7 @@ package steps
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -113,6 +114,10 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a status bead "([^"]*)" titled "([^"]*)" filed under no epic, waiting on "([^"]*)"$`,
 		c.aStatusBeadUnderNoEpicWaitingOn)
 	ctx.Given(`^the status story "([^"]*)" is labelled "([^"]*)"$`, c.theStatusStoryIsLabelled)
+	ctx.Given(`^the status story "([^"]*)" is held$`, c.theStatusStoryIsHeld)
+	ctx.Given(`^the status story "([^"]*)" keeps the hands step "([^"]*)"$`, c.theStatusStoryKeepsAHandsStep)
+	ctx.Then(`^the report lists "([^"]*)" under HELD, WITH A HANDS STEP$`, c.theReportListsUnderHeldWithAHandsStep)
+	ctx.Then(`^the report has no heading for held beads with a hands step$`, c.theReportHasNoHeadingForHeldHands)
 	ctx.Given(`^the status story "([^"]*)" is at priority (\d)$`, c.theStatusStoryIsAtPriority)
 	ctx.Given(`^the status story "([^"]*)" is finished$`, c.theStatusStoryIsFinished)
 	ctx.Given(`^the status story "([^"]*)" is claimed with its session running$`, c.theStatusStoryIsClaimedAndRunning)
@@ -305,6 +310,45 @@ func (c *statusContext) theStatusStoryIsLabelled(id, label string) error {
 	return c.tracker.SetLabels(id, label)
 }
 
+func (c *statusContext) theStatusStoryIsHeld(id string) error {
+	return c.tracker.HoldStory(context.Background(), id)
+}
+
+// theStatusStoryKeepsAHandsStep leaves a hands step in the story's note, as
+// mw hands add does, that has not run.
+func (c *statusContext) theStatusStoryKeepsAHandsStep(id, step string) error {
+	raw, err := json.Marshal([]application.HandsStepRecord{{
+		HandsStep: domain.HandsStep{ID: step, Host: "desktop", As: "user", Run: "espeak-ng hello"},
+		AddedAt:   c.now.UTC().Format(time.RFC3339),
+	}})
+	if err != nil {
+		return err
+	}
+	return c.tracker.SetNote(context.Background(), application.HandsStepsKey(id), string(raw))
+}
+
+func (c *statusContext) theReportListsUnderHeldWithAHandsStep(id string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	for _, line := range strings.Split(headedBy(c.report.String(), application.HeldHandsHeading), "\n") {
+		if strings.Contains(line, id) {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected %s under %q, got:\n%s", id, application.HeldHandsHeading, c.report.String())
+}
+
+func (c *statusContext) theReportHasNoHeadingForHeldHands() error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	if strings.Contains(c.report.String(), application.HeldHandsHeading) {
+		return fmt.Errorf("expected no %s section, got:\n%s", application.HeldHandsHeading, c.report.String())
+	}
+	return nil
+}
+
 func (c *statusContext) theStatusStoryIsFinished(id string) error {
 	return c.tracker.CloseStory(context.Background(), id, "worked by the test")
 }
@@ -433,6 +477,7 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 		return err
 	}
 
+	mayor := application.MayorReader{Tracker: c.tracker, Notes: c.tracker, Now: func() time.Time { return c.now }}
 	c.report, c.err = application.Status{
 		Tracker:        c.tracker,
 		Notes:          c.tracker,
@@ -443,7 +488,8 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 		HostSilence:    time.Duration(hours) * time.Hour,
 		RigMemoryBytes: budget,
 		Ticks:          logs,
-		Mayor:          application.MayorReader{Tracker: c.tracker, Notes: c.tracker, Now: func() time.Time { return c.now }},
+		Mayor:          mayor,
+		HeldHands:      mayor,
 		Now:            func() time.Time { return c.now },
 	}.Run(context.Background())
 	return nil

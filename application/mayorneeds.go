@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -121,4 +122,55 @@ func (r MayorReader) maybeNeed(d StoryDetail, now time.Time) bool {
 	}
 	since := firstKnown(d.Created, d.Updated)
 	return since.IsZero() || now.Sub(since) <= PosternViewStaleHands
+}
+
+// HeldHands lists the held beads with a hands step that has not run clean and
+// was not superseded, in the order of their ids. It costs one read of the
+// notes and, when any bead keeps steps, one read of those beads. It writes
+// nothing.
+func (r MayorReader) HeldHands(ctx context.Context) ([]StoryDetail, error) {
+	if r.Tracker == nil || r.Notes == nil {
+		return nil, fmt.Errorf("reading the held hands beads: there is no tracker or notes to read them from")
+	}
+	notes, err := r.Notes.NotesWithPrefix(ctx, "hands.")
+	if err != nil {
+		return nil, fmt.Errorf("reading the notes: %w", err)
+	}
+	var ids []string
+	for key := range notes {
+		id := strings.TrimPrefix(key, "hands.")
+		if id == key || strings.HasPrefix(id, "ran.") || strings.HasPrefix(id, "superseded.") || strings.HasPrefix(id, "approval.") {
+			continue
+		}
+		if !waitingHandsStep(viewHandsSteps(id, notes)) {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	sort.Strings(ids)
+	found, err := r.Tracker.ShowBeads(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("reading the beads that keep hands steps: %w", err)
+	}
+	var held []StoryDetail
+	for _, d := range found {
+		if d.Held() {
+			held = append(held, d)
+		}
+	}
+	return held, nil
+}
+
+// waitingHandsStep reports whether any of steps is still for the Governor's
+// hands: not run clean, not superseded.
+func waitingHandsStep(steps []PosternViewHandsStep) bool {
+	for _, step := range steps {
+		if step.SupersededBy == "" && (step.Ran == nil || step.Ran.Exit != 0) {
+			return true
+		}
+	}
+	return false
 }
