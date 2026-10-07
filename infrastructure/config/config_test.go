@@ -1534,7 +1534,7 @@ func TestGristCeilingsDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	if strings.Join(got.Models, ",") != "haiku,sonnet,opus" || strings.Join(got.Efforts, ",") != "low,medium,high" || got.MaxAttachments != 4 || got.MaxAttachmentBytes != 8388608 ||
-		got.DailyLimit != 50 || got.Timeout != 10*time.Minute {
+		got.DailyLimit != 50 || got.Concurrency != 2 || got.Timeout != 10*time.Minute {
 		t.Fatalf("expected the default ceilings, got %+v", got)
 	}
 }
@@ -1548,6 +1548,7 @@ efforts = "low,xhigh"
 max_attachments = 2
 max_attachment_bytes = 4194304
 daily_limit = 20
+concurrency = 3
 timeout = "5m"
 
 [grist-apps]
@@ -1558,7 +1559,7 @@ cairn = "/home/jwhite/rigs/Cairn"
 		t.Fatal(err)
 	}
 	if strings.Join(got.Models, ",") != "haiku,sonnet" || strings.Join(got.Efforts, ",") != "low,xhigh" || got.MaxAttachments != 2 || got.MaxAttachmentBytes != 4194304 ||
-		got.DailyLimit != 20 || got.Timeout != 5*time.Minute {
+		got.DailyLimit != 20 || got.Concurrency != 3 || got.Timeout != 5*time.Minute {
 		t.Fatalf("expected the table's ceilings, got %+v", got)
 	}
 	apps, err := config.GristApps()
@@ -1568,7 +1569,7 @@ cairn = "/home/jwhite/rigs/Cairn"
 }
 
 func TestGristCeilingsThatAreNotNumbersAreRefused(t *testing.T) {
-	for _, bad := range []string{"daily_limit = 0", "max_attachments = four", `timeout = "soon"`} {
+	for _, bad := range []string{"daily_limit = 0", "concurrency = 0", "concurrency = two", "max_attachments = four", `timeout = "soon"`} {
 		writeConfig(t, "[grist]\n"+bad+"\n")
 		if _, err := config.Grist(); err == nil {
 			t.Errorf("expected %q refused", bad)
