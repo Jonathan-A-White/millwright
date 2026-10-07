@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 )
@@ -14,14 +15,28 @@ import (
 // FakeGrinder is an in-memory application.Grinder: every grind reports
 // Result (or Err), and each call is kept with the files its directory held
 // while it ran, so a test can see the photos a grind was given after the
-// directory is gone.
+// directory is gone. Grinds run side by side: nothing is held between calls.
 type FakeGrinder struct {
 	mu sync.Mutex
 
 	Result application.SessionResult
 	Err    error
 
-	calls []GrindSeen
+	// Entered, when set, is sent on as each grind starts, so a test can wait
+	// for one without sleeping. Hold, when set, keeps each grind running until
+	// a value is received from it (or it is closed): the test lets one end at
+	// a time. A grind whose context ends stops waiting.
+	Entered chan struct{}
+	Hold    chan struct{}
+	// Together, when above 1, keeps each of the first Together grinds running
+	// until that many are running at once, so a test shows grinds overlapping
+	// without sleeping or racing a clock; the grinds after them are not held.
+	Together int
+
+	calls  []GrindSeen
+	active int
+	most   int
+	joined chan struct{}
 }
 
 // GrindSeen is one call a FakeGrinder took, and the files in its directory
@@ -35,9 +50,8 @@ type GrindSeen struct {
 var _ application.Grinder = (*FakeGrinder)(nil)
 
 // Grind implements application.Grinder.
-func (f *FakeGrinder) Grind(_ context.Context, call application.GrindCall) (application.SessionResult, error) {
+func (f *FakeGrinder) Grind(ctx context.Context, call application.GrindCall) (application.SessionResult, error) {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	seen := GrindSeen{Call: call, Files: map[string][]byte{}}
 	entries, _ := os.ReadDir(call.Dir)
 	for _, e := range entries {
@@ -45,6 +59,43 @@ func (f *FakeGrinder) Grind(_ context.Context, call application.GrindCall) (appl
 		seen.Files[e.Name()] = data
 	}
 	f.calls = append(f.calls, seen)
+	f.active++
+	f.most = max(f.most, f.active)
+	var joined chan struct{}
+	if f.Together > 1 && len(f.calls) <= f.Together {
+		if f.joined == nil {
+			f.joined = make(chan struct{})
+		}
+		joined = f.joined
+		if len(f.calls) == f.Together {
+			close(f.joined)
+		}
+	}
+	entered, hold := f.Entered, f.Hold
+	f.mu.Unlock()
+	defer func() {
+		f.mu.Lock()
+		f.active--
+		f.mu.Unlock()
+	}()
+
+	if entered != nil {
+		entered <- struct{}{}
+	}
+	if joined != nil {
+		select {
+		case <-joined:
+		case <-ctx.Done():
+		case <-time.After(10 * time.Second):
+			return application.SessionResult{}, fmt.Errorf("the grinds never ran %d at once", f.Together)
+		}
+	}
+	if hold != nil {
+		select {
+		case <-hold:
+		case <-ctx.Done():
+		}
+	}
 	if f.Err != nil {
 		return application.SessionResult{}, f.Err
 	}
@@ -56,6 +107,13 @@ func (f *FakeGrinder) Calls() []GrindSeen {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]GrindSeen(nil), f.calls...)
+}
+
+// MostAtOnce reports the most grinds that were running at the same moment.
+func (f *FakeGrinder) MostAtOnce() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.most
 }
 
 // FakeGrinds is an in-memory application.GrindSource: each checkout's main

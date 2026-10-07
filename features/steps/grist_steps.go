@@ -84,6 +84,7 @@ type gristContext struct {
 	photos map[string][]byte // blob hash to the photo it seals
 
 	audio audioContext // features/grist_audio.feature
+	slots slotsContext // features/grist_concurrent.feature
 
 	report     application.GristReport
 	homeIs     string // the host the vault's home file names; empty is no home file
@@ -116,6 +117,7 @@ func InitializeGristScenario(ctx *godog.ScenarioContext) {
 	})
 	// After the reset above: it must not clear what the audio steps keep.
 	registerGristAudio(ctx, c)
+	registerGristSlots(ctx, c)
 
 	ctx.Given(`^a mill on the host "([^"]*)" with a cap of (\d+)$`, c.aMill)
 	ctx.Given(`^the app "([^"]*)" is checked out here, its main at commit "([^"]*)" with the grind "([^"]*)"$`, c.theAppIsCheckedOut)
@@ -274,7 +276,7 @@ func (c *gristContext) sendAttached(key string, apps []string, app, kind, v stri
 		return nil
 	}
 	for i := 1; i <= photos; i++ {
-		if err := upload([]byte(fmt.Sprintf("jpeg bytes of photo %d", i)), "image/jpeg"); err != nil {
+		if err := upload([]byte(fmt.Sprintf("jpeg bytes of photo %d%s", i, c.slots.photoSalt())), "image/jpeg"); err != nil {
 			return err
 		}
 	}
@@ -448,7 +450,7 @@ func (c *gristContext) mill() application.GristGrind {
 	return application.GristGrind{
 		Postern: c.backend, Cipher: &apptest.FakeCipher{From: c.millKey}, Keys: c.keys,
 		State: c.state, Grinds: c.grinds, Grinder: c.grinder, Tracker: c.tracker,
-		Pass: c.pass, Grinding: c.grinding, Host: c.host, Cap: c.cap,
+		Pass: c.pass, Grinding: c.grinding, MoreGrinding: c.slots.more(), Host: c.host, Cap: c.cap,
 		Apps:        map[string]string{"cairn": c.checkout("cairn")},
 		Ceilings:    c.ceilings,
 		GovernorKey: c.governor,
@@ -506,7 +508,7 @@ func (c *gristContext) mwDispatchRuns(host string, cap int) error {
 	tick := application.Dispatch{
 		Tracker: c.tracker, Worktrees: noWorktrees{}, Runner: apptest.NewFakeRunner(),
 		Host: host, Cap: cap, Rigs: map[string]string{"millwright": "/rigs/millwright"},
-		Grinding: c.grinding, Out: &c.out,
+		Grinding: c.grinding, MoreGrinding: c.slots.more(), Out: &c.out,
 	}
 	if c.homeIs != "" {
 		tick.Home = &apptest.FakeHomeFile{Text: c.homeIs + " 2026-09-29T09:00:00Z mw@" + c.homeIs + "\n"}
@@ -824,7 +826,7 @@ func (c *gristContext) dispatchStartedNothing(why string) error {
 }
 
 func (c *gristContext) dispatchSaysGrinding() error {
-	if !c.dispatch.Grinding || c.dispatch.Running != 1 || !strings.Contains(c.out.String(), "a grist grind holds one of those sessions") {
+	if !c.dispatch.Grinding || c.dispatch.Grinds != 1 || c.dispatch.Running != 1 || !strings.Contains(c.out.String(), "a grist grind holds one of those sessions") {
 		return fmt.Errorf("expected dispatch to count the grind as a running session, it said:\n%s", c.out.String())
 	}
 	return nil

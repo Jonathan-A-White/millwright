@@ -121,10 +121,12 @@ type Dispatch struct {
 	Cap  int
 	Rigs map[string]string
 
-	// Grinding is held while the mill grinds a grist here (mw grist grind):
-	// a grind takes one of the sessions Cap counts, first come first served.
-	// A nil Grinding counts none.
-	Grinding GristLock
+	// Grinding and MoreGrinding are the mill's grind slots here (mw grist
+	// grind), each held while the mill grinds a grist: a grind takes one of the
+	// sessions Cap counts, first come first served, and every slot held is one
+	// session. A nil Grinding counts none.
+	Grinding     GristLock
+	MoreGrinding []GristLock
 
 	// Exclusive is this host's dispatch lock, taken without waiting and held for
 	// the whole of a real run: a second dispatch that cannot take it says so and
@@ -292,9 +294,10 @@ type DispatchReport struct {
 	Host string
 	Cap  int
 	// Running is how many sessions this host already had in flight;
-	// Grinding says one of them is a grist grind.
+	// Grinding says one of them is a grist grind; Grinds is how many are.
 	Running  int
 	Grinding bool
+	Grinds   int
 	// Grist is what the mill's pass after the claims did, when one ran.
 	Grist *GristReport
 	// Reclaimed is every claim this dispatch took back from a dead pane and an
@@ -522,23 +525,24 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		}
 		report.Running++
 	}
-	// A real run takes the grind lock and keeps it while it claims, so that a
-	// grind starting in the same tick reads the cap after the claims are made
-	// (or is turned away and waits for the next tick), never before them: the
-	// two cannot both take the last slot. A dry run only looks.
-	var unlock func()
+	// A real run takes the grind slots free and keeps them while it claims, so
+	// that a grind starting in the same tick reads the cap after the claims are
+	// made (or is turned away and waits for the next tick), never before them:
+	// the two cannot both take the last slot. A dry run only looks.
+	var unlock []func()
 	defer func() {
-		if unlock != nil {
-			unlock()
+		for _, release := range unlock {
+			release()
 		}
 	}()
 	if d.Grinding != nil {
-		grinding, err := d.grindRunning(ctx, &unlock)
+		grinds, err := d.grindsRunning(ctx, &unlock)
 		if err != nil {
 			report.Notes = append(report.Notes, fmt.Sprintf("whether a grist grind is running here could not be read: %v", err))
-		} else if grinding {
-			report.Running++
+		} else if grinds > 0 {
+			report.Running += grinds
 			report.Grinding = true
+			report.Grinds = grinds
 		}
 	}
 	free := d.Cap - report.Running
@@ -699,10 +703,10 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	}
 
 	d.print(report.String())
-	if unlock != nil {
-		unlock()
-		unlock = nil
+	for _, release := range unlock {
+		release()
 	}
+	unlock = nil
 	d.answerWaitingGrist(ctx, &report)
 	if len(report.Failed) > 0 {
 		return report, fmt.Errorf("dispatching on %s: %s", d.Host, report.failures())
@@ -710,20 +714,32 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	return report, nil
 }
 
-// grindRunning says whether a grist grind holds a session here. A real run
-// that finds none has taken the grind lock, and leaves its release in unlock.
-func (d Dispatch) grindRunning(ctx context.Context, unlock *func()) (bool, error) {
-	if d.DryRun {
-		return d.Grinding.Held(ctx)
+// grindsRunning says how many grist grinds hold a session here. A real run
+// takes every grind slot not held, and leaves their releases in unlock.
+func (d Dispatch) grindsRunning(ctx context.Context, unlock *[]func()) (int, error) {
+	running := 0
+	for _, slot := range append([]GristLock{d.Grinding}, d.MoreGrinding...) {
+		if d.DryRun {
+			held, err := slot.Held(ctx)
+			if err != nil {
+				return running, err
+			}
+			if held {
+				running++
+			}
+			continue
+		}
+		release, taken, err := slot.TryTake(ctx)
+		if err != nil {
+			return running, err
+		}
+		if taken {
+			*unlock = append(*unlock, release)
+		} else {
+			running++
+		}
 	}
-	release, taken, err := d.Grinding.TryTake(ctx)
-	if err != nil {
-		return false, err
-	}
-	if taken {
-		*unlock = release
-	}
-	return !taken, nil
+	return running, nil
 }
 
 // answerWaitingGrist runs one pass of the mill after the claims, on the host
@@ -1546,7 +1562,10 @@ func (r DispatchReport) String() string {
 		what = "dispatch (dry run: nothing was synced, claimed or started)"
 	}
 	fmt.Fprintf(&b, "%s on %s: %d of %d sessions were already running\n", what, r.Host, r.Running, r.Cap)
-	if r.Grinding {
+	switch {
+	case r.Grinds > 1:
+		fmt.Fprintf(&b, "  grinding: %d grist grinds hold %d of those sessions\n", r.Grinds, r.Grinds)
+	case r.Grinding:
 		b.WriteString("  grinding: a grist grind holds one of those sessions\n")
 	}
 	if r.Synced {

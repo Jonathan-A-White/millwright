@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -35,6 +36,7 @@ type audioContext struct {
 	engines map[string]*apptest.FakeScorer
 	store   *grist.Runs
 	ticks   bool
+	mu      sync.Mutex
 	looks   int
 	grinds  map[string]audioGrind
 	clip    []byte
@@ -72,6 +74,9 @@ func (a *audioContext) now() time.Time {
 	if !a.ticks {
 		return gristNow
 	}
+	// Grinds ask from goroutines of their own.
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.looks++
 	return gristNow.Add(time.Duration(a.looks) * time.Second)
 }

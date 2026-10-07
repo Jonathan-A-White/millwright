@@ -73,10 +73,13 @@ type GristGrind struct {
 	Grinder Grinder
 	Tracker RunningHere
 	// Pass is held for the whole pass, so two passes never answer the same
-	// grist. Grinding is held while a grind runs: mw dispatch counts it as
-	// one of the sessions its cap allows.
-	Pass     GristLock
-	Grinding GristLock
+	// grist. Grinding and MoreGrinding are the grind slots, one lock each: a
+	// slot is held while a grind runs, and mw dispatch counts every one held as
+	// one of the sessions its cap allows. The mill grinds as many grists at once
+	// as it has slots (config [grist] concurrency); Grinding alone is one.
+	Pass         GristLock
+	Grinding     GristLock
+	MoreGrinding []GristLock
 
 	// Host and Cap are this host and how many sessions may run here at once.
 	Host string
@@ -226,9 +229,12 @@ func (w *gristWork) settle(status, reason string) {
 
 // Run is one pass: it delivers any answer an earlier pass could not, reads
 // what has arrived since its cursor, and answers every grist addressed to
-// the mill key that it has not answered before. It stops grinding the moment
-// the host has no slot free; that grist and every one after it wait for the
-// next pass, and the cursor stays before them.
+// the mill key that it has not answered before, oldest first. It grinds as
+// many at once as the host has slots free; a grist past them waits for a
+// grind of this pass to end. It stops grinding the moment the host has no
+// slot free and none of its own grinds is left to wait for; that grist and
+// every one after it wait for the next pass. The cursor moves only past
+// grists whose grind has ended, and stays before the rest.
 func (g GristGrind) Run(ctx context.Context) (GristReport, error) {
 	report := GristReport{Host: g.Host}
 	if err := g.wired(); err != nil {
@@ -272,36 +278,170 @@ func (g GristGrind) Run(ctx context.Context) (GristReport, error) {
 		answered[line.Txid] = true
 	}
 
-	next, waiting := cursor, false
-	for _, r := range records {
-		mine := r.Class == GristClass && r.To == millKey && r.Txid != ""
-		if !mine || answered[r.Txid] {
-			if !waiting {
-				next = max(next, r.Seq)
-			}
-			continue
-		}
-		if waiting {
-			report.Waiting++
-			continue
-		}
-		line, waited, err := g.one(ctx, r, privKey, millKey, lines, &report)
-		if err != nil {
-			g.keepCursor(ctx, cursor, next, &report)
-			return report, err
-		}
-		if waited {
-			waiting = true
-			report.Waiting++
-			continue
-		}
-		lines = append(lines, line)
-		answered[r.Txid] = true
-		next = max(next, r.Seq)
+	p := &gristPass{
+		g: g, ctx: ctx, report: &report, privKey: privKey, millKey: millKey,
+		lines: lines, answered: answered, records: records, ended: make([]bool, len(records)),
+		next: cursor, ground: make(chan gristGround), held: make([]func(), len(g.slots())),
 	}
-	g.keepCursor(ctx, cursor, next, &report)
+	p.work()
+	g.keepCursor(ctx, cursor, p.next, &report)
 	g.print(report.String())
-	return report, nil
+	return report, p.err
+}
+
+// gristGround is a grind that has ended: its grist's place in the pass, and
+// the slot it held.
+type gristGround struct {
+	at   int
+	w    *gristWork
+	slot int
+}
+
+// gristPass is one pass's work in flight. Only the pass's own goroutine
+// touches it: a grind's goroutine hands back what it ground on ground.
+type gristPass struct {
+	g       GristGrind
+	ctx     context.Context
+	report  *GristReport
+	privKey string
+	millKey string
+
+	lines    []GrindLine
+	answered map[string]bool
+	records  []PosternRecord
+	// ended says each record's grind is over (or it needed none): the cursor
+	// moves past a record only when it and every record before it has.
+	ended []bool
+	next  int64
+	// front is the first record not yet past the cursor.
+	front int
+
+	ground   chan gristGround
+	held     []func() // each slot's release while a grind of this pass holds it
+	grinding int
+	// err is the first error that stops the pass: the grinds still running are
+	// let finish and answered, and nothing new is started.
+	err error
+}
+
+// work runs the pass over its records, and returns once every grind it
+// started has ended and been answered.
+func (p *gristPass) work() {
+	g := p.g
+	millKey := p.millKey
+	stopped := false
+	for i, r := range p.records {
+		if p.err != nil {
+			break
+		}
+		mine := r.Class == GristClass && r.To == millKey && r.Txid != ""
+		if !mine || p.answered[r.Txid] {
+			p.end(i)
+			continue
+		}
+		if stopped {
+			p.report.Waiting++
+			continue
+		}
+		w := &gristWork{record: r, started: g.now(), sealed: map[string]bool{}}
+		w.received = w.started
+		g.judge(p.ctx, w, p.privKey, p.lines)
+		if w.status != "" {
+			// A grist that needs no session is answered at once when a slot is
+			// free for it to have been ground in; else it keeps its place behind
+			// the grinds running, so one slot answers in the order grists came.
+			for p.grinding >= len(p.held) {
+				p.settle(<-p.ground)
+			}
+			p.answered[r.Txid] = true
+			p.settleGrist(i, w)
+			continue
+		}
+		slot, why := p.slot()
+		if slot < 0 && p.err != nil {
+			break
+		}
+		if slot < 0 {
+			p.report.WaitingWhy = why
+			stopped = true
+			p.report.Waiting++
+			continue
+		}
+		p.answered[r.Txid] = true
+		p.grind(i, w, slot)
+	}
+	for p.grinding > 0 {
+		p.settle(<-p.ground)
+	}
+}
+
+// slot takes a slot for the next grind, waiting for one of this pass's own
+// grinds to end when it is they that fill them. It reports the slot's number,
+// or -1 and why there is none.
+func (p *gristPass) slot() (int, string) {
+	for {
+		n, release, why, err := p.g.slot(p.ctx, p.held, p.grinding)
+		if err != nil {
+			p.err = err
+			return -1, ""
+		}
+		if n >= 0 {
+			p.held[n] = release
+			return n, ""
+		}
+		if p.grinding == 0 {
+			return -1, why
+		}
+		p.settle(<-p.ground)
+		if p.err != nil {
+			return -1, ""
+		}
+	}
+}
+
+// grind starts record at's grist grinding in slot n, in a goroutine of its own.
+func (p *gristPass) grind(at int, w *gristWork, n int) {
+	p.grinding++
+	w.started = p.g.now()
+	go func() {
+		p.g.grindOne(p.ctx, w, p.privKey)
+		p.ground <- gristGround{at: at, w: w, slot: n}
+	}()
+}
+
+// settle answers a grind that has ended and frees its slot.
+func (p *gristPass) settle(done gristGround) {
+	p.grinding--
+	if release := p.held[done.slot]; release != nil {
+		release()
+	}
+	p.held[done.slot] = nil
+	p.settleGrist(done.at, done.w)
+}
+
+// settleGrist answers a grist whose grind has ended (or needed none) and, when
+// that is recorded, lets the cursor pass it. An answer that cannot be recorded
+// stops the pass, and leaves the cursor before the grist.
+func (p *gristPass) settleGrist(at int, w *gristWork) {
+	line, err := p.g.answer(p.ctx, w, p.privKey, p.millKey, p.report)
+	if err != nil {
+		if p.err == nil {
+			p.err = err
+		}
+		return
+	}
+	p.lines = append(p.lines, line)
+	p.end(at)
+}
+
+// end marks record at as needing nothing more, and moves the cursor over every
+// record before the first that does.
+func (p *gristPass) end(at int) {
+	p.ended[at] = true
+	for p.front < len(p.records) && p.ended[p.front] {
+		p.next = max(p.next, p.records[p.front].Seq)
+		p.front++
+	}
 }
 
 // keepCursor moves the cursor to next, when it has moved; a failure to is a
@@ -313,28 +453,6 @@ func (g GristGrind) keepCursor(ctx context.Context, cursor, next int64, report *
 	if err := g.State.SetCursor(ctx, next); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the cursor could not be moved to %d: %v", next, err))
 	}
-}
-
-// one answers one grist, or reports that it waits for a slot.
-func (g GristGrind) one(ctx context.Context, r PosternRecord, privKey, millKey string, lines []GrindLine, report *GristReport) (GrindLine, bool, error) {
-	w := &gristWork{record: r, started: g.now(), sealed: map[string]bool{}}
-	w.received = w.started
-	g.judge(ctx, w, privKey, lines)
-	if w.status == "" {
-		release, why, err := g.slot(ctx)
-		if err != nil {
-			return GrindLine{}, false, err
-		}
-		if release == nil {
-			report.WaitingWhy = why
-			return GrindLine{}, true, nil
-		}
-		w.started = g.now()
-		g.grindOne(ctx, w, privKey)
-		release()
-	}
-	line, err := g.answer(ctx, w, privKey, millKey, report)
-	return line, false, err
 }
 
 // judge opens the grist and checks it against its grind and every ceiling,
@@ -549,35 +667,48 @@ func sentToday(lines []GrindLine, sender string, now time.Time) int {
 	return sent
 }
 
-// slot takes one of this host's story slots for a grind: the grind lock,
-// then a look at what is running here. It reports release nil, and why, when
-// there is none to take.
-func (g GristGrind) slot(ctx context.Context) (release func(), why string, err error) {
-	release, taken, err := g.Grinding.TryTake(ctx)
-	if err != nil {
-		return nil, "", fmt.Errorf("mw grist grind: %w", err)
-	}
-	if !taken {
-		return nil, "another grind is running on this host", nil
-	}
-	running, err := g.Tracker.RunningStories(ctx, g.Host)
-	if err != nil {
-		release()
-		return nil, "", fmt.Errorf("mw grist grind: reading what is running on %s: %w", g.Host, err)
-	}
-	busy := 0
-	for _, detail := range running {
-		// As mw dispatch counts them: a story the Governor must be present
-		// for is worked with the Mayor, not in a session of this host.
-		if !detail.Hitl() {
-			busy++
+// slots is the host's grind slots, the first first.
+func (g GristGrind) slots() []GristLock {
+	return append([]GristLock{g.Grinding}, g.MoreGrinding...)
+}
+
+// slot takes one of this host's story slots for a grind: a grind lock, then a
+// look at what is running here. held says which locks this pass's own grinds
+// hold, and running how many that is; they are not tried again, and they are
+// sessions the cap counts. It reports the lock's number and its release, or
+// number -1, and why, when there is none to take.
+func (g GristGrind) slot(ctx context.Context, held []func(), running int) (int, func(), string, error) {
+	for n, lock := range g.slots() {
+		if held[n] != nil {
+			continue
 		}
+		release, taken, err := lock.TryTake(ctx)
+		if err != nil {
+			return -1, nil, "", fmt.Errorf("mw grist grind: %w", err)
+		}
+		if !taken {
+			continue
+		}
+		stories, err := g.Tracker.RunningStories(ctx, g.Host)
+		if err != nil {
+			release()
+			return -1, nil, "", fmt.Errorf("mw grist grind: reading what is running on %s: %w", g.Host, err)
+		}
+		busy := running
+		for _, detail := range stories {
+			// As mw dispatch counts them: a story the Governor must be present
+			// for is worked with the Mayor, not in a session of this host.
+			if !detail.Hitl() {
+				busy++
+			}
+		}
+		if busy >= g.Cap {
+			release()
+			return -1, nil, fmt.Sprintf("the host is at its cap (%d of %d sessions running)", busy, g.Cap), nil
+		}
+		return n, release, "", nil
 	}
-	if busy >= g.Cap {
-		release()
-		return nil, fmt.Sprintf("the host is at its cap (%d of %d sessions running)", busy, g.Cap), nil
-	}
-	return release, "", nil
+	return -1, nil, "another grind is running on this host", nil
 }
 
 // grindOne opens the grist's photos into a private directory, runs the
