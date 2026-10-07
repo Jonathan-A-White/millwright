@@ -159,10 +159,13 @@ func (g *Gateway) CreateStory(ctx context.Context, story application.NewStory) (
 	switch {
 	case strings.TrimSpace(story.Title) == "":
 		return "", fmt.Errorf("a story needs a title")
-	case strings.TrimSpace(story.EpicID) == "":
+	case strings.TrimSpace(story.EpicID) == "" && !story.Standalone:
 		return "", fmt.Errorf("the story %q needs an epic to be filed under", story.Title)
 	}
-	args := []string{"create", story.Title, "--parent", story.EpicID, "--status", StatusDeferred}
+	args := []string{"create", story.Title, "--status", StatusDeferred}
+	if epic := strings.TrimSpace(story.EpicID); epic != "" {
+		args = append(args, "--parent", epic)
+	}
 
 	if description := strings.TrimSpace(story.Description); description != "" {
 		args = append(args, "--description", description)

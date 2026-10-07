@@ -623,6 +623,34 @@ func TestGatewayNotesWithPrefixFindsTheDoctorsNotes(t *testing.T) {
 	}
 }
 
+// A story is filed with no parent only when it says it is standalone: the swap
+// of a backend whose landed story had no epic (mw-5kuu6z).
+func TestGatewayFilesAStandaloneStoryOnlyWhenItSaysSo(t *testing.T) {
+	t.Parallel()
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	gateway := beads.New(vault)
+	if _, err := gateway.CreateStory(ctx, application.NewStory{Title: "Forgot the epic"}); err == nil {
+		t.Fatalf("expected a story with no epic and no say-so to be refused")
+	}
+	id, err := gateway.CreateStory(ctx, application.NewStory{Title: "A swap with no epic", Standalone: true, Labels: []string{application.LabelHitl}})
+	if err != nil {
+		t.Fatalf("filing the standalone story: %v", err)
+	}
+	if err := gateway.ReleaseStory(ctx, id); err != nil {
+		t.Fatalf("releasing %s: %v", id, err)
+	}
+	detail, err := gateway.ShowStory(ctx, id)
+	if err != nil {
+		t.Fatalf("showing %s: %v", id, err)
+	}
+	if detail.EpicID != "" || detail.Status != application.StatusOpen || !detail.Hitl() {
+		t.Errorf("expected an open hitl story under no epic, got %+v", detail)
+	}
+}
+
 // Filing a plan is the other half of the gateway: it writes beads rather than
 // reading them. Everything here goes into one throwaway database too.
 func TestGatewayFilesAnEpicWithItsStoriesHeld(t *testing.T) {

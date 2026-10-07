@@ -386,7 +386,7 @@ func (f *FakeTracker) CreateStory(_ context.Context, story application.NewStory)
 	switch {
 	case story.Title == "":
 		return "", fmt.Errorf("a story needs a title")
-	case story.EpicID == "":
+	case story.EpicID == "" && !story.Standalone:
 		return "", fmt.Errorf("a story needs an epic to be filed under")
 	}
 	for _, need := range story.Needs {
@@ -403,6 +403,9 @@ func (f *FakeTracker) CreateStory(_ context.Context, story application.NewStory)
 		}
 	}
 	id := fmt.Sprintf("%s.%d", story.EpicID, under+1)
+	if story.EpicID == "" {
+		id = fmt.Sprintf("mw-standalone.%d", under+1)
+	}
 
 	f.order = append(f.order, id)
 	f.stories[id] = &fakeStory{

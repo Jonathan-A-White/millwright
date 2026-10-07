@@ -289,8 +289,15 @@ type NewEpic struct {
 // story's metadata; Needs are the ids of the stories that must be finished
 // before it can be worked. A Priority or an EstimateMinutes of zero leaves the
 // tracker's own default standing.
+//
+// A story with no epic is only filed when Standalone says so: a bead of the
+// factory's own making, such as a backend swap for a landing whose story had no
+// epic, has no parent to be filed under.
 type NewStory struct {
-	EpicID          string
+	EpicID string
+	// Standalone files the story with no parent, and is how an empty EpicID is
+	// told from one that was forgotten.
+	Standalone      bool
 	Title           string
 	Description     string
 	Acceptance      string
