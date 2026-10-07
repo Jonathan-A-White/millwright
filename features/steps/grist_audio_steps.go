@@ -103,6 +103,12 @@ func registerGristAudio(ctx *godog.ScenarioContext, c *gristContext) {
 	ctx.Then(`^the session's request carries the error "([^"]*)" for the engine "([^"]*)"$`, a.requestCarriesError)
 	ctx.Then(`^the session's request keeps the app's own fields$`, a.requestKeepsFields)
 	ctx.Then(`^the session's request has no reading_result$`, a.requestHasNoReading)
+	ctx.Then(`^the app's decrypted reply has the grind's answer and a reading_result from "([^"]*)", with (\d+) words$`, a.replyCarriesOne)
+	ctx.Then(`^the app's decrypted reply has a reading_result from "([^"]*)", with (\d+) words$`, a.replyCarriesOne)
+	ctx.Then(`^the app's decrypted reply has the error "([^"]*)" for the engine "([^"]*)"$`, a.replyCarriesError)
+	ctx.Then(`^the app's decrypted reply has no reading_results$`, a.replyHasNoReadings)
+	ctx.Then(`^the app's decrypted reply holds no audio$`, a.replyHoldsNoAudio)
+	ctx.Then(`^the app's decrypted reply has the grind's answer and no reading_result$`, a.replyHasNoReading)
 	ctx.Then(`^the session's directory held no audio$`, a.directoryHeldNoAudio)
 	ctx.Then(`^the session's prompt and system prompt hold no audio$`, a.promptsHoldNoAudio)
 	ctx.Then(`^no engine was given a recording$`, a.noEngineWasGiven)
@@ -579,6 +585,115 @@ func (a *audioContext) calledWithTurns(turns int) error {
 	}
 	if seen.Call.MaxTurns != turns {
 		return fmt.Errorf("expected the session called with %d turns, got %d", turns, seen.Call.MaxTurns)
+	}
+	return nil
+}
+
+// reply is the plaintext of the one answer the mill delivered, as raw fields.
+func (a *audioContext) reply() (map[string]json.RawMessage, string, error) {
+	raws := a.c.backend.Delivered()
+	if len(raws) != 1 {
+		return nil, "", fmt.Errorf("expected one answer delivered, got %d", len(raws))
+	}
+	var p application.PosternPayload
+	if err := json.Unmarshal(raws[0], &p); err != nil {
+		return nil, "", err
+	}
+	plain, err := base64.StdEncoding.DecodeString(p.Ct)
+	if err != nil {
+		return nil, "", err
+	}
+	parts := strings.SplitN(string(plain), "\x00", 3)
+	if len(parts) != 3 {
+		return nil, "", fmt.Errorf("the answer's ct is not the fake cipher's")
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(parts[2]), &fields); err != nil {
+		return nil, "", fmt.Errorf("the reply is not a JSON object: %w", err)
+	}
+	return fields, parts[2], nil
+}
+
+// replyReadings is the reply's reading_result, by engine.
+func (a *audioContext) replyReadings() (map[string]json.RawMessage, error) {
+	fields, _, err := a.reply()
+	if err != nil {
+		return nil, err
+	}
+	if len(fields["answer"]) == 0 {
+		return nil, fmt.Errorf("the reply has no answer: %v", fields)
+	}
+	raw, ok := fields["reading_result"]
+	if !ok {
+		return nil, fmt.Errorf("the reply carries no reading_result: %v", fields)
+	}
+	var byEngine map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &byEngine); err != nil {
+		return nil, fmt.Errorf("reading_result is not an object by engine: %s", raw)
+	}
+	return byEngine, nil
+}
+
+func (a *audioContext) replyCarriesOne(engine string, words int) error {
+	byEngine, err := a.replyReadings()
+	if err != nil {
+		return err
+	}
+	var result application.ReadingResult
+	if err := json.Unmarshal(byEngine[engine], &result); err != nil || result.Engine != engine || len(result.Words) != words {
+		return fmt.Errorf("expected %d words from %s in the reply, got %s", words, engine, byEngine[engine])
+	}
+	return nil
+}
+
+func (a *audioContext) replyCarriesError(why, engine string) error {
+	byEngine, err := a.replyReadings()
+	if err != nil {
+		return err
+	}
+	var failed struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(byEngine[engine], &failed); err != nil || !strings.Contains(failed.Error, why) {
+		return fmt.Errorf("expected the error %q for %s in the reply, got %s", why, engine, byEngine[engine])
+	}
+	return nil
+}
+
+func (a *audioContext) replyHasNoReadings() error {
+	fields, _, err := a.reply()
+	if err != nil {
+		return err
+	}
+	if _, ok := fields["reading_results"]; ok {
+		return fmt.Errorf("expected no reading_results for one recording, got %v", fields)
+	}
+	return nil
+}
+
+func (a *audioContext) replyHoldsNoAudio() error {
+	_, text, err := a.reply()
+	if err != nil {
+		return err
+	}
+	if strings.Contains(text, string(a.clip)) || strings.Contains(text, base64.StdEncoding.EncodeToString(a.clip)) {
+		return fmt.Errorf("the audio is in the reply:\n%s", text)
+	}
+	return nil
+}
+
+func (a *audioContext) replyHasNoReading() error {
+	fields, _, err := a.reply()
+	if err != nil {
+		return err
+	}
+	if len(fields["answer"]) == 0 {
+		return fmt.Errorf("the reply has no answer: %v", fields)
+	}
+	for _, key := range []string{"reading_result", "reading_results"} {
+		if _, ok := fields[key]; ok {
+			return fmt.Errorf("expected no %s in the reply, got %v", key, fields)
+		}
 	}
 	return nil
 }

@@ -125,6 +125,21 @@ the first's and `reading_results` is the list of all, in order. The recording is
 memory and kept in the run record; it is never written to the session's directory and
 never in its prompt.
 
+## The reply
+
+The mill's answer to a grist whose grind scored a recording carries the same scores
+beside `answer`, as the session was given them and never the audio: `reading_result`
+(the first recording's, by engine, an engine that failed as `{"error": "..."}`) and,
+with more than one recording, `reading_results` (all, in order). The app reads them to
+show each engine's word table. A grind that scored nothing replies without either.
+
+```json
+{"re": "<txid>", "status": "answered", "answer": {"...": "..."},
+ "reading_result": {"local": {"engine": "local", "words": [], "accuracy": 80, "seconds": 1.5},
+                    "azure": {"error": "the azure key was refused"}},
+ "grind": {"app": "cairn", "kind": "reading", "v": "1.1", "commit": "<sha>"}}
+```
+
 ## The run record
 
 Every grind that ran keeps its raw record under the state directory

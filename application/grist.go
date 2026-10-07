@@ -64,13 +64,18 @@ type GristAnswerGrind struct {
 // GristAnswer is the plaintext of the mill's answer to one grist, sealed to
 // the grist's sender (section 18, The answer), fields in the protocol's own
 // order. Reason is there unless the status is GristAnswered; Answer only
-// when it is.
+// when it is. ReadingResult is there when the grind scored a recording: the
+// scores by engine, exactly as the session was given them (the first
+// recording's, and ReadingResults, one for each in order, when the grist
+// carried more than one); never the audio.
 type GristAnswer struct {
-	Re     string           `json:"re"`
-	Status string           `json:"status"`
-	Reason string           `json:"reason,omitempty"`
-	Answer json.RawMessage  `json:"answer,omitempty"`
-	Grind  GristAnswerGrind `json:"grind"`
+	Re             string           `json:"re"`
+	Status         string           `json:"status"`
+	Reason         string           `json:"reason,omitempty"`
+	Answer         json.RawMessage  `json:"answer,omitempty"`
+	ReadingResult  json.RawMessage  `json:"reading_result,omitempty"`
+	ReadingResults json.RawMessage  `json:"reading_results,omitempty"`
+	Grind          GristAnswerGrind `json:"grind"`
 }
 
 // GrindFile is an app's grind for one kind of grist, `grinds/<kind>.json` in

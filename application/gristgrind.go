@@ -197,6 +197,8 @@ type gristWork struct {
 
 	status, reason string
 	answer         json.RawMessage
+	reading        json.RawMessage // reading_result and reading_results of the request, for the answer
+	readings       json.RawMessage
 	result         SessionResult
 	started        time.Time
 
@@ -906,6 +908,7 @@ func (g GristGrind) answer(ctx context.Context, w *gristWork, privKey, millKey s
 	name := w.plain.Grist
 	body := GristAnswer{
 		Re: w.record.Txid, Status: w.status, Reason: w.reason, Answer: w.answer,
+		ReadingResult: w.reading, ReadingResults: w.readings,
 		Grind: GristAnswerGrind{App: name.App, Kind: name.Kind, V: name.V, Commit: w.commit},
 	}
 	if w.status == GristAnswered {

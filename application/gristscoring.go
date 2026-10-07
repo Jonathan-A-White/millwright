@@ -57,7 +57,7 @@ func (w *gristWork) inputObject() (map[string]json.RawMessage, bool) {
 // scoreRecordings scores each recording of a scoring grind's grist with every
 // engine, and gives plain the results as reading_result in its request: the
 // first recording's, and reading_results, one for each in order, when the
-// grist carries more than one. An engine's failure is its entry's error text,
+// grist carries more than one. The mill's answer carries the same two. An engine's failure is its entry's error text,
 // never the grind's. The recordings themselves are never put in the request.
 func (g GristGrind) scoreRecordings(ctx context.Context, w *gristWork, plain *GristPlaintext) {
 	if !w.grind.Scoring.Audio || !w.carriesAudio() {
@@ -90,9 +90,11 @@ func (g GristGrind) scoreRecordings(ctx context.Context, w *gristWork, plain *Gr
 	w.scoredAt = &scored
 	w.scoringSeconds = scored.Sub(started).Seconds()
 
-	fields["reading_result"] = mustJSON(all[0])
+	w.reading = mustJSON(all[0])
+	fields["reading_result"] = w.reading
 	if len(all) > 1 {
-		fields["reading_results"] = mustJSON(all)
+		w.readings = mustJSON(all)
+		fields["reading_results"] = w.readings
 	}
 	plain.Input = mustJSON(fields)
 }

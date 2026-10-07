@@ -29,6 +29,27 @@ Feature: mw grist grind takes a recording, scores it, and keeps every grind's ra
     And the session's directory held no audio
     And the session's prompt and system prompt hold no audio
 
+  Scenario: The answer to a scored grist carries the scores beside the answer, never the audio
+    Given the phone sends a "cairn" "reading" grist, version "1.1", of "the cat sat" read aloud in a webm recording
+    When the mill grinds
+    Then the mill answered 1, refused 0, failed 0, and left 0 waiting
+    And the app's decrypted reply has the grind's answer and a reading_result from "local", with 3 words
+    And the app's decrypted reply has a reading_result from "azure", with 3 words
+    And the app's decrypted reply has no reading_results
+    And the app's decrypted reply holds no audio
+
+  Scenario: An engine that failed is its entry's error in the answer too
+    Given the engine "azure" breaks down with "the azure key was refused"
+    And the phone sends a "cairn" "reading" grist, version "1.1", of "the cat sat" read aloud in a webm recording
+    When the mill grinds
+    Then the app's decrypted reply has a reading_result from "local", with 3 words
+    And the app's decrypted reply has the error "the azure key was refused" for the engine "azure"
+
+  Scenario: A grist of photos is answered with no reading_result
+    Given the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
+    When the mill grinds
+    Then the app's decrypted reply has the grind's answer and no reading_result
+
   Scenario: An engine that fails is written down in its place and does not fail the grind
     Given the engine "azure" breaks down with "the azure key was refused"
     And the phone sends a "cairn" "reading" grist, version "1.1", of "the cat sat" read aloud in a webm recording

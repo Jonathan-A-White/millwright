@@ -1519,7 +1519,9 @@ score refuses it. The mill scores each recording with every `[scorers]` engine
 against the text in the request's `target_field`, before the harness session, and
 adds `reading_result` to the request as text: `{<engine>: <ReadingResult> | {"error":
 "..."}}`. An engine that fails never fails the grind, and the audio is never in the
-session's directory or its prompt. A grind file may set `maxTurns` (default: the
+session's directory or its prompt. The answer carries the same `reading_result` (and
+`reading_results` for several recordings) beside `answer`; a grind that scored nothing
+answers without them. A grind file may set `maxTurns` (default: the
 harness's own). Every grind that ran is kept under `grist_state_dir`'s
 `runs/<txid>/`: `input.json` (the request as the session was given it),
 `attachment-N.<ext>`, `scorers.json`, `answer.json` and `timing.json`, 0600, never
