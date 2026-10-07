@@ -291,3 +291,29 @@ Feature: mw postern view
     Given the view's story "mw-v.6" under "mw-v" has used all 3 attempts
     When the live view is built
     Then the view's need "alarm" on "mw-v.6" waits for "mayor"
+
+  # A story with no parent epic (the Mayor's friction and bug stories) is no
+  # less work for being filed alone: the Map counts it Working or Landed.
+  Scenario: A running story with no parent epic is in the view, in progress
+    Given the view's story "mw-s.1" has no parent epic and is running
+    When the live view is built
+    Then the view's bead "mw-s.1" has the status "in_progress" and no parent
+
+  Scenario: A story with no parent epic that landed an hour ago is in the view with its closed time
+    Given the view's story "mw-s.2" has no parent epic and landed an hour ago
+    When the live view is built
+    Then the view's bead "mw-s.2" has the status "closed" and was closed at "2026-09-28T11:00:00Z"
+
+  Scenario: A story with no parent epic that landed a month ago is not in the view
+    Given the view's story "mw-s.3" has no parent epic and landed a month ago
+    When the live view is built
+    Then the view has no bead "mw-s.3"
+
+  Scenario: Mail and molecule steps with no rig are not stories, and an epic's children publish as before
+    Given the view's mail bead "mw-mail.1" has no parent epic
+    And the view's molecule step "mw-mol-x.1" hangs from the molecule "mw-mol-x"
+    When the live view is built
+    Then the view has no bead "mw-mail.1"
+    And the view has no bead "mw-mol-x.1"
+    And the view's bead "mw-v.3" has the status "closed" and was closed at "2026-09-28T11:00:00Z"
+    And the view's needs are "hands:mw-v.1, question:mw-v.4, verify:mw-v.3"

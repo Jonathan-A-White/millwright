@@ -98,6 +98,72 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the view's epic "([^"]*)" has (\d+) done earlier$`, c.theViewsEpicHasDoneEarlier)
 	ctx.Then(`^the written view opens, from gzip, to a v (\d+) view holding "([^"]*)"$`, c.theWrittenViewOpens)
 	ctx.Then(`^the view read no comments of "([^"]*)" or "([^"]*)"$`, c.theViewReadNoCommentsOf)
+	ctx.Given(`^the view's story "([^"]*)" has no parent epic and is running$`, c.theViewsLoneStoryIsRunning)
+	ctx.Given(`^the view's story "([^"]*)" has no parent epic and landed an hour ago$`, c.theViewsLoneStoryLandedAnHourAgo)
+	ctx.Given(`^the view's story "([^"]*)" has no parent epic and landed a month ago$`, c.theViewsLoneStoryLandedAMonthAgo)
+	ctx.Given(`^the view's mail bead "([^"]*)" has no parent epic$`, c.theViewsMailBeadHasNoParent)
+	ctx.Given(`^the view's molecule step "([^"]*)" hangs from the molecule "([^"]*)"$`, c.theViewsMoleculeStepHangsFrom)
+	ctx.Then(`^the view's bead "([^"]*)" has the status "([^"]*)" and no parent$`, c.theViewsBeadHasStatusAndNoParent)
+	ctx.Then(`^the view's bead "([^"]*)" has the status "([^"]*)" and was closed at "([^"]*)"$`, c.theViewsBeadHasStatusClosedAt)
+}
+
+// loneStory files a story pathed to a rig and hung from no epic, as the
+// Mayor files a friction or bug story.
+func (c *posternViewContext) loneStory(id string) {
+	c.tracker.AddStory("", domain.Story{ID: id, Title: "Story " + id, Overrides: domain.Path{Rig: "millwright"}})
+}
+
+func (c *posternViewContext) theViewsLoneStoryIsRunning(id string) error {
+	c.loneStory(id)
+	return c.tracker.SetStatus(id, apptest.StatusInProgress)
+}
+
+func (c *posternViewContext) closeLoneStory(id string, at time.Time) error {
+	c.loneStory(id)
+	if err := c.tracker.SetStatus(id, apptest.StatusClosed); err != nil {
+		return err
+	}
+	return c.tracker.SetClosedAt(id, at)
+}
+
+func (c *posternViewContext) theViewsLoneStoryLandedAnHourAgo(id string) error {
+	return c.closeLoneStory(id, posternViewFeatureNow.Add(-time.Hour))
+}
+
+func (c *posternViewContext) theViewsLoneStoryLandedAMonthAgo(id string) error {
+	return c.closeLoneStory(id, posternViewFeatureNow.Add(-30*24*time.Hour))
+}
+
+func (c *posternViewContext) theViewsMailBeadHasNoParent(id string) error {
+	c.tracker.AddStory("", domain.Story{ID: id, Title: "Mail " + id})
+	return c.tracker.SetType(id, "mail")
+}
+
+func (c *posternViewContext) theViewsMoleculeStepHangsFrom(id, root string) error {
+	c.tracker.AddStory(root, domain.Story{ID: id, Title: "Step " + id})
+	return nil
+}
+
+func (c *posternViewContext) theViewsBeadHasStatusAndNoParent(id, status string) error {
+	b, ok := c.bead(id)
+	if !ok {
+		return fmt.Errorf("the view has no bead %s", id)
+	}
+	if b.Status != status || b.Parent != "" {
+		return fmt.Errorf("expected %s to be %s with no parent, got %s under %q", id, status, b.Status, b.Parent)
+	}
+	return nil
+}
+
+func (c *posternViewContext) theViewsBeadHasStatusClosedAt(id, status, closed string) error {
+	b, ok := c.bead(id)
+	if !ok {
+		return fmt.Errorf("the view has no bead %s", id)
+	}
+	if b.Status != status || b.Closed != closed {
+		return fmt.Errorf("expected %s to be %s, closed at %s, got %s, closed at %q", id, status, closed, b.Status, b.Closed)
+	}
+	return nil
 }
 
 func (c *posternViewContext) theViewsEpicIsLive(id string) error {
