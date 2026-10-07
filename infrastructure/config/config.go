@@ -37,6 +37,12 @@
 //	vps_host = "vps"    # optional: the VPS standby is kept level too, its swap always a tap;
 //	                    # with vps_stage, vps_live, vps_service and vps_health beside it
 //
+//	[scorers]
+//	engines        = ["local"]
+//	local_url      = "http://127.0.0.1:8765"
+//	azure_key_file = "/home/jwhite/.config/mw/azure.key"
+//	azure_region   = "westus2"
+//
 //	[watch]
 //	ssh     = "vps"
 //	host    = "vps"
@@ -174,6 +180,18 @@ const DoctorTable = "doctor"
 const (
 	GristTable     = "grist"
 	GristAppsTable = "grist-apps"
+)
+
+// ScorersTable is the table of the config file that says which scoring
+// engines this host runs and where they are (docs/scorers.md): `engines` (a
+// list, "local" by default), `local_url`, `azure_key_file` and
+// `azure_region`.
+const ScorersTable = "scorers"
+
+// The scorer settings when the [scorers] table says nothing.
+const (
+	DefaultScorerEngines  = "local"
+	DefaultScorerLocalURL = "http://127.0.0.1:8765"
 )
 
 // DefaultCap is how many sessions may run at once on a host that does not say.
@@ -2285,4 +2303,52 @@ func unquote(value string) string {
 		value = value[:comment]
 	}
 	return strings.TrimSpace(value)
+}
+
+// ScorerSettings are the `[scorers]` table of ~/.config/mw/config.toml.
+type ScorerSettings struct {
+	// Engines are the scoring engines this host runs, by name.
+	Engines []string
+	// LocalURL is where the local scorer (contrib/scorer) listens, without a
+	// trailing slash.
+	LocalURL string
+	// AzureKeyFile is a full path to a file holding the Azure Speech key;
+	// empty when none is configured. AzureRegion is the key's region.
+	AzureKeyFile string
+	AzureRegion  string
+}
+
+// Scorers reports the `[scorers]` table: `engines` (a list, or one string with
+// commas; DefaultScorerEngines when it says nothing), `local_url` (an http or
+// https address, DefaultScorerLocalURL when it says nothing), `azure_key_file`
+// (a full path) and `azure_region`. A machine with no such table runs the
+// local engine at its default address.
+func Scorers() (ScorerSettings, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ScorerSettings{}, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	table, err := tableIn(path, ScorersTable)
+	if err != nil {
+		return ScorerSettings{}, err
+	}
+	settings := ScorerSettings{Engines: list(DefaultScorerEngines), LocalURL: DefaultScorerLocalURL}
+	if engines := list(table["engines"]); len(engines) > 0 {
+		settings.Engines = engines
+	}
+	if said := strings.TrimSpace(table["local_url"]); said != "" {
+		if !strings.HasPrefix(said, "http://") && !strings.HasPrefix(said, "https://") {
+			return ScorerSettings{}, fmt.Errorf("the [%s] table of %s says local_url = %q: it must be an http:// or https:// address", ScorersTable, path, said)
+		}
+		settings.LocalURL = strings.TrimRight(said, "/")
+	}
+	if said := strings.TrimSpace(table["azure_key_file"]); said != "" {
+		if !filepath.IsAbs(said) {
+			return ScorerSettings{}, fmt.Errorf("the [%s] table of %s says azure_key_file = %q: it must be a full path", ScorersTable, path, said)
+		}
+		settings.AzureKeyFile = said
+	}
+	settings.AzureRegion = strings.TrimSpace(table["azure_region"])
+	return settings, nil
 }

@@ -105,6 +105,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeGristEvalScenario(ctx)
 	steps.InitializeGristScenario(ctx)
 	steps.InitializeGristSendScenario(ctx)
+	steps.InitializeScorerScenario(ctx)
 	steps.InitializeHandsScenario(ctx)
 	steps.InitializePromptScenario(ctx)
 	steps.InitializeProveScenario(ctx)

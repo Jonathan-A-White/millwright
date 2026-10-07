@@ -1916,3 +1916,40 @@ vps_health = "http://vps.mw:8787/healthz"
 		}
 	}
 }
+
+func TestScorersDefaultToTheLocalEngineAtItsPort(t *testing.T) {
+	writeConfig(t, "")
+	s, err := config.Scorers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(s.Engines, ",") != "local" || s.LocalURL != "http://127.0.0.1:8765" || s.AzureKeyFile != "" || s.AzureRegion != "" {
+		t.Fatalf("unexpected defaults %+v", s)
+	}
+}
+
+func TestScorersAreReadFromTheirTable(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\n\n[scorers]\nengines = [\"local\", \"azure\"]\nlocal_url = \"http://10.0.0.5:9000/\"\nazure_key_file = \"/keys/azure.key\"\nazure_region = \"westus2\"\n")
+	s, err := config.Scorers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(s.Engines, ",") != "local,azure" || s.LocalURL != "http://10.0.0.5:9000" ||
+		s.AzureKeyFile != "/keys/azure.key" || s.AzureRegion != "westus2" {
+		t.Fatalf("unexpected settings %+v", s)
+	}
+}
+
+func TestScorersAzureKeyFileMustBeAFullPath(t *testing.T) {
+	writeConfig(t, "[scorers]\nazure_key_file = \"azure.key\"\n")
+	if _, err := config.Scorers(); err == nil || !strings.Contains(err.Error(), "full path") {
+		t.Fatalf("expected a refusal naming a full path, got %v", err)
+	}
+}
+
+func TestScorersLocalURLMustBeAnHTTPAddress(t *testing.T) {
+	writeConfig(t, "[scorers]\nlocal_url = \"127.0.0.1:8765\"\n")
+	if _, err := config.Scorers(); err == nil || !strings.Contains(err.Error(), "local_url") {
+		t.Fatalf("expected a refusal naming local_url, got %v", err)
+	}
+}
