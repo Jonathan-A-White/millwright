@@ -143,14 +143,15 @@ acting=none
 acting_text=""
 [ -n "$vault" ] && acting_text=$(cat "$vault/.mayor-acting" 2>/dev/null)
 if [ -n "$acting_text" ]; then
-	tab=$(printf '\t')
-	windows=$(tmx list-windows -a -F "#{window_id}${tab}#{window_index}${tab}#{window_name}" 2>/dev/null)
+	# A printable |, not a tab: a client that is not UTF-8 (a systemd unit's bare
+	# environment) prints a tab as _ (the doctor's 42d9bc7 hit the same).
+	windows=$(tmx list-windows -a -F '#{window_id}|#{window_index}|#{window_name}' 2>/dev/null)
 	target=""
 	for id in $(echo "$acting_text" | grep -o '@[0-9][0-9]*'); do
-		if echo "$windows" | cut -f 1 | grep -qx "$id"; then target=$id; break; fi
+		if echo "$windows" | cut -d "|" -f 1 | grep -qx "$id"; then target=$id; break; fi
 	done
 	if [ -z "$target" ]; then
-		found=$(echo "$windows" | while IFS="$tab" read -r id _ name; do
+		found=$(echo "$windows" | while IFS="|" read -r id _ name; do
 			case $name in mayor*) case $acting_text in *"$name"*) echo "$id" ;; esac ;; esac
 		done)
 		[ "$(echo "$found" | grep -c .)" -eq 1 ] && target=$found
@@ -158,7 +159,7 @@ if [ -n "$acting_text" ]; then
 	if [ -z "$target" ]; then
 		index=$(echo "$acting_text" | sed -n 's/.*[Ww]indow[: #]*\([0-9][0-9]*\).*/\1/p' | head -n 1)
 		if [ -n "$index" ]; then
-			found=$(echo "$windows" | awk -F "$tab" -v i="$index" '$2 == i { print $1 }')
+			found=$(echo "$windows" | awk -F "|" -v i="$index" '$2 == i { print $1 }')
 			[ "$(echo "$found" | grep -c .)" -eq 1 ] && target=$found
 		fi
 	fi

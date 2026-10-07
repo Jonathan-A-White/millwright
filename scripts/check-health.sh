@@ -56,7 +56,11 @@ standin tmux <<'EOF'
 #!/bin/sh
 echo "tmux $*" >>"$FAKE_CALLS"
 case $1 in
-list-windows) printf '%b' "$FAKE_WINDOWS" ;;
+list-windows)
+	# A tab in the format is what a non-UTF-8 client prints as _: refuse it.
+	case $* in *"$(printf '\t')"*) exit 99 ;; esac
+	case $* in *"#{window_id}|#{window_index}|#{window_name}"*) ;; *) exit 99 ;; esac
+	printf '%b' "$FAKE_WINDOWS" ;;
 list-panes) echo "$FAKE_PANE" ;;
 *) exit 99 ;;
 esac
@@ -108,7 +112,7 @@ well() {
 	meminfo 1024000 2097152 2086912
 	FAKE_DISK=42
 	FAKE_DOWN=""
-	FAKE_WINDOWS='@3\t2\tmayor-2026-09-19-10\n@4\t1\tother\n'
+	FAKE_WINDOWS='@3|2|mayor-2026-09-19-10\n@4|1|other\n'
 	FAKE_PANE="0 claude"
 	FAKE_CONTEXT="context=1000 handoff_at=180000 ok session=abc12345"
 	FAKE_PS='/sbin/init\nmw dispatch\nvim mw sync.txt\n'
@@ -170,7 +174,7 @@ ALIVE="mayor=alive acting=match"
   run "a service down" "load1=0.50 mem_avail_mb=1000 swap_used_mb=10 disk_pct=42 services=blog:up,api:down $ALIVE $WELL_SUFFIX verdict=unwell:service_down:api" )
 ( well; FAKE_PANE="0 bash"
   run "mayor gone: only a shell left in the window" "$WELL_PREFIX mayor=gone acting=match $WELL_SUFFIX verdict=unwell:mayor_gone" )
-( well; FAKE_WINDOWS='@4\t1\tother\n'
+( well; FAKE_WINDOWS='@4|1|other\n'
   run "acting mismatch: the window is not there" "$WELL_PREFIX mayor=gone acting=mismatch $WELL_SUFFIX verdict=unwell:mayor_gone,acting_mismatch" )
 ( well; FAKE_CONTEXT="context=180001 handoff_at=180000 HAND OFF NOW"
   run "context over its limit" "$WELL_PREFIX $ALIVE context=180001/180000 last_sync_age_s=300 syncs_running=0 verdict=unwell:context_over_limit" )
