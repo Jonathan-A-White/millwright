@@ -41,7 +41,7 @@ engine that returns anything else fails where it is read, not where it is used.
 | `engine` | the engine's name; `mw` fills it with `local` when the local scorer leaves it out |
 | `words` | one entry for each word of the target, in reading order, and one for each word the reader added; at least one |
 | `words[].text` | the word, as the target spells it (the word as heard, for an insertion); never empty |
-| `words[].expected_phonemes` | the phonemes the target asks for, ARPAbet-style, `[]` for an insertion |
+| `words[].expected_phonemes` | the phonemes the target asks for, ARPAbet-style (IPA from `azure`), `[]` for an insertion |
 | `words[].produced_phonemes` | the phonemes the engine heard, `[]` for an omission |
 | `words[].error` | exactly one of `none`, `omission` (left out), `insertion` (added), `mispronunciation`, `hesitation` |
 | `words[].accuracy` | whole number 0 to 100 |
@@ -62,7 +62,11 @@ An engine is a name in config and a file in `infrastructure/scorer/`.
   `contrib/scorer/install.sh` installs it (after the hand step
   `sudo apt install espeak-ng`), and `contrib/scorer/README.md` says how it
   scores, its limits and the way back.
-- **`azure`** is declared in config and used by a later story.
+- **`azure`** (`infrastructure/scorer/azure.go`) is Azure Speech's pronunciation
+  assessment, the reference the local model is measured against. **The clip leaves
+  this host**: it is sent to Microsoft, so add `azure` to `engines` only on a host
+  where that is wanted. [The azure engine](#the-azure-engine) says what it needs and
+  how it maps the answer.
 
 ### Audio
 
@@ -89,6 +93,80 @@ command stops with a line saying so.
 scorer answers `200` with a `ReadingResult` as above. Any other status is an
 error, and its body is shown. A connection refused names `local_url` and this
 page; a request that takes longer than two minutes is timed out.
+
+### The azure engine
+
+Config, in the `[scorers]` table: `azure_key_file` (a full path to a file holding the
+Speech resource's key, mode 0600; a file others can read is refused, like
+`grist_key_file`) and `azure_region` (the key's region, e.g. `westus2`). The key is read at
+each score and never printed. With no key file, or no region, the engine refuses
+naming the setting (`azure_key_file`, `azure_region`), and in a grist that is the
+engine's `{"error": "..."}` while the other engines score as usual. `MW_AZURE_ENDPOINT`
+replaces the address, for a test that stubs Azure; it is not a setting.
+
+`mw` converts the recording with `ToWav16k`, then sends one request to the speech-to-text
+REST API for short audio (checked against Microsoft Learn, 2026-10-07):
+
+```
+POST https://<azure_region>.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1?language=en-US&format=detailed
+Ocp-Apim-Subscription-Key: <the key>
+Content-Type: audio/wav; codecs=audio/pcm; samplerate=16000
+Accept: application/json
+Pronunciation-Assessment: <base64 of the JSON below>
+```
+
+```json
+{"ReferenceText": "the cat sat", "GradingSystem": "HundredMark", "Granularity": "Phoneme",
+ "Dimension": "Comprehensive", "EnableMiscue": true, "PhonemeAlphabet": "IPA", "NBestPhonemeCount": 5}
+```
+
+The body is the WAV file. `language` is `en-US` for `en` (`es` is `es-ES`; any other code
+is sent as given). Azure takes at most 60 seconds of audio and says a pronunciation
+assessment should be no more than 30, so `mw` refuses a longer clip with a plain line.
+Microsoft's docs give the resource-name form
+(`<resource>.cognitiveservices.azure.com/stt/speech/...`) as the current address; the
+regional host above is the one `azure_region` names and is what `mw` calls.
+
+**Free tier.** The F0 tier gives 5 audio hours of speech to text a month, shared with
+custom speech. Microsoft's price page does not name a separate allowance for
+pronunciation assessment, which is billed as an add-on beyond it: treat the 5 hours as
+what is free and watch the Azure portal for the rest. A `429` means the rate limit or the
+quota is used up, and is reported as that.
+
+**What comes back.** `NBest[0].Words[]` is read as `Word` and
+`PronunciationAssessment{AccuracyScore, ErrorType}` (the flat `AccuracyScore` and
+`ErrorType` of the short-audio docs' older example work as well):
+
+| Azure | `words[].error` |
+| --- | --- |
+| `None` | `none` |
+| `Omission` | `omission` |
+| `Insertion` | `insertion` |
+| `Mispronunciation` (Azure's word accuracy below 60) | `mispronunciation` |
+| `UnexpectedBreak` | `hesitation` |
+| `MissingBreak`, `Monotone` | `none`: prosody notes, not misreadings; there is no field to carry the note |
+
+Any other `ErrorType` is refused, naming it. Azure reports a break or a monotone only when
+prosody assessment is asked for, which `mw` does not, so the last two rows are for answers
+that carry them. `accuracy` is the word's `AccuracyScore` rounded to a whole number, and the
+reading's is `NBest[0]`'s; `seconds` is the answer's `Duration` (100-nanosecond units); `self_corrected` is
+always `false`, since Azure does not say.
+
+**Phonemes are IPA, as Azure spells them** (`PhonemeAlphabet: IPA`), not the ARPAbet of the
+local engine, so the two engines' phoneme lists are not comparable symbol by symbol yet.
+In Azure's answer `Phonemes[].Phoneme` is the *expected* phoneme, and the likeliest phoneme
+actually spoken is the best-scoring entry of its `NBestPhonemes` (asked for with
+`NBestPhonemeCount`). So `expected_phonemes` is every `Phoneme` of the word, and
+`produced_phonemes` is each phoneme's best `NBestPhonemes` entry; when an answer carries no
+`NBestPhonemes`, it is the phonemes whose own `AccuracyScore` is 60 or more. An omission
+produces `[]`, and for an insertion the `Phonemes` listed are what was said, so they are
+`produced_phonemes` and `expected_phonemes` is `[]`. A `RecognitionStatus` other than
+`Success` (`NoMatch`, `InitialSilenceTimeout`, ...) is an error naming it.
+
+**Errors.** `401` and `403` say the key was refused and to check `azure_key_file` and that
+`azure_region` is the key's region; `429` says the limit or quota is used up; anything else
+shows the status and Azure's own words. A request that takes longer than two minutes is
+timed out.
 
 ## In a grist
 

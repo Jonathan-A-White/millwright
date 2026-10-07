@@ -1509,7 +1509,9 @@ was read right, left out, added, mispronounced or hesitated over, and its
 accuracy. Engines are the `[scorers]` table's `engines` (default `["local"]`),
 with `local_url` (default `http://127.0.0.1:8765`), `azure_key_file` and
 `azure_region` beside it; the local engine needs `ffmpeg` and the scorer of
-`contrib/scorer` (install and way back in its `README.md`). The contract, with
+`contrib/scorer` (install and way back in its `README.md`), and the `azure` engine
+(Azure Speech pronunciation assessment, a third party hears the clip) needs `ffmpeg`,
+a 0600 `azure_key_file` and `azure_region`. The contract, with
 the request and response JSON, is `docs/scorers.md`; see `features/scorer.feature`.
 
 A grist may carry a recording (`audio/webm`, `audio/ogg`, `audio/mp4`, `audio/mpeg`,
