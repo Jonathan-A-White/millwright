@@ -124,3 +124,15 @@ Feature: mw hands
     And the step "linger" on "mw-h.1" is superseded by "mw-h.9"
     When the Mayor lists the hands steps of "mw-h.1"
     Then the list shows "linger" with its sha256 and "superseded by mw-h.9"
+
+  Scenario: A step added to a held bead is kept, with a warning that the Governor sees no Run until it is open
+    Given a held bead "mw-h.4" for the Governor's hands
+    When the Mayor adds the step "speak" to "mw-h.4" on "desktop" as "user" running "espeak-ng hello"
+    Then adding the step succeeds
+    And bead "mw-h.4" keeps the step "speak" running "espeak-ng hello"
+    And stderr warns "mw-h.4" has no Run until it is open
+
+  Scenario: A step added to an open bead carries no such warning
+    When the Mayor adds the step "linger" to "mw-h.1" on "desktop" as "root" running "loginctl enable-linger jwhite"
+    Then adding the step succeeds
+    And stderr carries no warning about a Run

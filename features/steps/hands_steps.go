@@ -39,6 +39,9 @@ func InitializeHandsScenario(ctx *godog.ScenarioContext) {
 	})
 
 	ctx.Given(`^a bead "([^"]*)" for the Governor's hands$`, c.aBeadForTheGovernorsHands)
+	ctx.Given(`^a held bead "([^"]*)" for the Governor's hands$`, c.aHeldBeadForTheGovernorsHands)
+	ctx.Then(`^stderr warns "([^"]*)" has no Run until it is open$`, c.stderrWarnsNoRunUntilOpen)
+	ctx.Then(`^stderr carries no warning about a Run$`, c.stderrCarriesNoRunWarning)
 	ctx.Given(`^the Mayor added the step "([^"]*)" to "([^"]*)" on "([^"]*)" as "([^"]*)" running "([^"]*)"$`, c.theMayorAddedTheStep)
 	ctx.Given(`^the step "([^"]*)" on "([^"]*)" ran on "([^"]*)" with exit (\d+)$`, c.theStepRan)
 	ctx.Given(`^the step "([^"]*)" on "([^"]*)" is superseded by "([^"]*)"$`, c.theStepIsSupersededBy)
@@ -80,6 +83,29 @@ func InitializeHandsScenario(ctx *godog.ScenarioContext) {
 func (c *handsContext) aBeadForTheGovernorsHands(bead string) error {
 	c.tracker.AddEpic("mw-h", domain.Path{})
 	c.tracker.AddStory("mw-h", domain.Story{ID: bead, Title: "For his hands"})
+	return nil
+}
+
+func (c *handsContext) aHeldBeadForTheGovernorsHands(bead string) error {
+	if err := c.aBeadForTheGovernorsHands(bead); err != nil {
+		return err
+	}
+	return c.tracker.HoldStory(context.Background(), bead)
+}
+
+func (c *handsContext) stderrWarnsNoRunUntilOpen(bead string) error {
+	for _, line := range strings.Split(c.errOut.String(), "\n") {
+		if strings.Contains(line, bead) && strings.Contains(line, "no Run until it is open") {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected stderr to warn %s has no Run until it is open, got %q", bead, c.errOut.String())
+}
+
+func (c *handsContext) stderrCarriesNoRunWarning() error {
+	if strings.Contains(c.errOut.String(), "no Run") {
+		return fmt.Errorf("expected no warning about a Run, got %q", c.errOut.String())
+	}
 	return nil
 }
 

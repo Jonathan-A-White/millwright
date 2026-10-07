@@ -251,6 +251,9 @@ func (h HandsAdd) Run(ctx context.Context, req HandsAddRequest) (HandsStepRecord
 	if h.Out != nil {
 		fmt.Fprintf(h.Out, "added step %s to %s, on %s as %s: sha256 %s\n", req.Step.ID, req.Bead, req.Step.Host, req.Step.As, domain.HandsSHA256(req.Bead, req.Step))
 	}
+	if found[0].Held() {
+		h.report("warning: %s is held: the Governor sees no Run until it is open (the step is kept)", req.Bead)
+	}
 	h.publish(ctx)
 	if !replaced || approved {
 		h.push(ctx, req.Bead, found[0].Story.Title, waits, replaced)
