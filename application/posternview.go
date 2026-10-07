@@ -167,11 +167,22 @@ type PosternViewBead struct {
 // TrackerSnapshot is a tracker that can read every bead at once and answer the
 // view's reads from that one read: bd costs a process a call, so the view takes
 // a snapshot, when the tracker offers one, instead of a call per epic. The
-// snapshot answers LiveEpics, ShowEpics and ShowBeads as the tracker's own
-// reads do; it is good for one build, and what it does not hold it asks the
-// tracker for.
+// snapshot answers LiveEpics, ShowEpics, ShowBeads and LoneStories as the
+// tracker's own reads do; it is good for one build, and what it does not hold
+// it asks the tracker for.
 type TrackerSnapshot interface {
 	Snapshot(ctx context.Context) (WorkTracker, error)
+}
+
+// LoneStories is a tracker that can list the stories filed under no epic: the
+// Mayor's friction and bug stories, which LiveEpics and the epics' children
+// never reach. A lone story is a bead with no parent, not an epic, whose own
+// metadata names a rig (so no mail, no molecule and no step); every status,
+// closed ones included, and the view keeps the closed ones within
+// PosternViewRecentWindow. A tracker that is not one leaves them out of the
+// view.
+type LoneStories interface {
+	LoneStories(ctx context.Context) ([]StoryDetail, error)
 }
 
 // SnapshotNotes is a snapshot that read every note along with the beads, in the
@@ -188,7 +199,7 @@ type SnapshotNotes interface {
 // serves it (GET /api/view). It replaces PosternSnapshot's ten-minute brief
 // with one cheap enough to run every half minute on the factory's own host:
 //
-//   - LiveEpics, once;
+//   - LiveEpics, once; and LoneStories, once, for the stories under no epic;
 //   - ShowEpics, once for every live epic — one call for their own fields and
 //     one per epic for its children, the one call per epic a tracker with no
 //     TrackerSnapshot needs; one that has takes a snapshot first, one read of
@@ -407,6 +418,9 @@ func (v PosternView) Build(ctx context.Context) (PosternViewDoc, error) {
 	if err := v.readTrees(ctx, b, live); err != nil {
 		return PosternViewDoc{}, err
 	}
+	if err := v.readLoneStories(ctx, b); err != nil {
+		return PosternViewDoc{}, err
+	}
 	if err := v.readOutside(ctx, b); err != nil {
 		return PosternViewDoc{}, err
 	}
@@ -490,6 +504,27 @@ func (v PosternView) readTrees(ctx context.Context, b *viewBuild, epics []EpicDe
 			return fmt.Errorf("reading the child epics %s: %w", strings.Join(next, ", "), err)
 		}
 		epics = read
+	}
+	return nil
+}
+
+// readLoneStories adds the stories filed under no epic that are not finished
+// or closed within the recent window, as an epic's child is added, with
+// nothing for a parent. They are not underLive: no epic's landing memory or
+// verify need covers them.
+func (v PosternView) readLoneStories(ctx context.Context, b *viewBuild) error {
+	lone, ok := v.Tracker.(LoneStories)
+	if !ok {
+		return nil
+	}
+	stories, err := lone.LoneStories(ctx)
+	if err != nil {
+		return fmt.Errorf("reading the stories under no epic: %w", err)
+	}
+	for _, story := range stories {
+		if b.recent(story) {
+			b.add(&viewEntry{detail: story, path: viewPathOf(story.Merged())})
+		}
 	}
 	return nil
 }

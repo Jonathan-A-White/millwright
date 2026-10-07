@@ -864,6 +864,34 @@ func (f *FakeTracker) LiveEpics(_ context.Context) ([]string, error) {
 	return live, nil
 }
 
+// LoneStories implements application.LoneStories: the stories added under no
+// epic that are not epics and carry a rig in their own Path, in the order
+// added. Mail and every step of a molecule carry none, or hang from a root.
+func (f *FakeTracker) LoneStories(_ context.Context) ([]application.StoryDetail, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	var lone []application.StoryDetail
+	for _, id := range f.order {
+		s := f.stories[id]
+		if s.detail.EpicID != "" || s.detail.IsEpic || s.detail.Story.Overrides.Rig == "" {
+			continue
+		}
+		detail := s.detail
+		detail.Needs = nil
+		for _, need := range s.needs {
+			if blocker, filed := f.stories[need]; !filed || blocker.detail.Status != StatusClosed {
+				detail.Needs = append(detail.Needs, need)
+			}
+		}
+		detail.CommentCount = len(s.comments)
+		lone = append(lone, detail)
+	}
+	return lone, nil
+}
+
 // AddFormula installs a formula in the fake, with the steps pouring it makes.
 func (f *FakeTracker) AddFormula(name string, steps ...application.FormulaStep) {
 	f.mu.Lock()

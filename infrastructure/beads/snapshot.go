@@ -192,6 +192,24 @@ func (s *snapshot) LiveEpics(context.Context) ([]string, error) {
 	return ids, nil
 }
 
+// LoneStories implements application.LoneStories from the listing: every bead
+// with no parent that is not an epic and whose own metadata names a rig, which
+// leaves out mail and molecules (none carries one) and every step (each has a
+// parent), in the order filed.
+func (s *snapshot) LoneStories(context.Context) ([]application.StoryDetail, error) {
+	var lone []bead
+	for _, b := range s.beads {
+		if b.Parent == "" && b.Type != TypeEpic && b.pathMetadata()["rig"] != "" {
+			lone = append(lone, b)
+		}
+	}
+	out := make([]application.StoryDetail, 0, len(lone))
+	for _, b := range inFiledOrder(lone) {
+		out = append(out, s.shown(b, domain.Path{}))
+	}
+	return out, nil
+}
+
 // ShowEpics is Gateway.ShowEpics read from the listing; an epic the listing
 // does not hold sends the whole read to the gateway, to report it as it does.
 func (s *snapshot) ShowEpics(ctx context.Context, ids []string) ([]application.EpicDetail, error) {

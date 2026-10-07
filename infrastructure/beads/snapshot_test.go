@@ -111,3 +111,41 @@ func TestSnapshotGoesWithoutNotesWhenTheSqlCallFails(t *testing.T) {
 		t.Errorf("expected the snapshot to hold no notes, got %v", got)
 	}
 }
+
+// mw-d6y59n: the view holds the stories filed under no epic — a running one and
+// one landed today — and none of the mail, molecules, steps or epics that have
+// no parent either.
+func TestSnapshotViewHoldsTheStoriesUnderNoEpic(t *testing.T) {
+	now := time.Date(2026, 10, 7, 18, 40, 0, 0, time.UTC)
+	listing := `[
+	 {"id":"t-run","title":"Running","status":"in_progress","issue_type":"bug","priority":1,"metadata":{"rig":"millwright"},"started_at":"2026-10-07T18:00:00Z"},
+	 {"id":"t-done","title":"Landed","status":"closed","issue_type":"task","priority":2,"metadata":{"rig":"millwright"},"closed_at":"2026-10-07T18:26:00Z"},
+	 {"id":"t-old","title":"Landed long ago","status":"closed","issue_type":"task","metadata":{"rig":"millwright"},"closed_at":"2026-08-01T00:00:00Z"},
+	 {"id":"t-mail","title":"Mail","status":"open","issue_type":"mail"},
+	 {"id":"t-mol","title":"Molecule","status":"open","issue_type":"molecule"},
+	 {"id":"t-mol.1","title":"Step","status":"open","issue_type":"task","parent":"t-mol","metadata":{"rig":"millwright"}}
+	]`
+	gateway, _ := standInSnapshot(t, listing, `[]`)
+	view := application.PosternView{
+		Tracker: gateway, Notes: gateway, Host: "laptop", Now: func() time.Time { return now },
+	}
+	doc, err := view.Build(context.Background())
+	if err != nil {
+		t.Fatalf("building the view: %v", err)
+	}
+	got := map[string]application.PosternViewBead{}
+	for _, b := range doc.Beads {
+		got[b.ID] = b
+	}
+	if b, ok := got["t-run"]; !ok || b.Status != "in_progress" || b.Parent != "" {
+		t.Errorf("expected the running story in progress under no epic, got %+v", b)
+	}
+	if b, ok := got["t-done"]; !ok || b.Status != "closed" || b.Closed != "2026-10-07T18:26:00Z" {
+		t.Errorf("expected the landed story with its closed time, got %+v", b)
+	}
+	for _, id := range []string{"t-old", "t-mail", "t-mol", "t-mol.1"} {
+		if _, ok := got[id]; ok {
+			t.Errorf("expected no bead %s in the view, got %+v", id, got[id])
+		}
+	}
+}
