@@ -117,6 +117,7 @@
 #                        (${XDG_STATE_HOME:-~/.local/state}/mw-mail-notify);
 #                        a mailbox but the mayor's keeps its own in <dir>/<mailbox>
 #   MW_MAIL_LOADAVG_FILE where the load average is read (/proc/loadavg; else uptime)
+#   MW_MAIL_SETTLE       seconds to wait after Enter before reading the input line back (2)
 #   MW_MAIL_VIEW_EVERY   least seconds between two `mw postern view`s; set
 #                        only on the host that serves the live view (30
 #                        there, as hosts/desktop-move.md installs it);
@@ -180,6 +181,10 @@ fi
 # up to this cap.
 NUDGE_DAMPER_SECONDS=3600
 NUDGE_DAMPER_MAX_SECONDS=28800
+
+# SETTLE: how long after Enter the input line is read back, to see that the
+# line went (type_line). MW_MAIL_SETTLE sets it, in seconds.
+SETTLE=${MW_MAIL_SETTLE:-2}
 
 say() { echo "mail-notify: $*"; }
 die() { echo "mail-notify: $*" >&2; exit 1; }
@@ -591,12 +596,38 @@ pane_idle() {
 	[ "$(echo "$pane" | input_line_state)" = empty ] || return 1
 	return 0
 }
+line_on_input() {
+	# line_on_input LINE: whether the last prompt line of $target's screen
+	# holds the start of LINE, which Enter was meant to submit. A screen that
+	# cannot be read, or has no prompt, does not: nothing is pressed over a pane
+	# that cannot be seen.
+	prompt=$(tmx capture-pane -p -t "$target" 2>/dev/null | grep -F "$(printf '\342\235\257')" | tail -n 1)
+	[ -n "$prompt" ] || return 1
+	case $prompt in
+	*"$(printf '%.40s' "$1")"*) return 0 ;;
+	esac
+	return 1
+}
 type_line() {
 	# type_line LINE: types LINE and Enter into $target. A pause before Enter,
-	# so that a TUI reads the text first.
+	# so that a TUI reads the text first. Once SETTLE seconds have passed the
+	# input line is read: a LINE still on it was not submitted (a session hung
+	# mid-turn drops the Enter), so Enter is pressed once more and the line read
+	# again. This is mw's application.TypeConfirmed in shell. Returns 1 when the
+	# line cannot be typed, or is on the input line still.
 	tmx send-keys -t "$target" -l "$1" || return 1
 	sleep 0.5
-	tmx send-keys -t "$target" Enter
+	tmx send-keys -t "$target" Enter || return 1
+	sleep "$SETTLE"
+	line_on_input "$1" || return 0
+	tmx send-keys -t "$target" Enter || return 1
+	sleep "$SETTLE"
+	if line_on_input "$1"; then
+		say "pressed Enter again in $target and the line is on its input line still: $1"
+		return 1
+	fi
+	say "the line was not submitted by Enter in $target; pressed Enter again and it went: $1"
+	return 0
 }
 
 pane_idle

@@ -43,6 +43,28 @@ var panes = map[string]string{
 	// Code's dim suggested next prompt after the mark, and text a person typed.
 	"ghost": `cat "$MW_FIXTURES/ghost-suggestion.txt"`,
 	"draft": `cat "$MW_FIXTURES/real-draft.txt"`,
+
+	// Panes that draw what is typed after the prompt mark, as Claude Code does,
+	// and take the line only at the Nth Enter, writing it to $MW_TEST_DIR/taken.
+	"enter-lost-once": lossyPane(2),
+	"enter-never":     lossyPane(1 << 20),
+}
+
+// lossyPane is a pane script for a session that ignores every Enter before the
+// nth: the typed text stays on the input line, after the prompt mark.
+func lossyPane(n int) string {
+	return fmt.Sprintf(`printf '\342\235\257\302\240'; stty raw -echo; buf=; n=0
+while c=$(dd bs=1 count=1 2>/dev/null); do
+	if [ "$c" = "$(printf '\r')" ]; then
+		n=$((n+1))
+		if [ $n -ge %d ]; then
+			printf '%%s\n' "$buf" > "$MW_TEST_DIR/taken"; buf=
+			printf '\r\342\235\257\302\240\033[K'
+		fi
+	else
+		buf="$buf$c"; printf '%%s' "$c"
+	fi
+done`, n)
 }
 
 // factory is one throwaway world for the script to run in.
@@ -274,6 +296,7 @@ func (f *factory) tick() string {
 		"MW_TMUX_SOCKET=" + f.socket,
 		"MW_MAIL_STATE_DIR=" + f.path("state"),
 		"MW_MAIL_LOADAVG_FILE=" + f.path("loadavg"),
+		"MW_MAIL_SETTLE=0.1",
 	}
 	cmd.Env = append(cmd.Env, f.env...)
 	out, err := cmd.CombinedOutput()
@@ -1505,5 +1528,41 @@ func TestPosternViewStepRunsAgainWhenTheFollowServiceStops(t *testing.T) {
 
 	if n := f.viewRuns(); n != 1 {
 		t.Fatalf("mw postern view ran %d times after the service stopped, want 1", n)
+	}
+}
+
+func TestAnEnterTheSessionDroppedIsPressedAgainAndTheTickSaysSo(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("enter-lost-once", actingByID)
+	f.inbox("mw-aaa")
+
+	out := f.tick()
+
+	if !strings.Contains(out, "pressed Enter again and it went") {
+		t.Fatalf("the tick said %q, want that Enter was pressed again and it went", out)
+	}
+	if got := f.read("taken"); got != fmt.Sprintf(announcement, 1) {
+		t.Fatalf("the window took %q, want the announcement", got)
+	}
+	if got := f.announced(); got != "mw-aaa\n" {
+		t.Fatalf("recorded ids %q", got)
+	}
+}
+
+func TestALineThatNeverGoesIsPressedOnceMoreSaidStuckAndNotAnnounced(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("enter-never", actingByID)
+	f.inbox("mw-aaa")
+
+	out := f.tick()
+
+	if !strings.Contains(out, "on its input line still") {
+		t.Fatalf("the tick said %q, want that the line is on its input line still", out)
+	}
+	if got := f.read("taken"); got != "" {
+		t.Fatalf("the window took %q, want nothing", got)
+	}
+	if got := f.announced(); got != "" {
+		t.Fatalf("recorded %q for mail that never went", got)
 	}
 }
