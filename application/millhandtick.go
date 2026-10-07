@@ -571,11 +571,16 @@ func (t MillhandTick) nudge(ctx context.Context, name, window string, unread int
 	if t.DryRun {
 		return fmt.Sprintf("dry run: would nudge the Millhand's window %s: %s", name, oneLine(text)), true, nil
 	}
-	if typeErr := t.Millhand.Terminal.Type(ctx, window, text); typeErr != nil {
+	outcome, typeErr := TypeConfirmed(ctx, t.Millhand.Terminal, ReapWindow{ID: window, Name: name}, text, t.Millhand.Settle)
+	if typeErr != nil {
 		note := "could not nudge the Millhand: " + oneLine(typeErr.Error())
 		return joinNotes(alreadyUp(name), []string{note}), true, fmt.Errorf("typing into the window %s: %w", name, typeErr)
 	}
-	return nudgedLine(name, unread), true, nil
+	line = nudgedLine(name, unread)
+	if said := outcome.Said(name, text); said != "" {
+		line = joinNotes(line, []string{oneLine(said)})
+	}
+	return line, true, nil
 }
 
 func nudgedLine(window string, unread int) string {

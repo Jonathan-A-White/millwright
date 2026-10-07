@@ -67,6 +67,25 @@ Feature: mw deputy
     And no window was opened
     And no reaper was armed
 
+  Scenario: The mail nudge whose Enter was lost is submitted with a second Enter, and the Deputy says so
+    Given the window "deputy-2026-09-30-02" was opened at "2026-09-30T08:00:00Z"
+    And the Deputy's box holds 2 unread messages
+    And the window "deputy-2026-09-30-02" loses the first Enter key it is sent
+    When mw deputy is run
+    Then mw deputy succeeds
+    And mw deputy says it nudged the Deputy in the window "deputy-2026-09-30-02"
+    And mw deputy says it pressed Enter again
+    And the Enter key was pressed 2 times in the window "deputy-2026-09-30-02"
+
+  Scenario: A pane that never takes Enter is retried once and the Deputy says the line is on its input line still
+    Given the window "deputy-2026-09-30-02" was opened at "2026-09-30T08:00:00Z"
+    And the Deputy's box holds 2 unread messages
+    And the window "deputy-2026-09-30-02" loses every Enter key it is sent
+    When mw deputy is run
+    Then mw deputy succeeds
+    And mw deputy says the nudge is on its input line still
+    And the Enter key was pressed 2 times in the window "deputy-2026-09-30-02"
+
   Scenario: A busy Deputy is left alone and told of the mail waiting
     Given the window "deputy-2026-09-30-02" was opened at "2026-09-30T08:00:00Z"
     And the pane of the window "deputy-2026-09-30-02" is busy

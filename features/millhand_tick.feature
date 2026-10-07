@@ -154,6 +154,16 @@ Feature: mw millhand tick
     And the tick did not sync
     And the reaper log holds no line
 
+  Scenario: A wake line whose Enter was lost is submitted with a second Enter and the tick's line says so
+    Given the window "millhand-test" is open, its age not known
+    And unread tick mail for "millhand@laptop" with the subject "Please look at the queue"
+    And the window "millhand-test" loses the first Enter key it is sent
+    When mw millhand tick is run
+    Then mw millhand tick succeeds
+    And mw millhand tick prints one dated line saying "nudged (millhand-test)"
+    And mw millhand tick prints one dated line saying "pressed Enter again"
+    And the Enter key was pressed 2 times in the window "millhand-test"
+
   Scenario: An idle Millhand with no unread mail is simply already up
     Given the window "millhand-test" is open, its age not known
     When mw millhand tick is run

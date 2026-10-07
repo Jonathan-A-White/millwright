@@ -25,6 +25,8 @@ import (
 func registerDeputySteps(ctx *godog.ScenarioContext, c *seatUpContext) {
 	ctx.Given(`^the Deputy's box holds (\d+) unread messages$`, c.theDeputysBoxHolds)
 	ctx.Given(`^the pane of the window "([^"]*)" is busy$`, c.thePaneIsBusy)
+	ctx.Given(`^the window "([^"]*)" loses the first Enter key it is sent$`, c.theWindowLosesTheFirstEnter)
+	ctx.Given(`^the window "([^"]*)" loses every Enter key it is sent$`, c.theWindowLosesEveryEnter)
 
 	ctx.When(`^mw deputy is run$`, c.mwDeputyIsRun)
 	ctx.When(`^mw deputy is run for the reason "([^"]*)"$`, c.mwDeputyIsRunFor)
@@ -33,9 +35,12 @@ func registerDeputySteps(ctx *godog.ScenarioContext, c *seatUpContext) {
 	ctx.Then(`^mw deputy is refused saying the Deputy is already up in "([^"]*)"$`, c.deputyRefusedForBeingUp)
 	ctx.Then(`^mw deputy is refused saying there is no charter$`, c.refusedForNoCharter)
 	ctx.Then(`^mw deputy is refused saying the Deputy is busy in "([^"]*)" and the mail waits$`, c.deputyRefusedForBeingBusy)
+	ctx.Then(`^mw deputy says it pressed Enter again$`, c.deputySaysEnterAgain)
+	ctx.Then(`^mw deputy says the nudge is on its input line still$`, c.deputySaysStuck)
 	ctx.Then(`^mw deputy says it nudged the Deputy in the window "([^"]*)"$`, c.deputySaysItNudged)
 	ctx.Then(`^the line "([^"]*)" was typed into the window "([^"]*)"$`, c.theLineWasTyped)
 	ctx.Then(`^nothing was typed into the window "([^"]*)"$`, c.nothingWasTyped)
+	ctx.Then(`^the Enter key was pressed (\d+) times in the window "([^"]*)"$`, c.enterWasPressed)
 	ctx.Then(`^mw deputy leaves with the status (\d+)$`, c.millhandLeavesWith)
 }
 
@@ -113,6 +118,34 @@ func (c *seatUpContext) thePaneIsBusy(window string) error {
 	return c.windows.Pane(id, application.PaneWorking)
 }
 
+func (c *seatUpContext) theWindowLosesTheFirstEnter(window string) error {
+	return c.loseEnters(window, 1)
+}
+
+func (c *seatUpContext) theWindowLosesEveryEnter(window string) error {
+	return c.loseEnters(window, -1)
+}
+
+func (c *seatUpContext) loseEnters(window string, n int) error {
+	id, open := c.windows.IDOf(window)
+	if !open {
+		return fmt.Errorf("the window %s is not open", window)
+	}
+	c.windows.LoseEnters(id, n)
+	return nil
+}
+
+func (c *seatUpContext) enterWasPressed(times int, window string) error {
+	id, open := c.windows.IDOf(window)
+	if !open {
+		return fmt.Errorf("the window %s is not open", window)
+	}
+	if got := c.windows.Enters(id); got != times {
+		return fmt.Errorf("expected Enter pressed %d times in %s, it was pressed %d", times, window, got)
+	}
+	return nil
+}
+
 func (c *seatUpContext) deputyRefusedForBeingBusy(window string) error {
 	said, err := c.refused("the Deputy being busy")
 	if err != nil {
@@ -132,6 +165,20 @@ func (c *seatUpContext) deputySaysItNudged(window string) error {
 	want := "nudged the Deputy in window " + window
 	if !strings.Contains(c.said.String(), want) {
 		return fmt.Errorf("expected mw deputy to say %q, it said %q", want, c.said.String())
+	}
+	return nil
+}
+
+func (c *seatUpContext) deputySaysEnterAgain() error {
+	if !strings.Contains(c.said.String(), "pressed Enter again") || !strings.Contains(c.said.String(), "and it went") {
+		return fmt.Errorf("expected mw deputy to say it pressed Enter again and it went, it said %q", c.said.String())
+	}
+	return nil
+}
+
+func (c *seatUpContext) deputySaysStuck() error {
+	if !strings.Contains(c.said.String(), "is on its input line still") {
+		return fmt.Errorf("expected mw deputy to say the nudge is on its input line still, it said %q", c.said.String())
 	}
 	return nil
 }

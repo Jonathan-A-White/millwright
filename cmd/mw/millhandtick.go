@@ -144,6 +144,7 @@ func newMillhandTickCmd() *cobra.Command {
 					Harness:  sessionHarness(dir, host),
 					Terminal: windows,
 					Armer:    reaper.New(exe),
+					Settle:   application.TypeSettle,
 
 					Host:         host,
 					RoutineModel: domain.Model(routine),

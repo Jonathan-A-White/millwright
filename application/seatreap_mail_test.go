@@ -193,3 +193,31 @@ func mustInbox(t *testing.T, box application.Mailbox) []application.Message {
 	}
 	return inbox
 }
+
+func TestTheReapersMailNudgeWhoseEnterWasLostIsSubmittedAgainAndTheLogSaysSo(t *testing.T) {
+	box := aBoxWith(t, 2)
+	r := newDeputyReaper(t, box)
+	r.windows.LoseEnters("@3", 1)
+	r.events[4] = func() { r.handsOffAgain() }
+	r.events[3] = func() {
+		for _, m := range mustInbox(t, box) {
+			_, _ = box.Read(context.Background(), m.ID, "deputy")
+		}
+	}
+
+	if _, err := r.reap.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.windows.Enters("@3"); got != 2 {
+		t.Errorf("Enter pressed %d times, want 2 (the first was lost)", got)
+	}
+	pressed := 0
+	for _, line := range r.log.lines {
+		if strings.Contains(line, "pressed Enter again") {
+			pressed++
+		}
+	}
+	if pressed != 1 {
+		t.Errorf("expected one line saying Enter was pressed again, got %q", r.log.lines)
+	}
+}

@@ -78,6 +78,7 @@ func bringUpMillhand(ctx context.Context, wake application.Wake, reason string, 
 		Harness:  sessionHarness(dir, host),
 		Terminal: windows,
 		Armer:    reaper.New(exe),
+		Settle:   application.TypeSettle,
 
 		Host:         host,
 		Wake:         wake,

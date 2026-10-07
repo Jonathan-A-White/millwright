@@ -188,6 +188,10 @@ type SeatReap struct {
 	Mailbox     string
 	NudgeFormat string
 
+	// Settle is how long after the mail nudge is typed the input line is read,
+	// to see that Enter took it (TypeConfirmed). Zero reads it at once.
+	Settle time.Duration
+
 	// Interval is how long between looks and Limit how long to keep looking;
 	// zero is DefaultReapInterval and DefaultReapLimit.
 	Interval time.Duration
@@ -302,7 +306,9 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 			unknown = false
 			if len(waiting) > 0 {
 				idle = 0
-				if err := s.Terminal.Type(ctx, s.Window, s.nudge(len(waiting))); err != nil {
+				text := s.nudge(len(waiting))
+				outcome, err := TypeConfirmed(ctx, s.Terminal, ReapWindow{ID: s.Window, Name: s.Window}, text, s.Settle)
+				if err != nil {
 					if _, err := s.say(ctx, fmt.Sprintf("the mail nudge could not be typed: %v; not closing", err)); err != nil {
 						return ReapReport{}, err
 					}
@@ -311,6 +317,11 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 				nudged = s.now()
 				if _, err := s.say(ctx, fmt.Sprintf("nudged: %d unread mail(s) for %s; not closing", len(waiting), s.Mailbox)); err != nil {
 					return ReapReport{}, err
+				}
+				if said := outcome.Said(s.Window, text); said != "" {
+					if _, err := s.say(ctx, said); err != nil {
+						return ReapReport{}, err
+					}
 				}
 				continue
 			}

@@ -201,50 +201,21 @@ func (n *EventNudge) tell(ctx context.Context, window ReapWindow, seat, line str
 	return true, nil
 }
 
-// typeAndConfirm types the line and, once Settle has passed, reads the input
-// line: a line still on it was not submitted (a session hung mid-turn drops
-// the Enter), so Enter is pressed once more and the line is read again. One
-// log line says what came of it. A pane that cannot be read is left as it is.
+// typeAndConfirm types the line with TypeConfirmed and says on Err what came of
+// it, once, when Enter had to be pressed again.
 func (n *EventNudge) typeAndConfirm(ctx context.Context, window ReapWindow, line string) error {
-	if err := n.Terminal.Type(ctx, window.ID, line); err != nil {
+	outcome, err := TypeConfirmed(ctx, n.Terminal, window, line, n.Settle)
+	if err != nil {
 		return err
 	}
-	if !n.stuck(ctx, window, line) {
-		return nil
-	}
-	if err := n.Terminal.Enter(ctx, window.ID); err != nil {
-		return fmt.Errorf("pressing Enter again in %s: %w", window.Name, err)
-	}
-	still := n.stuck(ctx, window, line)
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	if n.Err != nil {
-		if still {
-			fmt.Fprintf(n.Err, "mw events follow: pressed Enter again in %s and the nudge %q is on its input line still; not typing into it until the line is empty\n", window.Name, line)
-		} else {
-			fmt.Fprintf(n.Err, "mw events follow: the nudge %q was not submitted by Enter in %s; pressed Enter again and it went\n", line, window.Name)
+	if said := outcome.Said(window.Name, line); said != "" {
+		n.mu.Lock()
+		defer n.mu.Unlock()
+		if n.Err != nil {
+			fmt.Fprintf(n.Err, "mw events follow: %s\n", said)
 		}
 	}
 	return nil
-}
-
-// stuck reports whether, after Settle, the line typed is on the window's input
-// line. A line the pane has not read is not stuck: nothing is pressed over a
-// pane that cannot be seen.
-func (n *EventNudge) stuck(ctx context.Context, window ReapWindow, line string) bool {
-	if n.Settle > 0 {
-		select {
-		case <-time.After(n.Settle):
-		case <-ctx.Done():
-			return false
-		}
-	}
-	held, err := n.Terminal.InputLine(ctx, window.ID)
-	if err != nil {
-		return false
-	}
-	held = strings.TrimSpace(held)
-	return held != "" && (strings.Contains(held, line) || strings.HasPrefix(line, held))
 }
 
 // windowOf is the seat's window: the only open one named <seat>-*, or, of

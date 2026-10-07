@@ -91,6 +91,10 @@ type Deputy struct {
 	// Now is the clock the window's date is taken from; nil is time.Now.
 	Now func() time.Time
 
+	// Settle is how long after the mail nudge is typed the input line is read,
+	// to see that Enter took it (TypeConfirmed). Zero reads it at once.
+	Settle time.Duration
+
 	// Out is where what seat up says is printed. A nil Out prints nothing.
 	Out io.Writer
 }
@@ -226,11 +230,16 @@ func (d Deputy) wakeIdle(ctx context.Context, name string) (SeatUpReport, error)
 	if state != PaneIdle {
 		return SeatUpReport{}, &DeputyAlreadyUp{Window: name, Busy: true}
 	}
-	if err := d.Terminal.Type(ctx, id, fmt.Sprintf(DeputyNudgeFormat, len(inbox))); err != nil {
+	text := fmt.Sprintf(DeputyNudgeFormat, len(inbox))
+	outcome, err := TypeConfirmed(ctx, d.Terminal, ReapWindow{ID: id, Name: name}, text, d.Settle)
+	if err != nil {
 		return SeatUpReport{}, fmt.Errorf("typing the mail nudge into the window %s: %w", name, err)
 	}
 	if d.Out != nil {
 		fmt.Fprintf(d.Out, "nudged the Deputy in window %s\n", name)
+		if said := outcome.Said(name, text); said != "" {
+			fmt.Fprintf(d.Out, "%s\n", said)
+		}
 	}
 	return SeatUpReport{}, nil
 }

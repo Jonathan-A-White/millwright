@@ -163,6 +163,7 @@ func newSeatReapCmd() *cobra.Command {
 				Host:     host,
 				Window:   window,
 				WhenIdle: whenIdle,
+				Settle:   application.TypeSettle,
 				Interval: interval,
 				Limit:    limit,
 				Out:      cmd.OutOrStdout(),

@@ -93,6 +93,10 @@ type Millhand struct {
 	// Now is the clock the window's date is taken from; nil is time.Now.
 	Now func() time.Time
 
+	// Settle is how long after a tick's wake line is typed the input line is
+	// read, to see that Enter took it (TypeConfirmed). Zero reads it at once.
+	Settle time.Duration
+
 	// Out is where what seat up says is printed. A nil Out prints nothing.
 	Out io.Writer
 }
