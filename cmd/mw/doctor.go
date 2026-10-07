@@ -201,6 +201,14 @@ func newDoctorCmd() *cobra.Command {
 				verdict, _ := wg.Probe(ctx)
 				return verdict == application.DoctorFaulty
 			}
+			// The threshold is mw status's own, read here but judged by the check:
+			// a host_silent_hours this host cannot read is its to say.
+			boostAsleep := doctor.NewBoostAsleep(mwVault(vault, host), host, mwGateway(vault, host))
+			if hours, hoursErr := config.HostSilentHours(); hoursErr != nil {
+				boostAsleep.LimitErr = hoursErr
+			} else {
+				boostAsleep.Limit = time.Duration(hours) * time.Hour
+			}
 			checks := application.DoctorChecks{}
 			vpsNginx, err := hostVPSNginx(mwVault(vault, host), false)
 			if err != nil {
@@ -247,6 +255,7 @@ func newDoctorCmd() *cobra.Command {
 					posternChannel,
 					battery,
 					boostReach,
+					boostAsleep,
 				}, checks...),
 				State: store,
 				Log:   store,
