@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/domain"
@@ -115,9 +116,9 @@ type EpicShortfall struct {
 }
 
 // epicShortfalls reads every live epic of a rig that requires something and
-// reports the ones that do not meet it. The epics are read in one batch, and
-// the stories of one only when its rig asks for a last story. Nothing is
-// written.
+// reports the ones that do not meet it; a bead labelled wayfinder:map is a map,
+// not an epic to hold to them. The epics are read in one batch, and the stories
+// of one only when its rig asks for a last story. Nothing is written.
 func (s Status) epicShortfalls(ctx context.Context) ([]EpicShortfall, error) {
 	if s.Rules == nil {
 		return nil, nil
@@ -137,6 +138,9 @@ func (s Status) epicShortfalls(ctx context.Context) ([]EpicShortfall, error) {
 	rules := map[string]domain.EpicRequirements{}
 	var found []EpicShortfall
 	for _, bead := range beads {
+		if slices.Contains(bead.Labels, "wayfinder:map") {
+			continue
+		}
 		rig := strings.TrimSpace(bead.Merged().Rig)
 		if rig == "" {
 			continue

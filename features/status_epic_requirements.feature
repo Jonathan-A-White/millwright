@@ -48,3 +48,13 @@ Feature: Status lists the epics that miss their rig's requirements
     When mw status reads the host
     Then reading status succeeds
     And the report has no EPICS MISSING REQUIREMENTS section
+
+  Scenario: A map is not read, though it names a rig
+    Given the status epic "ep-6" of the rig "spell-forge" described as "Cast spells."
+    And the status epic "ep-6" is labelled "wayfinder:map"
+    And the status epic "ep-7" of the rig "spell-forge" described as "Cast spells."
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "ep-7" under EPICS MISSING REQUIREMENTS saying "Demo"
+    And the report lists "ep-7" under EPICS MISSING REQUIREMENTS saying "demo"
+    And the report does not list "ep-6" under EPICS MISSING REQUIREMENTS

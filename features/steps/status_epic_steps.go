@@ -19,8 +19,11 @@ func (c *statusContext) registerEpicSteps(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the status epic "([^"]*)" of the rig "([^"]*)" described as "([^"]*)"$`, c.theStatusEpicOfTheRig)
 	ctx.Given(`^the status epic "([^"]*)" carries the waiver labels for "([^"]*)" and "([^"]*)"$`, c.theStatusEpicCarriesTheWaiverLabels)
 	ctx.Given(`^the status epic "([^"]*)" is closed$`, c.theStatusEpicIsClosed)
+	ctx.Given(`^the status epic "([^"]*)" is labelled "([^"]*)"$`, c.theStatusEpicIsLabelled)
 	ctx.Then(`^the report lists "([^"]*)" under (EPICS MISSING REQUIREMENTS|EPICS WAIVED) saying "([^"]*)"$`,
 		c.theReportListsTheEpicUnder)
+	ctx.Then(`^the report does not list "([^"]*)" under (EPICS MISSING REQUIREMENTS|EPICS WAIVED)$`,
+		c.theReportDoesNotListTheEpicUnder)
 	ctx.Then(`^the report has no (EPICS MISSING REQUIREMENTS|EPICS WAIVED) section$`, c.theReportHasNoEpicSection)
 }
 
@@ -49,6 +52,10 @@ func (c *statusContext) theStatusEpicCarriesTheWaiverLabels(id, first, second st
 func (c *statusContext) theStatusEpicIsClosed(id string) error {
 	c.tracker.DescribeEpic(id, id, application.StatusClosed, application.DefaultPriority)
 	return nil
+}
+
+func (c *statusContext) theStatusEpicIsLabelled(id, label string) error {
+	return c.tracker.AddLabel(context.Background(), id, label)
 }
 
 // sectionOf is the lines of the report under one heading, up to its blank line.
@@ -91,6 +98,19 @@ func (c *statusContext) theReportHasNoEpicSection(heading string) error {
 	}
 	if _, found := c.sectionOf(heading); found {
 		return fmt.Errorf("expected no %s section, got:\n%s", heading, c.report.String())
+	}
+	return nil
+}
+
+func (c *statusContext) theReportDoesNotListTheEpicUnder(id, heading string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	section, _ := c.sectionOf(heading)
+	for _, line := range section {
+		if strings.Contains(line, id) {
+			return fmt.Errorf("expected %s not under %s, got:\n%s", id, heading, strings.Join(section, "\n"))
+		}
 	}
 	return nil
 }
