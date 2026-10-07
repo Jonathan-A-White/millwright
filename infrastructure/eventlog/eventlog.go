@@ -44,8 +44,34 @@ func (l *Log) seqPath() string {
 // line's seq: far more than one event.
 const tailRead = 64 << 10
 
+// lockPath is the file whose flock serializes the writers of the log: log.jsonl's
+// is log.lock. It is a file of its own, not the log, because a trim replaces
+// the log by renaming a new file over it.
+func (l *Log) lockPath() string {
+	return strings.TrimSuffix(l.Path, filepath.Ext(l.Path)) + ".lock"
+}
+
+// lock takes the exclusive flock on the lock file, making its directory first.
+func (l *Log) lock() (unlock func(), err error) {
+	if err := os.MkdirAll(filepath.Dir(l.Path), 0o700); err != nil {
+		return nil, fmt.Errorf("making the event log's directory: %w", err)
+	}
+	f, err := os.OpenFile(l.lockPath(), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("opening the event log's lock: %w", err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("locking the event log: %w", err)
+	}
+	return func() {
+		syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		f.Close()
+	}, nil
+}
+
 // Append implements application.EventLog. Under an exclusive flock on the
-// log, it cuts a torn last line (a crash mid-write), takes the head as the
+// log's lock file, it cuts a torn last line (a crash mid-write), takes the head as the
 // greater of the sidecar and the last line's seq (a crash between the log's
 // fsync and the sidecar's), writes the batch in one write, fsyncs, then
 // writes the sidecar.
@@ -53,18 +79,16 @@ func (l *Log) Append(_ context.Context, evs []events.Event) (uint64, error) {
 	if len(evs) == 0 {
 		return l.head()
 	}
-	if err := os.MkdirAll(filepath.Dir(l.Path), 0o700); err != nil {
-		return 0, fmt.Errorf("making the event log's directory: %w", err)
+	unlock, err := l.lock()
+	if err != nil {
+		return 0, err
 	}
+	defer unlock()
 	f, err := os.OpenFile(l.Path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return 0, fmt.Errorf("opening the event log: %w", err)
 	}
 	defer f.Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		return 0, fmt.Errorf("locking the event log: %w", err)
-	}
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
 
 	end, last, err := lastWhole(f)
 	if err != nil {

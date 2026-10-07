@@ -214,3 +214,158 @@ func TestNudgeCursorsRoundTripBesideTheLog(t *testing.T) {
 		t.Fatalf("got %v, %v", got, err)
 	}
 }
+
+func newLogOf(t *testing.T, n int) (*eventlog.Log, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "events", "log.jsonl")
+	log := eventlog.New(path)
+	for i := 0; i < n; i++ {
+		appendOK(t, log, mail("mw-1"))
+	}
+	return log, path
+}
+
+func TestTrimMovesTheOldEventsToTheDatedArchiveAndKeepsTheTailAndTheSeq(t *testing.T) {
+	log, path := newLogOf(t, 10)
+	moved, err := log.Trim(context.Background(), 6, "2026-10-07")
+	if err != nil || moved != 6 {
+		t.Fatalf("Trim = %d, %v; want 6 moved", moved, err)
+	}
+	kept, _ := log.Since(context.Background(), 0)
+	if got := seqs(kept); len(got) != 4 || got[0] != 7 || got[3] != 10 {
+		t.Fatalf("the log holds seqs %v, want 7 to 10", got)
+	}
+	if first, _ := log.First(context.Background()); first != 7 {
+		t.Fatalf("First = %d, want 7", first)
+	}
+	if head, _ := log.Head(context.Background()); head != 10 {
+		t.Fatalf("Head = %d, want 10", head)
+	}
+	archive := filepath.Join(filepath.Dir(path), "archive", "log-2026-10-07.jsonl")
+	if lines := strings.Split(strings.TrimSpace(readFile(t, archive)), "\n"); len(lines) != 6 || !strings.HasPrefix(lines[0], `{"seq":1,`) {
+		t.Fatalf("the archive holds %d lines:\n%s", len(lines), readFile(t, archive))
+	}
+	if last := appendOK(t, log, mail("mw-2")); last != 11 {
+		t.Fatalf("the append after a trim got seq %d, want 11", last)
+	}
+}
+
+func TestTrimWithNothingToMoveLeavesTheLogAlone(t *testing.T) {
+	log, path := newLogOf(t, 3)
+	before := readFile(t, path)
+	if moved, err := log.Trim(context.Background(), 0, "2026-10-07"); err != nil || moved != 0 {
+		t.Fatalf("Trim = %d, %v; want nothing moved", moved, err)
+	}
+	if readFile(t, path) != before {
+		t.Fatal("a trim that moved nothing changed the log")
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(path), "archive")); err == nil {
+		t.Fatal("a trim that moved nothing made an archive")
+	}
+}
+
+func TestTrimRepairsATornLastLine(t *testing.T) {
+	log, path := newLogOf(t, 5)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.WriteString(`{"seq":6,"ts":"2026-`)
+	f.Close()
+	if moved, err := log.Trim(context.Background(), 3, "2026-10-07"); err != nil || moved != 3 {
+		t.Fatalf("Trim = %d, %v; want 3 moved", moved, err)
+	}
+	if text := readFile(t, path); !strings.HasSuffix(text, "\n") || strings.Contains(text, `"seq":6`) {
+		t.Fatalf("the torn line is still in the log:\n%s", text)
+	}
+	if last := appendOK(t, log, mail("mw-6")); last != 6 {
+		t.Fatalf("the append after trimming a torn log got seq %d, want 6", last)
+	}
+	kept, err := log.Since(context.Background(), 0)
+	if err != nil || len(kept) != 3 || kept[0].Seq != 4 {
+		t.Fatalf("the log holds %v, %v; want seqs 4 to 6", seqs(kept), err)
+	}
+}
+
+func TestTrimmingEverythingLeavesTheHeadInTheSidecar(t *testing.T) {
+	log, _ := newLogOf(t, 3)
+	if _, err := log.Trim(context.Background(), 3, "2026-10-07"); err != nil {
+		t.Fatal(err)
+	}
+	if head, _ := log.Head(context.Background()); head != 3 {
+		t.Fatalf("Head = %d, want 3", head)
+	}
+	if first, _ := log.First(context.Background()); first != 0 {
+		t.Fatalf("First of an empty log = %d, want 0", first)
+	}
+	if last := appendOK(t, log, mail("mw-4")); last != 4 {
+		t.Fatalf("the next seq is %d, want 4", last)
+	}
+}
+
+func TestArchivedReadsEveryDatedFileInOrderAndOnlyAfterSeq(t *testing.T) {
+	log, _ := newLogOf(t, 12)
+	if _, err := log.Trim(context.Background(), 4, "2026-10-06"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := log.Trim(context.Background(), 8, "2026-10-07"); err != nil {
+		t.Fatal(err)
+	}
+	old, err := log.Archived(context.Background(), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := seqs(old); len(got) != 6 || got[0] != 3 || got[5] != 8 {
+		t.Fatalf("Archived(2) = %v, want 3 to 8", got)
+	}
+	if old, _ := log.Archived(context.Background(), 8); len(old) != 0 {
+		t.Fatalf("Archived(8) = %v, want nothing", seqs(old))
+	}
+}
+
+func TestATrimThatCrashedBeforeCuttingTheLogLeavesNoDuplicatesToRead(t *testing.T) {
+	log, path := newLogOf(t, 6)
+	if _, err := log.Trim(context.Background(), 3, "2026-10-07"); err != nil {
+		t.Fatal(err)
+	}
+	// The same events archived again, as a retry after a crash would.
+	archive := filepath.Join(filepath.Dir(path), "archive", "log-2026-10-07.jsonl")
+	data := readFile(t, archive)
+	if err := os.WriteFile(archive, []byte(data+data), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old, err := log.Archived(context.Background(), 0)
+	if err != nil || len(old) != 3 {
+		t.Fatalf("Archived(0) = %v, %v; want seqs 1 to 3 once", seqs(old), err)
+	}
+}
+
+func TestAppendsDuringTrimsAreNeverLost(t *testing.T) {
+	log, path := newLogOf(t, 5)
+	var wg sync.WaitGroup
+	for w := 0; w < 3; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			other := eventlog.New(path)
+			for i := 0; i < 20; i++ {
+				if _, err := other.Append(context.Background(), []events.Event{mail("mw-9")}); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		}()
+	}
+	for i := 0; i < 10; i++ {
+		head, _ := log.Head(context.Background())
+		if _, err := log.Trim(context.Background(), head/2, "2026-10-07"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wg.Wait()
+	old, _ := log.Archived(context.Background(), 0)
+	kept, _ := log.Since(context.Background(), 0)
+	if total := len(old) + len(kept); total != 65 {
+		t.Fatalf("%d events archived and %d kept, want 65 in all", len(old), len(kept))
+	}
+}

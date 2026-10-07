@@ -33,10 +33,10 @@ func newEventsCmd() *cobra.Command {
 		Long: "events is the home's sequenced, append-only log of the factory's events (docs/events.md):\n" +
 			"one JSON event per line in events_log_path (default ~/.local/state/mw/events/log.jsonl),\n" +
 			"its head in log.seq beside it. `mw events follow` writes the beads' events into it,\n" +
-			"`mw events emit` adds a job's own, `mw events tail` reads it, and `mw events wait` blocks on it\n" +
-			"until a seat's subscribed event comes.",
+			"`mw events emit` adds a job's own, `mw events tail` reads it, `mw events wait` blocks on it\n" +
+			"until a seat's subscribed event comes, and `mw events trim` moves the old events to the archive.",
 	}
-	cmd.AddCommand(newEventsFollowCmd(), newEventsEmitCmd(), newEventsTailCmd(), newEventsWaitCmd())
+	cmd.AddCommand(newEventsFollowCmd(), newEventsEmitCmd(), newEventsTailCmd(), newEventsWaitCmd(), newEventsTrimCmd())
 	return cmd
 }
 
@@ -162,6 +162,7 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 		Nudger:     nudger,
 		Springer:   spring,
 		Controller: controller,
+		Trimmer:    eventTrim(path),
 		Head:       gateway,
 		Feed:       gateway,
 		Log:        eventlog.New(path),
@@ -179,6 +180,18 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 		Every: every,
 		Err:   cmd.ErrOrStderr(),
 	}.Run(ctx)
+}
+
+// eventTrim is the trim of the log in the file path: its readers' cursors and
+// the shipper's state beside it, its archive in the directory beside it.
+func eventTrim(path string) application.EventTrim {
+	log := eventlog.New(path)
+	return application.EventTrim{
+		Log:     log,
+		Archive: log,
+		Nudges:  eventlog.NewNudgeCursors(path),
+		Ship:    eventlog.NewShipStates(path),
+	}
 }
 
 // homeEventLog is this host's event log for a command that only reads it (a
@@ -273,7 +286,8 @@ func newEventsTailCmd() *cobra.Command {
 		Long: "tail prints every event after --since (default 0, the whole log), one per line: seq, time,\n" +
 			"kind, bead, actor, from->to, detail, with \"-\" for an empty bead or actor or a kind with no\n" +
 			"machine and \"(start)\" for a machine's first state. --follow keeps printing what is\n" +
-			"appended, until SIGTERM or SIGINT.",
+			"appended, until SIGTERM or SIGINT. A --since older than the log's first kept event reads the\n" +
+			"older ones from the archive (mw events trim).",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			path, err := config.EventsLogPath()
@@ -282,7 +296,7 @@ func newEventsTailCmd() *cobra.Command {
 			}
 			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGTERM, os.Interrupt)
 			defer stop()
-			return application.EventTail{Log: eventlog.New(path), Since: since, Follow: follow, Out: cmd.OutOrStdout()}.Run(ctx)
+			return application.EventTail{Log: eventlog.New(path), Archive: eventlog.New(path), Since: since, Follow: follow, Out: cmd.OutOrStdout()}.Run(ctx)
 		},
 	}
 	cmd.Flags().Uint64Var(&since, "since", 0, "print only the events after this seq")
@@ -385,5 +399,32 @@ func newEventsWaitCmd() *cobra.Command {
 	cmd.Flags().StringSliceVar(&kinds, "kinds", nil, "the kinds that end the wait, comma separated (default: the seat's subscribe.toml)")
 	cmd.Flags().Uint64Var(&since, "since", 0, "count the events after this seq, so those already in the log end the wait at once")
 	cmd.Flags().DurationVar(&limit, "limit", application.DefaultEventWaitLimit, "how long to wait before saying nothing came")
+	return cmd
+}
+
+func newEventsTrimCmd() *cobra.Command {
+	var keep uint64
+	cmd := &cobra.Command{
+		Use:   "trim [--keep N]",
+		Short: "Move the log's old events into a dated archive file, so the log stays small",
+		Long: "trim moves every event that every reader is past from log.jsonl to archive/log-<date>.jsonl beside it\n" +
+			"(the UTC date of the trim), keeping the log's newest --keep events (default 5000) whatever the readers\n" +
+			"say. An event is past when its seq is at or below the lowest of the seats' nudge cursors and the control\n" +
+			"cursor (nudge.json), at or below the last seq the shipper has sent (ship.json), and before the first batch\n" +
+			"still waiting for the chain. Seq numbering is unchanged. `mw events follow` does this itself, once a UTC day;\n" +
+			"`mw events tail --since N` reads the archive when N is older than the log's first kept event.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			path, err := config.EventsLogPath()
+			if err != nil {
+				return err
+			}
+			trim := eventTrim(path)
+			trim.Keep, trim.Out = keep, cmd.OutOrStdout()
+			_, err = trim.Run(cmd.Context())
+			return err
+		},
+	}
+	cmd.Flags().Uint64Var(&keep, "keep", application.DefaultEventKeep, "how many of the newest events stay in the log")
 	return cmd
 }

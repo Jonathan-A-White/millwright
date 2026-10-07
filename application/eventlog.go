@@ -67,9 +67,12 @@ const DefaultEventTailEvery = 500 * time.Millisecond
 // EventTail prints the events after Since, one EventLine each, and with
 // Follow goes on printing what is appended until ctx ends.
 type EventTail struct {
-	Log    EventLog
-	Since  uint64
-	Follow bool
+	Log EventLog
+	// Archive, when set, is read for the events before the log's first when
+	// Since reaches back past it; without it, tail says where they are.
+	Archive EventArchive
+	Since   uint64
+	Follow  bool
 	// Every is the wait between two reads with Follow; zero means
 	// DefaultEventTailEvery.
 	Every time.Duration
@@ -91,6 +94,9 @@ func (t EventTail) Run(ctx context.Context) error {
 		sleep = sleepFor
 	}
 	since := t.Since
+	if err := t.printArchived(ctx, since); err != nil {
+		return err
+	}
 	for {
 		evs, err := t.Log.Since(ctx, since)
 		if err != nil {
@@ -107,6 +113,36 @@ func (t EventTail) Run(ctx context.Context) error {
 			return nil
 		}
 	}
+}
+
+// printArchived prints the archived events after since, when since is older
+// than the first event the log keeps, and says plainly when the archive does
+// not hold all of them.
+func (t EventTail) printArchived(ctx context.Context, since uint64) error {
+	if t.Archive == nil {
+		return nil
+	}
+	first, err := t.Archive.First(ctx)
+	if err != nil || first == 0 || since+1 >= first {
+		return err
+	}
+	old, err := t.Archive.Archived(ctx, since)
+	if err != nil {
+		return err
+	}
+	next := since + 1
+	missing := func(to uint64) {
+		if to > next {
+			fmt.Fprintf(t.Out, "(events %d to %d are in neither the log nor the archive)\n", next, to-1)
+		}
+	}
+	for _, e := range old {
+		missing(e.Seq)
+		fmt.Fprintln(t.Out, EventLine(e))
+		next = e.Seq + 1
+	}
+	missing(first)
+	return nil
 }
 
 // EventLine is one event on one line: seq, time, kind, bead, actor, the

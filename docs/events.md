@@ -61,6 +61,15 @@ Mayor's check; the rule the postern view uses) is a `bead_changed` from the bead
 usually `closed`, to `verified`, detail `verified`. A later one on the same bead, a comment
 that only mentions VERIFIED, and `NOT VERIFIED` are plain `comment` events.
 
+The log is trimmed so it stays small. Once a UTC day `mw events follow` (or at any time `mw
+events trim`) moves every event that no reader needs again from `log.jsonl` to
+`archive/log-<date>.jsonl` beside it, leaving the newest 5,000 whatever the readers say.
+An event is past when its seq is at or below every seat's nudge cursor and the control
+cursor (`nudge.json`), at or below the last seq shipped (`ship.json`), and before the first
+batch still waiting for the chain. Seq numbers do not change, and `mw events tail --since N`
+reads the archive when N is older than the log's first kept event. A reader that asks the
+log for its whole history (`Since(0)`) now gets only what was kept.
+
 ## Subscriptions
 
 A seat hears its events without polling (mw-jrx0s.6). `seats/<seat>/subscribe.toml` in

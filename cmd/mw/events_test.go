@@ -187,3 +187,34 @@ func TestEventsEmitEmergencyWritesTheEventInTheEmergencyLane(t *testing.T) {
 		t.Fatalf("expected an emergency then a normal event, got %q", data)
 	}
 }
+
+func TestEventsTrimMovesOldEventsToTheArchiveAndTailReadsThemBack(t *testing.T) {
+	path := eventsHome(t)
+	for i := 0; i < 6; i++ {
+		if out, err := runEvents(t, "emit", "--kind", "job", "--bead", "mw-1", "--from", "scheduled", "--to", "running", "--actor", "dispatch@laptop"); err != nil {
+			t.Fatalf("emit: %v\n%s", err, out)
+		}
+	}
+	dir := filepath.Dir(path)
+	if err := os.WriteFile(filepath.Join(dir, "ship.json"), []byte(`{"shipped":6}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runEvents(t, "trim", "--keep", "2")
+	if err != nil || !strings.Contains(out, "Moved 4 events, up to seq 4") {
+		t.Fatalf("mw events trim = %q, %v; want 4 moved", out, err)
+	}
+	if data, _ := os.ReadFile(path); strings.Count(string(data), "\n") != 2 {
+		t.Fatalf("the log holds %q, want the newest two", data)
+	}
+	if matches, _ := filepath.Glob(filepath.Join(dir, "archive", "log-*.jsonl")); len(matches) != 1 {
+		t.Fatalf("archive files %v, want one", matches)
+	}
+	out, err = runEvents(t, "tail", "--since", "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 5 || !strings.HasPrefix(lines[0], "2 ") || !strings.HasPrefix(lines[4], "6 ") {
+		t.Fatalf("tail --since 1 after a trim printed %q, want seqs 2 to 6", out)
+	}
+}

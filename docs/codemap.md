@@ -2,7 +2,7 @@
 
 ## Layers
 
-domain/, domain/events: stdlib · application/ (apptest/: fakes): use cases, ports · infrastructure/: adapters · cmd/mw/: cobra · features/ (steps/): Gherkin · template/: embed
+domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · infrastructure/: adapters · cmd/mw/: cobra · features/ (steps/): Gherkin · template/: embed
 
 ## Ports
 
@@ -13,8 +13,8 @@ domain/, domain/events: stdlib · application/ (apptest/: fakes): use cases, por
 | VaultFiles, TrackerSync | application/sync.go | `infrastructure/{vault/git,beads/sync}.go` | apptest.Fake{VaultFiles,Tracker} |
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | `infrastructure/beads/mail.go` | apptest.FakeMailbox |
 | EpicRules | application/epicrules.go | `infrastructure/vault/epicrules.go` | apptest.FakeEpicRules |
-| Vault | application/seatboot.go | infrastructure/vault | application/seatboot_test.go |
-| Runner | application/runner.go | infrastructure/tmux | apptest.FakeRunner |
+| Vault | application/seatboot.go | infra/vault | application/seatboot_test.go |
+| Runner | application/runner.go | infra/tmux | apptest.FakeRunner |
 | Harness | application/harness.go | infrastructure/claude | application/seatboot_test.go |
 | SeatFiles, Windows, SeatHarness, ActingFile | application/seatup.go, application/seathandover.go | infrastructure/{vault/{seat,reaplog},tmux/window,claude/claude}.go | apptest.Fake{Windows,ActingFile} |
 | Transcripts{,Tail,Replies}, PeekRemote | application/seatcontext.go, application/peek.go | infrastructure/{claude,peekremote} | apptest/fakepeek.go |
@@ -64,7 +64,7 @@ domain/, domain/events: stdlib · application/ (apptest/: fakes): use cases, por
 | SeatBoot | application/seatboot.go | none: called by Dispatch, Next | features/seat_boot.feature |
 | Init | application/init.go | mw init - cmd/mw/init.go | features/init.feature |
 | Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern key/inbox/send/snapshot/view/bead - cmd/mw/posternview.go, cmd/mw/posternbead.go | `features/postern_*.feature` |
-| Event{Follow,Emit,Tail,Ship,Wait,Nudge,Spring,Control} | application/eventfollow.go, application/eventlog.go, application/eventship.go, application/eventwait.go, application/eventnudge.go, application/eventsubscribe.go, application/eventspring.go, application/eventcontrol.go | mw events follow/emit/tail/wait - cmd/mw/events.go | features/event_follow.feature |
+| Event{Follow,Emit,Tail,Ship,Wait,Nudge,Spring,Control,Trim} | application/eventfollow.go, application/eventlog.go, application/eventship.go, application/eventwait.go, application/eventnudge.go, application/eventsubscribe.go, application/eventspring.go, application/eventcontrol.go, application/eventtrim.go | mw events follow/emit/tail/wait/trim - cmd/mw/events.go | features/event_follow.feature |
 | Hands{Add,List} | application/hands.go | mw hands add/list - cmd/mw/hands.go; cmd/mw-hands-root | features/hands.feature |
 | Postern{Serve,Nginx,Mirror} | application/posternhand.go, application/posternmirror.go | mw postern serve/nginx/mirror - cmd/mw/postern.go, cmd/mw/posternmirror.go | features/postern_serve.feature |
 | Prompt{Save,List,Show,Run}, Cards | application/prompt.go, application/card.go | mw prompt/card - cmd/mw/prompt.go, cmd/mw/card.go | features/{prompt,card}.feature |

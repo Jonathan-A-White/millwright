@@ -12,12 +12,16 @@ import (
 // FakeEventLog is an in-memory application.EventLog that numbers and checks
 // events as the file adapter does.
 type FakeEventLog struct {
-	mu      sync.Mutex
-	evs     []events.Event
-	failErr error
+	mu       sync.Mutex
+	evs      []events.Event
+	archived []events.Event
+	days     []string
+	head     uint64
+	failErr  error
 }
 
 var _ application.EventLog = (*FakeEventLog)(nil)
+var _ application.EventArchive = (*FakeEventLog)(nil)
 
 // FailNext makes the next Append fail with err, writing nothing.
 func (f *FakeEventLog) FailNext(err error) {
@@ -34,7 +38,7 @@ func (f *FakeEventLog) Append(_ context.Context, evs []events.Event) (uint64, er
 		f.failErr = nil
 		return 0, err
 	}
-	seq := uint64(len(f.evs))
+	seq := f.head
 	numbered := make([]events.Event, len(evs))
 	for i, e := range evs {
 		seq++
@@ -45,6 +49,7 @@ func (f *FakeEventLog) Append(_ context.Context, evs []events.Event) (uint64, er
 		numbered[i] = e
 	}
 	f.evs = append(f.evs, numbered...)
+	f.head = seq
 	return seq, nil
 }
 
@@ -52,17 +57,71 @@ func (f *FakeEventLog) Append(_ context.Context, evs []events.Event) (uint64, er
 func (f *FakeEventLog) Since(_ context.Context, seq uint64) ([]events.Event, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if seq >= uint64(len(f.evs)) {
-		return nil, nil
+	return after(f.evs, seq), nil
+}
+
+// after is the events of evs with a seq above seq.
+func after(evs []events.Event, seq uint64) []events.Event {
+	var out []events.Event
+	for _, e := range evs {
+		if e.Seq > seq {
+			out = append(out, e)
+		}
 	}
-	return append([]events.Event(nil), f.evs[seq:]...), nil
+	return out
 }
 
 // Head implements application.EventLog.
 func (f *FakeEventLog) Head(context.Context) (uint64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return uint64(len(f.evs)), nil
+	return f.head, nil
+}
+
+// Trim implements application.EventArchive: events up to seq upTo go to the
+// archive, which the fake keeps as one list, noting the day of each trim.
+func (f *FakeEventLog) Trim(_ context.Context, upTo uint64, day string) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var kept []events.Event
+	moved := 0
+	for _, e := range f.evs {
+		if e.Seq <= upTo {
+			f.archived = append(f.archived, e)
+			moved++
+		} else {
+			kept = append(kept, e)
+		}
+	}
+	f.evs = kept
+	if moved > 0 {
+		f.days = append(f.days, day)
+	}
+	return moved, nil
+}
+
+// First implements application.EventArchive.
+func (f *FakeEventLog) First(context.Context) (uint64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.evs) == 0 {
+		return 0, nil
+	}
+	return f.evs[0].Seq, nil
+}
+
+// Archived implements application.EventArchive.
+func (f *FakeEventLog) Archived(_ context.Context, seq uint64) ([]events.Event, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return after(f.archived, seq), nil
+}
+
+// TrimDays is the day given to each Trim that moved something, oldest first.
+func (f *FakeEventLog) TrimDays() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.days...)
 }
 
 // All is every event appended, oldest first.

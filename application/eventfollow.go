@@ -143,6 +143,9 @@ type EventFollow struct {
 	// Springer, when set, is called each pass, after the Nudger: it starts
 	// the jobs the pass's events, or the clock, call for (EventSpring).
 	Springer EventSpringer
+	// Trimmer, when set, is called at the end of the first pass of each UTC
+	// day, after the Shipper, to move old events out of the log (EventTrim).
+	Trimmer EventTrimmer
 	// Controller, when set, is called each pass once the beads' events are
 	// written and before anything is nudged, sprung or sent: it acts on the cancel events in the
 	// log (EventControl), so a hold shows in seconds, not behind a slow send.
@@ -228,7 +231,7 @@ func (f EventFollow) Run(ctx context.Context) error {
 		}()
 		defer wg.Wait()
 	}
-	var read string
+	var read, trimmedDay string
 	var cursor *FollowCursor
 	for ctx.Err() == nil {
 		head, err := f.Head.Head(ctx)
@@ -296,6 +299,22 @@ func (f EventFollow) Run(ctx context.Context) error {
 				}
 			} else {
 				quiet("sending events")
+			}
+		}
+		if f.Trimmer != nil && ctx.Err() == nil {
+			now := time.Now
+			if f.Now != nil {
+				now = f.Now
+			}
+			if day := now().UTC().Format("2006-01-02"); day != trimmedDay {
+				if err := f.Trimmer.Trim(ctx); err != nil {
+					if ctx.Err() == nil {
+						say("trimming the log", err)
+					}
+				} else {
+					trimmedDay = day
+					quiet("trimming the log")
+				}
 			}
 		}
 		if sleep(ctx, every) != nil {
