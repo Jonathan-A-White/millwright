@@ -107,6 +107,13 @@ the pass waited on) is not failed: it is `done` with the detail `cut short by th
 stopping; run again when it is back`, and the first look of the follower that comes back runs it
 again, scheduled for `run again after the follower restarted`.
 
+The `grist-grind` job runs one pass of the mill (`mw grist grind`) in the follower itself, on a
+host whose config has a `[grist]` table and only while that host is home. No event springs it:
+the follower reads the postern backend for records at most every 5 seconds, and a new `grist`
+record for the mill key springs a pass, reason `grist <txid> arrived`. A grist already waiting
+when the follower starts springs nothing, and no clock does: the dispatch tick still answers
+those. The pass keeps its own pass lock, so one sprung while another runs finds it busy and ends.
+
 The `chain-stamp` job (docs/chain-stamps.md) runs in the follower itself, not in a unit, and on its
 own clock only: every minute, reason `clock`. `mw next` queues a stamp of each commit it lands in
 `~/.local/state/mw/stamps/pending.jsonl` (setting `stamps_dir`, `$MW_STAMPS_DIR`); a pass takes each

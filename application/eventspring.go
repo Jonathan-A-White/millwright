@@ -47,6 +47,11 @@ type SpringJob struct {
 	// Wants says whether an event springs the job, and why in a few words.
 	// Nil is no event.
 	Wants func(e events.Event) (reason string, ok bool)
+	// Probe, when set, is asked once each Spring, and springs the job when it
+	// says so, as an event would: for what the log does not hold, such as a
+	// record that reached the postern backend. The first Spring asks it too,
+	// to take its bearings, and springs nothing from the answer.
+	Probe func(ctx context.Context) (reason string, ok bool)
 	// Every is how long the job may go unrun before it is run for Reason,
 	// counted from its last pass of any cause; zero is never.
 	Every  time.Duration
@@ -186,6 +191,11 @@ func (s *EventSpring) Spring(ctx context.Context) error {
 				s.launch(ctx, j, st, SpringRestartedReason)
 			}
 		}
+		for _, j := range s.Jobs {
+			if j.Probe != nil {
+				j.Probe(ctx)
+			}
+		}
 		return nil
 	}
 	var evs []events.Event
@@ -204,6 +214,9 @@ func (s *EventSpring) Spring(ctx context.Context) error {
 					break
 				}
 			}
+		}
+		if !wanted && j.Probe != nil {
+			reason, wanted = j.Probe(ctx)
 		}
 		switch {
 		case wanted && st.inFlight:

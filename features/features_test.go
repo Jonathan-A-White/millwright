@@ -101,6 +101,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeDispatchScenario(ctx)
 	steps.InitializeDoctorScenario(ctx)
 	steps.InitializeEventFollowScenario(ctx)
+	steps.InitializeEventGristSpringScenario(ctx)
 	steps.InitializeFilePlanScenario(ctx)
 	steps.InitializeGristEvalScenario(ctx)
 	steps.InitializeGristScenario(ctx)
