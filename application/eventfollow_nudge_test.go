@@ -84,3 +84,50 @@ func TestFollowCallsTheSpringerEveryPassAndSaysItsFailureOnce(t *testing.T) {
 		t.Fatalf("the springer was called %d times and the loop said %q", springer.calls, errs.String())
 	}
 }
+
+// slowShipper stands for a Postern send that hangs or fails after ~26 s
+// (2026-10-07): it says how many nudges and springs had been made by the
+// time Ship was entered, and then fails.
+type slowShipper struct {
+	nudger         *countingNudger
+	springer       *countingSpringer
+	nudgesAtShip   int
+	springsAtShip  int
+	ships          int
+	stopAfterFirst context.CancelFunc
+}
+
+func (s *slowShipper) Ship(context.Context) error {
+	s.ships++
+	s.nudgesAtShip, s.springsAtShip = s.nudger.calls, s.springer.calls
+	s.stopAfterFirst()
+	return errors.New("said 502")
+}
+
+func TestFollowNudgesAndSpringsBeforeItShips(t *testing.T) {
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	nudger, springer := &countingNudger{}, &countingSpringer{}
+	shipper := &slowShipper{nudger: nudger, springer: springer, stopAfterFirst: stop}
+	err := application.EventFollow{
+		Head:     &apptest.FakeHead{Heads: []string{"a"}},
+		Log:      &apptest.FakeEventLog{},
+		Feed:     apptest.NewFakeTracker(),
+		Cursors:  &apptest.FakeFollowCursors{},
+		Shipper:  shipper,
+		Nudger:   nudger,
+		Springer: springer,
+		Publish:  func(context.Context) error { return nil },
+		Sleep:    func(context.Context, time.Duration) error { return ctx.Err() },
+	}.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shipper.ships != 1 {
+		t.Fatalf("Ship was called %d times, want 1", shipper.ships)
+	}
+	if shipper.nudgesAtShip != 1 || shipper.springsAtShip != 1 {
+		t.Fatalf("when Ship was entered the loop had nudged %d and sprung %d times; a slow send must not hold either back (want 1 and 1)",
+			shipper.nudgesAtShip, shipper.springsAtShip)
+	}
+}

@@ -120,12 +120,13 @@ type EventShipper interface {
 // failure that repeats word for word is said once. An event its machine
 // forbids is said and left out. With no Log, it only republishes.
 //
-// With a Shipper, every pass ends by calling it, whether or not the beads'
-// head moved: it sends the events written since its last batch, and retries
-// the batches waiting for the chain (EventShip). With a Nudger it then calls
-// that, to tell the seats of the events they subscribed to (EventNudge); and
-// with a Springer, that, to run the jobs those events call for (EventSpring).
-// With a Controller it acts, before the Shipper, on the cancel events in the log.
+// With a Nudger, every pass calls it, whether or not the beads' head moved,
+// to tell the seats of the events they subscribed to (EventNudge); with a
+// Springer, that, to run the jobs those events call for (EventSpring); and
+// with a Shipper it ends by calling that, to send the events written since its
+// last batch and retry the batches waiting for the chain (EventShip). The
+// Shipper is last because a send can take as long as a backend takes to fail.
+// With a Controller it acts, before any of them, on the cancel events in the log.
 type EventFollow struct {
 	Head    BeadsHead
 	Feed    BeadFeed
@@ -133,17 +134,17 @@ type EventFollow struct {
 	Cursors FollowCursors
 	// Publish builds the view and writes it where the backend serves it.
 	Publish func(ctx context.Context) error
-	// Shipper, when set, is called at the end of each pass.
+	// Shipper, when set, is called at the end of each pass, after the
+	// Springer, so a slow send holds nothing else back.
 	Shipper EventShipper
-	// Nudger, when set, is called at the end of each pass, after the
-	// Shipper: it tells the seats of their events.
+	// Nudger, when set, is called each pass, before the Springer: it tells
+	// the seats of their events.
 	Nudger EventNudger
-	// Springer, when set, is called at the end of each pass, after the
-	// Nudger: it starts the jobs the pass's events, or the clock, call for
-	// (EventSpring).
+	// Springer, when set, is called each pass, after the Nudger: it starts
+	// the jobs the pass's events, or the clock, call for (EventSpring).
 	Springer EventSpringer
 	// Controller, when set, is called each pass once the beads' events are
-	// written and before anything is sent: it acts on the cancel events in the
+	// written and before anything is nudged, sprung or sent: it acts on the cancel events in the
 	// log (EventControl), so a hold shows in seconds, not behind a slow send.
 	Controller EventController
 	// Aside publishes in a goroutine of its own, one publish at a time and
@@ -268,15 +269,6 @@ func (f EventFollow) Run(ctx context.Context) error {
 				quiet("acting on control events")
 			}
 		}
-		if f.Shipper != nil && ctx.Err() == nil {
-			if err := f.Shipper.Ship(ctx); err != nil {
-				if ctx.Err() == nil {
-					say("sending events", err)
-				}
-			} else {
-				quiet("sending events")
-			}
-		}
 		if f.Nudger != nil && f.Log != nil && ctx.Err() == nil {
 			if err := f.Nudger.Nudge(ctx); err != nil {
 				if ctx.Err() == nil {
@@ -293,6 +285,17 @@ func (f EventFollow) Run(ctx context.Context) error {
 				}
 			} else {
 				quiet("springing the jobs")
+			}
+		}
+		// Ship goes last: a send that hangs or fails slowly (a 502 took ~26 s
+		// on 2026-10-07) must not hold back a nudge or a spring.
+		if f.Shipper != nil && ctx.Err() == nil {
+			if err := f.Shipper.Ship(ctx); err != nil {
+				if ctx.Err() == nil {
+					say("sending events", err)
+				}
+			} else {
+				quiet("sending events")
 			}
 		}
 		if sleep(ctx, every) != nil {
