@@ -45,15 +45,22 @@ func gristKeys() (*postern.KeyFile, error) {
 	return postern.New(path), nil
 }
 
-// gristGrindLock is this host's grind lock, which mw dispatch counts as one
-// of its sessions while it is held. A host whose grist state directory
-// cannot be named has none, and counts none.
-func gristGrindLock() application.GristLock {
+// gristGrindSlots is this host's grind slot locks, which mw dispatch counts
+// as one of its sessions each while they are held: the first, and the others
+// up to the [grist] concurrency. A host whose grist state directory cannot be
+// named has none, and counts none. A [grist] table that cannot be read counts
+// the default number of slots: only the slots held are counted.
+func gristGrindSlots() (first application.GristLock, more []application.GristLock) {
 	dir, err := config.GristStateDir()
 	if err != nil {
-		return nil
+		return nil, nil
 	}
-	return hostlock.NewTry(dir, hostlock.GrindFile)
+	concurrency := config.DefaultGristConcurrency
+	if settings, err := config.Grist(); err == nil {
+		concurrency = settings.Concurrency
+	}
+	slots := hostlock.GrindSlots(dir, concurrency)
+	return slots[0], slots[1:]
 }
 
 // newGristKeyCmd builds `mw grist key`: the mill key, made once, and its
@@ -366,22 +373,24 @@ func newMill(out io.Writer) (application.GristGrind, error) {
 	if err != nil {
 		return application.GristGrind{}, err
 	}
+	slots := hostlock.GrindSlots(stateDir, ceilings.Concurrency)
 	return application.GristGrind{
-		Postern:     backend,
-		Cipher:      postern.NewCipher(keys),
-		Keys:        keys,
-		State:       grist.New(stateDir),
-		Scorers:     scorers,
-		Runs:        grist.NewRuns(stateDir),
-		Grinds:      rig.NewGrinds(),
-		Grinder:     claude.NewGrinder(),
-		Tracker:     mwGateway(dir, host),
-		Pass:        hostlock.NewTry(stateDir, hostlock.PassFile),
-		Grinding:    hostlock.NewTry(stateDir, hostlock.GrindFile),
-		Host:        host,
-		Cap:         atOnce,
-		Apps:        apps,
-		GovernorKey: governorKey,
+		Postern:      backend,
+		Cipher:       postern.NewCipher(keys),
+		Keys:         keys,
+		State:        grist.New(stateDir),
+		Scorers:      scorers,
+		Runs:         grist.NewRuns(stateDir),
+		Grinds:       rig.NewGrinds(),
+		Grinder:      claude.NewGrinder(),
+		Tracker:      mwGateway(dir, host),
+		Pass:         hostlock.NewTry(stateDir, hostlock.PassFile),
+		Grinding:     slots[0],
+		MoreGrinding: slots[1:],
+		Host:         host,
+		Cap:          atOnce,
+		Apps:         apps,
+		GovernorKey:  governorKey,
 		Ceilings: application.GristCeilings{
 			Models: ceilings.Models, Efforts: ceilings.Efforts, MaxAttachments: ceilings.MaxAttachments,
 			MaxAttachmentBytes: ceilings.MaxAttachmentBytes, DailyLimit: ceilings.DailyLimit,

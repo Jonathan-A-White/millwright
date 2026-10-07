@@ -1437,12 +1437,16 @@ for the mill key and answers each grist once, sealed back to its sender with
 The grind is `grinds/<kind>.json` at the app rig's local `main`, read with its
 instructions and schema at that commit, and the commit is stamped on the
 answer. A grind takes one of the host's `cap` slots, first come first served.
-When no slot is free the grist waits for the next pass: the next grist's hook,
+The mill grinds up to `[grist]` `concurrency` grists at once (default 2), oldest
+first, each in its own temp directory and run record, with one lock file
+`grind-<n>.lock` for each; a grist past that waits for a grind to end, and the
+cursor moves only past grists whose grind has ended. A grind that finds no slot
+free to start waits for the next pass: the next grist's hook,
 or the next `mw dispatch` tick, which on the host that is home (`mw home`) and
 where the config file has a `[grist]` table runs one pass after its claims. A
-dispatch holds the grind lock while it claims, so a grind and a claim starting
-together never take the same slot. `mw dispatch` counts a running grind as one
-of its sessions. After answering, the grist's photos are
+dispatch holds the free grind locks while it claims, so a grind and a claim
+starting together never take the same slot. `mw dispatch` counts every running
+grind as one of its sessions. After answering, the grist's photos are
 deleted from the backend. Each grist handled adds one line to
 `grinds.jsonl` in `grist_state_dir` (default `~/.local/state/mw/grist`): time,
 txid, app, kind, sender fingerprint, model, effort, where each came from, status,
@@ -1461,6 +1465,7 @@ efforts = "low,medium,high"   # what a grist may ask for; the grind file's own e
 max_attachments = 4
 max_attachment_bytes = 8388608
 daily_limit = 50         # grist a day from one key
+concurrency = 2          # grists ground at once; each holds one of the host's session slots, the rest queue
 timeout = "10m"
 
 [grist-apps]             # where each app's rig is checked out here

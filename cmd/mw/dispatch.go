@@ -138,8 +138,8 @@ func newDispatchCmd() *cobra.Command {
 			"dirty checkout is left alone, and a build that fails keeps the old mw and is tried by the next tick.\n\n" +
 			"On the host that is home (mw home), and where the config file has a [grist] table, it then\n" +
 			"runs one pass of the grist mill (mw grist grind), so a grist left waiting for a slot is\n" +
-			"answered by this tick. While it claims it holds the grind lock, so a grind starting in the\n" +
-			"same tick cannot take the slot it takes.\n\n" +
+			"answered by this tick. While it claims it holds the free grind slots, so a grind starting in the\n" +
+			"same tick cannot take the session slot it takes.\n\n" +
 			"While the network is metered (config `metered`, or Windows' own setting read from WSL) it\n" +
 			"starts no story whose rig is named under [heavy_net] in the config file (`postern = true`),\n" +
 			"because its gate or close-out installs dependencies: the story stays open, and the first tick\n" +
@@ -208,32 +208,34 @@ func newDispatchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			grinding, moreGrinding := gristGrindSlots()
 			dispatch := application.Dispatch{
-				Tracker:     gateway,
-				Worktrees:   worktrees,
-				Landing:     worktrees,
-				Files:       files,
-				Runner:      tmux.New(),
-				Boot:        builderBoot(files, host, tests),
-				Memory:      gateway,
-				Sync:        sync,
-				SyncTries:   tries,
-				SyncWait:    wait,
-				SyncHalts:   hostSyncHalt(),
-				Host:        host,
-				Cap:         atOnce,
-				MaxAttempts: maxAttempts,
-				Mailbox:     gateway,
-				Load:        hostload.Proc{},
-				Rigs:        rigs,
-				Network:     net,
-				HeavyNet:    heavy,
-				Grinding:    gristGrindLock(),
-				Exclusive:   hostDispatchLock(),
-				Events:      homeEventLog(),
-				Home:        files,
-				DryRun:      dryRun,
-				Out:         cmd.OutOrStdout(),
+				Tracker:      gateway,
+				Worktrees:    worktrees,
+				Landing:      worktrees,
+				Files:        files,
+				Runner:       tmux.New(),
+				Boot:         builderBoot(files, host, tests),
+				Memory:       gateway,
+				Sync:         sync,
+				SyncTries:    tries,
+				SyncWait:     wait,
+				SyncHalts:    hostSyncHalt(),
+				Host:         host,
+				Cap:          atOnce,
+				MaxAttempts:  maxAttempts,
+				Mailbox:      gateway,
+				Load:         hostload.Proc{},
+				Rigs:         rigs,
+				Network:      net,
+				HeavyNet:     heavy,
+				Grinding:     grinding,
+				MoreGrinding: moreGrinding,
+				Exclusive:    hostDispatchLock(),
+				Events:       homeEventLog(),
+				Home:         files,
+				DryRun:       dryRun,
+				Out:          cmd.OutOrStdout(),
 			}
 			// The mill answers what it left waiting, on the host that is home and
 			// where a [grist] table says so. A mill that cannot be set up costs

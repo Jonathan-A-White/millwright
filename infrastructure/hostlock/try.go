@@ -12,14 +12,26 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 )
 
-// The grist mill's two locks, by their names inside the grist state
-// directory: PassFile is held for a whole `mw grist grind` pass, so two
-// passes never answer the same grist; GrindFile only while a grind runs,
-// which is what `mw dispatch` counts as one of its sessions.
-const (
-	PassFile  = "pass.lock"
-	GrindFile = "grind.lock"
-)
+// PassFile is the grist mill's pass lock, by its name inside the grist state
+// directory: held for a whole `mw grist grind` pass, so two passes never
+// answer the same grist.
+const PassFile = "pass.lock"
+
+// GrindFile is the name of grind slot n's lock inside the grist state
+// directory. The mill takes one slot while each grind runs, up to its
+// `[grist] concurrency` of them, and `mw dispatch` counts every held slot as
+// one of its sessions.
+func GrindFile(n int) string { return fmt.Sprintf("grind-%d.lock", n) }
+
+// GrindSlots is the locks of a host's grind slots, one for each grind the mill
+// may run at once, the first slot first.
+func GrindSlots(dir string, concurrency int) []application.GristLock {
+	slots := make([]application.GristLock, 0, max(concurrency, 1))
+	for n := range max(concurrency, 1) {
+		slots = append(slots, NewTry(dir, GrindFile(n)))
+	}
+	return slots
+}
 
 // DispatchFile is the lock a whole `mw dispatch` run holds, by its name inside
 // the dispatch state directory.

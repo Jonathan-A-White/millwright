@@ -603,6 +603,7 @@ const (
 	DefaultGristMaxAttachments     = 4
 	DefaultGristMaxAttachmentBytes = 8388608
 	DefaultGristDailyLimit         = 50
+	DefaultGristConcurrency        = 2
 	DefaultGristTimeout            = 10 * time.Minute
 )
 
@@ -705,14 +706,17 @@ type GristSettings struct {
 	MaxAttachments     int
 	MaxAttachmentBytes int64
 	DailyLimit         int
-	Timeout            time.Duration
+	// Concurrency is how many grists the mill grinds at once on this host.
+	Concurrency int
+	Timeout     time.Duration
 }
 
 // Grist reports the ceilings of the `[grist]` table of
 // ~/.config/mw/config.toml: `models` (a list, or one string with commas),
 // `efforts` (the efforts a grist may ask for, the same way),
 // `max_attachments`, `max_attachment_bytes`, `daily_limit` (grist a day from
-// one key) and `timeout` (a Go duration, "10m"), each its default when the
+// one key), `concurrency` (grinds at once, each counted against the host's cap
+// of sessions) and `timeout` (a Go duration, "10m"), each its default when the
 // table says nothing.
 func Grist() (GristSettings, error) {
 	home, err := os.UserHomeDir()
@@ -742,7 +746,11 @@ func Grist() (GristSettings, error) {
 	if err != nil {
 		return GristSettings{}, err
 	}
-	settings.MaxAttachments, settings.DailyLimit = int(most), int(daily)
+	concurrency, err := countIn(table, "concurrency", DefaultGristConcurrency, path)
+	if err != nil {
+		return GristSettings{}, err
+	}
+	settings.MaxAttachments, settings.DailyLimit, settings.Concurrency = int(most), int(daily), int(concurrency)
 	if said := strings.TrimSpace(table["timeout"]); said != "" {
 		timeout, err := time.ParseDuration(said)
 		if err != nil || timeout <= 0 {

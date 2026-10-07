@@ -68,6 +68,6 @@ domain/, domain/events: stdlib · application/ (apptest/: fakes): use cases, por
 | Hands{Add,List} | application/hands.go | mw hands add/list - cmd/mw/hands.go; cmd/mw-hands-root | features/hands.feature |
 | Postern{Serve,Nginx,Mirror} | application/posternhand.go, application/posternmirror.go | mw postern serve/nginx/mirror - cmd/mw/postern.go, cmd/mw/posternmirror.go | features/postern_serve.feature |
 | Prompt{Save,List,Show,Run}, Cards | application/prompt.go, application/card.go | mw prompt/card - cmd/mw/prompt.go, cmd/mw/card.go | features/{prompt,card}.feature |
-| Grist{Key,Grind,Send,Eval,Score,Runs} | application/grist.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go | mw grist key/grind/send/eval/score/runs - cmd/mw/grist.go | features/{grist{,_send,_eval,_audio},scorer}.feature |
+| Grist{Key,Grind,Send,Eval,Score,Runs} | application/grist.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go | mw grist key/grind/send/eval/score/runs - cmd/mw/grist.go | features/{grist{,_send,_eval,_audio,_concurrent},scorer}.feature |
 
 cmd/mw/root.go: the tree; cmd/mw/version.go.
