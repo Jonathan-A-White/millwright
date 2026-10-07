@@ -1,0 +1,66 @@
+{
+  "Id": "bbb42ea51bdb46d19a1d685e635fe173",
+  "RecognitionStatus": "Success",
+  "Offset": 7500000,
+  "Duration": 15000000,
+  "DisplayText": "The cap sat loudly.",
+  "NBest": [
+    {
+      "Confidence": 0.93,
+      "Lexical": "the cap sat loudly",
+      "ITN": "the cap sat loudly",
+      "MaskedITN": "the cap sat loudly",
+      "Display": "The cap sat loudly.",
+      "PronunciationAssessment": {
+        "AccuracyScore": 71.6,
+        "FluencyScore": 90.0,
+        "CompletenessScore": 100.0,
+        "PronScore": 78.2
+      },
+      "Words": [
+        {
+          "Word": "the",
+          "Offset": 7500000,
+          "Duration": 2000000,
+          "PronunciationAssessment": {"AccuracyScore": 96.0, "ErrorType": "None"},
+          "Phonemes": [
+            {"Phoneme": "ð", "PronunciationAssessment": {"AccuracyScore": 95.0, "NBestPhonemes": [{"Phoneme": "ð", "Score": 95.0}, {"Phoneme": "d", "Score": 40.0}]}},
+            {"Phoneme": "ə", "PronunciationAssessment": {"AccuracyScore": 97.0, "NBestPhonemes": [{"Phoneme": "ə", "Score": 97.0}, {"Phoneme": "ɛ", "Score": 30.0}]}}
+          ]
+        },
+        {
+          "Word": "cat",
+          "Offset": 9700000,
+          "Duration": 3000000,
+          "PronunciationAssessment": {"AccuracyScore": 48.0, "ErrorType": "Mispronunciation"},
+          "Phonemes": [
+            {"Phoneme": "k", "PronunciationAssessment": {"AccuracyScore": 90.0, "NBestPhonemes": [{"Phoneme": "k", "Score": 90.0}, {"Phoneme": "g", "Score": 20.0}]}},
+            {"Phoneme": "æ", "PronunciationAssessment": {"AccuracyScore": 35.0, "NBestPhonemes": [{"Phoneme": "ʌ", "Score": 100.0}, {"Phoneme": "æ", "Score": 35.0}]}},
+            {"Phoneme": "t", "PronunciationAssessment": {"AccuracyScore": 19.0, "NBestPhonemes": [{"Phoneme": "p", "Score": 100.0}, {"Phoneme": "t", "Score": 19.0}]}}
+          ]
+        },
+        {
+          "Word": "sat",
+          "Offset": 12800000,
+          "Duration": 2500000,
+          "PronunciationAssessment": {"AccuracyScore": 0.0, "ErrorType": "Omission"},
+          "Phonemes": [
+            {"Phoneme": "s", "PronunciationAssessment": {"AccuracyScore": 0.0}},
+            {"Phoneme": "æ", "PronunciationAssessment": {"AccuracyScore": 0.0}},
+            {"Phoneme": "t", "PronunciationAssessment": {"AccuracyScore": 0.0}}
+          ]
+        },
+        {
+          "Word": "loudly",
+          "Offset": 15400000,
+          "Duration": 4000000,
+          "PronunciationAssessment": {"AccuracyScore": 0.0, "ErrorType": "Insertion"},
+          "Phonemes": [
+            {"Phoneme": "l", "PronunciationAssessment": {"AccuracyScore": 0.0}},
+            {"Phoneme": "aʊ", "PronunciationAssessment": {"AccuracyScore": 0.0}}
+          ]
+        }
+      ]
+    }
+  ]
+}

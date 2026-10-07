@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -237,7 +238,8 @@ func newGristScoreCmd() *cobra.Command {
 			"and its accuracy, then the reading's accuracy as a whole. The engines are the ones the\n" +
 			"[scorers] table of the config file names (engines, default local); a name that is not one of\n" +
 			"them is refused, saying which are. The local engine needs ffmpeg and the scorer of\n" +
-			"contrib/scorer running at local_url. The contract is docs/scorers.md.",
+			"contrib/scorer running at local_url; the azure engine needs ffmpeg, azure_key_file (mode 0600)\n" +
+			"and azure_region, and sends the audio to Azure Speech. The contract is docs/scorers.md.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			scorers, err := newScorers()
@@ -309,6 +311,10 @@ func parseRunsSince(text string, now time.Time) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("mw grist runs: --since %q is not a duration (24h), a date (2026-10-07) or an RFC 3339 time", text)
 }
 
+// azureEndpointEnv replaces the azure engine's address, so a test can stub
+// Azure; it is not a setting.
+const azureEndpointEnv = "MW_AZURE_ENDPOINT"
+
 // newScorers is the registry of the engines the [scorers] table of the config
 // file names. An engine this mw has no adapter for is an error, so a
 // misspelt name in the config is not mistaken for one that is merely down.
@@ -322,8 +328,12 @@ func newScorers() (application.ScorerRegistry, error) {
 		switch name {
 		case "local":
 			engines[name] = scorer.NewLocal(settings.LocalURL)
+		case "azure":
+			azure := scorer.NewAzure(settings.AzureKeyFile, settings.AzureRegion)
+			azure.Endpoint = os.Getenv(azureEndpointEnv)
+			engines[name] = azure
 		default:
-			return application.ScorerRegistry{}, fmt.Errorf("the [%s] table of %s names the engine %q: this mw has no such engine (it has local)", config.ScorersTable, config.File, name)
+			return application.ScorerRegistry{}, fmt.Errorf("the [%s] table of %s names the engine %q: this mw has no such engine (it has local and azure)", config.ScorersTable, config.File, name)
 		}
 	}
 	return application.NewScorerRegistry(engines), nil
