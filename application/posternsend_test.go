@@ -231,20 +231,16 @@ func TestPosternSendSeveralFilesAreSeveralMessagesTheCaptionOnTheLast(t *testing
 	}
 }
 
-// Nothing is sent when a file cannot be: too large, of a type §14 does not
-// list, or with a question, whose shape carries no attachment.
+// Nothing is sent when a file cannot be: too large, missing, or with a question, whose shape carries no attachment.
 func TestPosternSendRefusesAnAttachmentItCannotSendBeforeSendingAnything(t *testing.T) {
 	dir := t.TempDir()
 	big := filepath.Join(dir, "big.png")
 	mustDo(t, os.WriteFile(big, bytes.Repeat([]byte{1}, 8<<20+1), 0o600))
-	exe := filepath.Join(dir, "tool.exe")
-	mustDo(t, os.WriteFile(exe, []byte("MZ"), 0o600))
 	small := filepath.Join(dir, "ok.png")
 	mustDo(t, os.WriteFile(small, []byte("png"), 0o600))
 
 	for name, req := range map[string]application.PosternSendRequest{
 		"8 MiB":          {Text: "x", Attachments: []string{small, big}},
-		".exe":           {Text: "x", Attachments: []string{exe}},
 		"decision":       {Class: "decision-needed", Text: "x", Bead: "mw-a.1", Options: []string{"A"}, Attachments: []string{small}},
 		"no such file":   {Text: "x", Attachments: []string{filepath.Join(dir, "missing.png")}},
 		"chain, several": {Text: "x", Attachments: []string{small, small}},

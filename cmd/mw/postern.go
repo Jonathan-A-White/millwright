@@ -429,9 +429,10 @@ func newPosternSendCmd() *cobra.Command {
 			"direct:<sha256>), or the Governor's newest record, as mw talk wait last heard it, did; a\n" +
 			"chain that will not take such a copy is only said. Several files are refused with --chain.\n\n" +
 			"--attach <file> (repeatable) encrypts the file to the Governor, uploads it to the\n" +
-			"backend's blob store and announces it in the message (sections 8 and 14): at most 8 MiB,\n" +
-			"typed by its extension — .png .jpg .jpeg .webp .webm .ogg .oga .opus .m4a .mp4 .mp3\n" +
-			".pdf .txt .md .log. Several files are several messages, <text> the caption on the last.\n" +
+			"backend's blob store and announces it in the message (sections 8 and 14): any file, at\n" +
+			"most 8 MiB, sent under its base name and typed by its extension (.png .jpg .webp .ogg\n" +
+			".m4a .mp3 .pdf .txt .md .log ...), else application/octet-stream. Several files are\n" +
+			"several messages, <text> the caption on the last.\n" +
 			"Refused with --bead. <text> may be left out when a file is attached.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

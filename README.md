@@ -1065,8 +1065,10 @@ below), and then a chain that fails is only said. A message sent in a bead's cha
 (`--bead-channel`; `--channel <name>` names another; `--re <txid>` answers inside a post's thread) is commented on that bead too, `MAYOR via postern, txid <id>:
 <text>`, so the whole exchange lives on the bead. `--attach <file>`
 (repeatable) encrypts a file to the Governor, uploads it to the backend's blob
-store and announces it in the message (§8, §14): at most 8 MiB, its type read
-from its extension (images, `.webm .ogg .m4a .mp3` voice, `.pdf`, `.txt`);
+store and announces it in the message (§8, §14): any file, at most 8 MiB, sent under
+its base name, its type read from its extension (images, `.webm .ogg .m4a .mp3`
+voice, `.pdf`, `.txt`), else `application/octet-stream`; `mw postern inbox`
+writes a received file under the extension of the name it carries;
 several files are several messages, the caption on the last. See
 `features/postern_send.feature`.
 

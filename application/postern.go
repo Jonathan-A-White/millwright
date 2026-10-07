@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -379,11 +378,14 @@ func (m PosternThreadedMessage) MarshalJSON() ([]byte, error) {
 // docs/protocol.md section 8: an image, encrypted exactly as the message
 // text is, uploaded whole to the postern backend's blob store. Hash is the
 // sha256, hex, of the ciphertext body as uploaded; Size is that body's own
-// byte count; Mime is one of image/png, image/jpeg or image/webp.
+// byte count; Mime is the file's type, any.
 type PosternAttachment struct {
 	Hash string `json:"hash"`
 	Size int64  `json:"size"`
 	Mime string `json:"mime"`
+	// Name is the sender's base name for the file, such as notes.md; absent
+	// from a record that carries none.
+	Name string `json:"name,omitempty"`
 }
 
 // decodePosternThreadedMessage reads text as a PosternThreadedMessage,
@@ -562,14 +564,22 @@ func (m PosternInboxMessage) files() []*PosternAttachment {
 type posternSavedFile struct {
 	Path string
 	Mime string
+	// Name is the sender's name for the file when it is a safe base name,
+	// else empty; Size is the decrypted file's byte count.
+	Name string
+	Size int
 }
 
 // posternSavedNames is saved as a bead comment and a result name it: one
-// "[image: <path>]" per file, a space between.
+// "[image: <path>]" per file, a space between; a file the sender named reads
+// "[file: <path> (notes.md)]".
 func posternSavedNames(saved []posternSavedFile) string {
 	names := make([]string, len(saved))
 	for n, file := range saved {
 		names[n] = fmt.Sprintf("[%s: %s]", posternAttachmentLabel(file.Mime), file.Path)
+		if file.Name != "" {
+			names[n] = fmt.Sprintf("[%s: %s (%s)]", posternAttachmentLabel(file.Mime), file.Path, file.Name)
+		}
 	}
 	return strings.Join(names, " ")
 }
@@ -857,51 +867,98 @@ func (i PosternInbox) attachmentOutcome(ctx context.Context, m PosternInboxMessa
 		if len(files) > 1 {
 			name = fmt.Sprintf("%s-%d", name, n+1)
 		}
-		path, err := i.downloadAttachment(ctx, file, name)
+		path, size, err := i.downloadAttachment(ctx, file, name)
 		if err != nil {
 			lines = append(lines, err.Error())
 			continue
 		}
-		saved = append(saved, posternSavedFile{Path: path, Mime: file.Mime})
+		saved = append(saved, posternSavedFile{Path: path, Mime: file.Mime, Name: posternSafeFileName(file.Name), Size: size})
 		if i.isUntranscribedVoiceNote(m) {
 			lines = append(lines, fmt.Sprintf("%s (%s)", path, posternNotTranscribed))
 			continue
 		}
-		lines = append(lines, path)
+		lines = append(lines, posternSavedLine(saved[len(saved)-1]))
 	}
 	return strings.Join(lines, "\n"), saved
 }
 
+// posternSavedLine is what Run prints for a written file: its path alone, or,
+// when the sender named it, "<path> (<name>, <mime>, <size> bytes)".
+func posternSavedLine(file posternSavedFile) string {
+	if file.Name == "" {
+		return file.Path
+	}
+	return fmt.Sprintf("%s (%s, %s, %d bytes)", file.Path, file.Name, strings.TrimSpace(file.Mime), file.Size)
+}
+
+// posternSafeFileName is name when it is a plain base name an attachment may
+// be called — no directory part, no control characters, not "." or ".." —
+// else empty. It is only ever shown, never made into a path.
+func posternSafeFileName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" || name == "." || name == ".." || len(name) > 255 || strings.ContainsAny(name, `/\`) {
+		return ""
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return ""
+		}
+	}
+	return name
+}
+
+// posternNamedExtension is the extension of the attachment's own name when it
+// is safe to write under: a base name whose extension is one to ten ASCII
+// letters and digits, lower-cased; else empty.
+func posternNamedExtension(name string) string {
+	name = posternSafeFileName(name)
+	ext := strings.TrimPrefix(filepath.Ext(name), ".")
+	if name == "" || ext == "" || len(ext) > 10 {
+		return ""
+	}
+	for _, r := range ext {
+		if r > unicode.MaxASCII || !(unicode.IsLetter(r) || unicode.IsDigit(r)) {
+			return ""
+		}
+	}
+	return "." + strings.ToLower(ext)
+}
+
 // downloadAttachment downloads attachment, checks its sha256 against the
 // hash it was announced under, decrypts it with this host's key, and writes
-// it 0600 to AttachmentDir, named name and an extension by the attachment's
-// mime, reporting the path it wrote. A hash mismatch is
+// it 0600 to AttachmentDir, named name and the extension of the attachment's
+// own name when that is safe, else of its mime, reporting the path it wrote
+// and the file's size. A hash mismatch is
 // reported as "attachment refused: hash mismatch" and writes nothing.
-func (i PosternInbox) downloadAttachment(ctx context.Context, attachment *PosternAttachment, name string) (string, error) {
+func (i PosternInbox) downloadAttachment(ctx context.Context, attachment *PosternAttachment, name string) (string, int, error) {
 	raw, err := i.Postern.Blob(ctx, attachment.Hash)
 	if err != nil {
-		return "", fmt.Errorf("downloading the attachment: %w", err)
+		return "", 0, fmt.Errorf("downloading the attachment: %w", err)
 	}
 	sum := sha256.Sum256(raw)
 	if !strings.EqualFold(hex.EncodeToString(sum[:]), strings.TrimSpace(attachment.Hash)) {
-		return "", fmt.Errorf("attachment refused: hash mismatch")
+		return "", 0, fmt.Errorf("attachment refused: hash mismatch")
 	}
 	privKey, err := i.Keys.PrivateKeyWIF()
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	plain, _, err := i.Cipher.Decrypt(privKey, base64.StdEncoding.EncodeToString(raw))
 	if err != nil {
-		return "", fmt.Errorf("decrypting the attachment: %w", err)
+		return "", 0, fmt.Errorf("decrypting the attachment: %w", err)
 	}
 	if err := os.MkdirAll(i.AttachmentDir, 0o700); err != nil {
-		return "", fmt.Errorf("making %s: %w", i.AttachmentDir, err)
+		return "", 0, fmt.Errorf("making %s: %w", i.AttachmentDir, err)
 	}
-	path := filepath.Join(i.AttachmentDir, name+posternAttachmentExtension(attachment.Mime))
+	ext := posternNamedExtension(attachment.Name)
+	if ext == "" {
+		ext = posternAttachmentExtension(attachment.Mime)
+	}
+	path := filepath.Join(i.AttachmentDir, name+ext)
 	if err := os.WriteFile(path, []byte(plain), 0o600); err != nil {
-		return "", fmt.Errorf("writing the attachment: %w", err)
+		return "", 0, fmt.Errorf("writing the attachment: %w", err)
 	}
-	return path, nil
+	return path, len(plain), nil
 }
 
 // posternAttachmentExtension is the file extension an attachment of mime is
@@ -1492,8 +1549,10 @@ type PosternSendRequest struct {
 	// docs/protocol.md sections 8 and 14: each is encrypted to the
 	// Governor, uploaded to the backend's blob store and announced in a
 	// message of its own, the caption (Text) on the last. Each must be at
-	// most PosternAttachmentLimit bytes, of a type PosternAttachmentMimes
-	// names by its extension. Refused with a question.
+	// most PosternAttachmentLimit bytes, of any type: PosternAttachmentMimes
+	// names the mime of a known extension, else application/octet-stream, and
+	// the file's base name travels as the attachment's name. Refused with a
+	// question.
 	Attachments []string
 
 	// Re and Role are section 14's annotations: the txid of the message
@@ -1537,8 +1596,8 @@ const (
 const PosternAttachmentLimit = 8 << 20
 
 // PosternAttachmentMimes names the type of each file extension mw postern
-// send attaches, from the types postern's docs/protocol.md section 14 lists;
-// any other extension is refused.
+// send knows, from the types postern's docs/protocol.md section 14 lists; a
+// file of any other extension is sent as application/octet-stream.
 var PosternAttachmentMimes = map[string]string{
 	".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
 	".webm": "audio/webm", ".ogg": "audio/ogg", ".oga": "audio/ogg", ".opus": "audio/ogg",
@@ -1637,14 +1696,13 @@ type posternFile struct {
 }
 
 // readPosternFiles reads every file req attaches, refusing the lot before
-// anything is sent when one cannot be: missing, too large, or of a type
-// section 14 does not list.
+// anything is sent when one cannot be: missing or too large.
 func readPosternFiles(paths []string) ([]posternFile, error) {
 	files := make([]posternFile, 0, len(paths))
 	for _, path := range paths {
 		mime, ok := PosternAttachmentMimes[strings.ToLower(filepath.Ext(path))]
 		if !ok {
-			return nil, fmt.Errorf("mw postern send: %s is not a type postern carries: attach one of %s", path, strings.Join(posternAttachmentExtensions(), " "))
+			mime = "application/octet-stream"
 		}
 		info, err := os.Stat(path)
 		if err != nil {
@@ -1660,17 +1718,6 @@ func readPosternFiles(paths []string) ([]posternFile, error) {
 		files = append(files, posternFile{path: path, data: data, mime: mime})
 	}
 	return files, nil
-}
-
-// posternAttachmentExtensions is every extension PosternAttachmentMimes
-// names, sorted, for a refusal a person reads.
-func posternAttachmentExtensions() []string {
-	exts := make([]string, 0, len(PosternAttachmentMimes))
-	for ext := range PosternAttachmentMimes {
-		exts = append(exts, ext)
-	}
-	sort.Strings(exts)
-	return exts
 }
 
 // PosternSend sends a message to the Governor: by the direct channel (the
@@ -1951,7 +1998,7 @@ func (s PosternSend) upload(ctx context.Context, file posternFile) (*PosternAtta
 	if err != nil {
 		return nil, fmt.Errorf("uploading %s: %w", file.path, err)
 	}
-	return &PosternAttachment{Hash: hash, Size: size, Mime: file.mime}, nil
+	return &PosternAttachment{Hash: hash, Size: size, Mime: file.mime, Name: filepath.Base(file.path)}, nil
 }
 
 // PosternSummaryRunes is the most runes a direct record's summary holds.
