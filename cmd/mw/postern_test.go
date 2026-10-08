@@ -453,7 +453,7 @@ func TestPosternInboxDownloadsDecryptsAndWritesAnAttachment(t *testing.T) {
 	if !blobRequested {
 		t.Fatal("expected GET /api/blobs/{hash} to be requested")
 	}
-	if !strings.HasPrefix(blobAuth, "Postern ") {
+	if !strings.HasPrefix(blobAuth, "Postern2 ") {
 		t.Fatalf("expected the blob request's Authorization header to be signed, got %q", blobAuth)
 	}
 

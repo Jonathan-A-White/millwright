@@ -35,8 +35,14 @@ var _ application.Prompts = (*HTTP)(nil)
 const httpTimeout = 60 * time.Second
 
 // posternAuthScheme is the Authorization header's scheme token, postern's
-// docs/api.md Authentication section: "Postern <pubkeyHex>:<nonceHex>:<sigHex>".
-const posternAuthScheme = "Postern "
+// docs/api.md Authentication section: "Postern2 <pubkeyHex>:<nonceHex>:<sigHex>",
+// the signature over the whole request (the v2 message), not the nonce alone.
+const posternAuthScheme = "Postern2 "
+
+// posternNonceReason is the reason code of the backend's 401 for a nonce it
+// does not accept (unknown, expired, used, issued by another host or before
+// it started). Nothing has been acted on when it is refused.
+const posternNonceReason = "nonce"
 
 // posternNoLicenceError is the postern backend's own error text (its
 // server/internal/api/handlers.go, requireLicence) when the signed, verified
@@ -45,20 +51,20 @@ const posternNoLicenceError = "no licence held"
 
 // ChallengeSigner proves control of a key to the postern backend, postern's
 // docs/api.md Authentication section: its own compressed public key, and a
-// signature over a challenge nonce the backend issued. KeyFile is the real
-// implementation.
+// signature over a request's v2 message, which carries a challenge nonce the
+// backend issued. KeyFile is the real implementation.
 type ChallengeSigner interface {
 	// PublicKey reports the caller's compressed public key, hex.
 	PublicKey() (pubKeyHex string, address string, err error)
-	// SignNonce signs nonce, reporting a DER-encoded ECDSA signature, hex.
-	SignNonce(nonce string) (sigHex string, err error)
+	// SignMessage signs message, reporting a DER-encoded ECDSA signature, hex.
+	SignMessage(message []byte) (sigHex string, err error)
 }
 
 // HTTP is the postern backend's HTTP API (postern's docs/api.md), at base —
 // config postern_backend, the desktop's backend over WireGuard. Every
 // endpoint but GET /api/challenge and /healthz requires proof that the
 // caller holds a licensed key, so every call here first asks the backend for
-// a fresh challenge nonce and signs it with keys.
+// a fresh challenge nonce and signs the request, nonce included, with keys.
 type HTTP struct {
 	base   string
 	client *http.Client
@@ -386,14 +392,17 @@ func (h *HTTP) authFetch(ctx context.Context, method, path string, body []byte) 
 
 // authFetchAs is authFetch with a body of contentType rather than JSON.
 //
-// A GET that times out is tried once more, from a fresh challenge (the first
-// one was spent): a backend just restarted walks its licence chain on the
-// first call, outlasting the timeout, and has the answer cached for the
-// second. A POST or DELETE is never repeated, and neither is a call whose
-// own ctx is done.
+// A call is tried once more, from a fresh challenge (the first one was
+// spent), in two cases, and never more than once in all. A 401 with reason
+// "nonce" is refused before anything is acted on, whatever the method: the
+// home restarted, or the standby issued the challenge. A GET that times out:
+// a backend just restarted walks its licence chain on the first call,
+// outlasting the timeout, and has the answer cached for the second. A POST
+// or DELETE is never repeated on a timeout, and no call whose own ctx is
+// done is repeated.
 func (h *HTTP) authFetchAs(ctx context.Context, method, path string, body []byte, contentType string) ([]byte, error) {
 	pubKeyHex, raw, err := h.authFetchOnce(ctx, method, path, body, contentType)
-	if err != nil && method == http.MethodGet && ctx.Err() == nil && isTimeout(err) {
+	if err != nil && ctx.Err() == nil && (isNonceRefusal(err) || method == http.MethodGet && isTimeout(err)) {
 		pubKeyHex, raw, err = h.authFetchOnce(ctx, method, path, body, contentType)
 	}
 	if err != nil {
@@ -412,10 +421,16 @@ func isTimeout(err error) bool {
 	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
+// isNonceRefusal reports whether err is the backend's 401 with reason "nonce".
+func isNonceRefusal(err error) bool {
+	var status *statusError
+	return errors.As(err, &status) && status.code == http.StatusUnauthorized && status.reason == posternNonceReason
+}
+
 // authFetchOnce is one challenge, signature and call, reporting the caller's
 // public key beside the raw body.
 func (h *HTTP) authFetchOnce(ctx context.Context, method, path string, body []byte, contentType string) (pubKeyHex string, raw []byte, err error) {
-	pubKeyHex, header, err := h.authHeader(ctx)
+	pubKeyHex, header, err := h.authHeader(ctx, method, path, body)
 	if err != nil {
 		return "", nil, err
 	}
@@ -450,33 +465,58 @@ func (h *HTTP) DeleteBlob(ctx context.Context, hash string) error {
 	return err
 }
 
-// statusError is the backend answering outside 2xx: its status, and what it
-// said.
+// statusError is the backend answering outside 2xx: its status, what it said,
+// and the reason code of a refusal (docs/api.md), empty when it named none.
 type statusError struct {
-	code int
-	said string
+	code   int
+	said   string
+	reason string
 }
 
 func (e *statusError) Error() string { return e.said }
 
-// authHeader asks the backend for a fresh challenge nonce and signs it with
-// keys, reporting the caller's own public key alongside the Authorization
-// header value it built, postern's docs/api.md Authentication section:
-// "Postern <pubkeyHex>:<nonceHex>:<sigHex>".
-func (h *HTTP) authHeader(ctx context.Context) (pubKeyHex, header string, err error) {
+// authHeader asks the backend for a fresh challenge nonce and signs the
+// request about to be sent with keys, reporting the caller's own public key
+// alongside the Authorization header value it built, postern's docs/api.md
+// Authentication section: "Postern2 <pubkeyHex>:<nonceHex>:<sigHex>". The
+// signature covers method, the request target exactly as it goes on the
+// request line, the body's exact bytes (none hashes the empty string) and the
+// nonce.
+func (h *HTTP) authHeader(ctx context.Context, method, path string, body []byte) (pubKeyHex, header string, err error) {
 	pubKeyHex, _, err = h.keys.PublicKey()
 	if err != nil {
 		return "", "", fmt.Errorf("reading the postern key to authenticate to the backend: %w", err)
+	}
+	target, err := h.requestTarget(path)
+	if err != nil {
+		return "", "", err
 	}
 	nonce, err := h.challenge(ctx)
 	if err != nil {
 		return "", "", err
 	}
-	sigHex, err := h.keys.SignNonce(nonce)
+	sigHex, err := h.keys.SignMessage(signedMessage(method, target, body, nonce))
 	if err != nil {
 		return "", "", fmt.Errorf("signing the postern backend's challenge: %w", err)
 	}
 	return pubKeyHex, posternAuthScheme + pubKeyHex + ":" + nonce + ":" + sigHex, nil
+}
+
+// requestTarget is path as the HTTP client puts it on the request line:
+// percent-encodings as written, the query included.
+func (h *HTTP) requestTarget(path string) (string, error) {
+	u, err := url.Parse(h.base + path)
+	if err != nil {
+		return "", fmt.Errorf("asking the postern backend at %s: %w", h.base, err)
+	}
+	return u.RequestURI(), nil
+}
+
+// signedMessage is the v2 message of postern's docs/api.md Authentication
+// section: five parts joined by a single line feed, none at the end.
+func signedMessage(method, target string, body []byte, nonce string) []byte {
+	bodyHash := sha256.Sum256(body)
+	return []byte(strings.Join([]string{"postern-v2", method, target, hex.EncodeToString(bodyHash[:]), nonce}, "\n"))
 }
 
 // challenge asks the backend for a nonce to sign: GET /api/challenge, the one
@@ -544,12 +584,13 @@ func (h *HTTP) fetchAs(ctx context.Context, method, path string, body []byte, au
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		var said struct {
-			Error string `json:"error"`
+			Error  string `json:"error"`
+			Reason string `json:"reason"`
 		}
 		if json.Unmarshal(raw, &said) != nil || said.Error == "" {
 			said.Error = strings.TrimSpace(string(raw))
 		}
-		return nil, &statusError{code: resp.StatusCode, said: fmt.Sprintf("the postern backend at %s said %d to %s %s: %s", h.base, resp.StatusCode, method, path, said.Error)}
+		return nil, &statusError{code: resp.StatusCode, reason: said.Reason, said: fmt.Sprintf("the postern backend at %s said %d to %s %s: %s", h.base, resp.StatusCode, method, path, said.Error)}
 	}
 	return raw, nil
 }
@@ -559,7 +600,7 @@ func (h *HTTP) fetchAs(ctx context.Context, method, path string, body []byte, au
 // a message's seq both come back as the event's Seq; a comment (the ping) and
 // an event it does not know are skipped.
 func (h *HTTP) Events(ctx context.Context, onEvent func(application.PosternEvent) error) error {
-	_, header, err := h.authHeader(ctx)
+	_, header, err := h.authHeader(ctx, http.MethodGet, "/api/events", nil)
 	if err != nil {
 		return err
 	}

@@ -88,13 +88,16 @@ func serveWithKeys(t *testing.T, answers map[string]answer, keys *postern.KeyFil
 }
 
 // verifyPosternAuthorization checks header against docs/api.md's
-// Authentication section: "Postern <pubkeyHex>:<nonceHex>:<sigHex>", the
+// Authentication section: "Postern2 <pubkeyHex>:<nonceHex>:<sigHex>", the
 // pubkey matching wantPubKeyHex, the nonce matching wantNonce, and the
 // signature a valid DER-encoded ECDSA signature by that key over
-// sha256(nonce).
-func verifyPosternAuthorization(t *testing.T, header, wantPubKeyHex, wantNonce string) {
+// sha256 of the v2 message for the request that carried it: "postern-v2",
+// the method, the request target as sent, hex(sha256(body)) and the nonce,
+// joined by single line feeds.
+func verifyPosternAuthorization(t *testing.T, req *http.Request, body string, wantPubKeyHex, wantNonce string) {
 	t.Helper()
-	const scheme = "Postern "
+	header := req.Header.Get("Authorization")
+	const scheme = "Postern2 "
 	if !strings.HasPrefix(header, scheme) {
 		t.Fatalf("expected an Authorization header starting %q, got %q", scheme, header)
 	}
@@ -121,9 +124,11 @@ func verifyPosternAuthorization(t *testing.T, header, wantPubKeyHex, wantNonce s
 	if err != nil {
 		t.Fatalf("parsing the public key: %v", err)
 	}
-	hash := sha256.Sum256([]byte(nonce))
+	bodyHash := sha256.Sum256([]byte(body))
+	message := strings.Join([]string{"postern-v2", req.Method, req.RequestURI, hex.EncodeToString(bodyHash[:]), nonce}, "\n")
+	hash := sha256.Sum256([]byte(message))
 	if !sig.Verify(hash[:], pubKey) {
-		t.Fatalf("the signature does not verify over sha256(%q) by %s", nonce, pubKeyHex)
+		t.Fatalf("the signature does not verify by %s over sha256 of the v2 message %q", pubKeyHex, message)
 	}
 }
 
@@ -349,7 +354,7 @@ func TestEveryCallSignsAFreshChallengeWithThePosternKey(t *testing.T) {
 	if got := challengeReq.Header.Get("Authorization"); got != "" {
 		t.Fatalf("expected /api/challenge to carry no Authorization header, got %q", got)
 	}
-	verifyPosternAuthorization(t, balanceReq.Header.Get("Authorization"), pubKeyHex, b.issuedNonces[0])
+	verifyPosternAuthorization(t, balanceReq, b.bodies[1], pubKeyHex, b.issuedNonces[0])
 }
 
 // A nonce is consumed the moment it is presented (docs/api.md), so two calls
@@ -370,8 +375,8 @@ func TestEachCallFetchesAndSignsItsOwnChallenge(t *testing.T) {
 	if len(b.issuedNonces) != 2 || b.issuedNonces[0] == b.issuedNonces[1] {
 		t.Fatalf("expected two distinct issued nonces, got %v", b.issuedNonces)
 	}
-	verifyPosternAuthorization(t, b.requests[1].Header.Get("Authorization"), pubKeyHex, b.issuedNonces[0])
-	verifyPosternAuthorization(t, b.requests[3].Header.Get("Authorization"), pubKeyHex, b.issuedNonces[1])
+	verifyPosternAuthorization(t, b.requests[1], b.bodies[1], pubKeyHex, b.issuedNonces[0])
+	verifyPosternAuthorization(t, b.requests[3], b.bodies[3], pubKeyHex, b.issuedNonces[1])
 }
 
 // A key that holds no licence is the backend's own 401 "no licence held"
@@ -419,7 +424,8 @@ func TestDeliverPostsTheRecordScriptAndReportsItsDirectID(t *testing.T) {
 		t.Fatal("the fixture's record script does not decode")
 	}
 	for _, status := range []int{201, 200} {
-		b, backend := serve(t, map[string]answer{"POST /api/messages": {status, `{"txid":"direct:ab12","seq":7}`}})
+		keys, pubKeyHex := testKeyAndAddress(t)
+		b, backend := serveWithKeys(t, map[string]answer{"POST /api/messages": {status, `{"txid":"direct:ab12","seq":7}`}}, keys)
 
 		txid, err := backend.Deliver(context.Background(), payload)
 		if err != nil {
@@ -428,9 +434,10 @@ func TestDeliverPostsTheRecordScriptAndReportsItsDirectID(t *testing.T) {
 		if txid != "direct:ab12" {
 			t.Fatalf("expected the direct id, got %q", txid)
 		}
-		if len(b.requests) != 2 || !strings.HasPrefix(b.requests[1].Header.Get("Authorization"), "Postern ") {
+		if len(b.requests) != 2 {
 			t.Fatalf("expected a challenge then a signed POST, got %d requests", len(b.requests))
 		}
+		verifyPosternAuthorization(t, b.requests[1], b.bodies[1], pubKeyHex, b.issuedNonces[0])
 		var body struct {
 			ScriptHex string `json:"scriptHex"`
 		}
@@ -524,7 +531,7 @@ func TestDeleteBlobDeletesAndAGoneBlobIsNoError(t *testing.T) {
 		t.Fatalf("deleting a blob: %v", err)
 	}
 	last := b.requests[len(b.requests)-1]
-	if last.Method != http.MethodDelete || !strings.HasPrefix(last.Header.Get("Authorization"), "Postern ") {
+	if last.Method != http.MethodDelete || !strings.HasPrefix(last.Header.Get("Authorization"), "Postern2 ") {
 		t.Fatalf("expected a proven DELETE, got %s %q", last.Method, last.Header.Get("Authorization"))
 	}
 
@@ -551,7 +558,7 @@ func TestMeReportsTheCallerAndTheMill(t *testing.T) {
 	if want := (application.PosternMe{Pubkey: "02aa", Mill: "03bb", Network: "testnet"}); me != want {
 		t.Fatalf("expected %+v, got %+v", want, me)
 	}
-	if len(b.requests) != 2 || !strings.HasPrefix(b.requests[1].Header.Get("Authorization"), "Postern ") {
+	if len(b.requests) != 2 || !strings.HasPrefix(b.requests[1].Header.Get("Authorization"), "Postern2 ") {
 		t.Fatalf("expected a challenge then a signed GET, got %d requests", len(b.requests))
 	}
 }
@@ -584,7 +591,7 @@ func TestPromptsAreSavedReadAndDeletedThroughTheBackend(t *testing.T) {
 		t.Fatalf("saving a prompt: %v", err)
 	}
 	put := b.requests[len(b.requests)-1]
-	if put.Method != http.MethodPut || !strings.HasPrefix(put.Header.Get("Authorization"), "Postern ") {
+	if put.Method != http.MethodPut || !strings.HasPrefix(put.Header.Get("Authorization"), "Postern2 ") {
 		t.Fatalf("expected a proven PUT, got %s %q", put.Method, put.Header.Get("Authorization"))
 	}
 	var sent map[string]any
@@ -644,5 +651,131 @@ func TestPromptListReadsTheBackendsBareArray(t *testing.T) {
 	list, err = empty.List(context.Background())
 	if err != nil || len(list) != 0 {
 		t.Fatalf("expected no prompts and no error, got %+v err %v", list, err)
+	}
+}
+
+// The v2 message covers the request's own target, query included, and the
+// body's exact bytes (docs/api.md): a GET with a query is signed with it, and
+// a GET with no body hashes the empty string.
+func TestAGetWithAQueryAndNoBodyIsSignedOverItsTargetAndTheEmptyBody(t *testing.T) {
+	keys, pubKeyHex := testKeyAndAddress(t)
+	b, backend := serveWithKeys(t, map[string]answer{
+		"GET /api/messages?since=3&limit=200": {200, `{"records":[],"next":3}`},
+	}, keys)
+
+	if _, err := backend.Messages(context.Background(), 3); err != nil {
+		t.Fatalf("reading the messages: %v", err)
+	}
+
+	if len(b.requests) != 2 || b.requests[1].RequestURI != "/api/messages?since=3&limit=200" {
+		t.Fatalf("expected a challenge then GET /api/messages?since=3&limit=200, got %d requests", len(b.requests))
+	}
+	verifyPosternAuthorization(t, b.requests[1], "", pubKeyHex, b.issuedNonces[0])
+	if got := b.requests[1].Header.Get("Authorization"); !strings.HasPrefix(got, "Postern2 ") {
+		t.Fatalf("expected the Postern2 scheme, got %q", got)
+	}
+}
+
+// A percent-encoding in the target is signed as it goes on the request line.
+func TestATargetIsSignedAsItIsWrittenOnTheRequestLine(t *testing.T) {
+	keys, pubKeyHex := testKeyAndAddress(t)
+	b, backend := serveWithKeys(t, map[string]answer{
+		"GET /api/prompts":              {200, `[]`},
+		"DELETE /api/prompts/a%20b%2Fc": {204, ``},
+	}, keys)
+
+	if err := backend.Delete(context.Background(), "a b/c"); err != nil {
+		t.Fatalf("deleting the prompt: %v", err)
+	}
+
+	last := b.requests[len(b.requests)-1]
+	if last.RequestURI != "/api/prompts/a%20b%2Fc" {
+		t.Fatalf("expected the encoded target on the request line, got %q", last.RequestURI)
+	}
+	verifyPosternAuthorization(t, last, "", pubKeyHex, b.issuedNonces[0])
+}
+
+// nonceBackend stands in for a backend that refuses the first refuseFirst
+// signed requests with 401 reason "nonce" (a restart, or the standby's
+// challenge reaching the home) and answers the rest 200 with {}.
+func nonceBackend(t *testing.T, refuseFirst int) (*backend, *postern.HTTP) {
+	t.Helper()
+	keys, _ := testKeyAndAddress(t)
+	b := &backend{}
+	var signed int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		b.requests = append(b.requests, r)
+		b.bodies = append(b.bodies, string(body))
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet && r.URL.Path == "/api/challenge" {
+			nonce := fmt.Sprintf("nonce-%d", len(b.issuedNonces)+1)
+			b.issuedNonces = append(b.issuedNonces, nonce)
+			fmt.Fprintf(w, `{"nonce":%q}`, nonce)
+			return
+		}
+		signed++
+		if signed <= refuseFirst {
+			w.WriteHeader(http.StatusUnauthorized)
+			io.WriteString(w, `{"error":"nonce unknown, expired or used","reason":"nonce"}`)
+			return
+		}
+		io.WriteString(w, `{"txid":"direct:ab12","seq":1}`)
+	}))
+	t.Cleanup(srv.Close)
+	return b, postern.NewHTTP(srv.URL, keys)
+}
+
+// A nonce refusal acted on nothing, so the call is tried once more from a
+// fresh challenge, whatever its method.
+func TestANonceRefusalIsRetriedOnceFromAFreshChallenge(t *testing.T) {
+	for _, call := range []struct {
+		name string
+		do   func(*postern.HTTP) error
+	}{
+		{"a POST", func(h *postern.HTTP) error { _, err := h.Deliver(context.Background(), []byte(`{"v":1}`)); return err }},
+		{"a GET", func(h *postern.HTTP) error { _, err := h.Messages(context.Background(), 0); return err }},
+	} {
+		b, backend := nonceBackend(t, 1)
+
+		if err := call.do(backend); err != nil {
+			t.Fatalf("%s: expected the second try to answer, got: %v", call.name, err)
+		}
+		if len(b.requests) != 4 || len(b.issuedNonces) != 2 {
+			t.Fatalf("%s: expected two challenges and two signed requests, got %d requests and %d nonces", call.name, len(b.requests), len(b.issuedNonces))
+		}
+		for i, wantNonce := range b.issuedNonces {
+			if got := b.requests[2*i+1].Header.Get("Authorization"); !strings.Contains(got, ":"+wantNonce+":") {
+				t.Fatalf("%s: expected try %d to carry %s, got %q", call.name, i+1, wantNonce, got)
+			}
+		}
+	}
+}
+
+func TestASecondNonceRefusalIsTheError(t *testing.T) {
+	b, backend := nonceBackend(t, 2)
+
+	_, err := backend.Deliver(context.Background(), []byte(`{"v":1}`))
+	if err == nil || !strings.Contains(err.Error(), "401") || !strings.Contains(err.Error(), "nonce unknown") {
+		t.Fatalf("expected the backend's second nonce refusal, got: %v", err)
+	}
+	if len(b.requests) != 4 {
+		t.Fatalf("expected two challenges and two signed requests and no more, got %d requests", len(b.requests))
+	}
+}
+
+// Only the reason "nonce" is retried: a bad signature is the same bad
+// signature the next time.
+func TestAnotherUnauthorizedReasonIsNotRetried(t *testing.T) {
+	keys, _ := testKeyAndAddress(t)
+	b, backend := serveWithKeys(t, map[string]answer{
+		"GET /api/messages?since=0&limit=200": {401, `{"error":"signature does not verify","reason":"signature"}`},
+	}, keys)
+
+	if _, err := backend.Messages(context.Background(), 0); err == nil {
+		t.Fatal("expected the refusal to be returned")
+	}
+	if len(b.requests) != 2 {
+		t.Fatalf("expected one challenge and one signed request, got %d requests", len(b.requests))
 	}
 }

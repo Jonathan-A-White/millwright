@@ -307,17 +307,18 @@ func (k *KeyFile) MarkSpent(utxos []application.PosternUtxo) error {
 	return nil
 }
 
-// SignNonce signs nonce with the postern key, for the Authorization header
-// postern's docs/api.md Authentication section describes: a DER-encoded
-// ECDSA signature over sha256(nonce) (the nonce string's UTF-8 bytes, a
-// single hash, not double), matching @bsv/sdk's PrivateKey.sign(nonceString)
-// and Signature.toDER().
-func (k *KeyFile) SignNonce(nonce string) (string, error) {
+// SignMessage signs message with the postern key, for the Authorization
+// header postern's docs/api.md Authentication section describes: a
+// DER-encoded ECDSA signature over sha256(message) (a single hash, not
+// double), matching @bsv/sdk's PrivateKey.sign(message) and
+// Signature.toDER(). The caller builds the v2 message; this signs whatever
+// bytes it is handed.
+func (k *KeyFile) SignMessage(message []byte) (string, error) {
 	priv, err := k.privateKey()
 	if err != nil {
 		return "", err
 	}
-	hash := sha256.Sum256([]byte(nonce))
+	hash := sha256.Sum256(message)
 	sig, err := priv.Sign(hash[:])
 	if err != nil {
 		return "", fmt.Errorf("signing the postern backend's challenge: %w", err)
