@@ -37,6 +37,9 @@ type fakeRetryLanding struct {
 	RemoveErr error
 	DeleteErr error
 
+	// NoWorktree makes Exists say neither the worktree nor the branch is there.
+	NoWorktree bool
+
 	bundled, removed, branchDeleted bool
 }
 
@@ -50,7 +53,7 @@ func (f *fakeRetryLanding) Add(context.Context, string, string, string, string) 
 	return nil
 }
 func (f *fakeRetryLanding) Exists(context.Context, string, string, string) (bool, error) {
-	return false, nil
+	return !f.NoWorktree, nil
 }
 func (f *fakeRetryLanding) Remove(context.Context, string, string, string) error { return nil }
 
@@ -230,6 +233,39 @@ func TestRetryWithNoCommitsAheadSkipsTheBundleAndGivesTheClaimBack(t *testing.T)
 // worktree, branch and claim untouched, and the printed report must say only
 // that the bundle was made — not that the vault was pushed, the worktree and
 // branch are gone, or the claim was given back.
+// TestRetryOfAStoryWithNoWorktreeReadsNothingAndGivesTheClaimBack pins
+// mw-gq6.296: a story refused at pour never had a worktree or branch cut, so a
+// retry must not read one (git status on a missing directory fails) but give the
+// claim back and say there was nothing to keep.
+func TestRetryOfAStoryWithNoWorktreeReadsNothingAndGivesTheClaimBack(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	aRetryStory(t, tracker, "mw-gq6.1")
+	landing := &fakeRetryLanding{NoWorktree: true, UncommittedErr: context.DeadlineExceeded}
+	files := &apptest.FakeVaultFiles{}
+	var out strings.Builder
+
+	report, err := aRetry(tracker, landing, files, &out).Run(context.Background(), "mw-gq6.1")
+	if err != nil {
+		t.Fatalf("expected the retry to succeed, got: %v\n%s", err, out.String())
+	}
+	if !report.NoWorktree || !report.ClaimReleased {
+		t.Errorf("expected NoWorktree and ClaimReleased, got %+v", report)
+	}
+	if report.WorktreeGone || report.BranchGone || report.Bundled || landing.removed || landing.bundled {
+		t.Errorf("expected no worktree or branch touched, got %+v", report)
+	}
+	if !strings.Contains(out.String(), "no worktree or branch") {
+		t.Errorf("expected the report to say so, got %q", out.String())
+	}
+	detail, err := tracker.ShowStory(context.Background(), "mw-gq6.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Status != application.StatusOpen || detail.Assignee != "" {
+		t.Errorf("expected the story open and unassigned, got %q %q", detail.Status, detail.Assignee)
+	}
+}
+
 func TestRetryThatFailsPartwayReportsOnlyWhatItDid(t *testing.T) {
 	tracker := apptest.NewFakeTracker()
 	aRetryStory(t, tracker, "mw-gq6.1")

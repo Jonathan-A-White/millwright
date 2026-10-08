@@ -138,6 +138,10 @@ func salvageBranch(ctx context.Context, worktrees Worktrees, landing Landing, fi
 // that host, so the claim is given back and a comment says so, and that host's
 // next dispatch bundles what it left (mw-gq6.256).
 //
+// A story with no worktree and no branch here at all — one refused at pour never
+// got that far — has nothing to read or bundle either: the claim is given back
+// and a comment says so (mw-gq6.296).
+//
 // It never resets a story's attempts count, and a story already started
 // MaxAttempts times is refused rather than retried — that is the Mayor's
 // decision to make, not a retry's to take for them.
@@ -200,6 +204,11 @@ type RetryReport struct {
 	// skipped, and the retry went straight on to taking the worktree and branch
 	// away.
 	NothingAhead bool
+
+	// NoWorktree says neither the story's worktree nor its branch was ever made
+	// here — a story refused at pour never got that far — so there was nothing
+	// to read or bundle, and the retry went straight on to giving the claim back.
+	NoWorktree bool
 
 	// Bundled says the branch's commits were captured into a bundle that
 	// verified. BranchCommit and BundlePath are only meaningful when this is
@@ -319,6 +328,17 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 		return report, fmt.Errorf("retrying %s: fetching the rig: %w", storyID, err)
 	}
 
+	// A story refused at pour never had a worktree or a branch cut: there is
+	// nothing to read, bundle or remove, so only the claim is given back.
+	there, err := r.Worktrees.Exists(ctx, rigDir, report.Worktree, report.Branch)
+	if err != nil {
+		return report, fmt.Errorf("retrying %s: checking whether %s or %s is there: %w", storyID, report.Worktree, report.Branch, err)
+	}
+	if !there {
+		report.NoWorktree = true
+		return r.giveBack(ctx, report, "there was no worktree or branch of it on "+r.Host+" to keep: none was ever made")
+	}
+
 	base := StartPoint(r.remote(), path.Branch)
 	salvaged, err := salvageBranch(ctx, r.Worktrees, r.Landing, r.Files, r.Vault, rigDir, storyID, report.Worktree, report.Branch, base, attempt)
 	report.CommittedLeftovers = salvaged.CommittedLeftovers
@@ -334,14 +354,30 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	report.WorktreeGone = true
 	report.BranchGone = true
 
+	return r.giveBack(ctx, report, "")
+}
+
+// giveBack gives the claim back once whatever worktree and branch there were
+// are dealt with, and comments on the story saying what the retry did. nothing,
+// when not empty, says why there was nothing to keep.
+func (r Retry) giveBack(ctx context.Context, report RetryReport, nothing string) (RetryReport, error) {
+	storyID, attempt := report.StoryID, report.Attempt
 	if err := r.Tracker.ReleaseClaim(ctx, storyID); err != nil {
+		if report.NoWorktree {
+			return report, fmt.Errorf("retrying %s: the claim could not be given back: %w", storyID, err)
+		}
 		return report, fmt.Errorf("retrying %s: the worktree and branch are gone, but the claim could not be given back: %w",
 			storyID, err)
 	}
 	report.ClaimReleased = true
 
 	var comment string
-	if report.Bundled {
+	if report.NoWorktree {
+		comment = fmt.Sprintf(
+			"mw retry on %s gave back the claim on attempt %d of %s without reading a worktree: %s. "+
+				"The story is open again and the next dispatch tick takes it as attempt %d of %d.",
+			r.Host, attempt, storyID, nothing, attempt+1, r.maxAttempts())
+	} else if report.Bundled {
 		comment = fmt.Sprintf(
 			"mw retry on %s bundled attempt %d of %s (branch %s at %s) into %s, pushed to the vault as %s. "+
 				"The worktree and branch are gone; the claim was given back and the story is open again. "+
@@ -427,6 +463,9 @@ func (r RetryReport) String() string {
 			r.writeHitl(&b)
 		}
 		return b.String()
+	}
+	if r.NoWorktree {
+		fmt.Fprintf(&b, "  bundle  nothing to keep: no worktree or branch of the story was ever made here\n")
 	}
 	if r.CommittedLeftovers {
 		fmt.Fprintf(&b, "  commit  the worktree's uncommitted work was committed onto %s\n", r.Branch)
