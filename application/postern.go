@@ -790,7 +790,7 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 		}
 		answers := ""
 		if m.Re != "" {
-			answers = "  re " + m.Re
+			answers = "  " + m.reLabel()
 		}
 		i.printf("%s  from %s  txid %s  %s  %s%s\n%s\n", m.Class, i.fromLabel(m), orUnknown(m.Txid), m.channelLabel(), sentInFull(m.Ts), answers, m.Text)
 		if line != "" {
@@ -822,6 +822,15 @@ func (m PosternInboxMessage) channelLabel() string {
 	default:
 		return fmt.Sprintf("channel %q", m.Thread)
 	}
+}
+
+// reLabel is "re <post>" for a message that answers a post, "" otherwise: the
+// thread root mw postern inbox and mw talk wait both print.
+func (m PosternInboxMessage) reLabel() string {
+	if m.Re == "" {
+		return ""
+	}
+	return "re " + m.Re
 }
 
 // answerLine is the command that answers this message inside its thread: the

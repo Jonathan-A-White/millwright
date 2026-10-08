@@ -48,9 +48,22 @@ func newTalkPosternFixture(t *testing.T) *talkPosternFixture {
 // post on the named channel (a topic) unless that is empty, and returns its seq.
 func (f *talkPosternFixture) addMessage(txid, topic, text string) int64 {
 	f.t.Helper()
+	return f.addReply(txid, topic, "", text)
+}
+
+// addReply is addMessage for a message that answers the post re (none if empty).
+func (f *talkPosternFixture) addReply(txid, topic, re, text string) int64 {
+	f.t.Helper()
 	plain := text
-	if topic != "" {
-		wrapped, _ := json.Marshal(map[string]any{"thread": map[string]any{"topic": topic}, "text": text})
+	if topic != "" || re != "" {
+		body := map[string]any{"text": text}
+		if topic != "" {
+			body["thread"] = map[string]any{"topic": topic}
+		}
+		if re != "" {
+			body["re"] = re
+		}
+		wrapped, _ := json.Marshal(body)
 		plain = string(wrapped)
 	}
 	ct, err := f.cipher.Encrypt(talkWaitMayorKey, plain)
@@ -225,5 +238,38 @@ func TestTalkWaitHearsTheMessageAfterATurnOnTheNextRun(t *testing.T) {
 
 	if len(report.Postern) != 1 || !strings.Contains(printed, "direct:later") {
 		t.Errorf("expected the second wait to hear the later message, got %+v:\n%s", report.Postern, printed)
+	}
+}
+
+// A message that answers a post is printed with its thread root, and the line
+// to answer in that thread names the root, not the message's own txid.
+func TestTalkWaitNamesTheThreadRootOfAReply(t *testing.T) {
+	f := newTalkPosternFixture(t)
+	seq := f.addReply("direct:fd3e", "", "direct:7cb3", "an answer")
+
+	_, printed := f.run(seq)
+
+	for _, want := range []string{"re direct:7cb3", `answer in its thread: mw postern send --re direct:7cb3 "..."`} {
+		if !strings.Contains(printed, want) {
+			t.Errorf("expected %q in what was printed, got:\n%s", want, printed)
+		}
+	}
+	if strings.Contains(printed, "--re direct:fd3e") {
+		t.Errorf("expected the reply's own txid not offered to --re, got:\n%s", printed)
+	}
+}
+
+// A message that answers nothing is its own thread's root.
+func TestTalkWaitOffersAMessageWithNoReItsOwnTxidToAnswer(t *testing.T) {
+	f := newTalkPosternFixture(t)
+	seq := f.addMessage("direct:abc123", "", "hello")
+
+	_, printed := f.run(seq)
+
+	if !strings.Contains(printed, `answer in its thread: mw postern send --re direct:abc123 "..."`) {
+		t.Errorf("expected the answer line with the message's own txid, got:\n%s", printed)
+	}
+	if strings.Contains(printed, ", re ") {
+		t.Errorf("expected no re label, got:\n%s", printed)
 	}
 }

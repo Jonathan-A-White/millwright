@@ -558,7 +558,14 @@ func (r *talkWaitRun) finish(ctx context.Context) (TalkWaitReport, error) {
 	if len(r.posts) > 0 {
 		r.printf(r.Out, "new postern message: %d unread, read them with mw postern inbox\n", len(r.posts))
 		for _, message := range r.posts {
-			r.printf(r.Out, "  %s, txid %s: %s\n", message.channelLabel(), message.Txid, postFirstLine(message.Text))
+			re := ""
+			if label := message.reLabel(); label != "" {
+				re = ", " + label
+			}
+			r.printf(r.Out, "  %s, txid %s%s: %s\n", message.channelLabel(), message.Txid, re, postFirstLine(message.Text))
+			if answer := message.answerLine(); answer != "" {
+				r.printf(r.Out, "    %s\n", answer)
+			}
 		}
 	}
 
