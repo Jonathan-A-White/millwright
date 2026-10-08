@@ -123,6 +123,13 @@ type TalkWait struct {
 	// read. Nil reports none.
 	Mailbox Mailbox
 
+	// Transcriber, when set, hears a voice note before its notice is printed
+	// (bounded by TalkWaitHearLimit), so that the notice carries the words
+	// (mw-gq6.301). AttachmentDir is where the decrypted audio is written.
+	// Nil prints "words to follow" for a note whose transcript is not known.
+	Transcriber   PosternTranscriber
+	AttachmentDir string
+
 	// Log, when set, is the home's event log, which the wait looks at once a
 	// second, spending no token, for the Mayor's handover (mw-jrx0s.11). A
 	// handover to another window than Self ends the wait at once with
@@ -562,7 +569,7 @@ func (r *talkWaitRun) finish(ctx context.Context) (TalkWaitReport, error) {
 			if label := message.reLabel(); label != "" {
 				re = ", " + label
 			}
-			r.printf(r.Out, "  %s, txid %s%s: %s\n", message.channelLabel(), message.Txid, re, postFirstLine(message.Text))
+			r.printf(r.Out, "  %s, txid %s%s: %s\n", message.channelLabel(), message.Txid, re, r.postNotice(ctx, message))
 			if answer := message.answerLine(); answer != "" {
 				r.printf(r.Out, "    %s\n", answer)
 			}
@@ -612,6 +619,68 @@ func postFirstLine(text string) string {
 		}
 	}
 	return "(no text)"
+}
+
+// TalkWaitHearLimit bounds how long the wait spends hearing one voice note
+// before it prints the notice without the words.
+const TalkWaitHearLimit = 60 * time.Second
+
+// voiceNoteToFollow is the notice of a voice note whose words are not known.
+const voiceNoteToFollow = "voice note (words to follow by mail Voice: ...; read with mw postern inbox)"
+
+// postNotice is what the notice of m says of it: its first line of words, or,
+// for a post carrying audio, "voice note" with the transcript in quotes when
+// it is known (the inbox heard it, or the wait hears it now) and "words to
+// follow" when it is not, then any typed words as "with the words: <text>".
+func (r *talkWaitRun) postNotice(ctx context.Context, m PosternInboxMessage) string {
+	var audio *PosternAttachment
+	for _, file := range m.files() {
+		if file != nil && isPosternAudio(file.Mime) {
+			audio = file
+			break
+		}
+	}
+	if audio == nil {
+		return postFirstLine(m.Text)
+	}
+	notice := voiceNoteToFollow
+	if words := r.voiceTranscript(ctx, m, audio); words != "" {
+		notice = fmt.Sprintf("voice note: %q", words)
+	}
+	if typed := strings.TrimSpace(m.Text); typed != "" {
+		notice += " with the words: " + postFirstLine(typed)
+	}
+	return notice
+}
+
+// voiceTranscript is the words of m's voice note, "" when they are not known:
+// from the inbox's applied note if it has heard it, else heard now when the
+// wait has a transcriber, within TalkWaitHearLimit.
+func (r *talkWaitRun) voiceTranscript(ctx context.Context, m PosternInboxMessage, audio *PosternAttachment) string {
+	if m.Txid != "" {
+		note, _ := r.Memory.Note(ctx, PosternAppliedKey(m.Txid))
+		_, words, ok := strings.Cut(note, " txid "+m.Txid+": ")
+		if ok && strings.HasPrefix(note, "applied voice ") && !strings.HasPrefix(words, "[audio:") && strings.TrimSpace(words) != "" {
+			return strings.TrimSpace(words)
+		}
+	}
+	if r.Transcriber == nil || r.AttachmentDir == "" {
+		return ""
+	}
+	hearCtx, cancel := context.WithTimeout(ctx, TalkWaitHearLimit)
+	defer cancel()
+	inbox := PosternInbox{Postern: r.Postern, Cipher: r.Cipher, Keys: r.Keys, AttachmentDir: r.AttachmentDir}
+	path, _, err := inbox.downloadAttachment(hearCtx, audio, posternFileName(m.Txid))
+	if err != nil {
+		r.printf(r.Err, "mw talk wait: voice note %s was not downloaded: %v\n", m.Txid, err)
+		return ""
+	}
+	heard, err := r.Transcriber.Transcribe(hearCtx, path)
+	if err != nil {
+		r.printf(r.Err, "mw talk wait: voice note %s was not heard: %v\n", m.Txid, err)
+		return ""
+	}
+	return strings.Join(strings.Fields(heard), " ")
 }
 
 // save moves the stored cursor to the one in hand.
