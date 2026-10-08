@@ -97,3 +97,29 @@ Feature: Releasing a plan filed earlier
     When the epic "f-nope" is released
     Then releasing is refused, saying: reading the epic f-nope
     And every story of the filed plan is still held
+
+  Scenario: Releasing a held epic opens the epic too, so its released stories show on the phone
+    Given the epic of the filed plan is held
+    When the epic is released
+    Then releasing succeeds
+    And the epic of the filed plan is now open
+    And the story "module" of the filed plan is now open
+    And the story "gateway" of the filed plan is now open
+    And the story "formulas" of the filed plan is now open
+    And the release says: Opened the epic
+
+  Scenario: An open epic is left as it is when its held stories are released
+    When the epic is released
+    Then releasing succeeds
+    And the epic of the filed plan is now open
+    And the story "module" of the filed plan is now open
+
+  Scenario: A held epic with no held story to release stays held
+    Given the epic of the filed plan is held
+    And the story "module" of the filed plan is finished
+    And the story "gateway" of the filed plan is finished
+    And the story "formulas" of the filed plan is finished
+    When the epic is released
+    Then releasing succeeds
+    And the epic of the filed plan is now held
+    And the release says: Nothing to release

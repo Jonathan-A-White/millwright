@@ -432,6 +432,21 @@ func (f *FakeTracker) CreateStory(_ context.Context, story application.NewStory)
 
 // ReleaseStory implements application.WorkTracker.
 func (f *FakeTracker) ReleaseStory(_ context.Context, id string) error {
+	f.mu.Lock()
+	if _, isStory := f.stories[id]; !isStory && f.Err == nil {
+		if _, isEpic := f.defaults[id]; isEpic {
+			// A root epic has no story entry: it reads as held by what it says.
+			says, described := f.epicSays[id]
+			if described && says.status == StatusDeferred {
+				says.status = StatusOpen
+				f.epicSays[id] = says
+			}
+			f.writes++
+			f.mu.Unlock()
+			return nil
+		}
+	}
+	f.mu.Unlock()
 	return f.write(id, func(s *fakeStory) error {
 		if s.detail.Status == StatusDeferred {
 			s.detail.Status = StatusOpen

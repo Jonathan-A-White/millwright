@@ -44,6 +44,7 @@ func InitializeReleaseScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the plan, filed and held earlier:$`, c.thePlanFiledAndHeldEarlier)
 	ctx.Given(`^the story "([^"]*)" of the filed plan is finished$`, c.theStoryOfTheFiledPlanIsFinished)
 	ctx.Given(`^the story "([^"]*)" of the filed plan is taken by a session$`, c.theStoryOfTheFiledPlanIsTaken)
+	ctx.Given(`^the epic of the filed plan is held$`, c.theEpicOfTheFiledPlanIsHeld)
 	ctx.When(`^the epic is released$`, c.theEpicIsReleased)
 	ctx.When(`^the epic is released again$`, c.theEpicIsReleased)
 	ctx.When(`^the epic "([^"]*)" is released$`, c.theNamedEpicIsReleased)
@@ -55,6 +56,7 @@ func InitializeReleaseScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the release tree shows the story "([^"]*)" as (.+)$`, c.theReleaseTreeShowsTheStoryAs)
 	ctx.Then(`^the release says: (.+)$`, c.theReleaseSays)
 	ctx.Then(`^the story "([^"]*)" of the filed plan is now (.+)$`, c.theStoryOfTheFiledPlanIsNow)
+	ctx.Then(`^the epic of the filed plan is now (.+)$`, c.theEpicOfTheFiledPlanIsNow)
 	ctx.Then(`^the stories ready on (\S+) once released are (.+)$`, c.theStoriesReadyOnceReleasedAre)
 	ctx.Then(`^every story of the filed plan is still held$`, c.everyStoryOfTheFiledPlanIsStillHeld)
 
@@ -92,6 +94,28 @@ func (c *releaseContext) theStoryOfTheFiledPlanIsTaken(key string) error {
 		return err
 	}
 	return c.tracker.ClaimStory(context.Background(), id)
+}
+
+// theEpicOfTheFiledPlanIsHeld holds the epic itself, as one filed held by hand
+// is: `mw file` makes its epics open.
+func (c *releaseContext) theEpicOfTheFiledPlanIsHeld() error {
+	epic, err := c.tracker.ShowEpic(context.Background(), c.filed.EpicID)
+	if err != nil {
+		return fmt.Errorf("reading the epic %s: %w", c.filed.EpicID, err)
+	}
+	c.tracker.DescribeEpic(epic.ID, epic.Title, apptest.StatusDeferred, epic.Priority)
+	return nil
+}
+
+func (c *releaseContext) theEpicOfTheFiledPlanIsNow(state string) error {
+	epic, err := c.tracker.ShowEpic(context.Background(), c.filed.EpicID)
+	if err != nil {
+		return fmt.Errorf("reading back the epic %s: %w", c.filed.EpicID, err)
+	}
+	if got := application.StateOf(epic.Status); got != state {
+		return fmt.Errorf("expected the epic %s to be %s now, it is %s", epic.ID, state, got)
+	}
+	return nil
 }
 
 func (c *releaseContext) theEpicIsReleased() error {

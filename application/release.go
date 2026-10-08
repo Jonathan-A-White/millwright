@@ -18,6 +18,9 @@ import (
 // released before, is left exactly as it was found. So releasing an epic twice
 // does what releasing it once did, and nothing more.
 //
+// A held epic is opened with the stories it releases; the phone's view takes
+// only the children of epics that are open or in progress.
+//
 // The tree is printed before anything is released, and shows the epic as it was
 // found — what was held at the moment the release was asked for. What changed
 // is the line under it.
@@ -52,8 +55,20 @@ func (r Release) Run(ctx context.Context, epicID string) (FiledPlan, error) {
 			return found, fmt.Errorf("releasing story %s of %s: %w", story.ID, epic.ID, err)
 		}
 	}
+	// A held epic hides its stories from the phone's view, released or not, so
+	// it is opened with the stories it releases. An epic that is open, in
+	// progress or closed is left as it is, and so is one with nothing to release.
+	opened := len(held) > 0 && strings.EqualFold(strings.TrimSpace(epic.Status), StatusHeld)
+	if opened {
+		if err := r.Tracker.ReleaseStory(ctx, epic.ID); err != nil {
+			return found, fmt.Errorf("opening the epic %s after releasing its stories: %w", epic.ID, err)
+		}
+	}
 	found.Released = true
 	r.print(found.released(len(held)))
+	if opened {
+		r.print(fmt.Sprintf("Opened the epic %s too: it was held.\n", epic.ID))
+	}
 	return found, nil
 }
 
