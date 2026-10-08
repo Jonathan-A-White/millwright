@@ -119,6 +119,35 @@ func (r *Runs) List(_ context.Context, since time.Time) ([]application.GristRunL
 	return lines, nil
 }
 
+// Timings implements application.GristRunStore, oldest first. A directory that
+// is not a run (no timing.json) is skipped; a timing.json that does not read is
+// an error.
+func (r *Runs) Timings(_ context.Context) ([]application.GristRunTiming, error) {
+	root := filepath.Join(r.Dir, RunsDir)
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading the mill's runs: %w", err)
+	}
+	var timings []application.GristRunTiming
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		var timing application.GristRunTiming
+		if err := readJSON(filepath.Join(root, e.Name(), RunTimingFile), &timing); errors.Is(err, os.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		timings = append(timings, timing)
+	}
+	sort.SliceStable(timings, func(i, j int) bool { return timings[i].Received.Before(timings[j].Received) })
+	return timings, nil
+}
+
 func readJSON(path string, into any) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {

@@ -21,6 +21,8 @@ type GristRunStore interface {
 	// List reports the runs received at or after since (all of them when it is
 	// zero), oldest first.
 	List(ctx context.Context, since time.Time) ([]GristRunLine, error)
+	// Timings reports the timing of every run kept, oldest first.
+	Timings(ctx context.Context) ([]GristRunTiming, error)
 }
 
 // GristRun is everything one grind took in and gave out.
@@ -67,20 +69,25 @@ type GristRunAnswer struct {
 }
 
 // GristRunTiming is when each part of a grind happened, and how many seconds
-// each took. ScoredAt is empty when nothing was scored.
+// each took. ScoredAt is empty when nothing was scored. Sent is the grist
+// record's own time, so Received minus Sent is the queue wait; Scorers is the
+// seconds each engine took, summed over the recordings, and both are left out
+// when not known.
 type GristRunTiming struct {
-	Txid           string     `json:"txid"`
-	App            string     `json:"app"`
-	Kind           string     `json:"kind"`
-	Model          string     `json:"model"`
-	Effort         string     `json:"effort"`
-	Received       time.Time  `json:"received"`
-	ScoredAt       *time.Time `json:"scored_at,omitempty"`
-	HarnessStarted time.Time  `json:"harness_started"`
-	Answered       time.Time  `json:"answered"`
-	ScoringSeconds float64    `json:"scoring_seconds"`
-	HarnessSeconds float64    `json:"harness_seconds"`
-	Seconds        float64    `json:"seconds"`
+	Txid           string             `json:"txid"`
+	App            string             `json:"app"`
+	Kind           string             `json:"kind"`
+	Model          string             `json:"model"`
+	Effort         string             `json:"effort"`
+	Sent           *time.Time         `json:"sent,omitempty"`
+	Received       time.Time          `json:"received"`
+	ScoredAt       *time.Time         `json:"scored_at,omitempty"`
+	HarnessStarted time.Time          `json:"harness_started"`
+	Answered       time.Time          `json:"answered"`
+	ScoringSeconds float64            `json:"scoring_seconds"`
+	Scorers        map[string]float64 `json:"scorers,omitempty"`
+	HarnessSeconds float64            `json:"harness_seconds"`
+	Seconds        float64            `json:"seconds"`
 }
 
 // GristRunLine is one run as mw grist runs lists it.

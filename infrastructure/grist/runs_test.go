@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -80,5 +81,36 @@ func TestRunsAreListedOldestFirstSinceATime(t *testing.T) {
 	}
 	if none, err := grist.NewRuns(t.TempDir()).List(ctx, time.Time{}); err != nil || len(none) != 0 {
 		t.Fatalf("expected no runs where none were kept, got %+v %v", none, err)
+	}
+}
+
+// Timings reads every kept timing.json back, oldest first, with the sent time
+// and each scorer's seconds, and skips a directory that is no run.
+func TestTimingsAreReadBackWithSentAndTheScorersSeconds(t *testing.T) {
+	ctx, dir := context.Background(), t.TempDir()
+	runs := grist.NewRuns(dir)
+	at := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
+	sent := at.Add(-3 * time.Second)
+	later, earlier := aRun("direct:later", at.Add(time.Minute), "answered"), aRun("direct:earlier", at, "answered")
+	earlier.Timing.Sent = &sent
+	earlier.Timing.Scorers = map[string]float64{"local": 1.5, "azure": 2.5}
+	for _, run := range []application.GristRun{later, earlier} {
+		if err := runs.Keep(ctx, run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "runs", "not-a-run"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	got, err := runs.Timings(ctx)
+	if err != nil || len(got) != 2 || got[0].Txid != "direct:earlier" || got[1].Txid != "direct:later" {
+		t.Fatalf("expected the two runs, oldest first, got %+v %v", got, err)
+	}
+	if got[0].Sent == nil || !got[0].Sent.Equal(sent) || got[0].Scorers["local"] != 1.5 || got[0].Scorers["azure"] != 2.5 {
+		t.Errorf("expected sent and scorer seconds read back, got %+v", got[0])
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, "runs", "direct:later", "timing.json"))
+	if strings.Contains(string(raw), `"sent"`) || strings.Contains(string(raw), `"scorers"`) {
+		t.Errorf("expected a run with neither to omit both, got %s", raw)
 	}
 }

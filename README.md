@@ -1528,7 +1528,11 @@ harness's own). Every grind that ran is kept under `grist_state_dir`'s
 `runs/<txid>/`: `input.json` (the request as the session was given it),
 `attachment-N.<ext>`, `scorers.json`, `answer.json` and `timing.json`, 0600, never
 deleted by `mw`; `mw grist runs [--since 24h|2026-10-07]` lists them (txid, kind, model,
-seconds, answered|refused|failed). See `docs/scorers.md` and `features/grist_audio.feature`.
+seconds, answered|refused|failed). `timing.json` also keeps `sent` (the grist
+record's own time, so `received` minus `sent` is the queue wait) and `scorers` (each
+engine's seconds), each left out when not known; `mw grist stats --kind tutor-turn
+[--last 20]` prints, for the last runs of that kind, the median and worst seconds of
+each phase (queue, scoring and each engine, harness, total) and how many runs had it. See `docs/scorers.md` and `features/grist_audio.feature`.
 
 ## Steps for his hands
 

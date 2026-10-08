@@ -34,6 +34,7 @@ func newGristCmd() *cobra.Command {
 	root.AddCommand(newGristEvalCmd())
 	root.AddCommand(newGristScoreCmd())
 	root.AddCommand(newGristRunsCmd())
+	root.AddCommand(newGristStatsCmd())
 	return root
 }
 
@@ -291,6 +292,35 @@ func newGristRunsCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&since, "since", "", "list only the runs since this: a duration such as 24h, a date, or an RFC 3339 time (default: all)")
+	return cmd
+}
+
+// newGristStatsCmd builds `mw grist stats`: where the wait of one kind of grist
+// goes, from the timing the mill kept of its runs.
+func newGristStatsCmd() *cobra.Command {
+	var kind string
+	var last int
+
+	cmd := &cobra.Command{
+		Use:   "stats",
+		Short: "Print the median and worst of each phase of the last runs of one kind of grist",
+		Long: "stats reads the timing.json the mill kept of the last runs of --kind and prints, for each phase,\n" +
+			"the median and the worst seconds and how many runs had it: queue (the grist sent to taken up),\n" +
+			"scoring and each scorer engine within it, harness and total (taken up to answered).\n" +
+			"A phase none of those runs had is left out. Only kinds, times and ids are read.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			stateDir, err := config.GristStateDir()
+			if err != nil {
+				return err
+			}
+			_, err = application.GristStats{Runs: grist.NewRuns(stateDir), Out: cmd.OutOrStdout()}.Run(cmd.Context(), kind, last)
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&kind, "kind", "", "the kind of grist, e.g. tutor-turn (required)")
+	cmd.Flags().IntVar(&last, "last", application.GristStatsLast, "how many of the latest runs of the kind to look at")
+	_ = cmd.MarkFlagRequired("kind")
 	return cmd
 }
 

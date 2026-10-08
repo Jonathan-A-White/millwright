@@ -212,6 +212,7 @@ type gristWork struct {
 	input          json.RawMessage
 	scoredAt       *time.Time
 	scoringSeconds float64
+	scorerSeconds  map[string]float64
 	harnessStarted time.Time
 	answered       time.Time
 	notes          []string

@@ -88,6 +88,12 @@ Feature: mw grist grind takes a recording, scores it, and keeps every grind's ra
     Then the run's directory holds input.json, attachment-1.jpg, scorers.json, answer.json and timing.json
     And the run's scorers.json holds no results
 
+  Scenario: A run's timing.json also keeps when the grist was sent and each scorer's seconds
+    Given the mill's clock moves a second at each look
+    And the phone sends a "cairn" "reading" grist, version "1.1", of "the cat sat" read aloud in a webm recording
+    When the mill grinds
+    Then the run's timing.json has when the grist was sent, so the queue wait, and the seconds of "local" and "azure"
+
   Scenario: A grind that fails is kept too
     Given the grind's session ends in an error
     And the phone sends a "cairn" "reading" grist, version "1.1", of "the cat sat" read aloud in a webm recording

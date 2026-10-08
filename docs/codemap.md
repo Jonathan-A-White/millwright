@@ -8,25 +8,25 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 
 | Port | Declared in | Real adapter | Fake |
 | --- | --- | --- | --- |
-| `WorkTracker` | application/worktracker.go | infrastructure/beads/ | apptest.FakeTracker |
+| `WorkTracker` | application/worktracker.go | infra/beads/ | apptest.FakeTracker |
 | TrackerNotes, SweepNotes, BeadGraph | application/{status,sweep}.go | same | same |
 | VaultFiles, TrackerSync | application/sync.go | `infrastructure/{vault/git,beads/sync}.go` | apptest.Fake{VaultFiles,Tracker} |
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | `infrastructure/beads/mail.go` | apptest.FakeMailbox |
 | EpicRules | application/epicrules.go | `infrastructure/vault/epicrules.go` | apptest.FakeEpicRules |
 | Vault | application/seatboot.go | infra/vault | application/seatboot_test.go |
 | Runner | application/runner.go | infra/tmux | apptest.FakeRunner |
-| Harness | application/harness.go | infrastructure/claude | application/seatboot_test.go |
+| Harness | application/harness.go | infra/claude | application/seatboot_test.go |
 | SeatFiles, Windows, SeatHarness, ActingFile | application/seatup.go, application/seathandover.go | infrastructure/{vault/{seat,reaplog},tmux/window,claude/claude}.go | apptest.Fake{Windows,ActingFile} |
 | Transcripts{,Tail,Replies}, PeekRemote | application/seatcontext.go, application/peek.go | infrastructure/{claude,peekremote} | apptest/fakepeek.go |
 | Reap{Terminal,Log,Armer} | application/seatreap.go | infrastructure/{tmux/reap,vault/reaplog,reaper/arm}.go | apptest.Fake{Windows,ReapArmer} |
-| WatchProbes | application/watch.go | infrastructure/watch | apptest.FakeWatch |
+| WatchProbes | application/watch.go | infra/watch | apptest.FakeWatch |
 | Doctor{Check,State,Log,Notes}, VPSProbe | application/doctor.go, application/vpsnginx.go | infra/{doctor,vpsnginx} | none |
-| Network{Probe,Store,Reader} | application/network.go | infrastructure/network | apptest.FakeNetwork* |
-| TickLog | application/millhandtick.go | infrastructure/ticklog | apptest.FakeTickLog |
-| CardLog | application/card.go | infrastructure/cardlog | apptest.FakeCardLog |
+| Network{Probe,Store,Reader} | application/network.go | infra/network | apptest.FakeNetwork* |
+| TickLog | application/millhandtick.go | infra/ticklog | apptest.FakeTickLog |
+| CardLog | application/card.go | infra/cardlog | apptest.FakeCardLog |
 | Worktrees | application/worktrees.go | `infrastructure/rig/worktree.go` | application/dispatch_test.go |
-| HostLoad | application/hostload.go | infrastructure/hostload | apptest.FakeHostLoad |
-| SyncHaltMarker | application/sync.go | infrastructure/synchalt | apptest.FakeSyncHaltMarker |
+| HostLoad | application/hostload.go | infra/hostload | apptest.FakeHostLoad |
+| SyncHaltMarker | application/sync.go | infra/synchalt | apptest.FakeSyncHaltMarker |
 | Notifier, HomeMoveHost, OldHome, VaultBirth, TrackerBirth | application/{millhandtick,homemove,init}.go | infrastructure/{notify/notify,homemove/homemove,vault/birth,beads/init}.go | none |
 | Landing, Checks, MergeSlot, Holding | application/landing.go | infrastructure/rig/{landing,checks,slot}.go | none |
 | AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter | application/afterlanding.go, application/selfupdate.go, application/backendstage.go | infrastructure/{rig/{afterlanding,built,backend},userunits}.go | features/{self_update,backend_swap}.feature |
@@ -68,6 +68,6 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 | Hands{Add,List} | application/hands.go | mw hands add/list - cmd/mw/hands.go; cmd/mw-hands-root | features/hands.feature |
 | Postern{Serve,Nginx,Mirror} | application/posternhand.go, application/posternmirror.go | mw postern serve/nginx/mirror - cmd/mw/postern.go, cmd/mw/posternmirror.go | features/postern_serve.feature |
 | Prompt{Save,List,Show,Run}, Cards | application/prompt.go, application/card.go | mw prompt/card - cmd/mw/prompt.go, cmd/mw/card.go | features/{prompt,card}.feature |
-| Grist{Key,Grind,Send,Eval,Score,Runs} | application/grist.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go | mw grist key/grind/send/eval/score/runs - cmd/mw/grist.go | features/{grist{,_send,_eval,_audio,_concurrent},scorer}.feature |
+| Grist{Key,Grind,Send,Eval,Score,Runs,Stats} | application/grist.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go | mw grist key/grind/send/eval/score/runs/stats - cmd/mw/grist.go | features/{grist{,_send,_eval,_audio,_concurrent},scorer}.feature |
 
 cmd/mw/root.go: the tree; cmd/mw/version.go.

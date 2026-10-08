@@ -230,10 +230,12 @@ and `mw` never deletes it:
 | `attachment-N.<ext>` | each attachment as it was opened, in order (photos too) |
 | `scorers.json` | a list, one entry for each recording: `attachment`, `mime`, `target_text`, `lang`, `reading_result` by engine; `[]` when nothing was scored |
 | `answer.json` | `status` (answered, refused or failed), `reason`, `answer`, `said`, `turns`, `total_cost_usd` |
-| `timing.json` | `txid`, `app`, `kind`, `model`, `effort`; `received`, `scored_at`, `harness_started`, `answered`; `scoring_seconds`, `harness_seconds`, `seconds` (received to answered) |
+| `timing.json` | `txid`, `app`, `kind`, `model`, `effort`; `sent` (the grist record's time; `received` minus it is the queue wait), `received`, `scored_at`, `harness_started`, `answered`; `scoring_seconds`, `scorers` (each engine's seconds), `harness_seconds`, `seconds` (received to answered); `sent` and `scorers` are left out when unknown |
 
 `mw grist runs [--since 24h|2026-10-07|<RFC 3339>]` lists them, oldest first: txid,
-kind, model, seconds and how it ended. See `features/grist_audio.feature`.
+kind, model, seconds and how it ended. `mw grist stats --kind <kind> [--last 20]` prints the
+median and worst seconds of each phase (queue, scoring, each engine, harness, total) over the
+last runs of that kind. See `features/grist_audio.feature`.
 
 ## Config
 

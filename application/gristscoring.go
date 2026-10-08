@@ -82,7 +82,13 @@ func (g GristGrind) scoreRecordings(ctx context.Context, w *gristWork, plain *Gr
 		if !isGristAudio(clip.mime) {
 			continue
 		}
-		results := g.scoreClip(ctx, engines, clip, target, w.grind.Scoring.TargetField)
+		results, took := g.scoreClip(ctx, engines, clip, target, w.grind.Scoring.TargetField)
+		if w.scorerSeconds == nil {
+			w.scorerSeconds = map[string]float64{}
+		}
+		for name, seconds := range took {
+			w.scorerSeconds[name] += seconds
+		}
 		w.scores = append(w.scores, GristRunScore{Attachment: i + 1, Mime: clip.mime, Target: target, Lang: gristScoringLang, Results: results})
 		all = append(all, results)
 	}
@@ -100,23 +106,27 @@ func (g GristGrind) scoreRecordings(ctx context.Context, w *gristWork, plain *Gr
 }
 
 // scoreClip runs every engine on one recording at once, and reports what each
-// said by its name.
-func (g GristGrind) scoreClip(ctx context.Context, engines []string, clip gristClip, target, field string) map[string]json.RawMessage {
+// said by its name, with the seconds each took.
+func (g GristGrind) scoreClip(ctx context.Context, engines []string, clip gristClip, target, field string) (map[string]json.RawMessage, map[string]float64) {
 	results := make(map[string]json.RawMessage, len(engines))
+	took := make(map[string]float64, len(engines))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for _, name := range engines {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			begun := g.now()
 			said := g.scoreWith(ctx, name, clip, target, field)
+			seconds := g.now().Sub(begun).Seconds()
 			mu.Lock()
 			results[name] = said
+			took[name] = seconds
 			mu.Unlock()
 		}()
 	}
 	wg.Wait()
-	return results
+	return results, took
 }
 
 // scoreWith is one engine's answer for one recording, as JSON: its
@@ -165,9 +175,9 @@ func (g GristGrind) keepRun(ctx context.Context, w *gristWork) {
 		Timing: GristRunTiming{
 			Txid: w.record.Txid, App: w.plain.Grist.App, Kind: w.plain.Grist.Kind,
 			Model: w.model, Effort: w.effort,
-			Received: w.received.UTC(), ScoredAt: utcPtr(w.scoredAt),
+			Sent: sentTime(w.record.Ts), Received: w.received.UTC(), ScoredAt: utcPtr(w.scoredAt),
 			HarnessStarted: w.harnessStarted.UTC(), Answered: w.answered.UTC(),
-			ScoringSeconds: w.scoringSeconds,
+			ScoringSeconds: w.scoringSeconds, Scorers: w.scorerSeconds,
 			HarnessSeconds: w.answered.Sub(w.harnessStarted).Seconds(),
 			Seconds:        w.answered.Sub(w.received).Seconds(),
 		},
@@ -178,6 +188,15 @@ func (g GristGrind) keepRun(ctx context.Context, w *gristWork) {
 	if err := g.Runs.Keep(ctx, run); err != nil {
 		w.notes = append(w.notes, fmt.Sprintf("the record of the run of %s could not be kept: %v", shortTxid(w.record.Txid), err))
 	}
+}
+
+// sentTime is when the grist was sent as the timing keeps it: nothing when the
+// record carries no time.
+func sentTime(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return utcPtr(&t)
 }
 
 func utcPtr(t *time.Time) *time.Time {

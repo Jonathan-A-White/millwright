@@ -120,6 +120,7 @@ func registerGristAudio(ctx *godog.ScenarioContext, c *gristContext) {
 	ctx.Then(`^the run's answer\.json says "([^"]*)" with the grind's answer$`, a.runAnswerSaysWithAnswer)
 	ctx.Then(`^the run's answer\.json says "([^"]*)"$`, a.runAnswerSays)
 	ctx.Then(`^the run's timing\.json has when it was received, scored, started and answered, and how many seconds each took$`, a.runTimingHas)
+	ctx.Then(`^the run's timing\.json has when the grist was sent, so the queue wait, and the seconds of "([^"]*)" and "([^"]*)"$`, a.runTimingHasSentAndScorers)
 	ctx.Then(`^the list has one line for the grist with its kind "([^"]*)", its model "([^"]*)", more than 0 seconds, and "([^"]*)"$`, a.listHasOne)
 	ctx.Then(`^the list has no lines$`, a.listHasNone)
 	ctx.Then(`^the session was called with at most (\d+) turns$`, a.calledWithTurns)
@@ -540,6 +541,26 @@ func (a *audioContext) runTimingHas() error {
 	}
 	if timing.Txid != a.c.grist.Txid || timing.Kind == "" || timing.Model == "" {
 		return fmt.Errorf("expected the txid, kind and model in timing.json, got %s", raw)
+	}
+	return nil
+}
+
+func (a *audioContext) runTimingHasSentAndScorers(first, second string) error {
+	raw, err := a.runFile("timing.json")
+	if err != nil {
+		return err
+	}
+	var timing application.GristRunTiming
+	if err := json.Unmarshal(raw, &timing); err != nil {
+		return err
+	}
+	if timing.Sent == nil || !timing.Sent.Equal(gristNow) || !timing.Received.After(*timing.Sent) {
+		return fmt.Errorf("expected sent to be when the grist was sent (%s) and before it was received, got %s", gristNow.Format(time.RFC3339), raw)
+	}
+	for _, engine := range []string{first, second} {
+		if timing.Scorers[engine] <= 0 {
+			return fmt.Errorf("expected seconds for the scorer %s in timing.json, got %s", engine, raw)
+		}
 	}
 	return nil
 }
