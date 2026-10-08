@@ -50,40 +50,51 @@ func promptCallName(text string) (name, rest string, ok bool) {
 }
 
 // splitPromptCall splits a call's options into words at spaces; a value in
-// single or double quotes is one word, its quotes dropped.
-func splitPromptCall(text string) ([]string, error) {
+// single or double quotes is one word, its quotes dropped. A quote opens a
+// value only at the start of a word, and only when a matching quote later ends
+// a word; any other quote — inside a word (he's, 5'2") or never closed — is a
+// literal character, so a call is never refused for its quotes (mw-gq6.294).
+func splitPromptCall(text string) []string {
 	var words []string
 	var word strings.Builder
-	var quote rune
 	inWord := false
-	for _, r := range text {
+	for at := 0; at < len(text); at++ {
+		c := text[at]
 		switch {
-		case quote != 0:
-			if r == quote {
-				quote = 0
-			} else {
-				word.WriteRune(r)
+		case (c == '"' || c == '\'') && !inWord:
+			if end := closingQuote(text, at); end >= 0 {
+				words = append(words, text[at+1:end])
+				at = end
+				continue
 			}
-		case r == '"' || r == '\'':
-			quote, inWord = r, true
-		case r == ' ' || r == '\t' || r == '\n':
+			word.WriteByte(c)
+			inWord = true
+		case c == ' ' || c == '\t' || c == '\n':
 			if inWord {
 				words = append(words, word.String())
 				word.Reset()
 				inWord = false
 			}
 		default:
-			word.WriteRune(r)
+			word.WriteByte(c)
 			inWord = true
 		}
-	}
-	if quote != 0 {
-		return nil, fmt.Errorf("a quote is never closed")
 	}
 	if inWord {
 		words = append(words, word.String())
 	}
-	return words, nil
+	return words
+}
+
+// closingQuote is the index of the quote that closes the one opening at
+// text[open]: the next like quote that is last in its word, or -1.
+func closingQuote(text string, open int) int {
+	for at := open + 1; at < len(text); at++ {
+		if text[at] == text[open] && (at+1 == len(text) || strings.IndexByte(" \t\n", text[at+1]) >= 0) {
+			return at
+		}
+	}
+	return -1
 }
 
 // applyPromptCall applies a Governor message that begins '/': a call of one of
@@ -119,9 +130,7 @@ func (i PosternInbox) applyPromptCall(ctx context.Context, m PosternInboxMessage
 	var given []domain.PromptArg
 	if prompt == nil {
 		problem = fmt.Sprintf("Unknown prompt /%s; saved prompts: %s", name, strings.Join(namesOrNone(names), " "))
-	} else if words, err := splitPromptCall(rest); err != nil {
-		problem = fmt.Sprintf("Bad prompt call /%s: %v", name, err)
-	} else if given, err = parsePromptArgs(*prompt, words); err != nil {
+	} else if given, err = parsePromptArgs(*prompt, splitPromptCall(rest)); err != nil {
 		problem = "Bad prompt call: " + strings.TrimPrefix(err.Error(), "mw prompt run: ")
 	} else if _, err = prompt.Fill(given); err != nil {
 		problem = "Bad prompt call: " + err.Error()

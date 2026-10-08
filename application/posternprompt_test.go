@@ -188,6 +188,54 @@ func TestApplyKeepsAQuotedPromptValueWhole(t *testing.T) {
 	}
 }
 
+// A quote opens only at the start of a word: an apostrophe inside a word is a
+// literal character, so dictated prose is never refused for its quotes
+// (mw-gq6.294).
+func TestApplyKeepsApostrophesInADictatedPromptCall(t *testing.T) {
+	f := newPromptFixture(t)
+	f.message(t, releaseTapGovernorKey, "tx-dictated", "/later so he's saying that, you know, we don't need it and it's 5'2\" tall")
+
+	f.apply(t)
+
+	if got := f.answered(t); len(got) != 0 {
+		t.Fatalf("expected the call not refused, got %+v", got)
+	}
+	subjects := f.subjects(t)
+	want := `Prompt: /later --text 'so he'\''s saying that, you know, we don'\''t need it and it'\''s 5'\''2" tall'`
+	if len(subjects) != 1 || subjects[0] != want {
+		t.Fatalf("expected the prose whole with its apostrophes, want %q got %v", want, subjects)
+	}
+}
+
+// A quote that opens a word and is never closed is a literal character, not an
+// error.
+func TestApplyKeepsAQuoteThatIsNeverClosed(t *testing.T) {
+	f := newPromptFixture(t)
+	f.message(t, releaseTapGovernorKey, "tx-lone", "/later 'two hours and I said \"stop")
+
+	f.apply(t)
+
+	if got := f.answered(t); len(got) != 0 {
+		t.Fatalf("expected the call not refused, got %+v", got)
+	}
+	want := `Prompt: /later --text ''\''two hours and I said "stop'`
+	if got := f.subjects(t); len(got) != 1 || got[0] != want {
+		t.Fatalf("expected the lone quote kept, want %q got %v", want, got)
+	}
+}
+
+// A quoted value may hold an apostrophe: only a quote that ends a word closes it.
+func TestApplyKeepsAnApostropheInsideAQuotedPromptValue(t *testing.T) {
+	f := newPromptFixture(t)
+	f.message(t, releaseTapGovernorKey, "tx-inner", `/top5 --duration "it's two hours"`)
+
+	f.apply(t)
+
+	if got := f.subjects(t); len(got) != 1 || got[0] != `Prompt: /top5 --duration 'it'\''s two hours'` {
+		t.Fatalf("expected the value kept whole, got %v", got)
+	}
+}
+
 // Text that does not begin with a slash, and a slash from anyone but the
 // Governor, are read as before.
 func TestApplyLeavesOtherMessagesAlone(t *testing.T) {
