@@ -19,8 +19,8 @@ const PassFile = "pass.lock"
 
 // GrindFile is the name of grind slot n's lock inside the grist state
 // directory. The mill takes one slot while each grind runs, up to its
-// `[grist] concurrency` of them, and `mw dispatch` counts every held slot as
-// one of its sessions.
+// `[grist] concurrency` of them: the mill's own limit, which neither waits
+// for the host's Builders nor takes a place in the cap `mw dispatch` keeps.
 func GrindFile(n int) string { return fmt.Sprintf("grind-%d.lock", n) }
 
 // GrindSlots is the locks of a host's grind slots, one for each grind the mill

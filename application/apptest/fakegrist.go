@@ -272,6 +272,13 @@ func (f *FakeGristLock) Hold() {
 	f.held = true
 }
 
+// Free lets go of a lock that Hold held, as the other pass or grind ending would.
+func (f *FakeGristLock) Free() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.held = false
+}
+
 // TryTake implements application.GristLock.
 func (f *FakeGristLock) TryTake(context.Context) (func(), bool, error) {
 	f.mu.Lock()

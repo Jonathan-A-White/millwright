@@ -9,7 +9,6 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
-	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // A mill that grinds up to slots grists at once, with n grists waiting, the
@@ -40,7 +39,6 @@ func aMillWithSlots(t *testing.T, slots, grists int) (application.GristGrind, *a
 	for _, lock := range locks[1:] {
 		mill.MoreGrinding = append(mill.MoreGrinding, lock)
 	}
-	mill.Cap = 4
 	state := apptest.NewFakeGristState()
 	mill.State = state
 	grinder.Result = application.SessionResult{Subtype: "success", Answer: json.RawMessage(`{"items":[],"placeName":"Top drawer"}`), StopReason: "end_turn"}
@@ -178,30 +176,17 @@ func TestGristGrindLeavesTheCursorBeforeAGristItCouldNotRecord(t *testing.T) {
 	cursorIs(t, state, 3, "after the next pass")
 }
 
-// The slots a pass's own grinds hold are sessions the cap counts: with a cap
-// of 2 and a story running, one grind runs at a time though three slots are
-// free, and the rest queue behind it.
-func TestGristGrindCountsItsOwnHeldSlotsAgainstTheCap(t *testing.T) {
+// The mill's slots are its own limit: it reads no host cap, so every slot it
+// has grinds at once (mw-gq6.303).
+func TestGristGrindGrindsAsManyAtOnceAsItHasSlots(t *testing.T) {
 	mill, _, grinder, _, _ := aMillWithSlots(t, 3, 3)
-	tracker := apptest.NewFakeTracker()
-	var path domain.Path
-	for field, value := range map[string]string{"rig": "millwright", "branch": "main", "harness": "claude", "model": "opus", "effort": "high", "host": "laptop"} {
-		if err := path.Set(field, value); err != nil {
-			t.Fatal(err)
-		}
-	}
-	tracker.AddEpic("mw-9", path)
-	tracker.AddStory("mw-9", domain.Story{ID: "mw-9.1", Title: "A story"})
-	if err := tracker.ClaimStory(context.Background(), "mw-9.1"); err != nil {
-		t.Fatal(err)
-	}
-	mill.Tracker, mill.Cap = tracker, 2
+	grinder.Together = 3
 	report, err := mill.Run(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Answered != 3 || grinder.MostAtOnce() != 1 {
-		t.Fatalf("expected 3 answered one at a time under the cap, got %+v with %d at once", report, grinder.MostAtOnce())
+	if report.Answered != 3 || report.Waiting != 0 || grinder.MostAtOnce() != 3 {
+		t.Fatalf("expected 3 answered, 3 at once, got %+v with %d at once", report, grinder.MostAtOnce())
 	}
 }
 
@@ -215,7 +200,7 @@ func TestGristGrindWaitsWhenEverySlotIsHeldElsewhere(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Waiting != 2 || report.WaitingWhy != "another grind is running on this host" || len(grinder.Calls()) != 0 {
+	if report.Waiting != 2 || report.WaitingWhy != "the mill is at its limit (2 of 2 grinds running)" || len(grinder.Calls()) != 0 {
 		t.Fatalf("expected both grists waiting, got %+v", report)
 	}
 	cursorIs(t, state, 0, "with no grind run")

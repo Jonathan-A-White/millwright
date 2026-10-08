@@ -715,8 +715,8 @@ type GristSettings struct {
 // ~/.config/mw/config.toml: `models` (a list, or one string with commas),
 // `efforts` (the efforts a grist may ask for, the same way),
 // `max_attachments`, `max_attachment_bytes`, `daily_limit` (grist a day from
-// one key), `concurrency` (grinds at once, each counted against the host's cap
-// of sessions) and `timeout` (a Go duration, "10m"), each its default when the
+// one key), `concurrency` (grinds at once, the mill's own limit, apart from
+// the host's cap on Builders) and `timeout` (a Go duration, "10m"), each its default when the
 // table says nothing.
 func Grist() (GristSettings, error) {
 	home, err := os.UserHomeDir()

@@ -99,7 +99,4 @@ func TestNextEndOfLandingDispatchDoesNothingWhileTheHostDispatchLockIsHeld(t *te
 	if len(report.Started) != 0 {
 		t.Fatalf("expected nothing started, got %+v", report)
 	}
-	if dispatch.Grinding == nil {
-		t.Fatal("expected the grind lock to be counted too")
-	}
 }

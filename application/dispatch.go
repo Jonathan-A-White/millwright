@@ -121,13 +121,6 @@ type Dispatch struct {
 	Cap  int
 	Rigs map[string]string
 
-	// Grinding and MoreGrinding are the mill's grind slots here (mw grist
-	// grind), each held while the mill grinds a grist: a grind takes one of the
-	// sessions Cap counts, first come first served, and every slot held is one
-	// session. A nil Grinding counts none.
-	Grinding     GristLock
-	MoreGrinding []GristLock
-
 	// Exclusive is this host's dispatch lock, taken without waiting and held for
 	// the whole of a real run: a second dispatch that cannot take it says so and
 	// does nothing, since two would claim the same story and race to cut its
@@ -148,8 +141,9 @@ type Dispatch struct {
 
 	// Mill and Home make the tick answer what the mill left waiting: after
 	// its own claims, on the host that is home, one pass of the mill runs
-	// (mw grist grind's own use case, with its own lock and its own cap
-	// check). A nil Mill, or a Home that says another host is home or cannot
+	// (mw grist grind's own use case, with its own locks and its own limit: a
+	// grind takes none of the sessions Cap counts, and Cap never holds a grind
+	// back). A nil Mill, or a Home that says another host is home or cannot
 	// be read, runs none. A dry run runs none either.
 	Mill GristMill
 	Home HomeFile
@@ -293,11 +287,8 @@ type HeldRefused struct {
 type DispatchReport struct {
 	Host string
 	Cap  int
-	// Running is how many sessions this host already had in flight;
-	// Grinding says one of them is a grist grind; Grinds is how many are.
-	Running  int
-	Grinding bool
-	Grinds   int
+	// Running is how many sessions this host already had in flight.
+	Running int
 	// Grist is what the mill's pass after the claims did, when one ran.
 	Grist *GristReport
 	// Reclaimed is every claim this dispatch took back from a dead pane and an
@@ -525,26 +516,6 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		}
 		report.Running++
 	}
-	// A real run takes the grind slots free and keeps them while it claims, so
-	// that a grind starting in the same tick reads the cap after the claims are
-	// made (or is turned away and waits for the next tick), never before them:
-	// the two cannot both take the last slot. A dry run only looks.
-	var unlock []func()
-	defer func() {
-		for _, release := range unlock {
-			release()
-		}
-	}()
-	if d.Grinding != nil {
-		grinds, err := d.grindsRunning(ctx, &unlock)
-		if err != nil {
-			report.Notes = append(report.Notes, fmt.Sprintf("whether a grist grind is running here could not be read: %v", err))
-		} else if grinds > 0 {
-			report.Running += grinds
-			report.Grinding = true
-			report.Grinds = grinds
-		}
-	}
 	free := d.Cap - report.Running
 
 	ready, err := d.Tracker.ReadyForHost(ctx, d.Host)
@@ -703,10 +674,6 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	}
 
 	d.print(report.String())
-	for _, release := range unlock {
-		release()
-	}
-	unlock = nil
 	d.answerWaitingGrist(ctx, &report)
 	if len(report.Failed) > 0 {
 		return report, fmt.Errorf("dispatching on %s: %s", d.Host, report.failures())
@@ -714,38 +681,10 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	return report, nil
 }
 
-// grindsRunning says how many grist grinds hold a session here. A real run
-// takes every grind slot not held, and leaves their releases in unlock.
-func (d Dispatch) grindsRunning(ctx context.Context, unlock *[]func()) (int, error) {
-	running := 0
-	for _, slot := range append([]GristLock{d.Grinding}, d.MoreGrinding...) {
-		if d.DryRun {
-			held, err := slot.Held(ctx)
-			if err != nil {
-				return running, err
-			}
-			if held {
-				running++
-			}
-			continue
-		}
-		release, taken, err := slot.TryTake(ctx)
-		if err != nil {
-			return running, err
-		}
-		if taken {
-			*unlock = append(*unlock, release)
-		} else {
-			running++
-		}
-	}
-	return running, nil
-}
-
 // answerWaitingGrist runs one pass of the mill after the claims, on the host
 // that is home: a grist left waiting for a slot, or for a busy pass, is
 // answered by the next tick and not only when another grist arrives. The pass
-// is the mill's own, with its own lock and its own cap check. What goes wrong
+// is the mill's own, with its own locks and its own limit. What goes wrong
 // in it is a note: the tick's claims have been made and stand.
 func (d Dispatch) answerWaitingGrist(ctx context.Context, report *DispatchReport) {
 	if d.Mill == nil || d.Home == nil || d.DryRun {
@@ -1582,12 +1521,6 @@ func (r DispatchReport) String() string {
 		what = "dispatch (dry run: nothing was synced, claimed or started)"
 	}
 	fmt.Fprintf(&b, "%s on %s: %d of %d sessions were already running\n", what, r.Host, r.Running, r.Cap)
-	switch {
-	case r.Grinds > 1:
-		fmt.Fprintf(&b, "  grinding: %d grist grinds hold %d of those sessions\n", r.Grinds, r.Grinds)
-	case r.Grinding:
-		b.WriteString("  grinding: a grist grind holds one of those sessions\n")
-	}
 	if r.Synced {
 		fmt.Fprintf(&b, "  synced  %s\n", r.Sync)
 	}

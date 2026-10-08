@@ -5,11 +5,12 @@ Feature: mw grist grind, the mill
   for the mill key, answers each grist exactly once with a grist record sealed
   to its sender, and ends. It refuses what the sender's licence, the app's
   grind or the factory's ceilings do not allow, without a session; otherwise it
-  grinds it in one short harness session with no seat, which takes one of this
-  host's story slots, first come first served.
+  grinds it in one short harness session with no seat, which takes one of the
+  mill's own grind slots, first come first served. The host's Builders take
+  none of those slots, and the grinds take none of the host's cap on Builders.
 
   Background:
-    Given a mill on the host "laptop" with a cap of 1
+    Given a mill on the host "laptop"
     And the app "cairn" is checked out here, its main at commit "0123456789abcdef0123456789abcdef01234567" with the grind "sweep"
     And a phone whose licence opens "cairn"
 
@@ -156,19 +157,15 @@ Feature: mw grist grind, the mill
     And no grind was run
     And the mill's cursor is past them
 
-  Scenario: A grist waits, without a grind, while the host is at its cap
+  Scenario: A grist is ground while the host's Builders are at their cap
     Given a story is already running on "laptop"
     And the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
     And the grind answers with a sweep result
     When the mill grinds
-    Then the mill answered 0, refused 0, failed 0, and left 1 waiting
-    And the mill says it is waiting because "the host is at its cap (1 of 1 sessions running)"
-    And no grind was run
-    And no answer was delivered
-    And the mill's cursor is before the grist
-    When the running story finishes
-    And the mill grinds again
     Then the mill answered 1, refused 0, failed 0, and left 0 waiting
+    And 1 grind was run
+    And 1 answer was delivered
+    And the mill's cursor is past them
 
   Scenario: An answer the backend will not take is kept and delivered by the next pass
     Given the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
@@ -190,22 +187,31 @@ Feature: mw grist grind, the mill
     Then the mill says another pass is running
     And no answer was delivered
 
-  Scenario: mw dispatch counts a running grind as one of its sessions
+  Scenario: mw dispatch still refuses a Builder at its cap while a grind is running
+    Given a story is already running on "laptop"
+    And a grind is running on "laptop"
+    And another story is ready on "laptop"
+    When mw dispatch runs on "laptop" with a cap of 1
+    Then dispatch started nothing, since "laptop has taken 1 of the 1 sessions it may run at once"
+    And dispatch counts no grind among its sessions
+
+  Scenario: A running grind takes no Builder's place
     Given a grind is running on "laptop"
     And a story is ready on "laptop"
     When mw dispatch runs on "laptop" with a cap of 1
-    Then dispatch started nothing, since "laptop has taken 1 of the 1 sessions it may run at once"
-    And dispatch says a grist grind holds one of its sessions
+    Then dispatch started the story "mw-9.1"
+    And dispatch counts no grind among its sessions
 
   Scenario: A grist left waiting is answered by the next dispatch tick, with no new grist and no hook
-    Given a story is already running on "laptop"
+    Given a grind is running on "laptop"
     And "laptop" is home
     And [grist] is configured
     And the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
     And the grind answers with a sweep result
     When the mill grinds
     Then the mill answered 0, refused 0, failed 0, and left 1 waiting
-    When the running story finishes
+    And the mill says it is waiting because "the mill is at its limit (1 of 1 grinds running)"
+    When the running grind ends
     And mw dispatch runs on "laptop" with a cap of 1
     Then the dispatch's grist pass answered 1, refused 0, failed 0, and left 0 waiting
     And 1 grind was run

@@ -3,7 +3,6 @@ package steps
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/cucumber/godog"
@@ -57,7 +56,6 @@ func registerGristSlots(ctx *godog.ScenarioContext, c *gristContext) {
 	ctx.Then(`^at most (\d+) grinds? ran at once$`, s.mostAtOnce)
 	ctx.Then(`^the mill's cursor is past all (\d+) grists$`, s.cursorPastAll)
 	ctx.Then(`^the first two runs overlap in their timing$`, s.runsOverlap)
-	ctx.Then(`^dispatch says (\d+) grist grinds hold (\d+) of its sessions$`, s.dispatchSaysGrinds)
 }
 
 func (s *slotsContext) slotsAre(n int) error {
@@ -120,14 +118,6 @@ func (s *slotsContext) runsOverlap() error {
 	if !second.Received.Before(ended) {
 		return fmt.Errorf("expected the second run received at %s before the first ended at %s:\n%s",
 			second.Received.Format("15:04:05"), ended.Format("15:04:05"), s.c.audio.listing.String())
-	}
-	return nil
-}
-
-func (s *slotsContext) dispatchSaysGrinds(n, held int) error {
-	if !s.c.dispatch.Grinding || s.c.dispatch.Grinds != n || n != held ||
-		!strings.Contains(s.c.out.String(), fmt.Sprintf("%d grist grinds hold %d of those sessions", n, held)) {
-		return fmt.Errorf("expected dispatch to count %d grinds as running sessions, it said:\n%s", n, s.c.out.String())
 	}
 	return nil
 }

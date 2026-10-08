@@ -66,11 +66,12 @@ func TestGristKeyMakesTheMillKeyOnce(t *testing.T) {
 	}
 }
 
-// mw grist grind stops plainly when this machine has not been told its vault.
-func TestGristGrindStopsWhenTheMachineDoesNotKnowItsVault(t *testing.T) {
+// mw grist grind needs no vault: the mill reads no tracker, so a machine that
+// has not been told its vault goes on to its key (mw-gq6.303).
+func TestGristGrindNeedsNoVault(t *testing.T) {
 	mwConfig(t, "host = \"laptop\"\n")
-	if out, err := runGrist(t, "grind"); err == nil || !strings.Contains(err.Error(), "MW_VAULT") {
-		t.Fatalf("expected the reason to say how to set the vault, got %v\n%s", err, out)
+	if out, err := runGrist(t, "grind"); err == nil || strings.Contains(err.Error(), "MW_VAULT") {
+		t.Fatalf("expected the mill to ask for no vault, got %v\n%s", err, out)
 	}
 }
 

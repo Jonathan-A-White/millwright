@@ -3,13 +3,14 @@ Feature: mw grist grind grinds several grists at once, up to [grist] concurrency
   [grist] concurrency, default 2), each a lock file of its own. A pass grinds
   the oldest grists first, as many at once as there are slots free, and a grist
   past them waits for a grind of the pass to end, so a second child's turn
-  never waits on the first. Every slot held is one of the host's sessions: the
-  cap counts them, and mw dispatch counts them. The cursor moves only past
+  never waits on the first. The slots are the mill's own limit: the Builders
+  running on the host take none of them, and the grinds take none of the
+  host's cap for Builders (mw dispatch counts none). The cursor moves only past
   grists whose grind has ended. With one slot the mill grinds as it always has
   (features/grist.feature).
 
   Background:
-    Given a mill on the host "laptop" with a cap of 4
+    Given a mill on the host "laptop"
     And the app "cairn" is checked out here, its main at commit "0123456789abcdef0123456789abcdef01234567" with the grind "sweep"
     And a phone whose licence opens "cairn"
     And each grist carries a photo of its own
@@ -40,30 +41,39 @@ Feature: mw grist grind grinds several grists at once, up to [grist] concurrency
     Then the mill answered 2, refused 0, failed 0, and left 0 waiting
     And at most 1 grind ran at once
 
-  Scenario: The grinds a pass runs count against the host's cap with the stories running
-    Given the mill grinds up to 4 grists at once
+  Scenario: The Builders running on the host take none of the mill's slots
+    Given the mill grinds up to 2 grists at once
     And a story is already running on "laptop"
-    And the grinds are held until 3 of them are running at once
-    And the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
+    And the grinds are held until 2 of them are running at once
     And the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
     And the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
     And the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
     When the mill grinds
-    Then the mill answered 4, refused 0, failed 0, and left 0 waiting
-    And at most 3 grinds ran at once
+    Then the mill answered 3, refused 0, failed 0, and left 0 waiting
+    And at most 2 grinds ran at once
 
-  Scenario: mw dispatch counts every running grind as one of its sessions
+  Scenario: A grist beyond the mill's own limit waits, and the reason names the limit
+    Given the mill grinds up to 2 grists at once
+    And a story is already running on "laptop"
+    And 2 grinds are running on "laptop"
+    And the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
+    When the mill grinds
+    Then the mill answered 0, refused 0, failed 0, and left 1 waiting
+    And the mill says it is waiting because "the mill is at its limit (2 of 2 grinds running)"
+    And no grind was run
+    And the mill's cursor is before the grist
+
+  Scenario: A free slot grinds the grist beside the grinds running
+    Given the mill grinds up to 2 grists at once
+    And 1 grind is running on "laptop"
+    And the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
+    When the mill grinds
+    Then the mill answered 1, refused 0, failed 0, and left 0 waiting
+
+  Scenario: mw dispatch counts none of the grinds running as its sessions
     Given the mill grinds up to 2 grists at once
     And 2 grinds are running on "laptop"
     And a story is ready on "laptop"
     When mw dispatch runs on "laptop" with a cap of 2
-    Then dispatch started nothing, since "laptop has taken 2 of the 2 sessions it may run at once"
-    And dispatch says 2 grist grinds hold 2 of its sessions
-
-  Scenario: mw dispatch counts only the slots that are held
-    Given the mill grinds up to 2 grists at once
-    And 1 grind is running on "laptop"
-    And a story is ready on "laptop"
-    When mw dispatch runs on "laptop" with a cap of 1
-    Then dispatch started nothing, since "laptop has taken 1 of the 1 sessions it may run at once"
-    And dispatch says a grist grind holds one of its sessions
+    Then dispatch started the story "mw-9.1"
+    And dispatch counts no grind among its sessions

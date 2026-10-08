@@ -224,8 +224,8 @@ func aSmallMill(t *testing.T) (application.GristGrind, *apptest.FakePostern, *ap
 	grinder := &apptest.FakeGrinder{}
 	return application.GristGrind{
 		Postern: backend, Cipher: &apptest.FakeCipher{From: mill}, Keys: keys,
-		State: apptest.NewFakeGristState(), Grinds: grinds, Grinder: grinder, Tracker: apptest.NewFakeTracker(),
-		Pass: &apptest.FakeGristLock{}, Grinding: &apptest.FakeGristLock{}, Host: "laptop", Cap: 1,
+		State: apptest.NewFakeGristState(), Grinds: grinds, Grinder: grinder,
+		Pass: &apptest.FakeGristLock{}, Grinding: &apptest.FakeGristLock{}, Host: "laptop",
 		Apps: map[string]string{"cairn": "/rigs/cairn"}, TempDir: t.TempDir(),
 		Now: func() time.Time { return time.Date(2026, 9, 29, 10, 0, 0, 0, time.UTC) },
 	}, backend, grinder
@@ -463,7 +463,6 @@ func aGristWithPhotos(t *testing.T, mill application.GristGrind, backend *apptes
 // field is written for a grist with none too.
 func TestGristGrindRecordsHowManyPhotosEachGristCarried(t *testing.T) {
 	mill, backend, grinder := aSmallMill(t)
-	mill.Cap = 3
 	mill.Ceilings = application.GristCeilings{DailyLimit: 10}
 	grinder.Result = application.SessionResult{Subtype: "success", Answer: json.RawMessage(`{"items":[],"placeName":"x"}`)}
 	mill.Grinds.(*apptest.FakeGrinds).SetFile("/rigs/cairn", "c0ffee", "grinds/sweep.json", []byte(`{"grind":1,"app":"cairn","kind":"sweep","versions":["1.1"],

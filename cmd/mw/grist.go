@@ -47,24 +47,6 @@ func gristKeys() (*postern.KeyFile, error) {
 	return postern.New(path), nil
 }
 
-// gristGrindSlots is this host's grind slot locks, which mw dispatch counts
-// as one of its sessions each while they are held: the first, and the others
-// up to the [grist] concurrency. A host whose grist state directory cannot be
-// named has none, and counts none. A [grist] table that cannot be read counts
-// the default number of slots: only the slots held are counted.
-func gristGrindSlots() (first application.GristLock, more []application.GristLock) {
-	dir, err := config.GristStateDir()
-	if err != nil {
-		return nil, nil
-	}
-	concurrency := config.DefaultGristConcurrency
-	if settings, err := config.Grist(); err == nil {
-		concurrency = settings.Concurrency
-	}
-	slots := hostlock.GrindSlots(dir, concurrency)
-	return slots[0], slots[1:]
-}
-
 // newGristKeyCmd builds `mw grist key`: the mill key, made once, and its
 // public half.
 func newGristKeyCmd() *cobra.Command {
@@ -97,7 +79,8 @@ func newGristGrindCmd() *cobra.Command {
 			"app, the app's grind (grinds/<kind>.json at its rig's local main, config [grist-apps]) is\n" +
 			"unknown, or the grist is past a grind's or the factory's limits (config [grist]); otherwise\n" +
 			"ground in one short Claude Code session with no seat, answered or failed. A grind takes one\n" +
-			"of this host's cap, first come first served: with none free, the grist waits for the next\n" +
+			"of the mill's own grind slots ([grist] concurrency), first come first served, and neither\n" +
+			"waits for the host's Builders nor takes the cap's: with no slot free, the grist waits for the next\n" +
 			"pass, or for the next mw dispatch tick on the host that is home. Each grist handled is one line of grinds.jsonl in grist_state_dir, and its photos are\n" +
 			"deleted from the backend once it is answered. The backend's POSTERN_ON_GRIST runs it.",
 		Args: cobra.NoArgs,
@@ -373,15 +356,7 @@ func newScorers() (application.ScorerRegistry, error) {
 // `mw grist grind` runs, and what the dispatch tick runs on the host that is
 // home. It prints its report to out.
 func newMill(out io.Writer) (application.GristGrind, error) {
-	dir, err := config.Vault()
-	if err != nil {
-		return application.GristGrind{}, err
-	}
 	host, err := config.Host()
-	if err != nil {
-		return application.GristGrind{}, err
-	}
-	atOnce, err := config.Cap()
 	if err != nil {
 		return application.GristGrind{}, err
 	}
@@ -423,12 +398,10 @@ func newMill(out io.Writer) (application.GristGrind, error) {
 		Runs:         grist.NewRuns(stateDir),
 		Grinds:       rig.NewGrinds(),
 		Grinder:      claude.NewGrinder(),
-		Tracker:      mwGateway(dir, host),
 		Pass:         hostlock.NewTry(stateDir, hostlock.PassFile),
 		Grinding:     slots[0],
 		MoreGrinding: slots[1:],
 		Host:         host,
-		Cap:          atOnce,
 		Apps:         apps,
 		GovernorKey:  governorKey,
 		Ceilings: application.GristCeilings{

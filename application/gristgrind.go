@@ -60,8 +60,11 @@ var gristBlobHash = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
 // GristGrind is the mill (`mw grist grind`): one pass that answers every
 // grist waiting for the mill key, then ends. Each grist is answered once,
 // with a grist record sealed to its sender: answered, refused or failed.
-// Refusing needs no session; grinding takes one of this host's story
-// slots, first come first served, and waits while there is none.
+// Refusing needs no session; grinding takes one of the mill's own grind
+// slots, first come first served, and waits while there is none. The mill
+// answers his live use in seconds, so it never queues behind the host's
+// Builders: they take none of its slots, and the host's cap on Builders does
+// not count its grinds.
 type GristGrind struct {
 	Postern Postern
 	// Cipher seals from the mill key; Keys is the mill key file.
@@ -69,21 +72,19 @@ type GristGrind struct {
 	Keys   PosternKeyFile
 	State  GristState
 	Grinds GrindSource
-	// Grinder runs a grind; Tracker is what the cap is read against.
+	// Grinder runs a grind.
 	Grinder Grinder
-	Tracker RunningHere
 	// Pass is held for the whole pass, so two passes never answer the same
-	// grist. Grinding and MoreGrinding are the grind slots, one lock each: a
-	// slot is held while a grind runs, and mw dispatch counts every one held as
-	// one of the sessions its cap allows. The mill grinds as many grists at once
-	// as it has slots (config [grist] concurrency); Grinding alone is one.
+	// grist. Grinding and MoreGrinding are the grind slots, one lock each, held
+	// while a grind runs: the mill's own limit, apart from the host's cap on
+	// Builders. The mill grinds as many grists at once as it has slots (config
+	// [grist] concurrency); Grinding alone is one.
 	Pass         GristLock
 	Grinding     GristLock
 	MoreGrinding []GristLock
 
-	// Host and Cap are this host and how many sessions may run here at once.
+	// Host is this host.
 	Host string
-	Cap  int
 	// Scorers are the engines this host runs; every one of them scores each
 	// recording a scoring grind's grist carries. Runs keeps every grind's raw
 	// record; nil keeps none.
@@ -385,7 +386,7 @@ func (p *gristPass) work() {
 // or -1 and why there is none.
 func (p *gristPass) slot() (int, string) {
 	for {
-		n, release, why, err := p.g.slot(p.ctx, p.held, p.grinding)
+		n, release, why, err := p.g.slot(p.ctx, p.held)
 		if err != nil {
 			p.err = err
 			return -1, ""
@@ -682,13 +683,12 @@ func (g GristGrind) slots() []GristLock {
 	return append([]GristLock{g.Grinding}, g.MoreGrinding...)
 }
 
-// slot takes one of this host's story slots for a grind: a grind lock, then a
-// look at what is running here. held says which locks this pass's own grinds
-// hold, and running how many that is; they are not tried again, and they are
-// sessions the cap counts. It reports the lock's number and its release, or
-// number -1, and why, when there is none to take.
-func (g GristGrind) slot(ctx context.Context, held []func(), running int) (int, func(), string, error) {
-	for n, lock := range g.slots() {
+// slot takes one of the mill's grind slots for a grind. held says which locks
+// this pass's own grinds hold; they are not tried again. It reports the lock's
+// number and its release, or number -1, and why, when there is none to take.
+func (g GristGrind) slot(ctx context.Context, held []func()) (int, func(), string, error) {
+	slots := g.slots()
+	for n, lock := range slots {
 		if held[n] != nil {
 			continue
 		}
@@ -696,29 +696,11 @@ func (g GristGrind) slot(ctx context.Context, held []func(), running int) (int, 
 		if err != nil {
 			return -1, nil, "", fmt.Errorf("mw grist grind: %w", err)
 		}
-		if !taken {
-			continue
+		if taken {
+			return n, release, "", nil
 		}
-		stories, err := g.Tracker.RunningStories(ctx, g.Host)
-		if err != nil {
-			release()
-			return -1, nil, "", fmt.Errorf("mw grist grind: reading what is running on %s: %w", g.Host, err)
-		}
-		busy := running
-		for _, detail := range stories {
-			// As mw dispatch counts them: a story the Governor must be present
-			// for is worked with the Mayor, not in a session of this host.
-			if !detail.Hitl() {
-				busy++
-			}
-		}
-		if busy >= g.Cap {
-			release()
-			return -1, nil, fmt.Sprintf("the host is at its cap (%d of %d sessions running)", busy, g.Cap), nil
-		}
-		return n, release, "", nil
 	}
-	return -1, nil, "another grind is running on this host", nil
+	return -1, nil, fmt.Sprintf("the mill is at its limit (%d of %d grinds running)", len(slots), len(slots)), nil
 }
 
 // grindOne opens the grist's photos into a private directory, runs the
@@ -1083,14 +1065,10 @@ func (g GristGrind) wired() error {
 		return fmt.Errorf("mw grist grind: nowhere to keep what the mill has answered")
 	case g.Grinds == nil || g.Grinder == nil:
 		return fmt.Errorf("mw grist grind: nothing to read or run a grind with")
-	case g.Tracker == nil:
-		return fmt.Errorf("mw grist grind: no work tracker to read the host's cap against")
 	case g.Pass == nil || g.Grinding == nil:
 		return fmt.Errorf("mw grist grind: no locks to keep two grinds apart")
 	case g.Host == "":
 		return fmt.Errorf("mw grist grind: which host is this? set MW_HOST, or host in the config file")
-	case g.Cap < 1:
-		return fmt.Errorf("mw grist grind: the cap on sessions running at once on %s is %d, so nothing could be ground", g.Host, g.Cap)
 	}
 	return nil
 }

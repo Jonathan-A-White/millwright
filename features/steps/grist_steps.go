@@ -19,7 +19,9 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/postern"
+	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/cucumber/godog"
 )
@@ -71,7 +73,6 @@ type gristContext struct {
 	pass      *apptest.FakeGristLock
 	grinding  *apptest.FakeGristLock
 	host      string
-	cap       int
 	commit    string
 	ceilings  application.GristCeilings
 	governor  string
@@ -119,7 +120,7 @@ func InitializeGristScenario(ctx *godog.ScenarioContext) {
 	registerGristAudio(ctx, c)
 	registerGristSlots(ctx, c)
 
-	ctx.Given(`^a mill on the host "([^"]*)" with a cap of (\d+)$`, c.aMill)
+	ctx.Given(`^a mill on the host "([^"]*)"$`, c.aMill)
 	ctx.Given(`^the app "([^"]*)" is checked out here, its main at commit "([^"]*)" with the grind "([^"]*)"$`, c.theAppIsCheckedOut)
 	ctx.Given(`^a phone whose licence opens "([^"]*)"$`, c.aPhoneWhoseLicenceOpens)
 	ctx.Given(`^the phone sends a "([^"]*)" "([^"]*)" grist, version "([^"]*)", with (\d+) photos?$`, c.thePhoneSends)
@@ -170,7 +171,10 @@ func InitializeGristScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the mill says it is waiting because "([^"]*)"$`, c.theMillIsWaitingBecause)
 	ctx.Then(`^the mill says another pass is running$`, c.theMillSaysAnotherPass)
 	ctx.Then(`^dispatch started nothing, since "([^"]*)"$`, c.dispatchStartedNothing)
-	ctx.Then(`^dispatch says a grist grind holds one of its sessions$`, c.dispatchSaysGrinding)
+	ctx.Given(`^another story is ready on "([^"]*)"$`, c.anotherStoryIsReadyOn)
+	ctx.When(`^the running grind ends$`, c.theRunningGrindEnds)
+	ctx.Then(`^dispatch started the story "([^"]*)"$`, c.dispatchStartedTheStory)
+	ctx.Then(`^dispatch counts no grind among its sessions$`, c.dispatchCountsNoGrind)
 	ctx.Then(`^the dispatch's grist pass answered (\d+), refused (\d+), failed (\d+), and left (\d+) waiting$`, c.dispatchGristPassCounted)
 	ctx.Then(`^the dispatch ran no grist pass$`, c.dispatchRanNoGristPass)
 }
@@ -190,12 +194,12 @@ func (c *gristContext) vectorKey(name string) (pub, wif string, err error) {
 	return key.PublicKeyHex, priv.WifPrefix(byte(ec.TestNet)), nil
 }
 
-func (c *gristContext) aMill(host string, cap int) error {
+func (c *gristContext) aMill(host string) error {
 	home, err := os.MkdirTemp("", "mw-grist-")
 	if err != nil {
 		return err
 	}
-	c.home, c.host, c.cap = home, host, cap
+	c.home, c.host = home, host
 	pub, wif, err := c.vectorKey("mill")
 	if err != nil {
 		return err
@@ -449,8 +453,8 @@ func (c *gristContext) aGrindIsRunningOn(host string) error {
 func (c *gristContext) mill() application.GristGrind {
 	return application.GristGrind{
 		Postern: c.backend, Cipher: &apptest.FakeCipher{From: c.millKey}, Keys: c.keys,
-		State: c.state, Grinds: c.grinds, Grinder: c.grinder, Tracker: c.tracker,
-		Pass: c.pass, Grinding: c.grinding, MoreGrinding: c.slots.more(), Host: c.host, Cap: c.cap,
+		State: c.state, Grinds: c.grinds, Grinder: c.grinder,
+		Pass: c.pass, Grinding: c.grinding, MoreGrinding: c.slots.more(), Host: c.host,
 		Apps:        map[string]string{"cairn": c.checkout("cairn")},
 		Ceilings:    c.ceilings,
 		GovernorKey: c.governor,
@@ -503,13 +507,32 @@ func (c *gristContext) gristIsConfigured() error {
 // mwDispatchRuns is one dispatch tick, as cmd/mw wires it: the mill is given
 // only where a [grist] table is configured, and the vault's home file says
 // which host is home.
+// builderBoot is what a dispatch needs to start a Builder: a vault holding the
+// seat's charter, in the scenario's own directory.
+func (c *gristContext) builderBoot(host string) (application.SeatBoot, error) {
+	dir := filepath.Join(c.home, "vault")
+	charter := filepath.Join(dir, vault.SeatsDir, "builder", vault.CharterFile)
+	if err := os.MkdirAll(filepath.Dir(charter), 0o755); err != nil {
+		return application.SeatBoot{}, err
+	}
+	if err := os.WriteFile(charter, []byte("# Builder — charter\n"), 0o644); err != nil {
+		return application.SeatBoot{}, err
+	}
+	return application.SeatBoot{Vault: vault.New(dir), Harness: claude.New(), Seat: "builder", Host: host}, nil
+}
+
 func (c *gristContext) mwDispatchRuns(host string, cap int) error {
 	c.out.Reset()
 	tick := application.Dispatch{
 		Tracker: c.tracker, Worktrees: noWorktrees{}, Runner: apptest.NewFakeRunner(),
 		Host: host, Cap: cap, Rigs: map[string]string{"millwright": "/rigs/millwright"},
-		Grinding: c.grinding, MoreGrinding: c.slots.more(), Out: &c.out,
+		Out: &c.out,
 	}
+	boot, err := c.builderBoot(host)
+	if err != nil {
+		return err
+	}
+	tick.Boot = boot
 	if c.homeIs != "" {
 		tick.Home = &apptest.FakeHomeFile{Text: c.homeIs + " 2026-09-29T09:00:00Z mw@" + c.homeIs + "\n"}
 	}
@@ -825,9 +848,38 @@ func (c *gristContext) dispatchStartedNothing(why string) error {
 	return fmt.Errorf("expected a story passed because %q, dispatch said:\n%s", why, c.out.String())
 }
 
-func (c *gristContext) dispatchSaysGrinding() error {
-	if !c.dispatch.Grinding || c.dispatch.Grinds != 1 || c.dispatch.Running != 1 || !strings.Contains(c.out.String(), "a grist grind holds one of those sessions") {
-		return fmt.Errorf("expected dispatch to count the grind as a running session, it said:\n%s", c.out.String())
+func (c *gristContext) anotherStoryIsReadyOn(host string) error {
+	if host != c.host {
+		return fmt.Errorf("the mill is on %s, not %s", c.host, host)
+	}
+	c.tracker.AddStory("mw-9", domain.Story{ID: "mw-9.2", Title: "Another story"})
+	return nil
+}
+
+// theRunningGrindEnds frees every grind slot, as the grinds of another pass
+// ending would.
+func (c *gristContext) theRunningGrindEnds() error {
+	c.grinding.Free()
+	for _, lock := range c.slots.extra {
+		lock.Free()
+	}
+	return nil
+}
+
+func (c *gristContext) dispatchStartedTheStory(id string) error {
+	for _, started := range c.dispatch.Started {
+		if started.StoryID == id {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected %s started, dispatch said:\n%s", id, c.out.String())
+}
+
+// dispatchCountsNoGrind checks that a running grind is not among the sessions
+// dispatch counts against its cap, and that its report does not say so.
+func (c *gristContext) dispatchCountsNoGrind() error {
+	if strings.Contains(c.out.String(), "grist grind") {
+		return fmt.Errorf("expected dispatch to count no grind among its sessions, it said:\n%s", c.out.String())
 	}
 	return nil
 }

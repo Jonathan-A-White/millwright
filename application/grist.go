@@ -307,12 +307,6 @@ type GristMill interface {
 	Run(ctx context.Context) (GristReport, error)
 }
 
-// RunningHere is what the mill reads the host's cap against: the stories
-// running on a host, exactly as mw dispatch counts them. WorkTracker has it.
-type RunningHere interface {
-	RunningStories(ctx context.Context, host string) ([]StoryDetail, error)
-}
-
 // GrindLine is one line of the mill's record: one grist handled. It holds
 // the sender's fingerprint and never its key, never the grist's input,
 // photos or answer.

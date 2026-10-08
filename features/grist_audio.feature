@@ -10,7 +10,7 @@ Feature: mw grist grind takes a recording, scores it, and keeps every grind's ra
   (docs/scorers.md).
 
   Background:
-    Given a mill on the host "laptop" with a cap of 1
+    Given a mill on the host "laptop"
     And the app "cairn" is checked out here, its main at commit "0123456789abcdef0123456789abcdef01234567" with the grind "sweep"
     And the grind "reading" takes a webm recording and scores it against "target_text"
     And the grind "listening" takes a webm recording but scores nothing
