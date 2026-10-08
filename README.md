@@ -1481,6 +1481,32 @@ licence collection to its name). `mw postern serve` does not write these yet,
 so add them to the backend's environment file by hand. See
 `features/grist.feature`.
 
+A grind may say `"forward": "mayor"` instead of naming a model, for a grist that is
+for a person to read, such as an app's feedback. The mill then runs no session
+and burns no Fuel: it opens the grist's text and pictures as for any grind,
+keeps the pictures under `forwarded/<txid>/` of `grist_state_dir`
+(`picture-1.jpg`, `picture-2.png`, ...), sends one mail to the mayor titled
+`Feedback from <app>: ` and the first 80 characters of the text, whose body is the
+full text, the sender's key and fingerprint, the grist's id and the pictures'
+full paths, and answers the app `{"status":"sent"}` so it can say Sent. The text is
+the request's `text` field, or the whole request when it has none. `mayor` is the only
+value; anything else refuses the grist ("The app's grind forwards to someone the mill
+does not forward to."), as does a grist over the grind's or the factory's attachment
+limits (a grind taking six pictures needs `[grist]` `max_attachments = 6`). A grist
+the mill cannot mail is failed, so the app may send it again. `model`, `effort`,
+`instructions` and `answerSchema` are not read. `mw grist runs` and `stats` count it
+as the kind `forward`. An app's `grinds/feedback.json`:
+
+```json
+{
+  "grind": 1, "app": "lampas", "kind": "feedback", "versions": ["1"],
+  "forward": "mayor",
+  "attachments": { "min": 0, "max": 6, "mime": ["image/jpeg", "image/png", "image/webp"], "maxBytes": 4194304 }
+}
+```
+
+See `features/grist_forward.feature`.
+
 `mw grist send` is the terminal's sender: it sends a grist as a key it is
 given, as an app's phone would, and can wait for the answer.
 

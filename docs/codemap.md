@@ -33,7 +33,7 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 | EventLog, BeadFeed, FollowCursors, ShipStates, SubscribeFiles, NudgeCursors, EventSpringer, EventController, HarnessCount | application/event*.go, status.go | infrastructure/{eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go | apptest.Fake{EventLog,FollowCursors,Ship*,Tracker,Subscribe*,Nudge*} |
 | Postern, hands, Prompts | application/{postern*,hands,prompt}.go | infrastructure/{postern,hands*,homemove} | apptest.Fake{Postern*,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*,HomeMover,Prompts} |
 | Chain, StampQueue, StampStore, CommitNotes, RigHeads | application/chain.go, application/chainstamp.go, application/prove.go | infra/{bsv,stampqueue,chainlookup}, rig/worktree.go | apptest.Fake{Chain,StampQueue,CommitNotes,RigHeads} |
-| Grinder, GrindSource, GristState, GristLock, GristRunStore | application/grist.go, application/gristruns.go | infrastructure/{claude/grind,rig/grinds,hostlock/try}.go, infrastructure/grist | apptest.Fake{Grinder,Grinds,GristState,GristLock} |
+| Grinder, GrindSource, GristState, GristLock, GristRunStore, GristForwardStore | application/grist.go, application/gristruns.go | infrastructure/{claude/grind,rig/grinds,hostlock/try}.go, infrastructure/grist | apptest.Fake{Grinder,Grinds,GristState,GristLock} |
 | Scorer | application/scorer.go | infrastructure/scorer/ | apptest.FakeScorer |
 
 ## Use cases
@@ -68,6 +68,6 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 | Hands{Add,List} | application/hands.go | mw hands add/list - cmd/mw/hands.go; cmd/mw-hands-root | features/hands.feature |
 | Postern{Serve,Nginx,Mirror} | application/posternhand.go, application/posternmirror.go | mw postern serve/nginx/mirror - cmd/mw/postern.go, cmd/mw/posternmirror.go | features/postern_serve.feature |
 | Prompt{Save,List,Show,Run}, Cards | application/prompt.go, application/card.go | mw prompt/card - cmd/mw/prompt.go, cmd/mw/card.go | features/{prompt,card}.feature |
-| Grist{Key,Grind,Send,Eval,Score,Runs,Stats} | application/grist.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go | mw grist key/grind/send/eval/score/runs/stats - cmd/mw/grist.go | features/{grist{,_send,_eval,_audio,_concurrent},scorer}.feature |
+| Grist{Key,Grind,Send,Eval,Score,Runs,Stats} | application/grist.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go | mw grist key/grind/send/eval/score/runs/stats - cmd/mw/grist.go | features/{grist{,_send,_eval,_audio,_concurrent,_forward},scorer}.feature |
 
 cmd/mw/root.go: the tree; cmd/mw/version.go.
