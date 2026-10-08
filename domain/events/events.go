@@ -32,20 +32,21 @@ type Event struct {
 // The kinds a seat or a screen subscribes to (mw-6ww.55, Q4 A, plus Q7's
 // scheduled jobs and bd mail).
 const (
-	KindBeadChanged  = "bead_changed"  // a bead's status, or anything else on it, changed
-	KindCardAsked    = "card_asked"    // a question put to the Governor on a bead
-	KindCardAnswered = "card_answered" // his answer to it
-	KindCardApplied  = "card_applied"  // his answer applied to the bead
-	KindMessage      = "message"       // a message in a channel
-	KindTalkTurn     = "talk_turn"     // a talk opened, a turn, an answer, the talk ended
-	KindHandsRan     = "hands_ran"     // a step for his hands ran
-	KindMail         = "mail"          // a bd mail bead sent to a seat
-	KindJob          = "job"           // a scheduled job's transition
-	KindHandover     = "handover"      // a seat's session hands the seat to its successor at a seq
-	KindControl      = "control"       // a word to the factory: cancel a story's session, pause a host, cap, priority
+	KindBeadChanged   = "bead_changed"   // a bead's status, or anything else on it, changed
+	KindCardAsked     = "card_asked"     // a question put to the Governor on a bead
+	KindCardAnswered  = "card_answered"  // his answer to it
+	KindCardApplied   = "card_applied"   // his answer applied to the bead
+	KindMessage       = "message"        // a message in a channel
+	KindTalkTurn      = "talk_turn"      // a talk opened, a turn, an answer, the talk ended
+	KindHandsRan      = "hands_ran"      // a step for his hands ran
+	KindMail          = "mail"           // a bd mail bead sent to a seat
+	KindJob           = "job"            // a scheduled job's transition
+	KindHandover      = "handover"       // a seat's session hands the seat to its successor at a seq
+	KindControl       = "control"        // a word to the factory: cancel a story's session, pause a host, cap, priority
+	KindActionApplied = "action_applied" // a one-tap action of the Governor's, applied from the inbox, echoed with the tap's txid
 )
 
-var kinds = []string{KindBeadChanged, KindCardAsked, KindCardAnswered, KindCardApplied, KindMessage, KindTalkTurn, KindHandsRan, KindMail, KindJob, KindHandover, KindControl}
+var kinds = []string{KindBeadChanged, KindCardAsked, KindCardAnswered, KindCardApplied, KindMessage, KindTalkTurn, KindHandsRan, KindMail, KindJob, KindHandover, KindControl, KindActionApplied}
 
 // kindMachine is the machine each kind is a transition of; a kind missing
 // here has none.
@@ -67,12 +68,13 @@ var kindTo = map[string]string{
 
 // kindBead are the kinds whose Bead must name one.
 var kindBead = map[string]bool{
-	KindBeadChanged:  true,
-	KindCardAsked:    true,
-	KindCardAnswered: true,
-	KindCardApplied:  true,
-	KindHandsRan:     true,
-	KindMail:         true,
+	KindBeadChanged:   true,
+	KindCardAsked:     true,
+	KindCardAnswered:  true,
+	KindCardApplied:   true,
+	KindHandsRan:      true,
+	KindMail:          true,
+	KindActionApplied: true,
 }
 
 // Kinds lists every kind.

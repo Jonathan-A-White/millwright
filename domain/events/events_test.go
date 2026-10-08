@@ -113,17 +113,18 @@ func keys(m map[string]json.RawMessage) string {
 
 func TestEveryKindIsNamedWithItsMachine(t *testing.T) {
 	want := map[string]events.Machine{
-		events.KindBeadChanged:  events.MachineBead,
-		events.KindCardAsked:    events.MachineCard,
-		events.KindCardAnswered: events.MachineCard,
-		events.KindCardApplied:  events.MachineCard,
-		events.KindTalkTurn:     events.MachineTalk,
-		events.KindJob:          events.MachineJob,
-		events.KindMessage:      "",
-		events.KindHandsRan:     "",
-		events.KindMail:         "",
-		events.KindHandover:     "",
-		events.KindControl:      "",
+		events.KindBeadChanged:   events.MachineBead,
+		events.KindCardAsked:     events.MachineCard,
+		events.KindCardAnswered:  events.MachineCard,
+		events.KindCardApplied:   events.MachineCard,
+		events.KindTalkTurn:      events.MachineTalk,
+		events.KindJob:           events.MachineJob,
+		events.KindMessage:       "",
+		events.KindHandsRan:      "",
+		events.KindMail:          "",
+		events.KindHandover:      "",
+		events.KindControl:       "",
+		events.KindActionApplied: "",
 	}
 	got := events.Kinds()
 	if len(got) != len(want) {
