@@ -289,6 +289,7 @@ func (i PosternInbox) applyOne(ctx context.Context, m PosternInboxMessage, outco
 		result, err := i.applyAction(ctx, m, action)
 		if err == nil && !result.Refused && action.Action != PosternActionRun {
 			i.answerByActs(ctx, m, i.actedBeads(ctx, action.Bead)...)
+			i.echoAction(ctx, action, m.Txid)
 		}
 		return result, err == nil, err
 	}
@@ -381,6 +382,28 @@ func (i PosternInbox) applyLooksGood(ctx context.Context, m PosternInboxMessage)
 			fmt.Sprintf("The Governor said Looks good by postern (txid %s) to %s; not applied: %s.", m.Txid, bead.Story.ID, result.Detail))
 	}
 	return result, true, i.mail(ctx, fmt.Sprintf("Closed: %s on his Looks good", bead.Story.ID), comment)
+}
+
+// echoAction appends the event that says an action of the Governor's was
+// applied, its detail the tap's txid, so the app that sent the tap can tell
+// from the events tail that it took. Release, Hold, Keep, Close and Verified
+// are echoed; a priority is not. It is written after the action is done, so a
+// failure to write it is said, not returned: the action stands, and applying
+// the tap again would only double it.
+func (i PosternInbox) echoAction(ctx context.Context, action PosternAction, txid string) {
+	switch action.Action {
+	case PosternActionRelease, PosternActionHold, PosternActionKeep, PosternActionClose, PosternActionVerified:
+	default:
+		return
+	}
+	if i.Events == nil {
+		return
+	}
+	if _, err := (EventEmit{Log: i.Events, Now: i.now, Event: events.Event{
+		Kind: events.KindActionApplied, Bead: action.Bead, Actor: GovernorPosternActor, Detail: txid,
+	}}).Run(ctx); err != nil {
+		i.printf("not echoed: %s %s txid %s: %v\n", action.Action, action.Bead, txid, err)
+	}
 }
 
 // applyAction applies one of the Governor's section 13 actions to its bead,

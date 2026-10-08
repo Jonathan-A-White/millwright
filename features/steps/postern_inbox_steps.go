@@ -44,6 +44,9 @@ type posternInboxContext struct {
 	transcriber *apptest.FakeTranscriber
 	runner      *apptest.FakeHandsRunner
 	handsSteps  map[string]domain.HandsStep
+	// eventLog, when a scenario keeps one, is the log the inbox echoes the
+	// Governor's taps into.
+	eventLog *apptest.FakeEventLog
 
 	// host, homeFile, mover, moveBead and now are a move-home scenario's:
 	// this host, the vault's home file, the stand-in for ssh and mw home
@@ -106,6 +109,7 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	})
 
 	c.registerPosternCloseSteps(ctx)
+	c.registerPosternActionEchoSteps(ctx)
 
 	ctx.Then(`^mw remembers the post "([^"]*)" is in the channel of bead "([^"]*)"$`, func(txid, bead string) error {
 		return c.rememberedThread(txid, application.PosternThread{Bead: bead})
@@ -743,6 +747,9 @@ func (c *posternInboxContext) inbox() application.PosternInbox {
 		GovernorKey:   c.governorKey,
 		AttachmentDir: c.attachDir,
 		Out:           c.out,
+	}
+	if c.eventLog != nil {
+		inbox.Events = c.eventLog
 	}
 	if c.transcriber != nil || c.runner != nil || c.replies {
 		inbox.Sender = &application.PosternSend{

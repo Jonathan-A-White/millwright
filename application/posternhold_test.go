@@ -26,8 +26,8 @@ func TestApplyHoldOfAClaimedStoryEmitsACancelEvent(t *testing.T) {
 	}
 
 	got := log.All()
-	if len(got) != 1 {
-		t.Fatalf("the log holds %d events, want one cancel: %+v", len(got), got)
+	if len(got) != 2 || got[1].Kind != events.KindActionApplied || got[1].Detail != "tx-claimed" {
+		t.Fatalf("the log holds %d events, want the cancel then the tap's echo: %+v", len(got), got)
 	}
 	ev := got[0]
 	if ev.Kind != events.KindControl || ev.Bead != "mw-e.4" || ev.Detail != events.ControlCancel || ev.Actor != application.GovernorPosternActor || ev.Lane != events.LaneNormal {
@@ -48,28 +48,32 @@ func TestApplyHoldOfAClaimedStoryEmitsACancelEvent(t *testing.T) {
 	}
 }
 
-// A hold of an open, unclaimed story emits nothing, and a cancel that cannot
-// be written is a refusal the Mayor is told of, not a hold that did not happen
-// in silence.
-func TestApplyHoldEmitsNothingForAnOpenStoryAndRefusesWhenTheCancelCannotBeWritten(t *testing.T) {
+// A hold of an open, unclaimed story writes no cancel, only the tap's echo,
+// and a cancel that cannot be written is a refusal the Mayor is told of, not a
+// hold that did not happen in silence.
+func TestApplyHoldWritesNoCancelForAnOpenStoryAndRefusesWhenTheCancelCannotBeWritten(t *testing.T) {
 	f := newApplyFixture(t)
 	log := &apptest.FakeEventLog{}
 	f.action(t, "tx-open", map[string]any{"action": "hold", "bead": "mw-e.3"})
-	f.action(t, "tx-claimed", map[string]any{"action": "hold", "bead": "mw-e.4"})
-	log.FailNext(errors.New("disk full"))
-
 	inbox := f.inbox()
 	inbox.Events = log
-	// The open story's hold goes first and writes no event, so the failure is
-	// the claimed one's.
 	if _, err := inbox.Apply(context.Background()); err != nil {
 		t.Fatalf("applying: %v", err)
 	}
 	if got := f.status(t, "mw-e.3"); got != apptest.StatusDeferred {
 		t.Fatalf("the open story is %s, want held", got)
 	}
-	if got := log.All(); len(got) != 0 {
-		t.Fatalf("events written: %+v", got)
+	if got := log.All(); len(got) != 1 || got[0].Kind != events.KindActionApplied || got[0].Detail != "tx-open" {
+		t.Fatalf("events written: %+v, want only the echo of tx-open", got)
+	}
+
+	f.action(t, "tx-claimed", map[string]any{"action": "hold", "bead": "mw-e.4"})
+	log.FailNext(errors.New("disk full"))
+	if _, err := inbox.Apply(context.Background()); err != nil {
+		t.Fatalf("applying: %v", err)
+	}
+	if got := log.All(); len(got) != 1 {
+		t.Fatalf("events written: %+v, want still the one echo", got)
 	}
 	if subjects := f.subjects(t); len(subjects) != 2 || subjects[1] != "Not applied: hold mw-e.4" {
 		t.Fatalf("mail subjects %v", subjects)
