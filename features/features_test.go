@@ -121,6 +121,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializePosternBeadScenario(ctx)
 	steps.InitializePosternInboxScenario(ctx)
 	steps.InitializePosternKeyScenario(ctx)
+	steps.InitializePosternRequestSignatureScenario(ctx)
 	steps.InitializePosternSendScenario(ctx)
 	steps.InitializePosternServeScenario(ctx)
 	steps.InitializePosternSnapshotScenario(ctx)
