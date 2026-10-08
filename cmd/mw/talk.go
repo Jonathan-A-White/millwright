@@ -10,6 +10,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
+	"github.com/Jonathan-A-White/millwright/infrastructure/postern"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
@@ -124,7 +125,9 @@ func newTalkWaitCmd() *cobra.Command {
 			"mail-wait never wakes the Mayor a second time for one turn.\n\n" +
 			"It also ends at a new postern message for the Mayor's key, one past the postern inbox's cursor\n" +
 			"(which it only reads), printing 'new postern message' with each one's channel, txid and first\n" +
-			"line; a message already read does not wake it, and a Governor turn that arrives with one wins.\n\n" +
+			"line; a message already read does not wake it, and a Governor turn that arrives with one wins.\n" +
+			"A voice note is printed as 'voice note: \"<words>\"' (heard here within 60 s when postern_transcribe_cmd\n" +
+			"is set, or already heard by the inbox), else 'voice note (words to follow by mail Voice: ...)'.\n\n" +
 			"A handover of the Mayor (mw seat handover) ends it at once, in the old Mayor's window, saying 'handed over\n" +
 			"at N': the old Mayor answers nothing after event N of the log, so a turn the Governor sent after\n" +
 			"it is left unprinted and the cursor unmoved, and the successor's wait hears it.\n\n" +
@@ -158,6 +161,18 @@ func newTalkWaitCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			attachmentDir, err := config.PosternInboxDir()
+			if err != nil {
+				return err
+			}
+			transcribeCmd, err := config.PosternTranscribeCmd()
+			if err != nil {
+				return err
+			}
+			var transcriber application.PosternTranscriber
+			if transcribeCmd != "" {
+				transcriber = postern.NewCommandTranscriber(transcribeCmd)
+			}
 			_, err = application.TalkWait{
 				Stream:      backend,
 				Postern:     backend,
@@ -166,13 +181,14 @@ func newTalkWaitCmd() *cobra.Command {
 				Memory:      gateway,
 				Mailbox:     gateway,
 				GovernorKey: governorKey,
-				Log:         eventlog.New(logPath),
-				Self:        thisWindowName(cmd.Context()),
-				Limit:       limit,
-				MinBackoff:  minBackoff,
-				MaxBackoff:  maxBackoff,
-				Out:         cmd.OutOrStdout(),
-				Err:         cmd.ErrOrStderr(),
+				Transcriber: transcriber, AttachmentDir: attachmentDir,
+				Log:        eventlog.New(logPath),
+				Self:       thisWindowName(cmd.Context()),
+				Limit:      limit,
+				MinBackoff: minBackoff,
+				MaxBackoff: maxBackoff,
+				Out:        cmd.OutOrStdout(),
+				Err:        cmd.ErrOrStderr(),
 			}.Run(cmd.Context())
 			return err
 		},
