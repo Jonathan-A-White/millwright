@@ -420,6 +420,14 @@ Feature: Dispatching the stories this host is ready to work
     Then the formula "tdd-feature" was poured for "mw-gq6.1"
     And the boot file of "mw-gq6.1" holds every poured step, in order
 
+  Scenario: A story whose title is near bd's limit is still poured, with its title shortened in the step titles (mw-gq6.295)
+    Given a ready story "mw-gq6.1" of that epic with a title 499 characters long
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.1"
+    And the formula "tdd-feature" was poured for "mw-gq6.1"
+    And no step poured for "mw-gq6.1" has a title over 500 characters
+    And the story "mw-gq6.1" is claimed by this host
+
   Scenario: A story whose recorded molecule is still open is dispatched without a second pour
     Given a ready story "mw-gq6.1" of that epic
     And the story "mw-gq6.1" has the formula "tdd-feature" poured and recorded, with its first step closed

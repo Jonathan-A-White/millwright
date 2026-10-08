@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // Plan is the Mayor's plan for one epic, as it is written down before it is
@@ -109,6 +110,42 @@ func StepTitleOverhead(stepTitles []string) int {
 		}
 	}
 	return longest
+}
+
+// Ellipsis is what ends a title that was shortened to fit.
+const Ellipsis = "\u2026"
+
+// FitTitleToSteps is the story's title as it can go into a formula's step
+// titles whatever its length: unchanged if the longest step title that carries
+// {{title}} still fits MaxTitleLength with it, and otherwise cut short, at a
+// character, with an Ellipsis at the end, so that it does. {{story}} is the
+// story's own id here, not StoryIDReserve, because the story is already filed.
+// A pour never fails for the length of a title (mw-gq6.295).
+func FitTitleToSteps(title, storyID string, stepTitles []string) string {
+	var overhead int
+	for _, step := range stepTitles {
+		if !strings.Contains(step, "{{title}}") {
+			continue
+		}
+		bare := strings.ReplaceAll(step, "{{story}}", storyID)
+		bare = strings.ReplaceAll(bare, "{{title}}", "")
+		if len(bare) > overhead {
+			overhead = len(bare)
+		}
+	}
+	room := MaxTitleLength - overhead
+	if len(title) <= room {
+		return title
+	}
+	room -= len(Ellipsis)
+	if room < 0 {
+		room = 0
+	}
+	cut := room
+	for cut > 0 && !utf8.RuneStart(title[cut]) {
+		cut--
+	}
+	return title[:cut] + Ellipsis
 }
 
 // Validate reports every reason this plan cannot be filed: an epic with no

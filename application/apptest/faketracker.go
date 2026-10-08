@@ -971,6 +971,11 @@ func (f *FakeTracker) PourFormula(_ context.Context, formula, storyID, title str
 			Title:       strings.NewReplacer("{{story}}", storyID, "{{title}}", title).Replace(step.Title),
 			Description: strings.NewReplacer("{{story}}", storyID, "{{title}}", title).Replace(step.Description),
 		})
+		// bd's own limit, so that a pour that would be refused is refused here too.
+		if n := len(poured.Steps[i].Title); n > domain.MaxTitleLength {
+			return application.Molecule{}, &application.PourRefused{Formula: formula, Story: storyID,
+				Reason: fmt.Sprintf("title must be %d characters or less (got %d)", domain.MaxTitleLength, n)}
+		}
 	}
 	f.molecules = append(f.molecules, poured)
 	f.poured[storyID] = root

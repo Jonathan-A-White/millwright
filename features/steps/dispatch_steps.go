@@ -106,6 +106,7 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the formula "([^"]*)" is installed$`, c.theFormulaIsInstalled)
 	ctx.Given(`^an epic "([^"]*)" whose stories are planned with the path:$`, c.anEpicWithTheDefaultPathForDispatch)
 	ctx.Given(`^a ready story "([^"]*)" of that epic$`, c.aReadyStoryOfThatEpic)
+	ctx.Given(`^a ready story "([^"]*)" of that epic with a title (\d+) characters long$`, c.aReadyStoryWithALongTitle)
 	ctx.Given(`^a ready story "([^"]*)" of that epic that overrides "([^"]*)" with "([^"]*)"$`, c.aReadyStoryThatOverrides)
 	ctx.Given(`^a ready story "([^"]*)" of that epic at priority (\d+), filed at "([^"]*)"$`, c.aReadyStoryAtPriority)
 	ctx.Given(`^a ready story "([^"]*)" of that epic labelled "([^"]*)"$`, c.aReadyStoryLabelled)
@@ -176,6 +177,7 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the story "([^"]*)" carries a comment saying the dispatch failed$`, c.theStoryCarriesAFailureComment)
 	ctx.Then(`^there is no worktree for "([^"]*)"$`, c.thereIsNoWorktreeFor)
 	ctx.Then(`^the formula "([^"]*)" was poured for "([^"]*)"$`, c.theFormulaWasPouredFor)
+	ctx.Then(`^no step poured for "([^"]*)" has a title over (\d+) characters$`, c.noStepTitleIsOver)
 	ctx.Then(`^the boot file of "([^"]*)" holds every poured step, in order$`, c.theBootFileHoldsEveryStep)
 	ctx.Then(`^nothing was poured$`, c.nothingWasPoured)
 	ctx.Then(`^nothing more was poured$`, c.nothingMoreWasPoured)
@@ -302,7 +304,7 @@ func (c *dispatchContext) theOtherHostHasPushed() error {
 // and reach the boot file, not what they say.
 func (c *dispatchContext) theFormulaIsInstalled(name string) error {
 	c.tracker.AddFormula(name,
-		application.FormulaStep{Title: "Understand {{story}}", Description: "Read the story and the code it touches."},
+		application.FormulaStep{Title: "Understand {{story}}: {{title}}", Description: "Read the story and the code it touches."},
 		application.FormulaStep{Title: "Write the failing feature first", Description: "Watch it fail for the right reason."},
 		application.FormulaStep{Title: "Implement until green", Description: "The smallest code that passes."},
 	)
@@ -345,6 +347,13 @@ func (c *dispatchContext) aReadyStoryAtPriority(id string, priority int, filed s
 		return err
 	}
 	return c.tracker.SetCreated(id, created)
+}
+
+// aReadyStoryWithALongTitle adds a ready story whose title is n characters, to
+// be poured into step titles that put more before it (mw-gq6.295).
+func (c *dispatchContext) aReadyStoryWithALongTitle(id string, n int) error {
+	c.tracker.AddStory(c.lastEpic, domain.Story{ID: id, Title: strings.Repeat("t", n)})
+	return nil
 }
 
 func (c *dispatchContext) aReadyStoryThatOverrides(id, field, value string) error {
@@ -1025,6 +1034,19 @@ func (c *dispatchContext) theFormulaWasPouredFor(formula, id string) error {
 	}
 	if !molecule.Poured() {
 		return fmt.Errorf("expected the molecule of %s to hold steps, got %+v", id, molecule)
+	}
+	return nil
+}
+
+func (c *dispatchContext) noStepTitleIsOver(id string, limit int) error {
+	molecule, poured := c.tracker.Poured(id)
+	if !poured {
+		return fmt.Errorf("nothing was poured for %s", id)
+	}
+	for _, step := range molecule.Steps {
+		if n := len(step.Title); n > limit {
+			return fmt.Errorf("the step %s of %s has a title %d characters long, over %d", step.ID, id, n, limit)
+		}
 	}
 	return nil
 }

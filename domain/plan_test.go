@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -222,5 +223,42 @@ func TestStepTitleOverheadIsTheLongestWordingAStepPutsBeforeTheTitle(t *testing.
 	}
 	if got := domain.StepTitleOverhead([]string{"Commit"}); got != 0 {
 		t.Errorf("a step that does not carry the title adds nothing, got %d", got)
+	}
+}
+
+func TestFitTitleToStepsLeavesATitleThatFitsAlone(t *testing.T) {
+	steps := []string{"Understand {{story}}: {{title}}", "Implement until green"}
+	if got := domain.FitTitleToSteps("A short one", "mw-1", steps); got != "A short one" {
+		t.Errorf("expected the title unchanged, got %q", got)
+	}
+}
+
+func TestFitTitleToStepsCutsALongTitleWithAnEllipsisToFitTheStepTitle(t *testing.T) {
+	steps := []string{"Understand {{story}}: {{title}}", "Implement until green"}
+	got := domain.FitTitleToSteps(strings.Repeat("t", 499), "mw-gq6.295", steps)
+	step := "Understand mw-gq6.295: " + got
+	if len(step) > domain.MaxTitleLength {
+		t.Errorf("expected the step title within %d, got %d", domain.MaxTitleLength, len(step))
+	}
+	if !strings.HasSuffix(got, domain.Ellipsis) {
+		t.Errorf("expected the cut title to end in an ellipsis, got ...%q", got[len(got)-5:])
+	}
+}
+
+func TestFitTitleToStepsCutsAtACharacterNotInsideOne(t *testing.T) {
+	steps := []string{"Understand {{story}}: {{title}}"}
+	got := domain.FitTitleToSteps(strings.Repeat("é", 400), "mw-1", steps)
+	if !utf8.ValidString(got) {
+		t.Errorf("expected a valid string, got %q", got)
+	}
+	if n := len("Understand mw-1: ") + len(got); n > domain.MaxTitleLength {
+		t.Errorf("expected within %d, got %d", domain.MaxTitleLength, n)
+	}
+}
+
+func TestFitTitleToStepsLeavesAFormulaWithNoTitleInItsStepsAlone(t *testing.T) {
+	title := strings.Repeat("t", 500)
+	if got := domain.FitTitleToSteps(title, "mw-1", []string{"Implement until green"}); got != title {
+		t.Errorf("expected the title unchanged, got %d bytes", len(got))
 	}
 }

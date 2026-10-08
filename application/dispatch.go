@@ -970,7 +970,11 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 	}
 
 	if !started.Reused && path.Formula != "" && formulas[path.Formula] {
-		molecule, err := d.Tracker.PourFormula(ctx, path.Formula, id, detail.Story.Title)
+		title, err := d.titleToPour(ctx, path.Formula, id, detail.Story.Title)
+		if err != nil {
+			return undo("reading the step titles of the formula "+path.Formula, err, true)
+		}
+		molecule, err := d.Tracker.PourFormula(ctx, path.Formula, id, title)
 		var refused *PourRefused
 		if errors.As(err, &refused) {
 			return d.refusePour(ctx, id, started, rigDir, refused)
@@ -1115,6 +1119,22 @@ func (e *pourRefusal) Unwrap() error { return e.err }
 // apart from "dispatch", which is the follower's job of springing dispatches
 // and keeps its own state in the log.
 const JobPourRefused = "dispatch-pour"
+
+// titleToPour is the story's title as it is poured into its formula's step
+// titles: cut short with an ellipsis when the longest of them, with it in, would
+// pass the tracker's limit, so that no title can make a pour fail (mw-gq6.295).
+// A tracker that cannot say what the step titles are is given the title whole.
+func (d Dispatch) titleToPour(ctx context.Context, formula, id, title string) (string, error) {
+	reader, ok := d.Tracker.(FormulaTitles)
+	if !ok {
+		return title, nil
+	}
+	steps, err := reader.FormulaStepTitles(ctx, formula)
+	if err != nil {
+		return "", err
+	}
+	return domain.FitTitleToSteps(title, id, steps), nil
+}
 
 // refusePour leaves a story whose pour the tracker refused blocked, the claim
 // kept: giving it back would have the next dispatch claim, cut and pour it
