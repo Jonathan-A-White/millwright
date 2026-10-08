@@ -8,6 +8,12 @@ docs/scorers.md promises ("ARPAbet-style") and what makes the two comparable.
 
 import unicodedata
 
+# Which phones, spellings and distances a reading is compared in depends on the
+# language. English goes through ARPAbet (to_arpabet, substitution_cost): the
+# names docs/scorers.md promises. Every other language is compared as IPA
+# (to_ipa_phones, ipa_cost): ARPAbet is English's alphabet, and the model and
+# espeak-ng both speak IPA already.
+
 # Longest first: the two-letter IPA phones are matched before their letters.
 _IPA = {
     "tʃ": ["CH"], "dʒ": ["JH"],
@@ -73,3 +79,102 @@ def substitution_cost(expected, produced):
     if (expected in VOWELS and produced in VOWELS) or frozenset((expected, produced)) in _NEAR:
         return 0.5
     return 1
+
+
+# --- Languages other than English: compared as IPA -------------------------
+
+# Spellings the model and espeak-ng each give one phone of the language, folded
+# to the one espeak-ng's own transcription of the language uses. This is the
+# tolerance table: add a row only for a variant of the same phone, never for a
+# phone a reader could actually misread (that would hide the misreading).
+#
+# Modern Greek (monotonic), after Holton, Mackridge and Philippaki-Warburton:
+#   five vowels, so every other vowel quality is a spelling of the nearest one,
+#   whatever length or stress it carries;
+#   /x/ is [x] or [ç] and /ɣ/ is [ɣ] or [ʝ] by the vowel after them, /k/ and
+#   /ɡ/ are [c] and [ɟ] before front vowels, /n/ is [ŋ] or [ɲ] and /m/ is [ɱ] by
+#   the consonant after them, /l/ is [ʎ] before [j], and /r/ is a tap or a trill;
+#   the model writes the Greek voiced stop as g or ɡ, and may hear σ and ζ with a
+#   hush ([ʃ], [ʒ]) which a Greek reader does not distinguish.
+_IPA_FOLD = {
+    "el": {
+        "ɑ": "a", "ɐ": "a", "æ": "a", "ɛ": "e", "ə": "e", "ɪ": "i", "ɨ": "i", "y": "i", "ʏ": "i",
+        "ɔ": "o", "ɒ": "o", "ʊ": "u",
+        "ç": "x", "ʝ": "ɣ", "c": "k", "ɟ": "ɡ", "g": "ɡ", "ŋ": "n", "ɲ": "n", "ɱ": "m",
+        "ʎ": "l", "ɫ": "l", "ɾ": "r", "ɹ": "r", "ɻ": "r", "ʃ": "s", "ʒ": "z",
+    },
+}
+
+# IPA phones that are close enough to be a near miss and not a plain error:
+# the voiced and voiceless of one place, the same for every language.
+_IPA_NEAR = {frozenset(p) for p in [
+    ("p", "b"), ("t", "d"), ("k", "ɡ"), ("f", "v"), ("θ", "ð"), ("s", "z"), ("x", "ɣ"),
+    ("l", "r"), ("θ", "f"), ("θ", "t"),
+]}
+
+# Phones the model, not the reader, confuses. Its training had no Greek, and the
+# voiced fricatives of Greek come out of it as a stop, a nasal or a liquid of the
+# same place, and it hears a nasal or a hissed θ for another, so a pair here counts a quarter of a phone, not half: a clean
+# reading of /ð/ that it hears as [n] must not be a misreading. A pair is added
+# here only when a clean synthetic reading shows the model doing it.
+_IPA_MODEL = {frozenset(p) for p in [
+    ("ð", "d"), ("ð", "l"), ("ð", "n"), ("ð", "m"), ("ð", "z"), ("ð", "v"),
+    ("ɣ", "ɡ"), ("ɣ", "k"), ("ɣ", "x"), ("ɣ", "j"),
+    ("m", "n"), ("θ", "s"),
+]}
+
+# Vowels by language that stand a step apart (a near miss, half a phone).
+_IPA_NEAR_VOWELS = {
+    "el": {frozenset(p) for p in [("e", "i"), ("o", "u"), ("a", "e"), ("a", "o")]},
+}
+
+_IPA_VOWELS = set("aeiouyɑɐæɛəɪɨʏɔɒʊøœɜɵ")
+
+
+def _fold_for(lang):
+    return _IPA_FOLD.get(lang.split("-")[0].lower(), {})
+
+
+def to_ipa_phones(ipa, lang):
+    """The phones of an IPA string for a language other than English: one per base
+    symbol, stress, length, tone and diacritics dropped, then the language's
+    variants folded together (_IPA_FOLD). A phone the table does not know is kept as heard."""
+    fold = _fold_for(lang)
+    out = []
+    for c in unicodedata.normalize("NFC", ipa):
+        if c in _DROP or c.isspace() or unicodedata.combining(c):
+            continue
+        if c in fold:
+            out.append(fold[c])
+            continue
+        # a composed letter (ç) was folded above; any other loses its marks
+        out.extend(fold.get(b, b) for b in unicodedata.normalize("NFD", c) if not unicodedata.combining(b))
+    return out
+
+
+def ipa_cost(lang):
+    """The substitution_cost for a language compared as IPA: 0 for the same phone, 0.25 for
+    a pair the model confuses (_IPA_MODEL), 0.5 for a near one (_IPA_NEAR; a vowel a step
+    away, _IPA_NEAR_VOWELS), else 1."""
+    vowels = _IPA_NEAR_VOWELS.get(lang.split("-")[0].lower())
+
+    def cost(expected, produced):
+        if expected == produced:
+            return 0
+        pair = frozenset((expected, produced))
+        if pair in _IPA_MODEL:
+            return 0.25
+        if pair in _IPA_NEAR:
+            return 0.5
+        if vowels is not None:
+            return 0.5 if pair in vowels else 1
+        if expected in _IPA_VOWELS and produced in _IPA_VOWELS:
+            return 0.5
+        return 1
+
+    return cost
+
+
+def is_english(lang):
+    """Whether a language code is English, the one language compared as ARPAbet."""
+    return (lang or "en").split("-")[0].lower() == "en"

@@ -3,8 +3,10 @@
 import logging
 import threading
 
-# "en" is read as American English: what a young reader here is taught.
-_LANGS = {"en": "en-us"}
+# "en" is read as American English: what a young reader here is taught. "el" is
+# modern Greek (espeak-ng's own "el"), which a reader of a verse in monotonic
+# letters is saying.
+_LANGS = {"en": "en-us", "el": "el"}
 
 _backends = {}
 _lock = threading.Lock()

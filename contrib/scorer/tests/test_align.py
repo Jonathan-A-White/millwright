@@ -162,5 +162,42 @@ class ToArpabet(unittest.TestCase):
         self.assertEqual(phones.substitution_cost("AE", "T"), 1)
 
 
+class IpaForOtherLanguages(unittest.TestCase):
+    """A language other than English is compared as IPA, not ARPAbet."""
+
+    def test_stress_length_and_tone_are_dropped_and_greek_variants_fold(self):
+        self.assertEqual(phones.to_ipa_phones("ˈiːðamen", "el"), ["i", "ð", "a", "m", "e", "n"])
+        self.assertEqual(phones.to_ipa_phones("çɛ5", "el"), ["x", "e"])
+        self.assertEqual(phones.to_ipa_phones("ʎɔɲ", "el"), ["l", "o", "n"])
+
+    def test_a_language_with_no_table_keeps_its_phones_as_heard(self):
+        self.assertEqual(phones.to_ipa_phones("ˈɛs", "fr"), ["ɛ", "s"])
+
+    def test_english_is_the_one_language_in_arpabet(self):
+        self.assertTrue(phones.is_english("en"))
+        self.assertTrue(phones.is_english("en-US"))
+        self.assertTrue(phones.is_english(""))
+        self.assertFalse(phones.is_english("el"))
+
+    def test_greek_costs(self):
+        cost = phones.ipa_cost("el")
+        self.assertEqual(cost("a", "a"), 0)
+        self.assertEqual(cost("ð", "s"), 1)   # not a pair the model confuses
+        self.assertEqual(cost("ð", "n"), 0.25)
+        self.assertEqual(cost("p", "b"), 0.5)
+        self.assertEqual(cost("e", "i"), 0.5)
+        self.assertEqual(cost("a", "u"), 1)   # Greek has five vowels: two apart is a misreading
+        self.assertEqual(cost("p", "k"), 1)
+
+    def test_a_greek_word_read_with_a_far_vowel_is_a_mispronunciation_and_a_near_one_is_not(self):
+        words = [("τοις", ["t", "i", "s"]), ("τον", ["t", "o", "n"])]
+        cost = phones.ipa_cost("el")
+        near = align.score_reading(words, heard((0.1, "t i s"), (0.4, "t u n")), 1.0, cost=cost)
+        self.assertEqual(errors(near), [("τοις", "none"), ("τον", "none")])
+        self.assertEqual(near["words"][1]["produced_phonemes"], ["t", "u", "n"])
+        far = align.score_reading(words, heard((0.1, "t u s"), (0.4, "t o n")), 1.0, cost=cost)
+        self.assertEqual(errors(far), [("τοις", "mispronunciation"), ("τον", "none")])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -48,12 +48,13 @@ def _round(x):
     return int(x + 0.5)
 
 
-def distance(expected, produced):
-    """The weighted edit distance between two lists of ARPAbet phones."""
-    return _table(expected, produced)[len(expected)][len(produced)][0]
+def distance(expected, produced, cost=phones.substitution_cost):
+    """The weighted edit distance between two lists of phones, by the cost of
+    substituting one for another (English ARPAbet unless a language says otherwise)."""
+    return _table(expected, produced, cost=cost)[len(expected)][len(produced)][0]
 
 
-def _table(expected, produced, inside=lambda i: 0):
+def _table(expected, produced, inside=lambda i: 0, cost=phones.substitution_cost):
     """d[i][j] is (cost, phones added inside a word) of the best alignment of
     expected[:i] with produced[:j], least cost first: of two alignments that cost
     the same, the one that puts added phones between words rather than inside
@@ -66,7 +67,7 @@ def _table(expected, produced, inside=lambda i: 0):
         d[0][j] = (float(j), 0)
     for i in range(1, n + 1):
         for j in range(1, m + 1):
-            d[i][j] = min(_step(d[i - 1][j - 1], phones.substitution_cost(expected[i - 1], produced[j - 1])),
+            d[i][j] = min(_step(d[i - 1][j - 1], cost(expected[i - 1], produced[j - 1])),
                           _step(d[i][j - 1], 1, inside(i)),
                           _step(d[i - 1][j], 1))
     return d
@@ -76,16 +77,16 @@ def _step(cell, cost, inside=0):
     return (cell[0] + cost, cell[1] + inside)
 
 
-def _ops(expected, produced, inside):
+def _ops(expected, produced, inside, cost=phones.substitution_cost):
     """The alignment as (op, i, j) from the start: op is "sub" (a match or a
     substitution of expected[i] by produced[j]), "ins" (produced[j] added
     before expected[i]; i may be len(expected)) or "del" (expected[i] left out).
     At a tie the later produced phones are matched, so a word read twice is
     matched on its last reading."""
-    d = _table(expected, produced, inside)
+    d = _table(expected, produced, inside, cost)
     i, j, out = len(expected), len(produced), []
     while i > 0 or j > 0:
-        if i > 0 and j > 0 and d[i][j] == _step(d[i - 1][j - 1], phones.substitution_cost(expected[i - 1], produced[j - 1])):
+        if i > 0 and j > 0 and d[i][j] == _step(d[i - 1][j - 1], cost(expected[i - 1], produced[j - 1])):
             i, j = i - 1, j - 1
             out.append(("sub", i, j))
         elif j > 0 and d[i][j] == _step(d[i][j - 1], 1, inside(i)):
@@ -98,32 +99,35 @@ def _ops(expected, produced, inside):
     return out
 
 
-def score_reading(words, produced, seconds, hesitation_seconds=HESITATION_SECONDS, engine="local"):
+def score_reading(words, produced, seconds, hesitation_seconds=HESITATION_SECONDS, engine="local",
+                  cost=phones.substitution_cost):
     """A ReadingResult (docs/scorers.md) as a dict.
 
-    words: the target's words in order, as (text, expected ARPAbet phones).
+    words: the target's words in order, as (text, expected phones).
     produced: the Phones heard, in time order.
     seconds: how long the clip is.
+    cost: the cost of one phone for another (phones.substitution_cost for ARPAbet,
+          phones.ipa_cost(lang) for a reading compared as IPA).
     """
     flat = [(w, p) for w, (_, expected) in enumerate(words) for p in expected]
     owner = [w for w, _ in flat]
     heard = [p.phone for p in produced]
     own = [[] for _ in words]       # indexes into produced of each word's phones
-    cost = [0.0 for _ in words]
+    spent = [0.0 for _ in words]
     runs = {}                       # boundary (index of the next word, or len(words)) -> produced indexes
 
     def inside(i):
         return 1 if 0 < i < len(flat) and owner[i - 1] == owner[i] else 0
 
-    for op, i, j in _ops([p for _, p in flat], heard, inside):
+    for op, i, j in _ops([p for _, p in flat], heard, inside, cost):
         if op == "sub":
             own[owner[i]].append(j)
-            cost[owner[i]] += phones.substitution_cost(flat[i][1], heard[j])
+            spent[owner[i]] += cost(flat[i][1], heard[j])
         elif op == "del":
-            cost[owner[i]] += 1
+            spent[owner[i]] += 1
         elif inside(i):
             own[owner[i]].append(j)   # added inside a word: part of the word
-            cost[owner[i]] += 1
+            spent[owner[i]] += 1
         else:
             runs.setdefault(owner[i] if i < len(flat) else len(words), []).append(j)
 
@@ -134,7 +138,7 @@ def score_reading(words, produced, seconds, hesitation_seconds=HESITATION_SECOND
             continue
         if boundary < len(words) and words[boundary][1]:
             expected = words[boundary][1]
-            gone = distance(expected, [heard[j] for j in run])
+            gone = distance(expected, [heard[j] for j in run], cost)
             if gone < ATTEMPT_SHARE * len(expected):
                 attempt[boundary] = (gone, run)
                 continue
@@ -152,13 +156,13 @@ def score_reading(words, produced, seconds, hesitation_seconds=HESITATION_SECOND
         elif not mine:
             entry = _word(text, expected, mine, 0, "omission")
         else:
-            accuracy = _round(100 * max(0.0, 1 - cost[w] / len(expected)))
-            error = "mispronunciation" if cost[w] >= MISPRONOUNCED_AT else "none"
+            accuracy = _round(100 * max(0.0, 1 - spent[w] / len(expected)))
+            error = "mispronunciation" if spent[w] >= MISPRONOUNCED_AT else "none"
             first = min(own[w] + (attempt[w][1] if attempt[w] else []))
             if error == "none" and last_end is not None and produced[first].start - last_end > hesitation_seconds:
                 error = "hesitation"
             entry = _word(text, expected, mine, accuracy, error)
-            entry["self_corrected"] = attempt[w] is not None and attempt[w][0] > cost[w]
+            entry["self_corrected"] = attempt[w] is not None and attempt[w][0] > spent[w]
             last_end = mine[-1].end
         accuracies.append(entry["accuracy"])
         out.append(entry)

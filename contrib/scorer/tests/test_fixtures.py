@@ -21,10 +21,21 @@ def clip(name):
         return f.read()
 
 
+_scorer = None
+
+
+def scorer():
+    """One Scorer for the whole run: loading the model is the slow part."""
+    global _scorer
+    if _scorer is None:
+        _scorer = pipeline.Scorer()
+    return _scorer
+
+
 class Fixtures(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.scorer = pipeline.Scorer()
+        cls.scorer = scorer()
 
     def score(self, name):
         result = self.scorer.score(TARGET, "en", clip(name))
@@ -78,6 +89,54 @@ class Fixtures(unittest.TestCase):
     def test_audio_that_is_not_a_wav_is_refused(self):
         with self.assertRaises(ValueError):
             self.scorer.score(TARGET, "en", b"not a wav file")
+
+
+GREEK = "Οίδαμεν δε ότι τοις αγαπώσι τον Θεόν πάντα συνεργεί εις αγαθόν"
+
+
+class GreekFixtures(unittest.TestCase):
+    """Romans 8:28's first clause in modern Greek, read by espeak-ng's Greek voice.
+
+    The model had no Greek in its training, so a reading is compared with a
+    little more tolerance (phones.ipa_cost) and the clean clip is held to the
+    reading's accuracy, as the English one is, not to every word."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.scorer = scorer()
+
+    def assertContract(self, result):
+        Fixtures.assertContract(self, result)
+
+    def score_el(self, name, target=GREEK):
+        result = self.scorer.score(target, "el", clip(name))
+        self.assertContract(result)
+        return result
+
+    def test_the_clean_greek_reading_is_read(self):
+        result = self.score_el("el-clean.wav")
+        self.assertEqual([w["text"] for w in result["words"]], GREEK.split())
+        self.assertGreaterEqual(result["accuracy"], 90)
+        read = [w for w in result["words"] if w["error"] == "none"]
+        self.assertGreaterEqual(len(read), len(result["words"]) - 1)
+        self.assertEqual(result["words"][3]["expected_phonemes"], ["t", "i", "s"])  # IPA, not ARPAbet
+        self.assertEqual(result["words"][3]["produced_phonemes"], ["t", "i", "s"])
+
+    def test_the_misread_word_is_marked(self):
+        clean, misread = self.score_el("el-clean.wav"), self.score_el("el-misread.wav")
+        word = misread["words"][3]  # τοις, read τους
+        self.assertEqual((word["text"], word["error"]), ("τοις", "mispronunciation"))
+        self.assertEqual(word["produced_phonemes"][-1], "s")
+        self.assertIn("u", word["produced_phonemes"])
+        self.assertLess(word["accuracy"], clean["words"][3]["accuracy"])
+
+    def test_a_target_in_greek_with_punctuation_is_scored_by_its_words(self):
+        result = self.scorer.score("Οίδαμεν δε, ότι τοις αγαπώσι τον Θεόν· πάντα συνεργεί εις αγαθόν.", "el", clip("el-clean.wav"))
+        self.assertEqual([w["text"] for w in result["words"]], GREEK.split())
+
+    def test_a_language_espeak_does_not_know_is_refused(self):
+        with self.assertRaises(ValueError):
+            self.scorer.score(TARGET, "xx-nope", clip("clean.wav"))
 
 
 if __name__ == "__main__":
