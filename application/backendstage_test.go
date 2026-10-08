@@ -537,3 +537,81 @@ func TestANewerSwapStepLeavesRanAndForeignStepsAlone(t *testing.T) {
 		t.Errorf("expected another rig's swap left alone, got superseded by %q", got)
 	}
 }
+
+// holdersOfSwap lists the beads whose hands steps hold backend-<short>.
+func holdersOfSwap(t *testing.T, tracker *apptest.FakeTracker, short string) []string {
+	t.Helper()
+	notes, err := tracker.NotesWithPrefix(context.Background(), "hands.")
+	mustDo(t, err)
+	var held []string
+	for key, raw := range notes {
+		if strings.HasPrefix(key, "hands.ran.") || strings.HasPrefix(key, "hands.superseded.") || strings.HasPrefix(key, "hands.approval.") {
+			continue
+		}
+		if strings.Contains(raw, `"id":"backend-`+short+`"`) {
+			held = append(held, strings.TrimPrefix(key, "hands."))
+		}
+	}
+	return held
+}
+
+// Staging the same commit twice for one landing (a retry after the first try's
+// pending note was lost, say) leaves one swap bead, not superseded, and the list
+// says it has not run (mw-gq6.292: mw-44omaq.4 and .5).
+func TestStagingTheSameCommitTwiceKeepsOneSwapBeadThatIsNotSuperseded(t *testing.T) {
+	r := aBackendRig(t, "laptop", "laptop")
+	ctx := context.Background()
+
+	r.stage.Landed(ctx, swapLanding("mw-j0f2d.28", "9f58ce8aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+	r.stage.Landed(ctx, swapLanding("mw-j0f2d.28", "9f58ce8aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+
+	held := holdersOfSwap(t, r.tracker, "9f58ce8")
+	if len(held) != 1 {
+		t.Fatalf("expected exactly one bead to hold backend-9f58ce8, got %v", held)
+	}
+	if got := supersededBy(t, r.tracker, held[0], "backend-9f58ce8"); got != "" {
+		t.Fatalf("expected the swap not superseded, got superseded by %q", got)
+	}
+	if n := len(filedUnder(t, r, "mw-j0f2d")); n != 1 {
+		t.Fatalf("expected one swap bead filed under the epic, got %d", n)
+	}
+	var out bytes.Buffer
+	_, err := application.HandsList{Notes: r.tracker, Out: &out}.Run(ctx, held[0])
+	mustDo(t, err)
+	if !strings.Contains(out.String(), "not run") || strings.Contains(out.String(), "superseded") {
+		t.Fatalf("expected the list to say not run, got:\n%s", out.String())
+	}
+}
+
+// Two beads already holding the swap of one commit and marked superseded by each
+// other (the live case) are set right by staging again: no bead is superseded by a
+// bead holding the same commit.
+func TestStagingAgainFreesTwoBeadsThatSupersededEachOther(t *testing.T) {
+	r := aBackendRig(t, "laptop", "laptop")
+	ctx := context.Background()
+	commit := "9f58ce8aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	r.stage.Landed(ctx, swapLanding("mw-j0f2d.28", commit))
+	first := beadOfSwap(t, r.tracker, "9f58ce8")
+
+	r.tracker.AddStory("mw-j0f2d", domain.Story{ID: "mw-j0f2d.40", Title: "Twin swap"})
+	notes, err := r.tracker.NotesWithPrefix(ctx, "hands.")
+	mustDo(t, err)
+	mustDo(t, r.tracker.SetNote(ctx, application.HandsStepsKey("mw-j0f2d.40"), notes[application.HandsStepsKey(first)]))
+	mustDo(t, r.tracker.SetNote(ctx, application.HandsSupersededKey(first, "backend-9f58ce8"), "mw-j0f2d.40"))
+	mustDo(t, r.tracker.SetNote(ctx, application.HandsSupersededKey("mw-j0f2d.40", "backend-9f58ce8"), first))
+
+	r.stage.Landed(ctx, swapLanding("mw-j0f2d.28", commit))
+
+	approvable := 0
+	for _, bead := range []string{first, "mw-j0f2d.40"} {
+		got := supersededBy(t, r.tracker, bead, "backend-9f58ce8")
+		if got != "" {
+			t.Errorf("expected %s not superseded by a bead holding the same commit, got %q", bead, got)
+		} else {
+			approvable++
+		}
+	}
+	if approvable == 0 {
+		t.Fatal("expected at least one swap left approvable")
+	}
+}

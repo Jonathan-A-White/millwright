@@ -334,6 +334,9 @@ func (b BackendStage) stage(ctx context.Context, l *BackendLanding, home string)
 	step := BackendSwap(cfg, home, short, out)
 
 	if l.Bead == "" {
+		l.Bead = b.openSwapOf(ctx, cfg, step.ID)
+	}
+	if l.Bead == "" {
 		bead, err := b.fileSwap(ctx, l.Epic, NewStory{
 			Title:       fmt.Sprintf("Swap the home's %s backend to %s so %s's backend half is live", l.Rig, short, l.Story),
 			Description: backendBeadText(*l, cfg, short, out, b.swapsItself(cfg)),
@@ -419,6 +422,9 @@ func (b BackendStage) stageStandby(ctx context.Context, l *BackendLanding, cfg B
 	step := backendSwapAs(standby, cfg.VPSHost, short, dest, domain.HandsAsRoot)
 
 	if l.StandbyBead == "" {
+		l.StandbyBead = b.openSwapOf(ctx, standby, step.ID)
+	}
+	if l.StandbyBead == "" {
 		bead, err := b.fileSwap(ctx, l.Epic, NewStory{
 			Title:       fmt.Sprintf("Swap the VPS standby's %s backend to %s so the front door is level with the home", l.Rig, short),
 			Description: standbyBeadText(*l, cfg, short, dest),
@@ -450,15 +456,13 @@ func (b BackendStage) swapsItself(cfg BackendRig) bool {
 	return cfg.Automatic() && b.Runner != nil && b.Lock != nil
 }
 
-// supersedeOlder marks every other swap step of cfg's live binary that has not run
-// clean as superseded by bead, now that bead holds a newer one: a swap step that
-// ran after a newer one put the older backend back on the home (mw-gq6.190). A
-// swap is a step named backend-<commit> whose text swaps cfg.Live; a step of any
-// other kind or rig is left alone.
-func (b BackendStage) supersedeOlder(ctx context.Context, cfg BackendRig, bead, id string) error {
+// swapSteps is every swap step of cfg's live binary that has not run clean, in
+// the order of the beads that hold them: a swap is a step named backend-<commit>
+// whose text swaps cfg.Live; a step of any other kind or rig is not one.
+func (b BackendStage) swapSteps(ctx context.Context, cfg BackendRig) ([]heldSwap, error) {
 	notes, err := b.Notes.NotesWithPrefix(ctx, "hands.")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	keys := make([]string, 0, len(notes))
 	for key := range notes {
@@ -466,6 +470,7 @@ func (b BackendStage) supersedeOlder(ctx context.Context, cfg BackendRig, bead, 
 	}
 	sort.Strings(keys)
 	swaps := "l=" + shQuote(cfg.Live) + ";"
+	var held []heldSwap
 	for _, key := range keys {
 		holder := strings.TrimPrefix(key, "hands.")
 		if strings.HasPrefix(holder, "ran.") || strings.HasPrefix(holder, "approval.") || strings.HasPrefix(holder, "superseded.") {
@@ -476,15 +481,60 @@ func (b BackendStage) supersedeOlder(ctx context.Context, cfg BackendRig, bead, 
 			continue
 		}
 		for _, step := range steps {
-			if !strings.HasPrefix(step.ID, "backend-") || !strings.Contains(step.Run, swaps) || (holder == bead && step.ID == id) {
+			if !strings.HasPrefix(step.ID, "backend-") || !strings.Contains(step.Run, swaps) {
 				continue
 			}
 			if ran, ok := parseHandsRan(notes[HandsRanKey(holder, step.ID)]); ok && ran.Exit == 0 {
 				continue
 			}
-			if err := b.Notes.SetNote(ctx, HandsSupersededKey(holder, step.ID), bead); err != nil {
+			held = append(held, heldSwap{Bead: holder, ID: step.ID})
+		}
+	}
+	return held, nil
+}
+
+type heldSwap struct{ Bead, ID string }
+
+// openSwapOf is the bead that already holds the swap step id of cfg's live binary,
+// not run clean and not closed, or "" when there is none: a staging of a commit
+// whose swap is already filed writes on that bead rather than filing a second
+// (mw-gq6.292).
+func (b BackendStage) openSwapOf(ctx context.Context, cfg BackendRig, id string) string {
+	held, err := b.swapSteps(ctx, cfg)
+	if err != nil {
+		return ""
+	}
+	for _, h := range held {
+		if h.ID != id {
+			continue
+		}
+		if detail, err := b.Tracker.ShowStory(ctx, h.Bead); err == nil && detail.Status != StatusClosed {
+			return h.Bead
+		}
+	}
+	return ""
+}
+
+// supersedeOlder marks every other swap step of cfg's live binary that has not run
+// clean as superseded by bead, now that bead holds a newer one: a swap step that
+// ran after a newer one put the older backend back on the home (mw-gq6.190). A
+// swap of the same commit (the same step id, on another bead) is a duplicate, not
+// an older one: it is never marked, and a mark that two stagings put on each other
+// is cleared (mw-gq6.292).
+func (b BackendStage) supersedeOlder(ctx context.Context, cfg BackendRig, bead, id string) error {
+	held, err := b.swapSteps(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	for _, h := range held {
+		if h.ID == id {
+			if err := b.Notes.ClearNote(ctx, HandsSupersededKey(h.Bead, h.ID)); err != nil {
 				return err
 			}
+			continue
+		}
+		if err := b.Notes.SetNote(ctx, HandsSupersededKey(h.Bead, h.ID), bead); err != nil {
+			return err
 		}
 	}
 	return nil
