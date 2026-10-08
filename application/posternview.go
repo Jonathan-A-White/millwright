@@ -80,12 +80,17 @@ var posternNeedRank = map[string]int{
 
 // PosternViewDoc is the live view's plaintext, postern's docs/protocol.md §11.
 type PosternViewDoc struct {
-	V         int               `json:"v"`
-	WrittenAt string            `json:"written_at"`
-	Host      string            `json:"host"`
-	Hosts     []PosternViewHost `json:"hosts"`
-	Needs     []PosternViewNeed `json:"needs"`
-	Beads     []PosternViewBead `json:"beads"`
+	V         int    `json:"v"`
+	WrittenAt string `json:"written_at"`
+	// Seq is the event log's head read before the beads were, so the view is
+	// never ahead of its content: an app that has seen every event up to Seq
+	// knows the view already shows it. Omitted when there is no log or it is
+	// empty.
+	Seq   int64             `json:"seq,omitempty"`
+	Host  string            `json:"host"`
+	Hosts []PosternViewHost `json:"hosts"`
+	Needs []PosternViewNeed `json:"needs"`
+	Beads []PosternViewBead `json:"beads"`
 }
 
 // PosternViewHost is one host and when it last recorded itself level.
@@ -240,6 +245,10 @@ type PosternView struct {
 	// writes every run.
 	Memo *PosternViewMemo
 
+	// Events, when set, is the event log whose head is the view's seq. Nil
+	// leaves the view with no seq.
+	Events EventLog
+
 	// Out is where Run says what it wrote. A nil Out prints nothing.
 	Out io.Writer
 	// Err is where a failure to write the landed memory is said; the view is
@@ -258,9 +267,9 @@ type PosternViewMemo struct {
 	set    bool
 }
 
-// digestOf is the digest of doc as it reads apart from written_at.
+// digestOf is the digest of doc as it reads apart from written_at and seq.
 func digestOf(doc PosternViewDoc) ([sha256.Size]byte, error) {
-	doc.WrittenAt = ""
+	doc.WrittenAt, doc.Seq = "", 0
 	plain, err := json.Marshal(doc)
 	if err != nil {
 		return [sha256.Size]byte{}, fmt.Errorf("building the JSON: %w", err)
@@ -373,6 +382,16 @@ func (v PosternView) Build(ctx context.Context) (PosternViewDoc, error) {
 	if v.Notes == nil {
 		return PosternViewDoc{}, fmt.Errorf("mw postern view: nowhere to read the notes from")
 	}
+	// The head first: a change that lands while the beads are read is then
+	// above the seq, and the app sees it as an event, never as missing.
+	var seq int64
+	if v.Events != nil {
+		head, err := v.Events.Head(ctx)
+		if err != nil {
+			return PosternViewDoc{}, fmt.Errorf("reading the event log's head: %w", err)
+		}
+		seq = int64(head)
+	}
 	var snapshotted map[string]string
 	if snapshotter, ok := v.Tracker.(TrackerSnapshot); ok {
 		snapshot, err := snapshotter.Snapshot(ctx)
@@ -439,7 +458,7 @@ func (v PosternView) Build(ctx context.Context) (PosternViewDoc, error) {
 	sortPosternNeeds(needs)
 
 	doc := PosternViewDoc{
-		V: PosternViewVersion, WrittenAt: b.now.UTC().Format(time.RFC3339), Host: v.Host,
+		V: PosternViewVersion, WrittenAt: b.now.UTC().Format(time.RFC3339), Seq: seq, Host: v.Host,
 		Hosts: hosts, Needs: needs, Beads: make([]PosternViewBead, 0, len(b.order)),
 	}
 	for _, id := range b.order {
