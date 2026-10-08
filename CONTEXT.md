@@ -67,6 +67,10 @@ _Avoid_: Task, job, subtask
 A git repository the factory works on. The factory's own repo is a rig.
 _Avoid_: Project, repo (when you mean the unit of factory work)
 
+**Guest rig**:
+A Rig whose owner is not the Governor, named by `guest = "<owner>"` in the rig's file in the vault (`rigs/<rig>.toml`). The factory works it only on its owner's ask: `mw file` refuses a plan with a story in it unless `--guest-ask "<their words>"` is given, and writes those words on the epic. `mw status` and `mw brief` show `guest: <owner>` beside its stories.
+_Avoid_: Shared rig, external repo
+
 **Path**:
 The Mayor's plan for how an epic gets worked: the ordering of its stories, and for each story its rig, target branch, harness, model, effort, formula and host. Adjustable per story at any time before it starts. A story without a rig and a target branch has no path.
 _Avoid_: Route, plan, schedule

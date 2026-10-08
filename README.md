@@ -3269,3 +3269,9 @@ know. See `features/path_validation.feature`.
 ## Licence
 
 millwright is released under the MIT licence; see [LICENSE](LICENSE).
+
+A rig's file may also say `guest = "<owner>"`: a guest repo, whose owner is not the
+Governor and whose stories the factory files only on the owner's ask. `mw file`
+refuses a plan with a story in one, naming the rig and the owner, unless it is
+given `--guest-ask "<their words>"`, which are written on the epic. `mw status` and
+`mw brief` show `guest: <owner>` beside a guest rig's stories.
