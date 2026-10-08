@@ -1517,7 +1517,9 @@ the request and response JSON, is `docs/scorers.md`; see `features/scorer.featur
 A grist may carry a recording (`audio/webm`, `audio/ogg`, `audio/mp4`, `audio/mpeg`,
 `audio/wav`) for a grind whose file says `"scoring": {"audio": true, "target_field":
 "target_text"}` and lists the type under `attachments.mime`; a grind that does not
-score refuses it. The mill scores each recording with every `[scorers]` engine
+score refuses it. `scoring.langs` (`["el", "en"]`, first the default, absent `["en"]`)
+names the languages it scores in and the request's `lang` picks one; an engine without
+the language (Azure for Greek) is skipped with a note. The mill scores each recording with every `[scorers]` engine
 against the text in the request's `target_field`, before the harness session, and
 adds `reading_result` to the request as text: `{<engine>: <ReadingResult> | {"error":
 "..."}}`. An engine that fails never fails the grind, and the audio is never in the

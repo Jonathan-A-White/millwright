@@ -52,7 +52,8 @@ sudo apt remove espeak-ng   # hand step, if nothing else uses it
 `{"target_text", "lang", "audio_wav_base64"}` (a WAV file; mw sends 16 kHz
 mono, anything else PCM is converted) and answers `200` with a ReadingResult:
 `engine` `local`, one entry per target word in reading order plus one per added
-word, each with `expected_phonemes` and `produced_phonemes` in ARPAbet,
+word, each with `expected_phonemes` and `produced_phonemes` in ARPAbet (IPA
+for a language other than English, see Greek below),
 `error` (`none`, `omission`, `insertion`, `mispronunciation`, `hesitation`),
 `accuracy` 0 to 100 and `self_corrected`; then the reading's `accuracy` and
 `seconds`. A bad request is a `400` with a plain line saying why; a failure of
@@ -79,6 +80,27 @@ the scorer is a `500`. `GET /health` answers `200` once the model is loaded.
    close to it (it is then `self_corrected` if the final reading is closer),
    otherwise an `insertion`. Word accuracy is 100 × (1 − distance ÷ expected
    phones); the reading's is the mean over the target's words.
+
+## Greek
+
+`lang` `el` is modern Greek, monotonic letters (a verse as a Greek reader says it
+today; Erasmian is not scored). espeak-ng's own `el` gives the expected IPA of
+each word; the model's tokens are already IPA. ARPAbet is English's alphabet,
+so for any language but English the two sides stay IPA and are compared by
+`mw_scorer/phones.py`'s `ipa_cost`: stress, length marks and tone are dropped,
+variants of one Greek phone are folded together (`_IPA_FOLD`: the vowel
+qualities to Greek's five, [ç] to /x/, [ɲ ŋ ɱ] to /n m/, the tap and trill, ...),
+a voicing pair or a vowel a step away (e/i, o/u, a/e, a/o) costs 0.5, and the
+few pairs the model blurs because it had no Greek in its training (the voiced
+fricatives ð and ɣ, m/n, θ/s) cost 0.25. Everything else costs 1, and the
+labels and accuracy work as for English. A language with no table is compared
+as IPA with the generic rules. To add one, give it a row in `_IPA_FOLD`,
+`_IPA_NEAR_VOWELS` and `g2p._LANGS`, a pair of fixture clips in
+`fixtures/make.sh`, and a test class beside `GreekFixtures`.
+
+The Greek fixtures are espeak-ng's robotic voice, which the model hears worse
+than the English one: the clean clip scores 93 with `πάντα` called a
+mispronunciation; a human reading is what it is for and has not been tried.
 
 ## What it is tuned for
 

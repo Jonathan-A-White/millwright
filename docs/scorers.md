@@ -187,9 +187,28 @@ the same. A grind without `scoring.audio` refuses a recording, so a recording is
 ever taken to be scored. `maxTurns` is optional; nothing in the harness's command line
 forbids subagents.
 
+### The language
+
+`scoring.langs` is optional: the language codes the grind scores in, the first the
+default (`"langs": ["el", "en"]`). Absent, it is `["en"]`. The codes known are `en`
+(American English), `el` (modern Greek, monotonic letters) and `es`; a grind file naming
+another is refused as unreadable. The grist's request may carry `"lang"`, one of the
+grind's (a region, `el-GR`, counts as its language); without it the first is used, and a
+`lang` the grind does not list refuses the grist, saying which it does ("This grist asks
+for the language fr; its grind scores in el and en."). The language chosen is what every
+engine is given and what `scorers.json` records as `lang`.
+
+An engine that cannot score the language is not run for the recording, and the pass
+notes `<engine> skipped: no <lang>`; its entry is left out of `reading_result`. Azure's
+pronunciation assessment has no Greek, so for `el` only the local engine scores. The
+local scorer reads Greek through espeak-ng's `el` voice and compares in IPA, not ARPAbet
+(`contrib/scorer/README.md`): a Greek word's `expected_phonemes` and `produced_phonemes`
+are IPA symbols. Erasmian pronunciation is not scored by any engine.
+
 Before the harness session, for each recording the mill runs **every** engine in
-`[scorers]` `engines`, at once, with the string in the request's `target_field` as the
-target (language `en`), and adds `reading_result` to the request the session is given:
+`[scorers]` `engines` that can score the language, at once, with the string in the
+request's `target_field` as the target, and adds `reading_result` to the request the
+session is given:
 
 ```json
 {"mode": "reading", "target_text": "the cat sat",
