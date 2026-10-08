@@ -16,10 +16,12 @@ import (
 // they share.
 const RigFileExt = ".toml"
 
-// The keys of a rig's file. Both are lists of strings and both are optional.
+// The keys of a rig's file, all optional. The first two are lists of strings;
+// guest is one quoted string, the owner of a rig that is not the Governor's.
 const (
 	EpicSectionsKey        = "epic_sections"
 	EpicLastStoryLabelsKey = "epic_last_story_labels"
+	GuestKey               = "guest"
 )
 
 var _ application.EpicRules = (*Vault)(nil)
@@ -29,6 +31,7 @@ var _ application.EpicRules = (*Vault)(nil)
 //
 //	epic_sections          = ["Demo"]
 //	epic_last_story_labels = ["demo"]
+//	guest                  = "Luke"
 //
 // A rig with no file asks nothing. A key this does not know is an error rather
 // than a silence: a misspelt key would otherwise switch the requirement off
@@ -53,7 +56,8 @@ func (v *Vault) EpicRequirements(_ context.Context, rig string) (domain.EpicRequ
 }
 
 // parseRigFile reads the little TOML a rig's file holds: `key = ["a", "b"]`,
-// the list possibly running over several lines, and `#` comments.
+// the list possibly running over several lines, `guest = "<owner>"`, and `#`
+// comments.
 func parseRigFile(written string) (domain.EpicRequirements, error) {
 	var requirements domain.EpicRequirements
 	lines := strings.Split(written, "\n")
@@ -64,6 +68,14 @@ func parseRigFile(written string) (domain.EpicRequirements, error) {
 		}
 		key, value, found := strings.Cut(line, "=")
 		key, value = strings.TrimSpace(key), strings.TrimSpace(value)
+		if found && key == GuestKey {
+			owner, err := quotedStrings(value)
+			if err != nil || len(owner) != 1 {
+				return requirements, fmt.Errorf("line %d: expected `%s = \"<owner>\"`, got %q", i+1, GuestKey, lines[i])
+			}
+			requirements.Guest = owner[0]
+			continue
+		}
 		if !found || !strings.HasPrefix(value, "[") {
 			return requirements, fmt.Errorf("line %d: expected `key = [\"name\", ...]`, got %q", i+1, lines[i])
 		}
@@ -83,8 +95,8 @@ func parseRigFile(written string) (domain.EpicRequirements, error) {
 		case EpicLastStoryLabelsKey:
 			requirements.LastStoryLabels = names
 		default:
-			return requirements, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s and %s)",
-				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey)
+			return requirements, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s and %s)",
+				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey)
 		}
 	}
 	return requirements, nil

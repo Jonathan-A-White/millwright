@@ -40,6 +40,10 @@ type Brief struct {
 	// prints none.
 	Comments int
 
+	// Rules is where a rig's file is read from, to mark a child whose rig is a
+	// guest. A nil Rules marks none.
+	Rules EpicRules
+
 	// Out is where the brief is printed. A nil Out prints nothing.
 	Out io.Writer
 }
@@ -140,6 +144,16 @@ func (b Brief) bead(ctx context.Context, id string, lookup map[string]StoryDetai
 		default:
 			brief.Open = append(brief.Open, line)
 		}
+	}
+
+	var kids []*StoryDetail
+	for _, group := range [][]BriefLine{brief.InProgress, brief.Open, brief.Held} {
+		for i := range group {
+			kids = append(kids, &group[i].Story)
+		}
+	}
+	if err := markGuests(ctx, b.Rules, kids...); err != nil {
+		return BeadBrief{}, fmt.Errorf("briefing %s: %w", id, err)
 	}
 
 	if b.Comments > 0 {
@@ -253,6 +267,9 @@ func (l BriefLine) String() string {
 	}
 	if path.Model != "" {
 		parts = append(parts, string(path.Model))
+	}
+	if l.Story.Guest != "" {
+		parts = append(parts, "guest: "+l.Story.Guest)
 	}
 	for _, title := range l.Waits {
 		parts = append(parts, "waits on "+clippedTo(title, BriefWaitWidth))

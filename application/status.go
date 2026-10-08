@@ -630,8 +630,31 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		report.HeldHands = read.held
 	}
 
+	if err := report.markGuests(ctx, s.Rules); err != nil {
+		return report, err
+	}
+
 	s.print(report.String())
 	return report, nil
+}
+
+// markGuests sets Guest on every story of the report whose rig is a guest repo.
+func (r *StatusReport) markGuests(ctx context.Context, rules EpicRules) error {
+	var all []*StoryDetail
+	for i := range r.Running {
+		all = append(all, &r.Running[i].Detail)
+	}
+	for _, list := range [][]StoryDetail{r.Ready, r.Waiting, r.HeldHands, r.Blocked} {
+		for i := range list {
+			all = append(all, &list[i])
+		}
+	}
+	for i := range r.Others {
+		for j := range r.Others[i].Stories {
+			all = append(all, &r.Others[i].Stories[j])
+		}
+	}
+	return markGuests(ctx, rules, all...)
 }
 
 // heldHandsRead is what reading the held beads that keep hands steps came back with.
@@ -1202,7 +1225,9 @@ func writeStory(b *strings.Builder, d StoryDetail, note string) {
 // writeStoryIn is writeStory indented under something else — a story listed
 // under the host it is pathed to, rather than under a heading.
 func writeStoryIn(b *strings.Builder, pad string, d StoryDetail, note string) {
-	if rig := d.Merged().Rig; rig != "" {
+	if rig := d.Merged().Rig; rig != "" && d.Guest != "" {
+		clip(b, fmt.Sprintf("%s%s · %s · guest: %s", pad, d.Story.ID, rig, d.Guest))
+	} else if rig != "" {
 		clip(b, fmt.Sprintf("%s%s · %s", pad, d.Story.ID, rig))
 	} else {
 		clip(b, pad+d.Story.ID)

@@ -17,6 +17,10 @@ type EpicRequirements struct {
 	// on every other story of the epic, so that it is the last one worked: one
 	// such story for each label.
 	LastStoryLabels []string
+	// Guest, when it is not empty, names the owner of a guest rig: a rig whose
+	// owner is not the Governor, worked by the factory only when its owner asks.
+	// It is no requirement of an epic, so Any does not count it.
+	Guest string
 }
 
 // Any reports whether the rig asks anything of its epics at all. A rig that

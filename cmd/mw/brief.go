@@ -20,7 +20,8 @@ func newBriefCmd() *cobra.Command {
 			"status and priority; then its children that are not closed, under the headings In progress,\n" +
 			"Open and Held, each line carrying title, id, priority, the host and model its path names and,\n" +
 			"for each open blocker, 'waits on <title>'; then one line saying how many children are\n" +
-			"closed. It prints no description and no closed child.\n\n" +
+			"closed. It prints no description and no closed child. A child whose rig is a guest repo\n" +
+			"(its rig's file says guest = \"<owner>\") also carries 'guest: <owner>'.\n\n" +
 			"With --comments N the newest N comments of each bead follow in full, never truncated: they\n" +
 			"hold the Governor's words. Nothing else is printed of a comment's bead.\n\n" +
 			"An id the tracker does not have is an error naming it, and nothing is printed. Plain text,\n" +
@@ -37,6 +38,7 @@ func newBriefCmd() *cobra.Command {
 			}
 			_, err = application.Brief{
 				Tracker:  mwGateway(dir, host),
+				Rules:    mwVault(dir, host),
 				Comments: comments,
 				Out:      cmd.OutOrStdout(),
 			}.Run(cmd.Context(), args...)

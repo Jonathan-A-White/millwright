@@ -25,6 +25,7 @@ func newFileCmd() *cobra.Command {
 	var approved bool
 	var waive []string
 	var because string
+	var guestAsk string
 
 	cmd := &cobra.Command{
 		Use:   "file <plan.json>",
@@ -41,7 +42,11 @@ func newFileCmd() *cobra.Command {
 			"description must contain, and epic_last_story_labels, labels the epic must carry on a story\n" +
 			"that waits on every other: a plan that lacks either is refused, naming each, and nothing is\n" +
 			"written. Only the Governor's word excuses one: --waive <name> (once for each) with --because\n" +
-			"\"<his words>\", which are written on the epic.",
+			"\"<his words>\", which are written on the epic.\n\n" +
+			"A rig's file may also say guest = \"<owner>\": a guest repo, whose owner is not the Governor.\n" +
+			"A plan with a story in one is refused, naming the rig and the owner, and nothing is\n" +
+			"written, unless the owner asked: --guest-ask \"<their words>\", which are written on the\n" +
+			"epic. mw status and mw brief show 'guest: <owner>' beside such a rig's stories.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			written, err := os.ReadFile(args[0])
@@ -63,11 +68,12 @@ func newFileCmd() *cobra.Command {
 			}
 
 			_, err = application.File{
-				Tracker: gateway,
-				Rules:   vault.New(dir),
-				Waive:   application.EpicWaiver{Names: waive, Because: because},
-				Out:     cmd.OutOrStdout(),
-				Approve: approval(cmd, approved),
+				Tracker:  gateway,
+				Rules:    vault.New(dir),
+				Waive:    application.EpicWaiver{Names: waive, Because: because},
+				GuestAsk: guestAsk,
+				Out:      cmd.OutOrStdout(),
+				Approve:  approval(cmd, approved),
 			}.Run(cmd.Context(), plan)
 			return err
 		},
@@ -79,6 +85,8 @@ func newFileCmd() *cobra.Command {
 		"a requirement of the rig the Governor waived for this epic, by name; needs --because")
 	cmd.Flags().StringVar(&because, "because", "",
 		"the Governor's own words for waiving it, written on the epic")
+	cmd.Flags().StringVar(&guestAsk, "guest-ask", "",
+		"the owner's own words asking for work in a guest rig, written on the epic; needed to file a plan in one")
 	return cmd
 }
 

@@ -95,3 +95,34 @@ func TestAMisspeltKeyOrARigNameOutsideTheVaultIsRefused(t *testing.T) {
 		t.Error("an unquoted name must be refused")
 	}
 }
+
+func TestAGuestRigsFileNamesItsOwnerAndStillRefusesAnUnknownKey(t *testing.T) {
+	dir := t.TempDir()
+	v := vault.New(dir)
+
+	writeRigFile(t, dir, "argus", "# Luke's rig\nguest = \"Luke\"  # A32\nepic_sections = [\"Demo\"]\n")
+	got, err := v.EpicRequirements(context.Background(), "argus")
+	if err != nil {
+		t.Fatalf("reading a guest rig's file: %v", err)
+	}
+	want := domain.EpicRequirements{Sections: []string{"Demo"}, Guest: "Luke"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+
+	writeRigFile(t, dir, "argus", "guest = 'Luke (lukeaverywhite-alt)'\n")
+	got, err = v.EpicRequirements(context.Background(), "argus")
+	if err != nil || got.Guest != "Luke (lukeaverywhite-alt)" {
+		t.Errorf("single quotes and parentheses: got %+v, %v", got, err)
+	}
+
+	writeRigFile(t, dir, "argus", "guest = Luke\n")
+	if _, err := v.EpicRequirements(context.Background(), "argus"); err == nil {
+		t.Error("expected an unquoted owner to be an error")
+	}
+
+	writeRigFile(t, dir, "argus", "gest = \"Luke\"\n")
+	if _, err := v.EpicRequirements(context.Background(), "argus"); err == nil || !strings.Contains(err.Error(), "gest") {
+		t.Errorf("expected an unknown key to be an error naming it, got %v", err)
+	}
+}

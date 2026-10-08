@@ -62,6 +62,9 @@ type StoryDetail struct {
 	Labels      []string
 	Description string
 	Acceptance  string
+	// Guest is the owner of the story's rig when that rig is a guest repo, as
+	// mw status and mw brief mark it; the tracker never sets it.
+	Guest string
 	// Needs is the ids of the stories this one waits on, as far as the listing
 	// it came from said. It is empty when the tracker was not asked for the
 	// story's dependencies. A listing that knows which of them are finished —

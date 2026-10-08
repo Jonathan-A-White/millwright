@@ -32,6 +32,11 @@ type File struct {
 	// waived for this epic. The zero value waives nothing.
 	Waive EpicWaiver
 
+	// GuestAsk is what the owner of a guest rig said when they asked for the
+	// plan, quoted. A plan that works in a guest rig is refused without it, and
+	// it is written on the epic with it.
+	GuestAsk string
+
 	// Out is where the tree is printed. A nil Out prints nothing.
 	Out io.Writer
 
@@ -133,6 +138,13 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	if err := f.validateFormulas(ctx, plan, order); err != nil {
 		return FiledPlan{}, err
 	}
+	guests, err := f.guestRigsOf(ctx, plan)
+	if err != nil {
+		return FiledPlan{}, err
+	}
+	if err := f.checkGuests(guests); err != nil {
+		return FiledPlan{}, err
+	}
 	rules, err := f.requirementsOf(ctx, plan)
 	if err != nil {
 		return FiledPlan{}, err
@@ -190,6 +202,9 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 		})
 	}
 
+	if err := f.recordGuestAsk(ctx, epicID, guests); err != nil {
+		return filed, err
+	}
 	if len(f.Waive.Names) > 0 {
 		if err := f.recordWaiver(ctx, epicID, rules); err != nil {
 			return filed, err

@@ -178,3 +178,49 @@ func TestFileRefusesAPlanThatLacksWhatTheRigsFileRequires(t *testing.T) {
 		t.Fatalf("expected a waiver without the Governor's words to be refused, got %v", err)
 	}
 }
+
+// A guest rig's file makes mw file refuse a plan unless the owner's words come
+// with it; the refusal names the rig and the owner, before any bead is made.
+func TestFileRefusesAPlanInAGuestRigWithoutTheOwnersWords(t *testing.T) {
+	vaultDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(vaultDir, "rigs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(vaultDir, "rigs", "argus.toml"), []byte("guest = \"Luke\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MW_VAULT", vaultDir)
+	t.Setenv("MW_HOST", "vps")
+	t.Setenv("PATH", t.TempDir())
+
+	plan := filepath.Join(t.TempDir(), "plan.json")
+	written := `{"epic":{"key":"e","title":"E","description":"Cast.","defaults":{"rig":"argus","branch":"main","harness":"claude","model":"opus","effort":"high","host":"vps"}},` +
+		`"stories":[{"key":"s","title":"S","acceptance":"it passes","needs":[]}]}`
+	if err := os.WriteFile(plan, []byte(written), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	root := newRootCmd()
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"file", plan})
+	err := root.Execute()
+	if err == nil || !strings.Contains(err.Error(), "argus") || !strings.Contains(err.Error(), "Luke") {
+		t.Fatalf("expected the refusal to name the rig and its owner, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "--guest-ask") {
+		t.Errorf("expected the refusal to name the flag, got %v", err)
+	}
+
+	// With the owner's words it gets past the guest check and on to beads, which
+	// this PATH does not have.
+	root = newRootCmd()
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SetArgs([]string{"file", plan, "--guest-ask", "Luke: yes, file it"})
+	err = root.Execute()
+	if err != nil && strings.Contains(err.Error(), "Luke") && strings.Contains(err.Error(), "guest") {
+		t.Errorf("expected --guest-ask to pass the guest check, got %v", err)
+	}
+}
