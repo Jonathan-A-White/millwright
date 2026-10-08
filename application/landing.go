@@ -85,6 +85,18 @@ type Landing interface {
 	// merged result is tested and the push is made from.
 	OpenLanding(ctx context.Context, rigDir, base string) (string, error)
 
+	// RefHead reports the commit ref points at, as the rig has it. It is how a
+	// close-out records the target branch's head a conflicted story was sent
+	// back against, to tell whether the branch has moved since.
+	RefHead(ctx context.Context, rigDir, ref string) (string, error)
+
+	// UnionNotes makes the repository the worktree at dir belongs to merge
+	// CLAUDE.md as a union (`CLAUDE.md merge=union` in its info/attributes),
+	// so that two stories appending lines to it merge, and rebase, without a
+	// conflict. Nothing tracked changes, and doing it again changes nothing.
+	// OpenLanding does the same for every landing it opens.
+	UnionNotes(ctx context.Context, dir string) error
+
 	// Merge merges branch into what the landing worktree has checked out. A
 	// merge that conflicts is undone before the error comes back, so that the
 	// landing worktree is left as it was found.

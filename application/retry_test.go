@@ -119,6 +119,8 @@ func (f *fakeRetryLanding) Commits(context.Context, string, string, string) ([]a
 func (f *fakeRetryLanding) OpenLanding(context.Context, string, string) (string, error) {
 	return "", nil
 }
+func (f *fakeRetryLanding) RefHead(context.Context, string, string) (string, error) { return "", nil }
+func (f *fakeRetryLanding) UnionNotes(context.Context, string) error                { return nil }
 func (f *fakeRetryLanding) Merge(context.Context, string, string) (application.Landed, error) {
 	return application.Landed{}, nil
 }

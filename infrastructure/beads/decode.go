@@ -130,8 +130,11 @@ func (b bead) pathMetadata() map[string]string {
 // attempts is how many sessions were started for this bead, as its metadata
 // says. bd stores a number it is given as a number, and a story edited by hand
 // may hold the count as text, so both are read; anything else is no attempts.
-func (b bead) attempts() int {
-	switch value := b.Metadata[application.AttemptsField].(type) {
+func (b bead) attempts() int { return b.count(application.AttemptsField) }
+
+// count reads a number kept in the bead's metadata the way attempts does.
+func (b bead) count(field string) int {
+	switch value := b.Metadata[field].(type) {
 	case float64:
 		return int(value)
 	case string:
@@ -140,6 +143,12 @@ func (b bead) attempts() int {
 		}
 	}
 	return 0
+}
+
+// text reads a string kept in the bead's metadata; anything else is empty.
+func (b bead) text(field string) string {
+	text, _ := b.Metadata[field].(string)
+	return strings.TrimSpace(text)
 }
 
 // exhausted is whether mw dispatch has marked this bead as having used up its
@@ -282,6 +291,8 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		LeaseExpires:    b.leaseExpires(),
 		CommentCount:    b.CommentCount,
 		Attempts:        b.attempts(),
+		RebaseSends:     b.count(application.RebaseSendsField),
+		RebaseBase:      b.text(application.RebaseBaseField),
 		Exhausted:       b.exhausted(),
 		Needs:           b.needs(),
 		IsEpic:          b.Type == TypeEpic,

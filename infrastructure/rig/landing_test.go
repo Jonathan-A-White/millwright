@@ -416,3 +416,150 @@ func TestAdvanceNamesAtMostTenOfAManyUncommittedPaths(t *testing.T) {
 		})
 	}
 }
+
+// landBranch lands branch on main at the origin the way mw next does, in a
+// throwaway landing worktree, and reports the merge error if there was one.
+func landBranch(t *testing.T, here, branch string) error {
+	t.Helper()
+	ctx := context.Background()
+	worktrees := rig.New()
+	run(t, here, "git", "fetch", "-q", "origin")
+	dir, err := worktrees.OpenLanding(ctx, here, "origin/main")
+	if err != nil {
+		t.Fatalf("opening the landing: %v", err)
+	}
+	defer func() {
+		if err := worktrees.CloseLanding(ctx, here, dir); err != nil {
+			t.Errorf("closing the landing: %v", err)
+		}
+	}()
+	if _, err := worktrees.Merge(ctx, dir, branch); err != nil {
+		return err
+	}
+	return worktrees.Push(ctx, dir, "origin", "main")
+}
+
+// aClaudeMdBranch cuts a branch from main that appends line to the rig's CLAUDE.md.
+func aClaudeMdBranch(t *testing.T, here, branch, line string) {
+	t.Helper()
+	run(t, here, "git", "checkout", "-q", "-b", branch, "main")
+	f, err := os.OpenFile(filepath.Join(here, "CLAUDE.md"), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("opening CLAUDE.md: %v", err)
+	}
+	if _, err := f.WriteString(line + "\n"); err != nil {
+		t.Fatalf("appending to CLAUDE.md: %v", err)
+	}
+	f.Close()
+	run(t, here, "git", "commit", "-qam", "Note: "+line)
+	run(t, here, "git", "checkout", "-q", "main")
+}
+
+// TestTwoBranchesAppendingToClaudeMdLandOneAfterTheOtherWithNoConflict drives
+// real git: both branches add a different last line to CLAUDE.md, which on its
+// own conflicts, and a landing treats the file as a union merge so both stay.
+func TestTwoBranchesAppendingToClaudeMdLandOneAfterTheOtherWithNoConflict(t *testing.T) {
+	here, _ := aRig(t)
+	write(t, here, "CLAUDE.md", "# notes\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "CLAUDE.md opens")
+	run(t, here, "git", "push", "-q", "origin", "main")
+
+	aClaudeMdBranch(t, here, "mw/one", "one learned this")
+	aClaudeMdBranch(t, here, "mw/two", "two learned that")
+
+	if err := landBranch(t, here, "mw/one"); err != nil {
+		t.Fatalf("landing the first branch: %v", err)
+	}
+	if err := landBranch(t, here, "mw/two"); err != nil {
+		t.Fatalf("landing the second branch, which only appended a line to CLAUDE.md: %v", err)
+	}
+	run(t, here, "git", "fetch", "-q", "origin")
+	got := run(t, here, "git", "show", "origin/main:CLAUDE.md")
+	for _, want := range []string{"# notes", "one learned this", "two learned that"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected CLAUDE.md on main to keep %q, got:\n%s", want, got)
+		}
+	}
+	if tracked := run(t, here, "git", "ls-files", ".gitattributes"); tracked != "" {
+		t.Errorf("expected no tracked .gitattributes to be made, got %q", tracked)
+	}
+}
+
+// TestAConflictInAnotherFileStillStopsTheLanding keeps the union rule to
+// CLAUDE.md: two different edits of the same line of any other file conflict.
+func TestAConflictInAnotherFileStillStopsTheLanding(t *testing.T) {
+	here, _ := aRig(t)
+	for _, b := range []struct{ branch, text string }{{"mw/one", "one's README\n"}, {"mw/two", "two's README\n"}} {
+		run(t, here, "git", "checkout", "-q", "-b", b.branch, "main")
+		write(t, here, "README.md", b.text)
+		run(t, here, "git", "commit", "-qam", "README "+b.branch)
+		run(t, here, "git", "checkout", "-q", "main")
+	}
+	if err := landBranch(t, here, "mw/one"); err != nil {
+		t.Fatalf("landing the first branch: %v", err)
+	}
+	if err := landBranch(t, here, "mw/two"); !application.Conflicted(err) {
+		t.Errorf("expected the second README edit to conflict, got %v", err)
+	}
+}
+
+// TestUnionNotesMakesARebaseKeepBothAppendedLines drives real git in a story
+// worktree: after UnionNotes, a rebase onto a main that also appended to CLAUDE.md
+// goes through with no stop.
+func TestUnionNotesMakesARebaseKeepBothAppendedLines(t *testing.T) {
+	here, _ := aRig(t)
+	ctx := context.Background()
+	worktrees := rig.New()
+	write(t, here, "CLAUDE.md", "# notes\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "CLAUDE.md opens")
+	run(t, here, "git", "push", "-q", "origin", "main")
+
+	aClaudeMdBranch(t, here, "mw/one", "one learned this")
+	aClaudeMdBranch(t, here, "mw/two", "two learned that")
+	if err := landBranch(t, here, "mw/one"); err != nil {
+		t.Fatalf("landing the first branch: %v", err)
+	}
+
+	work := filepath.Join(filepath.Dir(here), "work")
+	if err := worktrees.Add(ctx, here, work, "mw/work", "mw/two"); err != nil {
+		t.Fatalf("cutting the story worktree: %v", err)
+	}
+	if err := worktrees.UnionNotes(ctx, work); err != nil {
+		t.Fatalf("setting up the union: %v", err)
+	}
+	if err := worktrees.UnionNotes(ctx, work); err != nil {
+		t.Fatalf("setting up the union a second time: %v", err)
+	}
+	run(t, work, "git", "rebase", "origin/main")
+	got := run(t, work, "git", "show", "HEAD:CLAUDE.md")
+	for _, want := range []string{"one learned this", "two learned that"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected the rebased CLAUDE.md to keep %q, got:\n%s", want, got)
+		}
+	}
+	attributes := run(t, work, "git", "rev-parse", "--git-path", "info/attributes")
+	if !filepath.IsAbs(attributes) {
+		attributes = filepath.Join(work, attributes)
+	}
+	body, err := os.ReadFile(attributes)
+	if err != nil {
+		t.Fatalf("reading info/attributes: %v", err)
+	}
+	if n := strings.Count(string(body), "CLAUDE.md merge=union"); n != 1 {
+		t.Errorf("expected the rule exactly once, found %d in:\n%s", n, body)
+	}
+}
+
+func TestRefHeadNamesTheCommitARefPointsAt(t *testing.T) {
+	here, _ := aRig(t)
+	want := run(t, here, "git", "rev-parse", "origin/main")
+	got, err := rig.New().RefHead(context.Background(), here, "origin/main")
+	if err != nil || got != want {
+		t.Errorf("expected %s, got %q, %v", want, got, err)
+	}
+	if _, err := rig.New().RefHead(context.Background(), here, "origin/nothing-here"); err == nil {
+		t.Error("expected a ref that is not there to be an error")
+	}
+}

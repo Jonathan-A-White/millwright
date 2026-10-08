@@ -224,8 +224,67 @@ func (w *Worktrees) OpenLanding(ctx context.Context, rigDir, base string) (strin
 	if _, err := w.git(ctx, rigDir, "worktree", "add", "--detach", dir, base); err != nil {
 		return "", err
 	}
+	if err := w.UnionNotes(ctx, dir); err != nil {
+		_ = w.Remove(ctx, rigDir, dir, "")
+		return "", err
+	}
 	return dir, nil
 }
+
+// RefHead implements application.Landing.
+func (w *Worktrees) RefHead(ctx context.Context, rigDir, ref string) (string, error) {
+	if ref == "" {
+		return "", fmt.Errorf("reading the head of %s: which ref?", rigDir)
+	}
+	said, err := w.git(ctx, rigDir, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(said), nil
+}
+
+// UnionNotes implements application.Landing.
+//
+// The rule goes in info/attributes, which git keeps once for a repository and
+// all of its worktrees, so it is never a tracked file of the rig's. It is
+// written only when no line of the file already says it.
+func (w *Worktrees) UnionNotes(ctx context.Context, dir string) error {
+	if dir == "" {
+		return fmt.Errorf("setting up the union merge of CLAUDE.md: in which worktree?")
+	}
+	said, err := w.git(ctx, dir, "rev-parse", "--git-path", "info/attributes")
+	if err != nil {
+		return err
+	}
+	path := strings.TrimSpace(said)
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(dir, path)
+	}
+	kept, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("reading %s: %w", path, err)
+	}
+	for _, line := range strings.Split(string(kept), "\n") {
+		if strings.TrimSpace(line) == unionRule {
+			return nil
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("making the directory of %s: %w", path, err)
+	}
+	text := string(kept)
+	if text != "" && !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
+	if err := os.WriteFile(path, []byte(text+unionRule+"\n"), 0o644); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	return nil
+}
+
+// unionRule is the line UnionNotes keeps in info/attributes: two stories that
+// each append a note to the rig's CLAUDE.md both keep their lines.
+const unionRule = "CLAUDE.md merge=union"
 
 // Merge implements application.Landing. A merge that conflicts is undone before
 // the error comes back: mw resolves nothing for anybody, and a landing worktree
