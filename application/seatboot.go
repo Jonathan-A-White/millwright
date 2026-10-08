@@ -417,7 +417,7 @@ func RebaseKickoffPrompt(seat, storyID, vaultDir, onto string) string {
 		"Your worktree is the directory you are in: work only there. "+
 		"The story has been worked and its formula steps are closed, but its branch does not merge into %s "+
 		"without conflicts: the target branch moved on while the story was worked. "+
-		"You are sent back once, to rebase: run `git rebase %s` in your worktree, resolve every conflict "+
+		"You are sent back to rebase: run `git rebase %s` in your worktree, resolve every conflict "+
 		"so that both the story's work and what landed meanwhile are kept, run the rig's suite in the foreground "+
 		"until it is green, and commit. The branch was never pushed, so the rebase forces nothing. "+
 		"Do not push, do not merge, do not close the story, and work nothing else of it. "+

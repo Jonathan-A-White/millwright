@@ -20,6 +20,7 @@ import (
 // registerNextRebaseSteps registers the send-back steps of features/next.feature.
 func registerNextRebaseSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the other host landed a change to the same file as "([^"]*)" on "([^"]*)"$`, c.theOtherHostChangedTheSameFile)
+	ctx.Given(`^the other host lands another change on "([^"]*)"$`, c.theOtherHostMovesTheTarget)
 	ctx.Given(`^mw next is running in the session of "([^"]*)"$`, c.mwNextIsRunningInTheSession)
 	ctx.Given(`^the session of "([^"]*)" was the first that dispatch started for it$`, c.theSessionWasTheFirstAttempt)
 	ctx.Given(`^the session sent back rebases the branch of "([^"]*)" onto "([^"]*)" and commits the resolution$`, c.theSentBackSessionRebases)
@@ -28,6 +29,8 @@ func registerNextRebaseSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^a fresh session is running for "([^"]*)" in its worktree, told to rebase onto "([^"]*)"$`, c.aSessionIsRunningToRebase)
 	ctx.Then(`^the story "([^"]*)" is recorded as sent back to rebase$`, c.theStoryIsRecordedAsSentBack)
 	ctx.Then(`^the report says "([^"]*)" was sent back to rebase$`, c.theReportSaysItWasSentBack)
+	ctx.Then(`^the sends back to rebase counted on "([^"]*)" come to (\d+)$`, c.theSendsBackComeTo)
+	ctx.Then(`^a mail with the subject "([^"]*)" holds:$`, c.aMailWithTheSubjectHolds)
 	ctx.Then(`^(\d+) sessions were ever started for "([^"]*)"$`, c.sessionsWereEverStarted)
 	ctx.Then(`^the attempts counted on "([^"]*)" come to (\d+)$`, c.theAttemptsCountedComeTo)
 	ctx.Then(`^the file of "([^"]*)" on "([^"]*)" at the rig's origin keeps the other host's line too$`, c.theOtherHostsLineIsKept)
@@ -87,7 +90,12 @@ func (c *nextContext) theSentBackSessionEndsWithoutRebasing(id string) error {
 // theSentBackSessionSucceeds is the result the second session leaves, under a
 // session id of its own, over the first session's.
 func (c *nextContext) theSentBackSessionSucceeds(id string) error {
-	return c.putResult(id, `{"type":"result","subtype":"success","is_error":false,"num_turns":4,`+
+	detail, err := c.tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	// The session sent back writes the result of the attempt it was counted as.
+	return c.putResultNamed(id, application.ResultFileNameForAttempt(max(detail.Attempts, 1)), `{"type":"result","subtype":"success","is_error":false,"num_turns":4,`+
 		`"duration_ms":300000,"session_id":"s-rebase","total_cost_usd":0.5,`+
 		`"usage":{"input_tokens":50,"output_tokens":900,"cache_read_input_tokens":20000,"cache_creation_input_tokens":1000}}`)
 }
@@ -176,4 +184,52 @@ func (c *nextContext) theAttemptsCountedComeTo(id string, want int) error {
 		return fmt.Errorf("expected %s to have %d attempts counted, got %d", id, want, detail.Attempts)
 	}
 	return nil
+}
+
+// theOtherHostMovesTheTarget is the target branch moving on again without
+// touching the story's file, so that the conflict stays and only the head changes.
+func (c *nextContext) theOtherHostMovesTheTarget(branch string) error {
+	c.moves++
+	name := fmt.Sprintf("moved-%d.md", c.moves)
+	if err := os.WriteFile(filepath.Join(c.seed, name), []byte("the other host moved on\n"), 0o644); err != nil {
+		return err
+	}
+	for _, args := range [][]string{
+		{"add", "-A"}, {"commit", "-qm", "The other host moves on"}, {"push", "-q", "origin", branch},
+	} {
+		if err := gitRun(c.seed, "git", args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *nextContext) theSendsBackComeTo(id string, want int) error {
+	detail, err := c.tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	if detail.RebaseSends != want {
+		return fmt.Errorf("expected %s to have been sent back to rebase %d times, got %d (the close-out said: %v; %s)", id, want, detail.RebaseSends, c.err, c.report.Why)
+	}
+	return nil
+}
+
+func (c *nextContext) aMailWithTheSubjectHolds(subject string, table *godog.Table) error {
+	sent, err := c.mailSent()
+	if err != nil {
+		return err
+	}
+	for _, mail := range sent {
+		if mail.Subject != subject {
+			continue
+		}
+		for _, row := range table.Rows {
+			if want := strings.TrimSpace(row.Cells[0].Value); !strings.Contains(mail.Body, want) {
+				return fmt.Errorf("expected the body of %q to hold %q, got:\n%s", subject, want, mail.Body)
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("expected a mail with the subject %q, got %+v", subject, sent)
 }

@@ -105,6 +105,12 @@ type StoryDetail struct {
 	// dispatch has already told the Mayor the story used them all up.
 	Attempts  int
 	Exhausted bool
+	// RebaseSends is how many times mw next has sent this story's branch back
+	// to a fresh session to rebase, and RebaseBase the target branch's head
+	// the last of them was made against, as the RebaseSendsField and
+	// RebaseBaseField metadata say; zero and empty when it never was.
+	RebaseSends int
+	RebaseBase  string
 	// Molecule is the formula poured for this story, empty until it has been
 	// poured. It is filled in by whoever pours it, not by reading the story.
 	Molecule Molecule

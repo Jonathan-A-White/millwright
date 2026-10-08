@@ -34,6 +34,7 @@ type nextContext struct {
 	vault string
 	rig   string
 	seed  string // the other host's clone
+	moves int    // how many times the other host has moved the target on
 
 	tracker *apptest.FakeTracker
 	runner  *apptest.FakeRunner
@@ -167,6 +168,8 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 
 	ctx.When(`^mw closes out "([^"]*)"$`, c.mwClosesOut)
 	ctx.When(`^mw closes out "([^"]*)" a second time$`, c.mwClosesOut)
+	ctx.When(`^mw closes out "([^"]*)" a third time$`, c.mwClosesOut)
+	ctx.When(`^mw closes out "([^"]*)" a fourth time$`, c.mwClosesOut)
 
 	ctx.Then(`^the work of "([^"]*)" is on "([^"]*)" at the rig's origin$`, c.theWorkIsOnTheOrigin)
 	ctx.Then(`^the other host's work is still on "([^"]*)" at the rig's origin$`, c.theOtherHostsWorkIsStillThere)
@@ -582,11 +585,15 @@ func (c *nextContext) theRunLeftItsBootFile(id string) error {
 // putResult writes what the session reported where the harness would have
 // redirected it.
 func (c *nextContext) putResult(id, contents string) error {
+	return c.putResultNamed(id, application.ResultFileName, contents)
+}
+
+func (c *nextContext) putResultNamed(id, name, contents string) error {
 	dir := filepath.Join(c.vault, vault.RunsDir, id)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(dir, application.ResultFileName), []byte(contents), 0o644)
+	return os.WriteFile(filepath.Join(dir, name), []byte(contents), 0o644)
 }
 
 func (c *nextContext) theRigsTestsPass() error {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,11 +31,20 @@ const (
 // RebaseState is the state dimension that says a story's branch was sent back
 // to a fresh Builder session to rebase, after it would not merge into its
 // target branch without conflicts. RebaseSentBack is its one value. It is on
-// the story, not in a note, because it is what keeps the send-back to once: a
-// story carrying it that conflicts again is stopped, never sent back again.
+// the story, not in a note, so that a story sent back is seen to be.
+//
+// What bounds the send-backs is two metadata fields: RebaseSendsField counts
+// them and RebaseBaseField holds the head of the target branch the last was
+// made against. A branch that conflicts again is sent back again only when the
+// target branch has moved since that head, and never more than MaxRebaseSends
+// times in all: otherwise it is a person's to resolve.
 const (
 	RebaseState    = "rebase"
 	RebaseSentBack = "sent-back"
+
+	RebaseSendsField = "rebase_sends"
+	RebaseBaseField  = "rebase_base"
+	MaxRebaseSends   = 3
 )
 
 // MergedTestsState is the state dimension that says a story's branch was sent
@@ -148,8 +158,9 @@ const (
 // are closed and the rig's own tests pass — first in the story's worktree and
 // again on the merged result whenever merging made something new. It never
 // forces a push, never resolves a merge for anybody, and never closes a story it
-// did not land. A branch that will not merge is sent back, once, to a fresh
-// session of the seat to rebase; a second conflict stops there. Everything it
+// did not land. A branch that will not merge is sent back to a fresh
+// session of the seat to rebase, again each time the target branch has moved
+// since, three times at most; any other conflict stops there. Everything it
 // refuses to do is written on the story and in the seat's ledger, so that a
 // story that did not land says so in both places.
 type Next struct {
@@ -743,15 +754,18 @@ func (n Next) paneTail(ctx context.Context, c *closeOut) string {
 const asideSuffix = "-sent-back"
 
 // sendBack answers a branch that would not merge into its target branch without
-// conflicts the one time it is allowed to: a fresh session of the seat, in the
-// same worktree, told to rebase onto the target branch as the remote has it,
-// resolve, run the suite and commit, and the mw next it ends with lands it as
-// usual. The branch was never pushed, so the rebase forces nothing.
+// conflicts: a fresh session of the seat, in the same worktree, told to rebase
+// onto the target branch as the remote has it, resolve, run the suite and
+// commit, and the mw next it ends with lands it as usual. The branch was never
+// pushed, so the rebase forces nothing.
 //
-// Once only, and recorded on the story before anything is started, so that it
-// cannot loop: a story already sent back, or one that cannot be recorded as
-// sent back, is not sent. What it returns is why it was not sent, empty when it
-// was; the close-out then stops as for any conflict.
+// A rebase is only worth another session when the target branch has moved since
+// the last one: a story is sent back again when its head differs from the one
+// recorded at the last send-back, up to MaxRebaseSends times in all. The count
+// and the head are recorded on the story before anything is started, so that it
+// cannot loop: one that cannot be recorded is not sent. What it returns is why
+// it was not sent, empty when it was; the close-out then stops as for any
+// conflict.
 func (n Next) sendBack(ctx context.Context, c *closeOut, report *NextReport, landErr error, kept string) string {
 	if n.Runner == nil || n.Boot.Harness == nil {
 		return "this mw next has no session to send it back to"
@@ -760,18 +774,39 @@ func (n Next) sendBack(ctx context.Context, c *closeOut, report *NextReport, lan
 	if err != nil {
 		return fmt.Sprintf("whether it was sent back before could not be read: %v", err)
 	}
-	if was == RebaseSentBack {
-		return "it was sent back once to rebase already, and a story is sent back only once. The conflict is a person's to resolve now"
+	sends := c.detail.RebaseSends
+	if sends == 0 && was == RebaseSentBack {
+		// Sent back before the count was kept: once, against a head not known.
+		sends = 1
+	}
+	if sends >= MaxRebaseSends {
+		return fmt.Sprintf("it was sent back to rebase %d times already, which is the most a story is sent back. The conflict is a person's to resolve now", sends)
 	}
 
 	onto := StartPoint(n.remote(), c.target)
+	head, err := n.Landing.RefHead(ctx, c.rigDir, onto)
+	if err != nil {
+		return fmt.Sprintf("the head of %s could not be read: %v", onto, err)
+	}
+	if sends > 0 && head == c.detail.RebaseBase {
+		return fmt.Sprintf("it was sent back %s to rebase already, onto %s at %s, and %s has not moved since, so another rebase would change nothing. The conflict is a person's to resolve now",
+			times(sends), onto, shortSHA(head), c.target)
+	}
 	spec, err := n.Boot.Rebase(ctx, c.detail, c.worktree, onto)
 	if err != nil {
 		return fmt.Sprintf("the session to rebase it could not be assembled: %v", err)
 	}
+	if err := n.Landing.UnionNotes(ctx, c.worktree); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("CLAUDE.md could not be set to merge as a union in %s: %v", c.worktree, err))
+	}
+	if err := n.Tracker.SetStoryMetadata(ctx, c.id, map[string]string{
+		RebaseSendsField: strconv.Itoa(sends + 1), RebaseBaseField: head,
+	}); err != nil {
+		return fmt.Sprintf("it could not be recorded as sent back to rebase against %s, which is what bounds the send-backs: %v", shortSHA(head), err)
+	}
 	if err := n.Tracker.SetStoryState(ctx, c.id, RebaseState, RebaseSentBack,
-		fmt.Sprintf("sent back to rebase onto %s: %s", onto, firstLine(landErr.Error()))); err != nil {
-		return fmt.Sprintf("it could not be recorded as %s=%s, which is what keeps it to once: %v", RebaseState, RebaseSentBack, err)
+		fmt.Sprintf("sent back to rebase onto %s (%s, send-back %d of %d): %s", onto, shortSHA(head), sends+1, MaxRebaseSends, firstLine(landErr.Error()))); err != nil {
+		return fmt.Sprintf("it could not be recorded as %s=%s: %v", RebaseState, RebaseSentBack, err)
 	}
 	aside, err := n.makeWay(ctx, spec.Name)
 	if err != nil {
@@ -803,11 +838,12 @@ func (n Next) sendBack(ctx context.Context, c *closeOut, report *NextReport, lan
 	where := fmt.Sprintf("sent back to rebase by mw on %s: session %s in %s on %s, onto %s", n.Host, spec.Name, c.worktree, c.branch, onto)
 	note := fmt.Sprintf("mw next on %s did not land this story (%s): %s does not merge into %s without conflicts, "+
 		"because %s moved on while the story was worked.\n\n"+
-		"It was sent back once to a fresh Builder session, %s, in the worktree %s, to rebase %s onto %s, resolve, "+
-		"run the suite and commit. The mw next that session ends with lands it as usual. It is not sent back again: "+
-		"a second conflict stops the close-out and is a person's to resolve. Nothing was merged, nothing was pushed "+
-		"and nothing was forced.\n\n%s",
-		n.Host, ReasonMergeConflict, c.branch, c.target, c.target, spec.Name, c.worktree, c.branch, onto, kept)
+		"It was sent back (send-back %d of %d, against %s at %s) to a fresh Builder session, %s, in the worktree %s, to rebase %s onto %s, resolve, "+
+		"run the suite and commit. The mw next that session ends with lands it as usual. If it conflicts again it is sent back again only "+
+		"if %s has moved by then, and never more than %d times in all; otherwise the conflict stops the close-out and is a person's to resolve. "+
+		"Nothing was merged, nothing was pushed and nothing was forced.\n\n%s",
+		n.Host, ReasonMergeConflict, c.branch, c.target, c.target, sends+1, MaxRebaseSends, onto, shortSHA(head), spec.Name, c.worktree, c.branch, onto,
+		c.target, MaxRebaseSends, kept)
 	if err := n.Tracker.CommentOnStory(ctx, c.id, note); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the send-back could not be written on the story: %v", err))
 	}
@@ -824,6 +860,22 @@ func (n Next) sendBack(ctx context.Context, c *closeOut, report *NextReport, lan
 	return ""
 }
 
+// times says a count of send-backs in words: "once", "2 times".
+func times(count int) string {
+	if count == 1 {
+		return "once"
+	}
+	return fmt.Sprintf("%d times", count)
+}
+
+// shortSHA is a commit as a person names it.
+func shortSHA(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
+}
+
 // makeWay frees the story's session name for the session it is sent back to.
 // A session still running under it is the one this close-out is running in,
 // chained on after the harness, and is renamed rather than closed, because
@@ -837,6 +889,12 @@ func (n Next) makeWay(ctx context.Context, name string) (string, error) {
 	switch status.State {
 	case StateRunning:
 		aside := SessionName(name + asideSuffix)
+		// A story sent back before left its earlier session under this name,
+		// ended, since the one running now is its successor; a name can be
+		// held by one session only.
+		if err := n.Runner.Close(ctx, aside); err != nil {
+			return "", err
+		}
 		return aside, n.Runner.Rename(ctx, name, aside)
 	case StateExited, StateExitUnknown:
 		return "", n.Runner.Close(ctx, name)
@@ -1743,7 +1801,7 @@ func (r NextReport) String() string {
 		if r.Reason == ReasonMergedTestsFail {
 			fmt.Fprintf(&b, "          to %s, a fresh session fixing the merged tests; sent back once, never again\n", r.SentBack)
 		} else {
-			fmt.Fprintf(&b, "          to %s, a fresh session rebasing onto %s; sent back once, never again\n", r.SentBack, r.Target)
+			fmt.Fprintf(&b, "          to %s, a fresh session rebasing onto %s; sent back only while the target keeps moving, three times at most\n", r.SentBack, r.Target)
 		}
 	default:
 		if r.Reason == "" {

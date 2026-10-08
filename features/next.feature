@@ -341,7 +341,7 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.1" is not closed
     And a fresh session is running for "mw-gq6.1" in its worktree, told to rebase onto "origin/main"
     And the story "mw-gq6.1" is recorded as sent back to rebase
-    And the story "mw-gq6.1" carries a comment quoting: sent back once to a fresh Builder session
+    And the story "mw-gq6.1" carries a comment quoting: send-back 1 of 3
     And the report says "mw-gq6.1" was sent back to rebase
     And the last ledger line holds:
       | not landed (merge-conflict): |
@@ -376,6 +376,51 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.1" carries a comment quoting: it was sent back once to rebase already
     And the worktree of "mw-gq6.1" is still there
     And 2 sessions were ever started for "mw-gq6.1"
+
+  Scenario: A conflict against the same target head as the last send-back stops at once, saying the head has not moved
+    Given the other host landed a change to the same file as "mw-gq6.1" on "main"
+    And the session of "mw-gq6.1" was the first that dispatch started for it
+    And the session of "mw-gq6.1" reported a plain success
+    And mw next is running in the session of "mw-gq6.1"
+    When mw closes out "mw-gq6.1"
+    Given the session sent back for "mw-gq6.1" ends without rebasing
+    When mw closes out "mw-gq6.1" a second time
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is held blocked
+    And the report says it stopped for "merge-conflict"
+    And the story "mw-gq6.1" carries a comment quoting: has not moved since
+    And the sends back to rebase counted on "mw-gq6.1" come to 1
+    And 2 sessions were ever started for "mw-gq6.1"
+
+  Scenario: A conflicted branch is sent back again each time the target moved, three times in all, and a fourth conflict stops
+    Given the other host landed a change to the same file as "mw-gq6.1" on "main"
+    And the session of "mw-gq6.1" was the first that dispatch started for it
+    And the session of "mw-gq6.1" reported a plain success
+    And mw next is running in the session of "mw-gq6.1"
+    When mw closes out "mw-gq6.1"
+    Then the sends back to rebase counted on "mw-gq6.1" come to 1
+    Given the session sent back for "mw-gq6.1" ends without rebasing
+    And the other host lands another change on "main"
+    When mw closes out "mw-gq6.1" a second time
+    Then a fresh session is running for "mw-gq6.1" in its worktree, told to rebase onto "origin/main"
+    And the sends back to rebase counted on "mw-gq6.1" come to 2
+    Given the session sent back for "mw-gq6.1" ends without rebasing
+    And the other host lands another change on "main"
+    When mw closes out "mw-gq6.1" a third time
+    Then a fresh session is running for "mw-gq6.1" in its worktree, told to rebase onto "origin/main"
+    And the sends back to rebase counted on "mw-gq6.1" come to 3
+    Given the session sent back for "mw-gq6.1" ends without rebasing
+    And the other host lands another change on "main"
+    When mw closes out "mw-gq6.1" a fourth time
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is held blocked
+    And the report says it stopped for "merge-conflict"
+    And the story "mw-gq6.1" carries a comment quoting: sent back to rebase 3 times already
+    And a mail with the subject "Blocked: The story mw-gq6.1" holds:
+      | sent back to rebase 3 times already |
+      | a person's to resolve               |
+    And the sends back to rebase counted on "mw-gq6.1" come to 3
+    And 4 sessions were ever started for "mw-gq6.1"
 
   Scenario: A branch that merges cleanly but fails the rig's tests together is sent back once to fix them
     Given the other host landed its own work on "main" while "mw-gq6.1" was worked
