@@ -87,3 +87,12 @@ Feature: mw retry
     Then the retry succeeds
     And no worktree of "mw-gq6.1" was read or made here
     And the story "mw-gq6.1" is open and unassigned
+
+  Scenario: A story refused at pour has no worktree to read, and its claim is given back all the same
+    Given the story "mw-gq6.1" was refused at pour: claimed and blocked, with no worktree or branch ever made
+    When mw retries "mw-gq6.1"
+    Then the retry succeeds
+    And the retry says there was no worktree or branch to keep for "mw-gq6.1"
+    And no worktree of "mw-gq6.1" was read or made here
+    And the story "mw-gq6.1" is open and unassigned
+    And the story "mw-gq6.1" still records 1 attempt

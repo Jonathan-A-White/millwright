@@ -71,6 +71,7 @@ func InitializeRetryScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^an epic "([^"]*)" whose stories are worked on "([^"]*)" and target "([^"]*)"$`, c.anEpicWorkedOnTarget)
 	ctx.Given(`^the story "([^"]*)" was dispatched and worked in its own worktree$`, c.theStoryWasDispatchedAndWorked)
 	ctx.Given(`^the story "([^"]*)" was dispatched but the session made no commits$`, c.theStoryWasDispatchedWithNoCommits)
+	ctx.Given(`^the story "([^"]*)" was refused at pour: claimed and blocked, with no worktree or branch ever made$`, c.theStoryWasRefusedAtPour)
 	ctx.Given(`^the worktree of "([^"]*)" also holds uncommitted work$`, c.theWorktreeAlsoHoldsUncommittedWork)
 	ctx.Given(`^the session of "([^"]*)" has ended$`, c.theSessionHasEnded)
 	ctx.Given(`^the session of "([^"]*)" is still running$`, c.theSessionIsStillRunning)
@@ -85,6 +86,7 @@ func InitializeRetryScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the retry refuses, saying: (.+)$`, c.theRetryRefusesSaying)
 	ctx.Then(`^the retry fails, saying: (.+)$`, c.theRetryFailsSaying)
 	ctx.Then(`^the retry found nothing to keep for "([^"]*)"$`, c.theRetryFoundNothingToKeep)
+	ctx.Then(`^the retry says there was no worktree or branch to keep for "([^"]*)"$`, c.theRetryFoundNoWorktree)
 	ctx.Then(`^the printed report names the bundle but nothing after it$`, c.thePrintedReportNamesTheBundleButNothingAfterIt)
 	ctx.Then(`^the branch of "([^"]*)" was bundled into "([^"]*)" in the vault, and it verifies$`, c.theBranchWasBundledIntoAndVerifies)
 	ctx.Then(`^the vault committed and pushed the bundle of "([^"]*)"$`, c.theVaultCommittedAndPushedTheBundle)
@@ -267,6 +269,37 @@ func (c *retryContext) theStoryWasDispatchedWithNoCommits(id string) error {
 		return err
 	}
 	return gitIdentify(dir)
+}
+
+// theStoryWasRefusedAtPour leaves the world as a dispatch whose pour was
+// refused would: the story claimed to this host, its first attempt recorded and
+// run:blocked set, and no worktree or branch ever cut.
+func (c *retryContext) theStoryWasRefusedAtPour(id string) error {
+	c.tracker.AddStory(c.lastEpic, domain.Story{ID: id, Title: "The story " + id})
+	ctx := context.Background()
+	if err := c.tracker.ClaimStory(ctx, id); err != nil {
+		return err
+	}
+	if err := c.tracker.SetStoryMetadata(ctx, id, map[string]string{application.AttemptsField: "1"}); err != nil {
+		return err
+	}
+	return c.tracker.SetStoryState(ctx, id, application.RunState, application.RunBlocked,
+		"the formula pour was refused")
+}
+
+// theRetryFoundNoWorktree checks the report and the printed text both say
+// there was no worktree or branch here to keep.
+func (c *retryContext) theRetryFoundNoWorktree(id string) error {
+	if !c.report.NoWorktree {
+		return fmt.Errorf("expected the report to say there was no worktree, got %+v", c.report)
+	}
+	if !strings.Contains(c.printed.String(), "no worktree or branch") {
+		return fmt.Errorf("expected the printed report to say no worktree or branch, got %q", c.printed.String())
+	}
+	if !strings.Contains(strings.Join(c.tracker.Comments(id), "\n"), "no worktree or branch") {
+		return fmt.Errorf("expected a comment on %s saying there was no worktree or branch, got %q", id, c.tracker.Comments(id))
+	}
+	return nil
 }
 
 // theStoryRanOnAnotherHost leaves the world as a dispatch on another host
