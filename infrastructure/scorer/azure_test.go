@@ -291,3 +291,15 @@ func TestAzureDefaultEndpointIsTheRegionsShortAudioHost(t *testing.T) {
 		t.Errorf("URL() = %q, want %q", got, want)
 	}
 }
+
+func TestAzureHasNoGreek(t *testing.T) {
+	a := scorer.NewAzure(azureKey(t, 0o600), "westus2")
+	for lang, want := range map[string]bool{"en": true, "es": true, "fr": true, "el": false, "el-GR": false, " EL ": false} {
+		if got := a.ScoresLang(lang); got != want {
+			t.Errorf("ScoresLang(%q) = %v, want %v", lang, got, want)
+		}
+	}
+	if _, err := a.Score(context.Background(), []byte("x"), "audio/wav", "γειά", "el"); err == nil || !strings.Contains(err.Error(), "no pronunciation assessment for el") {
+		t.Errorf("scoring Greek should be refused plainly, got %v", err)
+	}
+}

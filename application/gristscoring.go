@@ -4,15 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
 	"strings"
 )
-
-// gristScoringLang is the language every recording is scored in: the grist
-// carries none yet.
-const gristScoringLang = "en"
 
 // gristEngineError is what the session is given in an engine's place when the
 // engine failed.
@@ -29,6 +26,44 @@ func (w *gristWork) scoringFits() bool {
 	}
 	_, ok := w.inputObject()
 	return ok
+}
+
+// chooseLang settles the language the grist's recordings are scored in: the
+// "lang" of the app's request when it has one, else the grind's first. It is
+// why the grist is refused, or "": a lang the grind does not score in.
+func (w *gristWork) chooseLang() string {
+	langs := w.grind.Scoring.Languages()
+	w.lang = langs[0]
+	if !w.grind.Scoring.Audio || !w.carriesAudio() {
+		return ""
+	}
+	fields, _ := w.inputObject()
+	raw, found := fields["lang"]
+	if !found {
+		return ""
+	}
+	var asked string
+	if err := json.Unmarshal(raw, &asked); err != nil {
+		return GristReasonMalformed
+	}
+	// A region ("el-GR") is the language it is in.
+	asked, _, _ = strings.Cut(strings.ToLower(strings.TrimSpace(asked)), "-")
+	if asked == "" {
+		return ""
+	}
+	if !slices.Contains(langs, asked) {
+		return fmt.Sprintf("This grist asks for the language %s; its grind scores in %s.", asked, joinWords(langs))
+	}
+	w.lang = asked
+	return ""
+}
+
+// joinWords is items said in a sentence: "el", "el and en", "el, en and es".
+func joinWords(items []string) string {
+	if len(items) < 2 {
+		return strings.Join(items, "")
+	}
+	return strings.Join(items[:len(items)-1], ", ") + " and " + items[len(items)-1]
 }
 
 func (w *gristWork) carriesAudio() bool {
@@ -68,6 +103,7 @@ func (g GristGrind) scoreRecordings(ctx context.Context, w *gristWork, plain *Gr
 		w.notes = append(w.notes, fmt.Sprintf("%s was not scored: no scorer engine is configured", shortTxid(w.record.Txid)))
 		return
 	}
+	engines = g.enginesFor(w, engines)
 	fields, ok := w.inputObject()
 	if !ok {
 		return
@@ -82,14 +118,14 @@ func (g GristGrind) scoreRecordings(ctx context.Context, w *gristWork, plain *Gr
 		if !isGristAudio(clip.mime) {
 			continue
 		}
-		results, took := g.scoreClip(ctx, engines, clip, target, w.grind.Scoring.TargetField)
+		results, took := g.scoreClip(ctx, engines, clip, target, w.lang, w.grind.Scoring.TargetField)
 		if w.scorerSeconds == nil {
 			w.scorerSeconds = map[string]float64{}
 		}
 		for name, seconds := range took {
 			w.scorerSeconds[name] += seconds
 		}
-		w.scores = append(w.scores, GristRunScore{Attachment: i + 1, Mime: clip.mime, Target: target, Lang: gristScoringLang, Results: results})
+		w.scores = append(w.scores, GristRunScore{Attachment: i + 1, Mime: clip.mime, Target: target, Lang: w.lang, Results: results})
 		all = append(all, results)
 	}
 	scored := g.now()
@@ -105,9 +141,23 @@ func (g GristGrind) scoreRecordings(ctx context.Context, w *gristWork, plain *Gr
 	plain.Input = mustJSON(fields)
 }
 
+// enginesFor is the engines that can score the grist's language; one that
+// cannot is left out and the pass says so.
+func (g GristGrind) enginesFor(w *gristWork, engines []string) []string {
+	var able []string
+	for _, name := range engines {
+		if engine, err := g.Scorers.Get(name); err == nil && !ScoresLang(engine, w.lang) {
+			w.notes = append(w.notes, fmt.Sprintf("%s skipped: no %s", name, w.lang))
+			continue
+		}
+		able = append(able, name)
+	}
+	return able
+}
+
 // scoreClip runs every engine on one recording at once, and reports what each
 // said by its name, with the seconds each took.
-func (g GristGrind) scoreClip(ctx context.Context, engines []string, clip gristClip, target, field string) (map[string]json.RawMessage, map[string]float64) {
+func (g GristGrind) scoreClip(ctx context.Context, engines []string, clip gristClip, target, lang, field string) (map[string]json.RawMessage, map[string]float64) {
 	results := make(map[string]json.RawMessage, len(engines))
 	took := make(map[string]float64, len(engines))
 	var mu sync.Mutex
@@ -117,7 +167,7 @@ func (g GristGrind) scoreClip(ctx context.Context, engines []string, clip gristC
 		go func() {
 			defer wg.Done()
 			begun := g.now()
-			said := g.scoreWith(ctx, name, clip, target, field)
+			said := g.scoreWith(ctx, name, clip, target, lang, field)
 			seconds := g.now().Sub(begun).Seconds()
 			mu.Lock()
 			results[name] = said
@@ -131,7 +181,7 @@ func (g GristGrind) scoreClip(ctx context.Context, engines []string, clip gristC
 
 // scoreWith is one engine's answer for one recording, as JSON: its
 // ReadingResult, or {"error": "..."}.
-func (g GristGrind) scoreWith(ctx context.Context, name string, clip gristClip, target, field string) json.RawMessage {
+func (g GristGrind) scoreWith(ctx context.Context, name string, clip gristClip, target, lang, field string) json.RawMessage {
 	if target == "" {
 		return mustJSON(gristEngineError{fmt.Sprintf("the grist's request has no text to score against in %q", field)})
 	}
@@ -139,7 +189,7 @@ func (g GristGrind) scoreWith(ctx context.Context, name string, clip gristClip, 
 	if err != nil {
 		return mustJSON(gristEngineError{err.Error()})
 	}
-	result, err := engine.Score(ctx, clip.data, clip.mime, target, gristScoringLang)
+	result, err := engine.Score(ctx, clip.data, clip.mime, target, lang)
 	if err != nil {
 		return mustJSON(gristEngineError{err.Error()})
 	}

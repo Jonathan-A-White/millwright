@@ -2,6 +2,7 @@ package apptest
 
 import (
 	"context"
+	"slices"
 	"sync"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -15,6 +16,8 @@ type FakeScorer struct {
 
 	Result application.ReadingResult
 	Err    error
+	// NoLangs are the languages the engine cannot score.
+	NoLangs []string
 
 	calls []ScorerCall
 }
@@ -39,6 +42,11 @@ func (f *FakeScorer) Score(_ context.Context, audio []byte, mime, targetText, la
 		return application.ReadingResult{}, f.Err
 	}
 	return f.Result, nil
+}
+
+// ScoresLang implements application.LangScorer.
+func (f *FakeScorer) ScoresLang(lang string) bool {
+	return !slices.Contains(f.NoLangs, lang)
 }
 
 // Calls reports every reading scored, in order.

@@ -123,3 +123,50 @@ Feature: mw grist grind takes a recording, scores it, and keeps every grind's ra
     Given the phone sends a "cairn" "reading" grist, version "1.1", of "the cat sat" read aloud in a webm recording
     When the mill grinds
     Then the session was called with no limit on its turns
+
+  Scenario: A grist that names a language its grind allows is scored in it, and the run records it
+    Given the grind "reading" scores a webm recording against "target_text" in the languages "el" and "en"
+    And the phone sends a "cairn" "reading" grist, version "1.1", of "the cat sat" read aloud in a webm recording in the language "el"
+    When the mill grinds
+    Then the mill answered 1, refused 0, failed 0, and left 0 waiting
+    And the engine "local" was given the language "el"
+    And the run's scorers.json records the language "el"
+
+  Scenario: A grist that names no language is scored in the first its grind allows
+    Given the grind "reading" scores a webm recording against "target_text" in the languages "el" and "en"
+    And the phone sends a "cairn" "reading" grist, version "1.1", of "the cat sat" read aloud in a webm recording
+    When the mill grinds
+    Then the engine "local" was given the language "el"
+    And the run's scorers.json records the language "el"
+
+  Scenario: A grist that names a language its grind does not allow is refused, naming the ones it does
+    Given the grind "reading" scores a webm recording against "target_text" in the languages "el" and "en"
+    And the phone sends a "cairn" "reading" grist, version "1.1", of "the cat sat" read aloud in a webm recording in the language "fr"
+    When the mill grinds
+    Then the answer says "refused" because "This grist asks for the language fr; its grind scores in el and en."
+    And no grind was run
+    And no engine was given a recording
+
+  Scenario: A grind that names no languages scores in English, as it always did
+    Given the phone sends a "cairn" "reading" grist, version "1.1", of "the cat sat" read aloud in a webm recording
+    When the mill grinds
+    Then the engine "local" was given the language "en"
+    And the run's scorers.json records the language "en"
+
+  Scenario: A grind that names a language the mill does not know is refused as a broken grind
+    Given the grind "reading" scores a webm recording against "target_text" in the languages "tlh" and "en"
+    And the phone sends a "cairn" "reading" grist, version "1.1", of "the cat sat" read aloud in a webm recording
+    When the mill grinds
+    Then the answer says "refused" because "The app's grind for this kind of grist cannot be read."
+    And no engine was given a recording
+
+  Scenario: An engine that has no such language is skipped for the recording and the pass says so
+    Given the engine "azure" has no "el"
+    And the grind "reading" scores a webm recording against "target_text" in the languages "el" and "en"
+    And the phone sends a "cairn" "reading" grist, version "1.1", of "the cat sat" read aloud in a webm recording in the language "el"
+    When the mill grinds
+    Then the mill answered 1, refused 0, failed 0, and left 0 waiting
+    And the engine "local" was given the language "el"
+    And the engine "azure" was given no recording
+    And the session's request carries a reading_result from "local", with 3 words
+    And the pass notes "azure skipped: no el"

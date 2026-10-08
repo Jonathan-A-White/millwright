@@ -205,10 +205,12 @@ type gristWork struct {
 	// received is when the mill took the grist up; clips are every attachment
 	// as it was opened; scores, input, scoredAt and harnessStarted are the
 	// scoring step and the request the session was given; answered is when the
-	// session ended; notes are what the pass says of the run's record.
+	// session ended; notes are what the pass says of the run's record; lang is
+	// the language the recordings are scored in.
 	received       time.Time
 	clips          []gristClip
 	scores         []GristRunScore
+	lang           string
 	input          json.RawMessage
 	scoredAt       *time.Time
 	scoringSeconds float64
@@ -522,7 +524,8 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 		return
 	}
 	if err := json.Unmarshal(raw, &w.grind); err != nil || w.grind.Grind != GrindFileFormat ||
-		w.grind.App != name.App || w.grind.Kind != name.Kind || !slices.Contains(GrindEfforts, w.grind.Effort) {
+		w.grind.App != name.App || w.grind.Kind != name.Kind || !slices.Contains(GrindEfforts, w.grind.Effort) ||
+		!w.grind.Scoring.langsKnown() {
 		w.settle(GristRefused, GristReasonBrokenGrind)
 		return
 	}
@@ -548,6 +551,10 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 	}
 	if !w.scoringFits() {
 		w.settle(GristRefused, GristReasonMalformed)
+		return
+	}
+	if reason := w.chooseLang(); reason != "" {
+		w.settle(GristRefused, reason)
 		return
 	}
 	w.system, w.schema = g.readGrindText(ctx, w, checkout)

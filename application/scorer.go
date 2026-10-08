@@ -77,6 +77,20 @@ type Scorer interface {
 	Score(ctx context.Context, audio []byte, mime, targetText, lang string) (ReadingResult, error)
 }
 
+// LangScorer is an engine that can say which languages it cannot score. An
+// engine that does not implement it is taken to score every language.
+type LangScorer interface {
+	ScoresLang(lang string) bool
+}
+
+// ScoresLang reports whether engine can score a reading in lang.
+func ScoresLang(engine Scorer, lang string) bool {
+	if l, ok := engine.(LangScorer); ok {
+		return l.ScoresLang(lang)
+	}
+	return true
+}
+
 // ScorerRegistry is the engines this host is configured to run, by name.
 type ScorerRegistry struct {
 	engines map[string]Scorer

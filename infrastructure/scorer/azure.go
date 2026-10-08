@@ -46,11 +46,21 @@ type Azure struct {
 }
 
 // Azure satisfies the port.
-var _ application.Scorer = (*Azure)(nil)
+var (
+	_ application.Scorer     = (*Azure)(nil)
+	_ application.LangScorer = (*Azure)(nil)
+)
 
 // NewAzure is the azure engine for the key in keyFile and the region given.
 func NewAzure(keyFile, region string) *Azure {
 	return &Azure{KeyFile: keyFile, Region: strings.TrimSpace(region)}
+}
+
+// ScoresLang reports whether Azure's pronunciation assessment has the language:
+// it has no Greek (el-GR is not among its locales).
+func (a *Azure) ScoresLang(lang string) bool {
+	base, _, _ := strings.Cut(strings.ToLower(strings.TrimSpace(lang)), "-")
+	return base != "el"
 }
 
 // URL is the address the engine posts to, without the query: the endpoint when
@@ -106,6 +116,9 @@ type azureAssessment struct {
 // Score converts the audio to 16 kHz mono WAV, posts it with the target as the
 // reference text, and maps what Azure answers.
 func (a *Azure) Score(ctx context.Context, audio []byte, mime, targetText, lang string) (application.ReadingResult, error) {
+	if !a.ScoresLang(lang) {
+		return application.ReadingResult{}, fmt.Errorf("azure has no pronunciation assessment for %s", strings.TrimSpace(lang))
+	}
 	key, err := a.key()
 	if err != nil {
 		return application.ReadingResult{}, err

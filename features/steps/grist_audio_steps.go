@@ -49,6 +49,7 @@ type audioContext struct {
 type audioGrind struct {
 	scoring  bool
 	maxTurns int
+	langs    []string
 }
 
 // registry is the engines the mill runs: none when no scenario made any.
@@ -86,13 +87,17 @@ func registerGristAudio(ctx *godog.ScenarioContext, c *gristContext) {
 	a.c = c
 
 	ctx.Given(`^the grind "([^"]*)" takes a webm recording and scores it against "([^"]*)"$`, a.grindScores)
+	ctx.Given(`^the grind "([^"]*)" scores a webm recording against "([^"]*)" in the languages "([^"]*)" and "([^"]*)"$`, a.grindScoresInLangs)
 	ctx.Given(`^the grind "([^"]*)" takes a webm recording but scores nothing$`, a.grindDoesNotScore)
+	ctx.Given(`^the engine "([^"]*)" has no "([^"]*)"$`, a.engineHasNoLang)
 	ctx.Given(`^the grind "([^"]*)" takes at most (\d+) turns$`, a.grindTakesTurns)
 	ctx.Given(`^the scorer engines "([^"]*)" and "([^"]*)" are configured, each scoring any reading as "([^"]*)"$`, a.enginesConfigured)
 	ctx.Given(`^the engine "([^"]*)" breaks down with "([^"]*)"$`, a.engineFails)
 	ctx.Given(`^the mill keeps its runs under its state directory$`, a.keepsRuns)
 	ctx.Given(`^the mill's clock moves a second at each look$`, a.clockTicks)
 	ctx.Given(`^the phone sends a "([^"]*)" "([^"]*)" grist, version "([^"]*)", of "([^"]*)" read aloud in a webm recording$`, a.phoneSendsReading)
+
+	ctx.Given(`^the phone sends a "([^"]*)" "([^"]*)" grist, version "([^"]*)", of "([^"]*)" read aloud in a webm recording in the language "([^"]*)"$`, a.phoneSendsReadingIn)
 
 	ctx.When(`^mw grist runs lists the runs$`, a.listRuns)
 	ctx.When(`^mw grist runs lists the runs since a day after they were made$`, a.listRunsSinceTomorrow)
@@ -112,6 +117,10 @@ func registerGristAudio(ctx *godog.ScenarioContext, c *gristContext) {
 	ctx.Then(`^the session's directory held no audio$`, a.directoryHeldNoAudio)
 	ctx.Then(`^the session's prompt and system prompt hold no audio$`, a.promptsHoldNoAudio)
 	ctx.Then(`^no engine was given a recording$`, a.noEngineWasGiven)
+	ctx.Then(`^the engine "([^"]*)" was given the language "([^"]*)"$`, a.engineWasGivenLang)
+	ctx.Then(`^the engine "([^"]*)" was given no recording$`, a.engineWasGivenNone)
+	ctx.Then(`^the run's scorers\.json records the language "([^"]*)"$`, a.runScorersRecordLang)
+	ctx.Then(`^the pass notes "([^"]*)"$`, a.passNotes)
 	ctx.Then(`^the run's directory holds (.+)$`, a.runHolds)
 	ctx.Then(`^the run's input\.json carries reading_result\.local and no audio bytes$`, a.runInputCarries)
 	ctx.Then(`^the run's attachment-1\.webm is the recording as it was sent$`, a.runKeptTheRecording)
@@ -143,7 +152,11 @@ func (a *audioContext) writeGrind(kind string, g audioGrind) error {
 		"attachments":  map[string]any{"min": 1, "max": 2, "mime": []string{"audio/webm"}, "maxBytes": 4194304},
 	}
 	if g.scoring {
-		file["scoring"] = map[string]any{"audio": true, "target_field": "target_text"}
+		scoring := map[string]any{"audio": true, "target_field": "target_text"}
+		if len(g.langs) > 0 {
+			scoring["langs"] = g.langs
+		}
+		file["scoring"] = scoring
 	}
 	if g.maxTurns > 0 {
 		file["maxTurns"] = g.maxTurns
@@ -161,6 +174,22 @@ func (a *audioContext) grindScores(kind, field string) error {
 		return fmt.Errorf("the feature's grinds score against target_text, not %q", field)
 	}
 	return a.writeGrind(kind, audioGrind{scoring: true})
+}
+
+func (a *audioContext) grindScoresInLangs(kind, field, first, second string) error {
+	if field != "target_text" {
+		return fmt.Errorf("the feature's grinds score against target_text, not %q", field)
+	}
+	return a.writeGrind(kind, audioGrind{scoring: true, langs: []string{first, second}})
+}
+
+func (a *audioContext) engineHasNoLang(name, lang string) error {
+	engine, ok := a.engines[name]
+	if !ok {
+		return fmt.Errorf("no engine %q is configured", name)
+	}
+	engine.NoLangs = append(engine.NoLangs, lang)
+	return nil
 }
 
 func (a *audioContext) grindDoesNotScore(kind string) error {
@@ -207,9 +236,17 @@ func (a *audioContext) clockTicks() error {
 }
 
 func (a *audioContext) phoneSendsReading(app, kind, v, target string) error {
+	return a.phoneSendsReadingIn(app, kind, v, target, "")
+}
+
+func (a *audioContext) phoneSendsReadingIn(app, kind, v, target, lang string) error {
 	a.target = target
 	a.clip = []byte("webm bytes of the child reading " + target)
-	input, err := json.Marshal(map[string]string{"schemaVersion": v, "mode": "reading", "target_text": target})
+	fields := map[string]string{"schemaVersion": v, "mode": "reading", "target_text": target}
+	if lang != "" {
+		fields["lang"] = lang
+	}
+	input, err := json.Marshal(fields)
 	if err != nil {
 		return err
 	}
@@ -240,6 +277,52 @@ func (a *audioContext) enginesWereGiven(first, second, target, lang, mime string
 		}
 	}
 	return nil
+}
+
+func (a *audioContext) engineWasGivenLang(name, lang string) error {
+	calls, err := a.engineCalls(name)
+	if err != nil {
+		return err
+	}
+	if len(calls) != 1 || calls[0].Lang != lang {
+		return fmt.Errorf("expected the engine %s given one recording in %q, got %+v", name, lang, calls)
+	}
+	return nil
+}
+
+func (a *audioContext) engineWasGivenNone(name string) error {
+	calls, err := a.engineCalls(name)
+	if err != nil {
+		return err
+	}
+	if len(calls) != 0 {
+		return fmt.Errorf("expected the engine %s given no recording, got %d", name, len(calls))
+	}
+	return nil
+}
+
+func (a *audioContext) runScorersRecordLang(lang string) error {
+	raw, err := a.runFile("scorers.json")
+	if err != nil {
+		return err
+	}
+	var scored []application.GristRunScore
+	if err := json.Unmarshal(raw, &scored); err != nil {
+		return err
+	}
+	if len(scored) != 1 || scored[0].Lang != lang {
+		return fmt.Errorf("expected scorers.json to record the language %q, got %s", lang, raw)
+	}
+	return nil
+}
+
+func (a *audioContext) passNotes(note string) error {
+	for _, got := range a.c.report.Notes {
+		if strings.Contains(got, note) {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected the pass to note %q, its notes are %q", note, a.c.report.Notes)
 }
 
 func (a *audioContext) noEngineWasGiven() error {

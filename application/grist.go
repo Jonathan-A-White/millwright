@@ -113,9 +113,43 @@ type GrindAttachments struct {
 // (docs/scorers.md), against the text the app's request holds in TargetField,
 // before the harness session, and the session is given the results as text.
 // With it off, the grind takes no recording at all.
+//
+// Langs are the languages the grind scores in (GristScoringLangs names the
+// codes known); the first is the default, and absent means English only. A
+// grist's request may carry "lang", one of them, to say which it is read in.
 type GrindScoring struct {
-	Audio       bool   `json:"audio"`
-	TargetField string `json:"target_field"`
+	Audio       bool     `json:"audio"`
+	TargetField string   `json:"target_field"`
+	Langs       []string `json:"langs,omitempty"`
+}
+
+// GristScoringLangs are the language codes a grind's scoring.langs may name:
+// English, modern Greek (monotonic), and Spanish.
+var GristScoringLangs = []string{"en", "el", "es"}
+
+// DefaultGristScoringLang is the language a recording is scored in when the
+// grind names none.
+const DefaultGristScoringLang = "en"
+
+// Languages are the languages the grind scores in, the default first.
+func (s GrindScoring) Languages() []string {
+	if len(s.Langs) == 0 {
+		return []string{DefaultGristScoringLang}
+	}
+	return s.Langs
+}
+
+// langsKnown reports whether every language of the scoring is one the mill
+// knows, each named once.
+func (s GrindScoring) langsKnown() bool {
+	seen := map[string]bool{}
+	for _, l := range s.Langs {
+		if !slices.Contains(GristScoringLangs, l) || seen[l] {
+			return false
+		}
+		seen[l] = true
+	}
+	return true
 }
 
 // GrindFileFormat is the grind file format the mill reads.
