@@ -137,7 +137,7 @@ func TestMessagesReadsTheRecordsSinceTheCursorFromTheirScripts(t *testing.T) {
 		},
 		"next": 5,
 	})
-	_, backend := serve(t, map[string]answer{"GET /api/messages?since=3": {200, string(records)}})
+	_, backend := serve(t, map[string]answer{"GET /api/messages?since=3&limit=200": {200, string(records)}})
 
 	got, err := backend.Messages(context.Background(), 3)
 	if err != nil {
@@ -157,8 +157,102 @@ func TestMessagesReadsTheRecordsSinceTheCursorFromTheirScripts(t *testing.T) {
 	}
 }
 
+// pageOf is one GET /api/messages answer: the records with these seqs, the
+// cursor to ask from next, and whether more follow.
+func pageOf(seqs []int64, next int64, more bool) answer {
+	records := []map[string]any{}
+	for _, seq := range seqs {
+		records = append(records, map[string]any{"seq": seq, "txid": fmt.Sprintf("t%d", seq), "vout": 0, "scriptHex": "", "height": 0})
+	}
+	body, _ := json.Marshal(map[string]any{"records": records, "next": next, "more": more})
+	return answer{200, string(body)}
+}
+
+func requestsFor(b *backend, path string) []string {
+	var got []string
+	for _, r := range b.requests {
+		if r.URL.Path == path {
+			got = append(got, r.URL.RequestURI())
+		}
+	}
+	return got
+}
+
+// One Messages call drains the pages: each asks limit=200 from the previous
+// page's next, until more is false, and the records come back in order.
+func TestMessagesDrainsEveryPageInOneCall(t *testing.T) {
+	b, backend := serve(t, map[string]answer{
+		"GET /api/messages?since=0&limit=200": pageOf([]int64{1, 2}, 2, true),
+		"GET /api/messages?since=2&limit=200": pageOf([]int64{3, 4}, 4, true),
+		"GET /api/messages?since=4&limit=200": pageOf([]int64{5}, 5, false),
+	})
+
+	got, err := backend.Messages(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("reading messages: %v", err)
+	}
+	var seqs []int64
+	for _, r := range got {
+		seqs = append(seqs, r.Seq)
+	}
+	if !reflect.DeepEqual(seqs, []int64{1, 2, 3, 4, 5}) {
+		t.Fatalf("expected all five records in order, got %v", seqs)
+	}
+	want := []string{"/api/messages?since=0&limit=200", "/api/messages?since=2&limit=200", "/api/messages?since=4&limit=200"}
+	if reqs := requestsFor(b, "/api/messages"); !reflect.DeepEqual(reqs, want) {
+		t.Fatalf("expected three page requests %v, got %v", want, reqs)
+	}
+}
+
+// A page whose records the backend filtered to none (an app key sees only its
+// own) still moves the cursor on, to its next.
+func TestMessagesAdvancesPastAPageFilteredToNothing(t *testing.T) {
+	b, backend := serve(t, map[string]answer{
+		"GET /api/messages?since=0&limit=200":   pageOf(nil, 200, true),
+		"GET /api/messages?since=200&limit=200": pageOf([]int64{201}, 201, false),
+	})
+
+	got, err := backend.Messages(context.Background(), 0)
+	if err != nil || len(got) != 1 || got[0].Seq != 201 {
+		t.Fatalf("expected the one record past the empty page, got %+v, %v", got, err)
+	}
+	if reqs := requestsFor(b, "/api/messages"); len(reqs) != 2 {
+		t.Fatalf("expected two page requests, got %v", reqs)
+	}
+}
+
+// An old backend answers with no more at all: one page, as before.
+func TestMessagesFromAnOldBackendIsOnePage(t *testing.T) {
+	b, backend := serve(t, map[string]answer{
+		"GET /api/messages?since=0&limit=200": {200, `{"records":[{"seq":1,"txid":"t1"},{"seq":2,"txid":"t2"}],"next":2}`},
+	})
+
+	got, err := backend.Messages(context.Background(), 0)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("expected the two records of the one page, got %+v, %v", got, err)
+	}
+	if reqs := requestsFor(b, "/api/messages"); len(reqs) != 1 {
+		t.Fatalf("expected one page request, got %v", reqs)
+	}
+}
+
+// A backend that says more but does not move next would loop forever: stop.
+func TestMessagesStopsWhenAPageDoesNotAdvance(t *testing.T) {
+	b, backend := serve(t, map[string]answer{
+		"GET /api/messages?since=7&limit=200": pageOf([]int64{8}, 7, true),
+	})
+
+	got, err := backend.Messages(context.Background(), 7)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("expected the one record, got %+v, %v", got, err)
+	}
+	if reqs := requestsFor(b, "/api/messages"); len(reqs) != 1 {
+		t.Fatalf("expected one page request, got %v", reqs)
+	}
+}
+
 func TestMessagesWithNothingNewIsEmpty(t *testing.T) {
-	_, backend := serve(t, map[string]answer{"GET /api/messages?since=0": {200, `{"records":null,"next":0}`}})
+	_, backend := serve(t, map[string]answer{"GET /api/messages?since=0&limit=200": {200, `{"records":null,"next":0}`}})
 
 	got, err := backend.Messages(context.Background(), 0)
 	if err != nil || len(got) != 0 {
@@ -286,7 +380,7 @@ func TestEachCallFetchesAndSignsItsOwnChallenge(t *testing.T) {
 func TestAnUnlicensedKeyIsReportedPlainly(t *testing.T) {
 	keys, pubKeyHex := testKeyAndAddress(t)
 	_, backend := serveWithKeys(t, map[string]answer{
-		"GET /api/messages?since=0": {401, `{"error":"no licence held"}`},
+		"GET /api/messages?since=0&limit=200": {401, `{"error":"no licence held"}`},
 	}, keys)
 
 	_, err := backend.Messages(context.Background(), 0)
@@ -305,7 +399,7 @@ func TestAnUnlicensedKeyIsReportedPlainly(t *testing.T) {
 // the backend's own message: only "no licence held" is rewritten plainly.
 func TestAnyOtherUnauthorizedIsLeftAsTheBackendSaidIt(t *testing.T) {
 	_, backend := serve(t, map[string]answer{
-		"GET /api/messages?since=0": {401, `{"error":"signature does not verify"}`},
+		"GET /api/messages?since=0&limit=200": {401, `{"error":"signature does not verify"}`},
 	})
 
 	_, err := backend.Messages(context.Background(), 0)
@@ -395,7 +489,7 @@ func TestMessagesReadsTheSignerTheBackendSupplies(t *testing.T) {
 		"records": []map[string]any{{"seq": 1, "txid": "direct:ab", "vout": 0, "scriptHex": f.RecordScriptHex,
 			"height": 0, "signer": f.EncryptMessage.From}},
 	})
-	_, backend := serve(t, map[string]answer{"GET /api/messages?since=0": {200, string(records)}})
+	_, backend := serve(t, map[string]answer{"GET /api/messages?since=0&limit=200": {200, string(records)}})
 
 	got, err := backend.Messages(context.Background(), 0)
 	if err != nil || len(got) != 1 {
@@ -414,7 +508,7 @@ func TestMessagesReadsTheSignerApps(t *testing.T) {
 		"records": []map[string]any{{"seq": 1, "txid": "direct:ab", "scriptHex": f.RecordScriptHex,
 			"signer": f.EncryptMessage.From, "signer_apps": []string{"cairn"}}},
 	})
-	_, backend := serve(t, map[string]answer{"GET /api/messages?since=0": {200, string(records)}})
+	_, backend := serve(t, map[string]answer{"GET /api/messages?since=0&limit=200": {200, string(records)}})
 	got, err := backend.Messages(context.Background(), 0)
 	if err != nil || len(got) != 1 || strings.Join(got[0].SignerApps, ",") != "cairn" {
 		t.Fatalf("expected the record's signer apps [cairn], got %+v %v", got, err)

@@ -68,7 +68,7 @@ func TestPosternInboxApplyReleasesAHeldStoryOnTheGovernorsTap(t *testing.T) {
 	messages, _ := json.Marshal(map[string]any{"records": []map[string]any{{
 		"seq": 1, "txid": "direct:tap", "vout": 0, "scriptHex": hex.EncodeToString(*script), "signer": f.SenderPubKey,
 	}}})
-	url, _ := fakePosternBackend(t, map[string]string{"/api/messages?since=0": string(messages)})
+	url, _ := fakePosternBackend(t, map[string]string{"/api/messages?since=0&limit=200": string(messages)})
 	posternHome(t, url, f.RecipientWIF, f.SenderPubKey)
 	log := bdRecording(t, `[{"id": "mw-e.1", "title": "Held", "status": "deferred", "issue_type": "task", "parent": "mw-e"}]`)
 
@@ -135,7 +135,7 @@ func TestPosternInboxApplyHearsAVoiceNote(t *testing.T) {
 		case r.URL.Path == "/api/challenge":
 			challenges++
 			fmt.Fprintf(w, `{"nonce":"n-%d"}`, challenges)
-		case r.URL.RequestURI() == "/api/messages?since=0":
+		case r.URL.RequestURI() == "/api/messages?since=0&limit=200":
 			w.Write(messages)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/blobs/"+hash:
 			w.Write(blob)
@@ -213,7 +213,7 @@ func TestPosternInboxApplyOnABoostLeavesTheGovernorsTapToTheHome(t *testing.T) {
 	messages, _ := json.Marshal(map[string]any{"records": []map[string]any{{
 		"seq": 1, "txid": "direct:tap", "vout": 0, "scriptHex": hex.EncodeToString(*script), "signer": f.SenderPubKey,
 	}}})
-	url, _ := fakePosternBackend(t, map[string]string{"/api/messages?since=0": string(messages)})
+	url, _ := fakePosternBackend(t, map[string]string{"/api/messages?since=0&limit=200": string(messages)})
 	posternHome(t, url, f.RecipientWIF, f.SenderPubKey)
 	vault := t.TempDir()
 	if err := os.WriteFile(filepath.Join(vault, application.HomeFileName), []byte("desktop 2026-09-29T12:00:00Z mw@desktop\n"), 0o644); err != nil {

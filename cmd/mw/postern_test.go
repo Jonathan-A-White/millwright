@@ -174,7 +174,7 @@ func TestPosternInboxPrintsTheTextOfARecordFromTheBackend(t *testing.T) {
 		"records": []map[string]any{{"seq": 1, "txid": "3af1", "vout": 0, "scriptHex": f.ScriptHex, "height": 0, "firstSeen": "2026-09-24T12:00:03Z"}},
 		"next":    1,
 	})
-	url, _ := fakePosternBackend(t, map[string]string{"/api/messages?since=0": string(messages)})
+	url, _ := fakePosternBackend(t, map[string]string{"/api/messages?since=0&limit=200": string(messages)})
 	posternHome(t, url, f.RecipientWIF, "")
 
 	out, err := runPostern(t, "inbox")
@@ -431,7 +431,7 @@ func TestPosternInboxDownloadsDecryptsAndWritesAnAttachment(t *testing.T) {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/challenge":
 			challenges++
 			fmt.Fprintf(w, `{"nonce":"nonce-%d"}`, challenges)
-		case r.Method == http.MethodGet && r.URL.RequestURI() == "/api/messages?since=0":
+		case r.Method == http.MethodGet && r.URL.RequestURI() == "/api/messages?since=0&limit=200":
 			w.Write(messages)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/blobs/"+hash:
 			blobRequested = true

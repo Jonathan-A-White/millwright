@@ -31,7 +31,7 @@ type talkConn struct {
 
 // talkBackend is a postern backend that speaks just enough of docs/api.md for
 // mw talk wait: GET /api/challenge, GET /api/events as server-sent events and
-// GET /api/messages?since=. It is the real wire, so the real HTTP adapter runs
+// GET /api/messages?since=&limit=, paged. It is the real wire, so the real HTTP adapter runs
 // against it.
 type talkBackend struct {
 	mu        sync.Mutex
@@ -49,6 +49,7 @@ func (b *talkBackend) handler(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"nonce":"a-nonce"}`)
 	case "/api/messages":
 		since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 		b.mu.Lock()
 		var found []map[string]any
 		for _, record := range b.records {
@@ -57,7 +58,13 @@ func (b *talkBackend) handler(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		b.mu.Unlock()
-		json.NewEncoder(w).Encode(map[string]any{"records": found})
+		if limit <= 0 || len(found) <= limit {
+			json.NewEncoder(w).Encode(map[string]any{"records": found})
+			return
+		}
+		// A page: limit records, next the last of them, more still to come.
+		page := found[:limit]
+		json.NewEncoder(w).Encode(map[string]any{"records": page, "next": page[limit-1]["seq"], "more": true})
 	case "/api/events":
 		b.stream(w, r)
 	default:
@@ -288,6 +295,14 @@ func InitializeTalkWaitScenario(ctx *godog.ScenarioContext) {
 	})
 	ctx.Given(`^a "([^"]*)" record to the Mayor has been indexed$`, func(class string) error {
 		return c.record(class, c.mayor, c.governorKey, class+" text", false)
+	})
+	ctx.Given(`^(\d+) talk turns to another key have been indexed$`, func(n int) error {
+		for i := 0; i < n; i++ {
+			if err := c.record("talk", "another-key", c.governorKey, talkTurnPlaintext("talk-x", 1, "turn", "not for the Mayor", "", false), false); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	ctx.When(`^a talk turn to another key is indexed$`, func() error {
 		return c.record("talk", "another-key", c.governorKey, talkTurnPlaintext("talk-x", 1, "turn", "not for the Mayor", "", false), true)

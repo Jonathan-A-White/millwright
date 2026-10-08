@@ -90,30 +90,48 @@ type apiRecord struct {
 	SignerApps []string `json:"signer_apps"`
 }
 
-// Messages implements application.Postern: GET /api/messages?since=. A
-// record that is not a postern message (another kind, or not a version-1
-// record at all) comes back with only its Seq and Txid, addressed to nobody,
-// so the inbox's cursor still moves past it.
+// messagesPageLimit is how many records Messages asks the backend for in a
+// page: GET /api/messages?since=&limit=.
+const messagesPageLimit = 200
+
+// Messages implements application.Postern: GET /api/messages?since=&limit=,
+// drained page by page — each page asked from the previous page's next, until
+// the backend says more is false — so a caller keeps one call and its
+// signature. A page filtered to no records still moves the cursor on, to its
+// next. A backend that answers with no more (an old one) is one page. A record
+// that is not a postern message (another kind, or not a version-1 record at
+// all) comes back with only its Seq and Txid, addressed to nobody, so the
+// inbox's cursor still moves past it.
 func (h *HTTP) Messages(ctx context.Context, since int64) ([]application.PosternRecord, error) {
-	var body struct {
-		Records []apiRecord `json:"records"`
-	}
-	if err := h.authDo(ctx, http.MethodGet, "/api/messages?since="+strconv.FormatInt(since, 10), nil, &body); err != nil {
-		return nil, err
-	}
-	records := make([]application.PosternRecord, 0, len(body.Records))
-	for _, r := range body.Records {
-		record := application.PosternRecord{Seq: r.Seq, Txid: r.Txid, Signer: r.Signer, SignerApps: r.SignerApps}
-		if raw, ok := DecodeRecordScript(r.ScriptHex); ok {
-			var p application.PosternPayload
-			if json.Unmarshal(raw, &p) == nil && p.Kind == application.PosternMessageKind {
-				record.Class, record.From, record.To = p.Class, p.From, p.To
-				record.Ts, record.Ciphertext = time.Unix(p.Ts, 0).UTC(), p.Ct
-			}
+	records := []application.PosternRecord{}
+	for {
+		var body struct {
+			Records []apiRecord `json:"records"`
+			Next    int64       `json:"next"`
+			More    bool        `json:"more"`
 		}
-		records = append(records, record)
+		path := "/api/messages?since=" + strconv.FormatInt(since, 10) + "&limit=" + strconv.Itoa(messagesPageLimit)
+		if err := h.authDo(ctx, http.MethodGet, path, nil, &body); err != nil {
+			return nil, err
+		}
+		for _, r := range body.Records {
+			record := application.PosternRecord{Seq: r.Seq, Txid: r.Txid, Signer: r.Signer, SignerApps: r.SignerApps}
+			if raw, ok := DecodeRecordScript(r.ScriptHex); ok {
+				var p application.PosternPayload
+				if json.Unmarshal(raw, &p) == nil && p.Kind == application.PosternMessageKind {
+					record.Class, record.From, record.To = p.Class, p.From, p.To
+					record.Ts, record.Ciphertext = time.Unix(p.Ts, 0).UTC(), p.Ct
+				}
+			}
+			records = append(records, record)
+		}
+		// A backend that claims more but does not move its cursor would be
+		// asked the same page for ever.
+		if !body.More || body.Next <= since {
+			return records, nil
+		}
+		since = body.Next
 	}
-	return records, nil
 }
 
 // Utxos is one of bsv.Coins: GET /api/utxos/{address}.

@@ -66,7 +66,7 @@ func TestPosternInboxApplyRunsAHandsStepTheGovernorApproved(t *testing.T) {
 		case r.URL.Path == "/api/challenge":
 			challenges++
 			fmt.Fprintf(w, `{"nonce":"n-%d"}`, challenges)
-		case r.URL.RequestURI() == "/api/messages?since=0":
+		case r.URL.RequestURI() == "/api/messages?since=0&limit=200":
 			w.Write(messages)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/messages":
 			delivered = append(delivered, string(raw))

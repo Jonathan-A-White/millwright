@@ -148,6 +148,12 @@ Feature: mw talk wait
     Then the backend inbox printed "message text"
     And the backend inbox did not print "A talk turn"
 
+  Scenario: mw postern inbox reads past the first page of records
+    Given 450 talk turns to another key have been indexed
+    And a "message" record to the Mayor has been indexed
+    When mw postern inbox --unread-count is run against the backend
+    Then the backend inbox counts 1 unread
+
   Scenario: the Governor's call request ends it at once, printing it
     Given mw talk wait is armed
     When the Governor's call request "Call me" is indexed
