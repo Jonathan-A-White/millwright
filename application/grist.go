@@ -97,7 +97,15 @@ type GrindFile struct {
 	// MaxTurns is the most turns the grind's session may take; 0 leaves it to
 	// the harness's own limit.
 	MaxTurns int `json:"maxTurns"`
+	// Forward, when set, makes the grind no session at all: the mill mails the
+	// grist to this seat and answers it sent. GristForwardMayor is the only
+	// value the mill reads; model, effort, instructions and answerSchema are
+	// then not needed.
+	Forward string `json:"forward,omitempty"`
 }
+
+// GristForwardMayor is the one seat a grind may forward its grist to.
+const GristForwardMayor = "mayor"
 
 // GrindAttachments is what a grind takes in attachments: photos, and with
 // Scoring on, recordings. A grind that says nothing takes none.
@@ -289,6 +297,14 @@ type GristState interface {
 	Undelivered(ctx context.Context) ([]GristUndelivered, error)
 	// Delivered forgets a kept answer once it is delivered.
 	Delivered(ctx context.Context, txid string) error
+}
+
+// GristForwardStore keeps the pictures of a forwarded grist under the mill's
+// state directory, one directory for each grist, and reports the full path of
+// each file it wrote, in order. The real adapter is infrastructure/grist's
+// Forwards.
+type GristForwardStore interface {
+	Keep(ctx context.Context, txid string, pictures []GristRunAttachment) ([]string, error)
 }
 
 // GristLock is a lock the mill takes without waiting. The real adapter is

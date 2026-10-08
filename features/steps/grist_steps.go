@@ -80,9 +80,11 @@ type gristContext struct {
 	phoneApps []string
 	askModel  string // what the next grist asks for; empty is nothing
 	askEffort string
+	askInput  json.RawMessage // the request the next grist carries; nil is the vectors'
 
-	grist  application.PosternRecord
-	photos map[string][]byte // blob hash to the photo it seals
+	forward forwardContext // features/grist_forward.feature
+	grist   application.PosternRecord
+	photos  map[string][]byte // blob hash to the photo it seals
 
 	audio audioContext // features/grist_audio.feature
 	slots slotsContext // features/grist_concurrent.feature
@@ -119,6 +121,7 @@ func InitializeGristScenario(ctx *godog.ScenarioContext) {
 	// After the reset above: it must not clear what the audio steps keep.
 	registerGristAudio(ctx, c)
 	registerGristSlots(ctx, c)
+	registerGristForward(ctx, c)
 
 	ctx.Given(`^a mill on the host "([^"]*)"$`, c.aMill)
 	ctx.Given(`^the app "([^"]*)" is checked out here, its main at commit "([^"]*)" with the grind "([^"]*)"$`, c.theAppIsCheckedOut)
@@ -266,6 +269,9 @@ func (c *gristContext) sendAttached(key string, apps []string, app, kind, v stri
 	plain := c.vectors.Grist
 	plain.Grist = application.GristName{App: app, Kind: kind, V: v, Model: c.askModel, Effort: c.askEffort}
 	plain.Attachments = nil
+	if c.askInput != nil {
+		plain.Input = c.askInput
+	}
 	upload := func(body []byte, mime string) error {
 		sealed, err := sealer.EncryptBytes(c.millKey, body)
 		if err != nil {
@@ -461,6 +467,8 @@ func (c *gristContext) mill() application.GristGrind {
 		TempDir:     c.home,
 		Scorers:     c.audio.registry(),
 		Runs:        c.audio.runs(),
+		Mailbox:     c.forward.mailboxPort(),
+		Forwards:    c.forward.keeper(),
 		Now:         c.audio.now,
 		Out:         &c.out,
 	}

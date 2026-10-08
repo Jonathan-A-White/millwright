@@ -38,12 +38,14 @@ const (
 	GristReasonTooLarge    = "A photo in this grist is larger than its grind takes."
 	GristReasonPhotoForged = "A photo in this grist is not the one the grist announced."
 	GristReasonDeclined    = "The model declined this grist."
+	GristReasonForward     = "The app's grind forwards to someone the mill does not forward to."
 
 	GristReasonUnread     = "The factory could not read the app's grind; send it again."
 	GristReasonPhotoLost  = "A photo in this grist could not be fetched; send it again."
 	GristReasonTimedOut   = "The grind ran out of time; send it again."
 	GristReasonSessionEnd = "The grind's session did not finish; send it again."
 	GristReasonNoAnswer   = "The grind's answer did not match its schema; send it again."
+	GristReasonNotSent    = "The factory could not pass this on; send it again."
 )
 
 // gristEnvelopeOverhead is what BRC-78 adds to a photo's bytes: section 8
@@ -90,6 +92,10 @@ type GristGrind struct {
 	// record; nil keeps none.
 	Scorers ScorerRegistry
 	Runs    GristRunStore
+	// Mailbox and Forwards are what a grind that forwards its grist uses: the
+	// mail to the Mayor, and the place its pictures are kept.
+	Mailbox  Mailbox
+	Forwards GristForwardStore
 
 	// Apps is where each app's rig is checked out here (config
 	// [grist-apps]); Ceilings are the factory's limits above every grind.
@@ -352,6 +358,9 @@ func (p *gristPass) work() {
 		w := &gristWork{record: r, started: g.now(), sealed: map[string]bool{}}
 		w.received = w.started
 		g.judge(p.ctx, w, p.privKey, p.lines)
+		if w.status == "" && w.grind.Forward != "" {
+			g.forward(p.ctx, w, p.privKey)
+		}
 		if w.status != "" {
 			// A grist that needs no session is answered at once when a slot is
 			// free for it to have been ground in; else it keeps its place behind
@@ -525,9 +534,14 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 		return
 	}
 	if err := json.Unmarshal(raw, &w.grind); err != nil || w.grind.Grind != GrindFileFormat ||
-		w.grind.App != name.App || w.grind.Kind != name.Kind || !slices.Contains(GrindEfforts, w.grind.Effort) ||
+		w.grind.App != name.App || w.grind.Kind != name.Kind ||
+		!(w.grind.Forward != "" || slices.Contains(GrindEfforts, w.grind.Effort)) ||
 		!w.grind.Scoring.langsKnown() {
 		w.settle(GristRefused, GristReasonBrokenGrind)
+		return
+	}
+	if w.grind.Forward != "" && w.grind.Forward != GristForwardMayor {
+		w.settle(GristRefused, GristReasonForward)
 		return
 	}
 	w.model, w.modelFrom = w.grind.Model, gristFromGrind
@@ -542,12 +556,16 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 		w.settle(GristRefused, GristReasonVersion)
 		return
 	}
-	if reason := g.judgeRun(w, ceilings); reason != "" {
+	forwarded := w.grind.Forward != ""
+	if reason := g.judgeRun(w, ceilings); reason != "" && !forwarded {
 		w.settle(GristRefused, reason)
 		return
 	}
 	if reason := g.judgePhotos(w, ceilings); reason != "" {
 		w.settle(GristRefused, reason)
+		return
+	}
+	if forwarded {
 		return
 	}
 	if !w.scoringFits() {

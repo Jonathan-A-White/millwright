@@ -388,6 +388,12 @@ func newMill(out io.Writer) (application.GristGrind, error) {
 	if err != nil {
 		return application.GristGrind{}, err
 	}
+	// Only a grind that forwards its grist needs the vault, to mail the Mayor:
+	// with none configured the mill still grinds, and such a grist fails.
+	var mailbox application.Mailbox
+	if vaultDir, err := config.Vault(); err == nil {
+		mailbox = mwGateway(vaultDir, host)
+	}
 	slots := hostlock.GrindSlots(stateDir, ceilings.Concurrency)
 	return application.GristGrind{
 		Postern:      backend,
@@ -396,6 +402,8 @@ func newMill(out io.Writer) (application.GristGrind, error) {
 		State:        grist.New(stateDir),
 		Scorers:      scorers,
 		Runs:         grist.NewRuns(stateDir),
+		Mailbox:      mailbox,
+		Forwards:     grist.NewForwards(stateDir),
 		Grinds:       rig.NewGrinds(),
 		Grinder:      claude.NewGrinder(),
 		Pass:         hostlock.NewTry(stateDir, hostlock.PassFile),
