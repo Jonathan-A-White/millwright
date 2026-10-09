@@ -28,6 +28,9 @@
 //	[dispatch]                         # the room a host needs to start a story (mw-t0z3fu.1)
 //	room_load_per_core = 1.0           # none while the 1-minute load is this many a core
 //	room_min_free_mb   = 2048          # none while less memory than this is available
+//	grist_cap          = 4             # stories at once while a tutor is in use (default: cap less 2)
+//	grist_recent_s     = 600           # a tutor is in use this long after its last answer
+//	grist_slow_factor  = 1.5           # none while tutor answers take over this times their par
 //
 //	[backend.postern]
 //	dir     = "server"
@@ -835,6 +838,10 @@ const DispatchTable = "dispatch"
 const (
 	DefaultRoomLoadPerCore       = 1.0
 	DefaultRoomMinFreeMB   int64 = 2048
+	// DefaultGristRecentSeconds and DefaultGristSlowFactor are the same for
+	// grist (mw-t0z3fu.4).
+	DefaultGristRecentSeconds = 600
+	DefaultGristSlowFactor    = 1.5
 )
 
 // RoomSettings is how much room a host must have to start a story.
@@ -843,12 +850,22 @@ type RoomSettings struct {
 	LoadPerCore float64
 	// MinFreeMB is the memory available, in megabytes, under which it has none.
 	MinFreeMB int64
+	// GristCap is how many sessions the host runs at once while a tutor is in
+	// use (mw-t0z3fu.4), 0 for the host's cap less 2. GristRecentSeconds is how
+	// long after the last tutor answer one still is, and GristSlowFactor the
+	// times its par a kind's median answer may reach before the host starts no
+	// story at all.
+	GristCap           int
+	GristRecentSeconds int
+	GristSlowFactor    float64
 }
 
 // Room reports the `[dispatch]` table of ~/.config/mw/config.toml:
 // `room_load_per_core` (a number above zero, default 1.0) and `room_min_free_mb`
-// (a whole number, 1 or more, default 2048), each its default when the table
-// says nothing.
+// (a whole number, 1 or more, default 2048), and grist's own: `grist_cap` (a whole
+// number, 1 or more, default the host's cap less 2), `grist_recent_s` (seconds,
+// default 600) and `grist_slow_factor` (above 1, default 1.5); each its default
+// when the table says nothing.
 func Room() (RoomSettings, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -873,6 +890,29 @@ func Room() (RoomSettings, error) {
 			return RoomSettings{}, fmt.Errorf("the [%s] table of %s says room_min_free_mb = %q: it must be a whole number of megabytes, 1 or more", DispatchTable, path, said)
 		}
 		settings.MinFreeMB = n
+	}
+	settings.GristRecentSeconds, settings.GristSlowFactor = DefaultGristRecentSeconds, DefaultGristSlowFactor
+	for _, key := range []string{"grist_cap", "grist_recent_s"} {
+		said := strings.TrimSpace(table[key])
+		if said == "" {
+			continue
+		}
+		n, err := strconv.Atoi(said)
+		if err != nil || n < 1 {
+			return RoomSettings{}, fmt.Errorf("the [%s] table of %s says %s = %q: it must be a whole number, 1 or more", DispatchTable, path, key, said)
+		}
+		if key == "grist_cap" {
+			settings.GristCap = n
+		} else {
+			settings.GristRecentSeconds = n
+		}
+	}
+	if said := strings.TrimSpace(table["grist_slow_factor"]); said != "" {
+		n, err := strconv.ParseFloat(said, 64)
+		if err != nil || n <= 1 || math.IsInf(n, 0) || math.IsNaN(n) {
+			return RoomSettings{}, fmt.Errorf("the [%s] table of %s says grist_slow_factor = %q: it must be a number above 1, like 1.5", DispatchTable, path, said)
+		}
+		settings.GristSlowFactor = n
 	}
 	return settings, nil
 }

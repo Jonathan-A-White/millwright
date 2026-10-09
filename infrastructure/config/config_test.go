@@ -2067,6 +2067,27 @@ func TestRoomIsReadFromTheTable(t *testing.T) {
 	}
 }
 
+func TestGristRoomIsReadFromTheDispatchTable(t *testing.T) {
+	writeConfig(t, "host = \"laptop\"\n")
+	got, err := config.Room()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.GristCap != 0 || got.GristRecentSeconds != 600 || got.GristSlowFactor != 1.5 {
+		t.Fatalf("expected the cap left to the host's less 2, 600 s and 1.5, got %+v", got)
+	}
+	writeConfig(t, "[dispatch]\ngrist_cap = 3\ngrist_recent_s = 300\ngrist_slow_factor = 2\n")
+	if got, err = config.Room(); err != nil || got.GristCap != 3 || got.GristRecentSeconds != 300 || got.GristSlowFactor != 2 {
+		t.Fatalf("expected 3, 300 s and 2, got %+v, %v", got, err)
+	}
+	for _, bad := range []string{"grist_cap = 0\n", "grist_cap = many\n", "grist_recent_s = -5\n", "grist_slow_factor = 1\n", "grist_slow_factor = fast\n"} {
+		writeConfig(t, "[dispatch]\n"+bad)
+		if _, err := config.Room(); err == nil || !strings.Contains(err.Error(), "grist_") {
+			t.Errorf("expected %q to be refused naming the key, got %v", bad, err)
+		}
+	}
+}
+
 func TestCloudReadsTheTableWithItsDefaultsAndRefusesABadOne(t *testing.T) {
 	writeConfig(t, "host = \"desktop\"\n\n[rigs]\nmillwright = \"/home/m/millwright\"\n\n[cloud]\nsnapshot = \"snap-1\"  # made by contrib/vultr-boost snapshot\nmonthly_cap_usd = 40.5\n\n[cloud.caps]\ndesktop = 2\nlaptop = 1\n")
 	cloud, ok, err := config.Cloud()
