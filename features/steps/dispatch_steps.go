@@ -65,6 +65,12 @@ type dispatchContext struct {
 	// events is the home's event log the dispatch reads and writes (mw-t0z3fu.1).
 	room   application.RoomLimits
 	events *apptest.FakeEventLog
+	// gristRuns, gristLock and gristCap are the mill's runs, the grind slot a
+	// scenario holds and the grist_cap the config file gave (mw-t0z3fu.4); the
+	// dispatch reads them only when a scenario named some.
+	gristRuns *apptest.FakeGristRuns
+	gristLock *apptest.FakeGristLock
+	gristCap  int
 	// earlier is the molecule a scenario poured for a story before the dispatch
 	// ran, so that it can say whether the dispatch reused it or poured another.
 	earlier application.Molecule
@@ -150,6 +156,12 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^this host's memory cannot be read$`, c.thisHostsMemoryCannotBeRead)
 	ctx.Given(`^the config file says room_load_per_core is ([0-9.]+) and room_min_free_mb is (\d+)$`, c.theConfigSaysTheRoomLimits)
 	ctx.Then(`^(\d+) sessions were started$`, c.sessionsWereStarted)
+	ctx.Given(`^a tutor grind is in flight$`, c.aTutorGrindIsInFlight)
+	ctx.Given(`^(\d+) tutor-turn grinds ended in the last (\d+) minutes, (\d+) seconds each$`, c.tutorGrindsEndedInTheLast)
+	ctx.Given(`^(\d+) tutor-turn grinds ended (\d+) minutes ago, (\d+) seconds each$`, c.tutorGrindsEndedAgo)
+	ctx.Given(`^(\d+) tutor-turn grinds of (\d+) seconds each ended long ago, then (\d+) of (\d+) seconds each ended in the last (\d+) minutes$`, c.tutorGrindsThenSlow)
+	ctx.Given(`^(\d+) tutor-turn grinds of (\d+) seconds each then ended in the last (\d+) minutes$`, c.tutorGrindsThenEnded)
+	ctx.Given(`^the config file says grist_cap is (\d+)$`, c.theConfigSaysGristCap)
 	ctx.Then(`^the event log holds no room events$`, c.theEventLogHoldsNoRoomEvents)
 	ctx.Then(`^the event log holds (\d+) room events?, the last saying the host has no room: (.+)$`, c.theEventLogHoldsRoomEventsLastNoRoom)
 	ctx.Then(`^the event log holds (\d+) room events?, the last saying the host has room again$`, c.theEventLogHoldsRoomEventsLastRoomAgain)
@@ -676,6 +688,57 @@ func (c *dispatchContext) theConfigSaysTheRoomLimits(perCore string, minFreeMB i
 	return nil
 }
 
+func (c *dispatchContext) aTutorGrindIsInFlight() error {
+	c.gristLock = &apptest.FakeGristLock{}
+	c.gristLock.Hold()
+	return nil
+}
+
+func (c *dispatchContext) theConfigSaysGristCap(n int) error {
+	c.gristCap = n
+	return nil
+}
+
+// tutorGrind adds a tutor-turn grind that ended ago before the dispatch, took
+// seconds end to end and waited 2 of them.
+func (c *dispatchContext) tutorGrind(n int, ago time.Duration, seconds int) {
+	if c.gristRuns == nil {
+		c.gristRuns = &apptest.FakeGristRuns{}
+	}
+	for i := 0; i < n; i++ {
+		answered := dispatchNow.Add(-ago + time.Duration(i)*time.Second)
+		run := float64(seconds - 2)
+		received := answered.Add(-time.Duration(run) * time.Second)
+		sent := received.Add(-2 * time.Second)
+		queued := 2.0
+		c.gristRuns.Kept = append(c.gristRuns.Kept, application.GristRunTiming{
+			Txid: fmt.Sprintf("direct:tutor-%d-%d", len(c.gristRuns.Kept), seconds), Kind: "tutor-turn",
+			Sent: &sent, Received: received, Answered: answered, Seconds: run, QueuedSeconds: &queued, RunSeconds: run,
+		})
+	}
+}
+
+func (c *dispatchContext) tutorGrindsEndedInTheLast(n, minutes, seconds int) error {
+	c.tutorGrind(n, time.Duration(minutes)*time.Minute/2, seconds)
+	return nil
+}
+
+func (c *dispatchContext) tutorGrindsEndedAgo(n, minutes, seconds int) error {
+	c.tutorGrind(n, time.Duration(minutes)*time.Minute, seconds)
+	return nil
+}
+
+func (c *dispatchContext) tutorGrindsThenSlow(n, seconds, slow, slowSeconds, minutes int) error {
+	c.tutorGrind(n, 2*time.Hour, seconds)
+	c.tutorGrind(slow, time.Duration(minutes)*time.Minute/2, slowSeconds)
+	return nil
+}
+
+func (c *dispatchContext) tutorGrindsThenEnded(n, seconds, minutes int) error {
+	c.tutorGrind(n, time.Duration(minutes)*time.Minute/2-time.Duration(n)*time.Second, seconds)
+	return nil
+}
+
 func (c *dispatchContext) sessionsWereStarted(n int) error {
 	report, err := c.dispatched()
 	if err != nil {
@@ -849,6 +912,19 @@ func (c *dispatchContext) dispatch(host string, cap int, dryRun bool) error {
 	}
 	if c.load != nil {
 		dispatcher.Load = c.load
+	}
+	if c.gristRuns != nil || c.gristLock != nil {
+		room := application.GristRoom{
+			Limits: application.GristRoomLimits{Cap: c.gristCap},
+			Now:    func() time.Time { return dispatchNow },
+		}
+		if c.gristRuns != nil {
+			room.Runs = c.gristRuns
+		}
+		if c.gristLock != nil {
+			room.Grinding = []application.GristLock{c.gristLock}
+		}
+		dispatcher.Grist = room
 	}
 	c.report, c.err = dispatcher.Run(context.Background())
 	return nil

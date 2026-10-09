@@ -323,6 +323,77 @@ Feature: Dispatching the stories this host is ready to work
     When dispatch runs on "vps" with a cap of 4 as a dry run
     Then the event log holds no room events
 
+  # Grist comes first in the caps (mw-t0z3fu.4): while a tutor is being used (a
+  # grind running or one answered in the last grist_recent_s) the host starts no
+  # more stories than grist_cap, which is its cap less 2 unless the config file
+  # says; and while tutor answers run past 1.5 x their par it starts none.
+  # Stories already running are never stopped.
+
+  Scenario: A grind in flight caps the stories this host starts at the grist cap
+    Given a ready story "mw-gq6.1" of that epic
+    And a ready story "mw-gq6.2" of that epic
+    And a ready story "mw-gq6.3" of that epic
+    And a tutor grind is in flight
+    When dispatch runs on "vps" with a cap of 4
+    Then 2 sessions were started
+    And dispatch passed over "mw-gq6.3", saying: vps has taken 2 of the 2 sessions it may run at once while a tutor is in use (grist first)
+
+  Scenario: A grind that ended minutes ago still caps the stories this host starts
+    Given a ready story "mw-gq6.1" of that epic
+    And a ready story "mw-gq6.2" of that epic
+    And a ready story "mw-gq6.3" of that epic
+    And 3 tutor-turn grinds ended in the last 5 minutes, 10 seconds each
+    When dispatch runs on "vps" with a cap of 4
+    Then 2 sessions were started
+
+  Scenario: Grist that is not recent leaves the host's whole cap
+    Given a ready story "mw-gq6.1" of that epic
+    And a ready story "mw-gq6.2" of that epic
+    And a ready story "mw-gq6.3" of that epic
+    And 3 tutor-turn grinds ended 20 minutes ago, 10 seconds each
+    When dispatch runs on "vps" with a cap of 4
+    Then 3 sessions were started
+
+  Scenario: A story already running counts against the grist cap and is never stopped
+    Given a ready story "mw-gq6.1" of that epic
+    And a story "mw-gq6.8" of that epic is already running here
+    And a story "mw-gq6.9" of that epic is already running here
+    And a tutor grind is in flight
+    When dispatch runs on "vps" with a cap of 4
+    Then no session was started
+    And dispatch passed over "mw-gq6.1", saying: vps has taken 2 of the 2 sessions it may run at once while a tutor is in use (grist first)
+
+  Scenario: The config file's grist_cap moves the cap while a tutor is in use
+    Given a ready story "mw-gq6.1" of that epic
+    And a ready story "mw-gq6.2" of that epic
+    And a ready story "mw-gq6.3" of that epic
+    And a tutor grind is in flight
+    And the config file says grist_cap is 3
+    When dispatch runs on "vps" with a cap of 4
+    Then 3 sessions were started
+
+  Scenario: Tutor answers past their par start no story, and the reason is the room event's
+    Given a ready story "mw-gq6.1" of that epic
+    And 45 tutor-turn grinds of 10 seconds each ended long ago, then 5 of 30 seconds each ended in the last 5 minutes
+    When dispatch runs on "vps" with a cap of 4
+    Then no session was started
+    And the story "mw-gq6.1" is not claimed
+    And dispatch passed over "mw-gq6.1", saying: vps has no room: slow grist: tutor-turn 30 s, par 10 s
+    And the event log holds 1 room event, the last saying the host has no room: slow grist: tutor-turn 30 s, par 10 s
+
+  Scenario: Tutor answers back near their par lift the block
+    Given a ready story "mw-gq6.1" of that epic
+    And 45 tutor-turn grinds of 10 seconds each ended long ago, then 5 of 30 seconds each ended in the last 5 minutes
+    And 3 tutor-turn grinds of 10 seconds each then ended in the last 2 minutes
+    When dispatch runs on "vps" with a cap of 4
+    Then one session was started, for "mw-gq6.1"
+
+  Scenario: A host with no grist log is not held back
+    Given a ready story "mw-gq6.1" of that epic
+    And a ready story "mw-gq6.2" of that epic
+    When dispatch runs on "vps" with a cap of 2
+    Then 2 sessions were started
+
   Scenario: A story that names another host is passed over whatever the tracker offers
     Given a ready story "mw-gq6.1" of that epic that overrides "host" with "desktop"
     And the work tracker offers dispatch every ready story, whichever host it names

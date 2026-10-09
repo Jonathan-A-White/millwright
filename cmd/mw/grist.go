@@ -421,3 +421,28 @@ func newMill(out io.Writer) (application.GristGrind, error) {
 		Out: out,
 	}, nil
 }
+
+// hostGristRoom is what the dispatch and mw status read of the mill on this
+// host (mw-t0z3fu.4): its grind slots and its kept runs, with the room limits
+// the config file gave. nil, with no error, on a host with no [grist] table:
+// it has no mill, and grist holds nothing back.
+func hostGristRoom(room config.RoomSettings) application.GristPulses {
+	if configured, err := config.GristConfigured(); err != nil || !configured {
+		return nil
+	}
+	stateDir, err := config.GristStateDir()
+	if err != nil {
+		return nil
+	}
+	concurrency := config.DefaultGristConcurrency
+	if ceilings, err := config.Grist(); err == nil {
+		concurrency = int(ceilings.Concurrency)
+	}
+	return application.GristRoom{
+		Runs:     grist.NewRuns(stateDir),
+		Grinding: hostlock.GrindSlots(stateDir, concurrency),
+		Limits: application.GristRoomLimits{
+			Cap: room.GristCap, RecentSeconds: room.GristRecentSeconds, SlowFactor: room.GristSlowFactor,
+		},
+	}
+}

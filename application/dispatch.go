@@ -118,6 +118,14 @@ type Dispatch struct {
 	Load HostLoad
 	Room RoomLimits
 
+	// Grist is what the mill is doing on this host, read once a pass (mw-t0z3fu.4):
+	// while a tutor is in use (a grind running or one answered lately) the host
+	// starts no more stories than the grist cap, and while the tutor's answers
+	// run past their par it starts none, as it does for want of room. Stories
+	// already running are never stopped. A nil Grist, or one that cannot be read,
+	// holds nothing back.
+	Grist GristPulses
+
 	// Host is which of the factory's hosts this is, Cap is how many sessions
 	// may be running here at once, and Rigs is where each rig is checked out.
 	Host string
@@ -519,14 +527,28 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		}
 		report.Running++
 	}
-	free := d.Cap - report.Running
 
 	// The room is read once a pass. A pass that is only looking leaves no word of
 	// it in the log.
 	noRoom, roomRead := ReadRoom(ctx, d.Load, d.Room)
+	// Grist comes first (mw-t0z3fu.4): slow tutor answers are a want of room,
+	// and a tutor in use lowers the cap.
+	limit := d.Cap
+	var pulse GristPulse
+	if d.Grist != nil {
+		var err error
+		if pulse, err = d.Grist.Pulse(ctx, d.Cap); err != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf("grist could not be read, so it holds nothing back: %v", err))
+		} else {
+			roomRead = roomRead || pulse.Slow != ""
+			noRoom = strings.Join(nonEmpty(noRoom, pulse.Slow), "; ")
+			limit = pulse.Cap
+		}
+	}
 	if roomRead && !d.DryRun {
 		d.tellRoom(ctx, noRoom, &report)
 	}
+	free := limit - report.Running
 
 	ready, err := d.Tracker.ReadyForHost(ctx, d.Host)
 	if err != nil {
@@ -648,9 +670,12 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// dispatcher that claims and releases every ready story in turn is
 		// worse than one that stops and says so.
 		if len(report.Started)+len(report.Failed) >= free {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
-				"%s has taken %d of the %d sessions it may run at once", d.Host,
-				report.Running+len(report.Started)+len(report.Failed), d.Cap)})
+			why := fmt.Sprintf("%s has taken %d of the %d sessions it may run at once", d.Host,
+				report.Running+len(report.Started)+len(report.Failed), limit)
+			if pulse.Lowered() {
+				why += " while a tutor is in use (grist first)"
+			}
+			report.Passed = append(report.Passed, Passed{StoryID: id, Why: why})
 			continue
 		}
 
@@ -775,6 +800,17 @@ func (d Dispatch) tellRoom(ctx context.Context, noRoom string, report *DispatchR
 	if _, err := (EventEmit{Log: d.Events, Now: d.now, Event: event}).Run(ctx); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the room event could not be written: %v", err))
 	}
+}
+
+// nonEmpty is the words that say something.
+func nonEmpty(words ...string) []string {
+	var out []string
+	for _, w := range words {
+		if w != "" {
+			out = append(out, w)
+		}
+	}
+	return out
 }
 
 // roomHeld reports whether the log's latest word of host's room is that it has
