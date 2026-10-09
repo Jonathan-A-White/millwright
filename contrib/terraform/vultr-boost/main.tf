@@ -55,12 +55,16 @@ resource "vultr_firewall_rule" "ssh" {
   notes             = "ssh"
 }
 
+# From a snapshot (contrib/vultr-boost snapshot) the box starts with the
+# bootstrap's work done, and cloud-init's run of it changes only what is this
+# box's own; without one it is Ubuntu, bootstrapped in full.
 resource "vultr_instance" "boost" {
   label             = var.name
   hostname          = var.name
   region            = var.region
   plan              = var.plan
-  os_id             = data.vultr_os.ubuntu.id
+  os_id             = var.snapshot_id == "" ? data.vultr_os.ubuntu.id : null
+  snapshot_id       = var.snapshot_id == "" ? null : var.snapshot_id
   user_data         = local.user_data
   firewall_group_id = vultr_firewall_group.boost.id
   backups           = "disabled"

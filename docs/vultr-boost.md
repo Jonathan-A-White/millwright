@@ -13,7 +13,14 @@ contrib/vultr-boost up --dry-run   # every step and what it would run; nothing r
 contrib/vultr-boost up             # terraform shows its plan and asks before it spends
 contrib/vultr-boost status         # the box's state and what it costs
 contrib/vultr-boost down           # destroy the box, take its peer off the hub
+contrib/vultr-boost snapshot       # a ready-made image of a bootstrapped box
+contrib/vultr-boost spend          # what Vultr's billing says the boxes cost this month
 ```
+
+`--name NAME` picks the box (default the tfvars `name`, else `cloud1`). The
+tfvars name keeps the files below; any other box keeps its own beside them,
+`hosts/vultr/NAME.tfstate.age`, `NAME.wg.key.age` and `NAME.wg.pub`, so two boxes
+never share a state or a key. `up --snapshot ID` makes the box from a snapshot.
 
 `--yes` on `up` or `down` passes `-auto-approve` to terraform, which otherwise
 asks. `--dry-run` prints the numbered steps and changes nothing.
@@ -120,9 +127,88 @@ have been read, and put new ones:
 | `boost_beads_password` | change it on the beads server (Dolt) |
 | the box's WireGuard key | `down` removes the peer; to retire the key too, delete `hosts/vultr/wg.key.age` and `wg.pub` from the vault, and the next `up` makes a new one |
 
+## Elastic: boxes made and destroyed by demand
+
+With a `[cloud]` table in the home's `~/.config/mw/config.toml`, mw makes and
+destroys the boxes itself. Without one it never spends: the table is the
+Governor's word. Every minute the home's follower runs the cloud check (by hand:
+`mw cloud check`, which does nothing on a host that is not home). It costs no tokens.
+
+```toml
+[cloud]
+provider        = "vultr"   # the one provider
+max_boxes       = 2         # boxes up at once, at most
+monthly_cap_usd = 75        # the most the boxes may cost in a UTC month
+idle_minutes    = 30        # a box with no story this long is destroyed
+hourly_usd      = 0.132     # what one box costs an hour
+box_cap         = 2         # sessions a box runs at once (the bootstrap's cap)
+snapshot        = "<id>"    # what contrib/vultr-boost snapshot printed; blank bootstraps in full
+command         = "<full path to contrib/vultr-boost>"   # default: the millwright checkout of [rigs]
+
+[cloud.caps]                # the sessions each host runs at once
+desktop = 2
+laptop  = 2
+```
+
+Each check:
+
+1. **Counts.** The stories that wait for any host (ready, unblocked, pathed
+   `host = auto`, not hitl), and the sessions free: each host of `[cloud.caps]`
+   (without the table, the home alone at its `cap`) and each box up, less the
+   stories claimed on it. A story pathed to one host makes no box: a box could not
+   take it. A host that is asleep is counted as free all the same, so list only
+   the hosts that are on, or expect fewer boxes than stories.
+2. **Keeps under the cap.** When one more hour of the boxes up would pass
+   `monthly_cap_usd`, every box is destroyed.
+3. **Destroys the idle.** A box with no story claimed on it for `idle_minutes`,
+   counted from the first check that found it so (from when it was made, until it
+   takes one), is destroyed.
+4. **Makes one box** when more stories wait than there are sessions free, while
+   fewer than `max_boxes` are up, and the month can pay the first hour of it and
+   one more hour of every box with it. The box is `cloud1`, or the next name free:
+   `contrib/vultr-boost up --yes --name cloudN --snapshot <snapshot>`. A check makes
+   at most one; the next check counts its sessions as free while it boots, so it
+   is not made twice.
+5. **A box that does not come up** (the wrapper fails) is destroyed and tried once
+   more. When that fails too it is destroyed again and no box is made for an hour.
+
+**The month's spend** is the box hours the check made, each begun hour a whole
+one (Vultr bills by the hour), kept in the vault in `hosts/vultr/cloud.json` with
+the boxes up, and committed at each change: it moves with the vault to the next
+home. Each check also asks `contrib/vultr-boost spend` for what Vultr's pending
+charges say the boxes `cloud1`..`cloudN` cost, and takes that when it is more.
+When Vultr cannot be asked, the book's count stands. A new UTC month starts the
+count afresh. At the cap no box is made and one cloud event says `cap reached`,
+once a month.
+
+**Every move is an event**, kind `cloud`, actor `cloud@<home>`: `up cloud1: 5
+stories wait for any host, 0 sessions free`, `down cloud1: idle 30m`, `failed
+cloud1: ...`, `cap reached: $74.90 spent of $75.00 this month; no box is made`.
+`mw events tail` shows them. **`mw status`** has a CLOUD section: the month's
+spend against the cap, each box up with its age and how long it has been idle,
+and the last five moves.
+
+### The ready-made image
+
+A box bootstrapped from Ubuntu takes some minutes before it works; one made from
+a snapshot is working in about two. To make the snapshot:
+
+1. `contrib/vultr-boost up --name cloud1`, and let the bootstrap finish
+   (`~/boost-bootstrap.log` on the box; it shows in `mw status` once it dispatches).
+2. `contrib/vultr-boost snapshot --name cloud1` asks Vultr for a snapshot of it
+   and prints its id. Vultr takes some minutes to finish it.
+3. Put the id in `[cloud] snapshot = "<id>"`, and `contrib/vultr-boost down
+   --name cloud1`.
+
+A box made from it runs the bootstrap again through cloud-init, which changes only
+what is the box's own (its name, WireGuard key and address). The snapshot holds
+what the box held, its tokens too: delete it at Vultr (my.vultr.com, Snapshots)
+when you revoke them, and make a new one. It is billed for its size while kept.
+
 ## What it does not do
 
-- It does not run the first real `up` on its own: spending is the Governor's word.
-- It does not manage more than one box, a firewall beyond ssh, backups, or
-  snapshots. The box holds nothing that must outlive it: work is in git and beads.
+- It does not run the first real `up` on its own: spending is the Governor's word,
+  given by writing the `[cloud]` table.
+- It does not manage a firewall beyond ssh, or backups. The box holds nothing that
+  must outlive it: work is in git and beads.
 - It does not log the box in to anything it was not given a token for.

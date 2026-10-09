@@ -28,6 +28,12 @@ variable "name" {
   }
 }
 
+variable "snapshot_id" {
+  description = "A Vultr snapshot to make the box from (contrib/vultr-boost snapshot made it); blank makes it from Ubuntu and bootstraps it in full."
+  type        = string
+  default     = ""
+}
+
 variable "user" {
   description = "The Linux user the Boost dispatches as (cloud-init makes it, with passwordless sudo)."
   type        = string

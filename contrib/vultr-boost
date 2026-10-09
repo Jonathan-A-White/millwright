@@ -4,9 +4,11 @@
 # factory's WireGuard network as a peer of the hub. Run on the home, which holds
 # the age key that opens the vault's secrets.
 #
-#   contrib/vultr-boost up      [--yes] [--dry-run]
-#   contrib/vultr-boost down    [--yes] [--dry-run]
-#   contrib/vultr-boost status
+#   contrib/vultr-boost up       [--yes] [--dry-run] [--name NAME] [--snapshot ID]
+#   contrib/vultr-boost down     [--yes] [--dry-run] [--name NAME]
+#   contrib/vultr-boost status   [--name NAME]
+#   contrib/vultr-boost snapshot [--dry-run] [--name NAME]
+#   contrib/vultr-boost spend    [--name NAME]...
 #   contrib/vultr-boost --help
 #
 # up      keys the box (hosts/vultr/wg.key.age, once), enrols its public key on the
@@ -17,6 +19,14 @@
 #         backed up first). The keys stay in the vault for the next up.
 # status  the box's state (from the state in the vault and Vultr's API) and what it
 #         costs; with no box, the price one would cost.
+# snapshot  makes a Vultr snapshot of a box that is up and bootstrapped, and prints its
+#         id: the ready-made image `up --snapshot ID` (mw's [cloud] snapshot) makes a box
+#         from, working in a couple of minutes instead of bootstrapping in full.
+# spend   what Vultr's pending charges say the boxes named have cost this month, in
+#         dollars, or "unknown" when the billing could not be read: mw's cloud check
+#         takes it when it is more than its own count.
+# --name  the box: its host name, peer name and its own state and key in the vault
+#         (default: the tfvars name, else cloud1). mw names its boxes cloud1, cloud2.
 # --dry-run prints every step and what it would run, and changes nothing.
 #
 # Where things live. The terraform code is contrib/terraform/vultr-boost. The
@@ -49,6 +59,9 @@ API=https://api.vultr.com/v2
 DRY=0
 YES=0
 CMD=""
+NAME_ARG=""
+NAMES=()
+SNAPSHOT=""
 STEPS=0
 N=0
 
@@ -59,23 +72,38 @@ die() {
 
 usage() {
 	cat <<'EOF'
-Usage: vultr-boost up      [--yes] [--dry-run]
-       vultr-boost down    [--yes] [--dry-run]
-       vultr-boost status
+Usage: vultr-boost up       [--yes] [--dry-run] [--name NAME] [--snapshot ID]
+       vultr-boost down     [--yes] [--dry-run] [--name NAME]
+       vultr-boost status   [--name NAME]
+       vultr-boost snapshot [--dry-run] [--name NAME]
+       vultr-boost spend    [--name NAME]...
 
 up makes the Boost box on Vultr and enrols it on the WireGuard hub; down destroys
-it and removes the peer; status prints its state and cost. --yes passes
--auto-approve to terraform (otherwise terraform asks); --dry-run prints every step
-and runs none. Settings live in the vault's hosts/vultr/vultr-boost.tfvars and
-tokens in `mw secrets`; see docs/vultr-boost.md.
+it and removes the peer; status prints its state and cost; snapshot makes a
+ready-made image of a bootstrapped box for up --snapshot; spend prints what the
+boxes named have cost this month. --name picks the box (default the tfvars name,
+else cloud1). --yes passes -auto-approve to terraform (otherwise terraform asks);
+--dry-run prints every step and runs none. Settings live in the vault's
+hosts/vultr/vultr-boost.tfvars and tokens in `mw secrets`; see docs/vultr-boost.md.
 EOF
 }
 
 while [ $# -gt 0 ]; do
 	case $1 in
-	up | down | status)
+	up | down | status | snapshot | spend)
 		[ -z "$CMD" ] || die "one command at a time: $CMD and $1"
 		CMD=$1
+		;;
+	--name)
+		[ $# -gt 1 ] || die "--name needs a box name"
+		NAME_ARG=$2
+		NAMES+=("$2")
+		shift
+		;;
+	--snapshot)
+		[ $# -gt 1 ] || die "--snapshot needs a snapshot id"
+		SNAPSHOT=$2
+		shift
 		;;
 	--yes | -y) YES=1 ;;
 	--dry-run) DRY=1 ;;
@@ -115,9 +143,6 @@ if [ -z "$VAULT" ] || [ ! -d "$VAULT" ]; then
 fi
 HOSTDIR=$VAULT/hosts/vultr
 TFVARS=$HOSTDIR/vultr-boost.tfvars
-STATE_AGE=$HOSTDIR/terraform.tfstate.age
-KEY_AGE=$HOSTDIR/wg.key.age
-PUB_FILE=$HOSTDIR/wg.pub
 AGE_KEY=${MW_AGE_KEY_FILE:-$(config_key age_key_file)}
 AGE_KEY=${AGE_KEY:-$HOME/.config/mw/age.key}
 RUNBASE=${VULTR_BOOST_RUN:-${XDG_RUNTIME_DIR:-/dev/shm}}
@@ -129,8 +154,23 @@ tfvar() {
 	sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" "$TFVARS" | head -n 1
 }
 
-NAME=$(tfvar name)
-NAME=${NAME:-cloud1}
+DEFAULT_NAME=$(tfvar name)
+DEFAULT_NAME=${DEFAULT_NAME:-cloud1}
+NAME=${NAME_ARG:-$DEFAULT_NAME}
+case $NAME in
+*[!a-z0-9-]* | "") die "the box name \"$NAME\" must match [a-z0-9-]+ (what wg-enrol accepts)" ;;
+esac
+# The tfvars name keeps the files it always had; every other box has its own,
+# named for it, so two boxes never share a state or a key.
+if [ "$NAME" = "$DEFAULT_NAME" ]; then
+	STATE_AGE=$HOSTDIR/terraform.tfstate.age
+	KEY_AGE=$HOSTDIR/wg.key.age
+	PUB_FILE=$HOSTDIR/wg.pub
+else
+	STATE_AGE=$HOSTDIR/$NAME.tfstate.age
+	KEY_AGE=$HOSTDIR/$NAME.wg.key.age
+	PUB_FILE=$HOSTDIR/$NAME.wg.pub
+fi
 ENDPOINT=$(tfvar wg_endpoint)
 HUB_SSH=${VULTR_BOOST_HUB_SSH:-root@${ENDPOINT%:*}}
 [ "$HUB_SSH" != "root@" ] || HUB_SSH="root@<the host of wg_endpoint>"
@@ -163,7 +203,7 @@ plan_up() {
 	step "wireguard: a key for the box, once: wg genkey, kept encrypted in $KEY_AGE, public half in $PUB_FILE"
 	step "ssh $HUB_SSH: copy /etc/wireguard/wg0.conf to a dated backup, then $ENROL $NAME <the box's public key>"
 	would "print the backup's path and the way back (ssh $HUB_SSH '$ENROL --remove $NAME')"
-	step "terraform -chdir=$TFDIR init, then apply -state=<private dir>/terraform.tfstate -var-file=$TFVARS (tokens in TF_VAR_* only)"
+	step "terraform -chdir=$TFDIR init, then apply -state=<private dir>/terraform.tfstate -var-file=$TFVARS -var name=$NAME$(snapshot_var) (tokens in TF_VAR_* only)"
 	would "ask to confirm, or pass -auto-approve with --yes; this is where the box starts to cost money"
 	step "state: encrypt it back to $STATE_AGE with age, commit hosts/vultr in the vault, remove the private directory"
 }
@@ -178,10 +218,25 @@ plan_down() {
 	step "state: encrypt it back to $STATE_AGE with age, commit hosts/vultr in the vault, remove the private directory"
 }
 
+snapshot_var() {
+	[ -z "$SNAPSHOT" ] || echo " -var snapshot_id=$SNAPSHOT"
+}
+
 if [ "$DRY" = 1 ]; then
 	case $CMD in
 	up) plan_up ;;
 	down) plan_down ;;
+	snapshot)
+		STEPS=2
+		echo "vultr-boost snapshot --dry-run: nothing below is run"
+		step "state: open $STATE_AGE with age (read only) and read $NAME's id from it"
+		step "curl -X POST $API/snapshots with the token on stdin: a snapshot of $NAME, whose id is printed for [cloud] snapshot"
+		;;
+	spend)
+		STEPS=1
+		echo "vultr-boost spend --dry-run: nothing below is run"
+		step "curl $API/billing/pending-charges with the token on stdin: the sum of the charges that name ${NAMES[*]:-$NAME}"
+		;;
 	status)
 		STEPS=2
 		echo "vultr-boost status --dry-run: nothing below is run"
@@ -289,6 +344,10 @@ confirm_args() {
 	if [ "$YES" = 1 ]; then echo "-auto-approve"; fi
 }
 
+snapshot_args() {
+	if [ -n "$SNAPSHOT" ]; then echo "-var snapshot_id=$SNAPSHOT"; fi
+}
+
 # --- up -----------------------------------------------------------------------
 do_up() {
 	STEPS=6
@@ -337,7 +396,7 @@ do_up() {
 	tf init -input=false >/dev/null || die "terraform init failed"
 	local rc=0
 	# shellcheck disable=SC2046
-	tf apply -state="$PRIV/terraform.tfstate" -var-file="$TFVARS" $(confirm_args) || rc=$?
+	tf apply -state="$PRIV/terraform.tfstate" -var-file="$TFVARS" -var "name=$NAME" $(snapshot_args) $(confirm_args) || rc=$?
 
 	step "state: seal it in the vault"
 	seal_state
@@ -360,7 +419,7 @@ do_down() {
 	if [ -s "$PRIV/terraform.tfstate" ]; then
 		tf init -input=false >/dev/null || die "terraform init failed"
 		# shellcheck disable=SC2046
-		tf destroy -state="$PRIV/terraform.tfstate" -var-file="$TFVARS" $(confirm_args) || rc=$?
+		tf destroy -state="$PRIV/terraform.tfstate" -var-file="$TFVARS" -var "name=$NAME" $(confirm_args) || rc=$?
 	else
 		echo "    skip: no state in the vault, so no box to destroy"
 	fi
@@ -455,8 +514,67 @@ do_status() {
 	fi
 }
 
+# --- snapshot -----------------------------------------------------------------
+# box_id: the id of the box in the vault's state for NAME, or nothing. The
+# private directory is opened first, by the caller, so the trap removes it.
+box_id() {
+	[ -f "$STATE_AGE" ] || return 0
+	[ -r "$AGE_KEY" ] || die "no age key at $AGE_KEY: this runs on the home, which holds it (docs/secrets.md)"
+	age -d -i "$AGE_KEY" "$STATE_AGE" >"$PRIV/terraform.tfstate" || die "could not decrypt $STATE_AGE"
+	jq -r '[.resources[]? | select(.type == "vultr_instance") | .instances[0].attributes.id][0] // empty' "$PRIV/terraform.tfstate"
+	rm -f "$PRIV/terraform.tfstate"
+}
+
+do_snapshot() {
+	STEPS=2
+	need mw age jq curl
+	step "state: read $NAME's id from the vault's"
+	local id token reply snap
+	open_priv
+	id=$(box_id)
+	[ -n "$id" ] || die "no box $NAME in the vault's state: make one with up --name $NAME, let it bootstrap, then snapshot it"
+	step "vultr: snapshot $id"
+	token=$(secret vultr_api_token) || die "no vultr_api_token kept: mw secrets put vultr_api_token < token.txt"
+	reply=$(printf 'header = "Authorization: Bearer %s"\nheader = "Content-Type: application/json"\n' "$token" |
+		curl -fsS -K - -X POST --data "{\"instance_id\":\"$id\",\"description\":\"mw boost $NAME $(date -u +%Y-%m-%d)\"}" "$API/snapshots") ||
+		die "Vultr would not snapshot $id"
+	snap=$(echo "$reply" | jq -r '.snapshot.id // empty')
+	[ -n "$snap" ] || die "Vultr's answer named no snapshot"
+	echo "    snapshot: $snap (Vultr takes some minutes to finish it; it bills for its size while kept)"
+	echo "    put it in ~/.config/mw/config.toml: [cloud] snapshot = \"$snap\""
+}
+
+# --- spend ----------------------------------------------------------------------
+# spend: the pending charges this month whose description names a box, summed;
+# "unknown" when Vultr's billing could not be read or said nothing to sum.
+do_spend() {
+	need mw jq curl
+	local token reply names usd
+	[ ${#NAMES[@]} -gt 0 ] || NAMES=("$NAME")
+	token=$(secret vultr_api_token 2>/dev/null) || {
+		echo unknown
+		return 0
+	}
+	reply=$(printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -fsS -m 30 -K - "$API/billing/pending-charges" 2>/dev/null) || {
+		echo unknown
+		return 0
+	}
+	names=$(printf '%s\n' "${NAMES[@]}" | jq -R . | jq -s .)
+	usd=$(echo "$reply" | jq -r --argjson names "$names" '
+		if (.pending_charges | type) != "array" then empty else
+		[.pending_charges[] | select(((.description // "") + " " + (.product // "")) as $d | any($names[]; . as $n | $d | test("\\b" + $n + "\\b")))
+			| (.total // .amount // 0) | tonumber] | add // 0 end' 2>/dev/null) || usd=""
+	if [ -z "$usd" ]; then
+		echo unknown
+	else
+		printf '%.2f\n' "$usd"
+	fi
+}
+
 case $CMD in
 up) do_up ;;
 down) do_down ;;
 status) do_status ;;
+snapshot) do_snapshot ;;
+spend) do_spend ;;
 esac

@@ -19,7 +19,12 @@
 #      `down` destroys the box and removes the peer
 #   e. a missing token or a missing setting is refused in one line, before
 #      anything is touched
-#   f. docs/vultr-boost.md says up, down, status, the cost and how to revoke
+#   f. docs/vultr-boost.md says up, down, status, the cost and how to revoke,
+#      and has the elastic section: the [cloud] table, the cap, idle, snapshot
+#   g. the elastic cloud's wrapper (mw-5gr3k0.4): a second box by --name keeps
+#      a state and a key of its own and is made from --snapshot; snapshot asks
+#      Vultr for a snapshot of the box; spend sums the charges that name the
+#      boxes, or says unknown; a bad name is refused; their dry runs call nothing
 
 set -eu
 
@@ -102,7 +107,8 @@ if [ -z "$(git ls-files 'contrib/terraform' | grep -E '\.(tfstate|tfvars)' || tr
 fi
 
 # --- f. the doc ---------------------------------------------------------------
-for w in 'vultr-boost up' 'vultr-boost down' 'vultr-boost status' 'cost' 'revoke' 'tfvars' 'wg-enrol'; do
+for w in 'vultr-boost up' 'vultr-boost down' 'vultr-boost status' 'cost' 'revoke' 'tfvars' 'wg-enrol' \
+	'## Elastic' '[cloud]' 'monthly_cap_usd' 'idle_minutes' 'max_boxes' 'vultr-boost snapshot' 'vultr-boost spend' 'mw cloud check'; do
 	grep -q -i -- "$w" "$DOC" || fail "$DOC does not mention: $w"
 done
 
@@ -256,6 +262,8 @@ case " \$* " in *" -K - "*) cat >>"$CURLLOG" ;; esac
 case \$last in
 */instances/inst-1234) echo '{"instance":{"id":"inst-1234","status":"active","power_status":"running","server_status":"ok","plan":"vhp-8c-16gb-amd","region":"zzz","date_created":"2026-10-09T10:00:00+00:00"}}' ;;
 */plans*) echo '{"plans":[{"id":"vhp-8c-16gb-amd","vcpu_count":8,"ram":16384,"monthly_cost":96,"hourly_cost":0.132}]}' ;;
+*/billing/pending-charges) echo '{"pending_charges":[{"description":"cloud1 (vhp-8c-16gb-amd)","total":1.5},{"description":"hub vps","total":6},{"description":"cloud2 (vhp-8c-16gb-amd)","total":0.25},{"description":"cloud12","total":9}]}' ;;
+*/snapshots) echo '{"snapshot":{"id":"snap-77","description":"mw boost"}}' ;;
 *) echo "curl stand-in: unexpected url \$last" >&2; exit 22 ;;
 esac
 EOF
@@ -282,6 +290,10 @@ run_bare() {
 }
 
 # --- b. a dry run prints the steps and runs nothing --------------------------
+for sub in snapshot spend; do
+	out=$(run_bare "$sub" --dry-run --name cloud2 2>&1) || fail "$sub --dry-run failed: $out"
+	echo "$out" | grep -q 'curl' || fail "$sub --dry-run does not print the call to Vultr: $out"
+done
 for sub in up down; do
 	out=$(run_bare "$sub" --dry-run 2>&1) || fail "$sub --dry-run failed: $out"
 	echo "$out" | grep -q 'terraform' || fail "$sub --dry-run does not print the terraform steps: $out"
@@ -397,5 +409,43 @@ grep -q 'cp -p' "$SSHLOG" || fail "down did not back up the hub's wg0.conf first
 out=$(run status 2>&1) || fail "status after down failed: $out"
 echo "$out" | grep -q -i 'no box' || fail "status after down does not say there is no box: $out"
 [ -z "$(git -C "$VAULT" status --porcelain)" ] || fail "the vault is left with uncommitted files after down"
+
+# --- g. the elastic cloud's wrapper --------------------------------------------
+if out=$(run up --yes --name Cloud_2 2>&1); then fail "a box name wg-enrol would not take should be refused"; fi
+echo "$out" | grep -q 'a-z0-9' || fail "the refusal of a bad name does not say what a name is: $out"
+
+cp "$VAULT/hosts/vultr/terraform.tfstate.age" "$T/cloud1.state.keep"
+: >"$SSHLOG"
+out=$(run up --yes --name cloud2 --snapshot snap-9 2>&1) || fail "up --name cloud2 failed: $out"
+apply=$(grep '^terraform .* apply' "$CALLS" | tail -n 1)
+echo "$apply" | grep -q -- '-var name=cloud2' || fail "up --name cloud2 did not make the box under its name: $apply"
+echo "$apply" | grep -q -- '-var snapshot_id=snap-9' || fail "up --snapshot did not make the box from the snapshot: $apply"
+grep -q "wg-enrol cloud2 $WG_PUB" "$SSHLOG" || fail "cloud2 was not enrolled on the hub under its name: $(cat "$SSHLOG")"
+for f in cloud2.tfstate.age cloud2.wg.key.age cloud2.wg.pub; do
+	[ -f "$VAULT/hosts/vultr/$f" ] || fail "cloud2 has no hosts/vultr/$f of its own"
+done
+cmp -s "$T/cloud1.state.keep" "$VAULT/hosts/vultr/terraform.tfstate.age" || fail "making cloud2 changed cloud1's state"
+[ -z "$(git -C "$VAULT" status --porcelain)" ] || fail "up --name cloud2 left the vault uncommitted"
+
+: >"$CURLLOG"
+out=$(run snapshot --name cloud2 2>&1) || fail "snapshot failed: $out"
+grep -q '^curl .*-X POST.*instance_id.*inst-1234.*/snapshots' "$CALLS" || fail "snapshot did not ask Vultr to snapshot cloud2's box: $(grep '^curl' "$CALLS" | tail -n 1)"
+echo "$out" | grep -q 'snap-77' || fail "snapshot does not print the snapshot's id: $out"
+echo "$out" | grep -q 'snapshot = "snap-77"' || fail "snapshot does not say where the id goes: $out"
+grep -q "$VULTR_KEY" "$CURLLOG" || fail "snapshot did not send the token to curl on stdin"
+grep -q "$VULTR_KEY" "$CALLS" && fail "snapshot put the Vultr token on a command line"
+[ -z "$(ls -A "$RUN")" ] || fail "snapshot left a tmpfs directory behind"
+
+: >"$SSHLOG"
+out=$(run down --yes --name cloud2 2>&1) || fail "down --name cloud2 failed: $out"
+grep '^terraform .* destroy' "$CALLS" | tail -n 1 | grep -q -- '-var name=cloud2' || fail "down --name cloud2 did not destroy cloud2"
+grep -q 'wg-enrol --remove cloud2' "$SSHLOG" || fail "down --name cloud2 did not remove its peer: $(cat "$SSHLOG")"
+
+out=$(run spend --name cloud1 --name cloud2 2>&1) || fail "spend failed: $out"
+[ "$out" = 1.75 ] || fail "spend should sum cloud1's and cloud2's charges and nothing else (1.75), not: $out"
+mv "$SECRETS/vultr_api_token" "$T/token.away"
+out=$(run spend --name cloud1 2>&1) || fail "spend without a token failed: $out"
+[ "$out" = unknown ] || fail "spend that cannot ask Vultr should say unknown, not: $out"
+mv "$T/token.away" "$SECRETS/vultr_api_token"
 
 echo "check-vultr-boost: ok"
