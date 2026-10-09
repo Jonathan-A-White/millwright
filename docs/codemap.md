@@ -23,9 +23,9 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 | Doctor{Check,State,Log,Notes}, VPSProbe | application/doctor.go, application/vpsnginx.go | infra/{doctor,vpsnginx} | none |
 | Network{Probe,Store,Reader} | application/network.go | infra/network | apptest.FakeNetwork* |
 | CardLog | application/card.go | infra/cardlog | apptest.FakeCardLog |
-| SyncHaltMarker, CloseOutMarks | application/sync.go, application/closeout.go | infra/{synchalt,closeout} | apptest.Fake*Mark* |
+| CloseOutMarks | application/closeout.go | infra/closeout | apptest.Fake*Mark* |
 | Worktrees | application/worktrees.go | infra/rig/worktree.go | application/dispatch_test.go |
-| HostLoad | application/hostload.go | infra/hostload | apptest.FakeHostLoad |
+| HostLoad, Cloud* | application/hostload.go | infra/{hostload,cloud,vault/cloudbook.go} | apptest.Fake{HostLoad,Cloud*} |
 | TickLog, Notifier, HomeMoveHost, OldHome, VaultBirth, TrackerBirth | application/{millhandtick,homemove,init}.go | infra/{ticklog,notify/notify,homemove/homemove,vault/birth,beads/init}.go | apptest.FakeTickLog |
 | Landing, Checks, MergeSlot, Holding | application/landing.go | infra/rig/{landing,checks,slot}.go | none |
 | AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter | application/afterlanding.go, application/selfupdate.go, application/backendstage.go | infra/{rig/{afterlanding,built,backend},userunits}.go | features/{self_update,backend_swap}.feature |
@@ -42,16 +42,15 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 | --- | --- | --- | --- |
 | File, Release, Retry | application/file.go, application/release.go, application/retry.go | mw file/release/retry - cmd/mw/file.go, cmd/mw/release.go, cmd/mw/retry.go | features/{file_plan,release,retry}.feature |
 | Show, Peek, Prove, StampHead | application/show.go, application/stamphead.go | mw show/peek/prove/stamp - cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go | features/{show,peek,prove,stamp}.feature |
-| Dispatch | application/dispatch.go | mw dispatch - cmd/mw/dispatch.go | features/dispatch.feature |
-| Next, AfterLandingRun | application/next.go, application/afterlandingrun.go | mw next, mw after-landing - cmd/mw/next.go, cmd/mw/afterlanding.go | features/{next,after_landing}.feature |
+| Dispatch, Next, AfterLandingRun | application/dispatch.go, application/next.go, application/afterlandingrun.go | mw dispatch/next/after-landing - cmd/mw/dispatch.go, cmd/mw/next.go, cmd/mw/afterlanding.go | features/{dispatch,next,after_landing}.feature |
 | Tester | application/testerreport.go | mw tester report - cmd/mw/tester.go; [tester] toml | features/tester.feature |
-| Check, Status, Brief | application/check.go, application/status.go, application/brief.go | mw check/status/brief - cmd/mw/check.go, cmd/mw/status.go, cmd/mw/brief.go | features/{check,status,brief}.feature |
+| Check, Status, CloudCheck, Brief | application/check.go, application/status.go, application/cloud.go, application/brief.go | mw check/status/cloud/brief - cmd/mw/check.go, cmd/mw/status.go, cmd/mw/cloud.go, cmd/mw/brief.go | features/{check,status,cloud,brief}.feature |
 | Sweep, Tidy | application/sweep.go, application/tidy.go | mw sweep/tidy - cmd/mw/sweep.go, cmd/mw/tidy.go | features/{sweep,tidy}.feature |
 | Sync, Nudge, Mail | application/sync.go, application/nudge.go, application/mail.go | mw sync/nudge/mail - cmd/mw/sync.go, cmd/mw/nudge.go, cmd/mw/mail.go | features/{sync,mail}.feature |
-| Home, HomeMove | application/home.go, application/homemove.go | mw home, mw home move - cmd/mw/home.go, cmd/mw/homemove.go | features/home.feature, docs/home-move.md |
+| Home, HomeMove | application/home.go, application/homemove.go | mw home [move] - cmd/mw/home.go, cmd/mw/homemove.go | features/home.feature, docs/home-move.md |
 | Seat{Context,Up,Reap,Handover} | application/seat{context,up,reap,handover}.go | mw seat <sub> - cmd/mw/seat.go | features/seat_{context,up,reap}.feature |
 | Talk{Call,Model,Say,Wait} | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go | mw talk <sub> - cmd/mw/talk.go | features/talk_*.feature |
-| Millhand, Deputy, MillhandTick | application/millhand.go, application/deputy.go, application/millhandtick.go | mw millhand/deputy/millhand tick - cmd/mw/millhand.go, cmd/mw/deputy.go, cmd/mw/millhandtick.go | features/{millhand,deputy,millhand_tick}.feature |
+| Millhand, Deputy, MillhandTick | application/millhand.go, application/deputy.go, application/millhandtick.go | mw millhand [tick]/deputy - cmd/mw/millhand.go, cmd/mw/deputy.go, cmd/mw/millhandtick.go | features/{millhand,deputy,millhand_tick}.feature |
 | Secrets{Put,Get,List} | application/secrets.go | mw secrets - cmd/mw/secrets.go | features/secrets.feature |
 | Watch, Doctor | application/watch.go, application/doctor.go | mw watch/doctor - cmd/mw/watch.go, cmd/mw/doctor.go | features/{watch,doctor}.feature |
 | SeatBoot, Init | application/seatboot.go, application/init.go | Dispatch, Next; mw init - cmd/mw/init.go | features/{seat_boot,init}.feature |

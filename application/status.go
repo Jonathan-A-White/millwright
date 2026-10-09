@@ -227,6 +227,12 @@ type Status struct {
 	// runs the home's commit.
 	Standby StandbyReader
 
+	// Cloud, when set, is the cloud's book, read with CloudPlan for the CLOUD
+	// section: each box up, its age, and the month's spend against the cap.
+	// Nil leaves it out.
+	Cloud     CloudBook
+	CloudPlan CloudPlan
+
 	// Control, when set, is the home's event log, read for the CANCELLED
 	// section (the cancel events of the last day) and the PAUSED line. Nil
 	// leaves both out.
@@ -391,6 +397,9 @@ type StatusReport struct {
 	// Standby is how the standby's backend compares with the home's; nil when not
 	// asked.
 	Standby *StandbyReading
+	// Cloud is the cloud's boxes and the month's spend; nil when not asked or
+	// not read.
+	Cloud *CloudReading
 	// Cancelled are the runs a cancel event ended in the last day, and Paused
 	// the pause-host event this host is under, if any.
 	Cancelled []Cancel
@@ -586,6 +595,13 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	if s.Network != nil {
 		reading := s.Network.Read(ctx)
 		report.Network = &reading
+	}
+	if s.Cloud != nil {
+		if reading, err := ReadCloud(ctx, s.Cloud, s.CloudPlan, s.now()); err == nil {
+			report.Cloud = reading
+		} else {
+			s.print(fmt.Sprintf("mw status: the cloud's book could not be read: %v\n", err))
+		}
 	}
 	if s.VPSNginx != nil {
 		reading := s.VPSNginx.Read(ctx)
@@ -1002,6 +1018,11 @@ func (r StatusReport) String() string {
 		w.write(&b, r.Host, r.SyncMode.OneDatabase())
 	}
 	b.WriteString("\n")
+
+	if r.Cloud != nil {
+		r.Cloud.write(&b)
+		b.WriteString("\n")
+	}
 
 	if r.Ticks.Known() {
 		clip(&b, TicksHeading)

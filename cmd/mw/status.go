@@ -144,6 +144,7 @@ func newStatusCmd() *cobra.Command {
 				standby = reader
 			}
 			mayor := application.MayorReader{Tracker: tracker, Notes: tracker}
+			cloudBook, plan := cloudStatus(dir, host)
 			_, err = application.Status{
 				Tracker:          tracker,
 				Notes:            tracker,
@@ -173,6 +174,8 @@ func newStatusCmd() *cobra.Command {
 				Room:             application.RoomLimits{LoadPerCore: room.LoadPerCore, MinFreeMB: room.MinFreeMB},
 				VPSNginx:         vps,
 				Standby:          standby,
+				Cloud:            cloudBook,
+				CloudPlan:        plan,
 				Out:              cmd.OutOrStdout(),
 			}.Run(cmd.Context())
 			return err

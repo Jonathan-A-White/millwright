@@ -1068,6 +1068,18 @@ missing or not 600 on the home, or present on any other host.
 revoked at its source, and how the home gets its key. See
 `features/secrets.feature`.
 
+## Cloud boxes made by demand
+
+With a `[cloud]` table in the home's config (provider, `max_boxes`,
+`monthly_cap_usd`, `idle_minutes`, `snapshot`), the home's follower runs the
+cloud check every minute, `mw cloud check` by hand. When more stories wait for
+any host than there are sessions free across the hosts of `[cloud.caps]` and the
+boxes up, it makes one Vultr box with `contrib/vultr-boost up`; a box with no
+story for `idle_minutes` is destroyed; and no box is made, or kept, past the
+month's cap, counted from the box hours it made (kept in the vault) and Vultr's
+billing. Each move is a `cloud` event, and `mw status` shows a CLOUD section.
+`docs/vultr-boost.md` ("Elastic") says it all. See `features/cloud.feature`.
+
 ## Going easy on a metered network
 
 On a WSL host mw asks Windows whether the connection it is using is metered
