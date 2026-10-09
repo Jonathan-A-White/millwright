@@ -2066,3 +2066,35 @@ func TestRoomIsReadFromTheTable(t *testing.T) {
 		}
 	}
 }
+
+func TestCloudReadsTheTableWithItsDefaultsAndRefusesABadOne(t *testing.T) {
+	writeConfig(t, "host = \"desktop\"\n\n[rigs]\nmillwright = \"/home/m/millwright\"\n\n[cloud]\nsnapshot = \"snap-1\"  # made by contrib/vultr-boost snapshot\nmonthly_cap_usd = 40.5\n\n[cloud.caps]\ndesktop = 2\nlaptop = 1\n")
+	cloud, ok, err := config.Cloud()
+	if err != nil || !ok {
+		t.Fatalf("reading [cloud]: %v, %v", ok, err)
+	}
+	if cloud.Provider != "vultr" || cloud.MaxBoxes != 2 || cloud.MonthlyCapUSD != 40.5 || cloud.IdleMinutes != 30 ||
+		cloud.HourlyUSD != config.DefaultCloudHourlyUSD || cloud.BoxCap != 2 || cloud.Snapshot != "snap-1" ||
+		cloud.Command != "/home/m/millwright/contrib/vultr-boost" || cloud.HostCaps["desktop"] != 2 || cloud.HostCaps["laptop"] != 1 {
+		t.Errorf("expected the defaults beside what the table says, got %+v", cloud)
+	}
+
+	writeConfig(t, "host = \"desktop\"\n")
+	if _, ok, err := config.Cloud(); ok || err != nil {
+		t.Errorf("expected no table to be no cloud, got %v, %v", ok, err)
+	}
+
+	for _, table := range []string{
+		"[cloud]\nprovider = \"aws\"\ncommand = \"/x/vultr-boost\"\n",
+		"[cloud]\nmonthly_cap_usd = 0\ncommand = \"/x/vultr-boost\"\n",
+		"[cloud]\nidle_minutes = \"soon\"\ncommand = \"/x/vultr-boost\"\n",
+		"[cloud]\nmax_boxes = -1\ncommand = \"/x/vultr-boost\"\n",
+		"[cloud]\ncommand = \"contrib/vultr-boost\"\n",
+		"[cloud]\nmax_boxes = 1\n",
+	} {
+		writeConfig(t, table)
+		if _, _, err := config.Cloud(); err == nil {
+			t.Errorf("expected %q to be refused", table)
+		}
+	}
+}
