@@ -101,6 +101,9 @@ type GristGrind struct {
 	// [grist-apps]); Ceilings are the factory's limits above every grind.
 	Apps     map[string]string
 	Ceilings GristCeilings
+	// Refreshes keeps each rig's checkout from being fetched more than once a
+	// minute; nil fetches before every grist.
+	Refreshes *GrindRefreshes
 	// GovernorKey may use any app's grinds from any of his keys' doors: he
 	// tests them from the terminal or the cockpit.
 	GovernorKey string
@@ -519,6 +522,12 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 	if !ok || strings.TrimSpace(checkout) == "" {
 		w.settle(GristRefused, GristReasonNoApp)
 		return
+	}
+	// A grind landed on another host is on the remote's main before it is on
+	// this checkout's: bring them level, and grind with what the checkout has
+	// if the remote cannot be reached.
+	if err := g.refresh(ctx, checkout); err != nil {
+		w.notes = append(w.notes, fmt.Sprintf("%s could not be brought level with the remote, so the grind is read from its local commit: %v", checkout, err))
 	}
 	if w.commit, err = g.Grinds.Commit(ctx, checkout); err != nil {
 		w.settle(GristFailed, GristReasonUnread)
@@ -1089,6 +1098,13 @@ func (g GristGrind) wired() error {
 		return fmt.Errorf("mw grist grind: which host is this? set MW_HOST, or host in the config file")
 	}
 	return nil
+}
+
+func (g GristGrind) refresh(ctx context.Context, checkout string) error {
+	if g.Refreshes == nil {
+		return g.Grinds.Refresh(ctx, checkout)
+	}
+	return g.Refreshes.Refresh(ctx, g.Grinds, checkout)
 }
 
 func (g GristGrind) now() time.Time {

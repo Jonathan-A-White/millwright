@@ -125,6 +125,8 @@ func InitializeGristScenario(ctx *godog.ScenarioContext) {
 
 	ctx.Given(`^a mill on the host "([^"]*)"$`, c.aMill)
 	ctx.Given(`^the app "([^"]*)" is checked out here, its main at commit "([^"]*)" with the grind "([^"]*)"$`, c.theAppIsCheckedOut)
+	ctx.Given(`^the remote's main for "([^"]*)" is at commit "([^"]*)" with the grind "([^"]*)" taking version "([^"]*)"$`, c.theRemoteHasAGrind)
+	ctx.Given(`^the remote of "([^"]*)" cannot be reached$`, c.theRemoteCannotBeReached)
 	ctx.Given(`^a phone whose licence opens "([^"]*)"$`, c.aPhoneWhoseLicenceOpens)
 	ctx.Given(`^the phone sends a "([^"]*)" "([^"]*)" grist, version "([^"]*)", with (\d+) photos?$`, c.thePhoneSends)
 	ctx.Given(`^the Governor's key sends a "([^"]*)" "([^"]*)" grist, version "([^"]*)", with (\d+) photos?$`, c.theGovernorSends)
@@ -157,6 +159,8 @@ func InitializeGristScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the mill answered (\d+), refused (\d+), failed (\d+), and left (\d+) waiting$`, c.theMillCounted)
 	ctx.Then(`^the answer is a grist record from the mill key, sealed to the phone, re the grist$`, c.theAnswerIsSealedToThePhone)
 	ctx.Then(`^the answer says "([^"]*)" with the grind's answer and the commit "([^"]*)"$`, c.theAnswerSaysAnswered)
+	ctx.Then(`^the answer was ground at the commit "([^"]*)"$`, c.theAnswerWasGroundAt)
+	ctx.Then(`^the mill's report says the remote of "([^"]*)" could not be reached and the local commit was used$`, c.theReportSaysTheRemoteWasUnreachable)
 	ctx.Then(`^the answer says "([^"]*)" because "([^"]*)"$`, c.theAnswerSaysBecause)
 	ctx.Then(`^the grind ran on "([^"]*)" at "([^"]*)" effort, given the photo by its full path and the request between its markers$`, c.theGrindRan)
 	ctx.Then(`^the grind was called on "([^"]*)" at "([^"]*)" effort$`, c.theGrindWasCalledOn)
@@ -238,6 +242,39 @@ func (c *gristContext) theAppIsCheckedOut(app, commit, kind string) error {
 	c.grinds.SetFile(c.checkout(app), commit, "grinds/"+kind+".json", []byte(gristGrindFile))
 	c.grinds.SetFile(c.checkout(app), commit, "grinds/sweep.md", []byte(gristInstructions))
 	c.grinds.SetFile(c.checkout(app), commit, "contexts/inventory/schemas/sweep-result.schema.json", []byte(gristSchema))
+	return nil
+}
+
+// theRemoteHasAGrind puts a newer grind on the remote's main, which the app's
+// checkout has not fetched yet: the same grind file, taking version v instead.
+func (c *gristContext) theRemoteHasAGrind(app, commit, kind, v string) error {
+	newer := strings.Replace(gristGrindFile, `"versions": ["1.1"]`, fmt.Sprintf(`"versions": [%q]`, v), 1)
+	c.grinds.SetRemoteFile(c.checkout(app), commit, "grinds/"+kind+".json", []byte(newer))
+	return nil
+}
+
+func (c *gristContext) theRemoteCannotBeReached(app string) error {
+	c.grinds.RefreshErr = fmt.Errorf("could not resolve host: the remote of %s", app)
+	return nil
+}
+
+func (c *gristContext) theAnswerWasGroundAt(commit string) error {
+	_, _, answer, err := c.onlyAnswer()
+	if err != nil {
+		return err
+	}
+	if answer.Status != application.GristAnswered || answer.Grind.Commit != commit {
+		return fmt.Errorf("expected an answer ground at %s, got %s %q at %s", commit, answer.Status, answer.Reason, answer.Grind.Commit)
+	}
+	return nil
+}
+
+func (c *gristContext) theReportSaysTheRemoteWasUnreachable(app string) error {
+	report := c.out.String()
+	if !strings.Contains(report, "could not be brought level with the remote") || !strings.Contains(report, c.checkout(app)) ||
+		!strings.Contains(report, "local commit") {
+		return fmt.Errorf("the report does not say the remote of %s could not be reached:\n%s", app, report)
+	}
 	return nil
 }
 

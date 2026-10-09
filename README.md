@@ -1453,9 +1453,13 @@ for the mill key and answers each grist once, sealed back to its sender with
   with no seat. The session runs in a private temp directory holding the
   opened photos, may only Read them, and must answer in the grind's schema.
 
-The grind is `grinds/<kind>.json` at the app rig's local `main`, read with its
+The grind is `grinds/<kind>.json` at the app rig's `main`, read with its
 instructions and schema at that commit, and the commit is stamped on the
-answer. A grind takes one of the mill's own grind slots, first come first served; the host's `cap` on Builders neither holds a grind back nor counts it.
+answer. Before it reads, the mill fetches the rig's remote `main` (at most
+once a minute per rig) and reads the remote's commit when it is ahead of the
+rig's local `main`, so a grind landed on another host goes live without a
+landing here; if the remote cannot be reached it reads the local commit and
+says so in its report. A grind takes one of the mill's own grind slots, first come first served; the host's `cap` on Builders neither holds a grind back nor counts it.
 The mill grinds up to `[grist]` `concurrency` grists at once (default 2), oldest
 first, each in its own temp directory and run record, with one lock file
 `grind-<n>.lock` for each; a grist past that waits for a grind to end, and the

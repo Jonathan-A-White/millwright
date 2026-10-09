@@ -26,6 +26,24 @@ Feature: mw grist grind, the mill
     And the grist's photos were deleted from the backend
     And the mill's record holds one line for the grist, "answered", with its Fuel and nothing of its content
 
+  Scenario: A grind changed on the remote's main is the one the mill grinds with
+    Given the remote's main for "cairn" is at commit "fedcba9876543210fedcba9876543210fedcba98" with the grind "sweep" taking version "1.2"
+    And the phone sends a "cairn" "sweep" grist, version "1.2", with 1 photo
+    And the grind answers with a sweep result
+    When the mill grinds
+    Then the mill answered 1, refused 0, failed 0, and left 0 waiting
+    And the answer was ground at the commit "fedcba9876543210fedcba9876543210fedcba98"
+
+  Scenario: A remote that cannot be reached leaves the mill grinding with the local commit, and says so
+    Given the remote's main for "cairn" is at commit "fedcba9876543210fedcba9876543210fedcba98" with the grind "sweep" taking version "1.2"
+    And the remote of "cairn" cannot be reached
+    And the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
+    And the grind answers with a sweep result
+    When the mill grinds
+    Then the mill answered 1, refused 0, failed 0, and left 0 waiting
+    And the answer was ground at the commit "0123456789abcdef0123456789abcdef01234567"
+    And the mill's report says the remote of "cairn" could not be reached and the local commit was used
+
   Scenario: A grist whose app the sender's licence does not open is refused
     Given a phone whose licence opens "spellforge"
     And the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo

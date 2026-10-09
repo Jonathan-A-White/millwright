@@ -405,6 +405,7 @@ func newMill(out io.Writer) (application.GristGrind, error) {
 		Mailbox:      mailbox,
 		Forwards:     grist.NewForwards(stateDir),
 		Grinds:       rig.NewGrinds(),
+		Refreshes:    application.NewGrindRefreshes(application.GrindRefreshEvery),
 		Grinder:      claude.NewGrinder(),
 		Pass:         hostlock.NewTry(stateDir, hostlock.PassFile),
 		Grinding:     slots[0],
