@@ -12,6 +12,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
+	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/cucumber/godog"
 )
@@ -31,7 +32,24 @@ type selfUpdateContext struct {
 	newHead  string
 	commands map[string]string
 	line     string
+
+	// The vault the home keeps (formulas): a clone with a bare origin of its own.
+	vault       string
+	vaultOrigin string
+	vaultHead   string
+	isHome      bool
+	formulas    bool
 }
+
+// homeFile is a vault's home file, read for a fixed answer.
+type homeFile string
+
+func (h homeFile) ReadHome(context.Context) (string, error) { return string(h), nil }
+
+const (
+	oldFormula = "{\"name\":\"tdd-feature\",\"version\":1}\n"
+	newFormula = "{\"name\":\"tdd-feature\",\"version\":2}\n"
+)
 
 // quietSync is a sync that finds the host level.
 type quietSync struct{}
@@ -56,6 +74,16 @@ func InitializeSelfUpdateScenario(ctx *godog.ScenarioContext) {
 	})
 
 	ctx.Given(`^a millwright rig whose origin's main has moved on since this host's checkout$`, c.aRigBehindItsOrigin)
+	ctx.Given(`^the host is home and its vault holds the rig's old formulas$`, func() error { return c.aVaultHolding(true, oldFormula) })
+	ctx.Given(`^the host is home and its vault already holds the rig's new formulas$`, func() error { return c.aVaultHolding(true, newFormula) })
+	ctx.Given(`^the host is not home and its vault holds the rig's old formulas$`, func() error { return c.aVaultHolding(false, oldFormula) })
+	ctx.Given(`^the vault has an uncommitted change under \.beads/formulas$`, c.theVaultIsDirty)
+	ctx.Then(`^the vault holds the rig's new formulas$`, c.theVaultHoldsNew)
+	ctx.Then(`^the vault has one new commit: (.+)$`, c.theVaultHasOneCommit)
+	ctx.Then(`^the vault has no new commit$`, c.theVaultHasNoCommit)
+	ctx.Then(`^the vault's origin has that commit$`, c.theOriginHasIt)
+	ctx.Then(`^the vault's uncommitted change is still there$`, c.theDirtIsStillThere)
+	ctx.Then(`^the tick's line says nothing of formulas$`, c.theLineSaysNothingOfFormulas)
 	ctx.Given(`^the host's build command makes bin/mw$`, c.theBuildMakesBinMw)
 	ctx.When(`^the host's build command makes bin/mw$`, c.theBuildMakesBinMw)
 	ctx.Given(`^the host's build command prints "([^"]*)" and fails$`, c.theBuildFails)
@@ -108,6 +136,12 @@ func (c *selfUpdateContext) aRigBehindItsOrigin() error {
 	if err := os.WriteFile(filepath.Join(other, ".gitignore"), []byte("bin/\n"), 0o644); err != nil {
 		return err
 	}
+	if err := os.MkdirAll(filepath.Join(other, "formulas"), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(other, "formulas", "tdd-feature.formula.json"), []byte(oldFormula), 0o644); err != nil {
+		return err
+	}
 	if err := c.commitAndPush(other, "The rig opens"); err != nil {
 		return err
 	}
@@ -131,6 +165,9 @@ func (c *selfUpdateContext) aRigBehindItsOrigin() error {
 
 	// The other host lands a change on main.
 	if err := os.WriteFile(filepath.Join(other, "fix.md"), []byte("a fix\n"), 0o644); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(other, "formulas", "tdd-feature.formula.json"), []byte(newFormula), 0o644); err != nil {
 		return err
 	}
 	if err := c.commitAndPush(other, "A fix lands"); err != nil {
@@ -194,19 +231,14 @@ func (c *selfUpdateContext) theTickLooks() error {
 	worktrees := rig.New()
 	var out bytes.Buffer
 	tick := application.MillhandTick{
-		Millhand: application.Millhand{Windows: apptest.NewFakeWindows()},
-		Sync:     quietSync{},
-		Mail:     apptest.NewFakeMailbox(),
-		Sweep:    application.Sweep{Tracker: apptest.NewFakeTracker(), Host: "laptop"},
-		SelfUpdate: application.SelfUpdate{
-			Rigs:     map[string]string{application.FactoryRig: c.rig},
-			Checkout: worktrees,
-			After:    rig.NewAfterLanding(rig.WithAfterCommands(c.commands)),
-			Built:    rig.NewBuiltMarks(filepath.Join(c.root, "state")),
-		},
-		Host: "laptop",
-		Now:  func() time.Time { return time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC) },
-		Out:  &out,
+		Millhand:   application.Millhand{Windows: apptest.NewFakeWindows()},
+		Sync:       quietSync{},
+		Mail:       apptest.NewFakeMailbox(),
+		Sweep:      application.Sweep{Tracker: apptest.NewFakeTracker(), Host: "laptop"},
+		SelfUpdate: c.selfUpdate(worktrees, "laptop"),
+		Host:       "laptop",
+		Now:        func() time.Time { return time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC) },
+		Out:        &out,
 	}
 	if _, err := tick.Run(context.Background()); err != nil {
 		return fmt.Errorf("the tick failed: %w", err)
@@ -221,20 +253,15 @@ func (c *selfUpdateContext) theDispatchTickLooks(dryRun bool) error {
 	worktrees := rig.New()
 	var out bytes.Buffer
 	dispatch := application.Dispatch{
-		Tracker:   apptest.NewFakeTracker(),
-		Worktrees: worktrees,
-		Runner:    apptest.NewFakeRunner(),
-		SelfUpdate: application.SelfUpdate{
-			Rigs:     map[string]string{application.FactoryRig: c.rig},
-			Checkout: worktrees,
-			After:    rig.NewAfterLanding(rig.WithAfterCommands(c.commands)),
-			Built:    rig.NewBuiltMarks(filepath.Join(c.root, "state")),
-		},
-		Host:   "desktop",
-		Cap:    1,
-		DryRun: dryRun,
-		Out:    &out,
-		Now:    func() time.Time { return time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC) },
+		Tracker:    apptest.NewFakeTracker(),
+		Worktrees:  worktrees,
+		Runner:     apptest.NewFakeRunner(),
+		SelfUpdate: c.selfUpdate(worktrees, "desktop"),
+		Host:       "desktop",
+		Cap:        1,
+		DryRun:     dryRun,
+		Out:        &out,
+		Now:        func() time.Time { return time.Date(2026, 10, 1, 8, 0, 0, 0, time.UTC) },
 	}
 	if _, err := dispatch.Run(context.Background()); err != nil {
 		return fmt.Errorf("the dispatch failed: %w", err)
@@ -364,4 +391,130 @@ func (c *selfUpdateContext) theLineSaysNothing() error {
 		return fmt.Errorf("expected the tick's line to say nothing of an update, got:\n%s", c.line)
 	}
 	return nil
+}
+
+// aVaultHolding makes the vault: a clone with a bare origin, holding formula as
+// the rig's tdd-feature, committed and pushed.
+func (c *selfUpdateContext) aVaultHolding(home bool, formula string) error {
+	c.formulas, c.isHome = true, home
+	c.vaultOrigin = filepath.Join(c.root, "vault-origin.git")
+	c.vault = filepath.Join(c.root, "vault")
+	if err := c.git(c.root, "init", "--bare", "-q", "-b", "main", c.vaultOrigin); err != nil {
+		return err
+	}
+	if err := c.git(c.root, "clone", "-q", c.vaultOrigin, c.vault); err != nil {
+		return err
+	}
+	if err := gitIdentify(c.vault); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Join(c.vault, ".beads", "formulas"), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(c.vault, ".beads", "formulas", "tdd-feature.formula.json"), []byte(formula), 0o644); err != nil {
+		return err
+	}
+	if err := c.commitAndPush(c.vault, "The vault opens"); err != nil {
+		return err
+	}
+	var err error
+	c.vaultHead, err = gitSay(c.vault, "rev-parse", "HEAD")
+	return err
+}
+
+func (c *selfUpdateContext) theVaultIsDirty() error {
+	return os.WriteFile(filepath.Join(c.vault, ".beads", "formulas", "tdd-feature.formula.json"), []byte("half-done edit\n"), 0o644)
+}
+
+func (c *selfUpdateContext) theVaultHoldsNew() error {
+	held, err := os.ReadFile(filepath.Join(c.vault, ".beads", "formulas", "tdd-feature.formula.json"))
+	if err != nil || string(held) != newFormula {
+		return fmt.Errorf("expected the vault to hold the rig's new formula, got %q (%v)", held, err)
+	}
+	return nil
+}
+
+func (c *selfUpdateContext) vaultCommits() ([]string, error) {
+	out, err := gitSay(c.vault, "log", "--format=%H %s", c.vaultHead+"..HEAD")
+	if err != nil || out == "" {
+		return nil, err
+	}
+	return strings.Split(out, "\n"), nil
+}
+
+func (c *selfUpdateContext) theVaultHasOneCommit(subject string) error {
+	subject = strings.NewReplacer("<old>", c.oldHead[:7], "<new>", c.newHead[:7]).Replace(subject)
+	commits, err := c.vaultCommits()
+	if err != nil {
+		return err
+	}
+	if len(commits) != 1 || !strings.HasSuffix(commits[0], " "+subject) {
+		return fmt.Errorf("expected one vault commit %q, got %q", subject, commits)
+	}
+	return nil
+}
+
+func (c *selfUpdateContext) theVaultHasNoCommit() error {
+	commits, err := c.vaultCommits()
+	if err != nil {
+		return err
+	}
+	if len(commits) != 0 {
+		return fmt.Errorf("expected no new vault commit, got %q", commits)
+	}
+	return nil
+}
+
+func (c *selfUpdateContext) theOriginHasIt() error {
+	local, err := gitSay(c.vault, "rev-parse", "HEAD")
+	if err != nil {
+		return err
+	}
+	remote, err := gitSay(c.vaultOrigin, "rev-parse", "main")
+	if err != nil {
+		return err
+	}
+	if local != remote {
+		return fmt.Errorf("expected the vault's origin at %s, it is at %s", local, remote)
+	}
+	return nil
+}
+
+func (c *selfUpdateContext) theDirtIsStillThere() error {
+	held, err := os.ReadFile(filepath.Join(c.vault, ".beads", "formulas", "tdd-feature.formula.json"))
+	if err != nil || string(held) != "half-done edit\n" {
+		return fmt.Errorf("expected the uncommitted change kept, got %q (%v)", held, err)
+	}
+	return nil
+}
+
+func (c *selfUpdateContext) theLineSaysNothingOfFormulas() error {
+	if strings.Contains(c.line, "formulas") {
+		return fmt.Errorf("expected the tick's line to say nothing of formulas, got:\n%s", c.line)
+	}
+	return nil
+}
+
+// formulaInstall is the SelfUpdate's formula side for this scenario: none for a
+// scenario with no vault.
+func (c *selfUpdateContext) formulaInstall() (application.FormulaInstaller, application.HomeFile, string) {
+	if !c.formulas {
+		return nil, nil, ""
+	}
+	home := homeFile("laptop 2026-10-01T00:00:00Z mayor\n")
+	if !c.isHome {
+		home = homeFile("desktop 2026-10-01T00:00:00Z mayor\n")
+	}
+	return vault.NewFormulas(vault.New(c.vault)), home, "laptop"
+}
+
+func (c *selfUpdateContext) selfUpdate(worktrees *rig.Worktrees, host string) application.SelfUpdate {
+	update := application.SelfUpdate{
+		Rigs:     map[string]string{application.FactoryRig: c.rig},
+		Checkout: worktrees,
+		After:    rig.NewAfterLanding(rig.WithAfterCommands(c.commands)),
+		Built:    rig.NewBuiltMarks(filepath.Join(c.root, "state")),
+	}
+	update.Formulas, update.Home, update.Host = c.formulaInstall()
+	return update
 }

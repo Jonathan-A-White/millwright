@@ -85,3 +85,35 @@ Feature: a host keeps the mw it runs level with the factory rig's main
     When the host's dispatch tick looks at its mw as a dry run
     Then the checkout is still at its old commit
     And the build did not run
+
+  Scenario: A self-update to a main whose formulas differ installs them in the vault
+    Given the host is home and its vault holds the rig's old formulas
+    And the host's build command makes bin/mw
+    When the host's tick looks at its mw
+    Then the vault holds the rig's new formulas
+    And the vault has one new commit: Install formulas from millwright <new>
+    And the vault's origin has that commit
+    And the tick's line says: self-update: millwright formulas installed in the vault from <new>
+
+  Scenario: Formulas already equal make no vault commit
+    Given the host is home and its vault already holds the rig's new formulas
+    And the host's build command makes bin/mw
+    When the host's tick looks at its mw
+    Then the vault has no new commit
+    And the tick's line says nothing of formulas
+
+  Scenario: Uncommitted changes under the vault's formulas leave them alone
+    Given the host is home and its vault holds the rig's old formulas
+    And the vault has an uncommitted change under .beads/formulas
+    And the host's build command makes bin/mw
+    When the host's tick looks at its mw
+    Then the vault has no new commit
+    And the vault's uncommitted change is still there
+    And the tick's line says: self-update: millwright formulas left alone: the vault has 1 uncommitted path(s) under .beads/formulas
+
+  Scenario: A host that is not home leaves the vault's formulas alone
+    Given the host is not home and its vault holds the rig's old formulas
+    And the host's build command makes bin/mw
+    When the host's tick looks at its mw
+    Then the vault has no new commit
+    And the tick's line says nothing of formulas

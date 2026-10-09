@@ -68,6 +68,15 @@ type SelfUpdate struct {
 	// succeeded, so that they run what was just built. A nil Units restarts
 	// nothing.
 	Units UnitRestarter
+
+	// Formulas puts the checkout's formulas/ into the vault's .beads/formulas,
+	// where bd pours them from, once the checkout is level with origin's main
+	// (mw-gq6.314): one vault commit naming the revision, and none when the
+	// copies already match. Only the home does it, so that Home and Host must
+	// say this host is home when Home is set. A nil Formulas installs nothing.
+	Formulas FormulaInstaller
+	Home     HomeFile
+	Host     string
 }
 
 // selfUpdateWords is how every note about an update begins.
@@ -121,25 +130,28 @@ func (s SelfUpdate) Run(ctx context.Context) []string {
 		return failed("reading the checkout's commit", err)
 	}
 
+	formulaNotes := s.installFormulas(ctx, dir, head)
+	with := func(notes []string) []string { return append(formulaNotes, notes...) }
+
 	// Level already: build only what an earlier tick's failed build left
 	// unbuilt, and only a tree that is exactly a commit.
 	if !advanced.Moved {
 		if built, err := s.Built.Built(ctx, FactoryRig); err != nil || built == head {
-			return nil
+			return with(nil)
 		}
 		if dirty, err := s.Checkout.Uncommitted(ctx, dir); err != nil || len(dirty) > 0 {
-			return nil
+			return with(nil)
 		}
 	}
 
 	ran, err := s.After.Run(ctx, FactoryRig, dir)
 	switch {
 	case err != nil:
-		return []string{fmt.Sprintf("%s at %s: %s; the old mw is kept, the next tick tries again",
-			selfUpdateWords, updatedRevision(head), afterLandingLine(s.After.Command(FactoryRig), "could not be run: "+firstLine(err.Error())))}
+		return with([]string{fmt.Sprintf("%s at %s: %s; the old mw is kept, the next tick tries again",
+			selfUpdateWords, updatedRevision(head), afterLandingLine(s.After.Command(FactoryRig), "could not be run: "+firstLine(err.Error())))})
 	case !ran.Succeeded():
-		return []string{fmt.Sprintf("%s at %s: %s; the old mw is kept, the next tick tries again",
-			selfUpdateWords, updatedRevision(head), ran.Line())}
+		return with([]string{fmt.Sprintf("%s at %s: %s; the old mw is kept, the next tick tries again",
+			selfUpdateWords, updatedRevision(head), ran.Line())})
 	}
 
 	notes := []string{fmt.Sprintf("%s %s → %s, built", selfUpdateWords, updatedRevision(before), updatedRevision(head))}
@@ -150,5 +162,5 @@ func (s SelfUpdate) Run(ctx context.Context) []string {
 		notes = append(notes, "the build could not be remembered: "+firstLine(err.Error()))
 	}
 	said, _ := RestartFactoryUnits(ctx, s.Units, FactoryRig)
-	return append(notes, said...)
+	return with(append(notes, said...))
 }
