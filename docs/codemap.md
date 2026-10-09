@@ -23,7 +23,6 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 | Doctor{Check,State,Log,Notes}, VPSProbe | application/doctor.go, application/vpsnginx.go | infra/{doctor,vpsnginx} | none |
 | Network{Probe,Store,Reader} | application/network.go | infra/network | apptest.FakeNetwork* |
 | CardLog | application/card.go | infra/cardlog | apptest.FakeCardLog |
-| CloseOutMarks | application/closeout.go | infra/closeout | apptest.Fake*Mark* |
 | SyncHaltMarker, CloseOutMarks | application/sync.go, application/closeout.go | infra/{synchalt,closeout} | apptest.Fake*Mark* |
 | Worktrees | application/worktrees.go | infra/rig/worktree.go | application/dispatch_test.go |
 | HostLoad | application/hostload.go | infra/hostload | apptest.FakeHostLoad |
@@ -43,10 +42,6 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 | --- | --- | --- | --- |
 | File, Release, Retry | application/file.go, application/release.go, application/retry.go | mw file/release/retry - cmd/mw/file.go, cmd/mw/release.go, cmd/mw/retry.go | features/{file_plan,release,retry}.feature |
 | Show, Peek, Prove, StampHead | application/show.go, application/stamphead.go | mw show/peek/prove/stamp - cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go | features/{show,peek,prove,stamp}.feature |
-| File | application/file.go | mw file - cmd/mw/file.go | features/file_plan.feature |
-| Release | application/release.go | mw release - cmd/mw/release.go | features/release.feature |
-| Retry | application/retry.go | mw retry - cmd/mw/retry.go | features/retry.feature |
-| Show, Peek, Prove, StampHead | application/show.go, application/stamphead.go | mw show/peek/prove/stamp - cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go | features/{show,peek,prove}.feature |
 | Dispatch | application/dispatch.go | mw dispatch - cmd/mw/dispatch.go | features/dispatch.feature |
 | Next, AfterLandingRun | application/next.go, application/afterlandingrun.go | mw next, mw after-landing - cmd/mw/next.go, cmd/mw/afterlanding.go | features/{next,after_landing}.feature |
 | Tester | application/testerreport.go | mw tester report - cmd/mw/tester.go; [tester]: rigs until model effort | features/tester.feature |
@@ -74,6 +69,5 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 | Postern{Serve,Nginx,Mirror} | application/posternhand.go, application/posternmirror.go | mw postern <sub> - cmd/mw/postern.go, cmd/mw/posternmirror.go | features/postern_serve.feature |
 | Prompt{Save,List,Show,Run}, Cards | application/prompt.go | mw prompt/card - cmd/mw/prompt.go, cmd/mw/card.go | features/{prompt,card}.feature |
 | Grist{Key,Grind,Send,Eval,Score,Runs,Stats} | application/grist.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go | mw grist <sub> - cmd/mw/grist.go | features/{grist{,_send,_eval,_audio,_concurrent,_forward},scorer}.feature |
-| Grist{Key,Grind,Send,Eval,Score,Runs,Stats} | application/grist.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go | mw grist key/grind/send/eval/score/runs/stats - cmd/mw/grist.go | features/{grist*,scorer}.feature |
 
 cmd/mw/root.go: the tree; cmd/mw/version.go.
