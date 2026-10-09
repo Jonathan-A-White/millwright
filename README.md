@@ -980,6 +980,32 @@ there is none; in both the note is written straight into the database every
 sync. See *The factory on one host (the desktop)*, above, and
 `features/sync.feature`.
 
+## Keeping the factory's tokens
+
+`mw secrets` keeps the tokens the factory hands to a machine (a cloud
+provider's API key, say) in the vault, in `secrets.enc.yaml`, encrypted with
+[sops](https://github.com/getsops/sops) to the [age](https://github.com/FiloSottile/age)
+recipient the vault's `.sops.yaml` names, so no value is ever in the clear in
+git. The age key that opens it is `~/.config/mw/age.key` (mode 600, or
+`age_key_file` / `MW_AGE_KEY_FILE`), on the home only.
+
+    mw secrets put vultr_api_token < token.txt   # the value from stdin, never an argument
+    mw secrets get vultr_api_token | terraform …  # the value to a pipe or a file, never a terminal
+    mw secrets list                               # names only
+
+`put` drops one trailing newline, refuses an empty value and a name that is not
+a plain word (letters, digits, underscores), and commits `secrets.enc.yaml`
+alone in the vault. `get` refuses when stdout is a terminal, before anything is
+decrypted. No value is printed, logged, or put in an event, a bead or a mail;
+sops gets it on stdin and gives it back on stdout, and is shown no age identity
+but the key file. `contrib/install-sops-age.sh` installs the pinned sops and
+age release binaries, each checked against a sha256 pinned in the script; a
+second run changes nothing. mw doctor's **age-key** check warns when the key is
+missing or not 600 on the home, or present on any other host.
+`docs/secrets.md` says what is kept, who holds the key, how each token is
+revoked at its source, and how the home gets its key. See
+`features/secrets.feature`.
+
 ## Going easy on a metered network
 
 On a WSL host mw asks Windows whether the connection it is using is metered
@@ -3261,6 +3287,15 @@ out. It names the key and the file and has no cure — the doctor never edits th
 config; a person adds `postern_channel = "direct"`. A host the vault's home file
 says is not home reads ok.
 
+**age-key** watches the age key that opens the vault's `secrets.enc.yaml`
+(`~/.config/mw/age.key`, see *Keeping the factory's tokens*). On the home it
+faults when the key is missing, while the vault keeps secrets (a `.sops.yaml`
+or `secrets.enc.yaml`; with neither it reads ok, n/a), and when it is not a
+plain file of mode 600. On any host the vault's home file says is not home it
+faults when a key is there at all: the key lives on the home only. It has no
+cure — the doctor never makes, moves or deletes a key — and names what it
+found and what a person does; `docs/secrets.md` says how.
+
 **Install**, once per host: `sh scripts/install-units.sh --enable mw-doctor`
 (see *Running a host on a timer*), which runs `mw-doctor.timer` at 2, 7, 12,
 ... past the hour — off the dispatch timer's own minutes, so the two never
@@ -3356,6 +3391,12 @@ the network.
   the harness that every Claude seat runs in. Run as published.
 - [tmux](https://github.com/tmux/tmux) (ISC licence, [COPYING](https://github.com/tmux/tmux/blob/HEAD/COPYING)):
   holds each seat's session in a window so it outlives a login. Unmodified.
+- [sops](https://github.com/getsops/sops) (Mozilla Public Licence 2.0, [LICENSE](https://github.com/getsops/sops/blob/HEAD/LICENSE)):
+  encrypts the vault's `secrets.enc.yaml`; `mw secrets` runs the `sops`
+  release binary `contrib/install-sops-age.sh` installs. Unmodified.
+- [age](https://github.com/FiloSottile/age) (Filippo Valsorda; BSD 3-Clause licence, [LICENSE](https://github.com/FiloSottile/age/blob/HEAD/LICENSE)):
+  the encryption sops seals the secrets to, and `age-keygen`, which makes the
+  home's key. Release binaries, unmodified.
 - [Obsidian](https://obsidian.md) (free for personal use, under [Obsidian's terms](https://obsidian.md/terms)):
   how the Governor reads and edits the vault of notes, ledgers and charters.
   Not part of mw; the vault is plain Markdown.

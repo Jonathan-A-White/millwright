@@ -209,6 +209,11 @@ func newDoctorCmd() *cobra.Command {
 			} else {
 				boostAsleep.Limit = time.Duration(hours) * time.Hour
 			}
+			// Judged by the check itself, as beads_sync is: an age_key_file this
+			// host cannot read is age-key's to say.
+			ageKeyFile, ageKeyErr := config.AgeKeyFile()
+			ageKey := doctor.NewAgeKey(mwVault(vault, host), host, vault, ageKeyFile)
+			ageKey.PathErr = ageKeyErr
 			checks := application.DoctorChecks{}
 			vpsNginx, err := hostVPSNginx(mwVault(vault, host), false)
 			if err != nil {
@@ -256,6 +261,7 @@ func newDoctorCmd() *cobra.Command {
 					battery,
 					boostReach,
 					boostAsleep,
+					ageKey,
 				}, checks...),
 				State: store,
 				Log:   store,

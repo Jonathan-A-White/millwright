@@ -1984,3 +1984,27 @@ func TestBuilderNiceRefusesWhatNiceCannotTake(t *testing.T) {
 		}
 	}
 }
+
+func TestAgeKeyFileDefaultsUnderTheHomeAndIsRead(t *testing.T) {
+	home := writeConfig(t, "")
+	t.Setenv("MW_AGE_KEY_FILE", "")
+	if key, err := config.AgeKeyFile(); err != nil || key != filepath.Join(home, ".config", "mw", "age.key") {
+		t.Fatalf("expected ~/.config/mw/age.key, got %q %v", key, err)
+	}
+	writeConfig(t, "age_key_file = \"/keys/age.key\"\n")
+	if key, err := config.AgeKeyFile(); err != nil || key != "/keys/age.key" {
+		t.Fatalf("expected the config's key file, got %q %v", key, err)
+	}
+	t.Setenv("MW_AGE_KEY_FILE", "/env/age.key")
+	if key, _ := config.AgeKeyFile(); key != "/env/age.key" {
+		t.Fatalf("expected the environment ahead of the file, got %q", key)
+	}
+}
+
+func TestAgeKeyFileMustBeAFullPath(t *testing.T) {
+	writeConfig(t, "age_key_file = \"age.key\"\n")
+	t.Setenv("MW_AGE_KEY_FILE", "")
+	if _, err := config.AgeKeyFile(); err == nil || !strings.Contains(err.Error(), "full path") {
+		t.Fatalf("expected a relative key file refused, got %v", err)
+	}
+}

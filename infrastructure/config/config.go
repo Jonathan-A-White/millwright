@@ -125,6 +125,7 @@ const (
 	HandsRootHelperEnv = "MW_HANDS_ROOT_HELPER"
 
 	GristKeyFileEnv  = "MW_GRIST_KEY_FILE"
+	AgeKeyFileEnv    = "MW_AGE_KEY_FILE"
 	GristStateDirEnv = "MW_GRIST_STATE_DIR"
 
 	BeadsSyncEnv          = "MW_BEADS_SYNC"
@@ -585,6 +586,19 @@ func HomeMoveBead() (string, error) {
 // appended. Empty when neither says, and then no voice note is transcribed.
 func PosternTranscribeCmd() (string, error) {
 	return optionalSetting("postern_transcribe_cmd", PosternTranscribeCmdEnv, "")
+}
+
+// DefaultAgeKeyFile is where the age key that opens the vault's
+// secrets.enc.yaml is kept under the home directory when nothing says
+// otherwise. Only the home holds one.
+var DefaultAgeKeyFile = filepath.Join(".config", "mw", "age.key")
+
+// AgeKeyFile reports where the age key is kept: $MW_AGE_KEY_FILE if it is
+// set, otherwise the root-table `age_key_file` key of ~/.config/mw/config.toml,
+// a full path either way, and DefaultAgeKeyFile under the home directory when
+// neither says.
+func AgeKeyFile() (string, error) {
+	return fullPathSetting("age_key_file", AgeKeyFileEnv, DefaultAgeKeyFile, "the age key file")
 }
 
 // DefaultGristKeyFile is where the mill key is kept under the home

@@ -48,6 +48,10 @@ type doctorContext struct {
 	// After hook; nil when this scenario never touched them.
 	posternChannelEnv map[string]string
 
+	// ageKeyDir is the temp dir an age-key scenario made, removed by the
+	// After hook; empty in any other.
+	ageKeyDir string
+
 	tmpLeftoversTmp       string
 	tmpLeftoversProc      string
 	tmpLeftoversFDCounter int
@@ -81,12 +85,16 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 		for key, value := range c.posternChannelEnv {
 			os.Setenv(key, value)
 		}
+		if c.ageKeyDir != "" {
+			os.RemoveAll(c.ageKeyDir)
+		}
 		return ctx, nil
 	})
 
 	c.registerBoostReachSteps(ctx)
 	c.registerBoostAsleepSteps(ctx)
 	c.registerMayorStuckSteps(ctx)
+	c.registerAgeKeySteps(ctx)
 
 	ctx.Given(`^a doctor check "([^"]*)" whose probe says ok$`, c.aCheckWhoseProbeSaysOK)
 	ctx.Given(`^a doctor check "([^"]*)" whose probe says faulty "([^"]*)"$`, c.aCheckWhoseProbeSaysFaulty)

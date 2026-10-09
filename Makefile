@@ -46,7 +46,10 @@ test:
 # its pins. Then the unit installer, run against a stand-in systemctl and a
 # throwaway HOME. Then mw-heavy, against a stand-in systemd-run and a real
 # flock on a throwaway lock file. Then wg-enrol, against temp files with
-# WG_SYNC=0 (and, for the syncconf scenario, stand-in wg and wg-quick). Then the
+# WG_SYNC=0 (and, for the syncconf scenario, stand-in wg and wg-quick). Then
+# contrib/install-sops-age.sh, against a stand-in curl serving made-up releases
+# and a throwaway MW_BIN: its pins, its checksum refusals, and that a second run
+# changes nothing. Then the
 # gate's parallelism: GOFLAGS and GOMAXPROCS must follow JOBS. Every
 # other check here reads only this repository (and a temporary directory)
 # and starts nothing.
@@ -62,6 +65,7 @@ lint:
 	scripts/check-install-units.sh
 	scripts/check-heavy.sh
 	scripts/check-wg-enrol.sh
+	scripts/check-install-sops-age.sh
 	scripts/check-gate-jobs.sh
 	scripts/check-chain-stamps-doc.sh
 

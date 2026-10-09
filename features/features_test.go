@@ -136,6 +136,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeSeatReapScenario(ctx)
 	steps.InitializeSessionEnvScenario(ctx)
 	steps.InitializeSeatUpScenario(ctx)
+	steps.InitializeSecretsScenario(ctx)
 	steps.InitializeStatusScenario(ctx)
 	steps.InitializeSweepScenario(ctx)
 	steps.InitializeTalkModelScenario(ctx)
