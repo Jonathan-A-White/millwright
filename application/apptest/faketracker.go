@@ -909,6 +909,35 @@ func (f *FakeTracker) LoneStories(_ context.Context) ([]application.StoryDetail,
 	return lone, nil
 }
 
+// StoriesSince implements application.TesterStories: every story the fake
+// holds, epics left out, filed, changed or closed at since or later, in the
+// order they arrived. A story with none of those times set is listed.
+func (f *FakeTracker) StoriesSince(_ context.Context, since time.Time) ([]application.StoryDetail, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	var touched []application.StoryDetail
+	for _, id := range f.order {
+		d := f.stories[id].detail
+		if d.IsEpic {
+			continue
+		}
+		times := []time.Time{d.Created, d.Updated, d.ClosedAt}
+		known, recent := false, false
+		for _, at := range times {
+			known = known || !at.IsZero()
+			recent = recent || (!at.IsZero() && !at.Before(since))
+		}
+		if !known || recent {
+			d.CommentCount = len(f.stories[id].comments)
+			touched = append(touched, d)
+		}
+	}
+	return touched, nil
+}
+
 // AddFormula installs a formula in the fake, with the steps pouring it makes.
 func (f *FakeTracker) AddFormula(name string, steps ...application.FormulaStep) {
 	f.mu.Lock()

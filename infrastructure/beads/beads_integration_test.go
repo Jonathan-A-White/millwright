@@ -1473,3 +1473,93 @@ func TestPouringTddFeatureForABugAsksForTheRegressionTestAndTheSweep(t *testing.
 		}
 	}
 }
+
+// The Tester formula (mw-it6qk5.5), poured by a real bd: its steps follow the
+// landed story's HOW TO CHECK IT at a phone's 390x844, try at least five
+// adversarial moves, commit nothing, and write FINDINGS and the Tester fuel.
+func TestPouringTheTesterFormulaDrivesTheLandedAppAndCommitsNothing(t *testing.T) {
+	t.Parallel()
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	installFormula(t, vault, "tester")
+	gateway := beads.New(vault)
+
+	molecule, err := gateway.PourFormula(ctx, "tester", "mw-l.9", "Test: The mic", false)
+	if err != nil {
+		t.Fatalf("pouring tester: %v", err)
+	}
+	if !molecule.Poured() || len(molecule.Steps) != 5 {
+		t.Fatalf("expected the five steps of tester poured, got %+v", molecule)
+	}
+	var all []string
+	for _, step := range molecule.Steps {
+		all = append(all, step.Title+"\n"+step.Description)
+	}
+	text := strings.Join(all, "\n---\n")
+	for _, phrase := range []string{
+		"HOW TO CHECK IT", "390x844", "at least five adversarial moves", "commits nothing",
+		"'FINDINGS'", "'FINDINGS: none'", "'Tester fuel: <tokens>'", "[bug]", "[taste]", "/tmp/tester-mw-l.9/",
+	} {
+		if !strings.Contains(text, phrase) {
+			t.Errorf("expected the poured tester steps to name %q, got:\n%s", phrase, text)
+		}
+	}
+	moves := 0
+	for _, move := range []string{"leave the app and come back", "hold and let go at once", "tap twice fast", "slow 3G", "rotate", "Back at each screen"} {
+		if strings.Contains(text, move) {
+			moves++
+		}
+	}
+	if moves < 5 {
+		t.Errorf("expected at least five adversarial moves named, found %d in:\n%s", moves, text)
+	}
+}
+
+// mw tester report reads every story touched since the trial began, closed ones
+// included, each with its epic's rig, and no epic.
+func TestGatewayListsTheStoriesTouchedSinceAMoment(t *testing.T) {
+	t.Parallel()
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	gateway := beads.New(vault)
+
+	epicID := bdRun(t, vault, beads.Program, "create", "Lampas", "-t", "epic",
+		"--metadata", `{"rig":"lampas","branch":"main","harness":"claude","model":"opus","effort":"high","host":"laptop"}`, "--silent")
+	landed := bdRun(t, vault, beads.Program, "create", "The mic", "--parent", epicID, "--silent")
+	bdRun(t, vault, beads.Program, "close", landed, "--reason", "landed")
+	tester := bdRun(t, vault, beads.Program, "create", "Test: The mic", "--parent", epicID, "-l", "tester",
+		"--metadata", `{"formula":"tester","model":"sonnet"}`, "--silent")
+
+	stories, err := gateway.StoriesSince(ctx, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("listing the stories since an hour ago: %v", err)
+	}
+	seen := map[string]application.StoryDetail{}
+	for _, d := range stories {
+		seen[d.Story.ID] = d
+	}
+	if _, listed := seen[epicID]; listed || len(seen) != 2 {
+		t.Fatalf("expected the two stories and not the epic, got %q", apptestIDs(stories))
+	}
+	if d := seen[landed]; !d.Closed() || d.Merged().Rig != "lampas" {
+		t.Errorf("expected %s closed and on lampas, got %+v", landed, d)
+	}
+	if d := seen[tester]; !application.IsTesterStory(d) {
+		t.Errorf("expected %s to read as a Tester story, got %+v", tester, d)
+	}
+
+	later, err := gateway.StoriesSince(ctx, time.Now().Add(time.Hour))
+	if err != nil || len(later) != 0 {
+		t.Errorf("expected nothing touched an hour from now, got %q: %v", apptestIDs(later), err)
+	}
+}
+
+func apptestIDs(stories []application.StoryDetail) []string {
+	ids := make([]string, 0, len(stories))
+	for _, d := range stories {
+		ids = append(ids, d.Story.ID)
+	}
+	return ids
+}

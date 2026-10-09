@@ -236,6 +236,9 @@ type SeatBoot struct {
 // back is ready for a Runner to start.
 func (b SeatBoot) Boot(ctx context.Context, detail StoryDetail, dir string) (SessionSpec, error) {
 	return b.boot(ctx, detail, dir, func(vaultDir string) string {
+		if IsTesterStory(detail) {
+			return TesterKickoffPrompt(b.Seat, detail.Story.ID, vaultDir)
+		}
 		return KickoffPrompt(b.Seat, detail.Story.ID, vaultDir)
 	})
 }
@@ -405,6 +408,26 @@ func KickoffPrompt(seat, storyID, vaultDir string) string {
 		"A formula step you have not closed yet is one it will name. "+
 		"This session is headless and ends when your turn ends: run the suite in the foreground "+
 		"and wait for it, never in the background, and commit before you stop.", seat, storyID, bdVault(vaultDir), storyID)
+}
+
+// TesterKickoffPrompt is the first thing a Tester story's session is told
+// (mw-it6qk5.5): KickoffPrompt without the commits, because a Tester commits
+// nothing and mw next refuses a Tester branch that holds one.
+func TesterKickoffPrompt(seat, storyID, vaultDir string) string {
+	return fmt.Sprintf("You are booted into the %s seat of millwright as a Tester, and your story is %s. "+
+		"Your charter, your memory of this rig and the story itself are in the system prompt you were given. "+
+		"A Tester uses what a landed story built as the Governor would, on a phone-sized screen, and tries to break it. "+
+		"You commit nothing, to any branch: whatever you make goes under /tmp, and nothing is added to the rig. "+
+		"Follow the story's formula steps in order, and write your FINDINGS on the landed story as its last step says. "+
+		"Your memory of this rig is read-only to you: propose notes under \"For the rig memory:\" in your closing comment. "+
+		"Do not push, do not merge, do not close the story. "+
+		"bd runs without asking, but as its own Bash call, never chained with another command "+
+		"by ;, | or &&. "+
+		"%s"+
+		"Before you stop, run `mw check %s`: for a Tester it checks the branch holds no commits, every formula "+
+		"step is closed and the FINDINGS are written, and exits non-zero when any of that fails. "+
+		"This session is headless and ends when your turn ends: run anything long in the foreground "+
+		"and wait for it, never in the background.", seat, storyID, bdVault(vaultDir), storyID)
 }
 
 // RebaseKickoffPrompt is the first thing a session sent back to rebase is told.

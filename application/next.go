@@ -81,6 +81,10 @@ const (
 	ReasonTestsFail       Reason = "tests-fail"
 	ReasonMergeConflict   Reason = "merge-conflict"
 	ReasonMergedTestsFail Reason = "merged-tests-fail"
+	// A Tester story's branch (mw-it6qk5.5): it committed something, or wrote
+	// no FINDINGS.
+	ReasonTesterCommitted Reason = "tester-committed"
+	ReasonNoFindings      Reason = "no-findings"
 
 	// The factory.
 	ReasonNoResult      Reason = "no-result"
@@ -254,6 +258,10 @@ type Next struct {
 	// turn or for the host to calm. A nil CloseOuts leaves no mark.
 	CloseOuts CloseOutMarks
 
+	// Tester is the home's Tester trial: a landing in it springs a Tester story
+	// (springTester). The zero Tester is no trial, and springs nothing.
+	Tester TesterTrial
+
 	// Seat is whose ledger the line is written in, Host is which host this is,
 	// and Rigs is where each rig is checked out.
 	Seat string
@@ -374,6 +382,13 @@ type NextReport struct {
 	// restarted on the new build, which the mail to the Mayor says first.
 	UnitRestartFailed []string
 
+	// Tested is the landed story a Tester story tested, when this close-out
+	// closed one, and Findings what the Tester found. TesterFiled is the
+	// Tester story this landing sprang, empty when it sprang none.
+	Tested      string
+	Findings    TesterFindings
+	TesterFiled string
+
 	Synced     bool
 	Sync       SyncReport
 	Dispatched bool
@@ -402,6 +417,13 @@ type closeOut struct {
 
 	// began is when the close-out began, as its mark says.
 	began time.Time
+
+	// tested is the landed story a Tester story tested, findings what it
+	// found, and findingsFrom the story they were written on, as its checks
+	// read them (testerRefusals).
+	tested       string
+	findings     TesterFindings
+	findingsFrom string
 }
 
 // attempt is which attempt of the story this close-out is closing: what the
@@ -595,6 +617,15 @@ func (n Next) closeOut(ctx context.Context, storyID string, began time.Time) (Ne
 	if n.ledgeredAsLanded(ctx, c, &report) {
 		return n.closeALanding(ctx, c, &report)
 	}
+	// A Tester story an earlier run closed out and could not close has no
+	// branch left to read: only the close is left to do.
+	if IsTesterStory(detail) {
+		if tested, err := n.testedAlready(ctx, storyID); err != nil {
+			report.Notes = append(report.Notes, err.Error())
+		} else if tested {
+			return n.closeATested(ctx, c, &report)
+		}
+	}
 	return n.land(ctx, c, &report)
 }
 
@@ -662,6 +693,9 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 		report.Refused = true
 		return n.stop(ctx, c, report, found[0].Reason, found[0].Why, found[0].Said)
 	}
+	if IsTesterStory(c.detail) {
+		return n.closeTested(ctx, c, report)
+	}
 
 	n.readBackend(ctx, c, report)
 
@@ -714,6 +748,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	// with the session it runs in leaves a story a later run can tell is landed.
 	n.afterLanding(ctx, c, report)
 	n.stageBackend(ctx, c, report)
+	n.springTester(ctx, c, report, landed)
 	return n.finish(ctx, c, report, outcome, false)
 }
 
@@ -1087,6 +1122,9 @@ type Refusal struct {
 // branch wants to be told at once. It reads and never writes: all it changes
 // is the report it fills in.
 func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all bool) []Refusal {
+	if IsTesterStory(c.detail) {
+		return n.testerRefusals(ctx, c, report, all)
+	}
 	var found []Refusal
 	// refuse notes one refusal and says whether to go no further.
 	refuse := func(reason Reason, why, said string) bool {
@@ -1121,19 +1159,8 @@ func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all
 
 	// What the formula says the session was to do. A step still open is a step
 	// the session did not do, whatever the code looks like.
-	if root := c.detail.Molecule.RootID; root != "" {
-		open, err := n.Tracker.OpenSteps(ctx, root)
-		switch {
-		case err != nil:
-			if refuse(ReasonTrackerFailed, fmt.Sprintf("the steps of the formula poured as %s could not be read: %v", root, err), "") {
-				return found
-			}
-		case len(open) > 0:
-			if refuse(ReasonOpenSteps, fmt.Sprintf("%d formula step(s) of %s are still open, so the formula was not finished", len(open), root),
-				"Still open:\n"+stepList(open)) {
-				return found
-			}
-		}
+	if refusal, open := n.openStepsRefusal(ctx, c); open && refuse(refusal.Reason, refusal.Why, refusal.Said) {
+		return found
 	}
 
 	// What the rig itself says about the work, in the worktree the session left.
@@ -1161,6 +1188,24 @@ func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all
 		refuse(reason, why, "The last lines of `"+checked.Command+"` in "+c.worktree+":\n\n```\n"+checked.Tail(CheckLines)+"\n```")
 	}
 	return found
+}
+
+// openStepsRefusal is the refusal of a story whose poured formula still has a
+// step open, or whose steps could not be read; false when there is none.
+func (n Next) openStepsRefusal(ctx context.Context, c *closeOut) (Refusal, bool) {
+	root := c.detail.Molecule.RootID
+	if root == "" {
+		return Refusal{}, false
+	}
+	open, err := n.Tracker.OpenSteps(ctx, root)
+	switch {
+	case err != nil:
+		return Refusal{ReasonTrackerFailed, fmt.Sprintf("the steps of the formula poured as %s could not be read: %v", root, err), ""}, true
+	case len(open) > 0:
+		return Refusal{ReasonOpenSteps, fmt.Sprintf("%d formula step(s) of %s are still open, so the formula was not finished", len(open), root),
+			"Still open:\n" + stepList(open)}, true
+	}
+	return Refusal{}, false
 }
 
 // nothingCommitted is the refusal of a branch with no commits on it. A
@@ -1305,7 +1350,11 @@ func (n Next) finish(ctx context.Context, c *closeOut, report *NextReport, outco
 	// Told once: the run that landed the story says so, and a later run that
 	// only closes it has nothing new for the Mayor.
 	if !again {
-		n.mailTheMayor(ctx, c, report, MailLanded, "")
+		verdict := MailLanded
+		if c.tested != "" {
+			verdict = MailTested
+		}
+		n.mailTheMayor(ctx, c, report, verdict, "")
 	}
 	if closeErr != nil {
 		return *report, fmt.Errorf("closing out %s: it %s, but the story could not be closed, so it is landed and still open: %w",
@@ -1586,6 +1635,9 @@ func (n Next) mailTheMayor(ctx context.Context, c *closeOut, report *NextReport,
 	if title == "" {
 		title = c.id
 	}
+	if verdict == MailTested {
+		title = c.tested + ": " + c.findings.Counted()
+	}
 	body := report.String()
 	if report.AfterLandingStopped > 0 {
 		body = AfterLandingStoppedLine + "\n" + body
@@ -1850,6 +1902,10 @@ func (r NextReport) String() string {
 		fmt.Fprintf(&b, "  landed  on %s by an earlier run of mw next: nothing was merged, tested or pushed again\n", r.Target)
 	case r.Landed:
 		fmt.Fprintf(&b, "  landed  %s on %s (%d commits, %d push(es))\n", r.How.LandedAs(r.Target), r.Target, r.Commits, r.Pushes)
+	case r.Tested != "" && r.Findings.Text == "":
+		fmt.Fprintf(&b, "  tested  %s by an earlier run of mw next: nothing was read or written again\n", r.Tested)
+	case r.Tested != "":
+		fmt.Fprintf(&b, "  tested  %s: %s; a Tester story, so nothing was merged, raised or pushed\n", r.Tested, r.Findings.Split())
 	case r.SentBack != "":
 		fmt.Fprintf(&b, "  SENT BACK (%s) %s\n", r.Reason, r.Why)
 		if r.Reason == ReasonMergedTestsFail {
@@ -1869,6 +1925,9 @@ func (r NextReport) String() string {
 		fmt.Fprintf(&b, "  rig     %s fast-forwarded to %s on %s\n", r.RigDir, shortCommit(r.How.Commit), r.Target)
 	case r.Rig.Left != "":
 		fmt.Fprintf(&b, "  rig     %s left as it was, not brought up to %s: %s\n", r.RigDir, r.Target, r.Rig.Left)
+	}
+	if r.TesterFiled != "" {
+		fmt.Fprintf(&b, "  tester  %s filed to drive this landing on a phone-sized screen\n", r.TesterFiled)
 	}
 	if len(r.Uncommitted) > 0 {
 		fmt.Fprintf(&b, "  left    uncommitted work, %d path(s), in the worktree:\n", len(r.Uncommitted))

@@ -194,6 +194,33 @@ func TestBootWritesTheBootFileAndHandsTheHarnessEverything(t *testing.T) {
 	}
 }
 
+// A Tester story (mw-it6qk5.5) commits nothing, so its session is never told
+// to commit before it stops, as every other session is.
+func TestBootTellsATesterToCommitNothing(t *testing.T) {
+	v, h := newFakeVault(), &fakeHarness{}
+	tester := aStory(func(d *application.StoryDetail) {
+		d.Story.Overrides.Formula = application.TesterFormula
+		d.Labels = []string{application.LabelTester}
+	})
+	if _, err := aSeatBoot(v, h).Boot(context.Background(), tester, "/root/.mw-worktrees/mw-gq6.6"); err != nil {
+		t.Fatalf("booting the Tester story: %v", err)
+	}
+	kickoff := h.launch.Kickoff
+	if kickoff != application.TesterKickoffPrompt("builder", "mw-gq6.6", "/vault") {
+		t.Errorf("expected the Tester kickoff, got %q", kickoff)
+	}
+	for _, want := range []string{"commit nothing", "FINDINGS", "mw check mw-gq6.6", "Do not push"} {
+		if !strings.Contains(kickoff, want) {
+			t.Errorf("expected the Tester kickoff to say %q, got %q", want, kickoff)
+		}
+	}
+	for _, never := range []string{"commit before you stop", "Once your work is committed"} {
+		if strings.Contains(kickoff, never) {
+			t.Errorf("expected the Tester kickoff never to say %q, got %q", never, kickoff)
+		}
+	}
+}
+
 func TestBootRefusesWhatItCannotBoot(t *testing.T) {
 	cases := map[string]struct {
 		boot   func() application.SeatBoot

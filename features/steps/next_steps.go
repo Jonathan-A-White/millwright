@@ -34,8 +34,11 @@ type nextContext struct {
 	root  string // holds the origin, both clones and the vault
 	vault string
 	rig   string
-	seed  string // the other host's clone
-	moves int    // how many times the other host has moved the target on
+	// rigName is what the rig is called, as the scenario named it; empty is
+	// "millwright" (rigKey).
+	rigName string
+	seed    string // the other host's clone
+	moves   int    // how many times the other host has moved the target on
 
 	tracker *apptest.FakeTracker
 	runner  *apptest.FakeRunner
@@ -77,6 +80,8 @@ type nextContext struct {
 	deployRanBeside atomic.Bool         // whether the command had started when that deploy let go
 	deployReleased  chan struct{}
 	units           *apptest.FakeUnitRestarter // the user manager this host has, when a scenario names the follower
+
+	tester *testerFixture // the [tester] trial and what a Tester scenario filed, when it has one
 
 	backend   *backendFixture // the [backend] table this scenario's host has, when it has one
 	worktrees *rig.Worktrees  // the git adapter mw next is given, so that the backend is built through it
@@ -172,6 +177,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerNextReattemptSteps(ctx, c)
 	registerNextStampSteps(ctx, c)
 	registerNextVersionSteps(ctx, c)
+	registerTesterSteps(ctx, c)
 
 	ctx.When(`^mw closes out "([^"]*)"$`, c.mwClosesOut)
 	ctx.When(`^mw closes out "([^"]*)" a second time$`, c.mwClosesOut)
@@ -232,6 +238,15 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 
 	registerCheckSteps(ctx, c)
 	registerNextLeaseSteps(ctx, c)
+}
+
+// rigKey is the name of the scenario's rig: the one it was checked out as,
+// "millwright" when none was.
+func (c *nextContext) rigKey() string {
+	if c.rigName == "" {
+		return "millwright"
+	}
+	return c.rigName
 }
 
 // workspace makes the temp directory a scenario keeps everything in, once.
@@ -299,6 +314,7 @@ func (c *nextContext) aRigFromABareOrigin(name string) error {
 		}
 	}
 
+	c.rigName = name
 	c.rig = filepath.Join(root, "rigs", name)
 	if err := gitRun(root, "git", "clone", "-q", origin, c.rig); err != nil {
 		return err
@@ -332,7 +348,7 @@ exec git "$@"
 
 func (c *nextContext) aPlanWorkedHere(epic, host, branch string) error {
 	c.tracker.AddEpic(epic, domain.Path{
-		Rig: "millwright", Branch: branch, Harness: domain.HarnessClaude,
+		Rig: c.rigKey(), Branch: branch, Harness: domain.HarnessClaude,
 		Model: domain.ModelOpus, Effort: domain.EffortHigh, Host: host,
 	})
 	c.lastEpic = epic
@@ -392,6 +408,12 @@ func (c *nextContext) worked(id string) error {
 	if err := c.aStoryReadyHere(id); err != nil {
 		return err
 	}
+	return c.claimAndCut(id)
+}
+
+// claimAndCut claims a story the tracker holds and cuts it the worktree a
+// dispatch would have.
+func (c *nextContext) claimAndCut(id string) error {
 	ctx := context.Background()
 	if err := c.tracker.ClaimStory(ctx, id); err != nil {
 		return err
@@ -786,7 +808,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 
 	worktrees := rig.New(rig.WithProgram(c.gitProgram))
 	c.worktrees = worktrees
-	rigs := map[string]string{"millwright": c.rig}
+	rigs := map[string]string{c.rigKey(): c.rig}
 	files := vault.New(c.vault)
 	boot := application.SeatBoot{
 		Vault: files, Harness: claude.New(), Seat: nextSeat, Host: nextHost,
@@ -844,6 +866,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 		Backend:        c.backendStage(),
 		Units:          c.unitRestarter(),
 		Stamps:         c.stamps,
+		Tester:         c.testerTrial(),
 	}.Run(context.Background(), id)
 
 	if c.afterFirst == nil {

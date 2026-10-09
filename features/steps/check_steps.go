@@ -213,7 +213,7 @@ func (c *nextContext) checkWith(id string, slots *rig.Slots) error {
 		Landing: worktrees,
 		Checks:  rig.NewChecks(rig.WithCommand(c.checkCommand)),
 		Host:    nextHost,
-		Rigs:    map[string]string{"millwright": c.rig},
+		Rigs:    map[string]string{c.rigKey(): c.rig},
 		Out:     &c.printed,
 	}.Run(context.Background(), id)
 	return nil

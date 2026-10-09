@@ -73,7 +73,7 @@ func (c *nextContext) theRigNamesVersionFiles(first, second string) error {
 		return err
 	}
 	line := fmt.Sprintf("version_files = [%q, %q]\n", first, second)
-	return os.WriteFile(filepath.Join(dir, "millwright"+vault.RigFileExt), []byte(line), 0o644)
+	return os.WriteFile(filepath.Join(dir, c.rigKey()+vault.RigFileExt), []byte(line), 0o644)
 }
 
 // theWorkIsRebasedOntoMain moves the story's branch onto the main the origin now

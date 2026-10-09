@@ -109,6 +109,7 @@ func TestKickoffPromptsSayTheRigMemoryIsReadOnlyToTheSession(t *testing.T) {
 	prompts := map[string]string{
 		"kickoff":        application.KickoffPrompt("builder", "mw-gq6.6", "/vault"),
 		"rebase kickoff": application.RebaseKickoffPrompt("builder", "mw-gq6.50", "/vault", "origin/main"),
+		"tester kickoff": application.TesterKickoffPrompt("builder", "mw-l.2", "/vault"),
 	}
 	for name, prompt := range prompts {
 		if !strings.Contains(prompt, want) {
