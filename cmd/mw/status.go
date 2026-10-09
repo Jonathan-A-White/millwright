@@ -6,6 +6,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
+	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
 	"github.com/Jonathan-A-White/millwright/infrastructure/procs"
 
 	"github.com/spf13/cobra"
@@ -75,6 +76,11 @@ func newStatusCmd() *cobra.Command {
 			"the standby's /healthz says with the home's: 'standby behind: <standby commit|none> vs <home\n" +
 			"commit>', 'standby level at <commit>', or 'standby not checked (<why>)'. A landing that changed\n" +
 			"the backend stages the standby's swap as a hands step for the Governor's tap.\n\n" +
+			"A 'host: N of cap M' line says how many of the cap on sessions (config `cap`) are in use. When the\n" +
+			"host has no room to start another story - its 1-minute load at or above its core count, or\n" +
+			"less than 2 GB of memory available (the [dispatch] table's room_load_per_core and\n" +
+			"room_min_free_mb) - a 'held back, no room' line gives each reason, and mw dispatch starts\n" +
+			"nothing here until it clears.\n\n" +
 			"Every line fits a phone-width terminal, at most 60 columns. Nothing is claimed, nothing is\n" +
 			"written and no session is started: status only reads.",
 		Args: cobra.NoArgs,
@@ -97,6 +103,14 @@ func newStatusCmd() *cobra.Command {
 				return err
 			}
 			beadsBudget, err := config.BeadsBudgetBytes()
+			if err != nil {
+				return err
+			}
+			atOnce, err := config.Cap()
+			if err != nil {
+				return err
+			}
+			room, err := config.Room()
 			if err != nil {
 				return err
 			}
@@ -154,6 +168,9 @@ func newStatusCmd() *cobra.Command {
 				SyncMode:         setting.Configured,
 				Home:             files,
 				Network:          net,
+				Cap:              atOnce,
+				Load:             hostload.Proc{},
+				Room:             application.RoomLimits{LoadPerCore: room.LoadPerCore, MinFreeMB: room.MinFreeMB},
 				VPSNginx:         vps,
 				Standby:          standby,
 				Out:              cmd.OutOrStdout(),

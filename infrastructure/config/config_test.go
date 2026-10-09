@@ -2037,3 +2037,32 @@ func TestTesterReadsTheTrialAndRefusesAHalfSetTable(t *testing.T) {
 		}
 	}
 }
+
+// With no [dispatch] table a host needs a core's worth of load and 2 GB.
+func TestRoomDefaults(t *testing.T) {
+	writeConfig(t, "host = \"laptop\"\n")
+	got, err := config.Room()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.LoadPerCore != 1.0 || got.MinFreeMB != 2048 {
+		t.Fatalf("expected 1.0 a core and 2048 MB, got %+v", got)
+	}
+}
+
+func TestRoomIsReadFromTheTable(t *testing.T) {
+	writeConfig(t, "[dispatch]\nroom_load_per_core = 0.75\nroom_min_free_mb = 4096\n")
+	got, err := config.Room()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.LoadPerCore != 0.75 || got.MinFreeMB != 4096 {
+		t.Fatalf("expected 0.75 a core and 4096 MB, got %+v", got)
+	}
+	for _, bad := range []string{"room_load_per_core = 0\n", "room_load_per_core = lots\n", "room_min_free_mb = 0\n", "room_min_free_mb = 1.5\n"} {
+		writeConfig(t, "[dispatch]\n"+bad)
+		if _, err := config.Room(); err == nil || !strings.Contains(err.Error(), "room_") {
+			t.Errorf("expected %q to be refused naming the key, got %v", bad, err)
+		}
+	}
+}

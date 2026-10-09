@@ -15,6 +15,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/domain/events"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
@@ -60,6 +61,10 @@ type dispatchContext struct {
 	// stories of every host.
 	load      *apptest.FakeHostLoad
 	offersAll bool
+	// room is the room limits a scenario's config file gave, when it gave them;
+	// events is the home's event log the dispatch reads and writes (mw-t0z3fu.1).
+	room   application.RoomLimits
+	events *apptest.FakeEventLog
 	// earlier is the molecule a scenario poured for a story before the dispatch
 	// ran, so that it can say whether the dispatch reused it or poured another.
 	earlier application.Molecule
@@ -86,6 +91,7 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 			files:       &apptest.FakeVaultFiles{},
 			bundleFiles: &apptest.FakeVaultFiles{},
 			mail:        apptest.NewFakeMailbox(),
+			events:      &apptest.FakeEventLog{},
 		}
 		// ReclaimStory judges a lease against the fake tracker's own clock
 		// (mw-gq6.120): every scenario in this file runs at dispatchNow, so the
@@ -138,6 +144,15 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the story "([^"]*)" records a molecule that does not exist$`, c.theStoryRecordsAMissingMolecule)
 
 	ctx.Given(`^this host is at load ([0-9.]+) of (\d+) cores$`, c.thisHostIsAtLoad)
+	ctx.When(`^this host is then at load ([0-9.]+) of (\d+) cores$`, c.thisHostIsAtLoad)
+	ctx.Given(`^this host has (\d+) MB of memory available$`, c.thisHostHasMemoryAvailable)
+	ctx.Given(`^this host's load cannot be read$`, c.thisHostsLoadCannotBeRead)
+	ctx.Given(`^this host's memory cannot be read$`, c.thisHostsMemoryCannotBeRead)
+	ctx.Given(`^the config file says room_load_per_core is ([0-9.]+) and room_min_free_mb is (\d+)$`, c.theConfigSaysTheRoomLimits)
+	ctx.Then(`^(\d+) sessions were started$`, c.sessionsWereStarted)
+	ctx.Then(`^the event log holds no room events$`, c.theEventLogHoldsNoRoomEvents)
+	ctx.Then(`^the event log holds (\d+) room events?, the last saying the host has no room: (.+)$`, c.theEventLogHoldsRoomEventsLastNoRoom)
+	ctx.Then(`^the event log holds (\d+) room events?, the last saying the host has room again$`, c.theEventLogHoldsRoomEventsLastRoomAgain)
 	ctx.Given(`^the work tracker offers dispatch every ready story, whichever host it names$`, c.theTrackerOffersEveryStory)
 	ctx.Given(`^the story "([^"]*)" was claimed by the other host before the sync$`, c.theOtherHostClaimedFirst)
 
@@ -628,6 +643,105 @@ func (c *dispatchContext) thisHostIsAtLoad(load string, cores int) error {
 	return nil
 }
 
+func (c *dispatchContext) readingToSet() *apptest.FakeHostLoad {
+	if c.load == nil {
+		c.load = &apptest.FakeHostLoad{Reading: application.LoadReading{Load: 1, Cores: 16}}
+	}
+	return c.load
+}
+
+func (c *dispatchContext) thisHostHasMemoryAvailable(mb int64) error {
+	load := c.readingToSet()
+	load.Reading.MemAvailableMB, load.Reading.MemKnown = mb, true
+	return nil
+}
+
+func (c *dispatchContext) thisHostsLoadCannotBeRead() error {
+	c.load = &apptest.FakeHostLoad{Err: errors.New("no /proc/loadavg")}
+	return nil
+}
+
+func (c *dispatchContext) thisHostsMemoryCannotBeRead() error {
+	load := c.readingToSet()
+	load.Reading.MemAvailableMB, load.Reading.MemKnown = 0, false
+	return nil
+}
+
+func (c *dispatchContext) theConfigSaysTheRoomLimits(perCore string, minFreeMB int64) error {
+	value, err := strconv.ParseFloat(perCore, 64)
+	if err != nil {
+		return fmt.Errorf("%q is not a number: %w", perCore, err)
+	}
+	c.room = application.RoomLimits{LoadPerCore: value, MinFreeMB: minFreeMB}
+	return nil
+}
+
+func (c *dispatchContext) sessionsWereStarted(n int) error {
+	report, err := c.dispatched()
+	if err != nil {
+		return err
+	}
+	if names := c.runner.Names(); len(names) != n || len(report.Started) != n {
+		return fmt.Errorf("expected %d sessions, the runner holds %q and the report says %+v", n, names, report.Started)
+	}
+	return nil
+}
+
+// roomEvents is the room events the dispatch wrote to the log, oldest first.
+func (c *dispatchContext) roomEvents() ([]events.Event, error) {
+	all, err := c.events.Since(context.Background(), 0)
+	if err != nil {
+		return nil, err
+	}
+	var room []events.Event
+	for _, ev := range all {
+		if ev.Kind == events.KindJob && ev.Actor == application.JobRoom+"@vps" {
+			room = append(room, ev)
+		}
+	}
+	return room, nil
+}
+
+func (c *dispatchContext) theEventLogHoldsNoRoomEvents() error {
+	room, err := c.roomEvents()
+	if err != nil {
+		return err
+	}
+	if len(room) != 0 {
+		return fmt.Errorf("expected no room events, got %+v", room)
+	}
+	return nil
+}
+
+func (c *dispatchContext) theEventLogHoldsRoomEventsLastNoRoom(n int, why string) error {
+	room, err := c.roomEvents()
+	if err != nil {
+		return err
+	}
+	if len(room) != n {
+		return fmt.Errorf("expected %d room events, got %+v", n, room)
+	}
+	last := room[len(room)-1]
+	if last.To != events.JobFailed || !strings.Contains(last.Detail, why) {
+		return fmt.Errorf("expected the last room event to fail saying %q, got %+v", why, last)
+	}
+	return nil
+}
+
+func (c *dispatchContext) theEventLogHoldsRoomEventsLastRoomAgain(n int) error {
+	room, err := c.roomEvents()
+	if err != nil {
+		return err
+	}
+	if len(room) != n {
+		return fmt.Errorf("expected %d room events, got %+v", n, room)
+	}
+	if last := room[len(room)-1]; last.To != events.JobDone {
+		return fmt.Errorf("expected the last room event to be done, got %+v", last)
+	}
+	return nil
+}
+
 // theTrackerOffersEveryStory makes the tracker hand dispatch every ready story,
 // not only the ones pathed to this host, so that the door's own host check is
 // what a scenario tests: the tracker filters by host too, the second lock on
@@ -726,6 +840,8 @@ func (c *dispatchContext) dispatch(host string, cap int, dryRun bool) error {
 		MaxAttempts: c.attempts(),
 		Mailbox:     c.mail,
 		Rigs:        map[string]string{"millwright": c.rig},
+		Room:        c.room,
+		Events:      c.events,
 		DryRun:      dryRun,
 		Out:         &c.out,
 		Log:         ticklog.New(c.dispatchLogDir()),

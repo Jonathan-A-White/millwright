@@ -499,3 +499,36 @@ Feature: mw status
     When mw status reads the host
     Then reading status succeeds
     And the report has no heading for held beads with a hands step
+
+  # Room (mw-t0z3fu.1): mw dispatch starts no story on a host with no room, and
+  # mw status says how many of the cap are in use and, when the host is held
+  # back, why.
+
+  Scenario: The report says how many of the cap are in use, and says nothing of room while the host has it
+    Given a status story "mw-gq6.1" filed under it
+    And the status story "mw-gq6.1" is claimed with its session running
+    And this host runs at most 4 sessions at once
+    And this host is at load 3.0 of 16 cores with 8000 MB of memory available
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "host: 1 of cap 4"
+    And the report does not say the host is held back
+
+  Scenario: The report says why the host is held back when it has no room
+    Given a status story "mw-gq6.1" filed under it
+    And this host runs at most 4 sessions at once
+    And this host is at load 20.0 of 16 cores with 1500 MB of memory available
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "host: 0 of cap 4"
+    And the report says the host is held back: "load 20.0 of 16 cores; 1500 MB free, under 2048 MB"
+    And every line of the report is at most 60 columns wide
+    And nothing was written through the tracker, the ledger or the runner
+
+  Scenario: A load that cannot be read does not hold the host back in the report
+    Given this host runs at most 4 sessions at once
+    And this host's load cannot be read for the report
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "host: 0 of cap 4"
+    And the report does not say the host is held back

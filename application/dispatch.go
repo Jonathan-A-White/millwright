@@ -109,11 +109,14 @@ type Dispatch struct {
 	// The zero value waits for real, and stops when the context does.
 	Wait func(ctx context.Context, d time.Duration) error
 
-	// Load is how busy this host is, read before a story pathed to domain.HostAuto
-	// is taken: such a story is passed over while the 1-minute load is at or above
-	// the core count. A story that names this host is never braked by load. A nil
-	// Load, or a load that cannot be read, does not brake: the cap still applies.
+	// Load is how busy this host is, read once a pass: no story, whichever host it
+	// names, is taken while the host has no room (mw-t0z3fu.1), which is its
+	// 1-minute load at or above Room's share of a core each or its available
+	// memory under Room's floor. The cap is still the ceiling. A nil Load, or a
+	// load or memory that cannot be read, does not hold a story back: the cap
+	// rules.
 	Load HostLoad
+	Room RoomLimits
 
 	// Host is which of the factory's hosts this is, Cap is how many sessions
 	// may be running here at once, and Rigs is where each rig is checked out.
@@ -518,6 +521,13 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	}
 	free := d.Cap - report.Running
 
+	// The room is read once a pass. A pass that is only looking leaves no word of
+	// it in the log.
+	noRoom, roomRead := ReadRoom(ctx, d.Load, d.Room)
+	if roomRead && !d.DryRun {
+		d.tellRoom(ctx, noRoom, &report)
+	}
+
 	ready, err := d.Tracker.ReadyForHost(ctx, d.Host)
 	if err != nil {
 		return report, fmt.Errorf("dispatching on %s: reading what is ready here: %w", d.Host, err)
@@ -528,8 +538,6 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	// dry run reads them too, so that it reports the same refusal a real run
 	// would, without writing anything.
 	var formulas map[string]bool
-	// The load is read once, and only if a story may run on any host.
-	var load *LoadReading
 	for _, detail := range ready {
 		id := detail.Story.ID
 		// First, so that a story that is not a session's to take is never passed
@@ -552,20 +560,18 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Why: "its path names no host, so no host may take it"})
 			continue
 		}
-		// A story that may run on any host passes the host check on every host,
-		// provided this one is not already busy: the cap is checked below as it
-		// is for any story, and the load only here, for stories nobody else has
-		// a claim to.
+		// A story that may run on any host passes the host check on every host:
+		// the cap is checked below as it is for any story.
 		auto := path.Host == domain.HostAuto
 		if path.Host != d.Host && !auto {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Why: "it is worked on " + path.Host})
 			continue
 		}
-		if auto {
-			if busy, why := d.busy(ctx, &load); busy {
-				report.Passed = append(report.Passed, Passed{StoryID: id, Why: why})
-				continue
-			}
+		// A story this host would take waits for the room to take it, whichever
+		// host it names (mw-t0z3fu.1). It stays ready, claimed by nobody.
+		if noRoom != "" {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf("%s has no room: %s", d.Host, noRoom)})
+			continue
 		}
 
 		// A story whose last run landed it is finished but for its close, which
@@ -741,24 +747,50 @@ func (d Dispatch) syncWaitingForTheNetwork(ctx context.Context) (SyncReport, int
 	}
 }
 
-// busy says whether this host is too busy to take a story that may run on any
-// host, and why. The load is read the first time it is asked for and kept for the
-// rest of the run. What cannot be read is not busy: the cap is still the limit.
-func (d Dispatch) busy(ctx context.Context, read **LoadReading) (bool, string) {
-	if d.Load == nil {
-		return false, ""
+// tellRoom writes the job event for a change of this host's room from what the
+// log last said of it: one when it has none, one when it has it back, and none
+// for a host whose room stays as it was. A host the log has said nothing of
+// has room. What cannot be read or written is a note, and the next pass tries
+// again.
+func (d Dispatch) tellRoom(ctx context.Context, noRoom string, report *DispatchReport) {
+	if d.Events == nil {
+		return
 	}
-	if *read == nil {
-		reading, err := d.Load.Load(ctx)
-		if err != nil {
-			return false, ""
+	held, err := roomHeld(ctx, d.Events, d.Host)
+	if err != nil {
+		report.Notes = append(report.Notes, err.Error())
+		return
+	}
+	if held == (noRoom != "") {
+		return
+	}
+	event := events.Event{Kind: events.KindJob, Actor: JobRoom + "@" + d.Host, From: events.JobRunning}
+	if noRoom != "" {
+		event.To = events.JobFailed
+		event.Detail = events.CutDetail(fmt.Sprintf("%s has no room: %s; it starts no story until it has", d.Host, noRoom))
+	} else {
+		event.To = events.JobDone
+		event.Detail = fmt.Sprintf("%s has room again: it starts stories up to its cap of %d", d.Host, d.Cap)
+	}
+	if _, err := (EventEmit{Log: d.Events, Now: d.now, Event: event}).Run(ctx); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the room event could not be written: %v", err))
+	}
+}
+
+// roomHeld reports whether the log's latest word of host's room is that it has
+// none. The log is read whole, as a pause is: a pass reads it once.
+func roomHeld(ctx context.Context, log EventLog, host string) (bool, error) {
+	evs, err := log.Since(ctx, 0)
+	if err != nil {
+		return false, fmt.Errorf("reading the event log for the room of %s: %w", host, err)
+	}
+	held := false
+	for _, ev := range evs {
+		if ev.Kind == events.KindJob && ev.Actor == JobRoom+"@"+host {
+			held = ev.To == events.JobFailed
 		}
-		*read = &reading
 	}
-	if reading := **read; reading.Busy() {
-		return true, fmt.Sprintf("host=%s and %s is at load %.1f of %d cores", domain.HostAuto, d.Host, reading.Load, reading.Cores)
-	}
-	return false, ""
+	return held, nil
 }
 
 // start dispatches one story: claim, worktree, formula, boot, session, and the

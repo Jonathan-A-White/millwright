@@ -57,6 +57,10 @@ type statusContext struct {
 	// lastTick is when each host's log of each kind was last added to, so that
 	// the next lines a scenario adds come after it.
 	lastTick map[string]time.Time
+	// cap and load are the cap on sessions a scenario gave this host and the load
+	// and memory it read, when it gave them (mw-t0z3fu.1).
+	cap  int
+	load *apptest.FakeHostLoad
 
 	report application.StatusReport
 	err    error
@@ -103,6 +107,8 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 		}
 		return ctx, os.Unsetenv(config.HostSilenceEnv)
 	})
+
+	registerStatusRoomSteps(ctx, c)
 
 	ctx.Given(`^the status epic "([^"]*)" on the default path:$`, c.theStatusEpicOnTheDefaultPath)
 	ctx.Given(`^a status story "([^"]*)" filed under it$`, c.aStatusStoryFiledUnderIt)
@@ -480,7 +486,7 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 	}
 
 	mayor := application.MayorReader{Tracker: c.tracker, Notes: c.tracker, Now: func() time.Time { return c.now }}
-	c.report, c.err = application.Status{
+	status := application.Status{
 		Tracker:        c.tracker,
 		Notes:          c.tracker,
 		Rules:          c.epicRules,
@@ -493,7 +499,12 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 		Mayor:          mayor,
 		HeldHands:      mayor,
 		Now:            func() time.Time { return c.now },
-	}.Run(context.Background())
+		Cap:            c.cap,
+	}
+	if c.load != nil {
+		status.Load = c.load
+	}
+	c.report, c.err = status.Run(context.Background())
 	return nil
 }
 
