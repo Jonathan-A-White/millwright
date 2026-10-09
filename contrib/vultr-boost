@@ -133,6 +133,7 @@ NAME=$(tfvar name)
 NAME=${NAME:-cloud1}
 ENDPOINT=$(tfvar wg_endpoint)
 HUB_SSH=${VULTR_BOOST_HUB_SSH:-root@${ENDPOINT%:*}}
+[ "$HUB_SSH" != "root@" ] || HUB_SSH="root@<the host of wg_endpoint>"
 
 step() {
 	N=$((N + 1))
