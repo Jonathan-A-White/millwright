@@ -19,7 +19,10 @@ token gets its row here before it is put.
 
 | Name | What it is | Used by | Revoke it at its source |
 | --- | --- | --- | --- |
-| `vultr_api_token` | the Vultr account's API key (planned: epic mw-5gr3k0) | `contrib/vultr-boost` on the home, to make and unmake a Boost box | my.vultr.com, Account, API: disable the API or regenerate the key, then put the new one |
+| `vultr_api_token` | the Vultr account's API key (epic mw-5gr3k0) | `contrib/vultr-boost` on the home ([vultr-boost.md](vultr-boost.md)), to make and unmake a Boost box | my.vultr.com, Account, API: disable the API or regenerate the key, then put the new one |
+| `boost_github_token` | a GitHub token that reads the vault and the rigs (optional) | `contrib/vultr-boost`, into the box's cloud-init | github.com, Settings, Developer settings: delete the token |
+| `boost_claude_token` | a Claude Code token from `claude setup-token` (optional) | `contrib/vultr-boost`, into the box's cloud-init | claude.ai, Settings: revoke the token |
+| `boost_beads_password` | the beads server's password, if it has one (optional) | `contrib/vultr-boost`, into the box's cloud-init | change it on the beads server |
 
 Nothing else is kept here. The claude login, GitHub credentials, the Postern
 and mill keys and WireGuard keys are each where their own docs say, not in this

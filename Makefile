@@ -51,7 +51,9 @@ test:
 # and a throwaway MW_BIN: its pins, its checksum refusals, and that a second run
 # changes nothing. Then boost-bootstrap, against stand-in apt, git, curl,
 # systemctl and wg and a fake root, twice over: the second run must change
-# nothing. Then the
+# nothing. Then contrib/vultr-boost, against stand-in mw, terraform, ssh, age and
+# curl and a throwaway vault (terraform fmt, validate and tflint where installed).
+# Then the
 # gate's parallelism: GOFLAGS and GOMAXPROCS must follow JOBS. Every
 # other check here reads only this repository (and a temporary directory)
 # and starts nothing.
@@ -69,6 +71,7 @@ lint:
 	scripts/check-wg-enrol.sh
 	scripts/check-install-sops-age.sh
 	scripts/check-boost-bootstrap.sh
+	scripts/check-vultr-boost.sh
 	scripts/check-gate-jobs.sh
 	scripts/check-chain-stamps-doc.sh
 
