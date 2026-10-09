@@ -40,6 +40,7 @@ left out of an event that ends no emergency, so an event without it reads as it 
 | `handover` | none | empty | `<seat> to <successor window> at <N>`: the old session answers nothing past event N |
 | `action_applied` | none | the bead the tap was on | the tap's txid: a Release, Hold, Keep, Close or Verified of the Governor's, applied from the inbox |
 | `control` | none | the bead for `cancel` and `priority`, else empty | the word and what it takes: `cancel`, `pause-host <host>`, `resume-host <host>`, `cap <host> <n>`, `priority <n>` |
+| `cloud` | none | empty | a cloud box made (`up cloud1: ...`), destroyed (`down cloud1: idle 30m`), one that did not come up (`failed cloud1: ...`), or the month's cap reached (`cap reached: ...`) |
 
 A `bead_changed` event whose from and to are the same state is a change that
 left the status alone (a comment, an edited field). Every other event of a
@@ -144,6 +145,11 @@ moves it to `sent.jsonl` beside its txid, then comments `STAMP <txid> for <commi
 story. A stamp the backend would not take stays in `pending.jsonl` with its failed tries counted
 (`attempts`, no limit) and is tried again on the next pass; the pass is `done` all the same, its
 failures said on the follower's stderr. A pass over an empty queue reads nothing but the queue.
+
+The `cloud` job runs the cloud check (`mw cloud check`, docs/vultr-boost.md, "Elastic") in the
+follower itself, every minute, reason `clock`, on a host whose config has a `[cloud]` table and
+only while it is home. A pass that makes or destroys a box writes a `cloud` event, actor
+`cloud@<host>`, for each move; a pass that finds nothing to do writes none.
 
 ## Control
 
