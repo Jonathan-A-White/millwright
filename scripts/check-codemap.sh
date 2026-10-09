@@ -30,11 +30,12 @@
 #        line matching  ^func new<Name>Cmd(
 #    Files under application/apptest/ are skipped: they are fakes, not ports.
 #
-# 4. DUPLICATES. .gitattributes merges the map by union, so two branches that
-#    each add a row both keep it. The price is that two branches which edit one
-#    row differently keep both versions. So no non-blank line may appear twice,
-#    and no two table rows may start with the same first cell. The separator
-#    row (| --- | --- |) of each table is skipped: every table has one.
+# 4. DUPLICATES. A union merge keeps both versions of a row two branches edited,
+#    so .gitattributes no longer merges the map that way (mw-gq6.317): such a
+#    row is a conflict to resolve. This stays as the net under a bad resolution.
+#    No non-blank line may appear twice, and no two table rows may start with the
+#    same first cell. The separator row (| --- | --- |) of each table is
+#    skipped: every table has one.
 
 set -eu
 
