@@ -1024,3 +1024,119 @@ Feature: Closing out a finished story and carrying on
     And "main" at the rig's origin has exactly 1 commits saying "Version 0.1.2 (mw-gq6.1)"
     And "main" at the rig's origin has exactly 0 commits saying "Version 0.1.1 (mw-gq6.1)"
     And "main" at the rig's origin has exactly 1 commits saying "Version 0.1.1 (mw-other.1)"
+
+  # A rig whose file names changelog_files has each landing's What's new: line
+  # written into the app's changelog, in the same commit that raises the version.
+  Scenario: A landing writes the closing comment's What's new line into both changelog files, in the Version commit
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.2"
+    And the rig's file in the vault names the version files "package.json" and "package-lock.json"
+    And the rig's file in the vault also names the changelog files "public/changelog.json" and "CHANGELOG.md"
+    And the work of "mw-gq6.1" is rebased onto that main
+    And the story "mw-gq6.1" carries the closing comment "Done.\nWhat's new: Fixed: Listen stops at the verse's end\nFor the rig memory: nothing"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the tip of "main" at the rig's origin is the commit "Version 0.1.3 (mw-gq6.1)"
+    And "main" at the rig's origin has exactly 1 commits saying "Version 0.1.3 (mw-gq6.1)"
+    And "main" at the rig's origin has exactly 0 commits saying "What's new 0.1.3 (mw-gq6.1)"
+    And the tip of "main" at the rig's origin changed "public/changelog.json" and "CHANGELOG.md"
+    And "public/changelog.json" at the top of "main" at the rig's origin is the entry "0.1.3", "2026-09-18", "mw-gq6.1", "fixed", "Listen stops at the verse's end"
+    And "CHANGELOG.md" on "main" at the rig's origin reads:
+      """
+      # What's new
+
+      ## 0.1.3
+      _2026-09-18_
+      - Fixed: Listen stops at the verse's end
+      """
+
+  Scenario: A later landing goes above the earlier entries, and the newest What's new line is the one used
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.2"
+    And the rig's file in the vault names the version files "package.json" and "package-lock.json"
+    And the rig's file in the vault also names the changelog files "public/changelog.json" and "CHANGELOG.md"
+    And the rig's main already holds a changelog with the entry "0.1.2" saying "Verses repeat"
+    And the work of "mw-gq6.1" is rebased onto that main
+    And the story "mw-gq6.1" carries the closing comment "What's new: New: Not this one"
+    And the story "mw-gq6.1" carries the closing comment "What's new: New: Pick a verse to hear it"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And "public/changelog.json" at the top of "main" at the rig's origin is the entry "0.1.3", "2026-09-18", "mw-gq6.1", "new", "Pick a verse to hear it"
+    And "public/changelog.json" at the rig's origin lists the versions "0.1.3" then "0.1.2"
+    And "CHANGELOG.md" on "main" at the rig's origin reads:
+      """
+      # What's new
+
+      ## 0.1.3
+      _2026-09-18_
+      - New: Pick a verse to hear it
+
+      ## 0.1.2
+      _2026-09-01_
+      - New: Verses repeat
+      """
+
+  Scenario: Without a What's new line the title is the note, minus its tags
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.2"
+    And the rig's file in the vault names the version files "package.json" and "package-lock.json"
+    And the rig's file in the vault also names the changelog files "public/changelog.json" and "CHANGELOG.md"
+    And the work of "mw-gq6.1" is rebased onto that main
+    And the story "mw-gq6.1" is titled "[millwright] Verses scroll to the top"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then "public/changelog.json" at the top of "main" at the rig's origin is the entry "0.1.3", "2026-09-18", "mw-gq6.1", "new", "Verses scroll to the top"
+
+  Scenario: Without a What's new line a bug's title is the note, as Fixed
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.2"
+    And the rig's file in the vault names the version files "package.json" and "package-lock.json"
+    And the rig's file in the vault also names the changelog files "public/changelog.json" and "CHANGELOG.md"
+    And the work of "mw-gq6.1" is rebased onto that main
+    And the story "mw-gq6.1" is titled "[bug] Listen stops early"
+    And the story "mw-gq6.1" is labelled "bug"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then "public/changelog.json" at the top of "main" at the rig's origin is the entry "0.1.3", "2026-09-18", "mw-gq6.1", "fixed", "Listen stops early"
+
+  Scenario: What's new: none raises the version and writes no entry
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.2"
+    And the rig's file in the vault names the version files "package.json" and "package-lock.json"
+    And the rig's file in the vault also names the changelog files "public/changelog.json" and "CHANGELOG.md"
+    And the work of "mw-gq6.1" is rebased onto that main
+    And the story "mw-gq6.1" carries the closing comment "Tests only.\nWhat's new: none"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the tip of "main" at the rig's origin is the commit "Version 0.1.3 (mw-gq6.1)"
+    And "main" at the rig's origin holds version "0.1.3" in "package.json" and "package-lock.json"
+    And the tip of "main" at the rig's origin changed no changelog file
+    And "public/changelog.json" and "CHANGELOG.md" are absent from "main" at the rig's origin
+
+  Scenario: A rig without changelog_files writes no changelog
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.2"
+    And the rig's file in the vault names the version files "package.json" and "package-lock.json"
+    And the work of "mw-gq6.1" is rebased onto that main
+    And the story "mw-gq6.1" carries the closing comment "What's new: New: Pick a verse to hear it"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the tip of "main" at the rig's origin is the commit "Version 0.1.3 (mw-gq6.1)"
+    And "public/changelog.json" and "CHANGELOG.md" are absent from "main" at the rig's origin
+
+  Scenario: A story that raised the version itself has its entry under that version, in a What's new commit
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.2"
+    And the rig's file in the vault names the version files "package.json" and "package-lock.json"
+    And the rig's file in the vault also names the changelog files "public/changelog.json" and "CHANGELOG.md"
+    And the work of "mw-gq6.1" is rebased onto that main
+    And the story "mw-gq6.1" raised the version to "0.2.0" itself
+    And the story "mw-gq6.1" carries the closing comment "What's new: New: A whole new reading view"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the tip of "main" at the rig's origin is the commit "What's new 0.2.0 (mw-gq6.1)"
+    And "main" at the rig's origin holds version "0.2.0" in "package.json" and "package-lock.json"
+    And "public/changelog.json" at the top of "main" at the rig's origin is the entry "0.2.0", "2026-09-18", "mw-gq6.1", "new", "A whole new reading view"
+    And "CHANGELOG.md" on "main" at the rig's origin reads:
+      """
+      # What's new
+
+      ## 0.2.0
+      _2026-09-18_
+      - New: A whole new reading view
+      """

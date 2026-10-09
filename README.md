@@ -3489,6 +3489,27 @@ refused and tried again raises the version once, from the new base. A rig withou
 key lands as it always did, and a Builder never bumps the patch by hand. The Landed mail
 and the ledger line say `version X.Y.Z`. See `features/next.feature`.
 
+### The changelog a landing writes
+
+A rig's file that names `version_files` may also say
+`changelog_files = ["public/changelog.json", "CHANGELOG.md"]` (a `.json` and a `.md`
+file, paths inside the rig). Each formula's closing comment carries one line,
+`What's new: New: <one plain sentence, no file names>`, `What's new: Fixed: <...>`, or
+`What's new: none` for a change nobody using the app can see. At landing `mw next` reads
+the newest comment on the story holding `What's new:`; with none it uses the story's title
+without its `[bug]` and rig tags, as Fixed for a bug and New for anything else. It writes
+the entry in the same `Version X.Y.Z (<story id>)` commit, so parallel stories never
+conflict over a list kept by hand:
+
+- `public/changelog.json` is an array, newest first, of
+  `{"version", "date" (UTC, YYYY-MM-DD), "story", "kind": "new"|"fixed", "text"}`.
+- `CHANGELOG.md` has a `# What's new` title, then for each landing `## X.Y.Z`, a
+  `_YYYY-MM-DD_` line and `- New: text` or `- Fixed: text`, newest at the top.
+
+Absent files are created. `none` writes no entry, and a rig without the key writes no
+changelog. A story that raised the version itself gets its entry under that version in a
+separate commit, `What's new X.Y.Z (<story id>)`. See `features/next.feature`.
+
 ## Licence
 
 millwright is released under the MIT licence; see [LICENSE](LICENSE).

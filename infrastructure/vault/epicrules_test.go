@@ -172,3 +172,28 @@ func TestVersionFilesStillRefusesAnUnknownKeyAndAPathOutsideTheRig(t *testing.T)
 		}
 	}
 }
+
+func TestARigsFileNamesTheChangelogFilesALandingWrites(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+	writeRigFile(t, dir, "lampas", "version_files = [\"package.json\"]\nchangelog_files = [\"public/changelog.json\", \"CHANGELOG.md\"]\n")
+
+	got, err := v.EpicRequirements(context.Background(), "lampas")
+	if err != nil {
+		t.Fatalf("reading the rig's file: %v", err)
+	}
+	want := domain.EpicRequirements{VersionFiles: []string{"package.json"}, ChangelogFiles: []string{"public/changelog.json", "CHANGELOG.md"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("requirements = %+v, want %+v", got, want)
+	}
+	if got.Any() {
+		t.Errorf("changelog_files is no requirement of an epic, but Any() = true")
+	}
+
+	for _, bad := range []string{`["/etc/passwd.md"]`, `["../CHANGELOG.md"]`, `["changelog.txt"]`} {
+		writeRigFile(t, dir, "lampas", "changelog_files = "+bad+"\n")
+		if _, err := v.EpicRequirements(context.Background(), "lampas"); err == nil || !strings.Contains(err.Error(), "changelog_files") {
+			t.Errorf("changelog_files = %s: err = %v, want a refusal naming changelog_files", bad, err)
+		}
+	}
+}

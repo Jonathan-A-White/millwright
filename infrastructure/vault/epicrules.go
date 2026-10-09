@@ -25,6 +25,7 @@ const (
 	EpicLastStoryLabelsKey = "epic_last_story_labels"
 	GuestKey               = "guest"
 	VersionFilesKey        = "version_files"
+	ChangelogFilesKey      = "changelog_files"
 )
 
 var _ application.EpicRules = (*Vault)(nil)
@@ -36,6 +37,7 @@ var _ application.EpicRules = (*Vault)(nil)
 //	epic_last_story_labels = ["demo"]
 //	guest                  = "Luke"
 //	version_files          = ["package.json", "package-lock.json"]
+//	changelog_files        = ["public/changelog.json", "CHANGELOG.md"]
 //
 // A rig with no file asks nothing. A key this does not know is an error rather
 // than a silence: a misspelt key would otherwise switch the requirement off
@@ -98,16 +100,23 @@ func parseRigFile(written string) (domain.EpicRequirements, error) {
 			requirements.Sections = names
 		case EpicLastStoryLabelsKey:
 			requirements.LastStoryLabels = names
-		case VersionFilesKey:
+		case VersionFilesKey, ChangelogFilesKey:
 			for _, name := range names {
 				if path.IsAbs(name) || name != path.Clean(name) || name == ".." || strings.HasPrefix(name, "../") {
 					return requirements, fmt.Errorf("the list for %s: %q is not a path inside the rig (write it relative, as in %q)", key, name, "pwa/package.json")
 				}
+				if ext := path.Ext(name); key == ChangelogFilesKey && ext != ".json" && ext != ".md" {
+					return requirements, fmt.Errorf("the list for %s: %q is neither a .json nor a .md file", key, name)
+				}
 			}
-			requirements.VersionFiles = names
+			if key == ChangelogFilesKey {
+				requirements.ChangelogFiles = names
+			} else {
+				requirements.VersionFiles = names
+			}
 		default:
-			return requirements, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s and %s)",
-				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey)
+			return requirements, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s and %s)",
+				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey)
 		}
 	}
 	return requirements, nil
