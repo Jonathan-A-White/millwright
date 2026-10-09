@@ -37,6 +37,12 @@
 //	vps_host = "vps"    # optional: the VPS standby is kept level too, its swap always a tap;
 //	                    # with vps_stage, vps_live, vps_service and vps_health beside it
 //
+//	[tester]                           # the one-week Tester trial, on the home only
+//	rigs   = ["lampas"]
+//	until  = "2026-10-16T20:00:00Z"    # UTC; no Tester story is sprung from then on
+//	model  = "sonnet"
+//	effort = "high"
+//
 //	[scorers]
 //	engines        = ["local"]
 //	local_url      = "http://127.0.0.1:8765"
@@ -1740,6 +1746,67 @@ func Backends() (map[string]BackendSettings, error) {
 		backends[name] = b
 	}
 	return backends, nil
+}
+
+// TesterTable is the table of the config file that turns the Tester trial on
+// (mw-it6qk5.5): `rigs` (a list), `until` (a UTC time, RFC 3339), `model` and
+// `effort` ("sonnet" and "high" when it does not say).
+const TesterTable = "tester"
+
+// The model and effort a Tester session runs on when [tester] does not say.
+const (
+	DefaultTesterModel  = "sonnet"
+	DefaultTesterEffort = "high"
+)
+
+// TesterSettings is what the `[tester]` table says. The zero value is no
+// trial.
+type TesterSettings struct {
+	Rigs          []string
+	Until         time.Time
+	Model, Effort string
+}
+
+// Tester reports the Tester trial this host runs, read from the `[tester]`
+// table of ~/.config/mw/config.toml. A machine with no such table runs none,
+// which is not an error. A table that names no rig, or no until, or an until
+// that is not an RFC 3339 time, is refused saying which, so that a half-set
+// table never springs Tester stories for ever.
+func Tester() (TesterSettings, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return TesterSettings{}, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	table, err := tableIn(path, TesterTable)
+	if err != nil {
+		return TesterSettings{}, err
+	}
+	if len(table) == 0 {
+		return TesterSettings{}, nil
+	}
+	tester := TesterSettings{
+		Rigs:   list(table["rigs"]),
+		Model:  strings.Trim(strings.TrimSpace(table["model"]), `"'`),
+		Effort: strings.Trim(strings.TrimSpace(table["effort"]), `"'`),
+	}
+	if len(tester.Rigs) == 0 {
+		return TesterSettings{}, fmt.Errorf("the [%s] table of %s names no rigs: write rigs = [\"lampas\"], or delete the table to end the trial", TesterTable, path)
+	}
+	until := strings.Trim(strings.TrimSpace(table["until"]), `"'`)
+	if until == "" {
+		return TesterSettings{}, fmt.Errorf("the [%s] table of %s has no until: write until = \"<UTC time>\", as 2026-10-16T20:00:00Z", TesterTable, path)
+	}
+	if tester.Until, err = time.Parse(time.RFC3339, until); err != nil {
+		return TesterSettings{}, fmt.Errorf("the [%s] until is %q in %s: it is a UTC time written as 2026-10-16T20:00:00Z", TesterTable, until, path)
+	}
+	if tester.Model == "" {
+		tester.Model = DefaultTesterModel
+	}
+	if tester.Effort == "" {
+		tester.Effort = DefaultTesterEffort
+	}
+	return tester, nil
 }
 
 // WatchSettings is what the `[watch]` table says: how to reach the host that is

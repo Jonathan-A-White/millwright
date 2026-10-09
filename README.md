@@ -935,6 +935,57 @@ A story labelled `hitl` is still retried and its claim still given back, but
 dispatch passes a `hitl` story over, so the report adds a line naming the label
 and the cure: `bd update <id> --remove-label hitl`. See `features/retry.feature`.
 
+## The Tester trial
+
+A week's trial (mw-it6qk5.5): a fresh session that only uses the app finds what
+the Governor finds, where the Builder tests what it built with fakes it wrote.
+It is on while the home's `~/.config/mw/config.toml` has a `[tester]` table:
+
+```toml
+[tester]
+rigs   = ["lampas"]                 # the rigs whose landings are tested
+until  = "2026-10-16T20:00:00Z"     # UTC: no Tester story is sprung from then on
+model  = "sonnet"                   # the Tester session's model (sonnet when left out)
+effort = "high"                     # and effort (high when left out)
+```
+
+After a landing on one of those rigs before `until`, when the story's closing
+comment has a HOW TO CHECK IT section with numbered steps (not the Internal
+line), `mw next` files a story `Test: <landed title>` under the landed story's
+epic, labelled `tester`, worked by the `tester` formula, on the landed story's
+rig, branch and host with the table's model and effort, and lets it go at once.
+Its description names the landed story on a `Landed story: <id>` line and quotes
+the HOW TO CHECK IT. A Tester story, a demo, or a story with no HOW TO CHECK IT
+springs none. A table `mw next` cannot read springs none and is said on stderr;
+it never stops a landing.
+
+The Tester session (`formulas/tester.formula.json`, installed in the vault's
+`.beads/formulas/` like the others) builds the landed commit in a scratch
+worktree, serves it (`npm run preview` for Lampas), and with a Playwright script
+under `/tmp` drives it at 390x844: HOW TO CHECK IT step by step, then at least
+five adversarial moves, a shot of each. It commits nothing. Its closing comment
+goes on the landed story: `FINDINGS`, each finding `- [bug]` or `- [taste]` with
+what he would see, the steps and the shot path, or `FINDINGS: none`; then
+`Tester fuel: <tokens>`. Its kickoff is a Tester's own, which never says to
+commit, and `mw check` on a Tester story asks what `mw next` will: no commits,
+every step closed, FINDINGS written.
+
+`mw next` closes a Tester story without merging, raising a version or pushing:
+it refuses one whose branch holds a commit (`tester-committed`) or that left no
+FINDINGS (`no-findings`), carries FINDINGS the Tester wrote on its own story
+over to the landed one, and mails the Mayor `Tested: <landed id>: N findings`.
+
+```sh
+bin/mw tester report [--since 2026-10-09]
+```
+
+`mw tester report` sums the trial per rig, as text for the demo to paste: the
+landings in the trial, the Tester runs, their findings (bug and taste), the
+`[bug]` stories whose description names a "Tester finding", and each Tester
+run's fuel from its `result.json`. It starts a week before `until` unless told
+`--since`; with the table gone it reports every rig a Tester ran on. Ending the
+trial early is deleting the table. See `features/tester.feature`.
+
 ## Keeping two hosts level
 
 `mw sync` is the one command that brings this host level with the other, by

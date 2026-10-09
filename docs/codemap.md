@@ -53,6 +53,7 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 | Show, Peek, Prove, StampHead | application/show.go, application/stamphead.go | mw show/peek/prove/stamp - cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go | features/{show,peek,prove,stamp}.feature |
 | Dispatch | application/dispatch.go | mw dispatch - cmd/mw/dispatch.go | features/dispatch.feature |
 | Next, AfterLandingRun | application/next.go, application/afterlandingrun.go | mw next, mw after-landing - cmd/mw/next.go, cmd/mw/afterlanding.go | features/{next,after_landing}.feature |
+| Tester | application/testerreport.go | mw tester report - cmd/mw/tester.go; [tester]: rigs until model effort | features/tester.feature |
 | Check | application/check.go | mw check - cmd/mw/check.go | features/check.feature |
 | Status | application/status.go | mw status - cmd/mw/status.go | features/status.feature |
 | Brief | application/brief.go | mw brief - cmd/mw/brief.go | features/brief.feature |
@@ -61,21 +62,23 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 | Nudge | application/nudge.go | mw nudge - cmd/mw/nudge.go | none |
 | Mail | application/mail.go | mw mail - cmd/mw/mail.go | features/mail.feature |
 | Home | application/home.go | mw home - cmd/mw/home.go | features/home.feature |
-| HomeMove | application/homemove.go | mw home move - cmd/mw/homemove.go | none: docs/home-move.md |
-| Seat{Context,Up,Reap,Handover} | application/seat{context,up,reap,handover}.go | mw seat context/up/reap/handover - cmd/mw/seat.go | features/seat_{context,up,reap}.feature |
-| Talk{Call,Model,Say,Wait} | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go | mw talk call/say/wait/model cmd/mw/talk.go | features/talk_*.feature |
+| HomeMove | application/homemove.go | mw home move - cmd/mw/homemove.go | docs/home-move.md |
+| Seat{Context,Up,Reap,Handover} | application/seat{context,up,reap,handover}.go | mw seat <sub> - cmd/mw/seat.go | features/seat_{context,up,reap}.feature |
+| Talk{Call,Model,Say,Wait} | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go | mw talk <sub> - cmd/mw/talk.go | features/talk_*.feature |
 | Millhand, Deputy | application/millhand.go, application/deputy.go | mw millhand/deputy - cmd/mw/millhand.go, cmd/mw/deputy.go | features/{millhand,deputy}.feature |
 | MillhandTick | application/millhandtick.go | mw millhand tick - cmd/mw/millhandtick.go | features/millhand_tick.feature |
 | Secrets{Put,Get,List} | application/secrets.go | mw secrets - cmd/mw/secrets.go | features/secrets.feature |
 | Watch | application/watch.go | mw watch - cmd/mw/watch.go | features/watch.feature |
 | Doctor | application/doctor.go | mw doctor - cmd/mw/doctor.go | features/doctor.feature |
-| SeatBoot | application/seatboot.go | none: called by Dispatch, Next | features/seat_boot.feature |
+| SeatBoot | application/seatboot.go | none: Dispatch, Next | features/seat_boot.feature |
 | Init | application/init.go | mw init - cmd/mw/init.go | features/init.feature |
-| Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern key/inbox/send/snapshot/view/bead - cmd/mw/posternview.go, cmd/mw/posternbead.go | `features/postern_*.feature` |
-| Event{Follow,Emit,Tail,Ship,Wait,Nudge,Spring,Control,Trim} | application/eventfollow.go, application/eventlog.go, application/eventship.go, application/eventwait.go, application/eventnudge.go, application/eventsubscribe.go, application/eventspring.go, application/eventcontrol.go, application/eventtrim.go | mw events follow/emit/tail/wait/trim - cmd/mw/events.go | features/event_follow.feature |
-| Hands{Add,List} | application/hands.go | mw hands add/list - cmd/mw/hands.go; cmd/mw-hands-root | features/hands.feature |
+| Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern <sub> - cmd/mw/posternview.go, cmd/mw/posternbead.go | `features/postern_*.feature` |
+| Event{Follow,Emit,Tail,Ship,Wait,Nudge,Spring,Control,Trim} | application/eventfollow.go, application/eventlog.go, application/eventship.go, application/eventwait.go, application/eventnudge.go, application/eventsubscribe.go, application/eventspring.go, application/eventcontrol.go, application/eventtrim.go | mw events <sub> - cmd/mw/events.go | features/event_follow.feature |
+| Hands{Add,List} | application/hands.go | mw hands <sub> - cmd/mw/hands.go; cmd/mw-hands-root | features/hands.feature |
 | Postern{Serve,Nginx,Mirror} | application/posternhand.go, application/posternmirror.go | mw postern serve/nginx/mirror - cmd/mw/postern.go, cmd/mw/posternmirror.go | features/postern_serve.feature |
 | Prompt{Save,List,Show,Run}, Cards | application/prompt.go | mw prompt/card - cmd/mw/prompt.go, cmd/mw/card.go | features/{prompt,card}.feature |
 | Grist{Key,Grind,Send,Eval,Score,Runs,Stats} | application/grist.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go | mw grist key/grind/send/eval/score/runs/stats - cmd/mw/grist.go | features/{grist{,_send,_eval,_audio,_concurrent,_forward},scorer}.feature |
+| Prompt{Save,List,Show,Run}, Cards | application/prompt.go, application/card.go | mw prompt/card - cmd/mw/prompt.go, cmd/mw/card.go | features/{prompt,card}.feature |
+| Grist{Key,Grind,Send,Eval,Score,Runs,Stats} | application/grist.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go | mw grist <sub> - cmd/mw/grist.go | features/{grist{,_send,_eval,_audio,_concurrent,_forward},scorer}.feature |
 
 cmd/mw/root.go: the tree; cmd/mw/version.go.

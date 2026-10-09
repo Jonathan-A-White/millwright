@@ -2008,3 +2008,32 @@ func TestAgeKeyFileMustBeAFullPath(t *testing.T) {
 		t.Fatalf("expected a relative key file refused, got %v", err)
 	}
 }
+
+func TestTesterReadsTheTrialAndRefusesAHalfSetTable(t *testing.T) {
+	writeConfig(t, "host = \"laptop\"\n\n[tester]\nrigs = [\"lampas\"]\nuntil = \"2026-10-16T20:00:00Z\"  # a week from the landing\n")
+	tester, err := config.Tester()
+	if err != nil {
+		t.Fatalf("reading [tester]: %v", err)
+	}
+	want := time.Date(2026, 10, 16, 20, 0, 0, 0, time.UTC)
+	if len(tester.Rigs) != 1 || tester.Rigs[0] != "lampas" || !tester.Until.Equal(want) ||
+		tester.Model != config.DefaultTesterModel || tester.Effort != config.DefaultTesterEffort {
+		t.Errorf("expected lampas until %s on sonnet/high, got %+v", want, tester)
+	}
+
+	writeConfig(t, "host = \"laptop\"\n")
+	if tester, err := config.Tester(); err != nil || len(tester.Rigs) != 0 || !tester.Until.IsZero() {
+		t.Errorf("expected no table to be no trial, got %+v, %v", tester, err)
+	}
+
+	for _, table := range []string{
+		"[tester]\nuntil = \"2026-10-16T20:00:00Z\"\n",
+		"[tester]\nrigs = [\"lampas\"]\n",
+		"[tester]\nrigs = [\"lampas\"]\nuntil = \"next friday\"\n",
+	} {
+		writeConfig(t, table)
+		if _, err := config.Tester(); err == nil {
+			t.Errorf("expected %q to be refused", table)
+		}
+	}
+}

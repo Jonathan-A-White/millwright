@@ -120,6 +120,13 @@ func newNextCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// A [tester] table that cannot be read springs no Tester story, and
+			// never stops a close-out: it is said, and the landing goes on.
+			tester, err := testerTrial()
+			if err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "mw next: no Tester story will be sprung: %v\n", err)
+				tester = application.TesterTrial{}
+			}
 
 			// A close-out takes away the very worktree its session was running
 			// in, and this process is standing in it: the shell that chained mw
@@ -202,6 +209,7 @@ func newNextCmd() *cobra.Command {
 				Units:        userunits.Systemctl{},
 				Stamps:       stamps,
 				CloseOuts:    hostCloseOuts(),
+				Tester:       tester,
 			}.Run(cmd.Context(), args[0])
 			return err
 		},
