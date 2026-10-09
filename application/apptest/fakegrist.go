@@ -123,8 +123,15 @@ type FakeGrinds struct {
 
 	commits map[string]string
 	files   map[string]map[string][]byte
-	// Err, when set, is returned by every method.
+	// remote is what the remote's main holds that the checkout's has not
+	// yet: the next Refresh makes it the checkout's.
+	remoteCommits map[string]string
+	remoteFiles   map[string]map[string][]byte
+	refreshes     map[string]int
+	// Err, when set, is returned by every method but Refresh.
 	Err error
+	// RefreshErr, when set, is returned by Refresh, which then changes nothing.
+	RefreshErr error
 }
 
 // FakeGrinds satisfies the port.
@@ -132,7 +139,53 @@ var _ application.GrindSource = (*FakeGrinds)(nil)
 
 // NewFakeGrinds returns a source with no checkouts.
 func NewFakeGrinds() *FakeGrinds {
-	return &FakeGrinds{commits: map[string]string{}, files: map[string]map[string][]byte{}}
+	return &FakeGrinds{
+		commits: map[string]string{}, files: map[string]map[string][]byte{},
+		remoteCommits: map[string]string{}, remoteFiles: map[string]map[string][]byte{},
+		refreshes: map[string]int{},
+	}
+}
+
+// SetRemoteFile puts data at path on the remote's main for the checkout, which
+// is at commit there. The checkout does not have it until it is Refreshed.
+func (f *FakeGrinds) SetRemoteFile(checkout, commit, path string, data []byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.remoteCommits[checkout] = commit
+	if f.remoteFiles[checkout] == nil {
+		f.remoteFiles[checkout] = map[string][]byte{}
+	}
+	f.remoteFiles[checkout][path] = append([]byte(nil), data...)
+}
+
+// Refreshes reports how many times the checkout was Refreshed, failed or not.
+func (f *FakeGrinds) Refreshes(checkout string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.refreshes[checkout]
+}
+
+// Refresh implements application.GrindSource: the remote's main, when one was
+// set, becomes the checkout's.
+func (f *FakeGrinds) Refresh(_ context.Context, checkout string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.refreshes[checkout]++
+	if f.RefreshErr != nil {
+		return f.RefreshErr
+	}
+	commit, ok := f.remoteCommits[checkout]
+	if !ok {
+		return nil
+	}
+	f.commits[checkout] = commit
+	if f.files[checkout] == nil {
+		f.files[checkout] = map[string][]byte{}
+	}
+	for path, data := range f.remoteFiles[checkout] {
+		f.files[checkout][path] = append([]byte(nil), data...)
+	}
+	return nil
 }
 
 // SetFile puts data at path in the checkout, whose main is at commit.

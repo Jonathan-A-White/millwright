@@ -70,3 +70,70 @@ func TestGrindsOfADirectoryThatIsNoCheckoutIsAnError(t *testing.T) {
 		t.Fatal("expected a directory with no main to be an error")
 	}
 }
+
+// A grind landed on another host reaches the remote's main, not this
+// checkout's: after a Refresh the grind is read from the remote's main, and
+// the checkout's own main and working tree are left as they were.
+func TestGrindsAreReadFromTheRemotesMainOnceRefreshed(t *testing.T) {
+	here, other := aRig(t)
+	ctx := context.Background()
+	grinds := rig.NewGrinds()
+	was := run(t, here, "git", "rev-parse", "HEAD")
+
+	write(t, other, "grinds/sweep.json", `{"grind":2}`+"\n")
+	run(t, other, "git", "add", "-A")
+	run(t, other, "git", "commit", "-qm", "A newer sweep grind, landed on the other host")
+	run(t, other, "git", "push", "-q", "origin", "main")
+	landed := run(t, other, "git", "rev-parse", "HEAD")
+
+	if commit, err := grinds.Commit(ctx, here); err != nil || commit != was {
+		t.Fatalf("expected main unmoved at %s before any refresh, got %q %v", was, commit, err)
+	}
+	if err := grinds.Refresh(ctx, here); err != nil {
+		t.Fatalf("refreshing a checkout whose remote is there: %v", err)
+	}
+	commit, err := grinds.Commit(ctx, here)
+	if err != nil || commit != landed {
+		t.Fatalf("expected the remote's main %s, got %q %v", landed, commit, err)
+	}
+	if data, found, err := grinds.ReadAt(ctx, here, commit, "grinds/sweep.json"); err != nil || !found || string(data) != `{"grind":2}`+"\n" {
+		t.Fatalf("expected the remote's grind, got %q %v %v", data, found, err)
+	}
+	if now := run(t, here, "git", "rev-parse", "refs/heads/main"); now != was {
+		t.Errorf("expected the checkout's own main left at %s, it is at %s", was, now)
+	}
+}
+
+// A landing made on this host and not yet pushed is ahead of the remote's
+// main: the grind is read from it, not from the older remote.
+func TestGrindsFromALocalLandingAheadOfTheRemoteAreKept(t *testing.T) {
+	here, _ := aRig(t)
+	write(t, here, "grinds/sweep.json", `{"grind":3}`+"\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "Landed here, not pushed yet")
+	ahead := run(t, here, "git", "rev-parse", "HEAD")
+
+	grinds := rig.NewGrinds()
+	if err := grinds.Refresh(context.Background(), here); err != nil {
+		t.Fatal(err)
+	}
+	if commit, err := grinds.Commit(context.Background(), here); err != nil || commit != ahead {
+		t.Fatalf("expected the local main %s, got %q %v", ahead, commit, err)
+	}
+}
+
+// A remote that cannot be reached is an error from Refresh, and Commit still
+// answers from the checkout's own main.
+func TestAnUnreachableRemoteIsAnErrorAndMainStillAnswers(t *testing.T) {
+	here, _ := aRig(t)
+	main := run(t, here, "git", "rev-parse", "HEAD")
+	run(t, here, "git", "remote", "set-url", "origin", filepath.Join(t.TempDir(), "gone.git"))
+
+	grinds := rig.NewGrinds()
+	if err := grinds.Refresh(context.Background(), here); err == nil {
+		t.Fatal("expected a remote that is gone to be an error")
+	}
+	if commit, err := grinds.Commit(context.Background(), here); err != nil || commit != main {
+		t.Fatalf("expected the local main %s, got %q %v", main, commit, err)
+	}
+}

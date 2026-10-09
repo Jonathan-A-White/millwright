@@ -266,10 +266,16 @@ type GrindCall struct {
 }
 
 // GrindSource reads an app's grinds from its rig's checkout on this host, at
-// its local main. The real adapter is infrastructure/rig's Grinds, which
+// the rig's main: the remote's if the checkout has seen it move ahead of its
+// own, else its own. The real adapter is infrastructure/rig's Grinds, which
 // asks git.
 type GrindSource interface {
-	// Commit reports the commit the checkout's local main is at.
+	// Refresh brings the checkout's view of the remote's main up to date, so
+	// that a grind landed on another host is the one Commit then reports. An
+	// error means the remote could not be reached; Commit still answers from
+	// what the checkout has.
+	Refresh(ctx context.Context, checkout string) error
+	// Commit reports the commit the checkout's main is at.
 	Commit(ctx context.Context, checkout string) (string, error)
 	// ReadAt reports the file at path, relative to the rig's root, as it is
 	// at commit; found is false when there is no such file there.
