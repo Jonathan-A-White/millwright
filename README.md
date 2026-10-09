@@ -3383,6 +3383,20 @@ Every direct requirement in `go.mod` is credited here, and a test
   that millwright's stamps are written to. See
   [Swapping the chain](docs/swapping-the-chain.md) for using another or none.
 
+### The version a landing raises
+
+A rig's file may also say `version_files = ["package.json", "package-lock.json"]`
+(paths inside the rig; whisper-hid's are `pwa/package.json` and
+`pwa/package-lock.json`). When it does, `mw next` raises the patch of the version in
+the first file at landing (1.2.3 becomes 1.2.4), writes it into every file named
+(a lock file's top-level `version` and `packages[""].version`; every other byte stays),
+and commits that in the landing worktree as `Version X.Y.Z (<story id>)`, after the merge
+and before the gate and the push. A story whose own commits changed that version, the
+minor a Builder raises in an epic's last story, lands with it untouched. A push that is
+refused and tried again raises the version once, from the new base. A rig without the
+key lands as it always did, and a Builder never bumps the patch by hand. The Landed mail
+and the ledger line say `version X.Y.Z`. See `features/next.feature`.
+
 ## Licence
 
 millwright is released under the MIT licence; see [LICENSE](LICENSE).

@@ -970,3 +970,57 @@ Feature: Closing out a finished story and carrying on
     Then the story "mw-gq6.1" is closed
     And the landing is left as a note for the home "laptop" and nothing was built
     And the close-out returned no error
+
+  Scenario: A rig that names version_files has the patch raised at landing, in a commit of its own
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.0"
+    And the rig's file in the vault names the version files "package.json" and "package-lock.json"
+    And the work of "mw-gq6.1" is rebased onto that main
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And "main" at the rig's origin holds version "0.1.1" in "package.json" and "package-lock.json"
+    And the tip of "main" at the rig's origin is the commit "Version 0.1.1 (mw-gq6.1)"
+    And "package-lock.json" on "main" differs from its old self only in its two version fields
+    And exactly one mail was sent, to "mayor" from "mw@vps"
+    And that mail's body holds:
+      | version 0.1.1 |
+    And the story "mw-gq6.1" is closed
+    And the last ledger line holds:
+      | version 0.1.1 |
+
+  Scenario: A story whose branch raised the minor itself lands with that version untouched
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.0"
+    And the rig's file in the vault names the version files "package.json" and "package-lock.json"
+    And the work of "mw-gq6.1" is rebased onto that main
+    And the story "mw-gq6.1" raised the version to "0.2.0" itself
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And "main" at the rig's origin holds version "0.2.0" in "package.json" and "package-lock.json"
+    And no commit on "main" at the rig's origin says "Version" except the story's own
+    And that mail's body does not say "version 0.2.1"
+
+  Scenario: A rig without version_files lands exactly as before
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.0"
+    And the work of "mw-gq6.1" is rebased onto that main
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And it landed as a fast-forward
+    And "main" at the rig's origin holds version "0.1.0" in "package.json" and "package-lock.json"
+    And no commit on "main" at the rig's origin says "Version" except the story's own
+    And the tip of "main" at the rig's origin is the commit "The work of mw-gq6.1"
+
+  Scenario: A rejected push is retried from the new base and the version is raised once
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.0"
+    And the rig's file in the vault names the version files "package.json" and "package-lock.json"
+    And the work of "mw-gq6.1" is rebased onto that main
+    And the other host lands a story and its version bump the moment mw first tries to push
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And mw pushed twice and forced nothing
+    And "main" at the rig's origin holds version "0.1.2" in "package.json" and "package-lock.json"
+    And "main" at the rig's origin has exactly 1 commits saying "Version 0.1.2 (mw-gq6.1)"
+    And "main" at the rig's origin has exactly 0 commits saying "Version 0.1.1 (mw-gq6.1)"
+    And "main" at the rig's origin has exactly 1 commits saying "Version 0.1.1 (mw-other.1)"

@@ -171,6 +171,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerNextMergeFixSteps(ctx, c)
 	registerNextReattemptSteps(ctx, c)
 	registerNextStampSteps(ctx, c)
+	registerNextVersionSteps(ctx, c)
 
 	ctx.When(`^mw closes out "([^"]*)"$`, c.mwClosesOut)
 	ctx.When(`^mw closes out "([^"]*)" a second time$`, c.mwClosesOut)
@@ -814,6 +815,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 		Checks:        rig.NewChecks(rig.WithCommand(c.checkCommand)),
 		Slot:          rig.NewSlots(rig.WithSlotWait(5*time.Second), rig.WithSlotPoll(20*time.Millisecond)),
 		Vault:         files,
+		Rules:         files,
 		Files:         filesPort,
 		Mailbox:       c.mailbox,
 		Runner:        c.runner,
