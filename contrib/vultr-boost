@@ -154,7 +154,7 @@ hubssh() { # remote command string
 
 # --- the dry run: every step, none run ----------------------------------------
 plan_up() {
-	STEPS=7
+	STEPS=6
 	echo "vultr-boost up --dry-run: nothing below is run"
 	step "read: settings $TFVARS, tokens vultr_api_token (and boost_github_token, boost_claude_token, boost_beads_password when kept) with mw secrets get"
 	would "refuse if vultr_api_token, region, wg_endpoint or beads_host is missing"
