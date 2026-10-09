@@ -49,7 +49,9 @@ test:
 # WG_SYNC=0 (and, for the syncconf scenario, stand-in wg and wg-quick). Then
 # contrib/install-sops-age.sh, against a stand-in curl serving made-up releases
 # and a throwaway MW_BIN: its pins, its checksum refusals, and that a second run
-# changes nothing. Then the
+# changes nothing. Then boost-bootstrap, against stand-in apt, git, curl,
+# systemctl and wg and a fake root, twice over: the second run must change
+# nothing. Then the
 # gate's parallelism: GOFLAGS and GOMAXPROCS must follow JOBS. Every
 # other check here reads only this repository (and a temporary directory)
 # and starts nothing.
@@ -66,6 +68,7 @@ lint:
 	scripts/check-heavy.sh
 	scripts/check-wg-enrol.sh
 	scripts/check-install-sops-age.sh
+	scripts/check-boost-bootstrap.sh
 	scripts/check-gate-jobs.sh
 	scripts/check-chain-stamps-doc.sh
 
