@@ -19,6 +19,14 @@ const AfterLandingLimit = 5 * time.Minute
 // quiet note is not enough for what a person has to go and look at.
 const AfterLandingStoppedLine = "after landing STOPPED at the limit: the site may be half-deployed"
 
+// AfterLandingRetryWait is how long a rig's after-landing command is left before
+// it is run once more, when it failed on a fault of the network that passes
+// (DNS that did not answer, an ssh that could not connect). A resolver that
+// failed a deploy at 05:54 answered again three minutes later: half a minute is
+// long enough for most of such faults and short enough that the landing, which
+// holds the baton while it waits, is not held up.
+const AfterLandingRetryWait = 30 * time.Second
+
 // UnitRestartFailedLine is the first line of the mail to the Mayor when a
 // long-running mw user unit could not be restarted on the new build: the
 // follower keeps publishing the Governor's view with the old binary until
@@ -127,6 +135,83 @@ func (r Ran) Line() string {
 	return afterLandingLine(r.Command, how)
 }
 
+// networkFaultMarks are what a command's output says when the network, not the
+// command, failed — in the words of ssh, git, curl and the resolver, lower-cased.
+var networkFaultMarks = []string{
+	"could not resolve host",
+	"temporary failure in name resolution",
+	"name or service not known",
+	"connection refused",
+	"connection timed out",
+	"connection reset",
+	"network is unreachable",
+	"no route to host",
+}
+
+// networkFaultLines is how many of the last lines of a failed command's output
+// are read for those words: where a deploy says what broke, and not the whole of
+// a build's chatter.
+const networkFaultLines = 20
+
+// NetworkFault says the run failed on a fault of the network that may pass, and
+// so is worth one more try: ssh's own exit status 255 (it could not connect, or
+// was cut off), or a resolver or connection error in the tail of what it printed.
+// A command that succeeded or was stopped at its limit is not one: the second
+// would be run with nothing to say it would go any differently.
+func (r Ran) NetworkFault() bool {
+	if r.Succeeded() || r.TimedOut > 0 {
+		return false
+	}
+	if r.Status == 255 {
+		return true
+	}
+	tail := strings.ToLower(RecentLines(r.Output, networkFaultLines))
+	for _, mark := range networkFaultMarks {
+		if strings.Contains(tail, mark) {
+			return true
+		}
+	}
+	return false
+}
+
+// runAfterLanding runs the rig's after-landing command in dir and, when it
+// failed on a fault of the network that may pass, once more after pause (zero is
+// AfterLandingRetryWait), using wait to pause. It says in retried, as a line,
+// that it ran the command again, and why; retried is empty when it did not. The
+// Ran is the last run's. An error is a command that could not be started, or a
+// pause cut short by ctx.
+func runAfterLanding(ctx context.Context, port AfterLanding, rig, dir string, pause time.Duration, wait func(context.Context, time.Duration) error) (ran Ran, retried string, err error) {
+	ran, err = port.Run(ctx, rig, dir)
+	if err != nil || !ran.NetworkFault() {
+		return ran, "", err
+	}
+	if pause <= 0 {
+		pause = AfterLandingRetryWait
+	}
+	first := fmt.Sprintf("exit status %d", ran.Status)
+	retried = afterLandingLine(ran.Command, fmt.Sprintf("retried once after %s, because the first run failed on a network fault that may pass (%s)", pause, first))
+	if err := wait(ctx, pause); err != nil {
+		return ran, retried, err
+	}
+	ran, err = port.Run(ctx, rig, dir)
+	return ran, retried, err
+}
+
+// takeAfterLandingSlot takes the rig's after-landing lock, which is what keeps
+// two runs of the rig's command — a landing's own and one a person asks for —
+// from deploying at once. A nil slot takes nothing, and the release it returns
+// does nothing. The release is safe to call twice.
+func takeAfterLandingSlot(ctx context.Context, slot MergeSlot, rigDir, holder string) (release func(context.Context) error, err error) {
+	if slot == nil {
+		return func(context.Context) error { return nil }, nil
+	}
+	holding, err := slot.Take(ctx, rigDir, holder)
+	if err != nil {
+		return nil, fmt.Errorf("the after-landing lock of %s could not be taken: %w", rigDir, err)
+	}
+	return holding.Release, nil
+}
+
 // afterLandingLine is the shape every line about the command has, so that the
 // three places it is said read alike and a person can search for it.
 func afterLandingLine(command, said string) string {
@@ -174,10 +259,13 @@ func (n Next) afterLanding(ctx context.Context, c *closeOut, report *NextReport)
 		return
 	}
 
-	ran, err := n.AfterLanding.Run(ctx, c.path.Rig, c.rigDir)
+	ran, retried, err := n.deploy(ctx, c, report)
 	line := ran.Line()
 	if err != nil {
 		line = afterLandingLine(command, "could not be run: "+firstLine(err.Error()))
+	}
+	if retried != "" {
+		report.Notes = append(report.Notes, retried)
 	}
 	report.Notes = append(report.Notes, line)
 	if err == nil && ran.Succeeded() {
@@ -194,6 +282,21 @@ func (n Next) afterLanding(ctx context.Context, c *closeOut, report *NextReport)
 	if err := n.Tracker.CommentOnStory(ctx, c.id, comment); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the after-landing command's failure could not be written on the story: %v", err))
 	}
+}
+
+// deploy runs the rig's command under the rig's after-landing lock, so that it
+// never runs beside another run of it, and again once if it failed on a passing
+// network fault. retried is the line saying so, empty when it did not.
+func (n Next) deploy(ctx context.Context, c *closeOut, report *NextReport) (ran Ran, retried string, err error) {
+	release, err := takeAfterLandingSlot(ctx, n.DeploySlot, c.rigDir, Holders(n.Seat, n.Host, c.id))
+	if err != nil {
+		return Ran{}, "", err
+	}
+	ran, retried, err = runAfterLanding(ctx, n.AfterLanding, c.path.Rig, c.rigDir, n.AfterRetryWait, n.wait)
+	if relErr := release(ctx); relErr != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the after-landing lock of %s could not be given back: %v", c.path.Rig, relErr))
+	}
+	return ran, retried, err
 }
 
 // restartUnits restarts this host's long-running mw units on the build that just

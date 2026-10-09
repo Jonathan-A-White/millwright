@@ -820,6 +820,50 @@ Feature: Closing out a finished story and carrying on
     And that mail's first line is: after landing STOPPED at the limit: the site may be half-deployed
     And that mail's body says: after landing: <the command>: stopped after 300ms, still running
 
+  Scenario: An after-landing command that fails once on a passing network fault is run again, and the mail says it was retried
+    Given the rig names a command to run after a landing, which fails the first time on a name-resolution fault, exit 255, and then succeeds
+    And after-landing commands are run again after 50 milliseconds
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the rig's after-landing command ran twice, in the rig checkout, at the commit that landed on "main"
+    And the report says: after landing: <the command>: retried once after 50ms
+    And the report says: after landing: <the command>: ok
+    And the story "mw-gq6.1" carries no comment quoting: after landing
+    And exactly one mail was sent, to "mayor" from "mw@vps"
+    And that mail's body says: after landing: <the command>: retried once after 50ms
+    And that mail's body says: after landing: <the command>: ok
+    And the close-out returned no error
+
+  Scenario: An after-landing command that fails twice on a passing network fault reports the failure as it always did
+    Given the rig names a command to run after a landing, which prints "ssh: Could not resolve hostname allmymind.org: Temporary failure in name resolution" and exits 255
+    And after-landing commands are run again after 50 milliseconds
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed exactly as it is without an after-landing command
+    And the rig's after-landing command ran twice, in the rig checkout, at the commit that landed on "main"
+    And the report says: after landing: <the command>: retried once after 50ms
+    And the report says: after landing: <the command>: exit status 255: ssh: Could not resolve hostname allmymind.org: Temporary failure in name resolution
+    And the comment on "mw-gq6.1" says: after landing: <the command>: exit status 255: ssh: Could not resolve hostname allmymind.org: Temporary failure in name resolution
+    And that mail's body says: after landing: <the command>: exit status 255: ssh: Could not resolve hostname allmymind.org: Temporary failure in name resolution
+
+  Scenario: An after-landing command that fails for any other reason is not run again
+    Given the rig names a command to run after a landing, which prints "make: *** No rule to make target 'build'" and exits 2
+    And after-landing commands are run again after 50 milliseconds
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the rig's after-landing command ran once, in the rig checkout, at the commit that landed on "main"
+    And the report says: after landing: <the command>: exit status 2: make: *** No rule to make target 'build'
+
+  Scenario: An after-landing command waits for the rig's after-landing lock, so that it never runs beside another deploy
+    Given the rig names a command to run after a landing
+    And another deploy of the rig holds its after-landing lock for 400 milliseconds
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the rig's after-landing command ran once, in the rig checkout, at the commit that landed on "main"
+    And the rig's after-landing command did not start until the other deploy let go
+    And the report says: after landing: <the command>: ok
+
   Scenario: An after-landing command that fails and is not stopped has no loud first line
     Given the rig names a command to run after a landing, which prints "boom" and exits 2
     And the session of "mw-gq6.1" reported a plain success

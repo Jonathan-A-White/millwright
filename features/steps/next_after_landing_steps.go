@@ -1,6 +1,7 @@
 package steps
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 
 	"github.com/cucumber/godog"
 )
@@ -29,8 +31,13 @@ func registerNextAfterLandingSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^this host runs the follower, mw-view-follow.service$`, c.thisHostRunsTheFollower)
 	ctx.Given(`^this host runs the follower, mw-view-follow.service, which fails to restart, saying: (.+)$`, c.theFollowerFailsToRestart)
 	ctx.Given(`^after-landing commands are stopped after (\d+) milliseconds$`, c.afterLandingCommandsAreStoppedAfter)
+	ctx.Given(`^the rig names a command to run after a landing, which fails the first time on a name-resolution fault, exit 255, and then succeeds$`, c.theRigNamesAFlakyCommand)
+	ctx.Given(`^after-landing commands are run again after (\d+) milliseconds$`, c.afterLandingCommandsAreRetriedAfter)
+	ctx.Given(`^another deploy of the rig holds its after-landing lock for (\d+) milliseconds$`, c.anotherDeployHoldsTheLock)
 
 	ctx.Then(`^the rig's after-landing command ran once, in the rig checkout, at the commit that landed on "([^"]*)"$`, c.theCommandRanOnce)
+	ctx.Then(`^the rig's after-landing command ran twice, in the rig checkout, at the commit that landed on "([^"]*)"$`, c.theCommandRanTwice)
+	ctx.Then(`^the rig's after-landing command did not start until the other deploy let go$`, c.theCommandWaitedForTheOtherDeploy)
 	ctx.Then(`^mw-view-follow.service was try-restarted once$`, c.theFollowerWasRestartedOnce)
 	ctx.Then(`^no user unit was try-restarted$`, c.noUnitWasRestarted)
 	ctx.Then(`^the rig's after-landing command did not run$`, c.theCommandDidNotRun)
@@ -66,6 +73,56 @@ func (c *nextContext) theRigNamesAFailingCommand(prints string, status int) erro
 
 func (c *nextContext) theRigNamesASlowCommand() error { return c.afterScript("sleep 30") }
 
+// theRigNamesAFlakyCommand is a command that fails the first time it is run the
+// way ssh fails on a passing DNS fault, and succeeds every time after.
+func (c *nextContext) theRigNamesAFlakyCommand() error {
+	return c.afterScript(`seen="$(dirname "$0")/seen"
+if [ ! -e "$seen" ]; then
+  touch "$seen"
+  echo "ssh: Could not resolve hostname allmymind.org: Temporary failure in name resolution"
+  exit 255
+fi
+exit 0`)
+}
+
+func (c *nextContext) afterLandingCommandsAreRetriedAfter(milliseconds int) error {
+	c.afterRetry = time.Duration(milliseconds) * time.Millisecond
+	return nil
+}
+
+// anotherDeployHoldsTheLock takes the rig's after-landing lock now, as another
+// deploy would, and gives it back after the time given. Whether the command had
+// started by then is read off its log at the moment of letting go.
+func (c *nextContext) anotherDeployHoldsTheLock(milliseconds int) error {
+	held, err := rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)).Take(context.Background(), c.rig, "another deploy")
+	if err != nil {
+		return err
+	}
+	c.deployHolding = held
+	log := filepath.Join(c.root, "after.log")
+	released := make(chan struct{})
+	c.deployReleased = released
+	time.AfterFunc(time.Duration(milliseconds)*time.Millisecond, func() {
+		_, err := os.Stat(log)
+		c.deployRanBeside.Store(err == nil)
+		_ = held.Release(context.Background())
+		close(released)
+	})
+	return nil
+}
+
+func (c *nextContext) theCommandWaitedForTheOtherDeploy() error {
+	select {
+	case <-c.deployReleased:
+	case <-time.After(5 * time.Second):
+		return fmt.Errorf("the other deploy never let go of the lock")
+	}
+	if c.deployRanBeside.Load() {
+		return fmt.Errorf("the after-landing command had already started while another deploy held the lock")
+	}
+	return nil
+}
+
 func (c *nextContext) anotherRigNamesACommand() error {
 	if err := c.afterScript("exit 0"); err != nil {
 		return err
@@ -81,14 +138,18 @@ func (c *nextContext) afterLandingCommandsAreStoppedAfter(milliseconds int) erro
 
 // theCommandRanOnce reads the log the command wrote: one line, the rig checkout
 // and the commit the origin's branch holds.
-func (c *nextContext) theCommandRanOnce(branch string) error {
+func (c *nextContext) theCommandRanOnce(branch string) error { return c.theCommandRan(1, branch) }
+
+func (c *nextContext) theCommandRanTwice(branch string) error { return c.theCommandRan(2, branch) }
+
+func (c *nextContext) theCommandRan(times int, branch string) error {
 	held, err := os.ReadFile(filepath.Join(c.root, "after.log"))
 	if err != nil {
 		return fmt.Errorf("expected the after-landing command to have run: %w", err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(held)), "\n")
-	if len(lines) != 1 {
-		return fmt.Errorf("expected the command to run once, got %d runs: %q", len(lines), lines)
+	if len(lines) != times {
+		return fmt.Errorf("expected the command to run %d times, got %d runs: %q", times, len(lines), lines)
 	}
 	landed, err := gitSay(c.origin(), "rev-parse", branch)
 	if err != nil {
@@ -100,16 +161,18 @@ func (c *nextContext) theCommandRanOnce(branch string) error {
 	if err != nil {
 		return err
 	}
-	fields := strings.Fields(lines[0])
-	if len(fields) != 2 {
-		return fmt.Errorf("expected the command's log line to hold a directory and a commit, got %q", lines[0])
-	}
-	gotDir, err := filepath.EvalSymlinks(fields[0])
-	if err != nil {
-		return err
-	}
-	if gotDir != wantDir || fields[1] != landed {
-		return fmt.Errorf("expected the command to run in %s at %s, got %s at %s", wantDir, landed, gotDir, fields[1])
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			return fmt.Errorf("expected the command's log line to hold a directory and a commit, got %q", line)
+		}
+		gotDir, err := filepath.EvalSymlinks(fields[0])
+		if err != nil {
+			return err
+		}
+		if gotDir != wantDir || fields[1] != landed {
+			return fmt.Errorf("expected the command to run in %s at %s, got %s at %s", wantDir, landed, gotDir, fields[1])
+		}
 	}
 	return nil
 }

@@ -176,6 +176,14 @@ type Next struct {
 	// from the rig by itself. A nil AfterLanding runs nothing.
 	AfterLanding AfterLanding
 
+	// DeploySlot is the rig's after-landing lock, taken around its command so that
+	// a landing's deploy and `mw after-landing` never run side by side
+	// (mw-gq6.309). A nil DeploySlot takes none. AfterRetryWait is how long the
+	// command is left before it is run once more after a passing network fault;
+	// zero is AfterLandingRetryWait.
+	DeploySlot     MergeSlot
+	AfterRetryWait time.Duration
+
 	// Units restarts this host's long-running mw user units once a landing's
 	// build of the factory rig has succeeded, so that they run the new binary
 	// (mw-gq6.232). A nil Units restarts nothing.

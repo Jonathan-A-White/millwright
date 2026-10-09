@@ -24,6 +24,12 @@ const (
 	SlotPoll   = 2 * time.Second
 )
 
+// AfterLandingSlotSuffix names the rig's after-landing lock, a slot of the same
+// kind as the merge slot but its own: it is held by whoever runs the rig's
+// after-landing command, so that a deploy never runs beside another, and a
+// landing is not held up by a deploy that is running.
+const AfterLandingSlotSuffix = ".after-landing-slot"
+
 // Slots hands out a rig's merge slot: the right to be the one close-out putting
 // work on that rig's target branch on this host. It is the adapter behind
 // application.MergeSlot.
@@ -40,9 +46,10 @@ const (
 // race between the two hosts is settled where it has to be, by the remote
 // refusing the second push.
 type Slots struct {
-	wait time.Duration
-	cap  time.Duration
-	poll time.Duration
+	wait   time.Duration
+	cap    time.Duration
+	poll   time.Duration
+	suffix string
 
 	// notice is told, in a sentence, who has the slot when taking it has to
 	// wait, and again whenever it changes hands. Nil says nothing.
@@ -71,6 +78,12 @@ func WithSlotPoll(poll time.Duration) SlotOption {
 	return func(s *Slots) { s.poll = poll }
 }
 
+// WithSlotSuffix names the slot file a rig's slot is, instead of SlotSuffix: how
+// the after-landing lock is a different lock from the merge slot.
+func WithSlotSuffix(suffix string) SlotOption {
+	return func(s *Slots) { s.suffix = suffix }
+}
+
 // WithSlotNotice sets who is told, once a wait for a held slot has begun, whose
 // slot it is waiting on: a person at a terminal sees why nothing is happening.
 func WithSlotNotice(notice func(said string)) SlotOption {
@@ -79,7 +92,7 @@ func WithSlotNotice(notice func(said string)) SlotOption {
 
 // NewSlots returns the merge slots of this host's rigs.
 func NewSlots(opts ...SlotOption) *Slots {
-	s := &Slots{wait: SlotWait, cap: SlotCap, poll: SlotPoll}
+	s := &Slots{wait: SlotWait, cap: SlotCap, poll: SlotPoll, suffix: SlotSuffix}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -89,9 +102,11 @@ func NewSlots(opts ...SlotOption) *Slots {
 // SlotPath is where a rig's merge slot lives: beside the rig's story worktrees,
 // named after the rig, and so outside the rig's own git directory and outside
 // every worktree cut from it.
-func SlotPath(rigDir string) string {
+func SlotPath(rigDir string) string { return slotPath(rigDir, SlotSuffix) }
+
+func slotPath(rigDir, suffix string) string {
 	clean := filepath.Clean(rigDir)
-	return filepath.Join(filepath.Dir(clean), application.WorktreesDir, filepath.Base(clean)+SlotSuffix)
+	return filepath.Join(filepath.Dir(clean), application.WorktreesDir, filepath.Base(clean)+suffix)
 }
 
 // Take implements application.MergeSlot.
@@ -99,7 +114,7 @@ func (s *Slots) Take(ctx context.Context, rigDir, holder string) (application.Ho
 	if rigDir == "" {
 		return nil, fmt.Errorf("taking a merge slot: which rig?")
 	}
-	path := SlotPath(rigDir)
+	path := slotPath(rigDir, s.suffix)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("making the directory the merge slot of %s belongs in: %w", rigDir, err)
 	}

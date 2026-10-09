@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -68,9 +69,14 @@ type nextContext struct {
 
 	lease *landingLease // the lease watch of features/next_lease.feature, when a scenario asks for one
 
-	afterCommands map[string]string          // the [after_landing] table this scenario's rig host has
-	afterLimit    time.Duration              // how long an after-landing command may run; zero is the adapter's own
-	units         *apptest.FakeUnitRestarter // the user manager this host has, when a scenario names the follower
+	afterCommands map[string]string // the [after_landing] table this scenario's rig host has
+	afterLimit    time.Duration     // how long an after-landing command may run; zero is the adapter's own
+	afterRetry    time.Duration     // how long a failed-on-the-network after-landing command waits to be run again; zero is the use case's own
+
+	deployHolding   application.Holding // the after-landing lock another deploy holds, in the lock scenario
+	deployRanBeside atomic.Bool         // whether the command had started when that deploy let go
+	deployReleased  chan struct{}
+	units           *apptest.FakeUnitRestarter // the user manager this host has, when a scenario names the follower
 
 	backend   *backendFixture // the [backend] table this scenario's host has, when it has one
 	worktrees *rig.Worktrees  // the git adapter mw next is given, so that the backend is built through it
@@ -830,10 +836,12 @@ func (c *nextContext) mwClosesOut(id string) error {
 		Out:  &c.printed,
 		Err:  &c.stderr,
 
-		AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(c.afterCommands), rig.WithAfterLimit(c.afterLimit)),
-		Backend:      c.backendStage(),
-		Units:        c.unitRestarter(),
-		Stamps:       c.stamps,
+		AfterLanding:   rig.NewAfterLanding(rig.WithAfterCommands(c.afterCommands), rig.WithAfterLimit(c.afterLimit)),
+		DeploySlot:     rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix), rig.WithSlotWait(5*time.Second), rig.WithSlotPoll(20*time.Millisecond)),
+		AfterRetryWait: c.afterRetry,
+		Backend:        c.backendStage(),
+		Units:          c.unitRestarter(),
+		Stamps:         c.stamps,
 	}.Run(context.Background(), id)
 
 	if c.afterFirst == nil {
