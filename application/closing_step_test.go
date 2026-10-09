@@ -217,3 +217,42 @@ func TestTheClosingStepOfABugStoryAsksForTheRegressionTestAndTheClassWithItsSwee
 		}
 	}
 }
+
+// The closing comment also carries the one line the app's changelog is written
+// from, in its three forms.
+func TestClosingStepsOfBothFormulasAskForTheWhatsNewLine(t *testing.T) {
+	for _, tc := range []struct{ file, step string }{
+		{"tdd-feature.formula.json", "close"},
+		{"tdd-feature.formula.json", "close-bug"},
+		{"chore.formula.json", "close"},
+	} {
+		raw, err := os.ReadFile(filepath.Join("..", "formulas", tc.file))
+		if err != nil {
+			t.Fatalf("reading %s: %v", tc.file, err)
+		}
+		var formula struct {
+			Steps []formulaStep `json:"steps"`
+		}
+		if err := json.Unmarshal(raw, &formula); err != nil {
+			t.Fatalf("decoding %s: %v", tc.file, err)
+		}
+		found := false
+		for _, s := range formula.Steps {
+			if s.ID != tc.step {
+				continue
+			}
+			found = true
+			for _, want := range []string{"What's new: New: ", "What's new: Fixed: ", "What's new: none"} {
+				if !strings.Contains(s.Description, want) {
+					t.Errorf("%s %s: expected the closing step to give the form %q, got %q", tc.file, tc.step, want, s.Description)
+				}
+			}
+			if !strings.Contains(s.Description, "no file names") {
+				t.Errorf("%s %s: expected the closing step to say no file names, got %q", tc.file, tc.step, s.Description)
+			}
+		}
+		if !found {
+			t.Errorf("%s: no step %q", tc.file, tc.step)
+		}
+	}
+}
