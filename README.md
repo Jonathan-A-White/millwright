@@ -285,10 +285,21 @@ each with its acceptance criteria and estimate in their own fields, its Path
 overrides as metadata, and what it waits on as a blocked-by dependency.
 
 A Path's `host` names the one host that works the story. `host = "auto"` means
-whichever host is under its cap and its load takes it: a host takes an `auto`
-story only while its 1-minute load average is below its core count, and the claim
-writes that host's name over `auto`, so every later reader sees a concrete host.
+whichever host is under its cap and has room takes it, and the claim writes that
+host's name over `auto`, so every later reader sees a concrete host.
 `mw status` lists a ready `auto` story under READY on every host, as `host auto`.
+
+A host has **room** for a story of any host, `auto` or named, only while its
+1-minute load average is under `room_load_per_core` of a core each (default 1.0,
+so under its core count) and at least `room_min_free_mb` of memory is available
+(default 2048, from `MemAvailable` in `/proc/meminfo`); both are in the config
+file's `[dispatch]` table. The cap on sessions is still the ceiling: room only holds
+back a story the cap would have let through, which stays ready and claimed by
+nobody. A load or memory that cannot be read holds nothing back. A host that loses
+its room, and one that has it back, are each one `job` event (`dispatch-room@<host>`,
+running to failed, running to done), not one per tick; `mw status` prints
+`host: N of cap M` and, while the host has no room, a `held back, no room:` line
+for each reason.
 
 Every story is filed **held** — beads' `deferred` status — so that nothing can
 be dispatched from a plan nobody has approved. `mw file` prints the tree it
@@ -1078,7 +1089,9 @@ host that is not WSL. While the network is metered:
 A change of state is written once, not per tick: an emergency-lane `job` event
 `network@<host>` (running to failed) when it turns metered, so the Governor gets one push,
 and one in the normal lane (running to done, `clears` that seq) when it turns back. See
-`application/network_test.go` and `application/dispatch_network_test.go`.
+`application/network_test.go` and `application/dispatch_network_test.go`. A host
+losing its room to start a story (load or free memory, `[dispatch]` in the config) is
+written the same way, in the normal lane, as `dispatch-room@<host>`.
 
 ## Stamping a rig's head by hand
 

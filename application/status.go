@@ -210,6 +210,15 @@ type Status struct {
 	// Network, when set, is asked for the NETWORK line: metered or not.
 	Network NetworkReader
 
+	// Cap is how many sessions may run on this host at once, and Load and Room
+	// are how its room to start another is judged (mw-t0z3fu.1): the HOST line
+	// says how many of the cap are in use and, when the host has no room, why
+	// mw dispatch holds a story back. A zero Cap leaves the line out; a nil Load,
+	// or a load that cannot be read, says nothing of room.
+	Cap  int
+	Load HostLoad
+	Room RoomLimits
+
 	// VPSNginx, when set, is asked for the VPS NGINX line: whether the VPS's
 	// postern_api upstream sends the phone to the home first.
 	VPSNginx VPSNginxReader
@@ -330,7 +339,14 @@ func (w HostWork) Unreadable() bool { return w.Said != "" && w.LastSync.IsZero()
 type StatusReport struct {
 	Host    string
 	Running []RunningStory
-	Ready   []StoryDetail
+	// Cap is how many sessions this host may run at once, 0 when it was not
+	// told. InUse is how many of Running hold one of them, and NoRoom is why
+	// mw dispatch holds a story back here, "" when the host has room or the load
+	// could not be read (mw-t0z3fu.1).
+	Cap    int
+	InUse  int
+	NoRoom string
+	Ready  []StoryDetail
 	// Waiting are the beads labelled hitl that are open and not blocked, on any
 	// host or none, and the stories labelled hitl this host has claimed: worked
 	// with the Governor present, so neither a dispatcher's to take nor a session
@@ -466,6 +482,15 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 			rs.CloseOut, rs.Now = &mark, s.now()
 		}
 		report.Running = append(report.Running, rs)
+		if !rs.Refused() {
+			// A refused story waits on the Mayor and holds no session, so the cap
+			// does not count it, as in mw dispatch.
+			report.InUse++
+		}
+	}
+	if s.Cap > 0 {
+		report.Cap = s.Cap
+		report.NoRoom, _ = ReadRoom(ctx, s.Load, s.Room)
 	}
 
 	for _, detail := range work.ReadyOn(s.Host) {
@@ -882,6 +907,17 @@ func (r StatusReport) String() string {
 	if r.BeadsKnown {
 		clip(&b, beadsLine(r.BeadsBytes, r.BeadsBudgetBytes))
 		clip(&b, r.syncModeLine())
+		b.WriteString("\n")
+	}
+
+	if r.Cap > 0 {
+		clip(&b, fmt.Sprintf("host: %d of cap %d", r.InUse, r.Cap))
+		// One line a reason, so that none runs past a phone's width.
+		for _, why := range strings.Split(r.NoRoom, "; ") {
+			if why != "" {
+				clip(&b, "  held back, no room: "+why)
+			}
+		}
 		b.WriteString("\n")
 	}
 
