@@ -126,3 +126,49 @@ func TestAGuestRigsFileNamesItsOwnerAndStillRefusesAnUnknownKey(t *testing.T) {
 		t.Errorf("expected an unknown key to be an error naming it, got %v", err)
 	}
 }
+
+func TestARigsFileNamesTheFilesWhoseVersionLandingRaises(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+	writeRigFile(t, dir, "lampas", "version_files = [\"package.json\", \"package-lock.json\"]  # the patch at landing\n")
+
+	got, err := v.EpicRequirements(context.Background(), "lampas")
+	if err != nil {
+		t.Fatalf("reading the rig's file: %v", err)
+	}
+	want := domain.EpicRequirements{VersionFiles: []string{"package.json", "package-lock.json"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("requirements = %+v, want %+v", got, want)
+	}
+	if got.Any() {
+		t.Errorf("version_files is no requirement of an epic, but Any() = true")
+	}
+
+	// A list over several lines, beside the other keys.
+	writeRigFile(t, dir, "whisper-hid", "epic_sections = [\"Demo\"]\nversion_files = [\n  \"pwa/package.json\",\n  \"pwa/package-lock.json\",\n]\n")
+	got, err = v.EpicRequirements(context.Background(), "whisper-hid")
+	if err != nil {
+		t.Fatalf("reading the rig's file: %v", err)
+	}
+	want = domain.EpicRequirements{Sections: []string{"Demo"}, VersionFiles: []string{"pwa/package.json", "pwa/package-lock.json"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("requirements = %+v, want %+v", got, want)
+	}
+}
+
+func TestVersionFilesStillRefusesAnUnknownKeyAndAPathOutsideTheRig(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+
+	writeRigFile(t, dir, "lampas", "version_files = [\"package.json\"]\nversion_file = [\"package.json\"]\n")
+	if _, err := v.EpicRequirements(context.Background(), "lampas"); err == nil || !strings.Contains(err.Error(), "version_file") {
+		t.Errorf("a misspelt key beside version_files: err = %v, want it to name the key", err)
+	}
+
+	for _, bad := range []string{`["/etc/passwd"]`, `["../package.json"]`, `["a/../../b.json"]`} {
+		writeRigFile(t, dir, "lampas", "version_files = "+bad+"\n")
+		if _, err := v.EpicRequirements(context.Background(), "lampas"); err == nil || !strings.Contains(err.Error(), "version_files") {
+			t.Errorf("version_files = %s: err = %v, want a refusal naming version_files", bad, err)
+		}
+	}
+}

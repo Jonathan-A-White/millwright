@@ -21,6 +21,11 @@ type EpicRequirements struct {
 	// owner is not the Governor, worked by the factory only when its owner asks.
 	// It is no requirement of an epic, so Any does not count it.
 	Guest string
+	// VersionFiles, when it is not empty, are the files of the rig, relative to
+	// its root, that carry its version: a landing raises the patch of the first
+	// one's version and writes it into all of them. It is no requirement of an
+	// epic either, so Any does not count it.
+	VersionFiles []string
 }
 
 // Any reports whether the rig asks anything of its epics at all. A rig that

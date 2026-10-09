@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -16,12 +17,14 @@ import (
 // they share.
 const RigFileExt = ".toml"
 
-// The keys of a rig's file, all optional. The first two are lists of strings;
-// guest is one quoted string, the owner of a rig that is not the Governor's.
+// The keys of a rig's file, all optional. The first two and version_files are
+// lists of strings; guest is one quoted string, the owner of a rig that is not
+// the Governor's.
 const (
 	EpicSectionsKey        = "epic_sections"
 	EpicLastStoryLabelsKey = "epic_last_story_labels"
 	GuestKey               = "guest"
+	VersionFilesKey        = "version_files"
 )
 
 var _ application.EpicRules = (*Vault)(nil)
@@ -32,6 +35,7 @@ var _ application.EpicRules = (*Vault)(nil)
 //	epic_sections          = ["Demo"]
 //	epic_last_story_labels = ["demo"]
 //	guest                  = "Luke"
+//	version_files          = ["package.json", "package-lock.json"]
 //
 // A rig with no file asks nothing. A key this does not know is an error rather
 // than a silence: a misspelt key would otherwise switch the requirement off
@@ -94,9 +98,16 @@ func parseRigFile(written string) (domain.EpicRequirements, error) {
 			requirements.Sections = names
 		case EpicLastStoryLabelsKey:
 			requirements.LastStoryLabels = names
+		case VersionFilesKey:
+			for _, name := range names {
+				if path.IsAbs(name) || name != path.Clean(name) || name == ".." || strings.HasPrefix(name, "../") {
+					return requirements, fmt.Errorf("the list for %s: %q is not a path inside the rig (write it relative, as in %q)", key, name, "pwa/package.json")
+				}
+			}
+			requirements.VersionFiles = names
 		default:
-			return requirements, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s and %s)",
-				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey)
+			return requirements, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s and %s)",
+				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey)
 		}
 	}
 	return requirements, nil
