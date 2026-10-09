@@ -1,10 +1,13 @@
 package contrib_test
 
-// docs/codemap.md is merged by git's union driver (.gitattributes), so two
-// branches that each add a row to the same table both keep their row instead of
-// conflicting. These tests prove that in a throwaway repository in a temporary
-// directory, and that scripts/check-codemap.sh refuses the one thing a union
-// merge can leave behind: a row that two branches edited differently.
+// docs/codemap.md is NOT merged by git's union driver: union keeps both
+// versions of a row two branches each edited, and the two trimmed versions of a
+// byte-capped page came out as one over the cap (mw-gq6.317). With the default
+// merge, a row edited on two branches is a conflict a Builder resolves. These
+// tests prove that in a throwaway repository in a temporary directory, that the
+// real map passes scripts/check-codemap.sh (make test is what a landing runs),
+// and that the script refuses the one thing a union merge could leave behind: a
+// row that two branches edited differently.
 
 import (
 	"os"
@@ -14,8 +17,7 @@ import (
 	"testing"
 )
 
-func gitIn(t *testing.T, dir string, args ...string) string {
-	t.Helper()
+func gitTry(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(),
@@ -23,31 +25,39 @@ func gitIn(t *testing.T, dir string, args ...string) string {
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@example.invalid",
 		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@example.invalid")
 	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func gitIn(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := gitTry(dir, args...)
 	if err != nil {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
-	return string(out)
+	return out
 }
 
-func TestCodemapAttributeIsUnion(t *testing.T) {
+func TestCodemapIsNotMergedByUnion(t *testing.T) {
 	root, err := filepath.Abs("..")
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := gitIn(t, root, "check-attr", "merge", "docs/codemap.md")
-	if want := "docs/codemap.md: merge: union"; strings.TrimSpace(out) != want {
-		t.Fatalf("git check-attr merge docs/codemap.md = %q, want %q", strings.TrimSpace(out), want)
+	out := strings.TrimSpace(gitIn(t, root, "check-attr", "merge", "docs/codemap.md"))
+	if strings.HasSuffix(out, ": union") {
+		t.Fatalf("git check-attr merge docs/codemap.md = %q: a union merge doubles a row two branches edited", out)
 	}
 }
 
-func TestCodemapUnionMergesTwoAddedRows(t *testing.T) {
+func TestCodemapRowEditedOnTwoBranchesNeverMergesToTwoRows(t *testing.T) {
 	root, err := filepath.Abs("..")
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The rig's own attributes, if it has any: there is no file when nothing
+	// in the rig is merged specially.
 	attributes, err := os.ReadFile(filepath.Join(root, ".gitattributes"))
-	if err != nil {
-		t.Fatalf("no .gitattributes: %v", err)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
 	}
 	codemap, err := os.ReadFile(filepath.Join(root, "docs", "codemap.md"))
 	if err != nil {
@@ -60,8 +70,10 @@ func TestCodemapUnionMergesTwoAddedRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	mapPath := filepath.Join(dir, "docs", "codemap.md")
-	if err := os.WriteFile(filepath.Join(dir, ".gitattributes"), attributes, 0o644); err != nil {
-		t.Fatal(err)
+	if attributes != nil {
+		if err := os.WriteFile(filepath.Join(dir, ".gitattributes"), attributes, 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := os.WriteFile(mapPath, codemap, 0o644); err != nil {
 		t.Fatal(err)
@@ -69,46 +81,54 @@ func TestCodemapUnionMergesTwoAddedRows(t *testing.T) {
 	gitIn(t, dir, "add", ".")
 	gitIn(t, dir, "commit", "-q", "-m", "base")
 
-	// Each branch adds a different row right after the same existing row of
-	// the Ports table: adjacent lines, which a plain merge refuses.
+	// Each branch trims the same row, differently.
 	const anchor = "| `WorkTracker` |"
-	addRow := func(branch, row string) {
+	editRow := func(branch, suffix string) {
 		gitIn(t, dir, "checkout", "-q", "-b", branch, "main")
 		lines := strings.Split(string(codemap), "\n")
-		var edited []string
 		found := false
-		for _, l := range lines {
-			edited = append(edited, l)
+		for i, l := range lines {
 			if strings.HasPrefix(l, anchor) {
-				edited = append(edited, row)
+				lines[i] = l + suffix
 				found = true
 			}
 		}
 		if !found {
-			t.Fatalf("docs/codemap.md has no row starting %q to add beside", anchor)
+			t.Fatalf("docs/codemap.md has no row starting %q to edit", anchor)
 		}
-		if err := os.WriteFile(mapPath, []byte(strings.Join(edited, "\n")), 0o644); err != nil {
+		if err := os.WriteFile(mapPath, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		gitIn(t, dir, "commit", "-q", "-am", branch)
 	}
-	rowA := "| `PortAlpha` | `application/alpha.go` | none | none |"
-	rowB := "| `PortBeta` | `application/beta.go` | none | none |"
-	addRow("alpha", rowA)
-	addRow("beta", rowB)
+	editRow("alpha", " alpha")
+	editRow("beta", " beta")
 
 	gitIn(t, dir, "checkout", "-q", "main")
 	gitIn(t, dir, "merge", "--no-edit", "alpha")
-	gitIn(t, dir, "merge", "--no-edit", "beta")
-
+	if _, err := gitTry(dir, "merge", "--no-edit", "beta"); err != nil {
+		return // a conflict: the Builder resolves it by hand
+	}
 	merged, err := os.ReadFile(mapPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, row := range []string{rowA, rowB} {
-		if n := strings.Count(string(merged), row+"\n"); n != 1 {
-			t.Errorf("merged codemap holds %q %d times, want once", row, n)
-		}
+	if n := strings.Count(string(merged), anchor); n != 1 {
+		t.Errorf("merged codemap holds a row starting %q %d times, want once", anchor, n)
+	}
+}
+
+func TestRealCodemapPassesItsCheck(t *testing.T) {
+	// make test is what a landing runs; make lint is not. Without this the
+	// byte cap and the duplicate-row rule are only as good as a Builder's habit.
+	root, err := filepath.Abs("..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", "scripts/check-codemap.sh")
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("scripts/check-codemap.sh on the real map: %v\n%s", err, out)
 	}
 }
 
