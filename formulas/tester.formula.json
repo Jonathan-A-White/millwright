@@ -1,0 +1,53 @@
+{
+  "formula": "tester",
+  "description": "Use what a landed story built as the Governor would, on a phone-sized screen: follow its HOW TO CHECK IT step by step, then try to break it, and write FINDINGS with shots on the landed story. A Tester commits nothing.",
+  "version": 1,
+  "type": "workflow",
+  "pour": true,
+  "vars": {
+    "story": {
+      "description": "the Tester story bead this formula works",
+      "required": true
+    },
+    "title": {
+      "description": "the Tester story's title",
+      "required": true
+    }
+  },
+  "steps": [
+    {
+      "id": "understand",
+      "title": "Understand {{story}}: {{title}}",
+      "description": "Read {{story}}'s description: the line 'Landed story: <id>' names the landed story you test and the commit it landed at, and the HOW TO CHECK IT section below it is the Governor's steps, copied from that story's closing comment. Read the landed story's closing comment too. This is a Tester story: it commits nothing, to any branch, ever. Everything you make goes under /tmp/tester-{{story}}/, nothing is added to the rig.",
+      "type": "task"
+    },
+    {
+      "id": "serve",
+      "title": "Build and serve the landed commit",
+      "description": "Make a scratch worktree of the rig at the landed commit under /tmp/tester-{{story}}/app (git worktree add --detach), never your own story worktree. Build it as the rig builds (npm ci, then npm run build for Lampas) and serve it (npm run preview for Lampas), noting the URL. Take the scratch worktree away (git worktree remove) when you are done with it. This step commits nothing.",
+      "type": "task",
+      "depends_on": ["understand"]
+    },
+    {
+      "id": "check",
+      "title": "Follow HOW TO CHECK IT at 390x844",
+      "description": "Write a Playwright script under /tmp/tester-{{story}}/ (nothing added to the rig) that opens the served app at a 390x844 viewport, touch on, as a phone. Follow HOW TO CHECK IT step by step, exactly as written, with the exact labels it names, and take a shot after each step into /tmp/tester-{{story}}/shots/ named by step number. For each step note what right looks like and what you saw. This step commits nothing.",
+      "type": "task",
+      "depends_on": ["serve"]
+    },
+    {
+      "id": "adversarial",
+      "title": "At least five adversarial moves",
+      "description": "Still at 390x844, with a shot of each, try at least five adversarial moves on the screens HOW TO CHECK IT touched: (1) leave the app and come back (page hidden, then visible); (2) hold and let go at once on each button that holds; (3) tap twice fast on each button; (4) slow 3G (Playwright network throttling) through the steps; (5) rotate to 844x390 and back; (6) Back at each screen. Note each move, what happened and its shot path. This step commits nothing.",
+      "type": "task",
+      "depends_on": ["check"]
+    },
+    {
+      "id": "findings",
+      "title": "Write FINDINGS on the landed story",
+      "description": "Comment on the LANDED story (its id is on {{story}}'s 'Landed story:' line), not on {{story}}. Start the comment with a line 'FINDINGS', then one item per finding, each starting '- [bug]' (it does not do what HOW TO CHECK IT says, or breaks) or '- [taste]' (it works, and he would not like it), each saying what he would see, the steps that show it, and the shot path. With nothing found, write the single line 'FINDINGS: none'. End the comment with a line 'Tester fuel: <tokens>', the tokens this session spent as far as you can tell, else 'Tester fuel: unknown'. A Tester commits nothing: leave your branch with no commits, and run mw check {{story}} before you stop.",
+      "type": "task",
+      "depends_on": ["adversarial"]
+    }
+  ]
+}

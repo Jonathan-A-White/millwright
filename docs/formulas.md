@@ -8,7 +8,7 @@ A formula is the step-by-step procedure a story is worked by (see
 Formula is one of the fields of a story's **path** (rig, target branch,
 harness, model, effort, formula, host), set by the Mayor when it plans the
 epic and written into the story bead's `formula` metadata (as `mw file`
-does for every other path field). Today there are two:
+does for every other path field). Today there are three:
 
 - `chore` — do the change, verify it, commit, closing comment. Use for
   stories with no meaningful test-first step (docs, config, plumbing).
@@ -16,8 +16,12 @@ does for every other path field). Today there are two:
   failing test or feature first, implement to green, run the full build/
   test/vet, self-review the diff against the acceptance criteria, commit,
   closing comment. Use for anything that changes behavior.
+- `tester` — the Tester trial's, never planned by hand: mw next files the
+  story after a landing. Build and serve the landed commit, drive it at
+  390x844 by its HOW TO CHECK IT and five adversarial moves, write FINDINGS
+  on the landed story. Commits nothing.
 
-Both take two variables: `story` (the story bead id) and `title` (the
+All take two variables: `story` (the story bead id) and `title` (the
 story's title). `tdd-feature` takes a third, `kind`, which `mw next` sets to
 `bug` when the story is a bug (its type is `bug` or its title starts `[bug]`)
 and leaves at its default, `feature`, otherwise.
@@ -57,11 +61,12 @@ Builder's, and is not done by any story's own commit:
 ```sh
 mkdir -p /root/millwright-vault/.beads/formulas
 cp formulas/tdd-feature.formula.json formulas/chore.formula.json \
-   /root/millwright-vault/.beads/formulas/
+   formulas/tester.formula.json /root/millwright-vault/.beads/formulas/
 ```
 
 Verify with `bd -C /root/millwright-vault formula list`, which should show
-both by name.
+each by name. `tester` is the Tester trial's (README, "The Tester trial"): a
+story it works commits nothing.
 
 ## Verifying a formula
 

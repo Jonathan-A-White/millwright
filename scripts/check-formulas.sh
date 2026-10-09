@@ -30,6 +30,7 @@ command -v jq >/dev/null 2>&1 || fail "jq is not on PATH"
 declare -A FORMULA_FILES=(
 	[tdd-feature]="$FORMULAS_DIR/tdd-feature.formula.json"
 	[chore]="$FORMULAS_DIR/chore.formula.json"
+	[tester]="$FORMULAS_DIR/tester.formula.json"
 )
 
 for name in "${!FORMULA_FILES[@]}"; do
@@ -64,17 +65,17 @@ $WHERE_OUT" ;;
 esac
 
 mkdir -p .beads/formulas
-cp "${FORMULA_FILES[tdd-feature]}" "${FORMULA_FILES[chore]}" .beads/formulas/
+cp "${FORMULA_FILES[tdd-feature]}" "${FORMULA_FILES[chore]}" "${FORMULA_FILES[tester]}" .beads/formulas/
 
 # --- bd formula list ---------------------------------------------------
 LIST_JSON="$(bd formula list --json)"
-for name in tdd-feature chore; do
+for name in tdd-feature chore tester; do
 	echo "$LIST_JSON" | jq -e --arg n "$name" 'map(.name) | index($n)' >/dev/null \
 		|| fail "bd formula list does not include '$name'; got: $LIST_JSON"
 done
 
 # --- bd cook -------------------------------------------------------------
-for name in tdd-feature chore; do
+for name in tdd-feature chore tester; do
 	bd cook "$name" >/dev/null || fail "bd cook $name exited non-zero"
 done
 
@@ -83,6 +84,7 @@ done
 declare -A FIRST_STEP_ID=(
 	[tdd-feature]="understand"
 	[chore]="do"
+	[tester]="understand"
 )
 
 check_pour() {
@@ -118,6 +120,7 @@ check_pour() {
 
 check_pour tdd-feature
 check_pour chore
+check_pour tester
 
 # A bug is poured with kind=bug: still one ready step, and the red-bug and
 # close-bug steps stand in for red and close.
@@ -129,4 +132,4 @@ bug_root="$(echo "$bug_json" | jq -r '.new_epic_id')"
 [ "$(bd ready --parent "$bug_root" --json | jq 'length')" = "1" ] \
 	|| fail "tdd-feature with kind=bug: expected exactly 1 ready step"
 
-echo "OK: tdd-feature and chore formulas listed, cooked, and poured with only their first step ready"
+echo "OK: tdd-feature, chore and tester formulas listed, cooked, and poured with only their first step ready"
