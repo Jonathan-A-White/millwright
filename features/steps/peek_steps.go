@@ -122,7 +122,7 @@ func (c *peekContext) theFormulaIsPoured(a, b, d string) error {
 		steps = append(steps, application.FormulaStep{Title: title})
 	}
 	c.tracker.AddFormula("tdd-feature", steps...)
-	molecule, err := c.tracker.PourFormula(context.Background(), "tdd-feature", c.storyID, "Peek at a Builder")
+	molecule, err := c.tracker.PourFormula(context.Background(), "tdd-feature", c.storyID, "Peek at a Builder", false)
 	if err != nil {
 		return err
 	}

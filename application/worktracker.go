@@ -487,8 +487,11 @@ type WorkTracker interface {
 	// PourFormula pours a formula into step beads for one story and reports the
 	// molecule it made: the root bead and the steps in the order they are
 	// worked. Pouring twice makes two molecules, so pour only when the story has
-	// no open molecule to work (see OpenMolecule).
-	PourFormula(ctx context.Context, formula, storyID, title string) (Molecule, error)
+	// no open molecule to work (see OpenMolecule). A story that is a bug (see
+	// domain.IsBugStory) is poured as one: the steps that ask for the
+	// regression test, the class and the sweep are made in place of the plain
+	// red and closing steps, by a formula that has them.
+	PourFormula(ctx context.Context, formula, storyID, title string, bug bool) (Molecule, error)
 
 	// StoryState reads back one dimension of a story's operational state, or ""
 	// when that dimension has never been set.

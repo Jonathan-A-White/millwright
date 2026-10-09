@@ -575,7 +575,7 @@ func (c *dispatchContext) aSessionIsRunningInItsWorktree(id string) error {
 // an earlier dispatch that failed after pouring would have left it.
 func (c *dispatchContext) pourAndRecord(id, formula string) (application.Molecule, error) {
 	ctx := context.Background()
-	molecule, err := c.tracker.PourFormula(ctx, formula, id, "The story "+id)
+	molecule, err := c.tracker.PourFormula(ctx, formula, id, "The story "+id, false)
 	if err != nil {
 		return application.Molecule{}, err
 	}

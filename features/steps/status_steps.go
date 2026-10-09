@@ -377,7 +377,7 @@ func (c *statusContext) theFormulaPouredHasAStepStillOpen(id string) error {
 		application.FormulaStep{Title: "Write the failing feature"},
 		application.FormulaStep{Title: "Implement until green"},
 	)
-	molecule, err := c.tracker.PourFormula(ctx, "tdd-feature", id, "The story "+id)
+	molecule, err := c.tracker.PourFormula(ctx, "tdd-feature", id, "The story "+id, false)
 	if err != nil {
 		return err
 	}

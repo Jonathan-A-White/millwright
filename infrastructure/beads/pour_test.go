@@ -17,7 +17,7 @@ import (
 // and a bd that failed for any other reason is not.
 func TestPourFormulaTellsARefusalOfTheBeadsFromAFaultOfBd(t *testing.T) {
 	refused := standIn(t, "title must be 500 characters or less (got 512)", 1)
-	_, err := refused.PourFormula(context.Background(), "tdd-feature", "mw-1", "A title")
+	_, err := refused.PourFormula(context.Background(), "tdd-feature", "mw-1", "A title", false)
 	var refusal *application.PourRefused
 	if !errors.As(err, &refusal) {
 		t.Fatalf("expected a PourRefused, got %v", err)
@@ -27,7 +27,7 @@ func TestPourFormulaTellsARefusalOfTheBeadsFromAFaultOfBd(t *testing.T) {
 	}
 
 	faulty := standIn(t, "connection refused", 1)
-	_, err = faulty.PourFormula(context.Background(), "tdd-feature", "mw-1", "A title")
+	_, err = faulty.PourFormula(context.Background(), "tdd-feature", "mw-1", "A title", false)
 	if err == nil || errors.As(err, &refusal) {
 		t.Errorf("expected a plain failure for a fault of bd, got %v", err)
 	}

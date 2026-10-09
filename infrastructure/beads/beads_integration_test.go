@@ -373,7 +373,7 @@ func TestGatewayWorksAStoryThroughBeads(t *testing.T) {
 		t.Fatalf("expected tdd-feature to be installed, got %q", installed)
 	}
 
-	molecule, err := gateway.PourFormula(ctx, "tdd-feature", storyID, "Beads gateway")
+	molecule, err := gateway.PourFormula(ctx, "tdd-feature", storyID, "Beads gateway", false)
 	if err != nil {
 		t.Fatalf("pouring tdd-feature for %s: %v", storyID, err)
 	}
@@ -1431,4 +1431,45 @@ func mustJSON(t *testing.T, v any) []byte {
 		t.Fatalf("encoding %T: %v", v, err)
 	}
 	return encoded
+}
+
+// Pouring tdd-feature for a bug makes the red and closing steps that ask for the
+// regression test, the class and the sweep, and only those; pouring it for any
+// other story makes the plain ones, which do not.
+func TestPouringTddFeatureForABugAsksForTheRegressionTestAndTheSweep(t *testing.T) {
+	t.Parallel()
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	installFormula(t, vault, "tdd-feature")
+	gateway := beads.New(vault)
+
+	asked := func(m application.Molecule) string {
+		var all []string
+		for _, step := range m.Steps {
+			all = append(all, step.Title+"\n"+step.Description)
+		}
+		return strings.Join(all, "\n---\n")
+	}
+	for _, tc := range []struct {
+		name string
+		bug  bool
+	}{{"a bug", true}, {"a feature", false}} {
+		molecule, err := gateway.PourFormula(ctx, "tdd-feature", "mw-x.1", "A story", tc.bug)
+		if err != nil {
+			t.Fatalf("pouring tdd-feature for %s: %v", tc.name, err)
+		}
+		if len(molecule.Steps) != 7 {
+			t.Fatalf("expected seven steps poured for %s, got %q", tc.name, asked(molecule))
+		}
+		text := asked(molecule)
+		for _, phrase := range []string{
+			"regression test", "fail for the reason he saw",
+			"Regression test: <file:line>", "Class: <the kind of bug, one line>; sweep:",
+		} {
+			if got := strings.Contains(text, phrase); got != tc.bug {
+				t.Errorf("for %s: expected %q present = %v, got %v in %q", tc.name, phrase, tc.bug, got, text)
+			}
+		}
+	}
 }

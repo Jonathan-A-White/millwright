@@ -294,7 +294,7 @@ func TestDispatchWorksAnOpenMoleculeAgainAndDoesNotCallItLeftBehindWhenTheBootFa
 	dispatch, tracker, _, _, _ := aFactory(t)
 	tracker.AddFormula("tdd-feature", application.FormulaStep{Title: "One"}, application.FormulaStep{Title: "Two"})
 	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
-	first, err := tracker.PourFormula(ctx, "tdd-feature", "mw-gq6.1", "A story")
+	first, err := tracker.PourFormula(ctx, "tdd-feature", "mw-gq6.1", "A story", false)
 	if err != nil {
 		t.Fatalf("pouring: %v", err)
 	}
@@ -1312,7 +1312,7 @@ type racedClaimTracker struct {
 }
 
 func (r *racedClaimTracker) ClaimStory(ctx context.Context, id string) error {
-	molecule, err := r.FakeTracker.PourFormula(ctx, "tdd-feature", id, "A story")
+	molecule, err := r.FakeTracker.PourFormula(ctx, "tdd-feature", id, "A story", false)
 	if err != nil {
 		return err
 	}
@@ -1350,5 +1350,40 @@ func TestDispatchDoesNotPourOverAMoleculeRecordedAfterItReadTheReadyList(t *test
 	}
 	if len(report.Started) != 1 || !report.Started[0].Reused || len(runner.Names()) != 1 {
 		t.Fatalf("expected one start working the first molecule again, got %+v", report.Started)
+	}
+}
+
+// A story of type bug, or one whose title starts [bug], is poured as a bug, so
+// that its steps ask for the regression test first and the class and sweep at
+// the end; any other story is poured as it always was.
+func TestDispatchPoursABugStoryAsABugByItsTypeOrByItsTitle(t *testing.T) {
+	for _, tc := range []struct {
+		name, title, kind string
+		bug               bool
+	}{
+		{"by type", "Mail shows twice", "bug", true},
+		{"by title", "[bug] Mail shows twice", "task", true},
+		{"a feature", "Mail shows twice", "feature", false},
+		{"no type", "Mail shows twice", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dispatch, tracker, _, _, _ := aFactory(t)
+			tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: tc.title})
+			tracker.AddFormula("tdd-feature", application.FormulaStep{Title: "Understand"})
+			if tc.kind != "" {
+				if err := tracker.SetType("mw-gq6.1", tc.kind); err != nil {
+					t.Fatalf("setting the type: %v", err)
+				}
+			}
+			if _, err := dispatch.Run(context.Background()); err != nil {
+				t.Fatalf("dispatching: %v", err)
+			}
+			if _, poured := tracker.Poured("mw-gq6.1"); !poured {
+				t.Fatal("expected the formula to be poured")
+			}
+			if got := tracker.PouredAsBug("mw-gq6.1"); got != tc.bug {
+				t.Errorf("expected the pour of %q (type %q) to be as a bug: %v, got %v", tc.title, tc.kind, tc.bug, got)
+			}
+		})
 	}
 }

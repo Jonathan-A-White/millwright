@@ -913,7 +913,7 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 		if err != nil {
 			return undo("reading the step titles of the formula "+path.Formula, err, true)
 		}
-		molecule, err := d.Tracker.PourFormula(ctx, path.Formula, id, title)
+		molecule, err := d.Tracker.PourFormula(ctx, path.Formula, id, title, domain.IsBugStory(detail.Type, detail.Story.Title))
 		var refused *PourRefused
 		if errors.As(err, &refused) {
 			return d.refusePour(ctx, id, started, rigDir, refused)

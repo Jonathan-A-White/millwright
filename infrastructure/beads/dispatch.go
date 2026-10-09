@@ -352,7 +352,7 @@ func (g *Gateway) Formulas(ctx context.Context) ([]string, error) {
 // PourFormula implements application.WorkTracker. Pouring is two calls: bd
 // makes the beads and says which id it gave each step, and then the steps are
 // read back for what they say, because the pouring says only their ids.
-func (g *Gateway) PourFormula(ctx context.Context, formula, storyID, title string) (application.Molecule, error) {
+func (g *Gateway) PourFormula(ctx context.Context, formula, storyID, title string, bug bool) (application.Molecule, error) {
 	switch {
 	case strings.TrimSpace(formula) == "":
 		return application.Molecule{}, fmt.Errorf("pouring a formula for %s: which formula?", storyID)
@@ -360,7 +360,13 @@ func (g *Gateway) PourFormula(ctx context.Context, formula, storyID, title strin
 		return application.Molecule{}, fmt.Errorf("pouring %s: which story?", formula)
 	}
 
-	args := []string{"mol", "pour", formula, "--var", "story=" + storyID, "--var", "title=" + title, "--json"}
+	args := []string{"mol", "pour", formula, "--var", "story=" + storyID, "--var", "title=" + title}
+	if bug {
+		// A formula that does not declare kind takes it without complaint, so a
+		// vault whose copy is older than the rig's still pours.
+		args = append(args, "--var", "kind=bug")
+	}
+	args = append(args, "--json")
 	out, errs, err := g.run(ctx, args...)
 	if err != nil {
 		// bd refusing what it was asked to make (a step title over its limit) is

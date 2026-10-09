@@ -59,6 +59,7 @@ type FakeTracker struct {
 	formulas    map[string][]application.FormulaStep // formula name -> its steps
 	molecules   []application.Molecule
 	poured      map[string]string // story id -> the molecule poured for it
+	pouredBugs  map[string]bool   // story id -> its molecule was poured as a bug's
 	closedSteps map[string]bool   // step id -> closed by the session working it
 	closedRoots map[string]bool   // molecule root id -> closed
 
@@ -180,6 +181,7 @@ func NewFakeTracker() *FakeTracker {
 		stories:    map[string]*fakeStory{},
 		formulas:   map[string][]application.FormulaStep{},
 		poured:     map[string]string{},
+		pouredBugs: map[string]bool{},
 		notes:      map[string]string{},
 		published:  map[string]string{},
 	}
@@ -948,7 +950,7 @@ func (f *FakeTracker) Formulas(_ context.Context) ([]string, error) {
 // PourFormula implements application.WorkTracker. The step beads are named
 // after the molecule they belong to, as beads' own are, so that a test can tell
 // two pourings of one formula apart.
-func (f *FakeTracker) PourFormula(_ context.Context, formula, storyID, title string) (application.Molecule, error) {
+func (f *FakeTracker) PourFormula(_ context.Context, formula, storyID, title string, bug bool) (application.Molecule, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.asked = append(f.asked, "PourFormula")
@@ -979,7 +981,16 @@ func (f *FakeTracker) PourFormula(_ context.Context, formula, storyID, title str
 	}
 	f.molecules = append(f.molecules, poured)
 	f.poured[storyID] = root
+	f.pouredBugs[storyID] = bug
 	return poured, nil
+}
+
+// PouredAsBug reports whether the molecule poured for a story was poured as a
+// bug's.
+func (f *FakeTracker) PouredAsBug(storyID string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pouredBugs[storyID]
 }
 
 // Poured reports the molecule poured for a story, and whether one was.
