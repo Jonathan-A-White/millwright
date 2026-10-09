@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -1422,13 +1423,21 @@ func (n Next) ledgered(ctx context.Context, id string) (bool, error) {
 // before either kind of retry existed.
 func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Landed, error) {
 	base := StartPoint(n.remote(), c.target)
-	var versionFiles []string
+	var version VersionBump
 	if n.Rules != nil {
 		rules, err := n.Rules.EpicRequirements(ctx, c.path.Rig)
 		if err != nil {
 			return Landed{}, failedFor(ReasonLandingFailed, fmt.Errorf("reading the version files of %s: %w", c.path.Rig, err))
 		}
-		versionFiles = rules.VersionFiles
+		version.Files = rules.VersionFiles
+		if len(rules.VersionFiles) > 0 && len(rules.ChangelogFiles) > 0 {
+			if version.Entry, err = n.changelogEntry(ctx, c); err != nil {
+				return Landed{}, failedFor(ReasonLandingFailed, err)
+			}
+			if version.Entry.Text != "" {
+				version.Changelog = rules.ChangelogFiles
+			}
+		}
 	}
 	var lost error
 	for try := 1; try <= n.tries(); try++ {
@@ -1442,7 +1451,7 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 			return Landed{}, failedFor(ReasonLandingFailed, fmt.Errorf("a landing of %s at %s could not be opened: %w", c.path.Rig, base, err))
 		}
 
-		landed, err := n.push(ctx, c, report, dir, versionFiles)
+		landed, err := n.push(ctx, c, report, dir, version)
 		if closeErr := n.Landing.CloseLanding(ctx, c.rigDir, dir); closeErr != nil {
 			report.Notes = append(report.Notes, fmt.Sprintf("the landing worktree %s could not be taken away: %v", dir, closeErr))
 		}
@@ -1465,7 +1474,7 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 // made if it made anything new, and push. Each attempt starts from a fresh
 // landing worktree at the newest base, so a push that was refused and tried
 // again raises the version once, from the new base, never on top of its own.
-func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir string, versionFiles []string) (Landed, error) {
+func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir string, version VersionBump) (Landed, error) {
 	landed, err := n.Landing.Merge(ctx, dir, c.branch)
 	if err != nil {
 		if Conflicted(err) {
@@ -1475,17 +1484,19 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 		return Landed{}, failedFor(ReasonLandingFailed, fmt.Errorf("%s could not be merged into %s: %w", c.branch, c.target, err))
 	}
 
-	if len(versionFiles) > 0 {
-		bumped, err := n.Landing.BumpVersion(ctx, dir, VersionBump{Files: versionFiles, Before: landed.Before, Branch: c.branch, StoryID: c.id})
+	if len(version.Files) > 0 {
+		version.Before, version.Branch, version.StoryID = landed.Before, c.branch, c.id
+		bumped, err := n.Landing.BumpVersion(ctx, dir, version)
 		if err != nil {
 			return Landed{}, failedFor(ReasonLandingFailed, fmt.Errorf("the version of %s could not be raised: %w", c.path.Rig, err))
 		}
-		if bumped.Version != "" {
+		if bumped.Commit != "" {
 			// The version commit is what is pushed, and so what has landed. It
-			// changes only the version fields, so a merge that was a
-			// fast-forward stays one for the gate below: the story's tests
-			// already passed on its branch, and a version-only commit on top
-			// needs no run of its own.
+			// changes only the version fields and the changelog's notes, so a
+			// merge that was a fast-forward stays one for the gate below: the
+			// story's tests already passed on its branch, and a commit of
+			// that kind on top needs no run of its own. A story that raised
+			// the version itself has only its note committed, and no Version.
 			landed.Commit, landed.Version = bumped.Commit, bumped.Version
 		}
 	}
@@ -1517,6 +1528,38 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 		return Landed{}, err
 	}
 	return landed, nil
+}
+
+// changelogEntry is the note a landing writes into the rig's changelog files:
+// the story's newest What's new: line, or its title when it has none, under
+// today's date (UTC). Its Text is empty when the story says "What's new: none".
+// The version is the landing's to fill in.
+func (n Next) changelogEntry(ctx context.Context, c *closeOut) (domain.ChangelogEntry, error) {
+	comments, err := n.Tracker.StoryComments(ctx, c.id)
+	if err != nil {
+		return domain.ChangelogEntry{}, fmt.Errorf("the comments on %s could not be read for its What's new: line: %w", c.id, err)
+	}
+	texts := make([]string, len(comments))
+	for i, comment := range comments {
+		texts[i] = comment.Text
+	}
+	bug := domain.IsBugStory(c.detail.Type, c.detail.Story.Title) || slices.Contains(c.detail.Labels, "bug")
+	kind := domain.ChangelogNew
+	if bug {
+		kind = domain.ChangelogFixed
+	}
+	note, found := domain.NewestWhatsNew(texts)
+	switch {
+	case found && note.None:
+		return domain.ChangelogEntry{}, nil
+	case found:
+		if note.Kind != "" {
+			kind = note.Kind
+		}
+	default:
+		note.Text = domain.NoteFromTitle(c.detail.Story.Title, c.path.Rig)
+	}
+	return domain.ChangelogEntry{Date: n.now().UTC().Format("2006-01-02"), Story: c.id, Kind: kind, Text: note.Text}, nil
 }
 
 // pushRetrying pushes what the landing worktree has checked out, and tries

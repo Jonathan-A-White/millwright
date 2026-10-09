@@ -748,6 +748,14 @@ func (f *FakeTracker) ShowBeadPage(ctx context.Context, id string) (application.
 	return page, true, nil
 }
 
+// SetTitle sets the title of a story the fake holds, as a fixture.
+func (f *FakeTracker) SetTitle(id, title string) error {
+	return f.write(id, func(s *fakeStory) error {
+		s.detail.Story.Title = title
+		return nil
+	})
+}
+
 // SetType sets the tracker's word for what kind of bead a story is — bug,
 // feature, chore — as a fixture. A story added without one reports none.
 func (f *FakeTracker) SetType(id, kind string) error {

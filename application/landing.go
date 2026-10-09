@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // LandingPrefix is what the throwaway worktree a story is landed in is named
@@ -49,16 +51,24 @@ type Landed struct {
 // is the one read; Before is the commit the merge started from and Branch the
 // story's branch, whose own changes to the version are told from the target
 // branch's; StoryID names the story in the commit.
+//
+// Changelog, when it is not empty, are the rig's changelog files (a .json and a
+// .md one) and Entry the note to put at the top of each, under the version the
+// rig comes to: it rides in the same commit as the version. Entry.Version is
+// the landing's to fill in.
 type VersionBump struct {
-	Files   []string
-	Before  string
-	Branch  string
-	StoryID string
+	Files     []string
+	Before    string
+	Branch    string
+	StoryID   string
+	Changelog []string
+	Entry     domain.ChangelogEntry
 }
 
 // Bumped is what a VersionBump did: the version the files now hold and the
-// commit that raised it. Version is empty, and nothing was committed, when the
-// story's branch had changed the version itself.
+// commit that raised it. Version is empty when the story's branch had changed
+// the version itself; then Commit is empty too, unless the story's note was
+// committed under that version ("What's new X.Y.Z (<story>)").
 type Bumped struct {
 	Version string
 	Commit  string
@@ -132,7 +142,9 @@ type Landing interface {
 	// writes it into all of them and commits that as "Version X.Y.Z (<story>)"
 	// in the landing worktree, unless the story's branch changed that version
 	// since it was cut: then the Builder raised it deliberately, and nothing is
-	// touched. The files keep every byte but the version fields.
+	// touched. The files keep every byte but the version fields. With bump.Changelog
+	// the entry is written into those files in the same commit, or, for a story
+	// that raised the version itself, in a commit of its own.
 	BumpVersion(ctx context.Context, landingDir string, bump VersionBump) (Bumped, error)
 
 	// Push publishes what the landing worktree has checked out as branch on the
