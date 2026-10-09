@@ -2209,8 +2209,10 @@ five parts, and two more when there is something to say.
 
 - **RUNNING** — the stories this host has claimed, each with the name of the
   tmux session to attach to. A story recorded `run=stopped` or `run=stuck` says
-  `NOT RUNNING` rather than pretending, and a claimed story whose poured formula
-  still has a step open says its close-out is blocked.
+  `NOT RUNNING` rather than pretending, one recorded `run=blocked` (a refused
+  landing) says `refused, waiting on the Mayor (mw retry or a hold)`, and a
+  claimed story whose poured formula still has a step open says its close-out
+  is blocked.
 - **READY** — what this host could take now.
 - **WAITING FOR THE GOVERNOR** — the ready or claimed stories labelled `hitl`,
   worked with the Governor present. They are listed here and not under RUNNING

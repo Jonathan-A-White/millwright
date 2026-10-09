@@ -262,6 +262,10 @@ func (r RunningStory) Stopped() bool {
 	return r.Run == RunStopped || r.Run == RunStuck
 }
 
+// Refused reports whether this story's landing was refused (or its attempts
+// ran out) and it now waits on the Mayor: run state blocked.
+func (r RunningStory) Refused() bool { return r.Run == RunBlocked }
+
 // FormulaOpen reports whether this story cannot be closed out yet because a
 // step of its poured formula is still open.
 func (r RunningStory) FormulaOpen() bool { return r.FormulaSteps > 0 }
@@ -1202,12 +1206,15 @@ func readyOrClaimed(d StoryDetail) string {
 
 // write is one running story as the report shows it: the story, its session,
 // and whatever a person must not mistake it for — a session recorded stopped
-// or stuck rather than running, or a formula step still open that will refuse
-// to let it close out.
+// or stuck rather than running, a landing refused and waiting on the Mayor, or
+// a formula step still open that will refuse to let it close out.
 func (r RunningStory) write(b *strings.Builder) {
 	writeStory(b, r.Detail, "session "+r.Session)
 	if r.Stopped() {
 		clip(b, fmt.Sprintf("    NOT RUNNING: run=%s", r.Run))
+	}
+	if r.Refused() {
+		clip(b, "    refused, waiting on the Mayor (mw retry or a hold)")
 	}
 	if r.FormulaOpen() {
 		clip(b, fmt.Sprintf("    close blocked: %d formula step(s) open", r.FormulaSteps))

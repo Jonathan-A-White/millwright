@@ -166,6 +166,8 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the report says the close-out of "([^"]*)" is blocked by an open formula step$`,
 		c.theReportSaysCloseOutBlockedByFormula)
 	ctx.Then(`^the report shows "([^"]*)" as run=(\S+), not running$`, c.theReportShowsRunState)
+	ctx.Then(`^the report shows "([^"]*)" as refused, waiting on the Mayor$`, c.theReportShowsRefused)
+	ctx.Then(`^the report does not show "([^"]*)" as refused$`, c.theReportDoesNotShowRefused)
 	ctx.Then(`^the report says today's fuel is (.+)$`, c.theReportSaysTodaysFuelIs)
 	ctx.Then(`^every line of the report is at most 60 columns wide$`, c.everyLineIsAtMost60ColumnsWide)
 	ctx.Then(`^nothing was written through the tracker, the ledger or the runner$`, c.nothingWasWritten)
@@ -822,6 +824,44 @@ func (c *statusContext) theReportShowsRunState(id, run string) error {
 	}
 	if !strings.Contains(c.report.String(), run) {
 		return fmt.Errorf("expected the printed report to say run=%s, got:\n%s", run, c.report.String())
+	}
+	return nil
+}
+
+// refusedWords is what dispatch says of a refused story, and so what mw status
+// must say beside it under RUNNING.
+const refusedWords = "refused, waiting on the Mayor"
+
+func (c *statusContext) theReportShowsRefused(id string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	rs, ok := c.runningIn(id)
+	if !ok {
+		return fmt.Errorf("%s is not listed as running:\n%s", id, c.report.String())
+	}
+	if !rs.Refused() {
+		return fmt.Errorf("expected %s to be shown as refused, got %+v", id, rs)
+	}
+	if !strings.Contains(c.report.String(), refusedWords) {
+		return fmt.Errorf("expected the printed report to say %q, got:\n%s", refusedWords, c.report.String())
+	}
+	return nil
+}
+
+func (c *statusContext) theReportDoesNotShowRefused(id string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	rs, ok := c.runningIn(id)
+	if !ok {
+		return fmt.Errorf("%s is not listed as running:\n%s", id, c.report.String())
+	}
+	if rs.Refused() {
+		return fmt.Errorf("expected %s not to be shown as refused, got %+v", id, rs)
+	}
+	if strings.Contains(c.report.String(), refusedWords) {
+		return fmt.Errorf("expected the printed report not to say %q, got:\n%s", refusedWords, c.report.String())
 	}
 	return nil
 }

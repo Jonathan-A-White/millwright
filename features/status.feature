@@ -179,6 +179,21 @@ Feature: mw status
     Then reading status succeeds
     And the report shows "mw-gq6.7" as run=stuck, not running
 
+  Scenario: A refused story is shown as waiting on the Mayor, not as running
+    Given a status story "mw-gq6.9" filed under it
+    And the status story "mw-gq6.9" is claimed with its session running
+    And the status story "mw-gq6.9" is marked run=blocked
+    When mw status reads the host
+    Then reading status succeeds
+    And the report shows "mw-gq6.9" as refused, waiting on the Mayor
+
+  Scenario: A story that is running is not shown as refused
+    Given a status story "mw-gq6.9" filed under it
+    And the status story "mw-gq6.9" is claimed with its session running
+    When mw status reads the host
+    Then reading status succeeds
+    And the report does not show "mw-gq6.9" as refused
+
   Scenario: A story started more than once shows how many attempts it has had
     Given a status story "mw-gq6.8" filed under it
     And the status story "mw-gq6.8" is claimed with its session running
