@@ -10,7 +10,7 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 | --- | --- | --- | --- |
 | `WorkTracker` | application/worktracker.go | infra/beads/ | apptest.FakeTracker |
 | TrackerNotes, SweepNotes, BeadGraph | application/{status,sweep}.go | same | same |
-| VaultFiles, TrackerSync, SyncHaltMarker | application/sync.go | `infra/{vault/git,beads/sync}.go`, infra/synchalt | apptest.Fake{VaultFiles,Tracker,SyncHaltMarker} |
+| VaultFiles, TrackerSync, SyncHaltMarker | application/sync.go | infra/{vault/git,beads/sync}.go, infra/synchalt | apptest.Fake{VaultFiles,Tracker,SyncHaltMarker} |
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | infra/beads/mail.go | apptest.FakeMailbox |
 | EpicRules | application/epicrules.go | infra/vault/epicrules.go | apptest.FakeEpicRules |
 | Vault | application/seatboot.go | infra/vault | application/seatboot_test.go |
@@ -54,13 +54,13 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 | Secrets{Put,Get,List} | application/secrets.go | mw secrets - cmd/mw/secrets.go | features/secrets.feature |
 | Watch, Doctor | application/watch.go, application/doctor.go | mw watch/doctor - cmd/mw/watch.go, cmd/mw/doctor.go | features/{watch,doctor}.feature |
 | SeatBoot, Init | application/seatboot.go, application/init.go | Dispatch, Next; mw init - cmd/mw/init.go | features/{seat_boot,init}.feature |
-| Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern <sub> - cmd/mw/posternview.go, cmd/mw/posternbead.go | `features/postern_*.feature` |
+| Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern <sub> - cmd/mw/posternview.go, cmd/mw/posternbead.go | features/postern_*.feature |
 | Event{Follow,Emit,Tail,Ship,Wait,Nudge,Spring,Control,Trim} | application/eventfollow.go, application/eventlog.go, application/eventship.go, application/eventwait.go, application/eventnudge.go, application/eventsubscribe.go, application/eventspring.go, application/eventcontrol.go, application/eventtrim.go | mw events <sub> - cmd/mw/events.go | features/event_follow.feature |
 | Hands{Add,List} | application/hands.go | mw hands <sub> - cmd/mw/hands.go; cmd/mw-hands-root | features/hands.feature |
 | Postern{Serve,Nginx,Mirror} | application/posternhand.go, application/posternmirror.go | mw postern <sub> - cmd/mw/postern.go, cmd/mw/posternmirror.go | features/postern_serve.feature |
 | Prompt{Save,List,Show,Run}, Cards | application/prompt.go | mw prompt/card - cmd/mw/prompt.go, cmd/mw/card.go | features/{prompt,card}.feature |
-| Grist{Key,Grind,Send,Eval,Score,Runs,Stats} | application/grist.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go | mw grist <sub> - cmd/mw/grist.go | features/{grist{,_send,_eval,_audio,_concurrent,_forward},scorer}.feature |
+| Grist{Key,Grind,Send,Eval,Score,Runs,Stats} | application/grist.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go, application/gristroom.go | mw grist <sub> - cmd/mw/grist.go | features/{grist{,_send,_eval,_audio,_concurrent,_forward},scorer}.feature |
 
-cmd/mw/root.go: the tree; cmd/mw/version.go.
+cmd/mw/root.go: tree; cmd/mw/version.go.
 
-rig toml `changelog_files`: infra/rig/version.go writes domain/changelog.go's note with the version: public/changelog.json `[{version,date,story,kind,text}]`; CHANGELOG.md `## X.Y.Z`, `_date_`, `- New|Fixed: text`.
+rig toml changelog_files: infra/rig/version.go writes domain/changelog.go's note: public/changelog.json `[{version,date,story,kind,text}]`; CHANGELOG.md `## X.Y.Z`, _date_, `- New|Fixed: text`.

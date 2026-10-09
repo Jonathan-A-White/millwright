@@ -301,6 +301,22 @@ running to failed, running to done), not one per tick; `mw status` prints
 `host: N of cap M` and, while the host has no room, a `held back, no room:` line
 for each reason.
 
+**Grist comes first in the caps.** A tutor's answer is the Governor, or his child,
+waiting with the app open; a Builder story can wait minutes. On the host where the
+mill runs, while grist is in use (a grind running, or one answered within
+`grist_recent_s`, default 600) the host starts no more stories than `grist_cap`
+(default: its cap less 2, never under 1), and a pass that is held says "while a
+tutor is in use (grist first)". If the median of a kind's last 5 answers, queue wait
+plus run (`queued_s` + `run_s` in each run's `timing.json`), passes `grist_slow_factor`
+(default 1.5) times that kind's par (its median over its last 50; over all grist's when
+the kind has fewer than 10), the host starts none until they recover, and that
+reason ("slow grist: tutor-turn 30 s, par 10 s") is the room event's. Only grist
+within the recent window is judged, so a block clears by itself. Stories already running
+are never stopped, a forwarded photo is not a tutor, and a grind never waits for a
+Builder slot. The three settings are in the `[dispatch]` table with the room limits.
+`mw status` adds `grist: active (3 in 10 min), median 14 s (par 11 s)` (`slow` or
+`quiet` otherwise) and, while the cap is lowered, `grist first: N stories at most`.
+
 Every story is filed **held** — beads' `deferred` status — so that nothing can
 be dispatched from a plan nobody has approved. `mw file` prints the tree it
 filed, with each story's Path and what it waits on, and then asks. `--approve`
