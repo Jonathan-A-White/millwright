@@ -3320,6 +3320,69 @@ of them; `Story.PathFrom` overlays the two and rejects what is not a path — no
 rig, no target branch, or a harness, model or effort the factory does not
 know. See `features/path_validation.feature`.
 
+## Credits
+
+> If I have seen further it is by standing on the shoulders of Giants.
+> — Isaac Newton, letter to Robert Hooke, 1675
+
+millwright stands on a great deal of other people's work, and credit is owed
+whether or not a licence asks for it. Each entry below names the source, says
+what millwright uses it for, gives its licence, and says what was changed.
+Nothing here is copied into this repository or modified: each is used as
+published, as a library, a program on the host's path, or a service called over
+the network.
+
+### Ideas
+
+- [Steve Yegge](https://github.com/steveyegge): the author of Beads and of Gas
+  Town, whose ideas the factory is built on: work held as small tracked beads
+  that sessions claim and close, and a town of named seats (a Mayor, workers in
+  their own worktrees) that an agent factory is made of. millwright's seats,
+  formulas and ledgers are our own take on those ideas, not their code.
+- [Gas Town](https://github.com/steveyegge/gastown) (MIT licence, [LICENSE](https://github.com/steveyegge/gastown/blob/HEAD/LICENSE)):
+  the multi-agent workspace manager whose shape (Mayor, rigs, worktrees per
+  worker) we borrowed. Ideas only; no code used and nothing changed.
+
+### Tools millwright runs
+
+- [Beads](https://github.com/steveyegge/beads) (`bd`; MIT licence, [LICENSE](https://github.com/steveyegge/beads/blob/HEAD/LICENSE)):
+  the issue tracker that holds every story, step, event and note. mw calls the
+  `bd` program; unmodified.
+- [Dolt](https://github.com/dolthub/dolt) (Apache 2.0 licence, [LICENSE](https://github.com/dolthub/dolt/blob/HEAD/LICENSE)):
+  the version-controlled SQL database under Beads, and what syncs the vault
+  between hosts. Used unmodified, through Beads.
+- [Claude Code](https://www.anthropic.com/claude-code) (Anthropic; used under
+  [Anthropic's commercial terms](https://www.anthropic.com/legal/commercial-terms)):
+  the harness that every Claude seat runs in. Run as published.
+- [tmux](https://github.com/tmux/tmux) (ISC licence, [COPYING](https://github.com/tmux/tmux/blob/HEAD/COPYING)):
+  holds each seat's session in a window so it outlives a login. Unmodified.
+- [Obsidian](https://obsidian.md) (free for personal use, under [Obsidian's terms](https://obsidian.md/terms)):
+  how the Governor reads and edits the vault of notes, ledgers and charters.
+  Not part of mw; the vault is plain Markdown.
+
+### Go libraries
+
+Every direct requirement in `go.mod` is credited here, and a test
+(`credits_test.go`) fails when one is not.
+
+- [cobra](https://github.com/spf13/cobra) (Apache 2.0 licence, [LICENSE.txt](https://github.com/spf13/cobra/blob/HEAD/LICENSE.txt)):
+  the command line of `mw`. Unmodified.
+- [godog](https://github.com/cucumber/godog) (MIT licence, [LICENSE](https://github.com/cucumber/godog/blob/HEAD/LICENSE)):
+  runs the Gherkin features in `features/` as tests. Unmodified.
+- [go-sdk](https://github.com/bsv-blockchain/go-sdk) (BSV Blockchain; Open BSV
+  licence, [LICENSE](https://github.com/bsv-blockchain/go-sdk/blob/HEAD/LICENSE)):
+  keys, scripts and transactions for the chain stamps and the Postern key.
+  Unmodified.
+
+### Outside services and networks
+
+- [WhatsOnChain](https://whatsonchain.com) (a block explorer and API; used
+  under its terms of service): looked up to find the
+  block and time of a chain-stamp transaction (`mw` calls its testnet API).
+- [BSV](https://bsvblockchain.org) (the BSV Blockchain Association): the chain
+  that millwright's stamps are written to. See
+  [Swapping the chain](docs/swapping-the-chain.md) for using another or none.
+
 ## Licence
 
 millwright is released under the MIT licence; see [LICENSE](LICENSE).
