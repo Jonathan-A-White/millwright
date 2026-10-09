@@ -18,7 +18,22 @@ does for every other path field). Today there are two:
   closing comment. Use for anything that changes behavior.
 
 Both take two variables: `story` (the story bead id) and `title` (the
-story's title).
+story's title). `tdd-feature` takes a third, `kind`, which `mw next` sets to
+`bug` when the story is a bug (its type is `bug` or its title starts `[bug]`)
+and leaves at its default, `feature`, otherwise.
+
+A bug story is poured with two different steps: `red-bug` and `close-bug` take
+the place of `red` and `close` (bd keeps a step by its `condition` on `kind`).
+Its red step has the Builder write the regression test from his report (the
+screen, the words, the steps he gave), run it on the branch before any fix and
+see it fail for the reason he saw; if it cannot fail because the fake hides the
+bug, the Builder says so and makes the fake honest enough to fail. Its closing
+step asks for two more lines ahead of HOW TO CHECK IT: `Regression test:
+<file:line>` and `Class: <the kind of bug, one line>; sweep: <where else in the
+rig it can happen: fixed here, or filed as a [bug] with its id>`. The
+Builder reports the siblings it finds and the Mayor files them, as for any
+problem a Builder discovers. A vault whose copy of `tdd-feature` predates
+`kind` still pours, the plain way, until the Mayor installs the new copy.
 
 A Builder's session pours its story's formula at start of work:
 

@@ -12,6 +12,10 @@
     "title": {
       "description": "the story's title",
       "required": true
+    },
+    "kind": {
+      "description": "'bug' when the story is a bug (its type is bug or its title starts '[bug]'), otherwise 'feature'; mw next sets it",
+      "default": "feature"
     }
   },
   "steps": [
@@ -26,42 +30,77 @@
       "title": "Write the failing feature or test first",
       "description": "Write the Gherkin feature or unit test that captures {{story}}'s acceptance criteria, and confirm it fails for the right reason.",
       "type": "task",
-      "depends_on": ["understand"]
+      "depends_on": [
+        "understand"
+      ],
+      "condition": "{{kind}} != bug"
+    },
+    {
+      "id": "red-bug",
+      "title": "Write the regression test from his report, and see it fail",
+      "description": "Write the regression test for {{story}} from his report first: the screen, the words, the steps he gave. Run it on this branch before any fix and see it fail for the reason he saw. If it cannot fail (the fake hides it), say so on the bead and make the fake honest enough to fail, then run it again. Do not go on until you have seen it fail for his reason.",
+      "type": "task",
+      "depends_on": [
+        "understand"
+      ],
+      "condition": "{{kind}} == bug"
     },
     {
       "id": "green",
       "title": "Implement until green",
       "description": "Write the implementation for {{story}} until the failing test or feature from the previous step passes.",
       "type": "task",
-      "depends_on": ["red"]
+      "depends_on": [
+        "red",
+        "red-bug"
+      ]
     },
     {
       "id": "verify",
       "title": "Run the full build, tests and vet",
       "description": "Run the rig's build, the full test suite and vet; all must pass clean, not just the new test.",
       "type": "task",
-      "depends_on": ["green"]
+      "depends_on": [
+        "green"
+      ]
     },
     {
       "id": "self-review",
       "title": "Self-review the diff against the acceptance criteria",
       "description": "Read the whole diff for {{story}} end to end against its acceptance criteria before committing.",
       "type": "task",
-      "depends_on": ["verify"]
+      "depends_on": [
+        "verify"
+      ]
     },
     {
       "id": "commit",
       "title": "Commit",
       "description": "Commit the change for {{story}} in small, plainly described commits, with no AI attribution lines.",
       "type": "task",
-      "depends_on": ["self-review"]
+      "depends_on": [
+        "self-review"
+      ]
     },
     {
       "id": "close",
       "title": "Write the closing comment and propose rig memory notes",
       "description": "Comment on {{story}} with what was built, what was verified and how, and anything left undone. Before that section, when the story changes something the Governor can see, add a section headed exactly 'HOW TO CHECK IT, for the Governor': at most six plain numbered steps with the exact on-screen labels and what right looks like; otherwise write the single line 'Internal: nothing for the Governor to look at'. END the closing comment with a section headed exactly 'For the rig memory:' holding at most two short lines that a later Builder on this rig would have been saved real time by, or the single word 'nothing'. The Builder does NOT edit the rig memory file: the Mayor places what he keeps.",
       "type": "task",
-      "depends_on": ["commit"]
+      "depends_on": [
+        "commit"
+      ],
+      "condition": "{{kind}} != bug"
+    },
+    {
+      "id": "close-bug",
+      "title": "Write the closing comment and propose rig memory notes",
+      "description": "Comment on {{story}} with what was built, what was verified and how, and anything left undone. Because {{story}} is a bug, give two more lines first, ahead of the HOW TO CHECK IT section below: 'Regression test: <file:line>' and 'Class: <the kind of bug, one line>; sweep: <where else in the rig it can happen: fixed here, or filed as a [bug] with its id>'. Do the sweep before you write the Class line: search the rig for the same kind of bug, and report any you do not fix here so the Mayor can file them. Before that section, when the story changes something the Governor can see, add a section headed exactly 'HOW TO CHECK IT, for the Governor': at most six plain numbered steps with the exact on-screen labels and what right looks like; otherwise write the single line 'Internal: nothing for the Governor to look at'. END the closing comment with a section headed exactly 'For the rig memory:' holding at most two short lines that a later Builder on this rig would have been saved real time by, or the single word 'nothing'. The Builder does NOT edit the rig memory file: the Mayor places what he keeps.",
+      "type": "task",
+      "depends_on": [
+        "commit"
+      ],
+      "condition": "{{kind}} == bug"
     }
   ]
 }

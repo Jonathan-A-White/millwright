@@ -119,4 +119,14 @@ check_pour() {
 check_pour tdd-feature
 check_pour chore
 
+# A bug is poured with kind=bug: still one ready step, and the red-bug and
+# close-bug steps stand in for red and close.
+bug_json="$(bd mol pour tdd-feature --var story=mw-check-bug --var title=bug --var kind=bug --json)" \
+	|| fail "bd mol pour tdd-feature --var kind=bug exited non-zero"
+echo "$bug_json" | jq -e '.id_mapping | has("tdd-feature.red-bug") and has("tdd-feature.close-bug") and (has("tdd-feature.red") | not) and (has("tdd-feature.close") | not)' >/dev/null \
+	|| fail "tdd-feature with kind=bug did not pour red-bug and close-bug in place of red and close: $bug_json"
+bug_root="$(echo "$bug_json" | jq -r '.new_epic_id')"
+[ "$(bd ready --parent "$bug_root" --json | jq 'length')" = "1" ] \
+	|| fail "tdd-feature with kind=bug: expected exactly 1 ready step"
+
 echo "OK: tdd-feature and chore formulas listed, cooked, and poured with only their first step ready"
