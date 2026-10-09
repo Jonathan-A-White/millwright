@@ -239,6 +239,13 @@ type Status struct {
 	Cloud     CloudBook
 	CloudPlan CloudPlan
 
+	// Benchmarks, when set, is the book of past close-outs' benchmarks, read for
+	// the BENCHMARKS section: each host's usual gate time against its latest,
+	// what each host landed at each running count, and how well the par of each
+	// kind has held (mw-t0z3fu.2), by Bench's thresholds. Nil leaves it out.
+	Benchmarks BenchmarkBook
+	Bench      BenchmarkSettings
+
 	// Control, when set, is the home's event log, read for the CANCELLED
 	// section (the cancel events of the last day) and the PAUSED line. Nil
 	// leaves both out.
@@ -408,6 +415,9 @@ type StatusReport struct {
 	// Cloud is the cloud's boxes and the month's spend; nil when not asked or
 	// not read.
 	Cloud *CloudReading
+	// Benchmarks is what the close-outs measured, and nil when not asked, not
+	// read or there is none yet.
+	Benchmarks *BenchmarkReport
 	// Cancelled are the runs a cancel event ended in the last day, and Paused
 	// the pause-host event this host is under, if any.
 	Cancelled []Cancel
@@ -615,6 +625,13 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 			report.Cloud = reading
 		} else {
 			s.print(fmt.Sprintf("mw status: the cloud's book could not be read: %v\n", err))
+		}
+	}
+	if s.Benchmarks != nil {
+		if past, err := s.Benchmarks.Recent(ctx); err != nil {
+			s.print(fmt.Sprintf("mw status: the benchmarks could not be read: %v\n", err))
+		} else {
+			report.Benchmarks = ReadBenchmarks(past, s.Bench)
 		}
 	}
 	if s.VPSNginx != nil {
@@ -1041,6 +1058,11 @@ func (r StatusReport) String() string {
 
 	if r.Cloud != nil {
 		r.Cloud.write(&b)
+		b.WriteString("\n")
+	}
+
+	if r.Benchmarks != nil {
+		r.Benchmarks.write(&b)
 		b.WriteString("\n")
 	}
 

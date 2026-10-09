@@ -141,6 +141,10 @@ func newNextCmd() *cobra.Command {
 			}
 
 			gateway := mwGateway(dir, host)
+			bench, err := config.Benchmark()
+			if err != nil {
+				return err
+			}
 			files := mwVault(dir, host)
 			worktrees := rig.New()
 			runner := tmux.New()
@@ -184,7 +188,7 @@ func newNextCmd() *cobra.Command {
 				Worktrees: worktrees,
 				Landing:   worktrees,
 				Checks:    rig.NewChecks(rig.WithCommands(tests), rig.WithNice(nice)),
-				Load:      hostload.Proc{},
+				Load:      hostload.Proc{SwapSample: benchmarkSwapSample},
 				Slot:      rig.NewSlots(),
 				Vault:     files,
 				Rules:     files,
@@ -210,6 +214,8 @@ func newNextCmd() *cobra.Command {
 				Stamps:       stamps,
 				CloseOuts:    hostCloseOuts(),
 				Tester:       tester,
+				Benchmarks:   vault.Benchmarks{Vault: files},
+				Bench:        benchmarkLimits(bench),
 			}.Run(cmd.Context(), args[0])
 			return err
 		},
@@ -292,3 +298,7 @@ func mwProgram() []string {
 	}
 	return []string{program}
 }
+
+// benchmarkSwapSample is how long a close-out samples the swap rate for at the
+// start of its gate: vmstat's si and so over that long.
+const benchmarkSwapSample = 500 * time.Millisecond

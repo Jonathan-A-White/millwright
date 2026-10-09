@@ -8,6 +8,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
 	"github.com/Jonathan-A-White/millwright/infrastructure/procs"
+	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
 )
@@ -76,6 +77,14 @@ func newStatusCmd() *cobra.Command {
 			"the standby's /healthz says with the home's: 'standby behind: <standby commit|none> vs <home\n" +
 			"commit>', 'standby level at <commit>', or 'standby not checked (<why>)'. A landing that changed\n" +
 			"the backend stages the standby's swap as a hands step for the Governor's tap.\n\n" +
+			"A BENCHMARKS section reads what every close-out recorded in its story's result file in the vault\n" +
+			"(gate_seconds, load_at_gate, cores, mem_free_mb, running_count, swap_in_per_s, par_s and\n" +
+			"more): each rig's usual gate time on each host against its latest ('lampas on laptop: gate\n" +
+			"usual 5m10s, latest 9m02s', the median of the last [benchmark] usual_gates), what each host\n" +
+			"landed per hour at each count of stories running at once, raw and in par-hours (a story's par\n" +
+			"is the median wall time of the last par_window landings of its rig, bug-or-not and model, or\n" +
+			"of its rig or all when fewer than par_min are of the kind), and each kind's par error over its\n" +
+			"last calibration_window landings, flagged past error_flag_percent with the change it suggests.\n\n" +
 			"A 'host: N of cap M' line says how many of the cap on sessions (config `cap`) are in use. When the\n" +
 			"host has no room to start another story - its 1-minute load at or above its core count, or\n" +
 			"less than 2 GB of memory available (the [dispatch] table's room_load_per_core and\n" +
@@ -114,6 +123,10 @@ func newStatusCmd() *cobra.Command {
 				return err
 			}
 			room, err := config.Room()
+			if err != nil {
+				return err
+			}
+			bench, err := config.Benchmark()
 			if err != nil {
 				return err
 			}
@@ -180,6 +193,8 @@ func newStatusCmd() *cobra.Command {
 				Standby:          standby,
 				Cloud:            cloudBook,
 				CloudPlan:        plan,
+				Benchmarks:       vault.Benchmarks{Vault: files},
+				Bench:            benchmarkLimits(bench),
 				Out:              cmd.OutOrStdout(),
 			}.Run(cmd.Context())
 			return err
@@ -214,4 +229,12 @@ func idleSource() (application.EventLog, time.Duration, error) {
 		return nil, 0, err
 	}
 	return eventlog.New(path), knobs.IdleAfter, nil
+}
+
+// benchmarkLimits is the [benchmark] table as the use cases read it.
+func benchmarkLimits(s config.BenchmarkSettings) application.BenchmarkSettings {
+	return application.BenchmarkSettings{
+		UsualGates: s.UsualGates, ParWindow: s.ParWindow, ParMin: s.ParMin,
+		CalibrationWindow: s.CalibrationWindow, ErrorFlagPercent: s.ErrorFlagPercent, OverParFactor: s.OverParFactor,
+	}
 }

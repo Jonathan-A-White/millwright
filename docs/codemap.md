@@ -2,7 +2,7 @@
 
 ## Layers
 
-domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · infra/: adapters · cmd/mw/: cobra · features/ (steps/): Gherkin · template/: embed
+domain/(events): stdlib · application/: use cases/ports · infra/: adapters · cmd/mw/: cobra · features/: Gherkin · template/: embed
 
 ## Ports
 
@@ -25,7 +25,7 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 | CardLog | application/card.go | infra/cardlog | apptest.FakeCardLog |
 | CloseOutMarks | application/closeout.go | infra/closeout | apptest.Fake*Mark* |
 | Worktrees | application/worktrees.go | infra/rig/worktree.go | application/dispatch_test.go |
-| HostLoad, Cloud* | application/hostload.go | infra/{hostload,cloud,vault/cloudbook.go} | apptest.Fake{HostLoad,Cloud*} |
+| HostLoad, Cloud*, BenchmarkBook | application/hostload.go, application/benchmark.go | infra/{hostload,cloud,vault/{cloudbook,benchmarks}.go} | apptest.Fake{HostLoad,Cloud*,Benchmarks} |
 | TickLog, Notifier, HomeMoveHost, OldHome, VaultBirth, TrackerBirth | application/{millhandtick,homemove,init}.go | infra/{ticklog,notify/notify,homemove/homemove,vault/birth,beads/init}.go | apptest.FakeTickLog |
 | Landing, Checks, MergeSlot, Holding | application/landing.go | infra/rig/{landing,checks,slot}.go | none |
 | AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter | application/afterlanding.go, application/selfupdate.go, application/backendstage.go | infra/{rig/{afterlanding,built,backend},userunits}.go | features/{self_update,backend_swap}.feature |
@@ -45,8 +45,7 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 | Dispatch, Next, AfterLandingRun | application/dispatch.go, application/next.go, application/afterlandingrun.go | mw dispatch/next/after-landing - cmd/mw/dispatch.go, cmd/mw/next.go, cmd/mw/afterlanding.go | features/{dispatch,next,after_landing}.feature |
 | Tester | application/testerreport.go | mw tester report - cmd/mw/tester.go; [tester] toml | features/tester.feature |
 | Check, Status, CloudCheck, Brief | application/check.go, application/status.go, application/cloud.go, application/brief.go | mw check/status/cloud/brief - cmd/mw/check.go, cmd/mw/status.go, cmd/mw/cloud.go, cmd/mw/brief.go | features/{check,status,cloud,brief}.feature |
-| Sweep, Tidy | application/sweep.go, application/tidy.go | mw sweep/tidy - cmd/mw/sweep.go, cmd/mw/tidy.go | features/{sweep,tidy}.feature |
-| Sync, Nudge, Mail | application/sync.go, application/nudge.go, application/mail.go | mw sync/nudge/mail - cmd/mw/sync.go, cmd/mw/nudge.go, cmd/mw/mail.go | features/{sync,mail}.feature |
+| Sweep, Tidy, Sync, Nudge, Mail | application/sweep.go, application/tidy.go, application/sync.go, application/nudge.go, application/mail.go | mw sweep/tidy/sync/nudge/mail - cmd/mw/sweep.go, cmd/mw/tidy.go, cmd/mw/sync.go, cmd/mw/nudge.go, cmd/mw/mail.go | features/{sweep,tidy,sync,mail}.feature |
 | Home, HomeMove | application/home.go, application/homemove.go | mw home [move] - cmd/mw/home.go, cmd/mw/homemove.go | features/home.feature, docs/home-move.md |
 | Seat{Context,Up,Reap,Handover} | application/seat{context,up,reap,handover}.go | mw seat <sub> - cmd/mw/seat.go | features/seat_{context,up,reap}.feature |
 | Talk{Call,Model,Say,Wait} | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go | mw talk <sub> - cmd/mw/talk.go | features/talk_*.feature |
@@ -61,6 +60,6 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 | Prompt{Save,List,Show,Run}, Cards | application/prompt.go | mw prompt/card - cmd/mw/prompt.go, cmd/mw/card.go | features/{prompt,card}.feature |
 | Grist{Key,Grind,Send,Eval,Score,Runs,Stats} | application/grist.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go, application/gristroom.go | mw grist <sub> - cmd/mw/grist.go | features/{grist{,_send,_eval,_audio,_concurrent,_forward},scorer}.feature |
 
-cmd/mw/root.go: tree; cmd/mw/version.go.
+cmd/mw/root.go: tree; cmd/mw/version.go
 
-rig toml changelog_files: infra/rig/version.go writes domain/changelog.go's note: public/changelog.json `[{version,date,story,kind,text}]`; CHANGELOG.md `## X.Y.Z`, _date_, `- New|Fixed: text`.
+rig toml changelog_files: infra/rig/version.go writes domain/changelog.go note: public/changelog.json `[{version,date,story,kind,text}]`; CHANGELOG.md `## X.Y.Z`, _date_, `- New|Fixed: text`.

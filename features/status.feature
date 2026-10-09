@@ -567,3 +567,49 @@ Feature: mw status
     When mw status reads the host
     Then reading status succeeds
     And the report does not say "grist:"
+
+  # Benchmarks (mw-t0z3fu.2): every close-out leaves its gate time, the host's
+  # load and the stories running in its result file; mw status compares what a
+  # host usually does with what it just did, and shows what each host landed
+  # at each count of stories running at once.
+
+  Scenario: The report sets each host's usual gate time against its latest
+    Given these close-outs were benchmarked:
+      | host   | rig    | kind                  | running | gate | actual | par  | landed |
+      | laptop | lampas | lampas/feature/sonnet | 3       | 310  | 3600   | 3600 | yes    |
+      | laptop | lampas | lampas/feature/sonnet | 3       | 310  | 3600   | 3600 | yes    |
+      | laptop | lampas | lampas/feature/sonnet | 3       | 310  | 3600   | 3600 | yes    |
+      | laptop | lampas | lampas/feature/sonnet | 3       | 542  | 3600   | 3600 | yes    |
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "lampas on laptop: gate usual 5m10s, latest 9m02s"
+    And every line of the report is at most 60 columns wide
+
+  Scenario: The report shows what each host landed at each count of stories running
+    Given these close-outs were benchmarked:
+      | host   | rig    | kind                  | running | gate | actual | par  | landed |
+      | laptop | lampas | lampas/feature/sonnet | 4       | 360  | 7200   | 3600 | yes    |
+      | laptop | lampas | lampas/feature/sonnet | 4       | 360  | 7200   | 3600 | yes    |
+      | laptop | lampas | lampas/feature/sonnet | 4       | 360  | 7200   | 3600 | yes    |
+      | laptop | lampas | lampas/feature/sonnet | 2       | 120  | 3600   | 3600 | yes    |
+      | laptop | lampas | lampas/feature/sonnet | 2       | 120  | 3600   | 3600 | yes    |
+      | desktop | lampas | lampas/feature/sonnet | 1       | 60   | 1800   | 1800 | yes    |
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "laptop at 2 running: 2.0/h, 2.0 par-h/h, gate 2m00s"
+    And the report says "laptop at 4 running: 2.0/h, 2.0 par-h/h, gate 6m00s"
+    And the report says "desktop at 1 running: 2.0/h, 1.0 par-h/h, gate 1m00s"
+    And every line of the report is at most 60 columns wide
+
+  Scenario: The report flags a kind whose par has been off
+    Given these close-outs were benchmarked:
+      | host   | rig    | kind            | running | gate | actual | par | landed |
+      | laptop | lampas | lampas/bug/opus | 3       | 100  | 200    | 100 | yes    |
+      | laptop | lampas | lampas/bug/opus | 3       | 100  | 50     | 100 | yes    |
+      | laptop | lampas | lampas/bug/opus | 3       | 100  | 400    | 100 | yes    |
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "lampas/bug/opus: par off 100% over 3 landed"
+    And the report says "1 of 3 over 2x par or timed out"
+    And the report says "FLAG lampas/bug/opus: try a wider window"
+    And every line of the report is at most 60 columns wide

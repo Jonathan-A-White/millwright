@@ -317,6 +317,22 @@ Builder slot. The three settings are in the `[dispatch]` table with the room lim
 `mw status` adds `grist: active (3 in 10 min), median 14 s (par 11 s)` (`slow` or
 `quiet` otherwise) and, while the cap is lowered, `grist first: N stories at most`.
 
+Every close-out that ran the rig's tests is a **benchmark**: `mw next` adds to the
+story's `result.json` in the vault `gate_seconds`, and the host's `load_at_gate`,
+`cores`, `mem_free_mb`, `running_count` (stories running then) and
+`swap_in_per_s`/`swap_out_per_s` (vmstat's si and so, KB a second, sampled for half
+a second at the gate's start). A landed story also gets `actual_s` (dispatch to
+landing) and a **par**, `par_s`: the median `actual_s` of the last 20 landings of its
+kind (rig, bug or not, model), or of its rig, or of all when fewer than 5 are of the
+kind. `mw status` has a BENCHMARKS section built from every host's records: each
+rig's usual gate time on a host against its latest, landings per hour and par-hours
+per hour at each running count (the knee, where more stories at once stop landing
+more), and each kind's par error, flagged with the change it suggests when the median
+passes 30%. A tests-fail whose output names a timeout while the host was at or above
+its core count is refused as `timeout under load`. The windows and thresholds are the
+config file's `[benchmark]` table: `usual_gates`, `par_window`, `par_min`,
+`calibration_window`, `error_flag_percent`, `over_par_factor`.
+
 Every story is filed **held** — beads' `deferred` status — so that nothing can
 be dispatched from a plan nobody has approved. `mw file` prints the tree it
 filed, with each story's Path and what it waits on, and then asks. `--approve`

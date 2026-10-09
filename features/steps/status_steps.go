@@ -64,6 +64,8 @@ type statusContext struct {
 	// gristRuns is the mill's runs, when a scenario gave this host some
 	// (mw-t0z3fu.4).
 	gristRuns *apptest.FakeGristRuns
+	// benchmarks are the past close-outs a scenario gave (mw-t0z3fu.2).
+	benchmarks *apptest.FakeBenchmarks
 
 	report application.StatusReport
 	err    error
@@ -112,6 +114,7 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	})
 
 	registerStatusRoomSteps(ctx, c)
+	registerStatusBenchmarkSteps(ctx, c)
 
 	ctx.Given(`^the status epic "([^"]*)" on the default path:$`, c.theStatusEpicOnTheDefaultPath)
 	ctx.Given(`^a status story "([^"]*)" filed under it$`, c.aStatusStoryFiledUnderIt)
@@ -509,6 +512,9 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 	}
 	if c.gristRuns != nil {
 		status.Grist = application.GristRoom{Runs: c.gristRuns, Now: func() time.Time { return c.now }}
+	}
+	if c.benchmarks != nil {
+		status.Benchmarks = c.benchmarks
 	}
 	c.report, c.err = status.Run(context.Background())
 	return nil

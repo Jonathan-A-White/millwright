@@ -2119,3 +2119,28 @@ func TestCloudReadsTheTableWithItsDefaultsAndRefusesABadOne(t *testing.T) {
 		}
 	}
 }
+
+func TestBenchmarkIsReadFromTheTableAndLeavesTheRestZero(t *testing.T) {
+	writeConfig(t, "host = \"desktop\"\n")
+	if got, err := config.Benchmark(); err != nil || got != (config.BenchmarkSettings{}) {
+		t.Fatalf("expected zero settings, which read as the defaults, got %+v, %v", got, err)
+	}
+
+	writeConfig(t, "[benchmark]\nusual_gates = 7\npar_window = 12\npar_min = 3\ncalibration_window = 40\nerror_flag_percent = 25.5\nover_par_factor = 3\n")
+	got, err := config.Benchmark()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := config.BenchmarkSettings{UsualGates: 7, ParWindow: 12, ParMin: 3, CalibrationWindow: 40, ErrorFlagPercent: 25.5, OverParFactor: 3}
+	if got != want {
+		t.Fatalf("expected %+v, got %+v", want, got)
+	}
+
+	for _, bad := range []string{"usual_gates = 0\n", "par_window = many\n", "par_min = 1.5\n", "calibration_window = -1\n", "error_flag_percent = 0\n", "over_par_factor = lots\n"} {
+		writeConfig(t, "[benchmark]\n"+bad)
+		key, _, _ := strings.Cut(bad, " ")
+		if _, err := config.Benchmark(); err == nil || !strings.Contains(err.Error(), key) {
+			t.Errorf("expected %q to be refused naming the key, got %v", bad, err)
+		}
+	}
+}

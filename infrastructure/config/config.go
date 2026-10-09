@@ -917,6 +917,81 @@ func Room() (RoomSettings, error) {
 	return settings, nil
 }
 
+// BenchmarkTable is the table of the config file that says how a close-out's
+// benchmark is read (mw-t0z3fu.2): what a host's usual gate is the median of,
+// what a story's par is the median of, and when a kind's par is flagged.
+const BenchmarkTable = "benchmark"
+
+// BenchmarkSettings are the [benchmark] table's thresholds, each zero when the
+// table says nothing, which application reads as its own default
+// (application.BenchmarkSettings).
+type BenchmarkSettings struct {
+	UsualGates        int
+	ParWindow         int
+	ParMin            int
+	CalibrationWindow int
+	ErrorFlagPercent  float64
+	OverParFactor     float64
+}
+
+// Benchmark reports the `[benchmark]` table of ~/.config/mw/config.toml:
+// `usual_gates` (the gates a host's usual is the median of, default 10),
+// `par_window` (landings a par is the median of, default 20), `par_min`
+// (landings of the kind before its own are used, default 5),
+// `calibration_window` (landings a kind's par error is read over, default 50),
+// `error_flag_percent` (the median error past which a kind is flagged, default
+// 30) and `over_par_factor` (the multiple of par past which a story counts as
+// having run over, default 2).
+func Benchmark() (BenchmarkSettings, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return BenchmarkSettings{}, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	table, err := tableIn(path, BenchmarkTable)
+	if err != nil {
+		return BenchmarkSettings{}, err
+	}
+	var settings BenchmarkSettings
+	whole := func(key string, into *int) error {
+		said := strings.TrimSpace(table[key])
+		if said == "" {
+			return nil
+		}
+		n, err := strconv.Atoi(said)
+		if err != nil || n < 1 {
+			return fmt.Errorf("the [%s] table of %s says %s = %q: it must be a whole number, 1 or more", BenchmarkTable, path, key, said)
+		}
+		*into = n
+		return nil
+	}
+	number := func(key string, into *float64) error {
+		said := strings.TrimSpace(table[key])
+		if said == "" {
+			return nil
+		}
+		n, err := strconv.ParseFloat(said, 64)
+		if err != nil || n <= 0 || math.IsInf(n, 0) || math.IsNaN(n) {
+			return fmt.Errorf("the [%s] table of %s says %s = %q: it must be a number above zero", BenchmarkTable, path, key, said)
+		}
+		*into = n
+		return nil
+	}
+	for _, step := range []error{
+		whole("usual_gates", &settings.UsualGates),
+		whole("par_window", &settings.ParWindow),
+		whole("par_min", &settings.ParMin),
+		whole("calibration_window", &settings.CalibrationWindow),
+		number("error_flag_percent", &settings.ErrorFlagPercent),
+		number("over_par_factor", &settings.OverParFactor),
+	} {
+		if step != nil {
+			return BenchmarkSettings{}, step
+		}
+	}
+	return settings, nil
+}
+
 // EventsTable is the table of the config file that says how the event
 // follower sends its batches.
 const EventsTable = "events"
