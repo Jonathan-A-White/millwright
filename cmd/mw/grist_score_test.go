@@ -80,6 +80,32 @@ func TestGristScorePrintsTheReadingResultAsJSON(t *testing.T) {
 	}
 }
 
+func TestGristScorePrintsTheWordsAReadingNeverReachedAsNotReached(t *testing.T) {
+	if _, err := exec.LookPath("ffmpeg"); err != nil {
+		t.Skip("ffmpeg is not installed: the local engine converts audio with it, so mw grist score is not tried here")
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"engine":"local","words":[
+ {"text":"the","expected_phonemes":["DH","AH"],"produced_phonemes":["DH","AH"],"error":"none","accuracy":100,"self_corrected":false},
+ {"text":"cat","expected_phonemes":["K","AE","T"],"produced_phonemes":[],"error":"not_reached","accuracy":0,"self_corrected":false}],
+ "accuracy":100,"seconds":0.4}`))
+	}))
+	defer srv.Close()
+	scorersHome(t, `["local"]`, srv.URL)
+
+	out, errOut, err := runGristScore(t, "score", "--engine", "local", "--target", "the cat", "--audio", "../../testdata/clip.webm")
+	if err != nil {
+		t.Fatalf("mw grist score failed: %v\n%s", err, errOut)
+	}
+	var result application.ReadingResult
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("expected JSON on standard output, got %q: %v", out, err)
+	}
+	if len(result.Words) != 2 || result.Words[1].Error != application.ErrNotReached || !strings.Contains(out, `"error": "not_reached"`) && !strings.Contains(out, `"error":"not_reached"`) {
+		t.Errorf("expected the second word printed as not_reached, got %s", out)
+	}
+}
+
 func TestGristScoreNamesTheConfiguredEnginesWhenOneIsMissing(t *testing.T) {
 	scorersHome(t, `["local"]`, "http://127.0.0.1:1")
 	out, _, err := runGristScore(t, "score", "--engine", "nosuch", "--target", "the cat sat", "--audio", "../../testdata/clip.webm")

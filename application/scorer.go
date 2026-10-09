@@ -8,13 +8,18 @@ import (
 )
 
 // The kinds of error a scorer reports for one word of a reading. docs/scorers.md
-// is the contract; these are its five words.
+// is the contract; these are its six words.
 const (
 	ErrNone             = "none"
 	ErrOmission         = "omission"
 	ErrInsertion        = "insertion"
 	ErrMispronunciation = "mispronunciation"
 	ErrHesitation       = "hesitation"
+	// ErrNotReached is a word of the target after the one where the reader
+	// stopped: unlike an omission, which is a word skipped inside the reading,
+	// nothing was owed for it yet. Its produced phonemes are empty and its
+	// accuracy 0.
+	ErrNotReached = "not_reached"
 )
 
 // ReadingWord is one word of a reading, as a scorer heard it: the phonemes the
@@ -58,9 +63,9 @@ func (r ReadingResult) Validate() error {
 			return fmt.Errorf("word %d of the result has no text", i+1)
 		}
 		switch w.Error {
-		case ErrNone, ErrOmission, ErrInsertion, ErrMispronunciation, ErrHesitation:
+		case ErrNone, ErrOmission, ErrInsertion, ErrMispronunciation, ErrHesitation, ErrNotReached:
 		default:
-			return fmt.Errorf("word %d (%q) of the result has the error %q: it must be none, omission, insertion, mispronunciation or hesitation", i+1, w.Text, w.Error)
+			return fmt.Errorf("word %d (%q) of the result has the error %q: it must be none, omission, insertion, mispronunciation, hesitation or not_reached", i+1, w.Text, w.Error)
 		}
 		if w.Accuracy < 0 || w.Accuracy > 100 {
 			return fmt.Errorf("word %d (%q) of the result has the accuracy %d: it must be 0 to 100", i+1, w.Text, w.Accuracy)

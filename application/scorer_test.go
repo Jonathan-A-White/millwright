@@ -47,6 +47,20 @@ func TestReadingResultValidateRefusesWhatTheContractDoesNot(t *testing.T) {
 	}
 }
 
+func TestReadingResultValidateAcceptsNotReachedForTheWordsAfterWhereTheReadingStopped(t *testing.T) {
+	r := application.ReadingResult{Accuracy: 100, Seconds: 1, Words: []application.ReadingWord{
+		{Text: "the", Error: application.ErrNone, Accuracy: 100},
+		{Text: "cat", Error: application.ErrNotReached},
+	}}
+	if err := r.Validate(); err != nil {
+		t.Errorf("a result with a word not reached was refused: %v", err)
+	}
+	out, _ := json.Marshal(r.Words[1])
+	if !strings.Contains(string(out), `"error":"not_reached"`) {
+		t.Errorf("expected the kind spelled not_reached in %s", out)
+	}
+}
+
 func TestScorerRegistryFindsAnEngineAndListsTheConfiguredOnesWhenOneIsMissing(t *testing.T) {
 	local := &apptest.FakeScorer{}
 	reg := application.NewScorerRegistry(map[string]application.Scorer{"local": local, "azure": &apptest.FakeScorer{}})

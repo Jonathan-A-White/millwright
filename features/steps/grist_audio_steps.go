@@ -93,6 +93,7 @@ func registerGristAudio(ctx *godog.ScenarioContext, c *gristContext) {
 	ctx.Given(`^the grind "([^"]*)" takes at most (\d+) turns$`, a.grindTakesTurns)
 	ctx.Given(`^the scorer engines "([^"]*)" and "([^"]*)" are configured, each scoring any reading as "([^"]*)"$`, a.enginesConfigured)
 	ctx.Given(`^the engine "([^"]*)" breaks down with "([^"]*)"$`, a.engineFails)
+	ctx.Given(`^the engine "([^"]*)" heard the reading stop after its first word$`, a.engineStopsEarly)
 	ctx.Given(`^the mill keeps its runs under its state directory$`, a.keepsRuns)
 	ctx.Given(`^the mill's clock moves a second at each look$`, a.clockTicks)
 	ctx.Given(`^the phone sends a "([^"]*)" "([^"]*)" grist, version "([^"]*)", of "([^"]*)" read aloud in a webm recording$`, a.phoneSendsReading)
@@ -106,6 +107,7 @@ func registerGristAudio(ctx *godog.ScenarioContext, c *gristContext) {
 	ctx.Then(`^the session's request carries a reading_result from each of "([^"]*)" and "([^"]*)", with (\d+) words each$`, a.requestCarriesBoth)
 	ctx.Then(`^the session's request carries a reading_result from "([^"]*)", with (\d+) words$`, a.requestCarriesOne)
 	ctx.Then(`^the session's request carries the error "([^"]*)" for the engine "([^"]*)"$`, a.requestCarriesError)
+	ctx.Then(`^the session's request carries a reading_result from "([^"]*)" whose words after the first are not_reached$`, a.requestCarriesNotReached)
 	ctx.Then(`^the session's request keeps the app's own fields$`, a.requestKeepsFields)
 	ctx.Then(`^the session's request has no reading_result$`, a.requestHasNoReading)
 	ctx.Then(`^the app's decrypted reply has the grind's answer and a reading_result from "([^"]*)", with (\d+) words$`, a.replyCarriesOne)
@@ -213,6 +215,23 @@ func (a *audioContext) enginesConfigured(first, second, said string) error {
 		}
 		a.engines[name] = &apptest.FakeScorer{Result: application.ReadingResult{Engine: name, Words: words, Accuracy: 90, Seconds: 1.5}}
 	}
+	return nil
+}
+
+// engineStopsEarly makes the engine score its reading as one that stopped
+// after the first word: the others are not reached.
+func (a *audioContext) engineStopsEarly(name string) error {
+	engine, ok := a.engines[name]
+	if !ok {
+		return fmt.Errorf("no engine %q is configured", name)
+	}
+	words := append([]application.ReadingWord(nil), engine.Result.Words...)
+	for i := 1; i < len(words); i++ {
+		words[i].ProducedPhonemes = []string{}
+		words[i].Error = application.ErrNotReached
+		words[i].Accuracy = 0
+	}
+	engine.Result.Words = words
 	return nil
 }
 
@@ -404,6 +423,22 @@ func (a *audioContext) requestCarriesOne(engine string, words int) error {
 	}
 	if result.Engine != engine || len(result.Words) != words {
 		return fmt.Errorf("expected %d words from %s, got %+v", words, engine, result)
+	}
+	return nil
+}
+
+func (a *audioContext) requestCarriesNotReached(engine string) error {
+	result, err := a.reading(engine)
+	if err != nil {
+		return err
+	}
+	if len(result.Words) < 2 || result.Words[0].Error != application.ErrNone {
+		return fmt.Errorf("expected a read first word and more after it from %s, got %+v", engine, result)
+	}
+	for _, w := range result.Words[1:] {
+		if w.Error != application.ErrNotReached {
+			return fmt.Errorf("expected %q not_reached from %s, got %+v", w.Text, engine, w)
+		}
 	}
 	return nil
 }

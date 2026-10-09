@@ -43,13 +43,23 @@ engine that returns anything else fails where it is read, not where it is used.
 | `words[].text` | the word, as the target spells it (the word as heard, for an insertion); never empty |
 | `words[].expected_phonemes` | the phonemes the target asks for, ARPAbet-style (IPA from `azure`), `[]` for an insertion |
 | `words[].produced_phonemes` | the phonemes the engine heard, `[]` for an omission |
-| `words[].error` | exactly one of `none`, `omission` (left out), `insertion` (added), `mispronunciation`, `hesitation` |
+| `words[].error` | exactly one of `none`, `omission` (left out), `insertion` (added), `mispronunciation`, `hesitation`, `not_reached` (the reader stopped before it) |
 | `words[].accuracy` | whole number 0 to 100 |
 | `words[].self_corrected` | the reader got it wrong, then right |
 | `accuracy` | the reading as a whole, whole number 0 to 100 |
 | `seconds` | seconds of speech scored, 0 or more |
 
 The JSON names are snake_case and the lists are never `null`.
+
+**A reading that stops early.** `omission` is a word skipped inside the reading. A
+reading that stops before the text does (the first words of a verse, then silence) scores
+the words it reached as usual, and every word of the target after the last one reached is
+`not_reached`: its `produced_phonemes` are `[]` and its `accuracy` 0. They are the tail of
+`words`, in the target's order, and no phone heard is ever given to one. A tutor reads where
+the reader stopped as the first `not_reached` word. The
+reading's `accuracy` is the mean over the words reached, so a reading that stops early is
+not marked down for the words it never came to. The `azure` engine does not report the kind:
+Azure marks the same words as omissions.
 
 ## The engines
 
