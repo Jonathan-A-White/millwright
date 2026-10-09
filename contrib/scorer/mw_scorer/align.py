@@ -29,6 +29,12 @@ word when it is close to it (the word is then self_corrected if its final
 reading is closer still), and otherwise a word the reader added: an insertion.
 One stray phone between words is ignored.
 
+Each word also says when it was heard: start and end, seconds from the start
+of the recording, from its first produced phone's CTC frame to the end of its
+last (an inserted word likewise; a word read twice, its last reading). They are
+null for a word with nothing heard (omission, not_reached), and never run past
+the clip's length.
+
 accuracy per word = 100 x (1 - distance / expected phones), floored at 0; the
 reading's accuracy is the mean over the words reached, insertions and the words
 not reached left out (a reading that stops early is scored on what was read).
@@ -123,7 +129,18 @@ def score_reading(words, produced, seconds, hesitation_seconds=HESITATION_SECOND
     result = _score_words(words[:reached], produced, seconds, hesitation_seconds, engine, cost)
     for text, expected in words[reached:]:
         result["words"].append(_word(text, expected, [], 0, "not_reached"))
+    _hold_to_clip(result["words"], result["seconds"])
     return result
+
+
+def _hold_to_clip(words, seconds):
+    """A CTC frame can end a little past the clip's length: hold the times to it."""
+    for w in words:
+        if w["end"] is None or w["end"] <= seconds:
+            continue
+        w["end"] = seconds
+        if w["start"] >= seconds:
+            w["start"] = round(max(0.0, seconds - 0.01), 2)
 
 
 def _reached(words, heard, cost):
@@ -220,6 +237,8 @@ def _word(text, expected, mine, accuracy, error):
         "error": error,
         "accuracy": accuracy,
         "self_corrected": False,
+        "start": mine[0].start if mine else None,
+        "end": mine[-1].end if mine else None,
     }
 
 

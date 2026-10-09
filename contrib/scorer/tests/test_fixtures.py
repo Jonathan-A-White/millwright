@@ -57,6 +57,19 @@ class Fixtures(unittest.TestCase):
             self.assertIsInstance(w["expected_phonemes"], list)
             self.assertIsInstance(w["produced_phonemes"], list)
             self.assertIsInstance(w["self_corrected"], bool)
+        Fixtures.assertWordTimes(self, result)
+
+    def assertWordTimes(self, result):
+        """Every word that was heard has 0 <= start < end <= the clip's length, and
+        the words are in order; the others (omitted, not reached) have null times."""
+        last = 0.0
+        for w in result["words"]:
+            if w["produced_phonemes"]:
+                self.assertTrue(0 <= w["start"] < w["end"] <= result["seconds"], w)
+                self.assertGreaterEqual(w["start"], last, w)
+                last = w["end"]
+            else:
+                self.assertEqual((w["start"], w["end"]), (None, None), w)
 
     def errors(self, result):
         return [(w["text"], w["error"]) for w in result["words"]]
@@ -88,6 +101,15 @@ class Fixtures(unittest.TestCase):
         for w in result["words"][4:]:
             self.assertEqual((w["produced_phonemes"], w["accuracy"]), ([], 0))
         self.assertGreaterEqual(result["accuracy"], 90)
+
+    def test_the_words_are_timed_in_the_recording(self):
+        clean = self.score("clean.wav")
+        self.assertTrue(all(w["start"] is not None for w in clean["words"]))
+        nothe = self.score("no-the.wav")
+        self.assertEqual((nothe["words"][0]["start"], nothe["words"][0]["end"]), (None, None))
+        partial = self.score("partial.wav")
+        for w in partial["words"][4:]:
+            self.assertEqual((w["start"], w["end"]), (None, None))
 
     def test_a_target_with_punctuation_is_scored_by_its_words(self):
         result = self.scorer.score("The cat sat on the mat.", "en", clip("clean.wav"))

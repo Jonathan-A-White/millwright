@@ -56,7 +56,9 @@ word, each with `expected_phonemes` and `produced_phonemes` in ARPAbet (IPA
 for a language other than English, see Greek below),
 `error` (`none`, `omission`, `insertion`, `mispronunciation`, `hesitation`,
 `not_reached`),
-`accuracy` 0 to 100 and `self_corrected`; then the reading's `accuracy` and
+`accuracy` 0 to 100, `self_corrected`, and `start` and `end` (seconds in the
+recording, from the CTC frames of the word's first and last produced phone;
+`null` for an omission or a word not reached); then the reading's `accuracy` and
 `seconds`. A bad request is a `400` with a plain line saying why; a failure of
 the scorer is a `500`. `GET /health` answers `200` once the model is loaded.
 

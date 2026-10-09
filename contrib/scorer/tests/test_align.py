@@ -145,6 +145,41 @@ ROMANS_8_11 = [  # the first twelve words of the target of the run that scattere
 ]
 
 
+class WordTimes(unittest.TestCase):
+    """Each word says when it was heard in the recording: from its first produced
+    phone to the end of its last. A word with nothing heard has no times."""
+
+    def test_a_word_is_timed_from_its_first_phone_to_the_end_of_its_last(self):
+        result = align.score_reading(CAT, heard((0.1, "DH AH"), (0.3, "K AE T"), (0.6, "S AE T")), 1.0)
+        self.assertEqual([(w["start"], w["end"]) for w in result["words"]],
+                         [(0.1, 0.18), (0.3, 0.44), (0.6, 0.74)])
+
+    def test_an_omission_and_a_word_not_reached_have_no_times(self):
+        omitted = align.score_reading(CAT, heard((0.3, "K AE T"), (0.6, "S AE T")), 1.0)
+        self.assertEqual(errors(omitted)[0], ("the", "omission"))
+        self.assertEqual((omitted["words"][0]["start"], omitted["words"][0]["end"]), (None, None))
+        partial = align.score_reading(CAT, heard((0.1, "DH AH"), (0.3, "K AE T")), 0.6)
+        self.assertEqual(errors(partial)[2], ("sat", "not_reached"))
+        self.assertEqual((partial["words"][2]["start"], partial["words"][2]["end"]), (None, None))
+
+    def test_nothing_heard_leaves_every_word_untimed(self):
+        result = align.score_reading(CAT, [], 1.0)
+        self.assertEqual([(w["start"], w["end"]) for w in result["words"]], [(None, None)] * 3)
+
+    def test_an_inserted_word_is_timed_and_in_order(self):
+        result = align.score_reading(CAT, heard((0.1, "DH AH"), (0.3, "B IH G"), (0.6, "K AE T"), (0.9, "S AE T")), 1.2)
+        self.assertEqual([w["error"] for w in result["words"]], ["none", "insertion", "none", "none"])
+        self.assertEqual((result["words"][1]["start"], result["words"][1]["end"]), (0.3, 0.44))
+
+    def test_a_word_read_twice_is_timed_on_its_last_reading(self):
+        result = align.score_reading(CAT, heard((0.1, "DH AH"), (0.3, "K AE T"), (0.6, "K AE T"), (0.9, "S AE T")), 1.2)
+        self.assertEqual((result["words"][1]["start"], result["words"][1]["end"]), (0.6, 0.74))
+
+    def test_an_end_past_the_clip_is_held_to_its_length(self):
+        result = align.score_reading(CAT, heard((0.1, "DH AH"), (0.3, "K AE T"), (0.6, "S AE T")), 0.7)
+        self.assertEqual(result["words"][2]["end"], 0.7)
+
+
 class PartialReading(unittest.TestCase):
     """A reading that stops early is aligned to the start of the target; the
     words after it are not_reached, never omissions, never scattered phones."""
