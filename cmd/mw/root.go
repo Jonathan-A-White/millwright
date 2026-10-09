@@ -12,6 +12,7 @@ func newRootCmd() *cobra.Command {
 		SilenceErrors: false,
 	}
 
+	root.AddCommand(newAfterLandingCmd())
 	root.AddCommand(newBriefCmd())
 	root.AddCommand(newCardCmd())
 	root.AddCommand(newCheckCmd())

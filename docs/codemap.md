@@ -2,7 +2,7 @@
 
 ## Layers
 
-domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · infrastructure/: adapters · cmd/mw/: cobra · features/ (steps/): Gherkin · template/: embed
+domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · infra/: adapters · cmd/mw/: cobra · features/ (steps/): Gherkin · template/: embed
 
 ## Ports
 
@@ -10,15 +10,15 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 | --- | --- | --- | --- |
 | `WorkTracker` | application/worktracker.go | infra/beads/ | apptest.FakeTracker |
 | TrackerNotes, SweepNotes, BeadGraph | application/{status,sweep}.go | same | same |
-| VaultFiles, TrackerSync | application/sync.go | `infrastructure/{vault/git,beads/sync}.go` | apptest.Fake{VaultFiles,Tracker} |
+| VaultFiles, TrackerSync | application/sync.go | `infra/{vault/git,beads/sync}.go` | apptest.Fake{VaultFiles,Tracker} |
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | `infrastructure/beads/mail.go` | apptest.FakeMailbox |
 | EpicRules | application/epicrules.go | `infrastructure/vault/epicrules.go` | apptest.FakeEpicRules |
 | Vault | application/seatboot.go | infra/vault | application/seatboot_test.go |
 | Runner | application/runner.go | infra/tmux | apptest.FakeRunner |
 | Harness | application/harness.go | infra/claude | application/seatboot_test.go |
-| SeatFiles, Windows, SeatHarness, ActingFile | application/seatup.go, application/seathandover.go | infrastructure/{vault/{seat,reaplog},tmux/window,claude/claude}.go | apptest.Fake{Windows,ActingFile} |
-| Transcripts{,Tail,Replies}, PeekRemote | application/seatcontext.go, application/peek.go | infrastructure/{claude,peekremote} | apptest/fakepeek.go |
-| Reap{Terminal,Log,Armer} | application/seatreap.go | infrastructure/{tmux/reap,vault/reaplog,reaper/arm}.go | apptest.Fake{Windows,ReapArmer} |
+| SeatFiles, Windows, SeatHarness, ActingFile | application/seatup.go, application/seathandover.go | infra/{vault/{seat,reaplog},tmux/window,claude/claude}.go | apptest.Fake{Windows,ActingFile} |
+| Transcripts{,Tail,Replies}, PeekRemote | application/seatcontext.go, application/peek.go | infra/{claude,peekremote} | apptest/fakepeek.go |
+| Reap{Terminal,Log,Armer} | application/seatreap.go | infra/{tmux/reap,vault/reaplog,reaper/arm}.go | apptest.Fake{Windows,ReapArmer} |
 | WatchProbes | application/watch.go | infra/watch | apptest.FakeWatch |
 | Doctor{Check,State,Log,Notes}, VPSProbe | application/doctor.go, application/vpsnginx.go | infra/{doctor,vpsnginx} | none |
 | Network{Probe,Store,Reader} | application/network.go | infra/network | apptest.FakeNetwork* |
@@ -27,14 +27,14 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 | Worktrees | application/worktrees.go | `infrastructure/rig/worktree.go` | application/dispatch_test.go |
 | HostLoad | application/hostload.go | infra/hostload | apptest.FakeHostLoad |
 | SyncHaltMarker | application/sync.go | infra/synchalt | apptest.FakeSyncHaltMarker |
-| Notifier, HomeMoveHost, OldHome, VaultBirth, TrackerBirth | application/{millhandtick,homemove,init}.go | infrastructure/{notify/notify,homemove/homemove,vault/birth,beads/init}.go | none |
-| Landing, Checks, MergeSlot, Holding | application/landing.go | infrastructure/rig/{landing,checks,slot}.go | none |
-| AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter | application/afterlanding.go, application/selfupdate.go, application/backendstage.go | infrastructure/{rig/{afterlanding,built,backend},userunits}.go | features/{self_update,backend_swap}.feature |
-| EventLog, BeadFeed, FollowCursors, ShipStates, SubscribeFiles, NudgeCursors, EventSpringer, EventController, HarnessCount | application/event*.go, status.go | infrastructure/{eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go | apptest.Fake{EventLog,FollowCursors,Ship*,Tracker,Subscribe*,Nudge*} |
-| Postern, hands, Prompts | application/{postern*,hands,prompt}.go | infrastructure/{postern,hands*,homemove} | apptest.Fake{Postern*,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*,HomeMover,Prompts} |
+| Notifier, HomeMoveHost, OldHome, VaultBirth, TrackerBirth | application/{millhandtick,homemove,init}.go | infra/{notify/notify,homemove/homemove,vault/birth,beads/init}.go | none |
+| Landing, Checks, MergeSlot, Holding | application/landing.go | infra/rig/{landing,checks,slot}.go | none |
+| AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter | application/afterlanding.go, application/selfupdate.go, application/backendstage.go | infra/{rig/{afterlanding,built,backend},userunits}.go | features/{self_update,backend_swap}.feature |
+| EventLog, BeadFeed, FollowCursors, ShipStates, SubscribeFiles, NudgeCursors, EventSpringer, EventController, HarnessCount | application/event*.go, status.go | infra/{eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go | apptest.Fake{EventLog,FollowCursors,Ship*,Tracker,Subscribe*,Nudge*} |
+| Postern, hands, Prompts | application/{postern*,hands,prompt}.go | infra/{postern,hands*,homemove} | apptest.Fake{Postern*,Cipher,SnapshotFile,NginxRunner,Transcriber,Hands*,HomeMover,Prompts} |
 | Chain, StampQueue, StampStore, CommitNotes, RigHeads | application/chain.go, application/chainstamp.go, application/prove.go | infra/{bsv,stampqueue,chainlookup}, rig/worktree.go | apptest.Fake{Chain,StampQueue,CommitNotes,RigHeads} |
-| Grinder, GrindSource, GristState, GristLock, GristRunStore, GristForwardStore | application/grist.go, application/gristruns.go | infrastructure/{claude/grind,rig/grinds,hostlock/try}.go, infrastructure/grist | apptest.Fake{Grinder,Grinds,GristState,GristLock} |
-| Scorer | application/scorer.go | infrastructure/scorer/ | apptest.FakeScorer |
+| Grinder, GrindSource, GristState, GristLock, GristRunStore, GristForwardStore | application/grist.go, application/gristruns.go | infra/{claude/grind,rig/grinds,hostlock/try}.go, infra/grist | apptest.Fake{Grinder,Grinds,GristState,GristLock} |
+| Scorer | application/scorer.go | infra/scorer/ | apptest.FakeScorer |
 
 ## Use cases
 
@@ -45,7 +45,7 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 | Retry | application/retry.go | mw retry - cmd/mw/retry.go | features/retry.feature |
 | Show, Peek, Prove, StampHead | application/show.go, application/peek.go, application/prove.go, application/stamphead.go | mw show/peek/prove/stamp - cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go | features/{show,peek,prove,stamp}.feature |
 | Dispatch | application/dispatch.go | mw dispatch - cmd/mw/dispatch.go | features/dispatch.feature |
-| Next | application/next.go | mw next - cmd/mw/next.go | features/next.feature |
+| Next, AfterLandingRun | application/next.go, application/afterlandingrun.go | mw next, mw after-landing - cmd/mw/next.go, cmd/mw/afterlanding.go | features/{next,after_landing}.feature |
 | Check | application/check.go | mw check - cmd/mw/check.go | features/check.feature |
 | Status | application/status.go | mw status - cmd/mw/status.go | features/status.feature |
 | Brief | application/brief.go | mw brief - cmd/mw/brief.go | features/brief.feature |

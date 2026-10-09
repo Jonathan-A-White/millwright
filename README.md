@@ -532,6 +532,25 @@ because a site copied by a command cut off midway is half-deployed; a rig that s
 a site uses `contrib/site-deploy`, which cannot leave it so (`docs/site-deploy.md`).
 A rig the table does not name runs nothing.
 
+A command that fails on a network fault that may pass — ssh's exit status 255, or
+a name that did not resolve, a connection refused or timed out in the tail of its
+output — is run once more after thirty seconds, and the report and the mail say
+`after landing: <command>: retried once after 30s, because the first run failed on
+a network fault that may pass (exit status 255)` before the second run's line; a
+second failure is reported as any failure is. A command stopped at its limit is
+not run again. The command runs under the rig's after-landing lock (a file beside
+the rig's worktrees, `<rig>.after-landing-slot`; not the merge slot, which a
+landing has given back by then), so two runs of it never go side by side.
+
+`mw after-landing <rig>` runs that same command now, for a landing whose deploy
+did not happen or failed: in the rig's checkout as it is, under the same lock
+(it waits, saying who holds it, for a deploy that is running), the same limit
+and the same one retry, restarting the follower after a successful build of
+`millwright` as a landing does. It prints `after landing: make build: ok`, or the
+failure line and exits non-zero. It fetches and moves nothing. A rig this host
+has no checkout of, or names no command for, is refused. See
+`features/after_landing.feature`.
+
 When the rig is `millwright` and its command succeeded, the landing then runs
 `systemctl --user try-restart mw-view-follow.service`, so that the follower
 publishes the Governor's view with the binary just built and not the one it
