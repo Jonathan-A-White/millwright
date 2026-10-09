@@ -26,6 +26,11 @@ type EpicRequirements struct {
 	// one's version and writes it into all of them. It is no requirement of an
 	// epic either, so Any does not count it.
 	VersionFiles []string
+	// ChangelogFiles, when it is not empty, are the files of the rig that keep
+	// its changelog, relative to its root: a .json one and a .md one. A landing
+	// writes the story's What's new: note into them in the commit that carries
+	// the version. It is no requirement of an epic either, so Any does not count it.
+	ChangelogFiles []string
 }
 
 // Any reports whether the rig asks anything of its epics at all. A rig that
