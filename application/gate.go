@@ -101,8 +101,10 @@ type gated struct {
 // command that would not start is not a load fault and is never run again.
 func (n Next) gate(ctx context.Context, c *closeOut, report *NextReport, dir, what string) gated {
 	before, gaveUp := n.calmed(ctx, report, c, what)
-	checked, err := n.Checks.Run(ctx, c.path.Rig, dir)
+	n.beginGate(ctx, c, before)
+	checked, err := n.timedChecks(ctx, c, dir)
 	if err != nil || checked.NotRun || checked.Passed {
+		c.gate.settle(checked, err, before)
 		return gated{Checked: checked, Err: err}
 	}
 
@@ -110,6 +112,7 @@ func (n Next) gate(ctx context.Context, c *closeOut, report *NextReport, dir, wh
 	if !gaveUp {
 		after, ok := n.readLoad(ctx)
 		if !ok || !after.Busy() {
+			c.gate.settle(checked, nil, before)
 			return gated{Checked: checked}
 		}
 		busy = after
@@ -117,7 +120,8 @@ func (n Next) gate(ctx context.Context, c *closeOut, report *NextReport, dir, wh
 	n.print(fmt.Sprintf("  retry   %s failed while %s was at load %.1f of %d cores: running them once more when it calms\n",
 		what, n.Host, busy.Load, busy.Cores))
 	n.calmed(ctx, report, c, what+" again")
-	again, err := n.Checks.Run(ctx, c.path.Rig, dir)
+	again, err := n.timedChecks(ctx, c, dir)
+	c.gate.settle(again, err, busy)
 	said := fmt.Sprintf("%s ran twice: the first run failed while %s was at load %.1f of %d cores, the second run %s",
 		what, n.Host, busy.Load, busy.Cores, secondRun(again, err))
 	report.Notes = append(report.Notes, said)

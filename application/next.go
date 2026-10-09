@@ -254,6 +254,14 @@ type Next struct {
 	LoadBound time.Duration
 	LoadWait  func(ctx context.Context, d time.Duration) error
 
+	// Benchmarks is where the benchmarks of past close-outs are read from, for a
+	// landed story's par and the calibration printed with the report, and Bench
+	// the thresholds of both (mw-t0z3fu.2). Every close-out that ran the rig's
+	// tests records its own in the story's result file whether or not there
+	// is a book; a nil Benchmarks gives it no par and the report no summary.
+	Benchmarks BenchmarkBook
+	Bench      BenchmarkSettings
+
 	// CloseOuts is where this close-out says it is running, so that mw status
 	// and the quiet alarm do not take the story for quiet while it waits its
 	// turn or for the host to calm. A nil CloseOuts leaves no mark.
@@ -390,6 +398,11 @@ type NextReport struct {
 	Findings    TesterFindings
 	TesterFiled string
 
+	// Bench is what the close-out recorded of its gate, one line and the
+	// calibration of its kind under it; empty when it recorded none or has no
+	// book to compare it with.
+	Bench []string
+
 	Synced     bool
 	Sync       SyncReport
 	Dispatched bool
@@ -418,6 +431,10 @@ type closeOut struct {
 
 	// began is when the close-out began, as its mark says.
 	began time.Time
+
+	// gate is what the rig's tests measured of the host, as the benchmark
+	// records it.
+	gate gateRecord
 
 	// tested is the landed story a Tester story tested, findings what it
 	// found, and findingsFrom the story they were written on, as its checks
@@ -1333,6 +1350,7 @@ func (n Next) finish(ctx context.Context, c *closeOut, report *NextReport, outco
 		written = held
 	}
 	if !written {
+		n.recordBenchmark(ctx, c, report, true)
 		if err := n.ledger(ctx, c, report, outcome); err != nil {
 			report.Notes = append(report.Notes, err.Error())
 		}
@@ -1621,7 +1639,13 @@ func (n Next) carryOn(ctx context.Context, c *closeOut, report *NextReport) (Nex
 // is closed and nothing is given back — the worktree and the branch are left
 // exactly as the session left them, because they are the evidence.
 func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason Reason, why, said string) (NextReport, error) {
+	// Tests that timed out on a host at or above its core count did not fail on
+	// the story: the refusal says so, in the mail and on the story.
+	if (reason == ReasonTestsFail || reason == ReasonMergedTestsFail) && c.gate.timeout {
+		why += " (" + TimeoutUnderLoadNote(n.Host, c.gate.at) + ")"
+	}
 	report.Why, report.Reason = why, reason
+	n.recordBenchmark(ctx, c, report, false)
 
 	note := fmt.Sprintf("mw next on %s "+RefusedPhrase+"%s): %s\n\n"+
 		"Nothing was merged and nothing was pushed. The story is not closed and the claim was not given back. "+
@@ -1977,6 +2001,9 @@ func (r NextReport) String() string {
 		for _, line := range strings.Split(bullets(r.Uncommitted, UncommittedListed), "\n") {
 			fmt.Fprintf(&b, "            %s\n", line)
 		}
+	}
+	for _, line := range r.Bench {
+		fmt.Fprintf(&b, "  bench   %s\n", line)
 	}
 	if r.Ledger != "" {
 		fmt.Fprintf(&b, "  ledger  %s\n", r.Ledger)
