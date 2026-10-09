@@ -224,7 +224,7 @@ Feature: Dispatching the stories this host is ready to work
     When dispatch runs on "vps" with a cap of 4
     Then no session was started
     And the story "mw-gq6.1" is not claimed
-    And dispatch passed over "mw-gq6.1", saying: host=auto and vps is at load 16.5 of 16 cores
+    And dispatch passed over "mw-gq6.1", saying: vps has no room: load 16.5 of 16 cores
 
   Scenario: A story that may run on any host is still passed over when this host is at its cap
     Given a ready story "mw-gq6.1" of that epic that overrides "host" with "auto"
@@ -235,11 +235,93 @@ Feature: Dispatching the stories this host is ready to work
     And the story "mw-gq6.1" is not claimed
     And dispatch passed over "mw-gq6.1", saying: vps has taken 1 of the 1 sessions it may run at once
 
-  Scenario: A story that names this host is not braked by load
+  # Room (mw-t0z3fu.1): a host takes on a story only while its load is under its
+  # core count and its available memory over a floor, for a story that names the
+  # host as much as for host=auto. The cap stays the ceiling. A story held back
+  # for want of room stays ready and unclaimed.
+
+  Scenario: A story that names this host is not started while the load has reached its cores
     Given a ready story "mw-gq6.1" of that epic
     And this host is at load 16.5 of 16 cores
+    When dispatch runs on "vps" with a cap of 4
+    Then no session was started
+    And the story "mw-gq6.1" is not claimed
+    And dispatch passed over "mw-gq6.1", saying: vps has no room: load 16.5 of 16 cores
+
+  Scenario: A story is not started while the available memory is under the floor
+    Given a ready story "mw-gq6.1" of that epic
+    And this host is at load 3.0 of 16 cores
+    And this host has 1500 MB of memory available
+    When dispatch runs on "vps" with a cap of 4
+    Then no session was started
+    And the story "mw-gq6.1" is not claimed
+    And dispatch passed over "mw-gq6.1", saying: vps has no room: 1500 MB free, under 2048 MB
+
+  Scenario: A story is started when the load and the memory both have room and the host is under its cap
+    Given a ready story "mw-gq6.1" of that epic
+    And this host is at load 3.0 of 16 cores
+    And this host has 8000 MB of memory available
+    When dispatch runs on "vps" with a cap of 4
+    Then one session was started, for "mw-gq6.1"
+    And the story "mw-gq6.1" is claimed by this host
+
+  Scenario: A host with room still starts no more than its cap
+    Given a ready story "mw-gq6.1" of that epic
+    And a ready story "mw-gq6.2" of that epic
+    And a ready story "mw-gq6.3" of that epic
+    And this host is at load 0.5 of 16 cores
+    And this host has 64000 MB of memory available
+    When dispatch runs on "vps" with a cap of 2
+    Then 2 sessions were started
+    And dispatch passed over "mw-gq6.3", saying: vps has taken 2 of the 2 sessions it may run at once
+
+  Scenario: A load that cannot be read does not hold a story back
+    Given a ready story "mw-gq6.1" of that epic
+    And this host's load cannot be read
     When dispatch runs on "vps" with a cap of 1
     Then one session was started, for "mw-gq6.1"
+
+  Scenario: A memory that cannot be read does not hold a story back
+    Given a ready story "mw-gq6.1" of that epic
+    And this host is at load 3.0 of 16 cores
+    And this host's memory cannot be read
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.1"
+
+  Scenario: The cap holds a story back even when the load and the memory cannot be read
+    Given a ready story "mw-gq6.1" of that epic
+    And a story "mw-gq6.9" of that epic is already running here
+    And this host's load cannot be read
+    When dispatch runs on "vps" with a cap of 1
+    Then no session was started
+    And dispatch passed over "mw-gq6.1", saying: vps has taken 1 of the 1 sessions it may run at once
+
+  Scenario: The config file's room limits move where the host has no room
+    Given a ready story "mw-gq6.1" of that epic
+    And this host is at load 9.0 of 16 cores
+    And this host has 3000 MB of memory available
+    And the config file says room_load_per_core is 0.5 and room_min_free_mb is 4096
+    When dispatch runs on "vps" with a cap of 4
+    Then no session was started
+    And dispatch passed over "mw-gq6.1", saying: vps has no room: load 9.0 of 16 cores at 0.5 a core; 3000 MB free, under 4096 MB
+
+  Scenario: A host with no room is told once when it loses its room and once when it has it back
+    Given this host is at load 3.0 of 16 cores
+    When dispatch runs on "vps" with a cap of 4
+    Then the event log holds no room events
+    When this host is then at load 20.0 of 16 cores
+    And dispatch runs on "vps" with a cap of 4
+    And dispatch runs on "vps" with a cap of 4
+    Then the event log holds 1 room event, the last saying the host has no room: load 20.0 of 16 cores
+    When this host is then at load 3.0 of 16 cores
+    And dispatch runs on "vps" with a cap of 4
+    And dispatch runs on "vps" with a cap of 4
+    Then the event log holds 2 room events, the last saying the host has room again
+
+  Scenario: A rehearsal writes no room event
+    Given this host is at load 20.0 of 16 cores
+    When dispatch runs on "vps" with a cap of 4 as a dry run
+    Then the event log holds no room events
 
   Scenario: A story that names another host is passed over whatever the tracker offers
     Given a ready story "mw-gq6.1" of that epic that overrides "host" with "desktop"
