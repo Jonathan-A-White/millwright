@@ -532,3 +532,38 @@ Feature: mw status
     Then reading status succeeds
     And the report says "host: 0 of cap 4"
     And the report does not say the host is held back
+
+  # Grist comes first in the caps (mw-t0z3fu.4): mw status says whether a tutor
+  # is in use, how the answers compare with their par, and the cap that holds
+  # while it is.
+
+  Scenario: The report says grist is active, its median against its par, and the cap it lowers
+    Given this host runs at most 4 sessions at once
+    And this host's mill answered 45 tutor-turn grists in 10 seconds each long ago, then 3 in 14 seconds each in the last 5 minutes
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "grist: active (3 in 10 min), median 14 s (par 10 s)"
+    And the report says "2 stories at most while it lasts"
+    And every line of the report is at most 60 columns wide
+
+  Scenario: The report says why the host is held back when tutor answers are slow
+    Given this host runs at most 4 sessions at once
+    And this host's mill answered 45 tutor-turn grists in 10 seconds each long ago, then 5 in 30 seconds each in the last 5 minutes
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "grist: slow (5 in 10 min), median 30 s (par 10 s)"
+    And the report says the host is held back: "slow grist: tutor-turn 30 s, par 10 s"
+
+  Scenario: The report says grist is quiet when none ran lately
+    Given this host runs at most 4 sessions at once
+    And this host's mill answered 3 tutor-turn grists in 10 seconds each long ago, then 0 in 10 seconds each in the last 5 minutes
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "grist: quiet (none in 10 min)"
+    And the report does not say the host is held back
+
+  Scenario: A host with no mill says nothing of grist
+    Given this host runs at most 4 sessions at once
+    When mw status reads the host
+    Then reading status succeeds
+    And the report does not say "grist:"

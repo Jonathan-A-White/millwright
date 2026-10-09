@@ -219,6 +219,12 @@ type Status struct {
 	Load HostLoad
 	Room RoomLimits
 
+	// Grist is what the mill is doing on this host (mw-t0z3fu.4): the GRIST line
+	// says whether a tutor is in use and how its answers compare with their par,
+	// and a tutor answering slowly is a reason the host is held back. Nil leaves
+	// the line out.
+	Grist GristPulses
+
 	// VPSNginx, when set, is asked for the VPS NGINX line: whether the VPS's
 	// postern_api upstream sends the phone to the home first.
 	VPSNginx VPSNginxReader
@@ -352,7 +358,9 @@ type StatusReport struct {
 	Cap    int
 	InUse  int
 	NoRoom string
-	Ready  []StoryDetail
+	// Grist is what the mill is doing, zero (Known false) when this host has none.
+	Grist GristPulse
+	Ready []StoryDetail
 	// Waiting are the beads labelled hitl that are open and not blocked, on any
 	// host or none, and the stories labelled hitl this host has claimed: worked
 	// with the Governor present, so neither a dispatcher's to take nor a session
@@ -500,6 +508,12 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	if s.Cap > 0 {
 		report.Cap = s.Cap
 		report.NoRoom, _ = ReadRoom(ctx, s.Load, s.Room)
+		if s.Grist != nil {
+			if pulse, err := s.Grist.Pulse(ctx, s.Cap); err == nil {
+				report.Grist = pulse
+				report.NoRoom = strings.Join(nonEmpty(report.NoRoom, pulse.Slow), "; ")
+			}
+		}
 	}
 
 	for _, detail := range work.ReadyOn(s.Host) {
@@ -932,6 +946,12 @@ func (r StatusReport) String() string {
 		for _, why := range strings.Split(r.NoRoom, "; ") {
 			if why != "" {
 				clip(&b, "  held back, no room: "+why)
+			}
+		}
+		if line := r.Grist.Line(); line != "" {
+			clip(&b, line)
+			if capLine := r.Grist.CapLine(); capLine != "" {
+				clip(&b, "  "+capLine)
 			}
 		}
 		b.WriteString("\n")

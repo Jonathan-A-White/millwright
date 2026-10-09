@@ -81,6 +81,9 @@ func newStatusCmd() *cobra.Command {
 			"less than 2 GB of memory available (the [dispatch] table's room_load_per_core and\n" +
 			"room_min_free_mb) - a 'held back, no room' line gives each reason, and mw dispatch starts\n" +
 			"nothing here until it clears.\n\n" +
+			"On the host where the mill runs, a 'grist:' line says whether a tutor is in use ('active (3 in\n" +
+			"10 min)', 'slow' or 'quiet'), the median of its last answers against their par, and the lowered cap\n" +
+			"('grist first: N stories at most while it lasts'); slow grist is a 'held back, no room' reason.\n\n" +
 			"Every line fits a phone-width terminal, at most 60 columns. Nothing is claimed, nothing is\n" +
 			"written and no session is started: status only reads.",
 		Args: cobra.NoArgs,
@@ -172,6 +175,7 @@ func newStatusCmd() *cobra.Command {
 				Cap:              atOnce,
 				Load:             hostload.Proc{},
 				Room:             application.RoomLimits{LoadPerCore: room.LoadPerCore, MinFreeMB: room.MinFreeMB},
+				Grist:            hostGristRoom(room),
 				VPSNginx:         vps,
 				Standby:          standby,
 				Cloud:            cloudBook,

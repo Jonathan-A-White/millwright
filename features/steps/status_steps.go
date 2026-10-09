@@ -61,6 +61,9 @@ type statusContext struct {
 	// and memory it read, when it gave them (mw-t0z3fu.1).
 	cap  int
 	load *apptest.FakeHostLoad
+	// gristRuns is the mill's runs, when a scenario gave this host some
+	// (mw-t0z3fu.4).
+	gristRuns *apptest.FakeGristRuns
 
 	report application.StatusReport
 	err    error
@@ -503,6 +506,9 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 	}
 	if c.load != nil {
 		status.Load = c.load
+	}
+	if c.gristRuns != nil {
+		status.Grist = application.GristRoom{Runs: c.gristRuns, Now: func() time.Time { return c.now }}
 	}
 	c.report, c.err = status.Run(context.Background())
 	return nil

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
@@ -19,6 +20,8 @@ func registerStatusRoomSteps(ctx *godog.ScenarioContext, c *statusContext) {
 	ctx.Given(`^this host runs at most (\d+) sessions at once$`, c.thisHostRunsAtMost)
 	ctx.Given(`^this host is at load ([0-9.]+) of (\d+) cores with (\d+) MB of memory available$`, c.thisHostIsAtLoadWithMemory)
 	ctx.Given(`^this host's load cannot be read for the report$`, c.thisHostsLoadCannotBeReadForTheReport)
+	ctx.Given(`^this host's mill answered (\d+) tutor-turn grists in (\d+) seconds each long ago, then (\d+) in (\d+) seconds each in the last 5 minutes$`, c.thisHostsMillAnswered)
+	ctx.Then(`^the report does not say "([^"]*)"$`, c.theReportDoesNotSay)
 	ctx.Then(`^the report says "([^"]*)"$`, c.theReportSays)
 	ctx.Then(`^the report says the host is held back: "([^"]*)"$`, c.theReportSaysTheHostIsHeldBack)
 	ctx.Then(`^the report does not say the host is held back$`, c.theReportDoesNotSayTheHostIsHeldBack)
@@ -62,6 +65,38 @@ func (c *statusContext) theReportSaysTheHostIsHeldBack(why string) error {
 func (c *statusContext) theReportDoesNotSayTheHostIsHeldBack() error {
 	if printed := c.report.String(); strings.Contains(printed, "held back") {
 		return fmt.Errorf("expected the report not to say the host is held back, got:\n%s", printed)
+	}
+	return nil
+}
+
+// thisHostsMillAnswered gives the status the mill's runs: n grists of old
+// seconds that ended hours ago and then recent of seconds each that ended in
+// the last five minutes.
+func (c *statusContext) thisHostsMillAnswered(n, old, recent, seconds int) error {
+	c.gristRuns = &apptest.FakeGristRuns{}
+	add := func(ago time.Duration, secs int) {
+		answered := c.now.Add(-ago)
+		run := float64(secs - 2)
+		received := answered.Add(-time.Duration(run) * time.Second)
+		sent := received.Add(-2 * time.Second)
+		queued := 2.0
+		c.gristRuns.Kept = append(c.gristRuns.Kept, application.GristRunTiming{
+			Txid: fmt.Sprintf("direct:tutor-%d", len(c.gristRuns.Kept)), Kind: "tutor-turn",
+			Sent: &sent, Received: received, Answered: answered, Seconds: run, QueuedSeconds: &queued, RunSeconds: run,
+		})
+	}
+	for i := 0; i < n; i++ {
+		add(3*time.Hour+time.Duration(n-i)*time.Second, old)
+	}
+	for i := 0; i < recent; i++ {
+		add(time.Duration(recent-i)*time.Minute, seconds)
+	}
+	return nil
+}
+
+func (c *statusContext) theReportDoesNotSay(text string) error {
+	if printed := c.report.String(); strings.Contains(printed, text) {
+		return fmt.Errorf("expected the report not to say %q, got:\n%s", text, printed)
 	}
 	return nil
 }
