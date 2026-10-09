@@ -506,3 +506,44 @@ Feature: mw doctor
     Then mw doctor leaves with the status 0
     And the doctor log holds "boost-asleep ok desktop silent 1h00m"
     And mw doctor printed "boost-asleep: ok (desktop silent 1h00m (threshold 2h))"
+
+  Scenario: The real age-key check on the home with no age key is faulty, has no cure, and names the key file
+    Given the home host's vault keeps secrets and it holds no age key
+    When mw doctor's age-key check runs
+    Then mw doctor leaves with the status 6
+    And the doctor log holds "age-key cure-failed no cure"
+    And mw doctor printed "no age key at"
+    And mw doctor printed "age.key"
+
+  Scenario: The real age-key check on the home whose age key is not mode 600 is faulty, naming the mode
+    Given the home host's vault keeps secrets and its age key is mode 644
+    When mw doctor's age-key check runs
+    Then mw doctor leaves with the status 6
+    And the doctor log holds "age-key cure-failed no cure"
+    And mw doctor printed "mode 644, not 600"
+    And mw doctor printed "chmod 600"
+
+  Scenario: The real age-key check on a host that is not home holding an age key is faulty: the key lives on the home only
+    Given a host that is not home holding an age key of mode 600
+    When mw doctor's age-key check runs
+    Then mw doctor leaves with the status 6
+    And the doctor log holds "age-key cure-failed no cure"
+    And mw doctor printed "which is not home"
+
+  Scenario: The real age-key check on the home whose age key is mode 600 is ok
+    Given the home host's vault keeps secrets and its age key is mode 600
+    When mw doctor's age-key check runs
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "age-key ok"
+
+  Scenario: The real age-key check on a host that is not home and holds no age key is ok
+    Given a host that is not home holding no age key
+    When mw doctor's age-key check runs
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "age-key ok"
+
+  Scenario: The real age-key check on the home of a vault that keeps no secrets yet is ok without a key
+    Given the home host's vault keeps no secrets and it holds no age key
+    When mw doctor's age-key check runs
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "age-key ok n/a: the vault keeps no secrets"
