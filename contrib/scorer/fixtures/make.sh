@@ -4,6 +4,7 @@
 #   clean.wav   the target as written
 #   cap.wav     'cat' read as 'cap'
 #   no-the.wav  the first 'the' left out
+#   partial.wav only the first four words, "the cat sat on": a reading that stops early
 # Of the first clause of Romans 8:28 in modern Greek, monotonic letters
 # (lang "el", espeak-ng's voice "el"):
 #   el-clean.wav    the clause as written
@@ -24,6 +25,7 @@ say() {
 say clean "the cat sat on the mat"
 say cap "the cap sat on the mat"
 say no-the "cat sat on the mat"
+say partial "the cat sat on"
 # Greek: espeak-ng's own voice is rough, and the model (no Greek in its
 # training) hears it less well than English; this speed and pitch is the one
 # the clean clip scored best at, by contrib/scorer/tests/test_fixtures.py.

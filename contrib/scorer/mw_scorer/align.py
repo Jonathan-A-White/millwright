@@ -8,7 +8,16 @@ Of two alignments that cost the same, the one with fewer phones added inside a
 word wins (extra phones belong between words), then the one matching the later
 produced phones (a word read twice is matched on its last reading).
 
+A reading may stop before the text does. The expected phones are not all
+owed: the words after the one the reading reached (the cut) are free, so the
+alignment is to the start of the text and never scatters the phones heard over
+the words after it. The cut is where the weighted distance to the produced
+phones is least (of equal cuts, the later one: a word attempted is a word
+reached); at least the first word is always reached, and with nothing heard
+there is no cut.
+
 Labels, in this order:
+  not_reached       a word after the cut: the reader stopped before it
   omission          nothing produced for the word
   mispronunciation  the word's distance is MISPRONOUNCED_AT or more: one far
                     phone, or two near ones
@@ -21,7 +30,8 @@ reading is closer still), and otherwise a word the reader added: an insertion.
 One stray phone between words is ignored.
 
 accuracy per word = 100 x (1 - distance / expected phones), floored at 0; the
-reading's accuracy is the mean over the target's words, insertions left out.
+reading's accuracy is the mean over the words reached, insertions and the words
+not reached left out (a reading that stops early is scored on what was read).
 """
 
 from typing import NamedTuple
@@ -109,6 +119,31 @@ def score_reading(words, produced, seconds, hesitation_seconds=HESITATION_SECOND
     cost: the cost of one phone for another (phones.substitution_cost for ARPAbet,
           phones.ipa_cost(lang) for a reading compared as IPA).
     """
+    reached = _reached(words, [p.phone for p in produced], cost)
+    result = _score_words(words[:reached], produced, seconds, hesitation_seconds, engine, cost)
+    for text, expected in words[reached:]:
+        result["words"].append(_word(text, expected, [], 0, "not_reached"))
+    return result
+
+
+def _reached(words, heard, cost):
+    """How many of the target's words the reading reached: the cut that leaves
+    the least weighted distance between the words before it and everything heard.
+    All of them when nothing was heard, or when no word has phones."""
+    flat = [p for _, expected in words for p in expected]
+    if not heard or not flat:
+        return len(words)
+    d = _table(flat, heard, cost=cost)
+    best, reached, taken = None, len(words), 0
+    for w, (_, expected) in enumerate(words):
+        taken += len(expected)
+        if best is None or d[taken][len(heard)][0] <= best:
+            best, reached = d[taken][len(heard)][0], w + 1
+    return reached
+
+
+def _score_words(words, produced, seconds, hesitation_seconds, engine, cost):
+    """score_reading for words that were all reached."""
     flat = [(w, p) for w, (_, expected) in enumerate(words) for p in expected]
     owner = [w for w, _ in flat]
     heard = [p.phone for p in produced]

@@ -129,6 +129,72 @@ class ScoreReading(unittest.TestCase):
         result = align.score_reading(CAT, heard((0.1, "DH AH"), (0.3, "K AE T"), (1.6, "M AE P")), 2.0)
         self.assertEqual(result["words"][2]["error"], "mispronunciation")
 
+ROMANS_8_11 = [  # the first twelve words of the target of the run that scattered (mw-gq6.304)
+    ("And", ["AE", "N", "D"]),
+    ("if", ["IH", "F"]),
+    ("the", ["DH", "AH"]),
+    ("Spirit", ["S", "P", "IH", "R", "IH", "T"]),
+    ("of", ["AH", "V"]),
+    ("Him", ["HH", "IH", "M"]),
+    ("who", ["HH", "UW"]),
+    ("raised", ["R", "EY", "Z", "D"]),
+    ("Jesus", ["JH", "IY", "Z", "AH", "S"]),
+    ("from", ["F", "R", "AH", "M"]),
+    ("the", ["DH", "AH"]),
+    ("dead", ["D", "EH", "D"]),
+]
+
+
+class PartialReading(unittest.TestCase):
+    """A reading that stops early is aligned to the start of the target; the
+    words after it are not_reached, never omissions, never scattered phones."""
+
+    def test_a_reading_that_stops_early_leaves_the_rest_not_reached(self):
+        result = align.score_reading(CAT, heard((0.1, "DH AH"), (0.3, "K AE T")), 0.6)
+        self.assertEqual(errors(result), [("the", "none"), ("cat", "none"), ("sat", "not_reached")])
+        sat = result["words"][2]
+        self.assertEqual(sat["expected_phonemes"], ["S", "AE", "T"])
+        self.assertEqual(sat["produced_phonemes"], [])
+        self.assertEqual(sat["accuracy"], 0)
+        self.assertFalse(sat["self_corrected"])
+
+    def test_the_accuracy_is_of_the_words_reached(self):
+        result = align.score_reading(CAT, heard((0.1, "DH AH"), (0.3, "K AE P")), 0.6)
+        self.assertEqual(errors(result), [("the", "none"), ("cat", "mispronunciation"), ("sat", "not_reached")])
+        self.assertEqual(result["accuracy"], 84)
+
+    def test_his_and_if_the_spirit_of_romans_8_11(self):
+        # What the model heard of his clear 'And if the Spirit' (run direct:2789e3c9...,
+        # 3.72 s): EH N D IH F OW S V EY. It scored 29 of 38 words omitted, the first
+        # four among them, and the nine phones scattered over later words.
+        spoken = heard((1.48, "EH"), (1.58, "N"), (1.64, "D"), (1.68, "IH"), (1.8, "F"),
+                       (1.92, "OW"), (2.04, "S"), (2.18, "V"), (2.24, "EY"))
+        result = align.score_reading(ROMANS_8_11, spoken, 3.72)
+        words = result["words"]
+        self.assertEqual([w["text"] for w in words if w["error"] != "insertion"], [w for w, _ in ROMANS_8_11])
+        self.assertEqual([w["error"] for w in words[:2]], ["none", "none"])
+        self.assertEqual(words[0]["produced_phonemes"], ["EH", "N", "D"])
+        self.assertEqual(words[1]["produced_phonemes"], ["IH", "F"])
+        first_unreached = [w["error"] for w in words].index("not_reached")
+        self.assertGreaterEqual(first_unreached, 4, "And, if, the, Spirit are what he read")
+        for w in words[first_unreached:]:
+            self.assertEqual((w["error"], w["produced_phonemes"], w["accuracy"]), ("not_reached", [], 0))
+        self.assertNotIn("omission", [w["error"] for w in words[:first_unreached]])
+        self.assertEqual(sum(len(w["produced_phonemes"]) for w in words), 9, "every phone he said is in the words he read")
+
+    def test_a_last_word_read_wrong_is_still_a_word_read(self):
+        result = align.score_reading(CAT, heard((0.1, "DH AH"), (0.3, "K AE T"), (0.6, "S AE P")), 1.0)
+        self.assertEqual(errors(result), [("the", "none"), ("cat", "none"), ("sat", "mispronunciation")])
+
+    def test_a_word_left_out_in_the_middle_is_still_an_omission(self):
+        words = CAT + [("on", ["AO", "N"])]
+        result = align.score_reading(words, heard((0.1, "DH AH"), (0.6, "S AE T"), (0.9, "AO N")), 1.2)
+        self.assertEqual([w["error"] for w in result["words"]], ["none", "omission", "none", "none"])
+
+    def test_nothing_heard_is_every_word_omitted_not_unreached(self):
+        result = align.score_reading(CAT, [], 0.5)
+        self.assertEqual([w["error"] for w in result["words"]], ["omission"] * 3)
+
 
 class ToArpabet(unittest.TestCase):
     def test_espeak_ipa_becomes_arpabet_without_stress_or_length(self):

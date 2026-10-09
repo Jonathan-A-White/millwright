@@ -54,7 +54,8 @@ mono, anything else PCM is converted) and answers `200` with a ReadingResult:
 `engine` `local`, one entry per target word in reading order plus one per added
 word, each with `expected_phonemes` and `produced_phonemes` in ARPAbet (IPA
 for a language other than English, see Greek below),
-`error` (`none`, `omission`, `insertion`, `mispronunciation`, `hesitation`),
+`error` (`none`, `omission`, `insertion`, `mispronunciation`, `hesitation`,
+`not_reached`),
 `accuracy` 0 to 100 and `self_corrected`; then the reading's `accuracy` and
 `seconds`. A bad request is a `400` with a plain line saying why; a failure of
 the scorer is a `500`. `GET /health` answers `200` once the model is loaded.
@@ -76,6 +77,11 @@ the scorer is a `500`. `GET /health` answers `200` once the model is loaded.
    `omission` when nothing was heard for it; `mispronunciation` when its
    distance is 1 or more (one far phone, or two near ones); `hesitation` when
    the gap after the word before it is longer than 0.8 s; otherwise `none`.
+   A reading may stop before the text does: the alignment is to the start of the
+   text, at the cut (a whole number of words, at least one) where the distance to
+   everything heard is least, and every word after the cut is `not_reached`
+   (`produced_phonemes` `[]`, accuracy 0), never an `omission` and never given a
+   stray phone. The reading's accuracy is then the mean over the words reached.
    Two or more phones between words are an attempt at the next word when
    close to it (it is then `self_corrected` if the final reading is closer),
    otherwise an `insertion`. Word accuracy is 100 × (1 − distance ÷ expected
@@ -113,6 +119,10 @@ scorer beside Azure's: tuning it against Azure is a later epic's work.
 
 ## Known limits
 
+- Where the reading stopped is the best fit of what the model heard, so a
+  last word the model barely heard may be `not_reached` where a careful ear
+  would call it misread; and a skipped last word is `not_reached`, not an
+  `omission`.
 - The model hears vowels loosely, so one vowel swap alone ("cut" for "cat") is
   not called a mispronunciation: the word's accuracy drops to 83 and
   `produced_phonemes` shows the vowel heard. Two near swaps, or one far
@@ -141,10 +151,13 @@ contrib/scorer/test.sh          # everything, the three fixture clips included (
 contrib/scorer/test.sh --pure   # the alignment and the HTTP face only, with any python3
 ```
 
-`fixtures/make.sh` remakes the three clips of "the cat sat on the mat" with
+`fixtures/make.sh` remakes the four clips of "the cat sat on the mat" with
 `espeak-ng -w`, offline: `clean.wav` (every word `none`), `cap.wav`
-(`mispronunciation` on "cat") and `no-the.wav` (the first "the" an
-`omission`). The mw gate never needs torch: `contrib/scorer_test.go` runs
+(`mispronunciation` on "cat"), `no-the.wav` (the first "the" an
+`omission`) and `partial.wav` (only "the cat sat on": the last two words
+`not_reached`). The clip that found the bug was the Governor's own voice and is
+not in the repo: `test_align.py`'s `PartialReading` holds the phones the model
+heard of it instead, by hand. The mw gate never needs torch: `contrib/scorer_test.go` runs
 `test.sh --pure`, and the whole of `test.sh` only where the venv is installed.
 `MW_SCORER_URL=http://127.0.0.1:8765 go test ./infrastructure/scorer/` scores
 `cap.wav` through mw's own client against the running unit.

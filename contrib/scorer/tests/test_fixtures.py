@@ -13,7 +13,7 @@ from mw_scorer import pipeline
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIXTURES = os.path.join(HERE, "..", "fixtures")
 TARGET = "the cat sat on the mat"
-ERRORS = {"none", "omission", "insertion", "mispronunciation", "hesitation"}
+ERRORS = {"none", "omission", "insertion", "mispronunciation", "hesitation", "not_reached"}
 
 
 def clip(name):
@@ -80,6 +80,14 @@ class Fixtures(unittest.TestCase):
         want = [(w, "omission" if i == 0 else "none") for i, w in enumerate(TARGET.split())]
         self.assertEqual(self.errors(result), want)
         self.assertEqual(result["words"][0]["produced_phonemes"], [])
+
+    def test_a_reading_that_stops_early_leaves_the_rest_not_reached(self):
+        result = self.score("partial.wav")
+        want = [(w, "none" if i < 4 else "not_reached") for i, w in enumerate(TARGET.split())]
+        self.assertEqual(self.errors(result), want)
+        for w in result["words"][4:]:
+            self.assertEqual((w["produced_phonemes"], w["accuracy"]), ([], 0))
+        self.assertGreaterEqual(result["accuracy"], 90)
 
     def test_a_target_with_punctuation_is_scored_by_its_words(self):
         result = self.scorer.score("The cat sat on the mat.", "en", clip("clean.wav"))
