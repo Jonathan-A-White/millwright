@@ -938,6 +938,14 @@ and is tried again by the next tick (the commit last built is kept in
 running `mw-view-follow.service` and says so in the line. A dry run does none of it. The command
 is stopped after five minutes, so the tick's unit allows ten.
 
+On the home the same look also keeps the formulas live (mw-gq6.314): bd pours
+the vault's `.beads/formulas`, so once the checkout is level with origin's `main`,
+`formulas/*.formula.json` that differ from the vault's copies are copied in and
+committed in the vault as `Install formulas from millwright <short sha>`, then
+pushed (a push that fails is left for the next `mw sync`). Copies already equal
+make no commit, and a vault with uncommitted changes under `.beads/formulas` is
+left alone, the line saying so. The way back is `git revert` of that vault commit.
+
 `mw dispatch` does the same look first (mw-gq6.184), once it holds the dispatch
 lock and before it syncs, so a host that dispatches and runs no Millhand tick
 keeps its `mw` level too; it prints the same `self-update:` line. A host that runs
@@ -3394,6 +3402,13 @@ transaction, and past WhatsOnChain's newest-100 history cap the Mayor is locked
 out. It names the key and the file and has no cure — the doctor never edits the
 config; a person adds `postern_channel = "direct"`. A host the vault's home file
 says is not home reads ok.
+
+**formulas** watches that the vault's `.beads/formulas` match the factory
+checkout's `formulas/`, on the home. A difference seen once is only remembered
+(the self-update installs it); it faults when the vault is still out of step
+once the checkout has moved to another commit, that is after more than one
+self-update, and names the formula files. It has no cure; a person looks at why
+the install did not run (`docs/formulas.md`).
 
 **age-key** watches the age key that opens the vault's `secrets.enc.yaml`
 (`~/.config/mw/age.key`, see *Keeping the factory's tokens*). On the home it

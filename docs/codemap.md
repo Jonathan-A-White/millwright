@@ -7,7 +7,7 @@ domain/(events): stdlib · application/: use cases/ports · infra/: adapters · 
 ## Ports
 
 | Port | Declared in | Real adapter | Fake |
-| --- | --- | --- | --- |
+|-|-|-|-|
 | `WorkTracker` | application/worktracker.go | infra/beads/ | apptest.FakeTracker |
 | TrackerNotes, SweepNotes, BeadGraph | application/{status,sweep}.go | same | same |
 | VaultFiles, TrackerSync, SyncHaltMarker | application/sync.go | infra/{vault/git,beads/sync}.go, infra/synchalt | apptest.Fake{VaultFiles,Tracker,SyncHaltMarker} |
@@ -28,7 +28,7 @@ domain/(events): stdlib · application/: use cases/ports · infra/: adapters · 
 | HostLoad, Cloud*, BenchmarkBook | application/hostload.go, application/benchmark.go | infra/{hostload,cloud,vault/{cloudbook,benchmarks}.go} | apptest.Fake{HostLoad,Cloud*,Benchmarks} |
 | TickLog, Notifier, HomeMoveHost, OldHome, VaultBirth, TrackerBirth | application/{millhandtick,homemove,init}.go | infra/{ticklog,notify/notify,homemove/homemove,vault/birth,beads/init}.go | apptest.FakeTickLog |
 | Landing, Checks, MergeSlot, Holding | application/landing.go | infra/rig/{landing,checks,slot}.go | none |
-| AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter | application/afterlanding.go, application/selfupdate.go, application/backendstage.go | infra/{rig/{afterlanding,built,backend},userunits}.go | features/{self_update,backend_swap}.feature |
+| AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter, FormulaInstaller | application/afterlanding.go, application/selfupdate.go, application/backendstage.go, application/formulainstall.go | infra/{rig/{afterlanding,built,backend},userunits,vault/formulas}.go | features/{self_update,backend_swap}.feature |
 | EventLog, BeadFeed, FollowCursors, ShipStates, SubscribeFiles, NudgeCursors, EventSpringer, EventController, HarnessCount | application/event*.go, status.go | infra/{eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go | apptest.Fake{EventLog,FollowCursors,Ship*,Tracker,Subscribe*} |
 | Postern, hands, Prompts | application/{postern*,hands,prompt}.go | infra/{postern,hands*,homemove} | apptest.Fake{Postern*,Cipher,Hands*,HomeMover,Prompts} |
 | Chain, StampQueue, StampStore, CommitNotes, RigHeads | application/chain.go, application/chainstamp.go, application/prove.go | infra/{bsv,stampqueue,chainlookup}, rig/worktree.go | apptest.Fake{Chain,StampQueue,Commit*,RigHeads} |
@@ -39,11 +39,11 @@ domain/(events): stdlib · application/: use cases/ports · infra/: adapters · 
 ## Use cases
 
 | Use case | File | Command | Feature |
-| --- | --- | --- | --- |
+|-|-|-|-|
 | File, Release, Retry | application/file.go, application/release.go, application/retry.go | mw file/release/retry - cmd/mw/file.go, cmd/mw/release.go, cmd/mw/retry.go | features/{file_plan,release,retry}.feature |
 | Show, Peek, Prove, StampHead | application/show.go, application/stamphead.go | mw show/peek/prove/stamp - cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go | features/{show,peek,prove,stamp}.feature |
 | Dispatch, Next, AfterLandingRun | application/dispatch.go, application/next.go, application/afterlandingrun.go | mw dispatch/next/after-landing - cmd/mw/dispatch.go, cmd/mw/next.go, cmd/mw/afterlanding.go | features/{dispatch,next,after_landing}.feature |
-| Tester | application/testerreport.go | mw tester report - cmd/mw/tester.go; [tester] toml | features/tester.feature |
+| Tester | application/testerreport.go | mw tester report - cmd/mw/tester.go | features/tester.feature |
 | Check, Status, CloudCheck, Brief | application/check.go, application/status.go, application/cloud.go, application/brief.go | mw check/status/cloud/brief - cmd/mw/check.go, cmd/mw/status.go, cmd/mw/cloud.go, cmd/mw/brief.go | features/{check,status,cloud,brief}.feature |
 | Sweep, Tidy, Sync, Nudge, Mail | application/sweep.go, application/tidy.go, application/sync.go, application/nudge.go, application/mail.go | mw sweep/tidy/sync/nudge/mail - cmd/mw/sweep.go, cmd/mw/tidy.go, cmd/mw/sync.go, cmd/mw/nudge.go, cmd/mw/mail.go | features/{sweep,tidy,sync,mail}.feature |
 | Home, HomeMove | application/home.go, application/homemove.go | mw home [move] - cmd/mw/home.go, cmd/mw/homemove.go | features/home.feature, docs/home-move.md |
@@ -60,6 +60,6 @@ domain/(events): stdlib · application/: use cases/ports · infra/: adapters · 
 | Prompt{Save,List,Show,Run}, Cards | application/prompt.go | mw prompt/card - cmd/mw/prompt.go, cmd/mw/card.go | features/{prompt,card}.feature |
 | Grist{Key,Grind,Send,Eval,Score,Runs,Stats} | application/grist.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go, application/gristroom.go | mw grist <sub> - cmd/mw/grist.go | features/{grist{,_send,_eval,_audio,_concurrent,_forward},scorer}.feature |
 
-cmd/mw/root.go: tree; cmd/mw/version.go
+cmd/mw/root.go, cmd/mw/version.go
 
-rig toml changelog_files: infra/rig/version.go writes domain/changelog.go note: public/changelog.json `[{version,date,story,kind,text}]`; CHANGELOG.md `## X.Y.Z`, _date_, `- New|Fixed: text`.
+changelog_files: infra/rig/version.go writes domain/changelog.go: public/changelog.json `[{version,date,story,kind,text}]`; CHANGELOG.md `## X.Y.Z`, _date_, `- New|Fixed: text`.

@@ -37,7 +37,7 @@ step asks for two more lines ahead of HOW TO CHECK IT: `Regression test:
 rig it can happen: fixed here, or filed as a [bug] with its id>`. The
 Builder reports the siblings it finds and the Mayor files them, as for any
 problem a Builder discovers. A vault whose copy of `tdd-feature` predates
-`kind` still pours, the plain way, until the Mayor installs the new copy.
+`kind` still pours, the plain way, until the vault's copy is installed.
 
 A Builder's session pours its story's formula at start of work:
 
@@ -53,20 +53,36 @@ each one as it's done — closing a step is what makes the next one ready.
 ## Installing formulas into the vault
 
 Formulas are searched from `<resolved-beads-dir>/formulas/` first (see
-`bd formula --help`). For the vault's own database that directory is
-`/root/millwright-vault/.beads/formulas/`. Installing a formula means
-copying its `.formula.json` file there — this is the Mayor's job, not a
-Builder's, and is not done by any story's own commit:
+`bd formula --help`). For the vault's own database that directory is the vault's
+`.beads/formulas/`, so a change landed in `formulas/` is live only once the
+vault's copy is level with it (mw-gq6.314; before that nothing installed them and
+the copies sat at the 2026-09-18 originals).
+
+The home installs them itself. When its factory checkout is level with origin's
+`main` (the self-update, `application/selfupdate.go`, run by `mw millhand tick`
+and `mw dispatch`), any `formulas/*.formula.json` that is missing from the vault
+or differs is copied into `.beads/formulas/`, committed in the vault as
+`Install formulas from millwright <short sha>` (the vault's own commit, authored
+`mw@<host>`) and pushed. Nothing is committed when the copies are equal. If the
+vault has uncommitted changes under `.beads/formulas`, it is left alone and the
+tick's line says so; a host that is not home never installs. `mw doctor`'s
+**formulas** check faults when the vault's copies are still out of step after
+more than one self-update.
+
+The way back is `git revert <that vault commit>` in the vault. The hand step
+below is for when the self-update cannot run (a build that fails does not stop
+the install, but a host with no `[after_landing]` command for `millwright` runs
+no self-update at all):
 
 ```sh
-mkdir -p /root/millwright-vault/.beads/formulas
-cp formulas/tdd-feature.formula.json formulas/chore.formula.json \
-   formulas/tester.formula.json /root/millwright-vault/.beads/formulas/
+cp formulas/*.formula.json <vault>/.beads/formulas/
+git -C <vault> add .beads/formulas
+git -C <vault> commit -m "Install formulas from millwright <short sha>"
 ```
 
-Verify with `bd -C /root/millwright-vault formula list`, which should show
-each by name. `tester` is the Tester trial's (README, "The Tester trial"): a
-story it works commits nothing.
+Verify with `bd -C <vault> formula list`, which should show each by name.
+`tester` is the Tester trial's (README, "The Tester trial"): a story it works
+commits nothing.
 
 ## Verifying a formula
 
@@ -74,4 +90,4 @@ story it works commits nothing.
 under `formulas/` end to end — listed, cooked, poured with only its first
 step ready — against a throwaway beads database in a temp dir. It never
 touches the vault. Run it after adding or changing a formula, before
-asking the Mayor to install it.
+landing it.
