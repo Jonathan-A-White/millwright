@@ -73,6 +73,11 @@ type Nudge struct {
 	// halted.
 	SyncHalt SyncHaltMarker
 
+	// CloseOuts is where the close-outs running on this host are read from: a
+	// story whose close-out is running is not quiet, however long it has been
+	// claimed. A nil CloseOuts leaves every claimed story judged by its age.
+	CloseOuts CloseOutMarks
+
 	// SyncMode is how this host's beads are synced. On a host that reads the
 	// one database every host shares (backup, shared) another host's note of
 	// its last sync is read live, not off this host's own copy, so this
@@ -121,9 +126,15 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 
 	var clauses []NudgeClause
 	now := s.now()
+	closing := closingOut(ctx, n.CloseOuts)
 	for _, detail := range work.RunningOn(n.Host) {
 		since := detail.ClaimStarted()
 		if detail.Hitl() || since.IsZero() {
+			continue
+		}
+		// A close-out that is running — landing the story, or waiting its turn
+		// or for the host to calm — is the story being worked, not a quiet one.
+		if _, running := closing[detail.Story.ID]; running {
 			continue
 		}
 		rs, err := s.running(ctx, detail)

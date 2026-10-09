@@ -249,6 +249,11 @@ type Next struct {
 	LoadBound time.Duration
 	LoadWait  func(ctx context.Context, d time.Duration) error
 
+	// CloseOuts is where this close-out says it is running, so that mw status
+	// and the quiet alarm do not take the story for quiet while it waits its
+	// turn or for the host to calm. A nil CloseOuts leaves no mark.
+	CloseOuts CloseOutMarks
+
 	// Seat is whose ledger the line is written in, Host is which host this is,
 	// and Rigs is where each rig is checked out.
 	Seat string
@@ -394,6 +399,9 @@ type closeOut struct {
 	// landingError says this run kept the whole error of a failed landing in the
 	// vault, so the close-out commits it.
 	landingError bool
+
+	// began is when the close-out began, as its mark says.
+	began time.Time
 }
 
 // attempt is which attempt of the story this close-out is closing: what the
@@ -417,7 +425,13 @@ func (n Next) Run(ctx context.Context, storyID string) (NextReport, error) {
 	// queue and the rig's tests that follow can outlast bd's five-minute TTL, and
 	// a lapsed lease is what mw sweep marks run=stuck (mw-gq6.138).
 	release := n.holdLease(ctx, storyID)
-	report, err := n.closeOut(ctx, storyID)
+	// Say the close-out is running, so that mw status and the quiet alarm do not
+	// take the story for quiet while it waits its turn or for the host to calm.
+	began := n.now()
+	n.markCloseOut(ctx, storyID, began, false)
+	report, err := n.closeOut(ctx, storyID, began)
+	// Cleared before the session is closed below, which may hang this process up.
+	n.clearCloseOut(storyID)
 	report.Notes = append(report.Notes, release()...)
 	n.print(report.String())
 	n.closeSession(ctx, report)
@@ -525,7 +539,7 @@ func (n Next) wait(ctx context.Context, d time.Duration) error {
 }
 
 // closeOut is Run without the printing.
-func (n Next) closeOut(ctx context.Context, storyID string) (NextReport, error) {
+func (n Next) closeOut(ctx context.Context, storyID string, began time.Time) (NextReport, error) {
 	report := NextReport{StoryID: storyID, Host: n.Host}
 	switch {
 	case n.Tracker == nil || n.Vault == nil || n.Worktrees == nil || n.Landing == nil || n.Checks == nil || n.Slot == nil:
@@ -565,6 +579,7 @@ func (n Next) closeOut(ctx context.Context, storyID string) (NextReport, error) 
 		worktree: WorktreeDir(rigDir, storyID),
 		branch:   StoryBranch(storyID),
 		target:   path.Branch,
+		began:    began,
 	}
 	report.Target = c.target
 

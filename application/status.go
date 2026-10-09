@@ -202,6 +202,11 @@ type Status struct {
 	IdleAfter time.Duration
 	Harness   HarnessCount
 
+	// CloseOuts, when set, is where the close-outs running on this host are
+	// read from, so that a story being closed out says so beside it. Nil
+	// leaves the line out.
+	CloseOuts CloseOutMarks
+
 	// Network, when set, is asked for the NETWORK line: metered or not.
 	Network NetworkReader
 
@@ -254,6 +259,10 @@ type RunningStory struct {
 	// FormulaSteps is how many steps of the story's poured formula are still
 	// open. Zero means either no formula was poured, or every step is closed.
 	FormulaSteps int
+	// CloseOut is the close-out running on this host for the story, nil when
+	// none is. Now is when it was read, to say how long it has run.
+	CloseOut *CloseOutMark
+	Now      time.Time
 }
 
 // Stopped reports whether this story's session is not to be trusted as
@@ -441,6 +450,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		return report, fmt.Errorf("reading what is in hand: %w", err)
 	}
 
+	closing := closingOut(ctx, s.CloseOuts)
 	for _, detail := range work.RunningOn(s.Host) {
 		if detail.Hitl() {
 			// The Mayor works it beside the Governor: there is no session of its
@@ -451,6 +461,9 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		rs, err := s.running(ctx, detail)
 		if err != nil {
 			return report, err
+		}
+		if mark, ok := closing[detail.Story.ID]; ok {
+			rs.CloseOut, rs.Now = &mark, s.now()
 		}
 		report.Running = append(report.Running, rs)
 	}
@@ -1210,6 +1223,9 @@ func readyOrClaimed(d StoryDetail) string {
 // a formula step still open that will refuse to let it close out.
 func (r RunningStory) write(b *strings.Builder) {
 	writeStory(b, r.Detail, "session "+r.Session)
+	if r.CloseOut != nil {
+		clip(b, "    "+r.CloseOut.since(r.Now))
+	}
 	if r.Stopped() {
 		clip(b, fmt.Sprintf("    NOT RUNNING: run=%s", r.Run))
 	}

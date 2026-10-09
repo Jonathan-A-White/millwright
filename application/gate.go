@@ -51,13 +51,16 @@ func (n Next) readLoad(ctx context.Context) (LoadReading, bool) {
 // calmed waits, up to the bound, for the host to stop being busy, and says so as
 // it does. It returns the last reading it took, and whether the bound ran out
 // with the host still busy. The gate runs after it either way.
-func (n Next) calmed(ctx context.Context, report *NextReport, what string) (reading LoadReading, gaveUp bool) {
+func (n Next) calmed(ctx context.Context, report *NextReport, c *closeOut, what string) (reading LoadReading, gaveUp bool) {
 	reading, ok := n.readLoad(ctx)
 	if !ok || !reading.Busy() {
 		return reading, false
 	}
 	n.print(fmt.Sprintf("  wait    %s is at load %.1f of %d cores: waiting up to %s for it to calm before %s\n",
 		n.Host, reading.Load, reading.Cores, n.loadBound(), what))
+	// The close-out says it is waiting, and says it is running again once it stops.
+	n.markCloseOut(ctx, c.id, c.began, true)
+	defer n.markCloseOut(ctx, c.id, c.began, false)
 	var waited time.Duration
 	for reading.Busy() {
 		if waited >= n.loadBound() {
@@ -97,7 +100,7 @@ type gated struct {
 // second failure counts. A run that fails on a calm host counts at once. A
 // command that would not start is not a load fault and is never run again.
 func (n Next) gate(ctx context.Context, c *closeOut, report *NextReport, dir, what string) gated {
-	before, gaveUp := n.calmed(ctx, report, what)
+	before, gaveUp := n.calmed(ctx, report, c, what)
 	checked, err := n.Checks.Run(ctx, c.path.Rig, dir)
 	if err != nil || checked.NotRun || checked.Passed {
 		return gated{Checked: checked, Err: err}
@@ -113,7 +116,7 @@ func (n Next) gate(ctx context.Context, c *closeOut, report *NextReport, dir, wh
 	}
 	n.print(fmt.Sprintf("  retry   %s failed while %s was at load %.1f of %d cores: running them once more when it calms\n",
 		what, n.Host, busy.Load, busy.Cores))
-	n.calmed(ctx, report, what+" again")
+	n.calmed(ctx, report, c, what+" again")
 	again, err := n.Checks.Run(ctx, c.path.Rig, dir)
 	said := fmt.Sprintf("%s ran twice: the first run failed while %s was at load %.1f of %d cores, the second run %s",
 		what, n.Host, busy.Load, busy.Cores, secondRun(again, err))

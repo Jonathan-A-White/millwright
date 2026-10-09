@@ -13,9 +13,9 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 | VaultFiles, TrackerSync | application/sync.go | `infra/{vault/git,beads/sync}.go` | apptest.Fake{VaultFiles,Tracker} |
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | `infrastructure/beads/mail.go` | apptest.FakeMailbox |
 | EpicRules | application/epicrules.go | `infrastructure/vault/epicrules.go` | apptest.FakeEpicRules |
-| Vault | application/seatboot.go | infra/vault | application/seatboot_test.go |
+| Vault | application/seatboot.go | infra/vault | seatboot_test.go |
 | Runner | application/runner.go | infra/tmux | apptest.FakeRunner |
-| Harness | application/harness.go | infra/claude | application/seatboot_test.go |
+| Harness | application/harness.go | infra/claude | seatboot_test.go |
 | SeatFiles, Windows, SeatHarness, ActingFile | application/seatup.go, application/seathandover.go | infra/{vault/{seat,reaplog},tmux/window,claude/claude}.go | apptest.Fake{Windows,ActingFile} |
 | Transcripts{,Tail,Replies}, PeekRemote | application/seatcontext.go, application/peek.go | infra/{claude,peekremote} | apptest/fakepeek.go |
 | Reap{Terminal,Log,Armer} | application/seatreap.go | infra/{tmux/reap,vault/reaplog,reaper/arm}.go | apptest.Fake{Windows,ReapArmer} |
@@ -24,10 +24,10 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 | Network{Probe,Store,Reader} | application/network.go | infra/network | apptest.FakeNetwork* |
 | TickLog | application/millhandtick.go | infra/ticklog | apptest.FakeTickLog |
 | CardLog | application/card.go | infra/cardlog | apptest.FakeCardLog |
-| Worktrees | application/worktrees.go | `infrastructure/rig/worktree.go` | application/dispatch_test.go |
+| Worktrees | application/worktrees.go | `infrastructure/rig/worktree.go` | dispatch_test.go |
 | HostLoad | application/hostload.go | infra/hostload | apptest.FakeHostLoad |
-| SyncHaltMarker | application/sync.go | infra/synchalt | apptest.FakeSyncHaltMarker |
-| Notifier, HomeMoveHost, OldHome, VaultBirth, TrackerBirth | application/{millhandtick,homemove,init}.go | infra/{notify/notify,homemove/homemove,vault/birth,beads/init}.go | none |
+| SyncHaltMarker, CloseOutMarks | application/sync.go, application/closeout.go | infra/{synchalt,closeout} | apptest.Fake*Mark* |
+| Notifier, HomeMoveHost, OldHome, {Vault,Tracker}Birth | application/{millhandtick,homemove,init}.go | infra/{notify/notify,homemove/homemove,vault/birth,beads/init}.go | none |
 | Landing, Checks, MergeSlot, Holding | application/landing.go | infra/rig/{landing,checks,slot}.go | none |
 | AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter | application/afterlanding.go, application/selfupdate.go, application/backendstage.go | infra/{rig/{afterlanding,built,backend},userunits}.go | features/{self_update,backend_swap}.feature |
 | EventLog, BeadFeed, FollowCursors, ShipStates, SubscribeFiles, NudgeCursors, EventSpringer, EventController, HarnessCount | application/event*.go, status.go | infra/{eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go | apptest.Fake{EventLog,FollowCursors,Ship*,Tracker,Subscribe*,Nudge*} |
