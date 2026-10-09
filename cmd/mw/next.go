@@ -201,6 +201,7 @@ func newNextCmd() *cobra.Command {
 				Backend:      hostBackend(gateway, files, host, rigs, cmd.ErrOrStderr()),
 				Units:        userunits.Systemctl{},
 				Stamps:       stamps,
+				CloseOuts:    hostCloseOuts(),
 			}.Run(cmd.Context(), args[0])
 			return err
 		},

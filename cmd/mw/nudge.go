@@ -25,6 +25,8 @@ func newNudgeCmd() *cobra.Command {
 			"claim, is not an alarm. On a host the vault's home file says is not home, it prints nothing.\n" +
 			"A need that has waited on the Mayor more than 30 minutes (the ones mw status lists under\n" +
 			"WAITING ON THE MAYOR) is a clause too, keyed mayor.<bead>.\n" +
+			"A story whose close-out (mw next) is running on this host is not quiet and is left out, however\n" +
+			"long it has been claimed: mw status shows it as closing out, and as waiting for calm when it is.\n" +
 			"When this host's own sync is halted, the other hosts' ages are read off notes\n" +
 			"this host cannot currently refresh, so they are left out in favour of one clause naming\n" +
 			"this host's own halt instead — unless beads_sync is backup or shared, where every host's note\n" +
@@ -65,6 +67,7 @@ func newNudgeCmd() *cobra.Command {
 				Host:       host,
 				Home:       mwVault(dir, host),
 				SyncHalt:   hostSyncHalt(),
+				CloseOuts:  hostCloseOuts(),
 				SyncMode:   setting.Mode(),
 				NudgeAfter: time.Duration(after) * time.Minute,
 				SyncStale:  time.Duration(stale) * time.Minute,

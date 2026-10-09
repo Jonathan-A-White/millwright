@@ -7,6 +7,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
+	"github.com/Jonathan-A-White/millwright/infrastructure/closeout"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostlock"
@@ -50,6 +51,16 @@ var DispatchStateDir = filepath.Join(".local", "state", "mw-dispatch")
 // home directory: shared between mw dispatch and mw millhand tick, and read
 // straight back by mw status here. Nothing in it is synced anywhere.
 var SyncHaltStateDir = filepath.Join(".local", "state", "mw")
+
+// hostCloseOuts is where close-outs running on this host leave their marks,
+// kept under SyncHaltStateDir. A host with no home directory keeps none.
+func hostCloseOuts() application.CloseOutMarks {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return nil
+	}
+	return closeout.New(filepath.Join(home, SyncHaltStateDir, closeout.Dir))
+}
 
 // hostSyncHalt is this host's own mark of a halted sync, kept in
 // SyncHaltStateDir. A host with no home directory keeps none.
