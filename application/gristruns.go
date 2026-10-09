@@ -88,6 +88,41 @@ type GristRunTiming struct {
 	Scorers        map[string]float64 `json:"scorers,omitempty"`
 	HarnessSeconds float64            `json:"harness_seconds"`
 	Seconds        float64            `json:"seconds"`
+	// QueuedSeconds is how long the grist waited for the mill (sent to
+	// received), when Sent is known, and RunSeconds how long the mill took
+	// (received to answered), the same as Seconds: the pair the room check
+	// judges a tutor's wait by (mw-t0z3fu.4). Runs kept before they were
+	// written leave both out; EndToEnd reads them from the times.
+	QueuedSeconds *float64 `json:"queued_s,omitempty"`
+	RunSeconds    float64  `json:"run_s"`
+}
+
+// withWaits fills QueuedSeconds and RunSeconds from the times already in t.
+func (t GristRunTiming) withWaits() GristRunTiming {
+	if t.Sent != nil {
+		queued := t.Received.Sub(*t.Sent).Seconds()
+		t.QueuedSeconds = &queued
+	}
+	t.RunSeconds = t.Seconds
+	return t
+}
+
+// EndToEnd is how long the one who sent the grist waited for its answer:
+// queued_s plus run_s. A run kept before those were written is read from its
+// times, and one with no send time counts no wait before the mill took it.
+func (t GristRunTiming) EndToEnd() float64 {
+	queued := 0.0
+	switch {
+	case t.QueuedSeconds != nil:
+		queued = *t.QueuedSeconds
+	case t.Sent != nil:
+		queued = t.Received.Sub(*t.Sent).Seconds()
+	}
+	run := t.RunSeconds
+	if run == 0 {
+		run = t.Seconds
+	}
+	return queued + run
 }
 
 // GristRunLine is one run as mw grist runs lists it.

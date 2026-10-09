@@ -107,6 +107,7 @@ Feature: mw grist grind takes a recording, scores it, and keeps every grind's ra
     And the phone sends a "cairn" "reading" grist, version "1.1", of "the cat sat" read aloud in a webm recording
     When the mill grinds
     Then the run's timing.json has when the grist was sent, so the queue wait, and the seconds of "local" and "azure"
+    And the run's timing.json has queued_s and run_s, the seconds it waited and the seconds it ran (mw-t0z3fu.4)
 
   Scenario: A grind that fails is kept too
     Given the grind's session ends in an error

@@ -230,7 +230,7 @@ func (g GristGrind) keepRun(ctx context.Context, w *gristWork) {
 			ScoringSeconds: w.scoringSeconds, Scorers: w.scorerSeconds,
 			HarnessSeconds: w.answered.Sub(w.harnessStarted).Seconds(),
 			Seconds:        w.answered.Sub(w.received).Seconds(),
-		},
+		}.withWaits(),
 	}
 	for _, clip := range w.clips {
 		run.Attachments = append(run.Attachments, GristRunAttachment{Ext: posternAttachmentExtension(clip.mime), Data: clip.data})
