@@ -1,0 +1,461 @@
+#!/bin/bash
+# Make and unmake one Boost on Vultr: a High Performance 8 vCPU / 16 GB box that
+# boots through cloud-init into contrib/boost-bootstrap.sh, and joins the
+# factory's WireGuard network as a peer of the hub. Run on the home, which holds
+# the age key that opens the vault's secrets.
+#
+#   contrib/vultr-boost up      [--yes] [--dry-run]
+#   contrib/vultr-boost down    [--yes] [--dry-run]
+#   contrib/vultr-boost status
+#   contrib/vultr-boost --help
+#
+# up      keys the box (hosts/vultr/wg.key.age, once), enrols its public key on the
+#         hub over ssh (the hub's wg0.conf is backed up first, and the way back is
+#         printed), then terraform apply makes the box. Terraform asks you to
+#         confirm unless --yes is given. A second up changes nothing it need not.
+# down    terraform destroy removes the box, then the peer comes off the hub (again
+#         backed up first). The keys stay in the vault for the next up.
+# status  the box's state (from the state in the vault and Vultr's API) and what it
+#         costs; with no box, the price one would cost.
+# --dry-run prints every step and what it would run, and changes nothing.
+#
+# Where things live. The terraform code is contrib/terraform/vultr-boost. The
+# settings (region, the hub's endpoint, the beads host, ...) are the tfvars file
+# hosts/vultr/vultr-boost.tfvars in the private vault; docs/vultr-boost.md lists
+# them. Beside it the vault keeps the box's WireGuard key (wg.key.age, wg.pub) and
+# terraform's state (terraform.tfstate.age), both encrypted with age to the
+# recipient of the home's key and committed. The tokens are in `mw secrets`:
+#   vultr_api_token (required)   boost_github_token, boost_claude_token,
+#   boost_beads_password (each optional: the box lacks what is not kept)
+#
+# No secret is put in a command line, a file in the clear or this script's output:
+# tokens go to terraform in its environment (TF_VAR_*), to curl as a config on its
+# stdin. Terraform's state lives only in a private directory on a tmpfs (memory)
+# for the length of one run, and is encrypted back into the vault before it goes.
+#
+# Settings, all overridable:
+#   MW_VAULT             the vault (else the `vault` key of ~/.config/mw/config.toml)
+#   MW_AGE_KEY_FILE      the age key (~/.config/mw/age.key)
+#   VULTR_BOOST_RUN      a tmpfs directory for the run's private files ($XDG_RUNTIME_DIR, else /dev/shm)
+#   VULTR_BOOST_HUB_SSH  where to ssh to change the hub (root@ the host of wg_endpoint)
+#   VULTR_BOOST_HUB_ENROL  the hub's wg-enrol command (wg-enrol)
+
+set -eu
+set -o pipefail
+
+HERE=$(cd "$(dirname "$0")" && pwd)
+TFDIR=${VULTR_BOOST_TFDIR:-$HERE/terraform/vultr-boost}
+API=https://api.vultr.com/v2
+DRY=0
+YES=0
+CMD=""
+STEPS=0
+N=0
+
+die() {
+	echo "vultr-boost: $*" >&2
+	exit 1
+}
+
+usage() {
+	cat <<'EOF'
+Usage: vultr-boost up      [--yes] [--dry-run]
+       vultr-boost down    [--yes] [--dry-run]
+       vultr-boost status
+
+up makes the Boost box on Vultr and enrols it on the WireGuard hub; down destroys
+it and removes the peer; status prints its state and cost. --yes passes
+-auto-approve to terraform (otherwise terraform asks); --dry-run prints every step
+and runs none. Settings live in the vault's hosts/vultr/vultr-boost.tfvars and
+tokens in `mw secrets`; see docs/vultr-boost.md.
+EOF
+}
+
+while [ $# -gt 0 ]; do
+	case $1 in
+	up | down | status)
+		[ -z "$CMD" ] || die "one command at a time: $CMD and $1"
+		CMD=$1
+		;;
+	--yes | -y) YES=1 ;;
+	--dry-run) DRY=1 ;;
+	--help | -h)
+		usage
+		exit 0
+		;;
+	*)
+		echo "vultr-boost: unknown argument: $1" >&2
+		usage >&2
+		exit 2
+		;;
+	esac
+	shift
+done
+[ -n "$CMD" ] || {
+	usage >&2
+	exit 2
+}
+
+# A key of the root table of mw's config file, as mail-notify and mw-health read it.
+config_key() {
+	[ -r "$HOME/.config/mw/config.toml" ] || return 0
+	local v
+	v=$(sed -n "/^[[:space:]]*\\[/q; s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$HOME/.config/mw/config.toml" | head -n 1)
+	case $v in
+	\"*) v=${v#\"} v=${v%%\"*} ;;
+	\'*) v=${v#\'} v=${v%%\'*} ;;
+	*) v=${v%%#*} v=${v%"${v##*[![:space:]]}"} ;;
+	esac
+	echo "$v"
+}
+
+VAULT=${MW_VAULT:-$(config_key vault)}
+if [ -z "$VAULT" ] || [ ! -d "$VAULT" ]; then
+	die "no vault: set MW_VAULT, or \`vault = \"...\"\` in ~/.config/mw/config.toml"
+fi
+HOSTDIR=$VAULT/hosts/vultr
+TFVARS=$HOSTDIR/vultr-boost.tfvars
+STATE_AGE=$HOSTDIR/terraform.tfstate.age
+KEY_AGE=$HOSTDIR/wg.key.age
+PUB_FILE=$HOSTDIR/wg.pub
+AGE_KEY=${MW_AGE_KEY_FILE:-$(config_key age_key_file)}
+AGE_KEY=${AGE_KEY:-$HOME/.config/mw/age.key}
+RUNBASE=${VULTR_BOOST_RUN:-${XDG_RUNTIME_DIR:-/dev/shm}}
+ENROL=${VULTR_BOOST_HUB_ENROL:-wg-enrol}
+
+# tfvar NAME: the string value of NAME = "value" in the tfvars file (empty if absent).
+tfvar() {
+	[ -r "$TFVARS" ] || return 0
+	sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" "$TFVARS" | head -n 1
+}
+
+NAME=$(tfvar name)
+NAME=${NAME:-cloud1}
+ENDPOINT=$(tfvar wg_endpoint)
+HUB_SSH=${VULTR_BOOST_HUB_SSH:-root@${ENDPOINT%:*}}
+
+step() {
+	N=$((N + 1))
+	echo "==> [$N/$STEPS] $1"
+}
+
+would() { echo "    would: $*"; }
+
+need() { # tool...: each on PATH, or die naming the first that is not
+	local t
+	for t in "$@"; do
+		command -v "$t" >/dev/null 2>&1 || die "$t is not installed (needed to $CMD)"
+	done
+}
+
+hubssh() { # remote command string
+	ssh -o BatchMode=yes -o ConnectTimeout=15 "$HUB_SSH" "$1"
+}
+
+# --- the dry run: every step, none run ----------------------------------------
+plan_up() {
+	STEPS=7
+	echo "vultr-boost up --dry-run: nothing below is run"
+	step "read: settings $TFVARS, tokens vultr_api_token (and boost_github_token, boost_claude_token, boost_beads_password when kept) with mw secrets get"
+	would "refuse if vultr_api_token, region, wg_endpoint or beads_host is missing"
+	step "state: open $STATE_AGE with age into a private directory under $RUNBASE (a tmpfs); removed on exit"
+	step "wireguard: a key for the box, once: wg genkey, kept encrypted in $KEY_AGE, public half in $PUB_FILE"
+	step "ssh $HUB_SSH: copy /etc/wireguard/wg0.conf to a dated backup, then $ENROL $NAME <the box's public key>"
+	would "print the backup's path and the way back (ssh $HUB_SSH '$ENROL --remove $NAME')"
+	step "terraform -chdir=$TFDIR init, then apply -state=<private dir>/terraform.tfstate -var-file=$TFVARS (tokens in TF_VAR_* only)"
+	would "ask to confirm, or pass -auto-approve with --yes; this is where the box starts to cost money"
+	step "state: encrypt it back to $STATE_AGE with age, commit hosts/vultr in the vault, remove the private directory"
+}
+
+plan_down() {
+	STEPS=5
+	echo "vultr-boost down --dry-run: nothing below is run"
+	step "read: settings $TFVARS, token vultr_api_token with mw secrets get"
+	step "state: open $STATE_AGE with age into a private directory under $RUNBASE (a tmpfs); removed on exit"
+	step "terraform -chdir=$TFDIR destroy -state=<private dir>/terraform.tfstate -var-file=$TFVARS (-auto-approve with --yes)"
+	step "ssh $HUB_SSH: copy /etc/wireguard/wg0.conf to a dated backup, then $ENROL --remove $NAME"
+	step "state: encrypt it back to $STATE_AGE with age, commit hosts/vultr in the vault, remove the private directory"
+}
+
+if [ "$DRY" = 1 ]; then
+	case $CMD in
+	up) plan_up ;;
+	down) plan_down ;;
+	status)
+		STEPS=2
+		echo "vultr-boost status --dry-run: nothing below is run"
+		step "state: open $STATE_AGE with age (read only) and read the box's id from it"
+		step "curl $API/instances/<id> with the token on stdin, and $API/plans for the price"
+		;;
+	esac
+	exit 0
+fi
+
+# --- the private directory ----------------------------------------------------
+PRIV=""
+cleanup() {
+	[ -z "$PRIV" ] || rm -rf "$PRIV"
+	PRIV=""
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+
+open_priv() {
+	[ -d "$RUNBASE" ] || die "$RUNBASE is not a directory: set VULTR_BOOST_RUN to a tmpfs directory (state is kept only in memory while terraform runs)"
+	PRIV=$(mktemp -d "$RUNBASE/vultr-boost.XXXXXX")
+	chmod 700 "$PRIV"
+}
+
+RECIPIENT=""
+age_recipient() {
+	[ -n "$RECIPIENT" ] || RECIPIENT=$(age-keygen -y "$AGE_KEY") || die "could not read the recipient from $AGE_KEY"
+	echo "$RECIPIENT"
+}
+
+# open_state: the vault's encrypted state, as a plain file in the private directory (if any).
+open_state() {
+	[ -r "$AGE_KEY" ] || die "no age key at $AGE_KEY: this runs on the home, which holds it (docs/secrets.md)"
+	open_priv
+	if [ -f "$STATE_AGE" ]; then
+		age -d -i "$AGE_KEY" "$STATE_AGE" >"$PRIV/terraform.tfstate" || die "could not decrypt $STATE_AGE with $AGE_KEY"
+	fi
+}
+
+# seal_state: the private state back into the vault, encrypted, and committed.
+seal_state() {
+	local new
+	if [ -s "$PRIV/terraform.tfstate" ]; then
+		new=$STATE_AGE.new
+		age -r "$(age_recipient)" -o "$new" <"$PRIV/terraform.tfstate" || die "could not encrypt the state"
+		mv "$new" "$STATE_AGE"
+	fi
+	commit_vault "vultr-boost: $CMD"
+}
+
+commit_vault() {
+	local files=() f
+	for f in "$STATE_AGE" "$KEY_AGE" "$PUB_FILE"; do
+		[ -f "$f" ] && files+=("$f")
+	done
+	[ ${#files[@]} -gt 0 ] || return 0
+	if [ -z "$(git -C "$VAULT" status --porcelain -- "${files[@]}")" ]; then
+		return 0
+	fi
+	git -C "$VAULT" add -- "${files[@]}" &&
+		git -C "$VAULT" commit -q -m "$1" -- "${files[@]}" ||
+		echo "vultr-boost: could not commit hosts/vultr in the vault; the files are there, commit them by hand" >&2
+}
+
+secret() { # name: the token kept under name; fails when none is kept
+	mw secrets get "$1"
+}
+
+tf() { # terraform arguments: run in the tokens' environment, never their command line
+	(
+		export TF_VAR_vultr_api_key=$VULTR_KEY TF_VAR_wg_address=${WG_ADDRESS:-} TF_VAR_wg_hub_pubkey=${HUB_PUBKEY:-} \
+			TF_VAR_wg_private_key=${WG_PRIVATE:-} TF_VAR_github_token=${GITHUB_TOKEN:-} \
+			TF_VAR_claude_token=${CLAUDE_TOKEN:-} TF_VAR_beads_password=${BEADS_PASSWORD:-}
+		exec terraform -chdir="$TFDIR" "$@"
+	)
+}
+
+load_settings() {
+	[ -f "$TFVARS" ] || die "no settings: write $TFVARS (docs/vultr-boost.md lists them)"
+	local k
+	for k in region wg_endpoint beads_host; do
+		[ -n "$(tfvar $k)" ] || die "$TFVARS has no $k = \"...\" line"
+	done
+	case $NAME in
+	*[!a-z0-9-]*) die "name \"$NAME\" in $TFVARS must match [a-z0-9-]+ (what wg-enrol accepts)" ;;
+	esac
+}
+
+load_token() { # the Vultr token, required
+	VULTR_KEY=$(secret vultr_api_token) || die "no vultr_api_token kept: mw secrets put vultr_api_token < token.txt (docs/secrets.md)"
+	[ -n "$VULTR_KEY" ] || die "vultr_api_token is empty"
+}
+
+kept=""
+load_optional_tokens() {
+	kept=$(mw secrets list 2>/dev/null) || kept=""
+	GITHUB_TOKEN="" CLAUDE_TOKEN="" BEADS_PASSWORD=""
+	if echo "$kept" | grep -qx boost_github_token; then GITHUB_TOKEN=$(secret boost_github_token); else echo "    note: no boost_github_token kept; the box cannot clone the vault or rigs"; fi
+	if echo "$kept" | grep -qx boost_claude_token; then CLAUDE_TOKEN=$(secret boost_claude_token); else echo "    note: no boost_claude_token kept; the box has no Claude login"; fi
+	if echo "$kept" | grep -qx boost_beads_password; then BEADS_PASSWORD=$(secret boost_beads_password); fi
+}
+
+confirm_args() {
+	if [ "$YES" = 1 ]; then echo "-auto-approve"; fi
+}
+
+# --- up -----------------------------------------------------------------------
+do_up() {
+	STEPS=6
+	need mw terraform ssh age age-keygen wg git
+	load_settings
+	load_token
+	step "read: settings and tokens"
+	load_optional_tokens
+
+	step "state: open the vault's"
+	open_state
+
+	step "wireguard: the box's key"
+	mkdir -p "$HOSTDIR"
+	if [ -f "$KEY_AGE" ]; then
+		WG_PRIVATE=$(age -d -i "$AGE_KEY" "$KEY_AGE") || die "could not decrypt $KEY_AGE"
+		echo "    skip: the key is already kept"
+	else
+		WG_PRIVATE=$(wg genkey)
+		printf '%s\n' "$WG_PRIVATE" | age -r "$(age_recipient)" -o "$KEY_AGE" || die "could not encrypt the key"
+		echo "    made: a new key, kept encrypted in hosts/vultr/wg.key.age"
+	fi
+	WG_PUBLIC=$(printf '%s\n' "$WG_PRIVATE" | wg pubkey)
+	printf '%s\n' "$WG_PUBLIC" >"$PUB_FILE"
+	commit_vault "vultr-boost: key for $NAME"
+
+	step "hub: enrol $NAME on $HUB_SSH"
+	local remote out backup
+	remote="set -e; f=/etc/wireguard/wg0.conf; if grep -q '^# peer $NAME (enrolled' \"\$f\"; then echo backup:none; else b=\$f.bak-\$(date +%Y%m%d%H%M%S); cp -p \"\$f\" \"\$b\"; echo backup:\$b; fi; $ENROL $NAME $WG_PUBLIC"
+	out=$(hubssh "$remote") || die "could not enrol $NAME on the hub ($HUB_SSH); the box was not made"
+	backup=$(echo "$out" | sed -n 's/^backup://p' | head -n 1)
+	WG_ADDRESS=$(echo "$out" | sed -n 's/^Address = \([0-9.]*\)\/.*/\1/p' | head -n 1)
+	HUB_PUBKEY=$(echo "$out" | awk '/^\[Peer\]/ { p = 1 } p && /^PublicKey = / { print $3; exit }')
+	if [ -z "$WG_ADDRESS" ] || [ -z "$HUB_PUBKEY" ]; then
+		die "the hub's answer had no address or key for $NAME; its wg0.conf is as it was unless backup $backup says otherwise"
+	fi
+	if [ "$backup" = none ]; then
+		echo "    skip: $NAME is already a peer of the hub ($WG_ADDRESS); nothing changed there"
+	else
+		echo "    enrolled: $NAME is $WG_ADDRESS on the hub; its old wg0.conf is $backup"
+	fi
+	echo "    way back: ssh $HUB_SSH '$ENROL --remove $NAME'    (or restore $backup and run: wg syncconf wg0 <(wg-quick strip wg0))"
+
+	step "terraform: init, then apply (this is where the box starts to cost money)"
+	cost_line
+	tf init -input=false >/dev/null || die "terraform init failed"
+	local rc=0
+	# shellcheck disable=SC2046
+	tf apply -state="$PRIV/terraform.tfstate" -var-file="$TFVARS" $(confirm_args) || rc=$?
+
+	step "state: seal it in the vault"
+	seal_state
+	[ "$rc" = 0 ] || die "terraform apply failed (status $rc). The peer is on the hub; the state is kept; run up again, or down to remove both"
+	echo "    up. watch it with: contrib/vultr-boost status   (the bootstrap takes some minutes; its log is ~/boost-bootstrap.log on the box)"
+}
+
+# --- down ---------------------------------------------------------------------
+do_down() {
+	STEPS=4
+	need mw terraform ssh age age-keygen git
+	load_settings
+	load_token
+
+	step "state: open the vault's"
+	open_state
+
+	step "terraform: destroy"
+	local rc=0
+	if [ -s "$PRIV/terraform.tfstate" ]; then
+		tf init -input=false >/dev/null || die "terraform init failed"
+		# shellcheck disable=SC2046
+		tf destroy -state="$PRIV/terraform.tfstate" -var-file="$TFVARS" $(confirm_args) || rc=$?
+	else
+		echo "    skip: no state in the vault, so no box to destroy"
+	fi
+	if [ "$rc" != 0 ]; then
+		seal_state
+		die "terraform destroy failed (status $rc); the peer was left on the hub and the state is kept. Run down again"
+	fi
+
+	step "hub: remove $NAME from $HUB_SSH"
+	local remote out backup
+	remote="set -e; f=/etc/wireguard/wg0.conf; if grep -q '^# peer $NAME (enrolled' \"\$f\"; then b=\$f.bak-\$(date +%Y%m%d%H%M%S); cp -p \"\$f\" \"\$b\"; echo backup:\$b; $ENROL --remove $NAME; else echo backup:none; fi"
+	if out=$(hubssh "$remote"); then
+		backup=$(echo "$out" | sed -n 's/^backup://p' | head -n 1)
+		if [ "$backup" = none ]; then
+			echo "    skip: $NAME is not a peer of the hub"
+		else
+			echo "    removed: $NAME is off the hub; its old wg0.conf is $backup"
+			echo "    way back: ssh $HUB_SSH 'cp -p $backup /etc/wireguard/wg0.conf' and then wg syncconf wg0 <(wg-quick strip wg0) there"
+		fi
+	else
+		echo "vultr-boost: the box is destroyed, but the peer could not be removed from $HUB_SSH: run it there: $ENROL --remove $NAME" >&2
+		rc=1
+	fi
+
+	step "state: seal it in the vault"
+	seal_state
+	[ "$rc" = 0 ] || exit 1
+	echo "    down. nothing of this box is running or billed."
+}
+
+# --- status -------------------------------------------------------------------
+# plan_cost: "monthly hourly" of the plan, from Vultr's public price list.
+plan_cost() {
+	local plan=${1:-vhp-8c-16gb-amd}
+	curl -fsS "$API/plans?type=vhp&per_page=500" 2>/dev/null |
+		jq -r --arg p "$plan" '.plans[] | select(.id == $p) | "\(.monthly_cost) \(.hourly_cost)"' 2>/dev/null | head -n 1
+}
+
+cost_line() {
+	local plan c
+	plan=$(tfvar plan)
+	c=$(plan_cost "${plan:-vhp-8c-16gb-amd}" || true)
+	if [ -n "$c" ]; then
+		echo "    cost: \$${c% *} a month, \$${c#* } an hour, for as long as the box exists (stopped boxes bill too); contrib/vultr-boost down ends it"
+	else
+		echo "    cost: Vultr's price list could not be read; High Performance 8 vCPU / 16 GB is about \$96 a month"
+	fi
+}
+
+do_status() {
+	STEPS=2
+	need age jq curl
+	step "state: read the vault's"
+	local id plan created c
+	if [ -f "$STATE_AGE" ]; then
+		[ -r "$AGE_KEY" ] || die "no age key at $AGE_KEY: this runs on the home, which holds it (docs/secrets.md)"
+		open_priv
+		age -d -i "$AGE_KEY" "$STATE_AGE" >"$PRIV/terraform.tfstate" || die "could not decrypt $STATE_AGE"
+		id=$(jq -r '[.resources[]? | select(.type == "vultr_instance") | .instances[0].attributes.id][0] // empty' "$PRIV/terraform.tfstate")
+		plan=$(jq -r '[.resources[]? | select(.type == "vultr_instance") | .instances[0].attributes.plan][0] // empty' "$PRIV/terraform.tfstate")
+		created=$(jq -r '[.resources[]? | select(.type == "vultr_instance") | .instances[0].attributes.date_created][0] // empty' "$PRIV/terraform.tfstate")
+	fi
+	if [ -z "${id:-}" ]; then
+		c=$(plan_cost "" || true)
+		echo "    no box: nothing is running or billed."
+		[ -z "$c" ] || echo "    a box would cost \$${c% *} a month (\$${c#* } an hour) while it exists."
+		return 0
+	fi
+	step "vultr: ask for $id"
+	local token reply
+	token=$(secret vultr_api_token) || die "no vultr_api_token kept: mw secrets put vultr_api_token < token.txt"
+	reply=$(printf 'header = "Authorization: Bearer %s"\n' "$token" | curl -fsS -K - "$API/instances/$id") || reply=""
+	echo "    box:    $id ($NAME), plan ${plan:-unknown}"
+	if [ -n "$reply" ]; then
+		echo "    state:  $(echo "$reply" | jq -r '.instance | "\(.status), \(.power_status), server \(.server_status)"')"
+	else
+		echo "    state:  unknown (Vultr's API could not be reached, or the box is gone from it)"
+	fi
+	c=$(plan_cost "$plan" || true)
+	if [ -n "$c" ]; then
+		echo "    cost:   \$${c% *} a month, \$${c#* } an hour"
+		if [ -n "$created" ]; then
+			local then_s now_s
+			then_s=$(date -d "$created" +%s 2>/dev/null || echo "")
+			now_s=$(date +%s)
+			if [ -n "$then_s" ]; then
+				awk -v h="${c#* }" -v t="$then_s" -v n="$now_s" 'BEGIN { hrs = (n - t) / 3600; printf "    so far: about $%.2f over %.1f hours since it was made\n", hrs * h, hrs }'
+			fi
+		fi
+	else
+		echo "    cost:   Vultr's price list could not be read"
+	fi
+}
+
+case $CMD in
+up) do_up ;;
+down) do_down ;;
+status) do_status ;;
+esac
