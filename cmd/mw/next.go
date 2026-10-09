@@ -180,6 +180,7 @@ func newNextCmd() *cobra.Command {
 				Load:      hostload.Proc{},
 				Slot:      rig.NewSlots(),
 				Vault:     files,
+				Rules:     files,
 				Files:     files,
 				Mailbox:   gateway,
 				Runner:    runner,

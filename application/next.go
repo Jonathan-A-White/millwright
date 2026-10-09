@@ -171,6 +171,11 @@ type Next struct {
 	Slot      MergeSlot
 	Vault     Vault
 
+	// Rules is where a rig's version_files are read from, so that a landing
+	// raises the rig's patch version. A nil Rules, or a rig that names none,
+	// raises nothing.
+	Rules EpicRules
+
 	// AfterLanding runs the command a host names for a rig once a landing has
 	// moved this host's checkout of it, so that a host rebuilds what it runs
 	// from the rig by itself. A nil AfterLanding runs nothing.
@@ -1353,6 +1358,14 @@ func (n Next) ledgered(ctx context.Context, id string) (bool, error) {
 // before either kind of retry existed.
 func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Landed, error) {
 	base := StartPoint(n.remote(), c.target)
+	var versionFiles []string
+	if n.Rules != nil {
+		rules, err := n.Rules.EpicRequirements(ctx, c.path.Rig)
+		if err != nil {
+			return Landed{}, failedFor(ReasonLandingFailed, fmt.Errorf("reading the version files of %s: %w", c.path.Rig, err))
+		}
+		versionFiles = rules.VersionFiles
+	}
 	var lost error
 	for try := 1; try <= n.tries(); try++ {
 		if try > 1 {
@@ -1365,7 +1378,7 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 			return Landed{}, failedFor(ReasonLandingFailed, fmt.Errorf("a landing of %s at %s could not be opened: %w", c.path.Rig, base, err))
 		}
 
-		landed, err := n.push(ctx, c, report, dir)
+		landed, err := n.push(ctx, c, report, dir, versionFiles)
 		if closeErr := n.Landing.CloseLanding(ctx, c.rigDir, dir); closeErr != nil {
 			report.Notes = append(report.Notes, fmt.Sprintf("the landing worktree %s could not be taken away: %v", dir, closeErr))
 		}
@@ -1384,8 +1397,11 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 }
 
 // push is one attempt at a landing, in a landing worktree that is already open:
-// merge, test what merging made if it made anything new, and push.
-func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir string) (Landed, error) {
+// merge, raise the rig's version when it names files for one, test what merging
+// made if it made anything new, and push. Each attempt starts from a fresh
+// landing worktree at the newest base, so a push that was refused and tried
+// again raises the version once, from the new base, never on top of its own.
+func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir string, versionFiles []string) (Landed, error) {
 	landed, err := n.Landing.Merge(ctx, dir, c.branch)
 	if err != nil {
 		if Conflicted(err) {
@@ -1393,6 +1409,21 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 				c.branch, c.target, err))
 		}
 		return Landed{}, failedFor(ReasonLandingFailed, fmt.Errorf("%s could not be merged into %s: %w", c.branch, c.target, err))
+	}
+
+	if len(versionFiles) > 0 {
+		bumped, err := n.Landing.BumpVersion(ctx, dir, VersionBump{Files: versionFiles, Before: landed.Before, Branch: c.branch, StoryID: c.id})
+		if err != nil {
+			return Landed{}, failedFor(ReasonLandingFailed, fmt.Errorf("the version of %s could not be raised: %w", c.path.Rig, err))
+		}
+		if bumped.Version != "" {
+			// The version commit is what is pushed, and so what has landed. It
+			// changes only the version fields, so a merge that was a
+			// fast-forward stays one for the gate below: the story's tests
+			// already passed on its branch, and a version-only commit on top
+			// needs no run of its own.
+			landed.Commit, landed.Version = bumped.Commit, bumped.Version
+		}
 	}
 
 	// A merge commit is a combination of two branches that nothing has ever been

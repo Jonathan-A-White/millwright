@@ -318,6 +318,7 @@ func (w *Worktrees) Merge(ctx context.Context, landingDir, branch string) (appli
 	commit := strings.TrimSpace(after)
 	return application.Landed{
 		Commit: commit,
+		Before: strings.TrimSpace(before),
 		// The target branch simply moved onto the story's work: what is being
 		// pushed is exactly the commit the story's tests ran on.
 		FastForward: commit == strings.TrimSpace(tip) && commit != strings.TrimSpace(before),

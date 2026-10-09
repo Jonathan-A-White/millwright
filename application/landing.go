@@ -33,9 +33,35 @@ var (
 // onto the story's work or a merge commit had to be made. A merge commit means
 // the target branch moved while the story was worked, and so that the merged
 // result is a combination nothing has ever been tested on.
+//
+// Before is the commit the landing worktree was at before the merge: the target
+// branch as the remote had it. Version, when it is not empty, is the version
+// the landing raised the rig to, in a commit of its own that Commit then is.
 type Landed struct {
 	Commit      string
 	FastForward bool
+	Before      string
+	Version     string
+}
+
+// VersionBump asks a landing worktree to raise the rig's version after a merge:
+// Files are the files that carry it, relative to the rig, the first of which
+// is the one read; Before is the commit the merge started from and Branch the
+// story's branch, whose own changes to the version are told from the target
+// branch's; StoryID names the story in the commit.
+type VersionBump struct {
+	Files   []string
+	Before  string
+	Branch  string
+	StoryID string
+}
+
+// Bumped is what a VersionBump did: the version the files now hold and the
+// commit that raised it. Version is empty, and nothing was committed, when the
+// story's branch had changed the version itself.
+type Bumped struct {
+	Version string
+	Commit  string
 }
 
 // Landing is the port a story's work is put on its target branch through. One
@@ -101,6 +127,13 @@ type Landing interface {
 	// merge that conflicts is undone before the error comes back, so that the
 	// landing worktree is left as it was found.
 	Merge(ctx context.Context, landingDir, branch string) (Landed, error)
+
+	// BumpVersion raises the patch of the version in the first of bump.Files,
+	// writes it into all of them and commits that as "Version X.Y.Z (<story>)"
+	// in the landing worktree, unless the story's branch changed that version
+	// since it was cut: then the Builder raised it deliberately, and nothing is
+	// touched. The files keep every byte but the version fields.
+	BumpVersion(ctx context.Context, landingDir string, bump VersionBump) (Bumped, error)
 
 	// Push publishes what the landing worktree has checked out as branch on the
 	// remote. A remote that has moved on refuses it, and the refusal comes back
@@ -261,6 +294,9 @@ func (l Landed) LandedAs(target string) string {
 	how := "merge commit"
 	if l.FastForward {
 		how = "fast-forward"
+	}
+	if l.Version != "" {
+		return fmt.Sprintf("landed on %s (%s, %s, version %s)", target, how, shortCommit(l.Commit), l.Version)
 	}
 	return fmt.Sprintf("landed on %s (%s, %s)", target, how, shortCommit(l.Commit))
 }

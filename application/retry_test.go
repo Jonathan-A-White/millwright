@@ -124,6 +124,9 @@ func (f *fakeRetryLanding) UnionNotes(context.Context, string) error            
 func (f *fakeRetryLanding) Merge(context.Context, string, string) (application.Landed, error) {
 	return application.Landed{}, nil
 }
+func (f *fakeRetryLanding) BumpVersion(context.Context, string, application.VersionBump) (application.Bumped, error) {
+	return application.Bumped{}, nil
+}
 func (f *fakeRetryLanding) Push(context.Context, string, string, string) error { return nil }
 func (f *fakeRetryLanding) CloseLanding(context.Context, string, string) error { return nil }
 
