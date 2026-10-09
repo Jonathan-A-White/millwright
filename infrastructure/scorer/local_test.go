@@ -76,6 +76,33 @@ func TestLocalPostsTheWavAndTargetAndReadsTheResult(t *testing.T) {
 	}
 }
 
+func TestLocalKeepsTheStartAndEndOfEachWordAndNullForTheWordsNotHeard(t *testing.T) {
+	needFfmpeg(t)
+	answer := `{"engine":"local","words":[
+ {"text":"the","expected_phonemes":["DH","AH"],"produced_phonemes":["DH","AH"],"error":"none","accuracy":96,"self_corrected":false,"start":0.12,"end":0.3},
+ {"text":"cat","expected_phonemes":["K","AE","T"],"produced_phonemes":[],"error":"omission","accuracy":0,"self_corrected":false,"start":null,"end":null},
+ {"text":"sat","expected_phonemes":["S","AE","T"],"produced_phonemes":[],"error":"not_reached","accuracy":0,"self_corrected":false}],
+ "accuracy":48,"seconds":1.5}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(answer))
+	}))
+	defer srv.Close()
+
+	result, err := scorer.NewLocal(srv.URL).Score(context.Background(), clip(t), "audio/webm", "the cat sat", "en")
+	if err != nil {
+		t.Fatalf("Score: %v", err)
+	}
+	the := result.Words[0]
+	if the.Start == nil || the.End == nil || *the.Start != 0.12 || *the.End != 0.3 {
+		t.Errorf("expected the first word to keep 0.12 to 0.3, got %+v", the)
+	}
+	for _, w := range result.Words[1:] {
+		if w.Start != nil || w.End != nil {
+			t.Errorf("expected no times for %q, got %v to %v", w.Text, w.Start, w.End)
+		}
+	}
+}
+
 func TestLocalNamesTheEngineWhenTheAnswerLeavesItOut(t *testing.T) {
 	needFfmpeg(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -90,8 +117,8 @@ func TestLocalNamesTheEngineWhenTheAnswerLeavesItOut(t *testing.T) {
 		t.Errorf("expected the engine named local, got %q", result.Engine)
 	}
 	out, _ := json.Marshal(result)
-	if strings.Contains(string(out), "null") {
-		t.Errorf("expected no null in %s: a word with no phonemes has empty lists", out)
+	if strings.Contains(string(out), `phonemes":null`) {
+		t.Errorf("expected no null list in %s: a word with no phonemes has empty lists", out)
 	}
 }
 

@@ -28,6 +28,43 @@ func TestReadingResultJSONNamesAreSnakeCase(t *testing.T) {
 	}
 }
 
+func TestReadingWordTimesKeepTheirNamesAndAWordNotHeardHasNullTimes(t *testing.T) {
+	start, end := 0.25, 0.75
+	heard, _ := json.Marshal(application.ReadingWord{Text: "cat", Error: application.ErrNone, Start: &start, End: &end})
+	for _, want := range []string{`"start":0.25`, `"end":0.75`} {
+		if !strings.Contains(string(heard), want) {
+			t.Errorf("expected %s in %s", want, heard)
+		}
+	}
+	silent, _ := json.Marshal(application.ReadingWord{Text: "cat", Error: application.ErrOmission})
+	for _, want := range []string{`"start":null`, `"end":null`} {
+		if !strings.Contains(string(silent), want) {
+			t.Errorf("expected %s in %s", want, silent)
+		}
+	}
+	var back application.ReadingWord
+	if err := json.Unmarshal(heard, &back); err != nil || back.Start == nil || *back.Start != 0.25 || *back.End != 0.75 {
+		t.Errorf("round trip lost the times: %v %+v", err, back)
+	}
+}
+
+func TestReadingResultValidateRefusesTimesThatAreNotInOrder(t *testing.T) {
+	neg, one, two := -0.1, 1.0, 2.0
+	for name, w := range map[string]application.ReadingWord{
+		"negative start":   {Text: "cat", Error: application.ErrNone, Start: &neg, End: &one},
+		"end before start": {Text: "cat", Error: application.ErrNone, Start: &two, End: &one},
+		"start alone":      {Text: "cat", Error: application.ErrNone, Start: &one},
+	} {
+		if err := (application.ReadingResult{Words: []application.ReadingWord{w}, Seconds: 3}).Validate(); err == nil {
+			t.Errorf("%s: expected a refusal", name)
+		}
+	}
+	ok := application.ReadingWord{Text: "cat", Error: application.ErrNone, Start: &one, End: &two}
+	if err := (application.ReadingResult{Words: []application.ReadingWord{ok}, Seconds: 3}).Validate(); err != nil {
+		t.Errorf("a timed word was refused: %v", err)
+	}
+}
+
 func TestReadingResultValidateRefusesWhatTheContractDoesNot(t *testing.T) {
 	ok := application.ReadingWord{Text: "cat", Error: application.ErrNone, Accuracy: 50}
 	for name, r := range map[string]application.ReadingResult{

@@ -26,7 +26,10 @@ const (
 // target text asked for, the phonemes it heard, what went wrong, and how well
 // the word was read, 0 to 100. An inserted word is one the reader added, so
 // its expected phonemes are empty; an omitted one is one the reader left out,
-// so its produced phonemes are empty.
+// so its produced phonemes are empty. Start and End are when the word was
+// heard, in seconds from the start of the recording; both are nil (JSON null)
+// for a word with nothing heard (an omission or a word not reached), and for
+// an engine that does not time its words.
 type ReadingWord struct {
 	Text             string   `json:"text"`
 	ExpectedPhonemes []string `json:"expected_phonemes"`
@@ -34,6 +37,8 @@ type ReadingWord struct {
 	Error            string   `json:"error"`
 	Accuracy         int      `json:"accuracy"`
 	SelfCorrected    bool     `json:"self_corrected"`
+	Start            *float64 `json:"start"`
+	End              *float64 `json:"end"`
 }
 
 // ReadingResult is what every Scorer returns: the engine that made it, a
@@ -69,6 +74,12 @@ func (r ReadingResult) Validate() error {
 		}
 		if w.Accuracy < 0 || w.Accuracy > 100 {
 			return fmt.Errorf("word %d (%q) of the result has the accuracy %d: it must be 0 to 100", i+1, w.Text, w.Accuracy)
+		}
+		if (w.Start == nil) != (w.End == nil) {
+			return fmt.Errorf("word %d (%q) of the result has only one of start and end: it must have both or neither", i+1, w.Text)
+		}
+		if w.Start != nil && (*w.Start < 0 || *w.End <= *w.Start) {
+			return fmt.Errorf("word %d (%q) of the result runs from %v to %v seconds: it must start at 0 or later and end after it starts", i+1, w.Text, *w.Start, *w.End)
 		}
 	}
 	return nil

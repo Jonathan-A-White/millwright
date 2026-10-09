@@ -25,11 +25,11 @@ engine that returns anything else fails where it is read, not where it is used.
   "engine": "local",
   "words": [
     {"text": "the", "expected_phonemes": ["DH", "AH"], "produced_phonemes": ["DH", "AH"],
-     "error": "none", "accuracy": 96, "self_corrected": false},
+     "error": "none", "accuracy": 96, "self_corrected": false, "start": 0.12, "end": 0.34},
     {"text": "cat", "expected_phonemes": ["K", "AE", "T"], "produced_phonemes": ["K", "AH", "T"],
-     "error": "mispronunciation", "accuracy": 61, "self_corrected": false},
+     "error": "mispronunciation", "accuracy": 61, "self_corrected": false, "start": 0.52, "end": 0.84},
     {"text": "sat", "expected_phonemes": ["S", "AE", "T"], "produced_phonemes": [],
-     "error": "omission", "accuracy": 0, "self_corrected": false}
+     "error": "omission", "accuracy": 0, "self_corrected": false, "start": null, "end": null}
   ],
   "accuracy": 52,
   "seconds": 1.5
@@ -46,6 +46,7 @@ engine that returns anything else fails where it is read, not where it is used.
 | `words[].error` | exactly one of `none`, `omission` (left out), `insertion` (added), `mispronunciation`, `hesitation`, `not_reached` (the reader stopped before it) |
 | `words[].accuracy` | whole number 0 to 100 |
 | `words[].self_corrected` | the reader got it wrong, then right |
+| `words[].start`, `words[].end` | when the word was heard, seconds from the start of the recording: `0 <= start < end`, the words in order; `null` for a word with nothing heard (`omission`, `not_reached`) and from an engine that does not time its words (`azure`). `local` times a word from its first phone to the end of its last |
 | `accuracy` | the reading as a whole, whole number 0 to 100 |
 | `seconds` | seconds of speech scored, 0 or more |
 

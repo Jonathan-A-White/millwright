@@ -57,6 +57,13 @@ Feature: mw grist grind takes a recording, scores it, and keeps every grind's ra
     Then the mill answered 1, refused 0, failed 0, and left 0 waiting
     And the session's request carries a reading_result from "local" whose words after the first are not_reached
 
+  Scenario: The seconds each word was heard reach the session, and a word not heard has none
+    Given the engine "local" timed its words
+    And the phone sends a "cairn" "reading" grist, version "1.1", of "the cat sat" read aloud in a webm recording
+    When the mill grinds
+    Then the mill answered 1, refused 0, failed 0, and left 0 waiting
+    And the session's request carries a reading_result from "local" whose words keep their start and end seconds
+
   Scenario: An engine that fails is written down in its place and does not fail the grind
     Given the engine "azure" breaks down with "the azure key was refused"
     And the phone sends a "cairn" "reading" grist, version "1.1", of "the cat sat" read aloud in a webm recording
