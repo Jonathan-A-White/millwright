@@ -1,4 +1,5 @@
-// Package hostload reads how busy this host is from /proc/loadavg.
+// Package hostload reads how busy this host is from /proc/loadavg and how much
+// memory it has left from /proc/meminfo.
 package hostload
 
 import (
@@ -16,6 +17,8 @@ import (
 type Proc struct {
 	// File is where the kernel keeps the load average; empty is /proc/loadavg.
 	File string
+	// MemFile is where the kernel keeps the memory figures; empty is /proc/meminfo.
+	MemFile string
 	// Cores is how many cores there are; zero is runtime.NumCPU.
 	Cores int
 }
@@ -44,5 +47,33 @@ func (p Proc) Load(_ context.Context) (application.LoadReading, error) {
 	if cores == 0 {
 		cores = runtime.NumCPU()
 	}
-	return application.LoadReading{Load: load, Cores: cores}, nil
+	reading := application.LoadReading{Load: load, Cores: cores}
+	reading.MemAvailableMB, reading.MemKnown = p.memAvailableMB()
+	return reading, nil
+}
+
+// memAvailableMB is the MemAvailable line of the memory file in megabytes, and
+// whether there was one to read: a file that cannot be read, or has no such
+// line, leaves the memory unknown rather than failing the whole reading.
+func (p Proc) memAvailableMB() (int64, bool) {
+	file := p.MemFile
+	if file == "" {
+		file = "/proc/meminfo"
+	}
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		return 0, false
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != "MemAvailable:" {
+			continue
+		}
+		kb, err := strconv.ParseInt(fields[1], 10, 64)
+		if err != nil || kb < 0 {
+			return 0, false
+		}
+		return kb / 1024, true
+	}
+	return 0, false
 }

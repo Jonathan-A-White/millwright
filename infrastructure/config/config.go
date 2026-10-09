@@ -25,6 +25,10 @@
 //	[rigs]
 //	millwright = "/root/millwright"
 //
+//	[dispatch]                         # the room a host needs to start a story (mw-t0z3fu.1)
+//	room_load_per_core = 1.0           # none while the 1-minute load is this many a core
+//	room_min_free_mb   = 2048          # none while less memory than this is available
+//
 //	[backend.postern]
 //	dir     = "server"
 //	build   = "go build -o {out} ./cmd/postern"
@@ -77,6 +81,7 @@ package config
 import (
 	"bufio"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"path/filepath"
@@ -803,6 +808,59 @@ func GristApps() (map[string]string, error) {
 		}
 	}
 	return apps, nil
+}
+
+// DispatchTable is the table of the config file that says how much room a host
+// must have before mw dispatch starts a story on it.
+const DispatchTable = "dispatch"
+
+// DefaultRoomLoadPerCore and DefaultRoomMinFreeMB are the room a host needs to
+// start a story when the [dispatch] table says nothing: the 1-minute load under
+// a core each, and 2 GB of memory available. They are application's own
+// defaults, said again so that this package needs not import it.
+const (
+	DefaultRoomLoadPerCore       = 1.0
+	DefaultRoomMinFreeMB   int64 = 2048
+)
+
+// RoomSettings is how much room a host must have to start a story.
+type RoomSettings struct {
+	// LoadPerCore times the host's cores is the load at which it has no room.
+	LoadPerCore float64
+	// MinFreeMB is the memory available, in megabytes, under which it has none.
+	MinFreeMB int64
+}
+
+// Room reports the `[dispatch]` table of ~/.config/mw/config.toml:
+// `room_load_per_core` (a number above zero, default 1.0) and `room_min_free_mb`
+// (a whole number, 1 or more, default 2048), each its default when the table
+// says nothing.
+func Room() (RoomSettings, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return RoomSettings{}, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	table, err := tableIn(path, DispatchTable)
+	if err != nil {
+		return RoomSettings{}, err
+	}
+	settings := RoomSettings{LoadPerCore: DefaultRoomLoadPerCore, MinFreeMB: DefaultRoomMinFreeMB}
+	if said := strings.TrimSpace(table["room_load_per_core"]); said != "" {
+		n, err := strconv.ParseFloat(said, 64)
+		if err != nil || n <= 0 || math.IsInf(n, 0) || math.IsNaN(n) {
+			return RoomSettings{}, fmt.Errorf("the [%s] table of %s says room_load_per_core = %q: it must be a number above zero, like 1.0", DispatchTable, path, said)
+		}
+		settings.LoadPerCore = n
+	}
+	if said := strings.TrimSpace(table["room_min_free_mb"]); said != "" {
+		n, err := strconv.ParseInt(said, 10, 64)
+		if err != nil || n < 1 {
+			return RoomSettings{}, fmt.Errorf("the [%s] table of %s says room_min_free_mb = %q: it must be a whole number of megabytes, 1 or more", DispatchTable, path, said)
+		}
+		settings.MinFreeMB = n
+	}
+	return settings, nil
 }
 
 // EventsTable is the table of the config file that says how the event
