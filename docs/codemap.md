@@ -10,10 +10,6 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 | --- | --- | --- | --- |
 | `WorkTracker` | application/worktracker.go | infra/beads/ | apptest.FakeTracker |
 | TrackerNotes, SweepNotes, BeadGraph | application/{status,sweep}.go | same | same |
-| VaultFiles, TrackerSync | application/sync.go | `infra/{vault/git,beads/sync}.go` | apptest.Fake{VaultFiles,Tracker} |
-| Mailbox, TidyMailbox | application/{mail,tidy}.go | `infrastructure/beads/mail.go` | apptest.FakeMailbox |
-| EpicRules | application/epicrules.go | `infrastructure/vault/epicrules.go` | apptest.FakeEpicRules |
-| Vault | application/seatboot.go | infra/vault | seatboot_test.go |
 | VaultFiles, TrackerSync, SyncHaltMarker | application/sync.go | `infra/{vault/git,beads/sync}.go`, infra/synchalt | apptest.Fake{VaultFiles,Tracker,SyncHaltMarker} |
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | infra/beads/mail.go | apptest.FakeMailbox |
 | EpicRules | application/epicrules.go | infra/vault/epicrules.go | apptest.FakeEpicRules |
@@ -27,10 +23,7 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 | Doctor{Check,State,Log,Notes}, VPSProbe | application/doctor.go, application/vpsnginx.go | infra/{doctor,vpsnginx} | none |
 | Network{Probe,Store,Reader} | application/network.go | infra/network | apptest.FakeNetwork* |
 | CardLog | application/card.go | infra/cardlog | apptest.FakeCardLog |
-| Worktrees | application/worktrees.go | `infrastructure/rig/worktree.go` | dispatch_test.go |
-| HostLoad | application/hostload.go | infra/hostload | apptest.FakeHostLoad |
-| SyncHaltMarker, CloseOutMarks | application/sync.go, application/closeout.go | infra/{synchalt,closeout} | apptest.Fake*Mark* |
-| Notifier, HomeMoveHost, OldHome, {Vault,Tracker}Birth | application/{millhandtick,homemove,init}.go | infra/{notify/notify,homemove/homemove,vault/birth,beads/init}.go | none |
+| CloseOutMarks | application/closeout.go | infra/closeout | apptest.Fake*Mark* |
 | Worktrees | application/worktrees.go | infra/rig/worktree.go | application/dispatch_test.go |
 | HostLoad | application/hostload.go | infra/hostload | apptest.FakeHostLoad |
 | TickLog, Notifier, HomeMoveHost, OldHome, VaultBirth, TrackerBirth | application/{millhandtick,homemove,init}.go | infra/{ticklog,notify/notify,homemove/homemove,vault/birth,beads/init}.go | apptest.FakeTickLog |
@@ -47,9 +40,7 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 
 | Use case | File | Command | Feature |
 | --- | --- | --- | --- |
-| File | application/file.go | mw file - cmd/mw/file.go | features/file_plan.feature |
-| Release | application/release.go | mw release - cmd/mw/release.go | features/release.feature |
-| Retry | application/retry.go | mw retry - cmd/mw/retry.go | features/retry.feature |
+| File, Release, Retry | application/file.go, application/release.go, application/retry.go | mw file/release/retry - cmd/mw/file.go, cmd/mw/release.go, cmd/mw/retry.go | features/{file_plan,release,retry}.feature |
 | Show, Peek, Prove, StampHead | application/show.go, application/stamphead.go | mw show/peek/prove/stamp - cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go | features/{show,peek,prove,stamp}.feature |
 | Dispatch | application/dispatch.go | mw dispatch - cmd/mw/dispatch.go | features/dispatch.feature |
 | Next, AfterLandingRun | application/next.go, application/afterlandingrun.go | mw next, mw after-landing - cmd/mw/next.go, cmd/mw/afterlanding.go | features/{next,after_landing}.feature |
@@ -75,10 +66,8 @@ domain/(events): stdlib · application/ (apptest/: fakes): use cases, ports · i
 | Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern <sub> - cmd/mw/posternview.go, cmd/mw/posternbead.go | `features/postern_*.feature` |
 | Event{Follow,Emit,Tail,Ship,Wait,Nudge,Spring,Control,Trim} | application/eventfollow.go, application/eventlog.go, application/eventship.go, application/eventwait.go, application/eventnudge.go, application/eventsubscribe.go, application/eventspring.go, application/eventcontrol.go, application/eventtrim.go | mw events <sub> - cmd/mw/events.go | features/event_follow.feature |
 | Hands{Add,List} | application/hands.go | mw hands <sub> - cmd/mw/hands.go; cmd/mw-hands-root | features/hands.feature |
-| Postern{Serve,Nginx,Mirror} | application/posternhand.go, application/posternmirror.go | mw postern serve/nginx/mirror - cmd/mw/postern.go, cmd/mw/posternmirror.go | features/postern_serve.feature |
+| Postern{Serve,Nginx,Mirror} | application/posternhand.go, application/posternmirror.go | mw postern <sub> - cmd/mw/postern.go, cmd/mw/posternmirror.go | features/postern_serve.feature |
 | Prompt{Save,List,Show,Run}, Cards | application/prompt.go | mw prompt/card - cmd/mw/prompt.go, cmd/mw/card.go | features/{prompt,card}.feature |
-| Grist{Key,Grind,Send,Eval,Score,Runs,Stats} | application/grist.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go | mw grist key/grind/send/eval/score/runs/stats - cmd/mw/grist.go | features/{grist{,_send,_eval,_audio,_concurrent,_forward},scorer}.feature |
-| Prompt{Save,List,Show,Run}, Cards | application/prompt.go, application/card.go | mw prompt/card - cmd/mw/prompt.go, cmd/mw/card.go | features/{prompt,card}.feature |
 | Grist{Key,Grind,Send,Eval,Score,Runs,Stats} | application/grist.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go | mw grist <sub> - cmd/mw/grist.go | features/{grist{,_send,_eval,_audio,_concurrent,_forward},scorer}.feature |
 
 cmd/mw/root.go: the tree; cmd/mw/version.go.
