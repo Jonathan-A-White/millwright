@@ -13,6 +13,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
+	vaultpkg "github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
 )
@@ -215,6 +216,13 @@ func newDoctorCmd() *cobra.Command {
 			ageKey := doctor.NewAgeKey(mwVault(vault, host), host, vault, ageKeyFile)
 			ageKey.PathErr = ageKeyErr
 			checks := application.DoctorChecks{}
+			// The factory checkout the vault's formulas are judged against; none
+			// where this host checks the rig out nowhere.
+			factoryDir := ""
+			if rigs, rigsErr := config.Rigs(); rigsErr == nil {
+				factoryDir = rigs[application.FactoryRig]
+			}
+			formulasCheck := doctor.NewFormulas(vaultpkg.NewFormulas(mwVault(vault, host)), factoryDir, mwVault(vault, host), host, store)
 			vpsNginx, err := hostVPSNginx(mwVault(vault, host), false)
 			if err != nil {
 				return err
@@ -247,6 +255,7 @@ func newDoctorCmd() *cobra.Command {
 					doctor.NewTunnel(tunnelHost, reach, tunnelUnit, tunnelProbe),
 					wg,
 					doctor.NewVaultDirty(vault, host, store),
+					formulasCheck,
 					doctor.NewTimers(units),
 					&doctor.BeadsSize{Dir: vault, Budget: beadsBudget},
 					doctor.NewBeadsStores(vault),
