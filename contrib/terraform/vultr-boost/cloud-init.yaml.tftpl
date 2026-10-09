@@ -1,0 +1,28 @@
+#cloud-config
+# Rendered by Terraform in memory; boost-bootstrap.sh and its inputs travel
+# base64-encoded so no value needs quoting. The inputs file holds tokens: it is
+# mode 600, owned by the Boost's user, and removed when the bootstrap is done.
+users:
+  - name: ${user}
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: true
+%{ if ssh_key != "" ~}
+    ssh_authorized_keys:
+      - ${jsonencode(ssh_key)}
+%{ endif ~}
+write_files:
+  - path: /home/${user}/boost-bootstrap.sh
+    owner: ${user}:${user}
+    permissions: "0755"
+    encoding: b64
+    content: ${script_b64}
+    defer: true
+  - path: /home/${user}/boost.env
+    owner: ${user}:${user}
+    permissions: "0600"
+    encoding: b64
+    content: ${env_b64}
+    defer: true
+runcmd:
+  - [su, -l, ${user}, -c, "./boost-bootstrap.sh --env-file boost.env > boost-bootstrap.log 2>&1 && rm -f boost.env"]

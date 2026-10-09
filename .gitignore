@@ -1,3 +1,10 @@
 bin/
 __pycache__/
 *.pyc
+
+# Terraform: state and variable files hold keys and tokens and live in the vault, never here
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfplan
+.terraform/
