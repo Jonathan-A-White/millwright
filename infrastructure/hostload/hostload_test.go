@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
 )
@@ -93,5 +94,46 @@ func TestTheRealMemoryIsReadOnThisHost(t *testing.T) {
 	got, err := hostload.Proc{}.Load(context.Background())
 	if err != nil || !got.MemKnown || got.MemAvailableMB < 1 {
 		t.Errorf("got %+v, %v", got, err)
+	}
+}
+
+func TestProcSamplesTheSwapRateOverItsSampleTime(t *testing.T) {
+	dir := t.TempDir()
+	load := filepath.Join(dir, "loadavg")
+	vmstat := filepath.Join(dir, "vmstat")
+	if err := os.WriteFile(load, []byte("1.00 1.00 1.00 1/1 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(vmstat, []byte("nr_free_pages 1\npswpin 100\npswpout 200\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The counters move while the sample is taken.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		_ = os.WriteFile(vmstat, []byte("nr_free_pages 1\npswpin 1100\npswpout 200\n"), 0o600)
+	}()
+	got, err := hostload.Proc{File: load, SwapFile: vmstat, SwapSample: 200 * time.Millisecond, Cores: 4}.Load(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.SwapKnown || got.SwapInKBPerS <= 0 || got.SwapOutKBPerS != 0 {
+		t.Errorf("expected swapping in and none out, got %+v", got)
+	}
+}
+
+func TestProcLeavesTheSwapRateUnknownWithoutASampleTimeOrAFile(t *testing.T) {
+	dir := t.TempDir()
+	load := filepath.Join(dir, "loadavg")
+	if err := os.WriteFile(load, []byte("1.00 1.00 1.00 1/1 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []hostload.Proc{
+		{File: load, Cores: 4},
+		{File: load, Cores: 4, SwapSample: time.Millisecond, SwapFile: filepath.Join(dir, "missing")},
+	} {
+		got, err := p.Load(context.Background())
+		if err != nil || got.SwapKnown {
+			t.Errorf("expected a reading with the swap unknown, got %+v, %v", got, err)
+		}
 	}
 }

@@ -25,6 +25,12 @@ type LoadReading struct {
 	// applies.
 	MemAvailableMB int64
 	MemKnown       bool
+	// SwapInKBPerS and SwapOutKBPerS are the memory the host was swapping in and
+	// out a second, vmstat's si and so, when SwapKnown. A reading that did not
+	// sample it leaves SwapKnown false (mw-t0z3fu.2).
+	SwapInKBPerS  float64
+	SwapOutKBPerS float64
+	SwapKnown     bool
 }
 
 // Busy reports whether the load has reached the core count: every core has
