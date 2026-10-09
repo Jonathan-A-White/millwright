@@ -111,7 +111,7 @@ func (a *AfterLanding) Run(ctx context.Context, rig, dir string) (application.Ra
 	limit := a.Limit(rig)
 	limited, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
-	output, err := runLine(limited, a.shell, command, dir)
+	output, err := runLine(limited, a.shell, command, dir, 0)
 	ran := application.Ran{Command: command, Output: output}
 	if err == nil {
 		return ran, nil

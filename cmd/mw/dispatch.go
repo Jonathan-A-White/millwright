@@ -175,6 +175,10 @@ func newDispatchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			nice, err := config.BuilderNice()
+			if err != nil {
+				return err
+			}
 
 			tries, err := config.DispatchSyncTries()
 			if err != nil {
@@ -214,7 +218,7 @@ func newDispatchCmd() *cobra.Command {
 				Landing:     worktrees,
 				Files:       files,
 				Runner:      tmux.New(),
-				Boot:        builderBoot(files, host, tests),
+				Boot:        builderBoot(files, host, tests, nice),
 				Memory:      gateway,
 				Sync:        sync,
 				SyncTries:   tries,

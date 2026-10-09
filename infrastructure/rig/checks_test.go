@@ -2,6 +2,7 @@ package rig_test
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -96,4 +97,31 @@ func TestARigsTestsDoNotCarryTheVaultsLowSpeedLimit(t *testing.T) {
 	if want := "limit= time=\n"; checked.Output != want {
 		t.Fatalf("expected a rig's own command to see no low-speed limit, got %q", checked.Output)
 	}
+}
+
+// TestTheGateRunsUnderTheNiceItIsGiven: mw next's gate is a Builder's tests in
+// all but name, and runs behind the mill's work just as the session did
+// (mw-gq6.312). The command reads its own niceness back.
+func TestTheGateRunsUnderTheNiceItIsGiven(t *testing.T) {
+	base := niceOf(t, rig.NewChecks(rig.WithCommand("nice")))
+	niced := niceOf(t, rig.NewChecks(rig.WithCommand("nice"), rig.WithNice(7)))
+	if niced != base+7 && niced != 19 {
+		t.Errorf("expected the gate to run %d nicer than %d, got %d", 7, base, niced)
+	}
+	if off := niceOf(t, rig.NewChecks(rig.WithCommand("nice"), rig.WithNice(0))); off != base {
+		t.Errorf("expected a nice of 0 to leave the gate at %d, got %d", base, off)
+	}
+}
+
+func niceOf(t *testing.T, checks *rig.Checks) int {
+	t.Helper()
+	checked, err := checks.Run(context.Background(), "millwright", t.TempDir())
+	if err != nil || !checked.Passed {
+		t.Fatalf("running nice: %v %+v", err, checked)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(checked.Output))
+	if err != nil {
+		t.Fatalf("expected the command to print its niceness, got %q", checked.Output)
+	}
+	return n
 }

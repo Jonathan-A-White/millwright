@@ -79,7 +79,7 @@ func (w *Worktrees) Build(ctx context.Context, rigDir, commit, subdir, command, 
 	limited, cancel := context.WithTimeout(ctx, application.AfterLandingLimit)
 	defer cancel()
 	built := strings.ReplaceAll(command, application.BackendOutPlaceholder, shellWord(partial))
-	output, err := runLine(limited, Shell, built, filepath.Join(dir, subdir))
+	output, err := runLine(limited, Shell, built, filepath.Join(dir, subdir), 0)
 	if err != nil {
 		_ = os.Remove(partial)
 		return fmt.Errorf("`%s` failed: %w: %s", command, err, application.RecentLines(output, 10))

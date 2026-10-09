@@ -9,6 +9,7 @@ package claude
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -217,6 +218,7 @@ type Harness struct {
 	tests          map[string]string
 	envFile        string
 	serverHost     string
+	nice           int
 }
 
 // Harness satisfies the port.
@@ -270,6 +272,14 @@ func WithBeadsServerHost(host string) Option {
 	return func(h *Harness) { h.serverHost = host }
 }
 
+// WithNice starts the harness under `nice -n <n>`, so a Builder's session and
+// the tests it runs yield the CPU to the mill's own work on the same host
+// (mw-gq6.312). 0, the default, starts it as it was. Only the harness is
+// niced: the heartbeat and the close-out are light.
+func WithNice(n int) Option {
+	return func(h *Harness) { h.nice = n }
+}
+
 // New returns a Harness that runs Claude Code as this host has it, unless an
 // option says otherwise.
 func New(opts ...Option) *Harness {
@@ -321,6 +331,10 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 		"--settings", settings,
 		"--name", l.StoryID,
 		l.Kickoff,
+	}
+
+	if h.nice > 0 {
+		argv = append([]string{"nice", "-n", strconv.Itoa(h.nice)}, argv...)
 	}
 
 	// Only the result goes to the file. What Claude Code says on stderr stays

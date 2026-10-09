@@ -132,6 +132,8 @@ const (
 	BeadsServerHostEnv    = "MW_BEADS_SERVER_HOST"
 
 	MeteredEnv = "MW_METERED"
+
+	BuilderNiceEnv = "MW_BUILDER_NICE"
 )
 
 // The environment variables bd itself reads to reach a Dolt database server
@@ -990,6 +992,31 @@ func Cap() (int, error) {
 		return 0, fmt.Errorf("the cap on sessions running at once is %d, so nothing could ever be started: set it to 1 or more", atOnce)
 	}
 	return atOnce, nil
+}
+
+// DefaultBuilderNice is how much nicer than the mill a Builder's session and
+// the gate's tests run on a host that does not say (mw-gq6.312).
+const DefaultBuilderNice = 10
+
+// BuilderNice reports how nice a Builder's session and mw next's gate run: $MW_BUILDER_NICE if
+// set, otherwise the root-table `builder_nice` key of ~/.config/mw/config.toml,
+// and DefaultBuilderNice when neither says. They are started under `nice -n`
+// this much, so a grist's scorer and model on the same home keep the CPU while
+// Builders run their tests. 0 turns it off. Only 0 to 19 is taken: a negative
+// nice would need privilege and would put a Builder ahead of the mill.
+func BuilderNice() (int, error) {
+	said, err := optionalSetting("builder_nice", BuilderNiceEnv, "")
+	if err != nil {
+		return 0, err
+	}
+	if said == "" {
+		return DefaultBuilderNice, nil
+	}
+	n, err := strconv.Atoi(said)
+	if err != nil || n < 0 || n > 19 {
+		return 0, fmt.Errorf("builder_nice is %q: set it to a whole number from 0 (off) to 19, in %s or with %s", said, File, BuilderNiceEnv)
+	}
+	return n, nil
 }
 
 // MaxAttempts reports how many times a story may be started in all: $MW_MAX_ATTEMPTS

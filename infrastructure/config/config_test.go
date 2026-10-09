@@ -1954,3 +1954,33 @@ func TestScorersLocalURLMustBeAnHTTPAddress(t *testing.T) {
 		t.Fatalf("expected a refusal naming local_url, got %v", err)
 	}
 }
+
+func TestBuilderNiceIsTenUntilAHostSaysOtherwise(t *testing.T) {
+	writeConfig(t, vpsConfig)
+	t.Setenv(config.BuilderNiceEnv, "")
+	if got, err := config.BuilderNice(); err != nil || got != 10 {
+		t.Fatalf("builder_nice = %d, %v; want 10", got, err)
+	}
+	writeConfig(t, "builder_nice = 5\n")
+	if got, err := config.BuilderNice(); err != nil || got != 5 {
+		t.Fatalf("builder_nice = %d, %v; want 5", got, err)
+	}
+	writeConfig(t, "builder_nice = 0\n")
+	if got, err := config.BuilderNice(); err != nil || got != 0 {
+		t.Fatalf("builder_nice = 0 gave %d, %v; want 0 (off)", got, err)
+	}
+	t.Setenv(config.BuilderNiceEnv, "15")
+	if got, err := config.BuilderNice(); err != nil || got != 15 {
+		t.Fatalf("MW_BUILDER_NICE=15 gave %d, %v; want 15", got, err)
+	}
+}
+
+func TestBuilderNiceRefusesWhatNiceCannotTake(t *testing.T) {
+	t.Setenv(config.BuilderNiceEnv, "")
+	for _, bad := range []string{"-5", "20", "lots", "1.5"} {
+		writeConfig(t, "builder_nice = "+bad+"\n")
+		if _, err := config.BuilderNice(); err == nil || !strings.Contains(err.Error(), "builder_nice") {
+			t.Errorf("builder_nice = %s gave %v, want a refusal naming builder_nice", bad, err)
+		}
+	}
+}

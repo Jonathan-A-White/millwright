@@ -830,6 +830,7 @@ home_move_bead = "mw-43v9x"        # the bead the Governor's Move home tap, its 
 postern_transcribe_cmd = ""        # what hears the Governor's voice notes, the audio's path appended, e.g. contrib/postern-transcribe (default empty: none are heard)
 beads_sync = "remote"              # remote (a copy of its own), backup (holds the one database) or shared (reaches another host's) (default remote)
 beads_backup_minutes = 30          # on a backup host, how long between two backups of the one database (default 30)
+builder_nice = 10                #  a Builder session and mw next's gate run under nice -n this, so a grist's scorer and model keep the CPU; 0 is off (default 10)
 hands_root_helper = "/usr/local/sbin/mw-hands-root"  # what a root hands step is handed to, through sudo -n, on every host (default shown)
 
 [rigs]

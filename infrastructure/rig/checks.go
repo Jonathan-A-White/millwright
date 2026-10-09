@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -39,6 +40,7 @@ type Checks struct {
 	commands map[string]string
 	command  string
 	shell    string
+	nice     int
 }
 
 // Checks satisfies the port.
@@ -76,6 +78,13 @@ func WithCheckShell(path string) CheckOption {
 	return func(c *Checks) { c.shell = path }
 }
 
+// WithNice runs every rig's tests under `nice -n <n>`, so they yield the CPU to
+// the mill's own work on the same host (mw-gq6.312). 0, the default, runs them
+// as they were.
+func WithNice(n int) CheckOption {
+	return func(c *Checks) { c.nice = n }
+}
+
 // NewChecks returns the checks of a rig whose tests are DefaultCommand, unless
 // an option says otherwise.
 func NewChecks(opts ...CheckOption) *Checks {
@@ -104,7 +113,7 @@ func (c *Checks) Run(ctx context.Context, rig, dir string) (application.Checked,
 		return application.Checked{}, fmt.Errorf("running `%s`: %w", command, err)
 	}
 
-	output, err := runLine(ctx, c.shell, command, dir)
+	output, err := runLine(ctx, c.shell, command, dir, c.nice)
 	checked := application.Checked{Command: command, Output: output, Passed: err == nil}
 	if err == nil {
 		return checked, nil
@@ -136,8 +145,12 @@ const killGrace = time.Second
 // alike. A context that ends stops the command and everything it started, not
 // only the shell: `make` and the compiler under it are the ones still running
 // when a limit is reached.
-func runLine(ctx context.Context, shell, command, dir string) (string, error) {
-	cmd := exec.CommandContext(ctx, shell, "-c", command)
+func runLine(ctx context.Context, shell, command, dir string, nice int) (string, error) {
+	argv := []string{shell, "-c", command}
+	if nice > 0 {
+		argv = append([]string{"nice", "-n", strconv.Itoa(nice)}, argv...)
+	}
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
 	// Nobody is at the keyboard: a test that asks git for a password would wait
 	// there forever in a pane nobody is watching.

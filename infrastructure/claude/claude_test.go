@@ -910,3 +910,35 @@ func TestServerHostWithNoEnvFileReachesTheSeatWindow(t *testing.T) {
 		t.Errorf("expected the host carried by a script, got %q", spec.Command)
 	}
 }
+
+// TestTheBuildersLaunchLineCarriesItsNice: a Builder runs behind the mill's own
+// work on the home, so its harness is started under nice (mw-gq6.312). Only the
+// harness is niced: the heartbeat and the close-out are light and stay as they are.
+func TestTheBuildersLaunchLineCarriesItsNice(t *testing.T) {
+	spec, err := New(WithNice(10)).Session(launch(func(l *application.Launch) {
+		l.Heartbeat = []string{"mw", "next", "--heartbeat", "mw-gq6.6"}
+		l.After = []string{"mw", "next", "mw-gq6.6"}
+	}))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	line := spec.Command[2]
+	if !strings.Contains(line, "nice -n 10 claude --print") {
+		t.Errorf("expected the harness to run under nice -n 10, got %q", line)
+	}
+	if strings.Count(line, "nice -n") != 1 {
+		t.Errorf("expected only the harness to be niced, got %q", line)
+	}
+}
+
+func TestANiceOfZeroLaunchesWithoutNice(t *testing.T) {
+	for _, opts := range [][]Option{nil, {WithNice(0)}} {
+		spec, err := New(opts...).Session(launch(nil))
+		if err != nil {
+			t.Fatalf("assembling the session: %v", err)
+		}
+		if line := spec.Command[2]; strings.Contains(line, "nice") || !strings.Contains(line, "claude --print") {
+			t.Errorf("expected a plain launch with no nice, got %q", line)
+		}
+	}
+}

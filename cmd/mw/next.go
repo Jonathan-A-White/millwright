@@ -96,6 +96,10 @@ func newNextCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			nice, err := config.BuilderNice()
+			if err != nil {
+				return err
+			}
 			afterLanding, err := config.AfterLanding()
 			if err != nil {
 				return err
@@ -147,7 +151,7 @@ func newNextCmd() *cobra.Command {
 					Tracker:     gateway,
 					Worktrees:   worktrees,
 					Runner:      runner,
-					Boot:        builderBoot(files, host, tests),
+					Boot:        builderBoot(files, host, tests, nice),
 					Memory:      gateway,
 					Host:        host,
 					Cap:         atOnce,
@@ -172,7 +176,7 @@ func newNextCmd() *cobra.Command {
 				Tracker:   gateway,
 				Worktrees: worktrees,
 				Landing:   worktrees,
-				Checks:    rig.NewChecks(rig.WithCommands(tests)),
+				Checks:    rig.NewChecks(rig.WithCommands(tests), rig.WithNice(nice)),
 				Load:      hostload.Proc{},
 				Slot:      rig.NewSlots(),
 				Vault:     files,
@@ -182,7 +186,7 @@ func newNextCmd() *cobra.Command {
 				Memory:    gateway,
 				Sync:      sync,
 				Dispatch:  dispatcher,
-				Boot:      builderBoot(files, host, tests),
+				Boot:      builderBoot(files, host, tests, nice),
 				Seat:      BuilderSeat,
 				Host:      host,
 				Rigs:      rigs,
@@ -228,7 +232,8 @@ func beadsEnvFile() string {
 // seat, on this host, with this same mw chained on after the harness exits.
 // tests is the [tests] table, so the session may run its own rig's tests
 // without being asked, exactly as `mw next` would run them (see
-// claude.WithTests).
+// claude.WithTests). nice is builder_nice: the session runs that much nicer
+// than the mill (see claude.WithNice).
 // withHostDispatchLocks gives a dispatch the lock the timer's dispatch takes:
 // this host's dispatch lock, so that the dispatch that ends a landing and a
 // timer tick never claim, pour and start the same story at once (mw-gq6.193).
@@ -239,10 +244,10 @@ func withHostDispatchLocks(d application.Dispatch) application.Dispatch {
 	return d
 }
 
-func builderBoot(files *vault.Vault, host string, tests map[string]string) application.SeatBoot {
+func builderBoot(files *vault.Vault, host string, tests map[string]string, nice int) application.SeatBoot {
 	return application.SeatBoot{
 		Vault:     files,
-		Harness:   sessionHarness(files.Dir(), host, claude.WithTests(tests)),
+		Harness:   sessionHarness(files.Dir(), host, claude.WithTests(tests), claude.WithNice(nice)),
 		Seat:      BuilderSeat,
 		Host:      host,
 		After:     afterSession(),

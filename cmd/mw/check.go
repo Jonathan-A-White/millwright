@@ -51,6 +51,10 @@ func newCheckCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			nice, err := config.BuilderNice()
+			if err != nil {
+				return err
+			}
 
 			var slot application.MergeSlot
 			if !noSlot {
@@ -60,7 +64,7 @@ func newCheckCmd() *cobra.Command {
 			_, err = application.Check{
 				Tracker: mwGateway(dir, host),
 				Landing: worktrees,
-				Checks:  rig.NewChecks(rig.WithCommands(tests)),
+				Checks:  rig.NewChecks(rig.WithCommands(tests), rig.WithNice(nice)),
 				Slot:    slot,
 				Host:    host,
 				Rigs:    rigs,
