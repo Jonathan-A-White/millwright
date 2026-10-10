@@ -328,7 +328,7 @@ kind. `mw status` has a BENCHMARKS section built from every host's records: each
 rig's usual gate time on a host against its latest, landings per hour and par-hours
 per hour at each running count (the knee, where more stories at once stop landing
 more), and each kind's par error, flagged with the change it suggests when the median
-passes 30%. A tests-fail whose output names a timeout while the host was at or above
+passes 30% once it has `par_min` measured landings (fewer are no evidence). A tests-fail whose output names a timeout while the host was at or above
 its core count is refused as `timeout under load`. The windows and thresholds are the
 config file's `[benchmark]` table: `usual_gates`, `par_window`, `par_min`,
 `calibration_window`, `error_flag_percent`, `over_par_factor`.

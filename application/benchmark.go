@@ -435,7 +435,8 @@ func (k KindCalibration) FlagLine() string { return "FLAG " + k.Kind + ": " + k.
 
 // Calibrate reads each kind's par against what its stories took, over the last
 // CalibrationWindow of them, in kind order. A kind whose median error passes the
-// threshold is flagged with the change that is suggested: a wider window while
+// threshold is flagged, once it has ParMin measured landings (fewer is no
+// evidence the window is wrong), with the change that is suggested: a wider window while
 // it has fewer landings than a par is the median of (the par is not steady yet),
 // and rig-only grouping once it has (the kind is mixing different work).
 func Calibrate(history []Benchmark, s BenchmarkSettings) []KindCalibration {
@@ -465,7 +466,7 @@ func Calibrate(history []Benchmark, s BenchmarkSettings) []KindCalibration {
 		}
 		cal.Measured = len(errs)
 		cal.MedianErrorPercent = median(errs)
-		if cal.Measured > 0 && cal.MedianErrorPercent > s.errorFlagPercent() {
+		if cal.Measured >= s.parMin() && cal.MedianErrorPercent > s.errorFlagPercent() {
 			if cal.Measured < s.parWindow() {
 				cal.Flag = "try a wider window"
 			} else {

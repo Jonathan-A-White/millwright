@@ -617,12 +617,23 @@ Feature: mw status
       | laptop | lampas | lampas/bug/opus | 3       | 100  | 200    | 100 | yes    |
       | laptop | lampas | lampas/bug/opus | 3       | 100  | 50     | 100 | yes    |
       | laptop | lampas | lampas/bug/opus | 3       | 100  | 400    | 100 | yes    |
+      | laptop | lampas | lampas/bug/opus | 3       | 100  | 200    | 100 | yes    |
+      | laptop | lampas | lampas/bug/opus | 3       | 100  | 200    | 100 | yes    |
     When mw status reads the host
     Then reading status succeeds
-    And the report says "lampas/bug/opus: par off 100% over 3 landed"
-    And the report says "1 of 3 over 2x par or timed out"
+    And the report says "lampas/bug/opus: par off 100% over 5 landed"
+    And the report says "1 of 5 over 2x par or timed out"
     And the report says "FLAG lampas/bug/opus: try a wider window"
     And every line of the report is at most 60 columns wide
+
+  Scenario: The report does not flag a kind with fewer landings than par_min, but still says how far off it is
+    Given these close-outs were benchmarked:
+      | host    | rig           | kind                          | running | gate | actual | par | landed |
+      | desktop | trade-tracker | trade-tracker/feature/sonnet | 1       | 100  | 156    | 100 | yes    |
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "trade-tracker/feature/sonnet: par off 56% over 1 landed"
+    And the report does not say "FLAG"
 
   Scenario: A story labelled hitl and hitl:review is listed as waiting for the Governor, saying review
     Given a status story "mw-gq6.60" filed under it
