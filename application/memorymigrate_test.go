@@ -10,10 +10,23 @@ func TestSubjectOfTakesAPathBeforeABacktickedToken(t *testing.T) {
 		{"Edit `make all` in app/parse.go first.", "app/parse.go"},
 		{"Read docs/codemap.md.", "docs/codemap.md"},
 		{"The file main.go is the entry.", "main.go"},
-		{"Run `make build` then look in bin/.", "make build"},
+		{"Run `make` then look in bin/.", "make"},
+		{"Run `make build` then look in bin/.", "general"},
 		{"See https://example.org/a/b for why.", "general"},
 		{"Nothing to anchor this to.", "general"},
 		{"Use ~/postern/server/internal.", "~/postern/server/internal"},
+		// A placeholder path stays whole.
+		{"every epic ends with a demo story (a docs/demo-<epic>.md he runs on his phone)", "docs/demo-<epic>.md"},
+		{"Write <dir>/notes.md first.", "<dir>/notes.md"},
+		{"Read demo-<epic>.md first.", "demo-<epic>.md"},
+		// A path over the limit is passed over for the next one.
+		{"Needs LD_LIBRARY_PATH=$HOME/.cache/ms-playwright-system-libs/usr/lib/x86_64-linux-gnu (tests/support/browser-env.ts sets it)", "tests/support/browser-env.ts"},
+		{"Read " + strings.Repeat("a/", SubjectMaxChars) + "b.md only.", "b.md"},
+		// A backticked token with a space, or over the limit, is not a subject.
+		{"Run `npm ci --no-audit --no-fund && TZ=UTC npm test` before pushing.", "general"},
+		{"Run `npm ci --no-audit --no-fund && cd src/bridge && npm test` first.", "src/bridge"},
+		{"Run `" + strings.Repeat("x", SubjectMaxChars+1) + "` first.", "general"},
+		{"Run `" + strings.Repeat("x", SubjectMaxChars) + "` first.", strings.Repeat("x", SubjectMaxChars)},
 	} {
 		if got := subjectOf(tc.sentence); got != tc.want {
 			t.Errorf("subjectOf(%q) = %q, want %q", tc.sentence, got, tc.want)

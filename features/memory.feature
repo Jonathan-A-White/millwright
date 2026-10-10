@@ -357,7 +357,7 @@ Feature: mw memory
     And the fact file "decided-by-the-governor-the" of the rig "demo" holds:
       """
       ---
-      subject: make check
+      subject: general
       kind: decision
       status: current
       source: mw-dd.1
@@ -381,7 +381,7 @@ Feature: mw memory
     And the fact file "run-the-build-with-make" of the rig "demo" holds:
       """
       ---
-      subject: make build
+      subject: general
       kind: gotcha
       status: current
       source: mayor:demo.md@abc1234
@@ -417,7 +417,7 @@ Feature: mw memory
     And the fact file "old-build-used-make-all" of the rig "demo" holds:
       """
       ---
-      subject: make all
+      subject: general
       kind: gotcha
       status: retired
       source: mw-ff.2
@@ -484,12 +484,12 @@ Feature: mw memory
       """
       dry run: nothing is written
       about.md  51 bytes
-      decided-by-the-governor-the  current  decision  [make check]  2026-10-10  mw-dd.1  Decided by the Governor: the gate is `make check` and nothing lands without it.
+      decided-by-the-governor-the  current  decision  [general]  2026-10-10  mw-dd.1  Decided by the Governor: the gate is `make check` and nothing lands without it.
       the-parser-lives-in-appparsego  current  gotcha  [app/parse.go]  2026-10-10  mayor:demo.md@abc1234  The parser lives in app/parse.go and reads once.
-      run-the-build-with-make  current  gotcha  [make build]  2026-10-10  mayor:demo.md@abc1234  Run the build with `make build` and then look in bin/.
+      run-the-build-with-make  current  gotcha  [general]  2026-10-10  mayor:demo.md@abc1234  Run the build with `make build` and then look in bin/.
       never-edit-the-ledger-by  current  gotcha  [general]  2026-10-10  mw-ee  Never edit the ledger by hand, the Mayor owns it.
       node-20-is-needed-from  current  gotcha  [general]  2026-09-02  mayor:demo.md@abc1234  Node 20 is needed from 2026-09-02 for the build.
-      old-build-used-make-all  retired  gotcha  [make all]  2026-10-10  mw-ff.2  Old build used `make all` before the gate.  retired 2026-09-20 (pruned: Moved 2026-09-20 (after mw-ff))
+      old-build-used-make-all  retired  gotcha  [general]  2026-10-10  mw-ff.2  Old build used `make all` before the gate.  retired 2026-09-20 (pruned: Moved 2026-09-20 (after mw-ff))
       the-old-parser-was-in  retired  gotcha  [app/old.go]  2026-10-10  mayor:demo-archive.md@abc1234  The old parser was in app/old.go.  retired 2026-08-01 (pruned: Moved 2026-08-01 (stale notes))
       not placed: demo.md line 14: A stray paragraph that belongs nowhere.
       would migrate the rig demo: about.md and 7 facts (5 current, 2 retired); 1 line not placed

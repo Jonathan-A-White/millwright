@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -41,6 +42,9 @@ type MemoryMigrate struct {
 // AboutMaxBytes is how much of a memory file's head becomes the about text.
 const AboutMaxBytes = 600
 
+// SubjectMaxChars is the longest path or backticked token taken as a fact's subject.
+const SubjectMaxChars = 40
+
 // scannedLine is one '- ' line of a memory file, read.
 type scannedLine struct {
 	Sentence, Source, Subject, Since string
@@ -63,8 +67,8 @@ var (
 	beadRe     = regexp.MustCompile(`\bmw-[a-z0-9]+(?:\.[0-9]+)*\b`)
 	bracketRe  = regexp.MustCompile(`\s*[(\[][^()\[\]]*[)\]]`)
 	urlRe      = regexp.MustCompile(`https?://\S+`)
-	slashPath  = regexp.MustCompile(`[A-Za-z0-9_~.\-]+(?:/[A-Za-z0-9_][A-Za-z0-9_.\-]*)+`)
-	filePath   = regexp.MustCompile(`\b[A-Za-z0-9_\-]+\.(?:go|md|toml|json|sh|feature|ts|tsx|js|yml|yaml|txt)\b`)
+	slashPath  = regexp.MustCompile(`[A-Za-z0-9_~.<>\-]+(?:/[A-Za-z0-9_<][A-Za-z0-9_.<>\-]*)+`)
+	filePath   = regexp.MustCompile(`(?:\b|<)[A-Za-z0-9_<>\-]+\.(?:go|md|toml|json|sh|feature|ts|tsx|js|yml|yaml|txt)\b`)
 	backticked = regexp.MustCompile("`([^`]+)`")
 )
 
@@ -92,23 +96,40 @@ func sourceOf(text string) (source, rest string) {
 	return "", text
 }
 
-// subjectOf is the first path-like token of a sentence (a/b, a.go, a.md), else
-// the first backticked token, else "general".
-func subjectOf(sentence string) string {
-	plain := urlRe.ReplaceAllString(sentence, " ")
-	var best []int
+// pathIn is the first path-like token of text (a/b, a.go, a.md) no longer than
+// SubjectMaxChars, a placeholder such as <epic> kept in it whole, else "".
+func pathIn(text string) string {
+	plain := urlRe.ReplaceAllString(text, " ")
+	var found [][]int
 	for _, re := range []*regexp.Regexp{slashPath, filePath} {
-		if loc := re.FindStringIndex(plain); loc != nil && (best == nil || loc[0] < best[0]) {
-			best = loc
-		}
+		found = append(found, re.FindAllStringIndex(plain, -1)...)
 	}
-	if best != nil {
-		if path := strings.TrimRight(plain[best[0]:best[1]], ".,"); path != "" {
+	sort.Slice(found, func(i, j int) bool { return found[i][0] < found[j][0] })
+	for _, loc := range found {
+		if path := strings.TrimRight(plain[loc[0]:loc[1]], ".,"); path != "" && len(path) <= SubjectMaxChars {
 			return path
 		}
 	}
+	return ""
+}
+
+// subjectOf is the first path-like token of a sentence (a/b, a.go, a.md), else
+// the first backticked token, else "general". A backticked token with a space in
+// it, or longer than SubjectMaxChars, is a command and not a subject: the first
+// path-like token inside it stands in, else "general".
+func subjectOf(sentence string) string {
+	if path := pathIn(sentence); path != "" {
+		return path
+	}
 	if m := backticked.FindStringSubmatch(sentence); m != nil {
-		if token := strings.TrimSpace(m[1]); token != "" {
+		token := strings.TrimSpace(m[1])
+		switch {
+		case token == "":
+		case len(token) > SubjectMaxChars || strings.ContainsAny(token, " \t"):
+			if path := pathIn(token); path != "" {
+				return path
+			}
+		default:
 			return token
 		}
 	}

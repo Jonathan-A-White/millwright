@@ -177,8 +177,8 @@ func newMemoryMigrateCmd() *cobra.Command {
 			"text; each '- ' line is a current fact, and each of the archive's a retired one, with the\n" +
 			"date and name of the heading it sat under. A fact's source is the last bead id in brackets\n" +
 			"on its line, else mayor:<file>@<vault HEAD>; its kind decision under a heading with 'Before\n" +
-			"you start' or 'Decided' in it, else gotcha; its subject the first path-like or backticked\n" +
-			"token, else general; its since a date in the line, else today. A line it cannot place is\n" +
+			"you start' or 'Decided' in it, else gotcha; its subject the first path-like token (a <placeholder> kept\n" +
+			"whole) or one-word backticked token of at most 40 characters, else general; its since a date in the line, else today. A line it cannot place is\n" +
 			"printed as 'not placed' and left out. --dry-run prints every fact and writes nothing.\n" +
 			"Otherwise it removes the two files it read (no git command is run: the Mayor commits). It\n" +
 			"refuses a rig that already has a facts folder, and one with no memory file.",

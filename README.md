@@ -1871,7 +1871,8 @@ and each line of the archive a retired one, retired on the date in the heading i
 sat under with the reason `pruned: <heading>`. A fact's source is the last
 bracketed bead id on its line, else `mayor:<file>@<vault HEAD>`; its kind is
 decision under a heading with "Before you start" or "Decided" in it, else gotcha;
-its subject the first path-like or backticked token, else `general`; its since a
+its subject the first path-like token (a `<placeholder>` kept whole) or one-word backticked
+token of at most 40 characters, else `general`; its since a
 date in the line, else today. A line it cannot place is printed as `not placed`
 with its line number and left out. `--dry-run` prints every fact and writes
 nothing; a real run writes `about.md` and `facts/`, removes the two files (no
