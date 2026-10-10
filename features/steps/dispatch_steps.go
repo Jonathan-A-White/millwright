@@ -39,12 +39,6 @@ type dispatchContext struct {
 	files   *apptest.FakeVaultFiles
 	mail    *apptest.FakeMailbox
 
-	// bundleFiles is where a leftover branch's bundle is committed and pushed
-	// (mw-gq6.107) — its own fake, apart from files (the host sync's), so that
-	// a scenario can break the bundle's push without also breaking the sync
-	// that runs before it.
-	bundleFiles *apptest.FakeVaultFiles
-
 	// out is what the dispatch printed, and waits is every wait it asked for,
 	// which a scenario never really sits through.
 	out   bytes.Buffer
@@ -92,12 +86,11 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
 		*c = dispatchContext{
-			tracker:     apptest.NewFakeTracker(),
-			runner:      apptest.NewFakeRunner(),
-			files:       &apptest.FakeVaultFiles{},
-			bundleFiles: &apptest.FakeVaultFiles{},
-			mail:        apptest.NewFakeMailbox(),
-			events:      &apptest.FakeEventLog{},
+			tracker: apptest.NewFakeTracker(),
+			runner:  apptest.NewFakeRunner(),
+			files:   &apptest.FakeVaultFiles{},
+			mail:    apptest.NewFakeMailbox(),
+			events:  &apptest.FakeEventLog{},
 		}
 		// ReclaimStory judges a lease against the fake tracker's own clock
 		// (mw-gq6.120): every scenario in this file runs at dispatchNow, so the
@@ -124,7 +117,7 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a ready story "([^"]*)" of that epic labelled "([^"]*)"$`, c.aReadyStoryLabelled)
 	ctx.Given(`^a story "([^"]*)" of that epic is already running here$`, c.aStoryAlreadyRunningHere)
 	ctx.Given(`^a story "([^"]*)" of that epic was dispatched and left its worktree with (\d+) commits?$`, c.aStoryLeftAWorktreeWithCommits)
-	ctx.Given(`^the vault cannot push the bundle$`, c.theVaultCannotPushTheBundle)
+	ctx.Given(`^the worktree of "([^"]*)" holds uncommitted work$`, c.theWorktreeHoldsUncommittedWork)
 	ctx.Given(`^the close-out of "([^"]*)" refused it$`, c.theCloseOutRefusedIt)
 	ctx.Given(`^the session of "([^"]*)" has a dead pane and its lease has expired$`, c.theSessionHasADeadPaneAndLeaseExpired)
 	ctx.Given(`^the session of "([^"]*)" has a dead pane but its lease has not expired$`, c.theSessionHasADeadPaneButLeaseNotExpired)
@@ -224,8 +217,10 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the branch of "([^"]*)" still has its (\d+) commits?$`, c.theBranchStillHasItsCommits)
 	ctx.Then(`^dispatch said once that "([^"]*)" is refused and waits for the Mayor$`, c.dispatchSaidOnceItIsRefused)
 	ctx.Then(`^dispatch reclaimed "([^"]*)" for a dead pane with an expired lease$`, c.dispatchReclaimedForADeadPane)
-	ctx.Then(`^the leftover branch of "([^"]*)" was saved as a bundle under "([^"]*)" in the vault$`, c.theLeftoverBranchWasSavedAsABundleUnder)
-	ctx.Then(`^the dispatch line for "([^"]*)" names the bundle and the attempt$`, c.theDispatchLineNamesTheBundleAndTheAttempt)
+	ctx.Then(`^the earlier branch of "([^"]*)" was kept as "([^"]*)" with its (\d+) commits?$`, c.theEarlierBranchWasKept)
+	ctx.Then(`^the dispatch line for "([^"]*)" names the kept branch and the attempt$`, c.theDispatchLineNamesTheKeptBranchAndTheAttempt)
+	ctx.Then(`^a session was started for "([^"]*)" all the same$`, c.aSessionWasStartedAllTheSame)
+	ctx.Then(`^the worktree of "([^"]*)" still holds its uncommitted work$`, c.theWorktreeStillHoldsItsUncommittedWork)
 	ctx.Then(`^the dry run report says (\d+) of (\d+) sessions were already running$`, c.theReportSaysHowManyWereRunning)
 	ctx.Then(`^dispatch reports (\d+) of (\d+) sessions were already running$`, c.theReportSaysHowManyWereRunning)
 	ctx.Then(`^the story "([^"]*)" records (\d+) attempts?$`, c.theStoryRecordsAttempts)
@@ -426,11 +421,18 @@ func (c *dispatchContext) aStoryLeftAWorktreeWithCommits(id string, n int) error
 	return nil
 }
 
-// theVaultCannotPushTheBundle makes the vault's own files refuse a push, the
-// shape a retry's or a dispatch's own bundle push hits when the vault's
-// remote cannot be reached.
-func (c *dispatchContext) theVaultCannotPushTheBundle() error {
-	c.bundleFiles.PushErr = fmt.Errorf("git push in vault: exit status 128: could not push")
+// theWorktreeHoldsUncommittedWork leaves a file nobody committed in the
+// story's worktree: what a session that died mid-work leaves (mw-gq6.326).
+func (c *dispatchContext) theWorktreeHoldsUncommittedWork(id string) error {
+	return os.WriteFile(filepath.Join(c.worktreeOf(id), "half-done.md"), []byte("not committed\n"), 0o644)
+}
+
+// theWorktreeStillHoldsItsUncommittedWork checks dispatch left that file where
+// it was.
+func (c *dispatchContext) theWorktreeStillHoldsItsUncommittedWork(id string) error {
+	if _, err := os.Stat(filepath.Join(c.worktreeOf(id), "half-done.md")); err != nil {
+		return fmt.Errorf("expected the uncommitted work of %s to be left alone: %w", id, err)
+	}
 	return nil
 }
 
@@ -882,7 +884,6 @@ func (c *dispatchContext) dispatch(host string, cap int, dryRun bool) error {
 		Tracker:   tracker,
 		Worktrees: worktrees,
 		Landing:   worktrees,
-		Files:     c.bundleFiles,
 		Runner:    c.runner,
 		Memory:    c.tracker,
 		Boot: application.SeatBoot{
@@ -1007,6 +1008,17 @@ func (c *dispatchContext) oneSessionWasStartedFor(id string) error {
 		return fmt.Errorf("expected the runner to hold one session named %q, got %q", application.SessionName(id), names)
 	}
 	return nil
+}
+
+// aSessionWasStartedAllTheSame checks the runner holds the story's session,
+// whether or not the dispatch failed on another story.
+func (c *dispatchContext) aSessionWasStartedAllTheSame(id string) error {
+	for _, name := range c.runner.Names() {
+		if name == application.SessionName(id) {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected a session for %s, the runner holds %q", id, c.runner.Names())
 }
 
 func (c *dispatchContext) noSessionWasStarted() error {
@@ -1422,25 +1434,25 @@ func (c *dispatchContext) dispatchReclaimedForADeadPane(id string) error {
 	return fmt.Errorf("expected %s to be reclaimed for a dead pane, got %+v", id, report.Reclaimed)
 }
 
-// theLeftoverBranchWasSavedAsABundleUnder checks that a leftover branch's
-// commits reached the vault as a bundle at relPath, that the bundle verifies,
-// and that the report names it against the story it was saved for.
-func (c *dispatchContext) theLeftoverBranchWasSavedAsABundleUnder(id, relPath string) error {
+// theEarlierBranchWasKept checks that the branch an earlier attempt left is
+// there under the name it was kept as, with its n commits, and that the
+// report names it against the story it was kept for.
+func (c *dispatchContext) theEarlierBranchWasKept(id, kept string, n int) error {
 	report, err := c.dispatched()
 	if err != nil {
 		return err
 	}
-	abs := filepath.Join(c.vault, filepath.FromSlash(relPath))
-	if _, err := os.Stat(abs); err != nil {
-		return fmt.Errorf("expected a bundle at %s: %w", abs, err)
+	said, err := gitSay(c.rig, "rev-list", "--count", application.StartPoint(application.DefaultRemote, "main")+".."+kept)
+	if err != nil {
+		return fmt.Errorf("the branch %s is not there: %w", kept, err)
 	}
-	if _, err := gitSay(c.rig, "bundle", "verify", abs); err != nil {
-		return fmt.Errorf("the bundle at %s does not verify: %w", abs, err)
+	if said != fmt.Sprint(n) {
+		return fmt.Errorf("expected %s to hold %d commits, got %s", kept, n, said)
 	}
 	for _, started := range report.Started {
 		if started.StoryID == id {
-			if started.SalvagedBundle != relPath {
-				return fmt.Errorf("expected %s to report the bundle %s, got %q", id, relPath, started.SalvagedBundle)
+			if started.KeptBranch != kept {
+				return fmt.Errorf("expected %s to report the branch kept as %s, got %q", id, kept, started.KeptBranch)
 			}
 			return nil
 		}
@@ -1448,9 +1460,9 @@ func (c *dispatchContext) theLeftoverBranchWasSavedAsABundleUnder(id, relPath st
 	return fmt.Errorf("expected %s among what was started, got %+v", id, report.Started)
 }
 
-// theDispatchLineNamesTheBundleAndTheAttempt checks that the printed report
-// names both the bundle a leftover was saved as and the attempt it started.
-func (c *dispatchContext) theDispatchLineNamesTheBundleAndTheAttempt(id string) error {
+// theDispatchLineNamesTheKeptBranchAndTheAttempt checks that the printed report
+// names both the branch an earlier attempt was kept as and the attempt it started.
+func (c *dispatchContext) theDispatchLineNamesTheKeptBranchAndTheAttempt(id string) error {
 	report, err := c.dispatched()
 	if err != nil {
 		return err
@@ -1460,8 +1472,8 @@ func (c *dispatchContext) theDispatchLineNamesTheBundleAndTheAttempt(id string) 
 			continue
 		}
 		printed := report.String()
-		if started.SalvagedBundle == "" || !strings.Contains(printed, started.SalvagedBundle) {
-			return fmt.Errorf("expected the report to name the bundle saved for %s, got:\n%s", id, printed)
+		if started.KeptBranch == "" || !strings.Contains(printed, started.KeptBranch) {
+			return fmt.Errorf("expected the report to name the branch kept for %s, got:\n%s", id, printed)
 		}
 		if !strings.Contains(printed, fmt.Sprintf("attempt %d", started.Attempt)) {
 			return fmt.Errorf("expected the report to name attempt %d for %s, got:\n%s", started.Attempt, id, printed)

@@ -49,6 +49,14 @@ type fakeWorktrees struct {
 	// the instant between this one's Exists check and its own.
 	OnExists func()
 
+	// dirs and branches, once Leave has been called, are the worktrees and
+	// branches that are really "there": Exists reports them, Add refuses one
+	// that is there as git does, and RemoveWithoutForce and RenameBranch change
+	// them. renamed is every "from to" RenameBranch was given.
+	dirs, branches map[string]bool
+	renamed        []string
+	RenameErr      error
+
 	// FetchEntered, when set, is closed the instant Fetch is called, so a test
 	// can wait until a dispatch has claimed a story and reached the fetch
 	// before it cancels the context Fetch is blocking on.
@@ -76,11 +84,24 @@ func (f *fakeWorktrees) Fetch(ctx context.Context, rigDir string) error {
 	return f.FetchErr
 }
 
-func (f *fakeWorktrees) Exists(_ context.Context, _, _, branch string) (bool, error) {
+// Leave says a worktree at dir and a branch were left by an earlier attempt.
+func (f *fakeWorktrees) Leave(dir, branch string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.dirs == nil {
+		f.dirs, f.branches = map[string]bool{}, map[string]bool{}
+	}
+	f.dirs[dir], f.branches[branch] = true, true
+}
+
+func (f *fakeWorktrees) Exists(_ context.Context, _, dir, branch string) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.OnExists != nil {
 		f.OnExists()
+	}
+	if f.dirs != nil {
+		return (dir != "" && f.dirs[dir]) || (branch != "" && f.branches[branch]), f.ExistsErr
 	}
 	if f.ExistsBranch != "" && branch != f.ExistsBranch {
 		return false, nil
@@ -91,6 +112,15 @@ func (f *fakeWorktrees) Exists(_ context.Context, _, _, branch string) (bool, er
 func (f *fakeWorktrees) Add(_ context.Context, _, dir, branch, start string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.dirs != nil {
+		if f.branches[branch] {
+			return fmt.Errorf("fatal: a branch named '%s' already exists", branch)
+		}
+		if f.dirs[dir] {
+			return fmt.Errorf("fatal: '%s' already exists", dir)
+		}
+		f.dirs[dir], f.branches[branch] = true, true
+	}
 	if f.AddErr != nil {
 		if f.OnAdd != nil {
 			f.OnAdd()
@@ -112,11 +142,40 @@ func (f *fakeWorktrees) RemoveWithoutForce(_ context.Context, _, dir string) err
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.removed = append(f.removed, dir)
+	if f.RemoveErr == nil && f.dirs != nil {
+		delete(f.dirs, dir)
+	}
 	return f.RemoveErr
 }
 
 func (f *fakeWorktrees) DeleteBranch(_ context.Context, _, _ string) error {
 	return nil
+}
+
+func (f *fakeWorktrees) RenameBranch(_ context.Context, _, from, to string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.RenameErr != nil {
+		return f.RenameErr
+	}
+	if f.branches != nil {
+		if !f.branches[from] {
+			return fmt.Errorf("error: refname refs/heads/%s not found", from)
+		}
+		if f.branches[to] {
+			return fmt.Errorf("fatal: a branch named '%s' already exists", to)
+		}
+		delete(f.branches, from)
+		f.branches[to] = true
+	}
+	f.renamed = append(f.renamed, from+" "+to)
+	return nil
+}
+
+func (f *fakeWorktrees) renames() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.renamed...)
 }
 
 func (f *fakeWorktrees) was() (added, removed []string) {
@@ -1009,25 +1068,30 @@ func TestDispatchClearsTheMarkerOnceLevelAgain(t *testing.T) {
 	}
 }
 
-// mw-gq6.107: a dead-pane reclaim gives a story's claim back but leaves the
-// worktree and branch an earlier attempt cut exactly as they were, and the
-// fresh attempt below used to fail every time on git's own "already exists"
-// refusal. These tests walk dispatch through what it now does instead: save
-// the leftover as a bundle before cutting fresh, or — when that fails —
-// refuse just that story and let the rest of the tick's stories dispatch.
+// mw-gq6.107, mw-gq6.326: a dead-pane reclaim or a mw retry gives a story's
+// claim back but may leave the worktree and branch an earlier attempt cut,
+// and the fresh attempt used to fail every tick on git's own "already
+// exists" refusal. These tests walk dispatch through what it does instead:
+// keep the old branch under mw/<id>-attempt<N>, take the clean old worktree
+// away, cut fresh; and, for a dirty worktree, touch nothing and say which.
 
-func TestDispatchSalvagesALeftoverBranchBeforeCuttingFresh(t *testing.T) {
-	ctx := context.Background()
-	dispatch, tracker, worktrees, _, _ := aFactory(t)
+// aLeftover is a dispatch with a story whose earlier attempt (the first) left
+// its worktree and branch, and nothing running for it.
+func aLeftover(t *testing.T) (application.Dispatch, *apptest.FakeTracker, *fakeWorktrees, *apptest.FakeRunner) {
+	t.Helper()
+	dispatch, tracker, worktrees, runner, _ := aFactory(t)
 	claimedStory(t, tracker, "mw-gq6.1", 1)
-	if err := tracker.ReleaseClaim(ctx, "mw-gq6.1"); err != nil {
+	if err := tracker.ReleaseClaim(context.Background(), "mw-gq6.1"); err != nil {
 		t.Fatalf("giving back the claim: %v", err)
 	}
-	worktrees.ExistsVal = true
-	landing := &fakeRetryLanding{AheadCount: 2, BundleSHA: "deadbeef"}
-	dispatch.Landing = landing
-	files := &apptest.FakeVaultFiles{}
-	dispatch.Files = files
+	worktrees.Leave(application.WorktreeDir("/rigs/millwright", "mw-gq6.1"), application.StoryBranch("mw-gq6.1"))
+	dispatch.Landing = &fakeRetryLanding{}
+	return dispatch, tracker, worktrees, runner
+}
+
+func TestDispatchKeepsALeftoverBranchUnderItsAttemptBeforeCuttingFresh(t *testing.T) {
+	ctx := context.Background()
+	dispatch, _, worktrees, _ := aLeftover(t)
 
 	report, err := dispatch.Run(ctx)
 	if err != nil {
@@ -1036,76 +1100,93 @@ func TestDispatchSalvagesALeftoverBranchBeforeCuttingFresh(t *testing.T) {
 	if len(report.Started) != 1 || report.Started[0].StoryID != "mw-gq6.1" {
 		t.Fatalf("expected mw-gq6.1 started, got %+v (failed: %+v)", report.Started, report.Failed)
 	}
-	if report.Started[0].SalvagedBundle == "" {
-		t.Fatalf("expected the report to name the bundle saved, got %+v", report.Started[0])
-	}
 	if report.Started[0].Attempt != 2 {
 		t.Fatalf("expected attempt 2, got %d", report.Started[0].Attempt)
 	}
-	if !landing.bundled {
-		t.Errorf("expected the leftover branch to be bundled")
+	if kept := report.Started[0].KeptBranch; kept != "mw/mw-gq6.1-attempt1" {
+		t.Errorf("expected the report to name the branch kept, got %q", kept)
 	}
-	if len(files.Commits()) != 1 {
-		t.Errorf("expected the bundle committed in the vault, got %v", files.Commits())
+	if got := worktrees.renames(); len(got) != 1 || got[0] != "mw/mw-gq6.1 mw/mw-gq6.1-attempt1" {
+		t.Errorf("expected the old branch renamed to its attempt, got %q", got)
 	}
 	added, removed := worktrees.was()
 	if len(removed) != 1 {
-		t.Errorf("expected the leftover worktree removed before the fresh cut, got %q", removed)
+		t.Errorf("expected the old worktree removed before the fresh cut, got %q", removed)
 	}
 	if len(added) != 1 {
-		t.Errorf("expected a fresh worktree cut once the leftover was cleared, got %q", added)
+		t.Errorf("expected a fresh worktree cut, got %q", added)
 	}
-	if printed := report.String(); !strings.Contains(printed, report.Started[0].SalvagedBundle) {
-		t.Errorf("expected the printed report to name the bundle, got:\n%s", printed)
+	if printed := report.String(); !strings.Contains(printed, "mw/mw-gq6.1-attempt1") {
+		t.Errorf("expected the printed report to name the branch kept, got:\n%s", printed)
 	}
 }
 
-func TestDispatchRefusesOnlyThatStoryWhenSavingALeftoverBranchFails(t *testing.T) {
+func TestDispatchKeepsALeftoverBranchWhoseWorktreeIsAlreadyGone(t *testing.T) {
 	ctx := context.Background()
-	dispatch, tracker, worktrees, _, _ := aFactory(t)
-	dispatch.Cap = 2
-	claimedStory(t, tracker, "mw-gq6.1", 1)
-	if err := tracker.ReleaseClaim(ctx, "mw-gq6.1"); err != nil {
-		t.Fatalf("giving back the claim: %v", err)
-	}
-	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.2", Title: "Another story"})
-	worktrees.ExistsVal = true
-	worktrees.ExistsBranch = application.StoryBranch("mw-gq6.1")
-	landing := &fakeRetryLanding{AheadCount: 1, BundleErr: fmt.Errorf("the disk is full")}
-	dispatch.Landing = landing
-	dispatch.Files = &apptest.FakeVaultFiles{}
+	dispatch, _, worktrees, _ := aLeftover(t)
+	delete(worktrees.dirs, application.WorktreeDir("/rigs/millwright", "mw-gq6.1"))
 
 	report, err := dispatch.Run(ctx)
-	if err != nil {
-		t.Fatalf("expected the run to succeed even though one story was refused, got %v", err)
+	if err != nil || len(report.Started) != 1 {
+		t.Fatalf("expected mw-gq6.1 started, got %+v, %v (failed: %+v)", report.Started, err, report.Failed)
 	}
-	if len(report.Failed) != 0 {
-		t.Fatalf("expected no failures counted against the run, got %+v", report.Failed)
-	}
-	var found bool
-	for _, passed := range report.Passed {
-		if passed.StoryID != "mw-gq6.1" {
-			continue
-		}
-		found = true
-		if !strings.Contains(passed.Why, "could not be saved") {
-			t.Errorf("expected the reason to say it could not be saved, got %q", passed.Why)
-		}
-	}
-	if !found {
-		t.Fatalf("expected mw-gq6.1 passed over, got %+v", report.Passed)
-	}
-	var startedOther bool
-	for _, started := range report.Started {
-		if started.StoryID == "mw-gq6.2" {
-			startedOther = true
-		}
-	}
-	if !startedOther {
-		t.Fatalf("expected the other ready story to still dispatch, got %+v", report.Started)
+	if got := worktrees.renames(); len(got) != 1 {
+		t.Errorf("expected the old branch kept, got %q", got)
 	}
 	if _, removed := worktrees.was(); len(removed) != 0 {
-		t.Fatalf("expected the leftover left exactly as it was, got %q removed", removed)
+		t.Errorf("expected no worktree to remove, got %q", removed)
+	}
+}
+
+func TestDispatchKeepsALeftoverWorktreeWhoseBranchIsAlreadyGone(t *testing.T) {
+	ctx := context.Background()
+	dispatch, _, worktrees, _ := aLeftover(t)
+	delete(worktrees.branches, application.StoryBranch("mw-gq6.1"))
+
+	report, err := dispatch.Run(ctx)
+	if err != nil || len(report.Started) != 1 {
+		t.Fatalf("expected mw-gq6.1 started, got %+v, %v (failed: %+v)", report.Started, err, report.Failed)
+	}
+	if got := worktrees.renames(); len(got) != 0 {
+		t.Errorf("expected no branch to rename, got %q", got)
+	}
+	if _, removed := worktrees.was(); len(removed) != 1 {
+		t.Errorf("expected the old worktree removed, got %q", removed)
+	}
+}
+
+func TestDispatchNeverWritesOverABranchKeptBefore(t *testing.T) {
+	ctx := context.Background()
+	dispatch, _, worktrees, _ := aLeftover(t)
+	worktrees.branches["mw/mw-gq6.1-attempt1"] = true
+
+	report, err := dispatch.Run(ctx)
+	if err != nil || len(report.Started) != 1 {
+		t.Fatalf("expected mw-gq6.1 started, got %+v, %v (failed: %+v)", report.Started, err, report.Failed)
+	}
+	if got := worktrees.renames(); len(got) != 1 || got[0] != "mw/mw-gq6.1 mw/mw-gq6.1-attempt1-2" {
+		t.Errorf("expected the old branch kept under a name not yet taken, got %q", got)
+	}
+}
+
+func TestDispatchLeavesADirtyLeftoverAloneAndSaysWhich(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, worktrees, _ := aLeftover(t)
+	dispatch.Landing = &fakeRetryLanding{UncommittedPaths: []string{"half-done.go"}}
+
+	report, err := dispatch.Run(ctx)
+	if err == nil {
+		t.Fatalf("expected the run to report the story stuck, got %+v", report.Started)
+	}
+	dir := application.WorktreeDir("/rigs/millwright", "mw-gq6.1")
+	if len(report.Failed) != 1 || !strings.Contains(report.Failed[0].Err.Error(), dir) || !strings.Contains(report.Failed[0].Err.Error(), "half-done.go") {
+		t.Fatalf("expected one failure naming the dirty worktree and what is in it, got %+v", report.Failed)
+	}
+	if got := worktrees.renames(); len(got) != 0 {
+		t.Errorf("expected no branch renamed, got %q", got)
+	}
+	if added, removed := worktrees.was(); len(added) != 0 || len(removed) != 0 {
+		t.Errorf("expected nothing cut or removed, got %q %q", added, removed)
 	}
 	detail, err := tracker.ShowStory(ctx, "mw-gq6.1")
 	if err != nil {
@@ -1114,61 +1195,74 @@ func TestDispatchRefusesOnlyThatStoryWhenSavingALeftoverBranchFails(t *testing.T
 	if detail.Assignee != "" || detail.Status == apptest.StatusInProgress {
 		t.Fatalf("expected the claim given back, got status %q assignee %q", detail.Status, detail.Assignee)
 	}
-	if comments := tracker.Comments("mw-gq6.1"); len(comments) != 1 {
-		t.Fatalf("expected one comment noting the refusal, got %q", comments)
+}
+
+func TestDispatchStopsOnlyThatStoryWhenAKeptBranchCannotBeRenamed(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, worktrees, _ := aLeftover(t)
+	dispatch.Cap = 2
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.2", Title: "Another story"})
+	worktrees.RenameErr = fmt.Errorf("the disk is full")
+
+	report, _ := dispatch.Run(ctx)
+	if len(report.Failed) != 1 || report.Failed[0].StoryID != "mw-gq6.1" || !strings.Contains(report.Failed[0].Err.Error(), "the disk is full") {
+		t.Fatalf("expected mw-gq6.1 to fail with the reason, got %+v", report.Failed)
+	}
+	var startedOther bool
+	for _, started := range report.Started {
+		startedOther = startedOther || started.StoryID == "mw-gq6.2"
+	}
+	if !startedOther {
+		t.Fatalf("expected the other ready story to still dispatch, got %+v", report.Started)
 	}
 }
 
 // mw-gq6.96/mw-gq6.107: a live session under the story's name is a genuine
-// race with another dispatcher, not a leftover from a dead attempt — clearing
-// its branch away would destroy work a session is working on right now.
-func TestDispatchDoesNotSalvageALeftoverWhenAnotherDispatcherWinsTheRaceAtThatInstant(t *testing.T) {
+// race with another dispatcher, not a leftover from a dead attempt — moving
+// its branch away would pull the ground from under work going on right now.
+func TestDispatchDoesNotKeepALeftoverWhenAnotherDispatcherWinsTheRaceAtThatInstant(t *testing.T) {
 	ctx := context.Background()
-	dispatch, tracker, worktrees, runner, _ := aFactory(t)
+	dispatch, tracker, worktrees, runner := aLeftover(t)
 	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
-	worktrees.ExistsVal = true
-	worktrees.AddErr = fmt.Errorf("fatal: a branch named 'mw/mw-gq6.1' already exists")
 	session := application.SessionName("mw-gq6.1")
 	worktrees.OnExists = func() {
 		if err := runner.Start(ctx, application.SessionSpec{Name: session, Dir: "/other", Command: []string{"claude"}}); err != nil {
 			t.Fatalf("starting the other dispatcher's session: %v", err)
 		}
 	}
-	landing := &fakeRetryLanding{AheadCount: 1}
-	dispatch.Landing = landing
-	dispatch.Files = &apptest.FakeVaultFiles{}
 
 	report, err := dispatch.Run(ctx)
 	if err == nil || !strings.Contains(err.Error(), session) {
 		t.Fatalf("expected the failure to name the running session %s, got %v", session, err)
 	}
-	if landing.bundled || landing.removed || landing.branchDeleted {
-		t.Fatalf("expected nothing salvaged once a live session held the name, got %+v", landing)
+	if got := worktrees.renames(); len(got) != 0 {
+		t.Fatalf("expected nothing renamed once a live session held the name, got %q", got)
 	}
 	if len(report.Failed) != 1 || report.Failed[0].Released {
 		t.Fatalf("expected one failure that left the claim alone, got %+v", report.Failed)
 	}
 }
 
-// TestDispatchWithNoLeftoverDispatchesExactlyAsBefore pins the story's own
-// promise: wiring Landing and Files in at all must not change what happens
-// to a story with nothing left over to salvage.
+// TestDispatchWithNoLeftoverDispatchesExactlyAsBefore pins that wiring Landing
+// in at all must not change what happens to a story with nothing left over.
 func TestDispatchWithNoLeftoverDispatchesExactlyAsBefore(t *testing.T) {
 	ctx := context.Background()
 	dispatch, tracker, worktrees, _, _ := aFactory(t)
 	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
 	dispatch.Landing = &fakeRetryLanding{}
-	dispatch.Files = &apptest.FakeVaultFiles{}
 
 	report, err := dispatch.Run(ctx)
 	if err != nil {
 		t.Fatalf("dispatching: %v", err)
 	}
-	if len(report.Started) != 1 || report.Started[0].SalvagedBundle != "" {
-		t.Fatalf("expected a plain start with nothing salvaged, got %+v", report.Started)
+	if len(report.Started) != 1 || report.Started[0].KeptBranch != "" {
+		t.Fatalf("expected a plain start with nothing kept, got %+v", report.Started)
 	}
 	if added, _ := worktrees.was(); len(added) != 1 {
 		t.Fatalf("expected exactly one worktree cut, got %q", added)
+	}
+	if got := worktrees.renames(); len(got) != 0 {
+		t.Fatalf("expected nothing renamed, got %q", got)
 	}
 }
 

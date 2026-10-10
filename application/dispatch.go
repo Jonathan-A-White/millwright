@@ -68,15 +68,12 @@ type Dispatch struct {
 	Runner    Runner
 	Boot      SeatBoot
 
-	// Landing and Files are how a leftover worktree or branch from an earlier
-	// attempt — one a dead-pane reclaim gave the claim back on, or any other
-	// attempt that never had it cleared away — is saved before a fresh cut
-	// clears it, the same steps mw retry takes (mw-gq6.107). The vault a
-	// leftover's bundle is written under is Boot.Vault, already wired for the
-	// boot file. Either left nil means a leftover is never salvaged: Add's own
-	// failure decides what happens next, exactly as before mw-gq6.107.
+	// Landing is how a leftover worktree from an earlier attempt — one a
+	// dead-pane reclaim or a mw retry gave the claim back on — is read for
+	// uncommitted work before a fresh cut takes it away (mw-gq6.326). Left nil,
+	// a leftover is never looked for: Add's own failure decides what happens
+	// next.
 	Landing Landing
-	Files   VaultFiles
 
 	// Memory is where mw sweep remembers what it saw of a story's last session,
 	// so that a fresh attempt can clear it (mw-gq6.86): a session's pane starts
@@ -234,11 +231,9 @@ type Started struct {
 	// and that was still open, so that nothing was poured this time. Its Steps are
 	// the ones still open.
 	Reused bool
-	// SalvagedBundle is where a worktree or branch left over from an earlier
-	// attempt was bundled before this attempt's fresh cut cleared it away
-	// (mw-gq6.107), by path from the vault's root. Empty when nothing was left
-	// over, or when the leftover had no commits ahead of its target to bundle.
-	SalvagedBundle string
+	// KeptBranch is the name an earlier attempt's branch was kept under before
+	// this attempt's fresh cut (mw-gq6.326). Empty when no branch was left.
+	KeptBranch string
 }
 
 // Passed is one ready story this dispatch did not take, and why. It is not a
@@ -716,17 +711,11 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			report.Started = append(report.Started, started)
 		}
 		if err != nil {
-			var refusal *leftoverRefusal
 			var pour *pourRefusal
 			if errors.As(err, &pour) {
 				// Not a failed run either: the story is blocked with the reason on
 				// it, the claim kept, and the next dispatch holds it as refused.
 				report.Passed = append(report.Passed, Passed{StoryID: id, Why: pour.Error()})
-			} else if errors.As(err, &refusal) {
-				// Not a failed run: only this story is refused, its own leftover
-				// is somebody's to settle with mw retry, and the stories after it
-				// are still worked (mw-gq6.107).
-				report.Passed = append(report.Passed, Passed{StoryID: id, Why: refusal.Error()})
 			} else {
 				report.Failed = append(report.Failed, Failed{StoryID: id, Err: err, Released: released})
 				d.tellStuck(ctx, id, err, &report)
@@ -981,13 +970,11 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 		if leftoverAttempt < 1 {
 			leftoverAttempt = 1
 		}
-		salvaged, err := salvageBranch(ctx, d.Worktrees, d.Landing, d.Files, d.Boot.Vault, rigDir, id, started.Worktree, started.Branch, started.Start, leftoverAttempt)
+		kept, err := d.keepLeftover(ctx, rigDir, id, started, leftoverAttempt)
 		if err != nil {
-			refused, released, err := d.refuseLeftover(ctx, id, err)
-			handedBack(released)
-			return refused, released, err
+			return undo("clearing the way for the new worktree", err, false)
 		}
-		started.SalvagedBundle = salvaged.BundlePath
+		started.KeptBranch = kept
 	}
 
 	if err := d.Worktrees.Add(ctx, rigDir, started.Worktree, started.Branch, started.Start); err != nil {
@@ -1068,8 +1055,8 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 	if started.Attempt > 1 {
 		where += fmt.Sprintf(", attempt %d", started.Attempt)
 	}
-	if started.SalvagedBundle != "" {
-		where += fmt.Sprintf(", after saving what an earlier attempt left as %s", started.SalvagedBundle)
+	if started.KeptBranch != "" {
+		where += fmt.Sprintf(", after keeping what an earlier attempt left as %s", started.KeptBranch)
 	}
 	if molecule := started.Molecule; molecule.Poured() {
 		if started.Reused {
@@ -1089,21 +1076,19 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 }
 
 // leftoverAt reports whether an earlier attempt left the worktree or the
-// branch a fresh cut is about to take — the shape a dead-pane reclaim leaves
-// behind, its session gone but the git it made never cleared away
-// (mw-gq6.107). Salvaging one needs somewhere to bundle it and somewhere to
-// push that bundle; without Landing and Files wired in, nothing here is ever
-// called a leftover, and Add's own failure decides what happens next, exactly
-// as before mw-gq6.107.
+// branch a fresh cut is about to take — the shape a dead-pane reclaim or a mw
+// retry leaves behind, its session gone but the git it made never cleared away
+// (mw-gq6.107, mw-gq6.326). Without Landing wired in, nothing here is ever
+// called a leftover, and Add's own failure decides what happens next.
 //
 // A live session already running under the story's name is never a leftover,
 // whatever Exists says: that is the race two dispatchers can lose to each
-// other in the same instant (mw-gq6.96), and clearing away a branch a session
-// is working right now would destroy it. Add's own failure and the namesake
-// check release makes right before giving a claim back both still cover that
-// race exactly as they did before this existed.
+// other in the same instant (mw-gq6.96), and moving a branch a session is
+// working on right now would pull the ground from under it. Add's own failure
+// and the namesake check release makes right before giving a claim back both
+// still cover that race exactly as they did before this existed.
 func (d Dispatch) leftoverAt(ctx context.Context, rigDir string, started Started) (bool, error) {
-	if d.Landing == nil || d.Files == nil || d.Boot.Vault == nil {
+	if d.Landing == nil {
 		return false, nil
 	}
 	exists, err := d.Worktrees.Exists(ctx, rigDir, started.Worktree, started.Branch)
@@ -1116,16 +1101,55 @@ func (d Dispatch) leftoverAt(ctx context.Context, rigDir string, started Started
 	return true, nil
 }
 
-// leftoverRefusal marks a story refused because a worktree or branch left by
-// an earlier attempt could not be saved before a fresh cut (mw-gq6.107): the
-// claim was given back and why is on the story, the same as any other
-// refusal, but it is not counted as a failed run — the leftover is
-// somebody's to settle with mw retry, and the other stories ready this tick
-// are still worked.
-type leftoverRefusal struct{ err error }
-
-func (e *leftoverRefusal) Error() string { return e.err.Error() }
-func (e *leftoverRefusal) Unwrap() error { return e.err }
+// keepLeftover clears an earlier attempt's worktree and branch out of the way of
+// a fresh cut without losing anything (mw-gq6.326). A worktree holding
+// uncommitted work is refused, naming it and what is in it: it is somebody's to
+// settle by hand, and nothing is changed. Otherwise the clean worktree is taken
+// away (never forced) and the branch is renamed to mw/<id>-attempt<N>, N the
+// attempt that made it, with a number added if that name is taken by an attempt
+// kept before; no branch is ever deleted. It returns the name the branch was
+// kept under, empty when there was no branch.
+func (d Dispatch) keepLeftover(ctx context.Context, rigDir, id string, started Started, attempt int) (string, error) {
+	hasDir, err := d.Worktrees.Exists(ctx, rigDir, started.Worktree, "")
+	if err != nil {
+		return "", err
+	}
+	hasBranch, err := d.Worktrees.Exists(ctx, rigDir, "", started.Branch)
+	if err != nil {
+		return "", err
+	}
+	if hasDir {
+		left, err := d.Landing.Uncommitted(ctx, started.Worktree)
+		if err != nil {
+			return "", fmt.Errorf("reading what the worktree %s left uncommitted: %w", started.Worktree, err)
+		}
+		if len(left) > 0 {
+			return "", fmt.Errorf("the worktree %s of an earlier attempt holds uncommitted work (%s), so it and its branch %s were left as they were; commit or discard it by hand, or mw retry %s",
+				started.Worktree, strings.Join(left, ", "), started.Branch, id)
+		}
+		if err := d.Worktrees.RemoveWithoutForce(ctx, rigDir, started.Worktree); err != nil {
+			return "", fmt.Errorf("the worktree %s of an earlier attempt could not be removed: %w", started.Worktree, err)
+		}
+	}
+	if !hasBranch {
+		return "", nil
+	}
+	kept := fmt.Sprintf("%s-attempt%d", started.Branch, attempt)
+	for n := 2; ; n++ {
+		taken, err := d.Worktrees.Exists(ctx, rigDir, "", kept)
+		if err != nil {
+			return "", err
+		}
+		if !taken {
+			break
+		}
+		kept = fmt.Sprintf("%s-attempt%d-%d", started.Branch, attempt, n)
+	}
+	if err := d.Worktrees.RenameBranch(ctx, rigDir, started.Branch, kept); err != nil {
+		return "", fmt.Errorf("the branch %s of an earlier attempt could not be kept as %s: %w", started.Branch, kept, err)
+	}
+	return kept, nil
+}
 
 // ReasonPourRefused is the code a story is marked blocked under when the
 // tracker refused to pour its formula.
@@ -1220,17 +1244,6 @@ func (d Dispatch) refusePour(ctx context.Context, id string, started Started, ri
 		result = fmt.Errorf("%w (%s)", result, strings.Join(unsaid, "; "))
 	}
 	return Started{}, false, &pourRefusal{err: result}
-}
-
-// refuseLeftover gives the claim back and notes on the story that a leftover
-// from an earlier attempt could not be saved, so this dispatch tick moves on
-// to whatever else is ready rather than failing the whole run over it. The
-// leftover itself is left exactly as it was, the same as a failed mw retry
-// leaves it, for a person to settle by hand.
-func (d Dispatch) refuseLeftover(ctx context.Context, id string, err error) (Started, bool, error) {
-	why := fmt.Errorf("cutting the worktree of %s: a worktree or branch left by an earlier attempt could not be saved before a fresh cut: %w", id, err)
-	released, err := d.release(ctx, id, why)
-	return Started{}, released, &leftoverRefusal{err: err}
 }
 
 // reclaimDeadPane looks at one story this host already has claimed, and gives
@@ -1658,8 +1671,8 @@ func (r DispatchReport) String() string {
 		if started.Attempt > 1 {
 			fmt.Fprintf(&b, " · attempt %d", started.Attempt)
 		}
-		if started.SalvagedBundle != "" {
-			fmt.Fprintf(&b, " · a leftover from an earlier attempt was saved as %s", started.SalvagedBundle)
+		if started.KeptBranch != "" {
+			fmt.Fprintf(&b, " · a leftover from an earlier attempt was kept as %s", started.KeptBranch)
 		}
 		if molecule := started.Molecule; molecule.Poured() && started.Reused {
 			fmt.Fprintf(&b, " · %s reused as %s (%d steps still open)", molecule.Formula, molecule.RootID, len(molecule.Steps))

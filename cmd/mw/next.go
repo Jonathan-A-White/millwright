@@ -161,6 +161,7 @@ func newNextCmd() *cobra.Command {
 				dispatcher = withHostDispatchLocks(application.Dispatch{
 					Tracker:     gateway,
 					Worktrees:   worktrees,
+					Landing:     worktrees,
 					Runner:      runner,
 					Boot:        builderBoot(files, host, tests, nice),
 					Memory:      gateway,

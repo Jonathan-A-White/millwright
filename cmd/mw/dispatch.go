@@ -243,7 +243,6 @@ func newDispatchCmd() *cobra.Command {
 				Tracker:     gateway,
 				Worktrees:   worktrees,
 				Landing:     worktrees,
-				Files:       files,
 				Runner:      tmux.New(),
 				Boot:        builderBoot(files, host, tests, nice),
 				Memory:      gateway,
