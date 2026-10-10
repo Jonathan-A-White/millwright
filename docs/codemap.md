@@ -13,18 +13,18 @@ domain/(events): stdlib · application/: use cases, ports · infra/: adapters ·
 | VaultFiles, TrackerSync, SyncHaltMarker | application/sync.go | infra/{vault/git,beads/sync}.go, infra/synchalt | apptest.Fake{VaultFiles,Tracker,SyncHaltMarker} |
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | infra/beads/mail.go | apptest.FakeMailbox |
 | EpicRules | application/epicrules.go | infra/vault/epicrules.go | apptest.FakeEpicRules |
-| Vault | application/seatboot.go | infra/vault | application/seatboot_test.go |
+| Vault | application/seatboot.go | infra/vault | seatboot_test.go |
 | Runner | application/runner.go | infra/tmux | apptest.FakeRunner |
 | Harness | application/harness.go | infra/claude | seatboot_test.go |
 | SeatFiles, Windows, SeatHarness, ActingFile | application/seatup.go, application/seathandover.go | infra/{vault/{seat,reaplog},tmux/window,claude/claude}.go | apptest.Fake{Windows,Acting*} |
-| Transcripts{,Tail,Replies}, PeekRemote | application/seatcontext.go, application/peek.go | infra/{claude,peekremote} | apptest/fakepeek.go |
+| Transcripts{,Tail,Replies}, PeekRemote | application/seatcontext.go, application/peek.go | infra/{claude,peekremote} | apptest.FakePeek |
 | Reap{Terminal,Log,Armer} | application/seatreap.go | infra/{tmux/reap,vault/reaplog,reaper/arm}.go | apptest.Fake{Windows,ReapArmer} |
 | WatchProbes | application/watch.go | infra/watch | apptest.FakeWatch |
 | Doctor{Check,State,Log,Notes}, VPSProbe | application/doctor.go, application/vpsnginx.go | infra/{doctor,vpsnginx} | - |
 | Network{Probe,Store,Reader} | application/network.go | infra/network | apptest.FakeNetwork* |
 | CardLog | application/card.go | infra/cardlog | apptest.FakeCardLog |
 | CloseOutMarks | application/closeout.go | infra/closeout | apptest.Fake*Mark* |
-| Worktrees | application/worktrees.go | infra/rig/worktree.go | application/dispatch_test.go |
+| Worktrees | application/worktrees.go | infra/rig/worktree.go | dispatch_test.go |
 | HostLoad, Cloud*, BenchmarkBook | application/hostload.go, application/benchmark.go | infra/{hostload,cloud,vault/{cloudbook,benchmarks}.go} | apptest.Fake{HostLoad,Cloud*,Benchmarks} |
 | TickLog, Notifier, HomeMoveHost, OldHome, VaultBirth, TrackerBirth | application/{millhandtick,homemove,init}.go | infra/{ticklog,notify/notify,homemove/homemove,vault/birth,beads/init}.go | apptest.FakeTickLog |
 | Landing, Checks, MergeSlot, Holding | application/landing.go | infra/rig/{landing,checks,slot}.go | - |
@@ -51,7 +51,7 @@ domain/(events): stdlib · application/: use cases, ports · infra/: adapters ·
 | Talk{Call,Model,Say,Wait} | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go | mw talk <sub> - cmd/mw/talk.go | features/talk_*.feature |
 | Millhand, Deputy, MillhandTick | application/millhand.go, application/deputy.go, application/millhandtick.go | mw millhand [tick]/deputy - cmd/mw/millhand.go, cmd/mw/deputy.go, cmd/mw/millhandtick.go | features/{millhand,deputy,millhand_tick}.feature |
 | Secrets{Put,Get,List}, Hands{Add,List}, Ask, Watch, Doctor | application/secrets.go, application/hands.go, application/ask.go, application/watch.go, application/doctor.go | mw secrets/hands/ask/watch/doctor - cmd/mw/secrets.go, cmd/mw/hands.go, cmd/mw/ask.go, cmd/mw/watch.go, cmd/mw/doctor.go | features/{secrets,hands,ask,watch,doctor}.feature |
-| SeatBoot, Memory, Init | application/seatboot.go, application/rigfacts.go, application/memory.go, application/init.go | Dispatch, Next; mw init/memory - cmd/mw/init.go, cmd/mw/memory.go | features/{seat_boot,init,memory}.feature |
+| SeatBoot, Memory, Init | application/seatboot.go, application/rigfacts.go, application/memory.go, application/memorymigrate.go, application/init.go | Dispatch, Next; mw init/memory - cmd/mw/init.go, cmd/mw/memory.go | features/{seat_boot,init,memory}.feature |
 | Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern <sub> - cmd/mw/posternview.go, cmd/mw/posternbead.go | features/postern_*.feature |
 | Event{Follow,Emit,Tail,Ship,Wait,Nudge,Spring,Control,Trim} | application/eventfollow.go, application/eventlog.go, application/eventship.go, application/eventwait.go, application/eventnudge.go, application/eventsubscribe.go, application/eventspring.go, application/eventcontrol.go, application/eventtrim.go | mw events <sub> - cmd/mw/events.go | features/event_follow.feature |
 | Postern{Serve,Nginx,Mirror} | application/posternhand.go, application/posternmirror.go | mw postern <sub> - cmd/mw/postern.go, cmd/mw/posternmirror.go | features/postern_serve.feature |
