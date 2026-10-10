@@ -97,3 +97,49 @@ func TestPausedHostIsTheLatestPauseOrResumeForIt(t *testing.T) {
 		t.Fatal("still paused after resume-host")
 	}
 }
+
+// A pause written on the home reaches a Boost as the host.<h>.paused note: its
+// dispatch, which reads a log with no pause in it, reports the pause from the
+// note and starts nothing (mw-sgtc6p).
+func TestDispatchIsPausedByTheNoteTheHomeMirrored(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, runner, _ := aFactory(t)
+	var out bytes.Buffer
+	dispatch.Events, dispatch.Memory, dispatch.Out = &apptest.FakeEventLog{}, tracker, &out
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+
+	log := &apptest.FakeEventLog{}
+	appendAll(t, log, control("governor@postern", "pause-host vps"))
+	pause, _, err := application.PausedHost(ctx, log, "vps")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mirror := &application.EventControl{Log: log, Cursors: &apptest.FakeNudgeCursors{}, Tracker: tracker, Runner: runner, Host: "home", Notes: tracker}
+	if err := mirror.Control(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := tracker.Note(ctx, application.PausedKey("vps")); got == "" {
+		t.Fatalf("the home did not mirror %+v", pause)
+	}
+
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if report.Paused == nil || report.Paused.Actor != "governor@postern" {
+		t.Fatalf("report.Paused = %+v, want the pause by governor@postern", report.Paused)
+	}
+	if len(report.Started) != 0 || len(runner.Names()) != 0 {
+		t.Fatalf("a paused host started %+v", report.Started)
+	}
+	if !strings.Contains(out.String(), "paused") {
+		t.Fatalf("the pass said %q", out.String())
+	}
+
+	if err := tracker.ClearNote(ctx, application.PausedKey("vps")); err != nil {
+		t.Fatal(err)
+	}
+	if report, err = dispatch.Run(ctx); err != nil || report.Paused != nil || len(report.Started) != 1 {
+		t.Fatalf("after the note was cleared: %+v, %v", report, err)
+	}
+}

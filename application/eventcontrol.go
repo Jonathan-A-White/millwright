@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -55,6 +56,43 @@ func PausedHost(ctx context.Context, log EventLog, host string) (HostPause, bool
 		}
 	}
 	return pause, paused, nil
+}
+
+// PausedKey is the key of the bd kv note that mirrors a pause-host for host:
+// host.<h>.paused, beside host.<h>.last_sync. The home's follower sets it on a
+// pause-host and clears it on a resume-host, and the tracker's sync carries it
+// to a Boost, whose log holds no pause (mw-sgtc6p).
+func PausedKey(host string) string { return "host." + host + ".paused" }
+
+type pausedNote struct {
+	Seq   uint64    `json:"seq"`
+	At    time.Time `json:"at"`
+	Actor string    `json:"actor"`
+}
+
+func (p HostPause) note() string {
+	raw, _ := json.Marshal(pausedNote{Seq: p.Seq, At: p.At, Actor: p.Actor})
+	return string(raw)
+}
+
+// PausedByNote reports whether the mirrored note says host is paused, and by
+// whom. A note that is there but cannot be read is still a pause: the home
+// wrote it, and a Boost is better stopped than started on a guess.
+func PausedByNote(ctx context.Context, notes interface {
+	Note(ctx context.Context, key string) (string, error)
+}, host string) (HostPause, bool, error) {
+	value, err := notes.Note(ctx, PausedKey(host))
+	if err != nil {
+		return HostPause{}, false, fmt.Errorf("reading the pause note of %s: %w", host, err)
+	}
+	if strings.TrimSpace(value) == "" {
+		return HostPause{}, false, nil
+	}
+	var n pausedNote
+	if json.Unmarshal([]byte(value), &n) != nil {
+		return HostPause{Actor: "an unreadable pause note"}, true, nil
+	}
+	return HostPause{Seq: n.Seq, At: n.At, Actor: n.Actor}, true, nil
 }
 
 // Cancel is a cancel event as mw status shows it.
@@ -114,6 +152,10 @@ type EventControl struct {
 	Runner  Runner
 	// Host is this host: a story claimed on another is that host's to cancel.
 	Host string
+	// Notes is where a pause-host or resume-host in the log is mirrored, as the
+	// host.<h>.paused note, so that a host reading another log hears it. Left
+	// nil, nothing is mirrored.
+	Notes SweepNotes
 	// Err is where what is left or failed is said, each once while it repeats.
 	Err io.Writer
 
@@ -139,6 +181,18 @@ func (c *EventControl) Control(ctx context.Context) error {
 		if known {
 			return nil
 		}
+		// History is not cancelled, but a pause still in force is mirrored.
+		if c.Notes != nil {
+			evs, err := c.Log.Since(ctx, 0)
+			if err != nil {
+				return err
+			}
+			for _, ev := range evs {
+				if !c.mirror(ctx, ev) {
+					return nil
+				}
+			}
+		}
 		return c.save(ctx, cursors, head)
 	}
 	evs, err := c.Log.Since(ctx, cur)
@@ -150,12 +204,40 @@ func (c *EventControl) Control(ctx context.Context) error {
 		if control, ok := events.ControlOf(ev); ok && control.Word == events.ControlCancel && !c.cancel(ctx, ev) {
 			break
 		}
+		if !c.mirror(ctx, ev) {
+			break
+		}
 		last = ev.Seq
 	}
 	if last == cur {
 		return nil
 	}
 	return c.save(ctx, cursors, last)
+}
+
+// mirror writes the host.<h>.paused note for a pause-host event and clears it
+// for a resume-host, and reports false when the note could not be written, so
+// that a later pass tries the event again. Any other event is left.
+func (c *EventControl) mirror(ctx context.Context, ev events.Event) bool {
+	control, ok := events.ControlOf(ev)
+	if !ok || c.Notes == nil {
+		return true
+	}
+	var err error
+	switch control.Word {
+	case events.ControlPauseHost:
+		err = c.Notes.SetNote(ctx, PausedKey(control.Host), HostPause{Seq: ev.Seq, At: ev.Ts, Actor: ev.Actor}.note())
+	case events.ControlResumeHost:
+		err = c.Notes.ClearNote(ctx, PausedKey(control.Host))
+	default:
+		return true
+	}
+	if err != nil {
+		c.say("pause:"+control.Host, fmt.Errorf("the %s of %s could not be mirrored to its note: %w", control.Word, control.Host, err))
+		return false
+	}
+	c.quiet("pause:" + control.Host)
+	return true
 }
 
 func (c *EventControl) save(ctx context.Context, cursors map[string]uint64, seq uint64) error {
