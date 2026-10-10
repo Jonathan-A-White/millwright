@@ -82,6 +82,56 @@ func TestReclaimDeadPaneClosesAStoryWhoseBranchAlreadyLanded(t *testing.T) {
 	}
 }
 
+// A demo is closed only on the Governor's "Looks good", so a demo found landed
+// is left open and held, its claim given back, instead of closed (mw-gq6.345).
+func TestReclaimDeadPaneHoldsADemoWhoseBranchAlreadyLanded(t *testing.T) {
+	for name, mark := range map[string]func(*testing.T, *apptest.FakeTracker){
+		"labelled": func(t *testing.T, tracker *apptest.FakeTracker) {
+			if err := tracker.SetLabels("mw-gq6.9", application.LabelDemo); err != nil {
+				t.Fatalf("labelling the story: %v", err)
+			}
+		},
+		"titled": func(t *testing.T, tracker *apptest.FakeTracker) {
+			if err := tracker.SetTitle("mw-gq6.9", "DEMO the catch-it-first doc"); err != nil {
+				t.Fatalf("titling the story: %v", err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			dispatch, tracker, runner, session := aDeadPaneWithALapsedLease(t, &fakeRetryLanding{MergedTip: landedTip})
+			mark(t, tracker)
+
+			report, err := dispatch.Run(ctx)
+			if err != nil {
+				t.Fatalf("expected the dispatch to run cleanly, got %v", err)
+			}
+			if len(report.LandedAlready) != 1 || report.Running != 0 || len(report.Started) != 0 {
+				t.Fatalf("expected the demo reported landed already and not running or started, got %+v", report)
+			}
+			detail, err := tracker.ShowStory(ctx, "mw-gq6.9")
+			if err != nil {
+				t.Fatalf("showing the story: %v", err)
+			}
+			if detail.Status != apptest.StatusDeferred || detail.Assignee != "" {
+				t.Fatalf("expected the demo left held and unclaimed, got %q held by %q", detail.Status, detail.Assignee)
+			}
+			if state, _ := tracker.StoryState(ctx, "mw-gq6.9", application.RunState); state != application.RunLanded {
+				t.Fatalf("expected the story recorded %s=%s, got %q", application.RunState, application.RunLanded, state)
+			}
+			comments := strings.Join(tracker.Comments("mw-gq6.9"), "\n")
+			for _, want := range []string{landedTip[:12], "A demo: left open and held for the Governor's 'Looks good'."} {
+				if !strings.Contains(comments, want) {
+					t.Fatalf("expected a comment naming %q, got %q", want, comments)
+				}
+			}
+			if closed := runner.Closed(); len(closed) != 1 || closed[0] != session {
+				t.Fatalf("expected the dead window closed, got %q closed", closed)
+			}
+		})
+	}
+}
+
 func TestReclaimDeadPaneGivesBackAStoryWhoseBranchIsNotMerged(t *testing.T) {
 	ctx := context.Background()
 	dispatch, tracker, _, session := aDeadPaneWithALapsedLease(t, &fakeRetryLanding{})

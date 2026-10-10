@@ -383,6 +383,9 @@ type NextReport struct {
 	// nothing to commit.
 	Committed []string
 	Closed    bool
+	// DemoHeld is true when the story landed and is a demo, so it was left open
+	// and held for the Governor's "Looks good" rather than closed.
+	DemoHeld bool
 	// Abandoned names the stories claimed here whose session is not there any
 	// more — claims a person or a later sweep has to settle.
 	Abandoned []string
@@ -505,7 +508,7 @@ func (n Next) closeSession(ctx context.Context, report NextReport) {
 		// Sent back: the story's name is the fresh session's now, and the one
 		// this close-out ran in has been moved aside to be closed.
 		name = report.Aside
-	case !report.Closed:
+	case !report.Closed && !report.DemoHeld:
 		return
 	}
 	if err := n.Runner.Close(ctx, name); err != nil {
@@ -1374,10 +1377,18 @@ func (n Next) finish(ctx context.Context, c *closeOut, report *NextReport, outco
 	// every sync until somebody commits it, and this is the run that can.
 	n.commit(ctx, c, report)
 
-	closeErr := n.closeStory(ctx, c.id, outcome)
-	if closeErr != nil {
-		report.NotClosed = closeErr.Error()
+	var closeErr error
+	if isDemo(c.detail) {
+		closeErr = n.holdDemo(ctx, c, report, outcome)
 	} else {
+		closeErr = n.closeStory(ctx, c.id, outcome)
+	}
+	switch {
+	case closeErr != nil:
+		report.NotClosed = closeErr.Error()
+	case isDemo(c.detail):
+		report.DemoHeld = true
+	default:
 		report.Closed = true
 	}
 	// Told once: the run that landed the story says so, and a later run that
@@ -1396,6 +1407,34 @@ func (n Next) finish(ctx context.Context, c *closeOut, report *NextReport, outco
 
 	report.Abandoned = n.abandoned(ctx, c.id, report)
 	return n.carryOn(ctx, c, report)
+}
+
+// holdDemo is what landing does in place of closeStory for a demo, which only
+// the Governor's "Looks good" closes: it is left open and held, tried again the
+// way a close is, and counts as held when a read back finds it so.
+func (n Next) holdDemo(ctx context.Context, c *closeOut, report *NextReport, outcome string) error {
+	tries := n.pushTries()
+	var last error
+	for try := 1; try <= tries; try++ {
+		if try > 1 {
+			if err := waitFor(ctx, n.PushWait); err != nil {
+				return fmt.Errorf("%w (and waiting %s to try holding the demo again: %v)", last, n.PushWait, err)
+			}
+		}
+		var notes []string
+		notes, last = holdLandedDemo(ctx, n.Tracker, c.id, outcome, "")
+		report.Notes = append(report.Notes, notes...)
+		if last == nil {
+			return nil
+		}
+		if detail, err := n.Tracker.ShowStory(ctx, c.id); err == nil && detail.Held() && detail.Assignee == "" {
+			return nil
+		}
+	}
+	if tries == 1 {
+		return last
+	}
+	return fmt.Errorf("holding the demo failed on each of its %d tries, the last saying: %w", tries, last)
 }
 
 // closeStory closes a landed story, and when the close fails tries it again the
@@ -2066,7 +2105,10 @@ func (r NextReport) String() string {
 	if r.Closed {
 		b.WriteString("  closed  the story is closed\n")
 	}
-	if r.Landed && !r.Closed {
+	if r.DemoHeld {
+		b.WriteString("  closed  " + DemoLeftOpen + "\n")
+	}
+	if r.Landed && !r.Closed && !r.DemoHeld {
 		fmt.Fprintf(&b, "  OPEN    the story is landed but still open: %s\n", firstLine(r.NotClosed))
 		fmt.Fprintf(&b, "          nothing above is undone; run `mw next %s` again to close it, and nothing is merged or ledgered twice\n", r.StoryID)
 		if r.Assignee != "" {

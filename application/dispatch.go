@@ -1473,8 +1473,9 @@ func (d Dispatch) target(detail StoryDetail) string {
 }
 
 // closeLanded closes a story found already landed, the way a finished close-out
-// would have, and reports it; found says how it was known. The claim is never
-// given back. A close that fails leaves the claim exactly as it was, counted
+// would have, and reports it; found says how it was known. A demo is not closed
+// but left open and held, its claim given back, for the Governor's "Looks good"
+// (mw-gq6.345). Otherwise the claim is never given back. A close that fails leaves the claim exactly as it was, counted
 // running, for the next tick to try again; nothing else is written until it
 // has gone through, so a server that stays unreachable is not written to over
 // and over.
@@ -1484,7 +1485,20 @@ func (d Dispatch) closeLanded(ctx context.Context, detail StoryDetail, session s
 	outcome := fmt.Sprintf("landed on %s already: %s; closed by mw dispatch on %s, "+
 		"which found the claim with a dead pane (%s) and its lease run out",
 		found.Target, found.By, d.Host, session)
-	if err := d.Tracker.CloseStory(ctx, id, outcome); err != nil {
+	demo := isDemo(detail)
+	if demo {
+		// A demo is closed on the Governor's "Looks good" alone: held, not closed.
+		outcome = fmt.Sprintf("landed on %s already: %s; found by mw dispatch on %s, "+
+			"which found the claim with a dead pane (%s) and its lease run out",
+			found.Target, found.By, d.Host, session)
+		notes, err := holdLandedDemo(ctx, d.Tracker, id, outcome, detail.Assignee)
+		report.Notes = append(report.Notes, notes...)
+		if err != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf(
+				"%s: the demo landed already (%s), but it could not be held: %v", id, found.By, err))
+			return false
+		}
+	} else if err := d.Tracker.CloseStory(ctx, id, outcome); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf(
 			"%s: it landed already (%s), but the story could not be closed, so its claim was kept: %v",
 			id, found.By, err))
@@ -1496,11 +1510,13 @@ func (d Dispatch) closeLanded(ctx context.Context, detail StoryDetail, session s
 	if err := d.Tracker.SetStoryState(ctx, id, RunState, RunLanded, outcome); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be recorded as %s=%s: %v", id, RunState, RunLanded, err))
 	}
-	said := "mw dispatch on " + d.Host + " found " + id + " claimed here with a dead pane (" + session + ") and its lease run out, " +
-		"and " + found.By + ": the close-out landed it on " + found.Target + " and only the close of the story was lost, " +
-		"so the story was closed rather than dispatched again."
-	if err := d.Tracker.CommentOnStory(ctx, id, said); err != nil {
-		report.Notes = append(report.Notes, fmt.Sprintf("%s: the landed close could not be commented on: %v", id, err))
+	if !demo {
+		said := "mw dispatch on " + d.Host + " found " + id + " claimed here with a dead pane (" + session + ") and its lease run out, " +
+			"and " + found.By + ": the close-out landed it on " + found.Target + " and only the close of the story was lost, " +
+			"so the story was closed rather than dispatched again."
+		if err := d.Tracker.CommentOnStory(ctx, id, said); err != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf("%s: the landed close could not be commented on: %v", id, err))
+		}
 	}
 	report.LandedAlready = append(report.LandedAlready, found)
 	return true

@@ -698,6 +698,27 @@ Feature: Closing out a finished story and carrying on
       | 311,200 tokens |
       | $4.21          |
 
+  Scenario: A demo that lands is left open and held for the Governor's Looks good
+    Given the story "mw-gq6.1" is labelled "demo"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the story "mw-gq6.1" is left open and held, though it landed
+    And the story "mw-gq6.1" carries a comment quoting: A demo: left open and held for the Governor's 'Looks good'.
+    And the last ledger line names "mw-gq6.1"
+    And the session of "mw-gq6.1" is closed
+    And exactly one mail was sent, to "mayor" from "mw@vps"
+    And that mail's subject is "Landed: The story mw-gq6.1"
+    And that mail's body holds:
+      | left open (a demo) |
+
+  Scenario: A story titled DEMO with no label is left open and held too
+    Given the story "mw-gq6.1" is titled "DEMO catch it first"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is left open and held, though it landed
+    And the story "mw-gq6.1" carries a comment quoting: A demo: left open and held for the Governor's 'Looks good'.
+
   Scenario: A Landed mail carries the closing comment's rig-memory proposals as mw memory lines to paste
     Given the session of "mw-gq6.1" reported a plain success
     And the story "mw-gq6.1" carries the closing comment "Done.\nFor the rig memory:\ngotcha [bd]: Point every bd call at the vault with -C.\nretire old-note: The script it described is gone."
