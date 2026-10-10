@@ -157,6 +157,7 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 		Tracker: gateway,
 		Runner:  tmux.New(),
 		Host:    host,
+		Notes:   gateway,
 		Err:     cmd.ErrOrStderr(),
 	}
 	return application.EventFollow{

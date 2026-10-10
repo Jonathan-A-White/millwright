@@ -10,7 +10,7 @@ docs/protocol.md section 22 uses exactly these.
 
 | Field | JSON | What it holds |
 | --- | --- | --- |
-| Seq | `seq` | The home's log number: unique, increasing from 1. Order and dedupe by it, never by txid. |
+| Seq | `seq` | The home's log number: unique within one home's log, increasing from 1 (a fresh home starts again at 1). Order and dedupe by it, never by txid. |
 | Ts | `ts` | When it happened, RFC 3339, UTC. |
 | Kind | `kind` | One of the kinds below. |
 | Bead | `bead` | The bead it is about; empty where the kind has none. |
@@ -174,9 +174,11 @@ a story claimed on its own host it closes the story's session as the reaper clos
 gives the claim back, holds the story, sets its run state to `cancelled`, and comments
 `cancelled by <actor> at <time>`. The worktree and branch stay for a Clerk or `mw retry`. A
 cancel of a story that is not claimed, or is claimed on another host, is left and said on the
-follower's stderr. Only the home's log is read, so a pause or a cancel reaches the host whose
-follower and dispatch read that log. `mw status` shows a `PAUSED` line and the runs cancelled
-in the last day.
+follower's stderr. Only the home's log is read, so a cancel reaches the host whose follower
+reads that log. A pause reaches a Boost by a note: the control pass mirrors a `pause-host <h>`
+to the bd kv note `host.<h>.paused` and a `resume-host <h>` clears it, and `mw dispatch` on
+`<h>` is paused if its own log or that note says so. `mw status` shows a `PAUSED` line and the
+runs cancelled in the last day.
 
 ## The machines
 

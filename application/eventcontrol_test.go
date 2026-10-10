@@ -218,3 +218,67 @@ func TestFollowCallsTheControllerEveryPass(t *testing.T) {
 type controllerFunc func(context.Context) error
 
 func (c controllerFunc) Control(ctx context.Context) error { return c(ctx) }
+
+// A pause-host in the home's log is mirrored by the follower's control pass to
+// the host.<h>.paused note, and a resume-host clears it, so that a Boost, which
+// reads another log, can see the pause (mw-sgtc6p).
+func TestHomePauseSetsTheNoteAndResumeClearsIt(t *testing.T) {
+	ctx := context.Background()
+	w := newControlWorld(t)
+	w.control.Notes = w.tracker
+	w.pass(t)
+	if got, _ := w.tracker.Note(ctx, application.PausedKey("boost")); got != "" {
+		t.Fatalf("a note before any pause: %q", got)
+	}
+
+	appendAll(t, w.log, control("governor@postern", "pause-host boost"))
+	w.pass(t)
+	got, _ := w.tracker.Note(ctx, application.PausedKey("boost"))
+	if got == "" {
+		t.Fatal("the pause did not set the note")
+	}
+	if other, _ := w.tracker.Note(ctx, application.PausedKey("laptop")); other != "" {
+		t.Fatalf("a pause of boost set laptop's note: %q", other)
+	}
+
+	appendAll(t, w.log, control("governor@postern", "resume-host boost"))
+	w.pass(t)
+	if got, _ := w.tracker.Note(ctx, application.PausedKey("boost")); got != "" {
+		t.Fatalf("the resume left the note %q", got)
+	}
+}
+
+// A follower that starts with a pause already in the log mirrors it too, and a
+// pause then resume in one pass leaves no note.
+func TestFirstPassMirrorsAPauseAlreadyInTheLog(t *testing.T) {
+	ctx := context.Background()
+	w := newControlWorld(t)
+	w.control.Notes = w.tracker
+	appendAll(t, w.log,
+		control("governor@postern", "pause-host boost"),
+		control("governor@postern", "pause-host laptop"),
+		control("governor@postern", "resume-host laptop"))
+	w.pass(t)
+	if got, _ := w.tracker.Note(ctx, application.PausedKey("boost")); got == "" {
+		t.Fatal("a pause from before the follower began was not mirrored")
+	}
+	if got, _ := w.tracker.Note(ctx, application.PausedKey("laptop")); got != "" {
+		t.Fatalf("a pause already resumed left the note %q", got)
+	}
+}
+
+// A note that cannot be written is tried again on the next pass.
+func TestPauseNoteIsTriedAgainWhenItCannotBeWritten(t *testing.T) {
+	ctx := context.Background()
+	w := newControlWorld(t)
+	w.control.Notes = w.tracker
+	w.pass(t)
+	appendAll(t, w.log, control("governor@postern", "pause-host boost"))
+	w.tracker.Err = errors.New("dolt is down")
+	w.pass(t)
+	w.tracker.Err = nil
+	w.pass(t)
+	if got, _ := w.tracker.Note(ctx, application.PausedKey("boost")); got == "" {
+		t.Fatal("the pause note was not written once the tracker came back")
+	}
+}

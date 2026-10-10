@@ -471,17 +471,17 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	report := DispatchReport{Host: d.Host, Cap: d.Cap, DryRun: d.DryRun}
 
 	// A paused host starts nothing, and is not even synced: a pause is a word
-	// that the host is to be left alone until a resume-host says otherwise.
-	if d.Events != nil {
-		pause, paused, err := PausedHost(ctx, d.Events, d.Host)
-		if err != nil {
-			report.Notes = append(report.Notes, err.Error())
-		} else if paused {
-			report.Paused = &pause
-			d.print(fmt.Sprintf("dispatch on %s: paused by %s at %s (control event %d); nothing done until a resume-host event\n",
-				d.Host, pause.Actor, pause.At.UTC().Format(time.RFC3339), pause.Seq))
-			return report, nil
-		}
+	// that the host is to be left alone until a resume-host says otherwise. The
+	// word is in this host's own log, or, for a Boost whose log the home never
+	// wrote, in the host.<h>.paused note the home's follower mirrored.
+	pause, paused, err := d.pausedHere(ctx)
+	if err != nil {
+		report.Notes = append(report.Notes, err.Error())
+	} else if paused {
+		report.Paused = &pause
+		d.print(fmt.Sprintf("dispatch on %s: paused by %s at %s (control event %d); nothing done until a resume-host event\n",
+			d.Host, pause.Actor, pause.At.UTC().Format(time.RFC3339), pause.Seq))
+		return report, nil
 	}
 
 	// Asked before the sync, so that the backup it may skip reads the answer
@@ -1733,4 +1733,28 @@ func (f Failed) line() string {
 		return fmt.Sprintf("%v (the claim was given back)", f.Err)
 	}
 	return fmt.Sprintf("%v", f.Err)
+}
+
+// pausedHere reports whether this host is paused: its own log says so, or the
+// note the home's follower mirrored does. A read that fails is said in the
+// report's notes and does not stop the pass, as a log read that fails never has.
+func (d Dispatch) pausedHere(ctx context.Context) (HostPause, bool, error) {
+	var failed error
+	if d.Events != nil {
+		pause, paused, err := PausedHost(ctx, d.Events, d.Host)
+		if paused {
+			return pause, true, nil
+		}
+		failed = err
+	}
+	if d.Memory != nil {
+		pause, paused, err := PausedByNote(ctx, d.Memory, d.Host)
+		if paused {
+			return pause, true, nil
+		}
+		if failed == nil {
+			failed = err
+		}
+	}
+	return HostPause{}, false, failed
 }

@@ -1388,7 +1388,8 @@ pass, closes that story's session, gives the claim back, holds the story, record
 and comments `cancelled by <actor> at <time>`, leaving the worktree for `mw retry`. A
 `pause-host` makes that host's `mw dispatch` do nothing, saying it is paused, until a
 `resume-host`. `mw status` shows a `PAUSED` line and a `CANCELLED` section for the last day.
-Both act on the home's log, so they reach the host whose follower and dispatch read it.
+A cancel acts on the home's log, so it reaches the host whose follower reads it; a pause reaches a
+Boost through the `host.<h>.paused` note the home's follower mirrors, which the tracker's sync carries.
 
 No seat polls (mw-jrx0s.6, Q7 rule 2 of mw-6ww.55). A seat says which events it hears in
 `seats/<seat>/subscribe.toml` in the vault:
