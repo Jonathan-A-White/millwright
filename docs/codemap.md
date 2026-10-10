@@ -8,7 +8,7 @@ domain/(events): stdlib · application/: use cases/ports · infra/: adapters · 
 
 | Port | Declared in | Real adapter | Fake |
 |-|-|-|-|
-| `WorkTracker` | application/worktracker.go | infra/beads/ | apptest.FakeTracker |
+| `WorkTracker` | application/worktracker.go | infra/beads | apptest.FakeTracker |
 | TrackerNotes, SweepNotes, BeadGraph | application/{status,sweep}.go | same | same |
 | VaultFiles, TrackerSync, SyncHaltMarker | application/sync.go | infra/{vault/git,beads/sync}.go, infra/synchalt | apptest.Fake{VaultFiles,Tracker,SyncHaltMarker} |
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | infra/beads/mail.go | apptest.FakeMailbox |
@@ -32,8 +32,8 @@ domain/(events): stdlib · application/: use cases/ports · infra/: adapters · 
 | EventLog, BeadFeed, FollowCursors, ShipStates, SubscribeFiles, NudgeCursors, EventSpringer, EventController, HarnessCount | application/event*.go, status.go | infra/{eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go | apptest.Fake{EventLog,FollowCursors,Ship*,Tracker,Subscribe*} |
 | Postern, hands, Prompts | application/{postern*,hands,prompt}.go | infra/{postern,hands*,homemove} | apptest.Fake{Postern*,Cipher,Hands*,HomeMover,Prompts} |
 | Chain, StampQueue, StampStore, CommitNotes, RigHeads | application/chain.go, application/chainstamp.go, application/prove.go | infra/{bsv,stampqueue,chainlookup}, rig/worktree.go | apptest.Fake{Chain,StampQueue,Commit*,RigHeads} |
-| Grinder, GrindSource, GristState, GristLock, GristRunStore, GristForwardStore | application/grist.go, application/gristruns.go | infra/{claude/grind,rig/grinds,hostlock/try}.go, infra/grist | apptest.Fake{Grinder,Grinds,Grist*} |
-| Scorer | application/scorer.go | infra/scorer/ | apptest.FakeScorer |
+| Grinder, GrindSource, GristState, GristLock, GristRunStore, GristForwardStore, GristSmoke* | application/grist.go, application/gristruns.go, application/gristsmoke.go | infra/{claude/grind,rig/grinds,hostlock/try}.go, infra/grist | apptest.Fake{Grinder,Grinds,Grist*} |
+| Scorer | application/scorer.go | infra/scorer | apptest.FakeScorer |
 | SecretStore | application/secrets.go | infra/sops | apptest.FakeSecretStore |
 
 ## Use cases
@@ -46,7 +46,7 @@ domain/(events): stdlib · application/: use cases/ports · infra/: adapters · 
 | Tester | application/testerreport.go | mw tester report - cmd/mw/tester.go | features/tester.feature |
 | Check, Status, CloudCheck, Brief | application/check.go, application/status.go, application/cloud.go, application/brief.go | mw check/status/cloud/brief - cmd/mw/check.go, cmd/mw/status.go, cmd/mw/cloud.go, cmd/mw/brief.go | features/{check,status,cloud,brief}.feature |
 | Sweep, Tidy, Sync, Nudge, Mail | application/sweep.go, application/tidy.go, application/sync.go, application/nudge.go, application/mail.go | mw sweep/tidy/sync/nudge/mail - cmd/mw/sweep.go, cmd/mw/tidy.go, cmd/mw/sync.go, cmd/mw/nudge.go, cmd/mw/mail.go | features/{sweep,tidy,sync,mail}.feature |
-| Home, HomeMove | application/home.go, application/homemove.go | mw home [move] - cmd/mw/home.go, cmd/mw/homemove.go | features/home.feature, docs/home-move.md |
+| Home, HomeMove | application/home.go, application/homemove.go | mw home [move] - cmd/mw/home.go, cmd/mw/homemove.go | features/home.feature |
 | Seat{Context,Up,Reap,Handover} | application/seat{context,up,reap,handover}.go | mw seat <sub> - cmd/mw/seat.go | features/seat_{context,up,reap}.feature |
 | Talk{Call,Model,Say,Wait} | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go | mw talk <sub> - cmd/mw/talk.go | features/talk_*.feature |
 | Millhand, Deputy, MillhandTick | application/millhand.go, application/deputy.go, application/millhandtick.go | mw millhand [tick]/deputy - cmd/mw/millhand.go, cmd/mw/deputy.go, cmd/mw/millhandtick.go | features/{millhand,deputy,millhand_tick}.feature |
@@ -55,11 +55,11 @@ domain/(events): stdlib · application/: use cases/ports · infra/: adapters · 
 | SeatBoot, Init | application/seatboot.go, application/init.go | Dispatch, Next; mw init - cmd/mw/init.go | features/{seat_boot,init}.feature |
 | Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern <sub> - cmd/mw/posternview.go, cmd/mw/posternbead.go | features/postern_*.feature |
 | Event{Follow,Emit,Tail,Ship,Wait,Nudge,Spring,Control,Trim} | application/eventfollow.go, application/eventlog.go, application/eventship.go, application/eventwait.go, application/eventnudge.go, application/eventsubscribe.go, application/eventspring.go, application/eventcontrol.go, application/eventtrim.go | mw events <sub> - cmd/mw/events.go | features/event_follow.feature |
-| Hands{Add,List} | application/hands.go | mw hands <sub> - cmd/mw/hands.go; cmd/mw-hands-root | features/hands.feature |
+| Hands{Add,List} | application/hands.go | mw hands <sub> - cmd/mw/hands.go | features/hands.feature |
 | Postern{Serve,Nginx,Mirror} | application/posternhand.go, application/posternmirror.go | mw postern <sub> - cmd/mw/postern.go, cmd/mw/posternmirror.go | features/postern_serve.feature |
 | Prompt{Save,List,Show,Run}, Cards | application/prompt.go | mw prompt/card - cmd/mw/prompt.go, cmd/mw/card.go | features/{prompt,card}.feature |
-| Grist{Key,Grind,Send,Eval,Score,Runs,Stats} | application/grist.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go, application/gristroom.go | mw grist <sub> - cmd/mw/grist.go | features/{grist{,_send,_eval,_audio,_concurrent,_forward},scorer}.feature |
+| Grist{Key,Grind,Send,Eval,Score,Runs,Stats,Smoke} | application/grist.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go, application/gristroom.go, application/gristsmoke.go | mw grist <sub> - cmd/mw/grist.go, cmd/mw/gristsmoke.go | features/{grist{,_send,_eval,_audio,_concurrent,_forward,_smoke},scorer}.feature |
 
 cmd/mw/root.go, cmd/mw/version.go
 
-changelog_files: infra/rig/version.go writes domain/changelog.go: public/changelog.json `[{version,date,story,kind,text}]`; CHANGELOG.md `## X.Y.Z`, _date_, `- New|Fixed: text`.
+changelog_files: infra/rig/version.go writes domain/changelog.go and the rig's files (formats: README).

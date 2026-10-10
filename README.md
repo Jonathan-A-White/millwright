@@ -1626,6 +1626,7 @@ refused naming the value.
 ```toml
 grist_key_file  = "/home/jwhite/.config/mw/mill.key"   # MW_GRIST_KEY_FILE
 grist_state_dir = "/home/jwhite/.local/state/mw/grist" # MW_GRIST_STATE_DIR
+grist_test_key_file = "/home/jwhite/.config/mw/grist-test.key" # MW_GRIST_TEST_KEY_FILE; what mw grist smoke sends as (default shown)
 
 [grist]                  # the ceilings above every grind; these are the defaults
 models = "haiku,sonnet,opus"
@@ -1646,6 +1647,56 @@ The postern backend pairs with it through three environment lines:
 licence collection to its name). `mw postern serve` does not write these yet,
 so add them to the backend's environment file by hand. See
 `features/grist.feature`.
+
+### Grist smoke: an app's grist, tested end to end
+
+`mw grist smoke <app> [--kind k] [--wait 5m]` sends every scenario of the app's
+grinds through the live backend and checks the answers. A scenario is
+`grinds/examples/<kind>/<name>.json` in the app's rig (read at its `main`, as
+the mill reads grinds), with any photos it names beside it:
+
+```json
+{ "request": { "schemaVersion": "1", "...": "the app's own request" },
+  "photos":  ["blank-paper.jpg"],
+  "expect":  { "price": { "is_null": true }, "confidence": "low" } }
+```
+
+`expect` says what the answer must show, one entry per field (a dotted path:
+`items.0.name`). A bare value means equals; an object holds any of `equals`,
+`is_null`, `one_of`, `contains` (a substring, or an element of a list),
+`matches` (a regular expression) and `present` (true or false), and every part
+must hold. A new behaviour of a grind is a new scenario file. The smoke sends as
+the **test key** `grist_test_key_file` (default `~/.config/mw/grist-test.key`,
+env `MW_GRIST_TEST_KEY_FILE`: a key file the backend holds a licence for each
+app's grist; never the mill's or the Mayor's, and mw does not make it) and
+passes when the grist is answered, the answer fits the grind's answer schema
+(type, enum, required, properties, items, bounds, pattern, anyOf/oneOf, local
+`$ref`) and meets every `expect`. A failure names the scenario, the field, what
+was wanted and what came; a refused, failed or unanswered grist is a failure
+too. A kind with no scenario is a warning, not a failure, and a grind that
+forwards to the Mayor is not smoked. It exits 1 on a failure.
+
+After every landing in a rig, `mw next` runs the smoke without being asked: for
+an app whose rig landed a change to `grinds/` or to the rig's grist client paths,
+and for every app with grinds when the factory's own rig landed a change to
+`application/grist*.go`, `infrastructure/grist`, `infrastructure/claude/grind*.go`
+or `infrastructure/rig/grinds*.go`. Only a host with a `[grist-apps]` table smokes.
+The client paths are per rig, git pathspecs, in the config file:
+
+```toml
+[grist_smoke]            # besides grinds/, which always counts
+trade-tracker = "src/grist,src/api/grist.ts"
+```
+
+A failed smoke after a landing posts a failed `job` event (actor
+`grist-smoke@<host>`, emergency lane) that the Mayor's follower sees, writes the
+failure on the landed story, shows in `mw status` under GRIST SMOKE (a kind with
+no scenario shows there as a warning), and **holds the landing rig's open stories**:
+`mw dispatch` passes them over, saying why, and starts none of them. The hold ends
+when a later smoke of that app passes (a landing's, or `mw grist smoke <app>` by
+hand), or by hand with `mw grist smoke <app> --lift` when the failure is the very
+thing a held story is to mend. A smoke that could not be made at all (no test key)
+is a failure the same way.
 
 A grind may say `"forward": "mayor"` instead of naming a model, for a grist that is
 for a person to read, such as an app's feedback. The mill then runs no session
