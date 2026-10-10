@@ -481,6 +481,11 @@ unless made with `--no-inherit-labels`). No dispatcher takes it, and, dry run
 or not, it is passed over with that reason; the Mayor claims it and does it beside
 the Governor, and a `hitl` story in progress does not count against the cap.
 
+What it asks of him is one more label beside `hitl`: `hitl:hands`, `hitl:decision`,
+`hitl:review` or `hitl:verify`, and Needs you lists the bead as a need of that
+kind, with its body (Do this, Verified, Done when). A bare `hitl` is a hands need.
+`mw status` names the kind and warns of a bead that carries two.
+
 **A story is tried a bounded number of times.** Every session mw starts for a
 story is an attempt, counted in the story's `attempts` metadata once the session
 is running: a dispatch that fails before that (the fetch, the worktree, the

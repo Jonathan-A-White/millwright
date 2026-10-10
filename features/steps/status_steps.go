@@ -126,6 +126,11 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a status bead "([^"]*)" titled "([^"]*)" filed under no epic, waiting on "([^"]*)"$`,
 		c.aStatusBeadUnderNoEpicWaitingOn)
 	ctx.Given(`^the status story "([^"]*)" is labelled "([^"]*)"$`, c.theStatusStoryIsLabelled)
+	ctx.Given(`^the status story "([^"]*)" is labelled "([^"]*)" and "([^"]*)"$`, c.theStatusStoryIsLabelledTwice)
+	ctx.Given(`^the status story "([^"]*)" is labelled "([^"]*)" and "([^"]*)" and "([^"]*)"$`, c.theStatusStoryIsLabelledThrice)
+	ctx.Then(`^the report says "([^"]*)" waits as "([^"]*)"$`, c.theReportSaysWaitsAs)
+	ctx.Then(`^the report has no warning$`, c.theReportHasNoWarning)
+	ctx.Then(`^the report warns that "([^"]*)" has two hitl kinds, "([^"]*)" and "([^"]*)"$`, c.theReportWarnsTwoHitlKinds)
 	ctx.Given(`^the status story "([^"]*)" is held$`, c.theStatusStoryIsHeld)
 	ctx.Given(`^the status story "([^"]*)" keeps the hands step "([^"]*)"$`, c.theStatusStoryKeepsAHandsStep)
 	ctx.Then(`^the report lists "([^"]*)" under HELD, WITH A HANDS STEP$`, c.theReportListsUnderHeldWithAHandsStep)
@@ -322,6 +327,60 @@ func (c *statusContext) theStatusStoryIsAtPriority(id, priority string) error {
 
 func (c *statusContext) theStatusStoryIsLabelled(id, label string) error {
 	return c.tracker.SetLabels(id, label)
+}
+
+func (c *statusContext) theStatusStoryIsLabelledTwice(id, a, b string) error {
+	return c.tracker.SetLabels(id, a, b)
+}
+
+func (c *statusContext) theStatusStoryIsLabelledThrice(id, a, b, d string) error {
+	return c.tracker.SetLabels(id, a, b, d)
+}
+
+// theReportSaysWaitsAs checks the printed line under the Governor's heading
+// for the story names the kind of need it is.
+func (c *statusContext) theReportSaysWaitsAs(id, kind string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	section := headedBy(c.report.String(), application.WaitingHeading)
+	i := strings.Index(section, id)
+	if i < 0 {
+		return fmt.Errorf("%s is not under %q:\n%s", id, application.WaitingHeading, c.report.String())
+	}
+	rest := section[i:]
+	if j := strings.Index(rest, "\n\n"); j >= 0 {
+		rest = rest[:j]
+	}
+	if !strings.Contains(rest, kind) {
+		return fmt.Errorf("expected %s to wait as %q, got:\n%s", id, kind, rest)
+	}
+	return nil
+}
+
+func (c *statusContext) theReportHasNoWarning() error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	if len(c.report.Warnings) != 0 || strings.Contains(c.report.String(), "warning:") {
+		return fmt.Errorf("expected no warning, got:\n%s", c.report.String())
+	}
+	return nil
+}
+
+func (c *statusContext) theReportWarnsTwoHitlKinds(id, first, second string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	for _, w := range c.report.Warnings {
+		if strings.Contains(w, id) && strings.Contains(w, first) && strings.Contains(w, second) {
+			if !strings.Contains(c.report.String(), "warning: "+w) {
+				return fmt.Errorf("the warning %q is not printed:\n%s", w, c.report.String())
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("expected a warning that %s has the hitl kinds %s and %s, got %q:\n%s", id, first, second, c.report.Warnings, c.report.String())
 }
 
 func (c *statusContext) theStatusStoryIsHeld(id string) error {

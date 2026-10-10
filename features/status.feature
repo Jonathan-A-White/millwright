@@ -613,3 +613,21 @@ Feature: mw status
     And the report says "1 of 3 over 2x par or timed out"
     And the report says "FLAG lampas/bug/opus: try a wider window"
     And every line of the report is at most 60 columns wide
+
+  Scenario: A story labelled hitl and hitl:review is listed as waiting for the Governor, saying review
+    Given a status story "mw-gq6.60" filed under it
+    And the status story "mw-gq6.60" is labelled "hitl" and "hitl:review"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "mw-gq6.60" as waiting for the Governor
+    And the report does not list "mw-gq6.60" as ready
+    And the report says "mw-gq6.60" waits as "ready, review"
+    And the report has no warning
+
+  Scenario: A story labelled hitl and two hitl kinds is a warning
+    Given a status story "mw-gq6.61" filed under it
+    And the status story "mw-gq6.61" is labelled "hitl" and "hitl:review" and "hitl:decision"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "mw-gq6.61" as waiting for the Governor
+    And the report warns that "mw-gq6.61" has two hitl kinds, "review" and "decision"

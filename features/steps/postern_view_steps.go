@@ -63,6 +63,9 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the view's approve need on "([^"]*)" offers "([^"]*)"$`, c.theViewsApproveNeedOffers)
 	ctx.Then(`^the view's approve need on "([^"]*)" offers nothing$`, c.theViewsApproveNeedOffersNothing)
 	ctx.Given(`^the view's hitl bead "([^"]*)" under "([^"]*)" was filed (\d+) days? ago$`, c.theViewsHitlBeadWasFiled)
+	ctx.Given(`^the view's hitl bead "([^"]*)" under "([^"]*)" was filed (\d+) days? ago with the labels "([^"]*)" and the body "([^"]*)"$`, c.theViewsHitlBeadWasFiledLabelled)
+	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" landed an hour ago with the labels "([^"]*)"$`, c.theViewsBeadLandedAnHourAgoLabelled)
+	ctx.Then(`^the view's need "([^"]*)" on "([^"]*)" says "([^"]*)"$`, c.theViewsNeedSays)
 	ctx.Given(`^the view's bead "([^"]*)" has the comment "([^"]*)"$`, c.theViewsBeadHasTheComment)
 	ctx.Given(`^the view's bead "([^"]*)" has the comment "([^"]*)" dated (\d+) days? ago$`, c.theViewsBeadHasTheCommentDated)
 	ctx.Given(`^the view's bead "([^"]*)" has a comment of (\d+) letters$`, c.theViewsBeadHasALongComment)
@@ -513,6 +516,45 @@ func (c *posternViewContext) theViewsHitlBeadWasFiled(id, epic string, days int)
 		return err
 	}
 	return c.tracker.SetCreated(id, posternViewDaysAgo(days))
+}
+
+// theViewsHitlBeadWasFiledLabelled files a bead under epic with the comma-
+// separated labels and the body, days ago.
+func (c *posternViewContext) theViewsHitlBeadWasFiledLabelled(id, epic string, days int, labels, body string) error {
+	c.tracker.AddStory(epic, domain.Story{ID: id, Title: "Story " + id})
+	if err := c.tracker.SetLabels(id, splitLabels(labels)...); err != nil {
+		return err
+	}
+	if err := c.tracker.SetDescription(id, body); err != nil {
+		return err
+	}
+	return c.tracker.SetCreated(id, posternViewDaysAgo(days))
+}
+
+func (c *posternViewContext) theViewsBeadLandedAnHourAgoLabelled(id, epic, labels string) error {
+	if err := c.closeAt(id, epic, posternViewFeatureNow.Add(-time.Hour)); err != nil {
+		return err
+	}
+	return c.tracker.SetLabels(id, splitLabels(labels)...)
+}
+
+func splitLabels(labels string) []string {
+	var out []string
+	for _, l := range strings.Split(labels, ",") {
+		out = append(out, strings.TrimSpace(l))
+	}
+	return out
+}
+
+func (c *posternViewContext) theViewsNeedSays(kind, bead, text string) error {
+	n, err := c.needOf(kind, bead)
+	if err != nil {
+		return err
+	}
+	if n.Text != text {
+		return fmt.Errorf("expected the %s need on %s to say %q, got %q", kind, bead, text, n.Text)
+	}
+	return nil
 }
 
 func (c *posternViewContext) theViewsBeadHasTheComment(id, text string) error {

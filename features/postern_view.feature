@@ -317,3 +317,52 @@ Feature: mw postern view
     And the view has no bead "mw-mol-x.1"
     And the view's bead "mw-v.3" has the status "closed" and was closed at "2026-09-28T11:00:00Z"
     And the view's needs are "hands:mw-v.1, question:mw-v.4, verify:mw-v.3"
+
+  # One marker for everything waiting on him (mw-gq6.324): the label hitl plus
+  # one hitl:<kind> is a need of that kind; a bare hitl stays hands.
+  Scenario Outline: A bead labelled hitl and hitl:<kind> is a need of that kind, with its body
+    Given the view's epic "mw-kind" is live
+    And the view's hitl bead "mw-kind.1" under "mw-kind" was filed 1 day ago with the labels "hitl, hitl:<kind>" and the body "Do this: open the pull request. Verified: the checks are green. Done when: you have merged it."
+    When the live view is built
+    Then the view's needs on "mw-kind.1" are "<kind>:mw-kind.1"
+    And the view's need "<kind>" on "mw-kind.1" waits for "you"
+    And the view's need "<kind>" on "mw-kind.1" says "Do this: open the pull request. Verified: the checks are green. Done when: you have merged it."
+
+    Examples:
+      | kind     |
+      | decision |
+      | review   |
+      | verify   |
+
+  Scenario: A bead labelled hitl and hitl:hands is a hands need, with its body and its step
+    Given the view's epic "mw-kind" is live
+    And the view's hitl bead "mw-kind.1" under "mw-kind" was filed 1 day ago with the labels "hitl, hitl:hands" and the body "Do this: run the step. Verified: it exits 0. Done when: the step has run."
+    And the view's bead "mw-kind.1" has the hands step "linger" on "desktop" as "root" running "loginctl enable-linger jwhite"
+    When the live view is built
+    Then the view's needs on "mw-kind.1" are "hands:mw-kind.1"
+    And the view's need "hands" on "mw-kind.1" waits for "you"
+    And the view's need "hands" on "mw-kind.1" says "Do this: run the step. Verified: it exits 0. Done when: the step has run."
+
+  Scenario: A bare hitl bead still reads as hands
+    Given the view's epic "mw-kind" is live
+    And the view's hitl bead "mw-kind.1" under "mw-kind" was filed 1 day ago with the labels "hitl" and the body "Do this: flip the switch."
+    When the live view is built
+    Then the view's needs on "mw-kind.1" are "hands:mw-kind.1"
+
+  Scenario: A decision bead with no step is ready for him, not waiting on the Mayor to write steps
+    Given the view's epic "mw-kind" is live
+    And the view's hitl bead "mw-kind.1" under "mw-kind" was filed 1 day ago with the labels "hitl, hitl:decision" and the body "Do this: pick a name."
+    When the live view is built
+    Then the view's need "decision" on "mw-kind.1" waits for "you"
+
+  Scenario: A hitl:review bead left four days goes stale like any other waiting bead
+    Given the view's epic "mw-kind" is live
+    And the view's hitl bead "mw-kind.1" under "mw-kind" was filed 4 days ago with the labels "hitl, hitl:review" and the body "Do this: read the diff."
+    When the live view is built
+    Then the view's needs on "mw-kind.1" are "stale:mw-kind.1"
+
+  Scenario: A closed hitl:verify bead is his own doing and leaves Needs you with no Verify card
+    Given the view's epic "mw-kind" is live
+    And the view's bead "mw-kind.1" under "mw-kind" landed an hour ago with the labels "hitl, hitl:verify"
+    When the live view is built
+    Then the view's needs on "mw-kind.1" are ""
