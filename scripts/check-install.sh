@@ -18,7 +18,7 @@
 # when it is piped in, with no pins beside it); a foreign file is never
 # overwritten; the hand steps are printed.
 #
-# shellcheck is run over the scripts when it is installed, and skipped when not.
+# The scripts are linted with shellcheck when it is installed, and skipped when not.
 
 set -eu
 

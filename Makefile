@@ -74,6 +74,7 @@ lint:
 	scripts/check-vultr-boost.sh
 	scripts/check-gate-jobs.sh
 	scripts/check-chain-stamps-doc.sh
+	scripts/check-shellcheck-directives.sh
 
 clean:
 	rm -rf bin
