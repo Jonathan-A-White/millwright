@@ -680,6 +680,35 @@ Feature: Closing out a finished story and carrying on
       | 311,200 tokens |
       | $4.21          |
 
+  Scenario: A Landed mail carries the closing comment's rig-memory proposals as mw memory lines to paste
+    Given the session of "mw-gq6.1" reported a plain success
+    And the story "mw-gq6.1" carries the closing comment "Done.\nFor the rig memory:\ngotcha [bd]: Point every bd call at the vault with -C.\nretire old-note: The script it described is gone."
+    When mw closes out "mw-gq6.1"
+    Then exactly one mail was sent, to "mayor" from "mw@vps"
+    And that mail's subject is "Landed: The story mw-gq6.1"
+    And that mail's body holds:
+      | For the rig memory (millwright):                                                                           |
+      | mw memory add millwright --kind gotcha --subject 'bd' --source mw-gq6.1 'Point every bd call at the vault with -C.' |
+      | mw memory retire millwright old-note --reason 'The script it described is gone.'                           |
+
+  Scenario: A proposal mw cannot parse is flagged in the Landed mail and the story still lands
+    Given the session of "mw-gq6.1" reported a plain success
+    And the story "mw-gq6.1" carries the closing comment "Done.\nFor the rig memory:\nremember the vault"
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the story "mw-gq6.1" is closed
+    And that mail's subject is "Landed: The story mw-gq6.1"
+    And that mail's body holds:
+      | MALFORMED: remember the vault |
+
+  Scenario: A closing comment that proposes nothing says nothing in the Landed mail
+    Given the session of "mw-gq6.1" reported a plain success
+    And the story "mw-gq6.1" carries the closing comment "Done.\nFor the rig memory: nothing"
+    When mw closes out "mw-gq6.1"
+    Then that mail's body holds:
+      | For the rig memory (millwright): |
+      | nothing                          |
+
   Scenario: A refused story mails the Mayor the whole reason
     Given the session of "mw-gq6.1" reported a plain success
     And the rig's tests fail, saying "remote: fatal error in commit_refs"

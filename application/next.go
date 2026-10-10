@@ -1387,7 +1387,7 @@ func (n Next) finish(ctx context.Context, c *closeOut, report *NextReport, outco
 		if c.tested != "" {
 			verdict = MailTested
 		}
-		n.mailTheMayor(ctx, c, report, verdict, "")
+		n.mailTheMayor(ctx, c, report, verdict, n.rigMemoryProposals(ctx, c))
 	}
 	if closeErr != nil {
 		return *report, fmt.Errorf("closing out %s: it %s, but the story could not be closed, so it is landed and still open: %w",
@@ -1592,6 +1592,24 @@ func (n Next) changelogEntry(ctx context.Context, c *closeOut) (domain.Changelog
 		note.Text = domain.NoteFromTitle(c.detail.Story.Title, c.path.Rig)
 	}
 	return domain.ChangelogEntry{Date: n.now().UTC().Format("2006-01-02"), Story: c.id, Kind: kind, Text: note.Text}, nil
+}
+
+// rigMemoryProposals is the block a landing's mail carries from the story's
+// newest closing comment that has a 'For the rig memory:' section: the
+// proposals as mw memory lines to paste. It is empty when no comment has the
+// section or the comments cannot be read; a landing is never refused for it,
+// nor for a line that does not parse (the block flags that line).
+func (n Next) rigMemoryProposals(ctx context.Context, c *closeOut) string {
+	comments, err := n.Tracker.StoryComments(ctx, c.id)
+	if err != nil {
+		return ""
+	}
+	for i := len(comments) - 1; i >= 0; i-- {
+		if proposals := ParseFactProposals(comments[i].Text); proposals.Found {
+			return proposals.RigMemoryBlock(c.path.Rig, c.id)
+		}
+	}
+	return ""
 }
 
 // pushRetrying pushes what the landing worktree has checked out, and tries
