@@ -22,6 +22,8 @@ import (
 func registerNextChangelogSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the rig's file in the vault also names the changelog files "([^"]*)" and "([^"]*)"$`, c.theRigNamesChangelogFiles)
 	ctx.Given(`^the rig's main already holds a changelog with the entry "([^"]*)" saying "([^"]*)"$`, c.theRigsMainHoldsAChangelog)
+	ctx.Given(`^the story "([^"]*)" seeded a changelog entry "([^"]*)" saying "([^"]*)"$`, c.theStorySeededAnEntry)
+	ctx.Given(`^the story "([^"]*)" added the version files at "([^"]*)"$`, c.theStoryAddedVersionFiles)
 	ctx.Given(`^the story "([^"]*)" is titled "([^"]*)"$`, c.theStoryIsTitled)
 	ctx.Given(`^the story "([^"]*)" is labelled "([^"]*)"$`, c.theStoryIsLabelled)
 
@@ -29,6 +31,7 @@ func registerNextChangelogSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^the tip of "([^"]*)" at the rig's origin changed no changelog file$`, c.theTipChangedNoChangelog)
 	ctx.Then(`^"([^"]*)" at the top of "([^"]*)" at the rig's origin is the entry "([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)"$`, c.theTopEntryIs)
 	ctx.Then(`^"([^"]*)" at the rig's origin lists the versions "([^"]*)" then "([^"]*)"$`, c.theChangelogListsVersions)
+	ctx.Then(`^"([^"]*)" at the rig's origin lists exactly (\d+) entry$`, c.theChangelogListsEntries)
 	ctx.Then(`^"([^"]*)" on "([^"]*)" at the rig's origin reads:$`, c.theFileReads)
 	ctx.Then(`^"([^"]*)" and "([^"]*)" are absent from "([^"]*)" at the rig's origin$`, c.theFilesAreAbsent)
 }
@@ -172,6 +175,48 @@ func (c *nextContext) theFilesAreAbsent(first, second, branch string) error {
 		if text, err := gitShow(c.origin(), branch, file); err == nil {
 			return fmt.Errorf("expected %s to be absent from %s, it holds:\n%s", file, branch, text)
 		}
+	}
+	return nil
+}
+
+// theStorySeededAnEntry is a Builder who wrote its own story's note into both
+// changelog files, in its branch, under a version of its choosing.
+func (c *nextContext) theStorySeededAnEntry(id, version, text string) error {
+	dir := application.WorktreeDir(c.rig, id)
+	if err := os.MkdirAll(filepath.Join(dir, "public"), 0o755); err != nil {
+		return err
+	}
+	files := map[string]string{
+		"public/changelog.json": fmt.Sprintf("[\n  {\n    \"version\": %q,\n    \"date\": \"2026-09-17\",\n    \"story\": %q,\n    \"kind\": \"new\",\n    \"text\": %q\n  }\n]\n", version, id, text),
+		"CHANGELOG.md":          fmt.Sprintf("# What's new\n\n## %s\n_2026-09-17_\n- New: %s\n", version, text),
+	}
+	for file, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(file)), []byte(body), 0o644); err != nil {
+			return err
+		}
+	}
+	return commitIn(dir, "Seed the changelog ("+id+")")
+}
+
+// theStoryAddedVersionFiles is a rig's first landing: the version files are
+// not on main at all, and the story's branch brings them.
+func (c *nextContext) theStoryAddedVersionFiles(id, version string) error {
+	dir := application.WorktreeDir(c.rig, id)
+	for file, text := range map[string]string{"package.json": packageJSON(version), "package-lock.json": packageLock(version)} {
+		if err := os.WriteFile(filepath.Join(dir, file), []byte(text), 0o644); err != nil {
+			return err
+		}
+	}
+	return commitIn(dir, "Add the package files ("+id+")")
+}
+
+func (c *nextContext) theChangelogListsEntries(file string, want int) error {
+	entries, err := c.changelogAt(file, "main")
+	if err != nil {
+		return err
+	}
+	if len(entries) != want {
+		return fmt.Errorf("expected %s to hold %d entry, got %d: %+v", file, want, len(entries), entries)
 	}
 	return nil
 }

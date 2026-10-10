@@ -20,13 +20,15 @@ func (w *Worktrees) BumpVersion(ctx context.Context, landingDir string, bump app
 
 	// Did the story's own commits change the version? Then the Builder raised it
 	// on purpose (the minor of an epic's last story) and mw adds nothing to it.
+	// A file the story added, with no version before, is a rig's first landing
+	// (mw-gq6.334): that is not a raise, and the patch is raised from what it holds.
 	fork, err := w.git(ctx, landingDir, "merge-base", bump.Before, bump.Branch)
 	if err != nil {
 		return application.Bumped{}, err
 	}
 	was := w.versionAt(ctx, landingDir, strings.TrimSpace(fork), bump.Files[0])
 	now := w.versionAt(ctx, landingDir, bump.Branch, bump.Files[0])
-	if was != now {
+	if was != "" && was != now {
 		return w.noteUnderOwnVersion(ctx, landingDir, bump, now)
 	}
 
@@ -170,7 +172,7 @@ func changelogNames(files []changelogFile) []string {
 }
 
 // versionAt is the version the file holds at rev, or empty when the file is not
-// there or holds none: a story that adds the file has changed its version.
+// there or holds none.
 func (w *Worktrees) versionAt(ctx context.Context, dir, rev, file string) string {
 	content, err := w.git(ctx, dir, "show", rev+":"+file)
 	if err != nil {
