@@ -31,7 +31,7 @@ const BriefWaitWidth = 24
 // With Comments set, the newest comments of the bead follow in full: they hold
 // the Governor's words, so nothing clips them.
 //
-// It only reads: every call it makes is a ShowEpic, a ShowStory or a
+// It only reads: every call it makes is a ShowEpic, a ShowBeads or a
 // StoryComments, and nothing is written to the tracker.
 type Brief struct {
 	Tracker WorkTracker
@@ -126,12 +126,21 @@ func (b Brief) bead(ctx context.Context, id string, lookup map[string]StoryDetai
 	for _, child := range epic.Stories {
 		lookup[child.Story.ID] = child
 	}
+	var unfinished []StoryDetail
+	for _, child := range epic.Stories {
+		if !child.Closed() {
+			unfinished = append(unfinished, child)
+		}
+	}
+	if err := readNeeded(ctx, b.Tracker, unfinished, lookup); err != nil {
+		return BeadBrief{}, fmt.Errorf("briefing %s: %w", id, err)
+	}
 	for _, child := range epic.Stories {
 		if child.Closed() {
 			brief.Closed++
 			continue
 		}
-		waits, err := b.waitsOn(ctx, child, lookup)
+		waits, err := b.waitsOn(child, lookup)
 		if err != nil {
 			return BeadBrief{}, fmt.Errorf("briefing %s: %w", id, err)
 		}
@@ -171,21 +180,17 @@ func (b Brief) bead(ctx context.Context, id string, lookup map[string]StoryDetai
 }
 
 // waitsOn is the titles of what a child still waits on. A blocker among the
-// stories already read is known to be finished or not; one elsewhere is read
-// from the tracker, because a listing of children says which stories a child
-// waits on but not whether they are done. A blocker that is finished is not a
-// wait, and is not named.
-func (b Brief) waitsOn(ctx context.Context, child StoryDetail, lookup map[string]StoryDetail) ([]string, error) {
+// stories already read is known to be finished or not; one elsewhere is in
+// lookup too by now, read from the tracker with all the others in one batch
+// (readNeeded), because a listing of children says which stories a child waits
+// on but not whether they are done. A blocker that is finished is not a wait,
+// and is not named.
+func (b Brief) waitsOn(child StoryDetail, lookup map[string]StoryDetail) ([]string, error) {
 	var titles []string
 	for _, need := range child.Needs {
 		blocker, known := lookup[need]
 		if !known {
-			read, err := b.Tracker.ShowStory(ctx, need)
-			if err != nil {
-				return nil, fmt.Errorf("reading %s, which %s waits on: %w", need, child.Story.ID, err)
-			}
-			blocker = read
-			lookup[need] = blocker
+			return nil, fmt.Errorf("reading %s, which %s waits on: not read", need, child.Story.ID)
 		}
 		if blocker.Closed() {
 			continue

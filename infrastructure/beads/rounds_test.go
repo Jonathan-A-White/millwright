@@ -24,12 +24,14 @@ type roundsDB struct {
 	ready, claimed, blocked string
 	shown                   map[string]string
 	children                map[string]string
+	unlisted                []string // beads `show` knows and `list --id` does not print
 }
 
 // roundsStandIn is a stand-in bd over a roundsDB. `show` takes any number of
 // ids and prints the bead for each, as bd does, and refuses when one is unknown.
 // Every argv is written down, and every `list --parent` holds for a moment and
-// writes "overlap" to the file returned if another bd was inside one at the time.
+// writes "overlap" to the file returned if another bd was inside one at the time;
+// every `show` does the same, and writes to that file's name with ".show" after it.
 func roundsStandIn(t *testing.T, db roundsDB, opts ...beads.Option) (*beads.Gateway, string, string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -39,7 +41,10 @@ func roundsStandIn(t *testing.T, db roundsDB, opts ...beads.Option) (*beads.Gate
 	log := filepath.Join(dir, "asked.log")
 	overlap := filepath.Join(dir, "overlap")
 
-	var known, arms, kids strings.Builder
+	var known, arms, kids, hidden strings.Builder
+	for _, id := range db.unlisted {
+		fmt.Fprintf(&hidden, "            %s) continue ;;\n", id)
+	}
 	for id, bead := range db.shown {
 		fmt.Fprintf(&known, "        %s) ;;\n", id)
 		fmt.Fprintf(&arms, "        %s) bead='%s' ;;\n", id, bead)
@@ -71,14 +76,37 @@ case "$1" in
         case "$3" in
 %[6]s          *) printf '[]' ;;
         esac ;;
+      --id)
+        first=1
+        printf '['
+        for id in $(echo "$3" | tr ',' ' '); do
+          case "$id" in
+%[9]s          esac
+          case "$id" in
+%[7]s            *) continue ;;
+          esac
+          case "$id" in
+%[8]s          esac
+          [ $first = 1 ] || printf ','
+          first=0
+          printf '%%s' "$bead"
+        done
+        printf ']' ;;
       *) printf '%%s' '%[4]s' ;;
     esac ;;
   show)
     shift
+    if mkdir %[5]s.show.lock 2>/dev/null; then
+      sleep 0.3
+      rmdir %[5]s.show.lock
+    else
+      echo overlap >> %[5]s.show
+      sleep 0.3
+    fi
     out=""
     for id in "$@"; do
       case "$id" in
-        --json) continue ;;
+        --json|--include-comments) continue ;;
 %[7]s        *) echo "no issues found matching $id" >&2; exit 1 ;;
       esac
     done
@@ -86,7 +114,7 @@ case "$1" in
     printf '['
     for id in "$@"; do
       case "$id" in
-        --json) continue ;;
+        --json|--include-comments) continue ;;
 %[8]s      esac
       [ $first = 1 ] || printf ','
       first=0
@@ -95,7 +123,7 @@ case "$1" in
     printf ']' ;;
   *) exit 1 ;;
 esac
-`, log, db.ready, db.blocked, db.claimed, overlap, kids.String(), known.String(), arms.String())
+`, log, db.ready, db.blocked, db.claimed, overlap, kids.String(), known.String(), arms.String(), hidden.String())
 	path := filepath.Join(dir, "bd-rounds")
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("writing the stand-in: %v", err)
@@ -112,6 +140,7 @@ func bdCalls(t *testing.T, log string) int {
 // is read for its defaults. Read one at a time, a database of many epics costs
 // a bd each; the epics are read in one.
 func TestWorkInHandReadsAllTheEpicsInOneBd(t *testing.T) {
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "")
 	gateway, log, _ := roundsStandIn(t, roundsDB{
 		ready:   "[" + story("mw-a.1", "mw-e1") + "," + story("mw-b.1", "mw-e2") + "," + story("mw-c.1", "mw-e3") + "]",
 		claimed: "[" + story("mw-d.1", "mw-e4") + "," + story("mw-a.2", "mw-e1") + "]",
@@ -138,9 +167,65 @@ func TestWorkInHandReadsAllTheEpicsInOneBd(t *testing.T) {
 	}
 }
 
+// The epics a story's defaults come from are read for their own fields, and a
+// bd list prints those for any number of ids in one query where bd show makes a
+// round trip an id (2 to 2.5 s each over wg0, mw-gq6.358): against a server the
+// epics of what is in hand are one bd list, and no bd show.
+func TestWorkInHandReadsTheEpicsWithOneListAgainstAServer(t *testing.T) {
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "10.88.0.2")
+	gateway, log, _ := roundsStandIn(t, roundsDB{
+		ready:   "[" + story("mw-a.1", "mw-e1") + "," + story("mw-b.1", "mw-e2") + "]",
+		claimed: "[" + story("mw-d.1", "mw-e4") + "," + story("mw-a.2", "mw-e1") + "]",
+		shown: map[string]string{
+			"mw-e1": epic("mw-e1", "laptop"), "mw-e2": epic("mw-e2", "laptop"), "mw-e4": epic("mw-e4", "laptop"),
+		},
+	})
+
+	inHand, err := gateway.WorkInHand(context.Background())
+	if err != nil {
+		t.Fatalf("reading what is in hand: %v", err)
+	}
+	for _, detail := range append(inHand.Ready, inHand.Running...) {
+		if detail.Merged().Host != "laptop" {
+			t.Errorf("expected %s to inherit its epic's host laptop, got %q", detail.Story.ID, detail.Merged().Host)
+		}
+	}
+	if shows := showsAsked(t, log); len(shows) != 0 {
+		t.Errorf("expected no bd show for the epics, got %v", shows)
+	}
+	if got := bdCalls(t, log); got != 3 {
+		t.Errorf("expected ready, list and one list of the epics (3 bd calls), got %d: %v", got, asked(t, log))
+	}
+}
+
+// A bead bd list does not print (a type it hides) is read with bd show, so the
+// shortcut never loses an epic.
+func TestWorkInHandReadsAnEpicBdListHidesWithShow(t *testing.T) {
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "10.88.0.2")
+	gateway, log, _ := roundsStandIn(t, roundsDB{
+		ready:    "[" + story("mw-a.1", "mw-e1") + "," + story("mw-b.1", "mw-e2") + "]",
+		shown:    map[string]string{"mw-e1": epic("mw-e1", "laptop"), "mw-e2": epic("mw-e2", "laptop")},
+		unlisted: []string{"mw-e2"},
+	})
+
+	inHand, err := gateway.WorkInHand(context.Background())
+	if err != nil {
+		t.Fatalf("reading what is in hand: %v", err)
+	}
+	for _, detail := range inHand.Ready {
+		if detail.Merged().Host != "laptop" {
+			t.Errorf("expected %s to inherit its epic's host laptop, got %q", detail.Story.ID, detail.Merged().Host)
+		}
+	}
+	if shows := showsAsked(t, log); len(shows) != 1 || !strings.HasSuffix(shows[0], "show mw-e2 --json") {
+		t.Errorf("expected one bd show, of mw-e2, got %v", shows)
+	}
+}
+
 // bd blocked prints rows with no parent, so each blocked story is read back,
 // and its epic after it: the stories in one bd, the epics in another.
 func TestBlockedForHostReadsTheStoriesAndTheEpicsInOneBdEach(t *testing.T) {
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "")
 	gateway, log, _ := roundsStandIn(t, roundsDB{
 		blocked: "[" + row("mw-a.1") + "," + row("mw-b.1") + "," + row("mw-c.1") + "," + row("mw-d.1") + "]",
 		shown: map[string]string{
@@ -203,5 +288,125 @@ func TestShowEpicsReadsOneBdAtATimeAgainstTheVaultsOwnDatabase(t *testing.T) {
 	}
 	if _, err := os.Stat(overlap); err == nil {
 		t.Error("expected no two bd to run at once against the vault's own database")
+	}
+}
+
+// `bd show` of several ids is one round trip to the server per id, one after
+// another inside the one process, so a batch of 46 beads was minutes over wg0
+// (2 to 2.5 s an id, measured on the desktop, mw-gq6.358). Sixteen bd, one id
+// each, side by side take as long as one; so against a server a batch of ids
+// is read as a bd apiece, together.
+func manyBeads(n int) (roundsDB, []string) {
+	db := roundsDB{shown: map[string]string{}}
+	var ids []string
+	for i := 1; i <= n; i++ {
+		id := fmt.Sprintf("mw-e%d", i)
+		db.shown[id] = epic(id, "laptop")
+		ids = append(ids, id)
+	}
+	return db, ids
+}
+
+func showsAsked(t *testing.T, log string) []string {
+	t.Helper()
+	var shows []string
+	for _, line := range asked(t, log) {
+		if strings.Contains(line, " show ") {
+			shows = append(shows, line)
+		}
+	}
+	return shows
+}
+
+func TestShowBeadsReadsABatchAsABdApieceTogetherAgainstAServer(t *testing.T) {
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "10.88.0.2")
+	db, ids := manyBeads(6)
+	gateway, log, overlap := roundsStandIn(t, db)
+
+	found, err := gateway.ShowBeads(context.Background(), ids)
+	if err != nil {
+		t.Fatalf("reading the beads: %v", err)
+	}
+	if len(found) != len(ids) {
+		t.Fatalf("expected %d beads, got %d", len(ids), len(found))
+	}
+	for i, one := range found {
+		if one.Story.ID != ids[i] {
+			t.Errorf("expected bead %d to be %s, in the order asked, got %s", i, ids[i], one.Story.ID)
+		}
+	}
+	if got := len(showsAsked(t, log)); got != len(ids) {
+		t.Errorf("expected a bd show for each of the %d beads, got %d: %v", len(ids), got, asked(t, log))
+	}
+	if _, err := os.Stat(overlap + ".show"); err != nil {
+		t.Error("expected two of the bd show to be under way at once against a server")
+	}
+}
+
+func TestShowBeadsReadsABatchInOneBdAgainstTheVaultsOwnDatabase(t *testing.T) {
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "")
+	db, ids := manyBeads(6)
+	gateway, log, _ := roundsStandIn(t, db)
+
+	if _, err := gateway.ShowBeads(context.Background(), ids); err != nil {
+		t.Fatalf("reading the beads: %v", err)
+	}
+	if got := len(showsAsked(t, log)); got != 1 {
+		t.Errorf("expected one bd show for the batch against the vault's own database, got %d: %v", got, asked(t, log))
+	}
+}
+
+func TestShowBeadsLeavesOutAnIdBdHasNoRecordOfAgainstAServer(t *testing.T) {
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "10.88.0.2")
+	db, ids := manyBeads(3)
+	gateway, _, _ := roundsStandIn(t, db)
+
+	found, err := gateway.ShowBeads(context.Background(), append([]string{"mw-nobody"}, ids...))
+	if err != nil {
+		t.Fatalf("reading the beads: %v", err)
+	}
+	if len(found) != len(ids) {
+		t.Errorf("expected the %d beads there are, got %+v", len(ids), found)
+	}
+}
+
+func TestStoriesCommentsReadsABatchAsABdApieceTogetherAgainstAServer(t *testing.T) {
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "10.88.0.2")
+	db, ids := manyBeads(4)
+	for _, id := range ids {
+		db.shown[id] = fmt.Sprintf(`{"id":"%s","title":"t","status":"open","issue_type":"task","comments":[{"author":"a","text":"hello from %s","created_at":"2026-10-10T20:00:00Z"}]}`, id, id)
+	}
+	gateway, log, overlap := roundsStandIn(t, db)
+
+	said, err := gateway.StoriesComments(context.Background(), ids)
+	if err != nil {
+		t.Fatalf("reading the comments: %v", err)
+	}
+	for _, id := range ids {
+		if len(said[id]) != 1 || said[id][0].Text != "hello from "+id {
+			t.Errorf("expected the comment of %s, got %+v", id, said[id])
+		}
+	}
+	if got := len(showsAsked(t, log)); got != len(ids) {
+		t.Errorf("expected a bd show for each of the %d beads, got %d: %v", len(ids), got, asked(t, log))
+	}
+	if _, err := os.Stat(overlap + ".show"); err != nil {
+		t.Error("expected two of the bd show to be under way at once against a server")
+	}
+}
+
+func TestShowEpicsReadsTheEpicsThemselvesWithOneListAgainstAServer(t *testing.T) {
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "10.88.0.2")
+	gateway, log, _ := roundsStandIn(t, epicsWithChildren())
+
+	epics, err := gateway.ShowEpics(context.Background(), []string{"mw-e1", "mw-e2", "mw-e3", "mw-e4", "mw-e5", "mw-e6"})
+	if err != nil {
+		t.Fatalf("reading the epics: %v", err)
+	}
+	if len(epics) != 6 || epics[0].ID != "mw-e1" || epics[5].ID != "mw-e6" {
+		t.Errorf("expected the six epics in the order asked, got %+v", epics)
+	}
+	if shows := showsAsked(t, log); len(shows) != 0 {
+		t.Errorf("expected no bd show for the epics, got %v", shows)
 	}
 }

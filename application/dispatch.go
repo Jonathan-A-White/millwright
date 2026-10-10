@@ -1590,15 +1590,18 @@ func (d Dispatch) release(ctx context.Context, id string, why error) (bool, erro
 // moment ago. A need already closed is not a wait, the same as everywhere else
 // a story's Needs are read (see bead.needs and Brief.waitsOn).
 func (d Dispatch) blockedBy(ctx context.Context, detail StoryDetail) (blocker, status string, blocked bool, err error) {
+	// All of its needs are read together, since over a slow link each read is
+	// seconds; the first unfinished, in the order the story names them, is the
+	// one reported (mw-gq6.358).
+	read := map[string]StoryDetail{}
+	if err := readNeeded(ctx, d.Tracker, []StoryDetail{detail}, read); err != nil {
+		return "", "", false, err
+	}
 	for _, need := range detail.Needs {
-		read, err := d.Tracker.ShowStory(ctx, need)
-		if err != nil {
-			return "", "", false, fmt.Errorf("reading %s, which %s waits on: %w", need, detail.Story.ID, err)
-		}
-		if read.Closed() {
+		if read[need].Closed() {
 			continue
 		}
-		return need, read.Status, true, nil
+		return need, read[need].Status, true, nil
 	}
 	return "", "", false, nil
 }

@@ -141,7 +141,7 @@ func (g *Gateway) overlaid(ctx context.Context, stories []bead) ([]application.S
 			wanted = append(wanted, story.Parent)
 		}
 	}
-	epics, err := g.readBeads(ctx, wanted)
+	epics, err := g.readOwn(ctx, wanted)
 	if err != nil {
 		return nil, fmt.Errorf("reading the epics %s: %w", strings.Join(wanted, ", "), err)
 	}
