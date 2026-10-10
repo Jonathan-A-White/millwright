@@ -311,3 +311,229 @@ Feature: mw memory
     When the Mayor retires the fact "big" of the rig "millwright" because "too big"
     And mw status reads the host for memory
     Then the memory status line is absent for the rig "millwright"
+
+  # mw memory migrate: a rig kept as one memory file (and its archive) becomes
+  # about.md and one typed fact per file, in one run.
+
+  Scenario: migrate makes about.md and seven fact files from the memory file and its archive
+    Given the rig "demo" keeps its memory in one file:
+      """
+      # Rig memory: demo
+
+      Demo is a small rig. It keeps a parser and a build.
+
+      ## Before you start
+      - Decided by the Governor: the gate is `make check` and nothing lands without it (mw-dd.1).
+
+      ## Where things are
+      - The parser lives in app/parse.go and reads once.
+      - Run the build with `make build` and then look in bin/.
+      - Never edit the ledger by hand, the Mayor owns it [mw-ee].
+      - Node 20 is needed from 2026-09-02 for the build.
+
+      A stray paragraph that belongs nowhere.
+      """
+    And the rig "demo" keeps its archive in one file:
+      """
+      # Rig memory archive: demo
+
+      Lines moved out of demo.md by the Mayor.
+
+      ## Moved 2026-09-20 (after mw-ff)
+
+      - Old build used `make all` before the gate. (mw-ff.2)
+
+      ## Moved 2026-08-01 (stale notes)
+
+      - The old parser was in app/old.go.
+      """
+    When the Mayor migrates the rig "demo"
+    Then the memory command succeeded
+    And the memory command printed "migrated the rig demo: about.md and 7 facts (5 current, 2 retired); 1 line not placed"
+    And the file "about.md" of the rig "demo" holds:
+      """
+      Demo is a small rig. It keeps a parser and a build.
+      """
+    And the fact file "decided-by-the-governor-the" of the rig "demo" holds:
+      """
+      ---
+      subject: make check
+      kind: decision
+      status: current
+      source: mw-dd.1
+      since: 2026-10-10
+      ---
+
+      Decided by the Governor: the gate is `make check` and nothing lands without it.
+      """
+    And the fact file "the-parser-lives-in-appparsego" of the rig "demo" holds:
+      """
+      ---
+      subject: app/parse.go
+      kind: gotcha
+      status: current
+      source: mayor:demo.md@abc1234
+      since: 2026-10-10
+      ---
+
+      The parser lives in app/parse.go and reads once.
+      """
+    And the fact file "run-the-build-with-make" of the rig "demo" holds:
+      """
+      ---
+      subject: make build
+      kind: gotcha
+      status: current
+      source: mayor:demo.md@abc1234
+      since: 2026-10-10
+      ---
+
+      Run the build with `make build` and then look in bin/.
+      """
+    And the fact file "never-edit-the-ledger-by" of the rig "demo" holds:
+      """
+      ---
+      subject: general
+      kind: gotcha
+      status: current
+      source: mw-ee
+      since: 2026-10-10
+      ---
+
+      Never edit the ledger by hand, the Mayor owns it.
+      """
+    And the fact file "node-20-is-needed-from" of the rig "demo" holds:
+      """
+      ---
+      subject: general
+      kind: gotcha
+      status: current
+      source: mayor:demo.md@abc1234
+      since: 2026-09-02
+      ---
+
+      Node 20 is needed from 2026-09-02 for the build.
+      """
+    And the fact file "old-build-used-make-all" of the rig "demo" holds:
+      """
+      ---
+      subject: make all
+      kind: gotcha
+      status: retired
+      source: mw-ff.2
+      since: 2026-10-10
+      retired: 2026-09-20
+      reason: pruned: Moved 2026-09-20 (after mw-ff)
+      ---
+
+      Old build used `make all` before the gate.
+      """
+    And the fact file "the-old-parser-was-in" of the rig "demo" holds:
+      """
+      ---
+      subject: app/old.go
+      kind: gotcha
+      status: retired
+      source: mayor:demo-archive.md@abc1234
+      since: 2026-10-10
+      retired: 2026-08-01
+      reason: pruned: Moved 2026-08-01 (stale notes)
+      ---
+
+      The old parser was in app/old.go.
+      """
+    And the rig "demo" has 7 fact files
+    And the rig "demo" keeps no memory file and no archive file
+    And a boot of the rig "demo" reads 5 current facts after its about text
+
+  Scenario: migrate --dry-run prints the same seven facts and the line not placed, and writes nothing
+    Given the rig "demo" keeps its memory in one file:
+      """
+      # Rig memory: demo
+
+      Demo is a small rig. It keeps a parser and a build.
+
+      ## Before you start
+      - Decided by the Governor: the gate is `make check` and nothing lands without it (mw-dd.1).
+
+      ## Where things are
+      - The parser lives in app/parse.go and reads once.
+      - Run the build with `make build` and then look in bin/.
+      - Never edit the ledger by hand, the Mayor owns it [mw-ee].
+      - Node 20 is needed from 2026-09-02 for the build.
+
+      A stray paragraph that belongs nowhere.
+      """
+    And the rig "demo" keeps its archive in one file:
+      """
+      # Rig memory archive: demo
+
+      Lines moved out of demo.md by the Mayor.
+
+      ## Moved 2026-09-20 (after mw-ff)
+
+      - Old build used `make all` before the gate. (mw-ff.2)
+
+      ## Moved 2026-08-01 (stale notes)
+
+      - The old parser was in app/old.go.
+      """
+    When the Mayor migrates the rig "demo" with --dry-run
+    Then the memory command succeeded
+    And the memory command printed exactly:
+      """
+      dry run: nothing is written
+      about.md  51 bytes
+      decided-by-the-governor-the  current  decision  [make check]  2026-10-10  mw-dd.1  Decided by the Governor: the gate is `make check` and nothing lands without it.
+      the-parser-lives-in-appparsego  current  gotcha  [app/parse.go]  2026-10-10  mayor:demo.md@abc1234  The parser lives in app/parse.go and reads once.
+      run-the-build-with-make  current  gotcha  [make build]  2026-10-10  mayor:demo.md@abc1234  Run the build with `make build` and then look in bin/.
+      never-edit-the-ledger-by  current  gotcha  [general]  2026-10-10  mw-ee  Never edit the ledger by hand, the Mayor owns it.
+      node-20-is-needed-from  current  gotcha  [general]  2026-09-02  mayor:demo.md@abc1234  Node 20 is needed from 2026-09-02 for the build.
+      old-build-used-make-all  retired  gotcha  [make all]  2026-10-10  mw-ff.2  Old build used `make all` before the gate.  retired 2026-09-20 (pruned: Moved 2026-09-20 (after mw-ff))
+      the-old-parser-was-in  retired  gotcha  [app/old.go]  2026-10-10  mayor:demo-archive.md@abc1234  The old parser was in app/old.go.  retired 2026-08-01 (pruned: Moved 2026-08-01 (stale notes))
+      not placed: demo.md line 14: A stray paragraph that belongs nowhere.
+      would migrate the rig demo: about.md and 7 facts (5 current, 2 retired); 1 line not placed
+      """
+    And the rig "demo" keeps its memory file
+    And the rig "demo" keeps its archive file
+    And the rig "demo" has no facts folder
+
+  Scenario: a slug that is taken gets a numeric suffix
+    Given the rig "demo" keeps its memory in one file:
+      """
+      # Rig memory: demo
+
+      - Run the gate before you close a step (mw-1).
+      - Run the gate before you close a step (mw-2).
+      - Run the gate before you close a step (mw-3).
+      """
+    When the Mayor migrates the rig "demo"
+    Then the memory command succeeded
+    And the rig "demo" has 3 fact files
+    And the fact file "run-the-gate-before-you" of the rig "demo" holds a fact with source "mw-1"
+    And the fact file "run-the-gate-before-you-2" of the rig "demo" holds a fact with source "mw-2"
+    And the fact file "run-the-gate-before-you-3" of the rig "demo" holds a fact with source "mw-3"
+
+  Scenario: a head over 600 bytes is cut at a sentence end and says so
+    Given the rig "demo" keeps a memory file with a head of 700 bytes
+    When the Mayor migrates the rig "demo"
+    Then the memory command succeeded
+    And the memory command printed "warning: the head of demo.md is 700 bytes; about.md keeps the first 593, cut at a sentence end"
+    And the file "about.md" of the rig "demo" has a text of 593 bytes
+
+  Scenario: migrate refuses a rig that already has a facts folder
+    Given the rig "demo" keeps its memory in one file:
+      """
+      # Rig memory: demo
+
+      - A fact (mw-1).
+      """
+    And the Builder keeps the rig "demo" as facts
+    When the Mayor migrates the rig "demo"
+    Then the memory command was refused saying "already has a facts folder"
+    And the rig "demo" keeps its memory file
+
+  Scenario: migrate refuses a rig with no memory file
+    When the Mayor migrates the rig "ghost"
+    Then the memory command was refused saying "no memory file for the rig ghost"
+    And the rig "ghost" has no facts folder

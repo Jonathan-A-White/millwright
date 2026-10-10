@@ -31,10 +31,16 @@ const factSlugWords = 5
 
 // Memory is mw memory: the Mayor places, replaces and retires the facts of a
 // rig that is kept as facts. Each verb writes files and nothing else — no
-// commit, no push — and no verb deletes a file, so a fact's reason outlives it.
+// commit, no push — and no verb deletes a fact, so a fact's reason outlives it.
+// (migrate removes the one memory file of a rig it has turned into facts, and
+// nothing else.)
 type Memory struct {
 	Files RigFactFiles
-	Seat  string
+	// Legacy and Head are what migrate needs: the rig's one memory file and the
+	// vault's HEAD, which names the source of a line that cites no bead.
+	Legacy RigLegacyFiles
+	Head   func(context.Context) (string, error)
+	Seat   string
 	// Budget is what a Builder may read of a rig at boot, in bytes.
 	Budget int
 	Now    func() time.Time

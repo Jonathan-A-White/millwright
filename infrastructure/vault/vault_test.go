@@ -434,3 +434,62 @@ func TestRigFactFilesWriteAndReadBack(t *testing.T) {
 		t.Fatal("a slug that reaches outside the facts folder was written")
 	}
 }
+
+func TestRigMemoryFilesAreReadAndRemovedAndNothingElse(t *testing.T) {
+	dir := t.TempDir()
+	v := vault.New(dir)
+	ctx := context.Background()
+	rigs := filepath.Join(dir, vault.SeatsDir, "builder", vault.RigsDir)
+	if err := os.MkdirAll(rigs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := v.ReadRigMemoryFiles(ctx, "builder", "demo")
+	if err != nil || got.HasMemory || got.HasArchive || got.HasFacts {
+		t.Fatalf("a rig with no files: %+v, %v", got, err)
+	}
+
+	for name, text := range map[string]string{"demo.md": "memory\n", "demo-archive.md": "archive\n", "other.md": "other\n"} {
+		if err := os.WriteFile(filepath.Join(rigs, name), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err = v.ReadRigMemoryFiles(ctx, "builder", "demo")
+	if err != nil || !got.HasMemory || got.Memory != "memory\n" || !got.HasArchive || got.Archive != "archive\n" || got.HasFacts {
+		t.Fatalf("a rig with both files: %+v, %v", got, err)
+	}
+
+	path, err := v.WriteRigAbout(ctx, "builder", "demo", "about\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(rigs, "demo", "about.md"); path != want {
+		t.Fatalf("wrote %s, want %s", path, want)
+	}
+	if got, _ = v.ReadRigMemoryFiles(ctx, "builder", "demo"); got.HasFacts {
+		t.Fatal("an about text alone made a facts folder")
+	}
+	if _, err := v.WriteRigFact(ctx, "builder", "demo", "one", "text\n"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = v.ReadRigMemoryFiles(ctx, "builder", "demo"); !got.HasFacts {
+		t.Fatal("a rig with a facts folder was not seen to have one")
+	}
+
+	for i := 0; i < 2; i++ { // the second removal finds nothing and is no error
+		if err := v.RemoveRigMemoryFiles(ctx, "builder", "demo"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, want := range map[string]bool{"demo.md": false, "demo-archive.md": false, "other.md": true} {
+		if _, err := os.Stat(filepath.Join(rigs, name)); (err == nil) != want {
+			t.Errorf("%s present = %v, want %v", name, err == nil, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(rigs, "demo", "facts", "one.md")); err != nil {
+		t.Errorf("removal touched the facts: %v", err)
+	}
+	if _, err := v.ReadRigMemoryFiles(ctx, "builder", "../x"); err == nil {
+		t.Error("a rig name that reaches outside the vault was read")
+	}
+}
