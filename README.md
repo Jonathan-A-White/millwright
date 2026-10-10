@@ -1686,6 +1686,15 @@ an app whose rig landed a change to `grinds/` or to the rig's grist client paths
 and for every app with grinds when the factory's own rig landed a change to
 `application/grist*.go`, `infrastructure/grist`, `infrastructure/claude/grind*.go`
 or `infrastructure/rig/grinds*.go`. Only a host with a `[grist-apps]` table smokes.
+A story landed from another host moves only that host's checkout, and the mill reads
+the grinds from the home's, so the home's follower does the rest (the `grist-level`
+job, sprung by any bead that lands, with the heartbeat as fallback): it fetches each
+`[grist-apps]` rig, fast-forwards the checkout onto origin's main (a clean checkout on
+`main` that is behind, never merged, reset or forced) and makes the smoke of what the
+commits it brought changed. A checkout it must leave alone (uncommitted work, another
+branch, commits of its own) is a line under GRIST SMOKE in `mw status` and one mail to the
+Mayor, said again only when the reason changes. A rig not named in `[grist-apps]` is never
+touched, nor is the factory's own (`self-update` keeps that level).
 The client paths are per rig, git pathspecs, in the config file:
 
 ```toml

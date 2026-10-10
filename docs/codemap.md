@@ -2,7 +2,7 @@
 
 ## Layers
 
-domain/(events): stdlib · application/: use cases/ports · infra/: adapters · cmd/mw/: cobra · features/: Gherkin · template/: embed
+domain/(events): stdlib · application/: use cases, ports · infra/: adapters · cmd/mw/: cobra · features/: Gherkin · template/: embed
 
 ## Ports
 
@@ -20,14 +20,14 @@ domain/(events): stdlib · application/: use cases/ports · infra/: adapters · 
 | Transcripts{,Tail,Replies}, PeekRemote | application/seatcontext.go, application/peek.go | infra/{claude,peekremote} | apptest/fakepeek.go |
 | Reap{Terminal,Log,Armer} | application/seatreap.go | infra/{tmux/reap,vault/reaplog,reaper/arm}.go | apptest.Fake{Windows,ReapArmer} |
 | WatchProbes | application/watch.go | infra/watch | apptest.FakeWatch |
-| Doctor{Check,State,Log,Notes}, VPSProbe | application/doctor.go, application/vpsnginx.go | infra/{doctor,vpsnginx} | none |
+| Doctor{Check,State,Log,Notes}, VPSProbe | application/doctor.go, application/vpsnginx.go | infra/{doctor,vpsnginx} | - |
 | Network{Probe,Store,Reader} | application/network.go | infra/network | apptest.FakeNetwork* |
 | CardLog | application/card.go | infra/cardlog | apptest.FakeCardLog |
 | CloseOutMarks | application/closeout.go | infra/closeout | apptest.Fake*Mark* |
 | Worktrees | application/worktrees.go | infra/rig/worktree.go | application/dispatch_test.go |
 | HostLoad, Cloud*, BenchmarkBook | application/hostload.go, application/benchmark.go | infra/{hostload,cloud,vault/{cloudbook,benchmarks}.go} | apptest.Fake{HostLoad,Cloud*,Benchmarks} |
 | TickLog, Notifier, HomeMoveHost, OldHome, VaultBirth, TrackerBirth | application/{millhandtick,homemove,init}.go | infra/{ticklog,notify/notify,homemove/homemove,vault/birth,beads/init}.go | apptest.FakeTickLog |
-| Landing, Checks, MergeSlot, Holding | application/landing.go | infra/rig/{landing,checks,slot}.go | none |
+| Landing, Checks, MergeSlot, Holding | application/landing.go | infra/rig/{landing,checks,slot}.go | - |
 | AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter, FormulaInstaller | application/afterlanding.go, application/selfupdate.go, application/backendstage.go, application/formulainstall.go | infra/{rig/{afterlanding,built,backend},userunits,vault/formulas}.go | features/{self_update,backend_swap}.feature |
 | EventLog, BeadFeed, FollowCursors, ShipStates, SubscribeFiles, NudgeCursors, EventSpringer, EventController, HarnessCount | application/event*.go, status.go | infra/{eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go | apptest.Fake{EventLog,FollowCursors,Ship*,Tracker,Subscribe*} |
 | Postern, hands, Prompts | application/{postern*,hands,prompt}.go | infra/{postern,hands*,homemove} | apptest.Fake{Postern*,Cipher,Hands*,HomeMover,Prompts} |
@@ -58,8 +58,8 @@ domain/(events): stdlib · application/: use cases/ports · infra/: adapters · 
 | Hands{Add,List} | application/hands.go | mw hands <sub> - cmd/mw/hands.go | features/hands.feature |
 | Postern{Serve,Nginx,Mirror} | application/posternhand.go, application/posternmirror.go | mw postern <sub> - cmd/mw/postern.go, cmd/mw/posternmirror.go | features/postern_serve.feature |
 | Prompt{Save,List,Show,Run}, Cards | application/prompt.go | mw prompt/card - cmd/mw/prompt.go, cmd/mw/card.go | features/{prompt,card}.feature |
-| Grist{Key,Grind,Send,Eval,Score,Runs,Stats,Smoke} | application/grist.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go, application/gristroom.go, application/gristsmoke.go | mw grist <sub> - cmd/mw/grist.go, cmd/mw/gristsmoke.go | features/{grist{,_send,_eval,_audio,_concurrent,_forward,_smoke},scorer}.feature |
+| Grist{Key,Grind,Send,Eval,Score,Runs,Stats,Smoke,Level} | application/grist.go, application/gristlevel.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go, application/gristroom.go, application/gristsmoke.go | mw grist <sub> - cmd/mw/grist.go, cmd/mw/gristsmoke.go | features/{grist{,_send,_eval,_audio,_concurrent,_forward,_level,_smoke},scorer}.feature |
 
 cmd/mw/root.go, cmd/mw/version.go
 
-changelog_files: infra/rig/version.go writes domain/changelog.go and the rig's files (formats: README).
+changelog_files: infra/rig/version.go writes domain/changelog.go + the rig's files.

@@ -137,6 +137,13 @@ record for the mill key springs a pass, reason `grist <txid> arrived`. A grist a
 when the follower starts springs nothing, and no clock does: the dispatch tick still answers
 those. The pass keeps its own pass lock, so one sprung while another runs finds it busy and ends.
 
+The `grist-level` job runs in the follower itself, on a host whose config has a `[grist-apps]`
+table and only while that host is home. A bead_changed to landed from any host springs it, reason
+`bead mw-x landed`, with the heartbeat as fallback. A pass fetches each app's rig, fast-forwards the
+home's checkout onto origin's main when it is clean and on `main`, and makes the grist smoke of what
+the commits it brought changed; a checkout it must leave alone is a line of `mw status` and one mail to
+the Mayor, and the pass is `done` all the same. Only a pass that could not fetch or move a checkout is `failed`.
+
 The `chain-stamp` job (docs/chain-stamps.md) runs in the follower itself, not in a unit, and on its
 own clock only: every minute, reason `clock`. `mw next` queues a stamp of each commit it lands in
 `~/.local/state/mw/stamps/pending.jsonl` (setting `stamps_dir`, `$MW_STAMPS_DIR`); a pass takes each
