@@ -592,6 +592,19 @@ func (s PosternSnapshot) startEpic(ctx context.Context, detail EpicDetail) (*epi
 		lookup[child.Story.ID] = child
 	}
 
+	// What the children that will be asked what they wait on wait on is read
+	// together, before the first is asked (mw-gq6.358).
+	var waiting []StoryDetail
+	for _, child := range detail.Stories {
+		if !child.IsEpic && !child.Closed() &&
+			(strings.EqualFold(strings.TrimSpace(child.Status), StatusInProgress) || !child.Held()) {
+			waiting = append(waiting, child)
+		}
+	}
+	if err := readNeeded(ctx, s.Tracker, waiting, lookup); err != nil {
+		return nil, err
+	}
+
 	now := s.now()
 	for _, child := range detail.Stories {
 		if child.IsEpic {
@@ -624,14 +637,14 @@ func (s PosternSnapshot) startEpic(ctx context.Context, detail EpicDetail) (*epi
 
 		switch {
 		case strings.EqualFold(strings.TrimSpace(child.Status), StatusInProgress):
-			waits, err := s.waits(ctx, child, lookup)
+			waits, err := s.waits(child, lookup)
 			if err != nil {
 				return nil, err
 			}
 			b.inProgress = append(b.inProgress, workingCandidate{story: child, waits: waits})
 			b.counted++
 		case !child.Held():
-			waits, err := s.waits(ctx, child, lookup)
+			waits, err := s.waits(child, lookup)
 			if err != nil {
 				return nil, err
 			}
@@ -772,21 +785,16 @@ func landedFromComments(child StoryDetail, comments []Comment) (PosternSnapshotL
 	}, true
 }
 
-// waits is the ids of what child still waits on that is not finished, reading
-// a blocker not among lookup already from the tracker. It mirrors Brief's own
-// waitsOn, but reports ids rather than titles: postern's docs/protocol.md §7
-// names waits by bead id.
-func (s PosternSnapshot) waits(ctx context.Context, child StoryDetail, lookup map[string]StoryDetail) ([]string, error) {
+// waits is the ids of what child still waits on that is not finished, from
+// lookup, which readNeeded has filled with every blocker. It mirrors Brief's
+// own waitsOn, but reports ids rather than titles: postern's docs/protocol.md
+// §7 names waits by bead id.
+func (s PosternSnapshot) waits(child StoryDetail, lookup map[string]StoryDetail) ([]string, error) {
 	ids := []string{}
 	for _, need := range child.Needs {
 		blocker, known := lookup[need]
 		if !known {
-			read, err := s.Tracker.ShowStory(ctx, need)
-			if err != nil {
-				return nil, fmt.Errorf("reading %s, which %s waits on: %w", need, child.Story.ID, err)
-			}
-			blocker = read
-			lookup[need] = blocker
+			return nil, fmt.Errorf("reading %s, which %s waits on: not read", need, child.Story.ID)
 		}
 		if blocker.Closed() {
 			continue
