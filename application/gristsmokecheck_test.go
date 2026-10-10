@@ -53,11 +53,36 @@ func TestExpectChecksTheAnswerFieldByField(t *testing.T) {
 	}
 }
 
+// An all check holds a list of checks on the one field, every one of which
+// must hold, and a failure names the one that did not.
+func TestAnAllCheckHoldsEveryCheckInItsList(t *testing.T) {
+	both := `{"answer": {"all": [{"matches": "gardener"}, {"matches": "library"}]}}`
+	for _, c := range []struct{ name, answer, failure string }{
+		{"both words", `{"answer": "the gardener went to the library"}`, ""},
+		{"one word missing", `{"answer": "the gardener went home"}`, `answer: wanted matching "library", got "the gardener went home"`},
+	} {
+		failed := CheckExpect(json.RawMessage(c.answer), expectOf(t, both))
+		switch {
+		case c.failure == "" && len(failed) != 0:
+			t.Errorf("%s: expected it to hold, got %v", c.name, failed)
+		case c.failure != "" && (len(failed) != 1 || !strings.Contains(failed[0].String(), c.failure)):
+			t.Errorf("%s: expected one failure saying %q, got %v", c.name, c.failure, failed)
+		}
+	}
+	mixed := expectOf(t, `{"answer": {"all": [{"contains": "gardener"}, {"one_of": ["x"]}], "present": true}}`)
+	if failed := CheckExpect(json.RawMessage(`{"answer": "gardener"}`), mixed); len(failed) != 1 || !strings.Contains(failed[0].String(), `one of ["x"]`) {
+		t.Errorf("all beside another key: expected the one_of to fail alone, got %v", failed)
+	}
+}
+
 func TestAnExampleWithoutARequestOrWithAnUnknownCheckIsRefused(t *testing.T) {
 	for _, c := range []struct{ name, text, says string }{
 		{"no request", `{"expect": {}}`, "no request"},
 		{"unknown check", `{"request": {}, "expect": {"price": {"is_nul": true}}}`, `"is_nul" is not a check`},
 		{"bad pattern", `{"request": {}, "expect": {"price": {"matches": "("}}}`, "matches"},
+		{"unknown check inside all", `{"request": {}, "expect": {"answer": {"all": [{"matches": "a"}, {"is_nul": true}]}}}`, `"is_nul" is not a check`},
+		{"all that is not a list", `{"request": {}, "expect": {"answer": {"all": {"matches": "a"}}}}`, "all is a list of checks"},
+		{"empty all", `{"request": {}, "expect": {"answer": {"all": []}}}`, "all is a list of checks"},
 		{"not json", `nonsense`, "not an example"},
 	} {
 		if _, err := ParseGristExample([]byte(c.text)); err == nil || !strings.Contains(err.Error(), c.says) {

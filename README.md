@@ -1664,8 +1664,11 @@ the mill reads grinds), with any photos it names beside it:
 `expect` says what the answer must show, one entry per field (a dotted path:
 `items.0.name`). A bare value means equals; an object holds any of `equals`,
 `is_null`, `one_of`, `contains` (a substring, or an element of a list),
-`matches` (a regular expression) and `present` (true or false), and every part
-must hold. A new behaviour of a grind is a new scenario file. The smoke sends as
+`matches` (a regular expression), `present` (true or false) and `all`, and every
+part must hold. `all` is a list of checks of those same kinds on the same field,
+each of which must hold: `"answer": { "all": [ { "matches": "gardener" },
+{ "matches": "library" } ] }` wants both words, and a failure names the one
+that is missing. A new behaviour of a grind is a new scenario file. The smoke sends as
 the **test key** `grist_test_key_file` (default `~/.config/mw/grist-test.key`,
 env `MW_GRIST_TEST_KEY_FILE`: a key file the backend holds a licence for each
 app's grist; never the mill's or the Mayor's, and mw does not make it) and

@@ -25,8 +25,14 @@ import (
 // Each key of expect is a path into the answer, object keys and array
 // positions joined by dots ("items.0.name"). Its check is one of: a bare value
 // (the field equals it), or an object holding any of equals, is_null, one_of,
-// contains, matches (a regular expression) and present (true or false), every
-// one of which must hold.
+// contains, matches (a regular expression), present (true or false) and all,
+// every one of which must hold. All is a list of checks of the same kinds,
+// each of which must hold too, for a field that must show several things
+// (matching two words, which one regular expression cannot say):
+//
+//	"expect": {"answer": {"all": [{"matches": "gardener"}, {"matches": "library"}]}}
+//
+// A failure of an all check names the one of its list that did not hold.
 type GristExample struct {
 	Request json.RawMessage            `json:"request"`
 	Photos  []string                   `json:"photos"`
@@ -59,10 +65,11 @@ type gristCheck struct {
 	contains *any
 	matches  *regexp.Regexp
 	present  *bool
+	all      []gristCheck
 }
 
 // gristCheckKeys are the keys a check object may hold.
-var gristCheckKeys = []string{"equals", "is_null", "one_of", "contains", "matches", "present"}
+var gristCheckKeys = []string{"equals", "is_null", "one_of", "contains", "matches", "present", "all"}
 
 func parseGristCheck(raw json.RawMessage) (gristCheck, error) {
 	trimmed := strings.TrimSpace(string(raw))
@@ -120,6 +127,18 @@ func parseGristCheck(raw json.RawMessage) (gristCheck, error) {
 				return check, fmt.Errorf("matches: %w", err)
 			}
 			check.matches = re
+		case "all":
+			var each []json.RawMessage
+			if err := json.Unmarshal(value, &each); err != nil || len(each) == 0 {
+				return check, fmt.Errorf("all is a list of checks")
+			}
+			for _, raw := range each {
+				inner, err := parseGristCheck(raw)
+				if err != nil {
+					return check, fmt.Errorf("all: %w", err)
+				}
+				check.all = append(check.all, inner)
+			}
 		default:
 			return check, fmt.Errorf("%q is not a check: use %s", key, strings.Join(gristCheckKeys, ", "))
 		}
@@ -231,6 +250,9 @@ func (c gristCheck) failures(field string, got any, found bool) []ExpectFailure 
 		if !found || !isText || !c.matches.MatchString(text) {
 			fail("matching " + strconv.Quote(c.matches.String()))
 		}
+	}
+	for _, inner := range c.all {
+		failed = append(failed, inner.failures(field, got, found)...)
 	}
 	return failed
 }

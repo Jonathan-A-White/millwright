@@ -3,7 +3,8 @@ Feature: mw grist smoke tests an app's grist end to end
   request, the photos beside it and what the answer must show (expect).
   `mw grist smoke <app>` sends every one through the live backend as the
   factory's test key and holds each answer to the grind's answer schema and to
-  its expect. A landing that touches grinds/, an app's grist client paths, or
+  its expect (a field's check may hold "all", a list of checks that must every
+  one hold). A landing that touches grinds/, an app's grist client paths, or
   (for the factory's own rig) the mill itself, runs it; a failure is an alarm,
   a line of mw status and a hold on the rig's open stories.
 
