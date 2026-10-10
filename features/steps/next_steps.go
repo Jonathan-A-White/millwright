@@ -145,6 +145,9 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the pane of "([^"]*)" last printed "([^"]*)"$`, c.thePaneLastPrinted)
 	ctx.Given(`^the run of "([^"]*)" left its boot file beside the result$`, c.theRunLeftItsBootFile)
 	ctx.Given(`^the rig's tests fail, saying "([^"]*)"$`, c.theRigsTestsFail)
+	ctx.Given(`^the rig's tests fail with a vitest run whose last lines are a DOM dump$`, c.theRigsTestsFailWithADOMDump)
+	ctx.Then(`^that mail names the failing tests before the last lines of the tests$`, c.thatMailNamesTheFailingTestsFirst)
+	ctx.Then(`^the run of "([^"]*)" keeps the whole output of the tests in gate.log$`, c.theRunKeepsTheGateLog)
 	ctx.Given(`^the rig's tests pass$`, c.theRigsTestsPass)
 	ctx.Given(`^the rig's tests cannot be run, saying "([^"]*)"$`, c.theRigsTestsCannotBeRun)
 	ctx.Given(`^the story "([^"]*)" is planned and ready to be worked here$`, c.aStoryReadyHere)
@@ -635,6 +638,59 @@ func (c *nextContext) theRigsTestsPass() error {
 
 func (c *nextContext) theRigsTestsFail(saying string) error {
 	c.checkCommand = fmt.Sprintf("printf 'run\\n' >> %s; echo '%s'; exit 1", c.checkLog, saying)
+	return nil
+}
+
+// vitestDOMDump is a vitest failure as a person sees it: the tests that failed
+// are named near the top, and the last lines are a testing-library DOM dump
+// that names nothing.
+func vitestDOMDump() string {
+	var out strings.Builder
+	out.WriteString(" FAIL  src/review.test.tsx > Review > shows the due count\n")
+	out.WriteString("TestingLibraryElementError: Unable to find an element with the text: Due 9\n\n")
+	out.WriteString(" × Review > shows the due count 31ms\n")
+	out.WriteString(" ✓ Review > shows the title 4ms\n")
+	for i := 0; i < 60; i++ {
+		fmt.Fprintf(&out, "    <div class=\"row-%d\">New words: 3</div>\n", i)
+	}
+	return out.String()
+}
+
+// theRigsTestsFailWithADOMDump has the rig's tests print vitestDOMDump and fail.
+func (c *nextContext) theRigsTestsFailWithADOMDump() error {
+	dump := filepath.Join(filepath.Dir(c.checkLog), "vitest.out")
+	if err := os.WriteFile(dump, []byte(vitestDOMDump()), 0o644); err != nil {
+		return err
+	}
+	c.checkCommand = fmt.Sprintf("printf 'run\\n' >> %s; cat %s; exit 1", c.checkLog, dump)
+	return nil
+}
+
+// thatMailNamesTheFailingTestsFirst reads the one mail's body for the list of
+// failing tests ahead of the tail of the output.
+func (c *nextContext) thatMailNamesTheFailingTestsFirst() error {
+	mail, err := c.theOneMail()
+	if err != nil {
+		return err
+	}
+	named := strings.Index(mail.Body, "Failing tests (")
+	tail := strings.Index(mail.Body, "The last lines of")
+	if named < 0 || tail < 0 || named > tail {
+		return fmt.Errorf("expected the failing tests before the last lines (at %d and %d), got:\n%s", named, tail, mail.Body)
+	}
+	return nil
+}
+
+// theRunKeepsTheGateLog finds the whole of what the tests printed beside the
+// result, including the lines the mail does not carry.
+func (c *nextContext) theRunKeepsTheGateLog(id string) error {
+	kept, err := os.ReadFile(filepath.Join(c.vault, vault.RunsDir, id, "gate.log"))
+	if err != nil {
+		return fmt.Errorf("expected the run of %s to keep the output of the tests: %w", id, err)
+	}
+	if want := vitestDOMDump(); string(kept) != want {
+		return fmt.Errorf("expected gate.log to hold the whole output, got:\n%s", kept)
+	}
 	return nil
 }
 

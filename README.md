@@ -684,7 +684,8 @@ ready here is dispatched.
 
 The commit is exactly three paths — `seats/<seat>/ledger.md`,
 `seats/<seat>/rigs/<rig>.md` and `runs/<story>/result.json` — and a fourth,
-`runs/<story>/landing-error.txt`, when a landing failed (below) — named explicitly,
+`runs/<story>/landing-error.txt`, when a landing failed (below), and
+`runs/<story>/gate.log`, when the rig's tests failed (below) — named explicitly,
 never `git add -A` and never `commit -a`, under a plain message naming the story
 and signed by nobody. They are the only files a story is allowed to write in the
 vault: mw wrote the first and the run record, and the Mayor writes the second from
@@ -728,6 +729,13 @@ A landing that fails — a push the remote refuses, a merge that will not go —
 keeps the whole of git's error in `runs/<story>/landing-error.txt` and quotes it
 in full, fenced, in the story's comment; the ledger row keeps its one line, the
 first line of the error.
+
+Tests that fail keep the whole of what they printed in `runs/<story>/gate.log`
+(capped at 512 KiB, the first 128 KiB and the rest from the end, with a line
+saying how much was left out). The refusal in the story's comment and the mail
+to the Mayor list the failing tests by name first (vitest's `FAIL` and `×`
+lines, go test's `--- FAIL:`, Playwright's `✘`; at most 20), then the last
+lines; the ledger row names the first three.
 
 The **merge slot** is an advisory lock (`flock`) on a file beside the rig's
 worktrees, one per rig per host. It is a lock rather than a file somebody writes

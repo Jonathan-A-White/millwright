@@ -138,6 +138,30 @@ Feature: Closing out a finished story and carrying on
     And the report says it stopped for "tests-fail"
     And no fresh session was started
 
+  Scenario: A vitest failure ending in a DOM dump names the failing tests, and the whole output is kept
+    Given the session of "mw-gq6.1" reported a plain success
+    And the rig's tests fail with a vitest run whose last lines are a DOM dump
+    And the story "mw-gq6.2" is planned and ready to be worked here
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is held blocked
+    And exactly one mail was sent, to "mayor" from "mw@vps"
+    And that mail's body holds:
+      | Failing tests (2): |
+      | FAIL src/review.test.tsx > Review > shows the due count |
+      | × Review > shows the due count |
+    And that mail names the failing tests before the last lines of the tests
+    And the story "mw-gq6.1" carries a comment quoting: FAIL src/review.test.tsx > Review > shows the due count
+    And the last ledger line holds:
+      | mw-gq6.1 |
+      | failing: FAIL src/review.test.tsx > Review > shows the due count |
+    And the run of "mw-gq6.1" keeps the whole output of the tests in gate.log
+    And mw committed to the vault exactly:
+      | seats/builder/ledger.md            |
+      | seats/builder/rigs/millwright.md   |
+      | runs/mw-gq6.1/result.json          |
+      | runs/mw-gq6.1/gate.log             |
+
   Scenario: Tests that could not be run are not reported as failing, and nothing is landed
     Given the session of "mw-gq6.1" reported a plain success
     And the rig's tests cannot be run, saying "make: go: No such file or directory"
@@ -602,6 +626,7 @@ Feature: Closing out a finished story and carrying on
       | seats/builder/ledger.md          |
       | seats/builder/rigs/millwright.md |
       | runs/mw-gq6.1/result.json        |
+      | runs/mw-gq6.1/gate.log           |
 
   Scenario: A session that left no result is not landed, and the close-out says the run record was missing
     Given the session of "mw-gq6.1" left no result at all

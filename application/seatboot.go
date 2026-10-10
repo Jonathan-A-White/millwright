@@ -18,6 +18,7 @@ const (
 	BootFileName         = "boot.md"
 	ResultFileName       = "result.json"
 	LandingErrorFileName = "landing-error.txt"
+	GateLogFileName      = "gate.log"
 )
 
 // Seat is the part of a seat a session is primed with at boot: the charter,
@@ -148,6 +149,13 @@ func attemptRunFileName(base string, attempt int) string {
 // would reach outside the vault gives no path.
 func LandingErrorRecord(storyID string) string {
 	return runFilePath(storyID, LandingErrorFileName)
+}
+
+// GateLogFileNameForAttempt is the file a failed test run's whole output is
+// kept in, named by attempt like the result so that a later attempt never
+// writes over a path an earlier close-out committed.
+func GateLogFileNameForAttempt(attempt int) string {
+	return attemptRunFileName(GateLogFileName, attempt)
 }
 
 func runFilePath(storyID, name string) string {

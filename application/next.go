@@ -442,6 +442,10 @@ type closeOut struct {
 	// vault, so the close-out commits it.
 	landingError bool
 
+	// gateLog is the name of the file in the run that holds the whole output of
+	// a failed test run, empty when none was kept; the close-out commits it.
+	gateLog string
+
 	// began is when the close-out began, as its mark says.
 	began time.Time
 
@@ -1224,7 +1228,10 @@ func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all
 		if gate.Said != "" {
 			why += " (" + gate.Said + ")"
 		}
-		refuse(reason, why, "The last lines of `"+checked.Command+"` in "+c.worktree+":\n\n```\n"+checked.Tail(CheckLines)+"\n```")
+		if failing := FailingTestsShort(checked.Output); failing != "" {
+			why += " [" + failing + "]"
+		}
+		refuse(reason, why, n.failedTestsDetail(ctx, c, report, checked, c.worktree))
 	}
 	return found
 }
@@ -1594,8 +1601,8 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 			if gate.Said != "" {
 				ran = " (" + gate.Said + ")"
 			}
-			return Landed{}, failedFor(ReasonMergedTestsFail, fmt.Errorf("%s and %s do not pass the rig's tests together: `%s` failed on the merged result, so nothing was pushed%s\n\n```\n%s\n```",
-				c.branch, c.target, checked.Command, ran, checked.Tail(CheckLines)))
+			return Landed{}, failedFor(ReasonMergedTestsFail, fmt.Errorf("%s and %s do not pass the rig's tests together: `%s` failed on the merged result, so nothing was pushed%s\n\n%s",
+				c.branch, c.target, checked.Command, ran, n.failedTestsDetail(ctx, c, report, checked, dir)))
 		}
 	}
 
@@ -1881,6 +1888,8 @@ func (n Next) charged(ctx context.Context, sessionID string) (bool, error) {
 // committed beside it by explicit path, so that what git said survives the
 // worktree and reaches the other host.
 //
+// The same goes for the whole output of a test run that failed (gate.log).
+//
 // A run record that is not there is a note and no more: the rest is committed
 // all the same, and the report says which file was missing.
 //
@@ -1905,6 +1914,12 @@ func (n Next) commit(ctx context.Context, c *closeOut, report *NextReport) {
 
 	if c.landingError {
 		if record := LandingErrorRecord(c.id); record != "" {
+			paths = append(paths, record)
+		}
+	}
+
+	if c.gateLog != "" {
+		if record := runFilePath(c.id, c.gateLog); record != "" {
 			paths = append(paths, record)
 		}
 	}
