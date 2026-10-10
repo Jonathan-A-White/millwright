@@ -42,3 +42,36 @@ func TestAMapOfARigIsNotHeldToTheRigsEpicRequirements(t *testing.T) {
 		t.Errorf("epic-1 should miss the Demo section and the demo story, got %+v", report.EpicShortfalls[0].Missing)
 	}
 }
+
+// Each epic's stories are a bd apiece, and over a slow link a bd is seconds:
+// the epics whose rig asks for a last story are read in one call to the
+// tracker, however many there are (mw-gq6.356).
+func TestStatusReadsTheStoriesOfEveryEpicInOneCall(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	path := domain.Path{Rig: "spell-forge", Branch: "main", Harness: "claude", Model: "opus", Effort: "high", Host: "vps"}
+	for _, id := range []string{"epic-1", "epic-2", "epic-3"} {
+		tracker.AddEpic(id, path)
+		tracker.DescribeEpicText(id, "Cast spells.")
+	}
+	rules := apptest.NewFakeEpicRules()
+	rules.Require("spell-forge", domain.EpicRequirements{LastStoryLabels: []string{"demo"}})
+
+	report, err := application.Status{
+		Tracker: tracker,
+		Notes:   tracker,
+		Rules:   rules,
+		Host:    "vps",
+		Seat:    "builder",
+		Now:     func() time.Time { return statusNow },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatalf("reading status: %v", err)
+	}
+
+	if len(report.EpicShortfalls) != 3 {
+		t.Fatalf("want all three epics short of a demo story, got %+v", report.EpicShortfalls)
+	}
+	if got := tracker.ShowEpicsCalls(); got != 1 {
+		t.Errorf("want the epics' stories read in 1 call, got %d", got)
+	}
+}

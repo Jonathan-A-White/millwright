@@ -129,23 +129,32 @@ func (g *Gateway) onHost(ctx context.Context, stories []bead, host string, anyHo
 
 // overlaid is beads read as stories, each with its epic's default Path
 // overlaid. Every distinct epic is read once, however many stories hang from
-// it, and not at all when bd inlined the epic with the story.
+// it, and not at all when bd inlined the epic with the story; all the epics
+// wanted are read in a single bd, since over a slow link a bd apiece is
+// seconds apiece (mw-gq6.356).
 func (g *Gateway) overlaid(ctx context.Context, stories []bead) ([]application.StoryDetail, error) {
-	defaults := map[string]domain.Path{}
-	var details []application.StoryDetail
+	var wanted []string
+	seen := map[string]bool{}
+	for _, story := range stories {
+		if _, found := story.parentPath(); !found && story.Parent != "" && !seen[story.Parent] {
+			seen[story.Parent] = true
+			wanted = append(wanted, story.Parent)
+		}
+	}
+	epics, err := g.readBeads(ctx, wanted)
+	if err != nil {
+		return nil, fmt.Errorf("reading the epics %s: %w", strings.Join(wanted, ", "), err)
+	}
 
+	var details []application.StoryDetail
 	for _, story := range stories {
 		path, found := story.parentPath()
 		if !found && story.Parent != "" {
-			var known bool
-			if path, known = defaults[story.Parent]; !known {
-				epic, err := g.showOne(ctx, story.Parent)
-				if err != nil {
-					return nil, fmt.Errorf("reading the epic %s of story %s: %w", story.Parent, story.ID, err)
-				}
-				path = domain.PathFromMetadata(epic.pathMetadata())
-				defaults[story.Parent] = path
+			epic, known := epics[story.Parent]
+			if !known {
+				return nil, fmt.Errorf("reading the epic %s of story %s: no bead %s in %s", story.Parent, story.ID, story.Parent, g.vault)
 			}
+			path = domain.PathFromMetadata(epic.pathMetadata())
 		}
 		details = append(details, story.detail(path))
 	}
@@ -155,9 +164,9 @@ func (g *Gateway) overlaid(ctx context.Context, stories []bead) ([]application.S
 // BlockedForHost implements application.WorkTracker. `bd blocked --json` finds
 // the stories a dependency holds back, but not their epic: its rows carry
 // neither a parent nor metadata, unlike `bd list` and `bd ready`. So each
-// candidate is read back with `bd show`, as ShowStory does, and the epics'
-// defaults are overlaid once for all of them, each epic read once however many
-// stories hang from it.
+// candidate is read back with `bd show`, as ShowStory does — all of them in one
+// bd — and the epics' defaults are overlaid once for all of them, each epic read
+// once however many stories hang from it.
 //
 // The poured steps of every running story are in `bd blocked` too, each waiting
 // on the step before it, and there are far more of them than stories. A row
@@ -177,14 +186,22 @@ func (g *Gateway) BlockedForHost(ctx context.Context, host string) ([]applicatio
 		return nil, fmt.Errorf("reading what is blocked on %s: %w", host, err)
 	}
 
-	var shown []bead
+	var wanted []string
 	for _, candidate := range candidates {
 		if candidate.Type == TypeEpic || candidate.Status != StatusOpen || candidate.Assignee != "" || isPouredStep(candidate.ID) {
 			continue
 		}
-		story, err := g.showOne(ctx, candidate.ID)
-		if err != nil {
-			return nil, fmt.Errorf("reading the blocked story %s: %w", candidate.ID, err)
+		wanted = append(wanted, candidate.ID)
+	}
+	read, err := g.readBeads(ctx, wanted)
+	if err != nil {
+		return nil, fmt.Errorf("reading the blocked stories: %w", err)
+	}
+	var shown []bead
+	for _, id := range wanted {
+		story, ok := read[id]
+		if !ok {
+			return nil, fmt.Errorf("reading the blocked story %s: no bead %s in %s", id, id, g.vault)
 		}
 		shown = append(shown, story)
 	}

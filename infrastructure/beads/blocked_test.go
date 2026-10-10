@@ -13,9 +13,9 @@ import (
 )
 
 // blockedStandIn is a stand-in bd that answers `blocked` with the rows given,
-// `show <id>` with the canned bead for that id (an error for any other), and
-// writes down every argv it was asked. The Gateway has no actor, so the
-// subcommand is the third argument and its id the fourth.
+// `show <id>...` with the canned bead for each id (an error naming any other),
+// and writes down every argv it was asked. The Gateway has no actor, so the
+// subcommand is the third argument and its ids follow.
 func blockedStandIn(t *testing.T, blocked string, shown map[string]string) (*beads.Gateway, string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -25,16 +25,26 @@ func blockedStandIn(t *testing.T, blocked string, shown map[string]string) (*bea
 	log := filepath.Join(dir, "asked.log")
 	var cases strings.Builder
 	for id, bead := range shown {
-		fmt.Fprintf(&cases, "    %s) printf '%%s' '[%s]' ;;\n", id, bead)
+		fmt.Fprintf(&cases, "      %s) bead='%s' ;;\n", id, bead)
 	}
 	script := fmt.Sprintf(`#!/bin/sh
 printf '%%s\n' "$*" >> %s
 case "$3" in
   blocked) printf '%%s' '%s' ;;
   show)
-    case "$4" in
-%s    *) echo "no issues found matching $4" >&2; exit 1 ;;
-    esac ;;
+    shift 3
+    first=1
+    printf '['
+    for id in "$@"; do
+      case "$id" in
+      --json) continue ;;
+%s      *) echo "no issues found matching $id" >&2; exit 1 ;;
+      esac
+      [ $first = 1 ] || printf ','
+      first=0
+      printf '%%s' "$bead"
+    done
+    printf ']' ;;
   *) exit 1 ;;
 esac
 `, log, blocked, cases.String())
@@ -116,7 +126,9 @@ func TestBlockedForHostReadsEachEpicOnce(t *testing.T) {
 	reads := map[string]int{}
 	for _, line := range asked(t, log) {
 		if fields := strings.Fields(line); len(fields) >= 4 && fields[2] == "show" {
-			reads[fields[3]]++
+			for _, id := range fields[3:] {
+				reads[id]++
+			}
 		}
 	}
 	if reads["mw-e1"] != 1 {

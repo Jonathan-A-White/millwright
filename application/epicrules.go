@@ -135,8 +135,11 @@ func (s Status) epicShortfalls(ctx context.Context) ([]EpicShortfall, error) {
 		return nil, fmt.Errorf("reading the live epics: %w", err)
 	}
 
+	// The stories of every epic whose rig asks for a last story are read
+	// together: each is a bd of its own, and over a slow link they would
+	// otherwise be read one after another (mw-gq6.356).
 	rules := map[string]domain.EpicRequirements{}
-	var found []EpicShortfall
+	var needStories []string
 	for _, bead := range beads {
 		if slices.Contains(bead.Labels, "wayfinder:map") {
 			continue
@@ -152,17 +155,38 @@ func (s Status) epicShortfalls(ctx context.Context) ([]EpicShortfall, error) {
 			}
 			rules[rig] = required
 		}
+		if required.Any() && len(required.LastStoryLabels) > 0 {
+			needStories = append(needStories, bead.Story.ID)
+		}
+	}
+	storiesOf := map[string][]StoryDetail{}
+	if len(needStories) > 0 {
+		epics, err := s.Tracker.ShowEpics(ctx, needStories)
+		if err != nil {
+			return nil, fmt.Errorf("reading the stories of %s: %w", strings.Join(needStories, ", "), err)
+		}
+		for _, epic := range epics {
+			storiesOf[epic.ID] = epic.Stories
+		}
+	}
+
+	var found []EpicShortfall
+	for _, bead := range beads {
+		if slices.Contains(bead.Labels, "wayfinder:map") {
+			continue
+		}
+		rig := strings.TrimSpace(bead.Merged().Rig)
+		if rig == "" {
+			continue
+		}
+		required := rules[rig]
 		if !required.Any() {
 			continue
 		}
 
 		shape := domain.EpicShape{Description: bead.Description}
 		if len(required.LastStoryLabels) > 0 {
-			epic, err := s.Tracker.ShowEpic(ctx, bead.Story.ID)
-			if err != nil {
-				return nil, fmt.Errorf("reading the stories of %s: %w", bead.Story.ID, err)
-			}
-			for _, story := range epic.Stories {
+			for _, story := range storiesOf[bead.Story.ID] {
 				if story.IsEpic {
 					continue
 				}

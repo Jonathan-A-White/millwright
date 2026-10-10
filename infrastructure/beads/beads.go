@@ -2,7 +2,9 @@
 // `bd` command in the vault. It is the adapter behind application.WorkTracker.
 //
 // The beads database takes a single-writer lock, so a Gateway holds a mutex
-// across every `bd` it starts: no two run at once through one Gateway.
+// across every `bd` it starts: no two run at once through one Gateway. The one
+// exception is a read against a beads server, which takes reads side by side
+// and, over a link with a long round trip, is read together (mw-gq6.356).
 package beads
 
 import (
@@ -45,7 +47,8 @@ type Gateway struct {
 	vault   string
 	program string
 	actor   string
-	mu      sync.Mutex
+	mu      sync.RWMutex
+	reads   chan struct{}
 }
 
 // Gateway satisfies the port.
@@ -73,7 +76,7 @@ func WithActor(actor string) Option {
 
 // New returns a Gateway onto the beads database in a vault directory.
 func New(vault string, opts ...Option) *Gateway {
-	g := &Gateway{vault: vault, program: Program}
+	g := &Gateway{vault: vault, program: Program, reads: make(chan struct{}, maxSideBySide)}
 	for _, opt := range opts {
 		opt(g)
 	}
@@ -365,6 +368,7 @@ func (g *Gateway) ShowBeadPage(ctx context.Context, id string) (application.Bead
 // own bd list --parent call underneath, since bd's --parent flag takes only
 // one parent at a time and there is no way found to ask for several epics'
 // children in one call without losing what a story waits on (mw-tfne4.17).
+// Those calls are made together, which a beads server lets run side by side.
 func (g *Gateway) ShowEpics(ctx context.Context, ids []string) ([]application.EpicDetail, error) {
 	if len(ids) == 0 {
 		return nil, nil
@@ -378,7 +382,7 @@ func (g *Gateway) ShowEpics(ctx context.Context, ids []string) ([]application.Ep
 		byID[b.ID] = b
 	}
 
-	out := make([]application.EpicDetail, 0, len(ids))
+	epics := make([]bead, 0, len(ids))
 	for _, id := range ids {
 		epic, ok := byID[id]
 		if !ok {
@@ -387,16 +391,33 @@ func (g *Gateway) ShowEpics(ctx context.Context, ids []string) ([]application.Ep
 		if epic.Type != "" && epic.Type != TypeEpic {
 			return nil, fmt.Errorf("%s is a %s, not an epic", id, epic.Type)
 		}
-		defaults := domain.PathFromMetadata(epic.pathMetadata())
+		epics = append(epics, epic)
+	}
 
-		stories, err := g.childrenOf(ctx, id, defaults)
+	// Each epic's children are a bd of their own; against a beads server those
+	// run side by side, so over a slow link the epics cost one round of waiting
+	// and not one apiece.
+	out := make([]application.EpicDetail, len(epics))
+	failed := make([]error, len(epics))
+	var wg sync.WaitGroup
+	for i, epic := range epics {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defaults := domain.PathFromMetadata(epic.pathMetadata())
+			stories, err := g.childrenOf(ctx, epic.ID, defaults)
+			failed[i] = err
+			out[i] = application.EpicDetail{
+				ID: epic.ID, Title: epic.Title, Status: epic.Status, Priority: epic.priority(), Defaults: defaults,
+				Bead: epic.ownBead(), Stories: stories,
+			}
+		}()
+	}
+	wg.Wait()
+	for _, err := range failed {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, application.EpicDetail{
-			ID: epic.ID, Title: epic.Title, Status: epic.Status, Priority: epic.priority(), Defaults: defaults,
-			Bead: epic.ownBead(), Stories: stories,
-		})
 	}
 	return out, nil
 }
@@ -514,6 +535,36 @@ func (g *Gateway) showMany(ctx context.Context, ids []string) ([]bead, error) {
 		return nil, fmt.Errorf("reading %s: %w", strings.Join(ids, ", "), err)
 	}
 	return found, nil
+}
+
+// readBeads reads beads by id in one bd call and returns them by id. An id bd
+// has no record of is left out. When bd refuses a batch for naming one, each is
+// read on its own so that the rest still come back.
+func (g *Gateway) readBeads(ctx context.Context, ids []string) (map[string]bead, error) {
+	byID := make(map[string]bead, len(ids))
+	if len(ids) == 0 {
+		return byID, nil
+	}
+	found, err := g.showMany(ctx, ids)
+	if err != nil {
+		if len(ids) == 1 || !beadMissing(err) {
+			return nil, err
+		}
+		for _, id := range ids {
+			one, err := g.showMany(ctx, []string{id})
+			if err != nil {
+				if beadMissing(err) {
+					continue
+				}
+				return nil, err
+			}
+			found = append(found, one...)
+		}
+	}
+	for _, b := range found {
+		byID[b.ID] = b
+	}
+	return byID, nil
 }
 
 // LiveEpics implements application.WorkTracker: every epic bd has open or in
@@ -774,8 +825,19 @@ const killGrace = time.Second
 // remote through git itself), rather than leaving them behind for the next
 // tick to trip over.
 func (g *Gateway) run(ctx context.Context, args ...string) ([]byte, []byte, error) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
+	if g.sideBySide(args) {
+		select {
+		case g.reads <- struct{}{}:
+			defer func() { <-g.reads }()
+		case <-ctx.Done():
+			return nil, nil, fmt.Errorf("stopped: %w", ctx.Err())
+		}
+		g.mu.RLock()
+		defer g.mu.RUnlock()
+	} else {
+		g.mu.Lock()
+		defer g.mu.Unlock()
+	}
 
 	if err := g.serverModeRefusal(); err != nil {
 		return nil, nil, err
@@ -804,6 +866,27 @@ func (g *Gateway) run(ctx context.Context, args ...string) ([]byte, []byte, erro
 		err = fmt.Errorf("stopped: %w", ctx.Err())
 	}
 	return out.Bytes(), errs.Bytes(), err
+}
+
+// maxSideBySide is how many reads one Gateway has under way at once against a
+// beads server: enough to hide the round trips of a slow link, few enough not
+// to swamp the server or the host.
+const maxSideBySide = 16
+
+// sideBySide says whether this bd may run beside others: it only reads, and
+// the beads are in a server, which takes reads together. A database in the
+// vault takes one bd at a time, and a write takes the Gateway whole.
+func (g *Gateway) sideBySide(args []string) bool {
+	if strings.TrimSpace(os.Getenv("BEADS_DOLT_SERVER_HOST")) == "" || len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "show", "list", "ready", "blocked", "state", "comments":
+		return true
+	case "kv":
+		return len(args) > 1 && (args[1] == "get" || args[1] == "list")
+	}
+	return false
 }
 
 // serverModeRefusal is why bd is not to be started in a vault in server mode
