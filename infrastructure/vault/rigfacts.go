@@ -45,6 +45,24 @@ func (v *Vault) ReadRigFacts(_ context.Context, seat, rig string) (string, map[s
 	return about, files, true, nil
 }
 
+// ReadRigEval implements application.RigFactFiles.
+func (v *Vault) ReadRigEval(_ context.Context, seat, rig string) (string, bool, error) {
+	if err := safeName("seat", seat); err != nil {
+		return "", false, err
+	}
+	if err := safeName("rig", rig); err != nil {
+		return "", false, err
+	}
+	text, err := os.ReadFile(filepath.Join(v.dir, SeatsDir, seat, RigsDir, rig, application.EvalFile))
+	if os.IsNotExist(err) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("reading the %s seat's eval for the rig %s: %w", seat, rig, err)
+	}
+	return string(text), true, nil
+}
+
 // WriteRigFact implements application.RigFactFiles.
 func (v *Vault) WriteRigFact(_ context.Context, seat, rig, slug, text string) (string, error) {
 	for _, name := range [][2]string{{"seat", seat}, {"rig", rig}, {"fact", slug}} {

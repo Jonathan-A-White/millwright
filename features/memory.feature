@@ -630,3 +630,127 @@ Feature: mw memory
   Scenario: query refuses a rig the seat has no folder for
     When the Builder queries the rig "ghost" for "bd"
     Then the memory command was refused saying "no rig \"ghost\""
+
+  Scenario: eval prints a PASS line with the rank of each fact found in the top three, and a FAIL line for one that is not, and fails
+    Given the rig "millwright" holds facts for querying
+    And the rig "millwright" has an eval:
+      """
+      Q: How does a test run sync?
+      expect: never-sync-in-tests
+
+      Q: What is bd?
+      expect: vault-flag
+
+      Q: Where is the tmux socket?
+      expect: vault-flag
+      """
+    When the Mayor runs the eval of the rig "millwright"
+    Then the memory command was refused saying "eval failing: 1 of 3"
+    And the memory command printed exactly:
+      """
+      PASS 1 never-sync-in-tests  How does a test run sync?
+      PASS 2 vault-flag  What is bd?
+      FAIL vault-flag not in top 3  Where is the tmux socket?
+      """
+
+  Scenario: eval exits 0 when every question finds its fact
+    Given the rig "millwright" holds facts for querying
+    And the rig "millwright" has an eval:
+      """
+      Q: What is bd?
+      expect: never-sync-in-tests
+      """
+    When the Mayor runs the eval of the rig "millwright"
+    Then the memory command succeeded
+    And the memory command printed exactly:
+      """
+      PASS 1 never-sync-in-tests  What is bd?
+      """
+
+  Scenario: eval with no eval.md says so and succeeds
+    Given the rig "millwright" holds facts for querying
+    When the Mayor runs the eval of the rig "millwright"
+    Then the memory command succeeded
+    And the memory command printed exactly:
+      """
+      no eval
+      """
+
+  Scenario: eval skips a comment line, and a two-slug expect must find both facts
+    Given the rig "millwright" holds facts for querying
+    And the rig "millwright" has an eval:
+      """
+      # what a Builder asks about bd
+      Q: What is bd?
+      # both facts answer it
+      expect: never-sync-in-tests, vault-flag
+      """
+    When the Mayor runs the eval of the rig "millwright"
+    Then the memory command succeeded
+    And the memory command printed exactly:
+      """
+      PASS 1 never-sync-in-tests  What is bd?
+      PASS 2 vault-flag  What is bd?
+      """
+
+  Scenario: eval counts a question as failed when any one of its slugs is missing
+    Given the rig "millwright" holds facts for querying
+    And the rig "millwright" has an eval:
+      """
+      Q: What is bd?
+      expect: vault-flag, own-socket
+      """
+    When the Mayor runs the eval of the rig "millwright"
+    Then the memory command was refused saying "eval failing: 1 of 1"
+    And the memory command printed exactly:
+      """
+      PASS 2 vault-flag  What is bd?
+      FAIL own-socket not in top 3  What is bd?
+      """
+
+  Scenario: eval refuses an eval.md with a question that expects nothing
+    Given the rig "millwright" holds facts for querying
+    And the rig "millwright" has an eval:
+      """
+      Q: What is bd?
+      """
+    When the Mayor runs the eval of the rig "millwright"
+    Then the memory command was refused saying "eval.md line 1"
+
+  Scenario: eval refuses a rig the seat has no folder for
+    When the Mayor runs the eval of the rig "ghost"
+    Then the memory command was refused saying "no rig \"ghost\""
+
+  Scenario: mw status says eval failing for a rig whose eval fails, and nothing for one that passes
+    Given the Builder keeps the rig "fellowship" as facts
+    And the rig "millwright" holds facts for querying
+    And the rig "fellowship" holds facts for querying
+    And the rig "millwright" has an eval:
+      """
+      Q: How does a test run sync?
+      expect: never-sync-in-tests
+
+      Q: What is bd?
+      expect: vault-flag
+
+      Q: Where is the tmux socket?
+      expect: vault-flag
+      """
+    And the rig "fellowship" has an eval:
+      """
+      Q: What is bd?
+      expect: vault-flag
+      """
+    When mw status reads the host for memory
+    Then the memory status line reads "millwright eval failing: 1 of 3"
+    And the memory status line names no line of the rig "fellowship"
+
+  Scenario: mw status shows nothing of a rig whose eval passes
+    Given the rig "millwright" holds facts for querying
+    And the rig "millwright" has an eval:
+      """
+      Q: What is bd?
+      expect: vault-flag
+      """
+    When mw status reads the host for memory
+    Then the memory status line is absent for the rig "millwright"

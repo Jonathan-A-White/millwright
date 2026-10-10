@@ -75,6 +75,12 @@ func InitializeMemoryScenario(ctx *godog.ScenarioContext) {
 		return nil
 	})
 	ctx.When(`^mw status reads the host for memory$`, c.statusReads)
+	ctx.Given(`^the rig "([^"]*)" has an eval:$`, c.theRigHasAnEval)
+	ctx.When(`^the Mayor runs the eval of the rig "([^"]*)"$`, func(rig string) error {
+		c.err = c.memory().Eval(context.Background(), rig)
+		return nil
+	})
+	ctx.Then(`^the memory status line names no line of the rig "([^"]*)"$`, c.statusNamesNoLineOf)
 
 	ctx.Given(`^the rig "([^"]*)" keeps its memory in one file:$`, c.theRigKeepsItsMemory)
 	ctx.Given(`^the rig "([^"]*)" keeps its archive in one file:$`, c.theRigKeepsItsArchive)
@@ -317,6 +323,7 @@ func (c *memoryContext) statusReads() error {
 		Notes:          apptest.NewFakeTracker(),
 		Rules:          apptest.NewFakeEpicRules(),
 		Vault:          vault.New(c.root),
+		RigFacts:       vault.New(c.root),
 		Host:           "vps",
 		Seat:           memorySeat,
 		RigMemoryBytes: budget,
@@ -336,6 +343,19 @@ func (c *memoryContext) statusSays(line string) error {
 func (c *memoryContext) statusSaysNothing(rig string) error {
 	if strings.Contains(c.status.String(), application.RigMemoryHeading) {
 		return fmt.Errorf("expected nothing of the memory of %s, got:\n%s", rig, c.status.String())
+	}
+	return nil
+}
+
+func (c *memoryContext) theRigHasAnEval(rig string, doc *godog.DocString) error {
+	return os.WriteFile(filepath.Join(c.rigDir(rig), application.EvalFile), []byte(doc.Content+"\n"), 0o644)
+}
+
+func (c *memoryContext) statusNamesNoLineOf(rig string) error {
+	for _, got := range strings.Split(c.status.String(), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(got), rig+" ") {
+			return fmt.Errorf("expected mw status to say nothing of %s, got:\n%s", rig, c.status.String())
+		}
 	}
 	return nil
 }

@@ -25,6 +25,10 @@ type RigFactFiles interface {
 	// WriteRigFact writes the file of one fact, making the facts folder if it is
 	// not there, replacing the file if there is one, and reports where it landed.
 	WriteRigFact(ctx context.Context, seat, rig, slug, text string) (string, error)
+
+	// ReadRigEval reads the rig's eval.md, found false when it has none, which
+	// is not an error.
+	ReadRigEval(ctx context.Context, seat, rig string) (text string, found bool, err error)
 }
 
 // factSlugWords is how many words of a sentence a slug is made of by default.
@@ -485,6 +489,16 @@ func byReading(facts []RigFact) {
 	})
 }
 
+// orderedFacts is every fact in the order a Builder reads them.
+func orderedFacts(bySlug map[string]RigFact) []RigFact {
+	all := make([]RigFact, 0, len(bySlug))
+	for _, fact := range bySlug {
+		all = append(all, fact)
+	}
+	byReading(all)
+	return all
+}
+
 // Query prints the facts of a rig, of every status, in which every term starts
 // a word of the subject, sentence, slug or source (case does not matter), then
 // the facts related to them, each marked related. It reads files only. It is
@@ -503,11 +517,7 @@ func (m Memory) Query(ctx context.Context, req MemoryQuery) error {
 	if err != nil {
 		return err
 	}
-	all := make([]RigFact, 0, len(bySlug))
-	for _, fact := range bySlug {
-		all = append(all, fact)
-	}
-	byReading(all)
+	all := orderedFacts(bySlug)
 	var hits []RigFact
 	for _, fact := range all {
 		if fact.matches(terms) {

@@ -13,7 +13,7 @@ import (
 func newMemoryCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "memory",
-		Short: "Place, replace, retire, list and query the facts the Builder's seat keeps of a rig",
+		Short: "Place, replace, retire, list, query and eval the facts the Builder's seat keeps of a rig",
 		Long: "A rig kept as facts has a folder in the Builder's seat, seats/builder/rigs/<rig>/, with an\n" +
 			"about.md and facts/<slug>.md, one typed fact a file. These verbs are how the Mayor changes\n" +
 			"them: each writes files, prints each file it wrote, and runs no git command (the Mayor\n" +
@@ -22,7 +22,7 @@ func newMemoryCmd() *cobra.Command {
 		Args: cobra.NoArgs,
 	}
 	root.AddCommand(newMemoryAddCmd(), newMemorySupersedeCmd(), newMemoryRetireCmd(),
-		newMemoryRecheckCmd(), newMemoryListCmd(), newMemoryMigrateCmd(), newMemoryQueryCmd())
+		newMemoryRecheckCmd(), newMemoryListCmd(), newMemoryMigrateCmd(), newMemoryQueryCmd(), newMemoryEvalCmd())
 	return root
 }
 
@@ -212,6 +212,28 @@ func newMemoryQueryCmd() *cobra.Command {
 				return err
 			}
 			return memory.Query(cmd.Context(), application.MemoryQuery{Rig: args[0], Terms: args[1:]})
+		},
+	}
+}
+
+func newMemoryEvalCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "eval <rig>",
+		Short: "Run a rig's scripted questions against its facts: the pass bar for its memory",
+		Long: "eval reads seats/builder/rigs/<rig>/eval.md, blocks of 'Q: <what a Builder would ask>' and\n" +
+			"'expect: <slug>[, <slug>...]' separated by blank lines ('#' lines are comments), and runs\n" +
+			"each Q as a query (its words as terms, the stop words a, an, the, to, of, in, on, is, does,\n" +
+			"how, what, when and where dropped). It prints 'PASS <rank> <slug>  Q' for each expected fact\n" +
+			"found in the top three results and 'FAIL <slug> not in top 3  Q' for each that is not, and\n" +
+			"exits 1 when any question fails. A rig with no eval.md prints 'no eval' and exits 0. It reads\n" +
+			"files and runs no git command. mw status says 'eval failing' for a rig that fails.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			memory, err := memoryFor(cmd)
+			if err != nil {
+				return err
+			}
+			return memory.Eval(cmd.Context(), args[0])
 		},
 	}
 }

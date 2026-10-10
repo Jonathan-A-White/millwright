@@ -435,6 +435,28 @@ func TestRigFactFilesWriteAndReadBack(t *testing.T) {
 	}
 }
 
+func TestReadRigEvalIsTheRigsEvalFileOrNotFound(t *testing.T) {
+	dir := t.TempDir()
+	v := vault.New(dir)
+	ctx := context.Background()
+	rigDir := filepath.Join(dir, vault.SeatsDir, "builder", vault.RigsDir, "demo")
+	if err := os.MkdirAll(rigDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := v.ReadRigEval(ctx, "builder", "demo"); err != nil || found {
+		t.Fatalf("no eval.md: found=%v err=%v, want not found and no error", found, err)
+	}
+	if err := os.WriteFile(filepath.Join(rigDir, "eval.md"), []byte("Q: x\nexpect: y\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if text, found, err := v.ReadRigEval(ctx, "builder", "demo"); err != nil || !found || text != "Q: x\nexpect: y\n" {
+		t.Fatalf("read %q found=%v err=%v", text, found, err)
+	}
+	if _, _, err := v.ReadRigEval(ctx, "builder", "../etc"); err == nil {
+		t.Fatal("a rig name that reaches outside the vault was read")
+	}
+}
+
 func TestRigMemoryFilesAreReadAndRemovedAndNothingElse(t *testing.T) {
 	dir := t.TempDir()
 	v := vault.New(dir)

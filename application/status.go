@@ -177,6 +177,9 @@ type Status struct {
 	// RigMemoryBytes is how large the Seat's memory of one rig may be before the
 	// report says it is due to be pruned. Zero reads DefaultRigMemoryBytes.
 	RigMemoryBytes int
+	// RigFacts, when set, is where each rig kept as facts has its eval.md run
+	// from; a rig whose eval fails is named under RIG MEMORY.
+	RigFacts RigFactFiles
 	// BeadsBudgetBytes is how large this host's own beads database may grow
 	// before the report warns it is past budget. Zero reads
 	// DefaultBeadsBudgetBytes.
@@ -461,6 +464,8 @@ type StatusReport struct {
 	RigMemory []RigMemorySize
 	// RigMemoryBudget is the size a rig's memory was held to.
 	RigMemoryBudget int
+	// RigEvals are the rigs whose eval.md does not pass, in rig order.
+	RigEvals []RigEvalFailure
 	// Halt is what this host's own sync-halted mark says, read straight from
 	// SyncHalt rather than through the tracker. Nil when nothing is halted.
 	Halt *SyncHaltInfo
@@ -718,11 +723,12 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		}
 	}
 
-	over, err := s.rigMemoryOverBudget(ctx)
+	sizes, err := s.rigMemorySizes(ctx)
 	if err != nil {
 		return report, fmt.Errorf("sizing the %s seat's memory of its rigs: %w", s.Seat, err)
 	}
-	report.RigMemory = over
+	report.RigMemory = s.overBudget(sizes)
+	report.RigEvals = s.rigEvalFailures(ctx, sizes)
 	report.RigMemoryBudget = s.rigMemoryBudget()
 
 	if s.SyncHalt != nil {
@@ -939,23 +945,51 @@ func (s Status) fuelToday(ctx context.Context) (int, error) {
 	return total, nil
 }
 
-// rigMemoryOverBudget is the rigs whose memory is larger than the budget, in
-// rig order. A report with no vault to read them from has none.
-func (s Status) rigMemoryOverBudget(ctx context.Context) ([]RigMemorySize, error) {
+// rigMemorySizes is how large each rig's memory is, in rig order. A report
+// with no vault to read them from has none.
+func (s Status) rigMemorySizes(ctx context.Context) ([]RigMemorySize, error) {
 	if s.Vault == nil {
 		return nil, nil
 	}
-	sizes, err := s.Vault.RigMemorySizes(ctx, s.Seat)
-	if err != nil {
-		return nil, err
-	}
+	return s.Vault.RigMemorySizes(ctx, s.Seat)
+}
+
+// overBudget is the rigs whose memory is larger than the budget.
+func (s Status) overBudget(sizes []RigMemorySize) []RigMemorySize {
 	var over []RigMemorySize
 	for _, size := range sizes {
 		if size.Bytes > s.rigMemoryBudget() {
 			over = append(over, size)
 		}
 	}
-	return over, nil
+	return over
+}
+
+// rigEvalFailures are the rigs kept as facts whose eval.md does not pass, in
+// rig order. A rig with no eval.md, and a report with no RigFacts to run one
+// against, have none. An eval.md that cannot be read is a failure with its
+// problem.
+func (s Status) rigEvalFailures(ctx context.Context, sizes []RigMemorySize) []RigEvalFailure {
+	if s.RigFacts == nil {
+		return nil
+	}
+	memory := Memory{Files: s.RigFacts, Seat: s.Seat}
+	var failing []RigEvalFailure
+	for _, size := range sizes {
+		if !size.Facts {
+			continue
+		}
+		report, found, err := memory.runEval(ctx, size.Rig)
+		switch {
+		case err != nil && !found:
+			failing = append(failing, RigEvalFailure{Rig: size.Rig, Problem: "cannot run eval.md: " + err.Error()})
+		case err != nil:
+			failing = append(failing, RigEvalFailure{Rig: size.Rig, Problem: err.Error()})
+		case found && report.Failed > 0:
+			failing = append(failing, RigEvalFailure{Rig: size.Rig, Failed: report.Failed, Total: report.Total})
+		}
+	}
+	return failing
 }
 
 // rigMemoryBudget is how large a rig's memory may be before it is called due
@@ -1173,7 +1207,7 @@ func (r StatusReport) String() string {
 		b.WriteString("\n")
 	}
 
-	if len(r.RigMemory) > 0 {
+	if len(r.RigMemory) > 0 || len(r.RigEvals) > 0 {
 		clip(&b, RigMemoryHeading)
 		for _, size := range r.RigMemory {
 			fix := "prune"
@@ -1181,6 +1215,9 @@ func (r StatusReport) String() string {
 				fix = "retire or supersede"
 			}
 			clip(&b, fmt.Sprintf("  %s %d/%d bytes: %s (Mayor)", size.Rig, size.Bytes, r.RigMemoryBudget, fix))
+		}
+		for _, failure := range r.RigEvals {
+			clip(&b, "  "+failure.Line())
 		}
 		b.WriteString("\n")
 	}

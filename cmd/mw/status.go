@@ -165,6 +165,7 @@ func newStatusCmd() *cobra.Command {
 				Tracker:          tracker,
 				Notes:            tracker,
 				Vault:            mwVault(dir, host),
+				RigFacts:         mwVault(dir, host),
 				Rules:            files,
 				Graph:            tracker,
 				SyncHalt:         hostSyncHalt(),
