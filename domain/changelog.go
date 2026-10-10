@@ -136,8 +136,11 @@ func AddToChangelogJSON(existing []byte, entry ChangelogEntry) ([]byte, error) {
 }
 
 // AddToChangelogMarkdown puts the entry at the top of the markdown changelog,
-// just under its title, and returns the whole file. An absent or blank file is
-// created, and one without the title keeps what it holds below the entry.
+// just above its first "## " heading, and returns the whole file. Whatever
+// stands before that heading (a rig's own title and intro) is kept as it is. An
+// absent or blank file is created with ChangelogTitle; a file that opens with a
+// "# " title but has no "## " heading yet gets the entry after what it holds;
+// one with neither keeps what it holds below the entry, under ChangelogTitle.
 func AddToChangelogMarkdown(existing []byte, entry ChangelogEntry) []byte {
 	kind := "New"
 	if entry.Kind == ChangelogFixed {
@@ -145,14 +148,39 @@ func AddToChangelogMarkdown(existing []byte, entry ChangelogEntry) []byte {
 	}
 	block := fmt.Sprintf("## %s\n_%s_\n- %s: %s\n", entry.Version, entry.Date, kind, entry.Text)
 
-	rest := string(existing)
-	if first, after, _ := strings.Cut(rest, "\n"); strings.TrimSpace(first) == ChangelogTitle {
-		rest = after
+	text := string(existing)
+	head, rest := text, ""
+	if at := firstVersionHeading(text); at >= 0 {
+		head, rest = text[:at], text[at:]
 	}
-	rest = strings.TrimLeft(rest, "\n")
+	if strings.TrimSpace(head) != "" && (rest != "" || strings.HasPrefix(strings.TrimSpace(head), "# ")) {
+		out := strings.TrimRight(head, "\n") + "\n\n" + block
+		if rest != "" {
+			out += "\n" + rest
+		}
+		return []byte(out)
+	}
+
+	// No title of the rig's own: ours heads the file. A leading ChangelogTitle
+	// line already in it is not written twice.
+	if first, after, _ := strings.Cut(text, "\n"); strings.TrimSpace(first) == ChangelogTitle {
+		text = after
+	}
+	text = strings.TrimLeft(text, "\n")
 	out := ChangelogTitle + "\n\n" + block
-	if strings.TrimSpace(rest) != "" {
-		out += "\n" + rest
+	if strings.TrimSpace(text) != "" {
+		out += "\n" + text
 	}
 	return []byte(out)
+}
+
+// firstVersionHeading is the offset of the first line that starts "## ", or -1.
+func firstVersionHeading(text string) int {
+	if strings.HasPrefix(text, "## ") {
+		return 0
+	}
+	if at := strings.Index(text, "\n## "); at >= 0 {
+		return at + 1
+	}
+	return -1
 }

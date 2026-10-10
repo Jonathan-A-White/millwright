@@ -3626,8 +3626,9 @@ conflict over a list kept by hand:
 
 - `public/changelog.json` is an array, newest first, of
   `{"version", "date" (UTC, YYYY-MM-DD), "story", "kind": "new"|"fixed", "text"}`.
-- `CHANGELOG.md` has a `# What's new` title, then for each landing `## X.Y.Z`, a
-  `_YYYY-MM-DD_` line and `- New: text` or `- Fixed: text`, newest at the top.
+- `CHANGELOG.md` has a `# What's new` title (a file with a title of its own keeps it and
+  its intro), then for each landing `## X.Y.Z`, a `_YYYY-MM-DD_` line and `- New: text` or
+  `- Fixed: text`, newest at the top, just above the first `## ` heading.
 
 Absent files are created. `none` writes no entry, and a rig without the key writes no
 changelog. A story that raised the version itself gets its entry under that version in a
