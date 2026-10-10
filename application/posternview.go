@@ -60,13 +60,20 @@ const (
 	PosternNeedReview   = "review"
 	PosternNeedStale    = "stale"
 	PosternNeedAlarm    = "alarm"
+	// PosternNeedWaiting is a bead the factory asked someone else about, the
+	// view's Waiting on others part; PosternNeedChase is one of them that has not
+	// moved for ChaseAfterWorkingDays working days, which stands in for it.
+	PosternNeedWaiting = "waiting"
+	PosternNeedChase   = "chase"
 )
 
-// Who a need waits on, its waits_for: the Governor, the Mayor or the factory.
+// Who a need waits on, its waits_for: the Governor, the Mayor, the factory or
+// someone outside it.
 const (
 	PosternWaitsYou     = "you"
 	PosternWaitsMayor   = "mayor"
 	PosternWaitsFactory = "factory"
+	PosternWaitsOthers  = "others"
 )
 
 // LabelDemo is the label on a bead the Governor is to be shown working: a
@@ -79,6 +86,7 @@ var posternNeedRank = map[string]int{
 	PosternNeedAlarm: 0, PosternNeedQuestion: 1, PosternNeedApprove: 2,
 	PosternNeedDecision: 3, PosternNeedReview: 4, PosternNeedHands: 5,
 	PosternNeedVerify: 6, PosternNeedStale: 7, PosternNeedDemo: 8,
+	PosternNeedChase: 9, PosternNeedWaiting: 10,
 }
 
 // PosternViewDoc is the live view's plaintext, postern's docs/protocol.md §11.
@@ -845,6 +853,7 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 		needs = append(needs, w.need)
 	}
 	needs = append(needs, b.heldBehind(notes)...)
+	needs = append(needs, b.waitingOnOthers(notes)...)
 
 	for _, id := range b.order {
 		e := b.entries[id]
@@ -865,6 +874,47 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 		}
 	}
 	return needs, newMemory, nil
+}
+
+// waitingOnOthers is the view's Waiting on others part: a waiting need for each
+// open bead in the view labelled waiting:others, with who it waits on and since
+// when (the time mw ask waiting noted), waiting for others. One that has not
+// changed for ChaseAfterWorkingDays working days is a chase need instead, "Chase
+// <login> on <title>", for the Governor, until it moves or closes.
+func (b *viewBuild) waitingOnOthers(notes map[string]string) []PosternViewNeed {
+	var needs []PosternViewNeed
+	for _, id := range b.order {
+		e := b.entries[id]
+		d := e.detail
+		if !b.inView(id) || d.Closed() || !d.WaitingOnOthers() {
+			continue
+		}
+		since := askWaitingSince(notes[AskWaitingKey(id)], d)
+		of := d.AskedOf()
+		if chaseAt := askChaseAt(since, d); !chaseAt.IsZero() && !b.now.Before(chaseAt) {
+			who := of
+			if who == "" {
+				who = "others"
+			}
+			needs = append(needs, b.need(PosternNeedChase, e, chaseAt, "Chase "+who+" on "+d.Story.Title))
+			continue
+		}
+		who := "others"
+		if of != "" {
+			who = of
+			if role := d.AskRole(); role != "" {
+				who += " (" + role + ")"
+			}
+		}
+		text := "Waiting on " + who
+		if !since.IsZero() {
+			text += " since " + viewClock(since)
+		}
+		need := b.need(PosternNeedWaiting, e, since, text)
+		need.WaitsFor = PosternWaitsOthers
+		needs = append(needs, need)
+	}
+	return needs
 }
 
 // viewLandingCheckedMarker is the words the Mayor's comment on a landing he

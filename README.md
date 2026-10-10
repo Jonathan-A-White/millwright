@@ -492,6 +492,21 @@ What it asks of him is one more label beside `hitl`: `hitl:hands`, `hitl:decisio
 kind, with its body (Do this, Verified, Done when). A bare `hitl` is a hands need.
 `mw status` names the kind and warns of a bead that carries two.
 
+**Asks from outside the factory, and waiting on them.** A bead that delivers work
+somebody outside asked for carries `asked-by:<login>`; one the factory asked
+somebody for carries `asked-of:<login>`; `ask:<role>` (tl, skip, drqs) says who they
+are to the Governor, so the history survives a reorg. `mw ask by|of <bead> <login>
+[--role <role>]` writes them. Once an outbound ask is sent, `mw ask waiting <bead>
+[--of <login>]` labels the bead `waiting:others` and notes the time (the note
+`ask.waiting.<bead>`); Needs you lists it under Waiting on others, a `waiting` need
+that waits for `others`, saying who and since when. A bead with no change for three
+working days (Monday to Friday) becomes a `chase` need, "Chase <login> on <title>",
+for the Governor, until it moves or closes. `mw ask done <bead>` clears the wait.
+mw has no model to recheck a Done-when, so `mw status` lists the waiting beads under
+WAITING ON OTHERS, RECHECK DONE-WHEN for the Mayor to recheck each day. See
+`features/ask.feature`, and the Waiting on others scenarios in
+`features/postern_view.feature` and `features/status.feature`.
+
 **A story is tried a bounded number of times.** Every session mw starts for a
 story is an attempt, counted in the story's `attempts` metadata once the session
 is running: a dispatch that fails before that (the fetch, the worktree, the

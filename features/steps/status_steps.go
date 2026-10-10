@@ -131,6 +131,9 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the report says "([^"]*)" waits as "([^"]*)"$`, c.theReportSaysWaitsAs)
 	ctx.Then(`^the report has no warning$`, c.theReportHasNoWarning)
 	ctx.Then(`^the report warns that "([^"]*)" has two hitl kinds, "([^"]*)" and "([^"]*)"$`, c.theReportWarnsTwoHitlKinds)
+	ctx.Given(`^the status story "([^"]*)" has waited on others since "([^"]*)"$`, c.theStatusStoryHasWaitedOnOthersSince)
+	ctx.Then(`^the report lists "([^"]*)" to recheck its Done-when, waiting on "([^"]*)" since "([^"]*)"$`, c.theReportListsToRecheck)
+	ctx.Then(`^the report has no heading for beads waiting on others$`, c.theReportHasNoHeadingForWaitingOnOthers)
 	ctx.Given(`^the status story "([^"]*)" is held$`, c.theStatusStoryIsHeld)
 	ctx.Given(`^the status story "([^"]*)" keeps the hands step "([^"]*)"$`, c.theStatusStoryKeepsAHandsStep)
 	ctx.Then(`^the report lists "([^"]*)" under HELD, WITH A HANDS STEP$`, c.theReportListsUnderHeldWithAHandsStep)
@@ -1327,6 +1330,37 @@ func (c *statusContext) theLandedMemoryWasNotWritten() error {
 	}
 	if note != "" {
 		return fmt.Errorf("expected no landed-memory note, got %q", note)
+	}
+	return nil
+}
+
+func (c *statusContext) theStatusStoryHasWaitedOnOthersSince(id, at string) error {
+	return c.tracker.SetNote(context.Background(), application.AskWaitingKey(id), at)
+}
+
+func (c *statusContext) theReportListsToRecheck(id, of, since string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	section := headedBy(c.report.String(), application.WaitingOnOthersHeading)
+	i := strings.Index(section, id)
+	if i < 0 {
+		return fmt.Errorf("%s is not under %q:\n%s", id, application.WaitingOnOthersHeading, c.report.String())
+	}
+	for _, want := range []string{of, since} {
+		if !strings.Contains(section[i:], want) {
+			return fmt.Errorf("expected %s under %q to name %q, got:\n%s", id, application.WaitingOnOthersHeading, want, section)
+		}
+	}
+	return nil
+}
+
+func (c *statusContext) theReportHasNoHeadingForWaitingOnOthers() error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	if strings.Contains(c.report.String(), application.WaitingOnOthersHeading) {
+		return fmt.Errorf("expected no %q heading, got:\n%s", application.WaitingOnOthersHeading, c.report.String())
 	}
 	return nil
 }

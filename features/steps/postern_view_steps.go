@@ -85,6 +85,10 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the view's hands need on "([^"]*)" is not ready, waiting on "([^"]*)"$`, c.theViewsHandsNeedIsNotReady)
 	ctx.Then(`^the view's hands need on "([^"]*)" is ready, saying "([^"]*)"$`, c.theViewsHandsNeedIsReadySaying)
 	ctx.Then(`^the view's hands need on "([^"]*)" is ready$`, c.theViewsHandsNeedIsReady)
+	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" is waiting on "([^"]*)" as "([^"]*)" since (\d+) days? ago$`, c.theViewsBeadIsWaitingOnOthers)
+	ctx.Given(`^the view's bead "([^"]*)" was last changed (\d+) days? ago$`, c.theViewsBeadWasLastChanged)
+	ctx.Given(`^the view's bead "([^"]*)" is no longer waiting on others$`, c.theViewsBeadIsNoLongerWaitingOnOthers)
+	ctx.Given(`^the view's bead "([^"]*)" is closed$`, c.theViewsBeadIsClosed)
 	ctx.When(`^the live view is built$`, c.theLiveViewIsBuilt)
 	ctx.When(`^the live view is run and written$`, c.theLiveViewIsRunAndWritten)
 
@@ -741,4 +745,38 @@ func (c *posternViewContext) theViewsHandsNeedIsReady(bead string) error {
 
 func (c *posternViewContext) theViewsHandsStepIsSupersededBy(id, bead, newer string) error {
 	return c.tracker.SetNote(context.Background(), application.HandsSupersededKey(bead, id), newer)
+}
+
+// theViewsBeadIsWaitingOnOthers files a bead under epic labelled as mw ask
+// waiting leaves it: waiting:others, asked-of:<of> and ask:<role> when they are
+// given, and the note of when it began, days ago.
+func (c *posternViewContext) theViewsBeadIsWaitingOnOthers(id, epic, of, role string, days int) error {
+	c.story(id, epic)
+	labels := []string{application.LabelWaitingOthers}
+	if of != "" {
+		labels = append(labels, application.LabelAskedOfPrefix+of)
+	}
+	if role != "" {
+		labels = append(labels, application.LabelAskRolePrefix+role)
+	}
+	if err := c.tracker.SetLabels(id, labels...); err != nil {
+		return err
+	}
+	since := posternViewDaysAgo(days).Format(time.RFC3339)
+	return c.tracker.SetNote(context.Background(), application.AskWaitingKey(id), since)
+}
+
+func (c *posternViewContext) theViewsBeadWasLastChanged(id string, days int) error {
+	return c.tracker.SetUpdated(id, posternViewDaysAgo(days))
+}
+
+func (c *posternViewContext) theViewsBeadIsNoLongerWaitingOnOthers(id string) error {
+	if err := c.tracker.SetLabels(id); err != nil {
+		return err
+	}
+	return c.tracker.ClearNote(context.Background(), application.AskWaitingKey(id))
+}
+
+func (c *posternViewContext) theViewsBeadIsClosed(id string) error {
+	return c.tracker.SetStatus(id, apptest.StatusClosed)
 }

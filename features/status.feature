@@ -641,3 +641,19 @@ Feature: mw status
     Then reading status succeeds
     And the report lists "mw-gq6.61" as waiting for the Governor
     And the report warns that "mw-gq6.61" has two hitl kinds, "review" and "decision"
+
+  Scenario: A bead waiting on others is listed to recheck its Done-when, with who and since when
+    Given a status bead "mw-6ww.70" titled "Get the sign-off" filed under no epic
+    And the status story "mw-6ww.70" is labelled "waiting:others" and "asked-of:sam"
+    And the status story "mw-6ww.70" has waited on others since "2026-10-05T14:30:00Z"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "mw-6ww.70" to recheck its Done-when, waiting on "sam" since "5 Oct 14:30 UTC"
+    And every line of the report is at most 60 columns wide
+
+  Scenario: Without a bead waiting on others the report has no heading for them
+    Given a status bead "mw-6ww.71" titled "Get the sign-off" filed under no epic
+    And the status story "mw-6ww.71" is labelled "asked-of:sam"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report has no heading for beads waiting on others

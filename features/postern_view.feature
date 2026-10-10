@@ -366,3 +366,56 @@ Feature: mw postern view
     And the view's bead "mw-kind.1" under "mw-kind" landed an hour ago with the labels "hitl, hitl:verify"
     When the live view is built
     Then the view's needs on "mw-kind.1" are ""
+
+  # Waiting on others is the third part of Needs you: the beads the factory
+  # has asked someone else about, with who and since when. One that has not
+  # changed for three working days (Monday to Friday) becomes a chase, until it
+  # moves or closes. The clock reads Monday 28 September, 12:00 UTC.
+  Scenario: A bead waiting on others is listed with who and since when, and waits for them
+    Given the view's epic "mw-ask" is live
+    And the view's bead "mw-ask.1" under "mw-ask" is waiting on "sam" as "tl" since 1 day ago
+    When the live view is built
+    Then the view's needs on "mw-ask.1" are "waiting:mw-ask.1"
+    And the view's need "waiting" on "mw-ask.1" waits for "others"
+    And the view's need "waiting" on "mw-ask.1" says "Waiting on sam (tl) since 27 Sep 12:00 UTC"
+
+  Scenario: A bead waiting on others with no one named says so
+    Given the view's epic "mw-ask" is live
+    And the view's bead "mw-ask.1" under "mw-ask" is waiting on "" as "" since 1 day ago
+    When the live view is built
+    Then the view's need "waiting" on "mw-ask.1" says "Waiting on others since 27 Sep 12:00 UTC"
+
+  Scenario: Four calendar days over a weekend are only two working days, so there is no chase yet
+    Given the view's epic "mw-ask" is live
+    And the view's bead "mw-ask.1" under "mw-ask" is waiting on "sam" as "tl" since 4 days ago
+    When the live view is built
+    Then the view's needs on "mw-ask.1" are "waiting:mw-ask.1"
+
+  Scenario: Three working days without change, skipping the weekend, is a chase for the Governor
+    Given the view's epic "mw-ask" is live
+    And the view's bead "mw-ask.1" under "mw-ask" is waiting on "sam" as "tl" since 5 days ago
+    When the live view is built
+    Then the view's needs on "mw-ask.1" are "chase:mw-ask.1"
+    And the view's need "chase" on "mw-ask.1" waits for "you"
+    And the view's need "chase" on "mw-ask.1" says "Chase sam on Story mw-ask.1"
+
+  Scenario: A chase clears when the bead moves
+    Given the view's epic "mw-ask" is live
+    And the view's bead "mw-ask.1" under "mw-ask" is waiting on "sam" as "tl" since 5 days ago
+    And the view's bead "mw-ask.1" was last changed 1 day ago
+    When the live view is built
+    Then the view's needs on "mw-ask.1" are "waiting:mw-ask.1"
+
+  Scenario: A bead that is done waiting leaves Needs you
+    Given the view's epic "mw-ask" is live
+    And the view's bead "mw-ask.1" under "mw-ask" is waiting on "sam" as "tl" since 5 days ago
+    And the view's bead "mw-ask.1" is no longer waiting on others
+    When the live view is built
+    Then the view's needs on "mw-ask.1" are "none"
+
+  Scenario: A closed bead is not chased
+    Given the view's epic "mw-ask" is live
+    And the view's bead "mw-ask.1" under "mw-ask" is waiting on "sam" as "tl" since 5 days ago
+    And the view's bead "mw-ask.1" is closed
+    When the live view is built
+    Then the view's needs on "mw-ask.1" are "none"

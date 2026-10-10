@@ -37,6 +37,19 @@ const WaitingHeading = "WAITING FOR THE GOVERNOR"
 // out when there are none.
 const WaitingOnMayorHeading = "WAITING ON THE MAYOR"
 
+// WaitingOnOthersHeading is what heads the section for beads labelled
+// waiting:others, whose Done-when the Mayor is to recheck each day (mw has no
+// model to do it). The report leaves the section out when there are none.
+const WaitingOnOthersHeading = "WAITING ON OTHERS, RECHECK DONE-WHEN"
+
+// OtherWait is a bead waiting on someone outside the factory: who it waits on
+// ("" when no asked-of label says) and since when (zero when unknown).
+type OtherWait struct {
+	Story StoryDetail
+	Of    string
+	Since time.Time
+}
+
 // HeldHandsHeading is what heads the section for held beads that keep a hands
 // step: the view offers no Run until the bead is open. The report leaves the
 // section out when there are none.
@@ -381,6 +394,9 @@ type StatusReport struct {
 	// Warnings are things a person should put right, each one line: a bead for
 	// the Governor with two hitl:<kind> labels.
 	Warnings []string
+	// WaitingOnOthers are the open beads labelled waiting:others, longest
+	// waiting first: the ones whose Done-when the Mayor is to recheck.
+	WaitingOnOthers []OtherWait
 	// WaitingOnMayor are the needs the view says wait on the Mayor, oldest
 	// first (one with no known age last), and NeedsAt is the clock their age is read against.
 	WaitingOnMayor []PosternViewNeed
@@ -576,6 +592,10 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	sort.SliceStable(report.Waiting, func(i, j int) bool {
 		return report.Waiting[i].Priority < report.Waiting[j].Priority
 	})
+
+	if report.WaitingOnOthers, err = s.waitingOnOthers(ctx); err != nil {
+		return report, err
+	}
 
 	// What waits on the Mayor takes a read or two of its own, so it is read
 	// while the rest of the report is, and joined before it is printed.
@@ -1057,6 +1077,21 @@ func (r StatusReport) String() string {
 		}
 		for _, warning := range r.Warnings {
 			wrapInto(&b, "  ", "warning: "+warning)
+		}
+		b.WriteString("\n")
+	}
+
+	if len(r.WaitingOnOthers) > 0 {
+		clip(&b, fmt.Sprintf("%s (%d)", WaitingOnOthersHeading, len(r.WaitingOnOthers)))
+		for _, w := range r.WaitingOnOthers {
+			note := "waiting on " + w.Of
+			if w.Of == "" {
+				note = "waiting on others"
+			}
+			if !w.Since.IsZero() {
+				note += " since " + viewClock(w.Since)
+			}
+			writeStory(&b, w.Story, note)
 		}
 		b.WriteString("\n")
 	}
@@ -1562,4 +1597,32 @@ func wrapInto(b *strings.Builder, indent, text string) {
 	if strings.TrimSpace(line) != "" {
 		clip(b, line)
 	}
+}
+
+// waitingOnOthers lists the open beads labelled waiting:others, longest
+// waiting first, each with who it waits on and since when its note says. It
+// reads and writes nothing else.
+func (s Status) waitingOnOthers(ctx context.Context) ([]OtherWait, error) {
+	beads, err := s.Tracker.ReadyWithLabel(ctx, LabelWaitingOthers)
+	if err != nil {
+		return nil, fmt.Errorf("reading what waits on others: %w", err)
+	}
+	var waits []OtherWait
+	for _, d := range beads {
+		note := ""
+		if s.Notes != nil {
+			if note, err = s.Notes.Note(ctx, AskWaitingKey(d.Story.ID)); err != nil {
+				return nil, fmt.Errorf("reading when %s began waiting: %w", d.Story.ID, err)
+			}
+		}
+		waits = append(waits, OtherWait{Story: d, Of: d.AskedOf(), Since: askWaitingSince(note, d)})
+	}
+	sort.SliceStable(waits, func(i, j int) bool {
+		a, b := waits[i].Since, waits[j].Since
+		if a.IsZero() != b.IsZero() {
+			return !a.IsZero()
+		}
+		return a.Before(b)
+	})
+	return waits, nil
 }
