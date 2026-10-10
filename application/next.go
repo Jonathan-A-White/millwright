@@ -1569,7 +1569,7 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 func (n Next) changelogEntry(ctx context.Context, c *closeOut) (domain.ChangelogEntry, error) {
 	comments, err := n.Tracker.StoryComments(ctx, c.id)
 	if err != nil {
-		return domain.ChangelogEntry{}, fmt.Errorf("the comments on %s could not be read for its What's new: line: %w", c.id, err)
+		return domain.ChangelogEntry{}, fmt.Errorf("the comments on %s could not be read for its What's new line: %w", c.id, err)
 	}
 	texts := make([]string, len(comments))
 	for i, comment := range comments {

@@ -40,6 +40,41 @@ func TestTheNewestCommentWithAWhatsNewLineIsTheOneUsed(t *testing.T) {
 	}
 }
 
+func TestAWhatsNewMarkerCountsOnlyAtTheStartOfALine(t *testing.T) {
+	for _, tc := range []struct {
+		comment string
+		want    WhatsNew
+	}{
+		{"  What's new: New: Indented", WhatsNew{Kind: ChangelogNew, Text: "Indented"}},
+		{"- What's new: New: Bulleted", WhatsNew{Kind: ChangelogNew, Text: "Bulleted"}},
+		{"* **What's new:** Fixed: Bulleted and bold", WhatsNew{Kind: ChangelogFixed, Text: "Bulleted and bold"}},
+		{"_What's new:_ New: Emphasised", WhatsNew{Kind: ChangelogNew, Text: "Emphasised"}},
+	} {
+		got, found := ParseWhatsNew(tc.comment)
+		if !found || got != tc.want {
+			t.Errorf("ParseWhatsNew(%q) = %+v, %v; want %+v", tc.comment, got, found, tc.want)
+		}
+	}
+	for _, mid := range []string{
+		"the comments on mw-5r3p30.120 could not be read for its What's new: line: bd comments mw-5r3p30.120 --json: exit status 1",
+		"mw@desktop: refused; What's new: New: not a note",
+	} {
+		if got, found := ParseWhatsNew(mid); found {
+			t.Errorf("ParseWhatsNew(%q) = %+v, true; want a mid-sentence marker ignored", mid, got)
+		}
+	}
+}
+
+func TestMwsOwnRefusalCommentDoesNotHideTheBuildersWhatsNewLine(t *testing.T) {
+	got, found := NewestWhatsNew([]string{
+		"Done and verified.\nWhat's new: New: An 'Immersive reader' setting hides the chrome while you read\nFor the rig memory: nothing",
+		"mw@desktop: landing-failed: the comments on mw-5r3p30.120 could not be read for its What's new: line: bd comments mw-5r3p30.120 --json: exit status 1: Dolt server unreachable: i/o timeout",
+	})
+	if !found || got.Kind != ChangelogNew || got.Text != "An 'Immersive reader' setting hides the chrome while you read" {
+		t.Errorf("NewestWhatsNew = %+v, %v; want the Builder's Immersive reader line", got, found)
+	}
+}
+
 func TestATitleBecomesANoteWithoutItsTags(t *testing.T) {
 	for title, want := range map[string]string{
 		"[bug] Listen stops early":              "Listen stops early",

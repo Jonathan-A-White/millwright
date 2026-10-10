@@ -72,14 +72,16 @@ func ParseWhatsNew(comment string) (WhatsNew, bool) {
 }
 
 // afterMarker is what follows the What's new: marker on a line, in any case and
-// with either apostrophe.
+// with either apostrophe. The marker counts only at the start of the line,
+// after leading spaces, bullet and emphasis marks; mid-sentence it is prose
+// (mw's own refusal comments quote it), not a note.
 func afterMarker(line string) (string, bool) {
 	line = strings.ReplaceAll(line, "’", "'")
-	at := strings.Index(strings.ToLower(line), strings.ToLower(WhatsNewMarker))
-	if at < 0 {
+	line = strings.TrimLeft(line, " \t-*+•_`>")
+	if len(line) < len(WhatsNewMarker) || !strings.EqualFold(line[:len(WhatsNewMarker)], WhatsNewMarker) {
 		return "", false
 	}
-	return line[at+len(WhatsNewMarker):], true
+	return line[len(WhatsNewMarker):], true
 }
 
 // NewestWhatsNew reads the newest of the comments (given oldest first) that
