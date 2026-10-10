@@ -40,6 +40,13 @@ const (
 // dispatch made, written with the attempt it counts.
 const ClaimedAtField = "claimed_at"
 
+// SentBackAtField is the metadata a story carries to say when mw next last
+// sent its branch back to a fresh session (to rebase, or to fix the merged
+// tests), as UTC RFC 3339. The quiet alarm counts a sent-back story's silence
+// from it, not from the claim, since the Sent back mail and the new session
+// are the story being worked (mw-gq6.347).
+const SentBackAtField = "sent_back_at"
+
 // DefaultMaxAttempts is how many times a story is tried when the config file
 // says nothing: infrastructure/config.DefaultMaxAttempts is the same number.
 const DefaultMaxAttempts = 3

@@ -123,6 +123,11 @@ func (c *nextContext) aSessionIsRunningToRebase(id, onto string) error {
 }
 
 func (c *nextContext) theStoryIsRecordedAsSentBack(id string) error {
+	if detail, err := c.tracker.ShowStory(context.Background(), id); err != nil {
+		return err
+	} else if detail.SentBackAt.IsZero() {
+		return fmt.Errorf("expected %s to record when it was sent back (%s), which the quiet alarm counts from", id, application.SentBackAtField)
+	}
 	if got := c.tracker.State(id, application.RebaseState); got != application.RebaseSentBack {
 		return fmt.Errorf("expected %s to be recorded %s=%s, got %q", id, application.RebaseState, application.RebaseSentBack, got)
 	}

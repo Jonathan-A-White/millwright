@@ -899,6 +899,7 @@ func (n Next) sendBack(ctx context.Context, c *closeOut, report *NextReport, lan
 	}
 	if err := n.Tracker.SetStoryMetadata(ctx, c.id, map[string]string{
 		RebaseSendsField: strconv.Itoa(sends + 1), RebaseBaseField: head,
+		SentBackAtField: n.now().UTC().Format(time.RFC3339),
 	}); err != nil {
 		return fmt.Sprintf("it could not be recorded as sent back to rebase against %s, which is what bounds the send-backs: %v", shortSHA(head), err)
 	}
@@ -1034,6 +1035,9 @@ func (n Next) sendBackForFailingTests(ctx context.Context, c *closeOut, report *
 		return fmt.Sprintf("the session to fix the tests could not be assembled: %v", err)
 	}
 	next := c.detail.Attempts + 1
+	if err := n.Tracker.SetStoryMetadata(ctx, c.id, map[string]string{SentBackAtField: n.now().UTC().Format(time.RFC3339)}); err != nil {
+		return fmt.Sprintf("the time it was sent back could not be recorded, which is what the quiet alarm counts from: %v", err)
+	}
 	if err := n.Tracker.SetStoryState(ctx, c.id, MergedTestsState, MergedTestsSentBack,
 		fmt.Sprintf("sent back as attempt %d to fix the merged tests, %s merged in: %s", next, onto, firstLine(landErr.Error()))); err != nil {
 		return fmt.Sprintf("it could not be recorded as %s=%s, which is what keeps it to once: %v", MergedTestsState, MergedTestsSentBack, err)

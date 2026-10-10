@@ -1402,6 +1402,9 @@ func (f *FakeTracker) SetStoryMetadata(_ context.Context, id string, fields map[
 			if k == application.ClaimedAtField {
 				s.detail.ClaimedAt, _ = time.Parse(time.RFC3339, v)
 			}
+			if k == application.SentBackAtField {
+				s.detail.SentBackAt, _ = time.Parse(time.RFC3339, v)
+			}
 			if k == application.AttemptsExhaustedField {
 				s.detail.Exhausted = v != ""
 			}

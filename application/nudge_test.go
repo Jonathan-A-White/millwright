@@ -326,6 +326,56 @@ func TestNudgeCountsAStoryFromItsLatestClaim(t *testing.T) {
 	}
 }
 
+// 2026-10-10: mw-5r3p30.130 alarmed '138 min, no mail' five minutes after its
+// Sent back mail, its rebase session running tests. A send-back restarts the
+// story's quiet clock: the alarm reads the time mw next recorded on the story
+// when it sent it back (SentBackAtField).
+func TestNudgeCountsAStoryFromItsLatestSendBack(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.30", "Claimed 140 minutes ago, sent back 5 minutes ago", "vps")
+	claim(t, tracker, "mw-gq6.30", 140*time.Minute)
+	sent := statusNow.Add(-5 * time.Minute).UTC().Format(time.RFC3339)
+	if err := tracker.SetStoryMetadata(context.Background(), "mw-gq6.30", map[string]string{
+		application.RebaseSendsField: "2", application.SentBackAtField: sent,
+	}); err != nil {
+		t.Fatalf("recording the send-back: %v", err)
+	}
+
+	clauses := nudgeReport(t, tracker, application.Nudge{})
+
+	if len(clauses) != 0 {
+		t.Fatalf("expected a story sent back 5 minutes ago not to alarm, got %+v", clauses)
+	}
+}
+
+func TestNudgeNamesASentBackStoryOnceTheLimitHasPassedSinceTheSendBack(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.30", "Sent back 65 minutes ago", "vps")
+	claim(t, tracker, "mw-gq6.30", 200*time.Minute)
+	sent := statusNow.Add(-65 * time.Minute).UTC().Format(time.RFC3339)
+	if err := tracker.SetStoryMetadata(context.Background(), "mw-gq6.30", map[string]string{application.SentBackAtField: sent}); err != nil {
+		t.Fatalf("recording the send-back: %v", err)
+	}
+
+	clauses := nudgeReport(t, tracker, application.Nudge{})
+
+	if len(clauses) != 1 || clauses[0].Text != "mw-gq6.30 in progress 65 min, no mail" {
+		t.Fatalf("expected the clause to count from the send-back, got %+v", clauses)
+	}
+}
+
+func TestNudgeStillNamesAStoryClaimedLongAgoAndNeverSentBack(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.30", "Claimed 140 minutes ago, never sent back", "vps")
+	claim(t, tracker, "mw-gq6.30", 140*time.Minute)
+
+	clauses := nudgeReport(t, tracker, application.Nudge{})
+
+	if len(clauses) != 1 || clauses[0].Text != "mw-gq6.30 in progress 140 min, no mail" {
+		t.Fatalf("expected one clause for a story never sent back, got %+v", clauses)
+	}
+}
+
 // aHandsBeadFiledAgo files a bead labelled hitl with no hands step under the
 // epic — a need that waits on the Mayor — created ago before statusNow.
 func aHandsBeadFiledAgo(t *testing.T, tracker *apptest.FakeTracker, id string, ago time.Duration) {

@@ -2411,7 +2411,7 @@ one armed, says so and ends.
 `mw nudge` is the zero-token, read-only use case behind the second line: it
 reads this host's claimed stories for one running longer than
 `nudge_after_minutes` (default 60) with nothing landed, refused or blocked
-mailed to the Mayor about it since it was claimed, and every other host a
+mailed to the Mayor about it since it was claimed (or last sent back by `mw next`), and every other host a
 story is pathed to for one whose last recorded sync, as this host last heard
 it, is older than `nudge_sync_stale_minutes` (default 20) — both in
 `~/.config/mw/config.toml` (*What a host is told*). It writes nothing: no

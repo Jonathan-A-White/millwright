@@ -234,6 +234,16 @@ func (b bead) claimedAt() time.Time {
 	return at
 }
 
+// sentBackAt is when mw next recorded sending this bead's branch back, or the
+// zero time when it never did or what is there is not a time.
+func (b bead) sentBackAt() time.Time {
+	at, err := time.Parse(time.RFC3339, b.text(application.SentBackAtField))
+	if err != nil {
+		return time.Time{}
+	}
+	return at
+}
+
 // updated is when bd says the bead was last changed, or the zero time when it
 // says nothing or something that is not a time.
 func (b bead) updated() time.Time {
@@ -286,6 +296,7 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		Created:          b.created(),
 		Started:          b.started(),
 		ClaimedAt:        b.claimedAt(),
+		SentBackAt:       b.sentBackAt(),
 		Updated:          b.updated(),
 		ClosedAt:         b.closedAt(),
 		LeaseExpires:     b.leaseExpires(),
