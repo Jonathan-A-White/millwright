@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1346,10 +1347,28 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 		return false, false, nil
 	}
 
+	// The session ended and no close-out ever ran, so the attempt it used is
+	// given back: a story is not spent by sessions that never got to say
+	// whether it worked (mw-y0dkzp). A refusal (run=blocked) returned above and
+	// is never refunded. The tick re-reads the story, so the next start counts
+	// from the lowered number.
+	refund := fmt.Sprintf("its attempt count of %d is unchanged, as the refund could not be recorded", detail.Attempts)
+	if detail.Attempts > 0 {
+		lowered := detail.Attempts - 1
+		if err := d.Tracker.SetStoryMetadata(ctx, id, map[string]string{AttemptsField: strconv.Itoa(lowered)}); err != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf(
+				"%s: its dead-pane attempt could not be refunded (%s=%d): %v", id, AttemptsField, lowered, err))
+		} else {
+			refund = fmt.Sprintf("that attempt was refunded (%s %d -> %d), as its session ended without a close-out", AttemptsField, detail.Attempts, lowered)
+		}
+	} else {
+		refund = "no attempt was recorded, so none was refunded"
+	}
+
 	why := fmt.Sprintf(
 		"mw dispatch on %s found %s claimed here with a dead pane (%s is %s) and its lease had run out with no heartbeat since: "+
-			"the window was closed and the claim given back so it is dispatched again as a fresh attempt.",
-		d.Host, id, name, status.State)
+			"the window was closed and the claim given back so it is dispatched again as a fresh attempt; %s.",
+		d.Host, id, name, status.State, refund)
 
 	if err := d.Runner.Close(ctx, name); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf(

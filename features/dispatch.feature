@@ -129,14 +129,36 @@ Feature: Dispatching the stories this host is ready to work
     Then no session was started
     And the story "mw-gq6.1" is not claimed
 
-  Scenario: A dead pane with an expired lease is reclaimed and started again as the next attempt
+  # mw-y0dkzp: a session that died with no close-out is not a try the story
+  # failed, so the reclaim gives the attempt back (it never goes below 0).
+
+  Scenario: A dead pane with an expired lease is reclaimed, its attempt is refunded, and it is started again
     Given a story "mw-gq6.9" of that epic is already running here
     And the story "mw-gq6.9" has been tried 1 time
     And the session of "mw-gq6.9" has a dead pane and its lease has expired
     When dispatch runs on "vps" with a cap of 1
     Then one session was started, for "mw-gq6.9"
-    And the story "mw-gq6.9" records 2 attempts
+    And the story "mw-gq6.9" records 1 attempt
     And dispatch reclaimed "mw-gq6.9" for a dead pane with an expired lease
+    And the reclaim comment on "mw-gq6.9" says the attempt was refunded
+
+  Scenario: A story tried max_attempts times whose pane is dead is reclaimed and started, not exhausted
+    Given a story "mw-gq6.9" of that epic is already running here
+    And the story "mw-gq6.9" has been tried 3 times
+    And the session of "mw-gq6.9" has a dead pane and its lease has expired
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.9"
+    And the story "mw-gq6.9" records 3 attempts
+    And dispatch reclaimed "mw-gq6.9" for a dead pane with an expired lease
+    And the story "mw-gq6.9" carries no comment saying it used up its attempts
+
+  Scenario: A story never tried that is reclaimed for a dead pane is not refunded below none
+    Given a story "mw-gq6.9" of that epic is already running here
+    And the story "mw-gq6.9" has been tried 0 times
+    And the session of "mw-gq6.9" has a dead pane and its lease has expired
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.9"
+    And the story "mw-gq6.9" records 1 attempt
 
   # mw-gq6.182: a story its close-out refused is evidence, not a dead session.
   # The claim, the worktree and the branch stay as the session left them until
@@ -163,7 +185,7 @@ Feature: Dispatching the stories this host is ready to work
     And the session of "mw-gq6.9" has a dead pane and its lease has expired
     When dispatch runs on "vps" with a cap of 1
     Then one session was started, for "mw-gq6.9"
-    And the story "mw-gq6.9" records 2 attempts
+    And the story "mw-gq6.9" records 1 attempt
     And dispatch reclaimed "mw-gq6.9" for a dead pane with an expired lease
 
   # mw-gq6.107: a dead-pane reclaim gives the claim back but leaves the
@@ -176,7 +198,7 @@ Feature: Dispatching the stories this host is ready to work
     And the session of "mw-gq6.9" has a dead pane and its lease has expired
     When dispatch runs on "vps" with a cap of 1
     Then one session was started, for "mw-gq6.9"
-    And the story "mw-gq6.9" records 2 attempts
+    And the story "mw-gq6.9" records 1 attempt
     And the worktree of "mw-gq6.9" is a checkout of the rig on branch "mw/mw-gq6.9"
     And the earlier branch of "mw-gq6.9" was kept as "mw/mw-gq6.9-attempt1" with its 2 commits
     And the dispatch line for "mw-gq6.9" names the kept branch and the attempt

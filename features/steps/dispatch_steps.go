@@ -217,6 +217,7 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the branch of "([^"]*)" still has its (\d+) commits?$`, c.theBranchStillHasItsCommits)
 	ctx.Then(`^dispatch said once that "([^"]*)" is refused and waits for the Mayor$`, c.dispatchSaidOnceItIsRefused)
 	ctx.Then(`^dispatch reclaimed "([^"]*)" for a dead pane with an expired lease$`, c.dispatchReclaimedForADeadPane)
+	ctx.Then(`^the reclaim comment on "([^"]*)" says the attempt was refunded$`, c.theReclaimCommentSaysRefunded)
 	ctx.Then(`^the earlier branch of "([^"]*)" was kept as "([^"]*)" with its (\d+) commits?$`, c.theEarlierBranchWasKept)
 	ctx.Then(`^the dispatch line for "([^"]*)" names the kept branch and the attempt$`, c.theDispatchLineNamesTheKeptBranchAndTheAttempt)
 	ctx.Then(`^a session was started for "([^"]*)" all the same$`, c.aSessionWasStartedAllTheSame)
@@ -1434,6 +1435,17 @@ func (c *dispatchContext) dispatchReclaimedForADeadPane(id string) error {
 	return fmt.Errorf("expected %s to be reclaimed for a dead pane, got %+v", id, report.Reclaimed)
 }
 
+// theReclaimCommentSaysRefunded checks that the comment the dead-pane reclaim
+// left on the story says the attempt was given back (mw-y0dkzp).
+func (c *dispatchContext) theReclaimCommentSaysRefunded(id string) error {
+	for _, comment := range c.tracker.Comments(id) {
+		if strings.Contains(comment, "dead pane") && strings.Contains(comment, "refunded") {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected a reclaim comment on %s saying the attempt was refunded, got %q", id, c.tracker.Comments(id))
+}
+
 // theEarlierBranchWasKept checks that the branch an earlier attempt left is
 // there under the name it was kept as, with its n commits, and that the
 // report names it against the story it was kept for.
@@ -1475,8 +1487,14 @@ func (c *dispatchContext) theDispatchLineNamesTheKeptBranchAndTheAttempt(id stri
 		if started.KeptBranch == "" || !strings.Contains(printed, started.KeptBranch) {
 			return fmt.Errorf("expected the report to name the branch kept for %s, got:\n%s", id, printed)
 		}
-		if !strings.Contains(printed, fmt.Sprintf("attempt %d", started.Attempt)) {
+		// The first attempt is not named on the line (a dead-pane reclaim refunds
+		// the attempt it ended, mw-y0dkzp); the kept branch carries the earlier
+		// attempt's number in its name.
+		if started.Attempt > 1 && !strings.Contains(printed, fmt.Sprintf("attempt %d", started.Attempt)) {
 			return fmt.Errorf("expected the report to name attempt %d for %s, got:\n%s", started.Attempt, id, printed)
+		}
+		if !strings.Contains(started.KeptBranch, "-attempt") {
+			return fmt.Errorf("expected the kept branch %s of %s to carry the attempt it was kept for", started.KeptBranch, id)
 		}
 		return nil
 	}

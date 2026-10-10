@@ -49,6 +49,11 @@ that could not write.
   (`dispatch.go:1154`); `mw sweep` reads only this host's claims (`application/sweep.go:64-83`) and
   marks them `run=stuck`; `ReclaimStory` never passes `--any-replica`, "who may reclaim the other
   host's claims is not settled" (`infrastructure/beads/beads.go:679`). A dead host reclaims nothing.
+  A reclaim also refunds the attempt (mw-y0dkzp): the session ended and no close-out ever ran, so
+  `attempts` goes down by one (never below 0) and the reclaim comment says so; a story tried
+  `max_attempts` times with a dead pane is reclaimed and started, not exhausted. A refusal
+  (`run=blocked`) is never reclaimed or refunded, and the 2026-10-01 refusals above would not have
+  been refunded either: that needs a signal that the host, not the story, failed (option B).
 - **Giving back another host's claim is refused.** `ReleaseClaim` carries `--if-assignee <own
   actor>` (`infrastructure/beads/dispatch.go:218-224`), so the home cannot release `mw@desktop`'s
   claim; the Mayor had to run `bd update` by hand and filed a bug.

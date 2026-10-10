@@ -164,8 +164,8 @@ func assertReclaimedAsBefore(t *testing.T, report application.DispatchReport, tr
 	if len(report.Reclaimed) != 1 || report.Reclaimed[0].StoryID != "mw-gq6.9" || report.Reclaimed[0].Session != session {
 		t.Fatalf("expected mw-gq6.9's claim given back, got %+v", report.Reclaimed)
 	}
-	if len(report.Started) != 1 || report.Started[0].Attempt != 2 {
-		t.Fatalf("expected mw-gq6.9 started again as attempt 2, got %+v", report.Started)
+	if len(report.Started) != 1 || report.Started[0].Attempt != 1 {
+		t.Fatalf("expected mw-gq6.9 started again as attempt 1, the one it ended refunded, got %+v", report.Started)
 	}
 	detail, err := tracker.ShowStory(context.Background(), "mw-gq6.9")
 	if err != nil {

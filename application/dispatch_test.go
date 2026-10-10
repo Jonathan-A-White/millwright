@@ -533,8 +533,8 @@ func TestDispatchReclaimsADeadPaneWithAnExpiredLeaseAndRedispatchesTheNextAttemp
 	if closed := runner.Closed(); len(closed) != 1 || closed[0] != session {
 		t.Fatalf("expected the dead window closed, got %q closed", closed)
 	}
-	if len(report.Started) != 1 || report.Started[0].StoryID != "mw-gq6.9" || report.Started[0].Attempt != 2 {
-		t.Fatalf("expected mw-gq6.9 started again as attempt 2, got %+v", report.Started)
+	if len(report.Started) != 1 || report.Started[0].StoryID != "mw-gq6.9" || report.Started[0].Attempt != 1 {
+		t.Fatalf("expected mw-gq6.9 started again as attempt 1, the one it ended refunded, got %+v", report.Started)
 	}
 	if status, _ := runner.Status(ctx, session); !status.Running() {
 		t.Fatalf("expected the fresh session running under the same name, got %+v", status)
