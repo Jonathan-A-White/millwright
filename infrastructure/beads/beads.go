@@ -364,7 +364,7 @@ func (g *Gateway) ShowBeadPage(ctx context.Context, id string) (application.Bead
 
 // ShowEpics implements application.WorkTracker: ShowEpic for several epics at
 // once. Their own fields — title, status, priority — are read in a single bd
-// show call rather than one per epic; each epic's children still cost their
+// call (readOwn) rather than one per epic; each epic's children still cost their
 // own bd list --parent call underneath, since bd's --parent flag takes only
 // one parent at a time and there is no way found to ask for several epics'
 // children in one call without losing what a story waits on (mw-tfne4.17).
@@ -373,13 +373,9 @@ func (g *Gateway) ShowEpics(ctx context.Context, ids []string) ([]application.Ep
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	found, err := g.showMany(ctx, ids)
+	byID, err := g.readOwn(ctx, ids)
 	if err != nil {
 		return nil, err
-	}
-	byID := make(map[string]bead, len(found))
-	for _, b := range found {
-		byID[b.ID] = b
 	}
 
 	epics := make([]bead, 0, len(ids))
@@ -520,21 +516,100 @@ func (g *Gateway) HoldStory(ctx context.Context, id string) error {
 	return err
 }
 
-// showMany reads several beads in one bd call: bd show takes any number of
-// ids and prints them in the same JSON array shape showOne reads one bead
-// from.
+// showMany reads several beads: bd show takes any number of ids and prints
+// them in the same JSON array shape showOne reads one bead from.
 func (g *Gateway) showMany(ctx context.Context, ids []string) ([]bead, error) {
-	args := append([]string{"show"}, ids...)
-	args = append(args, "--json")
-	out, err := g.call(ctx, args...)
+	printed, err := g.showEach(ctx, ids)
 	if err != nil {
 		return nil, err
 	}
-	found, err := decodeBeads(out)
+	var found []bead
+	for _, out := range printed {
+		some, err := decodeBeads(out)
+		if err != nil {
+			return nil, fmt.Errorf("reading %s: %w", strings.Join(ids, ", "), err)
+		}
+		found = append(found, some...)
+	}
+	return found, nil
+}
+
+// showEach runs bd show for the ids, with extra flags after them, and returns
+// what it printed, in the order of the ids. bd show does its reads of the
+// beads one after another inside its one process, so against a beads server a
+// batch costs a round trip per id, 2 to 2.5 s each over wg0 (measured on the
+// desktop, mw-gq6.358): 46 beads were 98 s. A bd apiece, side by side, cost one
+// wait for as many as the Gateway has reads under way (maxSideBySide). Against
+// a database in the vault, which takes one bd at a time and has no round trips
+// to hide, the ids go in one bd.
+func (g *Gateway) showEach(ctx context.Context, ids []string, extra ...string) ([][]byte, error) {
+	if len(ids) < 2 || !g.sideBySide([]string{"show"}) {
+		args := append(append([]string{"show"}, ids...), extra...)
+		out, err := g.call(ctx, append(args, "--json")...)
+		if err != nil {
+			return nil, err
+		}
+		return [][]byte{out}, nil
+	}
+
+	printed := make([][]byte, len(ids))
+	failed := make([]error, len(ids))
+	var wg sync.WaitGroup
+	for i, id := range ids {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			args := append(append([]string{"show", id}, extra...), "--json")
+			printed[i], failed[i] = g.call(ctx, args...)
+		}()
+	}
+	wg.Wait()
+	for _, err := range failed {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return printed, nil
+}
+
+// readOwn reads beads by id for their own fields only — an epic's title, status
+// and the metadata its stories' Paths default from — and returns them by id.
+// Against a server that is one bd list --id, a single query for any number of
+// ids, where bd show makes a round trip an id; what it prints of a bead is what
+// a listing of its parent's children prints. An id it does not print (a type bd
+// list hides, or a bead bd has no record of) is read as readBeads reads it, so
+// a bead is lost only when bd show says it is not there. Against a database in
+// the vault there is no round trip to save, and readBeads reads them whole.
+func (g *Gateway) readOwn(ctx context.Context, ids []string) (map[string]bead, error) {
+	if len(ids) == 0 || !g.sideBySide([]string{"list"}) {
+		return g.readBeads(ctx, ids)
+	}
+	out, err := g.call(ctx, "list", "--id", strings.Join(ids, ","), "--all", "--limit", "0", "--json")
+	if err != nil {
+		return nil, err
+	}
+	listed, err := decodeBeads(out)
 	if err != nil {
 		return nil, fmt.Errorf("reading %s: %w", strings.Join(ids, ", "), err)
 	}
-	return found, nil
+	byID := make(map[string]bead, len(ids))
+	for _, b := range listed {
+		byID[b.ID] = b
+	}
+	var unlisted []string
+	for _, id := range ids {
+		if _, ok := byID[id]; !ok {
+			unlisted = append(unlisted, id)
+		}
+	}
+	more, err := g.readBeads(ctx, unlisted)
+	if err != nil {
+		return nil, err
+	}
+	for id, b := range more {
+		byID[id] = b
+	}
+	return byID, nil
 }
 
 // readBeads reads beads by id in one bd call and returns them by id. An id bd
@@ -693,22 +768,27 @@ func (g *Gateway) StoryComments(ctx context.Context, id string) ([]application.C
 // StoriesComments implements application.WorkTracker: StoryComments for
 // several stories at once, keyed by id. bd show --include-comments streams
 // every comment inline for as many ids as it is given in one process, rather
-// than one bd comments process per story (mw-tfne4.17). An id bd does not
+// than one bd comments process per story (mw-tfne4.17); against a server it is
+// a bd show apiece, together (see showEach). An id bd does not
 // recognise is left out of the result rather than failing the whole call, the
 // way bd show itself skips it.
 func (g *Gateway) StoriesComments(ctx context.Context, ids []string) (map[string][]application.Comment, error) {
 	if len(ids) == 0 {
 		return map[string][]application.Comment{}, nil
 	}
-	args := append([]string{"show"}, ids...)
-	args = append(args, "--include-comments", "--json")
-	out, err := g.call(ctx, args...)
+	printed, err := g.showEach(ctx, ids, "--include-comments")
 	if err != nil {
 		return nil, err
 	}
-	said, err := decodeCommentsByID(out)
-	if err != nil {
-		return nil, fmt.Errorf("reading the comments of %s: %w", strings.Join(ids, ", "), err)
+	said := map[string][]application.Comment{}
+	for _, out := range printed {
+		some, err := decodeCommentsByID(out)
+		if err != nil {
+			return nil, fmt.Errorf("reading the comments of %s: %w", strings.Join(ids, ", "), err)
+		}
+		for id, comments := range some {
+			said[id] = comments
+		}
 	}
 	return said, nil
 }
