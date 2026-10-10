@@ -70,6 +70,11 @@ type GristSmokeReport struct {
 	Warnings []string `json:"warnings,omitempty"`
 	// NoGrinds says the app's rig has no grinds, so there was nothing to test.
 	NoGrinds bool `json:"no_grinds,omitempty"`
+	// NotRun are the reasons the mill could not be asked, when that is all that
+	// went wrong: it refused for the day's limit or the licence, or could not be
+	// reached. None of that is the examples' fault, so it is no Failure and holds
+	// nothing. Any Failure beside it takes these into itself.
+	NotRun []string `json:"not_run,omitempty"`
 }
 
 // Failed says an example failed.
@@ -82,6 +87,8 @@ func (r GristSmokeReport) Line() string {
 		return fmt.Sprintf("grist smoke: %s: the app has no grinds", r.App)
 	case r.Failed():
 		return fmt.Sprintf("grist smoke: %s: FAILED %d of %d examples: %s", r.App, len(r.Failures), r.Examples, strings.Join(r.Failures, "; "))
+	case len(r.NotRun) > 0:
+		return fmt.Sprintf("grist smoke: %s: not run: %s", r.App, strings.Join(r.NotRun, "; "))
 	}
 	said := fmt.Sprintf("grist smoke: %s: ok, %d examples answered as expected", r.App, r.Examples)
 	if len(r.Warnings) > 0 {
@@ -131,6 +138,11 @@ func (s GristSmoke) Run(ctx context.Context, app, kind string) (GristSmokeReport
 	}
 	for _, k := range kinds {
 		s.kind(ctx, checkout, commit, app, k, files, &report)
+	}
+	if report.Failed() {
+		// The smoke failed whatever the mill refused, and says all it found.
+		report.Failures = append(report.Failures, report.NotRun...)
+		report.NotRun = nil
 	}
 	return report, nil
 }
@@ -196,7 +208,15 @@ func (s GristSmoke) kind(ctx context.Context, checkout, commit, app, kind string
 		name := strings.TrimSuffix(path.Base(example), ".json")
 		report.Examples++
 		s.say("sending %s/%s ...", label, name)
-		if why := s.example(ctx, checkout, commit, app, kind, example, schema); why != "" {
+		why, notRun := s.example(ctx, checkout, commit, app, kind, example, schema)
+		if notRun != "" {
+			if !slices.Contains(report.NotRun, notRun) {
+				report.NotRun = append(report.NotRun, notRun)
+			}
+			s.say("  NOT RUN: %s", notRun)
+			continue
+		}
+		if why != "" {
 			report.Failures = append(report.Failures, label+"/"+name+": "+why)
 			s.say("  FAILED: %s", why)
 			continue
@@ -206,37 +226,39 @@ func (s GristSmoke) kind(ctx context.Context, checkout, commit, app, kind string
 }
 
 // example sends one example and reports why it failed, empty when the answer
-// came, fits the schema and shows everything expected.
-func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, file, schema string) string {
+// came, fits the schema and shows everything expected. notRun, when it is not
+// empty, says instead that the mill could not be asked, for a reason that is
+// not the example's (see GristSmokeReport.NotRun).
+func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, file, schema string) (why, notRun string) {
 	data, _, err := s.Grinds.ReadAt(ctx, checkout, commit, file)
 	if err != nil {
-		return "the example could not be read: " + firstLine(err.Error())
+		return "the example could not be read: " + firstLine(err.Error()), ""
 	}
 	example, err := ParseGristExample(data)
 	if err != nil {
-		return "the example is wrong: " + err.Error()
+		return "the example is wrong: " + err.Error(), ""
 	}
 	dir, err := os.MkdirTemp(s.TempDir, "mw-grist-smoke-")
 	if err != nil {
-		return "no directory to send it from: " + err.Error()
+		return "no directory to send it from: " + err.Error(), ""
 	}
 	defer os.RemoveAll(dir)
 	request := filepath.Join(dir, "request.json")
 	if err := os.WriteFile(request, example.Request, 0o600); err != nil {
-		return "the request could not be written: " + err.Error()
+		return "the request could not be written: " + err.Error(), ""
 	}
 	var photos []string
 	for _, name := range example.Photos {
 		if name == "" || path.Base(name) != name {
-			return fmt.Sprintf("the photo %q is not a file beside the example", name)
+			return fmt.Sprintf("the photo %q is not a file beside the example", name), ""
 		}
 		photo, found, err := s.Grinds.ReadAt(ctx, checkout, commit, path.Join(path.Dir(file), name))
 		if err != nil || !found {
-			return fmt.Sprintf("the photo %s is not beside the example", name)
+			return fmt.Sprintf("the photo %s is not beside the example", name), ""
 		}
 		local := filepath.Join(dir, name)
 		if err := os.WriteFile(local, photo, 0o600); err != nil {
-			return "a photo could not be written: " + err.Error()
+			return "a photo could not be written: " + err.Error(), ""
 		}
 		photos = append(photos, local)
 	}
@@ -247,27 +269,41 @@ func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, fi
 	sent, err := s.Send.Run(ctx, GristSendRequest{App: app, Kind: kind, Version: example.SchemaVersion, RequestFile: request, Photos: photos, Wait: wait})
 	if unanswered, ok := GristUnansweredIn(err); ok {
 		if unanswered.Answer == nil {
-			return fmt.Sprintf("no answer in %s", wait)
+			return fmt.Sprintf("no answer in %s", wait), ""
 		}
-		return fmt.Sprintf("the mill %s it: %s", unanswered.Answer.Status, strings.TrimSpace(unanswered.Answer.Reason))
+		reason := strings.TrimSpace(unanswered.Answer.Reason)
+		if unanswered.Answer.Status == GristRefused && gristRefusalIsNotTheExamples(reason) {
+			return "", reason
+		}
+		return fmt.Sprintf("the mill %s it: %s", unanswered.Answer.Status, reason), ""
+	}
+	if errors.Is(err, ErrPosternUnreachable) {
+		return "", ErrPosternUnreachable.Error() + ": " + firstLine(err.Error())
 	}
 	if err != nil {
-		return "it could not be sent: " + firstLine(err.Error())
+		return "it could not be sent: " + firstLine(err.Error()), ""
 	}
 	if sent.Answer == nil {
-		return "the mill left no answer"
+		return "the mill left no answer", ""
 	}
 	if violations := SchemaViolations(sent.Answer.Answer, schema); len(violations) > 0 {
-		return "the answer does not fit the grind's schema: " + strings.Join(violations, ", ")
+		return "the answer does not fit the grind's schema: " + strings.Join(violations, ", "), ""
 	}
 	var missed []string
 	for _, f := range CheckExpect(sent.Answer.Answer, example.Expect) {
 		missed = append(missed, f.String())
 	}
 	if len(missed) > 0 {
-		return "the answer misses what the example expects: " + strings.Join(missed, "; ")
+		return "the answer misses what the example expects: " + strings.Join(missed, "; "), ""
 	}
-	return ""
+	return "", ""
+}
+
+// gristRefusalIsNotTheExamples says the mill refused a grist for a reason that
+// is not in the examples: the key has sent its limit today, or has no licence
+// for the app. The smoke cannot say whether the app's grist works then.
+func gristRefusalIsNotTheExamples(reason string) bool {
+	return reason == GristReasonLicence || isGristReasonDaily(reason)
 }
 
 func (s GristSmoke) say(format string, args ...any) {
@@ -308,6 +344,9 @@ type GristSmokeRecord struct {
 	Failed   bool      `json:"failed"`
 	Failures []string  `json:"failures,omitempty"`
 	Warnings []string  `json:"warnings,omitempty"`
+	// NotRun is why the mill could not be asked (GristSmokeReport.NotRun). It
+	// is no failure and holds nothing.
+	NotRun []string `json:"not_run,omitempty"`
 }
 
 // Line is the record as mw status and a story's comment say it.
@@ -319,6 +358,9 @@ func (r GristSmokeRecord) Line() string {
 		}
 		return fmt.Sprintf("grist smoke: %s FAILED %s (%s): %s. `mw grist smoke %s` that passes lifts the hold, or `mw grist smoke %s --lift`.",
 			r.App, r.At.UTC().Format("2006-01-02 15:04Z"), held, strings.Join(r.Failures, "; "), r.App, r.App)
+	}
+	if len(r.NotRun) > 0 {
+		return fmt.Sprintf("grist smoke: %s not run %s: %s", r.App, r.At.UTC().Format("2006-01-02 15:04Z"), strings.Join(r.NotRun, "; "))
 	}
 	return fmt.Sprintf("grist smoke: %s ok %s, %d examples", r.App, r.At.UTC().Format("2006-01-02 15:04Z"), r.Examples)
 }
@@ -370,7 +412,7 @@ func (b GristSmokeBook) now() time.Time {
 }
 
 // Record keeps what a smoke found as the app's last, and for a failure posts
-// the alarm. rig is the rig whose landing made the smoke run, empty by hand: a
+// the alarm (a smoke that was not run is kept, and posts none). rig is the rig whose landing made the smoke run, empty by hand: a
 // failure by hand keeps the rig an earlier failure held. An app with no grinds
 // has its record forgotten.
 func (b GristSmokeBook) Record(ctx context.Context, rig string, report GristSmokeReport) error {
@@ -383,12 +425,16 @@ func (b GristSmokeBook) Record(ctx context.Context, rig string, report GristSmok
 	}
 	record := GristSmokeRecord{
 		App: report.App, Rig: rig, At: b.now().UTC(), Commit: report.Commit, Examples: report.Examples,
-		Failed: report.Failed(), Failures: report.Failures, Warnings: report.Warnings,
+		Failed: report.Failed(), Failures: report.Failures, Warnings: report.Warnings, NotRun: report.NotRun,
 	}
-	if record.Failed && record.Rig == "" {
-		if before, ok := b.read(ctx, key); ok && before.Failed {
-			record.Rig = before.Rig
-		}
+	before, had := b.read(ctx, key)
+	if len(record.NotRun) > 0 && had && before.Failed {
+		// A smoke that was not run proves nothing of the failure before it: its
+		// hold stays until a smoke passes or is lifted.
+		return nil
+	}
+	if record.Failed && record.Rig == "" && had && before.Failed {
+		record.Rig = before.Rig
 	}
 	text, err := json.Marshal(record)
 	if err != nil {

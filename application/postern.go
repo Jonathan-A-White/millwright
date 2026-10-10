@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,6 +19,11 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
+
+// ErrPosternUnreachable is what a postern backend that could not be reached
+// is: the network, not the backend's answer. An adapter's error is it by
+// errors.Is, with its own words.
+var ErrPosternUnreachable = errors.New("the postern backend could not be reached")
 
 // PosternKeyFile is where the Mayor's postern key lives on this host: a
 // generated testnet secp256k1 key, kept host-local outside the vault and its

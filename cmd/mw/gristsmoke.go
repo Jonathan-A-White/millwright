@@ -112,7 +112,9 @@ func newGristSmokeCmd() *cobra.Command {
 			"is_null, one_of, contains, matches (a pattern), present and all (a list of such checks, each of\n" +
 			"which must hold). It passes when the grist is\n" +
 			"answered, the answer fits the grind's answer schema and meets every expect; a failure names\n" +
-			"the example, the field, what was wanted and what came. A kind with no example is a warning.\n\n" +
+			"the example, the field, what was wanted and what came. A kind with no example is a warning.\n" +
+			"A smoke the mill would not take for a reason that is not the examples' (the key's daily limit,\n" +
+			"its licence, the backend out of reach) is \"not run\": it fails nothing and holds nothing.\n\n" +
 			"What it finds is kept (mw status shows it): a failure after a landing holds the rig's open\n" +
 			"stories until a smoke passes. --lift ends that hold without a smoke. It exits 1 on a failure.",
 		Args: cobra.ExactArgs(1),

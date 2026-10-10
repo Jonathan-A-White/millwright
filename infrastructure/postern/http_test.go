@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -328,6 +329,9 @@ func TestAnUnreachableBackendIsAnError(t *testing.T) {
 	_, err := postern.NewHTTP(url, keys).Balance(context.Background(), "mtAddr")
 	if err == nil || !strings.Contains(err.Error(), url) {
 		t.Fatalf("expected an error naming %s, got: %v", url, err)
+	}
+	if !errors.Is(err, application.ErrPosternUnreachable) {
+		t.Fatalf("expected the error to be ErrPosternUnreachable, got: %v", err)
 	}
 }
 

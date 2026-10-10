@@ -557,6 +557,14 @@ func (h *HTTP) fetch(ctx context.Context, method, path string, body []byte, auth
 	return h.fetchAs(ctx, method, path, body, authHeader, "application/json")
 }
 
+// unreachable is an error of reaching the backend at all, which is
+// application.ErrPosternUnreachable and says its own words.
+type unreachable struct{ error }
+
+func (u unreachable) Unwrap() error { return u.error }
+
+func (u unreachable) Is(target error) bool { return target == application.ErrPosternUnreachable }
+
 // fetchAs is fetch with a body of contentType.
 func (h *HTTP) fetchAs(ctx context.Context, method, path string, body []byte, authHeader, contentType string) ([]byte, error) {
 	var reader io.Reader
@@ -575,7 +583,7 @@ func (h *HTTP) fetchAs(ctx context.Context, method, path string, body []byte, au
 	}
 	resp, err := h.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("reaching the postern backend at %s: %w", h.base, err)
+		return nil, unreachable{fmt.Errorf("reaching the postern backend at %s: %w", h.base, err)}
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)

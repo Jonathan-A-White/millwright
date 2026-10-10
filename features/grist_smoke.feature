@@ -6,7 +6,9 @@ Feature: mw grist smoke tests an app's grist end to end
   its expect (a field's check may hold "all", a list of checks that must every
   one hold). A landing that touches grinds/, an app's grist client paths, or
   (for the factory's own rig) the mill itself, runs it; a failure is an alarm,
-  a line of mw status and a hold on the rig's open stories.
+  a line of mw status and a hold on the rig's open stories. A smoke the mill
+  would not take for a reason that is not the examples' (the key's daily limit,
+  its licence, the backend out of reach) is "not run": it holds nothing.
 
   Background:
     Given the app "trade-tracker" has the grind "price-check" whose answer must carry a price and a confidence
@@ -191,3 +193,56 @@ Feature: mw grist smoke tests an app's grist end to end
     When mw grist smoke is run for "trade-tracker"
     Then mw status shows "warning: trade-tracker/label-read: no"
     And mw status shows "trade-tracker ok"
+
+  Scenario: a smoke the mill refuses for the daily limit is not run, and holds nothing
+    Given a rig "trade-tracker" checked out where the app "trade-tracker" is
+    And the mill refuses the next grist because "This key has sent its 50 grist for today; send it again tomorrow."
+    When a landing in "trade-tracker" changes "grinds/price-check.json"
+    Then mw status shows "trade-tracker not run"
+    And mw status shows "not run: This key has sent its 50 grist for today"
+    And the open stories of "trade-tracker" are not held
+    And no alarm was posted
+
+  Scenario: a smoke the mill refuses for the licence is not run, and holds nothing
+    Given a rig "trade-tracker" checked out where the app "trade-tracker" is
+    And the mill refuses the next grist because "This phone's licence does not open the app named in the grist."
+    When a landing in "trade-tracker" changes "grinds/price-check.json"
+    Then mw status shows "trade-tracker not run"
+    And mw status shows "not run: This phone's licence does not open the app"
+    And the open stories of "trade-tracker" are not held
+    And no alarm was posted
+
+  Scenario: a smoke that cannot reach the mill is not run, and holds nothing
+    Given a rig "trade-tracker" checked out where the app "trade-tracker" is
+    And the postern backend cannot be reached for the next grist
+    When a landing in "trade-tracker" changes "grinds/price-check.json"
+    Then mw status shows "trade-tracker not run"
+    And mw status shows "not run: the postern backend could not be reached"
+    And the open stories of "trade-tracker" are not held
+
+  Scenario: mw grist smoke says it was not run, and did not fail
+    Given the mill refuses the next grist because "This key has sent its 50 grist for today; send it again tomorrow."
+    When mw grist smoke is run for "trade-tracker"
+    Then the smoke was not run, saying "trade-tracker: not run: This key has sent its 50 grist for today"
+
+  Scenario: a refusal beside an example that is wrong is still a failure
+    Given the app "trade-tracker" has the example "price-check/second" containing:
+      """
+      {"request": {"schemaVersion": "1"}, "expect": {"confidence": "low"}}
+      """
+    And the mill refuses the next grist because "This key has sent its 50 grist for today; send it again tomorrow."
+    And the mill answers the next grist with:
+      """
+      {"price": null, "confidence": "high"}
+      """
+    When a landing in "trade-tracker" changes "grinds/price-check.json"
+    Then mw status shows "trade-tracker FAILED"
+    And the open stories of "trade-tracker" are held, saying "the grist smoke of trade-tracker failed"
+
+  Scenario: a smoke that is not run leaves an earlier failure's hold in place
+    Given a rig "trade-tracker" checked out where the app "trade-tracker" is
+    And the mill refuses the next grist because "no licence opens trade-tracker"
+    And a landing in "trade-tracker" changes "grinds/price-check.json"
+    And the mill refuses the next grist because "This key has sent its 50 grist for today; send it again tomorrow."
+    When mw grist smoke is run for "trade-tracker"
+    Then the open stories of "trade-tracker" are held, saying "the grist smoke of trade-tracker failed after a landing in trade-tracker"

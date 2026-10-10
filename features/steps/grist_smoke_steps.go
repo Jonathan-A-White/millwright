@@ -35,6 +35,7 @@ type smokeAnswer struct {
 	status, reason string
 	answer         string
 	silent         bool
+	unreachable    bool
 }
 
 func (s *smokeSender) Run(_ context.Context, req application.GristSendRequest) (application.GristSendReport, error) {
@@ -65,6 +66,9 @@ func (s *smokeSender) Run(_ context.Context, req application.GristSendRequest) (
 	next := s.script[0]
 	s.script = s.script[1:]
 	report := application.GristSendReport{Txid: "direct:smoke"}
+	if next.unreachable {
+		return application.GristSendReport{}, fmt.Errorf("reaching the postern backend at http://postern.test: %w", application.ErrPosternUnreachable)
+	}
 	if next.silent {
 		return report, &application.GristUnanswered{Txid: report.Txid, Wait: req.Wait}
 	}
@@ -138,6 +142,7 @@ func InitializeGristSmokeScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the mill answers the next grist with:$`, c.theMillAnswers)
 	ctx.Given(`^the mill refuses the next grist because "([^"]*)"$`, c.theMillRefuses)
 	ctx.Given(`^the mill does not answer the next grist$`, c.theMillIsSilent)
+	ctx.Given(`^the postern backend cannot be reached for the next grist$`, c.theBackendIsUnreachable)
 	ctx.Given(`^a rig "([^"]*)" checked out where the app "([^"]*)" is$`, c.aRigWhereTheAppIs)
 	ctx.Given(`^the rig "([^"]*)" names the grist client path "([^"]*)"$`, c.theRigNamesAClientPath)
 	ctx.Given(`^a landing in "([^"]*)" changes "([^"]*)"$`, c.aLandingChanges)
@@ -148,6 +153,7 @@ func InitializeGristSmokeScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^the hold of the smoke of "([^"]*)" is lifted$`, c.liftTheHold)
 
 	ctx.Then(`^the smoke passed, saying "([^"]*)"$`, c.passed)
+	ctx.Then(`^the smoke was not run, saying "([^"]*)"$`, c.notRun)
 	ctx.Then(`^the smoke failed, saying "([^"]*)"$`, c.failed)
 	ctx.Then(`^the smoke sent (\d+) grist as "([^"]*)" with the photo "([^"]*)"$`, c.sentWithPhoto)
 	ctx.Then(`^the smoke sent (\d+) grist as "([^"]*)" with no photo$`, c.sentWithNoPhoto)
@@ -211,6 +217,11 @@ func (c *smokeContext) theMillIsSilent() error {
 	return nil
 }
 
+func (c *smokeContext) theBackendIsUnreachable() error {
+	c.sender.script = append(c.sender.script, smokeAnswer{unreachable: true})
+	return nil
+}
+
 func (c *smokeContext) aRigWhereTheAppIs(rig, app string) error {
 	c.rigs[rig] = c.checkout(app)
 	return nil
@@ -253,6 +264,19 @@ func (c *smokeContext) aLandingChanges(rig, file string) error {
 }
 
 func (c *smokeContext) passed(said string) error {
+	if c.err != nil {
+		return fmt.Errorf("the smoke could not be made: %v", c.err)
+	}
+	if c.report.Failed() {
+		return fmt.Errorf("the smoke failed: %s", c.report.Line())
+	}
+	if !strings.Contains(c.report.Line(), said) {
+		return fmt.Errorf("the smoke said %q, not %q", c.report.Line(), said)
+	}
+	return nil
+}
+
+func (c *smokeContext) notRun(said string) error {
 	if c.err != nil {
 		return fmt.Errorf("the smoke could not be made: %v", c.err)
 	}

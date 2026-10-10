@@ -1466,6 +1466,13 @@ func writeGristSmoke(b *strings.Builder, records []GristSmokeRecord) {
 	clip(b, GristSmokeHeading)
 	for _, r := range records {
 		when := r.At.UTC().Format("2006-01-02 15:04Z")
+		if !r.Failed && len(r.NotRun) > 0 {
+			clip(b, fmt.Sprintf("  %s not run %s", r.App, when))
+			for _, why := range r.NotRun {
+				wrapInto(b, "    ", "not run: "+why)
+			}
+			continue
+		}
 		if !r.Failed {
 			clip(b, fmt.Sprintf("  %s ok %s, %d examples", r.App, when, r.Examples))
 		} else {
