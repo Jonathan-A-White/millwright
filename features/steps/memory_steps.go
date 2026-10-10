@@ -53,6 +53,7 @@ func InitializeMemoryScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the Builder keeps the rig "([^"]*)" as facts$`, c.theBuilderKeepsTheRigAsFacts)
 	ctx.Given(`^the fact file "([^"]*)" of the rig "([^"]*)" holds:$`, c.theFactFileHolds)
 	ctx.Given(`^the rig "([^"]*)" holds facts for listing$`, c.theRigHoldsFactsForListing)
+	ctx.Given(`^the rig "([^"]*)" holds facts for querying$`, c.theRigHoldsFactsForQuerying)
 	ctx.Given(`^the rig "([^"]*)" has an about text of (\d+) bytes$`, c.theRigHasAnAboutText)
 
 	ctx.When(`^the Mayor adds a fact to the rig "([^"]*)":$`, c.theMayorAdds)
@@ -68,6 +69,10 @@ func InitializeMemoryScenario(ctx *godog.ScenarioContext) {
 	})
 	ctx.When(`^the Mayor lists the rig "([^"]*)" oldest first$`, func(rig string) error {
 		return c.list(application.MemoryList{Rig: rig, Oldest: true})
+	})
+	ctx.When(`^the Builder queries the rig "([^"]*)" for "([^"]*)"$`, func(rig, terms string) error {
+		c.err = c.memory().Query(context.Background(), application.MemoryQuery{Rig: rig, Terms: strings.Fields(terms)})
+		return nil
 	})
 	ctx.When(`^mw status reads the host for memory$`, c.statusReads)
 
@@ -147,6 +152,24 @@ func (c *memoryContext) theRigHoldsFactsForListing(rig string) error {
 	} {
 		text := fmt.Sprintf("---\nsubject: %s\nkind: %s\nstatus: %s\nsource: %s\nsince: %s\n%s---\n\nA fact.\n",
 			f.subject, f.kind, f.status, f.source, f.since, f.extra)
+		if err := os.WriteFile(filepath.Join(c.rigDir(rig), application.FactsDir, f.slug+".md"), []byte(text), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *memoryContext) theRigHoldsFactsForQuerying(rig string) error {
+	for _, f := range []struct{ slug, subject, status, source, sentence, extra string }{
+		{"own-socket", "tmux", "current", "mw-10", "Every test needs its own socket.", "supersedes: old-socket\n"},
+		{"old-socket", "tmux", "superseded", "mw-4", "Tests share the default socket.", "superseded-by: own-socket\n"},
+		{"vault-flag", "bd", "current", "mw-2", "Point every call at the vault with -C.", ""},
+		{"never-sync-in-tests", "bd", "current", "mw-3", "Never run sync from a test.", ""},
+		{"gone-clock", "clock", "retired", "mw-5", "The wall clock steps back.", "retired: 2026-10-01\nreason: wsl2 fixed\n"},
+		{"gate-make-check", "gate", "current", "mayor:2026-09-01", "The gate is make check.", ""},
+	} {
+		text := fmt.Sprintf("---\nsubject: %s\nkind: gotcha\nstatus: %s\nsource: %s\nsince: 2026-09-01\n%s---\n\n%s\n",
+			f.subject, f.status, f.source, f.extra, f.sentence)
 		if err := os.WriteFile(filepath.Join(c.rigDir(rig), application.FactsDir, f.slug+".md"), []byte(text), 0o644); err != nil {
 			return err
 		}

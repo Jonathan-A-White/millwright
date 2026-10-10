@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 // RigFactFiles is the port the Mayor places facts through: the folder of one
@@ -65,6 +66,12 @@ type MemoryList struct {
 	Rig    string
 	Status FactStatus
 	Oldest bool
+}
+
+// MemoryQuery is the request mw memory query makes: every term must match.
+type MemoryQuery struct {
+	Rig   string
+	Terms []string
 }
 
 func (m Memory) today() string {
@@ -364,5 +371,157 @@ func (m Memory) List(ctx context.Context, req MemoryList) error {
 		fmt.Fprintf(m.Out, "skipped: %s\n", why)
 	}
 	fmt.Fprintf(m.Out, "render %d/%d bytes\n", len(RenderRigMemory(about, all)), m.Budget)
+	return nil
+}
+
+// wordHas reports whether term starts a word of text: it is found there with
+// nothing but a non-letter, non-digit (or the start) before it. Both are
+// already lower-case, so a whole word and the start of one both match.
+func wordHas(text, term string) bool {
+	for from := 0; ; {
+		at := strings.Index(text[from:], term)
+		if at < 0 {
+			return false
+		}
+		at += from
+		if at == 0 {
+			return true
+		}
+		if before, _ := utf8.DecodeLastRuneInString(text[:at]); !unicode.IsLetter(before) && !unicode.IsDigit(before) {
+			return true
+		}
+		from = at + 1
+	}
+}
+
+// matches reports whether every term starts a word of the fact's subject,
+// sentence, slug or source.
+func (f RigFact) matches(terms []string) bool {
+	fields := []string{
+		strings.ToLower(f.Subject), strings.ToLower(f.Sentence),
+		strings.ToLower(f.Slug), strings.ToLower(f.Source),
+	}
+	for _, term := range terms {
+		found := false
+		for _, field := range fields {
+			if wordHas(field, term) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+// queryLine is a fact as mw memory query prints it: 'slug  status  [subject]
+// sentence (source)', then, for a superseded fact, its successor and, for a
+// retired one, when and why.
+func queryLine(f RigFact) string {
+	line := fmt.Sprintf("%s  %s  [%s]  %s (%s)", f.Slug, f.Status, f.Subject, f.Sentence, f.Source)
+	switch f.Status {
+	case FactSuperseded:
+		if f.SupersededBy != "" {
+			line += "  superseded by " + f.SupersededBy
+		}
+	case FactRetired:
+		line += "  retired " + f.Retired
+		if f.Reason != "" {
+			line += ": " + f.Reason
+		}
+	}
+	return line
+}
+
+// related is the facts, other than the hits, that share a hit's subject or lie
+// along a hit's supersedes chain in either direction.
+func related(hits []RigFact, all []RigFact, bySlug map[string]RigFact) []RigFact {
+	hit := map[string]bool{}
+	subjects := map[string]bool{}
+	for _, f := range hits {
+		hit[f.Slug] = true
+		subjects[f.Subject] = true
+	}
+	near := map[string]bool{}
+	for _, f := range hits {
+		for _, next := range []func(RigFact) string{
+			func(f RigFact) string { return f.SupersededBy },
+			func(f RigFact) string { return f.Supersedes },
+		} {
+			for at, seen := f, map[string]bool{f.Slug: true}; ; {
+				slug := next(at)
+				fact, ok := bySlug[slug]
+				if slug == "" || !ok || seen[slug] {
+					break
+				}
+				seen[slug] = true
+				near[slug] = true
+				at = fact
+			}
+		}
+	}
+	var out []RigFact
+	for _, f := range all {
+		if !hit[f.Slug] && (subjects[f.Subject] || near[f.Slug]) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// byReading puts the facts a Builder reads first: current, then by subject and slug.
+func byReading(facts []RigFact) {
+	sort.SliceStable(facts, func(i, j int) bool {
+		a, b := facts[i], facts[j]
+		if statusRank(a.Status) != statusRank(b.Status) {
+			return statusRank(a.Status) < statusRank(b.Status)
+		}
+		if a.Subject != b.Subject {
+			return a.Subject < b.Subject
+		}
+		return a.Slug < b.Slug
+	})
+}
+
+// Query prints the facts of a rig, of every status, in which every term starts
+// a word of the subject, sentence, slug or source (case does not matter), then
+// the facts related to them, each marked related. It reads files only. It is
+// an error when nothing matches.
+func (m Memory) Query(ctx context.Context, req MemoryQuery) error {
+	terms := make([]string, 0, len(req.Terms))
+	for _, term := range req.Terms {
+		if term = strings.ToLower(strings.TrimSpace(term)); term != "" {
+			terms = append(terms, term)
+		}
+	}
+	if len(terms) == 0 {
+		return fmt.Errorf("give at least one term to look for")
+	}
+	_, _, bySlug, err := m.load(ctx, req.Rig)
+	if err != nil {
+		return err
+	}
+	all := make([]RigFact, 0, len(bySlug))
+	for _, fact := range bySlug {
+		all = append(all, fact)
+	}
+	byReading(all)
+	var hits []RigFact
+	for _, fact := range all {
+		if fact.matches(terms) {
+			hits = append(hits, fact)
+		}
+	}
+	if len(hits) == 0 {
+		return fmt.Errorf("no fact matches %s in the rig %s", strings.Join(terms, " "), req.Rig)
+	}
+	for _, fact := range hits {
+		fmt.Fprintln(m.Out, queryLine(fact))
+	}
+	for _, fact := range related(hits, all, bySlug) {
+		fmt.Fprintln(m.Out, queryLine(fact)+"  related")
+	}
 	return nil
 }

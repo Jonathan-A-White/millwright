@@ -1832,7 +1832,8 @@ each phase (queue, scoring and each engine, harness, total) and how many runs ha
 
 The Mayor changes a rig kept as facts with these verbs, each writing files under
 `seats/builder/rigs/<rig>/facts/` and printing each file it wrote. None runs git
-(the Mayor commits and pushes) and none deletes a fact:
+(the Mayor commits and pushes) and none deletes a fact; `query`, only reads, for a
+Builder:
 
 ```sh
 mw memory add <rig> --kind gotcha|decision --subject <s> --source <bead|rig@sha|mayor:<date>> [--slug <slug>] "<sentence>"
@@ -1841,6 +1842,7 @@ mw memory retire <rig> <slug> --reason "<why>"
 mw memory recheck <rig> <slug> [--why "<text>"]
 mw memory list <rig> [--status current|recheck|superseded|retired] [--oldest]
 mw memory migrate <rig> [--dry-run]
+mw memory query <rig> <term>...
 ```
 
 `add` writes a current fact dated today (UTC); the slug defaults to the
@@ -1870,6 +1872,17 @@ with its line number and left out. `--dry-run` prints every fact and writes
 nothing; a real run writes `about.md` and `facts/`, removes the two files (no
 `git rm`: the Mayor commits) and prints the counts. It refuses a rig that already
 has a facts folder and one with no memory file. See `features/memory.feature`.
+
+`query` finds what boot does not carry, which is every fact that is not
+current and any current one past the budget. Each term must start a word of a
+fact's subject, sentence, slug or source (case aside; a whole word or its
+start), whatever the fact's status. A hit prints
+`slug  status  [subject]  sentence (source)`, a superseded one adding
+`superseded by <slug>` and a retired one `retired <date>: <reason>`; current
+hits come first. After the hits come the facts with a hit's subject and those
+either side of a hit's supersedes chain, each ending `related`. Nothing hitting
+is exit 1, `no fact matches`. It reads files and runs no git, so a Builder may
+run it from its worktree; the kickoff prompt says so. See `features/memory.feature`.
 
 ## Steps for his hands
 

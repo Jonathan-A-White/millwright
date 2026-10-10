@@ -85,6 +85,7 @@ Feature: Booting a session into a seat
       | Follow the story's formula steps    |
       | no AI attribution of any kind       |
       | read-only to you: propose typed facts under "For the rig memory:": gotcha [subject]: ..., decision [subject]: ..., supersede <slug>: ..., retire <slug>: <reason>, recheck <slug>: <why>, at most two, or nothing |
+      | mw memory query <rig> <term> finds facts not shown here |
       | bd runs without asking              |
       | as its own Bash call, never chained |
       | run `mw check mw-gq6.6`             |

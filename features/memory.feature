@@ -537,3 +537,96 @@ Feature: mw memory
     When the Mayor migrates the rig "ghost"
     Then the memory command was refused saying "no memory file for the rig ghost"
     And the rig "ghost" has no facts folder
+
+  Scenario: query finds a fact by its subject, current facts first
+    Given the rig "millwright" holds facts for querying
+    When the Builder queries the rig "millwright" for "bd"
+    Then the memory command succeeded
+    And the memory listing is:
+      """
+      never-sync-in-tests  current  [bd]  Never run sync from a test. (mw-3)
+      vault-flag  current  [bd]  Point every call at the vault with -C. (mw-2)
+      """
+
+  Scenario: query finds a fact by a word of its sentence, whatever the case, and follows it to related facts by subject
+    Given the rig "millwright" holds facts for querying
+    When the Builder queries the rig "millwright" for "SYNC"
+    Then the memory command succeeded
+    And the memory listing is:
+      """
+      never-sync-in-tests  current  [bd]  Never run sync from a test. (mw-3)
+      vault-flag  current  [bd]  Point every call at the vault with -C. (mw-2)  related
+      """
+
+  Scenario: query finds a fact by its slug
+    Given the rig "millwright" holds facts for querying
+    When the Builder queries the rig "millwright" for "gate-make"
+    Then the memory command succeeded
+    And the memory listing is:
+      """
+      gate-make-check  current  [gate]  The gate is make check. (mayor:2026-09-01)
+      """
+
+  Scenario: query finds a fact by its source
+    Given the rig "millwright" holds facts for querying
+    When the Builder queries the rig "millwright" for "mayor:2026"
+    Then the memory command succeeded
+    And the memory listing is:
+      """
+      gate-make-check  current  [gate]  The gate is make check. (mayor:2026-09-01)
+      """
+
+  Scenario: query matches a word or the start of one, not the middle of one
+    Given the rig "millwright" holds facts for querying
+    When the Builder queries the rig "millwright" for "ocket"
+    Then the memory command was refused saying "no fact matches"
+    When the Builder queries the rig "millwright" for "sock"
+    Then the memory command succeeded
+
+  Scenario: query shows a retired fact's date and reason
+    Given the rig "millwright" holds facts for querying
+    When the Builder queries the rig "millwright" for "wall"
+    Then the memory command succeeded
+    And the memory listing is:
+      """
+      gone-clock  retired  [clock]  The wall clock steps back. (mw-5)  retired 2026-10-01: wsl2 fixed
+      """
+
+  Scenario: query names the successor of a superseded fact and follows the chain to it
+    Given the rig "millwright" holds facts for querying
+    When the Builder queries the rig "millwright" for "default"
+    Then the memory command succeeded
+    And the memory listing is:
+      """
+      old-socket  superseded  [tmux]  Tests share the default socket. (mw-4)  superseded by own-socket
+      own-socket  current  [tmux]  Every test needs its own socket. (mw-10)  related
+      """
+
+  Scenario: query follows the chain from the successor back to what it replaced
+    Given the rig "millwright" holds facts for querying
+    When the Builder queries the rig "millwright" for "mw-10"
+    Then the memory command succeeded
+    And the memory listing is:
+      """
+      own-socket  current  [tmux]  Every test needs its own socket. (mw-10)
+      old-socket  superseded  [tmux]  Tests share the default socket. (mw-4)  superseded by own-socket  related
+      """
+
+  Scenario: query with two terms keeps the facts that match both
+    Given the rig "millwright" holds facts for querying
+    When the Builder queries the rig "millwright" for "bd sync"
+    Then the memory command succeeded
+    And the memory listing is:
+      """
+      never-sync-in-tests  current  [bd]  Never run sync from a test. (mw-3)
+      vault-flag  current  [bd]  Point every call at the vault with -C. (mw-2)  related
+      """
+
+  Scenario: query finds nothing and says so
+    Given the rig "millwright" holds facts for querying
+    When the Builder queries the rig "millwright" for "tmux wall"
+    Then the memory command was refused saying "no fact matches"
+
+  Scenario: query refuses a rig the seat has no folder for
+    When the Builder queries the rig "ghost" for "bd"
+    Then the memory command was refused saying "no rig \"ghost\""

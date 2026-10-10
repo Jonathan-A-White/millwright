@@ -13,7 +13,7 @@ import (
 func newMemoryCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "memory",
-		Short: "Place, replace, retire and list the facts the Builder's seat keeps of a rig",
+		Short: "Place, replace, retire, list and query the facts the Builder's seat keeps of a rig",
 		Long: "A rig kept as facts has a folder in the Builder's seat, seats/builder/rigs/<rig>/, with an\n" +
 			"about.md and facts/<slug>.md, one typed fact a file. These verbs are how the Mayor changes\n" +
 			"them: each writes files, prints each file it wrote, and runs no git command (the Mayor\n" +
@@ -22,7 +22,7 @@ func newMemoryCmd() *cobra.Command {
 		Args: cobra.NoArgs,
 	}
 	root.AddCommand(newMemoryAddCmd(), newMemorySupersedeCmd(), newMemoryRetireCmd(),
-		newMemoryRecheckCmd(), newMemoryListCmd(), newMemoryMigrateCmd())
+		newMemoryRecheckCmd(), newMemoryListCmd(), newMemoryMigrateCmd(), newMemoryQueryCmd())
 	return root
 }
 
@@ -192,4 +192,26 @@ func newMemoryMigrateCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print every fact it would write, and write nothing")
 	return cmd
+}
+
+func newMemoryQueryCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "query <rig> <term>...",
+		Short: "Find a rig's facts by term, of every status, with the facts related to them",
+		Long: "query prints each fact of the rig in which every term starts a word (or is a word) of its\n" +
+			"subject, sentence, slug or source, case aside, whatever its status: 'slug  status  [subject]\n" +
+			"sentence (source)', a superseded fact adding 'superseded by <slug>' and a retired one\n" +
+			"'retired <date>: <reason>'. Current facts come first. After the hits come the facts with a\n" +
+			"hit's subject and those along a hit's supersedes chain, each marked 'related'. It is how a\n" +
+			"Builder finds what boot does not show. It reads files and runs no git command, so it may be\n" +
+			"run from a worktree. Exit 1, saying 'no fact matches', when nothing hits.",
+		Args: cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			memory, err := memoryFor(cmd)
+			if err != nil {
+				return err
+			}
+			return memory.Query(cmd.Context(), application.MemoryQuery{Rig: args[0], Terms: args[1:]})
+		},
+	}
 }
