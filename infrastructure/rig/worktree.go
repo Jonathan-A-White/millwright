@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/gitcmd"
 )
 
 // Program is the command this adapter shells out to, and DefaultRemote is the
@@ -233,11 +234,10 @@ func (w *Worktrees) defaultBranch(ctx context.Context, rigDir string) (string, e
 
 // git runs one git command in a rig and returns its standard output. It never
 // prompts: a dispatch may run from a hook with nobody at the keyboard, and a
-// command waiting for a password would hang there unnoticed.
+// command waiting for a password would hang there unnoticed. See gitcmd for
+// the process group and the low-speed limit it also gets.
 func (w *Worktrees) git(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, w.program, args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
+	cmd := gitcmd.Command(ctx, w.program, dir, args...)
 
 	var out, errs bytes.Buffer
 	cmd.Stdout = &out

@@ -4,12 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
-	"os/exec"
 	"sort"
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/gitcmd"
 )
 
 // GrindBranch is the branch an app's grinds are read from: the checkout's
@@ -105,8 +104,7 @@ func (g *Grinds) List(ctx context.Context, checkout, commit, dir string) ([]stri
 
 // git runs one git command in the checkout, never prompting.
 func (g *Grinds) git(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, g.program, append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0")
+	cmd := gitcmd.Command(ctx, g.program, "", append([]string{"-C", dir}, args...)...)
 	var out, errs bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errs
 	if err := cmd.Run(); err != nil {

@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
@@ -562,4 +565,71 @@ func TestRefHeadNamesTheCommitARefPointsAt(t *testing.T) {
 	if _, err := rig.New().RefHead(context.Background(), here, "origin/nothing-here"); err == nil {
 		t.Error("expected a ref that is not there to be an error")
 	}
+}
+
+// TestACancelledPushKillsWhateverGitStarted checks a push that is cancelled
+// takes the whole process group with it: git runs a transport helper
+// underneath, and one left behind would keep holding the remote.
+func TestACancelledPushKillsWhateverGitStarted(t *testing.T) {
+	dir := t.TempDir()
+	mainPidFile := filepath.Join(dir, "main.pid")
+	childPidFile := filepath.Join(dir, "child.pid")
+	script := fmt.Sprintf(`#!/bin/sh
+echo $$ > %q
+( while true; do sleep 0.05; done ) &
+echo $! > %q
+wait
+`, mainPidFile, childPidFile)
+	program := filepath.Join(dir, "git")
+	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing the stand-in for git: %v", err)
+	}
+	worktrees := rig.New(rig.WithProgram(program))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- worktrees.Push(ctx, t.TempDir(), "origin", "main") }()
+
+	mainPid := pidWhenWritten(t, mainPidFile)
+	childPid := pidWhenWritten(t, childPidFile)
+	cancel()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected a cancelled push to report an error")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("expected the cancelled push to return within a few seconds, not hang")
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for (syscall.Kill(mainPid, 0) == nil || syscall.Kill(childPid, 0) == nil) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if syscall.Kill(mainPid, 0) == nil {
+		t.Errorf("expected the git stand-in (pid %d) to be gone once cancelled", mainPid)
+	}
+	if syscall.Kill(childPid, 0) == nil {
+		t.Errorf("expected the child it started (pid %d) to be gone too, not orphaned", childPid)
+	}
+}
+
+// pidWhenWritten polls for a pid file a stand-in writes once it has started.
+func pidWhenWritten(t *testing.T, path string) int {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if data, err := os.ReadFile(path); err == nil && strings.TrimSpace(string(data)) != "" {
+			pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+			if err != nil {
+				t.Fatalf("reading pid from %s: %v", path, err)
+			}
+			return pid
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", path)
+	return 0
 }
