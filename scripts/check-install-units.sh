@@ -18,7 +18,7 @@
 # under contrib/systemd/system/ into a stand-in /etc/systemd/system instead,
 # refuses without root, and never touches the --user directory.
 #
-# shellcheck is run over both scripts when it is installed, and skipped when not.
+# Both scripts are linted with shellcheck when it is installed, and skipped when not.
 
 set -eu
 
