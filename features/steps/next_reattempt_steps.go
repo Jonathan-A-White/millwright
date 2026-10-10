@@ -37,10 +37,15 @@ func registerNextReattemptSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the vault is a real git clone$`, c.theVaultIsARealGitClone)
 	ctx.Given(`^the first attempt of "([^"]*)" already committed its boot file and result to the vault$`, c.theFirstAttemptWasAlreadyCommitted)
 
+	ctx.Given(`^the story "([^"]*)" was started once$`, c.theStoryWasStartedOnce)
+
 	ctx.When(`^mw dispatches "([^"]*)" again$`, c.mwDispatchesAgain)
+	ctx.When(`^the next dispatch tick runs with the leftovers kept$`, c.theNextTickKeepsTheLeftovers)
 	ctx.When(`^the session of "([^"]*)" finished its second attempt$`, c.theSessionFinishedItsSecondAttempt)
 
 	ctx.Then(`^one session was started again, for "([^"]*)"$`, c.oneSessionWasStartedAgainFor)
+	ctx.Then(`^the story "([^"]*)" records attempt (\d+)$`, c.theStoryRecordsAttemptNumber)
+	ctx.Then(`^the first attempt's branch of "([^"]*)" is kept$`, c.theFirstAttemptsBranchIsKept)
 	ctx.Then(`^the vault holds no modified tracked file$`, c.theVaultHoldsNoModifiedTrackedFile)
 	ctx.Then(`^the first attempt of "([^"]*)" is unchanged in the vault$`, c.theFirstAttemptsFilesAreUnchanged)
 	ctx.Then(`^the vault's last commit holds the result of "([^"]*)"'s second attempt$`, c.theVaultsLastCommitHoldsTheSecondAttemptsResult)
@@ -89,6 +94,58 @@ func (c *nextContext) theFirstAttemptWasAlreadyCommitted(id string) error {
 		return err
 	}
 	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.AttemptsField: "1"})
+}
+
+// theStoryWasStartedOnce records the one attempt a dispatch counted before the
+// session ran.
+func (c *nextContext) theStoryWasStartedOnce(id string) error {
+	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.AttemptsField: "1"})
+}
+
+// theNextTickKeepsTheLeftovers is the dispatch tick that follows a stop: the
+// same dispatch mwDispatchesAgain runs, with a Landing wired in so that the
+// worktree and branch the first attempt left are kept rather than run into.
+func (c *nextContext) theNextTickKeepsTheLeftovers() error {
+	worktrees := rig.New(rig.WithProgram(c.gitProgram))
+	boot := application.SeatBoot{
+		Vault: vault.New(c.vault), Harness: claude.New(), Seat: nextSeat, Host: nextHost,
+	}
+	report, err := application.Dispatch{
+		Tracker:   c.tracker,
+		Worktrees: worktrees,
+		Landing:   worktrees,
+		Runner:    c.runner,
+		Memory:    c.tracker,
+		Boot:      boot,
+		Host:      nextHost,
+		Cap:       1,
+		Rigs:      map[string]string{"millwright": c.rig},
+	}.Run(context.Background())
+	c.dispatchReport, c.err = report, err
+	return nil
+}
+
+func (c *nextContext) theStoryRecordsAttemptNumber(id string, attempt int) error {
+	detail, err := c.tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	if detail.Attempts != attempt {
+		return fmt.Errorf("expected %s to record attempt %d, got %d (dispatch said: %v)", id, attempt, detail.Attempts, c.err)
+	}
+	return nil
+}
+
+func (c *nextContext) theFirstAttemptsBranchIsKept(id string) error {
+	kept := application.StoryBranch(id) + "-attempt1"
+	out, err := gitSay(c.rig, "branch", "--list", kept)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(out) == "" {
+		return fmt.Errorf("expected the first attempt's branch to be kept as %s in %s", kept, c.rig)
+	}
+	return nil
 }
 
 // mwDispatchesAgain runs a standalone dispatch the way mw dispatch would run

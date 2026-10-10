@@ -284,6 +284,24 @@ Feature: Closing out a finished story and carrying on
     And the last ledger line holds:
       | not landed (open-steps): |
 
+  # mw-gq6.341: a session that wrote its work and left a step open is not waiting
+  # for a person. The claim is given back with the stop, so the next dispatch
+  # tick takes the story as attempt 2 and keeps the first attempt's branch.
+  Scenario: A story stopped for open steps is taken again by the next dispatch as attempt 2
+    Given the story "mw-gq6.1" was started once
+    And the session of "mw-gq6.1" reported a plain success
+    And a formula was poured for "mw-gq6.1" and one of its steps is still open
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is not closed
+    And the story "mw-gq6.1" is held blocked
+    And the report says it stopped for "open-steps"
+    And the story "mw-gq6.1" carries a comment quoting: takes it as attempt 2
+    And the worktree of "mw-gq6.1" is still there
+    When the next dispatch tick runs with the leftovers kept
+    Then one session was started again, for "mw-gq6.1"
+    And the story "mw-gq6.1" records attempt 2
+    And the first attempt's branch of "mw-gq6.1" is kept
+
   Scenario: The target branch moved on the origin while the story was worked
     Given the other host landed its own work on "main" while "mw-gq6.1" was worked
     And the session of "mw-gq6.1" reported a plain success

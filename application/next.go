@@ -1668,8 +1668,9 @@ func (n Next) carryOn(ctx context.Context, c *closeOut, report *NextReport) (Nex
 // filed under, on the story; the story marked blocked so that nobody takes it
 // for work in flight; and one line in the ledger saying it did not land, its
 // outcome starting with the code. Nothing is merged, nothing is pushed, nothing
-// is closed and nothing is given back — the worktree and the branch are left
-// exactly as the session left them, because they are the evidence.
+// is closed and, but for open steps (mw-gq6.341), nothing is given back — the
+// worktree and the branch are left exactly as the session left them, because
+// they are the evidence.
 func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason Reason, why, said string) (NextReport, error) {
 	// Tests that timed out on a host at or above its core count did not fail on
 	// the story: the refusal says so, in the mail and on the story.
@@ -1679,15 +1680,34 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	report.Why, report.Reason = why, reason
 	n.recordBenchmark(ctx, c, report, false)
 
+	var trouble []string
+	// A story whose work is committed and whose formula was left unfinished is
+	// not waiting for a person (mw-gq6.341): the claim is given back so that the
+	// next dispatch tick takes it as another attempt, keeping this branch under
+	// another name as it keeps any leftover of an earlier attempt. Every other
+	// stop keeps the claim, because the claim is the evidence.
+	given := false
+	if reason == ReasonOpenSteps {
+		if err := n.Tracker.ReleaseClaim(ctx, c.id); err != nil {
+			trouble = append(trouble, fmt.Sprintf("the claim on %s could not be given back: %v", c.id, err))
+		} else {
+			given = true
+		}
+	}
+
+	claim := "the claim was not given back"
+	if given {
+		claim = fmt.Sprintf("the claim was given back and it is open again: the next dispatch tick takes it as attempt %d "+
+			"and keeps the branch under another name before it cuts a fresh one", c.detail.Attempts+1)
+	}
 	note := fmt.Sprintf("mw next on %s "+RefusedPhrase+"%s): %s\n\n"+
-		"Nothing was merged and nothing was pushed. The story is not closed and the claim was not given back. "+
+		"Nothing was merged and nothing was pushed. The story is not closed and %s. "+
 		"The worktree %s and the branch %s are left as the session left them.",
-		n.Host, reason, why, c.worktree, c.branch)
+		n.Host, reason, why, claim, c.worktree, c.branch)
 	if said != "" {
 		note += "\n\n" + said
 	}
 
-	var trouble []string
 	if err := n.Tracker.CommentOnStory(ctx, c.id, note); err != nil {
 		trouble = append(trouble, fmt.Sprintf("the reason could not be written on the story: %v", err))
 	}

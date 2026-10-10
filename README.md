@@ -564,7 +564,9 @@ A session that did finish is checked before anything is landed:
 
 1. the branch must hold **commits** that `origin/<target>` does not;
 2. none of those commits may be **signed by a machine** (below);
-3. every **step** of the story's poured formula must be closed;
+3. every **step** of the story's poured formula must be closed (a story stopped
+   only for an open step has its claim given back, so the next dispatch tick takes
+   it as another attempt and keeps the branch under another name);
 4. the **rig's own tests** must pass in the story's worktree. A test command
    the shell could not run at all (exit 126 or 127 — a toolchain that is not on
    the PATH `mw` was started with) is reported as that, with the command's own
