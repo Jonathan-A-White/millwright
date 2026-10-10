@@ -1,6 +1,7 @@
 package application_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -152,9 +153,9 @@ func TestCalibrationReportsEachKindsParErrorAndFlagsOneThatIsOff(t *testing.T) {
 	for i, actual := range []float64{90, 110, 100, 120} {
 		history = append(history, landing("laptop", "lampas", "lampas/feature/sonnet", i, 3, actual, 100))
 	}
-	// An unsteady kind: par 100, actuals 200, 50, 400, 100 (errors 100, 50, 300,
-	// 0%: median 75%), one over 2x par, and a refusal for a timeout.
-	for i, actual := range []float64{200, 50, 400, 100} {
+	// An unsteady kind: par 100, actuals 200, 50, 400, 100, 100 (errors 100, 50,
+	// 300, 0, 0%: median 50%), one over 2x par, and a refusal for a timeout.
+	for i, actual := range []float64{200, 50, 400, 100, 100} {
 		history = append(history, landing("laptop", "lampas", "lampas/bug/opus", 10+i, 3, actual, 100))
 	}
 	refused := landing("laptop", "lampas", "lampas/bug/opus", 20, 3, 0, 0)
@@ -170,20 +171,49 @@ func TestCalibrationReportsEachKindsParErrorAndFlagsOneThatIsOff(t *testing.T) {
 	if steady.Kind != "lampas/feature/sonnet" || steady.MedianErrorPercent != 10 || steady.Flag != "" {
 		t.Errorf("expected the feature kind steady at 10%% with no flag, got %+v", steady)
 	}
-	if unsteady.Kind != "lampas/bug/opus" || unsteady.MedianErrorPercent != 75 || unsteady.Flag == "" {
-		t.Errorf("expected the bug kind off by 75%% and flagged, got %+v", unsteady)
+	if unsteady.Kind != "lampas/bug/opus" || unsteady.MedianErrorPercent != 50 || unsteady.Flag == "" {
+		t.Errorf("expected the bug kind off by 50%% and flagged, got %+v", unsteady)
 	}
-	// Four landings is under the par window, so the suggestion is a wider window.
+	// Five landings is par_min but under the par window, so the suggestion is a wider window.
 	if !strings.Contains(unsteady.Flag, "wider window") {
 		t.Errorf("expected the flag to suggest a wider window, got %q", unsteady.Flag)
 	}
-	// 5 started: the one at 400 ran over 2x par (200 is not over: 2x is not past 2x)
+	// 6 started: the one at 400 ran over 2x par (200 is not over: 2x is not past 2x)
 	// and the one refused for a timeout.
-	if unsteady.Started != 5 || unsteady.Trouble != 2 {
-		t.Errorf("expected 2 of 5 over 2x par or timed out, got %+v", unsteady)
+	if unsteady.Started != 6 || unsteady.Trouble != 2 {
+		t.Errorf("expected 2 of 6 over 2x par or timed out, got %+v", unsteady)
 	}
-	if !strings.Contains(unsteady.String(), "75%") || !strings.Contains(unsteady.String(), "2 of 5") {
-		t.Errorf("expected the line to say 75%% and 2 of 5, got %q", unsteady.String())
+	if !strings.Contains(unsteady.String(), "50%") || !strings.Contains(unsteady.String(), "2 of 6") {
+		t.Errorf("expected the line to say 50%% and 2 of 6, got %q", unsteady.String())
+	}
+}
+
+func TestAKindWithFewerLandingsThanParMinIsNeverFlaggedButStillReportsItsError(t *testing.T) {
+	settings := application.BenchmarkSettings{ErrorFlagPercent: 30, ParMin: 5}
+	for landings := 1; landings < 5; landings++ {
+		var history []application.Benchmark
+		for i := 0; i < landings; i++ {
+			history = append(history, landing("desktop", "trade-tracker", "trade-tracker/feature/sonnet", i, 1, 156, 100))
+		}
+		got := application.Calibrate(history, settings)
+		if len(got) != 1 || got[0].Flag != "" {
+			t.Errorf("%d landings: expected no flag under par_min, got %+v", landings, got)
+		}
+		if want := fmt.Sprintf("par off 56%% over %d landed", landings); got[0].ErrorLine() != want {
+			t.Errorf("%d landings: expected the line %q, got %q", landings, want, got[0].ErrorLine())
+		}
+	}
+}
+
+func TestAKindWithParMinLandingsOffIsFlaggedToTryAWiderWindow(t *testing.T) {
+	settings := application.BenchmarkSettings{ErrorFlagPercent: 30, ParMin: 5}
+	var history []application.Benchmark
+	for i := 0; i < 5; i++ {
+		history = append(history, landing("desktop", "trade-tracker", "trade-tracker/feature/sonnet", i, 1, 156, 100))
+	}
+	got := application.Calibrate(history, settings)
+	if len(got) != 1 || !strings.Contains(got[0].Flag, "wider window") {
+		t.Errorf("expected a flag suggesting a wider window at par_min landings, got %+v", got)
 	}
 }
 
