@@ -6,6 +6,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
+	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
 )
@@ -58,7 +59,13 @@ func newCheckCmd() *cobra.Command {
 
 			var slot application.MergeSlot
 			if !noSlot {
-				slot = rig.NewSlots(rig.WithSlotNotice(func(said string) { fmt.Fprint(cmd.ErrOrStderr(), said) }))
+				bench, err := config.Benchmark()
+				if err != nil {
+					return err
+				}
+				slot = rig.NewSlots(
+					gateScaledSlotWait(vault.Benchmarks{Vault: mwVault(dir, host)}, rigs, host, benchmarkLimits(bench)),
+					rig.WithSlotNotice(func(said string) { fmt.Fprint(cmd.ErrOrStderr(), said) }))
 			}
 			worktrees := rig.New()
 			_, err = application.Check{

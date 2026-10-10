@@ -281,3 +281,31 @@ func TestTheBenchmarkIsMergedIntoTheResultAndReadBack(t *testing.T) {
 		t.Errorf("a result with no benchmark in it is not one")
 	}
 }
+
+func TestTheSlotWaitIsTwiceTheRigsSlowerGateOnTheHostAndNeverUnderTheFloor(t *testing.T) {
+	floor := 20 * time.Minute
+	gate := func(rig, host string, minutes ...float64) []application.Benchmark {
+		var out []application.Benchmark
+		for _, m := range minutes {
+			out = append(out, application.Benchmark{Rig: rig, Host: host, GateSeconds: m * 60})
+		}
+		return out
+	}
+	cases := []struct {
+		name    string
+		history []application.Benchmark
+		want    time.Duration
+	}{
+		{"no history", nil, floor},
+		{"a quick rig keeps the floor", gate("lampas", "laptop", 3, 4), floor},
+		{"usual 29m", gate("lampas", "laptop", 29, 29, 29), 58 * time.Minute},
+		{"a latest slower than the usual counts", gate("lampas", "laptop", 10, 10, 10, 30), 60 * time.Minute},
+		{"another host's gates do not count", gate("lampas", "vps", 40), floor},
+		{"another rig's gates do not count", gate("millwright", "laptop", 40), floor},
+	}
+	for _, c := range cases {
+		if got := application.SlotWaitFor(c.history, "lampas", "laptop", application.BenchmarkSettings{}, floor); got != c.want {
+			t.Errorf("%s: want %s, got %s", c.name, c.want, got)
+		}
+	}
+}

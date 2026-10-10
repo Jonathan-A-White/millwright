@@ -51,6 +51,14 @@ type Slots struct {
 	poll   time.Duration
 	suffix string
 
+	// waitFor, when set, works out how long one holder of a rig's slot is
+	// waited on, in place of wait; a wait it gives as zero or less is wait. It
+	// is asked once, when the slot is first found held. now and sleep are the
+	// clock a wait is kept by.
+	waitFor func(ctx context.Context, rigDir string) time.Duration
+	now     func() time.Time
+	sleep   func(ctx context.Context, d time.Duration) error
+
 	// notice is told, in a sentence, who has the slot when taking it has to
 	// wait, and again whenever it changes hands. Nil says nothing.
 	notice func(said string)
@@ -65,6 +73,20 @@ type SlotOption func(*Slots)
 // WithSlotWait sets how long taking a slot waits on one holder before giving up.
 func WithSlotWait(wait time.Duration) SlotOption {
 	return func(s *Slots) { s.wait = wait }
+}
+
+// WithSlotWaitFor sets how long taking a rig's slot waits on one holder from the
+// rig itself, so that a close-out waits out a holder whose gate takes as long as
+// the rig's does. A wait of zero or less falls back to the wait WithSlotWait sets.
+func WithSlotWaitFor(waitFor func(ctx context.Context, rigDir string) time.Duration) SlotOption {
+	return func(s *Slots) { s.waitFor = waitFor }
+}
+
+// WithSlotClock sets the clock a wait is kept by: what time it is, and how a wait
+// of one poll is passed (it returns early with the context's error when the
+// context gives up). It is for a test that cannot wait half an hour.
+func WithSlotClock(now func() time.Time, sleep func(ctx context.Context, d time.Duration) error) SlotOption {
+	return func(s *Slots) { s.now, s.sleep = now, sleep }
 }
 
 // WithSlotCap sets how long taking a slot waits in all, whoever has it, before
@@ -92,11 +114,23 @@ func WithSlotNotice(notice func(said string)) SlotOption {
 
 // NewSlots returns the merge slots of this host's rigs.
 func NewSlots(opts ...SlotOption) *Slots {
-	s := &Slots{wait: SlotWait, cap: SlotCap, poll: SlotPoll, suffix: SlotSuffix}
+	s := &Slots{wait: SlotWait, cap: SlotCap, poll: SlotPoll, suffix: SlotSuffix, now: time.Now, sleep: sleepFor}
 	for _, opt := range opts {
 		opt(s)
 	}
 	return s
+}
+
+// sleepFor passes d, or less if ctx gives up first, and says why it stopped early.
+func sleepFor(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // SlotPath is where a rig's merge slot lives: beside the rig's story worktrees,
@@ -123,7 +157,7 @@ func (s *Slots) Take(ctx context.Context, rigDir, holder string) (application.Ho
 		return nil, fmt.Errorf("opening the merge slot of %s: %w", rigDir, err)
 	}
 
-	if err := s.flock(ctx, file, path); err != nil {
+	if err := s.flock(ctx, file, rigDir, path); err != nil {
 		file.Close()
 		return nil, err
 	}
@@ -140,10 +174,11 @@ func (s *Slots) Take(ctx context.Context, rigDir, holder string) (application.Ho
 // gives up. The wait is per holder: it starts again whenever what the slot says
 // changes, because a slot that keeps changing hands is a queue of close-outs all
 // landing, not one stuck.
-func (s *Slots) flock(ctx context.Context, file *os.File, path string) error {
-	started := time.Now()
+func (s *Slots) flock(ctx context.Context, file *os.File, rigDir, path string) error {
+	started := s.now()
 	since, said := started, readSlot(path)
 	told := ""
+	wait, scaled := s.wait, false
 	for {
 		err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		if err == nil {
@@ -153,7 +188,16 @@ func (s *Slots) flock(ctx context.Context, file *os.File, path string) error {
 			return fmt.Errorf("taking the merge slot %s: %w", path, err)
 		}
 
-		now := time.Now()
+		if !scaled {
+			scaled = true
+			if s.waitFor != nil {
+				if w := s.waitFor(ctx, rigDir); w > 0 {
+					wait = w
+				}
+			}
+		}
+
+		now := s.now()
 		if again := readSlot(path); again != said {
 			since, said = now, again
 		}
@@ -165,15 +209,13 @@ func (s *Slots) flock(ctx context.Context, file *os.File, path string) error {
 			return fmt.Errorf("the merge slot %s kept changing hands and was still held by %q after %s, the overall most a close-out waits: close-outs are landing work on this rig one after another",
 				path, held(path), waited.Round(time.Second))
 		}
-		if waited := now.Sub(since); waited >= s.wait {
-			return fmt.Errorf("the merge slot %s is still held by %q after %s: one holder has had it that long, so that close-out is stuck or is landing a great deal of work",
-				path, held(path), waited.Round(time.Second))
+		if waited := now.Sub(since); waited >= wait {
+			return fmt.Errorf("the merge slot %s is still held by %q after %s: one holder has had it that long, so that close-out is stuck or is landing a great deal of work (a close-out waits %s on one holder of this rig's slot)",
+				path, held(path), waited.Round(time.Second), wait)
 		}
 
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("waiting for the merge slot %s, held by %q: %w", path, held(path), ctx.Err())
-		case <-time.After(s.poll):
+		if err := s.sleep(ctx, s.poll); err != nil {
+			return fmt.Errorf("waiting for the merge slot %s, held by %q: %w", path, held(path), err)
 		}
 	}
 }

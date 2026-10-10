@@ -270,6 +270,22 @@ func byTime(history []Benchmark) []Benchmark {
 	return out
 }
 
+// SlotWaitFor is how long a close-out on a rig waits on one holder of its merge
+// slot on a host: twice the slower of the rig's usual and latest gate there, for
+// a healthy holder is one still running the gate, and never less than floor. A
+// rig with no gate recorded on the host waits floor.
+func SlotWaitFor(history []Benchmark, rig, host string, s BenchmarkSettings, floor time.Duration) time.Duration {
+	wait := floor
+	for _, line := range GateLines(history, s) {
+		if line.Rig != rig || line.Host != host {
+			continue
+		}
+		slower := max(line.Usual, line.Latest)
+		wait = max(wait, 2*slower)
+	}
+	return wait
+}
+
 // GateLines is, for each rig on each host that has recorded a gate, the median
 // of its last UsualGates gates against the latest, in rig then host order.
 func GateLines(history []Benchmark, s BenchmarkSettings) []GateLine {
