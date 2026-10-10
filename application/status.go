@@ -525,6 +525,37 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		return report, fmt.Errorf("reading what is in hand: %w", err)
 	}
 
+	// Over a link with a long round trip every read of the tracker is seconds,
+	// and the reads below do not depend on one another, so they are started
+	// together and joined where the report needs each (mw-gq6.356). A tracker
+	// that takes reads side by side makes them cost one wait and not a row.
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
+	runningRead := map[string]func() (RunningStory, error){}
+	for _, detail := range work.RunningOn(s.Host) {
+		if !detail.Hitl() {
+			runningRead[detail.Story.ID] = later(func() (RunningStory, error) { return s.running(ctx, detail) })
+		}
+	}
+	governorsRead := later(func() ([]StoryDetail, error) { return s.Tracker.ReadyWithLabel(ctx, LabelHitl) })
+	othersWaitRead := later(func() ([]OtherWait, error) { return s.waitingOnOthers(ctx) })
+	blockedRead := later(func() ([]StoryDetail, error) { return s.Tracker.BlockedForHost(ctx, s.Host) })
+	elsewhereRead := later(func() ([]HostWork, error) { return s.elsewhere(ctx, work) })
+	shortfallsRead := later(func() ([]EpicShortfall, error) { return s.epicShortfalls(ctx) })
+	var graphRead func() ([]domain.GraphBead, error)
+	if s.Graph != nil {
+		graphRead = later(func() ([]domain.GraphBead, error) { return s.Graph.BeadGraph(ctx) })
+	}
+
+	var smokeRead func() ([]GristSmokeRecord, error)
+	if s.Smoke != nil {
+		smokeRead = later(func() ([]GristSmokeRecord, error) { return s.Smoke.Records(ctx) })
+	}
+	var backupRead func() (string, error)
+	if s.Notes != nil && report.SyncMode == BeadsSyncBackup {
+		backupRead = later(func() (string, error) { return s.Notes.Note(ctx, LastBackupKey(s.Host)) })
+	}
+
 	closing := closingOut(ctx, s.CloseOuts)
 	for _, detail := range work.RunningOn(s.Host) {
 		if detail.Hitl() {
@@ -533,7 +564,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 			report.Waiting = append(report.Waiting, detail)
 			continue
 		}
-		rs, err := s.running(ctx, detail)
+		rs, err := runningRead[detail.Story.ID]()
 		if err != nil {
 			return report, err
 		}
@@ -575,7 +606,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	// A bead for the Governor may have no Path at all, so no listing keyed by
 	// host finds it: ask for the label itself. A hitl story ready on this host
 	// comes back here too, and is listed once.
-	governors, err := s.Tracker.ReadyWithLabel(ctx, LabelHitl)
+	governors, err := governorsRead()
 	if err != nil {
 		return report, fmt.Errorf("reading what waits for the Governor: %w", err)
 	}
@@ -598,7 +629,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		return report.Waiting[i].Priority < report.Waiting[j].Priority
 	})
 
-	if report.WaitingOnOthers, err = s.waitingOnOthers(ctx); err != nil {
+	if report.WaitingOnOthers, err = othersWaitRead(); err != nil {
 		return report, err
 	}
 
@@ -623,13 +654,13 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		}()
 	}
 
-	blocked, err := s.Tracker.BlockedForHost(ctx, s.Host)
+	blocked, err := blockedRead()
 	if err != nil {
 		return report, fmt.Errorf("reading what is blocked on %s: %w", s.Host, err)
 	}
 	report.Blocked = blocked
 
-	others, err := s.elsewhere(ctx, work)
+	others, err := elsewhereRead()
 	if err != nil {
 		return report, err
 	}
@@ -637,12 +668,12 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	report.Ticks = ReadHostTicks(ctx, s.Ticks)
 	report.MillhandResume = MillhandResumeLine(ctx, s.Ticks.Millhand, s.now())
 
-	if report.EpicShortfalls, err = s.epicShortfalls(ctx); err != nil {
+	if report.EpicShortfalls, err = shortfallsRead(); err != nil {
 		return report, err
 	}
 
-	if s.Graph != nil {
-		graph, err := s.Graph.BeadGraph(ctx)
+	if graphRead != nil {
+		graph, err := graphRead()
 		if err != nil {
 			return report, fmt.Errorf("reading which open beads look finished: %w", err)
 		}
@@ -689,8 +720,8 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 			report.Benchmarks = ReadBenchmarks(past, s.Bench)
 		}
 	}
-	if s.Smoke != nil {
-		if records, err := s.Smoke.Records(ctx); err != nil {
+	if smokeRead != nil {
+		if records, err := smokeRead(); err != nil {
 			s.print(fmt.Sprintf("mw status: the grist smoke's record could not be read: %v\n", err))
 		} else {
 			report.GristSmoke = records
@@ -748,8 +779,8 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		report.BeadsBudgetBytes = s.beadsBudget()
 		report.BeadsKnown = true
 
-		if report.SyncMode == BeadsSyncBackup {
-			said, err := s.Notes.Note(ctx, LastBackupKey(s.Host))
+		if backupRead != nil {
+			said, err := backupRead()
 			if err != nil {
 				return report, fmt.Errorf("reading when %s last backed up its beads: %w", s.Host, err)
 			}
@@ -815,6 +846,25 @@ type heldHandsRead struct {
 	err  error
 }
 
+// later starts f in a goroutine of its own and returns the function that waits
+// for what it came back with. It may be called once or many times.
+func later[T any](f func() (T, error)) func() (T, error) {
+	type result struct {
+		value T
+		err   error
+	}
+	done := make(chan struct{})
+	var got result
+	go func() {
+		defer close(done)
+		got.value, got.err = f()
+	}()
+	return func() (T, error) {
+		<-done
+		return got.value, got.err
+	}
+}
+
 // mayorRead is what reading the Mayor's needs came back with.
 type mayorRead struct {
 	needs []PosternViewNeed
@@ -869,10 +919,23 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand) ([]HostWork, e
 	}
 	sort.Strings(hosts)
 
+	// Each host's three notes are a read apiece, and no note depends on
+	// another: all of them are started before the first is waited for.
 	now := s.now()
+	type noted struct {
+		synced, halted, ticks func() (string, error)
+	}
+	notes := make([]noted, len(hosts))
+	for i, host := range hosts {
+		read := func(key string) func() (string, error) {
+			return later(func() (string, error) { return s.Notes.Note(ctx, key) })
+		}
+		notes[i] = noted{read(LastSyncKey(host)), read(SyncHaltKey(host)), read(TicksKey(host))}
+	}
+
 	work := make([]HostWork, 0, len(hosts))
-	for _, host := range hosts {
-		said, err := s.Notes.Note(ctx, LastSyncKey(host))
+	for i, host := range hosts {
+		said, err := notes[i].synced()
 		if err != nil {
 			return nil, fmt.Errorf("reading when %s last synced: %w", host, err)
 		}
@@ -886,7 +949,7 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand) ([]HostWork, e
 		}
 		held.Asleep = held.LastSync.IsZero() || held.Silent > s.hostSilence()
 
-		haltSaid, err := s.Notes.Note(ctx, SyncHaltKey(host))
+		haltSaid, err := notes[i].halted()
 		if err != nil {
 			return nil, fmt.Errorf("reading whether %s's sync is halted: %w", host, err)
 		}
@@ -894,7 +957,7 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand) ([]HostWork, e
 			held.Halt = &info
 		}
 
-		ticks, err := s.Notes.Note(ctx, TicksKey(host))
+		ticks, err := notes[i].ticks()
 		if err != nil {
 			return nil, fmt.Errorf("reading how the timers of %s are doing: %w", host, err)
 		}
@@ -1644,11 +1707,18 @@ func (s Status) waitingOnOthers(ctx context.Context) ([]OtherWait, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading what waits on others: %w", err)
 	}
-	var waits []OtherWait
-	for _, d := range beads {
-		note := ""
+	// One note a bead, all asked for before the first is waited on.
+	noted := make([]func() (string, error), len(beads))
+	for i, d := range beads {
 		if s.Notes != nil {
-			if note, err = s.Notes.Note(ctx, AskWaitingKey(d.Story.ID)); err != nil {
+			noted[i] = later(func() (string, error) { return s.Notes.Note(ctx, AskWaitingKey(d.Story.ID)) })
+		}
+	}
+	var waits []OtherWait
+	for i, d := range beads {
+		note := ""
+		if noted[i] != nil {
+			if note, err = noted[i](); err != nil {
 				return nil, fmt.Errorf("reading when %s began waiting: %w", d.Story.ID, err)
 			}
 		}
