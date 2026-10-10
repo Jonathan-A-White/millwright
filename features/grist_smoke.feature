@@ -28,6 +28,44 @@ Feature: mw grist smoke tests an app's grist end to end
     And the smoke passed, saying "trade-tracker: ok, 1 examples"
     And no alarm was posted
 
+  Scenario: an example whose schemaVersion stands beside its request is sent with that version
+    Given the app "lampas" has the grind "tutor" whose answer must carry a price and a confidence
+    And the app "lampas" has the example "tutor/hello" containing:
+      """
+      {"schemaVersion": "1", "request": {"note": "no version in here"}, "expect": {"confidence": "low"}}
+      """
+    And the mill answers the next grist with:
+      """
+      {"price": null, "confidence": "low"}
+      """
+    When mw grist smoke is run for "lampas"
+    Then the smoke sent the grist of "lampas/tutor" with the version "1"
+    And the smoke passed, saying "lampas: ok, 1 examples"
+
+  Scenario: an example whose request holds the schemaVersion is still sent with it
+    Given the app "cairn" has the grind "sweep" whose answer must carry a price and a confidence
+    And the app "cairn" has the example "sweep/one" containing:
+      """
+      {"request": {"schemaVersion": "2"}, "expect": {"confidence": "low"}}
+      """
+    And the mill answers the next grist with:
+      """
+      {"price": null, "confidence": "low"}
+      """
+    When mw grist smoke is run for "cairn"
+    Then the smoke sent the grist of "cairn/sweep" with the version "2"
+    And the smoke passed, saying "cairn: ok, 1 examples"
+
+  Scenario: an example with two different schemaVersions is wrong, and nothing is sent
+    Given the app "lampas" has the grind "tutor" whose answer must carry a price and a confidence
+    And the app "lampas" has the example "tutor/hello" containing:
+      """
+      {"schemaVersion": "1", "request": {"schemaVersion": "2"}, "expect": {"confidence": "low"}}
+      """
+    When mw grist smoke is run for "lampas"
+    Then the smoke failed, saying "tutor/hello: the example is wrong: schemaVersion is 1 beside the request but 2 in it"
+    And the smoke sent 0 grist
+
   Scenario: an answer that misses an expect fails, naming the example, the field, what was wanted and what came
     Given the mill answers the next grist with:
       """

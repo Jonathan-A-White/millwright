@@ -243,7 +243,7 @@ func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, fi
 	if wait <= 0 {
 		wait = GristSmokeWait
 	}
-	sent, err := s.Send.Run(ctx, GristSendRequest{App: app, Kind: kind, RequestFile: request, Photos: photos, Wait: wait})
+	sent, err := s.Send.Run(ctx, GristSendRequest{App: app, Kind: kind, Version: example.SchemaVersion, RequestFile: request, Photos: photos, Wait: wait})
 	if unanswered, ok := GristUnansweredIn(err); ok {
 		if unanswered.Answer == nil {
 			return fmt.Sprintf("no answer in %s", wait)

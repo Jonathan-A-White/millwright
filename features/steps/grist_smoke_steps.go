@@ -20,6 +20,7 @@ import (
 // smokeSent is one grist the fake backend was sent.
 type smokeSent struct {
 	app, kind string
+	version   string
 	photos    []string
 }
 
@@ -37,9 +38,19 @@ type smokeAnswer struct {
 }
 
 func (s *smokeSender) Run(_ context.Context, req application.GristSendRequest) (application.GristSendReport, error) {
-	sent := smokeSent{app: req.App, kind: req.Kind}
-	if _, err := os.ReadFile(req.RequestFile); err != nil {
+	sent := smokeSent{app: req.App, kind: req.Kind, version: strings.TrimSpace(req.Version)}
+	raw, err := os.ReadFile(req.RequestFile)
+	if err != nil {
 		return application.GristSendReport{}, err
+	}
+	// As the real send does: the version asked for, else the request's own schemaVersion.
+	if sent.version == "" {
+		var fields map[string]json.RawMessage
+		_ = json.Unmarshal(raw, &fields)
+		_ = json.Unmarshal(fields["schemaVersion"], &sent.version)
+	}
+	if strings.TrimSpace(sent.version) == "" {
+		return application.GristSendReport{}, fmt.Errorf("mw grist send: the request has no schemaVersion to say which version of the app's schema it is: give --schema-version")
 	}
 	for _, photo := range req.Photos {
 		if _, err := os.Stat(photo); err != nil {
@@ -141,6 +152,7 @@ func InitializeGristSmokeScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the smoke sent (\d+) grist as "([^"]*)" with the photo "([^"]*)"$`, c.sentWithPhoto)
 	ctx.Then(`^the smoke sent (\d+) grist as "([^"]*)" with no photo$`, c.sentWithNoPhoto)
 	ctx.Then(`^the smoke sent (\d+) grist$`, c.sentTotal)
+	ctx.Then(`^the smoke sent the grist of "([^"]*)" with the version "([^"]*)"$`, c.sentWithVersion)
 	ctx.Then(`^no alarm was posted$`, c.noAlarm)
 	ctx.Then(`^an alarm event was posted saying "([^"]*)"$`, c.alarmPosted)
 	ctx.Then(`^the landing smoked "([^"]*)"$`, c.landingSmoked)
@@ -289,6 +301,19 @@ func (c *smokeContext) sentWithPhoto(n int, target, photo string) error {
 
 func (c *smokeContext) sentWithNoPhoto(n int, target string) error {
 	return c.sentAs(n, target, nil)
+}
+
+func (c *smokeContext) sentWithVersion(target, version string) error {
+	app, kind, _ := strings.Cut(target, "/")
+	for _, sent := range c.sender.sent {
+		if sent.app == app && sent.kind == kind {
+			if sent.version != version {
+				return fmt.Errorf("%s was sent with the version %q, not %q", target, sent.version, version)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("no grist was sent as %s", target)
 }
 
 func (c *smokeContext) sentTotal(n int) error {

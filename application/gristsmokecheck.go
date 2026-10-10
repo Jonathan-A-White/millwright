@@ -17,10 +17,16 @@ import (
 // and what the answer must show. A new behaviour of the grind is a new example.
 //
 //	{
-//	  "request": {"schemaVersion": "1", "...": "..."},
+//	  "schemaVersion": "1",
+//	  "request": {"...": "..."},
 //	  "photos":  ["blank-paper.jpg"],
 //	  "expect":  {"price": {"is_null": true}, "confidence": "low"}
 //	}
+//
+// The schemaVersion stands beside the request, as an app sends its v beside
+// its input, and is sent as the version of the grist, not copied into the
+// request. A request that holds its own schemaVersion does without it; one
+// that has both must have them agree.
 //
 // Each key of expect is a path into the answer, object keys and array
 // positions joined by dots ("items.0.name"). Its check is one of: a bare value
@@ -34,9 +40,10 @@ import (
 //
 // A failure of an all check names the one of its list that did not hold.
 type GristExample struct {
-	Request json.RawMessage            `json:"request"`
-	Photos  []string                   `json:"photos"`
-	Expect  map[string]json.RawMessage `json:"expect"`
+	SchemaVersion string                     `json:"schemaVersion"`
+	Request       json.RawMessage            `json:"request"`
+	Photos        []string                   `json:"photos"`
+	Expect        map[string]json.RawMessage `json:"expect"`
 }
 
 // ParseGristExample reads one example file, refusing one that has no request
@@ -48,6 +55,15 @@ func ParseGristExample(data []byte) (GristExample, error) {
 	}
 	if len(strings.TrimSpace(string(example.Request))) == 0 {
 		return GristExample{}, fmt.Errorf("it has no request")
+	}
+	if example.SchemaVersion != "" {
+		var inRequest struct {
+			SchemaVersion string `json:"schemaVersion"`
+		}
+		_ = json.Unmarshal(example.Request, &inRequest)
+		if inRequest.SchemaVersion != "" && inRequest.SchemaVersion != example.SchemaVersion {
+			return GristExample{}, fmt.Errorf("schemaVersion is %s beside the request but %s in it", example.SchemaVersion, inRequest.SchemaVersion)
+		}
 	}
 	for field, raw := range example.Expect {
 		if _, err := parseGristCheck(raw); err != nil {
