@@ -3590,6 +3590,9 @@ the network.
 
 Every direct requirement in `go.mod` is credited here, and a test
 (`credits_test.go`) fails when one is not.
+A source added or removed changes its credit in the same commit, and the test
+says so: it fails on a credit here for a module `go.mod` no longer requires, and
+on a bundled font or data file that no credit names.
 
 - [cobra](https://github.com/spf13/cobra) (Apache 2.0 licence, [LICENSE.txt](https://github.com/spf13/cobra/blob/HEAD/LICENSE.txt)):
   the command line of `mw`. Unmodified.
