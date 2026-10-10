@@ -1828,6 +1828,33 @@ engine's seconds), each left out when not known; `mw grist stats --kind tutor-tu
 [--last 20]` prints, for the last runs of that kind, the median and worst seconds of
 each phase (queue, scoring and each engine, harness, total) and how many runs had it. See `docs/scorers.md` and `features/grist_audio.feature`.
 
+## Keeping a rig's facts (mw memory)
+
+The Mayor changes a rig kept as facts with five verbs, each writing files under
+`seats/builder/rigs/<rig>/facts/` and printing each file it wrote. None runs git
+(the Mayor commits and pushes) and none deletes a file:
+
+```sh
+mw memory add <rig> --kind gotcha|decision --subject <s> --source <bead|rig@sha|mayor:<date>> [--slug <slug>] "<sentence>"
+mw memory supersede <rig> <slug> --source <...> [--slug <new>] "<sentence>"
+mw memory retire <rig> <slug> --reason "<why>"
+mw memory recheck <rig> <slug> [--why "<text>"]
+mw memory list <rig> [--status current|recheck|superseded|retired] [--oldest]
+```
+
+`add` writes a current fact dated today (UTC); the slug defaults to the
+sentence's first five words, lower-case and hyphenated. It refuses a rig with no
+folder in the seat, a slug that already has a file, a sentence with a newline
+and a kind other than gotcha or decision. `supersede` writes the new fact with
+`supersedes:` and marks the old one `superseded` with `superseded-by:`; it
+refuses an unknown slug or one already superseded or retired. `retire` keeps the
+sentence and sets `retired:` and the `reason`. `recheck` sets status recheck (the
+`--why` appended to the reason), which a Builder does not read at boot; `add`
+refuses its slug until `supersede` or `retire` settles it. `list` prints
+`slug  status  kind  [subject]  since  source`, current facts first by subject
+(`--oldest`: by since), then `render N/8000 bytes`, the size `mw status` holds
+to `rig_memory_bytes`. See `features/memory.feature`.
+
 ## Steps for his hands
 
 A step only the Governor's hands could take — a `sudo` line, a unit to
