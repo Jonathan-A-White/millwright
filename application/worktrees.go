@@ -64,4 +64,10 @@ type Worktrees interface {
 	// delete (`git branch -d`) first and forcing (`git branch -D`) only when
 	// the safe delete refuses it. A branch that is not there is not an error.
 	DeleteBranch(ctx context.Context, rigDir, branch string) error
+
+	// RenameBranch gives a branch a new name and deletes nothing: it is how
+	// a dispatch keeps what an earlier attempt left under another name before
+	// the story's own branch is cut again (mw-gq6.326). It refuses when to is
+	// already a branch, and when from is not one.
+	RenameBranch(ctx context.Context, rigDir, from, to string) error
 }

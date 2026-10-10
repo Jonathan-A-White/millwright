@@ -538,6 +538,7 @@ func (noWorktrees) Exists(context.Context, string, string, string) (bool, error)
 func (noWorktrees) Remove(context.Context, string, string, string) error         { return nil }
 func (noWorktrees) RemoveWithoutForce(context.Context, string, string) error     { return nil }
 func (noWorktrees) DeleteBranch(context.Context, string, string) error           { return nil }
+func (noWorktrees) RenameBranch(context.Context, string, string, string) error   { return nil }
 
 func (c *gristContext) hostIsHome(host string) error {
 	c.homeIs = host

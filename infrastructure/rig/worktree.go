@@ -170,6 +170,13 @@ func (w *Worktrees) DeleteBranch(ctx context.Context, rigDir, branch string) err
 	return err
 }
 
+// RenameBranch implements application.Worktrees: `git branch -m`, which
+// refuses a name already taken and never overwrites it.
+func (w *Worktrees) RenameBranch(ctx context.Context, rigDir, from, to string) error {
+	_, err := w.git(ctx, rigDir, "branch", "-m", from, to)
+	return err
+}
+
 // AddNote implements application.CommitNotes: `git notes --ref=<ref> add -f -m
 // <note> <commit>` in the rig's checkout.
 func (w *Worktrees) AddNote(ctx context.Context, rigDir, ref, commit, note string) error {

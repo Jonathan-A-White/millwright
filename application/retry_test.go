@@ -67,6 +67,8 @@ func (f *fakeRetryLanding) RemoveWithoutForce(context.Context, string, string) e
 	return nil
 }
 
+func (f *fakeRetryLanding) RenameBranch(context.Context, string, string, string) error { return nil }
+
 func (f *fakeRetryLanding) DeleteBranch(context.Context, string, string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
