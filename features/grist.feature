@@ -144,6 +144,15 @@ Feature: mw grist grind, the mill
     Then the answer says "refused" because "This key has sent its 2 grist for today; send it again tomorrow."
     And no grind was run
 
+  Scenario: The factory's own test key at the daily limit is still ground
+    Given the factory allows 2 grist a day from one key
+    And the phone is the key of the grist smoke
+    And the phone has already sent 2 grist today
+    And the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
+    And the grind answers with a sweep result
+    When the mill grinds
+    Then the mill answered 1, refused 0, failed 0, and left 0 waiting
+
   Scenario: A grind that fails is answered failed, and recorded
     Given the phone sends a "cairn" "sweep" grist, version "1.1", with 1 photo
     And the grind's session ends in an error

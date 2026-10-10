@@ -389,6 +389,7 @@ func newMill(out io.Writer) (application.GristGrind, error) {
 	if err != nil {
 		return application.GristGrind{}, err
 	}
+	testKey := gristTestPublicKey()
 	// Only a grind that forwards its grist needs the vault, to mail the Mayor:
 	// with none configured the mill still grinds, and such a grist fails.
 	var mailbox application.Mailbox
@@ -414,6 +415,7 @@ func newMill(out io.Writer) (application.GristGrind, error) {
 		Host:         host,
 		Apps:         apps,
 		GovernorKey:  governorKey,
+		TestKey:      testKey,
 		Ceilings: application.GristCeilings{
 			Models: ceilings.Models, Efforts: ceilings.Efforts, MaxAttachments: ceilings.MaxAttachments,
 			MaxAttachmentBytes: ceilings.MaxAttachmentBytes, DailyLimit: ceilings.DailyLimit,
@@ -421,6 +423,25 @@ func newMill(out io.Writer) (application.GristGrind, error) {
 		},
 		Out: out,
 	}, nil
+}
+
+// gristTestPublicKey is the public key of the grist smoke's test key, which
+// the mill does not count against the daily limit (mw-gq6.340); empty when the
+// host has no such key, and then the limit counts every key.
+func gristTestPublicKey() string {
+	path, err := config.GristTestKeyFile()
+	if err != nil {
+		return ""
+	}
+	keys := postern.New(path)
+	if exists, err := keys.Exists(); err != nil || !exists {
+		return ""
+	}
+	pub, _, err := keys.PublicKey()
+	if err != nil {
+		return ""
+	}
+	return pub
 }
 
 // hostGristRoom is what the dispatch and mw status read of the mill on this

@@ -77,6 +77,7 @@ type gristContext struct {
 	ceilings  application.GristCeilings
 	governor  string
 	phoneKey  string
+	testKey   string // the grist smoke's key, which the mill does not count; empty is none
 	phoneApps []string
 	askModel  string // what the next grist asks for; empty is nothing
 	askEffort string
@@ -139,6 +140,7 @@ func InitializeGristScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the grist asks for the model "([^"]*)" and the effort "([^"]*)"$`, c.theGristAsksFor)
 	ctx.Given(`^the factory allows (\d+) grist a day from one key$`, c.theFactoryAllowsADay)
 	ctx.Given(`^the phone has already sent (\d+) grist today$`, c.thePhoneHasSent)
+	ctx.Given(`^the phone is the key of the grist smoke$`, c.thePhoneIsTheSmokeKey)
 	ctx.Given(`^a message to the mill key$`, c.aMessageToTheMill)
 	ctx.Given(`^a grist from the phone to another key$`, c.aGristToAnotherKey)
 	ctx.Given(`^a story is already running on "([^"]*)"$`, c.aStoryIsRunningOn)
@@ -437,6 +439,11 @@ func (c *gristContext) thePhoneHasSent(n int) error {
 	return nil
 }
 
+func (c *gristContext) thePhoneIsTheSmokeKey() error {
+	c.testKey = c.phoneKey
+	return nil
+}
+
 func (c *gristContext) aMessageToTheMill() error {
 	c.backend.AddRecord(application.PosternRecord{Txid: "direct:message", Class: "message", From: c.governor, To: c.millKey, Ciphertext: "x"})
 	return nil
@@ -501,6 +508,7 @@ func (c *gristContext) mill() application.GristGrind {
 		Apps:        map[string]string{"cairn": c.checkout("cairn")},
 		Ceilings:    c.ceilings,
 		GovernorKey: c.governor,
+		TestKey:     c.testKey,
 		TempDir:     c.home,
 		Scorers:     c.audio.registry(),
 		Runs:        c.audio.runs(),

@@ -40,6 +40,11 @@ const (
 	GristReasonDeclined    = "The model declined this grist."
 	GristReasonForward     = "The app's grind forwards to someone the mill does not forward to."
 
+	// gristReasonDailyStart and gristReasonDailyEnd are the words round the
+	// limit in GristReasonDaily's reason.
+	gristReasonDailyStart = "This key has sent its "
+	gristReasonDailyEnd   = " grist for today; send it again tomorrow."
+
 	GristReasonUnread     = "The factory could not read the app's grind; send it again."
 	GristReasonPhotoLost  = "A photo in this grist could not be fetched; send it again."
 	GristReasonTimedOut   = "The grind ran out of time; send it again."
@@ -107,6 +112,11 @@ type GristGrind struct {
 	// GovernorKey may use any app's grinds from any of his keys' doors: he
 	// tests them from the terminal or the cockpit.
 	GovernorKey string
+	// TestKey is the public key of the grist smoke's own key
+	// (grist_test_key_file). It is the factory's, not an app's user, so the
+	// daily limit, which guards fuel against app keys, does not count it
+	// (mw-gq6.340); empty is none.
+	TestKey string
 
 	// TempDir is where each grind's private directory is made; empty is
 	// the system's.
@@ -514,8 +524,11 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 		return
 	}
 	ceilings := g.Ceilings.filled()
-	if sent := sentToday(lines, w.sender, g.now()); sent >= ceilings.DailyLimit {
-		w.settle(GristRefused, fmt.Sprintf("This key has sent its %d grist for today; send it again tomorrow.", ceilings.DailyLimit))
+	// The daily limit guards fuel against an app's keys; the smoke's own key is
+	// the factory's, sent by every smoke of every app (mw-gq6.340).
+	factoryKey := g.TestKey != "" && envelopeFrom == g.TestKey
+	if sent := sentToday(lines, w.sender, g.now()); sent >= ceilings.DailyLimit && !factoryKey {
+		w.settle(GristRefused, GristReasonDaily(ceilings.DailyLimit))
 		return
 	}
 	checkout, ok := g.Apps[name.App]
@@ -691,6 +704,17 @@ func rigPath(p string) bool {
 		return false
 	}
 	return path.Clean(p) == p && p != ".." && !strings.HasPrefix(p, "../")
+}
+
+// GristReasonDaily is the reason the mill refuses a key that has sent its
+// limit of grist today.
+func GristReasonDaily(limit int) string {
+	return fmt.Sprintf("%s%d%s", gristReasonDailyStart, limit, gristReasonDailyEnd)
+}
+
+// isGristReasonDaily says reason is GristReasonDaily's, for any limit.
+func isGristReasonDaily(reason string) bool {
+	return strings.HasPrefix(reason, gristReasonDailyStart) && strings.HasSuffix(reason, gristReasonDailyEnd)
 }
 
 // sentToday counts the grist sender has sent today, by the record.
