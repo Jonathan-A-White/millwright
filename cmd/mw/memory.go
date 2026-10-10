@@ -13,7 +13,7 @@ import (
 func newMemoryCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "memory",
-		Short: "Place, replace, retire, list, query and eval the facts the Builder's seat keeps of a rig",
+		Short: "Place, replace, retire, list, query, eval, demote and promote the facts the Builder's seat keeps of a rig",
 		Long: "A rig kept as facts has a folder in the Builder's seat, seats/builder/rigs/<rig>/, with an\n" +
 			"about.md and facts/<slug>.md, one typed fact a file. These verbs are how the Mayor changes\n" +
 			"them: each writes files, prints each file it wrote, and runs no git command (the Mayor\n" +
@@ -22,7 +22,8 @@ func newMemoryCmd() *cobra.Command {
 		Args: cobra.NoArgs,
 	}
 	root.AddCommand(newMemoryAddCmd(), newMemorySupersedeCmd(), newMemoryRetireCmd(),
-		newMemoryRecheckCmd(), newMemoryListCmd(), newMemoryMigrateCmd(), newMemoryQueryCmd(), newMemoryEvalCmd())
+		newMemoryRecheckCmd(), newMemoryListCmd(), newMemoryMigrateCmd(), newMemoryQueryCmd(), newMemoryEvalCmd(),
+		newMemoryDemoteCmd(), newMemoryPromoteCmd())
 	return root
 }
 
@@ -234,6 +235,43 @@ func newMemoryEvalCmd() *cobra.Command {
 				return err
 			}
 			return memory.Eval(cmd.Context(), args[0])
+		},
+	}
+}
+
+func newMemoryDemoteCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "demote <rig> <slug>",
+		Short: "Keep a current fact out of the boot render, as long as the rig's eval still finds it",
+		Long: "demote sets boot: no on a current fact, so that boot does not show it. The fact stays\n" +
+			"current, and query shows it and list marks it 'boot:no'. It is refused, saying 'no eval\n" +
+			"question finds <slug>; add one to eval.md first', unless some question in the rig's eval.md\n" +
+			"has the slug in its expect and that question passes (see eval). It also refuses a slug that\n" +
+			"is unknown, not current or already demoted.",
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			memory, err := memoryFor(cmd)
+			if err != nil {
+				return err
+			}
+			return memory.Demote(cmd.Context(), args[0], args[1])
+		},
+	}
+}
+
+func newMemoryPromoteCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "promote <rig> <slug>",
+		Short: "Put a demoted fact back into the boot render",
+		Long: "promote removes boot: no from a fact that demote kept out of boot. It refuses a slug that\n" +
+			"is unknown or not demoted.",
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			memory, err := memoryFor(cmd)
+			if err != nil {
+				return err
+			}
+			return memory.Promote(cmd.Context(), args[0], args[1])
 		},
 	}
 }

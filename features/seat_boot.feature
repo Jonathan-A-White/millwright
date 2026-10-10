@@ -85,7 +85,7 @@ Feature: Booting a session into a seat
       | Follow the story's formula steps    |
       | no AI attribution of any kind       |
       | read-only to you: propose typed facts under "For the rig memory:": gotcha [subject]: ..., decision [subject]: ..., supersede <slug>: ..., retire <slug>: <reason>, recheck <slug>: <why>, at most two, or nothing |
-      | mw memory query <rig> <term> finds facts not shown here |
+      | Boot shows the facts every story needs; before touching a subject you do not know, run mw memory query <rig> <term> |
       | bd runs without asking              |
       | as its own Bash call, never chained |
       | run `mw check mw-gq6.6`             |
@@ -139,6 +139,20 @@ Feature: Booting a session into a seat
       | status:                 |
       | ---                     |
       | bd-dash-c               |
+
+  Scenario: A current fact with boot: no is left out of the boot file
+    Given the vault holds the "builder" seat's about text for the rig "millwright"
+    And the rig "millwright" holds these facts:
+      | slug       | subject | kind   | status  | sentence               | source   | boot |
+      | bd-dash-c  | bd      | gotcha | current | Point bd at the vault. | mw-gq6.1 |      |
+      | git-rebase | git     | gotcha | current | KEPT OUT OF BOOT.      | mw-gq6.2 | no   |
+    When the session that works the story is assembled for the "builder" seat
+    Then the boot file holds, in this order:
+      | - [bd] Point bd at the vault. (mw-gq6.1) |
+      | make test passes                         |
+    And the boot file holds none of:
+      | KEPT OUT OF BOOT |
+      | boot: no         |
 
   Scenario: A fact file with a bad status is skipped and named, and the boot succeeds
     Given the vault holds the "builder" seat's about text for the rig "millwright"

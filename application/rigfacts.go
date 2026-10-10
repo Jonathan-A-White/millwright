@@ -59,6 +59,9 @@ type RigFact struct {
 	SupersededBy string
 	Retired      string // YYYY-MM-DD
 	Reason       string
+	// Unbooted keeps a current fact out of the boot render (front matter
+	// boot: no). It is still a fact: query and list show it.
+	Unbooted bool
 }
 
 const (
@@ -71,6 +74,7 @@ const (
 	factSupersededBy = "superseded-by"
 	factRetired      = "retired"
 	factReason       = "reason"
+	factBoot         = "boot"
 )
 
 const frontMatterFence = "---"
@@ -133,6 +137,14 @@ func ParseRigFact(slug, text string) (RigFact, error) {
 			fact.Retired = value
 		case factReason:
 			fact.Reason = value
+		case factBoot:
+			switch value {
+			case "no":
+				fact.Unbooted = true
+			case "yes":
+			default:
+				return RigFact{}, fmt.Errorf("the value of %q: %s is not yes or no", key, value)
+			}
 		default:
 			return RigFact{}, fmt.Errorf("unknown key %q", key)
 		}
@@ -228,6 +240,9 @@ func (f RigFact) String() string {
 			fmt.Fprintf(&b, "%s: %s\n", pair[0], writeFactValue(pair[1]))
 		}
 	}
+	if f.Unbooted {
+		fmt.Fprintf(&b, "%s: no\n", factBoot)
+	}
 	b.WriteString(frontMatterFence + "\n\n")
 	b.WriteString(f.Sentence + "\n")
 	return b.String()
@@ -256,7 +271,8 @@ func LoadRigFacts(files map[string]string) (facts []RigFact, skipped []string) {
 // RenderRigMemory is what a Builder reads of a rig kept as facts: the about
 // text, then the current decisions, then the current gotchas grouped by
 // subject, one line each. Front matter, file names, and every fact that is not
-// current are left out, because every byte of it is paid on every story. It has
+// current, and a current one with boot: no, are left out, because every byte of
+// it is paid on every story. It has
 // no trailing newline, and its length is the size mw status holds to the budget.
 func RenderRigMemory(about string, facts []RigFact) string {
 	var sections []string
@@ -269,7 +285,7 @@ func RenderRigMemory(about string, facts []RigFact) string {
 	}{{"## Decisions", FactDecision}, {"## Gotchas", FactGotcha}} {
 		var current []RigFact
 		for _, fact := range facts {
-			if fact.Kind == group.kind && fact.Status == FactCurrent {
+			if fact.Kind == group.kind && fact.Status == FactCurrent && !fact.Unbooted {
 				current = append(current, fact)
 			}
 		}

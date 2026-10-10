@@ -74,6 +74,14 @@ func InitializeMemoryScenario(ctx *godog.ScenarioContext) {
 		c.err = c.memory().Query(context.Background(), application.MemoryQuery{Rig: rig, Terms: strings.Fields(terms)})
 		return nil
 	})
+	ctx.When(`^the Mayor demotes the fact "([^"]*)" of the rig "([^"]*)"$`, func(slug, rig string) error {
+		c.err = c.memory().Demote(context.Background(), rig, slug)
+		return nil
+	})
+	ctx.When(`^the Mayor promotes the fact "([^"]*)" of the rig "([^"]*)"$`, func(slug, rig string) error {
+		c.err = c.memory().Promote(context.Background(), rig, slug)
+		return nil
+	})
 	ctx.When(`^mw status reads the host for memory$`, c.statusReads)
 	ctx.Given(`^the rig "([^"]*)" has an eval:$`, c.theRigHasAnEval)
 	ctx.When(`^the Mayor runs the eval of the rig "([^"]*)"$`, func(rig string) error {

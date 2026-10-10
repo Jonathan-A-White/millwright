@@ -116,6 +116,15 @@ type EvalReport struct {
 	Lines []string
 	// Failed and Total count questions: one with any slug missing is failed.
 	Failed, Total int
+	// Questions are the questions run, in the order of the file, each with
+	// whether every slug it expects was found.
+	Questions []EvalResult
+}
+
+// EvalResult is one question of an eval.md and whether it passed.
+type EvalResult struct {
+	EvalQuestion
+	Failed bool
 }
 
 // runEval runs the rig's eval.md against its facts, whatever their status. found
@@ -158,6 +167,7 @@ func (m Memory) runEval(ctx context.Context, rig string) (report EvalReport, fou
 			report.Lines = append(report.Lines, fmt.Sprintf("PASS %d %s  %s", rank, slug, q.Question))
 		}
 		report.Total++
+		report.Questions = append(report.Questions, EvalResult{EvalQuestion: q, Failed: failed})
 		if failed {
 			report.Failed++
 		}

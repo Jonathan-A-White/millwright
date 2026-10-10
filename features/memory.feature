@@ -721,6 +721,132 @@ Feature: mw memory
     When the Mayor runs the eval of the rig "ghost"
     Then the memory command was refused saying "no rig \"ghost\""
 
+  Scenario: demote keeps a current fact out of boot when an eval question that expects it passes, and promote brings it back
+    Given the rig "millwright" holds facts for querying
+    And the rig "millwright" has an about text of 20 bytes
+    And the rig "millwright" has an eval:
+      """
+      Q: What is bd?
+      expect: vault-flag
+      """
+    When the Mayor demotes the fact "vault-flag" of the rig "millwright"
+    Then the memory command succeeded
+    And the memory command printed the fact file "vault-flag" of the rig "millwright"
+    And the fact file "vault-flag" of the rig "millwright" holds:
+      """
+      ---
+      subject: bd
+      kind: gotcha
+      status: current
+      source: mw-2
+      since: 2026-09-01
+      boot: no
+      ---
+
+      Point every call at the vault with -C.
+      """
+    And a boot of the rig "millwright" reads 3 current facts after its about text
+    When the Mayor lists the rig "millwright" with the status "current"
+    Then the memory command printed "vault-flag  current boot:no  gotcha  [bd]  2026-09-01  mw-2"
+    When the Builder queries the rig "millwright" for "vault"
+    Then the memory command printed "vault-flag  current  [bd]  Point every call at the vault with -C. (mw-2)"
+    When the Mayor promotes the fact "vault-flag" of the rig "millwright"
+    Then the memory command succeeded
+    And the fact file "vault-flag" of the rig "millwright" holds:
+      """
+      ---
+      subject: bd
+      kind: gotcha
+      status: current
+      source: mw-2
+      since: 2026-09-01
+      ---
+
+      Point every call at the vault with -C.
+      """
+    And a boot of the rig "millwright" reads 4 current facts after its about text
+
+  Scenario: demote is refused when no eval question expects the fact
+    Given the rig "millwright" holds facts for querying
+    And the rig "millwright" has an eval:
+      """
+      Q: What is bd?
+      expect: vault-flag
+      """
+    When the Mayor demotes the fact "gate-make-check" of the rig "millwright"
+    Then the memory command was refused saying "no eval question finds gate-make-check; add one to eval.md first"
+    And the fact file "gate-make-check" of the rig "millwright" holds:
+      """
+      ---
+      subject: gate
+      kind: gotcha
+      status: current
+      source: mayor:2026-09-01
+      since: 2026-09-01
+      ---
+
+      The gate is make check.
+      """
+
+  Scenario: demote is refused when the rig has no eval.md
+    Given the rig "millwright" holds facts for querying
+    When the Mayor demotes the fact "vault-flag" of the rig "millwright"
+    Then the memory command was refused saying "no eval question finds vault-flag; add one to eval.md first"
+
+  Scenario: demote is refused when the question that expects the fact fails
+    Given the rig "millwright" holds facts for querying
+    And the rig "millwright" has an eval:
+      """
+      Q: Where is the tmux socket?
+      expect: vault-flag
+      """
+    When the Mayor demotes the fact "vault-flag" of the rig "millwright"
+    Then the memory command was refused saying "no eval question finds vault-flag; add one to eval.md first"
+
+  Scenario: demote is refused for a fact that is not current
+    Given the rig "millwright" holds facts for querying
+    And the rig "millwright" has an eval:
+      """
+      Q: What is tmux socket?
+      expect: old-socket
+      """
+    When the Mayor demotes the fact "old-socket" of the rig "millwright"
+    Then the memory command was refused saying "the fact \"old-socket\" of the rig millwright is superseded, not current"
+
+  Scenario: demote and promote refuse an unknown slug
+    Given the rig "millwright" holds facts for querying
+    When the Mayor demotes the fact "ghost" of the rig "millwright"
+    Then the memory command was refused saying "no fact \"ghost\" for the rig millwright"
+    When the Mayor promotes the fact "ghost" of the rig "millwright"
+    Then the memory command was refused saying "no fact \"ghost\" for the rig millwright"
+
+  Scenario: promote refuses a fact that boot already shows
+    Given the rig "millwright" holds facts for querying
+    When the Mayor promotes the fact "vault-flag" of the rig "millwright"
+    Then the memory command was refused saying "the fact \"vault-flag\" of the rig millwright is not demoted"
+
+  Scenario: a fact with a boot value other than no or yes is skipped as not whole
+    Given the Builder keeps the rig "demo" as facts
+    And the fact file "odd" of the rig "demo" holds:
+      """
+      ---
+      subject: bd
+      kind: gotcha
+      status: current
+      source: mw-1
+      since: 2026-09-01
+      boot: maybe
+      ---
+
+      A fact.
+      """
+    When the Mayor lists the rig "demo"
+    Then the memory command printed exactly:
+      """
+      skipped: odd.md: the value of "boot": maybe is not yes or no
+      render 0/8000 bytes
+      """
+
   Scenario: mw status says eval failing for a rig whose eval fails, and nothing for one that passes
     Given the Builder keeps the rig "fellowship" as facts
     And the rig "millwright" holds facts for querying

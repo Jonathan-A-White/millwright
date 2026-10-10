@@ -319,6 +319,61 @@ func (m Memory) Recheck(ctx context.Context, rig, slug, why string) error {
 	return m.put(ctx, rig, fact)
 }
 
+// Demote keeps a current fact out of the boot render (boot: no). The fact stays
+// current, and query and list still show it. It is refused unless some question
+// of the rig's eval.md expects the fact and passes, so that a Builder who needs
+// the fact can still find it.
+func (m Memory) Demote(ctx context.Context, rig, slug string) error {
+	_, files, facts, err := m.load(ctx, rig)
+	if err != nil {
+		return err
+	}
+	fact, err := existing(rig, slug, files, facts)
+	if err != nil {
+		return err
+	}
+	if fact.Status != FactCurrent {
+		return fmt.Errorf("the fact %q of the rig %s is %s, not current", slug, rig, fact.Status)
+	}
+	if fact.Unbooted {
+		return fmt.Errorf("the fact %q of the rig %s is already demoted", slug, rig)
+	}
+	report, _, err := m.runEval(ctx, rig)
+	if err != nil {
+		return err
+	}
+	found := false
+	for _, q := range report.Questions {
+		for _, expected := range q.Expect {
+			if expected == slug && !q.Failed {
+				found = true
+			}
+		}
+	}
+	if !found {
+		return fmt.Errorf("no eval question finds %s; add one to eval.md first", slug)
+	}
+	fact.Unbooted = true
+	return m.put(ctx, rig, fact)
+}
+
+// Promote puts a demoted fact back into the boot render.
+func (m Memory) Promote(ctx context.Context, rig, slug string) error {
+	_, files, facts, err := m.load(ctx, rig)
+	if err != nil {
+		return err
+	}
+	fact, err := existing(rig, slug, files, facts)
+	if err != nil {
+		return err
+	}
+	if !fact.Unbooted {
+		return fmt.Errorf("the fact %q of the rig %s is not demoted", slug, rig)
+	}
+	fact.Unbooted = false
+	return m.put(ctx, rig, fact)
+}
+
 // statusRank puts the facts a Builder reads first.
 func statusRank(s FactStatus) int {
 	switch s {
@@ -369,7 +424,11 @@ func (m Memory) List(ctx context.Context, req MemoryList) error {
 		return a.Slug < b.Slug
 	})
 	for _, fact := range shown {
-		fmt.Fprintf(m.Out, "%s  %s  %s  [%s]  %s  %s\n", fact.Slug, fact.Status, fact.Kind, fact.Subject, fact.Since, fact.Source)
+		status := string(fact.Status)
+		if fact.Unbooted {
+			status += " boot:no"
+		}
+		fmt.Fprintf(m.Out, "%s  %s  %s  [%s]  %s  %s\n", fact.Slug, status, fact.Kind, fact.Subject, fact.Since, fact.Source)
 	}
 	for _, why := range skipped {
 		fmt.Fprintf(m.Out, "skipped: %s\n", why)

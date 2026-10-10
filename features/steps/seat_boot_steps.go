@@ -126,8 +126,12 @@ func (c *seatBootContext) theRigHoldsTheseFacts(rig string, table *godog.Table) 
 		for i, h := range header {
 			cell[h.Value] = row.Cells[i].Value
 		}
-		text := fmt.Sprintf("---\nsubject: %s\nkind: %s\nstatus: %s\nsource: %s\nsince: 2026-09-01\n---\n\n%s\n",
-			cell["subject"], cell["kind"], cell["status"], cell["source"], cell["sentence"])
+		boot := ""
+		if cell["boot"] != "" {
+			boot = "boot: " + cell["boot"] + "\n"
+		}
+		text := fmt.Sprintf("---\nsubject: %s\nkind: %s\nstatus: %s\nsource: %s\nsince: 2026-09-01\n%s---\n\n%s\n",
+			cell["subject"], cell["kind"], cell["status"], cell["source"], boot, cell["sentence"])
 		if err := c.write(text, "seats", "builder", "rigs", rig, "facts", cell["slug"]+".md"); err != nil {
 			return err
 		}
