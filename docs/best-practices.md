@@ -92,8 +92,8 @@ than the work, and its important lines drown.
 rig only for that rig, with an 8000-byte budget
 ([`template/seats/builder/rigs/README.md`](../template/seats/builder/rigs/README.md));
 the ledger and postmortems never at boot. The Mayor's procedures sheet stays under
-8 KB. A Builder may not edit its rig memory: it proposes at most two lines in its
-closing comment, and the Mayor places and prunes them. This repository's own
+8 KB. A Builder may not edit its rig memory: it proposes at most two typed facts in its
+closing comment, and the Mayor places, supersedes and retires them. This repository's own
 [`docs/codemap.md`](codemap.md) has a size cap a lint check enforces.
 
 **If you have less.** One rule is enough: a charter that fits on one screen, and a

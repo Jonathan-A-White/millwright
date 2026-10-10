@@ -402,7 +402,7 @@ func KickoffPrompt(seat, storyID, vaultDir string) string {
 		"Follow the story's formula steps in order, leave the build and the tests green, "+
 		"and write one truthful closing comment on the story when you are done. "+
 		// The Mayor places what he keeps of the notes; the session only proposes.
-		"Your memory of this rig is read-only to you: propose notes under \"For the rig memory:\" in your closing comment. "+
+		"Your memory of this rig is read-only to you: propose typed facts under \"For the rig memory:\": gotcha [subject]: ..., decision [subject]: ..., supersede <slug>: ..., retire <slug>: <reason>, recheck <slug>: <why>, at most two, or nothing. "+
 		"Do not push, do not merge, do not close the story. "+
 		// The harness is told the same thing by its settings (the claude
 		// adapter's SessionSettings), and mw next refuses a branch that carries
@@ -439,7 +439,7 @@ func TesterKickoffPrompt(seat, storyID, vaultDir string) string {
 		"A Tester uses what a landed story built as the Governor would, on a phone-sized screen, and tries to break it. "+
 		"You commit nothing, to any branch: whatever you make goes under /tmp, and nothing is added to the rig. "+
 		"Follow the story's formula steps in order, and write your FINDINGS on the landed story as its last step says. "+
-		"Your memory of this rig is read-only to you: propose notes under \"For the rig memory:\" in your closing comment. "+
+		"Your memory of this rig is read-only to you: propose typed facts under \"For the rig memory:\": gotcha [subject]: ..., decision [subject]: ..., supersede <slug>: ..., retire <slug>: <reason>, recheck <slug>: <why>, at most two, or nothing. "+
 		"Do not push, do not merge, do not close the story. "+
 		"bd runs without asking, but as its own Bash call, never chained with another command "+
 		"by ;, | or &&. "+
@@ -464,7 +464,7 @@ func RebaseKickoffPrompt(seat, storyID, vaultDir, onto string) string {
 		"so that both the story's work and what landed meanwhile are kept, run the rig's suite in the foreground "+
 		"until it is green, and commit. The branch was never pushed, so the rebase forces nothing. "+
 		"Do not push, do not merge, do not close the story, and work nothing else of it. "+
-		"Your memory of this rig is read-only to you: propose notes under \"For the rig memory:\" in your closing comment. "+
+		"Your memory of this rig is read-only to you: propose typed facts under \"For the rig memory:\": gotcha [subject]: ..., decision [subject]: ..., supersede <slug>: ..., retire <slug>: <reason>, recheck <slug>: <why>, at most two, or nothing. "+
 		"Sign nothing you commit: no Co-Authored-By trailer, no Generated with line, "+
 		"no AI attribution of any kind. "+
 		"bd runs without asking, but as its own Bash call, never chained with another command "+
@@ -490,7 +490,7 @@ func MergeFixKickoffPrompt(seat, storyID, vaultDir, onto string) string {
 		"You are sent back once, to fix them: find why the tests fail on the merged result, fix it, "+
 		"run the rig's suite in the foreground until it is green, and commit. "+
 		"Do not push, do not merge again, do not close the story, and work nothing else of it. "+
-		"Your memory of this rig is read-only to you: propose notes under \"For the rig memory:\" in your closing comment. "+
+		"Your memory of this rig is read-only to you: propose typed facts under \"For the rig memory:\": gotcha [subject]: ..., decision [subject]: ..., supersede <slug>: ..., retire <slug>: <reason>, recheck <slug>: <why>, at most two, or nothing. "+
 		"Sign nothing you commit: no Co-Authored-By trailer, no Generated with line, "+
 		"no AI attribution of any kind. "+
 		"bd runs without asking, but as its own Bash call, never chained with another command "+

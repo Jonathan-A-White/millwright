@@ -105,7 +105,7 @@ func TestClosingStepOfEachFormulaAsksForHowToCheckItBeforeTheRigMemoryNotes(t *t
 }
 
 func TestKickoffPromptsSayTheRigMemoryIsReadOnlyToTheSession(t *testing.T) {
-	want := `memory of this rig is read-only to you: propose notes under "` + proposeNotesHeading + `" in your closing comment`
+	want := `memory of this rig is read-only to you: propose typed facts under "` + proposeNotesHeading + `": gotcha [subject]: ..., decision [subject]: ..., supersede <slug>: ..., retire <slug>: <reason>, recheck <slug>: <why>, at most two, or nothing`
 	prompts := map[string]string{
 		"kickoff":        application.KickoffPrompt("builder", "mw-gq6.6", "/vault"),
 		"rebase kickoff": application.RebaseKickoffPrompt("builder", "mw-gq6.50", "/vault", "origin/main"),
