@@ -127,6 +127,9 @@ type StoryDetail struct {
 	// stays at the first claim ever, so ClaimStarted is what to measure a run
 	// from.
 	ClaimedAt time.Time
+	// SentBackAt is when mw next last sent the story's branch back to a fresh
+	// session, as SentBackAtField says; zero when it never did.
+	SentBackAt time.Time
 	// Updated is when the tracker last recorded a change to the story; zero
 	// when the tracker did not say.
 	Updated time.Time
@@ -261,6 +264,20 @@ func (d StoryDetail) ClaimStarted() time.Time {
 		return d.ClaimedAt
 	}
 	return d.Started
+}
+
+// QuietSince is when the story's silence is counted from: the later of its
+// latest claim and its latest send-back, which put a fresh session to work on
+// it and mailed the Mayor the Sent back line.
+func (d StoryDetail) QuietSince() time.Time {
+	since := d.ClaimStarted()
+	if since.IsZero() {
+		return since
+	}
+	if d.SentBackAt.After(since) {
+		return d.SentBackAt
+	}
+	return since
 }
 
 // Held reports whether the tracker is holding this story back from every

@@ -87,6 +87,11 @@ func (c *nextContext) aSessionIsRunningToFixTheMergedTests(id string) error {
 }
 
 func (c *nextContext) theStoryIsRecordedAsSentBackForTests(id string) error {
+	if detail, err := c.tracker.ShowStory(context.Background(), id); err != nil {
+		return err
+	} else if detail.SentBackAt.IsZero() {
+		return fmt.Errorf("expected %s to record when it was sent back (%s), which the quiet alarm counts from", id, application.SentBackAtField)
+	}
 	if got := c.tracker.State(id, application.MergedTestsState); got != application.MergedTestsSentBack {
 		return fmt.Errorf("expected %s to be recorded %s=%s, got %q", id, application.MergedTestsState, application.MergedTestsSentBack, got)
 	}

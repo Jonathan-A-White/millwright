@@ -19,7 +19,8 @@ func newNudgeCmd() *cobra.Command {
 		Short: "Print the quiet alarm's clauses for this host, one a line",
 		Long: "nudge reads this host's claimed stories and, of each, whether it has run longer than\n" +
 			"nudge_after_minutes (default 60) with nothing landed, refused or blocked mailed to the\n" +
-			"Mayor about it since it was claimed, counted from the latest claim a dispatch recorded. It\n" +
+			"Mayor about it since it was claimed, counted from the latest claim a dispatch recorded, or from\n" +
+			"the latest time mw next sent its branch back to a fresh session, if later. It\n" +
 			"then reads every other host that holds a claim and, of each, whether its last recorded sync\n" +
 			"is older than nudge_sync_stale_minutes (default 20): a host that is simply off, holding no\n" +
 			"claim, is not an alarm. On a host the vault's home file says is not home, it prints nothing.\n" +

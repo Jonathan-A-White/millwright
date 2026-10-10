@@ -128,7 +128,7 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 	now := s.now()
 	closing := closingOut(ctx, n.CloseOuts)
 	for _, detail := range work.RunningOn(n.Host) {
-		since := detail.ClaimStarted()
+		since := detail.QuietSince()
 		if detail.Hitl() || since.IsZero() {
 			continue
 		}
