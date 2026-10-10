@@ -403,6 +403,8 @@ func KickoffPrompt(seat, storyID, vaultDir string) string {
 		"and write one truthful closing comment on the story when you are done. "+
 		// The Mayor places what he keeps of the notes; the session only proposes.
 		"Your memory of this rig is read-only to you: propose typed facts under \"For the rig memory:\": gotcha [subject]: ..., decision [subject]: ..., supersede <slug>: ..., retire <slug>: <reason>, recheck <slug>: <why>, at most two, or nothing. "+
+		// Boot carries only the current facts; the rest is one command away.
+		"mw memory query <rig> <term> finds facts not shown here. "+
 		"Do not push, do not merge, do not close the story. "+
 		// The harness is told the same thing by its settings (the claude
 		// adapter's SessionSettings), and mw next refuses a branch that carries
