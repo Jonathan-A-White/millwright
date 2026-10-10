@@ -1830,9 +1830,9 @@ each phase (queue, scoring and each engine, harness, total) and how many runs ha
 
 ## Keeping a rig's facts (mw memory)
 
-The Mayor changes a rig kept as facts with five verbs, each writing files under
+The Mayor changes a rig kept as facts with these verbs, each writing files under
 `seats/builder/rigs/<rig>/facts/` and printing each file it wrote. None runs git
-(the Mayor commits and pushes) and none deletes a file:
+(the Mayor commits and pushes) and none deletes a fact:
 
 ```sh
 mw memory add <rig> --kind gotcha|decision --subject <s> --source <bead|rig@sha|mayor:<date>> [--slug <slug>] "<sentence>"
@@ -1840,6 +1840,7 @@ mw memory supersede <rig> <slug> --source <...> [--slug <new>] "<sentence>"
 mw memory retire <rig> <slug> --reason "<why>"
 mw memory recheck <rig> <slug> [--why "<text>"]
 mw memory list <rig> [--status current|recheck|superseded|retired] [--oldest]
+mw memory migrate <rig> [--dry-run]
 ```
 
 `add` writes a current fact dated today (UTC); the slug defaults to the
@@ -1853,7 +1854,22 @@ sentence and sets `retired:` and the `reason`. `recheck` sets status recheck (th
 refuses its slug until `supersede` or `retire` settles it. `list` prints
 `slug  status  kind  [subject]  since  source`, current facts first by subject
 (`--oldest`: by since), then `render N/8000 bytes`, the size `mw status` holds
-to `rig_memory_bytes`. See `features/memory.feature`.
+to `rig_memory_bytes`.
+
+`migrate` moves a rig kept as one memory file to facts in one run. It reads
+`seats/builder/rigs/<rig>.md` and `<rig>-archive.md`: the head (before the first
+heading or `- ` line) becomes `about.md` (the whole under 600 bytes, else the
+first 600 cut at a sentence end, with a warning), each `- ` line a current fact
+and each line of the archive a retired one, retired on the date in the heading it
+sat under with the reason `pruned: <heading>`. A fact's source is the last
+bracketed bead id on its line, else `mayor:<file>@<vault HEAD>`; its kind is
+decision under a heading with "Before you start" or "Decided" in it, else gotcha;
+its subject the first path-like or backticked token, else `general`; its since a
+date in the line, else today. A line it cannot place is printed as `not placed`
+with its line number and left out. `--dry-run` prints every fact and writes
+nothing; a real run writes `about.md` and `facts/`, removes the two files (no
+`git rm`: the Mayor commits) and prints the counts. It refuses a rig that already
+has a facts folder and one with no memory file. See `features/memory.feature`.
 
 ## Steps for his hands
 

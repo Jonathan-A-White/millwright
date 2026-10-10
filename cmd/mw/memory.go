@@ -17,12 +17,12 @@ func newMemoryCmd() *cobra.Command {
 		Long: "A rig kept as facts has a folder in the Builder's seat, seats/builder/rigs/<rig>/, with an\n" +
 			"about.md and facts/<slug>.md, one typed fact a file. These verbs are how the Mayor changes\n" +
 			"them: each writes files, prints each file it wrote, and runs no git command (the Mayor\n" +
-			"commits). None deletes a file: a fact that is replaced or retired keeps its sentence, and\n" +
-			"why.",
+			"commits). None deletes a fact: one that is replaced or retired keeps its sentence, and\n" +
+			"why. migrate turns a rig's one memory file into facts, once.",
 		Args: cobra.NoArgs,
 	}
 	root.AddCommand(newMemoryAddCmd(), newMemorySupersedeCmd(), newMemoryRetireCmd(),
-		newMemoryRecheckCmd(), newMemoryListCmd())
+		newMemoryRecheckCmd(), newMemoryListCmd(), newMemoryMigrateCmd())
 	return root
 }
 
@@ -36,7 +36,10 @@ func memoryFor(cmd *cobra.Command) (application.Memory, error) {
 	if err != nil {
 		return application.Memory{}, err
 	}
-	return application.Memory{Files: vault.New(dir), Seat: BuilderSeat, Budget: budget, Out: cmd.OutOrStdout()}, nil
+	files := vault.New(dir)
+	return application.Memory{
+		Files: files, Legacy: files, Head: files.Head, Seat: BuilderSeat, Budget: budget, Out: cmd.OutOrStdout(),
+	}, nil
 }
 
 func newMemoryAddCmd() *cobra.Command {
@@ -159,5 +162,34 @@ func newMemoryListCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&status, "status", "", "only facts of this status")
 	cmd.Flags().BoolVar(&oldest, "oldest", false, "oldest first, by since")
+	return cmd
+}
+
+func newMemoryMigrateCmd() *cobra.Command {
+	var dryRun bool
+	cmd := &cobra.Command{
+		Use:   "migrate <rig> [--dry-run]",
+		Short: "Turn a rig's one memory file and its archive into an about text and facts",
+		Long: "migrate reads seats/builder/rigs/<rig>.md and <rig>-archive.md and writes about.md and one\n" +
+			"fact file each under seats/builder/rigs/<rig>/. The head of the memory file (the whole of it\n" +
+			"under 600 bytes, else the first 600 cut at a sentence end, with a warning) is the about\n" +
+			"text; each '- ' line is a current fact, and each of the archive's a retired one, with the\n" +
+			"date and name of the heading it sat under. A fact's source is the last bead id in brackets\n" +
+			"on its line, else mayor:<file>@<vault HEAD>; its kind decision under a heading with 'Before\n" +
+			"you start' or 'Decided' in it, else gotcha; its subject the first path-like or backticked\n" +
+			"token, else general; its since a date in the line, else today. A line it cannot place is\n" +
+			"printed as 'not placed' and left out. --dry-run prints every fact and writes nothing.\n" +
+			"Otherwise it removes the two files it read (no git command is run: the Mayor commits). It\n" +
+			"refuses a rig that already has a facts folder, and one with no memory file.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			memory, err := memoryFor(cmd)
+			if err != nil {
+				return err
+			}
+			return memory.Migrate(cmd.Context(), application.MemoryMigrate{Rig: args[0], DryRun: dryRun})
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print every fact it would write, and write nothing")
 	return cmd
 }
