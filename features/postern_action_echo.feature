@@ -1,6 +1,6 @@
 Feature: every one-tap action applied from the inbox is echoed in the events tail
   When mw postern inbox --apply applies one of the Governor's taps (Release,
-  Hold, Keep, Close, Verified), it appends an action_applied event on the bead
+  Hold, Keep, Close, Verified, and the three answers to a chase need), it appends an action_applied event on the bead
   whose detail is the tap's txid, so the app that sent the tap reads from the
   events tail that it took. A tap that is refused did nothing and is echoed by
   no event.

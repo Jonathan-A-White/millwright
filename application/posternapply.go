@@ -28,6 +28,11 @@ const (
 	PosternActionVerified = "verified"
 	PosternActionKeep     = "keep"
 	PosternActionClose    = "close"
+
+	// The three answers to a chase need (protocol section 13).
+	PosternActionChase       = "chase"
+	PosternActionAskDone     = "ask_done"
+	PosternActionKeepWaiting = "keep_waiting"
 )
 
 // PosternKeepDays is how many days a keep action that names none keeps a
@@ -73,7 +78,7 @@ func decodePosternAction(text string) (PosternAction, bool) {
 func knownPosternAction(action string) bool {
 	switch action {
 	case PosternActionRelease, PosternActionHold, PosternActionPriority, PosternActionVerified, PosternActionRun,
-		PosternActionKeep, PosternActionClose:
+		PosternActionKeep, PosternActionClose, PosternActionChase, PosternActionAskDone, PosternActionKeepWaiting:
 		return true
 	}
 	return false
@@ -386,13 +391,14 @@ func (i PosternInbox) applyLooksGood(ctx context.Context, m PosternInboxMessage)
 
 // echoAction appends the event that says an action of the Governor's was
 // applied, its detail the tap's txid, so the app that sent the tap can tell
-// from the events tail that it took. Release, Hold, Keep, Close and Verified
-// are echoed; a priority is not. It is written after the action is done, so a
+// from the events tail that it took. Release, Hold, Keep, Close, Verified and
+// the three answers to a chase need are echoed; a priority is not. It is written after the action is done, so a
 // failure to write it is said, not returned: the action stands, and applying
 // the tap again would only double it.
 func (i PosternInbox) echoAction(ctx context.Context, action PosternAction, txid string) {
 	switch action.Action {
-	case PosternActionRelease, PosternActionHold, PosternActionKeep, PosternActionClose, PosternActionVerified:
+	case PosternActionRelease, PosternActionHold, PosternActionKeep, PosternActionClose, PosternActionVerified,
+		PosternActionChase, PosternActionAskDone, PosternActionKeepWaiting:
 	default:
 		return
 	}
@@ -407,8 +413,8 @@ func (i PosternInbox) echoAction(ctx context.Context, action PosternAction, txid
 }
 
 // applyAction applies one of the Governor's section 13 actions to its bead,
-// as the Governor, at zero tokens: release, hold, priority, verified, keep or
-// close. Each done is commented on its bead and mailed to the Mayor; each that
+// as the Governor, at zero tokens: release, hold, priority, verified, keep,
+// close, or one of the three answers to a chase need. Each done is commented on its bead and mailed to the Mayor; each that
 // cannot be done — no such bead, a hold on a story already claimed, a priority
 // out of range — is refused, and the Mayor is mailed why. Either way it is
 // applied, so it is never tried again.
@@ -517,6 +523,9 @@ func (i PosternInbox) applyAction(ctx context.Context, m PosternInboxMessage, ac
 	case PosternActionClose:
 		return i.applyClose(ctx, m, bead, refuse, done)
 
+	case PosternActionChase, PosternActionAskDone, PosternActionKeepWaiting:
+		return i.applyChaseAnswer(ctx, m, action.Action, bead, refuse, done)
+
 	default: // PosternActionVerified
 		comments, err := i.Tracker.StoryComments(ctx, action.Bead)
 		if err != nil {
@@ -529,6 +538,41 @@ func (i PosternInbox) applyAction(ctx context.Context, m PosternInboxMessage, ac
 		}
 		return done(fmt.Sprintf("Verified: %s", action.Bead), fmt.Sprintf("VERIFIED by the Governor via postern (%s)", m.Txid))
 	}
+}
+
+// applyChaseAnswer applies one of the three answers to a chase need to bead,
+// which must be open and waiting on others. ask_done does what mw ask done
+// does. chase and keep_waiting both begin the wait again from now, so the next
+// chase need falls due ChaseAfterWorkingDays working days on and the waiting
+// mark stays; the Governor chasing the person and his choosing to wait longer
+// differ only in the comment that records them.
+func (i PosternInbox) applyChaseAnswer(ctx context.Context, m PosternInboxMessage, name string, bead StoryDetail,
+	refuse func(string) (posternApplied, error), done func(subject, comment string) (posternApplied, error)) (posternApplied, error) {
+	if bead.Closed() {
+		return refuse("it is already closed")
+	}
+	if !bead.WaitingOnOthers() {
+		return refuse("it is not waiting on others")
+	}
+	id := bead.Story.ID
+	if name == PosternActionAskDone {
+		if err := (Ask{Tracker: i.Tracker, Notes: i.Memory}).Done(ctx, id); err != nil {
+			return refuse(err.Error())
+		}
+		return done(fmt.Sprintf("Done waiting: %s", id),
+			fmt.Sprintf("WAITING ENDED by the Governor via postern, txid %s: the other side delivered", m.Txid))
+	}
+	now := i.now().UTC()
+	if err := i.Memory.SetNote(ctx, AskWaitingKey(id), now.Format(time.RFC3339)); err != nil {
+		return posternApplied{}, fmt.Errorf("restarting the wait on %s for the Governor: %w", id, err)
+	}
+	if name == PosternActionChase {
+		return done(fmt.Sprintf("Chased: %s", id),
+			fmt.Sprintf("CHASED by the Governor via postern, txid %s: the wait starts again from %s", m.Txid, now.Format(time.RFC3339)))
+	}
+	return done(fmt.Sprintf("Keep waiting: %s", id),
+		fmt.Sprintf("KEEP WAITING by the Governor via postern, txid %s: no chase until %s", m.Txid,
+			AddWorkingDays(now, ChaseAfterWorkingDays).Format("2006-01-02")))
 }
 
 // applyClose closes bead for the Governor: a story, ticket or hitl bead

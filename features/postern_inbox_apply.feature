@@ -266,6 +266,82 @@ Feature: mw postern inbox --apply
     Then the note "postern.keep.mw-act.3" is not set
     And bead "mw-act.3" has no comment
 
+  # The three answers to a chase need (protocol section 11 and 13): a bead
+  # waiting on others for three working days is chased. The clock reads Monday
+  # 28 September, 12:00 UTC, and the wait began Wednesday 23 September.
+  Scenario: An ask_done tap does what mw ask done does, and is echoed
+    Given the postern inbox clock reads "2026-09-28T12:00:00Z"
+    And the home's event log is kept
+    And live epic "mw-ask" has story "mw-ask.1" waiting on others since "2026-09-23T12:00:00Z"
+    And a postern action "ask_done" on bead "mw-ask.1" from "governor-pubkey-hex" with txid "tx-done"
+    When mw postern inbox --apply is run
+    Then reading succeeds
+    And bead "mw-ask.1" is no longer waiting on others
+    And the note "ask.waiting.mw-ask.1" is not set
+    And the postern view raises no chase need on "mw-ask.1"
+    And bead "mw-ask.1"'s last comment reads "WAITING ENDED by the Governor via postern, txid tx-done: the other side delivered"
+    And the events tail shows an action_applied event on "mw-ask.1" with detail "tx-done"
+    And the txid "tx-done" is marked applied
+
+  Scenario: A chase tap starts the wait again from now, so the next chase falls due three working days on
+    Given the postern inbox clock reads "2026-09-28T12:00:00Z"
+    And the home's event log is kept
+    And live epic "mw-ask" has story "mw-ask.1" waiting on others since "2026-09-23T12:00:00Z"
+    And the postern view raises a chase need on "mw-ask.1"
+    And a postern action "chase" on bead "mw-ask.1" from "governor-pubkey-hex" with txid "tx-chase"
+    When mw postern inbox --apply is run
+    Then reading succeeds
+    And the note "ask.waiting.mw-ask.1" reads "2026-09-28T12:00:00Z"
+    And bead "mw-ask.1" is still waiting on others
+    And bead "mw-ask.1"'s last comment reads "CHASED by the Governor via postern, txid tx-chase: the wait starts again from 2026-09-28T12:00:00Z"
+    And the events tail shows an action_applied event on "mw-ask.1" with detail "tx-chase"
+    And the postern view raises no chase need on "mw-ask.1"
+    When the postern inbox clock moves to "2026-09-30T12:00:00Z"
+    Then the postern view raises no chase need on "mw-ask.1"
+    When the postern inbox clock moves to "2026-10-01T12:00:00Z"
+    Then the postern view raises a chase need on "mw-ask.1"
+
+  Scenario: A keep_waiting tap puts the next chase three working days on and leaves the waiting mark
+    Given the postern inbox clock reads "2026-09-28T12:00:00Z"
+    And the home's event log is kept
+    And live epic "mw-ask" has story "mw-ask.1" waiting on others since "2026-09-23T12:00:00Z"
+    And the postern view raises a chase need on "mw-ask.1"
+    And a postern action "keep_waiting" on bead "mw-ask.1" from "governor-pubkey-hex" with txid "tx-keepw"
+    When mw postern inbox --apply is run
+    Then reading succeeds
+    And the note "ask.waiting.mw-ask.1" reads "2026-09-28T12:00:00Z"
+    And bead "mw-ask.1" is still waiting on others
+    And bead "mw-ask.1"'s last comment reads "KEEP WAITING by the Governor via postern, txid tx-keepw: no chase until 2026-10-01"
+    And the events tail shows an action_applied event on "mw-ask.1" with detail "tx-keepw"
+    And the postern view raises no chase need on "mw-ask.1"
+    When the postern inbox clock moves to "2026-10-01T12:00:00Z"
+    Then the postern view raises a chase need on "mw-ask.1"
+
+  Scenario Outline: A <action> tap on a bead not waiting on others is refused, and the Mayor is told why
+    Given the postern inbox clock reads "2026-09-28T12:00:00Z"
+    And the home's event log is kept
+    And a postern action "<action>" on bead "mw-act.3" from "governor-pubkey-hex" with txid "<txid>"
+    When mw postern inbox --apply is run
+    Then reading succeeds
+    And the note "ask.waiting.mw-act.3" is not set
+    And bead "mw-act.3" has no comment
+    And mail "Not applied: <action> mw-act.3" was sent to mayor saying "it is not waiting on others"
+    And the events tail shows no events
+
+    Examples:
+      | action       | txid  |
+      | ask_done     | tx-nd |
+      | chase        | tx-nc |
+      | keep_waiting | tx-nk |
+
+  Scenario: A chase answer from anyone but the Governor does nothing
+    Given the postern inbox clock reads "2026-09-28T12:00:00Z"
+    And live epic "mw-ask" has story "mw-ask.1" waiting on others since "2026-09-23T12:00:00Z"
+    And a postern action "chase" on bead "mw-ask.1" from "someone-else-pubkey-hex" with txid "tx-chase-other"
+    When mw postern inbox --apply is run
+    Then the note "ask.waiting.mw-ask.1" reads "2026-09-23T12:00:00Z"
+    And bead "mw-ask.1" has no comment
+
   Scenario: A close tap on a held story closes it with the Governor's reason
     Given a postern action "close" on bead "mw-act.1" from "governor-pubkey-hex" with txid "tx-close"
     When mw postern inbox --apply is run

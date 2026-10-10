@@ -38,7 +38,7 @@ left out of an event that ends no emergency, so an event without it reads as it 
 | `mail` | none | the mail bead | its box: the seat it is sent to |
 | `job` | job | empty, or the bead the job worked on | the outcome, on `done` or `failed` |
 | `handover` | none | empty | `<seat> to <successor window> at <N>`: the old session answers nothing past event N |
-| `action_applied` | none | the bead the tap was on | the tap's txid: a Release, Hold, Keep, Close or Verified of the Governor's, applied from the inbox |
+| `action_applied` | none | the bead the tap was on | the tap's txid: a Release, Hold, Keep, Close, Verified, Chase, Done or Keep waiting of the Governor's, applied from the inbox |
 | `control` | none | the bead for `cancel` and `priority`, else empty | the word and what it takes: `cancel`, `pause-host <host>`, `resume-host <host>`, `cap <host> <n>`, `priority <n>` |
 | `cloud` | none | empty | a cloud box made (`up cloud1: ...`), destroyed (`down cloud1: idle 30m`), one that did not come up (`failed cloud1: ...`), or the month's cap reached (`cap reached: ...`) |
 
@@ -64,7 +64,7 @@ usually `closed`, to `verified`, detail `verified`. A later one on the same bead
 that only mentions VERIFIED, and `NOT VERIFIED` are plain `comment` events.
 
 Every one-tap action of the Governor's that `mw postern inbox --apply` applies (release, hold,
-keep, close, verified; not a refused one) is also an `action_applied` event on the bead,
+keep, close, verified, chase, ask_done, keep_waiting; not a refused one) is also an `action_applied` event on the bead,
 written once the action is done, its detail the tap's txid. A hold of a claimed story writes
 the `control` cancel first. The bead's own comment names the txid only for release and hold, so
 this event is how an app sees any tap took.
