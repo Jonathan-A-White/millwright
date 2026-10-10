@@ -423,7 +423,8 @@ func (b GristSmokeBook) now() time.Time {
 }
 
 // Record keeps what a smoke found as the app's last, and for a failure posts
-// the alarm (a smoke that was not run is kept, and posts none). rig is the rig whose landing made the smoke run, empty by hand: a
+// the alarm (a smoke that was not run is kept, and posts none; nor does a failure
+// with the same failures as the record before it, which is no news). rig is the rig whose landing made the smoke run, empty by hand: a
 // failure by hand keeps the rig an earlier failure held. An app with no grinds
 // has its record forgotten.
 func (b GristSmokeBook) Record(ctx context.Context, rig string, report GristSmokeReport) error {
@@ -457,6 +458,11 @@ func (b GristSmokeBook) Record(ctx context.Context, rig string, report GristSmok
 	if !record.Failed || b.Events == nil {
 		return nil
 	}
+	if had && before.Failed && sameFailures(before.Failures, record.Failures) {
+		// A failure the last record already holds is no news: recorded above, so
+		// mw status shows the new time, but not posted again (mw-gq6.338).
+		return nil
+	}
 	// The Mayor's to act on, not the Governor's: the normal lane, and a line short
 	// enough for a phone. mw status and the note hold the detail.
 	_, err = EventEmit{
@@ -471,6 +477,15 @@ func (b GristSmokeBook) Record(ctx context.Context, rig string, report GristSmok
 		return fmt.Errorf("the alarm for the smoke of %s could not be posted: %w", report.App, err)
 	}
 	return nil
+}
+
+// sameFailures says two smokes failed with the same set of examples and reasons,
+// whatever order they were found in.
+func sameFailures(a, b []string) bool {
+	a, b = slices.Clone(a), slices.Clone(b)
+	sort.Strings(a)
+	sort.Strings(b)
+	return slices.Equal(a, b)
 }
 
 // Behind keeps why the home's checkout of app's rig was left behind the rig's

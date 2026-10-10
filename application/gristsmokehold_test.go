@@ -115,3 +115,54 @@ func TestAFailedGristSmokePostsOneShortLineOnTheNormalLane(t *testing.T) {
 		t.Fatalf("expected the record to keep the hold and every error for mw status, got %+v %v", records, err)
 	}
 }
+
+// mw-gq6.338: a smoke that fails exactly as the last record did is recorded and
+// not posted again; only ok (or none) -> FAILED, or a changed set of failing
+// examples, is news.
+func TestARepeatGristSmokeFailurePostsNoSecondAlarm(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	log := &apptest.FakeEventLog{}
+	at := time.Date(2026, 10, 10, 2, 46, 0, 0, time.UTC)
+	book := application.GristSmokeBook{Notes: tracker, Events: log, Host: "laptop", Now: func() time.Time { return at }}
+	failing := func(failures ...string) application.GristSmokeReport {
+		return application.GristSmokeReport{App: "legend", Examples: 6, Failures: failures}
+	}
+	record := func(report application.GristSmokeReport) {
+		t.Helper()
+		if err := book.Record(ctx, "legend", report); err != nil {
+			t.Fatalf("recording the smoke: %v", err)
+		}
+	}
+
+	record(application.GristSmokeReport{App: "legend", Examples: 6})
+	record(failing("legend/sweep/one: no answer in 5m0s", "legend/sweep/two: bad"))
+	if n := len(log.All()); n != 1 {
+		t.Fatalf("expected ok -> FAILED to post one event, got %d", n)
+	}
+
+	at = at.Add(45 * time.Minute)
+	record(failing("legend/sweep/two: bad", "legend/sweep/one: no answer in 5m0s"))
+	if n := len(log.All()); n != 1 {
+		t.Fatalf("expected the same failures again to post nothing, got %d events", n)
+	}
+	records, err := book.Records(ctx)
+	if err != nil || len(records) != 1 || !records[0].At.Equal(at) || !records[0].Failed {
+		t.Fatalf("expected the repeat to be recorded with its new time, got %+v %v", records, err)
+	}
+
+	record(failing("legend/sweep/one: no answer in 5m0s"))
+	if n := len(log.All()); n != 2 {
+		t.Fatalf("expected a different set of failures to post again, got %d events", n)
+	}
+	record(failing("legend/sweep/one: no answer in 5m0s"))
+	if n := len(log.All()); n != 2 {
+		t.Fatalf("expected a repeat to post nothing, got %d events", n)
+	}
+
+	record(application.GristSmokeReport{App: "legend", Examples: 6})
+	record(failing("legend/sweep/one: no answer in 5m0s"))
+	if n := len(log.All()); n != 3 {
+		t.Fatalf("expected ok -> FAILED after a pass to post again, got %d events", n)
+	}
+}
