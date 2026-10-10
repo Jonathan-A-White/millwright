@@ -317,6 +317,11 @@ func (s GristSmoke) say(format string, args ...any) {
 // event of its own (see PosternNotes).
 const GristSmokePrefix = "grist.smoke."
 
+// GristLevelPrefix is the start of the note each app's refusal to be brought
+// level is kept under, GristLevelPrefix + app: the reason GristLevel left the
+// checkout alone, while it is so.
+const GristLevelPrefix = "grist.level."
+
 // GristSmokeJob is the actor of the job event a failed smoke writes.
 const GristSmokeJob = "grist-smoke"
 
@@ -347,6 +352,12 @@ type GristSmokeRecord struct {
 	// NotRun is why the mill could not be asked (GristSmokeReport.NotRun). It
 	// is no failure and holds nothing.
 	NotRun []string `json:"not_run,omitempty"`
+	// Behind is why the home's checkout of the app's rig is not level with the
+	// rig's main (GristLevel), so that the mill grinds with older grinds than the
+	// app sends; empty when it is level. It is kept apart from the smoke's own
+	// record under GristLevelPrefix and joined to it when the records are read; a
+	// record with only this has no smoke yet (At is zero).
+	Behind string `json:"behind,omitempty"`
 }
 
 // Line is the record as mw status and a story's comment say it.
@@ -462,6 +473,24 @@ func (b GristSmokeBook) Record(ctx context.Context, rig string, report GristSmok
 	return nil
 }
 
+// Behind keeps why the home's checkout of app's rig was left behind the rig's
+// main, and reports whether that is news: false when the same reason is already
+// kept. An empty why forgets the refusal (the checkout is level), and is never
+// news.
+func (b GristSmokeBook) Behind(ctx context.Context, app, why string) (bool, error) {
+	if b.Notes == nil {
+		return false, nil
+	}
+	key := GristLevelPrefix + app
+	if why == "" {
+		return false, b.Notes.ClearNote(ctx, key)
+	}
+	if kept, err := b.Notes.Note(ctx, key); err == nil && kept == why {
+		return false, nil
+	}
+	return true, b.Notes.SetNote(ctx, key, why)
+}
+
 // Lift ends the hold a failed smoke of app put on its rig's stories, without a
 // smoke that passes, for the failure that is the fix's own story to mend. It
 // reports whether there was a hold.
@@ -506,6 +535,22 @@ func (b GristSmokeBook) Records(ctx context.Context) ([]GristSmokeRecord, error)
 		if json.Unmarshal([]byte(text), &record) == nil && record.App != "" {
 			records = append(records, record)
 		}
+	}
+	behind, err := b.Notes.NotesWithPrefix(ctx, GristLevelPrefix)
+	if err != nil {
+		return nil, err
+	}
+	for key, why := range behind {
+		app := strings.TrimPrefix(key, GristLevelPrefix)
+		if app == "" || why == "" {
+			continue
+		}
+		i := slices.IndexFunc(records, func(r GristSmokeRecord) bool { return r.App == app })
+		if i < 0 {
+			records = append(records, GristSmokeRecord{App: app})
+			i = len(records) - 1
+		}
+		records[i].Behind = why
 	}
 	sort.Slice(records, func(i, j int) bool { return records[i].App < records[j].App })
 	return records, nil

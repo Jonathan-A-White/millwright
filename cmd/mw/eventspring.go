@@ -9,6 +9,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
+	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/userunits"
 )
 
@@ -61,6 +62,11 @@ func homeSpring(path, host string, out io.Writer) (*application.EventSpring, err
 	}
 	if job, ok, err := gristSpringJob(host, out); err != nil {
 		fmt.Fprintf(out, "mw events follow: no grist job: %v\n", err)
+	} else if ok {
+		jobs = append(jobs, job)
+	}
+	if job, ok, err := gristLevelSpringJob(host, knobs.Heartbeat, out); err != nil {
+		fmt.Fprintf(out, "mw events follow: no grist-level job: %v\n", err)
 	} else if ok {
 		jobs = append(jobs, job)
 	}
@@ -120,4 +126,36 @@ func gristSpringJob(host string, out io.Writer) (application.SpringJob, bool, er
 		return look(ctx)
 	}
 	return job, true, nil
+}
+
+// gristLevelSpringJob is the job that keeps the home's checkout of each
+// [grist-apps] rig level with the rig's main when a story lands from any host,
+// and makes the grist smoke of what that changed (application.GristLevel). It
+// is there only where the config has a [grist-apps] table, and works only while
+// this host is home, for the home is where the mill reads the grinds.
+func gristLevelSpringJob(host string, heartbeat time.Duration, out io.Writer) (application.SpringJob, bool, error) {
+	apps, err := config.GristApps()
+	if err != nil || len(apps) == 0 {
+		return application.SpringJob{}, false, err
+	}
+	return application.GristLevelJob(heartbeat, func(ctx context.Context) error {
+		dir, err := config.Vault()
+		if err != nil {
+			return err
+		}
+		rigs, err := config.Rigs()
+		if err != nil {
+			return err
+		}
+		gateway := mwGateway(dir, host)
+		worktrees := rig.New()
+		return application.GristLevel{
+			Apps: apps, Rigs: rigs, Checkout: worktrees, Mailbox: gateway, Host: host, Out: out,
+			Book:  gristSmokeBook(gateway, host),
+			Smoke: hostGristSmoke(gateway, host, rigs, worktrees),
+			Home: func(ctx context.Context) (bool, error) {
+				return application.IsHome(ctx, mwVault(dir, host), host)
+			},
+		}.Run(ctx)
+	}), true, nil
 }

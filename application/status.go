@@ -1465,6 +1465,10 @@ const GristSmokeHeading = "GRIST SMOKE"
 func writeGristSmoke(b *strings.Builder, records []GristSmokeRecord) {
 	clip(b, GristSmokeHeading)
 	for _, r := range records {
+		if r.At.IsZero() {
+			writeGristBehind(b, r)
+			continue
+		}
 		when := r.At.UTC().Format("2006-01-02 15:04Z")
 		if !r.Failed && len(r.NotRun) > 0 {
 			clip(b, fmt.Sprintf("  %s not run %s", r.App, when))
@@ -1494,7 +1498,18 @@ func writeGristSmoke(b *strings.Builder, records []GristSmokeRecord) {
 			clip(b, "      mw grist smoke "+r.App)
 			clip(b, "    or by hand: mw grist smoke "+r.App+" --lift")
 		}
+		writeGristBehind(b, r)
 	}
+}
+
+// writeGristBehind says, when the home's checkout of the app's rig was left
+// behind the rig's main, that the mill grinds with older grinds than the app's.
+func writeGristBehind(b *strings.Builder, r GristSmokeRecord) {
+	if r.Behind == "" {
+		return
+	}
+	clip(b, fmt.Sprintf("  %s checkout left alone, not level with main: the mill grinds with its old grinds", r.App))
+	wrapInto(b, "    ", r.Behind)
 }
 
 // wrapInto writes text over lines of at most Width runes, each led by indent,
