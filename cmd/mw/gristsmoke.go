@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"time"
@@ -81,8 +82,14 @@ func hostGristSmoke(notes application.GristSmokeNotes, host string, rigs map[str
 	} else {
 		smoker = made
 	}
+	// A landing of the factory's own rig is smoked by the mw it builds, not by
+	// the one this process is (mw-gq6.339).
+	var built application.GristAppSmoker
+	if dir := rigs[application.FactoryRig]; dir != "" {
+		built = rig.NewBuiltSmoker(dir, smoker)
+	}
 	return application.GristSmokeAfter{
-		Touches: touches, Smoke: smoker, Book: gristSmokeBook(notes, host),
+		Touches: touches, Smoke: smoker, Built: built, Book: gristSmokeBook(notes, host),
 		Apps: apps, Rigs: rigs, ClientPaths: paths,
 	}
 }
@@ -92,7 +99,7 @@ func hostGristSmoke(notes application.GristSmokeNotes, host string, rigs map[str
 func newGristSmokeCmd() *cobra.Command {
 	var kind string
 	var wait time.Duration
-	var lift bool
+	var lift, asJSON bool
 
 	cmd := &cobra.Command{
 		Use:   "smoke <app>",
@@ -110,6 +117,20 @@ func newGristSmokeCmd() *cobra.Command {
 			"stories until a smoke passes. --lift ends that hold without a smoke. It exits 1 on a failure.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if asJSON {
+				// What a landing in the factory's rig asks of the mw it just built
+				// (mw-gq6.339): the smoke only, as one JSON report. The landing
+				// records it against the rig it holds, so this records nothing.
+				smoke, err := newSmoker(cmd.ErrOrStderr(), wait)
+				if err != nil {
+					return err
+				}
+				report, err := smoke.Run(cmd.Context(), args[0], kind)
+				if err != nil {
+					return err
+				}
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(report)
+			}
 			dir, err := config.Vault()
 			if err != nil {
 				return err
@@ -157,6 +178,7 @@ func newGristSmokeCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&kind, "kind", "", "smoke only this kind of grist (default: every grind of the app)")
 	cmd.Flags().DurationVar(&wait, "wait", application.GristSmokeWait, "how long each example waits for its answer")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print the report as one JSON object, and record nothing (what a landing asks of the mw it built)")
 	cmd.Flags().BoolVar(&lift, "lift", false, "end the hold a failed smoke of the app put on its rig's stories, without a smoke")
 	return cmd
 }

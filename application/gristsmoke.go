@@ -57,18 +57,19 @@ type GristSmoke struct {
 }
 
 // GristSmokeReport is what one smoke of one app found.
+// It is also the JSON `mw grist smoke <app> --json` prints.
 type GristSmokeReport struct {
-	App string
+	App string `json:"app"`
 	// Commit is the commit of the app's main the grinds were read at.
-	Commit string
+	Commit string `json:"commit,omitempty"`
 	// Examples is how many examples were sent.
-	Examples int
+	Examples int `json:"examples"`
 	// Failures are the examples that failed, one line each, and Warnings what
 	// is worth saying without failing: a kind with no example.
-	Failures []string
-	Warnings []string
+	Failures []string `json:"failures,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
 	// NoGrinds says the app's rig has no grinds, so there was nothing to test.
-	NoGrinds bool
+	NoGrinds bool `json:"no_grinds,omitempty"`
 }
 
 // Failed says an example failed.
@@ -512,7 +513,13 @@ type GristAppSmoker interface {
 type GristSmokeAfter struct {
 	Touches LandingTouches
 	Smoke   GristAppSmoker
-	Book    GristSmokeBook
+	// Built makes the smoke of a landing in the factory's own rig with the mw
+	// that landing built, in a process of its own: the mw the landing runs in
+	// was started before the merge, so a landing that fixes the smoke would
+	// otherwise be smoked by the smoke it fixed (mw-gq6.339). A nil Built
+	// smokes with Smoke.
+	Built GristAppSmoker
+	Book  GristSmokeBook
 	// Apps is where each app's rig is checked out on this host
 	// ([grist-apps]) and Rigs where each rig is ([rigs]): an app belongs to
 	// the rig it is checked out in, or the rig of its own name.
@@ -592,8 +599,12 @@ func (a GristSmokeAfter) appsOf(rig string) []string {
 // lines that are failures, which a landing also writes on its story. An app
 // that cannot be smoked at all is a failure of its own.
 func (a GristSmokeAfter) Run(ctx context.Context, rig string, apps []string) (lines, failed []string) {
+	smoker := a.Smoke
+	if rig == FactoryRig && a.Built != nil {
+		smoker = a.Built
+	}
 	for _, app := range apps {
-		report, err := a.Smoke.Run(ctx, app, "")
+		report, err := smoker.Run(ctx, app, "")
 		if err != nil {
 			report.Failures = append(report.Failures, "the smoke could not be made: "+firstLine(err.Error()))
 		}

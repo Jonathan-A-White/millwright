@@ -1701,6 +1701,13 @@ hand), or by hand with `mw grist smoke <app> --lift` when the failure is the ver
 thing a held story is to mend. A smoke that could not be made at all (no test key)
 is a failure the same way.
 
+A landing in the factory's own rig (`millwright`) makes its smoke with the mw that
+landing just built, `bin/mw grist smoke <app> --json` in the rig's checkout, in a
+process of its own, not with the mw `mw next` is running in, which was started
+before the merge and so would smoke a fix of the smoke with the smoke it fixes
+(mw-gq6.339). `--json` prints the report as one JSON object and records nothing;
+the landing records it. A build that left no `bin/mw` is smoked by the running mw.
+
 A grind may say `"forward": "mayor"` instead of naming a model, for a grist that is
 for a person to read, such as an app's feedback. The mill then runs no session
 and burns no Fuel: it opens the grist's text and pictures as for any grind,

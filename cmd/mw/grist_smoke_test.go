@@ -24,3 +24,19 @@ func TestGristSmokeNeedsTheAppAndATestKey(t *testing.T) {
 		t.Fatalf("expected the missing test key named, got %v\n%s", err, out)
 	}
 }
+
+// mw-gq6.339: --json is the smoke alone, what a landing asks of the mw it built:
+// it needs no vault, and with no test key says so on stderr, exiting non-zero,
+// which the landing reads as a smoke that could not be made.
+func TestGristSmokeJSONNeedsOnlyTheTestKey(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("MW_VAULT", "")
+	t.Setenv("MW_GRIST_TEST_KEY_FILE", "")
+	t.Setenv("MW_GRIST_KEY_FILE", "")
+	t.Setenv("MW_POSTERN_KEY_FILE", "")
+	out, err := runMw(t, "grist", "smoke", "trade-tracker", "--json")
+	if err == nil || !strings.Contains(err.Error(), "no grist test key at "+home+"/.config/mw/grist-test.key") {
+		t.Fatalf("expected the missing test key named, got %v\n%s", err, out)
+	}
+}

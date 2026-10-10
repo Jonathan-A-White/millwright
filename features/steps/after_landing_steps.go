@@ -67,6 +67,8 @@ func InitializeAfterLandingScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^mw after-landing printed: (.+)$`, c.itPrinted)
 	ctx.Then(`^mw after-landing succeeded$`, c.itSucceeded)
 	ctx.Then(`^mw after-landing failed, saying: (.+)$`, c.itFailed)
+
+	registerAfterLandingSmokeSteps(ctx, c)
 }
 
 // script writes the command a scenario's rig names: it logs the directory it ran

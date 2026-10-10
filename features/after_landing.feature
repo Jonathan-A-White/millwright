@@ -46,3 +46,22 @@ Feature: mw after-landing runs a rig's after-landing command again by hand
     When mw after-landing is run for "millwright"
     Then the command did not run
     And mw after-landing failed, saying: this host names no after-landing command for millwright
+
+  Scenario: a millwright landing's grist smoke is made by the mw the landing built, not by the mw the landing runs in
+    Given a rig "millwright" whose landing changes how the grist smoke judges the app "cairn"
+    When the landing of "millwright" makes its grist smoke of "cairn"
+    Then the mw the landing built made the smoke of "cairn"
+    And the grist smoke of "cairn" passed
+    And the mw the landing runs in smoked nothing itself
+
+  Scenario: a landing of another rig makes its grist smoke with the mw the landing runs in
+    Given a rig "cairn" whose landing changes how the grist smoke judges the app "cairn"
+    When the landing of "cairn" makes its grist smoke of "cairn"
+    Then the mw the landing runs in made the smoke of "cairn"
+    And the grist smoke of "cairn" failed
+
+  Scenario: a millwright landing whose build left no mw makes its grist smoke with the mw it runs in
+    Given a rig "millwright" whose build left no mw and whose running mw fails the smoke of "cairn"
+    When the landing of "millwright" makes its grist smoke of "cairn"
+    Then the mw the landing runs in made the smoke of "cairn"
+    And the grist smoke of "cairn" failed

@@ -88,3 +88,29 @@ func TestALandingSmokesTheAppsItChangedAndWritesAFailureOnTheStory(t *testing.T)
 		t.Fatalf("expected the hold lifted by a smoke that passed, got %q", why)
 	}
 }
+
+// mw-gq6.339: a landing in the factory's rig is smoked by Built, the mw it
+// built; a landing of another rig, or one with no Built, by Smoke.
+func TestAFactoryLandingIsSmokedByTheMwItBuilt(t *testing.T) {
+	ctx := context.Background()
+	running, built := &smokeStub{fail: true}, &smokeStub{}
+	book := GristSmokeBook{Notes: smokeNoteStore{}, Host: "laptop"}
+	after := GristSmokeAfter{Smoke: running, Built: built, Book: book}
+
+	_, failed := after.Run(ctx, FactoryRig, []string{"cairn"})
+	if len(failed) != 0 || fmt.Sprint(built.ran) != "[cairn]" || len(running.ran) != 0 {
+		t.Fatalf("expected the built mw to smoke the factory's landing, failed %v built %v running %v", failed, built.ran, running.ran)
+	}
+
+	built.ran = nil
+	_, failed = after.Run(ctx, "cairn", []string{"cairn"})
+	if len(failed) != 1 || len(built.ran) != 0 || fmt.Sprint(running.ran) != "[cairn]" {
+		t.Fatalf("expected the running mw to smoke another rig's landing, failed %v built %v running %v", failed, built.ran, running.ran)
+	}
+
+	running.ran = nil
+	after.Built = nil
+	if _, failed = after.Run(ctx, FactoryRig, []string{"cairn"}); len(failed) != 1 || len(running.ran) != 1 {
+		t.Fatalf("expected the running mw with no Built, failed %v running %v", failed, running.ran)
+	}
+}
