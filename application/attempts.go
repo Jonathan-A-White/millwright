@@ -23,6 +23,16 @@ const (
 	AttemptsExhaustedField = "attempts_exhausted"
 )
 
+// AttemptsRefundedField counts the attempts a dead-pane reclaim has given back
+// for a story, and MaxAttemptsRefunds is how many it gives: past that the
+// reclaim leaves the count as it is, so a story whose session dies every time
+// still reaches max_attempts and stops (mw-gq6.344). mw retry sets it back to
+// 0, so a story the Mayor retried has its refunds again.
+const (
+	AttemptsRefundedField = "attempts_refunded"
+	MaxAttemptsRefunds    = 2
+)
+
 // ClaimedAtField is the metadata a story carries to say when the claim it is
 // held under was made, as UTC RFC 3339. bd keeps started_at from the first
 // claim ever made, so a story given back and claimed again by another host

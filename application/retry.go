@@ -181,6 +181,10 @@ type RetryReport struct {
 	Refused bool
 	Why     string
 
+	// refunded is how many dead-pane refunds the story had when the retry read
+	// it, which the retry sets back to 0.
+	refunded int
+
 	// Elsewhere is the other host the story was worked on, when this retry
 	// only gave the claim back and left that host's worktree and branch for its
 	// own next dispatch; empty when the worktree was here.
@@ -298,6 +302,7 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	report.Attempt, report.Target = attempt, path.Branch
 	report.NextAttempt = detail.Attempts + 1
 	report.Hitl = detail.Hitl()
+	report.refunded = detail.AttemptsRefunded
 
 	if tried, most := detail.Attempts, r.maxAttempts(); tried >= most {
 		return r.refuse(report, fmt.Sprintf(
@@ -376,6 +381,9 @@ func (r Retry) giveBack(ctx context.Context, report RetryReport, nothing string)
 			storyID, err)
 	}
 	report.ClaimReleased = true
+	if err := r.clearRefunds(ctx, report); err != nil {
+		return report, err
+	}
 
 	var comment string
 	if report.NoWorktree {
@@ -404,6 +412,19 @@ func (r Retry) giveBack(ctx context.Context, report RetryReport, nothing string)
 	return report, nil
 }
 
+// clearRefunds sets the story's dead-pane refund count back to 0, so a retried
+// story has its refunds again (mw-gq6.344). Nothing is written when none were
+// given.
+func (r Retry) clearRefunds(ctx context.Context, report RetryReport) error {
+	if report.refunded < 1 {
+		return nil
+	}
+	if err := r.Tracker.SetStoryMetadata(ctx, report.StoryID, map[string]string{AttemptsRefundedField: "0"}); err != nil {
+		return fmt.Errorf("retrying %s: the claim was given back, but its dead-pane refund count could not be set back to 0: %w", report.StoryID, err)
+	}
+	return nil
+}
+
 // handBack is a retry of a story another host worked: the claim is given back
 // and a comment says where the worktree and branch were left. Nothing on this
 // host's disk is read or changed, and whether that host's session still runs
@@ -417,6 +438,9 @@ func (r Retry) handBack(ctx context.Context, report RetryReport, elsewhere, hold
 		return report, fmt.Errorf("retrying %s: the claim could not be given back: %w", storyID, err)
 	}
 	report.ClaimReleased = true
+	if err := r.clearRefunds(ctx, report); err != nil {
+		return report, err
+	}
 
 	comment := fmt.Sprintf(
 		"mw retry on %s gave back the claim on attempt %d of %s without reading a worktree: the story was worked on %s, "+

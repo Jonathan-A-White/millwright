@@ -1390,6 +1390,9 @@ func (f *FakeTracker) SetStoryMetadata(_ context.Context, id string, fields map[
 			if k == application.AttemptsField {
 				s.detail.Attempts, _ = strconv.Atoi(v)
 			}
+			if k == application.AttemptsRefundedField {
+				s.detail.AttemptsRefunded, _ = strconv.Atoi(v)
+			}
 			if k == application.RebaseSendsField {
 				s.detail.RebaseSends, _ = strconv.Atoi(v)
 			}

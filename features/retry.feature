@@ -24,6 +24,17 @@ Feature: mw retry
     And the story "mw-gq6.1" still records 1 attempt
     And the story "mw-gq6.1" carries a comment naming the branch commit, the bundle path and the vault commit
 
+  # mw-gq6.344: a retried story has its dead-pane refunds again.
+
+  Scenario: A retry sets the dead-pane refund count back to none
+    Given the story "mw-gq6.1" was dispatched and worked in its own worktree
+    And the session of "mw-gq6.1" has ended
+    And the story "mw-gq6.1" has had 2 dead-pane refunds
+    When mw retries "mw-gq6.1"
+    Then the retry succeeds
+    And the story "mw-gq6.1" dead-pane refund count is back at 0
+    And the story "mw-gq6.1" still records 1 attempt
+
   Scenario: A live session refuses the retry and changes nothing
     Given the story "mw-gq6.1" was dispatched and worked in its own worktree
     And the session of "mw-gq6.1" is still running

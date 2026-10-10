@@ -145,6 +145,9 @@ type StoryDetail struct {
 	// dispatch has already told the Mayor the story used them all up.
 	Attempts  int
 	Exhausted bool
+	// AttemptsRefunded is how many of those attempts a dead-pane reclaim has
+	// given back, as the AttemptsRefundedField metadata says; zero when none.
+	AttemptsRefunded int
 	// RebaseSends is how many times mw next has sent this story's branch back
 	// to a fresh session to rebase, and RebaseBase the target branch's head
 	// the last of them was made against, as the RebaseSendsField and

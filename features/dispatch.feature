@@ -160,6 +160,24 @@ Feature: Dispatching the stories this host is ready to work
     Then one session was started, for "mw-gq6.9"
     And the story "mw-gq6.9" records 1 attempt
 
+  # mw-gq6.344: the refund is given twice per story, so a session that dies
+  # every time still reaches max_attempts.
+
+  Scenario: A story whose pane is dead on three reclaims in a row is refunded twice and not the third time
+    Given a story "mw-gq6.9" of that epic is already running here
+    And the story "mw-gq6.9" has been tried 1 time
+    And the session of "mw-gq6.9" has a dead pane and its lease has expired
+    When dispatch runs on "vps" with a cap of 1
+    And the session of "mw-gq6.9" dies again with its lease expired
+    And dispatch runs on "vps" with a cap of 1
+    And the session of "mw-gq6.9" dies again with its lease expired
+    And dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.9"
+    And dispatch reclaimed "mw-gq6.9" for a dead pane with an expired lease
+    And the story "mw-gq6.9" records 2 attempts
+    And the story "mw-gq6.9" records 2 dead-pane refunds
+    And the latest reclaim comment on "mw-gq6.9" says it was not refunded: 2 dead-pane refunds already
+
   # mw-gq6.182: a story its close-out refused is evidence, not a dead session.
   # The claim, the worktree and the branch stay as the session left them until
   # a person acts (mw retry, a hold, a give-back by hand).

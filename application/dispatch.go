@@ -1351,18 +1351,24 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 	// given back: a story is not spent by sessions that never got to say
 	// whether it worked (mw-y0dkzp). A refusal (run=blocked) returned above and
 	// is never refunded. The tick re-reads the story, so the next start counts
-	// from the lowered number.
+	// from the lowered number. Only MaxAttemptsRefunds are given per story, so a
+	// session that dies every time still reaches max_attempts (mw-gq6.344).
 	refund := fmt.Sprintf("its attempt count of %d is unchanged, as the refund could not be recorded", detail.Attempts)
-	if detail.Attempts > 0 {
-		lowered := detail.Attempts - 1
-		if err := d.Tracker.SetStoryMetadata(ctx, id, map[string]string{AttemptsField: strconv.Itoa(lowered)}); err != nil {
+	switch {
+	case detail.Attempts < 1:
+		refund = "no attempt was recorded, so none was refunded"
+	case detail.AttemptsRefunded >= MaxAttemptsRefunds:
+		refund = fmt.Sprintf("not refunded: %d dead-pane refunds already", detail.AttemptsRefunded)
+	default:
+		lowered, refunded := detail.Attempts-1, detail.AttemptsRefunded+1
+		fields := map[string]string{AttemptsField: strconv.Itoa(lowered), AttemptsRefundedField: strconv.Itoa(refunded)}
+		if err := d.Tracker.SetStoryMetadata(ctx, id, fields); err != nil {
 			report.Notes = append(report.Notes, fmt.Sprintf(
 				"%s: its dead-pane attempt could not be refunded (%s=%d): %v", id, AttemptsField, lowered, err))
 		} else {
-			refund = fmt.Sprintf("that attempt was refunded (%s %d -> %d), as its session ended without a close-out", AttemptsField, detail.Attempts, lowered)
+			refund = fmt.Sprintf("that attempt was refunded (%s %d -> %d, refund %d of %d), as its session ended without a close-out",
+				AttemptsField, detail.Attempts, lowered, refunded, MaxAttemptsRefunds)
 		}
-	} else {
-		refund = "no attempt was recorded, so none was refunded"
 	}
 
 	why := fmt.Sprintf(

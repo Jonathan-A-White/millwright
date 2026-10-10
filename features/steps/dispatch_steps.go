@@ -121,6 +121,7 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the close-out of "([^"]*)" refused it$`, c.theCloseOutRefusedIt)
 	ctx.Given(`^the session of "([^"]*)" has a dead pane and its lease has expired$`, c.theSessionHasADeadPaneAndLeaseExpired)
 	ctx.Given(`^the session of "([^"]*)" has a dead pane but its lease has not expired$`, c.theSessionHasADeadPaneButLeaseNotExpired)
+	ctx.When(`^the session of "([^"]*)" dies again with its lease expired$`, c.theSessionDiesAgainWithLeaseExpired)
 	ctx.Given(`^a story "([^"]*)" of that epic labelled "([^"]*)" is already running here$`, c.aLabelledStoryAlreadyRunningHere)
 	ctx.Given(`^the story "([^"]*)" waits on "([^"]*)"$`, c.theStoryWaitsOn)
 	ctx.Given(`^the story "([^"]*)" is closed$`, c.theStoryIsClosedGiven)
@@ -218,6 +219,8 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^dispatch said once that "([^"]*)" is refused and waits for the Mayor$`, c.dispatchSaidOnceItIsRefused)
 	ctx.Then(`^dispatch reclaimed "([^"]*)" for a dead pane with an expired lease$`, c.dispatchReclaimedForADeadPane)
 	ctx.Then(`^the reclaim comment on "([^"]*)" says the attempt was refunded$`, c.theReclaimCommentSaysRefunded)
+	ctx.Then(`^the latest reclaim comment on "([^"]*)" says it was not refunded: (.+)$`, c.theLatestReclaimCommentSaysNotRefunded)
+	ctx.Then(`^the story "([^"]*)" records (\d+) dead-pane refunds?$`, c.theStoryRecordsRefunds)
 	ctx.Then(`^the earlier branch of "([^"]*)" was kept as "([^"]*)" with its (\d+) commits?$`, c.theEarlierBranchWasKept)
 	ctx.Then(`^the dispatch line for "([^"]*)" names the kept branch and the attempt$`, c.theDispatchLineNamesTheKeptBranchAndTheAttempt)
 	ctx.Then(`^a session was started for "([^"]*)" all the same$`, c.aSessionWasStartedAllTheSame)
@@ -454,6 +457,13 @@ func (c *dispatchContext) deadPaneWithLease(id string, leaseExpires time.Time) e
 
 func (c *dispatchContext) theSessionHasADeadPaneAndLeaseExpired(id string) error {
 	return c.deadPaneWithLease(id, dispatchNow.Add(-time.Hour))
+}
+
+// theSessionDiesAgainWithLeaseExpired is a session a dispatch started ending
+// with no close-out, its lease run out (mw-gq6.344).
+func (c *dispatchContext) theSessionDiesAgainWithLeaseExpired(id string) error {
+	c.runner.Exit(application.SessionName(id), 1)
+	return c.tracker.SetLeaseExpires(id, dispatchNow.Add(-time.Hour))
 }
 
 func (c *dispatchContext) theSessionHasADeadPaneButLeaseNotExpired(id string) error {
@@ -1444,6 +1454,32 @@ func (c *dispatchContext) theReclaimCommentSaysRefunded(id string) error {
 		}
 	}
 	return fmt.Errorf("expected a reclaim comment on %s saying the attempt was refunded, got %q", id, c.tracker.Comments(id))
+}
+
+// theLatestReclaimCommentSaysNotRefunded checks that the newest dead-pane
+// reclaim comment on the story says the attempt was left as it was, and why.
+func (c *dispatchContext) theLatestReclaimCommentSaysNotRefunded(id, why string) error {
+	var latest string
+	for _, comment := range c.tracker.Comments(id) {
+		if strings.Contains(comment, "dead pane") {
+			latest = comment
+		}
+	}
+	if !strings.Contains(latest, "not refunded: "+why) {
+		return fmt.Errorf("expected the latest reclaim comment on %s to say \"not refunded: %s\", got %q", id, why, latest)
+	}
+	return nil
+}
+
+func (c *dispatchContext) theStoryRecordsRefunds(id string, want int) error {
+	detail, err := c.tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	if detail.AttemptsRefunded != want {
+		return fmt.Errorf("expected %s to record %d dead-pane refunds, got %d (dispatch said: %v)", id, want, detail.AttemptsRefunded, c.err)
+	}
+	return nil
 }
 
 // theEarlierBranchWasKept checks that the branch an earlier attempt left is

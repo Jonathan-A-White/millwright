@@ -78,6 +78,7 @@ func InitializeRetryScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the story "([^"]*)" has been tried (\d+) times? in all$`, c.theStoryHasBeenTriedTimesInAll)
 	ctx.Given(`^the story "([^"]*)" ran on the host "([^"]*)" and its worktree is there, not here$`, c.theStoryRanOnAnotherHost)
 	ctx.Given(`^the story "([^"]*)" ran on the host "([^"]*)" and is claimed there by "([^"]*)"$`, c.theStoryIsClaimedByAnotherHostsActor)
+	ctx.Given(`^the story "([^"]*)" has had (\d+) dead-pane refunds?$`, c.theStoryHasHadRefunds)
 	ctx.Given(`^the vault cannot reach its origin$`, c.theVaultCannotReachItsOrigin)
 
 	ctx.When(`^mw retries "([^"]*)"$`, c.mwRetries)
@@ -96,6 +97,7 @@ func InitializeRetryScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the story "([^"]*)" carries a comment saying "([^"]*)" is where its worktree is left for the next dispatch there$`, c.theStoryCarriesTheOtherHostComment)
 	ctx.Then(`^the story "([^"]*)" is open and unassigned$`, c.theStoryIsOpenAndUnassigned)
 	ctx.Then(`^the story "([^"]*)" is still claimed$`, c.theStoryIsStillClaimed)
+	ctx.Then(`^the story "([^"]*)" dead-pane refund count is back at (\d+)$`, c.theStoryRecordsRefunds)
 	ctx.Then(`^the story "([^"]*)" still records (\d+) attempts?$`, c.theStoryStillRecordsAttempts)
 	ctx.Then(`^the story "([^"]*)" carries a comment naming the branch commit, the bundle path and the vault commit$`, c.theStoryCarriesTheRetryComment)
 	ctx.Then(`^the story "([^"]*)" carries no new comment$`, c.theStoryCarriesNoNewComment)
@@ -378,6 +380,21 @@ func (c *retryContext) theSessionIsStillRunning(id string) error {
 
 func (c *retryContext) theStoryHasBeenTriedTimesInAll(id string, times int) error {
 	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.AttemptsField: strconv.Itoa(times)})
+}
+
+func (c *retryContext) theStoryHasHadRefunds(id string, times int) error {
+	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.AttemptsRefundedField: strconv.Itoa(times)})
+}
+
+func (c *retryContext) theStoryRecordsRefunds(id string, want int) error {
+	detail, err := c.tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	if detail.AttemptsRefunded != want {
+		return fmt.Errorf("expected %s to record %d dead-pane refunds, got %d", id, want, detail.AttemptsRefunded)
+	}
+	return nil
 }
 
 // mwRetries runs the use case the way mw retry does: the real worktrees, the
