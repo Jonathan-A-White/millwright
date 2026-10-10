@@ -1843,6 +1843,7 @@ mw memory recheck <rig> <slug> [--why "<text>"]
 mw memory list <rig> [--status current|recheck|superseded|retired] [--oldest]
 mw memory migrate <rig> [--dry-run]
 mw memory query <rig> <term>...
+mw memory eval <rig>
 ```
 
 `add` writes a current fact dated today (UTC); the slug defaults to the
@@ -1883,6 +1884,34 @@ hits come first. After the hits come the facts with a hit's subject and those
 either side of a hit's supersedes chain, each ending `related`. Nothing hitting
 is exit 1, `no fact matches`. It reads files and runs no git, so a Builder may
 run it from its worktree; the kickoff prompt says so. See `features/memory.feature`.
+
+`eval` is the pass bar for a rig's memory: a test that it answers what Builders
+ask, so that facts can leave the boot layer safely. The Mayor writes
+`seats/builder/rigs/<rig>/eval.md`, blocks separated by a blank line, each a
+question and the slug (or slugs, comma-separated) of the fact that answers it;
+a line starting `#` is a comment:
+
+```
+# what a Builder asks before it touches bd
+Q: What is the bd vault flag?
+expect: vault-flag
+
+Q: What is bd?
+expect: vault-flag, never-sync-in-tests
+```
+
+`mw memory eval <rig>` runs each `Q:` as a `query` (its words as terms, edged
+punctuation off, and the stop words a, an, the, to, of, in, on, is, does, how,
+what, when and where dropped, so every remaining word must start a word of one
+fact) and looks for each expected slug among the first three hits, whatever its
+status. It prints `PASS <rank> <slug>  <Q>` or `FAIL <slug> not in top 3  <Q>`
+for each slug, and exits 1 when any question has a FAIL. A rig with no
+`eval.md` prints `no eval` and exits 0; an `eval.md` with a block that is not a
+`Q:` with an `expect:`, or a line that is neither, is refused naming its line.
+`mw status` runs the eval of every rig kept as facts (files only) and adds, under
+RIG MEMORY, `<rig> eval failing: N of M` for a rig with N questions failing of its
+M; an `eval.md` it cannot read says `<rig> eval failing: <why>`. See
+`features/memory.feature`.
 
 ## Steps for his hands
 
@@ -2553,7 +2582,10 @@ five parts, and two more when there is something to say.
   the Mayor to prune it. A rig kept as facts (`seats/builder/rigs/<rig>/about.md`
   plus one typed fact a file in `facts/`) is measured on what a Builder reads of
   it, the about text and its current facts, and its line ends `retire or
-  supersede (Mayor)`. The section is left out when no rig is over, a rig with
+  supersede (Mayor)`. A rig kept as facts with an `eval.md` (see *Keeping a
+  rig's facts*) whose questions do not all find their facts adds
+  `millwright eval failing: 1 of 3`. The section is left out when no rig is over
+  and no eval fails, a rig with
   no memory file is not an error, and the archive a memory is pruned into
   (`<rig>-archive.md`) is never counted.
 - **FUEL today** — the tokens the Builder's ledger charged on lines dated today,
