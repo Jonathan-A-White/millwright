@@ -51,7 +51,7 @@ domain/(events): stdlib · application/: use cases, ports · infra/: adapters ·
 | Talk{Call,Model,Say,Wait} | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go | mw talk <sub> - cmd/mw/talk.go | features/talk_*.feature |
 | Millhand, Deputy, MillhandTick | application/millhand.go, application/deputy.go, application/millhandtick.go | mw millhand [tick]/deputy - cmd/mw/millhand.go, cmd/mw/deputy.go, cmd/mw/millhandtick.go | features/{millhand,deputy,millhand_tick}.feature |
 | Secrets{Put,Get,List}, Hands{Add,List}, Ask, Watch, Doctor | application/secrets.go, application/hands.go, application/ask.go, application/watch.go, application/doctor.go | mw secrets/hands/ask/watch/doctor - cmd/mw/secrets.go, cmd/mw/hands.go, cmd/mw/ask.go, cmd/mw/watch.go, cmd/mw/doctor.go | features/{secrets,hands,ask,watch,doctor}.feature |
-| SeatBoot, Memory, Init | application/seatboot.go, application/rigfacts.go, application/memory.go, application/memorymigrate.go, application/init.go | mw init/memory query/eval[.md] - cmd/mw/init.go, cmd/mw/memory.go | features/{seat_boot,init,memory}.feature |
+| SeatBoot, Memory, Init | application/seatboot.go, application/rigfacts.go, application/memory.go, application/memorymigrate.go, application/init.go | mw init/memory query/eval/demote/promote boot: no - cmd/mw/init.go, cmd/mw/memory.go | features/{seat_boot,init,memory}.feature |
 | Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern <sub> - cmd/mw/posternview.go, cmd/mw/posternbead.go | features/postern_*.feature |
 | Event{Follow,Emit,Tail,Ship,Wait,Nudge,Spring,Control,Trim} | application/eventfollow.go, application/eventlog.go, application/eventship.go, application/eventwait.go, application/eventnudge.go, application/eventsubscribe.go, application/eventspring.go, application/eventcontrol.go, application/eventtrim.go | mw events <sub> - cmd/mw/events.go | features/event_follow.feature |
 | Postern{Serve,Nginx,Mirror} | application/posternhand.go, application/posternmirror.go | mw postern <sub> - cmd/mw/postern.go, cmd/mw/posternmirror.go | features/postern_serve.feature |
@@ -60,4 +60,4 @@ domain/(events): stdlib · application/: use cases, ports · infra/: adapters ·
 
 cmd/mw/root.go, cmd/mw/version.go
 
-changelog_files: infra/rig/version.go writes domain/changelog.go + rig files.
+changelog_files: infra/rig/version.go > domain/changelog.go

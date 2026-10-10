@@ -1844,6 +1844,8 @@ mw memory list <rig> [--status current|recheck|superseded|retired] [--oldest]
 mw memory migrate <rig> [--dry-run]
 mw memory query <rig> <term>...
 mw memory eval <rig>
+mw memory demote <rig> <slug>
+mw memory promote <rig> <slug>
 ```
 
 `add` writes a current fact dated today (UTC); the slug defaults to the
@@ -1912,6 +1914,18 @@ for each slug, and exits 1 when any question has a FAIL. A rig with no
 RIG MEMORY, `<rig> eval failing: N of M` for a rig with N questions failing of its
 M; an `eval.md` it cannot read says `<rig> eval failing: <why>`. See
 `features/memory.feature`.
+
+`demote` is how the boot layer shrinks without a fact being lost: it adds
+`boot: no` to a current fact's front matter (absent means yes), and boot's render
+leaves that fact out. The fact stays current; `query` still shows it and `list`
+puts `boot:no` after its status. It is refused, saying `no eval question finds
+<slug>; add one to eval.md first`, unless some question of the rig's `eval.md`
+expects the slug and passes, so a Builder can still find what boot no longer
+carries; it also refuses an unknown slug, one not current and one already
+demoted. `promote` removes `boot: no` (it refuses a fact not demoted). The
+kickoff prompt tells a session that boot shows the facts every story needs and to
+run `mw memory query <rig> <term>` before touching a subject it does not know.
+The budget (`rig_memory_bytes`) is unchanged. See `features/memory.feature`.
 
 ## Steps for his hands
 
