@@ -194,3 +194,22 @@ func TestShipRefusesAHostNoHandsHostNames(t *testing.T) {
 		t.Fatalf("expected a refusal naming [hands_hosts], got %v", err)
 	}
 }
+
+// mw-gq6.319: a landing's grist smoke asks Changed about git pathspecs with a
+// glob in them ("application/grist*.go"), which match a file at any depth.
+func TestChangedTakesAGlobPathspec(t *testing.T) {
+	here := aRigWithAServer(t)
+	ctx := context.Background()
+	worktrees := rig.New()
+	run(t, here, "git", "checkout", "-q", "-b", "mw/grist")
+	write(t, here, "application/gristsend.go", "package application\n")
+	write(t, here, "application/next.go", "package application\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "Grist send")
+
+	for spec, want := range map[string]bool{"application/grist*.go": true, "application/next.go": true, "application/gristeval*.go": false, "infrastructure/grist": false} {
+		if got, err := worktrees.Changed(ctx, here, "main", "mw/grist", spec); err != nil || got != want {
+			t.Errorf("%s: expected %v, got %v, %v", spec, want, got, err)
+		}
+	}
+}

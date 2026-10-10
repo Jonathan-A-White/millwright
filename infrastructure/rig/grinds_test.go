@@ -137,3 +137,32 @@ func TestAnUnreachableRemoteIsAnErrorAndMainStillAnswers(t *testing.T) {
 		t.Fatalf("expected the local main %s, got %q %v", main, commit, err)
 	}
 }
+
+// The files under a directory at a commit are listed whole, sorted, and only
+// what is committed there; a directory that is not there lists none.
+func TestGrindsListTheFilesUnderADirectoryAtACommit(t *testing.T) {
+	here, _ := aRig(t)
+	write(t, here, "grinds/sweep.json", "{}\n")
+	write(t, here, "grinds/examples/sweep/b.json", "{}\n")
+	write(t, here, "grinds/examples/sweep/a.json", "{}\n")
+	write(t, here, "grinds/examples/sweep/blank.jpg", "jpeg")
+	write(t, here, "other/file.json", "{}\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "Grinds and examples")
+	write(t, here, "grinds/examples/sweep/half-done.json", "{}\n")
+
+	ctx := context.Background()
+	grinds := rig.NewGrinds()
+	commit, err := grinds.Commit(ctx, here)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := grinds.List(ctx, here, commit, "grinds")
+	want := "grinds/examples/sweep/a.json grinds/examples/sweep/b.json grinds/examples/sweep/blank.jpg grinds/sweep.json"
+	if err != nil || strings.Join(files, " ") != want {
+		t.Fatalf("expected %q, got %q %v", want, files, err)
+	}
+	if none, err := grinds.List(ctx, here, commit, "nothing"); err != nil || len(none) != 0 {
+		t.Fatalf("expected none under a directory that is not there, got %q %v", none, err)
+	}
+}

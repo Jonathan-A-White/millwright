@@ -17,6 +17,7 @@
 //	millhand_routine_model = "sonnet"
 //	millhand_review_model = "opus"
 //	deputy_model = "sonnet"
+//	grist_test_key_file = "/home/jwhite/.config/mw/grist-test.key"   # what mw grist smoke sends as
 //	beads_sync = "remote"
 //	beads_backup_minutes = 30
 //	beads_server_host = "laptop.mw"    # only for beads_sync = "auto" on a boost
@@ -55,6 +56,12 @@
 //	local_url      = "http://127.0.0.1:8765"
 //	azure_key_file = "/home/jwhite/.config/mw/azure.key"
 //	azure_region   = "westus2"
+//
+//	[grist-apps]                       # where each app's rig is checked out here (mw grist smoke reads it too)
+//	trade-tracker = "/home/jwhite/trade-tracker"
+//
+//	[grist_smoke]                      # per rig: paths of its grist client, besides grinds/, whose change makes a landing smoke the app
+//	trade-tracker = "src/grist,src/api/grist.ts"
 //
 //	[watch]
 //	ssh     = "vps"
@@ -152,9 +159,12 @@ const (
 
 	HandsRootHelperEnv = "MW_HANDS_ROOT_HELPER"
 
-	GristKeyFileEnv  = "MW_GRIST_KEY_FILE"
-	AgeKeyFileEnv    = "MW_AGE_KEY_FILE"
-	GristStateDirEnv = "MW_GRIST_STATE_DIR"
+	GristKeyFileEnv = "MW_GRIST_KEY_FILE"
+	// GristTestKeyFileEnv replaces grist_test_key_file, the key mw grist smoke
+	// sends its examples as.
+	GristTestKeyFileEnv = "MW_GRIST_TEST_KEY_FILE"
+	AgeKeyFileEnv       = "MW_AGE_KEY_FILE"
+	GristStateDirEnv    = "MW_GRIST_STATE_DIR"
 
 	BeadsSyncEnv          = "MW_BEADS_SYNC"
 	BeadsBackupMinutesEnv = "MW_BEADS_BACKUP_MINUTES"
@@ -211,6 +221,10 @@ const DoctorTable = "doctor"
 const (
 	GristTable     = "grist"
 	GristAppsTable = "grist-apps"
+	// GristSmokeTable names, for each rig, the paths of its grist client whose
+	// change makes a landing smoke the app (a comma separated list of git
+	// pathspecs, besides grinds/ which always does).
+	GristSmokeTable = "grist_smoke"
 )
 
 // ScorersTable is the table of the config file that says which scoring
@@ -634,6 +648,12 @@ func AgeKeyFile() (string, error) {
 // never the same key.
 var DefaultGristKeyFile = filepath.Join(".config", "mw", "mill.key")
 
+// DefaultGristTestKeyFile is where the key mw grist smoke sends its examples
+// as is kept under the home directory when nothing says otherwise: a key the
+// backend holds a licence for every app's grist, and neither the mill's nor the
+// Mayor's.
+var DefaultGristTestKeyFile = filepath.Join(".config", "mw", "grist-test.key")
+
 // DefaultGristStateDir is where the mill keeps its cursor, its record and
 // any answer not yet delivered, under the home directory, when nothing says
 // otherwise.
@@ -673,6 +693,53 @@ func GristKeyFile() (string, error) {
 			path, mayors, File, GristKeyFileEnv)
 	}
 	return path, nil
+}
+
+// GristTestKeyFile reports where the grist smoke's key is kept:
+// $MW_GRIST_TEST_KEY_FILE if it is set, otherwise the root-table
+// `grist_test_key_file` key of ~/.config/mw/config.toml, a full path either way,
+// and DefaultGristTestKeyFile under the home directory when neither says. It is
+// an error for it to be the mill's key or the Mayor's postern key: a smoke
+// sent as the mill would never be answered by it.
+func GristTestKeyFile() (string, error) {
+	path, err := fullPathSetting("grist_test_key_file", GristTestKeyFileEnv, DefaultGristTestKeyFile, "the grist smoke's test key file")
+	if err != nil {
+		return "", err
+	}
+	mill, err := GristKeyFile()
+	if err != nil {
+		return "", err
+	}
+	mayors, err := PosternKeyFile()
+	if err != nil {
+		return "", err
+	}
+	if sameFile(path, mill) || sameFile(path, mayors) {
+		return "", fmt.Errorf("the grist test key file %s is the mill's or the Mayor's key: give the smoke a key of its own (grist_test_key_file in %s, or $%s)",
+			path, File, GristTestKeyFileEnv)
+	}
+	return path, nil
+}
+
+// GristSmokePaths reports, for each rig, the paths of its grist client whose
+// change makes a landing smoke the app, read from the `[grist_smoke]` table of
+// ~/.config/mw/config.toml: `trade-tracker = "src/grist,src/api/grist.ts"`.
+// Each is a git pathspec in the rig; a rig that says nothing has only grinds/,
+// and a machine with no such table is not an error.
+func GristSmokePaths() (map[string][]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	table, err := tableIn(filepath.Join(home, File), GristSmokeTable)
+	if err != nil {
+		return nil, err
+	}
+	paths := make(map[string][]string, len(table))
+	for rig, value := range table {
+		paths[rig] = list(value)
+	}
+	return paths, nil
 }
 
 // sameFile reports whether a and b name one file: the same path once every

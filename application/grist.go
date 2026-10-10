@@ -280,6 +280,9 @@ type GrindSource interface {
 	// ReadAt reports the file at path, relative to the rig's root, as it is
 	// at commit; found is false when there is no such file there.
 	ReadAt(ctx context.Context, checkout, commit, path string) (data []byte, found bool, err error)
+	// List reports the path, relative to the rig's root, of every file at
+	// or under dir at commit, sorted; none when there is no such directory.
+	List(ctx context.Context, checkout, commit, dir string) ([]string, error)
 }
 
 // GristState is the mill's own state on its host: how far it has read, the

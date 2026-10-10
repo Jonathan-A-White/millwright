@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -83,6 +84,23 @@ func (g *Grinds) ReadAt(ctx context.Context, checkout, commit, path string) ([]b
 		return nil, false, fmt.Errorf("reading %s at %s in %s: %w", path, commit, checkout, err)
 	}
 	return []byte(data), true, nil
+}
+
+// List implements application.GrindSource: `git ls-tree -r` names every file
+// under dir at commit.
+func (g *Grinds) List(ctx context.Context, checkout, commit, dir string) ([]string, error) {
+	listed, err := g.git(ctx, checkout, "ls-tree", "-r", "--name-only", "-z", "--full-tree", commit, "--", dir)
+	if err != nil {
+		return nil, fmt.Errorf("listing %s at %s in %s: %w", dir, commit, checkout, err)
+	}
+	var files []string
+	for _, name := range strings.Split(listed, "\x00") {
+		if name != "" {
+			files = append(files, name)
+		}
+	}
+	sort.Strings(files)
+	return files, nil
 }
 
 // git runs one git command in the checkout, never prompting.

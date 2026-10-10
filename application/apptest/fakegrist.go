@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -225,6 +226,26 @@ func (f *FakeGrinds) ReadAt(_ context.Context, checkout, commit, path string) ([
 	}
 	data, ok := f.files[checkout][path]
 	return append([]byte(nil), data...), ok, nil
+}
+
+// List implements application.GrindSource.
+func (f *FakeGrinds) List(_ context.Context, checkout, commit, dir string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	if f.commits[checkout] != commit {
+		return nil, fmt.Errorf("%s has no commit %s", checkout, commit)
+	}
+	var files []string
+	for name := range f.files[checkout] {
+		if name == dir || strings.HasPrefix(name, strings.TrimSuffix(dir, "/")+"/") {
+			files = append(files, name)
+		}
+	}
+	sort.Strings(files)
+	return files, nil
 }
 
 // FakeGristState is an in-memory application.GristState.

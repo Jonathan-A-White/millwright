@@ -1526,6 +1526,48 @@ func TestGristKeyFileRefusesTheMayorsPosternKey(t *testing.T) {
 	}
 }
 
+// The smoke's test key lives under the home directory unless config or the
+// environment says otherwise, a path said is a full one, and it is never the
+// mill's key or the Mayor's.
+func TestGristTestKeyFileDefaultsUnderTheHomeAndIsRead(t *testing.T) {
+	t.Setenv(config.GristTestKeyFileEnv, "")
+	t.Setenv("MW_GRIST_KEY_FILE", "")
+	t.Setenv("MW_POSTERN_KEY_FILE", "")
+	home := writeConfig(t, "")
+	if key, err := config.GristTestKeyFile(); err != nil || key != filepath.Join(home, ".config", "mw", "grist-test.key") {
+		t.Fatalf("expected ~/.config/mw/grist-test.key, got %q %v", key, err)
+	}
+	writeConfig(t, "grist_test_key_file = \"/keys/test.key\"\n")
+	if key, err := config.GristTestKeyFile(); err != nil || key != "/keys/test.key" {
+		t.Fatalf("expected the config's key file, got %q %v", key, err)
+	}
+	t.Setenv(config.GristTestKeyFileEnv, "/env/test.key")
+	if key, _ := config.GristTestKeyFile(); key != "/env/test.key" {
+		t.Fatalf("expected the environment ahead of the file, got %q", key)
+	}
+	t.Setenv(config.GristTestKeyFileEnv, "relative/test.key")
+	if _, err := config.GristTestKeyFile(); err == nil || !strings.Contains(err.Error(), "full path") {
+		t.Fatalf("expected a relative path refused, got %v", err)
+	}
+	t.Setenv(config.GristTestKeyFileEnv, "")
+	writeConfig(t, "grist_test_key_file = \"/keys/mill.key\"\ngrist_key_file = \"/keys/mill.key\"\n")
+	if _, err := config.GristTestKeyFile(); err == nil || !strings.Contains(err.Error(), "mill's or the Mayor's") {
+		t.Fatalf("expected the mill's key refused, got %v", err)
+	}
+}
+
+func TestGristSmokePathsAreTheRigsClientPaths(t *testing.T) {
+	writeConfig(t, "")
+	if paths, err := config.GristSmokePaths(); err != nil || len(paths) != 0 {
+		t.Fatalf("expected none without the table, got %v %v", paths, err)
+	}
+	writeConfig(t, "[grist_smoke]\ntrade-tracker = \"src/grist, src/api/grist.ts\"\n")
+	paths, err := config.GristSmokePaths()
+	if err != nil || len(paths["trade-tracker"]) != 2 || paths["trade-tracker"][1] != "src/api/grist.ts" {
+		t.Fatalf("expected the rig's two paths, got %v %v", paths, err)
+	}
+}
+
 // With no [grist] table the ceilings are the defaults.
 func TestGristCeilingsDefault(t *testing.T) {
 	writeConfig(t, "host = \"laptop\"\n")

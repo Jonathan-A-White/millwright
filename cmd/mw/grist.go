@@ -35,6 +35,7 @@ func newGristCmd() *cobra.Command {
 	root.AddCommand(newGristScoreCmd())
 	root.AddCommand(newGristRunsCmd())
 	root.AddCommand(newGristStatsCmd())
+	root.AddCommand(newGristSmokeCmd())
 	return root
 }
 
