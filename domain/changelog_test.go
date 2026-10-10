@@ -102,3 +102,33 @@ func TestAnEntryGoesUnderTheTitleOfTheMarkdownChangelogAndCreatesIt(t *testing.T
 		t.Errorf("changelog = %q, want %q", kept, want)
 	}
 }
+
+const postern0511 = "# Changelog\n\nWhat changed in each release of Postern.\n\n## 0.5.11\n_2026-10-08_\n- Fixed: Messages sort newest first\n"
+
+func TestAnEntryGoesAboveTheFirstVersionKeepingARigsOwnTitleAndIntro(t *testing.T) {
+	entry := ChangelogEntry{Version: "0.5.12", Date: "2026-10-10", Story: "pn-1", Kind: ChangelogNew, Text: "Replies thread"}
+	got := string(AddToChangelogMarkdown([]byte(postern0511), entry))
+	want := "# Changelog\n\nWhat changed in each release of Postern.\n\n" +
+		"## 0.5.12\n_2026-10-10_\n- New: Replies thread\n\n" +
+		"## 0.5.11\n_2026-10-08_\n- Fixed: Messages sort newest first\n"
+	if got != want {
+		t.Errorf("changelog = %q, want %q", got, want)
+	}
+	if strings.Contains(got, ChangelogTitle) {
+		t.Errorf("a rig's own title is not joined by ours: %q", got)
+	}
+}
+
+func TestAnEntryGoesAfterTheIntroOfAChangelogWithNoVersionYet(t *testing.T) {
+	entry := ChangelogEntry{Version: "0.1.0", Date: "2026-10-10", Story: "pn-1", Kind: ChangelogNew, Text: "First"}
+	got := string(AddToChangelogMarkdown([]byte("# Changelog\n\nAll notable changes.\n"), entry))
+	want := "# Changelog\n\nAll notable changes.\n\n## 0.1.0\n_2026-10-10_\n- New: First\n"
+	if got != want {
+		t.Errorf("changelog = %q, want %q", got, want)
+	}
+	got = string(AddToChangelogMarkdown([]byte("# Changelog"), entry))
+	want = "# Changelog\n\n## 0.1.0\n_2026-10-10_\n- New: First\n"
+	if got != want {
+		t.Errorf("changelog = %q, want %q", got, want)
+	}
+}
