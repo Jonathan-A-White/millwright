@@ -171,6 +171,7 @@ func newNextCmd() *cobra.Command {
 					Load:        hostload.Proc{},
 					Rigs:        rigs,
 					Events:      homeEventLog(),
+					SmokeHolds:  gristSmokeBook(gateway, host),
 					Out:         cmd.OutOrStdout(),
 				})
 			}
@@ -210,6 +211,7 @@ func newNextCmd() *cobra.Command {
 				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits)),
 				DeploySlot:   rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
 				Backend:      hostBackend(gateway, files, host, rigs, cmd.ErrOrStderr()),
+				Smoke:        hostGristSmoke(gateway, host, rigs, worktrees),
 				Units:        userunits.Systemctl{},
 				Stamps:       stamps,
 				CloseOuts:    hostCloseOuts(),

@@ -246,6 +246,11 @@ type Status struct {
 	Benchmarks BenchmarkBook
 	Bench      BenchmarkSettings
 
+	// Smoke, when set, is the record of each app's last grist smoke, read for
+	// the GRIST SMOKE section: a failure, what it holds back, and a kind with
+	// no example as a warning (mw-gq6.319). Nil leaves it out.
+	Smoke GristSmokeRecords
+
 	// Control, when set, is the home's event log, read for the CANCELLED
 	// section (the cancel events of the last day) and the PAUSED line. Nil
 	// leaves both out.
@@ -418,6 +423,9 @@ type StatusReport struct {
 	// Benchmarks is what the close-outs measured, and nil when not asked, not
 	// read or there is none yet.
 	Benchmarks *BenchmarkReport
+	// GristSmoke is the last grist smoke of each app, and nil when not asked or
+	// none has been made.
+	GristSmoke []GristSmokeRecord
 	// Cancelled are the runs a cancel event ended in the last day, and Paused
 	// the pause-host event this host is under, if any.
 	Cancelled []Cancel
@@ -632,6 +640,13 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 			s.print(fmt.Sprintf("mw status: the benchmarks could not be read: %v\n", err))
 		} else {
 			report.Benchmarks = ReadBenchmarks(past, s.Bench)
+		}
+	}
+	if s.Smoke != nil {
+		if records, err := s.Smoke.Records(ctx); err != nil {
+			s.print(fmt.Sprintf("mw status: the grist smoke's record could not be read: %v\n", err))
+		} else {
+			report.GristSmoke = records
 		}
 	}
 	if s.VPSNginx != nil {
@@ -1066,6 +1081,11 @@ func (r StatusReport) String() string {
 		b.WriteString("\n")
 	}
 
+	if len(r.GristSmoke) > 0 {
+		writeGristSmoke(&b, r.GristSmoke)
+		b.WriteString("\n")
+	}
+
 	if r.Ticks.Known() {
 		clip(&b, TicksHeading)
 		r.Ticks.write(&b, "  ")
@@ -1433,4 +1453,58 @@ func (s Status) idleSince(ctx context.Context) time.Time {
 		return time.Time{}
 	}
 	return since.In(s.now().Location())
+}
+
+// GristSmokeHeading is the heading of the section of mw status that says how
+// each app's last grist smoke went.
+const GristSmokeHeading = "GRIST SMOKE"
+
+// writeGristSmoke writes the section: one line for each app, under a failed
+// one what it holds and each example that failed, in full over as many lines as
+// it needs (the line of a phone is Width wide), and a line for each warning.
+func writeGristSmoke(b *strings.Builder, records []GristSmokeRecord) {
+	clip(b, GristSmokeHeading)
+	for _, r := range records {
+		when := r.At.UTC().Format("2006-01-02 15:04Z")
+		if !r.Failed {
+			clip(b, fmt.Sprintf("  %s ok %s, %d examples", r.App, when, r.Examples))
+		} else {
+			clip(b, fmt.Sprintf("  %s FAILED %s", r.App, when))
+			if r.Rig != "" {
+				clip(b, fmt.Sprintf("    the open stories of %s are held", r.Rig))
+			} else {
+				clip(b, "    no rig's stories are held (run by hand)")
+			}
+		}
+		for _, failure := range r.Failures {
+			wrapInto(b, "    ", failure)
+		}
+		for _, warning := range r.Warnings {
+			wrapInto(b, "    ", "warning: "+warning)
+		}
+		if r.Failed {
+			clip(b, "    lifted by a smoke that passes:")
+			clip(b, "      mw grist smoke "+r.App)
+			clip(b, "    or by hand: mw grist smoke "+r.App+" --lift")
+		}
+	}
+}
+
+// wrapInto writes text over lines of at most Width runes, each led by indent,
+// broken between words (a word longer than a line is cut).
+func wrapInto(b *strings.Builder, indent, text string) {
+	line := indent
+	for _, word := range strings.Fields(text) {
+		if len([]rune(line))+len([]rune(word))+1 > Width && strings.TrimSpace(line) != "" {
+			clip(b, line)
+			line = indent + "  "
+		}
+		if strings.TrimSpace(line) != "" {
+			line += " "
+		}
+		line += word
+	}
+	if strings.TrimSpace(line) != "" {
+		clip(b, line)
+	}
 }

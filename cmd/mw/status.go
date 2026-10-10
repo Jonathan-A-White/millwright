@@ -179,6 +179,7 @@ func newStatusCmd() *cobra.Command {
 				IdleAfter:        idleAfter,
 				Harness:          procs.Harness{},
 				Control:          homeEventLog(),
+				Smoke:            gristSmokeBook(tracker, host),
 				HostSilence:      time.Duration(hours) * time.Hour,
 				RigMemoryBytes:   budget,
 				BeadsBudgetBytes: beadsBudget,

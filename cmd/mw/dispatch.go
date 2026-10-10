@@ -263,6 +263,7 @@ func newDispatchCmd() *cobra.Command {
 				HeavyNet:    heavy,
 				Exclusive:   hostDispatchLock(),
 				Events:      homeEventLog(),
+				SmokeHolds:  gristSmokeBook(gateway, host),
 				Home:        files,
 				DryRun:      dryRun,
 				Out:         cmd.OutOrStdout(),

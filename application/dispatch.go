@@ -188,6 +188,12 @@ type Dispatch struct {
 	Network  NetworkReader
 	HeavyNet map[string]bool
 
+	// SmokeHolds is asked, once for each rig, whether a failed grist smoke holds
+	// the rig's open stories (mw-gq6.319): such a story is passed over and stays
+	// open, taken by the first tick after the smoke passes or the hold is lifted.
+	// A nil SmokeHolds, or one that cannot be read, holds nothing back.
+	SmokeHolds GristSmokeHolds
+
 	// DryRun prints what would be started and writes nothing at all: nothing is
 	// synced, nothing claimed, no worktree made, no formula poured, no session
 	// started.
@@ -283,6 +289,24 @@ type LandedAlready struct {
 	Target string
 	// By is how it was known to have landed, as a person reads it.
 	By string
+}
+
+// smokeHold is the reason a failed grist smoke holds the stories of rig, empty
+// when it does not. Each rig is asked once a pass; a record that cannot be read
+// holds nothing back.
+func (d Dispatch) smokeHold(ctx context.Context, rig string, asked map[string]string) string {
+	if d.SmokeHolds == nil {
+		return ""
+	}
+	if why, done := asked[rig]; done {
+		return why
+	}
+	why, err := d.SmokeHolds.HeldBy(ctx, rig)
+	if err != nil {
+		why = ""
+	}
+	asked[rig] = why
+	return why
 }
 
 // HeldRefused is one story this dispatch found claimed here with a dead pane
@@ -560,6 +584,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	// dry run reads them too, so that it reports the same refusal a real run
 	// would, without writing anything.
 	var formulas map[string]bool
+	smokeHolds := map[string]string{}
 	for _, detail := range ready {
 		id := detail.Story.ID
 		// First, so that a story that is not a session's to take is never passed
@@ -622,6 +647,13 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		if !checkedOut {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
 				"the rig %s is not checked out on %s: add it under [rigs] in the config file", path.Rig, d.Host)})
+			continue
+		}
+
+		// A rig whose last grist smoke failed holds its open stories, so that no
+		// more work lands on a mill that does not answer as its examples say.
+		if held := d.smokeHold(ctx, path.Rig, smokeHolds); held != "" {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Why: held})
 			continue
 		}
 

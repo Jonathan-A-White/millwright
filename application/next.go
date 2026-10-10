@@ -205,6 +205,13 @@ type Next struct {
 	// nothing, and nothing it does can stop a story being landed or closed.
 	Backend BackendStage
 
+	// Smoke runs the grist smoke of the apps a landing changed the grist of
+	// (grinds/, an app's grist client paths, or the mill itself), once the
+	// landing has moved the rig. A failure is an alarm, a line of mw status,
+	// and a hold on the rig's open stories (mw-gq6.319). A zero Smoke does
+	// nothing, and nothing it does can stop a story being landed or closed.
+	Smoke GristSmokeAfter
+
 	// Files is the vault as a git clone: what a close-out commits its own
 	// ledger line and the session's rig memory through, so that the sync it
 	// then runs is not stopped by the work it has just done. A nil Files leaves
@@ -424,6 +431,9 @@ type closeOut struct {
 	// backendChanged says the story's own commits changed what the rig's backend
 	// is built from, so that the landing is followed by staging it.
 	backendChanged bool
+
+	// smokeApps are the apps whose grist the story's own commits changed.
+	smokeApps []string
 
 	// landingError says this run kept the whole error of a failed landing in the
 	// vault, so the close-out commits it.
@@ -716,6 +726,9 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	}
 
 	n.readBackend(ctx, c, report)
+	var smokeNotes []string
+	c.smokeApps, smokeNotes = n.Smoke.Wants(ctx, c.path.Rig, c.rigDir, StartPoint(n.remote(), c.target), c.branch)
+	report.Notes = append(report.Notes, smokeNotes...)
 
 	// Only one close-out at a time may touch a rig's target branch on this host.
 	// The other host's races are settled by the remote itself, below.
@@ -765,6 +778,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	// After the story is recorded as landed, so that a command that is killed
 	// with the session it runs in leaves a story a later run can tell is landed.
 	n.afterLanding(ctx, c, report)
+	n.smoke(ctx, c, report)
 	n.stageBackend(ctx, c, report)
 	n.springTester(ctx, c, report, landed)
 	return n.finish(ctx, c, report, outcome, false)
