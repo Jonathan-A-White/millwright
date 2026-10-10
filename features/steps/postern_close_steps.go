@@ -21,6 +21,13 @@ func (c *posternInboxContext) registerPosternCloseSteps(ctx *godog.ScenarioConte
 	ctx.Given(`^a postern keep action on bead "([^"]*)" for (\d+) days from the Governor with txid "([^"]*)"$`, c.aPosternKeepActionFromTheGovernor)
 	ctx.Given(`^the postern view raises a stale need on "([^"]*)"$`, c.thePosternViewRaisesAStaleNeed)
 	ctx.Then(`^the postern view raises no stale need on "([^"]*)"$`, c.thePosternViewRaisesNoStaleNeed)
+	ctx.Given(`^live epic "([^"]*)" has story "([^"]*)" waiting on others since "([^"]*)"$`, c.liveEpicHasStoryWaitingOnOthers)
+	ctx.When(`^the postern inbox clock moves to "([^"]*)"$`, c.thePosternInboxClockReads)
+	ctx.Then(`^the postern view raises a chase need on "([^"]*)"$`, c.thePosternViewRaisesAChaseNeed)
+	ctx.Given(`^the postern view raises a chase need on "([^"]*)"$`, c.thePosternViewRaisesAChaseNeed)
+	ctx.Then(`^the postern view raises no chase need on "([^"]*)"$`, c.thePosternViewRaisesNoChaseNeed)
+	ctx.Then(`^bead "([^"]*)" is still waiting on others$`, c.beadIsStillWaitingOnOthers)
+	ctx.Then(`^bead "([^"]*)" is no longer waiting on others$`, c.beadIsNoLongerWaitingOnOthers)
 	ctx.Then(`^the note "([^"]*)" reads "([^"]*)"$`, c.theNoteReads)
 	ctx.Then(`^the note "([^"]*)" is not set$`, c.theNoteIsNotSet)
 	ctx.Given(`^epic "([^"]*)" has an open, unclaimed story "([^"]*)"$`, c.epicHasAnOpenStory)
@@ -61,17 +68,87 @@ func (c *posternInboxContext) aPosternKeepActionFromTheGovernor(bead string, day
 }
 
 func (c *posternInboxContext) staleNeedsOn(bead string) (int, error) {
+	return c.needsOn(bead, "stale")
+}
+
+// needsOn is how many needs of kind the postern view raises on bead.
+func (c *posternInboxContext) needsOn(bead, kind string) (int, error) {
 	doc, err := application.PosternView{Tracker: c.memory, Notes: c.memory, Now: func() time.Time { return c.clock }}.Build(context.Background())
 	if err != nil {
 		return 0, err
 	}
-	stale := 0
+	count := 0
 	for _, n := range doc.Needs {
-		if n.Bead == bead && n.Kind == "stale" {
-			stale++
+		if n.Bead == bead && n.Kind == kind {
+			count++
 		}
 	}
-	return stale, nil
+	return count, nil
+}
+
+// liveEpicHasStoryWaitingOnOthers files a live epic with a story marked as mw
+// ask waiting leaves it: labelled waiting:others and asked-of sam, with the
+// note of when the wait began.
+func (c *posternInboxContext) liveEpicHasStoryWaitingOnOthers(epic, bead, since string) error {
+	c.memory.AddEpic(epic, domain.Path{})
+	c.memory.DescribeEpic(epic, "Epic "+epic, apptest.StatusOpen, 1)
+	c.memory.AddStory(epic, domain.Story{ID: bead, Title: "Story " + bead})
+	if err := c.memory.SetLabels(bead, application.LabelWaitingOthers, application.LabelAskedOfPrefix+"sam"); err != nil {
+		return err
+	}
+	return c.memory.SetNote(context.Background(), application.AskWaitingKey(bead), since)
+}
+
+func (c *posternInboxContext) thePosternViewRaisesAChaseNeed(bead string) error {
+	n, err := c.needsOn(bead, "chase")
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("expected the view to raise a chase need on %s, it raises none", bead)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) thePosternViewRaisesNoChaseNeed(bead string) error {
+	n, err := c.needsOn(bead, "chase")
+	if err != nil {
+		return err
+	}
+	if n != 0 {
+		return fmt.Errorf("expected the view to raise no chase need on %s, it raises %d", bead, n)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) waitingOnOthers(bead string) (bool, error) {
+	d, err := c.memory.ShowStory(context.Background(), bead)
+	if err != nil {
+		return false, err
+	}
+	return d.WaitingOnOthers(), nil
+}
+
+func (c *posternInboxContext) beadIsStillWaitingOnOthers(bead string) error {
+	waiting, err := c.waitingOnOthers(bead)
+	if err != nil {
+		return err
+	}
+	if !waiting {
+		return fmt.Errorf("expected %s still waiting on others, it is not", bead)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) beadIsNoLongerWaitingOnOthers(bead string) error {
+	waiting, err := c.waitingOnOthers(bead)
+	if err != nil {
+		return err
+	}
+	if waiting {
+		return fmt.Errorf("expected %s no longer waiting on others, it still is", bead)
+	}
+	return nil
 }
 
 func (c *posternInboxContext) thePosternViewRaisesAStaleNeed(bead string) error {
