@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -27,6 +28,7 @@ type afterLandingContext struct {
 
 	holding   application.Holding
 	ranBeside *atomic.Bool
+	letGo     sync.Once
 	released  chan struct{} // closed when the landing lets go
 
 	printed bytes.Buffer
@@ -56,7 +58,7 @@ func InitializeAfterLandingScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a rig "([^"]*)" whose after-landing command fails the first time on a name-resolution fault, exit 255, and then succeeds$`, c.aRigThatIsFlaky)
 	ctx.Given(`^a rig "([^"]*)" with no after-landing command$`, c.aRigWithNoCommand)
 	ctx.Given(`^the command is run again after (\d+) milliseconds$`, c.theCommandIsRetriedAfter)
-	ctx.Given(`^a landing holds the rig's after-landing lock for (\d+) milliseconds$`, c.aLandingHoldsTheLock)
+	ctx.Given(`^a landing holds the rig's after-landing lock until mw after-landing is waiting for it$`, c.aLandingHoldsTheLock)
 
 	ctx.When(`^mw after-landing is run for "([^"]*)"$`, c.mwAfterLandingIsRun)
 
@@ -123,35 +125,52 @@ func (c *afterLandingContext) theCommandIsRetriedAfter(milliseconds int) error {
 	return nil
 }
 
-func (c *afterLandingContext) slots() *rig.Slots {
-	return rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix), rig.WithSlotWait(5*time.Second), rig.WithSlotPoll(20*time.Millisecond))
+// slotPatience is how long a step waits on something that must happen,
+// the landing letting go or the command being waited for: only a limit, for a
+// scenario that has hung, and never the way the scenario learns that it has
+// happened. It is far longer than any pause a loaded host has been seen to make
+// (mw-gq6.316: a 5 s lock wait ran out under a parallel make test, and the command never started), so that a slow
+// host is slow rather than wrong.
+const slotPatience = 2 * time.Minute
+
+func (c *afterLandingContext) slots(opts ...rig.SlotOption) *rig.Slots {
+	opts = append([]rig.SlotOption{rig.WithSlotSuffix(rig.AfterLandingSlotSuffix), rig.WithSlotWait(slotPatience), rig.WithSlotPoll(20 * time.Millisecond)}, opts...)
+	return rig.NewSlots(opts...)
 }
 
-// aLandingHoldsTheLock takes the lock now and gives it back after the time
-// given, noting whether the command had started by then.
-func (c *afterLandingContext) aLandingHoldsTheLock(milliseconds int) error {
+// aLandingHoldsTheLock takes the lock now and gives it back the moment mw
+// after-landing says it is waiting for it, noting whether the command had
+// started by then. It lets go on that event and not on a timer, so that no host
+// is too slow for it.
+func (c *afterLandingContext) aLandingHoldsTheLock() error {
 	held, err := c.slots().Take(context.Background(), c.rigDir, "mw next closing out a story")
 	if err != nil {
 		return err
 	}
 	c.holding = held
-	log, beside := filepath.Join(c.root, "after.log"), c.ranBeside
-	released := make(chan struct{})
-	c.released = released
-	time.AfterFunc(time.Duration(milliseconds)*time.Millisecond, func() {
-		_, err := os.Stat(log)
-		beside.Store(err == nil)
-		_ = held.Release(context.Background())
-		close(released)
-	})
+	c.released = make(chan struct{})
 	return nil
+}
+
+// letTheLandingGo is told by the lock that mw after-landing is waiting for it:
+// the landing gives the lock back, once.
+func (c *afterLandingContext) letTheLandingGo(string) {
+	if c.holding == nil {
+		return
+	}
+	c.letGo.Do(func() {
+		_, err := os.Stat(filepath.Join(c.root, "after.log"))
+		c.ranBeside.Store(err == nil)
+		_ = c.holding.Release(context.Background())
+		close(c.released)
+	})
 }
 
 func (c *afterLandingContext) mwAfterLandingIsRun(name string) error {
 	c.printed.Reset()
 	c.err = application.AfterLandingRun{
 		AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(c.commands)),
-		Slot:         c.slots(),
+		Slot:         c.slots(rig.WithSlotNotice(c.letTheLandingGo)),
 		Rigs:         map[string]string{"millwright": c.rigDir},
 		Host:         "laptop",
 		RetryWait:    c.retry,
@@ -197,7 +216,7 @@ func (c *afterLandingContext) theCommandDidNotRun() error {
 func (c *afterLandingContext) theCommandWaited() error {
 	select {
 	case <-c.released:
-	case <-time.After(5 * time.Second):
+	case <-time.After(slotPatience):
 		return fmt.Errorf("the landing never let go of the lock")
 	}
 	if c.ranBeside.Load() {

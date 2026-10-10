@@ -29,7 +29,7 @@ Feature: mw after-landing runs a rig's after-landing command again by hand
 
   Scenario: mw after-landing waits for a landing that holds the rig's after-landing lock
     Given a rig "millwright" whose after-landing command succeeds
-    And a landing holds the rig's after-landing lock for 400 milliseconds
+    And a landing holds the rig's after-landing lock until mw after-landing is waiting for it
     When mw after-landing is run for "millwright"
     Then the command ran once, in the rig checkout
     And the command did not start until the landing let go

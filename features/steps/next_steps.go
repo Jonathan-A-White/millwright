@@ -836,7 +836,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 		Worktrees:     worktrees,
 		Landing:       worktrees,
 		Checks:        rig.NewChecks(rig.WithCommand(c.checkCommand)),
-		Slot:          rig.NewSlots(rig.WithSlotWait(5*time.Second), rig.WithSlotPoll(20*time.Millisecond)),
+		Slot:          rig.NewSlots(rig.WithSlotWait(slotPatience), rig.WithSlotPoll(20*time.Millisecond)),
 		Vault:         files,
 		Rules:         files,
 		Files:         filesPort,
@@ -862,7 +862,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 		Err:  &c.stderr,
 
 		AfterLanding:   rig.NewAfterLanding(rig.WithAfterCommands(c.afterCommands), rig.WithAfterLimit(c.afterLimit)),
-		DeploySlot:     rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix), rig.WithSlotWait(5*time.Second), rig.WithSlotPoll(20*time.Millisecond)),
+		DeploySlot:     rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix), rig.WithSlotWait(slotPatience), rig.WithSlotPoll(20*time.Millisecond)),
 		AfterRetryWait: c.afterRetry,
 		Backend:        c.backendStage(),
 		Units:          c.unitRestarter(),
