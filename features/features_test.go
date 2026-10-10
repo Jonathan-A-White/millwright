@@ -147,4 +147,5 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeTidyScenario(ctx)
 	steps.InitializeWatchScenario(ctx)
 	steps.InitializeSyncScenario(ctx)
+	steps.InitializeVPSNginxScenario(ctx)
 }

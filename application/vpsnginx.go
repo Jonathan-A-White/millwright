@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 )
 
@@ -94,6 +95,10 @@ type VPSNginx struct {
 	// DefaultVPSNginxConf.
 	Conf string
 
+	// StandbyHealth, when set, is the standby's /healthz URL (a [backend.<rig>] vps_health):
+	// its host:port must be a `backup` server of the upstream too.
+	StandbyHealth string
+
 	// Commit, when set, is a commit the VPS's mw binary is also looked at for:
 	// a binary built without it is named in the reading. A host with no way to
 	// tell leaves the point out.
@@ -124,6 +129,11 @@ func (v VPSNginx) Read(ctx context.Context) VPSNginxReading {
 	}
 
 	reading := v.judge(servers, record.Host)
+	if reading.State == VPSNginxOK {
+		if standby := standbyAddr(v.StandbyHealth); standby != "" && !hasBackup(servers, standby) {
+			reading = v.standbyMissing(standby)
+		}
+	}
 	if v.Commit != "" {
 		if lacks, err := v.VPS.BinaryLacks(ctx, v.Commit); err == nil && lacks {
 			reading.Lacks = v.Commit
@@ -172,6 +182,48 @@ func ParseUpstreamServers(text, name string) ([]UpstreamServer, bool) {
 		}
 	}
 	return servers, found
+}
+
+// standbyAddr is the host:port of the standby's /healthz URL, empty when there
+// is none or it does not parse.
+func standbyAddr(health string) string {
+	if health == "" {
+		return ""
+	}
+	u, err := url.Parse(health)
+	if err != nil {
+		return ""
+	}
+	return u.Host
+}
+
+// hasBackup says servers holds addr as a `backup` server.
+func hasBackup(servers []UpstreamServer, addr string) bool {
+	for _, server := range servers {
+		if server.Backup && server.Addr == addr {
+			return true
+		}
+	}
+	return false
+}
+
+// standbyMissing is the fault for an upstream that is right about the home but
+// does not carry the standby's addr (host:port) as a backup, so the front door
+// has nowhere to fall back to when the home sleeps.
+func (v VPSNginx) standbyMissing(addr string) VPSNginxReading {
+	conf := v.Conf
+	if conf == "" {
+		conf = DefaultVPSNginxConf
+	}
+	short := "standby " + addr + " not in the upstream"
+	return VPSNginxReading{
+		State: VPSNginxFault,
+		Short: short,
+		Why:   fmt.Sprintf("%s: add `server %s backup;` as its last line (mw postern nginx --backend ... --backend http://%s)", short, addr, addr),
+		Fix: fmt.Sprintf("cp %s %s.bak && add `server %s backup;` as the last line of the %s block in %s, then nginx -t && systemctl reload nginx",
+			conf, conf, addr, vpsUpstreamName, conf),
+		WayBack: fmt.Sprintf("cp %s.bak %s && nginx -t && systemctl reload nginx", conf, conf),
+	}
 }
 
 // judge is the reading for servers when the home is home.

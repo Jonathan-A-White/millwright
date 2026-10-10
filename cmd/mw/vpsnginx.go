@@ -37,6 +37,9 @@ func hostVPSNginx(files application.HomeFile, withBinary bool) (*application.VPS
 		VPS:  vpsnginx.New(guard.SSH, guard.Conf, guard.Mw, rigs[application.FactoryRig]),
 		Conf: guard.Conf,
 	}
+	if b, ok := standbyBackend(); ok {
+		reader.StandbyHealth = b.VPSHealth
+	}
 	if withBinary {
 		reader.Commit = guard.Needs
 	}
@@ -51,9 +54,30 @@ func hostStandby(files application.HomeFile) *application.Standby {
 	if os.Getenv(vpsGuardOff) == "off" {
 		return nil
 	}
+	b, ok := standbyBackend()
+	if !ok {
+		return nil
+	}
+	return &application.Standby{
+		Home:    files,
+		Commits: vpsnginx.Healthz{},
+		HomeURL: func(host string) string {
+			url, err := config.PosternLocalURL(host)
+			if err != nil {
+				url = fmt.Sprintf("http://%s.mw:%d", host, config.DefaultPosternLocalPort)
+			}
+			return url + "/healthz"
+		},
+		StandbyURL: b.VPSHealth,
+	}
+}
+
+// standbyBackend is the first [backend.<rig>] table, by name, that names a VPS
+// standby, or false when none does or the tables cannot be read.
+func standbyBackend() (config.BackendSettings, bool) {
 	backends, err := config.Backends()
 	if err != nil {
-		return nil
+		return config.BackendSettings{}, false
 	}
 	names := make([]string, 0, len(backends))
 	for name := range backends {
@@ -62,19 +86,8 @@ func hostStandby(files application.HomeFile) *application.Standby {
 	sort.Strings(names)
 	for _, name := range names {
 		if b := backends[name]; b.VPSHost != "" {
-			return &application.Standby{
-				Home:    files,
-				Commits: vpsnginx.Healthz{},
-				HomeURL: func(host string) string {
-					url, err := config.PosternLocalURL(host)
-					if err != nil {
-						url = fmt.Sprintf("http://%s.mw:%d", host, config.DefaultPosternLocalPort)
-					}
-					return url + "/healthz"
-				},
-				StandbyURL: b.VPSHealth,
-			}
+			return b, true
 		}
 	}
-	return nil
+	return config.BackendSettings{}, false
 }

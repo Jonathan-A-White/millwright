@@ -646,6 +646,7 @@ the Governor's approval, so the standby's swap is always a tap, never the home's
 A copy that fails is a failed try like a failed build. `mw status` then says `standby
 behind: <standby commit|none> vs <home commit>` when the two `/healthz` lines differ,
 `standby level at <commit>` when they match, or `standby not checked (<why>)`.
+With a `vps_health` set, `mw doctor vps-nginx` and `mw status` also want the VPS's `postern_api` upstream to carry that URL's host:port as a `backup` server, and say `standby <host:port> not in the upstream` with the line to add when it does not.
 
 Only then: the worktree and its branch go, one line is appended to the seat's
 ledger, that line and the seat's memory of the rig are committed in the vault,
