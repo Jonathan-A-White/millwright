@@ -195,6 +195,11 @@ type RetryReport struct {
 	// ended, not the one the next dispatch will start.
 	Attempt int
 
+	// NextAttempt is the attempt the next dispatch will record: the story's
+	// attempts metadata plus one, which differs from Attempt+1 when the
+	// metadata was reset by hand below the attempt that was bundled.
+	NextAttempt int
+
 	// CommittedLeftovers says the worktree held work the session never
 	// committed, and this retry committed it onto the branch before bundling.
 	CommittedLeftovers bool
@@ -291,6 +296,7 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 		attempt = 1
 	}
 	report.Attempt, report.Target = attempt, path.Branch
+	report.NextAttempt = detail.Attempts + 1
 	report.Hitl = detail.Hitl()
 
 	if tried, most := detail.Attempts, r.maxAttempts(); tried >= most {
@@ -376,20 +382,20 @@ func (r Retry) giveBack(ctx context.Context, report RetryReport, nothing string)
 		comment = fmt.Sprintf(
 			"mw retry on %s gave back the claim on attempt %d of %s without reading a worktree: %s. "+
 				"The story is open again and the next dispatch tick takes it as attempt %d of %d.",
-			r.Host, attempt, storyID, nothing, attempt+1, r.maxAttempts())
+			r.Host, attempt, storyID, nothing, report.NextAttempt, r.maxAttempts())
 	} else if report.Bundled {
 		comment = fmt.Sprintf(
 			"mw retry on %s bundled attempt %d of %s (branch %s at %s) into %s, pushed to the vault as %s. "+
 				"The worktree and branch are gone; the claim was given back and the story is open again. "+
 				"The next dispatch tick takes it as attempt %d of %d.",
 			r.Host, attempt, storyID, report.Branch, shortCommit(report.BranchCommit), report.BundlePath, shortVaultCommit(report.VaultCommit),
-			attempt+1, r.maxAttempts())
+			report.NextAttempt, r.maxAttempts())
 	} else {
 		comment = fmt.Sprintf(
 			"mw retry on %s found nothing to keep on attempt %d of %s: %s had no commits ahead of %s, so nothing was bundled. "+
 				"The worktree and branch are gone; the claim was given back and the story is open again. "+
 				"The next dispatch tick takes it as attempt %d of %d.",
-			r.Host, attempt, storyID, report.Branch, report.Target, attempt+1, r.maxAttempts())
+			r.Host, attempt, storyID, report.Branch, report.Target, report.NextAttempt, r.maxAttempts())
 	}
 	if err := r.Tracker.CommentOnStory(ctx, storyID, comment); err != nil {
 		return report, fmt.Errorf("retrying %s: it was retried, but the comment naming what happened could not be written: %w", storyID, err)
@@ -416,7 +422,7 @@ func (r Retry) handBack(ctx context.Context, report RetryReport, elsewhere, hold
 		"mw retry on %s gave back the claim on attempt %d of %s without reading a worktree: the story was worked on %s, "+
 			"so its worktree and branch are left there, and the next dispatch on %s bundles whatever they hold before it cuts a fresh one. "+
 			"The story is open again and the next dispatch tick takes it as attempt %d of %d.",
-		r.Host, report.Attempt, storyID, elsewhere, elsewhere, report.Attempt+1, r.maxAttempts())
+		r.Host, report.Attempt, storyID, elsewhere, elsewhere, report.NextAttempt, r.maxAttempts())
 	if err := r.Tracker.CommentOnStory(ctx, storyID, comment); err != nil {
 		return report, fmt.Errorf("retrying %s: the claim was given back, but the comment naming what happened could not be written: %w", storyID, err)
 	}
@@ -459,7 +465,7 @@ func (r RetryReport) String() string {
 	if r.Elsewhere != "" {
 		fmt.Fprintf(&b, "  there   the story was worked on %s; its worktree and branch are left there, not read from here\n", r.Elsewhere)
 		if r.ClaimReleased {
-			fmt.Fprintf(&b, "  open    the claim was given back; the next dispatch tick takes it as attempt %d\n", r.Attempt+1)
+			fmt.Fprintf(&b, "  open    the claim was given back; the next dispatch tick takes it as attempt %d\n", r.NextAttempt)
 			r.writeHitl(&b)
 		}
 		return b.String()
@@ -483,7 +489,7 @@ func (r RetryReport) String() string {
 		fmt.Fprintf(&b, "  gone    the worktree %s and the branch %s\n", r.Worktree, r.Branch)
 	}
 	if r.ClaimReleased {
-		fmt.Fprintf(&b, "  open    the claim was given back; the next dispatch tick takes it as attempt %d\n", r.Attempt+1)
+		fmt.Fprintf(&b, "  open    the claim was given back; the next dispatch tick takes it as attempt %d\n", r.NextAttempt)
 		r.writeHitl(&b)
 	}
 	return b.String()

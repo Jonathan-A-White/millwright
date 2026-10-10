@@ -391,3 +391,40 @@ func TestRetryOfAStoryWithoutHitlPrintsNoHitlLine(t *testing.T) {
 		t.Errorf("expected no line about hitl, got %q", out.String())
 	}
 }
+
+// TestRetryPrintsTheAttemptTheNextDispatchWillRecord pins mw-gq6.336: the line
+// "the next dispatch tick takes it as attempt N" is the story's attempts
+// metadata plus one, the number the next dispatch records — not the bundled
+// attempt's floor of 1 plus one. A Mayor's hand reset to attempts 0 leaves
+// the next try attempt 1, however much was bundled before.
+func TestRetryPrintsTheAttemptTheNextDispatchWillRecord(t *testing.T) {
+	for _, tc := range []struct {
+		attempts string
+		want     string
+	}{
+		{"0", "attempt 1"},
+		{"1", "attempt 2"},
+		{"2", "attempt 3"},
+	} {
+		for _, ahead := range []int{0, 2} {
+			tracker := apptest.NewFakeTracker()
+			aRetryStory(t, tracker, "mw-gq6.1")
+			if err := tracker.SetStoryMetadata(context.Background(), "mw-gq6.1", map[string]string{application.AttemptsField: tc.attempts}); err != nil {
+				t.Fatal(err)
+			}
+			var out strings.Builder
+
+			if _, err := aRetry(tracker, &fakeRetryLanding{AheadCount: ahead}, &apptest.FakeVaultFiles{}, &out).Run(context.Background(), "mw-gq6.1"); err != nil {
+				t.Fatalf("attempts %s, ahead %d: expected the retry to succeed, got: %v\n%s", tc.attempts, ahead, err, out.String())
+			}
+			want := "takes it as " + tc.want
+			if !strings.Contains(out.String(), want+"\n") {
+				t.Errorf("attempts %s, ahead %d: expected the printed report to say %q, got %q", tc.attempts, ahead, want, out.String())
+			}
+			comments := strings.Join(tracker.Comments("mw-gq6.1"), "\n")
+			if !strings.Contains(comments, want+" of ") {
+				t.Errorf("attempts %s, ahead %d: expected the comment to say %q, got %q", tc.attempts, ahead, want, comments)
+			}
+		}
+	}
+}
