@@ -170,3 +170,17 @@ func TestAddLabelIsOneBdUpdate(t *testing.T) {
 		t.Fatalf("expected one bd update t-1 --add-label hitl, got %q", got)
 	}
 }
+
+func TestRemoveLabelIsOneBdUpdate(t *testing.T) {
+	gateway, log := recorder(t)
+	if err := gateway.RemoveLabel(context.Background(), "t-1", "waiting:others"); err != nil {
+		t.Fatalf("removing the label: %v", err)
+	}
+	asked, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.TrimSpace(string(asked)); !strings.HasSuffix(got, "update t-1 --remove-label waiting:others") || strings.Count(got, "\n") != 0 {
+		t.Fatalf("expected one bd update t-1 --remove-label waiting:others, got %q", got)
+	}
+}

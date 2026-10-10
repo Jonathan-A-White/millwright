@@ -369,3 +369,26 @@ func TestAddLabelPutsALabelOnOnce(t *testing.T) {
 		t.Fatal("expected a bead the fake does not hold refused")
 	}
 }
+
+func TestRemoveLabelTakesALabelOffAndLeavesTheRest(t *testing.T) {
+	f := trackerWithOneStory(t)
+	ctx := context.Background()
+	if err := f.SetLabels("mw-gq6.3", "demo", "waiting:others"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := f.RemoveLabel(ctx, "mw-gq6.3", "waiting:others"); err != nil {
+			t.Fatalf("removing the label: %v", err)
+		}
+	}
+	detail, err := f.ShowStory(ctx, "mw-gq6.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Labels) != 1 || detail.Labels[0] != "demo" {
+		t.Fatalf("expected only demo left, got %v", detail.Labels)
+	}
+	if err := f.RemoveLabel(ctx, "mw-nope", "demo"); err == nil {
+		t.Fatal("expected a bead the fake does not hold refused")
+	}
+}

@@ -13,6 +13,7 @@ func newRootCmd() *cobra.Command {
 	}
 
 	root.AddCommand(newAfterLandingCmd())
+	root.AddCommand(newAskCmd())
 	root.AddCommand(newBriefCmd())
 	root.AddCommand(newCardCmd())
 	root.AddCommand(newCheckCmd())

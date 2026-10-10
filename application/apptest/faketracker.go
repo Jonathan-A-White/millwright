@@ -811,6 +811,33 @@ func (f *FakeTracker) AddLabel(_ context.Context, id, label string) error {
 	})
 }
 
+// RemoveLabel implements application.WorkTracker, for a story the fake holds.
+func (f *FakeTracker) RemoveLabel(_ context.Context, id, label string) error {
+	without := func(labels []string) []string {
+		var kept []string
+		for _, l := range labels {
+			if l != label {
+				kept = append(kept, l)
+			}
+		}
+		return kept
+	}
+	f.mu.Lock()
+	if _, isStory := f.stories[id]; !isStory {
+		if _, isEpic := f.defaults[id]; isEpic {
+			f.epicLabels[id] = without(f.epicLabels[id])
+			f.writes++
+			f.mu.Unlock()
+			return nil
+		}
+	}
+	f.mu.Unlock()
+	return f.write(id, func(s *fakeStory) error {
+		s.detail.Labels = without(s.detail.Labels)
+		return nil
+	})
+}
+
 // AddBlocker implements application.WorkTracker, for a story the fake holds.
 func (f *FakeTracker) AddBlocker(_ context.Context, blocked, blocker string) error {
 	return f.write(blocked, func(s *fakeStory) error {

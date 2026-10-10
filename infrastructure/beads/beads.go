@@ -476,6 +476,14 @@ func (g *Gateway) AddLabel(ctx context.Context, id, label string) error {
 	return err
 }
 
+// RemoveLabel implements application.WorkTracker: one bd update
+// --remove-label, which leaves the bead's other labels alone and a bead
+// without the label as it is.
+func (g *Gateway) RemoveLabel(ctx context.Context, id, label string) error {
+	_, err := g.call(ctx, "update", id, "--remove-label", label)
+	return err
+}
+
 // AddBlocker implements application.WorkTracker: one bd dep add, which takes
 // the blocked bead first, and leaves a dependency already there as it is.
 func (g *Gateway) AddBlocker(ctx context.Context, blocked, blocker string) error {

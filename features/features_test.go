@@ -95,6 +95,7 @@ func runFeatures(t *testing.T, paths []string) {
 // initializeScenarios registers the step definitions of every feature.
 func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeBackendSwapScenario(ctx)
+	steps.InitializeAskScenario(ctx)
 	steps.InitializeBriefScenario(ctx)
 	steps.InitializeChainStampScenario(ctx)
 	steps.InitializeCloudScenario(ctx)

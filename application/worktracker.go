@@ -575,6 +575,10 @@ type WorkTracker interface {
 	// bead already carrying it is left as it is.
 	AddLabel(ctx context.Context, id, label string) error
 
+	// RemoveLabel takes label off a bead, leaving its other labels as they are;
+	// a bead not carrying it is left as it is.
+	RemoveLabel(ctx context.Context, id, label string) error
+
 	// AddBlocker makes blocker block blocked: blocked waits on blocker, as if
 	// it had been filed with it in Needs. A blocker blocked already has is left
 	// as it is.
