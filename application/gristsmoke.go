@@ -322,6 +322,18 @@ func (r GristSmokeRecord) Line() string {
 	return fmt.Sprintf("grist smoke: %s ok %s, %d examples", r.App, r.At.UTC().Format("2006-01-02 15:04Z"), r.Examples)
 }
 
+// PostLine is the failed record as the event log posts it: one line for a
+// phone, with the rig, the time, how many examples were wrong and the hold,
+// and none of the examples' own errors, which stay in Line, for mw status.
+func (r GristSmokeRecord) PostLine() string {
+	subject, held := r.App, "no rig's stories are held"
+	if r.Rig != "" {
+		subject, held = r.Rig, "the open stories of "+r.Rig+" are held"
+	}
+	return fmt.Sprintf("grist smoke: %s FAILED %s: %d examples wrong, %s; details in mw status",
+		subject, r.At.UTC().Format("2006-01-02 15:04Z"), len(r.Failures), held)
+}
+
 // GristSmokeRecords is what mw status reads of the smoke's record.
 type GristSmokeRecords interface {
 	Records(ctx context.Context) ([]GristSmokeRecord, error)
@@ -387,12 +399,14 @@ func (b GristSmokeBook) Record(ctx context.Context, rig string, report GristSmok
 	if !record.Failed || b.Events == nil {
 		return nil
 	}
+	// The Mayor's to act on, not the Governor's: the normal lane, and a line short
+	// enough for a phone. mw status and the note hold the detail.
 	_, err = EventEmit{
-		Log: b.Events, Now: b.now, Emergency: true,
+		Log: b.Events, Now: b.now,
 		Event: events.Event{
 			Kind: events.KindJob, Actor: GristSmokeJob + "@" + b.Host,
 			From: events.JobRunning, To: events.JobFailed,
-			Detail: events.CutDetail(record.Line()),
+			Detail: record.PostLine(),
 		},
 	}.Run(ctx)
 	if err != nil {

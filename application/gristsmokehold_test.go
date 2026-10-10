@@ -4,10 +4,12 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/domain/events"
 )
 
 // mw-gq6.319: a rig whose last grist smoke failed is passed over by dispatch,
@@ -71,5 +73,45 @@ func TestAFailureByHandKeepsTheRigItHeldAndAnAppWithNoGrindsIsForgotten(t *testi
 	}
 	if records, _ := book.Records(ctx); len(records) != 0 {
 		t.Fatalf("expected an app with no grinds forgotten, got %+v", records)
+	}
+}
+
+// mw-gq6.331: a failed smoke is the Mayor's to act on, not the Governor's: its
+// event is on the normal lane, and its text is one phone-sized line that names
+// the rig, the time, how many examples were wrong and the hold, with no
+// example's own error in it. The record keeps every error for mw status.
+func TestAFailedGristSmokePostsOneShortLineOnTheNormalLane(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	log := &apptest.FakeEventLog{}
+	at := time.Date(2026, 10, 10, 2, 48, 9, 0, time.UTC)
+	book := application.GristSmokeBook{Notes: tracker, Events: log, Host: "laptop", Now: func() time.Time { return at }}
+
+	failed := application.GristSmokeReport{App: "legend", Examples: 3, Failures: []string{
+		"legend/sweep/one: the mill refused it: " + strings.Repeat("no licence ", 60),
+		"legend/sweep/two: the answer lacked a price",
+	}}
+	if err := book.Record(ctx, "legend", failed); err != nil {
+		t.Fatalf("recording the smoke: %v", err)
+	}
+	all := log.All()
+	if len(all) != 1 {
+		t.Fatalf("expected one event, got %v", all)
+	}
+	ev := all[0]
+	if ev.Lane != events.LaneNormal {
+		t.Fatalf("expected the failure on the normal lane, got %q", ev.Lane)
+	}
+	want := "grist smoke: legend FAILED 2026-10-10 02:48Z: 2 examples wrong, the open stories of legend are held; details in mw status"
+	if ev.Detail != want {
+		t.Fatalf("expected the one line %q, got %q", want, ev.Detail)
+	}
+	if strings.Contains(ev.Detail, "\n") || strings.Contains(ev.Detail, "licence") || strings.Contains(ev.Detail, "price") {
+		t.Fatalf("expected no example's error in the text, got %q", ev.Detail)
+	}
+
+	records, err := book.Records(ctx)
+	if err != nil || len(records) != 1 || !records[0].Failed || len(records[0].Failures) != 2 || !strings.Contains(records[0].Line(), "no licence") {
+		t.Fatalf("expected the record to keep the hold and every error for mw status, got %+v %v", records, err)
 	}
 }

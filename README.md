@@ -1692,7 +1692,7 @@ trade-tracker = "src/grist,src/api/grist.ts"
 ```
 
 A failed smoke after a landing posts a failed `job` event (actor
-`grist-smoke@<host>`, emergency lane) that the Mayor's follower sees, writes the
+`grist-smoke@<host>`, normal lane, one short line) that the Mayor's follower sees, writes the
 failure on the landed story, shows in `mw status` under GRIST SMOKE (a kind with
 no scenario shows there as a warning), and **holds the landing rig's open stories**:
 `mw dispatch` passes them over, saying why, and starts none of them. The hold ends
