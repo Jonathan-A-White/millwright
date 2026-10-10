@@ -56,6 +56,8 @@ const (
 	PosternNeedVerify   = "verify"
 	PosternNeedDemo     = "demo"
 	PosternNeedHands    = "hands"
+	PosternNeedDecision = "decision"
+	PosternNeedReview   = "review"
 	PosternNeedStale    = "stale"
 	PosternNeedAlarm    = "alarm"
 )
@@ -75,7 +77,8 @@ const LabelDemo = "demo"
 // since, so the view comes out the same every run.
 var posternNeedRank = map[string]int{
 	PosternNeedAlarm: 0, PosternNeedQuestion: 1, PosternNeedApprove: 2,
-	PosternNeedHands: 3, PosternNeedVerify: 4, PosternNeedStale: 5, PosternNeedDemo: 6,
+	PosternNeedDecision: 3, PosternNeedReview: 4, PosternNeedHands: 5,
+	PosternNeedVerify: 6, PosternNeedStale: 7, PosternNeedDemo: 8,
 }
 
 // PosternViewDoc is the live view's plaintext, postern's docs/protocol.md §11.
@@ -702,7 +705,7 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 		}
 		// A closed hands bead is his own doing, a step he approved and ran or a
 		// bead he closed: only a landing asks him to verify.
-		if hasLabel(d.Labels, LabelHitl) {
+		if hasHitlLabel(d.Labels) {
 			continue
 		}
 		// A story closed without landing, dropped on his word, has nothing to
@@ -738,7 +741,15 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 				}
 			}
 		}
-		if workable(d) && hasLabel(d.Labels, LabelHitl) {
+		if workable(d) && hasHitlLabel(d.Labels) {
+			kind := hitlNeedKind(d.Labels)
+			if kind != PosternNeedHands {
+				// A decision, review or verify is his to do or to say: the body
+				// asks it, and nothing runs for it, so there are no steps.
+				need := b.need(kind, e, firstKnown(d.Created, d.Updated), viewSummary(d.Description))
+				waiting = append(waiting, waitingNeed{need: need, entry: e, window: PosternViewStaleHands, fact: "not yet answered"})
+				continue
+			}
 			steps := viewHandsSteps(id, notes)
 			// A demo bead is labelled hitl only to keep it from dispatch; it
 			// is his demo card alone unless it also carries a hands step.
@@ -811,6 +822,9 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 		w := &waiting[i]
 		if w.need.Kind == PosternNeedApprove {
 			w.need.Text = approveText(w.held, releasedAt(comments[w.entry.detail.Story.ID]))
+		}
+		if w.need.Kind != PosternNeedApprove && w.need.Kind != PosternNeedHands && !w.stale(b.now) {
+			b.markNotReady(&w.need, w.entry, false)
 		}
 		if w.need.Kind == PosternNeedHands && !w.stale(b.now) {
 			steps := w.need.Steps

@@ -248,7 +248,9 @@ func (r PromptRun) facts(ctx context.Context) ([]promptSection, error) {
 	}
 
 	governor := promptSection{heading: WaitingHeading}
+	listed := map[string]bool{}
 	for _, d := range waiting {
+		listed[d.Story.ID] = true
 		governor.lines = append(governor.lines, "  "+d.Story.ID+"  "+oneLine(d.Story.Title))
 	}
 	landed := promptSection{heading: PromptLandedHeading}
@@ -256,6 +258,11 @@ func (r PromptRun) facts(ctx context.Context) ([]promptSection, error) {
 	for _, need := range doc.Needs {
 		switch need.Kind {
 		case PosternNeedVerify:
+			// A hitl:verify bead waits for the Governor, listed above; only a
+			// landing is listed as landed.
+			if listed[need.Bead] {
+				continue
+			}
 			landed.lines = append(landed.lines, "  "+need.Bead+"  "+oneLine(need.Title))
 			landed.lines = append(landed.lines, indentLines(need.Text, "    ")...)
 		case PosternNeedDemo:

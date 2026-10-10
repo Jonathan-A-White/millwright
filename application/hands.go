@@ -243,7 +243,7 @@ func (h HandsAdd) Run(ctx context.Context, req HandsAddRequest) (HandsStepRecord
 	if err := h.Tracker.CommentOnStory(ctx, req.Bead, handsStepComment(req.Step, replaced)); err != nil {
 		return HandsStepRecord{}, fmt.Errorf("mw hands add: commenting the step on %s: %w", req.Bead, err)
 	}
-	if !found[0].Hitl() {
+	if !hasLabel(found[0].Labels, LabelHitl) {
 		if err := h.Tracker.AddLabel(ctx, req.Bead, LabelHitl); err != nil {
 			return HandsStepRecord{}, fmt.Errorf("mw hands add: labelling %s %s: %w", req.Bead, LabelHitl, err)
 		}

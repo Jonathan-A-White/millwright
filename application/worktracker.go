@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -26,6 +27,45 @@ const (
 // dispatcher ever starts a session for it. It says who a story is for, which a
 // Path's host cannot: hosts are always named, never "any" or "the Governor".
 const LabelHitl = "hitl"
+
+// LabelHitlKindPrefix starts the label that says what kind of need a hitl story
+// is: hitl:hands, hitl:decision, hitl:review or hitl:verify. A story is marked
+// with hitl plus exactly one of them; a bare hitl is a hands need.
+const LabelHitlKindPrefix = "hitl:"
+
+// hitlKinds are the kinds a hitl:<kind> label may name, which are also the
+// kinds of need the Governor's view lists for them.
+var hitlKinds = []string{PosternNeedHands, PosternNeedDecision, PosternNeedReview, PosternNeedVerify}
+
+// hitlKindsOf is the kinds the labels name with hitl:<kind>, in label order and
+// each once. A hitl:<other> label names no kind.
+func hitlKindsOf(labels []string) []string {
+	var kinds []string
+	for _, label := range labels {
+		label = strings.ToLower(strings.TrimSpace(label))
+		kind, ok := strings.CutPrefix(label, LabelHitlKindPrefix)
+		if !ok || !slices.Contains(hitlKinds, kind) || slices.Contains(kinds, kind) {
+			continue
+		}
+		kinds = append(kinds, kind)
+	}
+	return kinds
+}
+
+// hasHitlLabel reports whether the labels mark a story as worked with the
+// Governor present: hitl, or hitl:<kind> for a kind of need.
+func hasHitlLabel(labels []string) bool {
+	return hasLabel(labels, LabelHitl) || len(hitlKindsOf(labels)) > 0
+}
+
+// hitlNeedKind is the kind of need the labels make of a hitl story: the first
+// hitl:<kind> label's kind, and hands when it has none.
+func hitlNeedKind(labels []string) string {
+	if kinds := hitlKindsOf(labels); len(kinds) > 0 {
+		return kinds[0]
+	}
+	return PosternNeedHands
+}
 
 // DefaultPriority is the priority a story has when nobody set one, and what a
 // tracker that reports none is taken to mean. Priorities run from 0, the most
@@ -234,12 +274,19 @@ func (d StoryDetail) Closed() bool {
 // Hitl reports whether this story is worked with the Governor present, which
 // no dispatcher may take and which is not a session for a host's cap to count.
 func (d StoryDetail) Hitl() bool {
-	for _, label := range d.Labels {
-		if strings.EqualFold(strings.TrimSpace(label), LabelHitl) {
-			return true
-		}
-	}
-	return false
+	return hasHitlLabel(d.Labels)
+}
+
+// HitlKind is the kind of need this hitl story is: hands, decision, review or
+// verify. A story with no hitl:<kind> label is hands.
+func (d StoryDetail) HitlKind() string {
+	return hitlNeedKind(d.Labels)
+}
+
+// HitlKinds are the kinds its hitl:<kind> labels name, more than one of which
+// is a mistake `mw status` warns of.
+func (d StoryDetail) HitlKinds() []string {
+	return hitlKindsOf(d.Labels)
 }
 
 // Merged is the epic's defaults overlaid with the story's own overrides,

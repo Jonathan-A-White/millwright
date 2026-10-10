@@ -378,6 +378,9 @@ type StatusReport struct {
 	// with the Governor present, so neither a dispatcher's to take nor a session
 	// for Running to show. They are in no other list, most urgent first.
 	Waiting []StoryDetail
+	// Warnings are things a person should put right, each one line: a bead for
+	// the Governor with two hitl:<kind> labels.
+	Warnings []string
 	// WaitingOnMayor are the needs the view says wait on the Mayor, oldest
 	// first (one with no known age last), and NeedsAt is the clock their age is read against.
 	WaitingOnMayor []PosternViewNeed
@@ -534,10 +537,15 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		}
 	}
 
+	var byKind []StoryDetail
 	for _, detail := range work.ReadyOn(s.Host) {
 		if detail.Hitl() {
 			// Listed below with every other bead for the Governor, whichever host
-			// its Path names.
+			// its Path names. One marked only hitl:<kind> is not found by the
+			// label hitl, so it is carried here.
+			if !hasLabel(detail.Labels, LabelHitl) {
+				byKind = append(byKind, detail)
+			}
 			continue
 		}
 		report.Ready = append(report.Ready, detail)
@@ -551,6 +559,20 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		return report, fmt.Errorf("reading what waits for the Governor: %w", err)
 	}
 	report.Waiting = append(report.Waiting, governors...)
+	for _, detail := range byKind {
+		listed := false
+		for _, have := range report.Waiting {
+			listed = listed || have.Story.ID == detail.Story.ID
+		}
+		if !listed {
+			report.Waiting = append(report.Waiting, detail)
+		}
+	}
+	for _, detail := range report.Waiting {
+		if kinds := detail.HitlKinds(); len(kinds) > 1 {
+			report.Warnings = append(report.Warnings, fmt.Sprintf("%s has %d hitl kinds: %s", detail.Story.ID, len(kinds), strings.Join(kinds, ", ")))
+		}
+	}
 	sort.SliceStable(report.Waiting, func(i, j int) bool {
 		return report.Waiting[i].Priority < report.Waiting[j].Priority
 	})
@@ -1027,7 +1049,14 @@ func (r StatusReport) String() string {
 	if len(r.Waiting) > 0 {
 		clip(&b, fmt.Sprintf("%s (%d)", WaitingHeading, len(r.Waiting)))
 		for _, d := range r.Waiting {
-			writeStory(&b, d, readyOrClaimed(d))
+			note := readyOrClaimed(d)
+			if kinds := d.HitlKinds(); len(kinds) > 0 {
+				note += ", " + strings.Join(kinds, " + ")
+			}
+			writeStory(&b, d, note)
+		}
+		for _, warning := range r.Warnings {
+			wrapInto(&b, "  ", "warning: "+warning)
 		}
 		b.WriteString("\n")
 	}
