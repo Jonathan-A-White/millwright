@@ -317,4 +317,53 @@ func (n Next) springTester(ctx context.Context, c *closeOut, report *NextReport,
 		report.Notes = append(report.Notes, fmt.Sprintf("the Tester story %s was filed and is still held: %v", id, err))
 	}
 	report.TesterFiled = id
+	report.Notes = append(report.Notes, HoldDemosForTester(ctx, n.Tracker, n.Rules, c.path.Rig, c.detail.EpicID, id)...)
+}
+
+// HoldDemosForTester makes every open story of the epic that carries one of the
+// rig's last-story labels (epic_last_story_labels) wait on the Tester story just
+// filed under the epic, so the demo stays the epic's last story and is shown to
+// the Governor after the Tester has driven the landing. A labelled story that
+// is in progress or closed is left alone. It returns what the report should
+// say: a note for each story left alone and for each failure; an epic with no
+// such story, or a rig that names no such label, gives none.
+func HoldDemosForTester(ctx context.Context, tracker WorkTracker, rules EpicRules, rig, epicID, testerID string) []string {
+	if rules == nil || epicID == "" {
+		return nil
+	}
+	requirements, err := rules.EpicRequirements(ctx, rig)
+	if err != nil {
+		return []string{fmt.Sprintf("the Tester story %s was not made a need of the epic's last story: what %s requires of its epics could not be read: %v", testerID, rig, err)}
+	}
+	if len(requirements.LastStoryLabels) == 0 {
+		return nil
+	}
+	epic, err := tracker.ShowEpic(ctx, epicID)
+	if err != nil {
+		return []string{fmt.Sprintf("the Tester story %s was not made a need of the epic's last story: %s could not be read: %v", testerID, epicID, err)}
+	}
+	var notes []string
+	for _, story := range epic.Stories {
+		if story.Story.ID == testerID || !carriesAny(story.Labels, requirements.LastStoryLabels) {
+			continue
+		}
+		if story.Status != StatusOpen {
+			notes = append(notes, fmt.Sprintf("the last story %s is %s, so it does not wait on the Tester story %s", story.Story.ID, story.Status, testerID))
+			continue
+		}
+		if err := tracker.AddBlocker(ctx, story.Story.ID, testerID); err != nil {
+			notes = append(notes, fmt.Sprintf("the last story %s could not be made to wait on the Tester story %s: %v", story.Story.ID, testerID, err))
+		}
+	}
+	return notes
+}
+
+// carriesAny reports whether labels holds any of want.
+func carriesAny(labels, want []string) bool {
+	for _, w := range want {
+		if hasLabel(labels, w) {
+			return true
+		}
+	}
+	return false
 }

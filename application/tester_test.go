@@ -1,10 +1,15 @@
 package application_test
 
 import (
+	"context"
+	"errors"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
 )
 
@@ -51,5 +56,86 @@ func TestATesterStoryNamesTheLandedStoryOnItsOwnLine(t *testing.T) {
 		!application.IsTesterStory(application.StoryDetail{Story: domain.Story{Overrides: domain.Path{Formula: "tester"}}}) ||
 		application.IsTesterStory(application.StoryDetail{}) {
 		t.Error("expected a story labelled tester, or worked by the tester formula, and only those, to be a Tester story")
+	}
+}
+
+func testerEpic(t *testing.T) (*apptest.FakeTracker, *apptest.FakeEpicRules) {
+	t.Helper()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("mw-e", domain.Path{Rig: "lampas"})
+	tracker.AddStory("mw-e", domain.Story{ID: "mw-e.1", Title: "Build it"})
+	tracker.AddStory("mw-e", domain.Story{ID: "mw-e.2", Title: "Show it"})
+	if err := tracker.SetLabels("mw-e.2", application.LabelDemo); err != nil {
+		t.Fatal(err)
+	}
+	tracker.Needs("mw-e.2", "mw-e.1")
+	tracker.AddStory("mw-e", domain.Story{ID: "mw-e.3", Title: "Test: Build it"})
+	rules := apptest.NewFakeEpicRules()
+	rules.Require("lampas", domain.EpicRequirements{LastStoryLabels: []string{"demo"}})
+	return tracker, rules
+}
+
+func needsOf(t *testing.T, tracker *apptest.FakeTracker, id string) []string {
+	t.Helper()
+	epic, err := tracker.ShowEpic(context.Background(), "mw-e")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range epic.Stories {
+		if s.Story.ID == id {
+			return s.Needs
+		}
+	}
+	t.Fatalf("no story %s in the epic", id)
+	return nil
+}
+
+func TestATesterStoryFiledUnderAnEpicIsANeedOfItsOpenDemo(t *testing.T) {
+	tracker, rules := testerEpic(t)
+	notes := application.HoldDemosForTester(context.Background(), tracker, rules, "lampas", "mw-e", "mw-e.3")
+	if len(notes) != 0 {
+		t.Errorf("expected no notes, got %q", notes)
+	}
+	needs := needsOf(t, tracker, "mw-e.2")
+	if !slices.Contains(needs, "mw-e.3") || !slices.Contains(needs, "mw-e.1") {
+		t.Errorf("expected the demo to wait on mw-e.1 and the Tester mw-e.3, got %q", needs)
+	}
+}
+
+func TestADemoAlreadyInProgressOrClosedGetsNoNewNeedAndANote(t *testing.T) {
+	for _, status := range []string{apptest.StatusInProgress, apptest.StatusClosed} {
+		tracker, rules := testerEpic(t)
+		if err := tracker.SetStatus("mw-e.2", status); err != nil {
+			t.Fatal(err)
+		}
+		notes := application.HoldDemosForTester(context.Background(), tracker, rules, "lampas", "mw-e", "mw-e.3")
+		if needs := needsOf(t, tracker, "mw-e.2"); slices.Contains(needs, "mw-e.3") {
+			t.Errorf("%s: the demo should not wait on the Tester, got %q", status, needs)
+		}
+		if len(notes) != 1 || !strings.Contains(notes[0], "mw-e.2") || !strings.Contains(notes[0], status) {
+			t.Errorf("%s: expected one note naming the demo and its status, got %q", status, notes)
+		}
+	}
+}
+
+func TestAnEpicWithNoDemoStoryTakesTheTesterWithoutANote(t *testing.T) {
+	tracker, rules := testerEpic(t)
+	if err := tracker.SetLabels("mw-e.2"); err != nil {
+		t.Fatal(err)
+	}
+	if notes := application.HoldDemosForTester(context.Background(), tracker, rules, "lampas", "mw-e", "mw-e.3"); len(notes) != 0 {
+		t.Errorf("expected no notes, got %q", notes)
+	}
+	if notes := application.HoldDemosForTester(context.Background(), tracker, nil, "lampas", "mw-e", "mw-e.3"); len(notes) != 0 {
+		t.Errorf("expected no notes without rules, got %q", notes)
+	}
+}
+
+func TestADemoThatCannotBeHeldLeavesANote(t *testing.T) {
+	tracker, rules := testerEpic(t)
+	rules.Err = errors.New("no vault")
+	notes := application.HoldDemosForTester(context.Background(), tracker, rules, "lampas", "mw-e", "mw-e.3")
+	if len(notes) != 1 || !strings.Contains(notes[0], "no vault") {
+		t.Errorf("expected one note carrying the failure, got %q", notes)
 	}
 }

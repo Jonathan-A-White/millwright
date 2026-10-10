@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -48,6 +49,8 @@ func registerTesterSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^that Tester story is labelled "([^"]*)" and pathed to "([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)", formula "([^"]*)"$`, c.thatTesterStoryIsPathed)
 	ctx.Then(`^that Tester story's description names "([^"]*)" and quotes "([^"]*)"$`, c.thatTesterStorysDescription)
 	ctx.Then(`^the close-out report names that Tester story$`, c.theReportNamesTheTesterStory)
+	ctx.Given(`^the rig names "([^"]*)" as the label of an epic's last story$`, c.theRigNamesTheLastStoryLabel)
+	ctx.Then(`^the story "([^"]*)" waits on that Tester story$`, c.theStoryWaitsOnTheTester)
 	ctx.Then(`^no Tester story was filed$`, c.noTesterStoryWasFiled)
 	ctx.Then(`^the tester report says for "([^"]*)":$`, c.theTesterReportSays)
 	ctx.Then(`^the tester report gives "([^"]*)" its fuel "([^"]*)"$`, c.theTesterReportGivesFuel)
@@ -336,4 +339,35 @@ func (c *nextContext) theTesterReportGivesFuel(id, fuel string) error {
 		}
 	}
 	return fmt.Errorf("expected a line giving %s its fuel %q, got:\n%s", id, fuel, printed)
+}
+
+// theRigNamesTheLastStoryLabel writes the rig's file in the vault with the label
+// its epics' last story carries (epic_last_story_labels).
+func (c *nextContext) theRigNamesTheLastStoryLabel(label string) error {
+	dir := filepath.Join(c.vault, application.RigsDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	line := fmt.Sprintf("epic_last_story_labels = [%q]\n", label)
+	return os.WriteFile(filepath.Join(dir, c.rigKey()+vault.RigFileExt), []byte(line), 0o644)
+}
+
+func (c *nextContext) theStoryWaitsOnTheTester(id string) error {
+	tester, err := c.theTester()
+	if err != nil {
+		return err
+	}
+	epic, err := c.tracker.ShowEpic(context.Background(), c.lastEpic)
+	if err != nil {
+		return err
+	}
+	for _, s := range epic.Stories {
+		if s.Story.ID == id {
+			if !slices.Contains(s.Needs, tester.Story.ID) {
+				return fmt.Errorf("expected %s to wait on %s, it waits on %q", id, tester.Story.ID, s.Needs)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("no story %s in %s", id, c.lastEpic)
 }

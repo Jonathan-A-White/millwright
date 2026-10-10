@@ -25,6 +25,18 @@ Feature: A one-week Tester trial
     And that Tester story's description names "mw-l.1" and quotes "2. Tap Needs you: the list opens."
     And the close-out report names that Tester story
 
+  Scenario: The Tester story is a need of the epic's open demo, so the demo stays last
+    Given a Tester trial on "lampas" until "2026-09-25T12:00:00Z", on "sonnet" at "high"
+    And the rig names "demo" as the label of an epic's last story
+    And the story "mw-l.2" is planned and ready to be worked here
+    And the story "mw-l.2" is labelled "demo" for the trial
+    And the story "mw-l.1" has been worked in its own worktree
+    And the session of "mw-l.1" reported a plain success
+    And the story "mw-l.1" carries the closing comment "Done and green.\nHOW TO CHECK IT, for the Governor:\n1. Open the app."
+    When mw closes out "mw-l.1"
+    Then one Tester story "Test: The story mw-l.1" was filed under "mw-l", held and then let go
+    And the story "mw-l.2" waits on that Tester story
+
   Scenario Outline: No Tester story is sprung outside the trial or without HOW TO CHECK IT
     Given a Tester trial on "<rigs>" until "<until>", on "sonnet" at "high"
     And the story "mw-l.1" has been worked in its own worktree
