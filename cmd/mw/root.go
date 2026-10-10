@@ -27,6 +27,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newHomeCmd())
 	root.AddCommand(newInitCmd())
 	root.AddCommand(newMailCmd())
+	root.AddCommand(newMemoryCmd())
 	root.AddCommand(newMillhandCmd())
 	root.AddCommand(newDeputyCmd())
 	root.AddCommand(newNextCmd())

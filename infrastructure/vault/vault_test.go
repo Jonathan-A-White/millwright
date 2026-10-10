@@ -402,3 +402,35 @@ func TestRigMemorySizesOfARigKeptAsFactsIsTheSizeOfTheRender(t *testing.T) {
 		t.Errorf("expected %v, got %v", want, sizes)
 	}
 }
+
+func TestRigFactFilesWriteAndReadBack(t *testing.T) {
+	dir := t.TempDir()
+	v := vault.New(dir)
+	ctx := context.Background()
+
+	if _, _, known, err := v.ReadRigFacts(ctx, "builder", "ghost"); err != nil || known {
+		t.Fatalf("a rig with no folder: known=%v err=%v, want unknown and no error", known, err)
+	}
+
+	rigDir := filepath.Join(dir, vault.SeatsDir, "builder", vault.RigsDir, "demo")
+	if err := os.MkdirAll(rigDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, files, known, err := v.ReadRigFacts(ctx, "builder", "demo"); err != nil || !known || len(files) != 0 {
+		t.Fatalf("a rig folder with no facts yet: files=%v known=%v err=%v", files, known, err)
+	}
+
+	path, err := v.WriteRigFact(ctx, "builder", "demo", "one", "text\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(rigDir, "facts", "one.md"); path != want {
+		t.Fatalf("wrote %s, want %s", path, want)
+	}
+	if _, files, _, err := v.ReadRigFacts(ctx, "builder", "demo"); err != nil || files["one.md"] != "text\n" {
+		t.Fatalf("read back %v, %v", files, err)
+	}
+	if _, err := v.WriteRigFact(ctx, "builder", "demo", "../escape", "x"); err == nil {
+		t.Fatal("a slug that reaches outside the facts folder was written")
+	}
+}

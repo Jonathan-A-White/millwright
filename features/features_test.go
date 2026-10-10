@@ -119,6 +119,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeInitScenario(ctx)
 	steps.InitializeMailBeadsScenario(ctx)
 	steps.InitializeMailScenario(ctx)
+	steps.InitializeMemoryScenario(ctx)
 	steps.InitializeNextScenario(ctx)
 	steps.InitializePathScenario(ctx)
 	steps.InitializeAfterLandingScenario(ctx)
