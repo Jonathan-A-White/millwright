@@ -116,13 +116,18 @@ func NoteFromTitle(title, rig string) string {
 
 // AddToChangelogJSON puts the entry at the top of the JSON array that existing
 // holds, newest first, and returns the whole file. An absent or blank file is
-// created; one that is not an array of entries is an error.
+// created; one that is not an array of entries is an error. When the newest
+// entry already carries the entry's story or its text (a Builder seeded the
+// story's note), it is replaced by the entry, not written a second time.
 func AddToChangelogJSON(existing []byte, entry ChangelogEntry) ([]byte, error) {
 	entries := []ChangelogEntry{}
 	if len(bytes.TrimSpace(existing)) > 0 {
 		if err := json.Unmarshal(existing, &entries); err != nil {
 			return nil, fmt.Errorf("it is not a JSON array of entries: %w", err)
 		}
+	}
+	if len(entries) > 0 && (entries[0].Story == entry.Story && entry.Story != "" || entries[0].Text == entry.Text) {
+		entries = entries[1:]
 	}
 	entries = append([]ChangelogEntry{entry}, entries...)
 	var out bytes.Buffer
@@ -141,6 +146,9 @@ func AddToChangelogJSON(existing []byte, entry ChangelogEntry) ([]byte, error) {
 // absent or blank file is created with ChangelogTitle; a file that opens with a
 // "# " title but has no "## " heading yet gets the entry after what it holds;
 // one with neither keeps what it holds below the entry, under ChangelogTitle.
+// When the newest version block already holds a line with the entry's text (a
+// Builder seeded the story's note), that block is replaced by the entry's, not
+// written a second time.
 func AddToChangelogMarkdown(existing []byte, entry ChangelogEntry) []byte {
 	kind := "New"
 	if entry.Kind == ChangelogFixed {
@@ -152,6 +160,14 @@ func AddToChangelogMarkdown(existing []byte, entry ChangelogEntry) []byte {
 	head, rest := text, ""
 	if at := firstVersionHeading(text); at >= 0 {
 		head, rest = text[:at], text[at:]
+		newest, older := rest, ""
+		if next := firstVersionHeading(rest[len("## "):]); next >= 0 {
+			newest, older = rest[:len("## ")+next], rest[len("## ")+next:]
+		}
+		if blockSays(newest, entry.Text) {
+			rest = older
+			text = head + rest
+		}
 	}
 	if strings.TrimSpace(head) != "" && (rest != "" || strings.HasPrefix(strings.TrimSpace(head), "# ")) {
 		out := strings.TrimRight(head, "\n") + "\n\n" + block
@@ -183,4 +199,17 @@ func firstVersionHeading(text string) int {
 		return at + 1
 	}
 	return -1
+}
+
+// blockSays reports whether a version block of the markdown changelog has a
+// "- New: <text>" or "- Fixed: <text>" line saying text.
+func blockSays(block, text string) bool {
+	for _, line := range strings.Split(block, "\n") {
+		for _, kind := range []string{"New", "Fixed"} {
+			if strings.TrimSpace(line) == fmt.Sprintf("- %s: %s", kind, text) {
+				return true
+			}
+		}
+	}
+	return false
 }

@@ -1120,6 +1120,72 @@ Feature: Closing out a finished story and carrying on
     Then the tip of "main" at the rig's origin is the commit "Version 0.1.3 (mw-gq6.1)"
     And "public/changelog.json" and "CHANGELOG.md" are absent from "main" at the rig's origin
 
+  # mw-gq6.334: a Builder may seed the changelog entry for its own story. The
+  # landing renames that entry to the version it lands at, never adds a second.
+  Scenario: A story's own seeded changelog entry is renamed to the landing version, not written twice
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.0"
+    And the rig's file in the vault names the version files "package.json" and "package-lock.json"
+    And the rig's file in the vault also names the changelog files "public/changelog.json" and "CHANGELOG.md"
+    And the work of "mw-gq6.1" is rebased onto that main
+    And the story "mw-gq6.1" seeded a changelog entry "0.1.0" saying "Pick a verse to hear it"
+    And the story "mw-gq6.1" carries the closing comment "What's new: New: Pick a verse to hear it"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the tip of "main" at the rig's origin is the commit "Version 0.1.1 (mw-gq6.1)"
+    And "main" at the rig's origin holds version "0.1.1" in "package.json" and "package-lock.json"
+    And "public/changelog.json" at the top of "main" at the rig's origin is the entry "0.1.1", "2026-09-18", "mw-gq6.1", "new", "Pick a verse to hear it"
+    And "public/changelog.json" at the rig's origin lists exactly 1 entry
+    And "CHANGELOG.md" on "main" at the rig's origin reads:
+      """
+      # What's new
+
+      ## 0.1.1
+      _2026-09-18_
+      - New: Pick a verse to hear it
+      """
+
+  Scenario: A rig's first landing, whose story adds the version files and a 0.1.0 entry, still has the patch raised
+    Given the rig's file in the vault names the version files "package.json" and "package-lock.json"
+    And the rig's file in the vault also names the changelog files "public/changelog.json" and "CHANGELOG.md"
+    And the story "mw-gq6.1" added the version files at "0.1.0"
+    And the story "mw-gq6.1" seeded a changelog entry "0.1.0" saying "Pick a verse to hear it"
+    And the story "mw-gq6.1" carries the closing comment "What's new: New: Pick a verse to hear it"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the tip of "main" at the rig's origin is the commit "Version 0.1.1 (mw-gq6.1)"
+    And "main" at the rig's origin holds version "0.1.1" in "package.json" and "package-lock.json"
+    And "public/changelog.json" at the top of "main" at the rig's origin is the entry "0.1.1", "2026-09-18", "mw-gq6.1", "new", "Pick a verse to hear it"
+    And "public/changelog.json" at the rig's origin lists exactly 1 entry
+    And "CHANGELOG.md" on "main" at the rig's origin reads:
+      """
+      # What's new
+
+      ## 0.1.1
+      _2026-09-18_
+      - New: Pick a verse to hear it
+      """
+
+  Scenario: A story that raised the version itself and seeded its entry has it kept once
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.2"
+    And the rig's file in the vault names the version files "package.json" and "package-lock.json"
+    And the rig's file in the vault also names the changelog files "public/changelog.json" and "CHANGELOG.md"
+    And the work of "mw-gq6.1" is rebased onto that main
+    And the story "mw-gq6.1" raised the version to "0.2.0" itself
+    And the story "mw-gq6.1" seeded a changelog entry "0.2.0" saying "A whole new reading view"
+    And the story "mw-gq6.1" carries the closing comment "What's new: New: A whole new reading view"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then "main" at the rig's origin holds version "0.2.0" in "package.json" and "package-lock.json"
+    And "public/changelog.json" at the rig's origin lists exactly 1 entry
+    And "CHANGELOG.md" on "main" at the rig's origin reads:
+      """
+      # What's new
+
+      ## 0.2.0
+      _2026-09-18_
+      - New: A whole new reading view
+      """
+
   Scenario: A story that raised the version itself has its entry under that version, in a What's new commit
     Given the rig's main holds a package.json and a package-lock.json at version "0.1.2"
     And the rig's file in the vault names the version files "package.json" and "package-lock.json"

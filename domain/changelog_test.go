@@ -132,3 +132,31 @@ func TestAnEntryGoesAfterTheIntroOfAChangelogWithNoVersionYet(t *testing.T) {
 		t.Errorf("changelog = %q, want %q", got, want)
 	}
 }
+
+func TestAnEntryTheNewestOneAlreadySaysReplacesItInBothChangelogs(t *testing.T) {
+	entry := ChangelogEntry{Version: "0.1.1", Date: "2026-09-18", Story: "mw-a.1", Kind: ChangelogNew, Text: "Verses repeat"}
+
+	seeded := []byte(`[{"version":"0.1.0","date":"2026-09-17","story":"mw-a.1","kind":"new","text":"Verses repeat"},{"version":"0.0.9","date":"2026-09-01","story":"mw-z.1","kind":"new","text":"Older"}]`)
+	got, err := AddToChangelogJSON(seeded, entry)
+	if err != nil || strings.Count(string(got), `"version"`) != 2 || strings.Contains(string(got), "0.1.0") {
+		t.Errorf("AddToChangelogJSON over a seeded entry = %s, %v; want it renamed to 0.1.1 with Older kept", got, err)
+	}
+	other := []byte(`[{"version":"0.1.0","date":"2026-09-17","story":"mw-z.1","kind":"new","text":"Something else"}]`)
+	if got, _ := AddToChangelogJSON(other, entry); strings.Count(string(got), `"version"`) != 2 {
+		t.Errorf("AddToChangelogJSON over another story's entry = %s; want both kept", got)
+	}
+
+	for name, existing := range map[string]string{
+		"title then block": "# What's new\n\n## 0.1.0\n_2026-09-17_\n- New: Verses repeat\n",
+		"no title":         "## 0.1.0\n_2026-09-17_\n- New: Verses repeat\n",
+	} {
+		md := string(AddToChangelogMarkdown([]byte(existing), entry))
+		if strings.Count(md, "## ") != 1 || !strings.Contains(md, "## 0.1.1\n") || strings.Contains(md, "0.1.0") {
+			t.Errorf("%s: AddToChangelogMarkdown over a seeded block = %q; want one block at 0.1.1", name, md)
+		}
+	}
+	older := "# What's new\n\n## 0.1.0\n_2026-09-17_\n- New: Verses repeat\n\n## 0.0.9\n_2026-09-01_\n- New: Older\n"
+	if md := string(AddToChangelogMarkdown([]byte(older), entry)); strings.Count(md, "## ") != 2 || !strings.Contains(md, "- New: Older") {
+		t.Errorf("AddToChangelogMarkdown kept or lost the wrong blocks: %q", md)
+	}
+}
