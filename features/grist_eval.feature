@@ -58,6 +58,25 @@ Feature: mw grist eval, trying a grind on photos with known answers
     When mw grist eval runs on the models "haiku"
     Then the row for "drawer.jpg" on "haiku" has 3 hits of 3, misses "", extras "" and 1 unsure
 
+  Scenario: An answer that lists lines[].text is scored on those texts
+    Given the model "haiku" answers for "drawer.jpg" with this answer:
+      """
+      {"schemaVersion":"1.1","responseType":"receipt-result","placeName":"Hardware","items":[],
+       "lines":[{"text":"Scissors"},{"text":"  TAPE "},{"text":"hammer"}]}
+      """
+    When mw grist eval runs on the models "haiku"
+    Then the row for "drawer.jpg" on "haiku" has 2 hits of 3, misses "glue", extras "hammer" and 0 unsure
+    And the row for "drawer.jpg" on "haiku" does not say "no names to score"
+
+  Scenario: An answer with neither items nor lines says there are no names to score
+    Given the model "haiku" answers for "drawer.jpg" with this answer:
+      """
+      {"schemaVersion":"1.1","responseType":"receipt-result","placeName":"Hardware","items":[],"total":12.5}
+      """
+    When mw grist eval runs on the models "haiku"
+    Then the row for "drawer.jpg" on "haiku" says "no names to score" and counts no misses
+    And the printed table names "drawer.jpg", "haiku", "no names to score" and "hits"
+
   Scenario: A photo with no answer file is skipped with a note
     Given a photo "attic.webp" with no file listing what is expected
     And the model "haiku" answers for "drawer.jpg" with the items "scissors" at a cost of 0.010 USD

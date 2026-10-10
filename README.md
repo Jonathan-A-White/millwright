@@ -1791,7 +1791,7 @@ key unless told to, and nothing prints a private key; `--backend` defaults to
 `postern_backend`. See `features/grist_send.feature`.
 
 `mw grist eval --grind <rig>/grinds/<kind>.json --photos <dir> [--models haiku,sonnet] [--out <dir>]` grinds each photo
-that has a `<name>.txt` of expected names once per model, serially, as the mill would, and scores hits, misses, extras and unsure items with seconds, cost and tokens per photo and model.
+that has a `<name>.txt` of expected names once per model, serially, as the mill would, and scores the names in the answer's `items[].name` or `lines[].text` (an answer with neither says "no names to score") as hits, misses, extras and unsure items with seconds, cost and tokens per photo and model.
 It writes `eval-<UTC>.jsonl` and `.md` under `--out` and never touches the backend, the mill's counts or the cap; `--help` says the rest. See `features/grist_eval.feature`.
 
 `mw grist score --engine local --target "the cat sat" --audio clip.webm [--lang en]`

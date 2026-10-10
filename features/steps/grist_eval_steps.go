@@ -63,6 +63,8 @@ func InitializeGristEvalScenario(ctx *godog.ScenarioContext) {
 
 	ctx.Then(`^the eval has (\d+) rows?$`, c.theEvalHasRows)
 	ctx.Then(`^the row for "([^"]*)" on "([^"]*)" has (\d+) hits of (\d+), misses "([^"]*)", extras "([^"]*)" and (\d+) unsure$`, c.theRowHas)
+	ctx.Then(`^the row for "([^"]*)" on "([^"]*)" says "([^"]*)" and counts no misses$`, c.theRowSays)
+	ctx.Then(`^the row for "([^"]*)" on "([^"]*)" does not say "([^"]*)"$`, c.theRowDoesNotSay)
 	ctx.Then(`^the row for "([^"]*)" on "([^"]*)" spent ([0-9.]+) USD and (\d+) tokens in and (\d+) out$`, c.theRowSpent)
 	ctx.Then(`^the row for "([^"]*)" on "([^"]*)" failed with an error and counts of zero$`, c.theRowFailed)
 	ctx.Then(`^the summary for "([^"]*)" has (\d+) photos, (\d+) hits of (\d+) and a mean cost of ([0-9.]+) USD$`, c.theSummaryHas)
@@ -247,6 +249,28 @@ func (c *gristEvalContext) theRowHas(photo, model string, hits, expected int, mi
 		strings.Join(r.Missed, ", ") != misses || strings.Join(r.Extra, ", ") != extras {
 		return fmt.Errorf("expected %d hits of %d, misses %q, extras %q, %d unsure; got %d of %d, misses %q, extras %q, %d unsure",
 			hits, expected, misses, extras, unsure, r.Hits, r.Expected, strings.Join(r.Missed, ", "), strings.Join(r.Extra, ", "), r.Unsure)
+	}
+	return nil
+}
+
+func (c *gristEvalContext) theRowSays(photo, model, text string) error {
+	r, err := c.row(photo, model)
+	if err != nil {
+		return err
+	}
+	if r.Note != text || r.Error != "" || r.Hits != 0 || r.Expected != 0 || len(r.Missed) != 0 {
+		return fmt.Errorf("expected the note %q and no misses counted, got %+v", text, r)
+	}
+	return nil
+}
+
+func (c *gristEvalContext) theRowDoesNotSay(photo, model, text string) error {
+	r, err := c.row(photo, model)
+	if err != nil {
+		return err
+	}
+	if r.Note == text {
+		return fmt.Errorf("expected the row not to say %q, got %+v", text, r)
 	}
 	return nil
 }

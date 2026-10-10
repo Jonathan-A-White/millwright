@@ -49,6 +49,10 @@ type GristEvalRequest struct {
 	Out string
 }
 
+// GristEvalNoNames is what a row says of an answer holding no names to score,
+// in place of counting every expected name a miss.
+const GristEvalNoNames = "no names to score"
+
 // GristEvalRow is one photo on one model. A grind that failed has Error set
 // and every count zero.
 type GristEvalRow struct {
@@ -63,6 +67,7 @@ type GristEvalRow struct {
 	Seconds  float64         `json:"seconds"`
 	CostUSD  float64         `json:"costUsd"`
 	Fuel     Fuel            `json:"fuel"`
+	Note     string          `json:"note,omitempty"`
 	Error    string          `json:"error,omitempty"`
 	Answer   json.RawMessage `json:"answer,omitempty"`
 }
@@ -134,8 +139,12 @@ func (r GristEvalReport) tables(bar string, aligned bool) string {
 	var b strings.Builder
 	rows := [][]string{{"photo", "model", "hits/expected", "misses", "extras", "unsure", "seconds", "cost USD", "tokens in", "tokens out"}}
 	for _, row := range r.Rows {
+		score := fmt.Sprintf("%d/%d", row.Hits, row.Expected)
+		if row.Note != "" {
+			score = row.Note
+		}
 		rows = append(rows, []string{
-			row.Photo, row.Model, fmt.Sprintf("%d/%d", row.Hits, row.Expected), fmt.Sprint(len(row.Missed)),
+			row.Photo, row.Model, score, fmt.Sprint(len(row.Missed)),
 			fmt.Sprint(len(row.Extra)), fmt.Sprint(row.Unsure), fmt.Sprintf("%.1f", row.Seconds),
 			fmt.Sprintf("%.4f", row.CostUSD), Thousands(row.Fuel.Input), Thousands(row.Fuel.Output),
 		})
@@ -156,6 +165,8 @@ func (r GristEvalReport) tables(bar string, aligned bool) string {
 		switch {
 		case row.Error != "":
 			fmt.Fprintf(&names, "- %s on %s failed: %s\n", row.Photo, row.Model, row.Error)
+		case row.Note != "":
+			fmt.Fprintf(&names, "- %s on %s: %s\n", row.Photo, row.Model, row.Note)
 		case len(row.Missed) > 0 || len(row.Extra) > 0:
 			fmt.Fprintf(&names, "- %s on %s: missed [%s]; extra [%s]\n", row.Photo, row.Model, strings.Join(row.Missed, ", "), strings.Join(row.Extra, ", "))
 		}
@@ -323,6 +334,10 @@ func (e GristEval) grindPhoto(ctx context.Context, plain GristPlaintext, photo e
 		return fail(GristReasonNoAnswer)
 	}
 	row.Answer = result.Answer
+	if len(answered) == 0 {
+		row.Note = GristEvalNoNames
+		return row
+	}
 	row.Unsure = unsure
 	row.Expected = len(photo.expected)
 	for _, want := range photo.expected {
@@ -477,7 +492,8 @@ func expectedNames(text string) []string {
 }
 
 // evalAnswered is every name an answer holds, normalised and once each in
-// the order seen: each item, each container and each container's items. It
+// the order seen: each item, each container, each container's items and each
+// line's text (a receipt-reconcile answer lists lines, not items). It
 // counts the items marked unsure, which are answered all the same.
 func evalAnswered(answer json.RawMessage) (names []string, unsure int, ok bool) {
 	type item struct {
@@ -490,6 +506,9 @@ func evalAnswered(answer json.RawMessage) (names []string, unsure int, ok bool) 
 			Name  string `json:"name"`
 			Items []item `json:"items"`
 		} `json:"containers"`
+		Lines []struct {
+			Text string `json:"text"`
+		} `json:"lines"`
 	}
 	if json.Unmarshal(answer, &got) != nil {
 		return nil, 0, false
@@ -513,6 +532,9 @@ func evalAnswered(answer json.RawMessage) (names []string, unsure int, ok bool) 
 				unsure++
 			}
 		}
+	}
+	for _, l := range got.Lines {
+		add(l.Text)
 	}
 	return names, unsure, true
 }
