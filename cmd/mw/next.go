@@ -191,7 +191,7 @@ func newNextCmd() *cobra.Command {
 				Landing:   worktrees,
 				Checks:    rig.NewChecks(rig.WithCommands(tests), rig.WithNice(nice)),
 				Load:      hostload.Proc{SwapSample: benchmarkSwapSample},
-				Slot:      rig.NewSlots(),
+				Slot:      rig.NewSlots(gateScaledSlotWait(vault.Benchmarks{Vault: files}, rigs, host, benchmarkLimits(bench))),
 				Vault:     files,
 				Rules:     files,
 				Files:     files,

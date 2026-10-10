@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"path/filepath"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -8,6 +10,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
 	"github.com/Jonathan-A-White/millwright/infrastructure/procs"
+	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
@@ -238,5 +241,31 @@ func benchmarkLimits(s config.BenchmarkSettings) application.BenchmarkSettings {
 	return application.BenchmarkSettings{
 		UsualGates: s.UsualGates, ParWindow: s.ParWindow, ParMin: s.ParMin,
 		CalibrationWindow: s.CalibrationWindow, ErrorFlagPercent: s.ErrorFlagPercent, OverParFactor: s.OverParFactor,
+	}
+}
+
+// gateScaledSlotWait is how a close-out's wait on one holder of a rig's merge
+// slot scales with the rig's own gate on this host (mw-gq6.350): twice the
+// slower of its usual and latest gate, never under rig.SlotWait. rigs is where
+// each rig is checked out, to name the rig a slot belongs to. A history that
+// cannot be read, or a slot of a directory no rig is checked out in, waits
+// rig.SlotWait.
+func gateScaledSlotWait(book application.BenchmarkBook, rigs map[string]string, host string, s application.BenchmarkSettings) rig.SlotOption {
+	return rig.WithSlotWaitFor(gateScaledWait(book, rigs, host, s))
+}
+
+func gateScaledWait(book application.BenchmarkBook, rigs map[string]string, host string, s application.BenchmarkSettings) func(ctx context.Context, rigDir string) time.Duration {
+	return func(ctx context.Context, rigDir string) time.Duration {
+		for name, checkout := range rigs {
+			if filepath.Clean(checkout) != filepath.Clean(rigDir) {
+				continue
+			}
+			history, err := book.Recent(ctx)
+			if err != nil {
+				return rig.SlotWait
+			}
+			return application.SlotWaitFor(history, name, host, s, rig.SlotWait)
+		}
+		return rig.SlotWait
 	}
 }

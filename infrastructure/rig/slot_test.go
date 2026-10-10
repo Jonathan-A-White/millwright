@@ -276,3 +276,94 @@ func TestWaitingForAHeldSlotSaysWhoHasIt(t *testing.T) {
 		t.Errorf("expected one notice naming the holder, got %q", said)
 	}
 }
+
+// aClock is a clock a test winds by hand: sleeping is moving it on, so a wait of
+// half an hour takes no time, and a hook runs at each look at the slot.
+type aClock struct {
+	at     time.Time
+	onTick func(at time.Time)
+}
+
+func (c *aClock) now() time.Time { return c.at }
+
+func (c *aClock) sleep(_ context.Context, d time.Duration) error {
+	c.at = c.at.Add(d)
+	if c.onTick != nil {
+		c.onTick(c.at)
+	}
+	return nil
+}
+
+func TestACloseOutWaitsOutAHolderForAsLongAsTheRigsGateTakes(t *testing.T) {
+	dir := aRigDir(t)
+	held := holdSlotByHand(t, dir, "closing out mw-landing")
+	clock := &aClock{at: time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)}
+	release := clock.at.Add(25 * time.Minute)
+	clock.onTick = func(at time.Time) {
+		if !at.Before(release) {
+			held.release()
+		}
+	}
+	var asked string
+	slots := rig.NewSlots(
+		rig.WithSlotPoll(time.Minute),
+		rig.WithSlotClock(clock.now, clock.sleep),
+		rig.WithSlotWaitFor(func(_ context.Context, rigDir string) time.Duration {
+			asked = rigDir
+			return 58 * time.Minute
+		}),
+	)
+
+	taken, err := slots.Take(context.Background(), dir, "closing out mw-next")
+	if err != nil {
+		t.Fatalf("expected a close-out to wait 25 minutes for a holder when the rig's gate takes that long, got %v", err)
+	}
+	defer taken.Release(context.Background())
+	if asked != dir {
+		t.Errorf("expected the wait to be worked out for the rig %q, was asked about %q", dir, asked)
+	}
+}
+
+func TestAHolderPastTheScaledWaitStopsTheCloseOutAndTheMessageNamesTheWait(t *testing.T) {
+	dir := aRigDir(t)
+	held := holdSlotByHand(t, dir, "closing out mw-stuck")
+	defer held.release()
+	clock := &aClock{at: time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)}
+	slots := rig.NewSlots(
+		rig.WithSlotPoll(time.Minute),
+		rig.WithSlotClock(clock.now, clock.sleep),
+		rig.WithSlotWaitFor(func(context.Context, string) time.Duration { return 58 * time.Minute }),
+	)
+
+	_, err := slots.Take(context.Background(), dir, "closing out mw-me")
+	if err == nil {
+		t.Fatal("expected a holder that outlasts the scaled wait to stop the close-out")
+	}
+	if !strings.Contains(err.Error(), "closing out mw-stuck") || !strings.Contains(err.Error(), "58m0s") {
+		t.Errorf("expected the failure to name the holder and the wait used, got %q", err)
+	}
+}
+
+func TestARigWithNoGateHistoryWaitsTheDefaultPerHolder(t *testing.T) {
+	dir := aRigDir(t)
+	held := holdSlotByHand(t, dir, "closing out mw-stuck")
+	defer held.release()
+	clock := &aClock{at: time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)}
+	start := clock.at
+	slots := rig.NewSlots(
+		rig.WithSlotPoll(time.Minute),
+		rig.WithSlotClock(clock.now, clock.sleep),
+		rig.WithSlotWaitFor(func(context.Context, string) time.Duration { return 0 }),
+	)
+
+	_, err := slots.Take(context.Background(), dir, "closing out mw-me")
+	if err == nil {
+		t.Fatal("expected a stuck holder to stop the close-out")
+	}
+	if waited := clock.at.Sub(start); waited != rig.SlotWait {
+		t.Errorf("expected a wait of %s with no gate history, waited %s", rig.SlotWait, waited)
+	}
+	if !strings.Contains(err.Error(), "20m0s") {
+		t.Errorf("expected the failure to name the wait used, got %q", err)
+	}
+}
