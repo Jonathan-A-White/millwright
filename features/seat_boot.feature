@@ -111,3 +111,45 @@ Feature: Booting a session into a seat
       | and a second line           |
     And the command is one shell line
     And the command line holds no newline
+
+  Scenario: A rig kept as facts boots from its about text and its current facts
+    Given the vault holds the "builder" seat's about text for the rig "millwright"
+    And the rig "millwright" holds these facts:
+      | slug       | subject | kind     | status     | sentence                    | source   |
+      | bd-dash-c  | bd      | gotcha   | current    | Point bd at the vault.      | mw-gq6.1 |
+      | git-rebase | git     | gotcha   | current    | Rebase before landing.      | mw-gq6.2 |
+      | one-per    | layout  | decision | current    | Facts live one per file.    | mw-6ww.9 |
+      | old-bd     | bd      | gotcha   | superseded | OLD SUPERSEDED SENTENCE.    | mw-gq6.3 |
+      | gone       | bd      | gotcha   | retired    | OLD RETIRED SENTENCE.       | mw-gq6.4 |
+    When the session that works the story is assembled for the "builder" seat
+    Then the boot file holds, in this order:
+      | About millwright, in facts             |
+      | ## Decisions                           |
+      | - [layout] Facts live one per file. (mw-6ww.9) |
+      | ## Gotchas                             |
+      | - [bd] Point bd at the vault. (mw-gq6.1) |
+      | - [git] Rebase before landing. (mw-gq6.2) |
+      | make test passes                       |
+    And the boot file holds none of:
+      | OLD SUPERSEDED SENTENCE |
+      | OLD RETIRED SENTENCE    |
+      | Go is at /usr/local/go/bin |
+      | subject:                |
+      | status:                 |
+      | ---                     |
+      | bd-dash-c               |
+
+  Scenario: A fact file with a bad status is skipped and named, and the boot succeeds
+    Given the vault holds the "builder" seat's about text for the rig "millwright"
+    And the rig "millwright" holds these facts:
+      | slug      | subject | kind   | status  | sentence               | source   |
+      | bd-dash-c | bd      | gotcha | current | Point bd at the vault. | mw-gq6.1 |
+      | broken    | bd      | gotcha | stale   | NEVER SHOWN.           | mw-gq6.2 |
+    When the session that works the story is assembled for the "builder" seat
+    Then the session is assembled
+    And the boot file holds, in this order:
+      | - [bd] Point bd at the vault. (mw-gq6.1) |
+      | broken.md                                |
+      | make test passes                         |
+    And the boot file holds none of:
+      | NEVER SHOWN |

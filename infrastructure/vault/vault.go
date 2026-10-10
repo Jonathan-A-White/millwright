@@ -5,6 +5,8 @@
 //
 //	seats/<seat>/charter.md        always read at boot
 //	seats/<seat>/rigs/<rig>.md     read only for the rig being worked
+//	seats/<seat>/rigs/<rig>/       or, for a rig kept as facts: about.md and
+//	                               facts/<slug>.md, one typed fact each
 //	seats/<seat>/ledger.md         never read at boot
 //	seats/<seat>/postmortems/      never read at boot
 //	runs/<story-id>/               one directory per story worked
@@ -21,10 +23,13 @@ package vault
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/Jonathan-A-White/millwright/application"
 )
@@ -91,6 +96,13 @@ func (v *Vault) Seat(_ context.Context, seat, rig string) (application.Seat, err
 	if err := safeName("rig", rig); err != nil {
 		return application.Seat{}, err
 	}
+	if about, files, ok, err := v.readFacts(seat, rig); err != nil {
+		return application.Seat{}, err
+	} else if ok {
+		read.Memory, read.HasFacts = about, true
+		read.Facts, read.SkippedFacts = application.LoadRigFacts(files)
+		return read, nil
+	}
 	memory, err := os.ReadFile(filepath.Join(v.dir, SeatsDir, seat, RigsDir, rig+application.MemoryExt))
 	switch {
 	case os.IsNotExist(err):
@@ -103,9 +115,44 @@ func (v *Vault) Seat(_ context.Context, seat, rig string) (application.Seat, err
 	return read, nil
 }
 
-// RigMemorySizes implements application.Vault: the size of every file in the
-// seat's rigs directory that is a memory of a rig, sorted by rig. It stats the
-// files and reads none of them. A seat with no rigs directory yet has none.
+// readFacts reads a rig kept as facts: the text of its about.md and the text
+// of every .md file in its facts folder, by file name. ok is false for a rig
+// with no facts folder, which is kept as one memory file. A fact file that
+// cannot be read is handed on empty, so that it is skipped and named like any
+// other fact that is not whole.
+func (v *Vault) readFacts(seat, rig string) (about string, files map[string]string, ok bool, err error) {
+	rigDir := filepath.Join(v.dir, SeatsDir, seat, RigsDir, rig)
+	entries, err := os.ReadDir(filepath.Join(rigDir, application.FactsDir))
+	if os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR) {
+		return "", nil, false, nil
+	}
+	if err != nil {
+		return "", nil, false, fmt.Errorf("listing the %s seat's facts about the rig %s: %w", seat, rig, err)
+	}
+	aboutText, err := os.ReadFile(filepath.Join(rigDir, application.AboutFile))
+	if err != nil && !os.IsNotExist(err) {
+		return "", nil, false, fmt.Errorf("reading the %s seat's about text for the rig %s: %w", seat, rig, err)
+	}
+	files = map[string]string{}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), application.MemoryExt) {
+			continue
+		}
+		text, err := os.ReadFile(filepath.Join(rigDir, application.FactsDir, entry.Name()))
+		if err != nil {
+			text = nil
+		}
+		files[entry.Name()] = string(text)
+	}
+	return string(aboutText), files, true, nil
+}
+
+// RigMemorySizes implements application.Vault: the size of every memory of a
+// rig in the seat's rigs directory, sorted by rig. A rig kept as facts (a
+// directory with a facts folder) is the size of the render a Builder reads,
+// which takes reading its files; a rig kept as one file is the file's size,
+// statted and not read, and the archive it is pruned into is not counted. A
+// seat with no rigs directory yet has none.
 func (v *Vault) RigMemorySizes(_ context.Context, seat string) ([]application.RigMemorySize, error) {
 	if err := safeName("seat", seat); err != nil {
 		return nil, err
@@ -118,10 +165,28 @@ func (v *Vault) RigMemorySizes(_ context.Context, seat string) ([]application.Ri
 		return nil, fmt.Errorf("listing the %s seat's memories of its rigs: %w", seat, err)
 	}
 
+	factRigs := map[string]int{}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		about, files, ok, err := v.readFacts(seat, entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			facts, _ := application.LoadRigFacts(files)
+			factRigs[entry.Name()] = len(application.RenderRigMemory(about, facts))
+		}
+	}
+
 	var sizes []application.RigMemorySize
+	for rig, bytes := range factRigs {
+		sizes = append(sizes, application.RigMemorySize{Rig: rig, Bytes: bytes, Facts: true})
+	}
 	for _, entry := range entries {
 		rig, ok := strings.CutSuffix(entry.Name(), application.MemoryExt)
-		if !ok || entry.IsDir() || strings.HasSuffix(rig, application.ArchiveSuffix) {
+		if _, kept := factRigs[rig]; !ok || entry.IsDir() || kept || strings.HasSuffix(rig, application.ArchiveSuffix) {
 			continue
 		}
 		info, err := entry.Info()
@@ -130,6 +195,7 @@ func (v *Vault) RigMemorySizes(_ context.Context, seat string) ([]application.Ri
 		}
 		sizes = append(sizes, application.RigMemorySize{Rig: rig, Bytes: int(info.Size())})
 	}
+	sort.Slice(sizes, func(i, j int) bool { return sizes[i].Rig < sizes[j].Rig })
 	return sizes, nil
 }
 

@@ -196,6 +196,8 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the report says how to re-path a story stranded on the host "([^"]*)"$`, c.theReportSaysHowToRePathFrom)
 	ctx.Then(`^nothing pathed to another host was re-pathed or touched$`, c.nothingElsewhereWasTouched)
 	ctx.Then(`^the report says "([^"]*)" needs "([^"]*)" and nothing else$`, c.theReportSaysNeedsAndNothingElse)
+	ctx.Given(`^the builder's memory of the rig "([^"]*)" is kept as facts that render to (\d+) bytes$`, c.theBuildersMemoryIsKeptAsFacts)
+	ctx.Then(`^the report says to retire or supersede the facts of the rig "([^"]*)"$`, c.theReportSaysToRetireOrSupersede)
 	ctx.Then(`^the report has no RIG MEMORY section$`, c.theReportHasNoRigMemorySection)
 	ctx.Then(`^the report warns that the memory of the rig "([^"]*)" is (\d+) of (\d+) bytes$`, c.theReportWarnsAboutTheRigsMemory)
 	ctx.Then(`^the report does not warn about the memory of the rig "([^"]*)"$`, c.theReportDoesNotWarnAboutTheRigsMemory)
@@ -503,6 +505,42 @@ func (c *statusContext) theBuildersMemoryOfTheRigIs(rig, bytesText string) error
 // into, beside the memory itself.
 func (c *statusContext) theBuildersArchiveOfTheRigIs(rig, bytesText string) error {
 	return c.writeRigFile(rig+"-archive"+application.MemoryExt, bytesText)
+}
+
+// theBuildersMemoryIsKeptAsFacts writes the rig as a folder: an about text of
+// exactly the size given and one retired fact, which the render leaves out, so
+// that what a Builder reads is that size and no more.
+func (c *statusContext) theBuildersMemoryIsKeptAsFacts(rig, bytesText string) error {
+	size, err := strconv.Atoi(bytesText)
+	if err != nil {
+		return fmt.Errorf("the size %q is not a number: %w", bytesText, err)
+	}
+	dir, err := c.workspace()
+	if err != nil {
+		return err
+	}
+	facts := filepath.Join(dir, application.SeatsDir, statusSeat, application.RigsDir, rig, "facts")
+	if err := os.MkdirAll(facts, 0o755); err != nil {
+		return fmt.Errorf("making the Builder's facts directory: %w", err)
+	}
+	retired := "---\nsubject: bd\nkind: gotcha\nstatus: retired\nsource: mw-1\nsince: 2026-09-01\n---\n\nGone.\n"
+	if err := os.WriteFile(filepath.Join(facts, "gone.md"), []byte(retired), 0o644); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(facts, "..", "about.md"), []byte(strings.Repeat("x", size)), 0o644)
+}
+
+func (c *statusContext) theReportSaysToRetireOrSupersede(rig string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	want := rig + " "
+	for _, line := range strings.Split(c.report.String(), "\n") {
+		if strings.HasPrefix(line, "  "+want) && strings.HasSuffix(line, "bytes: retire or supersede (Mayor)") {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected %s to be told to retire or supersede, got:\n%s", rig, c.report.String())
 }
 
 func (c *statusContext) writeRigFile(name, bytesText string) error {

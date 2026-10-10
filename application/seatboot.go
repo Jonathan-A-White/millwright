@@ -29,8 +29,25 @@ type Seat struct {
 	Name    string
 	Charter string
 	Rig     string
-	// Memory is the seat's memory of Rig, empty when the seat has none.
+	// Memory is the seat's memory of Rig, empty when the seat has none. For a rig
+	// kept as facts it is the rig's about text.
 	Memory string
+	// HasFacts is whether the rig is kept as facts (its facts folder is there).
+	// Then Facts are the facts that parsed, and SkippedFacts the files that did
+	// not, each as "<file>: <why>".
+	HasFacts     bool
+	Facts        []RigFact
+	SkippedFacts []string
+}
+
+// RigMemory is what a session reads of the seat's memory of its rig: the render
+// of the about text and facts when the rig is kept as facts, else the memory
+// file as it is.
+func (s Seat) RigMemory() string {
+	if s.HasFacts {
+		return RenderRigMemory(s.Memory, s.Facts)
+	}
+	return s.Memory
 }
 
 // The vault's own layout, as far as anything outside the vault adapter needs to
@@ -55,6 +72,9 @@ const (
 type RigMemorySize struct {
 	Rig   string
 	Bytes int
+	// Facts is whether the rig is kept as facts, in which case Bytes is the size
+	// of the render a Builder reads, not of any one file.
+	Facts bool
 }
 
 // SeatWork is everything one story is allowed to have changed in the vault,
@@ -507,9 +527,19 @@ func BootPrompt(seat Seat, detail StoryDetail) string {
 	fmt.Fprintf(&b, "# The %s seat\n\n", seat.Name)
 	section(&b, seat.Charter)
 
-	if seat.Memory != "" {
+	memory := seat.RigMemory()
+	if memory != "" || len(seat.SkippedFacts) > 0 {
 		fmt.Fprintf(&b, "# The %s seat's memory of the rig %s\n\n", seat.Name, seat.Rig)
-		section(&b, seat.Memory)
+		if memory != "" {
+			section(&b, memory)
+		}
+		if len(seat.SkippedFacts) > 0 {
+			b.WriteString("Fact files skipped because they are malformed (tell the Mayor):\n\n")
+			for _, skipped := range seat.SkippedFacts {
+				fmt.Fprintf(&b, "- %s\n", skipped)
+			}
+			b.WriteString("\n")
+		}
 	}
 
 	fmt.Fprintf(&b, "# Your story: %s\n\n", detail.Story.ID)

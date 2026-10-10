@@ -422,7 +422,13 @@ A session is primed by `application.SeatBoot`: it reads the seat from the vault
 — `seats/<seat>/charter.md`, always, and `seats/<seat>/rigs/<rig>.md` when the
 seat has worked this rig before — writes the boot file to
 `runs/<story-id>/boot.md`, and asks the harness for the command line that
-starts the session. Nothing else the vault holds is read at boot, because a
+starts the session. A rig can instead be kept as facts: `seats/<seat>/rigs/<rig>/about.md`
+and `facts/<slug>.md`, one fact a file (front matter of `subject`, `kind`
+gotcha or decision, `status` current, recheck, superseded or retired, `source`,
+`since`, then one sentence). The boot renders the about text, `## Decisions` and
+`## Gotchas` as `- [subject] sentence (source)` lines, current facts only and no
+front matter; a malformed fact file is skipped and named in the boot file. A rig
+with no `facts/` folder boots from `<rig>.md` as before. Nothing else the vault holds is read at boot, because a
 fresh session pays for every line of it (ADR 0003). `infrastructure/claude` is
 the harness adapter: a headless `claude --print --output-format json` primed
 with `--append-system-prompt-file`, its result redirected to
@@ -2473,7 +2479,10 @@ five parts, and two more when there is something to say.
   (`seats/builder/rigs/<rig>.md`) is larger than `rig_memory_bytes`, 8000 by
   default: `millwright 8412/8000 bytes: prune (Mayor)`. Every Builder reads that
   file at boot, so its size is fuel paid on every story, and this is what tells
-  the Mayor to prune it. The section is left out when no rig is over, a rig with
+  the Mayor to prune it. A rig kept as facts (`seats/builder/rigs/<rig>/about.md`
+  plus one typed fact a file in `facts/`) is measured on what a Builder reads of
+  it, the about text and its current facts, and its line ends `retire or
+  supersede (Mayor)`. The section is left out when no rig is over, a rig with
   no memory file is not an error, and the archive a memory is pruned into
   (`<rig>-archive.md`) is never counted.
 - **FUEL today** — the tokens the Builder's ledger charged on lines dated today,

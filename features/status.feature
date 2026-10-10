@@ -335,6 +335,16 @@ Feature: mw status
     And the report warns that the memory of the rig "millwright" is 600 of 500 bytes
     And the report does not warn about the memory of the rig "fellowship"
 
+  Scenario: A rig kept as facts is measured on what a Builder would read, and the fix named is retiring
+    Given the builder's memory of the rig "millwright" is kept as facts that render to 8412 bytes
+    And the builder's memory of the rig "fellowship" is kept as facts that render to 300 bytes
+    When mw status reads the host
+    Then reading status succeeds
+    And the report warns that the memory of the rig "millwright" is 8412 of 8000 bytes
+    And the report says to retire or supersede the facts of the rig "millwright"
+    And the report does not warn about the memory of the rig "fellowship"
+    And every line of the report is at most 60 columns wide
+
   Scenario: An archive of a rig's memory is never counted, however large
     Given the builder's memory of the rig "millwright" is 200 bytes
     And the builder's archive of the rig "millwright" is 90000 bytes

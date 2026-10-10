@@ -50,16 +50,14 @@ domain/(events): stdlib · application/: use cases, ports · infra/: adapters ·
 | Seat{Context,Up,Reap,Handover} | application/seat{context,up,reap,handover}.go | mw seat <sub> - cmd/mw/seat.go | features/seat_{context,up,reap}.feature |
 | Talk{Call,Model,Say,Wait} | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go | mw talk <sub> - cmd/mw/talk.go | features/talk_*.feature |
 | Millhand, Deputy, MillhandTick | application/millhand.go, application/deputy.go, application/millhandtick.go | mw millhand [tick]/deputy - cmd/mw/millhand.go, cmd/mw/deputy.go, cmd/mw/millhandtick.go | features/{millhand,deputy,millhand_tick}.feature |
-| Secrets{Put,Get,List} | application/secrets.go | mw secrets - cmd/mw/secrets.go | features/secrets.feature |
-| Watch, Doctor | application/watch.go, application/doctor.go | mw watch/doctor - cmd/mw/watch.go, cmd/mw/doctor.go | features/{watch,doctor}.feature |
-| SeatBoot, Init | application/seatboot.go, application/init.go | Dispatch, Next; mw init - cmd/mw/init.go | features/{seat_boot,init}.feature |
+| Secrets{Put,Get,List}, Hands{Add,List}, Watch, Doctor | application/secrets.go, application/hands.go, application/watch.go, application/doctor.go | mw secrets/hands/watch/doctor - cmd/mw/secrets.go, cmd/mw/hands.go, cmd/mw/watch.go, cmd/mw/doctor.go | features/{secrets,hands,watch,doctor}.feature |
+| SeatBoot, RigFact, ParseRigFact, RenderRigMemory, Init | application/seatboot.go, application/rigfacts.go, application/init.go | Dispatch, Next; mw init - cmd/mw/init.go | features/{seat_boot,init}.feature |
 | Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern <sub> - cmd/mw/posternview.go, cmd/mw/posternbead.go | features/postern_*.feature |
 | Event{Follow,Emit,Tail,Ship,Wait,Nudge,Spring,Control,Trim} | application/eventfollow.go, application/eventlog.go, application/eventship.go, application/eventwait.go, application/eventnudge.go, application/eventsubscribe.go, application/eventspring.go, application/eventcontrol.go, application/eventtrim.go | mw events <sub> - cmd/mw/events.go | features/event_follow.feature |
-| Hands{Add,List} | application/hands.go | mw hands <sub> - cmd/mw/hands.go | features/hands.feature |
 | Postern{Serve,Nginx,Mirror} | application/posternhand.go, application/posternmirror.go | mw postern <sub> - cmd/mw/postern.go, cmd/mw/posternmirror.go | features/postern_serve.feature |
 | Prompt{Save,List,Show,Run}, Cards | application/prompt.go | mw prompt/card - cmd/mw/prompt.go, cmd/mw/card.go | features/{prompt,card}.feature |
 | Grist{Key,Grind,Send,Eval,Score,Runs,Stats,Smoke,Level} | application/grist.go, application/gristlevel.go, application/gristgrind.go, application/gristsend.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go, application/gristroom.go, application/gristsmoke.go | mw grist <sub> - cmd/mw/grist.go, cmd/mw/gristsmoke.go | features/{grist{,_send,_eval,_audio,_concurrent,_forward,_level,_smoke},scorer}.feature |
 
 cmd/mw/root.go, cmd/mw/version.go
 
-changelog_files: infra/rig/version.go writes domain/changelog.go + the rig's files.
+changelog_files: infra/rig/version.go writes domain/changelog.go + rig files.

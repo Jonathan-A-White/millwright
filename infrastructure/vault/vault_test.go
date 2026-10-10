@@ -339,3 +339,66 @@ func TestAHostFileIsWhatTheSeatKeepsForThatHostAndEmptyWhenItKeepsNone(t *testin
 		t.Error("expected a host that reaches outside the vault to be refused")
 	}
 }
+
+// aFactsVault is a vault whose builder keeps the rig "kiln" as facts: an about
+// text, one current gotcha, one retired, and one file that is not a fact.
+func aFactsVault(t *testing.T) string {
+	t.Helper()
+	dir := aVault(t)
+	facts := filepath.Join(dir, "seats", "builder", "rigs", "kiln", "facts")
+	if err := os.MkdirAll(facts, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	fact := func(status, sentence string) string {
+		return "---\nsubject: oven\nkind: gotcha\nstatus: " + status + "\nsource: mw-1\nsince: 2026-09-01\n---\n\n" + sentence + "\n"
+	}
+	for name, contents := range map[string]string{
+		"../about.md":   "About the kiln.\n",
+		"hot.md":        fact("current", "It runs hot."),
+		"cold.md":       fact("retired", "It runs cold."),
+		"not-fact.md":   "no front matter here\n",
+		"ignored.txt":   "not a markdown file",
+		"../../kiln.md": "the old single file, ignored once facts/ exists",
+	} {
+		if err := os.WriteFile(filepath.Join(facts, filepath.FromSlash(name)), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+func TestSeatOfARigKeptAsFactsReadsTheAboutTextAndTheFacts(t *testing.T) {
+	seat, err := vault.New(aFactsVault(t)).Seat(context.Background(), "builder", "kiln")
+	if err != nil {
+		t.Fatalf("reading the seat: %v", err)
+	}
+	if !seat.HasFacts || seat.Memory != "About the kiln.\n" {
+		t.Errorf("expected the about text of a facts rig, got %+v", seat)
+	}
+	if len(seat.Facts) != 2 || seat.Facts[0].Slug != "cold" || seat.Facts[1].Slug != "hot" {
+		t.Errorf("expected the two whole facts, got %+v", seat.Facts)
+	}
+	if len(seat.SkippedFacts) != 1 || !strings.HasPrefix(seat.SkippedFacts[0], "not-fact.md: ") {
+		t.Errorf("expected the bad file to be named, got %q", seat.SkippedFacts)
+	}
+}
+
+func TestRigMemorySizesOfARigKeptAsFactsIsTheSizeOfTheRender(t *testing.T) {
+	dir := aFactsVault(t)
+	seat, err := vault.New(dir).Seat(context.Background(), "builder", "kiln")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sizes, err := vault.New(dir).RigMemorySizes(context.Background(), "builder")
+	if err != nil {
+		t.Fatalf("sizing the memories: %v", err)
+	}
+	want := []application.RigMemorySize{
+		{Rig: "fellowship", Bytes: len("what the builder knows about fellowship")},
+		{Rig: "kiln", Bytes: len(seat.RigMemory()), Facts: true},
+		{Rig: "millwright", Bytes: len("what the builder knows about millwright")},
+	}
+	if len(sizes) != len(want) || sizes[0] != want[0] || sizes[1] != want[1] || sizes[2] != want[2] {
+		t.Errorf("expected %v, got %v", want, sizes)
+	}
+}

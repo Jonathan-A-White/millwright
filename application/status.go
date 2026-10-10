@@ -1141,7 +1141,11 @@ func (r StatusReport) String() string {
 	if len(r.RigMemory) > 0 {
 		clip(&b, RigMemoryHeading)
 		for _, size := range r.RigMemory {
-			clip(&b, fmt.Sprintf("  %s %d/%d bytes: prune (Mayor)", size.Rig, size.Bytes, r.RigMemoryBudget))
+			fix := "prune"
+			if size.Facts {
+				fix = "retire or supersede"
+			}
+			clip(&b, fmt.Sprintf("  %s %d/%d bytes: %s (Mayor)", size.Rig, size.Bytes, r.RigMemoryBudget, fix))
 		}
 		b.WriteString("\n")
 	}

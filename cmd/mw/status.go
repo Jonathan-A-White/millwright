@@ -40,7 +40,7 @@ func newStatusCmd() *cobra.Command {
 			"HOSTS.\n\n" +
 			"When a rig's memory in the Builder's seat is larger than the budget (config\n" +
 			"`rig_memory_bytes`, default 8000), a RIG MEMORY section says which and by how much: every\n" +
-			"session pays for that file at boot, so the Mayor is due to prune it. It is left out when\n" +
+			"session pays for that file at boot, so the Mayor is due to prune it (or, for a rig kept as facts, retire or supersede some). It is left out when\n" +
 			"none is over.\n\n" +
 			"The BEADS line warns when this host's beads database is past its budget (config\n" +
 			"`beads_budget_bytes`, default 1500000000).\n\n" +

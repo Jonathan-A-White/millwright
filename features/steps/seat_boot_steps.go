@@ -46,6 +46,8 @@ func InitializeSeatBootScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a vault$`, c.aVault)
 	ctx.Given(`^the vault holds the charter of the "([^"]*)" seat$`, c.theVaultHoldsTheCharterOf)
 	ctx.Given(`^the vault holds the "([^"]*)" seat's memory of the rig "([^"]*)"$`, c.theVaultHoldsTheMemoryOf)
+	ctx.Given(`^the vault holds the "([^"]*)" seat's about text for the rig "([^"]*)"$`, c.theVaultHoldsTheAboutTextOf)
+	ctx.Given(`^the rig "([^"]*)" holds these facts:$`, c.theRigHoldsTheseFacts)
 	ctx.Given(`^the "([^"]*)" seat has no memory of the rig "([^"]*)"$`, c.theSeatHasNoMemoryOf)
 	ctx.Given(`^the vault also holds a ledger, a postmortem and a memory of another rig$`, c.theVaultAlsoHoldsTheRest)
 	ctx.Given(`^a story "([^"]*)" with the path:$`, c.aStoryWithThePath)
@@ -55,6 +57,7 @@ func InitializeSeatBootScenario(ctx *godog.ScenarioContext) {
 
 	ctx.When(`^the session that works the story is assembled for the "([^"]*)" seat$`, c.theSessionIsAssembled)
 
+	ctx.Then(`^the session is assembled$`, c.theSessionIsAssembledOK)
 	ctx.Then(`^the boot file holds, in this order:$`, c.theBootFileHoldsInThisOrder)
 	ctx.Then(`^the boot file holds none of:$`, c.theBootFileHoldsNoneOf)
 	ctx.Then(`^the command line carries "([^"]*)"$`, c.theCommandLineCarries)
@@ -107,6 +110,34 @@ func (c *seatBootContext) theVaultHoldsTheCharterOf(seat string) error {
 
 func (c *seatBootContext) theVaultHoldsTheMemoryOf(seat, rig string) error {
 	return c.write(fixtureRigMemory, "seats", seat, "rigs", rig+".md")
+}
+
+func (c *seatBootContext) theVaultHoldsTheAboutTextOf(seat, rig string) error {
+	return c.write("About "+rig+", in facts\n", "seats", seat, "rigs", rig, "about.md")
+}
+
+// theRigHoldsTheseFacts writes one fact file a row into the builder's facts
+// folder for the rig. A kind or status is written as the table gives it, so
+// that a scenario can hold a file with a bad one.
+func (c *seatBootContext) theRigHoldsTheseFacts(rig string, table *godog.Table) error {
+	header := table.Rows[0].Cells
+	for _, row := range table.Rows[1:] {
+		cell := map[string]string{}
+		for i, h := range header {
+			cell[h.Value] = row.Cells[i].Value
+		}
+		text := fmt.Sprintf("---\nsubject: %s\nkind: %s\nstatus: %s\nsource: %s\nsince: 2026-09-01\n---\n\n%s\n",
+			cell["subject"], cell["kind"], cell["status"], cell["source"], cell["sentence"])
+		if err := c.write(text, "seats", "builder", "rigs", rig, "facts", cell["slug"]+".md"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *seatBootContext) theSessionIsAssembledOK() error {
+	_, err := c.assembled()
+	return err
 }
 
 func (c *seatBootContext) theSeatHasNoMemoryOf(seat, rig string) error {
