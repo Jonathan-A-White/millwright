@@ -31,6 +31,13 @@ type reportContext struct {
 	benchmarks *apptest.FakeBenchmarks
 	now        time.Time
 
+	// refused are the ids of the refused stories rigLanded filed, by rig.
+	refused map[string][]string
+	// stories are the ids addStory filed.
+	stories []string
+	// wrote is what mw report changed in the tracker or the vault, if anything.
+	wrote []string
+
 	printed bytes.Buffer
 	err     error
 }
@@ -40,7 +47,7 @@ func InitializeReportScenario(ctx *godog.ScenarioContext) {
 	c := &reportContext{}
 
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
-		*c = reportContext{tracker: apptest.NewFakeTracker(), benchmarks: &apptest.FakeBenchmarks{}}
+		*c = reportContext{tracker: apptest.NewFakeTracker(), benchmarks: &apptest.FakeBenchmarks{}, refused: map[string][]string{}}
 		return ctx, nil
 	})
 
@@ -52,11 +59,14 @@ func InitializeReportScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the report stories:$`, c.theStories)
 	ctx.Given(`^the report ledger holds the rows:$`, c.theLedgerRows)
 	ctx.Given(`^the report story "([^"]*)" has the cause "([^"]*)"$`, c.theStoryHasTheCause)
+	ctx.Given(`^every refused story of "([^"]*)" has the cause "([^"]*)"$`, c.everyRefusedStoryHasTheCause)
 	ctx.Given(`^the report story "([^"]*)" carries the comment "([^"]*)"$`, c.theStoryCarriesTheComment)
 	ctx.Given(`^the report ledger also holds a landed row for "([^"]*)" on "([^"]*)"$`, c.aLandedRowOn)
 	ctx.When(`^mw report runs with "([^"]*)"$`, c.reportRuns)
 	ctx.Then(`^the report prints the line "([^"]*)"$`, c.printsTheLine)
 	ctx.Then(`^the report prints "([^"]*)" under "([^"]*)"$`, c.printsUnder)
+	ctx.Then(`^the report prints no line starting "([^"]*)"$`, c.printsNoLineStarting)
+	ctx.Then(`^the report wrote nothing to the tracker or the vault$`, c.wroteNothing)
 	ctx.Then(`^the "([^"]*)" section prints the line "([^"]*)"$`, c.sectionPrintsTheLine)
 	ctx.Then(`^the "([^"]*)" section prints no line starting "([^"]*)"$`, c.sectionPrintsNoLine)
 	ctx.Then(`^the (QUALITY|SPEED|FUEL) "([^"]*)" section prints the line "([^"]*)"$`, c.partSectionPrintsTheLine)
@@ -83,6 +93,7 @@ func (c *reportContext) aFactory(now string) error {
 // addStory files a story on the fake tracker with the path the report reads.
 func (c *reportContext) addStory(id, title, rig, host, model string, attempts int, filed time.Time) error {
 	ctx := context.Background()
+	c.stories = append(c.stories, id)
 	c.tracker.AddStory("", domain.Story{
 		ID: id, Title: title,
 		Overrides: domain.Path{Rig: rig, Host: host, Model: domain.Model(model)},
@@ -127,6 +138,7 @@ func (c *reportContext) rigLanded(day, infix, rig string, landed, refused int, r
 		id, outcome := fmt.Sprintf("%s-%sl%d", rig, infix, i), "landed on main"
 		if i > landed {
 			id, outcome = fmt.Sprintf("%s-%sr%d", rig, infix, i-landed), application.NotLanded(application.Reason(reason), "the gate was red")
+			c.refused[rig] = append(c.refused[rig], id)
 		}
 		if err := c.addStory(id, "The story "+id, rig, "laptop", "sonnet", 0, time.Time{}); err != nil {
 			return err
@@ -193,6 +205,15 @@ func (c *reportContext) theStoryHasTheCause(id, class string) error {
 	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.CauseField: class})
 }
 
+func (c *reportContext) everyRefusedStoryHasTheCause(rig, class string) error {
+	for _, id := range c.refused[rig] {
+		if err := c.theStoryHasTheCause(id, class); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (c *reportContext) theStoryCarriesTheComment(id, text string) error {
 	return c.tracker.CommentOnStory(context.Background(), id, unescape(text))
 }
@@ -234,9 +255,46 @@ func (c *reportContext) reportRuns(flags string) error {
 	report.Benchmarks = c.benchmarks
 	report.Now = func() time.Time { return c.now }
 	report.Out = &c.printed
+	before := c.footprint()
 	_, c.err = report.Run(context.Background())
+	if after := c.footprint(); after != before {
+		c.wrote = append(c.wrote, "before: "+before, "after: "+after)
+	}
 	if c.err != nil {
 		return fmt.Errorf("mw report failed: %w", c.err)
+	}
+	return nil
+}
+
+// footprint is what a run could have changed: every file in the vault with its
+// size, what the tracker was asked and the comments on its stories.
+func (c *reportContext) footprint() string {
+	var b strings.Builder
+	_ = filepath.Walk(c.files.Dir(), func(path string, info os.FileInfo, err error) error {
+		if err == nil && !info.IsDir() {
+			fmt.Fprintf(&b, "%s %d\n", path, info.Size())
+		}
+		return nil
+	})
+	fmt.Fprintf(&b, "asked %v\n", c.tracker.Asked())
+	for _, id := range c.stories {
+		fmt.Fprintf(&b, "%s %v %v\n", id, c.tracker.Comments(id), c.tracker.Metadata(id))
+	}
+	return b.String()
+}
+
+func (c *reportContext) wroteNothing() error {
+	if len(c.wrote) > 0 {
+		return fmt.Errorf("mw report changed something:\n%s", strings.Join(c.wrote, "\n"))
+	}
+	return nil
+}
+
+func (c *reportContext) printsNoLineStarting(prefix string) error {
+	for _, line := range c.lines() {
+		if strings.HasPrefix(strings.TrimSpace(line), prefix) {
+			return fmt.Errorf("expected no line starting %q, got:\n%s", prefix, c.printed.String())
+		}
 	}
 	return nil
 }
@@ -372,7 +430,7 @@ func (c *reportContext) theBenchmarks(table *godog.Table) error {
 		if err != nil {
 			return err
 		}
-		b := application.Benchmark{Story: cell("story"), Rig: cell("rig"), Host: cell("host"), At: day.Add(12 * time.Hour), Landed: true}
+		b := application.Benchmark{Story: cell("story"), Rig: cell("rig"), Host: cell("host"), Kind: cell("kind"), At: day.Add(12 * time.Hour), Landed: true}
 		b.ActualS, _ = strconv.ParseFloat(cell("actual"), 64)
 		b.GateSeconds, _ = strconv.ParseFloat(cell("gate"), 64)
 		if ratio, _ := strconv.ParseFloat(cell("ratio"), 64); ratio > 0 && b.ActualS > 0 {

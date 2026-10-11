@@ -28,8 +28,10 @@ func newReportCmd() *cobra.Command {
 			"measured one) and FUEL (tokens per landing from the ledger and $ per landing from the result\n" +
 			"files, every attempt of a story summed). A number carries an arrow against the window before,\n" +
 			"level inside 5%, and says better or worse by the measure. --rig and --host narrow every\n" +
-			"block. A ledger row whose story is gone counts under rig unknown. It reads and writes\n" +
-			"nothing, and prints in 60 columns.",
+			"block. A ledger row whose story is gone counts under rig unknown. The report ends with CHEAP\n" +
+			"WINS: at most three one-line suggestions by fixed rules (causes unset, a dominant refusal\n" +
+			"reason, attempts used up, a refusal rate up, a flagged par, a slow gate), or 'none seen';\n" +
+			"--json carries every rule that held. It reads and writes nothing, and prints in 60 columns.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := config.Vault()

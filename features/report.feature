@@ -6,7 +6,9 @@ Feature: mw report
   per rig, then per model, then per host, in 60 columns, or all of it as JSON.
   After QUALITY come SPEED (the landings' time against par, and each host's
   gate) and FUEL (tokens and dollars per landing), and every number carries an
-  arrow against the window of the same length before it.
+  arrow against the window of the same length before it. The report ends with
+  CHEAP WINS: at most three one-line suggestions chosen by fixed rules over its
+  numbers, quality rules first, or "CHEAP WINS: none seen".
 
   Background:
     Given a report factory whose clock reads "2026-10-11T12:00:00Z"
@@ -262,3 +264,142 @@ Feature: mw report
     Given "lampas" landed 2 stories and refused 0 for "tests-fail" in the window
     When mw report runs with "--since 7d"
     Then the report puts QUALITY before SPEED before FUEL
+
+  Scenario: Refusals nobody gave a cause are the first cheap win
+    Given "lampas" landed 8 stories and refused 2 for "tests-fail" in the window
+    When mw report runs with "--since 7d"
+    Then the report prints the line "CHEAP WINS"
+    And the report prints the line "1. 2 refusals have no cause: mw cause them"
+
+  Scenario: A reason that is a third of a rig's refusals is a cheap win
+    Given "lampas" landed 5 stories and refused 3 for "tests-fail" in the window
+    And every refused story of "lampas" has the cause "code"
+    When mw report runs with "--since 7d"
+    Then the report prints the line "1. tests-fail is 100% of lampas refusals: gate check first"
+
+  Scenario: A reason under three refusals is not a cheap win
+    Given "lampas" landed 5 stories and refused 2 for "tests-fail" in the window
+    And every refused story of "lampas" has the cause "code"
+    When mw report runs with "--since 7d"
+    Then the report prints the line "CHEAP WINS: none seen"
+
+  Scenario: A story that used three attempts is a cheap win
+    Given the report stories:
+      | id  | title | rig    | host   | model  | attempts | filed |
+      | w-1 | One   | lampas | laptop | sonnet | 3        |       |
+      | w-2 | Two   | lampas | laptop | sonnet | 2        |       |
+    And the report ledger holds the rows:
+      | day        | id  | outcome        | worker      |
+      | 2026-10-08 | w-1 | landed on main | sonnet/high |
+      | 2026-10-08 | w-2 | landed on main | sonnet/high |
+    When mw report runs with "--since 7d"
+    Then the report prints the line "1. w-1 used 3 attempts: split it smaller"
+
+  Scenario: A story that ran out of attempts is a cheap win
+    Given the report stories:
+      | id  | title | rig    | host   | model  | attempts | filed |
+      | x-1 | One   | lampas | laptop | sonnet | 3        |       |
+    And the report ledger holds the rows:
+      | day        | id  | outcome                      | worker      |
+      | 2026-10-08 | x-1 | not landed (tests-fail): red | sonnet/high |
+    And the report story "x-1" has the cause "code"
+    When mw report runs with "--since 7d"
+    Then the report prints the line "1. x-1 used 3 attempts: split it smaller"
+
+  Scenario: A refusal rate up five points on the window before is a cheap win
+    Given "lampas" landed 8 stories and refused 2 for "tests-fail" in the window
+    And every refused story of "lampas" has the cause "code"
+    And "lampas" landed 10 stories and refused 0 for "tests-fail" in the window before
+    When mw report runs with "--since 7d"
+    Then the report prints the line "1. lampas refusals up 20 points: mw report --rig lampas"
+
+  Scenario: A kind whose par is far off is a cheap win
+    Given "lampas" landed 1 stories and refused 0 for "tests-fail" in the window
+    And the report benchmarks:
+      | story | rig    | host   | kind  | day        | actual | ratio |
+      | k-1   | lampas | laptop | rig   | 2026-10-04 | 1000   | 2.0   |
+      | k-2   | lampas | laptop | rig   | 2026-10-05 | 1000   | 2.0   |
+      | k-3   | lampas | laptop | rig   | 2026-10-06 | 1000   | 2.0   |
+      | k-4   | lampas | laptop | rig   | 2026-10-07 | 1000   | 2.0   |
+      | k-5   | lampas | laptop | rig   | 2026-10-08 | 1000   | 2.0   |
+    When mw report runs with "--since 7d"
+    Then the report prints the line "1. par for kind rig is off 100%: try a wider window"
+
+  Scenario: A gate well over its usual is a cheap win
+    Given "lampas" landed 1 stories and refused 0 for "tests-fail" in the window
+    And the report benchmarks:
+      | story | rig    | host   | day        | gate |
+      | g-1   | lampas | laptop | 2026-10-05 | 310  |
+      | g-2   | lampas | laptop | 2026-10-06 | 310  |
+      | g-3   | lampas | laptop | 2026-10-07 | 310  |
+      | g-4   | lampas | laptop | 2026-10-09 | 542  |
+    When mw report runs with "--since 7d"
+    Then the report prints the line "1. laptop gate on lampas 9m02s, usual 5m10s: check its load"
+
+  Scenario: A gate under one and a half times its usual is not a cheap win
+    Given "lampas" landed 1 stories and refused 0 for "tests-fail" in the window
+    And the report benchmarks:
+      | story | rig    | host   | day        | gate |
+      | g-1   | lampas | laptop | 2026-10-05 | 310  |
+      | g-2   | lampas | laptop | 2026-10-06 | 310  |
+      | g-3   | lampas | laptop | 2026-10-07 | 310  |
+      | g-4   | lampas | laptop | 2026-10-09 | 450  |
+    When mw report runs with "--since 7d"
+    Then the report prints the line "CHEAP WINS: none seen"
+
+  Scenario: No rule holding prints that none were seen
+    Given "lampas" landed 8 stories and refused 0 for "tests-fail" in the window
+    When mw report runs with "--since 7d"
+    Then the report prints the line "CHEAP WINS: none seen"
+
+  Scenario: Five rules holding print three lines in order, and --json carries all five
+    Given "lampas" landed 4 stories and refused 3 for "tests-fail" in the window
+    And "lampas" landed 10 stories and refused 0 for "tests-fail" in the window before
+    And the report stories:
+      | id  | title | rig    | host   | model  | attempts | filed |
+      | v-1 | One   | lampas | laptop | sonnet | 3        |       |
+    And the report ledger holds the rows:
+      | day        | id  | outcome        | worker      |
+      | 2026-10-08 | v-1 | landed on main | sonnet/high |
+    And the report benchmarks:
+      | story | rig    | host   | kind | day        | gate | actual | ratio |
+      | g-1   | lampas | laptop | rig  | 2026-10-05 | 310  |        |       |
+      | g-2   | lampas | laptop | rig  | 2026-10-06 | 310  |        |       |
+      | g-3   | lampas | laptop | rig  | 2026-10-07 | 310  |        |       |
+      | g-4   | lampas | laptop | rig  | 2026-10-09 | 542  |        |       |
+    When mw report runs with "--since 7d"
+    Then the report prints the line "1. 3 refusals have no cause: mw cause them"
+    And the report prints the line "2. tests-fail is 100% of lampas refusals: gate check first"
+    And the report prints the line "3. v-1 used 3 attempts: split it smaller"
+    And the report prints no line starting "4."
+    And the report prints no line starting "lampas refusals up"
+
+  Scenario: --json carries every rule that held with its id
+    Given "lampas" landed 4 stories and refused 3 for "tests-fail" in the window
+    And "lampas" landed 10 stories and refused 0 for "tests-fail" in the window before
+    And the report stories:
+      | id  | title | rig    | host   | model  | attempts | filed |
+      | v-1 | One   | lampas | laptop | sonnet | 3        |       |
+    And the report ledger holds the rows:
+      | day        | id  | outcome        | worker      |
+      | 2026-10-08 | v-1 | landed on main | sonnet/high |
+    And the report benchmarks:
+      | story | rig    | host   | day        | gate |
+      | g-1   | lampas | laptop | 2026-10-05 | 310  |
+      | g-2   | lampas | laptop | 2026-10-06 | 310  |
+      | g-3   | lampas | laptop | 2026-10-07 | 310  |
+      | g-4   | lampas | laptop | 2026-10-09 | 542  |
+    When mw report runs with "--since 7d --json"
+    Then the report JSON has cheap_wins.0.rule as "R1"
+    And the report JSON has cheap_wins.1.rule as "R2"
+    And the report JSON has cheap_wins.2.rule as "R3"
+    And the report JSON has cheap_wins.3.rule as "R4"
+    And the report JSON has cheap_wins.4.rule as "R6"
+    And the report JSON has cheap_wins.0.shown as "true"
+    And the report JSON has cheap_wins.3.shown as "false"
+
+  Scenario: The cheap wins fit 60 columns and write nothing
+    Given "a-rig-with-a-name-that-goes-on-and-on-and-on-and-on" landed 3 stories and refused 3 for "tests-fail" in the window
+    When mw report runs with "--since 7d"
+    Then no line of the report is wider than 60 columns
+    And the report wrote nothing to the tracker or the vault

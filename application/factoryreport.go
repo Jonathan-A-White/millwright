@@ -145,6 +145,9 @@ type FactoryReportResult struct {
 	Rigs           []ReportBlock `json:"rigs"`
 	Models         []ReportBlock `json:"models"`
 	Hosts          []ReportBlock `json:"hosts"`
+	// CheapWins are the suggestions every rule that held made, in precedence
+	// order; the first MaxCheapWins are Shown.
+	CheapWins []CheapWin `json:"cheap_wins"`
 }
 
 // reportEntry is one thing the window saw: a landing, a refusal or a bug filed.
@@ -157,6 +160,7 @@ type reportEntry struct {
 	reason           string
 	attempts         int
 	cause            string
+	exhausted        bool
 	findings         int
 	// measured says a benchmark gave the landing a wall time, actualS, and
 	// ratio is that over its par, 0 when it had none.
@@ -259,6 +263,7 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 			e.rig, e.host = orElse(path.Rig, e.rig), orElse(path.Host, e.host)
 			e.model = orElse(string(path.Model), e.model)
 			e.cause = d.Cause
+			e.exhausted = d.Exhausted
 			if d.Attempts > 1 {
 				e.attempts = d.Attempts
 			}
@@ -317,6 +322,7 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 	result.Rigs = r.blocks(entries, gates, func(e reportEntry) string { return e.rig }, func(g GateTrend) string { return g.Rig })
 	result.Models = r.blocks(entries, nil, func(e reportEntry) string { return e.model }, nil)
 	result.Hosts = r.blocks(entries, gates, func(e reportEntry) string { return e.host }, func(g GateTrend) string { return g.Host })
+	result.CheapWins = CheapWins(WinInputs{Rigs: result.Rigs, Gates: gates, Kinds: Calibrate(recent, BenchmarkSettings{}), Heavy: r.heavyStories(entries)})
 
 	if r.Out != nil {
 		if r.JSON {
@@ -330,6 +336,23 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 		}
 	}
 	return result, nil
+}
+
+// heavyStories are the stories of the window that used up their attempts or
+// needed as many as a story may have, each once, narrowed like the blocks.
+func (r FactoryReport) heavyStories(entries []reportEntry) []HeavyStory {
+	var heavy []HeavyStory
+	seen := map[string]bool{}
+	for _, e := range entries {
+		if e.previous || e.bug || e.id == "" || seen[e.id] || (r.Rig != "" && e.rig != r.Rig) || (r.Host != "" && e.host != r.Host) {
+			continue
+		}
+		if e.exhausted || e.attempts >= DefaultMaxAttempts {
+			seen[e.id] = true
+			heavy = append(heavy, HeavyStory{ID: e.id, Attempts: max(e.attempts, DefaultMaxAttempts)})
+		}
+	}
+	return heavy
 }
 
 // costOf is what a story's result files report it cost, its attempts summed:
@@ -475,37 +498,44 @@ func twoPlaces(x float64) float64 { return math.Round(x*100) / 100 }
 
 // String is the report as mw report prints it: the window, then QUALITY, SPEED
 // and FUEL in that order, each with a block per rig, per model and per host,
-// none of it wider than ReportWidth columns.
+// and CHEAP WINS at the end, none of it wider than ReportWidth columns.
 func (r FactoryReportResult) String() string {
 	var b strings.Builder
+	r.writeParts(&b)
+	writeCheapWins(&b, r.CheapWins)
+	return b.String()
+}
+
+// writeParts prints the window and the QUALITY, SPEED and FUEL parts.
+func (r FactoryReportResult) writeParts(b *strings.Builder) {
 	days := int(reportDay(r.Window.Until).Sub(r.Window.Since).Hours() / 24)
-	fmt.Fprintf(&b, "QUALITY %s to %s (%d days)\n",
+	fmt.Fprintf(b, "QUALITY %s to %s (%d days)\n",
 		r.Window.Since.UTC().Format(LedgerDate), r.Window.Until.UTC().Format(LedgerDate), days)
 	if len(r.Rigs) == 0 {
 		b.WriteString("\nnothing landed, was refused or was filed in it\n")
-		return b.String()
+		return
 	}
 	for i, part := range []struct {
 		heading string
 		write   func(ReportBlock, *strings.Builder)
 	}{{"", ReportBlock.writeQuality}, {"SPEED", ReportBlock.writeSpeed}, {"FUEL", ReportBlock.writeFuel}} {
 		if i > 0 {
-			fmt.Fprintf(&b, "\n%s\n", part.heading)
+			fmt.Fprintf(b, "\n%s\n", part.heading)
 		}
 		for _, section := range []struct {
 			kind   string
 			blocks []ReportBlock
 		}{{"rig", r.Rigs}, {"model", r.Models}, {"host", r.Hosts}} {
-			fmt.Fprintf(&b, "\nby %s\n", section.kind)
+			fmt.Fprintf(b, "\nby %s\n", section.kind)
 			for j, block := range section.blocks {
 				if j > 0 {
 					b.WriteString("\n")
 				}
-				part.write(block, &b)
+				part.write(block, b)
 			}
 		}
 	}
-	return b.String()
+	return
 }
 
 // arrow is the trend of a measure, as it follows the number in a line.
