@@ -22,7 +22,7 @@ domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cm
 | WatchProbes | application/watch.go | infra/watch | FakeWatch |
 | Doctor{Check,State,Log,Notes}, VPSProbe | application/doctor.go, application/vpsnginx.go | infra/{doctor,vpsnginx} | - |
 | Network{Probe,Store,Reader} | application/network.go | infra/network | FakeNetwork* |
-| CardLog | application/card.go | infra/cardlog | FakeCardLog |
+| CardLog, ReportSentLog | application/card.go, application/reportsend.go | infra/{cardlog,reportlog} | Fake{CardLog,ReportSentLog} |
 | CloseOutMarks | application/closeout.go | infra/closeout | Fake*Mark* |
 | Worktrees, BranchChanges | application/worktrees.go | infra/rig/worktree.go | dispatch_test.go |
 | HostLoad, Cloud*, BenchmarkBook | application/hostload.go, application/benchmark.go | infra/{hostload,cloud,vault/{cloudbook,benchmarks}.go} | Fake{HostLoad,Cloud*,Benchmarks} |
@@ -41,7 +41,7 @@ domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cm
 | Use case | File | Command | Feature |
 |-|-|-|-|
 | File, Release, Retry, Cause, Path{Set,Show} | application/file.go, application/release.go, application/retry.go, application/cause.go, application/pathset.go | cmd/mw/file.go, cmd/mw/release.go, cmd/mw/retry.go, cmd/mw/cause.go, cmd/mw/path.go | features/{file_plan,release,retry,cause,path_set}.feature |
-| Show, Peek, Prove, StampHead, Tester, FactoryReport | application/show.go, application/stamphead.go, application/testerreport.go, application/factoryreport.go | mw show/peek/prove/stamp/tester/report - cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go, cmd/mw/tester.go, cmd/mw/report.go | features/{show,peek,prove,stamp,tester,report}.feature |
+| Show, Peek, Prove, StampHead, Tester, FactoryReport[Send] | application/show.go, application/stamphead.go, application/testerreport.go, application/factoryreport.go, application/reportsend.go | mw show/peek/prove/stamp/tester/report[ send] - cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go, cmd/mw/tester.go, cmd/mw/report.go, cmd/mw/reportsend.go | features/{show,peek,prove,stamp,tester,report,report_send}.feature |
 | Dispatch, Next, AfterLandingRun | application/dispatch.go, application/next.go, application/afterlandingrun.go | mw dispatch/next/after-landing - cmd/mw/dispatch.go, cmd/mw/next.go, cmd/mw/afterlanding.go | features/{dispatch,next,after_landing}.feature |
 | Check, Status, CloudCheck, Brief | application/check.go, application/status.go, application/cloud.go, application/brief.go | mw check/status/cloud/brief - cmd/mw/check.go, cmd/mw/status.go, cmd/mw/cloud.go, cmd/mw/brief.go | features/{check,status,cloud,brief}.feature |
 | Sweep, Tidy, Sync, Nudge, Mail, Home[Move] | application/sweep.go, application/tidy.go, application/sync.go, application/nudge.go, application/mail.go, application/home.go, application/homemove.go | mw sweep/tidy/sync/nudge/mail/home - cmd/mw/sweep.go, cmd/mw/tidy.go, cmd/mw/sync.go, cmd/mw/nudge.go, cmd/mw/mail.go, cmd/mw/home.go, cmd/mw/homemove.go | features/{sweep,tidy,sync,mail,home}.feature |

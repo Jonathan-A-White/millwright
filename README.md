@@ -492,6 +492,34 @@ gone counts under rig `unknown`. The window is `--since` (`7d`, a day, or a UTC 
 7d by default) to now; `--rig` and `--host` narrow every block. It reads and writes
 nothing. See `features/report.feature`.
 
+### mw report send
+
+```sh
+bin/mw report send [--force] [--dry-run]
+```
+
+A report nobody reads measures nothing, so `mw report send` posts the same numbers to
+the Governor's phone. It builds a summary of the last 7 days from the same report, in
+at most 14 lines of 60 columns: `Factory, 7 days to 2026-10-11`, then QUALITY (landed,
+refused and its rate, attempts and bugs per landing), SPEED (par median and p90, the
+wall time from dispatch to landing), FUEL (tokens and dollars per landing) and CHEAP
+WINS, in that order, each number with its arrow against the week before. It is sent
+as a plain message, with no bead and no class, to the Factory channel, and its txid is
+printed.
+
+It goes out from the home alone: on a host the vault's home file says is not home it
+says which host is, sends nothing and exits 0. It sends at most once a UTC day,
+remembering the day in `~/.local/state/mw/report/sent.jsonl`; a second run the same day
+says when the first sent (`already sent today (2026-10-11) at 12:00:05Z, <txid>`) and
+sends nothing. `--force` sends again; `--dry-run` prints the summary and sends and
+remembers nothing.
+
+**Install**, once per host: `sh scripts/install-units.sh --enable mw-report` links
+`mw-report.timer` and `mw-report.service`, which run `mw report send` at 12:00 UTC
+(PROVISIONAL) with no catch-up for a missed noon. The timer may be armed on every host:
+only the home sends. `mw doctor` restarts the timer if it is found stopped
+(`mw-report.service` is among its default units). See `features/report_send.feature`.
+
 ## Setting a story's path
 
 ```sh
