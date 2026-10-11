@@ -99,6 +99,29 @@ Feature: mw retry
     And no worktree of "mw-gq6.1" was read or made here
     And the story "mw-gq6.1" is open and unassigned
 
+  # mw-gq6.364: where a story was worked comes from its claim, not the host key.
+
+  Scenario: A retry from a host that does not hold the claim gives it back, guarded on the actual assignee
+    Given the story "mw-gq6.1" ran on the host "desktop" and is claimed there by "mw@desktop"
+    And the host key of the story "mw-gq6.1" is changed to "vps"
+    And the story "mw-gq6.1" has been tried 1 time in all
+    When mw retries "mw-gq6.1"
+    Then the retry succeeds
+    And no worktree of "mw-gq6.1" was read or made here
+    And the story "mw-gq6.1" is open and unassigned
+    And the story "mw-gq6.1" carries a comment saying "desktop" is where its worktree is left for the next dispatch there
+
+  Scenario: A retry on the claiming host bundles its worktree even when the host key now names another host
+    Given the story "mw-gq6.1" was dispatched and worked in its own worktree
+    And the story "mw-gq6.1" is claimed by "mw@vps"
+    And the host key of the story "mw-gq6.1" is changed to "laptop"
+    And the session of "mw-gq6.1" has ended
+    When mw retries "mw-gq6.1"
+    Then the retry succeeds
+    And the branch of "mw-gq6.1" was bundled into "runs/mw-gq6.1/attempt-1.bundle" in the vault, and it verifies
+    And the worktree and branch of "mw-gq6.1" are both gone
+    And the story "mw-gq6.1" is open and unassigned
+
   Scenario: A story refused at pour has no worktree to read, and its claim is given back all the same
     Given the story "mw-gq6.1" was refused at pour: claimed and blocked, with no worktree or branch ever made
     When mw retries "mw-gq6.1"
