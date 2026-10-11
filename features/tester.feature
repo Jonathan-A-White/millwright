@@ -85,6 +85,28 @@ Feature: A one-week Tester trial
       | tested mw-l.1: 2 findings |
     And no Tester story was filed
 
+  Scenario: A FINDINGS comment whose only [bug] is inside "No [bug] found." counts no bug
+    Given the story "mw-l.1" is planned and ready to be worked here
+    And the Tester story "mw-l.2" testing "mw-l.1" has been worked in its own worktree, committing nothing
+    And the session of "mw-l.2" reported a plain success
+    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS\nNo [bug] found.\n- [taste] The list jumps on rotate.\nTester fuel: 55,100 tokens"
+    When mw closes out "mw-l.2"
+    Then the story "mw-l.2" is closed
+    And that mail's subject is "Tested: mw-l.1: 1 finding"
+    And the last ledger line holds:
+      | tested mw-l.1: 1 finding (0 bug, 1 taste) |
+
+  Scenario: A numbered finding whose text starts [bug] counts as a bug
+    Given the story "mw-l.1" is planned and ready to be worked here
+    And the Tester story "mw-l.2" testing "mw-l.1" has been worked in its own worktree, committing nothing
+    And the session of "mw-l.2" reported a plain success
+    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS\n1. [bug] The mic button stays red after Back.\nNo [bug] found in the list.\nTester fuel: 55,100 tokens"
+    When mw closes out "mw-l.2"
+    Then the story "mw-l.2" is closed
+    And that mail's subject is "Tested: mw-l.1: 1 finding"
+    And the last ledger line holds:
+      | tested mw-l.1: 1 finding (1 bug, 0 taste) |
+
   Scenario: FINDINGS a Tester left on its own story are carried to the landed story
     Given the story "mw-l.1" is planned and ready to be worked here
     And the Tester story "mw-l.2" testing "mw-l.1" has been worked in its own worktree, committing nothing

@@ -117,12 +117,13 @@ func (f TesterFindings) Split() string {
 var (
 	testerFindingsLine = regexp.MustCompile(`(?m)^[ \t#*]*` + TesterFindingsHeading + `\b`)
 	testerNoneLine     = regexp.MustCompile(`(?i)^[ \t#*]*` + TesterFindingsHeading + `[ \t*]*:[ \t]*none\b`)
-	testerTag          = regexp.MustCompile(`(?i)\[(bug|taste)\]`)
+	testerTag          = regexp.MustCompile(`(?i)^[ \t]*(?:(?:[-*+]|\d+[.)])[ \t]+)?(?:[*_]{1,2})?\[(bug|taste)\]`)
 )
 
 // ReadTesterFindings reads the FINDINGS section of a comment: from the heading
-// to the Tester fuel line, or the end. ok is false when the comment has no
-// FINDINGS heading at the start of a line.
+// to the Tester fuel line, or the end. A finding is a line that starts with its
+// tag, after a list marker or number if it has one; "No [bug] found." is not.
+// ok is false when the comment has no FINDINGS heading at the start of a line.
 func ReadTesterFindings(text string) (TesterFindings, bool) {
 	at := testerFindingsLine.FindStringIndex(text)
 	if at == nil {
