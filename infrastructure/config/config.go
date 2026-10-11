@@ -196,6 +196,7 @@ const (
 	RigsTable              = "rigs"
 	TestsTable             = "tests"
 	AfterLandingTable      = "after_landing"
+	ChangedSpecsTable      = "changed_specs"
 	AfterLandingLimitTable = "after_landing_limit"
 	// HeavyNetTable names the rigs whose gate or close-out installs dependencies
 	// (npm ci, go mod download): `postern = true`. A story on one waits while the
@@ -1804,6 +1805,21 @@ func Tests() (map[string]string, error) {
 		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
 	}
 	return tableIn(filepath.Join(home, File), TestsTable)
+}
+
+// ChangedSpecs reports the command each rig runs on the end-to-end specs a
+// story added or changed, after the rig's tests, by rig name, read from the
+// `[changed_specs]` table of ~/.config/mw/config.toml (mw-gq6.366):
+// `lampas = "npm run build && npx playwright test --project=shots {specs}"`,
+// where {specs} is the tests/e2e/*.spec.ts files the story's branch changed. A
+// rig that says nothing has none run, and a machine with no such table is not
+// an error.
+func ChangedSpecs() (map[string]string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	return tableIn(filepath.Join(home, File), ChangedSpecsTable)
 }
 
 // AfterLanding reports the command each rig has run after a landing has moved

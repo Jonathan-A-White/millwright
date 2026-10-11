@@ -465,6 +465,25 @@ millwright = "make build"
 	}
 }
 
+func TestChangedSpecsSaysWhatEachRigRunsOnTheSpecsAStoryChanged(t *testing.T) {
+	writeConfig(t, `host = "laptop"
+
+[tests]
+lampas = "npm test"
+
+[changed_specs]
+lampas = "npx playwright test {specs}"
+`)
+
+	specs, err := config.ChangedSpecs()
+	if err != nil {
+		t.Fatalf("reading the changed-specs commands: %v", err)
+	}
+	if len(specs) != 1 || specs["lampas"] != "npx playwright test {specs}" {
+		t.Errorf("expected only the rig's changed-specs command, got %+v", specs)
+	}
+}
+
 func TestAfterLandingLimitSaysHowLongEachRigsCommandMayRun(t *testing.T) {
 	writeConfig(t, `host = "laptop"
 

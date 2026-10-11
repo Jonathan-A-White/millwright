@@ -39,6 +39,8 @@ const (
 type Checks struct {
 	commands map[string]string
 	command  string
+	specs    map[string]string
+	git      string
 	shell    string
 	nice     int
 }
@@ -88,7 +90,7 @@ func WithNice(n int) CheckOption {
 // NewChecks returns the checks of a rig whose tests are DefaultCommand, unless
 // an option says otherwise.
 func NewChecks(opts ...CheckOption) *Checks {
-	c := &Checks{commands: map[string]string{}, command: DefaultCommand, shell: Shell}
+	c := &Checks{commands: map[string]string{}, command: DefaultCommand, specs: map[string]string{}, git: Program, shell: Shell}
 	for _, opt := range opts {
 		opt(c)
 	}

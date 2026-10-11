@@ -259,6 +259,23 @@ type Checks interface {
 	Run(ctx context.Context, rig, dir string) (Checked, error)
 }
 
+// SpecsChecked is one run of a rig's changed-specs command: the spec files it
+// was run on (empty when the story changed none, or the rig names no command, and
+// then nothing was run) and what that run came to.
+type SpecsChecked struct {
+	Checked
+	Specs []string
+}
+
+// SpecChecks is the port a rig's changed-specs command is run through
+// (mw-gq6.366): the rig's own command for end-to-end specs the rig's gate does
+// not run, given only the spec files the story's branch added or changed since
+// its merge-base with base. A rig that names no command, and a story that changed
+// no spec, are a SpecsChecked with no Specs and nothing run.
+type SpecChecks interface {
+	RunSpecs(ctx context.Context, rig, dir, base string) (SpecsChecked, error)
+}
+
 // MergeSlot is the port that keeps two close-outs from landing on one rig's
 // target branch at the same time. It is per rig and per host: the other host
 // has its own, and the two hosts take turns by the rig's CrossSlot, around it

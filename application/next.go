@@ -174,7 +174,11 @@ type Next struct {
 	Landing   Landing
 	Checks    Checks
 	Slot      MergeSlot
-	Vault     Vault
+
+	// SpecChecks runs a rig's changed-specs command after the rig's gate, on the
+	// specs the story added or changed (mw-gq6.366). Nil runs none.
+	SpecChecks SpecChecks
+	Vault      Vault
 
 	// CrossSlot is the rig's merge slot across hosts, on the beads server both
 	// hosts share, taken around Slot so that the other host's close-outs wait
@@ -1256,6 +1260,14 @@ func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all
 		}
 		refuse(reason, why, n.failedTestsDetail(ctx, c, report, checked, c.worktree))
 	}
+
+	// The specs the story added or changed, which the rig's gate does not run
+	// (mw-gq6.366), once the gate itself has passed.
+	if err == nil && checked.Passed {
+		if refusal, stop := n.specsRefusal(ctx, c, report, c.worktree, base, "in the worktree", n.specsFailReason(ctx, c)); stop {
+			refuse(refusal.Reason, refusal.Why, refusal.Said)
+		}
+	}
 	return found
 }
 
@@ -1628,6 +1640,15 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 			}
 			return Landed{}, failedFor(ReasonMergedTestsFail, fmt.Errorf("%s and %s do not pass the rig's tests together: `%s` failed on the merged result, so nothing was pushed%s\n\n%s",
 				c.branch, c.target, checked.Command, ran, n.failedTestsDetail(ctx, c, report, checked, dir)))
+		}
+	}
+
+	// The story's changed specs again on a merged result, from the commit the
+	// merge started from.
+	if !landed.FastForward {
+		if refusal, stop := n.specsRefusal(ctx, c, report, dir, landed.Before, "on the merged result", ReasonMergedTestsFail); stop {
+			return Landed{}, failedFor(refusal.Reason, fmt.Errorf("%s and %s do not pass together: %s, so nothing was pushed\n\n%s",
+				c.branch, c.target, refusal.Why, refusal.Said))
 		}
 	}
 

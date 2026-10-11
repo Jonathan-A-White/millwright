@@ -100,6 +100,10 @@ func newNextCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			changedSpecs, err := config.ChangedSpecs()
+			if err != nil {
+				return err
+			}
 			afterLanding, err := config.AfterLanding()
 			if err != nil {
 				return err
@@ -186,30 +190,32 @@ func newNextCmd() *cobra.Command {
 				stamps = nil
 			}
 
+			checks := rig.NewChecks(rig.WithCommands(tests), rig.WithSpecCommands(changedSpecs), rig.WithNice(nice))
 			_, err = application.Next{
-				Tracker:   gateway,
-				Worktrees: worktrees,
-				Landing:   worktrees,
-				Checks:    rig.NewChecks(rig.WithCommands(tests), rig.WithNice(nice)),
-				Load:      hostload.Proc{SwapSample: benchmarkSwapSample},
-				Slot:      rig.NewSlots(gateScaledSlotWait(vault.Benchmarks{Vault: files}, rigs, host, benchmarkLimits(bench))),
-				CrossSlot: application.CrossSlot{Notes: gateway, Host: host},
-				Vault:     files,
-				Rules:     files,
-				Files:     files,
-				Mailbox:   gateway,
-				Runner:    runner,
-				Memory:    gateway,
-				Sync:      sync,
-				Dispatch:  dispatcher,
-				Boot:      builderBoot(files, host, tests, nice),
-				Seat:      BuilderSeat,
-				Host:      host,
-				Rigs:      rigs,
-				PushTries: pushTries,
-				PushWait:  time.Duration(pushWaitSeconds) * time.Second,
-				Out:       cmd.OutOrStdout(),
-				Err:       cmd.ErrOrStderr(),
+				Tracker:    gateway,
+				Worktrees:  worktrees,
+				Landing:    worktrees,
+				Checks:     checks,
+				SpecChecks: checks,
+				Load:       hostload.Proc{SwapSample: benchmarkSwapSample},
+				Slot:       rig.NewSlots(gateScaledSlotWait(vault.Benchmarks{Vault: files}, rigs, host, benchmarkLimits(bench))),
+				CrossSlot:  application.CrossSlot{Notes: gateway, Host: host},
+				Vault:      files,
+				Rules:      files,
+				Files:      files,
+				Mailbox:    gateway,
+				Runner:     runner,
+				Memory:     gateway,
+				Sync:       sync,
+				Dispatch:   dispatcher,
+				Boot:       builderBoot(files, host, tests, nice),
+				Seat:       BuilderSeat,
+				Host:       host,
+				Rigs:       rigs,
+				PushTries:  pushTries,
+				PushWait:   time.Duration(pushWaitSeconds) * time.Second,
+				Out:        cmd.OutOrStdout(),
+				Err:        cmd.ErrOrStderr(),
 
 				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits)),
 				DeploySlot:   rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),

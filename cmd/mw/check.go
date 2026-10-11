@@ -52,6 +52,10 @@ func newCheckCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			changedSpecs, err := config.ChangedSpecs()
+			if err != nil {
+				return err
+			}
 			nice, err := config.BuilderNice()
 			if err != nil {
 				return err
@@ -68,14 +72,16 @@ func newCheckCmd() *cobra.Command {
 					rig.WithSlotNotice(func(said string) { fmt.Fprint(cmd.ErrOrStderr(), said) }))
 			}
 			worktrees := rig.New()
+			checks := rig.NewChecks(rig.WithCommands(tests), rig.WithSpecCommands(changedSpecs), rig.WithNice(nice))
 			_, err = application.Check{
-				Tracker: mwGateway(dir, host),
-				Landing: worktrees,
-				Checks:  rig.NewChecks(rig.WithCommands(tests), rig.WithNice(nice)),
-				Slot:    slot,
-				Host:    host,
-				Rigs:    rigs,
-				Out:     cmd.OutOrStdout(),
+				Tracker:    mwGateway(dir, host),
+				Landing:    worktrees,
+				Checks:     checks,
+				SpecChecks: checks,
+				Slot:       slot,
+				Host:       host,
+				Rigs:       rigs,
+				Out:        cmd.OutOrStdout(),
 			}.Run(cmd.Context(), args[0])
 			return err
 		},

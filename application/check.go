@@ -31,6 +31,10 @@ type Check struct {
 	Landing Landing
 	Checks  Checks
 
+	// SpecChecks runs the rig's changed-specs command after its tests, on the
+	// specs the branch added or changed (mw-gq6.366). Nil runs none.
+	SpecChecks SpecChecks
+
 	// Slot is the merge slot of the rig, taken around the rig's tests so that
 	// one gate per rig runs at a time on this host. Nil takes no slot.
 	Slot MergeSlot
@@ -130,15 +134,29 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		}
 	}
 
+	var specs SpecChecks
+	if k.SpecChecks != nil {
+		specs = k.SpecChecks
+		if k.Slot != nil {
+			specs = slottedSpecs{
+				specs:  k.SpecChecks,
+				slot:   k.Slot,
+				rigDir: rigDir,
+				holder: fmt.Sprintf("%s checking %s", SeatIdentity("", k.Host), storyID),
+			}
+		}
+	}
+
 	// The checks are mw next's own, run by the part of it that reads and never
 	// writes, so that what a session is told here and what it is told at
 	// close-out cannot come apart.
 	var read NextReport
 	report.Refusals = Next{
-		Tracker: k.Tracker,
-		Landing: k.Landing,
-		Checks:  checks,
-		Remote:  k.Remote,
+		Tracker:    k.Tracker,
+		Landing:    k.Landing,
+		Checks:     checks,
+		SpecChecks: specs,
+		Remote:     k.Remote,
 	}.refusals(ctx, c, &read, true)
 	report.Commits, report.Notes = read.Commits, read.Notes
 
