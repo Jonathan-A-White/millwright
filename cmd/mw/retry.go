@@ -30,8 +30,10 @@ func newRetryCmd() *cobra.Command {
 			"when that refuses it — and the claim given back with the story set open again, so the next\n" +
 			"dispatch tick claims it as a fresh attempt. A refusal changes nothing at all.\n\n" +
 			"A story worked on another host has its worktree there, so run from anywhere else, retry reads\n" +
-			"no worktree: it gives the claim back and leaves that host's worktree and branch to be bundled\n" +
-			"by that host's next dispatch.\n\n" +
+			"no worktree: it gives the claim back, guarded on whoever actually holds it, and leaves that\n" +
+			"host's worktree and branch to be bundled by that host's next dispatch. Where a story was worked\n" +
+			"is read from its claim (mw@<host>) first, and only without one from the host key of its path,\n" +
+			"so changing the host key of a story in progress moves neither its worktree nor its retry.\n\n" +
 			"It never resets a story's attempts, and a story already started max_attempts times is refused\n" +
 			"with \"attempts exhausted\" rather than retried — resetting the counter by hand is what allows\n" +
 			"another attempt.",
