@@ -6,42 +6,42 @@ domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cm
 
 ## Ports
 
-| Port | Declared in | Real adapter | Fake |
+| Port | Declared in | Real adapter | Fake (apptest.) |
 |-|-|-|-|
-| `WorkTracker` | application/worktracker.go | infra/beads | apptest.FakeTracker |
+| `WorkTracker` | application/worktracker.go | infra/beads | FakeTracker |
 | TrackerNotes, SweepNotes, BeadGraph | application/{status,sweep}.go | same | same |
-| VaultFiles, TrackerSync, SyncHaltMarker | application/sync.go | infra/{vault/git,beads/sync}.go, infra/synchalt | apptest.Fake{VaultFiles,Tracker,SyncHaltMarker} |
-| Mailbox, TidyMailbox | application/{mail,tidy}.go | infra/beads/mail.go | apptest.FakeMailbox |
-| EpicRules | application/epicrules.go | infra/vault/epicrules.go | apptest.FakeEpicRules |
+| VaultFiles, TrackerSync, SyncHaltMarker | application/sync.go | infra/{vault/git,beads/sync}.go, infra/synchalt | Fake{VaultFiles,Tracker,SyncHaltMarker} |
+| Mailbox, TidyMailbox | application/{mail,tidy}.go | infra/beads/mail.go | FakeMailbox |
+| EpicRules | application/epicrules.go | infra/vault/epicrules.go | FakeEpicRules |
 | Vault | application/seatboot.go | infra/vault | seatboot_test.go |
-| Runner | application/runner.go | infra/tmux | apptest.FakeRunner |
+| Runner | application/runner.go | infra/tmux | FakeRunner |
 | Harness | application/harness.go | infra/claude | seatboot_test.go |
-| SeatFiles, Windows, SeatHarness, ActingFile | application/seatup.go, application/seathandover.go | infra/{vault/{seat,reaplog},tmux/window,claude/claude}.go | apptest.Fake{Windows,Acting*} |
-| Transcripts{,Tail,Replies}, PeekRemote | application/seatcontext.go, application/peek.go | infra/{claude,peekremote} | apptest.FakePeek |
-| Reap{Terminal,Log,Armer} | application/seatreap.go | infra/{tmux/reap,vault/reaplog,reaper/arm}.go | apptest.Fake{Windows,ReapArmer} |
-| WatchProbes | application/watch.go | infra/watch | apptest.FakeWatch |
+| SeatFiles, Windows, SeatHarness, ActingFile | application/seatup.go, application/seathandover.go | infra/{vault/{seat,reaplog},tmux/window,claude/claude}.go | Fake{Windows,Acting*} |
+| Transcripts{,Tail,Replies}, PeekRemote | application/seatcontext.go, application/peek.go | infra/{claude,peekremote} | FakePeek |
+| Reap{Terminal,Log,Armer} | application/seatreap.go | infra/{tmux/reap,vault/reaplog,reaper/arm}.go | Fake{Windows,ReapArmer} |
+| WatchProbes | application/watch.go | infra/watch | FakeWatch |
 | Doctor{Check,State,Log,Notes}, VPSProbe | application/doctor.go, application/vpsnginx.go | infra/{doctor,vpsnginx} | - |
-| Network{Probe,Store,Reader} | application/network.go | infra/network | apptest.FakeNetwork* |
-| CardLog | application/card.go | infra/cardlog | apptest.FakeCardLog |
-| CloseOutMarks | application/closeout.go | infra/closeout | apptest.Fake*Mark* |
+| Network{Probe,Store,Reader} | application/network.go | infra/network | FakeNetwork* |
+| CardLog | application/card.go | infra/cardlog | FakeCardLog |
+| CloseOutMarks | application/closeout.go | infra/closeout | Fake*Mark* |
 | Worktrees | application/worktrees.go | infra/rig/worktree.go | dispatch_test.go |
-| HostLoad, Cloud*, BenchmarkBook | application/hostload.go, application/benchmark.go | infra/{hostload,cloud,vault/{cloudbook,benchmarks}.go} | apptest.Fake{HostLoad,Cloud*,Benchmarks} |
-| TickLog, Notifier, HomeMoveHost, OldHome, VaultBirth, TrackerBirth | application/{millhandtick,homemove,init}.go | infra/{ticklog,notify/notify,homemove/homemove,vault/birth,beads/init}.go | apptest.FakeTickLog |
+| HostLoad, Cloud*, BenchmarkBook | application/hostload.go, application/benchmark.go | infra/{hostload,cloud,vault/{cloudbook,benchmarks}.go} | Fake{HostLoad,Cloud*,Benchmarks} |
+| TickLog, Notifier, HomeMoveHost, OldHome, VaultBirth, TrackerBirth | application/{millhandtick,homemove,init}.go | infra/{ticklog,notify/notify,homemove/homemove,vault/birth,beads/init}.go | FakeTickLog |
 | Landing, Checks, MergeSlot, Holding | application/landing.go | infra/rig/{landing,checks,slot}.go | - |
 | AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter, FormulaInstaller | application/afterlanding.go, application/selfupdate.go, application/backendstage.go, application/formulainstall.go | infra/{rig/{afterlanding,built,backend},userunits,vault/formulas}.go | features/{self_update,backend_swap}.feature |
-| EventLog, BeadFeed, FollowCursors, ShipStates, SubscribeFiles, NudgeCursors, EventSpringer, EventController, HarnessCount | application/event*.go, status.go | infra/{eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go | apptest.Fake{EventLog,Follow*,Ship*,Tracker,Subscribe*} |
-| Postern, hands, Prompts | application/{postern*,hands,prompt}.go | infra/{postern,hands*,homemove} | apptest.Fake{Postern*,Cipher,Hands*,HomeMover,Prompts} |
-| Chain, StampQueue, StampStore, CommitNotes, RigHeads | application/chain.go, application/chainstamp.go, application/prove.go | infra/{bsv,stampqueue,chainlookup}, rig/worktree.go | apptest.Fake{Chain,Stamp*,Commit*,RigHeads} |
-| Grinder, GrindSource, GristState, GristLock, GristRunStore, GristForwardStore, GristSmoke* | application/grist.go, application/gristruns.go, application/gristsmoke.go | infra/{claude/grind,rig/grinds,hostlock/try}.go, infra/grist | apptest.Fake{Grinder,Grinds,Grist*} |
-| Scorer | application/scorer.go | infra/scorer | apptest.FakeScorer |
-| SecretStore | application/secrets.go | infra/sops | apptest.FakeSecretStore |
+| EventLog, BeadFeed, FollowCursors, ShipStates, SubscribeFiles, NudgeCursors, EventSpringer, EventController, HarnessCount | application/event*.go, status.go | infra/{eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go | Fake{EventLog,Follow*,Ship*,Tracker,Subscribe*} |
+| Postern, hands, Prompts | application/{postern*,hands,prompt}.go | infra/{postern,hands*,homemove} | Fake{Postern*,Cipher,Hands*,HomeMover,Prompts} |
+| Chain, StampQueue, StampStore, CommitNotes, RigHeads | application/chain.go, application/chainstamp.go, application/prove.go | infra/{bsv,stampqueue,chainlookup}, rig/worktree.go | Fake{Chain,Stamp*,Commit*,RigHeads} |
+| Grinder, GrindSource, GristState, GristLock, GristRunStore, GristForwardStore, GristSmoke* | application/grist.go, application/gristruns.go, application/gristsmoke.go | infra/{claude/grind,rig/grinds,hostlock/try}.go, infra/grist | Fake{Grinder,Grinds,Grist*} |
+| Scorer | application/scorer.go | infra/scorer | FakeScorer |
+| SecretStore | application/secrets.go | infra/sops | FakeSecretStore |
 
 ## Use cases
 
 | Use case | File | Command | Feature |
 |-|-|-|-|
 | File, Release, Retry, Cause, Path{Set,Show} | application/file.go, application/release.go, application/retry.go, application/cause.go, application/pathset.go | cmd/mw/file.go, cmd/mw/release.go, cmd/mw/retry.go, cmd/mw/cause.go, cmd/mw/path.go | features/{file_plan,release,retry,cause,path_set}.feature |
-| Show, Peek, Prove, StampHead, Tester | application/show.go, application/stamphead.go, application/testerreport.go | mw show/peek/prove/stamp/tester - cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go, cmd/mw/tester.go | features/{show,peek,prove,stamp,tester}.feature |
+| Show, Peek, Prove, StampHead, Tester, FactoryReport | application/show.go, application/stamphead.go, application/testerreport.go, application/factoryreport.go | mw show/peek/prove/stamp/tester/report - cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go, cmd/mw/tester.go, cmd/mw/report.go | features/{show,peek,prove,stamp,tester,report}.feature |
 | Dispatch, Next, AfterLandingRun | application/dispatch.go, application/next.go, application/afterlandingrun.go | mw dispatch/next/after-landing - cmd/mw/dispatch.go, cmd/mw/next.go, cmd/mw/afterlanding.go | features/{dispatch,next,after_landing}.feature |
 | Check, Status, CloudCheck, Brief | application/check.go, application/status.go, application/cloud.go, application/brief.go | mw check/status/cloud/brief - cmd/mw/check.go, cmd/mw/status.go, cmd/mw/cloud.go, cmd/mw/brief.go | features/{check,status,cloud,brief}.feature |
 | Sweep, Tidy, Sync, Nudge, Mail, Home[Move] | application/sweep.go, application/tidy.go, application/sync.go, application/nudge.go, application/mail.go, application/home.go, application/homemove.go | mw sweep/tidy/sync/nudge/mail/home - cmd/mw/sweep.go, cmd/mw/tidy.go, cmd/mw/sync.go, cmd/mw/nudge.go, cmd/mw/mail.go, cmd/mw/home.go, cmd/mw/homemove.go | features/{sweep,tidy,sync,mail,home}.feature |

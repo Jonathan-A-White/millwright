@@ -439,6 +439,26 @@ cause (the section is left out when there are none); and `mw retry` of a story
 with no cause prints `no cause recorded yet: mw cause ...` and retries anyway.
 See `features/cause.feature`.
 
+## How the factory is doing
+
+```sh
+bin/mw report [--since 7d|2026-10-09] [--rig lampas] [--host laptop] [--json]
+```
+
+`mw report` is the QUALITY section: from the builder ledger, the stories and the
+Tester's FINDINGS it sums a window, one block per rig, then per model, then per
+host, in 60 columns. Each block says what landed and what was refused (the
+refusal rate, and the refusals by the reason in `not landed (<reason>)`), the
+attempts a landing took, the refusals' causes by class (`mw cause`; `unset` is a
+refusal nobody named), the `[bug]` stories filed in the window and the Tester's
+findings on the landed stories, those last two per landing. A story's rig, host
+and model come from its merged path; a ledger row whose story is gone counts
+under rig `unknown`. The window is `--since` (`7d`, a day, or a UTC time; 7d by
+default) to now; `--rig` and `--host` narrow every block. The window of the same
+length before it is computed too and is in `--json`, which prints the whole
+structure, for the arrows to come. It reads and writes nothing. See
+`features/report.feature`.
+
 ## Setting a story's path
 
 ```sh
