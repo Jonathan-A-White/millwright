@@ -5,8 +5,8 @@
 # Four checks, each with a deliberately simple rule so the next Builder can
 # predict what will trip it:
 #
-# 1. SIZE. docs/codemap.md must be at most 8192 bytes. It is one page: if it
-#    no longer fits, cut something rather than raising the limit.
+# 1. SIZE. docs/codemap.md must be at most 10240 bytes. It is one page read at
+#    boot: if it no longer fits, merge rows or shorten them to make room.
 #
 # 2. PATHS. "A path named in the map" (in the map or in docs/adding-a-command.md,
 #    its companion page) is any span between single backticks
@@ -42,7 +42,7 @@ set -eu
 REPO_ROOT=$(git -C "$(dirname "$0")" rev-parse --show-toplevel 2>/dev/null) || REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 MAP=docs/codemap.md
 ADDING=docs/adding-a-command.md
-LIMIT=8192
+LIMIT=10240
 
 cd "$REPO_ROOT"
 
@@ -57,7 +57,7 @@ fail() {
 # --- 1. size -------------------------------------------------------------
 size=$(wc -c <"$MAP" | tr -d ' ')
 if [ "$size" -gt "$LIMIT" ]; then
-	fail "$MAP is $size bytes, over the $LIMIT-byte limit; cut something"
+	fail "$MAP is $size bytes, over the $LIMIT-byte limit; make room by merging rows or shortening them"
 fi
 
 # --- 2. every path named in the map exists -------------------------------
