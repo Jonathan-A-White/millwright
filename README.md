@@ -3711,6 +3711,10 @@ total. A go-build cache past budget with a file open under it, or a `go`,
 `gotestsum`, `compile`, `link` or `vet` process running, is a live build or
 test rather than a leftover: Probe reports it ok instead of faulty, and Cure
 leaves it for a later tick rather than clearing it out from underneath.
+Faulty again inside the 5-minute wait after a cure that worked (the cache
+regrows fast under several Builders' `go test`) is logged as `damped` but
+leaves with 0 and wakes nobody; the cap of 3 being spent, or a cure that
+failed, still leaves with the fault status.
 
 **root-disk-budget** watches the desktop's WSL root against the Windows
 drive that holds its `ext4.vhdx`. The vhdx is sparse: it grows as ext4

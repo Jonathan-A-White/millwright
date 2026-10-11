@@ -38,7 +38,8 @@ func newDoctorCmd() *cobra.Command {
 			"nothing: no cure runs, no state is written, no log line is appended.\n\n" +
 			"It leaves with 0 when every check is ok or cured, and " + fmt.Sprint(application.DoctorFaultExit) +
 			" when any check is left faulty and uncured (damped, or its cure failed), so a timer's\n" +
-			"journal shows it.",
+			"journal shows it. A check that says so (tmp-leftovers) is not left faulty by a damped tick\n" +
+			"held only by the wait after a cure that worked.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := ""
