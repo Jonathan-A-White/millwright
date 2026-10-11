@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/gitcmd"
@@ -201,13 +202,53 @@ func (v *Vault) Pull(ctx context.Context) (int, error) {
 		return 0, err
 	}
 
-	if _, err := v.git(ctx, "pull", "--rebase"); err != nil {
+	_, err = v.git(ctx, "pull", "--rebase")
+	if err != nil && closeOutIsWriting(err) {
+		// mw next's close-out writes a run's files into this checkout and
+		// commits them a moment later; a pull that lands between the two finds
+		// them untracked, in the way of the same files from the other host.
+		// Nothing was changed, and the commit is moments behind: wait, and try
+		// once more.
+		if waited := v.waitForCloseOut(ctx); waited != nil {
+			return 0, waited
+		}
+		_, err = v.git(ctx, "pull", "--rebase")
+	}
+	if err != nil {
 		if _, aborted := v.git(ctx, "rebase", "--abort"); aborted == nil {
 			return 0, fmt.Errorf("%w (the rebase was undone: the vault is as it was)", err)
 		}
 		return 0, err
 	}
 	return v.commitsBetween(ctx, strings.TrimSpace(before), "@{upstream}")
+}
+
+// closeOutWait is how long a pull waits for a close-out's commit before its one
+// retry.
+const closeOutWait = 3 * time.Second
+
+// untrackedInTheWay is the words git refuses a pull in when files in the working
+// tree that it does not track are the same paths as files coming in.
+const untrackedInTheWay = "untracked working tree files would be overwritten"
+
+// closeOutIsWriting reports whether git refused a pull for no more than files
+// in the way that a close-out is about to commit. Every other refusal is not it.
+func closeOutIsWriting(err error) bool {
+	return strings.Contains(err.Error(), untrackedInTheWay)
+}
+
+func (v *Vault) waitForCloseOut(ctx context.Context) error {
+	if v.wait != nil {
+		return v.wait(ctx, closeOutWait)
+	}
+	timer := time.NewTimer(closeOutWait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("waiting %s for the close-out to commit: %w", closeOutWait, ctx.Err())
+	case <-timer.C:
+		return nil
+	}
 }
 
 // Push implements application.VaultFiles. A clone with nothing to push does not

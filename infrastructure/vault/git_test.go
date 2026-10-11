@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
@@ -422,6 +423,85 @@ func TestPullUndoesARebaseItCannotFinish(t *testing.T) {
 	}
 	if left := run(t, here, "git", "status", "--porcelain"); strings.TrimSpace(left) != "" {
 		t.Fatalf("expected no half-finished rebase left behind, got %q", left)
+	}
+}
+
+// A close-out writes a run's files into the vault and commits them a moment
+// later. A pull that lands between the two meets the files untracked, in the
+// way of the same files coming from the other host, and git refuses it. The
+// close-out's commit is only a moment behind, so the pull waits and tries once
+// more, and finds the vault level.
+func TestPullWaitsOutACloseOutThatIsWritingTheFilesTheOtherHostSent(t *testing.T) {
+	here, there := twoHosts(t)
+
+	write(t, there, "runs/mw-x.1/result.json", "{}\n")
+	run(t, there, "git", "add", "-A")
+	run(t, there, "git", "commit", "-qm", "The other host's run files")
+	run(t, there, "git", "push", "-q")
+
+	// The close-out has written the files and has not yet committed them.
+	write(t, here, "runs/mw-x.1/result.json", "{}\n")
+
+	var waited []time.Duration
+	files := vault.New(here, vault.WithWait(func(_ context.Context, d time.Duration) error {
+		waited = append(waited, d)
+		// The close-out commits while the pull waits.
+		run(t, here, "git", "add", "-A")
+		run(t, here, "git", "commit", "-qm", "Close-out of mw-x.1")
+		return nil
+	}))
+
+	if _, err := files.Pull(context.Background()); err != nil {
+		t.Fatalf("expected the pull to wait out the close-out and finish, got %v", err)
+	}
+	if len(waited) != 1 {
+		t.Fatalf("expected one wait before the one retry, got %v", waited)
+	}
+	if left := run(t, here, "git", "status", "--porcelain"); strings.TrimSpace(left) != "" {
+		t.Fatalf("expected a level vault, got %q", left)
+	}
+}
+
+// The wait is for that one refusal and no other: a pull that git refuses for
+// any other reason fails at once, as it always did.
+func TestPullDoesNotWaitOutAnyOtherRefusal(t *testing.T) {
+	fakeGit(t, "fatal: refusing to merge unrelated histories")
+
+	waited := 0
+	files := vault.New(t.TempDir(), vault.WithWait(func(context.Context, time.Duration) error {
+		waited++
+		return nil
+	}))
+	if _, err := files.Pull(context.Background()); err == nil {
+		t.Fatal("expected the refusal to be reported")
+	}
+	if waited != 0 {
+		t.Fatalf("expected no wait for another refusal, waited %d times", waited)
+	}
+}
+
+// A close-out that never commits does not hold the pull for ever: it is tried
+// once more, and the second refusal comes back as it was said.
+func TestPullFailsWhenTheFilesAreStillInTheWayAfterTheOneRetry(t *testing.T) {
+	here, there := twoHosts(t)
+
+	write(t, there, "runs/mw-x.1/result.json", "{}\n")
+	run(t, there, "git", "add", "-A")
+	run(t, there, "git", "commit", "-qm", "The other host's run files")
+	run(t, there, "git", "push", "-q")
+	write(t, here, "runs/mw-x.1/result.json", "{}\n")
+
+	waited := 0
+	files := vault.New(here, vault.WithWait(func(context.Context, time.Duration) error {
+		waited++
+		return nil
+	}))
+	_, err := files.Pull(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "untracked working tree files would be overwritten") {
+		t.Fatalf("expected git's refusal after the retry, got %v", err)
+	}
+	if waited != 1 {
+		t.Fatalf("expected exactly one wait, waited %d times", waited)
 	}
 }
 

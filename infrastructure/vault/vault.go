@@ -30,6 +30,7 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 )
@@ -48,6 +49,7 @@ const (
 type Vault struct {
 	dir    string
 	author string
+	wait   func(context.Context, time.Duration) error
 }
 
 // Option shapes a Vault.
@@ -60,6 +62,12 @@ type Option func(*Vault)
 // is still the person's. A Vault with no author leaves git to the clone's own.
 func WithAuthor(author string) Option {
 	return func(v *Vault) { v.author = strings.TrimSpace(author) }
+}
+
+// WithWait replaces how a pull waits before it tries again after a close-out's
+// files got in its way; the default is a real wait. It is for tests.
+func WithWait(wait func(context.Context, time.Duration) error) Option {
+	return func(v *Vault) { v.wait = wait }
 }
 
 // New returns the vault held in a directory.
