@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
@@ -426,5 +427,86 @@ func TestRetryPrintsTheAttemptTheNextDispatchWillRecord(t *testing.T) {
 				t.Errorf("attempts %s, ahead %d: expected the comment to say %q, got %q", tc.attempts, ahead, want, comments)
 			}
 		}
+	}
+}
+
+// aClaimedRetryStory is aRetryStory with the claim held by holder instead of
+// the fake's own actor, and the story pathed to pathHost, as a Mayor leaves it
+// after changing the host key on an in-progress story (mw-gq6.364).
+func aClaimedRetryStory(t *testing.T, tracker *apptest.FakeTracker, id, holder, pathHost string) {
+	t.Helper()
+	aRetryStory(t, tracker, id)
+	if err := tracker.ClaimAs(id, holder, time.Now().Add(time.Hour)); err != nil {
+		t.Fatalf("claiming %s as %s: %v", id, holder, err)
+	}
+	if err := tracker.SetStoryMetadata(context.Background(), id, map[string]string{"host": pathHost}); err != nil {
+		t.Fatalf("pathing %s to %s: %v", id, pathHost, err)
+	}
+}
+
+// TestRetryFromAHostThatDoesNotHoldTheClaimGivesItBackByItsActualAssignee pins
+// the first half of mw-gq6.364: the host key names this host, but mw@desktop
+// holds the claim, so the story was worked on the desktop. The retry hands the
+// claim back guarded on the actual assignee and reads no worktree here.
+func TestRetryFromAHostThatDoesNotHoldTheClaimGivesItBackByItsActualAssignee(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	aClaimedRetryStory(t, tracker, "mw-gq6.1", "mw@desktop", "laptop")
+	landing := &fakeRetryLanding{AheadCount: 2}
+	var out strings.Builder
+
+	retry := aRetry(tracker, landing, &apptest.FakeVaultFiles{}, &out)
+	retry.Host = "laptop"
+	report, err := retry.Run(context.Background(), "mw-gq6.1")
+	if err != nil {
+		t.Fatalf("expected the retry to succeed, got: %v\n%s", err, out.String())
+	}
+
+	if report.Elsewhere != "desktop" || !report.ClaimReleased {
+		t.Errorf("expected the claim given back with the story worked on desktop, got %+v", report)
+	}
+	if landing.bundled || landing.removed || landing.branchDeleted {
+		t.Errorf("expected no worktree read or removed on laptop")
+	}
+	detail, err := tracker.ShowStory(context.Background(), "mw-gq6.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Status != application.StatusOpen || detail.Assignee != "" {
+		t.Errorf("expected the story open and unassigned, got status %q assignee %q", detail.Status, detail.Assignee)
+	}
+	if !strings.Contains(out.String(), "desktop") {
+		t.Errorf("expected the report to name desktop, got %q", out.String())
+	}
+}
+
+// TestRetryOnTheClaimingHostBundlesEvenWhenTheHostKeyNamesAnother is the other
+// half of mw-gq6.364: mw@desktop holds the claim and the retry runs on the
+// desktop, but the story's host key now says laptop. Where it was worked comes
+// from the claim, so the desktop's worktree is bundled and cleared.
+func TestRetryOnTheClaimingHostBundlesEvenWhenTheHostKeyNamesAnother(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	aClaimedRetryStory(t, tracker, "mw-gq6.1", "mw@desktop", "laptop")
+	landing := &fakeRetryLanding{AheadCount: 2, BundleSHA: "abc1234"}
+	var out strings.Builder
+
+	retry := aRetry(tracker, landing, &apptest.FakeVaultFiles{}, &out)
+	retry.Host = "desktop"
+	report, err := retry.Run(context.Background(), "mw-gq6.1")
+	if err != nil {
+		t.Fatalf("expected the retry to succeed, got: %v\n%s", err, out.String())
+	}
+
+	if report.Elsewhere != "" {
+		t.Errorf("expected the story read as worked here, got elsewhere %q", report.Elsewhere)
+	}
+	if !report.Bundled || !report.WorktreeGone || !report.BranchGone || !report.ClaimReleased {
+		t.Errorf("expected the worktree bundled, taken away and the claim given back, got %+v", report)
+	}
+	detail, err := tracker.ShowStory(context.Background(), "mw-gq6.1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Status != application.StatusOpen || detail.Assignee != "" {
+		t.Errorf("expected the story open and unassigned, got status %q assignee %q", detail.Status, detail.Assignee)
 	}
 }

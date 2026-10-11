@@ -134,7 +134,8 @@ func salvageBranch(ctx context.Context, worktrees Worktrees, landing Landing, fi
 // bundled or removed. An error partway through leaves the report naming only
 // what actually happened before it, never what was only planned.
 //
-// A story pathed to another host is not read here at all: its worktree is on
+// A story worked on another host (named by its claim, mw@<host>, before its
+// path's host key) is not read here at all: its worktree is on
 // that host, so the claim is given back and a comment says so, and that host's
 // next dispatch bundles what it left (mw-gq6.256).
 //
@@ -184,6 +185,10 @@ type RetryReport struct {
 	// refunded is how many dead-pane refunds the story had when the retry read
 	// it, which the retry sets back to 0.
 	refunded int
+
+	// holder is who held the claim when the retry read the story, the actor the
+	// give-back is guarded on.
+	holder string
 
 	// Elsewhere is the other host the story was worked on, when this retry
 	// only gave the claim back and left that host's worktree and branch for its
@@ -268,6 +273,19 @@ func (r Retry) remote() string {
 	return r.Remote
 }
 
+// workedOn is the host a story was worked on: the host its claim was made on
+// when the claim is mw's, else the path's host key. Empty means no host is
+// named, so the worktree is taken to be here.
+func (r Retry) workedOn(path domain.Path, assignee string) string {
+	if host := ClaimHost(assignee); host != "" {
+		return host
+	}
+	if path.Host == domain.HostAuto {
+		return ""
+	}
+	return path.Host
+}
+
 // Run retries one story. The error it returns is why nothing more was done;
 // the report says what, if anything, was.
 func (r Retry) Run(ctx context.Context, storyID string) (RetryReport, error) {
@@ -318,8 +336,10 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	// here: reading them would fail before anything was done. The claim is given
 	// back without touching any worktree, and the next dispatch on that host
 	// bundles whatever it left, as it does for any leftover in the way of a
-	// fresh cut.
-	if elsewhere := path.Host; elsewhere != "" && elsewhere != domain.HostAuto && elsewhere != r.Host {
+	// fresh cut. Where it was worked comes from the claim (mw@<host>) before the
+	// path's host key, which a person may have changed since (mw-gq6.364).
+	report.holder = detail.Assignee
+	if elsewhere := r.workedOn(path, detail.Assignee); elsewhere != "" && elsewhere != r.Host {
 		return r.handBack(ctx, report, elsewhere, detail.Assignee)
 	}
 
@@ -378,7 +398,7 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 // when not empty, says why there was nothing to keep.
 func (r Retry) giveBack(ctx context.Context, report RetryReport, nothing string) (RetryReport, error) {
 	storyID, attempt := report.StoryID, report.Attempt
-	if err := r.Tracker.ReleaseClaim(ctx, storyID); err != nil {
+	if err := r.Tracker.ReleaseClaimHeldBy(ctx, storyID, report.holder); err != nil {
 		if report.NoWorktree {
 			return report, fmt.Errorf("retrying %s: the claim could not be given back: %w", storyID, err)
 		}

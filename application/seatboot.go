@@ -400,6 +400,17 @@ func SeatIdentity(seat, host string) string {
 	return seat + "@" + host
 }
 
+// ClaimHost is the host a claim was made on, read from the assignee it left: a
+// claim mw made reads mw@<host>. A claim held under any other name, or none,
+// says nothing about a host, and the answer is empty.
+func ClaimHost(assignee string) string {
+	host, ok := strings.CutPrefix(assignee, MwSeat+"@")
+	if !ok {
+		return ""
+	}
+	return host
+}
+
 // KickoffPrompt is the first thing a session is told. It is short on purpose:
 // who it is and what it is working are in the boot file it was primed with,
 // and everything else it needs is in the story's own formula steps.

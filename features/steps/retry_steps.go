@@ -78,6 +78,8 @@ func InitializeRetryScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the story "([^"]*)" has been tried (\d+) times? in all$`, c.theStoryHasBeenTriedTimesInAll)
 	ctx.Given(`^the story "([^"]*)" ran on the host "([^"]*)" and its worktree is there, not here$`, c.theStoryRanOnAnotherHost)
 	ctx.Given(`^the story "([^"]*)" ran on the host "([^"]*)" and is claimed there by "([^"]*)"$`, c.theStoryIsClaimedByAnotherHostsActor)
+	ctx.Given(`^the host key of the story "([^"]*)" is changed to "([^"]*)"$`, c.theHostKeyIsChanged)
+	ctx.Given(`^the story "([^"]*)" is claimed by "([^"]*)"$`, c.theStoryIsClaimedBy)
 	ctx.Given(`^the story "([^"]*)" has had (\d+) dead-pane refunds?$`, c.theStoryHasHadRefunds)
 	ctx.Given(`^the vault cannot reach its origin$`, c.theVaultCannotReachItsOrigin)
 
@@ -329,6 +331,17 @@ func (c *retryContext) theStoryIsClaimedByAnotherHostsActor(id, host, actor stri
 		return err
 	}
 	return c.tracker.SetStoryMetadata(ctx, id, map[string]string{"host": host})
+}
+
+// theHostKeyIsChanged is what a Mayor does to an in-progress story to move it:
+// the host path key now names another host, the claim untouched.
+func (c *retryContext) theHostKeyIsChanged(id, host string) error {
+	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{"host": host})
+}
+
+// theStoryIsClaimedBy makes actor the story's claim holder, as bd records it.
+func (c *retryContext) theStoryIsClaimedBy(id, actor string) error {
+	return c.tracker.ClaimAs(id, actor, time.Now().Add(time.Hour))
 }
 
 // noWorktreeWasReadOrMadeHere proves the retry never reached for a worktree
