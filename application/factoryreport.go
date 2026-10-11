@@ -148,6 +148,9 @@ type FactoryReportResult struct {
 	// CheapWins are the suggestions every rule that held made, in precedence
 	// order; the first MaxCheapWins are Shown.
 	CheapWins []CheapWin `json:"cheap_wins"`
+	// Whole is the whole factory as one block, what Summary reads; nil when
+	// nothing landed, was refused or was filed. It is not in the JSON.
+	Whole *ReportBlock `json:"-"`
 }
 
 // reportEntry is one thing the window saw: a landing, a refusal or a bug filed.
@@ -322,6 +325,9 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 	result.Rigs = r.blocks(entries, gates, func(e reportEntry) string { return e.rig }, func(g GateTrend) string { return g.Rig })
 	result.Models = r.blocks(entries, nil, func(e reportEntry) string { return e.model }, nil)
 	result.Hosts = r.blocks(entries, gates, func(e reportEntry) string { return e.host }, func(g GateTrend) string { return g.Host })
+	if whole := r.blocks(entries, nil, func(reportEntry) string { return "factory" }, nil); len(whole) == 1 {
+		result.Whole = &whole[0]
+	}
 	result.CheapWins = CheapWins(WinInputs{Rigs: result.Rigs, Gates: gates, Kinds: Calibrate(recent, BenchmarkSettings{}), Heavy: r.heavyStories(entries)})
 
 	if r.Out != nil {
