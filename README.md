@@ -475,6 +475,18 @@ an arrow on the headline numbers; `--json` carries them all, as `arrows.<measure
 with `previous`, `arrow` and `verdict`, beside the previous window's figures
 (`previous`, `speed_previous`, `fuel_previous`).
 
+CHEAP WINS ends the report: at most three one-line suggestions, each naming its rig,
+host, kind or story and what to try, chosen by fixed rules in this order (quality
+first), the first three that hold being printed, numbered 1 to 3. R1 refusals with no
+cause (`mw cause them`); R2 one reason that is at least 30% of a rig's refusals, and
+at least 3 of them; R3 a story that used up its attempts or needed 3; R4 a rig's
+refusal rate up 5 points or more on the window before; R5 a kind whose par is flagged
+by the calibration (its FLAG line); R6 a host's latest gate at least 1.5
+times its usual. When none holds it says `CHEAP WINS: none seen`. `--json` has
+`cheap_wins`, every rule that held with its `rule` id (`R1` to `R6`), its `text` and
+whether it was `shown`. The thresholds are PROVISIONAL. The section only suggests: it
+files nothing, and the bigger call stays the Mayor's.
+
 A story's rig, host and model come from its merged path; a ledger row whose story is
 gone counts under rig `unknown`. The window is `--since` (`7d`, a day, or a UTC time;
 7d by default) to now; `--rig` and `--host` narrow every block. It reads and writes
