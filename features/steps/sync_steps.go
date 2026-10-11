@@ -50,6 +50,11 @@ type syncContext struct {
 	headBefore   string // this host's HEAD before the sync
 	remoteBefore string // the shared remote's main before the sync
 
+	// closeOutCommits is the close-out that has written its files here and
+	// commits them while the vault's pull waits; waits counts those waits.
+	closeOutCommits bool
+	waits           int
+
 	report application.SyncReport
 	err    error
 }
@@ -76,6 +81,10 @@ func InitializeSyncScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the other host appended a line to the Mayor's ledger and pushed it$`, c.theOtherHostAppendedAndPushed)
 	ctx.Given(`^this host appended its own line to the Mayor's ledger$`, c.thisHostAppended)
 	ctx.Given(`^this host has an uncommitted change to the Mayor's ledger$`, c.thisHostHasAnUncommittedChange)
+	ctx.Given(`^the other host pushed the run files of "([^"]*)"$`, c.theOtherHostPushedRunFiles)
+	ctx.Given(`^a close-out here has written the same run files of "([^"]*)" and has not committed them yet$`, c.aCloseOutHasWrittenRunFiles)
+	ctx.Given(`^the close-out commits them a moment later$`, c.theCloseOutCommitsLater)
+	ctx.Given(`^both hosts committed a different charter$`, c.bothHostsCommittedACharter)
 	ctx.Given(`^bd sync will exit (\d+)$`, c.bdSyncWillExit)
 	ctx.Given(`^bd sync will exit (\d+), then clear on the next try$`, c.bdSyncWillExitThenClear)
 	ctx.Given(`^this host keeps the one beads database, backed up every (\d+) minutes$`, c.thisHostKeepsTheOneDatabase)
@@ -85,6 +94,7 @@ func InitializeSyncScenario(ctx *godog.ScenarioContext) {
 
 	ctx.When(`^this host syncs$`, c.thisHostSyncs)
 
+	ctx.Then(`^the vault pull waited (\d+) times?$`, c.thePullWaited)
 	ctx.Then(`^the sync succeeds$`, c.theSyncSucceeds)
 	ctx.Then(`^the sync fails, and mw stops with a non-zero exit$`, c.theSyncFails)
 	ctx.Then(`^the sync stops with the vault blocked$`, c.theSyncStopsWithTheVaultBlocked)
@@ -285,7 +295,7 @@ func (c *syncContext) thisHostSyncs() error {
 	}
 
 	sync := application.Sync{
-		Vault:   vault.New(c.here),
+		Vault:   vault.New(c.here, vault.WithWait(c.waitForTheCloseOut)),
 		Tracker: c.tracker,
 		Host:    c.host,
 		Now:     func() time.Time { return syncedAt },
@@ -661,6 +671,87 @@ func (c *syncContext) theSyncSaysTheBackupHalted() error {
 	said := c.report.String()
 	if c.report.BackedUp || !strings.Contains(said, "backup halted") || !strings.Contains(said, "merge conflict") {
 		return fmt.Errorf("expected the sync to say the backup halted on a merge conflict, got %q", said)
+	}
+	return nil
+}
+
+func runFilesOf(story string) string { return "runs/" + story + "/result.json" }
+
+func (c *syncContext) theOtherHostPushedRunFiles(story string) error {
+	if err := writeFile(c.there, runFilesOf(story), "{}\n"); err != nil {
+		return err
+	}
+	for _, args := range [][]string{
+		{"add", "-A"},
+		{"commit", "-qm", "The other host's run files"},
+		{"push", "-q"},
+	} {
+		if _, err := runGit(c.there, args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// aCloseOutHasWrittenRunFiles leaves the files untracked, as a close-out does in
+// the moment between writing them and committing them.
+func (c *syncContext) aCloseOutHasWrittenRunFiles(story string) error {
+	return writeFile(c.here, runFilesOf(story), "{}\n")
+}
+
+func (c *syncContext) theCloseOutCommitsLater() error {
+	c.closeOutCommits = true
+	return nil
+}
+
+// waitForTheCloseOut stands in for the pull's wait: it counts it, and has the
+// close-out commit, when the scenario has one.
+func (c *syncContext) waitForTheCloseOut(context.Context, time.Duration) error {
+	c.waits++
+	if !c.closeOutCommits {
+		return nil
+	}
+	for _, args := range [][]string{
+		{"add", "-A"},
+		{"commit", "-qm", "Close-out"},
+	} {
+		if _, err := runGit(c.here, args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *syncContext) bothHostsCommittedACharter() error {
+	if err := writeFile(c.there, "seats/mayor/charter.md", "the charter as the other host has it\n"); err != nil {
+		return err
+	}
+	for _, args := range [][]string{
+		{"add", "-A"},
+		{"commit", "-qm", "The other host's charter"},
+		{"push", "-q"},
+	} {
+		if _, err := runGit(c.there, args...); err != nil {
+			return err
+		}
+	}
+	if err := writeFile(c.here, "seats/mayor/charter.md", "the charter as this host has it\n"); err != nil {
+		return err
+	}
+	for _, args := range [][]string{
+		{"add", "-A"},
+		{"commit", "-qm", "This host's charter"},
+	} {
+		if _, err := runGit(c.here, args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *syncContext) thePullWaited(times int) error {
+	if c.waits != times {
+		return fmt.Errorf("expected the vault pull to wait %d times, it waited %d", times, c.waits)
 	}
 	return nil
 }

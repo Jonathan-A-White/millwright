@@ -85,6 +85,22 @@ Feature: Keeping the vault and beads in step between hosts
     And the beads database was synced once
     And nothing is recorded under host.vps.last_sync
 
+  Scenario: A close-out's files in the way of the pull are waited out, and the sync goes on
+    Given the other host pushed the run files of "mw-x.1"
+    And a close-out here has written the same run files of "mw-x.1" and has not committed them yet
+    And the close-out commits them a moment later
+    When this host syncs
+    Then the sync succeeds
+    And the vault pull waited 1 time
+    And no conflict is left in the vault
+
+  Scenario: A pull git refuses for any other reason is not waited out and fails as it always did
+    Given both hosts committed a different charter
+    When this host syncs
+    Then the sync fails, and mw stops with a non-zero exit
+    And the vault pull waited 0 times
+    And no conflict is left in the vault
+
   Scenario: A vault that does not mark its ledgers yet is marked before anything merges
     Given the vault does not mark ledgers as append-only
     And the other host appended a line to the Mayor's ledger and pushed it
