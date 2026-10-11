@@ -54,6 +54,8 @@ type gristVectors struct {
 	} `json:"keys"`
 	Grist   application.GristPlaintext         `json:"grist"`
 	Answers map[string]application.GristAnswer `json:"answers"`
+	// RequestStatus is the request-status plaintexts, by status.
+	RequestStatus map[string]json.RawMessage `json:"requestStatus"`
 }
 
 // gristContext is one mill: a throwaway mill key (the vectors' own), a fake
@@ -123,6 +125,7 @@ func InitializeGristScenario(ctx *godog.ScenarioContext) {
 	registerGristAudio(ctx, c)
 	registerGristSlots(ctx, c)
 	registerGristForward(ctx, c)
+	registerGristRequest(ctx, c)
 
 	ctx.Given(`^a mill on the host "([^"]*)"$`, c.aMill)
 	ctx.Given(`^the app "([^"]*)" is checked out here, its main at commit "([^"]*)" with the grind "([^"]*)"$`, c.theAppIsCheckedOut)

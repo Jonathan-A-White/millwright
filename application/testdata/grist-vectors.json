@@ -1,5 +1,5 @@
 {
-  "about": "docs/protocol.md §18 test vectors. Test keys only: never fund or license them. The backend's tests (server/internal/api) and the mill's (millwright) read this file.",
+  "about": "docs/protocol.md §19 test vectors. Test keys only: never fund or license them. The backend's tests (server/internal/api) and the mill's (millwright) read this file.",
   "keys": {
     "mill": {
       "privateKeyHex": "1111111111111111111111111111111111111111111111111111111111111111",
@@ -24,6 +24,18 @@
   "apps": { "cairn": "cairn" },
   "grist": {
     "grist": { "app": "cairn", "kind": "sweep", "v": "1.1" },
+    "input": {
+      "schemaVersion": "1.1",
+      "requestType": "sweep",
+      "place": { "name": "Top drawer", "path": "Kitchen -> Top drawer" },
+      "knownItems": ["scissors", "tape measure"]
+    },
+    "attachments": [
+      { "hash": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", "size": 412345, "mime": "image/jpeg" }
+    ]
+  },
+  "gristAskingModelAndEffort": {
+    "grist": { "app": "cairn", "kind": "sweep", "v": "1.1", "model": "sonnet", "effort": "high" },
     "input": {
       "schemaVersion": "1.1",
       "requestType": "sweep",
@@ -66,13 +78,55 @@
       "grind": { "app": "cairn", "kind": "sweep", "v": "1.1", "commit": "0123456789abcdef0123456789abcdef01234567" }
     }
   },
+  "requestStatus": {
+    "filed": {
+      "kind": "request-status",
+      "request": "direct:5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+      "bead": "mw-x.1",
+      "status": "filed",
+      "ts": 1790000000000
+    },
+    "building": {
+      "kind": "request-status",
+      "request": "direct:5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+      "bead": "mw-x.1",
+      "status": "building",
+      "ts": 1790000600000
+    },
+    "landed": {
+      "kind": "request-status",
+      "request": "direct:5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+      "bead": "mw-x.1",
+      "status": "landed",
+      "version": "0.1.86",
+      "commit": "0123456789abcdef0123456789abcdef01234567",
+      "url": "https://github.com/Jonathan-A-White/cairn/commit/0123456789abcdef0123456789abcdef01234567",
+      "ts": 1790003600000
+    },
+    "declined": {
+      "kind": "request-status",
+      "request": "direct:5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+      "bead": "mw-x.1",
+      "status": "declined",
+      "reason": "This would make the app do two things at once; we are keeping it to one.",
+      "ts": 1790004600000
+    },
+    "adoptedAsSetting": {
+      "kind": "request-status",
+      "request": "direct:5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
+      "bead": "mw-x.1",
+      "status": "adopted-as-setting",
+      "setting": "Settings > Display > Larger text",
+      "ts": 1790005600000
+    }
+  },
   "delivery": [
     { "as": "cairnPhone", "class": "grist", "to": "mill", "status": 201, "signerApps": ["cairn"], "why": "an app key sends grist to the mill" },
     { "as": "cairnPhone", "class": "grist", "to": "governor", "status": 403, "why": "an app key sends grist to the mill only" },
     { "as": "cairnPhone", "class": "message", "to": "mill", "status": 403, "why": "an app key sends nothing but grist" },
     { "as": "mill", "class": "grist", "to": "cairnPhone", "status": 201, "why": "the mill answers any key" },
     { "as": "mill", "class": "message", "to": "governor", "status": 403, "why": "the mill sends nothing but grist" },
-    { "as": "governor", "class": "message", "to": "mill", "status": 201, "why": "a cockpit key is unchanged by §18" },
+    { "as": "governor", "class": "message", "to": "mill", "status": 201, "why": "a cockpit key is unchanged by §19" },
     { "as": "governor", "class": "grist", "to": "mill", "status": 201, "why": "a cockpit key may send grist too" },
     { "as": "stranger", "class": "grist", "to": "mill", "status": 401, "why": "no licence, no door" }
   ]

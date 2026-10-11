@@ -31,6 +31,7 @@ func newGristCmd() *cobra.Command {
 	root.AddCommand(newGristKeyCmd())
 	root.AddCommand(newGristGrindCmd())
 	root.AddCommand(newGristSendCmd())
+	root.AddCommand(newGristRequestCmd())
 	root.AddCommand(newGristEvalCmd())
 	root.AddCommand(newGristScoreCmd())
 	root.AddCommand(newGristRunsCmd())
@@ -150,6 +151,52 @@ func newGristSendCmd() *cobra.Command {
 		_ = cmd.MarkFlagRequired(name)
 	}
 	return cmd
+}
+
+// newGristRequestCmd builds `mw grist request`: a bead linked to the request a
+// forwarded grist carried, and the key that sent it told it was filed.
+func newGristRequestCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "request <bead> <txid>",
+		Short: "Link a bead to the request of a forwarded grist and tell its sender it was filed",
+		Long: "request is what the Mayor runs after filing a bead for a feedback grist the mill forwarded: the\n" +
+			"forward mail ends with the line, ready but for the bead. It sets the bead's metadata request\n" +
+			"(the grist's txid) and request_app, then seals a request-status record, \"filed\", from the mill\n" +
+			"key to the key that sent the grist (postern's docs/protocol.md section 19, \"Request status\"),\n" +
+			"which the app pulls as it pulls an answer. A txid the mill did not forward, or a bead that is\n" +
+			"not there, is refused and nothing is sent. Run again, it sends the status again.",
+		Args: cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			host, err := config.Host()
+			if err != nil {
+				return err
+			}
+			vaultDir, err := config.Vault()
+			if err != nil {
+				return err
+			}
+			keys, err := gristKeys()
+			if err != nil {
+				return err
+			}
+			backend, err := posternBackend(keys)
+			if err != nil {
+				return err
+			}
+			stateDir, err := config.GristStateDir()
+			if err != nil {
+				return err
+			}
+			return application.GristRequest{
+				Postern: backend,
+				Cipher:  postern.NewCipher(keys),
+				Keys:    keys,
+				Runs:    grist.NewRuns(stateDir),
+				Tracker: mwGateway(vaultDir, host),
+				Out:     cmd.OutOrStdout(),
+			}.Run(cmd.Context(), args[0], args[1])
+		},
+	}
 }
 
 // newGristEvalCmd builds `mw grist eval`: a grind tried on photos whose

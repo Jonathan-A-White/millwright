@@ -1856,6 +1856,20 @@ as the kind `forward`. An app's `grinds/feedback.json`:
 
 See `features/grist_forward.feature`.
 
+A forwarded grist is a request. The forward run keeps the sender's key
+(`runs/<txid>/sender.json`), and the forward mail ends with the line the Mayor
+runs once a bead is filed for it, the bead left to fill in:
+
+```sh
+mw grist request <bead> <txid>
+```
+
+It sets the bead's metadata `request` (the grist's txid) and `request_app`, and
+seals a `request-status` record, `filed`, from the mill key to the key that sent
+the grist (postern's `docs/protocol.md` section 19, "Request status"; it has no
+`re`). A txid the mill did not forward, or a bead that is not there, is refused
+and nothing is sent. See `features/grist_request.feature`.
+
 `mw grist send` is the terminal's sender: it sends a grist as a key it is
 given, as an app's phone would, and can wait for the answer.
 
