@@ -168,6 +168,54 @@ func TestHandsListPrintsEveryStepWithItsHashAndRun(t *testing.T) {
 	}
 }
 
+// With no bead, List prints one line per step not yet run on every open bead:
+// bead, step, host/user, age and the step's text cut to one line. A bead named
+// prints only its own steps, as it always did.
+func TestHandsListWithNoBeadPrintsEveryOpenStepOnEveryOpenBead(t *testing.T) {
+	tracker := handsTracker()
+	tracker.AddStory("mw-f758y", domain.Story{ID: "mw-f758y.9", Title: "Restart the unit"})
+	tracker.AddStory("mw-f758y", domain.Story{ID: "mw-f758y.10", Title: "Already done"})
+	tracker.AddStory("mw-f758y", domain.Story{ID: "mw-f758y.11", Title: "Closed with a step left"})
+	second := domain.HandsStep{ID: "restart", Host: "vps", As: "user", Run: "systemctl --user restart mw-dispatch\nsystemctl --user status mw-dispatch"}
+	ranStep := domain.HandsStep{ID: "ran", Host: "vps", As: "user", Run: "true"}
+	for bead, step := range map[string]domain.HandsStep{"mw-f758y.8": lingerStep(), "mw-f758y.9": second, "mw-f758y.10": ranStep, "mw-f758y.11": ranStep} {
+		if _, err := addHands(tracker, &bytes.Buffer{}, application.HandsAddRequest{Bead: bead, Step: step}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustDo(t, tracker.SetNote(context.Background(), application.HandsRanKey("mw-f758y.10", "ran"), `{"at":"2026-09-28T12:03:00Z","exit":0,"host":"vps"}`))
+	mustDo(t, tracker.CloseStory(context.Background(), "mw-f758y.11", "done"))
+	now := handsNow.Add(51 * time.Hour)
+
+	var out bytes.Buffer
+	if _, err := (application.HandsList{Notes: tracker, Tracker: tracker, Out: &out, Now: func() time.Time { return now }}).Run(context.Background(), ""); err != nil {
+		t.Fatalf("listing every bead: %v", err)
+	}
+	want := "mw-f758y.8  linger  desktop/root  2d  loginctl enable-linger jwhite\n" +
+		"mw-f758y.9  restart  vps/user  2d  systemctl --user restart mw-dispatch systemctl --user status mw-dispatch\n"
+	if out.String() != want {
+		t.Errorf("expected\n%s\ngot\n%s", want, out.String())
+	}
+
+	out.Reset()
+	if _, err := (application.HandsList{Notes: tracker, Tracker: tracker, Out: &out, Now: func() time.Time { return now }}).Run(context.Background(), "mw-f758y.9"); err != nil {
+		t.Fatalf("listing one bead: %v", err)
+	}
+	if text := out.String(); !strings.Contains(text, "restart on vps as user  sha256 ") || strings.Contains(text, "mw-f758y.8") || strings.Contains(text, "linger") {
+		t.Errorf("expected only mw-f758y.9's steps, got\n%s", text)
+	}
+}
+
+func TestHandsListWithNoBeadSaysWhenNothingIsWaiting(t *testing.T) {
+	var out bytes.Buffer
+	if _, err := (application.HandsList{Notes: handsTracker(), Out: &out}).Run(context.Background(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "no open hands steps\n" {
+		t.Errorf("got %q", out.String())
+	}
+}
+
 func addHandsPushing(tracker *apptest.FakeTracker, push *apptest.FakePosternSender, req application.HandsAddRequest) error {
 	_, err := application.HandsAdd{Tracker: tracker, Notes: tracker, Push: push, Now: func() time.Time { return handsNow }}.Run(context.Background(), req)
 	return err

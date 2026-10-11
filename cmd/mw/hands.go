@@ -196,18 +196,25 @@ func newHandsAddCmd() *cobra.Command {
 // newHandsListCmd builds `mw hands list`.
 func newHandsListCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "list <bead>",
-		Short: "List a bead's steps for the Governor's hands",
+		Use:   "list [bead]",
+		Short: "List a bead's steps for the Governor's hands, or every open step",
 		Long: "list prints every hands step of <bead>: its id, host and who it runs as, its §17\n" +
 			"sha256 (what the Governor's approval binds), whether it has run and how, its commands\n" +
-			"and its way back. It reads and writes nothing else.",
-		Args: cobra.ExactArgs(1),
+			"and its way back. It reads and writes nothing else.\n\n" +
+			"With no bead, list prints every open hands step (not yet run, not superseded) on every\n" +
+			"open bead, one line each: bead, step, host/user, age (d, h or m) and the step's text\n" +
+			"cut to one line.",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			gateway, _, err := posternGateway()
 			if err != nil {
 				return err
 			}
-			_, err = application.HandsList{Notes: gateway, Out: cmd.OutOrStdout()}.Run(cmd.Context(), args[0])
+			bead := ""
+			if len(args) == 1 {
+				bead = args[0]
+			}
+			_, err = application.HandsList{Notes: gateway, Tracker: gateway, Out: cmd.OutOrStdout()}.Run(cmd.Context(), bead)
 			return err
 		},
 	}

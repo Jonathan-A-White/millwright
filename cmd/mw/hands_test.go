@@ -218,3 +218,25 @@ func TestHandsAddHelpListsAfterAndNoView(t *testing.T) {
 		}
 	}
 }
+
+func TestHandsListHelpNamesTheNoArgumentForm(t *testing.T) {
+	out, err := runMw(t, "hands", "list", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "list [bead]") || !strings.Contains(out, "With no bead") {
+		t.Errorf("expected mw hands list --help to name the no-argument form, got:\n%s", out)
+	}
+}
+
+// mw hands list with no bead id is not an error.
+func TestHandsListWithNoBeadIsAccepted(t *testing.T) {
+	posternHome(t, "http://unused", "", "")
+	out, err := runMw(t, "hands", "list")
+	if err != nil {
+		t.Fatalf("mw hands list failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "no open hands steps") {
+		t.Errorf("expected nothing waiting said, got %q", out)
+	}
+}

@@ -393,17 +393,27 @@ func (h HandsAdd) now() time.Time {
 }
 
 // HandsList prints every hands step of a bead: where and as whom it runs,
-// its §17 sha256, whether it has run, its text and its way back. It reads
-// two notes' worth and writes nothing.
+// its §17 sha256, whether it has run, its text and its way back. With no
+// bead it prints one line for each step not yet run on every open bead. It
+// reads notes and writes nothing.
 type HandsList struct {
 	Notes PosternNotes
-	Out   io.Writer
+	// Tracker, when set, lets the list of every bead leave out the beads
+	// closed; nil leaves every bead with a step in.
+	Tracker WorkTracker
+	Out     io.Writer
+	// Now is the clock a step's age is measured against; nil reads the real one.
+	Now func() time.Time
 }
 
-// Run lists bead's steps.
+// Run lists bead's steps, or with an empty bead the open steps of every open
+// bead.
 func (l HandsList) Run(ctx context.Context, bead string) ([]HandsStepRecord, error) {
 	if l.Notes == nil {
 		return nil, fmt.Errorf("mw hands list: no work tracker is configured")
+	}
+	if bead == "" {
+		return l.runAll(ctx)
 	}
 	raw, err := l.Notes.Note(ctx, HandsStepsKey(bead))
 	if err != nil {
@@ -446,6 +456,77 @@ func (l HandsList) Run(ctx context.Context, bead string) ([]HandsStepRecord, err
 		}
 	}
 	return steps, nil
+}
+
+// runAll prints one line for each hands step no run was recorded for and no
+// newer step superseded, on each bead not closed: bead, step, host/user, age
+// and the step's text cut to one line. It returns those steps.
+func (l HandsList) runAll(ctx context.Context) ([]HandsStepRecord, error) {
+	notes, err := l.Notes.NotesWithPrefix(ctx, HandsStepsKey(""))
+	if err != nil {
+		return nil, err
+	}
+	var beads []string
+	for _, key := range sortedKeys(notes) {
+		bead := strings.TrimPrefix(key, HandsStepsKey(""))
+		// hands.ran.*, hands.superseded.* and hands.approval.* are not step
+		// lists: a step list is a JSON array, which they are not.
+		if records, err := parseHandsSteps(notes[key]); err == nil && len(records) > 0 {
+			beads = append(beads, bead)
+		}
+	}
+	closed := map[string]bool{}
+	if l.Tracker != nil && len(beads) > 0 {
+		details, err := l.Tracker.ShowBeads(ctx, beads)
+		if err != nil {
+			return nil, err
+		}
+		for _, d := range details {
+			closed[d.Story.ID] = d.Status == StatusClosed
+		}
+	}
+	now := time.Now()
+	if l.Now != nil {
+		now = l.Now()
+	}
+	var waiting []HandsStepRecord
+	for _, bead := range beads {
+		if closed[bead] {
+			continue
+		}
+		records, _ := parseHandsSteps(notes[HandsStepsKey(bead)])
+		for _, record := range records {
+			if _, ran := parseHandsRan(notes[HandsRanKey(bead, record.ID)]); ran || strings.TrimSpace(notes[HandsSupersededKey(bead, record.ID)]) != "" {
+				continue
+			}
+			waiting = append(waiting, record)
+			if l.Out != nil {
+				fmt.Fprintf(l.Out, "%s  %s  %s/%s  %s  %s\n", bead, record.ID, record.Host, record.As, handsAge(record.AddedAt, now), oneLine(record.Run))
+			}
+		}
+	}
+	if len(waiting) == 0 && l.Out != nil {
+		fmt.Fprintln(l.Out, "no open hands steps")
+	}
+	return waiting, nil
+}
+
+// handsAge is how long ago a step was added, in the largest whole unit: days,
+// hours or minutes; "?" when its added_at does not read.
+func handsAge(addedAt string, now time.Time) string {
+	at, err := time.Parse(time.RFC3339, addedAt)
+	if err != nil {
+		return "?"
+	}
+	d := now.Sub(at)
+	switch {
+	case d >= 24*time.Hour:
+		return fmt.Sprintf("%dd", int(d/(24*time.Hour)))
+	case d >= time.Hour:
+		return fmt.Sprintf("%dh", int(d/time.Hour))
+	default:
+		return fmt.Sprintf("%dm", max(int(d/time.Minute), 0))
+	}
 }
 
 // HandsVerifier checks the Governor's approval of a step: that sigDERHex is

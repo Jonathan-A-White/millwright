@@ -2137,7 +2137,7 @@ typed as a `!` line for him to copy (postern's docs/protocol.md §17):
 
 ```sh
 mw hands add <bead> --id <id> --host <host> --as user|root [--way-back '<commands>'] [--replace] -- '<commands>'
-mw hands list <bead>
+mw hands list [bead]
 ```
 
 `mw hands add` keeps the step in the bead's note `hands.<bead>` (a JSON array
@@ -2146,7 +2146,10 @@ as it will run (`HANDS STEP <id> on <host> as <as>:`, then the commands and the
 way back, fenced), and labels the bead `hitl`. The commands are one quoted
 argument after `--`. An id is used once per bead; `--replace` changes a step,
 which changes its hash and so voids any approval of the old one. `mw hands
-list` prints each step with its sha256 and whether it has run.
+list <bead>` prints each step with its sha256 and whether it has run; `mw hands
+list` with no bead prints one line for every open step (not yet run, not
+superseded) on every open bead: bead, step, host/user, age and the step's text
+cut to one line.
 
 Postern shows a `hitl` bead's steps under his hands (the view's `hands` need
 carries each with its §17 sha256 and, once run, `ran`). He approves a step with
