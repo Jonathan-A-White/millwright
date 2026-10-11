@@ -157,6 +157,13 @@ type StoryDetail struct {
 	// RebaseBaseField metadata say; zero and empty when it never was.
 	RebaseSends int
 	RebaseBase  string
+	// Cause, CauseWhy and CauseFix are what mw cause recorded of why the story
+	// failed, as the CauseField, CauseWhyField and CauseFixField metadata say:
+	// the class (one of CauseClasses), the reason, and the bead that mends it;
+	// empty when never named.
+	Cause    string
+	CauseWhy string
+	CauseFix string
 	// Molecule is the formula poured for this story, empty until it has been
 	// poured. It is filled in by whoever pours it, not by reading the story.
 	Molecule Molecule

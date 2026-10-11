@@ -135,6 +135,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializePosternViewScenario(ctx)
 	steps.InitializeReadyStoriesScenario(ctx)
 	steps.InitializeReleaseScenario(ctx)
+	steps.InitializeCauseScenario(ctx)
 	steps.InitializeRetryScenario(ctx)
 	steps.InitializeSeatBootScenario(ctx)
 	steps.InitializeSelfUpdateScenario(ctx)

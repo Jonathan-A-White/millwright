@@ -1399,6 +1399,15 @@ func (f *FakeTracker) SetStoryMetadata(_ context.Context, id string, fields map[
 			if k == application.RebaseBaseField {
 				s.detail.RebaseBase = v
 			}
+			if k == application.CauseField {
+				s.detail.Cause = v
+			}
+			if k == application.CauseWhyField {
+				s.detail.CauseWhy = v
+			}
+			if k == application.CauseFixField {
+				s.detail.CauseFix = v
+			}
 			if k == application.ClaimedAtField {
 				s.detail.ClaimedAt, _ = time.Parse(time.RFC3339, v)
 			}
