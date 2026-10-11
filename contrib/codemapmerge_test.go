@@ -214,3 +214,23 @@ func TestCheckCodemapAcceptsDistinctRowsUnderRepeatedSeparators(t *testing.T) {
 		t.Fatalf("check-codemap refused distinct rows (exit %d):\n%s", code, out)
 	}
 }
+
+func TestCheckCodemapCapIs10240Bytes(t *testing.T) {
+	// One filler line brings the map to an exact size; it repeats nothing.
+	sized := func(n int) string {
+		head := "# Map\n"
+		return head + strings.Repeat("a", n-len(head)-1) + "\n"
+	}
+	if code, out := checkCodemapIn(t, sized(10240)); code != 0 {
+		t.Fatalf("check-codemap refused a 10240-byte map (exit %d):\n%s", code, out)
+	}
+	code, out := checkCodemapIn(t, sized(10241))
+	if code == 0 {
+		t.Fatalf("check-codemap passed a 10241-byte map, output:\n%s", out)
+	}
+	for _, want := range []string{"10240", "merging rows"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output does not mention %q:\n%s", want, out)
+		}
+	}
+}
