@@ -31,7 +31,8 @@ func newReportCmd() *cobra.Command {
 			"block. A ledger row whose story is gone counts under rig unknown. The report ends with CHEAP\n" +
 			"WINS: at most three one-line suggestions by fixed rules (causes unset, a dominant refusal\n" +
 			"reason, attempts used up, a refusal rate up, a flagged par, a slow gate), or 'none seen';\n" +
-			"--json carries every rule that held. It reads and writes nothing, and prints in 60 columns.",
+			"--json carries every rule that held. It reads and writes nothing, and prints in 60 columns.\n" +
+			"mw report send posts a phone-sized summary of it to the Factory channel, once a day.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := config.Vault()
@@ -61,6 +62,7 @@ func newReportCmd() *cobra.Command {
 			return err
 		},
 	}
+	cmd.AddCommand(newReportSendCmd())
 	cmd.Flags().StringVar(&since, "since", "", "where the window starts: 7d, a day (2026-10-09) or a UTC time; 7d by default")
 	cmd.Flags().StringVar(&rig, "rig", "", "narrow every block to this rig")
 	cmd.Flags().StringVar(&host, "host", "", "narrow every block to this host")
