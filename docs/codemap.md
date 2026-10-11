@@ -29,9 +29,9 @@ domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cm
 | TickLog, Notifier, HomeMoveHost, OldHome, VaultBirth, TrackerBirth | application/{millhandtick,homemove,init}.go | infra/{ticklog,notify/notify,homemove/homemove,vault/birth,beads/init}.go | apptest.FakeTickLog |
 | Landing, Checks, MergeSlot, Holding | application/landing.go | infra/rig/{landing,checks,slot}.go | - |
 | AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter, FormulaInstaller | application/afterlanding.go, application/selfupdate.go, application/backendstage.go, application/formulainstall.go | infra/{rig/{afterlanding,built,backend},userunits,vault/formulas}.go | features/{self_update,backend_swap}.feature |
-| EventLog, BeadFeed, FollowCursors, ShipStates, SubscribeFiles, NudgeCursors, EventSpringer, EventController, HarnessCount | application/event*.go, status.go | infra/{eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go | apptest.Fake{EventLog,FollowCursors,Ship*,Tracker,Subscribe*} |
+| EventLog, BeadFeed, FollowCursors, ShipStates, SubscribeFiles, NudgeCursors, EventSpringer, EventController, HarnessCount | application/event*.go, status.go | infra/{eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go | apptest.Fake{EventLog,Follow*,Ship*,Tracker,Subscribe*} |
 | Postern, hands, Prompts | application/{postern*,hands,prompt}.go | infra/{postern,hands*,homemove} | apptest.Fake{Postern*,Cipher,Hands*,HomeMover,Prompts} |
-| Chain, StampQueue, StampStore, CommitNotes, RigHeads | application/chain.go, application/chainstamp.go, application/prove.go | infra/{bsv,stampqueue,chainlookup}, rig/worktree.go | apptest.Fake{Chain,StampQueue,Commit*,RigHeads} |
+| Chain, StampQueue, StampStore, CommitNotes, RigHeads | application/chain.go, application/chainstamp.go, application/prove.go | infra/{bsv,stampqueue,chainlookup}, rig/worktree.go | apptest.Fake{Chain,Stamp*,Commit*,RigHeads} |
 | Grinder, GrindSource, GristState, GristLock, GristRunStore, GristForwardStore, GristSmoke* | application/grist.go, application/gristruns.go, application/gristsmoke.go | infra/{claude/grind,rig/grinds,hostlock/try}.go, infra/grist | apptest.Fake{Grinder,Grinds,Grist*} |
 | Scorer | application/scorer.go | infra/scorer | apptest.FakeScorer |
 | SecretStore | application/secrets.go | infra/sops | apptest.FakeSecretStore |
@@ -40,7 +40,7 @@ domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cm
 
 | Use case | File | Command | Feature |
 |-|-|-|-|
-| File, Release, Retry, Path{Set,Show} | application/file.go, application/release.go, application/retry.go, application/pathset.go | mw file/release/retry/path - cmd/mw/file.go, cmd/mw/release.go, cmd/mw/retry.go, cmd/mw/path.go | features/{file_plan,release,retry,path_set}.feature |
+| File, Release, Retry, Cause, Path{Set,Show} | application/file.go, application/release.go, application/retry.go, application/cause.go, application/pathset.go | cmd/mw/file.go, cmd/mw/release.go, cmd/mw/retry.go, cmd/mw/cause.go, cmd/mw/path.go | features/{file_plan,release,retry,cause,path_set}.feature |
 | Show, Peek, Prove, StampHead, Tester | application/show.go, application/stamphead.go, application/testerreport.go | mw show/peek/prove/stamp/tester - cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go, cmd/mw/tester.go | features/{show,peek,prove,stamp,tester}.feature |
 | Dispatch, Next, AfterLandingRun | application/dispatch.go, application/next.go, application/afterlandingrun.go | mw dispatch/next/after-landing - cmd/mw/dispatch.go, cmd/mw/next.go, cmd/mw/afterlanding.go | features/{dispatch,next,after_landing}.feature |
 | Check, Status, CloudCheck, Brief | application/check.go, application/status.go, application/cloud.go, application/brief.go | mw check/status/cloud/brief - cmd/mw/check.go, cmd/mw/status.go, cmd/mw/cloud.go, cmd/mw/brief.go | features/{check,status,cloud,brief}.feature |

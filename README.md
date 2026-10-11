@@ -416,6 +416,29 @@ so releasing an epic twice does no more than releasing it once. An epic the
 tracker does not have is a plain refusal, and nothing is written. See
 `features/release.feature`.
 
+## Naming why a story failed
+
+```sh
+bin/mw cause mw-gq6.8 tooling "the gate's node was missing"
+bin/mw cause mw-gq6.8 code "the retry lost the claim" --fix mw-gq6.9
+```
+
+When a story fails the Mayor names the cause, one of four classes: `code`,
+`test`, `tooling` or `process`. `mw cause <id> <class> "<why>"` records it as the
+story's metadata (`cause`, `cause_why` and, with `--fix <bead>`, `cause_fix`),
+where causes can be counted, and as one comment beginning `CAUSE (<class>):`,
+where a person reading the story finds it. Naming a cause again replaces the
+class and adds a second comment. Nothing else of the story is touched: not its
+status, its claim nor its attempts. A class outside the four, an empty reason,
+and a story or fix the tracker does not know are refused with nothing written.
+
+Three things nudge for it, and none blocks: a Refused or Blocked mail from `mw
+next` ends with the ready line `mw cause <id> <class> "<why>"`; `mw status` lists
+under **CAUSES MISSING** each story refused in the last seven days that has no
+cause (the section is left out when there are none); and `mw retry` of a story
+with no cause prints `no cause recorded yet: mw cause ...` and retries anyway.
+See `features/cause.feature`.
+
 ## Setting a story's path
 
 ```sh
@@ -2620,6 +2643,8 @@ five parts, and two more when there is something to say.
   claimed story whose poured formula still has a step open says its close-out
   is blocked.
 - **READY** — what this host could take now.
+- **CAUSES MISSING** — the stories refused in the last seven days that no `mw
+  cause` has named, one line each; left out when there are none.
 - **WAITING FOR THE GOVERNOR** — the ready or claimed stories labelled `hitl`,
   worked with the Governor present. They are listed here and not under RUNNING
   or READY, and the heading is left out when there are none.
