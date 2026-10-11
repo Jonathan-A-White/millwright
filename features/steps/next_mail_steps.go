@@ -22,6 +22,7 @@ func registerNextMailSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^that mail's subject is "([^"]*)"$`, c.thatMailsSubjectIs)
 	ctx.Then(`^that mail's body names the commit that landed on "([^"]*)"$`, c.thatMailsBodyNamesTheCommit)
 	ctx.Then(`^that mail's body holds:$`, c.thatMailsBodyHolds)
+	ctx.Then(`^that mail's last line is: (.+)$`, c.thatMailsLastLineIs)
 	ctx.Then(`^no mail was sent$`, c.noMailWasSent)
 	ctx.Then(`^the close-out returned no error$`, c.theCloseOutReturnedNoError)
 	ctx.Then(`^stderr says the Mayor could not be mailed, quoting: (.+)$`, c.stderrSaysTheMayorCouldNotBeMailed)
@@ -132,6 +133,18 @@ func (c *nextContext) stderrSaysTheMayorCouldNotBeMailed(quoting string) error {
 	said := c.stderr.String()
 	if !strings.Contains(said, "mayor") || !strings.Contains(said, quoting) {
 		return fmt.Errorf("expected stderr to say the mayor could not be mailed, quoting %q, got %q", quoting, said)
+	}
+	return nil
+}
+
+func (c *nextContext) thatMailsLastLineIs(want string) error {
+	mail, err := c.theOneMail()
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(strings.TrimRight(mail.Body, "\n"), "\n")
+	if last := lines[len(lines)-1]; last != want {
+		return fmt.Errorf("expected the mail to end with %q, it ends with %q:\n%s", want, last, mail.Body)
 	}
 	return nil
 }

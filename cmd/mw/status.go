@@ -200,6 +200,7 @@ func newStatusCmd() *cobra.Command {
 				CloudPlan:        plan,
 				Benchmarks:       vault.Benchmarks{Vault: files},
 				Bench:            benchmarkLimits(bench),
+				Causes:           tracker,
 				Out:              cmd.OutOrStdout(),
 			}.Run(cmd.Context())
 			return err

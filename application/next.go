@@ -1842,6 +1842,9 @@ func (n Next) mailTheMayor(ctx context.Context, c *closeOut, report *NextReport,
 	if said != "" {
 		body += "\n" + said + "\n"
 	}
+	if verdict == MailRefused || verdict == MailBlocked {
+		body = strings.TrimRight(body, "\n") + "\n\n" + CauseLine(c.id) + "\n"
+	}
 	if _, err := n.Mailbox.Send(ctx, NewMessage{
 		From:    SeatIdentity(MwSeat, n.Host),
 		To:      MayorMailbox,

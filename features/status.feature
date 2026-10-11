@@ -668,3 +668,34 @@ Feature: mw status
     When mw status reads the host
     Then reading status succeeds
     And the report has no heading for beads waiting on others
+
+  # mw-2zh33g.1: a story refused lately and still without a named cause.
+
+  Scenario: A story refused within 7 days with no cause is listed under CAUSES MISSING
+    Given a status story "mw-gq6.70" titled "Fix the gate" filed under it
+    And the status story "mw-gq6.70" was refused 2 days ago
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "mw-gq6.70" under CAUSES MISSING
+
+  Scenario: A refused story whose cause is named, or refused earlier, is left out of CAUSES MISSING
+    Given a status story "mw-gq6.71" titled "Named already" filed under it
+    And the status story "mw-gq6.71" was refused 2 days ago
+    And the status story "mw-gq6.71" has its cause recorded as "code"
+    And a status story "mw-gq6.72" titled "Refused long ago" filed under it
+    And the status story "mw-gq6.72" was refused 9 days ago
+    And a status story "mw-gq6.73" titled "Never refused" filed under it
+    When mw status reads the host
+    Then reading status succeeds
+    And the report has no heading for causes missing
+
+  Scenario: Only the refused story without a cause is listed when others are named
+    Given a status story "mw-gq6.74" titled "Named already" filed under it
+    And the status story "mw-gq6.74" was refused 1 days ago
+    And the status story "mw-gq6.74" has its cause recorded as "test"
+    And a status story "mw-gq6.75" titled "Still unnamed" filed under it
+    And the status story "mw-gq6.75" was refused 3 days ago
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "mw-gq6.75" under CAUSES MISSING
+    And the report does not list "mw-gq6.74" under CAUSES MISSING

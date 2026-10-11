@@ -782,6 +782,7 @@ Feature: Closing out a finished story and carrying on
     And that mail's body holds:
       | the rig's tests fail in the worktree |
       | remote: fatal error in commit_refs   |
+    And that mail's last line is: mw cause mw-gq6.1 <class> "<why>"
 
   Scenario: A story that could not go ahead mails the Mayor that it is blocked
     Given the session of "mw-gq6.1" left no result at all
@@ -790,6 +791,7 @@ Feature: Closing out a finished story and carrying on
     And that mail's subject is "Blocked: The story mw-gq6.1"
     And that mail's body holds:
       | the session left no result |
+    And that mail's last line is: mw cause mw-gq6.1 <class> "<why>"
 
   Scenario: A mailbox that will not take the mail changes nothing about the landing
     Given the session of "mw-gq6.1" reported a plain success

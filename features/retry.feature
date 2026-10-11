@@ -107,3 +107,22 @@ Feature: mw retry
     And no worktree of "mw-gq6.1" was read or made here
     And the story "mw-gq6.1" is open and unassigned
     And the story "mw-gq6.1" still records 1 attempt
+
+  # mw-2zh33g.1: a nudge to name the cause, never a block.
+
+  Scenario: A story with no cause recorded is retried, and the retry reminds of mw cause
+    Given the story "mw-gq6.1" was dispatched and worked in its own worktree
+    And the session of "mw-gq6.1" has ended
+    When mw retries "mw-gq6.1"
+    Then the retry succeeds
+    And the retry printed the reminder: no cause recorded yet: mw cause mw-gq6.1 <class> "<why>"
+    And the story "mw-gq6.1" is open and unassigned
+
+  Scenario: A story whose cause is recorded is retried without the reminder
+    Given the story "mw-gq6.1" was dispatched and worked in its own worktree
+    And the session of "mw-gq6.1" has ended
+    And the cause of the story "mw-gq6.1" is recorded as "tooling"
+    When mw retries "mw-gq6.1"
+    Then the retry succeeds
+    And the retry printed no cause reminder
+    And the story "mw-gq6.1" is open and unassigned

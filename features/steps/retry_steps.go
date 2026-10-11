@@ -83,6 +83,9 @@ func InitializeRetryScenario(ctx *godog.ScenarioContext) {
 
 	ctx.When(`^mw retries "([^"]*)"$`, c.mwRetries)
 
+	ctx.Given(`^the cause of the story "([^"]*)" is recorded as "([^"]*)"$`, c.theCauseIsRecorded)
+	ctx.Then(`^the retry printed the reminder: (.+)$`, c.theRetryPrintedTheReminder)
+	ctx.Then(`^the retry printed no cause reminder$`, c.theRetryPrintedNoReminder)
 	ctx.Then(`^the retry succeeds$`, c.theRetrySucceeds)
 	ctx.Then(`^the retry refuses, saying: (.+)$`, c.theRetryRefusesSaying)
 	ctx.Then(`^the retry fails, saying: (.+)$`, c.theRetryFailsSaying)
@@ -641,4 +644,22 @@ func short(sha string) string {
 		return sha[:12]
 	}
 	return sha
+}
+
+func (c *retryContext) theCauseIsRecorded(id, class string) error {
+	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.CauseField: class})
+}
+
+func (c *retryContext) theRetryPrintedTheReminder(want string) error {
+	if !strings.Contains(c.printed.String(), want) {
+		return fmt.Errorf("expected the printed report to say %q, got %q", want, c.printed.String())
+	}
+	return nil
+}
+
+func (c *retryContext) theRetryPrintedNoReminder() error {
+	if strings.Contains(c.printed.String(), "no cause recorded yet") {
+		return fmt.Errorf("expected no cause reminder, got %q", c.printed.String())
+	}
+	return nil
 }

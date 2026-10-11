@@ -243,6 +243,10 @@ type RetryReport struct {
 	BranchGone    bool
 	ClaimReleased bool
 
+	// NoCause says no cause is recorded on the story (mw cause), which the report
+	// reminds of; the retry goes ahead all the same.
+	NoCause bool
+
 	// Hitl says the story carries the hitl label, so dispatch will pass it over
 	// and the retry will not run until the label is taken off (mw-gq6.261).
 	Hitl bool
@@ -302,6 +306,7 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	report.Attempt, report.Target = attempt, path.Branch
 	report.NextAttempt = detail.Attempts + 1
 	report.Hitl = detail.Hitl()
+	report.NoCause = detail.Cause == ""
 	report.refunded = detail.AttemptsRefunded
 
 	if tried, most := detail.Attempts, r.maxAttempts(); tried >= most {
@@ -485,6 +490,9 @@ func (r RetryReport) String() string {
 	if r.Refused {
 		fmt.Fprintf(&b, "  REFUSED %s\n", r.Why)
 		return b.String()
+	}
+	if r.NoCause {
+		fmt.Fprintf(&b, "  %s\n", NoCauseReminder(r.StoryID))
 	}
 	if r.Elsewhere != "" {
 		fmt.Fprintf(&b, "  there   the story was worked on %s; its worktree and branch are left there, not read from here\n", r.Elsewhere)

@@ -115,6 +115,7 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 
 	registerStatusRoomSteps(ctx, c)
 	registerStatusBenchmarkSteps(ctx, c)
+	registerStatusCauseSteps(ctx, c)
 
 	ctx.Given(`^the status epic "([^"]*)" on the default path:$`, c.theStatusEpicOnTheDefaultPath)
 	ctx.Given(`^a status story "([^"]*)" filed under it$`, c.aStatusStoryFiledUnderIt)
@@ -606,6 +607,7 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 		HeldHands:      mayor,
 		Now:            func() time.Time { return c.now },
 		Cap:            c.cap,
+		Causes:         c.tracker,
 	}
 	if c.load != nil {
 		status.Load = c.load

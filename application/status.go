@@ -262,6 +262,11 @@ type Status struct {
 	Benchmarks BenchmarkBook
 	Bench      BenchmarkSettings
 
+	// Causes, when set, is read for the CAUSES MISSING section: the stories
+	// refused in the last CausesMissingWindow that no cause is recorded for
+	// (mw cause). Nil leaves it out.
+	Causes TesterStories
+
 	// Smoke, when set, is the record of each app's last grist smoke, read for
 	// the GRIST SMOKE section: a failure, what it holds back, and a kind with
 	// no example as a warning (mw-gq6.319). Nil leaves it out.
@@ -445,6 +450,8 @@ type StatusReport struct {
 	// Benchmarks is what the close-outs measured, and nil when not asked, not
 	// read or there is none yet.
 	Benchmarks *BenchmarkReport
+	// CausesMissing are the stories refused lately with no cause recorded.
+	CausesMissing []StoryDetail
 	// GristSmoke is the last grist smoke of each app, and nil when not asked or
 	// none has been made.
 	GristSmoke []GristSmokeRecord
@@ -718,6 +725,13 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 			s.print(fmt.Sprintf("mw status: the benchmarks could not be read: %v\n", err))
 		} else {
 			report.Benchmarks = ReadBenchmarks(past, s.Bench)
+		}
+	}
+	if s.Causes != nil {
+		if missing, err := causesMissing(ctx, s.Causes, s.Tracker, s.now()); err != nil {
+			s.print(fmt.Sprintf("mw status: the refused stories without a cause could not be read: %v\n", err))
+		} else {
+			report.CausesMissing = missing
 		}
 	}
 	if smokeRead != nil {
@@ -1241,6 +1255,8 @@ func (r StatusReport) String() string {
 		r.Benchmarks.write(&b)
 		b.WriteString("\n")
 	}
+
+	r.writeCausesMissing(&b)
 
 	if len(r.GristSmoke) > 0 {
 		writeGristSmoke(&b, r.GristSmoke)
