@@ -362,3 +362,11 @@ func TestTmpLeftoversGoCleanFailingWithNoGoProcessLiveStillFails(t *testing.T) {
 		t.Fatalf("expected a go clean -cache failure with no go process live, got %v", err)
 	}
 }
+
+func TestTheTmpLeftoversCheckIsQuietWhileItsGoodCureCools(t *testing.T) {
+	var check application.DoctorCheck = doctor.NewTmpLeftovers(t.TempDir())
+	quiet, ok := check.(application.DoctorCoolingQuiet)
+	if !ok || !quiet.QuietWhileCooling() {
+		t.Errorf("expected the tmp-leftovers check to be quiet while its good cure cools")
+	}
+}

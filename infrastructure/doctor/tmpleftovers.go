@@ -206,6 +206,12 @@ func (t *TmpLeftovers) Damper() (time.Duration, int) {
 	return TmpLeftoversDamperWait, TmpLeftoversDamperCap
 }
 
+// QuietWhileCooling implements application.DoctorCoolingQuiet: the cure is a
+// real delete or go clean, and go-build regrows fast under several Builders'
+// go test, so the fault returning inside the minimum wait after a good cure
+// is not news.
+func (t *TmpLeftovers) QuietWhileCooling() bool { return true }
+
 // WayBack implements application.DoctorCheck: there is nothing to restore —
 // every path this check ever removes was already found dead, with no live
 // process holding it open, or was go's own rebuildable cache.

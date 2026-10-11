@@ -50,6 +50,41 @@ Feature: mw doctor
     And mw doctor runs
     Then the check "widget" was cured 3 times
 
+  Scenario: A quiet check damped only by the wait after a good cure is logged and wakes nobody
+    Given a doctor check "widget" whose probe says faulty "misaligned"
+    And the check "widget" is quiet while its good cure cools
+    And the check "widget"'s damper is 10 minutes, cap 3
+    When mw doctor runs
+    And 5 minutes go by
+    And mw doctor runs
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "widget damped"
+    And the check "widget" was cured 1 time
+
+  Scenario: A quiet check whose cap is spent still leaves the fault exit
+    Given a doctor check "widget" whose probe says faulty "misaligned"
+    And the check "widget" is quiet while its good cure cools
+    And the check "widget"'s damper is 1 minute, cap 2
+    When mw doctor runs
+    And 1 hour goes by
+    And mw doctor runs
+    And 1 hour goes by
+    And mw doctor runs
+    Then mw doctor leaves with the status 6
+    And the check "widget" was cured 2 times
+
+  Scenario: A quiet check whose cure failed still leaves the fault exit inside the wait
+    Given a doctor check "widget" whose probe says faulty "misaligned"
+    And the check "widget" is quiet while its good cure cools
+    And the check "widget"'s cure fails, saying "no wrench found"
+    And the check "widget"'s damper is 10 minutes, cap 3
+    When mw doctor runs
+    And 5 minutes go by
+    And mw doctor runs
+    Then mw doctor leaves with the status 6
+    And the doctor log holds "widget damped"
+    And the check "widget" was cured 1 time
+
   Scenario: A cure that fails is logged and leaves the fault exit
     Given a doctor check "widget" whose probe says faulty "misaligned"
     And the check "widget"'s cure fails, saying "no wrench found"

@@ -112,6 +112,8 @@ type FakeDoctorCheck struct {
 	Cap  int
 	// Way is what WayBack returns.
 	Way string
+	// QuietCooling is what QuietWhileCooling returns.
+	QuietCooling bool
 
 	probes int
 	cures  int
@@ -138,6 +140,9 @@ func (f *FakeDoctorCheck) Cure(context.Context) error {
 
 // Damper implements application.DoctorCheck.
 func (f *FakeDoctorCheck) Damper() (time.Duration, int) { return f.Wait, f.Cap }
+
+// QuietWhileCooling implements application.DoctorCoolingQuiet.
+func (f *FakeDoctorCheck) QuietWhileCooling() bool { return f.QuietCooling }
 
 // WayBack implements application.DoctorCheck.
 func (f *FakeDoctorCheck) WayBack() string { return f.Way }

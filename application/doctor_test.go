@@ -109,6 +109,90 @@ func TestTheSameFaultWithinTheDampersWaitIsDampedNotCured(t *testing.T) {
 	}
 }
 
+func TestAQuietCheckDampedByTheWaitAfterAGoodCureIsLoggedAndLeavesWithZero(t *testing.T) {
+	state := apptest.NewFakeDoctorState()
+	log := &apptest.FakeDoctorLog{}
+	notes := apptest.NewFakeDoctorNotes()
+	now := doctorNow
+	check := &apptest.FakeDoctorCheck{
+		CheckName: "widget", Verdict: application.DoctorFaulty, Reason: "misaligned",
+		Wait: 10 * time.Minute, Cap: 3, QuietCooling: true,
+	}
+	doctor := aDoctor(state, log, &now, check)
+	doctor.Notes = notes
+
+	if _, err := doctor.Run(context.Background(), "", false); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+	now = now.Add(5 * time.Minute)
+
+	report, err := doctor.Run(context.Background(), "", false)
+	if check.Cures() != 1 {
+		t.Errorf("expected no second cure, got %d cures", check.Cures())
+	}
+	if got := log.Lines(); len(got) != 2 || !strings.Contains(got[1], "widget damped") {
+		t.Errorf("expected the second line to say damped, got %v", got)
+	}
+	if err != nil || application.ExitStatus(err) != 0 {
+		t.Errorf("expected exit 0 for a damped wait after a good cure, got %d (%v)", application.ExitStatus(err), err)
+	}
+	if report.Faulty() {
+		t.Errorf("expected the report not to be faulty, got %v", report.FaultyNames())
+	}
+	if notes.Sets() != 0 {
+		t.Errorf("expected no note, got %d sets", notes.Sets())
+	}
+}
+
+func TestAQuietCheckStillLeavesWithTheFaultExitOnceItsCapIsSpent(t *testing.T) {
+	state := apptest.NewFakeDoctorState()
+	log := &apptest.FakeDoctorLog{}
+	now := doctorNow
+	check := &apptest.FakeDoctorCheck{
+		CheckName: "widget", Verdict: application.DoctorFaulty, Reason: "misaligned",
+		Wait: time.Minute, Cap: 2, QuietCooling: true,
+	}
+	doctor := aDoctor(state, log, &now, check)
+	for i := 0; i < 2; i++ {
+		if _, err := doctor.Run(context.Background(), "", false); err != nil {
+			t.Fatalf("run %d: %v", i, err)
+		}
+		now = now.Add(time.Hour)
+	}
+
+	_, err := doctor.Run(context.Background(), "", false)
+	if check.Cures() != 2 {
+		t.Errorf("expected the cure count to stay at 2, got %d", check.Cures())
+	}
+	if application.ExitStatus(err) != application.DoctorFaultExit {
+		t.Errorf("expected the capped episode to leave with the fault exit, got %d", application.ExitStatus(err))
+	}
+}
+
+func TestAQuietCheckWhoseCureFailedStillLeavesWithTheFaultExitInsideTheWait(t *testing.T) {
+	state := apptest.NewFakeDoctorState()
+	log := &apptest.FakeDoctorLog{}
+	now := doctorNow
+	check := &apptest.FakeDoctorCheck{
+		CheckName: "widget", Verdict: application.DoctorFaulty, Reason: "misaligned",
+		Wait: 10 * time.Minute, Cap: 3, QuietCooling: true, CureErr: errors.New("no wrench found"),
+	}
+	doctor := aDoctor(state, log, &now, check)
+
+	if _, err := doctor.Run(context.Background(), "", false); application.ExitStatus(err) != application.DoctorFaultExit {
+		t.Fatalf("expected the failed cure to leave with the fault exit, got %d", application.ExitStatus(err))
+	}
+	now = now.Add(5 * time.Minute)
+
+	_, err := doctor.Run(context.Background(), "", false)
+	if check.Cures() != 1 {
+		t.Errorf("expected no second cure, got %d cures", check.Cures())
+	}
+	if application.ExitStatus(err) != application.DoctorFaultExit {
+		t.Errorf("expected exit %d for a damped wait after a failed cure, got %d", application.DoctorFaultExit, application.ExitStatus(err))
+	}
+}
+
 func TestACureThatFailsIsLoggedAndLeavesWithTheFaultExit(t *testing.T) {
 	state := apptest.NewFakeDoctorState()
 	log := &apptest.FakeDoctorLog{}

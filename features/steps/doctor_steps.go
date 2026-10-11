@@ -103,6 +103,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the check "([^"]*)"'s way back is "([^"]*)"$`, c.theChecksWayBackIs)
 	ctx.Given(`^the check "([^"]*)"'s damper is (\d+) minutes?, cap (\d+)$`, c.theChecksDamperIs)
 	ctx.Given(`^the check "([^"]*)"'s cure fails, saying "([^"]*)"$`, c.theChecksCureFails)
+	ctx.Given(`^the check "([^"]*)" is quiet while its good cure cools$`, c.theCheckIsQuietWhileItsGoodCureCools)
 	ctx.Given(`^a fake systemctl that says "([^"]*)" needs a reload$`, c.aFakeSystemctlThatSaysNeedsAReload)
 	ctx.Given(`^a fake netsh reporting the network "([^"]*)"$`, c.aFakeNetshReportingTheNetwork)
 	ctx.Given(`^a fake powershell that exists$`, c.aFakePowershellThatExists)
@@ -215,6 +216,11 @@ func (c *doctorContext) theNotesPortFails(said string) error {
 
 func (c *doctorContext) theChecksWayBackIs(name, way string) error {
 	c.addFake(name).Way = way
+	return nil
+}
+
+func (c *doctorContext) theCheckIsQuietWhileItsGoodCureCools(name string) error {
+	c.addFake(name).QuietCooling = true
 	return nil
 }
 

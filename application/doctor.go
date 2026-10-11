@@ -71,6 +71,17 @@ type DoctorCheck interface {
 	WayBack() string
 }
 
+// DoctorCoolingQuiet is an optional addition to a DoctorCheck, for a check
+// whose cure really does the work and is cheap to repeat: the fault coming
+// back inside the damper's minimum wait, after a cure that succeeded, is the
+// cure working against a cause that keeps refilling (a cache five Builders
+// keep growing), not news. Such a damped tick is logged as damped but leaves
+// the run's status alone and writes no note, so it wakes nobody. The cap
+// ending an episode, and a cure that failed, are still left faulty.
+type DoctorCoolingQuiet interface {
+	QuietWhileCooling() bool
+}
+
 // DoctorChecks is the table mw doctor works down, in order.
 type DoctorChecks []DoctorCheck
 
@@ -82,6 +93,11 @@ type DoctorEpisode struct {
 	FirstFaulty time.Time
 	Cures       int
 	LastCure    time.Time
+
+	// LastCureFailed is whether the cure that set LastCure returned an error.
+	// A check that is quiet while cooling stays loud inside the wait after a
+	// failed cure.
+	LastCureFailed bool
 
 	// LastOKReason is the reason an ok verdict was last logged with. A check
 	// that answers ok with a reason — "n/a: none of these units is installed
@@ -215,7 +231,8 @@ type DoctorResult struct {
 	Reason  string
 	WayBack string
 	// Faulty is whether this check is left faulty and uncured — damped or its
-	// cure failed — so this run's exit status should say so.
+	// cure failed, except a damped tick of a DoctorCoolingQuiet check held
+	// only by the wait after a good cure — so this run's exit status should say so.
 	Faulty bool
 }
 
@@ -506,6 +523,11 @@ func (d Doctor) faulty(ctx context.Context, check DoctorCheck, reason string, dr
 
 	if damped {
 		result := DoctorResult{Check: name, Verdict: "damped", Reason: reason, WayBack: check.WayBack(), Faulty: true}
+		// Held only by the minimum wait after a cure that worked: logged, but
+		// no one's to look at.
+		if quiet, ok := check.(DoctorCoolingQuiet); ok && quiet.QuietWhileCooling() && !capped && !episode.LastCureFailed {
+			result.Faulty = false
+		}
 		if !dryRun {
 			if err := d.append(ctx, result); err != nil {
 				return DoctorResult{}, err
@@ -532,6 +554,7 @@ func (d Doctor) faulty(ctx context.Context, check DoctorCheck, reason string, dr
 	cureErr := check.Cure(ctx)
 	episode.Cures++
 	episode.LastCure = d.now()
+	episode.LastCureFailed = cureErr != nil
 	if episode.FirstFaulty.IsZero() {
 		episode.FirstFaulty = d.now()
 	}
