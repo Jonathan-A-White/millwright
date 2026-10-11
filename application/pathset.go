@@ -14,11 +14,12 @@ import (
 const PathUnset = "(unset)"
 
 // PathSet sets a story's path keys in one command: the seven keys of a sibling
-// story's path (From), the keys named in Pairs laid over them, or both. The
-// Mayor files each story under an existing epic with its own path, which was
-// seven `bd update --set-metadata` calls one at a time, because the tracker
-// takes a single writer; here the whole path goes in as one write, so there is
-// never a second writer to wait for and never a half-set path.
+// story's path (From) — never its files, which are its own — the keys named in
+// Pairs laid over them, or both. The Mayor files each story under an existing
+// epic with its own path, which was seven `bd update --set-metadata` calls one
+// at a time, because the tracker takes a single writer; here the whole path
+// goes in as one write, so there is never a second writer to wait for and never
+// a half-set path.
 //
 // A path is adjusted only before a story starts, so a story that is claimed or
 // finished is refused. Every refusal comes before the write: a refused set
@@ -65,6 +66,9 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 			return domain.Path{}, fmt.Errorf("reading the story %s to copy the path from: %w", from, err)
 		}
 		path = sibling.Merged()
+		// The files a story expects to change are its own: a sibling's are
+		// never copied (mw-gq6.349).
+		path.Files = ""
 		if path.Rig == "" {
 			return domain.Path{}, fmt.Errorf("the story %s has no rig, so there is no path to copy from it: nothing was written", from)
 		}
@@ -82,7 +86,7 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 }
 
 // parsePathPairs reads key=value settings into a path, refusing a key that is
-// not one of the seven and a value left empty.
+// not one of the eight and a value left empty.
 func parsePathPairs(pairs []string) (domain.Path, error) {
 	var path domain.Path
 	for _, pair := range pairs {
@@ -98,7 +102,7 @@ func parsePathPairs(pairs []string) (domain.Path, error) {
 	return path, nil
 }
 
-// pathLines is a path as a key=value line for each of the seven keys, a key it
+// pathLines is a path as a key=value line for each of the eight keys, a key it
 // does not set shown as PathUnset.
 func pathLines(path domain.Path) string {
 	var b strings.Builder
@@ -112,7 +116,7 @@ func pathLines(path domain.Path) string {
 	return b.String()
 }
 
-// PathShow prints the seven path keys of a story, as the story is worked by
+// PathShow prints the eight path keys of a story, as the story is worked by
 // them: its own settings over its epic's defaults.
 type PathShow struct {
 	Tracker WorkTracker
