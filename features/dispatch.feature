@@ -876,3 +876,69 @@ Feature: Dispatching the stories this host is ready to work
     Then the story "mw-gq6.1" is not claimed
     And the story "mw-gq6.1" carries 2 comments saying it used up its attempts
     And the Mayor has 2 mails
+
+  # Files (mw-gq6.349): a story may name the files it expects to change, in its
+  # files key. Stories on one rig that change the same files run one at a time:
+  # each landing moves the target branch under the others, and they come back
+  # as merge conflicts. A ready story whose files a running story on its rig
+  # names, or has already changed on its branch, waits, unclaimed, and the next
+  # ready story is started instead. A story that names no files waits for none.
+
+  Scenario: A story that names a file a running story names waits, and the next ready story starts
+    Given a story "mw-gq6.1" of that epic is already running here, expecting to change "src/Reader.tsx"
+    And a ready story "mw-gq6.2" of that epic expecting to change "src/Preface.tsx,src/Reader.tsx"
+    And a ready story "mw-gq6.3" of that epic expecting to change "src/SettingsScreen.tsx"
+    When dispatch runs on "vps" with a cap of 3
+    Then one session was started, for "mw-gq6.3"
+    And the story "mw-gq6.2" is not claimed
+    And dispatch passed over "mw-gq6.2", saying: waiting: shares src/Reader.tsx with mw-gq6.1
+
+  Scenario: A glob in a running story's files covers the file a ready story names
+    Given a story "mw-gq6.1" of that epic is already running here, expecting to change "src/*.tsx"
+    And a ready story "mw-gq6.2" of that epic expecting to change "src/Reader.tsx"
+    When dispatch runs on "vps" with a cap of 3
+    Then no session was started
+    And dispatch passed over "mw-gq6.2", saying: waiting: shares src/Reader.tsx with mw-gq6.1
+
+  Scenario: A story waits while a running story's branch has already changed a file it names
+    Given a story "mw-gq6.1" of that epic is already running here, its branch changing "src/Reader.tsx"
+    And a ready story "mw-gq6.2" of that epic expecting to change "src/Reader.tsx"
+    When dispatch runs on "vps" with a cap of 3
+    Then no session was started
+    And the story "mw-gq6.2" is not claimed
+    And dispatch passed over "mw-gq6.2", saying: waiting: shares src/Reader.tsx with mw-gq6.1
+
+  Scenario: Of two ready stories that name the same file, the first is started and the second waits for it
+    Given a ready story "mw-gq6.2" of that epic expecting to change "src/Reader.tsx"
+    And a ready story "mw-gq6.3" of that epic expecting to change "src/Reader.tsx"
+    When dispatch runs on "vps" with a cap of 3
+    Then one session was started, for "mw-gq6.2"
+    And dispatch passed over "mw-gq6.3", saying: waiting: shares src/Reader.tsx with mw-gq6.2
+
+  Scenario: A story that names files no running story touches starts beside them
+    Given a story "mw-gq6.1" of that epic is already running here, its branch changing "src/Reader.tsx"
+    And a ready story "mw-gq6.2" of that epic expecting to change "src/Preface.tsx"
+    When dispatch runs on "vps" with a cap of 3
+    Then one session was started, for "mw-gq6.2"
+
+  Scenario: A story that names no files dispatches as it always did
+    Given a story "mw-gq6.1" of that epic is already running here, expecting to change "src/Reader.tsx"
+    And the branch of "mw-gq6.1" has a commit changing "src/Reader.tsx"
+    And a ready story "mw-gq6.2" of that epic
+    When dispatch runs on "vps" with a cap of 3
+    Then one session was started, for "mw-gq6.2"
+    And the story "mw-gq6.2" is claimed by this host
+
+  Scenario: mw status shows a story that shares a running story's file as waiting
+    Given a story "mw-gq6.1" of that epic is already running here, expecting to change "src/Reader.tsx"
+    And a ready story "mw-gq6.2" of that epic expecting to change "src/Reader.tsx"
+    And a ready story "mw-gq6.3" of that epic expecting to change "src/Preface.tsx"
+    When mw status is read on "vps"
+    Then mw status lists "mw-gq6.2" as ready, saying "waiting: shares src/Reader.tsx with mw-gq6.1"
+    And mw status lists "mw-gq6.3" as ready, saying nothing of waiting
+
+  Scenario: mw status shows a story waiting on what a running story's branch has changed
+    Given a story "mw-gq6.1" of that epic is already running here, its branch changing "src/Reader.tsx"
+    And a ready story "mw-gq6.2" of that epic expecting to change "src/*.tsx"
+    When mw status is read on "vps"
+    Then mw status lists "mw-gq6.2" as ready, saying "waiting: shares src/Reader.tsx with mw-gq6.1"

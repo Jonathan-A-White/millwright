@@ -258,6 +258,7 @@ func newDispatchCmd() *cobra.Command {
 				Room:        application.RoomLimits{LoadPerCore: room.LoadPerCore, MinFreeMB: room.MinFreeMB},
 				Grist:       hostGristRoom(room),
 				Rigs:        rigs,
+				Changes:     worktrees,
 				Network:     net,
 				HeavyNet:    heavy,
 				Exclusive:   hostDispatchLock(),

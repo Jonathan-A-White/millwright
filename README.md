@@ -465,7 +465,8 @@ structure, for the arrows to come. It reads and writes nothing. See
 bin/mw path set mw-gq6.9 --from mw-gq6.8              # copy the seven path keys of a sibling
 bin/mw path set mw-gq6.9 --from mw-gq6.8 model=opus   # ...with model overridden
 bin/mw path set mw-gq6.9 rig=lampas                   # set only the rig
-bin/mw path show mw-gq6.9                             # print the seven keys
+bin/mw path set mw-gq6.9 files=src/Reader.tsx,src/data/*.ts  # the files it expects to change
+bin/mw path show mw-gq6.9                             # print the eight keys
 ```
 
 A story filed under an epic that does not give it a Path needs its rig, branch,
@@ -478,6 +479,16 @@ over them. An unknown key, a sibling with no rig, and a story that is in
 progress or closed are refused with nothing written: a Path is adjusted only
 before a story starts. `mw path show` prints `(unset)` for a key the story has
 no value for. See `features/path_set.feature`.
+
+The eighth key, `files`, is the comma-separated repo paths or globs (`*` within a
+directory, `**` across them; a directory covers what is under it) the story
+expects to change. It is the story's own, so `--from` never copies it. `mw
+dispatch` does not start a ready story while a story running here on its rig
+names one of its files, or has changed one on its branch so far (from the merge
+base with its target): it passes it over, unclaimed, saying `waiting: shares
+<path> with <id>`, starts the next ready story instead, and `mw status` shows
+the same line under READY. A story with no `files` dispatches as it always did.
+See the files scenarios of `features/dispatch.feature`.
 
 ## Booting a session into a seat
 

@@ -192,6 +192,12 @@ type Dispatch struct {
 	// A nil SmokeHolds, or one that cannot be read, holds nothing back.
 	SmokeHolds GristSmokeHolds
 
+	// Changes reads what a running story's branch has changed so far, so that a
+	// ready story naming one of those files waits for it as for one a running
+	// story names in its files key (mw-gq6.349). A nil Changes compares the
+	// files keys alone.
+	Changes BranchChanges
+
 	// DryRun prints what would be started and writes nothing at all: nothing is
 	// synced, nothing claimed, no worktree made, no formula poured, no session
 	// started.
@@ -521,6 +527,9 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	}
 	// A story the Governor must be present for is claimed by the Mayor, not run
 	// by a session of this host, so it is not one of the sessions the cap counts.
+	// Every other claim still held here, refused ones too, keeps its files from
+	// the stories ready beside it: its branch is yet to land (mw-gq6.349).
+	shares := fileShares{changes: d.Changes, rigs: d.Rigs, remote: d.remote()}
 	for _, detail := range running {
 		if detail.Hitl() {
 			continue
@@ -536,14 +545,18 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 				// still holding a session.
 				continue
 			}
+			shares.add(detail)
 			if held {
 				// Refused and waiting on the Mayor: it holds no session, so it
 				// does not take one of the cap's slots (mw-gq6.211).
 				continue
 			}
-		} else if d.refusedWithoutSession(ctx, detail) {
-			report.HeldRefused = append(report.HeldRefused, HeldRefused{StoryID: detail.Story.ID, Session: SessionName(detail.Story.ID)})
-			continue
+		} else {
+			shares.add(detail)
+			if d.refusedWithoutSession(ctx, detail) {
+				report.HeldRefused = append(report.HeldRefused, HeldRefused{StoryID: detail.Story.ID, Session: SessionName(detail.Story.ID)})
+				continue
+			}
 		}
 		report.Running++
 	}
@@ -693,6 +706,15 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			continue
 		}
 
+		// A story that names a file a running story on its rig names too, or has
+		// changed on its branch, waits for it, unclaimed, before the cap: it
+		// takes none of the sessions, and the next ready story is started in its
+		// place (mw-gq6.349).
+		if share, sharing := shares.shared(ctx, detail); sharing {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Why: share.String()})
+			continue
+		}
+
 		// A story that was claimed and could not be started counts against the
 		// cap too: whatever stopped it will probably stop the next one, and a
 		// dispatcher that claims and releases every ready story in turn is
@@ -710,6 +732,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		started, released, err := d.start(ctx, detail, path, rigDir, formulas)
 		if started.StoryID != "" {
 			report.Started = append(report.Started, started)
+			shares.add(detail)
 		}
 		if err != nil {
 			var pour *pourRefusal
@@ -726,6 +749,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		}
 	}
 
+	report.Notes = append(report.Notes, shares.notes...)
 	d.print(report.String())
 	d.answerWaitingGrist(ctx, &report)
 	if len(report.Failed) > 0 {

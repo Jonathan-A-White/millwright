@@ -140,6 +140,12 @@ type TrackerNotes interface {
 type Status struct {
 	Tracker WorkTracker
 	Vault   Vault
+	// Rigs are the rigs checked out on this host, by name, and Changes reads
+	// what a running story's branch in one has changed so far: a ready story
+	// that shares a file with a running one is shown waiting, as mw dispatch
+	// passes it over (mw-gq6.349). A nil Changes compares the files keys alone.
+	Rigs    map[string]string
+	Changes BranchChanges
 	// Notes is where the other hosts' last sync times are read from. A nil
 	// Notes leaves the other-hosts section out altogether rather than calling
 	// every host asleep on no evidence.
@@ -394,6 +400,9 @@ type StatusReport struct {
 	// Grist is what the mill is doing, zero (Known false) when this host has none.
 	Grist GristPulse
 	Ready []StoryDetail
+	// Sharing are the ready stories mw dispatch passes over for a file a
+	// running story here shares with them, by story id (mw-gq6.349).
+	Sharing map[string]FileShare
 	// Waiting are the beads labelled hitl that are open and not blocked, on any
 	// host or none, and the stories labelled hitl this host has claimed: worked
 	// with the Governor present, so neither a dispatcher's to take nor a session
@@ -609,6 +618,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		}
 		report.Ready = append(report.Ready, detail)
 	}
+	report.Sharing = s.sharing(ctx, report.Running, report.Ready)
 
 	// A bead for the Governor may have no Path at all, so no listing keyed by
 	// host finds it: ask for the label itself. A hitl story ready on this host
@@ -833,6 +843,29 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 
 	s.print(report.String())
 	return report, nil
+}
+
+// sharing is each ready story that shares a file with one running here, as mw
+// dispatch finds it, by id; nil when none does. A branch whose changes cannot
+// be read is said, and holds nothing back.
+func (s Status) sharing(ctx context.Context, running []RunningStory, ready []StoryDetail) map[string]FileShare {
+	shares := fileShares{changes: s.Changes, rigs: s.Rigs}
+	for _, rs := range running {
+		shares.add(rs.Detail)
+	}
+	var sharing map[string]FileShare
+	for _, detail := range ready {
+		if share, ok := shares.shared(ctx, detail); ok {
+			if sharing == nil {
+				sharing = map[string]FileShare{}
+			}
+			sharing[detail.Story.ID] = share
+		}
+	}
+	for _, note := range shares.notes {
+		s.print("mw status: " + note + "\n")
+	}
+	return sharing
 }
 
 // markGuests sets Guest on every story of the report whose rig is a guest repo.
@@ -1174,6 +1207,10 @@ func (r StatusReport) String() string {
 			note = "host " + domain.HostAuto
 		}
 		writeStory(&b, d, note)
+		// Wrapped, not clipped: a long path must not cut off whom it waits for.
+		if share, sharing := r.Sharing[d.Story.ID]; sharing {
+			wrapInto(&b, "    ", share.String())
+		}
 	}
 	b.WriteString("\n")
 
