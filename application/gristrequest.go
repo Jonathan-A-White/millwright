@@ -2,7 +2,6 @@ package application
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
@@ -18,7 +17,7 @@ const (
 
 // GristRequestStatusKind is the kind of the plaintext of a request status,
 // and the statuses it carries (postern's docs/protocol.md section 19,
-// "Request status"). Only filed is sent so far.
+// "Request status"). Filed is sent here; griststatus.go sends the rest.
 const (
 	GristRequestStatusKind = "request-status"
 	GristRequestFiled      = "filed"
@@ -57,6 +56,8 @@ type GristRequest struct {
 	Keys    PosternKeyFile
 	Runs    GristRunStore
 	Tracker WorkTracker
+	// Requests keeps the link for mw grist status to follow; nil keeps none.
+	Requests GristRequestStore
 
 	// Now reads the clock; nil reads the real one.
 	Now func() time.Time
@@ -86,33 +87,27 @@ func (g GristRequest) Run(ctx context.Context, bead, txid string) error {
 	if _, err := g.Tracker.ShowStory(ctx, bead); err != nil {
 		return fmt.Errorf("mw grist request: %s is not a bead the tracker shows: %w; nothing was sent", bead, err)
 	}
-	millKey, _, err := g.Keys.PublicKey()
-	if err != nil {
-		return fmt.Errorf("mw grist request: %w", err)
-	}
 	if err := g.Tracker.SetStoryMetadata(ctx, bead, map[string]string{RequestField: txid, RequestAppField: forwarded.App}); err != nil {
 		return fmt.Errorf("mw grist request: linking %s: %w", bead, err)
 	}
-	text, err := GristJSON(GristRequestStatus{
+	filed := GristRequestStatus{
 		Kind: GristRequestStatusKind, Request: txid, Bead: bead,
 		Status: GristRequestFiled, Ts: g.now().UnixMilli(),
-	})
-	if err != nil {
-		return fmt.Errorf("mw grist request: %w", err)
 	}
-	ct, err := g.Cipher.Encrypt(forwarded.Sender, string(text))
-	if err != nil {
-		return fmt.Errorf("mw grist request: sealing the status to %s: %w", KeyFingerprint(forwarded.Sender), err)
-	}
-	payload, err := json.Marshal(PosternPayload{
-		V: 1, Kind: PosternMessageKind, Class: GristClass, To: forwarded.Sender,
-		From: millKey, Ts: g.now().Unix(), Ct: ct,
-	})
-	if err != nil {
-		return fmt.Errorf("mw grist request: %w", err)
-	}
-	if _, err := g.Postern.Deliver(ctx, payload); err != nil {
+	if err := sendRequestStatus(ctx, g.Postern, g.Cipher, g.Keys, forwarded.Sender, filed); err != nil {
 		return fmt.Errorf("mw grist request: %s is linked to %s, but the status could not be sent (run it again): %w", bead, txid, err)
+	}
+	if g.Requests != nil {
+		// The record is what mw grist status goes on from; a link made again
+		// keeps what the Mayor marked the request with.
+		record, _, err := g.Requests.Get(ctx, bead)
+		if err != nil {
+			return fmt.Errorf("mw grist request: %w", err)
+		}
+		record.Bead, record.Request, record.App, record.Sender, record.Last = bead, txid, forwarded.App, forwarded.Sender, &filed
+		if err := g.Requests.Keep(ctx, record); err != nil {
+			return fmt.Errorf("mw grist request: %s is linked and its sender told, but the record could not be kept, so mw grist status will not follow it: %w", bead, err)
+		}
 	}
 	if g.Out != nil {
 		fmt.Fprintf(g.Out, "%s is linked to the request %s of %s; its sender (key %s) was told it was filed\n",

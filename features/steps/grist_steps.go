@@ -92,6 +92,10 @@ type gristContext struct {
 	audio audioContext // features/grist_audio.feature
 	slots slotsContext // features/grist_concurrent.feature
 
+	// statuses is the request status pass a dispatch tick is given
+	// (features/grist_request.feature); nil is none.
+	statuses application.GristStatuses
+
 	report     application.GristReport
 	homeIs     string // the host the vault's home file names; empty is no home file
 	configured bool   // a [grist] table is in the config file
@@ -595,6 +599,7 @@ func (c *gristContext) mwDispatchRuns(host string, cap int) error {
 	}
 	if c.configured {
 		tick.Mill = c.mill()
+		tick.Statuses = c.statuses
 	}
 	c.dispatch, c.err = tick.Run(context.Background())
 	return c.err

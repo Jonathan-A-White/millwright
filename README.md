@@ -1900,7 +1900,26 @@ It sets the bead's metadata `request` (the grist's txid) and `request_app`, and
 seals a `request-status` record, `filed`, from the mill key to the key that sent
 the grist (postern's `docs/protocol.md` section 19, "Request status"; it has no
 `re`). A txid the mill did not forward, or a bead that is not there, is refused
-and nothing is sent. See `features/grist_request.feature`.
+and nothing is sent. The link is kept in `requests/<bead>.json` under the mill's
+state directory. See `features/grist_request.feature`.
+
+`mw grist status` then sends the same key each later change of the bead, once,
+and `mw dispatch` runs it on the host that is home, after its grind pass: `building`
+once the bead is in progress; `landed` once it is closed, with the `version` and
+`commit` of the story's `Version <v> (<bead>)` commit on the rig's branch, and a
+`url` (the rig's `public_url` in `rigs/<rig>.toml`, then `/commit/<sha>`) only
+when the rig names one; `declined` and `adopted-as-setting` when the Mayor marked
+the request:
+
+```sh
+mw grist request decline <bead> --reason outside|already-there|not-now [--note "<a line>"]
+mw grist request adopt <bead> --setting <name>
+```
+
+Neither closes the bead or sends anything itself. A declined request, once its
+bead is closed, carries the reason's text (and the note after it); an adopted
+one, once closed with a landing, carries the setting and the landing. A reason
+that is not on the menu is refused with the menu.
 
 `mw grist send` is the terminal's sender: it sends a grist as a key it is
 given, as an app's phone would, and can wait for the answer.

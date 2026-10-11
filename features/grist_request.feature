@@ -8,6 +8,15 @@ Feature: mw grist request links a bead to an app's request and tells the sender 
   ends with this command, ready, for the Mayor to fill the bead in. A txid that
   was never a forwarded grist is refused, and nothing is sent.
 
+  After the grind pass on the home host, mw grist status sends the same key each
+  later change of the linked bead, once: building when the bead is in progress,
+  landed when it is closed with a landing (the version and commit of the rig's
+  "Version <v> (<bead>)" commit, and a url only when the rig's file in the vault
+  names public_url), declined when the Mayor marked it with mw grist request
+  decline and closed it (the reason's text from a menu, and an optional line),
+  adopted-as-setting when the Mayor marked it with mw grist request adopt. What
+  was sent is kept in a state file for the bead, so a second pass sends nothing.
+
   Background:
     Given a mill on the host "laptop"
     And the app "cairn" is checked out here, its main at commit "0123456789abcdef0123456789abcdef01234567" with the grind "sweep"
@@ -53,3 +62,141 @@ Feature: mw grist request links a bead to an app's request and tells the sender 
     And mw grist request links "mw-nope.9" to that grist
     Then mw grist request was refused saying "mw-nope.9"
     And the mill sent no request status
+
+  Scenario: A linked bead going in progress is told building, once
+    Given the phone sends a "cairn" "feedback" grist, version "1", saying "Please add a quiz." with 0 photos
+    When the mill grinds
+    And mw grist request links "mw-x.1" to that grist
+    And the bead "mw-x.1" goes in progress
+    When the status pass runs
+    Then the status pass sent one "building" status for that grist and "mw-x.1"
+    And the mill keeps a state file for "mw-x.1" under its requests directory
+    When the status pass runs
+    Then the status pass sent no status
+
+  Scenario: A bead still open is told nothing beyond filed
+    Given the phone sends a "cairn" "feedback" grist, version "1", saying "Please add a quiz." with 0 photos
+    When the mill grinds
+    And mw grist request links "mw-x.1" to that grist
+    When the status pass runs
+    Then the status pass sent no status
+
+  Scenario: A bead closed with a landing is told landed with the version, the commit and the url, once
+    Given the phone sends a "cairn" "feedback" grist, version "1", saying "Please add a quiz." with 0 photos
+    When the mill grinds
+    And mw grist request links "mw-x.1" to that grist
+    And the rig "cairn" names the public url "https://github.com/Jonathan-A-White/cairn"
+    And the bead "mw-x.1" goes in progress
+    And the status pass runs
+    And the bead "mw-x.1" is closed after landing in version "0.1.86" at the commit "fedcba9876543210fedcba9876543210fedcba98"
+    When the status pass runs
+    Then the status pass sent one "landed" status for that grist and "mw-x.1" carrying:
+      | field   | value                                                                                    |
+      | version | 0.1.86                                                                                   |
+      | commit  | fedcba9876543210fedcba9876543210fedcba98                                                 |
+      | url     | https://github.com/Jonathan-A-White/cairn/commit/fedcba9876543210fedcba9876543210fedcba98 |
+    When the status pass runs
+    Then the status pass sent no status
+
+  Scenario: A rig that names no public url gets a landed status with no url
+    Given the phone sends a "cairn" "feedback" grist, version "1", saying "Please add a quiz." with 0 photos
+    When the mill grinds
+    And mw grist request links "mw-x.1" to that grist
+    And the bead "mw-x.1" is closed after landing in version "0.1.86" at the commit "fedcba9876543210fedcba9876543210fedcba98"
+    When the status pass runs
+    Then the status pass sent one "landed" status for that grist and "mw-x.1" carrying:
+      | field   | value                                    |
+      | version | 0.1.86                                   |
+      | commit  | fedcba9876543210fedcba9876543210fedcba98 |
+
+  Scenario: A bead closed with no landing is told nothing
+    Given the phone sends a "cairn" "feedback" grist, version "1", saying "Please add a quiz." with 0 photos
+    When the mill grinds
+    And mw grist request links "mw-x.1" to that grist
+    And the bead "mw-x.1" is closed
+    When the status pass runs
+    Then the status pass sent no status
+
+  Scenario: A bead marked declined is told so when it is closed, with the reason's text
+    Given the phone sends a "cairn" "feedback" grist, version "1", saying "Please add a quiz." with 0 photos
+    When the mill grinds
+    And mw grist request links "mw-x.1" to that grist
+    When mw grist request declines "mw-x.1" for the reason "outside"
+    Then mw grist request left without an error
+    And the bead "mw-x.1" is not closed
+    When the status pass runs
+    Then the status pass sent no status
+    When the bead "mw-x.1" is closed
+    And the status pass runs
+    Then the status pass sent one "declined" status for that grist and "mw-x.1" carrying:
+      | field  | value                                      |
+      | reason | This is outside what this app is for.      |
+    When the status pass runs
+    Then the status pass sent no status
+
+  Scenario: A decline may carry a line of the Mayor's own after the reason's text
+    Given the phone sends a "cairn" "feedback" grist, version "1", saying "Please add a quiz." with 0 photos
+    When the mill grinds
+    And mw grist request links "mw-x.1" to that grist
+    When mw grist request declines "mw-x.1" for the reason "not-now" with the note "Ask again after the next release."
+    And the bead "mw-x.1" is closed
+    And the status pass runs
+    Then the status pass sent one "declined" status for that grist and "mw-x.1" carrying:
+      | field  | value                                                                         |
+      | reason | This is not something the factory will build now. Ask again after the next release. |
+
+  Scenario: A reason that is not on the menu is refused with the menu
+    Given the phone sends a "cairn" "feedback" grist, version "1", saying "Please add a quiz." with 0 photos
+    When the mill grinds
+    And mw grist request links "mw-x.1" to that grist
+    When mw grist request declines "mw-x.1" for the reason "because"
+    Then mw grist request was refused saying "outside, already-there, not-now"
+    When the bead "mw-x.1" is closed after landing in version "0.1.86" at the commit "fedcba9876543210fedcba9876543210fedcba98"
+    And the status pass runs
+    Then the status pass sent one "landed" status for that grist and "mw-x.1" carrying:
+      | field   | value                                    |
+      | version | 0.1.86                                   |
+      | commit  | fedcba9876543210fedcba9876543210fedcba98 |
+
+  Scenario: A bead that is not linked cannot be declined or adopted
+    When mw grist request declines "mw-x.1" for the reason "outside"
+    Then mw grist request was refused saying "not linked"
+    When mw grist request adopts "mw-x.1" as the setting "bible-walk"
+    Then mw grist request was refused saying "not linked"
+
+  Scenario: A bead marked adopted is told adopted-as-setting with the setting once it is closed with a landing
+    Given the phone sends a "cairn" "feedback" grist, version "1", saying "Please add a quiz." with 0 photos
+    When the mill grinds
+    And mw grist request links "mw-x.1" to that grist
+    And the bead "mw-x.1" is closed after landing in version "0.1.86" at the commit "fedcba9876543210fedcba9876543210fedcba98"
+    And the status pass runs
+    When mw grist request adopts "mw-x.1" as the setting "bible-walk"
+    Then mw grist request left without an error
+    When the status pass runs
+    Then the status pass sent one "adopted-as-setting" status for that grist and "mw-x.1" carrying:
+      | field   | value                                    |
+      | setting | bible-walk                               |
+      | version | 0.1.86                                   |
+      | commit  | fedcba9876543210fedcba9876543210fedcba98 |
+    When the status pass runs
+    Then the status pass sent no status
+
+  Scenario: The dispatch tick on the home host sends the statuses after its grind pass
+    Given "laptop" is home
+    And [grist] is configured
+    And the phone sends a "cairn" "feedback" grist, version "1", saying "Please add a quiz." with 0 photos
+    When the mill grinds
+    And mw grist request links "mw-x.1" to that grist
+    And the bead "mw-x.1" goes in progress
+    And mw dispatch runs on "laptop" with a cap of 1 and the request status pass
+    Then the status pass sent one "building" status for that grist and "mw-x.1"
+
+  Scenario: A dispatch tick on a host that is not home sends no statuses
+    Given "desktop" is home
+    And [grist] is configured
+    And the phone sends a "cairn" "feedback" grist, version "1", saying "Please add a quiz." with 0 photos
+    When the mill grinds
+    And mw grist request links "mw-x.1" to that grist
+    And the bead "mw-x.1" goes in progress
+    And mw dispatch runs on "laptop" with a cap of 1 and the request status pass
+    Then the status pass sent no status

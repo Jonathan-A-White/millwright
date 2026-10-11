@@ -32,7 +32,7 @@ domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cm
 | EventLog, BeadFeed, FollowCursors, ShipStates, SubscribeFiles, NudgeCursors, EventSpringer, EventController, HarnessCount | application/event*.go, status.go | infra/{eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go | Fake{EventLog,Follow*,Ship*,Tracker,Subscribe*} |
 | Postern, hands, Prompts | application/{postern*,hands,prompt}.go | infra/{postern,hands*,homemove} | Fake{Postern*,Cipher,Hands*,HomeMover,Prompts} |
 | Chain, StampQueue, StampStore, CommitNotes, RigHeads | application/chain.go, application/chainstamp.go, application/prove.go | infra/{bsv,stampqueue,chainlookup}, rig/worktree.go | Fake{Chain,Stamp*,Commit*,RigHeads} |
-| Grinder, GrindSource, GristState, GristLock, GristRunStore, GristForwardStore, GristSmoke* | application/grist.go, application/gristruns.go, application/gristsmoke.go | infra/{claude/grind,rig/grinds,hostlock/try}.go, infra/grist | Fake{Grinder,Grinds,Grist*} |
+| Grinder, GrindSource, GristState, GristLock, GristRunStore, GristForwardStore, GristRequestStore, GristLandings, GristSmoke* | application/grist.go, application/gristruns.go, application/griststatus.go, application/gristsmoke.go | infra/{claude/grind,rig/{grinds,landingof},hostlock/try}.go, infra/grist | Fake{Grinder,Grinds,Grist*,Landings} |
 | Scorer | application/scorer.go | infra/scorer | FakeScorer |
 | SecretStore | application/secrets.go | infra/sops | FakeSecretStore |
 
@@ -54,7 +54,7 @@ domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cm
 | Event{Follow,Emit,Tail,Ship,Wait,Nudge,Spring,Control,Trim} | application/eventfollow.go, application/eventlog.go, application/eventship.go, application/eventwait.go, application/eventnudge.go, application/eventsubscribe.go, application/eventspring.go, application/eventcontrol.go, application/eventtrim.go | mw events <sub> - cmd/mw/events.go | features/event_follow.feature |
 | Postern{Serve,Nginx,Mirror} | application/posternhand.go, application/posternmirror.go | mw postern <sub> - cmd/mw/postern.go, cmd/mw/posternmirror.go | features/postern_serve.feature |
 | Prompt{Save,List,Show,Run}, Cards | application/prompt.go | mw prompt/card - cmd/mw/prompt.go, cmd/mw/card.go | features/{prompt,card}.feature |
-| Grist{Key,Grind,Send,Request,Eval,Score,Runs,Stats,Smoke,Level} | application/grist.go, application/gristlevel.go, application/gristgrind.go, application/gristsend.go, application/gristrequest.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go, application/gristroom.go, application/gristsmoke.go | mw grist <sub> - cmd/mw/grist.go, cmd/mw/gristsmoke.go | features/{grist*,scorer}.feature |
+| Grist{Key,Grind,Send,Request,Status,Eval,Score,Runs,Stats,Smoke,Level} | application/grist.go, application/gristlevel.go, application/gristgrind.go, application/gristsend.go, application/gristrequest.go, application/griststatus.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go, application/gristroom.go, application/gristsmoke.go | mw grist <sub> - cmd/mw/grist.go, cmd/mw/gristsmoke.go | features/{grist*,scorer}.feature |
 
 cmd/mw/root.go, cmd/mw/version.go
 

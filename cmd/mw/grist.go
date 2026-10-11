@@ -18,6 +18,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/postern"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/scorer"
+	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 )
 
 // newGristCmd builds `mw grist`: the mill, the factory's side of the AI work
@@ -32,6 +33,7 @@ func newGristCmd() *cobra.Command {
 	root.AddCommand(newGristGrindCmd())
 	root.AddCommand(newGristSendCmd())
 	root.AddCommand(newGristRequestCmd())
+	root.AddCommand(newGristStatusCmd())
 	root.AddCommand(newGristEvalCmd())
 	root.AddCommand(newGristScoreCmd())
 	root.AddCommand(newGristRunsCmd())
@@ -156,7 +158,7 @@ func newGristSendCmd() *cobra.Command {
 // newGristRequestCmd builds `mw grist request`: a bead linked to the request a
 // forwarded grist carried, and the key that sent it told it was filed.
 func newGristRequestCmd() *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "request <bead> <txid>",
 		Short: "Link a bead to the request of a forwarded grist and tell its sender it was filed",
 		Long: "request is what the Mayor runs after filing a bead for a feedback grist the mill forwarded: the\n" +
@@ -164,7 +166,9 @@ func newGristRequestCmd() *cobra.Command {
 			"(the grist's txid) and request_app, then seals a request-status record, \"filed\", from the mill\n" +
 			"key to the key that sent the grist (postern's docs/protocol.md section 19, \"Request status\"),\n" +
 			"which the app pulls as it pulls an answer. A txid the mill did not forward, or a bead that is\n" +
-			"not there, is refused and nothing is sent. Run again, it sends the status again.",
+			"not there, is refused and nothing is sent. Run again, it sends the status again. The link is\n" +
+			"kept under the mill's state directory (requests/<bead>.json) for mw grist status to follow;\n" +
+			"decline and adopt mark it.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			host, err := config.Host()
@@ -188,15 +192,144 @@ func newGristRequestCmd() *cobra.Command {
 				return err
 			}
 			return application.GristRequest{
-				Postern: backend,
-				Cipher:  postern.NewCipher(keys),
-				Keys:    keys,
-				Runs:    grist.NewRuns(stateDir),
-				Tracker: mwGateway(vaultDir, host),
-				Out:     cmd.OutOrStdout(),
+				Postern:  backend,
+				Cipher:   postern.NewCipher(keys),
+				Keys:     keys,
+				Runs:     grist.NewRuns(stateDir),
+				Tracker:  mwGateway(vaultDir, host),
+				Requests: grist.NewRequests(stateDir),
+				Out:      cmd.OutOrStdout(),
 			}.Run(cmd.Context(), args[0], args[1])
 		},
 	}
+	cmd.AddCommand(newGristRequestDeclineCmd(), newGristRequestAdoptCmd())
+	return cmd
+}
+
+// newGristRequestDeclineCmd builds `mw grist request decline`: a linked
+// request marked declined, for a reason from the menu.
+func newGristRequestDeclineCmd() *cobra.Command {
+	var reason, note string
+	cmd := &cobra.Command{
+		Use:   "decline <bead> --reason <key> [--note <line>]",
+		Short: "Mark a linked request declined, for a reason from the menu",
+		Long: "decline marks the request a bead was linked to as declined. It closes nothing and sends\n" +
+			"nothing: when the bead is closed, the next mw grist status tells the key that sent the\n" +
+			"request it was declined, with the reason's text and the line, if one was given. The\n" +
+			"reasons are:\n" + gristDeclineMenuText() + "\nA reason that is not on the menu is refused.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			stateDir, err := config.GristStateDir()
+			if err != nil {
+				return err
+			}
+			return application.GristRequestDecline{Requests: grist.NewRequests(stateDir), Out: cmd.OutOrStdout()}.
+				Run(cmd.Context(), args[0], reason, note)
+		},
+	}
+	cmd.Flags().StringVar(&reason, "reason", "", "the menu key of the reason (required)")
+	cmd.Flags().StringVar(&note, "note", "", "a line of your own, shown after the reason's text")
+	_ = cmd.MarkFlagRequired("reason")
+	return cmd
+}
+
+// gristDeclineMenuText lists the decline menu, a line a reason.
+func gristDeclineMenuText() string {
+	var lines []string
+	for _, r := range application.GristDeclineReasons {
+		lines = append(lines, fmt.Sprintf("  %-14s %s", r.Key, r.Text))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// newGristRequestAdoptCmd builds `mw grist request adopt`: a linked request
+// marked adopted as a setting.
+func newGristRequestAdoptCmd() *cobra.Command {
+	var setting string
+	cmd := &cobra.Command{
+		Use:   "adopt <bead> --setting <name>",
+		Short: "Mark a linked request adopted as a setting",
+		Long: "adopt marks the request a bead was linked to as adopted as a setting of the app. The next\n" +
+			"mw grist status, once the bead is closed with a landing, tells the key that sent the request\n" +
+			"adopted-as-setting with the setting's name.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			stateDir, err := config.GristStateDir()
+			if err != nil {
+				return err
+			}
+			return application.GristRequestAdopt{Requests: grist.NewRequests(stateDir), Out: cmd.OutOrStdout()}.
+				Run(cmd.Context(), args[0], setting)
+		},
+	}
+	cmd.Flags().StringVar(&setting, "setting", "", "the name of the setting that answers the request (required)")
+	_ = cmd.MarkFlagRequired("setting")
+	return cmd
+}
+
+// newGristStatusCmd builds `mw grist status`: one pass that sends each linked
+// request's sender the change of its bead.
+func newGristStatusCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "status",
+		Short: "Tell the senders of linked requests what became of them: building, landed, declined, adopted",
+		Long: "status is one pass over the requests mw grist request linked to beads. For each it sends\n" +
+			"the key that sent the request a sealed request-status record when its bead has changed since\n" +
+			"the last one sent (postern's docs/protocol.md section 19): building once the bead is in\n" +
+			"progress; landed, with the version and commit of the story's landing and a url when the rig's\n" +
+			"file in the vault names public_url, once it is closed; declined (mw grist request decline) or\n" +
+			"adopted-as-setting (mw grist request adopt) when it was marked so. Each change is sent once.\n" +
+			"mw dispatch runs it on the host that is home, after its grind pass.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			status, err := newRequestStatus(cmd.OutOrStdout())
+			if err != nil {
+				return err
+			}
+			_, err = status.Run(cmd.Context())
+			return err
+		},
+	}
+}
+
+// newRequestStatus is the pass mw grist status runs, as this host is
+// configured; the dispatch tick runs it on the host that is home.
+func newRequestStatus(out io.Writer) (application.GristStatus, error) {
+	host, err := config.Host()
+	if err != nil {
+		return application.GristStatus{}, err
+	}
+	vaultDir, err := config.Vault()
+	if err != nil {
+		return application.GristStatus{}, err
+	}
+	keys, err := gristKeys()
+	if err != nil {
+		return application.GristStatus{}, err
+	}
+	backend, err := posternBackend(keys)
+	if err != nil {
+		return application.GristStatus{}, err
+	}
+	stateDir, err := config.GristStateDir()
+	if err != nil {
+		return application.GristStatus{}, err
+	}
+	rigs, err := config.Rigs()
+	if err != nil {
+		return application.GristStatus{}, err
+	}
+	return application.GristStatus{
+		Postern:  backend,
+		Cipher:   postern.NewCipher(keys),
+		Keys:     keys,
+		Requests: grist.NewRequests(stateDir),
+		Tracker:  mwGateway(vaultDir, host),
+		Rules:    vault.New(vaultDir),
+		Landings: rig.New(),
+		Rigs:     rigs,
+		Out:      out,
+	}, nil
 }
 
 // newGristEvalCmd builds `mw grist eval`: a grind tried on photos whose

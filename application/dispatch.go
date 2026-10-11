@@ -156,6 +156,10 @@ type Dispatch struct {
 	// be read, runs none. A dry run runs none either.
 	Mill GristMill
 	Home HomeFile
+	// Statuses runs after the mill's pass, on the same host: it tells the
+	// senders of linked requests what became of them (mw grist status). A nil
+	// Statuses runs none.
+	Statuses GristStatuses
 
 	// MaxAttempts is how many times a story may be started in all; a story tried
 	// that many times is not started again, and the Mayor is told. Fewer than one
@@ -789,6 +793,13 @@ func (d Dispatch) answerWaitingGrist(ctx context.Context, report *DispatchReport
 		note := fmt.Sprintf("the grist pass failed: %v", err)
 		report.Notes = append(report.Notes, note)
 		d.print("  note    " + note + "\n")
+	}
+	if d.Statuses != nil {
+		if _, err := d.Statuses.Run(ctx); err != nil {
+			note := fmt.Sprintf("the request status pass failed: %v", err)
+			report.Notes = append(report.Notes, note)
+			d.print("  note    " + note + "\n")
+		}
 	}
 }
 

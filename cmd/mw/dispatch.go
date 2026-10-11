@@ -279,6 +279,11 @@ func newDispatchCmd() *cobra.Command {
 				} else {
 					dispatch.Mill = mill
 				}
+				if statuses, err := newRequestStatus(cmd.OutOrStdout()); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "no request status pass this tick: %v\n", err)
+				} else {
+					dispatch.Statuses = statuses
+				}
 			}
 			// The tick keeps this host's mw level with the factory rig's main
 			// first, as the Millhand's tick does, for a host that runs no
