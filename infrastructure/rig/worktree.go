@@ -251,3 +251,27 @@ func (w *Worktrees) git(ctx context.Context, dir string, args ...string) (string
 	}
 	return out.String(), nil
 }
+
+// Worktrees satisfies the port a running story's changed files are read
+// through (mw-gq6.349).
+var _ application.BranchChanges = (*Worktrees)(nil)
+
+// ChangedFiles implements application.BranchChanges: `git diff --name-only`
+// from the merge base of base and branch to branch, three dots. A branch the
+// rig does not have, as for a story another host works, has changed nothing.
+func (w *Worktrees) ChangedFiles(ctx context.Context, rigDir, base, branch string) ([]string, error) {
+	if _, err := w.git(ctx, rigDir, "rev-parse", "--verify", "--quiet", "refs/heads/"+branch); err != nil {
+		return nil, nil
+	}
+	out, err := w.git(ctx, rigDir, "diff", "--name-only", "-z", base+"..."+branch, "--")
+	if err != nil {
+		return nil, err
+	}
+	var files []string
+	for _, file := range strings.Split(out, "\x00") {
+		if file != "" {
+			files = append(files, file)
+		}
+	}
+	return files, nil
+}

@@ -71,3 +71,14 @@ type Worktrees interface {
 	// already a branch, and when from is not one.
 	RenameBranch(ctx context.Context, rigDir, from, to string) error
 }
+
+// BranchChanges is the port the files a running story's branch has changed so
+// far are read through: git, in the rig's own checkout, where every story
+// worktree's branch is a branch of the rig (mw-gq6.349).
+type BranchChanges interface {
+	// ChangedFiles is every file the commits on branch beyond base change: the
+	// diff from their merge base to branch, three dots, so not what base gained
+	// meanwhile. A branch that is not there, as for a story worked on another
+	// host, has changed nothing.
+	ChangedFiles(ctx context.Context, rigDir, base, branch string) ([]string, error)
+}

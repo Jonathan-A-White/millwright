@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -221,5 +222,48 @@ func TestResolveExpandsACommitNamedByItsFirstCharacters(t *testing.T) {
 	}
 	if _, err := rig.New().Resolve(context.Background(), here, "deadbeef"); err == nil {
 		t.Fatal("Resolve of a commit that is not there succeeded")
+	}
+}
+
+func TestChangedFilesAreWhatTheStoryBranchChangedSinceItsMergeBase(t *testing.T) {
+	here := aRigWithAServer(t)
+	ctx := context.Background()
+	worktrees := rig.New()
+
+	run(t, here, "git", "checkout", "-q", "-b", "mw/story")
+	write(t, here, "src/app.txt", "a newer app\n")
+	write(t, here, "src/Reader.tsx", "a reader\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "The story's change")
+
+	// What the target gained meanwhile is not the story's change.
+	run(t, here, "git", "checkout", "-q", "main")
+	write(t, here, "server/other.txt", "another story's route\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "Another story landed")
+
+	got, err := worktrees.ChangedFiles(ctx, here, "main", "mw/story")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"src/Reader.tsx", "src/app.txt"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+}
+
+func TestABranchThatIsNotThereHasChangedNothing(t *testing.T) {
+	here := aRigWithAServer(t)
+	got, err := rig.New().ChangedFiles(context.Background(), here, "main", "mw/worked-elsewhere")
+	if err != nil || len(got) != 0 {
+		t.Errorf("expected nothing changed and no error, got %q, %v", got, err)
+	}
+}
+
+func TestABranchWithNoCommitsYetHasChangedNothing(t *testing.T) {
+	here := aRigWithAServer(t)
+	run(t, here, "git", "branch", "mw/just-cut", "main")
+	got, err := rig.New().ChangedFiles(context.Background(), here, "main", "mw/just-cut")
+	if err != nil || len(got) != 0 {
+		t.Errorf("expected nothing changed and no error, got %q, %v", got, err)
 	}
 }

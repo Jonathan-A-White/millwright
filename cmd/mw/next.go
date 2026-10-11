@@ -171,6 +171,7 @@ func newNextCmd() *cobra.Command {
 					Mailbox:     gateway,
 					Load:        hostload.Proc{},
 					Rigs:        rigs,
+					Changes:     worktrees,
 					Events:      homeEventLog(),
 					SmokeHolds:  gristSmokeBook(gateway, host),
 					Out:         cmd.OutOrStdout(),

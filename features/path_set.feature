@@ -88,3 +88,28 @@ Feature: Setting and showing a story's path
     Then the path shown has the line: rig=lampas
     And the path shown has the line: branch=(unset)
     And the path shown has the line: host=(unset)
+
+  # files (mw-gq6.349): the eighth key, the repo paths or globs a story expects
+  # to change. It is the story's own, so --from never copies it.
+
+  Scenario: The files key is set by name and shown
+    When the path of "B" is set with rig=lampas files=src/Reader.tsx,src/data/*.ts
+    Then setting the path succeeds
+    And the story "B" has the path key "files" as "src/Reader.tsx,src/data/*.ts"
+    When the path of "B" is shown
+    Then the path shown has the line: files=src/Reader.tsx,src/data/*.ts
+
+  Scenario: Copying a sibling's path never copies its files
+    Given the path-set story "F" is open with the metadata:
+      | rig   | lampas         |
+      | host  | laptop         |
+      | files | src/Reader.tsx |
+    When the path of "B" is set from "F"
+    Then setting the path succeeds
+    And the story "B" has exactly the metadata:
+      | rig  | lampas |
+      | host | laptop |
+
+  Scenario: A path with no files shows the key unset
+    When the path of "A" is shown
+    Then the path shown has the line: files=(unset)

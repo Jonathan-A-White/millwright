@@ -70,6 +70,9 @@ type dispatchContext struct {
 	earlier application.Molecule
 	report  application.DispatchReport
 	err     error
+	// status and statusErr are what mw status read, in a scenario that reads it.
+	status    application.StatusReport
+	statusErr error
 }
 
 // The text a scenario's fixtures hold, so that a scenario can say what reached
@@ -237,6 +240,7 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the Mayor has (\d+) mails?$`, c.theMayorHasMails)
 	ctx.Then(`^the mail to the Mayor says "([^"]*)"$`, c.theMailSays)
 	ctx.Then(`^the subject of the mail to the Mayor is "([^"]*)"$`, c.theMailSubjectIs)
+	c.registerFileSteps(ctx)
 }
 
 // workspace makes the temp directory a scenario keeps its vault, its origin and
@@ -915,6 +919,7 @@ func (c *dispatchContext) dispatch(host string, cap int, dryRun bool) error {
 		MaxAttempts: c.attempts(),
 		Mailbox:     c.mail,
 		Rigs:        map[string]string{"millwright": c.rig},
+		Changes:     worktrees,
 		Room:        c.room,
 		Events:      c.events,
 		DryRun:      dryRun,

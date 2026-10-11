@@ -24,7 +24,7 @@ domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cm
 | Network{Probe,Store,Reader} | application/network.go | infra/network | FakeNetwork* |
 | CardLog | application/card.go | infra/cardlog | FakeCardLog |
 | CloseOutMarks | application/closeout.go | infra/closeout | Fake*Mark* |
-| Worktrees | application/worktrees.go | infra/rig/worktree.go | dispatch_test.go |
+| Worktrees, BranchChanges | application/worktrees.go | infra/rig/worktree.go | dispatch_test.go |
 | HostLoad, Cloud*, BenchmarkBook | application/hostload.go, application/benchmark.go | infra/{hostload,cloud,vault/{cloudbook,benchmarks}.go} | Fake{HostLoad,Cloud*,Benchmarks} |
 | TickLog, Notifier, HomeMoveHost, OldHome, VaultBirth, TrackerBirth | application/{millhandtick,homemove,init}.go | infra/{ticklog,notify/notify,homemove/homemove,vault/birth,beads/init}.go | FakeTickLog |
 | Landing, Checks, MergeSlot, Holding | application/landing.go | infra/rig/{landing,checks,slot}.go | - |

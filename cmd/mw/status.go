@@ -164,8 +164,16 @@ func newStatusCmd() *cobra.Command {
 			}
 			mayor := application.MayorReader{Tracker: tracker, Notes: tracker}
 			cloudBook, plan := cloudStatus(dir, host)
+			// A rig table that cannot be read costs the report only what running
+			// branches have changed: the files keys are still compared.
+			rigs, err := config.Rigs()
+			if err != nil {
+				rigs = nil
+			}
 			_, err = application.Status{
 				Tracker:          tracker,
+				Rigs:             rigs,
+				Changes:          rig.New(),
 				Notes:            tracker,
 				Vault:            mwVault(dir, host),
 				RigFacts:         mwVault(dir, host),
