@@ -2,7 +2,7 @@
 
 ## Layers
 
-domain/(events): stdlib · application/: use cases, ports · infra/: adapters · cmd/mw/: cobra · features/: Gherkin · template/: embed
+domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cmd/mw/ cobra · features/ Gherkin · template/ embed
 
 ## Ports
 
@@ -40,13 +40,11 @@ domain/(events): stdlib · application/: use cases, ports · infra/: adapters ·
 
 | Use case | File | Command | Feature |
 |-|-|-|-|
-| File, Release, Retry | application/file.go, application/release.go, application/retry.go | mw file/release/retry - cmd/mw/file.go, cmd/mw/release.go, cmd/mw/retry.go | features/{file_plan,release,retry}.feature |
-| Show, Peek, Prove, StampHead | application/show.go, application/stamphead.go | mw show/peek/prove/stamp - cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go | features/{show,peek,prove,stamp}.feature |
+| File, Release, Retry, Path{Set,Show} | application/file.go, application/release.go, application/retry.go, application/pathset.go | mw file/release/retry/path - cmd/mw/file.go, cmd/mw/release.go, cmd/mw/retry.go, cmd/mw/path.go | features/{file_plan,release,retry,path_set}.feature |
+| Show, Peek, Prove, StampHead, Tester | application/show.go, application/stamphead.go, application/testerreport.go | mw show/peek/prove/stamp/tester - cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go, cmd/mw/tester.go | features/{show,peek,prove,stamp,tester}.feature |
 | Dispatch, Next, AfterLandingRun | application/dispatch.go, application/next.go, application/afterlandingrun.go | mw dispatch/next/after-landing - cmd/mw/dispatch.go, cmd/mw/next.go, cmd/mw/afterlanding.go | features/{dispatch,next,after_landing}.feature |
-| Tester | application/testerreport.go | mw tester report - cmd/mw/tester.go | features/tester.feature |
 | Check, Status, CloudCheck, Brief | application/check.go, application/status.go, application/cloud.go, application/brief.go | mw check/status/cloud/brief - cmd/mw/check.go, cmd/mw/status.go, cmd/mw/cloud.go, cmd/mw/brief.go | features/{check,status,cloud,brief}.feature |
-| Sweep, Tidy, Sync, Nudge, Mail | application/sweep.go, application/tidy.go, application/sync.go, application/nudge.go, application/mail.go | mw sweep/tidy/sync/nudge/mail - cmd/mw/sweep.go, cmd/mw/tidy.go, cmd/mw/sync.go, cmd/mw/nudge.go, cmd/mw/mail.go | features/{sweep,tidy,sync,mail}.feature |
-| Home, HomeMove | application/home.go, application/homemove.go | mw home [move] - cmd/mw/home.go, cmd/mw/homemove.go | features/home.feature |
+| Sweep, Tidy, Sync, Nudge, Mail, Home[Move] | application/sweep.go, application/tidy.go, application/sync.go, application/nudge.go, application/mail.go, application/home.go, application/homemove.go | mw sweep/tidy/sync/nudge/mail/home - cmd/mw/sweep.go, cmd/mw/tidy.go, cmd/mw/sync.go, cmd/mw/nudge.go, cmd/mw/mail.go, cmd/mw/home.go, cmd/mw/homemove.go | features/{sweep,tidy,sync,mail,home}.feature |
 | Seat{Context,Up,Reap,Handover} | application/seat{context,up,reap,handover}.go | mw seat <sub> - cmd/mw/seat.go | features/seat_*.feature |
 | Talk{Call,Model,Say,Wait} | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go | mw talk <sub> - cmd/mw/talk.go | features/talk_*.feature |
 | Millhand, Deputy, MillhandTick | application/millhand.go, application/deputy.go, application/millhandtick.go | mw millhand [tick]/deputy - cmd/mw/millhand.go, cmd/mw/deputy.go, cmd/mw/millhandtick.go | features/{millhand,deputy,millhand_tick}.feature |

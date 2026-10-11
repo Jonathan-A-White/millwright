@@ -96,6 +96,7 @@ func runFeatures(t *testing.T, paths []string) {
 func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeBackendSwapScenario(ctx)
 	steps.InitializeAskScenario(ctx)
+	steps.InitializePathSetScenario(ctx)
 	steps.InitializeBriefScenario(ctx)
 	steps.InitializeChainStampScenario(ctx)
 	steps.InitializeCloudScenario(ctx)

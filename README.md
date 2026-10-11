@@ -416,6 +416,26 @@ so releasing an epic twice does no more than releasing it once. An epic the
 tracker does not have is a plain refusal, and nothing is written. See
 `features/release.feature`.
 
+## Setting a story's path
+
+```sh
+bin/mw path set mw-gq6.9 --from mw-gq6.8              # copy the seven path keys of a sibling
+bin/mw path set mw-gq6.9 --from mw-gq6.8 model=opus   # ...with model overridden
+bin/mw path set mw-gq6.9 rig=lampas                   # set only the rig
+bin/mw path show mw-gq6.9                             # print the seven keys
+```
+
+A story filed under an epic that does not give it a Path needs its rig, branch,
+harness, model, effort, formula and host set one by one, which was seven
+`bd update --set-metadata` calls. `mw path set <id>` sets them as one write, so
+the tracker's single-writer rule holds by construction and a Path is never half
+set. `--from` copies only the sibling's seven path keys (its Path, with its
+epic's defaults overlaid), none of its other metadata; key=value arguments lay
+over them. An unknown key, a sibling with no rig, and a story that is in
+progress or closed are refused with nothing written: a Path is adjusted only
+before a story starts. `mw path show` prints `(unset)` for a key the story has
+no value for. See `features/path_set.feature`.
+
 ## Booting a session into a seat
 
 A session is primed by `application.SeatBoot`: it reads the seat from the vault
