@@ -71,6 +71,7 @@ type nextContext struct {
 	commentsWere map[string]int // how many comments a story held before the close-out ran
 
 	lease *landingLease // the lease watch of features/next_lease.feature, when a scenario asks for one
+	cross *crossFixture // the merge slot across hosts of features/next_cross_slot.feature, when a scenario has one
 
 	afterCommands map[string]string // the [after_landing] table this scenario's rig host has
 	afterLimit    time.Duration     // how long an after-landing command may run; zero is the adapter's own
@@ -127,6 +128,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	})
 	ctx.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
 		c.releaseTheOtherCloseOut()
+		c.stopTheOtherLander()
 		if c.root != "" {
 			_ = os.RemoveAll(c.root)
 		}
@@ -182,6 +184,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerNextVersionSteps(ctx, c)
 	registerNextChangelogSteps(ctx, c)
 	registerTesterSteps(ctx, c)
+	registerNextCrossSlotSteps(ctx, c)
 
 	ctx.When(`^mw closes out "([^"]*)"$`, c.mwClosesOut)
 	ctx.When(`^mw closes out "([^"]*)" a second time$`, c.mwClosesOut)
@@ -895,6 +898,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 		Landing:       worktrees,
 		Checks:        rig.NewChecks(rig.WithCommand(c.checkCommand)),
 		Slot:          rig.NewSlots(rig.WithSlotWait(slotPatience), rig.WithSlotPoll(20*time.Millisecond)),
+		CrossSlot:     c.crossSlot(),
 		Vault:         files,
 		Rules:         files,
 		Files:         filesPort,
