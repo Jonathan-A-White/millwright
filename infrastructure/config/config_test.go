@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -722,7 +723,7 @@ func TestAWatchTableThatCannotBeUsedSaysWhatIsMissing(t *testing.T) {
 	}
 }
 
-func TestDoctorUnitsIsTheShippedFourUntilAHostSaysOtherwise(t *testing.T) {
+func TestDoctorUnitsIsTheShippedFiveUntilAHostSaysOtherwise(t *testing.T) {
 	writeConfig(t, vpsConfig)
 
 	units, err := config.DoctorUnits()
@@ -731,6 +732,9 @@ func TestDoctorUnitsIsTheShippedFourUntilAHostSaysOtherwise(t *testing.T) {
 	}
 	if strings.Join(units, ",") != strings.Join(config.DefaultDoctorUnits, ",") {
 		t.Fatalf("expected the default units, got %+v", units)
+	}
+	if !slices.Contains(units, "mw-report.service") {
+		t.Fatalf("expected the default units to name mw-report.service, got %+v", units)
 	}
 
 	writeConfig(t, "[doctor]\nunits = [\"mw-dispatch.service\", \"mw-doctor.service\"]\n")

@@ -1,0 +1,21 @@
+# One `mw report send` run, as the user, then it exits: no daemon. For
+# `systemctl --user`; see README.md, "mw report send".
+#
+# Started by mw-report.timer. It builds the week's summary from the ledger, the
+# stories and the benchmarks and posts it to the Factory channel, from the home
+# only: on a host the vault's home file says is not home it prints why and sends
+# nothing, and exits 0. It spends no fuel and starts no session.
+[Unit]
+Description=Post the phone-sized factory report to the Factory channel, from the home (mw report send)
+
+[Service]
+Type=oneshot
+
+# Like mw-doctor.service, it runs the one fixed binary rather than relying on
+# PATH; the bd it calls for the tracker is found through dispatch.env's PATH.
+EnvironmentFile=-%h/.config/mw/dispatch.env
+ExecStart=/usr/bin/env %h/.local/bin/mw report send
+
+# Type=oneshot has no start timeout by default, and a hung read would then block
+# every later run.
+TimeoutStartSec=5min

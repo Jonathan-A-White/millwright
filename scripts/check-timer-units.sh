@@ -30,7 +30,9 @@
 #    does not catch up; its review pair a oneshot that treats exit 5 ("already
 #    up") as success, on a timer at 07:30 and 19:30 that does catch up. The doctor
 #    pair is a oneshot run straight from ~/.local/bin (not through `env`) on a timer
-#    at 2, 7, 12, ... that does not catch up. The postern mirror pair is a
+#    at 2, 7, 12, ... that does not catch up. The report pair is a oneshot run straight from
+#    ~/.local/bin that runs `mw report send` on a timer at 12:00 UTC that does not catch
+#    up. The postern mirror pair is a
 #    oneshot that runs `mw postern mirror` (through `env`) on a timer at 3, 13,
 #    23, ... that does not catch up. And the scripts those two run
 #    (contrib/mail-notify, contrib/health/mw-health.sh) are executable and parse.
@@ -67,6 +69,8 @@ DOCTOR_SERVICE=$DIR/mw-doctor.service
 DOCTOR_TIMER=$DIR/mw-doctor.timer
 MIRROR_SERVICE=$DIR/mw-postern-mirror.service
 MIRROR_TIMER=$DIR/mw-postern-mirror.timer
+REPORT_SERVICE=$DIR/mw-report.service
+REPORT_TIMER=$DIR/mw-report.timer
 FOLLOW_SERVICE=$DIR/mw-view-follow.service
 SEAT_TMUX_SERVICE=$DIR/system/mw-seat-tmux.service
 SYS_DOCTOR_SERVICE=$DIR/system/mw-doctor.service
@@ -95,6 +99,8 @@ fail() {
 [ -f "$DOCTOR_TIMER" ] || fail "$DOCTOR_TIMER does not exist"
 [ -f "$MIRROR_SERVICE" ] || fail "$MIRROR_SERVICE does not exist"
 [ -f "$MIRROR_TIMER" ] || fail "$MIRROR_TIMER does not exist"
+[ -f "$REPORT_SERVICE" ] || fail "$REPORT_SERVICE does not exist"
+[ -f "$REPORT_TIMER" ] || fail "$REPORT_TIMER does not exist"
 [ -f "$FOLLOW_SERVICE" ] || fail "$FOLLOW_SERVICE does not exist"
 [ -f "$SEAT_TMUX_SERVICE" ] || fail "$SEAT_TMUX_SERVICE does not exist"
 [ -f "$SYS_DOCTOR_SERVICE" ] || fail "$SYS_DOCTOR_SERVICE does not exist"
@@ -107,7 +113,7 @@ if command -v systemd-analyze >/dev/null 2>&1; then
 	# and complains about them (not the rig's to change): those lines are noted
 	# and do not fail. A line names a rig unit by its path or, as systemd does for
 	# some faults, by its file name alone.
-	UNITS="$SERVICE $TIMER $MAIL_SERVICE $MAIL_TIMER $HEALTH_SERVICE $HEALTH_TIMER $TICK_SERVICE $TICK_TIMER $REVIEW_SERVICE $REVIEW_TIMER $DOCTOR_SERVICE $DOCTOR_TIMER $MIRROR_SERVICE $MIRROR_TIMER $FOLLOW_SERVICE"
+	UNITS="$SERVICE $TIMER $MAIL_SERVICE $MAIL_TIMER $HEALTH_SERVICE $HEALTH_TIMER $TICK_SERVICE $TICK_TIMER $REVIEW_SERVICE $REVIEW_TIMER $DOCTOR_SERVICE $DOCTOR_TIMER $MIRROR_SERVICE $MIRROR_TIMER $REPORT_SERVICE $REPORT_TIMER $FOLLOW_SERVICE"
 	# shellcheck disable=SC2086 # the unit paths hold no spaces; word splitting is the point
 	out=$(systemd-analyze --user verify $UNITS 2>&1) || {
 		echo "$out" >&2
@@ -220,6 +226,11 @@ need "$MIRROR_SERVICE" "Type=oneshot"
 need "$MIRROR_SERVICE" "ExecStart=/usr/bin/env mw postern mirror"
 need "$MIRROR_TIMER" "OnCalendar=*:3/10"
 need "$MIRROR_TIMER" "Persistent=false"
+# The report pair: `mw report send` once a day at noon UTC, no catch-up.
+need "$REPORT_SERVICE" "Type=oneshot"
+need "$REPORT_SERVICE" "ExecStart=/usr/bin/env %h/.local/bin/mw report send"
+need "$REPORT_TIMER" "OnCalendar=*-*-* 12:00:00 UTC"
+need "$REPORT_TIMER" "Persistent=false"
 # The events follower (it republishes the view too), a daemon with no timer.
 need "$FOLLOW_SERVICE" "ExecStart=/usr/bin/env mw events follow"
 need "$FOLLOW_SERVICE" "Restart=on-failure"

@@ -9,7 +9,7 @@
 #
 # A unit name is a timer/service pair in contrib/systemd/, named without its
 # suffix (mw-dispatch, mw-millhand-tick, mw-millhand-review, mw-mail-notify,
-# mw-health). Each named pair is LINKED, not copied, into
+# mw-health, mw-report). Each named pair is LINKED, not copied, into
 # ${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user, so a landing that changes a
 # unit needs only `systemctl --user daemon-reload` on a host. Run it from the
 # rig's own checkout: the links point there.

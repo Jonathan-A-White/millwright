@@ -2239,6 +2239,7 @@ func Watch() (WatchSettings, error) {
 // ships.
 var DefaultDoctorUnits = []string{
 	"mw-dispatch.service", "mw-millhand-tick.service", "mw-millhand-review.service", "mw-doctor.service",
+	"mw-report.service",
 }
 
 // DefaultDoctorStateDir is where mw doctor keeps its episode state and its

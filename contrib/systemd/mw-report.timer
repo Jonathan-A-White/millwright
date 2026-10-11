@@ -1,0 +1,21 @@
+# Runs mw-report.service once a day, at 12:00 UTC. For `systemctl --user`; see
+# README.md, "mw report send".
+#
+# The hour is a fuel-free knob (PROVISIONAL): the run builds a summary from files
+# and the tracker and posts one message. Change it with a drop-in
+# (`systemctl --user edit mw-report.timer`), never by editing this file. The
+# service sends at most once a UTC day, so a second timer on another host, or a
+# run by hand, cannot double the report.
+[Unit]
+Description=Daily at 12:00 UTC, post the phone-sized factory report from the home (mw report send)
+
+[Timer]
+OnCalendar=*-*-* 12:00:00 UTC
+# No catch-up: a host that was asleep or off at noon does not send the report
+# when it wakes, and it is not woken to send it. The next noon is the next run.
+Persistent=false
+WakeSystem=false
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target
