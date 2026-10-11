@@ -58,6 +58,10 @@ type Path struct {
 	Effort  Effort  `json:"effort,omitempty"`
 	Formula string  `json:"formula,omitempty"`
 	Host    string  `json:"host,omitempty"`
+	// Files are the repo paths or globs the story expects to change, comma
+	// separated: a story whose files a running story on its rig shares waits
+	// for it (mw-gq6.349). They are the story's own, never a sibling's.
+	Files string `json:"files,omitempty"`
 }
 
 // Story is a bead sized to be worked start to finish by one session in one
@@ -112,7 +116,7 @@ func (e FormulaNotInstalledError) Error() string {
 
 // Fields are the names of a path's fields, in the order a path is written out.
 // They are also the metadata keys a path is stored under.
-var Fields = []string{"rig", "branch", "harness", "model", "effort", "formula", "host"}
+var Fields = []string{"rig", "branch", "harness", "model", "effort", "formula", "host", "files"}
 
 // Set sets the field of p named by one of Fields. It is how a path is read out
 // of stored metadata: one key, one value, at a time.
@@ -132,6 +136,8 @@ func (p *Path) Set(field, value string) error {
 		p.Formula = value
 	case "host":
 		p.Host = value
+	case "files":
+		p.Files = value
 	default:
 		return UnknownFieldError{Field: field}
 	}
@@ -155,6 +161,8 @@ func (p Path) Field(field string) (string, error) {
 		return p.Formula, nil
 	case "host":
 		return p.Host, nil
+	case "files":
+		return p.Files, nil
 	default:
 		return "", UnknownFieldError{Field: field}
 	}
@@ -241,6 +249,9 @@ func (p Path) Overlay(override Path) Path {
 	}
 	if override.Host != "" {
 		p.Host = override.Host
+	}
+	if override.Files != "" {
+		p.Files = override.Files
 	}
 	return p
 }

@@ -16,6 +16,7 @@ func completePath() domain.Path {
 		Effort:  domain.EffortHigh,
 		Formula: "tdd-feature",
 		Host:    "vps",
+		Files:   "src/Reader.tsx,src/data/*.ts",
 	}
 }
 
@@ -134,6 +135,7 @@ func TestMetadataLeavesOutEmptyFields(t *testing.T) {
 	p := completePath()
 	p.Formula = ""
 	p.Host = ""
+	p.Files = ""
 
 	got := p.Metadata()
 	if len(got) != 5 {
