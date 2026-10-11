@@ -2,6 +2,7 @@ package application
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -212,4 +213,84 @@ func ledgerCell(text string) string {
 		return "—"
 	}
 	return text
+}
+
+// LedgerEntry is as much of one line of a ledger as mw report reads: the day it
+// was written, the story it names, how the story ended, and the model and
+// effort that worked it. Unlike LedgerRow it needs no token figure, so a line
+// whose fuel column holds none still counts.
+type LedgerEntry struct {
+	Date    string
+	StoryID string
+	Outcome string
+	Model   string
+	Effort  string
+	Tokens  int
+}
+
+// Landed reports whether the line says the story landed.
+func (e LedgerEntry) Landed() bool { return strings.HasPrefix(e.Outcome, "landed") }
+
+// notLandedReason reads the code out of "not landed (<reason>): why".
+var notLandedReason = regexp.MustCompile(`^not landed \(([^)]*)\)`)
+
+// LedgerReasonUnspecified is the reason of a refusal written before there were
+// codes, "not landed: ...".
+const LedgerReasonUnspecified = "unspecified"
+
+// Refusal reports whether the line says the story was not landed, and the
+// reason code it was refused under.
+func (e LedgerEntry) Refusal() (reason string, refused bool) {
+	if !strings.HasPrefix(e.Outcome, "not landed") {
+		return "", false
+	}
+	if m := notLandedReason.FindStringSubmatch(e.Outcome); m != nil && strings.TrimSpace(m[1]) != "" {
+		return strings.TrimSpace(m[1]), true
+	}
+	return LedgerReasonUnspecified, true
+}
+
+// ParseLedgerLine reads one markdown table row of a ledger the way LedgerLine
+// wrote it. It reports false for a line that is not a table row of data: the
+// heading, the separator, a blank line, or one too short to name a story.
+func ParseLedgerLine(line string) (LedgerEntry, bool) {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "|") || !strings.HasSuffix(trimmed, "|") {
+		return LedgerEntry{}, false
+	}
+	cells := strings.Split(strings.Trim(trimmed, "|"), " | ")
+	if len(cells) < 4 {
+		return LedgerEntry{}, false
+	}
+	date := strings.TrimSpace(cells[0])
+	if _, err := time.Parse(LedgerDate, date); err != nil {
+		return LedgerEntry{}, false
+	}
+	entry := LedgerEntry{Date: date, StoryID: ledgerStoryID(cells[1]), Outcome: strings.TrimSpace(cells[2])}
+	if entry.StoryID == "" {
+		return LedgerEntry{}, false
+	}
+	model, effort, _ := strings.Cut(strings.TrimSpace(cells[3]), "/")
+	if model != "unknown" && model != "—" {
+		entry.Model = model
+		if effort != "—" {
+			entry.Effort = effort
+		}
+	}
+	if len(cells) > 4 {
+		entry.Tokens, _ = leadingTokens(cells[4])
+	}
+	return entry, true
+}
+
+// ledgerStoryID is the id in a ledger's story column: the one in brackets after
+// the title, or the whole cell when the story had no title.
+func ledgerStoryID(cell string) string {
+	cell = strings.TrimSpace(cell)
+	if strings.HasSuffix(cell, ")") {
+		if at := strings.LastIndex(cell, " ("); at >= 0 {
+			return strings.TrimSpace(cell[at+2 : len(cell)-1])
+		}
+	}
+	return cell
 }
