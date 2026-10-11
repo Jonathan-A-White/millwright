@@ -2,6 +2,7 @@ package doctor_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -290,5 +291,74 @@ func TestTmpLeftoversGoBuildCacheUnderBudgetIsNeverCleaned(t *testing.T) {
 	}
 	if cleaned != 0 {
 		t.Fatalf("expected go clean -cache never to run under budget, ran %d times", cleaned)
+	}
+}
+
+// tlGoBuildPastBudget is a go-build dir holding 200 bytes, past a budget of
+// 100, with nothing running.
+func tlGoBuildPastBudget(t *testing.T) string {
+	t.Helper()
+	goBuildDir := filepath.Join(t.TempDir(), "go-build")
+	if err := os.MkdirAll(goBuildDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(goBuildDir, "blob"), make([]byte, 200), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return goBuildDir
+}
+
+// tlStartGoProcess is a go process appearing in the fake /proc.
+func tlStartGoProcess(t *testing.T, proc string) {
+	t.Helper()
+	pidDir := filepath.Join(proc, "200")
+	if err := os.MkdirAll(pidDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pidDir, "comm"), []byte("go\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A Builder's go process that starts after the cure has looked, and before
+// `go clean -cache` has finished, makes go clean exit 1: that is the cure
+// losing a race, not the cure failing (mw-gq6.318).
+func TestTmpLeftoversGoCleanFailingWhileAGoProcessIsLiveIsSkippedNotFailed(t *testing.T) {
+	tmp, proc := tlHost(t)
+	goBuildDir := tlGoBuildPastBudget(t)
+
+	var cleaned int
+	check := &doctor.TmpLeftovers{
+		TmpDir: tmp, ProcDir: proc, GoBuildDir: goBuildDir, Budget: 100,
+		GoClean: func(context.Context) error {
+			cleaned++
+			tlStartGoProcess(t, proc)
+			return errors.New("exit status 1")
+		},
+	}
+
+	if err := check.Cure(context.Background()); err != nil {
+		t.Fatalf("expected a go clean that lost the race to a live go process to be skipped, got %v", err)
+	}
+	if cleaned != 1 {
+		t.Fatalf("expected go clean -cache to have been tried once, ran %d times", cleaned)
+	}
+	if strings.Contains(check.WayBack(), goBuildDir) {
+		t.Fatalf("expected the skipped go-build cache not to be reported as freed, got %q", check.WayBack())
+	}
+}
+
+func TestTmpLeftoversGoCleanFailingWithNoGoProcessLiveStillFails(t *testing.T) {
+	tmp, proc := tlHost(t)
+	goBuildDir := tlGoBuildPastBudget(t)
+
+	check := &doctor.TmpLeftovers{
+		TmpDir: tmp, ProcDir: proc, GoBuildDir: goBuildDir, Budget: 100,
+		GoClean: func(context.Context) error { return errors.New("exit status 1") },
+	}
+
+	err := check.Cure(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "go clean -cache") {
+		t.Fatalf("expected a go clean -cache failure with no go process live, got %v", err)
 	}
 }

@@ -154,7 +154,8 @@ func (t *TmpLeftovers) Probe(context.Context) (application.Verdict, string) {
 // its own and not live. Neither runs when its own half is not faulty: a check
 // faulty only on GoBuildDir never touches a dead leftover still under
 // budget, and the reverse; a live GoBuildDir is left for a later tick rather
-// than cleaned out from under a running go build, test or vet.
+// than cleaned out from under a running go build, test or vet, and so is a
+// go clean that fails because one started meanwhile.
 func (t *TmpLeftovers) Cure(ctx context.Context) error {
 	dead, err := t.deadLeftovers()
 	if err != nil {
@@ -180,11 +181,18 @@ func (t *TmpLeftovers) Cure(ctx context.Context) error {
 			return err
 		}
 		if !live {
-			if err := t.goClean(ctx); err != nil {
+			switch err := t.goClean(ctx); {
+			case err == nil:
+				cured = append(cured, t.GoBuildDir)
+				freed += goBuildBytes
+			case t.lostRaceToGo():
+				// A go process started after the look above, and go clean
+				// exited 1 under it: the cure lost a race with the work it
+				// tidies after. That is a skip until a later tick, not a failed
+				// cure that wakes the Millhand (mw-gq6.318).
+			default:
 				return fmt.Errorf("go clean -cache: %w", err)
 			}
-			cured = append(cured, t.GoBuildDir)
-			freed += goBuildBytes
 		}
 	}
 
@@ -335,6 +343,14 @@ func (t *TmpLeftovers) dirSize(dir string) (int64, error) {
 		return 0, err
 	}
 	return t.pathSize(dir, info)
+}
+
+// lostRaceToGo reports whether a go process is live now: a failed go clean
+// -cache with one running is the cure racing it, not the cure being broken.
+// A /proc that cannot be read says no, so the failure is still reported.
+func (t *TmpLeftovers) lostRaceToGo() bool {
+	live, err := t.goBuildLive()
+	return err == nil && live
 }
 
 // goClean implements the GoBuildDir half of Cure.
