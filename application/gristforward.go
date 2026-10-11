@@ -1,10 +1,12 @@
 package application
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 )
 
@@ -45,12 +47,16 @@ func (g GristGrind) forward(ctx context.Context, w *gristWork, privKey string) {
 		w.settle(GristFailed, GristReasonNotSent)
 		return
 	}
-	text := forwardText(w.plain.Input)
+	in := parseForwardInput(w.plain.Input)
+	title := in.text
+	if strings.TrimSpace(in.summary) != "" {
+		title = in.summary
+	}
 	_, err = g.Mailbox.Send(ctx, NewMessage{
 		From:    SeatIdentity(MwSeat, g.Host),
 		To:      w.grind.Forward,
-		Subject: forwardSubject(w.plain.Grist.App, text),
-		Body:    forwardBody(w, text, paths),
+		Subject: forwardSubject(w.plain.Grist.App, title),
+		Body:    forwardBody(w, in, paths),
 	})
 	if err != nil {
 		w.settle(GristFailed, GristReasonNotSent)
@@ -61,6 +67,67 @@ func (g GristGrind) forward(ctx context.Context, w *gristWork, privKey string) {
 	w.answered = g.now()
 	w.harnessStarted = w.answered
 	g.keepForwardRun(ctx, w)
+}
+
+// forwardedInput is a forwarded request taken apart: its words, its summary,
+// and the other fields of an object input as '<key>: <value>' lines.
+type forwardedInput struct {
+	text    string
+	summary string
+	lines   []string
+}
+
+// parseForwardInput takes the request apart. An object's "text" is the words
+// and its "summary" (when a string) the subject; every other top-level field is
+// a line, the summary first and the rest sorted by key, a string as it is and
+// anything else as compact JSON. Any other input is its own words.
+func parseForwardInput(input json.RawMessage) forwardedInput {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(input, &fields) != nil || fields == nil {
+		return forwardedInput{text: forwardText(input)}
+	}
+	var in forwardedInput
+	keys := make([]string, 0, len(fields))
+	for key, raw := range fields {
+		if key == "text" && json.Unmarshal(raw, &in.text) == nil {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	if _, ok := fields["summary"]; ok {
+		keys = append([]string{"summary"}, withoutKey(keys, "summary")...)
+	}
+	for _, key := range keys {
+		raw := fields[key]
+		var value string
+		if json.Unmarshal(raw, &value) != nil {
+			var compact bytes.Buffer
+			if json.Compact(&compact, raw) != nil {
+				compact.Reset()
+				compact.Write(raw)
+			}
+			value = compact.String()
+		} else if key == "summary" {
+			in.summary = value
+		}
+		line := key + ":"
+		if value != "" {
+			line += " " + value
+		}
+		in.lines = append(in.lines, line)
+	}
+	return in
+}
+
+func withoutKey(keys []string, drop string) []string {
+	var kept []string
+	for _, k := range keys {
+		if k != drop {
+			kept = append(kept, k)
+		}
+	}
+	return kept
 }
 
 // forwardText is the words of a forwarded request: its "text" when it is an
@@ -95,14 +162,18 @@ func forwardSubject(app, text string) string {
 	return fmt.Sprintf("Feedback from %s: %s", app, line)
 }
 
-// forwardBody is the mail: the full text, then who sent it and where the
-// pictures are kept.
-func forwardBody(w *gristWork, text string, paths []string) string {
+// forwardBody is the mail: the full text, the other fields of the request one
+// to a line, then who sent it and where the pictures are kept.
+func forwardBody(w *gristWork, in forwardedInput, paths []string) string {
 	var b strings.Builder
+	text := in.text
 	if strings.TrimSpace(text) == "" {
 		text = "(no text)"
 	}
 	b.WriteString(text)
+	for _, line := range in.lines {
+		b.WriteString("\n" + line)
+	}
 	name := w.plain.Grist
 	fmt.Fprintf(&b, "\n\n--\nFrom the key %s (fingerprint %s)\nApp %s, kind %s, version %s\nGrist %s\n",
 		w.to, w.sender, name.App, name.Kind, name.V, w.record.Txid)

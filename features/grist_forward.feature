@@ -32,6 +32,53 @@ Feature: mw grist grind forwards a grist whose grind says forward to the Mayor
     When the mill grinds
     Then one mail went to "mayor" titled "Feedback from cairn: 0123456789 0123456789 0123456789 0123456789 0123456789 0123456789 0123456789 012"
 
+  Scenario: The rest of the input, the summary first, goes in the mail, and the summary titles it
+    Given the app's grind "feedback" forwards to "mayor" and takes up to 6 pictures
+    And the phone sends a "cairn" "feedback" grist, version "1", with the input {"text":"yes please pass it to the makers","summary":"He wants a quiz to begin by asking his goal","screen":"Reader","reference":"Colossians 1","app_version":"0.1.83"} and 0 photos
+    When the mill grinds
+    Then one mail went to "mayor" titled "Feedback from cairn: He wants a quiz to begin by asking his goal"
+    And that mail's body, before the sender block, is:
+      """
+      yes please pass it to the makers
+      summary: He wants a quiz to begin by asking his goal
+      app_version: 0.1.83
+      reference: Colossians 1
+      screen: Reader
+      """
+
+  Scenario: An input with only text, and a bare string input, mail as they always did
+    Given the app's grind "feedback" forwards to "mayor" and takes up to 6 pictures
+    And the phone sends a "cairn" "feedback" grist, version "1", with the input {"text":"Only words."} and 0 photos
+    When the mill grinds
+    Then one mail went to "mayor" titled "Feedback from cairn: Only words."
+    And that mail's body, before the sender block, is:
+      """
+      Only words.
+      """
+
+  Scenario: A bare string input is the text
+    Given the app's grind "feedback" forwards to "mayor" and takes up to 6 pictures
+    And the phone sends a "cairn" "feedback" grist, version "1", with the input "Just a string." and 0 photos
+    When the mill grinds
+    Then one mail went to "mayor" titled "Feedback from cairn: Just a string."
+    And that mail's body, before the sender block, is:
+      """
+      Just a string.
+      """
+
+  Scenario: A field that is not a string shows as compact JSON, and an empty summary leaves the subject to the text
+    Given the app's grind "feedback" forwards to "mayor" and takes up to 6 pictures
+    And the phone sends a "cairn" "feedback" grist, version "1", with the input {"text":"Slow.","summary":"","count":3,"context":{"tab": "Quiz", "n": 2}} and 0 photos
+    When the mill grinds
+    Then one mail went to "mayor" titled "Feedback from cairn: Slow."
+    And that mail's body, before the sender block, is:
+      """
+      Slow.
+      summary:
+      context: {"tab":"Quiz","n":2}
+      count: 3
+      """
+
   Scenario: A forwarded grist is a run of the kind forward, with no tokens
     Given the app's grind "feedback" forwards to "mayor" and takes up to 6 pictures
     And the mill keeps its runs under its state directory

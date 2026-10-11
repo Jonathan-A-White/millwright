@@ -56,6 +56,9 @@ func registerGristForward(ctx *godog.ScenarioContext, c *gristContext) {
 	ctx.Given(`^the mayor's mail cannot be sent$`, f.mailFails)
 	ctx.Given(`^the phone sends a "([^"]*)" "([^"]*)" grist, version "([^"]*)", saying "([^"]*)" with (\d+) photos?$`, f.phoneSays)
 
+	ctx.Given(`^the phone sends a "([^"]*)" "([^"]*)" grist, version "([^"]*)", with the input (.+) and (\d+) photos?$`, f.phoneSendsInput)
+
+	ctx.Then(`^that mail's body, before the sender block, is:$`, f.bodyBeforeSender)
 	ctx.Then(`^one mail went to "([^"]*)" titled "([^"]*)"$`, f.oneMail)
 	ctx.Then(`^that mail has the text "([^"]*)", the sender's key and the paths of (\d+) kept pictures$`, f.mailHas)
 	ctx.Then(`^the (\d+) kept pictures are the photos as they were sent$`, f.keptAreThePhotos)
@@ -97,6 +100,31 @@ func (f *forwardContext) phoneSays(app, kind, v, text string, photos int) error 
 	}
 	f.c.askInput = input
 	return f.c.thePhoneSends(app, kind, v, photos)
+}
+
+func (f *forwardContext) phoneSendsInput(app, kind, v, input string, photos int) error {
+	if !json.Valid([]byte(input)) {
+		return fmt.Errorf("the input %s is not JSON", input)
+	}
+	f.c.askInput = json.RawMessage(input)
+	return f.c.thePhoneSends(app, kind, v, photos)
+}
+
+// bodyBeforeSender checks the mail's body up to the "--" line that opens the
+// sender block.
+func (f *forwardContext) bodyBeforeSender(want *godog.DocString) error {
+	m, err := f.sent()
+	if err != nil {
+		return err
+	}
+	got, _, found := strings.Cut(m.Body, "\n\n--\n")
+	if !found {
+		return fmt.Errorf("expected a sender block in the mail, got:\n%s", m.Body)
+	}
+	if got != want.Content {
+		return fmt.Errorf("expected the mail to open with:\n%s\ngot:\n%s", want.Content, got)
+	}
+	return nil
 }
 
 // sent is the mail the mill sent, the one message waiting for the mayor.
