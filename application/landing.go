@@ -261,12 +261,22 @@ type Checks interface {
 
 // MergeSlot is the port that keeps two close-outs from landing on one rig's
 // target branch at the same time. It is per rig and per host: the other host
-// has its own, and the remote itself is what settles a race between the two.
+// has its own, and the two hosts take turns by the rig's CrossSlot, around it
+// (mw-gq6.359). The remote still settles whatever race gets past both.
 type MergeSlot interface {
 	// Take waits for the rig's slot and reports the holding, which the caller
 	// gives back. holder says who has it, for whoever finds it taken. It gives
 	// up when ctx does.
 	Take(ctx context.Context, rigDir, holder string) (Holding, error)
+}
+
+// SlotNotes is the part of the shared tracker's key-value store a rig's
+// cross-host merge slot is kept in (CrossSlot). It is TrackerSync's own Note,
+// SetNote and ClearNote, narrowed.
+type SlotNotes interface {
+	Note(ctx context.Context, key string) (string, error)
+	SetNote(ctx context.Context, key, value string) error
+	ClearNote(ctx context.Context, key string) error
 }
 
 // Holding is a merge slot somebody has. Releasing it twice is harmless.

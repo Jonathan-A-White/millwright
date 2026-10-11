@@ -176,6 +176,12 @@ type Next struct {
 	Slot      MergeSlot
 	Vault     Vault
 
+	// CrossSlot is the rig's merge slot across hosts, on the beads server both
+	// hosts share, taken around Slot so that the other host's close-outs wait
+	// their turn rather than race this one to the remote (mw-gq6.359). The zero
+	// CrossSlot takes none, and the remote alone settles the race.
+	CrossSlot CrossSlot
+
 	// Rules is where a rig's version_files are read from, so that a landing
 	// raises the rig's patch version. A nil Rules, or a rig that names none,
 	// raises nothing.
@@ -345,6 +351,11 @@ type NextReport struct {
 	// Pushes is how many times the push was attempted: more than one means the
 	// other host landed something while this story was being landed.
 	Pushes int
+	// CrossSlot is what became of the rig's cross-host merge slot: how long
+	// the close-out waited for it and for whose landing, a holder gone away it
+	// was taken over from, or why it was skipped. Empty when there was nothing
+	// to say.
+	CrossSlot []string
 	// Rig is what became of this host's own checkout of the rig once the story
 	// was landed: fast-forwarded onto the landed commit, or left as it was with
 	// the reason. RigDir is where that checkout is. A landing made by an earlier
@@ -437,6 +448,11 @@ type closeOut struct {
 
 	// smokeApps are the apps whose grist the story's own commits changed.
 	smokeApps []string
+
+	// crossHeld says the close-out holds its rig's merge slot across hosts, so
+	// the first try at a landing fetches first: the other host may have landed
+	// while this one waited for it.
+	crossHeld bool
 
 	// landingError says this run kept the whole error of a failed landing in the
 	// vault, so the close-out commits it.
@@ -737,16 +753,23 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	c.smokeApps, smokeNotes = n.Smoke.Wants(ctx, c.path.Rig, c.rigDir, StartPoint(n.remote(), c.target), c.branch)
 	report.Notes = append(report.Notes, smokeNotes...)
 
-	// Only one close-out at a time may touch a rig's target branch on this host.
-	// The other host's races are settled by the remote itself, below.
+	// Only one close-out at a time may touch a rig's target branch: the rig's
+	// slot across hosts keeps the other host's out (mw-gq6.359), and inside it
+	// this host's own slot keeps this host's. Whatever race gets past both is
+	// settled by the remote itself, below.
+	cross, said := n.CrossSlot.Take(ctx, c.path.Rig, Holders(n.Seat, n.Host, c.id))
+	report.CrossSlot = append(report.CrossSlot, said...)
+	c.crossHeld = cross != nil
 	holding, err := n.Slot.Take(ctx, c.rigDir, Holders(n.Seat, n.Host, c.id))
 	if err != nil {
+		report.Notes = append(report.Notes, cross.Release(ctx)...)
 		return n.stop(ctx, c, report, ReasonMergeSlot, fmt.Sprintf("the merge slot of %s could not be taken: %v", c.path.Rig, err), "")
 	}
 	landed, landErr := n.merge(ctx, c, report)
 	if err := holding.Release(ctx); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the merge slot of %s could not be given back: %v", c.path.Rig, err))
 	}
+	report.Notes = append(report.Notes, cross.Release(ctx)...)
 	if landErr != nil {
 		kept := n.keepLandingError(ctx, c, report, landErr)
 		switch {
@@ -1502,7 +1525,9 @@ func (n Next) ledgered(ctx context.Context, id string) (bool, error) {
 // remote itself, worth trying again, is retried in place by push, below,
 // without a fresh fetch or merge, since nothing upstream has changed; a push
 // the remote refuses for a stated reason is landing-failed at once, exactly as
-// before either kind of retry existed.
+// before either kind of retry existed. A close-out holding its rig's slot
+// across hosts fetches on the first try too: the other host may have landed
+// while it waited for the slot.
 func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Landed, error) {
 	base := StartPoint(n.remote(), c.target)
 	var version VersionBump
@@ -1523,7 +1548,7 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 	}
 	var lost error
 	for try := 1; try <= n.tries(); try++ {
-		if try > 1 {
+		if try > 1 || c.crossHeld {
 			if err := n.Worktrees.Fetch(ctx, c.rigDir); err != nil {
 				return Landed{}, failedFor(ReasonGitFailed, fmt.Errorf("the rig could not be brought up to date with %s: %w", n.remote(), err))
 			}
@@ -2136,6 +2161,9 @@ func (r NextReport) String() string {
 	}
 	for _, id := range r.Abandoned {
 		fmt.Fprintf(&b, "  gone    %s is claimed here with no session behind it\n", id)
+	}
+	for _, said := range r.CrossSlot {
+		fmt.Fprintf(&b, "  slot    %s\n", said)
 	}
 	for _, note := range r.Notes {
 		fmt.Fprintf(&b, "  note    %s\n", note)

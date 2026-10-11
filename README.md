@@ -741,8 +741,20 @@ The **merge slot** is an advisory lock (`flock`) on a file beside the rig's
 worktrees, one per rig per host. It is a lock rather than a file somebody writes
 their name in because the kernel holds it: an `mw` that is killed, runs out of
 memory or has its terminal closed under it gives the slot back the moment the
-process ends, so there is no stale slot to break by hand. A race between the two
-*hosts* is not settled here at all — it is settled where it has to be, by the
+process ends, so there is no stale slot to break by hand.
+
+The two *hosts* take turns by the rig's **merge slot across hosts**, taken
+around this host's own: a lease in the beads server's key-value store
+(`merge-slot.<rig>`: holder, host, expiry), renewed while the close-out lands and
+given back after the push. A close-out that finds the other host holding it
+waits, and its report says so (`slot    waited 27m for laptop's landing of
+lampas`); then it fetches before it merges. Before the slot existed, a host whose
+merged-result tests took longer than the other host's landings never landed:
+every push was refused, and the story stopped push-lost (mw-gq6.359). A lease
+past its expiry is a holder that went away: it is taken over, and the report
+names the holder and its age. A beads server that cannot be reached skips the
+slot, saying so on the report, and the landing goes ahead under this host's slot
+alone. Whatever race still gets past both is settled where it always was, by the
 remote refusing the second push.
 
 The ledger line is one row of the seat's table: the date, the story, the
