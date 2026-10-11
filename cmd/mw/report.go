@@ -10,21 +10,26 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newReportCmd builds `mw report`: the factory's quality over a window.
+// newReportCmd builds `mw report`: the factory's quality, speed and fuel over a window.
 func newReportCmd() *cobra.Command {
 	var since, rig, host string
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "report [--since 7d|<day>] [--rig <rig>] [--host <host>] [--json]",
-		Short: "How the factory is doing: landed, refused and why, attempts, causes, bugs and Tester findings",
+		Short: "How the factory is doing: quality first, then speed against par and fuel per landing, each against the week before",
 		Long: "report sums the factory's quality over a window, from the builder ledger, the stories and\n" +
 			"the Tester's FINDINGS: per rig, then per model, then per host, what landed, what was refused\n" +
 			"and under which reason, the refusal rate, the attempts a landing took, the refusals' causes\n" +
 			"(mw cause), the [bug] stories filed and the Tester's findings, the last two per landing.\n" +
 			"The window is --since (7d by default; a number of days, a day such as 2026-10-09, or a UTC\n" +
 			"time) to now; the window of the same length before it is computed too and is in --json.\n" +
-			"--rig and --host narrow every block. A ledger row whose story is gone counts under rig\n" +
-			"unknown. It reads and writes nothing, and prints in 60 columns.",
+			"After QUALITY come SPEED (the median and p90 of actual over par, the wall time from dispatch\n" +
+			"to landing, and each host's gate usual against latest; 'no par yet' where no close-out\n" +
+			"measured one) and FUEL (tokens per landing from the ledger and $ per landing from the result\n" +
+			"files, every attempt of a story summed). A number carries an arrow against the window before,\n" +
+			"level inside 5%, and says better or worse by the measure. --rig and --host narrow every\n" +
+			"block. A ledger row whose story is gone counts under rig unknown. It reads and writes\n" +
+			"nothing, and prints in 60 columns.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := config.Vault()

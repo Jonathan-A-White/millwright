@@ -445,19 +445,40 @@ See `features/cause.feature`.
 bin/mw report [--since 7d|2026-10-09] [--rig lampas] [--host laptop] [--json]
 ```
 
-`mw report` is the QUALITY section: from the builder ledger, the stories and the
-Tester's FINDINGS it sums a window, one block per rig, then per model, then per
-host, in 60 columns. Each block says what landed and what was refused (the
-refusal rate, and the refusals by the reason in `not landed (<reason>)`), the
-attempts a landing took, the refusals' causes by class (`mw cause`; `unset` is a
-refusal nobody named), the `[bug]` stories filed in the window and the Tester's
-findings on the landed stories, those last two per landing. A story's rig, host
-and model come from its merged path; a ledger row whose story is gone counts
-under rig `unknown`. The window is `--since` (`7d`, a day, or a UTC time; 7d by
-default) to now; `--rig` and `--host` narrow every block. The window of the same
-length before it is computed too and is in `--json`, which prints the whole
-structure, for the arrows to come. It reads and writes nothing. See
-`features/report.feature`.
+`mw report` is the factory's quality, then its speed, then its fuel, in that order
+so that speed and fuel are never read alone. From the builder ledger, the stories
+and the Tester's FINDINGS it sums a window, one block per rig, then per model, then
+per host, in 60 columns.
+
+QUALITY says, per block, what landed and what was refused (the refusal rate, and
+the refusals by the reason in `not landed (<reason>)`), the attempts a landing took,
+the refusals' causes by class (`mw cause`; `unset` is a refusal nobody named), the
+`[bug]` stories filed in the window and the Tester's findings on the landed stories,
+those last two per landing.
+
+SPEED is read from the close-outs' benchmarks: `par x1.1 median, x2.5 p90` is the
+median and p90 (nearest rank) of actual over par across the block's landings, 1 at
+par; `dispatch to landing` the median wall time; and under a rig each host's, under
+a host each rig's, `gate usual 5m10s, latest 9m02s` (as in `mw status`). A block
+with no landing that was held to a par says `no par yet`.
+
+FUEL is per landing: `tokens/landing` from the ledger rows' tokens and `$/landing`
+from `total_cost_usd` in the result files of each attempt, a story landed on its
+second attempt summing both. A landing with no figure is left out of the mean, and a
+block with none says `no fuel figures yet`.
+
+Every number is set against the window of the same length before it, with an arrow:
+`↔` within a 5% band, otherwise `↑` or `↓`, and for a measure with a good side the
+words `better` or `worse` (`refused 1 (10% ↓ better)`; a landed count that held is
+`landed 12 ↔`). A block that nothing happened in before has no arrows. The text puts
+an arrow on the headline numbers; `--json` carries them all, as `arrows.<measure>`
+with `previous`, `arrow` and `verdict`, beside the previous window's figures
+(`previous`, `speed_previous`, `fuel_previous`).
+
+A story's rig, host and model come from its merged path; a ledger row whose story is
+gone counts under rig `unknown`. The window is `--since` (`7d`, a day, or a UTC time;
+7d by default) to now; `--rig` and `--host` narrow every block. It reads and writes
+nothing. See `features/report.feature`.
 
 ## Setting a story's path
 

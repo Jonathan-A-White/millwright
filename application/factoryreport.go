@@ -59,13 +59,15 @@ func reportDay(t time.Time) time.Time {
 
 // FactoryReport sums the factory's quality over a window: from the ledger what
 // landed and what was refused and why, from the stories the attempts, causes
-// and bugs, and from the landed stories' comments what the Tester found. It
-// reads and writes nothing else.
+// and bugs, and from the landed stories' comments what the Tester found. After
+// quality it sums speed, from the close-outs' benchmarks, and fuel, from the
+// ledger's tokens and the result files' cost, each against the window before.
+// It reads and writes nothing else.
 type FactoryReport struct {
 	Tracker TesterStories
 	Files   TesterRunFiles
 	// Benchmarks, when set, names the rig and host of a ledger row whose story
-	// is gone, from the close-out that measured it.
+	// is gone, from the close-out that measured it, and is where speed is read.
 	Benchmarks BenchmarkBook
 	// Seat is whose ledger is read.
 	Seat string
@@ -120,20 +122,29 @@ type Quality struct {
 // Empty says nothing landed, was refused or was filed as a bug.
 func (q Quality) Empty() bool { return q.Landed == 0 && q.Refused == 0 && q.BugsFiled == 0 }
 
-// QualityBlock is one rig, model or host: its window and the one before it.
-type QualityBlock struct {
-	Name     string  `json:"name"`
-	Quality  Quality `json:"quality"`
-	Previous Quality `json:"previous"`
+// ReportBlock is one rig, model or host: its quality, speed and fuel in the
+// window and in the one before it, and how each number moved. Arrows holds a
+// Trend for each number that both windows have, by measure.
+type ReportBlock struct {
+	Name          string           `json:"name"`
+	Quality       Quality          `json:"quality"`
+	Previous      Quality          `json:"previous"`
+	Speed         Speed            `json:"speed"`
+	SpeedPrevious Speed            `json:"speed_previous"`
+	Fuel          FuelUse          `json:"fuel"`
+	FuelPrevious  FuelUse          `json:"fuel_previous"`
+	Arrows        map[string]Trend `json:"arrows"`
+	// Gates are the gate times on the block's rigs or hosts; a model has none.
+	Gates []GateTrend `json:"gates,omitempty"`
 }
 
 // FactoryReportResult is what mw report found.
 type FactoryReportResult struct {
-	Window         ReportWindow   `json:"window"`
-	PreviousWindow ReportWindow   `json:"previous_window"`
-	Rigs           []QualityBlock `json:"rigs"`
-	Models         []QualityBlock `json:"models"`
-	Hosts          []QualityBlock `json:"hosts"`
+	Window         ReportWindow  `json:"window"`
+	PreviousWindow ReportWindow  `json:"previous_window"`
+	Rigs           []ReportBlock `json:"rigs"`
+	Models         []ReportBlock `json:"models"`
+	Hosts          []ReportBlock `json:"hosts"`
 }
 
 // reportEntry is one thing the window saw: a landing, a refusal or a bug filed.
@@ -147,6 +158,14 @@ type reportEntry struct {
 	attempts         int
 	cause            string
 	findings         int
+	// measured says a benchmark gave the landing a wall time, actualS, and
+	// ratio is that over its par, 0 when it had none.
+	measured bool
+	actualS  float64
+	ratio    float64
+	// tokens and costUSD are the fuel of every attempt of a landed story.
+	tokens  int
+	costUSD float64
 }
 
 // Run reads the ledger and the tracker and prints the report.
@@ -188,15 +207,26 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 	if err != nil {
 		return result, fmt.Errorf("reporting quality: the %s seat's ledger: %w", r.Seat, err)
 	}
-	var benchmarks map[string]Benchmark
+	var recent []Benchmark
 	if r.Benchmarks != nil {
-		recent, err := r.Benchmarks.Recent(ctx)
+		recent, err = r.Benchmarks.Recent(ctx)
 		if err != nil {
 			return result, fmt.Errorf("reporting quality: the benchmarks: %w", err)
 		}
-		benchmarks = make(map[string]Benchmark, len(recent))
-		for _, b := range recent {
-			benchmarks[b.Story] = b
+	}
+	benchmarks := make(map[string]Benchmark, len(recent))
+	landedIn := map[string]Benchmark{}
+	for _, b := range recent {
+		benchmarks[b.Story] = b
+		if b.Landed && b.ActualS > 0 {
+			landedIn[b.Story] = b
+		}
+	}
+	// A story's fuel is every ledger row's, a landing's attempts before it too.
+	tokensOf := map[string]int{}
+	for _, line := range ledger {
+		if row, ok := ParseLedgerLine(line); ok {
+			tokensOf[row.StoryID] += row.Tokens
 		}
 	}
 
@@ -254,13 +284,19 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 			}
 		}
 	}
-	// A story's findings count once per window, on its first landing row.
+	// A story's findings, wall time and fuel count once per window, on its first
+	// landing row.
 	counted := map[string]bool{}
 	for i, e := range entries {
 		key := fmt.Sprintf("%t/%s", e.previous, e.id)
 		if e.landed && e.id != "" && !counted[key] {
 			counted[key] = true
 			entries[i].findings = findings[e.id]
+			entries[i].tokens = tokensOf[e.id]
+			entries[i].costUSD = r.costOf(ctx, e.id, e.attempts)
+			if b, ok := landedIn[e.id]; ok {
+				entries[i].measured, entries[i].actualS, entries[i].ratio = true, b.ActualS, b.Ratio()
+			}
 		}
 	}
 
@@ -277,9 +313,10 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 			rig: orElse(path.Rig, ReportUnknown), host: orElse(path.Host, ReportUnknown), model: orElse(string(path.Model), ReportUnknown)})
 	}
 
-	result.Rigs = r.blocks(entries, func(e reportEntry) string { return e.rig })
-	result.Models = r.blocks(entries, func(e reportEntry) string { return e.model })
-	result.Hosts = r.blocks(entries, func(e reportEntry) string { return e.host })
+	gates := gateTrends(recent, result.Window.Since, r.Rig, r.Host)
+	result.Rigs = r.blocks(entries, gates, func(e reportEntry) string { return e.rig }, func(g GateTrend) string { return g.Rig })
+	result.Models = r.blocks(entries, nil, func(e reportEntry) string { return e.model }, nil)
+	result.Hosts = r.blocks(entries, gates, func(e reportEntry) string { return e.host }, func(g GateTrend) string { return g.Host })
 
 	if r.Out != nil {
 		if r.JSON {
@@ -293,6 +330,23 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 		}
 	}
 	return result, nil
+}
+
+// costOf is what a story's result files report it cost, its attempts summed:
+// 0 when no file says. A file that is missing or not a result is not an error,
+// only a figure the report has not got.
+func (r FactoryReport) costOf(ctx context.Context, id string, attempts int) float64 {
+	var cost float64
+	for attempt := 1; attempt <= max(attempts, 1); attempt++ {
+		printed, err := r.Files.ReadRunFile(ctx, id, ResultFileNameForAttempt(attempt))
+		if err != nil {
+			continue
+		}
+		if result, err := ReadSessionResult(printed); err == nil {
+			cost += result.CostUSD
+		}
+	}
+	return cost
 }
 
 // windowOfDay says which window a ledger day falls in: previous or not, and
@@ -327,8 +381,9 @@ func orElse(text, fallback string) string {
 
 // blocks groups what the windows saw by one of rig, model or host, narrowed by
 // the report's Rig and Host, and sums each group: the blocks with something in
-// this window, by name, with unknown last.
-func (r FactoryReport) blocks(entries []reportEntry, keyOf func(reportEntry) string) []QualityBlock {
+// this window, by name, with unknown last. gateKey, when set, names the block a
+// gate line belongs to.
+func (r FactoryReport) blocks(entries []reportEntry, gates []GateTrend, keyOf func(reportEntry) string, gateKey func(GateTrend) string) []ReportBlock {
 	now, before := map[string][]reportEntry{}, map[string][]reportEntry{}
 	for _, e := range entries {
 		if (r.Rig != "" && e.rig != r.Rig) || (r.Host != "" && e.host != r.Host) {
@@ -341,9 +396,25 @@ func (r FactoryReport) blocks(entries []reportEntry, keyOf func(reportEntry) str
 			now[key] = append(now[key], e)
 		}
 	}
-	var blocks []QualityBlock
+	var blocks []ReportBlock
 	for name, mine := range now {
-		blocks = append(blocks, QualityBlock{Name: name, Quality: sumQuality(mine), Previous: sumQuality(before[name])})
+		b := ReportBlock{Name: name,
+			Quality: sumQuality(mine), Previous: sumQuality(before[name]),
+			Speed: sumSpeed(mine), SpeedPrevious: sumSpeed(before[name]),
+			Fuel: sumFuel(mine), FuelPrevious: sumFuel(before[name])}
+		b.Arrows = qualityArrows(b.Quality, b.Previous)
+		for measure, t := range speedArrows(b.Speed, b.SpeedPrevious) {
+			b.Arrows[measure] = t
+		}
+		for measure, t := range fuelArrows(b.Fuel, b.FuelPrevious) {
+			b.Arrows[measure] = t
+		}
+		for _, g := range gates {
+			if gateKey != nil && gateKey(g) == name {
+				b.Gates = append(b.Gates, g)
+			}
+		}
+		blocks = append(blocks, b)
 	}
 	sort.Slice(blocks, func(i, j int) bool {
 		a, b := blocks[i].Name, blocks[j].Name
@@ -402,8 +473,9 @@ func sumQuality(entries []reportEntry) Quality {
 
 func twoPlaces(x float64) float64 { return math.Round(x*100) / 100 }
 
-// String is the report as mw report prints it: the window, then a block per
-// rig, per model and per host, none of it wider than ReportWidth columns.
+// String is the report as mw report prints it: the window, then QUALITY, SPEED
+// and FUEL in that order, each with a block per rig, per model and per host,
+// none of it wider than ReportWidth columns.
 func (r FactoryReportResult) String() string {
 	var b strings.Builder
 	days := int(reportDay(r.Window.Until).Sub(r.Window.Since).Hours() / 24)
@@ -413,31 +485,42 @@ func (r FactoryReportResult) String() string {
 		b.WriteString("\nnothing landed, was refused or was filed in it\n")
 		return b.String()
 	}
-	for _, section := range []struct {
-		kind   string
-		blocks []QualityBlock
-	}{{"rig", r.Rigs}, {"model", r.Models}, {"host", r.Hosts}} {
-		fmt.Fprintf(&b, "\nby %s\n", section.kind)
-		for i, block := range section.blocks {
-			if i > 0 {
-				b.WriteString("\n")
+	for i, part := range []struct {
+		heading string
+		write   func(ReportBlock, *strings.Builder)
+	}{{"", ReportBlock.writeQuality}, {"SPEED", ReportBlock.writeSpeed}, {"FUEL", ReportBlock.writeFuel}} {
+		if i > 0 {
+			fmt.Fprintf(&b, "\n%s\n", part.heading)
+		}
+		for _, section := range []struct {
+			kind   string
+			blocks []ReportBlock
+		}{{"rig", r.Rigs}, {"model", r.Models}, {"host", r.Hosts}} {
+			fmt.Fprintf(&b, "\nby %s\n", section.kind)
+			for j, block := range section.blocks {
+				if j > 0 {
+					b.WriteString("\n")
+				}
+				part.write(block, &b)
 			}
-			block.write(&b)
 		}
 	}
 	return b.String()
 }
 
-// write prints one block.
-func (k QualityBlock) write(b *strings.Builder) {
+// arrow is the trend of a measure, as it follows the number in a line.
+func (k ReportBlock) arrow(measure string) string { return k.Arrows[measure].Text() }
+
+// writeQuality prints one block's quality.
+func (k ReportBlock) writeQuality(b *strings.Builder) {
 	q := k.Quality
-	tail := fmt.Sprintf(": landed %d, refused %d (%.0f%%)", q.Landed, q.Refused, q.RefusalRate)
+	tail := fmt.Sprintf(": landed %d%s, refused %d (%.0f%%%s)", q.Landed, k.arrow("landed"), q.Refused, q.RefusalRate, k.arrow("refusal_rate"))
 	fmt.Fprintf(b, "%s%s\n", fitLine(k.Name, ReportWidth-utf8.RuneCountInString(tail)), tail)
 	for _, reason := range q.Reasons {
 		fmt.Fprintf(b, "  %s\n", fitLine(fmt.Sprintf("%s %d", reason.Reason, reason.Count), ReportWidth-2))
 	}
 	if q.Landed > 0 {
-		fmt.Fprintf(b, "  attempts per landing %.2f\n", q.AttemptsPerLanding)
+		fmt.Fprintf(b, "  attempts per landing %.2f%s\n", q.AttemptsPerLanding, k.arrow("attempts_per_landing"))
 	}
 	if q.Refused > 0 {
 		var causes []string
@@ -448,18 +531,67 @@ func (k QualityBlock) write(b *strings.Builder) {
 		}
 		fmt.Fprintf(b, "  causes %s\n", strings.Join(causes, " · "))
 	}
-	fmt.Fprintf(b, "  bugs filed %d%s\n", q.BugsFiled, perLanding(q, q.BugsPerLanding))
+	fmt.Fprintf(b, "  bugs filed %d%s\n", q.BugsFiled, perLanding(q, q.BugsPerLanding, k.arrow("bugs_per_landing")))
 	if q.Landed > 0 {
-		fmt.Fprintf(b, "  Tester findings %d%s\n", q.Findings, perLanding(q, q.FindingsPerLanding))
+		fmt.Fprintf(b, "  Tester findings %d%s\n", q.Findings, perLanding(q, q.FindingsPerLanding, k.arrow("findings_per_landing")))
 	}
 }
 
-// perLanding is " (0.25/landing)", or " (no landings)" when there are none.
-func perLanding(q Quality, rate float64) string {
+// writeSpeed prints one block's speed: the median and p90 of actual over par,
+// the wall time from dispatch to landing, and the gate of each host or rig.
+func (k ReportBlock) writeSpeed(b *strings.Builder) {
+	fmt.Fprintf(b, "%s\n", fitLine(k.Name, ReportWidth))
+	s := k.Speed
+	if s.WithPar == 0 {
+		b.WriteString("  no par yet\n")
+	} else {
+		fmt.Fprintf(b, "  par x%.1f median, x%.1f p90\n", s.ParMedian, s.ParP90)
+		writeLine(b, vsBefore("  ", []string{"median", "p90"}, k.Arrows["par_median"], k.Arrows["par_p90"]))
+	}
+	if s.Measured > 0 {
+		fmt.Fprintf(b, "  dispatch to landing %s median%s\n", gateClock(seconds(s.DispatchToLandingS)), k.arrow("dispatch_to_landing"))
+	}
+	for _, g := range k.Gates {
+		// A rig's gates are told by host, and a host's by rig.
+		name := g.Host
+		if k.Name == g.Host {
+			name = g.Rig
+		}
+		fmt.Fprintf(b, "  %s\n", fitLine(fmt.Sprintf("%s: gate usual %s, latest %s", name, gateClock(seconds(g.UsualS)), gateClock(seconds(g.LatestS))), ReportWidth-2))
+		writeLine(b, vsBefore("    ", []string{"usual", "latest"}, g.Arrows["usual"], g.Arrows["latest"]))
+	}
+}
+
+// writeFuel prints one block's fuel per landing.
+func (k ReportBlock) writeFuel(b *strings.Builder) {
+	fmt.Fprintf(b, "%s\n", fitLine(k.Name, ReportWidth))
+	f := k.Fuel
+	if f.WithTokens == 0 && f.WithCost == 0 {
+		b.WriteString("  no fuel figures yet\n")
+		return
+	}
+	if f.WithTokens > 0 {
+		fmt.Fprintf(b, "  tokens/landing %s%s\n", Thousands(int(f.TokensPerLanding)), k.arrow("tokens_per_landing"))
+	}
+	if f.WithCost > 0 {
+		fmt.Fprintf(b, "  $/landing %.2f%s\n", f.USDPerLanding, k.arrow("usd_per_landing"))
+	}
+}
+
+// writeLine prints a line, if there is one.
+func writeLine(b *strings.Builder, line string) {
+	if line != "" {
+		b.WriteString(line + "\n")
+	}
+}
+
+// perLanding is " (0.25/landing)", or " (no landings)" when there are none; the
+// arrow follows the rate.
+func perLanding(q Quality, rate float64, arrow string) string {
 	if q.Landed == 0 {
 		return " (no landings)"
 	}
-	return fmt.Sprintf(" (%.2f/landing)", rate)
+	return fmt.Sprintf(" (%.2f/landing%s)", rate, arrow)
 }
 
 // fitLine cuts text to width columns, ending in an ellipsis when it had to.

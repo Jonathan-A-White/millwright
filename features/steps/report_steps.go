@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -25,9 +26,10 @@ const reportSeat = "builder"
 // reportContext holds the fake tracker, a real vault in a temp directory that
 // holds the ledger, and what mw report printed.
 type reportContext struct {
-	tracker *apptest.FakeTracker
-	files   *vault.Vault
-	now     time.Time
+	tracker    *apptest.FakeTracker
+	files      *vault.Vault
+	benchmarks *apptest.FakeBenchmarks
+	now        time.Time
 
 	printed bytes.Buffer
 	err     error
@@ -38,12 +40,15 @@ func InitializeReportScenario(ctx *godog.ScenarioContext) {
 	c := &reportContext{}
 
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
-		*c = reportContext{tracker: apptest.NewFakeTracker()}
+		*c = reportContext{tracker: apptest.NewFakeTracker(), benchmarks: &apptest.FakeBenchmarks{}}
 		return ctx, nil
 	})
 
 	ctx.Given(`^a report factory whose clock reads "([^"]*)"$`, c.aFactory)
 	ctx.Given(`^"([^"]*)" landed (\d+) stories and refused (\d+) for "([^"]*)" in the window$`, c.aRigLandedAndRefused)
+	ctx.Given(`^"([^"]*)" landed (\d+) stories and refused (\d+) for "([^"]*)" in the window before$`, c.aRigLandedAndRefusedBefore)
+	ctx.Given(`^the report benchmarks:$`, c.theBenchmarks)
+	ctx.Given(`^the report result files:$`, c.theResultFiles)
 	ctx.Given(`^the report stories:$`, c.theStories)
 	ctx.Given(`^the report ledger holds the rows:$`, c.theLedgerRows)
 	ctx.Given(`^the report story "([^"]*)" has the cause "([^"]*)"$`, c.theStoryHasTheCause)
@@ -54,6 +59,9 @@ func InitializeReportScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the report prints "([^"]*)" under "([^"]*)"$`, c.printsUnder)
 	ctx.Then(`^the "([^"]*)" section prints the line "([^"]*)"$`, c.sectionPrintsTheLine)
 	ctx.Then(`^the "([^"]*)" section prints no line starting "([^"]*)"$`, c.sectionPrintsNoLine)
+	ctx.Then(`^the (QUALITY|SPEED|FUEL) "([^"]*)" section prints the line "([^"]*)"$`, c.partSectionPrintsTheLine)
+	ctx.Then(`^the (QUALITY|SPEED|FUEL) "([^"]*)" block "([^"]*)" prints "([^"]*)"$`, c.partBlockPrints)
+	ctx.Then(`^the report puts QUALITY before SPEED before FUEL$`, c.partsAreInOrder)
 	ctx.Then(`^no line of the report is wider than (\d+) columns$`, c.noLineIsWiderThan)
 	ctx.Then(`^the report JSON has (\S+) as "([^"]*)"$`, c.jsonHas)
 }
@@ -92,7 +100,7 @@ func (c *reportContext) addStory(id, title, rig, host, model string, attempts in
 	return c.tracker.SetUpdated(id, c.now)
 }
 
-func (c *reportContext) appendLedger(day, id, outcome, worker string) error {
+func (c *reportContext) appendLedger(day, id, outcome, worker string, tokens int) error {
 	at, err := time.Parse(application.LedgerDate, day)
 	if err != nil {
 		return err
@@ -100,20 +108,30 @@ func (c *reportContext) appendLedger(day, id, outcome, worker string) error {
 	path := domain.Path{}
 	model, effort, _ := strings.Cut(worker, "/")
 	path.Model, path.Effort = domain.Model(model), domain.Effort(effort)
-	line := application.LedgerLine{When: at, StoryID: id, Title: "The story " + id, Outcome: outcome, Path: path}.String()
+	line := application.LedgerLine{When: at, StoryID: id, Title: "The story " + id, Outcome: outcome, Path: path,
+		Result: application.SessionResult{Fuel: application.Fuel{Input: tokens}}}.String()
 	return c.files.AppendToLedger(context.Background(), reportSeat, line)
 }
 
 func (c *reportContext) aRigLandedAndRefused(rig string, landed, refused int, reason string) error {
+	return c.rigLanded("2026-10-08", "", rig, landed, refused, reason)
+}
+
+func (c *reportContext) aRigLandedAndRefusedBefore(rig string, landed, refused int, reason string) error {
+	return c.rigLanded("2026-09-30", "before-", rig, landed, refused, reason)
+}
+
+// rigLanded files landed and refused stories of a rig, with a ledger row each on day.
+func (c *reportContext) rigLanded(day, infix, rig string, landed, refused int, reason string) error {
 	for i := 1; i <= landed+refused; i++ {
-		id, outcome := fmt.Sprintf("%s-l%d", rig, i), "landed on main"
+		id, outcome := fmt.Sprintf("%s-%sl%d", rig, infix, i), "landed on main"
 		if i > landed {
-			id, outcome = fmt.Sprintf("%s-r%d", rig, i-landed), application.NotLanded(application.Reason(reason), "the gate was red")
+			id, outcome = fmt.Sprintf("%s-%sr%d", rig, infix, i-landed), application.NotLanded(application.Reason(reason), "the gate was red")
 		}
 		if err := c.addStory(id, "The story "+id, rig, "laptop", "sonnet", 0, time.Time{}); err != nil {
 			return err
 		}
-		if err := c.appendLedger("2026-10-08", id, outcome, "sonnet/high"); err != nil {
+		if err := c.appendLedger(day, id, outcome, "sonnet/high", 0); err != nil {
 			return err
 		}
 	}
@@ -143,7 +161,11 @@ func (c *reportContext) theLedgerRows(table *godog.Table) error {
 	cols := columns(table)
 	for _, row := range table.Rows[1:] {
 		cell := func(name string) string { return strings.TrimSpace(row.Cells[cols[name]].Value) }
-		if err := c.appendLedger(cell("day"), cell("id"), cell("outcome"), cell("worker")); err != nil {
+		tokens := 0
+		if _, has := cols["tokens"]; has {
+			tokens, _ = strconv.Atoi(cell("tokens"))
+		}
+		if err := c.appendLedger(cell("day"), cell("id"), cell("outcome"), cell("worker"), tokens); err != nil {
 			return err
 		}
 	}
@@ -155,7 +177,7 @@ func (c *reportContext) aLandedRowOn(rig, day string) error {
 	if err := c.addStory(id, "The story "+id, rig, "laptop", "sonnet", 0, time.Time{}); err != nil {
 		return err
 	}
-	return c.appendLedger(day, id, "landed on main", "sonnet/high")
+	return c.appendLedger(day, id, "landed on main", "sonnet/high", 0)
 }
 
 // columns maps a table's header cells to their index.
@@ -209,7 +231,7 @@ func (c *reportContext) reportRuns(flags string) error {
 		return err
 	}
 	report.Tracker, report.Files, report.Seat = c.tracker, c.files, reportSeat
-	report.Benchmarks = &apptest.FakeBenchmarks{}
+	report.Benchmarks = c.benchmarks
 	report.Now = func() time.Time { return c.now }
 	report.Out = &c.printed
 	_, c.err = report.Run(context.Background())
@@ -331,6 +353,138 @@ func (c *reportContext) jsonHas(path, want string) error {
 	}
 	if got := fmt.Sprint(node); got != want {
 		return fmt.Errorf("expected %s to be %q, it is %q in:\n%s", path, want, got, c.printed.String())
+	}
+	return nil
+}
+
+// theBenchmarks records the close-outs of landed stories: a ratio is the story's
+// actual over its par, a gate the seconds its tests ran.
+func (c *reportContext) theBenchmarks(table *godog.Table) error {
+	cols := columns(table)
+	for _, row := range table.Rows[1:] {
+		cell := func(name string) string {
+			if at, has := cols[name]; has {
+				return strings.TrimSpace(row.Cells[at].Value)
+			}
+			return ""
+		}
+		day, err := time.Parse(application.LedgerDate, cell("day"))
+		if err != nil {
+			return err
+		}
+		b := application.Benchmark{Story: cell("story"), Rig: cell("rig"), Host: cell("host"), At: day.Add(12 * time.Hour), Landed: true}
+		b.ActualS, _ = strconv.ParseFloat(cell("actual"), 64)
+		b.GateSeconds, _ = strconv.ParseFloat(cell("gate"), 64)
+		if ratio, _ := strconv.ParseFloat(cell("ratio"), 64); ratio > 0 && b.ActualS > 0 {
+			b.ParS = b.ActualS / ratio
+		}
+		c.benchmarks.Records = append(c.benchmarks.Records, b)
+	}
+	return nil
+}
+
+// theResultFiles writes the result file of a story's attempt with the cost it reports.
+func (c *reportContext) theResultFiles(table *godog.Table) error {
+	cols := columns(table)
+	for _, row := range table.Rows[1:] {
+		cell := func(name string) string { return strings.TrimSpace(row.Cells[cols[name]].Value) }
+		attempt, _ := strconv.Atoi(cell("attempt"))
+		file := c.files.RunFile(cell("story"), application.ResultFileNameForAttempt(attempt))
+		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(file, []byte(fmt.Sprintf(`{"subtype":"success","total_cost_usd":%s}`, cell("cost"))), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// parts splits the report at the lines that head QUALITY, SPEED and FUEL.
+func (c *reportContext) parts() map[string][]string {
+	found := map[string][]string{}
+	current := ""
+	for _, line := range c.lines() {
+		for _, part := range []string{"QUALITY", "SPEED", "FUEL"} {
+			if line == part || strings.HasPrefix(line, part+" ") {
+				current = part
+			}
+		}
+		if current != "" {
+			found[current] = append(found[current], line)
+		}
+	}
+	return found
+}
+
+// partSection is the lines under "by <kind>" in one part of the report.
+func (c *reportContext) partSection(part, kind string) ([]string, error) {
+	lines, ok := c.parts()[part]
+	if !ok {
+		return nil, fmt.Errorf("expected the report to have a %s part, got:\n%s", part, c.printed.String())
+	}
+	var found []string
+	in := false
+	for _, line := range lines {
+		switch {
+		case strings.TrimSpace(line) == "by "+kind:
+			in = true
+		case strings.HasPrefix(line, "by "):
+			in = false
+		case in:
+			found = append(found, line)
+		}
+	}
+	return found, nil
+}
+
+func (c *reportContext) partSectionPrintsTheLine(part, kind, want string) error {
+	lines, err := c.partSection(part, kind)
+	if err != nil {
+		return err
+	}
+	for _, line := range lines {
+		if strings.TrimSpace(line) == want {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected the %s part's %s section to print %q, got:\n%s", part, kind, want, c.printed.String())
+}
+
+// partBlockPrints looks, in the block that begins with name, for a line holding want.
+func (c *reportContext) partBlockPrints(part, kind, name, want string) error {
+	lines, err := c.partSection(part, kind)
+	if err != nil {
+		return err
+	}
+	for i, line := range lines {
+		if strings.TrimSpace(line) != name {
+			continue
+		}
+		for _, next := range lines[i+1:] {
+			if strings.TrimSpace(next) == "" {
+				break
+			}
+			if strings.Contains(next, want) {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("expected %q in the %s block %q of %s, got:\n%s", want, kind, name, part, c.printed.String())
+}
+
+func (c *reportContext) partsAreInOrder() error {
+	text := c.printed.String()
+	last := -1
+	for _, part := range []string{"QUALITY", "SPEED", "FUEL"} {
+		at := strings.Index(text, "\n"+part)
+		if part == "QUALITY" {
+			at = strings.Index(text, part)
+		}
+		if at < 0 || at <= last {
+			return fmt.Errorf("expected QUALITY, then SPEED, then FUEL, got:\n%s", text)
+		}
+		last = at
 	}
 	return nil
 }

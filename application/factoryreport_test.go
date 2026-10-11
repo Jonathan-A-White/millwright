@@ -49,3 +49,45 @@ func TestParseLedgerLineReadsTheColumnsAReportNeeds(t *testing.T) {
 		}
 	}
 }
+
+func TestNewTrendReadsAFivePercentBandAndTheSenseOfTheMeasure(t *testing.T) {
+	for _, c := range []struct {
+		now, before    float64
+		lowerIsBetter  bool
+		arrow, verdict string
+	}{
+		{10, 20, true, ArrowDown, VerdictBetter},
+		{12, 12, false, ArrowLevel, ""},
+		{104, 100, true, ArrowLevel, ""},
+		{105, 100, true, ArrowLevel, ""},
+		{106, 100, true, ArrowUp, VerdictWorse},
+		{106, 100, false, ArrowUp, VerdictBetter},
+		{94, 100, false, ArrowDown, VerdictWorse},
+		{0, 0, true, ArrowLevel, ""},
+		{3, 0, true, ArrowUp, VerdictWorse},
+	} {
+		got := NewTrend(c.now, c.before, c.lowerIsBetter)
+		if got.Arrow != c.arrow || got.Verdict != c.verdict || got.Previous != c.before {
+			t.Errorf("%v after %v (lower is better %v): got %+v, want %s %s", c.now, c.before, c.lowerIsBetter, got, c.arrow, c.verdict)
+		}
+	}
+	if text := NewTrend(10, 20, true).Text(); text != " ↓ better" {
+		t.Errorf("the text of a falling refusal rate is %q", text)
+	}
+	if text := (Trend{}).Text(); text != "" {
+		t.Errorf("a number with nothing to compare with has the text %q", text)
+	}
+}
+
+func TestPercentileIsTheNearestRank(t *testing.T) {
+	ratios := []float64{2.5, 0.8, 1.2, 1.0}
+	if got := percentile(ratios, 0.9); got != 2.5 {
+		t.Errorf("p90 of four ratios is %v, want 2.5", got)
+	}
+	if got := percentile(nil, 0.9); got != 0 {
+		t.Errorf("p90 of none is %v", got)
+	}
+	if got := twoPlaces(median(ratios)); got != 1.1 {
+		t.Errorf("median is %v, want 1.1", got)
+	}
+}
