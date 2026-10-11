@@ -26,6 +26,7 @@ const (
 	GuestKey               = "guest"
 	VersionFilesKey        = "version_files"
 	ChangelogFilesKey      = "changelog_files"
+	PublicURLKey           = "public_url"
 )
 
 var _ application.EpicRules = (*Vault)(nil)
@@ -38,6 +39,7 @@ var _ application.EpicRules = (*Vault)(nil)
 //	guest                  = "Luke"
 //	version_files          = ["package.json", "package-lock.json"]
 //	changelog_files        = ["public/changelog.json", "CHANGELOG.md"]
+//	public_url             = "https://github.com/Jonathan-A-White/lampas"
 //
 // A rig with no file asks nothing. A key this does not know is an error rather
 // than a silence: a misspelt key would otherwise switch the requirement off
@@ -82,6 +84,14 @@ func parseRigFile(written string) (domain.EpicRequirements, error) {
 			requirements.Guest = owner[0]
 			continue
 		}
+		if found && key == PublicURLKey {
+			url, err := quotedStrings(value)
+			if err != nil || len(url) != 1 || !strings.HasPrefix(url[0], "https://") {
+				return requirements, fmt.Errorf("line %d: expected `%s = \"https://github.com/<owner>/<rig>\"`, got %q", i+1, PublicURLKey, lines[i])
+			}
+			requirements.PublicURL = strings.TrimRight(url[0], "/")
+			continue
+		}
 		if !found || !strings.HasPrefix(value, "[") {
 			return requirements, fmt.Errorf("line %d: expected `key = [\"name\", ...]`, got %q", i+1, lines[i])
 		}
@@ -115,8 +125,8 @@ func parseRigFile(written string) (domain.EpicRequirements, error) {
 				requirements.VersionFiles = names
 			}
 		default:
-			return requirements, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s and %s)",
-				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey)
+			return requirements, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s and %s)",
+				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, PublicURLKey)
 		}
 	}
 	return requirements, nil

@@ -31,6 +31,11 @@ type EpicRequirements struct {
 	// writes the story's What's new: note into them in the commit that carries
 	// the version. It is no requirement of an epic either, so Any does not count it.
 	ChangelogFiles []string
+	// PublicURL, when it is not empty, is the web address of the rig's public
+	// repository, as in https://github.com/<owner>/<rig>: a commit's link is
+	// that, /commit/ and the commit. A rig that is private names none. It is no
+	// requirement of an epic either, so Any does not count it.
+	PublicURL string
 }
 
 // Any reports whether the rig asks anything of its epics at all. A rig that

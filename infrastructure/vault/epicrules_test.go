@@ -197,3 +197,27 @@ func TestARigsFileNamesTheChangelogFilesALandingWrites(t *testing.T) {
 		}
 	}
 }
+
+func TestARigsFileNamesItsPublicURLAndRefusesOneThatIsNotAnHTTPSAddress(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+	writeRigFile(t, dir, "lampas", "public_url = \"https://github.com/Jonathan-A-White/lampas/\" # public\n")
+
+	got, err := v.EpicRequirements(context.Background(), "lampas")
+	if err != nil {
+		t.Fatalf("reading the rig's file: %v", err)
+	}
+	if want := (domain.EpicRequirements{PublicURL: "https://github.com/Jonathan-A-White/lampas"}); !reflect.DeepEqual(got, want) {
+		t.Errorf("requirements = %+v, want %+v", got, want)
+	}
+	if got.Any() {
+		t.Errorf("public_url is no requirement of an epic, but Any() = true")
+	}
+
+	for _, bad := range []string{`github.com/x/y`, `"http://github.com/x/y"`, `["https://github.com/x/y"]`} {
+		writeRigFile(t, dir, "lampas", "public_url = "+bad+"\n")
+		if _, err := v.EpicRequirements(context.Background(), "lampas"); err == nil || !strings.Contains(err.Error(), "public_url") {
+			t.Errorf("public_url = %s: err = %v, want a refusal naming public_url", bad, err)
+		}
+	}
+}
