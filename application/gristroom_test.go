@@ -32,6 +32,9 @@ func (r roomRuns) Keep(context.Context, application.GristRun) error { return nil
 func (r roomRuns) List(context.Context, time.Time) ([]application.GristRunLine, error) {
 	return nil, nil
 }
+func (r roomRuns) Forwarded(context.Context, string) (application.GristForwarded, bool, error) {
+	return application.GristForwarded{}, false, nil
+}
 func (r roomRuns) Timings(context.Context) ([]application.GristRunTiming, error) {
 	return r.timings, nil
 }

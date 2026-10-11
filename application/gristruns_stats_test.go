@@ -17,6 +17,9 @@ func (s timingsStore) Keep(context.Context, application.GristRun) error { return
 func (s timingsStore) List(context.Context, time.Time) ([]application.GristRunLine, error) {
 	return nil, nil
 }
+func (s timingsStore) Forwarded(context.Context, string) (application.GristForwarded, bool, error) {
+	return application.GristForwarded{}, false, nil
+}
 func (s timingsStore) Timings(context.Context) ([]application.GristRunTiming, error) {
 	return s.timings, nil
 }

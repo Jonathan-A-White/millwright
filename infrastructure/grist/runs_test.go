@@ -114,3 +114,31 @@ func TestTimingsAreReadBackWithSentAndTheScorersSeconds(t *testing.T) {
 		t.Errorf("expected a run with neither to omit both, got %s", raw)
 	}
 }
+
+// Only a forward run that kept its sender's key is a forwarded grist: a run of
+// another kind, one with no sender kept, and a txid never run are not.
+func TestOnlyAForwardRunThatKeptItsSenderIsForwarded(t *testing.T) {
+	ctx, dir := context.Background(), t.TempDir()
+	runs := grist.NewRuns(dir)
+	forward := aRun("direct:fwd", time.Now(), "answered")
+	forward.Timing.Kind, forward.Timing.App, forward.Sender = application.GristForwardKind, "cairn", "02sender"
+	oldForward := aRun("direct:old", time.Now(), "answered")
+	oldForward.Timing.Kind = application.GristForwardKind
+	for _, run := range []application.GristRun{forward, oldForward, aRun("direct:ground", time.Now(), "answered")} {
+		if err := runs.Keep(ctx, run); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, ok, err := runs.Forwarded(ctx, "direct:fwd")
+	if err != nil || !ok || got != (application.GristForwarded{Txid: "direct:fwd", App: "cairn", Sender: "02sender"}) {
+		t.Fatalf("expected the forward run with its sender, got %+v %v %v", got, ok, err)
+	}
+	if info, err := os.Stat(filepath.Join(dir, "runs", "direct:fwd", "sender.json")); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("expected sender.json kept 0600, got %v %v", info, err)
+	}
+	for _, txid := range []string{"direct:old", "direct:ground", "direct:never"} {
+		if _, ok, err := runs.Forwarded(ctx, txid); ok || err != nil {
+			t.Fatalf("expected %s not a forwarded grist, got %v %v", txid, ok, err)
+		}
+	}
+}

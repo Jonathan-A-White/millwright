@@ -179,13 +179,19 @@ func forwardBody(w *gristWork, in forwardedInput, paths []string) string {
 		w.to, w.sender, name.App, name.Kind, name.V, w.record.Txid)
 	if len(paths) == 0 {
 		b.WriteString("Pictures: none\n")
-		return b.String()
+		return forwardWithRequestLine(b.String(), w.record.Txid)
 	}
 	fmt.Fprintf(&b, "Pictures: %d, kept on the mill's host\n", len(paths))
 	for _, p := range paths {
 		b.WriteString(p + "\n")
 	}
-	return b.String()
+	return forwardWithRequestLine(b.String(), w.record.Txid)
+}
+
+// forwardWithRequestLine ends the mail with the command that links the request
+// to the bead the Mayor files for it, ready but for the bead.
+func forwardWithRequestLine(body, txid string) string {
+	return body + "\n" + GristRequestCommand("<bead>", txid) + "\n"
 }
 
 // keepForwardRun keeps a forwarded grist's record as a run of the kind
@@ -196,6 +202,7 @@ func (g GristGrind) keepForwardRun(ctx context.Context, w *gristWork) {
 	}
 	run := GristRun{
 		Txid:   w.record.Txid,
+		Sender: w.to,
 		Input:  w.plain.Input,
 		Answer: GristRunAnswer{Status: w.status, Answer: w.answer},
 		Timing: GristRunTiming{

@@ -23,6 +23,18 @@ type GristRunStore interface {
 	List(ctx context.Context, since time.Time) ([]GristRunLine, error)
 	// Timings reports the timing of every run kept, oldest first.
 	Timings(ctx context.Context) ([]GristRunTiming, error)
+	// Forwarded reports the forwarded grist the run of txid kept, or false
+	// when the mill kept no such run or it was not a forward: only a forward
+	// keeps the sender's key (mw grist request reads it).
+	Forwarded(ctx context.Context, txid string) (GristForwarded, bool, error)
+}
+
+// GristForwarded is a grist the mill passed on to the Mayor: the app it came
+// from and the key that sent it, the one a status of its request goes back to.
+type GristForwarded struct {
+	Txid   string
+	App    string
+	Sender string
 }
 
 // GristRun is everything one grind took in and gave out.
@@ -38,6 +50,10 @@ type GristRun struct {
 	Scorers []GristRunScore
 	Answer  GristRunAnswer
 	Timing  GristRunTiming
+	// Sender is the key that sent the grist, kept by a forward run alone:
+	// the mill answers a forwarded request's status to it later. Empty is
+	// not kept.
+	Sender string
 }
 
 // GristRunAttachment is one attachment of a run: the file name's extension,

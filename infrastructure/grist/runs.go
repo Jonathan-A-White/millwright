@@ -23,7 +23,15 @@ const (
 	RunScorersFile = "scorers.json"
 	RunAnswerFile  = "answer.json"
 	RunTimingFile  = "timing.json"
+	// RunSenderFile holds the key that sent a forwarded grist, so mw grist
+	// request can answer it; only a forward run has one.
+	RunSenderFile = "sender.json"
 )
+
+// runSender is what RunSenderFile holds.
+type runSender struct {
+	Key string `json:"key"`
+}
 
 // Runs keeps every grind's raw record under Dir/runs/<txid>/ (application's
 // GristRunStore). Nothing it writes is ever deleted by mw. It holds the
@@ -69,6 +77,15 @@ func (r *Runs) Keep(_ context.Context, run application.GristRun) error {
 		}
 		if err := os.WriteFile(filepath.Join(dir, f.name), append(encoded, '\n'), 0o600); err != nil {
 			return fmt.Errorf("writing %s: %w", filepath.Join(dir, f.name), err)
+		}
+	}
+	if run.Sender != "" {
+		encoded, err := json.MarshalIndent(runSender{Key: run.Sender}, "", "  ")
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(filepath.Join(dir, RunSenderFile), append(encoded, '\n'), 0o600); err != nil {
+			return fmt.Errorf("writing %s: %w", filepath.Join(dir, RunSenderFile), err)
 		}
 	}
 	for i, a := range run.Attachments {
@@ -146,6 +163,31 @@ func (r *Runs) Timings(_ context.Context) ([]application.GristRunTiming, error) 
 	}
 	sort.SliceStable(timings, func(i, j int) bool { return timings[i].Received.Before(timings[j].Received) })
 	return timings, nil
+}
+
+// Forwarded implements application.GristRunStore: the run of txid when it is
+// a forward that kept its sender's key.
+func (r *Runs) Forwarded(_ context.Context, txid string) (application.GristForwarded, bool, error) {
+	dir := filepath.Join(r.Dir, RunsDir, application.GristRunName(txid))
+	var timing application.GristRunTiming
+	if err := readJSON(filepath.Join(dir, RunTimingFile), &timing); errors.Is(err, os.ErrNotExist) {
+		return application.GristForwarded{}, false, nil
+	} else if err != nil {
+		return application.GristForwarded{}, false, err
+	}
+	if timing.Kind != application.GristForwardKind || timing.Txid != txid {
+		return application.GristForwarded{}, false, nil
+	}
+	var sender runSender
+	if err := readJSON(filepath.Join(dir, RunSenderFile), &sender); errors.Is(err, os.ErrNotExist) {
+		return application.GristForwarded{}, false, nil
+	} else if err != nil {
+		return application.GristForwarded{}, false, err
+	}
+	if sender.Key == "" {
+		return application.GristForwarded{}, false, nil
+	}
+	return application.GristForwarded{Txid: txid, App: timing.App, Sender: sender.Key}, true, nil
 }
 
 func readJSON(path string, into any) error {
