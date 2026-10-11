@@ -123,6 +123,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a fake host with a live claude session dir "([^"]*)" of (\d+) bytes$`, c.aFakeHostWithALiveClaudeSessionDir)
 	ctx.Given(`^a fake host with an unrelated file "([^"]*)" of (\d+) bytes$`, c.aFakeHostWithAnUnrelatedFile)
 	ctx.Given(`^the tmp-leftovers check's budget is (\d+) bytes$`, c.theTmpLeftoversChecksBudgetIsBytes)
+	ctx.Given(`^a fake host whose go-build cache of (\d+) bytes is cleaned by a go clean that exits 1 while a go process (starts|does not start)$`, c.aFakeHostWhoseGoCleanFails)
 	ctx.Given(`^the fake host's /proc does not exist$`, c.theFakeHostsProcDoesNotExist)
 	ctx.Given(`^the home host's config has no postern_channel$`, c.theHomeHostsConfigHasNoPosternChannel)
 	ctx.Given(`^the home host's config says postern_channel = "([^"]*)"$`, c.theHomeHostsConfigSaysPosternChannel)
@@ -151,6 +152,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 
 	ctx.Then(`^mw doctor leaves with the status (\d+)$`, c.mwDoctorLeavesWith)
 	ctx.Then(`^the doctor log holds "([^"]*)"$`, c.theDoctorLogHolds)
+	ctx.Then(`^the doctor log does not hold "([^"]*)"$`, c.theDoctorLogDoesNotHold)
 	ctx.Then(`^the doctor log holds exactly (\d+) lines?$`, c.theDoctorLogHoldsExactlyNLines)
 	ctx.Then(`^the doctor log is empty$`, c.theDoctorLogIsEmpty)
 	ctx.Then(`^the check "([^"]*)" was not cured$`, c.theCheckWasNotCured)
@@ -311,6 +313,15 @@ func (c *doctorContext) theDoctorLogHolds(substr string) error {
 		}
 	}
 	return fmt.Errorf("expected the doctor log to hold %q, got %v", substr, c.log.Lines())
+}
+
+func (c *doctorContext) theDoctorLogDoesNotHold(substr string) error {
+	for _, line := range c.log.Lines() {
+		if strings.Contains(line, substr) {
+			return fmt.Errorf("expected the doctor log not to hold %q, got %v", substr, c.log.Lines())
+		}
+	}
+	return nil
 }
 
 func (c *doctorContext) theDoctorLogHoldsExactlyNLines(want int) error {
@@ -1018,6 +1029,42 @@ func (c *doctorContext) theFakeHostsProcDoesNotExist() error {
 		return err
 	}
 	check.ProcDir = filepath.Join(c.tmpLeftoversProc, "does-not-exist")
+	return nil
+}
+
+// aFakeHostWhoseGoCleanFails gives the check a go-build cache past its
+// budget and a go clean that exits 1; with startsText "starts", a go process
+// appears in the fake /proc while go clean runs, the way a Builder's does.
+func (c *doctorContext) aFakeHostWhoseGoCleanFails(sizeText, startsText string) error {
+	check, err := c.tmpLeftoversCheck()
+	if err != nil {
+		return err
+	}
+	size, err := strconv.Atoi(sizeText)
+	if err != nil {
+		return fmt.Errorf("parsing %q as a byte count: %w", sizeText, err)
+	}
+	goBuildDir := filepath.Join(filepath.Dir(c.tmpLeftoversTmp), "go-build")
+	if err := os.MkdirAll(goBuildDir, 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(goBuildDir, "blob"), make([]byte, size), 0o644); err != nil {
+		return err
+	}
+	check.GoBuildDir = goBuildDir
+	proc := c.tmpLeftoversProc
+	check.GoClean = func(context.Context) error {
+		if startsText == "starts" {
+			pidDir := filepath.Join(proc, "200")
+			if err := os.MkdirAll(pidDir, 0o755); err != nil {
+				return err
+			}
+			if err := os.WriteFile(filepath.Join(pidDir, "comm"), []byte("go\n"), 0o644); err != nil {
+				return err
+			}
+		}
+		return errors.New("exit status 1")
+	}
 	return nil
 }
 

@@ -320,6 +320,21 @@ Feature: mw doctor
     And the tmp file "nbs-spool-dead" exists
     And the tmp file "notes.txt" exists
 
+  Scenario: The real tmp-leftovers check whose go clean fails because a go process started meanwhile skips the cure, and does not alarm
+    Given a fake host whose go-build cache of 5000000 bytes is cleaned by a go clean that exits 1 while a go process starts
+    And the tmp-leftovers check's budget is 100 bytes
+    When mw doctor's tmp-leftovers check runs for real
+    Then mw doctor leaves with the status 0
+    And the doctor log does not hold "cure-failed"
+    And the note "doctor.laptop.tmp-leftovers" does not exist
+
+  Scenario: The real tmp-leftovers check whose go clean fails with no go process live still reports cure-failed
+    Given a fake host whose go-build cache of 5000000 bytes is cleaned by a go clean that exits 1 while a go process does not start
+    And the tmp-leftovers check's budget is 100 bytes
+    When mw doctor's tmp-leftovers check runs for real
+    Then mw doctor leaves with the status 6
+    And the doctor log holds "tmp-leftovers cure-failed go clean -cache: exit status 1"
+
   Scenario: The real tmp-leftovers check with no /proc to read is cannot-tell, and writes a note
     Given a fake host with a dead spool file "nbs-spool-dead" of 5000000 bytes
     And a fake host with an unrelated file "notes.txt" of 1000 bytes
