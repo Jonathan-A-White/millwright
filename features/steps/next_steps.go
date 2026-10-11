@@ -59,8 +59,9 @@ type nextContext struct {
 	gitLog       string
 	checkCommand string // what this scenario's "rig tests" are
 	checkLog     string
-	racer        string   // the other host, landing work mid-push
-	refusal      []string // what the origin's hook says when it refuses a push
+	specCommands map[string]string // the [changed_specs] table this scenario's host has
+	racer        string            // the other host, landing work mid-push
+	refusal      []string          // what the origin's hook says when it refuses a push
 
 	lastEpic     string
 	ledgerBefore []string
@@ -179,6 +180,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerNextBackendSteps(ctx, c)
 	registerNextRebaseSteps(ctx, c)
 	registerNextMergeFixSteps(ctx, c)
+	registerNextSpecsSteps(ctx, c)
 	registerNextReattemptSteps(ctx, c)
 	registerNextStampSteps(ctx, c)
 	registerNextVersionSteps(ctx, c)
@@ -896,7 +898,8 @@ func (c *nextContext) mwClosesOut(id string) error {
 		HeartbeatWait: heartbeatWait,
 		Worktrees:     worktrees,
 		Landing:       worktrees,
-		Checks:        rig.NewChecks(rig.WithCommand(c.checkCommand)),
+		Checks:        rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands)),
+		SpecChecks:    rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands)),
 		Slot:          rig.NewSlots(rig.WithSlotWait(slotPatience), rig.WithSlotPoll(20*time.Millisecond)),
 		CrossSlot:     c.crossSlot(),
 		Vault:         files,

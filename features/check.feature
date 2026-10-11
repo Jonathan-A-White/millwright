@@ -102,3 +102,24 @@ Feature: Checking a branch before its session ends
     Then the check passes
     And the check did not wait for the merge slot
     And the rig's tests were run 1 times
+
+  Scenario: The check runs the rig's changed-specs command on the specs the branch added
+    Given the rig has a changed-specs command that logs the specs it is given
+    And the story "mw-gq6.1" also added the spec "tests/e2e/talk-fit.spec.ts"
+    When a session checks "mw-gq6.1"
+    Then the check passes
+    And the changed-specs command was run once, given: tests/e2e/talk-fit.spec.ts
+
+  Scenario: A failing changed spec fails the check, naming the spec
+    Given the rig has a changed-specs command that fails, saying "1 failed: talk-fit.spec.ts:26"
+    And the story "mw-gq6.1" also added the spec "tests/e2e/talk-fit.spec.ts"
+    When a session checks "mw-gq6.1"
+    Then the check fails
+    And the check prints: tests/e2e/talk-fit.spec.ts
+    And the check prints: 1 failed: talk-fit.spec.ts:26
+
+  Scenario: The check runs no changed-specs command when the branch changed no spec
+    Given the rig has a changed-specs command that logs the specs it is given
+    When a session checks "mw-gq6.1"
+    Then the check passes
+    And the changed-specs command was not run

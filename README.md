@@ -1066,6 +1066,9 @@ millwright = "/root/millwright"    # where each rig is checked out here
 [tests]
 millwright = "make test"           # how a close-out asks this rig if it is green
 
+[changed_specs]
+lampas = "npm run build && TZ=UTC npx playwright test --project=shots {specs}"  # run after the rig's tests on the tests/e2e/*.spec.ts files a story added or changed (default: nothing)
+
 [after_landing]
 millwright = "make build"          # run in this rig's checkout once a landing has moved it (default: nothing)
 
@@ -1103,7 +1106,15 @@ A rig a story names but this host has no checkout of is said so plainly, and the
 story is left for the host that has it. A rig `[tests]` does not name is checked
 with `make test`. The `[tests]` line is also what a session working that rig may
 run without being asked — the whole line, and each side of a top-level `&&` on
-its own. A rig `[after_landing]` does not name has nothing run after a
+its own. A rig `[changed_specs]` names gets a second gate for end-to-end specs
+its `[tests]` line does not run (mw-gq6.366): after the tests pass, `mw next`
+and `mw check` read the `tests/e2e/*.spec.ts` files the story's branch added or
+changed since its merge-base with the target branch, put them where the line
+says `{specs}`, and run it with `/bin/sh` in the worktree — and again on the
+merged result when merging made a merge commit. No such file, no run; a failing
+run refuses the landing as `tests-fail` (`merged-tests-fail` on the merged
+result), naming the specs. A rig the table does not name lands as it always did.
+A rig `[after_landing]` does not name has nothing run after a
 landing; the table is for a host whose timers run a binary built in a rig's
 checkout, which a landing leaves one commit stale until the command rebuilds it.
 The command is one line, read by `/bin/sh` in the rig's checkout like a `[tests]`

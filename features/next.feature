@@ -1301,3 +1301,51 @@ Feature: Closing out a finished story and carrying on
       _2026-09-18_
       - New: A whole new reading view
       """
+
+  Scenario: A rig's changed-specs command is run on the specs the story added, after the gate
+    Given the rig has a changed-specs command that logs the specs it is given
+    And the story "mw-gq6.1" also added the spec "tests/e2e/talk-fit.spec.ts"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the story "mw-gq6.1" is closed
+    And the rig's tests were run 1 times
+    And the changed-specs command was run once, given: tests/e2e/talk-fit.spec.ts
+
+  Scenario: A story that touched no spec runs no changed-specs command
+    Given the rig has a changed-specs command that logs the specs it is given
+    And the story "mw-gq6.1" also added the file "tests/unit/helper.test.ts"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed
+    And the changed-specs command was not run
+
+  Scenario: A rig with no changed-specs command lands a story that added a spec as it always did
+    Given the story "mw-gq6.1" also added the spec "tests/e2e/talk-fit.spec.ts"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the story "mw-gq6.1" is closed
+    And the changed-specs command was not run
+
+  Scenario: A failing changed spec refuses the landing as tests-fail, naming the spec
+    Given the rig has a changed-specs command that fails, saying "1 failed: talk-fit.spec.ts:26"
+    And the story "mw-gq6.1" also added the spec "tests/e2e/talk-fit.spec.ts"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the story "mw-gq6.1" is held blocked
+    And the report says it stopped for "tests-fail"
+    And the story "mw-gq6.1" carries a comment quoting: tests/e2e/talk-fit.spec.ts
+    And the story "mw-gq6.1" carries a comment quoting: 1 failed: talk-fit.spec.ts:26
+
+  Scenario: A changed spec that fails only on the merged result refuses that landing
+    Given the other host landed its own work on "main" while "mw-gq6.1" was worked
+    And the rig has a changed-specs command that fails only once "main" is merged in
+    And the story "mw-gq6.1" also added the spec "tests/e2e/talk-fit.spec.ts"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the story "mw-gq6.1" carries a comment quoting: tests/e2e/talk-fit.spec.ts
