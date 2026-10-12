@@ -41,6 +41,9 @@ type talkBackend struct {
 	// bareTxid, when set, is the txid the next record indexed goes by, as one
 	// that came by chain does; empty gives "direct:<seq>".
 	bareTxid string
+	// ideas is the backend's Ideas only and the records the Mayor delivered
+	// (talk_wait_ideas_steps.go).
+	ideas talkIdeasBackend
 }
 
 func (b *talkBackend) handler(w http.ResponseWriter, r *http.Request) {
@@ -48,6 +51,10 @@ func (b *talkBackend) handler(w http.ResponseWriter, r *http.Request) {
 	case "/api/challenge":
 		fmt.Fprint(w, `{"nonce":"a-nonce"}`)
 	case "/api/messages":
+		if r.Method == http.MethodPost {
+			b.deliverRoute(w, r)
+			return
+		}
 		since, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 		b.mu.Lock()
@@ -68,6 +75,10 @@ func (b *talkBackend) handler(w http.ResponseWriter, r *http.Request) {
 	case "/api/events":
 		b.stream(w, r)
 	default:
+		if strings.HasPrefix(r.URL.Path, "/api/ideas-only/") {
+			b.ideasRoute(w, r)
+			return
+		}
 		http.NotFound(w, r)
 	}
 }
@@ -166,6 +177,8 @@ type talkWaitContext struct {
 
 	run       *talkWaitRun
 	lastEvent time.Time
+	// ideas wires the wait to the Governor's Ideas only.
+	ideas bool
 
 	inboxOut   bytes.Buffer
 	inboxCount int
@@ -257,6 +270,7 @@ func InitializeTalkWaitScenario(ctx *godog.ScenarioContext) {
 		return ctx, nil
 	})
 
+	c.registerIdeasOnlySteps(ctx)
 	ctx.Given(`^a postern backend that streams its events$`, c.aBackendThatStreams)
 	ctx.Given(`^mw talk wait trusts "([^"]*)" as the Governor's key$`, func(key string) error {
 		c.governorKey = key
@@ -457,6 +471,10 @@ func (c *talkWaitContext) arm() error {
 	}
 	if wait.Limit == 0 {
 		wait.Limit = time.Minute
+	}
+	if c.ideas {
+		mode := c.ideasMode()
+		wait.Ideas = &mode
 	}
 	go func() {
 		defer close(run.done)

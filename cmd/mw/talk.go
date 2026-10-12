@@ -137,6 +137,12 @@ func newTalkWaitCmd() *cobra.Command {
 			"stream that drops is opened again after a pause that doubles from --min-backoff to --max-backoff.\n" +
 			"It ends, saying so, after --limit with no turn: arm it again. $" + TalkWaitLimitEnv + " (seconds)\n" +
 			"sets the default of --limit, as MW_MAIL_WAIT_LIMIT does for mail-wait.\n\n" +
+			"While the Governor's Ideas only is on (mw ideas-only) it prints 'Ideas only until 21:00 UTC (N ideas\n" +
+			"held)' as it starts, and keeps what he sends instead of ending on it: a turn, a call request or a\n" +
+			"message of his is appended to the held file, answered at once from the Mayor's key with 'Recorded\n" +
+			"for after 21:00 UTC' (a turn as a talk answer), and the wait goes on. It still ends on his limit,\n" +
+			"a handover, and a message or mail from anyone else. It keeps its note of the mode level from the\n" +
+			"stream's ideas-only event.\n\n" +
 			"The Mayor's key is let onto the event stream without a licence, but reading the records takes a\n" +
 			"cockpit licence on it.",
 		Args: cobra.NoArgs,
@@ -173,7 +179,13 @@ func newTalkWaitCmd() *cobra.Command {
 			if transcribeCmd != "" {
 				transcriber = postern.NewCommandTranscriber(transcribeCmd)
 			}
+			ideas, err := ideasOnlyMode(true)
+			if err != nil {
+				return err
+			}
 			_, err = application.TalkWait{
+				Ideas:       &ideas,
+				Lock:        posternInboxLock(attachmentDir),
 				Stream:      backend,
 				Postern:     backend,
 				Cipher:      posternCipher(keys),

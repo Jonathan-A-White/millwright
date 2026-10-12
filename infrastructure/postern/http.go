@@ -29,6 +29,7 @@ var posternBlobHash = regexp.MustCompile(`^[0-9a-fA-F]{64}$`)
 var _ application.Postern = (*HTTP)(nil)
 var _ application.PosternStream = (*HTTP)(nil)
 var _ application.Prompts = (*HTTP)(nil)
+var _ application.IdeasOnlyReader = (*HTTP)(nil)
 
 // httpTimeout bounds each call to the backend: it sits at the far end of a
 // WireGuard tunnel, and a broadcast waits on WhatsOnChain behind it.
@@ -367,6 +368,39 @@ func (h *HTTP) Me(ctx context.Context) (application.PosternMe, error) {
 	return application.PosternMe{Pubkey: body.Pubkey, Mill: body.Mill, Network: body.Network}, nil
 }
 
+// IdeasOnly implements application.IdeasOnlyReader: GET /api/ideas-only/{pubkey},
+// postern's docs/protocol.md section 25, whose state is the setting worked out
+// by the backend's own clock. The Mayor's key reads any key's. A backend that
+// answers 404 or 501 keeps none, and the key is off.
+func (h *HTTP) IdeasOnly(ctx context.Context, pubkey string) (application.IdeasOnlyNow, error) {
+	var body struct {
+		Setting struct {
+			Schedule *struct {
+				Tz string `json:"tz"`
+			} `json:"schedule"`
+		} `json:"setting"`
+		State struct {
+			On    bool   `json:"on"`
+			Until int64  `json:"until"`
+			By    string `json:"by"`
+		} `json:"state"`
+	}
+	if err := h.authDo(ctx, http.MethodGet, "/api/ideas-only/"+url.PathEscape(strings.ToLower(pubkey)), nil, &body); err != nil {
+		// A backend with no such route (older than section 25) or no store for
+		// it keeps no Ideas only: the key is not in the mode.
+		var refused *statusError
+		if errors.As(err, &refused) && (refused.code == http.StatusNotFound || refused.code == http.StatusNotImplemented) {
+			return application.IdeasOnlyNow{}, nil
+		}
+		return application.IdeasOnlyNow{}, err
+	}
+	now := application.IdeasOnlyNow{On: body.State.On, Until: body.State.Until, By: body.State.By}
+	if body.Setting.Schedule != nil {
+		now.Tz = body.Setting.Schedule.Tz
+	}
+	return now, nil
+}
+
 // authDo is do, proven to the backend first: it asks for a fresh challenge
 // (postern's docs/api.md Authentication section — a nonce is consumed the
 // moment it is presented, so every call needs its own), signs it with keys,
@@ -658,18 +692,23 @@ func (h *HTTP) Events(ctx context.Context, onEvent func(application.PosternEvent
 	}
 }
 
-// parseStreamEvent reads one event of the stream: a hello or a message, the
-// two TalkWait looks at. ok is false for any other, or one whose data is not
+// parseStreamEvent reads one event of the stream: a hello, a message or an
+// ideas-only, the three TalkWait looks at. ok is false for any other, or one whose data is not
 // the JSON the docs show.
 func parseStreamEvent(kind, data string) (event application.PosternEvent, ok bool) {
 	var body struct {
-		Head int64 `json:"head"`
-		Seq  int64 `json:"seq"`
+		Head  int64  `json:"head"`
+		Seq   int64  `json:"seq"`
+		Key   string `json:"key"`
+		On    bool   `json:"on"`
+		Until int64  `json:"until"`
 	}
 	if json.Unmarshal([]byte(data), &body) != nil {
 		return application.PosternEvent{}, false
 	}
 	switch kind {
+	case application.PosternEventIdeasOnly:
+		return application.PosternEvent{Kind: kind, Key: body.Key, On: body.On, Until: body.Until}, true
 	case application.PosternEventHello:
 		return application.PosternEvent{Kind: kind, Seq: body.Head}, true
 	case application.PosternEventMessage:

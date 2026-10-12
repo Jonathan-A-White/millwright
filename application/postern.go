@@ -678,6 +678,12 @@ type PosternInbox struct {
 	// config home_move_bead. Empty writes them on no bead.
 	HomeMoveBead string
 
+	// Ideas, when set, is the Governor's Ideas only: while it is on, a verified
+	// record of his is kept, answered 'Recorded for after <time>' in its thread
+	// and never applied or shown as text (mw postern inbox --apply and the
+	// plain read both). Nil is no such mode.
+	Ideas *IdeasOnlyMode
+
 	// Now is the clock an approval's age is read by. The zero value reads
 	// the real one.
 	Now func() time.Time
@@ -754,12 +760,24 @@ func (i PosternInbox) Run(ctx context.Context) ([]PosternInboxMessage, error) {
 			}
 		}
 	}
+	var ideas ideasPass
 	for _, m := range newestFirst[:len(newestFirst)-settled] {
 		// A message a pass already applied (Apply, the on-message hook's)
 		// is one line: what was done, never its text, never done again.
 		if done, ok := applied[m.Txid]; ok && m.Txid != "" {
 			i.printf("already applied earlier: %s\n", done)
 			continue
+		}
+		// A message kept for Ideas only is one line too, never its text.
+		if m.Verified && i.isGovernor(m) {
+			line, kept, _, err := i.holdIdea(ctx, m, &ideas)
+			if err != nil {
+				return nil, err
+			}
+			if kept {
+				i.printf("%s\n", line)
+				continue
+			}
 		}
 		line, saved := i.attachmentOutcome(ctx, m)
 		// A record whose sender is not verified is never read as a reply,
@@ -1372,6 +1390,9 @@ func (i PosternInbox) UnreadCount(ctx context.Context) (int, error) {
 	}
 	mine, _, _, err := i.fetch(ctx)
 	if err != nil {
+		return 0, err
+	}
+	if mine, err = i.unreadWithoutHeld(ctx, mine); err != nil {
 		return 0, err
 	}
 	i.printf("%d\n", len(mine))

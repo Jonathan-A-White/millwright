@@ -47,16 +47,23 @@ const (
 // PosternEvent is one event of the postern backend's event stream, GET
 // /api/events (postern's docs/api.md): a hello, sent once on connect, with the
 // index's latest sequence number as Seq; a message, a record was indexed, with
-// its sequence number as Seq. The adapter reports no other kind.
+// its sequence number as Seq; an ideas-only, a key's Ideas only turned on or
+// off or its end moved, with the Key, whether it is On and, if so, the Unix
+// second it runs Until. The adapter reports no other kind.
 type PosternEvent struct {
 	Kind string
 	Seq  int64
+
+	Key   string
+	On    bool
+	Until int64
 }
 
 // The kinds of PosternEvent.
 const (
-	PosternEventHello   = "hello"
-	PosternEventMessage = "message"
+	PosternEventHello     = "hello"
+	PosternEventMessage   = "message"
+	PosternEventIdeasOnly = "ideas-only"
 )
 
 // PosternStream is the port to the postern backend's event stream. The real
@@ -148,6 +155,16 @@ type TalkWait struct {
 	// postern_governor_key. Only a verified record from it ends the wait.
 	GovernorKey string
 
+	// Ideas, when set, is the Governor's Ideas only: while it is on, a turn, a
+	// call request or a message of his is kept in the held file and answered
+	// 'Recorded for after <time>' at zero tokens, and the wait goes on. The wait
+	// says it is on as it starts and as it ends on its limit, and keeps the
+	// mode's note level from the stream's ideas-only events. Nil is no such mode.
+	Ideas *IdeasOnlyMode
+	// Lock, when set, is taken around keeping one record, so that the wait and
+	// the postern inbox's hook never keep, or answer, the same one together.
+	Lock HostLock
+
 	// Limit is how long to wait; zero is DefaultTalkWaitLimit. MinBackoff and
 	// MaxBackoff bound the pause before the stream is opened again; zero is
 	// each one's default.
@@ -230,6 +247,7 @@ func (w TalkWait) Run(ctx context.Context) (TalkWaitReport, error) {
 	if known {
 		run.saved = cursor
 	}
+	run.ideasStart(ctx)
 
 	backoff := minBackoff
 	for {
@@ -250,6 +268,7 @@ func (w TalkWait) Run(ctx context.Context) (TalkWaitReport, error) {
 			}
 			w.printf(w.Out, "No talk turn by %s; the wait ended on its time limit (%s). Arm it again.\n",
 				w.now().UTC().Format(time.RFC3339), w.now().Sub(started).Round(time.Second))
+			run.ideasEnd(ctx)
 			return TalkWaitReport{}, nil
 		}
 		w.printf(w.Err, "mw talk wait: %v; opening the stream again in %s\n", err, backoff)
@@ -318,6 +337,9 @@ type talkWaitRun struct {
 	saved     int64
 	connected bool
 
+	// ideaState is the Governor's Ideas only as the wait last knew it.
+	ideaState IdeasOnlyState
+
 	// turn is the Governor's turn the wait ends on, nil when it ends on new
 	// postern messages alone; posts are those messages, the ones the wait
 	// paged past before it reached the turn included.
@@ -338,8 +360,15 @@ type talkWaitRun struct {
 func (r *talkWaitRun) onEvent(event PosternEvent) error {
 	arrived := r.now()
 	switch event.Kind {
+	case PosternEventIdeasOnly:
+		r.ideasEvent(event)
+		return nil
 	case PosternEventHello:
 		r.connected = true
+		if r.Ideas != nil && r.known {
+			// A stream opened again may have missed the mode turning on or off.
+			r.refreshIdeas(r.ctx)
+		}
 		if !r.known {
 			r.cursor, r.known = event.Seq, true
 			return nil
@@ -379,6 +408,10 @@ func (r *talkWaitRun) page(arrived time.Time) error {
 		}
 		if record.Class == callRecordClass && record.To == pubKey {
 			if call, ok := r.governorsCall(record, privKey); ok {
+				if r.keepCall(record, call) {
+					r.cursor = record.Seq
+					continue
+				}
 				r.call, r.callTxid, r.heardAt = call, record.Txid, arrived
 				r.channel = recordChannel(record.Txid)
 				r.cursor = record.Seq
@@ -387,6 +420,10 @@ func (r *talkWaitRun) page(arrived time.Time) error {
 		} else if record.Class == talkRecordClass && record.To == pubKey {
 			turn, ok := r.governorsTurn(record, privKey)
 			if ok {
+				if r.keepTurn(record, turn) {
+					r.cursor = record.Seq
+					continue
+				}
 				r.turn, r.turnSeq, r.heardAt = turn, record.Seq, arrived
 				r.channel = recordChannel(record.Txid)
 				r.cursor = record.Seq
@@ -399,7 +436,7 @@ func (r *talkWaitRun) page(arrived time.Time) error {
 				}
 			}
 			if record.Seq > inboxCursor {
-				if message, ok := r.unreadMessage(record, privKey); ok {
+				if message, ok := r.unreadMessage(record, privKey); ok && !r.keepsMessage(message) {
 					r.posts = append(r.posts, message)
 				}
 			}

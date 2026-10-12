@@ -44,6 +44,9 @@ type posternInboxContext struct {
 	transcriber *apptest.FakeTranscriber
 	runner      *apptest.FakeHandsRunner
 	handsSteps  map[string]domain.HandsStep
+	// ideas, when a scenario sets the Governor's Ideas only, wires the inbox
+	// to it (postern_inbox_ideas_steps.go).
+	ideas bool
 	// eventLog, when a scenario keeps one, is the log the inbox echoes the
 	// Governor's taps into.
 	eventLog *apptest.FakeEventLog
@@ -110,6 +113,7 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 
 	c.registerPosternCloseSteps(ctx)
 	c.registerPosternActionEchoSteps(ctx)
+	c.registerPosternIdeasOnlySteps(ctx)
 
 	ctx.Then(`^mw remembers the post "([^"]*)" is in the channel of bead "([^"]*)"$`, func(txid, bead string) error {
 		return c.rememberedThread(txid, application.PosternThread{Bead: bead})
@@ -751,7 +755,11 @@ func (c *posternInboxContext) inbox() application.PosternInbox {
 	if c.eventLog != nil {
 		inbox.Events = c.eventLog
 	}
-	if c.transcriber != nil || c.runner != nil || c.replies {
+	if c.ideas {
+		mode := c.ideasMode()
+		inbox.Ideas = &mode
+	}
+	if c.transcriber != nil || c.runner != nil || c.replies || c.ideas {
 		inbox.Sender = &application.PosternSend{
 			Postern: c.backend, Chain: apptest.NewFakeChain(c.backend, c.keys),
 			Cipher: c.cipher, Keys: c.keys, GovernorKey: c.governorKey,

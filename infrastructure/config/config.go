@@ -494,6 +494,20 @@ func PosternThreadsFile() (string, error) {
 	return filepath.Join(home, DefaultPosternThreadsFile), nil
 }
 
+// DefaultIdeasOnlyDir is where mw keeps the state of the Governor's Ideas only
+// and the records it is holding for him, under the home directory: host state,
+// never the vault. There is no setting for it.
+var DefaultIdeasOnlyDir = filepath.Join(".local", "state", "mw", "postern", "ideas-only")
+
+// IdeasOnlyDir reports the full path to DefaultIdeasOnlyDir.
+func IdeasOnlyDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("there is no home directory to keep the state of Ideas only in: %w", err)
+	}
+	return filepath.Join(home, DefaultIdeasOnlyDir), nil
+}
+
 // The channels mw postern send delivers a message by: straight to the
 // postern backend (postern's docs/protocol.md §9), or in a funded testnet
 // transaction (§4). DefaultPosternChannel is chain, what every host did

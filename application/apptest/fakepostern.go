@@ -39,6 +39,10 @@ type FakePostern struct {
 	// ChainErr, when set, is returned by Utxos and Broadcast alone: the
 	// chain road down while the direct line is up.
 	ChainErr error
+	// IdeasOnlyNow is what IdeasOnly reports, and IdeasOnlyErr, when set, what
+	// it fails with: a backend that does not answer the Ideas only route.
+	IdeasOnlyNow application.IdeasOnlyNow
+	IdeasOnlyErr error
 	// DeliverErr, when set, is returned by Deliver alone: a backend that
 	// reads but will not take a record.
 	DeliverErr error
@@ -46,6 +50,7 @@ type FakePostern struct {
 
 // FakePostern satisfies the port.
 var _ application.Postern = (*FakePostern)(nil)
+var _ application.IdeasOnlyReader = (*FakePostern)(nil)
 
 // NewFakePostern returns an empty postern backend.
 func NewFakePostern() *FakePostern {
@@ -271,4 +276,15 @@ func (f *FakePostern) Me(_ context.Context) (application.PosternMe, error) {
 		return application.PosternMe{}, f.Err
 	}
 	return f.Mine, nil
+}
+
+// IdeasOnly implements application.IdeasOnlyReader: IdeasOnlyNow, whatever key
+// is asked for.
+func (f *FakePostern) IdeasOnly(_ context.Context, _ string) (application.IdeasOnlyNow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.IdeasOnlyErr != nil {
+		return application.IdeasOnlyNow{}, f.IdeasOnlyErr
+	}
+	return f.IdeasOnlyNow, nil
 }

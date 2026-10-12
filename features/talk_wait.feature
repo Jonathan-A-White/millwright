@@ -191,3 +191,90 @@ Feature: mw talk wait
     When the Governor's turn 1 of talk "talk-9" saying "Hello" is indexed
     Then mw talk wait ends within 1 second
     And mw talk wait remembered the Governor's newest record came by "direct"
+
+  # Ideas only (postern's docs/protocol.md section 25): while the Governor's key
+  # is in the mode, what he sends is kept, not acted on. The wait says so when it
+  # starts, keeps each turn, call request and message of his in the held file,
+  # answers it at once from the Mayor's key without waking anyone, and goes on
+  # waiting. It still ends on its limit, on a handover, and on mail or a message
+  # from anyone else. The stream's ideas-only event keeps its note of the mode level.
+
+  Scenario: With Ideas only on, the Governor's turn is kept and answered, and the wait goes on waiting
+    Given Ideas only is on until "2026-10-12T21:00:00Z" for mw talk wait
+    And mw talk wait has a time limit of 1200 milliseconds
+    And mw talk wait is armed
+    When the Governor's turn 3 of talk "talk-7" saying "An idea: a quieter dashboard" is indexed
+    Then mw talk wait is still waiting
+    When the wait comes to its time limit
+    Then the wait printed "Ideas only until 21:00 UTC (0 ideas held)"
+    And the wait printed "1 idea held"
+    And the wait did not print "talk talk-7 turn 3"
+    And the wait did not print "quieter dashboard"
+    And Ideas only kept "direct:1" from the talk, saying "An idea: a quieter dashboard"
+    And the Governor was answered in talk "talk-7" turn 3 saying "Recorded for after 21:00 UTC"
+    And the Governor was answered 1 time in all
+
+  Scenario: With Ideas only on, a call request is kept and answered in the general thread
+    Given Ideas only is on until "2026-10-12T21:00:00Z" for mw talk wait
+    And mw talk wait has a time limit of 1200 milliseconds
+    And mw talk wait is armed
+    When the Governor's call request "Call me about the roof" is indexed
+    Then mw talk wait is still waiting
+    When the wait comes to its time limit
+    Then the wait did not print "call direct:1"
+    And Ideas only kept "direct:1" from the call, saying "Call me about the roof"
+    And mw talk wait told the Governor "Recorded for after 21:00 UTC" re "direct:1"
+
+  Scenario: With Ideas only on, a message of his is kept and answered, and does not end the wait
+    Given Ideas only is on until "2026-10-12T21:00:00Z" for mw talk wait
+    And mw talk wait has a time limit of 1200 milliseconds
+    And mw talk wait is armed
+    When a "message" record to the Mayor is indexed
+    Then mw talk wait is still waiting
+    When the wait comes to its time limit
+    Then the wait did not print "new postern message"
+    And Ideas only kept "direct:1" from the general, saying "message text"
+    And mw talk wait told the Governor "Recorded for after 21:00 UTC" re "direct:1"
+
+  Scenario: A message the hook has already kept is not answered a second time
+    Given Ideas only is on until "2026-10-12T21:00:00Z" for mw talk wait
+    And the hook has already kept "direct:1"
+    And mw talk wait has a time limit of 1200 milliseconds
+    And mw talk wait is armed
+    When a "message" record to the Mayor is indexed
+    And the wait comes to its time limit
+    Then the Governor was answered 0 times in all
+    And Ideas only is keeping 1 idea
+
+  Scenario: A message from anyone but the Governor still ends the wait while Ideas only is on
+    Given Ideas only is on until "2026-10-12T21:00:00Z" for mw talk wait
+    And mw talk wait is armed
+    When a "message" record from "stranger-key" to the Mayor is indexed
+    Then mw talk wait ends within 1 second
+    And the wait printed "new postern message"
+    And Ideas only is keeping 0 ideas
+
+  Scenario: The stream's ideas-only event ends the mode in the note, and the next turn is the Mayor's again
+    Given Ideas only is on until "2026-10-12T21:00:00Z" for mw talk wait
+    And mw talk wait is armed
+    When the backend says the Governor's Ideas only has ended
+    Then the note of Ideas only comes to say it is off
+    When the Governor's turn 4 of talk "talk-8" saying "Back again" is indexed
+    Then mw talk wait ends within 1 second
+    And the wait printed "talk talk-8 turn 4"
+    And the Governor was answered 0 times in all
+
+  Scenario: The stream's ideas-only event for another key changes nothing
+    Given Ideas only is on until "2026-10-12T21:00:00Z" for mw talk wait
+    And mw talk wait is armed
+    When the backend says the Ideas only of "another-key" has ended
+    And the Governor's turn 4 of talk "talk-8" saying "Still away" is indexed
+    Then mw talk wait is still waiting
+
+  Scenario: With Ideas only off the turn ends the wait as ever
+    Given Ideas only is off for mw talk wait
+    And mw talk wait is armed
+    When the Governor's turn 3 of talk "talk-7" saying "Hello" is indexed
+    Then mw talk wait ends within 1 second
+    And the wait printed "talk talk-7 turn 3"
+    And the Governor was answered 0 times in all

@@ -161,6 +161,7 @@ func (i PosternInbox) Apply(ctx context.Context) ([]string, error) {
 	}
 	pass.applied = applied
 	var lines []string
+	var ideas ideasPass
 	for _, m := range mine {
 		if m.Txid == "" {
 			continue
@@ -179,6 +180,19 @@ func (i PosternInbox) Apply(ctx context.Context) ([]string, error) {
 			continue
 		}
 		if pass.onBoost(i.Host) || !m.Verified || !i.isGovernor(m) {
+			continue
+		}
+		// Ideas only: his word is kept, not applied. A move-home above is
+		// infrastructure and does not wait for him.
+		line, kept, fresh, err := i.holdIdea(ctx, m, &ideas)
+		if err != nil {
+			return lines, err
+		}
+		if kept {
+			if fresh {
+				lines = append(lines, line)
+				i.printf("%s\n", line)
+			}
 			continue
 		}
 		var outcome string

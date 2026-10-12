@@ -388,3 +388,95 @@ Feature: mw postern inbox --apply
     When mw postern inbox --apply is run
     Then bead "mw-act.1" now stands "deferred"
     And no mail was sent for the reply
+
+  # Ideas only (postern's docs/protocol.md section 25): while the Governor's key
+  # is in the mode, nothing he sends is acted on. mw keeps every record of his,
+  # answers it in its thread with 'Recorded for after <time>', and shows the
+  # Mayor one line, never his words. The phone's zone is not known, so the time
+  # is UTC.
+
+  Scenario: With Ideas only on, a text of the Governor's is kept, answered in its thread, and never shown to the Mayor
+    Given Ideas only is on until "2026-09-25T21:00:00Z" for the postern inbox
+    And a postern message from "governor-pubkey-hex" with text "Buy flour for the bread" and txid "tx-idea"
+    When mw postern inbox --apply is run
+    Then reading succeeds
+    And the idea "tx-idea" is held in "general" saying "Buy flour for the bread"
+    And the Governor was told "Recorded for after 21:00 UTC" re "tx-idea"
+    And the Governor was sent 1 message in all
+    When mw postern inbox is run
+    Then it printed "held for after 21:00 UTC: tx-idea"
+    And it did not print "Buy flour"
+
+  Scenario: A second pass keeps the idea once and answers it once
+    Given Ideas only is on until "2026-09-25T21:00:00Z" for the postern inbox
+    And a postern message from "governor-pubkey-hex" with text "Buy flour for the bread" and txid "tx-idea"
+    When mw postern inbox --apply is run
+    And mw postern inbox --apply is run
+    Then 1 idea is held
+    And the Governor was sent 1 message in all
+
+  Scenario: A release tap is held, not applied, and the story is not released
+    Given Ideas only is on until "2026-09-25T21:00:00Z" for the postern inbox
+    And a postern action "release" on bead "mw-act.1" from "governor-pubkey-hex" with txid "tx-release"
+    When mw postern inbox --apply is run
+    Then reading succeeds
+    And bead "mw-act.1" now stands "deferred"
+    And bead "mw-act.1" has no comment
+    And the idea "tx-release" is held in "general" saying "release mw-act.1"
+    And the txid "tx-release" is not marked applied
+    And the Governor was told "Recorded for after 21:00 UTC" re "tx-release"
+    And no mail was sent for the reply
+
+  Scenario: A message in a bead's channel is kept and answered in that channel, and the bead is not commented
+    Given Ideas only is on until "2026-09-25T21:00:00Z" for the postern inbox
+    And a postern message from "governor-pubkey-hex" in the channel of bead "mw-act.3" with text "Try the other way" and txid "tx-thread"
+    When mw postern inbox --apply is run
+    Then the idea "tx-thread" is held in "mw-act.3" saying "Try the other way"
+    And the Governor was told "Recorded for after 21:00 UTC" in bead "mw-act.3"'s thread
+    And bead "mw-act.3" has no comment
+
+  Scenario: A screenshot is downloaded, and the idea keeps where it was written
+    Given Ideas only is on until "2026-09-25T21:00:00Z" for the postern inbox
+    And a postern message from "governor-pubkey-hex" in the channel of bead "mw-act.3" with text "this one" and txid "tx-shot" carrying a screenshot
+    When mw postern inbox --apply is run
+    Then the idea "tx-shot" is held in "mw-act.3" saying "this one"
+    And the idea "tx-shot" kept the file it carried
+
+  Scenario: Words from anyone but the Governor are not kept
+    Given Ideas only is on until "2026-09-25T21:00:00Z" for the postern inbox
+    And a postern message from "someone-else-pubkey-hex" with text "Hello" and txid "tx-other"
+    When mw postern inbox --apply is run
+    Then no idea is held
+    And the Governor was sent 0 messages in all
+
+  Scenario: With Ideas only off, nothing is kept and a tap is applied as ever
+    Given Ideas only is off for the postern inbox
+    And a postern action "release" on bead "mw-act.1" from "governor-pubkey-hex" with txid "tx-release"
+    When mw postern inbox --apply is run
+    Then bead "mw-act.1" now stands "open"
+    And no idea is held
+    And the txid "tx-release" is marked applied
+
+  Scenario: A mode that ended while a record was kept does not hand it back to the Mayor's read as new
+    Given Ideas only is on until "2026-09-25T21:00:00Z" for the postern inbox
+    And a postern message from "governor-pubkey-hex" with text "Buy flour for the bread" and txid "tx-idea"
+    When mw postern inbox --apply is run
+    And Ideas only ends for the postern inbox
+    And mw postern inbox is run
+    Then it printed "held for after 21:00 UTC: tx-idea"
+    And it did not print "Buy flour"
+
+  Scenario: The unread count leaves out what is held, so that nothing wakes the Mayor for it
+    Given Ideas only is on until "2026-09-25T21:00:00Z" for the postern inbox
+    And a postern message from "governor-pubkey-hex" with text "Buy flour for the bread" and txid "tx-idea"
+    And a postern message from "someone-else-pubkey-hex" with text "Hello" and txid "tx-other"
+    When mw postern inbox --apply is run
+    And mw postern inbox --unread-count is run
+    Then the unread count is 1
+
+  Scenario: A backend that will not say whether Ideas only is on is taken at the note's word
+    Given the note of Ideas only says it is on until "2026-09-25T21:00:00Z" for the postern inbox
+    And the backend does not answer the Ideas only route for the postern inbox
+    And a postern message from "governor-pubkey-hex" with text "Buy flour for the bread" and txid "tx-idea"
+    When mw postern inbox --apply is run
+    Then the idea "tx-idea" is held in "general" saying "Buy flour for the bread"

@@ -209,7 +209,12 @@ func newPosternInboxCmd() *cobra.Command {
 			"runs mw home move <host> --planned when the old home answers ssh ([hands_hosts]), else\n" +
 			"--old-home-dead, writes the start and the result on home_move_bead and mails the Mayor.\n" +
 			"Naming the other host, it does nothing here. On a host the vault's home file says is not\n" +
-			"home, --apply applies nothing but a move-home, so a boost's hook never records twice.",
+			"home, --apply applies nothing but a move-home, so a boost's hook never records twice.\n\n" +
+			"While the Governor's Ideas only is on (mw ideas-only), --apply applies nothing of his, a tap\n" +
+			"included: it appends each verified record of his to ~/.local/state/mw/postern/ideas-only/\n" +
+			"held.jsonl, marks it under the note postern.held.<txid>, and answers it in its thread from the\n" +
+			"Mayor's key with 'Recorded for after 21:00 UTC', at zero tokens. A plain read then shows 'held\n" +
+			"for after 21:00 UTC: <txid>' in its place, never its text, and --unread-count leaves it out.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if apply {
@@ -244,7 +249,12 @@ func newPosternInboxCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			ideas, err := ideasOnlyMode(true)
+			if err != nil {
+				return err
+			}
 			inbox := application.PosternInbox{
+				Ideas:         &ideas,
 				Threads:       threads,
 				Postern:       backend,
 				Prompts:       backend,
