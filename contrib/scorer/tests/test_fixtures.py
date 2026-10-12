@@ -164,6 +164,13 @@ class GreekFixtures(unittest.TestCase):
         result = self.scorer.score("Οίδαμεν δε, ότι τοις αγαπώσι τον Θεόν· πάντα συνεργεί εις αγαθόν.", "el", clip("el-clean.wav"))
         self.assertEqual([w["text"] for w in result["words"]], GREEK.split())
 
+    def test_the_nasal_of_nt_inside_a_word_is_expected_and_at_the_start_is_not(self):
+        # espeak-ng's own "el" says pˈadote; Lampas teaches "PAN-do-te" (mw-gq6.381)
+        result = self.scorer.score("Πάντοτε ντομάτα", "el", clip("el-clean.wav"))
+        expected = {w["text"]: w["expected_phonemes"] for w in result["words"] if w["text"] in ("Πάντοτε", "ντομάτα")}
+        self.assertEqual(expected["Πάντοτε"], ["p", "a", "n", "d", "o", "t", "e"])
+        self.assertEqual(expected["ντομάτα"][:2], ["d", "o"])
+
     def test_a_language_espeak_does_not_know_is_refused(self):
         with self.assertRaises(ValueError):
             self.scorer.score(TARGET, "xx-nope", clip("clean.wav"))

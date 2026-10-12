@@ -47,6 +47,8 @@ class Scorer:
             cost = phones.ipa_cost(lang)
         with self._lock:
             expected = [to_phones(ipa) for ipa in g2p.phonemize(words, lang)]
+            if not phones.is_english(lang):
+                expected = [phones.with_optional_nasals(w, e, lang) for w, e in zip(words, expected)]
             heard = self.listener.tokens_heard(audio)
         produced = [align.Phone(p, start, end, token if k == 0 else "")
                     for token, start, end in heard

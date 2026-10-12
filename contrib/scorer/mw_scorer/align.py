@@ -2,7 +2,8 @@
 
 The expected phones of every word are laid end to end and aligned with the
 produced phones by a weighted Levenshtein distance (phones.substitution_cost;
-a phone added or left out costs 1). Each word takes the produced phones aligned
+a phone added or left out costs 1, except an Optional phone, which costs nothing
+to leave out). Each word takes the produced phones aligned
 to its own; the words are anchored in time by those phones' CTC frame times.
 Of two alignments that cost the same, the one with fewer phones added inside a
 word wins (extra phones belong between words), then the one matching the later
@@ -85,8 +86,13 @@ def _table(expected, produced, inside=lambda i: 0, cost=phones.substitution_cost
         for j in range(1, m + 1):
             d[i][j] = min(_step(d[i - 1][j - 1], cost(expected[i - 1], produced[j - 1])),
                           _step(d[i][j - 1], 1, inside(i)),
-                          _step(d[i - 1][j], 1))
+                          _step(d[i - 1][j], _gap(expected[i - 1])))
     return d
+
+
+def _gap(phone):
+    """What leaving an expected phone out costs: nothing for an optional one, else 1."""
+    return 0 if isinstance(phone, phones.Optional) else 1
 
 
 def _step(cell, cost, inside=0):
@@ -176,7 +182,7 @@ def _score_words(words, produced, seconds, hesitation_seconds, engine, cost):
             own[owner[i]].append(j)
             spent[owner[i]] += cost(flat[i][1], heard[j])
         elif op == "del":
-            spent[owner[i]] += 1
+            spent[owner[i]] += _gap(flat[i][1])
         elif inside(i):
             own[owner[i]].append(j)   # added inside a word: part of the word
             spent[owner[i]] += 1

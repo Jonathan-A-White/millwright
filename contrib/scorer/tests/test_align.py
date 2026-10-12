@@ -263,6 +263,57 @@ class ToArpabet(unittest.TestCase):
         self.assertEqual(phones.substitution_cost("AE", "T"), 1)
 
 
+class GreekNasals(unittest.TestCase):
+    """espeak-ng's Greek writes ντ, μπ inside a word as d, b; Lampas teaches "nd", "mb"
+    there. The nasal is expected but optional: a reading with or without it scores alike."""
+
+    def expected(self, word, ipa):
+        return phones.with_optional_nasals(word, phones.to_ipa_phones(ipa, "el"), "el")
+
+    def score(self, word, ipa, said):
+        words = [(word, self.expected(word, ipa))]
+        return align.score_reading(words, heard((0.1, said)), 1.0, cost=phones.ipa_cost("el"))
+
+    def test_a_nasal_is_expected_before_the_voiced_stop_inside_a_word(self):
+        self.assertEqual(self.expected("Πάντοτε", "pˈadotˌe"), ["p", "a", "n", "d", "o", "t", "e"])
+        self.assertEqual(self.expected("Λάμπρος", "lˈabros"), ["l", "a", "m", "b", "r", "o", "s"])
+        self.assertEqual(self.expected("άγκυρα", "ˈaŋɡirˌa"), ["a", "n", "ɡ", "i", "r", "a"])
+        self.assertEqual(self.expected("συγγενής", "sˌiŋɡenˈis"), ["s", "i", "n", "ɡ", "e", "n", "i", "s"])
+
+    def test_a_word_initial_stop_has_no_nasal(self):
+        self.assertEqual(self.expected("ντομάτα", "domˈata"), ["d", "o", "m", "a", "t", "a"])
+        self.assertEqual(self.expected("μπάλα", "bˈala"), ["b", "a", "l", "a"])
+        self.assertEqual(self.expected("γκρι", "ɡrˈi"), ["ɡ", "r", "i"])
+        self.assertEqual(self.expected("Ντομάτα", "domˈata"), ["d", "o", "m", "a", "t", "a"])
+
+    def test_an_initial_and_an_inner_cluster_in_one_word(self):
+        self.assertEqual(self.expected("ντάντα", "dˈada"), ["d", "a", "n", "d", "a"])
+
+    def test_reading_with_or_without_the_nasal_scores_100(self):
+        for said in ("p a n d o t e", "p a d o t e"):
+            entry = self.score("Πάντοτε", "pˈadotˌe", said)["words"][0]
+            self.assertEqual((entry["error"], entry["accuracy"]), ("none", 100), said)
+
+    def test_the_other_phones_of_the_word_still_count(self):
+        entry = self.score("Πάντοτε", "pˈadotˌe", "p a d o k e")["words"][0]
+        self.assertEqual(entry["error"], "mispronunciation")
+        self.assertEqual(entry["accuracy"], 86)
+
+    def test_a_wrong_nasal_is_still_wrong(self):
+        entry = self.score("Πάντοτε", "pˈadotˌe", "p a k d o t e")["words"][0]
+        self.assertEqual(entry["error"], "mispronunciation")
+
+    def test_the_reported_expected_phones_are_plain_strings(self):
+        import json
+        entry = self.score("Πάντοτε", "pˈadotˌe", "p a d o t e")["words"][0]
+        self.assertEqual(json.dumps(entry["expected_phonemes"]), '["p", "a", "n", "d", "o", "t", "e"]')
+
+    def test_a_word_espeak_gave_otherwise_is_left_as_it_was(self):
+        # the letters promise one stop and the phones hold none: no guess
+        self.assertEqual(self.expected("ντε", "te"), ["t", "e"])
+        self.assertEqual(phones.with_optional_nasals("πάντοτε", ["p", "a"], "en"), ["p", "a"])
+
+
 class IpaForOtherLanguages(unittest.TestCase):
     """A language other than English is compared as IPA, not ARPAbet."""
 

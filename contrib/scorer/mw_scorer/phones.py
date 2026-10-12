@@ -6,6 +6,7 @@ spellings of one English phone (ə ɐ ʌ, ɹ r, ɑ ɑː) into one name, which is
 docs/scorers.md promises ("ARPAbet-style") and what makes the two comparable.
 """
 
+import re
 import unicodedata
 
 # Which phones, spellings and distances a reading is compared in depends on the
@@ -149,6 +150,46 @@ def to_ipa_phones(ipa, lang):
             continue
         # a composed letter (ç) was folded above; any other loses its marks
         out.extend(fold.get(b, b) for b in unicodedata.normalize("NFD", c) if not unicodedata.combining(b))
+    return out
+
+
+class Optional(str):
+    """A phone the target expects but a reader may leave out: it is deleted for nothing
+    (align._gap). It is a str, so it compares, folds and serialises as the plain phone."""
+
+    __slots__ = ()
+
+
+# A Greek voiced stop is spelled with two letters, and espeak-ng says only the stop
+# ("Πάντοτε" is pˈadote). Lampas teaches the nasal inside a word ("PAN-do-te"), at the
+# start of a word the stop alone; so inside a word the nasal is expected, and optional,
+# because a Greek reader says it either way. letters -> (nasal, stop), after _IPA_FOLD.
+_OPTIONAL_NASALS = {
+    "el": {"ντ": ("n", "d"), "μπ": ("m", "b"), "γκ": ("n", "ɡ"), "γγ": ("n", "ɡ")},
+}
+
+
+def with_optional_nasals(word, phs, lang):
+    """The phones of a word (to_ipa_phones) with the nasal before the voiced stop of each
+    ντ, μπ, γκ, γγ inside the word marked Optional, put in where espeak-ng left it out. A
+    cluster at the start of the word stays the stop alone. When the clusters in the letters
+    and the stops in the phones do not pair up one to one, the phones are left as they are."""
+    table = _OPTIONAL_NASALS.get(lang.split("-")[0].lower())
+    if not table:
+        return list(phs)
+    letters = "".join(c for c in unicodedata.normalize("NFD", word.lower()) if not unicodedata.combining(c))
+    clusters = [(m.start(), table[m.group()]) for m in re.finditer("|".join(table), letters)]
+    stops = [i for i, p in enumerate(phs) if p in {stop for _, stop in table.values()}]
+    if len(clusters) != len(stops) or any(phs[at] != stop for at, (_, (_, stop)) in zip(stops, clusters)):
+        return list(phs)
+    out = list(phs)
+    for at, (start, (nasal, _)) in reversed(list(zip(stops, clusters))):
+        if start == 0:
+            continue
+        if at > 0 and out[at - 1] == nasal:
+            out[at - 1] = Optional(nasal)
+        else:
+            out.insert(at, Optional(nasal))
     return out
 
 

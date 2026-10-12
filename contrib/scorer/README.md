@@ -102,7 +102,14 @@ a voicing pair or a vowel a step away (e/i, o/u, a/e, a/o) costs 0.5, and the
 few pairs the model blurs because it had no Greek in its training (the voiced
 fricatives ð and ɣ, m/n, θ/s) cost 0.25. Everything else costs 1, and the
 labels and accuracy work as for English. A language with no table is compared
-as IPA with the generic rules. To add one, give it a row in `_IPA_FOLD`,
+as IPA with the generic rules.
+
+Inside a word, ντ, μπ, γκ and γγ are expected with their nasal (`n d`, `m b`,
+`n ɡ`: Lampas teaches "PAN-do-te" for Πάντοτε), though espeak-ng's `el` says the
+stop alone (pˈadote). The nasal is optional: a reading with it or without it scores
+alike, 100 for either (`phones.with_optional_nasals`; `phones.Optional` phones cost
+nothing to leave out in `align`). At the start of a word the stop alone is expected
+(`d`, `b`, `ɡ`). To add one, give it a row in `_IPA_FOLD`,
 `_IPA_NEAR_VOWELS` and `g2p._LANGS`, a pair of fixture clips in
 `fixtures/make.sh`, and a test class beside `GreekFixtures`.
 
