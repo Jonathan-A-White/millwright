@@ -715,3 +715,19 @@ Feature: mw status
     When mw status reads the host
     Then reading status succeeds
     And the report has no line starting "VISION:"
+
+  # Ideas only (postern's docs/protocol.md section 25): while the Governor has put
+  # his key in the mode, the Mayor is told at boot, in one line, that he is away on
+  # purpose and how many of his ideas mw is keeping.
+
+  Scenario: While the Governor is in Ideas only, the report opens with one line saying so
+    Given the status report knows the Governor's Ideas only is on until "2026-10-12T21:00:00Z" with 2 ideas held
+    When mw status reads the host
+    Then reading status succeeds
+    And the status report has a line "Governor: Ideas only until 21:00 UTC (2 ideas held)" right under its title
+
+  Scenario: Out of Ideas only the report has no such line
+    Given the status report knows the Governor's Ideas only is off
+    When mw status reads the host
+    Then reading status succeeds
+    And the status report has no line beginning "Governor: Ideas only"

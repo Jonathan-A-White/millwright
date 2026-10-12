@@ -21,6 +21,11 @@ type briefContext struct {
 	lastEpic     string
 	writesBefore int
 
+	// ideas is the Governor's Ideas only the brief is read with, and ideasDir
+	// the throwaway host it keeps its files in.
+	ideas    *application.IdeasOnlyMode
+	ideasDir string
+
 	printed string
 	err     error
 }
@@ -34,6 +39,7 @@ func InitializeBriefScenario(ctx *godog.ScenarioContext) {
 		return ctx, nil
 	})
 
+	c.registerIdeasOnlySteps(ctx)
 	ctx.Given(`^the brief epic "([^"]*)" titled "([^"]*)" at priority (\d) on the default path:$`, c.theBriefEpic)
 	ctx.Given(`^a brief story "([^"]*)" titled "([^"]*)" filed under it, which is (closed|in progress|open|held)$`, c.aBriefStory)
 	ctx.Given(`^the brief story "([^"]*)" overrides "([^"]*)" with "([^"]*)" and "([^"]*)" with "([^"]*)"$`, c.theBriefStoryOverrides)
@@ -150,7 +156,7 @@ func (c *briefContext) mwBriefReadsWithComments(id, count string) error {
 func (c *briefContext) read(comments int, ids ...string) error {
 	var out strings.Builder
 	c.writesBefore = c.tracker.Writes()
-	_, c.err = application.Brief{Tracker: c.tracker, Comments: comments, Out: &out}.Run(context.Background(), ids...)
+	_, c.err = application.Brief{Tracker: c.tracker, Comments: comments, Ideas: c.ideas, Out: &out}.Run(context.Background(), ids...)
 	c.printed = out.String()
 	return nil
 }

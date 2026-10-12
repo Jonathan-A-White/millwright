@@ -33,6 +33,7 @@ domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cm
 | Postern, hands, Prompts | application/{postern*,hands,prompt}.go | infra/{postern,hands*,homemove} | Fake{Postern*,Cipher,Hands*,HomeMover,Prompts} |
 | Chain, StampQueue, StampStore, CommitNotes, RigHeads | application/chain.go, application/chainstamp.go, application/prove.go | infra/{bsv,stampqueue,chainlookup}, rig/worktree.go | Fake{Chain,Stamp*,Commit*,RigHeads} |
 | Grinder, GrindSource, GristState, GristLock, GristRunStore, GristForwardStore, GristRequestStore, GristLandings, GristSmoke*, VisionSource | application/grist.go, application/vision.go, application/gristruns.go, application/griststatus.go, application/gristsmoke.go | infra/{claude/grind,rig/{grinds,landingof},hostlock/try}.go, infra/grist | Fake{Grinder,Grinds,Grist*,Landings,Visions} |
+| IdeasOnlyReader, IdeasOnlyFiles | application/ideasonly.go | infra/{postern/http.go,ideasonly} | FakePostern; features/ideas_only.feature (real files) |
 | ConfigFile | application/configset.go | infra/configfile | features/config_set.feature (real file) |
 | Scorer | application/scorer.go | infra/scorer | FakeScorer |
 | SecretStore | application/secrets.go | infra/sops | FakeSecretStore |
@@ -47,6 +48,7 @@ domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cm
 | Check, Status, CloudCheck, Brief | application/check.go, application/status.go, application/cloud.go, application/brief.go | mw check/status/cloud/brief - cmd/mw/check.go, cmd/mw/status.go, cmd/mw/cloud.go, cmd/mw/brief.go | features/{check,status,cloud,brief}.feature |
 | Sweep, Tidy, Sync, Nudge, Mail, Home[Move] | application/sweep.go, application/tidy.go, application/sync.go, application/nudge.go, application/mail.go, application/home.go, application/homemove.go | mw sweep/tidy/sync/nudge/mail/home - cmd/mw/sweep.go, cmd/mw/tidy.go, cmd/mw/sync.go, cmd/mw/nudge.go, cmd/mw/mail.go, cmd/mw/home.go, cmd/mw/homemove.go | features/{sweep,tidy,sync,mail,home}.feature |
 | ConfigSet, ConfigGet (domain/configtoml.go edits the TOML) | application/configset.go | mw config set/get - cmd/mw/config.go | features/config_set.feature |
+| IdeasOnly{Show,Mode}, the keeping of his records | application/ideasonly.go, application/posternideas.go, application/talkwaitideas.go | mw ideas-only - cmd/mw/ideasonly.go | features/ideas_only.feature, postern_inbox_apply, talk_wait |
 | Seat{Context,Up,Reap,Handover} | application/seat{context,up,reap,handover}.go | mw seat <sub> - cmd/mw/seat.go | features/seat_*.feature |
 | Talk{Call,Model,Say,Wait} | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go | mw talk <sub> - cmd/mw/talk.go | features/talk_*.feature |
 | Millhand, Deputy, MillhandTick | application/millhand.go, application/deputy.go, application/millhandtick.go | mw millhand [tick]/deputy - cmd/mw/millhand.go, cmd/mw/deputy.go, cmd/mw/millhandtick.go | features/{millhand,deputy,millhand_tick}.feature |

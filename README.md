@@ -3208,6 +3208,46 @@ without a licence (postern's `docs/protocol.md` section 20), but reading the
 records behind an event needs a cockpit licence on it. See
 `features/talk_wait.feature`.
 
+## When the Governor is in Ideas only
+
+```sh
+bin/mw ideas-only
+```
+
+The Governor can put his own key in Ideas only on the postern backend (its
+`docs/protocol.md` section 25): until a time, or on a weekly schedule, he is
+away on purpose, the factory runs on, and the backend pushes him nothing but a
+ring and an emergency. `mw ideas-only` asks the backend, with the Mayor's key,
+whether the mode is on and prints `off` or `on until 21:00 UTC` (with his own
+zone beside it when his schedule names one), then how many ideas are held and a
+line for each. It changes nothing and releases nothing.
+
+While the mode is on, mw keeps every record of his instead of acting on it, at
+zero tokens:
+
+- `mw postern inbox --apply` (the backend's hook) appends each verified record of
+  the Governor's, a tap included, to
+  `~/.local/state/mw/postern/ideas-only/held.jsonl` (txid, seq, class, channel,
+  the first 80 runes of his words, the file he sent, when), marks it under the
+  bd note `postern.held.<txid>`, and answers it in its thread from the Mayor's
+  key with `Recorded for after 21:00 UTC`. The plain `mw postern inbox` then
+  shows `held for after 21:00 UTC: <txid>` in its place, never his words, and
+  `--unread-count` leaves it out.
+- `mw talk wait` prints `Ideas only until 21:00 UTC (N ideas held)` as it
+  starts, keeps a turn, a call request or a message of his the same way (a turn
+  is answered with a talk `answer` record), and waits on. It still ends on its
+  limit, a handover, and a message or mail from anyone else. It keeps the state
+  file level from the stream's `ideas-only` event.
+- `mw status` and `mw brief` open with `Governor: Ideas only until 21:00 UTC (N
+  ideas held)`.
+
+`state.json` beside the held file is mw's note of the mode: a backend out of
+reach shows what was last known, and a note that says on is not believed past
+its end. Nothing here gives the ideas back when the mode ends. See
+`features/ideas_only.feature`, and the Ideas only scenarios of
+`features/postern_inbox_apply.feature`, `features/talk_wait.feature`,
+`features/status.feature` and `features/brief.feature`.
+
 ## Answering the Governor in a talk
 
 ```sh

@@ -194,6 +194,12 @@ type Status struct {
 	// the Builder is the seat that works every story.
 	Seat string
 
+	// Ideas, when set, is the Governor's Ideas only: while it is on the report
+	// opens with one line saying so and how many of his ideas are held (the
+	// state file, and the backend when it answers within IdeasOnlyLineWait).
+	// Nil leaves the line out.
+	Ideas *IdeasOnlyMode
+
 	// SyncMode is how this host's beads database is synced, config
 	// beads_sync: said on the report's BEADS SYNC line, with the last backup
 	// on the host that keeps the one database, and read for whether another
@@ -394,8 +400,11 @@ func (w HostWork) Unreadable() bool { return w.Said != "" && w.LastSync.IsZero()
 
 // StatusReport is what one host is doing right now, as `mw status` reads it.
 type StatusReport struct {
-	Host    string
-	Running []RunningStory
+	Host string
+	// IdeasOnly is the line 'Governor: Ideas only until 21:00 UTC (2 ideas
+	// held)', "" when the Governor is not in Ideas only.
+	IdeasOnly string
+	Running   []RunningStory
 	// Cap is how many sessions this host may run at once, 0 when it was not
 	// told. InUse is how many of Running hold one of them, and NoRoom is why
 	// mw dispatch holds a story back here, "" when the host has room or the load
@@ -560,6 +569,10 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		if !detail.Hitl() {
 			runningRead[detail.Story.ID] = later(func() (RunningStory, error) { return s.running(ctx, detail) })
 		}
+	}
+	var ideasRead func() (string, error)
+	if s.Ideas != nil {
+		ideasRead = later(func() (string, error) { return s.Ideas.Line(ctx), nil })
 	}
 	governorsRead := later(func() ([]StoryDetail, error) { return s.Tracker.ReadyWithLabel(ctx, LabelHitl) })
 	othersWaitRead := later(func() ([]OtherWait, error) { return s.waitingOnOthers(ctx) })
@@ -848,6 +861,9 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 
 	if err := report.markGuests(ctx, s.Rules); err != nil {
 		return report, err
+	}
+	if ideasRead != nil {
+		report.IdeasOnly, _ = ideasRead()
 	}
 
 	s.print(report.String())
@@ -1150,6 +1166,9 @@ func (s Status) print(text string) {
 func (r StatusReport) String() string {
 	var b strings.Builder
 	clip(&b, fmt.Sprintf("mw status · %s", r.Host))
+	if r.IdeasOnly != "" {
+		clip(&b, r.IdeasOnly)
+	}
 	b.WriteString("\n")
 
 	if r.Halt != nil {

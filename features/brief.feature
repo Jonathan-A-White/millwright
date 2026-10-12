@@ -167,3 +167,18 @@ Feature: mw brief
     When mw brief reads "mw-6ww" with the newest 1 comments
     Then reading the brief succeeds
     And the tracker recorded no writes for the brief
+
+  Scenario: While the Governor is in Ideas only, the brief opens with one line saying so
+    Given a brief story "mw-6ww.1" titled "Ready to take" filed under it, which is open
+    And the brief knows the Governor's Ideas only is on until "2026-10-12T21:00:00Z" with 1 idea held
+    When mw brief reads "mw-6ww"
+    Then reading the brief succeeds
+    And the brief opens with the line "Governor: Ideas only until 21:00 UTC (1 idea held)"
+    And the brief lists "mw-6ww.1" under the heading "Open"
+
+  Scenario: Out of Ideas only the brief has no such line
+    Given a brief story "mw-6ww.1" titled "Ready to take" filed under it, which is open
+    And the brief knows the Governor's Ideas only is off
+    When mw brief reads "mw-6ww"
+    Then reading the brief succeeds
+    And the brief has no line beginning "Governor: Ideas only"

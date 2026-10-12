@@ -44,6 +44,11 @@ type Brief struct {
 	// guest. A nil Rules marks none.
 	Rules EpicRules
 
+	// Ideas, when set, is the Governor's Ideas only: while it is on the brief
+	// opens with 'Governor: Ideas only until 21:00 UTC (2 ideas held)'. Nil
+	// leaves the line out.
+	Ideas *IdeasOnlyMode
+
 	// Out is where the brief is printed. A nil Out prints nothing.
 	Out io.Writer
 }
@@ -77,7 +82,10 @@ type BriefLine struct {
 
 // BriefReport is every bead a brief was asked for, in the order it was asked.
 type BriefReport struct {
-	Beads []BeadBrief
+	// IdeasOnly is the heading line while the Governor is in Ideas only, "" when
+	// he is not.
+	IdeasOnly string
+	Beads     []BeadBrief
 }
 
 // Run reads the beads named and prints their briefs, in the order given. Every
@@ -105,6 +113,9 @@ func (b Brief) Run(ctx context.Context, ids ...string) (BriefReport, error) {
 			return BriefReport{}, err
 		}
 		report.Beads = append(report.Beads, one)
+	}
+	if b.Ideas != nil {
+		report.IdeasOnly = b.Ideas.Line(ctx)
 	}
 
 	if b.Out != nil {
@@ -208,6 +219,9 @@ func (b Brief) waitsOn(child StoryDetail, lookup map[string]StoryDetail) ([]stri
 // between one bead and the next. A title is clipped and a comment never is.
 func (r BriefReport) String() string {
 	var b strings.Builder
+	if r.IdeasOnly != "" {
+		b.WriteString(r.IdeasOnly + "\n\n")
+	}
 	for i, one := range r.Beads {
 		if i > 0 {
 			b.WriteString("\n")

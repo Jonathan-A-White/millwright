@@ -32,6 +32,10 @@ const (
 // Nothing here reaches the factory's own vault, beads database or terminal.
 type statusContext struct {
 	root string
+	// ideas is the Governor's Ideas only the report is read with, and
+	// ideasDir the throwaway host it keeps its files in.
+	ideas    *application.IdeasOnlyMode
+	ideasDir string
 
 	tracker *apptest.FakeTracker
 	runner  *apptest.FakeRunner
@@ -164,6 +168,7 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	c.registerTickSteps(ctx)
 	c.registerEpicSteps(ctx)
 
+	c.registerIdeasOnlySteps(ctx)
 	ctx.When(`^mw status reads the host$`, c.mwStatusReadsTheHost)
 
 	ctx.Given(`^the status story "([^"]*)" was filed (\d+) minutes ago$`, c.theStatusStoryWasFiledMinutesAgo)
@@ -613,6 +618,7 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 		Now:            func() time.Time { return c.now },
 		Cap:            c.cap,
 		Causes:         c.tracker,
+		Ideas:          c.ideas,
 	}
 	if c.load != nil {
 		status.Load = c.load

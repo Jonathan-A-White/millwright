@@ -39,6 +39,7 @@ func newBriefCmd() *cobra.Command {
 			_, err = application.Brief{
 				Tracker:  mwGateway(dir, host),
 				Rules:    mwVault(dir, host),
+				Ideas:    bootIdeasOnly(),
 				Comments: comments,
 				Out:      cmd.OutOrStdout(),
 			}.Run(cmd.Context(), args...)

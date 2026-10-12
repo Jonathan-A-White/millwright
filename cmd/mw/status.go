@@ -175,6 +175,7 @@ func newStatusCmd() *cobra.Command {
 			}
 			_, err = application.Status{
 				Tracker:          tracker,
+				Ideas:            bootIdeasOnly(),
 				Rigs:             rigs,
 				Changes:          rig.New(),
 				Notes:            tracker,
