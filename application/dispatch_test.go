@@ -3,6 +3,7 @@ package application_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1479,5 +1480,69 @@ func TestDispatchPoursABugStoryAsABugByItsTypeOrByItsTitle(t *testing.T) {
 				t.Errorf("expected the pour of %q (type %q) to be as a bug: %v, got %v", tc.title, tc.kind, tc.bug, got)
 			}
 		})
+	}
+}
+
+// mw-gq6.372: a pour that fails on a Dolt timeout leaves the connection no
+// better for the give-back, and a write bd reported done can be lost. The
+// comment says the claim was given back only once the tracker reports the story
+// open and unclaimed, so the give-back is tried again until it has.
+func TestDispatchTriesTheGiveBackAgainWhenTheFirstOneWasLost(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, _, _ := aFactory(t)
+	dispatch.Wait = func(context.Context, time.Duration) error { return nil }
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	tracker.FailOn("PourFormula", errors.New("read tcp 10.88.0.3:49398->10.88.0.2:3307: i/o timeout"))
+	tracker.FailReleases(apptest.ReleaseFault{}, apptest.ReleaseFault{Err: errors.New("invalid connection")})
+
+	report, err := dispatch.Run(ctx)
+	if err == nil {
+		t.Fatal("expected the dispatch to report the failure")
+	}
+	if len(report.Failed) != 1 || !report.Failed[0].Released {
+		t.Fatalf("expected one failure with the claim given back, got %+v", report.Failed)
+	}
+	detail, err := tracker.ShowStory(ctx, "mw-gq6.1")
+	if err != nil {
+		t.Fatalf("showing the story: %v", err)
+	}
+	if detail.Status != application.StatusOpen || detail.Assignee != "" {
+		t.Fatalf("expected the story open and unclaimed, got status %q assignee %q", detail.Status, detail.Assignee)
+	}
+	comments := tracker.Comments("mw-gq6.1")
+	if len(comments) != 1 || !strings.Contains(comments[0], "the claim was given back") || strings.Contains(comments[0], "STILL") {
+		t.Fatalf("expected one comment saying the claim was given back, got %q", comments)
+	}
+}
+
+func TestDispatchSaysTheClaimIsStillHeldWhenNoGiveBackTook(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, _, _ := aFactory(t)
+	dispatch.Wait = func(context.Context, time.Duration) error { return nil }
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	tracker.FailOn("PourFormula", errors.New("read tcp 10.88.0.3:49398->10.88.0.2:3307: i/o timeout"))
+	lost := make([]apptest.ReleaseFault, 20)
+	tracker.FailReleases(lost...)
+
+	report, err := dispatch.Run(ctx)
+	if err == nil {
+		t.Fatal("expected the dispatch to report the failure")
+	}
+	if len(report.Failed) != 1 || report.Failed[0].Released {
+		t.Fatalf("expected one failure with the claim NOT given back, got %+v", report.Failed)
+	}
+	detail, err := tracker.ShowStory(ctx, "mw-gq6.1")
+	if err != nil {
+		t.Fatalf("showing the story: %v", err)
+	}
+	if detail.Status != application.StatusInProgress {
+		t.Fatalf("expected the lost writes to leave the story in progress, got %q", detail.Status)
+	}
+	comments := tracker.Comments("mw-gq6.1")
+	if len(comments) != 1 || !strings.Contains(comments[0], "STILL held") || strings.Contains(comments[0], "was given back") {
+		t.Fatalf("expected one comment saying the claim is STILL held, got %q", comments)
+	}
+	if got := report.Failed[0].Err.Error(); !strings.Contains(got, "i/o timeout") || !strings.Contains(got, "needs releasing by hand") {
+		t.Fatalf("expected the original failure and that the claim needs releasing by hand, got %v", got)
 	}
 }

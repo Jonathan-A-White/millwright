@@ -1609,8 +1609,18 @@ func (d Dispatch) release(ctx context.Context, id string, why error) (bool, erro
 		}
 		return false, fmt.Errorf("%w (the session %s of %s is running here now, so the claim was left alone rather than given back)", why, status.Name, id)
 	}
-	if err := d.Tracker.ReleaseClaim(giveBack, id); err != nil {
-		return false, fmt.Errorf("%w (and the claim could not be given back either: %v — %s is claimed by a session that is not running, and needs releasing by hand)", why, err, id)
+	wait := d.Wait
+	if wait == nil {
+		wait = waitFor
+	}
+	if err := giveBackClaim(giveBack, d.Tracker, id, func(ctx context.Context) error { return d.Tracker.ReleaseClaim(ctx, id) }, wait, GiveBackWait); err != nil {
+		still := fmt.Errorf("%w (and the claim could not be given back either: %v — %s is claimed by a session that is not running, and needs releasing by hand)", why, err, id)
+		said := fmt.Sprintf("mw dispatch on %s could not start this story, and the claim is STILL held: it could not be given back (%v). Nothing is running; the story stays in progress under %s until a Mayor retries it: %v",
+			d.Host, err, d.Host, why)
+		if cerr := d.Tracker.CommentOnStory(giveBack, id, said); cerr != nil {
+			still = fmt.Errorf("%w (and that could not be written on the story: %v)", still, cerr)
+		}
+		return false, still
 	}
 	d.print(fmt.Sprintf("  gave back %s: %v\n", id, why))
 	said := fmt.Sprintf("mw dispatch on %s could not start this story, so the claim was given back and nothing is running: %v", d.Host, why)
