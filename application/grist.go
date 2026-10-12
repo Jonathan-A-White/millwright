@@ -363,6 +363,29 @@ type GrindLine struct {
 	Seconds   float64 `json:"seconds"`
 	Commit    string  `json:"commit,omitempty"`
 	Delivered bool    `json:"delivered"`
+
+	// The phases of the answer's wait, in seconds with one decimal, each left
+	// out where its time is not known (an old line, a refusal that ran no
+	// harness, an answer not delivered): never 0 for a time nobody measured.
+	// They run in this order from the moment the grist was sent, and
+	// GristTiming reads them.
+	//
+	// WakeSeconds is sent on the backend to noticed by GristWatch (or, when
+	// nothing noticed it first, to the start of the pass the dispatch tick
+	// ran); PickupSeconds is noticed to the pass starting on the grist;
+	// SlotSeconds is the wait for a grind slot; StartupSeconds is the harness
+	// process starting to its own clock starting (the result's duration_ms is
+	// the model's time, so a result with none counts the whole run here and
+	// leaves ModelSeconds out); ModelSeconds is the rest of the harness run;
+	// DeliverSeconds is the answer ready to Postern.Deliver returning;
+	// TotalSeconds is sent to delivered.
+	WakeSeconds    *float64 `json:"wake_s,omitempty"`
+	PickupSeconds  *float64 `json:"pickup_s,omitempty"`
+	SlotSeconds    *float64 `json:"slot_s,omitempty"`
+	StartupSeconds *float64 `json:"startup_s,omitempty"`
+	ModelSeconds   *float64 `json:"model_s,omitempty"`
+	DeliverSeconds *float64 `json:"deliver_s,omitempty"`
+	TotalSeconds   *float64 `json:"total_s,omitempty"`
 }
 
 // GrindFuel is the Fuel one grind burned, as the harness counted it.
