@@ -1224,6 +1224,15 @@ const (
 // File is the config file's path under the home directory.
 var File = filepath.Join(".config", "mw", "config.toml")
 
+// FilePath is the config file's full path: File under the home directory.
+func FilePath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("there is no home directory to find %s in: %w", File, err)
+	}
+	return filepath.Join(home, File), nil
+}
+
 // Vault reports the directory holding the vault, and so the one beads
 // database: $MW_VAULT if it is set, otherwise the root-table `vault` key of
 // ~/.config/mw/config.toml.
