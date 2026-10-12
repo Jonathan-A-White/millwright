@@ -62,6 +62,11 @@ type doctorContext struct {
 	// stuck is the fixture of the mayor-stuck scenarios; nil in any other.
 	stuck *mayorStuckFixture
 
+	// stale and stalePane are the check and the pane file of the mayor-stale
+	// scenarios; nil and empty in any other.
+	stale     *doctor.MayorStale
+	stalePane string
+
 	out    bytes.Buffer
 	report application.DoctorReport
 	err    error
@@ -94,6 +99,7 @@ func InitializeDoctorScenario(ctx *godog.ScenarioContext) {
 	c.registerBoostReachSteps(ctx)
 	c.registerBoostAsleepSteps(ctx)
 	c.registerMayorStuckSteps(ctx)
+	c.registerMayorStaleSteps(ctx)
 	c.registerAgeKeySteps(ctx)
 
 	ctx.Given(`^a doctor check "([^"]*)" whose probe says ok$`, c.aCheckWhoseProbeSaysOK)
