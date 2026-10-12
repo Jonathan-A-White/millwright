@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/domain/events"
 )
 
 // The values a story's run state takes once the session that worked it has
@@ -321,6 +322,10 @@ type Next struct {
 	// real. HeartbeatWait is the heartbeat's own clock and is not this one.
 	RetryWait func(ctx context.Context, d time.Duration) error
 
+	// Events is the home's event log, where a close-out says it could not record
+	// what it meant to (mw-gq6.375). Nil writes none.
+	Events EventLog
+
 	// Stamps is where a landing leaves a chain stamp for the follower to
 	// broadcast (docs/chain-stamps.md). A nil Stamps queues none, and a queue
 	// that fails is said on the report and changes nothing about the landing.
@@ -475,6 +480,10 @@ type closeOut struct {
 	// landingError says this run kept the whole error of a failed landing in the
 	// vault, so the close-out commits it.
 	landingError bool
+
+	// unrecorded says this run kept what it could not record of a stopped story
+	// in the vault (UnrecordedFileName), so the close-out commits it.
+	unrecorded bool
 
 	// gateLog is the name of the file in the run that holds the whole output of
 	// a failed test run, empty when none was kept; the close-out commits it.
@@ -817,9 +826,8 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	// this story is landed. Everything after the push can fail — the close did,
 	// on the run this was written for — and a run that cannot tell a landed
 	// story from an unlanded one would merge it all over again.
-	if err := n.Tracker.SetStoryState(ctx, c.id, RunState, RunLanded, outcome); err != nil {
-		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be recorded as %s=%s: %v", c.id, RunState, RunLanded, err))
-	}
+	n.writeOrSay(ctx, c, report, "the run state", fmt.Sprintf("%s could not be recorded as %s=%s", c.id, RunState, RunLanded),
+		func() error { return n.Tracker.SetStoryState(ctx, c.id, RunState, RunLanded, outcome) })
 	// Before the after-landing command, which may be killed with the session it
 	// runs in: the stamp is queued as soon as the work is known to be landed.
 	n.queueStamp(ctx, c, report, landed)
@@ -942,14 +950,17 @@ func (n Next) sendBack(ctx context.Context, c *closeOut, report *NextReport, lan
 	if err := n.Landing.UnionNotes(ctx, c.worktree); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("CLAUDE.md could not be set to merge as a union in %s: %v", c.worktree, err))
 	}
-	if err := n.Tracker.SetStoryMetadata(ctx, c.id, map[string]string{
+	sendFields := map[string]string{
 		RebaseSendsField: strconv.Itoa(sends + 1), RebaseBaseField: head,
 		SentBackAtField: n.now().UTC().Format(time.RFC3339),
-	}); err != nil {
+	}
+	if err := writeRetrying(ctx, n, report, "the send-back's record", func() error { return n.Tracker.SetStoryMetadata(ctx, c.id, sendFields) }); err != nil {
 		return fmt.Sprintf("it could not be recorded as sent back to rebase against %s, which is what bounds the send-backs: %v", shortSHA(head), err)
 	}
-	if err := n.Tracker.SetStoryState(ctx, c.id, RebaseState, RebaseSentBack,
-		fmt.Sprintf("sent back to rebase onto %s (%s, send-back %d of %d): %s", onto, shortSHA(head), sends+1, MaxRebaseSends, firstLine(landErr.Error()))); err != nil {
+	rebaseWhy := fmt.Sprintf("sent back to rebase onto %s (%s, send-back %d of %d): %s", onto, shortSHA(head), sends+1, MaxRebaseSends, firstLine(landErr.Error()))
+	if err := writeRetrying(ctx, n, report, "the rebase state", func() error {
+		return n.Tracker.SetStoryState(ctx, c.id, RebaseState, RebaseSentBack, rebaseWhy)
+	}); err != nil {
 		return fmt.Sprintf("it could not be recorded as %s=%s: %v", RebaseState, RebaseSentBack, err)
 	}
 	aside, err := n.makeWay(ctx, spec.Name)
@@ -988,12 +999,10 @@ func (n Next) sendBack(ctx context.Context, c *closeOut, report *NextReport, lan
 		"Nothing was merged, nothing was pushed and nothing was forced.\n\n%s",
 		n.Host, ReasonMergeConflict, c.branch, c.target, c.target, sends+1, MaxRebaseSends, onto, shortSHA(head), spec.Name, c.worktree, c.branch, onto,
 		c.target, MaxRebaseSends, kept)
-	if err := n.Tracker.CommentOnStory(ctx, c.id, note); err != nil {
-		report.Notes = append(report.Notes, fmt.Sprintf("the send-back could not be written on the story: %v", err))
-	}
-	if err := n.Tracker.SetStoryState(ctx, c.id, RunState, RunRunning, where); err != nil {
-		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be recorded as %s=%s: %v", c.id, RunState, RunRunning, err))
-	}
+	n.writeOrSay(ctx, c, report, "the send-back on the story", "the send-back could not be written on the story",
+		func() error { return n.Tracker.CommentOnStory(ctx, c.id, note) })
+	n.writeOrSay(ctx, c, report, "the run state", fmt.Sprintf("%s could not be recorded as %s=%s", c.id, RunState, RunRunning),
+		func() error { return n.Tracker.SetStoryState(ctx, c.id, RunState, RunRunning, where) })
 	// The line charges the session that worked the story, whose result the
 	// fresh one will write over; the fresh one is charged by its own line.
 	if err := n.ledger(ctx, c, report, NotLanded(ReasonMergeConflict, "sent back to rebase onto "+onto+" in session "+spec.Name)); err != nil {
@@ -1080,11 +1089,14 @@ func (n Next) sendBackForFailingTests(ctx context.Context, c *closeOut, report *
 		return fmt.Sprintf("the session to fix the tests could not be assembled: %v", err)
 	}
 	next := c.detail.Attempts + 1
-	if err := n.Tracker.SetStoryMetadata(ctx, c.id, map[string]string{SentBackAtField: n.now().UTC().Format(time.RFC3339)}); err != nil {
+	sentBackAt := map[string]string{SentBackAtField: n.now().UTC().Format(time.RFC3339)}
+	if err := writeRetrying(ctx, n, report, "the time it was sent back", func() error { return n.Tracker.SetStoryMetadata(ctx, c.id, sentBackAt) }); err != nil {
 		return fmt.Sprintf("the time it was sent back could not be recorded, which is what the quiet alarm counts from: %v", err)
 	}
-	if err := n.Tracker.SetStoryState(ctx, c.id, MergedTestsState, MergedTestsSentBack,
-		fmt.Sprintf("sent back as attempt %d to fix the merged tests, %s merged in: %s", next, onto, firstLine(landErr.Error()))); err != nil {
+	sentBackWhy := fmt.Sprintf("sent back as attempt %d to fix the merged tests, %s merged in: %s", next, onto, firstLine(landErr.Error()))
+	if err := writeRetrying(ctx, n, report, "the merged-tests state", func() error {
+		return n.Tracker.SetStoryState(ctx, c.id, MergedTestsState, MergedTestsSentBack, sentBackWhy)
+	}); err != nil {
 		return fmt.Sprintf("it could not be recorded as %s=%s, which is what keeps it to once: %v", MergedTestsState, MergedTestsSentBack, err)
 	}
 	aside, err := n.makeWay(ctx, spec.Name)
@@ -1123,12 +1135,10 @@ func (n Next) sendBackForFailingTests(ctx context.Context, c *closeOut, report *
 		"it as usual. It is not sent back again: a second failure here stops the close-out and is a person's to "+
 		"resolve. Nothing was pushed.\n\n%s",
 		n.Host, ReasonMergedTestsFail, c.branch, c.target, onto, c.branch, next, spec.Name, c.worktree, kept)
-	if err := n.Tracker.CommentOnStory(ctx, c.id, note); err != nil {
-		report.Notes = append(report.Notes, fmt.Sprintf("the send-back could not be written on the story: %v", err))
-	}
-	if err := n.Tracker.SetStoryState(ctx, c.id, RunState, RunRunning, where); err != nil {
-		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be recorded as %s=%s: %v", c.id, RunState, RunRunning, err))
-	}
+	n.writeOrSay(ctx, c, report, "the send-back on the story", "the send-back could not be written on the story",
+		func() error { return n.Tracker.CommentOnStory(ctx, c.id, note) })
+	n.writeOrSay(ctx, c, report, "the run state", fmt.Sprintf("%s could not be recorded as %s=%s", c.id, RunState, RunRunning),
+		func() error { return n.Tracker.SetStoryState(ctx, c.id, RunState, RunRunning, where) })
 	// The line charges the session that worked the story, whose result the
 	// fresh one will write over; the fresh one is charged by its own line.
 	if err := n.ledger(ctx, c, report, NotLanded(ReasonMergedTestsFail,
@@ -1400,9 +1410,8 @@ func (n Next) closeALanding(ctx context.Context, c *closeOut, report *NextReport
 	// is what failed. The Verify card is built from it, so it is written now,
 	// before the close; failing to write it never stops the close.
 	if was, err := n.Tracker.StoryState(ctx, c.id, RunState); err != nil || was != RunLanded {
-		if err := n.Tracker.SetStoryState(ctx, c.id, RunState, RunLanded, outcome); err != nil {
-			report.Notes = append(report.Notes, fmt.Sprintf("%s could not be recorded as %s=%s: %v", c.id, RunState, RunLanded, err))
-		}
+		n.writeOrSay(ctx, c, report, "the run state", fmt.Sprintf("%s could not be recorded as %s=%s", c.id, RunState, RunLanded),
+			func() error { return n.Tracker.SetStoryState(ctx, c.id, RunState, RunLanded, outcome) })
 	}
 	return n.finish(ctx, c, report, outcome, true)
 }
@@ -1787,8 +1796,20 @@ func (n Next) fetchRetrying(ctx context.Context, report *NextReport, rigDir stri
 // other reason, "no issue found" among them, comes back at once as it was; so
 // does one that fails every time, in the tracker's own words (mw-gq6.374).
 func readRetrying[T any](ctx context.Context, n Next, report *NextReport, what string, read func() (T, error)) (T, error) {
+	return retrying(ctx, n, report, "read", what, read)
+}
+
+// writeRetrying is readRetrying for a write to the tracker or the mailbox
+// (mw-gq6.375): a write that met a passing fault is tried again, ReadRetries
+// times, and one that fails every time comes back in the tracker's own words.
+func writeRetrying(ctx context.Context, n Next, report *NextReport, what string, write func() error) error {
+	_, err := retrying(ctx, n, report, "write", what, func() (struct{}, error) { return struct{}{}, write() })
+	return err
+}
+
+func retrying[T any](ctx context.Context, n Next, report *NextReport, verb, what string, try func() (T, error)) (T, error) {
 	for retry := 0; ; retry++ {
-		got, err := read()
+		got, err := try()
 		if err == nil {
 			return got, nil
 		}
@@ -1798,10 +1819,10 @@ func readRetrying[T any](ctx context.Context, n Next, report *NextReport, what s
 		}
 		wait := n.PushWait / 4 * time.Duration(retry+1)
 		if report != nil {
-			report.Notes = append(report.Notes, fmt.Sprintf("read of %s failed (%s), retried in %s", what, fault.Why, wait))
+			report.Notes = append(report.Notes, fmt.Sprintf("%s of %s failed (%s), retried in %s", verb, what, fault.Why, wait))
 		}
 		if waitErr := n.retryWait(ctx, wait); waitErr != nil {
-			return got, fmt.Errorf("%w (and waiting %s to read %s again: %v)", err, wait, what, waitErr)
+			return got, fmt.Errorf("%w (and waiting %s to %s %s again: %v)", err, wait, verb, what, waitErr)
 		}
 	}
 }
@@ -1889,11 +1910,18 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 		note += "\n\n" + said
 	}
 
-	if err := n.Tracker.CommentOnStory(ctx, c.id, note); err != nil {
+	// Each write that meets a passing fault of the network is tried again; one
+	// that fails all the same is kept, with the mail, in the run for mw dispatch
+	// to replay (mw-gq6.375), rather than left to this pane's stderr.
+	var unwritten []string
+	stateDetail := "(" + string(reason) + ") " + why
+	if err := writeRetrying(ctx, n, report, "the reason on the story", func() error { return n.Tracker.CommentOnStory(ctx, c.id, note) }); err != nil {
 		trouble = append(trouble, fmt.Sprintf("the reason could not be written on the story: %v", err))
+		unwritten = append(unwritten, UnrecordedComment)
 	}
-	if err := n.Tracker.SetStoryState(ctx, c.id, RunState, RunBlocked, "("+string(reason)+") "+why); err != nil {
+	if err := writeRetrying(ctx, n, report, "the run state", func() error { return n.Tracker.SetStoryState(ctx, c.id, RunState, RunBlocked, stateDetail) }); err != nil {
 		trouble = append(trouble, fmt.Sprintf("%s could not be recorded as %s=%s: %v", c.id, RunState, RunBlocked, err))
+		unwritten = append(unwritten, UnrecordedRunState)
 	}
 	if err := n.ledger(ctx, c, report, NotLanded(reason, firstLine(why))); err != nil {
 		trouble = append(trouble, err.Error())
@@ -1907,7 +1935,18 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	if report.Refused {
 		verdict = MailRefused
 	}
-	n.mailTheMayor(ctx, c, report, verdict, said)
+	mail := n.mayorMail(c, report, verdict, said)
+	if err := n.sendMayorMail(ctx, c, report, mail, verdict); err != nil {
+		unwritten = append(unwritten, UnrecordedMail)
+	}
+	if len(unwritten) > 0 {
+		trouble = append(trouble, n.keepUnrecorded(ctx, c, report, UnrecordedOutcome{
+			Story: c.id, Host: n.Host, At: n.now().UTC(), Outcome: strings.ToLower(verdict), Reason: reason, Why: why,
+			Attempt: c.attempt(), Comment: note, StateDetail: stateDetail,
+			MailFrom: mail.From, MailTo: mail.To, MailSubject: mail.Subject, MailBody: mail.Body, Pending: unwritten,
+		})...)
+		n.commit(ctx, c, report)
+	}
 
 	err := fmt.Errorf("closing out %s: %s", c.id, why)
 	if len(trouble) > 0 {
@@ -1931,6 +1970,14 @@ func (n Next) mailTheMayor(ctx context.Context, c *closeOut, report *NextReport,
 	if n.Mailbox == nil {
 		return
 	}
+	if err := n.sendMayorMail(ctx, c, report, n.mayorMail(c, report, verdict, said), verdict); err != nil {
+		n.saidInEvents(ctx, report, c, fmt.Sprintf("the mail to %s about %s (%s) could not be sent: %v", MayorMailbox, c.id, strings.ToLower(verdict), err))
+	}
+}
+
+// mayorMail is the mail mailTheMayor sends: what it says is settled by the
+// report as it stands.
+func (n Next) mayorMail(c *closeOut, report *NextReport, verdict, said string) NewMessage {
 	title := strings.Join(strings.Fields(c.detail.Story.Title), " ")
 	if title == "" {
 		title = c.id
@@ -1951,14 +1998,61 @@ func (n Next) mailTheMayor(ctx context.Context, c *closeOut, report *NextReport,
 	if verdict == MailRefused || verdict == MailBlocked {
 		body = strings.TrimRight(body, "\n") + "\n\n" + CauseLine(c.id) + "\n"
 	}
-	if _, err := n.Mailbox.Send(ctx, NewMessage{
+	return NewMessage{
 		From:    SeatIdentity(MwSeat, n.Host),
 		To:      MayorMailbox,
 		Subject: verdict + ": " + title,
 		Body:    body,
-	}); err != nil && n.Err != nil {
+	}
+}
+
+// sendMayorMail sends the mail, trying it again on a passing fault of the
+// network. A mail that cannot be sent is said on stderr and changes nothing
+// else: its error is the caller's to keep what it needs (mw-gq6.375).
+func (n Next) sendMayorMail(ctx context.Context, c *closeOut, report *NextReport, mail NewMessage, verdict string) error {
+	if n.Mailbox == nil {
+		return nil
+	}
+	err := writeRetrying(ctx, n, report, "the mail to the Mayor", func() error {
+		_, err := n.Mailbox.Send(ctx, mail)
+		return err
+	})
+	if err == nil {
+		return nil
+	}
+	if n.Err != nil {
 		fmt.Fprintf(n.Err, "mw next: the mail to %s about %s (%s) could not be sent: %v\n",
 			MayorMailbox, c.id, strings.ToLower(verdict), err)
+	}
+	return err
+}
+
+// writeOrSay writes one record of a close-out that is already past the point of
+// stopping — a send-back's, a landing's — trying again on a passing fault of
+// the network; a write that fails all the same is a note on the report and a
+// line in the events log, never only the pane's stderr.
+func (n Next) writeOrSay(ctx context.Context, c *closeOut, report *NextReport, what, failure string, write func() error) {
+	if err := writeRetrying(ctx, n, report, what, write); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s: %v", failure, err))
+		n.saidInEvents(ctx, report, c, fmt.Sprintf("%s: %v", failure, err))
+	}
+}
+
+// saidInEvents writes a failed close-out write to the events log, as a job
+// that failed. A log that cannot be written is a note.
+func (n Next) saidInEvents(ctx context.Context, report *NextReport, c *closeOut, detail string) {
+	if n.Events == nil {
+		return
+	}
+	if _, err := (EventEmit{
+		Log: n.Events, Now: n.now,
+		Event: events.Event{
+			Kind: events.KindJob, Actor: JobCloseOutUnrecorded + "@" + n.Host,
+			From: events.JobRunning, To: events.JobFailed,
+			Detail: events.CutDetail(detail),
+		},
+	}).Run(ctx); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the job event for %s could not be written: %v", c.id, err))
 	}
 }
 
@@ -2048,6 +2142,12 @@ func (n Next) commit(ctx context.Context, c *closeOut, report *NextReport) {
 
 	if c.landingError {
 		if record := LandingErrorRecord(c.id); record != "" {
+			paths = append(paths, record)
+		}
+	}
+
+	if c.unrecorded {
+		if record := runFilePath(c.id, UnrecordedFileName); record != "" {
 			paths = append(paths, record)
 		}
 	}

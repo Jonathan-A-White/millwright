@@ -1324,6 +1324,15 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 	}
 	dead := status.State == StateExited || status.State == StateExitUnknown
 
+	// A close-out that stopped the story and could not write all of it down left
+	// the outcome in the run (mw-gq6.375): the pane is dead because the close-out
+	// ended, not because the session did, so what it meant to record is written
+	// now and the story is held as any refused story is, never refunded.
+	if dead && d.replayUnrecorded(ctx, detail, report) {
+		report.HeldRefused = append(report.HeldRefused, HeldRefused{StoryID: id, Session: name})
+		return false, true, nil
+	}
+
 	// A claim whose lease has run out and whose branch is already on the target
 	// branch is a close-out that got past the merge and lost only the close
 	// (mw-gq6.161). It is closed, never given back: a fresh attempt would work

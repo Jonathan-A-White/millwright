@@ -115,6 +115,13 @@ window but the successor's, ends at once on it with "handed over at N"; the succ
 `mw events wait` ends on it with "you hold the seat from N", and one begun `--since N` or
 later ignores it. The old session reads and answers up to N, the successor from N on.
 
+## A close-out that could not record
+
+`mw next` retries a bd write that meets a Dolt i/o timeout (mw-gq6.375). A write that fails all
+the same is a `job` event, running to failed, actor `close-out@<host>`, the story and what could
+not be written as detail; for a stopped story the outcome it meant to record is also kept in the
+run as `close-out-unrecorded.json`, and `mw dispatch` writes it down when it finds the pane dead.
+
 ## Springing the jobs
 
 The follower runs the factory's jobs (mw-jrx0s.14): `dispatch` (a bead_changed to open, or to
