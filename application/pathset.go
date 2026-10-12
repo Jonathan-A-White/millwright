@@ -125,6 +125,10 @@ func pathLines(path domain.Path) string {
 type PathShow struct {
 	Tracker WorkTracker
 
+	// Rules is where the story's rig's file is read from, to warn of a story
+	// that has no files key on a rig that expects one. A nil Rules warns of none.
+	Rules EpicRules
+
 	// Out is where the keys are printed. A nil Out prints nothing.
 	Out io.Writer
 }
@@ -145,6 +149,7 @@ func (s PathShow) Run(ctx context.Context, id string) (domain.Path, error) {
 	path := story.Merged()
 	if s.Out != nil {
 		fmt.Fprint(s.Out, pathLines(path))
+		warnNoFilesKey(ctx, s.Out, s.Rules, story)
 	}
 	return path, nil
 }

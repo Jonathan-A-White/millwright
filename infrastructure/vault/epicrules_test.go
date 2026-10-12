@@ -221,3 +221,29 @@ func TestARigsFileNamesItsPublicURLAndRefusesOneThatIsNotAnHTTPSAddress(t *testi
 		}
 	}
 }
+
+func TestARigsFileSaysWhetherItExpectsAFilesKeyAndRefusesAnythingElse(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+
+	for written, want := range map[string]bool{"files_expected = true # busy\n": true, "files_expected = false\n": false} {
+		writeRigFile(t, dir, "lampas", written)
+		got, err := v.EpicRequirements(context.Background(), "lampas")
+		if err != nil {
+			t.Fatalf("%q: reading the rig's file: %v", written, err)
+		}
+		if got.FilesExpected != want {
+			t.Errorf("%q: FilesExpected = %v, want %v", written, got.FilesExpected, want)
+		}
+		if got.Any() {
+			t.Errorf("files_expected is no requirement of an epic, but Any() = true")
+		}
+	}
+
+	for _, bad := range []string{`yes`, `"true"`, `[true]`, ``} {
+		writeRigFile(t, dir, "lampas", "files_expected = "+bad+"\n")
+		if _, err := v.EpicRequirements(context.Background(), "lampas"); err == nil || !strings.Contains(err.Error(), "files_expected") {
+			t.Errorf("files_expected = %s: err = %v, want a refusal naming files_expected", bad, err)
+		}
+	}
+}

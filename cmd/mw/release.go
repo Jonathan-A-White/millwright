@@ -3,6 +3,8 @@ package main
 import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
+	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
 )
@@ -22,7 +24,9 @@ func newReleaseCmd() *cobra.Command {
 			"already taken, already finished or already released is left exactly as it was found, and\n" +
 			"releasing the same epic twice does no more than releasing it once. Which of the released\n" +
 			"stories a dispatcher may take is the tracker's own answer: the ones that wait on nothing\n" +
-			"still to be done.",
+			"still to be done.\n\n" +
+			"On a rig whose file in the vault says files_expected = true, a story with no files key is\n" +
+			"named under the tree, one line each: a warning, and the release goes ahead.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			gateway, err := beads.FromConfig()
@@ -31,9 +35,20 @@ func newReleaseCmd() *cobra.Command {
 			}
 			_, err = application.Release{
 				Tracker: gateway,
+				Rules:   rigRulesIfKnown(),
 				Out:     cmd.OutOrStdout(),
 			}.Run(cmd.Context(), args[0])
 			return err
 		},
 	}
+}
+
+// rigRulesIfKnown is the rig files of the vault, or nil when the vault cannot
+// be found: a warning that reads them is not worth failing the command for.
+func rigRulesIfKnown() application.EpicRules {
+	dir, err := config.Vault()
+	if err != nil {
+		return nil
+	}
+	return vault.New(dir)
 }

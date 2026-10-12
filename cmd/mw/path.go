@@ -52,13 +52,16 @@ func newPathShowCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "show <story-id>",
 		Short: "Print a story's eight path keys",
-		Args:  cobra.ExactArgs(1),
+		Long: "show prints the eight path keys of a story as it is worked by them. On a rig whose file\n" +
+			"in the vault says files_expected = true, a story with no files key also gets one line\n" +
+			"saying so: a warning, and the keys are printed all the same.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			gateway, err := beads.FromConfig()
 			if err != nil {
 				return err
 			}
-			_, err = application.PathShow{Tracker: gateway, Out: cmd.OutOrStdout()}.Run(cmd.Context(), args[0])
+			_, err = application.PathShow{Tracker: gateway, Rules: rigRulesIfKnown(), Out: cmd.OutOrStdout()}.Run(cmd.Context(), args[0])
 			return err
 		},
 	}
