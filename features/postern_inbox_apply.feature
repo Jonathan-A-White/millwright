@@ -480,3 +480,22 @@ Feature: mw postern inbox --apply
     And a postern message from "governor-pubkey-hex" with text "Buy flour for the bread" and txid "tx-idea"
     When mw postern inbox --apply is run
     Then the idea "tx-idea" is held in "general" saying "Buy flour for the bread"
+
+  # The end of the mode: a record of his that arrives after Ideas only has ended
+  # is not kept. The hook gives back what was kept first, in one card, and then
+  # reads the record as it always did.
+
+  Scenario: A message of his that arrives after Ideas only has ended is not kept, and the release runs first
+    Given a postern message from "governor-pubkey-hex" with text "Buy flour for the bread" and txid "tx-idea"
+    And Ideas only is holding "tx-idea" for the postern inbox
+    And the note of Ideas only says it is on until "2026-09-25T09:00:00Z" for the postern inbox
+    And a postern message from "governor-pubkey-hex" with text "Another thought" and txid "tx-after"
+    When mw postern inbox --apply is run
+    Then reading succeeds
+    And no idea is held
+    And one card titled "Your ideas from Ideas only (1)" was sent to the Governor by the hook
+    And the Governor was sent 1 message in all
+    When mw postern inbox is run
+    Then it printed "Buy flour for the bread"
+    And it printed "Another thought"
+    And it did not print "held for after"

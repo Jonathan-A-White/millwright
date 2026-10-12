@@ -3243,8 +3243,39 @@ zero tokens:
 
 `state.json` beside the held file is mw's note of the mode: a backend out of
 reach shows what was last known, and a note that says on is not believed past
-its end. Nothing here gives the ideas back when the mode ends. See
-`features/ideas_only.feature`, and the Ideas only scenarios of
+its end.
+
+When the mode ends, mw gives the ideas back, once:
+
+```sh
+bin/mw ideas-only release
+```
+
+It sends the Governor one live card, `Your ideas from Ideas only (N)`, with an
+item for each idea (its first 80 runes, where he sent it and when; no link and
+no expectation, the Mayor adds links with `mw card update` as he files each
+one), applies the taps he made meanwhile in the order he made them, drops the
+`postern.held.<txid>` marks, puts the postern inbox's cursor back to the
+earliest held record so that `mw postern inbox` shows the ideas as unread, and
+moves `held.jsonl` to `released/<time>.jsonl`. It prints `Ideas only ended
+21:00: N ideas` and a line for each; with nothing held it prints `Ideas only
+ended: nothing held` and sends no card. While the mode is still on it releases
+nothing. Whichever of three sees the end first does it, and a second finds
+nothing held:
+
+- `mw talk wait` on the stream's `ideas-only` event with `on: false`, or when
+  the clock passes the end its note names although no event came; it then ENDS,
+  printing the lines above, so that the Mayor's harness wakes to them. A wait
+  armed after the end, with ideas still held, gives them back at once. An end
+  with nothing held is said and the wait goes on.
+- `mw postern inbox --apply`, before it reads anything: a record of his that
+  arrives after the end is not held.
+- `mw ideas-only release`, by hand.
+
+A release that dies after the card was sent finishes without sending another
+(the card's txid is kept in `state.json` meanwhile; `released_until` there is
+the end of the last mode given back). See `features/ideas_only.feature`,
+and the Ideas only scenarios of and the Ideas only scenarios of
 `features/postern_inbox_apply.feature`, `features/talk_wait.feature`,
 `features/status.feature` and `features/brief.feature`.
 

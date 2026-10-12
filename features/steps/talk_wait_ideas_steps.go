@@ -11,6 +11,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/ideasonly"
 	"github.com/Jonathan-A-White/millwright/infrastructure/postern"
 
@@ -83,8 +84,28 @@ func (c *talkWaitContext) ideasFiles() *ideasonly.Files {
 func (c *talkWaitContext) ideasMode() application.IdeasOnlyMode {
 	return application.IdeasOnlyMode{
 		Reader: c.client, Files: c.ideasFiles(), GovernorKey: c.governorKey,
+		Now: func() time.Time {
+			if at := c.clockAt.Load(); at != 0 {
+				return time.Unix(at, 0)
+			}
+			return talkIdeasClock
+		},
+	}
+}
+
+// ideasRelease is how the wait gives the ideas back: an inbox that can send the
+// card, wired as mw talk wait's command wires it.
+func (c *talkWaitContext) ideasRelease(mode *application.IdeasOnlyMode) *application.IdeasOnlyRelease {
+	cipher := apptest.NewFakeCipher()
+	cards := &application.Cards{
+		Postern: c.client, Cipher: cipher, Keys: c.keys, GovernorKey: c.governorKey,
 		Now: func() time.Time { return talkIdeasClock },
 	}
+	return &application.IdeasOnlyRelease{Inbox: application.PosternInbox{
+		Postern: c.client, Cipher: cipher, Keys: c.keys, Memory: c.memory, Tracker: c.memory,
+		GovernorKey: c.governorKey, Ideas: mode, Cards: cards,
+		Sender: &application.PosternSend{Postern: c.client, Cipher: cipher, Keys: c.keys, GovernorKey: c.governorKey},
+	}}
 }
 
 func (c *talkWaitContext) delivered() ([]string, []application.PosternPayload, error) {
@@ -106,6 +127,26 @@ func (c *talkWaitContext) delivered() ([]string, []application.PosternPayload, e
 		payloads = append(payloads, payload)
 	}
 	return texts, payloads, nil
+}
+
+// cardsSent is every card the Mayor delivered, opened.
+func (c *talkWaitContext) cardsSent() ([]domain.Card, error) {
+	texts, payloads, err := c.delivered()
+	if err != nil {
+		return nil, err
+	}
+	var cards []domain.Card
+	for n, text := range texts {
+		if payloads[n].Class != application.CardClass {
+			continue
+		}
+		var card domain.Card
+		if err := json.Unmarshal([]byte(text), &card); err != nil {
+			return nil, err
+		}
+		cards = append(cards, card)
+	}
+	return cards, nil
 }
 
 func (c *talkWaitContext) registerIdeasOnlySteps(ctx *godog.ScenarioContext) {
@@ -158,6 +199,41 @@ func (c *talkWaitContext) registerIdeasOnlySteps(ctx *godog.ScenarioContext) {
 		}
 	})
 
+	ctx.When(`^the clock of Ideas only passes "([^"]*)" for mw talk wait$`, func(at string) error {
+		t, err := time.Parse(time.RFC3339, at)
+		if err != nil {
+			return err
+		}
+		c.lastEvent = time.Now()
+		c.clockAt.Store(t.Unix())
+		return nil
+	})
+	ctx.Then(`^the wait has kept (\d+) ideas$`, func(n int) error {
+		return c.waitFor(fmt.Sprintf("the wait to keep %d ideas", n), func() bool {
+			held, err := c.ideasFiles().Held(context.Background())
+			return err == nil && len(held) == n
+		})
+	})
+	ctx.Then(`^one card titled "([^"]*)" was sent to the Governor by the wait$`, func(title string) error {
+		cards, err := c.cardsSent()
+		if err != nil {
+			return err
+		}
+		if len(cards) != 1 || cards[0].Title != title {
+			return fmt.Errorf("expected one card titled %q, got %+v", title, cards)
+		}
+		return nil
+	})
+	ctx.Then(`^no card was sent to the Governor by the wait$`, func() error {
+		cards, err := c.cardsSent()
+		if err != nil {
+			return err
+		}
+		if len(cards) != 0 {
+			return fmt.Errorf("expected no card, got %+v", cards)
+		}
+		return nil
+	})
 	ctx.Then(`^the note of Ideas only comes to say it is off$`, func() error {
 		return c.waitFor("the note of Ideas only to say off", func() bool {
 			state, err := c.ideasFiles().State(context.Background())

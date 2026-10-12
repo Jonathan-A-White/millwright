@@ -1,6 +1,9 @@
 package application
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Ideas only in mw talk wait (postern's docs/protocol.md section 25). While the
 // Governor's key is in the mode, the wait keeps what he sends instead of
@@ -25,18 +28,30 @@ func (r *talkWaitRun) refreshIdeas(ctx context.Context) {
 	if err != nil {
 		r.printf(r.Err, "mw talk wait: %v; going on with the last note of Ideas only\n", err)
 	}
+	r.setIdeaState(state)
+}
+
+func (r *talkWaitRun) setIdeaState(state IdeasOnlyState) {
+	r.ideaMu.Lock()
+	defer r.ideaMu.Unlock()
 	r.ideaState = state
+}
+
+func (r *talkWaitRun) ideaStateNow() IdeasOnlyState {
+	r.ideaMu.Lock()
+	defer r.ideaMu.Unlock()
+	return r.ideaState
 }
 
 // ideasOn reports whether the Governor is in Ideas only now.
 func (r *talkWaitRun) ideasOn() bool {
-	return r.Ideas != nil && r.ideaState.OnAt(r.Ideas.now())
+	return r.Ideas != nil && r.ideaStateNow().OnAt(r.Ideas.now())
 }
 
 // ideasBanner is 'Ideas only until 21:00 UTC (2 ideas held)'.
 func (r *talkWaitRun) ideasBanner(ctx context.Context) string {
 	held, _ := r.Ideas.Files.Held(ctx)
-	return IdeasOnlyBanner(r.ideaState, len(held), r.Ideas.now())
+	return IdeasOnlyBanner(r.ideaStateNow(), len(held), r.Ideas.now())
 }
 
 // ideasEvent keeps the note level with an ideas-only event of the stream.
@@ -49,7 +64,7 @@ func (r *talkWaitRun) ideasEvent(event PosternEvent) {
 		r.printf(r.Err, "mw talk wait: keeping the note of Ideas only: %v\n", err)
 		return
 	}
-	r.ideaState = state
+	r.setIdeaState(state)
 }
 
 // inboxForIdeas is the inbox the wait keeps a record with: the same keeping
@@ -82,7 +97,7 @@ func (r *talkWaitRun) keepIdea(m PosternInboxMessage, answer func(context.Contex
 	defer release()
 	held, err := heldNotes(r.ctx, r.Memory)
 	if err == nil {
-		pass := ideasPass{loaded: true, state: r.ideaState, held: held}
+		pass := ideasPass{loaded: true, state: r.ideaStateNow(), held: held}
 		var kept bool
 		if _, kept, _, err = inbox.holdIdeaAnswering(r.ctx, m, &pass, answer); err == nil {
 			return kept
@@ -137,4 +152,83 @@ func (r *talkWaitRun) ideasEnd(ctx context.Context) {
 	if r.ideasOn() {
 		r.printf(r.Out, "%s\n", r.ideasBanner(context.WithoutCancel(ctx)))
 	}
+}
+
+// ideaWatchEvery is how often the wait looks at the clock for the end of Ideas
+// only; ideaRetryAfter how long it leaves a release that could not be done.
+const (
+	ideaWatchEvery = 250 * time.Millisecond
+	ideaRetryAfter = 5 * time.Second
+)
+
+// ideasDue reports whether the mode is off while ideas are still held: the end
+// came while no wait or hook was there to see it.
+func (r *talkWaitRun) ideasDue(ctx context.Context) bool {
+	if r.Release == nil || r.Ideas == nil || r.ideasOn() {
+		return false
+	}
+	held, err := r.Ideas.Files.Held(ctx)
+	return err == nil && len(held) > 0
+}
+
+// giveBackIdeas gives the held ideas back, once, and reports whether the wait
+// is to end on them. Nothing held is said (unless quiet) and the wait goes on,
+// for it has nothing to wake the Mayor for; a mode still on, or a release that
+// failed (said on Err), also goes on.
+func (r *talkWaitRun) giveBackIdeas(quiet bool) bool {
+	ctx := context.WithoutCancel(r.ctx)
+	report, err := r.Release.Run(ctx)
+	if state, serr := r.Ideas.Files.State(ctx); serr == nil {
+		r.setIdeaState(state)
+	}
+	switch {
+	case err != nil:
+		r.printf(r.Err, "mw talk wait: giving back the ideas of Ideas only: %v\n", err)
+		return false
+	case report.StillOn:
+		return false
+	case !report.Given():
+		if !quiet {
+			r.printf(r.Out, "%s", report.String())
+		}
+		return false
+	}
+	r.gaveBack = &report
+	return true
+}
+
+// watchIdeasEnd ends the wait when the clock passes the end of the mode its note
+// names, though no event came to say so: the backend's own is not to be relied
+// on across a dropped stream. It looks at the note, never the backend, until the
+// end is due, and then gives the ideas back; a release that cannot be done is
+// tried again after ideaRetryAfter.
+func (r *talkWaitRun) watchIdeasEnd(ctx context.Context, stop context.CancelCauseFunc) {
+	var retryAt time.Time
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(ideaWatchEvery):
+		}
+		state := r.ideaStateNow()
+		if !state.On || state.Until == 0 || state.OnAt(r.Ideas.now()) || time.Now().Before(retryAt) {
+			continue
+		}
+		retryAt = time.Now().Add(ideaRetryAfter)
+		if r.giveBackIdeas(true) {
+			stop(errIdeasEnded)
+			return
+		}
+	}
+}
+
+// ideasEnded is how the wait ends on the end of Ideas only: it prints the ideas
+// it gave back, and the Mayor's harness wakes to them.
+func (r *talkWaitRun) ideasEnded(ctx context.Context) (TalkWaitReport, error) {
+	ctx = context.WithoutCancel(ctx)
+	report := TalkWaitReport{Released: r.gaveBack}
+	if r.gaveBack != nil {
+		r.printf(r.Out, "%s", r.gaveBack.String())
+	}
+	return report, r.save(ctx)
 }

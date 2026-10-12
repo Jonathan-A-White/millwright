@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -179,6 +180,8 @@ type talkWaitContext struct {
 	lastEvent time.Time
 	// ideas wires the wait to the Governor's Ideas only.
 	ideas bool
+	// clockAt, when not zero, is the clock Ideas only reads, in Unix seconds.
+	clockAt atomic.Int64
 
 	inboxOut   bytes.Buffer
 	inboxCount int
@@ -254,6 +257,7 @@ func InitializeTalkWaitScenario(ctx *godog.ScenarioContext) {
 
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
 		*c = talkWaitContext{}
+		c.clockAt.Store(0)
 		return ctx, nil
 	})
 	ctx.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
@@ -475,6 +479,7 @@ func (c *talkWaitContext) arm() error {
 	if c.ideas {
 		mode := c.ideasMode()
 		wait.Ideas = &mode
+		wait.Release = c.ideasRelease(&mode)
 	}
 	go func() {
 		defer close(run.done)

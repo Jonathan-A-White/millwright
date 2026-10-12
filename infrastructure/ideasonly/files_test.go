@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/ideasonly"
@@ -68,5 +69,34 @@ func TestAStateFileThatIsNotJSONIsAnErrorNamingIt(t *testing.T) {
 	}
 	if _, err := ideasonly.New(dir).State(context.Background()); err == nil {
 		t.Fatal("expected an error")
+	}
+}
+
+func TestReleaseMovesTheHeldFileToTheReleasedFolderAndNeverOverwrites(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ideas-only")
+	files := ideasonly.New(dir)
+	ctx := context.Background()
+	ended := time.Date(2026, 10, 12, 21, 0, 0, 0, time.UTC)
+
+	if err := files.Release(ctx, ended); err != nil {
+		t.Fatalf("releasing nothing should be nothing: %v", err)
+	}
+	for _, txid := range []string{"direct:1", "direct:2"} {
+		if err := files.Hold(ctx, application.IdeasOnlyHeld{Txid: txid, Seq: 1, Text: "an idea"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := files.Release(ctx, ended); err != nil {
+			t.Fatalf("releasing %s: %v", txid, err)
+		}
+		if held, err := files.Held(ctx); err != nil || len(held) != 0 {
+			t.Fatalf("expected nothing held after the release, got %+v, %v", held, err)
+		}
+	}
+	kept, err := filepath.Glob(filepath.Join(dir, "released", "*.jsonl"))
+	if err != nil || len(kept) != 2 {
+		t.Fatalf("expected both releases kept apart, found %v, %v", kept, err)
+	}
+	if filepath.Base(kept[0]) != "20261012T210000Z-2.jsonl" && filepath.Base(kept[1]) != "20261012T210000Z-2.jsonl" {
+		t.Fatalf("expected the second to carry a counter, found %v", kept)
 	}
 }

@@ -57,6 +57,26 @@ type IdeasOnlyState struct {
 	ReleasedUntil int64 `json:"released_until"`
 	// Tz is the zone of his schedule, "" when he has none.
 	Tz string `json:"tz,omitempty"`
+	// Ended is the Unix second the last mode ended, 0 while it is on or when
+	// this host never saw it on: the end of its window when mw saw the clock
+	// pass it, else the moment mw heard it had been turned off.
+	Ended int64 `json:"ended,omitempty"`
+	// Releasing is the txid of the card that gives his ideas back, from the
+	// moment it is sent until the release is done, so that a release that died
+	// part way finishes without sending a second card.
+	Releasing string `json:"releasing,omitempty"`
+}
+
+// EndedAt is when the mode that is not on at now ended: the end its note names
+// when the clock passed it, else the moment mw heard it turned off, else now.
+func (s IdeasOnlyState) EndedAt(now time.Time) time.Time {
+	switch {
+	case s.On && s.Until != 0 && now.Unix() >= s.Until:
+		return time.Unix(s.Until, 0)
+	case s.Ended != 0:
+		return time.Unix(s.Ended, 0)
+	}
+	return now
 }
 
 // OnAt reports whether the mode is on at now: a note that says on is not
@@ -98,6 +118,10 @@ type IdeasOnlyFiles interface {
 	Held(ctx context.Context) ([]IdeasOnlyHeld, error)
 	// Hold appends one record. A txid already held is not appended twice.
 	Hold(ctx context.Context, held IdeasOnlyHeld) error
+	// Release puts the held records away, as the ideas of the mode that ended
+	// at the given time: held.jsonl moves to released/<time>.jsonl. Nothing
+	// held is nothing to put away.
+	Release(ctx context.Context, ended time.Time) error
 }
 
 // IdeasOnlyMode is how the use cases know whether the Governor is in Ideas
@@ -155,6 +179,12 @@ func (m IdeasOnlyMode) keep(ctx context.Context, stored IdeasOnlyState, on bool,
 	fresh.On, fresh.Until, fresh.Tz = on, until, tz
 	if !on {
 		fresh.Until = 0
+		if stored.On {
+			fresh.Ended = stored.EndedAt(m.now()).Unix()
+		}
+	}
+	if on {
+		fresh.Ended = 0
 	}
 	if on && !stored.OnAt(m.now()) {
 		fresh.Since = m.now().Unix()

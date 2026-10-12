@@ -683,6 +683,9 @@ type PosternInbox struct {
 	// and never applied or shown as text (mw postern inbox --apply and the
 	// plain read both). Nil is no such mode.
 	Ideas *IdeasOnlyMode
+	// Cards sends the card the end of Ideas only gives his ideas back in.
+	// Nil leaves them held.
+	Cards *Cards
 
 	// Now is the clock an approval's age is read by. The zero value reads
 	// the real one.

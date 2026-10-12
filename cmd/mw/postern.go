@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -225,60 +226,19 @@ func newPosternInboxCmd() *cobra.Command {
 					}
 				}
 			}
-			keys, err := posternKeys()
+			inbox, wired, err := newPosternInbox(cmd.OutOrStdout())
 			if err != nil {
 				return err
-			}
-			gateway, host, err := posternGateway()
-			if err != nil {
-				return err
-			}
-			backend, err := posternBackend(keys)
-			if err != nil {
-				return err
-			}
-			governorKey, err := config.PosternGovernorKey()
-			if err != nil {
-				return err
-			}
-			attachmentDir, err := config.PosternInboxDir()
-			if err != nil {
-				return err
-			}
-			threads, err := posternThreads()
-			if err != nil {
-				return err
-			}
-			ideas, err := ideasOnlyMode(true)
-			if err != nil {
-				return err
-			}
-			inbox := application.PosternInbox{
-				Ideas:         &ideas,
-				Threads:       threads,
-				Postern:       backend,
-				Prompts:       backend,
-				Cipher:        posternCipher(keys),
-				Keys:          keys,
-				Memory:        gateway,
-				Tracker:       gateway,
-				Mailbox:       gateway,
-				Events:        homeEventLog(),
-				Host:          host,
-				GovernorKey:   governorKey,
-				AttachmentDir: attachmentDir,
-				Lock:          posternInboxLock(attachmentDir),
-				Out:           cmd.OutOrStdout(),
 			}
 			if unreadCount {
 				_, err = inbox.UnreadCount(cmd.Context())
 				return err
 			}
-			if err := answerTheGovernor(&inbox, backend, keys, governorKey); err != nil {
+			if err := answerTheGovernor(&inbox, wired.backend, wired.keys, wired.governorKey); err != nil {
 				return err
 			}
 			if apply {
-				if err := moveHomeOnTheGovernorsTap(&inbox, host, attachmentDir); err != nil {
+				if err := moveHomeOnTheGovernorsTap(&inbox, wired.host, wired.attachmentDir); err != nil {
 					return err
 				}
 				_, err = inbox.Apply(cmd.Context())
@@ -292,6 +252,74 @@ func newPosternInboxCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&apply, "apply", false, "apply the Governor's replies, bead comments and actions at once, moving no cursor")
 	cmd.MarkFlagsMutuallyExclusive("unread-count", "apply")
 	return cmd
+}
+
+// posternWiring is what newPosternInbox read on the way, for the steps that give
+// the inbox more.
+type posternWiring struct {
+	keys          *postern.KeyFile
+	backend       *postern.HTTP
+	host          string
+	governorKey   string
+	attachmentDir string
+}
+
+// newPosternInbox is the inbox every pass wires the same way: the Mayor's key,
+// the backend, the beads gateway for the notes, the tracker and the mailbox, the
+// Governor's Ideas only, and the card sender that gives his ideas back. Out gets
+// what a pass prints.
+func newPosternInbox(out io.Writer) (application.PosternInbox, posternWiring, error) {
+	keys, err := posternKeys()
+	if err != nil {
+		return application.PosternInbox{}, posternWiring{}, err
+	}
+	gateway, host, err := posternGateway()
+	if err != nil {
+		return application.PosternInbox{}, posternWiring{}, err
+	}
+	backend, err := posternBackend(keys)
+	if err != nil {
+		return application.PosternInbox{}, posternWiring{}, err
+	}
+	governorKey, err := config.PosternGovernorKey()
+	if err != nil {
+		return application.PosternInbox{}, posternWiring{}, err
+	}
+	attachmentDir, err := config.PosternInboxDir()
+	if err != nil {
+		return application.PosternInbox{}, posternWiring{}, err
+	}
+	threads, err := posternThreads()
+	if err != nil {
+		return application.PosternInbox{}, posternWiring{}, err
+	}
+	ideas, err := ideasOnlyMode(true)
+	if err != nil {
+		return application.PosternInbox{}, posternWiring{}, err
+	}
+	// A host that cannot send a card gives no ideas back, and reads as before.
+	var cardSender *application.Cards
+	if cards, err := posternCards(nil); err == nil {
+		cardSender = &cards
+	}
+	return application.PosternInbox{
+		Ideas:         &ideas,
+		Cards:         cardSender,
+		Threads:       threads,
+		Postern:       backend,
+		Prompts:       backend,
+		Cipher:        posternCipher(keys),
+		Keys:          keys,
+		Memory:        gateway,
+		Tracker:       gateway,
+		Mailbox:       gateway,
+		Events:        homeEventLog(),
+		Host:          host,
+		GovernorKey:   governorKey,
+		AttachmentDir: attachmentDir,
+		Lock:          posternInboxLock(attachmentDir),
+		Out:           out,
+	}, posternWiring{keys: keys, backend: backend, host: host, governorKey: governorKey, attachmentDir: attachmentDir}, nil
 }
 
 // answerTheGovernor gives inbox what it needs to act on the Governor's word

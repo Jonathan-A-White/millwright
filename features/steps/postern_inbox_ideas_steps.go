@@ -67,6 +67,52 @@ func (c *posternInboxContext) registerPosternIdeasOnlySteps(ctx *godog.ScenarioC
 		return nil
 	})
 
+	ctx.Given(`^Ideas only is holding "([^"]*)" for the postern inbox$`, func(txid string) error {
+		c.ideas = true
+		records, err := c.backend.Messages(context.Background(), 0)
+		if err != nil {
+			return err
+		}
+		for _, r := range records {
+			if r.Txid != txid {
+				continue
+			}
+			if err := c.ideasMode().Files.Hold(context.Background(), application.IdeasOnlyHeld{
+				Txid: txid, Seq: r.Seq, Class: r.Class, Channel: "general", Text: "kept", When: posternReplyStamp.Format(time.RFC3339),
+			}); err != nil {
+				return err
+			}
+			return c.memory.SetNote(context.Background(), application.PosternHeldKey(txid), "held for after 21:00 UTC: "+txid)
+		}
+		return fmt.Errorf("no record %s has been added", txid)
+	})
+	ctx.Then(`^one card titled "([^"]*)" was sent to the Governor by the hook$`, func(title string) error {
+		var cards []string
+		for _, raw := range c.backend.Delivered() {
+			var payload application.PosternPayload
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				return err
+			}
+			if payload.Class != application.CardClass {
+				continue
+			}
+			text, _, err := c.cipher.Decrypt("governor", payload.Ct)
+			if err != nil {
+				return err
+			}
+			var card struct {
+				Title string `json:"title"`
+			}
+			if err := json.Unmarshal([]byte(text), &card); err != nil {
+				return err
+			}
+			cards = append(cards, card.Title)
+		}
+		if len(cards) != 1 || cards[0] != title {
+			return fmt.Errorf("expected one card titled %q, got %q", title, cards)
+		}
+		return nil
+	})
 	ctx.Then(`^the idea "([^"]*)" is held in "([^"]*)" saying "([^"]*)"$`, func(txid, channel, text string) error {
 		if err := c.itSucceeds(); err != nil {
 			return err

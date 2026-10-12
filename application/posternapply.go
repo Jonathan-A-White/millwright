@@ -155,12 +155,17 @@ func (i PosternInbox) Apply(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	pass := moveHomePass{home: home}
+	// A mode that has ended gives its ideas back before anything of his is read,
+	// so that what he sends now is not kept with them.
+	var lines []string
+	if !pass.onBoost(i.Host) {
+		lines = i.giveIdeasBack(ctx)
+	}
 	mine, applied, err := i.toApply(ctx, &pass)
 	if err != nil {
 		return nil, err
 	}
 	pass.applied = applied
-	var lines []string
 	var ideas ideasPass
 	for _, m := range mine {
 		if m.Txid == "" {
@@ -714,4 +719,31 @@ func answerSuffix(m PosternInboxMessage) string {
 		return "\n\n" + line
 	}
 	return ""
+}
+
+// giveIdeasBack is the release the hook runs first: when Ideas only is not on
+// and it holds ideas, it gives them back and says so in a line. A failure is
+// said and gone on from, so that a record of his is never lost for it; the
+// ideas stay held until the next pass or mw ideas-only release. It reports the
+// taps applied.
+func (i PosternInbox) giveIdeasBack(ctx context.Context) []string {
+	if i.Ideas == nil || i.Ideas.Files == nil || i.Cards == nil {
+		return nil
+	}
+	if held, err := i.Ideas.Files.Held(ctx); err != nil || len(held) == 0 {
+		return nil
+	}
+	report, err := i.releaseIdeas(ctx)
+	if err != nil {
+		i.printf("mw postern inbox --apply: giving back the ideas of Ideas only: %v\n", err)
+		return nil
+	}
+	if !report.Given() {
+		return nil
+	}
+	i.printf("%s\n", strings.SplitN(report.String(), "\n", 2)[0])
+	for _, line := range append(append([]string{}, report.Applied...), report.Failed...) {
+		i.printf("%s\n", line)
+	}
+	return report.Applied
 }

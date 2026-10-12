@@ -278,3 +278,52 @@ Feature: mw talk wait
     Then mw talk wait ends within 1 second
     And the wait printed "talk talk-7 turn 3"
     And the Governor was answered 0 times in all
+
+  # The end of Ideas only: the wait gives the ideas back, once, and ends printing
+  # them, so that the Mayor's harness wakes to them. It does so on the stream's
+  # ideas-only event, and on the clock passing the mode's end when no event comes.
+
+  Scenario: The stream's ideas-only event ends the mode: one card is sent and the wait ends printing the ideas
+    Given Ideas only is on until "2026-10-12T21:00:00Z" for mw talk wait
+    And the hook has already kept "direct:9"
+    And mw talk wait is armed
+    When the Governor's turn 3 of talk "talk-7" saying "An idea: a quieter dashboard" is indexed
+    Then the wait has kept 2 ideas
+    When the backend says the Governor's Ideas only has ended
+    Then mw talk wait ends within 1 second
+    And the wait printed "Ideas only ended"
+    And the wait printed "2 ideas"
+    And the wait printed "An idea: a quieter dashboard"
+    And the wait printed "direct:9"
+    And one card titled "Your ideas from Ideas only (2)" was sent to the Governor by the wait
+    And Ideas only is keeping 0 ideas
+
+  Scenario: The clock passing the end of Ideas only ends the wait the same way, with no event
+    Given Ideas only is on until "2026-10-12T21:00:00Z" for mw talk wait
+    And the hook has already kept "direct:9"
+    And mw talk wait is armed
+    When the clock of Ideas only passes "2026-10-12T21:00:01Z" for mw talk wait
+    Then mw talk wait ends within 1 second
+    And the wait printed "Ideas only ended"
+    And the wait printed "1 idea"
+    And the wait printed "direct:9"
+    And one card titled "Your ideas from Ideas only (1)" was sent to the Governor by the wait
+    And Ideas only is keeping 0 ideas
+
+  Scenario: An end with nothing held says so and the wait goes on
+    Given Ideas only is on until "2026-10-12T21:00:00Z" for mw talk wait
+    And mw talk wait has a time limit of 1200 milliseconds
+    And mw talk wait is armed
+    When the backend says the Governor's Ideas only has ended
+    Then mw talk wait is still waiting
+    When the wait comes to its time limit
+    Then the wait printed "Ideas only ended: nothing held"
+    And no card was sent to the Governor by the wait
+
+  Scenario: A wait armed after the end gives back what was left held
+    Given Ideas only is off for mw talk wait
+    And the hook has already kept "direct:9"
+    And mw talk wait is armed
+    Then mw talk wait ends within 1 second
+    And the wait printed "Ideas only ended"
+    And one card titled "Your ideas from Ideas only (1)" was sent to the Governor by the wait

@@ -8,6 +8,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
@@ -161,6 +162,10 @@ type TalkWait struct {
 	// says it is on as it starts and as it ends on its limit, and keeps the
 	// mode's note level from the stream's ideas-only events. Nil is no such mode.
 	Ideas *IdeasOnlyMode
+	// Release, when set, gives the Governor's ideas back when Ideas only ends,
+	// by the stream's event or by the clock: the wait then ends printing them.
+	// Nil leaves them held, and the wait on.
+	Release *IdeasOnlyRelease
 	// Lock, when set, is taken around keeping one record, so that the wait and
 	// the postern inbox's hook never keep, or answer, the same one together.
 	Lock HostLock
@@ -200,7 +205,14 @@ type TalkWaitReport struct {
 	// Postern is the new postern messages for the Mayor's key the wait ended
 	// on, or that came with the turn it ended on.
 	Postern []PosternInboxMessage
+	// Released is the Governor's ideas the wait gave back when Ideas only
+	// ended, nil when it ended on anything else.
+	Released *IdeasOnlyReleased
 }
+
+// errIdeasEnded ends the stream, or is the cause the wait's context is ended
+// with, once Ideas only has ended and its ideas have been given back.
+var errIdeasEnded = errors.New("Ideas only ended and its ideas were given back")
 
 // errTalkHeard ends the stream once there is something to report: the
 // Governor's turn, or a new postern message.
@@ -248,6 +260,12 @@ func (w TalkWait) Run(ctx context.Context) (TalkWaitReport, error) {
 		run.saved = cursor
 	}
 	run.ideasStart(ctx)
+	if run.ideasDue(ctx) && run.giveBackIdeas(false) {
+		return run.ideasEnded(ctx)
+	}
+	if run.Release != nil && run.Ideas != nil {
+		go run.watchIdeasEnd(ctx, stop)
+	}
 
 	backoff := minBackoff
 	for {
@@ -255,7 +273,12 @@ func (w TalkWait) Run(ctx context.Context) (TalkWaitReport, error) {
 		switch {
 		case errors.Is(err, errTalkHeard):
 			return run.finish(ctx)
+		case errors.Is(err, errIdeasEnded):
+			return run.ideasEnded(ctx)
 		case ctx.Err() != nil:
+			if errors.Is(context.Cause(ctx), errIdeasEnded) {
+				return run.ideasEnded(ctx)
+			}
 			var handed *talkHandedOver
 			if errors.As(context.Cause(ctx), &handed) {
 				return run.handedOver(handed.h), nil
@@ -337,8 +360,12 @@ type talkWaitRun struct {
 	saved     int64
 	connected bool
 
-	// ideaState is the Governor's Ideas only as the wait last knew it.
+	// ideaState is the Governor's Ideas only as the wait last knew it; the
+	// stream's events and the clock's watch both read and write it, under ideaMu.
+	ideaMu    sync.Mutex
 	ideaState IdeasOnlyState
+	// gaveBack is the release that ended the wait, set before it is ended.
+	gaveBack *IdeasOnlyReleased
 
 	// turn is the Governor's turn the wait ends on, nil when it ends on new
 	// postern messages alone; posts are those messages, the ones the wait
@@ -361,13 +388,21 @@ func (r *talkWaitRun) onEvent(event PosternEvent) error {
 	arrived := r.now()
 	switch event.Kind {
 	case PosternEventIdeasOnly:
+		was := r.ideasOn()
 		r.ideasEvent(event)
+		if was && !r.ideasOn() && r.Release != nil && r.giveBackIdeas(false) {
+			return errIdeasEnded
+		}
 		return nil
 	case PosternEventHello:
 		r.connected = true
 		if r.Ideas != nil && r.known {
 			// A stream opened again may have missed the mode turning on or off.
+			was := r.ideasOn()
 			r.refreshIdeas(r.ctx)
+			if was && !r.ideasOn() && r.Release != nil && r.giveBackIdeas(false) {
+				return errIdeasEnded
+			}
 		}
 		if !r.known {
 			r.cursor, r.known = event.Seq, true

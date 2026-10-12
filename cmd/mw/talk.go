@@ -142,7 +142,10 @@ func newTalkWaitCmd() *cobra.Command {
 			"message of his is appended to the held file, answered at once from the Mayor's key with 'Recorded\n" +
 			"for after 21:00 UTC' (a turn as a talk answer), and the wait goes on. It still ends on his limit,\n" +
 			"a handover, and a message or mail from anyone else. It keeps its note of the mode level from the\n" +
-			"stream's ideas-only event.\n\n" +
+			"stream's ideas-only event. When it ends, by that event or by the clock passing its end, the wait\n" +
+			"gives the ideas back once, as mw ideas-only release does, and ends printing 'Ideas only ended 21:00:\n" +
+			"N ideas' and a line for each, so that the Mayor's harness wakes to them; with nothing held it\n" +
+			"says 'Ideas only ended: nothing held' and goes on.\n\n" +
 			"The Mayor's key is let onto the event stream without a licence, but reading the records takes a\n" +
 			"cockpit licence on it.",
 		Args: cobra.NoArgs,
@@ -185,6 +188,7 @@ func newTalkWaitCmd() *cobra.Command {
 			}
 			_, err = application.TalkWait{
 				Ideas:       &ideas,
+				Release:     ideasOnlyReleaser(cmd.ErrOrStderr()),
 				Lock:        posternInboxLock(attachmentDir),
 				Stream:      backend,
 				Postern:     backend,

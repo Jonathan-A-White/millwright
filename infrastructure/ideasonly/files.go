@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 )
@@ -128,4 +129,30 @@ func (f *Files) Hold(ctx context.Context, held application.IdeasOnlyHeld) error 
 		return fmt.Errorf("writing %s: %w", f.heldPath(), err)
 	}
 	return file.Close()
+}
+
+// Release implements application.IdeasOnlyFiles: held.jsonl is renamed to
+// released/<ended, UTC>.jsonl, so the ideas are kept and nothing is held. A
+// name already taken gets a counter, so that two modes ending in the same
+// second lose nothing.
+func (f *Files) Release(_ context.Context, ended time.Time) error {
+	if _, err := os.Stat(f.heldPath()); os.IsNotExist(err) {
+		return nil
+	}
+	dir := filepath.Join(f.dir, "released")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("making %s: %w", dir, err)
+	}
+	name := ended.UTC().Format("20060102T150405Z")
+	target := filepath.Join(dir, name+".jsonl")
+	for n := 2; ; n++ {
+		if _, err := os.Stat(target); os.IsNotExist(err) {
+			break
+		}
+		target = filepath.Join(dir, fmt.Sprintf("%s-%d.jsonl", name, n))
+	}
+	if err := os.Rename(f.heldPath(), target); err != nil {
+		return fmt.Errorf("moving %s to %s: %w", f.heldPath(), target, err)
+	}
+	return nil
 }

@@ -758,6 +758,12 @@ func (c *posternInboxContext) inbox() application.PosternInbox {
 	if c.ideas {
 		mode := c.ideasMode()
 		inbox.Ideas = &mode
+		cards := application.Cards{
+			Postern: c.backend, Chain: apptest.NewFakeChain(c.backend, c.keys),
+			Cipher: c.cipher, Keys: c.keys, GovernorKey: c.governorKey,
+			Now: func() time.Time { return posternIdeasClock },
+		}
+		inbox.Cards = &cards
 	}
 	if c.transcriber != nil || c.runner != nil || c.replies || c.ideas {
 		inbox.Sender = &application.PosternSend{

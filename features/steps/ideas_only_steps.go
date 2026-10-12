@@ -27,6 +27,8 @@ type ideasOnlyContext struct {
 	out     bytes.Buffer
 	errOut  bytes.Buffer
 	err     error
+	// release is the rig mw ideas-only release runs in (ideas_only_release_steps.go).
+	release *ideasReleaseRig
 }
 
 const ideasOnlyGovernorKey = "governor-key"
@@ -89,6 +91,8 @@ func InitializeIdeasOnlyScenario(ctx *godog.ScenarioContext) {
 			Txid: txid, Seq: 1, Class: "message", Channel: channel, Text: text, When: c.now.Format(time.RFC3339),
 		})
 	})
+
+	c.registerReleaseSteps(ctx)
 
 	ctx.When(`^mw ideas-only is run$`, func() error {
 		c.out.Reset()
