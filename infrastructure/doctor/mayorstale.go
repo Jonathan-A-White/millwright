@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -43,14 +44,24 @@ const mayorStaleSeenStateName = "mayor-stale-seen"
 // again and the check clears it.
 const mayorStaleAlarmStateName = "mayor-stale-alarm"
 
-// mayorStalePrompt is the line a harness puts above a question it will not go
-// on without. A stale pane showing it is a Mayor waiting on a person, not a
-// dead one: the check tells the Governor and leaves the window alone.
-const mayorStalePrompt = "Do you want to proceed?"
+// mayorStalePromptQuestion and mayorStalePromptNotice are the lines a harness
+// puts up when it will not go on without a person: the question it asks, and
+// the notice that its auto-mode classifier wants confirmation (the 2026-10-11
+// Mayor sat on both for 28 hours). A stale pane showing either is a Mayor
+// waiting on a person, not a dead one: the check tells the Governor and leaves
+// the window alone.
+const (
+	mayorStalePromptQuestion = "Do you want to proceed?"
+	mayorStalePromptNotice   = "requires confirmation"
+)
 
-// mayorStalePromptLines is how many of the pane's last non-blank lines an
-// alarm about a prompt carries: the question and its numbered options.
-const mayorStalePromptLines = 12
+// mayorStalePromptStateName is where the check remembers, between runs, the
+// prompt it last alarmed about, so a prompt that stays is told once.
+const mayorStalePromptStateName = "mayor-stale-prompt"
+
+// mayorStaleChoice is a numbered option under a prompt: "1. Yes", marked or
+// not by the harness's selection arrow.
+var mayorStaleChoice = regexp.MustCompile(`^\s*(?:[❯>]\s*)?\d+\.\s`)
 
 // mayorStaleBusy is what a harness draws while a turn runs. Its elapsed clock
 // redraws the pane, so a pane that shows it and has not changed is a frozen turn.
@@ -113,6 +124,11 @@ type MayorStale struct {
 	// started is the window id bin/mayor-up printed on its last output line,
 	// read by WayBack once Cure has run.
 	started string
+	// prompt is whether the last Probe found the pane on a harness prompt, and
+	// outcome what Cure did about it (or about a stale pane), both read by
+	// WayBack: a dry run reports from prompt, a real run from outcome.
+	prompt  bool
+	outcome string
 }
 
 // NewMayorStale is the check over the vault, run through the real tmux and the
@@ -151,6 +167,12 @@ func (m *MayorStale) Probe(ctx context.Context) (application.Verdict, string) {
 	since, err := m.since(ctx, window, pane)
 	if err != nil {
 		return application.DoctorCannotTell, err.Error()
+	}
+	_, m.prompt = promptOf(pane)
+	if !m.prompt {
+		if err := m.forgetPrompt(ctx); err != nil {
+			return application.DoctorCannotTell, err.Error()
+		}
 	}
 	if paneStalls(pane) {
 		if still := m.now().Sub(since); still >= m.limit() {
@@ -230,7 +252,7 @@ func (m *MayorStale) window(ctx context.Context) (id, name string, held bool, ve
 // not one this check can call dead.
 func paneStalls(pane string) bool {
 	pane = strings.ReplaceAll(pane, "\u00a0", " ")
-	if strings.Contains(pane, mayorStaleBusy) || strings.Contains(pane, mayorStalePrompt) {
+	if _, prompt := promptOf(pane); prompt || strings.Contains(pane, mayorStaleBusy) {
 		return true
 	}
 	// The input line is the lowest line that begins with the mark: earlier
@@ -288,13 +310,22 @@ func (m *MayorStale) Cure(ctx context.Context) error {
 		minutes = int(m.now().Sub(since) / time.Minute)
 	}
 
-	if strings.Contains(pane, mayorStalePrompt) {
-		text := fmt.Sprintf("The Mayor (window %s) has waited %d minutes on a prompt. The doctor left it alone; answer it in the window:\n%s",
-			name, minutes, lastLines(pane, mayorStalePromptLines))
-		return m.alarm(ctx, text, nil)
+	if prompt, ok := promptOf(pane); ok {
+		m.outcome = "left the Mayor's window alone: it waits on a harness prompt for the Governor to answer, so there is nothing to undo"
+		if told, err := m.promptTold(ctx, window, prompt); err != nil {
+			return err
+		} else if told {
+			return nil
+		}
+		text := fmt.Sprintf("The Mayor (window %s) has waited %d minutes on a prompt. The doctor left it alone; answer it in the window:\n%s", name, minutes, prompt)
+		if err := m.alarm(ctx, text, nil); err != nil {
+			return err
+		}
+		return m.rememberPrompt(ctx, window, prompt)
 	}
 
 	if _, err := m.held().run(ctx, "kill-window", "-t", window); err != nil {
+		m.outcome = "could not close the Mayor's window, so left it as it was"
 		return m.alarm(ctx, fmt.Sprintf("The Mayor (window %s) has not changed for %d minutes, and the doctor could not close it: %v", name, minutes, err), err)
 	}
 	started, upErr := m.mayorUp(ctx)
@@ -363,6 +394,12 @@ func (m *MayorStale) Damper() (time.Duration, int) { return MayorStaleDamperWait
 
 // WayBack implements application.DoctorCheck.
 func (m *MayorStale) WayBack() string {
+	if m.outcome != "" {
+		return m.outcome
+	}
+	if m.prompt && m.started == "" {
+		return "would leave the Mayor's window alone, as it waits on a harness prompt for the Governor, and send one alarm carrying the prompt and its choices"
+	}
 	if m.started == "" {
 		return fmt.Sprintf("would close the Mayor's window and run: MW_DOCTOR=1 %s; its way back, once it starts a Mayor, is: tmux kill-window -t '<window id it prints>'", m.held().mayorUpPath())
 	}
@@ -388,11 +425,78 @@ func (m *MayorStale) capture(ctx context.Context, window string) (string, error)
 	return m.held().run(ctx, "capture-pane", "-p", "-t", window)
 }
 
-// lastLines is the last n non-blank lines of text, trimmed.
-func lastLines(text string, n int) string {
-	lines := nonEmptyLines(text)
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
+// promptOf is the harness prompt a pane is parked on, when it shows one: the
+// notice that it requires confirmation, if that stands just above, then the
+// question, then the numbered choices under it, each line trimmed. A pane
+// with the notice and choices but no question is parked on those.
+func promptOf(pane string) (string, bool) {
+	lines := nonEmptyLines(strings.ReplaceAll(pane, "\u00a0", " "))
+	at := -1
+	for _, marker := range []string{mayorStalePromptQuestion, mayorStalePromptNotice} {
+		for i := len(lines) - 1; i >= 0 && at < 0; i-- {
+			if strings.Contains(lines[i], marker) {
+				at = i
+			}
+		}
 	}
-	return strings.Join(lines, "\n")
+	if at < 0 {
+		return "", false
+	}
+	first := at
+	for first > 0 && strings.Contains(lines[first-1], mayorStalePromptNotice) {
+		first--
+	}
+	last := at
+	for last+1 < len(lines) && mayorStaleChoice.MatchString(lines[last+1]) {
+		last++
+	}
+	// The notice alone is a phrase a Mayor may quote in its own words: it is a
+	// prompt only with choices under it.
+	if last == at && !strings.Contains(lines[at], mayorStalePromptQuestion) {
+		return "", false
+	}
+	return strings.Join(lines[first:last+1], "\n"), true
+}
+
+// promptTold is whether this prompt in this window is the one the check last
+// alarmed about.
+func (m *MayorStale) promptTold(ctx context.Context, window, prompt string) (bool, error) {
+	if m.State == nil {
+		return false, nil
+	}
+	episode, err := m.State.Load(ctx, mayorStalePromptStateName)
+	if err != nil {
+		return false, fmt.Errorf("reading this check's own state: %w", err)
+	}
+	return len(episode.SeenPaths) == 1 && episode.SeenPaths[0] == promptKey(window, prompt), nil
+}
+
+// rememberPrompt records that the Governor was told of this prompt.
+func (m *MayorStale) rememberPrompt(ctx context.Context, window, prompt string) error {
+	if m.State == nil {
+		return nil
+	}
+	err := m.State.Save(ctx, mayorStalePromptStateName, application.DoctorEpisode{SeenPaths: []string{promptKey(window, prompt)}})
+	if err != nil {
+		return fmt.Errorf("saving this check's own state: %w", err)
+	}
+	return nil
+}
+
+// forgetPrompt drops the record of an alarmed prompt once the pane no longer
+// shows one, so the same prompt coming back later is told again. A dry run
+// leaves the record.
+func (m *MayorStale) forgetPrompt(ctx context.Context) error {
+	if m.State == nil || application.DoctorDryRun(ctx) {
+		return nil
+	}
+	if err := m.State.Reset(ctx, mayorStalePromptStateName); err != nil {
+		return fmt.Errorf("forgetting this check's own state: %w", err)
+	}
+	return nil
+}
+
+func promptKey(window, prompt string) string {
+	sum := sha256.Sum256([]byte(window + "\n" + prompt))
+	return hex.EncodeToString(sum[:])
 }
