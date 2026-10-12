@@ -27,6 +27,10 @@ import (
 type Release struct {
 	Tracker WorkTracker
 
+	// Rules is where a rig's file is read from, to warn of a story that has no
+	// files key on a rig that expects one. A nil Rules warns of none.
+	Rules EpicRules
+
 	// Out is where the tree is printed. A nil Out prints nothing.
 	Out io.Writer
 }
@@ -48,6 +52,8 @@ func (r Release) Run(ctx context.Context, epicID string) (FiledPlan, error) {
 	}
 	found := filedFrom(epic)
 	r.print(found.Tree())
+	// A warning only: the stories are released all the same.
+	warnNoFilesKey(ctx, r.Out, r.Rules, epic.Stories...)
 
 	held := found.held()
 	for _, story := range held {

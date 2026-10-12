@@ -69,6 +69,10 @@ type MayorNeeds interface {
 	MayorNeeds(ctx context.Context, hitl []StoryDetail) ([]PosternViewNeed, error)
 }
 
+// NoFilesKeyHeading heads the section naming the open or held stories of a rig
+// that expects a files key which have none.
+const NoFilesKeyHeading = "NO FILES KEY"
+
 // EpicsMissingHeading heads the section naming the open epics that do not meet
 // what their rig requires of an epic, and EpicsWaivedHeading the one naming the
 // epics the Governor waived it for. Each is left out when it has none.
@@ -442,6 +446,9 @@ type StatusReport struct {
 	// EpicShortfalls are the open epics of rigs that require something which do
 	// not meet it or were waived, in the order the tracker lists them.
 	EpicShortfalls []EpicShortfall
+	// NoFilesKey are the open or held stories of rigs that expect a files key
+	// (files_expected = true) whose path has none, in the order found.
+	NoFilesKey []NoFilesKey
 	// Finished are the open beads that look finished, in the order the tracker
 	// lists them; FinishedKnown says the tracker was asked, so that "nothing" is
 	// told from "not asked".
@@ -707,6 +714,16 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	report.MillhandResume = MillhandResumeLine(ctx, s.Ticks.Millhand, s.now())
 
 	if report.EpicShortfalls, err = shortfallsRead(); err != nil {
+		return report, err
+	}
+
+	var known []StoryDetail
+	known = append(known, report.Ready...)
+	known = append(known, report.Blocked...)
+	for _, other := range report.Others {
+		known = append(known, other.Stories...)
+	}
+	if report.NoFilesKey, err = s.noFilesKey(ctx, known); err != nil {
 		return report, err
 	}
 
@@ -1345,6 +1362,15 @@ func (r StatusReport) String() string {
 	}
 
 	r.writeEpicShortfalls(&b)
+
+	if len(r.NoFilesKey) > 0 {
+		clip(&b, fmt.Sprintf("%s (%d)", NoFilesKeyHeading, len(r.NoFilesKey)))
+		for _, n := range r.NoFilesKey {
+			// Not clipped: the line is the command that mends it.
+			b.WriteString("  " + n.Line() + "\n")
+		}
+		b.WriteString("\n")
+	}
 
 	if r.FinishedKnown {
 		clip(&b, fmt.Sprintf("%s (%d)", FinishedHeading, len(r.Finished)))

@@ -42,7 +42,7 @@ domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cm
 
 | Use case | File | Command | Feature |
 |-|-|-|-|
-| File, Release, Retry, Cause, Path{Set,Show} | application/file.go, application/release.go, application/retry.go, application/cause.go, application/pathset.go | cmd/mw/file.go, cmd/mw/release.go, cmd/mw/retry.go, cmd/mw/cause.go, cmd/mw/path.go | features/{file_plan,release,retry,cause,path_set}.feature |
+| File, Release, Retry, Cause, Path{Set,Show} | application/file.go, application/release.go, application/retry.go, application/cause.go, application/pathset.go | cmd/mw/file.go, cmd/mw/release.go, cmd/mw/retry.go, cmd/mw/cause.go, cmd/mw/path.go | features/{file_plan,release,retry,cause,path_set,files_expected}.feature |
 | Show, Peek, Prove, StampHead, Tester, FactoryReport[Send] | application/show.go, application/stamphead.go, application/testerreport.go, application/factoryreport.go, application/reportsend.go | mw show/peek/prove/stamp/tester/report[ send] - cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go, cmd/mw/tester.go, cmd/mw/report.go, cmd/mw/reportsend.go | features/{show,peek,prove,stamp,tester,report,report_send}.feature |
 | Dispatch, Next, AfterLandingRun | application/dispatch.go, application/next.go, application/afterlandingrun.go | mw dispatch/next/after-landing - cmd/mw/dispatch.go, cmd/mw/next.go, cmd/mw/afterlanding.go | features/{dispatch,next,after_landing}.feature |
 | Check, Status, CloudCheck, Brief | application/check.go, application/status.go, application/cloud.go, application/brief.go | mw check/status/cloud/brief - cmd/mw/check.go, cmd/mw/status.go, cmd/mw/cloud.go, cmd/mw/brief.go | features/{check,status,cloud,brief}.feature |

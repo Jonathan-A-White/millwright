@@ -36,6 +36,12 @@ type EpicRequirements struct {
 	// that, /commit/ and the commit. A rig that is private names none. It is no
 	// requirement of an epic either, so Any does not count it.
 	PublicURL string
+	// FilesExpected says the rig's stories are expected to name `files` in their
+	// path: mw status, mw release and mw path show warn of one that does not,
+	// since the overlap guard of mw dispatch holds back only a story that names
+	// them (mw-gq6.349). It is no requirement of an epic either, so Any does
+	// not count it.
+	FilesExpected bool
 }
 
 // Any reports whether the rig asks anything of its epics at all. A rig that
