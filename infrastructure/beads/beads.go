@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -883,12 +884,45 @@ func (g *Gateway) call(ctx context.Context, args ...string) ([]byte, error) {
 }
 
 // failed is the error call makes of a bd that failed: the command, bd's own
-// error and what it said.
+// error and what it said. When what it said is a passing fault of the network
+// — a Dolt server that did not answer in time — the error is also an
+// application.TransientFault, so that a caller that reads may try again
+// (mw-gq6.374); its words are bd's own all the same.
 func (g *Gateway) failed(err error, out, errs []byte, args []string) error {
-	if said := said(out, errs); said != "" {
-		return fmt.Errorf("%s %s: %w: %s", g.program, strings.Join(args, " "), err, said)
+	told := said(out, errs)
+	if told == "" {
+		return fmt.Errorf("%s %s: %w", g.program, strings.Join(args, " "), err)
 	}
-	return fmt.Errorf("%s %s: %w", g.program, strings.Join(args, " "), err)
+	failure := fmt.Errorf("%s %s: %w: %s", g.program, strings.Join(args, " "), err, told)
+	if ctx := errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded); !ctx {
+		if why, passing := passingFault(told); passing {
+			return &application.TransientFault{Why: why, Err: failure}
+		}
+	}
+	return failure
+}
+
+// passingFaults are the words bd uses for a Dolt server it could not reach or
+// whose answer did not come, as against a reason it states that trying again
+// will never change, each with the short name a note gives it.
+var passingFaults = []struct{ phrase, why string }{
+	{"dolt server unreachable", "dolt server unreachable"},
+	{"i/o timeout", "i/o timeout"},
+	{"connection reset by peer", "connection reset"},
+	{"no such host", "could not resolve host"},
+	{"temporary failure in name resolution", "could not resolve host"},
+}
+
+// passingFault reports whether what bd said is a passing fault of the network,
+// and names it in a few words.
+func passingFault(said string) (string, bool) {
+	said = strings.ToLower(said)
+	for _, fault := range passingFaults {
+		if strings.Contains(said, fault.phrase) {
+			return fault.why, true
+		}
+	}
+	return "", false
 }
 
 // killGrace is how long a bd that has been told to stop is given to let go of
