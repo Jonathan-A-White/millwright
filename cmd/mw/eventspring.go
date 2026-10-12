@@ -106,7 +106,8 @@ func gristSpringJob(host string, out io.Writer) (application.SpringJob, bool, er
 		}
 		return application.IsHome(ctx, mwVault(dir, host), host)
 	}
-	watch := &application.GristWatch{Postern: backend, Keys: keys, Err: out}
+	notices := application.NewGristNotices()
+	watch := &application.GristWatch{Postern: backend, Keys: keys, Notices: notices, Err: out}
 	job := application.GristJob(watch, func(ctx context.Context) error {
 		if at, err := home(ctx); err != nil || !at {
 			return err
@@ -115,6 +116,7 @@ func gristSpringJob(host string, out io.Writer) (application.SpringJob, bool, er
 		if err != nil {
 			return err
 		}
+		mill.Notices = notices
 		_, err = mill.Run(ctx)
 		return err
 	})

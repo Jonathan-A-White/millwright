@@ -1,0 +1,226 @@
+package application
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"math"
+	"sort"
+	"sync"
+	"time"
+)
+
+// gristNoticeKeep is how long GristNotices holds a notice nobody took: a
+// grist noticed and never answered does not stay in memory.
+const gristNoticeKeep = time.Hour
+
+// GristNotices remembers when GristWatch noticed each grist at the backend, in
+// the follower's own process, for the pass of the mill it springs to say how
+// long the wake took. A pass the dispatch tick runs finds none and counts
+// from its own start. The zero value is not ready; a nil *GristNotices notes
+// and takes nothing.
+type GristNotices struct {
+	mu sync.Mutex
+	at map[string]time.Time
+}
+
+// NewGristNotices is an empty set of notices.
+func NewGristNotices() *GristNotices {
+	return &GristNotices{at: map[string]time.Time{}}
+}
+
+// Note records that txid was noticed at the time given; the first notice of a
+// txid stands. Notices older than gristNoticeKeep are dropped.
+func (n *GristNotices) Note(txid string, at time.Time) {
+	if n == nil {
+		return
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for old, when := range n.at {
+		if at.Sub(when) > gristNoticeKeep {
+			delete(n.at, old)
+		}
+	}
+	if _, ok := n.at[txid]; !ok {
+		n.at[txid] = at
+	}
+}
+
+// Take reports when txid was noticed and forgets it; false when nothing
+// noticed it.
+func (n *GristNotices) Take(txid string) (time.Time, bool) {
+	if n == nil {
+		return time.Time{}, false
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	at, ok := n.at[txid]
+	delete(n.at, txid)
+	return at, ok
+}
+
+// tenths is seconds rounded to one decimal, as a grind line keeps it.
+func tenths(seconds float64) *float64 {
+	rounded := math.Round(seconds*10) / 10
+	return &rounded
+}
+
+// phase is the seconds from one moment to a later one, or nil when either
+// moment is not known or they come the wrong way round (the backend's clock
+// is not this host's).
+func phase(from, to time.Time) *float64 {
+	if from.IsZero() || to.IsZero() || to.Before(from) {
+		return nil
+	}
+	return tenths(to.Sub(from).Seconds())
+}
+
+// GristTiming is `mw grist timing`: where the seconds of the mill's answers
+// went, from the phases each grind line carries. Only the record's own
+// numbers are read: no tokens, no network.
+type GristTiming struct {
+	State GristState
+	// Out is where the table is printed; nil prints nothing.
+	Out io.Writer
+}
+
+// GristTimingPhases is the name and meaning of each phase mw grist timing
+// prints, in order: what --help says.
+var GristTimingPhases = []struct{ Name, Means string }{
+	{"seconds", "the mill's own time, from its grind starting (a refusal: the pass taking it up) to the answer delivered or kept; every line has it, old ones too"},
+	{"wake", "the grist sent on the backend to noticed by the follower's watch (or the dispatch tick's pass)"},
+	{"pickup", "noticed to the pass starting on the grist"},
+	{"slot", "waiting for one of the mill's grind slots"},
+	{"startup", "the harness process starting, to its own clock starting (the whole run when it reports none)"},
+	{"model", "the rest of the harness run"},
+	{"deliver", "the answer ready to the backend taking it"},
+	{"total", "the grist sent to its answer delivered"},
+}
+
+// GristTimingRow is one phase of one app and kind: how many grinds had it, and
+// the median and 90th percentile of its seconds.
+type GristTimingRow struct {
+	Phase       string
+	Count       int
+	Median, P90 float64
+}
+
+// GristTimingGroup is one app and kind and its phases.
+type GristTimingGroup struct {
+	App, Kind string
+	Grinds    int
+	Rows      []GristTimingRow
+}
+
+// Run reads the record and reports, for each app and kind (by name),
+// the count, median and p90 of every phase some grind had. since keeps only
+// lines at or after since (the zero time keeps every line); app and kind, when
+// not empty, keep those alone.
+func (g GristTiming) Run(ctx context.Context, since time.Time, app, kind string) ([]GristTimingGroup, error) {
+	if g.State == nil {
+		return nil, fmt.Errorf("mw grist timing: nowhere the mill keeps its record")
+	}
+	lines, err := g.State.Lines(ctx)
+	if err != nil {
+		return nil, err
+	}
+	type key struct{ app, kind string }
+	grouped := map[key][]GrindLine{}
+	for _, line := range lines {
+		if line.Time.Before(since) {
+			continue
+		}
+		if (app != "" && line.App != app) || (kind != "" && line.Kind != kind) {
+			continue
+		}
+		grouped[key{line.App, line.Kind}] = append(grouped[key{line.App, line.Kind}], line)
+	}
+	var groups []GristTimingGroup
+	for k, ls := range grouped {
+		group := GristTimingGroup{App: k.app, Kind: k.kind, Grinds: len(ls)}
+		for _, p := range GristTimingPhases {
+			var seconds []float64
+			for _, line := range ls {
+				if s := line.phaseSeconds(p.Name); s != nil {
+					seconds = append(seconds, *s)
+				}
+			}
+			if len(seconds) > 0 {
+				group.Rows = append(group.Rows, timingRow(p.Name, seconds))
+			}
+		}
+		groups = append(groups, group)
+	}
+	sort.Slice(groups, func(i, j int) bool {
+		if groups[i].App != groups[j].App {
+			return groups[i].App < groups[j].App
+		}
+		return groups[i].Kind < groups[j].Kind
+	})
+	if g.Out != nil {
+		g.print(groups, app, kind)
+	}
+	return groups, nil
+}
+
+// phaseSeconds is the seconds of the phase named, or nil when the line does not
+// have it.
+func (l GrindLine) phaseSeconds(name string) *float64 {
+	switch name {
+	case "seconds":
+		return &l.Seconds
+	case "wake":
+		return l.WakeSeconds
+	case "pickup":
+		return l.PickupSeconds
+	case "slot":
+		return l.SlotSeconds
+	case "startup":
+		return l.StartupSeconds
+	case "model":
+		return l.ModelSeconds
+	case "deliver":
+		return l.DeliverSeconds
+	case "total":
+		return l.TotalSeconds
+	}
+	return nil
+}
+
+func (g GristTiming) print(groups []GristTimingGroup, app, kind string) {
+	if len(groups) == 0 {
+		fmt.Fprintln(g.Out, "the mill's record holds no grinds that fit")
+		return
+	}
+	for i, group := range groups {
+		if i > 0 {
+			fmt.Fprintln(g.Out)
+		}
+		name := group.App + " " + group.Kind
+		if group.App == "" && group.Kind == "" {
+			name = "(unread grists)"
+		}
+		noun := "grinds"
+		if group.Grinds == 1 {
+			noun = "grind"
+		}
+		fmt.Fprintf(g.Out, "%s: %d %s\n%-8s  %5s  %8s  %8s\n", name, group.Grinds, noun, "phase", "count", "median", "p90")
+		for _, r := range group.Rows {
+			fmt.Fprintf(g.Out, "%-8s  %5d  %7.1fs  %7.1fs\n", r.Phase, r.Count, r.Median, r.P90)
+		}
+	}
+}
+
+// timingRow is the median and nearest-rank 90th percentile of seconds.
+func timingRow(phase string, seconds []float64) GristTimingRow {
+	sorted := append([]float64(nil), seconds...)
+	sort.Float64s(sorted)
+	n := len(sorted)
+	median := sorted[n/2]
+	if n%2 == 0 {
+		median = (sorted[n/2-1] + sorted[n/2]) / 2
+	}
+	rank := int(math.Ceil(0.9 * float64(n)))
+	return GristTimingRow{Phase: phase, Count: n, Median: median, P90: sorted[max(rank, 1)-1]}
+}

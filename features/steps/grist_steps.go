@@ -89,8 +89,9 @@ type gristContext struct {
 	grist   application.PosternRecord
 	photos  map[string][]byte // blob hash to the photo it seals
 
-	audio audioContext // features/grist_audio.feature
-	slots slotsContext // features/grist_concurrent.feature
+	audio  audioContext  // features/grist_audio.feature
+	timing timingContext // features/grist_timing.feature
+	slots  slotsContext  // features/grist_concurrent.feature
 
 	// statuses is the request status pass a dispatch tick is given
 	// (features/grist_request.feature); nil is none.
@@ -130,6 +131,7 @@ func InitializeGristScenario(ctx *godog.ScenarioContext) {
 	registerGristSlots(ctx, c)
 	registerGristForward(ctx, c)
 	registerGristRequest(ctx, c)
+	registerGristTiming(ctx, c)
 
 	ctx.Given(`^a mill on the host "([^"]*)"$`, c.aMill)
 	ctx.Given(`^the app "([^"]*)" is checked out here, its main at commit "([^"]*)" with the grind "([^"]*)"$`, c.theAppIsCheckedOut)
@@ -509,8 +511,8 @@ func (c *gristContext) aGrindIsRunningOn(host string) error {
 
 func (c *gristContext) mill() application.GristGrind {
 	return application.GristGrind{
-		Postern: c.backend, Cipher: &apptest.FakeCipher{From: c.millKey}, Keys: c.keys,
-		State: c.state, Grinds: c.grinds, Grinder: c.grinder,
+		Postern: c.timing.postern(c.backend), Cipher: &apptest.FakeCipher{From: c.millKey}, Keys: c.keys,
+		State: c.state, Grinds: c.grinds, Grinder: c.timing.grinder(c.grinder),
 		Pass: c.pass, Grinding: c.grinding, MoreGrinding: c.slots.more(), Host: c.host,
 		Apps:        map[string]string{"cairn": c.checkout("cairn")},
 		Ceilings:    c.ceilings,
@@ -522,13 +524,17 @@ func (c *gristContext) mill() application.GristGrind {
 		Mailbox:     c.forward.mailboxPort(),
 		Forwards:    c.forward.keeper(),
 		Visions:     c.forward.visionPort(),
-		Now:         c.audio.now,
+		Now:         c.timing.nowOr(c.audio.now),
+		Notices:     c.timing.notices,
 		Out:         &c.out,
 	}
 }
 
 func (c *gristContext) theMillGrinds() error {
 	c.out.Reset()
+	if err := c.timing.noticeGrists(); err != nil {
+		return err
+	}
 	c.report, c.err = c.mill().Run(context.Background())
 	return c.err
 }

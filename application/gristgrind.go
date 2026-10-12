@@ -92,6 +92,10 @@ type GristGrind struct {
 
 	// Host is this host.
 	Host string
+	// Notices is when GristWatch noticed each grist, in the follower that
+	// sprang this pass; nil, or a grist it did not notice, counts the wake
+	// from the start of the pass (the dispatch tick's).
+	Notices *GristNotices
 	// Scorers are the engines this host runs; every one of them scores each
 	// recording a scoring grind's grist carries. Runs keeps every grind's raw
 	// record; nil keeps none.
@@ -241,6 +245,32 @@ type gristWork struct {
 	harnessStarted time.Time
 	answered       time.Time
 	notes          []string
+
+	// noticed is when the grist was noticed, by GristWatch or else the start
+	// of the pass; slotAsked is when the pass first asked for a grind slot,
+	// and slotted that it got one (started is then when it did); harnessOK
+	// that the harness gave a result. They are the phases of the grind's line.
+	noticed   time.Time
+	slotAsked time.Time
+	slotted   bool
+	harnessOK bool
+}
+
+// harnessPhases is the harness run's start-up and model seconds. The harness
+// reports duration_ms, the time its own clock ran: what the wall-clock run
+// took beyond it is the process starting up. A result without it counts the
+// whole run as start-up and leaves the model's time out; a run that gave no
+// result has neither.
+func (w *gristWork) harnessPhases() (startup, model *float64) {
+	if !w.ran || !w.harnessOK || w.harnessStarted.IsZero() || w.answered.Before(w.harnessStarted) {
+		return nil, nil
+	}
+	wall := w.answered.Sub(w.harnessStarted)
+	own := w.result.Duration
+	if own <= 0 || own > wall {
+		return tenths(wall.Seconds()), nil
+	}
+	return tenths((wall - own).Seconds()), tenths(own.Seconds())
 }
 
 // gristClip is one attachment of a grist, opened: its type and its bytes.
@@ -268,6 +298,7 @@ func (g GristGrind) Run(ctx context.Context) (GristReport, error) {
 	if err := g.wired(); err != nil {
 		return report, err
 	}
+	started := g.now()
 	release, taken, err := g.Pass.TryTake(ctx)
 	if err != nil {
 		return report, fmt.Errorf("mw grist grind: %w", err)
@@ -310,6 +341,7 @@ func (g GristGrind) Run(ctx context.Context) (GristReport, error) {
 		g: g, ctx: ctx, report: &report, privKey: privKey, millKey: millKey,
 		lines: lines, answered: answered, records: records, ended: make([]bool, len(records)),
 		next: cursor, ground: make(chan gristGround), held: make([]func(), len(g.slots())),
+		started: started,
 	}
 	p.work()
 	g.keepCursor(ctx, cursor, p.next, &report)
@@ -333,6 +365,9 @@ type gristPass struct {
 	report  *GristReport
 	privKey string
 	millKey string
+	// started is when the pass began: when a grist nothing noticed first is
+	// counted as noticed.
+	started time.Time
 
 	lines    []GrindLine
 	answered map[string]bool
@@ -373,6 +408,7 @@ func (p *gristPass) work() {
 		}
 		w := &gristWork{record: r, started: g.now(), sealed: map[string]bool{}}
 		w.received = w.started
+		w.noticed = p.noticedAt(r.Txid)
 		g.judge(p.ctx, w, p.privKey, p.lines)
 		if w.status == "" && w.grind.Forward != "" {
 			g.forward(p.ctx, w, p.privKey)
@@ -388,6 +424,7 @@ func (p *gristPass) work() {
 			p.settleGrist(i, w)
 			continue
 		}
+		w.slotAsked = g.now()
 		slot, why := p.slot()
 		if slot < 0 && p.err != nil {
 			break
@@ -404,6 +441,15 @@ func (p *gristPass) work() {
 	for p.grinding > 0 {
 		p.settle(<-p.ground)
 	}
+}
+
+// noticedAt is when the grist of txid was noticed: when GristWatch saw it, else
+// when this pass began, which the dispatch tick's pass is the first to see.
+func (p *gristPass) noticedAt(txid string) time.Time {
+	if at, ok := p.g.Notices.Take(txid); ok {
+		return at
+	}
+	return p.started
 }
 
 // slot takes a slot for the next grind, waiting for one of this pass's own
@@ -434,6 +480,7 @@ func (p *gristPass) slot() (int, string) {
 func (p *gristPass) grind(at int, w *gristWork, n int) {
 	p.grinding++
 	w.started = p.g.now()
+	w.slotted = true
 	go func() {
 		p.g.grindOne(p.ctx, w, p.privKey)
 		p.ground <- gristGround{at: at, w: w, slot: n}
@@ -784,6 +831,7 @@ func (g GristGrind) grindOne(ctx context.Context, w *gristWork, privKey string) 
 	result, err := g.Grinder.Grind(ctx, call)
 	w.answered = g.now()
 	w.result = result
+	w.harnessOK = err == nil
 	status, reason := gristOutcome(result, err, w.schema)
 	if status == GristAnswered {
 		w.answer = result.Answer
@@ -950,6 +998,7 @@ func gristPrompt(plain GristPlaintext, photos []string, tag string) string {
 // the pass.
 func (g GristGrind) answer(ctx context.Context, w *gristWork, privKey, millKey string, report *GristReport) (GrindLine, error) {
 	name := w.plain.Grist
+	ready := g.now()
 	body := GristAnswer{
 		Re: w.record.Txid, Status: w.status, Reason: w.reason, Answer: w.answer,
 		ReadingResult: w.reading, ReadingResults: w.readings,
@@ -961,6 +1010,7 @@ func (g GristGrind) answer(ctx context.Context, w *gristWork, privKey, millKey s
 	report.Notes = append(report.Notes, w.notes...)
 	blobs := g.provenBlobs(ctx, w, privKey)
 	delivered, err := g.deliver(ctx, millKey, w.to, body, blobs)
+	deliveredAt := g.now()
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the answer to %s could not be sent: %v", shortTxid(w.record.Txid), err))
 	}
@@ -979,6 +1029,16 @@ func (g GristGrind) answer(ctx context.Context, w *gristWork, privKey, millKey s
 	}
 	if fuel := w.result.Fuel; fuel.Total() > 0 {
 		line.Fuel = &GrindFuel{Input: fuel.Input, Output: fuel.Output, CacheRead: fuel.CacheRead, CacheWrite: fuel.CacheWrite}
+	}
+	line.WakeSeconds = phase(w.record.Ts, w.noticed)
+	line.PickupSeconds = phase(w.noticed, w.received)
+	if w.slotted {
+		line.SlotSeconds = phase(w.slotAsked, w.started)
+	}
+	line.StartupSeconds, line.ModelSeconds = w.harnessPhases()
+	if delivered {
+		line.DeliverSeconds = phase(ready, deliveredAt)
+		line.TotalSeconds = phase(w.record.Ts, deliveredAt)
 	}
 	if err := g.State.Append(ctx, line); err != nil {
 		return line, fmt.Errorf("mw grist grind: %s was answered %s, but the record could not be written, so it may be answered again: %w", w.record.Txid, w.status, err)

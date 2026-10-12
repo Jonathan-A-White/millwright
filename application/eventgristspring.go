@@ -33,6 +33,9 @@ type GristWatch struct {
 	// Every is the least time between two reads of the backend; zero is
 	// DefaultGristWatchEvery.
 	Every time.Duration
+	// Notices, when set, is told when each new grist was noticed, for the
+	// pass the follower springs to record how long the wake took.
+	Notices *GristNotices
 	// Now is the clock; nil is time.Now. Err is where a failed read is said,
 	// once for each distinct failure; nil says nothing.
 	Now func() time.Time
@@ -79,9 +82,14 @@ func (w *GristWatch) Waiting(ctx context.Context) (string, bool) {
 	w.said = ""
 	first, found := !w.taken, ""
 	w.taken = true
+	seen := now()
 	for _, r := range records {
 		w.newest = max(w.newest, r.Seq)
-		if r.Class == GristClass && r.To == millKey && r.Txid != "" && found == "" {
+		mine := r.Class == GristClass && r.To == millKey && r.Txid != ""
+		if mine && !first {
+			w.Notices.Note(r.Txid, seen)
+		}
+		if mine && found == "" {
 			found = "grist " + r.Txid + " arrived"
 		}
 	}
