@@ -643,7 +643,7 @@ func (n Next) closeOut(ctx context.Context, storyID string, began time.Time) (Ne
 		return report, fmt.Errorf("closing out a story: which story?")
 	}
 
-	detail, err := n.Tracker.ShowStory(ctx, storyID)
+	detail, err := readRetrying(ctx, n, &report, "the story", func() (StoryDetail, error) { return n.Tracker.ShowStory(ctx, storyID) })
 	if err != nil {
 		return report, fmt.Errorf("closing out %s: %w", storyID, err)
 	}
@@ -913,7 +913,7 @@ func (n Next) sendBack(ctx context.Context, c *closeOut, report *NextReport, lan
 	if n.Runner == nil || n.Boot.Harness == nil {
 		return "this mw next has no session to send it back to"
 	}
-	was, err := n.Tracker.StoryState(ctx, c.id, RebaseState)
+	was, err := readRetrying(ctx, n, report, "the rebase state", func() (string, error) { return n.Tracker.StoryState(ctx, c.id, RebaseState) })
 	if err != nil {
 		return fmt.Sprintf("whether it was sent back before could not be read: %v", err)
 	}
@@ -1063,7 +1063,7 @@ func (n Next) sendBackForFailingTests(ctx context.Context, c *closeOut, report *
 	if n.Runner == nil || n.Boot.Harness == nil {
 		return "this mw next has no session to send it back to"
 	}
-	was, err := n.Tracker.StoryState(ctx, c.id, MergedTestsState)
+	was, err := readRetrying(ctx, n, report, "the merged-tests state", func() (string, error) { return n.Tracker.StoryState(ctx, c.id, MergedTestsState) })
 	if err != nil {
 		return fmt.Sprintf("whether it was sent back before could not be read: %v", err)
 	}
@@ -1243,7 +1243,7 @@ func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all
 
 	// What the formula says the session was to do. A step still open is a step
 	// the session did not do, whatever the code looks like.
-	if refusal, open := n.openStepsRefusal(ctx, c); open && refuse(refusal.Reason, refusal.Why, refusal.Said) {
+	if refusal, open := n.openStepsRefusal(ctx, c, report); open && refuse(refusal.Reason, refusal.Why, refusal.Said) {
 		return found
 	}
 
@@ -1287,12 +1287,12 @@ func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all
 
 // openStepsRefusal is the refusal of a story whose poured formula still has a
 // step open, or whose steps could not be read; false when there is none.
-func (n Next) openStepsRefusal(ctx context.Context, c *closeOut) (Refusal, bool) {
+func (n Next) openStepsRefusal(ctx context.Context, c *closeOut, report *NextReport) (Refusal, bool) {
 	root := c.detail.Molecule.RootID
 	if root == "" {
 		return Refusal{}, false
 	}
-	open, err := n.Tracker.OpenSteps(ctx, root)
+	open, err := readRetrying(ctx, n, report, "the formula's steps", func() ([]FormulaStep, error) { return n.Tracker.OpenSteps(ctx, root) })
 	switch {
 	case err != nil:
 		return Refusal{ReasonTrackerFailed, fmt.Sprintf("the steps of the formula poured as %s could not be read: %v", root, err), ""}, true
@@ -1564,7 +1564,7 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 		}
 		version.Files = rules.VersionFiles
 		if len(rules.VersionFiles) > 0 && len(rules.ChangelogFiles) > 0 {
-			if version.Entry, err = n.changelogEntry(ctx, c); err != nil {
+			if version.Entry, err = n.changelogEntry(ctx, c, report); err != nil {
 				return Landed{}, failedFor(ReasonLandingFailed, err)
 			}
 			if version.Entry.Text != "" {
@@ -1676,8 +1676,8 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 // the story's newest What's new: line, or its title when it has none, under
 // today's date (UTC). Its Text is empty when the story says "What's new: none".
 // The version is the landing's to fill in.
-func (n Next) changelogEntry(ctx context.Context, c *closeOut) (domain.ChangelogEntry, error) {
-	comments, err := n.Tracker.StoryComments(ctx, c.id)
+func (n Next) changelogEntry(ctx context.Context, c *closeOut, report *NextReport) (domain.ChangelogEntry, error) {
+	comments, err := readRetrying(ctx, n, report, "the comments", func() ([]Comment, error) { return n.Tracker.StoryComments(ctx, c.id) })
 	if err != nil {
 		return domain.ChangelogEntry{}, fmt.Errorf("the comments on %s could not be read for its What's new line: %w", c.id, err)
 	}
@@ -1776,6 +1776,32 @@ func (n Next) fetchRetrying(ctx context.Context, report *NextReport, rigDir stri
 		report.Notes = append(report.Notes, retryNote("fetch", err, wait))
 		if waitErr := n.retryWait(ctx, wait); waitErr != nil {
 			return fmt.Errorf("%w (and waiting %s to fetch again: %v)", err, wait, waitErr)
+		}
+	}
+}
+
+// readRetrying runs one read of the work tracker, and when it failed on a
+// passing fault of the network — a Dolt server that did not answer in time —
+// tries it again ReadRetries times, a growing wait apart and under a minute in
+// all with the default PushWait, one note per retry. A read that failed for any
+// other reason, "no issue found" among them, comes back at once as it was; so
+// does one that fails every time, in the tracker's own words (mw-gq6.374).
+func readRetrying[T any](ctx context.Context, n Next, report *NextReport, what string, read func() (T, error)) (T, error) {
+	for retry := 0; ; retry++ {
+		got, err := read()
+		if err == nil {
+			return got, nil
+		}
+		fault, passing := Faulted(err)
+		if !passing || retry == ReadRetries {
+			return got, err
+		}
+		wait := n.PushWait / 4 * time.Duration(retry+1)
+		if report != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf("read of %s failed (%s), retried in %s", what, fault.Why, wait))
+		}
+		if waitErr := n.retryWait(ctx, wait); waitErr != nil {
+			return got, fmt.Errorf("%w (and waiting %s to read %s again: %v)", err, wait, what, waitErr)
 		}
 	}
 }

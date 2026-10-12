@@ -115,3 +115,7 @@ func Faulted(err error) (*TransientFault, bool) {
 	var fault *TransientFault
 	return fault, errors.As(err, &fault)
 }
+
+// ReadRetries is how many times a bd read that failed on a passing fault of the
+// network is tried again before the close-out stops (mw-gq6.374).
+const ReadRetries = 4
