@@ -38,6 +38,7 @@ func newGristCmd() *cobra.Command {
 	root.AddCommand(newGristScoreCmd())
 	root.AddCommand(newGristRunsCmd())
 	root.AddCommand(newGristStatsCmd())
+	root.AddCommand(newGristTimingCmd())
 	root.AddCommand(newGristSmokeCmd())
 	return root
 }
@@ -486,6 +487,53 @@ func newGristStatsCmd() *cobra.Command {
 	cmd.Flags().IntVar(&last, "last", application.GristStatsLast, "how many of the latest runs of the kind to look at")
 	_ = cmd.MarkFlagRequired("kind")
 	return cmd
+}
+
+// newGristTimingCmd builds `mw grist timing`: where the seconds of the mill's
+// answers went, from the phases each line of grinds.jsonl carries.
+func newGristTimingCmd() *cobra.Command {
+	var since, app, kind string
+
+	cmd := &cobra.Command{
+		Use:   "timing",
+		Short: "Print the median and p90 of each phase of the mill's answers, per app and kind",
+		Long: "timing reads grinds.jsonl in grist_state_dir and prints, for each app and kind, how many grinds\n" +
+			"it holds and, for each phase, how many had it and the median and p90 of its seconds. A phase\n" +
+			"a grind's line does not carry (an old line, a refusal that ran no harness, an answer not\n" +
+			"delivered) is not counted, and a phase no grind had is left out. It reads no tokens and calls\n" +
+			"nothing. The phases, in the order an answer's seconds pass:\n\n" +
+			gristTimingHelp() + "\n" +
+			"The phases run from the grist's own sent time, so wake and total lean on the backend's clock.\n" +
+			"Seconds between phases (the app's grind read, the photos opened, a recording scored) are in\n" +
+			"total and in no phase.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			from, err := parseRunsSince(since, time.Now())
+			if err != nil {
+				return err
+			}
+			stateDir, err := config.GristStateDir()
+			if err != nil {
+				return err
+			}
+			_, err = application.GristTiming{State: grist.New(stateDir), Out: cmd.OutOrStdout()}.Run(cmd.Context(), from, app, kind)
+			return err
+		},
+	}
+	cmd.Flags().StringVar(&since, "since", "", "count only the grinds since this: a duration such as 24h, a date, or an RFC 3339 time (default: all)")
+	cmd.Flags().StringVar(&app, "app", "", "count only this app's grinds")
+	cmd.Flags().StringVar(&kind, "kind", "", "count only this kind of grist")
+	return cmd
+}
+
+// gristTimingHelp is each phase mw grist timing prints and what it means, one
+// to a line.
+func gristTimingHelp() string {
+	var b strings.Builder
+	for _, p := range application.GristTimingPhases {
+		fmt.Fprintf(&b, "  %-8s %s\n", p.Name, p.Means)
+	}
+	return b.String()
 }
 
 // parseRunsSince is --since as a time: empty is the beginning of time.
