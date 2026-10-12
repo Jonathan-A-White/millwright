@@ -26,6 +26,12 @@ type FakePostern struct {
 	delivered  [][]byte
 	uploaded   [][]byte
 	deleted    []string
+	reads      int
+	streams    []*fakeStream
+
+	// StreamErr, when set, is what Events fails with at once: a backend that
+	// refuses the event stream.
+	StreamErr error
 
 	// NextTxid is the txid Broadcast and Deliver report. When empty,
 	// Broadcast reports "fake-txid-<n>" and Deliver "direct:fake-<n>".
@@ -51,6 +57,19 @@ type FakePostern struct {
 // FakePostern satisfies the port.
 var _ application.Postern = (*FakePostern)(nil)
 var _ application.IdeasOnlyReader = (*FakePostern)(nil)
+var _ application.PosternStream = (*FakePostern)(nil)
+
+// fakeStream is one open Events call: what AddRecord hands it, and the ack it
+// waits on, so that a record is heard before AddRecord returns.
+type fakeStream struct {
+	send chan fakeStreamEvent
+	done chan struct{}
+}
+
+type fakeStreamEvent struct {
+	event application.PosternEvent
+	heard chan struct{}
+}
 
 // NewFakePostern returns an empty postern backend.
 func NewFakePostern() *FakePostern {
@@ -74,12 +93,76 @@ func (f *FakePostern) SetBlob(hash string, body []byte) {
 // past what has been added so far, unless it is already set.
 func (f *FakePostern) AddRecord(record application.PosternRecord) application.PosternRecord {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	if record.Seq == 0 {
 		record.Seq = int64(len(f.records)) + 1
 	}
 	f.records = append(f.records, record)
+	open := append([]*fakeStream(nil), f.streams...)
+	f.mu.Unlock()
+	for _, s := range open {
+		heard := make(chan struct{})
+		select {
+		case s.send <- fakeStreamEvent{event: application.PosternEvent{Kind: application.PosternEventMessage, Seq: record.Seq}, heard: heard}:
+			<-heard
+		case <-s.done:
+		}
+	}
 	return record
+}
+
+// Events implements application.PosternStream: it says hello with the head,
+// then each record AddRecord adds as a message event, until ctx is done. A
+// record is heard (onEvent has returned) before AddRecord returns.
+func (f *FakePostern) Events(ctx context.Context, onEvent func(application.PosternEvent) error) error {
+	f.mu.Lock()
+	if f.StreamErr != nil {
+		defer f.mu.Unlock()
+		return f.StreamErr
+	}
+	s := &fakeStream{send: make(chan fakeStreamEvent), done: make(chan struct{})}
+	f.streams = append(f.streams, s)
+	head := int64(len(f.records))
+	f.mu.Unlock()
+	defer func() {
+		close(s.done)
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		for i, other := range f.streams {
+			if other == s {
+				f.streams = append(f.streams[:i], f.streams[i+1:]...)
+				break
+			}
+		}
+	}()
+	if err := onEvent(application.PosternEvent{Kind: application.PosternEventHello, Seq: head}); err != nil {
+		return err
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case e := <-s.send:
+			err := onEvent(e.event)
+			close(e.heard)
+			if err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// Streams is how many Events calls are open.
+func (f *FakePostern) Streams() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.streams)
+}
+
+// Reads is how many times Messages was called, failed or not.
+func (f *FakePostern) Reads() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.reads
 }
 
 // SetUtxos sets what Utxos reports for address.
@@ -115,6 +198,7 @@ func (f *FakePostern) ChainCalls() int {
 func (f *FakePostern) Messages(_ context.Context, since int64) ([]application.PosternRecord, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.reads++
 	if f.Err != nil {
 		return nil, f.Err
 	}

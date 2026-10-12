@@ -50,8 +50,12 @@ type SpringJob struct {
 	// Probe, when set, is asked once each Spring, and springs the job when it
 	// says so, as an event would: for what the log does not hold, such as a
 	// record that reached the postern backend. The first Spring asks it too,
-	// to take its bearings, and springs nothing from the answer.
+	// to take its bearings, and springs nothing from the answer, unless
+	// ProbeFirst.
 	Probe func(ctx context.Context) (reason string, ok bool)
+	// ProbeFirst makes the first Spring act on the Probe's answer as any
+	// other: for a job whose pass is safe to run on what was already waiting.
+	ProbeFirst bool
 	// Every is how long the job may go unrun before it is run for Reason,
 	// counted from its last pass of any cause; zero is never.
 	Every  time.Duration
@@ -192,8 +196,16 @@ func (s *EventSpring) Spring(ctx context.Context) error {
 			}
 		}
 		for _, j := range s.Jobs {
-			if j.Probe != nil {
-				j.Probe(ctx)
+			if j.Probe == nil {
+				continue
+			}
+			reason, wanted := j.Probe(ctx)
+			if st := s.jobs[j.Name]; wanted && j.ProbeFirst {
+				if st.inFlight {
+					st.again = reason
+				} else {
+					s.launch(ctx, j, st, reason)
+				}
 			}
 		}
 		return nil

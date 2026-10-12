@@ -139,10 +139,14 @@ again, scheduled for `run again after the follower restarted`.
 
 The `grist-grind` job runs one pass of the mill (`mw grist grind`) in the follower itself, on a
 host whose config has a `[grist]` table and only while that host is home. No event springs it:
-the follower reads the postern backend for records at most every 5 seconds, and a new `grist`
-record for the mill key springs a pass, reason `grist <txid> arrived`. A grist already waiting
-when the follower starts springs nothing, and no clock does: the dispatch tick still answers
-those. The pass keeps its own pass lock, so one sprung while another runs finds it busy and ends.
+the follower reads the postern backend for the records after the newest it has seen once a
+second, and a new `grist` record for the mill key springs a pass, reason `grist <txid> arrived`.
+When the backend lets the mill key onto its event stream (`GET /api/events`) the follower holds
+it open, reads when it announces a record, and reads only every 30 seconds as a backstop; a
+refused or dropped stream is said once and the one-second read goes on. A grist already waiting
+when the follower starts springs one pass at once; the mill answers each grist once, so one
+already answered costs a pass that finds nothing to do. No clock springs it: the dispatch tick
+still answers those. The pass keeps its own pass lock, so one sprung while another runs finds it busy and ends.
 
 The `grist-level` job runs in the follower itself, on a host whose config has a `[grist-apps]`
 table and only while that host is home. A bead_changed to landed from any host springs it, reason
