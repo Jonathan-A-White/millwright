@@ -51,6 +51,7 @@ func InitializePathSetScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the story "([^"]*)" has the path key "([^"]*)" as "([^"]*)"$`, c.theStoryHasThePathKey)
 	ctx.Then(`^the path-set printed the line: (.+)$`, c.printedTheLine)
 	ctx.Then(`^the path shown has the line: (.+)$`, c.printedTheLine)
+	ctx.Then(`^the path-set echoed what showing the path of "([^"]*)" prints$`, c.echoedWhatShowPrints)
 }
 
 func (c *pathSetContext) aStoryIsOpenWithNoMetadata(id string) error {
@@ -168,4 +169,18 @@ func (c *pathSetContext) printedTheLine(line string) error {
 		}
 	}
 	return fmt.Errorf("expected the line %q, got:\n%s", line, c.printed.String())
+}
+
+// echoedWhatShowPrints holds the echo of the last set to the keys that `mw path
+// show` prints for the story now: the same eight lines.
+func (c *pathSetContext) echoedWhatShowPrints(id string) error {
+	var shown bytes.Buffer
+	if _, err := (application.PathShow{Tracker: c.tracker, Out: &shown}).Run(context.Background(), id); err != nil {
+		return err
+	}
+	_, after, found := strings.Cut(c.printed.String(), ":\n")
+	if !found || after != shown.String() {
+		return fmt.Errorf("expected the echo to end with what showing the path prints:\n%s\ngot:\n%s", shown.String(), c.printed.String())
+	}
+	return nil
 }

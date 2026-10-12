@@ -113,3 +113,17 @@ Feature: Setting and showing a story's path
   Scenario: A path with no files shows the key unset
     When the path of "A" is shown
     Then the path shown has the line: files=(unset)
+
+  # mw-gq6.371: the echo is the path as `mw path show` reads it after the write,
+  # not only the keys this command set.
+
+  Scenario: The echo after a files write shows the keys the story already had
+    Given the path-set story "G" is open with the metadata:
+      | rig  | millwright |
+      | host | auto       |
+    When the path of "G" is set with files=a.go
+    Then setting the path succeeds
+    And the path-set printed the line: host=auto
+    And the path-set printed the line: files=a.go
+    And the path-set printed the line: rig=millwright
+    And the path-set echoed what showing the path of "G" prints
