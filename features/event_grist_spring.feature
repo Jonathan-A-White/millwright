@@ -2,9 +2,10 @@ Feature: mw events follow springs the mill when a grist arrives
   An app's grist reaches the mill within seconds, not on mw dispatch's tick:
   the follower, on a host whose config has a [grist] table, springs one
   mw grist grind pass in the cycle it sees a new grist record for the mill key
-  at the postern backend, as it springs dispatch on a bead that opens. History
-  springs nothing, a record for another key or of another class springs
-  nothing, and a host with no [grist] table never springs the mill.
+  at the postern backend, as it springs dispatch on a bead that opens. A grist
+  the backend holds when the follower starts springs one pass at once (the pass
+  answers each grist once); a record for another key or of another class
+  springs nothing, and a host with no [grist] table never springs the mill.
 
   Scenario: A new grist record springs one grind pass in the cycle it is seen
     Given the event follower springs the mill on a host with a [grist] table
@@ -17,11 +18,11 @@ Feature: mw events follow springs the mill when a grist arrives
     When the follower runs a cycle
     Then the mill has made 0 passes
 
-  Scenario: A grist already waiting when the follower starts is left to the dispatch tick
+  Scenario: A grist already waiting when the follower starts is ground at once
     Given a grist record for the mill key waits at the postern backend
     And the event follower springs the mill on a host with a [grist] table
     When the follower runs a cycle
-    Then the mill has made 0 passes
+    Then the mill has made 1 pass
 
   Scenario: A record for another key or of another class springs no pass
     Given the event follower springs the mill on a host with a [grist] table

@@ -107,7 +107,9 @@ func gristSpringJob(host string, out io.Writer) (application.SpringJob, bool, er
 		return application.IsHome(ctx, mwVault(dir, host), host)
 	}
 	notices := application.NewGristNotices()
-	watch := &application.GristWatch{Postern: backend, Keys: keys, Notices: notices, Err: out}
+	// The stream is the mill key's own; until the backend lets that key onto
+	// GET /api/events the watch reads every second instead and says so once.
+	watch := &application.GristWatch{Postern: backend, Stream: backend, Keys: keys, Notices: notices, Err: out}
 	job := application.GristJob(watch, func(ctx context.Context) error {
 		if at, err := home(ctx); err != nil || !at {
 			return err
