@@ -101,6 +101,9 @@ type GristGrind struct {
 	// mail to the Mayor, and the place its pictures are kept.
 	Mailbox  Mailbox
 	Forwards GristForwardStore
+	// Visions reads the VISION.md of the app's checkout, which a forwarded mail
+	// carries so the feedback is weighed against it. Nil leaves the section out.
+	Visions VisionSource
 
 	// Apps is where each app's rig is checked out here (config
 	// [grist-apps]); Ceilings are the factory's limits above every grind.

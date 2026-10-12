@@ -586,6 +586,7 @@ func newMill(out io.Writer) (application.GristGrind, error) {
 		Runs:         grist.NewRuns(stateDir),
 		Mailbox:      mailbox,
 		Forwards:     grist.NewForwards(stateDir),
+		Visions:      grist.NewVisions(),
 		Grinds:       rig.NewGrinds(),
 		Refreshes:    application.NewGrindRefreshes(application.GrindRefreshEvery),
 		Grinder:      claude.NewGrinder(),

@@ -24,6 +24,7 @@ type forwardContext struct {
 	c       *gristContext
 	mailbox *apptest.FakeMailbox
 	store   *grist.Forwards
+	visions *apptest.FakeVisions
 }
 
 // mailboxPort is the mailbox, or nothing (a nil port, not a nil *FakeMailbox)
@@ -33,6 +34,14 @@ func (f *forwardContext) mailboxPort() application.Mailbox {
 		return nil
 	}
 	return f.mailbox
+}
+
+// visionPort is the fake source of VISION.md files, made on first use.
+func (f *forwardContext) visionPort() application.VisionSource {
+	if f.visions == nil {
+		f.visions = apptest.NewFakeVisions()
+	}
+	return f.visions
 }
 
 func (f *forwardContext) keeper() application.GristForwardStore {
@@ -57,6 +66,12 @@ func registerGristForward(ctx *godog.ScenarioContext, c *gristContext) {
 	ctx.Given(`^the phone sends a "([^"]*)" "([^"]*)" grist, version "([^"]*)", saying "([^"]*)" with (\d+) photos?$`, f.phoneSays)
 
 	ctx.Given(`^the phone sends a "([^"]*)" "([^"]*)" grist, version "([^"]*)", with the input (.+) and (\d+) photos?$`, f.phoneSendsInput)
+
+	ctx.Given(`^the app "([^"]*)" keeps a VISION.md saying "([^"]*)"$`, f.visionSaying)
+	ctx.Given(`^the app "([^"]*)" keeps a VISION.md of (\d+) bytes$`, f.visionOfBytes)
+	ctx.Then(`^that mail ends with:$`, f.mailEndsWith)
+	ctx.Then(`^that mail ends with the first (\d+) bytes of the VISION.md, then "([^"]*)"$`, f.mailEndsWithCut)
+	ctx.Then(`^that mail ends with the whole VISION.md, (\d+) bytes$`, f.mailEndsWithWhole)
 
 	ctx.Then(`^that mail's body, before the sender block, is:$`, f.bodyBeforeSender)
 	ctx.Then(`^one mail went to "([^"]*)" titled "([^"]*)"$`, f.oneMail)
@@ -253,6 +268,58 @@ func (f *forwardContext) noMail() error {
 func (f *forwardContext) noKeptPictures() error {
 	if _, err := os.Stat(filepath.Join(f.c.home, "state", "forwarded")); !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("expected no pictures kept, stat said: %v", err)
+	}
+	return nil
+}
+
+// visionBody is a VISION.md of n bytes: a heading and then the letter a.
+func visionBody(n int) string {
+	return "# Vision\n" + strings.Repeat("a", n-len("# Vision\n"))
+}
+
+func (f *forwardContext) visionSaying(app, text string) error {
+	f.visionPort()
+	f.visions.Set(f.c.checkout(app), text)
+	return nil
+}
+
+func (f *forwardContext) visionOfBytes(app string, n int) error {
+	f.visionPort()
+	f.visions.Set(f.c.checkout(app), visionBody(n))
+	return nil
+}
+
+func (f *forwardContext) mailEndsWith(want *godog.DocString) error {
+	m, err := f.sent()
+	if err != nil {
+		return err
+	}
+	if got := strings.TrimRight(m.Body, "\n"); !strings.HasSuffix(got, want.Content) {
+		return fmt.Errorf("expected the mail to end with:\n%s\ngot:\n%s", want.Content, m.Body)
+	}
+	return nil
+}
+
+func (f *forwardContext) mailEndsWithCut(n int, marker string) error {
+	m, err := f.sent()
+	if err != nil {
+		return err
+	}
+	want := visionBody(4000)[:n] + "\n" + marker
+	if got := strings.TrimRight(m.Body, "\n"); !strings.HasSuffix(got, want) {
+		return fmt.Errorf("expected the mail to end with the first %d bytes of the vision and %q, got:\n%s", n, marker, m.Body)
+	}
+	return nil
+}
+
+func (f *forwardContext) mailEndsWithWhole(n int) error {
+	m, err := f.sent()
+	if err != nil {
+		return err
+	}
+	got := strings.TrimRight(m.Body, "\n")
+	if !strings.HasSuffix(got, visionBody(n)) || strings.HasSuffix(got, application.VisionCut) {
+		return fmt.Errorf("expected the mail to end with the whole %d-byte vision, uncut, got:\n%s", n, m.Body)
 	}
 	return nil
 }

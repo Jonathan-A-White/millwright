@@ -521,6 +521,7 @@ func (c *gristContext) mill() application.GristGrind {
 		Runs:        c.audio.runs(),
 		Mailbox:     c.forward.mailboxPort(),
 		Forwards:    c.forward.keeper(),
+		Visions:     c.forward.visionPort(),
 		Now:         c.audio.now,
 		Out:         &c.out,
 	}

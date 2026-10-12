@@ -26,10 +26,10 @@ Feature: mw grist request links a bead to an app's request and tells the sender 
     And the app's grind "feedback" forwards to "mayor" and takes up to 6 pictures
     And the bead "mw-x.1" is filed
 
-  Scenario: The forward mail ends with the ready command line, and the run keeps the sender's key
+  Scenario: The forward mail's command line comes just before the app's vision, and the run keeps the sender's key
     Given the phone sends a "cairn" "feedback" grist, version "1", saying "Please add a quiz." with 0 photos
     When the mill grinds
-    Then the forward mail's last line is the command "mw grist request <bead>" and the grist's txid
+    Then the forward mail's last line before the vision section is the command "mw grist request <bead>" and the grist's txid
     And the run of that grist keeps the phone's key as its sender
 
   Scenario: A forwarded grist is linked to the bead and its sender is told it was filed

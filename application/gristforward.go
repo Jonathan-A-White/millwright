@@ -56,7 +56,7 @@ func (g GristGrind) forward(ctx context.Context, w *gristWork, privKey string) {
 		From:    SeatIdentity(MwSeat, g.Host),
 		To:      w.grind.Forward,
 		Subject: forwardSubject(w.plain.Grist.App, title),
-		Body:    forwardBody(w, in, paths),
+		Body:    g.forwardBody(ctx, w, in, paths),
 	})
 	if err != nil {
 		w.settle(GristFailed, GristReasonNotSent)
@@ -163,8 +163,18 @@ func forwardSubject(app, text string) string {
 }
 
 // forwardBody is the mail: the full text, the other fields of the request one
-// to a line, then who sent it and where the pictures are kept.
-func forwardBody(w *gristWork, in forwardedInput, paths []string) string {
+// to a line, then who sent it and where the pictures are kept, then the command
+// that links it to a bead, and last the app's vision to weigh it against.
+func (g GristGrind) forwardBody(ctx context.Context, w *gristWork, in forwardedInput, paths []string) string {
+	body := forwardMain(w, in, paths)
+	if g.Visions == nil {
+		return body
+	}
+	return body + "\n" + VisionSection(ctx, g.Visions, g.Apps[w.plain.Grist.App]) + "\n"
+}
+
+// forwardMain is the mail up to its request line.
+func forwardMain(w *gristWork, in forwardedInput, paths []string) string {
 	var b strings.Builder
 	text := in.text
 	if strings.TrimSpace(text) == "" {

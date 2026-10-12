@@ -116,3 +116,37 @@ Feature: mw grist grind forwards a grist whose grind says forward to the Mayor
     Then the mill answered 0, refused 0, failed 1, and left 0 waiting
     And the answer says "failed" because "The factory could not pass this on; send it again."
     And no grind was run
+
+  Scenario: A forwarded mail ends with the app's VISION.md, so the feedback is weighed against it
+    Given the app's grind "feedback" forwards to "mayor" and takes up to 6 pictures
+    And the app "cairn" keeps a VISION.md saying "Cairn helps one person keep a daily walk in Scripture."
+    And the phone sends a "cairn" "feedback" grist, version "1", saying "The sweep button is hidden." with 0 photos
+    When the mill grinds
+    Then that mail ends with:
+      """
+      THE APP'S VISION (/rigs/cairn/VISION.md)
+      Cairn helps one person keep a daily walk in Scripture.
+      """
+
+  Scenario: A forwarded mail for an app with no VISION.md says so
+    Given the app's grind "feedback" forwards to "mayor" and takes up to 6 pictures
+    And the phone sends a "cairn" "feedback" grist, version "1", saying "The sweep button is hidden." with 0 photos
+    When the mill grinds
+    Then that mail ends with:
+      """
+      This app has no VISION.md: weigh this with the Governor.
+      """
+
+  Scenario: A VISION.md over 3000 bytes is cut there and marked
+    Given the app's grind "feedback" forwards to "mayor" and takes up to 6 pictures
+    And the app "cairn" keeps a VISION.md of 4000 bytes
+    And the phone sends a "cairn" "feedback" grist, version "1", saying "The sweep button is hidden." with 0 photos
+    When the mill grinds
+    Then that mail ends with the first 3000 bytes of the VISION.md, then "(cut)"
+
+  Scenario: A VISION.md of exactly 3000 bytes is carried whole
+    Given the app's grind "feedback" forwards to "mayor" and takes up to 6 pictures
+    And the app "cairn" keeps a VISION.md of 3000 bytes
+    And the phone sends a "cairn" "feedback" grist, version "1", saying "The sweep button is hidden." with 0 photos
+    When the mill grinds
+    Then that mail ends with the whole VISION.md, 3000 bytes

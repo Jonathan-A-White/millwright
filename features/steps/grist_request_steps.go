@@ -65,7 +65,7 @@ func registerGristRequest(ctx *godog.ScenarioContext, c *gristContext) {
 	ctx.Given(`^the bead "([^"]*)" is filed$`, r.beadIsFiled)
 	ctx.When(`^mw grist request links "([^"]*)" to that grist$`, r.linksThatGrist)
 	ctx.When(`^mw grist request links "([^"]*)" to the txid "([^"]*)"$`, r.links)
-	ctx.Then(`^the forward mail's last line is the command "([^"]*)" and the grist's txid$`, r.mailEndsWithCommand)
+	ctx.Then(`^the forward mail's last line before the vision section is the command "([^"]*)" and the grist's txid$`, r.mailEndsWithCommand)
 	ctx.Then(`^the run of that grist keeps the phone's key as its sender$`, r.runKeepsSender)
 	ctx.Then(`^mw grist request left without an error$`, r.leftWell)
 	ctx.Then(`^mw grist request was refused saying "([^"]*)"$`, r.refusedSaying)
@@ -233,7 +233,14 @@ func (r *requestContext) mailEndsWithCommand(command string) error {
 	if err != nil {
 		return err
 	}
-	lines := strings.Split(strings.TrimSuffix(m.Body, "\n"), "\n")
+	body := m.Body
+	// The vision section closes the mail, after the command line.
+	if i := strings.Index(body, "\n\nTHE APP'S VISION ("); i >= 0 {
+		body = body[:i]
+	} else if i := strings.Index(body, "\n\n"+application.VisionMissing); i >= 0 {
+		body = body[:i]
+	}
+	lines := strings.Split(strings.TrimSuffix(body, "\n"), "\n")
 	want := command + " " + r.c.grist.Txid
 	if last := lines[len(lines)-1]; last != want {
 		return fmt.Errorf("expected the mail to end with %q, its last line is %q:\n%s", want, last, m.Body)
