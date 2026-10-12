@@ -264,6 +264,35 @@ need "$SYS_DOCTOR_SERVICE" "ExecStart=/usr/bin/env %h/.local/bin/mw doctor"
 need "$SYS_DOCTOR_TIMER" "OnCalendar=*:2/5"
 need "$SYS_DOCTOR_TIMER" "Persistent=false"
 
+# Every unit that runs mw or bd reads the tracker through bd, and bd reaches the
+# home's Dolt server only through BEADS_DOLT_* in beads.env: without it bd exits
+# on an empty BEADS_DOLT_SERVER_HOST (mw-gq6.370, mw-report.service's first run).
+# So each --user service with an ExecStart running mw, mw-health or mw-mail-notify
+# carries the beads.env line, unless it is one of the two that touch no tracker.
+# A new unit has to be named here to be let off, rather than be forgotten.
+BEADS_ENV_LINE="EnvironmentFile=-%h/.config/mw/beads.env"
+NO_TRACKER="mw-doctor.service mw-postern-mirror.service"
+# beads_env_missing prints and returns 0 when the unit file $1 runs mw/bd and has
+# no beads.env EnvironmentFile line, optional or not.
+beads_env_missing() {
+	grep -q '^ExecStart=.*[ /]\(mw\|bd\)\(-[a-z-]*\)\{0,1\}\( \|$\)' "$1" || return 1
+	grep -q '^EnvironmentFile=-\{0,1\}%h/\.config/mw/beads\.env$' "$1" && return 1
+	return 0
+}
+for unit in "$DIR"/*.service; do
+	name=${unit##*/}
+	case " $NO_TRACKER " in *" $name "*) continue ;; esac
+	if beads_env_missing "$unit"; then
+		fail "$unit runs mw or bd but has no \`$BEADS_ENV_LINE\` line (bd needs BEADS_DOLT_SERVER_HOST)"
+	fi
+done
+# The check itself catches the fault: the report unit with its beads.env line
+# taken out must be named, not passed.
+BE=$(mktemp -d)
+grep -v 'beads\.env' "$REPORT_SERVICE" >"$BE/mw-report.service"
+beads_env_missing "$BE/mw-report.service" || fail "the beads.env check passed a mw-report.service with the line removed"
+rm -rf "$BE"
+
 # The scripts the services run must be there to run, and must parse.
 for script in "$MAIL_SCRIPT" "$HEALTH_SCRIPT"; do
 	[ -x "$script" ] || fail "$script is not executable"
