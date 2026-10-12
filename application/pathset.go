@@ -80,7 +80,11 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		return domain.Path{}, fmt.Errorf("setting the path of %s: %w", id, err)
 	}
 	if s.Out != nil {
-		fmt.Fprintf(s.Out, "Set the path of %s:\n%s", id, pathLines(path))
+		// The echo is the path as PathShow reads it after the write: the keys
+		// the story already held, and its epic's defaults, under the ones just
+		// set (mw-gq6.371).
+		now := story.Merged().Overlay(path)
+		fmt.Fprintf(s.Out, "Set the path of %s:\n%s", id, pathLines(now))
 	}
 	return path, nil
 }
