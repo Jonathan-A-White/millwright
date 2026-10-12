@@ -233,6 +233,11 @@ type Next struct {
 	// away. A nil Runner skips that check.
 	Runner Runner
 
+	// Transcripts is what the harness recorded in a story's worktree. A claim
+	// here with no session behind it is given back only when no transcript was
+	// recorded; a nil Transcripts cannot say so, and the claim is left alone.
+	Transcripts TranscriptTail
+
 	// HeartbeatWait is how Heartbeat waits between ticks: the real clock,
 	// unless a test replaces it to move time without truly waiting for it.
 	// A nil HeartbeatWait waits for real.
@@ -404,6 +409,10 @@ type NextReport struct {
 	// Abandoned names the stories claimed here whose session is not there any
 	// more — claims a person or a later sweep has to settle.
 	Abandoned []string
+	// GaveBack names the stories claimed here whose session never started —
+	// no transcript, no commit, nothing changed in a worktree — and whose
+	// claim this close-out gave back, so that the next dispatch takes them.
+	GaveBack []string
 	// Notes are the things that went sideways without changing the outcome.
 	Notes []string
 	// AfterLandingStopped is the limit the rig's after-landing command outlived
@@ -2026,7 +2035,8 @@ func recordedGone(ctx context.Context, tracker WorkTracker, id string) bool {
 // abandoned finds the stories this host has claimed whose session is not there
 // any anymore, and says so on each of them. The claim is left alone on purpose:
 // the story's worktree holds work nobody has looked at, and a claim given back
-// is a worktree the next dispatch would take away. Somebody has to decide, and
+// is a worktree the next dispatch would take away. The exception is a session
+// that never started (giveBackIfNeverStarted): there is nothing to take away. Somebody has to decide, and
 // this is how they are told there is something to decide.
 func (n Next) abandoned(ctx context.Context, skip string, report *NextReport) []string {
 	if n.Runner == nil {
@@ -2052,6 +2062,12 @@ func (n Next) abandoned(ctx context.Context, skip string, report *NextReport) []
 		if status.Running() {
 			continue
 		}
+
+		// A session that never started has left nothing in its worktree to
+		// protect, so the claim goes back and the next dispatch takes the story.
+		if n.giveBackIfNeverStarted(ctx, detail, report) {
+			continue
+		}
 		gone = append(gone, id)
 
 		// Said once. A story a sweep already found stuck, or that an earlier
@@ -2072,6 +2088,81 @@ func (n Next) abandoned(ctx context.Context, skip string, report *NextReport) []
 		}
 	}
 	return gone
+}
+
+// NeverStartedGrace is how old a claim must be before mw next takes its missing
+// session for one that never started: a dispatch cuts the worktree and starts
+// the session some time after it claims the story, and a claim younger than
+// this may be in that gap.
+const NeverStartedGrace = 5 * time.Minute
+
+// giveBackIfNeverStarted gives back the claim of a story whose session is gone
+// and which has left nothing behind it: no transcript, no commit beyond the
+// target, no change in its worktree (or no worktree at all). There is no work
+// for a given-back claim to take away. Anything it cannot establish — no
+// transcripts to read, a claim of unknown or recent age, a git or tracker
+// error — leaves the claim alone, as every gone session's was. It reports
+// whether the claim was given back, and confirms that by reading the story.
+func (n Next) giveBackIfNeverStarted(ctx context.Context, detail StoryDetail, report *NextReport) bool {
+	id := detail.Story.ID
+	started := detail.ClaimStarted()
+	if n.Transcripts == nil || n.Landing == nil || n.Worktrees == nil || started.IsZero() || n.now().Sub(started) < NeverStartedGrace {
+		return false
+	}
+	path, err := detail.Path()
+	if err != nil {
+		return false
+	}
+	rigDir, checkedOut := n.Rigs[path.Rig]
+	if !checkedOut {
+		return false
+	}
+	worktree, branch := WorktreeDir(rigDir, id), StoryBranch(id)
+
+	tail, err := n.Transcripts.Tail(ctx, worktree, PeekLines)
+	if err != nil || strings.TrimSpace(tail) != "" {
+		return false
+	}
+	dirThere, err := n.Worktrees.Exists(ctx, rigDir, worktree, "")
+	if err != nil {
+		return false
+	}
+	branchThere, err := n.Worktrees.Exists(ctx, rigDir, "", branch)
+	if err != nil {
+		return false
+	}
+	if branchThere {
+		ahead, err := n.Landing.Ahead(ctx, rigDir, branch, StartPoint(n.remote(), path.Branch))
+		if err != nil || ahead > 0 {
+			return false
+		}
+	}
+	if dirThere {
+		changed, err := n.Landing.Uncommitted(ctx, worktree)
+		if err != nil || len(changed) > 0 {
+			return false
+		}
+	}
+
+	if dirThere || branchThere {
+		if err := n.Worktrees.Remove(ctx, rigDir, worktree, branch); err != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf("%s: the empty worktree %s could not be removed, so its claim was left alone: %v", id, worktree, err))
+			return false
+		}
+	}
+	holder := detail.Assignee
+	if err := giveBackClaim(ctx, n.Tracker, id, func(ctx context.Context) error { return n.Tracker.ReleaseClaimHeldBy(ctx, id, holder) },
+		waitFor, n.PushWait); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s: its session never started, but the claim could not be given back: %v", id, err))
+		return false
+	}
+	said := fmt.Sprintf("mw next on %s gave the claim back: %s is not there, and the story left nothing behind it (no transcript, no commits beyond %s, no changes in a worktree), so the session never started. The story is open again and the next dispatch takes it.",
+		n.Host, SessionName(id), path.Branch)
+	if err := n.Tracker.CommentOnStory(ctx, id, said); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s: its claim was given back, but that could not be written on it: %v", id, err))
+	}
+	report.GaveBack = append(report.GaveBack, id)
+	return true
 }
 
 // remote is the remote the target branch is read from and pushed to.
@@ -2185,6 +2276,9 @@ func (r NextReport) String() string {
 	}
 	for _, id := range r.Abandoned {
 		fmt.Fprintf(&b, "  gone    %s is claimed here with no session behind it\n", id)
+	}
+	for _, id := range r.GaveBack {
+		fmt.Fprintf(&b, "  open    %s was claimed here but its session never started; the claim was given back\n", id)
 	}
 	for _, said := range r.CrossSlot {
 		fmt.Fprintf(&b, "  slot    %s\n", said)
