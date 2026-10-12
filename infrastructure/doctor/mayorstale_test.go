@@ -399,3 +399,114 @@ func TestADryRunSendsNoClearAndKeepsTheAlarmRecord(t *testing.T) {
 		t.Fatalf("the real run after it still clears 201, got %+v", r.clears)
 	}
 }
+
+// parkedPane is the pane of a Mayor stopped on the harness's confirmation
+// prompt after three refusals in a row (2026-10-11).
+const parkedPane = "● Update(config.toml)\n  ⎿  Error: blocked by the classifier\n\n" +
+	"Auto mode classifier requires confirmation for this action.\n" +
+	"3 consecutive actions were blocked.\n" +
+	"Do you want to proceed?\n" +
+	" ❯ 1. Yes\n   2. Yes, allow reading from /home/jwhite/.config/mw\n   3. No\n\n  Esc to cancel\n"
+
+func TestAParkedPromptIsAlarmedOnceNamingTheQuestionAndEveryChoice(t *testing.T) {
+	r := newStaleRig(t)
+	r.write(r.pane, parkedPane)
+	r.run(0)
+	r.run(20)
+	r.run(5)
+	r.run(40)
+	if len(r.alarms) != 1 {
+		t.Fatalf("a prompt that stays is alarmed once, got %d: %q", len(r.alarms), r.alarms)
+	}
+	for _, want := range []string{"Do you want to proceed?", "1. Yes", "2. Yes, allow reading from /home/jwhite/.config/mw", "3. No"} {
+		if !strings.Contains(r.alarms[0], want) {
+			t.Errorf("expected the alarm to carry %q, got %q", want, r.alarms[0])
+		}
+	}
+	if strings.Contains(r.alarms[0], "Error: blocked by the classifier") {
+		t.Errorf("the alarm names the prompt and its choices, not what scrolled above it: %q", r.alarms[0])
+	}
+	if r.lines(r.kills) != 0 || r.lines(r.upRuns) != 0 {
+		t.Errorf("the window is left alone: kills %d, mayor-up %d", r.lines(r.kills), r.lines(r.upRuns))
+	}
+}
+
+func TestAPaneAskingForConfirmationIsAPromptWhateverItsQuestion(t *testing.T) {
+	r := newStaleRig(t)
+	r.write(r.pane, "Auto mode classifier requires confirmation\n 1. Yes\n 2. No\n")
+	r.run(0)
+	r.run(20)
+	if len(r.alarms) != 1 || !strings.Contains(r.alarms[0], "requires confirmation") || !strings.Contains(r.alarms[0], "2. No") {
+		t.Fatalf("expected one alarm naming the line and its choices, got %q", r.alarms)
+	}
+	if r.lines(r.kills) != 0 {
+		t.Errorf("the window is left alone, got %d kills", r.lines(r.kills))
+	}
+}
+
+func TestTheNoticeQuotedInProseIsNotAPrompt(t *testing.T) {
+	r := newStaleRig(t)
+	r.write(r.pane, "● The harness said it requires confirmation, so I stopped.\n\n"+idlePane)
+	r.run(0)
+	if got := r.run(60); got.Verdict != "ok" || len(r.alarms) != 0 {
+		t.Fatalf("a Mayor idle at an empty prompt is alive: got %+v, alarms %q", got, r.alarms)
+	}
+}
+
+func TestAPromptThatReturnsAfterTheMayorWorkedAgainIsAlarmedAgain(t *testing.T) {
+	r := newStaleRig(t)
+	r.write(r.pane, parkedPane)
+	r.run(0)
+	r.run(20)
+	r.write(r.pane, frozenPane(1))
+	r.run(5)
+	r.write(r.pane, parkedPane)
+	r.run(5)
+	r.run(20)
+	if len(r.alarms) != 2 {
+		t.Fatalf("a prompt that comes back after the Mayor worked is a new one: expected 2 alarms, got %q", r.alarms)
+	}
+}
+
+func TestACureLineSaysWhatTheCureDid(t *testing.T) {
+	t.Run("a prompt is left alone, and the line says so", func(t *testing.T) {
+		r := newStaleRig(t)
+		r.write(r.pane, parkedPane)
+		r.run(0)
+		got := r.run(20)
+		if strings.Contains(got.WayBack, "would") || !strings.Contains(got.WayBack, "left the Mayor's window alone") {
+			t.Fatalf("expected a way back saying the window was left alone, got %q", got.WayBack)
+		}
+	})
+	t.Run("a dry run on a prompt says it would leave it alone", func(t *testing.T) {
+		r := newStaleRig(t)
+		r.write(r.pane, parkedPane)
+		r.run(0)
+		r.now = r.now.Add(20 * time.Minute)
+		report, _ := r.doc.Run(context.Background(), "", true)
+		got := report.Results[0]
+		if got.Verdict != "would-cure" || strings.Contains(got.WayBack, "would close") || !strings.Contains(got.WayBack, "would leave the Mayor's window alone") {
+			t.Fatalf("expected a dry run saying it would leave the window alone, got %+v", got)
+		}
+		if len(r.alarms) != 0 {
+			t.Errorf("a dry run sends no alarm, got %q", r.alarms)
+		}
+	})
+	t.Run("a dry run on a frozen turn would close the window", func(t *testing.T) {
+		r := newStaleRig(t)
+		r.run(0)
+		r.now = r.now.Add(20 * time.Minute)
+		report, _ := r.doc.Run(context.Background(), "", true)
+		if got := report.Results[0]; !strings.Contains(got.WayBack, "would close the Mayor's window") {
+			t.Fatalf("expected a dry run saying it would close the window, got %+v", got)
+		}
+	})
+	t.Run("a real run that closed the window says it did, not that it would", func(t *testing.T) {
+		r := newStaleRig(t)
+		r.run(0)
+		got := r.run(20)
+		if got.Verdict != "cured" || strings.Contains(got.WayBack, "would") || !strings.Contains(got.WayBack, "tmux kill-window -t '@9'") {
+			t.Fatalf("expected a way back naming the new window, got %+v", got)
+		}
+	})
+}

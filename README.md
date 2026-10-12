@@ -3781,8 +3781,12 @@ Its cure closes the stale window, runs the vault's `bin/mayor-up` (up to
 three tries, as the old Mayor's process may take a moment to go) and sends
 one `alarm`-class Postern push naming the window, the minutes and the new
 window, or that no Mayor could be started. A pane showing the harness's
-"Do you want to proceed?" is a Mayor waiting on a person, not a dead one:
-the window is left alone and the alarm carries the prompt and its options.
+"Do you want to proceed?" or "requires confirmation" (three refusals in a row
+by the auto-mode classifier park a Mayor there) is a Mayor waiting on a person,
+not a dead one: the window is left alone and one alarm carries the prompt line
+and its numbered choices, not sent again while that prompt stays. The cure line
+says what was done — "left the Mayor's window alone" — and "would ..." is
+printed only by `--dry-run`.
 Damper: 30 minutes, cap 1 per episode, so one respawn and one alarm to a
 stall. Its way back is `tmux kill-window -t '<window id mayor-up started>'`.
 `mw doctor mayor-stale` runs it by hand; `--dry-run` reports a stale seat
