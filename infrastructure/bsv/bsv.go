@@ -7,6 +7,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
+
+	"github.com/bsv-blockchain/go-sdk/transaction"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/chainlookup"
@@ -59,7 +62,9 @@ func New(coins Coins, keys application.PosternKeyFile, lookup Lookup, warn io.Wr
 // Send implements application.Chain: it signs a record transaction from the
 // postern key's unspent outputs and has the backend broadcast it, reporting
 // its txid. A failure to remember what it spent is said on warn, and fails
-// nothing.
+// nothing. A broadcast the node refuses because a coin it spends is spent
+// already has those coins remembered as spent and is built again from the
+// others.
 func (c *Chain) Send(ctx context.Context, payload []byte) (string, error) {
 	_, address, err := c.keys.PublicKey()
 	if err != nil {
@@ -69,18 +74,62 @@ func (c *Chain) Send(ctx context.Context, payload []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	rawtx, err := c.keys.Sign(utxos, payload)
-	if err != nil {
-		return "", err
+	var refused error
+	for range maxRefusals + 1 {
+		rawtx, err := c.keys.Sign(utxos, payload)
+		if err != nil {
+			if refused != nil {
+				return "", refused
+			}
+			return "", err
+		}
+		txid, err := c.coins.Broadcast(ctx, rawtx)
+		if err == nil {
+			if err := c.keys.MarkSent(rawtx); err != nil && c.warn != nil {
+				fmt.Fprintf(c.warn, "warning: the record was broadcast, but mw could not remember what it spent, so a send within the next block may fail: %v\n", err)
+			}
+			return txid, nil
+		}
+		if !spentAlready(err) || !c.remember(rawtx) {
+			return "", err
+		}
+		refused = err
 	}
-	txid, err := c.coins.Broadcast(ctx, rawtx)
-	if err != nil {
-		return "", err
+	return "", refused
+}
+
+// maxRefusals is how many broadcasts refused for a coin spent already one
+// Send builds again from the other coins before it gives the refusal back:
+// the key's sends leave it about four coins, each the head of a chain. A
+// refused send of two coins has both remembered as spent, the one still
+// spendable too, for the two hours the key file remembers.
+const maxRefusals = 8
+
+// spentAlready reports whether the node refused a broadcast because a coin it
+// spends is spent already by a transaction it holds: in its mempool
+// (txn-mempool-conflict), or in a block (bad-txns-inputs-missingorspent).
+// WhatsOnChain lists a confirmed output as unspent while an unconfirmed
+// transaction spends it, and the key file forgets its own spends after two
+// hours, so a chain of sends left unconfirmed longer than that (testnet blocks
+// that take no low-fee transactions, mw-gq6.377) has every send build on the
+// spent coin again, the confirmed one first.
+func spentAlready(err error) bool {
+	return strings.Contains(err.Error(), "txn-mempool-conflict") || strings.Contains(err.Error(), "bad-txns-inputs-missingorspent")
+}
+
+// remember has the key file remember the coins the refused rawtx spent as
+// spent, so that Sign builds the next try, and the sends after it, from the
+// others. It reports whether it could.
+func (c *Chain) remember(rawtx string) bool {
+	tx, err := transaction.NewTransactionFromHex(rawtx)
+	if err != nil || len(tx.Inputs) == 0 {
+		return false
 	}
-	if err := c.keys.MarkSent(rawtx); err != nil && c.warn != nil {
-		fmt.Fprintf(c.warn, "warning: the record was broadcast, but mw could not remember what it spent, so a send within the next block may fail: %v\n", err)
+	spent := make([]application.PosternUtxo, 0, len(tx.Inputs))
+	for _, in := range tx.Inputs {
+		spent = append(spent, application.PosternUtxo{Txid: in.SourceTXID.String(), Vout: int(in.SourceTxOutIndex)})
 	}
-	return txid, nil
+	return c.keys.MarkSpent(spent) == nil
 }
 
 // Balance implements application.Chain: the postern key's address's balance.

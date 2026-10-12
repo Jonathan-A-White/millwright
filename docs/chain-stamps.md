@@ -62,7 +62,10 @@ through the Postern backend as a public chain record, moves it to `sent.jsonl`
 beside its txid, and comments `STAMP <txid> for <commit> (testnet)` on the story
 (a stamp with no story, a vault push, comments on none). A stamp the backend will
 not take stays pending with its failed tries counted and is retried the next
-minute; a pass never fails for it.
+minute; a pass never fails for it. A broadcast the node refuses because a coin it
+spends is spent already (`txn-mempool-conflict`) is built again at once from the
+key's other coins, and the refused coin is remembered as spent, so the next
+minute does not try it again; a stamp waits only when every coin is spent so.
 
 ## Vault pushes
 
@@ -117,7 +120,10 @@ rig and commit do not make the commitment shown beside it.
 
 ## Limits and what mainnet needs
 
-Testnet only. The factory's testnet key pays the fee (1 sat/kB, no money). The
+Testnet only. The factory's testnet key pays the fee (1 sat/kB, no money). A
+block confirms such a fee only when its miner takes it: on 2026-10-12 every
+testnet block for hours came from a miner taking only ~250 sat/kB and up, so the
+key's sends chained unconfirmed meanwhile (mw-gq6.377). The
 network is fixed in code: testnet addresses in infrastructure/postern/transaction.go
 and record.go (`AnchorAddress`), the testnet WIF in infrastructure/postern/keyfile.go,
 the testnet WhatsOnChain endpoints in application/prove.go (`ExplorerURL`) and

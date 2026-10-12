@@ -14,7 +14,9 @@ type Chain interface {
 	// docs/protocol.md section 4, paid for from the postern key's own coins,
 	// and reports its txid. A record that went but whose spent coins could
 	// not be remembered is sent all the same: the adapter says so on its
-	// writer, and the next send within the block may fail.
+	// writer, and the next send within the block may fail. A send the chain
+	// refuses because a coin it spends is spent already is built again from
+	// the key's other coins.
 	Send(ctx context.Context, payload []byte) (txid string, err error)
 	// Balance reports the postern key's balance, in satoshis, confirmed and
 	// unconfirmed together: what the float cap is measured against.

@@ -57,8 +57,9 @@ type PosternKeyFile interface {
 	// last two hours, adds the change MarkSent has remembered, and spends an
 	// output listed twice once.
 	Sign(utxos []PosternUtxo, payload []byte) (rawtx string, err error)
-	// MarkSpent remembers that a send just spent utxos, for two hours, so
-	// that Sign skips them while the block explorer still lists them.
+	// MarkSpent remembers that a send just spent utxos, or that the chain
+	// refused a send of them as spent already, for two hours, so that Sign
+	// skips them while the block explorer still lists them.
 	MarkSpent(utxos []PosternUtxo) error
 	// MarkSent remembers what a send just broadcast as rawtx, for two hours:
 	// the outputs it spent, as MarkSpent does, and the change it paid back
