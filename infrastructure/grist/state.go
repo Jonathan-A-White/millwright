@@ -23,9 +23,12 @@ import (
 
 // The files inside the state directory.
 const (
-	CursorFile     = "cursor"
-	RecordFile     = "grinds.jsonl"
-	UndeliveredDir = "undelivered"
+	CursorFile = "cursor"
+	RecordFile = "grinds.jsonl"
+	// ClientTimingFile holds the phone's part of the round trip, one line for
+	// each earlier grist an app reported on, beside the record.
+	ClientTimingFile = "client_timing.jsonl"
+	UndeliveredDir   = "undelivered"
 )
 
 // State is the mill's state, kept in Dir.
@@ -65,6 +68,43 @@ func (s *State) SetCursor(_ context.Context, seq int64) error {
 	return s.writeWhole(filepath.Join(s.Dir, CursorFile), []byte(strconv.FormatInt(seq, 10)+"\n"))
 }
 
+// ClientTimings implements application.GristState.
+func (s *State) ClientTimings(context.Context) ([]application.GristClientTiming, error) {
+	path := filepath.Join(s.Dir, ClientTimingFile)
+	file, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading the mill's client timings: %w", err)
+	}
+	defer file.Close()
+	var timings []application.GristClientTiming
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for n := 1; scanner.Scan(); n++ {
+		text := bytes.TrimSpace(scanner.Bytes())
+		if len(text) == 0 {
+			continue
+		}
+		var timing application.GristClientTiming
+		if err := json.Unmarshal(text, &timing); err != nil {
+			return nil, fmt.Errorf("line %d of the mill's client timings %s is not one of its lines: %w", n, path, err)
+		}
+		timings = append(timings, timing)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("reading the mill's client timings: %w", err)
+	}
+	return timings, nil
+}
+
+// AppendClientTiming implements application.GristState: one line to the end of
+// the file, 0600.
+func (s *State) AppendClientTiming(_ context.Context, timing application.GristClientTiming) error {
+	return s.appendLine(ClientTimingFile, timing)
+}
+
 // Lines implements application.GristState. A line that is not one of the
 // record's is an error, never skipped: skipping it could answer its grist
 // twice.
@@ -101,20 +141,26 @@ func (s *State) Lines(context.Context) ([]application.GrindLine, error) {
 // Append implements application.GristState: one line, written in one go to
 // the end of the record, 0600.
 func (s *State) Append(_ context.Context, line application.GrindLine) error {
-	encoded, err := json.Marshal(line)
+	return s.appendLine(RecordFile, line)
+}
+
+// appendLine writes v as one line in one go to the end of the file named in
+// the state directory, 0600.
+func (s *State) appendLine(name string, v any) error {
+	encoded, err := json.Marshal(v)
 	if err != nil {
 		return err
 	}
 	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
 		return fmt.Errorf("making the mill's state directory: %w", err)
 	}
-	file, err := os.OpenFile(filepath.Join(s.Dir, RecordFile), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	file, err := os.OpenFile(filepath.Join(s.Dir, name), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
-		return fmt.Errorf("opening the mill's record: %w", err)
+		return fmt.Errorf("opening the mill's %s: %w", name, err)
 	}
 	if _, err := file.Write(append(encoded, '\n')); err != nil {
 		file.Close()
-		return fmt.Errorf("appending to the mill's record: %w", err)
+		return fmt.Errorf("appending to the mill's %s: %w", name, err)
 	}
 	return file.Close()
 }

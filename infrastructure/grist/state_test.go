@@ -85,3 +85,26 @@ func TestAnUndeliveredAnswerIsKeptUntilDelivered(t *testing.T) {
 		t.Fatalf("expected nothing kept once delivered, got %+v", got)
 	}
 }
+
+// Client timings are kept apart from the record's lines, 0600, and read back.
+func TestClientTimingsAreAppendedBesideTheRecordAndReadBack(t *testing.T) {
+	ctx, dir := context.Background(), t.TempDir()
+	state := grist.New(dir)
+	if got, err := state.ClientTimings(ctx); err != nil || len(got) != 0 {
+		t.Fatalf("expected none before any is reported, got %+v %v", got, err)
+	}
+	tap := 900.0
+	if err := state.AppendClientTiming(ctx, application.GristClientTiming{Time: time.Date(2026, 10, 12, 10, 0, 0, 0, time.UTC), Txid: "direct:a", TapToSent: &tap}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := state.ClientTimings(ctx)
+	if err != nil || len(got) != 1 || got[0].Txid != "direct:a" || got[0].TapToSent == nil || *got[0].TapToSent != 900 || got[0].Network != nil {
+		t.Fatalf("expected the timing back, got %+v %v", got, err)
+	}
+	if lines, err := state.Lines(ctx); err != nil || len(lines) != 0 {
+		t.Fatalf("expected the record's lines untouched, got %+v %v", lines, err)
+	}
+	if info, _ := os.Stat(filepath.Join(dir, grist.ClientTimingFile)); info.Mode().Perm() != 0o600 {
+		t.Fatalf("expected the file 0600, got %v", info.Mode())
+	}
+}

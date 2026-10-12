@@ -531,7 +531,7 @@ func newGristTimingCmd() *cobra.Command {
 func gristTimingHelp() string {
 	var b strings.Builder
 	for _, p := range application.GristTimingPhases {
-		fmt.Fprintf(&b, "  %-8s %s\n", p.Name, p.Means)
+		fmt.Fprintf(&b, "  %-17s %s\n", p.Name, p.Means)
 	}
 	return b.String()
 }

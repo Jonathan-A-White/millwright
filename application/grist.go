@@ -50,6 +50,10 @@ type GristPlaintext struct {
 	Grist       GristName           `json:"grist"`
 	Input       json.RawMessage     `json:"input,omitempty"`
 	Attachments []PosternAttachment `json:"attachments,omitempty"`
+	// ClientTiming is the optional client_timing of the app's previous answered
+	// grist, kept raw: a malformed one is ignored (GristClientTiming), never a
+	// reason to refuse the grist.
+	ClientTiming json.RawMessage `json:"client_timing,omitempty"`
 }
 
 // GristAnswerGrind is which grind answered a grist, and the commit of the
@@ -299,6 +303,11 @@ type GristState interface {
 	Lines(ctx context.Context) ([]GrindLine, error)
 	// Append adds one line to the record. Nothing is ever rewritten.
 	Append(ctx context.Context, line GrindLine) error
+	// ClientTimings reports every client timing the apps reported, oldest first;
+	// AppendClientTiming adds one. They are kept apart from the record's lines,
+	// which are written once, when the grist is answered.
+	ClientTimings(ctx context.Context) ([]GristClientTiming, error)
+	AppendClientTiming(ctx context.Context, timing GristClientTiming) error
 	// KeepUndelivered keeps an answer the backend would not take, sealed
 	// as it is, until a later pass delivers it.
 	KeepUndelivered(ctx context.Context, answer GristUndelivered) error

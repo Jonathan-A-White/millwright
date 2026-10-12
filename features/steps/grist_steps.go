@@ -89,9 +89,10 @@ type gristContext struct {
 	grist   application.PosternRecord
 	photos  map[string][]byte // blob hash to the photo it seals
 
-	audio  audioContext  // features/grist_audio.feature
-	timing timingContext // features/grist_timing.feature
-	slots  slotsContext  // features/grist_concurrent.feature
+	audio        audioContext        // features/grist_audio.feature
+	timing       timingContext       // features/grist_timing.feature
+	clientTiming clientTimingContext // features/grist_client_timing.feature
+	slots        slotsContext        // features/grist_concurrent.feature
 
 	// statuses is the request status pass a dispatch tick is given
 	// (features/grist_request.feature); nil is none.
@@ -132,6 +133,7 @@ func InitializeGristScenario(ctx *godog.ScenarioContext) {
 	registerGristForward(ctx, c)
 	registerGristRequest(ctx, c)
 	registerGristTiming(ctx, c)
+	registerGristClientTiming(ctx, c)
 
 	ctx.Given(`^a mill on the host "([^"]*)"$`, c.aMill)
 	ctx.Given(`^the app "([^"]*)" is checked out here, its main at commit "([^"]*)" with the grind "([^"]*)"$`, c.theAppIsCheckedOut)
@@ -320,6 +322,7 @@ func (c *gristContext) sendAttached(key string, apps []string, app, kind, v stri
 	if c.askInput != nil {
 		plain.Input = c.askInput
 	}
+	plain.ClientTiming, c.clientTiming.next = c.clientTiming.next, nil
 	upload := func(body []byte, mime string) error {
 		sealed, err := sealer.EncryptBytes(c.millKey, body)
 		if err != nil {

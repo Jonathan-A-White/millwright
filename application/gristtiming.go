@@ -96,6 +96,12 @@ var GristTimingPhases = []struct{ Name, Means string }{
 	{"model", "the rest of the harness run"},
 	{"deliver", "the answer ready to the backend taking it"},
 	{"total", "the grist sent to its answer delivered"},
+	{"tap_to_sent", "the app's report (client_timing): the user's tap to the grist accepted by the backend, upload included"},
+	{"delivered_to_seen", "the app's report: the answer delivered on the backend to the app's poll seeing it"},
+	{"wait", "the app's report: delivered_to_seen less the poll's own round trip, the wait between checks (when the app sent poll_network)"},
+	{"seen_to_shown", "the app's report: the answer seen to drawn on screen"},
+	{"network", "the app's report: the round trip of the poll that saw the answer plus that of the request that sent it; inside tap_to_sent and delivered_to_seen, not added to them"},
+	{"round_trip", "tap to shown: tap_to_sent + total + delivered_to_seen + seen_to_shown, where the app reported them"},
 }
 
 // GristTimingRow is one phase of one app and kind: how many grinds had it, and
@@ -125,6 +131,16 @@ func (g GristTiming) Run(ctx context.Context, since time.Time, app, kind string)
 	if err != nil {
 		return nil, err
 	}
+	reported, err := g.State.ClientTimings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	clients := map[string]GristClientTiming{}
+	for _, c := range reported {
+		if _, ok := clients[c.Txid]; !ok {
+			clients[c.Txid] = c
+		}
+	}
 	type key struct{ app, kind string }
 	grouped := map[key][]GrindLine{}
 	for _, line := range lines {
@@ -142,7 +158,11 @@ func (g GristTiming) Run(ctx context.Context, since time.Time, app, kind string)
 		for _, p := range GristTimingPhases {
 			var seconds []float64
 			for _, line := range ls {
-				if s := line.phaseSeconds(p.Name); s != nil {
+				s := line.phaseSeconds(p.Name)
+				if client, ok := clients[line.Txid]; ok && s == nil {
+					s = client.phaseSeconds(p.Name, line)
+				}
+				if s != nil {
 					seconds = append(seconds, *s)
 				}
 			}
@@ -205,9 +225,9 @@ func (g GristTiming) print(groups []GristTimingGroup, app, kind string) {
 		if group.Grinds == 1 {
 			noun = "grind"
 		}
-		fmt.Fprintf(g.Out, "%s: %d %s\n%-8s  %5s  %8s  %8s\n", name, group.Grinds, noun, "phase", "count", "median", "p90")
+		fmt.Fprintf(g.Out, "%s: %d %s\n%-17s  %5s  %8s  %8s\n", name, group.Grinds, noun, "phase", "count", "median", "p90")
 		for _, r := range group.Rows {
-			fmt.Fprintf(g.Out, "%-8s  %5d  %7.1fs  %7.1fs\n", r.Phase, r.Count, r.Median, r.P90)
+			fmt.Fprintf(g.Out, "%-17s  %5d  %7.1fs  %7.1fs\n", r.Phase, r.Count, r.Median, r.P90)
 		}
 	}
 }

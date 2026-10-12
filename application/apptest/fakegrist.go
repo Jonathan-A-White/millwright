@@ -254,6 +254,7 @@ type FakeGristState struct {
 
 	cursor      int64
 	lines       []application.GrindLine
+	timings     []application.GristClientTiming
 	undelivered map[string]application.GristUndelivered
 	// AppendErr, when set, is returned by Append.
 	AppendErr error
@@ -297,6 +298,21 @@ func (f *FakeGristState) Append(_ context.Context, line application.GrindLine) e
 		return f.AppendErr
 	}
 	f.lines = append(f.lines, line)
+	return nil
+}
+
+// ClientTimings implements application.GristState.
+func (f *FakeGristState) ClientTimings(context.Context) ([]application.GristClientTiming, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]application.GristClientTiming(nil), f.timings...), nil
+}
+
+// AppendClientTiming implements application.GristState.
+func (f *FakeGristState) AppendClientTiming(_ context.Context, timing application.GristClientTiming) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.timings = append(f.timings, timing)
 	return nil
 }
 

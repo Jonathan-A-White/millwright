@@ -17,7 +17,7 @@ func TestGristTimingHelpSaysWhatEachPhaseMeans(t *testing.T) {
 		t.Fatalf("mw grist timing --help failed: %v\n%s", err, out)
 	}
 	for _, want := range []string{
-		"wake", "pickup", "slot", "startup", "model", "deliver", "total", "seconds",
+		"wake", "pickup", "slot", "startup", "model", "deliver", "total", "seconds", "tap_to_sent", "delivered_to_seen", "seen_to_shown", "round_trip",
 		"noticed", "grind slots", "harness", "--since", "--app", "--kind",
 	} {
 		if !strings.Contains(out, want) {

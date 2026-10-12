@@ -210,8 +210,11 @@ type gristWork struct {
 	to     string // who the answer is sealed to
 	sender string // their fingerprint
 	plain  GristPlaintext
-	grind  GrindFile
-	commit string
+	// clientTiming is the client_timing the grist carried, when it was about a
+	// grist this mill answered for the same key.
+	clientTiming *GristClientTiming
+	grind        GrindFile
+	commit       string
 	// model and effort are what the grind runs on: the grist's own when it
 	// asks, else the grind file's; modelFrom and effortFrom say which.
 	model, effort         string
@@ -568,6 +571,7 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 			return
 		}
 	}
+	g.judgeClientTiming(w, lines)
 	name := w.plain.Grist
 	if !slices.Contains(r.SignerApps, name.App) && !(g.GovernorKey != "" && envelopeFrom == g.GovernorKey) {
 		w.settle(GristRefused, GristReasonLicence)
@@ -649,6 +653,65 @@ func (g GristGrind) judge(ctx context.Context, w *gristWork, privKey string, lin
 		return
 	}
 	w.system, w.schema = g.readGrindText(ctx, w, checkout)
+}
+
+// judgeClientTiming reads the client_timing the grist carries, if any, and keeps
+// it in w.clientTiming when it is about a grist this mill answered for the same
+// key. Anything else is ignored with a note: the grist is answered as usual.
+func (g GristGrind) judgeClientTiming(w *gristWork, lines []GrindLine) {
+	if len(w.plain.ClientTiming) == 0 || string(w.plain.ClientTiming) == "null" {
+		return
+	}
+	ignore := func(why string) {
+		w.notes = append(w.notes, fmt.Sprintf("the client_timing of %s was ignored: %s", shortTxid(w.record.Txid), why))
+	}
+	timing, err := parseGristClientTiming(w.plain.ClientTiming, g.now())
+	if err != nil {
+		ignore(err.Error())
+		return
+	}
+	for _, line := range lines {
+		if line.Txid != timing.Txid {
+			continue
+		}
+		switch {
+		case line.Sender != w.sender:
+			ignore(fmt.Sprintf("%s was answered for another key", shortTxid(timing.Txid)))
+		case !line.Delivered:
+			ignore(fmt.Sprintf("the answer to %s never reached the backend", shortTxid(timing.Txid)))
+		default:
+			w.clientTiming = &timing
+		}
+		return
+	}
+	ignore(fmt.Sprintf("the mill never answered %s", shortTxid(timing.Txid)))
+}
+
+// keepClientTiming records w's client_timing, if it kept one, unless one is
+// recorded already for that grist (the first report stands). A failure is a
+// note: the answer matters more.
+func (g GristGrind) keepClientTiming(ctx context.Context, w *gristWork, report *GristReport) {
+	timing := w.clientTiming
+	if timing == nil {
+		return
+	}
+	note := func(why string) {
+		report.Notes = append(report.Notes, fmt.Sprintf("the client_timing of %s was ignored: %s", shortTxid(w.record.Txid), why))
+	}
+	kept, err := g.State.ClientTimings(ctx)
+	if err != nil {
+		note(fmt.Sprintf("the record of client timings could not be read: %v", err))
+		return
+	}
+	for _, k := range kept {
+		if k.Txid == timing.Txid {
+			note(fmt.Sprintf("%s was reported already", shortTxid(timing.Txid)))
+			return
+		}
+	}
+	if err := g.State.AppendClientTiming(ctx, *timing); err != nil {
+		note(fmt.Sprintf("it could not be recorded: %v", err))
+	}
 }
 
 // Where the model and effort a grind ran on came from, as the record says.
@@ -1040,6 +1103,7 @@ func (g GristGrind) answer(ctx context.Context, w *gristWork, privKey, millKey s
 		line.DeliverSeconds = phase(ready, deliveredAt)
 		line.TotalSeconds = phase(w.record.Ts, deliveredAt)
 	}
+	g.keepClientTiming(ctx, w, report)
 	if err := g.State.Append(ctx, line); err != nil {
 		return line, fmt.Errorf("mw grist grind: %s was answered %s, but the record could not be written, so it may be answered again: %w", w.record.Txid, w.status, err)
 	}
