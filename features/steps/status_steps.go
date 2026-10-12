@@ -66,6 +66,10 @@ type statusContext struct {
 	gristRuns *apptest.FakeGristRuns
 	// benchmarks are the past close-outs a scenario gave (mw-t0z3fu.2).
 	benchmarks *apptest.FakeBenchmarks
+	// apps is where the host's [grist-apps] check each app out, and visions the
+	// VISION.md files those checkouts hold (mw-7vrp1r.1).
+	apps    map[string]string
+	visions *apptest.FakeVisions
 
 	report application.StatusReport
 	err    error
@@ -116,6 +120,7 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	registerStatusRoomSteps(ctx, c)
 	registerStatusBenchmarkSteps(ctx, c)
 	registerStatusCauseSteps(ctx, c)
+	registerStatusVisionSteps(ctx, c)
 
 	ctx.Given(`^the status epic "([^"]*)" on the default path:$`, c.theStatusEpicOnTheDefaultPath)
 	ctx.Given(`^a status story "([^"]*)" filed under it$`, c.aStatusStoryFiledUnderIt)
@@ -617,6 +622,9 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 	}
 	if c.benchmarks != nil {
 		status.Benchmarks = c.benchmarks
+	}
+	if c.visions != nil {
+		status.Apps, status.Visions = c.apps, c.visions
 	}
 	c.report, c.err = status.Run(context.Background())
 	return nil

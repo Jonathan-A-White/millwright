@@ -699,3 +699,19 @@ Feature: mw status
     Then reading status succeeds
     And the report lists "mw-gq6.75" under CAUSES MISSING
     And the report does not list "mw-gq6.74" under CAUSES MISSING
+
+  Scenario: An app in [grist-apps] whose checkout has no VISION.md is named
+    Given the host's [grist-apps] checks out the app "cairn" and the app "pilgrim"
+    And the checkout of the app "pilgrim" has a VISION.md
+    When mw status reads the host
+    Then reading status succeeds
+    And the report has the line "VISION: cairn has no VISION.md"
+    And the report has no line "VISION: pilgrim has no VISION.md"
+
+  Scenario: Every app with a VISION.md leaves no VISION line
+    Given the host's [grist-apps] checks out the app "cairn" and the app "pilgrim"
+    And the checkout of the app "cairn" has a VISION.md
+    And the checkout of the app "pilgrim" has a VISION.md
+    When mw status reads the host
+    Then reading status succeeds
+    And the report has no line starting "VISION:"

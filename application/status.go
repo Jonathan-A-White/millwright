@@ -278,6 +278,12 @@ type Status struct {
 	// no example as a warning (mw-gq6.319). Nil leaves it out.
 	Smoke GristSmokeRecords
 
+	// Apps is where each app's rig is checked out on this host ([grist-apps]),
+	// and Visions reads the VISION.md of each: an app without one is a VISION
+	// line. Either nil leaves the lines out.
+	Apps    map[string]string
+	Visions VisionSource
+
 	// Control, when set, is the home's event log, read for the CANCELLED
 	// section (the cancel events of the last day) and the PAUSED line. Nil
 	// leaves both out.
@@ -464,6 +470,8 @@ type StatusReport struct {
 	// GristSmoke is the last grist smoke of each app, and nil when not asked or
 	// none has been made.
 	GristSmoke []GristSmokeRecord
+	// NoVision are the [grist-apps] whose checkout has no VISION.md, by name.
+	NoVision []string
 	// Cancelled are the runs a cancel event ended in the last day, and Paused
 	// the pause-host event this host is under, if any.
 	Cancelled []Cancel
@@ -751,6 +759,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 			report.GristSmoke = records
 		}
 	}
+	report.NoVision = s.appsWithoutVision(ctx)
 	if s.VPSNginx != nil {
 		reading := s.VPSNginx.Read(ctx)
 		report.VPSNginx = &reading
@@ -1300,6 +1309,13 @@ func (r StatusReport) String() string {
 		b.WriteString("\n")
 	}
 
+	if len(r.NoVision) > 0 {
+		for _, app := range r.NoVision {
+			clip(&b, "VISION: "+app+" has no "+VisionFile)
+		}
+		b.WriteString("\n")
+	}
+
 	if r.Ticks.Known() {
 		clip(&b, TicksHeading)
 		r.Ticks.write(&b, "  ")
@@ -1674,6 +1690,23 @@ func (s Status) idleSince(ctx context.Context) time.Time {
 		return time.Time{}
 	}
 	return since.In(s.now().Location())
+}
+
+// appsWithoutVision names, in order, each app of [grist-apps] whose checkout
+// holds no VISION.md. A checkout whose file cannot be read is not named: the
+// mail to the Mayor says that, and status only says what is plainly missing.
+func (s Status) appsWithoutVision(ctx context.Context) []string {
+	if s.Visions == nil {
+		return nil
+	}
+	var missing []string
+	for app, dir := range s.Apps {
+		if _, found, err := s.Visions.Read(ctx, dir); err == nil && !found {
+			missing = append(missing, app)
+		}
+	}
+	sort.Strings(missing)
+	return missing
 }
 
 // GristSmokeHeading is the heading of the section of mw status that says how

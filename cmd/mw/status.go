@@ -8,6 +8,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
+	"github.com/Jonathan-A-White/millwright/infrastructure/grist"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
 	"github.com/Jonathan-A-White/millwright/infrastructure/procs"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
@@ -162,6 +163,8 @@ func newStatusCmd() *cobra.Command {
 			if reader := hostStandby(files); reader != nil {
 				standby = reader
 			}
+			// Apps that cannot be listed cost the report only its VISION lines.
+			gristApps, _ := config.GristApps()
 			mayor := application.MayorReader{Tracker: tracker, Notes: tracker}
 			cloudBook, plan := cloudStatus(dir, host)
 			// A rig table that cannot be read costs the report only what running
@@ -192,6 +195,8 @@ func newStatusCmd() *cobra.Command {
 				Harness:          procs.Harness{},
 				Control:          homeEventLog(),
 				Smoke:            gristSmokeBook(tracker, host),
+				Apps:             gristApps,
+				Visions:          grist.NewVisions(),
 				HostSilence:      time.Duration(hours) * time.Hour,
 				RigMemoryBytes:   budget,
 				BeadsBudgetBytes: beadsBudget,
