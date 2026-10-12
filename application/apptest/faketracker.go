@@ -130,6 +130,10 @@ type FakeTracker struct {
 	// failing is the methods FailOn makes fail, by the error each gives.
 	failing map[string]error
 
+	// releaseFaults is how a give-back goes wrong on its first tries: each
+	// ReleaseClaim or ReleaseClaimHeldBy takes the next fault off the front.
+	releaseFaults []ReleaseFault
+
 	// Clock is what a claim's lease is counted from. A nil Clock reads the
 	// real one.
 	Clock func() time.Time
@@ -1252,6 +1256,20 @@ func (f *FakeTracker) ReleaseClaimHeldBy(ctx context.Context, id, holder string)
 
 func (f *FakeTracker) release(_ context.Context, id, holder, noted string) error {
 	f.note(noted)
+	f.mu.Lock()
+	var fault *ReleaseFault
+	if len(f.releaseFaults) > 0 {
+		fault, f.releaseFaults = &f.releaseFaults[0], f.releaseFaults[1:]
+	}
+	f.mu.Unlock()
+	if fault != nil {
+		if fault.Err != nil {
+			return fault.Err
+		}
+		// Lost: bd said it was done and the story did not change, as a write on
+		// a Dolt connection that dropped can be (mw-gq6.372).
+		return nil
+	}
 	return f.write(id, func(s *fakeStory) error {
 		if s.detail.Assignee != holder {
 			return fmt.Errorf("release %s: held by %q, not %s", id, s.detail.Assignee, holder)
@@ -1462,6 +1480,18 @@ func (f *FakeTracker) FailOn(method string, err error) {
 		return
 	}
 	f.failing[method] = err
+}
+
+// ReleaseFault is one way a give-back goes wrong: it fails with Err, or, with
+// no Err, reports success and changes nothing — a lost write.
+type ReleaseFault struct{ Err error }
+
+// FailReleases makes the next give-backs, one fault each in order, go wrong
+// before the ones after them work again.
+func (f *FakeTracker) FailReleases(faults ...ReleaseFault) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.releaseFaults = append(f.releaseFaults, faults...)
 }
 
 // CloseMolecule closes the root bead of a poured molecule, as whoever finishes

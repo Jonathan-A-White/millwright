@@ -190,32 +190,39 @@ func newNextCmd() *cobra.Command {
 				stamps = nil
 			}
 
+			// Without the harness's projects directory no transcript can be read, and
+			// a claim with no session behind it is left alone rather than given back.
+			var transcripts application.TranscriptTail
+			if projects, err := claude.DefaultProjectsRoot(); err == nil {
+				transcripts = claude.NewTranscripts(projects)
+			}
 			checks := rig.NewChecks(rig.WithCommands(tests), rig.WithSpecCommands(changedSpecs), rig.WithNice(nice))
 			_, err = application.Next{
-				Tracker:    gateway,
-				Worktrees:  worktrees,
-				Landing:    worktrees,
-				Checks:     checks,
-				SpecChecks: checks,
-				Load:       hostload.Proc{SwapSample: benchmarkSwapSample},
-				Slot:       rig.NewSlots(gateScaledSlotWait(vault.Benchmarks{Vault: files}, rigs, host, benchmarkLimits(bench))),
-				CrossSlot:  application.CrossSlot{Notes: gateway, Host: host},
-				Vault:      files,
-				Rules:      files,
-				Files:      files,
-				Mailbox:    gateway,
-				Runner:     runner,
-				Memory:     gateway,
-				Sync:       sync,
-				Dispatch:   dispatcher,
-				Boot:       builderBoot(files, host, tests, nice),
-				Seat:       BuilderSeat,
-				Host:       host,
-				Rigs:       rigs,
-				PushTries:  pushTries,
-				PushWait:   time.Duration(pushWaitSeconds) * time.Second,
-				Out:        cmd.OutOrStdout(),
-				Err:        cmd.ErrOrStderr(),
+				Tracker:     gateway,
+				Worktrees:   worktrees,
+				Landing:     worktrees,
+				Checks:      checks,
+				SpecChecks:  checks,
+				Load:        hostload.Proc{SwapSample: benchmarkSwapSample},
+				Slot:        rig.NewSlots(gateScaledSlotWait(vault.Benchmarks{Vault: files}, rigs, host, benchmarkLimits(bench))),
+				CrossSlot:   application.CrossSlot{Notes: gateway, Host: host},
+				Vault:       files,
+				Rules:       files,
+				Files:       files,
+				Mailbox:     gateway,
+				Runner:      runner,
+				Transcripts: transcripts,
+				Memory:      gateway,
+				Sync:        sync,
+				Dispatch:    dispatcher,
+				Boot:        builderBoot(files, host, tests, nice),
+				Seat:        BuilderSeat,
+				Host:        host,
+				Rigs:        rigs,
+				PushTries:   pushTries,
+				PushWait:    time.Duration(pushWaitSeconds) * time.Second,
+				Out:         cmd.OutOrStdout(),
+				Err:         cmd.ErrOrStderr(),
 
 				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits)),
 				DeploySlot:   rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
