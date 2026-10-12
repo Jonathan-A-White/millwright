@@ -11,6 +11,7 @@ Description=Wake this host's Millhand for a review (mw millhand --wake review)
 Type=oneshot
 
 # A user unit gets a bare PATH; see mw-millhand-tick.service.
+EnvironmentFile=-%h/.config/mw/beads.env
 EnvironmentFile=-%h/.config/mw/dispatch.env
 ExecStart=/usr/bin/env mw millhand --wake review --reason timer
 

@@ -12,7 +12,10 @@ Description=Post the phone-sized factory report to the Factory channel, from the
 Type=oneshot
 
 # Like mw-doctor.service, it runs the one fixed binary rather than relying on
-# PATH; the bd it calls for the tracker is found through dispatch.env's PATH.
+# PATH; the bd it calls for the tracker is found through dispatch.env's PATH, and
+# reaches the home's Dolt server through BEADS_DOLT_* in beads.env (without them
+# it stops on an empty BEADS_DOLT_SERVER_HOST).
+EnvironmentFile=-%h/.config/mw/beads.env
 EnvironmentFile=-%h/.config/mw/dispatch.env
 ExecStart=/usr/bin/env %h/.local/bin/mw report send
 

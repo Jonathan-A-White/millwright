@@ -16,6 +16,7 @@ Type=oneshot
 # contrib/health/mw-health.sh); the leading "-" makes each file optional. `env`
 # finds mw-health through the PATH the first sets, which ExecStart on its own
 # would not.
+EnvironmentFile=-%h/.config/mw/beads.env
 EnvironmentFile=-%h/.config/mw/dispatch.env
 EnvironmentFile=-%h/.config/mw/health.env
 ExecStart=/usr/bin/env mw-health

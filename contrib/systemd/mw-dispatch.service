@@ -14,6 +14,7 @@ Type=oneshot
 # go are in the file below, as one line `PATH=...`; the rig names no host's
 # directories. The leading "-" makes the file optional. `env` finds mw through
 # the PATH that file sets, which ExecStart on its own would not.
+EnvironmentFile=-%h/.config/mw/beads.env
 EnvironmentFile=-%h/.config/mw/dispatch.env
 ExecStart=/usr/bin/env mw dispatch
 

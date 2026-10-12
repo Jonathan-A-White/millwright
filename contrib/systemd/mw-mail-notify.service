@@ -23,6 +23,7 @@ Type=oneshot
 # into the last one, so a limit of exactly 300 s would skip every second run:
 # a little under it lets each run sync (mail-notify.env, below, may set it).
 Environment=MW_MAIL_SYNC_EVERY=240
+EnvironmentFile=-%h/.config/mw/beads.env
 EnvironmentFile=-%h/.config/mw/dispatch.env
 EnvironmentFile=-%h/.config/mw/mail-notify.env
 ExecStart=/usr/bin/env mw-mail-notify
