@@ -77,6 +77,12 @@ func Available() bool {
 // Fetch implements application.Worktrees.
 func (w *Worktrees) Fetch(ctx context.Context, rigDir string) error {
 	_, err := w.git(ctx, rigDir, "fetch", w.remote)
+	if err == nil {
+		return nil
+	}
+	if why, passing := transientWhy(err); passing {
+		return &application.TransientFault{Why: why, Err: err}
+	}
 	return err
 }
 

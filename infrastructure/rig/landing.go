@@ -340,8 +340,10 @@ func (w *Worktrees) Push(ctx context.Context, landingDir, remote, branch string)
 		switch {
 		case rejected(err):
 			return fmt.Errorf("%w: %v", application.ErrPushRejected, err)
-		case transient(err):
-			return fmt.Errorf("%w: %v", application.ErrPushTransient, err)
+		default:
+			if why, passing := transientWhy(err); passing {
+				return &application.TransientFault{Why: why, Err: fmt.Errorf("%w: %v", application.ErrPushTransient, err)}
+			}
 		}
 		return err
 	}
@@ -392,7 +394,8 @@ var refusedPushFaults = []string{
 // at the remote itself, not a reason it is refusing the push: GitHub's own
 // known server-side hiccup (mw-gq6.86, "fatal error in commit_refs"), a
 // connection that dropped mid-push, a name that would not resolve, and a
-// server error answered over HTTP.
+// server error answered over HTTP. A fetch is read by the same words
+// (mw-gq6.373).
 var transientPushFaults = []string{
 	"fatal error in commit_refs",
 	"connection reset",
@@ -401,31 +404,38 @@ var transientPushFaults = []string{
 	"unexpected disconnect",
 	"the remote end hung up",
 	"could not resolve host",
+	"temporary failure in name resolution",
+	"couldn't connect to server",
+	"failed to connect to",
 	"rpc failed",
-	"http 502", "http/1.1 502",
-	"http 503", "http/1.1 503",
-	"http 504", "http/1.1 504",
+	"http 502", "http/1.1 502", "returned error: 502",
+	"http 503", "http/1.1 503", "returned error: 503",
+	"http 504", "http/1.1 504", "returned error: 504",
 }
 
-// transient reports whether git failed a push on a fault at the remote worth
-// trying again, as against a reason the remote states (refusedPushFaults, or
-// rejected's non-fast-forward wording) that trying again will never change.
-// A "[remote rejected] ... (failure)" with no stated reason at all — what
-// GitHub says for its own server-side faults when nothing more specific
-// comes back — counts too.
-func transient(err error) bool {
+// transientWhy reports whether git failed on a fault at the remote or the
+// network worth trying again, as against a reason the remote states
+// (refusedPushFaults, or rejected's non-fast-forward wording) that trying again
+// will never change, and names the fault in a few words for a note. A
+// "[remote rejected] ... (failure)" with no stated reason at all — what GitHub
+// says for its own server-side faults when nothing more specific comes back —
+// counts too.
+func transientWhy(err error) (string, bool) {
 	said := strings.ToLower(err.Error())
 	for _, phrase := range refusedPushFaults {
 		if strings.Contains(said, phrase) {
-			return false
+			return "", false
 		}
 	}
 	for _, phrase := range transientPushFaults {
 		if strings.Contains(said, phrase) {
-			return true
+			return phrase, true
 		}
 	}
-	return strings.Contains(said, "[remote rejected]") && strings.Contains(said, "(failure)")
+	if strings.Contains(said, "[remote rejected]") && strings.Contains(said, "(failure)") {
+		return "remote rejected (failure)", true
+	}
+	return "", false
 }
 
 // Advance implements application.Landing. The checkout is left alone unless it

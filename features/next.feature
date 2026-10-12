@@ -371,7 +371,7 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.1" is not closed
     And the report says it stopped for "landing-failed"
     And the run of "mw-gq6.1" holds a landing error with every line the origin said
-    And the landing error of "mw-gq6.1" says it was tried 3 times
+    And the landing error of "mw-gq6.1" says it was tried 4 times
 
   Scenario: A branch that conflicts with the moved target is sent back once to a fresh Builder to rebase
     Given the other host landed a change to the same file as "mw-gq6.1" on "main"

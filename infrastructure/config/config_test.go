@@ -1025,11 +1025,11 @@ func TestDispatchSyncWaitOfZeroIsAllowedSoATestNeverSleeps(t *testing.T) {
 	}
 }
 
-func TestPushTriesThreeTwentySecondsApartUntilAHostSaysOtherwise(t *testing.T) {
+func TestPushTriesFourWithABaseWaitOfTwentySecondsUntilAHostSaysOtherwise(t *testing.T) {
 	writeConfig(t, "")
 	tries, err := config.PushTries()
-	if err != nil || tries != 3 {
-		t.Fatalf("expected 3 tries, got %d: %v", tries, err)
+	if err != nil || tries != 4 {
+		t.Fatalf("expected 4 tries (three retries), got %d: %v", tries, err)
 	}
 	wait, err := config.PushWaitSeconds()
 	if err != nil || wait != 20 {

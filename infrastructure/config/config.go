@@ -12,7 +12,7 @@
 //	beads_budget_bytes = 1500000000
 //	dispatch_sync_tries = 3
 //	dispatch_sync_wait = "15s"
-//	push_tries = 3
+//	push_tries = 4
 //	push_wait_seconds = 20
 //	millhand_routine_model = "sonnet"
 //	millhand_review_model = "opus"
@@ -1231,7 +1231,7 @@ const (
 // times in all, DefaultPushWaitSeconds apart. application.DefaultPushTries is
 // the same number.
 const (
-	DefaultPushTries       = 3
+	DefaultPushTries       = 4
 	DefaultPushWaitSeconds = 20
 )
 

@@ -87,3 +87,31 @@ func waitFor(ctx context.Context, d time.Duration) error {
 		return nil
 	}
 }
+
+// TransientFault is a git step that failed on a passing fault of the network or
+// of the remote itself — a name that would not resolve, a connection that
+// timed out or was reset, a server error over HTTP — as against a reason the
+// remote states and trying again will never change. The git adapter is the one
+// place that reads those words; the application sees only this type, and waits
+// the fault out. Err is the failure as it was, unwrapped for whoever wants its
+// words.
+type TransientFault struct {
+	// Why is the short name of the fault, as a note would say it: "could not
+	// resolve host".
+	Why string
+	Err error
+}
+
+// Error is the failure as the adapter reported it.
+func (f *TransientFault) Error() string { return f.Err.Error() }
+
+// Unwrap gives back the failure underneath, so that a push that failed on a
+// transient fault is still an ErrPushTransient.
+func (f *TransientFault) Unwrap() error { return f.Err }
+
+// Faulted reports whether err is a git step that failed on a passing fault, and
+// what it found.
+func Faulted(err error) (*TransientFault, bool) {
+	var fault *TransientFault
+	return fault, errors.As(err, &fault)
+}

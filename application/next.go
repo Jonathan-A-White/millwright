@@ -316,6 +316,11 @@ type Next struct {
 	PushTries int
 	PushWait  time.Duration
 
+	// RetryWait waits d, or until ctx ends, between the tries of a fetch or a
+	// push that failed on a passing fault; a test replaces it. Nil waits for
+	// real. HeartbeatWait is the heartbeat's own clock and is not this one.
+	RetryWait func(ctx context.Context, d time.Duration) error
+
 	// Stamps is where a landing leaves a chain stamp for the follower to
 	// broadcast (docs/chain-stamps.md). A nil Stamps queues none, and a queue
 	// that fails is said on the report and changes nothing about the landing.
@@ -750,7 +755,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 
 	// The target branch as the remote has it now is what the work is measured
 	// against: the other host may have landed on it while this story was worked.
-	if err := n.Worktrees.Fetch(ctx, c.rigDir); err != nil {
+	if err := n.fetchRetrying(ctx, report, c.rigDir); err != nil {
 		return n.stop(ctx, c, report, ReasonGitFailed, fmt.Sprintf("the rig could not be brought up to date with %s: %v", n.remote(), err), "")
 	}
 	if found := n.refusals(ctx, c, report, false); len(found) > 0 {
@@ -1570,7 +1575,7 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 	var lost error
 	for try := 1; try <= n.tries(); try++ {
 		if try > 1 || c.crossHeld {
-			if err := n.Worktrees.Fetch(ctx, c.rigDir); err != nil {
+			if err := n.fetchRetrying(ctx, report, c.rigDir); err != nil {
 				return Landed{}, failedFor(ReasonGitFailed, fmt.Errorf("the rig could not be brought up to date with %s: %w", n.remote(), err))
 			}
 		}
@@ -1719,17 +1724,20 @@ func (n Next) rigMemoryProposals(ctx context.Context, c *closeOut) string {
 
 // pushRetrying pushes what the landing worktree has checked out, and tries
 // again after a wait when the push itself failed on a fault at the remote
-// worth trying again, up to PushTries times in all. It never retries a push
-// the remote refused for a stated reason, or the race with the other host —
-// Rejected — which merge's own loop answers by fetching and merging afresh;
-// either comes back as it was, for merge to tell apart. Every attempt is
-// counted on the report, whichever kind of failure eventually stops it.
+// worth trying again, up to PushTries times in all, the waits growing as a
+// fetch's do (retryPause). It never retries a push the remote refused for a
+// stated reason, or the race with the other host — Rejected — which merge's
+// own loop answers by fetching and merging afresh; either comes back as it
+// was, for merge to tell apart. Every attempt is counted on the report,
+// whichever kind of failure eventually stops it, and every retry is one note.
 func (n Next) pushRetrying(ctx context.Context, c *closeOut, report *NextReport, dir string) error {
 	var last error
 	for try := 1; try <= n.pushTries(); try++ {
 		if try > 1 {
-			if err := waitFor(ctx, n.PushWait); err != nil {
-				return failedFor(ReasonLandingFailed, fmt.Errorf("waiting %s to try the push to %s again: %w", n.PushWait, c.target, err))
+			wait := n.retryPause(try - 1)
+			report.Notes = append(report.Notes, retryNote("push", last, wait))
+			if err := n.retryWait(ctx, wait); err != nil {
+				return failedFor(ReasonLandingFailed, fmt.Errorf("waiting %s to try the push to %s again: %w", wait, c.target, err))
 			}
 		}
 		report.Pushes++
@@ -1744,6 +1752,48 @@ func (n Next) pushRetrying(ctx context.Context, c *closeOut, report *NextReport,
 	}
 	return failedFor(ReasonLandingFailed, fmt.Errorf("the push to %s kept failing on a fault at the remote, %d time(s) running: %w",
 		c.target, n.pushTries(), last))
+}
+
+// FetchRetries is how many times a fetch that failed on a passing fault of the
+// network is tried again before the close-out stops (mw-gq6.373).
+const FetchRetries = 3
+
+// fetchRetrying brings the rig's view of its origin up to date, and when the
+// fetch failed on a passing fault — a name that would not resolve, a
+// connection that timed out — tries it again FetchRetries times, a growing
+// wait apart and about a minute in all with the default PushWait, one note per
+// retry. A fetch that failed for any other reason comes back at once as it was.
+func (n Next) fetchRetrying(ctx context.Context, report *NextReport, rigDir string) error {
+	for retry := 0; ; retry++ {
+		err := n.Worktrees.Fetch(ctx, rigDir)
+		if err == nil {
+			return nil
+		}
+		if _, passing := Faulted(err); !passing || retry == FetchRetries {
+			return err
+		}
+		wait := n.retryPause(retry + 1)
+		report.Notes = append(report.Notes, retryNote("fetch", err, wait))
+		if waitErr := n.retryWait(ctx, wait); waitErr != nil {
+			return fmt.Errorf("%w (and waiting %s to fetch again: %v)", err, wait, waitErr)
+		}
+	}
+}
+
+// retryPause is how long to wait before the retry'th try again of a git step
+// that met a passing fault: half of PushWait, then PushWait, then half as much
+// again, so that three retries wait 60s in all by default.
+func (n Next) retryPause(retry int) time.Duration {
+	return n.PushWait / 2 * time.Duration(retry)
+}
+
+// retryNote is the one line a retry leaves in the close-out.
+func retryNote(step string, err error, wait time.Duration) string {
+	why := "passing fault"
+	if fault, ok := Faulted(err); ok {
+		why = fault.Why
+	}
+	return fmt.Sprintf("%s failed (%s), retried in %s", step, why, wait)
 }
 
 // carryOn brings the hosts level and dispatches whatever is ready now. It runs
@@ -2183,7 +2233,7 @@ func (n Next) tries() int {
 
 // DefaultPushTries is how many times a push is tried when nothing says
 // otherwise: infrastructure/config.DefaultPushTries is the same number.
-const DefaultPushTries = 3
+const DefaultPushTries = 4
 
 // pushTries is how many times a push will try again after failing on a fault
 // at the remote worth trying again.
@@ -2192,6 +2242,15 @@ func (n Next) pushTries() int {
 		return DefaultPushTries
 	}
 	return n.PushTries
+}
+
+// retryWait is the pause between the tries of a git step that met a passing
+// fault.
+func (n Next) retryWait(ctx context.Context, d time.Duration) error {
+	if n.RetryWait != nil {
+		return n.RetryWait(ctx, d)
+	}
+	return waitFor(ctx, d)
 }
 
 // now is the clock the ledger line is dated by.

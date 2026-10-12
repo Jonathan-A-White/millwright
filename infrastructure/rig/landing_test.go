@@ -633,3 +633,60 @@ func pidWhenWritten(t *testing.T, path string) int {
 	t.Fatalf("timed out waiting for %s", path)
 	return 0
 }
+
+// aGitThatSays is a stand-in for git that fails every call with what.
+func aGitThatSays(t *testing.T, what string) *rig.Worktrees {
+	t.Helper()
+	program := filepath.Join(t.TempDir(), "git")
+	script := fmt.Sprintf("#!/bin/sh\necho %q >&2\nexit 128\n", what)
+	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
+		t.Fatalf("writing the stand-in for git: %v", err)
+	}
+	return rig.New(rig.WithProgram(program))
+}
+
+func TestAFetchThatCouldNotResolveTheHostIsAPassingFault(t *testing.T) {
+	worktrees := aGitThatSays(t, "fatal: unable to access 'https://github.com/x/y.git/': Could not resolve host: github.com")
+
+	err := worktrees.Fetch(context.Background(), t.TempDir())
+	fault, ok := application.Faulted(err)
+	if !ok || fault.Why != "could not resolve host" {
+		t.Fatalf("expected a passing fault, could not resolve host, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "Could not resolve host: github.com") {
+		t.Errorf("expected the fault to keep git's own words, got %v", err)
+	}
+}
+
+func TestAFetchThatFailsForAnotherReasonIsNotAPassingFault(t *testing.T) {
+	worktrees := aGitThatSays(t, "fatal: couldn't find remote ref refs/heads/nope")
+
+	err := worktrees.Fetch(context.Background(), t.TempDir())
+	if err == nil {
+		t.Fatal("expected the fetch to fail")
+	}
+	if _, ok := application.Faulted(err); ok {
+		t.Fatalf("expected no passing fault, got %v", err)
+	}
+}
+
+func TestAPushThatTimedOutIsAPassingFaultAndStillATransientPush(t *testing.T) {
+	worktrees := aGitThatSays(t, "fatal: unable to access 'https://github.com/x/y.git/': Connection timed out after 300 seconds")
+
+	err := worktrees.Push(context.Background(), t.TempDir(), "origin", "main")
+	if fault, ok := application.Faulted(err); !ok || fault.Why != "connection timed out" {
+		t.Fatalf("expected a passing fault, connection timed out, got %v", err)
+	}
+	if !application.Transient(err) {
+		t.Fatalf("expected the push to stay transient, got %v", err)
+	}
+}
+
+func TestAPushThatTheRemoteRefusesIsNotAPassingFault(t *testing.T) {
+	worktrees := aGitThatSays(t, "remote: error: GH006: Protected branch update failed (connection reset by hook)")
+
+	err := worktrees.Push(context.Background(), t.TempDir(), "origin", "main")
+	if _, ok := application.Faulted(err); ok || application.Transient(err) {
+		t.Fatalf("expected a refusal, not a passing fault, got %v", err)
+	}
+}
