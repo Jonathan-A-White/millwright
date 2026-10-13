@@ -35,13 +35,15 @@ const vaultLookup = `V="${MW_VAULT:-$(sed -n 's/^vault *= *"\(.*\)".*/\1/p' "$HO
 // mayorGoneScript answers, on the old home, whether its Mayor has handed off: exit
 // 0 when .mayor-acting in its vault is empty or no Mayor process runs
 // (bin/respawn-mayor's own markers, "-n Mayor (after ..."), 1 when one is still
-// there, 2 when it could not tell. It says what it saw on stdout. The `[r]` keeps
-// the pgrep pattern from matching the shell that runs this text.
+// there, 2 when it could not tell. Only the user's own processes are looked at:
+// a second Linux user's Mayor on the host is not this home's (mw-9rp4hu.1). It
+// says what it saw on stdout. The `[r]` keeps the pgrep pattern from matching
+// the shell that runs this text.
 const mayorGoneScript = vaultLookup + `
 ACTING="$(cat "$V/.mayor-acting" 2>/dev/null)"
 if [ -z "$(printf %s "$ACTING" | tr -d ' \t\r\n')" ]; then echo ".mayor-acting is empty"; exit 0; fi
 command -v pgrep >/dev/null 2>&1 || { echo "no pgrep to look for the Mayor process with" >&2; exit 2; }
-pgrep -f -- '-n Mayor \(afte[r] ' >/dev/null 2>&1
+pgrep -u "$(id -u)" -f -- '-n Mayor \(afte[r] ' >/dev/null 2>&1
 case $? in
   0) echo ".mayor-acting says: $ACTING; its Mayor process is running"; exit 1 ;;
   1) echo "no Mayor process runs (.mayor-acting still says: $ACTING)"; exit 0 ;;
