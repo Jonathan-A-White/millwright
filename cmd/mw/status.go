@@ -182,6 +182,7 @@ func newStatusCmd() *cobra.Command {
 				Vault:            mwVault(dir, host),
 				RigFacts:         mwVault(dir, host),
 				Rules:            files,
+				Suites:           files,
 				Graph:            tracker,
 				SyncHalt:         hostSyncHalt(),
 				CloseOuts:        hostCloseOuts(),

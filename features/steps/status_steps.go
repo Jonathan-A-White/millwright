@@ -74,6 +74,10 @@ type statusContext struct {
 	// VISION.md files those checkouts hold (mw-7vrp1r.1).
 	apps    map[string]string
 	visions *apptest.FakeVisions
+	// rigs and suites are the rigs a scenario checked out on the host and the
+	// results of their whole suites kept in the vault (mw-8w7xb7.3).
+	rigs   map[string]string
+	suites *apptest.FakeSuiteRecords
 
 	report application.StatusReport
 	err    error
@@ -125,6 +129,7 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	registerStatusBenchmarkSteps(ctx, c)
 	registerStatusCauseSteps(ctx, c)
 	registerStatusVisionSteps(ctx, c)
+	registerStatusSuiteSteps(ctx, c)
 
 	ctx.Given(`^the status epic "([^"]*)" on the default path:$`, c.theStatusEpicOnTheDefaultPath)
 	ctx.Given(`^a status story "([^"]*)" filed under it$`, c.aStatusStoryFiledUnderIt)
@@ -631,6 +636,9 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 	}
 	if c.visions != nil {
 		status.Apps, status.Visions = c.apps, c.visions
+	}
+	if c.suites != nil {
+		status.Rigs, status.Suites = c.rigs, c.suites
 	}
 	c.report, c.err = status.Run(context.Background())
 	return nil

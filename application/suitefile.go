@@ -87,10 +87,7 @@ func (f SuiteFiler) File(ctx context.Context, epic string, report SuiteReport) (
 // fileOne puts one failing file on a bead: the open one that already names it,
 // or a new held bug.
 func (f SuiteFiler) fileOne(ctx context.Context, epic EpicDetail, report SuiteReport, file SuiteFile) (SuiteFiled, error) {
-	for _, story := range epic.Stories {
-		if story.Status == StatusClosed || !carriesAny(story.Labels, []string{LabelSuite}) || !namesFile(story.Story.Title, file.File) {
-			continue
-		}
+	if story, open := openSuiteBug(epic, file.File); open {
 		if err := f.Tracker.CommentOnStory(ctx, story.Story.ID, suiteComment(report, file)); err != nil {
 			return SuiteFiled{}, fmt.Errorf("commenting on %s: %w", story.Story.ID, err)
 		}
@@ -113,6 +110,18 @@ func (f SuiteFiler) fileOne(ctx context.Context, epic EpicDetail, report SuiteRe
 		return SuiteFiled{}, fmt.Errorf("filing the bug: %w", err)
 	}
 	return SuiteFiled{ID: id, File: file.File, New: true}, nil
+}
+
+// openSuiteBug is the open bead under the suite epic, labelled suite, whose
+// title names file: the one a run's failure of the file is written on, and the
+// one mw status names beside the failing count.
+func openSuiteBug(epic EpicDetail, file string) (StoryDetail, bool) {
+	for _, story := range epic.Stories {
+		if story.Status != StatusClosed && carriesAny(story.Labels, []string{LabelSuite}) && namesFile(story.Story.Title, file) {
+			return story, true
+		}
+	}
+	return StoryDetail{}, false
 }
 
 // namesFile reports whether a title names file as a word of its own, so that

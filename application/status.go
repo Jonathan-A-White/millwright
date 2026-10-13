@@ -177,6 +177,11 @@ type Status struct {
 	// leaves both out.
 	Rules EpicRules
 
+	// Suites, when set, is where each nightly-suite rig's newest kept result is
+	// read from, for the SUITE section; with Rigs and Rules, which say which
+	// rigs run it. Nil leaves the section out.
+	Suites SuiteHistory
+
 	// Graph is where the beads that look finished are found, for the DONE, STILL
 	// OPEN section. A nil Graph leaves the section out.
 	Graph BeadGraph
@@ -449,6 +454,9 @@ type StatusReport struct {
 	// NoFilesKey are the open or held stories of rigs that expect a files key
 	// (files_expected = true) whose path has none, in the order found.
 	NoFilesKey []NoFilesKey
+	// Suites is how the last whole suite of each rig that runs one nightly went
+	// (mw-8w7xb7.3), in rig order.
+	Suites []SuiteStatus
 	// Finished are the open beads that look finished, in the order the tracker
 	// lists them; FinishedKnown says the tracker was asked, so that "nothing" is
 	// told from "not asked".
@@ -726,6 +734,8 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	if report.NoFilesKey, err = s.noFilesKey(ctx, known); err != nil {
 		return report, err
 	}
+
+	report.Suites = s.suiteStatuses(ctx)
 
 	if graphRead != nil {
 		graph, err := graphRead()
@@ -1371,6 +1381,8 @@ func (r StatusReport) String() string {
 		}
 		b.WriteString("\n")
 	}
+
+	r.writeSuite(&b)
 
 	if r.FinishedKnown {
 		clip(&b, fmt.Sprintf("%s (%d)", FinishedHeading, len(r.Finished)))

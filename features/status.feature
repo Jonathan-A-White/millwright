@@ -731,3 +731,48 @@ Feature: mw status
     When mw status reads the host
     Then reading status succeeds
     And the status report has no line beginning "Governor: Ideas only"
+
+  # mw-8w7xb7.3: the last whole-suite result of each rig that runs one nightly.
+
+  Scenario: SUITE shows a rig's last result with the beads that hold its failing files
+    Given the status rig "lampas" runs the nightly suite, its bugs filed under the epic "mw-suite"
+    And the epic "mw-suite" holds the held bug "mw-a" for "src/a.test.ts" of "lampas"
+    And the epic "mw-suite" holds the held bug "mw-b" for "src/b.test.ts" of "lampas"
+    And the last suite of "lampas" was kept today at "9f3c2ab1d", failing "src/a.test.ts" and "src/b.test.ts"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report has the line "SUITE"
+    And the report has the line "  lampas 2026-09-18 9f3c2ab1d: 2 failing: mw-a, mw-b"
+
+  Scenario: A rig whose last suite passed says all pass
+    Given the status rig "lampas" runs the nightly suite, its bugs filed under the epic "mw-suite"
+    And the last suite of "lampas" was kept today at "9f3c2ab1d", all passed
+    When mw status reads the host
+    Then reading status succeeds
+    And the report has the line "  lampas 2026-09-18 9f3c2ab1d: all pass"
+
+  Scenario: A last suite two days old says how long it has not run
+    Given the status rig "lampas" runs the nightly suite, its bugs filed under the epic "mw-suite"
+    And the last suite of "lampas" was kept 2 days ago at "9f3c2ab1d", all passed
+    When mw status reads the host
+    Then reading status succeeds
+    And the report has the line "  lampas 2026-09-16 9f3c2ab1d: all pass · not run for 2 days"
+
+  Scenario: A last suite from yesterday is not yet late
+    Given the status rig "lampas" runs the nightly suite, its bugs filed under the epic "mw-suite"
+    And the last suite of "lampas" was kept 1 day ago at "9f3c2ab1d", all passed
+    When mw status reads the host
+    Then reading status succeeds
+    And the report has the line "  lampas 2026-09-17 9f3c2ab1d: all pass"
+
+  Scenario: A rig that has never run its nightly suite says so
+    Given the status rig "lampas" runs the nightly suite, its bugs filed under the epic "mw-suite"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report has the line "  lampas: never run"
+
+  Scenario: A rig that does not run the nightly suite is not under SUITE
+    Given the status rig "plain" does not run the nightly suite
+    When mw status reads the host
+    Then reading status succeeds
+    And the report has no heading for the suite
