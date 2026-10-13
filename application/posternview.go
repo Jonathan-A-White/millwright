@@ -195,8 +195,9 @@ type TrackerSnapshot interface {
 // never reach. A lone story is a bead with no parent, not an epic, whose own
 // metadata names a rig (so no mail, no molecule and no step); every status,
 // closed ones included, and the view keeps the closed ones within
-// PosternViewRecentWindow. A tracker that is not one leaves them out of the
-// view.
+// PosternViewRecentWindow. An open bead labelled hitl:todo is listed too
+// whatever its parent, so the phone can show it under an epic that is not
+// live. A tracker that is not one leaves them out of the view.
 type LoneStories interface {
 	LoneStories(ctx context.Context) ([]StoryDetail, error)
 }
@@ -538,6 +539,16 @@ func (v PosternView) readTrees(ctx context.Context, b *viewBuild, epics []EpicDe
 	return nil
 }
 
+// IsLoneStory reports whether a bead the view reads without its epic is a lone
+// story: one with no parent that names a rig of its own, or an open item on
+// the Governor's own lists (hitl:todo), under any parent.
+func IsLoneStory(d StoryDetail, parent, rig string) bool {
+	if d.Todo() && workable(d) {
+		return true
+	}
+	return parent == "" && rig != ""
+}
+
 // readLoneStories adds the stories filed under no epic that are not finished
 // or closed within the recent window, as an epic's child is added, with
 // nothing for a parent. They are not underLive: no epic's landing memory or
@@ -749,7 +760,7 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 				}
 			}
 		}
-		if workable(d) && hasHitlLabel(d.Labels) {
+		if workable(d) && hasHitlLabel(d.Labels) && !b.isList(e) {
 			kind := hitlNeedKind(d.Labels)
 			if kind != PosternNeedHands {
 				// A decision, review or verify is his to do or to say: the body
@@ -1208,6 +1219,31 @@ func (b *viewBuild) heldBehind(notes map[string]string) []PosternViewNeed {
 		}
 	}
 	return cards
+}
+
+// isList reports whether e is an item on one of his own lists, or the epic
+// of such a list: a bead labelled hitl:todo, or an epic labelled hitl whose
+// every open child is labelled hitl:todo. It makes no need, though it stays in
+// the view for the phone to list until he closes it.
+func (b *viewBuild) isList(e *viewEntry) bool {
+	d := e.detail
+	if d.Todo() {
+		return true
+	}
+	if !d.IsEpic {
+		return false
+	}
+	open := 0
+	for _, child := range b.epics[d.Story.ID].Stories {
+		if child.Closed() {
+			continue
+		}
+		if !child.Todo() {
+			return false
+		}
+		open++
+	}
+	return open > 0
 }
 
 // waitingNeed is an approve or hands need on entry, with the window it may

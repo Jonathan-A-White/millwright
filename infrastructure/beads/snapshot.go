@@ -195,11 +195,12 @@ func (s *snapshot) LiveEpics(context.Context) ([]string, error) {
 // LoneStories implements application.LoneStories from the listing: every bead
 // with no parent that is not an epic and whose own metadata names a rig, which
 // leaves out mail and molecules (none carries one) and every step (each has a
-// parent), in the order filed.
+// parent), in the order filed; and every open bead labelled hitl:todo, under
+// any parent.
 func (s *snapshot) LoneStories(context.Context) ([]application.StoryDetail, error) {
 	var lone []bead
 	for _, b := range s.beads {
-		if b.Parent == "" && b.Type != TypeEpic && b.pathMetadata()["rig"] != "" {
+		if b.Type != TypeEpic && application.IsLoneStory(application.StoryDetail{Status: b.Status, Labels: b.Labels}, b.Parent, b.pathMetadata()["rig"]) {
 			lone = append(lone, b)
 		}
 	}

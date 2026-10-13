@@ -926,6 +926,7 @@ func (f *FakeTracker) LiveEpics(_ context.Context) ([]string, error) {
 // LoneStories implements application.LoneStories: the stories added under no
 // epic that are not epics and carry a rig in their own Path, in the order
 // added. Mail and every step of a molecule carry none, or hang from a root.
+// An open hitl:todo bead is one too, under any parent.
 func (f *FakeTracker) LoneStories(_ context.Context) ([]application.StoryDetail, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -935,7 +936,7 @@ func (f *FakeTracker) LoneStories(_ context.Context) ([]application.StoryDetail,
 	var lone []application.StoryDetail
 	for _, id := range f.order {
 		s := f.stories[id]
-		if s.detail.EpicID != "" || s.detail.IsEpic || s.detail.Story.Overrides.Rig == "" {
+		if s.detail.IsEpic || !application.IsLoneStory(s.detail, s.detail.EpicID, s.detail.Story.Overrides.Rig) {
 			continue
 		}
 		detail := s.detail

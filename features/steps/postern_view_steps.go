@@ -47,6 +47,9 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the view's epic "([^"]*)" is live$`, c.theViewsEpicIsLive)
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" is labelled "([^"]*)"$`, c.theViewsBeadIsLabelled)
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" waits on "([^"]*)"$`, c.theViewsBeadWaitsOn)
+	ctx.Given(`^the view's epic "([^"]*)" is held$`, c.theViewsEpicIsHeld)
+	ctx.Given(`^the view's epic "([^"]*)" is labelled "([^"]*)"$`, c.theViewsEpicIsLabelled)
+	ctx.Then(`^the view's bead "([^"]*)" is under "([^"]*)" with the labels "([^"]*)"$`, c.theViewsBeadIsUnderWithLabels)
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" landed an hour ago$`, c.theViewsBeadLandedAnHourAgo)
 	ctx.Given(`^the view's hands bead "([^"]*)" under "([^"]*)" closed an hour ago$`, c.theViewsHandsBeadClosedAnHourAgo)
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" landed a month ago$`, c.theViewsBeadLandedAMonthAgo)
@@ -176,6 +179,34 @@ func (c *posternViewContext) theViewsBeadHasStatusClosedAt(id, status, closed st
 func (c *posternViewContext) theViewsEpicIsLive(id string) error {
 	c.tracker.AddEpic(id, domain.Path{})
 	c.tracker.DescribeEpic(id, "Epic "+id, apptest.StatusOpen, 1)
+	return nil
+}
+
+// theViewsEpicIsHeld makes the epic deferred, so it is not a live one.
+func (c *posternViewContext) theViewsEpicIsHeld(id string) error {
+	c.tracker.DescribeEpic(id, "Epic "+id, apptest.StatusDeferred, 1)
+	return nil
+}
+
+// theViewsEpicIsLabelled puts the comma-separated labels on the epic.
+func (c *posternViewContext) theViewsEpicIsLabelled(id, labels string) error {
+	for _, label := range splitLabels(labels) {
+		if err := c.tracker.AddLabel(context.Background(), id, label); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *posternViewContext) theViewsBeadIsUnderWithLabels(id, parent, labels string) error {
+	b, ok := c.bead(id)
+	if !ok {
+		return fmt.Errorf("the view has no bead %s", id)
+	}
+	if b.Parent != parent || strings.Join(b.Labels, ", ") != labels {
+		return fmt.Errorf("expected %s under %s with the labels %q, got under %q with %q",
+			id, parent, labels, b.Parent, strings.Join(b.Labels, ", "))
+	}
 	return nil
 }
 

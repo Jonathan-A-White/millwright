@@ -166,6 +166,7 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a postern action "([^"]*)" on bead "([^"]*)" from "([^"]*)" with txid "([^"]*)"$`, c.aPosternActionOnBeadFrom)
 	ctx.Given(`^a postern priority (\d+) action on bead "([^"]*)" from the Governor with txid "([^"]*)"$`, c.aPosternPriorityActionFromTheGovernor)
 	ctx.Given(`^bead "([^"]*)" is claimed by "([^"]*)"$`, c.beadIsClaimedBy)
+	ctx.Given(`^epic "([^"]*)" has the open bead "([^"]*)" labelled "([^"]*)"$`, c.epicHasTheOpenBeadLabelled)
 	ctx.When(`^mw postern inbox --apply is run$`, c.mwPosternInboxApplyIsRun)
 	ctx.Given(`^the postern inbox hears voice notes as "([^"]*)"$`, c.thePosternInboxHearsVoiceNotesAs)
 	ctx.Given(`^bead "([^"]*)" has the hands step "([^"]*)" on "([^"]*)" as "([^"]*)" running "([^"]*)"$`, c.beadHasTheHandsStep)
@@ -588,6 +589,18 @@ func (c *posternInboxContext) epicHasNHeldStories(id string, n int) error {
 		}
 	}
 	return nil
+}
+
+// epicHasTheOpenBeadLabelled files epic id with one open, unclaimed bead under
+// it, carrying the comma-separated labels.
+func (c *posternInboxContext) epicHasTheOpenBeadLabelled(id, bead, labels string) error {
+	c.memory.AddEpic(id, domain.Path{})
+	c.memory.AddStory(id, domain.Story{ID: bead, Title: "Story " + bead})
+	var all []string
+	for _, l := range strings.Split(labels, ",") {
+		all = append(all, strings.TrimSpace(l))
+	}
+	return c.memory.SetLabels(bead, all...)
 }
 
 // epicHasNOpenStories files epic id with n open, unclaimed stories under it,

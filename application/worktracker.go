@@ -33,6 +33,12 @@ const LabelHitl = "hitl"
 // with hitl plus exactly one of them; a bare hitl is a hands need.
 const LabelHitlKindPrefix = "hitl:"
 
+// LabelHitlTodo marks a bead as an item on one of the Governor's own lists
+// (errands, checks at a desk), filed as a hitl bead so no dispatcher takes it.
+// It is not a need: the view's Needs you leaves it out, and the phone lists it
+// under its epic until he closes it.
+const LabelHitlTodo = LabelHitlKindPrefix + "todo"
+
 // hitlKinds are the kinds a hitl:<kind> label may name, which are also the
 // kinds of need the Governor's view lists for them.
 var hitlKinds = []string{PosternNeedHands, PosternNeedDecision, PosternNeedReview, PosternNeedVerify}
@@ -53,9 +59,15 @@ func hitlKindsOf(labels []string) []string {
 }
 
 // hasHitlLabel reports whether the labels mark a story as worked with the
-// Governor present: hitl, or hitl:<kind> for a kind of need.
+// Governor present: hitl, hitl:todo, or hitl:<kind> for a kind of need.
 func hasHitlLabel(labels []string) bool {
-	return hasLabel(labels, LabelHitl) || len(hitlKindsOf(labels)) > 0
+	return hasLabel(labels, LabelHitl) || hasLabel(labels, LabelHitlTodo) || len(hitlKindsOf(labels)) > 0
+}
+
+// isTodo reports whether the labels make a bead an item on one of his own
+// lists, which makes no need of any kind.
+func isTodo(labels []string) bool {
+	return hasLabel(labels, LabelHitlTodo)
 }
 
 // hitlNeedKind is the kind of need the labels make of a hitl story: the first
@@ -302,6 +314,12 @@ func (d StoryDetail) Closed() bool {
 // no dispatcher may take and which is not a session for a host's cap to count.
 func (d StoryDetail) Hitl() bool {
 	return hasHitlLabel(d.Labels)
+}
+
+// Todo reports whether this bead is an item on one of the Governor's own
+// lists (hitl:todo), which is not a need of his.
+func (d StoryDetail) Todo() bool {
+	return isTodo(d.Labels)
 }
 
 // HitlKind is the kind of need this hitl story is: hands, decision, review or

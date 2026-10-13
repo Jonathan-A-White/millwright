@@ -350,6 +350,15 @@ Feature: mw postern inbox --apply
     And mail "Closed: mw-act.1" was sent to mayor
     And the txid "tx-close" is marked applied
 
+  Scenario: A close tap on an open hitl:todo bead closes it with the Governor's reason
+    Given epic "mw-todo" has the open bead "mw-todo.1" labelled "hitl, hitl:todo"
+    And a postern action "close" on bead "mw-todo.1" from "governor-pubkey-hex" with txid "tx-close-todo"
+    When mw postern inbox --apply is run
+    Then bead "mw-todo.1" now stands "closed"
+    And bead "mw-todo.1" was closed with the reason "Closed by the Governor via postern (tx-close-todo)"
+    And bead "mw-todo.1"'s last comment reads "Closed by the Governor via postern (tx-close-todo)"
+    And the txid "tx-close-todo" is marked applied
+
   Scenario: A close tap on an epic closes its two held stories, then the epic
     Given a postern action "close" on bead "mw-act" from "governor-pubkey-hex" with txid "tx-close-epic"
     When mw postern inbox --apply is run

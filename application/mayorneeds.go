@@ -115,9 +115,9 @@ func (r MayorReader) MayorNeeds(ctx context.Context, hitl []StoryDetail) ([]Post
 
 // maybeNeed reports whether d could be a hands need waiting on the Mayor by
 // what the bead says of itself alone: open or claimed, a hands kind of hitl
-// bead (bare hitl, or hitl:hands) but not demo, and not yet old enough for the view to call it stale.
+// bead (bare hitl, or hitl:hands) but not demo or hitl:todo, and not yet old enough for the view to call it stale.
 func (r MayorReader) maybeNeed(d StoryDetail, now time.Time) bool {
-	if !workable(d) || !hasHitlLabel(d.Labels) || hitlNeedKind(d.Labels) != PosternNeedHands || hasLabel(d.Labels, LabelDemo) {
+	if !workable(d) || !hasHitlLabel(d.Labels) || isTodo(d.Labels) || hitlNeedKind(d.Labels) != PosternNeedHands || hasLabel(d.Labels, LabelDemo) {
 		return false
 	}
 	since := firstKnown(d.Created, d.Updated)

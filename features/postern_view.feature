@@ -419,3 +419,54 @@ Feature: mw postern view
     And the view's bead "mw-ask.1" is closed
     When the live view is built
     Then the view's needs on "mw-ask.1" are "none"
+
+  # A bead labelled hitl:todo is an item on one of his own lists, not a need.
+  Scenario: An open hitl:todo bead gives no need and stays in the view with its labels and parent
+    Given the view's epic "mw-todo" is live
+    And the view's hitl bead "mw-todo.1" under "mw-todo" was filed 2 days ago with the labels "hitl, hitl:todo" and the body "Buy a hose"
+    When the live view is built
+    Then the view's needs on "mw-todo.1" are "none"
+    And the view's bead "mw-todo.1" is under "mw-todo" with the labels "hitl, hitl:todo"
+
+  Scenario: An open hitl:todo bead under an epic that is not live is still in the view with its epic
+    Given the view's epic "mw-todo" is live
+    And the view's epic "mw-todo" is held
+    And the view's hitl bead "mw-todo.1" under "mw-todo" was filed 2 days ago with the labels "hitl, hitl:todo" and the body "Buy a hose"
+    When the live view is built
+    Then the view's needs on "mw-todo.1" are "none"
+    And the view's bead "mw-todo.1" is under "mw-todo" with the labels "hitl, hitl:todo"
+    And the view's bead "mw-todo" has the status "deferred" and no parent
+
+  Scenario: The same bead without hitl:todo still gives a hands need
+    Given the view's epic "mw-todo" is live
+    And the view's hitl bead "mw-todo.1" under "mw-todo" was filed 2 days ago with the labels "hitl" and the body "Buy a hose"
+    When the live view is built
+    Then the view's needs on "mw-todo.1" are "hands:mw-todo.1"
+
+  Scenario: An epic labelled hitl and hitl:todo with two open hitl:todo children gives no hands need
+    Given the view's epic "mw-todo" is live
+    And the view's epic "mw-todo" is labelled "hitl, hitl:todo"
+    And the view's hitl bead "mw-todo.1" under "mw-todo" was filed 2 days ago with the labels "hitl, hitl:todo" and the body "Buy a hose"
+    And the view's hitl bead "mw-todo.2" under "mw-todo" was filed 2 days ago with the labels "hitl, hitl:todo" and the body "Check the router"
+    When the live view is built
+    Then the view's needs on "mw-todo" are "none"
+    And the view's needs on "mw-todo.1" are "none"
+    And the view's needs on "mw-todo.2" are "none"
+    And the view's bead "mw-todo.1" is under "mw-todo" with the labels "hitl, hitl:todo"
+    And the view's bead "mw-todo.2" is under "mw-todo" with the labels "hitl, hitl:todo"
+
+  Scenario: An epic labelled hitl whose every open child is hitl:todo gives no hands need
+    Given the view's epic "mw-todo" is live
+    And the view's epic "mw-todo" is labelled "hitl"
+    And the view's hitl bead "mw-todo.1" under "mw-todo" was filed 2 days ago with the labels "hitl, hitl:todo" and the body "Buy a hose"
+    When the live view is built
+    Then the view's needs on "mw-todo" are "none"
+
+  Scenario: An epic labelled hitl with an open child that is not hitl:todo still gives a hands need
+    Given the view's epic "mw-todo" is live
+    And the view's epic "mw-todo" is labelled "hitl"
+    And the view's hitl bead "mw-todo.1" under "mw-todo" was filed 2 days ago with the labels "hitl, hitl:todo" and the body "Buy a hose"
+    And the view's hitl bead "mw-todo.2" under "mw-todo" was filed 2 days ago with the labels "hitl" and the body "Fit the shelf"
+    When the live view is built
+    Then the view's needs on "mw-todo" are "hands:mw-todo"
+    And the view's needs on "mw-todo.2" are "hands:mw-todo.2"
