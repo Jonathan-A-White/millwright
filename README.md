@@ -900,6 +900,17 @@ their name in because the kernel holds it: an `mw` that is killed, runs out of
 memory or has its terminal closed under it gives the slot back the moment the
 process ends, so there is no stale slot to break by hand.
 
+The rig's tests are one more lock: this host's **gate lock**, an advisory
+`flock` on `gate.lock` in `~/.local/state/mw`, one for the whole host whatever the
+rig. A close-out takes it before the rig's tests, in the worktree and again on the
+merged result, waits for the load to calm only once it has it, and gives it back
+when its gate ends, passed, failed or errored. A suite fills every core, so two
+side by side failed each other on test timeouts (mw-gq6.388). A close-out that
+queued says so (`note    gate waited 7m for mw-xxx before the rig's tests`); a free
+lock says nothing. It is not the merge slot, which keeps two close-outs off one
+rig's target branch. A gate lock that cannot be taken within three hours is said,
+and the tests run without it.
+
 The two *hosts* take turns by the rig's **merge slot across hosts**, taken
 around this host's own: a lease in the beads server's key-value store
 (`merge-slot.<rig>`: holder, host, expiry), renewed while the close-out lands and

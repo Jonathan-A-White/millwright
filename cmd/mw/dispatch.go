@@ -62,6 +62,17 @@ func hostCloseOuts() application.CloseOutMarks {
 	return closeout.New(filepath.Join(home, SyncHaltStateDir, closeout.Dir))
 }
 
+// hostGateLock is this host's gate lock, kept under SyncHaltStateDir: one rig
+// gate at a time on the host, whatever the rig (mw-gq6.388). A host with no
+// home directory keeps none.
+func hostGateLock() application.GateLock {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return nil
+	}
+	return hostlock.NewGate(filepath.Join(home, SyncHaltStateDir))
+}
+
 // hostSyncHalt is this host's own mark of a halted sync, kept in
 // SyncHaltStateDir. A host with no home directory keeps none.
 func hostSyncHalt() application.SyncHaltMarker {

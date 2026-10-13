@@ -206,6 +206,7 @@ func newNextCmd() *cobra.Command {
 				Load:        hostload.Proc{SwapSample: benchmarkSwapSample},
 				Slot:        rig.NewSlots(gateScaledSlotWait(vault.Benchmarks{Vault: files}, rigs, host, benchmarkLimits(bench))),
 				CrossSlot:   application.CrossSlot{Notes: gateway, Host: host},
+				GateLock:    hostGateLock(),
 				Vault:       files,
 				Rules:       files,
 				Files:       files,

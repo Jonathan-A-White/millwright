@@ -25,7 +25,7 @@ domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cm
 | CardLog, ReportSentLog | application/card.go, application/reportsend.go | infra/{cardlog,reportlog} | Fake{CardLog,ReportSentLog} |
 | CloseOutMarks | application/closeout.go | infra/closeout | Fake*Mark* |
 | Worktrees, BranchChanges | application/worktrees.go | infra/rig/worktree.go | dispatch_test.go |
-| HostLoad, Cloud*, BenchmarkBook | application/hostload.go, application/benchmark.go | infra/{hostload,cloud,vault/{cloudbook,benchmarks}.go} | Fake{HostLoad,Cloud*,Benchmarks} |
+| HostLoad, GateLock, Cloud*, BenchmarkBook | application/hostload.go, application/gate.go, application/benchmark.go | infra/{hostload,hostlock/gate.go,cloud,vault/{cloudbook,benchmarks}.go} | Fake{HostLoad,Cloud*,Benchmarks}; features/next_gate_lock.feature |
 | TickLog, Notifier, HomeMoveHost, OldHome, VaultBirth, TrackerBirth | application/{millhandtick,homemove,init}.go | infra/{ticklog,notify/notify,homemove/homemove,vault/birth,beads/init}.go | FakeTickLog |
 | Landing, Checks, SpecChecks, MergeSlot, Holding | application/landing.go | infra/rig/{landing,checks,slot}.go | - |
 | AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter, FormulaInstaller | application/afterlanding.go, application/selfupdate.go, application/backendstage.go, application/formulainstall.go | infra/{rig/{afterlanding,built,backend},userunits,vault/formulas}.go | features/{self_update,backend_swap}.feature |
