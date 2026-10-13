@@ -66,7 +66,7 @@ func newSyncCmd() *cobra.Command {
 				Tracker:   mwGateway(dir, host),
 				Host:      host,
 				Ticks:     hostTickLogs(),
-				Lock:      hostSyncLock(),
+				Lock:      hostSyncLock(dir),
 				SyncHalts: hostSyncHalt(),
 
 				SkipBackup: noBackup,

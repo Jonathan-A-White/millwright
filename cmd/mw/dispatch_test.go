@@ -97,7 +97,7 @@ func TestDispatchLeavesQuietlyWhileAnotherDispatchHoldsTheHostLock(t *testing.T)
 	if err != nil {
 		t.Fatalf("finding the home directory: %v", err)
 	}
-	release, taken, err := hostlock.NewTry(filepath.Join(home, DispatchStateDir), hostlock.DispatchFile).TryTake(context.Background())
+	release, taken, err := hostlock.NewTry(filepath.Join(home, DispatchStateDir), hostlock.DispatchFileFor("/nowhere/vault")).TryTake(context.Background())
 	if err != nil || !taken {
 		t.Fatalf("expected to take the dispatch lock first, got taken %v, error %v", taken, err)
 	}

@@ -66,3 +66,35 @@ func TestWaitingForTheLockGivesUpWhenTheContextDoes(t *testing.T) {
 		t.Fatal("expected waiting for the lock to give up when the context did")
 	}
 }
+
+// mw-9rp4hu.1: one user serving two vaults holds two sync locks, one for each;
+// the same vault always names the same one.
+func TestSyncLockIsNamedByTheVaultAndSoDiffersBetweenVaults(t *testing.T) {
+	ctx, dir := context.Background(), t.TempDir()
+	a, b := "/home/luke/vault-a", "/home/luke/vault-b"
+
+	if hostlock.SyncFileFor(a) == hostlock.SyncFileFor(b) {
+		t.Fatalf("expected two vaults to name two sync locks, both are %q", hostlock.SyncFileFor(a))
+	}
+	if hostlock.SyncFileFor(a) != hostlock.SyncFileFor(a+"/") {
+		t.Fatalf("expected one vault to name one sync lock however it is written")
+	}
+
+	first, err := impatient2(dir, hostlock.WithFile(hostlock.SyncFileFor(a))).Take(ctx)
+	if err != nil {
+		t.Fatalf("taking vault a's sync lock: %v", err)
+	}
+	defer first()
+	second, err := impatient2(dir, hostlock.WithFile(hostlock.SyncFileFor(b))).Take(ctx)
+	if err != nil {
+		t.Fatalf("expected vault b's sync lock free while a's is held: %v", err)
+	}
+	second()
+	if _, err := impatient2(dir, hostlock.WithFile(hostlock.SyncFileFor(a))).Take(ctx); err == nil {
+		t.Fatal("expected vault a's sync lock held")
+	}
+}
+
+func impatient2(dir string, opts ...hostlock.Option) *hostlock.Lock {
+	return hostlock.New(dir, append([]hostlock.Option{hostlock.WithWait(150 * time.Millisecond), hostlock.WithPoll(10 * time.Millisecond)}, opts...)...)
+}

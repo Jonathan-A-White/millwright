@@ -33,9 +33,10 @@ func GrindSlots(dir string, concurrency int) []application.GristLock {
 	return slots
 }
 
-// DispatchFile is the lock a whole `mw dispatch` run holds, by its name inside
-// the dispatch state directory.
-const DispatchFile = "lock"
+// DispatchFileFor is the name of the dispatch lock of vault inside the dispatch
+// state directory: one for each vault, so that a user serving two vaults can
+// dispatch for both at once (mw-9rp4hu.1).
+func DispatchFileFor(vault string) string { return "lock-" + VaultKey(vault) }
 
 // DefaultSettle is how long TryTake keeps trying before it says the lock is
 // held: long enough to outlast a Held look taken at the same instant, short

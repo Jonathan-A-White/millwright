@@ -152,7 +152,7 @@ func newNextCmd() *cobra.Command {
 			files := mwVault(dir, host)
 			worktrees := rig.New()
 			runner := tmux.New()
-			sync, err := hostSync(application.Sync{Vault: files, Tracker: gateway, Host: host, Ticks: hostTickLogs(), Lock: hostSyncLock()})
+			sync, err := hostSync(application.Sync{Vault: files, Tracker: gateway, Host: host, Ticks: hostTickLogs(), Lock: hostSyncLock(dir)})
 			if err != nil {
 				return err
 			}
@@ -179,7 +179,7 @@ func newNextCmd() *cobra.Command {
 					Events:      homeEventLog(),
 					SmokeHolds:  gristSmokeBook(gateway, host),
 					Out:         cmd.OutOrStdout(),
-				})
+				}, dir)
 			}
 
 			// A stamp queue that cannot be placed is said, and queues nothing: no
@@ -275,8 +275,8 @@ func beadsEnvFile() string {
 // timer tick never claim, pour and start the same story at once (mw-gq6.193).
 // A dispatch that cannot take the dispatch lock
 // says so and does nothing; the timer's next tick starts what is ready.
-func withHostDispatchLocks(d application.Dispatch) application.Dispatch {
-	d.Exclusive = hostDispatchLock()
+func withHostDispatchLocks(d application.Dispatch, vault string) application.Dispatch {
+	d.Exclusive = hostDispatchLock(vault)
 	return d
 }
 

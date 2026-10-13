@@ -80,7 +80,7 @@ func TestNextEndOfLandingDispatchDoesNothingWhileTheHostDispatchLockIsHeld(t *te
 	mwConfig(t, "vault = \"/nowhere/vault\"\nhost = \"vps\"\n")
 	ctx := context.Background()
 
-	other := hostDispatchLock()
+	other := hostDispatchLock("/nowhere/vault")
 	release, taken, err := other.TryTake(ctx)
 	if err != nil || !taken {
 		t.Fatalf("expected to take the host's dispatch lock, got taken=%v err=%v", taken, err)
@@ -88,7 +88,7 @@ func TestNextEndOfLandingDispatchDoesNothingWhileTheHostDispatchLockIsHeld(t *te
 	defer release()
 
 	var out bytes.Buffer
-	dispatch := withHostDispatchLocks(application.Dispatch{Host: "vps", Cap: 1, Out: &out})
+	dispatch := withHostDispatchLocks(application.Dispatch{Host: "vps", Cap: 1, Out: &out}, "/nowhere/vault")
 	report, err := dispatch.Run(ctx)
 	if err != nil {
 		t.Fatalf("expected a dispatch that finds another running to leave quietly, got %v", err)
