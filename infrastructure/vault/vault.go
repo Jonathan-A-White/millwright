@@ -25,6 +25,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -252,6 +253,43 @@ func (v *Vault) PutSuiteFile(_ context.Context, rig, name, contents string) (str
 }
 
 var _ application.SuiteRecords = (*Vault)(nil)
+
+// LatestSuite implements application.SuiteHistory: the newest of the
+// runs/suite/<rig>/<date>.json files, by the date in its name.
+func (v *Vault) LatestSuite(_ context.Context, rig string) (application.SuiteRecord, bool, error) {
+	if err := safeName("rig", rig); err != nil {
+		return application.SuiteRecord{}, false, err
+	}
+	dir := filepath.Join(v.dir, filepath.FromSlash(path.Join(application.SuiteDir, rig)))
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return application.SuiteRecord{}, false, nil
+	}
+	if err != nil {
+		return application.SuiteRecord{}, false, fmt.Errorf("listing %s: %w", dir, err)
+	}
+	var day string
+	for _, entry := range entries {
+		name := entry.Name()
+		if d := strings.TrimSuffix(name, ".json"); d != name && !entry.IsDir() && d > day {
+			day = d
+		}
+	}
+	if day == "" {
+		return application.SuiteRecord{}, false, nil
+	}
+	contents, err := os.ReadFile(filepath.Join(dir, day+".json"))
+	if err != nil {
+		return application.SuiteRecord{}, false, fmt.Errorf("reading the suite result of %s: %w", day, err)
+	}
+	record, err := application.ParseSuiteRecord(day, string(contents))
+	if err != nil {
+		return application.SuiteRecord{}, false, err
+	}
+	return record, true, nil
+}
+
+var _ application.SuiteHistory = (*Vault)(nil)
 
 // ReadRunFile implements application.Vault. A file that was never written comes
 // back as the error os.ReadFile gives, which satisfies errors.Is(err,

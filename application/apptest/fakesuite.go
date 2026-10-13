@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"strings"
 	"sync"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -177,4 +178,28 @@ func (f *FakeSuiteRecords) Paths() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.order...)
+}
+
+var _ application.SuiteHistory = (*FakeSuiteRecords)(nil)
+
+// LatestSuite implements application.SuiteHistory: the newest of the
+// <date>.json files put for rig.
+func (f *FakeSuiteRecords) LatestSuite(_ context.Context, rig string) (application.SuiteRecord, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var day string
+	for at := range f.files {
+		dir, name := path.Split(at)
+		if dir != application.SuiteDir+"/"+rig+"/" || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		if d := strings.TrimSuffix(name, ".json"); d > day {
+			day = d
+		}
+	}
+	if day == "" {
+		return application.SuiteRecord{}, false, nil
+	}
+	record, err := application.ParseSuiteRecord(day, f.files[path.Join(application.SuiteDir, rig, day+".json")])
+	return record, err == nil, err
 }

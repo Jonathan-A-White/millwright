@@ -71,6 +71,11 @@ func homeSpring(path, host string, out io.Writer) (*application.EventSpring, err
 		jobs = append(jobs, job)
 	}
 	jobs = append(jobs, application.ChainStampJob(chainStampEvery, chainStampRun(out)))
+	if job, err := nightlySuiteSpringJob(host, knobs.SuiteHour, out); err != nil {
+		fmt.Fprintf(out, "mw events follow: no suite job: %v\n", err)
+	} else {
+		jobs = append(jobs, job)
+	}
 	if job, ok, err := cloudSpringJob(out); err != nil {
 		fmt.Fprintf(out, "mw events follow: no cloud job: %v\n", err)
 	} else if ok {

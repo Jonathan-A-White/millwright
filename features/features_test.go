@@ -151,6 +151,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeSecretsScenario(ctx)
 	steps.InitializeStatusScenario(ctx)
 	steps.InitializeSuiteScenario(ctx)
+	steps.InitializeSuiteNightlyScenario(ctx)
 	steps.InitializeSweepScenario(ctx)
 	steps.InitializeTalkModelScenario(ctx)
 	steps.InitializeTalkSayScenario(ctx)
