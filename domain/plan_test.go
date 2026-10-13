@@ -262,3 +262,27 @@ func TestFitTitleToStepsLeavesAFormulaWithNoTitleInItsStepsAlone(t *testing.T) {
 		t.Errorf("expected the title unchanged, got %d bytes", len(got))
 	}
 }
+
+func TestAPlanStorysFilesAreItsFilesKey(t *testing.T) {
+	plan, err := domain.ParsePlan([]byte(`{
+		"epic": {"title": "E", "defaults": {"rig": "r", "branch": "main", "harness": "claude", "model": "opus", "effort": "high", "host": "vps"}},
+		"stories": [
+			{"key": "a", "title": "A", "acceptance": "x", "files": "domain/plan.go, application/*.go"},
+			{"key": "b", "title": "B", "acceptance": "x", "path": {"files": "docs/"}},
+			{"key": "c", "title": "C", "acceptance": "x", "path": {"files": "docs/"}, "files": "src/"}
+		]
+	}`))
+	if err != nil {
+		t.Fatalf("reading the plan: %v", err)
+	}
+	for i, want := range []string{"domain/plan.go, application/*.go", "docs/", "src/"} {
+		story := plan.Stories[i]
+		if got := story.PathOverrides().Files; got != want {
+			t.Errorf("story %s: expected the overrides to carry the files key %q, got %q", story.Key, want, got)
+		}
+		path, err := story.PathFrom(plan.Epic.Defaults)
+		if err != nil || path.Files != want {
+			t.Errorf("story %s: expected its path to carry the files key %q, got %q (%v)", story.Key, want, path.Files, err)
+		}
+	}
+}
