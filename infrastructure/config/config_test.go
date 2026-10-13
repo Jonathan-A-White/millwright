@@ -2238,3 +2238,25 @@ func TestBenchmarkIsReadFromTheTableAndLeavesTheRestZero(t *testing.T) {
 		}
 	}
 }
+
+func TestPosternVerifyDaysIsFourUntilThePosternTableSaysOtherwise(t *testing.T) {
+	writeConfig(t, "")
+	days, err := config.PosternVerifyDays()
+	if err != nil || days != 4 {
+		t.Fatalf("expected 4 days by default, got %d: %v", days, err)
+	}
+
+	writeConfig(t, "[postern]\nverify_days = 2\n")
+	if days, err = config.PosternVerifyDays(); err != nil || days != 2 {
+		t.Fatalf("expected the [postern] table's 2 days, got %d: %v", days, err)
+	}
+}
+
+func TestPosternVerifyDaysRefusesWhatIsNotAWholeNumberOfDays(t *testing.T) {
+	for _, bad := range []string{"0", "-1", "soon", "1.5"} {
+		writeConfig(t, "[postern]\nverify_days = "+bad+"\n")
+		if _, err := config.PosternVerifyDays(); err == nil || !strings.Contains(err.Error(), "verify_days") {
+			t.Errorf("expected verify_days = %s to be refused, naming the key, got %v", bad, err)
+		}
+	}
+}

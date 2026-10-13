@@ -45,6 +45,9 @@
 //	vps_host = "vps"    # optional: the VPS standby is kept level too, its swap always a tap;
 //	                    # with vps_stage, vps_live, vps_service and vps_health beside it
 //
+//	[postern]
+//	verify_days = 4                    # days a landing's verify need stays in Needs you before it is published folded
+//
 //	[tester]                           # the one-week Tester trial, on the home only
 //	rigs   = ["lampas"]
 //	until  = "2026-10-16T20:00:00Z"    # UTC; no Tester story is sprung from then on
@@ -934,6 +937,40 @@ func GristApps() (map[string]string, error) {
 		}
 	}
 	return apps, nil
+}
+
+// PosternTable is the table of the config file that holds the postern view's
+// own settings.
+const PosternTable = "postern"
+
+// DefaultPosternVerifyDays is how many days a landing's verify need stays in the
+// view's Needs you, unfolded, when the [postern] table says nothing; it is
+// application's own default, said again so that this package needs not import it.
+const DefaultPosternVerifyDays = 4
+
+// PosternVerifyDays reports `verify_days` of the `[postern]` table of
+// ~/.config/mw/config.toml: how many days after it closed a landing's verify
+// need stays in Needs you before the view publishes it folded. A whole number, 1
+// or more; DefaultPosternVerifyDays when the table says nothing.
+func PosternVerifyDays() (int, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return 0, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	table, err := tableIn(path, PosternTable)
+	if err != nil {
+		return 0, err
+	}
+	said := strings.TrimSpace(table["verify_days"])
+	if said == "" {
+		return DefaultPosternVerifyDays, nil
+	}
+	days, err := strconv.Atoi(said)
+	if err != nil || days < 1 {
+		return 0, fmt.Errorf("the [%s] table of %s says verify_days = %q: it must be a whole number of days, 1 or more", PosternTable, path, said)
+	}
+	return days, nil
 }
 
 // DispatchTable is the table of the config file that says how much room a host

@@ -45,9 +45,10 @@ const (
 	KindControl       = "control"        // a word to the factory: cancel a story's session, pause a host, cap, priority
 	KindActionApplied = "action_applied" // a one-tap action of the Governor's, applied from the inbox, echoed with the tap's txid
 	KindCloud         = "cloud"          // a cloud box made or destroyed, a box that failed to come up, the month's cap reached
+	KindVerifyFolded  = "verify_folded"  // a landing's verify need went unverified past verify_days and is now published folded
 )
 
-var kinds = []string{KindBeadChanged, KindCardAsked, KindCardAnswered, KindCardApplied, KindMessage, KindTalkTurn, KindHandsRan, KindMail, KindJob, KindHandover, KindControl, KindActionApplied, KindCloud}
+var kinds = []string{KindBeadChanged, KindCardAsked, KindCardAnswered, KindCardApplied, KindMessage, KindTalkTurn, KindHandsRan, KindMail, KindJob, KindHandover, KindControl, KindActionApplied, KindCloud, KindVerifyFolded}
 
 // kindMachine is the machine each kind is a transition of; a kind missing
 // here has none.
@@ -76,6 +77,7 @@ var kindBead = map[string]bool{
 	KindHandsRan:      true,
 	KindMail:          true,
 	KindActionApplied: true,
+	KindVerifyFolded:  true,
 }
 
 // Kinds lists every kind.
