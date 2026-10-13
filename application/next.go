@@ -1270,7 +1270,12 @@ func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all
 
 	// What the formula says the session was to do. A step still open is a step
 	// the session did not do, whatever the code looks like.
-	if refusal, open := n.openStepsRefusal(ctx, c, report); open && refuse(refusal.Reason, refusal.Why, refusal.Said) {
+	// A check (all) only reads: it says the closing-comment step would be closed.
+	closing := closeClosingStep
+	if all {
+		closing = previewClosingStep
+	}
+	if refusal, open := n.openStepsRefusal(ctx, c, report, closing, base); open && refuse(refusal.Reason, refusal.Why, refusal.Said) {
 		return found
 	}
 
@@ -1312,9 +1317,30 @@ func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all
 	return found
 }
 
+// closingStepMode is what openStepsRefusal does about a lone open
+// closing-comment step whose comment is on the story (mw-gq6.398).
+type closingStepMode int
+
+const (
+	// leaveClosingStep treats it as any open step.
+	leaveClosingStep closingStepMode = iota
+	// closeClosingStep closes the step, and notes that it did.
+	closeClosingStep
+	// previewClosingStep writes nothing: it does not refuse, and notes that
+	// the close-out would close the step.
+	previewClosingStep
+)
+
+// ClosingCommentStepTitle begins the title of the formula step that asks the
+// Builder for the closing comment.
+const ClosingCommentStepTitle = "Write the closing comment"
+
 // openStepsRefusal is the refusal of a story whose poured formula still has a
-// step open, or whose steps could not be read; false when there is none.
-func (n Next) openStepsRefusal(ctx context.Context, c *closeOut, report *NextReport) (Refusal, bool) {
+// step open, or whose steps could not be read; false when there is none. The
+// one exception, by closing: a lone open step that asks for the closing comment
+// when the story already carries one written after its newest commit — the
+// Builder did what the step asks and never closed it (mw-gq6.398).
+func (n Next) openStepsRefusal(ctx context.Context, c *closeOut, report *NextReport, closing closingStepMode, base string) (Refusal, bool) {
 	root := c.detail.Molecule.RootID
 	if root == "" {
 		return Refusal{}, false
@@ -1324,10 +1350,69 @@ func (n Next) openStepsRefusal(ctx context.Context, c *closeOut, report *NextRep
 	case err != nil:
 		return Refusal{ReasonTrackerFailed, fmt.Sprintf("the steps of the formula poured as %s could not be read: %v", root, err), ""}, true
 	case len(open) > 0:
+		if closing != leaveClosingStep && len(open) == 1 && n.closingCommentWritten(ctx, c, open[0], base) {
+			if closing == previewClosingStep {
+				report.Notes = append(report.Notes, ClosingStepNote(true))
+				return Refusal{}, false
+			}
+			if err := n.Tracker.CloseStory(ctx, open[0].ID, "the closing comment is on the story (closed by mw next)"); err == nil {
+				report.Notes = append(report.Notes, ClosingStepNote(false))
+				return Refusal{}, false
+			}
+		}
 		return Refusal{ReasonOpenSteps, fmt.Sprintf("%d formula step(s) of %s are still open, so the formula was not finished", len(open), root),
 			"Still open:\n" + stepList(open)}, true
 	}
 	return Refusal{}, false
+}
+
+// ClosingStepNote is the note of a close-out that closed the closing-comment
+// step itself, or with preview that a close-out would.
+func ClosingStepNote(preview bool) string {
+	if preview {
+		return "would close the closing-comment step: the comment is on the story"
+	}
+	return "closed the closing-comment step: the comment is on the story"
+}
+
+// closingCommentWritten reports whether step asks for the closing comment and
+// the story carries one — HOW TO CHECK IT (or the Internal line that stands in
+// for it) and 'For the rig memory' — written after its newest commit. Anything
+// it cannot read counts as no.
+func (n Next) closingCommentWritten(ctx context.Context, c *closeOut, step FormulaStep, base string) bool {
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(step.Title)), strings.ToLower(ClosingCommentStepTitle)) {
+		return false
+	}
+	commits, err := n.Landing.Commits(ctx, c.rigDir, c.branch, base)
+	if err != nil {
+		return false
+	}
+	var newest time.Time
+	for _, commit := range commits {
+		if commit.Committed.After(newest) {
+			newest = commit.Committed
+		}
+	}
+	comments, err := n.Tracker.StoryComments(ctx, c.id)
+	if err != nil {
+		return false
+	}
+	for _, comment := range comments {
+		if comment.Created.After(newest) && isClosingComment(comment.Text) {
+			return true
+		}
+	}
+	return false
+}
+
+// isClosingComment is a comment with the two sections of a Builder's closing
+// comment: how the Governor checks it (or the line that says there is nothing
+// to look at) and the rig memory proposals.
+func isClosingComment(text string) bool {
+	if !strings.Contains(text, "For the rig memory") {
+		return false
+	}
+	return strings.Contains(text, "HOW TO CHECK IT") || strings.Contains(text, "Internal: nothing for the Governor to look at")
 }
 
 // nothingCommitted is the refusal of a branch with no commits on it. A

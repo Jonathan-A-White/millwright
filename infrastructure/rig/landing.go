@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 )
@@ -171,7 +172,7 @@ const (
 
 // Commits implements application.Landing: the commits branch has that base does
 // not, oldest first — the order they would land in — each with its short hash
-// and its whole message.
+// its whole message, and the time it was committed.
 func (w *Worktrees) Commits(ctx context.Context, rigDir, branch, base string) ([]application.Commit, error) {
 	switch {
 	case branch == "":
@@ -180,7 +181,7 @@ func (w *Worktrees) Commits(ctx context.Context, rigDir, branch, base string) ([
 		return nil, fmt.Errorf("reading the commits on %s in %s: ahead of what?", branch, rigDir)
 	}
 	// %B is the whole message, subject and body, exactly as it was written.
-	said, err := w.git(ctx, rigDir, "log", "--reverse", "--format=format:%h%n%B"+endDirective, base+".."+branch)
+	said, err := w.git(ctx, rigDir, "log", "--reverse", "--format=format:%h %ct%n%B"+endDirective, base+".."+branch)
 	if err != nil {
 		return nil, err
 	}
@@ -193,11 +194,13 @@ func (w *Worktrees) Commits(ctx context.Context, rigDir, branch, base string) ([
 		if strings.TrimSpace(record) == "" {
 			continue
 		}
-		hash, message, _ := strings.Cut(record, "\n")
-		commits = append(commits, application.Commit{
-			Hash:    strings.TrimSpace(hash),
-			Message: strings.TrimRight(message, "\n"),
-		})
+		head, message, _ := strings.Cut(record, "\n")
+		hash, stamp, _ := strings.Cut(strings.TrimSpace(head), " ")
+		commit := application.Commit{Hash: hash, Message: strings.TrimRight(message, "\n")}
+		if seconds, err := strconv.ParseInt(stamp, 10, 64); err == nil {
+			commit.Committed = time.Unix(seconds, 0)
+		}
+		commits = append(commits, commit)
 	}
 	return commits, nil
 }

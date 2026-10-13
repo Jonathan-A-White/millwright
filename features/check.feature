@@ -72,6 +72,16 @@ Feature: Checking a branch before its session ends
     And the check prints: Implement until green
     And the check wrote nothing to the tracker, the ledger, the vault or git
 
+  # mw-gq6.398: a check writes nothing, so it does not close the step; it says the
+  # close-out would, and does not fail for it.
+  Scenario: A lone closing-comment step with its comment on the story passes the check, and is not closed by it
+    Given a formula was poured for "mw-gq6.1" and only the closing-comment step is still open
+    And a closing comment with "HOW TO CHECK IT" and "For the rig memory:" was written on "mw-gq6.1" after its newest commit
+    When a session checks "mw-gq6.1"
+    Then the check passes
+    And the check prints: would close the closing-comment step
+    And the check wrote nothing to the tracker, the ledger, the vault or git
+
   Scenario: Every check that fails is printed at once, not only the first
     Given a commit on the branch of "mw-gq6.1" carries "Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
     And a formula was poured for "mw-gq6.1" and one of its steps is still open

@@ -163,6 +163,8 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the story "([^"]*)" is planned and ready to be worked here$`, c.aStoryReadyHere)
 	ctx.Given(`^the ledger already holds a line from an earlier story$`, c.theLedgerAlreadyHoldsALine)
 	ctx.Given(`^a formula was poured for "([^"]*)" and one of its steps is still open$`, c.aFormulaWithAnOpenStep)
+	ctx.Given(`^a formula was poured for "([^"]*)" and only the closing-comment step is still open$`, c.aFormulaWithOnlyTheClosingStepOpen)
+	ctx.Given(`^a closing comment with "([^"]*)" and "([^"]*)" was written on "([^"]*)" (after|before) its newest commit$`, c.aClosingCommentWasWritten)
 	ctx.Given(`^the story "([^"]*)" is claimed here with no session behind it$`, c.aStoryClaimedWithNoSession)
 	ctx.Given(`^the story "([^"]*)" is claimed here, its landing was refused and its session has ended$`, c.aStoryWhoseLandingWasRefused)
 	ctx.Given(`^the session of "([^"]*)" left these uncommitted in its worktree:$`, c.theSessionLeftUncommittedWork)
@@ -773,6 +775,40 @@ func (c *nextContext) aFormulaWithAnOpenStep(id string) error {
 		c.tracker.CloseStep(step.ID)
 	}
 	return nil
+}
+
+// aFormulaWithOnlyTheClosingStepOpen pours a formula for a story and closes
+// every step but the one that asks for the closing comment: a session that did
+// the work, wrote the comment, and never closed that last step (mw-gq6.398).
+func (c *nextContext) aFormulaWithOnlyTheClosingStepOpen(id string) error {
+	ctx := context.Background()
+	c.tracker.AddFormula("tdd-feature",
+		application.FormulaStep{Title: "Understand the story"},
+		application.FormulaStep{Title: "Implement until green"},
+		application.FormulaStep{Title: "Write the closing comment and propose rig memory notes"},
+	)
+	molecule, err := c.tracker.PourFormula(ctx, "tdd-feature", id, "The story "+id, false)
+	if err != nil {
+		return err
+	}
+	if err := c.tracker.SetStoryMetadata(ctx, id, map[string]string{application.MoleculeField: molecule.RootID}); err != nil {
+		return err
+	}
+	for _, step := range molecule.Steps[:len(molecule.Steps)-1] {
+		c.tracker.CloseStep(step.ID)
+	}
+	return nil
+}
+
+// aClosingCommentWasWritten comments on a story with the two markers of a
+// closing comment, stamped an hour after or a day before now: the story's
+// commits are real git commits made as the scenario runs, so "now" is theirs.
+func (c *nextContext) aClosingCommentWasWritten(howTo, memory, id, when string) error {
+	at := time.Now().Add(time.Hour)
+	if when == "before" {
+		at = time.Now().Add(-24 * time.Hour)
+	}
+	return c.tracker.CommentOnStoryAt(id, "Built it.\n\n"+howTo+", for the Governor:\n1. Look.\n\n"+memory+"\nnothing", at)
 }
 
 // theOtherHostLandedFirst puts the other host's own story on the target branch

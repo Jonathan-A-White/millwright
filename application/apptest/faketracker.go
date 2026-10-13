@@ -1687,6 +1687,20 @@ func (f *FakeTracker) RefuseToClose(id, why string) {
 // CloseStory implements application.WorkTracker.
 func (f *FakeTracker) CloseStory(_ context.Context, id, reason string) error {
 	f.mu.Lock()
+	// bd closes a step the way it closes a story: by its id.
+	for _, molecule := range f.molecules {
+		for _, step := range molecule.Steps {
+			if step.ID == id && f.Err == nil {
+				if f.closedSteps == nil {
+					f.closedSteps = map[string]bool{}
+				}
+				f.closedSteps[id] = true
+				f.writes++
+				f.mu.Unlock()
+				return nil
+			}
+		}
+	}
 	if open := f.openChildren(id); f.Err == nil && open > 0 {
 		f.mu.Unlock()
 		return fmt.Errorf("cannot close %s: %d open child issues", id, open)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -187,10 +188,12 @@ type Advanced struct {
 }
 
 // Commit is one commit a landing would put on the target branch: the short hash
-// a person names it by, and its whole message.
+// a person names it by, its whole message, and when it was committed (zero when
+// the adapter could not say).
 type Commit struct {
-	Hash    string
-	Message string
+	Hash      string
+	Message   string
+	Committed time.Time
 }
 
 // The two ways a commit message says a machine wrote it. Both are matched with

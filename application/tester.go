@@ -203,7 +203,7 @@ func (n Next) testerRefusals(ctx context.Context, c *closeOut, report *NextRepor
 			"(`git reset --hard %s` in %s) and run `mw next %s` again.", base, c.worktree, c.id)) {
 		return found
 	}
-	if refusal, open := n.openStepsRefusal(ctx, c, report); open && refuse(refusal.Reason, refusal.Why, refusal.Said) {
+	if refusal, open := n.openStepsRefusal(ctx, c, report, leaveClosingStep, base); open && refuse(refusal.Reason, refusal.Why, refusal.Said) {
 		return found
 	}
 
