@@ -116,12 +116,67 @@ type gated struct {
 }
 
 // gate runs the rig's tests in dir the way a close-out must on a host that may
-// be busy: it waits, bounded, for the load to drop below the core count first;
+// be busy, one gate at a time on the host: it takes the host's gate lock first,
+// waiting for another close-out's gate to end, and keeps it until its own ends,
+// the retry included, however it ends (mw-gq6.388). A lock that cannot be taken
+// is said, and the tests run without it.
+func (n Next) gate(ctx context.Context, c *closeOut, report *NextReport, dir, what string) gated {
+	if n.GateLock == nil {
+		return n.gateOnACalmHost(ctx, c, report, dir, what)
+	}
+	turn, err := n.GateLock.Take(ctx, c.id, func(by string) {
+		n.print(fmt.Sprintf("  wait    %s's gate lock is held by %s: waiting for it before %s\n", n.Host, by, what))
+		// The close-out says it is waiting, so that mw status and the quiet
+		// alarm do not take the story for quiet while it queues.
+		n.markCloseOut(ctx, c.id, c.began, true)
+	})
+	if err != nil {
+		n.markCloseOut(ctx, c.id, c.began, false)
+		note := fmt.Sprintf("%s's gate lock could not be taken (%v), so %s ran without it", n.Host, err, what)
+		n.print("  wait    " + note + "\n")
+		report.Notes = append(report.Notes, note)
+		return n.gateOnACalmHost(ctx, c, report, dir, what)
+	}
+	defer func() {
+		if err := turn.Holding.Release(context.Background()); err != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf("%s's gate lock could not be given back: %v", n.Host, err))
+		}
+	}()
+	if turn.For != "" {
+		n.markCloseOut(ctx, c.id, c.began, false)
+		report.Notes = append(report.Notes, fmt.Sprintf("gate waited %s for %s before %s", gateWaited(turn.Waited), turn.For, what))
+	}
+	return n.gateOnACalmHost(ctx, c, report, dir, what)
+}
+
+// gateWaited is a wait as the report says it: "under a second", "40s", "7m",
+// "7m30s", "1h5m".
+func gateWaited(d time.Duration) string {
+	d = d.Round(time.Second)
+	if d < time.Second {
+		return "under a second"
+	}
+	var said string
+	if h := d / time.Hour; h > 0 {
+		said += fmt.Sprintf("%dh", h)
+	}
+	if m := d % time.Hour / time.Minute; m > 0 {
+		said += fmt.Sprintf("%dm", m)
+	}
+	if s := d % time.Minute / time.Second; s > 0 {
+		said += fmt.Sprintf("%ds", s)
+	}
+	return said
+}
+
+// gateOnACalmHost runs the rig's tests in dir the way a close-out must on a
+// host that may be busy: it waits, bounded, for the load to drop below the core
+// count first;
 // and a run that fails while the host was busy at a reading it took — before the
 // run, or after it — is run once more when the host has calmed, and only a
 // second failure counts. A run that fails on a calm host counts at once. A
 // command that would not start is not a load fault and is never run again.
-func (n Next) gate(ctx context.Context, c *closeOut, report *NextReport, dir, what string) gated {
+func (n Next) gateOnACalmHost(ctx context.Context, c *closeOut, report *NextReport, dir, what string) gated {
 	before, gaveUp := n.calmed(ctx, report, c, what)
 	n.beginGate(ctx, c, before)
 	checked, err := n.timedChecks(ctx, c, dir)
