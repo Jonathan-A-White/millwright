@@ -14,11 +14,13 @@ fail() {
 	exit 1
 }
 
-# var <name> [make args...]: the value make settles on for <name>.
+# var <name> [make args...]: the value make settles on for <name>. JOBS is unset
+# in make's environment, so a host that caps it (builder_jobs) still gets the
+# Makefile's own default here; only a JOBS=n argument overrides.
 var() {
 	name=$1
 	shift
-	make -pn "$@" test 2>/dev/null | sed -n "s/^$name :\{0,1\}= *//p" | tail -n 1
+	env -u JOBS make -pn "$@" test 2>/dev/null | sed -n "s/^$name :\{0,1\}= *//p" | tail -n 1
 }
 
 cores=$(nproc)
