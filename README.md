@@ -1235,6 +1235,26 @@ main <sha>: <n> failing`, or `all pass`). A rig with no `suite_epic` is refused
 with `--file` before anything runs; without `--file` nothing is filed and no
 mail is sent. See `features/suite.feature`.
 
+**The nightly run** (mw-8w7xb7.3). The home's follower (`mw events follow`) springs the job `suite@<host>`:
+from **08:00 UTC** each day (about 3-4 am in the US) it runs `mw suite <rig> --file` for each rig of
+this host's `[rigs]` whose file says `nightly_suite = true`, one after the other, never two at once. It
+runs on the home only (`mw home`), never on the Boost, and a rig whose `runs/suite/<rig>/<today>.json`
+is already kept is not run again that day; a suite that could not be run is not tried again until the
+next day. The hour is a knob of the `[events]` table in `~/.config/mw/config.toml`:
+
+```toml
+[events]
+suite_hour = 8      # the UTC hour, 0 to 23, from which the nightly suite is run
+```
+
+The pass is told in the log like any job: `scheduled` (`nightly suite of lampas`), `running`, `done`
+or `failed` (a suite that found failing files exits 1, so the job is `failed` and its bugs are filed
+and mailed as above). `mw status` shows a `SUITE` section with one line for each such rig: the date
+of its last result, main's short sha, then `all pass` or `<n> failing: <bead ids>` (the open
+bugs under the `suite_epic` that name the failing files), and `· not run for <n> days` once that
+result is two days old or more; a rig with no result yet says `never run`. See
+`features/suite_nightly.feature` and the SUITE scenarios of `features/status.feature`.
+
 ## The Tester trial
 
 A week's trial (mw-it6qk5.5): a fresh session that only uses the app finds what
@@ -1601,13 +1621,14 @@ heartbeat. Each pass is told in the log as `job` events, actor `dispatch@<host>`
 `millhand-tick@<host>` or `mail-notify@<host>`: `scheduled` (its detail says why: `bead mw-x opened`,
 `heartbeat`, `clock`), `running`, `done` or `failed`. The timers of `contrib/systemd` are now
 hourly heartbeats (a host with no follower gives them their old cadence with a drop-in), and
-`install-units.sh --enable mw-view-follow` disables `mw-mail-notify.timer`. Three more knobs:
+`install-units.sh --enable mw-view-follow` disables `mw-mail-notify.timer`. Four more knobs:
 
 ```toml
 [events]
 heartbeat = "1h"    # a job unrun this long is run anyway: the fallback for a missed event
 clock = "5m"        # how often the follower runs mw-mail-notify.service
 idle_after = "10m"  # no event but the jobs' this long: mw status says IDLE since HH:MM
+suite_hour = 8      # the UTC hour the home's follower starts the nightly whole suite
 ```
 
 `mw status` prints `IDLE since 14:05 · 0 harness processes` once the log has held nothing but
