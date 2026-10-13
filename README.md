@@ -1225,8 +1225,15 @@ first error lines, flaky or not) to `<UTC date>.json`, both committed in the
 vault. Exit 0 when everything passed, 1 when any file failed.
 
 A rig's file `rigs/<rig>.toml` may say `nightly_suite = true` and
-`suite_epic = "<bead id>"`; `mw suite` itself reads neither yet. See
-`features/suite.feature`.
+`suite_epic = "<bead id>"`. `mw suite` reads `suite_epic` only with `--file`:
+for each failing file it files one held `[bug]` under that epic (labels
+`bug,suite`, the epic's path keys and `files=<file>`), or, when a bead under
+the epic that is not closed, labelled `suite`, already names the file in its
+title, appends a dated comment to it and files nothing. One mail to the mayor
+then names each bead with its file, new or commented (subject `Suite: <rig>
+main <sha>: <n> failing`, or `all pass`). A rig with no `suite_epic` is refused
+with `--file` before anything runs; without `--file` nothing is filed and no
+mail is sent. See `features/suite.feature`.
 
 ## The Tester trial
 

@@ -74,6 +74,10 @@ type Suite struct {
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
 
+	// Filer, when it is set, files what the run found under the rig's
+	// suite_epic and mails the Mayor (mw suite --file); nil does neither.
+	Filer *SuiteFiler
+
 	Host string
 	// Rigs, Tests and ChangedSpecs are the config file's tables, by rig name.
 	Rigs         map[string]string
@@ -125,6 +129,8 @@ type SuiteReport struct {
 	LogPath    string
 	ResultPath string
 	Failed     bool
+	// Filed is what --file did with each failing file; nil without --file.
+	Filed []SuiteFiled
 }
 
 // String is the short summary a suite prints.
@@ -161,6 +167,13 @@ func (r SuiteReport) String() string {
 	}
 	for _, said := range r.Result.Unnamed {
 		fmt.Fprintf(&b, "  %s\n", said)
+	}
+	for _, one := range r.Filed {
+		how := "commented on"
+		if one.New {
+			how = "filed, held:"
+		}
+		fmt.Fprintf(&b, "  %s %s for %s\n", how, one.ID, one.File)
 	}
 	if r.Result.GaveUpWaiting {
 		fmt.Fprintf(&b, "  %s\n", r.Result.Note)
@@ -269,6 +282,15 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 	tests := strings.TrimSpace(s.Tests[rig])
 	if tests == "" {
 		return SuiteReport{}, fmt.Errorf("the rig %s has no [tests] entry in the config file: a whole-suite run needs to be told what the suite is", rig)
+	}
+	var epic string
+	if s.Filer != nil {
+		// Refused before anything runs: a run that could not file what it finds
+		// is a night's work thrown away.
+		var err error
+		if epic, err = s.Filer.Epic(ctx, rig); err != nil {
+			return SuiteReport{}, err
+		}
 	}
 	phases := []suitePhase{{name: "tests", command: tests, alone: func(file string) string { return tests + " " + shellWord(file) }}}
 	if specs := strings.TrimSpace(s.ChangedSpecs[rig]); specs != "" {
@@ -388,6 +410,14 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 		}
 		if _, err := s.Files.Commit(ctx, fmt.Sprintf("mw suite %s %s: %s", rig, day, said), []string{report.LogPath, report.ResultPath}); err != nil {
 			return report, fmt.Errorf("committing the result of the suite in the vault: %w", err)
+		}
+	}
+	if s.Filer != nil {
+		filed, err := s.Filer.File(ctx, epic, report)
+		report.Filed = filed
+		if err != nil {
+			s.say("%s", report.String())
+			return report, err
 		}
 	}
 	s.say("%s", report.String())

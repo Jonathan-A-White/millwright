@@ -11,6 +11,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain"
 
 	"github.com/cucumber/godog"
 )
@@ -39,6 +40,16 @@ type suiteContext struct {
 	alone    map[string]bool   // file -> fails when run alone
 	readsAt1 int               // load reads made before the first command was run
 
+	// The --file side: the rig's suite epic and the tracker and mailbox the
+	// filing goes through.
+	tracker   *apptest.FakeTracker
+	mailbox   *apptest.FakeMailbox
+	rules     *apptest.FakeEpicRules
+	epic      string
+	epicPath  domain.Path
+	preFiled  map[string]bool // ids of the beads the scenario began with
+	suiteFile bool
+
 	out    bytes.Buffer
 	report application.SuiteReport
 	err    error
@@ -50,17 +61,21 @@ func InitializeSuiteScenario(ctx *godog.ScenarioContext) {
 
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
 		*c = suiteContext{
-			trees:   &apptest.FakeSuiteTrees{},
-			runner:  &apptest.FakeSuiteRunner{},
-			records: &apptest.FakeSuiteRecords{},
-			files:   &apptest.FakeVaultFiles{},
-			heads:   apptest.NewFakeRigHeads(),
-			load:    &apptest.FakeHostLoad{},
-			tests:   map[string]string{},
-			specs:   map[string]string{},
-			whole:   map[string]string{},
-			failed:  map[string]bool{},
-			alone:   map[string]bool{},
+			trees:    &apptest.FakeSuiteTrees{},
+			runner:   &apptest.FakeSuiteRunner{},
+			records:  &apptest.FakeSuiteRecords{},
+			files:    &apptest.FakeVaultFiles{},
+			heads:    apptest.NewFakeRigHeads(),
+			load:     &apptest.FakeHostLoad{},
+			tests:    map[string]string{},
+			specs:    map[string]string{},
+			whole:    map[string]string{},
+			failed:   map[string]bool{},
+			alone:    map[string]bool{},
+			tracker:  apptest.NewFakeTracker(),
+			mailbox:  apptest.NewFakeMailbox(),
+			rules:    apptest.NewFakeEpicRules(),
+			preFiled: map[string]bool{},
 		}
 		return ctx, nil
 	})
@@ -77,7 +92,11 @@ func InitializeSuiteScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the host is always at load ([\d.]+) of (\d+) cores$`, c.theHostStaysBusy)
 	ctx.Given(`^the suite waits at most (\d+) hours? for the host to calm$`, c.theCalmBound)
 
+	ctx.Given(`^the rig "([^"]*)" says its suite epic is "([^"]*)", whose path is (\S+)$`, c.theRigSaysItsSuiteEpic)
+	ctx.Given(`^the suite epic holds the (held|closed) bug "([^"]*)" titled "([^"]*)", labelled bug and suite$`, c.theSuiteEpicHoldsABug)
+
 	ctx.When(`^mw suite runs "([^"]*)"$`, c.mwSuiteRuns)
+	ctx.When(`^mw suite runs "([^"]*)" with --file$`, c.mwSuiteRunsWithFile)
 
 	ctx.Then(`^the suite exits (\d)$`, c.theSuiteExits)
 	ctx.Then(`^the suite ran "([^"]*)" in a worktree named "([^"]*)" beside the rig, not in the rig's own checkout$`, c.theSuiteRanInTheWorktree)
@@ -99,6 +118,18 @@ func InitializeSuiteScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the suite ran exactly (\d+) command$`, c.theSuiteRanExactly)
 	ctx.Then(`^the suite is refused, saying: (.+)$`, c.theSuiteIsRefused)
 	ctx.Then(`^the suite made no worktree, ran nothing and wrote nothing$`, c.theSuiteDidNothing)
+	ctx.Then(`^the suite epic "([^"]*)" holds (\d+) new stor(?:y|ies)$`, c.theEpicHoldsNew)
+	ctx.Then(`^the new story for "([^"]*)" is titled "([^"]*)"$`, c.theNewStoryIsTitled)
+	ctx.Then(`^the new story for "([^"]*)" is held and labelled bug and suite$`, c.theNewStoryIsHeld)
+	ctx.Then(`^the new story for "([^"]*)" has the files "([^"]*)" and the epic's path keys$`, c.theNewStoryHasFiles)
+	ctx.Then(`^the new story for "([^"]*)" describes "([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)" and "([^"]*)"$`, c.theNewStoryDescribes)
+	ctx.Then(`^the new story for "([^"]*)" has the acceptance "([^"]*)"$`, c.theNewStoryHasAcceptance)
+	ctx.Then(`^"([^"]*)" has one comment dated "([^"]*)" saying "([^"]*)", "([^"]*)" and "([^"]*)"$`, c.theBugHasADatedComment)
+	ctx.Then(`^"([^"]*)" has no comment$`, c.theBugHasNoComment)
+	ctx.Then(`^the suite sent one mail to the mayor, subject "([^"]*)"$`, c.theSuiteSentOneMail)
+	ctx.Then(`^the suite sent no mail$`, c.theSuiteSentNoMail)
+	ctx.Then(`^the mail names each new story with its file$`, c.theMailNamesEachNewStory)
+	ctx.Then(`^the mail says "([^"]*)" with "([^"]*)" was commented and the other file was new$`, c.theMailSaysWhichIsWhich)
 }
 
 func (c *suiteContext) aRigWhoseTestsAre(rig, tests string) error {
@@ -192,6 +223,16 @@ func (c *suiteContext) respond(rig string) func(dir, command string) (applicatio
 }
 
 func (c *suiteContext) mwSuiteRuns(rig string) error {
+	c.suiteFile = false
+	return c.run(rig)
+}
+
+func (c *suiteContext) mwSuiteRunsWithFile(rig string) error {
+	c.suiteFile = true
+	return c.run(rig)
+}
+
+func (c *suiteContext) run(rig string) error {
 	if c.main == "" {
 		c.main = "0000000"
 	}
@@ -215,6 +256,9 @@ func (c *suiteContext) mwSuiteRuns(rig string) error {
 	}
 	if c.hasLoad {
 		suite.Load = c.load
+	}
+	if c.suiteFile {
+		suite.Filer = &application.SuiteFiler{Tracker: c.tracker, Rules: c.rules, Mailbox: c.mailbox, Host: "desktop"}
 	}
 	c.report, c.err = suite.Run(context.Background(), rig)
 	return nil
@@ -457,6 +501,216 @@ func (c *suiteContext) theSuiteDidNothing() error {
 	if len(c.trees.Added()) != 0 || len(c.runner.Ran()) != 0 || len(c.records.Paths()) != 0 || len(c.files.Commits()) != 0 {
 		return fmt.Errorf("expected nothing done, got worktrees %v, commands %v, files %v, commits %v",
 			c.trees.Added(), c.runner.Ran(), c.records.Paths(), c.files.Commits())
+	}
+	return nil
+}
+
+func (c *suiteContext) theRigSaysItsSuiteEpic(rig, epic, path string) error {
+	fields := strings.Split(path, "/")
+	if len(fields) != 7 {
+		return fmt.Errorf("a path of seven keys is rig/branch/harness/model/effort/formula/host, got %q", path)
+	}
+	c.epic = epic
+	c.epicPath = domain.Path{Rig: fields[0], Branch: fields[1], Harness: domain.Harness(fields[2]), Model: domain.Model(fields[3]),
+		Effort: domain.Effort(fields[4]), Formula: fields[5], Host: fields[6]}
+	c.tracker.AddEpic(epic, c.epicPath)
+	c.rules.Require(rig, domain.EpicRequirements{NightlySuite: true, SuiteEpic: epic})
+	return nil
+}
+
+func (c *suiteContext) theSuiteEpicHoldsABug(state, id, title string) error {
+	c.tracker.AddStory(c.epic, domain.Story{ID: id, Title: title})
+	if err := c.tracker.SetLabels(id, "bug", "suite"); err != nil {
+		return err
+	}
+	status := apptest.StatusDeferred
+	if state == "closed" {
+		status = apptest.StatusClosed
+	}
+	c.preFiled[id] = true
+	return c.tracker.SetStatus(id, status)
+}
+
+// newStories are the stories of the suite epic the run filed.
+func (c *suiteContext) newStories() ([]application.StoryDetail, error) {
+	epic, err := c.tracker.ShowEpic(context.Background(), c.epic)
+	if err != nil {
+		return nil, err
+	}
+	var filed []application.StoryDetail
+	for _, story := range epic.Stories {
+		if !c.preFiled[story.Story.ID] {
+			filed = append(filed, story)
+		}
+	}
+	return filed, nil
+}
+
+func (c *suiteContext) newStoryFor(file string) (application.StoryDetail, error) {
+	filed, err := c.newStories()
+	if err != nil {
+		return application.StoryDetail{}, err
+	}
+	for _, story := range filed {
+		if strings.Contains(story.Story.Title, " "+file+" ") {
+			return story, nil
+		}
+	}
+	return application.StoryDetail{}, fmt.Errorf("no new story names %s (error: %v): %+v", file, c.err, filed)
+}
+
+func (c *suiteContext) theEpicHoldsNew(epic string, n int) error {
+	filed, err := c.newStories()
+	if err != nil {
+		return err
+	}
+	if len(filed) != n {
+		return fmt.Errorf("expected %d new stories under %s, got %d (error: %v): %+v", n, epic, len(filed), c.err, filed)
+	}
+	return nil
+}
+
+func (c *suiteContext) theNewStoryIsTitled(file, title string) error {
+	story, err := c.newStoryFor(file)
+	if err != nil {
+		return err
+	}
+	if story.Story.Title != title {
+		return fmt.Errorf("expected the title %q, got %q", title, story.Story.Title)
+	}
+	return nil
+}
+
+func (c *suiteContext) theNewStoryIsHeld(file string) error {
+	story, err := c.newStoryFor(file)
+	if err != nil {
+		return err
+	}
+	if story.Status != apptest.StatusDeferred || strings.Join(story.Labels, ",") != "bug,suite" {
+		return fmt.Errorf("expected %s held with the labels bug,suite, got %s with %v", story.Story.ID, story.Status, story.Labels)
+	}
+	return nil
+}
+
+func (c *suiteContext) theNewStoryHasFiles(file, files string) error {
+	story, err := c.newStoryFor(file)
+	if err != nil {
+		return err
+	}
+	want := c.epicPath
+	want.Files = files
+	if story.Story.Overrides != want {
+		return fmt.Errorf("expected the path %+v, got %+v", want, story.Story.Overrides)
+	}
+	return nil
+}
+
+func (c *suiteContext) theNewStoryDescribes(file, test, errorLine, sha, log, foundBy string) error {
+	parts := []string{test, errorLine, sha, log, foundBy}
+	story, err := c.newStoryFor(file)
+	if err != nil {
+		return err
+	}
+	for _, part := range parts {
+		if !strings.Contains(story.Description, part) {
+			return fmt.Errorf("expected the description to hold %q, got:\n%s", part, story.Description)
+		}
+	}
+	return nil
+}
+
+func (c *suiteContext) theNewStoryHasAcceptance(file, acceptance string) error {
+	story, err := c.newStoryFor(file)
+	if err != nil {
+		return err
+	}
+	if story.Acceptance != acceptance {
+		return fmt.Errorf("expected the acceptance %q, got %q", acceptance, story.Acceptance)
+	}
+	return nil
+}
+
+func (c *suiteContext) theBugHasADatedComment(id, day, sha, how, errorLine string) error {
+	parts := []string{sha, how, errorLine}
+	comments := c.tracker.Comments(id)
+	if len(comments) != 1 {
+		return fmt.Errorf("expected one comment on %s, got %d: %v", id, len(comments), comments)
+	}
+	for _, part := range append([]string{day}, parts...) {
+		if !strings.Contains(comments[0], part) {
+			return fmt.Errorf("expected the comment on %s to hold %q, got:\n%s", id, part, comments[0])
+		}
+	}
+	return nil
+}
+
+func (c *suiteContext) theBugHasNoComment(id string) error {
+	if comments := c.tracker.Comments(id); len(comments) != 0 {
+		return fmt.Errorf("expected no comment on %s, got %v", id, comments)
+	}
+	return nil
+}
+
+func (c *suiteContext) mailed() ([]application.Message, error) {
+	return c.mailbox.Inbox(context.Background(), application.MayorMailbox)
+}
+
+func (c *suiteContext) theSuiteSentOneMail(subject string) error {
+	mail, err := c.mailed()
+	if err != nil {
+		return err
+	}
+	if len(mail) != 1 || mail[0].Subject != subject {
+		return fmt.Errorf("expected one mail to the mayor with the subject %q (error: %v), got %+v", subject, c.err, mail)
+	}
+	return nil
+}
+
+func (c *suiteContext) theSuiteSentNoMail() error {
+	mail, err := c.mailed()
+	if err != nil {
+		return err
+	}
+	if len(mail) != 0 || c.mailbox.Writes() != 0 {
+		return fmt.Errorf("expected no mail, got %+v", mail)
+	}
+	return nil
+}
+
+func (c *suiteContext) theMailNamesEachNewStory() error {
+	mail, err := c.mailed()
+	if err != nil || len(mail) != 1 {
+		return fmt.Errorf("expected one mail, got %v (%v)", mail, err)
+	}
+	filed, err := c.newStories()
+	if err != nil {
+		return err
+	}
+	for _, story := range filed {
+		file := strings.Fields(story.Story.Title)[3]
+		if line := story.Story.ID + "  " + file + "  new"; !strings.Contains(mail[0].Body, line) {
+			return fmt.Errorf("expected the mail to hold %q, got:\n%s", line, mail[0].Body)
+		}
+	}
+	return nil
+}
+
+func (c *suiteContext) theMailSaysWhichIsWhich(id, file string) error {
+	mail, err := c.mailed()
+	if err != nil || len(mail) != 1 {
+		return fmt.Errorf("expected one mail, got %v (%v)", mail, err)
+	}
+	var commented, fresh bool
+	for _, line := range strings.Split(mail[0].Body, "\n") {
+		switch {
+		case strings.HasPrefix(line, id+"  "+file+"  commented"):
+			commented = true
+		case strings.Contains(line, "  new"):
+			fresh = true
+		}
+	}
+	if !commented || !fresh {
+		return fmt.Errorf("expected the mail to say %s with %s was commented and the other new, got:\n%s", id, file, mail[0].Body)
 	}
 	return nil
 }

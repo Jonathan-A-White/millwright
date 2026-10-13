@@ -93,3 +93,104 @@ Feature: Running a rig's whole test suite on its main
     When mw suite runs "orchard"
     Then the suite is refused, saying: no [tests] entry
     And the suite made no worktree, ran nothing and wrote nothing
+
+  # --file: what the nightly run does with what it found. The rig's suite_epic
+  # holds one HELD [bug] per failing file, and the Mayor is told once.
+
+  Scenario: Two files that fail on main are filed as two held bugs and the Mayor is mailed once
+    Given the rig "lampas" says its suite epic is "mw-suite", whose path is lampas/main/claude/sonnet/high/tdd-feature/laptop
+    And the whole run of the tests prints:
+      """
+      FAIL  src/dates.test.ts > parses dates
+      AssertionError: expected 1 to be 2
+      FAIL  src/config.test.ts > reads the config
+      Error: boom
+      """
+    And the tests fail
+    And alone, "src/dates.test.ts" fails again
+    And alone, "src/config.test.ts" fails again
+    When mw suite runs "lampas" with --file
+    Then the suite exits 1
+    And the suite epic "mw-suite" holds 2 new stories
+    And the new story for "src/dates.test.ts" is titled "[bug] lampas main: src/dates.test.ts fails on main"
+    And the new story for "src/dates.test.ts" is held and labelled bug and suite
+    And the new story for "src/dates.test.ts" has the files "src/dates.test.ts" and the epic's path keys
+    And the new story for "src/dates.test.ts" describes "parses dates", "AssertionError: expected 1 to be 2", "9f3c2ab", "runs/suite/lampas/2026-10-13.log" and "Found by the nightly whole suite (mw suite); no story's gate ran this file."
+    And the new story for "src/dates.test.ts" has the acceptance "1. src/dates.test.ts passes on main 5 runs in a row (a shell loop, uptime beside each). 2. The rig's gate passes."
+    And the new story for "src/config.test.ts" is titled "[bug] lampas main: src/config.test.ts fails on main"
+    And the suite sent one mail to the mayor, subject "Suite: lampas main 9f3c2ab: 2 failing"
+    And the mail names each new story with its file
+
+  Scenario: A file that failed and passed alone is filed as flaky
+    Given the rig "lampas" says its suite epic is "mw-suite", whose path is lampas/main/claude/sonnet/high/tdd-feature/laptop
+    And the whole run of the tests prints:
+      """
+      FAIL  src/config.test.ts > reads the config
+      Error: boom
+      """
+    And the tests fail
+    And alone, "src/config.test.ts" passes
+    When mw suite runs "lampas" with --file
+    Then the new story for "src/config.test.ts" is titled "[bug] lampas main: src/config.test.ts is flaky on main (failed, then passed alone)"
+    And the suite sent one mail to the mayor, subject "Suite: lampas main 9f3c2ab: 1 failing"
+
+  Scenario: A file that already has an open suite bug gets a dated comment, not a second bug
+    Given the rig "lampas" says its suite epic is "mw-suite", whose path is lampas/main/claude/sonnet/high/tdd-feature/laptop
+    And the suite epic holds the held bug "mw-suite.1" titled "[bug] lampas main: src/dates.test.ts fails on main", labelled bug and suite
+    And the whole run of the tests prints:
+      """
+      FAIL  src/dates.test.ts > parses dates
+      AssertionError: expected 1 to be 2
+      FAIL  src/config.test.ts > reads the config
+      Error: boom
+      """
+    And the tests fail
+    And alone, "src/dates.test.ts" fails again
+    And alone, "src/config.test.ts" fails again
+    When mw suite runs "lampas" with --file
+    Then the suite epic "mw-suite" holds 1 new story
+    And the new story for "src/config.test.ts" is titled "[bug] lampas main: src/config.test.ts fails on main"
+    And "mw-suite.1" has one comment dated "2026-10-13" saying "9f3c2ab", "failed twice" and "AssertionError: expected 1 to be 2"
+    And the suite sent one mail to the mayor, subject "Suite: lampas main 9f3c2ab: 2 failing"
+    And the mail says "mw-suite.1" with "src/dates.test.ts" was commented and the other file was new
+
+  Scenario: A closed suite bug for the file does not stop a new one
+    Given the rig "lampas" says its suite epic is "mw-suite", whose path is lampas/main/claude/sonnet/high/tdd-feature/laptop
+    And the suite epic holds the closed bug "mw-suite.1" titled "[bug] lampas main: src/dates.test.ts fails on main", labelled bug and suite
+    And the whole run of the tests prints:
+      """
+      FAIL  src/dates.test.ts > parses dates
+      AssertionError: expected 1 to be 2
+      """
+    And the tests fail
+    And alone, "src/dates.test.ts" fails again
+    When mw suite runs "lampas" with --file
+    Then the suite epic "mw-suite" holds 1 new story
+    And "mw-suite.1" has no comment
+
+  Scenario: A suite that passes files nothing and the Mayor is told all pass
+    Given the rig "lampas" says its suite epic is "mw-suite", whose path is lampas/main/claude/sonnet/high/tdd-feature/laptop
+    When mw suite runs "lampas" with --file
+    Then the suite exits 0
+    And the suite epic "mw-suite" holds 0 new stories
+    And the suite sent one mail to the mayor, subject "Suite: lampas main 9f3c2ab: all pass"
+
+  Scenario: A rig with no suite epic is refused with --file before anything runs
+    When mw suite runs "lampas" with --file
+    Then the suite is refused, saying: suite_epic
+    And the suite made no worktree, ran nothing and wrote nothing
+    And the suite sent no mail
+
+  Scenario: Without --file nothing is filed and no mail is sent
+    Given the rig "lampas" says its suite epic is "mw-suite", whose path is lampas/main/claude/sonnet/high/tdd-feature/laptop
+    And the whole run of the tests prints:
+      """
+      FAIL  src/dates.test.ts > parses dates
+      AssertionError: expected 1 to be 2
+      """
+    And the tests fail
+    And alone, "src/dates.test.ts" fails again
+    When mw suite runs "lampas"
+    Then the suite exits 1
+    And the suite epic "mw-suite" holds 0 new stories
+    And the suite sent no mail
