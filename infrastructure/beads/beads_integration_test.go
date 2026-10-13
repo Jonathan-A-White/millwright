@@ -1599,3 +1599,40 @@ func TestGatewayEditsAndMovesACardAndReadsItsRank(t *testing.T) {
 		t.Errorf("expected %s retitled, without notes, under %s, ranked 1.5 and still a card, got %+v", card, chores, got)
 	}
 }
+
+// A card's due time (mw-ev7oyy.8) is metadata: it reads back from a show and
+// from the ready list the reminders read, and setting it empty takes it off.
+func TestGatewayReadsAndClearsACardsDueTime(t *testing.T) {
+	t.Parallel()
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	errands := bdRun(t, vault, beads.Program, "create", "Errands", "-t", "epic", "--silent")
+	card := bdRun(t, vault, beads.Program, "create", "Buy a hose", "--parent", errands,
+		"--labels", "hitl,hitl:todo", "--no-inherit-labels", "--silent")
+	gateway := beads.New(vault)
+
+	const due = "2026-10-15T17:00:00-04:00"
+	if err := gateway.SetStoryMetadata(ctx, card, map[string]string{application.TodoDueField: due, application.TodoRemindedField: due}); err != nil {
+		t.Fatalf("setting the due time of %s: %v", card, err)
+	}
+	ready, err := gateway.ReadyWithLabel(ctx, application.LabelHitlTodo)
+	if err != nil || len(ready) != 1 {
+		t.Fatalf("listing the ready cards: %v, %+v", err, ready)
+	}
+	if ready[0].TodoDue != due || ready[0].TodoReminded != due {
+		t.Errorf("expected the ready card due and reminded %s, got %q and %q", due, ready[0].TodoDue, ready[0].TodoReminded)
+	}
+
+	if err := gateway.SetStoryMetadata(ctx, card, map[string]string{application.TodoDueField: ""}); err != nil {
+		t.Fatalf("clearing the due time of %s: %v", card, err)
+	}
+	shown, err := gateway.ShowBeads(ctx, []string{card})
+	if err != nil || len(shown) != 1 {
+		t.Fatalf("showing %s: %v, %d beads", card, err, len(shown))
+	}
+	if shown[0].TodoDue != "" || shown[0].TodoReminded != due {
+		t.Errorf("expected no due time and the reminder kept, got %q and %q", shown[0].TodoDue, shown[0].TodoReminded)
+	}
+}

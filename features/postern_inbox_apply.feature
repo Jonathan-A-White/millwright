@@ -549,6 +549,31 @@ Feature: mw postern inbox --apply
     Then bead "mw-todo.1" now has the title "Story mw-todo.1"
     And bead "mw-todo.1" now has the notes "call first"
 
+  Scenario: A todo_edit tap naming a due time sets the card's todo_due and leaves its words alone
+    Given epic "mw-todo" has the open bead "mw-todo.1" labelled "hitl, hitl:todo"
+    And the Governor sends the postern action {"action":"todo_edit","bead":"mw-todo.1","due":"2026-10-15T17:00:00-04:00"} with txid "tx-todo-edit-due"
+    When mw postern inbox --apply is run
+    Then bead "mw-todo.1" has the todo_due "2026-10-15T17:00:00-04:00"
+    And bead "mw-todo.1" now has the title "Story mw-todo.1"
+    And mail "Edited: mw-todo.1" was sent to mayor
+    And the txid "tx-todo-edit-due" is marked applied
+
+  Scenario: A todo_edit tap with an empty due clears the card's todo_due
+    Given epic "mw-todo" has the open bead "mw-todo.1" labelled "hitl, hitl:todo"
+    And bead "mw-todo.1" is due "2026-10-15T17:00:00Z"
+    And the Governor sends the postern action {"action":"todo_edit","bead":"mw-todo.1","due":""} with txid "tx-todo-edit-undue"
+    When mw postern inbox --apply is run
+    Then bead "mw-todo.1" has no todo_due
+    And the txid "tx-todo-edit-undue" is marked applied
+
+  Scenario: A todo_edit tap with a due that is not RFC 3339 is refused and changes nothing
+    Given epic "mw-todo" has the open bead "mw-todo.1" labelled "hitl, hitl:todo"
+    And the Governor sends the postern action {"action":"todo_edit","bead":"mw-todo.1","due":"tomorrow"} with txid "tx-todo-edit-baddue"
+    When mw postern inbox --apply is run
+    Then the tracker took only the mark that the tap was applied
+    And bead "mw-todo.1" has no todo_due
+    And mail "Not applied: todo_edit mw-todo.1" was sent to mayor saying "RFC 3339"
+
   Scenario: A todo_edit tap on a bead without hitl:todo is refused and changes nothing
     Given the Governor sends the postern action {"action":"todo_edit","bead":"mw-act.1","title":"Something else"} with txid "tx-todo-edit-no"
     When mw postern inbox --apply is run

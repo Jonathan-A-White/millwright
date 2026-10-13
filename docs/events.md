@@ -173,6 +173,16 @@ story. A stamp the backend would not take stays in `pending.jsonl` with its fail
 (`attempts`, no limit) and is tried again on the next pass; the pass is `done` all the same, its
 failures said on the follower's stderr. A pass over an empty queue reads nothing but the queue.
 
+The `todo-remind` job runs in the follower itself, every minute, reason `clock`. A To do card (an open
+bead labelled `hitl:todo`) can carry a due time, the metadata `todo_due` in RFC 3339: the Mayor's
+`mw todo due <bead> <time>` (`--clear` takes it off) or a todo_edit tap's `due` sets it, and the view
+publishes it as `todo_due`. A pass reads the open cards, and for each one whose due time has passed and
+that was not yet reminded of that time sends him one Postern push (class `alarm`, on the card's thread,
+provisionally) naming the card. The card's `todo_reminded` metadata is set to the `todo_due` it was sent
+for before the push goes, so a card is reminded once for each due time it is given; a push that fails
+takes the mark off again, fails the pass, and is tried again on the next. A closed card, a card with no
+due time and one not yet due are passed over, and a pass with nothing due reads nothing but the cards.
+
 The `cloud` job runs the cloud check (`mw cloud check`, docs/vultr-boost.md, "Elastic") in the
 follower itself, every minute, reason `clock`, on a host whose config has a `[cloud]` table and
 only while it is home. A pass that makes or destroys a box writes a `cloud` event, actor

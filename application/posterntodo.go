@@ -69,15 +69,22 @@ func (i PosternInbox) applyTodoAdd(ctx context.Context, m PosternInboxMessage, a
 	return result, i.mail(ctx, "Added: "+title, fmt.Sprintf("%s: %s", comment, title))
 }
 
-// applyTodoEdit changes the title, the notes (the bead's description), or both
-// of a card, as the action names them.
+// applyTodoEdit changes the title, the notes (the bead's description), the due
+// time (todo_due; empty takes it off), or any of them, as the action names them.
 func (i PosternInbox) applyTodoEdit(ctx context.Context, action PosternAction, card StoryDetail,
 	refuse func(string) (posternApplied, error), done func(subject, comment string) (posternApplied, error)) (posternApplied, error) {
 	if why := refuseNotACard(card); why != "" {
 		return refuse(why)
 	}
-	if action.Title == nil && action.Notes == nil {
-		return refuse("it names neither a title nor notes")
+	if action.Title == nil && action.Notes == nil && action.Due == nil {
+		return refuse("it names no title, notes nor due time")
+	}
+	due := ""
+	if action.Due != nil {
+		var err error
+		if due, err = normalTodoDue(*action.Due); err != nil {
+			return refuse(fmt.Sprintf("its due time is refused: %v", err))
+		}
 	}
 	edit := StoryEdit{}
 	var changed []string
@@ -94,8 +101,16 @@ func (i PosternInbox) applyTodoEdit(ctx context.Context, action PosternAction, c
 		edit.Description = &notes
 		changed = append(changed, "notes")
 	}
-	if err := i.Tracker.EditStory(ctx, card.Story.ID, edit); err != nil {
-		return refuse(err.Error())
+	if edit != (StoryEdit{}) {
+		if err := i.Tracker.EditStory(ctx, card.Story.ID, edit); err != nil {
+			return refuse(err.Error())
+		}
+	}
+	if action.Due != nil {
+		if err := i.Tracker.SetStoryMetadata(ctx, card.Story.ID, map[string]string{TodoDueField: due}); err != nil {
+			return refuse(err.Error())
+		}
+		changed = append(changed, "due time")
 	}
 	return done(fmt.Sprintf("Edited: %s", card.Story.ID),
 		fmt.Sprintf("EDITED by the Governor via postern: the %s changed", strings.Join(changed, " and ")))

@@ -1513,6 +1513,12 @@ func (f *FakeTracker) SetStoryMetadata(_ context.Context, id string, fields map[
 			if k == application.TodoRankField {
 				s.detail.TodoRank = v
 			}
+			if k == application.TodoDueField {
+				s.detail.TodoDue = v
+			}
+			if k == application.TodoRemindedField {
+				s.detail.TodoReminded = v
+			}
 			if k == application.ClaimedAtField {
 				s.detail.ClaimedAt, _ = time.Parse(time.RFC3339, v)
 			}

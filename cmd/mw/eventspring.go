@@ -37,8 +37,8 @@ const (
 // dispatch pass, the Millhand's tick and the sync job of mail-notify, each
 // only when its unit is installed here (a host with none is told on out, and
 // left to its timers), the grist job where the config has a [grist] table, the
-// chain-stamp job, which runs in the follower itself and so is always there,
-// and the cloud job where the config has a [cloud] table.
+// chain-stamp job and the To do reminder job, which run in the follower itself
+// and so are always there, and the cloud job where the config has a [cloud] table.
 func homeSpring(path, host string, out io.Writer) (*application.EventSpring, error) {
 	knobs, err := config.Events()
 	if err != nil {
@@ -74,6 +74,11 @@ func homeSpring(path, host string, out io.Writer) (*application.EventSpring, err
 		jobs = append(jobs, job)
 	}
 	jobs = append(jobs, application.ChainStampJob(chainStampEvery, chainStampRun(out)))
+	if job, err := todoReminderSpringJob(host, out); err != nil {
+		fmt.Fprintf(out, "mw events follow: no To do reminder job: %v\n", err)
+	} else {
+		jobs = append(jobs, job)
+	}
 	if job, err := nightlySuiteSpringJob(host, knobs.SuiteHour, out); err != nil {
 		fmt.Fprintf(out, "mw events follow: no suite job: %v\n", err)
 	} else {

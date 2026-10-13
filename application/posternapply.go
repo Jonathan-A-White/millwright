@@ -61,9 +61,12 @@ type PosternAction struct {
 	// is added or edited with (a nil one is left as it is), and the card a moved
 	// card is put before or after. A todo_add names its list in List, and Bead
 	// is read as that list.
-	List   string  `json:"list,omitempty"`
-	Title  *string `json:"title,omitempty"`
-	Notes  *string `json:"notes,omitempty"`
+	List  string  `json:"list,omitempty"`
+	Title *string `json:"title,omitempty"`
+	Notes *string `json:"notes,omitempty"`
+	// Due is a todo_edit's new due time, RFC 3339; an empty one clears it, and
+	// a nil one leaves it as it is.
+	Due    *string `json:"due,omitempty"`
 	Before string  `json:"before,omitempty"`
 	After  string  `json:"after,omitempty"`
 

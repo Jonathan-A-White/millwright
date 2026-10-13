@@ -202,6 +202,9 @@ type PosternViewBead struct {
 	// TodoRank is where a hitl:todo card stands among those of its list; absent
 	// on a bead with none. The beads of one list are listed in that order.
 	TodoRank string `json:"todo_rank,omitempty"`
+	// TodoDue is when a hitl:todo card is due, RFC 3339; absent on a bead with
+	// none.
+	TodoDue string `json:"todo_due,omitempty"`
 }
 
 // TrackerSnapshot is a tracker that can read every bead at once and answer the
@@ -1675,7 +1678,7 @@ func viewBeadOf(e *viewEntry) PosternViewBead {
 		Created: formatOrEmpty(d.Created), Updated: formatOrEmpty(d.Updated),
 		Started: formatOrEmpty(d.Started), Closed: formatOrEmpty(d.ClosedAt),
 		Path: e.path, Attempts: d.Attempts, Summary: viewSummary(d.Description),
-		Comments: d.CommentCount, DoneEarlier: e.doneEarlier, TodoRank: d.TodoRank,
+		Comments: d.CommentCount, DoneEarlier: e.doneEarlier, TodoRank: d.TodoRank, TodoDue: d.TodoDue,
 	}
 }
 

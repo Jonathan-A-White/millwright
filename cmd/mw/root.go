@@ -42,6 +42,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newStampCmd())
 	root.AddCommand(newReleaseCmd())
 	root.AddCommand(newCauseCmd())
+	root.AddCommand(newTodoCmd())
 	root.AddCommand(newPathCmd())
 	root.AddCommand(newRetryCmd())
 	root.AddCommand(newSeatCmd())

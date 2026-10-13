@@ -311,6 +311,8 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		LeaseExpires:     b.leaseExpires(),
 		CommentCount:     b.CommentCount,
 		TodoRank:         b.rankText(application.TodoRankField),
+		TodoDue:          b.text(application.TodoDueField),
+		TodoReminded:     b.text(application.TodoRemindedField),
 		Attempts:         b.attempts(),
 		RebaseSends:      b.count(application.RebaseSendsField),
 		RebaseBase:       b.text(application.RebaseBaseField),

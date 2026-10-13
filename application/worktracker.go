@@ -193,6 +193,11 @@ type StoryDetail struct {
 	// TodoRank is where a hitl:todo card stands among those of its list, as the
 	// TodoRankField metadata says; empty when it has none (InTodoOrder).
 	TodoRank string
+	// TodoDue is when a hitl:todo card is due, as the TodoDueField metadata says
+	// (RFC 3339), and TodoReminded the TodoDue the Governor was last reminded
+	// of it for (TodoRemindedField); empty when none.
+	TodoDue      string
+	TodoReminded string
 }
 
 // WorkInHand is what the tracker has in hand across every host: the stories

@@ -27,6 +27,9 @@ func registerPosternTodoSteps(ctx *godog.ScenarioContext, c *posternInboxContext
 	ctx.Then(`^bead "([^"]*)" now stands under "([^"]*)"$`, c.beadNowStandsUnder)
 	ctx.Then(`^bead "([^"]*)" has the todo_rank "([^"]*)"$`, c.beadHasTheTodoRank)
 	ctx.Then(`^bead "([^"]*)" has no todo_rank$`, c.beadHasNoTodoRank)
+	ctx.Given(`^bead "([^"]*)" is due "([^"]*)"$`, c.beadIsDue)
+	ctx.Then(`^bead "([^"]*)" has the todo_due "([^"]*)"$`, c.beadHasTheTodoDue)
+	ctx.Then(`^bead "([^"]*)" has no todo_due$`, func(id string) error { return c.beadHasTheTodoDue(id, "") })
 }
 
 func (c *posternInboxContext) theEpicIsAToDoList(id string) error {
@@ -166,6 +169,17 @@ func (c *posternInboxContext) beadHasTheTodoRank(id, rank string) error {
 func (c *posternInboxContext) beadHasNoTodoRank(id string) error {
 	if got, set := c.memory.Metadata(id)[application.TodoRankField]; set {
 		return fmt.Errorf("expected %s to have no todo_rank, got %q", id, got)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) beadIsDue(id, due string) error {
+	return c.memory.SetStoryMetadata(context.Background(), id, map[string]string{application.TodoDueField: due})
+}
+
+func (c *posternInboxContext) beadHasTheTodoDue(id, due string) error {
+	if got := c.memory.Metadata(id)[application.TodoDueField]; got != due {
+		return fmt.Errorf("expected %s at todo_due %q, got %q", id, due, got)
 	}
 	return nil
 }
