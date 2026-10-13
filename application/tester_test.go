@@ -2,7 +2,9 @@ package application_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -137,5 +139,67 @@ func TestADemoThatCannotBeHeldLeavesANote(t *testing.T) {
 	notes := application.HoldDemosForTester(context.Background(), tracker, rules, "lampas", "mw-e", "mw-e.3")
 	if len(notes) != 1 || !strings.Contains(notes[0], "no vault") {
 		t.Errorf("expected one note carrying the failure, got %q", notes)
+	}
+}
+
+func testerFormulaSteps(t *testing.T) map[string]string {
+	t.Helper()
+	raw, err := os.ReadFile("../formulas/tester.formula.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var formula struct {
+		Steps []struct {
+			ID          string `json:"id"`
+			Description string `json:"description"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal(raw, &formula); err != nil {
+		t.Fatal(err)
+	}
+	steps := map[string]string{}
+	for _, s := range formula.Steps {
+		steps[s.ID] = s.Description
+	}
+	return steps
+}
+
+func TestTheTesterFormulaChecksEachFindingOnMainsHeadAndMarksIt(t *testing.T) {
+	steps := testerFormulaSteps(t)
+	main, ok := steps["main"]
+	if !ok {
+		t.Fatal("expected the tester formula to have a 'main' step")
+	}
+	for _, want := range []string{
+		"git worktree add --detach",
+		"/tmp/tester-{{story}}/main",
+		"target branch",
+		"re-run",
+	} {
+		if !strings.Contains(main, want) {
+			t.Errorf("expected the 'main' step to say %q, got %q", want, main)
+		}
+	}
+	findings := steps["findings"]
+	for _, want := range []string{"still on main: yes", "still on main: no (<version>)"} {
+		if !strings.Contains(findings, want) {
+			t.Errorf("expected the 'findings' step to carry the mark %q, got %q", want, findings)
+		}
+	}
+}
+
+func TestTheTesterFormulaStillCommitsNothingAndRemovesBothScratchWorktrees(t *testing.T) {
+	steps := testerFormulaSteps(t)
+	if !strings.Contains(steps["serve"], "git worktree remove") {
+		t.Errorf("expected the 'serve' step to remove its scratch worktree, got %q", steps["serve"])
+	}
+	main := steps["main"]
+	for _, want := range []string{"git worktree remove", "commits nothing"} {
+		if !strings.Contains(main, want) {
+			t.Errorf("expected the 'main' step to say %q, got %q", want, main)
+		}
+	}
+	if !strings.Contains(steps["findings"], "commits nothing") {
+		t.Errorf("expected the 'findings' step to say the Tester commits nothing, got %q", steps["findings"])
 	}
 }
