@@ -116,8 +116,14 @@ func gristSpringJob(host string, out io.Writer) (application.SpringJob, bool, er
 	}
 	notices := application.NewGristNotices()
 	// The stream is the mill key's own; until the backend lets that key onto
-	// GET /api/events the watch reads every second instead and says so once.
+	// GET /api/events the watch reads four times a second instead and says so
+	// once. The watch reads on a loop of its own (job.Watch below), not once
+	// in each cycle of the follower, and only while this host is home.
 	watch := &application.GristWatch{Postern: backend, Stream: backend, Keys: keys, Notices: notices, Err: out}
+	watch.Gate = func(ctx context.Context) bool {
+		at, err := home(ctx)
+		return err == nil && at
+	}
 	// The warm pool is the follower's, kept from one pass to the next: a pass
 	// that mw grist grind or the dispatch tick runs has none, and grinds cold.
 	stateDir, err := config.GristStateDir()
@@ -144,7 +150,7 @@ func gristSpringJob(host string, out io.Writer) (application.SpringJob, bool, er
 		_, err = mill.Run(ctx)
 		return err
 	})
-	look := job.Probe
+	job.Watch = watch.Watch
 	var closing sync.Once
 	job.Probe = func(ctx context.Context) (string, bool) {
 		// The follower stopping ends every warm session; so does this host
@@ -160,7 +166,8 @@ func gristSpringJob(host string, out io.Writer) (application.SpringJob, bool, er
 			return "", false
 		}
 		pool.Tick(ctx)
-		return look(ctx)
+		// The grist is the watch's to find, on its own pace.
+		return "", false
 	}
 	return job, true, nil
 }

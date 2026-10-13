@@ -56,6 +56,12 @@ type SpringJob struct {
 	// ProbeFirst makes the first Spring act on the Probe's answer as any
 	// other: for a job whose pass is safe to run on what was already waiting.
 	ProbeFirst bool
+	// Watch, when set, is started in a goroutine of its own at the first
+	// Spring and runs until ctx ends: it looks for what the job is wanted for
+	// at its own pace, not once in each Spring, and says wake(reason) when it
+	// finds it. The job is sprung as an event would spring it: begun at once,
+	// or once more when the pass in flight ends.
+	Watch func(ctx context.Context, wake func(reason string))
 	// Every is how long the job may go unrun before it is run for Reason,
 	// counted from its last pass of any cause; zero is never.
 	Every  time.Duration
@@ -199,13 +205,13 @@ func (s *EventSpring) Spring(ctx context.Context) error {
 			if j.Probe == nil {
 				continue
 			}
-			reason, wanted := j.Probe(ctx)
-			if st := s.jobs[j.Name]; wanted && j.ProbeFirst {
-				if st.inFlight {
-					st.again = reason
-				} else {
-					s.launch(ctx, j, st, reason)
-				}
+			if reason, wanted := j.Probe(ctx); wanted && j.ProbeFirst {
+				s.want(ctx, j, s.jobs[j.Name], reason)
+			}
+		}
+		for _, j := range s.Jobs {
+			if j.Watch != nil {
+				go j.Watch(ctx, func(reason string) { s.wake(ctx, j, reason) })
 			}
 		}
 		return nil
@@ -231,15 +237,32 @@ func (s *EventSpring) Spring(ctx context.Context) error {
 			reason, wanted = j.Probe(ctx)
 		}
 		switch {
-		case wanted && st.inFlight:
-			st.again = reason
 		case wanted:
-			s.launch(ctx, j, st, reason)
+			s.want(ctx, j, st, reason)
 		case !st.inFlight && j.Every > 0 && now.Sub(st.lastRun) >= j.Every:
 			s.launch(ctx, j, st, j.Reason)
 		}
 	}
 	return nil
+}
+
+// want springs j for reason: begun at once, or once more when the pass in
+// flight ends. s.mu is held.
+func (s *EventSpring) want(ctx context.Context, j SpringJob, st *springState, reason string) {
+	if st.inFlight {
+		st.again = reason
+	} else {
+		s.launch(ctx, j, st, reason)
+	}
+}
+
+// wake is what a job's Watch says to spring it, between two Springs.
+func (s *EventSpring) wake(ctx context.Context, j SpringJob, reason string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if st := s.jobs[j.Name]; st != nil && ctx.Err() == nil {
+		s.want(ctx, j, st, reason)
+	}
 }
 
 // Wait returns when every pass begun has ended.
