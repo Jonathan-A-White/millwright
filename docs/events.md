@@ -139,11 +139,18 @@ again, scheduled for `run again after the follower restarted`.
 
 The `grist-grind` job runs one pass of the mill (`mw grist grind`) in the follower itself, on a
 host whose config has a `[grist]` table and only while that host is home. No event springs it:
-the follower reads the postern backend for the records after the newest it has seen once a
-second, and a new `grist` record for the mill key springs a pass, reason `grist <txid> arrived`.
-When the backend lets the mill key onto its event stream (`GET /api/events`) the follower holds
-it open, reads when it announces a record, and reads only every 30 seconds as a backstop; a
-refused or dropped stream is said once and the one-second read goes on. A grist already waiting
+the follower reads the postern backend for the records after the newest it has seen four
+times a second, on a loop of its own and not once in each cycle of the follower (which is a second
+of sleep and the cycle's work), and a new `grist` record for the mill key springs a pass at once,
+reason `grist <txid> arrived`. A read that found a grist, or took a second or more, is timed in the
+follower's log: when it began, how long it took, and how long after the read before it
+(`mw events follow: grist watch: read began 09:00:01.250, took 0.080s, grist <txid> arrived; ...`).
+The backend stamps a record with the sender's whole seconds, so the `wake` of `mw grist timing`
+counts from the start of the second the app sent in: half a second of it, on average, is that
+rounding and no wait of the mill's. When the backend lets the mill key onto its event stream
+(`GET /api/events`) the follower holds it open, reads when it announces a record, and reads only
+every 30 seconds as a backstop; a refused or dropped stream is said once and the quarter-second
+read goes on. A read that fails is tried again after a second. A grist already waiting
 when the follower starts springs one pass at once; the mill answers each grist once, so one
 already answered costs a pass that finds nothing to do. No clock springs it: the dispatch tick
 still answers those. The pass keeps its own pass lock, so one sprung while another runs finds it busy and ends.
