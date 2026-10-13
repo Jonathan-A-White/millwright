@@ -118,6 +118,31 @@ Feature: mw status
     Then reading status succeeds
     And the report has no heading for stories waiting for the Governor
 
+  Scenario: A bead labelled hitl and hitl:todo is listed under his to do, not under the heading for the Governor
+    Given a status bead "mw-6ww.114" titled "Renew the passport" filed under no epic
+    And the status story "mw-6ww.114" is labelled "hitl" and "hitl:todo"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report does not list "mw-6ww.114" as waiting for the Governor
+    And the report lists "mw-6ww.114" under "HIS TO DO (1)"
+
+  Scenario: A bead labelled hitl alone stays under the heading for the Governor beside his to do
+    Given a status bead "mw-6ww.115" titled "Renew the passport" filed under no epic
+    And the status story "mw-6ww.115" is labelled "hitl" and "hitl:todo"
+    And a status bead "mw-6ww.116" titled "Governor: pick a name" filed under no epic
+    And the status story "mw-6ww.116" is labelled "hitl"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report lists "mw-6ww.116" as waiting for the Governor
+    And the report does not list "mw-6ww.116" under "HIS TO DO (1)"
+
+  Scenario: With no bead labelled hitl:todo the report has no HIS TO DO section
+    Given a status bead "mw-6ww.117" titled "Governor: pick a name" filed under no epic
+    And the status story "mw-6ww.117" is labelled "hitl"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report has no HIS TO DO section
+
   Scenario: The beads waiting for the Governor are listed by title, most urgent first
     Given a status bead "mw-6ww.40" titled "Governor: a routine errand" filed under no epic
     And the status story "mw-6ww.40" is labelled "hitl"

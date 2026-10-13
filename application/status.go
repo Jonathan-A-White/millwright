@@ -32,6 +32,10 @@ const CancelledWindow = 24 * time.Hour
 // present for. The report leaves the section out when there are none.
 const WaitingHeading = "WAITING FOR THE GOVERNOR"
 
+// HisToDoHeading heads the short section for the beads on the Governor's own
+// to-do list (labelled hitl:todo), which WAITING FOR THE GOVERNOR leaves out.
+const HisToDoHeading = "HIS TO DO"
+
 // WaitingOnMayorHeading is what heads the section for needs that wait on the
 // Mayor: a hands bead with no step filed yet. The report leaves the section
 // out when there are none.
@@ -432,6 +436,9 @@ type StatusReport struct {
 	// with the Governor present, so neither a dispatcher's to take nor a session
 	// for Running to show. They are in no other list, most urgent first.
 	Waiting []StoryDetail
+	// HisToDo are the open beads labelled hitl:todo, the items on the Governor's
+	// own list, which Waiting leaves out; most urgent first (mw-ev7oyy.11).
+	HisToDo []StoryDetail
 	// Warnings are things a person should put right, each one line: a bead for
 	// the Governor with two hitl:<kind> labels.
 	Warnings []string
@@ -673,6 +680,15 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 			report.Waiting = append(report.Waiting, detail)
 		}
 	}
+	waiting := report.Waiting[:0:0]
+	for _, detail := range report.Waiting {
+		if detail.Todo() {
+			report.HisToDo = append(report.HisToDo, detail)
+		} else {
+			waiting = append(waiting, detail)
+		}
+	}
+	report.Waiting = waiting
 	for _, detail := range report.Waiting {
 		if kinds := detail.HitlKinds(); len(kinds) > 1 {
 			report.Warnings = append(report.Warnings, fmt.Sprintf("%s has %d hitl kinds: %s", detail.Story.ID, len(kinds), strings.Join(kinds, ", ")))
@@ -680,6 +696,9 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	}
 	sort.SliceStable(report.Waiting, func(i, j int) bool {
 		return report.Waiting[i].Priority < report.Waiting[j].Priority
+	})
+	sort.SliceStable(report.HisToDo, func(i, j int) bool {
+		return report.HisToDo[i].Priority < report.HisToDo[j].Priority
 	})
 
 	if report.WaitingOnOthers, err = othersWaitRead(); err != nil {
@@ -1283,6 +1302,14 @@ func (r StatusReport) String() string {
 		}
 		for _, warning := range r.Warnings {
 			wrapInto(&b, "  ", "warning: "+warning)
+		}
+		b.WriteString("\n")
+	}
+
+	if len(r.HisToDo) > 0 {
+		clip(&b, fmt.Sprintf("%s (%d)", HisToDoHeading, len(r.HisToDo)))
+		for _, d := range r.HisToDo {
+			clip(&b, "  "+d.Story.ID+" "+d.Story.Title)
 		}
 		b.WriteString("\n")
 	}
