@@ -247,3 +247,37 @@ func TestARigsFileSaysWhetherItExpectsAFilesKeyAndRefusesAnythingElse(t *testing
 		}
 	}
 }
+
+func TestARigsFileSaysWhetherItsSuiteRunsNightlyAndUnderWhichEpic(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+
+	writeRigFile(t, dir, "lampas", "nightly_suite = true # every night\nsuite_epic = \"mw-x\"\n")
+	got, err := v.EpicRequirements(context.Background(), "lampas")
+	if err != nil {
+		t.Fatalf("reading the rig's file: %v", err)
+	}
+	if want := (domain.EpicRequirements{NightlySuite: true, SuiteEpic: "mw-x"}); !reflect.DeepEqual(got, want) {
+		t.Errorf("requirements = %+v, want %+v", got, want)
+	}
+	if got.Any() {
+		t.Errorf("nightly_suite and suite_epic are no requirement of an epic, but Any() = true")
+	}
+
+	writeRigFile(t, dir, "lampas", "nightly_suite = false\n")
+	if got, err := v.EpicRequirements(context.Background(), "lampas"); err != nil || got.NightlySuite {
+		t.Errorf("nightly_suite = false: %+v, %v; want it off", got, err)
+	}
+
+	for key, bads := range map[string][]string{
+		"nightly_suite": {`"yes"`, `yes`, `"true"`, `[true]`, ``},
+		"suite_epic":    {`mw-x`, `""`, `["mw-x"]`, `"mw x"`, `"../x"`},
+	} {
+		for _, bad := range bads {
+			writeRigFile(t, dir, "lampas", key+" = "+bad+"\n")
+			if _, err := v.EpicRequirements(context.Background(), "lampas"); err == nil || !strings.Contains(err.Error(), key) {
+				t.Errorf("%s = %s: err = %v, want a refusal naming %s", key, bad, err, key)
+			}
+		}
+	}
+}

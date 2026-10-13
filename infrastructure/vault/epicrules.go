@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -28,9 +29,14 @@ const (
 	ChangelogFilesKey      = "changelog_files"
 	PublicURLKey           = "public_url"
 	FilesExpectedKey       = "files_expected"
+	NightlySuiteKey        = "nightly_suite"
+	SuiteEpicKey           = "suite_epic"
 )
 
 var _ application.EpicRules = (*Vault)(nil)
+
+// beadID is what a suite_epic may be: a bead's id, as in mw-5r3p30.
+var beadID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 // EpicRequirements implements application.EpicRules: it reads
 // rigs/<rig>.toml in the vault, which looks like this:
@@ -42,6 +48,8 @@ var _ application.EpicRules = (*Vault)(nil)
 //	changelog_files        = ["public/changelog.json", "CHANGELOG.md"]
 //	public_url             = "https://github.com/Jonathan-A-White/lampas"
 //	files_expected         = true
+//	nightly_suite          = true
+//	suite_epic             = "mw-5r3p30"
 //
 // A rig with no file asks nothing. A key this does not know is an error rather
 // than a silence: a misspelt key would otherwise switch the requirement off
@@ -67,7 +75,8 @@ func (v *Vault) EpicRequirements(_ context.Context, rig string) (domain.EpicRequ
 
 // parseRigFile reads the little TOML a rig's file holds: `key = ["a", "b"]`,
 // the list possibly running over several lines, `guest = "<owner>"`,
-// `files_expected = true` (or false), and `#` comments.
+// `files_expected = true` (or false), `nightly_suite = true` (or false),
+// `suite_epic = "<bead id>"`, and `#` comments.
 func parseRigFile(written string) (domain.EpicRequirements, error) {
 	var requirements domain.EpicRequirements
 	lines := strings.Split(written, "\n")
@@ -93,6 +102,23 @@ func parseRigFile(written string) (domain.EpicRequirements, error) {
 			default:
 				return requirements, fmt.Errorf("line %d: expected `%s = true` or `%s = false`, got %q", i+1, FilesExpectedKey, FilesExpectedKey, lines[i])
 			}
+			continue
+		}
+		if found && key == NightlySuiteKey {
+			switch value {
+			case "true", "false":
+				requirements.NightlySuite = value == "true"
+			default:
+				return requirements, fmt.Errorf("line %d: expected `%s = true` or `%s = false`, got %q", i+1, NightlySuiteKey, NightlySuiteKey, lines[i])
+			}
+			continue
+		}
+		if found && key == SuiteEpicKey {
+			epic, err := quotedStrings(value)
+			if err != nil || len(epic) != 1 || !beadID.MatchString(epic[0]) {
+				return requirements, fmt.Errorf("line %d: expected `%s = \"<bead id>\"`, got %q", i+1, SuiteEpicKey, lines[i])
+			}
+			requirements.SuiteEpic = epic[0]
 			continue
 		}
 		if found && key == PublicURLKey {
@@ -136,8 +162,8 @@ func parseRigFile(written string) (domain.EpicRequirements, error) {
 				requirements.VersionFiles = names
 			}
 		default:
-			return requirements, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s and %s)",
-				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, PublicURLKey, FilesExpectedKey)
+			return requirements, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s and %s)",
+				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, PublicURLKey, FilesExpectedKey, NightlySuiteKey, SuiteEpicKey)
 		}
 	}
 	return requirements, nil

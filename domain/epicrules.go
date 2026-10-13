@@ -42,6 +42,11 @@ type EpicRequirements struct {
 	// them (mw-gq6.349). It is no requirement of an epic either, so Any does
 	// not count it.
 	FilesExpected bool
+	// NightlySuite says the rig's whole test suite is run on its main each night
+	// (mw suite), and SuiteEpic is the epic the beads that run files are filed
+	// under. Neither is a requirement of an epic, so Any does not count them.
+	NightlySuite bool
+	SuiteEpic    string
 }
 
 // Any reports whether the rig asks anything of its epics at all. A rig that
