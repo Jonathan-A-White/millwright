@@ -1045,6 +1045,12 @@ func TestGatewayOffersAnAutoStoryToEveryHost(t *testing.T) {
 	if running, err := gateway.RunningStories(ctx, "vps"); err != nil || len(running) != 0 {
 		t.Fatalf("expected nothing running on vps, got %+v: %v", running, err)
 	}
+	if away, err := gateway.RunningElsewhere(ctx, "vps"); err != nil || len(away) != 1 || away[0].Story.ID != anywhere {
+		t.Fatalf("expected %s running beside vps, on laptop, got %+v: %v", anywhere, away, err)
+	}
+	if away, err := gateway.RunningElsewhere(ctx, "laptop"); err != nil || len(away) != 0 {
+		t.Fatalf("expected nothing running beside laptop, got %+v: %v", away, err)
+	}
 }
 
 // A bead labelled hitl that no epic gave a Path — the ticket a Mayor files for

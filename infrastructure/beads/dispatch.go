@@ -72,6 +72,34 @@ func (g *Gateway) RunningStories(ctx context.Context, host string) ([]applicatio
 	return g.onHost(ctx, stories, host, false)
 }
 
+// RunningElsewhere implements application.WorkTracker: what the hosts other
+// than this one have in flight. A story whose Path names no host, or still names
+// domain.HostAuto, was claimed by none and is left out.
+func (g *Gateway) RunningElsewhere(ctx context.Context, host string) ([]application.StoryDetail, error) {
+	if host == "" {
+		return nil, fmt.Errorf("which host's running stories are the others'?")
+	}
+	out, err := g.call(ctx, "list", "--status", StatusInProgress, "--exclude-type", "epic", "--limit", "0", "--json")
+	if err != nil {
+		return nil, err
+	}
+	stories, err := decodeBeads(out)
+	if err != nil {
+		return nil, fmt.Errorf("reading what is running beside %s: %w", host, err)
+	}
+	details, err := g.overlaid(ctx, stories)
+	if err != nil {
+		return nil, err
+	}
+	var elsewhere []application.StoryDetail
+	for _, detail := range details {
+		if merged := detail.Merged().Host; merged != "" && merged != host && merged != domain.HostAuto {
+			elsewhere = append(elsewhere, detail)
+		}
+	}
+	return elsewhere, nil
+}
+
 // WorkInHand implements application.WorkTracker: everything ready and
 // unclaimed, and everything claimed and unfinished, on every host. It is the
 // two listings a dispatcher makes, read once each with every distinct epic's
