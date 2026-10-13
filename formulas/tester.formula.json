@@ -50,11 +50,18 @@
       "depends_on": ["adversarial"]
     },
     {
-      "id": "findings",
-      "title": "Write FINDINGS on the landed story",
-      "description": "Comment on the LANDED story (its id is on {{story}}'s 'Landed story:' line), not on {{story}}. Start the comment with a line 'FINDINGS', then one item per finding, each starting '- [bug]' (it does not do what HOW TO CHECK IT says, or breaks) or '- [taste]' (it works, and he would not like it), each saying what he would see, the steps that show it, and the shot path, and ending with the mark from the 'main' step: 'still on main: yes' or 'still on main: no (<version>)', the version main reports. With nothing found, write the single line 'FINDINGS: none'. End the comment with a line 'Tester fuel: <tokens>', the tokens this session spent as far as you can tell, else 'Tester fuel: unknown'. A Tester commits nothing: leave your branch with no commits, and run mw check {{story}} before you stop.",
+      "id": "file",
+      "title": "File each finding still on main as a held story",
+      "description": "For each finding marked 'still on main: yes' by the 'main' step, run mw tester file {{story}} once, so the Mayor only reads and releases what you found. Write its long texts to files under /tmp/tester-{{story}}/ first and pass them as @file: mw tester file {{story}} --kind bug|taste --app <the app> --title '<one line>' --finding @<file: the finding verbatim, as it will stand in FINDINGS> --shot <shot path> --fix '<one line>' --how @<file: HOW TO CHECK IT, for the Governor, steps he can follow with the exact labels> --accept '<something to run that passes when it is fixed>' --files <repo paths, from your own grep of the rig for the code the fix will touch>. It files the story HELD under the landed story's epic with the landed story's path and your files key, makes it wait on every running or open story of the rig that names the same file, makes the epic's open demo wait on it, and marks your --fix as PROVISIONAL (Tester's suggestion; Mayor to confirm). When an open bead of the rig has the same title it files nothing and names that bead: it is a duplicate. Do not file a finding marked 'still on main: no'. A finding that would change what an app is for, or cross a line its VISION.md draws, is not yours to decide: file nothing for it and flag it in the report. Never release a story you filed (that stays the Mayor's), never edit one, and never file one by any other way. Note, for each finding, the id it printed (held), the bead it named (duplicate), or why you filed nothing (not filed). This step commits nothing to the rig.",
       "type": "task",
       "depends_on": ["main"]
+    },
+    {
+      "id": "findings",
+      "title": "Write FINDINGS on the landed story",
+      "description": "Comment on the LANDED story (its id is on {{story}}'s 'Landed story:' line), not on {{story}}. Start the comment with a line 'FINDINGS', then one item per finding, each starting '- [bug]' (it does not do what HOW TO CHECK IT says, or breaks) or '- [taste]' (it works, and he would not like it), each saying what he would see, the steps that show it, and the shot path, and ending with the mark from the 'main' step: 'still on main: yes' or 'still on main: no (<version>)', the version main reports; and then, on its own line, what the 'file' step did with it: 'held: <id>' (the story it filed), 'duplicate of: <id>' (the open bead it matched, nothing filed) or 'not filed: <reason>' (gone from main, or crossing the app's VISION.md, which you flag). The Mayor reads those ids from this comment. With nothing found, write the single line 'FINDINGS: none'. End the comment with a line 'Tester fuel: <tokens>', the tokens this session spent as far as you can tell, else 'Tester fuel: unknown'. A Tester commits nothing: leave your branch with no commits, and run mw check {{story}} before you stop.",
+      "type": "task",
+      "depends_on": ["file"]
     }
   ]
 }

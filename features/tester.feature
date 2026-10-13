@@ -85,6 +85,18 @@ Feature: A one-week Tester trial
       | tested mw-l.1: 2 findings |
     And no Tester story was filed
 
+  Scenario: The Tested: mail lists the stories the Tester filed held and names the bead a finding matched
+    Given the story "mw-l.1" is planned and ready to be worked here
+    And the Tester story "mw-l.2" testing "mw-l.1" has been worked in its own worktree, committing nothing
+    And the session of "mw-l.2" reported a plain success
+    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS\n- [bug] The page number is lost after rotate. still on main: yes\n  held: mw-l.9\n- [bug] The mic stays red after Back. still on main: yes\n  duplicate of: mw-l.7\nTester fuel: 55,100 tokens"
+    When mw closes out "mw-l.2"
+    Then the story "mw-l.2" is closed
+    And that mail's subject is "Tested: mw-l.1: 2 findings"
+    And that mail's body holds:
+      | held    mw-l.9 filed by the Tester for its findings: release or drop them |
+      | twin    mw-l.7 already open                                                |
+
   Scenario: A FINDINGS comment whose only [bug] is inside "No [bug] found." counts no bug
     Given the story "mw-l.1" is planned and ready to be worked here
     And the Tester story "mw-l.2" testing "mw-l.1" has been worked in its own worktree, committing nothing

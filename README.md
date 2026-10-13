@@ -1334,6 +1334,24 @@ what he would see, the steps and the shot path, or `FINDINGS: none`; then
 commit, and `mw check` on a Tester story asks what `mw next` will: no commits,
 every step closed, FINDINGS written.
 
+A finding that still happens on main is filed by the Tester itself, so the Mayor
+only reads and releases it (mw-gq6.397):
+
+```sh
+bin/mw tester file <tester-story> --kind bug --title "<one line>" --finding @finding.txt \
+  --how @how.txt --accept "<something to run>" --files src/Reader.tsx --shot /tmp/tester-x/06.png --fix "<one line>"
+```
+
+It files `[bug] <app>: <title>` (or `[taste]`) held under the landed story's epic: the
+finding verbatim, `Tester finding. Source: Tester on <landed> (<tester story>)`, the shot, the fix
+marked `PROVISIONAL (Tester's suggestion; Mayor to confirm)`, HOW TO CHECK IT, the acceptance, the
+landed story's path with `--files` as its files key, a wait on every running or open story of the
+rig that names the same file, and the epic's open demo (the rig's `epic_last_story_labels`) waiting
+on it. A finding whose title an open bead of the rig already has files nothing and names that bead.
+It never releases; a finding that crosses an app's VISION.md is flagged and not filed. The Tester
+writes `held: <id>` or `duplicate of: <id>` under each finding of its FINDINGS, and the
+`Tested:` mail lists them (`held` and `twin` lines) for the Mayor to release or drop.
+
 `mw next` closes a Tester story without merging, raising a version or pushing:
 it refuses one whose branch holds a commit (`tester-committed`) or that left no
 FINDINGS (`no-findings`), carries FINDINGS the Tester wrote on its own story

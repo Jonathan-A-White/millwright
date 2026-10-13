@@ -2,11 +2,14 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
 )
@@ -22,7 +25,7 @@ func newTesterCmd() *cobra.Command {
 			"to break the app, commits nothing, and writes FINDINGS on the landed story; mw next closes it with\n" +
 			"nothing merged and mails the Mayor 'Tested: <id>: N findings'.",
 	}
-	cmd.AddCommand(newTesterReportCmd())
+	cmd.AddCommand(newTesterReportCmd(), newTesterFileCmd())
 	return cmd
 }
 
@@ -93,4 +96,59 @@ func testerTrial() (application.TesterTrial, error) {
 		return application.TesterTrial{}, fmt.Errorf("the [%s] table: %w", config.TesterTable, err)
 	}
 	return trial, nil
+}
+
+// newTesterFileCmd builds `mw tester file`: a Tester files one of its findings
+// as a story held under the landed story's epic (mw-gq6.397).
+func newTesterFileCmd() *cobra.Command {
+	var finding application.TesterFinding
+	cmd := &cobra.Command{
+		Use:   "file <tester-story-id> --kind bug|taste --title <one line> --finding <text> --how <text> --accept <text> [--files a,b] [--shot <path>] [--fix <one line>]",
+		Short: "File a Tester's finding as a held story under the landed story's epic",
+		Long: "file is what a Tester runs for each finding that still happens on main, in place of the Mayor's triage.\n" +
+			"It reads the landed story from the Tester story's 'Landed story:' line and files, held, under the landed\n" +
+			"story's epic: '[bug] <app>: <title>' (or [taste]), the finding verbatim with its source, shot and the fix\n" +
+			"marked PROVISIONAL, HOW TO CHECK IT, the acceptance, the landed story's path with --files as its files\n" +
+			"key, a wait on every running or open story of the rig that names the same file, and the epic's open\n" +
+			"demo waiting on it. A finding whose title an open bead of the rig already has is not filed: the bead\n" +
+			"is named. It prints the id; put 'held: <id>' (or 'duplicate of: <id>') under the finding in FINDINGS.\n" +
+			"It releases nothing: that stays the Mayor's. A text flag whose value starts with @ reads that file.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			for _, text := range []*string{&finding.Finding, &finding.Fix, &finding.HowToCheck, &finding.Acceptance} {
+				if path, isFile := strings.CutPrefix(*text, "@"); isFile {
+					read, err := os.ReadFile(path)
+					if err != nil {
+						return fmt.Errorf("reading %s: %w", path, err)
+					}
+					*text = string(read)
+				}
+			}
+			dir, err := config.Vault()
+			if err != nil {
+				return err
+			}
+			host, err := config.Host()
+			if err != nil {
+				return err
+			}
+			_, err = application.TesterFiler{
+				Tracker: mwGateway(dir, host),
+				Rules:   vault.New(dir),
+				Out:     cmd.OutOrStdout(),
+			}.File(cmd.Context(), args[0], finding)
+			return err
+		},
+	}
+	flags := cmd.Flags()
+	flags.StringVar(&finding.Kind, "kind", "", "bug (it breaks, or does not do what HOW TO CHECK IT says) or taste")
+	flags.StringVar(&finding.App, "app", "", "the app named in the title; the landed story's rig by default")
+	flags.StringVar(&finding.Title, "title", "", "the finding in one line")
+	flags.StringVar(&finding.Finding, "finding", "", "the finding verbatim, as in FINDINGS (@file reads a file)")
+	flags.StringVar(&finding.Shot, "shot", "", "the shot's path")
+	flags.StringVar(&finding.Fix, "fix", "", "a one-line suggested fix, filed as PROVISIONAL (@file reads a file)")
+	flags.StringVar(&finding.HowToCheck, "how", "", "HOW TO CHECK IT, for the Governor (@file reads a file)")
+	flags.StringVar(&finding.Acceptance, "accept", "", "acceptance checkable by running something (@file reads a file)")
+	flags.StringVar(&finding.Files, "files", "", "the files key: the repo paths or globs the fix expects to change, comma-separated")
+	return cmd
 }

@@ -94,6 +94,10 @@ func TesterLanded(d StoryDetail) string {
 type TesterFindings struct {
 	Bug, Taste int
 	Text       string
+	// Held are the stories the Tester filed held for its findings, each named
+	// on a "held: <id>" line of its FINDINGS, and Duplicates the open beads it
+	// named as already holding one ("duplicate of: <id>"), in the order written.
+	Held, Duplicates []string
 }
 
 // Count is how many findings there were.
@@ -118,6 +122,9 @@ var (
 	testerFindingsLine = regexp.MustCompile(`(?m)^[ \t#*]*` + TesterFindingsHeading + `\b`)
 	testerNoneLine     = regexp.MustCompile(`(?i)^[ \t#*]*` + TesterFindingsHeading + `[ \t*]*:[ \t]*none\b`)
 	testerTag          = regexp.MustCompile(`(?i)^[ \t]*(?:(?:[-*+]|\d+[.)])[ \t]+)?(?:[*_]{1,2})?\[(bug|taste)\]`)
+	testerHeld         = regexp.MustCompile(`(?i)\bheld:[ \t]*([^\n]*)`)
+	testerDuplicate    = regexp.MustCompile(`(?i)\bduplicate of:?[ \t]*([^\n]*)`)
+	testerBeadID       = regexp.MustCompile(`[A-Za-z][A-Za-z0-9]*-[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*`)
 )
 
 // ReadTesterFindings reads the FINDINGS section of a comment: from the heading
@@ -134,6 +141,14 @@ func ReadTesterFindings(text string) (TesterFindings, bool) {
 		section = section[:end]
 	}
 	found := TesterFindings{Text: strings.TrimSpace(section)}
+	for _, said := range testerHeld.FindAllStringSubmatch(section, -1) {
+		found.Held = append(found.Held, testerBeadID.FindAllString(said[1], -1)...)
+	}
+	for _, said := range testerDuplicate.FindAllStringSubmatch(section, -1) {
+		if id := testerBeadID.FindString(said[1]); id != "" {
+			found.Duplicates = append(found.Duplicates, id)
+		}
+	}
 	if testerNoneLine.MatchString(section) {
 		return found, true
 	}

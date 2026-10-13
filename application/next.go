@@ -2570,6 +2570,12 @@ func (r NextReport) String() string {
 	if r.TesterFiled != "" {
 		fmt.Fprintf(&b, "  tester  %s filed to drive this landing on a phone-sized screen\n", r.TesterFiled)
 	}
+	if len(r.Findings.Held) > 0 {
+		fmt.Fprintf(&b, "  held    %s filed by the Tester for its findings: release or drop them\n", strings.Join(r.Findings.Held, ", "))
+	}
+	if len(r.Findings.Duplicates) > 0 {
+		fmt.Fprintf(&b, "  twin    %s already open, so the Tester filed nothing for a finding the same\n", strings.Join(r.Findings.Duplicates, ", "))
+	}
 	if len(r.Uncommitted) > 0 {
 		fmt.Fprintf(&b, "  left    uncommitted work, %d path(s), in the worktree:\n", len(r.Uncommitted))
 		for _, line := range strings.Split(bullets(r.Uncommitted, UncommittedListed), "\n") {
