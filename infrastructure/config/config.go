@@ -1098,6 +1098,11 @@ const (
 	DefaultEventsClock     = 5 * time.Minute
 )
 
+// DefaultEventsSuiteHour is the UTC hour from which the home's follower runs the
+// nightly whole suite when nothing says otherwise: about three or four in the
+// morning in the US. It is application.DefaultNightlySuiteHour.
+const DefaultEventsSuiteHour = 8
+
 // DefaultEventsIdleAfter is how long the log may hold no event but the jobs'
 // before mw status calls the factory idle.
 const DefaultEventsIdleAfter = 10 * time.Minute
@@ -1122,6 +1127,9 @@ type EventsSettings struct {
 	// IdleAfter is how long the log may hold no event but the jobs' before
 	// mw status calls the factory idle.
 	IdleAfter time.Duration
+	// SuiteHour is the UTC hour, 0 to 23, from which the home's follower runs
+	// the nightly whole suite of each rig that opts in.
+	SuiteHour int
 }
 
 // Events reports the `[events]` table of ~/.config/mw/config.toml: `chain`
@@ -1129,7 +1137,9 @@ type EventsSettings struct {
 // more, default DefaultEventsChainDailyCap), `emergency_daily_cap` (the same, default
 // DefaultEventsEmergencyDailyCap), `heartbeat` (a duration, default
 // an hour), `clock` (a duration, default 5m) and `idle_after` (a duration,
-// default 10m), each its default when the table says nothing.
+// default 10m) and `suite_hour` (a whole number, 0 to 23, the UTC hour the nightly
+// suite is run from, default DefaultEventsSuiteHour), each its default when the
+// table says nothing.
 func Events() (EventsSettings, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -1143,6 +1153,7 @@ func Events() (EventsSettings, error) {
 	settings := EventsSettings{
 		Chain: true, ChainDailyCap: DefaultEventsChainDailyCap, EmergencyDailyCap: DefaultEventsEmergencyDailyCap,
 		Heartbeat: DefaultEventsHeartbeat, Clock: DefaultEventsClock, IdleAfter: DefaultEventsIdleAfter,
+		SuiteHour: DefaultEventsSuiteHour,
 	}
 	for key, into := range map[string]*time.Duration{"heartbeat": &settings.Heartbeat, "clock": &settings.Clock, "idle_after": &settings.IdleAfter} {
 		said := strings.TrimSpace(table[key])
@@ -1175,6 +1186,13 @@ func Events() (EventsSettings, error) {
 			return EventsSettings{}, fmt.Errorf("the [%s] table of %s says emergency_daily_cap = %q: it must be a whole number, 1 or more", EventsTable, path, said)
 		}
 		settings.EmergencyDailyCap = n
+	}
+	if said := strings.TrimSpace(table["suite_hour"]); said != "" {
+		n, err := strconv.Atoi(said)
+		if err != nil || n < 0 || n > 23 {
+			return EventsSettings{}, fmt.Errorf("the [%s] table of %s says suite_hour = %q: it must be a whole number of hours, 0 to 23 (UTC)", EventsTable, path, said)
+		}
+		settings.SuiteHour = n
 	}
 	return settings, nil
 }

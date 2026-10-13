@@ -1853,6 +1853,30 @@ func TestEventsHeartbeatKnobsThatAreNotUnderstoodAreRefused(t *testing.T) {
 	}
 }
 
+// The nightly whole suite is run from 08:00 UTC unless the table names an hour.
+func TestEventsSuiteHourDefaultsToEightAndIsReadFromTheTable(t *testing.T) {
+	writeConfig(t, "host = \"laptop\"\n")
+	got, err := config.Events()
+	if err != nil || got.SuiteHour != 8 {
+		t.Fatalf("expected 8, got %d: %v", got.SuiteHour, err)
+	}
+	for said, want := range map[string]int{"suite_hour = 0": 0, "suite_hour = 3": 3, "suite_hour = \"23\"": 23} {
+		writeConfig(t, "[events]\n"+said+"\n")
+		if got, err = config.Events(); err != nil || got.SuiteHour != want {
+			t.Errorf("%s: expected %d, got %d: %v", said, want, got.SuiteHour, err)
+		}
+	}
+}
+
+func TestEventsSuiteHourThatIsNotAnHourIsRefused(t *testing.T) {
+	for _, bad := range []string{"suite_hour = 24", "suite_hour = -1", "suite_hour = late", "suite_hour = 8.5"} {
+		writeConfig(t, "[events]\n"+bad+"\n")
+		if _, err := config.Events(); err == nil || !strings.Contains(err.Error(), "suite_hour") {
+			t.Errorf("expected %q refused naming suite_hour, got %v", bad, err)
+		}
+	}
+}
+
 func TestEventsKnobsThatAreNotUnderstoodAreRefused(t *testing.T) {
 	for _, bad := range []string{"chain = maybe", "chain_daily_cap = 0", "chain_daily_cap = lots"} {
 		writeConfig(t, "[events]\n"+bad+"\n")
