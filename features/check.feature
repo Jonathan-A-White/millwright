@@ -154,3 +154,27 @@ Feature: Checking a branch before its session ends
     And the check prints: ran twice
     And the check prints: the second run failed
     And the check prints "the rig's tests fail in the worktree" 1 time(s)
+
+  Scenario: Checks of two stories started in the background write two logs, each named for its story
+    Given the story "mw-gq6.9" has been worked in its own worktree, committing nothing
+    When a session starts checks of "mw-gq6.1" and "mw-gq6.9" in the background
+    And the background checks finish
+    Then the log "check-1.log" in the run of "mw-gq6.1" ends with the verdict that mw next would land it
+    And the log "check-1.log" in the run of "mw-gq6.9" ends with the verdict that mw next would not land it
+    And the log of "mw-gq6.1" never names "mw-gq6.9"
+
+  Scenario: A check started in the background prints its log's path and returns before the tests finish
+    Given the rig's tests wait until they are told to finish
+    When a session starts a check of "mw-gq6.1" in the background
+    Then the command printed the path of the log "check-1.log" in the run of "mw-gq6.1"
+    And the command returned before the rig's tests finished
+    And the log of "mw-gq6.1" has no verdict yet
+    When the rig's tests are told to finish
+    And the background checks finish
+    Then the log "check-1.log" in the run of "mw-gq6.1" ends with the verdict that mw next would land it
+
+  Scenario: A check run in the foreground keeps the same verdict in its story's log as it prints
+    When a session checks "mw-gq6.1"
+    Then the check passes
+    And the log "check-1.log" in the run of "mw-gq6.1" holds what the check printed
+    And the check wrote nothing to the tracker, the ledger, the vault or git

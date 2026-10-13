@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
+	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/cucumber/godog"
 )
@@ -35,6 +37,7 @@ func registerCheckSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.When(`^a session checks "([^"]*)"$`, c.aSessionChecks)
 	ctx.When(`^a session checks "([^"]*)" while the other close-out finishes after (\d+) milliseconds$`, c.aSessionChecksWhileTheSlotIsHeld)
 	ctx.When(`^a session checks "([^"]*)" without the merge slot$`, c.aSessionChecksWithoutTheSlot)
+	registerBackgroundCheckSteps(ctx, c)
 
 	ctx.Then(`^the check passes$`, c.theCheckPasses)
 	ctx.Then(`^the check waited at least (\d+) milliseconds for the merge slot$`, c.theCheckWaited)
@@ -97,12 +100,30 @@ func (c *nextContext) snapshot(id string) (touched, error) {
 	return t, nil
 }
 
+// isCheckLog reports whether path is runs/<story>/check-<n>.log under dir.
+func isCheckLog(dir, path string) bool {
+	rel, err := filepath.Rel(dir, path)
+	if err != nil {
+		return false
+	}
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	if len(parts) != 3 || parts[0] != application.RunsDir {
+		return false
+	}
+	return strings.HasPrefix(parts[2], "check-") && strings.HasSuffix(parts[2], ".log")
+}
+
 // digest is a fingerprint of every file under dir, by path and contents.
 func digest(dir string) (string, error) {
 	var lines []string
 	err := filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err
+		}
+		// A check keeps its log in the run of its story: that is what it is asked
+		// to write, and nothing else in the vault.
+		if isCheckLog(dir, path) {
+			return nil
 		}
 		held, err := os.ReadFile(path)
 		if err != nil {
@@ -218,7 +239,15 @@ func (c *nextContext) checkWith(id string, slots *rig.Slots) error {
 	if c.checkLoad != nil {
 		load = c.checkLoad
 	}
-	c.checked, c.err = application.Check{
+	k := c.newCheck(worktrees, slot, load, &c.printed)
+	k.Logs = vault.New(c.vault)
+	c.checked, c.err = k.Run(context.Background(), id)
+	return nil
+}
+
+// newCheck is the use case mw check runs, over the scenario's world.
+func (c *nextContext) newCheck(worktrees *rig.Worktrees, slot application.MergeSlot, load application.HostLoad, out io.Writer) application.Check {
+	return application.Check{
 		Tracker:    c.tracker,
 		Slot:       slot,
 		Landing:    worktrees,
@@ -226,11 +255,10 @@ func (c *nextContext) checkWith(id string, slots *rig.Slots) error {
 		SpecChecks: rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands)),
 		Host:       nextHost,
 		Rigs:       map[string]string{c.rigKey(): c.rig},
-		Out:        &c.printed,
+		Out:        out,
 		Load:       load,
 		LoadWait:   func(context.Context, time.Duration) error { return nil },
-	}.Run(context.Background(), id)
-	return nil
+	}
 }
 
 func (c *nextContext) theCheckPasses() error {

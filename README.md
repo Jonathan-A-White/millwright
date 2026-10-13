@@ -984,6 +984,12 @@ twice and the load the first run failed at, so a session does not spend turns, o
 a second full suite, proving a failure was the host's load. A failure on a calm
 host is reported at once, with no second run.
 
+Every check also writes its whole output to `runs/<story-id>/check-<attempt>.log`
+in the vault (mw-gq6.380), a log named for its story that no other story's check
+shares. `bin/mw check <story-id> --background` starts the check detached, prints
+that log's path and returns at once, for a suite that outlasts a tool call's time
+limit; the verdict is the last lines of the log when the check is done.
+
 It is read-only. It writes no comment, run state or ledger line, commits nothing
 in the vault, and asks git for nothing that writes — no fetch, no landing
 worktree — so the commits are counted against `origin/<target>` as the

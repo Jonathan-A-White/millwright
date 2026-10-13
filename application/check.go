@@ -1,6 +1,7 @@
 package application
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -59,14 +60,83 @@ type Check struct {
 	// DefaultRemote.
 	Remote string
 
+	// Logs is where the check's whole output is also kept, as runs/<story>/
+	// check-<attempt>.log, so that a check run in the background has a log named
+	// for its story that no other story's check can overwrite (mw-gq6.380). Nil
+	// keeps none.
+	Logs CheckLogs
+
 	// Out is where the report is printed. A nil Out prints nothing.
 	Out io.Writer
+}
+
+// CheckLogs is the part of the vault that keeps a check's log: one file of a
+// story's run, and where it belongs.
+type CheckLogs interface {
+	PutRunFile(ctx context.Context, storyID, name, contents string) (string, error)
+	RunFile(storyID, name string) string
+}
+
+// CheckLogFileName is the name of the log a check of a story's attempt is kept
+// under, in the story's run directory.
+func CheckLogFileName(attempt int) string {
+	if attempt < 1 {
+		attempt = 1
+	}
+	return fmt.Sprintf("check-%d.log", attempt)
+}
+
+// CheckStarter starts mw check on a story as a process of its own that outlives
+// the one that asked, with everything it prints appended to the file at logPath.
+// It returns once the check has started, not when it is done.
+type CheckStarter interface {
+	Start(ctx context.Context, storyID, logPath string) error
+}
+
+// CheckBackground is `mw check --background`: it starts the check of a story
+// detached, names the log it writes to for the story and its attempt, and returns
+// at once with that log's path, so that a session whose tool call is cut off
+// after ten minutes can still read the verdict, and no two stories share a log.
+type CheckBackground struct {
+	Tracker WorkTracker
+	Logs    CheckLogs
+	Starter CheckStarter
+	Out     io.Writer
+}
+
+// Run starts the check of one story and returns the path of its log.
+func (b CheckBackground) Run(ctx context.Context, storyID string) (string, error) {
+	switch {
+	case b.Tracker == nil || b.Logs == nil || b.Starter == nil:
+		return "", fmt.Errorf("checking a story in the background: it needs a work tracker, a place for the log and a way to start the check")
+	case strings.TrimSpace(storyID) == "":
+		return "", fmt.Errorf("checking a story in the background: which story?")
+	}
+	detail, err := b.Tracker.ShowStory(ctx, storyID)
+	if err != nil {
+		return "", fmt.Errorf("checking %s: %w", storyID, err)
+	}
+	name := CheckLogFileName(detail.Attempts)
+	if _, err := b.Logs.PutRunFile(ctx, storyID, name, "check of "+storyID+" started in the background: its verdict is the last lines of this log\n"); err != nil {
+		return "", fmt.Errorf("checking %s: the log could not be made: %w", storyID, err)
+	}
+	logPath := b.Logs.RunFile(storyID, name)
+	if err := b.Starter.Start(ctx, storyID, logPath); err != nil {
+		return "", fmt.Errorf("checking %s: %w", storyID, err)
+	}
+	if b.Out != nil {
+		fmt.Fprintf(b.Out, "check of %s started in the background; its log is %s\n", storyID, logPath)
+	}
+	return logPath, nil
 }
 
 // CheckReport is what one check found.
 type CheckReport struct {
 	StoryID string
 	Title   string
+	// Attempt is which attempt of the story was checked, 0 when the story could
+	// not be read.
+	Attempt int
 	Host    string
 	Branch  string
 	Target  string
@@ -87,13 +157,37 @@ func (r CheckReport) Passed() bool { return len(r.Refusals) == 0 }
 // returns is what makes mw check exit non-zero: any check that failed, and
 // anything that stopped the checking at all.
 func (k Check) Run(ctx context.Context, storyID string) (CheckReport, error) {
+	// Everything printed is also kept, to be written to the story's log when the
+	// check is done.
+	var kept bytes.Buffer
+	shown := k.Out
+	if k.Logs != nil {
+		k.Out = teeTo(shown, &kept)
+	}
 	report, err := k.check(ctx, storyID)
 	// A check that could not be made has nothing to report, and the error says
 	// why; only a branch that was actually read has a verdict to print.
 	if k.Out != nil && report.Branch != "" {
 		fmt.Fprint(k.Out, report.String())
+	} else if err != nil {
+		// Nothing was printed, so the log would end with no verdict at all.
+		fmt.Fprintf(&kept, "mw check: %v\n", err)
+	}
+	if k.Logs != nil && report.Attempt > 0 {
+		name := CheckLogFileName(report.Attempt)
+		if _, werr := k.Logs.PutRunFile(ctx, storyID, name, kept.String()); werr != nil && shown != nil {
+			fmt.Fprintf(shown, "  note    the log of this check could not be kept in the run of %s: %v\n", storyID, werr)
+		}
 	}
 	return report, err
+}
+
+// teeTo writes to both, or to one when the other is nil.
+func teeTo(out io.Writer, kept *bytes.Buffer) io.Writer {
+	if out == nil {
+		return kept
+	}
+	return io.MultiWriter(out, kept)
 }
 
 func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
@@ -110,6 +204,7 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		return report, fmt.Errorf("checking %s: %w", storyID, err)
 	}
 	report.Title = detail.Story.Title
+	report.Attempt = max(detail.Attempts, 1)
 	if detail.Closed() {
 		return report, fmt.Errorf("checking %s: it is closed already, so there is nothing left to land", storyID)
 	}

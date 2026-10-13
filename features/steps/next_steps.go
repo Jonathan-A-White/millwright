@@ -61,6 +61,7 @@ type nextContext struct {
 	checkLog     string
 	checkLoad    *apptest.FakeHostLoad // the host's load as mw check reads it; nil reads none
 	specCommands map[string]string     // the [changed_specs] table this scenario's host has
+	background   *backgroundChecks     // the checks a scenario started with --background
 	racer        string                // the other host, landing work mid-push
 	refusal      []string              // what the origin's hook says when it refuses a push
 
