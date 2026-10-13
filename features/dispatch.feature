@@ -957,6 +957,29 @@ Feature: Dispatching the stories this host is ready to work
     Then one session was started, for "mw-gq6.2"
     And dispatch reports 0 of 1 sessions were already running
 
+  # What a story really changed (mw-gq6.406): mw next records the files its
+  # branch has changed on the story as it works (files_changed), where the other
+  # host reads them, so a file the files key missed still keeps its neighbours
+  # from starting beside it.
+
+  Scenario: A story waits for a story on the other host that has changed a file outside its files key
+    Given a story "mw-gq6.1" of that epic is running on "laptop", expecting to change "src/Reader.tsx"
+    And the story "mw-gq6.1" has recorded "src/Preface.tsx" as changed
+    And a ready story "mw-gq6.2" of that epic expecting to change "src/Preface.tsx"
+    And a ready story "mw-gq6.3" of that epic expecting to change "src/SettingsScreen.tsx"
+    When dispatch runs on "vps" with a cap of 3
+    Then one session was started, for "mw-gq6.3"
+    And the story "mw-gq6.2" is not claimed
+    And dispatch passed over "mw-gq6.2", saying: waiting: shares src/Preface.tsx with mw-gq6.1 (running on laptop)
+
+  Scenario: A story waits for a story on this host that has recorded a file outside its files key
+    Given a story "mw-gq6.1" of that epic is already running here, expecting to change "src/Reader.tsx"
+    And the story "mw-gq6.1" has recorded "src/Preface.tsx" as changed
+    And a ready story "mw-gq6.2" of that epic expecting to change "src/Preface.tsx"
+    When dispatch runs on "vps" with a cap of 3
+    Then no session was started
+    And dispatch passed over "mw-gq6.2", saying: waiting: shares src/Preface.tsx with mw-gq6.1
+
   # A story with no files key on a rig that expects one (files_expected = true in
   # its file in the vault) overlaps every story of the rig (mw-gq6.390): the
   # Mayor un-holds a story without mw release, so no one is told its key is

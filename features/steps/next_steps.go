@@ -260,6 +260,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 
 	registerCheckSteps(ctx, c)
 	registerNextLeaseSteps(ctx, c)
+	registerNextFilesSteps(ctx, c)
 	registerNextRunningSteps(ctx, c)
 }
 
@@ -944,6 +945,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 		HeartbeatWait: heartbeatWait,
 		Worktrees:     worktrees,
 		Landing:       worktrees,
+		Changes:       worktrees,
 		Checks:        rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands)),
 		SpecChecks:    rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands)),
 		Slot:          rig.NewSlots(rig.WithSlotWait(slotPatience), rig.WithSlotPoll(20*time.Millisecond)),

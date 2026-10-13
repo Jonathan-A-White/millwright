@@ -47,6 +47,13 @@ const ClaimedAtField = "claimed_at"
 // are the story being worked (mw-gq6.347).
 const SentBackAtField = "sent_back_at"
 
+// FilesChangedField is the metadata a story carries to say which files its
+// branch has changed from the target branch so far, comma separated, as mw next
+// records them beside the Builder's session. A dispatch on any host reads it
+// with the files key, so a file the key missed still keeps the stories that name
+// it from starting beside this one (mw-gq6.406).
+const FilesChangedField = "files_changed"
+
 // DefaultMaxAttempts is how many times a story is tried when the config file
 // says nothing: infrastructure/config.DefaultMaxAttempts is the same number.
 const DefaultMaxAttempts = 3
