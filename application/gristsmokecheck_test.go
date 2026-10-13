@@ -27,6 +27,8 @@ func TestExpectChecksTheAnswerFieldByField(t *testing.T) {
 		{"bare null", `{"price": null}`, ""},
 		{"equals", `{"box.count": {"equals": 3}}`, ""},
 		{"one of", `{"confidence": {"one_of": ["low", "medium"]}}`, ""},
+		{"between", `{"box.count": {"between": [3, 30]}}`, ""},
+		{"between at the high end", `{"box.count": {"between": [1, 3]}}`, ""},
 		{"contains text", `{"title": {"contains": "ring"}}`, ""},
 		{"contains element", `{"tags": {"contains": "b"}}`, ""},
 		{"matches", `{"title": {"matches": "^Gold"}}`, ""},
@@ -37,6 +39,10 @@ func TestExpectChecksTheAnswerFieldByField(t *testing.T) {
 		{"not null", `{"confidence": {"is_null": true}}`, `confidence: wanted null, got "low"`},
 		{"wrong value", `{"confidence": "high"}`, `confidence: wanted equal to "high", got "low"`},
 		{"not one of", `{"confidence": {"one_of": ["high", "medium"]}}`, `wanted one of ["high","medium"], got "low"`},
+		{"above the range", `{"box.count": {"between": [0.5, 2.5]}}`, `box.count: wanted a number between 0.5 and 2.5, got 3`},
+		{"a string is not in the range", `{"title": {"between": [3, 30]}}`, `title: wanted a number between 3 and 30, got "Gold ring"`},
+		{"null is not in the range", `{"price": {"between": [3, 30]}}`, `price: wanted a number between 3 and 30, got null`},
+		{"absent is not in the range", `{"colour": {"between": [3, 30]}}`, `colour: wanted a number between 3 and 30, got (absent)`},
 		{"does not contain", `{"title": {"contains": "silver"}}`, `title: wanted containing "silver", got "Gold ring"`},
 		{"does not match", `{"title": {"matches": "^Silver"}}`, `title: wanted matching "^Silver", got "Gold ring"`},
 		{"missing field", `{"colour": "red"}`, `colour: wanted equal to "red", got (absent)`},
@@ -83,10 +89,36 @@ func TestAnExampleWithoutARequestOrWithAnUnknownCheckIsRefused(t *testing.T) {
 		{"unknown check inside all", `{"request": {}, "expect": {"answer": {"all": [{"matches": "a"}, {"is_nul": true}]}}}`, `"is_nul" is not a check`},
 		{"all that is not a list", `{"request": {}, "expect": {"answer": {"all": {"matches": "a"}}}}`, "all is a list of checks"},
 		{"empty all", `{"request": {}, "expect": {"answer": {"all": []}}}`, "all is a list of checks"},
+		{"between with low above high", `{"request": {}, "expect": {"price": {"between": [30, 3]}}}`, "between is a list of two numbers, low then high"},
+		{"between of one number", `{"request": {}, "expect": {"price": {"between": [3]}}}`, "between is a list of two numbers, low then high"},
+		{"between of three numbers", `{"request": {}, "expect": {"price": {"between": [1, 2, 3]}}}`, "between is a list of two numbers, low then high"},
+		{"between of strings", `{"request": {}, "expect": {"price": {"between": ["a", "b"]}}}`, "between is a list of two numbers, low then high"},
+		{"between that is not a list", `{"request": {}, "expect": {"price": {"between": 3}}}`, "between is a list of two numbers, low then high"},
 		{"not json", `nonsense`, "not an example"},
 	} {
 		if _, err := ParseGristExample([]byte(c.text)); err == nil || !strings.Contains(err.Error(), c.says) {
 			t.Errorf("%s: expected a refusal saying %q, got %v", c.name, c.says, err)
+		}
+	}
+}
+
+// The 1964 silver quarter smoke: 18 is a fair value that no one_of list named.
+func TestABetweenCheckPassesANumberWithinItsRange(t *testing.T) {
+	expect := expectOf(t, `{"high": {"between": [3, 30]}}`)
+	for _, c := range []struct{ answer, failure string }{
+		{`{"high": 18}`, ""},
+		{`{"high": 3}`, ""},
+		{`{"high": 30}`, ""},
+		{`{"high": 31}`, "high: wanted a number between 3 and 30, got 31"},
+		{`{"high": 2.99}`, "high: wanted a number between 3 and 30, got 2.99"},
+		{`{"high": "18"}`, `high: wanted a number between 3 and 30, got "18"`},
+	} {
+		failed := CheckExpect(json.RawMessage(c.answer), expect)
+		switch {
+		case c.failure == "" && len(failed) != 0:
+			t.Errorf("%s: expected it to hold, got %v", c.answer, failed)
+		case c.failure != "" && (len(failed) != 1 || failed[0].String() != c.failure):
+			t.Errorf("%s: expected one failure %q, got %v", c.answer, c.failure, failed)
 		}
 	}
 }
