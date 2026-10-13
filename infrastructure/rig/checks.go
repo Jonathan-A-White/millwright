@@ -167,6 +167,10 @@ func (c *Checks) RunLine(ctx context.Context, dir, command string) (application.
 // of what it printed before mw stops waiting for it.
 const killGrace = time.Second
 
+// termGrace is how long a cancelled command is given to stop on SIGTERM, and to
+// stop what it started in groups of its own, before its group is killed.
+var termGrace = 10 * time.Second
+
 // runLine reads a command line with the shell in dir, and reports everything it
 // printed, both streams in the order they came. It is the one way this package
 // runs a rig's own command line, for its tests and for what follows a landing
@@ -184,12 +188,27 @@ func runLine(ctx context.Context, shell, command, dir string, nice int, env []st
 	// there forever in a pane nobody is watching.
 	cmd.Env = append(append(os.Environ(), "GIT_TERMINAL_PROMPT=0"), env...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
-	cmd.WaitDelay = killGrace
+	// A cancelled command is asked to stop first: Playwright starts its webServer
+	// in a group of its own and stops it only on its own exit path, so a SIGKILL
+	// leaves that server running (mw-gq6.410). The group is killed once the grace
+	// is up, or as soon as the command has returned, whichever comes first.
+	grace := termGrace
+	var killer *time.Timer
+	cmd.Cancel = func() error {
+		pgid := cmd.Process.Pid
+		err := syscall.Kill(-pgid, syscall.SIGTERM)
+		killer = time.AfterFunc(grace, func() { _ = syscall.Kill(-pgid, syscall.SIGKILL) })
+		return err
+	}
+	cmd.WaitDelay = grace + killGrace
 
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
 	err := cmd.Run()
+	if killer != nil {
+		killer.Stop()
+		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	}
 	return out.String(), err
 }

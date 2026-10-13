@@ -2,9 +2,13 @@ package rig_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 )
@@ -142,5 +146,96 @@ func TestTheGateRunsWithTheWorkerLimitItIsGiven(t *testing.T) {
 		if got := strings.TrimSuffix(checked.Output, "\n"); got != want {
 			t.Errorf("with %d jobs the command saw %q, want %q", jobs, got, want)
 		}
+	}
+}
+
+// pidFrom waits for the command to write the pid of the child it started in a
+// process group of its own, and reads it.
+func pidFrom(t *testing.T, path string) int {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if raw, err := os.ReadFile(path); err == nil {
+			if pid, err := strconv.Atoi(strings.TrimSpace(string(raw))); err == nil {
+				return pid
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("the command never wrote %s", path)
+	return 0
+}
+
+func alive(pid int) bool { return syscall.Kill(pid, 0) == nil }
+
+// TestACancelledCheckLetsItsCommandStopWhatItStarted: a check that is cancelled
+// is told to stop (SIGTERM to its group) before it is killed, so a command like
+// Playwright can stop the webServer it started in a process group of its own
+// (mw-gq6.410). The command here is that Playwright: a child in its own group,
+// which the command stops on TERM. Killed outright, the child would be left running.
+func TestACancelledCheckLetsItsCommandStopWhatItStarted(t *testing.T) {
+	pidfile := filepath.Join(t.TempDir(), "server.pid")
+	command := `setsid sh -c 'echo $$ > "$1"; exec sleep 300' sh "` + pidfile + `" &
+child=$!
+trap 'kill $child; wait $child; exit 0' TERM
+while :; do sleep 0.1; done`
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := rig.NewChecks(rig.WithCommand(command)).Run(ctx, "millwright", t.TempDir())
+		done <- err
+	}()
+
+	pid := pidFrom(t, pidfile)
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the cancelled check never returned")
+	}
+	if alive(pid) {
+		t.Errorf("expected the child in its own process group to have been stopped by the time the check returned, pid %d is still running", pid)
+	}
+}
+
+// TestACancelledCheckThatIgnoresTermIsKilledAfterTheGrace: the TERM is a request;
+// a group that ignores it is killed once the grace is up, and the check returns.
+func TestACancelledCheckThatIgnoresTermIsKilledAfterTheGrace(t *testing.T) {
+	rig.SetTermGraceForTest(t, time.Second)
+	pidfile := filepath.Join(t.TempDir(), "stubborn.pid")
+	command := `trap '' TERM
+echo $$ > "` + pidfile + `"
+while :; do sleep 0.1; done`
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	type result struct {
+		err     error
+		elapsed time.Duration
+	}
+	done := make(chan result, 1)
+	go func() {
+		start := time.Now()
+		_, err := rig.NewChecks(rig.WithCommand(command)).Run(ctx, "millwright", t.TempDir())
+		done <- result{err, time.Since(start)}
+	}()
+
+	pid := pidFrom(t, pidfile)
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	cancelled := time.Now()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the cancelled check never returned")
+	}
+	if took := time.Since(cancelled); took < time.Second || took > 5*time.Second {
+		t.Errorf("expected the check to return after the 1s grace and within a few seconds of it, took %s", took)
+	}
+	if alive(pid) {
+		t.Errorf("expected the group that ignored TERM to be killed, pid %d is still running", pid)
 	}
 }
