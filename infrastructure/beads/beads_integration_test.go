@@ -1474,8 +1474,8 @@ func TestPouringTddFeatureForABugAsksForTheRegressionTestAndTheSweep(t *testing.
 
 // The Tester formula (mw-it6qk5.5), poured by a real bd: its steps follow the
 // landed story's HOW TO CHECK IT at a phone's 390x844, try at least five
-// adversarial moves, re-run each finding on main's head, commit nothing, and
-// write FINDINGS and the Tester fuel.
+// adversarial moves, re-run each finding on main's head, file the ones still
+// there as held stories, commit nothing, and write FINDINGS and the Tester fuel.
 func TestPouringTheTesterFormulaDrivesTheLandedAppAndCommitsNothing(t *testing.T) {
 	t.Parallel()
 	vault := throwawayVault(t)
@@ -1488,8 +1488,8 @@ func TestPouringTheTesterFormulaDrivesTheLandedAppAndCommitsNothing(t *testing.T
 	if err != nil {
 		t.Fatalf("pouring tester: %v", err)
 	}
-	if !molecule.Poured() || len(molecule.Steps) != 6 {
-		t.Fatalf("expected the six steps of tester poured, got %+v", molecule)
+	if !molecule.Poured() || len(molecule.Steps) != 7 {
+		t.Fatalf("expected the seven steps of tester poured, got %+v", molecule)
 	}
 	var all []string
 	for _, step := range molecule.Steps {
@@ -1499,7 +1499,7 @@ func TestPouringTheTesterFormulaDrivesTheLandedAppAndCommitsNothing(t *testing.T
 	for _, phrase := range []string{
 		"HOW TO CHECK IT", "390x844", "at least five adversarial moves", "commits nothing",
 		"'FINDINGS'", "'FINDINGS: none'", "'Tester fuel: <tokens>'", "[bug]", "[taste]", "/tmp/tester-mw-l.9/", "/tmp/tester-mw-l.9/main",
-		"still on main: yes", "still on main: no (<version>)",
+		"still on main: yes", "still on main: no (<version>)", "mw tester file mw-l.9", "held: <id>",
 	} {
 		if !strings.Contains(text, phrase) {
 			t.Errorf("expected the poured tester steps to name %q, got:\n%s", phrase, text)

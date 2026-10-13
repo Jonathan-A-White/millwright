@@ -203,3 +203,54 @@ func TestTheTesterFormulaStillCommitsNothingAndRemovesBothScratchWorktrees(t *te
 		t.Errorf("expected the 'findings' step to say the Tester commits nothing, got %q", steps["findings"])
 	}
 }
+
+func TestTheTesterFormulaFilesEachFindingStillOnMainAsAHeldStoryAndListsTheIds(t *testing.T) {
+	steps := testerFormulaSteps(t)
+	file, ok := steps["file"]
+	if !ok {
+		t.Fatal("expected the tester formula to have a 'file' step")
+	}
+	for _, want := range []string{
+		"mw tester file {{story}}",
+		"still on main: yes",
+		"HELD",
+		"PROVISIONAL (Tester's suggestion; Mayor to confirm)",
+		"duplicate",
+		"VISION.md",
+		"stays the Mayor's",
+		"commits nothing",
+	} {
+		if !strings.Contains(file, want) {
+			t.Errorf("expected the 'file' step to say %q, got %q", want, file)
+		}
+	}
+	findings := steps["findings"]
+	for _, want := range []string{"held: <id>", "duplicate of: <id>", "not filed: <reason>"} {
+		if !strings.Contains(findings, want) {
+			t.Errorf("expected the 'findings' step to carry %q, got %q", want, findings)
+		}
+	}
+}
+
+func TestTheTesterFormulaFilesBetweenMainAndFindings(t *testing.T) {
+	raw, err := os.ReadFile("../formulas/tester.formula.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var formula struct {
+		Steps []struct {
+			ID        string   `json:"id"`
+			DependsOn []string `json:"depends_on"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal(raw, &formula); err != nil {
+		t.Fatal(err)
+	}
+	after := map[string][]string{}
+	for _, s := range formula.Steps {
+		after[s.ID] = s.DependsOn
+	}
+	if !slices.Equal(after["file"], []string{"main"}) || !slices.Equal(after["findings"], []string{"file"}) {
+		t.Errorf("expected file to follow main and findings to follow file, got %v", after)
+	}
+}
