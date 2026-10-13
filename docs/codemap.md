@@ -23,7 +23,7 @@ domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cm
 | Doctor{Check,State,Log,Notes}, VPSProbe | application/doctor.go, application/vpsnginx.go | infra/{doctor,vpsnginx} | - |
 | Network{Probe,Store,Reader} | application/network.go | infra/network | FakeNetwork* |
 | CardLog, ReportSentLog | application/card.go, application/reportsend.go | infra/{cardlog,reportlog} | Fake{CardLog,ReportSentLog} |
-| CloseOutMarks | application/closeout.go | infra/closeout | Fake*Mark* |
+| CloseOutMarks, LiveHeartbeats | application/closeout.go, application/liveheartbeats.go | infra/{closeout,procs} | Fake*Mark*, FakeHeartbeats |
 | Worktrees, BranchChanges | application/worktrees.go | infra/rig/worktree.go | dispatch_test.go |
 | HostLoad, GateLock, Cloud*, BenchmarkBook | application/hostload.go, application/gate.go, application/benchmark.go | infra/{hostload,hostlock/gate.go,cloud,vault/{cloudbook,benchmarks}.go} | Fake{HostLoad,Cloud*,Benchmarks}; features/next_gate_lock.feature |
 | TickLog, Notifier, HomeMoveHost, OldHome, VaultBirth, TrackerBirth | application/{millhandtick,homemove,init}.go | infra/{ticklog,notify/notify,homemove/homemove,vault/birth,beads/init}.go | FakeTickLog |

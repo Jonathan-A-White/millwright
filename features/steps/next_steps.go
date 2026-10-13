@@ -44,6 +44,7 @@ type nextContext struct {
 	runner  *apptest.FakeRunner
 	files   *apptest.FakeVaultFiles
 	mailbox *apptest.FakeMailbox
+	beating *apptest.FakeHeartbeats // the heartbeat processes alive, for features/next_running.feature
 	stamps  *apptest.FakeStampQueue
 
 	// realVault says the vault is a real git clone (mw-gq6.87's own scenarios),
@@ -128,6 +129,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 			runner:  apptest.NewFakeRunner(),
 			files:   &apptest.FakeVaultFiles{},
 			mailbox: apptest.NewFakeMailbox(),
+			beating: apptest.NewFakeHeartbeats(),
 			stamps:  apptest.NewFakeStampQueue(),
 		}
 		return ctx, nil
@@ -256,6 +258,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 
 	registerCheckSteps(ctx, c)
 	registerNextLeaseSteps(ctx, c)
+	registerNextRunningSteps(ctx, c)
 }
 
 // rigKey is the name of the scenario's rig: the one it was checked out as,
@@ -915,6 +918,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 		Files:         filesPort,
 		Mailbox:       c.mailbox,
 		Runner:        c.runner,
+		Heartbeats:    c.beating,
 		Memory:        c.tracker,
 		Sync:          application.Sync{Vault: c.files, Tracker: c.tracker, Host: nextHost},
 		Dispatch: application.Dispatch{

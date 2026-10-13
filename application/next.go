@@ -328,6 +328,11 @@ type Next struct {
 	// real. HeartbeatWait is the heartbeat's own clock and is not this one.
 	RetryWait func(ctx context.Context, d time.Duration) error
 
+	// Heartbeats is how a by-hand close-out learns that the story's session is
+	// still running, which it then refuses to close out (mw-gq6.394). Nil asks
+	// nothing, and every close-out goes on.
+	Heartbeats LiveHeartbeats
+
 	// Events is the home's event log, where a close-out says it could not record
 	// what it meant to (mw-gq6.375). Nil writes none.
 	Events EventLog
@@ -527,6 +532,12 @@ func (c *closeOut) attempt() int {
 // reason the story did not land; the report says what was recorded anyway,
 // because a close-out that lands nothing still writes down what happened.
 func (n Next) Run(ctx context.Context, storyID string) (NextReport, error) {
+	// A story whose session is still at work is not closed out by hand: nothing
+	// is written, so that the session's own close-out finds the story as it left
+	// it (mw-gq6.394).
+	if why := n.stillRunning(ctx, storyID); why != "" {
+		return NextReport{StoryID: storyID, Host: n.Host}, fmt.Errorf("closing out %s: %s", storyID, why)
+	}
 	// The session that held the claim's lease alive has ended by now; the merge
 	// queue and the rig's tests that follow can outlast bd's five-minute TTL, and
 	// a lapsed lease is what mw sweep marks run=stuck (mw-gq6.138).

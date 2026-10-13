@@ -76,3 +76,54 @@ func ownedBy(path string, uid int) bool {
 	}
 	return false
 }
+
+// Heartbeats finds the `mw next --heartbeat <story>` processes of one user, from
+// the cmdline of each numbered directory of Proc: the heartbeat a dispatched
+// session's shell line runs beside its harness and kills when the harness ends
+// (application.LiveHeartbeats).
+type Heartbeats struct {
+	// Proc is the process table; empty is /proc.
+	Proc string
+	// Uid is whose processes are looked at; nil is os.Getuid.
+	Uid func() int
+}
+
+// Beating is the ids of the heartbeat processes of storyID alive now. A process
+// that ended between the listing and the read is not among them, and neither is
+// a zombie, whose cmdline is empty.
+func (h Heartbeats) Beating(_ context.Context, storyID string) ([]int, error) {
+	proc := h.Proc
+	if proc == "" {
+		proc = "/proc"
+	}
+	uid := os.Getuid()
+	if h.Uid != nil {
+		uid = h.Uid()
+	}
+	entries, err := os.ReadDir(proc)
+	if err != nil {
+		return nil, err
+	}
+	var pids []int
+	for _, e := range entries {
+		pid, err := strconv.Atoi(e.Name())
+		if err != nil {
+			continue
+		}
+		cmdline, err := os.ReadFile(filepath.Join(proc, e.Name(), "cmdline"))
+		if err != nil || !heartbeatOf(strings.Split(strings.TrimRight(string(cmdline), "\x00"), "\x00"), storyID) {
+			continue
+		}
+		if ownedBy(filepath.Join(proc, e.Name(), "status"), uid) {
+			pids = append(pids, pid)
+		}
+	}
+	return pids, nil
+}
+
+// heartbeatOf is whether argv is `<program> next --heartbeat <story>`, however
+// the program is named: the command heartbeatSession builds, with the story last.
+func heartbeatOf(argv []string, storyID string) bool {
+	n := len(argv)
+	return n >= 4 && argv[n-3] == "next" && argv[n-2] == "--heartbeat" && argv[n-1] == storyID
+}
