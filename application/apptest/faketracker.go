@@ -1155,6 +1155,24 @@ func (f *FakeTracker) RunningStories(_ context.Context, host string) ([]applicat
 	return running, nil
 }
 
+// RunningElsewhere implements application.WorkTracker.
+func (f *FakeTracker) RunningElsewhere(_ context.Context, host string) ([]application.StoryDetail, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, "RunningElsewhere")
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	var running []application.StoryDetail
+	for _, id := range f.order {
+		s := f.stories[id]
+		if merged := s.detail.Merged().Host; s.detail.Status == StatusInProgress && merged != "" && merged != host && merged != domain.HostAuto {
+			running = append(running, s.detail)
+		}
+	}
+	return running, nil
+}
+
 // BlockedForHost implements application.WorkTracker.
 func (f *FakeTracker) BlockedForHost(_ context.Context, host string) ([]application.StoryDetail, error) {
 	f.mu.Lock()

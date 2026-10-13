@@ -565,6 +565,19 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		report.Running++
 	}
 
+	// What the other hosts hold keeps its files from the stories ready here too,
+	// and counts for nothing else: it is their sessions, their cap (mw-gq6.389).
+	// A tracker that cannot say holds nothing back.
+	if away, err := d.Tracker.RunningElsewhere(ctx, d.Host); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("what the other hosts are running could not be read, so it holds nothing back: %v", err))
+	} else {
+		for _, detail := range away {
+			if !detail.Hitl() {
+				shares.addAway(detail, detail.Merged().Host)
+			}
+		}
+	}
+
 	// The room is read once a pass. A pass that is only looking leaves no word of
 	// it in the log.
 	noRoom, roomRead := ReadRoom(ctx, d.Load, d.Room)

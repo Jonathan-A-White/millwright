@@ -929,6 +929,33 @@ Feature: Dispatching the stories this host is ready to work
     Then one session was started, for "mw-gq6.2"
     And the story "mw-gq6.2" is claimed by this host
 
+  # Files across hosts (mw-gq6.389): the other host's claims keep their files
+  # from the ready stories here too, for a landing there moves the target branch
+  # under a story started here just the same. They add their files to the guard
+  # and nothing else: the cap counts only this host's sessions.
+
+  Scenario: A story that names a file a story running on the other host names waits for it
+    Given a story "mw-gq6.1" of that epic is running on "laptop", expecting to change "src/Reader.tsx"
+    And a ready story "mw-gq6.2" of that epic expecting to change "src/Preface.tsx,src/Reader.tsx"
+    And a ready story "mw-gq6.3" of that epic expecting to change "src/SettingsScreen.tsx"
+    When dispatch runs on "vps" with a cap of 3
+    Then one session was started, for "mw-gq6.3"
+    And the story "mw-gq6.2" is not claimed
+    And dispatch passed over "mw-gq6.2", saying: waiting: shares src/Reader.tsx with mw-gq6.1 (running on laptop)
+
+  Scenario: A story that names no file the other host's story names starts beside it
+    Given a story "mw-gq6.1" of that epic is running on "laptop", expecting to change "src/Reader.tsx"
+    And a ready story "mw-gq6.2" of that epic expecting to change "src/Preface.tsx"
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.2"
+
+  Scenario: The sessions of the other host do not count against this host's cap
+    Given a story "mw-gq6.1" of that epic is running on "laptop", expecting to change "src/Reader.tsx"
+    And a ready story "mw-gq6.2" of that epic expecting to change "src/Preface.tsx"
+    When dispatch runs on "vps" with a cap of 1
+    Then one session was started, for "mw-gq6.2"
+    And dispatch reports 0 of 1 sessions were already running
+
   Scenario: mw status shows a story that shares a running story's file as waiting
     Given a story "mw-gq6.1" of that epic is already running here, expecting to change "src/Reader.tsx"
     And a ready story "mw-gq6.2" of that epic expecting to change "src/Reader.tsx"

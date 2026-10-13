@@ -14,10 +14,16 @@ import (
 type FileShare struct {
 	File string
 	With string
+	// Host is where the story waited for is claimed, when that is not the host
+	// asking (mw-gq6.389); empty for one of its own.
+	Host string
 }
 
 // String is the share as mw dispatch and mw status say it.
 func (s FileShare) String() string {
+	if s.Host != "" {
+		return fmt.Sprintf("waiting: shares %s with %s (running on %s)", s.File, s.With, s.Host)
+	}
 	return fmt.Sprintf("waiting: shares %s with %s", s.File, s.With)
 }
 
@@ -30,6 +36,10 @@ type fileShares struct {
 	rigs    map[string]string
 	remote  string
 	running []StoryDetail
+	// away is the host each story of running that another host claimed was
+	// claimed on: only its files key is read, for its branch is on that host
+	// (mw-gq6.389).
+	away    map[string]string
 	changed map[string][]string
 	// notes are what could not be read, one line each: a branch whose changes
 	// cannot be read holds nothing back.
@@ -38,6 +48,16 @@ type fileShares struct {
 
 // add counts a story as running, as one this pass started is from then on.
 func (f *fileShares) add(detail StoryDetail) {
+	f.running = append(f.running, detail)
+}
+
+// addAway counts a story another host has claimed as running there: it keeps
+// its files from the ready stories here, and counts for nothing else.
+func (f *fileShares) addAway(detail StoryDetail, host string) {
+	if f.away == nil {
+		f.away = map[string]string{}
+	}
+	f.away[detail.Story.ID] = host
 	f.running = append(f.running, detail)
 }
 
@@ -55,7 +75,10 @@ func (f *fileShares) shared(ctx context.Context, ready StoryDetail) (FileShare, 
 			continue
 		}
 		if file, ok := domain.SharedFile(ours, domain.FileList(theirs.Files)); ok {
-			return FileShare{File: file, With: running.Story.ID}, true
+			return FileShare{File: file, With: running.Story.ID, Host: f.away[running.Story.ID]}, true
+		}
+		if _, elsewhere := f.away[running.Story.ID]; elsewhere {
+			continue
 		}
 		if file, ok := domain.SharedFile(ours, f.branchChanged(ctx, running)); ok {
 			return FileShare{File: file, With: running.Story.ID}, true

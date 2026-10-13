@@ -6,8 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 
 	"github.com/cucumber/godog"
@@ -19,6 +21,7 @@ import (
 func (c *dispatchContext) registerFileSteps(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a ready story "([^"]*)" of that epic expecting to change "([^"]*)"$`, c.aReadyStoryExpectingToChange)
 	ctx.Given(`^a story "([^"]*)" of that epic is already running here, expecting to change "([^"]*)"$`, c.aStoryRunningExpectingToChange)
+	ctx.Given(`^a story "([^"]*)" of that epic is running on "([^"]*)", expecting to change "([^"]*)"$`, c.aStoryRunningOnAnotherHostExpectingToChange)
 	ctx.Given(`^a story "([^"]*)" of that epic is already running here, its branch changing "([^"]*)"$`, c.aStoryRunningWithItsBranchChanging)
 	ctx.Given(`^the branch of "([^"]*)" has a commit changing "([^"]*)"$`, c.theBranchHasACommitChanging)
 	ctx.When(`^mw status is read on "([^"]*)"$`, c.mwStatusIsReadOn)
@@ -35,6 +38,20 @@ func (c *dispatchContext) aStoryRunningExpectingToChange(id, files string) error
 		return err
 	}
 	return c.tracker.ClaimStory(context.Background(), id)
+}
+
+// aStoryRunningOnAnotherHostExpectingToChange is a story pathed to host and
+// claimed there, as a session of that host holds it (mw-gq6.389).
+func (c *dispatchContext) aStoryRunningOnAnotherHostExpectingToChange(id, host, files string) error {
+	story := domain.Story{ID: id, Title: "The story " + id}
+	if err := story.Overrides.Set("files", files); err != nil {
+		return err
+	}
+	if err := story.Overrides.Set("host", host); err != nil {
+		return err
+	}
+	c.tracker.AddStory(c.lastEpic, story)
+	return c.tracker.ClaimAs(id, "mw@"+host, dispatchNow.Add(5*time.Minute))
 }
 
 func (c *dispatchContext) aStoryRunningWithItsBranchChanging(id, file string) error {

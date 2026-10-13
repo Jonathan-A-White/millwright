@@ -486,6 +486,12 @@ type WorkTracker interface {
 	// counts. A story claimed on another host is not listed.
 	RunningStories(ctx context.Context, host string) ([]StoryDetail, error)
 
+	// RunningElsewhere lists the stories claimed on any host but the one named
+	// and not yet finished: what the other hosts hold, whose files a dispatcher
+	// keeps from the stories it has ready (mw-gq6.389). They are not what a cap
+	// counts.
+	RunningElsewhere(ctx context.Context, host string) ([]StoryDetail, error)
+
 	// BlockedForHost lists every open, unclaimed story in the tracker that
 	// waits on a dependency not yet finished, on a host — what `mw status`
 	// shows under "blocked" beside what ReadyForHost shows under "ready". Each
