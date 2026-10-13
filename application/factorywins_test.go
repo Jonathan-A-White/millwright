@@ -118,3 +118,75 @@ func TestEveryCheapWinLineFitsTheReportWidth(t *testing.T) {
 		}
 	}
 }
+
+func uncausedBlock(ids ...string) ReportBlock {
+	block := rigBlock("lampas", 1, len(ids), len(ids))
+	block.Quality.Uncaused = ids
+	return block
+}
+
+func r1(wins []CheapWin) CheapWin {
+	for _, w := range wins {
+		if w.Rule == WinCausesUnset {
+			return w
+		}
+	}
+	return CheapWin{}
+}
+
+func TestRuleOneNamesTheUncausedStoriesFiveAndThenPlusMore(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		ids  []string
+		want string
+	}{
+		{"one", []string{"mw-a.1"}, "1 refusal has no cause: mw cause mw-a.1"},
+		{"two", []string{"mw-a.1", "mw-b.2"}, "2 refusals have no cause: mw cause mw-a.1 mw-b.2"},
+		{"five", []string{"a", "b", "c", "d", "e"}, "5 refusals have no cause: mw cause a b c d e"},
+		{"seven", []string{"a", "b", "c", "d", "e", "f", "g"}, "7 refusals have no cause: mw cause a b c d e +2 more"},
+	} {
+		w := r1(CheapWins(WinInputs{Rigs: []ReportBlock{uncausedBlock(c.ids...)}}))
+		if w.Text != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, w.Text, c.want)
+		}
+		if strings.Join(w.IDs, " ") != strings.Join(c.ids, " ") {
+			t.Errorf("%s: ids %v, want all of %v", c.name, w.IDs, c.ids)
+		}
+	}
+}
+
+func TestRuleOneJoinsTheRigsAndSortsTheIds(t *testing.T) {
+	a, b := uncausedBlock("z-1"), uncausedBlock("a-1")
+	b.Name = "other"
+	w := r1(CheapWins(WinInputs{Rigs: []ReportBlock{a, b}}))
+	if want := "2 refusals have no cause: mw cause a-1 z-1"; w.Text != want {
+		t.Errorf("got %q, want %q", w.Text, want)
+	}
+}
+
+func TestSumQualityNamesOnlyRefusedStoriesWithoutAValidCauseOnce(t *testing.T) {
+	q := sumQuality([]reportEntry{
+		{id: "b", refused: true, reason: "x"},
+		{id: "a", refused: true, reason: "x", cause: "nonsense"},
+		{id: "a", refused: true, reason: "x"},
+		{id: "c", refused: true, reason: "x", cause: CauseClasses[0]},
+		{id: "d", landed: true},
+	})
+	if got := strings.Join(q.Uncaused, " "); got != "a b" || q.Causes[CauseUnset] != 3 {
+		t.Errorf("named %q, %d unset", got, q.Causes[CauseUnset])
+	}
+}
+
+func TestAWrappedRuleOneFitsTheReportWidthAndKeepsItsPlusMore(t *testing.T) {
+	ids := []string{"mw-gq6.401", "mw-gq6.402", "mw-gq6.403", "mw-gq6.404", "mw-gq6.405", "mw-gq6.406", "mw-gq6.407"}
+	var b strings.Builder
+	writeCheapWins(&b, CheapWins(WinInputs{Rigs: []ReportBlock{uncausedBlock(ids...)}}))
+	for _, line := range strings.Split(strings.TrimSpace(b.String()), "\n") {
+		if n := len([]rune(line)); n > ReportWidth {
+			t.Errorf("a line is %d columns: %q", n, line)
+		}
+	}
+	if !strings.Contains(b.String(), "\n   +2 more\n") && !strings.HasSuffix(strings.TrimSpace(b.String()), "+2 more") {
+		t.Errorf("the +2 more was lost: %q", b.String())
+	}
+}

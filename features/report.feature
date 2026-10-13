@@ -269,7 +269,29 @@ Feature: mw report
     Given "lampas" landed 8 stories and refused 2 for "tests-fail" in the window
     When mw report runs with "--since 7d"
     Then the report prints the line "CHEAP WINS"
-    And the report prints the line "1. 2 refusals have no cause: mw cause them"
+    And the report prints the line "1. 2 refusals have no cause: mw cause lampas-r1 lampas-r2"
+
+  Scenario: Seven uncaused refusals name five stories and "+2 more", and --json carries all seven
+    Given "lampas" landed 1 stories and refused 7 for "tests-fail" in the window
+    When mw report runs with "--since 7d --json"
+    Then the report JSON has cheap_wins.0.rule as "R1"
+    And the report JSON has cheap_wins.0.text as "7 refusals have no cause: mw cause lampas-r1 lampas-r2 lampas-r3 lampas-r4 lampas-r5 +2 more"
+    And the report JSON has cheap_wins.0.ids.0 as "lampas-r1"
+    And the report JSON has cheap_wins.0.ids.6 as "lampas-r7"
+
+  Scenario: Seven uncaused refusals print the "+2 more" on a wrapped line, none wider than the report
+    Given "lampas" landed 1 stories and refused 7 for "tests-fail" in the window
+    When mw report runs with "--since 7d"
+    Then the report prints the line "1. 7 refusals have no cause: mw cause lampas-r1 lampas-r2"
+    And the report prints the line "lampas-r3 lampas-r4 lampas-r5 +2 more"
+    And no line of the report is wider than 60 columns
+
+  Scenario: A refusal whose story has a cause is never named
+    Given "lampas" landed 1 stories and refused 3 for "tests-fail" in the window
+    And the report story "lampas-r2" has the cause "code"
+    When mw report runs with "--since 7d --json"
+    Then the report JSON has cheap_wins.0.text as "2 refusals have no cause: mw cause lampas-r1 lampas-r3"
+    And the report JSON has cheap_wins.0.ids.1 as "lampas-r3"
 
   Scenario: A reason that is a third of a rig's refusals is a cheap win
     Given "lampas" landed 5 stories and refused 3 for "tests-fail" in the window
@@ -368,7 +390,8 @@ Feature: mw report
       | g-3   | lampas | laptop | rig  | 2026-10-07 | 310  |        |       |
       | g-4   | lampas | laptop | rig  | 2026-10-09 | 542  |        |       |
     When mw report runs with "--since 7d"
-    Then the report prints the line "1. 3 refusals have no cause: mw cause them"
+    Then the report prints the line "1. 3 refusals have no cause: mw cause lampas-r1 lampas-r2"
+    And the report prints the line "lampas-r3"
     And the report prints the line "2. tests-fail is 100% of lampas refusals: gate check first"
     And the report prints the line "3. v-1 used 3 attempts: split it smaller"
     And the report prints no line starting "4."
