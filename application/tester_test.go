@@ -254,3 +254,16 @@ func TestTheTesterFormulaFilesBetweenMainAndFindings(t *testing.T) {
 		t.Errorf("expected file to follow main and findings to follow file, got %v", after)
 	}
 }
+
+// mw-gq6.409: a server a Tester starts is stopped before its scratch worktree
+// is taken away, so that it does not outlive the session and hold its port.
+func TestTheTesterFormulaStopsTheServerBeforeRemovingTheWorktree(t *testing.T) {
+	steps := testerFormulaSteps(t)
+	for _, id := range []string{"serve", "main"} {
+		step := steps[id]
+		stop, remove := strings.Index(step, "Stop the server"), strings.Index(step, "git worktree remove")
+		if stop < 0 || remove < 0 || stop > remove {
+			t.Errorf("expected the %q step to say to stop the server before 'git worktree remove', got %q", id, step)
+		}
+	}
+}

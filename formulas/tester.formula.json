@@ -24,7 +24,7 @@
     {
       "id": "serve",
       "title": "Build and serve the landed commit",
-      "description": "Make a scratch worktree of the rig at the landed commit under /tmp/tester-{{story}}/app (git worktree add --detach), never your own story worktree. Build it as the rig builds (npm ci, then npm run build for Lampas) and serve it (npm run preview for Lampas), noting the URL. Take the scratch worktree away (git worktree remove) when you are done with it. This step commits nothing.",
+      "description": "Make a scratch worktree of the rig at the landed commit under /tmp/tester-{{story}}/app (git worktree add --detach), never your own story worktree. Build it as the rig builds (npm ci, then npm run build for Lampas) and serve it (npm run preview for Lampas), noting the URL. Stop the server you started (kill it, and check its port is free) before you take the scratch worktree away (git worktree remove) when you are done with it; mw stops what is left under /tmp/tester-{{story}}/ when your session ends, but a server left running holds its port until then. This step commits nothing.",
       "type": "task",
       "depends_on": ["understand"]
     },
@@ -45,7 +45,7 @@
     {
       "id": "main",
       "title": "Re-run each finding on the rig's main head",
-      "description": "Write down each finding you have so far against the landed commit (what he would see, the steps, the shot path). Main has usually moved on since the landing, so then make a second scratch worktree of the rig's target branch head under /tmp/tester-{{story}}/main (git worktree add --detach, from the target branch named on {{story}}, never your own story worktree), build and serve it as you did the landed commit, and re-run each finding's steps there. Note for each finding whether it still happens on main, and the version main reports (for Lampas, the version shown in the app). The findings keep describing the landed commit; the mark says whether they survive. Take this scratch worktree away (git worktree remove) when you are done with it, and the landed commit's one too if it is still there. This step commits nothing.",
+      "description": "Write down each finding you have so far against the landed commit (what he would see, the steps, the shot path). Main has usually moved on since the landing, so then make a second scratch worktree of the rig's target branch head under /tmp/tester-{{story}}/main (git worktree add --detach, from the target branch named on {{story}}, never your own story worktree), build and serve it as you did the landed commit, and re-run each finding's steps there. Note for each finding whether it still happens on main, and the version main reports (for Lampas, the version shown in the app). The findings keep describing the landed commit; the mark says whether they survive. Stop the server you started on it before you take this scratch worktree away (git worktree remove) when you are done with it, and the landed commit's one too if it is still there (its server first). This step commits nothing.",
       "type": "task",
       "depends_on": ["adversarial"]
     },
