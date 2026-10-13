@@ -316,6 +316,7 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		Attempts:         b.attempts(),
 		RebaseSends:      b.count(application.RebaseSendsField),
 		RebaseBase:       b.text(application.RebaseBaseField),
+		FilesChanged:     domain.FileList(b.text(application.FilesChangedField)),
 		Cause:            b.text(application.CauseField),
 		CauseWhy:         b.text(application.CauseWhyField),
 		CauseFix:         b.text(application.CauseFixField),

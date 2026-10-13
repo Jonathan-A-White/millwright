@@ -300,6 +300,12 @@ type Next struct {
 	// (springTester). The zero Tester is no trial, and springs nothing.
 	Tester TesterTrial
 
+	// Changes reads the files a story's branch has changed: the heartbeat
+	// records them on the story as it works, and a landing says which of them
+	// the story's files key did not name (mw-gq6.406). A nil Changes does
+	// neither.
+	Changes BranchChanges
+
 	// Seat is whose ledger the line is written in, Host is which host this is,
 	// and Rigs is where each rig is checked out.
 	Seat string
@@ -483,6 +489,10 @@ type closeOut struct {
 	// smokeApps are the apps whose grist the story's own commits changed.
 	smokeApps []string
 
+	// outsideKey are the files the story's own commits changed that its files
+	// key does not name, read before the landing (mw-gq6.406).
+	outsideKey []string
+
 	// crossHeld says the close-out holds its rig's merge slot across hosts, so
 	// the first try at a landing fetches first: the other host may have landed
 	// while this one waited for it.
@@ -609,6 +619,7 @@ func (n Next) Heartbeat(ctx context.Context, storyID string) error {
 		if err := n.Tracker.HeartbeatClaim(ctx, storyID); err != nil {
 			n.print(fmt.Sprintf("mw next: the claim on %s could not be heartbeated: %v\n", storyID, err))
 		}
+		n.recordFilesChanged(ctx, storyID)
 	}
 }
 
@@ -796,6 +807,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	var smokeNotes []string
 	c.smokeApps, smokeNotes = n.Smoke.Wants(ctx, c.path.Rig, c.rigDir, StartPoint(n.remote(), c.target), c.branch)
 	report.Notes = append(report.Notes, smokeNotes...)
+	n.readFilesOutsideTheKey(ctx, c, report)
 
 	// Only one close-out at a time may touch a rig's target branch: the rig's
 	// slot across hosts keeps the other host's out (mw-gq6.359), and inside it
@@ -848,6 +860,7 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	// Before the after-landing command, which may be killed with the session it
 	// runs in: the stamp is queued as soon as the work is known to be landed.
 	n.queueStamp(ctx, c, report, landed)
+	n.sayFilesOutsideTheKey(ctx, c, report)
 	// After the story is recorded as landed, so that a command that is killed
 	// with the session it runs in leaves a story a later run can tell is landed.
 	n.afterLanding(ctx, c, report)

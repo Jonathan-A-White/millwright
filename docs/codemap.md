@@ -65,3 +65,5 @@ domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cm
 cmd/mw/root.go, cmd/mw/version.go
 
 changelog_files: infra/rig/version.go > domain/changelog.go
+
+gate check: scripts/check-codemap.sh

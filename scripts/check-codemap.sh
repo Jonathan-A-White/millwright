@@ -2,7 +2,7 @@
 # Keep docs/codemap.md honest. Reads only files inside this repository, writes
 # nothing, and never touches the vault, the beads database or any other rig.
 #
-# Four checks, each with a deliberately simple rule so the next Builder can
+# Five checks, each with a deliberately simple rule so the next Builder can
 # predict what will trip it:
 #
 # 1. SIZE. docs/codemap.md must be at most 10240 bytes. It is one page read at
@@ -30,12 +30,17 @@
 #        line matching  ^func new<Name>Cmd(
 #    Files under application/apptest/ are skipped: they are fakes, not ports.
 #
-# 4. DUPLICATES. A union merge keeps both versions of a row two branches edited,
-#    so .gitattributes no longer merges the map that way (mw-gq6.317): such a
-#    row is a conflict to resolve. This stays as the net under a bad resolution.
-#    No non-blank line may appear twice, and no two table rows may start with the
-#    same first cell. The separator row (| --- | --- |) of each table is
-#    skipped: every table has one.
+# 4. CONFLICT MARKERS. .gitattributes merges the map by union (mw-gq6.408), so
+#    two branches that each add a row both keep it and nothing conflicts; but a
+#    hand merge or a bad resolution can still leave a marker line behind. No
+#    line may be <<<<<<< (alone or followed by a space and a label), =======
+#    alone, or >>>>>>> (alone or followed by a space and a label).
+#
+# 5. DUPLICATES. A union merge keeps both versions of a row two branches edited
+#    differently, so this is the net under it: no non-blank line may appear
+#    twice, and no two table rows may start with the same first cell. The
+#    separator row (| --- | --- |) of each table is skipped: every table has one.
+#    When it trips after a merge, keep the one row that is right.
 
 set -eu
 
@@ -109,7 +114,15 @@ for file in $(find application cmd/mw -name '*.go' ! -name '*_test.go' | sort); 
 done
 [ "$uncovered" -eq 0 ] || exit 1
 
-# --- 4. no line or table row is repeated ---------------------------------
+# --- 4. no conflict marker -----------------------------------------------
+markers=$(grep -nE '^(<<<<<<<|>>>>>>>)( .*)?$|^=======$' "$MAP" |
+	sed "s|^\([0-9]*\):|check-codemap: $MAP line \1 is a conflict marker: |" || true)
+if [ -n "$markers" ]; then
+	echo "$markers" >&2
+	exit 1
+fi
+
+# --- 5. no line or table row is repeated ---------------------------------
 # Reports every repeat, then fails once.
 dupes=$(awk -v map="$MAP" '
 	/^[[:space:]]*$/ || /^\|[ |:-]*$/ { next }
@@ -136,4 +149,4 @@ if [ -n "$dupes" ]; then
 	exit 1
 fi
 
-echo "OK: $MAP is $size bytes, names only paths that exist, covers every port, use case and cmd/mw command, and repeats no row"
+echo "OK: $MAP is $size bytes, names only paths that exist, covers every port, use case and cmd/mw command, holds no conflict marker, and repeats no row"

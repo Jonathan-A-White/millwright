@@ -8,7 +8,8 @@ import (
 )
 
 // FileShare is a file a ready story names that a running story on its rig
-// names too, or has changed on its branch already: the ready story waits for
+// names too, or has changed on its branch already (or recorded as changed,
+// which any host reads: files_changed, mw-gq6.406): the ready story waits for
 // that one, for each landing moves the target branch under the other and they
 // come back as merge conflicts (mw-gq6.349).
 type FileShare struct {
@@ -123,7 +124,9 @@ func (f *fileShares) shared(ctx context.Context, ready StoryDetail) (FileShare, 
 		if expects && len(domain.FileList(theirs.Files)) == 0 {
 			return FileShare{With: running.Story.ID, Host: f.away[running.Story.ID], Rig: path.Rig, Unkeyed: RunningUnkeyed}, true
 		}
-		if file, ok := domain.SharedFile(ours, domain.FileList(theirs.Files)); ok {
+		// What the story has really changed, as mw next recorded it where any host
+		// reads it, counts with its files key (mw-gq6.406).
+		if file, ok := domain.SharedFile(ours, append(domain.FileList(theirs.Files), running.FilesChanged...)); ok {
 			return FileShare{File: file, With: running.Story.ID, Host: f.away[running.Story.ID]}, true
 		}
 		if _, elsewhere := f.away[running.Story.ID]; elsewhere {
