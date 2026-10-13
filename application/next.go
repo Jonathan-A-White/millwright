@@ -1911,7 +1911,7 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	// stop keeps the claim, because the claim is the evidence.
 	given := false
 	if reason == ReasonOpenSteps {
-		if err := n.Tracker.ReleaseClaim(ctx, c.id); err != nil {
+		if err := n.releaseOnStop(ctx, c.id, report); err != nil {
 			trouble = append(trouble, fmt.Sprintf("the claim on %s could not be given back: %v", c.id, err))
 		} else {
 			given = true
@@ -2360,6 +2360,28 @@ func (n Next) giveBackIfNeverStarted(ctx context.Context, detail StoryDetail, re
 	}
 	report.GaveBack = append(report.GaveBack, id)
 	return true
+}
+
+// releaseOnStop gives back the claim of a story stopped for open steps, and
+// tries again when the give-back met a passing fault of the beads server
+// (mw-gq6.393): on the desktop that fault, a lost connection among them,
+// left a finished story holding its claim. A try that failed and left the
+// story open and unclaimed did land, as a write on a connection that dropped
+// can, and counts as given back rather than as a second failure.
+func (n Next) releaseOnStop(ctx context.Context, id string, report *NextReport) error {
+	return writeRetrying(ctx, n, report, "the give-back of the claim on "+id, func() error {
+		err := n.Tracker.ReleaseClaim(ctx, id)
+		if err == nil {
+			return nil
+		}
+		if _, passing := Faulted(err); passing {
+			return err
+		}
+		if detail, readErr := n.Tracker.ShowStory(ctx, id); readErr == nil && detail.Status == StatusOpen && detail.Assignee == "" {
+			return nil
+		}
+		return err
+	})
 }
 
 // remote is the remote the target branch is read from and pushed to.

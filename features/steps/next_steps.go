@@ -187,6 +187,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerNextMergeFixSteps(ctx, c)
 	registerNextSpecsSteps(ctx, c)
 	registerNextReattemptSteps(ctx, c)
+	registerNextGiveBackSteps(ctx, c)
 	registerNextStampSteps(ctx, c)
 	registerNextVersionSteps(ctx, c)
 	registerNextChangelogSteps(ctx, c)

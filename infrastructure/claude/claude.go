@@ -354,6 +354,15 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 	tmp := l.ResultFile + ".tmp"
 	line := shellLine(argv) + " > " + shellQuote(tmp) + "; mv " + shellQuote(tmp) + " " + shellQuote(l.ResultFile)
 
+	// The session's bd retries a write that meets a passing fault of the beads
+	// server (mw-gq6.393): a script named bd, in a directory of its own put ahead
+	// of the real bd on the PATH of the harness alone, runs `mw bd`, and the real
+	// bd is named to it by MW_BD_REAL. A host with no bd, or no place to put the
+	// script, leaves the session the PATH it had.
+	if len(l.BdRetry) > 0 {
+		line = bdShimSetup(l.BdRetry) + bdShimEnv + line + "; " + bdShimCleanup
+	}
+
 	// Heartbeat runs beside the harness, not after it: started in the
 	// background before the harness's own command line and killed the moment
 	// that line finishes, so the lease it renews is never left running once
@@ -550,3 +559,20 @@ func (h *Harness) withEnvFile(argv []string) []string {
 		`if [ -n "$h" ]; then export BEADS_DOLT_SERVER_HOST="$h"; fi; exec "$@"`
 	return append([]string{h.shell, "-c", script, "sh", h.envFile, h.serverHost}, argv...)
 }
+
+// bdShimSetup is the shell that makes the directory holding the script that
+// stands in for bd, and names the real bd, leaving SHIM and REAL empty when
+// either cannot be had. The script is two fixed lines, written by printf from
+// words shellQuote has quoted, so nothing in them is read by a shell twice.
+func bdShimSetup(retry []string) string {
+	script := shellQuote("#!/bin/sh") + " " + shellQuote("exec "+shellLine(retry)+` "$@"`)
+	return `REAL=$(command -v bd); SHIM=$(mktemp -d); ` +
+		`if [ -z "$REAL" ] || [ -z "$SHIM" ] || ! { printf '%s\n' ` + script + ` > "$SHIM/bd" && chmod +x "$SHIM/bd"; }; then SHIM=; REAL=; fi; `
+}
+
+// bdShimEnv is what is put in front of the harness's command to give it the
+// script: assignments that last for that one command.
+const bdShimEnv = `MW_BD_REAL="$REAL" PATH="${SHIM:+$SHIM:}$PATH" `
+
+// bdShimCleanup takes the script's directory away once the session is over.
+const bdShimCleanup = `if [ -n "$SHIM" ]; then rm -rf "$SHIM"; fi`

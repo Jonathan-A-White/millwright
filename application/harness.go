@@ -38,6 +38,13 @@ type Launch struct {
 	// — nothing else is running once the harness has died to start it any
 	// other way. An empty Heartbeat starts nothing beside the harness.
 	Heartbeat []string
+
+	// BdRetry is the command a bd run by the session becomes: this same mw,
+	// `mw bd`, which runs the real bd again when it meets a passing fault of the
+	// beads server (mw-gq6.393). The harness puts a bd that runs it ahead of the
+	// real one on the PATH of the session alone — not of the Heartbeat or After
+	// chained beside it. An empty BdRetry leaves the session the real bd.
+	BdRetry []string
 }
 
 // Validate reports the first reason a launch could not be turned into a
