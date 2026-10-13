@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 )
 
 // Check is what a Builder runs on its own branch before its session ends: the
@@ -38,6 +39,17 @@ type Check struct {
 	// Slot is the merge slot of the rig, taken around the rig's tests so that
 	// one gate per rig runs at a time on this host. Nil takes no slot.
 	Slot MergeSlot
+
+	// Load is how busy this host is, read around the rig's tests as a
+	// close-out reads it (mw-gq6.379): the check waits, up to LoadBound, for a
+	// busy host to calm before the tests, and runs them once more when they fail
+	// while it was busy. A nil Load, or a load that cannot be read, does
+	// neither. LoadPoll, LoadBound and LoadWait are Next's own, with the same
+	// defaults.
+	Load      HostLoad
+	LoadPoll  time.Duration
+	LoadBound time.Duration
+	LoadWait  func(ctx context.Context, d time.Duration) error
 
 	// Host is which host this is, and Rigs is where each rig is checked out.
 	Host string
@@ -157,6 +169,12 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		Checks:     checks,
 		SpecChecks: specs,
 		Remote:     k.Remote,
+		Load:       k.Load,
+		LoadPoll:   k.LoadPoll,
+		LoadBound:  k.LoadBound,
+		LoadWait:   k.LoadWait,
+		Host:       k.Host,
+		Out:        k.Out,
 	}.refusals(ctx, c, &read, true)
 	report.Commits, report.Notes = read.Commits, read.Notes
 

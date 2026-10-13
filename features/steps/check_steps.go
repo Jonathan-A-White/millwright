@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 
 	"github.com/cucumber/godog"
@@ -28,6 +29,9 @@ func registerCheckSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the story "([^"]*)" has already been closed$`, c.theStoryWasAlreadyClosed)
 	ctx.Given(`^another close-out is holding the merge slot of the rig$`, c.anotherCloseOutHoldsTheSlot)
 
+	ctx.Given(`^the host's load reads in turn: (.+)$`, c.theHostsLoadReads)
+	ctx.Given(`^the rig's tests fail the first time and pass the second, saying "([^"]*)"$`, c.theRigsTestsFailOncePassNext)
+
 	ctx.When(`^a session checks "([^"]*)"$`, c.aSessionChecks)
 	ctx.When(`^a session checks "([^"]*)" while the other close-out finishes after (\d+) milliseconds$`, c.aSessionChecksWhileTheSlotIsHeld)
 	ctx.When(`^a session checks "([^"]*)" without the merge slot$`, c.aSessionChecksWithoutTheSlot)
@@ -41,6 +45,7 @@ func registerCheckSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^the check says the branch would be landed$`, c.theCheckSaysItWouldLand)
 	ctx.Then(`^the check prints: (.+)$`, c.theCheckPrints)
 	ctx.Then(`^the check does not print: (.+)$`, c.theCheckDoesNotPrint)
+	ctx.Then(`^the check prints "([^"]*)" (\d+) time\(s\)$`, c.theCheckPrintsTimes)
 	ctx.Then(`^the check names the signed commit$`, c.theCheckNamesTheSignedCommit)
 	ctx.Then(`^the check wrote nothing to the tracker, the ledger, the vault or git$`, c.theCheckWroteNothing)
 }
@@ -207,6 +212,12 @@ func (c *nextContext) checkWith(id string, slots *rig.Slots) error {
 	if slots != nil {
 		slot = slots
 	}
+	// A host's load is only read when a scenario says what it reads, and the
+	// waits for it to calm take no time.
+	var load application.HostLoad
+	if c.checkLoad != nil {
+		load = c.checkLoad
+	}
 	c.checked, c.err = application.Check{
 		Tracker:    c.tracker,
 		Slot:       slot,
@@ -216,6 +227,8 @@ func (c *nextContext) checkWith(id string, slots *rig.Slots) error {
 		Host:       nextHost,
 		Rigs:       map[string]string{c.rigKey(): c.rig},
 		Out:        &c.printed,
+		Load:       load,
+		LoadWait:   func(context.Context, time.Duration) error { return nil },
 	}.Run(context.Background(), id)
 	return nil
 }
@@ -317,6 +330,38 @@ func (c *nextContext) theCheckWroteNothing() error {
 		case "fetch", "merge", "push", "commit", "worktree", "branch", "reset", "checkout", "add", "update-ref", "tag", "rebase", "pull":
 			return fmt.Errorf("expected git to be asked for nothing that writes, but it was asked: git %s", line)
 		}
+	}
+	return nil
+}
+
+// theHostsLoadReads says what the host's load reads, one reading at a time and
+// the last again after: "calm" is load 3 of 20 cores and "busy" is 39 of 20.
+func (c *nextContext) theHostsLoadReads(words string) error {
+	var readings []application.LoadReading
+	for _, word := range strings.Split(words, ",") {
+		switch strings.TrimSpace(word) {
+		case "calm":
+			readings = append(readings, application.LoadReading{Load: 3, Cores: 20})
+		case "busy":
+			readings = append(readings, application.LoadReading{Load: 39, Cores: 20})
+		default:
+			return fmt.Errorf("a reading is calm or busy, not %q", word)
+		}
+	}
+	c.checkLoad = &apptest.FakeHostLoad{Readings: readings}
+	return nil
+}
+
+// theRigsTestsFailOncePassNext is the rig's tests as a loaded host runs them:
+// the first run, which is the first line its log gets, fails.
+func (c *nextContext) theRigsTestsFailOncePassNext(saying string) error {
+	c.checkCommand = fmt.Sprintf("printf 'run\\n' >> %s; if [ \"$(wc -l < %s)\" -le 1 ]; then echo '%s'; exit 1; fi", c.checkLog, c.checkLog, saying)
+	return nil
+}
+
+func (c *nextContext) theCheckPrintsTimes(words string, times int) error {
+	if said, got := c.printed.String(), strings.Count(c.printed.String(), words); got != times {
+		return fmt.Errorf("expected the check to print %q %d time(s), it printed it %d time(s):\n%s", words, times, got, said)
 	}
 	return nil
 }

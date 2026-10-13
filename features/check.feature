@@ -123,3 +123,34 @@ Feature: Checking a branch before its session ends
     When a session checks "mw-gq6.1"
     Then the check passes
     And the changed-specs command was not run
+
+  Scenario: Tests that fail on a busy host are run once more when it calms, and pass the check
+    Given the host's load reads in turn: calm, busy, calm
+    And the rig's tests fail the first time and pass the second, saying "Test Files 3 failed"
+    When a session checks "mw-gq6.1"
+    Then the check passes
+    And the rig's tests were run 2 times
+    And the check prints: ran twice
+    And the check prints: the first run failed while vps was at load 39.0 of 20 cores
+    And the check prints: the second run passed
+    And the check wrote nothing to the tracker, the ledger, the vault or git
+
+  Scenario: Tests that fail on a calm host fail the check at once, with no second run
+    Given the host's load reads in turn: calm
+    And the rig's tests fail, saying "undefined: Ledger"
+    When a session checks "mw-gq6.1"
+    Then the check fails
+    And the rig's tests were run 1 times
+    And the check prints: the rig's tests fail in the worktree
+    And the check prints: undefined: Ledger
+    And the check does not print: ran twice
+
+  Scenario: Tests that fail on a busy host and again once it calms fail the check, reported once
+    Given the host's load reads in turn: calm, busy, calm
+    And the rig's tests fail, saying "undefined: Ledger"
+    When a session checks "mw-gq6.1"
+    Then the check fails
+    And the rig's tests were run 2 times
+    And the check prints: ran twice
+    And the check prints: the second run failed
+    And the check prints "the rig's tests fail in the worktree" 1 time(s)

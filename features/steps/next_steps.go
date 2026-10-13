@@ -59,9 +59,10 @@ type nextContext struct {
 	gitLog       string
 	checkCommand string // what this scenario's "rig tests" are
 	checkLog     string
-	specCommands map[string]string // the [changed_specs] table this scenario's host has
-	racer        string            // the other host, landing work mid-push
-	refusal      []string          // what the origin's hook says when it refuses a push
+	checkLoad    *apptest.FakeHostLoad // the host's load as mw check reads it; nil reads none
+	specCommands map[string]string     // the [changed_specs] table this scenario's host has
+	racer        string                // the other host, landing work mid-push
+	refusal      []string              // what the origin's hook says when it refuses a push
 
 	lastEpic     string
 	ledgerBefore []string

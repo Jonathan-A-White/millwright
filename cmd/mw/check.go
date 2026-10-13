@@ -5,6 +5,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
@@ -28,7 +29,11 @@ func newCheckCmd() *cobra.Command {
 			"check is read-only: it writes no comment, run state or ledger line, commits nothing in the vault,\n" +
 			"and does not fetch, merge or push. The one thing it takes is the rig's merge slot, around the\n" +
 			"rig's tests, so that a close-out's tests and a check's on one rig do not run at once and starve\n" +
-			"each other: it waits for the slot, saying who holds it, and --no-slot skips the wait. It does not read the session's result, which is not written\n" +
+			"each other: it waits for the slot, saying who holds it, and --no-slot skips the wait.\n\n" +
+			"check treats a busy host as the close-out does (mw-gq6.228): it waits, up to the close-out's bound,\n" +
+			"for the host to calm before the tests, and runs tests that failed while it was busy once more when\n" +
+			"it has calmed, reporting only a second failure and saying it ran twice.\n\n" +
+			"It does not read the session's result, which is not written\n" +
 			"until the session ends, and it does not try the merge, so a branch that passes here can still be\n" +
 			"stopped by a conflict or by the other host's work. The commits are counted against the target\n" +
 			"branch as the rig last saw the remote's.\n\n" +
@@ -79,6 +84,7 @@ func newCheckCmd() *cobra.Command {
 				Checks:     checks,
 				SpecChecks: checks,
 				Slot:       slot,
+				Load:       hostload.Proc{},
 				Host:       host,
 				Rigs:       rigs,
 				Out:        cmd.OutOrStdout(),
