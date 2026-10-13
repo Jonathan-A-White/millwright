@@ -53,7 +53,7 @@ func (c *nextContext) crossSlot() application.CrossSlot {
 }
 
 func quickCrossSlot(notes application.SlotNotes, host string) application.CrossSlot {
-	return application.CrossSlot{Notes: notes, Host: host, TTL: time.Minute, Poll: 10 * time.Millisecond, Settle: 20 * time.Millisecond}
+	return application.CrossSlot{Notes: notes, Host: host, TTL: time.Minute, Poll: 10 * time.Millisecond, Settle: 20 * time.Millisecond, Retry: 50 * time.Millisecond}
 }
 
 // crossFor is the scenario's fixture, made the first time a step asks.

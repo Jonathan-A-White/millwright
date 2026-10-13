@@ -21,12 +21,14 @@ func CrossSlotKey(rig string) string { return "merge-slot." + rig }
 // CrossSlotSettle is how long a close-out that wrote its lease waits before it
 // reads it back, so that the other host, writing its own in the same moment,
 // has written by then; CrossSlotCap is how long a close-out waits for it in all
-// before it goes ahead without it.
+// before it goes ahead without it; CrossSlotRetry is how long a read or write of
+// the slot that fails is tried again, on the poll, before the slot is skipped.
 const (
 	CrossSlotTTL    = 10 * time.Minute
 	CrossSlotPoll   = 15 * time.Second
 	CrossSlotSettle = 5 * time.Second
 	CrossSlotCap    = 3 * time.Hour
+	CrossSlotRetry  = 2 * time.Minute
 )
 
 // CrossSlot is a rig's merge slot across hosts (mw-gq6.359): a lease, kept on
@@ -45,8 +47,10 @@ const (
 // hosts can still, rarely, both read it back as their own; the remote refusing
 // the second push settles that, as it settled every race before. A lease past
 // its expiry is a holder that went away and is taken over, and said so. A slot
-// that cannot be read or written is skipped, and said so: the landing goes
-// ahead under this host's slot alone, as it did before there was one.
+// that cannot be read or written is tried again on the poll, since the server's
+// reach drops for seconds under load; one that still cannot be after Retry is
+// skipped, and said so with how many tries failed over how long: the landing
+// goes ahead under this host's slot alone, as it did before there was one.
 //
 // The zero CrossSlot, or one with no Notes, takes nothing and says nothing.
 type CrossSlot struct {
@@ -56,12 +60,13 @@ type CrossSlot struct {
 	// can say whose landing it waited for.
 	Host string
 
-	// TTL, Poll, Settle and Cap are CrossSlotTTL, CrossSlotPoll,
-	// CrossSlotSettle and CrossSlotCap when zero.
+	// TTL, Poll, Settle, Cap and Retry are CrossSlotTTL, CrossSlotPoll,
+	// CrossSlotSettle, CrossSlotCap and CrossSlotRetry when zero.
 	TTL    time.Duration
 	Poll   time.Duration
 	Settle time.Duration
 	Cap    time.Duration
+	Retry  time.Duration
 
 	// Now and Wait are the clock: the real one unless a test moves time
 	// without truly waiting for it. Wait returns early with the context's
@@ -134,9 +139,9 @@ func (s CrossSlot) Take(ctx context.Context, rig, holder string) (*CrossHolding,
 	}
 
 	for {
-		note, err := s.Notes.Note(ctx, key)
-		if err != nil {
-			return nil, waited([]string{s.skipped(rig, err)})
+		var note string
+		if failed := s.retried(ctx, rig, func() (err error) { note, err = s.Notes.Note(ctx, key); return }); failed != "" {
+			return nil, waited([]string{failed})
 		}
 		now := s.now()
 		var took []string
@@ -162,16 +167,16 @@ func (s CrossSlot) Take(ctx context.Context, rig, holder string) (*CrossHolding,
 		}
 
 		mine := CrossSlotLease{Holder: holder, Host: s.Host, Token: newSlotToken(), Taken: now, Expires: now.Add(s.ttl())}
-		if err := s.Notes.SetNote(ctx, key, mine.Note()); err != nil {
-			return nil, waited([]string{s.skipped(rig, err)})
+		if failed := s.retried(ctx, rig, func() error { return s.Notes.SetNote(ctx, key, mine.Note()) }); failed != "" {
+			return nil, waited([]string{failed})
 		}
 		if err := s.wait(ctx, s.settle()); err != nil {
 			return nil, waited([]string{fmt.Sprintf("the cross-host merge slot of %s was not taken: %v; the lease written for it runs out by itself at %s",
 				rig, err, mine.Expires.UTC().Format(time.RFC3339))})
 		}
-		back, err := s.Notes.Note(ctx, key)
-		if err != nil {
-			return nil, waited([]string{s.skipped(rig, err) + fmt.Sprintf("; the lease written for it runs out by itself at %s", mine.Expires.UTC().Format(time.RFC3339))})
+		var back string
+		if failed := s.retried(ctx, rig, func() (err error) { back, err = s.Notes.Note(ctx, key); return }); failed != "" {
+			return nil, waited([]string{failed + fmt.Sprintf("; the lease written for it runs out by itself at %s", mine.Expires.UTC().Format(time.RFC3339))})
 		}
 		if read, ok := ReadCrossSlotLease(back); !ok || read.Token != mine.Token {
 			// The other host wrote its own in the same moment, after this one:
@@ -182,10 +187,35 @@ func (s CrossSlot) Take(ctx context.Context, rig, holder string) (*CrossHolding,
 	}
 }
 
-// skipped is what the report says of a slot that could not be read or written.
-func (s CrossSlot) skipped(rig string, err error) string {
-	return fmt.Sprintf("the cross-host merge slot of %s was skipped, so this landing went ahead under this host's merge slot alone: the beads server could not be reached: %v",
-		rig, err)
+// retried runs a read or write of the slot, and while it fails tries it again
+// on the poll until the retry window has passed. It returns what the report
+// says when the slot has to be skipped, or when the wait between tries is cut
+// short; empty when a try succeeded.
+func (s CrossSlot) retried(ctx context.Context, rig string, try func() error) string {
+	var first time.Time
+	for tries := 1; ; tries++ {
+		err := try()
+		if err == nil {
+			return ""
+		}
+		now := s.now()
+		if tries == 1 {
+			first = now
+		}
+		if long := now.Sub(first); long >= s.retry() {
+			return s.skipped(rig, err, tries, long)
+		}
+		if werr := s.wait(ctx, s.poll()); werr != nil {
+			return fmt.Sprintf("the cross-host merge slot of %s was not taken: waiting to try the beads server again after %d failed tries (the last: %v): %v", rig, tries, err, werr)
+		}
+	}
+}
+
+// skipped is what the report says of a slot that could not be read or written
+// in tries goes over long.
+func (s CrossSlot) skipped(rig string, err error, tries int, long time.Duration) string {
+	return fmt.Sprintf("the cross-host merge slot of %s was skipped, so this landing went ahead under this host's merge slot alone: the beads server could not be reached: %v (%d tries failed over %s)",
+		rig, err, tries, SlotAge(long))
 }
 
 // hold starts renewing a lease just taken, every third of its life, until the
@@ -340,6 +370,7 @@ func (s CrossSlot) ttl() time.Duration    { return orDefault(s.TTL, CrossSlotTTL
 func (s CrossSlot) poll() time.Duration   { return orDefault(s.Poll, CrossSlotPoll) }
 func (s CrossSlot) settle() time.Duration { return orDefault(s.Settle, CrossSlotSettle) }
 func (s CrossSlot) cap() time.Duration    { return orDefault(s.Cap, CrossSlotCap) }
+func (s CrossSlot) retry() time.Duration  { return orDefault(s.Retry, CrossSlotRetry) }
 
 func orDefault(d, fallback time.Duration) time.Duration {
 	if d <= 0 {

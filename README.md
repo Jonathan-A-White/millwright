@@ -920,9 +920,11 @@ lampas`); then it fetches before it merges. Before the slot existed, a host whos
 merged-result tests took longer than the other host's landings never landed:
 every push was refused, and the story stopped push-lost (mw-gq6.359). A lease
 past its expiry is a holder that went away: it is taken over, and the report
-names the holder and its age. A beads server that cannot be reached skips the
-slot, saying so on the report, and the landing goes ahead under this host's slot
-alone. Whatever race still gets past both is settled where it always was, by the
+names the holder and its age. A read or write of the slot that fails is tried
+again every poll for two minutes, since the server's reach drops for seconds
+under load (mw-gq6.391); a beads server that still cannot be reached then skips
+the slot, saying on the report how many tries failed over how long, and the
+landing goes ahead under this host's slot alone. Whatever race still gets past both is settled where it always was, by the
 remote refusing the second push.
 
 The ledger line is one row of the seat's table: the date, the story, the
