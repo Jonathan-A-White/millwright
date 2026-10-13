@@ -109,7 +109,7 @@ func newGristSmokeCmd() *cobra.Command {
 			"default ~/.config/mw/grist-test.key), with the photos beside it, and waits for the answer.\n" +
 			"An example is a request (with its schemaVersion beside it, or in it), optional photo file names, and expect: for\n" +
 			"each field of the answer (dotted, items.0.name) a value it equals or a check of equals,\n" +
-			"is_null, one_of, contains, matches (a pattern), present and all (a list of such checks, each of\n" +
+			"is_null, one_of, between ([low, high]: a number within), contains, matches (a pattern), present and all (a list of such checks, each of\n" +
 			"which must hold). It passes when the grist is\n" +
 			"answered, the answer fits the grind's answer schema and meets every expect; a failure names\n" +
 			"the example, the field, what was wanted and what came. A kind with no example is a warning.\n" +

@@ -31,6 +31,7 @@ import (
 // Each key of expect is a path into the answer, object keys and array
 // positions joined by dots ("items.0.name"). Its check is one of: a bare value
 // (the field equals it), or an object holding any of equals, is_null, one_of,
+// between (a list of low and high: a number within them, ends included),
 // contains, matches (a regular expression), present (true or false) and all,
 // every one of which must hold. All is a list of checks of the same kinds,
 // each of which must hold too, for a field that must show several things
@@ -78,6 +79,7 @@ type gristCheck struct {
 	equals   *any
 	isNull   *bool
 	oneOf    []any
+	between  *[2]float64
 	contains *any
 	matches  *regexp.Regexp
 	present  *bool
@@ -85,7 +87,7 @@ type gristCheck struct {
 }
 
 // gristCheckKeys are the keys a check object may hold.
-var gristCheckKeys = []string{"equals", "is_null", "one_of", "contains", "matches", "present", "all"}
+var gristCheckKeys = []string{"equals", "is_null", "one_of", "between", "contains", "matches", "present", "all"}
 
 func parseGristCheck(raw json.RawMessage) (gristCheck, error) {
 	trimmed := strings.TrimSpace(string(raw))
@@ -127,6 +129,12 @@ func parseGristCheck(raw json.RawMessage) (gristCheck, error) {
 			if err := json.Unmarshal(value, &check.oneOf); err != nil || len(check.oneOf) == 0 {
 				return check, fmt.Errorf("one_of is a list of values")
 			}
+		case "between":
+			var bounds []float64
+			if err := json.Unmarshal(value, &bounds); err != nil || len(bounds) != 2 || bounds[0] > bounds[1] {
+				return check, fmt.Errorf("between is a list of two numbers, low then high")
+			}
+			check.between = &[2]float64{bounds[0], bounds[1]}
 		case "contains":
 			var want any
 			if err := json.Unmarshal(value, &want); err != nil {
@@ -256,6 +264,12 @@ func (c gristCheck) failures(field string, got any, found bool) []ExpectFailure 
 		}
 		if !hit {
 			fail("one of " + gristShow(c.oneOf))
+		}
+	}
+	if c.between != nil {
+		number, isNumber := got.(float64)
+		if !found || !isNumber || number < c.between[0] || number > c.between[1] {
+			fail(fmt.Sprintf("a number between %v and %v", c.between[0], c.between[1]))
 		}
 	}
 	if c.contains != nil && !(found && gristContains(got, *c.contains)) {
