@@ -43,11 +43,18 @@
       "depends_on": ["check"]
     },
     {
-      "id": "findings",
-      "title": "Write FINDINGS on the landed story",
-      "description": "Comment on the LANDED story (its id is on {{story}}'s 'Landed story:' line), not on {{story}}. Start the comment with a line 'FINDINGS', then one item per finding, each starting '- [bug]' (it does not do what HOW TO CHECK IT says, or breaks) or '- [taste]' (it works, and he would not like it), each saying what he would see, the steps that show it, and the shot path. With nothing found, write the single line 'FINDINGS: none'. End the comment with a line 'Tester fuel: <tokens>', the tokens this session spent as far as you can tell, else 'Tester fuel: unknown'. A Tester commits nothing: leave your branch with no commits, and run mw check {{story}} before you stop.",
+      "id": "main",
+      "title": "Re-run each finding on the rig's main head",
+      "description": "Write down each finding you have so far against the landed commit (what he would see, the steps, the shot path). Main has usually moved on since the landing, so then make a second scratch worktree of the rig's target branch head under /tmp/tester-{{story}}/main (git worktree add --detach, from the target branch named on {{story}}, never your own story worktree), build and serve it as you did the landed commit, and re-run each finding's steps there. Note for each finding whether it still happens on main, and the version main reports (for Lampas, the version shown in the app). The findings keep describing the landed commit; the mark says whether they survive. Take this scratch worktree away (git worktree remove) when you are done with it, and the landed commit's one too if it is still there. This step commits nothing.",
       "type": "task",
       "depends_on": ["adversarial"]
+    },
+    {
+      "id": "findings",
+      "title": "Write FINDINGS on the landed story",
+      "description": "Comment on the LANDED story (its id is on {{story}}'s 'Landed story:' line), not on {{story}}. Start the comment with a line 'FINDINGS', then one item per finding, each starting '- [bug]' (it does not do what HOW TO CHECK IT says, or breaks) or '- [taste]' (it works, and he would not like it), each saying what he would see, the steps that show it, and the shot path, and ending with the mark from the 'main' step: 'still on main: yes' or 'still on main: no (<version>)', the version main reports. With nothing found, write the single line 'FINDINGS: none'. End the comment with a line 'Tester fuel: <tokens>', the tokens this session spent as far as you can tell, else 'Tester fuel: unknown'. A Tester commits nothing: leave your branch with no commits, and run mw check {{story}} before you stop.",
+      "type": "task",
+      "depends_on": ["main"]
     }
   ]
 }
