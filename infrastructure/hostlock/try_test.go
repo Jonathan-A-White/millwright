@@ -75,3 +75,33 @@ func TestGrindSlotsAreLocksOfTheirOwn(t *testing.T) {
 		t.Fatalf("expected a concurrency below 1 to leave one slot, got %d", got)
 	}
 }
+
+// mw-9rp4hu.1: the dispatch lock's file differs for two vault paths and is
+// stable for one, so that a user serving two vaults can dispatch for both.
+func TestDispatchFileForIsStablePerVaultAndDiffersBetweenVaults(t *testing.T) {
+	a, b := "/home/luke/vault-a", "/home/luke/vault-b"
+	if hostlock.DispatchFileFor(a) != hostlock.DispatchFileFor(a) || hostlock.DispatchFileFor(a) != hostlock.DispatchFileFor(a+"/") {
+		t.Errorf("expected one vault to name one dispatch lock, got %q and %q", hostlock.DispatchFileFor(a), hostlock.DispatchFileFor(a+"/"))
+	}
+	if hostlock.DispatchFileFor(a) == hostlock.DispatchFileFor(b) {
+		t.Errorf("expected two vaults to name two dispatch locks, both are %q", hostlock.DispatchFileFor(a))
+	}
+	if hostlock.DispatchFileFor(a) == hostlock.SyncFileFor(a) {
+		t.Errorf("expected the dispatch and sync locks of one vault to be two files")
+	}
+
+	ctx, dir := context.Background(), t.TempDir()
+	first, taken, err := hostlock.NewTry(dir, hostlock.DispatchFileFor(a)).TryTake(ctx)
+	if err != nil || !taken {
+		t.Fatalf("expected vault a's dispatch lock taken, got %v %v", taken, err)
+	}
+	defer first()
+	if other, taken, _ := hostlock.NewTry(dir, hostlock.DispatchFileFor(b)).TryTake(ctx); !taken {
+		t.Error("expected vault b's dispatch lock free while a's is held")
+	} else {
+		other()
+	}
+	if _, taken, _ := hostlock.NewTry(dir, hostlock.DispatchFileFor(a)).TryTake(ctx); taken {
+		t.Error("expected vault a's dispatch lock held")
+	}
+}

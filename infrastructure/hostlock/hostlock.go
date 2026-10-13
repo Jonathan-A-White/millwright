@@ -6,6 +6,8 @@ package hostlock
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -16,8 +18,23 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 )
 
-// File is the lock's name inside its directory.
+// File is the lock's name inside its directory, when nothing says otherwise.
 const File = "sync.lock"
+
+// VaultKey is a short, stable name for a vault path: a hash of its absolute,
+// cleaned form, so that one vault written two ways names one key and two vaults
+// name two. A user serving two vaults on one host keeps a lock for each
+// (mw-9rp4hu.1).
+func VaultKey(vault string) string {
+	if abs, err := filepath.Abs(vault); err == nil {
+		vault = abs
+	}
+	sum := sha256.Sum256([]byte(filepath.Clean(vault)))
+	return hex.EncodeToString(sum[:6])
+}
+
+// SyncFileFor is the name of the sync lock of vault inside its directory.
+func SyncFileFor(vault string) string { return "sync-" + VaultKey(vault) + ".lock" }
 
 // DefaultWait is how long Take waits for the lock before giving up, when
 // nothing says otherwise: long enough for an ordinary overlap — a tick and a
@@ -32,6 +49,7 @@ const DefaultPoll = 200 * time.Millisecond
 // Lock is this host's sync lock, kept as a file in Dir.
 type Lock struct {
 	Dir  string
+	Name string
 	wait time.Duration
 	poll time.Duration
 }
@@ -42,6 +60,9 @@ var _ application.HostLock = (*Lock)(nil)
 // Option is a setting of a Lock, given to New.
 type Option func(*Lock)
 
+// WithFile sets the lock's name inside its directory; File when not set.
+func WithFile(name string) Option { return func(l *Lock) { l.Name = name } }
+
 // WithWait sets how long Take waits for the lock before giving up.
 func WithWait(wait time.Duration) Option { return func(l *Lock) { l.wait = wait } }
 
@@ -50,7 +71,7 @@ func WithPoll(poll time.Duration) Option { return func(l *Lock) { l.poll = poll 
 
 // New is this host's sync lock, kept in dir.
 func New(dir string, opts ...Option) *Lock {
-	l := &Lock{Dir: dir, wait: DefaultWait, poll: DefaultPoll}
+	l := &Lock{Dir: dir, Name: File, wait: DefaultWait, poll: DefaultPoll}
 	for _, opt := range opts {
 		opt(l)
 	}
@@ -58,7 +79,7 @@ func New(dir string, opts ...Option) *Lock {
 }
 
 // path is where the lock file lives.
-func (l *Lock) path() string { return filepath.Join(l.Dir, File) }
+func (l *Lock) path() string { return filepath.Join(l.Dir, l.Name) }
 
 // Take implements application.HostLock.
 func (l *Lock) Take(ctx context.Context) (func(), error) {

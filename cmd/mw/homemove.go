@@ -85,7 +85,7 @@ func newHomeMoveCmd() *cobra.Command {
 				Old:         machine,
 				Mailbox:     mwGateway(dir, host),
 				Index:       postern.Mirrorer{},
-				Lock:        hostSyncLock(),
+				Lock:        hostSyncLock(dir),
 				Out:         cmd.OutOrStdout(),
 				Host:        host,
 				Target:      args[0],

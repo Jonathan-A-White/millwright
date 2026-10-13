@@ -139,7 +139,7 @@ func newMillhandTickCmd() *cobra.Command {
 			windows := seatWindows()
 			files := vault.New(dir)
 			gateway := mwGateway(dir, host)
-			sync, err := hostSync(application.Sync{Vault: mwVault(dir, host), Tracker: gateway, Host: host, Ticks: hostTickLogs(), Lock: hostSyncLock()})
+			sync, err := hostSync(application.Sync{Vault: mwVault(dir, host), Tracker: gateway, Host: host, Ticks: hostTickLogs(), Lock: hostSyncLock(dir)})
 			if err != nil {
 				return err
 			}

@@ -2,6 +2,7 @@ package homemove
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -131,7 +132,7 @@ func TestMayorGoneWhenNoMayorProcessRuns(t *testing.T) {
 	if err != nil || !gone || !strings.Contains(said, "no Mayor process runs") {
 		t.Fatalf("expected a Mayor gone, got %v, %q, %v", gone, said, err)
 	}
-	if got := strings.TrimSpace(logOf(t, dir, "pgrep")); got != `-f -- -n Mayor \(afte[r]` {
+	if got := strings.TrimSpace(logOf(t, dir, "pgrep")); got != fmt.Sprintf(`-u %d -f -- -n Mayor \(afte[r]`, os.Getuid()) {
 		t.Errorf("pgrep was run as %q", got)
 	}
 }

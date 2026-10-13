@@ -89,25 +89,28 @@ func hostSyncHalt() application.SyncHaltMarker {
 // them never run the beads half at once.
 var SyncLockStateDir = filepath.Join(".local", "state", "mw")
 
-// hostSyncLock is this host's own sync lock, kept in SyncLockStateDir. A host
-// with no home directory keeps none, and syncs unlocked.
-func hostSyncLock() application.HostLock {
+// hostSyncLock is this host's own sync lock for the vault in vault, kept in
+// SyncLockStateDir under a name taken from the vault's path, so that one user
+// serving two vaults holds two. A host with no home directory keeps none, and
+// syncs unlocked.
+func hostSyncLock(vault string) application.HostLock {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
 	}
-	return hostlock.New(filepath.Join(home, SyncLockStateDir))
+	return hostlock.New(filepath.Join(home, SyncLockStateDir), hostlock.WithFile(hostlock.SyncFileFor(vault)))
 }
 
-// hostDispatchLock is this host's dispatch lock, kept in DispatchStateDir: held
-// for the whole of a real mw dispatch, so that two never run at once. A host
-// with no home directory keeps none.
-func hostDispatchLock() application.GristLock {
+// hostDispatchLock is this host's dispatch lock for the vault in vault, kept in
+// DispatchStateDir under a name taken from the vault's path: held for the whole
+// of a real mw dispatch, so that two on one vault never run at once. A host with
+// no home directory keeps none.
+func hostDispatchLock(vault string) application.GristLock {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil
 	}
-	return hostlock.NewTry(filepath.Join(home, DispatchStateDir), hostlock.DispatchFile)
+	return hostlock.NewTry(filepath.Join(home, DispatchStateDir), hostlock.DispatchFileFor(vault))
 }
 
 // hostTickLogs are the logs this host's timers keep, in the home directory. A
@@ -150,7 +153,7 @@ func newDispatchCmd() *cobra.Command {
 			"line beginning \"local network fault\" and leaves with " + fmt.Sprint(application.NetworkFaultExit) + ", which a timer may\n" +
 			"treat as a wait. Every other sync failure is not retried.\n\n" +
 			"Only one real dispatch runs on a host at a time: one started while another holds the\n" +
-			"host's dispatch lock (~/.local/state/mw-dispatch/lock) prints \"another mw dispatch is running\n" +
+			"host's dispatch lock (~/.local/state/mw-dispatch/lock-<vault hash>) prints \"another mw dispatch is running\n" +
 			"here; nothing done\" and leaves with 0.\n\n" +
 			"Once it holds that lock, before the sync, a real dispatch keeps this host's mw level with the\n" +
 			"factory rig's main as mw millhand tick does, so a host that runs no Millhand tick stays level too:\n" +
@@ -246,7 +249,7 @@ func newDispatchCmd() *cobra.Command {
 			files := mwVault(dir, host)
 			logs := hostTickLogs()
 			worktrees := rig.New()
-			sync, err := hostSync(application.Sync{Vault: files, Tracker: gateway, Host: host, Ticks: logs, Lock: hostSyncLock(), Network: net})
+			sync, err := hostSync(application.Sync{Vault: files, Tracker: gateway, Host: host, Ticks: logs, Lock: hostSyncLock(dir), Network: net})
 			if err != nil {
 				return err
 			}
@@ -272,7 +275,7 @@ func newDispatchCmd() *cobra.Command {
 				Changes:     worktrees,
 				Network:     net,
 				HeavyNet:    heavy,
-				Exclusive:   hostDispatchLock(),
+				Exclusive:   hostDispatchLock(dir),
 				Events:      homeEventLog(),
 				SmokeHolds:  gristSmokeBook(gateway, host),
 				Home:        files,
