@@ -35,6 +35,10 @@ func newFileCmd() *cobra.Command {
 			"what it needs done first — and checks the whole of it before writing any of it: every\n" +
 			"story must resolve to a path, carry acceptance criteria, and wait only on stories the\n" +
 			"plan has and not on itself, directly or in a circle.\n\n" +
+			"A story may name the repo paths it expects to change as \"files\", which is filed as its\n" +
+			"files key. Under each story filed, mw prints the open or running stories on its rig whose\n" +
+			"files overlap (the running ones on its rig, if it names none) as 'in flight: <id> <title>\n" +
+			"(shares <path>)', with the bd dep add that would make it wait. It adds nothing itself.\n\n" +
 			"Every story is filed held, so that nothing can be dispatched from a plan nobody has\n" +
 			"approved. --approve releases them all as they are filed; without it, mw asks, and an\n" +
 			"unattended run leaves them held.\n\n" +

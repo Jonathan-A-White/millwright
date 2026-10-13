@@ -22,6 +22,10 @@ type fileContext struct {
 	plan    domain.Plan
 	read    error
 
+	// seeded are the ids of the stories a scenario put in the tracker before the
+	// plan was filed.
+	seeded []string
+
 	printed bytes.Buffer
 	filed   application.FiledPlan
 	err     error
@@ -46,6 +50,8 @@ func InitializeFilePlanScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the plan:$`, c.thePlan)
 	ctx.Given(`^the story "([^"]*)" has a title of (\d+) characters$`, c.theStoryHasATitleOf)
 	ctx.Given(`^the epic has a title of (\d+) characters$`, c.theEpicHasATitleOf)
+	ctx.Given(`^the story "([^"]*)" names the files "([^"]*)"$`, c.theStoryNamesTheFiles)
+	ctx.Given(`^the story "([^"]*)" "([^"]*)" is (running|open) on the rig "([^"]*)" with the files "([^"]*)"$`, c.aStoryIsInFlight)
 	ctx.When(`^the plan is filed$`, c.thePlanIsFiled)
 	ctx.When(`^the plan is filed and approved$`, c.thePlanIsFiledAndApproved)
 	ctx.When(`^the story "([^"]*)" is closed$`, c.theStoryIsDone)
@@ -56,6 +62,12 @@ func InitializeFilePlanScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the filed story "([^"]*)" carries its acceptance criteria$`, c.theFiledStoryCarriesItsAcceptanceCriteria)
 	ctx.Then(`^the filed story "([^"]*)" carries an estimate of (\d+) minutes$`, c.theFiledStoryCarriesAnEstimateOf)
 	ctx.Then(`^the filed story "([^"]*)" is worked on model (\S+) by formula (\S+)$`, c.theFiledStoryIsWorkedOnModelByFormula)
+	ctx.Then(`^the filed story "([^"]*)" carries the files key "([^"]*)"$`, c.theFiledStoryCarriesTheFilesKey)
+	ctx.Then(`^the tree shows under the story "([^"]*)": (.+)$`, c.theTreeShowsUnderTheStory)
+	ctx.Then(`^the tree shows under the story "([^"]*)" the dependency to add on "([^"]*)"$`, c.theTreeShowsTheDependencyToAdd)
+	ctx.Then(`^the tree shows nothing in flight under the story "([^"]*)"$`, c.theTreeShowsNothingInFlight)
+	ctx.Then(`^the tree does not name "([^"]*)"$`, c.theTreeDoesNotName)
+	ctx.Then(`^no dependency was added$`, c.noDependencyWasAdded)
 	ctx.Then(`^the tree names the epic (.+)$`, c.theTreeNamesTheEpic)
 	ctx.Then(`^the tree says: (.+)$`, c.theTreeSays)
 	ctx.Then(`^the tree shows the story "([^"]*)" on the path (.+)$`, c.theTreeShowsTheStoryOnThePath)
@@ -79,6 +91,125 @@ func (c *fileContext) theStoryHasATitleOf(key string, length int) error {
 		}
 	}
 	return fmt.Errorf("the plan has no story %q", key)
+}
+
+func (c *fileContext) theStoryNamesTheFiles(key, files string) error {
+	for i := range c.plan.Stories {
+		if c.plan.Stories[i].Key == key {
+			c.plan.Stories[i].Files = files
+			return nil
+		}
+	}
+	return fmt.Errorf("the plan has no story %q", key)
+}
+
+// aStoryIsInFlight puts a story the plan did not file in the tracker, open or
+// running, as the Mayor's earlier work would have left it.
+func (c *fileContext) aStoryIsInFlight(id, title, status, rig, files string) error {
+	c.tracker.AddStory("", domain.Story{ID: id, Title: title, Overrides: domain.Path{Rig: rig, Files: files}})
+	c.seeded = append(c.seeded, id)
+	if status == "running" {
+		return c.tracker.SetStatus(id, apptest.StatusInProgress)
+	}
+	return nil
+}
+
+func (c *fileContext) theFiledStoryCarriesTheFilesKey(key, files string) error {
+	detail, err := c.detailOf(key)
+	if err != nil {
+		return err
+	}
+	if got := detail.Merged().Files; got != files {
+		return fmt.Errorf("expected the story %s to carry the files key %q, got %q", key, files, got)
+	}
+	return nil
+}
+
+// treeLinesUnder are the lines the tree prints under a story's own: all of them
+// up to the next story, or the end of the tree.
+func (c *fileContext) treeLinesUnder(key string) ([]string, error) {
+	id, err := c.idOf(key)
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(c.printed.String(), "\n")
+	for i, line := range lines {
+		if !strings.HasPrefix(strings.TrimSpace(line), id+" · ") {
+			continue
+		}
+		var under []string
+		for _, next := range lines[i+1:] {
+			if strings.HasPrefix(next, "  ") && !strings.HasPrefix(next, "   ") || strings.TrimSpace(next) == "" {
+				break
+			}
+			under = append(under, strings.TrimSpace(next))
+		}
+		return under, nil
+	}
+	return nil, fmt.Errorf("the tree does not show the story %s (%s):\n%s", key, id, c.printed.String())
+}
+
+func (c *fileContext) theTreeShowsUnderTheStory(key, said string) error {
+	under, err := c.treeLinesUnder(key)
+	if err != nil {
+		return err
+	}
+	for _, line := range under {
+		if line == said {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected the tree to say %q under %s, got:\n%s", said, key, strings.Join(under, "\n"))
+}
+
+func (c *fileContext) theTreeShowsTheDependencyToAdd(key, flight string) error {
+	id, err := c.idOf(key)
+	if err != nil {
+		return err
+	}
+	return c.theTreeShowsUnderTheStory(key, "bd dep add "+id+" "+flight)
+}
+
+func (c *fileContext) theTreeShowsNothingInFlight(key string) error {
+	under, err := c.treeLinesUnder(key)
+	if err != nil {
+		return err
+	}
+	for _, line := range under {
+		if strings.HasPrefix(line, "in flight:") || strings.HasPrefix(line, "bd dep add") {
+			return fmt.Errorf("expected nothing in flight under %s, got:\n%s", key, strings.Join(under, "\n"))
+		}
+	}
+	return nil
+}
+
+func (c *fileContext) theTreeDoesNotName(id string) error {
+	if strings.Contains(c.printed.String(), id) {
+		return fmt.Errorf("expected the tree not to name %s, got:\n%s", id, c.printed.String())
+	}
+	return nil
+}
+
+// noDependencyWasAdded checks that nothing the plan filed waits on a story it
+// found in flight: the tree only suggests the dependency.
+func (c *fileContext) noDependencyWasAdded() error {
+	if err := c.filingSucceeds(); err != nil {
+		return err
+	}
+	for _, story := range c.filed.Stories {
+		detail, err := c.tracker.ShowStory(context.Background(), story.ID)
+		if err != nil {
+			return err
+		}
+		for _, need := range detail.Needs {
+			for _, seeded := range c.seeded {
+				if need == seeded {
+					return fmt.Errorf("expected nothing to be made to wait on %s, but %s does", seeded, story.ID)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (c *fileContext) theEpicHasATitleOf(length int) error {

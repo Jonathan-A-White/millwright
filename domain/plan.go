@@ -43,14 +43,28 @@ type PlanStory struct {
 	Acceptance  string   `json:"acceptance"`
 	Overrides   Path     `json:"path"`
 	Needs       []string `json:"needs"`
+	// Files are the repo paths or globs the story expects to change, comma
+	// separated, as the story's files key has them. It is the same as writing
+	// them as "files" in the story's path, and wins over that if both are written.
+	Files string `json:"files,omitempty"`
 	// Labels are the tags the story is filed with, as the tracker spells them.
 	Labels []string `json:"labels"`
+}
+
+// PathOverrides are the fields of the epic's default Path this story departs
+// from, as it is filed: its path, with its files written as the files key.
+func (s PlanStory) PathOverrides() Path {
+	overrides := s.Overrides
+	if strings.TrimSpace(s.Files) != "" {
+		overrides.Files = strings.TrimSpace(s.Files)
+	}
+	return overrides
 }
 
 // PathFrom is the Path this planned story would be worked by: the epic's
 // defaults with the story's own overrides on top, or the reason it is no Path.
 func (s PlanStory) PathFrom(defaults Path) (Path, error) {
-	return Story{ID: s.Key, Title: s.Title, Overrides: s.Overrides}.PathFrom(defaults)
+	return Story{ID: s.Key, Title: s.Title, Overrides: s.PathOverrides()}.PathFrom(defaults)
 }
 
 // PlanRefused is a plan that cannot be filed, carrying every reason it cannot

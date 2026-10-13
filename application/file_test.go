@@ -183,3 +183,55 @@ func TestAPlanWhoseTitleOverflowsAStepTitleIsRefusedBeforeAnythingIsFiled(t *tes
 		t.Errorf("expected a 450-character title to be filed, got %v", err)
 	}
 }
+
+// blindTracker is a tracker that cannot say what is in flight.
+type blindTracker struct{ *apptest.FakeTracker }
+
+func (blindTracker) WorkInHand(context.Context) (application.WorkInHand, error) {
+	return application.WorkInHand{}, errors.New("the vault is out of reach")
+}
+
+func TestFilingNamesTheStoriesInFlightAndAddsNothing(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	tracker.AddFormula("tdd-feature")
+	tracker.AddStory("", domain.Story{ID: "mw-run1", Title: "Rework", Overrides: domain.Path{Rig: "millwright", Files: "application/*.go"}})
+	if err := tracker.SetStatus("mw-run1", apptest.StatusInProgress); err != nil {
+		t.Fatalf("setting up: %v", err)
+	}
+	plan := twoStoryPlan()
+	plan.Stories[1].Files = "application/file.go"
+	out := &strings.Builder{}
+
+	filed, err := application.File{Tracker: tracker, Out: out}.Run(context.Background(), plan)
+	if err != nil {
+		t.Fatalf("filing the plan: %v", err)
+	}
+
+	gateway := filed.Stories[1]
+	if want := []application.InFlight{{ID: "mw-run1", Title: "Rework", Share: "application/file.go"}}; len(gateway.InFlight) != 1 || gateway.InFlight[0] != want[0] {
+		t.Errorf("expected the gateway story to overlap %+v, got %+v", want, gateway.InFlight)
+	}
+	said := "in flight: mw-run1 Rework (shares application/file.go)\n        bd dep add " + gateway.ID + " mw-run1\n"
+	if !strings.Contains(out.String(), said) {
+		t.Errorf("expected the tree to say %q, got:\n%s", said, out)
+	}
+	for _, need := range gateway.Needs {
+		if need == "mw-run1" {
+			t.Errorf("expected filing not to make the story wait on mw-run1")
+		}
+	}
+}
+
+func TestAnUnreadableFlightRefusesNothing(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	tracker.AddFormula("tdd-feature")
+	out := &strings.Builder{}
+
+	filed, err := application.File{Tracker: blindTracker{tracker}, Out: out}.Run(context.Background(), twoStoryPlan())
+	if err != nil {
+		t.Fatalf("expected the plan to be filed all the same: %v", err)
+	}
+	if len(filed.Stories) != 2 || !strings.Contains(out.String(), "could not be read") {
+		t.Errorf("expected both stories filed and a note that flight could not be read, got %d and:\n%s", len(filed.Stories), out)
+	}
+}
