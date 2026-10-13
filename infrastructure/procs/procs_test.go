@@ -74,3 +74,38 @@ func TestCountOfNoProcessTableIsAnError(t *testing.T) {
 		t.Fatal("expected an error")
 	}
 }
+
+// fakeCmdline gives a process of the fake table its argv, NUL-separated as the
+// kernel writes it.
+func fakeCmdline(t *testing.T, proc, pid string, argv ...string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(proc, pid, "cmdline"), []byte(strings.Join(argv, "\x00")+"\x00"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// mw-gq6.394: the heartbeat of a story is the user's own `mw next --heartbeat
+// <story>`, and no other process, story or user's.
+func TestBeatingIsTheUsersHeartbeatsOfThatStory(t *testing.T) {
+	proc := t.TempDir()
+	fakeProc(t, proc, "301", "mw\n", 1000)
+	fakeCmdline(t, proc, "301", "/home/u/bin/mw", "next", "--heartbeat", "mw-x.1")
+	fakeProc(t, proc, "302", "mw\n", 1000)
+	fakeCmdline(t, proc, "302", "/home/u/bin/mw", "next", "--heartbeat", "mw-x.2")
+	fakeProc(t, proc, "303", "mw\n", 1001)
+	fakeCmdline(t, proc, "303", "/home/u/bin/mw", "next", "--heartbeat", "mw-x.1")
+	// The close-out itself, and a zombie with nothing left of its cmdline.
+	fakeProc(t, proc, "304", "mw\n", 1000)
+	fakeCmdline(t, proc, "304", "/home/u/bin/mw", "next", "mw-x.1")
+	fakeProc(t, proc, "305", "mw\n", 1000)
+	fakeCmdline(t, proc, "305")
+
+	got, err := procs.Heartbeats{Proc: proc, Uid: func() int { return 1000 }}.Beating(context.Background(), "mw-x.1")
+	if err != nil || len(got) != 1 || got[0] != 301 {
+		t.Errorf("Beating(mw-x.1) = %v (%v), want [301]", got, err)
+	}
+	got, err = procs.Heartbeats{Proc: proc, Uid: func() int { return 1000 }}.Beating(context.Background(), "mw-x.3")
+	if err != nil || len(got) != 0 {
+		t.Errorf("Beating(mw-x.3) = %v (%v), want none", got, err)
+	}
+}

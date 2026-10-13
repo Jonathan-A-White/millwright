@@ -10,6 +10,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
+	"github.com/Jonathan-A-White/millwright/infrastructure/procs"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
 	"github.com/Jonathan-A-White/millwright/infrastructure/userunits"
@@ -55,6 +56,8 @@ func newNextCmd() *cobra.Command {
 			"committed by path first, under a plain message naming the story, so that a close-out's own writing\n" +
 			"does not stop the sync that follows. Anything else uncommitted in the vault still does, naming the\n" +
 			"file; the story is landed and closed all the same.\n\n" +
+			"Run by hand on a story whose session is still running — a `mw next --heartbeat` of it is alive on this\n" +
+			"host — it refuses, naming the session, and changes nothing: no ledger line, label, comment or mail.\n\n" +
 			"A story that landed and could not be closed is reported as landed but still open, and nothing of\n" +
 			"the landing is undone. Run next on it again: it closes the story and carries on, without merging,\n" +
 			"testing or pushing anything a second time and without a second line in the ledger.",
@@ -212,6 +215,7 @@ func newNextCmd() *cobra.Command {
 				Files:       files,
 				Mailbox:     gateway,
 				Runner:      runner,
+				Heartbeats:  procs.Heartbeats{},
 				Transcripts: transcripts,
 				Memory:      gateway,
 				Sync:        sync,
