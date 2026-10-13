@@ -10,6 +10,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/domain/events"
 
 	"github.com/cucumber/godog"
 )
@@ -28,6 +29,11 @@ type posternViewContext struct {
 	err     error
 	// readsCounted is the comment reads of a bead a scenario counted.
 	readsCounted int
+	// verifyDays and log are what a scenario built the view with: the days a
+	// verify need stays unfolded (0 for the default) and the event log a fold
+	// tells the Mayor in.
+	verifyDays int
+	log        *apptest.FakeEventLog
 }
 
 // InitializePosternViewScenario registers the steps of
@@ -48,6 +54,14 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" is labelled "([^"]*)"$`, c.theViewsBeadIsLabelled)
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" waits on "([^"]*)"$`, c.theViewsBeadWaitsOn)
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" landed an hour ago$`, c.theViewsBeadLandedAnHourAgo)
+	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" landed (\d+) days? ago$`, c.theViewsBeadLandedDaysAgo)
+	ctx.Given(`^the view's epic "([^"]*)" has since closed$`, c.theViewsEpicHasSinceClosed)
+	ctx.When(`^the live view is built with verify_days (\d+)$`, c.theLiveViewIsBuiltWithVerifyDays)
+	ctx.When(`^the live view is built with an event log$`, c.theLiveViewIsBuiltWithAnEventLog)
+	ctx.Then(`^the view's verify need on "([^"]*)" is folded$`, c.theViewsVerifyNeedIsFolded)
+	ctx.Then(`^the view's verify need on "([^"]*)" is not folded$`, c.theViewsVerifyNeedIsNotFolded)
+	ctx.Then(`^the view has no verify need on "([^"]*)"$`, c.theViewHasNoVerifyNeed)
+	ctx.Then(`^the Mayor was sent (\d+) verify_folded events?, naming "([^"]*)"$`, c.theMayorWasSentVerifyFolded)
 	ctx.Given(`^the view's hands bead "([^"]*)" under "([^"]*)" closed an hour ago$`, c.theViewsHandsBeadClosedAnHourAgo)
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" landed a month ago$`, c.theViewsBeadLandedAMonthAgo)
 	ctx.Given(`^the view's bead "([^"]*)" under "([^"]*)" landed two hours ago with the Mayor's comment "([^"]*)"$`, c.theViewsBeadLandedTwoHoursAgoChecked)
@@ -311,8 +325,82 @@ func (c *posternViewContext) view() application.PosternView {
 	return application.PosternView{
 		Tracker: c.tracker, Notes: c.tracker, Cipher: c.cipher, File: c.file,
 		GovernorKey: "governor-pubkey-hex", Host: "desktop",
-		Now: func() time.Time { return posternViewFeatureNow },
+		Now:        func() time.Time { return posternViewFeatureNow },
+		VerifyDays: c.verifyDays,
+		Events:     c.eventLog(),
 	}
+}
+
+// eventLog is the log the view tells the Mayor in, as an interface that is nil
+// when the scenario gave it none.
+func (c *posternViewContext) eventLog() application.EventLog {
+	if c.log == nil {
+		return nil
+	}
+	return c.log
+}
+
+func (c *posternViewContext) theViewsBeadLandedDaysAgo(id, epic string, days int) error {
+	return c.closeAt(id, epic, posternViewFeatureNow.Add(-time.Duration(days)*24*time.Hour))
+}
+
+func (c *posternViewContext) theViewsEpicHasSinceClosed(epic string) error {
+	c.tracker.DescribeEpic(epic, "Epic "+epic, apptest.StatusClosed, 1)
+	return nil
+}
+
+func (c *posternViewContext) theLiveViewIsBuiltWithVerifyDays(days int) error {
+	c.verifyDays = days
+	return c.theLiveViewIsBuilt()
+}
+
+func (c *posternViewContext) theLiveViewIsBuiltWithAnEventLog() error {
+	if c.log == nil {
+		c.log = &apptest.FakeEventLog{}
+	}
+	return c.theLiveViewIsBuilt()
+}
+
+func (c *posternViewContext) theViewsVerifyNeedIsFolded(bead string) error {
+	need, err := c.verifyNeed(bead)
+	if err != nil {
+		return err
+	}
+	if !need.Folded {
+		return fmt.Errorf("expected the verify need on %s to be folded", bead)
+	}
+	return nil
+}
+
+func (c *posternViewContext) theViewsVerifyNeedIsNotFolded(bead string) error {
+	need, err := c.verifyNeed(bead)
+	if err != nil {
+		return err
+	}
+	if need.Folded {
+		return fmt.Errorf("expected the verify need on %s not to be folded", bead)
+	}
+	return nil
+}
+
+func (c *posternViewContext) theViewHasNoVerifyNeed(bead string) error {
+	if _, err := c.verifyNeed(bead); err == nil {
+		return fmt.Errorf("expected no verify need on %s", bead)
+	}
+	return nil
+}
+
+func (c *posternViewContext) theMayorWasSentVerifyFolded(want int, bead string) error {
+	var sent []string
+	for _, ev := range c.log.All() {
+		if ev.Kind == events.KindVerifyFolded {
+			sent = append(sent, ev.Bead)
+		}
+	}
+	if len(sent) != want || (want > 0 && sent[0] != bead) {
+		return fmt.Errorf("expected %d verify_folded event(s) naming %s, the log holds them for %v", want, bead, sent)
+	}
+	return nil
 }
 
 func (c *posternViewContext) theLiveViewIsBuilt() error {

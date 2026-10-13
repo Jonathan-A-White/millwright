@@ -210,6 +210,31 @@ func (s *snapshot) LoneStories(context.Context) ([]application.StoryDetail, erro
 	return out, nil
 }
 
+// ClosedEpicLandings implements application.ClosedEpicLandings from the
+// listing: every story that is not an epic, closed at since or later, whose
+// parent is an epic that is closed, in the order filed. The usual live epic's
+// children are read with the epic, not here.
+func (s *snapshot) ClosedEpicLandings(_ context.Context, since time.Time) ([]application.StoryDetail, error) {
+	var landings []bead
+	for _, b := range s.beads {
+		if b.Parent == "" || b.Type == TypeEpic || b.Status != StatusClosed || b.closedAt().IsZero() || b.closedAt().Before(since) {
+			continue
+		}
+		if parent, held := s.byID[b.Parent]; held && parent.Type == TypeEpic && parent.Status == StatusClosed {
+			landings = append(landings, b)
+		}
+	}
+	out := make([]application.StoryDetail, 0, len(landings))
+	for _, b := range inFiledOrder(landings) {
+		var defaults domain.Path
+		if parent, held := s.byID[b.Parent]; held {
+			defaults = domain.PathFromMetadata(parent.pathMetadata())
+		}
+		out = append(out, s.shown(b, defaults))
+	}
+	return out, nil
+}
+
 // ShowEpics is Gateway.ShowEpics read from the listing; an epic the listing
 // does not hold sends the whole read to the gateway, to report it as it does.
 func (s *snapshot) ShowEpics(ctx context.Context, ids []string) ([]application.EpicDetail, error) {

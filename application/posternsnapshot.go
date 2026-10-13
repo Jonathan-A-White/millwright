@@ -445,17 +445,32 @@ func parseLandedMemory(raw string) map[string]posternSnapshotMemoryEntry {
 // holds exactly what oldMemory already did: a Build that remembered nothing
 // new spends no write on it. newMemory carries an entry only for a landed
 // candidate this Build actually saw with a comment worth remembering, so one
-// that has aged out of PosternSnapshotWindow since oldMemory was read is
-// dropped here.
+// that has aged out of PosternViewVerifyWindow since oldMemory was read is
+// dropped here; one closed within it but past PosternSnapshotWindow is carried
+// over from oldMemory for the view's sake.
 func (s PosternSnapshot) writeLandedMemory(ctx context.Context, oldMemory, newMemory map[string]posternSnapshotMemoryEntry) error {
+	// The view keeps a landing's verify need, and so its memory, for
+	// PosternViewVerifyWindow, far past the snapshot's own day: what the
+	// snapshot does not look at but the view still may is carried over, so that
+	// the two writers do not take turns forgetting it. Its comment_count still
+	// says whether it may be used.
+	for id, entry := range oldMemory {
+		if _, seen := newMemory[id]; seen || entry.Closed == 0 {
+			continue
+		}
+		if s.now().Sub(time.Unix(entry.Closed, 0)) < PosternViewVerifyWindow {
+			newMemory[id] = entry
+		}
+	}
 	return saveLandedMemory(ctx, s.Notes, oldMemory, newMemory)
 }
 
 // saveLandedMemory rewrites PosternSnapshotMemoryKey to newMemory through
 // notes, unless it holds exactly what oldMemory already did. PosternSnapshot
 // and PosternView both keep it: their landed and verify candidates are the
-// same stories — closed within PosternSnapshotWindow under a live epic — so
-// either one's read spares the other one. It is only a cache: a caller says
+// same stories — closed within PosternViewVerifyWindow under an epic (the
+// snapshot's, within PosternSnapshotWindow under a live one) — so either one's
+// read spares the other one. It is only a cache: a caller says
 // an error from here (sayLandedMemoryFailed) and carries on.
 func saveLandedMemory(ctx context.Context, notes PosternNotes, oldMemory, newMemory map[string]posternSnapshotMemoryEntry) error {
 	newMemory, encoded, err := boundLandedMemory(newMemory)

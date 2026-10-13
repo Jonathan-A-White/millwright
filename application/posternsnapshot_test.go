@@ -565,7 +565,8 @@ func TestPosternSnapshotRereadsALandedCandidateWhoseCommentCountRose(t *testing.
 
 // TestPosternSnapshotDropsAMemoryEntryOnceItsIdLeavesTheWindow covers
 // mw-tfne4.27's AC2: a landed candidate's memory entry must not survive in
-// the note once it ages out of PosternSnapshotWindow.
+// the note once it ages out of PosternViewVerifyWindow (the view's verify
+// need, 30 days, outlasts the snapshot's own day).
 func TestPosternSnapshotDropsAMemoryEntryOnceItsIdLeavesTheWindow(t *testing.T) {
 	tracker := aSnapshotTracker()
 	tracker.AddEpic("mw-a", domain.Path{})
@@ -597,8 +598,19 @@ func TestPosternSnapshotDropsAMemoryEntryOnceItsIdLeavesTheWindow(t *testing.T) 
 		t.Fatalf("expected the memory to remember mw-a.1 after the first build, got %q", raw)
 	}
 
-	// Nine days later mw-a.1 has long since aged out of the 24-hour landed window.
+	// Nine days later mw-a.1 has aged out of the 24-hour landed window, but the
+	// view's verify need still has it for 30 days, so the memory keeps it.
 	build(snapshotNow.Add(9 * 24 * time.Hour))
+	raw, err = tracker.Note(context.Background(), application.PosternSnapshotMemoryKey)
+	if err != nil {
+		t.Fatalf("reading the memory note: %v", err)
+	}
+	if !strings.Contains(raw, "mw-a.1") {
+		t.Fatalf("expected mw-a.1 to be kept for the view's verify window, got %q", raw)
+	}
+
+	// Thirty-one days later it is past both.
+	build(snapshotNow.Add(31 * 24 * time.Hour))
 	raw, err = tracker.Note(context.Background(), application.PosternSnapshotMemoryKey)
 	if err != nil {
 		t.Fatalf("reading the memory note: %v", err)

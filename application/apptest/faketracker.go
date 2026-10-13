@@ -923,6 +923,38 @@ func (f *FakeTracker) LiveEpics(_ context.Context) ([]string, error) {
 	return live, nil
 }
 
+// ClosedEpicLandings implements application.ClosedEpicLandings: the stories
+// added under an epic that is closed (described closed, or a child epic whose
+// story is closed), not epics themselves, closed at since or later, in the
+// order added.
+func (f *FakeTracker) ClosedEpicLandings(_ context.Context, since time.Time) ([]application.StoryDetail, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	closedEpic := func(id string) bool {
+		if says, described := f.epicSays[id]; described {
+			return strings.EqualFold(says.status, StatusClosed)
+		}
+		if s, filed := f.stories[id]; filed && s.detail.IsEpic {
+			return s.detail.Status == StatusClosed
+		}
+		return false
+	}
+	var out []application.StoryDetail
+	for _, id := range f.order {
+		d := f.stories[id].detail
+		if d.IsEpic || d.EpicID == "" || d.Status != StatusClosed || d.ClosedAt.IsZero() || d.ClosedAt.Before(since) || !closedEpic(d.EpicID) {
+			continue
+		}
+		d.Needs = nil
+		d.CommentCount = len(f.stories[id].comments)
+		out = append(out, d)
+	}
+	return out, nil
+}
+
 // LoneStories implements application.LoneStories: the stories added under no
 // epic that are not epics and carry a rig in their own Path, in the order
 // added. Mail and every step of a molecule carry none, or hang from a root.
