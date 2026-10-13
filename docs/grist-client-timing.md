@@ -60,3 +60,22 @@ For each app and kind, beside the mill's phases, where the apps reported them:
 `round_trip` is tap to shown: `tap_to_sent` + the mill's `total` +
 `delivered_to_seen` + `seen_to_shown`, known for a grist that reported all
 three and whose answer was delivered.
+
+## mw grist timing --otlp: the same record as OpenTelemetry traces
+
+`mw grist timing --otlp` (with `--out <file>`, else stdout) writes the record as
+OTLP/JSON, one line, for Grafana or any OpenTelemetry tool to read; it sends
+nothing anywhere. It honours `--since`, `--app` and `--kind`. One trace for each
+grind line: the trace id is the first 16 bytes of the txid's hex (a txid without
+that much hex gets the first 16 bytes of its SHA-256), span ids are derived from
+the trace id and the span's name, so a rerun writes the same ids. The root span
+is `grist <kind>`, with a child for each phase the record knows: `phone`
+(tap_to_sent) and `network` under `service.name` the app, and `wake`, `pickup`,
+`slot`, `startup`, `model` and `deliver` under `mw-mill`. The line's time is
+when the answer was delivered; the grist was sent `total_s` before it and the
+mill's phases run forward from there (without a total, back from the line's
+time). `phone` and `network` end at the moment the grist was sent; `network`,
+two round trips summed, has no single place, so it sits where the request was.
+`delivered_to_seen` and `seen_to_shown` are attributes of the root span. A phase
+with no time is left out; an old line with only its seconds is the root span
+alone.

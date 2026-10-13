@@ -492,7 +492,8 @@ func newGristStatsCmd() *cobra.Command {
 // newGristTimingCmd builds `mw grist timing`: where the seconds of the mill's
 // answers went, from the phases each line of grinds.jsonl carries.
 func newGristTimingCmd() *cobra.Command {
-	var since, app, kind string
+	var since, app, kind, out string
+	var otlp bool
 
 	cmd := &cobra.Command{
 		Use:   "timing",
@@ -505,7 +506,14 @@ func newGristTimingCmd() *cobra.Command {
 			gristTimingHelp() + "\n" +
 			"The phases run from the grist's own sent time, so wake and total lean on the backend's clock.\n" +
 			"Seconds between phases (the app's grind read, the photos opened, a recording scored) are in\n" +
-			"total and in no phase.",
+			"total and in no phase.\n\n" +
+			"--otlp writes the same record, one grist at a time, as OpenTelemetry traces in OTLP/JSON\n" +
+			"(resourceSpans, scopeSpans, spans) to stdout or to --out <file>, for Grafana or any OTel tool\n" +
+			"to read; nothing else runs and nothing is sent. The trace id is the first 16 bytes of the\n" +
+			"grist's txid; the root span is \"grist <kind>\", with a child for each of phone and network\n" +
+			"(service.name the app) and wake, pickup, slot, startup, model and deliver (service.name\n" +
+			"mw-mill) that the record knows. A phase nobody timed is left out; an old line with only its\n" +
+			"seconds is the root span alone.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			from, err := parseRunsSince(since, time.Now())
@@ -516,13 +524,31 @@ func newGristTimingCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = application.GristTiming{State: grist.New(stateDir), Out: cmd.OutOrStdout()}.Run(cmd.Context(), from, app, kind)
+			if out != "" && !otlp {
+				return fmt.Errorf("mw grist timing: --out names where --otlp writes; give --otlp too")
+			}
+			if !otlp {
+				_, err = application.GristTiming{State: grist.New(stateDir), Out: cmd.OutOrStdout()}.Run(cmd.Context(), from, app, kind)
+				return err
+			}
+			var w io.Writer = cmd.OutOrStdout()
+			if out != "" {
+				f, err := os.Create(out)
+				if err != nil {
+					return fmt.Errorf("mw grist timing: %w", err)
+				}
+				defer f.Close()
+				w = f
+			}
+			_, err = application.GristTiming{State: grist.New(stateDir), Out: w}.Otlp(cmd.Context(), from, app, kind)
 			return err
 		},
 	}
 	cmd.Flags().StringVar(&since, "since", "", "count only the grinds since this: a duration such as 24h, a date, or an RFC 3339 time (default: all)")
 	cmd.Flags().StringVar(&app, "app", "", "count only this app's grinds")
 	cmd.Flags().StringVar(&kind, "kind", "", "count only this kind of grist")
+	cmd.Flags().BoolVar(&otlp, "otlp", false, "write each answered grist as an OpenTelemetry trace in OTLP/JSON instead of the table")
+	cmd.Flags().StringVar(&out, "out", "", "with --otlp, write to this file instead of stdout")
 	return cmd
 }
 
