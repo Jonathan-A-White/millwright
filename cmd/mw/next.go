@@ -225,6 +225,7 @@ func newNextCmd() *cobra.Command {
 				Mailbox:     gateway,
 				Runner:      runner,
 				Heartbeats:  procs.Heartbeats{},
+				Leftovers:   procs.Table{},
 				Transcripts: transcripts,
 				Memory:      gateway,
 				Sync:        sync,

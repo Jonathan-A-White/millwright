@@ -339,6 +339,11 @@ type Next struct {
 	// nothing, and every close-out goes on.
 	Heartbeats LiveHeartbeats
 
+	// Leftovers is the host's table of the user's processes, swept at the end
+	// of a Tester story's close-out for what its session left running under
+	// /tmp/tester-<story>/ (mw-gq6.409). Nil sweeps nothing.
+	Leftovers UserProcesses
+
 	// Events is the home's event log, where a close-out says it could not record
 	// what it meant to (mw-gq6.375). Nil writes none.
 	Events EventLog
@@ -459,6 +464,13 @@ type NextReport struct {
 	Findings    TesterFindings
 	TesterFiled string
 
+	// Swept is how many processes a Tester story left running were stopped under
+	// SweptDir, /tmp/tester-<story>/, at the end of its close-out (mw-gq6.409);
+	// tester is whether the story is a Tester story, read with the story.
+	Swept    int
+	SweptDir string
+	tester   bool
+
 	// Bench is what the close-out recorded of its gate, one line and the
 	// calibration of its kind under it; empty when it recorded none or has no
 	// book to compare it with.
@@ -557,6 +569,7 @@ func (n Next) Run(ctx context.Context, storyID string) (NextReport, error) {
 	began := n.now()
 	n.markCloseOut(ctx, storyID, began, false)
 	report, err := n.closeOut(ctx, storyID, began)
+	n.sweepTester(ctx, &report)
 	// Cleared before the session is closed below, which may hang this process up.
 	n.clearCloseOut(storyID)
 	report.Notes = append(report.Notes, release()...)
@@ -685,6 +698,7 @@ func (n Next) closeOut(ctx context.Context, storyID string, began time.Time) (Ne
 		return report, fmt.Errorf("closing out %s: %w", storyID, err)
 	}
 	report.Title, report.Assignee = detail.Story.Title, detail.Assignee
+	report.tester = IsTesterStory(detail)
 	if detail.Closed() {
 		return report, fmt.Errorf("closing out %s: it is closed already, so nothing was landed, ledgered or dispatched", storyID)
 	}
@@ -2588,6 +2602,9 @@ func (r NextReport) String() string {
 	}
 	if len(r.Findings.Duplicates) > 0 {
 		fmt.Fprintf(&b, "  twin    %s already open, so the Tester filed nothing for a finding the same\n", strings.Join(r.Findings.Duplicates, ", "))
+	}
+	if r.Swept > 0 {
+		fmt.Fprintf(&b, "  stopped %d leftover processes under %s\n", r.Swept, r.SweptDir)
 	}
 	if len(r.Uncommitted) > 0 {
 		fmt.Fprintf(&b, "  left    uncommitted work, %d path(s), in the worktree:\n", len(r.Uncommitted))

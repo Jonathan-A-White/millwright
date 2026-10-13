@@ -55,6 +55,35 @@ func registerTesterSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^the tester report says for "([^"]*)":$`, c.theTesterReportSays)
 	ctx.Then(`^the tester report gives "([^"]*)" its fuel "([^"]*)"$`, c.theTesterReportGivesFuel)
 	ctx.Then(`^the check printed: (.+)$`, c.theCheckPrinted)
+
+	ctx.Given(`^process (\d+) is running "([^"]*)" from "([^"]*)"$`, c.aProcessIsRunning)
+	ctx.Then(`^process (\d+) is still running$`, c.processIsStillRunning)
+	ctx.Then(`^process (\d+) has been stopped$`, c.processHasBeenStopped)
+}
+
+// aProcessIsRunning puts a process of the user in the host's table, the way a
+// preview server a Tester started in the background is.
+func (c *nextContext) aProcessIsRunning(pid int, command, cwd string) error {
+	c.leftovers.Start(application.Process{Pid: pid, Argv: strings.Fields(command), Cwd: cwd})
+	return nil
+}
+
+func (c *nextContext) processIsStillRunning(pid int) error {
+	for _, alive := range c.leftovers.Alive() {
+		if alive == pid {
+			return nil
+		}
+	}
+	return fmt.Errorf("expected process %d to be left alone, but it was stopped", pid)
+}
+
+func (c *nextContext) processHasBeenStopped(pid int) error {
+	for _, alive := range c.leftovers.Alive() {
+		if alive == pid {
+			return fmt.Errorf("expected process %d to be stopped, but it is still running", pid)
+		}
+	}
+	return nil
 }
 
 func (c *nextContext) theCheckPrinted(words string) error {

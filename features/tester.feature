@@ -144,6 +144,34 @@ Feature: A one-week Tester trial
     And the ledger holds exactly one line for "mw-l.2"
     And exactly one mail was sent, to "mayor" from "mw@vps"
 
+  Scenario: A Tester story's leftover preview server is stopped when its close-out ends, and no other process is touched (mw-gq6.409)
+    Given the story "mw-l.1" is planned and ready to be worked here
+    And the Tester story "mw-l.2" testing "mw-l.1" has been worked in its own worktree, committing nothing
+    And process 4101 is running "node /tmp/tester-mw-l.2/app/node_modules/.bin/vite preview --port 4799 --strictPort" from "/tmp/tester-mw-l.2/app (deleted)"
+    And process 4102 is running "sleep 600" from "/tmp/tester-mw-l.2/shots"
+    And process 4103 is running "node /tmp/tester-mw-l.20/app/node_modules/.bin/vite preview --port 4798" from "/tmp/tester-mw-l.20/app"
+    And process 4104 is running "node /home/jwhite/lampas/node_modules/.bin/vite preview --port 4797" from "/home/jwhite/lampas"
+    And the session of "mw-l.2" reported a plain success
+    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS: none\nTester fuel: 55,100 tokens"
+    When mw closes out "mw-l.2"
+    Then process 4101 has been stopped
+    And process 4102 has been stopped
+    And process 4103 is still running
+    And process 4104 is still running
+    And the printed report says "stopped 2 leftover processes under /tmp/tester-mw-l.2/"
+
+  Scenario: A refused Tester story's leftover server is stopped too
+    Given the story "mw-l.1" is planned and ready to be worked here
+    And the Tester story "mw-l.2" testing "mw-l.1" has been worked in its own worktree, committing nothing
+    And the Tester of "mw-l.2" committed a script to its branch
+    And process 4101 is running "node /tmp/tester-mw-l.2/app/node_modules/.bin/vite preview --port 4799" from "/tmp/tester-mw-l.2/app"
+    And the session of "mw-l.2" reported a plain success
+    And the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS: none\nTester fuel: 55,100 tokens"
+    When mw closes out "mw-l.2"
+    Then the story "mw-l.2" is not closed
+    And process 4101 has been stopped
+    And the printed report says "stopped 1 leftover processes under /tmp/tester-mw-l.2/"
+
   Scenario: A Tester story that committed something is refused, and nothing is merged
     Given the story "mw-l.1" is planned and ready to be worked here
     And the Tester story "mw-l.2" testing "mw-l.1" has been worked in its own worktree, committing nothing

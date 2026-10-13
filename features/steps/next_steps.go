@@ -46,6 +46,9 @@ type nextContext struct {
 	mailbox *apptest.FakeMailbox
 	beating *apptest.FakeHeartbeats // the heartbeat processes alive, for features/next_running.feature
 	stamps  *apptest.FakeStampQueue
+	// leftovers is the user's process table, for features/tester.feature's sweep
+	// of what a Tester's session left running (mw-gq6.409).
+	leftovers *apptest.FakeUserProcesses
 
 	// realVault says the vault is a real git clone (mw-gq6.87's own scenarios),
 	// so that mw next commits to it for real and a scenario can read git's own
@@ -131,6 +134,8 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 			mailbox: apptest.NewFakeMailbox(),
 			beating: apptest.NewFakeHeartbeats(),
 			stamps:  apptest.NewFakeStampQueue(),
+
+			leftovers: apptest.NewFakeUserProcesses(),
 		}
 		return ctx, nil
 	})
@@ -957,6 +962,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 		Mailbox:       c.mailbox,
 		Runner:        c.runner,
 		Heartbeats:    c.beating,
+		Leftovers:     c.leftovers,
 		Memory:        c.tracker,
 		Sync:          application.Sync{Vault: c.files, Tracker: c.tracker, Host: nextHost},
 		Dispatch: application.Dispatch{
