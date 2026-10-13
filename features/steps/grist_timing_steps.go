@@ -3,6 +3,8 @@ package steps
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"math"
 	"strconv"
@@ -35,6 +37,9 @@ type timingContext struct {
 	out    bytes.Buffer
 	runErr error
 	groups []application.GristTimingGroup
+
+	otlp     application.OtlpDocument
+	otlpTxid string
 }
 
 // timingClock is a clock that reads one moment until it is moved.
@@ -138,6 +143,7 @@ func (t *timingContext) noticeGrists() error {
 }
 
 func registerGristTiming(ctx *godog.ScenarioContext, c *gristContext) {
+	registerGristTimingOtlp(ctx, c)
 	t := &c.timing
 	// After the reset of gristContext's own Before hook, which clears it.
 	ctx.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
@@ -454,6 +460,294 @@ func (t *timingContext) printedNothing(a, b string) error {
 		if t.block(name) != "" {
 			return fmt.Errorf("%q was printed:\n%s", name, t.out.String())
 		}
+	}
+	return nil
+}
+
+// otlpSteps are the steps of features/grist_timing_otlp.feature: they read the
+// document mw grist timing --otlp wrote.
+func registerGristTimingOtlp(ctx *godog.ScenarioContext, c *gristContext) {
+	t := &c.timing
+	ctx.Given(`^the record holds a grist whose txid is "([^"]*)" answered by "([^"]*)" "([^"]*)" at ([0-9:.]+) UTC, with these phases in seconds:$`, t.otlpGrist)
+	ctx.Given(`^the app reported for that grist: tap_to_sent (\d+), network (\d+), delivered_to_seen (\d+) and seen_to_shown (\d+) milliseconds$`, t.otlpClient)
+	ctx.When(`^mw grist timing is run with --otlp$`, t.runOtlp)
+	ctx.Then(`^the output is valid OTLP JSON$`, t.otlpValid)
+	ctx.Then(`^it holds one trace, whose id is "([^"]*)"$`, t.otlpOneTrace)
+	ctx.Then(`^the root span is named "([^"]*)" and runs from ([0-9:.]+) to ([0-9:.]+)$`, t.otlpRoot)
+	ctx.Then(`^its eight phase spans have the root for their parent, and run:$`, t.otlpPhases)
+	ctx.Then(`^the output holds (\d+) spans?, the root "([^"]*)"$`, t.otlpOnlyRoot)
+}
+
+// otlpDay is the day of the lines the otlp scenarios write.
+var otlpDay = time.Date(2026, 10, 7, 0, 0, 0, 0, time.UTC)
+
+// atClock is a time of otlpDay written 15:04:05.9 (the fraction optional).
+func atClock(text string) (time.Time, error) {
+	whole, frac, _ := strings.Cut(text, ".")
+	parsed, err := time.Parse("15:04:05", whole)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("%q is not a time of day: %v", text, err)
+	}
+	at := otlpDay.Add(time.Duration(parsed.Hour())*time.Hour + time.Duration(parsed.Minute())*time.Minute + time.Duration(parsed.Second())*time.Second)
+	if frac != "" {
+		f, _ := strconv.ParseFloat("0."+frac, 64)
+		at = at.Add(time.Duration(math.Round(f * float64(time.Second))))
+	}
+	return at, nil
+}
+
+func (t *timingContext) otlpGrist(txid, app, kind, at string, table *godog.Table) error {
+	when, err := atClock(at)
+	if err != nil {
+		return err
+	}
+	if len(table.Rows) != 2 {
+		return fmt.Errorf("the table needs a header and one row")
+	}
+	line := application.GrindLine{Time: when, Txid: txid, App: app, Kind: kind, Status: application.GristAnswered, Delivered: true}
+	for i, cell := range table.Rows[1].Cells {
+		v, err := strconv.ParseFloat(cell.Value, 64)
+		if err != nil {
+			return fmt.Errorf("%q is not a number", cell.Value)
+		}
+		switch table.Rows[0].Cells[i].Value {
+		case "seconds":
+			line.Seconds = v
+		case "wake_s":
+			line.WakeSeconds = &v
+		case "pickup_s":
+			line.PickupSeconds = &v
+		case "slot_s":
+			line.SlotSeconds = &v
+		case "startup_s":
+			line.StartupSeconds = &v
+		case "model_s":
+			line.ModelSeconds = &v
+		case "deliver_s":
+			line.DeliverSeconds = &v
+		case "total_s":
+			line.TotalSeconds = &v
+		default:
+			return fmt.Errorf("the column %q is no phase", table.Rows[0].Cells[i].Value)
+		}
+	}
+	t.otlpTxid = txid
+	return t.append(line)
+}
+
+func (t *timingContext) otlpClient(tap, network, seen, shown string) error {
+	ms := func(s string) *float64 { v, _ := strconv.ParseFloat(s, 64); return &v }
+	return t.c.state.AppendClientTiming(context.Background(), application.GristClientTiming{
+		Time: otlpDay, Txid: t.otlpTxid,
+		TapToSent: ms(tap), Network: ms(network), DeliveredToSeen: ms(seen), SeenToShown: ms(shown),
+	})
+}
+
+func (t *timingContext) runOtlp() error {
+	t.out.Reset()
+	t.otlp, t.runErr = application.GristTiming{State: t.c.state, Out: &t.out}.Otlp(context.Background(), time.Time{}, "", "")
+	return nil
+}
+
+// otlpSpans is every span of the document with the service.name it was
+// written under.
+func (t *timingContext) otlpSpans() map[string][]application.OtlpSpan {
+	spans := map[string][]application.OtlpSpan{}
+	for _, rs := range t.otlp.ResourceSpans {
+		service := rs.Resource.Attributes[0].Value.StringValue
+		for _, ss := range rs.ScopeSpans {
+			spans[*service] = append(spans[*service], ss.Spans...)
+		}
+	}
+	return spans
+}
+
+// otlpValid checks the printed JSON against what the OTLP/JSON schema
+// requires of a trace: resourceSpans > scopeSpans > spans, a 32-digit hex
+// traceId, a 16-digit hex spanId, a name, and start and end times as strings of
+// nanoseconds, the end not before the start.
+func (t *timingContext) otlpValid() error {
+	if t.runErr != nil {
+		return t.runErr
+	}
+	var raw map[string]any
+	text := strings.TrimSuffix(t.out.String(), "\n")
+	if strings.Contains(text, "\n") {
+		return fmt.Errorf("expected one line of JSON, got:\n%s", t.out.String())
+	}
+	if err := json.Unmarshal([]byte(text), &raw); err != nil {
+		return fmt.Errorf("the output is not JSON: %v\n%s", err, t.out.String())
+	}
+	return validateOtlp(raw)
+}
+
+func validateOtlp(raw map[string]any) error {
+	hexOf := func(v any, n int) bool {
+		s, ok := v.(string)
+		if !ok || len(s) != n || s != strings.ToLower(s) {
+			return false
+		}
+		_, err := hex.DecodeString(s)
+		return err == nil && strings.Trim(s, "0") != ""
+	}
+	list := func(v any, what string) ([]any, error) {
+		l, ok := v.([]any)
+		if !ok || len(l) == 0 {
+			return nil, fmt.Errorf("%s is not a list with something in it", what)
+		}
+		return l, nil
+	}
+	resourceSpans, err := list(raw["resourceSpans"], "resourceSpans")
+	if err != nil {
+		return err
+	}
+	for _, r := range resourceSpans {
+		rs, _ := r.(map[string]any)
+		resource, _ := rs["resource"].(map[string]any)
+		attrs, err := list(resource["attributes"], "resource.attributes")
+		if err != nil {
+			return err
+		}
+		if a, _ := attrs[0].(map[string]any); a["key"] != "service.name" {
+			return fmt.Errorf("the first resource attribute is not service.name: %v", attrs[0])
+		}
+		scopeSpans, err := list(rs["scopeSpans"], "scopeSpans")
+		if err != nil {
+			return err
+		}
+		for _, s := range scopeSpans {
+			ss, _ := s.(map[string]any)
+			spans, err := list(ss["spans"], "spans")
+			if err != nil {
+				return err
+			}
+			for _, sp := range spans {
+				span, _ := sp.(map[string]any)
+				if !hexOf(span["traceId"], 32) {
+					return fmt.Errorf("traceId %v is not 32 lowercase hex digits", span["traceId"])
+				}
+				if !hexOf(span["spanId"], 16) {
+					return fmt.Errorf("spanId %v is not 16 lowercase hex digits", span["spanId"])
+				}
+				if parent, present := span["parentSpanId"]; present && !hexOf(parent, 16) {
+					return fmt.Errorf("parentSpanId %v is not 16 lowercase hex digits", parent)
+				}
+				if name, _ := span["name"].(string); name == "" {
+					return fmt.Errorf("a span has no name")
+				}
+				start, err1 := strconv.ParseInt(fmt.Sprint(span["startTimeUnixNano"]), 10, 64)
+				end, err2 := strconv.ParseInt(fmt.Sprint(span["endTimeUnixNano"]), 10, 64)
+				if _, isString := span["startTimeUnixNano"].(string); !isString || err1 != nil {
+					return fmt.Errorf("startTimeUnixNano %v is not a string of nanoseconds", span["startTimeUnixNano"])
+				}
+				if _, isString := span["endTimeUnixNano"].(string); !isString || err2 != nil || end < start {
+					return fmt.Errorf("endTimeUnixNano %v is not a string of nanoseconds at or after the start", span["endTimeUnixNano"])
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (t *timingContext) otlpOneTrace(id string) error {
+	seen := map[string]bool{}
+	for _, spans := range t.otlpSpans() {
+		for _, s := range spans {
+			seen[s.TraceID] = true
+		}
+	}
+	if len(seen) != 1 || !seen[id] {
+		return fmt.Errorf("expected one trace %s, got %v", id, seen)
+	}
+	return nil
+}
+
+// within says two moments are the same, to a millisecond.
+func within(got string, want time.Time) error {
+	n, err := strconv.ParseInt(got, 10, 64)
+	if err != nil {
+		return err
+	}
+	if d := time.Duration(n - want.UnixNano()); d > time.Millisecond || d < -time.Millisecond {
+		return fmt.Errorf("expected %s, got %s", want.Format("15:04:05.000"), time.Unix(0, n).UTC().Format("15:04:05.000"))
+	}
+	return nil
+}
+
+func (t *timingContext) otlpRoot(name, from, to string) error {
+	for _, s := range t.otlpSpans()[application.OtlpMillService] {
+		if s.ParentSpanID != "" || s.Name != name {
+			continue
+		}
+		start, _ := atClock(from)
+		end, _ := atClock(to)
+		if err := within(s.StartTimeUnixNano, start); err != nil {
+			return fmt.Errorf("root start: %v", err)
+		}
+		if err := within(s.EndTimeUnixNano, end); err != nil {
+			return fmt.Errorf("root end: %v", err)
+		}
+		return nil
+	}
+	return fmt.Errorf("no root span %q in the output", name)
+}
+
+func (t *timingContext) otlpPhases(table *godog.Table) error {
+	spans := t.otlpSpans()
+	var rootID string
+	for _, s := range spans[application.OtlpMillService] {
+		if s.ParentSpanID == "" {
+			rootID = s.SpanID
+		}
+	}
+	count := 0
+	for _, list := range spans {
+		for _, s := range list {
+			if s.ParentSpanID != "" {
+				count++
+			}
+		}
+	}
+	if count != len(table.Rows)-1 {
+		return fmt.Errorf("expected %d phase spans, got %d", len(table.Rows)-1, count)
+	}
+	for _, row := range table.Rows[1:] {
+		name, service, from, to := row.Cells[0].Value, row.Cells[1].Value, row.Cells[2].Value, row.Cells[3].Value
+		var found *application.OtlpSpan
+		for i, s := range spans[service] {
+			if s.Name == name {
+				found = &spans[service][i]
+			}
+		}
+		if found == nil {
+			return fmt.Errorf("no span %s under service %s", name, service)
+		}
+		if found.ParentSpanID != rootID {
+			return fmt.Errorf("span %s has parent %q, not the root %q", name, found.ParentSpanID, rootID)
+		}
+		start, _ := atClock(from)
+		end, _ := atClock(to)
+		if err := within(found.StartTimeUnixNano, start); err != nil {
+			return fmt.Errorf("%s start: %v", name, err)
+		}
+		if err := within(found.EndTimeUnixNano, end); err != nil {
+			return fmt.Errorf("%s end: %v", name, err)
+		}
+	}
+	return nil
+}
+
+func (t *timingContext) otlpOnlyRoot(n, name string) error {
+	spans := t.otlpSpans()
+	total := 0
+	for _, list := range spans {
+		total += len(list)
+	}
+	if want, _ := strconv.Atoi(n); total != want {
+		return fmt.Errorf("expected %d span, got %d", want, total)
+	}
+	if got := spans[application.OtlpMillService]; len(got) != 1 || got[0].Name != name || got[0].ParentSpanID != "" {
+		return fmt.Errorf("expected the one span to be the root %q, got %+v", name, got)
 	}
 	return nil
 }
