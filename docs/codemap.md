@@ -14,7 +14,7 @@ domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cm
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | infra/beads/mail.go | FakeMailbox |
 | EpicRules (+LandingRules: lenient read) | application/epicrules.go | infra/vault/epicrules.go | FakeEpicRules |
 | Vault | application/seatboot.go | infra/vault | seatboot_test.go |
-| Runner | application/runner.go | infra/tmux | FakeRunner |
+| Runner, BdProgram | application/runner.go, application/bdretry.go | infra/{tmux,bdprogram} | FakeRunner, FakeBd |
 | Harness | application/harness.go | infra/claude | seatboot_test.go |
 | SeatFiles, Windows, SeatHarness, ActingFile | application/seatup.go, application/seathandover.go | infra/{vault/{seat,reaplog},tmux/window,claude/claude}.go | Fake{Windows,Acting*} |
 | Transcripts{,Tail,Replies}, PeekRemote | application/seatcontext.go, application/peek.go | infra/{claude,peekremote} | FakePeek |
@@ -45,7 +45,7 @@ domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cm
 |-|-|-|-|
 | File, Release, Retry, Cause, Path{Set,Show} | application/file.go, application/release.go, application/retry.go, application/cause.go, application/pathset.go | cmd/mw/file.go, cmd/mw/release.go, cmd/mw/retry.go, cmd/mw/cause.go, cmd/mw/path.go | features/{file_plan,release,retry,cause,path_set,files_expected}.feature |
 | Show, Peek, Prove, StampHead, Tester, FactoryReport[Send] | application/show.go, application/stamphead.go, application/testerreport.go, application/factoryreport.go, application/reportsend.go | mw show/peek/prove/stamp/tester/report[ send] - cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go, cmd/mw/tester.go, cmd/mw/report.go, cmd/mw/reportsend.go | features/{show,peek,prove,stamp,tester,report,report_send}.feature |
-| Dispatch, Next, AfterLandingRun | application/dispatch.go, application/next.go, application/afterlandingrun.go | mw dispatch/next/after-landing - cmd/mw/dispatch.go, cmd/mw/next.go, cmd/mw/afterlanding.go | features/{dispatch,next,after_landing}.feature |
+| Dispatch, Next, AfterLandingRun, BdRetry (mw bd: the Builder's bd) | application/dispatch.go, application/next.go, application/afterlandingrun.go, application/bdretry.go | mw dispatch/next/after-landing/bd - cmd/mw/dispatch.go, cmd/mw/next.go, cmd/mw/afterlanding.go, cmd/mw/bd.go | features/{dispatch,next,after_landing,bd_retry}.feature |
 | Check{,Background,Logs,Starter}, Status, CloudCheck, Brief | application/check.go, application/status.go, application/cloud.go, application/brief.go | mw check/status/cloud/brief - cmd/mw/check.go, cmd/mw/status.go, cmd/mw/cloud.go, cmd/mw/brief.go | features/{check,status,cloud,brief}.feature |
 | Sweep, Tidy, Sync, Nudge, Mail, Home[Move] | application/sweep.go, application/tidy.go, application/sync.go, application/nudge.go, application/mail.go, application/home.go, application/homemove.go | mw sweep/tidy/sync/nudge/mail/home - cmd/mw/sweep.go, cmd/mw/tidy.go, cmd/mw/sync.go, cmd/mw/nudge.go, cmd/mw/mail.go, cmd/mw/home.go, cmd/mw/homemove.go | features/{sweep,tidy,sync,mail,home}.feature |
 | Suite (whole-suite run), SuiteFiler (--file), NightlySuite (follower job suite@host, [events] suite_hour, SUITE in status) | application/suite.go, application/suitefile.go, application/suitenightly.go, application/suitestatus.go | mw suite - cmd/mw/suite.go, cmd/mw/suitenightly.go | features/{suite,suite_nightly}.feature |

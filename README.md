@@ -1034,6 +1034,22 @@ must match **each subcommand** of a compound command on its own. `bd show x |
 head -5; cat CONTEXT.md` is not covered by this rule — the `head` and the `cat`
 are judged as usual, and a chain can be refused whole. Run `bd` on its own line.
 
+### The bd a session runs rides out a passing fault
+
+A session's `bd` is `mw bd` (mw-gq6.393): the session's line makes a directory
+holding a script named `bd` that runs `mw bd`, puts it ahead of the real `bd` on
+the PATH of the harness alone (not of the heartbeat or `mw next` beside it), and
+takes the directory away when the session ends. `mw bd` runs the real `bd` and,
+when it fails on a passing fault of the beads server (`dolt server unreachable`,
+`connection refused`, `i/o timeout`, `write commit result indeterminate`), waits
+and runs it again, 2s doubling to 20s, for up to two minutes. A `close` or a
+`comment` that met a fault is read back first (`bd show`, `bd comments`), so one
+that had landed is not written again; a comment that cannot be compared (from a
+file) and a `create` are never run again. A server that stays down leaves with
+bd's own status after saying `giving up` and the fault it met. A host with no
+`bd` on its PATH keeps the PATH it had. `mw next` also tries the claim give-back
+of an open-steps stop again on the same faults.
+
 ### Who mw writes as
 
 `mw` names itself on **every** `bd` it runs: `--actor mw@<host>`, from the
