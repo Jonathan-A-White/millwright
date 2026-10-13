@@ -976,6 +976,14 @@ tests' last lines), and leaves with 1 when any check fails. It reports **every**
 check that fails, not only the first: a session that fixes one and asks again
 pays for the tests each time.
 
+It treats a busy host as the close-out does (mw-gq6.379): it waits, up to the
+close-out's bound, for the host's load to fall below its core count before the
+tests, and tests that fail while the host was busy are run once more when it has
+calmed. Only a second failure is reported, and the report says the tests ran
+twice and the load the first run failed at, so a session does not spend turns, or
+a second full suite, proving a failure was the host's load. A failure on a calm
+host is reported at once, with no second run.
+
 It is read-only. It writes no comment, run state or ledger line, commits nothing
 in the vault, and asks git for nothing that writes — no fetch, no landing
 worktree — so the commits are counted against `origin/<target>` as the
