@@ -258,6 +258,12 @@ type SeatBoot struct {
 	// is kept renewed for as long as the harness is really running — `mw next
 	// --heartbeat`. An empty Heartbeat starts nothing beside the harness.
 	Heartbeat []string
+
+	// BdRetry is the command the session's bd becomes: the program and the
+	// arguments that make it run bd again on a passing fault of the beads
+	// server (`mw bd`, mw-gq6.393). An empty BdRetry leaves the session the
+	// real bd.
+	BdRetry []string
 }
 
 // Boot assembles the session that works detail in the worktree dir. What comes
@@ -350,6 +356,7 @@ func (b SeatBoot) boot(ctx context.Context, detail StoryDetail, dir string, kick
 		Kickoff:    kickoff(b.Vault.Dir()),
 		After:      b.after(id),
 		Heartbeat:  b.heartbeat(id),
+		BdRetry:    b.BdRetry,
 	})
 	if err != nil {
 		return SessionSpec{}, fmt.Errorf("booting %s: %w", id, err)

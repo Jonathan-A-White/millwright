@@ -942,3 +942,92 @@ func TestANiceOfZeroLaunchesWithoutNice(t *testing.T) {
 		}
 	}
 }
+
+// writeScript writes an executable shell script.
+func writeScript(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+		t.Fatalf("writing %s: %v", path, err)
+	}
+}
+
+// mw-gq6.393: a session given BdRetry runs `mw bd` whenever it runs bd, and
+// only the session does; the real bd is named to it, and the script is gone
+// once the session is over.
+func TestTheSessionsBdIsMwBdAndNobodyElsesIs(t *testing.T) {
+	dir := t.TempDir()
+	realDir := filepath.Join(dir, "real")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "out")
+	writeScript(t, filepath.Join(realDir, "bd"), `echo "real bd $*" >> `+out+"\n")
+	// The mw that bd becomes says what it was run with and which bd it was
+	// told is the real one.
+	mw := filepath.Join(dir, "mw")
+	writeScript(t, mw, `echo "mw $* real=$MW_BD_REAL" >> `+out+"\n")
+	// The harness runs bd the way a session does and says which bd it found.
+	harness := filepath.Join(dir, "claude")
+	writeScript(t, harness, `bd close step-1 --reason done; command -v bd >> `+out+"\n")
+	after := filepath.Join(dir, "after")
+	writeScript(t, after, `echo "after finds $(command -v bd)" >> `+out+"\n")
+
+	spec, err := New(WithProgram(harness)).Session(launch(func(l *application.Launch) {
+		l.ResultFile = filepath.Join(dir, "result.json")
+		l.After = []string{after}
+		l.BdRetry = []string{mw, "bd"}
+	}))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	cmd := exec.Command(spec.Command[0], "-c", spec.Command[2])
+	cmd.Env = []string{"PATH=" + realDir + ":/usr/bin:/bin", "TMPDIR=" + dir}
+	if said, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("running the assembled line: %v\n%s", err, said)
+	}
+
+	printed, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("nothing was printed: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(printed)), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected three lines, got:\n%s", printed)
+	}
+	if want := "mw bd close step-1 --reason done real=" + filepath.Join(realDir, "bd"); lines[0] != want {
+		t.Errorf("the session's bd ran %q, want %q", lines[0], want)
+	}
+	shim := lines[1]
+	if !strings.HasPrefix(shim, dir+string(filepath.Separator)) || filepath.Base(shim) != "bd" {
+		t.Errorf("the session found bd at %q, want the script made in %s", shim, dir)
+	}
+	if want := "after finds " + filepath.Join(realDir, "bd"); lines[2] != want {
+		t.Errorf("what runs after the session found %q, want %q", lines[2], want)
+	}
+	if _, err := os.Stat(shim); !os.IsNotExist(err) {
+		t.Errorf("the script %s was left behind (%v)", shim, err)
+	}
+}
+
+func TestASessionWithNoBdOnTheHostKeepsItsPath(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "out")
+	harness := filepath.Join(dir, "claude")
+	writeScript(t, harness, `echo "path=$PATH" >> `+out+"\n")
+	spec, err := New(WithProgram(harness)).Session(launch(func(l *application.Launch) {
+		l.ResultFile = filepath.Join(dir, "result.json")
+		l.BdRetry = []string{"mw", "bd"}
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(spec.Command[0], "-c", spec.Command[2])
+	cmd.Env = []string{"PATH=/usr/bin:/bin", "TMPDIR=" + dir}
+	if said, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, said)
+	}
+	printed, _ := os.ReadFile(out)
+	if got := strings.TrimSpace(string(printed)); got != "path=/usr/bin:/bin" {
+		t.Errorf("the session's PATH is %q, want it as the host had it", got)
+	}
+}

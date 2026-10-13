@@ -288,6 +288,7 @@ func builderBoot(files *vault.Vault, host string, tests map[string]string, nice 
 		Host:      host,
 		After:     afterSession(),
 		Heartbeat: heartbeatSession(),
+		BdRetry:   bdRetrySession(),
 	}
 }
 
@@ -305,6 +306,12 @@ func afterSession() []string {
 // renewing the claim's lease. Found the same way afterSession's mw is.
 func heartbeatSession() []string {
 	return append(mwProgram(), "next", "--heartbeat")
+}
+
+// bdRetrySession is the command a dispatched session's bd becomes: this same
+// mw, as `mw bd` (mw-gq6.393).
+func bdRetrySession() []string {
+	return append(mwProgram(), "bd")
 }
 
 // mwProgram is the mw this host runs, as one argument: the running program's
