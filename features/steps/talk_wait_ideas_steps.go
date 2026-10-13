@@ -18,7 +18,8 @@ import (
 	"github.com/cucumber/godog"
 )
 
-// talkIdeasClock is the time Ideas only is read at in mw talk wait's scenarios.
+// talkIdeasClock is the time Ideas only is read at in mw talk wait's scenarios: an injected clock, so a
+// scenario's end of the mode is placed on it ("9 hours on"), never on a date the real clock can pass.
 var talkIdeasClock = time.Date(2026, time.October, 12, 12, 0, 0, 0, time.UTC)
 
 // talkIdeasBackend is the backend's Ideas only: what GET /api/ideas-only/{key}
@@ -150,13 +151,9 @@ func (c *talkWaitContext) cardsSent() ([]domain.Card, error) {
 }
 
 func (c *talkWaitContext) registerIdeasOnlySteps(ctx *godog.ScenarioContext) {
-	ctx.Given(`^Ideas only is on until "([^"]*)" for mw talk wait$`, func(until string) error {
-		at, err := time.Parse(time.RFC3339, until)
-		if err != nil {
-			return err
-		}
+	ctx.Given(`^Ideas only is on until (\d+) hours on for mw talk wait$`, func(hours int) error {
 		c.backend.mu.Lock()
-		c.backend.ideas.on, c.backend.ideas.until = true, at.Unix()
+		c.backend.ideas.on, c.backend.ideas.until = true, talkIdeasClock.Add(time.Duration(hours)*time.Hour).Unix()
 		c.backend.mu.Unlock()
 		c.ideas = true
 		return nil
@@ -183,10 +180,12 @@ func (c *talkWaitContext) registerIdeasOnlySteps(ctx *godog.ScenarioContext) {
 		c.backend.mu.Lock()
 		c.backend.ideas.on, c.backend.ideas.until = false, 0
 		c.backend.mu.Unlock()
+		c.lastEvent = time.Now()
 		c.backend.ideasEvent(c.governorKey, false, 0)
 		return nil
 	})
 	ctx.When(`^the backend says the Ideas only of "([^"]*)" has ended$`, func(key string) error {
+		c.lastEvent = time.Now()
 		c.backend.ideasEvent(key, false, 0)
 		return nil
 	})
@@ -199,16 +198,17 @@ func (c *talkWaitContext) registerIdeasOnlySteps(ctx *godog.ScenarioContext) {
 		}
 	})
 
-	ctx.When(`^the clock of Ideas only passes "([^"]*)" for mw talk wait$`, func(at string) error {
-		t, err := time.Parse(time.RFC3339, at)
-		if err != nil {
-			return err
-		}
-		c.lastEvent = time.Now()
-		c.clockAt.Store(t.Unix())
+	ctx.When(`^(\d+) milliseconds go by on the host running mw talk wait$`, func(ms int) error {
+		time.Sleep(time.Duration(ms) * time.Millisecond)
 		return nil
 	})
-	ctx.Then(`^the wait has kept (\d+) ideas$`, func(n int) error {
+
+	ctx.When(`^the clock of Ideas only passes (\d+) hours and (\d+) seconds? on for mw talk wait$`, func(hours, seconds int) error {
+		c.lastEvent = time.Now()
+		c.clockAt.Store(talkIdeasClock.Add(time.Duration(hours)*time.Hour + time.Duration(seconds)*time.Second).Unix())
+		return nil
+	})
+	ctx.Then(`^the wait has kept (\d+) ideas?$`, func(n int) error {
 		return c.waitFor(fmt.Sprintf("the wait to keep %d ideas", n), func() bool {
 			held, err := c.ideasFiles().Held(context.Background())
 			return err == nil && len(held) == n
