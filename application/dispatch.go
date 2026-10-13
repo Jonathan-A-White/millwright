@@ -305,19 +305,19 @@ type LandedAlready struct {
 // smokeHold is the reason a failed grist smoke holds the stories of rig, empty
 // when it does not. Each rig is asked once a pass; a record that cannot be read
 // holds nothing back.
-func (d Dispatch) smokeHold(ctx context.Context, rig string, asked map[string]string) string {
+func (d Dispatch) smokeHold(ctx context.Context, rig string, asked map[string]GristSmokeHold) GristSmokeHold {
 	if d.SmokeHolds == nil {
-		return ""
+		return GristSmokeHold{}
 	}
-	if why, done := asked[rig]; done {
-		return why
+	if hold, done := asked[rig]; done {
+		return hold
 	}
-	why, err := d.SmokeHolds.HeldBy(ctx, rig)
+	hold, err := d.SmokeHolds.Hold(ctx, rig)
 	if err != nil {
-		why = ""
+		hold = GristSmokeHold{}
 	}
-	asked[rig] = why
-	return why
+	asked[rig] = hold
+	return hold
 }
 
 // HeldRefused is one story this dispatch found claimed here with a dead pane
@@ -615,7 +615,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	// dry run reads them too, so that it reports the same refusal a real run
 	// would, without writing anything.
 	var formulas map[string]bool
-	smokeHolds := map[string]string{}
+	smokeHolds := map[string]GristSmokeHold{}
 	for _, detail := range ready {
 		id := detail.Story.ID
 		// First, so that a story that is not a session's to take is never passed
@@ -682,9 +682,10 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		}
 
 		// A rig whose last grist smoke failed holds its open stories, so that no
-		// more work lands on a mill that does not answer as its examples say.
-		if held := d.smokeHold(ctx, path.Rig, smokeHolds); held != "" {
-			report.Passed = append(report.Passed, Passed{StoryID: id, Why: held})
+		// more work lands on a mill that does not answer as its examples say. A story
+		// that names a failing example as its cause is the fix, and runs (mw-gq6.412).
+		if held := d.smokeHold(ctx, path.Rig, smokeHolds); held.Reason != "" && !held.Names(detail.SmokeExamples) {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Why: held.Reason})
 			continue
 		}
 

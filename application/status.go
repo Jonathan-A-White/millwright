@@ -1822,7 +1822,9 @@ func writeGristSmoke(b *strings.Builder, records []GristSmokeRecord) {
 			clip(b, fmt.Sprintf("  %s ok %s, %d examples", r.App, when, r.Examples))
 		} else {
 			clip(b, fmt.Sprintf("  %s FAILED %s", r.App, when))
-			if r.Rig != "" {
+			if len(r.FiledOn) > 0 {
+				clip(b, fmt.Sprintf("    filed on %s, not held", strings.Join(r.FiledOn, ", ")))
+			} else if r.Rig != "" {
 				clip(b, fmt.Sprintf("    the open stories of %s are held", r.Rig))
 			} else {
 				clip(b, "    no rig's stories are held (run by hand)")
@@ -1834,7 +1836,7 @@ func writeGristSmoke(b *strings.Builder, records []GristSmokeRecord) {
 		for _, warning := range r.Warnings {
 			wrapInto(b, "    ", "warning: "+warning)
 		}
-		if r.Failed {
+		if r.Held() {
 			clip(b, "    lifted by a smoke that passes:")
 			clip(b, "      mw grist smoke "+r.App)
 			clip(b, "    or by hand: mw grist smoke "+r.App+" --lift")

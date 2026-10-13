@@ -172,6 +172,10 @@ type StoryDetail struct {
 	// FilesChanged are the files the story's branch has changed so far, as mw
 	// next recorded them (FilesChangedField); empty when none were.
 	FilesChanged []string
+	// SmokeExamples are the failing grist smoke examples the story names as its
+	// cause, as the SmokeExamplesField metadata says (<app>/<kind>/<example>);
+	// empty when it names none.
+	SmokeExamples []string
 	// Cause, CauseWhy and CauseFix are what mw cause recorded of why the story
 	// failed, as the CauseField, CauseWhyField and CauseFixField metadata say:
 	// the class (one of CauseClasses), the reason, and the bead that mends it;

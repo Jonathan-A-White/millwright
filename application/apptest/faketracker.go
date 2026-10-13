@@ -1504,6 +1504,9 @@ func (f *FakeTracker) SetStoryMetadata(_ context.Context, id string, fields map[
 			if k == application.FilesChangedField {
 				s.detail.FilesChanged = domain.FileList(v)
 			}
+			if k == application.SmokeExamplesField {
+				s.detail.SmokeExamples = application.ParseSmokeExamples(v)
+			}
 			if k == application.CauseField {
 				s.detail.Cause = v
 			}
@@ -1927,6 +1930,27 @@ func (f *FakeTracker) NoteWrites(key string) int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.noteWrites[key]
+}
+
+// FiledSmokeExamples implements application.GristSmokeFiled: the examples the
+// open stories name, each with the story that names it.
+func (f *FakeTracker) FiledSmokeExamples(_ context.Context) (map[string]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	found := map[string]string{}
+	for _, id := range f.order {
+		if s := f.stories[id]; s != nil && !s.detail.Closed() {
+			for _, example := range s.detail.SmokeExamples {
+				if _, named := found[example]; !named {
+					found[example] = id
+				}
+			}
+		}
+	}
+	return found, nil
 }
 
 // NotesWithPrefix implements application.DoctorNotes.

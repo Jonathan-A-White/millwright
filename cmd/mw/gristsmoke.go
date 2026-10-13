@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -17,8 +18,10 @@ import (
 
 // gristSmokeBook is the record of each app's last grist smoke, kept in the
 // vault's tracker, and the alarm a failed one posts to the home's event log.
+// The tracker also says which failing examples an open bead names, when it can.
 func gristSmokeBook(notes application.GristSmokeNotes, host string) application.GristSmokeBook {
-	return application.GristSmokeBook{Notes: notes, Events: homeEventLog(), Host: host}
+	filed, _ := notes.(application.GristSmokeFiled)
+	return application.GristSmokeBook{Notes: notes, Filed: filed, Events: homeEventLog(), Host: host}
 }
 
 // newSmoker is the grist smoke as this host is set up to make it: the grinds
@@ -97,12 +100,12 @@ func hostGristSmoke(notes application.GristSmokeNotes, host string, rigs map[str
 // newGristSmokeCmd builds `mw grist smoke <app>`: an app's grist tested end to
 // end.
 func newGristSmokeCmd() *cobra.Command {
-	var kind string
+	var kind, filed string
 	var wait time.Duration
 	var lift, asJSON bool
 
 	cmd := &cobra.Command{
-		Use:   "smoke <app>",
+		Use:   "smoke <app> [<kind>/<example>...]",
 		Short: "Send every example of an app's grinds through the live backend and check the answers",
 		Long: "smoke sends each scenario of the app's grinds, grinds/examples/<kind>/<name>.json at its rig's\n" +
 			"main (config [grist-apps]), through the postern backend as the test key (grist_test_key_file,\n" +
@@ -116,9 +119,36 @@ func newGristSmokeCmd() *cobra.Command {
 			"A smoke the mill would not take for a reason that is not the examples' (the key's daily limit,\n" +
 			"its licence, the backend out of reach) is \"not run\": it fails nothing and holds nothing.\n\n" +
 			"What it finds is kept (mw status shows it): a failure after a landing holds the rig's open\n" +
-			"stories until a smoke passes. --lift ends that hold without a smoke. It exits 1 on a failure.",
-		Args: cobra.ExactArgs(1),
+			"stories until a smoke passes. --lift ends that hold without a smoke. It exits 1 on a failure.\n\n" +
+			"A failure whose every failing example is already named on an open bead holds nothing: its line\n" +
+			"says \"all filed on <bead>: not held\" and mw status shows \"filed on <bead>, not held\". Name them when\n" +
+			"you file the cause, with --filed <bead> and the examples (<kind>/<example>, or <app>/<kind>/<example>):\n" +
+			"  mw grist smoke lampas --filed mw-5r3p30.313 tutor/hello tutor/photo\n" +
+			"which sets the bead's smoke_examples metadata (comma-separated <app>/<kind>/<example>), and ends the\n" +
+			"hold of a failure it now names in full. The bead itself is never held by a failure it names, so the\n" +
+			"fix can run. Closing the bead ends it: the next failing smoke on those examples holds again.",
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if filed == "" && len(args) != 1 {
+				return fmt.Errorf("mw grist smoke takes the app alone; examples go with --filed <bead>")
+			}
+			if filed != "" {
+				dir, err := config.Vault()
+				if err != nil {
+					return err
+				}
+				host, err := config.Host()
+				if err != nil {
+					return err
+				}
+				gateway := mwGateway(dir, host)
+				named, err := application.GristSmokeFile{Tracker: gateway, Book: gristSmokeBook(gateway, host)}.Run(cmd.Context(), filed, args[0], args[1:])
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(cmd.OutOrStdout(), "grist smoke: %s names %s\n", filed, strings.Join(named, ", "))
+				return nil
+			}
 			if asJSON {
 				// What a landing in the factory's rig asks of the mw it just built
 				// (mw-gq6.339): the smoke only, as one JSON report. The landing
@@ -162,6 +192,7 @@ func newGristSmokeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			report = book.Mark(cmd.Context(), report)
 			// A kind-only smoke does not stand for the whole app's.
 			if kind == "" {
 				if err := book.Record(cmd.Context(), "", report); err != nil {
@@ -181,6 +212,7 @@ func newGristSmokeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&kind, "kind", "", "smoke only this kind of grist (default: every grind of the app)")
 	cmd.Flags().DurationVar(&wait, "wait", application.GristSmokeWait, "how long each example waits for its answer")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print the report as one JSON object, and record nothing (what a landing asks of the mw it built)")
+	cmd.Flags().StringVar(&filed, "filed", "", "name the examples given after the app on this open bead, which holds their cause (smoke_examples), and run no smoke")
 	cmd.Flags().BoolVar(&lift, "lift", false, "end the hold a failed smoke of the app put on its rig's stories, without a smoke")
 	return cmd
 }

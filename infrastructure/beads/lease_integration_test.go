@@ -202,3 +202,28 @@ func TestAClaimClearsTheRunStateAnEarlierAttemptLeft(t *testing.T) {
 		t.Errorf("expected %s no longer to be recorded %s=%s", storyID, application.RunState, application.RunBlocked)
 	}
 }
+
+// mw-gq6.412: the beads that name failing smoke examples are found with one
+// list of a real bd, and a closed one names nothing.
+func TestAClosedBeadNamesNoSmokeExamplesInARealBd(t *testing.T) {
+	t.Parallel()
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	epicID := bdRun(t, vault, beads.Program, "create", "A walking skeleton", "-t", "epic", "--silent")
+	open := bdRun(t, vault, beads.Program, "create", "The bug", "--parent", epicID, "--silent",
+		"--metadata", `{"smoke_examples":"lampas/tutor/hello, lampas/tutor/photo"}`)
+	closed := bdRun(t, vault, beads.Program, "create", "A fixed bug", "--parent", epicID, "--silent",
+		"--metadata", `{"smoke_examples":"lampas/tutor/old"}`)
+	bdRun(t, vault, beads.Program, "close", closed, "--reason", "fixed")
+
+	found, err := beads.New(vault, beads.WithActor("mw@vps")).FiledSmokeExamples(ctx)
+	if err != nil {
+		t.Fatalf("listing the filed examples: %v", err)
+	}
+	want := map[string]string{"lampas/tutor/hello": open, "lampas/tutor/photo": open}
+	if len(found) != len(want) || found["lampas/tutor/hello"] != open || found["lampas/tutor/photo"] != open {
+		t.Fatalf("expected %v, got %v", want, found)
+	}
+}

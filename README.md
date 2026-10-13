@@ -2093,6 +2093,24 @@ hand), or by hand with `mw grist smoke <app> --lift` when the failure is the ver
 thing a held story is to mend. A smoke that could not be made at all (no test key)
 is a failure the same way.
 
+A failure whose every failing example is already filed holds nothing (mw-gq6.412).
+An open bead names the examples it holds the cause of in its `smoke_examples` metadata,
+comma-separated `<app>/<kind>/<example>`; the Mayor sets it when he files the cause:
+
+```sh
+mw grist smoke lampas --filed mw-5r3p30.313 tutor/hello tutor/photo
+```
+
+(`--filed <bead>` takes the examples as `<kind>/<example>` or the full name, adds them to the
+bead's metadata, runs no smoke, and ends the hold of the app's last failure if the bead now names
+all of it). A smoke whose every failing example is named on an open bead says
+`FAILED 3 of 9 examples, all filed on mw-5r3p30.313: not held`, `mw status` shows
+`filed on mw-5r3p30.313, not held` under GRIST SMOKE, no alarm is posted and nothing is held.
+One failing example not named, or a failure that is no example's (a refusal, a grind that
+cannot be read), holds as always. A held rig still dispatches the open bead that names a
+failing example, so the fix can run. Closing the bead ends the naming: the next failing
+smoke on those examples holds again.
+
 A landing in the factory's own rig (`millwright`) makes its smoke with the mw that
 landing just built, `bin/mw grist smoke <app> --json` in the rig's checkout, in a
 process of its own, not with the mw `mw next` is running in, which was started

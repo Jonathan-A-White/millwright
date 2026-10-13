@@ -166,3 +166,100 @@ func TestARepeatGristSmokeFailurePostsNoSecondAlarm(t *testing.T) {
 		t.Fatalf("expected ok -> FAILED after a pass to post again, got %d events", n)
 	}
 }
+
+// mw-gq6.412: a rig held by a failed smoke still dispatches the open bead that
+// names the failing examples (its fix must be able to run); every other story
+// of the rig stays held. Once the bead is closed it names nothing.
+func TestAHeldRigStillDispatchesTheBeadThatNamesTheFailingExamples(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, _, _ := aFactory(t)
+	dispatch.Host, dispatch.Cap = "vps", 5
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "Some other story"})
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.2", Title: "The fix"})
+	if err := tracker.SetStoryMetadata(ctx, "mw-gq6.2", map[string]string{application.SmokeExamplesField: "cairn/sweep/one, cairn/sweep/two"}); err != nil {
+		t.Fatal(err)
+	}
+	book := application.GristSmokeBook{Notes: tracker, Host: "vps"}
+	dispatch.SmokeHolds = book
+	failed := application.GristSmokeReport{App: "cairn", Examples: 3, Failures: []string{"cairn/sweep/one: the answer lacked a price", "cairn/sweep/three: the answer lacked a price"}}
+	if err := book.Record(ctx, "millwright", failed); err != nil {
+		t.Fatal(err)
+	}
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Started) != 1 || report.Started[0].StoryID != "mw-gq6.2" {
+		t.Fatalf("expected only the bead that names a failing example started, got %+v passed %+v", report.Started, report.Passed)
+	}
+	if len(report.Passed) != 1 || report.Passed[0].StoryID != "mw-gq6.1" || !strings.Contains(report.Passed[0].Why, "grist smoke of cairn failed") {
+		t.Fatalf("expected the other story passed over for the smoke, got %+v", report.Passed)
+	}
+}
+
+// A failure whose examples are all named on an open bead is recorded as filed
+// and holds nothing; the alarm, which would say it holds, is not posted.
+func TestAFailureFiledOnAnOpenBeadHoldsNothingAndPostsNoAlarm(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	log := &apptest.FakeEventLog{}
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.9", Title: "The bug"})
+	_ = tracker.SetStoryMetadata(ctx, "mw-gq6.9", map[string]string{application.SmokeExamplesField: "cairn/sweep/one"})
+	book := application.GristSmokeBook{Notes: tracker, Filed: tracker, Events: log, Host: "laptop"}
+
+	report := book.Mark(ctx, application.GristSmokeReport{App: "cairn", Examples: 2, Failures: []string{"cairn/sweep/one: wrong"}})
+	if line := report.Line(); !strings.Contains(line, "FAILED 1 of 2 examples, all filed on mw-gq6.9: not held") {
+		t.Fatalf("expected the line to say it is filed, got %q", line)
+	}
+	if err := book.Record(ctx, "millwright", report); err != nil {
+		t.Fatal(err)
+	}
+	if why, _ := book.HeldBy(ctx, "millwright"); why != "" {
+		t.Fatalf("expected nothing held, got %q", why)
+	}
+	if len(log.All()) != 0 {
+		t.Fatalf("expected no alarm, got %v", log.All())
+	}
+	// A failure that is not named at all holds.
+	other := book.Mark(ctx, application.GristSmokeReport{App: "cairn", Examples: 2, Failures: []string{"cairn/sweep/one: wrong", "the mill refused it: no licence"}})
+	if len(other.FiledOn) != 0 {
+		t.Fatalf("expected a failure with a part unnamed not filed, got %v", other.FiledOn)
+	}
+	// Closing the bead ends it.
+	_ = tracker.CloseStory(ctx, "mw-gq6.9", "fixed")
+	closed := book.Mark(ctx, application.GristSmokeReport{App: "cairn", Examples: 2, Failures: []string{"cairn/sweep/one: wrong"}})
+	if len(closed.FiledOn) != 0 {
+		t.Fatalf("expected a closed bead to name nothing, got %v", closed.FiledOn)
+	}
+}
+
+// mw-gq6.412: naming examples completes <kind>/<example> with the app, refuses
+// an example of another app or a closed bead, and adds to what a bead names.
+func TestNamingFailingExamplesOnABead(t *testing.T) {
+	ctx := context.Background()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.9", Title: "The bug"})
+	file := application.GristSmokeFile{Tracker: tracker, Book: application.GristSmokeBook{Notes: tracker, Filed: tracker}}
+
+	named, err := file.Run(ctx, "mw-gq6.9", "cairn", []string{"sweep/one"})
+	if err != nil || strings.Join(named, ",") != "cairn/sweep/one" {
+		t.Fatalf("expected the example completed with its app, got %v %v", named, err)
+	}
+	named, err = file.Run(ctx, "mw-gq6.9", "cairn", []string{"cairn/sweep/two", "sweep/one"})
+	if err != nil || strings.Join(named, ",") != "cairn/sweep/one,cairn/sweep/two" {
+		t.Fatalf("expected the examples added to those named, each once, got %v %v", named, err)
+	}
+	if got := tracker.Metadata("mw-gq6.9")[application.SmokeExamplesField]; got != "cairn/sweep/one,cairn/sweep/two" {
+		t.Fatalf("expected the field written, got %q", got)
+	}
+	if _, err := file.Run(ctx, "mw-gq6.9", "cairn", []string{"legend/sweep/one"}); err == nil {
+		t.Fatal("expected an example of another app refused")
+	}
+	if _, err := file.Run(ctx, "mw-gq6.9", "cairn", []string{"one"}); err == nil {
+		t.Fatal("expected a bare example name refused")
+	}
+	_ = tracker.CloseStory(ctx, "mw-gq6.9", "fixed")
+	if _, err := file.Run(ctx, "mw-gq6.9", "cairn", []string{"sweep/three"}); err == nil || !strings.Contains(err.Error(), "closed") {
+		t.Fatalf("expected a closed bead refused, got %v", err)
+	}
+}

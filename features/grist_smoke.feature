@@ -246,3 +246,63 @@ Feature: mw grist smoke tests an app's grist end to end
     And the mill refuses the next grist because "This key has sent its 50 grist for today; send it again tomorrow."
     When mw grist smoke is run for "trade-tracker"
     Then the open stories of "trade-tracker" are held, saying "the grist smoke of trade-tracker failed after a landing in trade-tracker"
+
+  Scenario: a failed smoke whose every failing example is named on an open bead holds nothing
+    Given a rig "trade-tracker" checked out where the app "trade-tracker" is
+    And the bead "mw-5r3p30.313" is open and names the failing example "trade-tracker/price-check/blank-paper"
+    And the mill answers the next grist with:
+      """
+      {"price": 12.5, "confidence": "low"}
+      """
+    When a landing in "trade-tracker" changes "grinds/price-check.json"
+    Then the landing's smoke line says "FAILED 1 of 1 examples, all filed on mw-5r3p30.313: not held"
+    And mw status shows "filed on mw-5r3p30.313, not held"
+    And the open stories of "trade-tracker" are not held
+    And no alarm was posted
+
+  Scenario: one failing example that is not named still holds the rig
+    Given a rig "trade-tracker" checked out where the app "trade-tracker" is
+    And the app "trade-tracker" has the example "price-check/second" containing:
+      """
+      {"request": {"schemaVersion": "1"}, "expect": {"confidence": "low"}}
+      """
+    And the bead "mw-5r3p30.313" is open and names the failing example "trade-tracker/price-check/blank-paper"
+    And the mill answers the next grist with:
+      """
+      {"price": 12.5, "confidence": "low"}
+      """
+    And the mill answers the next grist with:
+      """
+      {"price": null, "confidence": "high"}
+      """
+    When a landing in "trade-tracker" changes "grinds/price-check.json"
+    Then the open stories of "trade-tracker" are held, saying "the grist smoke of trade-tracker failed after a landing in trade-tracker"
+    And mw status shows "the open stories of trade-tracker are held"
+
+  Scenario: closing the bead that names the examples ends it, and the next failure holds again
+    Given a rig "trade-tracker" checked out where the app "trade-tracker" is
+    And the bead "mw-5r3p30.313" is open and names the failing example "trade-tracker/price-check/blank-paper"
+    And the mill answers the next grist with:
+      """
+      {"price": 12.5, "confidence": "low"}
+      """
+    And a landing in "trade-tracker" changes "grinds/price-check.json"
+    And the bead "mw-5r3p30.313" is closed by its fix
+    And the mill answers the next grist with:
+      """
+      {"price": 12.5, "confidence": "low"}
+      """
+    When a landing in "trade-tracker" changes "grinds/price-check.json"
+    Then the open stories of "trade-tracker" are held, saying "the grist smoke of trade-tracker failed after a landing in trade-tracker"
+
+  Scenario: naming the failing examples on a bead by hand lifts the hold they put on the rig
+    Given a rig "trade-tracker" checked out where the app "trade-tracker" is
+    And the bead "mw-5r3p30.313" is open
+    And the mill answers the next grist with:
+      """
+      {"price": 12.5, "confidence": "low"}
+      """
+    And a landing in "trade-tracker" changes "grinds/price-check.json"
+    When the failing examples "price-check/blank-paper" of "trade-tracker" are named on the bead "mw-5r3p30.313"
+    Then the open stories of "trade-tracker" are not held
+    And mw status shows "filed on mw-5r3p30.313, not held"

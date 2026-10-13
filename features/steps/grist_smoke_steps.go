@@ -13,6 +13,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain"
 
 	"github.com/cucumber/godog"
 )
@@ -111,11 +112,12 @@ type smokeContext struct {
 	report  application.GristSmokeReport
 	err     error
 	smoked  []string
+	lines   []string
 	touches *smokeTouches
 }
 
 func (c *smokeContext) book() application.GristSmokeBook {
-	return application.GristSmokeBook{Notes: c.notes, Events: c.events, Host: "laptop", Now: func() time.Time { return gristNow }}
+	return application.GristSmokeBook{Notes: c.notes, Filed: c.notes, Events: c.events, Host: "laptop", Now: func() time.Time { return gristNow }}
 }
 
 func (c *smokeContext) smoke() application.GristSmoke {
@@ -146,10 +148,14 @@ func InitializeGristSmokeScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a rig "([^"]*)" checked out where the app "([^"]*)" is$`, c.aRigWhereTheAppIs)
 	ctx.Given(`^the rig "([^"]*)" names the grist client path "([^"]*)"$`, c.theRigNamesAClientPath)
 	ctx.Given(`^a landing in "([^"]*)" changes "([^"]*)"$`, c.aLandingChanges)
+	ctx.Given(`^the bead "([^"]*)" is open and names the failing example "([^"]*)"$`, c.theBeadNamesTheExample)
+	ctx.Given(`^the bead "([^"]*)" is open$`, c.theBeadIsOpen)
+	ctx.Given(`^the bead "([^"]*)" is closed by its fix$`, c.theBeadIsClosed)
 
 	ctx.When(`^mw grist smoke is run for "([^"]*)"$`, c.smokeApp)
 	ctx.When(`^mw grist smoke is run for "([^"]*)" kind "([^"]*)"$`, c.smokeKind)
 	ctx.When(`^a landing in "([^"]*)" changes "([^"]*)"$`, c.aLandingChanges)
+	ctx.When(`^the failing examples "([^"]*)" of "([^"]*)" are named on the bead "([^"]*)"$`, c.nameTheExamples)
 	ctx.When(`^the hold of the smoke of "([^"]*)" is lifted$`, c.liftTheHold)
 
 	ctx.Then(`^the smoke passed, saying "([^"]*)"$`, c.passed)
@@ -162,6 +168,7 @@ func InitializeGristSmokeScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^no alarm was posted$`, c.noAlarm)
 	ctx.Then(`^an alarm event was posted saying "([^"]*)"$`, c.alarmPosted)
 	ctx.Then(`^the landing smoked "([^"]*)"$`, c.landingSmoked)
+	ctx.Then(`^the landing's smoke line says "([^"]*)"$`, c.landingLineSays)
 	ctx.Then(`^the landing smoked nothing$`, c.landingSmokedNothing)
 	ctx.Then(`^mw status shows "([^"]*)"$`, c.statusShows)
 	ctx.Then(`^the open stories of "([^"]*)" are held, saying "([^"]*)"$`, c.held)
@@ -241,6 +248,7 @@ func (c *smokeContext) smokeKind(app, kind string) error {
 	if c.err != nil {
 		return nil
 	}
+	c.report = c.book().Mark(context.Background(), c.report)
 	return c.book().Record(context.Background(), "", c.report)
 }
 
@@ -257,8 +265,7 @@ func (c *smokeContext) aLandingChanges(rig, file string) error {
 	if len(apps) == 0 {
 		return nil
 	}
-	lines, _ := after.Run(context.Background(), rig, apps)
-	_ = lines
+	c.lines, _ = after.Run(context.Background(), rig, apps)
 	c.smoked = apps
 	return nil
 }
@@ -422,4 +429,34 @@ func (c *smokeContext) liftTheHold(app string) error {
 		return fmt.Errorf("there was no hold on %s to lift", app)
 	}
 	return nil
+}
+
+func (c *smokeContext) theBeadIsOpen(id string) error {
+	c.notes.AddStory("mw-5r3p30", domain.Story{ID: id, Title: "A bug the smoke found"})
+	return nil
+}
+
+func (c *smokeContext) theBeadNamesTheExample(id, example string) error {
+	if err := c.theBeadIsOpen(id); err != nil {
+		return err
+	}
+	return c.notes.SetStoryMetadata(context.Background(), id, map[string]string{application.SmokeExamplesField: example})
+}
+
+func (c *smokeContext) theBeadIsClosed(id string) error {
+	return c.notes.CloseStory(context.Background(), id, "fixed")
+}
+
+func (c *smokeContext) nameTheExamples(examples, app, bead string) error {
+	_, err := application.GristSmokeFile{Tracker: c.notes, Book: c.book()}.Run(context.Background(), bead, app, strings.Split(examples, ","))
+	return err
+}
+
+func (c *smokeContext) landingLineSays(said string) error {
+	for _, line := range c.lines {
+		if strings.Contains(line, said) {
+			return nil
+		}
+	}
+	return fmt.Errorf("no line of the landing's smoke said %q: %q", said, c.lines)
 }
