@@ -526,6 +526,7 @@ only the home sends. `mw doctor` restarts the timer if it is found stopped
 bin/mw config get after_landing.millwright              # make build
 bin/mw config set after_landing.millwright 'make build' # one key, after a dated backup
 bin/mw config set cloud.caps.desktop 3 --dry-run        # say what it would do, write nothing
+bin/mw config set cap 2                                 # a root-table key (cap, builder_nice, builder_jobs, host...) needs no table
 ```
 
 A hand edit of `~/.config/mw/config.toml` is what the Mayor's classifier refuses,
@@ -535,7 +536,7 @@ beside it, changes exactly that key (a missing key is added at the end of its
 table, a missing table is appended, every other byte and a comment after the old
 value are kept), and prints the old value (or `unset`), the new value, the
 backup, and the way back as one whole command (`cp <backup> <config>`). A key
-with no table, a value that would break the file, a file that does not parse as
+with no table that is not a known root-table key, a value that would break the file, a file that does not parse as
 TOML before or after the change, and a value the key already holds
 (`unchanged`) are refused with a non-zero status, nothing written and no backup
 made. A value that is already TOML (a quoted string, an array, a number, `true`)

@@ -155,9 +155,38 @@ func TestSplitConfigKey(t *testing.T) {
 	if err != nil || table != "cloud.caps" || key != "desktop" {
 		t.Errorf("got %q %q %v", table, key, err)
 	}
-	for _, bad := range []string{"nokey", ".k", "t.", "a b.k", "a..k", `a."b"`} {
-		if _, _, err := SplitConfigKey(bad); err == nil || (bad == "nokey" && !strings.Contains(err.Error(), "needs a table")) {
+	if table, key, err := SplitConfigKey("cap"); err != nil || table != "" || key != "cap" {
+		t.Errorf("cap: got %q %q %v", table, key, err)
+	}
+	if _, _, err := SplitConfigKey("nokey"); err == nil || !strings.Contains(err.Error(), "builder_jobs") {
+		t.Errorf("an unknown root key must be refused naming the known ones: %v", err)
+	}
+	for _, bad := range []string{".k", "t.", "a b.k", "a..k", `a."b"`} {
+		if _, _, err := SplitConfigKey(bad); err == nil {
 			t.Errorf("%q: %v", bad, err)
+		}
+	}
+}
+
+func TestSetARootKeyThatIsNotThereYet(t *testing.T) {
+	for name, c := range map[string]struct{ in, want string }{
+		"empty file":       {"", "cap = 2\n"},
+		"only a table":     {"[rigs]\na = \"b\"\n", "cap = 2\n\n[rigs]\na = \"b\"\n"},
+		"a comment at top": {"# hi\n[rigs]\n", "cap = 2\n\n# hi\n[rigs]\n"},
+		"after a root key": {"vault = \"/v\"\n\n[rigs]\n", "vault = \"/v\"\ncap = 2\n\n[rigs]\n"},
+	} {
+		f, err := ParseConfigTOML(c.in)
+		if err != nil {
+			t.Fatal(name, err)
+		}
+		got := f.Set("", "cap", "2")
+		if got != c.want {
+			t.Errorf("%s: got %q want %q", name, got, c.want)
+		}
+		if re, err := ParseConfigTOML(got); err != nil {
+			t.Errorf("%s: does not parse: %v", name, err)
+		} else if v, ok := re.Lookup("", "cap"); !ok || v != "2" {
+			t.Errorf("%s: reads back %q %v", name, v, ok)
 		}
 	}
 }

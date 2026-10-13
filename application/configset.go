@@ -35,10 +35,11 @@ type ConfigSet struct {
 	Out io.Writer
 }
 
-// Run sets table.key to value, or with dryRun says what it would do and writes
-// nothing. It refuses, writing nothing and making no backup, a key with no
-// table, a value on more than one line, a file that does not parse before or
-// after the change, and a value the key already holds.
+// Run sets table.key (or a known root key, with no table) to value, or with
+// dryRun says what it would do and writes nothing. It refuses, writing nothing
+// and making no backup, a key with no table that is not a known root key, a
+// value on more than one line, a file that does not parse before or after the
+// change, and a value the key already holds.
 func (c ConfigSet) Run(ctx context.Context, dotted, value string, dryRun bool) error {
 	table, key, err := domain.SplitConfigKey(dotted)
 	if err != nil {

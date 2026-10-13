@@ -4,7 +4,8 @@ Feature: mw config set changes one key of the config file, with a backup and the
   <value>` is the one narrow, auditable command that edits it instead: it copies the
   file to a dated backup beside it, changes exactly one key, and prints the old value,
   the new one, the backup and the whole command that puts the file back.
-  `mw config get <table>.<key>` reads a key.
+  `mw config get <table>.<key>` reads a key. A key of the root table that mw reads
+  (cap, builder_nice, builder_jobs, host and the rest) is named without a table.
 
   Background:
     Given a config file holding:
@@ -102,10 +103,63 @@ Feature: mw config set changes one key of the config file, with a backup and the
       desktop = 3
       """
 
-  Scenario: a key with no table is refused and nothing is written
-    When mw config set is run for "nokey" with "x"
-    Then mw config set was refused, saying: needs a table
+  Scenario: set on a top-level key changes the root table, with a dated backup and the way back
+    When mw config set is run for "cap" with "3"
+    Then mw config set succeeded
+    And the config file differs from before in exactly one line
+    And the config line "cap = 3" is in the root table
+    And the config set printed: old: 5
+    And the config set printed: new: 3
+    And the config set printed: backup: <the config>.bak-2026-10-12T140309Z
+    And the config set printed: way back: cp <the config>.bak-2026-10-12T140309Z <the config>
+    And the backup config.toml.bak-2026-10-12T140309Z exists and equals the old file
+
+  Scenario: the way back of a top-level key restores the old file
+    When mw config set is run for "cap" with "3"
+    And the printed way back is run
+    Then the config file equals the old file
+
+  Scenario: set adds a missing top-level key after the last key of the root table
+    When mw config set is run for "builder_jobs" with "4"
+    Then mw config set succeeded
+    And the config line "builder_jobs = 4" is in the root table
+    And the config set printed: old: unset
+    And the config line "legend = \"/home/jwhite/legend\"" is in the table "rigs"
+
+  Scenario: set adds a top-level key to a file that has only tables, above the first table
+    Given a config file holding:
+      """
+      [rigs]
+      legend = "/x"
+      """
+    When mw config set is run for "builder_nice" with "5"
+    Then mw config set succeeded
+    And the config file reads:
+      """
+      builder_nice = 5
+
+      [rigs]
+      legend = "/x"
+      """
+
+  Scenario: get prints a top-level key
+    When mw config get is run for "cap"
+    Then mw config get printed: 5
+
+  Scenario: get of a top-level key that is not there fails
+    When mw config get is run for "builder_jobs"
+    Then mw config get failed, saying: unset
+
+  Scenario: a top-level key the config does not know is refused, naming the known ones
+    When mw config set is run for "nosuchkey" with "1"
+    Then mw config set was refused, saying: builder_nice
+    And mw config set was refused, saying: cap
+    And mw config set was refused, saying: builder_jobs
     And the config directory is as it was
+
+  Scenario: get of a top-level key the config does not know is refused
+    When mw config get is run for "nosuchkey"
+    Then mw config get failed, saying: not a known top-level key
 
   Scenario: a value that would break the file is refused and nothing is written
     When mw config set is run for "after_landing.millwright" with '"make build'

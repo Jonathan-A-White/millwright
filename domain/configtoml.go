@@ -151,7 +151,7 @@ func (c *ConfigTOML) valueText(st tomlStatement) string {
 // TOML text for a value (see TOMLLiteral). An existing key keeps its place and
 // whatever comment follows its value; a missing key goes after the last key of
 // its table; a missing table is appended after a blank line. Every other byte
-// is as it was. Neither table nor key may need quoting.
+// is as it was. Neither table nor key may need quoting. The root table is "".
 func (c *ConfigTOML) Set(table, key, literal string) string {
 	crlf := len(c.lines) > 1 && strings.HasSuffix(c.lines[0], "\r")
 	eol := ""
@@ -185,6 +185,16 @@ func (c *ConfigTOML) Set(table, key, literal string) string {
 	}
 
 	text := strings.Join(c.lines, "\n")
+	if table == "" {
+		// The root table has no key yet: its first goes above everything else.
+		if text == "" {
+			return added + "\n"
+		}
+		if strings.TrimSpace(c.lines[0]) != "" {
+			added += "\n"
+		}
+		return added + "\n" + text
+	}
 	if text == "" {
 		return "[" + table + "]" + eol + "\n" + added + "\n"
 	}
@@ -198,13 +208,34 @@ func (c *ConfigTOML) Set(table, key, literal string) string {
 	return text + "[" + table + "]" + eol + "\n" + added + "\n"
 }
 
+// KnownRootConfigKeys are the keys of the config file's root table that mw
+// reads, which `mw config get` and `mw config set` take without a table.
+var KnownRootConfigKeys = []string{
+	"age_key_file", "beads_backup_minutes", "beads_budget_bytes", "beads_server_host", "beads_sync",
+	"builder_jobs", "builder_nice", "cap", "deputy_model", "dispatch_sync_tries", "dispatch_sync_wait",
+	"events_log_path", "grist_key_file", "grist_state_dir", "grist_test_key_file", "handoff_at",
+	"hands_root_helper", "home_move_bead", "host", "host_silent_hours", "max_attempts", "metered",
+	"millhand_review_model", "millhand_routine_model", "nudge_after_minutes", "nudge_sync_stale_minutes",
+	"postern_backend", "postern_channel", "postern_data", "postern_float_sats", "postern_governor_key",
+	"postern_key_file", "postern_local_url", "postern_snapshot_path", "postern_transcribe_cmd",
+	"postern_view_path", "postern_watchdog_target", "push_tries", "push_wait_seconds", "rig_memory_bytes",
+	"stamps_dir", "tick_recheck_seconds", "vault",
+}
+
 // SplitConfigKey splits "table.key" at its last dot. The table may itself be
-// dotted ("cloud.caps"); every part must be a bare TOML key. A key with no
-// table is refused: the root table is not edited this way.
+// dotted ("cloud.caps"); every part must be a bare TOML key. A key with no dot
+// is a key of the root table, and the table is "": it must be one of
+// KnownRootConfigKeys, or the error names them.
 func SplitConfigKey(dotted string) (table, key string, err error) {
 	cut := strings.LastIndex(dotted, ".")
 	if cut < 0 {
-		return "", "", fmt.Errorf("%q needs a table: say <table>.<key>, as after_landing.millwright", dotted)
+		for _, known := range KnownRootConfigKeys {
+			if dotted == known {
+				return "", dotted, nil
+			}
+		}
+		return "", "", fmt.Errorf("%q is not a known top-level key (the known ones are %s); for a key of a table say <table>.<key>, as after_landing.millwright",
+			dotted, strings.Join(KnownRootConfigKeys, ", "))
 	}
 	table, key = dotted[:cut], dotted[cut+1:]
 	for _, part := range append(strings.Split(table, "."), key) {

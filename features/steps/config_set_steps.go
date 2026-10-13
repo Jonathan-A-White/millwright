@@ -56,6 +56,7 @@ func InitializeConfigSetScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^mw config get printed: (.+)$`, c.printedLine)
 	ctx.Then(`^the config file differs from before in exactly one line$`, c.differsInOneLine)
 	ctx.Then(`^the config line "(.*)" is in the table "([^"]*)"$`, c.lineIsInTable)
+	ctx.Then(`^the config line "(.*)" is in the root table$`, c.lineIsInRoot)
 	ctx.Then(`^the config file reads:$`, c.fileReads)
 	ctx.Then(`^the config file is the old file followed by a blank line and:$`, c.fileIsOldFollowedBy)
 	ctx.Then(`^the config file equals the old file$`, c.fileEqualsOld)
@@ -215,6 +216,10 @@ func (c *configSetContext) lineIsInTable(line, table string) error {
 		return fmt.Errorf("[%s] %s is %q (found %v), want %q; the file is:\n%s", table, key, got, ok, literal, now)
 	}
 	return nil
+}
+
+func (c *configSetContext) lineIsInRoot(line string) error {
+	return c.lineIsInTable(line, "")
 }
 
 func (c *configSetContext) fileReads(doc *godog.DocString) error {
