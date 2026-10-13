@@ -6,6 +6,8 @@ import (
 	"io"
 	"slices"
 	"strings"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // NoFilesKey is an open or held story of a rig that expects a files key (the
@@ -19,6 +21,14 @@ type NoFilesKey struct {
 // Line is the warning as mw status, mw release and mw path show say it.
 func (n NoFilesKey) Line() string {
 	return fmt.Sprintf("no files key: %s (%s expects one; mw path set %s files=...)", n.ID, n.Rig, n.ID)
+}
+
+// claimsNoFiles is whether a story of this path claims no files at all: one
+// worked by the tester formula commits nothing, for it drives a scratch
+// worktree and edits no file of the rig (mw-gq6.413). A Tester story that names
+// files is compared as any other.
+func claimsNoFiles(path domain.Path) bool {
+	return path.Formula == TesterFormula && len(domain.FileList(path.Files)) == 0
 }
 
 // filesExpected finds the stories that lack a files key on a rig that expects
@@ -44,7 +54,7 @@ func (f *filesExpected) lacking(ctx context.Context, details ...StoryDetail) ([]
 		seen[id] = true
 		path := d.Merged()
 		rig := strings.TrimSpace(path.Rig)
-		if rig == "" || strings.TrimSpace(path.Files) != "" {
+		if rig == "" || strings.TrimSpace(path.Files) != "" || claimsNoFiles(path) {
 			continue
 		}
 		expects, read := f.expects[rig]

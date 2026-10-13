@@ -59,7 +59,9 @@ func (s FileShare) String() string {
 // fileShares finds the running story a ready one shares a file with. A ready
 // story that names no files shares none, and is dispatched as it always was,
 // unless its rig expects a files key (mw-gq6.390): then it shares every file
-// with every story of the rig, as a running one that names none does.
+// with every story of the rig, as a running one that names none does. A story
+// of the tester formula that names none claims no files, and neither waits nor
+// is waited for (mw-gq6.413).
 // What a running story's branch has changed is read once a pass, and only for
 // a rig a ready story naming files is on.
 type fileShares struct {
@@ -99,6 +101,9 @@ func (f *fileShares) addAway(detail StoryDetail, host string) {
 // with, and the file, in the order the running stories were added.
 func (f *fileShares) shared(ctx context.Context, ready StoryDetail) (FileShare, bool) {
 	path := ready.Merged()
+	if claimsNoFiles(path) {
+		return FileShare{}, false
+	}
 	ours := domain.FileList(path.Files)
 	expects := f.filesExpected(ctx, path.Rig)
 	if len(ours) == 0 {
@@ -109,7 +114,8 @@ func (f *fileShares) shared(ctx context.Context, ready StoryDetail) (FileShare, 
 		// the story touches as well as a files key does.
 		if ours = f.branchChanged(ctx, ready); len(ours) == 0 {
 			for _, running := range f.running {
-				if running.Story.ID != ready.Story.ID && running.Merged().Rig == path.Rig {
+				theirs := running.Merged()
+				if running.Story.ID != ready.Story.ID && theirs.Rig == path.Rig && !claimsNoFiles(theirs) {
 					return FileShare{With: running.Story.ID, Host: f.away[running.Story.ID], Rig: path.Rig, Unkeyed: ReadyUnkeyed}, true
 				}
 			}
@@ -118,7 +124,7 @@ func (f *fileShares) shared(ctx context.Context, ready StoryDetail) (FileShare, 
 	}
 	for _, running := range f.running {
 		theirs := running.Merged()
-		if running.Story.ID == ready.Story.ID || theirs.Rig != path.Rig {
+		if running.Story.ID == ready.Story.ID || theirs.Rig != path.Rig || claimsNoFiles(theirs) {
 			continue
 		}
 		if expects && len(domain.FileList(theirs.Files)) == 0 {

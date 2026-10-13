@@ -25,6 +25,7 @@ func (c *dispatchContext) registerFileSteps(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a story "([^"]*)" of that epic is running on "([^"]*)", expecting to change "([^"]*)"$`, c.aStoryRunningOnAnotherHostExpectingToChange)
 	ctx.Given(`^a story "([^"]*)" of that epic is already running here, its branch changing "([^"]*)"$`, c.aStoryRunningWithItsBranchChanging)
 	ctx.Given(`^the branch of "([^"]*)" has a commit changing "([^"]*)"$`, c.theBranchHasACommitChanging)
+	ctx.Given(`^a story "([^"]*)" of that epic is already running here under the formula "([^"]*)"$`, c.aStoryRunningUnderTheFormula)
 	ctx.Given(`^the rig "([^"]*)" expects a files key$`, c.theRigExpectsAFilesKey)
 	ctx.Given(`^the story "([^"]*)" has recorded "([^"]*)" as changed$`, c.theStoryHasRecordedAsChanged)
 	ctx.When(`^mw status is read on "([^"]*)"$`, c.mwStatusIsReadOn)
@@ -44,6 +45,15 @@ func (c *dispatchContext) theRigExpectsAFilesKey(rigName string) error {
 
 func (c *dispatchContext) aReadyStoryExpectingToChange(id, files string) error {
 	return c.aReadyStoryThatOverrides(id, "files", files)
+}
+
+// aStoryRunningUnderTheFormula is a story pathed to a formula and claimed here
+// (mw-gq6.413).
+func (c *dispatchContext) aStoryRunningUnderTheFormula(id, formula string) error {
+	if err := c.aReadyStoryThatOverrides(id, "formula", formula); err != nil {
+		return err
+	}
+	return c.tracker.ClaimStory(context.Background(), id)
 }
 
 func (c *dispatchContext) aStoryRunningExpectingToChange(id, files string) error {

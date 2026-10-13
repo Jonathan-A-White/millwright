@@ -1026,6 +1026,23 @@ Feature: Dispatching the stories this host is ready to work
     Then one session was started, for "mw-gq6.2"
     And dispatch passed over "mw-gq6.3", saying: waiting: no files key (millwright expects one), so it shares every file with mw-gq6.2
 
+  # A Tester story commits nothing, so it claims no files (mw-gq6.413).
+
+  Scenario: On a rig that expects files, a Tester story with no files key starts beside a running story
+    Given the rig "millwright" expects a files key
+    And the formula "tester" is installed
+    And a story "mw-gq6.1" of that epic is already running here, expecting to change "a.go"
+    And a ready story "mw-gq6.2" of that epic that overrides "formula" with "tester"
+    When dispatch runs on "vps" with a cap of 3
+    Then one session was started, for "mw-gq6.2"
+
+  Scenario: On a rig that expects files, a running Tester story with no files key keeps no ready story waiting
+    Given the rig "millwright" expects a files key
+    And a story "mw-gq6.1" of that epic is already running here under the formula "tester"
+    And a ready story "mw-gq6.2" of that epic expecting to change "a.go"
+    When dispatch runs on "vps" with a cap of 3
+    Then one session was started, for "mw-gq6.2"
+
   Scenario: On a rig that does not expect files, a story with no files key starts beside a running story
     Given a story "mw-gq6.1" of that epic is already running here, expecting to change "a.go"
     And a ready story "mw-gq6.2" of that epic
