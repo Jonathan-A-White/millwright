@@ -72,15 +72,23 @@ func newNextCmd() *cobra.Command {
 				return err
 			}
 
+			rigs, err := config.Rigs()
+			if err != nil {
+				return err
+			}
+
 			// --heartbeat is not a close-out: it is the other half of what
 			// this same command runs when it is chained into a dispatched
 			// session's shell line — beside the harness, not after it —
 			// renewing the story's claim's lease for as long as the harness
-			// is really running, and returning once it is not.
+			// is really running, and returning once it is not. It records the
+			// files the branch has changed on the story as it goes (mw-gq6.406).
 			if heartbeat {
 				return application.Next{
 					Tracker: mwGateway(dir, host),
 					Runner:  tmux.New(),
+					Changes: rig.New(),
+					Rigs:    rigs,
 				}.Heartbeat(cmd.Context(), args[0])
 			}
 
@@ -90,10 +98,6 @@ func newNextCmd() *cobra.Command {
 			}
 			if capOverride > 0 {
 				atOnce = capOverride
-			}
-			rigs, err := config.Rigs()
-			if err != nil {
-				return err
 			}
 			tests, err := config.Tests()
 			if err != nil {
@@ -208,6 +212,7 @@ func newNextCmd() *cobra.Command {
 				Tracker:     gateway,
 				Worktrees:   worktrees,
 				Landing:     worktrees,
+				Changes:     worktrees,
 				Checks:      checks,
 				SpecChecks:  checks,
 				Load:        hostload.Proc{SwapSample: benchmarkSwapSample},

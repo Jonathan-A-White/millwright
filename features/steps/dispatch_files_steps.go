@@ -26,6 +26,7 @@ func (c *dispatchContext) registerFileSteps(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a story "([^"]*)" of that epic is already running here, its branch changing "([^"]*)"$`, c.aStoryRunningWithItsBranchChanging)
 	ctx.Given(`^the branch of "([^"]*)" has a commit changing "([^"]*)"$`, c.theBranchHasACommitChanging)
 	ctx.Given(`^the rig "([^"]*)" expects a files key$`, c.theRigExpectsAFilesKey)
+	ctx.Given(`^the story "([^"]*)" has recorded "([^"]*)" as changed$`, c.theStoryHasRecordedAsChanged)
 	ctx.When(`^mw status is read on "([^"]*)"$`, c.mwStatusIsReadOn)
 	ctx.Then(`^mw status lists "([^"]*)" as ready, saying "([^"]*)"$`, c.mwStatusListsAsReadySaying)
 	ctx.Then(`^mw status lists "([^"]*)" as ready, saying nothing of waiting$`, c.mwStatusListsAsReadyNotWaiting)
@@ -167,4 +168,10 @@ func (c *dispatchContext) mwStatusListsAsReadyNotWaiting(id string) error {
 		return fmt.Errorf("expected mw status to say nothing of %s waiting, it printed:\n%s", id, block)
 	}
 	return nil
+}
+
+// theStoryHasRecordedAsChanged is what mw next leaves on a running story as its
+// branch changes (mw-gq6.406): the files changed so far, in its metadata.
+func (c *dispatchContext) theStoryHasRecordedAsChanged(id, files string) error {
+	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.FilesChangedField: files})
 }
