@@ -1203,6 +1203,31 @@ A story labelled `hitl` is still retried and its claim still given back, but
 dispatch passes a `hitl` story over, so the report adds a line naming the label
 and the cure: `bd update <id> --remove-label hitl`. See `features/retry.feature`.
 
+## Running a rig's whole suite
+
+A story's gate runs the rig's `[tests]` command and only the e2e specs the
+story changed (`[changed_specs]`), so a landing can break a test nobody touched
+and no gate sees it (mw-8w7xb7). `mw suite <rig>` runs the whole of it on the
+head of the rig's origin: a fresh detached worktree named `suite-<rig>` beside
+the story worktrees, removed after; the `[tests]` command, then the
+`[changed_specs]` command with `{specs}` replaced by nothing. It spends no
+tokens and refuses a rig with no `[tests]` entry.
+
+It waits first, up to `--calm-bound` (default 2h), for the host to be calm by
+the rule the close-out's gate uses (load under the core count), and runs
+anyway when it never is, saying so. Each test file that failed is run once more
+alone: the `[tests]` command with the file added, or the `[changed_specs]`
+command with just that spec. A file that fails twice is a failure; one that
+passes alone is flaky. The whole output goes to
+`runs/suite/<rig>/<UTC date>.log` in the vault and a summary (main's sha, start,
+duration, load at start, each failing file with its first failing test and
+first error lines, flaky or not) to `<UTC date>.json`, both committed in the
+vault. Exit 0 when everything passed, 1 when any file failed.
+
+A rig's file `rigs/<rig>.toml` may say `nightly_suite = true` and
+`suite_epic = "<bead id>"`; `mw suite` itself reads neither yet. See
+`features/suite.feature`.
+
 ## The Tester trial
 
 A week's trial (mw-it6qk5.5): a fresh session that only uses the app finds what

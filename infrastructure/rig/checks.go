@@ -107,7 +107,15 @@ func (c *Checks) Command(rig string) string {
 
 // Run implements application.Checks.
 func (c *Checks) Run(ctx context.Context, rig, dir string) (application.Checked, error) {
-	command := c.Command(rig)
+	return c.RunLine(ctx, dir, c.Command(rig))
+}
+
+// Checks satisfies the port a suite's command lines are run through.
+var _ application.SuiteRunner = (*Checks)(nil)
+
+// RunLine implements application.SuiteRunner: the command line, read by the
+// shell in dir, judged as Run judges a rig's tests.
+func (c *Checks) RunLine(ctx context.Context, dir, command string) (application.Checked, error) {
 	if dir == "" {
 		return application.Checked{}, fmt.Errorf("running `%s`: where?", command)
 	}

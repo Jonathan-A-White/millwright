@@ -38,6 +38,7 @@ type Worktrees struct {
 
 // Worktrees satisfies the port.
 var _ application.Worktrees = (*Worktrees)(nil)
+var _ application.SuiteTrees = (*Worktrees)(nil)
 var _ application.CommitNotes = (*Worktrees)(nil)
 var _ application.RigHeads = (*Worktrees)(nil)
 
@@ -100,6 +101,22 @@ func (w *Worktrees) Add(ctx context.Context, rigDir, dir, branch, start string) 
 		return fmt.Errorf("making the directory the worktree %s belongs in: %w", dir, err)
 	}
 	_, err := w.git(ctx, rigDir, "worktree", "add", "-b", branch, dir, start)
+	return err
+}
+
+// AddDetached implements application.SuiteTrees: a worktree of the rig at dir,
+// detached at commit, so that it has no branch of its own to leave behind.
+func (w *Worktrees) AddDetached(ctx context.Context, rigDir, dir, commit string) error {
+	switch {
+	case dir == "":
+		return fmt.Errorf("a worktree of %s needs a directory", rigDir)
+	case commit == "":
+		return fmt.Errorf("the worktree %s has no commit to be cut at", dir)
+	}
+	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
+		return fmt.Errorf("making the directory the worktree %s belongs in: %w", dir, err)
+	}
+	_, err := w.git(ctx, rigDir, "worktree", "add", "--detach", dir, commit)
 	return err
 }
 

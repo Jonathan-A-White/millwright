@@ -47,6 +47,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newSecretsCmd())
 	root.AddCommand(newShowCmd())
 	root.AddCommand(newStatusCmd())
+	root.AddCommand(newSuiteCmd())
 	root.AddCommand(newSweepCmd())
 	root.AddCommand(newSyncCmd())
 	root.AddCommand(newTalkCmd())

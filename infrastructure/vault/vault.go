@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -229,6 +230,28 @@ func (v *Vault) PutRunFile(_ context.Context, storyID, name, contents string) (s
 	}
 	return path, nil
 }
+
+// PutSuiteFile implements application.SuiteRecords: runs/suite/<rig>/<name>,
+// made if it is not there, and reports the path from the vault's root.
+func (v *Vault) PutSuiteFile(_ context.Context, rig, name, contents string) (string, error) {
+	if err := safeName("rig", rig); err != nil {
+		return "", err
+	}
+	if err := safeName("suite file", name); err != nil {
+		return "", err
+	}
+	rel := path.Join(application.SuiteDir, rig, name)
+	at := filepath.Join(v.dir, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(at), 0o755); err != nil {
+		return "", fmt.Errorf("making the suite directory of %s: %w", rig, err)
+	}
+	if err := os.WriteFile(at, []byte(contents), 0o644); err != nil {
+		return "", fmt.Errorf("writing %s: %w", at, err)
+	}
+	return rel, nil
+}
+
+var _ application.SuiteRecords = (*Vault)(nil)
 
 // ReadRunFile implements application.Vault. A file that was never written comes
 // back as the error os.ReadFile gives, which satisfies errors.Is(err,

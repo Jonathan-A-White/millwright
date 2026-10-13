@@ -17,7 +17,7 @@ import (
 // SpecsPlaceholder is where a rig's changed-specs command takes the spec files
 // the story changed, and SpecsPattern is what makes a file a spec (mw-gq6.366).
 const (
-	SpecsPlaceholder = "{specs}"
+	SpecsPlaceholder = application.SpecsPlaceholder
 	SpecsPattern     = "tests/e2e/*.spec.ts"
 )
 
