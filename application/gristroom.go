@@ -75,6 +75,8 @@ type GristRoom struct {
 	// Grinding are the mill's grind slots: a held one is a grind in flight.
 	Grinding []GristLock
 	Limits   GristRoomLimits
+	// Pool is the board the follower's warm pool keeps; nil reads none.
+	Pool GristPoolBoard
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
 }
@@ -106,6 +108,18 @@ type GristPulse struct {
 	Kind   string
 	Median float64
 	Par    float64
+	// Pool is what the follower's warm pool holds, nil when no follower has
+	// saved it within GristPoolStale.
+	Pool *GristPoolView
+}
+
+// PoolLine says what the warm pool holds, kind by kind, "" when no pool is
+// running.
+func (p GristPulse) PoolLine() string {
+	if p.Pool == nil {
+		return ""
+	}
+	return p.Pool.Line()
 }
 
 // Lowered reports whether grist holds the host to fewer stories than its cap.
@@ -185,6 +199,12 @@ func (g GristRoom) Pulse(ctx context.Context, hostCap int) (GristPulse, error) {
 	}
 	sort.SliceStable(timings, func(i, j int) bool { return timings[i].endedAt().Before(timings[j].endedAt()) })
 	pulse.Known = pulse.InFlight || len(timings) > 0
+	// A board that cannot be read only leaves the pool's line out.
+	if g.Pool != nil {
+		if view, err := g.Pool.Pool(ctx); err == nil && !view.At.IsZero() && now().Sub(view.At) < GristPoolStale {
+			pulse.Pool = &view
+		}
+	}
 
 	since := now().Add(-pulse.Window)
 	var recentKinds []string

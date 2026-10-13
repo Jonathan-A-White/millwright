@@ -125,6 +125,11 @@ type GristGrind struct {
 	// (mw-gq6.340); empty is none.
 	TestKey string
 
+	// Pool, when set, is the warm pool the grinds take their sessions from:
+	// the follower's, kept from one pass to the next. Nil starts every
+	// session cold, as mw grist grind and the dispatch tick do.
+	Pool *GristPool
+
 	// TempDir is where each grind's private directory is made; empty is
 	// the system's.
 	TempDir string
@@ -868,30 +873,43 @@ func (g GristGrind) slot(ctx context.Context, held []func()) (int, func(), strin
 }
 
 // grindOne opens the grist's photos into a private directory, runs the
-// grind there, and settles the grist by what the session said. The
-// directory is removed however the grind ends.
+// grind there, and settles the grist by what the session said. The directory
+// is the warm session's when the pool has one for the grist, else one made
+// for it, and is removed however the grind ends.
 func (g GristGrind) grindOne(ctx context.Context, w *gristWork, privKey string) {
-	dir, err := os.MkdirTemp(g.TempDir, "mw-grist-")
-	if err != nil {
-		w.settle(GristFailed, GristReasonSessionEnd)
-		return
+	spec := w.warmSpec(g.Ceilings.filled().Timeout)
+	warm := g.Pool.take(ctx, spec)
+	defer g.Pool.ended(ctx, spec)
+	dir, tag := "", gristTag()
+	if warm != nil {
+		dir, tag = warm.dir, warm.tag
+	} else {
+		made, err := os.MkdirTemp(g.TempDir, "mw-grist-")
+		if err != nil {
+			w.settle(GristFailed, GristReasonSessionEnd)
+			return
+		}
+		dir = made
+		if abs, err := filepath.Abs(dir); err == nil {
+			dir = abs
+		}
 	}
 	defer os.RemoveAll(dir)
-	if abs, err := filepath.Abs(dir); err == nil {
-		dir = abs
-	}
 	photos := g.openPhotos(ctx, w, privKey, dir)
 	if w.status != "" {
+		if warm != nil {
+			warm.session.Retire()
+		}
 		return
 	}
 	w.ran = true
 	plain := w.plain
 	g.scoreRecordings(ctx, w, &plain)
 	w.input = plain.Input
-	call := gristGrindCall(dir, plain, photos, w.model, w.effort, w.system, w.schema, g.Ceilings.filled().Timeout)
-	call.MaxTurns = w.grind.MaxTurns
+	call := spec.call(dir, tag)
+	call.Prompt = gristPrompt(plain, photos, tag)
 	w.harnessStarted = g.now()
-	result, err := g.Grinder.Grind(ctx, call)
+	result, err := g.harness(ctx, w, warm, call)
 	w.answered = g.now()
 	w.result = result
 	w.harnessOK = err == nil
@@ -901,6 +919,33 @@ func (g GristGrind) grindOne(ctx context.Context, w *gristWork, privKey string) 
 	}
 	w.settle(status, reason)
 	g.keepRun(ctx, w)
+}
+
+// warmSpec is the session w's grind is started with, but for its directory,
+// tag and message.
+func (w *gristWork) warmSpec(timeout time.Duration) gristWarmSpec {
+	name := w.plain.Grist
+	return gristWarmSpec{
+		app: name.App, kind: name.Kind, v: name.V,
+		model: w.model, effort: w.effort, instructions: w.system, schema: w.schema,
+		maxTurns: w.grind.MaxTurns, timeout: timeout,
+	}
+}
+
+// harness runs call: on the grist's warm session when it took one, and cold
+// when it took none or its warm session could not answer. A warm session that
+// ran out of time is not tried again cold: the grist has waited long enough.
+func (g GristGrind) harness(ctx context.Context, w *gristWork, warm *gristWarm, call GrindCall) (SessionResult, error) {
+	if warm == nil {
+		return g.Grinder.Grind(ctx, call)
+	}
+	result, err := warm.session.Answer(ctx, call.Prompt, call.Timeout)
+	if err == nil || errors.Is(err, ErrGrindTimedOut) || ctx.Err() != nil {
+		return result, err
+	}
+	w.notes = append(w.notes, fmt.Sprintf("the warm session for %s could not answer, so it ran cold: %v", shortTxid(w.record.Txid), err))
+	w.harnessStarted = g.now()
+	return g.Grinder.Grind(ctx, call)
 }
 
 // gristOutcome is how a grind ended: answered, refused or failed, and the
@@ -998,15 +1043,11 @@ func fitsSchema(answer json.RawMessage, schema string) bool {
 // instructions as the system prompt, and the prompt naming the photos.
 func gristGrindCall(dir string, plain GristPlaintext, photos []string, model, effort, instructions, schema string, timeout time.Duration) GrindCall {
 	tag := gristTag()
-	return GrindCall{
-		Dir:     dir,
-		Model:   model,
-		Effort:  effort,
-		System:  gristPreamble(plain.Grist, tag) + "\n\n" + instructions,
-		Schema:  schema,
-		Prompt:  gristPrompt(plain, photos, tag),
-		Timeout: timeout,
-	}
+	name := plain.Grist
+	spec := gristWarmSpec{app: name.App, kind: name.Kind, v: name.V, model: model, effort: effort, instructions: instructions, schema: schema, timeout: timeout}
+	call := spec.call(dir, tag)
+	call.Prompt = gristPrompt(plain, photos, tag)
+	return call
 }
 
 // gristTag is a fresh random tag for the lines the app's request sits
