@@ -2957,7 +2957,9 @@ five parts, and two more when there is something to say.
   cause` has named, one line each; left out when there are none.
 - **WAITING FOR THE GOVERNOR** — the ready or claimed stories labelled `hitl`,
   worked with the Governor present. They are listed here and not under RUNNING
-  or READY, and the heading is left out when there are none.
+  or READY, and the heading is left out when there are none. A bead also
+  labelled `hitl:todo` (an item on his own list) is not listed here but under
+  **HIS TO DO (N)**, one line each, left out when there are none.
 - **BLOCKED** — what is waiting, each with only the work it is still waiting
   for: a wait that has finished is not listed.
 - **OTHER HOSTS** — every other host a story is pathed to, and what it holds.

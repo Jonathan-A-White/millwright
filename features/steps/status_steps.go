@@ -198,6 +198,9 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the report does not list "([^"]*)" under any other host$`, c.theReportDoesNotListUnderAnyOtherHost)
 	ctx.Then(`^the report does not show "([^"]*)" as running$`, c.theReportDoesNotShowAsRunning)
 	ctx.Then(`^the report has no heading for stories waiting for the Governor$`, c.theReportHasNoHeadingForTheGovernor)
+	ctx.Then(`^the report lists "([^"]*)" under "([^"]*)"$`, c.theReportListsUnderHeading)
+	ctx.Then(`^the report does not list "([^"]*)" under "([^"]*)"$`, c.theReportDoesNotListUnderHeading)
+	ctx.Then(`^the report has no HIS TO DO section$`, c.theReportHasNoHisToDoSection)
 	ctx.Then(`^the report shows "([^"]*)" on the rig "([^"]*)"$`, c.theReportShowsOnTheRig)
 	ctx.Then(`^the report says the close-out of "([^"]*)" is blocked by an open formula step$`,
 		c.theReportSaysCloseOutBlockedByFormula)
@@ -900,6 +903,38 @@ func (c *statusContext) theReportHasNoHeadingForTheGovernor() error {
 	}
 	if strings.Contains(c.report.String(), application.WaitingHeading) {
 		return fmt.Errorf("expected no %q heading, got:\n%s", application.WaitingHeading, c.report.String())
+	}
+	return nil
+}
+
+// theReportListsUnderHeading checks the printed report lists the story, id and
+// title, under the heading.
+func (c *statusContext) theReportListsUnderHeading(id, heading string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	if !strings.Contains(headedBy(c.report.String(), heading), id) {
+		return fmt.Errorf("expected the printed report to list %s under %q, got:\n%s", id, heading, c.report.String())
+	}
+	return nil
+}
+
+func (c *statusContext) theReportDoesNotListUnderHeading(id, heading string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	if strings.Contains(headedBy(c.report.String(), heading), id) {
+		return fmt.Errorf("expected the printed report not to list %s under %q, got:\n%s", id, heading, c.report.String())
+	}
+	return nil
+}
+
+func (c *statusContext) theReportHasNoHisToDoSection() error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	if strings.Contains(c.report.String(), application.HisToDoHeading) {
+		return fmt.Errorf("expected no %q heading, got:\n%s", application.HisToDoHeading, c.report.String())
 	}
 	return nil
 }
