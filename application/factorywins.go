@@ -32,9 +32,11 @@ const (
 // CheapWin is one suggestion a rule made over the report's numbers. Shown says
 // it is one of the first MaxCheapWins that held, the ones printed.
 type CheapWin struct {
-	Rule  string `json:"rule"`
-	Text  string `json:"text"`
-	Shown bool   `json:"shown"`
+	Rule string `json:"rule"`
+	Text string `json:"text"`
+	// IDs are the stories the win names in full, when it names any.
+	IDs   []string `json:"ids,omitempty"`
+	Shown bool     `json:"shown"`
 }
 
 // HeavyStory is a story of the window that used up its attempts or needed
@@ -63,7 +65,9 @@ func CheapWins(in WinInputs) []CheapWin {
 			wins = append(wins, CheapWin{Rule: rule, Text: text})
 		}
 	}
-	add(WinCausesUnset, winCausesUnset(in.Rigs))
+	if text, ids := winCausesUnset(in.Rigs); text != "" {
+		wins = append(wins, CheapWin{Rule: WinCausesUnset, Text: text, IDs: ids})
+	}
 	add(WinDominantReason, winDominantReason(in.Rigs))
 	add(WinAttemptsUsed, winAttemptsUsed(in.Heavy))
 	add(WinRefusalRate, winRefusalRate(in.Rigs))
@@ -75,19 +79,34 @@ func CheapWins(in WinInputs) []CheapWin {
 	return wins
 }
 
-// winCausesUnset is R1: refusals nobody has named a cause for.
-func winCausesUnset(rigs []ReportBlock) string {
+// MaxNamedUncaused is how many stories R1 names in its text; --json has them all.
+const MaxNamedUncaused = 5
+
+// winCausesUnset is R1: refusals nobody has named a cause for, and the stories
+// they were of, the first MaxNamedUncaused in the text and then "+N more".
+func winCausesUnset(rigs []ReportBlock) (string, []string) {
 	n := 0
+	var ids []string
 	for _, rig := range rigs {
 		n += rig.Quality.Causes[CauseUnset]
+		ids = append(ids, rig.Quality.Uncaused...)
 	}
-	switch n {
-	case 0:
-		return ""
-	case 1:
-		return "1 refusal has no cause: mw cause it"
+	sort.Strings(ids)
+	named := strings.Join(ids[:min(len(ids), MaxNamedUncaused)], " ")
+	if len(ids) > MaxNamedUncaused {
+		named += fmt.Sprintf(" +%d more", len(ids)-MaxNamedUncaused)
 	}
-	return fmt.Sprintf("%d refusals have no cause: mw cause them", n)
+	switch {
+	case n == 0:
+		return "", nil
+	case len(ids) == 0 && n == 1:
+		return "1 refusal has no cause: mw cause it", nil
+	case len(ids) == 0:
+		return fmt.Sprintf("%d refusals have no cause: mw cause them", n), nil
+	case n == 1:
+		return "1 refusal has no cause: mw cause " + named, ids
+	}
+	return fmt.Sprintf("%d refusals have no cause: mw cause %s", n, named), ids
 }
 
 // winDominantReason is R2: the rig whose commonest refusal reason is the biggest
@@ -195,8 +214,28 @@ func winGateSlow(gates []GateTrend) string {
 		worst.Host, worst.Rig, gateClock(seconds(worst.LatestS)), gateClock(seconds(worst.UsualS)))
 }
 
+// wrapWords breaks text at spaces into lines of at most width columns; a word
+// wider than that is cut to fit.
+func wrapWords(text string, width int) []string {
+	var lines []string
+	line := ""
+	for _, word := range strings.Fields(text) {
+		word = fitLine(word, width)
+		switch {
+		case line == "":
+			line = word
+		case len([]rune(line))+1+len([]rune(word)) <= width:
+			line += " " + word
+		default:
+			lines = append(lines, line)
+			line = word
+		}
+	}
+	return append(lines, line)
+}
+
 // writeCheapWins prints the section that ends the report: the shown wins,
-// numbered from 1, each cut to ReportWidth columns, or one line saying none held.
+// numbered from 1, each cut to ReportWidth columns (R1 wrapped), or one line saying none held.
 func writeCheapWins(b *strings.Builder, wins []CheapWin) {
 	b.WriteString("\n")
 	n := 0
@@ -209,6 +248,16 @@ func writeCheapWins(b *strings.Builder, wins []CheapWin) {
 		}
 		n++
 		prefix := fmt.Sprintf("%d. ", n)
+		if w.Rule == WinCausesUnset {
+			// R1 wraps rather than is cut: its "+N more" is at the end.
+			for i, line := range wrapWords(w.Text, ReportWidth-len(prefix)) {
+				if i > 0 {
+					prefix = strings.Repeat(" ", len(prefix))
+				}
+				fmt.Fprintf(b, "%s%s\n", prefix, line)
+			}
+			continue
+		}
 		fmt.Fprintf(b, "%s%s\n", prefix, fitLine(w.Text, ReportWidth-len(prefix)))
 	}
 	if n == 0 {

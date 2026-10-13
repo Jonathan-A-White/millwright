@@ -478,7 +478,7 @@ with `previous`, `arrow` and `verdict`, beside the previous window's figures
 CHEAP WINS ends the report: at most three one-line suggestions, each naming its rig,
 host, kind or story and what to try, chosen by fixed rules in this order (quality
 first), the first three that hold being printed, numbered 1 to 3. R1 refusals with no
-cause (`mw cause them`); R2 one reason that is at least 30% of a rig's refusals, and
+cause, naming their stories (the first 5, then `+N more`; `--json` has all under `ids`); R2 one reason that is at least 30% of a rig's refusals, and
 at least 3 of them; R3 a story that used up its attempts or needed 3; R4 a rig's
 refusal rate up 5 points or more on the window before; R5 a kind whose par is flagged
 by the calibration (its FLAG line); R6 a host's latest gate at least 1.5

@@ -113,10 +113,13 @@ type Quality struct {
 	Attempts           int            `json:"attempts"`
 	AttemptsPerLanding float64        `json:"attempts_per_landing"`
 	Causes             map[string]int `json:"causes"`
-	BugsFiled          int            `json:"bugs_filed"`
-	BugsPerLanding     float64        `json:"bugs_per_landing"`
-	Findings           int            `json:"tester_findings"`
-	FindingsPerLanding float64        `json:"findings_per_landing"`
+	// Uncaused are the ids of the refused stories counted under CauseUnset, once
+	// each and sorted; cheap win R1 names them. They are not in the JSON.
+	Uncaused           []string `json:"-"`
+	BugsFiled          int      `json:"bugs_filed"`
+	BugsPerLanding     float64  `json:"bugs_per_landing"`
+	Findings           int      `json:"tester_findings"`
+	FindingsPerLanding float64  `json:"findings_per_landing"`
 }
 
 // Empty says nothing landed, was refused or was filed as a bug.
@@ -462,6 +465,7 @@ func sumQuality(entries []reportEntry) Quality {
 		q.Causes[class] = 0
 	}
 	reasons := map[string]int{}
+	uncaused := map[string]bool{}
 	for _, e := range entries {
 		switch {
 		case e.bug:
@@ -477,9 +481,14 @@ func sumQuality(entries []reportEntry) Quality {
 				q.Causes[class]++
 			} else {
 				q.Causes[CauseUnset]++
+				if !uncaused[e.id] {
+					uncaused[e.id] = true
+					q.Uncaused = append(q.Uncaused, e.id)
+				}
 			}
 		}
 	}
+	sort.Strings(q.Uncaused)
 	for reason, n := range reasons {
 		q.Reasons = append(q.Reasons, ReasonCount{Reason: reason, Count: n})
 	}
