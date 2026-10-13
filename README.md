@@ -1123,6 +1123,7 @@ postern_transcribe_cmd = ""        # what hears the Governor's voice notes, the 
 beads_sync = "remote"              # remote (a copy of its own), backup (holds the one database) or shared (reaches another host's) (default remote)
 beads_backup_minutes = 30          # on a backup host, how long between two backups of the one database (default 30)
 builder_nice = 10                #  a Builder session and mw next's gate run under nice -n this, so a grist's scorer and model keep the CPU; 0 is off (default 10)
+builder_jobs = 8                # the most test workers a Builder's tests and mw next's gate start at once (JOBS, GOMAXPROCS, VITEST_MAX_WORKERS), for a host that is also someone's PC; docs/research/desktop-shared-pc.md (default: no limit)
 hands_root_helper = "/usr/local/sbin/mw-hands-root"  # what a root hands step is handed to, through sudo -n, on every host (default shown)
 
 [rigs]

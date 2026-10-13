@@ -52,7 +52,7 @@ func (c *Checks) RunSpecs(ctx context.Context, rig, dir, base string) (applicati
 	}
 	command := strings.ReplaceAll(template, SpecsPlaceholder, shellWords(specs))
 
-	output, err := runLine(ctx, c.shell, command, dir, c.nice)
+	output, err := runLine(ctx, c.shell, command, dir, c.nice, c.workerEnv())
 	run := application.SpecsChecked{Checked: application.Checked{Command: command, Output: output, Passed: err == nil}, Specs: specs}
 	if err == nil {
 		return run, nil

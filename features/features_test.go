@@ -99,6 +99,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializePathSetScenario(ctx)
 	steps.InitializeBdRetryScenario(ctx)
 	steps.InitializeBriefScenario(ctx)
+	steps.InitializeBuilderJobsScenario(ctx)
 	steps.InitializeChainStampScenario(ctx)
 	steps.InitializeCloudScenario(ctx)
 	steps.InitializeConfigSetScenario(ctx)

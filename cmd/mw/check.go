@@ -83,6 +83,10 @@ func newCheckCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			jobs, err := config.BuilderJobs()
+			if err != nil {
+				return err
+			}
 
 			var slot application.MergeSlot
 			if !noSlot {
@@ -95,7 +99,7 @@ func newCheckCmd() *cobra.Command {
 					rig.WithSlotNotice(func(said string) { fmt.Fprint(cmd.ErrOrStderr(), said) }))
 			}
 			worktrees := rig.New()
-			checks := rig.NewChecks(rig.WithCommands(tests), rig.WithSpecCommands(changedSpecs), rig.WithNice(nice))
+			checks := rig.NewChecks(rig.WithCommands(tests), rig.WithSpecCommands(changedSpecs), rig.WithNice(nice), rig.WithJobs(jobs))
 			k := application.Check{
 				Tracker:    mwGateway(dir, host),
 				Landing:    worktrees,

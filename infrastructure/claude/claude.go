@@ -219,6 +219,7 @@ type Harness struct {
 	envFile        string
 	serverHost     string
 	nice           int
+	jobs           int
 }
 
 // Harness satisfies the port.
@@ -278,6 +279,14 @@ func WithBeadsServerHost(host string) Option {
 // niced: the heartbeat and the close-out are light.
 func WithNice(n int) Option {
 	return func(h *Harness) { h.nice = n }
+}
+
+// WithJobs gives the session JOBS, GOMAXPROCS and VITEST_MAX_WORKERS as n
+// (application.WorkerLimitEnv), so the tests a Builder runs start no more
+// workers than a host that is also someone's PC can spare (mw-gq6.399). 0, the
+// default, adds nothing.
+func WithJobs(n int) Option {
+	return func(h *Harness) { h.jobs = n }
 }
 
 // New returns a Harness that runs Claude Code as this host has it, unless an
@@ -394,25 +403,30 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 	}
 
 	identity := application.SeatIdentity(l.Seat, l.Host)
+	env := map[string]string{
+		// Who beads records as the actor, and who the seat is for mail.
+		"BEADS_ACTOR": identity,
+		"MW_SEAT":     identity,
+		"MW_STORY":    l.StoryID,
+		// A story's session is headless: it ends the moment its turn does,
+		// so a command backgrounded with it (the test suite, most often)
+		// and never waited on is lost the instant the turn ends, taking
+		// whatever was never committed with it (mw-gq6.90; it happened
+		// three times: mw-gq6.39, twice on mw-gq6.86). This is the
+		// harness's own way to take the option away rather than trust it
+		// is never used. A seat's own session (SeatSession) is not given
+		// this: its mail watcher and waiters run in the background by
+		// design.
+		"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1",
+	}
+	// The host's cap on test workers, when it says one (mw-gq6.399).
+	for name, value := range application.WorkerLimitEnv(h.jobs) {
+		env[name] = value
+	}
 	return application.SessionSpec{
-		Name: application.SessionName(l.StoryID),
-		Dir:  l.Dir,
-		Env: map[string]string{
-			// Who beads records as the actor, and who the seat is for mail.
-			"BEADS_ACTOR": identity,
-			"MW_SEAT":     identity,
-			"MW_STORY":    l.StoryID,
-			// A story's session is headless: it ends the moment its turn does,
-			// so a command backgrounded with it (the test suite, most often)
-			// and never waited on is lost the instant the turn ends, taking
-			// whatever was never committed with it (mw-gq6.90; it happened
-			// three times: mw-gq6.39, twice on mw-gq6.86). This is the
-			// harness's own way to take the option away rather than trust it
-			// is never used. A seat's own session (SeatSession) is not given
-			// this: its mail watcher and waiters run in the background by
-			// design.
-			"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1",
-		},
+		Name:    application.SessionName(l.StoryID),
+		Dir:     l.Dir,
+		Env:     env,
 		Command: []string{h.shell, "-c", line},
 	}, nil
 }

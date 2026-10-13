@@ -43,6 +43,7 @@ type Checks struct {
 	git      string
 	shell    string
 	nice     int
+	jobs     int
 }
 
 // Checks satisfies the port.
@@ -87,6 +88,14 @@ func WithNice(n int) CheckOption {
 	return func(c *Checks) { c.nice = n }
 }
 
+// WithJobs caps the test workers every rig's tests may start at n, by handing
+// the command JOBS, GOMAXPROCS and VITEST_MAX_WORKERS (application.WorkerLimitEnv),
+// so a host that is also someone's PC keeps cores free (mw-gq6.399). 0, the
+// default, leaves the command the environment it was started in.
+func WithJobs(n int) CheckOption {
+	return func(c *Checks) { c.jobs = n }
+}
+
 // NewChecks returns the checks of a rig whose tests are DefaultCommand, unless
 // an option says otherwise.
 func NewChecks(opts ...CheckOption) *Checks {
@@ -95,6 +104,15 @@ func NewChecks(opts ...CheckOption) *Checks {
 		opt(c)
 	}
 	return c
+}
+
+// workerEnv is the worker limit as KEY=VALUE words for a command's environment.
+func (c *Checks) workerEnv() []string {
+	var env []string
+	for name, value := range application.WorkerLimitEnv(c.jobs) {
+		env = append(env, name+"="+value)
+	}
+	return env
 }
 
 // Command reports the command line a rig's tests are run by.
@@ -123,7 +141,7 @@ func (c *Checks) RunLine(ctx context.Context, dir, command string) (application.
 		return application.Checked{}, fmt.Errorf("running `%s`: %w", command, err)
 	}
 
-	output, err := runLine(ctx, c.shell, command, dir, c.nice)
+	output, err := runLine(ctx, c.shell, command, dir, c.nice, c.workerEnv())
 	checked := application.Checked{Command: command, Output: output, Passed: err == nil}
 	if err == nil {
 		return checked, nil
@@ -155,7 +173,7 @@ const killGrace = time.Second
 // alike. A context that ends stops the command and everything it started, not
 // only the shell: `make` and the compiler under it are the ones still running
 // when a limit is reached.
-func runLine(ctx context.Context, shell, command, dir string, nice int) (string, error) {
+func runLine(ctx context.Context, shell, command, dir string, nice int, env []string) (string, error) {
 	argv := []string{shell, "-c", command}
 	if nice > 0 {
 		argv = append([]string{"nice", "-n", strconv.Itoa(nice)}, argv...)
@@ -164,7 +182,7 @@ func runLine(ctx context.Context, shell, command, dir string, nice int) (string,
 	cmd.Dir = dir
 	// Nobody is at the keyboard: a test that asks git for a password would wait
 	// there forever in a pane nobody is watching.
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = append(append(os.Environ(), "GIT_TERMINAL_PROMPT=0"), env...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = killGrace

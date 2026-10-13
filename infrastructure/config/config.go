@@ -9,6 +9,7 @@
 //	host_silent_hours = 2
 //	handoff_at = 180000
 //	rig_memory_bytes = 8000
+//	builder_jobs = 8                   # most test workers a Builder's tests and the gate start at once (default: no limit)
 //	beads_budget_bytes = 1500000000
 //	dispatch_sync_tries = 3
 //	dispatch_sync_wait = "15s"
@@ -176,6 +177,7 @@ const (
 	MeteredEnv = "MW_METERED"
 
 	BuilderNiceEnv = "MW_BUILDER_NICE"
+	BuilderJobsEnv = "MW_BUILDER_JOBS"
 )
 
 // The environment variables bd itself reads to reach a Dolt database server
@@ -1395,6 +1397,28 @@ func BuilderNice() (int, error) {
 	n, err := strconv.Atoi(said)
 	if err != nil || n < 0 || n > 19 {
 		return 0, fmt.Errorf("builder_nice is %q: set it to a whole number from 0 (off) to 19, in %s or with %s", said, File, BuilderNiceEnv)
+	}
+	return n, nil
+}
+
+// BuilderJobs reports the most test workers a Builder's tests and mw next's
+// gate may start at once: $MW_BUILDER_JOBS if set, otherwise the root-table
+// `builder_jobs` key of ~/.config/mw/config.toml, and 0, no limit, when neither
+// says. nice does not reach a host that is someone's PC (the WSL VM's threads
+// compete with Windows at normal priority), so a host like that says how many
+// workers its tests may use (application.WorkerLimitEnv). A whole number of 1 or
+// more is taken (mw-gq6.399).
+func BuilderJobs() (int, error) {
+	said, err := optionalSetting("builder_jobs", BuilderJobsEnv, "")
+	if err != nil {
+		return 0, err
+	}
+	if said == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(said)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("builder_jobs is %q: set it to a whole number of 1 or more, in %s or with %s", said, File, BuilderJobsEnv)
 	}
 	return n, nil
 }

@@ -125,3 +125,22 @@ func niceOf(t *testing.T, checks *rig.Checks) int {
 	}
 	return n
 }
+
+// TestTheGateRunsWithTheWorkerLimitItIsGiven: the gate's tests start no more
+// workers than the host's builder_jobs allows (mw-gq6.399); with none given the
+// command sees the environment it was started in.
+func TestTheGateRunsWithTheWorkerLimitItIsGiven(t *testing.T) {
+	t.Setenv("JOBS", "")
+	t.Setenv("GOMAXPROCS", "")
+	t.Setenv("VITEST_MAX_WORKERS", "")
+	command := `echo "$JOBS $GOMAXPROCS $VITEST_MAX_WORKERS"`
+	for jobs, want := range map[int]string{3: "3 3 3", 0: "  "} {
+		checked, err := rig.NewChecks(rig.WithCommand(command), rig.WithJobs(jobs)).Run(context.Background(), "millwright", t.TempDir())
+		if err != nil || !checked.Passed {
+			t.Fatalf("running the command: %v %+v", err, checked)
+		}
+		if got := strings.TrimSuffix(checked.Output, "\n"); got != want {
+			t.Errorf("with %d jobs the command saw %q, want %q", jobs, got, want)
+		}
+	}
+}

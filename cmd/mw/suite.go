@@ -73,6 +73,10 @@ func newSuiteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			jobs, err := config.BuilderJobs()
+			if err != nil {
+				return err
+			}
 
 			files := mwVault(dir, host)
 			var filer *application.SuiteFiler
@@ -81,7 +85,7 @@ func newSuiteCmd() *cobra.Command {
 				filer = &application.SuiteFiler{Tracker: gateway, Rules: vault.New(dir), Mailbox: gateway, Host: host}
 			}
 			worktrees := rig.New()
-			checks := rig.NewChecks(rig.WithNice(nice))
+			checks := rig.NewChecks(rig.WithNice(nice), rig.WithJobs(jobs))
 			report, err := application.Suite{
 				Trees:        worktrees,
 				Heads:        worktrees,

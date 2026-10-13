@@ -2260,3 +2260,29 @@ func TestPosternVerifyDaysRefusesWhatIsNotAWholeNumberOfDays(t *testing.T) {
 		}
 	}
 }
+
+func TestBuilderJobsIsUnsetUntilAHostSaysOtherwise(t *testing.T) {
+	t.Setenv(config.BuilderJobsEnv, "")
+	writeConfig(t, "cap = 4\n")
+	if got, err := config.BuilderJobs(); err != nil || got != 0 {
+		t.Fatalf("builder_jobs = %d, %v; want 0 (no limit)", got, err)
+	}
+	writeConfig(t, "builder_jobs = 6\n")
+	if got, err := config.BuilderJobs(); err != nil || got != 6 {
+		t.Fatalf("builder_jobs = %d, %v; want 6", got, err)
+	}
+	t.Setenv(config.BuilderJobsEnv, "2")
+	if got, err := config.BuilderJobs(); err != nil || got != 2 {
+		t.Fatalf("MW_BUILDER_JOBS=2 gave %d, %v; want 2", got, err)
+	}
+}
+
+func TestBuilderJobsRefusesWhatCapsNothing(t *testing.T) {
+	t.Setenv(config.BuilderJobsEnv, "")
+	for _, bad := range []string{"0", "-1", "two", "1.5"} {
+		writeConfig(t, "builder_jobs = "+bad+"\n")
+		if _, err := config.BuilderJobs(); err == nil || !strings.Contains(err.Error(), "builder_jobs") {
+			t.Errorf("builder_jobs = %s gave %v, want a refusal naming builder_jobs", bad, err)
+		}
+	}
+}

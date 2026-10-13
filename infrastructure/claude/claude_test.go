@@ -1031,3 +1031,29 @@ func TestASessionWithNoBdOnTheHostKeepsItsPath(t *testing.T) {
 		t.Errorf("the session's PATH is %q, want it as the host had it", got)
 	}
 }
+
+// TestTheBuildersSessionIsGivenItsWorkerLimit: a host that is also someone's PC
+// caps the test workers a Builder starts (mw-gq6.399); a host that says nothing
+// leaves the session's environment as it was.
+func TestTheBuildersSessionIsGivenItsWorkerLimit(t *testing.T) {
+	spec, err := New(WithJobs(3)).Session(launch(nil))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	for _, name := range []string{"JOBS", "GOMAXPROCS", "VITEST_MAX_WORKERS"} {
+		if spec.Env[name] != "3" {
+			t.Errorf("expected %s=3 in the session's environment, got %q", name, spec.Env[name])
+		}
+	}
+	for _, opts := range [][]Option{nil, {WithJobs(0)}} {
+		spec, err := New(opts...).Session(launch(nil))
+		if err != nil {
+			t.Fatalf("assembling the session: %v", err)
+		}
+		for _, name := range []string{"JOBS", "GOMAXPROCS", "VITEST_MAX_WORKERS"} {
+			if v, set := spec.Env[name]; set {
+				t.Errorf("expected no %s without a worker limit, got %q", name, v)
+			}
+		}
+	}
+}
