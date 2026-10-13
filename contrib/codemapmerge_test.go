@@ -1,13 +1,12 @@
 package contrib_test
 
-// docs/codemap.md is NOT merged by git's union driver: union keeps both
-// versions of a row two branches each edited, and the two trimmed versions of a
-// byte-capped page came out as one over the cap (mw-gq6.317). With the default
-// merge, a row edited on two branches is a conflict a Builder resolves. These
-// tests prove that in a throwaway repository in a temporary directory, that the
-// real map passes scripts/check-codemap.sh (make test is what a landing runs),
-// and that the script refuses the one thing a union merge could leave behind: a
-// row that two branches edited differently.
+// docs/codemap.md is merged by git's union driver (.gitattributes), so two
+// stories that each add a row near each other both keep it instead of
+// conflicting (mw-gq6.408). Union also keeps both versions of a row two
+// branches edited differently, and it can leave the page over its byte cap
+// (mw-gq6.317); scripts/check-codemap.sh, which make test runs, is the net for
+// those. These tests prove all of that in a throwaway repository in a
+// temporary directory.
 
 import (
 	"os"
@@ -37,31 +36,36 @@ func gitIn(t *testing.T, dir string, args ...string) string {
 	return out
 }
 
-func TestCodemapIsNotMergedByUnion(t *testing.T) {
+func TestCodemapIsMergedByUnion(t *testing.T) {
 	root, err := filepath.Abs("..")
 	if err != nil {
 		t.Fatal(err)
 	}
 	out := strings.TrimSpace(gitIn(t, root, "check-attr", "merge", "docs/codemap.md"))
-	if strings.HasSuffix(out, ": union") {
-		t.Fatalf("git check-attr merge docs/codemap.md = %q: a union merge doubles a row two branches edited", out)
+	if want := "docs/codemap.md: merge: union"; out != want {
+		t.Fatalf("git check-attr merge docs/codemap.md = %q, want %q", out, want)
 	}
 }
 
-func TestCodemapRowEditedOnTwoBranchesNeverMergesToTwoRows(t *testing.T) {
+// mergeCodemapBranches commits base (the real map when empty) and the rig's attributes in a
+// throwaway repository, edits it on branches alpha and beta with the given
+// functions, merges both into main and returns the merged map, plus whether
+// the second merge succeeded.
+func mergeCodemapBranches(t *testing.T, base string, alpha, beta func(lines []string) []string) (string, bool) {
+	t.Helper()
 	root, err := filepath.Abs("..")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The rig's own attributes, if it has any: there is no file when nothing
-	// in the rig is merged specially.
 	attributes, err := os.ReadFile(filepath.Join(root, ".gitattributes"))
 	if err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
-	codemap, err := os.ReadFile(filepath.Join(root, "docs", "codemap.md"))
-	if err != nil {
-		t.Fatal(err)
+	codemap := []byte(base)
+	if base == "" {
+		if codemap, err = os.ReadFile(filepath.Join(root, "docs", "codemap.md")); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	dir := t.TempDir()
@@ -81,40 +85,92 @@ func TestCodemapRowEditedOnTwoBranchesNeverMergesToTwoRows(t *testing.T) {
 	gitIn(t, dir, "add", ".")
 	gitIn(t, dir, "commit", "-q", "-m", "base")
 
-	// Each branch trims the same row, differently.
-	const anchor = "| `WorkTracker` |"
-	editRow := func(branch, suffix string) {
+	edit := func(branch string, change func([]string) []string) {
 		gitIn(t, dir, "checkout", "-q", "-b", branch, "main")
-		lines := strings.Split(string(codemap), "\n")
-		found := false
-		for i, l := range lines {
-			if strings.HasPrefix(l, anchor) {
-				lines[i] = l + suffix
-				found = true
-			}
-		}
-		if !found {
-			t.Fatalf("docs/codemap.md has no row starting %q to edit", anchor)
-		}
+		lines := change(strings.Split(string(codemap), "\n"))
 		if err := os.WriteFile(mapPath, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		gitIn(t, dir, "commit", "-q", "-am", branch)
 	}
-	editRow("alpha", " alpha")
-	editRow("beta", " beta")
+	edit("alpha", alpha)
+	edit("beta", beta)
 
 	gitIn(t, dir, "checkout", "-q", "main")
 	gitIn(t, dir, "merge", "--no-edit", "alpha")
-	if _, err := gitTry(dir, "merge", "--no-edit", "beta"); err != nil {
-		return // a conflict: the Builder resolves it by hand
-	}
+	_, mergeErr := gitTry(dir, "merge", "--no-edit", "beta")
 	merged, err := os.ReadFile(mapPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := strings.Count(string(merged), anchor); n != 1 {
-		t.Errorf("merged codemap holds a row starting %q %d times, want once", anchor, n)
+	return string(merged), mergeErr == nil
+}
+
+// insertAfterRow returns a change that puts row after the line starting anchor.
+func insertAfterRow(t *testing.T, anchor, row string) func([]string) []string {
+	return func(lines []string) []string {
+		for i, l := range lines {
+			if strings.HasPrefix(l, anchor) {
+				out := append([]string{}, lines[:i+1]...)
+				out = append(out, row)
+				return append(out, lines[i+1:]...)
+			}
+		}
+		t.Fatalf("docs/codemap.md has no row starting %q", anchor)
+		return nil
+	}
+}
+
+func TestTwoRowsAddedAtTheSameSpotMergeWithBothRows(t *testing.T) {
+	const anchor = "| `WorkTracker` |"
+	rowA := "| `AlphaPort` | application/alpha.go | infra/alpha | FakeAlpha |"
+	rowB := "| `BetaPort` | application/beta.go | infra/beta | FakeBeta |"
+	merged, ok := mergeCodemapBranches(t, "",
+		insertAfterRow(t, anchor, rowA), insertAfterRow(t, anchor, rowB))
+	if !ok {
+		t.Fatalf("merging two added rows at the same spot conflicted:\n%s", merged)
+	}
+	for _, row := range []string{rowA, rowB} {
+		if n := strings.Count(merged, row+"\n"); n != 1 {
+			t.Errorf("merged codemap holds %q %d times, want once", row, n)
+		}
+	}
+	if strings.Contains(merged, "<<<<<<<") {
+		t.Errorf("merged codemap holds a conflict marker:\n%s", merged)
+	}
+}
+
+func TestCheckCodemapRefusesARowTwoBranchesEdited(t *testing.T) {
+	// Union keeps both versions of a row each branch edited; the check
+	// scripts/check-codemap.sh makes in the gate is what catches them.
+	const anchor = "| `WorkTracker` |"
+	base := "# Map\n\n| Port | Declared in |\n| --- | --- |\n| `Other` | `a` |\n" +
+		"| `WorkTracker` | `b` |\n| `Last` | `c` |\n"
+	suffix := func(s string) func([]string) []string {
+		return func(lines []string) []string {
+			for i, l := range lines {
+				if strings.HasPrefix(l, anchor) {
+					lines[i] = l + s
+					return lines
+				}
+			}
+			t.Fatalf("docs/codemap.md has no row starting %q", anchor)
+			return nil
+		}
+	}
+	merged, ok := mergeCodemapBranches(t, base, suffix(" alpha"), suffix(" beta"))
+	if !ok {
+		return // a conflict: the Builder resolves it by hand
+	}
+	if n := strings.Count(merged, anchor); n != 2 {
+		t.Fatalf("merged codemap holds a row starting %q %d times, want 2 (union)", anchor, n)
+	}
+	code, out := checkCodemapIn(t, merged)
+	if code == 0 {
+		t.Fatalf("check-codemap passed a map holding two versions of one row:\n%s", out)
+	}
+	if !strings.Contains(out, "same first cell") {
+		t.Errorf("output does not name the repeated first cell:\n%s", out)
 	}
 }
 
@@ -232,5 +288,29 @@ func TestCheckCodemapCapIs10240Bytes(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("output does not mention %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestCheckCodemapRefusesAConflictMarker(t *testing.T) {
+	table := "| Port | Declared in |\n| --- | --- |\n"
+	for _, marker := range []string{"<<<<<<< HEAD", "<<<<<<<", "=======", ">>>>>>> mw/mw-x.1", ">>>>>>>"} {
+		t.Run(marker, func(t *testing.T) {
+			codemap := "# Map\n\n" + table + "| `A` | `x` |\n" + marker + "\n| `B` | `y` |\n"
+			code, out := checkCodemapIn(t, codemap)
+			if code == 0 {
+				t.Fatalf("check-codemap passed a map holding %q, output:\n%s", marker, out)
+			}
+			if !strings.Contains(out, "conflict marker") || !strings.Contains(out, "line 6") {
+				t.Errorf("output does not name a conflict marker on line 6:\n%s", out)
+			}
+		})
+	}
+}
+
+func TestCheckCodemapAcceptsEqualsRunsThatAreNotMarkers(t *testing.T) {
+	// A longer run of = (a setext heading underline) is not a marker.
+	codemap := "# Map\n\nTitle\n==========\n\n| Port | Declared in |\n| --- | --- |\n| `A` | `x` |\n"
+	if code, out := checkCodemapIn(t, codemap); code != 0 {
+		t.Fatalf("check-codemap refused a long = line (exit %d):\n%s", code, out)
 	}
 }
