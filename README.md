@@ -439,6 +439,21 @@ cause (the section is left out when there are none); and `mw retry` of a story
 with no cause prints `no cause recorded yet: mw cause ...` and retries anyway.
 See `features/cause.feature`.
 
+## Commenting on a bead with the clock's time
+
+```sh
+bin/mw note mw-x "VERIFIED by the Mayor, {now}: ok"
+bin/mw note mw-x --file verdict.txt
+```
+
+A time typed into a bead comment by hand has been wrong more than once. `mw note
+<bead> "<text>"` adds the text as a comment with every `{now}` in it replaced by
+the clock's UTC time at the moment of writing, to the minute, like `2026-10-13
+06:30Z`, and prints the time it used. Text with no `{now}` is written as it is,
+as `bd comment` would. `--file <path>` reads the text from a file, with the same
+replacement. A bead the tracker does not know, a file that cannot be read and an
+empty note are refused with nothing written. See `features/note.feature`.
+
 ## How the factory is doing
 
 ```sh

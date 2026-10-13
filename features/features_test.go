@@ -141,6 +141,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeReadyStoriesScenario(ctx)
 	steps.InitializeReleaseScenario(ctx)
 	steps.InitializeCauseScenario(ctx)
+	steps.InitializeNoteScenario(ctx)
 	steps.InitializeReportScenario(ctx)
 	steps.InitializeReportSendScenario(ctx)
 	steps.InitializeRetryScenario(ctx)
