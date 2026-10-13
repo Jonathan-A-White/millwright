@@ -119,6 +119,9 @@ func (i PosternInbox) applyTodoMove(ctx context.Context, action PosternAction, c
 	if target == "" {
 		target = card.EpicID
 	}
+	if target == "" {
+		return refuse("it is on no list, and names none")
+	}
 	if anchor == "" && target == card.EpicID {
 		return refuse("it names no place: a card to go before or after, or another list")
 	}
