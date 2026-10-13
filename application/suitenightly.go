@@ -177,3 +177,30 @@ func (n *NightlySuite) run(ctx context.Context) error {
 	}
 	return errors.Join(errs...)
 }
+
+// SuiteProcesses is the port a nightly suite's process is begun and waited for
+// through. The process lives apart from the follower: a follower that stops, as
+// it does for every self-update, leaves it running (mw-gq6.395).
+type SuiteProcesses interface {
+	// Begin starts the suite of rig, unless one begun earlier, by this follower
+	// or another, is still running: that one is the suite.
+	Begin(ctx context.Context, rig string) error
+	// Wait returns when the suite of rig ends: nil if it passed, an error if it
+	// failed or ended without saying. A ctx that ends stops the wait, not the
+	// suite.
+	Wait(ctx context.Context, rig string) error
+}
+
+// DetachedSuite runs the nightly suite of a rig in a process apart from the
+// follower, and adopts one a follower before this had begun.
+type DetachedSuite struct {
+	Processes SuiteProcesses
+}
+
+// Run begins the suite of rig, or finds the one running, and waits for it.
+func (d DetachedSuite) Run(ctx context.Context, rig string) error {
+	if err := d.Processes.Begin(ctx, rig); err != nil {
+		return fmt.Errorf("beginning the suite: %w", err)
+	}
+	return d.Processes.Wait(ctx, rig)
+}

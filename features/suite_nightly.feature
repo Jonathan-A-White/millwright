@@ -94,3 +94,35 @@ Feature: The follower springs the nightly whole suite on the home
     When the nightly clock reads "2026-10-13 03:00" UTC
     And the nightly follower runs a cycle
     Then "mw suite lampas --file" was run 1 time
+
+  Scenario: A suite still running when the follower restarts is adopted, and its real outcome is told
+    Given the nightly suite runs apart from the follower
+    And the nightly clock reads "2026-10-13 07:55" UTC
+    And the nightly follower runs a cycle
+    When the nightly clock reads "2026-10-13 08:00" UTC
+    And the nightly follower begins a cycle
+    And the suite of "lampas" is running
+    And the nightly follower stops
+    And the nightly follower begins a cycle
+    And the suite of "lampas" is running
+    And the suite of "lampas" ends having failed
+    And the nightly follower finishes its cycle
+    Then "mw suite lampas --file" was begun 1 time
+    And the last event of the job "suite@laptop" is failed
+    And the log tells the job "suite@laptop" as scheduled, running, done, scheduled, running, failed
+
+  Scenario: A suite that ends well after a restart is told as done, not as cut short
+    Given the nightly suite runs apart from the follower
+    And the nightly clock reads "2026-10-13 07:55" UTC
+    And the nightly follower runs a cycle
+    When the nightly clock reads "2026-10-13 08:00" UTC
+    And the nightly follower begins a cycle
+    And the suite of "lampas" is running
+    And the nightly follower stops
+    And the nightly follower begins a cycle
+    And the suite of "lampas" is running
+    And the suite of "lampas" ends having passed
+    And the nightly follower finishes its cycle
+    Then "mw suite lampas --file" was begun 1 time
+    And the last event of the job "suite@laptop" is done
+    And that event does not say the follower stopped

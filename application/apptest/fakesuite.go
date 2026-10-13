@@ -203,3 +203,98 @@ func (f *FakeSuiteRecords) LatestSuite(_ context.Context, rig string) (applicati
 	record, err := application.ParseSuiteRecord(day, f.files[path.Join(application.SuiteDir, rig, day+".json")])
 	return record, err == nil, err
 }
+
+// FakeSuiteProcesses is an application.SuiteProcesses whose suites run apart
+// from whoever began them, as the real ones do: a suite begun stays running,
+// whatever becomes of the context it was begun under, until a scenario ends it.
+type FakeSuiteProcesses struct {
+	mu      sync.Mutex
+	procs   map[string]*fakeSuiteProc
+	begun   []string
+	waiting map[string]int
+}
+
+type fakeSuiteProc struct {
+	done chan struct{}
+	err  error
+}
+
+var _ application.SuiteProcesses = (*FakeSuiteProcesses)(nil)
+
+// Begin implements application.SuiteProcesses: a suite of rig already running
+// is left as it is.
+func (f *FakeSuiteProcesses) Begin(_ context.Context, rig string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if p := f.procs[rig]; p != nil {
+		select {
+		case <-p.done:
+		default:
+			return nil
+		}
+	}
+	if f.procs == nil {
+		f.procs = map[string]*fakeSuiteProc{}
+	}
+	f.procs[rig] = &fakeSuiteProc{done: make(chan struct{})}
+	f.begun = append(f.begun, rig)
+	return nil
+}
+
+// Wait implements application.SuiteProcesses.
+func (f *FakeSuiteProcesses) Wait(ctx context.Context, rig string) error {
+	f.mu.Lock()
+	p := f.procs[rig]
+	if f.waiting == nil {
+		f.waiting = map[string]int{}
+	}
+	f.waiting[rig]++
+	f.mu.Unlock()
+	defer func() {
+		f.mu.Lock()
+		f.waiting[rig]--
+		f.mu.Unlock()
+	}()
+	if p == nil {
+		return fmt.Errorf("no suite of %s was begun", rig)
+	}
+	select {
+	case <-p.done:
+		return p.err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// Waiting says whether something is waiting on the suite of rig.
+func (f *FakeSuiteProcesses) Waiting(rig string) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.waiting[rig] > 0
+}
+
+// End ends the suite of rig: with err, it failed.
+func (f *FakeSuiteProcesses) End(rig string, err error) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	p := f.procs[rig]
+	if p == nil {
+		return fmt.Errorf("no suite of %s is running", rig)
+	}
+	p.err = err
+	close(p.done)
+	return nil
+}
+
+// Begun is how many times a suite of rig was begun.
+func (f *FakeSuiteProcesses) Begun(rig string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, r := range f.begun {
+		if r == rig {
+			n++
+		}
+	}
+	return n
+}

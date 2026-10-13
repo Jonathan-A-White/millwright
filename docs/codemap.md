@@ -35,7 +35,7 @@ domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cm
 | Grinder, WarmGrinder, GristPoolBoard, GrindSource, GristState, GristLock, GristRunStore, GristForwardStore, GristRequestStore, GristLandings, GristSmoke*, VisionSource | application/grist.go, application/gristpool.go, application/vision.go, application/gristruns.go, application/griststatus.go, application/gristsmoke.go | infra/{claude/grind,rig/{grinds,landingof},hostlock/try}.go, infra/grist | Fake{Grinder,WarmGrinder,Grinds,Grist*,Landings,Visions} |
 | IdeasOnlyReader, IdeasOnlyFiles | application/ideasonly.go | infra/{postern/http.go,ideasonly} | FakePostern; features/ideas_only.feature (real files) |
 | ConfigFile | application/configset.go | infra/configfile | features/config_set.feature (real file) |
-| SuiteTrees, SuiteRunner, SuiteRecords, SuiteHistory | application/suite.go, application/suitenightly.go | infra/{rig/{worktree,checks}.go,vault/vault.go} | FakeSuite{Trees,Runner,Records} |
+| SuiteTrees, SuiteRunner, SuiteRecords, SuiteHistory, SuiteProcesses | application/suite.go, application/suitenightly.go | infra/{rig/{worktree,checks}.go,vault/vault.go,suiteproc} | FakeSuite{Trees,Runner,Records,Processes} |
 | Scorer | application/scorer.go | infra/scorer | FakeScorer |
 | SecretStore | application/secrets.go | infra/sops | FakeSecretStore |
 

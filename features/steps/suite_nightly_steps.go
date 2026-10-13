@@ -29,6 +29,7 @@ type suiteNightlyContext struct {
 	records    *apptest.FakeSuiteRecords
 	log        *apptest.FakeEventLog
 	spring     *application.EventSpring
+	last       events.Event
 	ctx        context.Context
 	cancel     context.CancelFunc
 
@@ -37,6 +38,10 @@ type suiteNightlyContext struct {
 	active    int
 	together  bool
 	cannotRun bool
+
+	// processes stands for the suites apart from the follower, when the scenario
+	// says they run so: they outlive a follower and a restarted one finds them.
+	processes *apptest.FakeSuiteProcesses
 }
 
 // InitializeSuiteNightlyScenario registers the steps of features/suite_nightly.feature.
@@ -72,6 +77,28 @@ func InitializeSuiteNightlyScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the nightly suite is sprung at hour (\d+)$`, func(hour int) error { c.hour = hour; return nil })
 	ctx.Given(`^the suite of "([^"]*)" cannot be run$`, func(string) error { c.cannotRun = true; return nil })
 	ctx.Given(`^the result of "([^"]*)" for "([^"]*)" is already kept$`, c.alreadyKept)
+	ctx.Given(`^the nightly suite runs apart from the follower$`, func() error {
+		c.processes = &apptest.FakeSuiteProcesses{}
+		return nil
+	})
+	ctx.When(`^the nightly follower begins a cycle$`, c.begin)
+	ctx.When(`^the nightly follower stops$`, c.stop)
+	ctx.When(`^the nightly follower finishes its cycle$`, func() error { c.spring.Wait(); return nil })
+	ctx.When(`^the suite of "([^"]*)" is running$`, c.isRunning)
+	ctx.When(`^the suite of "([^"]*)" ends having (passed|failed)$`, c.ends)
+	ctx.Then(`^"mw suite ([^"]*) --file" was begun (\d+) times?$`, func(rig string, n int) error {
+		if got := c.processes.Begun(rig); got != n {
+			return fmt.Errorf("expected the suite of %s begun %d times, got %d", rig, n, got)
+		}
+		return nil
+	})
+	ctx.Then(`^the last event of the job "([^"]*)" is (done|failed)$`, c.lastEvent)
+	ctx.Then(`^that event does not say the follower stopped$`, func() error {
+		if c.last.Detail == application.SpringInterruptedDetail {
+			return fmt.Errorf("the last event says %q", c.last.Detail)
+		}
+		return nil
+	})
 	ctx.Given(`^the nightly clock reads "([^"]*)" UTC$`, c.setClock)
 	ctx.When(`^the nightly clock reads "([^"]*)" UTC$`, c.setClock)
 	ctx.Given(`^the nightly follower runs a cycle$`, c.cycle)
@@ -130,19 +157,69 @@ func (c *suiteNightlyContext) suite(ctx context.Context, rig string) error {
 }
 
 func (c *suiteNightlyContext) cycle() error {
+	if err := c.begin(); err != nil {
+		return err
+	}
+	c.spring.Wait()
+	return nil
+}
+
+// begin runs a cycle of the follower, starting one if there is none, and does
+// not wait for the passes it begins.
+func (c *suiteNightlyContext) begin() error {
 	if c.spring == nil {
+		run := c.suite
+		if c.processes != nil {
+			run = application.DetachedSuite{Processes: c.processes}.Run
+		}
 		suite := &application.NightlySuite{
 			Hour: c.hour, Rigs: c.rigs, Rules: c.rules, History: c.records,
 			Home: func(context.Context) (bool, error) { return c.host == c.home, nil },
-			Run:  c.suite,
+			Run:  run,
 			Now:  func() time.Time { return c.now },
 		}
 		c.spring = &application.EventSpring{Log: c.log, Host: c.host, Jobs: []application.SpringJob{suite.Job()}, Now: func() time.Time { return c.now }}
 	}
-	if err := c.spring.Spring(c.ctx); err != nil {
-		return err
-	}
+	return c.spring.Spring(c.ctx)
+}
+
+// stop is the follower being stopped for a self-update: its passes end, and the
+// next one to run is a new follower, which knows only what the log says.
+func (c *suiteNightlyContext) stop() error {
+	c.cancel()
 	c.spring.Wait()
+	c.spring = nil
+	c.ctx, c.cancel = context.WithCancel(context.Background())
+	return nil
+}
+
+func (c *suiteNightlyContext) isRunning(rig string) error {
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+		if c.processes.Waiting(rig) {
+			return nil
+		}
+	}
+	return fmt.Errorf("nothing came to wait on the suite of %s", rig)
+}
+
+func (c *suiteNightlyContext) ends(rig, how string) error {
+	var err error
+	if how == "failed" {
+		err = fmt.Errorf("the suite of %s failed on its main", rig)
+	}
+	return c.processes.End(rig, err)
+}
+
+func (c *suiteNightlyContext) lastEvent(actor, state string) error {
+	found := false
+	for _, e := range c.log.All() {
+		if e.Kind == events.KindJob && e.Actor == actor {
+			c.last, found = e, true
+		}
+	}
+	if !found || c.last.To != state {
+		return fmt.Errorf("expected the last event of %s to be %s, got %+v", actor, state, c.last)
+	}
 	return nil
 }
 
