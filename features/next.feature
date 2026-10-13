@@ -326,6 +326,31 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.1" records attempt 2
     And the first attempt's branch of "mw-gq6.1" is kept
 
+  # mw-gq6.393: the give-back that follows an open-steps stop met a passing fault
+  # of the beads server on the desktop and the story kept its claim. A give-back
+  # that fails that way is tried again, as the reads and the other writes are.
+  Scenario: The claim give-back of an open-steps stop meets a passing fault and is tried again
+    Given the story "mw-gq6.1" was started once
+    And the session of "mw-gq6.1" reported a plain success
+    And a formula was poured for "mw-gq6.1" and one of its steps is still open
+    And the next 2 give-backs of the claim on "mw-gq6.1" fail, saying: dolt server unreachable
+    When mw closes out "mw-gq6.1"
+    Then the report says it stopped for "open-steps"
+    And the story "mw-gq6.1" is open and unclaimed
+    And the story "mw-gq6.1" carries a comment quoting: takes it as attempt 2
+    And the printed report says "give-back of the claim on mw-gq6.1 failed (dolt server unreachable), retried"
+
+  Scenario: The claim give-back of an open-steps stop keeps meeting the fault and says so
+    Given the story "mw-gq6.1" was started once
+    And the session of "mw-gq6.1" reported a plain success
+    And a formula was poured for "mw-gq6.1" and one of its steps is still open
+    And the next 9 give-backs of the claim on "mw-gq6.1" fail, saying: dolt server unreachable
+    When mw closes out "mw-gq6.1"
+    Then the report says it stopped for "open-steps"
+    And the story "mw-gq6.1" keeps its claim
+    And the story "mw-gq6.1" carries a comment quoting: the claim was not given back
+    And the printed report says "dolt server unreachable"
+
   Scenario: The target branch moved on the origin while the story was worked
     Given the other host landed its own work on "main" while "mw-gq6.1" was worked
     And the session of "mw-gq6.1" reported a plain success
