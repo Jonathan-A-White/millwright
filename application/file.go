@@ -85,6 +85,61 @@ type FiledStory struct {
 	// held, open, in progress or closed. An empty State reads as held, which is
 	// what a story that has only just been filed is.
 	State string
+	// InFlight are the stories already open or running on this story's rig whose
+	// files its own overlap (or, a story that names no files, the running ones),
+	// as they were when it was filed. They are told, never acted on: the
+	// dependency is the Mayor's to add.
+	InFlight []InFlight
+}
+
+// InFlight is a story already open or running that a planned story's files
+// overlap: its id and title, and the path they share, empty when the planned
+// story names no files and only the rig is shared.
+type InFlight struct {
+	ID    string
+	Title string
+	Share string
+}
+
+// line is the in-flight story as the tree says it.
+func (i InFlight) line() string {
+	share := "same rig, no files named"
+	if i.Share != "" {
+		share = "shares " + i.Share
+	}
+	return fmt.Sprintf("in flight: %s %s (%s)", i.ID, i.Title, share)
+}
+
+// inFlightFor finds the stories of the work in hand that a story worked by this
+// path (and these files) overlaps, in the order the tracker reported them,
+// running before open. A story that names files overlaps the stories on its rig
+// whose files meet its own; one that names none overlaps the running stories on
+// its rig, since nothing says what it touches.
+func inFlightFor(work WorkInHand, path domain.Path) []InFlight {
+	ours := domain.FileList(path.Files)
+	var found []InFlight
+	lists := [][]StoryDetail{work.Running, work.Ready}
+	if len(ours) == 0 {
+		lists = lists[:1]
+	}
+	for _, list := range lists {
+		for _, detail := range list {
+			theirs := detail.Merged()
+			if theirs.Rig != path.Rig {
+				continue
+			}
+			flight := InFlight{ID: detail.Story.ID, Title: detail.Story.Title}
+			if len(ours) > 0 {
+				file, shared := domain.SharedFile(ours, domain.FileList(theirs.Files))
+				if !shared {
+					continue
+				}
+				flight.Share = file
+			}
+			found = append(found, flight)
+		}
+	}
+	return found
 }
 
 // state is what the tree calls this story, defaulting to held.
@@ -150,6 +205,10 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 		return FiledPlan{}, err
 	}
 
+	// What is in flight is read before anything is filed, so that the plan's own
+	// stories are never among it. Failing to read it refuses nothing.
+	work, workErr := f.Tracker.WorkInHand(ctx)
+
 	epicID, err := f.Tracker.CreateEpic(ctx, NewEpic{
 		Title:           plan.Epic.Title,
 		Description:     plan.Epic.Description,
@@ -182,13 +241,17 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 			Acceptance:      story.Acceptance,
 			Priority:        story.Priority,
 			EstimateMinutes: story.Estimate,
-			Overrides:       story.Overrides,
+			Overrides:       story.PathOverrides(),
 			Needs:           needs,
 			Labels:          story.Labels,
 		})
 		if err != nil {
 			return filed, fmt.Errorf("filing story %s under %s (the epic and %d of its stories are filed and held): %w",
 				story.Key, epicID, len(filed.Stories), err)
+		}
+		var inFlight []InFlight
+		if workErr == nil {
+			inFlight = inFlightFor(work, path)
 		}
 		ids[story.Key] = id
 		filed.Stories = append(filed.Stories, FiledStory{
@@ -199,6 +262,7 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 			EstimateMinutes: story.Estimate,
 			Needs:           needs,
 			State:           StateHeld,
+			InFlight:        inFlight,
 		})
 	}
 
@@ -212,6 +276,9 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	}
 
 	f.print(filed.Tree())
+	if workErr != nil {
+		f.print(fmt.Sprintf("\nWhat is in flight on the rig could not be read, so no story above says what it overlaps: %v\n", workErr))
+	}
 	if len(f.Waive.Names) > 0 {
 		f.print(fmt.Sprintf("\nWaived for %s: %s. The Governor's word is on the epic.\n", epicID, strings.Join(f.Waive.Names, ", ")))
 	}
@@ -345,6 +412,10 @@ func (p FiledPlan) Tree() string {
 			state = append(state, "waits on "+strings.Join(story.Needs, ", "))
 		}
 		fmt.Fprintf(&b, "      %s\n", strings.Join(state, " · "))
+		for _, flight := range story.InFlight {
+			fmt.Fprintf(&b, "      %s\n", flight.line())
+			fmt.Fprintf(&b, "        bd dep add %s %s\n", story.ID, flight.ID)
+		}
 	}
 	for _, epic := range p.Epics {
 		fmt.Fprintf(&b, "\n  %s · %s\n", epic.ID, epic.Title)

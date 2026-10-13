@@ -202,3 +202,47 @@ Feature: Filing the Mayor's plan
     When the plan is filed and approved
     And the story "module" is closed
     Then the ready stories of the epic on vps are gateway, formulas
+
+  Scenario: A story's files in the plan are written as its files key
+    Given the story "gateway" names the files "application/file.go, domain/*.go"
+    When the plan is filed
+    Then the filed story "gateway" carries the files key "application/file.go, domain/*.go"
+
+  Scenario: A story whose files overlap a running story's names it, and the dependency to add
+    Given the story "gateway" names the files "application/file.go, domain/*.go"
+    And the story "module" names the files "go.mod"
+    And the story "formulas" names the files "formulas/"
+    And the story "mw-run1" "Rework the plan" is running on the rig "millwright" with the files "domain/plan.go"
+    When the plan is filed
+    Then filing succeeds
+    And the tree shows under the story "gateway": in flight: mw-run1 Rework the plan (shares domain/plan.go)
+    And the tree shows under the story "gateway" the dependency to add on "mw-run1"
+    And the tree shows nothing in flight under the story "module"
+    And the tree shows nothing in flight under the story "formulas"
+    And no dependency was added
+
+  Scenario: An open story whose files overlap is named too
+    Given the story "gateway" names the files "application/file.go"
+    And the story "mw-open1" "Tidy the file use case" is open on the rig "millwright" with the files "application/"
+    When the plan is filed
+    Then the tree shows under the story "gateway": in flight: mw-open1 Tidy the file use case (shares application/file.go)
+
+  Scenario: A story whose files overlap nothing running prints nothing in flight
+    Given the story "gateway" names the files "application/file.go"
+    And the story "mw-run1" "Docs only" is running on the rig "millwright" with the files "docs/"
+    When the plan is filed
+    Then filing succeeds
+    And the tree shows nothing in flight under the story "gateway"
+
+  Scenario: A running story on another rig is not in flight for this plan
+    Given the story "gateway" names the files "application/file.go"
+    And the story "mw-run1" "Same file, other rig" is running on the rig "fellowship" with the files "application/file.go"
+    When the plan is filed
+    Then the tree shows nothing in flight under the story "gateway"
+
+  Scenario: A story that names no files lists the rig's running stories
+    Given the story "mw-run1" "Rework the plan" is running on the rig "millwright" with the files "domain/plan.go"
+    And the story "mw-run2" "Elsewhere" is running on the rig "fellowship" with the files "domain/plan.go"
+    When the plan is filed
+    Then the tree shows under the story "module": in flight: mw-run1 Rework the plan (same rig, no files named)
+    And the tree does not name "mw-run2"
