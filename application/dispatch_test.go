@@ -1546,3 +1546,92 @@ func TestDispatchSaysTheClaimIsStillHeldWhenNoGiveBackTook(t *testing.T) {
 		t.Fatalf("expected the original failure and that the claim needs releasing by hand, got %v", got)
 	}
 }
+
+// mw-gq6.386: a Dolt server under load answers slowly, not never, so a pour that
+// timed out is tried again after a pause before the claim is given back.
+func TestDispatchPoursAgainWhenTheDatabaseTimesOutAtThePour(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, _, _ := aFactory(t)
+	var waits []time.Duration
+	dispatch.Wait = func(_ context.Context, d time.Duration) error { waits = append(waits, d); return nil }
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	timeout := errors.New("read tcp 10.88.0.3:49398->10.88.0.2:3307: i/o timeout")
+	tracker.FailPours(timeout, timeout)
+
+	report, err := dispatch.Run(ctx)
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if len(report.Started) != 1 || len(report.Failed) != 0 {
+		t.Fatalf("expected the story started on the third try, got started %+v failed %+v", report.Started, report.Failed)
+	}
+	if got := countAsked(tracker, "PourFormula"); got != 3 {
+		t.Errorf("expected 3 pours, asked %d", got)
+	}
+	if len(waits) != 2 || waits[0] != 15*time.Second || waits[1] != 15*time.Second {
+		t.Errorf("expected two pauses of 15s, got %v", waits)
+	}
+	if _, poured := tracker.Poured("mw-gq6.1"); !poured {
+		t.Error("expected the formula to be poured")
+	}
+}
+
+func TestDispatchGivesTheClaimBackAfterThreeTimedOutPoursAndSaysTheLoad(t *testing.T) {
+	ctx := context.Background()
+	for name, tc := range map[string]struct {
+		load *apptest.FakeHostLoad
+		want string
+	}{
+		"read":    {&apptest.FakeHostLoad{Reading: application.LoadReading{Load: 24.5, Cores: 20}}, "load 24.5 on 20 cores"},
+		"unknown": {&apptest.FakeHostLoad{Err: errors.New("no /proc")}, "home load unknown"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dispatch, tracker, _, _, _ := aFactory(t)
+			dispatch.Wait = func(context.Context, time.Duration) error { return nil }
+			dispatch.Load = tc.load
+			dispatch.Room = application.RoomLimits{LoadPerCore: 2}
+			tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+			tracker.FailPours(errors.New("i/o timeout"), errors.New("invalid connection"), errors.New("Dolt server unreachable"), errors.New("i/o timeout"))
+
+			report, err := dispatch.Run(ctx)
+			if err == nil {
+				t.Fatal("expected the dispatch to report the failure")
+			}
+			if len(report.Failed) != 1 || !report.Failed[0].Released {
+				t.Fatalf("expected one failure with the claim given back, got %+v", report.Failed)
+			}
+			if got := countAsked(tracker, "PourFormula"); got != 3 {
+				t.Errorf("expected 3 pours, asked %d", got)
+			}
+			detail, err := tracker.ShowStory(ctx, "mw-gq6.1")
+			if err != nil {
+				t.Fatalf("showing the story: %v", err)
+			}
+			if detail.Status != application.StatusOpen || detail.Assignee != "" || detail.Attempts != 0 {
+				t.Errorf("expected the story open, unclaimed and with no attempt counted, got %q %q attempts %d", detail.Status, detail.Assignee, detail.Attempts)
+			}
+			comments := tracker.Comments("mw-gq6.1")
+			if len(comments) != 1 || !strings.Contains(comments[0], "3 tries") || !strings.Contains(comments[0], tc.want) {
+				t.Errorf("expected one comment naming 3 tries and %q, got %q", tc.want, comments)
+			}
+		})
+	}
+}
+
+func TestDispatchDoesNotPourAgainOnAFailureThatIsNotTheDatabaseSlow(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, _, _ := aFactory(t)
+	dispatch.Wait = func(context.Context, time.Duration) error {
+		t.Error("paused for a failure that is not transient")
+		return nil
+	}
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story"})
+	tracker.FailPours(errors.New("no such formula"))
+
+	if _, err := dispatch.Run(ctx); err == nil {
+		t.Fatal("expected the dispatch to report the failure")
+	}
+	if got := countAsked(tracker, "PourFormula"); got != 1 {
+		t.Errorf("expected one pour, asked %d", got)
+	}
+}

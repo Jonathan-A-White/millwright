@@ -829,6 +829,63 @@ func (d Dispatch) syncWaitingForTheNetwork(ctx context.Context) (SyncReport, int
 	}
 }
 
+// PourTries and PourWait are how many times a pour is tried, and how long the
+// pause between the tries is, when the database timed out or dropped the
+// connection (mw-gq6.386): a Dolt server under load answers slowly, not never.
+const (
+	PourTries = 3
+	PourWait  = 15 * time.Second
+)
+
+// transientPourFault says whether a pour failed because the database was slow or
+// out of reach, which the next try may find otherwise, rather than for a reason
+// that will be the same again.
+func transientPourFault(err error) bool {
+	said := err.Error()
+	for _, mark := range []string{"i/o timeout", "invalid connection", "Dolt server unreachable"} {
+		if strings.Contains(said, mark) {
+			return true
+		}
+	}
+	return false
+}
+
+// pourWaitingForTheDatabase pours the formula, and pours it again after PourWait
+// while what stops it is the database being slow or out of reach, up to PourTries
+// tries. A refusal (PourRefused) and every other failure come back at once. When
+// the last try fails too the error says the tries and this host's load, since a
+// pour that timed out may already have made beads that a later try cannot see.
+func (d Dispatch) pourWaitingForTheDatabase(ctx context.Context, formula, id, title string, bug bool) (Molecule, error) {
+	for try := 1; ; try++ {
+		molecule, err := d.Tracker.PourFormula(ctx, formula, id, title, bug)
+		if err == nil || !transientPourFault(err) {
+			return molecule, err
+		}
+		if try >= PourTries {
+			return molecule, fmt.Errorf("%w (%d tries, %s apart, all timed out or lost the connection; %s; a try that timed out may have made beads before it failed, which are left behind and not recorded on the story)",
+				err, try, PourWait, d.loadSaid(ctx))
+		}
+		d.print(fmt.Sprintf("  pour of %s failed (%v); trying again in %s\n", id, err, PourWait))
+		wait := d.Wait
+		if wait == nil {
+			wait = waitFor
+		}
+		if werr := wait(ctx, PourWait); werr != nil {
+			return molecule, fmt.Errorf("%w (and the wait to pour again was cut short: %v)", err, werr)
+		}
+	}
+}
+
+// loadSaid is this host's load as a comment says it, or that it is unknown.
+func (d Dispatch) loadSaid(ctx context.Context) string {
+	if d.Load != nil {
+		if reading, err := d.Load.Load(ctx); err == nil && reading.Cores > 0 {
+			return fmt.Sprintf("load %.1f on %d cores at %s", reading.Load, reading.Cores, d.Host)
+		}
+	}
+	return "home load unknown"
+}
+
 // tellRoom writes the job event for a change of this host's room from what the
 // log last said of it: one when it has none, one when it has it back, and none
 // for a host whose room stays as it was. A host the log has said nothing of
@@ -1036,7 +1093,7 @@ func (d Dispatch) start(ctx context.Context, detail StoryDetail, path domain.Pat
 		if err != nil {
 			return undo("reading the step titles of the formula "+path.Formula, err, true)
 		}
-		molecule, err := d.Tracker.PourFormula(ctx, path.Formula, id, title, domain.IsBugStory(detail.Type, detail.Story.Title))
+		molecule, err := d.pourWaitingForTheDatabase(ctx, path.Formula, id, title, domain.IsBugStory(detail.Type, detail.Story.Title))
 		var refused *PourRefused
 		if errors.As(err, &refused) {
 			return d.refusePour(ctx, id, started, rigDir, refused)

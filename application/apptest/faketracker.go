@@ -133,6 +133,9 @@ type FakeTracker struct {
 	// releaseFaults is how a give-back goes wrong on its first tries: each
 	// ReleaseClaim or ReleaseClaimHeldBy takes the next fault off the front.
 	releaseFaults []ReleaseFault
+	// pourFaults is how the next pours fail, one error each in order, before the
+	// ones after them work again (FailPours).
+	pourFaults []error
 
 	// Clock is what a claim's lease is counted from. A nil Clock reads the
 	// real one.
@@ -1028,6 +1031,11 @@ func (f *FakeTracker) PourFormula(_ context.Context, formula, storyID, title str
 	if err := f.failing["PourFormula"]; err != nil {
 		return application.Molecule{}, err
 	}
+	if len(f.pourFaults) > 0 {
+		var err error
+		err, f.pourFaults = f.pourFaults[0], f.pourFaults[1:]
+		return application.Molecule{}, err
+	}
 	steps, installed := f.formulas[formula]
 	if !installed {
 		return application.Molecule{}, fmt.Errorf("no formula %q is installed", formula)
@@ -1480,6 +1488,14 @@ func (f *FakeTracker) FailOn(method string, err error) {
 		return
 	}
 	f.failing[method] = err
+}
+
+// FailPours makes the next pours, one error each in order, fail before the ones
+// after them work again, as a database that answers slowly and then answers.
+func (f *FakeTracker) FailPours(errs ...error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pourFaults = append(f.pourFaults, errs...)
 }
 
 // ReleaseFault is one way a give-back goes wrong: it fails with Err, or, with
