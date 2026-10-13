@@ -126,6 +126,7 @@ func TestEveryKindIsNamedWithItsMachine(t *testing.T) {
 		events.KindControl:       "",
 		events.KindActionApplied: "",
 		events.KindCloud:         "",
+		events.KindVerifyFolded:  "",
 	}
 	got := events.Kinds()
 	if len(got) != len(want) {

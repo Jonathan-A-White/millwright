@@ -92,13 +92,19 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 	if err != nil {
 		return err
 	}
+	verifyDays, err := config.PosternVerifyDays()
+	if err != nil {
+		return err
+	}
 	view := application.PosternView{
-		Tracker: gateway,
-		Notes:   gateway,
-		Host:    host,
-		Now:     posternViewClock,
-		Err:     cmd.ErrOrStderr(),
-		// Its seq: the head of the log this follower writes.
+		Tracker:    gateway,
+		Notes:      gateway,
+		Host:       host,
+		Now:        posternViewClock,
+		Err:        cmd.ErrOrStderr(),
+		VerifyDays: verifyDays,
+		// Its seq: the head of the log this follower writes, and where a folded
+		// verify need tells the Mayor.
 		Events: eventlog.New(path),
 		// Held across the passes, so a beads change that leaves the view as
 		// it was does not give the Governor's phone a new file to download.

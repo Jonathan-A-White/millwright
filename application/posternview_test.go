@@ -306,8 +306,8 @@ func TestPosternViewListsEveryKindOfNeed(t *testing.T) {
 	tracker.AddStory("mw-a", domain.Story{ID: "mw-a.5", Title: "Landed and verified"})
 	closedAt(t, tracker, "mw-a.5", viewNow.Add(-time.Hour))
 	mustDo(t, tracker.CommentOnStory(ctx, "mw-a.5", "VERIFIED by the Governor via postern (x)"))
-	tracker.AddStory("mw-a", domain.Story{ID: "mw-a.6", Title: "Landed a while ago"})
-	closedAt(t, tracker, "mw-a.6", viewNow.Add(-36*time.Hour))
+	tracker.AddStory("mw-a", domain.Story{ID: "mw-a.6", Title: "Landed long ago"})
+	closedAt(t, tracker, "mw-a.6", viewNow.Add(-31*24*time.Hour))
 
 	// demo and hands.
 	tracker.AddStory("mw-a", domain.Story{ID: "mw-a.7", Title: "Show it"})

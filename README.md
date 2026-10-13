@@ -1590,9 +1590,13 @@ runs whisper.cpp's `whisper-cli` on it, printing plain text only; the model is
 live epic, every bead under one at any depth (a closed one only within the
 week; the rest counted in its epic's `done_earlier`), every live bead's parent
 chain, and the needs waiting on the Governor — an open question, a live epic
-with held stories, a story landed in the last day without `VERIFIED`, an open
+with held stories, a story landed without `VERIFIED`, an open
 `demo` or `hitl` bead, a story out of attempts, a host with work pathed to it
-unsynced for 20 minutes — most blocking first, then oldest. It gzips the JSON,
+unsynced for 20 minutes — most blocking first, then oldest. A landing's verify
+need stays in Needs you for `[postern] verify_days` (default 4) after it closed,
+then is published with `"folded": true` until it is verified or 30 days after the
+close, whether or not its epic is still live; the first view that folds it sends
+the Mayor one `verify_folded` event naming the bead (`docs/events.md`). It gzips the JSON,
 seals it with BRC-78 to `postern_governor_key` and writes it base64,
 atomically, to `postern_view_path`, for the backend's `GET /api/view`. It
 reads every bead in one bd list and every note and needed comment in one bd sql

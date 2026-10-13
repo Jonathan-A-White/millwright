@@ -16,6 +16,7 @@ import (
 	"unicode"
 
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/domain/events"
 )
 
 // PosternViewVersion is the live view's version, postern's docs/protocol.md
@@ -28,9 +29,24 @@ const PosternViewVersion = 2
 const PosternViewRecentWindow = 7 * 24 * time.Hour
 
 // PosternViewVerifyWindow is how recently a story must have closed, with no
-// VERIFIED comment, to be a verify need: §11's table, the same day
-// PosternSnapshotWindow gives a landing.
-const PosternViewVerifyWindow = PosternSnapshotWindow
+// VERIFIED comment, to be a verify need at all: the landing's need is in the
+// view, unfolded for DefaultPosternVerifyDays (config [postern] verify_days)
+// and folded after, until this many days after the close. It is apart from
+// PosternSnapshotWindow (the snapshot's landed group, one day) and from
+// PosternViewRecentWindow (the beads the view lists, a week), and a landing
+// keeps its need whether or not its epic is still live. The landed comment
+// memory keeps a landing as long.
+const PosternViewVerifyWindow = 30 * 24 * time.Hour
+
+// DefaultPosternVerifyDays is how many days after it closed a landing's verify
+// need stays unfolded in Needs you when config [postern] verify_days says
+// nothing.
+const DefaultPosternVerifyDays = 4
+
+// PosternVerifyFoldedKey is the note a landing's fold is marked told under,
+// once the Mayor has had the verify_folded event for it: the event goes out once
+// per bead.
+func PosternVerifyFoldedKey(bead string) string { return "postern.verify_folded." + bead }
 
 // PosternViewStaleApprove is how long a live epic's oldest held story may wait
 // for the Governor's word before its approve need becomes a stale one: §11.
@@ -132,6 +148,11 @@ type PosternViewNeed struct {
 	// offers neither Approve nor Done. Both are absent on a ready need.
 	NotReady  bool     `json:"not_ready,omitempty"`
 	WaitingOn []string `json:"waiting_on,omitempty"`
+	// Folded marks a verify need that has stayed unverified past verify_days: the
+	// phone keeps it out of Needs you and the Mayor verifies it from the
+	// Governor's use. Absent (false) on every other need and on a verify need
+	// not yet that old.
+	Folded bool `json:"folded,omitempty"`
 }
 
 // PosternViewHandsStep is one hands step as a hands need carries it: the
@@ -188,6 +209,15 @@ type PosternViewBead struct {
 // it asks the tracker for.
 type TrackerSnapshot interface {
 	Snapshot(ctx context.Context) (WorkTracker, error)
+}
+
+// ClosedEpicLandings is a tracker that can list the stories filed under an epic
+// that is no longer live and that closed since a time: the landings LiveEpics
+// and the live epics' children never reach, which keep their verify need
+// whether or not their epic is still live. A tracker that is not one leaves
+// them out of the view.
+type ClosedEpicLandings interface {
+	ClosedEpicLandings(ctx context.Context, since time.Time) ([]StoryDetail, error)
 }
 
 // LoneStories is a tracker that can list the stories filed under no epic: the
@@ -261,11 +291,25 @@ type PosternView struct {
 	// leaves the view with no seq.
 	Events EventLog
 
+	// VerifyDays is how many days after it closed a landing's verify need stays
+	// unfolded: config [postern] verify_days. Zero is DefaultPosternVerifyDays.
+	VerifyDays int
+
 	// Out is where Run says what it wrote. A nil Out prints nothing.
 	Out io.Writer
 	// Err is where a failure to write the landed memory is said; the view is
 	// built regardless. A nil Err says nothing.
 	Err io.Writer
+}
+
+// verifyFoldAfter is how long after it closed a landing's verify need is
+// published folded.
+func (v PosternView) verifyFoldAfter() time.Duration {
+	days := v.VerifyDays
+	if days <= 0 {
+		days = DefaultPosternVerifyDays
+	}
+	return time.Duration(days) * 24 * time.Hour
 }
 
 // PosternViewMemo is the digest of the view a follower last wrote, with its
@@ -349,10 +393,14 @@ type viewEntry struct {
 	// path is what the view writes as the bead's path: a story's merged Path,
 	// always; an epic's own defaults, nil when it has none.
 	path *PosternViewPath
-	// underLive says the bead is a direct child of a live epic: a story
-	// closed within the day there is a verify candidate, the same one
-	// PosternSnapshot calls landed, so the two share one memory.
-	underLive bool
+	// epicChild says the bead is a direct child of an epic, live or not: a story
+	// closed within PosternViewVerifyWindow there is a verify candidate, and
+	// the same landing PosternSnapshot calls landed within a day, so the two
+	// share one memory.
+	epicChild bool
+	// verifyOnly says the bead was read only for its verify need, a landing
+	// under an epic that is no longer live: it is no bead of the view.
+	verifyOnly bool
 	// doneEarlier counts the direct children of an epic whose children were
 	// read that closed before PosternViewRecentWindow.
 	doneEarlier int
@@ -452,6 +500,9 @@ func (v PosternView) Build(ctx context.Context) (PosternViewDoc, error) {
 	if err := v.readLoneStories(ctx, b); err != nil {
 		return PosternViewDoc{}, err
 	}
+	if err := v.readClosedEpicLandings(ctx, b); err != nil {
+		return PosternViewDoc{}, err
+	}
 	if err := v.readOutside(ctx, b); err != nil {
 		return PosternViewDoc{}, err
 	}
@@ -464,6 +515,9 @@ func (v PosternView) Build(ctx context.Context) (PosternViewDoc, error) {
 	if err := saveLandedMemory(ctx, v.Notes, memory, newMemory); err != nil {
 		sayLandedMemoryFailed(v.Err, err)
 	}
+	if err := v.tellTheMayorOfFolds(ctx, needs, notes); err != nil {
+		sayVerifyFoldedFailed(v.Err, err)
+	}
 
 	hosts, hostNeeds := v.hosts(b, notes)
 	needs = append(needs, hostNeeds...)
@@ -475,7 +529,7 @@ func (v PosternView) Build(ctx context.Context) (PosternViewDoc, error) {
 	}
 	for _, id := range b.order {
 		e := b.entries[id]
-		if !e.ancestor && !b.recent(e.detail) {
+		if e.verifyOnly || (!e.ancestor && !b.recent(e.detail)) {
 			continue
 		}
 		doc.Beads = append(doc.Beads, viewBeadOf(e))
@@ -513,7 +567,7 @@ func (v PosternView) readTrees(ctx context.Context, b *viewBuild, epics []EpicDe
 				if b.live[child.Story.ID] {
 					continue
 				}
-				entry := &viewEntry{detail: child, underLive: b.live[epic.ID]}
+				entry := &viewEntry{detail: child, epicChild: true}
 				if child.IsEpic {
 					entry.path = viewPathOrNil(child.Story.Overrides)
 					if b.recent(child) {
@@ -551,7 +605,7 @@ func IsLoneStory(d StoryDetail, parent, rig string) bool {
 
 // readLoneStories adds the stories filed under no epic that are not finished
 // or closed within the recent window, as an epic's child is added, with
-// nothing for a parent. They are not underLive: no epic's landing memory or
+// nothing for a parent. They are not epicChild: no epic's landing memory or
 // verify need covers them.
 func (v PosternView) readLoneStories(ctx context.Context, b *viewBuild) error {
 	lone, ok := v.Tracker.(LoneStories)
@@ -570,6 +624,29 @@ func (v PosternView) readLoneStories(ctx context.Context, b *viewBuild) error {
 	return nil
 }
 
+// readClosedEpicLandings adds the landings under an epic that is no longer live
+// and closed within PosternViewVerifyWindow, each only for its verify need
+// (verifyOnly): a landing keeps its need whether or not its epic is still live.
+// A story the view already holds, read under a child epic closed within the
+// week, stays as it was read.
+func (v PosternView) readClosedEpicLandings(ctx context.Context, b *viewBuild) error {
+	closed, ok := v.Tracker.(ClosedEpicLandings)
+	if !ok {
+		return nil
+	}
+	stories, err := closed.ClosedEpicLandings(ctx, b.now.Add(-PosternViewVerifyWindow))
+	if err != nil {
+		return fmt.Errorf("reading the landings under closed epics: %w", err)
+	}
+	for _, story := range stories {
+		if story.IsEpic || !hasLanded(story) {
+			continue
+		}
+		b.add(&viewEntry{detail: story, path: viewPathOf(story.Merged()), epicChild: true, verifyOnly: true})
+	}
+	return nil
+}
+
 // readOutside reads, in one ShowBeads a round, whatever the tree names but
 // does not hold: the parent of a bead in the view that is not itself in the
 // view (so every live bead's chain reaches its root), and a bead one in the
@@ -584,7 +661,7 @@ func (v PosternView) readOutside(ctx context.Context, b *viewBuild) error {
 		parentOf := map[string]bool{}
 		for _, id := range pending {
 			e := b.entries[id]
-			if !e.ancestor && !b.recent(e.detail) {
+			if e.verifyOnly || (!e.ancestor && !b.recent(e.detail)) {
 				continue
 			}
 			if p := e.detail.EpicID; p != "" && b.entries[p] == nil && !asked[p] {
@@ -667,7 +744,7 @@ func (b *viewBuild) recent(detail StoryDetail) bool {
 // inView reports whether the bead id is one the view writes.
 func (b *viewBuild) inView(id string) bool {
 	e, ok := b.entries[id]
-	return ok && (e.ancestor || b.recent(e.detail))
+	return ok && !e.verifyOnly && (e.ancestor || b.recent(e.detail))
 }
 
 // blocks counts the distinct unfinished beads in the view that wait on any
@@ -719,7 +796,7 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 	for _, id := range b.order {
 		e := b.entries[id]
 		d := e.detail
-		if !e.underLive || d.IsEpic || !d.Closed() || d.ClosedAt.IsZero() || b.now.Sub(d.ClosedAt) > PosternViewVerifyWindow {
+		if !e.epicChild || d.IsEpic || !d.Closed() || d.ClosedAt.IsZero() || b.now.Sub(d.ClosedAt) >= PosternViewVerifyWindow {
 			continue
 		}
 		// A closed hands bead is his own doing, a step he approved and ran or a
@@ -827,6 +904,7 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 			howTo = ""
 		}
 		need := b.need(PosternNeedVerify, e, e.detail.ClosedAt, verifyText(e.detail, howTo))
+		need.Folded = b.now.Sub(e.detail.ClosedAt) >= v.verifyFoldAfter()
 		if howTo == "" {
 			need.WaitsFor = PosternWaitsMayor
 			need.NotReady = true
@@ -885,6 +963,44 @@ func (v PosternView) needs(ctx context.Context, b *viewBuild, notes map[string]s
 		}
 	}
 	return needs, newMemory, nil
+}
+
+// tellTheMayorOfFolds sends the Mayor one verify_folded event for each verify
+// need in needs that is folded and that he has not been told of, and marks the
+// bead told (PosternVerifyFoldedKey) so that no later view sends it again. A
+// view with no event log tells no one and marks nothing: a later one that has
+// the log does. A bead whose event could not be sent is not marked, so the next
+// view tries it again.
+func (v PosternView) tellTheMayorOfFolds(ctx context.Context, needs []PosternViewNeed, notes map[string]string) error {
+	if v.Events == nil {
+		return nil
+	}
+	for _, need := range needs {
+		if need.Kind != PosternNeedVerify || !need.Folded || strings.TrimSpace(notes[PosternVerifyFoldedKey(need.Bead)]) != "" {
+			continue
+		}
+		_, err := EventEmit{
+			Log: v.Events, Now: v.now,
+			Event: events.Event{Kind: events.KindVerifyFolded, Bead: need.Bead, Actor: "postern-view@" + v.Host, Detail: "folded"},
+		}.Run(ctx)
+		if err != nil {
+			return fmt.Errorf("telling the Mayor %s's verify need folded: %w", need.Bead, err)
+		}
+		if err := v.Notes.SetNote(ctx, PosternVerifyFoldedKey(need.Bead), formatOrEmpty(v.now())); err != nil {
+			return fmt.Errorf("marking %s's fold told: %w", need.Bead, err)
+		}
+	}
+	return nil
+}
+
+// sayVerifyFoldedFailed says on w, in one line, that a fold could not be told
+// to the Mayor and the view goes on. A nil w says nothing.
+func sayVerifyFoldedFailed(w io.Writer, err error) {
+	if w == nil {
+		return
+	}
+	line := strings.Join(strings.Fields(err.Error()), " ")
+	fmt.Fprintf(w, "mw postern: %s (carrying on without it)\n", clippedTo(line, 240))
 }
 
 // waitingOnOthers is the view's Waiting on others part: a waiting need for each

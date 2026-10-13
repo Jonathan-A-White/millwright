@@ -149,3 +149,37 @@ func TestSnapshotViewHoldsTheStoriesUnderNoEpic(t *testing.T) {
 		}
 	}
 }
+
+// A landing under an epic that has since closed keeps its verify need, folded
+// once it is old enough, read from the same listing; one closed over 30 days
+// ago, a story that never landed and a bead under a live epic's own read are
+// not read as one.
+func TestSnapshotViewHoldsALandingUnderAClosedEpicAsAFoldedVerifyNeed(t *testing.T) {
+	now := time.Date(2026, 10, 13, 12, 0, 0, 0, time.UTC)
+	listing := `[
+	 {"id":"t-1","title":"Epic","status":"closed","issue_type":"epic","priority":1,"closed_at":"2026-10-08T00:00:00Z"},
+	 {"id":"t-1.1","title":"Landed","status":"closed","issue_type":"task","parent":"t-1","labels":["run:landed"],"closed_at":"2026-10-08T00:00:00Z","comment_count":0},
+	 {"id":"t-1.2","title":"Dropped","status":"closed","issue_type":"task","parent":"t-1","closed_at":"2026-10-08T00:00:00Z","comment_count":0},
+	 {"id":"t-1.3","title":"Landed long ago","status":"closed","issue_type":"task","parent":"t-1","labels":["run:landed"],"closed_at":"2026-08-01T00:00:00Z","comment_count":0}
+	]`
+	gateway, _ := standInSnapshot(t, listing, `[]`)
+
+	doc, err := application.PosternView{
+		Tracker: gateway, Notes: gateway, Host: "laptop", Now: func() time.Time { return now },
+	}.Build(context.Background())
+	if err != nil {
+		t.Fatalf("building the view: %v", err)
+	}
+	var verifies []string
+	for _, need := range doc.Needs {
+		if need.Kind == application.PosternNeedVerify {
+			verifies = append(verifies, need.Bead)
+			if !need.Folded || need.Epic != "t-1" {
+				t.Errorf("expected a folded verify need under t-1, got %+v", need)
+			}
+		}
+	}
+	if len(verifies) != 1 || verifies[0] != "t-1.1" {
+		t.Errorf("expected one verify need, on t-1.1, got %v", verifies)
+	}
+}

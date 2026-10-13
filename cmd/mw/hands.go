@@ -109,11 +109,16 @@ type handsView struct {
 }
 
 func (v handsView) Run(ctx context.Context) (application.PosternViewDoc, error) {
+	verifyDays, err := config.PosternVerifyDays()
+	if err != nil {
+		return application.PosternViewDoc{}, err
+	}
 	view, err := sealedPosternView(application.PosternView{
-		Tracker: v.gateway,
-		Notes:   v.gateway,
-		Host:    v.host,
-		Now:     posternViewClock,
+		Tracker:    v.gateway,
+		Notes:      v.gateway,
+		Host:       v.host,
+		Now:        posternViewClock,
+		VerifyDays: verifyDays,
 	})
 	if err != nil {
 		return application.PosternViewDoc{}, err

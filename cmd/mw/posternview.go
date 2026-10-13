@@ -61,13 +61,18 @@ func newPosternViewCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			verifyDays, err := config.PosternVerifyDays()
+			if err != nil {
+				return err
+			}
 			view := application.PosternView{
-				Tracker: gateway,
-				Notes:   gateway,
-				Host:    host,
-				Now:     posternViewClock,
-				Err:     cmd.ErrOrStderr(),
-				Events:  homeEventLog(),
+				Tracker:    gateway,
+				Notes:      gateway,
+				Host:       host,
+				Now:        posternViewClock,
+				Err:        cmd.ErrOrStderr(),
+				Events:     homeEventLog(),
+				VerifyDays: verifyDays,
 			}
 			if jsonOut {
 				doc, err := view.Build(cmd.Context())
