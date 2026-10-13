@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
+	"github.com/Jonathan-A-White/millwright/infrastructure/grist"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/userunits"
 )
@@ -115,6 +118,13 @@ func gristSpringJob(host string, out io.Writer) (application.SpringJob, bool, er
 	// The stream is the mill key's own; until the backend lets that key onto
 	// GET /api/events the watch reads every second instead and says so once.
 	watch := &application.GristWatch{Postern: backend, Stream: backend, Keys: keys, Notices: notices, Err: out}
+	// The warm pool is the follower's, kept from one pass to the next: a pass
+	// that mw grist grind or the dispatch tick runs has none, and grinds cold.
+	stateDir, err := config.GristStateDir()
+	if err != nil {
+		return application.SpringJob{}, false, err
+	}
+	pool := &application.GristPool{Warmer: claude.NewGrinder(), Board: grist.New(stateDir), Err: out}
 	job := application.GristJob(watch, func(ctx context.Context) error {
 		if at, err := home(ctx); err != nil || !at {
 			return err
@@ -124,14 +134,32 @@ func gristSpringJob(host string, out io.Writer) (application.SpringJob, bool, er
 			return err
 		}
 		mill.Notices = notices
+		// pool_quiet = "0s" keeps no warm pool.
+		if settings, err := config.Grist(); err == nil && settings.PoolQuiet > 0 {
+			pool.Configure(settings.Concurrency, settings.PoolQuiet, settings.PoolMaxAge)
+			mill.Pool = pool
+		} else {
+			pool.Close()
+		}
 		_, err = mill.Run(ctx)
 		return err
 	})
 	look := job.Probe
+	var closing sync.Once
 	job.Probe = func(ctx context.Context) (string, bool) {
+		// The follower stopping ends every warm session; so does this host
+		// no longer being home, for the mill is the home's alone.
+		closing.Do(func() {
+			go func() {
+				<-ctx.Done()
+				pool.Close()
+			}()
+		})
 		if at, err := home(ctx); err != nil || !at {
+			pool.Close()
 			return "", false
 		}
+		pool.Tick(ctx)
 		return look(ctx)
 	}
 	return job, true, nil

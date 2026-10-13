@@ -96,7 +96,9 @@ func newStatusCmd() *cobra.Command {
 			"nothing here until it clears.\n\n" +
 			"On the host where the mill runs, a 'grist:' line says whether a tutor is in use ('active (3 in\n" +
 			"10 min)', 'slow' or 'quiet'), the median of its last answers against their par, and the lowered cap\n" +
-			"('grist first: N stories at most while it lasts'); slow grist is a 'held back, no room' reason.\n\n" +
+			"('grist first: N stories at most while it lasts'); slow grist is a 'held back, no room' reason.\n" +
+			"While the follower's warm pool runs, a 'grist pool:' line gives each app and kind's sessions\n" +
+			"waiting for a grist and answering one ('lampas/bible-talk 1 warm, 0 busy').\n\n" +
 			"Every line fits a phone-width terminal, at most 60 columns. Nothing is claimed, nothing is\n" +
 			"written and no session is started: status only reads.",
 		Args: cobra.NoArgs,

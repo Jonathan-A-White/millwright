@@ -691,6 +691,7 @@ func hostGristRoom(room config.RoomSettings) application.GristPulses {
 	}
 	return application.GristRoom{
 		Runs:     grist.NewRuns(stateDir),
+		Pool:     grist.New(stateDir),
 		Grinding: hostlock.GrindSlots(stateDir, concurrency),
 		Limits: application.GristRoomLimits{
 			Cap: room.GristCap, RecentSeconds: room.GristRecentSeconds, SlowFactor: room.GristSlowFactor,

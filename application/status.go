@@ -1227,6 +1227,9 @@ func (r StatusReport) String() string {
 				clip(&b, "  "+capLine)
 			}
 		}
+		if line := r.Grist.PoolLine(); line != "" {
+			clip(&b, "  "+line)
+		}
 		b.WriteString("\n")
 	}
 
