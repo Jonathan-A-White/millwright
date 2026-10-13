@@ -171,7 +171,7 @@ func TestACrossSlotTheBeadsServerCannotGiveIsSkippedSayingWhy(t *testing.T) {
 	if held != nil {
 		t.Fatal("expected no holding")
 	}
-	want := "the cross-host merge slot of lampas was skipped, so this landing went ahead under this host's merge slot alone: the beads server could not be reached: dial tcp 127.0.0.1:3307: connect: connection refused"
+	want := "the cross-host merge slot of lampas was skipped, so this landing went ahead under this host's merge slot alone: the beads server could not be reached: dial tcp 127.0.0.1:3307: connect: connection refused (3 tries failed over 2m)"
 	if len(said) != 1 || said[0] != want {
 		t.Fatalf("expected %q, got %q", want, said)
 	}
@@ -275,5 +275,69 @@ func TestTheReportSaysWhatBecameOfTheCrossSlot(t *testing.T) {
 	report := application.NextReport{StoryID: "mw-y3qno5.3", Host: "desktop", CrossSlot: []string{"waited 27m for laptop's landing of lampas"}}
 	if !strings.Contains(report.String(), "  slot    waited 27m for laptop's landing of lampas\n") {
 		t.Fatalf("expected the wait on the report, got:\n%s", report.String())
+	}
+}
+
+// flakyNotes fails its first reads, and then goes on to the tracker.
+type flakyNotes struct {
+	*apptest.FakeTracker
+	failReads int // reads still to fail; negative fails them all
+	err       error
+	reads     int
+}
+
+func (f *flakyNotes) Note(ctx context.Context, key string) (string, error) {
+	f.reads++
+	if f.failReads != 0 {
+		if f.failReads > 0 {
+			f.failReads--
+		}
+		return "", f.err
+	}
+	return f.FakeTracker.Note(ctx, key)
+}
+
+func TestACrossSlotReadThatFailsTwiceIsTriedAgainAndTheSlotTaken(t *testing.T) {
+	notes, k := &flakyNotes{FakeTracker: apptest.NewFakeTracker(), failReads: 2, err: errors.New("Dolt server unreachable at 10.88.0.2:3307")}, newSlotClock()
+	held, said := testSlot(notes, k).Take(context.Background(), "lampas", "me")
+	if held == nil || len(said) != 0 {
+		t.Fatalf("expected the slot taken with nothing to say, got %v %q", held, said)
+	}
+	defer held.Release(context.Background())
+	if lease, ok := leaseOf(t, notes.FakeTracker, "lampas"); !ok || lease.Host != "desktop" {
+		t.Fatalf("expected the lease now this host's, got %+v", lease)
+	}
+}
+
+func TestACrossSlotReadThatFailsPastTheRetryWindowIsSkippedSayingHowManyTriesAndForHowLong(t *testing.T) {
+	notes, k := &flakyNotes{FakeTracker: apptest.NewFakeTracker(), failReads: -1, err: errors.New("Dolt server unreachable at 10.88.0.2:3307")}, newSlotClock()
+	held, said := testSlot(notes, k).Take(context.Background(), "lampas", "me")
+	if held != nil {
+		t.Fatal("expected no holding")
+	}
+	// A poll of a minute, a window of two: tries at 0, 1 and 2 minutes.
+	want := "the cross-host merge slot of lampas was skipped, so this landing went ahead under this host's merge slot alone: the beads server could not be reached: Dolt server unreachable at 10.88.0.2:3307 (3 tries failed over 2m)"
+	if len(said) != 1 || said[0] != want {
+		t.Fatalf("expected %q, got %q", want, said)
+	}
+	if notes.reads != 3 {
+		t.Fatalf("expected 3 reads, got %d", notes.reads)
+	}
+}
+
+func TestACrossSlotRetryCutShortByTheContextReturnsAtOnce(t *testing.T) {
+	notes, k := &flakyNotes{FakeTracker: apptest.NewFakeTracker(), failReads: -1, err: errors.New("Dolt server unreachable")}, newSlotClock()
+	ctx, cancel := context.WithCancel(context.Background())
+	slot := testSlot(notes, k)
+	slot.Wait = func(ctx context.Context, d time.Duration) error {
+		cancel()
+		return ctx.Err()
+	}
+	held, said := slot.Take(ctx, "lampas", "me")
+	if held != nil {
+		t.Fatal("expected no holding")
+	}
+	if len(said) != 1 || !strings.Contains(said[0], "was not taken") || !strings.Contains(said[0], "context canceled") || notes.reads != 1 {
+		t.Fatalf("expected the slot not taken at once, got %d reads and %q", notes.reads, said)
 	}
 }
