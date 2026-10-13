@@ -74,6 +74,9 @@ type nextContext struct {
 	lease *landingLease // the lease watch of features/next_lease.feature, when a scenario asks for one
 	cross *crossFixture // the merge slot across hosts of features/next_cross_slot.feature, when a scenario has one
 
+	otherGate      application.Holding // the gate lock another close-out holds, in features/next_gate_lock.feature
+	otherGateStory string
+
 	afterCommands map[string]string // the [after_landing] table this scenario's rig host has
 	afterLimit    time.Duration     // how long an after-landing command may run; zero is the adapter's own
 	afterRetry    time.Duration     // how long a failed-on-the-network after-landing command waits to be run again; zero is the use case's own
@@ -187,6 +190,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerNextChangelogSteps(ctx, c)
 	registerTesterSteps(ctx, c)
 	registerNextCrossSlotSteps(ctx, c)
+	registerNextGateSteps(ctx, c)
 
 	ctx.When(`^mw closes out "([^"]*)"$`, c.mwClosesOut)
 	ctx.When(`^mw closes out "([^"]*)" a second time$`, c.mwClosesOut)
@@ -902,6 +906,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 		SpecChecks:    rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands)),
 		Slot:          rig.NewSlots(rig.WithSlotWait(slotPatience), rig.WithSlotPoll(20*time.Millisecond)),
 		CrossSlot:     c.crossSlot(),
+		GateLock:      c.gateLock(),
 		Vault:         files,
 		Rules:         files,
 		Files:         filesPort,

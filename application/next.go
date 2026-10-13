@@ -277,6 +277,12 @@ type Next struct {
 	LoadBound time.Duration
 	LoadWait  func(ctx context.Context, d time.Duration) error
 
+	// GateLock keeps this host to one rig gate at a time, whatever rig: a
+	// close-out takes it before the rig's tests, in the worktree and again on the
+	// merged result, and waits for the load to calm only once it has it
+	// (mw-gq6.388). A nil GateLock takes none.
+	GateLock GateLock
+
 	// Benchmarks is where the benchmarks of past close-outs are read from, for a
 	// landed story's par and the calibration printed with the report, and Bench
 	// the thresholds of both (mw-t0z3fu.2). Every close-out that ran the rig's

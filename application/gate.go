@@ -16,6 +16,28 @@ const (
 	GateLoadBound = 15 * time.Minute
 )
 
+// GateLock is the port that keeps this host to one rig gate at a time
+// (mw-gq6.388): the rig's tests are heavy enough to fill every core, and two
+// of them side by side fail each other on timeouts. It is per host, for every
+// rig's gate, and so is not the rig's merge slot, which keeps two close-outs
+// off one rig's target branch.
+type GateLock interface {
+	// Take waits for the host's gate lock and reports the turn, which the
+	// caller gives back. holder says whose gate it is, for whoever finds it
+	// taken; held, when it is not nil, is told who has the lock the first time
+	// it is found held. It gives up when ctx does, or when the wait has gone on
+	// past the most a close-out waits.
+	Take(ctx context.Context, holder string, held func(by string)) (GateTurn, error)
+}
+
+// GateTurn is a gate lock somebody has, and what its taking waited for. Waited
+// is zero and For empty when the lock was free.
+type GateTurn struct {
+	Holding Holding
+	Waited  time.Duration
+	For     string
+}
+
 func (n Next) loadPoll() time.Duration {
 	if n.LoadPoll <= 0 {
 		return GateLoadPoll
