@@ -1913,6 +1913,22 @@ header may carry `model` and `effort`: they replace the grind file's for that
 grist, and must be within `[grist]` `models` and `efforts`, else the grist is
 refused naming the value.
 
+The follower (`mw events follow`) keeps a warm pool so a grist does not wait
+for its session to start (about 1.5 s of an answer): for each app and kind, sessions
+already started with the grind's flags, system prompt, model, effort and schema, each in a private
+directory of its own and waiting on its standard input (`--input-format
+stream-json`), asking the model nothing until it has its message. A grist
+takes one: its photos are written into that directory and its request is the
+message. The session answers that one grist and ends; the pool starts its
+replacement, and no session is ever given a second grist. A kind keeps as many
+warm sessions as it has lately had grists in flight at once, never more than
+`concurrency`, and none once it has had no grist for `pool_quiet`; a warm
+session older than `pool_max_age`, or started for a grind that has since
+changed, is retired unused. A warm session that cannot start or answer leaves
+its grist to a session started cold, and says so in the pass's report. A pass
+run by `mw grist grind` or the dispatch tick has no pool. `mw status` shows the
+pool in one line under the host's: `grist pool: lampas/bible-talk 1 warm, 0 busy`.
+
 ```toml
 grist_key_file  = "/home/jwhite/.config/mw/mill.key"   # MW_GRIST_KEY_FILE
 grist_state_dir = "/home/jwhite/.local/state/mw/grist" # MW_GRIST_STATE_DIR
@@ -1926,6 +1942,8 @@ max_attachment_bytes = 8388608
 daily_limit = 50         # grist a day from one key
 concurrency = 2          # grists ground at once, the mill's own limit; the rest queue. The host's cap on Builders does not apply
 timeout = "10m"
+pool_quiet = "10m"       # a kind with no grist this long keeps no warm session; "0s" keeps no warm pool at all
+pool_max_age = "15m"     # a warm session waiting this long is retired unused
 
 [grist-apps]             # where each app's rig is checked out here
 cairn = "/home/jwhite/rigs/Cairn"

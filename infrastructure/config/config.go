@@ -684,6 +684,10 @@ const (
 	DefaultGristDailyLimit         = 50
 	DefaultGristConcurrency        = 2
 	DefaultGristTimeout            = 10 * time.Minute
+	// DefaultGristPoolQuiet and DefaultGristPoolMaxAge are application's own
+	// defaults for the follower's warm pool, said again.
+	DefaultGristPoolQuiet  = 10 * time.Minute
+	DefaultGristPoolMaxAge = 15 * time.Minute
 )
 
 // GristKeyFile reports where the mill key is kept: $MW_GRIST_KEY_FILE if it
@@ -835,6 +839,11 @@ type GristSettings struct {
 	// Concurrency is how many grists the mill grinds at once on this host.
 	Concurrency int
 	Timeout     time.Duration
+	// PoolQuiet is how long a kind goes without a grist before the follower's
+	// warm pool keeps none of its sessions; 0 keeps no warm pool at all.
+	// PoolMaxAge is how long a warm session waits before it is retired unused.
+	PoolQuiet  time.Duration
+	PoolMaxAge time.Duration
 }
 
 // Grist reports the ceilings of the `[grist]` table of
@@ -842,8 +851,9 @@ type GristSettings struct {
 // `efforts` (the efforts a grist may ask for, the same way),
 // `max_attachments`, `max_attachment_bytes`, `daily_limit` (grist a day from
 // one key), `concurrency` (grinds at once, the mill's own limit, apart from
-// the host's cap on Builders) and `timeout` (a Go duration, "10m"), each its default when the
-// table says nothing.
+// the host's cap on Builders), `timeout` (a Go duration, "10m"), `pool_quiet`
+// (a duration, "0s" for no warm pool) and `pool_max_age` (a duration above
+// zero), each its default when the table says nothing.
 func Grist() (GristSettings, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -854,7 +864,10 @@ func Grist() (GristSettings, error) {
 	if err != nil {
 		return GristSettings{}, err
 	}
-	settings := GristSettings{Models: list(DefaultGristModels), Efforts: list(DefaultGristEfforts), Timeout: DefaultGristTimeout}
+	settings := GristSettings{
+		Models: list(DefaultGristModels), Efforts: list(DefaultGristEfforts), Timeout: DefaultGristTimeout,
+		PoolQuiet: DefaultGristPoolQuiet, PoolMaxAge: DefaultGristPoolMaxAge,
+	}
 	if models := list(table["models"]); len(models) > 0 {
 		settings.Models = models
 	}
@@ -883,6 +896,20 @@ func Grist() (GristSettings, error) {
 			return GristSettings{}, fmt.Errorf("the [%s] table of %s says timeout = %q: it must be a duration, \"10m\"", GristTable, path, said)
 		}
 		settings.Timeout = timeout
+	}
+	if said := strings.TrimSpace(table["pool_quiet"]); said != "" {
+		quiet, err := time.ParseDuration(said)
+		if err != nil || quiet < 0 {
+			return GristSettings{}, fmt.Errorf("the [%s] table of %s says pool_quiet = %q: it must be a duration, \"10m\", or \"0s\" for no warm pool", GristTable, path, said)
+		}
+		settings.PoolQuiet = quiet
+	}
+	if said := strings.TrimSpace(table["pool_max_age"]); said != "" {
+		age, err := time.ParseDuration(said)
+		if err != nil || age <= 0 {
+			return GristSettings{}, fmt.Errorf("the [%s] table of %s says pool_max_age = %q: it must be a duration, \"15m\"", GristTable, path, said)
+		}
+		settings.PoolMaxAge = age
 	}
 	return settings, nil
 }
