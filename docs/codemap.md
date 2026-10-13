@@ -12,7 +12,7 @@ domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cm
 | TrackerNotes, SweepNotes, BeadGraph | application/{status,sweep}.go | same | same |
 | VaultFiles, TrackerSync, SyncHaltMarker | application/sync.go | infra/{vault/git,beads/sync}.go, infra/synchalt | Fake{VaultFiles,Tracker,SyncHaltMarker} |
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | infra/beads/mail.go | FakeMailbox |
-| EpicRules | application/epicrules.go | infra/vault/epicrules.go | FakeEpicRules |
+| EpicRules (+LandingRules: lenient read) | application/epicrules.go | infra/vault/epicrules.go | FakeEpicRules |
 | Vault | application/seatboot.go | infra/vault | seatboot_test.go |
 | Runner | application/runner.go | infra/tmux | FakeRunner |
 | Harness | application/harness.go | infra/claude | seatboot_test.go |

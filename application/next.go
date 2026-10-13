@@ -1567,9 +1567,13 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 	base := StartPoint(n.remote(), c.target)
 	var version VersionBump
 	if n.Rules != nil {
-		rules, err := n.Rules.EpicRequirements(ctx, c.path.Rig)
+		rules, unknown, err := n.landingRequirements(ctx, c.path.Rig)
 		if err != nil {
 			return Landed{}, failedFor(ReasonLandingFailed, fmt.Errorf("reading the version files of %s: %w", c.path.Rig, err))
+		}
+		for _, key := range unknown {
+			report.Notes = append(report.Notes, fmt.Sprintf("%s/%s%s has a key this mw does not know: %s (rebuild mw on %s)",
+				RigsDir, c.path.Rig, ".toml", key, n.Host))
 		}
 		version.Files = rules.VersionFiles
 		if len(rules.VersionFiles) > 0 && len(rules.ChangelogFiles) > 0 {
@@ -1609,6 +1613,17 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 	}
 	return Landed{}, failedFor(ReasonPushLost, fmt.Errorf("%s could not be landed on %s: the other host got there first %d times running; nothing was forced: %w",
 		c.branch, c.target, n.tries(), lost))
+}
+
+// landingRequirements reads the rig's file for a landing: leniently when the
+// rules can, so that a key set in the vault after this mw was built does not
+// stop it, with the keys it did not know beside what the known ones say.
+func (n Next) landingRequirements(ctx context.Context, rig string) (domain.EpicRequirements, []string, error) {
+	if lenient, ok := n.Rules.(LandingRules); ok {
+		return lenient.LandingRequirements(ctx, rig)
+	}
+	rules, err := n.Rules.EpicRequirements(ctx, rig)
+	return rules, nil, err
 }
 
 // push is one attempt at a landing, in a landing worktree that is already open:

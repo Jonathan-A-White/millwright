@@ -281,3 +281,34 @@ func TestARigsFileSaysWhetherItsSuiteRunsNightlyAndUnderWhichEpic(t *testing.T) 
 		}
 	}
 }
+
+func TestALandingReadsPastAKeyThisMwDoesNotKnowButNotPastABadKnownOne(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+	ctx := context.Background()
+	writeRigFile(t, dir, "lampas", "version_files = [\"package.json\"]\nsome_future_key = true\nfuture_list = [\n  \"a\", # one\n  \"b\"\n]\nlater_text = \"x\"\n")
+
+	got, unknown, err := v.LandingRequirements(ctx, "lampas")
+	if err != nil {
+		t.Fatalf("a landing's read stopped at an unknown key: %v", err)
+	}
+	if want := []string{"package.json"}; !reflect.DeepEqual(got.VersionFiles, want) {
+		t.Errorf("version files = %v, want %v", got.VersionFiles, want)
+	}
+	if want := []string{"some_future_key", "future_list", "later_text"}; !reflect.DeepEqual(unknown, want) {
+		t.Errorf("unknown keys = %v, want %v", unknown, want)
+	}
+
+	// Outside a landing the same file is still refused, as before.
+	if _, err := v.EpicRequirements(ctx, "lampas"); err == nil || !strings.Contains(err.Error(), "some_future_key") {
+		t.Errorf("the strict read = %v, want the refusal naming some_future_key", err)
+	}
+
+	// A malformed value of a key it knows, or a line that is no key at all, still stops a landing.
+	for _, bad := range []string{"version_files = package.json\n", "version_files = [\"/etc/passwd\"]\n", "some_future_key = true\nnot a line\n", "files_expected = maybe\n"} {
+		writeRigFile(t, dir, "lampas", bad)
+		if _, _, err := v.LandingRequirements(ctx, "lampas"); err == nil {
+			t.Errorf("a landing read %q without complaint", bad)
+		}
+	}
+}

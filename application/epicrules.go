@@ -17,6 +17,15 @@ type EpicRules interface {
 	EpicRequirements(ctx context.Context, rig string) (domain.EpicRequirements, error)
 }
 
+// LandingRules is what a landing reads a rig's file through when its Rules offer
+// it: the same requirements, but a key the running mw does not know never stops
+// the landing. It comes back by name beside what the known keys say, and the
+// landing's mail says so. A malformed value of a known key is still an error.
+// Rules that do not offer it are read strictly.
+type LandingRules interface {
+	LandingRequirements(ctx context.Context, rig string) (domain.EpicRequirements, []string, error)
+}
+
 // EpicWaiver is the Governor's word that an epic is excused from some of what
 // its rig requires: the names excused, and what he said, quoted. Only a
 // waiver carrying his words is a waiver.

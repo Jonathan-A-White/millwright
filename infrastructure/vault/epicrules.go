@@ -34,6 +34,7 @@ const (
 )
 
 var _ application.EpicRules = (*Vault)(nil)
+var _ application.LandingRules = (*Vault)(nil)
 
 // beadID is what a suite_epic may be: a bead's id, as in mw-5r3p30.
 var beadID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
@@ -54,31 +55,58 @@ var beadID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 // A rig with no file asks nothing. A key this does not know is an error rather
 // than a silence: a misspelt key would otherwise switch the requirement off
 // without a word.
-func (v *Vault) EpicRequirements(_ context.Context, rig string) (domain.EpicRequirements, error) {
+func (v *Vault) EpicRequirements(ctx context.Context, rig string) (domain.EpicRequirements, error) {
+	requirements, _, err := v.readRigFile(ctx, rig, false)
+	return requirements, err
+}
+
+// LandingRequirements implements application.LandingRules: the same file, read
+// for a landing, which a key this build does not know must not stop (it races
+// every older mw still running against a key set in the vault after it was
+// built). The unknown keys come back beside what the known ones say; a
+// malformed value of a key it does know is an error as in EpicRequirements.
+func (v *Vault) LandingRequirements(ctx context.Context, rig string) (domain.EpicRequirements, []string, error) {
+	return v.readRigFile(ctx, rig, true)
+}
+
+func (v *Vault) readRigFile(_ context.Context, rig string, lenient bool) (domain.EpicRequirements, []string, error) {
 	if err := safeName("rig", rig); err != nil {
-		return domain.EpicRequirements{}, err
+		return domain.EpicRequirements{}, nil, err
 	}
 	path := filepath.Join(v.dir, application.RigsDir, rig+RigFileExt)
 	written, err := os.ReadFile(path)
 	switch {
 	case os.IsNotExist(err):
-		return domain.EpicRequirements{}, nil
+		return domain.EpicRequirements{}, nil, nil
 	case err != nil:
-		return domain.EpicRequirements{}, fmt.Errorf("reading %s: %w", path, err)
+		return domain.EpicRequirements{}, nil, fmt.Errorf("reading %s: %w", path, err)
 	}
-	requirements, err := parseRigFile(string(written))
+	requirements, unknown, err := parseRigFile(string(written), lenient)
 	if err != nil {
-		return domain.EpicRequirements{}, fmt.Errorf("reading %s: %w", path, err)
+		return domain.EpicRequirements{}, nil, fmt.Errorf("reading %s: %w", path, err)
 	}
-	return requirements, nil
+	return requirements, unknown, nil
 }
+
+// knownKeys are the keys a rig's file has.
+var knownKeys = map[string]bool{
+	EpicSectionsKey: true, EpicLastStoryLabelsKey: true, GuestKey: true, VersionFilesKey: true, ChangelogFilesKey: true,
+	PublicURLKey: true, FilesExpectedKey: true, NightlySuiteKey: true, SuiteEpicKey: true,
+}
+
+// bareKey is what a key may be for a lenient read to set it aside as one it
+// does not know rather than as a line that is no `key = value` at all.
+var bareKey = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // parseRigFile reads the little TOML a rig's file holds: `key = ["a", "b"]`,
 // the list possibly running over several lines, `guest = "<owner>"`,
 // `files_expected = true` (or false), `nightly_suite = true` (or false),
-// `suite_epic = "<bead id>"`, and `#` comments.
-func parseRigFile(written string) (domain.EpicRequirements, error) {
+// `suite_epic = "<bead id>"`, and `#` comments. A lenient read sets a key it
+// does not know aside, whatever its value and however many lines the value
+// runs over, and names it in the second result; a strict one refuses it.
+func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []string, error) {
 	var requirements domain.EpicRequirements
+	var unknown []string
 	lines := strings.Split(written, "\n")
 	for i := 0; i < len(lines); i++ {
 		line := strings.TrimSpace(stripComment(lines[i]))
@@ -87,10 +115,18 @@ func parseRigFile(written string) (domain.EpicRequirements, error) {
 		}
 		key, value, found := strings.Cut(line, "=")
 		key, value = strings.TrimSpace(key), strings.TrimSpace(value)
+		if lenient && found && !knownKeys[key] && bareKey.MatchString(key) {
+			unknown = append(unknown, key)
+			for strings.HasPrefix(value, "[") && !strings.Contains(value, "]") && i+1 < len(lines) {
+				i++
+				value += " " + strings.TrimSpace(stripComment(lines[i]))
+			}
+			continue
+		}
 		if found && key == GuestKey {
 			owner, err := quotedStrings(value)
 			if err != nil || len(owner) != 1 {
-				return requirements, fmt.Errorf("line %d: expected `%s = \"<owner>\"`, got %q", i+1, GuestKey, lines[i])
+				return requirements, nil, fmt.Errorf("line %d: expected `%s = \"<owner>\"`, got %q", i+1, GuestKey, lines[i])
 			}
 			requirements.Guest = owner[0]
 			continue
@@ -100,7 +136,7 @@ func parseRigFile(written string) (domain.EpicRequirements, error) {
 			case "true", "false":
 				requirements.FilesExpected = value == "true"
 			default:
-				return requirements, fmt.Errorf("line %d: expected `%s = true` or `%s = false`, got %q", i+1, FilesExpectedKey, FilesExpectedKey, lines[i])
+				return requirements, nil, fmt.Errorf("line %d: expected `%s = true` or `%s = false`, got %q", i+1, FilesExpectedKey, FilesExpectedKey, lines[i])
 			}
 			continue
 		}
@@ -109,14 +145,14 @@ func parseRigFile(written string) (domain.EpicRequirements, error) {
 			case "true", "false":
 				requirements.NightlySuite = value == "true"
 			default:
-				return requirements, fmt.Errorf("line %d: expected `%s = true` or `%s = false`, got %q", i+1, NightlySuiteKey, NightlySuiteKey, lines[i])
+				return requirements, nil, fmt.Errorf("line %d: expected `%s = true` or `%s = false`, got %q", i+1, NightlySuiteKey, NightlySuiteKey, lines[i])
 			}
 			continue
 		}
 		if found && key == SuiteEpicKey {
 			epic, err := quotedStrings(value)
 			if err != nil || len(epic) != 1 || !beadID.MatchString(epic[0]) {
-				return requirements, fmt.Errorf("line %d: expected `%s = \"<bead id>\"`, got %q", i+1, SuiteEpicKey, lines[i])
+				return requirements, nil, fmt.Errorf("line %d: expected `%s = \"<bead id>\"`, got %q", i+1, SuiteEpicKey, lines[i])
 			}
 			requirements.SuiteEpic = epic[0]
 			continue
@@ -124,23 +160,23 @@ func parseRigFile(written string) (domain.EpicRequirements, error) {
 		if found && key == PublicURLKey {
 			url, err := quotedStrings(value)
 			if err != nil || len(url) != 1 || !strings.HasPrefix(url[0], "https://") {
-				return requirements, fmt.Errorf("line %d: expected `%s = \"https://github.com/<owner>/<rig>\"`, got %q", i+1, PublicURLKey, lines[i])
+				return requirements, nil, fmt.Errorf("line %d: expected `%s = \"https://github.com/<owner>/<rig>\"`, got %q", i+1, PublicURLKey, lines[i])
 			}
 			requirements.PublicURL = strings.TrimRight(url[0], "/")
 			continue
 		}
 		if !found || !strings.HasPrefix(value, "[") {
-			return requirements, fmt.Errorf("line %d: expected `key = [\"name\", ...]`, got %q", i+1, lines[i])
+			return requirements, nil, fmt.Errorf("line %d: expected `key = [\"name\", ...]`, got %q", i+1, lines[i])
 		}
 		for !strings.Contains(value, "]") {
 			if i++; i >= len(lines) {
-				return requirements, fmt.Errorf("the list for %s is never closed with ]", key)
+				return requirements, nil, fmt.Errorf("the list for %s is never closed with ]", key)
 			}
 			value += " " + strings.TrimSpace(stripComment(lines[i]))
 		}
 		names, err := quotedStrings(value[1:strings.Index(value, "]")])
 		if err != nil {
-			return requirements, fmt.Errorf("the list for %s: %w", key, err)
+			return requirements, nil, fmt.Errorf("the list for %s: %w", key, err)
 		}
 		switch key {
 		case EpicSectionsKey:
@@ -150,10 +186,10 @@ func parseRigFile(written string) (domain.EpicRequirements, error) {
 		case VersionFilesKey, ChangelogFilesKey:
 			for _, name := range names {
 				if path.IsAbs(name) || name != path.Clean(name) || name == ".." || strings.HasPrefix(name, "../") {
-					return requirements, fmt.Errorf("the list for %s: %q is not a path inside the rig (write it relative, as in %q)", key, name, "pwa/package.json")
+					return requirements, nil, fmt.Errorf("the list for %s: %q is not a path inside the rig (write it relative, as in %q)", key, name, "pwa/package.json")
 				}
 				if ext := path.Ext(name); key == ChangelogFilesKey && ext != ".json" && ext != ".md" {
-					return requirements, fmt.Errorf("the list for %s: %q is neither a .json nor a .md file", key, name)
+					return requirements, nil, fmt.Errorf("the list for %s: %q is neither a .json nor a .md file", key, name)
 				}
 			}
 			if key == ChangelogFilesKey {
@@ -162,11 +198,11 @@ func parseRigFile(written string) (domain.EpicRequirements, error) {
 				requirements.VersionFiles = names
 			}
 		default:
-			return requirements, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s and %s)",
+			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s and %s)",
 				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, PublicURLKey, FilesExpectedKey, NightlySuiteKey, SuiteEpicKey)
 		}
 	}
-	return requirements, nil
+	return requirements, unknown, nil
 }
 
 // stripComment cuts a trailing # comment off a line, leaving a # inside quotes.

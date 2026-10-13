@@ -1083,6 +1083,30 @@ Feature: Closing out a finished story and carrying on
     And the last ledger line holds:
       | version 0.1.1 |
 
+  Scenario: A key in the rig's file that this mw does not know never stops a landing, and the mail names it
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.0"
+    And the rig's file in the vault names the version files "package.json" and "package-lock.json"
+    And the rig's file in the vault also holds the line "some_future_key = true"
+    And the work of "mw-gq6.1" is rebased onto that main
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And "main" at the rig's origin holds version "0.1.1" in "package.json" and "package-lock.json"
+    And the story "mw-gq6.1" is closed
+    And that mail's body holds:
+      | rigs/millwright.toml has a key this mw does not know: some_future_key (rebuild mw on vps) |
+
+  Scenario: A malformed value of a key this mw does know still stops the landing
+    Given the rig's main holds a package.json and a package-lock.json at version "0.1.0"
+    And the rig's file in the vault holds the line "version_files = package.json"
+    And the rig's file in the vault also holds the line "some_future_key = true"
+    And the work of "mw-gq6.1" is rebased onto that main
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the report says it stopped for "landing-failed"
+
   Scenario: A story whose branch raised the minor itself lands with that version untouched
     Given the rig's main holds a package.json and a package-lock.json at version "0.1.0"
     And the rig's file in the vault names the version files "package.json" and "package-lock.json"

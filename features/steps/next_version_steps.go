@@ -21,6 +21,8 @@ import (
 func registerNextVersionSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the rig's main holds a package\.json and a package-lock\.json at version "([^"]*)"$`, c.theRigsMainHoldsPackages)
 	ctx.Given(`^the rig's file in the vault names the version files "([^"]*)" and "([^"]*)"$`, c.theRigNamesVersionFiles)
+	ctx.Given(`^the rig's file in the vault holds the line "([^"]*)"$`, c.theRigFileHoldsTheLine)
+	ctx.Given(`^the rig's file in the vault also holds the line "([^"]*)"$`, c.theRigFileAlsoHoldsTheLine)
 	ctx.Given(`^the work of "([^"]*)" is rebased onto that main$`, c.theWorkIsRebasedOntoMain)
 	ctx.Given(`^the story "([^"]*)" raised the version to "([^"]*)" itself$`, c.theStoryRaisedTheVersion)
 	ctx.Given(`^the other host lands a story and its version bump the moment mw first tries to push$`, c.theOtherHostRacesWithABump)
@@ -74,6 +76,26 @@ func (c *nextContext) theRigNamesVersionFiles(first, second string) error {
 	}
 	line := fmt.Sprintf("version_files = [%q, %q]\n", first, second)
 	return os.WriteFile(filepath.Join(dir, c.rigKey()+vault.RigFileExt), []byte(line), 0o644)
+}
+
+// theRigFileHoldsTheLine starts the rig's file with one line as written;
+// theRigFileAlsoHoldsTheLine adds one to what is there.
+func (c *nextContext) theRigFileHoldsTheLine(line string) error {
+	dir := filepath.Join(c.vault, application.RigsDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, c.rigKey()+vault.RigFileExt), []byte(line+"\n"), 0o644)
+}
+
+func (c *nextContext) theRigFileAlsoHoldsTheLine(line string) error {
+	f, err := os.OpenFile(filepath.Join(c.vault, application.RigsDir, c.rigKey()+vault.RigFileExt), os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = fmt.Fprintln(f, line)
+	return err
 }
 
 // theWorkIsRebasedOntoMain moves the story's branch onto the main the origin now
