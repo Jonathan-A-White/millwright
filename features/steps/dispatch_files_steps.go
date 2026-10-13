@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 
@@ -24,9 +25,20 @@ func (c *dispatchContext) registerFileSteps(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a story "([^"]*)" of that epic is running on "([^"]*)", expecting to change "([^"]*)"$`, c.aStoryRunningOnAnotherHostExpectingToChange)
 	ctx.Given(`^a story "([^"]*)" of that epic is already running here, its branch changing "([^"]*)"$`, c.aStoryRunningWithItsBranchChanging)
 	ctx.Given(`^the branch of "([^"]*)" has a commit changing "([^"]*)"$`, c.theBranchHasACommitChanging)
+	ctx.Given(`^the rig "([^"]*)" expects a files key$`, c.theRigExpectsAFilesKey)
 	ctx.When(`^mw status is read on "([^"]*)"$`, c.mwStatusIsReadOn)
 	ctx.Then(`^mw status lists "([^"]*)" as ready, saying "([^"]*)"$`, c.mwStatusListsAsReadySaying)
 	ctx.Then(`^mw status lists "([^"]*)" as ready, saying nothing of waiting$`, c.mwStatusListsAsReadyNotWaiting)
+}
+
+// theRigExpectsAFilesKey is the rig's file in the vault saying files_expected =
+// true (mw-gq6.390).
+func (c *dispatchContext) theRigExpectsAFilesKey(rigName string) error {
+	if c.rules == nil {
+		c.rules = apptest.NewFakeEpicRules()
+	}
+	c.rules.Require(rigName, domain.EpicRequirements{FilesExpected: true})
+	return nil
 }
 
 func (c *dispatchContext) aReadyStoryExpectingToChange(id, files string) error {

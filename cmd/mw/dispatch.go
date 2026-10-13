@@ -273,6 +273,7 @@ func newDispatchCmd() *cobra.Command {
 				Grist:       hostGristRoom(room),
 				Rigs:        rigs,
 				Changes:     worktrees,
+				Rules:       files,
 				Network:     net,
 				HeavyNet:    heavy,
 				Exclusive:   hostDispatchLock(dir),

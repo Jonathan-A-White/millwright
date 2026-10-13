@@ -202,6 +202,11 @@ type Dispatch struct {
 	// files keys alone.
 	Changes BranchChanges
 
+	// Rules is the rig files of the vault. On a rig whose file says files_expected
+	// = true, a story with no files key overlaps every story of the rig
+	// (mw-gq6.390). A nil Rules expects nothing of any rig.
+	Rules EpicRules
+
 	// DryRun prints what would be started and writes nothing at all: nothing is
 	// synced, nothing claimed, no worktree made, no formula poured, no session
 	// started.
@@ -533,7 +538,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	// by a session of this host, so it is not one of the sessions the cap counts.
 	// Every other claim still held here, refused ones too, keeps its files from
 	// the stories ready beside it: its branch is yet to land (mw-gq6.349).
-	shares := fileShares{changes: d.Changes, rigs: d.Rigs, remote: d.remote()}
+	shares := fileShares{changes: d.Changes, rules: d.Rules, rigs: d.Rigs, remote: d.remote()}
 	for _, detail := range running {
 		if detail.Hitl() {
 			continue

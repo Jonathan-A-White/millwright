@@ -37,7 +37,9 @@ type dispatchContext struct {
 	tracker *apptest.FakeTracker
 	runner  *apptest.FakeRunner
 	files   *apptest.FakeVaultFiles
-	mail    *apptest.FakeMailbox
+	// rules is the rig files of the vault, when a scenario gave one (mw-gq6.390).
+	rules *apptest.FakeEpicRules
+	mail  *apptest.FakeMailbox
 
 	// out is what the dispatch printed, and waits is every wait it asked for,
 	// which a scenario never really sits through.
@@ -929,6 +931,9 @@ func (c *dispatchContext) dispatch(host string, cap int, dryRun bool) error {
 	}
 	if c.load != nil {
 		dispatcher.Load = c.load
+	}
+	if c.rules != nil {
+		dispatcher.Rules = c.rules
 	}
 	if c.gristRuns != nil || c.gristLock != nil {
 		room := application.GristRoom{

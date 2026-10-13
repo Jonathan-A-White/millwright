@@ -882,7 +882,8 @@ Feature: Dispatching the stories this host is ready to work
   # each landing moves the target branch under the others, and they come back
   # as merge conflicts. A ready story whose files a running story on its rig
   # names, or has already changed on its branch, waits, unclaimed, and the next
-  # ready story is started instead. A story that names no files waits for none.
+  # ready story is started instead. A story that names no files waits for none,
+  # except on a rig that expects a files key (below).
 
   Scenario: A story that names a file a running story names waits, and the next ready story starts
     Given a story "mw-gq6.1" of that epic is already running here, expecting to change "src/Reader.tsx"
@@ -955,6 +956,58 @@ Feature: Dispatching the stories this host is ready to work
     When dispatch runs on "vps" with a cap of 1
     Then one session was started, for "mw-gq6.2"
     And dispatch reports 0 of 1 sessions were already running
+
+  # A story with no files key on a rig that expects one (files_expected = true in
+  # its file in the vault) overlaps every story of the rig (mw-gq6.390): the
+  # Mayor un-holds a story without mw release, so no one is told its key is
+  # missing, and a story that names nothing is not known to touch nothing.
+
+  Scenario: On a rig that expects files, a story with no files key waits for a running story
+    Given the rig "millwright" expects a files key
+    And a story "mw-gq6.1" of that epic is already running here, expecting to change "a.go"
+    And a ready story "mw-gq6.2" of that epic
+    When dispatch runs on "vps" with a cap of 3
+    Then no session was started
+    And the story "mw-gq6.2" is not claimed
+    And dispatch passed over "mw-gq6.2", saying: waiting: no files key (millwright expects one), so it shares every file with mw-gq6.1
+
+  Scenario: On a rig that expects files, a running story with no files key keeps a ready story waiting
+    Given the rig "millwright" expects a files key
+    And a story "mw-gq6.1" of that epic is already running here
+    And a ready story "mw-gq6.2" of that epic expecting to change "a.go"
+    When dispatch runs on "vps" with a cap of 3
+    Then no session was started
+    And the story "mw-gq6.2" is not claimed
+    And dispatch passed over "mw-gq6.2", saying: waiting: mw-gq6.1 has no files key (millwright expects one), so it shares every file with it
+
+  Scenario: On a rig that expects files, a story with no files key starts when nothing else is claimed
+    Given the rig "millwright" expects a files key
+    And a ready story "mw-gq6.2" of that epic
+    When dispatch runs on "vps" with a cap of 3
+    Then one session was started, for "mw-gq6.2"
+    And the story "mw-gq6.2" is claimed by this host
+
+  Scenario: On a rig that expects files, a story with no files key waits for a story running on the other host
+    Given the rig "millwright" expects a files key
+    And a story "mw-gq6.1" of that epic is running on "laptop", expecting to change "a.go"
+    And a ready story "mw-gq6.2" of that epic
+    When dispatch runs on "vps" with a cap of 3
+    Then no session was started
+    And dispatch passed over "mw-gq6.2", saying: waiting: no files key (millwright expects one), so it shares every file with mw-gq6.1 (running on laptop)
+
+  Scenario: On a rig that expects files, of two ready stories with no files key the first is started
+    Given the rig "millwright" expects a files key
+    And a ready story "mw-gq6.2" of that epic
+    And a ready story "mw-gq6.3" of that epic
+    When dispatch runs on "vps" with a cap of 3
+    Then one session was started, for "mw-gq6.2"
+    And dispatch passed over "mw-gq6.3", saying: waiting: no files key (millwright expects one), so it shares every file with mw-gq6.2
+
+  Scenario: On a rig that does not expect files, a story with no files key starts beside a running story
+    Given a story "mw-gq6.1" of that epic is already running here, expecting to change "a.go"
+    And a ready story "mw-gq6.2" of that epic
+    When dispatch runs on "vps" with a cap of 3
+    Then one session was started, for "mw-gq6.2"
 
   Scenario: mw status shows a story that shares a running story's file as waiting
     Given a story "mw-gq6.1" of that epic is already running here, expecting to change "src/Reader.tsx"
