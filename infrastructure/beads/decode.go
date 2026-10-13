@@ -151,6 +151,15 @@ func (b bead) text(field string) string {
 	return strings.TrimSpace(text)
 }
 
+// rankText reads a number kept in the bead's metadata as the text it was
+// written as: bd hands back a value set as 1.5 as a number, not as "1.5".
+func (b bead) rankText(field string) string {
+	if value, ok := b.Metadata[field].(float64); ok {
+		return strconv.FormatFloat(value, 'g', -1, 64)
+	}
+	return b.text(field)
+}
+
 // exhausted is whether mw dispatch has marked this bead as having used up its
 // attempts: the mark holds the count it was said at, and is empty once cleared.
 func (b bead) exhausted() bool {
@@ -301,6 +310,7 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		ClosedAt:         b.closedAt(),
 		LeaseExpires:     b.leaseExpires(),
 		CommentCount:     b.CommentCount,
+		TodoRank:         b.rankText(application.TodoRankField),
 		Attempts:         b.attempts(),
 		RebaseSends:      b.count(application.RebaseSendsField),
 		RebaseBase:       b.text(application.RebaseBaseField),

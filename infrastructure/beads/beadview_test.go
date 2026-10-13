@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/Jonathan-A-White/millwright/application"
 )
 
 // showTwoBeadsJSON is what bd show prints for a story and its epic asked for
@@ -182,5 +184,56 @@ func TestRemoveLabelIsOneBdUpdate(t *testing.T) {
 	}
 	if got := strings.TrimSpace(string(asked)); !strings.HasSuffix(got, "update t-1 --remove-label waiting:others") || strings.Count(got, "\n") != 0 {
 		t.Fatalf("expected one bd update t-1 --remove-label waiting:others, got %q", got)
+	}
+}
+
+func TestEditStoryAndMoveStoryAreOneBdUpdateEach(t *testing.T) {
+	gateway, log := recorder(t)
+	ctx := context.Background()
+	title, notes := " Buy two hoses ", "one green"
+
+	if err := gateway.EditStory(ctx, "t-1", application.StoryEdit{Title: &title, Description: &notes}); err != nil {
+		t.Fatalf("editing: %v", err)
+	}
+	if err := gateway.EditStory(ctx, "t-1", application.StoryEdit{}); err != nil {
+		t.Fatalf("an edit that names nothing: %v", err)
+	}
+	blank := "  "
+	if err := gateway.EditStory(ctx, "t-1", application.StoryEdit{Title: &blank}); err == nil {
+		t.Fatal("expected a blank title to be refused before bd is asked")
+	}
+	if err := gateway.MoveStory(ctx, "t-1", "t-2"); err != nil {
+		t.Fatalf("moving: %v", err)
+	}
+	asked, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(asked)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("expected two bd calls, got %q", asked)
+	}
+	if !strings.HasSuffix(lines[0], "update t-1 --title Buy two hoses --description one green --allow-empty-description") {
+		t.Errorf("expected bd update t-1 with the title and description, got %q", lines[0])
+	}
+	if !strings.HasSuffix(lines[1], "update t-1 --parent t-2") {
+		t.Errorf("expected bd update t-1 --parent t-2, got %q", lines[1])
+	}
+}
+
+// bd hands a metadata value set as 1.5 back as a number; the rank is read as
+// the text it was written as either way.
+func TestShowBeadsReadsATodoRankWhetherBdHoldsItAsTextOrANumber(t *testing.T) {
+	gateway, _ := leaseStandIn(t, map[string]string{
+		"show": `[{"id": "t-1", "title": "A", "status": "open", "metadata": {"todo_rank": 1.5}},
+		          {"id": "t-2", "title": "B", "status": "open", "metadata": {"todo_rank": "3"}},
+		          {"id": "t-3", "title": "C", "status": "open"}]`,
+	})
+	found, err := gateway.ShowBeads(context.Background(), []string{"t-1", "t-2", "t-3"})
+	if err != nil || len(found) != 3 {
+		t.Fatalf("showing: %v, %+v", err, found)
+	}
+	if found[0].TodoRank != "1.5" || found[1].TodoRank != "3" || found[2].TodoRank != "" {
+		t.Errorf("expected the ranks 1.5, 3 and none, got %q, %q, %q", found[0].TodoRank, found[1].TodoRank, found[2].TodoRank)
 	}
 }

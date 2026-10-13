@@ -65,7 +65,8 @@ usually `closed`, to `verified`, detail `verified`. A later one on the same bead
 that only mentions VERIFIED, and `NOT VERIFIED` are plain `comment` events.
 
 Every one-tap action of the Governor's that `mw postern inbox --apply` applies (release, hold,
-keep, close, verified, chase, ask_done, keep_waiting; not a refused one) is also an `action_applied` event on the bead,
+keep, close, verified, chase, ask_done, keep_waiting, and the To do board's todo_add, todo_edit
+and todo_move; not a refused one) is also an `action_applied` event on the bead,
 written once the action is done, its detail the tap's txid. A hold of a claimed story writes
 the `control` cancel first. The bead's own comment names the txid only for release and hold, so
 this event is how an app sees any tap took.

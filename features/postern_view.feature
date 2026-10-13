@@ -437,6 +437,31 @@ Feature: mw postern view
     And the view's bead "mw-todo.1" is under "mw-todo" with the labels "hitl, hitl:todo"
     And the view's bead "mw-todo" has the status "deferred" and no parent
 
+  # The card's todo_rank is published, and the cards of a list are ordered by
+  # it: ranked cards by rank, then the unranked ones in the order filed.
+  Scenario: A hitl:todo bead's todo_rank is published, and the cards of its list are ordered by it
+    Given the view's epic "mw-todo" is live
+    And the view's hitl bead "mw-todo.1" under "mw-todo" was filed 3 days ago with the labels "hitl, hitl:todo" and the body "Buy a hose"
+    And the view's hitl bead "mw-todo.2" under "mw-todo" was filed 2 days ago with the labels "hitl, hitl:todo" and the body "Check the router"
+    And the view's hitl bead "mw-todo.3" under "mw-todo" was filed 1 day ago with the labels "hitl, hitl:todo" and the body "Fit the shelf"
+    And the view's bead "mw-todo.1" has the todo_rank "3"
+    And the view's bead "mw-todo.2" has the todo_rank "1.5"
+    And the view's bead "mw-todo.3" has the todo_rank "2"
+    When the live view is built
+    Then the view's bead "mw-todo.2" carries the todo_rank "1.5"
+    And the view's bead "mw-todo.1" carries the todo_rank "3"
+    And the view lists the beads under "mw-todo" in the order "mw-todo.2, mw-todo.3, mw-todo.1"
+
+  Scenario: Cards with no todo_rank follow the ranked ones in the order filed
+    Given the view's epic "mw-todo" is live
+    And the view's hitl bead "mw-todo.1" under "mw-todo" was filed 3 days ago with the labels "hitl, hitl:todo" and the body "Buy a hose"
+    And the view's hitl bead "mw-todo.2" under "mw-todo" was filed 2 days ago with the labels "hitl, hitl:todo" and the body "Check the router"
+    And the view's hitl bead "mw-todo.3" under "mw-todo" was filed 1 day ago with the labels "hitl, hitl:todo" and the body "Fit the shelf"
+    And the view's bead "mw-todo.3" has the todo_rank "7"
+    When the live view is built
+    Then the view's bead "mw-todo.1" carries no todo_rank
+    And the view lists the beads under "mw-todo" in the order "mw-todo.3, mw-todo.1, mw-todo.2"
+
   Scenario: The same bead without hitl:todo still gives a hands need
     Given the view's epic "mw-todo" is live
     And the view's hitl bead "mw-todo.1" under "mw-todo" was filed 2 days ago with the labels "hitl" and the body "Buy a hose"

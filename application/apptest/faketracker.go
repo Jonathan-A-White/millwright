@@ -796,6 +796,31 @@ func (f *FakeTracker) SetStoryPriority(_ context.Context, id string, priority in
 	return f.SetPriority(id, priority)
 }
 
+// EditStory implements application.WorkTracker, for a story the fake holds.
+func (f *FakeTracker) EditStory(_ context.Context, id string, edit application.StoryEdit) error {
+	if edit.Title != nil && strings.TrimSpace(*edit.Title) == "" {
+		return fmt.Errorf("a story needs a title")
+	}
+	return f.write(id, func(s *fakeStory) error {
+		if edit.Title != nil {
+			s.detail.Story.Title = strings.TrimSpace(*edit.Title)
+		}
+		if edit.Description != nil {
+			s.detail.Description = *edit.Description
+		}
+		return nil
+	})
+}
+
+// MoveStory implements application.WorkTracker, for a story the fake holds.
+func (f *FakeTracker) MoveStory(_ context.Context, id, parent string) error {
+	return f.write(id, func(s *fakeStory) error {
+		s.detail.EpicID = parent
+		s.detail.Defaults = f.defaults[parent]
+		return nil
+	})
+}
+
 // AddLabel implements application.WorkTracker, for a story the fake holds.
 func (f *FakeTracker) AddLabel(_ context.Context, id, label string) error {
 	f.mu.Lock()
@@ -1484,6 +1509,9 @@ func (f *FakeTracker) SetStoryMetadata(_ context.Context, id string, fields map[
 			}
 			if k == application.CauseFixField {
 				s.detail.CauseFix = v
+			}
+			if k == application.TodoRankField {
+				s.detail.TodoRank = v
 			}
 			if k == application.ClaimedAtField {
 				s.detail.ClaimedAt, _ = time.Parse(time.RFC3339, v)

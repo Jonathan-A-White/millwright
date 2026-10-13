@@ -51,6 +51,10 @@ type posternInboxContext struct {
 	// Governor's taps into.
 	eventLog *apptest.FakeEventLog
 
+	// writesBefore is how many writes the tracker had taken when the pass
+	// ran, so a refused to-do action can be shown to have written nothing.
+	writesBefore int
+
 	// host, homeFile, mover, moveBead and now are a move-home scenario's:
 	// this host, the vault's home file, the stand-in for ssh and mw home
 	// move, the bead the move is written on, and the clock.
@@ -227,6 +231,7 @@ func InitializePosternInboxScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the decrypted image is written under the attachment directory$`, c.theDecryptedImageIsWrittenUnderTheAttachmentDirectory)
 	ctx.Then(`^bead "([^"]*)"'s last comment names the decrypted image's path$`, c.beadsLastCommentNamesTheDecryptedImagesPath)
 	registerPosternMoveHomeSteps(ctx, c)
+	registerPosternTodoSteps(ctx, c)
 }
 
 func (c *posternInboxContext) aThrowawayPosternKey() error {
@@ -1329,8 +1334,13 @@ func (c *posternInboxContext) addAction(from, txid string, action map[string]any
 	if err != nil {
 		return err
 	}
+	return c.addActionText(from, txid, string(text))
+}
+
+// addActionText sends text, already an action's JSON, from from.
+func (c *posternInboxContext) addActionText(from, txid, text string) error {
 	c.cipher.From = from
-	ciphertext, err := c.cipher.Encrypt(c.pubKey, string(text))
+	ciphertext, err := c.cipher.Encrypt(c.pubKey, text)
 	if err != nil {
 		return err
 	}
@@ -1345,6 +1355,7 @@ func (c *posternInboxContext) beadIsClaimedBy(bead, holder string) error {
 }
 
 func (c *posternInboxContext) mwPosternInboxApplyIsRun() error {
+	c.writesBefore = c.memory.Writes()
 	_, c.err = c.inbox().Apply(context.Background())
 	return nil
 }

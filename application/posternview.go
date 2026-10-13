@@ -199,6 +199,9 @@ type PosternViewBead struct {
 	Summary     string           `json:"summary"`
 	Comments    int              `json:"comments"`
 	DoneEarlier int              `json:"done_earlier"`
+	// TodoRank is where a hitl:todo card stands among those of its list; absent
+	// on a bead with none. The beads of one list are listed in that order.
+	TodoRank string `json:"todo_rank,omitempty"`
 }
 
 // TrackerSnapshot is a tracker that can read every bead at once and answer the
@@ -534,7 +537,32 @@ func (v PosternView) Build(ctx context.Context) (PosternViewDoc, error) {
 		}
 		doc.Beads = append(doc.Beads, viewBeadOf(e))
 	}
+	orderTodoCards(doc.Beads)
 	return doc, nil
+}
+
+// orderTodoCards puts the cards of each list in the order the list shows them
+// (InTodoOrder), each in a place a card of its list held: the other beads, and
+// the lists among them, stay where they were.
+func orderTodoCards(beads []PosternViewBead) {
+	places := map[string][]int{}
+	for n, bead := range beads {
+		if hasLabel(bead.Labels, LabelHitlTodo) && bead.Type != "epic" {
+			places[bead.Parent] = append(places[bead.Parent], n)
+		}
+	}
+	for _, at := range places {
+		cards := make([]StoryDetail, len(at))
+		byID := make(map[string]PosternViewBead, len(at))
+		for n, place := range at {
+			bead := beads[place]
+			cards[n] = StoryDetail{Story: domain.Story{ID: bead.ID}, TodoRank: bead.TodoRank}
+			byID[bead.ID] = bead
+		}
+		for n, card := range InTodoOrder(cards) {
+			beads[at[n]] = byID[card.Story.ID]
+		}
+	}
 }
 
 // epicBeadOf is a read epic as one bead of the view: its own bead, with the
@@ -1647,7 +1675,7 @@ func viewBeadOf(e *viewEntry) PosternViewBead {
 		Created: formatOrEmpty(d.Created), Updated: formatOrEmpty(d.Updated),
 		Started: formatOrEmpty(d.Started), Closed: formatOrEmpty(d.ClosedAt),
 		Path: e.path, Attempts: d.Attempts, Summary: viewSummary(d.Description),
-		Comments: d.CommentCount, DoneEarlier: e.doneEarlier,
+		Comments: d.CommentCount, DoneEarlier: e.doneEarlier, TodoRank: d.TodoRank,
 	}
 }
 

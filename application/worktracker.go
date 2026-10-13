@@ -190,6 +190,9 @@ type StoryDetail struct {
 	// zero can carry no marker written as a comment, so a reader looking for
 	// one needs no further call to find that out (mw-tfne4.24).
 	CommentCount int
+	// TodoRank is where a hitl:todo card stands among those of its list, as the
+	// TodoRankField metadata says; empty when it has none (InTodoOrder).
+	TodoRank string
 }
 
 // WorkInHand is what the tracker has in hand across every host: the stories
@@ -410,6 +413,13 @@ type NewStory struct {
 	Labels []string
 }
 
+// StoryEdit is a change to a bead's own words: the title and the description
+// it is to have. A nil field is left as it is.
+type StoryEdit struct {
+	Title       *string
+	Description *string
+}
+
 // BeadPage is one bead as ShowBeadPage reads it.
 type BeadPage struct {
 	// Bead is the bead as ShowBeads reports it.
@@ -611,6 +621,15 @@ type WorkTracker interface {
 	// SetStoryMetadata writes metadata fields onto a story, leaving the fields
 	// it does not name alone. Path fields are metadata like any other.
 	SetStoryMetadata(ctx context.Context, id string, fields map[string]string) error
+
+	// EditStory changes a bead's title, its description, or both, leaving what
+	// the edit names no value for as it is. A blank title is refused before the
+	// tracker is asked. It is the Governor's todo_edit tap (section 13).
+	EditStory(ctx context.Context, id string, edit StoryEdit) error
+
+	// MoveStory files a bead under another parent, taking it from the one it
+	// has. It is the Governor's todo_move tap to another list (section 13).
+	MoveStory(ctx context.Context, id, parent string) error
 
 	// SetStoryPriority sets a bead's priority, 0 (most urgent) to 4; anything
 	// outside that is refused before the tracker is asked. It is the

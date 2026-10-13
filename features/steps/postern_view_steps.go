@@ -106,6 +106,10 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the view's bead "([^"]*)" was last changed (\d+) days? ago$`, c.theViewsBeadWasLastChanged)
 	ctx.Given(`^the view's bead "([^"]*)" is no longer waiting on others$`, c.theViewsBeadIsNoLongerWaitingOnOthers)
 	ctx.Given(`^the view's bead "([^"]*)" is closed$`, c.theViewsBeadIsClosed)
+	ctx.Given(`^the view's bead "([^"]*)" has the todo_rank "([^"]*)"$`, c.theViewsBeadHasTheTodoRank)
+	ctx.Then(`^the view's bead "([^"]*)" carries the todo_rank "([^"]*)"$`, c.theViewsBeadCarriesTheTodoRank)
+	ctx.Then(`^the view's bead "([^"]*)" carries no todo_rank$`, func(id string) error { return c.theViewsBeadCarriesTheTodoRank(id, "") })
+	ctx.Then(`^the view lists the beads under "([^"]*)" in the order "([^"]*)"$`, c.theViewListsTheBeadsUnderInOrder)
 	ctx.When(`^the live view is built$`, c.theLiveViewIsBuilt)
 	ctx.When(`^the live view is run and written$`, c.theLiveViewIsRunAndWritten)
 
@@ -898,4 +902,32 @@ func (c *posternViewContext) theViewsBeadIsNoLongerWaitingOnOthers(id string) er
 
 func (c *posternViewContext) theViewsBeadIsClosed(id string) error {
 	return c.tracker.SetStatus(id, apptest.StatusClosed)
+}
+
+func (c *posternViewContext) theViewsBeadHasTheTodoRank(id, rank string) error {
+	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.TodoRankField: rank})
+}
+
+func (c *posternViewContext) theViewsBeadCarriesTheTodoRank(id, rank string) error {
+	b, ok := c.bead(id)
+	if !ok {
+		return fmt.Errorf("the view has no bead %s", id)
+	}
+	if b.TodoRank != rank {
+		return fmt.Errorf("expected %s to carry the todo_rank %q, got %q", id, rank, b.TodoRank)
+	}
+	return nil
+}
+
+func (c *posternViewContext) theViewListsTheBeadsUnderInOrder(parent, order string) error {
+	var got []string
+	for _, b := range c.doc.Beads {
+		if b.Parent == parent {
+			got = append(got, b.ID)
+		}
+	}
+	if joined := strings.Join(got, ", "); joined != order {
+		return fmt.Errorf("expected the beads under %s in the order %q, got %q", parent, order, joined)
+	}
+	return nil
 }

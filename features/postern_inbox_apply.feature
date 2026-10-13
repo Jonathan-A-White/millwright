@@ -508,3 +508,134 @@ Feature: mw postern inbox --apply
     Then it printed "Buy flour for the bread"
     And it printed "Another thought"
     And it did not print "held for after"
+
+  # The Governor's hand edits to his To do board (mw-ev7oyy.6): add a card,
+  # edit a card, move a card. Each is applied to a hitl:todo bead only.
+  Scenario: A todo_add tap files an open hitl:todo card at the end of the list
+    Given the epic "mw-todo" is a to-do list
+    And the Governor sends the postern action {"action":"todo_add","list":"mw-todo","title":"Buy a hose","notes":"the green one"} with txid "tx-todo-add"
+    When mw postern inbox --apply is run
+    Then the to-do list "mw-todo" holds an open card titled "Buy a hose" labelled "hitl, hitl:todo" with the notes "the green one"
+    And mail "Added: Buy a hose" was sent to mayor
+    And the txid "tx-todo-add" is marked applied
+
+  Scenario: A todo_add tap on an epic that is not a to-do list is refused and files nothing
+    Given the Governor sends the postern action {"action":"todo_add","list":"mw-act","title":"Buy a hose"} with txid "tx-todo-add-no"
+    When mw postern inbox --apply is run
+    Then the tracker took only the mark that the tap was applied
+    And mail "Not applied: todo_add mw-act" was sent to mayor saying "not a to-do list"
+
+  Scenario: A todo_add tap with no title is refused and files nothing
+    Given the epic "mw-todo" is a to-do list
+    And the Governor sends the postern action {"action":"todo_add","list":"mw-todo","title":"  "} with txid "tx-todo-add-blank"
+    When mw postern inbox --apply is run
+    Then the tracker took only the mark that the tap was applied
+    And mail "Not applied: todo_add mw-todo" was sent to mayor saying "title"
+
+  Scenario: A todo_edit tap changes a hitl:todo card's title and notes
+    Given epic "mw-todo" has the open bead "mw-todo.1" labelled "hitl, hitl:todo"
+    And the Governor sends the postern action {"action":"todo_edit","bead":"mw-todo.1","title":"Buy two hoses","notes":"one green, one grey"} with txid "tx-todo-edit"
+    When mw postern inbox --apply is run
+    Then bead "mw-todo.1" now has the title "Buy two hoses"
+    And bead "mw-todo.1" now has the notes "one green, one grey"
+    And bead "mw-todo.1" now stands "open"
+    And mail "Edited: mw-todo.1" was sent to mayor
+    And the txid "tx-todo-edit" is marked applied
+
+  Scenario: A todo_edit tap naming only the notes leaves the title alone
+    Given epic "mw-todo" has the open bead "mw-todo.1" labelled "hitl, hitl:todo"
+    And the Governor sends the postern action {"action":"todo_edit","bead":"mw-todo.1","notes":"call first"} with txid "tx-todo-edit-notes"
+    When mw postern inbox --apply is run
+    Then bead "mw-todo.1" now has the title "Story mw-todo.1"
+    And bead "mw-todo.1" now has the notes "call first"
+
+  Scenario: A todo_edit tap on a bead without hitl:todo is refused and changes nothing
+    Given the Governor sends the postern action {"action":"todo_edit","bead":"mw-act.1","title":"Something else"} with txid "tx-todo-edit-no"
+    When mw postern inbox --apply is run
+    Then the tracker took only the mark that the tap was applied
+    And bead "mw-act.1" now has the title "Story 1"
+    And mail "Not applied: todo_edit mw-act.1" was sent to mayor saying "not an item on a to-do list"
+
+  Scenario: A todo_edit tap that names neither title nor notes is refused
+    Given epic "mw-todo" has the open bead "mw-todo.1" labelled "hitl, hitl:todo"
+    And the Governor sends the postern action {"action":"todo_edit","bead":"mw-todo.1"} with txid "tx-todo-edit-none"
+    When mw postern inbox --apply is run
+    Then the tracker took only the mark that the tap was applied
+    And mail "Not applied: todo_edit mw-todo.1" was sent to mayor
+
+  Scenario: A todo_move tap before a card puts the card ahead of it
+    Given the to-do list "mw-todo" has the ranked cards "mw-todo.1" at 1, "mw-todo.2" at 2, "mw-todo.3" at 3
+    And the Governor sends the postern action {"action":"todo_move","bead":"mw-todo.3","before":"mw-todo.2"} with txid "tx-todo-move-before"
+    When mw postern inbox --apply is run
+    Then bead "mw-todo.3" has the todo_rank "1.5"
+    And bead "mw-todo.3" now stands under "mw-todo"
+    And mail "Moved: mw-todo.3" was sent to mayor
+    And the txid "tx-todo-move-before" is marked applied
+
+  Scenario: A todo_move tap after the last card puts the card at the end
+    Given the to-do list "mw-todo" has the ranked cards "mw-todo.1" at 1, "mw-todo.2" at 2, "mw-todo.3" at 3
+    And the Governor sends the postern action {"action":"todo_move","bead":"mw-todo.1","after":"mw-todo.3"} with txid "tx-todo-move-after"
+    When mw postern inbox --apply is run
+    Then bead "mw-todo.1" has the todo_rank "4"
+
+  Scenario: A todo_move tap before the first card puts the card at the head
+    Given the to-do list "mw-todo" has the ranked cards "mw-todo.1" at 1, "mw-todo.2" at 2, "mw-todo.3" at 3
+    And the Governor sends the postern action {"action":"todo_move","bead":"mw-todo.3","before":"mw-todo.1"} with txid "tx-todo-move-head"
+    When mw postern inbox --apply is run
+    Then bead "mw-todo.3" has the todo_rank "0"
+
+  Scenario: A todo_move tap before the first of cards the Mayor filed without ranks needs no other card ranked
+    Given the to-do list "mw-todo" has the unranked cards "mw-todo.1", "mw-todo.2", "mw-todo.3"
+    And the Governor sends the postern action {"action":"todo_move","bead":"mw-todo.3","before":"mw-todo.1"} with txid "tx-todo-move-head-unranked"
+    When mw postern inbox --apply is run
+    Then bead "mw-todo.3" has the todo_rank "1"
+    And bead "mw-todo.1" has no todo_rank
+    And bead "mw-todo.2" has no todo_rank
+
+  Scenario: A todo_move tap among cards the Mayor filed without ranks numbers the list
+    Given the to-do list "mw-todo" has the unranked cards "mw-todo.1", "mw-todo.2", "mw-todo.3"
+    And the Governor sends the postern action {"action":"todo_move","bead":"mw-todo.3","after":"mw-todo.1"} with txid "tx-todo-move-number"
+    When mw postern inbox --apply is run
+    Then bead "mw-todo.1" has the todo_rank "1"
+    And bead "mw-todo.3" has the todo_rank "2"
+    And bead "mw-todo.2" has the todo_rank "3"
+
+  Scenario: A todo_move tap with a list moves the card to the end of the other list
+    Given the to-do list "mw-todo" has the ranked cards "mw-todo.1" at 1, "mw-todo.2" at 2
+    And the to-do list "mw-chores" has the ranked cards "mw-chores.1" at 5
+    And the Governor sends the postern action {"action":"todo_move","bead":"mw-todo.1","list":"mw-chores"} with txid "tx-todo-move-list"
+    When mw postern inbox --apply is run
+    Then bead "mw-todo.1" now stands under "mw-chores"
+    And bead "mw-todo.1" has the todo_rank "6"
+    And bead "mw-todo.2" now stands under "mw-todo"
+
+  Scenario: A todo_move tap to a list that is not a to-do list is refused and moves nothing
+    Given epic "mw-todo" has the open bead "mw-todo.1" labelled "hitl, hitl:todo"
+    And the Governor sends the postern action {"action":"todo_move","bead":"mw-todo.1","list":"mw-act"} with txid "tx-todo-move-nolist"
+    When mw postern inbox --apply is run
+    Then the tracker took only the mark that the tap was applied
+    And bead "mw-todo.1" now stands under "mw-todo"
+    And mail "Not applied: todo_move mw-todo.1" was sent to mayor saying "not a to-do list"
+
+  Scenario: A todo_move tap before a card that is not on the list is refused
+    Given the to-do list "mw-todo" has the ranked cards "mw-todo.1" at 1, "mw-todo.2" at 2
+    And the to-do list "mw-chores" has the ranked cards "mw-chores.1" at 5
+    And the Governor sends the postern action {"action":"todo_move","bead":"mw-todo.1","before":"mw-chores.1"} with txid "tx-todo-move-stray"
+    When mw postern inbox --apply is run
+    Then the tracker took only the mark that the tap was applied
+    And mail "Not applied: todo_move mw-todo.1" was sent to mayor saying "mw-chores.1"
+
+  Scenario: A todo_move tap on a bead without hitl:todo is refused and changes nothing
+    Given the Governor sends the postern action {"action":"todo_move","bead":"mw-act.1","after":"mw-act.2"} with txid "tx-todo-move-no"
+    When mw postern inbox --apply is run
+    Then the tracker took only the mark that the tap was applied
+    And bead "mw-act.1" has no todo_rank
+    And bead "mw-act.1" now stands under "mw-act"
+    And mail "Not applied: todo_move mw-act.1" was sent to mayor saying "not an item on a to-do list"
+
+  Scenario: A todo_move tap that names no place is refused
+    Given epic "mw-todo" has the open bead "mw-todo.1" labelled "hitl, hitl:todo"
+    And the Governor sends the postern action {"action":"todo_move","bead":"mw-todo.1"} with txid "tx-todo-move-none"
+    When mw postern inbox --apply is run
+    Then the tracker took only the mark that the tap was applied
+    And mail "Not applied: todo_move mw-todo.1" was sent to mayor

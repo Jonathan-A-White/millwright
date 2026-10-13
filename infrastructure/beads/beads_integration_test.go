@@ -1563,3 +1563,39 @@ func apptestIDs(stories []application.StoryDetail) []string {
 	}
 	return ids
 }
+
+// The Governor's hand edits to a card (mw-ev7oyy.6): its words change, it
+// moves to another list, and its todo_rank reads back as the text it was
+// written as even though bd hands a number back as a number.
+func TestGatewayEditsAndMovesACardAndReadsItsRank(t *testing.T) {
+	t.Parallel()
+	vault := throwawayVault(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	errands := bdRun(t, vault, beads.Program, "create", "Errands", "-t", "epic", "--silent")
+	chores := bdRun(t, vault, beads.Program, "create", "Chores", "-t", "epic", "--silent")
+	card := bdRun(t, vault, beads.Program, "create", "Buy a hose", "--parent", errands,
+		"--description", "the green one", "--labels", "hitl,hitl:todo", "--no-inherit-labels", "--silent")
+	gateway := beads.New(vault)
+
+	title, notes := "Buy two hoses", ""
+	if err := gateway.EditStory(ctx, card, application.StoryEdit{Title: &title, Description: &notes}); err != nil {
+		t.Fatalf("editing %s: %v", card, err)
+	}
+	if err := gateway.MoveStory(ctx, card, chores); err != nil {
+		t.Fatalf("moving %s: %v", card, err)
+	}
+	if err := gateway.SetStoryMetadata(ctx, card, map[string]string{application.TodoRankField: "1.5"}); err != nil {
+		t.Fatalf("ranking %s: %v", card, err)
+	}
+
+	shown, err := gateway.ShowBeads(ctx, []string{card})
+	if err != nil || len(shown) != 1 {
+		t.Fatalf("showing %s: %v, %d beads", card, err, len(shown))
+	}
+	got := shown[0]
+	if got.Story.Title != title || got.Description != "" || got.EpicID != chores || got.TodoRank != "1.5" || !got.Todo() {
+		t.Errorf("expected %s retitled, without notes, under %s, ranked 1.5 and still a card, got %+v", card, chores, got)
+	}
+}

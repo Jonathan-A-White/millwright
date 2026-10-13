@@ -33,6 +33,12 @@ const (
 	PosternActionChase       = "chase"
 	PosternActionAskDone     = "ask_done"
 	PosternActionKeepWaiting = "keep_waiting"
+
+	// The three hand edits to his To do board (protocol section 13). Each is
+	// applied to hitl:todo beads only.
+	PosternActionTodoAdd  = "todo_add"
+	PosternActionTodoEdit = "todo_edit"
+	PosternActionTodoMove = "todo_move"
 )
 
 // PosternKeepDays is how many days a keep action that names none keeps a
@@ -49,6 +55,17 @@ type PosternAction struct {
 	// Days is a keep's: how many days more the bead is kept, PosternKeepDays
 	// when it names none.
 	Days *int `json:"days,omitempty"`
+
+	// List, Title, Notes, Before and After are the To do board actions': the
+	// list (an epic) a card is added to or moved to, the title and notes a card
+	// is added or edited with (a nil one is left as it is), and the card a moved
+	// card is put before or after. A todo_add names its list in List, and Bead
+	// is read as that list.
+	List   string  `json:"list,omitempty"`
+	Title  *string `json:"title,omitempty"`
+	Notes  *string `json:"notes,omitempty"`
+	Before string  `json:"before,omitempty"`
+	After  string  `json:"after,omitempty"`
 
 	// Step, SHA256, ApprovedAt and Sig are a run action's (§17): the step
 	// approved, its hash as he saw it, when he approved it (Unix seconds),
@@ -67,6 +84,9 @@ func decodePosternAction(text string) (PosternAction, bool) {
 		return PosternAction{}, false
 	}
 	action.Action = strings.ToLower(strings.TrimSpace(action.Action))
+	if action.Action == PosternActionTodoAdd {
+		action.Bead = action.List
+	}
 	if action.Action == "" || strings.TrimSpace(action.Bead) == "" {
 		return PosternAction{}, false
 	}
@@ -78,7 +98,8 @@ func decodePosternAction(text string) (PosternAction, bool) {
 func knownPosternAction(action string) bool {
 	switch action {
 	case PosternActionRelease, PosternActionHold, PosternActionPriority, PosternActionVerified, PosternActionRun,
-		PosternActionKeep, PosternActionClose, PosternActionChase, PosternActionAskDone, PosternActionKeepWaiting:
+		PosternActionKeep, PosternActionClose, PosternActionChase, PosternActionAskDone, PosternActionKeepWaiting,
+		PosternActionTodoAdd, PosternActionTodoEdit, PosternActionTodoMove:
 		return true
 	}
 	return false
@@ -417,7 +438,8 @@ func (i PosternInbox) applyLooksGood(ctx context.Context, m PosternInboxMessage)
 func (i PosternInbox) echoAction(ctx context.Context, action PosternAction, txid string) {
 	switch action.Action {
 	case PosternActionRelease, PosternActionHold, PosternActionKeep, PosternActionClose, PosternActionVerified,
-		PosternActionChase, PosternActionAskDone, PosternActionKeepWaiting:
+		PosternActionChase, PosternActionAskDone, PosternActionKeepWaiting,
+		PosternActionTodoAdd, PosternActionTodoEdit, PosternActionTodoMove:
 	default:
 		return
 	}
@@ -541,6 +563,15 @@ func (i PosternInbox) applyAction(ctx context.Context, m PosternInboxMessage, ac
 
 	case PosternActionClose:
 		return i.applyClose(ctx, m, bead, refuse, done)
+
+	case PosternActionTodoAdd:
+		return i.applyTodoAdd(ctx, m, action, bead, refuse, result)
+
+	case PosternActionTodoEdit:
+		return i.applyTodoEdit(ctx, action, bead, refuse, done)
+
+	case PosternActionTodoMove:
+		return i.applyTodoMove(ctx, action, bead, refuse, done)
 
 	case PosternActionChase, PosternActionAskDone, PosternActionKeepWaiting:
 		return i.applyChaseAnswer(ctx, m, action.Action, bead, refuse, done)

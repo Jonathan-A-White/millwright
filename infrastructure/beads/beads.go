@@ -486,6 +486,32 @@ func (g *Gateway) SetStoryPriority(ctx context.Context, id string, priority int)
 	return err
 }
 
+// EditStory implements application.WorkTracker: one bd update --title and/or
+// --description, for whichever the edit names.
+func (g *Gateway) EditStory(ctx context.Context, id string, edit application.StoryEdit) error {
+	args := []string{"update", id}
+	if edit.Title != nil {
+		if strings.TrimSpace(*edit.Title) == "" {
+			return fmt.Errorf("a story needs a title")
+		}
+		args = append(args, "--title", strings.TrimSpace(*edit.Title))
+	}
+	if edit.Description != nil {
+		args = append(args, "--description", *edit.Description, "--allow-empty-description")
+	}
+	if len(args) == 2 {
+		return nil
+	}
+	_, err := g.call(ctx, args...)
+	return err
+}
+
+// MoveStory implements application.WorkTracker: one bd update --parent.
+func (g *Gateway) MoveStory(ctx context.Context, id, parent string) error {
+	_, err := g.call(ctx, "update", id, "--parent", parent)
+	return err
+}
+
 // AddLabel implements application.WorkTracker: one bd update --add-label,
 // which leaves the bead's other labels alone and one it already carries as
 // it is.
