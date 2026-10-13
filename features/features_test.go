@@ -150,6 +150,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeSeatReapScenario(ctx)
 	steps.InitializeSessionEnvScenario(ctx)
 	steps.InitializeSeatUpScenario(ctx)
+	steps.InitializeContributeBackScenario(ctx)
 	steps.InitializeSecretsScenario(ctx)
 	steps.InitializeStatusScenario(ctx)
 	steps.InitializeSuiteScenario(ctx)

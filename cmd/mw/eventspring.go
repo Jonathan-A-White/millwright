@@ -79,6 +79,11 @@ func homeSpring(path, host string, out io.Writer) (*application.EventSpring, err
 	} else {
 		jobs = append(jobs, job)
 	}
+	if job, err := contributeBackSpringJob(host, knobs.ContributeBackDay); err != nil {
+		fmt.Fprintf(out, "mw events follow: no contribute-back job: %v\n", err)
+	} else {
+		jobs = append(jobs, job)
+	}
 	if job, ok, err := cloudSpringJob(out); err != nil {
 		fmt.Fprintf(out, "mw events follow: no cloud job: %v\n", err)
 	} else if ok {

@@ -2286,3 +2286,27 @@ func TestBuilderJobsRefusesWhatCapsNothing(t *testing.T) {
 		}
 	}
 }
+
+// The contribute-back review is filed from the 1st unless the table names a day.
+func TestEventsContributeBackDayDefaultsToTheFirstAndIsReadFromTheTable(t *testing.T) {
+	writeConfig(t, "host = \"laptop\"\n")
+	got, err := config.Events()
+	if err != nil || got.ContributeBackDay != 1 {
+		t.Fatalf("expected 1, got %d: %v", got.ContributeBackDay, err)
+	}
+	for said, want := range map[string]int{"contribute_back_day = 1": 1, "contribute_back_day = 15": 15, "contribute_back_day = \"28\"": 28} {
+		writeConfig(t, "[events]\n"+said+"\n")
+		if got, err = config.Events(); err != nil || got.ContributeBackDay != want {
+			t.Errorf("%s: expected %d, got %d: %v", said, want, got.ContributeBackDay, err)
+		}
+	}
+}
+
+func TestEventsContributeBackDayThatIsNotADayOfEveryMonthIsRefused(t *testing.T) {
+	for _, bad := range []string{"contribute_back_day = 0", "contribute_back_day = 29", "contribute_back_day = -1", "contribute_back_day = first"} {
+		writeConfig(t, "[events]\n"+bad+"\n")
+		if _, err := config.Events(); err == nil || !strings.Contains(err.Error(), "contribute_back_day") {
+			t.Errorf("expected %q refused naming contribute_back_day, got %v", bad, err)
+		}
+	}
+}

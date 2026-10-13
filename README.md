@@ -1695,7 +1695,17 @@ heartbeat = "1h"    # a job unrun this long is run anyway: the fallback for a mi
 clock = "5m"        # how often the follower runs mw-mail-notify.service
 idle_after = "10m"  # no event but the jobs' this long: mw status says IDLE since HH:MM
 suite_hour = 8      # the UTC hour the home's follower starts the nightly whole suite
+contribute_back_day = 1  # the UTC day of the month, 1 to 28, the contribute-back review is filed from
 ```
+
+**The contribute-back review** (mw-gq6.400). The home's follower springs the job
+`contribute-back@<host>`: from the 1st of each month (or `contribute_back_day`) it files one research
+bead under `mw-gq6`, `Contribute-back review <YYYY-MM>`, labelled `wayfinder:research`, whose
+`## Question` asks which code we wrote to fill a gap in an open-source project (or that duplicates one)
+its maintainers would likely welcome as a pull request: at most three picks, only real fits. The month
+is kept in the tracker note `contribute-back.<YYYY-MM>`, so it is filed once; a follower that was down
+on the day files it when it is back. The review's picks come to the Governor as decision cards, and
+nothing is sent upstream without his word. See `features/contribute_back.feature`.
 
 `mw status` prints `IDLE since 14:05 · 0 harness processes` once the log has held nothing but
 jobs' events since then for `idle_after` and no job is in flight; the count is the `claude`
