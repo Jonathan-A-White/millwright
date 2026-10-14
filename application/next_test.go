@@ -3,6 +3,7 @@ package application_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"sync/atomic"
@@ -213,5 +214,53 @@ func TestACloseOutWaitingForItsHostsMergeSlotLeavesTheSlotAcrossHostsToTheOtherH
 	}
 	if note, _ := server.Note(ctx, application.CrossSlotKey("millwright")); note != "" {
 		t.Fatalf("expected nobody to hold the slot across hosts, it says %s", note)
+	}
+}
+
+// aConflictingLanding is a branch that does not merge into its target.
+type aConflictingLanding struct{ fakeRetryLanding }
+
+func (*aConflictingLanding) Merge(context.Context, string, string) (application.Landed, error) {
+	return application.Landed{}, fmt.Errorf("CONFLICT (content): Merge conflict in a.go: %w", application.ErrMergeConflict)
+}
+
+// aCrossSlotWatcher is the shared server, saying whether a close-out held the
+// slot across hosts at any time.
+type aCrossSlotWatcher struct {
+	*apptest.FakeTracker
+	held atomic.Bool
+}
+
+func (w *aCrossSlotWatcher) SetNote(ctx context.Context, key, value string) error {
+	if _, ok := application.ReadCrossSlotLease(value); ok {
+		w.held.Store(true)
+	}
+	return w.FakeTracker.SetNote(ctx, key, value)
+}
+
+func TestAStorySentBackGivesBackTheSlotAcrossHostsItHeld(t *testing.T) {
+	for name, landing := range map[string]struct {
+		lands  application.Landing
+		reason application.Reason
+	}{
+		"merge conflict":    {&aConflictingLanding{fakeRetryLanding{AheadCount: 1}}, application.ReasonMergeConflict},
+		"merged tests fail": {&mergingLanding{fakeRetryLanding{AheadCount: 1}}, application.ReasonMergedTestsFail},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			server := &aCrossSlotWatcher{FakeTracker: apptest.NewFakeTracker()}
+			var polls atomic.Int32
+			report, err := aCloseOutOn("desktop", "mw-x.4", aSlot{}, aCrossSlotOn(server, "desktop", &polls),
+				landing.lands, &scriptedChecks{passes: []bool{true, false}}).Run(ctx, "mw-x.4")
+			if report.SentBack == "" || report.Reason != landing.reason {
+				t.Fatalf("expected the story sent back for %s, got %v and %+v", landing.reason, err, report)
+			}
+			if !server.held.Load() {
+				t.Fatal("expected the close-out to have held the slot across hosts while it merged")
+			}
+			if note, _ := server.Note(ctx, application.CrossSlotKey("millwright")); note != "" {
+				t.Fatalf("expected the slot across hosts given back, it says %s", note)
+			}
+		})
 	}
 }
