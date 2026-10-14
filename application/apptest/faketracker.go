@@ -1199,6 +1199,7 @@ func (f *FakeTracker) ReadyForHost(_ context.Context, host string) ([]applicatio
 		}
 		detail := s.detail
 		detail.Needs = append([]string(nil), s.needs...)
+		detail.CommentCount = len(s.comments) // bd ready carries it, as bd show does
 		ready = append(ready, detail)
 	}
 	return ready, nil
@@ -1321,13 +1322,15 @@ func (f *FakeTracker) WorkInHand(_ context.Context) (application.WorkInHand, err
 	var work application.WorkInHand
 	for _, id := range f.order {
 		s := f.stories[id]
+		detail := s.detail
+		detail.CommentCount = len(s.comments) // bd list carries it
 		switch {
 		case s.detail.Status == StatusInProgress:
-			work.Running = append(work.Running, s.detail)
+			work.Running = append(work.Running, detail)
 		case s.detail.Status == StatusOpen && s.detail.Assignee == "" && !f.waiting(s):
-			work.Ready = append(work.Ready, s.detail)
+			work.Ready = append(work.Ready, detail)
 		case s.detail.Status == StatusOpen && application.ClaimHost(s.detail.Assignee) != "":
-			work.OpenClaimed = append(work.OpenClaimed, s.detail)
+			work.OpenClaimed = append(work.OpenClaimed, detail)
 		}
 	}
 	return work, nil
