@@ -25,6 +25,12 @@ const (
 	DefaultReapLimit    = 3 * time.Hour
 )
 
+// DefaultReapNextWait is how long a reaper holds off closing a window with a
+// running `mw next` in it, before it closes it all the same: a close-out killed
+// in the middle of the rig's tests costs a whole run, but a run that has gone
+// on longer than this is stuck, and a window is not kept for it for ever.
+const DefaultReapNextWait = 90 * time.Minute
+
 // ReapWindow is one window of the terminal as a reaper sees it: named by the
 // id the terminal gives it, which — unlike its name — is never reused for
 // another window while the terminal runs.
@@ -88,6 +94,11 @@ type ReapTerminal interface {
 	// InputLine reports the text on the window's input line, "" when it is
 	// empty. Dim text, which is a suggestion and not a draft, is not read.
 	InputLine(ctx context.Context, window string) (string, error)
+
+	// NextRunning reports whether a process in the window's pane tree is a
+	// running `mw next`, and the story it was given, "" when it names none. A
+	// look that cannot be made is an error.
+	NextRunning(ctx context.Context, window string) (story string, running bool, err error)
 
 	// Close closes the window and what runs in it. Closing a window that is
 	// already gone is not a failure.
@@ -161,6 +172,11 @@ const (
 // reaper types the mail nudge into the idle pane and goes on waiting, and closes
 // only for a handoff written after the nudge, with the box empty.
 //
+// A window with a running `mw next` in its pane tree is not closed, in either
+// mode: a close-out killed mid-test is a run lost. The reaper says so once,
+// looks again on its usual interval, and closes the window when the run has
+// ended, or after NextWait if it has not, saying that it gave up waiting.
+//
 // It gives up after Limit, closing nothing. Arming, closing and giving up each
 // append one dated line to the seat's reaper log.
 type SeatReap struct {
@@ -196,6 +212,10 @@ type SeatReap struct {
 	// zero is DefaultReapInterval and DefaultReapLimit.
 	Interval time.Duration
 	Limit    time.Duration
+
+	// NextWait is how long a window with a running `mw next` in it is kept
+	// before it is closed over the run; zero is DefaultReapNextWait.
+	NextWait time.Duration
 
 	// Now is the clock; nil is time.Now. Sleep waits out an interval, or until
 	// ctx ends; nil sleeps for real.
@@ -264,6 +284,14 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 	// one written after it. unknown is whether the last count already said so.
 	var nudged time.Time
 	unknown := false
+	// When the wait on a running `mw next` began, zero when none is waited on,
+	// and whether the wait has run out.
+	var waitingSince time.Time
+	waitedOut := false
+	nextWait := s.NextWait
+	if nextWait <= 0 {
+		nextWait = DefaultReapNextWait
+	}
 	for s.now().Before(deadline) {
 		if err := s.wait(ctx, interval); err != nil {
 			return ReapReport{}, err
@@ -289,6 +317,30 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 		}
 		if idle++; idle < 2 {
 			continue
+		}
+
+		if !waitedOut {
+			story, running, err := s.Terminal.NextRunning(ctx, s.Window)
+			switch {
+			case err != nil:
+				// A run that cannot be looked for may be there: not closing.
+				continue
+			case !running:
+				waitingSince = time.Time{}
+			case waitingSince.IsZero():
+				waitingSince = s.now()
+				if _, err := s.say(ctx, fmt.Sprintf("waiting: %s runs in this window", nextCommand(story))); err != nil {
+					return ReapReport{}, err
+				}
+				continue
+			case s.now().Sub(waitingSince) < nextWait:
+				continue
+			default:
+				waitedOut = true
+				if _, err := s.say(ctx, fmt.Sprintf("gave up waiting for %s after %s; closing", nextCommand(story), nextWait)); err != nil {
+					return ReapReport{}, err
+				}
+			}
 		}
 
 		if s.WhenIdle && s.Mail != nil {
@@ -342,6 +394,14 @@ func (s SeatReap) Run(ctx context.Context) (ReapReport, error) {
 		return report, err
 	}
 	return report, fmt.Errorf("%s", report.Said)
+}
+
+// nextCommand is the running `mw next` as the log names it.
+func nextCommand(story string) string {
+	if story == "" {
+		return "mw next"
+	}
+	return "mw next " + story
 }
 
 // held reports whether what the watch waits for has happened: in successor

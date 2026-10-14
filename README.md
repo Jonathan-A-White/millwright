@@ -3301,6 +3301,12 @@ Idle means an empty input line with nothing running, on two looks in a row. A
 window whose input line holds text is never closed, in either mode: someone
 may be typing. Only the tmux adapter reads a pane.
 
+A window with a running `mw next` in its pane tree is not closed either, in
+either mode: a hand-run `mw next <id>` killed mid-test is a run lost. The
+reaper logs `waiting: mw next <id> runs in this window` once, looks again every
+interval, and closes the window when the run has ended; after 90 minutes it logs
+`gave up waiting for mw next <id> after 1h30m0s; closing` and closes as always.
+
 It gives up after `--limit` (3 hours), closing nothing and saying so, and
 exits non-zero. Arming, closing, giving up, and finding the window already gone
 each append one dated line to `.<seat>-reaper.log` in the vault:

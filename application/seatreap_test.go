@@ -90,3 +90,94 @@ func TestAWatchNeedsItsSeatAndAValidName(t *testing.T) {
 		}
 	}
 }
+
+// aClock is a clock the reaper's sleeps move on, so that a watch of hours runs
+// in no time.
+type aClock struct{ now time.Time }
+
+func (c *aClock) Now() time.Time { return c.now }
+func (c *aClock) Sleep(_ context.Context, d time.Duration) error {
+	c.now = c.now.Add(d)
+	return nil
+}
+
+// aWatchOfAWindowRunningNext is a reaper on a finished window in which a
+// hand-run `mw next mw-86e9r1.25` is running, looking every 30 seconds for up
+// to three hours.
+func aWatchOfAWindowRunningNext(t *testing.T) (application.SeatReap, *apptest.FakeWindows, *aClock, *memoryLog) {
+	t.Helper()
+	windows, files := aFinishedWindow(t)
+	windows.RunsNext("@3", "mw-86e9r1.25")
+	clock := &aClock{now: time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)}
+	log := &memoryLog{}
+	return application.SeatReap{
+		Seats: files, Terminal: windows, Log: log,
+		Seat: "mayor", Host: "laptop", Window: "@3", WhenIdle: true,
+		Interval: 30 * time.Second, Limit: 3 * time.Hour,
+		Now: clock.Now, Sleep: clock.Sleep,
+	}, windows, clock, log
+}
+
+func TestAWindowRunningMwNextIsNotClosedUntilTheRunEnds(t *testing.T) {
+	reap, windows, clock, log := aWatchOfAWindowRunningNext(t)
+	endsAt := clock.now.Add(10 * time.Minute)
+	sleep := reap.Sleep
+	reap.Sleep = func(ctx context.Context, d time.Duration) error {
+		if !clock.now.Before(endsAt) {
+			windows.EndsNext("@3")
+		}
+		return sleep(ctx, d)
+	}
+
+	report, err := reap.Run(context.Background())
+
+	if err != nil || report.Outcome != application.ReapClosed {
+		t.Fatalf("expected the window closed once the run ended, it ended %q with %v", report.Outcome, err)
+	}
+	if closedAt := clock.now; closedAt.Before(endsAt) {
+		t.Errorf("the window was closed at %s, before the run ended at %s", closedAt, endsAt)
+	}
+	waiting := 0
+	for _, line := range log.lines {
+		if strings.Contains(line, "waiting: mw next mw-86e9r1.25 runs in this window") {
+			waiting++
+		}
+	}
+	if waiting != 1 || len(log.lines) != 3 {
+		t.Errorf("expected armed, one waiting line and closed, got %q", log.lines)
+	}
+}
+
+func TestAWaitForMwNextGivesUpAfterNinetyMinutes(t *testing.T) {
+	reap, windows, clock, log := aWatchOfAWindowRunningNext(t)
+	armed := clock.now
+
+	report, err := reap.Run(context.Background())
+
+	if err != nil || report.Outcome != application.ReapClosed {
+		t.Fatalf("expected the window closed past the cap, it ended %q with %v", report.Outcome, err)
+	}
+	if got := clock.now.Sub(armed); got < 90*time.Minute || got > 91*time.Minute {
+		t.Errorf("expected the window closed about 90 minutes in, it was closed %s in", got)
+	}
+	if closed := windows.ClosedIDs(); len(closed) != 1 {
+		t.Errorf("expected the window closed once, got %v", closed)
+	}
+	if len(log.lines) != 4 || !strings.Contains(log.lines[2], "gave up waiting for mw next mw-86e9r1.25 after 1h30m0s") || !strings.Contains(log.lines[3], "closed") {
+		t.Errorf("expected armed, waiting, gave up waiting and closed, got %q", log.lines)
+	}
+}
+
+func TestAWindowWithNoMwNextIsReapedAsAlways(t *testing.T) {
+	reap, windows, _, log := aWatchOfAWindowRunningNext(t)
+	windows.EndsNext("@3")
+
+	report, err := reap.Run(context.Background())
+
+	if err != nil || report.Outcome != application.ReapClosed {
+		t.Fatalf("expected the window closed, it ended %q with %v", report.Outcome, err)
+	}
+	if len(log.lines) != 2 || strings.Contains(strings.Join(log.lines, "\n"), "runs in this window") {
+		t.Errorf("expected only an armed line and a closed line, got %q", log.lines)
+	}
+}

@@ -141,3 +141,37 @@ func TestInputLineTextIsTheUndimmedDraftOnTheLastPromptLine(t *testing.T) {
 		}
 	}
 }
+
+func TestNextBelowFindsAMwNextInThePaneTree(t *testing.T) {
+	processes := `    1     0 /sbin/init
+  100     1 -bash
+  200   100 claude --resume
+  300   200 /bin/bash -c mw next mw-86e9r1.25 --no-dispatch
+  310   300 /home/jwhite/millwright/bin/mw next mw-86e9r1.25 --no-dispatch
+  320   310 go test ./...
+  900     1 /home/jwhite/millwright/bin/mw next mw-other
+`
+	cases := []struct {
+		name      string
+		roots     []string
+		processes string
+		story     string
+		running   bool
+	}{
+		{"a mw next below the pane's process", []string{"100"}, processes, "mw-86e9r1.25", true},
+		{"a mw next in another tree is not this window's", []string{"320"}, processes, "", false},
+		{"a mw next that names no story", []string{"1"}, "  5 1 mw next\n", "", true},
+		{"flags before the story are skipped", []string{"1"}, "  5 1 mw next --no-dispatch mw-abc\n", "mw-abc", true},
+		{"a shell that only mentions mw next is not one", []string{"1"}, "  5 1 bash -c echo mw next mw-abc\n", "", false},
+		{"another mw command is not mw next", []string{"1"}, "  5 1 mw seat reap --seat mayor\n", "", false},
+		{"no processes", []string{"1"}, "", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			story, running := nextBelow(tc.roots, tc.processes)
+			if story != tc.story || running != tc.running {
+				t.Errorf("nextBelow = %q, %v; want %q, %v", story, running, tc.story, tc.running)
+			}
+		})
+	}
+}

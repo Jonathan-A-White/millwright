@@ -62,6 +62,36 @@ func (f *FakeWindows) RunsIn(id string) {
 	f.here = id
 }
 
+// RunsNext says that a hand-run `mw next` for the story is running in the pane
+// tree of the window, as when a Mayor re-runs a story by hand; an empty story
+// is a `mw next` that names none.
+func (f *FakeWindows) RunsNext(id, story string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.nexts == nil {
+		f.nexts = map[string]string{}
+	}
+	f.nexts[id] = story
+}
+
+// EndsNext says that the `mw next` running in the window has ended.
+func (f *FakeWindows) EndsNext(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.nexts, id)
+}
+
+// NextRunning implements application.ReapTerminal.
+func (f *FakeWindows) NextRunning(_ context.Context, id string) (string, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return "", false, f.Err
+	}
+	story, running := f.nexts[id]
+	return story, running, nil
+}
+
 // Vanish removes a window as if a person had closed it: it is not recorded as
 // closed by anyone the test is watching.
 func (f *FakeWindows) Vanish(id string) {

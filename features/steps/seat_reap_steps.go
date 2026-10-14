@@ -96,6 +96,8 @@ func InitializeSeatReapScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^before look (\d+) the window "([^"]*)" is closed by someone else$`, c.beforeLookTheWindowIsClosed)
 	ctx.Given(`^before look (\d+) the pane of "([^"]*)" is (idle|working)$`, c.beforeLookThePaneIs)
 	ctx.Given(`^before look (\d+) the seat writes the handoff "([^"]*)"$`, c.beforeLookTheSeatWrites)
+	ctx.Given(`^"mw next ([^"]*)" runs in the window "([^"]*)"$`, c.mwNextRunsIn)
+	ctx.Given(`^before look (\d+) the "mw next" in the window "([^"]*)" ends$`, c.beforeLookMwNextEnds)
 	ctx.Given(`^the seat has a mailbox "([^"]*)" holding (\d+) unread messages$`, c.theSeatHasAMailbox)
 	ctx.Given(`^the seat has a mailbox "([^"]*)" whose count fails$`, c.theSeatHasAMailboxThatFails)
 	ctx.Given(`^before look (\d+) the mailbox is empty$`, c.beforeLookTheMailboxIsEmpty)
@@ -262,6 +264,18 @@ func (c *seatReapContext) theReaperWatches(window, mode string, seconds, limit i
 	}
 	c.report, c.err = reap.Run(context.Background())
 	return nil
+}
+
+func (c *seatReapContext) mwNextRunsIn(story, id string) error {
+	c.windows.RunsNext(id, story)
+	return nil
+}
+
+func (c *seatReapContext) beforeLookMwNextEnds(look, id string) error {
+	return c.before(look, func() error {
+		c.windows.EndsNext(id)
+		return nil
+	})
 }
 
 func (c *seatReapContext) theSeatHasAMailbox(name string, unread int) error {

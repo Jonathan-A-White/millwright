@@ -283,3 +283,53 @@ func TestReaperNeverClosesARealWindowWithTextOnItsInputLine(t *testing.T) {
 		t.Errorf("expected the window with text on its input line to be left open: %v", err)
 	}
 }
+
+func TestNextRunningSeesAMwNextBelowThePane(t *testing.T) {
+	windows, _ := privateWindows(t)
+	dir := t.TempDir()
+	ctx := context.Background()
+
+	// A stand-in for mw: a copy of yes, which runs on, ignoring what it is given.
+	yes, err := exec.LookPath("yes")
+	if err != nil {
+		t.Skip("no yes to stand in for mw")
+	}
+	body, err := os.ReadFile(yes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mw := filepath.Join(dir, "mw")
+	if err := os.WriteFile(mw, body, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "runs-next.sh")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\n"+mw+" next mw-86e9r1.25 >/dev/null\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	idle := openStandIn(t, windows, dir, "idle-window", emptyInput)
+	if err := windows.Open(ctx, application.WindowSpec{Name: "next-window", Dir: dir, Command: []string{script}}); err != nil {
+		t.Fatalf("opening the window: %v", err)
+	}
+	busy := idOf(t, windows, "next-window")
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		story, running, err := windows.NextRunning(ctx, busy)
+		if err != nil {
+			t.Fatalf("looking for mw next: %v", err)
+		}
+		if running {
+			if story != "mw-86e9r1.25" {
+				t.Errorf("expected the story mw-86e9r1.25, got %q", story)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("expected the mw next in the window to be seen")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if _, running, err := windows.NextRunning(ctx, idle); err != nil || running {
+		t.Errorf("expected no mw next in the idle window, got %v, %v", running, err)
+	}
+}

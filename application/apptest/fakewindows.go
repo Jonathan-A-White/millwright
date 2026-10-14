@@ -37,6 +37,9 @@ type FakeWindows struct {
 	lines  map[string]string
 	enters map[string]int
 	lost   map[string]int
+	// nexts is the story of the `mw next` running in each window, by id
+	// (RunsNext).
+	nexts map[string]string
 
 	// Opened is every spec Open was asked for, in the order it was asked.
 	Opened []application.WindowSpec

@@ -17,6 +17,11 @@ Feature: mw seat reap
   goes on waiting, closing only for a handoff written after the nudge with the
   box empty; a count that fails closes nothing and is tried again.
 
+  A window with a running `mw next` in its pane tree is never closed over the
+  run, in either mode: the reaper logs once that it is waiting, looks again on
+  its usual interval, and closes the window once the run has ended. It gives up
+  waiting after 90 minutes, says so, and closes as it always did.
+
   The watch gives up after its limit and says so. Arming, closing and giving up
   each append one dated line to the seat's reaper log in the vault.
 
@@ -35,6 +40,26 @@ Feature: mw seat reap
     And the reaper log holds 2 lines
     And the reaper log's line 1 says "reap @3: armed"
     And the reaper log's line 2 says "reap @3: closed"
+
+  Scenario: A window with a running mw next in it is closed only once the run ends, and the wait is logged once
+    Given the window "@4" named "mayor-2026-09-19-13" was opened at "2026-09-19T11:59:00Z"
+    And before look 1 the acting file says "Mayor after handoff 12 (tmux window 4 'mayor-2026-09-19-13'), since 2026-09-19T12:01:00Z"
+    And "mw next mw-86e9r1.25" runs in the window "@3"
+    And before look 6 the "mw next" in the window "@3" ends
+    When the reaper watches "@3" in successor mode, looking every 30 seconds for up to 10 minutes
+    Then the reaper closed the window "@3" on look 6
+    And the reaper log holds 3 lines
+    And the reaper log's line 2 says "reap @3: waiting: mw next mw-86e9r1.25 runs in this window"
+    And the reaper log's line 3 says "reap @3: closed"
+
+  Scenario: A wait on a running mw next gives up after 90 minutes and closes the window
+    Given the window "@4" named "mayor-2026-09-19-13" was opened at "2026-09-19T11:59:00Z"
+    And before look 1 the acting file says "Mayor after handoff 12 (tmux window 4 'mayor-2026-09-19-13'), since 2026-09-19T12:01:00Z"
+    And "mw next mw-86e9r1.25" runs in the window "@3"
+    When the reaper watches "@3" in successor mode, looking every 30 seconds for up to 3 hours
+    Then the reaper closed the window "@3" on look 182
+    And the reaper log holds 4 lines
+    And the reaper log's line 3 says "gave up waiting for mw next mw-86e9r1.25 after 1h30m0s"
 
   Scenario: Successor mode waits while the acting file still says what it said when it was armed
     Given the window "@4" named "mayor-2026-09-19-13" was opened at "2026-09-19T11:59:00Z"

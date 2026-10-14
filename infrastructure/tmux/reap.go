@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -208,6 +210,68 @@ func inputLineText(screen string) string {
 		}
 	}
 	return ""
+}
+
+// NextRunning implements application.ReapTerminal: whether a process below the
+// pids of the window's panes is a running `mw next`, found in one listing of
+// every process.
+func (w *Windows) NextRunning(ctx context.Context, window string) (string, bool, error) {
+	if err := windowID(window); err != nil {
+		return "", false, err
+	}
+	panes, err := w.call(ctx, "list-panes", "-t", window, "-F", "#{pane_pid}")
+	if err != nil {
+		if noServer(err) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	processes, err := exec.CommandContext(ctx, psProgram, "-e", "-o", "pid=,ppid=,args=").Output()
+	if err != nil {
+		return "", false, fmt.Errorf("listing processes: %w", err)
+	}
+	story, running := nextBelow(strings.Fields(string(panes)), string(processes))
+	return story, running, nil
+}
+
+// nextBelow reads a listing of processes, a line each of pid, parent pid and
+// the command line, and finds a `mw next` among those below the root pids: the
+// story it names, "" when it names none, and whether there is one. A command
+// is `mw next` when its program is named mw and its first word is next, so a
+// shell whose script mentions mw next is not.
+func nextBelow(roots []string, processes string) (story string, running bool) {
+	type process struct {
+		pid  string
+		args []string
+	}
+	children := map[string][]process{}
+	for _, line := range strings.Split(processes, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 {
+			continue
+		}
+		children[fields[1]] = append(children[fields[1]], process{pid: fields[0], args: fields[2:]})
+	}
+	seen := map[string]bool{}
+	for queue := roots; len(queue) > 0; queue = queue[1:] {
+		parent := queue[0]
+		if seen[parent] {
+			continue
+		}
+		seen[parent] = true
+		for _, child := range children[parent] {
+			if filepath.Base(child.args[0]) == "mw" && len(child.args) > 1 && child.args[1] == "next" {
+				for _, arg := range child.args[2:] {
+					if !strings.HasPrefix(arg, "-") {
+						return arg, true
+					}
+				}
+				return "", true
+			}
+			queue = append(queue, child.pid)
+		}
+	}
+	return "", false
 }
 
 // Close implements application.ReapTerminal: the window named by id, and what
