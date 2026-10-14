@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -213,4 +214,18 @@ func suiteMail(host string, report SuiteReport, filed []SuiteFiled, failures []s
 		fmt.Fprintf(&b, "\nThe day's log, in the vault: %s\n", report.LogPath)
 	}
 	return NewMessage{From: SeatIdentity(MwSeat, host), To: MayorMailbox, Subject: subject, Body: b.String()}
+}
+
+// oneTestFile is a files key that is a single test file and nothing else.
+var oneTestFile = regexp.MustCompile("^" + testFileName.String() + "$")
+
+// suiteSpec is the one spec a nightly-suite bug names: the story carries
+// LabelSuite and its files key (files, the story's path's) is exactly one test
+// file, no glob and no list. Any other story is never re-run first.
+func suiteSpec(labels []string, files string) (string, bool) {
+	files = strings.TrimSpace(files)
+	if !carriesAny(labels, []string{LabelSuite}) || !oneTestFile.MatchString(files) {
+		return "", false
+	}
+	return files, true
 }

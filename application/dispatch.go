@@ -207,6 +207,12 @@ type Dispatch struct {
 	// (mw-gq6.390). A nil Rules expects nothing of any rig.
 	Rules EpicRules
 
+	// Rechecks re-runs a nightly-suite bug's spec on its rig's main before the bug
+	// is dispatched (mw-gq6.414): a spec that passes there is fixed already, and
+	// the bug is closed with no session. A nil Rechecks re-runs nothing, and a dry
+	// run re-runs nothing either.
+	Rechecks SpecRechecker
+
 	// DryRun prints what would be started and writes nothing at all: nothing is
 	// synced, nothing claimed, no worktree made, no formula poured, no session
 	// started.
@@ -223,6 +229,31 @@ type Dispatch struct {
 
 	// Out is where the report is printed. A nil Out prints nothing.
 	Out io.Writer
+}
+
+// SpecRechecker runs one spec alone on a rig's main. Suite is the implementation.
+type SpecRechecker interface {
+	Recheck(ctx context.Context, rig, spec string) (SpecRecheck, error)
+}
+
+var _ SpecRechecker = Suite{}
+
+// FixedOnMain is one nightly-suite bug this dispatch closed without a session,
+// because its spec passes on the rig's main already (mw-gq6.414).
+type FixedOnMain struct {
+	StoryID string
+	Spec    string
+	Sha     string
+	Tests   int
+}
+
+// reason is what the story is closed with.
+func (f FixedOnMain) reason() string {
+	said := fmt.Sprintf("fixed on main before dispatch: %s passes at %s", f.Spec, short(f.Sha))
+	if f.Tests > 0 {
+		said += fmt.Sprintf(" (%d %s)", f.Tests, plural(f.Tests, "test", "tests"))
+	}
+	return said
 }
 
 // Started is one story this dispatch started, or would have started.
@@ -250,6 +281,10 @@ type Started struct {
 	// KeptBranch is the name an earlier attempt's branch was kept under before
 	// this attempt's fresh cut (mw-gq6.326). Empty when no branch was left.
 	KeptBranch string
+	// Recheck says what the re-run of a nightly-suite bug's spec on main came to
+	// when the story was dispatched all the same: that the spec still fails, or
+	// why it could not be re-run. Empty for any other story.
+	Recheck string
 }
 
 // Passed is one ready story this dispatch did not take, and why. It is not a
@@ -346,6 +381,9 @@ type DispatchReport struct {
 	// HeldRefused is every dead-pane story left claimed because its close-out
 	// refused it.
 	HeldRefused []HeldRefused
+	// FixedOnMain is every nightly-suite bug closed before dispatch because its
+	// spec passes on main already.
+	FixedOnMain []FixedOnMain
 	// Paused is the pause-host event that stopped this pass, nil when none did.
 	Paused  *HostPause
 	Started []Started
@@ -459,7 +497,7 @@ func dispatchLogWords(report DispatchReport, err error) string {
 		return DispatchLogFailed + clippedTo(oneLine(err.Error()), DispatchLogReasonLimit)
 	case report.Paused != nil:
 		return DispatchLogPaused + " by " + report.Paused.Actor
-	case len(report.Started) == 0 && len(report.Passed) == 0:
+	case len(report.Started) == 0 && len(report.Passed) == 0 && len(report.FixedOnMain) == 0:
 		return DispatchLogNothingReady
 	}
 	return fmt.Sprintf("%s%d started", DispatchLogOK, len(report.Started))
@@ -752,7 +790,17 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			continue
 		}
 
+		// A nightly-suite bug whose spec passes on main already is closed here, once
+		// a slot is free to take it and before any claim: it takes none of the
+		// sessions, and one that waits for a slot is not re-run tick after tick
+		// (mw-gq6.414).
+		recheck, fixed := d.recheckSuiteBug(ctx, detail, path, &report)
+		if fixed {
+			continue
+		}
+
 		started, released, err := d.start(ctx, detail, path, rigDir, formulas)
+		started.Recheck = recheck
 		if started.StoryID != "" {
 			report.Started = append(report.Started, started)
 			shares.add(detail)
@@ -779,6 +827,39 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		return report, fmt.Errorf("dispatching on %s: %s", d.Host, report.failures())
 	}
 	return report, nil
+}
+
+// recheckSuiteBug re-runs the spec of a nightly-suite bug on its rig's main,
+// before the story is claimed. A spec that passes closes the story (no session,
+// no claim, no worktree) and fixed is true. Otherwise the story is dispatched as
+// it always was, and said is what the re-run came to for its line: that the spec
+// still fails, or why it could not be re-run. Nothing is re-run in a dry run, and
+// nothing for a story that is not labelled suite or names more than one file.
+func (d Dispatch) recheckSuiteBug(ctx context.Context, detail StoryDetail, path domain.Path, report *DispatchReport) (said string, fixed bool) {
+	spec, suiteBug := suiteSpec(detail.Labels, path.Files)
+	if d.Rechecks == nil || d.DryRun || !suiteBug {
+		return "", false
+	}
+	id := detail.Story.ID
+	found, err := d.Rechecks.Recheck(ctx, path.Rig, spec)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("not re-run on main first: %v", oneLine(err.Error())), false
+	case !found.Passed:
+		return fmt.Sprintf("re-run on main first: %s still fails at %s", spec, short(found.Sha)), false
+	}
+	one := FixedOnMain{StoryID: id, Spec: spec, Sha: found.Sha, Tests: found.Tests}
+	if err := d.Tracker.CloseStory(ctx, id, one.reason()); err != nil {
+		return fmt.Sprintf("%s passes on main but the story could not be closed: %v", spec, oneLine(err.Error())), false
+	}
+	comment := fmt.Sprintf("mw dispatch on %s re-ran %s on %s's main before dispatching this bug, and it passes at %s, "+
+		"so the bug was closed with no session (a story that landed after the nightly suite's sha fixed it).\n\nThe end of the run:\n%s",
+		d.Host, spec, path.Rig, found.Sha, strings.TrimSpace(found.Tail))
+	if err := d.Tracker.CommentOnStory(ctx, id, comment); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s: it was closed as fixed on main, but the run's tail could not be commented on: %v", id, err))
+	}
+	report.FixedOnMain = append(report.FixedOnMain, one)
+	return "", true
 }
 
 // answerWaitingGrist runs one pass of the mill after the claims, on the host
@@ -1821,6 +1902,9 @@ func (r DispatchReport) String() string {
 	for _, landed := range r.LandedAlready {
 		fmt.Fprintf(&b, "  closed %s · %s · already landed: %s\n", landed.StoryID, landed.Session, landed.By)
 	}
+	for _, fixed := range r.FixedOnMain {
+		fmt.Fprintf(&b, "  closed %s · %s\n", fixed.StoryID, fixed.reason())
+	}
 	for _, held := range r.HeldRefused {
 		fmt.Fprintf(&b, "  held    %s · %s · refused, waiting on the Mayor: not counted; its claim, worktree and branch are kept (mw retry)\n",
 			held.StoryID, held.Session)
@@ -1848,6 +1932,9 @@ func (r DispatchReport) String() string {
 		if started.KeptBranch != "" {
 			fmt.Fprintf(&b, " · a leftover from an earlier attempt was kept as %s", started.KeptBranch)
 		}
+		if started.Recheck != "" {
+			fmt.Fprintf(&b, " · %s", started.Recheck)
+		}
 		if molecule := started.Molecule; molecule.Poured() && started.Reused {
 			fmt.Fprintf(&b, " · %s reused as %s (%d steps still open)", molecule.Formula, molecule.RootID, len(molecule.Steps))
 		} else if molecule.Poured() {
@@ -1866,7 +1953,7 @@ func (r DispatchReport) String() string {
 	for _, note := range r.Notes {
 		fmt.Fprintf(&b, "  note    %s\n", note)
 	}
-	if len(r.Started) == 0 && len(r.Failed) == 0 && len(r.Passed) == 0 {
+	if len(r.Started) == 0 && len(r.Failed) == 0 && len(r.Passed) == 0 && len(r.FixedOnMain) == 0 {
 		b.WriteString("  nothing is ready here\n")
 	}
 	return b.String()

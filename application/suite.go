@@ -7,8 +7,12 @@ import (
 	"io"
 	"math"
 	"path"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // The whole-suite run (mw suite): the rig's [tests] command and then its
@@ -24,6 +28,10 @@ const (
 
 	// SuiteTreePrefix names the throwaway worktree a suite is run in, after the rig.
 	SuiteTreePrefix = "suite-"
+
+	// RecheckTreePrefix names the one a suite bug's spec is re-run in before the
+	// bug is dispatched: not the suite's own, which a nightly run may be using.
+	RecheckTreePrefix = "recheck-"
 
 	// SuiteCalmBound is how long a suite waits for a busy host to calm, when no
 	// flag says otherwise.
@@ -271,6 +279,29 @@ type suitePhase struct {
 	alone         func(file string) string
 }
 
+// cutTree cuts the throwaway worktree a run is made in: detached at the head of
+// the rig's origin, named for prefix and the rig. release takes it away again.
+func (s Suite) cutTree(ctx context.Context, rig, rigDir, prefix string) (dir string, head RigCommit, release func(), err error) {
+	head, err = s.Heads.Resolve(ctx, rigDir, "")
+	if err != nil {
+		return "", RigCommit{}, nil, fmt.Errorf("reading %s's origin: %w", rig, err)
+	}
+	dir = WorktreeDir(rigDir, prefix+rig)
+	if there, err := s.Trees.Exists(ctx, rigDir, dir, ""); err != nil {
+		return "", RigCommit{}, nil, err
+	} else if there {
+		// Left by a run that was killed: it is named for this rig and this kind of
+		// run and nothing else uses it.
+		if err := s.Trees.Remove(ctx, rigDir, dir, ""); err != nil {
+			return "", RigCommit{}, nil, fmt.Errorf("clearing the worktree an earlier run left at %s: %w", dir, err)
+		}
+	}
+	if err := s.Trees.AddDetached(ctx, rigDir, dir, head.Commit); err != nil {
+		return "", RigCommit{}, nil, fmt.Errorf("cutting a worktree of %s at %s: %w", rig, head.Commit, err)
+	}
+	return dir, head, func() { s.Trees.Remove(context.WithoutCancel(ctx), rigDir, dir, "") }, nil
+}
+
 // Run runs rig's whole suite and writes it down. A file that failed is not an
 // error: it is a report with Failed set, which the command turns into exit 1.
 // An error is a suite that could not be run or kept at all.
@@ -306,24 +337,11 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 		return SuiteReport{}, fmt.Errorf("waiting for %s to calm: %w", s.Host, err)
 	}
 
-	head, err := s.Heads.Resolve(ctx, rigDir, "")
+	dir, head, release, err := s.cutTree(ctx, rig, rigDir, SuiteTreePrefix)
 	if err != nil {
-		return SuiteReport{}, fmt.Errorf("reading %s's origin: %w", rig, err)
-	}
-	dir := WorktreeDir(rigDir, SuiteTreePrefix+rig)
-	if there, err := s.Trees.Exists(ctx, rigDir, dir, ""); err != nil {
 		return SuiteReport{}, err
-	} else if there {
-		// Left by a suite that was killed: it is named for this rig's suite and
-		// nothing else uses it.
-		if err := s.Trees.Remove(ctx, rigDir, dir, ""); err != nil {
-			return SuiteReport{}, fmt.Errorf("clearing the suite worktree an earlier run left at %s: %w", dir, err)
-		}
 	}
-	if err := s.Trees.AddDetached(ctx, rigDir, dir, head.Commit); err != nil {
-		return SuiteReport{}, fmt.Errorf("cutting a worktree of %s at %s: %w", rig, head.Commit, err)
-	}
-	defer s.Trees.Remove(context.WithoutCancel(ctx), rigDir, dir, "")
+	defer release()
 
 	started := s.now().UTC()
 	result := SuiteResult{
@@ -422,4 +440,58 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 	}
 	s.say("%s", report.String())
 	return report, nil
+}
+
+// SpecRecheck is one spec run alone on a rig's main: whether it passed, at which
+// commit, how many tests the run said passed (zero when it did not say), and the
+// end of its output.
+type SpecRecheck struct {
+	Spec   string
+	Sha    string
+	Passed bool
+	Tests  int
+	Tail   string
+}
+
+// SpecRecheckTail is how many lines of the run a closing comment keeps.
+const SpecRecheckTail = 8
+
+var passedCount = regexp.MustCompile(`(\d+) passed`)
+
+// Recheck runs one spec alone on the head of rig's origin, in a worktree of its
+// own, with the command the suite runs a file alone with: a *.spec.* file with
+// the rig's [changed_specs] command when it has one, any other file with the
+// [tests] command and the file added. A spec that fails is an answer; an error
+// is a run that could not be made.
+func (s Suite) Recheck(ctx context.Context, rig, spec string) (SpecRecheck, error) {
+	rigDir, known := s.Rigs[rig]
+	if !known {
+		return SpecRecheck{}, fmt.Errorf("%s is no rig of this host: the config file's [rigs] table does not name it", rig)
+	}
+	var command string
+	if specs := strings.TrimSpace(s.ChangedSpecs[rig]); specs != "" && strings.Contains(path.Base(spec), ".spec.") {
+		command = strings.ReplaceAll(specs, SpecsPlaceholder, shellWord(spec))
+	} else if tests := strings.TrimSpace(s.Tests[rig]); tests != "" {
+		command = tests + " " + shellWord(spec)
+	} else {
+		return SpecRecheck{}, fmt.Errorf("the rig %s has no [tests] entry in the config file: there is no command to run %s with", rig, spec)
+	}
+	dir, head, release, err := s.cutTree(ctx, rig, rigDir, RecheckTreePrefix)
+	if err != nil {
+		return SpecRecheck{}, err
+	}
+	defer release()
+
+	checked, err := s.Runner.RunLine(ctx, dir, command)
+	if err != nil {
+		return SpecRecheck{}, fmt.Errorf("running `%s` in %s: %w", command, dir, err)
+	}
+	if checked.NotRun {
+		return SpecRecheck{}, fmt.Errorf("`%s` could not be run in %s: %s", command, dir, checked.Tail(3))
+	}
+	found := SpecRecheck{Spec: spec, Sha: head.Commit, Passed: checked.Passed, Tail: checked.Tail(SpecRecheckTail)}
+	if all := passedCount.FindAllStringSubmatch(domain.StripANSI(checked.Output), -1); len(all) > 0 {
+		found.Tests, _ = strconv.Atoi(all[len(all)-1][1])
+	}
+	return found, nil
 }
