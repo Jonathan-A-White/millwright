@@ -477,3 +477,50 @@ func TestStatusRefusesWhenTheGraphCannotBeRead(t *testing.T) {
 		t.Fatalf("got %v, want a refusal naming bd is down", err)
 	}
 }
+
+func TestStatusListsOpenBugsWithoutASweepUnderOneHeading(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	filed := func(id, title, acceptance string, created time.Time) {
+		storyOn(t, tracker, id, title, "vps")
+		if err := tracker.SetCreated(id, created); err != nil {
+			t.Fatal(err)
+		}
+		if err := tracker.SetAcceptance(id, acceptance); err != nil {
+			t.Fatal(err)
+		}
+	}
+	after := domain.SweepRuleFrom.Add(time.Hour)
+	filed("mw-gq6.40", "[bug] no sweep", "1. It passes.", after)
+	filed("mw-gq6.41", "[bug] a sweep", "1. It passes.\n2. Sweep: grep the class.", after)
+	filed("mw-gq6.42", "[bug] none, no reason", "Sweep: none", after)
+	filed("mw-gq6.43", "[bug] filed before the rule", "1. It passes.", domain.SweepRuleFrom.Add(-time.Hour))
+	filed("mw-gq6.44", "A feature", "1. It passes.", after)
+
+	report := otherHostStatus(t, tracker)
+	var ids []string
+	for _, bug := range report.NoSweep {
+		ids = append(ids, bug.Story.ID)
+	}
+	if got := strings.Join(ids, ","); got != "mw-gq6.40,mw-gq6.42" {
+		t.Fatalf("bugs without a sweep: %q, want mw-gq6.40,mw-gq6.42", got)
+	}
+	text := report.String()
+	if !strings.Contains(text, application.NoSweepHeading+" (2)") || !strings.Contains(text, "mw-gq6.40") {
+		t.Errorf("the heading and the bugs should be shown, got:\n%s", text)
+	}
+	if strings.Count(text, application.NoSweepHeading) != 1 {
+		t.Errorf("one heading, got:\n%s", text)
+	}
+}
+
+func TestStatusShowsNothingOfSweepsWhenEveryBugHasOne(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.40", "[bug] has a sweep", "vps")
+	_ = tracker.SetCreated("mw-gq6.40", domain.SweepRuleFrom.Add(time.Hour))
+	_ = tracker.SetAcceptance("mw-gq6.40", "Sweep: none, because a one-off")
+
+	report := otherHostStatus(t, tracker)
+	if len(report.NoSweep) != 0 || strings.Contains(report.String(), application.NoSweepHeading) {
+		t.Errorf("zero should show nothing, got %+v\n%s", report.NoSweep, report.String())
+	}
+}

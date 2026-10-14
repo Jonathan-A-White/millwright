@@ -77,6 +77,10 @@ type MayorNeeds interface {
 // that expects a files key which have none.
 const NoFilesKeyHeading = "NO FILES KEY"
 
+// NoSweepHeading heads the section naming the open bugs, filed after the sweep
+// rule, whose acceptance has no usable Sweep: line (mw-gq6.419).
+const NoSweepHeading = "BUGS WITHOUT A SWEEP"
+
 // EpicsMissingHeading heads the section naming the open epics that do not meet
 // what their rig requires of an epic, and EpicsWaivedHeading the one naming the
 // epics the Governor waived it for. Each is left out when it has none.
@@ -461,6 +465,9 @@ type StatusReport struct {
 	// NoFilesKey are the open or held stories of rigs that expect a files key
 	// (files_expected = true) whose path has none, in the order found.
 	NoFilesKey []NoFilesKey
+	// NoSweep are the open bugs filed after the sweep rule whose acceptance has
+	// no Sweep: line that passes, which mw dispatch will not claim.
+	NoSweep []StoryDetail
 	// Suites is how the last whole suite of each rig that runs one nightly went
 	// (mw-8w7xb7.3), in rig order.
 	Suites []SuiteStatus
@@ -753,6 +760,8 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	if report.NoFilesKey, err = s.noFilesKey(ctx, known); err != nil {
 		return report, err
 	}
+
+	report.NoSweep = bugsWithoutASweep(known)
 
 	report.Suites = s.suiteStatuses(ctx)
 
@@ -1412,6 +1421,14 @@ func (r StatusReport) String() string {
 		b.WriteString("\n")
 	}
 
+	if len(r.NoSweep) > 0 {
+		clip(&b, fmt.Sprintf("%s (%d)", NoSweepHeading, len(r.NoSweep)))
+		for _, d := range r.NoSweep {
+			writeStory(&b, d, domain.SweepOf(d.Acceptance).String())
+		}
+		b.WriteString("\n")
+	}
+
 	r.writeSuite(&b)
 
 	if r.FinishedKnown {
@@ -1907,4 +1924,21 @@ func (s Status) waitingOnOthers(ctx context.Context) ([]OtherWait, error) {
 		return a.Before(b)
 	})
 	return waits, nil
+}
+
+// bugsWithoutASweep picks, from the open stories this status has read, those
+// mw dispatch refuses for want of a Sweep: line, once each.
+func bugsWithoutASweep(known []StoryDetail) []StoryDetail {
+	var found []StoryDetail
+	seen := map[string]bool{}
+	for _, d := range known {
+		if d.IsEpic || d.Status == StatusClosed || seen[d.Story.ID] {
+			continue
+		}
+		seen[d.Story.ID] = true
+		if domain.OwesASweep(d.Type, d.Story.Title, d.Labels, d.Created) && !domain.SweepOf(d.Acceptance).Passes() {
+			found = append(found, d)
+		}
+	}
+	return found
 }
