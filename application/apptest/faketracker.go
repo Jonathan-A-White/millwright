@@ -1326,6 +1326,8 @@ func (f *FakeTracker) WorkInHand(_ context.Context) (application.WorkInHand, err
 			work.Running = append(work.Running, s.detail)
 		case s.detail.Status == StatusOpen && s.detail.Assignee == "" && !f.waiting(s):
 			work.Ready = append(work.Ready, s.detail)
+		case s.detail.Status == StatusOpen && application.ClaimHost(s.detail.Assignee) != "":
+			work.OpenClaimed = append(work.OpenClaimed, s.detail)
 		}
 	}
 	return work, nil

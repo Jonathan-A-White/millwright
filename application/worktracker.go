@@ -216,6 +216,10 @@ type WorkInHand struct {
 	Ready []StoryDetail
 	// Running are the stories claimed and not yet finished, on any host or none.
 	Running []StoryDetail
+	// OpenClaimed are the stories whose status is open yet whose assignee is
+	// still a host's claim (mw@<host>): neither ready, which asks for the
+	// unassigned, nor running, which asks for in progress (mw-gq6.417).
+	OpenClaimed []StoryDetail
 }
 
 // ReadyOn is the ready stories whose Path names this host, or domain.HostAuto,

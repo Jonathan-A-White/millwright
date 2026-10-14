@@ -127,12 +127,30 @@ func (g *Gateway) WorkInHand(ctx context.Context) (application.WorkInHand, error
 		return application.WorkInHand{}, fmt.Errorf("reading what is claimed: %w", err)
 	}
 
-	n := len(ready)
-	details, err := g.overlaid(ctx, append(ready, claimed...))
+	// An open story that still names a host as its assignee is in neither
+	// listing above: `bd ready --unassigned` skips it for the claim and the
+	// in-progress listing for the status (mw-gq6.417).
+	out, err = g.call(ctx, "list", "--status", StatusOpen, "--exclude-type", "epic", "--limit", "0", "--json")
 	if err != nil {
 		return application.WorkInHand{}, err
 	}
-	return application.WorkInHand{Ready: details[:n:n], Running: details[n:]}, nil
+	open, err := decodeBeads(out)
+	if err != nil {
+		return application.WorkInHand{}, fmt.Errorf("reading what is open: %w", err)
+	}
+	var stale []bead
+	for _, story := range open {
+		if story.Status == StatusOpen && application.ClaimHost(story.Assignee) != "" {
+			stale = append(stale, story)
+		}
+	}
+
+	n, m := len(ready), len(ready)+len(claimed)
+	details, err := g.overlaid(ctx, append(append(ready, claimed...), stale...))
+	if err != nil {
+		return application.WorkInHand{}, err
+	}
+	return application.WorkInHand{Ready: details[:n:n], Running: details[n:m:m], OpenClaimed: details[m:]}, nil
 }
 
 // onHost narrows beads to the stories worked on one host, with each story's

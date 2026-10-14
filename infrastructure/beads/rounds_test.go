@@ -162,8 +162,8 @@ func TestWorkInHandReadsAllTheEpicsInOneBd(t *testing.T) {
 			t.Errorf("expected %s to inherit its epic's host laptop, got %q", detail.Story.ID, detail.Merged().Host)
 		}
 	}
-	if got := bdCalls(t, log); got > 3 {
-		t.Errorf("expected ready, list and one show of the epics (3 bd calls), got %d: %v", got, asked(t, log))
+	if got := bdCalls(t, log); got > 4 {
+		t.Errorf("expected ready, the two lists and one show of the epics (4 bd calls), got %d: %v", got, asked(t, log))
 	}
 }
 
@@ -193,8 +193,8 @@ func TestWorkInHandReadsTheEpicsWithOneListAgainstAServer(t *testing.T) {
 	if shows := showsAsked(t, log); len(shows) != 0 {
 		t.Errorf("expected no bd show for the epics, got %v", shows)
 	}
-	if got := bdCalls(t, log); got != 3 {
-		t.Errorf("expected ready, list and one list of the epics (3 bd calls), got %d: %v", got, asked(t, log))
+	if got := bdCalls(t, log); got != 4 {
+		t.Errorf("expected ready, the two lists and one list of the epics (4 bd calls), got %d: %v", got, asked(t, log))
 	}
 }
 
@@ -408,5 +408,26 @@ func TestShowEpicsReadsTheEpicsThemselvesWithOneListAgainstAServer(t *testing.T)
 	}
 	if shows := showsAsked(t, log); len(shows) != 0 {
 		t.Errorf("expected no bd show for the epics, got %v", shows)
+	}
+}
+
+// An open story that names a host as its assignee is in neither `bd ready
+// --unassigned` nor the in-progress list: WorkInHand finds it in the open list
+// and no other open story with it (mw-gq6.417).
+func TestWorkInHandFindsAnOpenStoryStillClaimedByAHost(t *testing.T) {
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "")
+	stale := `{"id":"mw-a.9","title":"t","status":"open","issue_type":"task","assignee":"mw@laptop","parent":"mw-e1"}`
+	mayors := `{"id":"mw-a.8","title":"t","status":"open","issue_type":"task","assignee":"mayor","parent":"mw-e1"}`
+	gateway, _, _ := roundsStandIn(t, roundsDB{
+		claimed: "[" + stale + "," + mayors + "," + story("mw-a.7", "mw-e1") + "]",
+		shown:   map[string]string{"mw-e1": epic("mw-e1", "laptop")},
+	})
+
+	inHand, err := gateway.WorkInHand(context.Background())
+	if err != nil {
+		t.Fatalf("reading what is in hand: %v", err)
+	}
+	if len(inHand.OpenClaimed) != 1 || inHand.OpenClaimed[0].Story.ID != "mw-a.9" {
+		t.Fatalf("expected only mw-a.9 open but claimed, got %+v", inHand.OpenClaimed)
 	}
 }
