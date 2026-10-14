@@ -280,7 +280,9 @@ type Next struct {
 	// GateLock keeps this host to one rig gate at a time, whatever rig: a
 	// close-out takes it before the rig's tests, in the worktree and again on the
 	// merged result, and waits for the load to calm only once it has it
-	// (mw-gq6.388). A nil GateLock takes none.
+	// (mw-gq6.388). On the merged result it is kept until the landing ends, and
+	// never waited for under the rig's merge slot across hosts (mw-gq6.422). A
+	// nil GateLock takes none.
 	GateLock GateLock
 
 	// Benchmarks is where the benchmarks of past close-outs are read from, for a
@@ -510,10 +512,14 @@ type closeOut struct {
 	// key does not name, read before the landing (mw-gq6.406).
 	outsideKey []string
 
-	// crossHeld says the close-out holds its rig's merge slot across hosts, so
-	// the first try at a landing fetches first: the other host may have landed
-	// while this one waited for it.
-	crossHeld bool
+	// cross is the rig's merge slot across hosts while the close-out holds it,
+	// nil while it holds none. Holding it, the first try at a landing fetches
+	// first: the other host may have landed while this one waited for it.
+	cross *CrossHolding
+
+	// merged is what the gate on a merged result keeps between tries: this
+	// host's gate lock, once taken, and how far the host was let calm.
+	merged mergedGate
 
 	// landingError says this run kept the whole error of a failed landing in the
 	// vault, so the close-out commits it.
@@ -832,17 +838,21 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	// own slot keeps this host's out, and inside it the rig's slot across hosts
 	// keeps the other host's (mw-gq6.359). The slot across hosts is the wider,
 	// so it is taken last and given back first: a close-out waiting in line on
-	// this host never keeps the other host waiting too (mw-gq6.421). Whatever
-	// race gets past both is settled by the remote itself, below.
+	// this host never keeps the other host waiting too (mw-gq6.421), nor does
+	// one whose gate on the merged result waits for this host's gate lock or
+	// calm, which gives it back while it waits (mw-gq6.422). Whatever race gets
+	// past both is settled by the remote itself, below.
 	holding, err := n.Slot.Take(ctx, c.rigDir, Holders(n.Seat, n.Host, c.id))
 	if err != nil {
 		return n.stop(ctx, c, report, ReasonMergeSlot, fmt.Sprintf("the merge slot of %s could not be taken: %v", c.path.Rig, err), "")
 	}
-	cross, said := n.CrossSlot.Take(ctx, c.path.Rig, Holders(n.Seat, n.Host, c.id))
-	report.CrossSlot = append(report.CrossSlot, said...)
-	c.crossHeld = cross != nil
+	n.takeCrossSlot(ctx, c, report)
 	landed, landErr := n.merge(ctx, c, report)
-	report.Notes = append(report.Notes, cross.Release(ctx)...)
+	report.Notes = append(report.Notes, c.cross.Release(ctx)...)
+	c.cross = nil
+	if c.merged.lock != nil {
+		n.giveTheGateLockBack(report, c.merged.lock)
+	}
 	if err := holding.Release(ctx); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the merge slot of %s could not be given back: %v", c.path.Rig, err))
 	}
@@ -888,6 +898,38 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	n.stageBackend(ctx, c, report)
 	n.springTester(ctx, c, report, landed)
 	return n.finish(ctx, c, report, outcome, false)
+}
+
+// takeCrossSlot waits for the rig's merge slot across hosts and takes it, and
+// the report says what became of it.
+func (n Next) takeCrossSlot(ctx context.Context, c *closeOut, report *NextReport) {
+	cross, said := n.CrossSlot.Take(ctx, c.path.Rig, Holders(n.Seat, n.Host, c.id))
+	report.CrossSlot = append(report.CrossSlot, said...)
+	c.cross = cross
+}
+
+// waitOffTheSlot gives the rig's merge slot across hosts back while the gate on
+// a merged result waits for this host, for waits, and takes it again once it
+// is done waiting (mw-gq6.422): the other host lands meanwhile, and the next
+// try starts over from a fresh fetch. It is no try lost, since nothing was
+// pushed, and it cannot come round for ever: the gate lock, once had, is kept,
+// and the host is let calm once before each run.
+func (n Next) waitOffTheSlot(ctx context.Context, c *closeOut, report *NextReport, waits string) {
+	report.Notes = append(report.Notes, c.cross.Release(ctx)...)
+	c.cross = nil
+	report.CrossSlot = append(report.CrossSlot, fmt.Sprintf("gave the cross-host merge slot of %s back while it waited for %s before %s",
+		c.path.Rig, waits, c.merged.what()))
+	n.waitForTheMergedGate(ctx, c, report)
+	n.takeCrossSlot(ctx, c, report)
+}
+
+// offTheSlot is a try at a landing that stopped before its gate on the merged
+// result, which would have waited for this host, for waits, while holding the
+// rig's merge slot across hosts.
+type offTheSlot struct{ waits string }
+
+func (o offTheSlot) Error() string {
+	return "the rig's tests on the merged result wait for " + o.waits + ", which is not waited for under the merge slot across hosts"
 }
 
 // queueStamp leaves a chain stamp of the landed commit for the follower's
@@ -1697,7 +1739,9 @@ func (n Next) ledgered(ctx context.Context, id string) (bool, error) {
 // the remote refuses for a stated reason is landing-failed at once, exactly as
 // before either kind of retry existed. A close-out holding its rig's slot
 // across hosts fetches on the first try too: the other host may have landed
-// while it waited for the slot.
+// while it waited for the slot. A try whose gate on the merged result would
+// wait for this host gives that slot back while it waits, and is done again
+// from a fresh fetch without being counted (waitOffTheSlot).
 func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Landed, error) {
 	base := StartPoint(n.remote(), c.target)
 	var version VersionBump
@@ -1721,12 +1765,14 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 		}
 	}
 	var lost error
-	for try := 1; try <= n.tries(); try++ {
-		if try > 1 || c.crossHeld {
+	fetch := c.cross != nil
+	for try := 1; try <= n.tries(); {
+		if fetch {
 			if err := n.fetchRetrying(ctx, report, c.rigDir); err != nil {
 				return Landed{}, failedFor(ReasonGitFailed, fmt.Errorf("the rig could not be brought up to date with %s: %w", n.remote(), err))
 			}
 		}
+		fetch = true
 		dir, err := n.Landing.OpenLanding(ctx, c.rigDir, base)
 		if err != nil {
 			return Landed{}, failedFor(ReasonLandingFailed, fmt.Errorf("a landing of %s at %s could not be opened: %w", c.path.Rig, base, err))
@@ -1736,12 +1782,15 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 		if closeErr := n.Landing.CloseLanding(ctx, c.rigDir, dir); closeErr != nil {
 			report.Notes = append(report.Notes, fmt.Sprintf("the landing worktree %s could not be taken away: %v", dir, closeErr))
 		}
+		var off offTheSlot
 		switch {
 		case err == nil:
 			return landed, nil
+		case errors.As(err, &off):
+			n.waitOffTheSlot(ctx, c, report, off.waits)
 		case Rejected(err):
 			lost = err
-			continue
+			try++
 		default:
 			return Landed{}, err
 		}
@@ -1797,7 +1846,10 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 	// tested on: the story's tests passed on the story's branch, and the other
 	// host's passed on its own. Only this result matters now.
 	if !landed.FastForward {
-		gate := n.gate(ctx, c, report, dir, "the rig's tests on the merged result")
+		gate, waits := n.mergedResultGate(ctx, c, report, dir)
+		if waits != "" {
+			return Landed{}, offTheSlot{waits}
+		}
 		checked, err := gate.Checked, gate.Err
 		if err != nil {
 			return Landed{}, failedFor(ReasonTestsNotRun, fmt.Errorf("the rig's tests could not be run on the merged result in %s: %w", dir, err))

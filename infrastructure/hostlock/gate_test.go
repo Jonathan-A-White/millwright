@@ -79,3 +79,26 @@ func TestAReleasedGateLockCanBeTakenAgainAndReleasingTwiceIsHarmless(t *testing.
 	}
 	again.Holding.Release(context.Background())
 }
+
+// A close-out holding its rig's merge slot across hosts asks for the gate lock
+// without waiting, by giving up in held (mw-gq6.422): the lock must say it is
+// held before it waits, and give up then and there.
+func TestAGateLockAskedForWithoutWaitingIsRefusedAtOnceWhenHeld(t *testing.T) {
+	dir := t.TempDir()
+	first, err := hostlock.NewGate(dir).Take(context.Background(), "mw-a", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Holding.Release(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var heldBy string
+	began := time.Now()
+	_, err = hostlock.NewGate(dir, hostlock.WithGatePoll(time.Minute)).Take(ctx, "mw-b", func(by string) { heldBy = by; cancel() })
+	if err == nil || heldBy != "mw-a" {
+		t.Fatalf("expected the ask refused, told mw-a held it, got %v and %q", err, heldBy)
+	}
+	if waited := time.Since(began); waited > 5*time.Second {
+		t.Fatalf("expected the ask refused at once, it waited %s", waited)
+	}
+}

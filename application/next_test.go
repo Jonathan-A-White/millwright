@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -262,5 +263,197 @@ func TestAStorySentBackGivesBackTheSlotAcrossHostsItHeld(t *testing.T) {
 				t.Fatalf("expected the slot across hosts given back, it says %s", note)
 			}
 		})
+	}
+}
+
+// Nor is the slot across hosts held while a close-out's gate on a merged
+// result waits for this host's gate lock, or for the host to calm
+// (mw-gq6.422): the other host's close-out of the rig would wait for this
+// host's whole queue of gates, any rig's, up to the gate lock's 3h cap.
+
+// anotherRigsGate is this host's gate lock, which another rig's gate takes
+// once the first free takes are over. A close-out asking for it without
+// waiting (cancelling its context when told it is held) is refused at once;
+// one that waits runs whileWaiting, and then has it.
+type anotherRigsGate struct {
+	free         int
+	whileWaiting func()
+	takes        int
+}
+
+func (g *anotherRigsGate) Take(ctx context.Context, _ string, held func(string)) (application.GateTurn, error) {
+	if g.takes++; g.takes <= g.free {
+		return application.GateTurn{Holding: aHolding{}}, nil
+	}
+	if held != nil {
+		held("mw-other.1")
+	}
+	if err := ctx.Err(); err != nil {
+		return application.GateTurn{}, err
+	}
+	g.whileWaiting()
+	return application.GateTurn{Holding: aHolding{}, Waited: 4 * time.Minute, For: "mw-other.1"}, nil
+}
+
+func TestACloseOutWaitingForItsHostsGateLockLeavesTheSlotAcrossHostsToTheOtherHost(t *testing.T) {
+	ctx := context.Background()
+	server := apptest.NewFakeTracker()
+	waiting, ended := make(chan struct{}, 1), make(chan struct{})
+	var once sync.Once
+	otherGateEnds := func() { once.Do(func() { close(ended) }) }
+	defer otherGateEnds()
+	var desktopPolls, laptopPolls atomic.Int32
+
+	// A, on the desktop, merges into a merge commit; its gate on the merged
+	// result finds the desktop's gate lock taken by another rig's gate.
+	type endedRun struct {
+		report application.NextReport
+		err    error
+	}
+	a := make(chan endedRun, 1)
+	go func() {
+		next := aCloseOutOn("desktop", "mw-x.5", aSlot{}, aCrossSlotOn(server, "desktop", &desktopPolls),
+			&mergingLanding{fakeRetryLanding{AheadCount: 1}}, &scriptedChecks{passes: []bool{true}})
+		next.GateLock = &anotherRigsGate{free: 1, whileWaiting: func() { waiting <- struct{}{}; <-ended }}
+		report, err := next.Run(ctx, "mw-x.5")
+		a <- endedRun{report, err}
+	}()
+	select {
+	case <-waiting:
+	case <-time.After(10 * time.Second):
+		t.Fatal("expected close-out A to wait for the desktop's gate lock")
+	}
+
+	// C, on the laptop, takes the slot across hosts at once and lands.
+	c, err := aCloseOutOn("laptop", "mw-x.6", aSlot{}, aCrossSlotOn(server, "laptop", &laptopPolls),
+		&aLandingLanding{fakeRetryLanding{AheadCount: 1}}, &scriptedChecks{passes: []bool{true}}).Run(ctx, "mw-x.6")
+	if err != nil || !c.Landed {
+		t.Fatalf("expected close-out C on the laptop to land, got %v and %+v", err, c)
+	}
+	if n := laptopPolls.Load(); n != 0 || len(c.CrossSlot) != 0 {
+		t.Fatalf("expected close-out C to take the slot across hosts at once, without waiting for the desktop's gate lock: it polled %d times and its report says %q", n, c.CrossSlot)
+	}
+
+	// The other gate ends: A takes the lock, takes the slot across hosts
+	// again, merges afresh and lands.
+	otherGateEnds()
+	var got endedRun
+	select {
+	case got = <-a:
+	case <-time.After(10 * time.Second):
+		t.Fatal("expected close-out A to end once the other gate gave the lock back")
+	}
+	if got.err != nil || !got.report.Landed || desktopPolls.Load() != 0 {
+		t.Fatalf("expected close-out A to land without waiting on the slot across hosts, got %v, %d polls and %+v", got.err, desktopPolls.Load(), got.report)
+	}
+	if !strings.Contains(strings.Join(got.report.CrossSlot, "\n"), "gave the cross-host merge slot of millwright back while it waited for desktop's gate lock, held by mw-other.1") {
+		t.Fatalf("expected A's report to say it gave the slot back while it waited, got %q", got.report.CrossSlot)
+	}
+	if note, _ := server.Note(ctx, application.CrossSlotKey("millwright")); note != "" {
+		t.Fatalf("expected nobody to hold the slot across hosts, it says %s", note)
+	}
+}
+
+// aRemoteBothHostsLandOn merges into a merge commit and pushes to a remote the
+// other host lands on too: a push made from a fetch older than the remote's
+// newest landing is refused, as git refuses it.
+type aRemoteBothHostsLandOn struct {
+	fakeRetryLanding
+	remote, fetched, pushes int
+}
+
+func (r *aRemoteBothHostsLandOn) Fetch(context.Context, string) error {
+	r.fetched = r.remote
+	return nil
+}
+
+func (*aRemoteBothHostsLandOn) Merge(context.Context, string, string) (application.Landed, error) {
+	return application.Landed{Commit: "0123456789abcdef"}, nil
+}
+
+func (r *aRemoteBothHostsLandOn) Push(context.Context, string, string, string) error {
+	r.pushes++
+	if r.fetched != r.remote {
+		return fmt.Errorf("! [rejected] main -> main (fetch first): %w", application.ErrPushRejected)
+	}
+	r.remote++
+	return nil
+}
+
+// aLoadThatWaitingCalms is a host that is busy from the moment the merged
+// result's first run begins until a close-out waits for it to calm.
+type aLoadThatWaitingCalms struct{ busy bool }
+
+func (l *aLoadThatWaitingCalms) Load(context.Context) (application.LoadReading, error) {
+	if l.busy {
+		return busy(), nil
+	}
+	return calm(), nil
+}
+
+// checksThatBusyTheHost are the rig's tests: the worktree's run passes, the
+// merged result's first fails while it busies the host, the second passes.
+type checksThatBusyTheHost struct {
+	load *aLoadThatWaitingCalms
+	runs int
+}
+
+func (c *checksThatBusyTheHost) Run(context.Context, string, string) (application.Checked, error) {
+	c.runs++
+	if c.runs == 2 {
+		c.load.busy = true
+		return application.Checked{Command: "make test", Output: "FAIL: timed out\n"}, nil
+	}
+	return application.Checked{Command: "make test", Passed: true}, nil
+}
+
+func TestACloseOutThatGivesTheSlotAcrossHostsBackToWaitStillLandsWithNoTryLost(t *testing.T) {
+	ctx := context.Background()
+	server := apptest.NewFakeTracker()
+	remote := &aRemoteBothHostsLandOn{fakeRetryLanding: fakeRetryLanding{AheadCount: 1}}
+	load := &aLoadThatWaitingCalms{}
+	var polls atomic.Int32
+	var underTheSlot []string
+	// The other host lands whenever the slot across hosts is free, which it
+	// must be whenever this close-out waits for this host.
+	theOtherHostLands := func(waitingFor string) {
+		if note, _ := server.Note(ctx, application.CrossSlotKey("millwright")); note != "" {
+			underTheSlot = append(underTheSlot, waitingFor)
+			return
+		}
+		remote.remote++
+	}
+
+	next := aCloseOutOn("desktop", "mw-x.7", aSlot{}, aCrossSlotOn(server, "desktop", &polls),
+		remote, &checksThatBusyTheHost{load: load})
+	next.Tries = 1
+	next.GateLock = &anotherRigsGate{free: 1, whileWaiting: func() { theOtherHostLands("the gate lock") }}
+	next.Load = load
+	next.LoadWait = func(context.Context, time.Duration) error {
+		theOtherHostLands("the host to calm")
+		load.busy = false
+		return nil
+	}
+	report, err := next.Run(ctx, "mw-x.7")
+	if len(underTheSlot) > 0 {
+		t.Fatalf("expected the slot across hosts given back while the close-out waited, it held it while it waited for %q", underTheSlot)
+	}
+	if err != nil || !report.Landed {
+		t.Fatalf("expected the story landed in its one try, got %v and %+v", err, report)
+	}
+	if remote.pushes != 1 || report.Pushes != 1 || remote.remote != 3 {
+		t.Fatalf("expected one push, after the other host's 2 landings, got %d pushes and %d landings in all", remote.pushes, remote.remote)
+	}
+	gaveBack := 0
+	for _, said := range report.CrossSlot {
+		if strings.HasPrefix(said, "gave the cross-host merge slot of millwright back") {
+			gaveBack++
+		}
+	}
+	if gaveBack != 2 {
+		t.Fatalf("expected the slot given back twice, for the gate lock and for the host to calm, got %q", report.CrossSlot)
+	}
+	if !strings.Contains(report.String(), "ran twice") {
+		t.Fatalf("expected the report to say the merged result's tests ran twice, got:\n%s", report.String())
 	}
 }

@@ -8,7 +8,9 @@ Feature: The two hosts take turns at a rig's merge slot
   Lampas every ten). So a rig's merge slot spans hosts as well: a lease on the
   beads server both hosts share, taken inside this host's own slot, waited for
   while the other host holds it, taken over once it has run out, and skipped,
-  saying so, when the server cannot be reached.
+  saying so, when the server cannot be reached. It is given back while a
+  close-out's merged-result tests wait for this host's gate lock or calm, and
+  a host waiting for it has the next turn at it (mw-gq6.422).
 
   Background:
     Given a factory whose vault holds a builder charter and a ledger
