@@ -273,6 +273,9 @@ func (b SeatBoot) Boot(ctx context.Context, detail StoryDetail, dir string) (Ses
 		if IsTesterStory(detail) {
 			return TesterKickoffPrompt(b.Seat, detail.Story.ID, vaultDir)
 		}
+		if isBugStory(detail) {
+			return KickoffPrompt(b.Seat, detail.Story.ID, vaultDir) + CommonErrorsAsk
+		}
 		return KickoffPrompt(b.Seat, detail.Story.ID, vaultDir)
 	})
 }

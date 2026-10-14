@@ -835,6 +835,27 @@ Feature: Closing out a finished story and carrying on
       | For the rig memory (millwright): |
       | nothing                          |
 
+  Scenario: A bug's Landed mail carries its common error as an mw errors line to paste
+    Given the story "mw-gq6.1" is titled "[bug] The gloss is the neighbour's"
+    And the session of "mw-gq6.1" reported a plain success
+    And the error register in the vault holds the class "gloss-from-a-neighbour"
+    And the story "mw-gq6.1" carries the closing comment "Done.\nFor common errors:\ngloss-from-a-neighbour: aligned by position\nFor the rig memory: nothing"
+    When mw closes out "mw-gq6.1"
+    Then that mail's subject is "Landed: [bug] The gloss is the neighbour's"
+    And that mail's body holds:
+      | For common errors (millwright):                                    |
+      | mw errors checked gloss-from-a-neighbour millwright found:mw-gq6.1 |
+      | For the rig memory (millwright):                                   |
+
+  Scenario: A bug's Landed mail says when its closing comment names no common error
+    Given the story "mw-gq6.1" is titled "[bug] The gloss is the neighbour's"
+    And the session of "mw-gq6.1" reported a plain success
+    And the story "mw-gq6.1" carries the closing comment "Done.\nFor the rig memory: nothing"
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is closed
+    And that mail's body holds:
+      | For common errors (millwright): not given |
+
   Scenario: A refused story mails the Mayor the whole reason
     Given the session of "mw-gq6.1" reported a plain success
     And the rig's tests fail, saying "remote: fatal error in commit_refs"

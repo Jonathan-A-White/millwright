@@ -200,6 +200,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerNextStampSteps(ctx, c)
 	registerNextVersionSteps(ctx, c)
 	registerNextChangelogSteps(ctx, c)
+	registerNextCommonErrorsSteps(ctx, c)
 	registerTesterSteps(ctx, c)
 	registerNextCrossSlotSteps(ctx, c)
 	registerNextGateSteps(ctx, c)
@@ -951,6 +952,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 		Worktrees:     worktrees,
 		Landing:       worktrees,
 		Changes:       worktrees,
+		Errors:        files,
 		Checks:        rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands)),
 		SpecChecks:    rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands)),
 		Slot:          rig.NewSlots(rig.WithSlotWait(slotPatience), rig.WithSlotPoll(20*time.Millisecond)),

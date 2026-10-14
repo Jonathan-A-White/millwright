@@ -419,3 +419,23 @@ func TestRebaseKickoffPromptSaysWhatToRebaseOntoAndNothingMore(t *testing.T) {
 		t.Errorf("expected every value written as it is, got %q", prompt)
 	}
 }
+
+// A bug's Builder is asked for the class of its fault, beside its rig memory
+// proposals (mw-gq6.420); a story that is not a bug is not.
+func TestBootAsksABugsBuilderForItsCommonError(t *testing.T) {
+	v, h := newFakeVault(), &fakeHarness{}
+	bug := aStory(func(d *application.StoryDetail) { d.Story.Title = "[bug] the gloss is the neighbour's" })
+	if _, err := aSeatBoot(v, h).Boot(context.Background(), bug, "/worktree"); err != nil {
+		t.Fatalf("booting the bug: %v", err)
+	}
+	if !strings.Contains(h.launch.Kickoff, application.CommonErrorsMarker) || !strings.Contains(h.launch.Kickoff, "mw errors list") {
+		t.Errorf("a bug's kickoff should ask for %q, got %q", application.CommonErrorsMarker, h.launch.Kickoff)
+	}
+
+	if _, err := aSeatBoot(v, h).Boot(context.Background(), aStory(nil), "/worktree"); err != nil {
+		t.Fatalf("booting the story: %v", err)
+	}
+	if strings.Contains(h.launch.Kickoff, application.CommonErrorsMarker) {
+		t.Errorf("a story that is not a bug is not asked, got %q", h.launch.Kickoff)
+	}
+}

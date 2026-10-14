@@ -306,6 +306,11 @@ type Next struct {
 	// neither.
 	Changes BranchChanges
 
+	// Errors is the common-errors register a landing reads to say, of a bug's
+	// 'For common errors:' line, whether its class is already there
+	// (mw-gq6.420). A nil Errors reads every class as new.
+	Errors ErrorFiles
+
 	// Seat is whose ledger the line is written in, Host is which host this is,
 	// and Rigs is where each rig is checked out.
 	Seat string
@@ -1596,7 +1601,7 @@ func (n Next) finish(ctx context.Context, c *closeOut, report *NextReport, outco
 		if c.tested != "" {
 			verdict = MailTested
 		}
-		n.mailTheMayor(ctx, c, report, verdict, n.rigMemoryProposals(ctx, c))
+		n.mailTheMayor(ctx, c, report, verdict, n.closingProposals(ctx, c))
 	}
 	if closeErr != nil {
 		return *report, fmt.Errorf("closing out %s: it %s, but the story could not be closed, so it is landed and still open: %w",
@@ -1857,22 +1862,61 @@ func (n Next) changelogEntry(ctx context.Context, c *closeOut, report *NextRepor
 	return domain.ChangelogEntry{Date: n.now().UTC().Format("2006-01-02"), Story: c.id, Kind: kind, Text: note.Text}, nil
 }
 
-// rigMemoryProposals is the block a landing's mail carries from the story's
-// newest closing comment that has a 'For the rig memory:' section: the
-// proposals as mw memory lines to paste. It is empty when no comment has the
-// section or the comments cannot be read; a landing is never refused for it,
-// nor for a line that does not parse (the block flags that line).
-func (n Next) rigMemoryProposals(ctx context.Context, c *closeOut) string {
+// closingProposals is what a landing's mail carries from the story's closing
+// comments: its common errors (mw-gq6.420), then its rig-memory proposals, a
+// blank line apart. The comments are read once; when they cannot be, it is
+// empty, and a landing is never refused for it.
+func (n Next) closingProposals(ctx context.Context, c *closeOut) string {
 	comments, err := n.Tracker.StoryComments(ctx, c.id)
 	if err != nil {
 		return ""
 	}
+	return joinBlocks(n.commonErrors(ctx, c, comments), rigMemoryProposals(c, comments))
+}
+
+// rigMemoryProposals is the block from the story's newest closing comment that
+// has a 'For the rig memory:' section: the proposals as mw memory lines to
+// paste. It is empty when no comment has the section; a line that does not
+// parse is flagged in the block.
+func rigMemoryProposals(c *closeOut, comments []Comment) string {
 	for i := len(comments) - 1; i >= 0; i-- {
 		if proposals := ParseFactProposals(comments[i].Text); proposals.Found {
 			return proposals.RigMemoryBlock(c.path.Rig, c.id)
 		}
 	}
 	return ""
+}
+
+// commonErrors is the block from the story's newest closing comment that has a
+// 'For common errors:' section, as mw errors lines to paste, or, for a bug
+// whose comments have none, the line that says so (mw-gq6.420). A register
+// that cannot be read reads every class as new.
+func (n Next) commonErrors(ctx context.Context, c *closeOut, comments []Comment) string {
+	var proposals CommonErrorProposals
+	for i := len(comments) - 1; i >= 0 && !proposals.Found; i-- {
+		proposals = ParseCommonErrors(comments[i].Text)
+	}
+	known, kinds := map[string]bool{}, RigKinds{}
+	if n.Errors != nil && proposals.Found {
+		if files, kindsText, err := n.Errors.ReadErrorRegister(ctx, n.Seat); err == nil {
+			for slug := range files {
+				known[slug] = true
+			}
+			kinds, _ = ParseRigKinds(kindsText)
+		}
+	}
+	return proposals.Block(c.path.Rig, c.id, isBugStory(c.detail), known, kinds[c.path.Rig])
+}
+
+// joinBlocks is the blocks that say something, a blank line apart.
+func joinBlocks(blocks ...string) string {
+	var said []string
+	for _, block := range blocks {
+		if block != "" {
+			said = append(said, block)
+		}
+	}
+	return strings.Join(said, "\n\n")
 }
 
 // pushRetrying pushes what the landing worktree has checked out, and tries
