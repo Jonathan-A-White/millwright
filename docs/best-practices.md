@@ -360,6 +360,15 @@ any rig. The escape for a true one-off is `Sweep: none, because <reason>`; a bar
 `Sweep: none` does not pass. `mw status` lists the open bugs lacking one. See
 [*Dispatch gates*](dispatch-gates.md#the-sweep-gate).
 
+**A change to the factory names the metric it should move.** A millwright story's
+acceptance criteria carry a line `Expect: <metric> <up|down>`, the metric one of
+`refusals`, `attempts/landing`, `bugs/landing`, `dispatch-to-landing`,
+`tokens/landing` or `$/landing`, or `Expect: none, because <reason>`. `mw report`
+then compares that metric for the whole factory in the 7 days before and the 7
+days after the landing, under FACTORY CHANGES, and calls the change WORSE when it
+moved the wrong way by more than a 10% band. See
+[*Filing a millwright story*](wayfinding-on-beads.md#filing-a-millwright-story).
+
 **A class of error seen once is checked everywhere it can occur.** A bug fixed in
 one app is often the same bug, unseen, in another: the same idea in a sibling
 app, the same pattern in another rig of the same kind. Keep a register of error

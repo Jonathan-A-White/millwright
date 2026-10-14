@@ -25,8 +25,10 @@ func newReportSendCmd() *cobra.Command {
 			"It goes out from the home alone: on any other host it says which is home and sends\n" +
 			"nothing. It sends at most once a UTC day, remembering the day in\n" +
 			"~/.local/state/mw/report/sent.jsonl; a second run says when it sent. --force sends again;\n" +
-			"--dry-run prints the summary and sends and remembers nothing. mw-report.timer runs it at\n" +
-			"12:00 UTC.",
+			"--dry-run prints the summary and sends and remembers nothing. Beside the post it writes what\n" +
+			"mw report only shows: a factory change that went WORSE (FACTORY CHANGES) is mailed to the\n" +
+			"Mayor once, and the day's key metrics are appended to metrics/factory.jsonl in the vault,\n" +
+			"one snapshot a day. mw-report.timer runs it at 12:00 UTC.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := config.Vault()
@@ -73,6 +75,9 @@ func newReportSendCmd() *cobra.Command {
 					Files:      files,
 					Benchmarks: vault.Benchmarks{Vault: files},
 					Seat:       BuilderSeat,
+					Notes:      gateway,
+					Mailbox:    gateway,
+					Snapshots:  files,
 				},
 				Home: files,
 				Host: here,

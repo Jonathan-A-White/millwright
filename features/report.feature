@@ -8,7 +8,12 @@ Feature: mw report
   gate) and FUEL (tokens and dollars per landing), and every number carries an
   arrow against the window of the same length before it. The report ends with
   CHEAP WINS: at most three one-line suggestions chosen by fixed rules over its
-  numbers, quality rules first, or "CHEAP WINS: none seen".
+  numbers, quality rules first, or "CHEAP WINS: none seen". Before CHEAP WINS
+  comes FACTORY CHANGES: each millwright landing of the last 30 days with the
+  "Expect: <metric> <up|down>" line of its acceptance, the metric in the 7 days
+  before and after the landing, and WORSE when it went the wrong way past a 10%
+  band. The writes of mw report send tell the Mayor of a WORSE change once and
+  keep one snapshot of the key metrics a day.
 
   Background:
     Given a report factory whose clock reads "2026-10-11T12:00:00Z"
@@ -426,3 +431,62 @@ Feature: mw report
     When mw report runs with "--since 7d"
     Then no line of the report is wider than 60 columns
     And the report wrote nothing to the tracker or the vault
+
+  Scenario: FACTORY CHANGES compares a millwright landing's metric the week before and the week after
+    Given "lampas" landed 4 and refused 1 on "2026-09-15"
+    And "lampas" landed 2 and refused 2 on "2026-09-23"
+    And the factory change "mw-c1" titled "Make refusals rarer" landed on "2026-09-20" with the acceptance "1. It works.\n2. Expect: refusals down"
+    When mw report runs with "--since 7d"
+    Then the report prints the line "FACTORY CHANGES (millwright landings, 30 days)"
+    And the report prints the line "7 days before vs 7 after; WORSE past a 10% band"
+    And the report prints "landed 2026-09-20, Expect: refusals down" under "Make refusals rarer (mw-c1)"
+    And the report prints "20% → 50% (+150%): WORSE" under "Make refusals rarer (mw-c1)"
+    And no line of the report is wider than 60 columns
+    And the report wrote nothing to the tracker or the vault
+
+  Scenario: A change that moved its metric the right way is better, not WORSE
+    Given "lampas" landed 2 and refused 2 on "2026-09-15"
+    And "lampas" landed 5 and refused 0 on "2026-09-23"
+    And the factory change "mw-c2" titled "Fewer refusals" landed on "2026-09-20" with the acceptance "Expect: refusals down"
+    When mw report runs with "--since 7d"
+    Then the report prints "50% → 0% (-100%): better" under "Fewer refusals (mw-c2)"
+    And the report prints no line starting "50% → 0% (-100%): WORSE"
+
+  Scenario: A change less than a week old is too soon, one with no metric to move says so
+    Given "lampas" landed 4 and refused 1 on "2026-10-05"
+    And the factory change "mw-c3" titled "Brand new" landed on "2026-10-08" with the acceptance "Expect: refusals down"
+    And the factory change "mw-c4" titled "A doc" landed on "2026-09-25" with the acceptance "Expect: none, because it is a doc"
+    And the factory change "mw-c5" titled "Unmeasured" landed on "2026-09-26" with the acceptance "1. It works."
+    When mw report runs with "--since 7d"
+    Then the report prints "too soon: the week after ends 2026-10-15" under "Brand new (mw-c3)"
+    And the report prints "landed 2026-09-25, Expect: none" under "A doc (mw-c4)"
+    And the report prints the line "1 landed with no Expect named (--json lists them)"
+    And the report prints no line starting "Unmeasured"
+
+  Scenario: A landing older than 30 days or on another rig is not a factory change
+    Given the factory change "mw-c6" titled "Long ago" landed on "2026-08-01" with the acceptance "Expect: refusals down"
+    And "lampas" landed 1 and refused 0 on "2026-10-01"
+    When mw report runs with "--since 7d"
+    Then the report prints the line "none landed"
+    And the report prints no line starting "Long ago"
+
+  Scenario: A WORSE change writes one event to the Mayor, once
+    Given "lampas" landed 4 and refused 1 on "2026-09-15"
+    And "lampas" landed 2 and refused 2 on "2026-09-23"
+    And the factory change "mw-c1" titled "Make refusals rarer" landed on "2026-09-20" with the acceptance "Expect: refusals down"
+    When the writes of mw report send run 3 times
+    Then the Mayor's inbox holds 1 message about "Make refusals rarer"
+
+  Scenario: A change that is not WORSE writes nothing to the Mayor
+    Given "lampas" landed 2 and refused 2 on "2026-09-15"
+    And "lampas" landed 5 and refused 0 on "2026-09-23"
+    And the factory change "mw-c2" titled "Fewer refusals" landed on "2026-09-20" with the acceptance "Expect: refusals down"
+    When the writes of mw report send run 1 time
+    Then the Mayor's inbox holds 0 messages about "Fewer refusals"
+
+  Scenario: The key metrics are kept as one dated snapshot a day in the vault
+    Given "lampas" landed 3 and refused 1 on "2026-10-09"
+    When the writes of mw report send run 2 times
+    And the report factory clock moves on a day
+    And the writes of mw report send run 1 time
+    Then the vault holds the metric snapshots of the days "2026-10-11,2026-10-12"

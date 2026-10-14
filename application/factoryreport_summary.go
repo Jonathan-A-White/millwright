@@ -10,7 +10,8 @@ const SummaryLines = 14
 
 // Summary is the report as a phone reads it: the window, then QUALITY, SPEED,
 // FUEL and CHEAP WINS for the whole factory, each number with its arrow against
-// the window before, in at most SummaryLines lines of ReportWidth columns.
+// the window before, and a CHANGES line when a factory change went WORSE, in at
+// most SummaryLines lines of ReportWidth columns.
 func (r FactoryReportResult) Summary() string {
 	days := int(reportDay(r.Window.Until).Sub(r.Window.Since).Hours() / 24)
 	var b strings.Builder
@@ -50,6 +51,14 @@ func (r FactoryReportResult) Summary() string {
 		if f.WithCost > 0 {
 			summaryLine(&b, "", label, fmt.Sprintf("$/landing %.2f%s", f.USDPerLanding, whole.arrow("usd_per_landing")))
 		}
+	}
+
+	if bad := worse(r.Changes); len(bad) > 0 {
+		var names []string
+		for _, c := range bad {
+			names = append(names, c.Title)
+		}
+		summaryLine(&b, "", "CHANGES ", fmt.Sprintf("%d WORSE: %s", len(bad), strings.Join(names, ", ")))
 	}
 
 	var wins strings.Builder
