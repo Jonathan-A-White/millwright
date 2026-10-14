@@ -308,6 +308,15 @@ func (f *FakeTracker) SetDescription(id, description string) error {
 	})
 }
 
+// SetAcceptance sets the acceptance criteria a story reports, as a real bd show
+// carries them on StoryDetail.
+func (f *FakeTracker) SetAcceptance(id, acceptance string) error {
+	return f.write(id, func(s *fakeStory) error {
+		s.detail.Acceptance = acceptance
+		return nil
+	})
+}
+
 // SetCreated sets when a story the fake holds was filed. A story added without
 // one has no creation time, which a dispatch reads as no age to order it by.
 func (f *FakeTracker) SetCreated(id string, created time.Time) error {

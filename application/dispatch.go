@@ -537,6 +537,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	}
 	report := DispatchReport{Host: d.Host, Cap: d.Cap, DryRun: d.DryRun}
 
+	// gate: paused
 	// A paused host starts nothing, and is not even synced: a pause is a word
 	// that the host is to be left alone until a resume-host says otherwise. The
 	// word is in this host's own log, or, for a Boost whose log the home never
@@ -670,6 +671,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	smokeHolds := map[string]GristSmokeHold{}
 	for _, detail := range ready {
 		id := detail.Story.ID
+		// gate: hitl
 		// First, so that a story that is not a session's to take is never passed
 		// over for the cap instead: the cap is not what stops it.
 		if detail.Hitl() {
@@ -677,6 +679,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 				"the Governor must be present for it (labelled %s): it is worked with the Mayor, never by a dispatched session", LabelHitl)})
 			continue
 		}
+		// gate: no-path
 		path, err := detail.Path()
 		if err != nil {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Why: "it has no path: " + err.Error()})
@@ -686,10 +689,12 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		// door, because starting another host's story is the one mistake a
 		// two-host factory cannot undo by itself. A story that names no host is
 		// nobody's: the Mayor has not said where it is worked yet.
+		// gate: no-host
 		if path.Host == "" {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Why: "its path names no host, so no host may take it"})
 			continue
 		}
+		// gate: other-host
 		// A story that may run on any host passes the host check on every host:
 		// the cap is checked below as it is for any story.
 		auto := path.Host == domain.HostAuto
@@ -697,6 +702,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Why: "it is worked on " + path.Host})
 			continue
 		}
+		// gate: no-room
 		// A story this host would take waits for the room to take it, whichever
 		// host it names (mw-t0z3fu.1). It stays ready, claimed by nobody.
 		if noRoom != "" {
@@ -704,6 +710,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			continue
 		}
 
+		// gate: landed
 		// A story whose last run landed it is finished but for its close, which
 		// was lost: claiming it would work it again on top of its own landed
 		// commits (mw-gq6.191). The run state is read off the listing.
@@ -714,6 +721,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			continue
 		}
 
+		// gate: blocked
 		// bd's own ready set is trusted for everything except this: a dependency
 		// filed on a story moments after bd decided it was ready is not always
 		// caught by it (mw-gq6.93), so what the candidate still waits on is read
@@ -726,6 +734,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			continue
 		}
 
+		// gate: rig-not-checked-out
 		rigDir, checkedOut := d.Rigs[path.Rig]
 		if !checkedOut {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
@@ -733,6 +742,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			continue
 		}
 
+		// gate: smoke-hold
 		// A rig whose last grist smoke failed holds its open stories, so that no
 		// more work lands on a mill that does not answer as its examples say. A story
 		// that names a failing example as its cause is the fix, and runs (mw-gq6.412).
@@ -741,6 +751,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			continue
 		}
 
+		// gate: metered-network
 		// A story on a rig that installs dependencies waits for a network that is
 		// not metered. It stays open and unclaimed, so no attempt is spent on it.
 		if network != nil && network.Metered && d.HeavyNet[path.Rig] {
@@ -749,6 +760,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			continue
 		}
 
+		// gate: formula-not-installed
 		// A story whose formula this vault has not installed is refused before
 		// the cap, the same as one whose attempts are exhausted: claiming it
 		// would start a session with nothing poured to work from, over and over,
@@ -769,6 +781,21 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			}
 		}
 
+		// gate: no-sweep
+		// A bug filed after the sweep rule whose acceptance has no Sweep: line
+		// waits, open and unclaimed, for the Mayor to add it: the whole class of the
+		// fault is to be looked for, not only the case seen (mw-gq6.419).
+		if verdict := domain.SweepOf(detail.Acceptance); !verdict.Passes() &&
+			domain.OwesASweep(detail.Type, detail.Story.Title, detail.Labels, detail.Created) {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
+				"it is a bug and %s (a check over the whole class of the fault, or 'Sweep: none, because <reason>'): it is not claimed", verdict)})
+			if !d.DryRun {
+				d.refuseSweepless(ctx, detail, verdict, &report)
+			}
+			continue
+		}
+
+		// gate: attempts-exhausted
 		// Before the cap, because a story that is not started takes none of the
 		// sessions the cap counts, and the Mayor is to be told of it now rather
 		// than once whatever is running has finished.
@@ -781,6 +808,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			continue
 		}
 
+		// gate: shared-files
 		// A story that names a file a running story on its rig names too, or has
 		// changed on its branch, waits for it, unclaimed, before the cap: it
 		// takes none of the sessions, and the next ready story is started in its
@@ -790,6 +818,7 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			continue
 		}
 
+		// gate: cap
 		// A story that was claimed and could not be started counts against the
 		// cap too: whatever stopped it will probably stop the next one, and a
 		// dispatcher that claims and releases every ready story in turn is
@@ -1915,6 +1944,55 @@ func (d Dispatch) refuseUninstalledFormula(ctx context.Context, id, formula stri
 	if err := d.Tracker.CommentOnStory(ctx, id, said); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf(
 			"%s: the comment about its uninstalled formula could not be written: %v", id, err))
+	}
+}
+
+// ReasonNoSweep is the code a comment carries when mw dispatch would not claim a
+// bug because its acceptance has no Sweep: line (mw-gq6.419): the marker that a
+// second dispatch finding the comment already there says and mails nothing again.
+const ReasonNoSweep = "no-sweep"
+
+// refuseSweepless tells the story, and the Mayor, once, that a bug was not
+// claimed for want of a Sweep: line. The comment is written first and is the
+// once: a comment that cannot be written or read means no mail, so that a
+// dispatch that cannot remember it has said it does not say it every tick.
+func (d Dispatch) refuseSweepless(ctx context.Context, detail StoryDetail, verdict domain.SweepVerdict, report *DispatchReport) {
+	id := detail.Story.ID
+	comments, err := d.Tracker.StoryComments(ctx, id)
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf(
+			"%s: whether it was already told it has no sweep could not be read, so nobody is told again: %v", id, err))
+		return
+	}
+	for _, comment := range comments {
+		if strings.Contains(comment.Text, ReasonNoSweep) {
+			return
+		}
+	}
+
+	fix := "Add a line beginning 'Sweep:' to its acceptance criteria that checks the whole class of the fault, " +
+		"not only the case seen, or 'Sweep: none, because <reason>' for a true one-off."
+	said := fmt.Sprintf("mw dispatch on %s did not claim this bug (%s): %s. %s It is left open and is dispatched once it has one.",
+		d.Host, ReasonNoSweep, verdict, fix)
+	if err := d.Tracker.CommentOnStory(ctx, id, said); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s: the comment about its missing sweep could not be written, so nobody is told: %v", id, err))
+		return
+	}
+	if d.Mailbox == nil {
+		return
+	}
+	title := strings.Join(strings.Fields(detail.Story.Title), " ")
+	if title == "" {
+		title = id
+	}
+	if _, err := d.Mailbox.Send(ctx, NewMessage{
+		From:    SeatIdentity(MwSeat, d.Host),
+		To:      MayorMailbox,
+		Subject: MailBlocked + ": " + title,
+		Body: fmt.Sprintf("%s (%s) is a bug whose acceptance criteria have no sweep, so mw dispatch on %s did not claim it (%s): %s.\n\n%s\n",
+			id, title, d.Host, ReasonNoSweep, verdict, fix),
+	}); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("%s: the mail to %s about its missing sweep could not be sent: %v", id, MayorMailbox, err))
 	}
 }
 
