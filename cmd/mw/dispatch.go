@@ -186,7 +186,8 @@ func newDispatchCmd() *cobra.Command {
 			"origin main, with the command mw suite runs a file alone with. If it passes, a story that landed\n" +
 			"since the suite's sha has fixed it: the bug is closed (\"fixed on main before dispatch: <spec> passes\n" +
 			"at <sha> (<n> tests)\") with the end of the run in a comment, and no session is started. If it fails,\n" +
-			"or cannot be run, the story is dispatched as ever and its line says so. A dry run re-runs nothing.\n\n" +
+			"or cannot be run, the story is dispatched as ever and its line says so. A flaky file's bug and a dry run\n" +
+			"are never re-run.\n\n" +
 			"--dry-run prints what it would start and writes nothing: nothing is synced, claimed, cut,\n" +
 			"poured or started.",
 		Args: cobra.NoArgs,

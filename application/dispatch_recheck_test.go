@@ -133,11 +133,16 @@ func TestADispatchNeverRerunsAStoryThatIsNotASuiteBugOrNamesMoreThanOneSpec(t *t
 		"a glob":           {[]string{application.LabelBug, application.LabelSuite}, "tests/e2e/*.spec.ts"},
 		"not a test file":  {[]string{application.LabelBug, application.LabelSuite}, "src/audio.ts"},
 		"no files at all":  {[]string{application.LabelBug, application.LabelSuite}, ""},
+		"a flaky bug":      {[]string{application.LabelBug, application.LabelSuite}, greekSpec},
 		"a spec with text": {[]string{application.LabelBug, application.LabelSuite}, greekSpec + " and more"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			dispatch, tracker, _, _, _ := aFactory(t)
-			tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "A story", Overrides: domain.Path{Files: story.files}})
+			title := "A story"
+			if name == "a flaky bug" {
+				title = "[bug] lampas main: " + greekSpec + " is flaky on main (failed, then passed alone)"
+			}
+			tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: title, Overrides: domain.Path{Files: story.files}})
 			if err := tracker.SetLabels("mw-gq6.1", story.labels...); err != nil {
 				t.Fatal(err)
 			}

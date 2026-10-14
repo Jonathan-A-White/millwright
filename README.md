@@ -1303,7 +1303,8 @@ with (`[changed_specs]` for a `*.spec.*` file when the rig has one, `[tests]` pl
 If it passes, the bug is closed with the reason `fixed on main before dispatch: <spec> passes at <sha>
 (<n> tests)` and a comment holding the end of the run, and no session, claim or worktree is made; it
 takes none of the cap. If it fails, or cannot be run, the story is dispatched as before and its line in
-the report says which. A story without the `suite` label is never re-run, nor is anything in a dry run.
+the report says which. A story without the `suite` label is never re-run, nor is a flaky file's bug (one pass
+does not fix a flake), nor is anything in a dry run.
 
 **The nightly run** (mw-8w7xb7.3). The home's follower (`mw events follow`) springs the job `suite@<host>`:
 from **08:00 UTC** each day (about 3-4 am in the US) it runs `mw suite <rig> --file` for each rig of

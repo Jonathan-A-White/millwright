@@ -834,9 +834,9 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 // no claim, no worktree) and fixed is true. Otherwise the story is dispatched as
 // it always was, and said is what the re-run came to for its line: that the spec
 // still fails, or why it could not be re-run. Nothing is re-run in a dry run, and
-// nothing for a story that is not labelled suite or names more than one file.
+// nothing for a story that is not labelled suite, names more than one file or is a flaky file's bug.
 func (d Dispatch) recheckSuiteBug(ctx context.Context, detail StoryDetail, path domain.Path, report *DispatchReport) (said string, fixed bool) {
-	spec, suiteBug := suiteSpec(detail.Labels, path.Files)
+	spec, suiteBug := suiteSpec(detail, path.Files)
 	if d.Rechecks == nil || d.DryRun || !suiteBug {
 		return "", false
 	}

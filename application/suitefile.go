@@ -15,6 +15,9 @@ const (
 	LabelSuite = "suite"
 )
 
+// flakyOnMain is what a flaky file's bug title says of it after the file's name.
+const flakyOnMain = " is flaky on main"
+
 // SuiteFoundBy ends the description of every bug the whole suite files.
 const SuiteFoundBy = "Found by the nightly whole suite (mw suite); no story's gate ran this file."
 
@@ -138,7 +141,7 @@ func namesFile(title, file string) bool {
 
 func suiteBugTitle(rig string, file SuiteFile) string {
 	if file.Flaky {
-		return fmt.Sprintf("[bug] %s main: %s is flaky on main (failed, then passed alone)", rig, file.File)
+		return fmt.Sprintf("[bug] %s main: %s%s (failed, then passed alone)", rig, file.File, flakyOnMain)
 	}
 	return fmt.Sprintf("[bug] %s main: %s fails on main", rig, file.File)
 }
@@ -221,10 +224,13 @@ var oneTestFile = regexp.MustCompile("^" + testFileName.String() + "$")
 
 // suiteSpec is the one spec a nightly-suite bug names: the story carries
 // LabelSuite and its files key (files, the story's path's) is exactly one test
-// file, no glob and no list. Any other story is never re-run first.
-func suiteSpec(labels []string, files string) (string, bool) {
+// file, no glob and no list. Any other story is never re-run first, nor is a
+// flaky file's bug, which one pass on main does not fix: its acceptance is five
+// in a row.
+func suiteSpec(detail StoryDetail, files string) (string, bool) {
 	files = strings.TrimSpace(files)
-	if !carriesAny(labels, []string{LabelSuite}) || !oneTestFile.MatchString(files) {
+	if !carriesAny(detail.Labels, []string{LabelSuite}) || !oneTestFile.MatchString(files) ||
+		strings.Contains(detail.Story.Title, files+flakyOnMain) {
 		return "", false
 	}
 	return files, true
