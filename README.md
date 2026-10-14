@@ -3164,6 +3164,53 @@ tracked`. A story pathed to another host is read there: mw runs `mw peek
 back. `--here` reads this host's session whoever the story is pathed to. Peek
 writes nothing and costs no fuel. See `features/peek.feature`.
 
+## The common-errors register (mw errors)
+
+An error class seen in one rig is checked in every rig it can occur in. The
+register is `seats/builder/common-errors/` in the vault: one file a class, its
+front matter the `symptom`, the `cause`, the `sweep` (the check over the whole
+class), the `kinds` of rig it can occur in (pwa, go-cli, grind, phonics...), the
+`shared`-component verdict (none, candidate or `exists <where>`; absent until the
+Mayor weighs it) and `since`; then under `## Checked` one dated line a rig
+checked, `- <date> <rig> ok|found:<bead>`. Beside them `kinds.toml` says what
+kinds each rig is, `<rig> = ["pwa", "grind"]`. A Builder reads the register by
+need (`mw errors list`, `mw errors show <slug>`), never at boot. The Mayor keeps
+it, one writer, as he keeps rig memory; each verb writes files and prints each
+file it wrote, spends no fuel, runs no git command and files nothing:
+
+```sh
+mw errors add <slug> --symptom "<line>" --kinds <k1,k2> [--cause "<line>"] [--sweep "<line>"] [--shared <verdict>] [--found <rig>:<bead>]
+mw errors checked <slug> <rig> ok|found:<bead>
+mw errors shared <slug> none|candidate|exists <where>
+mw errors kinds [<rig> [<kind>...]]
+mw errors list
+mw errors show <slug>
+mw errors seed
+```
+
+`add` refuses a slug already in the register, a slug or kind that is not
+lower-case letters, digits and hyphens, no kinds and a value with a newline.
+`checked` appends a check dated today (UTC). A class is found as many times as
+it has distinct `found:` beads; when a find makes it two, `checked` says so,
+naming each find, and asks the shared-component question: would one shared
+component carry the fix to every rig of its kinds? Nothing is filed for it: the
+Mayor weighs it (it is a Goldilocks call, and not always possible) and records
+the verdict with `shared`. `list` and `show` ask the same question of a class
+found twice with no verdict. `seed` writes the classes this mw was built with
+(the first three, from the Lampas bugs of 2026-10-14) into a register that lacks
+them, never over one it holds; a fresh vault is born with them.
+
+The loop. A bug's Builder is asked at boot to end its closing comment's body,
+just before `For the rig memory:`, with `For common errors:` and one line,
+`<slug>: <one line on the class>` (the register's slug when it has the class), or
+`nothing`. The Landed mail turns it into a line to paste: `mw errors checked
+<slug> <rig> found:<story>` for a class the register holds, `mw errors add <slug>
+--found <rig>:<story> --kinds <the rig's kinds> --symptom '<line>'` for a new one;
+a bug whose comment names none is said as `not given`. `mw status` lists under
+`ERROR CLASSES TO CHECK` each class not yet checked in every rig of its kinds,
+which is the register's standing sweep: the Mayor has each check made (a story,
+or a look) and records it with `checked`. See `features/errors.feature`.
+
 ## Closing what is plainly finished
 
 ```sh

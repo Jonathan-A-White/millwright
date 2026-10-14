@@ -63,6 +63,10 @@ _Avoid_: Policy, lint rule, gate
 A bead sized to be worked start to finish by one session in one rig, within one context window.
 _Avoid_: Task, job, subtask
 
+**Error class**:
+A kind of fault, named by a slug, that can occur in more than one rig: a file in the Builder's common-errors register with its symptom, cause, sweep, the kinds of rig it can occur in, the rigs checked for it and the shared-component verdict. A bug's closing comment names its class; the Mayor records it with `mw errors`.
+_Avoid_: Bug type, pattern, category
+
 **Rig**:
 A git repository the factory works on. The factory's own repo is a rig.
 _Avoid_: Project, repo (when you mean the unit of factory work)

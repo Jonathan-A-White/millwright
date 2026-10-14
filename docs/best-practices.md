@@ -360,6 +360,18 @@ any rig. The escape for a true one-off is `Sweep: none, because <reason>`; a bar
 `Sweep: none` does not pass. `mw status` lists the open bugs lacking one. See
 [*Dispatch gates*](dispatch-gates.md#the-sweep-gate).
 
+**A class of error seen once is checked everywhere it can occur.** A bug fixed in
+one app is often the same bug, unseen, in another: the same idea in a sibling
+app, the same pattern in another rig of the same kind. Keep a register of error
+classes beside the work (millwright's is `mw errors`, kept in the vault): what is
+seen, why, the check over the whole class, and the kinds of project it can occur
+in. Every project of those kinds is checked for it and the check is dated; a
+class not yet checked everywhere stays on the daily status until it is. A class
+seen twice asks one more question: is it the same code, and would one shared
+component carry the fix to all of them? Weigh it, and do not force it; sharing
+has a cost too. The register is read by need, never loaded into every session.
+See [*The common-errors register*](../README.md#the-common-errors-register-mw-errors).
+
 **If you have less.** A pre-merge CI job that runs the tests on the merged result,
 and a rule that a story's last step is pasting the command and its output.
 
