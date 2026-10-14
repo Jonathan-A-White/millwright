@@ -574,3 +574,54 @@ func TestStatusShowsNothingOfErrorClassesWhenEveryOneIsChecked(t *testing.T) {
 		t.Errorf("zero shows nothing, got:\n%s", report.String())
 	}
 }
+
+// openButClaimed is a story that was handed back (or un-held) and is open
+// again yet still carries the claim of the host that held it (mw-gq6.417).
+func openButClaimed(t *testing.T, tracker *apptest.FakeTracker, id, holder string) {
+	t.Helper()
+	storyOn(t, tracker, id, "Open, claimed by "+holder, "vps")
+	if err := tracker.ClaimAs(id, holder, time.Time{}); err != nil {
+		t.Fatalf("claiming %s as %s: %v", id, holder, err)
+	}
+	if err := tracker.SetStatus(id, apptest.StatusOpen); err != nil {
+		t.Fatalf("reopening %s: %v", id, err)
+	}
+}
+
+func TestStatusNamesAnOpenStoryStillClaimedByAHostWithTheRetryThatFreesIt(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	openButClaimed(t, tracker, "mw-gq6.50", "mw@laptop")
+	storyOn(t, tracker, "mw-gq6.51", "Open and unassigned", "vps")
+	storyOn(t, tracker, "mw-gq6.52", "Running here", "vps")
+	if err := tracker.ClaimStory(context.Background(), "mw-gq6.52"); err != nil {
+		t.Fatal(err)
+	}
+
+	report := otherHostStatus(t, tracker)
+
+	if len(report.OpenButClaimed) != 1 || report.OpenButClaimed[0].Story.ID != "mw-gq6.50" {
+		t.Fatalf("expected only mw-gq6.50 open but claimed, got %+v", report.OpenButClaimed)
+	}
+	text := report.String()
+	if !strings.Contains(text, application.OpenButClaimedHeading+" (1)") {
+		t.Errorf("the heading with its count should be shown, got:\n%s", text)
+	}
+	if !strings.Contains(text, "mw retry mw-gq6.50") {
+		t.Errorf("the mw retry that frees the story should be shown, got:\n%s", text)
+	}
+	for _, id := range []string{"mw-gq6.51", "mw-gq6.52"} {
+		if strings.Contains(text, "mw retry "+id) {
+			t.Errorf("%s is not open but claimed, got:\n%s", id, text)
+		}
+	}
+}
+
+func TestStatusLeavesOutOpenStoriesClaimedByAnotherActorThanAHost(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	openButClaimed(t, tracker, "mw-gq6.50", "mayor")
+
+	report := otherHostStatus(t, tracker)
+	if len(report.OpenButClaimed) != 0 || strings.Contains(report.String(), application.OpenButClaimedHeading) {
+		t.Errorf("a bead the Mayor holds is not a host's claim, got %+v\n%s", report.OpenButClaimed, report.String())
+	}
+}

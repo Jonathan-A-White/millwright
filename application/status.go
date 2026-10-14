@@ -59,6 +59,13 @@ type OtherWait struct {
 // section out when there are none.
 const HeldHandsHeading = "HELD, WITH A HANDS STEP"
 
+// OpenButClaimedHeading is what heads the section for open stories that still
+// carry a host's claim (assignee mw@<host>) with no session behind it: `bd
+// ready --unassigned` and so mw dispatch pass them over until `mw retry`
+// gives the claim back (mw-gq6.417). The report leaves it out when there are
+// none.
+const OpenButClaimedHeading = "OPEN BUT CLAIMED"
+
 // HeldHandsReader finds the beads that are held yet keep a hands step not yet
 // run: the view offers the Governor a Run only on a workable bead (workable),
 // so his phone shows none until the bead is open. MayorReader is the one
@@ -464,7 +471,11 @@ type StatusReport struct {
 	// HeldHands are the held beads that keep a hands step, in id order.
 	HeldHands []StoryDetail
 	NeedsAt   time.Time
-	Blocked   []StoryDetail
+	// OpenButClaimed are the open stories whose assignee is still a host
+	// (mw@<host>): no session runs them and dispatch will not take them, in
+	// the order the tracker listed them.
+	OpenButClaimed []StoryDetail
+	Blocked        []StoryDetail
 	// Others is what every other host named in a story's Path has in hand, one
 	// entry per host, in host order.
 	Others []HostWork
@@ -929,6 +940,8 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 		report.HeldHands = read.held
 	}
 
+	report.OpenButClaimed = work.OpenClaimed
+
 	if err := report.markGuests(ctx, s.Rules); err != nil {
 		return report, err
 	}
@@ -969,7 +982,7 @@ func (r *StatusReport) markGuests(ctx context.Context, rules EpicRules) error {
 	for i := range r.Running {
 		all = append(all, &r.Running[i].Detail)
 	}
-	for _, list := range [][]StoryDetail{r.Ready, r.Waiting, r.HeldHands, r.Blocked} {
+	for _, list := range [][]StoryDetail{r.Ready, r.Waiting, r.HeldHands, r.OpenButClaimed, r.Blocked} {
 		for i := range list {
 			all = append(all, &list[i])
 		}
@@ -1366,6 +1379,15 @@ func (r StatusReport) String() string {
 		clip(&b, fmt.Sprintf("%s (%d)", HeldHandsHeading, len(r.HeldHands)))
 		for _, d := range r.HeldHands {
 			writeStory(&b, d, "no Run until it is open")
+		}
+		b.WriteString("\n")
+	}
+
+	if len(r.OpenButClaimed) > 0 {
+		clip(&b, fmt.Sprintf("%s (%d)", OpenButClaimedHeading, len(r.OpenButClaimed)))
+		for _, d := range r.OpenButClaimed {
+			writeStory(&b, d, "claimed by "+d.Assignee+", no session")
+			clip(&b, "    frees it: mw retry "+d.Story.ID)
 		}
 		b.WriteString("\n")
 	}
