@@ -31,7 +31,11 @@ func newReportCmd() *cobra.Command {
 			"block. A ledger row whose story is gone counts under rig unknown. The report ends with CHEAP\n" +
 			"WINS: at most three one-line suggestions by fixed rules (causes unset, a dominant refusal\n" +
 			"reason, attempts used up, a refusal rate up, a flagged par, a slow gate), or 'none seen';\n" +
-			"--json carries every rule that held. It reads and writes nothing, and prints in 60 columns.\n" +
+			"--json carries every rule that held. Between FUEL and CHEAP WINS is FACTORY CHANGES: each\n" +
+			"millwright landing of the last 30 days with the 'Expect: <metric> <up|down>' line of its\n" +
+			"acceptance, that metric for the whole factory in the 7 days before and the 7 days after the\n" +
+			"landing day ('too soon' until the 7 days are over), and WORSE when it went the wrong way by\n" +
+			"more than a 10% band. It reads and writes nothing, and prints in 60 columns.\n" +
 			"mw report send posts a phone-sized summary of it to the Factory channel, once a day.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
