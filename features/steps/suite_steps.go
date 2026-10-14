@@ -648,6 +648,8 @@ func (c *suiteContext) theNewStoryHasAcceptance(file, acceptance string) error {
 	if err != nil {
 		return err
 	}
+	// A feature line holds no newline: \n stands for one.
+	acceptance = strings.ReplaceAll(acceptance, `\n`, "\n")
 	if story.Acceptance != acceptance {
 		return fmt.Errorf("expected the acceptance %q, got %q", acceptance, story.Acceptance)
 	}

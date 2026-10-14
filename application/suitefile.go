@@ -106,7 +106,7 @@ func (f SuiteFiler) fileOne(ctx context.Context, epic EpicDetail, report SuiteRe
 		EpicID:      epic.ID,
 		Title:       suiteBugTitle(report.Result.Rig, file),
 		Description: suiteBugDescription(report, file),
-		Acceptance:  fmt.Sprintf("1. %s passes on main 5 runs in a row (a shell loop, uptime beside each). 2. The rig's gate passes.", file.File),
+		Acceptance:  fmt.Sprintf("1. %s passes on main 5 runs in a row (a shell loop, uptime beside each). 2. The rig's gate passes.\n3. Sweep: none, because the nightly whole suite (mw suite) already runs every file of the rig and found this one.", file.File),
 		Overrides:   path,
 		Labels:      []string{LabelBug, LabelSuite},
 	})

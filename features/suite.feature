@@ -116,7 +116,7 @@ Feature: Running a rig's whole test suite on its main
     And the new story for "src/dates.test.ts" is held and labelled bug and suite
     And the new story for "src/dates.test.ts" has the files "src/dates.test.ts" and the epic's path keys
     And the new story for "src/dates.test.ts" describes "parses dates", "AssertionError: expected 1 to be 2", "9f3c2ab", "runs/suite/lampas/2026-10-13.log" and "Found by the nightly whole suite (mw suite); no story's gate ran this file."
-    And the new story for "src/dates.test.ts" has the acceptance "1. src/dates.test.ts passes on main 5 runs in a row (a shell loop, uptime beside each). 2. The rig's gate passes."
+    And the new story for "src/dates.test.ts" has the acceptance "1. src/dates.test.ts passes on main 5 runs in a row (a shell loop, uptime beside each). 2. The rig's gate passes.\n3. Sweep: none, because the nightly whole suite (mw suite) already runs every file of the rig and found this one."
     And the new story for "src/config.test.ts" is titled "[bug] lampas main: src/config.test.ts fails on main"
     And the suite sent one mail to the mayor, subject "Suite: lampas main 9f3c2ab: 2 failing"
     And the mail names each new story with its file

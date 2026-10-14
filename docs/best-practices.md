@@ -352,6 +352,14 @@ merges under the rig's merge slot and, when the merge was not a fast-forward, ru
 the tests again on the merged result
 ([*Closing a story out*](../README.md#closing-a-story-out)).
 
+**A bug's acceptance carries a sweep.** When a bug is seen, the story looks for the
+whole class of the fault, not only the case seen. A bug's acceptance criteria must
+have a line beginning `Sweep:` that checks the whole class (every route, every
+caller, every gate), and `mw dispatch` does not start a bug filed without one, on
+any rig. The escape for a true one-off is `Sweep: none, because <reason>`; a bare
+`Sweep: none` does not pass. `mw status` lists the open bugs lacking one. See
+[*Dispatch gates*](dispatch-gates.md#the-sweep-gate).
+
 **If you have less.** A pre-merge CI job that runs the tests on the merged result,
 and a rule that a story's last step is pasting the command and its output.
 
