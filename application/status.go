@@ -81,6 +81,11 @@ const NoFilesKeyHeading = "NO FILES KEY"
 // rule, whose acceptance has no usable Sweep: line (mw-gq6.419).
 const NoSweepHeading = "BUGS WITHOUT A SWEEP"
 
+// UncheckedErrorsHeading heads the section naming the classes of the
+// common-errors register not yet checked in every rig of their kinds: the
+// register's standing sweep (mw-gq6.420).
+const UncheckedErrorsHeading = "ERROR CLASSES TO CHECK"
+
 // EpicsMissingHeading heads the section naming the open epics that do not meet
 // what their rig requires of an epic, and EpicsWaivedHeading the one naming the
 // epics the Governor waived it for. Each is left out when it has none.
@@ -200,6 +205,10 @@ type Status struct {
 	// RigMemoryBytes is how large the Seat's memory of one rig may be before the
 	// report says it is due to be pruned. Zero reads DefaultRigMemoryBytes.
 	RigMemoryBytes int
+	// Errors, when set, is the common-errors register: the classes not yet
+	// checked in every rig of their kinds are named under
+	// UncheckedErrorsHeading (mw-gq6.420).
+	Errors ErrorFiles
 	// RigFacts, when set, is where each rig kept as facts has its eval.md run
 	// from; a rig whose eval fails is named under RIG MEMORY.
 	RigFacts RigFactFiles
@@ -468,6 +477,11 @@ type StatusReport struct {
 	// NoSweep are the open bugs filed after the sweep rule whose acceptance has
 	// no Sweep: line that passes, which mw dispatch will not claim.
 	NoSweep []StoryDetail
+	// UncheckedErrors are the classes of the common-errors register not yet
+	// checked in every rig of their kinds, by slug; UncheckedErrorsUnread is
+	// why the register could not be read, when it could not.
+	UncheckedErrors       []UncheckedClass
+	UncheckedErrorsUnread string
 	// Suites is how the last whole suite of each rig that runs one nightly went
 	// (mw-8w7xb7.3), in rig order.
 	Suites []SuiteStatus
@@ -762,6 +776,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	}
 
 	report.NoSweep = bugsWithoutASweep(known)
+	report.UncheckedErrors, report.UncheckedErrorsUnread = s.uncheckedErrors(ctx)
 
 	report.Suites = s.suiteStatuses(ctx)
 
@@ -1429,6 +1444,19 @@ func (r StatusReport) String() string {
 		b.WriteString("\n")
 	}
 
+	if len(r.UncheckedErrors) > 0 || r.UncheckedErrorsUnread != "" {
+		clip(&b, fmt.Sprintf("%s (%d)", UncheckedErrorsHeading, len(r.UncheckedErrors)))
+		if r.UncheckedErrorsUnread != "" {
+			clip(&b, "  cannot read the register: "+r.UncheckedErrorsUnread)
+		}
+		for _, unchecked := range r.UncheckedErrors {
+			for _, line := range unchecked.Lines() {
+				clip(&b, "  "+line)
+			}
+		}
+		b.WriteString("\n")
+	}
+
 	r.writeSuite(&b)
 
 	if r.FinishedKnown {
@@ -1941,4 +1969,24 @@ func bugsWithoutASweep(known []StoryDetail) []StoryDetail {
 		}
 	}
 	return found
+}
+
+// uncheckedErrors are the classes of the common-errors register not yet
+// checked in every rig of their kinds. A register that cannot be read is said,
+// and fails nothing else of the status; a class file that is not whole is left
+// out, as mw errors list names it.
+func (s Status) uncheckedErrors(ctx context.Context) ([]UncheckedClass, string) {
+	if s.Errors == nil {
+		return nil, ""
+	}
+	files, kindsText, err := s.Errors.ReadErrorRegister(ctx, s.Seat)
+	if err != nil {
+		return nil, err.Error()
+	}
+	kinds, err := ParseRigKinds(kindsText)
+	if err != nil {
+		return nil, ErrorKindsFile + ": " + err.Error()
+	}
+	classes, _ := LoadErrorClasses(files)
+	return UncheckedClasses(classes, kinds), ""
 }

@@ -524,3 +524,53 @@ func TestStatusShowsNothingOfSweepsWhenEveryBugHasOne(t *testing.T) {
 		t.Errorf("zero should show nothing, got %+v\n%s", report.NoSweep, report.String())
 	}
 }
+
+func statusWithErrors(t *testing.T, files *apptest.FakeErrorFiles) application.StatusReport {
+	t.Helper()
+	tracker := aTrackerPathedToVPS(t)
+	report, err := application.Status{
+		Tracker: tracker, Notes: tracker, Host: "vps", Seat: "builder", HostSilence: 2 * time.Hour,
+		Now: func() time.Time { return statusNow }, Errors: files,
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatalf("reading status: %v", err)
+	}
+	return report
+}
+
+func TestStatusListsTheErrorClassesNotYetCheckedInEveryRigOfTheirKinds(t *testing.T) {
+	files := &apptest.FakeErrorFiles{
+		Kinds: "lampas = [\"pwa\", \"grind\"]\nspell-forge = [\"pwa\"]\nmillwright = [\"go-cli\"]\n",
+		Classes: map[string]string{
+			"swept": "---\nsymptom: s\nkinds: go-cli\nsince: 2026-10-14\n---\n\n## Checked\n\n- 2026-10-14 millwright found:mw-gq6.1\n",
+			"twice": "---\nsymptom: s\nkinds: pwa\nsince: 2026-10-14\n---\n\n## Checked\n\n- 2026-10-14 lampas found:mw-a.1\n- 2026-10-14 lampas found:mw-a.2\n",
+			"grind": "---\nsymptom: s\nkinds: grind\nsince: 2026-10-14\n---\n",
+		},
+	}
+	report := statusWithErrors(t, files)
+	var slugs []string
+	for _, unchecked := range report.UncheckedErrors {
+		slugs = append(slugs, unchecked.Class.Slug+":"+strings.Join(unchecked.Rigs, "+"))
+	}
+	if got := strings.Join(slugs, ","); got != "grind:lampas,twice:spell-forge" {
+		t.Fatalf("unchecked classes: %q", got)
+	}
+	text := report.String()
+	if strings.Count(text, application.UncheckedErrorsHeading) != 1 || !strings.Contains(text, application.UncheckedErrorsHeading+" (2)") {
+		t.Errorf("one heading with the count, got:\n%s", text)
+	}
+	if !strings.Contains(text, "twice: not checked in spell-forge") || !strings.Contains(text, "seen 2 times: "+application.SharedComponentAsk) {
+		t.Errorf("each class names its rigs, and one seen twice asks the question, got:\n%s", text)
+	}
+}
+
+func TestStatusShowsNothingOfErrorClassesWhenEveryOneIsChecked(t *testing.T) {
+	files := &apptest.FakeErrorFiles{
+		Kinds:   "millwright = [\"go-cli\"]\n",
+		Classes: map[string]string{"swept": "---\nsymptom: s\nkinds: go-cli\nsince: 2026-10-14\n---\n\n## Checked\n\n- 2026-10-14 millwright ok\n"},
+	}
+	report := statusWithErrors(t, files)
+	if len(report.UncheckedErrors) != 0 || strings.Contains(report.String(), application.UncheckedErrorsHeading) {
+		t.Errorf("zero shows nothing, got:\n%s", report.String())
+	}
+}
