@@ -58,9 +58,10 @@ var (
 )
 
 // ParseFactProposals reads the 'For the rig memory:' section of one closing
-// comment: the lines from the heading to the end, the text after the heading's
-// own colon counting as the first. Blank lines are skipped; a bullet or a
-// number in front of a line is ignored. A line that is none of the proposal
+// comment: the lines from the heading to the end, or to a 'For common errors:'
+// heading after it, the text after the heading's own colon counting as the
+// first. Blank lines are skipped; a bullet or a number in front of a line is
+// ignored. A line that is none of the proposal
 // forms is returned as malformed, never dropped. When the comment holds the
 // heading more than once, the last is the section.
 func ParseFactProposals(comment string) FactProposals {
@@ -76,6 +77,11 @@ func ParseFactProposals(comment string) FactProposals {
 	}
 	found := FactProposals{Found: true}
 	for _, raw := range append([]string{first}, lines[start+1:]...) {
+		// A bug's 'For common errors:' section, written after this one, is not
+		// a proposal of it (mw-gq6.420).
+		if strings.Contains(strings.ToLower(raw), strings.ToLower(CommonErrorsMarker)) {
+			break
+		}
 		text := strings.TrimSpace(proposalListMarker.ReplaceAllString(strings.TrimSpace(raw), ""))
 		if text == "" {
 			continue
