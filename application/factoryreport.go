@@ -77,8 +77,30 @@ type FactoryReport struct {
 	Rig, Host string
 	// JSON prints the result as one object instead of text.
 	JSON bool
-	Now  func() time.Time
-	Out  io.Writer
+	// Notes, Mailbox and Snapshots, when all set, are what mw report send
+	// writes with: a WORSE factory change is told to the Mayor once, and a day's
+	// key metrics are kept. A plain mw report leaves them nil and writes nothing.
+	Notes     ReportNotes
+	Mailbox   Mailbox
+	Snapshots MetricSnapshots
+	Now       func() time.Time
+	Out       io.Writer
+}
+
+// ReportNotes is the part of the tracker's key-value store that remembers which
+// WORSE changes the Mayor has been told of.
+type ReportNotes interface {
+	Note(ctx context.Context, key string) (string, error)
+	SetNote(ctx context.Context, key, value string) error
+}
+
+// MetricSnapshots is where mw keeps the factory's key metrics, one dated
+// snapshot a day, in a file that is only ever appended to: Snapshots reads them
+// oldest first, none and no error when there are none; Append adds one. The real
+// adapter is infrastructure/vault; the fake is apptest.FakeMetricSnapshots.
+type MetricSnapshots interface {
+	Snapshots(ctx context.Context) ([]MetricSnapshot, error)
+	Append(ctx context.Context, snapshot MetricSnapshot) error
 }
 
 // ReportWindow is a stretch of days, from the start of Since to Until.
@@ -151,6 +173,9 @@ type FactoryReportResult struct {
 	// CheapWins are the suggestions every rule that held made, in precedence
 	// order; the first MaxCheapWins are Shown.
 	CheapWins []CheapWin `json:"cheap_wins"`
+	// Changes are the millwright landings of the last ChangeDays days, each
+	// with the metric it expected to move and how it moved; oldest first.
+	Changes []FactoryChange `json:"factory_changes"`
 	// Whole is the whole factory as one block, what Summary reads; nil when
 	// nothing landed, was refused or was filed. It is not in the JSON.
 	Whole *ReportBlock `json:"-"`
@@ -158,8 +183,13 @@ type FactoryReportResult struct {
 
 // reportEntry is one thing the window saw: a landing, a refusal or a bug filed.
 type reportEntry struct {
-	id               string
-	previous         bool
+	id       string
+	previous bool
+	// at is the start of the day the entry belongs to; inWindow says it falls
+	// in the window asked for or the one before it, and is false for an entry
+	// read only to measure a factory change.
+	at               time.Time
+	inWindow         bool
 	rig, host, model string
 	landed, refused  bool
 	bug              bool
@@ -205,7 +235,13 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 		PreviousWindow: ReportWindow{Since: since.AddDate(0, 0, -days), Until: since},
 	}
 
-	stories, err := r.Tracker.StoriesSince(ctx, result.PreviousWindow.Since)
+	// Entries are read back as far as a factory change needs them: a landing
+	// of the last ChangeDays days and the week before it.
+	earliest := result.PreviousWindow.Since
+	if wide := reportDay(now).AddDate(0, 0, -(ChangeDays + ChangeWindowDays)); wide.Before(earliest) {
+		earliest = wide
+	}
+	stories, err := r.Tracker.StoriesSince(ctx, earliest)
 	if err != nil {
 		return result, fmt.Errorf("reporting quality: %w", err)
 	}
@@ -240,7 +276,7 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 		}
 	}
 
-	var entries []reportEntry
+	var all []reportEntry
 	var landedIDs []string
 	landedSeen := map[string]bool{}
 	for _, line := range ledger {
@@ -249,14 +285,15 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 			continue
 		}
 		previous, inside := result.windowOfDay(row.Date)
-		if !inside {
+		day, dayErr := time.Parse(LedgerDate, row.Date)
+		if !inside && (dayErr != nil || day.Before(earliest) || day.After(now)) {
 			continue
 		}
 		reason, refused := row.Refusal()
 		if !row.Landed() && !refused {
 			continue
 		}
-		e := reportEntry{previous: previous, id: row.StoryID, rig: ReportUnknown, host: ReportUnknown, model: ReportUnknown,
+		e := reportEntry{previous: previous, inWindow: inside, at: day, id: row.StoryID, rig: ReportUnknown, host: ReportUnknown, model: ReportUnknown,
 			landed: row.Landed(), refused: refused, reason: reason, attempts: 1}
 		if row.Model != "" {
 			e.model = row.Model
@@ -273,14 +310,14 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 			if d.Attempts > 1 {
 				e.attempts = d.Attempts
 			}
-			if e.landed && !landedSeen[row.StoryID] {
+			if e.landed && inside && !landedSeen[row.StoryID] {
 				landedSeen[row.StoryID] = true
 				landedIDs = append(landedIDs, row.StoryID)
 			}
 		} else if b, found := benchmarks[row.StoryID]; found {
 			e.rig, e.host = orElse(b.Rig, e.rig), orElse(b.Host, e.host)
 		}
-		entries = append(entries, e)
+		all = append(all, e)
 	}
 
 	findings := map[string]int{}
@@ -298,15 +335,15 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 	// A story's findings, wall time and fuel count once per window, on its first
 	// landing row.
 	counted := map[string]bool{}
-	for i, e := range entries {
-		key := fmt.Sprintf("%t/%s", e.previous, e.id)
+	for i, e := range all {
+		key := fmt.Sprintf("%t/%t/%s", e.previous, e.inWindow, e.id)
 		if e.landed && e.id != "" && !counted[key] {
 			counted[key] = true
-			entries[i].findings = findings[e.id]
-			entries[i].tokens = tokensOf[e.id]
-			entries[i].costUSD = r.costOf(ctx, e.id, e.attempts)
+			all[i].findings = findings[e.id]
+			all[i].tokens = tokensOf[e.id]
+			all[i].costUSD = r.costOf(ctx, e.id, e.attempts)
 			if b, ok := landedIn[e.id]; ok {
-				entries[i].measured, entries[i].actualS, entries[i].ratio = true, b.ActualS, b.Ratio()
+				all[i].measured, all[i].actualS, all[i].ratio = true, b.ActualS, b.Ratio()
 			}
 		}
 	}
@@ -316,13 +353,21 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 			continue
 		}
 		previous, inside := result.windowOfTime(d.Created)
-		if !inside {
+		if !inside && d.Created.Before(earliest) {
 			continue
 		}
 		path := d.Merged()
-		entries = append(entries, reportEntry{previous: previous, bug: true,
+		all = append(all, reportEntry{previous: previous, inWindow: inside, at: reportDay(d.Created), bug: true,
 			rig: orElse(path.Rig, ReportUnknown), host: orElse(path.Host, ReportUnknown), model: orElse(string(path.Model), ReportUnknown)})
 	}
+
+	var entries []reportEntry
+	for _, e := range all {
+		if e.inWindow {
+			entries = append(entries, e)
+		}
+	}
+	result.Changes = factoryChanges(all, byID, now)
 
 	gates := gateTrends(recent, result.Window.Since, r.Rig, r.Host)
 	result.Rigs = r.blocks(entries, gates, func(e reportEntry) string { return e.rig }, func(g GateTrend) string { return g.Rig })
@@ -344,7 +389,7 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 			fmt.Fprint(r.Out, result.String())
 		}
 	}
-	return result, nil
+	return result, r.record(ctx, result, all, now)
 }
 
 // heavyStories are the stories of the window that used up their attempts or
@@ -517,6 +562,7 @@ func twoPlaces(x float64) float64 { return math.Round(x*100) / 100 }
 func (r FactoryReportResult) String() string {
 	var b strings.Builder
 	r.writeParts(&b)
+	writeChanges(&b, r.Changes)
 	writeCheapWins(&b, r.CheapWins)
 	return b.String()
 }
