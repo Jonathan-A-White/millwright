@@ -3,6 +3,7 @@ package application_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -339,5 +340,104 @@ func TestACrossSlotRetryCutShortByTheContextReturnsAtOnce(t *testing.T) {
 	}
 	if len(said) != 1 || !strings.Contains(said[0], "was not taken") || !strings.Contains(said[0], "context canceled") || notes.reads != 1 {
 		t.Fatalf("expected the slot not taken at once, got %d reads and %q", notes.reads, said)
+	}
+}
+
+// A host with several close-outs of a rig in line passed the slot across hosts
+// from one to the next within seconds, while a close-out waiting on the other
+// host looked again only every poll, and so could wait through several
+// landings in a row (mw-gq6.422). A close-out that finds the slot held by the
+// other host asks for the next turn at it, and the holder's host leaves the
+// slot to it once it is given back.
+
+// aHostTakingTurns is one host's view of the shared slot: its polls are let
+// through by the test one at a time, and say so when they begin.
+type aHostTakingTurns struct {
+	slot    application.CrossSlot
+	polling chan struct{}
+	tick    chan struct{}
+}
+
+func aHostTakingTurnsOn(notes application.SlotNotes, host string) *aHostTakingTurns {
+	h := &aHostTakingTurns{polling: make(chan struct{}, 16), tick: make(chan struct{})}
+	h.slot = application.CrossSlot{Notes: notes, Host: host, TTL: time.Minute, Poll: time.Second, Settle: time.Millisecond, Retry: time.Second,
+		Wait: func(ctx context.Context, d time.Duration) error {
+			if d == time.Second {
+				h.polling <- struct{}{}
+				select {
+				case <-h.tick:
+					return nil
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+			}
+			select {
+			case <-time.After(d):
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}}
+	return h
+}
+
+// lands takes the slot for who, says so on landed, and gives it back.
+func (h *aHostTakingTurns) lands(who string, landed chan<- string) {
+	held, said := h.slot.Take(context.Background(), "millwright", who)
+	if held == nil {
+		landed <- fmt.Sprintf("%s did not take the slot: %q", who, said)
+		return
+	}
+	held.Release(context.Background())
+	landed <- who
+}
+
+func TestACloseOutWaitingOnTheOtherHostTakesTheSlotAcrossHostsBeforeTheHoldersNextCloseOut(t *testing.T) {
+	server := apptest.NewFakeTracker()
+	desktop, laptop := aHostTakingTurnsOn(server, "desktop"), aHostTakingTurnsOn(server, "laptop")
+	landed := make(chan string, 8)
+	var order []string
+	next := func() string {
+		select {
+		case who := <-landed:
+			order = append(order, who)
+			return who
+		case <-time.After(10 * time.Second):
+			t.Fatalf("expected another landing, after %q", order)
+		}
+		return ""
+	}
+
+	// A, on the desktop, holds the slot; W, on the laptop, waits for it.
+	a, said := desktop.slot.Take(context.Background(), "millwright", "A")
+	if a == nil {
+		t.Fatalf("expected A to take the slot, got %q", said)
+	}
+	order = append(order, "A")
+	go laptop.lands("W", landed)
+	<-laptop.polling
+
+	// A lands; B, next in line on the desktop, comes to the slot at once.
+	a.Release(context.Background())
+	go desktop.lands("B", landed)
+	bWaits := false
+	select {
+	case who := <-landed:
+		order = append(order, who)
+	case <-desktop.polling:
+		bWaits = true
+	}
+
+	// W looks again, and lands; then B, then C.
+	laptop.tick <- struct{}{}
+	next()
+	if bWaits {
+		desktop.tick <- struct{}{}
+		next()
+	}
+	go desktop.lands("C", landed)
+	next()
+	if strings.Join(order, " ") != "A W B C" {
+		t.Fatalf("expected W, waiting on the laptop, to land second, got %q", order)
 	}
 }

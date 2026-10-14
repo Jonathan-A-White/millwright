@@ -15,6 +15,14 @@ import (
 // shared tracker's key-value store.
 func CrossSlotKey(rig string) string { return "merge-slot." + rig }
 
+// CrossTurnKey is the key a close-out waiting for a rig's cross-host merge slot
+// asks for the next turn at it under, when the other host holds it.
+func CrossTurnKey(rig string) string { return "merge-turn." + rig }
+
+// CrossTurnPolls is how many polls an ask for the next turn at a cross-host
+// merge slot lasts unless its asker, who renews it at every poll, does.
+const CrossTurnPolls = 4
+
 // How a cross-host merge slot is kept. CrossSlotTTL is how long a lease lasts
 // unless its holder renews it, which it does every third of that while it
 // lands; CrossSlotPoll is how often a close-out waiting for it looks again;
@@ -53,6 +61,15 @@ const (
 // reach drops for seconds under load; one that still cannot be after Retry is
 // skipped, and said so with how many tries failed over how long: the landing
 // goes ahead under this host's slot alone, as it did before there was one.
+//
+// A close-out that finds the slot held by the other host asks for the next turn
+// at it, and a close-out that finds the slot free while the other host has the
+// turn waits for that host's landing first (mw-gq6.422). Without it a host
+// with several close-outs of a rig in line passed the slot from one to the
+// next within seconds, while the other host, looking again only every poll,
+// could wait through several landings in a row. The turn is a courtesy: one
+// that cannot be read or written is no turn, and an asker that went away
+// leaves one that runs out within CrossTurnPolls polls.
 //
 // The zero CrossSlot, or one with no Notes, takes nothing and says nothing.
 type CrossSlot struct {
@@ -130,8 +147,16 @@ func (s CrossSlot) Take(ctx context.Context, rig, holder string) (*CrossHolding,
 	if s.Notes == nil || strings.TrimSpace(rig) == "" {
 		return nil, nil
 	}
-	key := CrossSlotKey(rig)
+	key, turnKey := CrossSlotKey(rig), CrossTurnKey(rig)
 	began := s.now()
+	// This close-out's ask for the next turn, once it has made one: taken
+	// back however the wait ends, when it is still this close-out's.
+	var turn CrossSlotLease
+	defer func() {
+		if turn.Token != "" {
+			s.leaveTurn(context.WithoutCancel(ctx), turnKey, turn.Token)
+		}
+	}()
 	var waitedOn []string
 	waited := func(said []string) []string {
 		if len(waitedOn) == 0 {
@@ -158,6 +183,9 @@ func (s CrossSlot) Take(ctx context.Context, rig, holder string) (*CrossHolding,
 					return nil, []string{fmt.Sprintf("waited %s for %s landing of %s and went ahead without the cross-host merge slot: %s still held it, past the %s a close-out waits for it",
 						SlotAge(long), possessive(waitedOn), rig, held.Holder, SlotAge(s.cap()))}
 				}
+				if held.Host != s.Host {
+					turn = s.askForTheTurn(ctx, turnKey, holder, turn.Token, now)
+				}
 				if err := s.wait(ctx, s.poll()); err != nil {
 					return nil, waited([]string{fmt.Sprintf("the cross-host merge slot of %s was not taken: waiting for %s: %v", rig, held.Holder, err)})
 				}
@@ -166,6 +194,20 @@ func (s CrossSlot) Take(ctx context.Context, rig, holder string) (*CrossHolding,
 				took = []string{fmt.Sprintf("took over the cross-host merge slot of %s from %s: its lease was taken %s ago and ran out %s ago, so its holder is gone",
 					rig, held.Holder, SlotAge(now.Sub(held.Taken)), SlotAge(now.Sub(held.Expires)))}
 			}
+		}
+
+		// The slot is free, but a close-out of the other host waited for it:
+		// the turn is that one's.
+		if next, ok := s.otherTurn(ctx, turnKey, now); ok {
+			waitedOn = addOnce(waitedOn, next.Host)
+			if long := now.Sub(began); long >= s.cap() {
+				return nil, []string{fmt.Sprintf("waited %s for %s landing of %s and went ahead without the cross-host merge slot: %s had the next turn at it, past the %s a close-out waits for it",
+					SlotAge(long), possessive(waitedOn), rig, next.Holder, SlotAge(s.cap()))}
+			}
+			if err := s.wait(ctx, s.poll()); err != nil {
+				return nil, waited([]string{fmt.Sprintf("the cross-host merge slot of %s was not taken: waiting for %s, whose turn it was: %v", rig, next.Holder, err)})
+			}
+			continue
 		}
 
 		mine := CrossSlotLease{Holder: holder, Host: s.Host, Token: newSlotToken(), Taken: now, Expires: now.Add(s.ttl())}
@@ -186,6 +228,47 @@ func (s CrossSlot) Take(ctx context.Context, rig, holder string) (*CrossHolding,
 			continue
 		}
 		return s.hold(ctx, key, rig, mine), waited(took)
+	}
+}
+
+// askForTheTurn writes, or writes again, this close-out's ask for the next turn
+// at the slot, under the token it already has or a new one. One that cannot be
+// written is no turn asked for, and is tried again at the next poll.
+func (s CrossSlot) askForTheTurn(ctx context.Context, turnKey, holder, token string, now time.Time) CrossSlotLease {
+	if token == "" {
+		token = newSlotToken()
+	}
+	ask := CrossSlotLease{Holder: holder, Host: s.Host, Token: token, Taken: now, Expires: now.Add(CrossTurnPolls * s.poll())}
+	if err := s.Notes.SetNote(ctx, turnKey, ask.Note()); err != nil {
+		return CrossSlotLease{Token: token}
+	}
+	return ask
+}
+
+// otherTurn is the ask for the next turn at the slot of a close-out of another
+// host, when there is one that has not run out. A turn that cannot be read is
+// no turn.
+func (s CrossSlot) otherTurn(ctx context.Context, turnKey string, now time.Time) (CrossSlotLease, bool) {
+	note, err := s.Notes.Note(ctx, turnKey)
+	if err != nil || strings.TrimSpace(note) == "" {
+		return CrossSlotLease{}, false
+	}
+	ask, ok := ReadCrossSlotLease(note)
+	if !ok || ask.Host == s.Host || !now.Before(ask.Expires) {
+		return CrossSlotLease{}, false
+	}
+	return ask, true
+}
+
+// leaveTurn takes this close-out's ask for the next turn back, when it is still
+// this close-out's.
+func (s CrossSlot) leaveTurn(ctx context.Context, turnKey, token string) {
+	note, err := s.Notes.Note(ctx, turnKey)
+	if err != nil {
+		return
+	}
+	if ask, ok := ReadCrossSlotLease(note); ok && ask.Token == token {
+		_ = s.Notes.ClearNote(ctx, turnKey)
 	}
 }
 
