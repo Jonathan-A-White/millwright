@@ -1295,6 +1295,16 @@ main <sha>: <n> failing`, or `all pass`). A rig with no `suite_epic` is refused
 with `--file` before anything runs; without `--file` nothing is filed and no
 mail is sent. See `features/suite.feature`.
 
+**A suite bug is re-checked before it is dispatched** (mw-gq6.414). A story that landed after the
+nightly suite's sha may have fixed the bug already. Before `mw dispatch` claims a story labelled `suite`
+whose `files` key is exactly one test file, it runs that file alone on a fresh worktree of the rig's
+origin main (`recheck-<rig>` beside the story worktrees), with the command `mw suite` runs a file alone
+with (`[changed_specs]` for a `*.spec.*` file when the rig has one, `[tests]` plus the file otherwise).
+If it passes, the bug is closed with the reason `fixed on main before dispatch: <spec> passes at <sha>
+(<n> tests)` and a comment holding the end of the run, and no session, claim or worktree is made; it
+takes none of the cap. If it fails, or cannot be run, the story is dispatched as before and its line in
+the report says which. A story without the `suite` label is never re-run, nor is anything in a dry run.
+
 **The nightly run** (mw-8w7xb7.3). The home's follower (`mw events follow`) springs the job `suite@<host>`:
 from **08:00 UTC** each day (about 3-4 am in the US) it runs `mw suite <rig> --file` for each rig of
 this host's `[rigs]` whose file says `nightly_suite = true`, one after the other, never two at once. It

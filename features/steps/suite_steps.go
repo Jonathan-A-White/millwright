@@ -38,6 +38,7 @@ type suiteContext struct {
 	whole    map[string]string // what the whole run of tests/specs printed
 	failed   map[string]bool   // whether the whole run of tests/specs failed
 	alone    map[string]bool   // file -> fails when run alone
+	rerun    map[string]string // file -> what a passing re-run of it prints
 	readsAt1 int               // load reads made before the first command was run
 
 	// The --file side: the rig's suite epic and the tracker and mailbox the
@@ -49,6 +50,11 @@ type suiteContext struct {
 	epicPath  domain.Path
 	preFiled  map[string]bool // ids of the beads the scenario began with
 	suiteFile bool
+
+	// sessions and dispatch are what mw dispatch started and reported, in the
+	// scenarios that run it (mw-gq6.414).
+	sessions *apptest.FakeRunner
+	dispatch application.DispatchReport
 
 	out    bytes.Buffer
 	report application.SuiteReport
@@ -72,6 +78,7 @@ func InitializeSuiteScenario(ctx *godog.ScenarioContext) {
 			whole:    map[string]string{},
 			failed:   map[string]bool{},
 			alone:    map[string]bool{},
+			rerun:    map[string]string{},
 			tracker:  apptest.NewFakeTracker(),
 			mailbox:  apptest.NewFakeMailbox(),
 			rules:    apptest.NewFakeEpicRules(),
@@ -88,6 +95,13 @@ func InitializeSuiteScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the whole run of the (tests|specs) prints:$`, c.theWholeRunPrints)
 	ctx.Given(`^the (tests|specs) fail$`, c.theWholeRunFails)
 	ctx.Given(`^alone, "([^"]*)" (fails again|passes)$`, c.aloneItGoes)
+	ctx.Given(`^the re-run of "([^"]*)" on main prints "([^"]*)" and passes$`, c.aRerunPasses)
+	ctx.Given(`^the suite epic "([^"]*)" holds the ready bug "([^"]*)" labelled "([^"]*)", whose files key is "([^"]*)"$`, c.theEpicHoldsAReadyBug)
+	ctx.When(`^mw dispatch runs on "([^"]*)" for "([^"]*)"$`, c.mwDispatchRuns)
+	ctx.Then(`^the bug "([^"]*)" is closed with the reason "([^"]*)"$`, c.theBugIsClosedWith)
+	ctx.Then(`^the bug "([^"]*)" has a comment holding "([^"]*)"$`, c.theBugHasCommentHolding)
+	ctx.Then(`^dispatch started no session and "([^"]*)" is claimed by nobody$`, c.dispatchStartedNothing)
+	ctx.Then(`^the dispatch printed: (.+)$`, c.theDispatchPrinted)
 	ctx.Given(`^the host is at load ([\d.]+) of (\d+) cores, then ([\d.]+), then ([\d.]+)$`, c.theHostCalms)
 	ctx.Given(`^the host is always at load ([\d.]+) of (\d+) cores$`, c.theHostStaysBusy)
 	ctx.Given(`^the suite waits at most (\d+) hours? for the host to calm$`, c.theCalmBound)
@@ -203,6 +217,11 @@ func (c *suiteContext) respond(rig string) func(dir, command string) (applicatio
 		if c.readsAt1 == 0 {
 			c.readsAt1 = c.load.Reads
 		}
+		for file, out := range c.rerun {
+			if command == c.tests[rig]+" "+file || (c.specs[rig] != "" && command == strings.ReplaceAll(c.specs[rig], application.SpecsPlaceholder, file)) {
+				return application.Checked{Passed: true, Output: out + "\n"}, nil
+			}
+		}
 		for file, fails := range c.alone {
 			if command == c.tests[rig]+" "+file || (c.specs[rig] != "" && command == strings.ReplaceAll(c.specs[rig], application.SpecsPlaceholder, file)) {
 				out := "alone: " + file + "\n"
@@ -232,7 +251,7 @@ func (c *suiteContext) mwSuiteRunsWithFile(rig string) error {
 	return c.run(rig)
 }
 
-func (c *suiteContext) run(rig string) error {
+func (c *suiteContext) newSuite(rig string) application.Suite {
 	if c.main == "" {
 		c.main = "0000000"
 	}
@@ -257,6 +276,11 @@ func (c *suiteContext) run(rig string) error {
 	if c.hasLoad {
 		suite.Load = c.load
 	}
+	return suite
+}
+
+func (c *suiteContext) run(rig string) error {
+	suite := c.newSuite(rig)
 	if c.suiteFile {
 		suite.Filer = &application.SuiteFiler{Tracker: c.tracker, Rules: c.rules, Mailbox: c.mailbox, Host: "desktop"}
 	}
@@ -713,4 +737,68 @@ func (c *suiteContext) theMailSaysWhichIsWhich(id, file string) error {
 		return fmt.Errorf("expected the mail to say %s with %s was commented and the other new, got:\n%s", id, file, mail[0].Body)
 	}
 	return nil
+}
+
+func (c *suiteContext) aRerunPasses(file, printed string) error {
+	c.rerun[file] = printed
+	return nil
+}
+
+func (c *suiteContext) theEpicHoldsAReadyBug(epic, id, label, files string) error {
+	c.tracker.AddEpic(epic, domain.Path{
+		Rig: "lampas", Branch: "main", Harness: domain.HarnessClaude,
+		Model: domain.ModelSonnet, Effort: domain.EffortHigh, Host: "desktop",
+	})
+	c.tracker.AddStory(epic, domain.Story{
+		ID: id, Title: "[bug] lampas main: " + files + " fails on main", Overrides: domain.Path{Files: files},
+	})
+	return c.tracker.SetLabels(id, "bug", label)
+}
+
+func (c *suiteContext) mwDispatchRuns(host, rig string) error {
+	c.sessions = apptest.NewFakeRunner()
+	c.dispatch, c.err = application.Dispatch{
+		Tracker:   c.tracker,
+		Worktrees: noWorktrees{},
+		Runner:    c.sessions,
+		Host:      host,
+		Cap:       2,
+		Rigs:      map[string]string{rig: path.Join(suiteRigsDir, rig)},
+		Rechecks:  c.newSuite(rig),
+		Out:       &c.out,
+	}.Run(context.Background())
+	return c.err
+}
+
+func (c *suiteContext) theBugIsClosedWith(id, reason string) error {
+	if got := c.tracker.CloseReason(id); got != reason {
+		return fmt.Errorf("expected %s to be closed with %q, the reason is %q (dispatch printed:\n%s)", id, reason, got, c.out.String())
+	}
+	return nil
+}
+
+func (c *suiteContext) theBugHasCommentHolding(id, text string) error {
+	said := strings.Join(c.tracker.Comments(id), "\n")
+	if !strings.Contains(said, text) {
+		return fmt.Errorf("expected a comment on %s holding %q, got %q", id, text, said)
+	}
+	return nil
+}
+
+func (c *suiteContext) dispatchStartedNothing(id string) error {
+	if started := c.sessions.Started(); len(started) != 0 || len(c.dispatch.Started) != 0 {
+		return fmt.Errorf("expected no session, started %v / %+v", started, c.dispatch.Started)
+	}
+	detail, err := c.tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	if detail.Assignee != "" {
+		return fmt.Errorf("expected %s to be claimed by nobody, it is claimed by %s", id, detail.Assignee)
+	}
+	return nil
+}
+
+func (c *suiteContext) theDispatchPrinted(want string) error {
+	return c.theSuitePrints(want)
 }

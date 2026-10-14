@@ -194,3 +194,15 @@ Feature: Running a rig's whole test suite on its main
     Then the suite exits 1
     And the suite epic "mw-suite" holds 0 new stories
     And the suite sent no mail
+
+  Scenario: A suite bug whose spec already passes on main is closed before it is dispatched
+    Given the suite rig "lampas" has the changed-specs command "npx playwright test {specs}"
+    And the suite epic "mw-suite" holds the ready bug "mw-suite.1" labelled "suite", whose files key is "tests/e2e/greek-audio.spec.ts"
+    And the re-run of "tests/e2e/greek-audio.spec.ts" on main prints "3 passed (4.1s)" and passes
+    When mw dispatch runs on "desktop" for "lampas"
+    Then the bug "mw-suite.1" is closed with the reason "fixed on main before dispatch: tests/e2e/greek-audio.spec.ts passes at 9f3c2ab (3 tests)"
+    And the bug "mw-suite.1" has a comment holding "3 passed (4.1s)"
+    And dispatch started no session and "mw-suite.1" is claimed by nobody
+    And the suite ran exactly 1 command
+    And the suite ran "npx playwright test tests/e2e/greek-audio.spec.ts" alone
+    And the suite's worktree is gone

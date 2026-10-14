@@ -181,6 +181,12 @@ func newDispatchCmd() *cobra.Command {
 			"grist_slow_factor (default 1.5) times that kind's par (its median over the last 50) it starts none,\n" +
 			"until they recover; the reason is the room event's. Stories already running are never stopped, and\n" +
 			"a grind never waits for a slot.\n\n" +
+			"A story labelled suite (a bug the nightly whole suite filed) whose files key is one test file is\n" +
+			"re-checked first, before it is claimed: that spec is run alone on a fresh worktree of the rig's\n" +
+			"origin main, with the command mw suite runs a file alone with. If it passes, a story that landed\n" +
+			"since the suite's sha has fixed it: the bug is closed (\"fixed on main before dispatch: <spec> passes\n" +
+			"at <sha> (<n> tests)\") with the end of the run in a comment, and no session is started. If it fails,\n" +
+			"or cannot be run, the story is dispatched as ever and its line says so. A dry run re-runs nothing.\n\n" +
 			"--dry-run prints what it would start and writes nothing: nothing is synced, claimed, cut,\n" +
 			"poured or started.",
 		Args: cobra.NoArgs,
@@ -213,6 +219,10 @@ func newDispatchCmd() *cobra.Command {
 					host, config.RigsTable, config.File)
 			}
 			tests, err := config.Tests()
+			if err != nil {
+				return err
+			}
+			changedSpecs, err := config.ChangedSpecs()
 			if err != nil {
 				return err
 			}
@@ -284,8 +294,12 @@ func newDispatchCmd() *cobra.Command {
 				Events:      homeEventLog(),
 				SmokeHolds:  gristSmokeBook(gateway, host),
 				Home:        files,
-				DryRun:      dryRun,
-				Out:         cmd.OutOrStdout(),
+				Rechecks: application.Suite{
+					Trees: worktrees, Heads: worktrees, Runner: rig.NewChecks(rig.WithNice(nice), rig.WithJobs(jobs)),
+					Rigs: rigs, Tests: tests, ChangedSpecs: changedSpecs,
+				},
+				DryRun: dryRun,
+				Out:    cmd.OutOrStdout(),
 			}
 			// The mill answers what it left waiting, on the host that is home and
 			// where a [grist] table says so. A mill that cannot be set up costs
