@@ -281,8 +281,9 @@ type SpecChecks interface {
 
 // MergeSlot is the port that keeps two close-outs from landing on one rig's
 // target branch at the same time. It is per rig and per host: the other host
-// has its own, and the two hosts take turns by the rig's CrossSlot, around it
-// (mw-gq6.359). The remote still settles whatever race gets past both.
+// has its own, and the two hosts take turns by the rig's CrossSlot, taken
+// inside it (mw-gq6.359, mw-gq6.421). The remote still settles whatever race
+// gets past both.
 type MergeSlot interface {
 	// Take waits for the rig's slot and reports the holding, which the caller
 	// gives back. holder says who has it, for whoever finds it taken. It gives

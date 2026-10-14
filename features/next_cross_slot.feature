@@ -6,7 +6,7 @@ Feature: The two hosts take turns at a rig's merge slot
   again, the other host landed again meanwhile, and the story stopped push-lost
   (mw-y3qno5.3: the desktop's Lampas gate is 27 minutes, and the Laptop lands
   Lampas every ten). So a rig's merge slot spans hosts as well: a lease on the
-  beads server both hosts share, taken around this host's own slot, waited for
+  beads server both hosts share, taken inside this host's own slot, waited for
   while the other host holds it, taken over once it has run out, and skipped,
   saying so, when the server cannot be reached.
 

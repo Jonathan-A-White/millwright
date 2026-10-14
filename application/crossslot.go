@@ -34,7 +34,9 @@ const (
 // CrossSlot is a rig's merge slot across hosts (mw-gq6.359): a lease, kept on
 // the beads server both hosts share, that one close-out on either host holds
 // while it fetches, merges, re-runs the rig's tests on the merged result and
-// pushes. This host's own MergeSlot is taken inside it.
+// pushes. It is taken inside this host's own MergeSlot, never around it: a
+// close-out waiting in line for its own host's slot holds nothing the other
+// host waits for (mw-gq6.421).
 //
 // Without it the two hosts raced at the remote, and a host whose merged-result
 // tests take longer than the other host takes to land a story never won: each

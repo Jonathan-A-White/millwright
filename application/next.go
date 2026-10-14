@@ -182,7 +182,7 @@ type Next struct {
 	Vault      Vault
 
 	// CrossSlot is the rig's merge slot across hosts, on the beads server both
-	// hosts share, taken around Slot so that the other host's close-outs wait
+	// hosts share, taken inside Slot so that the other host's close-outs wait
 	// their turn rather than race this one to the remote (mw-gq6.359). The zero
 	// CrossSlot takes none, and the remote alone settles the race.
 	CrossSlot CrossSlot
@@ -828,23 +828,24 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	report.Notes = append(report.Notes, smokeNotes...)
 	n.readFilesOutsideTheKey(ctx, c, report)
 
-	// Only one close-out at a time may touch a rig's target branch: the rig's
-	// slot across hosts keeps the other host's out (mw-gq6.359), and inside it
-	// this host's own slot keeps this host's. Whatever race gets past both is
-	// settled by the remote itself, below.
+	// Only one close-out at a time may touch a rig's target branch: this host's
+	// own slot keeps this host's out, and inside it the rig's slot across hosts
+	// keeps the other host's (mw-gq6.359). The slot across hosts is the wider,
+	// so it is taken last and given back first: a close-out waiting in line on
+	// this host never keeps the other host waiting too (mw-gq6.421). Whatever
+	// race gets past both is settled by the remote itself, below.
+	holding, err := n.Slot.Take(ctx, c.rigDir, Holders(n.Seat, n.Host, c.id))
+	if err != nil {
+		return n.stop(ctx, c, report, ReasonMergeSlot, fmt.Sprintf("the merge slot of %s could not be taken: %v", c.path.Rig, err), "")
+	}
 	cross, said := n.CrossSlot.Take(ctx, c.path.Rig, Holders(n.Seat, n.Host, c.id))
 	report.CrossSlot = append(report.CrossSlot, said...)
 	c.crossHeld = cross != nil
-	holding, err := n.Slot.Take(ctx, c.rigDir, Holders(n.Seat, n.Host, c.id))
-	if err != nil {
-		report.Notes = append(report.Notes, cross.Release(ctx)...)
-		return n.stop(ctx, c, report, ReasonMergeSlot, fmt.Sprintf("the merge slot of %s could not be taken: %v", c.path.Rig, err), "")
-	}
 	landed, landErr := n.merge(ctx, c, report)
+	report.Notes = append(report.Notes, cross.Release(ctx)...)
 	if err := holding.Release(ctx); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("the merge slot of %s could not be given back: %v", c.path.Rig, err))
 	}
-	report.Notes = append(report.Notes, cross.Release(ctx)...)
 	if landErr != nil {
 		kept := n.keepLandingError(ctx, c, report, landErr)
 		switch {
