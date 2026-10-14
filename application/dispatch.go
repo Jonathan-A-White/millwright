@@ -18,6 +18,11 @@ import (
 // closes it out can find the formula steps that were poured for it.
 const MoleculeField = "molecule"
 
+// DispatchGateWait is the most a dispatch waits for the host's gate lock before
+// a suite bug's re-run on main: a gate runs for many minutes, and a dispatch
+// tick is not worth holding for one (mw-gq6.416).
+const DispatchGateWait = 30 * time.Second
+
 // RunState is the state dimension a dispatched story carries, and RunRunning is
 // its value while a session is working it.
 const (
@@ -212,6 +217,15 @@ type Dispatch struct {
 	// the bug is closed with no session. A nil Rechecks re-runs nothing, and a dry
 	// run re-runs nothing either.
 	Rechecks SpecRechecker
+
+	// GateLock is the host's gate lock, the one a rig's gate takes (mw-gq6.416).
+	// A suite bug's re-run on main is a heavy run, so it is made only while the
+	// lock is held. A nil GateLock takes none.
+	GateLock GateLock
+
+	// GateWait is the most the re-run waits for the gate lock; a re-run that
+	// cannot have it by then is skipped. Zero is DispatchGateWait.
+	GateWait time.Duration
 
 	// DryRun prints what would be started and writes nothing at all: nothing is
 	// synced, nothing claimed, no worktree made, no formula poured, no session
@@ -841,7 +855,11 @@ func (d Dispatch) recheckSuiteBug(ctx context.Context, detail StoryDetail, path 
 		return "", false
 	}
 	id := detail.Story.ID
-	found, err := d.Rechecks.Recheck(ctx, path.Rig, spec)
+	found, err := d.recheckUnderGate(ctx, id, path.Rig, spec, report)
+	var busy gateBusy
+	if errors.As(err, &busy) {
+		return busy.Error(), false
+	}
 	switch {
 	case err != nil:
 		return fmt.Sprintf("not re-run on main first: %v", oneLine(err.Error())), false
@@ -860,6 +878,43 @@ func (d Dispatch) recheckSuiteBug(ctx context.Context, detail StoryDetail, path 
 	}
 	report.FixedOnMain = append(report.FixedOnMain, one)
 	return "", true
+}
+
+// gateBusy is why a suite bug was not re-run: the host's gate lock was not to be
+// had. It reads as the line of the dispatch says it.
+type gateBusy struct{ why string }
+
+func (g gateBusy) Error() string { return g.why }
+
+// recheckUnderGate re-runs spec on rig's main while holding the host's gate lock,
+// the one a rig's gate takes, so that a heavy spec never runs beside a gate
+// (mw-gq6.416). It waits for the lock no longer than GateWait; a lock that is not
+// to be had by then is a gateBusy, and the re-run is not made. The lock is given
+// back however the re-run ends. A nil GateLock re-runs without one.
+func (d Dispatch) recheckUnderGate(ctx context.Context, id, rig, spec string, report *DispatchReport) (SpecRecheck, error) {
+	if d.GateLock == nil {
+		return d.Rechecks.Recheck(ctx, rig, spec)
+	}
+	wait := d.GateWait
+	if wait <= 0 {
+		wait = DispatchGateWait
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wait)
+	defer cancel()
+	var heldBy string
+	turn, err := d.GateLock.Take(waitCtx, id, func(by string) { heldBy = by })
+	if err != nil {
+		if heldBy != "" || errors.Is(err, context.DeadlineExceeded) {
+			return SpecRecheck{}, gateBusy{"not re-checked: the gate is busy"}
+		}
+		return SpecRecheck{}, gateBusy{fmt.Sprintf("not re-checked: the gate lock could not be taken: %v", oneLine(err.Error()))}
+	}
+	defer func() {
+		if err := turn.Holding.Release(context.Background()); err != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf("%s's gate lock could not be given back: %v", d.Host, err))
+		}
+	}()
+	return d.Rechecks.Recheck(ctx, rig, spec)
 }
 
 // answerWaitingGrist runs one pass of the mill after the claims, on the host

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
@@ -19,10 +20,17 @@ type stubRechecks struct {
 	answer application.SpecRecheck
 	err    error
 	asked  []string
+	// lock, when it is set, is the gate lock the re-run is watched under: held
+	// holds how many locks were out when each re-run began.
+	lock *aGateLock
+	held []int
 }
 
 func (s *stubRechecks) Recheck(_ context.Context, rig, spec string) (application.SpecRecheck, error) {
 	s.asked = append(s.asked, rig+" "+spec)
+	if s.lock != nil {
+		s.held = append(s.held, s.lock.taken-s.lock.freed)
+	}
 	return s.answer, s.err
 }
 
@@ -192,6 +200,99 @@ func TestAStoryClosedBeforeDispatchTakesNoSlotOfTheCap(t *testing.T) {
 	}
 	if ids := startedIDs(report); len(ids) != 1 || ids[0] != "mw-gq6.2" {
 		t.Fatalf("started %v, want mw-gq6.2 to take the one slot", ids)
+	}
+}
+
+// aBusyGateLock is a host gate lock another gate holds for as long as the
+// asker is willing to wait.
+type aBusyGateLock struct{ by string }
+
+func (b aBusyGateLock) Take(ctx context.Context, _ string, held func(string)) (application.GateTurn, error) {
+	if held != nil {
+		held(b.by)
+	}
+	<-ctx.Done()
+	return application.GateTurn{}, ctx.Err()
+}
+
+func TestTheSuiteBugRecheckRunsOnlyWhileTheGateLockIsHeldAndGivesItBackWhateverItFinds(t *testing.T) {
+	for name, answer := range map[string]struct {
+		found application.SpecRecheck
+		err   error
+	}{
+		"a pass":       {found: application.SpecRecheck{Spec: greekSpec, Sha: "abc", Passed: true, Tests: 1}},
+		"a fail":       {found: application.SpecRecheck{Spec: greekSpec, Sha: "abc", Passed: false}},
+		"a cannot-run": {err: errors.New("no tree")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dispatch, tracker, _, _, _ := aFactory(t)
+			aSuiteBug(t, tracker, "mw-gq6.1", application.LabelBug, application.LabelSuite)
+			lock := &aGateLock{}
+			recheck := &stubRechecks{answer: answer.found, err: answer.err, lock: lock}
+			dispatch.Rechecks = recheck
+			dispatch.GateLock = lock
+
+			if _, err := dispatch.Run(context.Background()); err != nil {
+				t.Fatalf("dispatching: %v", err)
+			}
+			if len(recheck.held) != 1 || recheck.held[0] != 1 {
+				t.Errorf("the re-run should begin with the gate lock held once, got %v", recheck.held)
+			}
+			if lock.taken != 1 || lock.freed != 1 {
+				t.Errorf("the lock should be taken once and given back, got taken %d freed %d", lock.taken, lock.freed)
+			}
+			if lock.holders[0] != "mw-gq6.1" {
+				t.Errorf("the lock should be taken for the story, got %v", lock.holders)
+			}
+		})
+	}
+}
+
+func TestASuiteBugIsNotRerunWhileAnotherGateHoldsTheLockAndIsDispatchedAsBefore(t *testing.T) {
+	dispatch, tracker, _, _, _ := aFactory(t)
+	aSuiteBug(t, tracker, "mw-gq6.1", application.LabelBug, application.LabelSuite)
+	recheck := &stubRechecks{answer: application.SpecRecheck{Spec: greekSpec, Sha: "abc", Passed: true, Tests: 1}}
+	dispatch.Rechecks = recheck
+	dispatch.GateLock = aBusyGateLock{by: "mw-x.9"}
+	dispatch.GateWait = time.Millisecond
+
+	report, err := dispatch.Run(context.Background())
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if len(recheck.asked) != 0 {
+		t.Errorf("the re-run was made without the gate lock: %v", recheck.asked)
+	}
+	if ids := startedIDs(report); len(ids) != 1 || ids[0] != "mw-gq6.1" {
+		t.Fatalf("started %v, want the bug dispatched as before", ids)
+	}
+	if tracker.CloseReason("mw-gq6.1") != "" {
+		t.Errorf("a bug that was not re-run must not be closed")
+	}
+	if !strings.Contains(report.Started[0].Recheck, "not re-checked: the gate is busy") {
+		t.Errorf("the started story should say the gate was busy, got %q", report.Started[0].Recheck)
+	}
+	if !strings.Contains(report.String(), "not re-checked: the gate is busy") {
+		t.Errorf("the dispatch line should say so, got:\n%s", report.String())
+	}
+}
+
+func TestASuiteBugIsDispatchedWhenTheGateLockCannotBeTakenForAnotherReason(t *testing.T) {
+	dispatch, tracker, _, _, _ := aFactory(t)
+	aSuiteBug(t, tracker, "mw-gq6.1", application.LabelBug, application.LabelSuite)
+	recheck := &stubRechecks{answer: application.SpecRecheck{Passed: true}}
+	dispatch.Rechecks = recheck
+	dispatch.GateLock = &aGateLock{refuse: errors.New("no room for the lock file")}
+
+	report, err := dispatch.Run(context.Background())
+	if err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if len(recheck.asked) != 0 || len(startedIDs(report)) != 1 {
+		t.Fatalf("re-ran %v, started %v", recheck.asked, startedIDs(report))
+	}
+	if got := report.Started[0].Recheck; !strings.Contains(got, "not re-checked") || !strings.Contains(got, "no room for the lock file") {
+		t.Errorf("the line should say why, got %q", got)
 	}
 }
 

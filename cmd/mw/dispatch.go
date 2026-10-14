@@ -295,6 +295,7 @@ func newDispatchCmd() *cobra.Command {
 				Events:      homeEventLog(),
 				SmokeHolds:  gristSmokeBook(gateway, host),
 				Home:        files,
+				GateLock:    hostGateLock(),
 				Rechecks: application.Suite{
 					Trees: worktrees, Heads: worktrees, Runner: rig.NewChecks(rig.WithNice(nice), rig.WithJobs(jobs)),
 					Rigs: rigs, Tests: tests, ChangedSpecs: changedSpecs,
