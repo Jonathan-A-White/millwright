@@ -23,6 +23,7 @@ three.
 | `formula-not-installed` | the path's formula is not installed in the vault |
 | `no-sweep` | a bug filed after the sweep rule has no line beginning `Sweep:` in its acceptance (below) |
 | `attempts-exhausted` | it was started `max_attempts` times already |
+| `handed-back` | its Builder handed it back (a comment opening `HANDED BACK`) and no later comment opening `RE-PATHED:` says what changed (below) |
 | `shared-files` | it names a file a running story of the rig names or has changed |
 | `cap` | the host runs as many sessions as it may |
 
@@ -39,3 +40,12 @@ pass. Older bugs are not asked.
 The first time a dispatch passes a bug over for it, it comments on the bead and
 mails the Mayor, once per bead. `mw status` lists such bugs under
 BUGS WITHOUT A SWEEP, and nothing when there are none.
+
+## The handed-back gate
+
+A story the Builder handed back (its newest hand-back comment opens
+`HANDED BACK`) is not dispatched, and `mw retry` refuses it, until a comment
+opening `RE-PATHED:` follows: the same Builder given the same story hands it back
+the same way. `mw retry <id> --repathed "<what changed>"` writes that comment and
+retries. `mw status` lists such stories under HANDED BACK with the date of the
+hand-back.

@@ -27,6 +27,7 @@ var DispatchGates = []DispatchGate{
 	{"formula-not-installed", "the path's formula is not installed in the vault"},
 	{"no-sweep", "a bug filed after the sweep rule has no line beginning 'Sweep:' in its acceptance"},
 	{"attempts-exhausted", "it was started max_attempts times already"},
+	{"handed-back", "its Builder handed it back and no RE-PATHED: comment says what changed since"},
 	{"shared-files", "it names a file a running story of the rig names or has changed"},
 	{"cap", "the host runs as many sessions as it may"},
 }

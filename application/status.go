@@ -485,6 +485,10 @@ type StatusReport struct {
 	// NoFilesKey are the open or held stories of rigs that expect a files key
 	// (files_expected = true) whose path has none, in the order found.
 	NoFilesKey []NoFilesKey
+	// HandedBack are the open stories whose newest word is a Builder's
+	// hand-back with no RE-PATHED: after it, in the order the tracker listed
+	// them (mw-gq6.418).
+	HandedBack []HandedBackStory
 	// NoSweep are the open bugs filed after the sweep rule whose acceptance has
 	// no Sweep: line that passes, which mw dispatch will not claim.
 	NoSweep []StoryDetail
@@ -787,6 +791,9 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	}
 
 	report.NoSweep = bugsWithoutASweep(known)
+	if report.HandedBack, err = s.handedBack(ctx, known, report.OpenButClaimed); err != nil {
+		return report, err
+	}
 	report.UncheckedErrors, report.UncheckedErrorsUnread = s.uncheckedErrors(ctx)
 
 	report.Suites = s.suiteStatuses(ctx)
@@ -1458,6 +1465,15 @@ func (r StatusReport) String() string {
 		b.WriteString("\n")
 	}
 
+	if len(r.HandedBack) > 0 {
+		clip(&b, fmt.Sprintf("%s (%d)", HandedBackHeading, len(r.HandedBack)))
+		for _, h := range r.HandedBack {
+			writeStory(&b, h.Detail, "handed back on "+handedBackDay(h.At)+", unchanged since")
+			clip(&b, "    to run it: "+repathedWith(h.Detail.Story.ID))
+		}
+		b.WriteString("\n")
+	}
+
 	if len(r.NoSweep) > 0 {
 		clip(&b, fmt.Sprintf("%s (%d)", NoSweepHeading, len(r.NoSweep)))
 		for _, d := range r.NoSweep {
@@ -1991,6 +2007,39 @@ func bugsWithoutASweep(known []StoryDetail) []StoryDetail {
 		}
 	}
 	return found
+}
+
+// handedBack lists the open stories among the ones the report knows whose
+// newest word is a Builder's hand-back (mw-gq6.418), in the order they were
+// listed. The comments are read together, and only for stories that carry any.
+func (s Status) handedBack(ctx context.Context, known, claimed []StoryDetail) ([]HandedBackStory, error) {
+	var candidates []StoryDetail
+	var ids []string
+	seen := map[string]bool{}
+	for _, list := range [][]StoryDetail{known, claimed} {
+		for _, d := range list {
+			if d.IsEpic || d.Status == StatusClosed || d.CommentCount == 0 || seen[d.Story.ID] {
+				continue
+			}
+			seen[d.Story.ID] = true
+			candidates = append(candidates, d)
+			ids = append(ids, d.Story.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	said, err := s.Tracker.StoriesComments(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("reading which stories were handed back: %w", err)
+	}
+	var found []HandedBackStory
+	for _, d := range candidates {
+		if at, handedBack := HandedBack(said[d.Story.ID]); handedBack {
+			found = append(found, HandedBackStory{Detail: d, At: at})
+		}
+	}
+	return found, nil
 }
 
 // uncheckedErrors are the classes of the common-errors register not yet

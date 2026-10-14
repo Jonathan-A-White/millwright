@@ -808,6 +808,21 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 			continue
 		}
 
+		// gate: handed-back
+		// A story its Builder handed back, with no word since of what changed, is
+		// not run again: the same Builder would hand it back the same way. Before
+		// the cap, so it takes none of the sessions (mw-gq6.418).
+		if at, handedBack, err := handedBackOf(ctx, d.Tracker, detail); err != nil {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
+				"whether its Builder handed it back could not be read, so it is not claimed: %v", oneLine(err.Error()))})
+			continue
+		} else if handedBack {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Why: fmt.Sprintf(
+				"its Builder handed it back on %s and nothing says what changed since: %s",
+				handedBackDay(at), repathedWith(id))})
+			continue
+		}
+
 		// gate: shared-files
 		// A story that names a file a running story on its rig names too, or has
 		// changed on its branch, waits for it, unclaimed, before the cap: it

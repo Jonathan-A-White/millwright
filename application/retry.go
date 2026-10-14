@@ -170,6 +170,11 @@ type Retry struct {
 
 	// Out is where the report is printed. A nil Out prints nothing.
 	Out io.Writer
+
+	// RePathed, when not empty, is what changed since the Builder handed the
+	// story back (mw retry --repathed): it is written as a RE-PATHED: comment,
+	// and lets a retry of a handed-back story go on.
+	RePathed string
 }
 
 // RetryReport is what one retry did, or why it changed nothing.
@@ -189,6 +194,13 @@ type RetryReport struct {
 	// holder is who held the claim when the retry read the story, the actor the
 	// give-back is guarded on.
 	holder string
+
+	// unclaimed says the story was open with no claim at all when the retry read
+	// it (one a dispatch passed over), so there is none to give back.
+	unclaimed bool
+
+	// RePathed says a RE-PATHED: comment was written on the story.
+	RePathed bool
 
 	// Elsewhere is the other host the story was worked on, when this retry
 	// only gave the claim back and left that host's worktree and branch for its
@@ -332,6 +344,19 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 			"it has been started %d times, the most a story may be (max_attempts is %d): attempts exhausted", tried, most))
 	}
 
+	// A story its Builder handed back, with nothing said since of what changed,
+	// would be handed back the same way again: --repathed says what changed
+	// (mw-gq6.418). A refusal changes nothing, so the comment is written later,
+	// where the claim is given back.
+	if at, handedBack, err := handedBackOf(ctx, r.Tracker, detail); err != nil {
+		return report, fmt.Errorf("retrying %s: reading whether its Builder handed it back: %w", storyID, err)
+	} else if handedBack && strings.TrimSpace(r.RePathed) == "" {
+		return r.refuse(report, fmt.Sprintf(
+			"its Builder handed it back on %s and nothing says what changed since, so the next Builder would hand it back the same way: "+
+				"say what changed with %s", handedBackDay(at), repathedWith(storyID)))
+	}
+	report.unclaimed = detail.Assignee == "" && detail.Status == StatusOpen
+
 	// A story worked on another host has its worktree and branch there, not
 	// here: reading them would fail before anything was done. The claim is given
 	// back without touching any worktree, and the next dispatch on that host
@@ -340,7 +365,7 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	// path's host key, which a person may have changed since (mw-gq6.364).
 	report.holder = detail.Assignee
 	if elsewhere := r.workedOn(path, detail.Assignee); elsewhere != "" && elsewhere != r.Host {
-		return r.handBack(ctx, report, elsewhere, detail.Assignee)
+		return r.handBack(ctx, report, elsewhere)
 	}
 
 	rigDir, checkedOut := r.Rigs[path.Rig]
@@ -398,7 +423,10 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 // when not empty, says why there was nothing to keep.
 func (r Retry) giveBack(ctx context.Context, report RetryReport, nothing string) (RetryReport, error) {
 	storyID, attempt := report.StoryID, report.Attempt
-	if err := r.Tracker.ReleaseClaimHeldBy(ctx, storyID, report.holder); err != nil {
+	if err := r.rePathed(ctx, &report); err != nil {
+		return report, err
+	}
+	if err := r.release(ctx, report); err != nil {
 		if report.NoWorktree {
 			return report, fmt.Errorf("retrying %s: the claim could not be given back: %w", storyID, err)
 		}
@@ -437,6 +465,31 @@ func (r Retry) giveBack(ctx context.Context, report RetryReport, nothing string)
 	return report, nil
 }
 
+// release gives the claim back, guarded on whoever held it when the retry read
+// the story. A story that was open with no claim has none to give back.
+func (r Retry) release(ctx context.Context, report RetryReport) error {
+	if report.unclaimed {
+		return nil
+	}
+	return r.Tracker.ReleaseClaimHeldBy(ctx, report.StoryID, report.holder)
+}
+
+// rePathed writes the RE-PATHED: comment, when --repathed said what changed, so
+// that nothing holds the story back once it is open again (mw-gq6.418). It is
+// written before the claim is given back: a comment that cannot be written
+// leaves the story claimed, as it was.
+func (r Retry) rePathed(ctx context.Context, report *RetryReport) error {
+	what := strings.TrimSpace(r.RePathed)
+	if what == "" {
+		return nil
+	}
+	if err := r.Tracker.CommentOnStory(ctx, report.StoryID, RePathedMark+" "+what); err != nil {
+		return fmt.Errorf("retrying %s: the RE-PATHED: comment could not be written, so the claim was not given back: %w", report.StoryID, err)
+	}
+	report.RePathed = true
+	return nil
+}
+
 // clearRefunds sets the story's dead-pane refund count back to 0, so a retried
 // story has its refunds again (mw-gq6.344). Nothing is written when none were
 // given.
@@ -454,12 +507,15 @@ func (r Retry) clearRefunds(ctx context.Context, report RetryReport) error {
 // and a comment says where the worktree and branch were left. Nothing on this
 // host's disk is read or changed, and whether that host's session still runs
 // is not asked, so it is for the person to have seen it end.
-func (r Retry) handBack(ctx context.Context, report RetryReport, elsewhere, holder string) (RetryReport, error) {
+func (r Retry) handBack(ctx context.Context, report RetryReport, elsewhere string) (RetryReport, error) {
 	storyID := report.StoryID
 	report.Elsewhere = elsewhere
 	// That host's dispatch claimed it under its own actor, so the give-back
-	// expects whoever holds it now, not this host's actor.
-	if err := r.Tracker.ReleaseClaimHeldBy(ctx, storyID, holder); err != nil {
+	// expects whoever holds it now (report.holder), not this host's actor.
+	if err := r.rePathed(ctx, &report); err != nil {
+		return report, err
+	}
+	if err := r.release(ctx, report); err != nil {
 		return report, fmt.Errorf("retrying %s: the claim could not be given back: %w", storyID, err)
 	}
 	report.ClaimReleased = true
@@ -513,6 +569,9 @@ func (r RetryReport) String() string {
 	}
 	if r.NoCause {
 		fmt.Fprintf(&b, "  %s\n", NoCauseReminder(r.StoryID))
+	}
+	if r.RePathed {
+		fmt.Fprintf(&b, "  re-path the story was told what changed (%s comment)\n", RePathedMark)
 	}
 	if r.Elsewhere != "" {
 		fmt.Fprintf(&b, "  there   the story was worked on %s; its worktree and branch are left there, not read from here\n", r.Elsewhere)

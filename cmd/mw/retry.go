@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
@@ -16,6 +17,7 @@ import (
 // used to take a person several hand steps to run, as one command (friction:
 // mw-gq6.92).
 func newRetryCmd() *cobra.Command {
+	var repathed string
 	cmd := &cobra.Command{
 		Use:   "retry <story-id>",
 		Short: "Recover a story after a refused landing, so the next dispatch tick tries it again",
@@ -36,7 +38,11 @@ func newRetryCmd() *cobra.Command {
 			"so changing the host key of a story in progress moves neither its worktree nor its retry.\n\n" +
 			"It never resets a story's attempts, and a story already started max_attempts times is refused\n" +
 			"with \"attempts exhausted\" rather than retried — resetting the counter by hand is what allows\n" +
-			"another attempt.",
+			"another attempt.\n\n" +
+			"A story its Builder handed back (its newest hand-back comment opens HANDED BACK) is refused,\n" +
+			"and mw dispatch passes it over, until a comment opening RE-PATHED: follows it: the same Builder\n" +
+			"given the same story hands it back the same way. --repathed \"<what changed>\" writes that\n" +
+			"comment, once the retry is past its refusals, and goes on.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := config.Vault()
@@ -54,6 +60,10 @@ func newRetryCmd() *cobra.Command {
 			maxAttempts, err := config.MaxAttempts()
 			if err != nil {
 				return err
+			}
+
+			if cmd.Flags().Changed("repathed") && strings.TrimSpace(repathed) == "" {
+				return fmt.Errorf("retrying %s: --repathed needs a sentence on what changed since the Builder handed the story back", args[0])
 			}
 
 			// A retry commits and pushes the vault's own files, and it may be run
@@ -77,9 +87,12 @@ func newRetryCmd() *cobra.Command {
 				Rigs:        rigs,
 				MaxAttempts: maxAttempts,
 				Out:         cmd.OutOrStdout(),
+				RePathed:    repathed,
 			}.Run(cmd.Context(), args[0])
 			return err
 		},
 	}
+	cmd.Flags().StringVar(&repathed, "repathed", "",
+		"what changed since the Builder handed the story back: written as a RE-PATHED: comment, and lets the retry of a handed-back story go on")
 	return cmd
 }
