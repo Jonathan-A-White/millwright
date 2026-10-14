@@ -29,6 +29,7 @@ type reportContext struct {
 	tracker    *apptest.FakeTracker
 	files      *vault.Vault
 	benchmarks *apptest.FakeBenchmarks
+	mailbox    *apptest.FakeMailbox
 	now        time.Time
 
 	// refused are the ids of the refused stories rigLanded filed, by rig.
@@ -47,7 +48,7 @@ func InitializeReportScenario(ctx *godog.ScenarioContext) {
 	c := &reportContext{}
 
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
-		*c = reportContext{tracker: apptest.NewFakeTracker(), benchmarks: &apptest.FakeBenchmarks{}, refused: map[string][]string{}}
+		*c = reportContext{tracker: apptest.NewFakeTracker(), benchmarks: &apptest.FakeBenchmarks{}, mailbox: apptest.NewFakeMailbox(), refused: map[string][]string{}}
 		return ctx, nil
 	})
 
@@ -62,7 +63,13 @@ func InitializeReportScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^every refused story of "([^"]*)" has the cause "([^"]*)"$`, c.everyRefusedStoryHasTheCause)
 	ctx.Given(`^the report story "([^"]*)" carries the comment "([^"]*)"$`, c.theStoryCarriesTheComment)
 	ctx.Given(`^the report ledger also holds a landed row for "([^"]*)" on "([^"]*)"$`, c.aLandedRowOn)
+	ctx.Given(`^"([^"]*)" landed (\d+) and refused (\d+) on "([^"]*)"$`, c.aRigLandedAndRefusedOn)
+	ctx.Given(`^the factory change "([^"]*)" titled "([^"]*)" landed on "([^"]*)" with the acceptance "([^"]*)"$`, c.aFactoryChangeLanded)
+	ctx.When(`^the report factory clock moves on a day$`, c.theClockMovesOn)
 	ctx.When(`^mw report runs with "([^"]*)"$`, c.reportRuns)
+	ctx.When(`^the writes of mw report send run (\d+) times?$`, c.sendWritesRun)
+	ctx.Then(`^the Mayor's inbox holds (\d+) messages? about "([^"]*)"$`, c.theMayorHasMessages)
+	ctx.Then(`^the vault holds the metric snapshots of the days "([^"]*)"$`, c.theVaultHoldsSnapshots)
 	ctx.Then(`^the report prints the line "([^"]*)"$`, c.printsTheLine)
 	ctx.Then(`^the report prints "([^"]*)" under "([^"]*)"$`, c.printsUnder)
 	ctx.Then(`^the report prints no line starting "([^"]*)"$`, c.printsNoLineStarting)
@@ -243,6 +250,79 @@ func reportFlags(text string, now time.Time) (application.FactoryReport, error) 
 	from, err := application.ParseReportSince(since, now)
 	report.Since = from
 	return report, err
+}
+
+// aRigLandedAndRefusedOn files landed and refused stories of a rig with a
+// ledger row each on a day of the scenario's choosing, inside the window or not.
+func (c *reportContext) aRigLandedAndRefusedOn(rig string, landed, refused int, day string) error {
+	return c.rigLanded(day, day+"-", rig, landed, refused, "tests-fail")
+}
+
+// aFactoryChangeLanded files a millwright story with acceptance criteria and a
+// landed row for it on day.
+func (c *reportContext) aFactoryChangeLanded(id, title, day, acceptance string) error {
+	if err := c.addStory(id, title, "millwright", "laptop", "sonnet", 0, time.Time{}); err != nil {
+		return err
+	}
+	if err := c.tracker.SetAcceptance(id, unescape(acceptance)); err != nil {
+		return err
+	}
+	return c.appendLedger(day, id, "landed on main", "sonnet/high", 0)
+}
+
+func (c *reportContext) theClockMovesOn() error {
+	c.now = c.now.AddDate(0, 0, 1)
+	return nil
+}
+
+// sendWritesRun runs the report the way mw report send does, with the means to
+// tell the Mayor and to keep the snapshot, n times.
+func (c *reportContext) sendWritesRun(n int) error {
+	for i := 0; i < n; i++ {
+		from, err := application.ParseReportSince("7d", c.now)
+		if err != nil {
+			return err
+		}
+		report := application.FactoryReport{Tracker: c.tracker, Files: c.files, Seat: reportSeat, Benchmarks: c.benchmarks,
+			Since: from, Now: func() time.Time { return c.now },
+			Notes: c.tracker, Mailbox: c.mailbox, Snapshots: c.files}
+		if _, err := report.Run(context.Background()); err != nil {
+			return fmt.Errorf("the report send writes failed: %w", err)
+		}
+	}
+	return nil
+}
+
+func (c *reportContext) theMayorHasMessages(want int, about string) error {
+	inbox, err := c.mailbox.Inbox(context.Background(), application.MayorMailbox)
+	if err != nil {
+		return err
+	}
+	got := 0
+	for _, m := range inbox {
+		if strings.Contains(m.Subject+m.Body, about) {
+			got++
+		}
+	}
+	if got != want {
+		return fmt.Errorf("expected %d messages to the Mayor about %q, found %d in %+v", want, about, got, inbox)
+	}
+	return nil
+}
+
+func (c *reportContext) theVaultHoldsSnapshots(days string) error {
+	kept, err := c.files.Snapshots(context.Background())
+	if err != nil {
+		return err
+	}
+	var got []string
+	for _, s := range kept {
+		got = append(got, s.Day)
+	}
+	if strings.Join(got, ",") != days {
+		return fmt.Errorf("expected the snapshots of the days %q, the vault holds %q", days, strings.Join(got, ","))
+	}
+	return nil
 }
 
 func (c *reportContext) reportRuns(flags string) error {
