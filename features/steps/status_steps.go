@@ -63,8 +63,9 @@ type statusContext struct {
 	lastTick map[string]time.Time
 	// cap and load are the cap on sessions a scenario gave this host and the load
 	// and memory it read, when it gave them (mw-t0z3fu.1).
-	cap  int
-	load *apptest.FakeHostLoad
+	cap    int
+	capWhy string
+	load   *apptest.FakeHostLoad
 	// gristRuns is the mill's runs, when a scenario gave this host some
 	// (mw-t0z3fu.4).
 	gristRuns *apptest.FakeGristRuns
@@ -625,6 +626,7 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 		HeldHands:      mayor,
 		Now:            func() time.Time { return c.now },
 		Cap:            c.cap,
+		CapWhy:         c.capWhy,
 		Causes:         c.tracker,
 		Ideas:          c.ideas,
 	}

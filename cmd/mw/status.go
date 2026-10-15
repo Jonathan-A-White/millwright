@@ -124,7 +124,7 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			atOnce, err := config.Cap()
+			atOnce, capWhy, err := config.CapInForce(time.Now())
 			if err != nil {
 				return err
 			}
@@ -209,6 +209,7 @@ func newStatusCmd() *cobra.Command {
 				Home:             files,
 				Network:          net,
 				Cap:              atOnce,
+				CapWhy:           capWhy,
 				Load:             hostload.Proc{},
 				Room:             application.RoomLimits{LoadPerCore: room.LoadPerCore, MinFreeMB: room.MinFreeMB},
 				Grist:            hostGristRoom(room),

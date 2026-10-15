@@ -549,6 +549,15 @@ Feature: mw status
     And the report says "host: 1 of cap 4"
     And the report does not say the host is held back
 
+  Scenario: The report says which window sets the cap while one does (mw-gq6.429)
+    Given this host runs at most 4 sessions at once
+    And this host's cap is set by "night window to 06:00 America/New_York"
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "host: 0 of cap 4"
+    And the report says "cap 4: night window to 06:00 America/New_York"
+    And every line of the report is at most 60 columns wide
+
   Scenario: The report says why the host is held back when it has no room
     Given a status story "mw-gq6.1" filed under it
     And this host runs at most 4 sessions at once

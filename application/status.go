@@ -276,9 +276,12 @@ type Status struct {
 	// says how many of the cap are in use and, when the host has no room, why
 	// mw dispatch holds a story back. A zero Cap leaves the line out; a nil Load,
 	// or a load that cannot be read, says nothing of room.
-	Cap  int
-	Load HostLoad
-	Room RoomLimits
+	Cap int
+	// CapWhy names the dispatch window that sets Cap now, like "night window to
+	// 06:00 America/New_York"; "" when the cap is the host's own (mw-gq6.429).
+	CapWhy string
+	Load   HostLoad
+	Room   RoomLimits
 
 	// Grist is what the mill is doing on this host (mw-t0z3fu.4): the GRIST line
 	// says whether a tutor is in use and how its answers compare with their par,
@@ -443,6 +446,7 @@ type StatusReport struct {
 	// mw dispatch holds a story back here, "" when the host has room or the load
 	// could not be read (mw-t0z3fu.1).
 	Cap    int
+	CapWhy string
 	InUse  int
 	NoRoom string
 	// Grist is what the mill is doing, zero (Known false) when this host has none.
@@ -675,6 +679,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	}
 	if s.Cap > 0 {
 		report.Cap = s.Cap
+		report.CapWhy = s.CapWhy
 		report.NoRoom, _ = ReadRoom(ctx, s.Load, s.Room)
 		if s.Grist != nil {
 			if pulse, err := s.Grist.Pulse(ctx, s.Cap); err == nil {
@@ -1278,6 +1283,9 @@ func (r StatusReport) String() string {
 
 	if r.Cap > 0 {
 		clip(&b, fmt.Sprintf("host: %d of cap %d", r.InUse, r.Cap))
+		if r.CapWhy != "" {
+			clip(&b, fmt.Sprintf("  cap %d: %s", r.Cap, r.CapWhy))
+		}
 		// One line a reason, so that none runs past a phone's width.
 		for _, why := range strings.Split(r.NoRoom, "; ") {
 			if why != "" {
