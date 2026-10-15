@@ -120,6 +120,9 @@ type EventShipper interface {
 // failure that repeats word for word is said once. An event its machine
 // forbids is said and left out. With no Log, it only republishes.
 //
+// With a Watcher, every pass calls it too, to tell a seat's session that has
+// filled its context to hand off (SeatContextWatch).
+//
 // With a Nudger, every pass calls it, whether or not the beads' head moved,
 // to tell the seats of the events they subscribed to (EventNudge); with a
 // Springer, that, to run the jobs those events call for (EventSpring); and
@@ -143,6 +146,10 @@ type EventFollow struct {
 	// Springer, when set, is called each pass, after the Nudger: it starts
 	// the jobs the pass's events, or the clock, call for (EventSpring).
 	Springer EventSpringer
+	// Watcher, when set, is called each pass, after the Springer: it types
+	// the line that tells a seat's session past its limit to hand off
+	// (SeatContextWatch), reading the transcripts at most once a minute.
+	Watcher ContextWatcher
 	// Trimmer, when set, is called at the end of the first pass of each UTC
 	// day, after the Shipper, to move old events out of the log (EventTrim).
 	Trimmer EventTrimmer
@@ -288,6 +295,15 @@ func (f EventFollow) Run(ctx context.Context) error {
 				}
 			} else {
 				quiet("springing the jobs")
+			}
+		}
+		if f.Watcher != nil && ctx.Err() == nil {
+			if err := f.Watcher.Watch(ctx); err != nil {
+				if ctx.Err() == nil {
+					say("watching the seats' context", err)
+				}
+			} else {
+				quiet("watching the seats' context")
 			}
 		}
 		// Ship goes last: a send that hangs or fails slowly (a 502 took ~26 s
