@@ -1,0 +1,1 @@
+d2ab622 check-gate-jobs: ignore an ambient JOBS when reading the Makefile

@@ -1,0 +1,20 @@
+diff --git a/scripts/check-gate-jobs.sh b/scripts/check-gate-jobs.sh
+index 2bceb0f..db421ed 100755
+--- a/scripts/check-gate-jobs.sh
++++ b/scripts/check-gate-jobs.sh
+@@ -14,11 +14,13 @@ fail() {
+ 	exit 1
+ }
+ 
+-# var <name> [make args...]: the value make settles on for <name>.
++# var <name> [make args...]: the value make settles on for <name>. JOBS is unset
++# for make, so an ambient JOBS (a host's builder_jobs cap) cannot stand in for
++# the Makefile's default; only the JOBS=n given here sets it.
+ var() {
+ 	name=$1
+ 	shift
+-	make -pn "$@" test 2>/dev/null | sed -n "s/^$name :\{0,1\}= *//p" | tail -n 1
++	env -u JOBS make -pn "$@" test 2>/dev/null | sed -n "s/^$name :\{0,1\}= *//p" | tail -n 1
+ }
+ 
+ cores=$(nproc)

@@ -1,0 +1,2 @@
+8b7d828 mail-notify: the mayor's mail line says how many messages are new (mw-gq6.179)
+1bb31c6 mail-notify test: the typed mail count is the new messages, not the inbox total (mw-gq6.179)

@@ -1,0 +1,2 @@
+e2c5aba scorer: untrack the six compiled .pyc files under contrib/scorer/mw_scorer/__pycache__, which churn on every run and differ by Python version (mw-gq6.298)
+78d3b34 gitignore: ignore Python bytecode, __pycache__/ and *.pyc (mw-gq6.298)

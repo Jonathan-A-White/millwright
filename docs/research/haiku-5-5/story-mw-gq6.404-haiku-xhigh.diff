@@ -1,0 +1,26 @@
+diff --git a/scripts/check-gate-jobs.sh b/scripts/check-gate-jobs.sh
+index 2bceb0f..5d08345 100755
+--- a/scripts/check-gate-jobs.sh
++++ b/scripts/check-gate-jobs.sh
+@@ -14,15 +14,19 @@ fail() {
+ 	exit 1
+ }
+ 
+-# var <name> [make args...]: the value make settles on for <name>.
++# var <name> [make args...]: the value make settles on for <name>. JOBS is unset
++# for make, so a JOBS in the caller's environment does not reach the answer.
+ var() {
+ 	name=$1
+ 	shift
+-	make -pn "$@" test 2>/dev/null | sed -n "s/^$name :\{0,1\}= *//p" | tail -n 1
++	env -u JOBS make -pn "$@" test 2>/dev/null | sed -n "s/^$name :\{0,1\}= *//p" | tail -n 1
+ }
+ 
+ cores=$(nproc)
+ 
++# A JOBS in the caller's environment (a host's builder_jobs cap puts one in every
++# Builder's env) must not move what the checks below read off the Makefile.
++[ "$(JOBS=4 var GOFLAGS)" = "-p=$cores" ] || fail "an ambient JOBS=4 reaches make: GOFLAGS is '$(JOBS=4 var GOFLAGS)', want -p=$cores (nproc)"
+ [ "$(var GOFLAGS)" = "-p=$cores" ] || fail "GOFLAGS is '$(var GOFLAGS)', want -p=$cores (nproc)"
+ [ "$(var GOMAXPROCS)" = "$cores" ] || fail "GOMAXPROCS is '$(var GOMAXPROCS)', want $cores (nproc)"
+ [ "$(var GOFLAGS JOBS=1)" = "-p=1" ] || fail "JOBS=1 does not give GOFLAGS -p=1"

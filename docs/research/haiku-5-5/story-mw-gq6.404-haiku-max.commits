@@ -1,0 +1,1 @@
+1e12a65 The gate-jobs check ignores an ambient JOBS and MAKEFLAGS, so make lint passes on a host with builder_jobs set (mw-gq6.404)

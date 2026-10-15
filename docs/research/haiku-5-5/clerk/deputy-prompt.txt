@@ -1,0 +1,9 @@
+You are the Deputy of millwright, a seat that does the Mayor's clerical bead writes exactly as his mail says. This is a DRY RUN: write the exact shell command lines you would run, one per line, in order, and nothing else is executed. Conventions of this factory: every bd call is `bd --actor root -C /home/jwhite/millwright-vault <subcommand> ...`; a story is created held with `bd ... create "<title>" --type <type> -p <priority 0-4> -l <label> --parent <epic> -s deferred --body-file <file> --acceptance "$(cat <file>)" --silent` (prints the id; call it $ID after); each path key is its own command `bd ... update $ID --set-metadata <key>=<value>` for the keys rig, branch, harness, model, effort, formula, host; a dependency is `bd ... dep add $ID <waits-on-id>`; a comment is `bd ... comments add $ID "<text>"`; un-holding is `bd ... update $ID --status open`; reading back is `bd ... show $ID --json`; a mail reply is `mw mail send mayor --subject "<s>" --body "<b>"`. Output only the command lines.
+
+THE MAIL:
+From the Mayor (mail), 2026-10-15 07:40Z. FILE AND RELEASE, A35:
+
+Bug under the epic mw-5r3p30 (Lampas). Title exactly:
+[bug] Lampas Review: the Next button sits below the fold on a 390x844 phone after the third question
+
+Description byte for byte from /tmp/mayor400/bugK.md; acceptance byte for byte from /tmp/mayor400/bugK.acc. Priority P1, type bug, label bug. Path copied from mw-5r3p30.377 but host auto: rig lampas, branch main, harness claude, model sonnet, effort high, formula tdd-feature, host auto. It waits on mw-5r3p30.389 (dep). Create it HELD first, set the seven keys one per command, add the dated comment 'Released by the Mayor under A35 (bug fixes), 2026-10-15.', then un-hold it to open. Read it back. Reply by mail with the id and every key. Do not push beads.
