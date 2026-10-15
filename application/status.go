@@ -210,6 +210,12 @@ type Status struct {
 	// rigs run it. Nil leaves the section out.
 	Suites SuiteHistory
 
+	// Batches, when set, is where the batch lines of metrics/factory.jsonl are
+	// read from, for the last batch of each rig under LAND RUSH; which rigs
+	// have a line is told by Rigs and Rules (landing = "batch"). Nil leaves the
+	// last batch out of the line.
+	Batches BatchHistory
+
 	// Graph is where the beads that look finished are found, for the DONE, STILL
 	// OPEN section. A nil Graph leaves the section out.
 	Graph BeadGraph
@@ -520,6 +526,10 @@ type StatusReport struct {
 	// Suites is how the last whole suite of each rig that runs one nightly went
 	// (mw-8w7xb7.3), in rig order.
 	Suites []SuiteStatus
+	// LandRush are the rigs that land in batches, one line each, in rig order:
+	// what is queued, the oldest wait, the last batch and the batches held
+	// (plans/0117, Land Rush 6).
+	LandRush []LandRushStatus
 	// Finished are the open beads that look finished, in the order the tracker
 	// lists them; FinishedKnown says the tracker was asked, so that "nothing" is
 	// told from "not asked".
@@ -840,6 +850,7 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	report.UncheckedErrors, report.UncheckedErrorsUnread = s.uncheckedErrors(ctx)
 
 	report.Suites = s.suiteStatuses(ctx)
+	report.LandRush = s.landRushStatuses(ctx, work)
 
 	if graphRead != nil {
 		graph, err := graphRead()
@@ -1562,6 +1573,7 @@ func (r StatusReport) String() string {
 	}
 
 	r.writeSuite(&b)
+	r.writeLandRush(&b)
 
 	if r.FinishedKnown {
 		clip(&b, fmt.Sprintf("%s (%d)", FinishedHeading, len(r.Finished)))
