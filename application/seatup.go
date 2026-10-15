@@ -204,10 +204,11 @@ type SeatHarness interface {
 // was opened.
 //
 // Given a Terminal and an Armer it also arms the reaper that closes what is
-// finished with (SeatReap): on the window it was run from, when the seat's
-// acting file names that window — the outgoing session's own, closed once the
-// successor holds the seat — and, with ReapWhenIdle, on the window it opens,
-// for a session that will hand over to nobody.
+// finished with (SeatReap): on the window it was run from, when that window is
+// named for the seat (<seat>-...) and the seat's acting file names it — the
+// outgoing session's own, closed once the successor holds the seat — and, with
+// ReapWhenIdle, on the window it opens, for a session that will hand over to
+// nobody.
 type SeatUp struct {
 	Seats   SeatFiles
 	Windows Windows
@@ -338,7 +339,12 @@ func (s SeatUp) arm(ctx context.Context, acting, opened string) error {
 	switch here, in, err := s.Terminal.ThisWindow(ctx); {
 	case err != nil:
 		s.say("could not tell which window this is, so it will not close itself: %v", err)
-	case in && here.Name != "" && strings.Contains(acting, here.Name):
+	case in && !strings.HasPrefix(here.Name, s.Seat+"-"):
+		// Only a window named for the seat is the seat's: the window seat up
+		// was run from may be another seat's, the Millhand's starting a Mayor,
+		// and its name may be a word the acting file happens to hold (mw-gq6.432).
+		s.say("this window (%s, %q) is not a %s window, nothing armed", here.ID, here.Name, seatTitle(s.Seat))
+	case in && strings.Contains(acting, here.Name):
 		if err := s.Armer.Arm(ctx, ReapArming{Seat: s.Seat, Window: here.ID, Mode: ReapSuccessor}); err != nil {
 			s.say("this window (%s) was not armed to close: %v", here.ID, err)
 		} else {
@@ -364,6 +370,14 @@ func (s SeatUp) arm(ctx context.Context, acting, opened string) error {
 		return nil
 	}
 	return fmt.Errorf("the reaper could not be armed: the window %s is not among those open", opened)
+}
+
+// seatTitle is a seat's name as a sentence names it: "mayor" is the Mayor.
+func seatTitle(seat string) string {
+	if seat == "" {
+		return seat
+	}
+	return strings.ToUpper(seat[:1]) + seat[1:]
 }
 
 func (s SeatUp) say(format string, args ...any) {
