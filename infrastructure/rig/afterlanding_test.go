@@ -107,20 +107,23 @@ func TestACommandIsGivenFiveMinutesUnlessTheHostIsToldOtherwise(t *testing.T) {
 
 func TestARigsOwnLimitReplacesTheDefaultForThatRigAlone(t *testing.T) {
 	// The default is short, as 5m is next to a slow uplink; the rig that names a
-	// longer limit gets it and another rig keeps the default.
+	// longer limit gets it and another rig keeps the default. The margins are
+	// tenfold or more each way, so that a busy host cannot move a command across
+	// a limit (mw-gq6.423): the 0.5s command is ten times the 50ms default and a
+	// twentieth of the 10s limit, and the 30s command is far past the default.
 	after := rig.NewAfterLanding(
-		rig.WithAfterLimit(200*time.Millisecond),
-		rig.WithAfterLimits(map[string]time.Duration{"postern": 5 * time.Second}),
-		rig.WithAfterCommands(map[string]string{"postern": "sleep 1; echo deployed", "millwright": "sleep 1; echo built"}),
+		rig.WithAfterLimit(50*time.Millisecond),
+		rig.WithAfterLimits(map[string]time.Duration{"postern": 10 * time.Second}),
+		rig.WithAfterCommands(map[string]string{"postern": "sleep 0.5; echo deployed", "millwright": "sleep 30; echo built"}),
 	)
 
 	ran, err := after.Run(context.Background(), "postern", t.TempDir())
 	if err != nil || !ran.Succeeded() || !strings.Contains(ran.Output, "deployed") {
-		t.Errorf("expected the rig with a 5s limit to run its 1s command to the end, got %+v, %v", ran, err)
+		t.Errorf("expected the rig with a 10s limit to run its 0.5s command to the end, got %+v, %v", ran, err)
 	}
 	ran, err = after.Run(context.Background(), "millwright", t.TempDir())
-	if err != nil || ran.TimedOut != 200*time.Millisecond {
-		t.Errorf("expected a rig with no limit of its own to be stopped at the default 200ms, got %+v, %v", ran, err)
+	if err != nil || ran.TimedOut != 50*time.Millisecond {
+		t.Errorf("expected a rig with no limit of its own to be stopped at the default 50ms, got %+v, %v", ran, err)
 	}
 }
 

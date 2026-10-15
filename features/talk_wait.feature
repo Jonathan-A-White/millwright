@@ -201,7 +201,7 @@ Feature: mw talk wait
 
   Scenario: With Ideas only on, the Governor's turn is kept and answered, and the wait goes on waiting
     Given Ideas only is on until 9 hours on for mw talk wait
-    And mw talk wait has a time limit of 1200 milliseconds
+    And mw talk wait has a time limit of 3000 milliseconds
     And mw talk wait is armed
     When the Governor's turn 3 of talk "talk-7" saying "An idea: a quieter dashboard" is indexed
     Then mw talk wait is still waiting
@@ -216,7 +216,7 @@ Feature: mw talk wait
 
   Scenario: With Ideas only on, a call request is kept and answered in the general thread
     Given Ideas only is on until 9 hours on for mw talk wait
-    And mw talk wait has a time limit of 1200 milliseconds
+    And mw talk wait has a time limit of 3000 milliseconds
     And mw talk wait is armed
     When the Governor's call request "Call me about the roof" is indexed
     Then mw talk wait is still waiting
@@ -227,7 +227,7 @@ Feature: mw talk wait
 
   Scenario: With Ideas only on, a message of his is kept and answered, and does not end the wait
     Given Ideas only is on until 9 hours on for mw talk wait
-    And mw talk wait has a time limit of 1200 milliseconds
+    And mw talk wait has a time limit of 3000 milliseconds
     And mw talk wait is armed
     When a "message" record to the Mayor is indexed
     Then mw talk wait is still waiting
@@ -239,7 +239,7 @@ Feature: mw talk wait
   Scenario: A message the hook has already kept is not answered a second time
     Given Ideas only is on until 9 hours on for mw talk wait
     And the hook has already kept "direct:1"
-    And mw talk wait has a time limit of 1200 milliseconds
+    And mw talk wait has a time limit of 3000 milliseconds
     And mw talk wait is armed
     When a "message" record to the Mayor is indexed
     And the wait comes to its time limit
@@ -322,7 +322,7 @@ Feature: mw talk wait
 
   Scenario: An end with nothing held says so and the wait goes on
     Given Ideas only is on until 9 hours on for mw talk wait
-    And mw talk wait has a time limit of 1200 milliseconds
+    And mw talk wait has a time limit of 3000 milliseconds
     And mw talk wait is armed
     When the backend says the Governor's Ideas only has ended
     Then mw talk wait is still waiting
