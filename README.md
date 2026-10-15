@@ -1587,7 +1587,9 @@ key. See `features/postern_key.feature`.
 (`--bead --recommend --option`, repeatable): once broadcast, the bead is
 commented QUESTION and marked open with a note that records the txid and the
 options offered. `mw postern inbox` reads a reply to it and appends ANSWER to
-the bead, clears the note, and mails the Mayor.
+the bead, clears the note, and mails the Mayor. A reply that carries `re` (the txid of the
+card it was tapped on) makes the comment say `, answers card <short txid>` before its
+`, txid <txid>: <answer>`; one without `re` reads as it always did.
 
 An `--option` may end `|<bead>:<state>[,<bead>:<state>...]` (state: `open`,
 `held`, `landed`, `verified` or `closed`), as `--option 'A: Release both|mw-x.1:open,mw-x.2:open'`:

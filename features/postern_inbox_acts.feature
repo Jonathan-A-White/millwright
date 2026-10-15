@@ -27,7 +27,8 @@ Feature: a card answered by the Governor's own acts
     Then reading succeeds
     And bead "mw-x.2" now stands "open"
     And bead "mw-x"'s last comment starts "ANSWER (by his acts) "
-    And bead "mw-x"'s last comment contains "txid tx-r2: A: Release both"
+    And bead "mw-x"'s last comment contains ", answers card "
+    And bead "mw-x"'s last comment contains ", txid tx-r2: A: Release both"
     And bead "mw-x"'s question note is cleared
     And mail "Answer: mw-x: A: Release both (by his acts)" was sent to mayor
     And the Governor was told "Answered by your acts: A: Release both" under the card asking about "mw-x"

@@ -296,6 +296,20 @@ type PosternQuestion struct {
 type PosternReply struct {
 	Bead   string `json:"bead"`
 	Answer string `json:"answer"`
+	// Re is the txid of the question card the answer was tapped on, absent
+	// from an answer that names none: then the card is the bead's open one.
+	Re string `json:"re,omitempty"`
+}
+
+// answersCard is the words an ANSWER comment adds to name the card it
+// answers, by its short txid: ", answers card <short txid>", or "" when re
+// names none. It stands before the comment's ", txid <txid>: <answer>", which
+// postern's answeredByComment (src/model/needs.ts) reads the answer after.
+func answersCard(re string) string {
+	if re = strings.TrimSpace(re); re == "" {
+		return ""
+	}
+	return ", answers card " + shortTxid(re)
 }
 
 // decodePosternReply reads text as a PosternReply, reporting false when it is
@@ -414,6 +428,9 @@ func decodePosternThreadedMessage(text string) (PosternThreadedMessage, bool) {
 // posternReOf is the txid a decrypted plaintext says it answers: the re of
 // its threaded body (section 14), or "" when it has none.
 func posternReOf(text string) string {
+	if reply, ok := decodePosternReply(text); ok {
+		return strings.TrimSpace(reply.Re)
+	}
 	if wrapped, ok := decodePosternThreadedMessage(text); ok {
 		return strings.TrimSpace(wrapped.Re)
 	}
@@ -1068,7 +1085,7 @@ func (i PosternInbox) recordAnswer(ctx context.Context, m PosternInboxMessage, r
 	if i.Tracker == nil {
 		return false, nil
 	}
-	comment := fmt.Sprintf("ANSWER %s from %s, txid %s: %s", sentInFull(m.Ts), orUnknown(m.From), m.Txid, reply.Answer)
+	comment := fmt.Sprintf("ANSWER %s from %s%s, txid %s: %s", sentInFull(m.Ts), orUnknown(m.From), answersCard(reply.Re), m.Txid, reply.Answer)
 	if err := i.Tracker.CommentOnStory(ctx, reply.Bead, comment); err != nil {
 		return false, nil
 	}

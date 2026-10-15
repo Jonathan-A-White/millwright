@@ -288,6 +288,50 @@ func TestApplyRecordsARepliesAndThreadComments(t *testing.T) {
 	}
 }
 
+// An answer record that carries re — the question card's txid — writes an
+// ANSWER comment that names the card by its short txid, and the mail to the
+// Mayor carries the same words (mw-1cfk7g.2).
+func TestApplyNamesTheCardAnAnswerAnswers(t *testing.T) {
+	f := newApplyFixture(t)
+	reply, _ := json.Marshal(application.PosternReply{Bead: "mw-e.3", Answer: "B", Re: "direct:" + reTxid})
+	f.message(t, releaseTapGovernorKey, "tx-answer", string(reply))
+
+	f.apply(t)
+
+	got := f.tracker.Comments("mw-e.3")
+	if len(got) != 1 || !strings.HasSuffix(got[0], ", answers card direct:"+reTxid[:12]+", txid tx-answer: B") {
+		t.Fatalf("expected the ANSWER to name the card's short txid, got %v", got)
+	}
+	mail, err := f.mailbox.Inbox(context.Background(), application.MayorMailbox)
+	mustDo(t, err)
+	if len(mail) != 1 || mail[0].Body != got[0] {
+		t.Fatalf("expected the Mayor's mail to carry the comment, got %+v", mail)
+	}
+}
+
+// An answer record without re writes the ANSWER comment exactly as before.
+func TestApplyAnAnswerWithoutReIsCommentedAsBefore(t *testing.T) {
+	f := newApplyFixture(t)
+	reply, _ := json.Marshal(application.PosternReply{Bead: "mw-e.3", Answer: "B"})
+	f.message(t, releaseTapGovernorKey, "tx-answer", string(reply))
+
+	f.apply(t)
+
+	got := f.tracker.Comments("mw-e.3")
+	if len(got) != 1 || !strings.HasSuffix(got[0], ", txid tx-answer: B") || strings.Contains(got[0], "answers card") {
+		t.Fatalf("expected today's ANSWER comment, got %v", got)
+	}
+}
+
+// mw postern inbox prints the re of an answer it could not record (a bead the
+// tracker does not know), as it does a message's.
+func TestInboxPrintsTheReOfAnAnswerItCannotRecord(t *testing.T) {
+	out := reInbox(t, `{"bead":"mw-nowhere.1","answer":"B","re":"direct:`+reTxid+`"}`)
+	if first := strings.SplitN(out, "\n", 2)[0]; !strings.Contains(first, "re direct:"+reTxid) {
+		t.Fatalf("expected re on the answer's own line, got:\n%s", out)
+	}
+}
+
 // The Mayor's own read shows a message the pass already applied as one line,
 // never its text, and never applies it again; it moves the cursor.
 func TestInboxShowsAnAppliedMessageAsOneLineAndNeverAppliesItTwice(t *testing.T) {

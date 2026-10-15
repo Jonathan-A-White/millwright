@@ -166,7 +166,7 @@ func (i PosternInbox) optionHeld(ctx context.Context, note posternQuestionNote) 
 // recordActedAnswer answers bead's card with option, as recordAnswer answers
 // one by a tap, but by his acts: m is the act that completed the card.
 func (i PosternInbox) recordActedAnswer(ctx context.Context, m PosternInboxMessage, bead string, note posternQuestionNote, option string) {
-	comment := fmt.Sprintf("ANSWER (by his acts) %s from %s, txid %s: %s", sentInFull(m.Ts), orUnknown(m.From), m.Txid, option)
+	comment := fmt.Sprintf("ANSWER (by his acts) %s from %s%s, txid %s: %s", sentInFull(m.Ts), orUnknown(m.From), answersCard(note.Txid), m.Txid, option)
 	if err := i.Tracker.CommentOnStory(ctx, bead, comment); err != nil {
 		i.printf("mw postern inbox: answering %s's question by his acts failed: %v\n", bead, err)
 		return
