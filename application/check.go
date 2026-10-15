@@ -148,6 +148,12 @@ type CheckReport struct {
 	Refusals []Refusal
 	// Notes are the things that went sideways without changing the outcome.
 	Notes []string
+	// Tip is the commit the checks were run at: the branch's tip, read before
+	// and after them, with a clean worktree before. Empty when the worktree held
+	// uncommitted work, the tip moved while the checks ran, or it could not be
+	// read: then nothing says which commit passed. A batch landing trusts a
+	// passed check at Tip in place of running the rig's tests again (plans/0117).
+	Tip string
 }
 
 // Passed reports whether every check passed.
@@ -254,6 +260,9 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		}
 	}
 
+	// The commit the checks are run at, when the worktree holds nothing else.
+	tip := k.cleanTip(ctx, c)
+
 	// The checks are mw next's own, run by the part of it that reads and never
 	// writes, so that what a session is told here and what it is told at
 	// close-out cannot come apart.
@@ -272,11 +281,56 @@ func (k Check) check(ctx context.Context, storyID string) (CheckReport, error) {
 		Out:        k.Out,
 	}.refusals(ctx, c, &read, true)
 	report.Commits, report.Notes = read.Commits, read.Notes
+	if tip != "" {
+		if after, err := k.Landing.RefHead(ctx, c.rigDir, c.branch); err == nil && after == tip {
+			report.Tip = tip
+		}
+	}
 
 	if !report.Passed() {
 		return report, fmt.Errorf("checking %s: %d check(s) failed, so mw next would not land it", storyID, len(report.Refusals))
 	}
 	return report, nil
+}
+
+// cleanTip is the commit at the story's branch's tip when its worktree holds
+// no uncommitted work, so that what the checks run on is that commit and
+// nothing else; empty when it holds some, or either cannot be read.
+func (k Check) cleanTip(ctx context.Context, c *closeOut) string {
+	if left, err := k.Landing.Uncommitted(ctx, c.worktree); err != nil || len(left) > 0 {
+		return ""
+	}
+	tip, err := k.Landing.RefHead(ctx, c.rigDir, c.branch)
+	if err != nil {
+		return ""
+	}
+	return tip
+}
+
+// The first words of the lines that end the report of a check that passed at
+// a known commit: the tip line naming the commit, then the passed verdict and
+// the line under it, which stay the last two lines of the log.
+const (
+	checkedTipWord = "tip"
+	passedWord     = "passed"
+)
+
+// CheckedTip is the commit a check passed at, read from the log it kept: the
+// tip line of a report whose last two lines are the passed verdict, and empty
+// for any other log — one that failed, one whose tip was not known, one cut
+// off before its verdict or with anything printed after it. It is how mw next
+// tells that mw check passed on the very commit it is closing out (plans/0117,
+// Land Rush 2).
+func CheckedTip(log string) string {
+	lines := strings.Split(strings.TrimRight(log, "\n"), "\n")
+	if len(lines) < 3 {
+		return ""
+	}
+	tip, verdict := strings.Fields(lines[len(lines)-3]), strings.Fields(lines[len(lines)-2])
+	if len(tip) != 2 || tip[0] != checkedTipWord || len(verdict) == 0 || verdict[0] != passedWord {
+		return ""
+	}
+	return tip[1]
 }
 
 // slottedChecks runs the rig's tests while holding the rig's merge slot.
@@ -313,8 +367,13 @@ func (r CheckReport) String() string {
 	}
 	switch {
 	case r.Passed():
-		fmt.Fprintf(&b, "  passed  %d commit(s) on %s, none signed, every formula step closed, the rig's tests pass: mw next would land it\n",
-			r.Commits, r.Branch)
+		// Just before the verdict, which stays the last two lines; CheckedTip
+		// reads all three.
+		if r.Tip != "" {
+			fmt.Fprintf(&b, "  %s     %s\n", checkedTipWord, r.Tip)
+		}
+		fmt.Fprintf(&b, "  %s  %d commit(s) on %s, none signed, every formula step closed, the rig's tests pass: mw next would land it\n",
+			passedWord, r.Commits, r.Branch)
 		fmt.Fprintf(&b, "          (mw next also needs the session to finish, and %s to merge into %s without conflicts)\n", r.Branch, r.Target)
 	default:
 		fmt.Fprintf(&b, "  failed  %d check(s): mw next would not land %s as it stands\n", len(r.Refusals), r.Branch)

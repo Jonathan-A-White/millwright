@@ -41,7 +41,10 @@ func newCheckCmd() *cobra.Command {
 			"Every check also writes its whole output to runs/<story>/check-<attempt>.log in the vault, named\n" +
 			"for its story and attempt so that no other story's check can overwrite it. --background starts the\n" +
 			"check detached, writing that log, prints the log's path and returns at once: the tests can outlast\n" +
-			"a tool call's time limit, and the verdict is the last lines of the log when the check is done.\n\n" +
+			"a tool call's time limit, and the verdict is the last lines of the log when the check is done.\n" +
+			"A check that passes on a clean worktree names the commit it passed at on a tip line just before\n" +
+			"its verdict: on a rig that lands in batches, mw next closing out that very commit trusts it and\n" +
+			"does not run the rig's tests again, and its ledger line says so (plans/0117).\n\n" +
 			"It does not read the session's result, which is not written\n" +
 			"until the session ends, and it does not try the merge, so a branch that passes here can still be\n" +
 			"stopped by a conflict or by the other host's work. The commits are counted against the target\n" +
