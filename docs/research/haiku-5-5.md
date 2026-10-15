@@ -148,7 +148,7 @@ unfinished and the Sonnet side never ran.
 ## Grinds: pass rate, seconds and cost per answer
 
 Full table with every grind in `docs/research/haiku-5-5/grind-tables.md`; every run in
-`grind-runs.csv`. "Runs" counts examples times repetitions. Production = `grinds.jsonl`, last 14
+`grind-runs.jsonl`. "Runs" counts examples times repetitions. Production = `grinds.jsonl`, last 14
 days, answered grists, median total seconds (warm pool, so faster than a cold start here).
 
 | app / grind | model:effort | runs | pass | api s (median) | wall s | $ / answer | out tokens | production: answers, failed, median s |
@@ -435,7 +435,7 @@ at high can follow S1 if S1 passes), the Millhand review wake, the Mayor, featur
 ## Files
 
 - `docs/research/haiku-5-5/grind-tables.md`: every grind, every model:effort, and every failure.
-- `docs/research/haiku-5-5/grind-runs.csv`: all 666 runs (answers themselves not kept).
+- `docs/research/haiku-5-5/grind-runs.jsonl`: all 666 runs (answers themselves not kept).
 - `docs/research/haiku-5-5/replay-runner.go.txt`: the offline replay runner (a scratch `main`
   built against this rig with a `replace` directive; not part of the build).
 - `docs/research/haiku-5-5/make-story-run.sh`, `make-tester-run.sh`, `run-clerk.sh`: how the
