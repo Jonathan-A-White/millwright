@@ -25,6 +25,11 @@
 #   g. each cloned rig that depends on @playwright/test has chromium installed
 #      with its system deps, at that rig's own version; the step is planned in a
 #      dry run and skipped on a second run (mw-gq6.453)
+#   h. a box made from another box's snapshot ends with its own name: a config.toml
+#      saying host = "cloud1" is rewritten to cloud2, its other lines kept; a
+#      checkout whose HEAD is a zero-byte object is repaired (empty objects removed,
+#      fetched, reset to origin), and one fetch cannot mend is cloned again with its
+#      .git/config kept, the log saying which (mw-5gr3k0.8)
 # The shell linter is run over the script when it is installed, and skipped when not.
 
 set -eu
@@ -67,7 +72,10 @@ STATE=$T/state
 BIN=$T/bin
 CALLS=$T/calls.log
 TEMPLATE=$T/rig-template
-mkdir -p "$HOME_DIR" "$BOOT/etc" "$STATE" "$BIN" "$TEMPLATE"
+ORIGINS=$T/origins
+OTHER_TEMPLATE=$T/other-template
+mkdir -p "$HOME_DIR" "$BOOT/etc" "$STATE" "$BIN" "$TEMPLATE" "$ORIGINS" "$OTHER_TEMPLATE"
+echo "a rig" >"$OTHER_TEMPLATE/README"
 : >"$CALLS"
 
 # Fake tokens: distinctive, so a grep finds every place they landed.
@@ -137,17 +145,31 @@ esac
 if [ -n "$out" ]; then cp "$src" "$out"; else cat "$src"; fi
 EOF
 
+# git clone is a real clone, of a repository made once from the template the url
+# names and kept outside the fake machine (the origin a fetch reaches); every other
+# git call is the real git. A fetch and a reset are logged, as a clone is.
 stub git <<'EOF'
 if [ "$1" = clone ]; then
 	echo "git $*" >>"$CALLS"
-	mkdir -p "$3/.git"
 	case $2 in
-	*millwright.git) cp -R "$RIGTEMPLATE/." "$3/" ;;
-	*millwright-vault.git) cp -R "$VAULTTEMPLATE/." "$3/" ;;
-	*postern.git) cp -R "$POSTERNTEMPLATE/." "$3/" ;;
+	*millwright.git) src=$RIGTEMPLATE ;;
+	*millwright-vault.git) src=$VAULTTEMPLATE ;;
+	*postern.git) src=$POSTERNTEMPLATE ;;
+	*) src=$OTHERTEMPLATE ;;
 	esac
-	exit 0
+	origin=$ORIGINS/$(basename "$src").git
+	if [ ! -d "$origin" ]; then
+		w=$ORIGINS/work-$(basename "$src")
+		mkdir -p "$w"
+		cp -R "$src/." "$w/"
+		/usr/bin/git -C "$w" init -q -b main
+		/usr/bin/git -C "$w" add -A
+		/usr/bin/git -C "$w" -c user.name=t -c user.email=t@t commit -q --allow-empty -m template
+		/usr/bin/git clone -q --bare "$w" "$origin"
+	fi
+	exec /usr/bin/git clone -q "file://$origin" "$3"
 fi
+case " $* " in *" fetch "* | *" reset "*) echo "git $*" >>"$CALLS" ;; esac
 exec /usr/bin/git "$@"
 EOF
 
@@ -189,6 +211,7 @@ EOF
 # The rig a clone produces: only what the script and the stand-in installers read.
 mkdir -p "$TEMPLATE/cmd/mw" "$TEMPLATE/scripts" "$TEMPLATE/contrib"
 echo 'module github.com/Jonathan-A-White/millwright' >"$TEMPLATE/go.mod"
+echo 'package main' >"$TEMPLATE/cmd/mw/main.go"
 cat >"$TEMPLATE/scripts/install.sh" <<'EOF'
 #!/bin/sh
 echo "install.sh $*" >>"$CALLS"
@@ -306,7 +329,7 @@ cp "$SCRIPT" "$LOOSE/boost-bootstrap.sh"
 boost() {
 	env -i PATH="$BIN:$REAL" HOME="$HOME_DIR" BOOST_ROOT="$BOOT" BOOST_OS_RELEASE="$T/os-release" \
 		MW_HOME="$HOME_DIR/millwright" \
-		STATE="$STATE" CALLS="$CALLS" FIXTURE="$FIXTURE" RIGTEMPLATE="$TEMPLATE" VAULTTEMPLATE="$VAULT_TEMPLATE" POSTERNTEMPLATE="$POSTERN_TEMPLATE" \
+		STATE="$STATE" CALLS="$CALLS" FIXTURE="$FIXTURE" RIGTEMPLATE="$TEMPLATE" VAULTTEMPLATE="$VAULT_TEMPLATE" POSTERNTEMPLATE="$POSTERN_TEMPLATE" ORIGINS="$ORIGINS" OTHERTEMPLATE="$OTHER_TEMPLATE" \
 		bash "$LOOSE/boost-bootstrap.sh" "$@"
 }
 
@@ -323,7 +346,7 @@ snapshot() {
 
 # changing: the calls in the log that change the machine.
 changing() {
-	grep -E '^(apt-get install|git clone|npm install|npx .* install |curl .*(\.tar\.xz)|loginctl|systemctl (user|system) (enable|daemon-reload)|install\.sh [^-]|install\.sh$|install-units\.sh)' "$1" || true
+	grep -E '^(apt-get install|git clone|git .* (fetch|reset) |npm install|npx .* install |curl .*(\.tar\.xz)|loginctl|systemctl (user|system) (enable|daemon-reload)|install\.sh [^-]|install\.sh$|install-units\.sh)' "$1" || true
 }
 
 STEPS="packages node git wireguard rig claude vault rigs config browsers beads profile dispatch"
@@ -492,7 +515,7 @@ echo "ok: a token with a space is refused"
 
 refused "a system that is not Ubuntu is refused" env BOOST_OS_RELEASE="$T/os-release-fedora" \
 	env -i PATH="$BIN:$REAL" HOME="$HOME_DIR" BOOST_ROOT="$BOOT" BOOST_OS_RELEASE="$T/os-release-fedora" \
-	STATE="$STATE" CALLS="$CALLS" FIXTURE="$FIXTURE" RIGTEMPLATE="$TEMPLATE" VAULTTEMPLATE="$VAULT_TEMPLATE" POSTERNTEMPLATE="$POSTERN_TEMPLATE" \
+	STATE="$STATE" CALLS="$CALLS" FIXTURE="$FIXTURE" RIGTEMPLATE="$TEMPLATE" VAULTTEMPLATE="$VAULT_TEMPLATE" POSTERNTEMPLATE="$POSTERN_TEMPLATE" ORIGINS="$ORIGINS" OTHERTEMPLATE="$OTHER_TEMPLATE" \
 	bash "$LOOSE/boost-bootstrap.sh" --env-file "$ENVFILE"
 echo "ok: a system that is not Ubuntu is refused"
 
@@ -513,7 +536,7 @@ cp "$SCRIPT" "$INRIG/contrib/boost-bootstrap.sh"
 : >"$CALLS"
 RC=0
 OUT=$(env -i PATH="$BIN:$REAL" HOME="$HOME_DIR" BOOST_ROOT="$BOOT" BOOST_OS_RELEASE="$T/os-release" \
-	STATE="$STATE" CALLS="$CALLS" FIXTURE="$FIXTURE" RIGTEMPLATE="$TEMPLATE" VAULTTEMPLATE="$VAULT_TEMPLATE" POSTERNTEMPLATE="$POSTERN_TEMPLATE" \
+	STATE="$STATE" CALLS="$CALLS" FIXTURE="$FIXTURE" RIGTEMPLATE="$TEMPLATE" VAULTTEMPLATE="$VAULT_TEMPLATE" POSTERNTEMPLATE="$POSTERN_TEMPLATE" ORIGINS="$ORIGINS" OTHERTEMPLATE="$OTHER_TEMPLATE" \
 	bash "$INRIG/contrib/boost-bootstrap.sh" --env-file "$ENVFILE" 2>&1) || RC=$?
 [ "$RC" = 0 ] || fail "$NAME: exited $RC: $OUT"
 grep -F 'git clone' "$CALLS" | grep -Fq 'millwright.git' && fail "$NAME: it cloned the rig it is in"
@@ -527,7 +550,7 @@ printf 'host = "cloud1"\n\n[rigs]\nargus = "%s/argus"\n' "$HOME_DIR" >"$HOME_DIR
 before_conf=$(cat "$HOME_DIR/.config/mw/config.toml")
 RC=0
 OUT=$(env -i PATH="$BIN:$REAL" HOME="$HOME_DIR" BOOST_ROOT="$BOOT" BOOST_OS_RELEASE="$T/os-release" \
-	STATE="$STATE" CALLS="$CALLS" FIXTURE="$FIXTURE" RIGTEMPLATE="$TEMPLATE" VAULTTEMPLATE="$VAULT_TEMPLATE" POSTERNTEMPLATE="$POSTERN_TEMPLATE" \
+	STATE="$STATE" CALLS="$CALLS" FIXTURE="$FIXTURE" RIGTEMPLATE="$TEMPLATE" VAULTTEMPLATE="$VAULT_TEMPLATE" POSTERNTEMPLATE="$POSTERN_TEMPLATE" ORIGINS="$ORIGINS" OTHERTEMPLATE="$OTHER_TEMPLATE" \
 	bash "$INRIG/contrib/boost-bootstrap.sh" --env-file "$ENVFILE" 2>&1) || RC=$?
 [ "$RC" = 0 ] || fail "$NAME: exited $RC: $OUT"
 [ "$(cat "$HOME_DIR/.config/mw/config.toml")" = "$before_conf" ] || fail "$NAME: config.toml was edited"
@@ -542,7 +565,7 @@ EMPTY_VAULT=$T/vault-empty
 mkdir -p "$EMPTY_VAULT"
 RC=0
 OUT=$(env -i PATH="$BIN:$REAL" HOME="$HOME_DIR" BOOST_ROOT="$BOOT" BOOST_OS_RELEASE="$T/os-release" \
-	STATE="$STATE" CALLS="$CALLS" FIXTURE="$FIXTURE" RIGTEMPLATE="$TEMPLATE" VAULTTEMPLATE="$EMPTY_VAULT" POSTERNTEMPLATE="$POSTERN_TEMPLATE" \
+	STATE="$STATE" CALLS="$CALLS" FIXTURE="$FIXTURE" RIGTEMPLATE="$TEMPLATE" VAULTTEMPLATE="$EMPTY_VAULT" POSTERNTEMPLATE="$POSTERN_TEMPLATE" ORIGINS="$ORIGINS" OTHERTEMPLATE="$OTHER_TEMPLATE" \
 	bash "$INRIG/contrib/boost-bootstrap.sh" --env-file "$ENVFILE" 2>&1) || RC=$?
 [ "$RC" = 0 ] || fail "$NAME: exited $RC: $OUT"
 printf '%s\n' "$OUT" | grep -Fq 'the vault has no hosts/boost-config.toml' || fail "$NAME: the missing file is not said: $OUT"
@@ -557,7 +580,7 @@ mkdir -p "$PARTIAL_VAULT/hosts"
 printf '[tests]\nargus = "npm test"\n' >"$PARTIAL_VAULT/hosts/boost-config.toml"
 RC=0
 OUT=$(env -i PATH="$BIN:$REAL" HOME="$HOME_DIR" BOOST_ROOT="$BOOT" BOOST_OS_RELEASE="$T/os-release" \
-	STATE="$STATE" CALLS="$CALLS" FIXTURE="$FIXTURE" RIGTEMPLATE="$TEMPLATE" VAULTTEMPLATE="$PARTIAL_VAULT" POSTERNTEMPLATE="$POSTERN_TEMPLATE" \
+	STATE="$STATE" CALLS="$CALLS" FIXTURE="$FIXTURE" RIGTEMPLATE="$TEMPLATE" VAULTTEMPLATE="$PARTIAL_VAULT" POSTERNTEMPLATE="$POSTERN_TEMPLATE" ORIGINS="$ORIGINS" OTHERTEMPLATE="$OTHER_TEMPLATE" \
 	bash "$INRIG/contrib/boost-bootstrap.sh" --env-file "$ENVFILE" 2>&1) || RC=$?
 [ "$RC" = 0 ] || fail "$NAME: exited $RC: $OUT"
 printf '%s\n' "$OUT" | grep -Fq 'no [tests] line for postern' || fail "$NAME: postern's missing line is not said: $OUT"
@@ -565,5 +588,68 @@ printf '%s\n' "$OUT" | grep -Fq 'no [tests] line for argus' && fail "$NAME: argu
 grep -Fxq 'argus = "npm test"' "$HOME_DIR/.config/mw/config.toml" || fail "$NAME: argus's line was not copied"
 sed -n '/^\[tests\]$/,/^$/p' "$HOME_DIR/.config/mw/config.toml" | grep -Fq 'postern' && fail "$NAME: a postern [tests] line was made up"
 echo "ok: $NAME"
+
+# --- h. a box made from cloud1's snapshot becomes cloud2, and its checkouts are mended ----
+NAME="a box made from cloud1's snapshot is cloud2, keeps the rest of its config, and mends its checkouts"
+rm -rf "$HOME_DIR" "$STATE" "$BOOT"
+mkdir -p "$HOME_DIR" "$STATE" "$BOOT/etc"
+RC=0
+OUT=$(boost --env-file "$ENVFILE" 2>&1) || RC=$?
+[ "$RC" = 0 ] || fail "$NAME: making cloud1 exited $RC: $OUT"
+CONF=$HOME_DIR/.config/mw/config.toml
+VAULT=$HOME_DIR/millwright-vault
+# cloud1's config, as the snapshot keeps it, with a line the host added by hand.
+sed -i 's/^cap = .*/&\nnudge_minutes = 7/' "$CONF"
+grep -Fxq 'nudge_minutes = 7' "$CONF" || fail "$NAME: could not add a line to cloud1's config.toml"
+# The vault's HEAD is a commit fetched loose, then left a zero-byte file, as on cloud1.
+W=$T/vault-push
+/usr/bin/git clone -q "file://$ORIGINS/vault-template.git" "$W"
+echo later >"$W/later.md"
+/usr/bin/git -C "$W" add later.md
+/usr/bin/git -C "$W" -c user.name=t -c user.email=t@t commit -q -m later
+/usr/bin/git -C "$W" push -q origin main
+HOME=$HOME_DIR /usr/bin/git -C "$VAULT" pull -q --ff-only
+head_id=$(/usr/bin/git -C "$VAULT" rev-parse HEAD)
+want_head=$(/usr/bin/git -C "$W" rev-parse HEAD)
+[ "$head_id" = "$want_head" ] || fail "$NAME: the vault did not take the later commit"
+loose=$VAULT/.git/objects/$(printf '%s' "$head_id" | cut -c1-2)/$(printf '%s' "$head_id" | cut -c3-)
+[ -f "$loose" ] || fail "$NAME: the vault's HEAD is not a loose object, so it cannot be emptied as on cloud1"
+chmod u+w "$loose"
+: >"$loose"
+if HOME=$HOME_DIR /usr/bin/git -C "$VAULT" status >/dev/null 2>&1; then fail "$NAME: git status still works on a vault whose HEAD is empty"; fi
+# postern's checkout is past mending by a fetch: its HEAD file is gone. A setting of its own must outlive it.
+HOME=$HOME_DIR /usr/bin/git -C "$HOME_DIR/postern" config mw.kept yes
+rm -f "$HOME_DIR/postern/.git/HEAD"
+sed -e 's/^BOOST_HOST=.*/BOOST_HOST=cloud2/' -e 's/^BOOST_WG_ADDRESS=.*/BOOST_WG_ADDRESS=10.88.0.5/' "$ENVFILE" >"$T/cloud2.env"
+chmod 600 "$T/cloud2.env"
+: >"$CALLS"
+RC=0
+OUT=$(boost --env-file "$T/cloud2.env" 2>&1) || RC=$?
+[ "$RC" = 0 ] || fail "$NAME: exited $RC: $OUT"
+grep -Fxq 'host = "cloud2"' "$CONF" || fail "$NAME: config.toml's host is not cloud2: $(cat "$CONF")"
+grep -Fq 'cloud1' "$CONF" && fail "$NAME: config.toml still names cloud1: $(cat "$CONF")"
+grep -Fxq 'nudge_minutes = 7' "$CONF" || fail "$NAME: a line of the existing config.toml was lost: $(cat "$CONF")"
+grep -Fxq 'argus = "'"$HOME_DIR"'/argus"' "$CONF" || fail "$NAME: the [rigs] table was lost: $(cat "$CONF")"
+sed -n '/^\[tests\]$/,/^$/p' "$CONF" | grep -Fq 'postern = ' || fail "$NAME: the [tests] table was lost: $(cat "$CONF")"
+[ "$(grep -c '^host = ' "$CONF")" = 1 ] || fail "$NAME: config.toml has more than one host line: $(cat "$CONF")"
+printf '%s\n' "$OUT" | grep -Fq 'host = "cloud2"' || fail "$NAME: the log does not say the host was set: $OUT"
+printf '%s\n' "$OUT" | grep -F "repaired $VAULT" | grep -Fq 'removed 1 empty object' || fail "$NAME: the log does not say the vault was repaired, and how: $OUT"
+printf '%s\n' "$OUT" | grep -F "repaired $VAULT" | grep -Fq 'reset to origin/main' || fail "$NAME: the log does not say the vault was reset to origin/main: $OUT"
+HOME=$HOME_DIR /usr/bin/git -C "$VAULT" status >/dev/null 2>&1 || fail "$NAME: git status still fails in the vault"
+[ "$(/usr/bin/git -C "$VAULT" rev-parse HEAD)" = "$want_head" ] || fail "$NAME: the vault is not at origin/main"
+[ -s "$loose" ] || fail "$NAME: the vault's HEAD object is still empty"
+printf '%s\n' "$OUT" | grep -Fq "re-cloned $HOME_DIR/postern" || fail "$NAME: the log does not say postern was cloned again: $OUT"
+HOME=$HOME_DIR /usr/bin/git -C "$HOME_DIR/postern" status >/dev/null 2>&1 || fail "$NAME: postern is still broken"
+[ "$(HOME=$HOME_DIR /usr/bin/git -C "$HOME_DIR/postern" config mw.kept)" = yes ] || fail "$NAME: postern's .git/config was not kept"
+grep -Fxq 'Address = 10.88.0.5/24' "$BOOT/etc/wireguard/wg0.conf" || fail "$NAME: wg0.conf still has cloud1's address"
+NAME="a second run on cloud2 changes nothing"
+before=$(snapshot)
+: >"$CALLS"
+RC=0
+OUT2=$(boost --env-file "$T/cloud2.env" 2>&1) || RC=$?
+[ "$RC" = 0 ] || fail "$NAME: exited $RC: $OUT2"
+[ "$(snapshot)" = "$before" ] || fail "$NAME: the machine changed"
+[ -z "$(changing "$CALLS")" ] || fail "$NAME: a changing command ran: $(changing "$CALLS")"
+echo "ok: a box made from cloud1's snapshot is cloud2, keeps the rest of its config, and mends its checkouts"
 
 echo "OK: contrib/boost-bootstrap.sh prints and runs every step in order, checks before it acts so a second run changes nothing, writes tokens only to mode 600 files, and refuses bad input"

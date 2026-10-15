@@ -18,11 +18,17 @@
 #   6  claude     Claude Code (npm, into ~/.local) and ~/.config/mw/claude.env (CLAUDE_CODE_OAUTH_TOKEN=...)
 #   7  vault      the vault cloned to BOOST_VAULT
 #   8  rigs       every rig in BOOST_RIGS cloned beside it
+#                 A checkout already there (5, 7, 8: a box made from a snapshot has them all) is checked
+#                 with git status and git fsck --connectivity-only, and for empty object files; a broken
+#                 one is repaired (its empty objects removed, fetched, reset to origin) or, when that does
+#                 not mend it, cloned again with its .git/config kept, the broken one moved aside. The log
+#                 says which. This script's own checkout is only checked.
 #   9  config     ~/.config/mw/config.toml, if there is none: host, vault, cap, beads_sync = "auto",
 #                 beads_server_host, the [rigs] table, and a [tests] line for each rig (a [changed_specs] line
 #                 where there is one) copied from the vault's hosts/boost-config.toml, so mw next gates a rig
-#                 with its own tests and not with `make test`. An existing one is never edited; what it lacks
-#                 is said.
+#                 with its own tests and not with `make test`. In an existing one only the host line is
+#                 ever edited, set to BOOST_HOST (a snapshot carries the box it was made from's); what else
+#                 it lacks is said.
 #  10  browsers   Playwright chromium and its system deps (root), at the version each cloned rig that depends
 #                 on @playwright/test has locked
 #  11  beads      ~/.config/mw/beads.env (mode 600): bd's BEADS_DOLT_* pointing at the home's beads server
@@ -472,6 +478,67 @@ s_wireguard() {
 	fi
 }
 
+# --- checkouts ---------------------------------------------------------------------
+# A snapshot can carry a checkout a write was cut short in: cloud1's vault held a
+# HEAD that was a zero-byte object, so every git call in it failed and every
+# dispatch with it (mw-5gr3k0.8). git_in runs git on the checkout <dir> alone,
+# never one above it.
+git_in() { # <dir> <git args...>
+	local dir=$1
+	shift
+	git --git-dir="$dir/.git" --work-tree="$dir" "$@"
+}
+empty_objects() { # <dir>: how many object files of the checkout are empty
+	find "$1/.git/objects" -type f -size 0 2>/dev/null | wc -l | tr -d ' '
+}
+# broken <dir>: what is wrong with the checkout, in a few words; empty when nothing
+# is. It only reads: git status takes no lock and refreshes no index.
+broken() {
+	local n out
+	n=$(empty_objects "$1")
+	if [ "$n" != 0 ]; then
+		echo "$n empty object file(s)"
+		return 0
+	fi
+	if ! out=$(git_in "$1" --no-optional-locks status --porcelain 2>&1 >/dev/null); then
+		echo "git status: $(printf '%s\n' "$out" | grep . | tail -n 1)"
+		return 0
+	fi
+	if ! out=$(git_in "$1" fsck --connectivity-only --no-progress 2>&1 >/dev/null); then
+		echo "git fsck: $(printf '%s\n' "$out" | grep . | tail -n 1)"
+	fi
+}
+# mend <dir> <url>: check a checkout that is there; repair a broken one in place,
+# and when that does not mend it, clone it again from <url> with its .git/config.
+# A reset to origin drops what the checkout held that origin does not: on a box
+# made from a snapshot that is the other box's, and the checkout is broken anyway.
+mend() {
+	local dir=$1 url=$2 why n branch aside
+	why=$(broken "$dir")
+	if [ -z "$why" ]; then
+		skip "$dir checks out (git status, git fsck --connectivity-only, no empty objects)"
+		return 0
+	fi
+	act "repair $dir ($why): remove its empty objects, fetch, reset to origin; clone it again if that does not mend it" || return 0
+	n=$(empty_objects "$dir")
+	find "$dir/.git/objects" -type f -size 0 -delete 2>/dev/null || true
+	branch=$(git_in "$dir" symbolic-ref --short HEAD 2>/dev/null) || branch=main
+	if GH_TOKEN="${BOOST_GITHUB_TOKEN}" git_in "$dir" fetch -q origin && git_in "$dir" reset -q --hard "origin/$branch" && [ -z "$(broken "$dir")" ]; then
+		printf '    repaired %s: removed %s empty object(s), fetched, reset to origin/%s\n' "$dir" "$n" "$branch"
+		return 0
+	fi
+	aside=$dir.broken-$(date -u +%Y%m%dT%H%M%SZ)
+	printf '    a repair did not mend %s (%s): cloning it again, the broken one moved to %s\n' "$dir" "$(broken "$dir")" "$aside"
+	mv "$dir" "$aside"
+	GH_TOKEN="${BOOST_GITHUB_TOKEN}" git clone "$url" "$dir" || die "could not clone $url again; the broken checkout is at $aside"
+	if git config -f "$aside/.git/config" --list >/dev/null 2>&1; then
+		cp -p "$aside/.git/config" "$dir/.git/config"
+		printf '    re-cloned %s from %s, its .git/config kept; the broken one is at %s\n' "$dir" "$url" "$aside"
+	else
+		printf '    re-cloned %s from %s; its .git/config could not be read, so the clone keeps its own; the broken one is at %s\n' "$dir" "$url" "$aside"
+	fi
+}
+
 # --- 5. the rig and its toolchain -------------------------------------------------
 # needs_toolchain: true when scripts/install.sh --dry-run has something to do.
 # (A bd that is already there writes its own telemetry under ~/.beads when
@@ -484,10 +551,16 @@ needs_toolchain() {
 }
 s_rig() {
 	step rig "$RIG, then Go, bd and mw through scripts/install.sh"
+	local why
 	if [ "$RIG_MODE" = checkout ]; then
 		skip "using the checkout this script is in"
+		# Someone's own checkout: what is wrong with it is said, never reset.
+		if [ -e "$RIG/.git" ] && why=$(broken "$RIG") && [ -n "$why" ]; then
+			note "the checkout this script is in, $RIG, is broken ($why): mend it by hand"
+		fi
 	elif is_checkout "$RIG"; then
 		skip "already cloned (not updated)"
+		mend "$RIG" "$REPO_URL"
 	else
 		if [ -e "$RIG" ] && [ -n "$(ls -A "$RIG" 2>/dev/null)" ]; then
 			die "$RIG exists and is not a millwright checkout; move it aside or set MW_HOME. Nothing more was changed."
@@ -526,6 +599,7 @@ s_claude() {
 clone_into() { # <url> <dir>
 	if [ -d "$2/.git" ]; then
 		skip "$2 is already cloned (not updated)"
+		mend "$2" "$1"
 	elif [ -e "$2" ] && [ -n "$(ls -A "$2" 2>/dev/null)" ]; then
 		die "$2 exists and is not a git checkout; move it aside. Nothing more was changed."
 	elif act "git clone $1 $2"; then
@@ -598,8 +672,22 @@ config_lines() { # the lines a config for this Boost holds, one per line: [rigs]
 	config_table tests
 	config_table changed_specs
 }
+# config_host <file>: the host the config names, before its first table; empty if none.
+config_host() {
+	awk '/^[[:space:]]*\[/ { exit } /^[[:space:]]*host[[:space:]]*=/ { v = $0; sub(/^[^=]*=[[:space:]]*/, "", v); sub(/[[:space:]]*(#.*)?$/, "", v); gsub(/^"|"$/, "", v); print v; exit }' "$1"
+}
+# with_host <file>: the config with its host line set to BOOST_HOST, every other
+# line as it was; a config with none gets one just before its first table.
+with_host() {
+	awk -v line="host = \"$BOOST_HOST\"" '
+		!done && /^[[:space:]]*\[/ { if (!set) print line; done = 1 }
+		!done && /^[[:space:]]*host[[:space:]]*=/ { if (!set) print line; set = 1; next }
+		{ print }
+		END { if (!done && !set) print line }
+	' "$1"
+}
 s_config() {
-	local want line rn
+	local want line rn now
 	step config "$MW_DIR/config.toml"
 	want=$(config_lines)
 	# A rig the vault's file does not name is said, not guessed. millwright's own
@@ -615,7 +703,12 @@ s_config() {
 		fi
 	fi
 	if [ -f "$MW_DIR/config.toml" ]; then
-		skip "exists; never edited"
+		now=$(config_host "$MW_DIR/config.toml")
+		if [ "$now" = "$BOOST_HOST" ]; then
+			skip "exists, its host is $BOOST_HOST; nothing in it is edited"
+		elif act "set host = \"$BOOST_HOST\" in $MW_DIR/config.toml (it says ${now:-no host}; a snapshot carries the box it was made from's), every other line kept"; then
+			put "$(stat -c %a "$MW_DIR/config.toml")" "$MW_DIR/config.toml" "$(with_host "$MW_DIR/config.toml")"
+		fi
 		while IFS= read -r line; do
 			case $line in '' | '['*) continue ;; esac
 			grep -Fxq -- "$line" "$MW_DIR/config.toml" || note "config.toml has no line: $line"
