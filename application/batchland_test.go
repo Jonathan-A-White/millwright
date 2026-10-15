@@ -3,6 +3,8 @@ package application_test
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -188,5 +190,228 @@ func TestLandingARigThisHostHasNotCheckedOutIsRefused(t *testing.T) {
 	land, _, _ := aBatchRig(t)
 	if _, err := land.Run(context.Background(), "elsewhere"); err == nil || !strings.Contains(err.Error(), "not checked out") {
 		t.Fatalf("expected a rig that is not checked out refused, got %v", err)
+	}
+}
+
+// The follower's batch-land job (plans/0117, Land Rush 4): when a rig's queue
+// is due, mw land is run on it, on the home only.
+
+func TestBatchDueFollowsTheRigsKeys(t *testing.T) {
+	settings := domain.LandingSettings{BatchEvery: 30 * time.Minute, BatchMin: 2, BatchMax: 4}
+	now := time.Date(2026, 10, 15, 13, 0, 0, 0, time.UTC)
+	ago := func(minutes int) time.Time { return now.Add(-time.Duration(minutes) * time.Minute) }
+	for _, c := range []struct {
+		name   string
+		queued int
+		oldest time.Time
+		want   bool
+	}{
+		{"nothing queued is never due", 0, ago(600), false},
+		{"below the minimum and young is not due", 1, ago(5), false},
+		{"below the minimum and old is not due", 1, ago(600), false},
+		{"the minimum reached but young is not due", 2, ago(29), false},
+		{"the minimum reached and old enough is due", 2, ago(30), true},
+		{"the maximum reached is due at once", 4, ago(0), true},
+		{"past the maximum is due", 5, ago(1), true},
+		{"a queue whose time was never recorded is old", 2, time.Time{}, true},
+	} {
+		if got := application.BatchDue(settings, c.queued, c.oldest, now); got != c.want {
+			t.Errorf("%s: expected due=%v, got %v", c.name, c.want, got)
+		}
+	}
+}
+
+// aLandingJob is the follower's batch-land job over a tracker whose stories
+// are queued as a test says, each rig's file as given. Land lands the oldest
+// queued story of the rig when it is asked for one, and every queued story of
+// it otherwise, and notes what it was asked.
+type aLandingJob struct {
+	t       *testing.T
+	tracker *apptest.FakeTracker
+	rules   *apptest.FakeEpicRules
+	home    bool
+	now     time.Time
+	asked   []string
+	failing map[string]error
+	job     application.SpringJob
+}
+
+func newLandingJob(t *testing.T) *aLandingJob {
+	t.Helper()
+	j := &aLandingJob{
+		t:       t,
+		tracker: apptest.NewFakeTracker(),
+		rules:   apptest.NewFakeEpicRules(),
+		home:    true,
+		now:     time.Date(2026, 10, 15, 13, 0, 0, 0, time.UTC),
+		failing: map[string]error{},
+	}
+	for _, rig := range []string{"lampas", "millwright"} {
+		j.tracker.AddEpic("e-"+rig, domain.Path{Rig: rig, Branch: "main", Harness: domain.HarnessClaude,
+			Model: domain.ModelOpus, Effort: domain.EffortHigh, Host: "desktop"})
+	}
+	landings := &application.BatchLandings{
+		Rigs:    map[string]string{"lampas": "/rigs/lampas", "millwright": "/rigs/millwright"},
+		Rules:   j.rules,
+		Tracker: j.tracker,
+		Home:    func(context.Context) (bool, error) { return j.home, nil },
+		Land:    j.land,
+		Now:     func() time.Time { return j.now },
+	}
+	j.job = landings.Job()
+	return j
+}
+
+// queued puts a story of rig in the queue, queued the given minutes ago.
+func (j *aLandingJob) queued(rig, id string, minutesAgo int) {
+	j.t.Helper()
+	ctx := context.Background()
+	j.tracker.AddStory("e-"+rig, domain.Story{ID: id, Title: "The story " + id})
+	mustDo(j.t, j.tracker.ClaimStory(ctx, id))
+	queue(j.t, j.tracker, id)
+	mustDo(j.t, j.tracker.SetStoryMetadata(ctx, id, map[string]string{
+		application.QueuedAtField: j.now.Add(-time.Duration(minutesAgo) * time.Minute).Format(time.RFC3339),
+	}))
+}
+
+func (j *aLandingJob) land(ctx context.Context, rig string, one bool) error {
+	j.asked = append(j.asked, fmt.Sprintf("%s one=%v", rig, one))
+	if err := j.failing[rig]; err != nil {
+		return err
+	}
+	work, err := j.tracker.WorkInHand(ctx)
+	mustDo(j.t, err)
+	for _, d := range work.Running {
+		path, _ := d.Path()
+		if path.Rig != rig || !application.QueuedForBatch(d) {
+			continue
+		}
+		mustDo(j.t, j.tracker.SetStoryState(ctx, d.Story.ID, application.RunState, application.RunLanded, "landed"))
+		if one {
+			break
+		}
+	}
+	return nil
+}
+
+func (j *aLandingJob) rule(rig string, mode domain.LandingMode) {
+	j.rules.Require(rig, domain.EpicRequirements{Landing: domain.LandingSettings{Mode: mode}})
+}
+
+func (j *aLandingJob) probe() (string, bool) { return j.job.Probe(context.Background()) }
+
+func TestTheBatchLandJobLandsABatchRigWhenItsQueueIsDue(t *testing.T) {
+	j := newLandingJob(t)
+	j.rule("lampas", domain.LandingBatch)
+	j.queued("lampas", "lp-1", 5)
+	if reason, ok := j.probe(); ok {
+		t.Fatalf("one young story is not a batch, but the job was sprung: %q", reason)
+	}
+	j.queued("lampas", "lp-2", 4)
+	if reason, ok := j.probe(); ok {
+		t.Fatalf("two young stories are not due, but the job was sprung: %q", reason)
+	}
+	j.now = j.now.Add(30 * time.Minute)
+	reason, ok := j.probe()
+	if !ok {
+		t.Fatal("the oldest has waited batch_every with batch_min queued, but the job was not sprung")
+	}
+	if !strings.Contains(reason, "lampas") || !strings.Contains(reason, "2 queued") {
+		t.Fatalf("expected the reason to name the rig and the count, got %q", reason)
+	}
+	mustDo(t, j.job.Run(context.Background()))
+	if got, want := j.asked, []string{"lampas one=false"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected one mw land of the whole queue, got %v", got)
+	}
+	if reason, ok := j.probe(); ok {
+		t.Fatalf("the queue is empty, but the job was sprung: %q", reason)
+	}
+}
+
+func TestTheBatchLandJobLandsAtOnceWhenTheQueueReachesBatchMax(t *testing.T) {
+	j := newLandingJob(t)
+	j.rule("lampas", domain.LandingBatch)
+	for i := 0; i < domain.DefaultBatchMax; i++ {
+		j.queued("lampas", fmt.Sprintf("lp-%d", i), 0)
+	}
+	reason, ok := j.probe()
+	if !ok || !strings.Contains(reason, "6 queued") {
+		t.Fatalf("expected the job sprung for 6 queued, got %q, %v", reason, ok)
+	}
+}
+
+func TestTheBatchLandJobLandsAnEachRigsLeftoversOneAtATime(t *testing.T) {
+	j := newLandingJob(t)
+	j.rule("lampas", domain.LandingEach)
+	j.queued("lampas", "lp-1", 2)
+	j.queued("lampas", "lp-2", 1)
+	// A story of another rig that lands in batches, young, is left alone.
+	j.rule("millwright", domain.LandingBatch)
+	j.queued("millwright", "mw-1", 0)
+
+	reason, ok := j.probe()
+	if !ok || !strings.Contains(reason, "lampas") || !strings.Contains(reason, "2 queued") || strings.Contains(reason, "millwright") {
+		t.Fatalf("expected the reason to name lampas and 2 queued only, got %q, %v", reason, ok)
+	}
+	mustDo(t, j.job.Run(context.Background()))
+	if got, want := j.asked, []string{"lampas one=true", "lampas one=true"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("expected the two leftovers landed singly, got %v", got)
+	}
+	if _, ok := j.probe(); ok {
+		t.Fatal("no leftover remains, but the job was sprung")
+	}
+}
+
+func TestTheBatchLandJobDoesNotRunOnTheBoost(t *testing.T) {
+	j := newLandingJob(t)
+	j.rule("lampas", domain.LandingBatch)
+	j.queued("lampas", "lp-1", 600)
+	j.queued("lampas", "lp-2", 600)
+	j.home = false
+	if reason, ok := j.probe(); ok {
+		t.Fatalf("the job was sprung on the boost: %q", reason)
+	}
+	mustDo(t, j.job.Run(context.Background()))
+	if len(j.asked) != 0 {
+		t.Fatalf("mw land was run on the boost: %v", j.asked)
+	}
+}
+
+func TestTheBatchLandJobLeavesAHeldBatchAloneUntilBatchEveryHasPassed(t *testing.T) {
+	j := newLandingJob(t)
+	j.rule("lampas", domain.LandingBatch)
+	j.queued("lampas", "lp-1", 600)
+	j.queued("lampas", "lp-2", 600)
+	j.failing["lampas"] = errors.New("batch 1 of lampas was held: red")
+	err := j.job.Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "lampas") {
+		t.Fatalf("expected the failure named, got %v", err)
+	}
+	if reason, ok := j.probe(); ok {
+		t.Fatalf("a held batch was tried again at once: %q", reason)
+	}
+	j.now = j.now.Add(domain.DefaultBatchEvery)
+	if _, ok := j.probe(); !ok {
+		t.Fatal("the held batch was not tried again after batch_every")
+	}
+}
+
+func TestTheBatchLandJobStopsDrainingWhenALandingLeavesTheQueueAsItWas(t *testing.T) {
+	j := newLandingJob(t)
+	j.rule("lampas", domain.LandingEach)
+	j.queued("lampas", "lp-1", 2)
+	j.queued("lampas", "lp-2", 1)
+	landings := &application.BatchLandings{
+		Rigs: map[string]string{"lampas": "/rigs/lampas"}, Rules: j.rules, Tracker: j.tracker,
+		Home: func(context.Context) (bool, error) { return true, nil },
+		Land: func(_ context.Context, rig string, one bool) error {
+			j.asked = append(j.asked, rig)
+			return nil // lands nothing
+		},
+		Now: func() time.Time { return j.now },
+	}
+	err := landings.Job().Run(context.Background())
+	if err == nil || len(j.asked) != 1 {
+		t.Fatalf("expected one try and an error for a landing that landed nothing, got %d tries, %v", len(j.asked), err)
 	}
 }

@@ -1262,6 +1262,16 @@ and why. What each batch did is kept under `runs/batch/<rig>/<n>/` in the vault.
 On a batch rig nothing but `mw land` pushes main. See
 `features/batch_land.feature`.
 
+**The follower lands the queue when it is due** (Land Rush 4). The home's follower
+(`mw events follow`) springs the job `batch-land@<host>`, on the home only, never on the
+Boost: for each of this host's rigs that lands in batches, it runs `mw land <rig>` once the rig
+has `batch_min` stories queued and the oldest has waited `batch_every`, or at once when
+`batch_max` are queued. A rig flipped back to `landing = "each"` with stories still queued
+has them landed one at a time, oldest first (`mw land <rig> --one`), until none remains. One
+rig at a time, never two at once; a batch that was held is not tried again until `batch_every`
+has passed. The job's `scheduled` event names the rigs and the counts
+(`landing of lampas (3 queued)`).
+
 ## Recovering a story after a refused landing
 
 ```sh

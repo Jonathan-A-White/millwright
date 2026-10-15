@@ -2,11 +2,13 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
@@ -93,6 +95,10 @@ type BatchLand struct {
 	// (BatchMetric), whether it landed or was held. Nil keeps none.
 	Metrics BatchMetrics
 	DryRun  bool
+	// One takes only the oldest queued story, whatever else is queued: how a
+	// rig flipped back to landing = each lands what was left in its queue, one
+	// story at a time (the follower's batch-land job, Land Rush 4).
+	One bool
 }
 
 // BatchStory is one queued story as a batch took it, in the order it was
@@ -326,6 +332,9 @@ func (b BatchLand) queued(ctx context.Context, rig string, report *BatchReport) 
 			continue
 		}
 		kept = append(kept, s)
+	}
+	if b.One && len(kept) > 1 {
+		kept = kept[:1]
 	}
 	return kept, nil
 }
@@ -852,4 +861,241 @@ func writeNotes(b *strings.Builder, notes []string) {
 	for _, note := range notes {
 		fmt.Fprintf(b, "  note    %s\n", note)
 	}
+}
+
+// BatchLandJobName is the name of the follower's job that lands the queues of
+// the rigs that land in batches: its events' actor is batch-land@<host>.
+const BatchLandJobName = "batch-land"
+
+// BatchDue says whether a queue of queued stories, the oldest queued at oldest,
+// is to be landed at now: BatchMax queued is due at once, and BatchMin queued
+// is due once the oldest has waited BatchEvery. An oldest with no time was
+// queued by an mw that recorded none, before any that has one, so it has waited
+// long enough. An empty queue is never due.
+func BatchDue(s domain.LandingSettings, queued int, oldest, now time.Time) bool {
+	switch {
+	case queued <= 0:
+		return false
+	case queued >= s.BatchMax:
+		return true
+	case queued < s.BatchMin:
+		return false
+	}
+	return oldest.IsZero() || now.Sub(oldest) >= s.BatchEvery
+}
+
+// BatchQueues is the port the batch-land job reads the queues through: the
+// stories in hand, among which are those run=queued.
+type BatchQueues interface {
+	WorkInHand(ctx context.Context) (WorkInHand, error)
+}
+
+// BatchLandings is the follower's job that runs mw land on every rig of this
+// host whose queue is due, on the home only (plans/0117, Land Rush 4).
+//
+// A rig that lands in batches is due by BatchDue, under its own keys. A rig
+// whose file says landing = each is due as soon as a story is queued on it: it
+// was flipped back, and what it had queued is landed one story at a time, the
+// oldest first, until none remains. The passes run the due rigs one after the
+// other, so two landings never run together here, and the follower keeps the
+// job in flight at most once; mw land takes the rig's merge slot besides.
+//
+// A rig whose landing failed (a held batch, which the Mayor is mailed, or a
+// story landed that left the queue as it was) is not tried again until
+// BatchEvery has passed, so a red batch is not run again every pass.
+type BatchLandings struct {
+	// Rigs are the rigs checked out on this host, by name.
+	Rigs map[string]string
+	// Rules is where each rig's landing keys are read from.
+	Rules EpicRules
+	// Tracker is where the queued stories are read from.
+	Tracker BatchQueues
+	// Home says whether this host is the home: only the home lands.
+	Home func(ctx context.Context) (bool, error)
+	// Land does mw land <rig>, or with one mw land <rig> --one.
+	Land func(ctx context.Context, rig string, one bool) error
+	// Now is the clock; nil is time.Now.
+	Now func() time.Time
+
+	mu     sync.Mutex
+	failed map[string]time.Time // rig -> when its landing last failed
+}
+
+func (b *BatchLandings) now() time.Time {
+	if b.Now != nil {
+		return b.Now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+// Job is the follower's job: no event springs it; every pass asks whether a
+// queue is due.
+func (b *BatchLandings) Job() SpringJob {
+	return SpringJob{
+		Name: BatchLandJobName,
+		Probe: func(ctx context.Context) (string, bool) {
+			due, _ := b.due(ctx)
+			if len(due) == 0 {
+				return "", false
+			}
+			parts := make([]string, len(due))
+			for i, d := range due {
+				parts[i] = d.String()
+			}
+			return "landing of " + strings.Join(parts, ", "), true
+		},
+		Run: b.run,
+	}
+}
+
+// batchDue is a rig whose queue is to be landed now.
+type batchDue struct {
+	rig    string
+	each   bool
+	queued int
+}
+
+func (d batchDue) String() string {
+	if d.each {
+		return fmt.Sprintf("%s (%d queued, one at a time)", d.rig, d.queued)
+	}
+	return fmt.Sprintf("%s (%d queued)", d.rig, d.queued)
+}
+
+// batchQueue is what a rig has queued: how many, and when the oldest was.
+type batchQueue struct {
+	queued int
+	oldest time.Time
+}
+
+// queues reads the queue of every rig of this host that has one.
+func (b *BatchLandings) queues(ctx context.Context) (map[string]batchQueue, error) {
+	work, err := b.Tracker.WorkInHand(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("reading the queued stories: %w", err)
+	}
+	queues := map[string]batchQueue{}
+	for _, detail := range work.Running {
+		if !QueuedForBatch(detail) {
+			continue
+		}
+		path, err := detail.Path()
+		if err != nil {
+			continue
+		}
+		if _, here := b.Rigs[path.Rig]; !here {
+			continue
+		}
+		q := queues[path.Rig]
+		if q.queued == 0 || detail.QueuedAt.Before(q.oldest) {
+			q.oldest = detail.QueuedAt
+		}
+		q.queued++
+		queues[path.Rig] = q
+	}
+	return queues, nil
+}
+
+// due is the rigs whose queue is to be landed now, in name order. A rig whose
+// rules cannot be read is left out and the error comes back beside the rest.
+func (b *BatchLandings) due(ctx context.Context) ([]batchDue, error) {
+	// Home first: it reads one file in the vault, and the queues are read
+	// from the tracker.
+	if at, err := b.Home(ctx); err != nil || !at {
+		return nil, err
+	}
+	queues, err := b.queues(ctx)
+	if err != nil || len(queues) == 0 {
+		return nil, err
+	}
+	names := make([]string, 0, len(queues))
+	for name := range queues {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	now := b.now()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var due []batchDue
+	var errs []error
+	for _, name := range names {
+		rules, err := b.requirements(ctx, name)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("reading the rules of %s: %w", name, err))
+			continue
+		}
+		settings := rules.LandingSettings()
+		if failed, was := b.failed[name]; was && now.Sub(failed) < settings.BatchEvery {
+			continue
+		}
+		q := queues[name]
+		if settings.Mode == domain.LandingEach {
+			due = append(due, batchDue{rig: name, each: true, queued: q.queued})
+		} else if BatchDue(settings, q.queued, q.oldest, now) {
+			due = append(due, batchDue{rig: name, queued: q.queued})
+		}
+	}
+	return due, errors.Join(errs...)
+}
+
+// requirements reads a rig's file as a landing does: a key this mw does not
+// know does not stop it.
+func (b *BatchLandings) requirements(ctx context.Context, rig string) (domain.EpicRequirements, error) {
+	if lenient, ok := b.Rules.(LandingRules); ok {
+		rules, _, err := lenient.LandingRequirements(ctx, rig)
+		return rules, err
+	}
+	return b.Rules.EpicRequirements(ctx, rig)
+}
+
+// run lands each due rig, one at a time. A rig whose landing failed does not
+// stop the next; the pass then fails, naming each.
+func (b *BatchLandings) run(ctx context.Context) error {
+	due, err := b.due(ctx)
+	if len(due) == 0 {
+		return err
+	}
+	errs := []error{err}
+	for _, d := range due {
+		if ctx.Err() != nil {
+			errs = append(errs, ctx.Err())
+			break
+		}
+		if err := b.landRig(ctx, d); err != nil {
+			b.mu.Lock()
+			if b.failed == nil {
+				b.failed = map[string]time.Time{}
+			}
+			b.failed[d.rig] = b.now()
+			b.mu.Unlock()
+			errs = append(errs, fmt.Errorf("landing %s: %w", d.rig, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// landRig lands the queue of one rig: all of it at once, or on a rig that lands
+// each story by itself, one story at a time until none is left. A landing that
+// leaves the queue as long as it was stops the drain, so that it cannot go on
+// for ever.
+func (b *BatchLandings) landRig(ctx context.Context, d batchDue) error {
+	if !d.each {
+		return b.Land(ctx, d.rig, false)
+	}
+	for left := d.queued; left > 0; {
+		if err := b.Land(ctx, d.rig, true); err != nil {
+			return err
+		}
+		queues, err := b.queues(ctx)
+		if err != nil {
+			return err
+		}
+		remaining := queues[d.rig].queued
+		if remaining >= left {
+			return fmt.Errorf("a story was landed by itself and %d are still queued", remaining)
+		}
+		left = remaining
+	}
+	return nil
 }
