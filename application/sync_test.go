@@ -749,6 +749,88 @@ func TestASyncChecksPackCountsEvenWhenGCIsNotDue(t *testing.T) {
 	}
 }
 
+// A backup remote that has stopped answering (mw-gq6.449: the dolt pull said
+// "Blob not found" from 2026-10-05) must not starve the collection: the
+// database the factory runs on went ten days without one and passed its budget.
+func TestAHaltedRemoteDoesNotStarveTheCollectionWhenItIsDue(t *testing.T) {
+	cases := map[string]func(*testing.T) (application.Sync, *apptest.FakeTracker){
+		"a host that keeps the one database": func(t *testing.T) (application.Sync, *apptest.FakeTracker) {
+			sync, _, tracker := keeping(t)
+			return sync, tracker
+		},
+		"a host whose beads cycle is the sync": func(t *testing.T) (application.Sync, *apptest.FakeTracker) {
+			sync, _, tracker := syncing(t)
+			return sync, tracker
+		},
+	}
+	for name, build := range cases {
+		t.Run(name, func(t *testing.T) {
+			sync, tracker := build(t)
+			tracker.SyncErr = errors.New("dolt pull: Blob not found")
+			if err := tracker.SetNote(context.Background(), application.LastGCKey("vps"),
+				level.Add(-2*application.DefaultGCInterval).UTC().Format(application.LastSyncFormat)); err != nil {
+				t.Fatalf("seeding the last collection: %v", err)
+			}
+
+			report, _ := sync.Run(context.Background())
+
+			if got := tracker.GCs(); got != 1 {
+				t.Fatalf("expected one collection although the remote failed, got %d", got)
+			}
+			if !report.GCed {
+				t.Fatal("expected the report to say the collection ran")
+			}
+			if got, want := note(t, tracker, application.LastGCKey("vps")), level.Format(application.LastSyncFormat); got != want {
+				t.Fatalf("expected host.vps.last_gc to be %q, got %q", want, got)
+			}
+		})
+	}
+}
+
+func TestAHaltedRemoteDoesNotRunACollectionThatIsNotDue(t *testing.T) {
+	cases := map[string]func(*testing.T) (application.Sync, *apptest.FakeTracker){
+		"a host that keeps the one database": func(t *testing.T) (application.Sync, *apptest.FakeTracker) {
+			sync, _, tracker := keeping(t)
+			return sync, tracker
+		},
+		"a host whose beads cycle is the sync": func(t *testing.T) (application.Sync, *apptest.FakeTracker) {
+			sync, _, tracker := syncing(t)
+			return sync, tracker
+		},
+	}
+	for name, build := range cases {
+		t.Run(name, func(t *testing.T) {
+			sync, tracker := build(t)
+			tracker.SyncErr = errors.New("dolt pull: Blob not found")
+			if err := tracker.SetNote(context.Background(), application.LastGCKey("vps"),
+				level.Add(-time.Hour).UTC().Format(application.LastSyncFormat)); err != nil {
+				t.Fatalf("seeding the last collection: %v", err)
+			}
+
+			report, _ := sync.Run(context.Background())
+
+			if got := tracker.GCs(); got != 0 || report.GCed {
+				t.Fatalf("expected no collection an hour after the last, got %d (GCed=%v)", got, report.GCed)
+			}
+		})
+	}
+}
+
+// A vault with uncommitted work skips the vault half, not the beads half, and
+// the beads database still wants its collection.
+func TestABlockedVaultDoesNotStarveTheCollection(t *testing.T) {
+	sync, files, tracker := syncing(t)
+	files.Dirty = []string{"notes.md"}
+
+	report, err := sync.Run(context.Background())
+	if _, blocked := err.(*application.VaultBlocked); !blocked {
+		t.Fatalf("expected the vault to be blocked, got %v", err)
+	}
+	if got := tracker.GCs(); got != 1 || !report.GCed {
+		t.Fatalf("expected the collection to run on a blocked vault, got %d (GCed=%v)", got, report.GCed)
+	}
+}
+
 func TestASyncThatCannotCollectStillSucceeds(t *testing.T) {
 	sync, _, tracker := syncing(t)
 	tracker.GCErr = errors.New("no space to write a compacted commit")

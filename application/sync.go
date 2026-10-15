@@ -761,9 +761,13 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 		switch mode {
 		case BeadsSyncBackup:
 			s.backupIfDue(ctx, &report)
+			if !s.SkipBackup {
+				report.GCed = s.maybeGC(ctx)
+			}
 		case BeadsSyncShared:
 		default:
 			retried, err := s.syncTrackerMarking(ctx)
+			report.GCed = s.maybeGC(ctx)
 			if err != nil {
 				return report, fmt.Errorf("syncing the beads database on %s: %w", s.Host, err)
 			}
@@ -814,8 +818,8 @@ func (s Sync) queueStamp(ctx context.Context, report *SyncReport) {
 // to carry them anywhere; then, on the host that holds that database, a
 // backup if one is due and a GC on its usual cadence. A backup that halts
 // takes no note back — every other host already reads this one — and stops
-// nothing; it only holds this sync's GC back, since a database whose backup
-// has just halted may be part-way through a merge.
+// nothing, the GC included: it is local work on its own cadence, and a halted
+// backup must not starve it (mw-gq6.449).
 //
 // On a host whose database is another's nothing here can halt, so a mark or
 // note of a halt left from before is cleared: it can only be stale.
@@ -833,13 +837,15 @@ func (s Sync) recordLevelInTheOneDatabase(ctx context.Context, report SyncReport
 		s.backupIfDue(ctx, &report)
 	}
 
+	// The collection is local work on the database and has nothing to wait for
+	// from the backup: a remote that keeps failing must not starve it (mw-gq6.449).
+	if report.Mode == BeadsSyncBackup && !s.SkipBackup {
+		report.GCed = s.maybeGC(ctx)
+	}
 	if noteErr != nil {
 		return report, fmt.Errorf("recording when %s was last level: %w", s.Host, noteErr)
 	}
 	report.At = at
-	if report.Mode == BeadsSyncBackup && report.BackupErr == nil && !s.SkipBackup && !report.BackupMetered {
-		report.GCed = s.maybeGC(ctx)
-	}
 	return report, nil
 }
 
@@ -937,6 +943,10 @@ func (s Sync) syncBeadsRecordingLevel(ctx context.Context, report SyncReport) (S
 	}
 
 	retried, err := s.syncTrackerMarking(ctx)
+	// A cycle that halted still went through the database, which keeps growing
+	// whether or not the remote answers: the collection runs on its own
+	// cadence either way (mw-gq6.449).
+	report.GCed = s.maybeGC(ctx)
 	if err != nil {
 		err = fmt.Errorf("syncing the beads database on %s: %w", s.Host, err)
 		if noteErr == nil {
@@ -954,7 +964,6 @@ func (s Sync) syncBeadsRecordingLevel(ctx context.Context, report SyncReport) (S
 		return report, fmt.Errorf("recording when %s was last level: %w", s.Host, noteErr)
 	}
 	report.At = at
-	report.GCed = s.maybeGC(ctx)
 	return report, nil
 }
 
