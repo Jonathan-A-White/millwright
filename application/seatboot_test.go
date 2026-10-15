@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
@@ -437,5 +440,67 @@ func TestBootAsksABugsBuilderForItsCommonError(t *testing.T) {
 	}
 	if strings.Contains(h.launch.Kickoff, application.CommonErrorsMarker) {
 		t.Errorf("a story that is not a bug is not asked, got %q", h.launch.Kickoff)
+	}
+}
+
+// A Builder's story session has no run_in_background (mw-gq6.90), and a Builder
+// that polled its own mw check log with `sleep 570` lost minutes per check
+// (mw-gq6.425): every Builder kickoff says how to wait on a long command, and
+// says never to sleep-poll.
+func TestEveryBuilderKickoffTeachesTheBackgroundAndTailWait(t *testing.T) {
+	kickoffs := map[string]string{
+		"story":    application.KickoffPrompt("builder", "mw-gq6.6", "/home/jwhite/vault"),
+		"rebase":   application.RebaseKickoffPrompt("builder", "mw-gq6.6", "/home/jwhite/vault", "origin/main"),
+		"mergefix": application.MergeFixKickoffPrompt("builder", "mw-gq6.6", "/home/jwhite/vault", "origin/main"),
+	}
+	for name, prompt := range kickoffs {
+		for _, want := range []string{
+			"no run_in_background",
+			"nohup <cmd> > /tmp/<name>-<story>.log 2>&1 & echo $!",
+			"timeout 550 tail --pid=<pid> -f /dev/null",
+			"until the pid is gone",
+			"never a fixed `sleep N`",
+			"never end the turn while it runs",
+		} {
+			if !strings.Contains(prompt, want) {
+				t.Errorf("the %s kickoff should hold %q, got %q", name, want, prompt)
+			}
+		}
+		if strings.Contains(prompt, "never in the background") {
+			t.Errorf("the %s kickoff still says never in the background: %q", name, prompt)
+		}
+		if strings.Contains(prompt, "%!") {
+			t.Errorf("the %s kickoff has a format slip: %q", name, prompt)
+		}
+	}
+}
+
+// The wait form the Builders are taught really returns when the command ends,
+// and really gives up its turn at the limit.
+func TestTheTailWaitReturnsWhenTheCommandEndsAndAtItsLimit(t *testing.T) {
+	run := func(t *testing.T, wait, command string) time.Duration {
+		t.Helper()
+		log := filepath.Join(t.TempDir(), "long.log")
+		script := fmt.Sprintf("nohup %s > %s 2>&1 & pid=$!; %s; kill $pid 2>/dev/null; true",
+			command, log, strings.ReplaceAll(wait, "<pid>", "$pid"))
+		start := time.Now()
+		if out, err := exec.Command("sh", "-c", script).CombinedOutput(); err != nil {
+			t.Fatalf("running the wait form: %v: %s", err, out)
+		}
+		return time.Since(start)
+	}
+
+	if elapsed := run(t, application.LongCommandWait, "sleep 3"); elapsed < 3*time.Second || elapsed > 8*time.Second {
+		t.Errorf("a 3-second command should be waited on for 3 to 8 seconds (ending +5 s), took %v", elapsed)
+	}
+
+	// 550 s cannot be waited out in a test: the same form with a 2 s limit shows
+	// the limit ends the wait while the command runs on.
+	short := strings.Replace(application.LongCommandWait, "timeout 550", "timeout 2", 1)
+	if short == application.LongCommandWait {
+		t.Fatalf("the wait form should start with timeout 550, got %q", application.LongCommandWait)
+	}
+	if elapsed := run(t, short, "sleep 600"); elapsed < 2*time.Second || elapsed > 5*time.Second {
+		t.Errorf("a 600-second command should be left after the limit (2 s here), took %v", elapsed)
 	}
 }

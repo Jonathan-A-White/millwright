@@ -91,8 +91,10 @@ Feature: Booting a session into a seat
       | run `mw check mw-gq6.6`             |
       | exits non-zero when any check fails |
       | ends when your turn ends            |
-      | run the suite in the foreground     |
-      | commit before you stop              |
+      | have no run_in_background           |
+      | timeout 550 tail --pid=<pid> -f /dev/null |
+      | never a fixed `sleep N`             |
+      | Commit before you stop              |
 
   Scenario: The session is told the exact bd command for this host's vault
     When the session that works the story is assembled for the "builder" seat

@@ -457,8 +457,8 @@ func KickoffPrompt(seat, storyID, vaultDir string) string {
 		"every formula step closed, the rig's tests passing), prints what mw next would print for each "+
 		"refusal, writes nothing anywhere and exits non-zero when any check fails. "+
 		"A formula step you have not closed yet is one it will name. "+
-		"This session is headless and ends when your turn ends: run the suite in the foreground "+
-		"and wait for it, never in the background, and commit before you stop.", seat, storyID, bdVault(vaultDir), storyID)
+		"This session is headless and ends when your turn ends. %s"+
+		"Commit before you stop.", seat, storyID, bdVault(vaultDir), storyID, longCommandAdvice)
 }
 
 // TesterKickoffPrompt is the first thing a Tester story's session is told
@@ -504,8 +504,8 @@ func RebaseKickoffPrompt(seat, storyID, vaultDir, onto string) string {
 		"Say on the story, in one comment, what the conflicts were and how you resolved them. "+
 		"Once the rebase is committed, run `mw check %s` and fix whatever it refuses. "+
 		"When you end, mw next lands the branch; if it still conflicts it stops, and nobody is sent back again. "+
-		"This session is headless and ends when your turn ends: run the suite in the foreground "+
-		"and wait for it, never in the background, and commit before you stop.", seat, storyID, onto, onto, bdVault(vaultDir), storyID)
+		"This session is headless and ends when your turn ends. %s"+
+		"Commit before you stop.", seat, storyID, onto, onto, bdVault(vaultDir), storyID, longCommandAdvice)
 }
 
 // MergeFixKickoffPrompt is the first thing a session sent back to fix the
@@ -530,8 +530,8 @@ func MergeFixKickoffPrompt(seat, storyID, vaultDir, onto string) string {
 		"Say on the story, in one comment, what failed and how you fixed it. "+
 		"Once the fix is committed, run `mw check %s` and fix whatever it refuses. "+
 		"When you end, mw next lands the branch; if the merged tests still fail it stops, and nobody is sent back again. "+
-		"This session is headless and ends when your turn ends: run the suite in the foreground "+
-		"and wait for it, never in the background, and commit before you stop.", seat, storyID, onto, bdVault(vaultDir), storyID)
+		"This session is headless and ends when your turn ends. %s"+
+		"Commit before you stop.", seat, storyID, onto, bdVault(vaultDir), storyID, longCommandAdvice)
 }
 
 // bdVault is the sentence that gives a session the exact bd command for this
@@ -642,3 +642,19 @@ func section(b *strings.Builder, text string) {
 	b.WriteString(strings.TrimRight(text, "\n"))
 	b.WriteString("\n\n")
 }
+
+// longCommandAdvice tells a Builder how to run what may outlast the foreground
+// limit (mw-gq6.425). A story session has no run_in_background (mw-gq6.90), so
+// a Builder that started mw check or a suite in the background polled its log
+// in `sleep 570` spells, losing minutes a check; waiting on the pid returns the
+// moment the command ends. It holds no % so it is passed to Sprintf as a value.
+var longCommandAdvice = "Story sessions have no run_in_background. " +
+	"A command that may outrun the 10-minute foreground limit (mw check, a full suite, a build) starts as " +
+	"`nohup <cmd> > /tmp/<name>-<story>.log 2>&1 & echo $!`, and you wait with `" + LongCommandWait + "`, " +
+	"repeated until the pid is gone, then read the log: never a fixed `sleep N` to poll, " +
+	"and never end the turn while it runs. Run anything shorter in the foreground and wait for it. "
+
+// LongCommandWait is the one wait a Builder makes on a command it started in the
+// background: it returns when the pid is gone, or after 550 s, inside the
+// 10-minute foreground limit, and is repeated until the pid is gone.
+const LongCommandWait = "timeout 550 tail --pid=<pid> -f /dev/null"
