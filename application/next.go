@@ -1745,6 +1745,7 @@ func (n Next) ledgered(ctx context.Context, id string) (bool, error) {
 func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Landed, error) {
 	base := StartPoint(n.remote(), c.target)
 	var version VersionBump
+	var union []string
 	if n.Rules != nil {
 		rules, unknown, err := n.landingRequirements(ctx, c.path.Rig)
 		if err != nil {
@@ -1755,6 +1756,7 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 				RigsDir, c.path.Rig, ".toml", key, n.Host))
 		}
 		version.Files = rules.VersionFiles
+		union = rules.UnionMergeFiles
 		if len(rules.VersionFiles) > 0 && len(rules.ChangelogFiles) > 0 {
 			if version.Entry, err = n.changelogEntry(ctx, c, report); err != nil {
 				return Landed{}, failedFor(ReasonLandingFailed, err)
@@ -1778,7 +1780,7 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 			return Landed{}, failedFor(ReasonLandingFailed, fmt.Errorf("a landing of %s at %s could not be opened: %w", c.path.Rig, base, err))
 		}
 
-		landed, err := n.push(ctx, c, report, dir, version)
+		landed, err := n.push(ctx, c, report, dir, version, union)
 		if closeErr := n.Landing.CloseLanding(ctx, c.rigDir, dir); closeErr != nil {
 			report.Notes = append(report.Notes, fmt.Sprintf("the landing worktree %s could not be taken away: %v", dir, closeErr))
 		}
@@ -1811,12 +1813,19 @@ func (n Next) landingRequirements(ctx context.Context, rig string) (domain.EpicR
 }
 
 // push is one attempt at a landing, in a landing worktree that is already open:
-// merge, raise the rig's version when it names files for one, test what merging
+// merge (by union, in the files the rig lists for it), raise the rig's version
+// when it names files for one, test what merging
 // made if it made anything new, and push. Each attempt starts from a fresh
 // landing worktree at the newest base, so a push that was refused and tried
 // again raises the version once, from the new base, never on top of its own.
-func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir string, version VersionBump) (Landed, error) {
-	landed, err := n.Landing.Merge(ctx, dir, c.branch)
+func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir string, version VersionBump, union []string) (Landed, error) {
+	var landed Landed
+	var err error
+	if len(union) > 0 {
+		landed, err = n.Landing.MergeUnion(ctx, dir, c.branch, union)
+	} else {
+		landed, err = n.Landing.Merge(ctx, dir, c.branch)
+	}
 	if err != nil {
 		if Conflicted(err) {
 			return Landed{}, failedFor(ReasonMergeConflict, fmt.Errorf("%s does not merge into %s without conflicts, which mw will not resolve for anybody: %w",
@@ -2667,6 +2676,9 @@ func (r NextReport) String() string {
 		fmt.Fprintf(&b, "  landed  on %s by an earlier run of mw next: nothing was merged, tested or pushed again\n", r.Target)
 	case r.Landed:
 		fmt.Fprintf(&b, "  landed  %s on %s (%d commits, %d push(es))\n", r.How.LandedAs(r.Target), r.Target, r.Commits, r.Pushes)
+		if len(r.How.Unioned) > 0 {
+			fmt.Fprintf(&b, "  union-merged: %s (conflicts the rig lists as append-mostly, both sides' lines kept, tested together)\n", strings.Join(r.How.Unioned, ", "))
+		}
 	case r.Tested != "" && r.Findings.Text == "":
 		fmt.Fprintf(&b, "  tested  %s by an earlier run of mw next: nothing was read or written again\n", r.Tested)
 	case r.Tested != "":

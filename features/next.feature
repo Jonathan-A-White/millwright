@@ -435,6 +435,47 @@ Feature: Closing out a finished story and carrying on
     And the run of "mw-gq6.1" holds a landing error with every line the origin said
     And the landing error of "mw-gq6.1" says it was tried 4 times
 
+  Scenario: A branch that conflicts only in a file the rig lists is merged by union, tested together, and lands
+    Given the rig's file in the vault lists "ATTRIBUTION.md" to be merged by union
+    And the other host landed the file "ATTRIBUTION.md" holding "the other host credits this" on "main"
+    And "mw-gq6.1" wrote the file "ATTRIBUTION.md" holding "the story credits that"
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the work of "mw-gq6.1" is on "main" at the rig's origin
+    And the file "ATTRIBUTION.md" on "main" at the rig's origin holds the lines "the other host credits this" and "the story credits that"
+    And it landed as a merge commit
+    And the rig's tests were run 2 times
+    And the story "mw-gq6.1" is closed
+    And that mail's body holds:
+      | union-merged: ATTRIBUTION.md |
+
+  Scenario: A branch that conflicts in a file the rig does not list is sent back as before
+    Given the rig's file in the vault lists "CLAUDE.md" to be merged by union
+    And the other host landed the file "ATTRIBUTION.md" holding "the other host credits this" on "main"
+    And "mw-gq6.1" wrote the file "ATTRIBUTION.md" holding "the story credits that"
+    And the session of "mw-gq6.1" was the first that dispatch started for it
+    And the session of "mw-gq6.1" reported a plain success
+    And mw next is running in the session of "mw-gq6.1"
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is recorded as sent back to rebase
+    And the last ledger line holds:
+      | not landed (merge-conflict): |
+
+  Scenario: A branch that conflicts in a listed file and an unlisted one is sent back whole
+    Given the rig's file in the vault lists "ATTRIBUTION.md" to be merged by union
+    And the other host landed a change to the same file as "mw-gq6.1" on "main"
+    And the other host landed the file "ATTRIBUTION.md" holding "the other host credits this" on "main"
+    And "mw-gq6.1" wrote the file "ATTRIBUTION.md" holding "the story credits that"
+    And the session of "mw-gq6.1" was the first that dispatch started for it
+    And the session of "mw-gq6.1" reported a plain success
+    And mw next is running in the session of "mw-gq6.1"
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is recorded as sent back to rebase
+    And the last ledger line holds:
+      | not landed (merge-conflict): |
+
   Scenario: A branch that conflicts with the moved target is sent back once to a fresh Builder to rebase
     Given the other host landed a change to the same file as "mw-gq6.1" on "main"
     And the session of "mw-gq6.1" was the first that dispatch started for it

@@ -27,6 +27,7 @@ const (
 	GuestKey               = "guest"
 	VersionFilesKey        = "version_files"
 	ChangelogFilesKey      = "changelog_files"
+	UnionMergeFilesKey     = "union_merge_files"
 	PublicURLKey           = "public_url"
 	FilesExpectedKey       = "files_expected"
 	NightlySuiteKey        = "nightly_suite"
@@ -47,6 +48,7 @@ var beadID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 //	guest                  = "Luke"
 //	version_files          = ["package.json", "package-lock.json"]
 //	changelog_files        = ["public/changelog.json", "CHANGELOG.md"]
+//	union_merge_files      = ["ATTRIBUTION.md", "docs/*.md"]
 //	public_url             = "https://github.com/Jonathan-A-White/lampas"
 //	files_expected         = true
 //	nightly_suite          = true
@@ -90,7 +92,7 @@ func (v *Vault) readRigFile(_ context.Context, rig string, lenient bool) (domain
 
 // knownKeys are the keys a rig's file has.
 var knownKeys = map[string]bool{
-	EpicSectionsKey: true, EpicLastStoryLabelsKey: true, GuestKey: true, VersionFilesKey: true, ChangelogFilesKey: true,
+	EpicSectionsKey: true, EpicLastStoryLabelsKey: true, GuestKey: true, VersionFilesKey: true, ChangelogFilesKey: true, UnionMergeFilesKey: true,
 	PublicURLKey: true, FilesExpectedKey: true, NightlySuiteKey: true, SuiteEpicKey: true,
 }
 
@@ -183,7 +185,7 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 			requirements.Sections = names
 		case EpicLastStoryLabelsKey:
 			requirements.LastStoryLabels = names
-		case VersionFilesKey, ChangelogFilesKey:
+		case VersionFilesKey, ChangelogFilesKey, UnionMergeFilesKey:
 			for _, name := range names {
 				if path.IsAbs(name) || name != path.Clean(name) || name == ".." || strings.HasPrefix(name, "../") {
 					return requirements, nil, fmt.Errorf("the list for %s: %q is not a path inside the rig (write it relative, as in %q)", key, name, "pwa/package.json")
@@ -192,14 +194,22 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 					return requirements, nil, fmt.Errorf("the list for %s: %q is neither a .json nor a .md file", key, name)
 				}
 			}
-			if key == ChangelogFilesKey {
+			switch key {
+			case ChangelogFilesKey:
 				requirements.ChangelogFiles = names
-			} else {
+			case UnionMergeFilesKey:
+				for _, name := range names {
+					if _, err := path.Match(name, ""); err != nil {
+						return requirements, nil, fmt.Errorf("the list for %s: %q is not a path or glob (%v)", key, name, err)
+					}
+				}
+				requirements.UnionMergeFiles = names
+			default:
 				requirements.VersionFiles = names
 			}
 		default:
-			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s and %s)",
-				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, PublicURLKey, FilesExpectedKey, NightlySuiteKey, SuiteEpicKey)
+			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s, %s and %s)",
+				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, UnionMergeFilesKey, PublicURLKey, FilesExpectedKey, NightlySuiteKey, SuiteEpicKey)
 		}
 	}
 	return requirements, unknown, nil

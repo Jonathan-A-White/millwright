@@ -6,13 +6,13 @@ domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cm
 
 ## Ports
 
-| Port | Declared in | Real adapter | Fake (apptest.) |
+| Port | Declared in | Real adapter | Fake |
 |-|-|-|-|
 | `WorkTracker` | application/worktracker.go | infra/beads | FakeTracker |
 | TrackerNotes, SweepNotes, BeadGraph | application/{status,sweep}.go | same | same |
 | VaultFiles, TrackerSync, SyncHaltMarker | application/sync.go | infra/{vault/git,beads/sync}.go, infra/synchalt | Fake{VaultFiles,Tracker,SyncHaltMarker} |
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | infra/beads/mail.go | FakeMailbox |
-| EpicRules (+LandingRules: lenient read) | application/epicrules.go | infra/vault/epicrules.go | FakeEpicRules |
+| EpicRules (+LandingRules) | application/epicrules.go | infra/vault/epicrules.go | FakeEpicRules |
 | Vault | application/seatboot.go | infra/vault | seatboot_test.go |
 | Runner, BdProgram | application/runner.go, application/bdretry.go | infra/{tmux,bdprogram} | FakeRunner, FakeBd |
 | Harness | application/harness.go | infra/claude | seatboot_test.go |
@@ -64,6 +64,6 @@ domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cm
 
 cmd/mw/root.go, cmd/mw/version.go
 
-changelog_files: infra/rig/version.go > domain/changelog.go
+changelog_files: infra/rig/version.go > domain/changelog.go; union_merge_files: rig/landing.go
 
-gate check: scripts/check-codemap.sh
+scripts/check-codemap.sh

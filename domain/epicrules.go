@@ -31,6 +31,13 @@ type EpicRequirements struct {
 	// writes the story's What's new: note into them in the commit that carries
 	// the version. It is no requirement of an epic either, so Any does not count it.
 	ChangelogFiles []string
+	// UnionMergeFiles, when it is not empty, are the files of the rig, as paths
+	// relative to its root or path.Match globs, that every story appends to and
+	// no story cares to order: the docs that list notes, credits or module rows.
+	// A landing whose merge conflicts only in such files keeps both sides' lines
+	// of each (mw-gq6.424). It is no requirement of an epic either, so Any does
+	// not count it.
+	UnionMergeFiles []string
 	// PublicURL, when it is not empty, is the web address of the rig's public
 	// repository, as in https://github.com/<owner>/<rig>: a commit's link is
 	// that, /commit/ and the commit. A rig that is private names none. It is no

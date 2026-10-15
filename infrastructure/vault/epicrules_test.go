@@ -312,3 +312,34 @@ func TestALandingReadsPastAKeyThisMwDoesNotKnowButNotPastABadKnownOne(t *testing
 		}
 	}
 }
+
+func TestARigsFileListsTheSharedDocsALandingMergesByUnion(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+	writeRigFile(t, dir, "lampas", "union_merge_files = [\"ATTRIBUTION.md\", \"docs/*.md\"]\n")
+
+	got, err := v.EpicRequirements(context.Background(), "lampas")
+	if err != nil {
+		t.Fatalf("reading the rig's file: %v", err)
+	}
+	if want := []string{"ATTRIBUTION.md", "docs/*.md"}; !reflect.DeepEqual(got.UnionMergeFiles, want) {
+		t.Errorf("union merge files = %v, want %v", got.UnionMergeFiles, want)
+	}
+	if got.Any() {
+		t.Errorf("union_merge_files is no requirement of an epic, but Any() = true")
+	}
+
+	// A landing of an older mw sets the key aside as one it does not know; this
+	// one reads it.
+	landing, unknown, err := v.LandingRequirements(context.Background(), "lampas")
+	if err != nil || len(unknown) != 0 || !reflect.DeepEqual(landing.UnionMergeFiles, got.UnionMergeFiles) {
+		t.Errorf("a landing read %+v, unknown %v, %v", landing, unknown, err)
+	}
+
+	for _, bad := range []string{`["/etc/passwd"]`, `["../CLAUDE.md"]`, `["docs/[.md"]`, `"ATTRIBUTION.md"`} {
+		writeRigFile(t, dir, "lampas", "union_merge_files = "+bad+"\n")
+		if _, err := v.EpicRequirements(context.Background(), "lampas"); err == nil || !strings.Contains(err.Error(), "union_merge_files") {
+			t.Errorf("union_merge_files = %s: err = %v, want a refusal naming union_merge_files", bad, err)
+		}
+	}
+}

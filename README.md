@@ -4325,6 +4325,20 @@ refused and tried again raises the version once, from the new base. A rig withou
 key lands as it always did, and a Builder never bumps the patch by hand. The Landed mail
 and the ledger line say `version X.Y.Z`. See `features/next.feature`.
 
+### Merging append-mostly docs by union
+
+A rig's file may list files that every story appends a line to and no story cares to
+order (a `CLAUDE.md` of notes, `ATTRIBUTION.md`, `docs/module-map.md`):
+`union_merge_files = ["ATTRIBUTION.md", "docs/*.md"]` (paths inside the rig, or
+`path.Match` globs). When the landing's merge conflicts *only* in listed files,
+`mw next` keeps both sides' lines of each (`git merge-file --union`, nothing written to
+the rig's attributes), commits the merge, and runs the gate on the merged result as for
+any merge commit; the Landed mail says `union-merged: <files>`. A conflict in one file
+that is not listed, or a listed file one side deleted, is the whole merge undone and the
+story sent back to rebase as before. A rig without the key lands as it always did. Set
+the key only once no older `mw next` runs on any host: an older one only notes that it
+does not know the key, and sends the story back.
+
 ### The changelog a landing writes
 
 A rig's file that names `version_files` may also say
