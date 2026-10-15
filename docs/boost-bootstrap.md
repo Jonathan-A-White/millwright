@@ -47,9 +47,9 @@ the environment wins over the same name in the file.
 
 Tokens are passed in; the script never fetches, mints or logs in for one.
 
-## The twelve steps
+## The thirteen steps
 
-Each is printed as `==> [n/12] name: what`, checks before it acts, and says
+Each is printed as `==> [n/13] name: what`, checks before it acts, and says
 `skip:` when the machine is already as the step wants it, so a second run
 changes nothing. `--dry-run` prints `would:` where a run would act, and writes,
 installs and starts nothing.
@@ -62,10 +62,28 @@ installs and starts nothing.
 6. **claude**: Claude Code through npm into `~/.local`; `~/.config/mw/claude.env` (`CLAUDE_CODE_OAUTH_TOKEN`).
 7. **vault**: a plain `git clone` of the vault. Not `mw init --join`, which would also bootstrap a beads database of its own; a Boost keeps none.
 8. **rigs**: every rig in `BOOST_RIGS`.
-9. **config**: `~/.config/mw/config.toml` with `host`, `vault`, `cap`, `beads_sync = "auto"`, `beads_server_host` and the `[rigs]` table, only if there is none. An existing one is never edited; the lines it lacks are listed.
-10. **beads**: `~/.config/mw/beads.env` (mode 600): `BEADS_DOLT_SERVER_HOST`, `_PORT`, and the user and password if given. This is what makes `bd` reach the home's server instead of making a second, empty database.
-11. **profile**: a marked block in `~/.profile` that puts `~/.local/bin` on `PATH` and reads the three env files.
-12. **dispatch**: `~/.config/mw/dispatch.env` (the `PATH` line, if absent; the host owns it), a systemd drop-in `mw-dispatch.service.d/boost-env.conf` naming the env files (no secret in it), `loginctl enable-linger`, then `scripts/install-units.sh --enable mw-dispatch`.
+9. **config**: `~/.config/mw/config.toml` with `host`, `vault`, `cap`, `beads_sync = "auto"`, `beads_server_host`, the `[rigs]` table, and a `[tests]` line for each rig it cloned (and a `[changed_specs]` line where there is one), only if there is no config. An existing one is never edited; the lines it lacks are listed. The `[tests]` and `[changed_specs]` lines are copied, as written, from the vault's `hosts/boost-config.toml` (below), never typed per box. A rig that file does not name is said, not guessed: without its `[tests]` line `mw next` gates the rig with `make test`, which a rig with no Makefile refuses (mw-gq6.453). `mw doctor rig-tests` names such a rig on a Boost later.
+10. **browsers**: for each cloned rig whose `package.json` depends on `@playwright/test` (lampas's `[changed_specs]` and postern's `gate:shots` drive a browser), `npx playwright@<the version its package-lock.json holds> install --with-deps chromium`, run in the rig, so the browser is the revision that rig's own Playwright wants. It needs root for the system libraries. Skipped when that version's chromium was installed before.
+11. **beads**: `~/.config/mw/beads.env` (mode 600): `BEADS_DOLT_SERVER_HOST`, `_PORT`, and the user and password if given. This is what makes `bd` reach the home's server instead of making a second, empty database.
+12. **profile**: a marked block in `~/.profile` that puts `~/.local/bin` on `PATH` and reads the three env files.
+13. **dispatch**: `~/.config/mw/dispatch.env` (the `PATH` line, if absent; the host owns it), a systemd drop-in `mw-dispatch.service.d/boost-env.conf` naming the env files (no secret in it), `loginctl enable-linger`, then `scripts/install-units.sh --enable mw-dispatch`.
+
+### hosts/boost-config.toml
+
+The one file in the vault that says what a Boost's `[tests]` and `[changed_specs]` hold: the same lines as the home's `config.toml`, one per rig, each on one line.
+
+```toml
+[tests]
+lampas = "npm ci --no-audit --no-fund && TZ=UTC npm test && npm run typecheck && npm run lint && npm run build"
+postern = "npm ci --no-audit --no-fund && TZ=UTC npm test && ... && npm run gate:shots"
+
+[changed_specs]
+lampas = "npm run build && TZ=UTC npx playwright test --project=shots {specs}"
+```
+
+When a rig's line changes in the home's `config.toml`, change it here too, or the next Boost
+gets the old one. millwright needs no line (its tests are `make test`). Only the rigs in
+`BOOST_RIGS` are copied, in the order of `[rigs]`.
 
 ## Where the secrets go
 

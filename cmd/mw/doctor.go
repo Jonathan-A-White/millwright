@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -127,6 +128,13 @@ func newDoctorCmd() *cobra.Command {
 			posternTranscribe.Home, posternTranscribe.Host = mwVault(vault, host), host
 
 			dispatchWindows := doctor.NewDispatchWindows(config.DispatchWindowProblems())
+
+			// Read here, judged by the check: a config this host cannot read is
+			// rig-tests's to say.
+			rigsAt, rigsErr := config.Rigs()
+			rigTestsRead, testsErr := config.Tests()
+			rigTests := doctor.NewRigTests(rigsAt, rigTestsRead, errors.Join(rigsErr, testsErr))
+			rigTests.Home, rigTests.Host = mwVault(vault, host), host
 
 			posternChannel := doctor.NewPosternChannel(mwVault(vault, host), host)
 
@@ -286,6 +294,7 @@ func newDoctorCmd() *cobra.Command {
 					seatContext,
 					posternTranscribe,
 					dispatchWindows,
+					rigTests,
 					beadsServerCheck,
 					posternChannel,
 					battery,

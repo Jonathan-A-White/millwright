@@ -4105,6 +4105,14 @@ which. There is no cure: installing them is host work. Without a transcriber
 not set" on the line it prints and in the bead comment. `mw doctor postern-transcribe
 --dry-run` shows it.
 
+**rig-tests** watches, on a host that is not the home, that the config file says
+what each rig's tests are: it is faulty naming every rig of `[rigs]` (but
+millwright, whose tests are `make test`) with no `[tests]` line, because `mw next`
+gates such a rig with `make test`, which a rig with no Makefile refuses (cloud1
+refused a lampas story that way, mw-gq6.453). There is no cure: a person adds the
+home's line for the rig, and `contrib/boost-bootstrap.sh` does it when it makes the
+config, from the vault's `hosts/boost-config.toml`.
+
 **tmp-leftovers** cures the fault behind the VPS reaching 94% disk on
 2026-09-25 from the factory's own dead leftovers: a killed bd's dolt spool
 files (`/tmp/nbs-spool-*`), `/tmp/bd`, and a stale Claude Code session

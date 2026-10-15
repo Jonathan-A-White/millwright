@@ -5,7 +5,7 @@
 #   contrib/boost-bootstrap.sh [--dry-run] [--env-file FILE]
 #   contrib/boost-bootstrap.sh --help
 #
-# Twelve steps, each printed before it runs. Each one checks before it acts and
+# Thirteen steps, each printed before it runs. Each one checks before it acts and
 # says "skip" when the machine is already as it wants it, so a second run
 # changes nothing:
 #   1  packages   git tmux jq ripgrep python3 curl ca-certificates gh make xz-utils wireguard-tools (root)
@@ -19,10 +19,15 @@
 #   7  vault      the vault cloned to BOOST_VAULT
 #   8  rigs       every rig in BOOST_RIGS cloned beside it
 #   9  config     ~/.config/mw/config.toml, if there is none: host, vault, cap, beads_sync = "auto",
-#                 beads_server_host and the [rigs] table. An existing one is never edited; what it lacks is said.
-#  10  beads      ~/.config/mw/beads.env (mode 600): bd's BEADS_DOLT_* pointing at the home's beads server
-#  11  profile    a marked block in ~/.profile that reads those env files and puts ~/.local/bin on PATH
-#  12  dispatch   ~/.config/mw/dispatch.env, a drop-in that lets the dispatch service read the env files,
+#                 beads_server_host, the [rigs] table, and a [tests] line for each rig (a [changed_specs] line
+#                 where there is one) copied from the vault's hosts/boost-config.toml, so mw next gates a rig
+#                 with its own tests and not with `make test`. An existing one is never edited; what it lacks
+#                 is said.
+#  10  browsers   Playwright chromium and its system deps (root), at the version each cloned rig that depends
+#                 on @playwright/test has locked
+#  11  beads      ~/.config/mw/beads.env (mode 600): bd's BEADS_DOLT_* pointing at the home's beads server
+#  12  profile    a marked block in ~/.profile that reads those env files and puts ~/.local/bin on PATH
+#  13  dispatch   ~/.config/mw/dispatch.env, a drop-in that lets the dispatch service read the env files,
 #                 linger, and mw-dispatch.timer enabled (scripts/install-units.sh)
 #
 # Inputs are environment variables, or a small env file of NAME=VALUE lines
@@ -42,7 +47,7 @@
 # in a command line, in git's config or in anything printed. The script never
 # holds the age key or a BSV key: those stay with the Governor.
 #
-# Root is needed for steps 1, 4 and the linger line of 12; a user who is not
+# Root is needed for steps 1, 4, 10 and the linger line of 13; a user who is not
 # root needs passwordless sudo, and without it the script says so and stops.
 # --dry-run prints every step and what it would do, and changes nothing.
 #
@@ -58,7 +63,7 @@ DEFAULT_NODE_VERSION=24.21.0
 NODE_MIN_MAJOR=22
 PKGS="git tmux jq ripgrep python3 curl ca-certificates gh make xz-utils wireguard-tools"
 KEYS="BOOST_HOST BOOST_WG_ADDRESS BOOST_WG_HUB_PUBKEY BOOST_WG_PRIVATE_KEY BOOST_WG_ENDPOINT BOOST_BEADS_HOST BOOST_BEADS_PORT BOOST_BEADS_USER BOOST_BEADS_PASSWORD BOOST_RIGS BOOST_RIGS_DIR BOOST_VAULT BOOST_VAULT_REPO BOOST_CAP BOOST_CLAUDE_TOKEN BOOST_GITHUB_TOKEN BOOST_GIT_NAME BOOST_GIT_EMAIL BOOST_NODE_VERSION MW_HOME"
-STEPS=12
+STEPS=13
 DRY=0
 ENV_FILE=${BOOST_ENV_FILE:-}
 
@@ -71,7 +76,7 @@ usage() {
 	cat <<'EOF'
 Usage: boost-bootstrap.sh [--dry-run] [--env-file FILE]
 
-Turns a fresh Ubuntu 24.04 machine into a Boost, in twelve steps, each skipped
+Turns a fresh Ubuntu 24.04 machine into a Boost, in thirteen steps, each skipped
 when already done. Inputs are environment variables or an env file of NAME=VALUE
 lines (mode 600); see contrib/boost-bootstrap.env.example and
 docs/boost-bootstrap.md.
@@ -550,7 +555,36 @@ s_rigs() {
 }
 
 # --- 9. config.toml ---------------------------------------------------------------
-config_lines() { # the lines a config for this Boost holds, one per line, [rigs] last
+# What a rig's tests are is not the Boost's to know: the home's config.toml holds
+# a [tests] line per rig, and a Boost without them gates every rig with `make test`
+# (mw-gq6.453). The factory keeps those tables in the vault, in hosts/boost-config.toml
+# (a [tests] and a [changed_specs] table of one-line `rig = "command"` entries, copied
+# from the home's config.toml), and this step copies the lines of the rigs it cloned.
+TABLES_FILE=$BOOST_VAULT/hosts/boost-config.toml
+rig_list() { # millwright first, then BOOST_RIGS in order, one per line
+	echo millwright
+	for rn in $RIG_NAMES; do [ "$rn" = millwright ] || echo "$rn"; done
+}
+rig_dir() { # <rig>
+	if [ "$1" = millwright ]; then echo "$RIG"; else echo "$BOOST_RIGS_DIR/$1"; fi
+}
+table_line() { # <table> <rig>: the vault file's line for the rig in that table, as written; empty if none
+	[ -f "$TABLES_FILE" ] || return 0
+	awk -v t="[$1]" -v r="$2" '
+		/^[[:space:]]*\[/ { on = ($0 == t); next }
+		on { k = $0; sub(/[[:space:]]*=.*/, "", k); if (k == r) { print; exit } }
+	' "$TABLES_FILE"
+}
+config_table() { # <table>: a blank line, [table] and the lines of the rigs this Boost has, or nothing
+	local rn line lines=""
+	for rn in $(rig_list); do
+		line=$(table_line "$1" "$rn")
+		[ -z "$line" ] || lines="$lines$line
+"
+	done
+	[ -z "$lines" ] || printf '\n[%s]\n%s' "$1" "$lines"
+}
+config_lines() { # the lines a config for this Boost holds, one per line: [rigs], then the tables
 	printf 'vault = "%s"\n' "$BOOST_VAULT"
 	printf 'host = "%s"\n' "$BOOST_HOST"
 	printf 'cap = %s\n' "$BOOST_CAP"
@@ -561,26 +595,89 @@ config_lines() { # the lines a config for this Boost holds, one per line, [rigs]
 	for rn in $RIG_NAMES; do
 		[ "$rn" = millwright ] || printf '%s = "%s/%s"\n' "$rn" "$BOOST_RIGS_DIR" "$rn"
 	done
+	config_table tests
+	config_table changed_specs
 }
 s_config() {
-	local want line
+	local want line rn
 	step config "$MW_DIR/config.toml"
 	want=$(config_lines)
+	# A rig the vault's file does not name is said, not guessed. millwright's own
+	# default, make test, is right, so it is not said. Nothing is said while the
+	# vault is not cloned yet (a dry run on a fresh machine).
+	if [ -d "$BOOST_VAULT/.git" ]; then
+		if [ ! -f "$TABLES_FILE" ]; then
+			note "the vault has no hosts/boost-config.toml: no [tests] or [changed_specs] line was written, so mw next gates every rig with make test"
+		else
+			for rn in $(rig_list); do
+				[ "$rn" = millwright ] || [ -n "$(table_line tests "$rn")" ] || note "no [tests] line for $rn in hosts/boost-config.toml: mw next gates it with make test (add the home's line for it to that file)"
+			done
+		fi
+	fi
 	if [ -f "$MW_DIR/config.toml" ]; then
 		skip "exists; never edited"
 		while IFS= read -r line; do
-			case $line in '' | '[rigs]') continue ;; esac
+			case $line in '' | '['*) continue ;; esac
 			grep -Fxq -- "$line" "$MW_DIR/config.toml" || note "config.toml has no line: $line"
 		done <<EOF
 $want
 EOF
-	elif act "write $MW_DIR/config.toml (host $BOOST_HOST, cap $BOOST_CAP, beads_sync auto, $(echo "$want" | grep -c ' = "' || true) settings)"; then
+	elif act "write $MW_DIR/config.toml (host $BOOST_HOST, cap $BOOST_CAP, beads_sync auto, $(echo "$want" | grep -c ' = "' || true) settings, [tests] and [changed_specs] lines from $TABLES_FILE)"; then
 		ensure_mw_dir
 		put 644 "$MW_DIR/config.toml" "$want"
 	fi
 }
 
-# --- 10. beads.env ----------------------------------------------------------------
+# --- 10. playwright browsers ------------------------------------------------------
+# A rig whose gate drives a browser (lampas's changed_specs, postern's gate:shots) needs
+# Playwright's chromium and the system libraries it loads, at the revision its own
+# @playwright/test wants. npx is pinned to the version the rig's lock file holds.
+playwright_version() { # <rig dir>: the rig's @playwright/test version, empty if it cannot be read
+	local v=""
+	if [ -f "$1/package-lock.json" ]; then
+		v=$(awk '/"node_modules\/@playwright\/test"[[:space:]]*:/ { on = 1; next } on && /"version"/ { print; exit }' "$1/package-lock.json" |
+			sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+	fi
+	if [ -z "$v" ]; then
+		v=$(sed -n 's/.*"@playwright\/test"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$1/package.json" | head -n 1 | sed 's/^[^0-9]*//')
+	fi
+	case $v in '' | *[!A-Za-z0-9.-]*) return 0 ;; esac
+	echo "$v"
+}
+s_browsers() {
+	local rn dir ver cache any=0
+	step browsers "Playwright chromium and its system deps, for each rig that depends on @playwright/test"
+	cache=${PLAYWRIGHT_BROWSERS_PATH:-}
+	case $cache in /*) ;; *) cache=$HOME/.cache/ms-playwright ;; esac
+	for rn in $(rig_list); do
+		dir=$(rig_dir "$rn")
+		if [ ! -f "$dir/package.json" ]; then
+			# a dry run on a fresh machine has cloned nothing, so it cannot know
+			if [ "$DRY" = 1 ] && [ ! -d "$dir/.git" ]; then
+				any=1
+				act "npx playwright@<the version $rn locks> install --with-deps chromium in $dir, if $rn depends on @playwright/test (not cloned yet)" || true
+			fi
+			continue
+		fi
+		grep -q '"@playwright/test"' "$dir/package.json" || continue
+		any=1
+		ver=$(playwright_version "$dir")
+		if [ -z "$ver" ]; then
+			note "$rn depends on @playwright/test but its version cannot be read from package.json or package-lock.json: run  npx playwright install --with-deps chromium  in $dir"
+			skip "$rn: no Playwright version to install"
+		elif [ -e "$cache/.boost-$rn-$ver" ] && ls -d "$cache"/chromium-* >/dev/null 2>&1; then
+			skip "$rn: chromium for Playwright $ver is installed"
+		elif act "npx playwright@$ver install --with-deps chromium in $dir"; then
+			as_root true
+			(cd "$dir" && npx --yes "playwright@$ver" install --with-deps chromium)
+			mkdir -p "$cache"
+			: >"$cache/.boost-$rn-$ver"
+		fi
+	done
+	[ "$any" = 1 ] || skip "no rig here depends on @playwright/test"
+}
+
+# --- 11. beads.env ----------------------------------------------------------------
 beads_env_text() {
 	printf 'BEADS_DOLT_SERVER_HOST=%s\nBEADS_DOLT_SERVER_PORT=%s' "$BOOST_BEADS_HOST" "$BOOST_BEADS_PORT"
 	[ -z "$BOOST_BEADS_USER" ] || printf '\nBEADS_DOLT_SERVER_USER=%s' "$BOOST_BEADS_USER"
@@ -598,7 +695,7 @@ s_beads() {
 	fi
 }
 
-# --- 11. ~/.profile ---------------------------------------------------------------
+# --- 12. ~/.profile ---------------------------------------------------------------
 PROFILE_BEGIN='# >>> mw boost-bootstrap >>>'
 profile_block() {
 	cat <<'EOF'
@@ -622,7 +719,7 @@ s_profile() {
 	fi
 }
 
-# --- 12. dispatch -----------------------------------------------------------------
+# --- 13. dispatch -----------------------------------------------------------------
 DROPIN_DIR=$HOME/.config/systemd/user/mw-dispatch.service.d
 DROPIN_TEXT='[Service]
 EnvironmentFile=-%h/.config/mw/beads.env
@@ -669,6 +766,7 @@ s_claude
 s_vault
 s_rigs
 s_config
+s_browsers
 s_beads
 s_profile
 s_dispatch

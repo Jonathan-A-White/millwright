@@ -162,7 +162,10 @@ it:
 2. Name it in `~/.config/mw/config.toml`, under `[rigs]`: `myrig = "<path>"`.
    (`mw init --rig myrig=<path>` writes the line when it makes the file.) The
    name is what a story's Path calls it. A story is only ever claimed on a host
-   that has the rig checked out.
+   that has the rig checked out. Give it its `[tests]` line too (`myrig = "<the
+   command that gates it>"`): a rig the table does not name is gated with `make
+   test`, and `mw init` does not write the table. On a host that is not the home,
+   `mw doctor rig-tests` names a rig that has none.
 3. Give the Builder what it needs to work there: a file
    `seats/builder/rigs/<rig>.md` in the vault, the Builder's memory of the rig
    (the commands to build and test, and the traps), under the byte budget
