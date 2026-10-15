@@ -381,6 +381,11 @@ type RunningStory struct {
 	// FormulaSteps is how many steps of the story's poured formula are still
 	// open. Zero means either no formula was poured, or every step is closed.
 	FormulaSteps int
+	// UsageLimit is the harness's own words when the session's result says it
+	// stopped at the usage limit ("You've hit your weekly limit · resets …"),
+	// empty otherwise: a story parked there waits on the limit, not on its
+	// work (mw-gq6.433).
+	UsageLimit string
 	// CloseOut is the close-out running on this host for the story, nil when
 	// none is. Now is when it was read, to say how long it has run.
 	CloseOut *CloseOutMark
@@ -1124,7 +1129,31 @@ func (s Status) running(ctx context.Context, detail StoryDetail) (RunningStory, 
 		}
 		rs.FormulaSteps = len(open)
 	}
+	rs.UsageLimit = s.usageLimit(ctx, detail)
 	return rs, nil
+}
+
+// usageLimit is the harness's words when the result the story's session left
+// for its attempt says the usage limit stopped it, and empty when it does not,
+// when there is no result yet, or when it cannot be read: a session still
+// running has none, and nothing here is a reason to fail the report.
+func (s Status) usageLimit(ctx context.Context, detail StoryDetail) string {
+	if s.Vault == nil {
+		return ""
+	}
+	attempt := detail.Attempts
+	if attempt < 1 {
+		attempt = 1
+	}
+	printed, err := s.Vault.ReadRunFile(ctx, detail.Story.ID, ResultFileNameForAttempt(attempt))
+	if err != nil || strings.TrimSpace(printed) == "" {
+		return ""
+	}
+	result, err := ReadSessionResult(printed)
+	if err != nil {
+		return ""
+	}
+	return result.UsageLimit()
 }
 
 // elsewhere reads what the other hosts hold: the stories pathed to each of
@@ -1854,7 +1883,8 @@ func readyOrClaimed(d StoryDetail) string {
 
 // write is one running story as the report shows it: the story, its session,
 // and whatever a person must not mistake it for — a session recorded stopped
-// or stuck rather than running, a landing refused and waiting on the Mayor, or
+// or stuck rather than running, one stopped at the usage limit, a landing
+// refused and waiting on the Mayor, or
 // a formula step still open that will refuse to let it close out.
 func (r RunningStory) write(b *strings.Builder) {
 	writeStory(b, r.Detail, "session "+r.Session)
@@ -1863,6 +1893,9 @@ func (r RunningStory) write(b *strings.Builder) {
 	}
 	if r.Stopped() {
 		clip(b, fmt.Sprintf("    NOT RUNNING: run=%s", r.Run))
+	}
+	if r.UsageLimit != "" {
+		clip(b, "    stopped at the usage limit: "+r.UsageLimit)
 	}
 	if r.Refused() {
 		clip(b, "    refused, waiting on the Mayor (mw retry or a hold)")

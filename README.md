@@ -3057,8 +3057,10 @@ five parts, and two more when there is something to say.
 - **RUNNING** — the stories this host has claimed, each with the name of the
   tmux session to attach to. A story recorded `run=stopped` or `run=stuck` says
   `NOT RUNNING` rather than pretending, one recorded `run=blocked` (a refused
-  landing) says `refused, waiting on the Mayor (mw retry or a hold)`, and a
-  claimed story whose poured formula still has a step open says its close-out
+  landing) says `refused, waiting on the Mayor (mw retry or a hold)`, one whose
+  session's result says the harness hit the usage limit ("You've hit your
+  weekly limit") says `stopped at the usage limit:` and the harness's words, and
+  a claimed story whose poured formula still has a step open says its close-out
   is blocked.
 - **READY** — what this host could take now.
 - **CAUSES MISSING** — the stories refused in the last seven days that no `mw

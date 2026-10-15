@@ -159,6 +159,7 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the status story "([^"]*)" is claimed with its session running$`, c.theStatusStoryIsClaimedAndRunning)
 	ctx.Given(`^the status story "([^"]*)" has been started (\d+) times?$`, c.theStatusStoryHasBeenStarted)
 	ctx.Given(`^the status story "([^"]*)" is marked run=(\S+)$`, c.theStatusStoryIsMarkedRun)
+	ctx.Given(`^the session of "([^"]*)" left a result saying "([^"]*)"$`, c.theSessionLeftAResultSaying)
 	ctx.Given(`^the formula poured for "([^"]*)" has a step still open$`, c.theFormulaPouredHasAStepStillOpen)
 	ctx.Given(`^a status story "([^"]*)" titled "([^"]*)" pathed to the host "([^"]*)"$`, c.aStatusStoryTitledPathedToTheHost)
 	ctx.Given(`^the builder's ledger holds a line from (today|\d{4}-\d{2}-\d{2}) burning (\d+) tokens$`,
@@ -207,6 +208,8 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 		c.theReportSaysCloseOutBlockedByFormula)
 	ctx.Then(`^the report shows "([^"]*)" as run=(\S+), not running$`, c.theReportShowsRunState)
 	ctx.Then(`^the report shows "([^"]*)" as refused, waiting on the Mayor$`, c.theReportShowsRefused)
+	ctx.Then(`^the report shows "([^"]*)" as stopped at the usage limit$`, c.theReportShowsAtTheUsageLimit)
+	ctx.Then(`^the report does not show "([^"]*)" as stopped at the usage limit$`, c.theReportDoesNotShowAtTheUsageLimit)
 	ctx.Then(`^the report does not show "([^"]*)" as refused$`, c.theReportDoesNotShowRefused)
 	ctx.Then(`^the report says today's fuel is (.+)$`, c.theReportSaysTodaysFuelIs)
 	ctx.Then(`^every line of the report is at most 60 columns wide$`, c.everyLineIsAtMost60ColumnsWide)
@@ -1008,6 +1011,59 @@ func (c *statusContext) theReportShowsRunState(id, run string) error {
 	}
 	if !strings.Contains(c.report.String(), run) {
 		return fmt.Errorf("expected the printed report to say run=%s, got:\n%s", run, c.report.String())
+	}
+	return nil
+}
+
+// theSessionLeftAResultSaying writes the failed result a headless harness
+// leaves in the story's run directory, as the 14 Builders stopped at the
+// weekly limit on 2026-10-15 left theirs (mw-gq6.433).
+func (c *statusContext) theSessionLeftAResultSaying(id, said string) error {
+	dir, err := c.workspace()
+	if err != nil {
+		return err
+	}
+	runs := filepath.Join(dir, "runs", id)
+	if err := os.MkdirAll(runs, 0o755); err != nil {
+		return err
+	}
+	result, err := json.Marshal(map[string]any{"type": "result", "subtype": "success", "is_error": true, "result": said, "num_turns": 1})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(runs, application.ResultFileName), result, 0o644)
+}
+
+// usageLimitWords is what mw status says beside a story whose session was
+// stopped at the usage limit.
+const usageLimitWords = "stopped at the usage limit"
+
+func (c *statusContext) theReportShowsAtTheUsageLimit(id string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	rs, ok := c.runningIn(id)
+	if !ok {
+		return fmt.Errorf("%s is not listed as running:\n%s", id, c.report.String())
+	}
+	if rs.UsageLimit == "" {
+		return fmt.Errorf("expected %s to be shown stopped at the usage limit, got %+v", id, rs)
+	}
+	if !strings.Contains(c.report.String(), usageLimitWords) {
+		return fmt.Errorf("expected the printed report to say %q, got:\n%s", usageLimitWords, c.report.String())
+	}
+	return nil
+}
+
+func (c *statusContext) theReportDoesNotShowAtTheUsageLimit(id string) error {
+	if err := c.readingStatusSucceeds(); err != nil {
+		return err
+	}
+	if rs, ok := c.runningIn(id); ok && rs.UsageLimit != "" {
+		return fmt.Errorf("expected %s not to be shown at the usage limit, got %+v", id, rs)
+	}
+	if strings.Contains(c.report.String(), usageLimitWords) {
+		return fmt.Errorf("expected the printed report not to say %q, got:\n%s", usageLimitWords, c.report.String())
 	}
 	return nil
 }
