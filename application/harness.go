@@ -45,6 +45,10 @@ type Launch struct {
 	// real one on the PATH of the session alone — not of the Heartbeat or After
 	// chained beside it. An empty BdRetry leaves the session the real bd.
 	BdRetry []string
+
+	// MaxTurns is the most turns the session may take; 0 sets no limit. A
+	// batch's fixer is bounded by its rig's batch_fixer_turns (Land Rush 5).
+	MaxTurns int
 }
 
 // Validate reports the first reason a launch could not be turned into a
