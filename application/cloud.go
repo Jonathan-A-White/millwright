@@ -15,8 +15,13 @@ import (
 // CloudProvider makes and destroys the cloud boxes: contrib/vultr-boost, or a
 // fake in a scenario. A box is named for the host it becomes (cloud1, cloud2).
 type CloudProvider interface {
+	// Begin starts the making of the box in a process of its own, outliving
+	// the caller and its context, and returns once that has started: the
+	// process runs CloudMake. An error is a make that did not start.
+	Begin(ctx context.Context, name string) error
 	// Up makes the box and returns once it is up; an error is a box that did
-	// not come up, which may still have been partly made.
+	// not come up, which may still have been partly made. It is what the
+	// process Begin starts calls, never the check.
 	Up(ctx context.Context, name string) error
 	// Down destroys the box, or what there is of it; a box not there is no
 	// error.
@@ -69,6 +74,10 @@ type CloudBox struct {
 	// IdleSince is when a check first found the box with no story claimed on
 	// it, the time it was made until it has taken one; zero while it has work.
 	IdleSince time.Time `json:"idle_since,omitzero"`
+	// Making is set from the time the box is asked for until its make ends,
+	// Up being when it was asked for: the box is billed from then, and no
+	// check destroys it or counts it idle meanwhile.
+	Making bool `json:"making,omitempty"`
 }
 
 // CloudMove is one up, down or failure, as the cloud event said it.
@@ -79,6 +88,11 @@ type CloudMove struct {
 
 // cloudMovesKept is how many moves the book keeps for mw status.
 const cloudMovesKept = 5
+
+// CloudMakeStale is how long a box may be made before a check gives it up for
+// lost: the process that was making it did not live to say how it ended. It is
+// more than the provider adapter's own limit on one make, tried twice.
+const CloudMakeStale = 45 * time.Minute
 
 // CloudFailHold is how long no box is made after one failed to come up twice
 // running: a fault at the provider is not tried every minute.
@@ -123,6 +137,8 @@ const DefaultCloudBoxCap = 2
 //
 //   - marks each box idle from the first check that finds no story claimed on
 //     it, and busy again once one is;
+//   - gives up a box begun CloudMakeStale ago and not yet up (the process
+//     making it died) and destroys it;
 //   - destroys every box up when one more hour of them would pass the
 //     month's cap;
 //   - destroys each box idle for Plan.Idle;
@@ -139,6 +155,11 @@ const DefaultCloudBoxCap = 2
 // cloud@Host, and a move the book keeps for mw status. The book is written
 // before a box is asked for, so a box that costs is never one it does not
 // know of.
+//
+// The check never waits for a box: a make takes minutes (terraform apply) and
+// must outlive a caller that is stopped, so the check writes the box into the
+// book as being made, asks the provider to Begin it in a process of its own
+// and returns. That process is CloudMake, which says how the make ended.
 type CloudCheck struct {
 	Work     CloudWork
 	Provider CloudProvider
@@ -162,6 +183,8 @@ type CloudReport struct {
 	SpentUSD      float64
 	// Moves are the cloud events the check wrote.
 	Moves []string
+	// Making are the boxes the check began, still being made.
+	Making []string
 }
 
 // String is the report in one line.
@@ -169,6 +192,9 @@ func (r CloudReport) String() string {
 	line := fmt.Sprintf("cloud: %d stories wait for any host, %d sessions free, %d boxes up, $%.2f spent this month", r.Waiting, r.Free, r.Boxes, r.SpentUSD)
 	for _, m := range r.Moves {
 		line += "\n  " + m
+	}
+	for _, name := range r.Making {
+		line += "\n  making " + name + " in the background; the book says when it is up"
 	}
 	return line
 }
@@ -194,15 +220,19 @@ func (c CloudCheck) Run(ctx context.Context) (CloudReport, error) {
 	p := cloudPass{check: c, now: now, state: state}
 	p.roll()
 	p.billed = p.askBilled(ctx)
+	p.dropStale(ctx)
 	p.markIdle(work)
 
 	if n := len(p.state.Boxes); n > 0 && p.spent()+c.Plan.HourlyUSD*float64(n) > c.Plan.MonthlyCapUSD {
 		p.capReached(ctx, "destroying every box")
-		for len(p.state.Boxes) > 0 && p.down(ctx, p.state.Boxes[0].Name, "the month's cap") {
+		for _, box := range append([]CloudBox(nil), p.state.Boxes...) {
+			if !box.Making && !p.down(ctx, box.Name, "the month's cap") {
+				break
+			}
 		}
 	}
 	for _, box := range append([]CloudBox(nil), p.state.Boxes...) {
-		if !box.IdleSince.IsZero() && now.Sub(box.IdleSince) >= c.Plan.Idle {
+		if !box.Making && !box.IdleSince.IsZero() && now.Sub(box.IdleSince) >= c.Plan.Idle {
 			p.down(ctx, box.Name, "idle "+Clock(now.Sub(box.IdleSince)))
 		}
 	}
@@ -280,9 +310,26 @@ func (p *cloudPass) spent() float64 {
 	return max(float64(p.state.hours(p.now))*p.check.Plan.HourlyUSD, p.billed)
 }
 
+// dropStale gives up each box begun CloudMakeStale ago and still being made:
+// destroys what there is of it, and says so.
+func (p *cloudPass) dropStale(ctx context.Context) {
+	for _, box := range append([]CloudBox(nil), p.state.Boxes...) {
+		if !box.Making || p.now.Sub(box.Up) < CloudMakeStale {
+			continue
+		}
+		if p.down(ctx, box.Name, "it did not come up") {
+			p.move(ctx, fmt.Sprintf("failed %s: the make begun at %s never said how it ended; destroyed", box.Name, box.Up.Format("15:04Z")))
+			p.keep(ctx, "failed "+box.Name)
+		}
+	}
+}
+
 func (p *cloudPass) markIdle(work WorkInHand) {
 	for i := range p.state.Boxes {
 		box := &p.state.Boxes[i]
+		if box.Making {
+			continue
+		}
 		busy := sessions(work, box.Name) > 0
 		switch {
 		case busy && !box.IdleSince.IsZero():
@@ -327,7 +374,8 @@ func sessions(work WorkInHand, host string) int {
 	return n
 }
 
-// make makes one box, and tries once more when it does not come up.
+// make begins one box: it is written into the book as being made, and the
+// provider is asked to make it in a process of its own, which CloudMake is.
 func (p *cloudPass) make(ctx context.Context) {
 	plan := p.check.Plan
 	if p.now.Before(p.state.HeldUntil) {
@@ -335,36 +383,25 @@ func (p *cloudPass) make(ctx context.Context) {
 		return
 	}
 	name := p.nextName()
-	for try := 1; try <= 2; try++ {
-		if p.spent()+plan.HourlyUSD*float64(len(p.state.Boxes)+2) > plan.MonthlyCapUSD {
-			p.capReached(ctx, "no box is made")
-			return
-		}
-		p.state.Boxes = append(p.state.Boxes, CloudBox{Name: name, Up: p.now, IdleSince: p.now})
-		if !p.keep(ctx, "making "+name) {
-			p.state.Boxes = p.state.Boxes[:len(p.state.Boxes)-1]
-			return
-		}
-		err := p.check.Provider.Up(ctx, name)
-		if err == nil {
-			p.move(ctx, fmt.Sprintf("up %s: %d stories wait for any host, %d sessions free", name, p.report.Waiting, p.report.Free))
-			p.keep(ctx, "up "+name)
-			return
-		}
-		failed := fmt.Sprintf("failed %s: %v", name, oneLine(err.Error()))
-		if !p.down(ctx, name, "it did not come up") {
-			p.move(ctx, failed+"; it could not be destroyed either, so no box is made until it is")
-			p.keep(ctx, failed)
-			return
-		}
-		if try == 1 {
-			p.move(ctx, failed+"; destroyed, and tried once more")
-		} else {
-			p.state.HeldUntil = p.now.Add(CloudFailHold)
-			p.move(ctx, failed+fmt.Sprintf(" again; destroyed, and no box is made before %s", p.state.HeldUntil.Format("15:04Z")))
-		}
-		p.keep(ctx, failed)
+	if p.spent()+plan.HourlyUSD*float64(len(p.state.Boxes)+2) > plan.MonthlyCapUSD {
+		p.capReached(ctx, "no box is made")
+		return
 	}
+	p.state.Boxes = append(p.state.Boxes, CloudBox{Name: name, Up: p.now, IdleSince: p.now, Making: true})
+	if !p.keep(ctx, "making "+name) {
+		p.state.Boxes = p.state.Boxes[:len(p.state.Boxes)-1]
+		return
+	}
+	p.move(ctx, fmt.Sprintf("making %s: %d stories wait for any host, %d sessions free", name, p.report.Waiting, p.report.Free))
+	p.dirty = "making " + name
+	if err := p.check.Provider.Begin(ctx, name); err != nil {
+		// Nothing is making it, so nothing is billed: it is not in the book.
+		p.state.Boxes = p.state.Boxes[:len(p.state.Boxes)-1]
+		p.dirty = "failed " + name
+		p.fail(fmt.Errorf("beginning to make %s: %w", name, err))
+		return
+	}
+	p.report.Making = append(p.report.Making, name)
 }
 
 // down destroys the box, counting its hours into the month's, and reports

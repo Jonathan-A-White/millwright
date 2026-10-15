@@ -37,7 +37,10 @@ func newCloudCmd() *cobra.Command {
 			"stories wait for any host than there are sessions free across the hosts of [cloud.caps]\n" +
 			"and the boxes, it makes one box with contrib/vultr-boost; a box with no story for\n" +
 			"idle_minutes is destroyed; and no box is made, or kept, past monthly_cap_usd. Each move\n" +
-			"is a cloud event and a line of mw status. It runs on the home only.",
+			"is a cloud event and a line of mw status. It runs on the home only.\n\n" +
+			"A box is not waited for: the check writes it into the book as being made and starts\n" +
+			"the make in a session of its own, which a stopped caller does not stop; the book says\n" +
+			"when it is up.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			check, ok, err := cloudCheck(cmd.Context(), cmd.ErrOrStderr())
@@ -57,7 +60,65 @@ func newCloudCmd() *cobra.Command {
 			return err
 		},
 	})
+	cmd.AddCommand(newCloudMakeCmd())
 	return cmd
+}
+
+// newCloudMakeCmd builds `mw cloud make <box>`: the process the cloud check
+// begins, in a session of its own, for a box it wrote into the book as being
+// made. Hidden: nobody runs it by hand.
+func newCloudMakeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:    "make <box>",
+		Short:  "Make one cloud box the check began, and write how it ended into the book",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			check, ok, err := cloudCheck(cmd.Context(), cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("no [cloud] table in the config, or this host is not home: no box is made")
+			}
+			return application.CloudMake{
+				Provider: check.Provider,
+				Book:     check.Book,
+				Log:      check.Log,
+				Host:     check.Host,
+				Plan:     check.Plan,
+				Out:      check.Out,
+				Lock:     waitForCloudLock,
+			}.Run(cmd.Context(), args[0])
+		},
+	}
+}
+
+// cloudMakeLockWait is how long a make waits for a cloud check's lock: a check
+// holds it for a moment, a minute at most.
+const cloudMakeLockWait = 10 * time.Minute
+
+// waitForCloudLock takes this host's cloud lock, waiting for a check that holds
+// it.
+func waitForCloudLock(ctx context.Context) (func(), error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, cloudMakeLockWait)
+	defer cancel()
+	lock := hostlock.NewTry(filepath.Join(home, DispatchStateDir), cloudLockFile)
+	for {
+		release, taken, err := lock.TryTake(ctx)
+		if err != nil || taken {
+			return release, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Second):
+		}
+	}
 }
 
 // cloudCheck is the cloud check of this host, and whether there is one to
@@ -83,14 +144,25 @@ func cloudCheck(ctx context.Context, out io.Writer) (application.CloudCheck, boo
 	if err != nil {
 		return application.CloudCheck{}, false, err
 	}
+	self, err := os.Executable()
+	if err != nil {
+		return application.CloudCheck{}, false, fmt.Errorf("finding mw to make a box with: %w", err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return application.CloudCheck{}, false, err
+	}
 	return application.CloudCheck{
-		Work:     mwGateway(dir, host),
-		Provider: cloud.Vultr{Command: settings.Command, Snapshot: settings.Snapshot, Out: out},
-		Book:     vault.CloudBook{Vault: files},
-		Log:      homeEventLog(),
-		Host:     host,
-		Plan:     plan,
-		Out:      out,
+		Work: mwGateway(dir, host),
+		Provider: cloud.Vultr{
+			Command: settings.Command, Snapshot: settings.Snapshot, Out: out,
+			Self: self, MakeLog: filepath.Join(home, DispatchStateDir, cloudMakeLog),
+		},
+		Book: vault.CloudBook{Vault: files},
+		Log:  homeEventLog(),
+		Host: host,
+		Plan: plan,
+		Out:  out,
 	}, true, nil
 }
 
@@ -134,6 +206,10 @@ func cloudSpringJob(out io.Writer) (application.SpringJob, bool, error) {
 // cloudLockFile is the lock one cloud check holds while it runs, beside the
 // dispatch lock: the follower's check and one by hand never make a box at once.
 const cloudLockFile = "cloud.lock"
+
+// cloudMakeLog is the file the processes making boxes append their output to,
+// beside the lock.
+const cloudMakeLog = "cloud-make.log"
 
 // runCloudCheck runs the check under this host's cloud lock, and reports
 // whether it ran: a check that finds the lock held does nothing.

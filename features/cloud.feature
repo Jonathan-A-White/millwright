@@ -21,6 +21,46 @@ Feature: The cloud grows and shrinks by demand
     And 1 cloud box is up
     And a cloud event says "up cloud1"
 
+  Scenario: The check makes the box in the background and does not wait for it
+    Given every host is full
+    And 5 stories wait for any host
+    When the cloud check runs and the box is still being made
+    Then the cloud check said "making cloud1 in the background; the book says when it is up"
+    And the book holds "cloud1" being made
+    And 0 cloud boxes are up
+    And a cloud event says "making cloud1"
+    When the box being made comes up
+    Then 1 cloud box is up
+    And the book holds no box being made
+    And a cloud event says "up cloud1"
+
+  Scenario: A caller cancelled 10 seconds into the apply leaves the apply to finish
+    Given every host is full
+    And 5 stories wait for any host
+    When the cloud check runs and its caller is cancelled 10 seconds into the apply
+    Then the provider was asked to make "cloud1" and nothing else
+    And 1 cloud box is up
+    And the book holds no box being made
+    And a cloud event says "up cloud1"
+
+  Scenario: A box still being made is not made twice, nor destroyed idle
+    Given every host is full
+    And 1 story waits for any host
+    And the cloud check runs and the box is still being made
+    When 40 minutes pass and the cloud check runs and the box is still being made
+    Then the provider was asked nothing
+    And the book holds "cloud1" being made
+
+  Scenario: A make that never finished is destroyed by a later check
+    Given every host is full
+    And 1 story waits for any host
+    And the cloud check runs and the box is still being made
+    And the process making the box dies
+    When 50 minutes pass and the cloud check runs
+    Then the provider was asked to destroy "cloud1"
+    And the book holds no box being made
+    And a cloud event says "failed cloud1"
+
   Scenario: A free session anywhere makes no box
     Given "desktop" runs 1 story and "laptop" runs 2
     And 1 story waits for any host

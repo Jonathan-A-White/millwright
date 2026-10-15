@@ -27,6 +27,7 @@ type cloudContext struct {
 	now      time.Time
 	stories  int
 	said     strings.Builder
+	report   string
 }
 
 // InitializeCloudScenario registers the steps of features/cloud.feature.
@@ -74,6 +75,18 @@ func InitializeCloudScenario(ctx *godog.ScenarioContext) {
 		return nil
 	})
 
+	ctx.Given(`^the cloud check runs and the box is still being made$`, c.checkOnly)
+	ctx.When(`^the cloud check runs and the box is still being made$`, c.checkOnly)
+	ctx.When(`^the cloud check runs and its caller is cancelled (\d+) seconds into the apply$`, c.checkCancelled)
+	ctx.When(`^the box being made comes up$`, c.boxesComeUp)
+	ctx.Given(`^the process making the box dies$`, func() error {
+		c.provider.TakeBegun()
+		return nil
+	})
+	ctx.When(`^(\d+) minutes pass and the cloud check runs and the box is still being made$`, func(n int) error {
+		c.now = c.now.Add(time.Duration(n) * time.Minute)
+		return c.checkOnly()
+	})
 	ctx.Given(`^the cloud check runs$`, c.check)
 	ctx.When(`^the cloud check runs$`, c.check)
 	ctx.When(`^the cloud check runs (\d+) times, a minute apart$`, func(n int) error {
@@ -121,7 +134,13 @@ func InitializeCloudScenario(ctx *godog.ScenarioContext) {
 		return fmt.Errorf("the provider was asked %q, with no down %s", c.provider.Calls(), name)
 	})
 	ctx.Then(`^(\d+) cloud box(?:es)? (?:is|are) up$`, func(n int) error {
-		if got := len(c.book.State.Boxes); got != n {
+		got := 0
+		for _, box := range c.book.State.Boxes {
+			if !box.Making {
+				got++
+			}
+		}
+		if got != n {
 			return fmt.Errorf("%d cloud boxes are up, want %d: %+v\n%s", got, n, c.book.State.Boxes, c.said.String())
 		}
 		return nil
@@ -135,6 +154,28 @@ func InitializeCloudScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^(\d+) cloud events? says? "([^"]*)"$`, func(n int, text string) error {
 		if got := c.cloudEvents(text); got != n {
 			return fmt.Errorf("%d cloud events say %q, want %d; the log holds %s", got, text, n, c.events())
+		}
+		return nil
+	})
+	ctx.Then(`^the cloud check said "([^"]*)"$`, func(text string) error {
+		if !strings.Contains(c.report, text) {
+			return fmt.Errorf("the cloud check did not say %q:\n%s", text, c.report)
+		}
+		return nil
+	})
+	ctx.Then(`^the book holds "([^"]*)" being made$`, func(name string) error {
+		for _, box := range c.book.State.Boxes {
+			if box.Name == name && box.Making {
+				return nil
+			}
+		}
+		return fmt.Errorf("the book holds no %s being made: %+v", name, c.book.State.Boxes)
+	})
+	ctx.Then(`^the book holds no box being made$`, func() error {
+		for _, box := range c.book.State.Boxes {
+			if box.Making {
+				return fmt.Errorf("the book holds %s being made: %+v", box.Name, c.book.State.Boxes)
+			}
 		}
 		return nil
 	})
@@ -223,8 +264,22 @@ func (c *cloudContext) finished(box string) error {
 	return nil
 }
 
+// check is a cloud check whose box, if one is begun, comes up before the
+// scenario goes on, as the detached make would meanwhile.
 func (c *cloudContext) check() error {
-	_, err := application.CloudCheck{
+	if err := c.checkOnly(); err != nil {
+		return err
+	}
+	return c.boxesComeUp()
+}
+
+// checkOnly is a cloud check that leaves the box it begins still being made.
+func (c *cloudContext) checkOnly() error {
+	return c.checkIn(context.Background())
+}
+
+func (c *cloudContext) checkIn(ctx context.Context) error {
+	report, err := application.CloudCheck{
 		Work:     c.tracker,
 		Provider: c.provider,
 		Book:     c.book,
@@ -233,9 +288,43 @@ func (c *cloudContext) check() error {
 		Plan:     c.plan,
 		Now:      func() time.Time { return c.now },
 		Out:      &c.said,
-	}.Run(context.Background())
+	}.Run(ctx)
+	c.report = report.String()
 	if err != nil {
 		return fmt.Errorf("the cloud check failed: %v\n%s", err, c.said.String())
+	}
+	return nil
+}
+
+// checkCancelled is a cloud check whose caller is cancelled secs seconds after
+// it begins a box: the make, detached from it, goes on and finishes.
+func (c *cloudContext) checkCancelled(secs int) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := c.checkIn(ctx); err != nil {
+		return err
+	}
+	c.now = c.now.Add(time.Duration(secs) * time.Second)
+	cancel()
+	return c.boxesComeUp()
+}
+
+// boxesComeUp runs each make the provider was asked to begin, as the process
+// it detached would, with a context of its own.
+func (c *cloudContext) boxesComeUp() error {
+	for _, name := range c.provider.TakeBegun() {
+		err := application.CloudMake{
+			Provider: c.provider,
+			Book:     c.book,
+			Log:      c.log,
+			Host:     "desktop",
+			Plan:     c.plan,
+			Now:      func() time.Time { return c.now },
+			Out:      &c.said,
+		}.Run(context.Background(), name)
+		if err != nil {
+			return fmt.Errorf("making %s failed: %v\n%s", name, err, c.said.String())
+		}
 	}
 	return nil
 }

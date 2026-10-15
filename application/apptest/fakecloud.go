@@ -9,7 +9,7 @@ import (
 )
 
 // FakeCloud is an application.CloudProvider that makes nothing: it records
-// each call as "up <name>" or "down <name>", fails the first FailUps ups, and
+// each Up and Down call as "up <name>" or "down <name>", fails the first FailUps ups, and
 // reports BilledUSD as the provider's billing when BilledKnown.
 type FakeCloud struct {
 	mu          sync.Mutex
@@ -17,9 +17,28 @@ type FakeCloud struct {
 	FailUps     int
 	BilledUSD   float64
 	BilledKnown bool
+	begun       []string
 }
 
 var _ application.CloudProvider = (*FakeCloud)(nil)
+
+// Begin implements application.CloudProvider: it only notes the box, which
+// TakeBegun hands to the scenario to make, as the process it detaches would.
+func (f *FakeCloud) Begin(_ context.Context, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.begun = append(f.begun, name)
+	return nil
+}
+
+// TakeBegun are the boxes begun and not yet made, which it forgets.
+func (f *FakeCloud) TakeBegun() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	begun := f.begun
+	f.begun = nil
+	return begun
+}
 
 // Up implements application.CloudProvider.
 func (f *FakeCloud) Up(_ context.Context, name string) error {

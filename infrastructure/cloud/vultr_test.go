@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/infrastructure/cloud"
 )
@@ -74,5 +75,43 @@ func TestBilledReadsTheSpendOrUnknown(t *testing.T) {
 	command, _ = standIn(t, "echo "+cloud.Unknown)
 	if usd, known, err := (cloud.Vultr{Command: command}).Billed(context.Background(), nil); err != nil || known || usd != 0 {
 		t.Errorf("expected unknown to be no answer and no error, got %v %v %v", usd, known, err)
+	}
+}
+
+func TestTheLimitOfAMakeIsAtLeastFifteenMinutes(t *testing.T) {
+	if cloud.DefaultLimit < 15*time.Minute {
+		t.Errorf("a make from a snapshot takes six minutes and more: the limit %s is too short", cloud.DefaultLimit)
+	}
+}
+
+func TestABegunMakeOutlivesTheCancelledCaller(t *testing.T) {
+	dir := t.TempDir()
+	done := filepath.Join(dir, "done")
+	self := filepath.Join(dir, "mw")
+	script := "#!/bin/sh\necho \"$*\" >" + filepath.Join(dir, "args") + "\nsleep 1\ntouch " + done + "\n"
+	if err := os.WriteFile(self, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	v := cloud.Vultr{Self: self, MakeLog: filepath.Join(dir, "make.log"), NoScope: true}
+	if err := v.Begin(ctx, "cloud1"); err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	cancel() // the caller is stopped while the make is going
+	if _, err := os.Stat(done); err == nil {
+		t.Fatalf("expected begin to return before the make ended")
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(done); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the make did not finish after its caller was cancelled")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if got := strings.TrimSpace(read(t, filepath.Join(dir, "args"))); got != "cloud make cloud1" {
+		t.Errorf("expected the make run as mw cloud make cloud1, got %q", got)
 	}
 }

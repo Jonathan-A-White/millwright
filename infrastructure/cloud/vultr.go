@@ -8,18 +8,22 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 )
 
 // DefaultLimit is how long one up or down may run before it is stopped: a
-// box made from a snapshot is up in a few minutes, one bootstrapped in full in
-// some more.
+// box made from a snapshot is up in about six minutes (terraform apply), one
+// bootstrapped in full in some more. It is the limit of the process Begin
+// starts, never of a caller, and is never under fifteen minutes.
 const DefaultLimit = 20 * time.Minute
 
 // billedLimit is how long asking the billing may take.
@@ -42,9 +46,67 @@ type Vultr struct {
 	Out io.Writer
 	// Limit is how long an up or down may run; zero is DefaultLimit.
 	Limit time.Duration
+	// Self is the mw binary Begin runs as `mw cloud make <name>`; MakeLog is
+	// the file that process appends its output to. NoScope keeps it out of a
+	// systemd scope of its own, which it is put in where systemd-run and a
+	// user manager are there.
+	Self    string
+	MakeLog string
+	NoScope bool
 }
 
 var _ application.CloudProvider = Vultr{}
+
+// Begin implements application.CloudProvider: it starts `mw cloud make <name>`
+// in a session of its own (and a systemd scope, where there is a user
+// manager, so that stopping the caller's unit does not take it), not tied to
+// ctx or to the caller's process group. A caller that is killed 10 seconds
+// into the apply leaves the apply running.
+func (v Vultr) Begin(_ context.Context, name string) error {
+	if v.Self == "" {
+		return fmt.Errorf("no mw to make the box with")
+	}
+	args := []string{v.Self, "cloud", "make", name}
+	if scope := v.scope(); scope != "" {
+		args = append([]string{scope, "--user", "--scope", "--collect", "--quiet"}, args...)
+	}
+	// Not CommandContext: the make is meant to outlive the context it was
+	// begun in.
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if v.MakeLog != "" {
+		if err := os.MkdirAll(filepath.Dir(v.MakeLog), 0o755); err != nil {
+			return fmt.Errorf("making the directory of the log %s: %w", v.MakeLog, err)
+		}
+		log, err := os.OpenFile(v.MakeLog, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0o644)
+		if err != nil {
+			return fmt.Errorf("opening the log %s: %w", v.MakeLog, err)
+		}
+		defer log.Close()
+		cmd.Stdout, cmd.Stderr = log, log
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("starting the make of %s: %w", name, err)
+	}
+	// Nobody waits for it: let go rather than leave a zombie of this process.
+	return cmd.Process.Release()
+}
+
+// scope is the systemd-run to put the make in a scope with, or "".
+func (v Vultr) scope() string {
+	if v.NoScope {
+		return ""
+	}
+	path, err := exec.LookPath("systemd-run")
+	if err != nil {
+		return ""
+	}
+	// A host without a user manager has systemd-run and nothing for it to ask.
+	if out, err := exec.Command("systemctl", "--user", "is-system-running").Output(); err != nil && len(out) == 0 {
+		return ""
+	}
+	return path
+}
 
 // Up implements application.CloudProvider.
 func (v Vultr) Up(ctx context.Context, name string) error {
