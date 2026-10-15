@@ -31,6 +31,7 @@ Feature: mw land lands a batch rig's queue under one gate run
       | mw-gq6.2 |
       | mw-gq6.3 |
     And the batch records of batch 1 hold the merge order, the gate log and the outcome "landed"
+    And metrics/factory.jsonl holds a line for batch 1 of the rig: 3 stories, 1 gate run, no fixer, outcome "green"
     And the Mayor was sent no mail saying the batch was held
 
   Scenario: A fourth branch that conflicts is set aside and stays queued while the other three land
@@ -63,6 +64,7 @@ Feature: mw land lands a batch rig's queue under one gate run
       | mw-gq6.3 |
     And the batch is held, and the Mayor's mail names every story in it and says "the batch is red"
     And the batch records of batch 1 hold the merge order, the gate log and the outcome "held"
+    And metrics/factory.jsonl holds a line for batch 1 of the rig: 3 stories, 1 gate run, no fixer, outcome "held"
 
   Scenario: --dry-run prints the batch it would make and changes nothing
     Given these stories are queued for batch landing:
@@ -76,6 +78,7 @@ Feature: mw land lands a batch rig's queue under one gate run
       | mw-gq6.2 |
     And the rig's tests were not run on the batch
     And no batch record was kept
+    And metrics/factory.jsonl holds no line for the rig
     And the Mayor was sent no mail saying the batch was held
 
   Scenario: The batch raises the version once, with one changelog entry per story

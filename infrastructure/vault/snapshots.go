@@ -19,7 +19,10 @@ const (
 	snapshotsLines = 4 * 1024 * 1024
 )
 
-var _ application.MetricSnapshots = (*Vault)(nil)
+var (
+	_ application.MetricSnapshots = (*Vault)(nil)
+	_ application.BatchMetrics    = (*Vault)(nil)
+)
 
 // SnapshotsPath is where the snapshots live in the vault.
 func (v *Vault) SnapshotsPath() string {
@@ -27,10 +30,15 @@ func (v *Vault) SnapshotsPath() string {
 }
 
 // Append implements application.MetricSnapshots: one line on the end of the
-// file, made when there is none. Only the home writes it, once a day, so there
-// is nothing for two hosts to merge.
+// file, made when there is none. Only the home writes the daily snapshot, once
+// a day, so there is nothing for two hosts to merge.
 func (v *Vault) Append(_ context.Context, snapshot application.MetricSnapshot) error {
-	line, err := json.Marshal(snapshot)
+	return v.appendMetricLine(snapshot)
+}
+
+// appendMetricLine writes one JSON line on the end of the file, made when there is none.
+func (v *Vault) appendMetricLine(entry any) error {
+	line, err := json.Marshal(entry)
 	if err != nil {
 		return err
 	}
@@ -75,6 +83,41 @@ func (v *Vault) Snapshots(context.Context) ([]application.MetricSnapshot, error)
 	}
 	if err := lines.Err(); err != nil {
 		return nil, fmt.Errorf("reading the key-metric snapshots: %w", err)
+	}
+	return kept, nil
+}
+
+// AppendBatch implements application.BatchMetrics: a batch's line on the end of
+// the same file. A line is appended whole in one write, and every line is its
+// own, so two hosts' lines merge by union.
+func (v *Vault) AppendBatch(_ context.Context, metric application.BatchMetric) error {
+	metric.Kind = application.BatchKind
+	return v.appendMetricLine(metric)
+}
+
+// Batches implements application.BatchHistory: the batch lines oldest first as
+// the file holds them; none and no error when the file is not there. A line
+// that is not a batch's is skipped.
+func (v *Vault) Batches(context.Context) ([]application.BatchMetric, error) {
+	file, err := os.Open(v.SnapshotsPath())
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading the batch metrics: %w", err)
+	}
+	defer file.Close()
+	var kept []application.BatchMetric
+	lines := bufio.NewScanner(file)
+	lines.Buffer(make([]byte, 0, 64*1024), snapshotsLines)
+	for lines.Scan() {
+		var one application.BatchMetric
+		if json.Unmarshal(lines.Bytes(), &one) == nil && one.Kind == application.BatchKind && one.Rig != "" {
+			kept = append(kept, one)
+		}
+	}
+	if err := lines.Err(); err != nil {
+		return nil, fmt.Errorf("reading the batch metrics: %w", err)
 	}
 	return kept, nil
 }
