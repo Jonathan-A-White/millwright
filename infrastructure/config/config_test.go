@@ -2310,3 +2310,32 @@ func TestEventsContributeBackDayThatIsNotADayOfEveryMonthIsRefused(t *testing.T)
 		}
 	}
 }
+
+func TestSeatHandoffsListTheDeputyAndMillhandAt200000UntilTheConfigSaysOtherwise(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\n")
+	got, err := config.SeatHandoffs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got["deputy"] != 200000 || got["millhand"] != 200000 {
+		t.Fatalf("expected the Deputy and the Millhand at 200000, got %v", got)
+	}
+}
+
+func TestSeatHandoffsTakeAnySeatTheConfigListsAndLetItChangeOrUnlistTheDefaults(t *testing.T) {
+	writeConfig(t, "handoff_at = 180000\n\n[seats.scribe]\nhandoff_at = 50000\n\n[seats.deputy]\nhandoff_at = 150000 # earlier\n\n[seats.millhand]\nhandoff_at = 0\n\n[rigs]\nx = \"/x\"\n")
+	got, err := config.SeatHandoffs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got["scribe"] != 50000 || got["deputy"] != 150000 {
+		t.Fatalf("expected scribe at 50000 and the deputy at 150000, with the millhand unlisted, got %v", got)
+	}
+}
+
+func TestSeatHandoffsRefuseAValueThatIsNotANumber(t *testing.T) {
+	writeConfig(t, "[seats.scribe]\nhandoff_at = \"soon\"\n")
+	if _, err := config.SeatHandoffs(); err == nil || !strings.Contains(err.Error(), "scribe") {
+		t.Fatalf("expected an error naming the seat, got %v", err)
+	}
+}

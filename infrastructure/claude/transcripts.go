@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -80,8 +81,55 @@ func (t *Transcripts) LiveContext(ctx context.Context, dir string) (application.
 	if newest == "" {
 		return application.TranscriptContext{}, fmt.Errorf("no transcript under %s: Claude Code has recorded no session run in %s", project, dir)
 	}
+	return contextOf(newest, project)
+}
 
-	file, err := os.Open(newest)
+// Transcripts satisfies the port that reads a session by its name.
+var _ application.TitledTranscripts = (*Transcripts)(nil)
+
+// TitledContext implements application.TitledTranscripts: LiveContext of the
+// newest transcript in dir whose session was named title (Claude Code's
+// --name, which a transcript records as a custom-title line).
+func (t *Transcripts) TitledContext(_ context.Context, dir, title string) (application.TranscriptContext, error) {
+	project := ProjectDir(t.root, dir)
+	for _, path := range transcriptsNewestFirst(project) {
+		if titleOf(path) == title {
+			return contextOf(path, project)
+		}
+	}
+	return application.TranscriptContext{}, fmt.Errorf("no transcript under %s is of a session named %s", project, title)
+}
+
+// titleOf is the name the session of a transcript was given, "" when it holds
+// none. The first custom-title line says it.
+func titleOf(path string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	lines := bufio.NewReaderSize(file, 1<<20)
+	for {
+		line, readErr := lines.ReadBytes('\n')
+		if bytes.Contains(line, []byte(`"custom-title"`)) {
+			var seen struct {
+				Type  string `json:"type"`
+				Title string `json:"customTitle"`
+			}
+			if json.Unmarshal(line, &seen) == nil && seen.Type == "custom-title" {
+				return seen.Title
+			}
+		}
+		if readErr != nil {
+			return ""
+		}
+	}
+}
+
+// contextOf is the context the last main-chain assistant turn of the
+// transcript at path was given.
+func contextOf(path, project string) (application.TranscriptContext, error) {
+	file, err := os.Open(path)
 	if err != nil {
 		return application.TranscriptContext{}, fmt.Errorf("reading the transcript in %s: %w", project, err)
 	}
@@ -102,14 +150,41 @@ func (t *Transcripts) LiveContext(ctx context.Context, dir string) (application.
 		}
 	}
 	if last == nil {
-		return application.TranscriptContext{}, fmt.Errorf("no assistant turn recorded yet in %s: looked in %s", newest, project)
+		return application.TranscriptContext{}, fmt.Errorf("no assistant turn recorded yet in %s: looked in %s", path, project)
 	}
 
 	u := last.Message.Usage
 	return application.TranscriptContext{
-		SessionID: strings.TrimSuffix(filepath.Base(newest), ".jsonl"),
+		SessionID: strings.TrimSuffix(filepath.Base(path), ".jsonl"),
 		Tokens:    u.Input + u.CacheRead + u.CacheCreation,
 	}, nil
+}
+
+// transcriptsNewestFirst is every transcript in a project directory, most
+// recently modified first; a tie is settled by name.
+func transcriptsNewestFirst(project string) []string {
+	found, _ := filepath.Glob(filepath.Join(project, "*.jsonl"))
+	type dated struct {
+		path string
+		at   int64
+	}
+	var all []dated
+	for _, path := range found {
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			all = append(all, dated{path, info.ModTime().UnixNano()})
+		}
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if all[i].at != all[j].at {
+			return all[i].at > all[j].at
+		}
+		return all[i].path > all[j].path
+	})
+	paths := make([]string, len(all))
+	for i, d := range all {
+		paths[i] = d.path
+	}
+	return paths
 }
 
 // newestTranscript is the most recently modified transcript in a project
