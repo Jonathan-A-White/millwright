@@ -147,6 +147,11 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 		if rs.Run == RunBlocked {
 			continue
 		}
+		// A story queued for batch landing has no session to be quiet: it
+		// waits for its batch (plans/0117).
+		if rs.Queued() {
+			continue
+		}
 		if elapsed := now.Sub(since); elapsed > n.nudgeAfter() {
 			clauses = append(clauses, NudgeClause{
 				Key:  detail.Story.ID,

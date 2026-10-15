@@ -387,6 +387,11 @@ func (r RunningStory) Stopped() bool {
 	return r.Run == RunStopped || r.Run == RunStuck
 }
 
+// Queued reports whether this story passed its close-out on a rig that lands in
+// batches and waits for its batch: run state queued. It is alive, not stopped,
+// though its session is gone and its lease has lapsed.
+func (r RunningStory) Queued() bool { return r.Run == RunQueued }
+
 // Refused reports whether this story's landing was refused (or its attempts
 // ran out) and it now waits on the Mayor: run state blocked.
 func (r RunningStory) Refused() bool { return r.Run == RunBlocked }
@@ -682,9 +687,10 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 			rs.CloseOut, rs.Now = &mark, s.now()
 		}
 		report.Running = append(report.Running, rs)
-		if !rs.Refused() {
-			// A refused story waits on the Mayor and holds no session, so the cap
-			// does not count it, as in mw dispatch.
+		if !rs.Refused() && !rs.Queued() {
+			// A refused story waits on the Mayor and a queued one for its batch:
+			// neither holds a session, so the cap does not count it, as in mw
+			// dispatch.
 			report.InUse++
 		}
 	}
@@ -1791,6 +1797,9 @@ func (r RunningStory) write(b *strings.Builder) {
 	}
 	if r.Refused() {
 		clip(b, "    refused, waiting on the Mayor (mw retry or a hold)")
+	}
+	if r.Queued() {
+		clip(b, "    queued for batch landing, waiting for its batch: no session")
 	}
 	if r.FormulaOpen() {
 		clip(b, fmt.Sprintf("    close blocked: %d formula step(s) open", r.FormulaSteps))

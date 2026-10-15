@@ -205,6 +205,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerTesterSteps(ctx, c)
 	registerNextCrossSlotSteps(ctx, c)
 	registerNextGateSteps(ctx, c)
+	registerNextBatchSteps(ctx, c)
 
 	ctx.When(`^mw closes out "([^"]*)"$`, c.mwClosesOut)
 	ctx.When(`^mw closes out "([^"]*)" a second time$`, c.mwClosesOut)

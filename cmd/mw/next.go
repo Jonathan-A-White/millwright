@@ -49,6 +49,13 @@ func newNextCmd() *cobra.Command {
 			"second conflict stops as any refusal does, and nobody is sent back again. Then the worktree goes,\n" +
 			"one line is appended to the seat's ledger, the story is closed, the hosts are brought level, and\n" +
 			"whatever is ready here is dispatched.\n\n" +
+			"On a rig whose file says landing = \"batch\" (plans/0117), a branch that passes the checks is not\n" +
+			"merged: it is pushed to the remote as itself, mw/<story>, never forced; the story is recorded\n" +
+			"run=queued, left open and claimed with its worktree kept, one ledger line says it is queued for\n" +
+			"batch landing, its session is closed and whatever is ready here is dispatched. No mail is sent;\n" +
+			"its batch lands it. When mw check passed at that very commit (the tip line of its log), the rig's\n" +
+			"tests are not run again, and the ledger line says \"tested by mw check at <commit>\". The status,\n" +
+			"the sweep, the dispatch and the quiet alarm call a queued story alive, never stuck or abandoned.\n\n" +
 			"One mail goes to the Mayor from mw on this host — Landed, Refused (the checks turned the branch away),\n" +
 			"Sent back (to rebase) or Blocked (anything else stopped it) — holding this report; a mail that cannot be sent is said on\n" +
 			"stderr and changes nothing. A run that finds nothing to close sends none.\n\n" +

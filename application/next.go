@@ -28,6 +28,13 @@ const (
 	// reads it too: a story marked run=stopped or run=stuck is shown as that,
 	// never as running.
 	RunStuck = "stuck"
+	// RunQueued is a story of a rig that lands in batches whose close-out
+	// passed: its branch is on the remote as mw/<id>, its worktree and claim
+	// are kept, and it waits for its batch to land it (plans/0117, Land Rush).
+	// Its session is gone and its lease lapses, and that is no sign of trouble:
+	// mw status, the sweep, the dispatch and the quiet alarm call it alive, and
+	// none of them counts it as a session, marks it stuck or gives it back.
+	RunQueued = "queued"
 )
 
 // RebaseState is the state dimension that says a story's branch was sent back
@@ -389,6 +396,14 @@ type NextReport struct {
 	LandedEarlier bool
 	How           Landed
 	Target        string
+	// Queued says the story passed its close-out on a rig that lands in
+	// batches, and was queued for its batch rather than landed: its branch is
+	// at the remote as QueuedAs, and Trusted is the commit whose mw check run
+	// was trusted in place of running the rig's tests again, empty when they
+	// were run.
+	Queued   bool
+	QueuedAs string
+	Trusted  string
 	// Commits is how many commits the session left on the story's branch.
 	Commits int
 	// Uncommitted is the paths the session left changed and not committed in
@@ -540,6 +555,15 @@ type closeOut struct {
 	// records it.
 	gate gateRecord
 
+	// batch says the story's rig lands in batches, so that a close-out that
+	// passes queues the story rather than landing it (plans/0117); tip is the
+	// commit at its branch's tip as the close-out read it then, and trusted is
+	// that same commit when mw check passed at it, so that the close-out does
+	// not run the rig's tests again. Both are empty on a rig that lands each.
+	batch   bool
+	tip     string
+	trusted string
+
 	// tested is the landed story a Tester story tested, findings what it
 	// found, and findingsFrom the story they were written on, as its checks
 	// read them (testerRefusals).
@@ -606,7 +630,7 @@ func (n Next) closeSession(ctx context.Context, report NextReport) {
 		// Sent back: the story's name is the fresh session's now, and the one
 		// this close-out ran in has been moved aside to be closed.
 		name = report.Aside
-	case !report.Closed && !report.DemoHeld:
+	case !report.Closed && !report.DemoHeld && !report.Queued:
 		return
 	}
 	if err := n.Runner.Close(ctx, name); err != nil {
@@ -741,6 +765,11 @@ func (n Next) closeOut(ctx context.Context, storyID string, began time.Time) (Ne
 	// without merging, testing, pushing or ledgering anything a second time.
 	if was, err := n.Tracker.StoryState(ctx, storyID, RunState); err == nil && was == RunLanded {
 		return n.closeALanding(ctx, c, &report)
+	} else if err == nil && was == RunQueued {
+		// Queued by an earlier run, on a rig that lands in batches: its batch
+		// lands it, and nothing is pushed, ledgered or dispatched twice.
+		return report, fmt.Errorf("closing out %s: it is queued for batch landing already (%s=%s), so nothing was pushed, ledgered or dispatched again: its batch lands it",
+			storyID, RunState, RunQueued)
 	}
 	// The run=landed write can fail after the push, and then the story carries
 	// no marker. What a landing does leave is its ledger line, written before
@@ -820,12 +849,16 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	if err := n.fetchRetrying(ctx, report, c.rigDir); err != nil {
 		return n.stop(ctx, c, report, ReasonGitFailed, fmt.Sprintf("the rig could not be brought up to date with %s: %v", n.remote(), err), "")
 	}
+	n.readLanding(ctx, c, report)
 	if found := n.refusals(ctx, c, report, false); len(found) > 0 {
 		report.Refused = true
 		return n.stop(ctx, c, report, found[0].Reason, found[0].Why, found[0].Said)
 	}
 	if IsTesterStory(c.detail) {
 		return n.closeTested(ctx, c, report)
+	}
+	if c.batch {
+		return n.queue(ctx, c, report)
 	}
 
 	n.readBackend(ctx, c, report)
@@ -1351,6 +1384,13 @@ func (n Next) refusals(ctx context.Context, c *closeOut, report *NextReport, all
 		closing = previewClosingStep
 	}
 	if refusal, open := n.openStepsRefusal(ctx, c, report, closing, base); open && refuse(refusal.Reason, refusal.Why, refusal.Said) {
+		return found
+	}
+
+	// A batch landing trusts mw check's own run at this very commit, and does
+	// not run the rig's tests, or the changed specs after them, a second time:
+	// the batch's gate runs them again on the merged result (plans/0117, Q2).
+	if c.trusted != "" {
 		return found
 	}
 
@@ -1886,7 +1926,7 @@ func (n Next) push(ctx context.Context, c *closeOut, report *NextReport, dir str
 		}
 	}
 
-	if err := n.pushRetrying(ctx, c, report, dir); err != nil {
+	if err := n.pushRetrying(ctx, report, dir, c.target); err != nil {
 		return Landed{}, err
 	}
 	return landed, nil
@@ -1989,18 +2029,18 @@ func joinBlocks(blocks ...string) string {
 // own loop answers by fetching and merging afresh; either comes back as it
 // was, for merge to tell apart. Every attempt is counted on the report,
 // whichever kind of failure eventually stops it, and every retry is one note.
-func (n Next) pushRetrying(ctx context.Context, c *closeOut, report *NextReport, dir string) error {
+func (n Next) pushRetrying(ctx context.Context, report *NextReport, dir, branch string) error {
 	var last error
 	for try := 1; try <= n.pushTries(); try++ {
 		if try > 1 {
 			wait := n.retryPause(try - 1)
 			report.Notes = append(report.Notes, retryNote("push", last, wait))
 			if err := n.retryWait(ctx, wait); err != nil {
-				return failedFor(ReasonLandingFailed, fmt.Errorf("waiting %s to try the push to %s again: %w", wait, c.target, err))
+				return failedFor(ReasonLandingFailed, fmt.Errorf("waiting %s to try the push to %s again: %w", wait, branch, err))
 			}
 		}
 		report.Pushes++
-		err := n.Landing.Push(ctx, dir, n.remote(), c.target)
+		err := n.Landing.Push(ctx, dir, n.remote(), branch)
 		if err == nil {
 			return nil
 		}
@@ -2010,7 +2050,7 @@ func (n Next) pushRetrying(ctx context.Context, c *closeOut, report *NextReport,
 		last = err
 	}
 	return failedFor(ReasonLandingFailed, fmt.Errorf("the push to %s kept failing on a fault at the remote, %d time(s) running: %w",
-		c.target, n.pushTries(), last))
+		branch, n.pushTries(), last))
 }
 
 // FetchRetries is how many times a fetch that failed on a passing fault of the
@@ -2098,10 +2138,14 @@ func retryNote(step string, err error, wait time.Duration) string {
 // rather than a claimed one, and so that what is dispatched next accounts for
 // the story that has just finished.
 func (n Next) carryOn(ctx context.Context, c *closeOut, report *NextReport) (NextReport, error) {
+	done := "it landed and was closed"
+	if report.Queued {
+		done = "it was queued for batch landing"
+	}
 	if n.Sync != nil {
 		synced, err := n.Sync.Run(ctx)
 		if err != nil {
-			return *report, fmt.Errorf("closing out %s: it landed and was closed, but the hosts could not be brought level, so nothing was dispatched: %w", c.id, err)
+			return *report, fmt.Errorf("closing out %s: %s, but the hosts could not be brought level, so nothing was dispatched: %w", c.id, done, err)
 		}
 		report.Sync, report.Synced = synced, true
 	}
@@ -2111,7 +2155,7 @@ func (n Next) carryOn(ctx context.Context, c *closeOut, report *NextReport) (Nex
 	dispatched, err := n.Dispatch.Run(ctx)
 	report.Dispatch, report.Dispatched = dispatched, true
 	if err != nil {
-		return *report, fmt.Errorf("closing out %s: it landed and was closed, but the next dispatch failed: %w", c.id, err)
+		return *report, fmt.Errorf("closing out %s: %s, but the next dispatch failed: %w", c.id, done, err)
 	}
 	return *report, nil
 }
@@ -2436,7 +2480,7 @@ func (n Next) ledgerNotes(c *closeOut, report *NextReport) []string {
 	if id := c.result.SessionID; id != "" {
 		notes = append(notes, "session "+id)
 	}
-	if report.Pushes > 1 {
+	if report.Pushes > 1 && !report.Queued {
 		notes = append(notes, fmt.Sprintf("pushed %d times: the other host landed first", report.Pushes))
 	}
 	if c.result.Denials > 0 {
@@ -2477,7 +2521,9 @@ func (n Next) abandoned(ctx context.Context, skip string, report *NextReport) []
 	var gone []string
 	for _, detail := range running {
 		id := detail.Story.ID
-		if id == skip {
+		// A story queued for batch landing has no session by design, and its
+		// claim and worktree wait for its batch.
+		if id == skip || QueuedForBatch(detail) {
 			continue
 		}
 		status, err := n.Runner.Status(ctx, SessionName(id))
@@ -2674,6 +2720,11 @@ func (r NextReport) String() string {
 	switch {
 	case r.LandedEarlier:
 		fmt.Fprintf(&b, "  landed  on %s by an earlier run of mw next: nothing was merged, tested or pushed again\n", r.Target)
+	case r.Queued:
+		fmt.Fprintf(&b, "  queued  for batch landing as %s (%d commits); %s is not touched until its batch lands\n", r.QueuedAs, r.Commits, r.Target)
+		if r.Trusted != "" {
+			fmt.Fprintf(&b, "          tested by mw check at %s: the rig's tests were not run again\n", shortCommit(r.Trusted))
+		}
 	case r.Landed:
 		fmt.Fprintf(&b, "  landed  %s on %s (%d commits, %d push(es))\n", r.How.LandedAs(r.Target), r.Target, r.Commits, r.Pushes)
 		if len(r.How.Unioned) > 0 {
@@ -2732,6 +2783,9 @@ func (r NextReport) String() string {
 	}
 	if r.Closed {
 		b.WriteString("  closed  the story is closed\n")
+	}
+	if r.Queued {
+		b.WriteString("  open    the story stays open and claimed, its worktree kept, until its batch lands it\n")
 	}
 	if r.DemoHeld {
 		b.WriteString("  closed  " + DemoLeftOpen + "\n")

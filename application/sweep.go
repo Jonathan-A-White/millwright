@@ -56,6 +56,9 @@ type SweepReport struct {
 	// Skipped is the claimed stories left alone because an earlier mw next or
 	// mw sweep had already recorded their session gone.
 	Skipped []string
+	// Queued is the claimed stories left alone because they are queued for
+	// batch landing: their session is gone and their lease lapsed by design.
+	Queued []string
 	// Notes are the things that went sideways without stopping the sweep: one
 	// story's trouble is never a reason to leave the rest unexamined.
 	Notes []string
@@ -105,6 +108,10 @@ func (s Sweep) Run(ctx context.Context) (SweepReport, error) {
 // them notices first is the one that gets to say so.
 func (s Sweep) one(ctx context.Context, detail StoryDetail, report *SweepReport) {
 	id := detail.Story.ID
+	if QueuedForBatch(detail) {
+		report.Queued = append(report.Queued, id)
+		return
+	}
 	if recordedGone(ctx, s.Tracker, id) {
 		report.Skipped = append(report.Skipped, id)
 		return
@@ -159,6 +166,9 @@ func (r SweepReport) String() string {
 	}
 	for _, d := range r.Stuck {
 		writeStory(&b, d, "")
+	}
+	if len(r.Queued) > 0 {
+		clip(&b, "  queued for batch landing, not stuck: "+strings.Join(r.Queued, ", "))
 	}
 	for _, note := range r.Notes {
 		clip(&b, "  ! "+note)

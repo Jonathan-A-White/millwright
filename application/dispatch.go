@@ -34,7 +34,7 @@ const (
 // next.go and eventcontrol.go: what a claim clears from a story an earlier
 // attempt left one on, since a fresh claim is not the refusal, landing or
 // cancel the label would still say.
-var RunStates = []string{RunRunning, RunLanded, RunBlocked, RunStopped, RunStuck, RunCancelled}
+var RunStates = []string{RunRunning, RunLanded, RunBlocked, RunStopped, RunStuck, RunCancelled, RunQueued}
 
 // HostSync is this host being brought level with the other one. Sync is the
 // implementation; the port is here so that a dispatch can be tested without a
@@ -395,6 +395,9 @@ type DispatchReport struct {
 	// HeldRefused is every dead-pane story left claimed because its close-out
 	// refused it.
 	HeldRefused []HeldRefused
+	// Queued is every story claimed here and queued for batch landing: not
+	// counted against the cap, and never given back.
+	Queued []string
 	// FixedOnMain is every nightly-suite bug closed before dispatch because its
 	// spec passes on main already.
 	FixedOnMain []FixedOnMain
@@ -594,6 +597,15 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	shares := fileShares{changes: d.Changes, rules: d.Rules, rigs: d.Rigs, remote: d.remote()}
 	for _, detail := range running {
 		if detail.Hitl() {
+			continue
+		}
+		// Queued for its batch, on a rig that lands in batches: its session is
+		// gone by design and its lease lapses, and neither is a dead pane to
+		// reclaim. It holds no session, so the cap does not count it, and its
+		// branch is yet to land, so it keeps its files (plans/0117).
+		if QueuedForBatch(detail) {
+			shares.add(detail)
+			report.Queued = append(report.Queued, detail.Story.ID)
 			continue
 		}
 		if !d.DryRun {
@@ -2056,6 +2068,9 @@ func (r DispatchReport) String() string {
 	for _, held := range r.HeldRefused {
 		fmt.Fprintf(&b, "  held    %s · %s · refused, waiting on the Mayor: not counted; its claim, worktree and branch are kept (mw retry)\n",
 			held.StoryID, held.Session)
+	}
+	for _, id := range r.Queued {
+		fmt.Fprintf(&b, "  queued  %s · queued for batch landing: not counted; its claim, worktree and branch wait for its batch\n", id)
 	}
 	for _, reclaim := range r.Reclaimed {
 		fmt.Fprintf(&b, "  reclaimed %s · %s · dead pane, lease expired %s\n", reclaim.StoryID, reclaim.Session,
