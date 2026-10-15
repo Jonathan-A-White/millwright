@@ -38,7 +38,7 @@ Feature: A warm pool of clean grind sessions, so a grist does not wait for one t
     Then the mill answered 1, refused 0, failed 0, and left 0 waiting
     And 1 cold session and 1 warm session were given grists
     And the warm session was started for the grind's own system prompt, model, effort and schema
-    And the warm session's message names the photo in its own directory, and the system prompt's tag
+    And the warm session's message names the photo in its own directory, and a tag the system prompt does not hold
     And the pool holds 1 warm session for "cairn" "sweep"
     And no warm session was given more than one grist
 

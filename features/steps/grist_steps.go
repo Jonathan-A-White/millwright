@@ -783,8 +783,12 @@ func (c *gristContext) theGrindRan(model, effort string) error {
 		if lines[i] == string(input) && strings.HasPrefix(lines[i-1], "GRIST INPUT ") && strings.HasSuffix(lines[i-1], " BEGINS") &&
 			lines[i+1] == strings.TrimSuffix(lines[i-1], " BEGINS")+" ENDS" {
 			found = true
-			if !strings.Contains(call.System, lines[i-1]) {
-				return fmt.Errorf("expected the system prompt to name the marker %q", lines[i-1])
+			tag := strings.TrimSuffix(strings.TrimPrefix(lines[i-1], "GRIST INPUT "), " BEGINS")
+			if strings.Contains(call.System, tag) {
+				return fmt.Errorf("expected the system prompt to hold no tag, but it holds %q", tag)
+			}
+			if !strings.Contains(call.Prompt, "The request's tag is "+tag+".") {
+				return fmt.Errorf("expected the message to give its tag %q", tag)
 			}
 		}
 	}

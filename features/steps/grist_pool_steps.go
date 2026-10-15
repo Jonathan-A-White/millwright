@@ -88,7 +88,7 @@ func registerGristPool(ctx *godog.ScenarioContext, c *gristContext) {
 	ctx.Then(`^no warm session is left running$`, p.noneRunning)
 	ctx.Then(`^(\d+) warm sessions? (?:was|were) retired unused$`, p.retiredUnused)
 	ctx.Then(`^the warm session was started for the grind's own system prompt, model, effort and schema$`, p.startedForTheGrind)
-	ctx.Then(`^the warm session's message names the photo in its own directory, and the system prompt's tag$`, p.messageNamesThePhoto)
+	ctx.Then(`^the warm session's message names the photo in its own directory, and a tag the system prompt does not hold$`, p.messageNamesThePhoto)
 	ctx.Then(`^the warm session waiting was started for the changed instructions$`, p.waitingForChanged)
 	ctx.Then(`^the report notes that the warm session could not answer, so the grist ran cold$`, p.reportNotesTheFallback)
 }
@@ -246,8 +246,7 @@ func (p *poolContext) retiredUnused(n int) error {
 	return nil
 }
 
-// gristTagIn is the tag of the lines a system prompt or message sets the
-// app's request between.
+// gristTagIn is the tag of the lines a message sets the app's request between.
 var gristTagIn = regexp.MustCompile(`GRIST INPUT ([0-9a-f]+) BEGINS`)
 
 func (p *poolContext) onlyAnsweredWarm() (*apptest.FakeWarmSession, error) {
@@ -275,12 +274,8 @@ func (p *poolContext) startedForTheGrind() error {
 		got.MaxTurns != want.MaxTurns || got.Timeout != want.Timeout {
 		return fmt.Errorf("the warm session was started with %+v, the cold one with %+v", got, want)
 	}
-	// The system prompts differ only in their tags, each session's own.
-	wantTag, gotTag := gristTagIn.FindStringSubmatch(want.System), gristTagIn.FindStringSubmatch(got.System)
-	if wantTag == nil || gotTag == nil {
-		return fmt.Errorf("a system prompt names no tag:\n%s\n%s", want.System, got.System)
-	}
-	if strings.ReplaceAll(got.System, gotTag[1], "TAG") != strings.ReplaceAll(want.System, wantTag[1], "TAG") {
+	// The system prompts are the same bytes: the tag is in each message.
+	if got.System != want.System {
 		return fmt.Errorf("the warm session's system prompt is not the cold one's:\n%s\n---\n%s", got.System, want.System)
 	}
 	if !strings.HasSuffix(got.System, gristInstructions) {
@@ -303,9 +298,8 @@ func (p *poolContext) messageNamesThePhoto() error {
 			return fmt.Errorf("the message does not name the photo %s:\n%s", full, seen.Call.Prompt)
 		}
 	}
-	systemTag, promptTag := gristTagIn.FindStringSubmatch(s.Call.System), gristTagIn.FindStringSubmatch(seen.Call.Prompt)
-	if systemTag == nil || promptTag == nil || systemTag[1] != promptTag[1] {
-		return fmt.Errorf("the message's tag is not the system prompt's:\n%s\n---\n%s", s.Call.System, seen.Call.Prompt)
+	if promptTag := gristTagIn.FindStringSubmatch(seen.Call.Prompt); promptTag == nil || strings.Contains(s.Call.System, promptTag[1]) {
+		return fmt.Errorf("the message does not carry a tag of its own, apart from the system prompt:\n%s\n---\n%s", s.Call.System, seen.Call.Prompt)
 	}
 	return nil
 }

@@ -147,18 +147,16 @@ type gristDemand struct {
 	inFlight int
 }
 
-// gristWarm is one warm session, the private directory it runs in and the tag
-// its system prompt names.
+// gristWarm is one warm session and the private directory it runs in.
 type gristWarm struct {
 	session WarmSession
 	spec    gristWarmSpec
 	dir     string
-	tag     string
 	started time.Time
 }
 
 // gristWarmSpec is everything a grind's session is started with but its
-// private directory, its tag and its message: two grists with the same spec
+// private directory and its message: two grists with the same spec
 // may be given sessions started the same way.
 type gristWarmSpec struct {
 	app, kind, v                        string
@@ -167,15 +165,16 @@ type gristWarmSpec struct {
 	timeout                             time.Duration
 }
 
-// call is the session spec runs as, in dir, its request set between lines
-// tagged tag: the mill's preamble then the grind's instructions as the system
-// prompt. Its Prompt is left empty for the grist's message.
-func (s gristWarmSpec) call(dir, tag string) GrindCall {
+// call is the session spec runs as, in dir: the mill's preamble then the
+// grind's instructions as the system prompt, the same bytes for every grist of
+// the kind. Its Prompt is left empty for the grist's message, which carries the
+// tag of the lines its request sits between.
+func (s gristWarmSpec) call(dir string) GrindCall {
 	return GrindCall{
 		Dir:      dir,
 		Model:    s.model,
 		Effort:   s.effort,
-		System:   gristPreamble(GristName{App: s.app, Kind: s.kind, V: s.v}, tag) + "\n\n" + s.instructions,
+		System:   gristPreamble(GristName{App: s.app, Kind: s.kind, V: s.v}) + "\n\n" + s.instructions,
 		Schema:   s.schema,
 		Timeout:  s.timeout,
 		MaxTurns: s.maxTurns,
@@ -366,13 +365,12 @@ func (p *GristPool) start(spec gristWarmSpec, now time.Time) (*gristWarm, error)
 	if abs, err := filepath.Abs(dir); err == nil {
 		dir = abs
 	}
-	tag := gristTag()
-	session, err := p.Warmer.Warm(spec.call(dir, tag))
+	session, err := p.Warmer.Warm(spec.call(dir))
 	if err != nil {
 		os.RemoveAll(dir)
 		return nil, err
 	}
-	return &gristWarm{session: session, spec: spec, dir: dir, tag: tag, started: now}, nil
+	return &gristWarm{session: session, spec: spec, dir: dir, started: now}, nil
 }
 
 // retire ends a warm session never given a grist, and removes its directory.
