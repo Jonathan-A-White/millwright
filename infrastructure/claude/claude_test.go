@@ -1074,3 +1074,32 @@ func TestTheBuildersSessionIsGivenItsWorkerLimit(t *testing.T) {
 		}
 	}
 }
+
+// A close-out alone runs mw next in the environment a session's close-out runs
+// in, the host's beads environment and the seat's identity, and nothing else:
+// no harness, no heartbeat, no boot file or result (mw-gq6.467).
+func TestACloseOutAloneRunsOnlyItsCloseOutInTheSessionsEnvironment(t *testing.T) {
+	const file = "/home/jwhite/.config/mw/beads.env"
+	spec, err := New(WithEnvFile(file), WithBeadsServerHost("laptop.mw")).Session(application.Launch{
+		StoryID: "mw-gq6.6", Path: launch(nil).Path, Seat: "builder", Host: "vps", Dir: "/root/.mw-worktrees/mw-gq6.6",
+		After: []string{"/usr/local/bin/mw", "next", "mw-gq6.6"}, Heartbeat: []string{"mw", "next", "--heartbeat", "mw-gq6.6"},
+		CloseOutOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("assembling the close-out: %v", err)
+	}
+	line := spec.Command[len(spec.Command)-1]
+	if !strings.HasSuffix(line, "export BEADS_DOLT_SERVER_HOST=laptop.mw; /usr/local/bin/mw next mw-gq6.6") || !strings.Contains(line, file) {
+		t.Errorf("expected the beads environment read and then mw next alone, got %q", line)
+	}
+	if strings.Contains(line, "claude") || strings.Contains(line, "--heartbeat") || strings.Contains(line, "result.json") {
+		t.Errorf("expected no harness, heartbeat or result on the line, got %q", line)
+	}
+	if spec.Env["MW_SEAT"] != "builder@vps" || spec.Env["MW_STORY"] != "mw-gq6.6" || spec.Dir != "/root/.mw-worktrees/mw-gq6.6" {
+		t.Errorf("expected the seat's identity and the story in the worktree, got %+v in %q", spec.Env, spec.Dir)
+	}
+
+	if _, err := New().Session(application.Launch{StoryID: "mw-gq6.6", Path: launch(nil).Path, Seat: "builder", CloseOutOnly: true}); err == nil {
+		t.Error("expected a close-out alone with nothing to run to be refused")
+	}
+}

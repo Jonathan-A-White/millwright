@@ -208,6 +208,21 @@ Feature: Dispatching the stories this host is ready to work
     And dispatch said once that "mw-gq6.9" is refused and waits for the Mayor
     And dispatch leaves with status 0
 
+  Scenario: A story its close-out handed back at the merge slot's overall most has only its close-out run again
+    Given a story "mw-gq6.9" of that epic was dispatched and left its worktree with 2 commits
+    And the story "mw-gq6.9" has been tried 1 time
+    And the close-out of "mw-gq6.9" handed it back at the merge slot's overall most
+    And the session of "mw-gq6.9" has a dead pane and its lease has expired
+    When dispatch runs on "vps" with a cap of 1
+    Then the dead session for "mw-gq6.9" was closed
+    And the session for "mw-gq6.9" runs only its close-out, "mw next mw-gq6.9", in the worktree of "mw-gq6.9"
+    And the story "mw-gq6.9" is claimed by this host
+    And the story "mw-gq6.9" records 1 attempt
+    And the branch of "mw-gq6.9" still has its 2 commits
+    And the story "mw-gq6.9" is recorded as running
+    And dispatch said that "mw-gq6.9" has its close-out run again
+    And dispatch leaves with status 0
+
   Scenario: A crashed session with no refusal recorded is still reclaimed and started again
     Given a story "mw-gq6.9" of that epic was dispatched and left its worktree with 1 commit
     And the story "mw-gq6.9" has been tried 1 time

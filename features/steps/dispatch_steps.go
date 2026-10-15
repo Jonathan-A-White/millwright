@@ -222,6 +222,9 @@ func InitializeDispatchScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^dispatch started nothing, leaving the dead window of "([^"]*)" as it was$`, c.dispatchStartedNothingNewAt)
 	ctx.Then(`^the branch of "([^"]*)" still has its (\d+) commits?$`, c.theBranchStillHasItsCommits)
 	ctx.Then(`^dispatch said once that "([^"]*)" is refused and waits for the Mayor$`, c.dispatchSaidOnceItIsRefused)
+	ctx.Given(`^the close-out of "([^"]*)" handed it back at the merge slot's overall most$`, c.theCloseOutHandedItBack)
+	ctx.Then(`^the session for "([^"]*)" runs only its close-out, "([^"]*)", in the worktree of "([^"]*)"$`, c.theSessionRunsOnlyItsCloseOut)
+	ctx.Then(`^dispatch said that "([^"]*)" has its close-out run again$`, c.dispatchSaidItsCloseOutRunsAgain)
 	ctx.Then(`^dispatch reclaimed "([^"]*)" for a dead pane with an expired lease$`, c.dispatchReclaimedForADeadPane)
 	ctx.Then(`^the reclaim comment on "([^"]*)" says the attempt was refunded$`, c.theReclaimCommentSaysRefunded)
 	ctx.Then(`^the latest reclaim comment on "([^"]*)" says it was not refunded: (.+)$`, c.theLatestReclaimCommentSaysNotRefunded)
@@ -908,6 +911,7 @@ func (c *dispatchContext) dispatch(host string, cap int, dryRun bool) error {
 			Harness: claude.New(),
 			Seat:    "builder",
 			Host:    host,
+			After:   []string{"mw", "next"},
 		},
 		Sync:      application.Sync{Vault: c.files, Tracker: c.tracker, Host: host},
 		SyncTries: knobs.tries,
@@ -1857,6 +1861,51 @@ func (c *dispatchContext) theMailSays(words string) error {
 
 // theCloseOutRefusedIt records what mw next's stop records when it refuses a
 // story's close-out: the run state blocked, with the reason (mw-gq6.182).
+// theCloseOutHandedItBack is what a close-out records when the merge slot was
+// still held at the overall most it waits (mw-gq6.467).
+func (c *dispatchContext) theCloseOutHandedItBack(id string) error {
+	return c.tracker.SetStoryState(context.Background(), id, application.RunState, application.RunCloseOutAgain,
+		"(merge-slot) the merge slot of millwright was still held at the overall most a close-out waits")
+}
+
+// theSessionRunsOnlyItsCloseOut checks the story's session runs the close-out
+// alone, in the story's worktree: its command ends with closeOut, and no harness
+// is started in it.
+func (c *dispatchContext) theSessionRunsOnlyItsCloseOut(id, closeOut, worktreeOf string) error {
+	spec, started := c.runner.Spec(application.SessionName(id))
+	if !started {
+		return fmt.Errorf("no session was started for %s (dispatch said: %v)\n%s", id, c.err, c.report.String())
+	}
+	if want := c.worktreeOf(worktreeOf); spec.Dir != want {
+		return fmt.Errorf("expected the close-out of %s to run in %q, got %q", id, want, spec.Dir)
+	}
+	line := strings.Join(spec.Command, " ")
+	if !strings.HasSuffix(line, closeOut) {
+		return fmt.Errorf("expected the session of %s to run %q, got %q", id, closeOut, line)
+	}
+	if strings.Contains(line, "claude") || strings.Contains(line, "--heartbeat") {
+		return fmt.Errorf("expected the session of %s to run its close-out alone, with no harness and no heartbeat, got %q", id, line)
+	}
+	return nil
+}
+
+func (c *dispatchContext) dispatchSaidItsCloseOutRunsAgain(id string) error {
+	report, err := c.dispatched()
+	if err != nil {
+		return err
+	}
+	if len(report.Reclaimed) != 0 || len(report.Started) != 0 || len(report.HeldRefused) != 0 {
+		return fmt.Errorf("expected nothing reclaimed, started afresh or held, got %+v, %+v, %+v", report.Reclaimed, report.Started, report.HeldRefused)
+	}
+	if len(report.CloseOutsAgain) != 1 || report.CloseOutsAgain[0] != id {
+		return fmt.Errorf("expected the report to hold one close-out run again, for %s, got %q", id, report.CloseOutsAgain)
+	}
+	if printed := report.String(); !strings.Contains(printed, id) || !strings.Contains(printed, "close-out again") {
+		return fmt.Errorf("expected the report to say %s has its close-out run again, got:\n%s", id, printed)
+	}
+	return nil
+}
+
 func (c *dispatchContext) theCloseOutRefusedIt(id string) error {
 	return c.tracker.SetStoryState(context.Background(), id, application.RunState, application.RunBlocked,
 		"(tests-fail) the rig's tests fail in the worktree")

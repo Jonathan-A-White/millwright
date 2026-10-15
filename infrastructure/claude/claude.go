@@ -315,6 +315,11 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 	if l.Path.Harness != domain.HarnessClaude {
 		return application.SessionSpec{}, fmt.Errorf("launching %s: this harness is %s, not %s", l.StoryID, domain.HarnessClaude, l.Path.Harness)
 	}
+	// A close-out alone runs After in the environment it runs in after a
+	// harness, and nothing else (mw-gq6.467).
+	if l.CloseOutOnly {
+		return h.spec(l, shellLine(l.After)), nil
+	}
 	if !knownPermissionMode(h.permissionMode) {
 		return application.SessionSpec{}, fmt.Errorf("launching %s: %q is not a permission mode Claude Code takes", l.StoryID, h.permissionMode)
 	}
@@ -392,7 +397,13 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 	if len(l.After) > 0 {
 		line += "; " + shellLine(l.After)
 	}
+	return h.spec(l, line), nil
+}
 
+// spec is the session that runs line for the launch: the host's beads
+// environment read ahead of it, and the seat's identity and the story in its
+// environment.
+func (h *Harness) spec(l application.Launch, line string) application.SessionSpec {
 	// The host's beads environment is read first of all, ahead of the
 	// heartbeat and the harness, so that the close-out chained on after them
 	// inherits it too. Nothing reads the file here: the line holds only its
@@ -431,7 +442,7 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 		Dir:     l.Dir,
 		Env:     env,
 		Command: []string{h.shell, "-c", line},
-	}, nil
+	}
 }
 
 // seatSettings is the --settings a seat's session is given.

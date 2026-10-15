@@ -59,6 +59,10 @@ type SweepReport struct {
 	// Queued is the claimed stories left alone because they are queued for
 	// batch landing: their session is gone and their lease lapsed by design.
 	Queued []string
+	// HandedBack is the claimed stories left alone because their close-out
+	// handed them back for their close-out alone (RunCloseOutAgain,
+	// mw-gq6.467): the next dispatch tick runs it again.
+	HandedBack []string
 	// Notes are the things that went sideways without stopping the sweep: one
 	// story's trouble is never a reason to leave the rest unexamined.
 	Notes []string
@@ -110,6 +114,10 @@ func (s Sweep) one(ctx context.Context, detail StoryDetail, report *SweepReport)
 	id := detail.Story.ID
 	if QueuedForBatch(detail) {
 		report.Queued = append(report.Queued, id)
+		return
+	}
+	if CloseOutAgain(detail) {
+		report.HandedBack = append(report.HandedBack, id)
 		return
 	}
 	if recordedGone(ctx, s.Tracker, id) {
@@ -169,6 +177,9 @@ func (r SweepReport) String() string {
 	}
 	if len(r.Queued) > 0 {
 		clip(&b, "  queued for batch landing, not stuck: "+strings.Join(r.Queued, ", "))
+	}
+	if len(r.HandedBack) > 0 {
+		clip(&b, "  handed back for its close-out alone, not stuck: "+strings.Join(r.HandedBack, ", "))
 	}
 	for _, note := range r.Notes {
 		clip(&b, "  ! "+note)

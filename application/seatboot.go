@@ -301,6 +301,39 @@ func (b SeatBoot) MergeFix(ctx context.Context, detail StoryDetail, dir, onto st
 	})
 }
 
+// CloseOut assembles the session that runs a story's close-out alone again, in
+// its worktree dir, for a story its last close-out handed back at the merge
+// slot's overall most (RunCloseOutAgain, mw-gq6.467): After with the story's id,
+// in the environment a session's After runs in, and no harness, heartbeat or
+// boot file. No attempt is counted and no file is written: the close-out reads
+// the result the attempt it closes out already left.
+func (b SeatBoot) CloseOut(ctx context.Context, detail StoryDetail, dir string) (SessionSpec, error) {
+	id := detail.Story.ID
+	switch {
+	case b.Harness == nil:
+		return SessionSpec{}, fmt.Errorf("running the close-out of %s again: a seat boot needs a harness", id)
+	case b.Seat == "":
+		return SessionSpec{}, fmt.Errorf("running the close-out of %s again: which seat is it?", id)
+	case len(b.After) == 0:
+		return SessionSpec{}, fmt.Errorf("running the close-out of %s again: this host names no close-out to run", id)
+	}
+	path, err := detail.Path()
+	if err != nil {
+		return SessionSpec{}, fmt.Errorf("running the close-out of %s again: %w", id, err)
+	}
+	spec, err := b.Harness.Session(Launch{
+		StoryID: id, Path: path, Seat: b.Seat, Host: b.Host, Dir: dir,
+		After: b.after(id), CloseOutOnly: true,
+	})
+	if err != nil {
+		return SessionSpec{}, fmt.Errorf("running the close-out of %s again: %w", id, err)
+	}
+	if err := spec.Validate(); err != nil {
+		return SessionSpec{}, fmt.Errorf("running the close-out of %s again: %w", id, err)
+	}
+	return spec, nil
+}
+
 // BatchFixBrief is what the fixer of a batch is told of it (plans/0117, Land
 // Rush 5): the batch, each of its stories in the order they were merged and
 // what became of each, and the rig's tests on the batch when they ran.

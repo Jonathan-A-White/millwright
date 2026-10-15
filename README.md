@@ -915,7 +915,13 @@ The **merge slot** is an advisory lock (`flock`) on a file beside the rig's
 worktrees, one per rig per host. It is a lock rather than a file somebody writes
 their name in because the kernel holds it: an `mw` that is killed, runs out of
 memory or has its terminal closed under it gives the slot back the moment the
-process ends, so there is no stale slot to break by hand.
+process ends, so there is no stale slot to break by hand. A close-out waits for
+the slot while its holder's process is alive, whatever the holder is doing (its
+tests on a loaded host can take an hour), up to two hours in all; only a holder
+whose process is gone is given up on after the per-holder wait. At the two hours
+the story is not stopped: it keeps its claim, worktree and branch, is recorded
+`run=close-out-again`, and the next dispatch tick runs `mw next <story>` alone in
+its worktree, never a fresh Builder session (mw-gq6.467).
 
 The rig's tests are one more lock: this host's **gate lock**, an advisory
 `flock` on `gate.lock` in `~/.local/state/mw`, one for the whole host whatever the

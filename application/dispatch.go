@@ -34,7 +34,7 @@ const (
 // next.go and eventcontrol.go: what a claim clears from a story an earlier
 // attempt left one on, since a fresh claim is not the refusal, landing or
 // cancel the label would still say.
-var RunStates = []string{RunRunning, RunLanded, RunBlocked, RunStopped, RunStuck, RunCancelled, RunQueued}
+var RunStates = []string{RunRunning, RunLanded, RunBlocked, RunStopped, RunStuck, RunCancelled, RunQueued, RunCloseOutAgain}
 
 // HostSync is this host being brought level with the other one. Sync is the
 // implementation; the port is here so that a dispatch can be tested without a
@@ -398,6 +398,10 @@ type DispatchReport struct {
 	// Queued is every story claimed here and queued for batch landing: not
 	// counted against the cap, and never given back.
 	Queued []string
+	// CloseOutsAgain is every story handed back by its close-out at the merge
+	// slot's overall most (RunCloseOutAgain) whose close-out this dispatch
+	// started again, alone, in its worktree (mw-gq6.467).
+	CloseOutsAgain []string
 	// FixedOnMain is every nightly-suite bug closed before dispatch because its
 	// spec passes on main already.
 	FixedOnMain []FixedOnMain
@@ -606,6 +610,17 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		if QueuedForBatch(detail) {
 			shares.add(detail)
 			report.Queued = append(report.Queued, detail.Story.ID)
+			continue
+		}
+		// Handed back by its close-out at the merge slot's overall most: its
+		// work is committed, so only its close-out runs again, never a fresh
+		// session, and it is never reclaimed as a dead pane (mw-gq6.467). A dry
+		// run counts it as running.
+		if CloseOutAgain(detail) {
+			shares.add(detail)
+			if d.DryRun || d.closeOutAgain(ctx, detail, &report) {
+				report.Running++
+			}
 			continue
 		}
 		if !d.DryRun {
@@ -2071,6 +2086,10 @@ func (r DispatchReport) String() string {
 	}
 	for _, id := range r.Queued {
 		fmt.Fprintf(&b, "  queued  %s · queued for batch landing: not counted; its claim, worktree and branch wait for its batch\n", id)
+	}
+	for _, id := range r.CloseOutsAgain {
+		fmt.Fprintf(&b, "  close-out again %s · handed back at the merge slot's overall most: only mw next runs, from its committed branch, in %s; no new session or attempt\n",
+			id, SessionName(id))
 	}
 	for _, reclaim := range r.Reclaimed {
 		fmt.Fprintf(&b, "  reclaimed %s · %s · dead pane, lease expired %s\n", reclaim.StoryID, reclaim.Session,
