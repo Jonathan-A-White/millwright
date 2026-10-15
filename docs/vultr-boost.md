@@ -13,7 +13,8 @@ contrib/vultr-boost up --dry-run   # every step and what it would run; nothing r
 contrib/vultr-boost up             # terraform shows its plan and asks before it spends
 contrib/vultr-boost status         # the box's state and what it costs
 contrib/vultr-boost down           # destroy the box, take its peer off the hub
-contrib/vultr-boost list           # every instance Vultr holds: id, label, status
+contrib/vultr-boost list           # every instance Vultr holds: id, label, status, server status
+contrib/vultr-boost adopt          # --instance ID: import a restoring instance into the box's state
 contrib/vultr-boost snapshot       # a ready-made image of a bootstrapped box
 contrib/vultr-boost spend          # what Vultr's billing says the boxes cost this month
 ```
@@ -23,9 +24,11 @@ tfvars name keeps the files below; any other box keeps its own beside them,
 `hosts/vultr/NAME.tfstate.age`, `NAME.wg.key.age` and `NAME.wg.pub`, so two boxes
 never share a state or a key. `up --snapshot ID` makes the box from a snapshot.
 
-`down --instance ID` also deletes that Vultr instance by its id (a 404 is done): it is
+`down --instance ID` also deletes that Vultr instance by its id: it is
 for an *orphan*, a box whose terraform state was lost, which `terraform destroy` cannot
-find. `list` prints each instance of the account, `id<TAB>label<TAB>status`.
+find (a 404 is done). Only a 204 or a 404 is a deletion; anything else (a 409 for an instance Vultr has
+locked, a 200) is a refusal and the command fails. `list` prints each instance of the
+account, `id<TAB>label<TAB>status<TAB>server status`.
 
 `--yes` on `up` or `down` passes `-auto-approve` to terraform, which otherwise
 asks. `--dry-run` prints the numbered steps and changes nothing.
@@ -147,6 +150,7 @@ monthly_cap_usd = 75        # the most the boxes may cost in a UTC month
 idle_minutes    = 30        # a box with no story this long is destroyed
 hourly_usd      = 0.132     # what one box costs an hour
 box_cap         = 2         # sessions a box runs at once (the bootstrap's cap)
+up_minutes      = 60        # how long a make may run before it reads the box back from Vultr
 snapshot        = "<id>"    # what contrib/vultr-boost snapshot printed; blank bootstraps in full
 command         = "<full path to contrib/vultr-boost>"   # default: the millwright checkout of [rigs]
 
@@ -180,27 +184,52 @@ Each check:
    session) left a half-made box that was billed and not in the book. So the check
    writes the box into the book as *being made*, prints `making cloudN in the
    background; the book says when it is up`, and starts `mw cloud make cloudN`
-   (hidden) in a session and systemd scope of its own, with a deadline of its own
-   (20 minutes, never under 15). That process runs the wrapper and writes the end
-   into the book and a `cloud` event, under the cloud lock only while it writes.
-   A box being made is never destroyed as idle, and a check that finds one begun
-   45 minutes ago, with the process gone (a reboot), destroys it and says
-   `failed`. Its output is in `~/.local/state/mw-dispatch/cloud-make.log` (the dispatch
+   (hidden) in a session and systemd scope of its own, with the deadline of
+   `up_minutes` (default 60: a Vultr snapshot restore of our image took about 50
+   minutes on 2026-10-15, so 20 killed every make). That process runs the wrapper
+   and writes the end into the book and a `cloud` event, under the cloud lock only
+   while it writes. A box being made is never destroyed as idle, and a check that
+   finds one begun `up_minutes` and 15 minutes ago, with the process gone (a
+   reboot), destroys it and says `failed`. Its output is in `~/.local/state/mw-dispatch/cloud-make.log` (the dispatch
    state directory).
 5. **A box that does not come up** (the wrapper fails) is destroyed and tried once
    more, by the same process. When that fails too it is destroyed again and no box
    is made for an hour. A refusal that a retry cannot mend is not that: see
-   [What Vultr can refuse](#what-vultr-can-refuse).
+   [What Vultr can refuse](#what-vultr-can-refuse). Nor is a make that reaches its
+   deadline: see *restoring*, below. A retry never starts while Vultr still holds an
+   instance of the box's name, nor when Vultr cannot be asked.
 6. **Reconciles with Vultr** (every check, first). It lists the account's instances
    (`vultr-boost list`) and destroys each one named for a box (`cloud` and a number)
    that the book does not hold, a box being made included: an *orphan*, left when a
    make was killed. It is billed and counts against Vultr's limits, and `down` finds
    no state for it. It is destroyed by its id (`down --instance`), as a `cloud` event
    `destroyed orphan cloud1 (Vultr instance <id>, <status>)`. Vultr will not delete an
-   instance it has locked (a snapshot restore takes many minutes): that is said once,
-   `could not destroy orphan ...`, and tried again at every check. Adopting the orphan
-   (`terraform import`) is not done: a box that was not finished is of no use, and
-   destroying it needs no state.
+   instance it has locked (a snapshot restore takes many minutes; it says 409): that is
+   said once, `could not destroy ... Vultr would not delete (locked)`, and tried again at
+   every check.
+
+   **A box restoring.** A make that reaches `up_minutes` does not tear the box down and
+   try again blind. It reads the instance back from Vultr (`vultr-boost list`, which
+   prints each instance's server status too): if Vultr holds one, restoring from the
+   snapshot (status not active, or server not ok), the book keeps the box as
+   *restoring*, with the instance's id and since when (`mw status` says
+   `cloud1  restoring ...`), a `cloud` event `restoring cloud1: ...` says so, and no
+   second box and no retry is made. The box is billed and counts against `max_boxes`
+   and its sessions count as free, as one being made does. The next check that finds
+   Vultr says it is up adopts it (`vultr-boost adopt --name cloudN --instance <id>`:
+   `terraform import vultr_instance.boost <id>` into the box's state, so that `down`
+   finds it; the firewall group of the killed apply is left on Vultr and costs nothing)
+   and writes `up cloud1`. A box still restoring `up_minutes` after the make gave up
+   waiting is destroyed by its id; one Vultr no longer holds is dropped from the book.
+
+   **What the book says of Vultr is read back, never assumed.** `up`, `down` and
+   `destroyed` are written only after Vultr has been asked: `up` after the box is found
+   on Vultr; `down` after the wrapper's `down` and a read of the instances (a wrapper
+   that holds no state for a box exits well and destroys nothing; an instance still
+   held is deleted by its id); `destroyed` only after the delete answered 204 or 404 (the
+   wrapper treats every other answer, 200 included, as a refusal, and says `locked, HTTP
+   409` for a 409). A box Vultr would not delete stays in the book and the event says
+   `Vultr would not delete (locked)`.
 
 ### What Vultr can refuse
 
