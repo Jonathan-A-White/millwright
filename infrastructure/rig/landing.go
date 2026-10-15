@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -293,6 +294,15 @@ const unionRule = "CLAUDE.md merge=union"
 // the error comes back: mw resolves nothing for anybody, and a landing worktree
 // left half-merged would be a trap for whoever looked at it next.
 func (w *Worktrees) Merge(ctx context.Context, landingDir, branch string) (application.Landed, error) {
+	return w.MergeUnion(ctx, landingDir, branch, nil)
+}
+
+// MergeUnion implements application.Landing. Only when every file the merge
+// conflicts in is one union lists (a path relative to the rig, or a path.Match
+// glob) is any of them resolved: each by git merge-file --union, so that the
+// attributes of the rig, which are shared by all its worktrees, are never
+// touched. A conflict in one file more is the whole merge undone, as in Merge.
+func (w *Worktrees) MergeUnion(ctx context.Context, landingDir, branch string, union []string) (application.Landed, error) {
 	if branch == "" {
 		return application.Landed{}, fmt.Errorf("merging into %s: which branch?", landingDir)
 	}
@@ -305,13 +315,17 @@ func (w *Worktrees) Merge(ctx context.Context, landingDir, branch string) (appli
 		return application.Landed{}, err
 	}
 
+	var unioned []string
 	// --no-edit so that no editor is ever opened: nobody is at the keyboard.
 	if _, err := w.git(ctx, landingDir, "merge", "--no-edit", branch); err != nil {
-		if _, abort := w.git(ctx, landingDir, "merge", "--abort"); abort != nil {
-			return application.Landed{}, fmt.Errorf("%w: %v (and the half-made merge in %s could not be undone: %v)",
-				application.ErrMergeConflict, err, landingDir, abort)
+		unioned, err = w.unionConflicts(ctx, landingDir, branch, union, err)
+		if err != nil {
+			if _, abort := w.git(ctx, landingDir, "merge", "--abort"); abort != nil {
+				return application.Landed{}, fmt.Errorf("%w: %v (and the half-made merge in %s could not be undone: %v)",
+					application.ErrMergeConflict, err, landingDir, abort)
+			}
+			return application.Landed{}, fmt.Errorf("%w: %v", application.ErrMergeConflict, err)
 		}
-		return application.Landed{}, fmt.Errorf("%w: %v", application.ErrMergeConflict, err)
 	}
 
 	after, err := w.git(ctx, landingDir, "rev-parse", "HEAD")
@@ -325,7 +339,90 @@ func (w *Worktrees) Merge(ctx context.Context, landingDir, branch string) (appli
 		// The target branch simply moved onto the story's work: what is being
 		// pushed is exactly the commit the story's tests ran on.
 		FastForward: commit == strings.TrimSpace(tip) && commit != strings.TrimSpace(before),
+		Unioned:     unioned,
 	}, nil
+}
+
+// unionConflicts settles a merge that has stopped on conflicts, if all of them
+// are in files union lists, and commits it; it reports the files it settled. When
+// it cannot, it returns an error saying why, with the merge left as it stopped
+// for the caller to undo; stopped is git's own refusal, which it returns when no
+// file is conflicted at all (a merge that failed for another reason).
+func (w *Worktrees) unionConflicts(ctx context.Context, dir, branch string, union []string, stopped error) ([]string, error) {
+	said, err := w.git(ctx, dir, "diff", "--name-only", "--diff-filter=U", "-z")
+	if err != nil || len(union) == 0 {
+		return nil, stopped
+	}
+	var files []string
+	for _, file := range strings.Split(said, "\x00") {
+		if file != "" {
+			files = append(files, file)
+		}
+	}
+	if len(files) == 0 {
+		return nil, stopped
+	}
+	for _, file := range files {
+		if !listed(union, file) {
+			return nil, fmt.Errorf("%w (%s is in conflict and the rig does not list it to be merged by union)", stopped, file)
+		}
+	}
+	scratch, err := os.MkdirTemp("", "mw-union-")
+	if err != nil {
+		return nil, fmt.Errorf("%w (and a place to merge %s by union could not be made: %v)", stopped, strings.Join(files, ", "), err)
+	}
+	defer os.RemoveAll(scratch)
+	merged := make(map[string]string, len(files))
+	for _, file := range files {
+		text, err := w.unionOf(ctx, dir, scratch, file)
+		if err != nil {
+			return nil, fmt.Errorf("%w (%s is listed to be merged by union, but could not be: %v)", stopped, file, err)
+		}
+		merged[file] = text
+	}
+	for _, file := range files {
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(file)), []byte(merged[file]), 0o644); err != nil {
+			return nil, fmt.Errorf("%w (writing %s: %v)", stopped, file, err)
+		}
+		if _, err := w.git(ctx, dir, "add", "--", file); err != nil {
+			return nil, fmt.Errorf("%w (%v)", stopped, err)
+		}
+	}
+	if _, err := w.git(ctx, dir, "commit", "--no-edit"); err != nil {
+		return nil, fmt.Errorf("%w (%v)", stopped, err)
+	}
+	return files, nil
+}
+
+// unionOf is the file as git merge-file --union makes it of the two sides of a
+// conflict and their common ancestor, which is empty when both sides added the
+// file. A side that deleted it is no union.
+func (w *Worktrees) unionOf(ctx context.Context, dir, scratch, file string) (string, error) {
+	var sides [3]string
+	for i, stage := range []string{"2", "1", "3"} { // ours, the base, theirs
+		text, err := w.git(ctx, dir, "show", ":"+stage+":"+file)
+		if err != nil && stage != "1" {
+			return "", fmt.Errorf("one side deleted it")
+		}
+		sides[i] = filepath.Join(scratch, stage)
+		if err := os.WriteFile(sides[i], []byte(text), 0o644); err != nil {
+			return "", err
+		}
+	}
+	return w.git(ctx, dir, "merge-file", "--union", "-p", sides[0], sides[1], sides[2])
+}
+
+// listed reports whether file is one of the paths or globs union lists.
+func listed(union []string, file string) bool {
+	for _, pattern := range union {
+		if pattern == file {
+			return true
+		}
+		if ok, err := path.Match(pattern, file); err == nil && ok {
+			return true
+		}
+	}
+	return false
 }
 
 // Push implements application.Landing: what the landing worktree has checked

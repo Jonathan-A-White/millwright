@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -688,5 +689,154 @@ func TestAPushThatTheRemoteRefusesIsNotAPassingFault(t *testing.T) {
 	err := worktrees.Push(context.Background(), t.TempDir(), "origin", "main")
 	if _, ok := application.Faulted(err); ok || application.Transient(err) {
 		t.Fatalf("expected a refusal, not a passing fault, got %v", err)
+	}
+}
+
+// aBranchAppending cuts a branch from main that appends line to file, which main
+// already holds, and leaves the checkout on main.
+func aBranchAppending(t *testing.T, here, branch, file, line string) {
+	t.Helper()
+	run(t, here, "git", "checkout", "-q", "-b", branch, "main")
+	f, err := os.OpenFile(filepath.Join(here, file), os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("opening %s: %v", file, err)
+	}
+	if _, err := f.WriteString(line + "\n"); err != nil {
+		t.Fatalf("appending to %s: %v", file, err)
+	}
+	f.Close()
+	run(t, here, "git", "commit", "-qam", "Append: "+line)
+	run(t, here, "git", "checkout", "-q", "main")
+}
+
+// landUnion lands branch on main at the origin as landBranch does, merging the
+// conflicts in the files union names by union. It reports what the merge said and
+// the landing's own state: whether it was left with a merge half made.
+func landUnion(t *testing.T, here, branch string, union []string) (application.Landed, string, error) {
+	t.Helper()
+	ctx := context.Background()
+	worktrees := rig.New()
+	run(t, here, "git", "fetch", "-q", "origin")
+	dir, err := worktrees.OpenLanding(ctx, here, "origin/main")
+	if err != nil {
+		t.Fatalf("opening the landing: %v", err)
+	}
+	defer func() {
+		if err := worktrees.CloseLanding(ctx, here, dir); err != nil {
+			t.Errorf("closing the landing: %v", err)
+		}
+	}()
+	landed, err := worktrees.MergeUnion(ctx, dir, branch, union)
+	left := run(t, dir, "git", "status", "--porcelain")
+	if err != nil {
+		return landed, left, err
+	}
+	return landed, left, worktrees.Push(ctx, dir, "origin", "main")
+}
+
+// TestAMergeKeepsBothAppendedLinesOfAListedFile drives real git: two branches
+// each add a different line at the end of ATTRIBUTION.md. The second lands with
+// the file listed, merged by union and named in what the merge says; with the
+// file unlisted it conflicts as it always did (mw-gq6.424).
+func TestAMergeKeepsBothAppendedLinesOfAListedFile(t *testing.T) {
+	for name, tc := range map[string]struct {
+		union []string
+		file  string
+	}{
+		"a path":                  {[]string{"ATTRIBUTION.md"}, "ATTRIBUTION.md"},
+		"a glob":                  {[]string{"docs/*.md"}, "docs/module-map.md"},
+		"a glob that is no match": {[]string{"docs/*.txt"}, ""},
+		"nothing listed":          {nil, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			here, _ := aRig(t)
+			file := tc.file
+			if file == "" {
+				file = "ATTRIBUTION.md"
+			}
+			write(t, here, file, "# attributions\n")
+			run(t, here, "git", "add", "-A")
+			run(t, here, "git", "commit", "-qm", file+" opens")
+			run(t, here, "git", "push", "-q", "origin", "main")
+			aBranchAppending(t, here, "mw/one", file, "one credits this")
+			aBranchAppending(t, here, "mw/two", file, "two credits that")
+			if err := landBranch(t, here, "mw/one"); err != nil {
+				t.Fatalf("landing the first branch: %v", err)
+			}
+
+			landed, left, err := landUnion(t, here, "mw/two", tc.union)
+			if tc.file == "" {
+				if !application.Conflicted(err) {
+					t.Fatalf("expected the conflict to stay a conflict, got %v", err)
+				}
+				if left != "" {
+					t.Errorf("expected the landing left as it was found, got:\n%s", left)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("expected the listed file merged by union, got %v", err)
+			}
+			if !slices.Equal(landed.Unioned, []string{file}) {
+				t.Errorf("expected the merge to name %s as union-merged, got %q", file, landed.Unioned)
+			}
+			if landed.FastForward {
+				t.Error("expected a merge commit, not a fast-forward")
+			}
+			run(t, here, "git", "fetch", "-q", "origin")
+			got := run(t, here, "git", "show", "origin/main:"+file)
+			for _, want := range []string{"# attributions", "one credits this", "two credits that"} {
+				if !strings.Contains(got, want) {
+					t.Errorf("expected %s at the origin to keep %q, got:\n%s", file, want, got)
+				}
+			}
+			if strings.Contains(got, "<<<<<<<") {
+				t.Errorf("expected no conflict markers in %s, got:\n%s", file, got)
+			}
+			if parents := strings.Fields(run(t, here, "git", "rev-list", "--parents", "-n1", "origin/main")); len(parents) != 3 {
+				t.Errorf("expected the union merge committed as a merge commit, got %q", parents)
+			}
+			if attributes, err := os.ReadFile(filepath.Join(here, ".git", "info", "attributes")); err == nil && strings.Contains(string(attributes), file) {
+				t.Errorf("expected the rig's attributes left alone, got:\n%s", attributes)
+			}
+		})
+	}
+}
+
+// TestAMergeConflictingInAListedAndAnUnlistedFileIsNotPartlyMerged: one file
+// that is not listed is enough to send the branch back, and the landing is left
+// as it was found, with the listed file not union-merged either (mw-gq6.424).
+func TestAMergeConflictingInAListedAndAnUnlistedFileIsNotPartlyMerged(t *testing.T) {
+	here, _ := aRig(t)
+	write(t, here, "ATTRIBUTION.md", "# attributions\n")
+	run(t, here, "git", "add", "-A")
+	run(t, here, "git", "commit", "-qm", "ATTRIBUTION.md opens")
+	run(t, here, "git", "push", "-q", "origin", "main")
+	for branch, line := range map[string]string{"mw/one": "one", "mw/two": "two"} {
+		run(t, here, "git", "checkout", "-q", "-b", branch, "main")
+		for _, file := range []string{"ATTRIBUTION.md", "README.md"} {
+			f, err := os.OpenFile(filepath.Join(here, file), os.O_APPEND|os.O_WRONLY, 0o644)
+			if err != nil {
+				t.Fatalf("opening %s: %v", file, err)
+			}
+			f.WriteString(line + " wrote this\n")
+			f.Close()
+		}
+		run(t, here, "git", "commit", "-qam", "Both files: "+line)
+		run(t, here, "git", "checkout", "-q", "main")
+	}
+	if err := landBranch(t, here, "mw/one"); err != nil {
+		t.Fatalf("landing the first branch: %v", err)
+	}
+
+	landed, left, err := landUnion(t, here, "mw/two", []string{"ATTRIBUTION.md"})
+	if !application.Conflicted(err) {
+		t.Fatalf("expected the conflict in README.md to send the branch back, got %v", err)
+	}
+	if len(landed.Unioned) != 0 {
+		t.Errorf("expected nothing named union-merged, got %q", landed.Unioned)
+	}
+	if left != "" {
+		t.Errorf("expected the landing left as it was found, got:\n%s", left)
 	}
 }

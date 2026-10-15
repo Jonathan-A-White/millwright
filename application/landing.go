@@ -45,6 +45,10 @@ type Landed struct {
 	FastForward bool
 	Before      string
 	Version     string
+	// Unioned are the files the merge conflicted in and kept both sides' lines
+	// of, because the rig lists them (union_merge_files): empty for a merge that
+	// had no conflict.
+	Unioned []string
 }
 
 // VersionBump asks a landing worktree to raise the rig's version after a merge:
@@ -138,6 +142,14 @@ type Landing interface {
 	// merge that conflicts is undone before the error comes back, so that the
 	// landing worktree is left as it was found.
 	Merge(ctx context.Context, landingDir, branch string) (Landed, error)
+
+	// MergeUnion is Merge for a rig that lists files whose conflicts are settled
+	// by union (mw-gq6.424): when the merge conflicts in files that all match
+	// one of union's paths or globs, each is resolved by keeping both sides'
+	// lines, the merge is committed, and Unioned names them. A conflict in any
+	// other file as well is undone exactly as Merge undoes it, none of the
+	// listed files merged. Nothing is written to the rig's attributes.
+	MergeUnion(ctx context.Context, landingDir, branch string, union []string) (Landed, error)
 
 	// BumpVersion raises the patch of the version in the first of bump.Files,
 	// writes it into all of them and commits that as "Version X.Y.Z (<story>)"
