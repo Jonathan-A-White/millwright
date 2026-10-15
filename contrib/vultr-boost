@@ -241,6 +241,7 @@ plan_down() {
 	step "terraform -chdir=$TFDIR destroy -state=<private dir>/terraform.tfstate -var-file=$TFVARS (-auto-approve with --yes)"
 	[ -z "$INSTANCE" ] || would "curl -X DELETE $API/instances/$INSTANCE with the token on stdin: the orphan no state holds"
 	step "ssh $HUB_SSH: copy /etc/wireguard/wg0.conf to a dated backup, then $ENROL --remove $NAME"
+	would "ssh-keygen -R <the peer's address, read off the hub> -f ~/.ssh/known_hosts: a box remade on it has a new host key"
 	step "state: encrypt it back to $STATE_AGE with age, commit hosts/vultr in the vault, remove the private directory"
 }
 
@@ -443,6 +444,30 @@ do_up() {
 }
 
 # --- down ---------------------------------------------------------------------
+# forget_host ADDR: drop ADDR's lines from ~/.ssh/known_hosts (hashed or not), so
+# the box next given the address is reached without REMOTE HOST IDENTIFICATION
+# HAS CHANGED (mw-5gr3k0.7).
+forget_host() {
+	local known=$HOME/.ssh/known_hosts
+	case $1 in
+	"" | *[!0-9.]*)
+		echo "    skip: the hub gave no address for $NAME, so ~/.ssh/known_hosts is left as it is"
+		return 0
+		;;
+	esac
+	if [ ! -f "$known" ]; then
+		echo "    skip: there is no ~/.ssh/known_hosts to drop $1 from"
+	elif ! command -v ssh-keygen >/dev/null 2>&1; then
+		echo "    note: ssh-keygen is not installed; drop $1 from ~/.ssh/known_hosts by hand (ssh-keygen -R $1)"
+	elif ! ssh-keygen -F "$1" -f "$known" >/dev/null 2>&1; then
+		echo "    skip: $1 is not in ~/.ssh/known_hosts"
+	elif ssh-keygen -R "$1" -f "$known" >/dev/null 2>&1; then
+		echo "    forgot: $1 in ~/.ssh/known_hosts (the box next given it has a new host key); the old file is known_hosts.old"
+	else
+		echo "    note: ssh-keygen -R $1 failed; drop it from ~/.ssh/known_hosts by hand"
+	fi
+}
+
 do_down() {
 	STEPS=4
 	need mw terraform ssh age age-keygen git
@@ -483,15 +508,18 @@ do_down() {
 	fi
 
 	step "hub: remove $NAME from $HUB_SSH"
-	local remote out backup
-	remote="set -e; f=/etc/wireguard/wg0.conf; if grep -q '^# peer $NAME (enrolled' \"\$f\"; then b=\$f.bak-\$(date +%Y%m%d%H%M%S); cp -p \"\$f\" \"\$b\"; echo backup:\$b; $ENROL --remove $NAME; else echo backup:none; fi"
+	local remote out backup addr
+	# The peer's address is read before it goes: the next box given it has a new host key.
+	remote="set -e; f=/etc/wireguard/wg0.conf; if grep -q '^# peer $NAME (enrolled' \"\$f\"; then echo addr:\$(sed -n '/^# peer $NAME (enrolled/,/^AllowedIPs/ s#^AllowedIPs = \([0-9.]*\)/32.*#\1#p' \"\$f\" | head -n 1); b=\$f.bak-\$(date +%Y%m%d%H%M%S); cp -p \"\$f\" \"\$b\"; echo backup:\$b; $ENROL --remove $NAME; else echo backup:none; fi"
 	if out=$(hubssh "$remote"); then
 		backup=$(echo "$out" | sed -n 's/^backup://p' | head -n 1)
+		addr=$(echo "$out" | sed -n 's/^addr://p' | head -n 1)
 		if [ "$backup" = none ]; then
 			echo "    skip: $NAME is not a peer of the hub"
 		else
 			echo "    removed: $NAME is off the hub; its old wg0.conf is $backup"
 			echo "    way back: ssh $HUB_SSH 'cp -p $backup /etc/wireguard/wg0.conf' and then wg syncconf wg0 <(wg-quick strip wg0) there"
+			forget_host "$addr"
 		fi
 	else
 		echo "vultr-boost: the box is destroyed, but the peer could not be removed from $HUB_SSH: run it there: $ENROL --remove $NAME" >&2

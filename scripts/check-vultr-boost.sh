@@ -3,7 +3,8 @@
 # to what the story promises. Reads this repository and a temporary directory it
 # makes and removes. It never reaches the network or spends anything: the wrapper
 # runs with a PATH of stand-ins (mw, terraform, ssh, age, age-keygen, wg, curl)
-# and a real git, jq and coreutils, over a throwaway vault, home and "tmpfs".
+# and a real git, jq, ssh-keygen and coreutils, over a throwaway vault, home and
+# "tmpfs"; the hub's side of `down` is the real wg-enrol over a throwaway wg0.conf.
 #
 # The scenarios are the story's acceptance criteria:
 #   a. terraform fmt -check and validate pass, and tflint, and shellcheck over
@@ -25,6 +26,9 @@
 #      a state and a key of its own and is made from --snapshot; snapshot asks
 #      Vultr for a snapshot of the box; spend sums the charges that name the
 #      boxes, or says unknown; a bad name is refused; their dry runs call nothing
+#   i. `down` drops the box's WireGuard address from ~/.ssh/known_hosts (read
+#      off the hub before the peer is removed), so a box remade on that address
+#      with a new host key is reached without a warning (mw-5gr3k0.7)
 
 set -eu
 
@@ -146,7 +150,7 @@ WG_PUB="PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP="
 HUB_PUB="HHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH="
 
 for tool in sh bash env cat cp mv rm mkdir chmod stat grep sed awk head tail tr cut sort wc date dirname basename \
-	mktemp ls printf uname touch sleep true false expr uniq tee diff test base64 find git jq id tty; do
+	mktemp ls printf uname touch sleep true false expr uniq tee diff test base64 find git jq id tty ssh-keygen; do
 	p=$(command -v "$tool" 2>/dev/null) || continue
 	case $p in /*) ln -sf "$p" "$REAL/$tool" ;; esac
 done
@@ -238,12 +242,25 @@ JSON
 esac
 EOF
 
+# The hub: a wg0.conf made by the real wg-enrol, cloud1 at .4 and cloud2 at .5. The
+# wrapper's removal is run against it for real, its /etc/wireguard/wg0.conf here.
+HUB=$T/hub
+mkdir -p "$HUB"
+echo "$HUB_PUB" >"$HUB/vps.pub"
+: >"$HUB/wg0.conf"
+: >"$HUB/hosts"
+stub wg-enrol <<EOF
+WG_CONF="$HUB/wg0.conf" WG_HOSTS="$HUB/hosts" WG_PUB="$HUB/vps.pub" WG_SYNC=0 exec bash "$REPO_ROOT/contrib/wg-enrol" "\$@"
+EOF
+for box in cloud1 cloud2; do PATH=$BIN:$PATH wg-enrol "$box" "$WG_PUB" >/dev/null; done
+grep -q '^AllowedIPs = 10.88.0.4/32' "$HUB/wg0.conf" || fail "the stand-in hub did not put cloud1 at 10.88.0.4: $(cat "$HUB/wg0.conf")"
+
 stub ssh <<EOF
 echo "ssh \$*" >>"$CALLS"
 for last; do :; done
 printf '%s\n' "\$last" >>"$SSHLOG"
 case \$last in
-*"wg-enrol --remove"*) echo "backup:/etc/wireguard/wg0.conf.bak-FAKE"; echo "removed cloud1" ;;
+*"wg-enrol --remove"*) sh -c "\$(printf '%s' "\$last" | sed 's#/etc/wireguard/wg0.conf#$HUB/wg0.conf#g')" ;;
 *"wg-enrol "*)
 	echo "backup:/etc/wireguard/wg0.conf.bak-FAKE"
 	cat <<CONF
@@ -412,9 +429,21 @@ grep -q "$VULTR_KEY" "$CURLLOG" || fail "status did not send the Vultr token to 
 grep -q "$VULTR_KEY" "$CALLS" && fail "status put the Vultr token on a command line"
 [ -z "$(ls -A "$RUN")" ] || fail "status left a tmpfs directory behind"
 
+# i. cloud1's old host key is in known_hosts, hashed as Ubuntu keeps it, beside another host's
+mkdir -p "$HOME_DIR/.ssh"
+ssh-keygen -q -t ed25519 -N '' -C '' -f "$T/hostkey"
+key=$(cut -d ' ' -f 1,2 "$T/hostkey.pub")
+printf '10.88.0.4 %s\nhub.example.test %s\n' "$key" "$key" >"$HOME_DIR/.ssh/known_hosts"
+ssh-keygen -H -f "$HOME_DIR/.ssh/known_hosts" >/dev/null 2>&1
+rm -f "$HOME_DIR/.ssh/known_hosts.old"
+
 # down: destroy, then take the peer off the hub
 : >"$SSHLOG"
 out=$(run down --yes 2>&1) || fail "down failed: $out"
+grep -q '^# peer cloud1 ' "$HUB/wg0.conf" && fail "down did not take cloud1 off the hub's wg0.conf: $(cat "$HUB/wg0.conf")"
+if ssh-keygen -F 10.88.0.4 -f "$HOME_DIR/.ssh/known_hosts" >/dev/null; then fail "down left cloud1's address (10.88.0.4) in ~/.ssh/known_hosts, so a box remade on it is met with REMOTE HOST IDENTIFICATION HAS CHANGED: $out"; fi
+ssh-keygen -F hub.example.test -f "$HOME_DIR/.ssh/known_hosts" >/dev/null || fail "down dropped another host's line from ~/.ssh/known_hosts"
+echo "$out" | grep -q 'forgot: 10.88.0.4 in ~/.ssh/known_hosts' || fail "down does not say it dropped 10.88.0.4 from known_hosts: $out"
 grep '^terraform .* destroy' "$CALLS" | grep -q -- '-auto-approve' || fail "down --yes did not terraform destroy -auto-approve"
 grep -q 'wg-enrol --remove cloud1' "$SSHLOG" || fail "down did not remove the peer from the hub: $(cat "$SSHLOG")"
 grep -q 'cp -p' "$SSHLOG" || fail "down did not back up the hub's wg0.conf first"
