@@ -35,6 +35,13 @@ const (
 	// mw status, the sweep, the dispatch and the quiet alarm call it alive, and
 	// none of them counts it as a session, marks it stuck or gives it back.
 	RunQueued = "queued"
+	// RunCloseOutAgain is a story whose close-out waited the overall most for
+	// its rig's merge slot and found it still held (mw-gq6.467): its session
+	// finished and its work is committed, so it keeps its claim, worktree and
+	// branch, and the next dispatch tick runs its close-out alone again, never
+	// a fresh Builder session. Until then it has no session and its lease
+	// lapses: the sweep, the quiet alarm and another close-out pass it over.
+	RunCloseOutAgain = "close-out-again"
 )
 
 // RebaseState is the state dimension that says a story's branch was sent back
@@ -404,6 +411,10 @@ type NextReport struct {
 	Queued   bool
 	QueuedAs string
 	Trusted  string
+	// HandedBack says the merge slot was still held at the overall most a
+	// close-out waits, and the story was handed back for its close-out alone
+	// (RunCloseOutAgain), its claim, worktree and branch kept (mw-gq6.467).
+	HandedBack bool
 	// Commits is how many commits the session left on the story's branch.
 	Commits int
 	// Uncommitted is the paths the session left changed and not committed in
@@ -876,6 +887,11 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	// calm, which gives it back while it waits (mw-gq6.422). Whatever race gets
 	// past both is settled by the remote itself, below.
 	holding, err := n.Slot.Take(ctx, c.rigDir, Holders(n.Seat, n.Host, c.id))
+	if errors.Is(err, ErrSlotCap) {
+		// Waited the overall most, on a live holder or a queue of them: the
+		// work is not at fault, so only the close-out is run again (mw-gq6.467).
+		return n.handBack(ctx, c, report, fmt.Sprintf("the merge slot of %s could not be taken: %v", c.path.Rig, err))
+	}
 	if err != nil {
 		return n.stop(ctx, c, report, ReasonMergeSlot, fmt.Sprintf("the merge slot of %s could not be taken: %v", c.path.Rig, err), "")
 	}
@@ -2529,8 +2545,9 @@ func (n Next) abandoned(ctx context.Context, skip string, report *NextReport) []
 	for _, detail := range running {
 		id := detail.Story.ID
 		// A story queued for batch landing has no session by design, and its
-		// claim and worktree wait for its batch.
-		if id == skip || QueuedForBatch(detail) {
+		// claim and worktree wait for its batch; one handed back for its
+		// close-out alone waits for the next dispatch tick (mw-gq6.467).
+		if id == skip || QueuedForBatch(detail) || CloseOutAgain(detail) {
 			continue
 		}
 		status, err := n.Runner.Status(ctx, SessionName(id))
@@ -2741,6 +2758,9 @@ func (r NextReport) String() string {
 		fmt.Fprintf(&b, "  tested  %s by an earlier run of mw next: nothing was read or written again\n", r.Tested)
 	case r.Tested != "":
 		fmt.Fprintf(&b, "  tested  %s: %s; a Tester story, so nothing was merged, raised or pushed\n", r.Tested, r.Findings.Split())
+	case r.HandedBack:
+		fmt.Fprintf(&b, "  HANDED BACK (%s) %s\n", r.Reason, r.Why)
+		b.WriteString("          its claim, worktree and branch are kept: the next dispatch tick runs its close-out alone again, not a new session\n")
 	case r.SentBack != "":
 		fmt.Fprintf(&b, "  SENT BACK (%s) %s\n", r.Reason, r.Why)
 		if r.Reason == ReasonMergedTestsFail {

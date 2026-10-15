@@ -148,8 +148,9 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 			continue
 		}
 		// A story queued for batch landing has no session to be quiet: it
-		// waits for its batch (plans/0117).
-		if rs.Queued() {
+		// waits for its batch (plans/0117). Nor has one handed back for its
+		// close-out alone, which waits for the next dispatch tick (mw-gq6.467).
+		if rs.Queued() || rs.HandedBack() {
 			continue
 		}
 		if elapsed := now.Sub(since); elapsed > n.nudgeAfter() {

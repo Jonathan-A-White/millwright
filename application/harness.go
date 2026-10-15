@@ -49,6 +49,13 @@ type Launch struct {
 	// MaxTurns is the most turns the session may take; 0 sets no limit. A
 	// batch's fixer is bounded by its rig's batch_fixer_turns (Land Rush 5).
 	MaxTurns int
+
+	// CloseOutOnly says the session runs After alone, in the environment a
+	// session's After runs in, and no harness, heartbeat or bd of its own: a
+	// story whose close-out was handed back has only its close-out run again
+	// (RunCloseOutAgain, mw-gq6.467). It needs no boot file, kickoff or result
+	// file, only After.
+	CloseOutOnly bool
 }
 
 // Validate reports the first reason a launch could not be turned into a
@@ -59,6 +66,9 @@ func (l Launch) Validate() error {
 		return fmt.Errorf("a launch needs a story")
 	case l.Seat == "":
 		return fmt.Errorf("launching %s: a session boots into a seat", l.StoryID)
+	case l.CloseOutOnly && len(l.After) == 0:
+		return fmt.Errorf("launching %s: a close-out alone needs the command that closes it out", l.StoryID)
+	case l.CloseOutOnly:
 	case l.BootFile == "":
 		return fmt.Errorf("launching %s: a session is primed from a boot file", l.StoryID)
 	case l.ResultFile == "":

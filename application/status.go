@@ -398,6 +398,12 @@ func (r RunningStory) Stopped() bool {
 // though its session is gone and its lease has lapsed.
 func (r RunningStory) Queued() bool { return r.Run == RunQueued }
 
+// HandedBack reports whether this story's close-out waited the overall most for
+// its rig's merge slot and handed it back for its close-out alone: run state
+// close-out-again (mw-gq6.467). It has no session until the next dispatch tick
+// runs its close-out again.
+func (r RunningStory) HandedBack() bool { return r.Run == RunCloseOutAgain }
+
 // Refused reports whether this story's landing was refused (or its attempts
 // ran out) and it now waits on the Mayor: run state blocked.
 func (r RunningStory) Refused() bool { return r.Run == RunBlocked }
@@ -1863,6 +1869,9 @@ func (r RunningStory) write(b *strings.Builder) {
 	}
 	if r.Queued() {
 		clip(b, "    queued for batch landing, waiting for its batch: no session")
+	}
+	if r.HandedBack() {
+		clip(b, "    handed back at the merge slot's overall most: the next dispatch tick runs its close-out alone again")
 	}
 	if r.FormulaOpen() {
 		clip(b, fmt.Sprintf("    close blocked: %d formula step(s) open", r.FormulaSteps))

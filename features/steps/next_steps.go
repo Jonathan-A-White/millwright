@@ -46,6 +46,9 @@ type nextContext struct {
 	mailbox *apptest.FakeMailbox
 	beating *apptest.FakeHeartbeats // the heartbeat processes alive, for features/next_running.feature
 	stamps  *apptest.FakeStampQueue
+	// slot, when set, is the merge slot in place of the real one
+	// (features/next_slot_cap.feature).
+	slot application.MergeSlot
 	// leftovers is the user's process table, for features/tester.feature's sweep
 	// of what a Tester's session left running (mw-gq6.409).
 	leftovers *apptest.FakeUserProcesses
@@ -207,6 +210,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerNextCrossSlotSteps(ctx, c)
 	registerNextGateSteps(ctx, c)
 	registerNextBatchSteps(ctx, c)
+	registerNextSlotCapSteps(ctx, c)
 	registerBatchLandSteps(ctx, c)
 
 	ctx.When(`^mw closes out "([^"]*)"$`, c.mwClosesOut)
@@ -976,7 +980,7 @@ func (c *nextContext) nextUseCase() application.Next {
 		Errors:        files,
 		Checks:        rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands)),
 		SpecChecks:    rig.NewChecks(rig.WithCommand(c.checkCommand), rig.WithSpecCommands(c.specCommands)),
-		Slot:          rig.NewSlots(rig.WithSlotWait(slotPatience), rig.WithSlotPoll(20*time.Millisecond)),
+		Slot:          c.mergeSlot(),
 		CrossSlot:     c.crossSlot(),
 		GateLock:      c.gateLock(),
 		Vault:         files,
@@ -1013,6 +1017,14 @@ func (c *nextContext) nextUseCase() application.Next {
 		Stamps:         c.stamps,
 		Tester:         c.testerTrial(),
 	}
+}
+
+// mergeSlot is the real merge slot, or the stand-in a scenario set.
+func (c *nextContext) mergeSlot() application.MergeSlot {
+	if c.slot != nil {
+		return c.slot
+	}
+	return rig.NewSlots(rig.WithSlotWait(slotPatience), rig.WithSlotPoll(20*time.Millisecond))
 }
 
 func (c *nextContext) origin() string { return filepath.Join(c.root, "origin.git") }
@@ -1622,7 +1634,7 @@ func (c *nextContext) theCommentQuotesTheWholeRefusal(id string) error {
 // theMergeSlotIsFree says the slot can be taken, which is the only honest way
 // to ask: an advisory lock is held by the kernel, not by what the file says.
 func (c *nextContext) theMergeSlotIsFree() error {
-	held, err := rig.NewSlots(rig.WithSlotWait(time.Second), rig.WithSlotPoll(20*time.Millisecond)).
+	held, err := rig.NewSlots(rig.WithSlotWait(time.Second), rig.WithSlotCap(time.Second), rig.WithSlotPoll(20*time.Millisecond)).
 		Take(context.Background(), c.rig, "the scenario")
 	if err != nil {
 		return fmt.Errorf("expected the merge slot of the rig to be free: %w", err)
