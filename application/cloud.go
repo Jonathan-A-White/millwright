@@ -2,9 +2,11 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -29,6 +31,32 @@ type CloudProvider interface {
 	// Billed is what the provider's billing says the boxes named have cost so
 	// far this month, and whether it could be asked at all.
 	Billed(ctx context.Context, names []string) (usd float64, known bool, err error)
+	// Instances are the boxes the provider holds, whatever the book says,
+	// each by the name it was labelled with.
+	Instances(ctx context.Context) ([]CloudInstance, error)
+	// Reap destroys one instance by its id, for a box no state of ours
+	// holds, so that Down could not find it.
+	Reap(ctx context.Context, instance CloudInstance) error
+}
+
+// CloudInstance is one box as the provider holds it.
+type CloudInstance struct {
+	ID, Label, Status string
+}
+
+// What the provider can refuse, each a reason a retry does not mend. The
+// adapter wraps one of these around the provider's own words; the text is
+// what the book and the cloud events say.
+var (
+	ErrCloudFeeLimit = errors.New("Vultr fee limit reached: raise it at my.vultr.com or wait for the month")
+	ErrCloudQuota    = errors.New("Vultr instance limit reached: raise it at my.vultr.com, or destroy a box there")
+	ErrCloudSoldOut  = errors.New("Vultr has none of the plan left in the region: choose another region or plan in the tfvars")
+	ErrCloudBadToken = errors.New("Vultr refused the API token: put a new vultr_api_token (mw secrets put), and check the API's access control at my.vultr.com")
+)
+
+// CloudNotice tells the Governor what only he can mend: a card to him.
+type CloudNotice interface {
+	Tell(ctx context.Context, title, text string) error
 }
 
 // CloudBook is where the cloud's state is kept between checks: in the vault,
@@ -62,6 +90,13 @@ type CloudState struct {
 	// HeldUntil is when a box may be made again after one failed to come up
 	// twice running.
 	HeldUntil time.Time `json:"held_until,omitzero"`
+	// FeeLimitAt is when Vultr last refused a box for its monthly fee limit,
+	// zero while it has not or a box has come up since: no box is made for
+	// CloudFeeLimitPause after it, and the Governor has one card for it.
+	FeeLimitAt time.Time `json:"fee_limit_at,omitzero"`
+	// OrphansSaid are the Vultr ids of the orphans a check could not destroy
+	// and said so for, that the next check does not say it again.
+	OrphansSaid []string `json:"orphans_said,omitempty"`
 	// Moves are the latest ups and downs, oldest first, at most
 	// cloudMovesKept of them, for mw status.
 	Moves []CloudMove `json:"moves,omitempty"`
@@ -97,6 +132,11 @@ const CloudMakeStale = 45 * time.Minute
 // CloudFailHold is how long no box is made after one failed to come up twice
 // running: a fault at the provider is not tried every minute.
 const CloudFailHold = time.Hour
+
+// CloudFeeLimitPause is how long no box is tried after Vultr refused one for
+// its monthly fee limit: not a failure to come up, so not CloudFailHold, but
+// not a try every minute either; the Governor may raise the limit meanwhile.
+const CloudFeeLimitPause = 10 * time.Minute
 
 // CloudPlan is the [cloud] table, as the check reads it.
 type CloudPlan struct {
@@ -135,6 +175,12 @@ const DefaultCloudBoxCap = 2
 // the book and the provider's billing, and calls the provider only to make or
 // destroy a box. In order, it:
 //
+//   - asks the provider for every instance it holds, and destroys each one
+//     named for a box (cloud1, cloud2, ...) that the book does not hold, an
+//     orphan of a make that was killed, which is billed and which Down cannot
+//     find, having no state; each is a move, and one that cannot be destroyed
+//     yet (Vultr locks an instance being restored) is said once and tried
+//     again at the next check;
 //   - marks each box idle from the first check that finds no story claimed on
 //     it, and busy again once one is;
 //   - gives up a box begun CloudMakeStale ago and not yet up (the process
@@ -165,6 +211,8 @@ type CloudCheck struct {
 	Provider CloudProvider
 	Book     CloudBook
 	Log      EventLog
+	// Notice tells the Governor what only he can mend. Nil tells no one.
+	Notice CloudNotice
 	// Host is the host the check runs on: its events' actor is cloud@Host.
 	Host string
 	Plan CloudPlan
@@ -220,6 +268,7 @@ func (c CloudCheck) Run(ctx context.Context) (CloudReport, error) {
 	p := cloudPass{check: c, now: now, state: state}
 	p.roll()
 	p.billed = p.askBilled(ctx)
+	p.reconcile(ctx)
 	p.dropStale(ctx)
 	p.markIdle(work)
 
@@ -310,6 +359,80 @@ func (p *cloudPass) spent() float64 {
 	return max(float64(p.state.hours(p.now))*p.check.Plan.HourlyUSD, p.billed)
 }
 
+// reconcile destroys each instance the provider holds that is named for a box
+// and that the book does not hold: it is billed and counts against the
+// account's limits, and no state is there for Down to find it by. A box the
+// book holds, being made or up, is never one.
+func (p *cloudPass) reconcile(ctx context.Context) {
+	instances, err := p.check.Provider.Instances(ctx)
+	if err != nil {
+		p.check.say("the provider's instances could not be listed, so no orphan is looked for: %v", err)
+		return
+	}
+	held := map[string]bool{}
+	for _, box := range p.state.Boxes {
+		held[box.Name] = true
+	}
+	var said []string
+	for _, inst := range instances {
+		if !p.boxName(inst.Label) || held[inst.Label] {
+			continue
+		}
+		which := fmt.Sprintf("%s (Vultr instance %s, %s)", inst.Label, inst.ID, inst.Status)
+		if err := p.check.Provider.Reap(ctx, inst); err != nil {
+			if !slices.Contains(p.state.OrphansSaid, inst.ID) {
+				p.move(ctx, fmt.Sprintf("could not destroy orphan %s, no box of the book's: %v; tried again at each check", which, oneLine(err.Error())))
+			} else {
+				p.check.say("could not destroy orphan %s: %v", which, oneLine(err.Error()))
+			}
+			said = append(said, inst.ID)
+			continue
+		}
+		p.move(ctx, fmt.Sprintf("destroyed orphan %s: a box no state held, billed and in no book", which))
+		p.dirty = "destroyed orphan " + inst.Label
+	}
+	if !slices.Equal(said, p.state.OrphansSaid) {
+		p.state.OrphansSaid = said
+		p.dirty = "orphans said"
+	}
+}
+
+// boxName reports whether label is a name a box is given: the prefix and a
+// number.
+func (p *cloudPass) boxName(label string) bool {
+	n, ok := strings.CutPrefix(label, p.check.Plan.prefix())
+	if !ok || n == "" {
+		return false
+	}
+	for _, r := range n {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// feeLimit notes that Vultr refused a box for its monthly fee limit. It is a
+// money cap and no fault of a make: the first refusal is a move and one card
+// to the Governor, who alone can raise the limit; the box is tried again after
+// CloudFeeLimitPause, and a box that comes up ends it.
+func (p *cloudPass) feeLimit(ctx context.Context) {
+	first := p.state.FeeLimitAt.IsZero()
+	p.state.FeeLimitAt = p.now
+	p.dirty = "Vultr fee limit"
+	if !first {
+		p.check.say("%v", ErrCloudFeeLimit)
+		return
+	}
+	p.move(ctx, ErrCloudFeeLimit.Error())
+	if p.check.Notice == nil {
+		return
+	}
+	if err := p.check.Notice.Tell(ctx, "Vultr will make no cloud box: its monthly fee limit is reached", ErrCloudFeeLimit.Error()); err != nil {
+		p.check.say("the card to the Governor could not be sent: %v", err)
+	}
+}
+
 // dropStale gives up each box begun CloudMakeStale ago and still being made:
 // destroys what there is of it, and says so.
 func (p *cloudPass) dropStale(ctx context.Context) {
@@ -380,6 +503,10 @@ func (p *cloudPass) make(ctx context.Context) {
 	plan := p.check.Plan
 	if p.now.Before(p.state.HeldUntil) {
 		p.check.say("%d stories wait, but no box is made before %s: one failed to come up twice", p.report.Waiting, p.state.HeldUntil.Format("15:04Z"))
+		return
+	}
+	if !p.state.FeeLimitAt.IsZero() && p.now.Before(p.state.FeeLimitAt.Add(CloudFeeLimitPause)) {
+		p.check.say("%d stories wait, but no box is made before %s: %v", p.report.Waiting, p.state.FeeLimitAt.Add(CloudFeeLimitPause).Format("15:04Z"), ErrCloudFeeLimit)
 		return
 	}
 	name := p.nextName()
@@ -527,6 +654,9 @@ type CloudReading struct {
 	CapUSD   float64
 	MaxBoxes int
 	Now      time.Time
+	// FeeLimitAt is when Vultr last refused a box for its fee limit, zero when
+	// it is not holding one back.
+	FeeLimitAt time.Time
 }
 
 // ReadCloud reads the book for mw status: the boxes, the latest moves and the
@@ -543,6 +673,8 @@ func ReadCloud(ctx context.Context, book CloudBook, plan CloudPlan, now time.Tim
 		CapUSD:   plan.MonthlyCapUSD,
 		MaxBoxes: plan.MaxBoxes,
 		Now:      now,
+
+		FeeLimitAt: state.FeeLimitAt,
 	}, nil
 }
 
@@ -558,6 +690,9 @@ func (r CloudReading) write(b *strings.Builder) {
 			line += ", working"
 		}
 		clip(b, line)
+	}
+	if !r.FeeLimitAt.IsZero() {
+		clip(b, "  Vultr fee limit reached since "+r.FeeLimitAt.UTC().Format("01-02 15:04Z"))
 	}
 	for _, m := range r.Moves {
 		clip(b, "  "+m.At.UTC().Format("01-02 15:04Z")+" "+m.What)

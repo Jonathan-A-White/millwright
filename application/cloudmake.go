@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -21,6 +22,7 @@ type CloudMake struct {
 	Provider CloudProvider
 	Book     CloudBook
 	Log      EventLog
+	Notice   CloudNotice
 	Host     string
 	Plan     CloudPlan
 	Now      func() time.Time
@@ -70,7 +72,7 @@ func (m CloudMake) locked(ctx context.Context, change func(p *cloudPass)) error 
 	if err != nil {
 		return fmt.Errorf("reading the cloud's book: %w", err)
 	}
-	p := &cloudPass{check: CloudCheck{Provider: m.Provider, Book: m.Book, Log: m.Log, Host: m.Host, Plan: m.Plan, Now: m.Now, Out: m.Out}, now: m.now(), state: state}
+	p := &cloudPass{check: CloudCheck{Provider: m.Provider, Book: m.Book, Log: m.Log, Notice: m.Notice, Host: m.Host, Plan: m.Plan, Now: m.Now, Out: m.Out}, now: m.now(), state: state}
 	p.roll()
 	p.billed = p.askBilled(ctx)
 	change(p)
@@ -124,6 +126,7 @@ func (m CloudMake) settle(ctx context.Context, name string, try int, started tim
 			if !found {
 				p.state.Boxes = append(p.state.Boxes, CloudBox{Name: name, Up: started, IdleSince: p.now})
 			}
+			p.state.FeeLimitAt = time.Time{}
 			p.move(ctx, fmt.Sprintf("up %s: made in %s", name, Clock(p.now.Sub(started))))
 			p.dirty = "up " + name
 			done = true
@@ -135,8 +138,32 @@ func (m CloudMake) settle(ctx context.Context, name string, try int, started tim
 				p.state.Boxes[i].Making = false
 			}
 		}
-		if !p.down(ctx, name, "it did not come up") {
-			p.move(ctx, failed+"; it could not be destroyed either, so no box is made until it is")
+		// Some refusals no retry mends, and the fee limit is no fault of the
+		// make: neither is tried twice, nor a fee limit held an hour.
+		fee := errors.Is(upErr, ErrCloudFeeLimit)
+		refused := fee || errors.Is(upErr, ErrCloudQuota) || errors.Is(upErr, ErrCloudSoldOut) || errors.Is(upErr, ErrCloudBadToken)
+		downed := p.down(ctx, name, "it did not come up")
+		if fee {
+			p.feeLimit(ctx)
+		}
+		if !downed {
+			if !fee {
+				p.move(ctx, failed+"; it could not be destroyed either, so no box is made until it is")
+			} else {
+				p.move(ctx, name+" could not be destroyed either, so no box is made until it is")
+			}
+			p.dirty = failed
+			done = true
+			return
+		}
+		if fee {
+			p.dirty = failed
+			done = true
+			return
+		}
+		if refused {
+			p.state.HeldUntil = p.now.Add(CloudFailHold)
+			p.move(ctx, failed+fmt.Sprintf("; destroyed, and no box is made before %s", p.state.HeldUntil.Format("15:04Z")))
 			p.dirty = failed
 			done = true
 			return

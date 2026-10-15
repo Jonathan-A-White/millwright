@@ -148,3 +148,76 @@ Feature: The cloud grows and shrinks by demand
     When 45 minutes pass on the cloud's clock
     Then mw status says "CLOUD: $0.13 spent of $75.00 this month, 1 of 2 boxes"
     And mw status says "cloud1  up 45m"
+
+  Scenario: A box Vultr holds that no state knows is destroyed, and the check says so
+    Given Vultr holds "cloud1" that no state knows
+    And Vultr holds "cloud2" that no state knows
+    When the cloud check runs
+    Then Vultr's "cloud1" was destroyed
+    And Vultr's "cloud2" was destroyed
+    And a cloud event says "destroyed orphan cloud1"
+    And a cloud event says "destroyed orphan cloud2"
+    And 0 cloud boxes are up
+
+  Scenario: A box the book is making is not an orphan
+    Given every host is full
+    And 1 story waits for any host
+    And the cloud check runs and the box is still being made
+    And Vultr holds "cloud1" that no state knows
+    When a minute passes and the cloud check runs and the box is still being made
+    Then the provider was asked nothing
+    And the book holds "cloud1" being made
+
+  Scenario: An orphan Vultr will not destroy yet is said once and tried at the next check
+    Given Vultr holds "cloud1" that no state knows
+    And Vultr will not destroy an instance yet, for it is locked
+    When the cloud check runs 3 times, a minute apart
+    Then the provider was asked to destroy "cloud1" by its id 3 times
+    And 1 cloud event says "could not destroy orphan cloud1"
+    When Vultr can destroy instances again
+    And a minute passes and the cloud check runs
+    Then Vultr's "cloud1" was destroyed
+    And a cloud event says "destroyed orphan cloud1"
+
+  Scenario: Vultr's monthly fee limit is a money cap, not a box that failed to come up
+    Given Vultr refuses to make a box: "Your account has reached its maximum monthly fee limit"
+    And every host is full
+    And 5 stories wait for any host
+    When the cloud check runs
+    Then the provider was asked to make "cloud1", destroy "cloud1"
+    And a cloud event says "Vultr fee limit reached: raise it at my.vultr.com or wait for the month"
+    And 0 cloud events say "failed cloud1"
+    And 0 cloud events say "again"
+    And the Governor was sent 1 card
+    And the Governor's card says "Vultr fee limit reached: raise it at my.vultr.com or wait for the month"
+    And mw status says "Vultr fee limit reached since"
+
+  Scenario: The fee limit is not tried every minute, and the Governor has one card
+    Given Vultr refuses to make a box: "Your account has reached its maximum monthly fee limit"
+    And every host is full
+    And 5 stories wait for any host
+    When the cloud check runs 3 times, a minute apart
+    Then the provider was asked to make "cloud1", destroy "cloud1"
+    When 11 minutes pass and the cloud check runs
+    Then the provider was asked to make "cloud1", destroy "cloud1", make "cloud1", destroy "cloud1"
+    And the Governor was sent 1 card
+    And 1 cloud event says "Vultr fee limit reached"
+
+  Scenario: Once the limit is raised a box comes up
+    Given Vultr refuses to make a box: "Your account has reached its maximum monthly fee limit"
+    And every host is full
+    And 5 stories wait for any host
+    And the cloud check runs
+    And the provider fails to make a box 0 times
+    When 11 minutes pass and the cloud check runs
+    Then 1 cloud box is up
+    And a cloud event says "up cloud1"
+
+  Scenario: A refusal that a retry cannot mend is said in plain words and tried once
+    Given Vultr refuses to make a box: "Invalid API token"
+    And every host is full
+    And 5 stories wait for any host
+    When the cloud check runs 3 times, a minute apart
+    Then the provider was asked to make "cloud1", destroy "cloud1"
+    And a cloud event says "Vultr refused the API token"
+    And 0 cloud events say "again"

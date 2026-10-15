@@ -24,6 +24,7 @@ type cloudContext struct {
 	provider *apptest.FakeCloud
 	book     *apptest.FakeCloudBook
 	log      *apptest.FakeEventLog
+	notice   *apptest.FakeCloudNotice
 	now      time.Time
 	stories  int
 	said     strings.Builder
@@ -75,10 +76,31 @@ func InitializeCloudScenario(ctx *godog.ScenarioContext) {
 		return nil
 	})
 
+	ctx.Given(`^Vultr holds "([^"]*)" that no state knows$`, func(label string) error {
+		c.provider.Orphans = append(c.provider.Orphans, application.CloudInstance{ID: "id-" + label, Label: label, Status: "active"})
+		return nil
+	})
+	ctx.Given(`^Vultr will not destroy an instance yet, for it is locked$`, func() error {
+		c.provider.ReapErr = fmt.Errorf("instance is locked")
+		return nil
+	})
+	ctx.When(`^Vultr can destroy instances again$`, func() error {
+		c.provider.ReapErr = nil
+		return nil
+	})
+	ctx.Given(`^Vultr refuses to make a box: "([^"]*)"$`, func(said string) error {
+		c.provider.FailUps = 99
+		c.provider.FailUpWith = application.ClassifyCloudError(fmt.Errorf("vultr-boost up: exit status 1: Error: %s", said), said)
+		return nil
+	})
 	ctx.Given(`^the cloud check runs and the box is still being made$`, c.checkOnly)
 	ctx.When(`^the cloud check runs and the box is still being made$`, c.checkOnly)
 	ctx.When(`^the cloud check runs and its caller is cancelled (\d+) seconds into the apply$`, c.checkCancelled)
 	ctx.When(`^the box being made comes up$`, c.boxesComeUp)
+	ctx.When(`^a minute passes and the cloud check runs and the box is still being made$`, func() error {
+		c.now = c.now.Add(time.Minute)
+		return c.checkOnly()
+	})
 	ctx.Given(`^the process making the box dies$`, func() error {
 		c.provider.TakeBegun()
 		return nil
@@ -119,6 +141,9 @@ func InitializeCloudScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the provider was asked to make "([^"]*)", "([^"]*)" and nothing else$`, func(a, b string) error {
 		return c.asked([]string{"up " + a, "up " + b})
 	})
+	ctx.Then(`^the provider was asked to (make|destroy) "([^"]*)", (make|destroy) "([^"]*)"$`, func(v1, n1, v2, n2 string) error {
+		return c.asked([]string{c.verb(v1) + n1, c.verb(v2) + n2})
+	})
 	ctx.Then(`^the provider was asked to (make|destroy) "([^"]*)", (make|destroy) "([^"]*)", (make|destroy) "([^"]*)"$`, func(v1, n1, v2, n2, v3, n3 string) error {
 		return c.asked([]string{c.verb(v1) + n1, c.verb(v2) + n2, c.verb(v3) + n3})
 	})
@@ -132,6 +157,40 @@ func InitializeCloudScenario(ctx *godog.ScenarioContext) {
 			}
 		}
 		return fmt.Errorf("the provider was asked %q, with no down %s", c.provider.Calls(), name)
+	})
+	ctx.Then(`^Vultr's "([^"]*)" was destroyed$`, func(label string) error {
+		for _, call := range c.provider.Calls() {
+			if call == "reap "+label {
+				return nil
+			}
+		}
+		return fmt.Errorf("the provider was asked %q, with no reap %s", c.provider.Calls(), label)
+	})
+	ctx.Then(`^the provider was asked to destroy "([^"]*)" by its id (\d+) times?$`, func(label string, n int) error {
+		got := 0
+		for _, call := range c.provider.Calls() {
+			if call == "reap "+label {
+				got++
+			}
+		}
+		if got != n {
+			return fmt.Errorf("reap %s asked %d times, want %d: %q", label, got, n, c.provider.Calls())
+		}
+		return nil
+	})
+	ctx.Then(`^the Governor was sent (\d+) cards?$`, func(n int) error {
+		if got := len(c.notice.Cards); got != n {
+			return fmt.Errorf("%d cards were sent, want %d: %q", got, n, c.notice.Cards)
+		}
+		return nil
+	})
+	ctx.Then(`^the Governor's card says "([^"]*)"$`, func(text string) error {
+		for _, card := range c.notice.Cards {
+			if strings.Contains(card, text) {
+				return nil
+			}
+		}
+		return fmt.Errorf("no card says %q: %q", text, c.notice.Cards)
 	})
 	ctx.Then(`^(\d+) cloud box(?:es)? (?:is|are) up$`, func(n int) error {
 		got := 0
@@ -194,6 +253,7 @@ func (c *cloudContext) aCloud(boxes int, capUSD float64, idle int, hourly float6
 	c.provider = &apptest.FakeCloud{}
 	c.book = &apptest.FakeCloudBook{}
 	c.log = &apptest.FakeEventLog{}
+	c.notice = &apptest.FakeCloudNotice{}
 	c.stories = 0
 	c.said.Reset()
 	return nil
@@ -284,6 +344,7 @@ func (c *cloudContext) checkIn(ctx context.Context) error {
 		Provider: c.provider,
 		Book:     c.book,
 		Log:      c.log,
+		Notice:   c.notice,
 		Host:     "desktop",
 		Plan:     c.plan,
 		Now:      func() time.Time { return c.now },
@@ -317,6 +378,7 @@ func (c *cloudContext) boxesComeUp() error {
 			Provider: c.provider,
 			Book:     c.book,
 			Log:      c.log,
+			Notice:   c.notice,
 			Host:     "desktop",
 			Plan:     c.plan,
 			Now:      func() time.Time { return c.now },
