@@ -18,6 +18,7 @@ import (
 // after the Before hook, so the context they fill is the scenario's own.
 func registerStatusRoomSteps(ctx *godog.ScenarioContext, c *statusContext) {
 	ctx.Given(`^this host runs at most (\d+) sessions at once$`, c.thisHostRunsAtMost)
+	ctx.Given(`^this host's cap is set by "([^"]*)"$`, c.thisHostsCapIsSetBy)
 	ctx.Given(`^this host is at load ([0-9.]+) of (\d+) cores with (\d+) MB of memory available$`, c.thisHostIsAtLoadWithMemory)
 	ctx.Given(`^this host's load cannot be read for the report$`, c.thisHostsLoadCannotBeReadForTheReport)
 	ctx.Given(`^this host's mill answered (\d+) tutor-turn grists in (\d+) seconds each long ago, then (\d+) in (\d+) seconds each in the last 5 minutes$`, c.thisHostsMillAnswered)
@@ -29,6 +30,11 @@ func registerStatusRoomSteps(ctx *godog.ScenarioContext, c *statusContext) {
 
 func (c *statusContext) thisHostRunsAtMost(n int) error {
 	c.cap = n
+	return nil
+}
+
+func (c *statusContext) thisHostsCapIsSetBy(why string) error {
+	c.capWhy = why
 	return nil
 }
 

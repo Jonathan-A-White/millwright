@@ -105,6 +105,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeConfigSetScenario(ctx)
 	steps.InitializeCardScenario(ctx)
 	steps.InitializeDispatchScenario(ctx)
+	steps.InitializeDispatchWindowsScenario(ctx)
 	steps.InitializeDoctorScenario(ctx)
 	steps.InitializeErrorsScenario(ctx)
 	steps.InitializeEventFollowScenario(ctx)

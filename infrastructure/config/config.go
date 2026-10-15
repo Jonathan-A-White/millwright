@@ -34,6 +34,12 @@
 //	grist_recent_s     = 600           # a tutor is in use this long after its last answer
 //	grist_slow_factor  = 1.5           # none while tutor answers take over this times their par
 //
+//	[[dispatch.windows]]               # from 23:00 to 06:00 on New York's clock these stand in for the root keys (mw-gq6.429)
+//	from = "23:00"                     # a window may carry cap, builder_jobs, builder_nice,
+//	to   = "06:00"                     # room_load_per_core and room_min_free_mb; to before from wraps midnight
+//	tz   = "America/New_York"
+//	cap  = 4
+//
 //	[backend.postern]
 //	dir     = "server"
 //	build   = "go build -o {out} ./cmd/postern"
@@ -1015,6 +1021,12 @@ type RoomSettings struct {
 // default 600) and `grist_slow_factor` (above 1, default 1.5); each its default
 // when the table says nothing.
 func Room() (RoomSettings, error) {
+	return RoomAt(time.Now())
+}
+
+// RoomAt is Room at the instant now: a [[dispatch.windows]] entry that holds now
+// answers room_load_per_core and room_min_free_mb ahead of the [dispatch] table.
+func RoomAt(now time.Time) (RoomSettings, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return RoomSettings{}, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
@@ -1023,6 +1035,13 @@ func Room() (RoomSettings, error) {
 	table, err := tableIn(path, DispatchTable)
 	if err != nil {
 		return RoomSettings{}, err
+	}
+	if window := activeWindow(path, now); window != nil {
+		for _, key := range []string{"room_load_per_core", "room_min_free_mb"} {
+			if said := window.Values[key]; said != "" {
+				table[key] = said
+			}
+		}
 	}
 	settings := RoomSettings{LoadPerCore: DefaultRoomLoadPerCore, MinFreeMB: DefaultRoomMinFreeMB}
 	if said := strings.TrimSpace(table["room_load_per_core"]); said != "" {
@@ -1367,30 +1386,39 @@ func Host() (string, error) {
 // Cap reports how many sessions may run on this machine at once: $MW_CAP if it
 // is set, otherwise the root-table `cap` key of ~/.config/mw/config.toml, and
 // DefaultCap when neither says. A host that says nothing runs one session at a
-// time, which is the safe way round on a small machine.
+// time, which is the safe way round on a small machine. A [[dispatch.windows]]
+// entry that holds the present moment and carries `cap` answers ahead of the
+// root-table key (mw-gq6.429).
 func Cap() (int, error) {
-	said := strings.TrimSpace(os.Getenv(CapEnv))
-	if said == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return 0, fmt.Errorf("no %s is set and there is no home directory to read %s in: %w", CapEnv, File, err)
-		}
-		if said, err = valueIn(filepath.Join(home, File), "cap"); err != nil {
-			return 0, err
-		}
+	return CapAt(time.Now())
+}
+
+// CapAt is Cap at the instant now: a [[dispatch.windows]] entry that holds now
+// and carries `cap` answers ahead of the root-table key (mw-gq6.429).
+func CapAt(now time.Time) (int, error) {
+	atOnce, _, err := CapInForce(now)
+	return atOnce, err
+}
+
+// CapInForce is CapAt and the window that set it: why reads like "night window
+// to 06:00 America/New_York", and is "" when the cap is the host's own.
+func CapInForce(now time.Time) (atOnce int, why string, err error) {
+	said, why, err := knobIn("cap", CapEnv, now)
+	if err != nil {
+		return 0, "", err
 	}
 	if said == "" {
-		return DefaultCap, nil
+		return DefaultCap, "", nil
 	}
 
-	atOnce, err := strconv.Atoi(said)
+	atOnce, err = strconv.Atoi(said)
 	if err != nil {
-		return 0, fmt.Errorf("the cap on sessions running at once is %q, which is not a whole number: set %s=<n>, or `cap = <n>` in %s", said, CapEnv, File)
+		return 0, "", fmt.Errorf("the cap on sessions running at once is %q, which is not a whole number: set %s=<n>, or `cap = <n>` in %s", said, CapEnv, File)
 	}
 	if atOnce < 1 {
-		return 0, fmt.Errorf("the cap on sessions running at once is %d, so nothing could ever be started: set it to 1 or more", atOnce)
+		return 0, "", fmt.Errorf("the cap on sessions running at once is %d, so nothing could ever be started: set it to 1 or more", atOnce)
 	}
-	return atOnce, nil
+	return atOnce, why, nil
 }
 
 // DefaultBuilderNice is how much nicer than the mill a Builder's session and
@@ -1404,7 +1432,12 @@ const DefaultBuilderNice = 10
 // Builders run their tests. 0 turns it off. Only 0 to 19 is taken: a negative
 // nice would need privilege and would put a Builder ahead of the mill.
 func BuilderNice() (int, error) {
-	said, err := optionalSetting("builder_nice", BuilderNiceEnv, "")
+	return BuilderNiceAt(time.Now())
+}
+
+// BuilderNiceAt is BuilderNice at the instant now, as CapAt is Cap.
+func BuilderNiceAt(now time.Time) (int, error) {
+	said, _, err := knobIn("builder_nice", BuilderNiceEnv, now)
 	if err != nil {
 		return 0, err
 	}
@@ -1426,7 +1459,12 @@ func BuilderNice() (int, error) {
 // workers its tests may use (application.WorkerLimitEnv). A whole number of 1 or
 // more is taken (mw-gq6.399).
 func BuilderJobs() (int, error) {
-	said, err := optionalSetting("builder_jobs", BuilderJobsEnv, "")
+	return BuilderJobsAt(time.Now())
+}
+
+// BuilderJobsAt is BuilderJobs at the instant now, as CapAt is Cap.
+func BuilderJobsAt(now time.Time) (int, error) {
+	said, _, err := knobIn("builder_jobs", BuilderJobsEnv, now)
 	if err != nil {
 		return 0, err
 	}

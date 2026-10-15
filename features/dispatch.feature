@@ -129,6 +129,17 @@ Feature: Dispatching the stories this host is ready to work
     Then no session was started
     And the story "mw-gq6.1" is not claimed
 
+  # mw-gq6.429: a cap that falls (a dispatch window closing) holds back new starts
+  # and stops nothing; the stories above the new cap run on.
+  Scenario: A cap lower than the stories running stops none of them and starts no more
+    Given a ready story "mw-gq6.1" of that epic
+    And a story "mw-gq6.8" of that epic is already running here
+    And a story "mw-gq6.9" of that epic is already running here
+    When dispatch runs on "vps" with a cap of 1
+    Then no session was started
+    And nothing was closed
+    And the story "mw-gq6.1" is not claimed
+
   # mw-y0dkzp: a session that died with no close-out is not a try the story
   # failed, so the reclaim gives the attempt back (it never goes below 0).
 
