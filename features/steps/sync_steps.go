@@ -120,6 +120,7 @@ func InitializeSyncScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the sync reports that the mark was added$`, c.theSyncReportsTheMark)
 	ctx.Then(`^the beads database was never synced$`, c.theDatabaseWasNeverSynced)
 	ctx.Then(`^the beads database was never asked to reclaim its disk space$`, c.theDatabaseWasNeverCollected)
+	ctx.Then(`^the beads database was asked to reclaim its disk space once$`, c.theDatabaseWasCollectedOnce)
 	ctx.Then(`^the sync says no backup was due$`, c.theSyncSaysNoBackupWasDue)
 	ctx.Then(`^the sync says a backup ran$`, c.theSyncSaysABackupRan)
 	ctx.Then(`^the sync says the backup was left to another run$`, c.theSyncSaysTheBackupWasLeft)
@@ -649,6 +650,13 @@ func (c *syncContext) theDatabaseWasNeverSynced() error {
 func (c *syncContext) theDatabaseWasNeverCollected() error {
 	if got := c.tracker.GCs(); got != 0 || c.report.GCed {
 		return fmt.Errorf("expected no collection, got %d", got)
+	}
+	return nil
+}
+
+func (c *syncContext) theDatabaseWasCollectedOnce() error {
+	if got := c.tracker.GCs(); got != 1 || !c.report.GCed {
+		return fmt.Errorf("expected one collection, got %d (reported %v)", got, c.report.GCed)
 	}
 	return nil
 }

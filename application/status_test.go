@@ -224,6 +224,57 @@ func TestStatusWarnsPastTheBeadsBudget(t *testing.T) {
 	}
 }
 
+// TestStatusSaysWhenTheBeadsWereLastCollected is mw-gq6.449: a collection the
+// halted backup starved for ten days shows on the BEADS line, so nobody has to
+// read the note to find out.
+func TestStatusSaysWhenTheBeadsWereLastCollected(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		note string // empty: no note at all
+		want string
+	}{
+		{"never", "", "BEADS 500MB · never collected\n"},
+		{"ten days ago", statusNow.Add(-10*24*time.Hour - time.Hour).UTC().Format(application.LastSyncFormat), "BEADS 500MB · last GC 10d ago\n"},
+		{"hours ago", statusNow.Add(-3*time.Hour - 5*time.Minute).UTC().Format(application.LastSyncFormat), "BEADS 500MB · last GC 3h05m ago\n"},
+		{"unreadable", "yesterday-ish", "BEADS 500MB · last GC unreadable\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tracker := aTrackerPathedToVPS(t)
+			tracker.SetSize(500_000_000)
+			if tc.note != "" {
+				if err := tracker.SetNote(context.Background(), application.LastGCKey("vps"), tc.note); err != nil {
+					t.Fatalf("seeding the last collection: %v", err)
+				}
+			}
+			report := otherHostStatus(t, tracker)
+			if !strings.Contains(report.String(), tc.want) {
+				t.Fatalf("expected %q, got:\n%s", tc.want, report.String())
+			}
+		})
+	}
+}
+
+// A host whose beads live on another's never collects them, so its BEADS line
+// has no last-GC to say.
+func TestStatusLeavesTheLastCollectionOutOnAHostThatSharesAnothersBeads(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	tracker.SetSize(500_000_000)
+	report, err := application.Status{
+		Tracker:  tracker,
+		Notes:    tracker,
+		Host:     "vps",
+		Seat:     "builder",
+		SyncMode: application.BeadsSyncShared,
+		Now:      func() time.Time { return statusNow },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatalf("reading status: %v", err)
+	}
+	if strings.Contains(report.String(), "collected") || strings.Contains(report.String(), "last GC") {
+		t.Fatalf("expected no word of a collection, got:\n%s", report.String())
+	}
+}
+
 // TestStatusHoldsTheBeadsSizeToTheBudgetItIsGiven: the budget comes from the
 // configuration, so a size past the default but under the given budget is no
 // warning, and one past the given budget is.
@@ -232,7 +283,7 @@ func TestStatusHoldsTheBeadsSizeToTheBudgetItIsGiven(t *testing.T) {
 		size int64
 		want string
 	}{
-		{2_000_000_000, "BEADS 2.0GB\n"},
+		{2_000_000_000, "BEADS 2.0GB · never collected\n"},
 		{3_100_000_000, "BEADS 3.1GB: past the 3.0GB budget"},
 	} {
 		tracker := aTrackerPathedToVPS(t)

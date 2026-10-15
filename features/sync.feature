@@ -173,6 +173,7 @@ Feature: Keeping the vault and beads in step between hosts
     And the sync says the backup halted on a merge conflict
     And the beads database holds the time of the sync under host.vps.last_sync
     And nothing is recorded under host.vps.last_backup
+    And the beads database was asked to reclaim its disk space once
 
   Scenario: A host whose beads live in another host's database never syncs or collects them
     Given this host's beads live in another host's database

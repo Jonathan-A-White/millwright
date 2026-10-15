@@ -155,8 +155,8 @@ func TestABackupThatHaltsIsSaidButDoesNotStopTheHostThatKeepsTheOneDatabase(t *t
 	if note(t, tracker, application.SyncHaltKey("vps")) == "" {
 		t.Fatal("expected the halt noted in the one database too")
 	}
-	if tracker.GCs() != 0 {
-		t.Fatal("expected no collection on a database whose backup has just halted")
+	if tracker.GCs() != 1 || !report.GCed {
+		t.Fatalf("expected the collection to run on its own cadence although the backup halted (mw-gq6.449), got %d", tracker.GCs())
 	}
 }
 
