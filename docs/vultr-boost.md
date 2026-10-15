@@ -169,8 +169,22 @@ Each check:
    `contrib/vultr-boost up --yes --name cloudN --snapshot <snapshot>`. A check makes
    at most one; the next check counts its sessions as free while it boots, so it
    is not made twice.
+
+   **The check does not wait for the box.** A make is a terraform apply of six
+   minutes and more, and a caller that is stopped mid-apply (a `timeout`, a closed
+   session) left a half-made box that was billed and not in the book. So the check
+   writes the box into the book as *being made*, prints `making cloudN in the
+   background; the book says when it is up`, and starts `mw cloud make cloudN`
+   (hidden) in a session and systemd scope of its own, with a deadline of its own
+   (20 minutes, never under 15). That process runs the wrapper and writes the end
+   into the book and a `cloud` event, under the cloud lock only while it writes.
+   A box being made is never destroyed as idle, and a check that finds one begun
+   45 minutes ago, with the process gone (a reboot), destroys it and says
+   `failed`. Its output is in `~/.local/state/mw-dispatch/cloud-make.log` (the dispatch
+   state directory).
 5. **A box that does not come up** (the wrapper fails) is destroyed and tried once
-   more. When that fails too it is destroyed again and no box is made for an hour.
+   more, by the same process. When that fails too it is destroyed again and no box
+   is made for an hour.
 
 **The month's spend** is the box hours the check made, each begun hour a whole
 one (Vultr bills by the hour), kept in the vault in `hosts/vultr/cloud.json` with
@@ -181,8 +195,8 @@ When Vultr cannot be asked, the book's count stands. A new UTC month starts the
 count afresh. At the cap no box is made and one cloud event says `cap reached`,
 once a month.
 
-**Every move is an event**, kind `cloud`, actor `cloud@<home>`: `up cloud1: 5
-stories wait for any host, 0 sessions free`, `down cloud1: idle 30m`, `failed
+**Every move is an event**, kind `cloud`, actor `cloud@<home>`: `making cloud1: 5
+stories wait for any host, 0 sessions free`, `up cloud1: made in 6m10s`, `down cloud1: idle 30m`, `failed
 cloud1: ...`, `cap reached: $74.90 spent of $75.00 this month; no box is made`.
 `mw events tail` shows them. **`mw status`** has a CLOUD section: the month's
 spend against the cap, each box up with its age and how long it has been idle,
