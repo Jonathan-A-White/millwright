@@ -601,11 +601,11 @@ wait
 		if err == nil {
 			t.Fatal("expected a cancelled push to report an error")
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("expected the cancelled push to return within a few seconds, not hang")
+	case <-time.After(30 * time.Second):
+		t.Fatal("expected the cancelled push to return, not hang")
 	}
 
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for (syscall.Kill(mainPid, 0) == nil || syscall.Kill(childPid, 0) == nil) && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -620,7 +620,7 @@ wait
 // pidWhenWritten polls for a pid file a stand-in writes once it has started.
 func pidWhenWritten(t *testing.T, path string) int {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		if data, err := os.ReadFile(path); err == nil && strings.TrimSpace(string(data)) != "" {
 			pid, err := strconv.Atoi(strings.TrimSpace(string(data)))

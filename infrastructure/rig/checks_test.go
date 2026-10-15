@@ -232,8 +232,10 @@ while :; do sleep 0.1; done`
 	case <-time.After(30 * time.Second):
 		t.Fatal("the cancelled check never returned")
 	}
-	if took := time.Since(cancelled); took < time.Second || took > 5*time.Second {
-		t.Errorf("expected the check to return after the 1s grace and within a few seconds of it, took %s", took)
+	// The ceiling is thirty times the grace: it only has to tell a kill that came
+	// from one that never did, and a busy host must not cross it (mw-gq6.423).
+	if took := time.Since(cancelled); took < time.Second || took > 30*time.Second {
+		t.Errorf("expected the check to return after the 1s grace and within 30s of it, took %s", took)
 	}
 	if alive(pid) {
 		t.Errorf("expected the group that ignored TERM to be killed, pid %d is still running", pid)

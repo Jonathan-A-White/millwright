@@ -148,41 +148,49 @@ func (h *slotHeldByHand) release() {
 	h.file.Close()
 }
 
-// passItOn hands the slot from holder to holder, each for the given time, and
-// then lets it go, unless stop is closed first. It returns once it has let go.
-func passItOn(h *slotHeldByHand, holders []string, each time.Duration, stop <-chan struct{}) {
-	defer h.release()
-	for _, holder := range holders {
-		h.says(holder)
-		select {
-		case <-stop:
+// anEpoch is where a test's wound clock starts.
+var anEpoch = time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+
+// handOverEvery makes the slot change hands on the clock's own ticks, not on a
+// timer of the test's: at every nth look the waiter takes at the slot, the next of
+// holders has it, and once the last has had it for n looks the slot is let go. A
+// waiter sees the same hand-offs however busy the host is, which a goroutine
+// sleeping beside the waiter cannot promise (mw-gq6.423).
+func handOverEvery(clock *aClock, h *slotHeldByHand, holders []string, n int) {
+	ticks, gone := 0, false
+	clock.onTick = func(time.Time) {
+		ticks++
+		if ticks%n != 0 || gone {
 			return
-		case <-time.After(each):
 		}
+		if i := ticks/n - 1; i < len(holders) {
+			h.says(holders[i])
+			return
+		}
+		gone = true
+		h.release()
 	}
 }
 
 func TestAMergeSlotThatKeepsChangingHandsIsNotGivenUpOn(t *testing.T) {
 	dir := aRigDir(t)
-	slots := rig.NewSlots(rig.WithSlotWait(150*time.Millisecond), rig.WithSlotPoll(10*time.Millisecond))
+	clock := &aClock{at: anEpoch}
+	slots := rig.NewSlots(rig.WithSlotWait(150*time.Millisecond), rig.WithSlotPoll(10*time.Millisecond),
+		rig.WithSlotClock(clock.now, clock.sleep))
 
 	holders := []string{"closing out mw-1", "closing out mw-2", "closing out mw-3", "closing out mw-4", "closing out mw-5"}
 	first := holdSlotByHand(t, dir, "closing out mw-0")
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		passItOn(first, holders, 60*time.Millisecond, nil)
-	}()
+	defer first.release()
+	// Each holder has it for six looks of 10ms: 60ms, well inside the 150ms wait.
+	handOverEvery(clock, first, holders, 6)
 
-	started := time.Now()
 	held, err := slots.Take(context.Background(), dir, "closing out mw-me")
 	if err != nil {
 		t.Fatalf("expected a waiter to keep waiting while the slot changes hands, got %v", err)
 	}
 	defer held.Release(context.Background())
-	<-done
 	// Six holders of 60ms each is well past the 150ms wait: the wait was per holder.
-	if waited := time.Since(started); waited < 150*time.Millisecond {
+	if waited := clock.at.Sub(anEpoch); waited < 150*time.Millisecond {
 		t.Errorf("expected the waiter to have waited longer than the wait in all, waited %s", waited)
 	}
 }
@@ -192,8 +200,9 @@ func TestAMergeSlotOneHolderHasHeldForTheWholeWaitIsGivenUpOn(t *testing.T) {
 	held := holdSlotByHand(t, dir, "closing out mw-stuck")
 	defer held.release()
 
-	slots := rig.NewSlots(rig.WithSlotWait(100*time.Millisecond), rig.WithSlotPoll(10*time.Millisecond))
-	started := time.Now()
+	clock := &aClock{at: anEpoch}
+	slots := rig.NewSlots(rig.WithSlotWait(100*time.Millisecond), rig.WithSlotPoll(10*time.Millisecond),
+		rig.WithSlotClock(clock.now, clock.sleep))
 	_, err := slots.Take(context.Background(), dir, "closing out mw-me")
 	if err == nil {
 		t.Fatal("expected a waiter to give up on a slot one holder keeps for longer than the wait")
@@ -204,28 +213,26 @@ func TestAMergeSlotOneHolderHasHeldForTheWholeWaitIsGivenUpOn(t *testing.T) {
 	if !strings.Contains(err.Error(), "one holder") {
 		t.Errorf("expected the failure to say it was one holder that kept it, got %q", err)
 	}
-	if waited := time.Since(started); waited > 2*time.Second {
-		t.Errorf("expected the waiter to give up after about the wait, waited %s", waited)
+	if waited := clock.at.Sub(anEpoch); waited != 100*time.Millisecond {
+		t.Errorf("expected the waiter to give up after exactly the wait, waited %s", waited)
 	}
 }
 
 func TestTheOverallCapStopsAWaiterWhoseSlotKeepsMoving(t *testing.T) {
 	dir := aRigDir(t)
-	slots := rig.NewSlots(rig.WithSlotWait(100*time.Millisecond), rig.WithSlotCap(250*time.Millisecond), rig.WithSlotPoll(10*time.Millisecond))
+	clock := &aClock{at: anEpoch}
+	slots := rig.NewSlots(rig.WithSlotWait(100*time.Millisecond), rig.WithSlotCap(250*time.Millisecond),
+		rig.WithSlotPoll(10*time.Millisecond), rig.WithSlotClock(clock.now, clock.sleep))
 
 	var holders []string
 	for i := 0; i < 100; i++ {
 		holders = append(holders, "closing out mw-"+strconv.Itoa(i))
 	}
 	first := holdSlotByHand(t, dir, "closing out mw-first")
-	stop, done := make(chan struct{}), make(chan struct{})
-	go func() {
-		defer close(done)
-		passItOn(first, holders, 30*time.Millisecond, stop)
-	}()
-	defer func() { close(stop); <-done }()
+	defer first.release()
+	// Every holder has it for 30ms, so the slot is moving the whole 250ms.
+	handOverEvery(clock, first, holders, 3)
 
-	started := time.Now()
 	_, err := slots.Take(context.Background(), dir, "closing out mw-me")
 	if err == nil {
 		t.Fatal("expected the overall cap to stop a waiter whose slot keeps changing hands")
@@ -233,8 +240,8 @@ func TestTheOverallCapStopsAWaiterWhoseSlotKeepsMoving(t *testing.T) {
 	if !strings.Contains(err.Error(), "overall") {
 		t.Errorf("expected the failure to say it was the overall cap, got %q", err)
 	}
-	if waited := time.Since(started); waited < 250*time.Millisecond || waited > 2*time.Second {
-		t.Errorf("expected the waiter to stop at about the cap, waited %s", waited)
+	if waited := clock.at.Sub(anEpoch); waited != 250*time.Millisecond {
+		t.Errorf("expected the waiter to stop at exactly the cap, waited %s", waited)
 	}
 }
 
