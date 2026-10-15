@@ -3,6 +3,8 @@ package steps
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -45,6 +47,10 @@ type talkBackend struct {
 	// ideas is the backend's Ideas only and the records the Mayor delivered
 	// (talk_wait_ideas_steps.go).
 	ideas talkIdeasBackend
+	// blobs is GET /api/blobs/{hash}'s store, and blobFetches how many times
+	// it was asked for one, served or not.
+	blobs       map[string][]byte
+	blobFetches int
 }
 
 func (b *talkBackend) handler(w http.ResponseWriter, r *http.Request) {
@@ -76,6 +82,18 @@ func (b *talkBackend) handler(w http.ResponseWriter, r *http.Request) {
 	case "/api/events":
 		b.stream(w, r)
 	default:
+		if hash, ok := strings.CutPrefix(r.URL.Path, "/api/blobs/"); ok && r.Method == http.MethodGet {
+			b.mu.Lock()
+			b.blobFetches++
+			body, found := b.blobs[hash]
+			b.mu.Unlock()
+			if !found {
+				http.Error(w, "no such blob", http.StatusNotFound)
+				return
+			}
+			w.Write(body)
+			return
+		}
 		if strings.HasPrefix(r.URL.Path, "/api/ideas-only/") {
 			b.ideasRoute(w, r)
 			return
@@ -247,6 +265,41 @@ func (c *talkWaitContext) governorTurnAbout(turn int, id, text, kind, aboutID, t
 	return c.record("talk", c.mayor, c.governorKey, string(raw), true)
 }
 
+// talkPicture is the picture a turn carries in the feature.
+const talkPicture = "the picture's jpeg bytes"
+
+// governorTurnWithPicture is a turn whose record carries talkPicture as an
+// image/jpeg attachment named name, sealed to the Mayor's key as the phone
+// seals it; served is whether the backend holds its blob.
+func (c *talkWaitContext) governorTurnWithPicture(turn int, id, text, name string, served, announce bool) error {
+	sealed, err := apptest.NewFakeCipher().EncryptBytes(c.mayor, []byte(talkPicture))
+	if err != nil {
+		return err
+	}
+	raw, err := base64.StdEncoding.DecodeString(sealed)
+	if err != nil {
+		return err
+	}
+	sum := sha256.Sum256(raw)
+	hash := hex.EncodeToString(sum[:])
+	if served {
+		c.backend.mu.Lock()
+		c.backend.blobs[hash] = raw
+		c.backend.mu.Unlock()
+	}
+	var plain map[string]any
+	_ = json.Unmarshal([]byte(talkTurnPlaintext(id, turn, "turn", text, "", false)), &plain)
+	plain["attachment"] = map[string]any{"hash": hash, "size": len(raw), "mime": "image/jpeg", "name": name}
+	encoded, _ := json.Marshal(plain)
+	return c.record("talk", c.mayor, c.governorKey, string(encoded), announce)
+}
+
+// inboxDir is where the wait writes a turn's picture, as the postern inbox
+// dir is for the real one.
+func (c *talkWaitContext) inboxDir() string {
+	return filepath.Join(c.home, "inbox")
+}
+
 func (c *talkWaitContext) governorTurn(turn int, id, text, model string, cut, announce bool) error {
 	return c.record("talk", c.mayor, c.governorKey, talkTurnPlaintext(id, turn, "turn", text, model, cut), announce)
 }
@@ -304,6 +357,47 @@ func InitializeTalkWaitScenario(ctx *godog.ScenarioContext) {
 		})
 	ctx.Given(`^the Governor's turn (\d+) of talk "([^"]*)" saying "([^"]*)" has been indexed$`, func(turn int, id, text string) error {
 		return c.governorTurn(turn, id, text, "", false, false)
+	})
+	ctx.When(`^the Governor's turn (\d+) of talk "([^"]*)" saying "([^"]*)" is indexed, with the picture "([^"]*)"$`,
+		func(turn int, id, text, name string) error {
+			return c.governorTurnWithPicture(turn, id, text, name, true, true)
+		})
+	ctx.When(`^the Governor's turn (\d+) of talk "([^"]*)" saying "([^"]*)" is indexed, with the picture "([^"]*)" the backend will not serve$`,
+		func(turn int, id, text, name string) error {
+			return c.governorTurnWithPicture(turn, id, text, name, false, true)
+		})
+	ctx.Given(`^the Governor's turn (\d+) of talk "([^"]*)" saying "([^"]*)" has been indexed, with the picture "([^"]*)"$`,
+		func(turn int, id, text, name string) error {
+			return c.governorTurnWithPicture(turn, id, text, name, true, false)
+		})
+	ctx.When(`^mw talk wait's cursor is put back to the start of the index$`, func() error {
+		return c.memory.SetNote(context.Background(), application.TalkWaitCursorKey, "0")
+	})
+	ctx.Then(`^the wait printed "([^"]*)" on the line after "([^"]*)"$`, func(line, above string) error {
+		want := above + "\n" + strings.ReplaceAll(line, "<inbox dir>", c.inboxDir())
+		if !strings.Contains(c.run.out.String(), want) {
+			return fmt.Errorf("expected the wait to print %q, it printed:\n%s", want, c.run.out.String())
+		}
+		return nil
+	})
+	ctx.Then(`^the inbox dir holds "([^"]*)" with the picture's bytes$`, func(name string) error {
+		got, err := os.ReadFile(filepath.Join(c.inboxDir(), name))
+		if err != nil {
+			return err
+		}
+		if string(got) != talkPicture {
+			return fmt.Errorf("expected %s to hold %q, it holds %q", name, talkPicture, got)
+		}
+		return nil
+	})
+	ctx.Then(`^the backend was asked for the picture (\d+) times?$`, func(want int) error {
+		c.backend.mu.Lock()
+		got := c.backend.blobFetches
+		c.backend.mu.Unlock()
+		if got != want {
+			return fmt.Errorf("expected the backend asked for the picture %d time(s), it was asked %d", want, got)
+		}
+		return nil
 	})
 	ctx.When(`^the Governor ends talk "([^"]*)"$`, func(id string) error {
 		return c.record("talk", c.mayor, c.governorKey, talkTurnPlaintext(id, 9, "end", "", "", false), true)
@@ -439,7 +533,7 @@ func (c *talkWaitContext) aBackendThatStreams() error {
 	if c.mayor, _, err = c.keys.PublicKey(); err != nil {
 		return err
 	}
-	c.backend = &talkBackend{conns: map[*talkConn]bool{}}
+	c.backend = &talkBackend{conns: map[*talkConn]bool{}, blobs: map[string][]byte{}}
 	c.server = httptest.NewServer(http.HandlerFunc(c.backend.handler))
 	c.client = postern.NewHTTP(c.server.URL, c.keys)
 	c.memory = apptest.NewFakeTracker()
@@ -460,18 +554,19 @@ func (c *talkWaitContext) arm() error {
 	c.run = run
 	cipher := apptest.NewFakeCipher()
 	wait := application.TalkWait{
-		Stream:      c.client,
-		Postern:     c.client,
-		Cipher:      cipher,
-		Keys:        c.keys,
-		Memory:      c.memory,
-		Mailbox:     c.mailbox,
-		GovernorKey: c.governorKey,
-		Limit:       c.limit,
-		MinBackoff:  5 * time.Millisecond,
-		MaxBackoff:  20 * time.Millisecond,
-		Out:         &run.out,
-		Err:         &run.errOut,
+		Stream:        c.client,
+		Postern:       c.client,
+		Cipher:        cipher,
+		Keys:          c.keys,
+		Memory:        c.memory,
+		Mailbox:       c.mailbox,
+		GovernorKey:   c.governorKey,
+		AttachmentDir: c.inboxDir(),
+		Limit:         c.limit,
+		MinBackoff:    5 * time.Millisecond,
+		MaxBackoff:    20 * time.Millisecond,
+		Out:           &run.out,
+		Err:           &run.errOut,
 	}
 	if wait.Limit == 0 {
 		wait.Limit = time.Minute

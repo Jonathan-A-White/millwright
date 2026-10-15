@@ -40,6 +40,42 @@ Feature: mw talk wait
     Then mw talk wait ends within 1 second
     And the wait did not print "about:"
 
+  Scenario: a turn carrying a picture prints its path under the text, the file holding the picture
+    Given mw talk wait is armed
+    When the Governor's turn 1 of talk "talk-12" saying "Look at this" is indexed, with the picture "Screenshot.jpg"
+    Then mw talk wait ends within 1 second
+    And the wait printed "image: <inbox dir>/direct-1.jpg (Screenshot.jpg)" on the line after "text: Look at this"
+    And the inbox dir holds "direct-1.jpg" with the picture's bytes
+
+  Scenario: a turn with no picture prints no image line
+    Given mw talk wait is armed
+    When the Governor's turn 1 of talk "talk-13" saying "No picture" is indexed
+    Then mw talk wait ends within 1 second
+    And the wait did not print "image:"
+
+  Scenario: a second run finds the picture already written and fetches nothing
+    Given mw talk wait's cursor is at the start of the index
+    And the Governor's turn 1 of talk "talk-12" saying "Look at this" has been indexed, with the picture "Screenshot.jpg"
+    When mw talk wait is armed
+    Then mw talk wait ends within 1 second
+    And the wait printed "image: <inbox dir>/direct-1.jpg (Screenshot.jpg)" on the line after "text: Look at this"
+    And the backend was asked for the picture 1 time
+    When mw talk wait's cursor is put back to the start of the index
+    And mw talk wait is armed again
+    Then mw talk wait ends within 1 second
+    And the wait printed "image: <inbox dir>/direct-1.jpg (Screenshot.jpg)" on the line after "text: Look at this"
+    And the backend was asked for the picture 1 time
+
+  Scenario: a picture the backend will not serve is said so, and the turn is printed as ever
+    Given mw talk wait is armed
+    When the Governor's turn 1 of talk "talk-14" saying "Look at this" is indexed, with the picture "Screenshot.jpg" the backend will not serve
+    Then mw talk wait ends within 1 second
+    And the wait printed "image: could not be fetched (" on the line after "text: Look at this"
+    And the wait printed "talk talk-14 turn 1"
+    And the wait printed "model unchanged"
+    And the wait printed "cut no"
+    And the wait printed an index-to-print time in milliseconds
+
   Scenario: a turn that changes no model and cuts nothing says so
     Given mw talk wait is armed
     When the Governor's turn 1 of talk "talk-8" saying "Hello" is indexed

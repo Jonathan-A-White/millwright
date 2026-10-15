@@ -987,15 +987,20 @@ func (i PosternInbox) downloadAttachment(ctx context.Context, attachment *Poster
 	if err := os.MkdirAll(i.AttachmentDir, 0o700); err != nil {
 		return "", 0, fmt.Errorf("making %s: %w", i.AttachmentDir, err)
 	}
-	ext := posternNamedExtension(attachment.Name)
-	if ext == "" {
-		ext = posternAttachmentExtension(attachment.Mime)
-	}
-	path := filepath.Join(i.AttachmentDir, name+ext)
+	path := i.attachmentPath(attachment, name)
 	if err := os.WriteFile(path, []byte(plain), 0o600); err != nil {
 		return "", 0, fmt.Errorf("writing the attachment: %w", err)
 	}
 	return path, len(plain), nil
+}
+
+// attachmentPath is where downloadAttachment writes attachment named name.
+func (i PosternInbox) attachmentPath(attachment *PosternAttachment, name string) string {
+	ext := posternNamedExtension(attachment.Name)
+	if ext == "" {
+		ext = posternAttachmentExtension(attachment.Mime)
+	}
+	return filepath.Join(i.AttachmentDir, name+ext)
 }
 
 // posternAttachmentExtension is the file extension an attachment of mime is
