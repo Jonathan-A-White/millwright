@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -38,6 +39,9 @@ type Release struct {
 // Run releases the held stories of one already-filed epic and reports the epic
 // as it was found. An epic the tracker does not have is a refusal, and nothing
 // is written: the reading comes first, and it is the whole of the reading.
+//
+// An id that is a story and not an epic releases that one story, when it is
+// held (see story).
 func (r Release) Run(ctx context.Context, epicID string) (FiledPlan, error) {
 	if r.Tracker == nil {
 		return FiledPlan{}, fmt.Errorf("releasing a plan: there is no work tracker to release it in")
@@ -47,6 +51,9 @@ func (r Release) Run(ctx context.Context, epicID string) (FiledPlan, error) {
 	}
 
 	epic, err := r.Tracker.ShowEpic(ctx, epicID)
+	if errors.Is(err, ErrNotAnEpic) {
+		return r.story(ctx, epicID)
+	}
 	if err != nil {
 		return FiledPlan{}, fmt.Errorf("reading the epic %s: %w", epicID, err)
 	}
@@ -75,6 +82,42 @@ func (r Release) Run(ctx context.Context, epicID string) (FiledPlan, error) {
 	if opened {
 		r.print(fmt.Sprintf("Opened the epic %s too: it was held.\n", epic.ID))
 	}
+	return found, nil
+}
+
+// story releases one story named by its own id: it prints the story's entry of
+// the tree, warns of a missing files key, releases it and says so. A story that
+// is not held is left as it is and said. A story whose Path names no rig or no
+// target branch is refused before anything is printed or written.
+func (r Release) story(ctx context.Context, id string) (FiledPlan, error) {
+	detail, err := r.Tracker.ShowStory(ctx, id)
+	if err != nil {
+		return FiledPlan{}, fmt.Errorf("reading the story %s: %w", id, err)
+	}
+	path := detail.Merged()
+	if strings.TrimSpace(path.Rig) == "" || strings.TrimSpace(path.Branch) == "" {
+		return FiledPlan{}, fmt.Errorf("releasing the story %s: it has no path (no rig or no target branch)", id)
+	}
+	found := FiledPlan{EpicID: detail.EpicID, Defaults: detail.Defaults, Stories: []FiledStory{{
+		ID:              detail.Story.ID,
+		Title:           detail.Story.Title,
+		Path:            path,
+		EstimateMinutes: detail.EstimateMinutes,
+		Needs:           detail.Needs,
+		State:           StateOf(detail.Status),
+	}}}
+	if !detail.Held() {
+		r.print(fmt.Sprintf("%s is %s, not held: nothing released\n", id, found.Stories[0].state()))
+		return found, nil
+	}
+	r.print(found.Stories[0].tree())
+	// A warning only: the story is released all the same.
+	warnNoFilesKey(ctx, r.Out, r.Rules, detail)
+	if err := r.Tracker.ReleaseStory(ctx, id); err != nil {
+		return found, fmt.Errorf("releasing story %s: %w", id, err)
+	}
+	found.Released = true
+	r.print(fmt.Sprintf("released 1: %s\n", id))
 	return found, nil
 }
 

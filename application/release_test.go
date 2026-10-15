@@ -8,6 +8,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // filedAndHeld files the two-story plan the way an unattended `mw file` does:
@@ -151,5 +152,118 @@ func TestReleasingNeedsAWorkTrackerAndAnEpic(t *testing.T) {
 	}
 	if _, err := (application.Release{Tracker: apptest.NewFakeTracker()}).Run(context.Background(), "  "); err == nil {
 		t.Error("expected releasing with no epic to be refused")
+	}
+}
+
+func TestReleaseStoryIdReleasesThatStoryAlone(t *testing.T) {
+	tracker, filed := filedAndHeld(t)
+	module, gateway := filed.Stories[0].ID, filed.Stories[1].ID
+	out := &strings.Builder{}
+
+	found, err := application.Release{Tracker: tracker, Out: out}.Run(context.Background(), module)
+	if err != nil {
+		t.Fatalf("releasing the story %s: %v", module, err)
+	}
+	if !found.Released {
+		t.Error("expected the release to report that it released the story")
+	}
+	for _, want := range []string{module + " · Go module", "millwright/main", "released 1"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("expected the release to say %q, got:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out.String(), gateway) {
+		t.Errorf("expected the sibling %s not to be mentioned, got:\n%s", gateway, out)
+	}
+
+	released, err := tracker.ShowStory(context.Background(), module)
+	if err != nil {
+		t.Fatalf("reading back %s: %v", module, err)
+	}
+	if released.Held() {
+		t.Errorf("expected %s to be released, it is %s", module, released.Status)
+	}
+	sibling, err := tracker.ShowStory(context.Background(), gateway)
+	if err != nil {
+		t.Fatalf("reading back %s: %v", gateway, err)
+	}
+	if !sibling.Held() {
+		t.Errorf("expected %s to be held still, it is %s", gateway, sibling.Status)
+	}
+}
+
+func TestReleaseStoryIdThatIsNotHeldLeavesItAsItIs(t *testing.T) {
+	tracker, filed := filedAndHeld(t)
+	module := filed.Stories[0].ID
+	if err := tracker.ReleaseStory(context.Background(), module); err != nil {
+		t.Fatalf("releasing %s first: %v", module, err)
+	}
+	out := &strings.Builder{}
+
+	if _, err := (application.Release{Tracker: tracker, Out: out}).Run(context.Background(), module); err != nil {
+		t.Fatalf("releasing the open story %s: %v", module, err)
+	}
+	if want := module + " is open, not held: nothing released"; !strings.Contains(out.String(), want) {
+		t.Errorf("expected the release to say %q, got:\n%s", want, out)
+	}
+	if strings.Contains(out.String(), "released 1") {
+		t.Errorf("expected no story to be released, got:\n%s", out)
+	}
+	detail, err := tracker.ShowStory(context.Background(), module)
+	if err != nil {
+		t.Fatalf("reading back %s: %v", module, err)
+	}
+	if detail.Status != apptest.StatusOpen {
+		t.Errorf("expected %s to stay open, it is %s", module, detail.Status)
+	}
+}
+
+func TestReleaseStoryIdWithNoRigIsRefusedAndWritesNothing(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("e-bare", domain.Path{})
+	tracker.AddStory("e-bare", domain.Story{ID: "s-bare", Title: "No path"})
+	if err := tracker.SetStatus("s-bare", apptest.StatusDeferred); err != nil {
+		t.Fatalf("holding the story: %v", err)
+	}
+	out := &strings.Builder{}
+
+	_, err := application.Release{Tracker: tracker, Out: out}.Run(context.Background(), "s-bare")
+	if err == nil {
+		t.Fatal("expected a story with no rig to be refused")
+	}
+	for _, want := range []string{"s-bare", "no path"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("expected the refusal to say %q, got %q", want, err)
+		}
+	}
+	detail, err := tracker.ShowStory(context.Background(), "s-bare")
+	if err != nil {
+		t.Fatalf("reading back s-bare: %v", err)
+	}
+	if !detail.Held() {
+		t.Errorf("expected s-bare to be held still, it is %s", detail.Status)
+	}
+}
+
+// expectsFiles says every rig expects a files key.
+type expectsFiles struct{}
+
+func (expectsFiles) EpicRequirements(context.Context, string) (domain.EpicRequirements, error) {
+	return domain.EpicRequirements{FilesExpected: true}, nil
+}
+
+func TestReleaseStoryIdWarnsOfAMissingFilesKeyAndReleasesAllTheSame(t *testing.T) {
+	tracker, filed := filedAndHeld(t)
+	module := filed.Stories[0].ID
+	out := &strings.Builder{}
+
+	if _, err := (application.Release{Tracker: tracker, Rules: expectsFiles{}, Out: out}).Run(context.Background(), module); err != nil {
+		t.Fatalf("releasing the story %s: %v", module, err)
+	}
+	if !strings.Contains(out.String(), module) || !strings.Contains(out.String(), "files") {
+		t.Errorf("expected a warning that %s has no files key, got:\n%s", module, out)
+	}
+	if !strings.Contains(out.String(), "released 1") {
+		t.Errorf("expected the story to be released all the same, got:\n%s", out)
 	}
 }

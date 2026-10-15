@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -364,6 +365,11 @@ func (d StoryDetail) Merged() domain.Path {
 func (d StoryDetail) Path() (domain.Path, error) {
 	return d.Story.PathFrom(d.Defaults)
 }
+
+// ErrNotAnEpic is what ShowEpic and ShowEpics wrap when the id they were given
+// is a bead that is not an epic, so that a caller who can take a story as well
+// tells that refusal from any other.
+var ErrNotAnEpic = errors.New("not an epic")
 
 // EpicDetail is an epic as the tracker holds it now: what it is called, the
 // default Path its stories inherit, and every story filed under it — whatever

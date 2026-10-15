@@ -15,8 +15,8 @@ import (
 // way to approve a plan without filing a second copy of it.
 func newReleaseCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "release <epic-id>",
-		Short: "Release the held stories of a plan filed earlier",
+		Use:   "release <epic-id|story-id>",
+		Short: "Release the held stories of a plan filed earlier, or one held story",
 		Long: "release reads an epic that is already in the tracker and prints the same tree mw file\n" +
 			"printed when it filed it — every story with the path it is worked by, what it still waits\n" +
 			"on, and what the tracker says it is — and then releases the stories that are still held.\n\n" +
@@ -25,6 +25,9 @@ func newReleaseCmd() *cobra.Command {
 			"releasing the same epic twice does no more than releasing it once. Which of the released\n" +
 			"stories a dispatcher may take is the tracker's own answer: the ones that wait on nothing\n" +
 			"still to be done.\n\n" +
+			"Given the id of a story instead of an epic, release prints that story's entry of the tree and\n" +
+			"releases that one story when it is held. A story that is not held is left as it is and said,\n" +
+			"and a story whose path names no rig or no target branch is refused.\n\n" +
 			"On a rig whose file in the vault says files_expected = true, a story with no files key is\n" +
 			"named under the tree, one line each: a warning, and the release goes ahead.",
 		Args: cobra.ExactArgs(1),

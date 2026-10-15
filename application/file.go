@@ -399,27 +399,35 @@ func (p FiledPlan) Tree() string {
 	fmt.Fprintf(&b, "    default path %s\n\n", p.Defaults.Summary())
 
 	for _, story := range p.Stories {
-		fmt.Fprintf(&b, "  %s · %s\n", story.ID, story.Title)
-		fmt.Fprintf(&b, "      path %s\n", story.Path.Summary())
-
-		state := []string{story.state()}
-		if story.EstimateMinutes > 0 {
-			state = append(state, fmt.Sprintf("%dm", story.EstimateMinutes))
-		}
-		if len(story.Needs) == 0 {
-			state = append(state, "waits on nothing")
-		} else {
-			state = append(state, "waits on "+strings.Join(story.Needs, ", "))
-		}
-		fmt.Fprintf(&b, "      %s\n", strings.Join(state, " · "))
-		for _, flight := range story.InFlight {
-			fmt.Fprintf(&b, "      %s\n", flight.line())
-			fmt.Fprintf(&b, "        bd dep add %s %s\n", story.ID, flight.ID)
-		}
+		b.WriteString(story.tree())
 	}
 	for _, epic := range p.Epics {
 		fmt.Fprintf(&b, "\n  %s · %s\n", epic.ID, epic.Title)
 		fmt.Fprintf(&b, "      an epic, %s: its stories are not shown here, mw show %s prints them\n", epic.State, epic.ID)
+	}
+	return b.String()
+}
+
+// tree is the story's entry in a plan's tree: its title, its path, and what it
+// is, how long it is thought to take and what it waits on.
+func (s FiledStory) tree() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "  %s · %s\n", s.ID, s.Title)
+	fmt.Fprintf(&b, "      path %s\n", s.Path.Summary())
+
+	state := []string{s.state()}
+	if s.EstimateMinutes > 0 {
+		state = append(state, fmt.Sprintf("%dm", s.EstimateMinutes))
+	}
+	if len(s.Needs) == 0 {
+		state = append(state, "waits on nothing")
+	} else {
+		state = append(state, "waits on "+strings.Join(s.Needs, ", "))
+	}
+	fmt.Fprintf(&b, "      %s\n", strings.Join(state, " · "))
+	for _, flight := range s.InFlight {
+		fmt.Fprintf(&b, "      %s\n", flight.line())
+		fmt.Fprintf(&b, "        bd dep add %s %s\n", s.ID, flight.ID)
 	}
 	return b.String()
 }
