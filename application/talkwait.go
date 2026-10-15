@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -96,6 +97,9 @@ type TalkTurn struct {
 	// About is what the talk was opened from, a card, a thread or a prompt:
 	// the Mayor's first answer is about it. Nil when the record carries none.
 	About *TalkAbout `json:"about,omitempty"`
+	// Attachment is a picture the Governor sent with the turn, a blob of the
+	// same shape as a message's file (section 8). Nil when there is none.
+	Attachment *PosternAttachment `json:"attachment,omitempty"`
 }
 
 // TalkAbout is the optional about field of a talk record: the kind of thing the
@@ -372,6 +376,7 @@ type talkWaitRun struct {
 	// paged past before it reached the turn included.
 	turn     *TalkTurn
 	turnSeq  int64
+	turnTxid string
 	call     *CallRecord
 	callTxid string
 	// channel is how the Governor's record the wait ends on came, empty when
@@ -459,7 +464,7 @@ func (r *talkWaitRun) page(arrived time.Time) error {
 					r.cursor = record.Seq
 					continue
 				}
-				r.turn, r.turnSeq, r.heardAt = turn, record.Seq, arrived
+				r.turn, r.turnSeq, r.turnTxid, r.heardAt = turn, record.Seq, record.Txid, arrived
 				r.channel = recordChannel(record.Txid)
 				r.cursor = record.Seq
 				return errTalkHeard
@@ -631,8 +636,11 @@ func (r *talkWaitRun) finish(ctx context.Context) (TalkWaitReport, error) {
 		if a := r.turn.About; a != nil && (a.Kind != "" || a.ID != "" || a.Title != "") {
 			about = strings.TrimSpace(fmt.Sprintf("about: %s %s %s", a.Kind, a.ID, a.Title)) + "\n"
 		}
-		r.printf(r.Out, "talk %s turn %d (role %s)\nmodel %s\n%scut %s\ntext: %s\n%sindex-to-print %d ms\n",
-			r.turn.Talk.ID, r.turn.Talk.Turn, r.turn.Role, model, switched, cut, r.turn.Text, about, report.IndexToPrint.Milliseconds())
+		// The picture is fetched after the index-to-print time is taken, so
+		// that the time still measures the wake and not the blob.
+		image := r.turnImage(ctx)
+		r.printf(r.Out, "talk %s turn %d (role %s)\nmodel %s\n%scut %s\ntext: %s\n%s%sindex-to-print %d ms\n",
+			r.turn.Talk.ID, r.turn.Talk.Turn, r.turn.Role, model, switched, cut, r.turn.Text, image, about, report.IndexToPrint.Milliseconds())
 	}
 	if len(r.posts) > 0 {
 		r.printf(r.Out, "new postern message: %d unread, read them with mw postern inbox\n", len(r.posts))
@@ -673,6 +681,41 @@ func (r *talkWaitRun) finish(ctx context.Context) (TalkWaitReport, error) {
 	}
 	report.Mail = mail
 	return report, nil
+}
+
+// TalkWaitImageLimit bounds how long the wait spends fetching a turn's
+// picture before it prints the turn without it.
+const TalkWaitImageLimit = 30 * time.Second
+
+// turnImage is the line printed under the turn's text for its picture, ""
+// when it carries none: "image: <path> (<name>)" once the picture is written
+// to AttachmentDir under the record's txid, as mw postern inbox writes a
+// message's, for the Mayor to look at before answering; a file already there
+// is not fetched again. A picture that cannot be had is "image: could not be
+// fetched (<reason>)", and the turn is printed all the same.
+func (r *talkWaitRun) turnImage(ctx context.Context) string {
+	picture := r.turn.Attachment
+	if picture == nil {
+		return ""
+	}
+	if r.AttachmentDir == "" || r.turnTxid == "" {
+		return "image: could not be fetched (no postern inbox dir or no txid to name it by)\n"
+	}
+	inbox := PosternInbox{Postern: r.Postern, Cipher: r.Cipher, Keys: r.Keys, AttachmentDir: r.AttachmentDir}
+	name := posternFileName(r.turnTxid)
+	path := inbox.attachmentPath(picture, name)
+	if _, err := os.Stat(path); err != nil {
+		// The turn is heard: the wait's own limit does not cut the fetch short.
+		fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), TalkWaitImageLimit)
+		defer cancel()
+		if path, _, err = inbox.downloadAttachment(fetchCtx, picture, name); err != nil {
+			return fmt.Sprintf("image: could not be fetched (%v)\n", err)
+		}
+	}
+	if label := posternSafeFileName(picture.Name); label != "" {
+		path += " (" + label + ")"
+	}
+	return "image: " + path + "\n"
 }
 
 // handedOver is how a wait ends on the seat's handover: it says so, and moves

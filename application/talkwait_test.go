@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -151,5 +153,143 @@ func TestTalkWaitStillSaysNoTextForAFileThatIsNotAudio(t *testing.T) {
 
 	if !strings.Contains(printed, "(no text)") || strings.Contains(printed, "voice note") {
 		t.Errorf("expected (no text) and no voice note, got:\n%s", printed)
+	}
+}
+
+// A turn's plaintext decodes with its picture into the one attachment type a
+// message's file decodes into, and without it to none.
+func TestTalkTurnDecodesWithAndWithoutAnAttachment(t *testing.T) {
+	var with application.TalkTurn
+	raw := `{"talk":{"id":"talk-12","turn":1},"role":"turn","text":"Look at this",` +
+		`"attachment":{"hash":"ab12","size":42,"mime":"image/jpeg","name":"Screenshot.jpg"}}`
+	if err := json.Unmarshal([]byte(raw), &with); err != nil {
+		t.Fatal(err)
+	}
+	var shared *application.PosternAttachment = with.Attachment
+	if shared == nil || *shared != (application.PosternAttachment{Hash: "ab12", Size: 42, Mime: "image/jpeg", Name: "Screenshot.jpg"}) {
+		t.Errorf("expected the attachment decoded, got %+v", shared)
+	}
+
+	var without application.TalkTurn
+	if err := json.Unmarshal([]byte(`{"talk":{"id":"talk-12","turn":2},"role":"turn","text":"Plain"}`), &without); err != nil {
+		t.Fatal(err)
+	}
+	if without.Attachment != nil {
+		t.Errorf("expected no attachment, got %+v", without.Attachment)
+	}
+	if encoded, _ := json.Marshal(without); strings.Contains(string(encoded), "attachment") {
+		t.Errorf("expected a turn with no picture to encode no attachment field, got %s", encoded)
+	}
+}
+
+// addPictureTurn indexes a talk turn from the Governor to the Mayor carrying
+// picture as a sealed image/jpeg named name, and returns its seq and the hash
+// the blob is stored under.
+func (f *talkPosternFixture) addPictureTurn(txid, text, name string, picture []byte) (int64, string) {
+	f.t.Helper()
+	sealed, err := f.cipher.EncryptBytes(talkWaitMayorKey, picture)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	raw, err := base64.StdEncoding.DecodeString(sealed)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	sum := sha256.Sum256(raw)
+	hash := hex.EncodeToString(sum[:])
+	f.postern.SetBlob(hash, raw)
+	plain, _ := json.Marshal(map[string]any{
+		"talk": map[string]any{"id": "talk-12", "turn": 1}, "text": text, "role": application.TalkRoleTurn,
+		"attachment": map[string]any{"hash": hash, "size": len(raw), "mime": "image/jpeg", "name": name},
+	})
+	ct, err := f.cipher.Encrypt(talkWaitMayorKey, string(plain))
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return f.postern.AddRecord(application.PosternRecord{
+		Txid: txid, Class: "talk", To: talkWaitMayorKey, From: talkWaitGovernorKey, Ciphertext: ct,
+	}).Seq, hash
+}
+
+// runInto is run with the turn's pictures written under dir.
+func (f *talkPosternFixture) runInto(head int64, dir string) string {
+	f.t.Helper()
+	var out strings.Builder
+	_, err := application.TalkWait{
+		Stream:        talkWaitStream{seq: head},
+		Postern:       f.postern,
+		Cipher:        apptest.NewFakeCipher(),
+		Keys:          stubPosternKeys{pubKey: talkWaitMayorKey},
+		Memory:        f.tracker,
+		GovernorKey:   talkWaitGovernorKey,
+		AttachmentDir: dir,
+		Limit:         200 * time.Millisecond,
+		MinBackoff:    5 * time.Millisecond,
+		MaxBackoff:    5 * time.Millisecond,
+		Out:           &out,
+	}.Run(context.Background())
+	if err != nil {
+		f.t.Fatalf("the wait: %v", err)
+	}
+	return out.String()
+}
+
+// A turn's picture is written to the inbox dir under the record's txid and
+// printed under the turn's text; a run that finds it there fetches nothing.
+func TestTalkWaitWritesATurnsPictureAndPrintsItsPath(t *testing.T) {
+	f := newTalkPosternFixture(t)
+	dir := t.TempDir()
+	seq, hash := f.addPictureTurn("direct:pic1", "Look at this", "Screenshot.jpg", []byte("jpeg bytes"))
+
+	printed := f.runInto(seq, dir)
+
+	path := filepath.Join(dir, "direct-pic1.jpg")
+	line := "text: Look at this\nimage: " + path + " (Screenshot.jpg)\n"
+	if !strings.Contains(printed, line) {
+		t.Errorf("expected %q under the text, got:\n%s", line, printed)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != "jpeg bytes" {
+		t.Errorf("expected the decrypted picture at %s, got %q (%v)", path, got, err)
+	}
+
+	// The blob gone from the backend, a second run can only print the line
+	// from the file it finds.
+	if err := f.postern.DeleteBlob(context.Background(), hash); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.tracker.SetNote(context.Background(), application.TalkWaitCursorKey, "0"); err != nil {
+		t.Fatal(err)
+	}
+	if again := f.runInto(seq, dir); !strings.Contains(again, line) {
+		t.Errorf("expected the same line on a second run, got:\n%s", again)
+	}
+}
+
+// A picture that cannot be fetched is said so, and the turn is printed whole.
+func TestTalkWaitSaysAPictureCouldNotBeFetched(t *testing.T) {
+	f := newTalkPosternFixture(t)
+	seq, hash := f.addPictureTurn("direct:pic2", "Look at this", "Screenshot.jpg", []byte("jpeg bytes"))
+	if err := f.postern.DeleteBlob(context.Background(), hash); err != nil {
+		t.Fatal(err)
+	}
+
+	printed := f.runInto(seq, t.TempDir())
+
+	for _, want := range []string{"talk talk-12 turn 1", "cut no", "text: Look at this\nimage: could not be fetched (", "index-to-print "} {
+		if !strings.Contains(printed, want) {
+			t.Errorf("expected %q, got:\n%s", want, printed)
+		}
+	}
+}
+
+// A turn with no picture prints no image line.
+func TestTalkWaitPrintsNoImageLineForATurnWithoutAPicture(t *testing.T) {
+	f := newTalkPosternFixture(t)
+	seq := f.addTurn("Plain question")
+
+	printed := f.runInto(seq, t.TempDir())
+
+	if !strings.Contains(printed, "text: Plain question") || strings.Contains(printed, "image:") {
+		t.Errorf("expected the turn and no image line, got:\n%s", printed)
 	}
 }

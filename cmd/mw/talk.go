@@ -123,6 +123,10 @@ func newTalkWaitCmd() *cobra.Command {
 			"milliseconds from the event to the print, and any new mail the Deputy sent the Mayor since the\n" +
 			"last turn, each message once. mw postern inbox and its --unread-count leave talk records alone, so\n" +
 			"mail-wait never wakes the Mayor a second time for one turn.\n\n" +
+			"A turn that carries a picture prints 'image: <path> (<name>)' under its text: the picture decrypted\n" +
+			"into the postern inbox dir as <txid>.jpg, as mw postern inbox writes a message's, and fetched only\n" +
+			"once; look at it before answering. One that cannot be had prints 'image: could not be fetched\n" +
+			"(<reason>)', and the turn is printed as ever.\n\n" +
 			"It also ends at a new postern message for the Mayor's key, one past the postern inbox's cursor\n" +
 			"(which it only reads), printing 'new postern message' with each one's channel, txid and first\n" +
 			"line; a message already read does not wake it, and a Governor turn that arrives with one wins.\n" +
