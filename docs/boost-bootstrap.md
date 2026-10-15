@@ -68,7 +68,7 @@ installs and starts nothing.
 10. **browsers**: for each cloned rig whose `package.json` depends on `@playwright/test` (lampas's `[changed_specs]` and postern's `gate:shots` drive a browser), `npx playwright@<the version its package-lock.json holds> install --with-deps chromium`, run in the rig, so the browser is the revision that rig's own Playwright wants. It needs root for the system libraries. Skipped when that version's chromium was installed before.
 11. **beads**: `~/.config/mw/beads.env` (mode 600): `BEADS_DOLT_SERVER_HOST`, `_PORT`, and the user and password if given. This is what makes `bd` reach the home's server instead of making a second, empty database.
 12. **profile**: a marked block in `~/.profile` that puts `~/.local/bin` on `PATH` and reads the three env files.
-13. **dispatch**: `~/.config/mw/dispatch.env` (the `PATH` line, if absent; the host owns it), a systemd drop-in `mw-dispatch.service.d/boost-env.conf` naming the env files (no secret in it), `loginctl enable-linger`, then `scripts/install-units.sh --enable mw-dispatch`.
+13. **dispatch**: `~/.config/mw/dispatch.env` (the `PATH` line, if absent; the host owns it), a systemd drop-in `mw-dispatch.service.d/boost-env.conf` naming the env files (no secret in it), a timer drop-in `mw-dispatch.timer.d/boost-pace.conf` (`OnCalendar=` then `OnCalendar=*:0/5`), `loginctl enable-linger`, then `scripts/install-units.sh --enable mw-dispatch`, and, when the step changed anything, one `systemctl --user start --no-block mw-dispatch.service`. The timer's own pace is hourly, the home's fallback for an event its follower missed; a Boost has no follower, so without the timer drop-in a box just made waited up to an hour for its first dispatch (mw-5gr3k0.7).
 
 ### hosts/boost-config.toml
 

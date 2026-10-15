@@ -30,6 +30,10 @@
 #      checkout whose HEAD is a zero-byte object is repaired (empty objects removed,
 #      fetched, reset to origin), and one fetch cannot mend is cloned again with its
 #      .git/config kept, the log saying which (mw-5gr3k0.8)
+#   i. a Boost has no follower to spring its dispatch, so the dispatch step writes
+#      a timer drop-in that keeps the five-minute pace (OnCalendar= then
+#      OnCalendar=*:0/5) and starts mw-dispatch.service once, so a fresh box
+#      dispatches within a minute and not at the next hour (mw-5gr3k0.7)
 # The shell linter is run over the script when it is installed, and skipped when not.
 
 set -eu
@@ -346,7 +350,7 @@ snapshot() {
 
 # changing: the calls in the log that change the machine.
 changing() {
-	grep -E '^(apt-get install|git clone|git .* (fetch|reset) |npm install|npx .* install |curl .*(\.tar\.xz)|loginctl|systemctl (user|system) (enable|daemon-reload)|install\.sh [^-]|install\.sh$|install-units\.sh)' "$1" || true
+	grep -E '^(apt-get install|git clone|git .* (fetch|reset) |npm install|npx .* install |curl .*(\.tar\.xz)|loginctl|systemctl (user|system) (enable|start|daemon-reload)|install\.sh [^-]|install\.sh$|install-units\.sh)' "$1" || true
 }
 
 STEPS="packages node git wireguard rig claude vault rigs config browsers beads profile dispatch"
@@ -370,6 +374,9 @@ for s in $STEPS; do
 	last=$ln
 done
 printf '%s\n' "$OUT" | grep -Fq "would:" || fail "$NAME: no step says what it would do: $OUT"
+dispatch_out=$(printf '%s\n' "$OUT" | awk '/^==> \[/ { on = ($0 ~ /\] dispatch:/) } on')
+printf '%s\n' "$dispatch_out" | grep -F "would:" | grep -Fq "mw-dispatch.timer.d/boost-pace.conf" || fail "$NAME: the dispatch step does not plan the timer drop-in: $dispatch_out"
+printf '%s\n' "$dispatch_out" | grep -F "would:" | grep -Fq "start --no-block mw-dispatch.service" || fail "$NAME: the dispatch step does not plan a first dispatch: $dispatch_out"
 browsers_out=$(printf '%s\n' "$OUT" | awk '/^==> \[/ { on = ($0 ~ /\] browsers:/) } on')
 printf '%s\n' "$browsers_out" | grep -F "would:" | grep -Fq "install --with-deps chromium" || fail "$NAME: the browsers step does not plan a Playwright chromium install: $browsers_out"
 config_out=$(printf '%s\n' "$OUT" | awk '/^==> \[/ { on = ($0 ~ /\] config:/) } on')
@@ -430,6 +437,13 @@ grep -Fq 'boost-bootstrap' "$HOME_DIR/.profile" || fail "$NAME: ~/.profile has n
 grep -Fq 'PATH=' "$HOME_DIR/.config/mw/dispatch.env" || fail "$NAME: dispatch.env has no PATH"
 DROPIN=$HOME_DIR/.config/systemd/user/mw-dispatch.service.d
 grep -Fq 'EnvironmentFile=-%h/.config/mw/github.env' "$DROPIN"/*.conf || fail "$NAME: the dispatch drop-in does not read github.env"
+# i. the five-minute pace, and one dispatch now: not the hourly default
+PACE=$HOME_DIR/.config/systemd/user/mw-dispatch.timer.d/boost-pace.conf
+[ -f "$PACE" ] || fail "$NAME: no timer drop-in $PACE: a Boost has no follower, so mw-dispatch.timer keeps its hourly default and a fresh box waits up to an hour for its first dispatch"
+[ "$(cat "$PACE")" = "$(printf '[Timer]\nOnCalendar=\nOnCalendar=*:0/5')" ] || fail "$NAME: the timer drop-in is not OnCalendar= then OnCalendar=*:0/5: $(cat "$PACE")"
+[ "$(grep -c '^systemctl user start .*mw-dispatch.service' "$CALLS")" = 1 ] || fail "$NAME: mw-dispatch.service was not started once at the end of the dispatch step: $(grep '^systemctl' "$CALLS")"
+last_sc=$(grep '^systemctl user ' "$CALLS" | tail -n 1)
+case $last_sc in *"start "*mw-dispatch.service*) ;; *) fail "$NAME: the dispatch was started before the timer was armed: $(grep '^systemctl user ' "$CALLS")" ;; esac
 [ "$(HOME="$HOME_DIR" /usr/bin/git config --global user.name)" = "Jonathan White" ] || fail "$NAME: git user.name not set"
 echo "ok: $NAME"
 
