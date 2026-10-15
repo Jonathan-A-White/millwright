@@ -641,7 +641,7 @@ func (f *FakeTracker) ShowEpic(_ context.Context, id string) (application.EpicDe
 		return application.EpicDetail{}, f.Err
 	}
 	if story, filed := f.stories[id]; filed && !story.detail.IsEpic {
-		return application.EpicDetail{}, fmt.Errorf("%s is a story, not an epic", id)
+		return application.EpicDetail{}, fmt.Errorf("%s is a story, %w", id, application.ErrNotAnEpic)
 	}
 	if _, filed := f.defaults[id]; !filed {
 		return application.EpicDetail{}, fmt.Errorf("no epic %q", id)

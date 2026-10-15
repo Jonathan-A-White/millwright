@@ -270,7 +270,7 @@ func (g *Gateway) ShowEpic(ctx context.Context, id string) (application.EpicDeta
 		return application.EpicDetail{}, err
 	}
 	if epic.Type != "" && epic.Type != TypeEpic {
-		return application.EpicDetail{}, fmt.Errorf("%s is a %s, not an epic", id, epic.Type)
+		return application.EpicDetail{}, fmt.Errorf("%s is a %s, %w", id, epic.Type, application.ErrNotAnEpic)
 	}
 	defaults := domain.PathFromMetadata(epic.pathMetadata())
 
@@ -386,7 +386,7 @@ func (g *Gateway) ShowEpics(ctx context.Context, ids []string) ([]application.Ep
 			return nil, fmt.Errorf("no bead %s in %s", id, g.vault)
 		}
 		if epic.Type != "" && epic.Type != TypeEpic {
-			return nil, fmt.Errorf("%s is a %s, not an epic", id, epic.Type)
+			return nil, fmt.Errorf("%s is a %s, %w", id, epic.Type, application.ErrNotAnEpic)
 		}
 		epics = append(epics, epic)
 	}

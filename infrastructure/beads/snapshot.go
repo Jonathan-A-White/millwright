@@ -246,7 +246,7 @@ func (s *snapshot) ShowEpics(ctx context.Context, ids []string) ([]application.E
 			return s.WorkTracker.ShowEpics(ctx, ids)
 		}
 		if epic.Type != "" && epic.Type != TypeEpic {
-			return nil, fmt.Errorf("%s is a %s, not an epic", id, epic.Type)
+			return nil, fmt.Errorf("%s is a %s, %w", id, epic.Type, application.ErrNotAnEpic)
 		}
 		defaults := domain.PathFromMetadata(epic.pathMetadata())
 

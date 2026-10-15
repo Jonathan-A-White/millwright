@@ -399,6 +399,7 @@ the tree names it as an epic, with its state, and leaves its own stories to
 
 ```sh
 bin/mw release mw-gq6   # print the epic's tree, release what is still held
+bin/mw release mw-gq6.4 # a story's id releases that one story, when it is held
 ```
 
 The Governor is usually not at the machine when a plan is filed, and filing it
