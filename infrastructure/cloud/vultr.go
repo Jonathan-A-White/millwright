@@ -146,6 +146,40 @@ func (v Vultr) Billed(ctx context.Context, names []string) (float64, bool, error
 	return usd, true, nil
 }
 
+// Instances implements application.CloudProvider: `list` prints a line for each
+// instance Vultr holds, its id, label and status separated by tabs; a line
+// without a label is not a box of ours and is dropped.
+func (v Vultr) Instances(ctx context.Context) ([]application.CloudInstance, error) {
+	out, err := v.run(ctx, billedLimit, "list")
+	if err != nil {
+		return nil, err
+	}
+	var found []application.CloudInstance
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Split(strings.TrimRight(line, "\r"), "\t")
+		for i := range fields {
+			fields[i] = strings.TrimSpace(fields[i])
+		}
+		if len(fields) < 2 || fields[0] == "" || fields[1] == "" {
+			continue
+		}
+		inst := application.CloudInstance{ID: fields[0], Label: fields[1]}
+		if len(fields) > 2 {
+			inst.Status = fields[2]
+		}
+		found = append(found, inst)
+	}
+	return found, nil
+}
+
+// Reap implements application.CloudProvider: `down --yes --name <label>
+// --instance <id>`, which destroys what the box's state holds, if it holds
+// anything, and the instance by its id, and takes the peer off the hub.
+func (v Vultr) Reap(ctx context.Context, instance application.CloudInstance) error {
+	_, err := v.run(ctx, v.limit(), "down", "--yes", "--name", instance.Label, "--instance", instance.ID)
+	return err
+}
+
 func (v Vultr) limit() time.Duration {
 	if v.Limit > 0 {
 		return v.Limit
@@ -180,10 +214,13 @@ func (v Vultr) run(ctx context.Context, limit time.Duration, args ...string) (st
 		if last == "" {
 			last = lastLine(stdout.String())
 		}
+		failure := fmt.Errorf("%s %s: %w", v.Command, args[0], err)
 		if last != "" {
-			return "", fmt.Errorf("%s %s: %v: %s", v.Command, args[0], err, last)
+			failure = fmt.Errorf("%s %s: %v: %s", v.Command, args[0], err, last)
 		}
-		return "", fmt.Errorf("%s %s: %w", v.Command, args[0], err)
+		// Terraform says what Vultr refused on standard error, a few lines
+		// above the wrapper's last: a refusal no retry mends is named so.
+		return "", application.ClassifyCloudError(failure, stderr.String())
 	}
 	return stdout.String(), nil
 }

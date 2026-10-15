@@ -5,7 +5,8 @@
 # the age key that opens the vault's secrets.
 #
 #   contrib/vultr-boost up       [--yes] [--dry-run] [--name NAME] [--snapshot ID]
-#   contrib/vultr-boost down     [--yes] [--dry-run] [--name NAME]
+#   contrib/vultr-boost down     [--yes] [--dry-run] [--name NAME] [--instance ID]
+#   contrib/vultr-boost list
 #   contrib/vultr-boost status   [--name NAME]
 #   contrib/vultr-boost snapshot [--dry-run] [--name NAME]
 #   contrib/vultr-boost spend    [--name NAME]...
@@ -17,6 +18,10 @@
 #         confirm unless --yes is given. A second up changes nothing it need not.
 # down    terraform destroy removes the box, then the peer comes off the hub (again
 #         backed up first). The keys stay in the vault for the next up.
+#         --instance ID also deletes that Vultr instance by its id, for an orphan no
+#         state holds (a make that was killed): terraform destroy finds nothing then.
+# list    every instance Vultr holds on the account, one line each: id, label and
+#         status separated by tabs. mw's cloud check reads it to find orphans.
 # status  the box's state (from the state in the vault and Vultr's API) and what it
 #         costs; with no box, the price one would cost.
 # snapshot  makes a Vultr snapshot of a box that is up and bootstrapped, and prints its
@@ -61,6 +66,7 @@ YES=0
 CMD=""
 NAME_ARG=""
 NAMES=()
+INSTANCE=""
 SNAPSHOT=""
 STEPS=0
 N=0
@@ -73,15 +79,18 @@ die() {
 usage() {
 	cat <<'EOF'
 Usage: vultr-boost up       [--yes] [--dry-run] [--name NAME] [--snapshot ID]
-       vultr-boost down     [--yes] [--dry-run] [--name NAME]
+       vultr-boost down     [--yes] [--dry-run] [--name NAME] [--instance ID]
+       vultr-boost list
        vultr-boost status   [--name NAME]
        vultr-boost snapshot [--dry-run] [--name NAME]
        vultr-boost spend    [--name NAME]...
 
 up makes the Boost box on Vultr and enrols it on the WireGuard hub; down destroys
 it and removes the peer; status prints its state and cost; snapshot makes a
-ready-made image of a bootstrapped box for up --snapshot; spend prints what the
-boxes named have cost this month. --name picks the box (default the tfvars name,
+ready-made image of a bootstrapped box for up --snapshot; list prints every
+instance Vultr holds (id, label, status); spend prints what the boxes named have
+cost this month; down --instance ID also deletes that Vultr instance, for an
+orphan no state holds. --name picks the box (default the tfvars name,
 else cloud1). --yes passes -auto-approve to terraform (otherwise terraform asks);
 --dry-run prints every step and runs none. Settings live in the vault's
 hosts/vultr/vultr-boost.tfvars and tokens in `mw secrets`; see docs/vultr-boost.md.
@@ -90,7 +99,7 @@ EOF
 
 while [ $# -gt 0 ]; do
 	case $1 in
-	up | down | status | snapshot | spend)
+	up | down | list | status | snapshot | spend)
 		[ -z "$CMD" ] || die "one command at a time: $CMD and $1"
 		CMD=$1
 		;;
@@ -98,6 +107,11 @@ while [ $# -gt 0 ]; do
 		[ $# -gt 1 ] || die "--name needs a box name"
 		NAME_ARG=$2
 		NAMES+=("$2")
+		shift
+		;;
+	--instance)
+		[ $# -gt 1 ] || die "--instance needs a Vultr instance id"
+		INSTANCE=$2
 		shift
 		;;
 	--snapshot)
@@ -171,6 +185,9 @@ else
 	KEY_AGE=$HOSTDIR/$NAME.wg.key.age
 	PUB_FILE=$HOSTDIR/$NAME.wg.pub
 fi
+case $INSTANCE in
+*[!a-zA-Z0-9-]*) die "the instance id \"$INSTANCE\" must match [a-zA-Z0-9-]+ (what Vultr issues)" ;;
+esac
 ENDPOINT=$(tfvar wg_endpoint)
 HUB_SSH=${VULTR_BOOST_HUB_SSH:-root@${ENDPOINT%:*}}
 [ "$HUB_SSH" != "root@" ] || HUB_SSH="root@<the host of wg_endpoint>"
@@ -214,6 +231,7 @@ plan_down() {
 	step "read: settings $TFVARS, token vultr_api_token with mw secrets get"
 	step "state: open $STATE_AGE with age into a private directory under $RUNBASE (a tmpfs); removed on exit"
 	step "terraform -chdir=$TFDIR destroy -state=<private dir>/terraform.tfstate -var-file=$TFVARS (-auto-approve with --yes)"
+	[ -z "$INSTANCE" ] || would "curl -X DELETE $API/instances/$INSTANCE with the token on stdin: the orphan no state holds"
 	step "ssh $HUB_SSH: copy /etc/wireguard/wg0.conf to a dated backup, then $ENROL --remove $NAME"
 	step "state: encrypt it back to $STATE_AGE with age, commit hosts/vultr in the vault, remove the private directory"
 }
@@ -231,6 +249,11 @@ if [ "$DRY" = 1 ]; then
 		echo "vultr-boost snapshot --dry-run: nothing below is run"
 		step "state: open $STATE_AGE with age (read only) and read $NAME's id from it"
 		step "curl -X POST $API/snapshots with the token on stdin: a snapshot of $NAME, whose id is printed for [cloud] snapshot"
+		;;
+	list)
+		STEPS=1
+		echo "vultr-boost list --dry-run: nothing below is run"
+		step "curl $API/instances with the token on stdin: each instance's id, label and status"
 		;;
 	spend)
 		STEPS=1
@@ -427,6 +450,19 @@ do_down() {
 		seal_state
 		die "terraform destroy failed (status $rc); the peer was left on the hub and the state is kept. Run down again"
 	fi
+	if [ -n "$INSTANCE" ]; then
+		# An orphan: a box terraform made and lost the state of. Terraform's destroy
+		# above may have taken it (or found nothing), so a 404 is done.
+		if vultr_api DELETE "/instances/$INSTANCE"; then
+			case $API_CODE in
+			404) echo "    skip: Vultr holds no instance $INSTANCE" ;;
+			*) echo "    deleted: Vultr instance $INSTANCE, no state held it" ;;
+			esac
+		else
+			seal_state
+			die "Vultr would not delete instance $INSTANCE (HTTP $API_CODE): $(printf '%s' "$API_BODY" | tr '\n' ' ' | cut -c1-300). The peer was left on the hub. Run down again"
+		fi
+	fi
 
 	step "hub: remove $NAME from $HUB_SSH"
 	local remote out backup
@@ -544,6 +580,39 @@ do_snapshot() {
 	echo "    put it in ~/.config/mw/config.toml: [cloud] snapshot = \"$snap\""
 }
 
+# --- list -----------------------------------------------------------------------
+# vultr_api METHOD PATH: call Vultr with the token on curl's stdin. API_BODY and
+# API_CODE are its answer; it succeeds on a 2xx or a 404 of a DELETE, and says
+# on standard error what Vultr said when it does not.
+API_BODY=""
+API_CODE=""
+vultr_api() {
+	local method=$1 reply
+	reply=$(printf 'header = "Authorization: Bearer %s"\n' "$VULTR_KEY" | curl -sS -m 60 -K - -X "$method" -w '\n%{http_code}' "$API$2") || {
+		API_BODY="" API_CODE=000
+		echo "vultr-boost: could not reach Vultr ($method $2)" >&2
+		return 1
+	}
+	API_CODE=${reply##*$'\n'}
+	API_BODY=${reply%$'\n'*}
+	case $API_CODE in
+	2?? | 404) [ "$API_CODE" != 404 ] || [ "$method" = DELETE ] || return 1 ;;
+	*) return 1 ;;
+	esac
+}
+
+# list: each instance Vultr holds, "id<TAB>label<TAB>status". A refusal is said,
+# as Vultr said it, on standard error.
+do_list() {
+	need mw jq curl
+	load_token
+	vultr_api GET "/instances?per_page=500" || {
+		echo "vultr-boost: Vultr refused the list of instances (HTTP $API_CODE): $(printf '%s' "$API_BODY" | tr '\n' ' ' | cut -c1-300)" >&2
+		exit 1
+	}
+	printf '%s' "$API_BODY" | jq -r '.instances[]? | [.id, (.label // ""), (.status // "")] | @tsv'
+}
+
 # --- spend ----------------------------------------------------------------------
 # spend: the pending charges this month whose description names a box, summed;
 # "unknown" when Vultr's billing could not be read or said nothing to sum.
@@ -574,6 +643,7 @@ do_spend() {
 case $CMD in
 up) do_up ;;
 down) do_down ;;
+list) do_list ;;
 status) do_status ;;
 snapshot) do_snapshot ;;
 spend) do_spend ;;

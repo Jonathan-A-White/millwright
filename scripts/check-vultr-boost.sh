@@ -263,6 +263,10 @@ case \$last in
 */instances/inst-1234) echo '{"instance":{"id":"inst-1234","status":"active","power_status":"running","server_status":"ok","plan":"vhp-8c-16gb-amd","region":"zzz","date_created":"2026-10-09T10:00:00+00:00"}}' ;;
 */plans*) echo '{"plans":[{"id":"vhp-8c-16gb-amd","vcpu_count":8,"ram":16384,"monthly_cost":96,"hourly_cost":0.132}]}' ;;
 */billing/pending-charges) echo '{"pending_charges":[{"description":"cloud1 (vhp-8c-16gb-amd)","total":1.5},{"description":"hub vps","total":6},{"description":"cloud2 (vhp-8c-16gb-amd)","total":0.25},{"description":"cloud12","total":9}]}' ;;
+*/instances\?per_page=500) echo '{"instances":[{"id":"inst-1234","label":"cloud1","status":"active"},{"id":"orphan-1","label":"cloud2","status":"locked"},{"id":"other-1","label":"","status":"active"}]}'; case " \$* " in *" -w "*) printf '\n200' ;; esac ;;
+*/instances/orphan-1) case " \$* " in *" -w "*) printf '\n204' ;; esac ;;
+*/instances/gone-1) echo '{"error":"Invalid instance ID"}'; case " \$* " in *" -w "*) printf '\n404' ;; esac ;;
+*/instances/locked-1) echo '{"error":"Instance is locked"}'; case " \$* " in *" -w "*) printf '\n409' ;; esac ;;
 */snapshots) echo '{"snapshot":{"id":"snap-77","description":"mw boost"}}' ;;
 *) echo "curl stand-in: unexpected url \$last" >&2; exit 22 ;;
 esac
@@ -447,5 +451,27 @@ mv "$SECRETS/vultr_api_token" "$T/token.away"
 out=$(run spend --name cloud1 2>&1) || fail "spend without a token failed: $out"
 [ "$out" = unknown ] || fail "spend that cannot ask Vultr should say unknown, not: $out"
 mv "$T/token.away" "$SECRETS/vultr_api_token"
+
+# --- h. reconciling with Vultr (mw-gq6.460): list, and down --instance ----------
+: >"$CURLLOG"
+out=$(run list 2>&1) || fail "list failed: $out"
+printf '%s\n' "$out" | grep -qx "$(printf 'orphan-1\tcloud2\tlocked')" || fail "list does not print id, label and status separated by tabs: $out"
+[ "$(printf '%s\n' "$out" | wc -l)" = 3 ] || fail "list should print a line for each instance: $out"
+grep -q "$VULTR_KEY" "$CURLLOG" || fail "list did not send the token to curl on stdin"
+grep -q "$VULTR_KEY" "$CALLS" && fail "list put the Vultr token on a command line"
+
+: >"$SSHLOG"
+out=$(run down --yes --name cloud2 --instance orphan-1 2>&1) || fail "down --instance failed: $out"
+tr '\n' ' ' <"$CALLS" | grep -q 'curl .*-X DELETE .*/instances/orphan-1' || fail "down --instance did not delete the instance at Vultr: $(tail -n 4 "$CALLS")"
+echo "$out" | grep -q 'deleted: Vultr instance orphan-1' || fail "down --instance does not say it deleted the instance: $out"
+grep -q 'wg-enrol --remove cloud2' "$SSHLOG" || fail "down --instance did not take the peer off the hub: $(cat "$SSHLOG")"
+out=$(run down --yes --name cloud2 --instance gone-1 2>&1) || fail "down --instance of an instance already gone failed: $out"
+echo "$out" | grep -q 'Vultr holds no instance gone-1' || fail "down --instance of a gone instance does not say so: $out"
+if out=$(run down --yes --name cloud2 --instance locked-1 2>&1); then fail "down --instance of a locked instance should fail"; fi
+echo "$out" | grep -q 'Instance is locked' || fail "down --instance does not say what Vultr said: $out"
+if out=$(run down --yes --name cloud2 --instance 'x;y' 2>&1); then fail "a bad instance id should be refused"; fi
+[ -z "$(ls -A "$RUN")" ] || fail "list or down --instance left a tmpfs directory behind"
+out=$(run_bare list --dry-run 2>&1) || fail "list --dry-run failed: $out"
+echo "$out" | grep -q 'curl' || fail "list --dry-run does not print the call to Vultr: $out"
 
 echo "check-vultr-boost: ok"

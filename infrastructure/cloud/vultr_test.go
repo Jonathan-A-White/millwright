@@ -2,12 +2,14 @@ package cloud_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/cloud"
 )
 
@@ -113,5 +115,58 @@ func TestABegunMakeOutlivesTheCancelledCaller(t *testing.T) {
 	}
 	if got := strings.TrimSpace(read(t, filepath.Join(dir, "args"))); got != "cloud make cloud1" {
 		t.Errorf("expected the make run as mw cloud make cloud1, got %q", got)
+	}
+}
+
+func TestInstancesReadsWhatListPrints(t *testing.T) {
+	command, calls := standIn(t, `printf 'a1\tcloud1\tactive\n\n \tcloud2\n\tx\ty\nb2\tcloud2\tlocked\n'`)
+	got, err := cloud.Vultr{Command: command}.Instances(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].ID != "a1" || got[0].Label != "cloud1" || got[0].Status != "active" || got[1].ID != "b2" || got[1].Status != "locked" {
+		t.Errorf("expected the two instances with an id and a label, got %+v", got)
+	}
+	if read(t, calls) != "list\n" {
+		t.Errorf("expected the wrapper run as list, got %q", read(t, calls))
+	}
+}
+
+func TestReapDeletesTheInstanceByItsId(t *testing.T) {
+	command, calls := standIn(t, "echo done")
+	err := cloud.Vultr{Command: command}.Reap(context.Background(), application.CloudInstance{ID: "i-9", Label: "cloud2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := read(t, calls), "down --yes --name cloud2 --instance i-9\n"; got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+}
+
+// What terraform says on standard error when Vultr refuses is named, not left
+// to read as a box that failed to come up.
+func TestAFailedUpNamesWhatVultrRefused(t *testing.T) {
+	for _, c := range []struct {
+		said string
+		want error
+	}{
+		{"Error: Error creating instance: Unable to create instance: your account has reached its maximum monthly fee limit", application.ErrCloudFeeLimit},
+		{"Error: Server add failed: You have reached your instance limit", application.ErrCloudQuota},
+		{"Error: this plan is not available in this region", application.ErrCloudSoldOut},
+		{"Error: Invalid API token", application.ErrCloudBadToken},
+	} {
+		// The wrapper's own last line is not the one that says it.
+		command, _ := standIn(t, "echo '"+c.said+"' >&2; echo 'vultr-boost: terraform apply failed (status 1)' >&2; exit 1")
+		err := cloud.Vultr{Command: command}.Up(context.Background(), "cloud1")
+		if !errors.Is(err, c.want) {
+			t.Errorf("%q: expected %v, got %v", c.said, c.want, err)
+		}
+	}
+	command, _ := standIn(t, "echo 'Error: something else' >&2; exit 1")
+	err := cloud.Vultr{Command: command}.Up(context.Background(), "cloud1")
+	for _, refusal := range []error{application.ErrCloudFeeLimit, application.ErrCloudQuota, application.ErrCloudSoldOut, application.ErrCloudBadToken} {
+		if errors.Is(err, refusal) {
+			t.Errorf("a failure that is none of the refusals was named %v", refusal)
+		}
 	}
 }
