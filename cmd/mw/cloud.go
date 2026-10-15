@@ -158,7 +158,8 @@ func cloudCheck(ctx context.Context, out io.Writer) (application.CloudCheck, boo
 		Work: mwGateway(dir, host),
 		Provider: cloud.Vultr{
 			Command: settings.Command, Snapshot: settings.Snapshot, Out: out,
-			Self: self, MakeLog: filepath.Join(home, DispatchStateDir, cloudMakeLog),
+			UpLimit: time.Duration(settings.UpMinutes) * time.Minute,
+			Self:    self, MakeLog: filepath.Join(home, DispatchStateDir, cloudMakeLog),
 		},
 		Book:   vault.CloudBook{Vault: files},
 		Log:    homeEventLog(),
@@ -200,6 +201,7 @@ func cloudPlan(settings config.CloudSettings, host string) (application.CloudPla
 		HourlyUSD:     settings.HourlyUSD,
 		Idle:          time.Duration(settings.IdleMinutes) * time.Minute,
 		BoxCap:        settings.BoxCap,
+		Up:            time.Duration(settings.UpMinutes) * time.Minute,
 		HostCaps:      caps,
 	}, nil
 }

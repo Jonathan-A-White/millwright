@@ -56,7 +56,7 @@ Feature: The cloud grows and shrinks by demand
     And 1 story waits for any host
     And the cloud check runs and the box is still being made
     And the process making the box dies
-    When 50 minutes pass and the cloud check runs
+    When 80 minutes pass and the cloud check runs
     Then the provider was asked to destroy "cloud1"
     And the book holds no box being made
     And a cloud event says "failed cloud1"
@@ -221,3 +221,140 @@ Feature: The cloud grows and shrinks by demand
     Then the provider was asked to make "cloud1", destroy "cloud1"
     And a cloud event says "Vultr refused the API token"
     And 0 cloud events say "again"
+
+  Scenario: A make is given up_minutes, not twenty, and a check waits that long and 15 more
+    Given a box is given 90 minutes to come up
+    And every host is full
+    And 1 story waits for any host
+    And the cloud check runs and the box is still being made
+    When 80 minutes pass and the cloud check runs and the box is still being made
+    Then the provider was asked nothing
+    And the book holds "cloud1" being made
+    When the process making the box dies
+    And 24 minutes pass and the cloud check runs and the box is still being made
+    Then the provider was asked nothing
+    When 2 minutes pass and the cloud check runs
+    Then the provider was asked to destroy "cloud1"
+    And a cloud event says "failed cloud1"
+
+  Scenario: A make that reaches its deadline while Vultr still restores the box keeps it, and makes no second
+    Given Vultr is still restoring the box when the make's deadline comes
+    And every host is full
+    And 1 story waits for any host
+    When the cloud check runs
+    Then the provider was asked to make "cloud1" and nothing else
+    And Vultr holds 1 instance labelled "cloud1"
+    And the book holds "cloud1" restoring
+    And 0 cloud boxes are up
+    And a cloud event says "restoring cloud1"
+    And 0 cloud events say "destroyed"
+    And 0 cloud events say "tried once more"
+    And mw status says "cloud1  restoring"
+
+  Scenario: A restoring box is not made twice while it restores
+    Given Vultr is still restoring the box when the make's deadline comes
+    And every host is full
+    And 1 story waits for any host
+    And the cloud check runs
+    When the cloud check runs 3 times, a minute apart
+    Then the provider was asked to make "cloud1" and nothing else
+    And Vultr holds 1 instance labelled "cloud1"
+    And the book holds "cloud1" restoring
+
+  Scenario: The next check adopts a restoring box that Vultr says is up
+    Given Vultr is still restoring the box when the make's deadline comes
+    And every host is full
+    And 1 story waits for any host
+    And the cloud check runs
+    When Vultr finishes restoring "cloud1"
+    And a minute passes and the cloud check runs
+    Then the provider was asked to make "cloud1", adopt "cloud1"
+    And 1 cloud box is up
+    And the book holds no box restoring
+    And a cloud event says "up cloud1"
+    And 0 cloud events say "destroyed"
+
+  Scenario: A restoring box Vultr is still restoring is waited for, then destroyed after up_minutes more
+    Given Vultr is still restoring the box when the make's deadline comes
+    And every host is full
+    And 1 story waits for any host
+    And the cloud check runs
+    When 59 minutes pass and the cloud check runs
+    Then the provider was asked to make "cloud1" and nothing else
+    And the book holds "cloud1" restoring
+    When 2 minutes pass and the cloud check runs
+    Then Vultr's "cloud1" was destroyed
+    And a cloud event says "destroyed cloud1"
+    And the book holds no box restoring
+
+  Scenario: A restoring box Vultr would not delete is kept in the book and says why
+    Given Vultr is still restoring the box when the make's deadline comes
+    And every host is full
+    And 1 story waits for any host
+    And the cloud check runs
+    And Vultr will not destroy an instance yet, for it is locked
+    When 61 minutes pass and the cloud check runs
+    Then the book holds "cloud1" restoring
+    And a cloud event says "Vultr would not delete (locked)"
+    And 0 cloud events say "destroyed"
+    And Vultr holds 1 instance labelled "cloud1"
+
+  Scenario: A restoring box Vultr no longer holds is dropped from the book
+    Given Vultr is still restoring the box when the make's deadline comes
+    And every host is full
+    And 1 story waits for any host
+    And the cloud check runs
+    When Vultr loses "cloud1"
+    And a minute passes and the cloud check runs
+    Then the book holds no box restoring
+    And a cloud event says "cloud1 is gone from Vultr"
+
+  Scenario: A box Vultr still holds after a down is not written down until Vultr lets go of it
+    Given every host is full
+    And 1 story waits for any host
+    And the cloud check runs
+    And "cloud1" runs 1 stories
+    And the stories on "cloud1" are finished
+    And the cloud check runs
+    And the wrapper finds no state for a box it is asked to destroy
+    When 31 minutes pass and the cloud check runs
+    Then Vultr's "cloud1" was destroyed
+    And a cloud event says "down cloud1"
+    And Vultr holds 0 instances labelled "cloud1"
+
+  Scenario: A box Vultr will not delete stays in the book, and no down is written
+    Given every host is full
+    And 1 story waits for any host
+    And the cloud check runs
+    And "cloud1" runs 1 stories
+    And the stories on "cloud1" are finished
+    And the cloud check runs
+    And the wrapper finds no state for a box it is asked to destroy
+    And Vultr will not destroy an instance yet, for it is locked
+    When 31 minutes pass and the cloud check runs
+    Then a cloud event says "Vultr would not delete (locked)"
+    And 0 cloud events say "down cloud1"
+    And 1 cloud box is up
+    And Vultr holds 1 instance labelled "cloud1"
+
+  Scenario: A failed make's retry never starts while its box is still on Vultr
+    Given the provider fails to make a box 1 time
+    And the failed make leaves its instance on Vultr
+    And the wrapper finds no state for a box it is asked to destroy
+    And Vultr will not destroy an instance yet, for it is locked
+    And every host is full
+    And 1 story waits for any host
+    When the cloud check runs
+    Then the provider made "cloud1" 1 time
+    And a cloud event says "Vultr would not delete (locked)"
+    And Vultr holds 1 instance labelled "cloud1"
+
+  Scenario: A make the wrapper calls done while Vultr holds no such box is not written up
+    Given the wrapper says a make is done though Vultr holds no box, 1 time
+    And every host is full
+    And 1 story waits for any host
+    When the cloud check runs
+    Then the provider was asked to make "cloud1", destroy "cloud1", make "cloud1"
+    And a cloud event says "failed cloud1"
+    And 1 cloud events say "up cloud1"
+    And Vultr holds 1 instance labelled "cloud1"

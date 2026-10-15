@@ -81,7 +81,7 @@ func InitializeCloudScenario(ctx *godog.ScenarioContext) {
 		return nil
 	})
 	ctx.Given(`^Vultr will not destroy an instance yet, for it is locked$`, func() error {
-		c.provider.ReapErr = fmt.Errorf("instance is locked")
+		c.provider.ReapErr = application.ClassifyCloudError(fmt.Errorf("vultr-boost down: exit status 1: vultr-boost: Vultr would not delete instance (locked, HTTP 409)"), "")
 		return nil
 	})
 	ctx.When(`^Vultr can destroy instances again$`, func() error {
@@ -93,10 +93,41 @@ func InitializeCloudScenario(ctx *godog.ScenarioContext) {
 		c.provider.FailUpWith = application.ClassifyCloudError(fmt.Errorf("vultr-boost up: exit status 1: Error: %s", said), said)
 		return nil
 	})
+	ctx.Given(`^a box is given (\d+) minutes to come up$`, func(n int) error {
+		c.plan.Up = time.Duration(n) * time.Minute
+		return nil
+	})
+	ctx.Given(`^Vultr is still restoring the box when the make's deadline comes$`, func() error {
+		c.provider.DeadlineUps = 1
+		return nil
+	})
+	ctx.When(`^Vultr finishes restoring "([^"]*)"$`, func(label string) error {
+		c.provider.FinishRestore(label)
+		return nil
+	})
+	ctx.When(`^Vultr loses "([^"]*)"$`, func(label string) error {
+		return c.provider.Lose(label)
+	})
+	ctx.Given(`^the wrapper finds no state for a box it is asked to destroy$`, func() error {
+		c.provider.DownKeeps = true
+		return nil
+	})
+	ctx.Given(`^the failed make leaves its instance on Vultr$`, func() error {
+		c.provider.UpLeaves = true
+		return nil
+	})
+	ctx.Given(`^the wrapper says a make is done though Vultr holds no box, (\d+) times?$`, func(n int) error {
+		c.provider.VanishingUps = n
+		return nil
+	})
 	ctx.Given(`^the cloud check runs and the box is still being made$`, c.checkOnly)
 	ctx.When(`^the cloud check runs and the box is still being made$`, c.checkOnly)
 	ctx.When(`^the cloud check runs and its caller is cancelled (\d+) seconds into the apply$`, c.checkCancelled)
 	ctx.When(`^the box being made comes up$`, c.boxesComeUp)
+	ctx.When(`^the process making the box dies$`, func() error {
+		c.provider.TakeBegun()
+		return nil
+	})
 	ctx.When(`^a minute passes and the cloud check runs and the box is still being made$`, func() error {
 		c.now = c.now.Add(time.Minute)
 		return c.checkOnly()
@@ -141,7 +172,7 @@ func InitializeCloudScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the provider was asked to make "([^"]*)", "([^"]*)" and nothing else$`, func(a, b string) error {
 		return c.asked([]string{"up " + a, "up " + b})
 	})
-	ctx.Then(`^the provider was asked to (make|destroy) "([^"]*)", (make|destroy) "([^"]*)"$`, func(v1, n1, v2, n2 string) error {
+	ctx.Then(`^the provider was asked to (make|destroy|adopt) "([^"]*)", (make|destroy|adopt) "([^"]*)"$`, func(v1, n1, v2, n2 string) error {
 		return c.asked([]string{c.verb(v1) + n1, c.verb(v2) + n2})
 	})
 	ctx.Then(`^the provider was asked to (make|destroy) "([^"]*)", (make|destroy) "([^"]*)", (make|destroy) "([^"]*)"$`, func(v1, n1, v2, n2, v3, n3 string) error {
@@ -178,6 +209,40 @@ func InitializeCloudScenario(ctx *godog.ScenarioContext) {
 		}
 		return nil
 	})
+	ctx.Then(`^the provider made "([^"]*)" (\d+) times?$`, func(name string, n int) error {
+		got := 0
+		for _, call := range c.provider.Calls() {
+			if call == "up "+name {
+				got++
+			}
+		}
+		if got != n {
+			return fmt.Errorf("up %s asked %d times, want %d: %q", name, got, n, c.provider.Calls())
+		}
+		return nil
+	})
+	ctx.Then(`^Vultr holds (\d+) instances? labelled "([^"]*)"$`, func(n int, label string) error {
+		if got := c.provider.Held(label); got != n {
+			return fmt.Errorf("Vultr holds %d instances labelled %s, want %d\n%s", got, label, n, c.said.String())
+		}
+		return nil
+	})
+	ctx.Then(`^the book holds "([^"]*)" restoring$`, func(name string) error {
+		for _, box := range c.book.State.Boxes {
+			if box.Name == name && box.Restoring && box.InstanceID != "" && !box.RestoringSince.IsZero() {
+				return nil
+			}
+		}
+		return fmt.Errorf("the book holds no %s restoring, with its id and since: %+v", name, c.book.State.Boxes)
+	})
+	ctx.Then(`^the book holds no box restoring$`, func() error {
+		for _, box := range c.book.State.Boxes {
+			if box.Restoring {
+				return fmt.Errorf("the book holds %s restoring: %+v", box.Name, c.book.State.Boxes)
+			}
+		}
+		return nil
+	})
 	ctx.Then(`^the Governor was sent (\d+) cards?$`, func(n int) error {
 		if got := len(c.notice.Cards); got != n {
 			return fmt.Errorf("%d cards were sent, want %d: %q", got, n, c.notice.Cards)
@@ -195,7 +260,7 @@ func InitializeCloudScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^(\d+) cloud box(?:es)? (?:is|are) up$`, func(n int) error {
 		got := 0
 		for _, box := range c.book.State.Boxes {
-			if !box.Making {
+			if !box.Making && !box.Restoring {
 				got++
 			}
 		}
@@ -392,8 +457,11 @@ func (c *cloudContext) boxesComeUp() error {
 }
 
 func (c *cloudContext) verb(v string) string {
-	if v == "make" {
+	switch v {
+	case "make":
 		return "up "
+	case "adopt":
+		return "adopt "
 	}
 	return "down "
 }

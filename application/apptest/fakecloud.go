@@ -9,8 +9,11 @@ import (
 )
 
 // FakeCloud is an application.CloudProvider that makes nothing: it records
-// each Up and Down call as "up <name>" or "down <name>", fails the first FailUps ups, and
-// reports BilledUSD as the provider's billing when BilledKnown.
+// each Up, Down, Reap and Adopt call as "up <name>", "down <name>", ..., fails
+// the first FailUps ups, and reports BilledUSD as the provider's billing when
+// BilledKnown. It holds Vultr's side too: an Up that succeeds leaves an
+// instance there, a Down takes it, and Instances says what is held, as the
+// provider does, whatever the book says.
 type FakeCloud struct {
 	mu      sync.Mutex
 	calls   []string
@@ -19,11 +22,26 @@ type FakeCloud struct {
 	FailUpWith error
 	// Orphans are the instances Vultr holds that no state knows: Down does not
 	// find them, and Reap destroys them. ReapErr, when set, is why it cannot.
-	Orphans     []application.CloudInstance
-	ReapErr     error
+	Orphans []application.CloudInstance
+	ReapErr error
+	// DeadlineUps is how many ups next run past their deadline with the
+	// instance made and Vultr still restoring it (locked), as a snapshot
+	// restore does; the Up fails with application.ErrCloudUpDeadline.
+	DeadlineUps int
+	// VanishingUps is how many ups next return well though Vultr holds no
+	// instance after.
+	VanishingUps int
+	// UpLeaves makes a failed Up leave its instance on Vultr, locked.
+	UpLeaves bool
+	// DownKeeps makes Down return well and take nothing, as the wrapper does
+	// for a box it holds no state for.
+	DownKeeps bool
+	// AdoptErr is why Adopt fails.
+	AdoptErr    error
 	BilledUSD   float64
 	BilledKnown bool
 	begun       []string
+	made        []application.CloudInstance
 }
 
 var _ application.CloudProvider = (*FakeCloud)(nil)
@@ -51,14 +69,67 @@ func (f *FakeCloud) Up(_ context.Context, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "up "+name)
-	if f.FailUps > 0 {
+	inst := application.CloudInstance{ID: "id-" + name, Label: name, Status: "active", Server: "ok"}
+	switch {
+	case f.DeadlineUps > 0:
+		f.DeadlineUps--
+		inst.Status, inst.Server = "pending", "locked"
+		f.made = append(f.made, inst)
+		return fmt.Errorf("%w: up ran past its limit", application.ErrCloudUpDeadline)
+	case f.FailUps > 0:
 		f.FailUps--
+		if f.UpLeaves {
+			inst.Status, inst.Server = "pending", "locked"
+			f.made = append(f.made, inst)
+		}
 		if f.FailUpWith != nil {
 			return f.FailUpWith
 		}
 		return fmt.Errorf("%s did not come up", name)
+	case f.VanishingUps > 0:
+		f.VanishingUps--
+		return nil
 	}
+	f.made = append(f.made, inst)
 	return nil
+}
+
+// FinishRestore has Vultr finish restoring the instance labelled label: it is
+// active, its server ok.
+func (f *FakeCloud) FinishRestore(label string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.made {
+		if f.made[i].Label == label {
+			f.made[i].Status, f.made[i].Server = "active", "ok"
+		}
+	}
+}
+
+// Lose has Vultr drop the instance labelled label, as a 404 says it is gone.
+func (f *FakeCloud) Lose(label string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, o := range f.made {
+		if o.Label == label {
+			f.made = append(f.made[:i], f.made[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("Vultr holds no %s to lose", label)
+}
+
+// Held are the instances Vultr holds labelled label.
+func (f *FakeCloud) Held(label string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, i := range append(append([]application.CloudInstance(nil), f.Orphans...), f.made...) {
+		if i.Label == label {
+			n++
+		}
+	}
+	return n
 }
 
 // Down implements application.CloudProvider.
@@ -66,7 +137,25 @@ func (f *FakeCloud) Down(_ context.Context, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, "down "+name)
+	if f.DownKeeps {
+		return nil
+	}
+	kept := f.made[:0]
+	for _, i := range f.made {
+		if i.Label != name {
+			kept = append(kept, i)
+		}
+	}
+	f.made = kept
 	return nil
+}
+
+// Adopt implements application.CloudProvider: it records "adopt <name>".
+func (f *FakeCloud) Adopt(_ context.Context, name string, _ application.CloudInstance) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "adopt "+name)
+	return f.AdoptErr
 }
 
 // Billed implements application.CloudProvider.
@@ -80,7 +169,7 @@ func (f *FakeCloud) Billed(context.Context, []string) (float64, bool, error) {
 func (f *FakeCloud) Instances(context.Context) ([]application.CloudInstance, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]application.CloudInstance(nil), f.Orphans...), nil
+	return append(append([]application.CloudInstance(nil), f.Orphans...), f.made...), nil
 }
 
 // Reap implements application.CloudProvider: it records "reap <label>".
@@ -94,6 +183,12 @@ func (f *FakeCloud) Reap(_ context.Context, instance application.CloudInstance) 
 	for i, o := range f.Orphans {
 		if o.ID == instance.ID {
 			f.Orphans = append(f.Orphans[:i], f.Orphans[i+1:]...)
+			return nil
+		}
+	}
+	for i, o := range f.made {
+		if o.ID == instance.ID {
+			f.made = append(f.made[:i], f.made[i+1:]...)
 			break
 		}
 	}

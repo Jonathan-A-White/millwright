@@ -41,7 +41,7 @@ func read(t *testing.T, path string) string {
 func TestUpAndDownRunTheWrapperForTheBoxFromTheSnapshot(t *testing.T) {
 	command, calls := standIn(t, "echo made")
 	var out strings.Builder
-	v := cloud.Vultr{Command: command, Snapshot: "snap-1", Out: &out}
+	v := cloud.Vultr{Command: command, Snapshot: "snap-1", Out: &out, UpLimit: time.Minute}
 	if err := v.Up(context.Background(), "cloud2"); err != nil {
 		t.Fatalf("up: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestUpAndDownRunTheWrapperForTheBoxFromTheSnapshot(t *testing.T) {
 
 func TestAFailedUpNamesTheWrappersLastLine(t *testing.T) {
 	command, _ := standIn(t, "echo 'step one'; echo 'vultr-boost: terraform apply failed (status 1)' >&2; exit 1")
-	err := cloud.Vultr{Command: command}.Up(context.Background(), "cloud1")
+	err := cloud.Vultr{Command: command, UpLimit: time.Minute}.Up(context.Background(), "cloud1")
 	if err == nil || !strings.Contains(err.Error(), "terraform apply failed") {
 		t.Errorf("expected the failure to name the wrapper's last line, got %v", err)
 	}
@@ -80,9 +80,37 @@ func TestBilledReadsTheSpendOrUnknown(t *testing.T) {
 	}
 }
 
-func TestTheLimitOfAMakeIsAtLeastFifteenMinutes(t *testing.T) {
-	if cloud.DefaultLimit < 15*time.Minute {
-		t.Errorf("a make from a snapshot takes six minutes and more: the limit %s is too short", cloud.DefaultLimit)
+// The make's deadline is the config's ([cloud] up_minutes), not a constant of
+// the adapter: a snapshot restore took 50 minutes where 20 were allowed.
+func TestAnUpIsGivenTheLimitItIsConfiguredWith(t *testing.T) {
+	command, _ := standIn(t, "sleep 1")
+	if err := (cloud.Vultr{Command: command, UpLimit: 5 * time.Second}).Up(context.Background(), "cloud1"); err != nil {
+		t.Errorf("expected an up inside its limit to be well, got %v", err)
+	}
+	err := cloud.Vultr{Command: command, UpLimit: 200 * time.Millisecond}.Up(context.Background(), "cloud1")
+	if !errors.Is(err, application.ErrCloudUpDeadline) {
+		t.Errorf("expected an up past its limit to be the deadline, got %v", err)
+	}
+	if err := (cloud.Vultr{Command: command}).Up(context.Background(), "cloud1"); err == nil || !strings.Contains(err.Error(), "up limit") {
+		t.Errorf("expected an up with no limit configured to be refused, not given a constant, got %v", err)
+	}
+}
+
+func TestAdoptImportsTheInstanceUnderTheBoxsName(t *testing.T) {
+	command, calls := standIn(t, "echo imported")
+	if err := (cloud.Vultr{Command: command}).Adopt(context.Background(), "cloud2", application.CloudInstance{ID: "i-9", Label: "cloud2"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := read(t, calls), "adopt --yes --name cloud2 --instance i-9\n"; got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+}
+
+func TestVultrsLockedRefusalToDeleteIsNamed(t *testing.T) {
+	command, _ := standIn(t, "echo 'vultr-boost: Vultr would not delete instance i-9 (locked, HTTP 409): Instance is locked' >&2; exit 1")
+	err := cloud.Vultr{Command: command}.Reap(context.Background(), application.CloudInstance{ID: "i-9", Label: "cloud2"})
+	if !errors.Is(err, application.ErrCloudLocked) {
+		t.Errorf("expected a 409 to be named locked, got %v", err)
 	}
 }
 
@@ -119,12 +147,12 @@ func TestABegunMakeOutlivesTheCancelledCaller(t *testing.T) {
 }
 
 func TestInstancesReadsWhatListPrints(t *testing.T) {
-	command, calls := standIn(t, `printf 'a1\tcloud1\tactive\n\n \tcloud2\n\tx\ty\nb2\tcloud2\tlocked\n'`)
+	command, calls := standIn(t, `printf 'a1\tcloud1\tactive\tok\n\n \tcloud2\n\tx\ty\nb2\tcloud2\tpending\tlocked\n'`)
 	got, err := cloud.Vultr{Command: command}.Instances(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got[0].ID != "a1" || got[0].Label != "cloud1" || got[0].Status != "active" || got[1].ID != "b2" || got[1].Status != "locked" {
+	if len(got) != 2 || got[0].ID != "a1" || got[0].Label != "cloud1" || got[0].Status != "active" || got[0].Server != "ok" || got[1].ID != "b2" || got[1].Status != "pending" || got[1].Server != "locked" {
 		t.Errorf("expected the two instances with an id and a label, got %+v", got)
 	}
 	if read(t, calls) != "list\n" {
@@ -157,13 +185,13 @@ func TestAFailedUpNamesWhatVultrRefused(t *testing.T) {
 	} {
 		// The wrapper's own last line is not the one that says it.
 		command, _ := standIn(t, "echo '"+c.said+"' >&2; echo 'vultr-boost: terraform apply failed (status 1)' >&2; exit 1")
-		err := cloud.Vultr{Command: command}.Up(context.Background(), "cloud1")
+		err := cloud.Vultr{Command: command, UpLimit: time.Minute}.Up(context.Background(), "cloud1")
 		if !errors.Is(err, c.want) {
 			t.Errorf("%q: expected %v, got %v", c.said, c.want, err)
 		}
 	}
 	command, _ := standIn(t, "echo 'Error: something else' >&2; exit 1")
-	err := cloud.Vultr{Command: command}.Up(context.Background(), "cloud1")
+	err := cloud.Vultr{Command: command, UpLimit: time.Minute}.Up(context.Background(), "cloud1")
 	for _, refusal := range []error{application.ErrCloudFeeLimit, application.ErrCloudQuota, application.ErrCloudSoldOut, application.ErrCloudBadToken} {
 		if errors.Is(err, refusal) {
 			t.Errorf("a failure that is none of the refusals was named %v", refusal)

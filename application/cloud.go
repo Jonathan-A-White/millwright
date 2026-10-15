@@ -37,11 +37,24 @@ type CloudProvider interface {
 	// Reap destroys one instance by its id, for a box no state of ours
 	// holds, so that Down could not find it.
 	Reap(ctx context.Context, instance CloudInstance) error
+	// Adopt takes a box the provider holds and the book names, whose make
+	// was cut off before its state was kept, into the provider's state
+	// (terraform import), so that Down finds it.
+	Adopt(ctx context.Context, name string, instance CloudInstance) error
 }
 
-// CloudInstance is one box as the provider holds it.
+// CloudInstance is one box as the provider holds it: Status is Vultr's
+// status (active, pending, ...) and Server its server_status (ok, locked,
+// installingbooting, none), empty when not said.
 type CloudInstance struct {
-	ID, Label, Status string
+	ID, Label, Status, Server string
+}
+
+// Up reports whether the provider says the instance is made and ready: active
+// and its server ok. One that does not say its server status is read by its
+// status alone.
+func (i CloudInstance) Up() bool {
+	return i.Status == "active" && (i.Server == "" || i.Server == "ok")
 }
 
 // What the provider can refuse, each a reason a retry does not mend. The
@@ -52,6 +65,13 @@ var (
 	ErrCloudQuota    = errors.New("Vultr instance limit reached: raise it at my.vultr.com, or destroy a box there")
 	ErrCloudSoldOut  = errors.New("Vultr has none of the plan left in the region: choose another region or plan in the tfvars")
 	ErrCloudBadToken = errors.New("Vultr refused the API token: put a new vultr_api_token (mw secrets put), and check the API's access control at my.vultr.com")
+	// ErrCloudLocked is Vultr's 409: it will not delete an instance it has
+	// locked, as one being restored from a snapshot is. It is no refusal of a
+	// make; a delete is tried again.
+	ErrCloudLocked = errors.New("Vultr would not delete (locked)")
+	// ErrCloudUpDeadline is a make that ran past its deadline: what became of
+	// the box is Vultr's to say, not the wrapper's exit status.
+	ErrCloudUpDeadline = errors.New("the make ran past its deadline")
 )
 
 // CloudNotice tells the Governor what only he can mend: a card to him.
@@ -113,6 +133,14 @@ type CloudBox struct {
 	// Up being when it was asked for: the box is billed from then, and no
 	// check destroys it or counts it idle meanwhile.
 	Making bool `json:"making,omitempty"`
+	// Restoring is a box whose make ran past its deadline while Vultr still
+	// held the instance, restoring from a snapshot: InstanceID is Vultr's id
+	// for it and RestoringSince when the make gave up waiting. A check adopts
+	// it when Vultr says it is up, and destroys it Plan.Up after that. Like a
+	// box being made it is billed, and never idle.
+	Restoring      bool      `json:"restoring,omitempty"`
+	InstanceID     string    `json:"instance_id,omitempty"`
+	RestoringSince time.Time `json:"restoring_since,omitzero"`
 }
 
 // CloudMove is one up, down or failure, as the cloud event said it.
@@ -124,10 +152,14 @@ type CloudMove struct {
 // cloudMovesKept is how many moves the book keeps for mw status.
 const cloudMovesKept = 5
 
-// CloudMakeStale is how long a box may be made before a check gives it up for
-// lost: the process that was making it did not live to say how it ended. It is
-// more than the provider adapter's own limit on one make, tried twice.
-const CloudMakeStale = 45 * time.Minute
+// CloudMakeStaleMargin is how long past the make's own deadline a box may be
+// made before a check gives it up for lost (CloudPlan.MakeStale): the process
+// that was making it did not live to say how it ended.
+const CloudMakeStaleMargin = 15 * time.Minute
+
+// DefaultCloudUp is how long a make may run when the plan does not say: a
+// Vultr snapshot restore took about 50 minutes on 2026-10-15.
+const DefaultCloudUp = 60 * time.Minute
 
 // CloudFailHold is how long no box is made after one failed to come up twice
 // running: a fault at the provider is not tried every minute.
@@ -154,7 +186,22 @@ type CloudPlan struct {
 	HostCaps map[string]int
 	// Prefix names the boxes, Prefix1, Prefix2, ...; empty is "cloud".
 	Prefix string
+	// Up is how long a make may run before it reads the instance back from the
+	// provider ([cloud] up_minutes); zero is DefaultCloudUp.
+	Up time.Duration
 }
+
+// UpLimit is how long a make may run.
+func (p CloudPlan) UpLimit() time.Duration {
+	if p.Up <= 0 {
+		return DefaultCloudUp
+	}
+	return p.Up
+}
+
+// MakeStale is how long a box may be made before a check gives it up for
+// lost: the make's deadline and CloudMakeStaleMargin.
+func (p CloudPlan) MakeStale() time.Duration { return p.UpLimit() + CloudMakeStaleMargin }
 
 // DefaultCloudPrefix is what a box's name begins with.
 const DefaultCloudPrefix = "cloud"
@@ -175,7 +222,11 @@ const DefaultCloudBoxCap = 2
 // the book and the provider's billing, and calls the provider only to make or
 // destroy a box. In order, it:
 //
-//   - asks the provider for every instance it holds, and destroys each one
+//   - asks the provider for every instance it holds, adopts each box the book
+//     holds as restoring (its make ran past its deadline with Vultr still
+//     restoring the instance) that Vultr now says is up, drops one Vultr no
+//     longer holds, and destroys one still restoring up_minutes after the
+//     make gave up waiting; then destroys each instance
 //     named for a box (cloud1, cloud2, ...) that the book does not hold, an
 //     orphan of a make that was killed, which is billed and which Down cannot
 //     find, having no state; each is a move, and one that cannot be destroyed
@@ -183,7 +234,7 @@ const DefaultCloudBoxCap = 2
 //     again at the next check;
 //   - marks each box idle from the first check that finds no story claimed on
 //     it, and busy again once one is;
-//   - gives up a box begun CloudMakeStale ago and not yet up (the process
+//   - gives up a box begun the plan's MakeStale ago and not yet up (the process
 //     making it died) and destroys it;
 //   - destroys every box up when one more hour of them would pass the
 //     month's cap;
@@ -359,42 +410,144 @@ func (p *cloudPass) spent() float64 {
 	return max(float64(p.state.hours(p.now))*p.check.Plan.HourlyUSD, p.billed)
 }
 
-// reconcile destroys each instance the provider holds that is named for a box
-// and that the book does not hold: it is billed and counts against the
-// account's limits, and no state is there for Down to find it by. A box the
-// book holds, being made or up, is never one.
+// reconcile reads the provider's instances back and sets the book right by
+// them, before anything is believed of the book: a restoring box is adopted
+// when Vultr says it is up, given up when it is gone or has restored too long,
+// and each instance named for a box that the book does not hold is destroyed.
+// An orphan is billed and counts against the account's limits, and no state is
+// there for Down to find it by. A box the book holds, being made, restoring or
+// up, is never one.
 func (p *cloudPass) reconcile(ctx context.Context) {
 	instances, err := p.check.Provider.Instances(ctx)
 	if err != nil {
-		p.check.say("the provider's instances could not be listed, so no orphan is looked for: %v", err)
+		p.check.say("the provider's instances could not be listed, so no orphan is looked for and no restoring box is read: %v", err)
 		return
 	}
+	p.settleRestoring(ctx, instances)
 	held := map[string]bool{}
 	for _, box := range p.state.Boxes {
 		held[box.Name] = true
 	}
-	var said []string
+	present := map[string]bool{}
 	for _, inst := range instances {
+		present[inst.ID] = true
 		if !p.boxName(inst.Label) || held[inst.Label] {
 			continue
 		}
 		which := fmt.Sprintf("%s (Vultr instance %s, %s)", inst.Label, inst.ID, inst.Status)
-		if err := p.check.Provider.Reap(ctx, inst); err != nil {
-			if !slices.Contains(p.state.OrphansSaid, inst.ID) {
-				p.move(ctx, fmt.Sprintf("could not destroy orphan %s, no box of the book's: %v; tried again at each check", which, oneLine(err.Error())))
-			} else {
-				p.check.say("could not destroy orphan %s: %v", which, oneLine(err.Error()))
-			}
-			said = append(said, inst.ID)
+		if !p.reapInstance(ctx, inst, "orphan "+which+", no box of the book's") {
 			continue
 		}
 		p.move(ctx, fmt.Sprintf("destroyed orphan %s: a box no state held, billed and in no book", which))
 		p.dirty = "destroyed orphan " + inst.Label
 	}
-	if !slices.Equal(said, p.state.OrphansSaid) {
-		p.state.OrphansSaid = said
+	// What was said of an instance that Vultr no longer holds is no more to say.
+	kept := p.state.OrphansSaid[:0:0]
+	for _, id := range p.state.OrphansSaid {
+		if present[id] {
+			kept = append(kept, id)
+		}
+	}
+	if !slices.Equal(kept, p.state.OrphansSaid) {
+		p.state.OrphansSaid = kept
 		p.dirty = "orphans said"
 	}
+}
+
+// settleRestoring reads each box the book holds as restoring against what
+// Vultr holds. One Vultr says is up is adopted into the provider's state and
+// is a box up. One Vultr no longer holds is dropped. One still restoring is
+// waited for, the make's deadline again, and then destroyed.
+func (p *cloudPass) settleRestoring(ctx context.Context, instances []CloudInstance) {
+	for _, box := range append([]CloudBox(nil), p.state.Boxes...) {
+		if !box.Restoring {
+			continue
+		}
+		var inst CloudInstance
+		found := false
+		for _, i := range instances {
+			if i.ID == box.InstanceID {
+				inst, found = i, true
+			}
+		}
+		since := Clock(p.now.Sub(box.RestoringSince))
+		switch {
+		case !found:
+			p.state.Hours += billedHours(maxTime(box.Up, cloudMonthStart(p.now)), p.now)
+			p.dropBox(box.Name)
+			p.move(ctx, fmt.Sprintf("%s is gone from Vultr: the instance %s it was restoring is no longer held; the book drops it", box.Name, box.InstanceID))
+			p.dirty = "gone " + box.Name
+		case inst.Up() && p.adopt(ctx, box, inst):
+			p.setBox(box.Name, func(b *CloudBox) {
+				b.Restoring, b.InstanceID, b.RestoringSince, b.IdleSince = false, "", time.Time{}, p.now
+			})
+			p.state.FeeLimitAt = time.Time{}
+			p.move(ctx, fmt.Sprintf("up %s: Vultr finished restoring it, %s after the make gave up waiting; adopted", box.Name, since))
+			p.dirty = "up " + box.Name
+		case p.now.Sub(box.RestoringSince) >= p.check.Plan.UpLimit():
+			if p.down(ctx, box.Name, "it did not come up") {
+				p.move(ctx, fmt.Sprintf("destroyed %s: Vultr was still restoring instance %s %s after the make gave up waiting", box.Name, box.InstanceID, since))
+			}
+		}
+	}
+}
+
+// adopt has the provider take the instance of a restoring box into its state,
+// and reports whether it did; a box it could not take is tried again at the
+// next check, until the restore has taken too long.
+func (p *cloudPass) adopt(ctx context.Context, box CloudBox, inst CloudInstance) bool {
+	if err := p.check.Provider.Adopt(ctx, box.Name, inst); err != nil {
+		p.check.say("Vultr says %s is up, but it could not be adopted: %v", box.Name, err)
+		return false
+	}
+	return true
+}
+
+func (p *cloudPass) setBox(name string, change func(b *CloudBox)) {
+	for i := range p.state.Boxes {
+		if p.state.Boxes[i].Name == name {
+			change(&p.state.Boxes[i])
+		}
+	}
+}
+
+func (p *cloudPass) dropBox(name string) {
+	p.state.Boxes = slices.DeleteFunc(p.state.Boxes, func(b CloudBox) bool { return b.Name == name })
+}
+
+// held reads the provider back for the instance labelled name.
+func (p *cloudPass) held(ctx context.Context, name string) (inst CloudInstance, found bool, err error) {
+	instances, err := p.check.Provider.Instances(ctx)
+	if err != nil {
+		return CloudInstance{}, false, err
+	}
+	for _, i := range instances {
+		if i.Label == name {
+			return i, true, nil
+		}
+	}
+	return CloudInstance{}, false, nil
+}
+
+// reapInstance destroys one instance Vultr holds, by its id, and reports
+// whether it is gone: the provider answers well only to Vultr's 204 or 404.
+// What it was refused is a move the first time, and said again, quietly, at
+// each check after.
+func (p *cloudPass) reapInstance(ctx context.Context, inst CloudInstance, what string) bool {
+	err := p.check.Provider.Reap(ctx, inst)
+	if err == nil {
+		p.state.OrphansSaid = slices.DeleteFunc(p.state.OrphansSaid, func(id string) bool { return id == inst.ID })
+		return true
+	}
+	text := fmt.Sprintf("could not destroy %s: %v; tried again at each check", what, oneLine(err.Error()))
+	if slices.Contains(p.state.OrphansSaid, inst.ID) {
+		p.check.say("%s", text)
+		return false
+	}
+	p.state.OrphansSaid = append(p.state.OrphansSaid, inst.ID)
+	p.dirty = "orphans said"
+	p.move(ctx, text)
+	return false
 }
 
 // boxName reports whether label is a name a box is given: the prefix and a
@@ -433,11 +586,11 @@ func (p *cloudPass) feeLimit(ctx context.Context) {
 	}
 }
 
-// dropStale gives up each box begun CloudMakeStale ago and still being made:
+// dropStale gives up each box begun the plan's MakeStale ago and still being made:
 // destroys what there is of it, and says so.
 func (p *cloudPass) dropStale(ctx context.Context) {
 	for _, box := range append([]CloudBox(nil), p.state.Boxes...) {
-		if !box.Making || p.now.Sub(box.Up) < CloudMakeStale {
+		if !box.Making || p.now.Sub(box.Up) < p.check.Plan.MakeStale() {
 			continue
 		}
 		if p.down(ctx, box.Name, "it did not come up") {
@@ -450,7 +603,7 @@ func (p *cloudPass) dropStale(ctx context.Context) {
 func (p *cloudPass) markIdle(work WorkInHand) {
 	for i := range p.state.Boxes {
 		box := &p.state.Boxes[i]
-		if box.Making {
+		if box.Making || box.Restoring {
 			continue
 		}
 		busy := sessions(work, box.Name) > 0
@@ -532,7 +685,12 @@ func (p *cloudPass) make(ctx context.Context) {
 }
 
 // down destroys the box, counting its hours into the month's, and reports
-// whether it is gone.
+// whether it is gone. It is gone when Vultr says it is, read back after the
+// provider's Down: a wrapper that holds no state for a box (its make was
+// killed, or its state lost) exits well and destroys nothing. A box still held
+// is then destroyed by its id, and the book keeps it, saying what Vultr said,
+// when Vultr will not. A box restoring has no state to find it by: it is
+// destroyed by its id at once.
 func (p *cloudPass) down(ctx context.Context, name, why string) bool {
 	at := -1
 	for i, box := range p.state.Boxes {
@@ -543,10 +701,26 @@ func (p *cloudPass) down(ctx context.Context, name, why string) bool {
 	if at < 0 {
 		return true
 	}
-	if err := p.check.Provider.Down(ctx, name); err != nil {
-		p.move(ctx, fmt.Sprintf("failed to destroy %s (%s): %v", name, why, oneLine(err.Error())))
-		p.fail(fmt.Errorf("destroying %s: %w", name, err))
-		return false
+	box := p.state.Boxes[at]
+	if box.Restoring && box.InstanceID != "" {
+		if !p.reapInstance(ctx, CloudInstance{ID: box.InstanceID, Label: name}, fmt.Sprintf("%s (Vultr instance %s, restoring)", name, box.InstanceID)) {
+			return false
+		}
+	} else {
+		if err := p.check.Provider.Down(ctx, name); err != nil {
+			p.move(ctx, fmt.Sprintf("failed to destroy %s (%s): %v", name, why, oneLine(err.Error())))
+			p.fail(fmt.Errorf("destroying %s: %w", name, err))
+			return false
+		}
+		inst, found, err := p.held(ctx, name)
+		if err != nil {
+			p.move(ctx, fmt.Sprintf("could not tell whether %s (%s) is destroyed: Vultr's instances could not be listed: %v", name, why, oneLine(err.Error())))
+			p.fail(fmt.Errorf("reading back the destroying of %s: %w", name, err))
+			return false
+		}
+		if found && !p.reapInstance(ctx, inst, fmt.Sprintf("%s (Vultr instance %s, %s), still held after the wrapper was done with it", name, inst.ID, inst.Status)) {
+			return false
+		}
 	}
 	p.state.Hours += billedHours(maxTime(p.state.Boxes[at].Up, cloudMonthStart(p.now)), p.now)
 	p.state.Boxes = append(p.state.Boxes[:at], p.state.Boxes[at+1:]...)
@@ -683,6 +857,10 @@ func ReadCloud(ctx context.Context, book CloudBook, plan CloudPlan, now time.Tim
 func (r CloudReading) write(b *strings.Builder) {
 	clip(b, fmt.Sprintf("CLOUD: $%.2f spent of $%.2f this month, %d of %d boxes", r.SpentUSD, r.CapUSD, len(r.Boxes), r.MaxBoxes))
 	for _, box := range r.Boxes {
+		if box.Restoring {
+			clip(b, fmt.Sprintf("  %s  restoring %s (Vultr instance %s), up %s", box.Name, Clock(r.Now.Sub(box.RestoringSince)), box.InstanceID, Clock(r.Now.Sub(box.Up))))
+			continue
+		}
 		line := fmt.Sprintf("  %s  up %s", box.Name, Clock(r.Now.Sub(box.Up)))
 		if !box.IdleSince.IsZero() {
 			line += ", idle " + Clock(r.Now.Sub(box.IdleSince))

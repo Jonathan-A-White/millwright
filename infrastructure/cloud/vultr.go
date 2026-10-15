@@ -6,6 +6,7 @@ package cloud
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -20,11 +21,14 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 )
 
-// DefaultLimit is how long one up or down may run before it is stopped: a
-// box made from a snapshot is up in about six minutes (terraform apply), one
-// bootstrapped in full in some more. It is the limit of the process Begin
-// starts, never of a caller, and is never under fifteen minutes.
-const DefaultLimit = 20 * time.Minute
+// downLimit is how long one down or reap may run before it is stopped. The
+// limit of an up is the config's ([cloud] up_minutes, Vultr.UpLimit): a
+// snapshot restore took about 50 minutes on 2026-10-15, where 20 were
+// allowed, so it is never a constant here.
+const downLimit = 20 * time.Minute
+
+// errRanPast is a run stopped at its limit.
+var errRanPast = errors.New("ran past its limit")
 
 // billedLimit is how long asking the billing may take.
 const billedLimit = time.Minute
@@ -44,8 +48,10 @@ type Vultr struct {
 	Snapshot string
 	// Out is where the wrapper's output is copied. Nil drops it.
 	Out io.Writer
-	// Limit is how long an up or down may run; zero is DefaultLimit.
-	Limit time.Duration
+	// UpLimit is how long an up may run, [cloud] up_minutes. It is the limit
+	// of the process Begin starts, never of a caller. Zero is a fault: an up
+	// is refused rather than given a limit of the adapter's own.
+	UpLimit time.Duration
 	// Self is the mw binary Begin runs as `mw cloud make <name>`; MakeLog is
 	// the file that process appends its output to. NoScope keeps it out of a
 	// systemd scope of its own, which it is put in where systemd-run and a
@@ -110,17 +116,24 @@ func (v Vultr) scope() string {
 
 // Up implements application.CloudProvider.
 func (v Vultr) Up(ctx context.Context, name string) error {
+	if v.UpLimit <= 0 {
+		return fmt.Errorf("no up limit: set up_minutes in the [cloud] table")
+	}
 	args := []string{"up", "--yes", "--name", name}
 	if v.Snapshot != "" {
 		args = append(args, "--snapshot", v.Snapshot)
 	}
-	_, err := v.run(ctx, v.limit(), args...)
+	_, err := v.run(ctx, v.UpLimit, args...)
+	if errors.Is(err, errRanPast) {
+		// What became of the box is Vultr's to say, not this exit's.
+		return fmt.Errorf("%w: %v", application.ErrCloudUpDeadline, err)
+	}
 	return err
 }
 
 // Down implements application.CloudProvider.
 func (v Vultr) Down(ctx context.Context, name string) error {
-	_, err := v.run(ctx, v.limit(), "down", "--yes", "--name", name)
+	_, err := v.run(ctx, downLimit, "down", "--yes", "--name", name)
 	return err
 }
 
@@ -147,7 +160,7 @@ func (v Vultr) Billed(ctx context.Context, names []string) (float64, bool, error
 }
 
 // Instances implements application.CloudProvider: `list` prints a line for each
-// instance Vultr holds, its id, label and status separated by tabs; a line
+// instance Vultr holds, its id, label, status and server status separated by tabs; a line
 // without a label is not a box of ours and is dropped.
 func (v Vultr) Instances(ctx context.Context) ([]application.CloudInstance, error) {
 	out, err := v.run(ctx, billedLimit, "list")
@@ -167,6 +180,9 @@ func (v Vultr) Instances(ctx context.Context) ([]application.CloudInstance, erro
 		if len(fields) > 2 {
 			inst.Status = fields[2]
 		}
+		if len(fields) > 3 {
+			inst.Server = fields[3]
+		}
 		found = append(found, inst)
 	}
 	return found, nil
@@ -176,15 +192,16 @@ func (v Vultr) Instances(ctx context.Context) ([]application.CloudInstance, erro
 // --instance <id>`, which destroys what the box's state holds, if it holds
 // anything, and the instance by its id, and takes the peer off the hub.
 func (v Vultr) Reap(ctx context.Context, instance application.CloudInstance) error {
-	_, err := v.run(ctx, v.limit(), "down", "--yes", "--name", instance.Label, "--instance", instance.ID)
+	_, err := v.run(ctx, downLimit, "down", "--yes", "--name", instance.Label, "--instance", instance.ID)
 	return err
 }
 
-func (v Vultr) limit() time.Duration {
-	if v.Limit > 0 {
-		return v.Limit
-	}
-	return DefaultLimit
+// Adopt implements application.CloudProvider: `adopt --yes --name <box>
+// --instance <id>` imports the instance into the box's terraform state, so
+// that down finds it.
+func (v Vultr) Adopt(ctx context.Context, name string, instance application.CloudInstance) error {
+	_, err := v.run(ctx, downLimit, "adopt", "--yes", "--name", name, "--instance", instance.ID)
+	return err
 }
 
 // run runs the wrapper, copying its output to Out, and returns its standard
@@ -208,7 +225,7 @@ func (v Vultr) run(ctx context.Context, limit time.Duration, args ...string) (st
 	cmd.WaitDelay = 10 * time.Second
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return "", fmt.Errorf("%s %s ran past %s", v.Command, args[0], limit)
+			return "", fmt.Errorf("%s %s %w (%s)", v.Command, args[0], errRanPast, limit)
 		}
 		last := lastLine(stderr.String())
 		if last == "" {

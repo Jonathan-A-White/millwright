@@ -104,6 +104,7 @@
 //	idle_minutes    = 30
 //	hourly_usd      = 0.132
 //	box_cap         = 2
+//	up_minutes      = 60                    # how long a make may run before it reads the box back from Vultr
 //	snapshot        = "<a Vultr snapshot id>"   # contrib/vultr-boost snapshot makes one
 //	command         = "/home/jwhite/millwright/contrib/vultr-boost"
 //
@@ -2287,6 +2288,9 @@ const (
 	DefaultCloudIdleMinutes   = 30
 	DefaultCloudHourlyUSD     = 0.132
 	DefaultCloudBoxCap        = 2
+	// DefaultCloudUpMinutes is how long a make may run before it reads the
+	// instance back: a snapshot restore took about 50 minutes (mw-gq6.465).
+	DefaultCloudUpMinutes = 60
 )
 
 // CloudSettings is what the `[cloud]` table says.
@@ -2298,6 +2302,9 @@ type CloudSettings struct {
 	HourlyUSD     float64
 	// BoxCap is how many sessions a box runs at once.
 	BoxCap int
+	// UpMinutes is how long a make may run before it reads the instance back
+	// from Vultr, and a check gives a make that left no word 15 more.
+	UpMinutes int
 	// Snapshot is the Vultr snapshot a box is made from; empty makes it from
 	// Ubuntu and bootstraps it in full.
 	Snapshot string
@@ -2332,13 +2339,14 @@ func Cloud() (CloudSettings, bool, error) {
 		IdleMinutes:   DefaultCloudIdleMinutes,
 		HourlyUSD:     DefaultCloudHourlyUSD,
 		BoxCap:        DefaultCloudBoxCap,
+		UpMinutes:     DefaultCloudUpMinutes,
 		Snapshot:      strings.TrimSpace(table["snapshot"]),
 		Command:       strings.TrimSpace(table["command"]),
 	}
 	if said := strings.TrimSpace(table["provider"]); said != "" && said != DefaultCloudProvider {
 		return CloudSettings{}, false, fmt.Errorf("the [%s] table of %s says provider = %q: the one provider is %q", CloudTable, path, said, DefaultCloudProvider)
 	}
-	for key, into := range map[string]*int{"max_boxes": &cloud.MaxBoxes, "idle_minutes": &cloud.IdleMinutes, "box_cap": &cloud.BoxCap} {
+	for key, into := range map[string]*int{"max_boxes": &cloud.MaxBoxes, "idle_minutes": &cloud.IdleMinutes, "box_cap": &cloud.BoxCap, "up_minutes": &cloud.UpMinutes} {
 		said := strings.TrimSpace(table[key])
 		if said == "" {
 			continue

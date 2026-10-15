@@ -18,6 +18,8 @@ var cloudRefusals = []struct {
 	{ErrCloudQuota, []string{"instance limit", "maximum number of instances", "maximum instance", "reached your limit", "exceeded your limit"}},
 	{ErrCloudSoldOut, []string{"sold out", "out of stock", "not available in this region", "not available in the region", "plan is not available", "no capacity", "insufficient capacity"}},
 	{ErrCloudBadToken, []string{"invalid api key", "invalid api token", "unauthorized ip", "unauthorized api", "401 unauthorized", "status code: 401", "authentication failed"}},
+	// Not a refusal of a make: Vultr's 409 to a delete, said as the wrapper says it.
+	{ErrCloudLocked, []string{"http 409", "instance is locked"}},
 }
 
 // ClassifyCloudError wraps the refusal said in output around err when the

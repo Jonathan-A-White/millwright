@@ -5,19 +5,24 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"time"
 )
 
 // CloudMake is the make of one box the cloud check began (mw cloud make, the
 // process CloudProvider.Begin starts, in a session and cgroup of its own). It
-// runs the provider's Up, which takes minutes, with a deadline of the
-// provider's own and none from any caller, and writes how it ended into the
+// runs the provider's Up, which takes minutes, with the deadline of the
+// plan's up_minutes and none from any caller, and writes how it ended into the
 // book and the cloud events. It, not the check, owns the box from the moment
 // the check writes it into the book as being made.
 //
 // A box that does not come up is destroyed and tried once more; when that
-// fails too, no box is made for CloudFailHold. The book is changed only under
-// Lock, never while the provider works, so a check is never held up by a make.
+// fails too, no box is made for CloudFailHold. A make that reaches its deadline
+// is not that: it reads the instance back from the provider, and one Vultr
+// still holds, restoring from a snapshot, is kept in the book as restoring,
+// with no second box and no retry, for a check to adopt when it is up. The
+// book is changed only under Lock, never while the provider works, so a check
+// is never held up by a make.
 type CloudMake struct {
 	Provider CloudProvider
 	Book     CloudBook
@@ -98,6 +103,19 @@ func (m CloudMake) begin(ctx context.Context, name string, try int) (goOn bool) 
 			// not this make's to bring up.
 			return
 		}
+		// A retry never starts while Vultr still holds a box of the name, nor
+		// when Vultr cannot be asked whether it does.
+		inst, found, err := p.held(ctx, name)
+		switch {
+		case err != nil:
+			p.move(ctx, fmt.Sprintf("failed %s: no second try, for Vultr's instances could not be listed to see that none is left: %v", name, oneLine(err.Error())))
+			p.dirty = "failed " + name
+			return
+		case found:
+			p.move(ctx, fmt.Sprintf("failed %s: no second try while Vultr still holds instance %s of that name (%s)", name, inst.ID, inst.Status))
+			p.dirty = "failed " + name
+			return
+		}
 		if p.spent()+m.Plan.HourlyUSD*float64(len(p.state.Boxes)+2) > m.Plan.MonthlyCapUSD {
 			p.capReached(ctx, "no box is made")
 			return
@@ -116,6 +134,25 @@ func (m CloudMake) begin(ctx context.Context, name string, try int) (goOn bool) 
 // settle writes how one try ended, and reports whether the make is over.
 func (m CloudMake) settle(ctx context.Context, name string, try int, started time.Time, upErr error) (done bool, err error) {
 	err = m.locked(ctx, func(p *cloudPass) {
+		note := ""
+		switch {
+		case upErr == nil:
+			// The wrapper's exit says the box is up; Vultr is asked.
+			inst, found, readErr := p.held(ctx, name)
+			switch {
+			case readErr != nil:
+				note = " (Vultr's instances could not be listed, so the wrapper's word stands)"
+			case !found:
+				upErr = fmt.Errorf("the wrapper said it was done, but Vultr holds no instance named %s", name)
+			case !inst.Up():
+				note = fmt.Sprintf(" (Vultr says status %s, server %s)", inst.Status, inst.Server)
+			}
+		case errors.Is(upErr, ErrCloudUpDeadline):
+			if m.restoring(ctx, p, name) {
+				done = true
+				return
+			}
+		}
 		if upErr == nil {
 			found := false
 			for i := range p.state.Boxes {
@@ -127,7 +164,7 @@ func (m CloudMake) settle(ctx context.Context, name string, try int, started tim
 				p.state.Boxes = append(p.state.Boxes, CloudBox{Name: name, Up: started, IdleSince: p.now})
 			}
 			p.state.FeeLimitAt = time.Time{}
-			p.move(ctx, fmt.Sprintf("up %s: made in %s", name, Clock(p.now.Sub(started))))
+			p.move(ctx, fmt.Sprintf("up %s: made in %s%s", name, Clock(p.now.Sub(started)), note))
 			p.dirty = "up " + name
 			done = true
 			return
@@ -182,6 +219,34 @@ func (m CloudMake) settle(ctx context.Context, name string, try int, started tim
 		return true, err
 	}
 	return done, nil
+}
+
+// restoring settles a make that ran past its deadline by what Vultr says of
+// the box, and reports whether it did: the instance is read back, and one that
+// Vultr holds is kept in the book as restoring, with its id and since when,
+// for a check to adopt when it is up or destroy after the deadline again. When
+// Vultr cannot be asked the box is left as being made, which a check gives up
+// for lost in its time. A box Vultr holds none of is no restore: false, and the
+// make goes on as one that failed.
+func (m CloudMake) restoring(ctx context.Context, p *cloudPass, name string) bool {
+	inst, found, err := p.held(ctx, name)
+	switch {
+	case err != nil:
+		p.move(ctx, fmt.Sprintf("%s ran past its deadline, and Vultr could not be asked what became of it (%v): it stays in the book as being made, and no second box is made", name, oneLine(err.Error())))
+		p.dirty = "deadline " + name
+		return true
+	case !found:
+		return false
+	}
+	p.setBox(name, func(b *CloudBox) {
+		b.Making, b.Restoring, b.InstanceID, b.RestoringSince, b.IdleSince = false, true, inst.ID, p.now, time.Time{}
+	})
+	if !slices.ContainsFunc(p.state.Boxes, func(b CloudBox) bool { return b.Name == name }) {
+		p.state.Boxes = append(p.state.Boxes, CloudBox{Name: name, Up: p.now, Restoring: true, InstanceID: inst.ID, RestoringSince: p.now})
+	}
+	p.move(ctx, fmt.Sprintf("restoring %s: Vultr still holds instance %s (%s, server %s) after %s, so the box is kept and no second is made; the next check adopts it when it is up, or destroys it after %s more", name, inst.ID, inst.Status, inst.Server, Clock(m.Plan.UpLimit()), Clock(m.Plan.UpLimit())))
+	p.dirty = "restoring " + name
+	return true
 }
 
 func (m CloudMake) say(format string, args ...any) {
