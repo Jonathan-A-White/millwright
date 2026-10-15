@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 )
@@ -100,6 +101,11 @@ func (n Next) queue(ctx context.Context, c *closeOut, report *NextReport) (NextR
 	// batch rather than for a session.
 	n.writeOrSay(ctx, c, report, "the run state", fmt.Sprintf("%s could not be recorded as %s=%s", c.id, RunState, RunQueued),
 		func() error { return n.Tracker.SetStoryState(ctx, c.id, RunState, RunQueued, outcome) })
+	// When it was queued, which mw land merges the queue in the order of.
+	n.writeOrSay(ctx, c, report, "the time it was queued", fmt.Sprintf("%s could not be recorded as queued at a time", c.id),
+		func() error {
+			return n.Tracker.SetStoryMetadata(ctx, c.id, map[string]string{QueuedAtField: n.now().UTC().Format(time.RFC3339)})
+		})
 	if err := n.ledger(ctx, c, report, outcome); err != nil {
 		report.Notes = append(report.Notes, err.Error())
 	}

@@ -143,6 +143,9 @@ type StoryDetail struct {
 	// SentBackAt is when mw next last sent the story's branch back to a fresh
 	// session, as SentBackAtField says; zero when it never did.
 	SentBackAt time.Time
+	// QueuedAt is when mw next queued the story for batch landing, as
+	// QueuedAtField says; zero when it never did.
+	QueuedAt time.Time
 	// Updated is when the tracker last recorded a change to the story; zero
 	// when the tracker did not say.
 	Updated time.Time

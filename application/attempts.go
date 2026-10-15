@@ -47,6 +47,11 @@ const ClaimedAtField = "claimed_at"
 // are the story being worked (mw-gq6.347).
 const SentBackAtField = "sent_back_at"
 
+// QueuedAtField is the metadata a story carries to say when mw next queued it
+// for batch landing, as UTC RFC 3339: mw land merges the queue oldest first by
+// it (plans/0117).
+const QueuedAtField = "queued_at"
+
 // FilesChangedField is the metadata a story carries to say which files its
 // branch has changed from the target branch so far, comma separated, as mw next
 // records them beside the Builder's session. A dispatch on any host reads it

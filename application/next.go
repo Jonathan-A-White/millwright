@@ -1795,6 +1795,13 @@ func (n Next) merge(ctx context.Context, c *closeOut, report *NextReport) (Lande
 			report.Notes = append(report.Notes, fmt.Sprintf("%s/%s%s has a key this mw does not know: %s (rebuild mw on %s)",
 				RigsDir, c.path.Rig, ".toml", key, n.Host))
 		}
+		// Only mw land pushes the target branch of a rig that lands in batches
+		// (plans/0117): a close-out that got this far on one, its first read of
+		// the rig's file having failed, is stopped before anything is merged.
+		if rules.LandingSettings().Mode == domain.LandingBatch {
+			return Landed{}, failedFor(ReasonLandingFailed, fmt.Errorf("%s lands in batches, so only mw land pushes %s: nothing was merged; run mw next %s again to queue it",
+				c.path.Rig, c.target, c.id))
+		}
 		version.Files = rules.VersionFiles
 		union = rules.UnionMergeFiles
 		if len(rules.VersionFiles) > 0 && len(rules.ChangelogFiles) > 0 {

@@ -121,29 +121,30 @@ type changelogFile struct {
 }
 
 // changelogsWith reads each of the rig's changelog files (absent ones begin
-// empty) and returns them with the bump's entry, under version, at the top. A
-// bump with no changelog files, or whose entry is empty, returns none. Nothing
-// is written, so that a file that cannot take the entry leaves the landing
-// worktree as it was.
+// empty) and returns them with the bump's entries (a batch's several, or the
+// one), under version, at the top, the last on top. A bump with no changelog
+// files, or whose entries are empty, returns none. Nothing is written, so that
+// a file that cannot take an entry leaves the landing worktree as it was.
 func changelogsWith(landingDir string, bump application.VersionBump, version string) ([]changelogFile, error) {
-	if len(bump.Changelog) == 0 || bump.Entry.Text == "" {
+	notes := bump.Notes()
+	if len(bump.Changelog) == 0 || len(notes) == 0 {
 		return nil, nil
 	}
-	entry := bump.Entry
-	entry.Version = version
 	var files []changelogFile
 	for _, name := range bump.Changelog {
-		existing, err := os.ReadFile(filepath.Join(landingDir, filepath.FromSlash(name)))
+		content, err := os.ReadFile(filepath.Join(landingDir, filepath.FromSlash(name)))
 		if err != nil && !os.IsNotExist(err) {
 			return nil, fmt.Errorf("reading the changelog %s: %w", name, err)
 		}
-		var content []byte
-		if strings.HasSuffix(name, ".json") {
-			if content, err = domain.AddToChangelogJSON(existing, entry); err != nil {
-				return nil, fmt.Errorf("the changelog %s: %w", name, err)
+		for _, entry := range notes {
+			entry.Version = version
+			if strings.HasSuffix(name, ".json") {
+				if content, err = domain.AddToChangelogJSON(content, entry); err != nil {
+					return nil, fmt.Errorf("the changelog %s: %w", name, err)
+				}
+			} else {
+				content = domain.AddToChangelogMarkdown(content, entry)
 			}
-		} else {
-			content = domain.AddToChangelogMarkdown(existing, entry)
 		}
 		files = append(files, changelogFile{name: name, content: content})
 	}

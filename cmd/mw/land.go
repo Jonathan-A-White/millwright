@@ -1,0 +1,139 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/hostload"
+	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
+	"github.com/Jonathan-A-White/millwright/infrastructure/userunits"
+
+	"github.com/spf13/cobra"
+)
+
+// newLandCmd builds `mw land <rig>`: the one command that pushes the target
+// branch of a rig that lands in batches (plans/0117, Land Rush 3).
+func newLandCmd() *cobra.Command {
+	var dryRun bool
+
+	cmd := &cobra.Command{
+		Use:   "land <rig>",
+		Short: "Land a rig's queued stories as one batch, under one run of its tests",
+		Long: "land takes every story queued for batch landing on the rig (run=queued, by mw next on a rig\n" +
+			"whose file says landing = \"batch\"), on any host, oldest queued first. In a landing worktree\n" +
+			"detached at the target branch as the origin has it, it merges each story's branch as the origin\n" +
+			"has it (mw/<story>) by the rig's union rules (union_merge_files); a branch that does not merge\n" +
+			"is set aside with git's conflict list and stays queued. It raises the version once for the batch\n" +
+			"(version_files), with one changelog entry per story (changelog_files), and runs the rig's tests\n" +
+			"once on the batch, under this host's gate lock and after letting a busy host calm.\n\n" +
+			"Only when that run passes is the target branch pushed: a fast-forward, never forced. Each story\n" +
+			"is then closed run=landed, naming the batch's commit and its own merge commit, with a chain\n" +
+			"stamp, a ledger line naming the batch and a Landed mail; the rig's checkout is brought up and\n" +
+			"the after-landing command and the grist smoke run once. A set-aside story is mailed to the\n" +
+			"Mayor (Set aside) with its conflict.\n\n" +
+			"A red run, a batch of which nothing merged, or a push the origin refuses pushes nothing: the\n" +
+			"batch is held, every story in it stays queued, the Mayor is mailed (Held) each story and why,\n" +
+			"and land exits non-zero.\n\n" +
+			"What the batch did is kept in the vault under runs/batch/<rig>/<n>/: merge-order.txt, gate.log\n" +
+			"and outcome.txt, committed with the ledger.\n\n" +
+			"--dry-run prints the batch it would make and does nothing else: nothing is merged, tested,\n" +
+			"pushed, recorded or mailed.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dir, err := config.Vault()
+			if err != nil {
+				return err
+			}
+			host, err := config.Host()
+			if err != nil {
+				return err
+			}
+			rigs, err := config.Rigs()
+			if err != nil {
+				return err
+			}
+			tests, err := config.Tests()
+			if err != nil {
+				return err
+			}
+			nice, err := config.BuilderNice()
+			if err != nil {
+				return err
+			}
+			jobs, err := config.BuilderJobs()
+			if err != nil {
+				return err
+			}
+			afterLanding, err := config.AfterLanding()
+			if err != nil {
+				return err
+			}
+			afterLimits, err := config.AfterLandingLimits()
+			if err != nil {
+				return err
+			}
+			pushTries, err := config.PushTries()
+			if err != nil {
+				return err
+			}
+			pushWaitSeconds, err := config.PushWaitSeconds()
+			if err != nil {
+				return err
+			}
+			// The landing takes story worktrees away; it works from the vault,
+			// which it never does, as mw next does.
+			if err := os.Chdir(dir); err != nil {
+				return fmt.Errorf("landing a batch of %s: the vault %s cannot be worked from: %w", args[0], dir, err)
+			}
+			stamps, err := stampQueue()
+			if err != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "chain stamp: not queued for this batch: %v\n", err)
+				stamps = nil
+			}
+
+			gateway := mwGateway(dir, host)
+			files := mwVault(dir, host)
+			worktrees := rig.New()
+			_, err = application.BatchLand{
+				Next: application.Next{
+					Tracker:   gateway,
+					Worktrees: worktrees,
+					Landing:   worktrees,
+					Changes:   worktrees,
+					Checks:    rig.NewChecks(rig.WithCommands(tests), rig.WithNice(nice), rig.WithJobs(jobs)),
+					Load:      hostload.Proc{SwapSample: benchmarkSwapSample},
+					Slot:      rig.NewSlots(),
+					GateLock:  hostGateLock(),
+					Vault:     files,
+					Rules:     files,
+					Files:     files,
+					Mailbox:   gateway,
+					Events:    homeEventLog(),
+					Seat:      BuilderSeat,
+					Host:      host,
+					Rigs:      rigs,
+					PushTries: pushTries,
+					PushWait:  time.Duration(pushWaitSeconds) * time.Second,
+					Out:       cmd.OutOrStdout(),
+					Err:       cmd.ErrOrStderr(),
+
+					AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits)),
+					DeploySlot:   rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
+					Smoke:        hostGristSmoke(gateway, host, rigs, worktrees),
+					Units:        userunits.Systemctl{},
+					Stamps:       stamps,
+				},
+				Records: files,
+				DryRun:  dryRun,
+			}.Run(cmd.Context(), args[0])
+			return err
+		},
+	}
+
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false,
+		"print the batch it would make, oldest queued first, and do nothing else")
+	return cmd
+}

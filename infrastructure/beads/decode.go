@@ -253,6 +253,16 @@ func (b bead) sentBackAt() time.Time {
 	return at
 }
 
+// queuedAt is when mw next recorded queueing this bead for batch landing, or
+// the zero time when it never did or what is there is not a time.
+func (b bead) queuedAt() time.Time {
+	at, err := time.Parse(time.RFC3339, b.text(application.QueuedAtField))
+	if err != nil {
+		return time.Time{}
+	}
+	return at
+}
+
 // updated is when bd says the bead was last changed, or the zero time when it
 // says nothing or something that is not a time.
 func (b bead) updated() time.Time {
@@ -306,6 +316,7 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		Started:          b.started(),
 		ClaimedAt:        b.claimedAt(),
 		SentBackAt:       b.sentBackAt(),
+		QueuedAt:         b.queuedAt(),
 		Updated:          b.updated(),
 		ClosedAt:         b.closedAt(),
 		LeaseExpires:     b.leaseExpires(),
