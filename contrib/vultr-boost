@@ -7,6 +7,7 @@
 #   contrib/vultr-boost up       [--yes] [--dry-run] [--name NAME] [--snapshot ID]
 #   contrib/vultr-boost down     [--yes] [--dry-run] [--name NAME] [--instance ID]
 #   contrib/vultr-boost list
+#   contrib/vultr-boost adopt    [--yes] [--dry-run] --name NAME --instance ID
 #   contrib/vultr-boost status   [--name NAME]
 #   contrib/vultr-boost snapshot [--dry-run] [--name NAME]
 #   contrib/vultr-boost spend    [--name NAME]...
@@ -20,8 +21,13 @@
 #         backed up first). The keys stay in the vault for the next up.
 #         --instance ID also deletes that Vultr instance by its id, for an orphan no
 #         state holds (a make that was killed): terraform destroy finds nothing then.
-# list    every instance Vultr holds on the account, one line each: id, label and
-#         status separated by tabs. mw's cloud check reads it to find orphans.
+# list    every instance Vultr holds on the account, one line each: id, label, status
+#         and server status separated by tabs. mw's cloud check reads it to find
+#         orphans, and to read back what Vultr says of a box before the book does.
+# adopt   terraform import of a Vultr instance into the box's state, for a box whose
+#         make ran past its deadline while Vultr was still restoring it (a snapshot
+#         restore takes ~50 minutes): once adopted, down finds it. The firewall group
+#         the killed apply made is left on Vultr (it costs nothing).
 # status  the box's state (from the state in the vault and Vultr's API) and what it
 #         costs; with no box, the price one would cost.
 # snapshot  makes a Vultr snapshot of a box that is up and bootstrapped, and prints its
@@ -81,6 +87,7 @@ usage() {
 Usage: vultr-boost up       [--yes] [--dry-run] [--name NAME] [--snapshot ID]
        vultr-boost down     [--yes] [--dry-run] [--name NAME] [--instance ID]
        vultr-boost list
+       vultr-boost adopt    [--yes] [--dry-run] --name NAME --instance ID
        vultr-boost status   [--name NAME]
        vultr-boost snapshot [--dry-run] [--name NAME]
        vultr-boost spend    [--name NAME]...
@@ -88,7 +95,8 @@ Usage: vultr-boost up       [--yes] [--dry-run] [--name NAME] [--snapshot ID]
 up makes the Boost box on Vultr and enrols it on the WireGuard hub; down destroys
 it and removes the peer; status prints its state and cost; snapshot makes a
 ready-made image of a bootstrapped box for up --snapshot; list prints every
-instance Vultr holds (id, label, status); spend prints what the boxes named have
+instance Vultr holds (id, label, status, server status); adopt imports a Vultr
+instance into a box's state; spend prints what the boxes named have
 cost this month; down --instance ID also deletes that Vultr instance, for an
 orphan no state holds. --name picks the box (default the tfvars name,
 else cloud1). --yes passes -auto-approve to terraform (otherwise terraform asks);
@@ -99,7 +107,7 @@ EOF
 
 while [ $# -gt 0 ]; do
 	case $1 in
-	up | down | list | status | snapshot | spend)
+	up | down | list | adopt | status | snapshot | spend)
 		[ -z "$CMD" ] || die "one command at a time: $CMD and $1"
 		CMD=$1
 		;;
@@ -244,6 +252,13 @@ if [ "$DRY" = 1 ]; then
 	case $CMD in
 	up) plan_up ;;
 	down) plan_down ;;
+	adopt)
+		STEPS=3
+		echo "vultr-boost adopt --dry-run: nothing below is run"
+		step "state: open $STATE_AGE with age into a private directory under $RUNBASE (a tmpfs); removed on exit"
+		step "terraform -chdir=$TFDIR import -state=<private dir>/terraform.tfstate -var-file=$TFVARS -var name=$NAME vultr_instance.boost ${INSTANCE:-<instance id>}"
+		step "state: encrypt it back to $STATE_AGE with age, commit hosts/vultr in the vault, remove the private directory"
+		;;
 	snapshot)
 		STEPS=2
 		echo "vultr-boost snapshot --dry-run: nothing below is run"
@@ -253,7 +268,7 @@ if [ "$DRY" = 1 ]; then
 	list)
 		STEPS=1
 		echo "vultr-boost list --dry-run: nothing below is run"
-		step "curl $API/instances with the token on stdin: each instance's id, label and status"
+		step "curl $API/instances with the token on stdin: each instance's id, label, status and server status"
 		;;
 	spend)
 		STEPS=1
@@ -438,13 +453,13 @@ do_down() {
 	open_state
 
 	step "terraform: destroy"
-	local rc=0
+	local rc=0 why
 	if [ -s "$PRIV/terraform.tfstate" ]; then
 		tf init -input=false >/dev/null || die "terraform init failed"
 		# shellcheck disable=SC2046
 		tf destroy -state="$PRIV/terraform.tfstate" -var-file="$TFVARS" -var "name=$NAME" $(confirm_args) || rc=$?
 	else
-		echo "    skip: no state in the vault, so no box to destroy"
+		echo "    skip: no state in the vault, so terraform destroyed nothing (a box Vultr holds is deleted by --instance ID)"
 	fi
 	if [ "$rc" != 0 ]; then
 		seal_state
@@ -460,7 +475,10 @@ do_down() {
 			esac
 		else
 			seal_state
-			die "Vultr would not delete instance $INSTANCE (HTTP $API_CODE): $(printf '%s' "$API_BODY" | tr '\n' ' ' | cut -c1-300). The peer was left on the hub. Run down again"
+			why="HTTP $API_CODE"
+			# Vultr locks an instance it is restoring from a snapshot, and says 409.
+			[ "$API_CODE" != 409 ] || why="locked, HTTP 409"
+			die "Vultr would not delete instance $INSTANCE ($why): $(printf '%s' "$API_BODY" | tr '\n' ' ' | cut -c1-300). The peer was left on the hub. Run down again"
 		fi
 	fi
 
@@ -484,6 +502,31 @@ do_down() {
 	seal_state
 	[ "$rc" = 0 ] || exit 1
 	echo "    down. nothing of this box is running or billed."
+}
+
+# --- adopt ---------------------------------------------------------------------
+# adopt: a Vultr instance the box's make was cut off from, into the box's state.
+do_adopt() {
+	STEPS=3
+	need mw terraform age age-keygen git
+	[ -n "$INSTANCE" ] || die "adopt needs --instance ID: the Vultr instance to take into $NAME's state"
+	load_settings
+	load_token
+	step "state: open the vault's"
+	open_state
+	if grep -q "\"id\": *\"$INSTANCE\"" "$PRIV/terraform.tfstate" 2>/dev/null; then
+		echo "    skip: the state already holds $INSTANCE"
+		return 0
+	fi
+	step "terraform: import vultr_instance.boost $INSTANCE"
+	local rc=0
+	tf init -input=false >/dev/null || die "terraform init failed"
+	# shellcheck disable=SC2046
+	tf import -input=false -state="$PRIV/terraform.tfstate" -var-file="$TFVARS" -var "name=$NAME" $(snapshot_args) vultr_instance.boost "$INSTANCE" || rc=$?
+	step "state: seal it in the vault"
+	seal_state
+	[ "$rc" = 0 ] || die "terraform import failed (status $rc)"
+	echo "    adopted: $INSTANCE is $NAME's in the state; down will find it"
 }
 
 # --- status -------------------------------------------------------------------
@@ -582,8 +625,9 @@ do_snapshot() {
 
 # --- list -----------------------------------------------------------------------
 # vultr_api METHOD PATH: call Vultr with the token on curl's stdin. API_BODY and
-# API_CODE are its answer; it succeeds on a 2xx or a 404 of a DELETE, and says
-# on standard error what Vultr said when it does not.
+# API_CODE are its answer; it succeeds on a 2xx, or on a 204 or 404 of a DELETE
+# (the only two answers that say an instance is gone), and says on standard error
+# what Vultr said when it does not.
 API_BODY=""
 API_CODE=""
 vultr_api() {
@@ -595,8 +639,14 @@ vultr_api() {
 	}
 	API_CODE=${reply##*$'\n'}
 	API_BODY=${reply%$'\n'*}
+	if [ "$method" = DELETE ]; then
+		case $API_CODE in
+		204 | 404) return 0 ;;
+		*) return 1 ;;
+		esac
+	fi
 	case $API_CODE in
-	2?? | 404) [ "$API_CODE" != 404 ] || [ "$method" = DELETE ] || return 1 ;;
+	2??) ;;
 	*) return 1 ;;
 	esac
 }
@@ -610,7 +660,7 @@ do_list() {
 		echo "vultr-boost: Vultr refused the list of instances (HTTP $API_CODE): $(printf '%s' "$API_BODY" | tr '\n' ' ' | cut -c1-300)" >&2
 		exit 1
 	}
-	printf '%s' "$API_BODY" | jq -r '.instances[]? | [.id, (.label // ""), (.status // "")] | @tsv'
+	printf '%s' "$API_BODY" | jq -r '.instances[]? | [.id, (.label // ""), (.status // ""), (.server_status // "")] | @tsv'
 }
 
 # --- spend ----------------------------------------------------------------------
@@ -644,6 +694,7 @@ case $CMD in
 up) do_up ;;
 down) do_down ;;
 list) do_list ;;
+adopt) do_adopt ;;
 status) do_status ;;
 snapshot) do_snapshot ;;
 spend) do_spend ;;

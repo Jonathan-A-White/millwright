@@ -227,6 +227,14 @@ destroy)
 	echo "\$state" >"$T/statepath"
 	echo '{"version":4,"resources":[]}' >"\$state"
 	;;
+import)
+	echo "\$state" >"$T/statepath"
+	last=
+	for a in "\$@"; do last=\$a; done
+	cat >"\$state" <<JSON
+{"version":4,"resources":[{"type":"vultr_instance","name":"boost","instances":[{"attributes":{"id":"\$last","label":"cloud2"}}]}]}
+JSON
+	;;
 esac
 EOF
 
@@ -263,8 +271,9 @@ case \$last in
 */instances/inst-1234) echo '{"instance":{"id":"inst-1234","status":"active","power_status":"running","server_status":"ok","plan":"vhp-8c-16gb-amd","region":"zzz","date_created":"2026-10-09T10:00:00+00:00"}}' ;;
 */plans*) echo '{"plans":[{"id":"vhp-8c-16gb-amd","vcpu_count":8,"ram":16384,"monthly_cost":96,"hourly_cost":0.132}]}' ;;
 */billing/pending-charges) echo '{"pending_charges":[{"description":"cloud1 (vhp-8c-16gb-amd)","total":1.5},{"description":"hub vps","total":6},{"description":"cloud2 (vhp-8c-16gb-amd)","total":0.25},{"description":"cloud12","total":9}]}' ;;
-*/instances\?per_page=500) echo '{"instances":[{"id":"inst-1234","label":"cloud1","status":"active"},{"id":"orphan-1","label":"cloud2","status":"locked"},{"id":"other-1","label":"","status":"active"}]}'; case " \$* " in *" -w "*) printf '\n200' ;; esac ;;
+*/instances\?per_page=500) echo '{"instances":[{"id":"inst-1234","label":"cloud1","status":"active","server_status":"ok"},{"id":"orphan-1","label":"cloud2","status":"pending","server_status":"locked"},{"id":"other-1","label":"","status":"active","server_status":"ok"}]}'; case " \$* " in *" -w "*) printf '\n200' ;; esac ;;
 */instances/orphan-1) case " \$* " in *" -w "*) printf '\n204' ;; esac ;;
+*/instances/odd-1) echo '{}'; case " \$* " in *" -w "*) printf '\n200' ;; esac ;;
 */instances/gone-1) echo '{"error":"Invalid instance ID"}'; case " \$* " in *" -w "*) printf '\n404' ;; esac ;;
 */instances/locked-1) echo '{"error":"Instance is locked"}'; case " \$* " in *" -w "*) printf '\n409' ;; esac ;;
 */snapshots) echo '{"snapshot":{"id":"snap-77","description":"mw boost"}}' ;;
@@ -455,7 +464,8 @@ mv "$T/token.away" "$SECRETS/vultr_api_token"
 # --- h. reconciling with Vultr (mw-gq6.460): list, and down --instance ----------
 : >"$CURLLOG"
 out=$(run list 2>&1) || fail "list failed: $out"
-printf '%s\n' "$out" | grep -qx "$(printf 'orphan-1\tcloud2\tlocked')" || fail "list does not print id, label and status separated by tabs: $out"
+printf '%s\n' "$out" | grep -qx "$(printf 'orphan-1\tcloud2\tpending\tlocked')" || fail "list does not print id, label, status and server status separated by tabs: $out"
+printf '%s\n' "$out" | grep -qx "$(printf 'inst-1234\tcloud1\tactive\tok')" || fail "list does not print an active box's server status: $out"
 [ "$(printf '%s\n' "$out" | wc -l)" = 3 ] || fail "list should print a line for each instance: $out"
 grep -q "$VULTR_KEY" "$CURLLOG" || fail "list did not send the token to curl on stdin"
 grep -q "$VULTR_KEY" "$CALLS" && fail "list put the Vultr token on a command line"
@@ -469,9 +479,26 @@ out=$(run down --yes --name cloud2 --instance gone-1 2>&1) || fail "down --insta
 echo "$out" | grep -q 'Vultr holds no instance gone-1' || fail "down --instance of a gone instance does not say so: $out"
 if out=$(run down --yes --name cloud2 --instance locked-1 2>&1); then fail "down --instance of a locked instance should fail"; fi
 echo "$out" | grep -q 'Instance is locked' || fail "down --instance does not say what Vultr said: $out"
+# Vultr's 409 is a locked instance (a snapshot restore): said so, the app names it from this
+echo "$out" | grep -q 'Vultr would not delete instance locked-1 (locked, HTTP 409)' || fail "down --instance of a locked instance does not say it is locked, HTTP 409: $out"
+# only a 204 or a 404 says an instance is gone: any other answer is a refusal, not a deletion
+if out=$(run down --yes --name cloud2 --instance odd-1 2>&1); then fail "a DELETE Vultr answered 200 is no deletion and should fail: $out"; fi
+echo "$out" | grep -q 'HTTP 200' || fail "down --instance does not say what Vultr answered: $out"
+echo "$out" | grep -q 'deleted: Vultr instance odd-1' && fail "down --instance said it deleted an instance Vultr answered 200 to"
 if out=$(run down --yes --name cloud2 --instance 'x;y' 2>&1); then fail "a bad instance id should be refused"; fi
 [ -z "$(ls -A "$RUN")" ] || fail "list or down --instance left a tmpfs directory behind"
 out=$(run_bare list --dry-run 2>&1) || fail "list --dry-run failed: $out"
 echo "$out" | grep -q 'curl' || fail "list --dry-run does not print the call to Vultr: $out"
+
+# --- i. adopt: a box whose make was cut off, taken into the state ---------------
+: >"$SSHLOG"
+out=$(run adopt --yes --name cloud2 --instance inst-77 2>&1) || fail "adopt failed: $out"
+grep -q '^terraform .*import.* -var name=cloud2 .*vultr_instance.boost inst-77' "$CALLS" || fail "adopt did not terraform import the instance into the box's state: $(grep '^terraform' "$CALLS" | tail -n 2)"
+tail -n +2 "$VAULT/hosts/vultr/cloud2.tfstate.age" | base64 -d | grep -q 'inst-77' || fail "adopt did not keep the imported instance in the sealed state"
+[ -z "$(git -C "$VAULT" status --porcelain)" ] || fail "adopt left the vault uncommitted"
+[ -z "$(ls -A "$RUN")" ] || fail "adopt left a tmpfs directory behind"
+if out=$(run adopt --yes --name cloud2 2>&1); then fail "adopt with no --instance should be refused"; fi
+out=$(run_bare adopt --dry-run --name cloud2 --instance inst-77 2>&1) || fail "adopt --dry-run failed: $out"
+echo "$out" | grep -q 'import' || fail "adopt --dry-run does not name terraform import: $out"
 
 echo "check-vultr-boost: ok"
