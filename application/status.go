@@ -602,6 +602,16 @@ type StatusReport struct {
 	LastBackup     time.Time
 	BackupAge      time.Duration
 	LastBackupSaid string
+
+	// LastGC is when this host last asked its beads database to reclaim disk
+	// space, and GCAge how long ago that was, so that a collection starved
+	// for days shows on the BEADS line (mw-gq6.449). Both are zero when it
+	// never has, and when LastGCSaid, the note as the tracker held it, cannot
+	// be read as a time. A host whose beads live on another's does not collect
+	// and leaves all three empty.
+	LastGC     time.Time
+	GCAge      time.Duration
+	LastGCSaid string
 }
 
 // Run reads the report and prints it. Every call it makes is a read: the
@@ -669,6 +679,11 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	var backupRead func() (string, error)
 	if s.Notes != nil && report.SyncMode == BeadsSyncBackup {
 		backupRead = later(func() (string, error) { return s.Notes.Note(ctx, LastBackupKey(s.Host)) })
+	}
+
+	var gcRead func() (string, error)
+	if s.Notes != nil && report.SyncMode != BeadsSyncShared {
+		gcRead = later(func() (string, error) { return s.Notes.Note(ctx, LastGCKey(s.Host)) })
 	}
 
 	closing := closingOut(ctx, s.CloseOuts)
@@ -950,6 +965,17 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 			if at, err := time.Parse(LastSyncFormat, report.LastBackupSaid); err == nil {
 				report.LastBackup = at
 				report.BackupAge = s.now().Sub(at)
+			}
+		}
+		if gcRead != nil {
+			said, err := gcRead()
+			if err != nil {
+				return report, fmt.Errorf("reading when %s last collected its beads: %w", s.Host, err)
+			}
+			report.LastGCSaid = strings.TrimSpace(said)
+			if at, err := time.Parse(LastSyncFormat, report.LastGCSaid); err == nil {
+				report.LastGC = at
+				report.GCAge = s.now().Sub(at)
 			}
 		}
 	}
@@ -1299,7 +1325,7 @@ func (r StatusReport) String() string {
 	}
 
 	if r.BeadsKnown {
-		clip(&b, beadsLine(r.BeadsBytes, r.BeadsBudgetBytes))
+		clip(&b, beadsLine(r.BeadsBytes, r.BeadsBudgetBytes)+r.gcSaid())
 		clip(&b, r.syncModeLine())
 		b.WriteString("\n")
 	}
@@ -1758,6 +1784,31 @@ func beadsLine(bytes, budget int64) string {
 		return fmt.Sprintf("BEADS %s: past the %s budget", formatBytes(bytes), formatBytes(budget))
 	}
 	return fmt.Sprintf("BEADS %s", formatBytes(bytes))
+}
+
+// gcSaid is what the BEADS line adds about the host's last collection, so
+// that one starved of its cadence shows without a Clerk reading the note.
+// Nothing for a host that does not collect.
+func (r StatusReport) gcSaid() string {
+	switch {
+	case r.SyncMode == BeadsSyncShared:
+		return ""
+	case r.LastGCSaid == "":
+		return " · never collected"
+	case r.LastGC.IsZero():
+		return " · last GC unreadable"
+	default:
+		return " · last GC " + gcAge(r.GCAge) + " ago"
+	}
+}
+
+// gcAge writes how long ago a collection ran: whole days once it is a day or
+// more, otherwise as Clock says it.
+func gcAge(d time.Duration) string {
+	if d >= 24*time.Hour {
+		return fmt.Sprintf("%dd", int(d.Hours())/24)
+	}
+	return Clock(d)
 }
 
 // formatBytes writes a byte count the way a person reads one: whole
