@@ -3,6 +3,7 @@ package application
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -108,6 +109,30 @@ func (r SessionResult) Trouble() string {
 	default:
 		return "the session reported that it failed, without saying why"
 	}
+}
+
+// usageLimitNotice is the harness's notice that the plan's usage limit stopped
+// it — "You've hit your weekly limit · resets …", or the session, 5-hour or
+// monthly limit — with either apostrophe.
+var usageLimitNotice = regexp.MustCompile(`(?i)\b(?:you(?:'|’)ve|you have) hit your\b[^\n]{0,40}?\blimit\b`)
+
+// AtUsageLimit reports whether text holds the harness's notice that the usage
+// limit stopped it (mw-gq6.433).
+func AtUsageLimit(text string) bool { return usageLimitNotice.MatchString(text) }
+
+// UsageLimit is the line of the harness's own words when a session that did
+// not finish was stopped at the usage limit, and empty for any other session:
+// on 2026-10-15 fourteen Builders stopped so and sat in_progress (mw-gq6.433).
+func (r SessionResult) UsageLimit() string {
+	if r.Finished() {
+		return ""
+	}
+	for _, line := range strings.Split(r.Said, "\n") {
+		if AtUsageLimit(line) {
+			return strings.TrimSpace(line)
+		}
+	}
+	return ""
 }
 
 // Spent is the fuel of one session on one line, for the ledger: what it burned,

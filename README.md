@@ -4245,8 +4245,15 @@ successor from the newest handoff with no handover; then sends one alarm, on
 the emergency lane, naming the window it started and any proxy it dropped. The
 Governor is told once to an episode: damper 30 minutes, cap 1, and the alarm is
 cleared by a normal-lane event once the Mayor answers again. Its way back is
-`tmux kill-window -t '<window id mayor-up started>'`. `mw doctor mayor-stuck`
-runs it by hand; `--dry-run` names the finding and changes nothing.
+`tmux kill-window -t '<window id mayor-up started>'`. It reads the Mayor's pane
+too: a Mayor parked on the harness's usage-limit menu ("Stop and wait" /
+"Switch to usage credits") or its "You've hit your weekly limit" notice writes
+no reply at all, so the transcript cannot see it (on 2026-10-15 one sat there
+2h12m). A pane on the limit for 10 minutes faults as `stopped at the usage
+limit`; the cure leaves the window alone, as a successor would meet the same
+limit, and pages the Governor once for the window that the factory is stopped,
+with the limit and its menu. `mayor-stale` leaves such a pane to it. `mw doctor
+mayor-stuck` runs it by hand; `--dry-run` names the finding and changes nothing.
 
 **postern-channel** faults the home host, and only it, when its config does not
 send the Mayor's postern messages directly: `postern_channel` reads chain

@@ -30,6 +30,7 @@ type mayorStuckFixture struct {
 	projects   string
 	tmuxLog    string
 	tmuxEnv    string
+	pane       string
 	upEnv      string
 	acting     string
 	environ    []string
@@ -55,6 +56,7 @@ func (c *doctorContext) registerMayorStuckSteps(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a transcript whose only replies were API Errors (\d+) minutes ago$`, c.aTranscriptOfOldAPIErrors)
 	ctx.Given(`^a transcript with no replies$`, c.aTranscriptWithNoReplies)
 	ctx.Given(`^this host is not home$`, c.thisHostIsNotHome)
+	ctx.Given(`^the Mayor's pane shows the weekly-limit menu$`, c.thePaneShowsTheWeeklyLimitMenu)
 	ctx.Given(`^the environment sets HTTPS_PROXY and https_proxy to a proxy whose port refuses connections$`, c.theEnvironmentSetsADeadProxy)
 	ctx.Given(`^the tmux server's global environment sets HTTPS_PROXY, https_proxy and ALL_PROXY to that same proxy$`, c.theTmuxEnvironmentSetsTheSameProxy)
 	ctx.Given(`^the environment sets HTTPS_PROXY to a proxy that answers$`, c.theEnvironmentSetsALiveProxy)
@@ -92,6 +94,7 @@ func (c *doctorContext) stuckFixture() (*mayorStuckFixture, error) {
 		projects: filepath.Join(root, "projects"),
 		tmuxLog:  filepath.Join(root, "tmux-calls"),
 		tmuxEnv:  filepath.Join(root, "tmux-env"),
+		pane:     filepath.Join(root, "pane"),
 		upEnv:    filepath.Join(root, "mayor-up-env"),
 		acting:   filepath.Join(vault, application.ActingFileName("mayor")),
 		environ:  []string{"PATH=" + os.Getenv("PATH"), "HOME=/nonexistent"},
@@ -125,9 +128,10 @@ case "$1" in
 list-windows) printf '@7|mayor-2026-10-06-210\n' ;;
 list-panes) printf '0 claude\n' ;;
 show-environment) cat %q 2>/dev/null ;;
+capture-pane) cat %q 2>/dev/null ;;
 esac
 exit 0
-`, f.tmuxLog, f.tmuxEnv)
+`, f.tmuxLog, f.tmuxEnv, f.pane)
 	if err := os.WriteFile(program, []byte(script), 0o755); err != nil {
 		return err
 	}
@@ -206,6 +210,22 @@ func (c *doctorContext) aTranscriptOfOldAPIErrors(minutes int) error {
 
 func (c *doctorContext) aTranscriptWithNoReplies() error {
 	return c.writeStuckTranscript(nil)
+}
+
+// thePaneShowsTheWeeklyLimitMenu is the pane @138 stood on for 2h12m on
+// 2026-10-15 (mw-gq6.433): the harness's limit notice and its menu.
+func (c *doctorContext) thePaneShowsTheWeeklyLimitMenu() error {
+	f, err := c.stuckFixture()
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(f.pane, []byte("● Reading the newest handoff first.\n\n"+
+		"  ⎿  You've hit your weekly limit · resets Oct 16, 7am (UTC)\n\n"+
+		" What do you want to do?\n\n"+
+		" ❯ 1. Stop and wait for limit to reset\n"+
+		"   2. Switch to usage credits\n"+
+		"   3. Upgrade your plan\n\n"+
+		" Enter to confirm · Esc to cancel\n"), 0o644)
 }
 
 func (c *doctorContext) thisHostIsNotHome() error {

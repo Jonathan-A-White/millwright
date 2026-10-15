@@ -262,3 +262,22 @@ func TestReadSessionResultAddsUpEveryModelAModelUsageNames(t *testing.T) {
 		t.Errorf("expected each kind of token summed across models, got %+v", result.Fuel)
 	}
 }
+
+// The 14 Builders stopped at the weekly limit on 2026-10-15 left a result
+// with the harness's notice and no work (mw-gq6.433).
+func TestAResultStoppedAtTheUsageLimitSaysSo(t *testing.T) {
+	cases := map[string]struct {
+		result application.SessionResult
+		want   string
+	}{
+		"weekly":       {application.SessionResult{IsError: true, Said: "You've hit your weekly limit · resets Oct 16, 7am (UTC)"}, "You've hit your weekly limit · resets Oct 16, 7am (UTC)"},
+		"session":      {application.SessionResult{IsError: true, Said: "Claude AI usage limit reached\nYou’ve hit your session limit · resets 3pm"}, "You’ve hit your session limit · resets 3pm"},
+		"another fail": {application.SessionResult{IsError: true, Said: "API Error: Connection lost mid-response"}, ""},
+		"finished":     {application.SessionResult{Subtype: "success", Said: "Done. You've hit your weekly limit was the story's title."}, ""},
+	}
+	for name, c := range cases {
+		if got := c.result.UsageLimit(); got != c.want {
+			t.Errorf("%s: UsageLimit() = %q, want %q", name, got, c.want)
+		}
+	}
+}

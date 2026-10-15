@@ -249,9 +249,13 @@ func (m *MayorStale) window(ctx context.Context) (id, name string, held bool, ve
 // running (its clock stopped redrawing), text on the input line that nobody
 // took, or a prompt waiting for an answer. A pane at an empty input line with
 // no turn running is a Mayor waiting for its next word, and any other pane is
-// not one this check can call dead.
+// not one this check can call dead. A pane parked on the usage limit is
+// mayor-stuck's: a respawn would meet the same limit (mw-gq6.433).
 func paneStalls(pane string) bool {
 	pane = strings.ReplaceAll(pane, "\u00a0", " ")
+	if _, limit := limitOf(pane); limit {
+		return false
+	}
 	if _, prompt := promptOf(pane); prompt || strings.Contains(pane, mayorStaleBusy) {
 		return true
 	}
