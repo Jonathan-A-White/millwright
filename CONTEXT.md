@@ -107,7 +107,7 @@ AI work an app sends the factory to be answered, not built: its inputs (the app'
 _Avoid_: Job, task, request, story
 
 **Grind**:
-An app's standing instructions for one kind of grist: what it accepts, the model and effort, the instructions, the answer's schema. The app's rig owns it (`grinds/<kind>.json`); the factory's config caps it.
+An app's standing instructions for one kind of grist: what it accepts, the model and effort, the instructions, the answer's schema. The app's rig owns it (`grinds/<kind>.json`); the factory's config caps it. Its instructions name one file, or a directory whose `*.md` parts are read in name order and joined by a blank line.
 _Avoid_: Spec, recipe, prompt, template
 
 **Mill**:

@@ -409,7 +409,11 @@ func readGrindTree(path string) (grind GrindFile, instructions, schema string, e
 		if !rigPath(rel) {
 			return "", fmt.Errorf("the grind's %s, %q, is not a path inside its rig", name, rel)
 		}
-		text, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
+		full := filepath.Join(root, filepath.FromSlash(rel))
+		if info, statErr := os.Stat(full); statErr == nil && info.IsDir() {
+			return readGrindParts(full)
+		}
+		text, err := os.ReadFile(full)
 		if err != nil {
 			return "", fmt.Errorf("reading the grind's %s: %w", name, err)
 		}
@@ -427,6 +431,27 @@ func readGrindTree(path string) (grind GrindFile, instructions, schema string, e
 		return grind, "", "", fmt.Errorf("%s has empty instructions or an answer schema that is not JSON", path)
 	}
 	return grind, instructions, compact.String(), nil
+}
+
+// readGrindParts reads the *.md parts directly in dir, in byte order of name,
+// joined as joinGrindParts says; "" when it has none.
+func readGrindParts(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", fmt.Errorf("reading the grind's instructions: %w", err)
+	}
+	var parts []string
+	for _, entry := range entries {
+		if entry.IsDir() || !isGrindPart(entry.Name()) {
+			continue
+		}
+		text, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			return "", fmt.Errorf("reading the grind's instructions: %w", err)
+		}
+		parts = append(parts, string(text))
+	}
+	return joinGrindParts(parts), nil
 }
 
 // evalExtension is the extension a photo's copy carries: the mill's own

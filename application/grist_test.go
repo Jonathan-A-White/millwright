@@ -319,6 +319,55 @@ func TestGristGrindRefusesAGrindItCannotTrust(t *testing.T) {
 	}
 }
 
+// A grind whose instructions name a directory is read as that directory's
+// *.md parts in name order, one blank line between them; one naming a file
+// is read as it always was; a directory with no parts is refused as empty
+// instructions are.
+func TestGristGrindReadsInstructionsFromADirectoryOfParts(t *testing.T) {
+	const dir = "grinds/sweep.instructions"
+	withInstructions := func(mill application.GristGrind, parts map[string]string) {
+		grinds := mill.Grinds.(*apptest.FakeGrinds)
+		grinds.SetFile("/rigs/cairn", "c0ffee", "grinds/sweep.json", []byte(`{"grind":1,"app":"cairn","kind":"sweep","versions":["1.1"],
+			"model":"sonnet","effort":"low","instructions":"`+dir+`","answerSchema":"schema.json",
+			"attachments":{"min":1,"max":4,"mime":["image/webp"],"maxBytes":1000}}`))
+		for name, text := range parts {
+			grinds.SetFile("/rigs/cairn", "c0ffee", dir+"/"+name, []byte(text))
+		}
+	}
+	t.Run("three parts", func(t *testing.T) {
+		mill, _, grinder := aSmallMill(t)
+		withInstructions(mill, map[string]string{"20-second.md": "Second.\n", "10-first.md": "First.\n", "30-third.md": "Third.", "README.txt": "no"})
+		if _, err := mill.Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		calls := grinder.Calls()
+		if len(calls) != 1 || !strings.HasSuffix(calls[0].Call.System, "First.\n\nSecond.\n\nThird.") {
+			t.Fatalf("expected one session with the three parts joined in name order, got %+v", calls)
+		}
+	})
+	t.Run("one file", func(t *testing.T) {
+		mill, _, grinder := aSmallMill(t)
+		if _, err := mill.Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		calls := grinder.Calls()
+		if len(calls) != 1 || !strings.HasSuffix(calls[0].Call.System, "\n\nList what you see.") {
+			t.Fatalf("expected one session with the file's text, got %+v", calls)
+		}
+	})
+	t.Run("no parts", func(t *testing.T) {
+		mill, backend, grinder := aSmallMill(t)
+		withInstructions(mill, map[string]string{"notes.txt": "no .md here"})
+		if _, err := mill.Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		answer := openFakeAnswer(t, backend.Delivered()[0])
+		if answer.Status != application.GristRefused || answer.Reason != application.GristReasonBrokenGrind || len(grinder.Calls()) != 0 {
+			t.Fatalf("expected a refusal as a broken grind and no session, got %+v", answer)
+		}
+	})
+}
+
 const (
 	gristPhoneKey    = "02466d7fcae563e5cb09a0d1870bb580344804617879a14949cf22285f1bae3f27"
 	gristStrangerKey = "032c0b7cf95324a07d05398b240174dc0c2be444d96b159aa6c7f7b1e668680991"
