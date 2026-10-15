@@ -126,6 +126,8 @@ func newDoctorCmd() *cobra.Command {
 			posternTranscribe := doctor.NewPosternTranscribe(transcribeCmd, transcribeErr)
 			posternTranscribe.Home, posternTranscribe.Host = mwVault(vault, host), host
 
+			dispatchWindows := doctor.NewDispatchWindows(config.DispatchWindowProblems())
+
 			posternChannel := doctor.NewPosternChannel(mwVault(vault, host), host)
 
 			staleMinutes, err := config.DoctorMayorStaleMinutes()
@@ -266,6 +268,7 @@ func newDoctorCmd() *cobra.Command {
 					mayorStale,
 					mayorGone,
 					posternTranscribe,
+					dispatchWindows,
 					beadsServerCheck,
 					posternChannel,
 					battery,

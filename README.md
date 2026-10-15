@@ -1142,6 +1142,14 @@ builder_nice = 10                #  a Builder session and mw next's gate run und
 builder_jobs = 8                # the most test workers a Builder's tests and mw next's gate start at once (JOBS, GOMAXPROCS, VITEST_MAX_WORKERS), for a host that is also someone's PC; docs/research/desktop-shared-pc.md (default: no limit)
 hands_root_helper = "/usr/local/sbin/mw-hands-root"  # what a root hands step is handed to, through sudo -n, on every host (default shown)
 
+[[dispatch.windows]]               # from 23:00 to 06:00 on New York's clock these stand in for the root keys (a window wraps midnight; mw config set cannot write it, paste it)
+name = "night"                     # optional: mw status shows "cap 4: night window to 06:00 America/New_York"
+from = "23:00"
+to   = "06:00"
+tz   = "America/New_York"          # a tz database zone, so a change of clocks is read; the first window that holds the moment wins
+cap  = 4                           # and any of builder_jobs, builder_nice, room_load_per_core, room_min_free_mb; a key it leaves out keeps its root value
+# A story running when a window closes is not stopped; the lower cap holds back new starts. A malformed window is skipped, the root values apply, and mw doctor dispatch-windows names the key.
+
 [rigs]
 millwright = "/root/millwright"    # where each rig is checked out here
 
