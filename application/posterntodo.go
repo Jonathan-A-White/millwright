@@ -70,21 +70,35 @@ func (i PosternInbox) applyTodoAdd(ctx context.Context, m PosternInboxMessage, a
 }
 
 // applyTodoEdit changes the title, the notes (the bead's description), the due
-// time (todo_due; empty takes it off), its star (todo_important), or any of
-// them, as the action names them.
+// time (todo_due; empty takes it off), its star (todo_important), its size
+// (todo_size), its Then line (todo_then), or any of them, as the action names them.
 func (i PosternInbox) applyTodoEdit(ctx context.Context, action PosternAction, card StoryDetail,
 	refuse func(string) (posternApplied, error), done func(subject, comment string) (posternApplied, error)) (posternApplied, error) {
 	if why := refuseNotACard(card); why != "" {
 		return refuse(why)
 	}
-	if action.Title == nil && action.Notes == nil && action.Due == nil && action.Important == nil {
-		return refuse("it names no title, notes, due time nor star")
+	if action.Title == nil && action.Notes == nil && action.Due == nil && action.Important == nil &&
+		action.Size == nil && action.Then == nil {
+		return refuse("it names no title, notes, due time, star, size nor Then line")
 	}
 	due := ""
 	if action.Due != nil {
 		var err error
 		if due, err = normalTodoDue(*action.Due); err != nil {
 			return refuse(fmt.Sprintf("its due time is refused: %v", err))
+		}
+	}
+	size, then := "", ""
+	if action.Size != nil {
+		var err error
+		if size, err = normalTodoSize(*action.Size); err != nil {
+			return refuse(fmt.Sprintf("its size is refused: %v", err))
+		}
+	}
+	if action.Then != nil {
+		var err error
+		if then, err = normalTodoThen(*action.Then); err != nil {
+			return refuse(fmt.Sprintf("its Then line is refused: %v", err))
 		}
 	}
 	edit := StoryEdit{}
@@ -122,6 +136,18 @@ func (i PosternInbox) applyTodoEdit(ctx context.Context, action PosternAction, c
 			return refuse(err.Error())
 		}
 		changed = append(changed, "star")
+	}
+	if action.Size != nil {
+		if err := i.Tracker.SetStoryMetadata(ctx, card.Story.ID, map[string]string{TodoSizeField: size}); err != nil {
+			return refuse(err.Error())
+		}
+		changed = append(changed, "size")
+	}
+	if action.Then != nil {
+		if err := i.Tracker.SetStoryMetadata(ctx, card.Story.ID, map[string]string{TodoThenField: then}); err != nil {
+			return refuse(err.Error())
+		}
+		changed = append(changed, "Then line")
 	}
 	return done(fmt.Sprintf("Edited: %s", card.Story.ID),
 		fmt.Sprintf("EDITED by the Governor via postern: the %s changed", strings.Join(changed, " and ")))

@@ -334,6 +334,8 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		TodoDue:          b.text(application.TodoDueField),
 		TodoReminded:     b.text(application.TodoRemindedField),
 		TodoImportant:    b.flag(application.TodoImportantField),
+		TodoSize:         b.text(application.TodoSizeField),
+		TodoThen:         b.text(application.TodoThenField),
 		Attempts:         b.attempts(),
 		RebaseSends:      b.count(application.RebaseSendsField),
 		RebaseBase:       b.text(application.RebaseBaseField),

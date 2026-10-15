@@ -165,6 +165,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeTalkWaitScenario(ctx)
 	steps.InitializeTidyScenario(ctx)
 	steps.InitializeTodoDueScenario(ctx)
+	steps.InitializeTodoSizeScenario(ctx)
 	steps.InitializeWatchScenario(ctx)
 	steps.InitializeSyncScenario(ctx)
 	steps.InitializeVPSNginxScenario(ctx)

@@ -112,6 +112,12 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 	ctx.Then(`^the view's bead "([^"]*)" carries the todo_due "([^"]*)"$`, c.theViewsBeadCarriesTheTodoDue)
 	ctx.Then(`^the view's bead "([^"]*)" carries no todo_due$`, func(id string) error { return c.theViewsBeadCarriesTheTodoDue(id, "") })
 	ctx.Given(`^the view's bead "([^"]*)" is important$`, c.theViewsBeadIsImportant)
+	ctx.Given(`^the view's bead "([^"]*)" has the todo_size "([^"]*)"$`, c.theViewsBeadHasTheTodoSize)
+	ctx.Given(`^the view's bead "([^"]*)" has the todo_then "([^"]*)"$`, c.theViewsBeadHasTheTodoThen)
+	ctx.Then(`^the view's bead "([^"]*)" carries the todo_size "([^"]*)"$`, c.theViewsBeadCarriesTheTodoSize)
+	ctx.Then(`^the view's bead "([^"]*)" carries no todo_size$`, func(id string) error { return c.theViewsBeadCarriesTheTodoSize(id, "") })
+	ctx.Then(`^the view's bead "([^"]*)" carries the todo_then "([^"]*)"$`, c.theViewsBeadCarriesTheTodoThen)
+	ctx.Then(`^the view's bead "([^"]*)" carries no todo_then$`, func(id string) error { return c.theViewsBeadCarriesTheTodoThen(id, "") })
 	ctx.Then(`^the view's bead "([^"]*)" carries todo_important true$`, func(id string) error { return c.theViewsBeadCarriesTodoImportant(id, true) })
 	ctx.Then(`^the view's bead "([^"]*)" carries no todo_important$`, func(id string) error { return c.theViewsBeadCarriesTodoImportant(id, false) })
 	ctx.Then(`^the view's bead "([^"]*)" carries no todo_rank$`, func(id string) error { return c.theViewsBeadCarriesTheTodoRank(id, "") })
@@ -936,6 +942,36 @@ func (c *posternViewContext) theViewsBeadCarriesTheTodoDue(id, due string) error
 	}
 	if b.TodoDue != due {
 		return fmt.Errorf("expected %s to carry the todo_due %q, got %q", id, due, b.TodoDue)
+	}
+	return nil
+}
+
+func (c *posternViewContext) theViewsBeadHasTheTodoSize(id, size string) error {
+	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.TodoSizeField: size})
+}
+
+func (c *posternViewContext) theViewsBeadHasTheTodoThen(id, then string) error {
+	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.TodoThenField: then})
+}
+
+func (c *posternViewContext) theViewsBeadCarriesTheTodoSize(id, size string) error {
+	b, ok := c.bead(id)
+	if !ok {
+		return fmt.Errorf("the view has no bead %s", id)
+	}
+	if b.TodoSize != size {
+		return fmt.Errorf("expected %s to carry the todo_size %q, got %q", id, size, b.TodoSize)
+	}
+	return nil
+}
+
+func (c *posternViewContext) theViewsBeadCarriesTheTodoThen(id, then string) error {
+	b, ok := c.bead(id)
+	if !ok {
+		return fmt.Errorf("the view has no bead %s", id)
+	}
+	if b.TodoThen != then {
+		return fmt.Errorf("expected %s to carry the todo_then %q, got %q", id, then, b.TodoThen)
 	}
 	return nil
 }

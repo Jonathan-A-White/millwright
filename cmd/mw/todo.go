@@ -19,6 +19,8 @@ func newTodoCmd() *cobra.Command {
 		Short: "Work the Governor's To do board",
 	}
 	todo.AddCommand(newTodoDueCmd())
+	todo.AddCommand(newTodoSizeCmd())
+	todo.AddCommand(newTodoThenCmd())
 	return todo
 }
 
@@ -55,6 +57,76 @@ func newTodoDueCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&clear, "clear", false, "take the due time off the card")
+	return cmd
+}
+
+func newTodoSizeCmd() *cobra.Command {
+	var clear bool
+	cmd := &cobra.Command{
+		Use:   "size <bead> (quick|hour|half-day | --clear)",
+		Short: "Set or clear how big a To do card is",
+		Long: "size gives a To do card (an open bead labelled hitl:todo) a size, quick, hour or half-day,\n" +
+			"written as the card's todo_size metadata, or with --clear takes it off. The view carries it.\n\n" +
+			"  mw todo size mw-ab12 hour\n" +
+			"  mw todo size mw-ab12 --clear\n\n" +
+			"A bead that is not an open card, and a size that is not one of the three, are refused and\n" +
+			"nothing is written.",
+		Args: cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			size := ""
+			switch {
+			case clear && len(args) == 2:
+				return fmt.Errorf("mw todo size: give a size or --clear, not both")
+			case !clear && len(args) == 1:
+				return fmt.Errorf("mw todo size: give a size (quick, hour or half-day), or --clear to take it off")
+			case len(args) == 2:
+				size = args[1]
+			}
+			gateway, err := beads.FromConfig()
+			if err != nil {
+				return err
+			}
+			_, err = application.TodoSize{Tracker: gateway, Out: cmd.OutOrStdout()}.Run(cmd.Context(), args[0], size)
+			return err
+		},
+	}
+	cmd.Flags().BoolVar(&clear, "clear", false, "take the size off the card")
+	return cmd
+}
+
+func newTodoThenCmd() *cobra.Command {
+	var clear bool
+	cmd := &cobra.Command{
+		Use:   "then <bead> (<text> | --clear)",
+		Short: "Set or clear what follows a To do card",
+		Long: "then gives a To do card (an open bead labelled hitl:todo) a Then line, free text of at most\n" +
+			"200 characters, written as the card's todo_then metadata, or with --clear takes it off. The\n" +
+			"view carries it, and when the Governor marks the card Done the Then line is filed as a card\n" +
+			"of its own on the same list.\n\n" +
+			"  mw todo then mw-ab12 \"Fit the hose to the tap\"\n" +
+			"  mw todo then mw-ab12 --clear\n\n" +
+			"A bead that is not an open card, and a line over 200 characters, are refused and nothing is\n" +
+			"written.",
+		Args: cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			text := ""
+			switch {
+			case clear && len(args) == 2:
+				return fmt.Errorf("mw todo then: give a line or --clear, not both")
+			case !clear && len(args) == 1:
+				return fmt.Errorf("mw todo then: give a line, or --clear to take the Then line off")
+			case len(args) == 2:
+				text = args[1]
+			}
+			gateway, err := beads.FromConfig()
+			if err != nil {
+				return err
+			}
+			_, err = application.TodoThen{Tracker: gateway, Out: cmd.OutOrStdout()}.Run(cmd.Context(), args[0], text)
+			return err
+		},
+	}
+	cmd.Flags().BoolVar(&clear, "clear", false, "take the Then line off the card")
 	return cmd
 }
 

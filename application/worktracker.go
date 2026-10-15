@@ -212,6 +212,11 @@ type StoryDetail struct {
 	// TodoImportant is whether the card is starred, as the TodoImportantField
 	// metadata says ("true").
 	TodoImportant bool
+	// TodoSize is how big a hitl:todo card is, as the TodoSizeField metadata says
+	// (one of TodoSizes), and TodoThen the line filed as a card of its own when
+	// this one is closed (TodoThenField); empty when none.
+	TodoSize string
+	TodoThen string
 }
 
 // WorkInHand is what the tracker has in hand across every host: the stories

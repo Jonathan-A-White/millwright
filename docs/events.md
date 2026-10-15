@@ -186,6 +186,16 @@ due time and one not yet due are passed over, and a pass with nothing due reads 
 A card can also be starred: a todo_edit tap's `important` sets the metadata `todo_important` to `true` (false
 takes it off), and the view publishes it as `todo_important: true`; the reminder does not read it.
 
+A card can carry a size and a Then line too, neither read by the reminder. The metadata `todo_size` is
+`quick`, `hour` or `half-day` (the Mayor's `mw todo size <bead> <size>`, `--clear` takes it off, or a
+todo_edit tap's `size`; anything else is refused before the write). The metadata `todo_then` is free text
+under 200 characters, trimmed (`mw todo then <bead> "<text>"`, or todo_edit's `then`; an empty one clears
+it). The view publishes them as `todo_size` and `todo_then`, each absent when empty. When the Governor's
+close tap closes a card that has a `todo_then`, mw files the line as one new open card, labelled `hitl` and
+`hitl:todo`, on the same list, titled the line and described `Follows <id>: <title>` with the closed
+card's `Open:` line copied if it has one, and comments `THEN filed as <new id>: <line>` on the closed card,
+which keeps its fields. A card with no Then line closes as before.
+
 The `cloud` job runs the cloud check (`mw cloud check`, docs/vultr-boost.md, "Elastic") in the
 follower itself, every minute, reason `clock`, on a host whose config has a `[cloud]` table and
 only while it is home. A pass that makes or destroys a box writes a `cloud` event, actor

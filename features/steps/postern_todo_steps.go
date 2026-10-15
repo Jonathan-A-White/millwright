@@ -31,6 +31,18 @@ func registerPosternTodoSteps(ctx *godog.ScenarioContext, c *posternInboxContext
 	ctx.Then(`^bead "([^"]*)" has the todo_due "([^"]*)"$`, c.beadHasTheTodoDue)
 	ctx.Then(`^bead "([^"]*)" has no todo_due$`, func(id string) error { return c.beadHasTheTodoDue(id, "") })
 	ctx.Given(`^bead "([^"]*)" is important$`, c.beadIsImportant)
+	ctx.Given(`^bead "([^"]*)" is sized "([^"]*)" with the Then line "([^"]*)"$`, c.beadIsSizedWithThen)
+	ctx.Given(`^bead "([^"]*)" has the Then line "([^"]*)"$`, c.beadHasTheThenLine)
+	ctx.Given(`^bead "([^"]*)" has the Open: line "([^"]*)"$`, c.beadHasTheOpenLine)
+	ctx.Given(`^the Governor sends a todo_edit tap on "([^"]*)" with a then of (\d+) characters and txid "([^"]*)"$`, c.theGovernorSendsALongThen)
+	ctx.Then(`^bead "([^"]*)" has the todo_size "([^"]*)"$`, c.beadHasTheTodoSize)
+	ctx.Then(`^bead "([^"]*)" has no todo_size$`, func(id string) error { return c.beadHasTheTodoSize(id, "") })
+	ctx.Then(`^bead "([^"]*)" has the todo_then "([^"]*)"$`, c.beadHasTheTodoThen)
+	ctx.Then(`^bead "([^"]*)" has no todo_then$`, func(id string) error { return c.beadHasTheTodoThen(id, "") })
+	ctx.Then(`^the to-do list "([^"]*)" holds (\d+) open cards? titled "([^"]*)" labelled "([^"]*)"$`, c.theToDoListHoldsNCards)
+	ctx.Then(`^bead "([^"]*)" is described by the line "([^"]*)"$`, func(id, line string) error { return c.beadIsDescribedBy(id, line) })
+	ctx.Then(`^bead "([^"]*)" is described by the lines "([^"]*)" and "([^"]*)"$`, func(id, a, b string) error { return c.beadIsDescribedBy(id, a, b) })
+	ctx.Then(`^bead "([^"]*)" does not exist$`, c.beadDoesNotExist)
 	ctx.Then(`^bead "([^"]*)" has the todo_important "([^"]*)"$`, c.beadHasTheTodoImportant)
 	ctx.Then(`^bead "([^"]*)" has no todo_important$`, func(id string) error { return c.beadHasTheTodoImportant(id, "") })
 }
@@ -194,6 +206,84 @@ func (c *posternInboxContext) beadIsImportant(id string) error {
 func (c *posternInboxContext) beadHasTheTodoImportant(id, important string) error {
 	if got := c.memory.Metadata(id)[application.TodoImportantField]; got != important {
 		return fmt.Errorf("expected %s at todo_important %q, got %q", id, important, got)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) beadIsSizedWithThen(id, size, then string) error {
+	return c.memory.SetStoryMetadata(context.Background(), id,
+		map[string]string{application.TodoSizeField: size, application.TodoThenField: then})
+}
+
+func (c *posternInboxContext) beadHasTheThenLine(id, then string) error {
+	return c.memory.SetStoryMetadata(context.Background(), id, map[string]string{application.TodoThenField: then})
+}
+
+func (c *posternInboxContext) beadHasTheOpenLine(id, target string) error {
+	bead, err := c.bead(id)
+	if err != nil {
+		return err
+	}
+	return c.memory.SetDescription(id, strings.TrimSpace(bead.Description+"\nOpen: "+target))
+}
+
+func (c *posternInboxContext) theGovernorSendsALongThen(id string, n int, txid string) error {
+	return c.addActionText(c.governorKey, txid,
+		fmt.Sprintf(`{"action":"todo_edit","bead":%q,"then":%q}`, id, strings.Repeat("x", n)))
+}
+
+func (c *posternInboxContext) beadHasTheTodoSize(id, size string) error {
+	if got := c.memory.Metadata(id)[application.TodoSizeField]; got != size {
+		return fmt.Errorf("expected %s at todo_size %q, got %q", id, size, got)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) beadHasTheTodoThen(id, then string) error {
+	if got := c.memory.Metadata(id)[application.TodoThenField]; got != then {
+		return fmt.Errorf("expected %s at todo_then %q, got %q", id, then, got)
+	}
+	return nil
+}
+
+// theToDoListHoldsNCards checks list holds exactly n open cards titled title,
+// each labelled labels.
+func (c *posternInboxContext) theToDoListHoldsNCards(list string, n int, title, labels string) error {
+	epic, err := c.memory.ShowEpic(context.Background(), list)
+	if err != nil {
+		return err
+	}
+	found := 0
+	for _, card := range epic.Stories {
+		if card.Story.Title != title || card.Status != application.StatusOpen {
+			continue
+		}
+		if got := strings.Join(card.Labels, ", "); got != labels {
+			return fmt.Errorf("expected the card %q labelled %q, got %q", title, labels, got)
+		}
+		found++
+	}
+	if found != n {
+		return fmt.Errorf("expected %s to hold %d open cards titled %q, it holds %d: %+v", list, n, title, found, epic.Stories)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) beadIsDescribedBy(id string, lines ...string) error {
+	bead, err := c.bead(id)
+	if err != nil {
+		return err
+	}
+	if want := strings.Join(lines, "\n"); bead.Description != want {
+		return fmt.Errorf("expected %s described as %q, got %q", id, want, bead.Description)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) beadDoesNotExist(id string) error {
+	found, err := c.memory.ShowBeads(context.Background(), []string{id})
+	if err == nil && len(found) > 0 {
+		return fmt.Errorf("expected no bead %s, found %+v", id, found[0])
 	}
 	return nil
 }

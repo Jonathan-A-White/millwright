@@ -1539,6 +1539,12 @@ func (f *FakeTracker) SetStoryMetadata(_ context.Context, id string, fields map[
 			if k == application.TodoImportantField {
 				s.detail.TodoImportant = v == "true"
 			}
+			if k == application.TodoSizeField {
+				s.detail.TodoSize = v
+			}
+			if k == application.TodoThenField {
+				s.detail.TodoThen = v
+			}
 			if k == application.TodoRemindedField {
 				s.detail.TodoReminded = v
 			}

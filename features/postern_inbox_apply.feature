@@ -359,6 +359,44 @@ Feature: mw postern inbox --apply
     And bead "mw-todo.1"'s last comment reads "Closed by the Governor via postern (tx-close-todo)"
     And the txid "tx-close-todo" is marked applied
 
+  Scenario: A close tap on a card with a Then line files the Then as its own card on the same list
+    Given epic "mw-todo" has the open bead "mw-todo.1" labelled "hitl, hitl:todo"
+    And bead "mw-todo.1" has the Then line "Fit the hose to the tap"
+    And bead "mw-todo.1" has the Open: line "https://example.test/hose"
+    And a postern action "close" on bead "mw-todo.1" from "governor-pubkey-hex" with txid "tx-close-then"
+    When mw postern inbox --apply is run
+    Then bead "mw-todo.1" now stands "closed"
+    And the to-do list "mw-todo" holds 1 open card titled "Fit the hose to the tap" labelled "hitl, hitl:todo"
+    And bead "mw-todo.2" is described by the lines "Follows mw-todo.1: Story mw-todo.1" and "Open: https://example.test/hose"
+    And bead "mw-todo.1"'s last comment reads "THEN filed as mw-todo.2: Fit the hose to the tap"
+    And bead "mw-todo.1" has the todo_then "Fit the hose to the tap"
+    And the txid "tx-close-then" is marked applied
+
+  Scenario: A close tap on a card with a Then line and no Open: line files a card with only the Follows line
+    Given epic "mw-todo" has the open bead "mw-todo.1" labelled "hitl, hitl:todo"
+    And bead "mw-todo.1" has the Then line "Fit the hose to the tap"
+    And a postern action "close" on bead "mw-todo.1" from "governor-pubkey-hex" with txid "tx-close-then-bare"
+    When mw postern inbox --apply is run
+    Then the to-do list "mw-todo" holds 1 open card titled "Fit the hose to the tap" labelled "hitl, hitl:todo"
+    And bead "mw-todo.2" is described by the line "Follows mw-todo.1: Story mw-todo.1"
+
+  Scenario: A close tap on a card without a Then line files nothing
+    Given epic "mw-todo" has the open bead "mw-todo.1" labelled "hitl, hitl:todo"
+    And a postern action "close" on bead "mw-todo.1" from "governor-pubkey-hex" with txid "tx-close-nothen"
+    When mw postern inbox --apply is run
+    Then bead "mw-todo.1" now stands "closed"
+    And the to-do list "mw-todo" holds 0 open cards titled "Fit the hose to the tap" labelled "hitl, hitl:todo"
+    And bead "mw-todo.2" does not exist
+
+  Scenario: A second close tap on the same card files the Then only once
+    Given epic "mw-todo" has the open bead "mw-todo.1" labelled "hitl, hitl:todo"
+    And bead "mw-todo.1" has the Then line "Fit the hose to the tap"
+    And a postern action "close" on bead "mw-todo.1" from "governor-pubkey-hex" with txid "tx-close-then-a"
+    And a postern action "close" on bead "mw-todo.1" from "governor-pubkey-hex" with txid "tx-close-then-b"
+    When mw postern inbox --apply is run
+    Then the to-do list "mw-todo" holds 1 open card titled "Fit the hose to the tap" labelled "hitl, hitl:todo"
+    And bead "mw-todo.3" does not exist
+
   Scenario: A close tap on an epic closes its two held stories, then the epic
     Given a postern action "close" on bead "mw-act" from "governor-pubkey-hex" with txid "tx-close-epic"
     When mw postern inbox --apply is run
@@ -601,6 +639,47 @@ Feature: mw postern inbox --apply
 
   Scenario: A todo_edit tap naming important on a bead without hitl:todo is refused and changes nothing
     Given the Governor sends the postern action {"action":"todo_edit","bead":"mw-act.1","important":true} with txid "tx-todo-edit-star-no"
+    When mw postern inbox --apply is run
+    Then the tracker took only the mark that the tap was applied
+    And mail "Not applied: todo_edit mw-act.1" was sent to mayor saying "not an item on a to-do list"
+
+  Scenario: A todo_edit tap naming a size and a then sets both and leaves the title alone
+    Given epic "mw-todo" has the open bead "mw-todo.1" labelled "hitl, hitl:todo"
+    And the Governor sends the postern action {"action":"todo_edit","bead":"mw-todo.1","size":"hour","then":"  Fit the hose  "} with txid "tx-todo-edit-sizethen"
+    When mw postern inbox --apply is run
+    Then bead "mw-todo.1" has the todo_size "hour"
+    And bead "mw-todo.1" has the todo_then "Fit the hose"
+    And bead "mw-todo.1" now has the title "Story mw-todo.1"
+    And mail "Edited: mw-todo.1" was sent to mayor
+    And the txid "tx-todo-edit-sizethen" is marked applied
+
+  Scenario: A todo_edit tap with an empty size and then clears both
+    Given epic "mw-todo" has the open bead "mw-todo.1" labelled "hitl, hitl:todo"
+    And bead "mw-todo.1" is sized "quick" with the Then line "Fit the hose"
+    And the Governor sends the postern action {"action":"todo_edit","bead":"mw-todo.1","size":"","then":""} with txid "tx-todo-edit-unsizethen"
+    When mw postern inbox --apply is run
+    Then bead "mw-todo.1" has no todo_size
+    And bead "mw-todo.1" has no todo_then
+    And the txid "tx-todo-edit-unsizethen" is marked applied
+
+  Scenario: A todo_edit tap with a size it does not know is refused and changes nothing
+    Given epic "mw-todo" has the open bead "mw-todo.1" labelled "hitl, hitl:todo"
+    And the Governor sends the postern action {"action":"todo_edit","bead":"mw-todo.1","title":"New words","size":"all-day"} with txid "tx-todo-edit-badsize"
+    When mw postern inbox --apply is run
+    Then the tracker took only the mark that the tap was applied
+    And bead "mw-todo.1" has no todo_size
+    And mail "Not applied: todo_edit mw-todo.1" was sent to mayor saying "quick, hour or half-day"
+
+  Scenario: A todo_edit tap with a then of more than 200 characters is refused and changes nothing
+    Given epic "mw-todo" has the open bead "mw-todo.1" labelled "hitl, hitl:todo"
+    And the Governor sends a todo_edit tap on "mw-todo.1" with a then of 201 characters and txid "tx-todo-edit-longthen"
+    When mw postern inbox --apply is run
+    Then the tracker took only the mark that the tap was applied
+    And bead "mw-todo.1" has no todo_then
+    And mail "Not applied: todo_edit mw-todo.1" was sent to mayor saying "200"
+
+  Scenario: A todo_edit tap naming a size on a bead without hitl:todo is refused and changes nothing
+    Given the Governor sends the postern action {"action":"todo_edit","bead":"mw-act.1","size":"quick"} with txid "tx-todo-edit-size-no"
     When mw postern inbox --apply is run
     Then the tracker took only the mark that the tap was applied
     And mail "Not applied: todo_edit mw-act.1" was sent to mayor saying "not an item on a to-do list"

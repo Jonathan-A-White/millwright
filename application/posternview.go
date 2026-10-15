@@ -208,6 +208,11 @@ type PosternViewBead struct {
 	// TodoImportant is true on a hitl:todo card the Governor has starred; absent
 	// on any other.
 	TodoImportant bool `json:"todo_important,omitempty"`
+	// TodoSize is how big a hitl:todo card is (quick, hour or half-day), and
+	// TodoThen the line filed as a card of its own when this one is closed; each
+	// is absent on a bead with none.
+	TodoSize string `json:"todo_size,omitempty"`
+	TodoThen string `json:"todo_then,omitempty"`
 }
 
 // TrackerSnapshot is a tracker that can read every bead at once and answer the
@@ -1682,7 +1687,7 @@ func viewBeadOf(e *viewEntry) PosternViewBead {
 		Started: formatOrEmpty(d.Started), Closed: formatOrEmpty(d.ClosedAt),
 		Path: e.path, Attempts: d.Attempts, Summary: viewSummary(d.Description),
 		Comments: d.CommentCount, DoneEarlier: e.doneEarlier, TodoRank: d.TodoRank, TodoDue: d.TodoDue,
-		TodoImportant: d.TodoImportant,
+		TodoImportant: d.TodoImportant, TodoSize: d.TodoSize, TodoThen: d.TodoThen,
 	}
 }
 

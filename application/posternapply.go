@@ -69,9 +69,13 @@ type PosternAction struct {
 	Due *string `json:"due,omitempty"`
 	// Important is a todo_edit's star: true marks the card important, false
 	// takes it off, and a nil one leaves it as it is.
-	Important *bool  `json:"important,omitempty"`
-	Before    string `json:"before,omitempty"`
-	After     string `json:"after,omitempty"`
+	Important *bool `json:"important,omitempty"`
+	// Size is a todo_edit's new size (quick, hour or half-day) and Then its new
+	// Then line; an empty one clears it, and a nil one leaves it as it is.
+	Size   *string `json:"size,omitempty"`
+	Then   *string `json:"then,omitempty"`
+	Before string  `json:"before,omitempty"`
+	After  string  `json:"after,omitempty"`
 
 	// Step, SHA256, ApprovedAt and Sig are a run action's (§17): the step
 	// approved, its hash as he saw it, when he approved it (Unix seconds),
@@ -667,6 +671,11 @@ func (i PosternInbox) applyClose(ctx context.Context, m PosternInboxMessage, bea
 		if err := i.Tracker.CloseStory(ctx, id, reason); err != nil {
 			return refuse(fmt.Sprintf("closing %s failed: %v", id, err))
 		}
+	}
+	// A card closed with a Then line files it as a card of its own, once: a
+	// second close finds the card closed above and is refused.
+	if _, err := fileThenCard(ctx, i.Tracker, bead); err != nil {
+		return posternApplied{}, fmt.Errorf("closing %s for the Governor: %w", bead.Story.ID, err)
 	}
 	return result, nil
 }
