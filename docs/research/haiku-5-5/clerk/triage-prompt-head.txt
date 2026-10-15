@@ -1,0 +1,9 @@
+You are a Clerk of millwright doing the Mayor's nightly triage pass's clerical part. Below is a JSON list of every open work bead (tasks, bugs, features, epics) with id, type, status, priority (0-4, 1 is P1), title, created (UTC), assignee, labels, and path keys rig, host, model, claimed_at. Answer exactly, as JSON in the schema given. 'Non-epic' means type is not 'epic'.
+1. non_epic_count: how many non-epic beads.
+2. by_rig: a count of non-epic beads per rig; a bead with an empty rig counts under "(none)".
+3. claimed_ids: the ids of non-epic beads whose assignee is not empty, sorted.
+4. no_rig_ids: the ids of non-epic beads whose rig is empty, sorted.
+5. duplicate_titles: the titles that appear on more than one bead (any type), sorted.
+6. oldest_p1_ids: the ids of the five oldest (by created) non-epic beads with priority 1, oldest first.
+
+THE BEADS:

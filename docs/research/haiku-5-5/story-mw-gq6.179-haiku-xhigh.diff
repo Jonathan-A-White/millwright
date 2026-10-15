@@ -1,0 +1,85 @@
+diff --git a/README.md b/README.md
+index 4556b84..b20375e 100644
+--- a/README.md
++++ b/README.md
+@@ -1529,7 +1529,7 @@ ago or more (300, five minutes; 60 on the desktop, where a sync is a few local
+ writes);
+ lists `bd mail inbox` and compares its ids with the ones it has announced; and
+ runs `mw nudge` (below), reusing the same synced beads. For new mail, it types
+-`New mail for mayor: <n> message(s). Run bd mail inbox.`; for whatever `mw
++`New mail for mayor: <n> new message(s). Run bd mail inbox.`; for whatever `mw
+ nudge` still has to say once its own per-condition hourly damper is applied,
+ `Quiet alarm for mayor: <clause>[; <clause> ...]. Run mw status.` — either or
+ both, only when the pane is not working (no `esc to interrupt`) and its input
+diff --git a/contrib/mail-notify b/contrib/mail-notify
+index f517dc6..39f3760 100755
+--- a/contrib/mail-notify
++++ b/contrib/mail-notify
+@@ -55,7 +55,7 @@
+ #   8. if there is new mail, a postern count risen since last noted, or a
+ #      clause survived the damper, finds the Mayor's window from the vault's
+ #      .mayor-acting and, once it is not working and its input line is empty,
+-#      types "New mail for mayor: <n> message(s). Run bd mail inbox." and
++#      types "New mail for mayor: <n> new message(s). Run bd mail inbox." and
+ #      Enter, then "New postern message for mayor (<n> unread)" and Enter,
+ #      then "Quiet alarm for mayor: <clause>[; <clause> ...]. Run mw status."
+ #      and Enter (checking the window is idle again first before each line
+@@ -560,7 +560,7 @@ fi
+ 
+ typed_mail=0
+ if [ -n "$new" ]; then
+-	line="New mail for $MAILBOX: $count message(s). Run bd mail inbox."
++	line="New mail for $MAILBOX: $count new message(s). Run bd mail inbox."
+ 	if type_line "$line"; then
+ 		# 9. Only now are the ids announced. What is no longer in the inbox is
+ 		# dropped from the record, so it does not grow.
+diff --git a/contrib/mailnotify_test.go b/contrib/mailnotify_test.go
+index 1770a54..7f20851 100644
+--- a/contrib/mailnotify_test.go
++++ b/contrib/mailnotify_test.go
+@@ -21,7 +21,7 @@ import (
+ )
+ 
+ const (
+-	announcement = "New mail for mayor: %d message(s). Run bd mail inbox.\n"
++	announcement = "New mail for mayor: %d new message(s). Run bd mail inbox.\n"
+ 
+ 	// The empty input line of Claude Code: the prompt mark and a no-break space.
+ 	emptyPrompt = `printf '\342\235\257\302\240\n'`
+@@ -342,6 +342,23 @@ func TestASecondTickAfterAnnouncingTypesNothingAgain(t *testing.T) {
+ 	}
+ }
+ 
++// The typed count is the new messages, never the inbox's total: with 233
++// listed and 231 of them already announced, the line says 2.
++func TestTheTypedCountIsTheNewMessagesNotTheWholeInbox(t *testing.T) {
++	f := newFactory(t)
++	f.mayor("idle", actingByID)
++	var old []string
++	for i := range 231 {
++		old = append(old, fmt.Sprintf("mw-old%03d", i))
++	}
++	f.write("state/announced", strings.Join(old, "\n")+"\n", 0o644)
++	f.inbox(append(old, "mw-new1", "mw-new2")...)
++
++	f.tick()
++
++	f.typed(fmt.Sprintf(announcement, 2))
++}
++
+ func TestTextOnTheInputLineIsNeverTypedOverAndTheIdsAreNotRecorded(t *testing.T) {
+ 	f := newFactory(t)
+ 	f.mayor("has-text", actingByID)
+diff --git a/contrib/mailwait_test.go b/contrib/mailwait_test.go
+index b8efbd4..ee0bef6 100644
+--- a/contrib/mailwait_test.go
++++ b/contrib/mailwait_test.go
+@@ -310,7 +310,7 @@ func TestTheNotifierFallsBackToTypingWhenTheWaitsHeartbeatIsStale(t *testing.T)
+ 
+ 	f.tick()
+ 
+-	f.typed("New mail for mayor: 1 message(s). Run bd mail inbox.\n")
++	f.typed("New mail for mayor: 1 new message(s). Run bd mail inbox.\n")
+ }
+ 
+ func TestTheNotifierStillTypesTheQuietAlarmWhileAWaitIsArmed(t *testing.T) {

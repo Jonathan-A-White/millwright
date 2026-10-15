@@ -1,0 +1,30 @@
+diff --git a/scripts/check-gate-jobs.sh b/scripts/check-gate-jobs.sh
+index 2bceb0f..7a1e6bc 100755
+--- a/scripts/check-gate-jobs.sh
++++ b/scripts/check-gate-jobs.sh
+@@ -14,15 +14,23 @@ fail() {
+ 	exit 1
+ }
+ 
+-# var <name> [make args...]: the value make settles on for <name>.
++# var <name> [make args...]: the value make settles on for <name>. The make runs
++# with JOBS and MAKEFLAGS unset, so only the Makefile's default and the args given
++# here decide it.
+ var() {
+ 	name=$1
+ 	shift
+-	make -pn "$@" test 2>/dev/null | sed -n "s/^$name :\{0,1\}= *//p" | tail -n 1
++	env -u JOBS -u MAKEFLAGS make -pn "$@" test 2>/dev/null | sed -n "s/^$name :\{0,1\}= *//p" | tail -n 1
+ }
+ 
+ cores=$(nproc)
+ 
++# The checks read the Makefile's own default, whatever JOBS the caller has: a
++# host's builder_jobs sets it for its Builders, and `make lint JOBS=4` hands it on
++# through MAKEFLAGS. This sets both to 7 and expects the default.
++ambient=$(export JOBS=7 MAKEFLAGS='-- JOBS=7'; var GOFLAGS)
++[ "$ambient" = "-p=$cores" ] || fail "with JOBS=7 in the environment GOFLAGS is '$ambient', want -p=$cores (nproc)"
++
+ [ "$(var GOFLAGS)" = "-p=$cores" ] || fail "GOFLAGS is '$(var GOFLAGS)', want -p=$cores (nproc)"
+ [ "$(var GOMAXPROCS)" = "$cores" ] || fail "GOMAXPROCS is '$(var GOMAXPROCS)', want $cores (nproc)"
+ [ "$(var GOFLAGS JOBS=1)" = "-p=1" ] || fail "JOBS=1 does not give GOFLAGS -p=1"
