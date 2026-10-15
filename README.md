@@ -3267,6 +3267,29 @@ at least 1, 180000 by default. See `features/seat_context.feature`. `mw seat` is
 the parent for the commands about a seat's own session; later ones sit beside
 `context`.
 
+### Watching every seat's context
+
+`mw events follow` also watches the seats that run long, once a minute and at
+no token cost. For each open window named `<seat>-*` of a listed seat it reads
+the transcript of the session of that name (a window and its session carry the
+same name, so seats sharing a directory are not mistaken for one another). When
+the context is at or past the seat's `handoff_at` and the pane is idle, it types
+one line into the pane, `Context <N> past <M>: write your handoff now and stop.`
+It says so once for the crossing, and again only after the session has grown a
+further 20000 tokens. A session that falls under the limit again (it was
+compacted) is told afresh on its next crossing; what was told is kept in
+`context-marks.json` beside the event log, so a restart does not repeat it.
+`mw doctor seat-context` names a window 20000 tokens or more past its limit.
+
+Seats are listed in the config file, one table each; the deputy and the
+millhand are listed at 200000 unless a table says otherwise, and a `handoff_at`
+of 0 unlists a seat. A seat that is not listed (the Mayor, for now) is not read:
+
+```toml
+[seats.scribe]
+handoff_at = 50000   # a new seat is watched by this one table, with no code change
+```
+
 ## Starting a seat's next session
 
 ```sh

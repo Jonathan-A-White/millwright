@@ -15,6 +15,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain/events"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
+	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/tmux"
@@ -150,6 +151,19 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 		Err:      cmd.ErrOrStderr(),
 		Settle:   application.TypeSettle,
 	}
+	projects, err := claude.DefaultProjectsRoot()
+	if err != nil {
+		return err
+	}
+	watcher := &application.SeatContextWatch{
+		Limits:      config.SeatHandoffs,
+		Dir:         vaultDir,
+		Transcripts: claude.NewTranscripts(projects),
+		Terminal:    terminal,
+		Marks:       eventlog.NewContextMarks(path),
+		Settle:      application.TypeSettle,
+		Err:         cmd.ErrOrStderr(),
+	}
 	spring, err := homeSpring(path, host, cmd.ErrOrStderr())
 	if err != nil {
 		return err
@@ -170,6 +184,7 @@ func runEventsFollow(cmd *cobra.Command, every time.Duration) error {
 		Shipper:    shipper,
 		Nudger:     nudger,
 		Springer:   spring,
+		Watcher:    watcher,
 		Controller: controller,
 		Trimmer:    eventTrim(path),
 		Head:       gateway,

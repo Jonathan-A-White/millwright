@@ -244,6 +244,22 @@ func newDoctorCmd() *cobra.Command {
 				}
 				checks = append(checks, vpsCheck)
 			}
+			// How full each seat window's session is, read as the follower's
+			// watcher reads it: where Claude Code keeps the transcripts is
+			// unknown on a host with no home, and the check says it cannot tell.
+			var seatContext *doctor.SeatContext
+			if projects, projectsErr := claude.DefaultProjectsRoot(); projectsErr != nil {
+				seatContext = doctor.NewSeatContext(func(context.Context) ([]application.SeatWindowContext, error) {
+					return nil, projectsErr
+				})
+			} else {
+				seatContext = doctor.NewSeatContext((&application.SeatContextWatch{
+					Limits:      config.SeatHandoffs,
+					Dir:         vault,
+					Transcripts: claude.NewTranscripts(projects),
+					Terminal:    seatWindows(),
+				}).Readings)
+			}
 			tmpLeftovers := doctor.NewTmpLeftovers(os.TempDir())
 			tmpLeftovers.Budget = tmpLeftoversBudget
 			rootDisk := doctor.NewRootDiskBudget()
@@ -267,6 +283,7 @@ func newDoctorCmd() *cobra.Command {
 					mayorStuck,
 					mayorStale,
 					mayorGone,
+					seatContext,
 					posternTranscribe,
 					dispatchWindows,
 					beadsServerCheck,

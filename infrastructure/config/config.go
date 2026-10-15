@@ -294,6 +294,12 @@ const DefaultTickRecheckSeconds = 30
 // must hand off when nothing says otherwise.
 const DefaultHandoffAt = 180000
 
+// DefaultSeatHandoffs is the seats the follower watches when the config file
+// lists none, each with the context size, in tokens, at which its session
+// must hand off. A `[seats.<name>]` table in the config file adds a seat or
+// changes one.
+var DefaultSeatHandoffs = map[string]int{"deputy": 200000, "millhand": 200000}
+
 // DefaultRigMemoryBytes is how large a Builder's memory of one rig may grow
 // before `mw status` says it is due to be pruned, when nothing says otherwise.
 // Every Builder reads that file at boot, so its size is fuel paid on every
@@ -3042,4 +3048,76 @@ func Scorers() (ScorerSettings, error) {
 	}
 	settings.AzureRegion = strings.TrimSpace(table["azure_region"])
 	return settings, nil
+}
+
+// SeatHandoffs reports the seats whose context the follower watches and the
+// context size, in tokens, at which each seat's session must hand off: the
+// DefaultSeatHandoffs, then every `[seats.<name>]` table's `handoff_at` of
+// ~/.config/mw/config.toml on top of them. A seat whose `handoff_at` is 0 is
+// not watched. No seat is named anywhere else: a new one is watched by a
+// table of its own.
+func SeatHandoffs() (map[string]int, error) {
+	out := map[string]int{}
+	for seat, limit := range DefaultSeatHandoffs {
+		out[seat] = limit
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	names, err := tableNames(path, "seats.")
+	if err != nil {
+		return nil, err
+	}
+	for _, seat := range names {
+		table, err := tableIn(path, "seats."+seat)
+		if err != nil {
+			return nil, err
+		}
+		said := strings.TrimSpace(table["handoff_at"])
+		if said == "" {
+			continue
+		}
+		limit, err := strconv.Atoi(said)
+		if err != nil || limit < 0 {
+			return nil, fmt.Errorf("the handoff limit of seat %s is %q, which is not a whole number of tokens: put `handoff_at = <n>` under [seats.%s] in %s", seat, said, seat, path)
+		}
+		if limit == 0 {
+			delete(out, seat)
+			continue
+		}
+		out[seat] = limit
+	}
+	return out, nil
+}
+
+// tableNames is what follows prefix in the name of every `[prefix...]` table
+// of a config file, in the order they appear. A missing file has none.
+func tableNames(path, prefix string) ([]string, error) {
+	file, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", path, err)
+	}
+	defer file.Close()
+
+	var names []string
+	lines := bufio.NewScanner(file)
+	for lines.Scan() {
+		line := strings.TrimSpace(lines.Text())
+		if !strings.HasPrefix(line, "[") || strings.HasPrefix(line, "[[") {
+			continue
+		}
+		name := strings.TrimSpace(strings.Trim(line, "[]"))
+		if rest, ok := strings.CutPrefix(name, prefix); ok && rest != "" {
+			names = append(names, rest)
+		}
+	}
+	if err := lines.Err(); err != nil {
+		return nil, fmt.Errorf("reading %s: %w", path, err)
+	}
+	return names, nil
 }

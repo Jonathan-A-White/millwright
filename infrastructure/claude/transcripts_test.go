@@ -151,3 +151,38 @@ func TestTailOfADirectoryWithNoTranscriptIsEmptyNotAnError(t *testing.T) {
 		t.Fatalf("expected nothing and no error, got %q, %v", got, err)
 	}
 }
+
+func titleLine(title string) string {
+	return `{"type":"custom-title","customTitle":"` + title + `","sessionId":"x"}`
+}
+
+func TestTitledContextIsTheSessionNamedForTheWindowNotTheNewestOne(t *testing.T) {
+	root := t.TempDir()
+	dir := "/work/vault"
+	morning := time.Date(2026, 10, 15, 9, 0, 0, 0, time.UTC)
+
+	// The Deputy's session shares the vault's directory with a Mayor whose
+	// transcript is the newer, and fuller, of the two.
+	writeTranscript(t, root, dir, "aaaaaaaa-deputy", morning,
+		titleLine("deputy-2026-10-15-03"), userLine, turn(2, 190000, 15000), titleLine("deputy-2026-10-15-03"))
+	writeTranscript(t, root, dir, "bbbbbbbb-mayor", morning.Add(time.Hour),
+		titleLine("Mayor (after 2026-10-15-393)"), userLine, turn(1, 100000, 5000))
+
+	got, err := NewTranscripts(root).TitledContext(context.Background(), dir, "deputy-2026-10-15-03")
+	if err != nil {
+		t.Fatalf("reading the titled context: %v", err)
+	}
+	if got.Tokens != 205002 || got.SessionID != "aaaaaaaa-deputy" {
+		t.Fatalf("expected the Deputy's 205002 tokens, got %+v", got)
+	}
+}
+
+func TestTitledContextWithNoSessionOfThatNameSaysSo(t *testing.T) {
+	root := t.TempDir()
+	writeTranscript(t, root, "/work/vault", "cccccccc", time.Now(), titleLine("other"), turn(1, 1, 1))
+
+	_, err := NewTranscripts(root).TitledContext(context.Background(), "/work/vault", "deputy-2026-10-15-03")
+	if err == nil || !strings.Contains(err.Error(), "deputy-2026-10-15-03") {
+		t.Fatalf("expected an error naming the title, got %v", err)
+	}
+}
