@@ -48,6 +48,8 @@ func registerBatchLandSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^these stories are still queued for batch landing, none of them closed:$`, c.theseStoriesAreStillQueued)
 	ctx.Then(`^the batch is held, and the Mayor's mail names every story in it and says "([^"]*)"$`, c.theBatchIsHeldAndMailed)
 	ctx.Then(`^the dry run names "([^"]*)" then "([^"]*)" in the order it would merge them$`, c.theDryRunNamesInOrder)
+	ctx.Then(`^metrics/factory.jsonl holds a line for batch (\d+) of the rig: (\d+) stories, (\d+) gate runs?, no fixer, outcome "([^"]*)"$`, c.theMetricsHoldTheBatch)
+	ctx.Then(`^metrics/factory.jsonl holds no line for the rig$`, c.theMetricsHoldNoBatch)
 	ctx.Then(`^no batch record was kept$`, c.noBatchRecordWasKept)
 	ctx.Then(`^the newest entry of "([^"]*)" at the rig's origin is for "([^"]*)", the next for "([^"]*)"$`, c.theNewestEntriesAreFor)
 }
@@ -125,6 +127,7 @@ func (c *nextContext) land(dryRun bool) error {
 	c.batch.report, c.batch.err = application.BatchLand{
 		Next:    c.nextUseCase(),
 		Records: vault.New(c.vault),
+		Metrics: vault.New(c.vault),
 		DryRun:  dryRun,
 	}.Run(context.Background(), c.rigKey())
 	return nil
@@ -411,6 +414,49 @@ func (c *nextContext) theNewestEntriesAreFor(file, newest, next string) error {
 	}
 	if len(entries) < 2 || entries[0].Story != newest || entries[1].Story != next {
 		return fmt.Errorf("expected the newest entries of %s to be for %s then %s, got %+v", file, newest, next, entries)
+	}
+	return nil
+}
+
+// batchLines are the batch lines of the rig in metrics/factory.jsonl.
+func (c *nextContext) batchLines() ([]application.BatchMetric, error) {
+	kept, err := vault.New(c.vault).Batches(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	var ours []application.BatchMetric
+	for _, line := range kept {
+		if line.Rig == c.rigKey() {
+			ours = append(ours, line)
+		}
+	}
+	return ours, nil
+}
+
+func (c *nextContext) theMetricsHoldTheBatch(number, stories, gateRuns int, outcome string) error {
+	lines, err := c.batchLines()
+	if err != nil {
+		return err
+	}
+	for _, line := range lines {
+		if line.Batch != number {
+			continue
+		}
+		if line.Stories != stories || line.GateRuns != gateRuns || line.Fixer || line.FixerTokens != 0 || line.Outcome != outcome {
+			return fmt.Errorf("expected %d stories, %d gate runs, no fixer and outcome %q, got %+v", stories, gateRuns, outcome, line)
+		}
+		return nil
+	}
+	return fmt.Errorf("expected a line for batch %d in metrics/factory.jsonl, got %+v\n%s", number, lines, c.said())
+}
+
+func (c *nextContext) theMetricsHoldNoBatch() error {
+	lines, err := c.batchLines()
+	if err != nil {
+		return err
+	}
+	if len(lines) > 0 {
+		return fmt.Errorf("expected no batch line, got %+v", lines)
 	}
 	return nil
 }

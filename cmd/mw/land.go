@@ -127,6 +127,7 @@ func newLandCmd() *cobra.Command {
 					Stamps:       stamps,
 				},
 				Records: files,
+				Metrics: files,
 				DryRun:  dryRun,
 			}.Run(cmd.Context(), args[0])
 			return err

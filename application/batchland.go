@@ -45,6 +45,20 @@ type BatchRecords interface {
 	PutBatchFile(ctx context.Context, rig string, number int, name, contents string) (string, error)
 }
 
+// BatchHistory reads the batch lines back, oldest first; none and no error when
+// there are none.
+type BatchHistory interface {
+	Batches(ctx context.Context) ([]BatchMetric, error)
+}
+
+// BatchMetrics is where mw land keeps its batch lines, in the same appended
+// file the daily snapshots are in. The real adapter is infrastructure/vault;
+// the fake is apptest.FakeBatchMetrics.
+type BatchMetrics interface {
+	BatchHistory
+	AppendBatch(ctx context.Context, metric BatchMetric) error
+}
+
 // BatchLand is mw land <rig> (plans/0117, Land Rush 3): it lands the stories
 // mw next queued on a rig that lands in batches, several under one gate run.
 //
@@ -75,6 +89,9 @@ type BatchLand struct {
 	// smoke, and its mail.
 	Next    Next
 	Records BatchRecords
+	// Metrics, when set, is given a line for the batch once it is over
+	// (BatchMetric), whether it landed or was held. Nil keeps none.
+	Metrics BatchMetrics
 	DryRun  bool
 }
 
@@ -128,6 +145,8 @@ type BatchReport struct {
 	Version string
 	Tested  bool
 	Gate    Checked
+	// GateTook is how long the one gate run took.
+	GateTook time.Duration
 
 	Landed bool
 	// Held is why nothing of the batch landed, empty when it landed.
@@ -261,6 +280,7 @@ func (b BatchLand) Run(ctx context.Context, rig string) (BatchReport, error) {
 	}
 	release()
 	b.keepRecords(ctx, &report)
+	b.keepMetric(ctx, &report)
 	b.mailTheMayor(ctx, &report, &nr)
 	b.commit(ctx, &report)
 	gather()
@@ -375,8 +395,9 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 		report.Version = bumped.Version
 	}
 
+	gateBegan := n.now()
 	gate := n.gate(ctx, b.batchCloseOut(report, rigDir), nr, dir, gateOnTheBatch)
-	report.Tested, report.Gate = true, gate.Checked
+	report.Tested, report.Gate, report.GateTook = true, gate.Checked, n.now().Sub(gateBegan)
 	switch {
 	case gate.Err != nil:
 		report.Held = fmt.Sprintf("%s could not be run: %v", gateOnTheBatch, gate.Err)
@@ -598,6 +619,17 @@ func (b BatchLand) keepRecords(ctx context.Context, report *BatchReport) {
 			continue
 		}
 		report.Records = append(report.Records, kept)
+	}
+}
+
+// keepMetric appends the batch's line to metrics/factory.jsonl. One that cannot
+// be written is a note: the batch is landed, or held, as it is.
+func (b BatchLand) keepMetric(ctx context.Context, report *BatchReport) {
+	if b.Metrics == nil {
+		return
+	}
+	if err := b.Metrics.AppendBatch(ctx, report.Metric(b.Next.now())); err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the metrics line of %s could not be kept: %v", report.Label(), err))
 	}
 }
 
