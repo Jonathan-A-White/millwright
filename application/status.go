@@ -84,6 +84,10 @@ type MayorNeeds interface {
 // that expects a files key which have none.
 const NoFilesKeyHeading = "NO FILES KEY"
 
+// WrongRigHeading heads the section naming the open, held or running stories
+// whose files key names paths that exist in none of their rig's checkout here.
+const WrongRigHeading = "WRONG RIG?"
+
 // NoSweepHeading heads the section naming the open bugs, filed after the sweep
 // rule, whose acceptance has no usable Sweep: line (mw-gq6.419).
 const NoSweepHeading = "BUGS WITHOUT A SWEEP"
@@ -170,6 +174,10 @@ type Status struct {
 	// passes it over (mw-gq6.349). A nil Changes compares the files keys alone.
 	Rigs    map[string]string
 	Changes BranchChanges
+	// RigFiles says whether a path of a story's files key is in its rig's
+	// checkout on this host, to name the stories filed into the wrong rig under
+	// WrongRigHeading (mw-gq6.428). Nil leaves the section out.
+	RigFiles RigFiles
 	// Notes is where the other hosts' last sync times are read from. A nil
 	// Notes leaves the other-hosts section out altogether rather than calling
 	// every host asleep on no evidence.
@@ -489,6 +497,9 @@ type StatusReport struct {
 	// NoFilesKey are the open or held stories of rigs that expect a files key
 	// (files_expected = true) whose path has none, in the order found.
 	NoFilesKey []NoFilesKey
+	// WrongRig are the open, held or running stories none of whose files exist
+	// in their rig's checkout on this host (mw-gq6.428).
+	WrongRig []WrongRig
 	// HandedBack are the open stories whose newest word is a Builder's
 	// hand-back with no RE-PATHED: after it, in the order the tracker listed
 	// them (mw-gq6.418).
@@ -791,9 +802,15 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 	for _, other := range report.Others {
 		known = append(known, other.Stories...)
 	}
-	if report.NoFilesKey, err = s.noFilesKey(ctx, known); err != nil {
+	var held []StoryDetail
+	if report.NoFilesKey, held, err = s.noFilesKey(ctx, known); err != nil {
 		return report, err
 	}
+	inRigs := append([]StoryDetail(nil), known...)
+	for _, running := range report.Running {
+		inRigs = append(inRigs, running.Detail)
+	}
+	report.WrongRig = wrongRigStories(s.Rigs, s.RigFiles, append(inRigs, held...)...)
 
 	report.NoSweep = bugsWithoutASweep(known)
 	if report.HandedBack, err = s.handedBack(ctx, known, report.OpenButClaimed); err != nil {
@@ -1469,6 +1486,15 @@ func (r StatusReport) String() string {
 		for _, n := range r.NoFilesKey {
 			// Not clipped: the line is the command that mends it.
 			b.WriteString("  " + n.Line() + "\n")
+		}
+		b.WriteString("\n")
+	}
+
+	if len(r.WrongRig) > 0 {
+		clip(&b, fmt.Sprintf("%s (%d)", WrongRigHeading, len(r.WrongRig)))
+		for _, w := range r.WrongRig {
+			// Not clipped: the line says which story and which rig.
+			b.WriteString("  " + w.Line() + "\n")
 		}
 		b.WriteString("\n")
 	}

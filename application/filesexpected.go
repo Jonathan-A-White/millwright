@@ -93,24 +93,25 @@ func warnNoFilesKey(ctx context.Context, out io.Writer, rules EpicRules, details
 	}
 }
 
-// noFilesKey reads the stories of the live epics of rigs that expect files,
-// held ones among them (the tracker lists a held story only under its epic),
-// and with known, the stories the report already holds, finds the ones that
-// have none. Nothing is written.
-func (s Status) noFilesKey(ctx context.Context, known []StoryDetail) ([]NoFilesKey, error) {
-	if s.Rules == nil {
-		return nil, nil
+// noFilesKey reads the stories of the live epics of rigs that expect files or
+// are checked out here, held ones among them (the tracker lists a held story
+// only under its epic), and with known, the stories the report already holds,
+// finds the ones that have none. It returns the stories it read of those epics
+// too, for the check of a story filed into the wrong rig. Nothing is written.
+func (s Status) noFilesKey(ctx context.Context, known []StoryDetail) ([]NoFilesKey, []StoryDetail, error) {
+	if s.Rules == nil && (s.RigFiles == nil || len(s.Rigs) == 0) {
+		return nil, nil, nil
 	}
 	finder := &filesExpected{rules: s.Rules}
 	ids, err := s.Tracker.LiveEpics(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("listing the live epics: %w", err)
+		return nil, nil, fmt.Errorf("listing the live epics: %w", err)
 	}
 	var shown []StoryDetail
 	if len(ids) > 0 {
 		epics, err := s.Tracker.ShowBeads(ctx, ids)
 		if err != nil {
-			return nil, fmt.Errorf("reading the live epics: %w", err)
+			return nil, nil, fmt.Errorf("reading the live epics: %w", err)
 		}
 		var wanted []string
 		for _, epic := range epics {
@@ -118,9 +119,17 @@ func (s Status) noFilesKey(ctx context.Context, known []StoryDetail) ([]NoFilesK
 			if rig == "" || slices.Contains(epic.Labels, "wayfinder:map") {
 				continue
 			}
+			_, here := s.Rigs[rig]
+			if here && s.RigFiles != nil {
+				wanted = append(wanted, epic.Story.ID)
+				continue
+			}
+			if s.Rules == nil {
+				continue
+			}
 			required, err := s.Rules.EpicRequirements(ctx, rig)
 			if err != nil {
-				return nil, fmt.Errorf("reading whether the rig %s expects a files key: %w", rig, err)
+				return nil, nil, fmt.Errorf("reading whether the rig %s expects a files key: %w", rig, err)
 			}
 			if required.FilesExpected {
 				wanted = append(wanted, epic.Story.ID)
@@ -129,12 +138,13 @@ func (s Status) noFilesKey(ctx context.Context, known []StoryDetail) ([]NoFilesK
 		if len(wanted) > 0 {
 			details, err := s.Tracker.ShowEpics(ctx, wanted)
 			if err != nil {
-				return nil, fmt.Errorf("reading the stories of %s: %w", strings.Join(wanted, ", "), err)
+				return nil, nil, fmt.Errorf("reading the stories of %s: %w", strings.Join(wanted, ", "), err)
 			}
 			for _, epic := range details {
 				shown = append(shown, epic.Stories...)
 			}
 		}
 	}
-	return finder.lacking(ctx, append(known, shown...)...)
+	lacking, err := finder.lacking(ctx, append(known, shown...)...)
+	return lacking, shown, err
 }

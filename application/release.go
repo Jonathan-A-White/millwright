@@ -32,6 +32,12 @@ type Release struct {
 	// files key on a rig that expects one. A nil Rules warns of none.
 	Rules EpicRules
 
+	// Rigs are the rigs checked out on this host and RigFiles says whether a
+	// path is in one, to warn of a story whose files are in none of its rig
+	// (mw-gq6.428). Either nil warns of none.
+	Rigs     map[string]string
+	RigFiles RigFiles
+
 	// Out is where the tree is printed. A nil Out prints nothing.
 	Out io.Writer
 }
@@ -61,6 +67,7 @@ func (r Release) Run(ctx context.Context, epicID string) (FiledPlan, error) {
 	r.print(found.Tree())
 	// A warning only: the stories are released all the same.
 	warnNoFilesKey(ctx, r.Out, r.Rules, epic.Stories...)
+	warnWrongRig(r.Out, r.Rigs, r.RigFiles, epic.Stories...)
 
 	held := found.held()
 	for _, story := range held {
@@ -113,6 +120,7 @@ func (r Release) story(ctx context.Context, id string) (FiledPlan, error) {
 	r.print(found.Stories[0].tree())
 	// A warning only: the story is released all the same.
 	warnNoFilesKey(ctx, r.Out, r.Rules, detail)
+	warnWrongRig(r.Out, r.Rigs, r.RigFiles, detail)
 	if err := r.Tracker.ReleaseStory(ctx, id); err != nil {
 		return found, fmt.Errorf("releasing story %s: %w", id, err)
 	}

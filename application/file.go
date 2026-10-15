@@ -28,6 +28,13 @@ type File struct {
 	// A nil Rules checks nothing.
 	Rules EpicRules
 
+	// Rigs are the rigs checked out on this host, by name, and RigFiles says
+	// whether a path is in one: a story whose files are in none of its rig is
+	// warned of, as filed into the wrong rig (mw-gq6.428). A nil RigFiles, or a
+	// rig not in Rigs, warns of nothing.
+	Rigs     map[string]string
+	RigFiles RigFiles
+
 	// Waive is the Governor's word that some of what the rig requires is
 	// waived for this epic. The zero value waives nothing.
 	Waive EpicWaiver
@@ -276,6 +283,11 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	}
 
 	f.print(filed.Tree())
+	for _, story := range filed.Stories {
+		if wrongRigOf(f.Rigs, f.RigFiles, story.Path) {
+			f.print(WrongRig{ID: story.ID, Rig: strings.TrimSpace(story.Path.Rig)}.Line() + "\n")
+		}
+	}
 	if workErr != nil {
 		f.print(fmt.Sprintf("\nWhat is in flight on the rig could not be read, so no story above says what it overlaps: %v\n", workErr))
 	}
