@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
@@ -85,6 +86,7 @@ func newCloudMakeCmd() *cobra.Command {
 				Provider: check.Provider,
 				Book:     check.Book,
 				Log:      check.Log,
+				Notice:   check.Notice,
 				Host:     check.Host,
 				Plan:     check.Plan,
 				Out:      check.Out,
@@ -158,12 +160,27 @@ func cloudCheck(ctx context.Context, out io.Writer) (application.CloudCheck, boo
 			Command: settings.Command, Snapshot: settings.Snapshot, Out: out,
 			Self: self, MakeLog: filepath.Join(home, DispatchStateDir, cloudMakeLog),
 		},
-		Book: vault.CloudBook{Vault: files},
-		Log:  homeEventLog(),
-		Host: host,
-		Plan: plan,
-		Out:  out,
+		Book:   vault.CloudBook{Vault: files},
+		Log:    homeEventLog(),
+		Notice: governorNotice{},
+		Host:   host,
+		Plan:   plan,
+		Out:    out,
 	}, true, nil
+}
+
+// governorNotice is application.CloudNotice over mw card send: a card to the
+// Governor, sealed to his key. A host that cannot send a card says so, and the
+// cloud check goes on without.
+type governorNotice struct{}
+
+func (governorNotice) Tell(ctx context.Context, title, text string) error {
+	cards, err := posternCards(nil)
+	if err != nil {
+		return err
+	}
+	_, _, err = cards.Send(ctx, application.CardSendRequest{Title: title, Items: []string{strings.NewReplacer("|", "/", "\n", " ").Replace(text)}})
+	return err
 }
 
 // cloudPlan is the [cloud] table as the check reads it. Without [cloud.caps]

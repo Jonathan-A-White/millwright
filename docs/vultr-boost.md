@@ -13,6 +13,7 @@ contrib/vultr-boost up --dry-run   # every step and what it would run; nothing r
 contrib/vultr-boost up             # terraform shows its plan and asks before it spends
 contrib/vultr-boost status         # the box's state and what it costs
 contrib/vultr-boost down           # destroy the box, take its peer off the hub
+contrib/vultr-boost list           # every instance Vultr holds: id, label, status
 contrib/vultr-boost snapshot       # a ready-made image of a bootstrapped box
 contrib/vultr-boost spend          # what Vultr's billing says the boxes cost this month
 ```
@@ -21,6 +22,10 @@ contrib/vultr-boost spend          # what Vultr's billing says the boxes cost th
 tfvars name keeps the files below; any other box keeps its own beside them,
 `hosts/vultr/NAME.tfstate.age`, `NAME.wg.key.age` and `NAME.wg.pub`, so two boxes
 never share a state or a key. `up --snapshot ID` makes the box from a snapshot.
+
+`down --instance ID` also deletes that Vultr instance by its id (a 404 is done): it is
+for an *orphan*, a box whose terraform state was lost, which `terraform destroy` cannot
+find. `list` prints each instance of the account, `id<TAB>label<TAB>status`.
 
 `--yes` on `up` or `down` passes `-auto-approve` to terraform, which otherwise
 asks. `--dry-run` prints the numbered steps and changes nothing.
@@ -184,7 +189,36 @@ Each check:
    state directory).
 5. **A box that does not come up** (the wrapper fails) is destroyed and tried once
    more, by the same process. When that fails too it is destroyed again and no box
-   is made for an hour.
+   is made for an hour. A refusal that a retry cannot mend is not that: see
+   [What Vultr can refuse](#what-vultr-can-refuse).
+6. **Reconciles with Vultr** (every check, first). It lists the account's instances
+   (`vultr-boost list`) and destroys each one named for a box (`cloud` and a number)
+   that the book does not hold, a box being made included: an *orphan*, left when a
+   make was killed. It is billed and counts against Vultr's limits, and `down` finds
+   no state for it. It is destroyed by its id (`down --instance`), as a `cloud` event
+   `destroyed orphan cloud1 (Vultr instance <id>, <status>)`. Vultr will not delete an
+   instance it has locked (a snapshot restore takes many minutes): that is said once,
+   `could not destroy orphan ...`, and tried again at every check. Adopting the orphan
+   (`terraform import`) is not done: a box that was not finished is of no use, and
+   destroying it needs no state.
+
+### What Vultr can refuse
+
+`vultr-boost up` can fail because Vultr says no, and no retry mends it. The adapter
+names these from terraform's standard error; only the first has been seen (the wording
+of the others is Vultr's API and terraform provider as best known, matched loosely).
+Anything else is a plain failure: destroyed, tried once more, then held an hour.
+
+| Vultr says (matched, lower case) | What the book and the `cloud` events say | What the check does |
+| --- | --- | --- |
+| `maximum monthly fee limit` | `Vultr fee limit reached: raise it at my.vultr.com or wait for the month` | Not a failure to come up: no second try, no hour's hold. The leftovers are destroyed. One card to the Governor, once, until a box comes up. No box is tried for 10 minutes, then once more, silently while it lasts. `mw status` says `Vultr fee limit reached since ...`. |
+| `instance limit`, `maximum number of instances`, `reached your limit` | `Vultr instance limit reached: raise it at my.vultr.com, or destroy a box there` | One try, destroyed, no box for an hour. An event, no card. |
+| `sold out`, `not available in this region`, `no capacity` | `Vultr has none of the plan left in the region: choose another region or plan in the tfvars` | One try, destroyed, no box for an hour. An event, no card. |
+| `invalid api key/token`, `unauthorized ip`, `401` | `Vultr refused the API token: put a new vultr_api_token (mw secrets put), and check the API's access control at my.vultr.com` | One try, destroyed, no box for an hour. An event, no card. |
+| (the instance list cannot be read) | the check says so on its output and looks for no orphan | The rest of the check goes on. |
+
+The fee limit is Vultr's, on the account; `monthly_cap_usd` is mw's own, and the two are
+separate.
 
 **The month's spend** is the box hours the check made, each begun hour a whole
 one (Vultr bills by the hour), kept in the vault in `hosts/vultr/cloud.json` with

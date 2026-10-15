@@ -17,5 +17,9 @@ killing each one; the cloud make was the one tried.
 | `mw suite`, `mw check --background` | the rig's tests | Begun detached (`Setsid`, a systemd scope), as this story does for the cloud make: the caller's death does not touch them. | No |
 | `mw postern inbox --apply` | hands steps | Handed off to a transient systemd unit when started by a service (`postern_detach.go`). | No |
 
+Since mw-gq6.460 the cloud check also lists Vultr's instances and destroys each box
+named for a cloud box that the book does not hold, so a box left by any of the
+kills above is destroyed at the next check, whatever state was lost.
+
 Not swept: `homemove`, `doctor`'s probes and `mw hands` steps, which are not part of
 the story's list and were not read for this.
