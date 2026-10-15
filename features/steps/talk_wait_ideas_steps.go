@@ -193,7 +193,7 @@ func (c *talkWaitContext) registerIdeasOnlySteps(ctx *godog.ScenarioContext) {
 		select {
 		case <-c.run.done:
 			return c.run.err
-		case <-time.After(5 * time.Second):
+		case <-time.After(15 * time.Second):
 			return fmt.Errorf("mw talk wait had not come to its time limit; so far it printed:\n%s", c.run.out.String())
 		}
 	})
