@@ -127,7 +127,8 @@ type CloudBox struct {
 	Name string    `json:"name"`
 	Up   time.Time `json:"up"`
 	// IdleSince is when a check first found the box with no story claimed on
-	// it, the time it was made until it has taken one; zero while it has work.
+	// it, the time it came up (never when its make began) until it has taken
+	// one; zero while it has work or is still being made or restored.
 	IdleSince time.Time `json:"idle_since,omitzero"`
 	// Making is set from the time the box is asked for until its make ends,
 	// Up being when it was asked for: the box is billed from then, and no
@@ -667,7 +668,7 @@ func (p *cloudPass) make(ctx context.Context) {
 		p.capReached(ctx, "no box is made")
 		return
 	}
-	p.state.Boxes = append(p.state.Boxes, CloudBox{Name: name, Up: p.now, IdleSince: p.now, Making: true})
+	p.state.Boxes = append(p.state.Boxes, CloudBox{Name: name, Up: p.now, Making: true})
 	if !p.keep(ctx, "making "+name) {
 		p.state.Boxes = p.state.Boxes[:len(p.state.Boxes)-1]
 		return

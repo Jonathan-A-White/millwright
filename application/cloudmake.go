@@ -120,7 +120,7 @@ func (m CloudMake) begin(ctx context.Context, name string, try int) (goOn bool) 
 			p.capReached(ctx, "no box is made")
 			return
 		}
-		p.state.Boxes = append(p.state.Boxes, CloudBox{Name: name, Up: p.now, IdleSince: p.now, Making: true})
+		p.state.Boxes = append(p.state.Boxes, CloudBox{Name: name, Up: p.now, Making: true})
 		p.dirty = "making " + name
 		goOn = true
 	})

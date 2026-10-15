@@ -160,10 +160,12 @@ func InitializeCloudScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^(\d+) minutes pass and the cloud check runs$`, passAndCheck)
 	ctx.When(`^(\d+) minutes pass and the cloud check runs$`, passAndCheck)
 	ctx.When(`^a minute passes and the cloud check runs$`, func() error { return passAndCheck(1) })
-	ctx.When(`^(\d+) minutes pass on the cloud's clock$`, func(n int) error {
+	pass := func(n int) error {
 		c.now = c.now.Add(time.Duration(n) * time.Minute)
 		return nil
-	})
+	}
+	ctx.Given(`^(\d+) minutes pass on the cloud's clock$`, pass)
+	ctx.When(`^(\d+) minutes pass on the cloud's clock$`, pass)
 
 	ctx.Then(`^the provider was asked nothing$`, func() error { return c.asked(nil) })
 	ctx.Then(`^the provider was asked to make "([^"]*)" and nothing else$`, func(name string) error {

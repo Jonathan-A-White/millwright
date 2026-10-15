@@ -96,6 +96,22 @@ Feature: The cloud grows and shrinks by demand
     And 0 cloud boxes are up
     And a cloud event says "down cloud1"
 
+  Scenario: A box made in longer than idle_minutes is not idle on arrival
+    Given every host is full
+    And 1 story waits for any host
+    And the cloud check runs and the box is still being made
+    And 31 minutes pass on the cloud's clock
+    When the box being made comes up
+    And the cloud check runs
+    Then the provider was asked to make "cloud1" and nothing else
+    And 1 cloud box is up
+    And 0 cloud events say "down cloud1"
+    When 29 minutes pass and the cloud check runs
+    Then 1 cloud box is up
+    When 2 minutes pass and the cloud check runs
+    Then the provider was asked to destroy "cloud1"
+    And a cloud event says "down cloud1"
+
   Scenario: At the monthly cap no box is made, and the cap is said once
     Given the vault counts 567 box hours this month
     And every host is full
