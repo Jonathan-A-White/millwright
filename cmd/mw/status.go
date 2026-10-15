@@ -180,6 +180,7 @@ func newStatusCmd() *cobra.Command {
 				Ideas:            bootIdeasOnly(),
 				Rigs:             rigs,
 				Changes:          rig.New(),
+				RigFiles:         rig.Files{},
 				Notes:            tracker,
 				Vault:            mwVault(dir, host),
 				RigFacts:         mwVault(dir, host),

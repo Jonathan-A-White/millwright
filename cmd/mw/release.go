@@ -4,6 +4,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
@@ -29,17 +30,23 @@ func newReleaseCmd() *cobra.Command {
 			"releases that one story when it is held. A story that is not held is left as it is and said,\n" +
 			"and a story whose path names no rig or no target branch is refused.\n\n" +
 			"On a rig whose file in the vault says files_expected = true, a story with no files key is\n" +
-			"named under the tree, one line each: a warning, and the release goes ahead.",
+			"named under the tree, one line each: a warning, and the release goes ahead. So is a story\n" +
+			"none of whose files exist in its rig's checkout on this host: '<id>: none of its files\n" +
+			"exist in <rig>: wrong rig?'.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			gateway, err := beads.FromConfig()
 			if err != nil {
 				return err
 			}
+			// A rig table that cannot be read costs the release only the wrong-rig warning.
+			rigs, _ := config.Rigs()
 			_, err = application.Release{
-				Tracker: gateway,
-				Rules:   rigRulesIfKnown(),
-				Out:     cmd.OutOrStdout(),
+				Tracker:  gateway,
+				Rules:    rigRulesIfKnown(),
+				Rigs:     rigs,
+				RigFiles: rig.Files{},
+				Out:      cmd.OutOrStdout(),
 			}.Run(cmd.Context(), args[0])
 			return err
 		},

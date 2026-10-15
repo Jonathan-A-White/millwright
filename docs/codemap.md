@@ -2,7 +2,7 @@
 
 ## Layers
 
-domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cmd/mw/ cobra · features/ Gherkin · template/ embed
+domain/ stdlib · application/ use cases, ports · infra/ adapters · cmd/mw/ cobra · features/ Gherkin · template/ embed
 
 ## Ports
 
@@ -24,7 +24,7 @@ domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cm
 | Network{Probe,Store,Reader} | application/network.go | infra/network | FakeNetwork* |
 | CardLog, ReportSentLog | application/card.go, application/reportsend.go | infra/{cardlog,reportlog} | Fake{CardLog,ReportSentLog} |
 | CloseOutMarks, LiveHeartbeats, UserProcesses (Tester) | application/closeout.go, application/liveheartbeats.go, application/testerleftovers.go | infra/{closeout,procs} | Fake*Mark*, FakeHeartbeats, FakeUserProcesses |
-| Worktrees, BranchChanges | application/worktrees.go | infra/rig/worktree.go | dispatch_test.go |
+| Worktrees, BranchChanges, RigFiles | application/worktrees.go, application/wrongrig.go | infra/rig/{worktree,rigfiles}.go | - |
 | HostLoad, GateLock, Cloud*, BenchmarkBook | application/hostload.go, application/gate.go, application/benchmark.go | infra/{hostload,hostlock/gate.go,cloud,vault/{cloudbook,benchmarks}.go} | Fake{HostLoad,Cloud*,Benchmarks}; features/next_gate_lock.feature |
 | TickLog, Notifier, HomeMoveHost, OldHome, VaultBirth, TrackerBirth | application/{millhandtick,homemove,init}.go | infra/{ticklog,notify/notify,homemove/homemove,vault/birth,beads/init}.go | FakeTickLog |
 | Landing, Checks, SpecChecks, MergeSlot, Holding | application/landing.go | infra/rig/{landing,checks,slot}.go | - |
@@ -44,7 +44,7 @@ domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cm
 | Use case | File | Command | Feature |
 |-|-|-|-|
 | File, Release, Retry, Cause, Note, Path{Set,Show} | application/file.go, application/release.go, application/retry.go, application/cause.go, application/note.go, application/pathset.go | cmd/mw/file.go, cmd/mw/release.go, cmd/mw/retry.go, cmd/mw/cause.go, cmd/mw/note.go, cmd/mw/path.go | features/{file*,release,retry,cause,note,path_set}.feature |
-| Show, Peek, Prove, StampHead, Tester[File], FactoryReport[Send] | application/show.go, application/stamphead.go, application/testerreport.go, application/testerfile.go, application/factoryreport.go, application/reportsend.go | mw show/peek/prove/stamp/tester[ file]/report[ send] - cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go, cmd/mw/tester.go, cmd/mw/report.go, cmd/mw/reportsend.go | features/{show,peek,prove,stamp,tester,report*}.feature |
+| Show, Peek, Prove, StampHead, Tester[File], FactoryReport[Send] | application/show.go, application/stamphead.go, application/testerreport.go, application/testerfile.go, application/factoryreport.go, application/reportsend.go | mw show/peek/prove/stamp/tester/report - cmd/mw/show.go, cmd/mw/peek.go, cmd/mw/prove.go, cmd/mw/stamp.go, cmd/mw/tester.go, cmd/mw/report.go, cmd/mw/reportsend.go | features/{show,peek,prove,stamp,tester,report*}.feature |
 | Dispatch, Next, AfterLandingRun, BdRetry (mw bd) | application/dispatch.go, application/next.go, application/afterlandingrun.go, application/bdretry.go | mw dispatch/next/after-landing/bd - cmd/mw/dispatch.go, cmd/mw/next.go, cmd/mw/afterlanding.go, cmd/mw/bd.go | features/{dispatch,next,after_*,bd_*}.feature |
 | Check{,Background,Logs,Starter}, Status, CloudCheck, Brief | application/check.go, application/status.go, application/cloud.go, application/brief.go | cmd/mw/check.go, cmd/mw/status.go, cmd/mw/cloud.go, cmd/mw/brief.go | features/{check,status,cloud,brief}.feature |
 | Sweep, Tidy, Sync, Nudge, Mail, Home[Move] | application/sweep.go, application/tidy.go, application/sync.go, application/nudge.go, application/mail.go, application/home.go, application/homemove.go | mw sweep/tidy/sync/nudge/mail/home - cmd/mw/sweep.go, cmd/mw/tidy.go, cmd/mw/sync.go, cmd/mw/nudge.go, cmd/mw/mail.go, cmd/mw/home.go, cmd/mw/homemove.go | features/{sweep,tidy,sync,mail,home}.feature |
@@ -59,7 +59,7 @@ domain/(events) stdlib · application/ use cases, ports · infra/ adapters · cm
 | Postern{Key*,Inbox,Send,Snapshot,View,Bead} | application/postern.go, application/posternmovehome.go, application/posternsnapshot.go, application/posternview.go, application/posternbead.go | mw postern <sub> - cmd/mw/posternview.go, cmd/mw/posternbead.go | features/postern_*.feature |
 | Event{Follow,Emit,Tail,Ship,Wait,Nudge,Spring,Control,Trim} | application/eventfollow.go, application/eventlog.go, application/eventship.go, application/eventwait.go, application/eventnudge.go, application/eventsubscribe.go, application/eventspring.go, application/eventcontrol.go, application/eventtrim.go | mw events <sub> - cmd/mw/events.go | features/event_follow.feature |
 | Postern{Serve,Nginx,Mirror} | application/posternhand.go, application/posternmirror.go | mw postern <sub> - cmd/mw/postern.go, cmd/mw/posternmirror.go | features/postern_serve.feature |
-| Prompt{Save,List,Show,Run}, Cards, TodoDue/TodoReminder | application/prompt.go, application/tododue.go | mw prompt/card/todo - cmd/mw/prompt.go, cmd/mw/card.go, cmd/mw/todo.go | features/{prompt,card,todo_*}.feature |
+| Prompt{Save,List,Show,Run}, Cards, TodoDue | application/prompt.go, application/tododue.go | mw prompt/card/todo - cmd/mw/prompt.go, cmd/mw/card.go, cmd/mw/todo.go | features/{prompt,card,todo_*}.feature |
 | Grist{Key,Grind,Send,Request,Status,Eval,Score,Runs,Stats,Timing,Smoke,Level} | application/grist.go, application/gristtiming.go, application/gristlevel.go, application/gristgrind.go, application/gristsend.go, application/gristrequest.go, application/griststatus.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go, application/gristroom.go, application/gristsmoke.go | mw grist <sub> - cmd/mw/grist.go, cmd/mw/gristsmoke.go | features/{grist*,scorer}.feature |
 
 cmd/mw/root.go, cmd/mw/version.go

@@ -13,6 +13,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
@@ -38,7 +39,10 @@ func newFileCmd() *cobra.Command {
 			"A story may name the repo paths it expects to change as \"files\", which is filed as its\n" +
 			"files key. Under each story filed, mw prints the open or running stories on its rig whose\n" +
 			"files overlap (the running ones on its rig, if it names none) as 'in flight: <id> <title>\n" +
-			"(shares <path>)', with the bd dep add that would make it wait. It adds nothing itself.\n\n" +
+			"(shares <path>)', with the bd dep add that would make it wait. It adds nothing itself.\n" +
+			"A story whose files exist in none of its rig's checkout on this host is named, as a warning,\n" +
+			"'<id>: none of its files exist in <rig>: wrong rig?'; a story of new files alone may be\n" +
+			"warned of too.\n\n" +
 			"Every story is filed held, so that nothing can be dispatched from a plan nobody has\n" +
 			"approved. --approve releases them all as they are filed; without it, mw asks, and an\n" +
 			"unattended run leaves them held.\n\n" +
@@ -71,9 +75,13 @@ func newFileCmd() *cobra.Command {
 				return err
 			}
 
+			// A rig table that cannot be read costs the plan only the wrong-rig warning.
+			rigs, _ := config.Rigs()
 			_, err = application.File{
 				Tracker:  gateway,
 				Rules:    vault.New(dir),
+				Rigs:     rigs,
+				RigFiles: rig.Files{},
 				Waive:    application.EpicWaiver{Names: waive, Because: because},
 				GuestAsk: guestAsk,
 				Out:      cmd.OutOrStdout(),
