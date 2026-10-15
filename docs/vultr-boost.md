@@ -219,17 +219,28 @@ Each check:
    Vultr says it is up adopts it (`vultr-boost adopt --name cloudN --instance <id>`:
    `terraform import vultr_instance.boost <id>` into the box's state, so that `down`
    finds it; the firewall group of the killed apply is left on Vultr and costs nothing)
-   and writes `up cloud1`. A box still restoring `up_minutes` after the make gave up
+   and writes `made cloud1`. A box still restoring `up_minutes` after the make gave up
    waiting is destroyed by its id; one Vultr no longer holds is dropped from the book.
 
    **What the book says of Vultr is read back, never assumed.** `up`, `down` and
-   `destroyed` are written only after Vultr has been asked: `up` after the box is found
+   `destroyed` are written only after Vultr has been asked: `made` after the box is found
    on Vultr; `down` after the wrapper's `down` and a read of the instances (a wrapper
    that holds no state for a box exits well and destroys nothing; an instance still
    held is deleted by its id); `destroyed` only after the delete answered 204 or 404 (the
    wrapper treats every other answer, 200 included, as a refusal, and says `locked, HTTP
    409` for a 409). A box Vultr would not delete stays in the book and the event says
    `Vultr would not delete (locked)`.
+
+   **`up` is the box at work, not Vultr's word.** A make that ends with Vultr holding
+   the box writes `made cloud1 in ...; up once its first dispatch reaches the beads
+   server`. A later check writes `up cloud1: its first dispatch reached the beads server
+   at ...` once the box's `host.cloud1.last_sync` note, which its dispatch's sync writes
+   into the one database before it claims anything, is newer than the make. A box that
+   has none 20 minutes after it was made is written once as `cloud1 up, not dispatching:
+   <why>` (what the note says, and where to look on the box), and `mw status` shows the
+   same; until then it shows `waiting for its first dispatch`. Two boxes from cloud1's
+   snapshot once both ran as cloud1 with a broken vault, and claimed nothing for an hour
+   while the book said they were up (mw-5gr3k0.8).
 
 ### What Vultr can refuse
 
@@ -278,8 +289,9 @@ a snapshot is working in about two. To make the snapshot:
    --name cloud1`.
 
 A box made from it runs the bootstrap again through cloud-init, which changes only
-what is the box's own (its name, WireGuard key and address). A `config.toml` that is
-already there is never edited, so a snapshot made before the bootstrap wrote `[tests]`
+what is the box's own (its name, WireGuard key and address): the `host` line of the
+`config.toml` it carries is set to the box's name, and a broken checkout is repaired
+or cloned again. Nothing else in that `config.toml` is edited, so a snapshot made before the bootstrap wrote `[tests]`
 keeps a config without it: the bootstrap names the lines it lacks, and `mw doctor
 rig-tests` names the rigs. The snapshot holds
 what the box held, its tokens too: delete it at Vultr (my.vultr.com, Snapshots)

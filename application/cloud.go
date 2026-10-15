@@ -95,6 +95,14 @@ type CloudWork interface {
 	WorkInHand(ctx context.Context) (WorkInHand, error)
 }
 
+// CloudNotes is what the cloud check reads of the tracker's notes: a box's
+// LastSyncKey, which its sync writes into the one database every host reads
+// once the box is level, the first thing its dispatch does. A box named by
+// another host's name, or whose vault is broken, writes none of its own.
+type CloudNotes interface {
+	Note(ctx context.Context, key string) (string, error)
+}
+
 // CloudState is what the book holds.
 type CloudState struct {
 	// Month is the UTC month ("2026-10") Hours counts, and Hours the box hours
@@ -142,6 +150,22 @@ type CloudBox struct {
 	Restoring      bool      `json:"restoring,omitempty"`
 	InstanceID     string    `json:"instance_id,omitempty"`
 	RestoringSince time.Time `json:"restoring_since,omitzero"`
+	// Made is when Vultr was found to hold the box up, at the end of its make
+	// or when a check adopted it; zero in a book written before it was kept,
+	// read as Up. Dispatched is when its first dispatch reached the beads
+	// server, at or after Up: only then is the box said up. NotDispatching is
+	// why it had not CloudDispatchWait after it was made, said once.
+	Made           time.Time `json:"made,omitzero"`
+	Dispatched     time.Time `json:"dispatched,omitzero"`
+	NotDispatching string    `json:"not_dispatching,omitempty"`
+}
+
+// made is when the box was made, Up for one the book did not keep it of.
+func (b CloudBox) made() time.Time {
+	if b.Made.IsZero() {
+		return b.Up
+	}
+	return b.Made
 }
 
 // CloudMove is one up, down or failure, as the cloud event said it.
@@ -161,6 +185,11 @@ const CloudMakeStaleMargin = 15 * time.Minute
 // DefaultCloudUp is how long a make may run when the plan does not say: a
 // Vultr snapshot restore took about 50 minutes on 2026-10-15.
 const DefaultCloudUp = 60 * time.Minute
+
+// CloudDispatchWait is how long a box made may go with no dispatch of its own
+// reaching the beads server before the book says it is up, not dispatching: a
+// box from the snapshot runs its bootstrap and its first dispatch in minutes.
+const CloudDispatchWait = 20 * time.Minute
 
 // CloudFailHold is how long no box is made after one failed to come up twice
 // running: a fault at the provider is not tried every minute.
@@ -233,6 +262,9 @@ const DefaultCloudBoxCap = 2
 //     find, having no state; each is a move, and one that cannot be destroyed
 //     yet (Vultr locks an instance being restored) is said once and tried
 //     again at the next check;
+//   - says a box up once its first dispatch has reached the beads server, and
+//     up, not dispatching, with why, when none has CloudDispatchWait after it
+//     was made;
 //   - marks each box idle from the first check that finds no story claimed on
 //     it, and busy again once one is;
 //   - gives up a box begun the plan's MakeStale ago and not yet up (the process
@@ -259,7 +291,10 @@ const DefaultCloudBoxCap = 2
 // book as being made, asks the provider to Begin it in a process of its own
 // and returns. That process is CloudMake, which says how the make ended.
 type CloudCheck struct {
-	Work     CloudWork
+	Work CloudWork
+	// Notes is where a box's first dispatch is seen to reach the beads server.
+	// Nil sees none, and no box is said up.
+	Notes    CloudNotes
 	Provider CloudProvider
 	Book     CloudBook
 	Log      EventLog
@@ -322,6 +357,7 @@ func (c CloudCheck) Run(ctx context.Context) (CloudReport, error) {
 	p.billed = p.askBilled(ctx)
 	p.reconcile(ctx)
 	p.dropStale(ctx)
+	p.seeDispatch(ctx)
 	p.markIdle(work)
 
 	if n := len(p.state.Boxes); n > 0 && p.spent()+c.Plan.HourlyUSD*float64(n) > c.Plan.MonthlyCapUSD {
@@ -480,11 +516,11 @@ func (p *cloudPass) settleRestoring(ctx context.Context, instances []CloudInstan
 			p.dirty = "gone " + box.Name
 		case inst.Up() && p.adopt(ctx, box, inst):
 			p.setBox(box.Name, func(b *CloudBox) {
-				b.Restoring, b.InstanceID, b.RestoringSince, b.IdleSince = false, "", time.Time{}, p.now
+				b.Restoring, b.InstanceID, b.RestoringSince, b.IdleSince, b.Made = false, "", time.Time{}, p.now, p.now
 			})
 			p.state.FeeLimitAt = time.Time{}
-			p.move(ctx, fmt.Sprintf("up %s: Vultr finished restoring it, %s after the make gave up waiting; adopted", box.Name, since))
-			p.dirty = "up " + box.Name
+			p.move(ctx, fmt.Sprintf("made %s: Vultr finished restoring it, %s after the make gave up waiting; adopted; %s", box.Name, since, cloudUpWhen))
+			p.dirty = "made " + box.Name
 		case p.now.Sub(box.RestoringSince) >= p.check.Plan.UpLimit():
 			if p.down(ctx, box.Name, "it did not come up") {
 				p.move(ctx, fmt.Sprintf("destroyed %s: Vultr was still restoring instance %s %s after the make gave up waiting", box.Name, box.InstanceID, since))
@@ -598,6 +634,57 @@ func (p *cloudPass) dropStale(ctx context.Context) {
 			p.move(ctx, fmt.Sprintf("failed %s: the make begun at %s never said how it ended; destroyed", box.Name, box.Up.Format("15:04Z")))
 			p.keep(ctx, "failed "+box.Name)
 		}
+	}
+}
+
+// cloudUpWhen is what a move of a box made says of when it is up.
+const cloudUpWhen = "up once its first dispatch reaches the beads server"
+
+// seeDispatch says each box made up once its first dispatch has reached the
+// beads server: the note of when it was last level (LastSyncKey), which its
+// dispatch's sync writes into the one database, at or after the box's make
+// began. Vultr's word is not enough: a box made from a snapshot that named
+// itself by the box it was made from, or whose vault was broken, ran and
+// claimed nothing (mw-5gr3k0.8). A box with no such note CloudDispatchWait
+// after it was made is said up, not dispatching, once, with what the note says.
+func (p *cloudPass) seeDispatch(ctx context.Context) {
+	if p.check.Notes == nil {
+		return
+	}
+	for i := range p.state.Boxes {
+		box := &p.state.Boxes[i]
+		if box.Making || box.Restoring || !box.Dispatched.IsZero() {
+			continue
+		}
+		said, err := p.check.Notes.Note(ctx, LastSyncKey(box.Name))
+		if err != nil {
+			p.check.say("whether %s has dispatched could not be read: %v", box.Name, err)
+			continue
+		}
+		said = strings.TrimSpace(said)
+		at, perr := time.Parse(LastSyncFormat, said)
+		if said != "" && perr == nil && !at.Before(box.Up) {
+			box.Dispatched, box.NotDispatching = at, ""
+			p.move(ctx, fmt.Sprintf("up %s: its first dispatch reached the beads server at %s, %s after it was made", box.Name, at.UTC().Format("15:04Z"), Clock(max(0, at.Sub(box.made())))))
+			p.dirty = "up " + box.Name
+			continue
+		}
+		if box.NotDispatching != "" || p.now.Sub(box.made()) < CloudDispatchWait {
+			continue
+		}
+		why := fmt.Sprintf("no dispatch of %s has reached the beads server in %s since it was made", box.Name, Clock(p.now.Sub(box.made())))
+		switch {
+		case said == "":
+			why += " (the server holds no note of it ever being level)"
+		case perr != nil:
+			why += fmt.Sprintf(" (its note of when it was last level reads %q)", said)
+		default:
+			why += fmt.Sprintf(" (it was last level %s, before this box was made)", at.UTC().Format("01-02 15:04Z"))
+		}
+		why += "; on the box, see the host line of ~/.config/mw/config.toml, git status in the vault and journalctl --user -u mw-dispatch"
+		box.NotDispatching = why
+		p.move(ctx, box.Name+" up, not dispatching: "+why)
+		p.dirty = box.Name + " not dispatching"
 	}
 }
 
@@ -863,6 +950,16 @@ func (r CloudReading) write(b *strings.Builder) {
 			continue
 		}
 		line := fmt.Sprintf("  %s  up %s", box.Name, Clock(r.Now.Sub(box.Up)))
+		// A box a book kept no Made of was said up by its make, as before.
+		switch {
+		case box.Making || !box.Dispatched.IsZero():
+		case box.NotDispatching != "":
+			clip(b, line+", not dispatching: "+box.NotDispatching)
+			continue
+		case !box.Made.IsZero():
+			clip(b, line+", waiting for its first dispatch")
+			continue
+		}
 		if !box.IdleSince.IsZero() {
 			line += ", idle " + Clock(r.Now.Sub(box.IdleSince))
 		} else {

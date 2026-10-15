@@ -19,7 +19,7 @@ Feature: The cloud grows and shrinks by demand
     When the cloud check runs
     Then the provider was asked to make "cloud1" and nothing else
     And 1 cloud box is up
-    And a cloud event says "up cloud1"
+    And a cloud event says "made cloud1"
 
   Scenario: The check makes the box in the background and does not wait for it
     Given every host is full
@@ -32,7 +32,7 @@ Feature: The cloud grows and shrinks by demand
     When the box being made comes up
     Then 1 cloud box is up
     And the book holds no box being made
-    And a cloud event says "up cloud1"
+    And a cloud event says "made cloud1"
 
   Scenario: A caller cancelled 10 seconds into the apply leaves the apply to finish
     Given every host is full
@@ -41,7 +41,7 @@ Feature: The cloud grows and shrinks by demand
     Then the provider was asked to make "cloud1" and nothing else
     And 1 cloud box is up
     And the book holds no box being made
-    And a cloud event says "up cloud1"
+    And a cloud event says "made cloud1"
 
   Scenario: A box still being made is not made twice, nor destroyed idle
     Given every host is full
@@ -227,7 +227,7 @@ Feature: The cloud grows and shrinks by demand
     And the provider fails to make a box 0 times
     When 11 minutes pass and the cloud check runs
     Then 1 cloud box is up
-    And a cloud event says "up cloud1"
+    And a cloud event says "made cloud1"
 
   Scenario: A refusal that a retry cannot mend is said in plain words and tried once
     Given Vultr refuses to make a box: "Invalid API token"
@@ -287,7 +287,7 @@ Feature: The cloud grows and shrinks by demand
     Then the provider was asked to make "cloud1", adopt "cloud1"
     And 1 cloud box is up
     And the book holds no box restoring
-    And a cloud event says "up cloud1"
+    And a cloud event says "made cloud1"
     And 0 cloud events say "destroyed"
 
   Scenario: A restoring box Vultr is still restoring is waited for, then destroyed after up_minutes more
@@ -372,5 +372,37 @@ Feature: The cloud grows and shrinks by demand
     When the cloud check runs
     Then the provider was asked to make "cloud1", destroy "cloud1", make "cloud1"
     And a cloud event says "failed cloud1"
-    And 1 cloud events say "up cloud1"
+    And 1 cloud event says "made cloud1"
     And Vultr holds 1 instance labelled "cloud1"
+
+  Scenario: A box is not said up until its first dispatch reaches the beads server
+    Given every host is full
+    And 1 story waits for any host
+    When the cloud check runs
+    Then a cloud event says "made cloud1"
+    And 0 cloud events say "up cloud1"
+    And mw status says "cloud1  up 0s, waiting for its first dispatch"
+    When "cloud1" dispatches and its sync reaches the beads server
+    And a minute passes and the cloud check runs
+    Then a cloud event says "up cloud1: its first dispatch reached the beads server"
+    When a minute passes and the cloud check runs
+    Then 1 cloud event says "up cloud1"
+    And mw status says "cloud1  up 2m, idle"
+
+  Scenario: A box whose dispatch never reaches the beads server is said up, not dispatching, and why
+    Given "cloud1" last reached the beads server at "2026-10-09T11:00:00Z", before this box
+    And every host is full
+    And 1 story waits for any host
+    When the cloud check runs
+    And 19 minutes pass and the cloud check runs
+    Then 0 cloud events say "not dispatching"
+    When 2 minutes pass and the cloud check runs
+    Then a cloud event says "cloud1 up, not dispatching: no dispatch of cloud1 has reached the beads server in 21m since it was made"
+    And a cloud event says "10-09 11:00Z, before this box was made"
+    And 0 cloud events say "up cloud1"
+    And mw status says "cloud1  up 21m, not dispatching"
+    When 3 minutes pass and the cloud check runs
+    Then 1 cloud event says "not dispatching"
+    When "cloud1" dispatches and its sync reaches the beads server
+    And a minute passes and the cloud check runs
+    Then a cloud event says "up cloud1: its first dispatch reached the beads server"

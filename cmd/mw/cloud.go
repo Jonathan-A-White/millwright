@@ -154,8 +154,10 @@ func cloudCheck(ctx context.Context, out io.Writer) (application.CloudCheck, boo
 	if err != nil {
 		return application.CloudCheck{}, false, err
 	}
+	gateway := mwGateway(dir, host)
 	return application.CloudCheck{
-		Work: mwGateway(dir, host),
+		Work:  gateway,
+		Notes: gateway,
 		Provider: cloud.Vultr{
 			Command: settings.Command, Snapshot: settings.Snapshot, Out: out,
 			UpLimit: time.Duration(settings.UpMinutes) * time.Minute,

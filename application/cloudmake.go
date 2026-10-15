@@ -157,15 +157,17 @@ func (m CloudMake) settle(ctx context.Context, name string, try int, started tim
 			found := false
 			for i := range p.state.Boxes {
 				if p.state.Boxes[i].Name == name {
-					p.state.Boxes[i].Making, found = false, true
+					p.state.Boxes[i].Making, p.state.Boxes[i].Made, found = false, p.now, true
 				}
 			}
 			if !found {
-				p.state.Boxes = append(p.state.Boxes, CloudBox{Name: name, Up: started, IdleSince: p.now})
+				p.state.Boxes = append(p.state.Boxes, CloudBox{Name: name, Up: started, IdleSince: p.now, Made: p.now})
 			}
 			p.state.FeeLimitAt = time.Time{}
-			p.move(ctx, fmt.Sprintf("up %s: made in %s%s", name, Clock(p.now.Sub(started)), note))
-			p.dirty = "up " + name
+			// Vultr's word is that the box runs, not that it works: a check says
+			// it up once its first dispatch reaches the beads server.
+			p.move(ctx, fmt.Sprintf("made %s in %s%s; %s", name, Clock(p.now.Sub(started)), note, cloudUpWhen))
+			p.dirty = "made " + name
 			done = true
 			return
 		}

@@ -120,6 +120,14 @@ func InitializeCloudScenario(ctx *godog.ScenarioContext) {
 		c.provider.VanishingUps = n
 		return nil
 	})
+	// A box's dispatch reaches the beads server when its sync writes the note of
+	// when the box was last level into the one database: the tracker's notes.
+	ctx.Given(`^"([^"]*)" last reached the beads server at "([^"]*)", before this box$`, func(box, at string) error {
+		return c.tracker.SetNote(context.Background(), application.LastSyncKey(box), at)
+	})
+	ctx.When(`^"([^"]*)" dispatches and its sync reaches the beads server$`, func(box string) error {
+		return c.tracker.SetNote(context.Background(), application.LastSyncKey(box), c.now.UTC().Format(application.LastSyncFormat))
+	})
 	ctx.Given(`^the cloud check runs and the box is still being made$`, c.checkOnly)
 	ctx.When(`^the cloud check runs and the box is still being made$`, c.checkOnly)
 	ctx.When(`^the cloud check runs and its caller is cancelled (\d+) seconds into the apply$`, c.checkCancelled)
@@ -408,6 +416,7 @@ func (c *cloudContext) checkOnly() error {
 func (c *cloudContext) checkIn(ctx context.Context) error {
 	report, err := application.CloudCheck{
 		Work:     c.tracker,
+		Notes:    c.tracker,
 		Provider: c.provider,
 		Book:     c.book,
 		Log:      c.log,
