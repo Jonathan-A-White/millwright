@@ -101,7 +101,11 @@ enrolled, terraform finds the box and does nothing.
 ## What `down` does
 
 `terraform destroy` (asking, unless `--yes`), then on the hub: a dated backup of
-`wg0.conf`, `wg-enrol --remove NAME`, and the way back printed. The WireGuard key
+`wg0.conf`, `wg-enrol --remove NAME`, and the way back printed. The peer's
+address, read off the hub before it goes, is then dropped from this host's
+`~/.ssh/known_hosts` (`ssh-keygen -R`): the next box given that address has a
+new host key, and ssh would refuse it as REMOTE HOST IDENTIFICATION HAS CHANGED.
+The WireGuard key
 stays in the vault for the next `up`. If the destroy fails the peer is left
 alone and the state is kept, so `down` can be run again. If only the peer removal
 fails, it says so and prints the command to run on the hub.

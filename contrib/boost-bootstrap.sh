@@ -34,7 +34,9 @@
 #  11  beads      ~/.config/mw/beads.env (mode 600): bd's BEADS_DOLT_* pointing at the home's beads server
 #  12  profile    a marked block in ~/.profile that reads those env files and puts ~/.local/bin on PATH
 #  13  dispatch   ~/.config/mw/dispatch.env, a drop-in that lets the dispatch service read the env files,
-#                 linger, and mw-dispatch.timer enabled (scripts/install-units.sh)
+#                 a timer drop-in that ticks every five minutes (a Boost has no follower to spring it),
+#                 linger, mw-dispatch.timer enabled (scripts/install-units.sh), then one dispatch started
+#                 when the step changed anything
 #
 # Inputs are environment variables, or a small env file of NAME=VALUE lines
 # (--env-file, or BOOST_ENV_FILE) that must not be readable by group or others.
@@ -818,9 +820,17 @@ DROPIN_TEXT='[Service]
 EnvironmentFile=-%h/.config/mw/beads.env
 EnvironmentFile=-%h/.config/mw/github.env
 EnvironmentFile=-%h/.config/mw/claude.env'
+# The timer's hourly tick is the home's fallback for an event its follower
+# missed; a Boost has no follower, so it keeps the five-minute pace
+# (contrib/systemd/mw-dispatch.timer says how) or waits up to an hour for its
+# first dispatch (mw-5gr3k0.7).
+PACE_DIR=$HOME/.config/systemd/user/mw-dispatch.timer.d
+PACE_TEXT='[Timer]
+OnCalendar=
+OnCalendar=*:0/5'
 s_dispatch() {
-	local dropin_changed=0 pathline
-	step dispatch "mw-dispatch.timer, its env files and linger"
+	local dropin_changed=0 acted=0 pathline
+	step dispatch "mw-dispatch.timer every five minutes, its env files and linger"
 	pathline="PATH=$HOME/.local/bin:$HOME/.local/go/bin:/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin"
 	if [ -f "$MW_DIR/dispatch.env" ]; then
 		skip "$MW_DIR/dispatch.env exists (the host owns it)"
@@ -830,9 +840,21 @@ s_dispatch() {
 	fi
 	if same 644 "$DROPIN_DIR/boost-env.conf" "$DROPIN_TEXT"; then
 		skip "the dispatch drop-in is in place"
-	elif act "write $DROPIN_DIR/boost-env.conf (names the env files; holds no secret)"; then
-		put 644 "$DROPIN_DIR/boost-env.conf" "$DROPIN_TEXT"
-		dropin_changed=1
+	else
+		acted=1
+		if act "write $DROPIN_DIR/boost-env.conf (names the env files; holds no secret)"; then
+			put 644 "$DROPIN_DIR/boost-env.conf" "$DROPIN_TEXT"
+			dropin_changed=1
+		fi
+	fi
+	if same 644 "$PACE_DIR/boost-pace.conf" "$PACE_TEXT"; then
+		skip "the timer drop-in is in place (every five minutes)"
+	else
+		acted=1
+		if act "write $PACE_DIR/boost-pace.conf (OnCalendar= then OnCalendar=*:0/5: no follower springs this host's dispatch)"; then
+			put 644 "$PACE_DIR/boost-pace.conf" "$PACE_TEXT"
+			dropin_changed=1
+		fi
 	fi
 	if [ -e "$LINGER_FILE" ]; then
 		skip "linger is on for $USER_NAME"
@@ -841,10 +863,20 @@ s_dispatch() {
 	fi
 	if systemctl --user is-enabled mw-dispatch.timer >/dev/null 2>&1 && systemctl --user is-active mw-dispatch.timer >/dev/null 2>&1; then
 		skip "mw-dispatch.timer is enabled and active"
-		if [ "$dropin_changed" = 1 ]; then systemctl --user daemon-reload; fi
-	elif act "sh $RIG/scripts/install-units.sh --enable mw-dispatch"; then
-		[ -f "$RIG/scripts/install-units.sh" ] || die "$RIG/scripts/install-units.sh is missing"
-		sh "$RIG/scripts/install-units.sh" --enable mw-dispatch
+		if [ "$dropin_changed" = 1 ]; then
+			systemctl --user daemon-reload
+			systemctl --user restart mw-dispatch.timer
+		fi
+	else
+		acted=1
+		if act "sh $RIG/scripts/install-units.sh --enable mw-dispatch"; then
+			[ -f "$RIG/scripts/install-units.sh" ] || die "$RIG/scripts/install-units.sh is missing"
+			sh "$RIG/scripts/install-units.sh" --enable mw-dispatch
+		fi
+	fi
+	# A box just made dispatches now, not at the timer's first tick.
+	if [ "$acted" = 1 ] && act "systemctl --user start --no-block mw-dispatch.service (one dispatch now)"; then
+		systemctl --user start --no-block mw-dispatch.service
 	fi
 }
 
