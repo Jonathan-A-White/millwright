@@ -1262,6 +1262,18 @@ and why. What each batch did is kept under `runs/batch/<rig>/<n>/` in the vault.
 On a batch rig nothing but `mw land` pushes main. See
 `features/batch_land.feature`.
 
+**One fixer per batch** (Land Rush 5). A batch with a branch set aside for its conflicts,
+or whose tests are red, is given one fixer: a Builder session in the batch's landing
+worktree, on the rig's `batch_fixer_model`, `batch_fixer_effort` and at most
+`batch_fixer_turns` turns, named `batch-<rig>-<n>` (its run under `runs/batch-<rig>-<n>/`).
+Its boot file names every branch, which merged, git's conflict list and the tests' last
+lines; it may merge what was set aside, keep both intents and fix code or tests, and may
+not push, revert or drop a story's change, or delete, skip or loosen a test without
+saying so on that story. It comments on each story it touched. mw land waits for it,
+then runs the tests on the batch itself: green lands it, with "resolved by the fixer" in
+each affected ledger line and the fixer's word on the cause recorded unbisected; red
+holds the batch and mails the Mayor, and no second fixer is started.
+
 **The follower lands the queue when it is due** (Land Rush 4). The home's follower
 (`mw events follow`) springs the job `batch-land@<host>`, on the home only, never on the
 Boost: for each of this host's rigs that lands in batches, it runs `mw land <rig>` once the rig

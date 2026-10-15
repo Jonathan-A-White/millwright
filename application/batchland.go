@@ -25,6 +25,9 @@ const (
 	BatchOrderFile   = "merge-order.txt"
 	BatchGateLogFile = "gate.log"
 	BatchOutcomeFile = "outcome.txt"
+	// BatchFixerFile is what became of the batch's fixer, when it had one:
+	// why it was started, how it ended, and its word on what it touched.
+	BatchFixerFile = "fixer.txt"
 )
 
 // The subjects of mw land's mail to the Mayor about a batch that did not land
@@ -95,6 +98,11 @@ type BatchLand struct {
 	// (BatchMetric), whether it landed or was held. Nil keeps none.
 	Metrics BatchMetrics
 	DryRun  bool
+	// Fix lets a batch that was set aside or red be given its one fixer
+	// (Land Rush 5): a session of the seat, assembled by Next.Boot and run
+	// through Next.Runner, in the batch's landing worktree. Without it such a
+	// batch is landed or held as Land Rush 3 lands or holds it.
+	Fix bool
 	// One takes only the oldest queued story, whatever else is queued: how a
 	// rig flipped back to landing = each lands what was left in its queue, one
 	// story at a time (the follower's batch-land job, Land Rush 4).
@@ -123,6 +131,8 @@ type BatchStory struct {
 	// when it was because the branch conflicts with the batch.
 	Why       string
 	Conflicts []string
+	// ByFixer says the story was set aside and the batch's fixer merged it.
+	ByFixer bool
 
 	detail StoryDetail
 	path   domain.Path
@@ -150,9 +160,19 @@ type BatchReport struct {
 
 	Version string
 	Tested  bool
-	Gate    Checked
-	// GateTook is how long the one gate run took.
+	// Gate is the last run of the rig's tests on the batch: the one, or the
+	// one mw made once the fixer had ended.
+	Gate Checked
+	// GateRuns are the runs of the rig's tests the batch made, and GateTook
+	// how long they took together.
+	GateRuns int
 	GateTook time.Duration
+	// RedAt is when the rig's tests first failed on the batch; zero when they
+	// never did.
+	RedAt time.Time
+	// Fixer is the one fixer the batch was given (Land Rush 5), nil when it
+	// was given none.
+	Fixer *BatchFixing
 
 	Landed bool
 	// Held is why nothing of the batch landed, empty when it landed.
@@ -381,6 +401,17 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 		return
 	}
 
+	// A branch set aside for its conflicts is the fixer's to merge, before the
+	// version is raised and the tests are run: what it merges then gets its
+	// changelog entry, and the batch is tested once, after it.
+	settings := rules.LandingSettings()
+	if b.mayFix() && report.conflicted() {
+		why := fmt.Sprintf("%s set aside for conflicts", strings.Join(storyIDs(report.SetAside), ", "))
+		if !b.fix(ctx, dir, rigDir, settings, report, why) {
+			return
+		}
+	}
+
 	if len(rules.VersionFiles) > 0 {
 		bump := VersionBump{Files: rules.VersionFiles, Before: report.Base, Branch: "HEAD", StoryID: report.Label()}
 		if len(rules.ChangelogFiles) > 0 {
@@ -404,18 +435,28 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 		report.Version = bumped.Version
 	}
 
-	gateBegan := n.now()
-	gate := n.gate(ctx, b.batchCloseOut(report, rigDir), nr, dir, gateOnTheBatch)
-	report.Tested, report.Gate, report.GateTook = true, gate.Checked, n.now().Sub(gateBegan)
+	gate := b.runGate(ctx, dir, rigDir, report, nr)
+	// A red batch is given its one fixer, unless it had it already; once the
+	// fixer has ended mw runs the tests again itself: its word is not the gate.
+	if gate.Err == nil && !gate.Checked.NotRun && !gate.Checked.Passed && b.mayFix() && report.Fixer == nil {
+		if !b.fix(ctx, dir, rigDir, settings, report, fmt.Sprintf("%s failed: `%s`", gateOnTheBatch, gate.Checked.Command)) {
+			return
+		}
+		gate = b.runGate(ctx, dir, rigDir, report, nr)
+	}
+	after := ""
+	if report.Fixer != nil && report.Fixer.Started {
+		after = ", after its fixer " + report.Fixer.Name + " had ended, and no second fixer is started"
+	}
 	switch {
 	case gate.Err != nil:
-		report.Held = fmt.Sprintf("%s could not be run: %v", gateOnTheBatch, gate.Err)
+		report.Held = fmt.Sprintf("%s could not be run%s: %v", gateOnTheBatch, after, gate.Err)
 		return
 	case gate.Checked.NotRun:
-		report.Held = fmt.Sprintf("%s could not be run: `%s` did not start", gateOnTheBatch, gate.Checked.Command)
+		report.Held = fmt.Sprintf("%s could not be run%s: `%s` did not start", gateOnTheBatch, after, gate.Checked.Command)
 		return
 	case !gate.Checked.Passed:
-		report.Held = fmt.Sprintf("%s failed: `%s`", gateOnTheBatch, gate.Checked.Command)
+		report.Held = fmt.Sprintf("%s failed%s: `%s`", gateOnTheBatch, after, gate.Checked.Command)
 		if gate.Said != "" {
 			report.Held += " (" + gate.Said + ")"
 		}
@@ -436,6 +477,21 @@ func (b BatchLand) landIn(ctx context.Context, dir, rigDir string, rules domain.
 		return
 	}
 	report.Commit, report.Landed = commit, true
+}
+
+// runGate is one run of the rig's tests on the batch, under the gate lock and
+// the calm rule, counted with the others the batch made.
+func (b BatchLand) runGate(ctx context.Context, dir, rigDir string, report *BatchReport, nr *NextReport) gated {
+	n := b.Next
+	began := n.now()
+	gate := n.gate(ctx, b.batchCloseOut(report, rigDir), nr, dir, gateOnTheBatch)
+	report.Tested, report.Gate = true, gate.Checked
+	report.GateRuns++
+	report.GateTook += n.now().Sub(began)
+	if gate.Err == nil && !gate.Checked.NotRun && !gate.Checked.Passed && report.RedAt.IsZero() {
+		report.RedAt = n.now()
+	}
+	return gate
 }
 
 // mergeAll merges the queue into the batch in order. A story whose branch is
@@ -529,7 +585,7 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 			When: n.now(), StoryID: s.ID, Title: s.Title, Outcome: outcome, Path: s.path,
 			// The session's fuel was charged by the line that queued it.
 			FuelCharged: true,
-			Notes:       []string{"landed by mw land on " + n.Host, report.Label() + ": " + strings.Join(together, ", ")},
+			Notes:       append([]string{"landed by mw land on " + n.Host, report.Label() + ": " + strings.Join(together, ", ")}, report.fixerNotes(s.ID)...),
 		}.String()
 		if err := n.Vault.AppendToLedger(ctx, n.Seat, line); err != nil {
 			nr.Notes = append(nr.Notes, fmt.Sprintf("the line for %s could not be appended to the %s seat's ledger: %v", s.ID, n.Seat, err))
@@ -549,8 +605,8 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 			StoryID: s.ID, Host: n.Host, Title: s.Title, Target: report.Target, Commits: s.Commits, Pushes: 1,
 			Landed: true, How: Landed{Commit: s.Merge, FastForward: s.FastForward, Version: report.Version, Unioned: s.Unioned},
 			Ledger: line, Closed: closed, NotClosed: "see the batch's report",
-			Notes: []string{fmt.Sprintf("landed by mw land in %s (%s), whose commit %s is on %s", report.Label(), strings.Join(together, ", "),
-				shortCommit(report.Commit), report.Target)},
+			Notes: append([]string{fmt.Sprintf("landed by mw land in %s (%s), whose commit %s is on %s", report.Label(), strings.Join(together, ", "),
+				shortCommit(report.Commit), report.Target)}, report.fixerNotes(s.ID)...),
 		}
 		n.mailTheMayor(ctx, c, &mailed, MailLanded, n.closingProposals(ctx, c))
 		report.Mailed = append(report.Mailed, MailLanded+": "+s.ID)
@@ -610,6 +666,10 @@ func (b BatchLand) keepRecords(ctx context.Context, report *BatchReport) {
 	if report.Tested {
 		gateLog = fmt.Sprintf("$ %s\n%s", report.Gate.Command, report.Gate.Output)
 	}
+	if f := report.Fixer; f != nil && f.Tested && report.GateRuns > 1 {
+		gateLog = fmt.Sprintf("$ %s\n%s\n# the fixer %s was given the batch; once it had ended mw ran the tests again:\n%s",
+			f.Gate.Command, f.Gate.Output, f.Name, gateLog)
+	}
 	outcome := fmt.Sprintf("landed %s on %s, %d stories: %s\n", report.Commit, report.Target, len(report.Merged), strings.Join(storyIDs(report.Merged), ", "))
 	if !report.Landed {
 		outcome = fmt.Sprintf("held: %s\nnothing was pushed; %s stays at %s, and every story in the batch stays queued\n", report.Held, report.Target, report.Base)
@@ -617,11 +677,15 @@ func (b BatchLand) keepRecords(ctx context.Context, report *BatchReport) {
 	if len(report.SetAside) > 0 {
 		outcome += fmt.Sprintf("set aside, still queued: %s\n", strings.Join(storyIDs(report.SetAside), ", "))
 	}
-	for _, file := range []struct{ name, contents string }{
+	files := []struct{ name, contents string }{
 		{BatchOrderFile, report.mergeOrder()},
 		{BatchGateLogFile, gateLog},
 		{BatchOutcomeFile, outcome},
-	} {
+	}
+	if report.Fixer != nil {
+		files = append(files, struct{ name, contents string }{BatchFixerFile, report.fixerRecord()})
+	}
+	for _, file := range files {
 		kept, err := b.Records.PutBatchFile(ctx, report.Rig, report.Number, file.name, file.contents)
 		if err != nil {
 			report.Notes = append(report.Notes, fmt.Sprintf("the %s of %s could not be kept: %v", file.name, report.Label(), err))
@@ -662,7 +726,10 @@ func (r BatchReport) mergeOrder() string {
 		}
 		if merged, ok := r.merged(s.ID); ok {
 			how := "merged at"
-			if merged.FastForward {
+			switch {
+			case merged.ByFixer:
+				how = "set aside, then merged by the fixer, at"
+			case merged.FastForward:
 				how = "fast-forwarded to"
 			}
 			fmt.Fprintf(&b, " %s %s", how, merged.Merge)
@@ -721,6 +788,9 @@ func (b BatchLand) mailTheMayor(ctx context.Context, report *BatchReport, nr *Ne
 			why = "merged into the batch, which was held"
 		}
 		fmt.Fprintf(&body, "- %s %s: %s\n", s.ID, strings.Join(strings.Fields(s.Title), " "), why)
+	}
+	if f := report.Fixer; f != nil && !report.Landed {
+		fmt.Fprintf(&body, "\n%s", report.fixerMail())
 	}
 	if !report.Landed && report.Tested && !report.Gate.Passed {
 		fmt.Fprintf(&body, "\n%s, `%s`, ended:\n\n```\n%s\n```\n", gateOnTheBatch, report.Gate.Command, report.Gate.Tail(CheckLines))
@@ -825,12 +895,27 @@ func (r BatchReport) String() string {
 	if r.Version != "" {
 		fmt.Fprintf(&b, "  version %s, once for the batch\n", r.Version)
 	}
+	if f := r.Fixer; f != nil {
+		if f.Started {
+			fmt.Fprintf(&b, "  fixer   %s, for %s: ended %s", f.Name, f.Why, f.Ended.State)
+			if len(f.Merged) > 0 {
+				fmt.Fprintf(&b, ", merged %s", strings.Join(f.Merged, ", "))
+			}
+			b.WriteString("\n")
+		} else {
+			fmt.Fprintf(&b, "  fixer   %s %s\n", f.Name, f.Trouble)
+		}
+	}
 	if r.Tested {
 		verdict := "pass"
 		if !r.Gate.Passed {
 			verdict = "FAIL"
 		}
-		fmt.Fprintf(&b, "  tested  %s, once: %s\n", gateOnTheBatch, verdict)
+		times := "once"
+		if r.GateRuns > 1 {
+			times = fmt.Sprintf("%d times, the last after the fixer", r.GateRuns)
+		}
+		fmt.Fprintf(&b, "  tested  %s, %s: %s\n", gateOnTheBatch, times, verdict)
 	}
 	if r.Landed {
 		fmt.Fprintf(&b, "  landed  %s at %s, one push, a fast-forward: %s\n", r.Target, shortCommit(r.Commit), strings.Join(storyIDs(r.Merged), ", "))
@@ -1098,4 +1183,10 @@ func (b *BatchLandings) landRig(ctx context.Context, d batchDue) error {
 		left = remaining
 	}
 	return nil
+}
+
+// BatchFixerName is the name the fixer of a batch is run under, and its run's
+// directory under runs/: batch-<rig>-<n>.
+func BatchFixerName(rig string, number int) string {
+	return fmt.Sprintf("batch-%s-%d", rig, number)
 }

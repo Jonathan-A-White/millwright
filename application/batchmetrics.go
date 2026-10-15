@@ -57,8 +57,17 @@ func (r BatchReport) Metric(at time.Time) BatchMetric {
 		m.Stories, m.Outcome = len(r.Merged), BatchGreen
 	}
 	if r.Tested {
-		m.GateRuns = 1
+		m.GateRuns = max(r.GateRuns, 1)
 		m.GateMinutes = r.GateTook.Minutes()
+	}
+	if f := r.Fixer; f != nil && f.Started {
+		m.Fixer, m.FixerTokens = true, f.Result.Fuel.Total()
+		if r.Landed {
+			m.Outcome = BatchFixed
+		}
+	}
+	if !r.RedAt.IsZero() {
+		m.RedMinutes = at.Sub(r.RedAt).Minutes()
 	}
 	return m
 }

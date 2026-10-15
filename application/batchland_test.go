@@ -415,3 +415,124 @@ func TestTheBatchLandJobStopsDrainingWhenALandingLeavesTheQueueAsItWas(t *testin
 		t.Fatalf("expected one try and an error for a landing that landed nothing, got %d tries, %v", len(j.asked), err)
 	}
 }
+
+// The batch's fixer (plans/0117, Land Rush 5): what it is booted with and how
+// its word is read back. The fixer started, waited for and judged by mw's own
+// run of the tests is features/batch_land.feature.
+
+// aBatchToFix is a red batch of millwright: two stories merged, a third set
+// aside for its conflict.
+func aBatchToFix() application.BatchFixBrief {
+	return application.BatchFixBrief{
+		Rig: "millwright", Target: "main", Number: 4, Base: "base0123",
+		Stories: []application.BatchStory{
+			{ID: "mw-gq6.1", Title: "The first", Branch: "origin/mw/mw-gq6.1", Merge: "merge111"},
+			{ID: "mw-gq6.2", Title: "The second", Branch: "origin/mw/mw-gq6.2", Merge: "merge222"},
+			{ID: "mw-gq6.3", Title: "The third", Branch: "origin/mw/mw-gq6.3",
+				Why: "it conflicts with the batch", Conflicts: []string{"CONFLICT (content): Merge conflict in a.md"}},
+		},
+		Tested: true,
+		Gate:   application.Checked{Command: "make test", Output: "ok one\nFAIL two: the batch is red\n"},
+		Settings: domain.EpicRequirements{Landing: domain.LandingSettings{
+			FixerModel: "haiku", FixerEffort: "medium", FixerTurns: 12,
+		}}.LandingSettings(),
+	}
+}
+
+func TestBatchFixBootsOneBuilderInTheLandingWorktreeOnTheRigsFixerKeys(t *testing.T) {
+	files, harness := newFakeVault(), &fakeHarness{}
+	boot := application.SeatBoot{Vault: files, Harness: harness, Seat: "builder", Host: "vps",
+		After: []string{"mw", "next"}, Heartbeat: []string{"mw", "next", "--heartbeat"}}
+
+	spec, err := boot.BatchFix(context.Background(), aBatchToFix(), "/rigs/millwright/.landing-1")
+	if err != nil {
+		t.Fatalf("booting the fixer: %v", err)
+	}
+	l := harness.launch
+	if spec.Name != "batch-millwright-4" || l.StoryID != "batch-millwright-4" || l.Dir != "/rigs/millwright/.landing-1" {
+		t.Fatalf("expected the fixer batch-millwright-4 in the landing worktree, got %+v / %+v", spec, l)
+	}
+	if l.Path.Model != domain.ModelHaiku || l.Path.Effort != domain.EffortMedium || l.MaxTurns != 12 || l.Path.Rig != "millwright" {
+		t.Fatalf("expected the rig's fixer keys, haiku/medium and 12 turns, got %+v, %d turns", l.Path, l.MaxTurns)
+	}
+	if len(l.After) != 0 || len(l.Heartbeat) != 0 {
+		t.Fatalf("expected nothing after or beside the fixer, since mw land waits for it, got %v and %v", l.After, l.Heartbeat)
+	}
+	if l.Seat != "builder" || l.ResultFile != "/vault/runs/batch-millwright-4/result.json" {
+		t.Fatalf("expected a Builder with its result under runs/batch-millwright-4, got %+v", l)
+	}
+	if !strings.Contains(l.Kickoff, "fixer of batch 4 of millwright") || !strings.Contains(l.Kickoff, "Do not push") {
+		t.Fatalf("expected the kickoff to name the batch and forbid a push, got %q", l.Kickoff)
+	}
+	if _, written := files.written["batch-millwright-4/boot.md"]; !written {
+		t.Fatalf("expected the boot file written under runs/batch-millwright-4, got %v", files.written)
+	}
+}
+
+func TestBatchFixRefusesFixerKeysThatMakeNoPath(t *testing.T) {
+	brief := aBatchToFix()
+	brief.Settings.FixerModel = "gpt"
+	boot := application.SeatBoot{Vault: newFakeVault(), Harness: &fakeHarness{}, Seat: "builder", Host: "vps"}
+	if _, err := boot.BatchFix(context.Background(), brief, "/rigs/millwright/.landing-1"); err == nil || !strings.Contains(err.Error(), "batch_fixer") {
+		t.Fatalf("expected a fixer model nobody knows refused, naming the keys, got %v", err)
+	}
+}
+
+func TestTheFixersBootFileNamesEveryBranchItsConflictTheTestsTailAndTheRules(t *testing.T) {
+	seat := application.Seat{Name: "builder", Rig: "millwright", Charter: "the builder's charter", Memory: "what the builder knows"}
+	prompt := application.BatchFixBootPrompt(seat, aBatchToFix())
+	for _, want := range []string{
+		"the builder's charter", "what the builder knows",
+		"# Your batch: batch 4 of millwright",
+		"1. mw-gq6.1, origin/mw/mw-gq6.1: merged at merge111",
+		"2. mw-gq6.2, origin/mw/mw-gq6.2: merged at merge222",
+		"3. mw-gq6.3, origin/mw/mw-gq6.3: SET ASIDE, git said: CONFLICT (content): Merge conflict in a.md",
+		"`make test` did not pass", "FAIL two: the batch is red",
+		"You may not push", "revert a story's branch", "drop a story's change",
+		"delete, skip or loosen a test without saying so on that story",
+		"comment on each story you touched", "TOUCHED <story>", "CAUSE <story>", "no second fixer",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected the fixer's boot file to hold %q, got:\n%s", want, prompt)
+		}
+	}
+
+	brief := aBatchToFix()
+	brief.Tested = false
+	if prompt := application.BatchFixBootPrompt(seat, brief); !strings.Contains(prompt, "Not run yet") {
+		t.Errorf("expected a fixer started before the tests ran to be told so, got:\n%s", prompt)
+	}
+}
+
+func TestReadFixerWordReadsTouchedAndCauseLinesAndNothingElse(t *testing.T) {
+	said := "Mended it.\nTOUCHED mw-gq6.2: src/a.ts, src/a.test.ts\n- `TOUCHED mw-gq6.3: b.md`\n" +
+		"CAUSE mw-gq6.2: it renamed a field mw-gq6.1 reads\nTOUCHED: nobody\nTOUCHED two words: x\nCAUSED nothing"
+	touched, causes := application.ReadFixerWord(said)
+	wantTouched := []application.FixerWord{{Story: "mw-gq6.2", Said: "src/a.ts, src/a.test.ts"}, {Story: "mw-gq6.3", Said: "b.md"}}
+	if !reflect.DeepEqual(touched, wantTouched) {
+		t.Fatalf("expected %+v touched, got %+v", wantTouched, touched)
+	}
+	wantCauses := []application.FixerWord{{Story: "mw-gq6.2", Said: "it renamed a field mw-gq6.1 reads"}}
+	if !reflect.DeepEqual(causes, wantCauses) {
+		t.Fatalf("expected %+v as its word on the cause, got %+v", wantCauses, causes)
+	}
+}
+
+func TestABatchLineCountsTheFixerItsFuelAndBothGateRuns(t *testing.T) {
+	red := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
+	report := application.BatchReport{
+		Rig: "lampas", Number: 2, Landed: true, Tested: true, GateRuns: 2, GateTook: 30 * time.Minute, RedAt: red,
+		Queue:  []application.BatchStory{{ID: "lp-1"}, {ID: "lp-2"}},
+		Merged: []application.BatchStory{{ID: "lp-1"}, {ID: "lp-2"}},
+		Fixer: &application.BatchFixing{Started: true, ResultRead: true,
+			Result: application.SessionResult{Fuel: application.Fuel{Input: 1000, Output: 500}}},
+	}
+	m := report.Metric(red.Add(20 * time.Minute))
+	if !m.Fixer || m.FixerTokens != 1500 || m.GateRuns != 2 || m.GateMinutes != 30 || m.Outcome != application.BatchFixed || m.RedMinutes != 20 {
+		t.Fatalf("expected a fixer of 1500 tokens, 2 gate runs over 30 minutes, outcome fixed and 20 red minutes, got %+v", m)
+	}
+	report.Landed = false
+	if m := report.Metric(red); m.Outcome != application.BatchHeld || !m.Fixer {
+		t.Fatalf("expected a batch held after its fixer to say held, with a fixer, got %+v", m)
+	}
+}
