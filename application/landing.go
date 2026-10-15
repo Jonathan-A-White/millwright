@@ -325,6 +325,13 @@ type MergeSlot interface {
 	Take(ctx context.Context, rigDir, holder string) (Holding, error)
 }
 
+// ErrSlotCap is what a MergeSlot's Take wraps when it waited the overall most a
+// close-out waits for the slot and it was still held (mw-gq6.467): the holder
+// was alive and still at its close-out, or the slot kept changing hands. The
+// close-out's work is not at fault, so the story is handed back for its
+// close-out alone (RunCloseOutAgain) rather than stopped.
+var ErrSlotCap = errors.New("the merge slot was still held at the overall most a close-out waits for it")
+
 // SlotNotes is the part of the shared tracker's key-value store a rig's
 // cross-host merge slot is kept in (CrossSlot). It is TrackerSync's own Note,
 // SetNote and ClearNote, narrowed.

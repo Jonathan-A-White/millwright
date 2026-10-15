@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -15,8 +16,9 @@ import (
 
 // SlotSuffix names a rig's merge slot, which lives beside the rig's story
 // worktrees. SlotWait is how long a close-out waits on one holder of the slot
-// before giving up, SlotCap is how long it waits in all however often the slot
-// changes hands, and SlotPoll is how often it looks.
+// whose process is gone before giving up, SlotCap is how long it waits in all,
+// on a live holder or however often the slot changes hands, and SlotPoll is how
+// often it looks.
 const (
 	SlotSuffix = ".merge-slot"
 	SlotWait   = 20 * time.Minute
@@ -169,11 +171,15 @@ func (s *Slots) Take(ctx context.Context, rigDir, holder string) (application.Ho
 	return &holding{file: file, holder: holder}, nil
 }
 
-// flock waits for the lock on the slot file, looking every poll until one
-// holder has kept it for the wait, or the cap has passed in all, or the context
-// gives up. The wait is per holder: it starts again whenever what the slot says
-// changes, because a slot that keeps changing hands is a queue of close-outs all
-// landing, not one stuck.
+// flock waits for the lock on the slot file, looking every poll until the cap
+// has passed in all, or one holder whose process is gone has kept it for the
+// wait, or the context gives up. The wait is per holder: it starts again
+// whenever what the slot says changes, because a slot that keeps changing hands
+// is a queue of close-outs all landing, not one stuck. And it is only for a
+// holder whose process is gone: a live one is still at its close-out, its tests
+// or its merge, however slow a loaded host makes them, and giving up on it
+// costs a finished story a fresh attempt (mw-gq6.467). A live holder is waited
+// on up to the cap.
 func (s *Slots) flock(ctx context.Context, file *os.File, rigDir, path string) error {
 	started := s.now()
 	since, said := started, readSlot(path)
@@ -206,11 +212,11 @@ func (s *Slots) flock(ctx context.Context, file *os.File, rigDir, path string) e
 			s.notice(fmt.Sprintf("waiting for the merge slot: held by %s\n", told))
 		}
 		if waited := now.Sub(started); waited >= s.cap {
-			return fmt.Errorf("the merge slot %s kept changing hands and was still held by %q after %s, the overall most a close-out waits: close-outs are landing work on this rig one after another",
-				path, held(path), waited.Round(time.Second))
+			return fmt.Errorf("the merge slot %s was still held by %q after %s, the overall most a close-out waits: its holder is still at its close-out, or close-outs are landing work on this rig one after another: %w",
+				path, held(path), waited.Round(time.Second), application.ErrSlotCap)
 		}
-		if waited := now.Sub(since); waited >= wait {
-			return fmt.Errorf("the merge slot %s is still held by %q after %s: one holder has had it that long, so that close-out is stuck or is landing a great deal of work (a close-out waits %s on one holder of this rig's slot)",
+		if waited := now.Sub(since); waited >= wait && !holderAlive(said) {
+			return fmt.Errorf("the merge slot %s is still held by %q after %s: one holder has had it that long and the process it names is gone, so whatever holds its lock is stuck (a close-out waits %s on one holder of this rig's slot)",
 				path, held(path), waited.Round(time.Second), wait)
 		}
 
@@ -275,6 +281,26 @@ func readSlot(path string) string {
 		return ""
 	}
 	return string(said)
+}
+
+// holderAlive says whether the process the slot names (its "pid N" line) is
+// still running on this host. A slot that names none, or one it cannot read, is
+// not alive: the per-holder wait is kept for it, as before mw-gq6.467. A process
+// this one may not signal (EPERM) is alive all the same.
+func holderAlive(said string) bool {
+	for _, line := range strings.Split(said, "\n") {
+		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "pid ")
+		if !ok {
+			continue
+		}
+		pid, err := strconv.Atoi(strings.TrimSpace(rest))
+		if err != nil || pid <= 0 {
+			return false
+		}
+		err = syscall.Kill(pid, 0)
+		return err == nil || errors.Is(err, syscall.EPERM)
+	}
+	return false
 }
 
 // held is whoever the slot file says has it, for a message to somebody waiting.

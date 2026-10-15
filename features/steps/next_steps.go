@@ -1622,7 +1622,7 @@ func (c *nextContext) theCommentQuotesTheWholeRefusal(id string) error {
 // theMergeSlotIsFree says the slot can be taken, which is the only honest way
 // to ask: an advisory lock is held by the kernel, not by what the file says.
 func (c *nextContext) theMergeSlotIsFree() error {
-	held, err := rig.NewSlots(rig.WithSlotWait(time.Second), rig.WithSlotPoll(20*time.Millisecond)).
+	held, err := rig.NewSlots(rig.WithSlotWait(time.Second), rig.WithSlotCap(time.Second), rig.WithSlotPoll(20*time.Millisecond)).
 		Take(context.Background(), c.rig, "the scenario")
 	if err != nil {
 		return fmt.Errorf("expected the merge slot of the rig to be free: %w", err)

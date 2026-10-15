@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
 )
 
@@ -26,9 +28,10 @@ func aRigDir(t *testing.T) string {
 }
 
 // impatient is a slots that waits barely at all, so that a test of contention
-// takes milliseconds rather than minutes.
+// takes milliseconds rather than minutes. Its holder in such a test is this
+// very process, alive, so it is the cap that ends the wait (mw-gq6.467).
 func impatient() *rig.Slots {
-	return rig.NewSlots(rig.WithSlotWait(150*time.Millisecond), rig.WithSlotPoll(10*time.Millisecond))
+	return rig.NewSlots(rig.WithSlotWait(150*time.Millisecond), rig.WithSlotCap(150*time.Millisecond), rig.WithSlotPoll(10*time.Millisecond))
 }
 
 func TestOnlyOneCloseOutHoldsARigsMergeSlot(t *testing.T) {
@@ -108,13 +111,32 @@ func TestWaitingForAMergeSlotGivesUpWhenTheContextDoes(t *testing.T) {
 
 // slotHeldByHand is somebody holding a rig's merge slot through a lock of their
 // own, so that a test can change who the slot says has it without ever letting
-// the lock go: a hand-over with no gap for the waiter to slip through.
+// the lock go: a hand-over with no gap for the waiter to slip through. The slot
+// names pid as the holder's process.
 type slotHeldByHand struct {
 	t    *testing.T
 	file *os.File
+	pid  int
 }
 
+// holdSlotByHand holds the slot for holder, naming a process that is gone: a
+// stuck holder, the one the per-holder wait is for (mw-gq6.467).
 func holdSlotByHand(t *testing.T, dir, holder string) *slotHeldByHand {
+	t.Helper()
+	return holdSlotByHandAs(t, dir, holder, gonePid(t))
+}
+
+// gonePid is the process id of a process that has ended.
+func gonePid(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command("true")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("running a process to end: %v", err)
+	}
+	return cmd.Process.Pid
+}
+
+func holdSlotByHandAs(t *testing.T, dir, holder string, pid int) *slotHeldByHand {
 	t.Helper()
 	path := rig.SlotPath(dir)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -127,7 +149,7 @@ func holdSlotByHand(t *testing.T, dir, holder string) *slotHeldByHand {
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
 		t.Fatalf("locking the slot: %v", err)
 	}
-	h := &slotHeldByHand{t: t, file: file}
+	h := &slotHeldByHand{t: t, file: file, pid: pid}
 	h.says(holder)
 	return h
 }
@@ -138,7 +160,7 @@ func (h *slotHeldByHand) says(holder string) {
 	if err := h.file.Truncate(0); err != nil {
 		h.t.Fatalf("emptying the slot: %v", err)
 	}
-	if _, err := h.file.WriteAt([]byte(holder+"\npid 1\ntaken "+time.Now().UTC().Format(time.RFC3339Nano)+"\n"), 0); err != nil {
+	if _, err := h.file.WriteAt([]byte(holder+"\npid "+strconv.Itoa(h.pid)+"\ntaken "+time.Now().UTC().Format(time.RFC3339Nano)+"\n"), 0); err != nil {
 		h.t.Fatalf("writing the slot: %v", err)
 	}
 }
@@ -237,7 +259,7 @@ func TestTheOverallCapStopsAWaiterWhoseSlotKeepsMoving(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected the overall cap to stop a waiter whose slot keeps changing hands")
 	}
-	if !strings.Contains(err.Error(), "overall") {
+	if !strings.Contains(err.Error(), "overall") || !errors.Is(err, application.ErrSlotCap) {
 		t.Errorf("expected the failure to say it was the overall cap, got %q", err)
 	}
 	if waited := clock.at.Sub(anEpoch); waited != 250*time.Millisecond {
@@ -274,7 +296,7 @@ func TestWaitingForAHeldSlotSaysWhoHasIt(t *testing.T) {
 	defer first.Release(ctx)
 
 	var said []string
-	waiting := rig.NewSlots(rig.WithSlotWait(100*time.Millisecond), rig.WithSlotPoll(10*time.Millisecond),
+	waiting := rig.NewSlots(rig.WithSlotWait(100*time.Millisecond), rig.WithSlotCap(100*time.Millisecond), rig.WithSlotPoll(10*time.Millisecond),
 		rig.WithSlotNotice(func(s string) { said = append(said, s) }))
 	if _, err := waiting.Take(ctx, dir, "builder@laptop checking mw-gq6.9"); err == nil {
 		t.Fatal("expected the wait to give up while the slot is held")
@@ -372,5 +394,48 @@ func TestARigWithNoGateHistoryWaitsTheDefaultPerHolder(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "20m0s") {
 		t.Errorf("expected the failure to name the wait used, got %q", err)
+	}
+}
+
+// A holder whose process is alive is still at its close-out, however long its
+// tests take on a loaded host: it is waited on past the per-holder wait, up to
+// the cap (mw-gq6.467, where mw-emk3xt.1 gave up after 52m on a live holder).
+func TestALiveHolderIsWaitedOnPastThePerHolderWait(t *testing.T) {
+	dir := aRigDir(t)
+	held := holdSlotByHandAs(t, dir, "builder@laptop closing out mw-5r3p30.318", os.Getpid())
+	clock := &aClock{at: anEpoch}
+	release := anEpoch.Add(52 * time.Minute)
+	clock.onTick = func(at time.Time) {
+		if !at.Before(release) {
+			held.release()
+		}
+	}
+	slots := rig.NewSlots(rig.WithSlotWait(20*time.Minute), rig.WithSlotCap(2*time.Hour), rig.WithSlotPoll(time.Minute),
+		rig.WithSlotClock(clock.now, clock.sleep))
+
+	taken, err := slots.Take(context.Background(), dir, "builder@laptop closing out mw-emk3xt.1")
+	if err != nil {
+		t.Fatalf("expected a live holder to be waited on past the per-holder wait, got %v", err)
+	}
+	defer taken.Release(context.Background())
+	if waited := clock.at.Sub(anEpoch); waited != 52*time.Minute {
+		t.Errorf("expected the slot to be taken when its holder let go, after 52m, waited %s", waited)
+	}
+}
+
+func TestALiveHolderThatNeverLetsGoStopsTheWaiterAtTheCap(t *testing.T) {
+	dir := aRigDir(t)
+	held := holdSlotByHandAs(t, dir, "builder@laptop closing out mw-5r3p30.318", os.Getpid())
+	defer held.release()
+	clock := &aClock{at: anEpoch}
+	slots := rig.NewSlots(rig.WithSlotWait(20*time.Minute), rig.WithSlotCap(2*time.Hour), rig.WithSlotPoll(time.Minute),
+		rig.WithSlotClock(clock.now, clock.sleep))
+
+	_, err := slots.Take(context.Background(), dir, "builder@laptop closing out mw-emk3xt.1")
+	if !errors.Is(err, application.ErrSlotCap) {
+		t.Fatalf("expected the waiter to stop at the overall cap, got %v", err)
+	}
+	if waited := clock.at.Sub(anEpoch); waited != 2*time.Hour {
+		t.Errorf("expected the waiter to stop at exactly the cap, waited %s", waited)
 	}
 }
