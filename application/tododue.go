@@ -15,6 +15,9 @@ import (
 const (
 	TodoDueField      = "todo_due"
 	TodoRemindedField = "todo_reminded"
+	// TodoImportantField is "true" on a card the Governor has starred
+	// (todo_edit's important); absent, or anything but "true", is not important.
+	TodoImportantField = "todo_important"
 )
 
 // TodoReminderJobName is the follower job that sends the reminders.

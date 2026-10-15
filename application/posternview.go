@@ -205,6 +205,9 @@ type PosternViewBead struct {
 	// TodoDue is when a hitl:todo card is due, RFC 3339; absent on a bead with
 	// none.
 	TodoDue string `json:"todo_due,omitempty"`
+	// TodoImportant is true on a hitl:todo card the Governor has starred; absent
+	// on any other.
+	TodoImportant bool `json:"todo_important,omitempty"`
 }
 
 // TrackerSnapshot is a tracker that can read every bead at once and answer the
@@ -1679,6 +1682,7 @@ func viewBeadOf(e *viewEntry) PosternViewBead {
 		Started: formatOrEmpty(d.Started), Closed: formatOrEmpty(d.ClosedAt),
 		Path: e.path, Attempts: d.Attempts, Summary: viewSummary(d.Description),
 		Comments: d.CommentCount, DoneEarlier: e.doneEarlier, TodoRank: d.TodoRank, TodoDue: d.TodoDue,
+		TodoImportant: d.TodoImportant,
 	}
 }
 

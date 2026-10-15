@@ -111,6 +111,9 @@ func InitializePosternViewScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the view's bead "([^"]*)" has the todo_due "([^"]*)"$`, c.theViewsBeadHasTheTodoDue)
 	ctx.Then(`^the view's bead "([^"]*)" carries the todo_due "([^"]*)"$`, c.theViewsBeadCarriesTheTodoDue)
 	ctx.Then(`^the view's bead "([^"]*)" carries no todo_due$`, func(id string) error { return c.theViewsBeadCarriesTheTodoDue(id, "") })
+	ctx.Given(`^the view's bead "([^"]*)" is important$`, c.theViewsBeadIsImportant)
+	ctx.Then(`^the view's bead "([^"]*)" carries todo_important true$`, func(id string) error { return c.theViewsBeadCarriesTodoImportant(id, true) })
+	ctx.Then(`^the view's bead "([^"]*)" carries no todo_important$`, func(id string) error { return c.theViewsBeadCarriesTodoImportant(id, false) })
 	ctx.Then(`^the view's bead "([^"]*)" carries no todo_rank$`, func(id string) error { return c.theViewsBeadCarriesTheTodoRank(id, "") })
 	ctx.Then(`^the view lists the beads under "([^"]*)" in the order "([^"]*)"$`, c.theViewListsTheBeadsUnderInOrder)
 	ctx.When(`^the live view is built$`, c.theLiveViewIsBuilt)
@@ -933,6 +936,21 @@ func (c *posternViewContext) theViewsBeadCarriesTheTodoDue(id, due string) error
 	}
 	if b.TodoDue != due {
 		return fmt.Errorf("expected %s to carry the todo_due %q, got %q", id, due, b.TodoDue)
+	}
+	return nil
+}
+
+func (c *posternViewContext) theViewsBeadIsImportant(id string) error {
+	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.TodoImportantField: "true"})
+}
+
+func (c *posternViewContext) theViewsBeadCarriesTodoImportant(id string, want bool) error {
+	b, ok := c.bead(id)
+	if !ok {
+		return fmt.Errorf("the view has no bead %s", id)
+	}
+	if b.TodoImportant != want {
+		return fmt.Errorf("expected %s to carry todo_important %v, got %v", id, want, b.TodoImportant)
 	}
 	return nil
 }

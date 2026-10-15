@@ -574,6 +574,37 @@ Feature: mw postern inbox --apply
     And bead "mw-todo.1" has no todo_due
     And mail "Not applied: todo_edit mw-todo.1" was sent to mayor saying "RFC 3339"
 
+  Scenario: A todo_edit tap naming important sets the card's todo_important and leaves its words alone
+    Given epic "mw-todo" has the open bead "mw-todo.1" labelled "hitl, hitl:todo"
+    And the Governor sends the postern action {"action":"todo_edit","bead":"mw-todo.1","important":true} with txid "tx-todo-edit-star"
+    When mw postern inbox --apply is run
+    Then bead "mw-todo.1" has the todo_important "true"
+    And bead "mw-todo.1" now has the title "Story mw-todo.1"
+    And mail "Edited: mw-todo.1" was sent to mayor
+    And the txid "tx-todo-edit-star" is marked applied
+
+  Scenario: A todo_edit tap with important false clears the card's todo_important
+    Given epic "mw-todo" has the open bead "mw-todo.1" labelled "hitl, hitl:todo"
+    And bead "mw-todo.1" is important
+    And the Governor sends the postern action {"action":"todo_edit","bead":"mw-todo.1","important":false} with txid "tx-todo-edit-unstar"
+    When mw postern inbox --apply is run
+    Then bead "mw-todo.1" has no todo_important
+    And the txid "tx-todo-edit-unstar" is marked applied
+
+  Scenario: A todo_edit tap naming both due and important applies both
+    Given epic "mw-todo" has the open bead "mw-todo.1" labelled "hitl, hitl:todo"
+    And the Governor sends the postern action {"action":"todo_edit","bead":"mw-todo.1","due":"2026-10-15T17:00:00Z","important":true} with txid "tx-todo-edit-both"
+    When mw postern inbox --apply is run
+    Then bead "mw-todo.1" has the todo_due "2026-10-15T17:00:00Z"
+    And bead "mw-todo.1" has the todo_important "true"
+    And the txid "tx-todo-edit-both" is marked applied
+
+  Scenario: A todo_edit tap naming important on a bead without hitl:todo is refused and changes nothing
+    Given the Governor sends the postern action {"action":"todo_edit","bead":"mw-act.1","important":true} with txid "tx-todo-edit-star-no"
+    When mw postern inbox --apply is run
+    Then the tracker took only the mark that the tap was applied
+    And mail "Not applied: todo_edit mw-act.1" was sent to mayor saying "not an item on a to-do list"
+
   Scenario: A todo_edit tap on a bead without hitl:todo is refused and changes nothing
     Given the Governor sends the postern action {"action":"todo_edit","bead":"mw-act.1","title":"Something else"} with txid "tx-todo-edit-no"
     When mw postern inbox --apply is run

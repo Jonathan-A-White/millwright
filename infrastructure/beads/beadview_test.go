@@ -237,3 +237,22 @@ func TestShowBeadsReadsATodoRankWhetherBdHoldsItAsTextOrANumber(t *testing.T) {
 		t.Errorf("expected the ranks 1.5, 3 and none, got %q, %q, %q", found[0].TodoRank, found[1].TodoRank, found[2].TodoRank)
 	}
 }
+
+// A card is starred when todo_important holds "true", as text or as a boolean;
+// anything else, or nothing, is not important.
+func TestShowBeadsReadsATodoImportantOnlyWhenItIsTrue(t *testing.T) {
+	gateway, _ := leaseStandIn(t, map[string]string{
+		"show": `[{"id": "t-1", "title": "A", "status": "open", "metadata": {"todo_important": "true"}},
+		          {"id": "t-2", "title": "B", "status": "open", "metadata": {"todo_important": true}},
+		          {"id": "t-3", "title": "C", "status": "open", "metadata": {"todo_important": "yes"}},
+		          {"id": "t-4", "title": "D", "status": "open"}]`,
+	})
+	found, err := gateway.ShowBeads(context.Background(), []string{"t-1", "t-2", "t-3", "t-4"})
+	if err != nil || len(found) != 4 {
+		t.Fatalf("showing: %v, %+v", err, found)
+	}
+	got := []bool{found[0].TodoImportant, found[1].TodoImportant, found[2].TodoImportant, found[3].TodoImportant}
+	if !got[0] || !got[1] || got[2] || got[3] {
+		t.Errorf("expected important, important, not, not, got %v", got)
+	}
+}

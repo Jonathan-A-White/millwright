@@ -30,6 +30,9 @@ func registerPosternTodoSteps(ctx *godog.ScenarioContext, c *posternInboxContext
 	ctx.Given(`^bead "([^"]*)" is due "([^"]*)"$`, c.beadIsDue)
 	ctx.Then(`^bead "([^"]*)" has the todo_due "([^"]*)"$`, c.beadHasTheTodoDue)
 	ctx.Then(`^bead "([^"]*)" has no todo_due$`, func(id string) error { return c.beadHasTheTodoDue(id, "") })
+	ctx.Given(`^bead "([^"]*)" is important$`, c.beadIsImportant)
+	ctx.Then(`^bead "([^"]*)" has the todo_important "([^"]*)"$`, c.beadHasTheTodoImportant)
+	ctx.Then(`^bead "([^"]*)" has no todo_important$`, func(id string) error { return c.beadHasTheTodoImportant(id, "") })
 }
 
 func (c *posternInboxContext) theEpicIsAToDoList(id string) error {
@@ -180,6 +183,17 @@ func (c *posternInboxContext) beadIsDue(id, due string) error {
 func (c *posternInboxContext) beadHasTheTodoDue(id, due string) error {
 	if got := c.memory.Metadata(id)[application.TodoDueField]; got != due {
 		return fmt.Errorf("expected %s at todo_due %q, got %q", id, due, got)
+	}
+	return nil
+}
+
+func (c *posternInboxContext) beadIsImportant(id string) error {
+	return c.memory.SetStoryMetadata(context.Background(), id, map[string]string{application.TodoImportantField: "true"})
+}
+
+func (c *posternInboxContext) beadHasTheTodoImportant(id, important string) error {
+	if got := c.memory.Metadata(id)[application.TodoImportantField]; got != important {
+		return fmt.Errorf("expected %s at todo_important %q, got %q", id, important, got)
 	}
 	return nil
 }

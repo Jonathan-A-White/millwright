@@ -183,6 +183,9 @@ for before the push goes, so a card is reminded once for each due time it is giv
 takes the mark off again, fails the pass, and is tried again on the next. A closed card, a card with no
 due time and one not yet due are passed over, and a pass with nothing due reads nothing but the cards.
 
+A card can also be starred: a todo_edit tap's `important` sets the metadata `todo_important` to `true` (false
+takes it off), and the view publishes it as `todo_important: true`; the reminder does not read it.
+
 The `cloud` job runs the cloud check (`mw cloud check`, docs/vultr-boost.md, "Elastic") in the
 follower itself, every minute, reason `clock`, on a host whose config has a `[cloud]` table and
 only while it is home. A pass that makes or destroys a box writes a `cloud` event, actor

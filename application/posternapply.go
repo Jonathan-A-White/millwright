@@ -66,9 +66,12 @@ type PosternAction struct {
 	Notes *string `json:"notes,omitempty"`
 	// Due is a todo_edit's new due time, RFC 3339; an empty one clears it, and
 	// a nil one leaves it as it is.
-	Due    *string `json:"due,omitempty"`
-	Before string  `json:"before,omitempty"`
-	After  string  `json:"after,omitempty"`
+	Due *string `json:"due,omitempty"`
+	// Important is a todo_edit's star: true marks the card important, false
+	// takes it off, and a nil one leaves it as it is.
+	Important *bool  `json:"important,omitempty"`
+	Before    string `json:"before,omitempty"`
+	After     string `json:"after,omitempty"`
 
 	// Step, SHA256, ApprovedAt and Sig are a run action's (§17): the step
 	// approved, its hash as he saw it, when he approved it (Unix seconds),

@@ -151,6 +151,15 @@ func (b bead) text(field string) string {
 	return strings.TrimSpace(text)
 }
 
+// flag reads a switch kept in the bead's metadata: true when it holds "true",
+// whether bd hands it back as that text or as a JSON boolean.
+func (b bead) flag(field string) bool {
+	if value, ok := b.Metadata[field].(bool); ok {
+		return value
+	}
+	return b.text(field) == "true"
+}
+
 // rankText reads a number kept in the bead's metadata as the text it was
 // written as: bd hands back a value set as 1.5 as a number, not as "1.5".
 func (b bead) rankText(field string) string {
@@ -324,6 +333,7 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		TodoRank:         b.rankText(application.TodoRankField),
 		TodoDue:          b.text(application.TodoDueField),
 		TodoReminded:     b.text(application.TodoRemindedField),
+		TodoImportant:    b.flag(application.TodoImportantField),
 		Attempts:         b.attempts(),
 		RebaseSends:      b.count(application.RebaseSendsField),
 		RebaseBase:       b.text(application.RebaseBaseField),

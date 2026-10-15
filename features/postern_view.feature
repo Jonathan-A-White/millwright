@@ -471,6 +471,15 @@ Feature: mw postern view
     Then the view's bead "mw-todo.1" carries the todo_due "2026-10-15T17:00:00-04:00"
     And the view's bead "mw-todo.2" carries no todo_due
 
+  Scenario: A hitl:todo card's todo_important is published
+    Given the view's epic "mw-todo" is live
+    And the view's hitl bead "mw-todo.1" under "mw-todo" was filed 3 days ago with the labels "hitl, hitl:todo" and the body "Buy a hose"
+    And the view's hitl bead "mw-todo.2" under "mw-todo" was filed 2 days ago with the labels "hitl, hitl:todo" and the body "Check the router"
+    And the view's bead "mw-todo.1" is important
+    When the live view is built
+    Then the view's bead "mw-todo.1" carries todo_important true
+    And the view's bead "mw-todo.2" carries no todo_important
+
   Scenario: The same bead without hitl:todo still gives a hands need
     Given the view's epic "mw-todo" is live
     And the view's hitl bead "mw-todo.1" under "mw-todo" was filed 2 days ago with the labels "hitl" and the body "Buy a hose"

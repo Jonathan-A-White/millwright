@@ -70,14 +70,15 @@ func (i PosternInbox) applyTodoAdd(ctx context.Context, m PosternInboxMessage, a
 }
 
 // applyTodoEdit changes the title, the notes (the bead's description), the due
-// time (todo_due; empty takes it off), or any of them, as the action names them.
+// time (todo_due; empty takes it off), its star (todo_important), or any of
+// them, as the action names them.
 func (i PosternInbox) applyTodoEdit(ctx context.Context, action PosternAction, card StoryDetail,
 	refuse func(string) (posternApplied, error), done func(subject, comment string) (posternApplied, error)) (posternApplied, error) {
 	if why := refuseNotACard(card); why != "" {
 		return refuse(why)
 	}
-	if action.Title == nil && action.Notes == nil && action.Due == nil {
-		return refuse("it names no title, notes nor due time")
+	if action.Title == nil && action.Notes == nil && action.Due == nil && action.Important == nil {
+		return refuse("it names no title, notes, due time nor star")
 	}
 	due := ""
 	if action.Due != nil {
@@ -111,6 +112,16 @@ func (i PosternInbox) applyTodoEdit(ctx context.Context, action PosternAction, c
 			return refuse(err.Error())
 		}
 		changed = append(changed, "due time")
+	}
+	if action.Important != nil {
+		important := ""
+		if *action.Important {
+			important = "true"
+		}
+		if err := i.Tracker.SetStoryMetadata(ctx, card.Story.ID, map[string]string{TodoImportantField: important}); err != nil {
+			return refuse(err.Error())
+		}
+		changed = append(changed, "star")
 	}
 	return done(fmt.Sprintf("Edited: %s", card.Story.ID),
 		fmt.Sprintf("EDITED by the Governor via postern: the %s changed", strings.Join(changed, " and ")))

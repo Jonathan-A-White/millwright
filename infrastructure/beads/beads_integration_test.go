@@ -1635,4 +1635,17 @@ func TestGatewayReadsAndClearsACardsDueTime(t *testing.T) {
 	if shown[0].TodoDue != "" || shown[0].TodoReminded != due {
 		t.Errorf("expected no due time and the reminder kept, got %q and %q", shown[0].TodoDue, shown[0].TodoReminded)
 	}
+
+	if err := gateway.SetStoryMetadata(ctx, card, map[string]string{application.TodoImportantField: "true"}); err != nil {
+		t.Fatalf("starring %s: %v", card, err)
+	}
+	if shown, err = gateway.ShowBeads(ctx, []string{card}); err != nil || len(shown) != 1 || !shown[0].TodoImportant {
+		t.Errorf("expected %s starred, got %v, %+v", card, err, shown)
+	}
+	if err := gateway.SetStoryMetadata(ctx, card, map[string]string{application.TodoImportantField: ""}); err != nil {
+		t.Fatalf("unstarring %s: %v", card, err)
+	}
+	if shown, err = gateway.ShowBeads(ctx, []string{card}); err != nil || len(shown) != 1 || shown[0].TodoImportant {
+		t.Errorf("expected %s not starred, got %v, %+v", card, err, shown)
+	}
 }

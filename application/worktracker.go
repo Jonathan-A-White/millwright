@@ -209,6 +209,9 @@ type StoryDetail struct {
 	// of it for (TodoRemindedField); empty when none.
 	TodoDue      string
 	TodoReminded string
+	// TodoImportant is whether the card is starred, as the TodoImportantField
+	// metadata says ("true").
+	TodoImportant bool
 }
 
 // WorkInHand is what the tracker has in hand across every host: the stories
