@@ -17,8 +17,8 @@ domain/ stdlib · application/ use cases, ports · infra/ adapters · cmd/mw/ co
 | Runner, BdProgram | application/runner.go, application/bdretry.go | infra/{tmux,bdprogram} | FakeRunner, FakeBd |
 | Harness | application/harness.go | infra/claude | seatboot_test.go |
 | SeatFiles, Windows, SeatHarness, ActingFile | application/seatup.go, application/seathandover.go | infra/{vault/{seat,reaplog},tmux/window,claude/claude}.go | Fake{Windows,Acting*} |
-| Transcripts{,Tail,Replies}, PeekRemote | application/seatcontext.go, application/peek.go | infra/{claude,peekremote} | FakePeek |
-| Reap{Terminal,Log,Armer} | application/seatreap.go | infra/{tmux/reap,vault/reaplog,reaper/arm}.go | Fake{Windows,ReapArmer} |
+| Transcripts{,Tail,Replies,Titled}, PeekRemote | application/seatcontext.go, application/peek.go | infra/{claude,peekremote} | FakePeek |
+| Reap{Terminal,Log,Armer} | application/seatreap.go | infra/{tmux/reap,vault/reaplog,reaper/arm}.go | Fake{Windows,Reap*} |
 | WatchProbes | application/watch.go | infra/watch | FakeWatch |
 | Doctor{Check,State,Log,Notes}, VPSProbe | application/doctor.go, application/vpsnginx.go | infra/{doctor,vpsnginx} | - |
 | Network{Probe,Store,Reader} | application/network.go | infra/network | FakeNetwork* |
