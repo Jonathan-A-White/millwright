@@ -10,6 +10,7 @@ import (
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
+	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/domain/events"
 )
 
@@ -481,5 +482,31 @@ func TestSpringTheFollowerThatComesBackRunsNothingAfterAPassThatEndedOrFailed(t 
 	case name := <-r.ran:
 		t.Fatalf("%s was run for a failure the log already says", name)
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestSpringTheBatchLandJobSaysWhichRigAndHowManyAreQueued(t *testing.T) {
+	j := newLandingJob(t)
+	j.rule("lampas", domain.LandingEach)
+	j.queued("lampas", "lp-1", 2)
+	j.queued("lampas", "lp-2", 1)
+	log := &apptest.FakeEventLog{}
+	spring := &application.EventSpring{Log: log, Host: "desktop", Jobs: []application.SpringJob{j.job}, Now: func() time.Time { return j.now }}
+	ctx := context.Background()
+	if err := spring.Spring(ctx); err != nil { // the first only takes its bearings
+		t.Fatal(err)
+	}
+	if err := spring.Spring(ctx); err != nil {
+		t.Fatal(err)
+	}
+	spring.Wait()
+	var scheduled []events.Event
+	for _, e := range log.All() {
+		if e.Kind == events.KindJob && e.Actor == "batch-land@desktop" && e.To == events.JobScheduled {
+			scheduled = append(scheduled, e)
+		}
+	}
+	if len(scheduled) != 1 || !strings.Contains(scheduled[0].Detail, "lampas") || !strings.Contains(scheduled[0].Detail, "2 queued") {
+		t.Fatalf("expected one scheduled event naming lampas and 2 queued, got %+v", scheduled)
 	}
 }
