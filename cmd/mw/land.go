@@ -17,7 +17,7 @@ import (
 // newLandCmd builds `mw land <rig>`: the one command that pushes the target
 // branch of a rig that lands in batches (plans/0117, Land Rush 3).
 func newLandCmd() *cobra.Command {
-	var dryRun bool
+	var dryRun, one bool
 
 	cmd := &cobra.Command{
 		Use:   "land <rig>",
@@ -39,6 +39,7 @@ func newLandCmd() *cobra.Command {
 			"and land exits non-zero.\n\n" +
 			"What the batch did is kept in the vault under runs/batch/<rig>/<n>/: merge-order.txt, gate.log\n" +
 			"and outcome.txt, committed with the ledger.\n\n" +
+			"--one takes only the oldest queued story, whatever else is queued, and lands it by itself.\n\n" +
 			"--dry-run prints the batch it would make and does nothing else: nothing is merged, tested,\n" +
 			"pushed, recorded or mailed.",
 		Args: cobra.ExactArgs(1),
@@ -128,6 +129,7 @@ func newLandCmd() *cobra.Command {
 				},
 				Records: files,
 				DryRun:  dryRun,
+				One:     one,
 			}.Run(cmd.Context(), args[0])
 			return err
 		},
@@ -135,5 +137,7 @@ func newLandCmd() *cobra.Command {
 
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false,
 		"print the batch it would make, oldest queued first, and do nothing else")
+	cmd.Flags().BoolVar(&one, "one", false,
+		"take only the oldest queued story: how the follower lands what a rig flipped back to landing = each had queued")
 	return cmd
 }
