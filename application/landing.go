@@ -61,6 +61,11 @@ type Landed struct {
 // .md one) and Entry the note to put at the top of each, under the version the
 // rig comes to: it rides in the same commit as the version. Entry.Version is
 // the landing's to fill in.
+//
+// Entries, when it is not empty, stands in for Entry: a batch's notes, one per
+// story it lands, put at the top of each file in their order, so that the last
+// is on top, all under the one version the batch raises the rig to. Branch is
+// then the batch's own HEAD, and StoryID names the batch.
 type VersionBump struct {
 	Files     []string
 	Before    string
@@ -68,6 +73,23 @@ type VersionBump struct {
 	StoryID   string
 	Changelog []string
 	Entry     domain.ChangelogEntry
+	Entries   []domain.ChangelogEntry
+}
+
+// Notes are the changelog entries a bump writes, in the order they are put at
+// the top of the files: Entries, or Entry alone; one with no text is none.
+func (b VersionBump) Notes() []domain.ChangelogEntry {
+	all := b.Entries
+	if len(all) == 0 {
+		all = []domain.ChangelogEntry{b.Entry}
+	}
+	var notes []domain.ChangelogEntry
+	for _, entry := range all {
+		if entry.Text != "" {
+			notes = append(notes, entry)
+		}
+	}
+	return notes
 }
 
 // Bumped is what a VersionBump did: the version the files now hold and the
