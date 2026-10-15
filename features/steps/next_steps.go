@@ -79,6 +79,7 @@ type nextContext struct {
 
 	lease *landingLease // the lease watch of features/next_lease.feature, when a scenario asks for one
 	cross *crossFixture // the merge slot across hosts of features/next_cross_slot.feature, when a scenario has one
+	batch batchFixture  // what mw land did, in features/batch_land.feature
 
 	otherGate      application.Holding // the gate lock another close-out holds, in features/next_gate_lock.feature
 	otherGateStory string
@@ -206,6 +207,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerNextCrossSlotSteps(ctx, c)
 	registerNextGateSteps(ctx, c)
 	registerNextBatchSteps(ctx, c)
+	registerBatchLandSteps(ctx, c)
 
 	ctx.When(`^mw closes out "([^"]*)"$`, c.mwClosesOut)
 	ctx.When(`^mw closes out "([^"]*)" a second time$`, c.mwClosesOut)
@@ -925,6 +927,23 @@ func (c *nextContext) mwClosesOut(id string) error {
 	}
 	c.originBefore = before
 
+	c.report, c.err = c.nextUseCase().Run(context.Background(), id)
+
+	if c.afterFirst == nil {
+		lines, err := c.ledgerLines()
+		if err != nil {
+			return err
+		}
+		c.afterFirst = lines
+	}
+	return nil
+}
+
+// nextUseCase is the close-out the way mw builds it: the real worktrees, the
+// real landing, the real merge slot, the real vault and the real ledger, with
+// stand-ins only for the beads database and the terminal. mw land is built on
+// the same (features/batch_land.feature).
+func (c *nextContext) nextUseCase() application.Next {
 	worktrees := rig.New(rig.WithProgram(c.gitProgram))
 	c.worktrees = worktrees
 	rigs := map[string]string{c.rigKey(): c.rig}
@@ -948,7 +967,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 		tracker, heartbeatWait = c.lease.watch(c.tracker), c.lease.wait
 	}
 
-	c.report, c.err = application.Next{
+	return application.Next{
 		Tracker:       tracker,
 		HeartbeatWait: heartbeatWait,
 		Worktrees:     worktrees,
@@ -993,16 +1012,7 @@ func (c *nextContext) mwClosesOut(id string) error {
 		Units:          c.unitRestarter(),
 		Stamps:         c.stamps,
 		Tester:         c.testerTrial(),
-	}.Run(context.Background(), id)
-
-	if c.afterFirst == nil {
-		lines, err := c.ledgerLines()
-		if err != nil {
-			return err
-		}
-		c.afterFirst = lines
 	}
-	return nil
 }
 
 func (c *nextContext) origin() string { return filepath.Join(c.root, "origin.git") }

@@ -1238,6 +1238,30 @@ keeps its `mw` level too; it prints the same `self-update:` line. A host that ru
 both ticks builds a commit once, because both keep the one built marker. The
 dispatch unit's `TimeoutStartSec` is ten minutes for the same reason.
 
+## Landing a rig's stories in batches
+
+A rig whose file in the vault says `landing = "batch"` (plans/0117, Land Rush)
+does not land each story by itself: `mw next` queues it (its branch pushed as
+`mw/<story>`, run=queued), and `mw land <rig>` lands the queue:
+
+```sh
+mw land lampas --dry-run   # the batch it would make, oldest queued first; nothing else
+mw land lampas             # merge, test once, push main only when green
+```
+
+In a landing worktree detached at the target branch as the origin has it, the
+queued branches are merged oldest queued first by the rig's union rules; one
+that does not merge is set aside with git's conflict list and stays queued. The
+version is raised once, with one changelog entry per story, and the rig's tests
+run once on the batch under the host's gate lock and calm rule. Only when they
+pass is main pushed, a fast-forward: each story is closed run=landed with a
+ledger line naming the batch, a chain stamp and a Landed mail, and the
+after-landing command and the grist smoke run once. A red run pushes nothing:
+the batch is held, every story stays queued, and the Mayor is mailed each story
+and why. What each batch did is kept under `runs/batch/<rig>/<n>/` in the vault.
+On a batch rig nothing but `mw land` pushes main. See
+`features/batch_land.feature`.
+
 ## Recovering a story after a refused landing
 
 ```sh
