@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // EpicRequirements is what a rig asks of every epic that is worked in it, as
@@ -54,6 +55,78 @@ type EpicRequirements struct {
 	// under. Neither is a requirement of an epic, so Any does not count them.
 	NightlySuite bool
 	SuiteEpic    string
+	// Landing is how the rig's stories land, as its file wrote it: a key the
+	// file does not hold is left at its zero, and LandingSettings gives the
+	// settings with the defaults filled in. Nothing reads it before Land Rush 2.
+	// It is no requirement of an epic either, so Any does not count it.
+	Landing LandingSettings
+	// Warnings are what the rig's file said that was read past rather than
+	// refused: a landing value this mw does not know, a batch key whose value
+	// makes no sense. An older or newer mw must never stop a landing over the
+	// file, so each reads as its default and is named here.
+	Warnings []string
+}
+
+// LandingMode is how a rig's stories land on its main.
+type LandingMode string
+
+const (
+	// LandingEach lands every story by itself, the day-to-day way.
+	LandingEach LandingMode = "each"
+	// LandingBatch queues the stories and lands several together under one gate.
+	LandingBatch LandingMode = "batch"
+)
+
+// The defaults of a rig's landing settings; all provisional (plans/0117).
+const (
+	DefaultBatchEvery  = 30 * time.Minute
+	DefaultBatchMin    = 2
+	DefaultBatchMax    = 6
+	DefaultFixerModel  = "sonnet"
+	DefaultFixerEffort = "high"
+	DefaultFixerTurns  = 60
+)
+
+// LandingSettings are the landing keys of a rig's file: the mode, when a batch
+// is due (BatchEvery after the oldest queued story, or BatchMax queued; at
+// least BatchMin queued), and the model, effort and turns of the fixer that
+// is asked to mend a red batch.
+type LandingSettings struct {
+	Mode        LandingMode
+	BatchEvery  time.Duration
+	BatchMin    int
+	BatchMax    int
+	FixerModel  string
+	FixerEffort string
+	FixerTurns  int
+}
+
+// LandingSettings are the rig's landing settings with the defaults in place of
+// every key its file did not write.
+func (r EpicRequirements) LandingSettings() LandingSettings {
+	s := r.Landing
+	if s.Mode == "" {
+		s.Mode = LandingEach
+	}
+	if s.BatchEvery <= 0 {
+		s.BatchEvery = DefaultBatchEvery
+	}
+	if s.BatchMin <= 0 {
+		s.BatchMin = DefaultBatchMin
+	}
+	if s.BatchMax <= 0 {
+		s.BatchMax = DefaultBatchMax
+	}
+	if s.FixerModel == "" {
+		s.FixerModel = DefaultFixerModel
+	}
+	if s.FixerEffort == "" {
+		s.FixerEffort = DefaultFixerEffort
+	}
+	if s.FixerTurns <= 0 {
+		s.FixerTurns = DefaultFixerTurns
+	}
+	return s
 }
 
 // Any reports whether the rig asks anything of its epics at all. A rig that

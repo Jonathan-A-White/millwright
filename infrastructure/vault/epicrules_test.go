@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
@@ -341,5 +342,86 @@ func TestARigsFileListsTheSharedDocsALandingMergesByUnion(t *testing.T) {
 		if _, err := v.EpicRequirements(context.Background(), "lampas"); err == nil || !strings.Contains(err.Error(), "union_merge_files") {
 			t.Errorf("union_merge_files = %s: err = %v, want a refusal naming union_merge_files", bad, err)
 		}
+	}
+}
+
+func TestARigsFileSetsHowItsStoriesLand(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+	ctx := context.Background()
+	writeRigFile(t, dir, "lampas", "landing = \"batch\"\nbatch_every = \"45m\"\nbatch_min = 3\nbatch_max = 8\nbatch_fixer_model = \"opus\"\nbatch_fixer_effort = \"max\"\nbatch_fixer_turns = 90\n")
+
+	want := domain.LandingSettings{Mode: domain.LandingBatch, BatchEvery: 45 * time.Minute, BatchMin: 3, BatchMax: 8,
+		FixerModel: "opus", FixerEffort: "max", FixerTurns: 90}
+	got, err := v.EpicRequirements(ctx, "lampas")
+	if err != nil {
+		t.Fatalf("reading the rig's file: %v", err)
+	}
+	if have := got.LandingSettings(); have != want {
+		t.Errorf("landing settings = %+v, want %+v", have, want)
+	}
+	if len(got.Warnings) != 0 || got.Any() {
+		t.Errorf("warnings = %v, Any() = %v, want neither", got.Warnings, got.Any())
+	}
+
+	// A landing reads the same seven keys as known ones, not as unknown.
+	landing, unknown, err := v.LandingRequirements(ctx, "lampas")
+	if err != nil || len(unknown) != 0 || landing.LandingSettings() != want {
+		t.Errorf("a landing read %+v, unknown %v, %v", landing, unknown, err)
+	}
+}
+
+func TestARigWithoutLandingKeysLandsEachWithTheDefaults(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+	ctx := context.Background()
+	want := domain.LandingSettings{Mode: domain.LandingEach, BatchEvery: 30 * time.Minute, BatchMin: 2, BatchMax: 6,
+		FixerModel: "sonnet", FixerEffort: "high", FixerTurns: 60}
+
+	// A rig with no file, and a rig whose file says nothing of landing.
+	got, err := v.EpicRequirements(ctx, "no-file")
+	if err != nil || got.LandingSettings() != want {
+		t.Errorf("a rig with no file: %+v, %v, want %+v", got.LandingSettings(), err, want)
+	}
+	writeRigFile(t, dir, "lampas", "version_files = [\"package.json\"]\n")
+	got, err = v.EpicRequirements(ctx, "lampas")
+	if err != nil || got.LandingSettings() != want || len(got.Warnings) != 0 {
+		t.Errorf("a rig with another key: %+v, warnings %v, %v, want %+v", got.LandingSettings(), got.Warnings, err, want)
+	}
+}
+
+func TestAnUnknownLandingValueReadsAsEachWithAWarningNotAnError(t *testing.T) {
+	dir := aVault(t)
+	v := vault.New(dir)
+	ctx := context.Background()
+	writeRigFile(t, dir, "lampas", "landing = \"rush\"\n")
+
+	got, err := v.EpicRequirements(ctx, "lampas")
+	if err != nil {
+		t.Fatalf("an unknown landing value stopped the read: %v", err)
+	}
+	if mode := got.LandingSettings().Mode; mode != domain.LandingEach {
+		t.Errorf("landing = %q, want each", mode)
+	}
+	if len(got.Warnings) != 1 || !strings.Contains(got.Warnings[0], "rush") || !strings.Contains(got.Warnings[0], "landing") {
+		t.Errorf("warnings = %v, want one naming landing and rush", got.Warnings)
+	}
+
+	landing, unknown, err := v.LandingRequirements(ctx, "lampas")
+	if err != nil || len(unknown) != 0 || landing.LandingSettings().Mode != domain.LandingEach || len(landing.Warnings) != 1 {
+		t.Errorf("a landing read %+v, unknown %v, %v", landing, unknown, err)
+	}
+
+	// A value of another batch key that does not make sense falls back to its default, with a warning, just as lenient.
+	writeRigFile(t, dir, "lampas", "batch_every = \"soon\"\nbatch_min = 0\nbatch_max = many\nbatch_fixer_turns = -4\nbatch_fixer_model = \"\"\nlanding = batch\n")
+	got, err = v.EpicRequirements(ctx, "lampas")
+	if err != nil {
+		t.Fatalf("a nonsense batch value stopped the read: %v", err)
+	}
+	if want := (domain.EpicRequirements{}).LandingSettings(); got.LandingSettings() != want {
+		t.Errorf("landing settings = %+v, want the defaults %+v", got.LandingSettings(), want)
+	}
+	if len(got.Warnings) != 6 {
+		t.Errorf("warnings = %v, want six", got.Warnings)
 	}
 }

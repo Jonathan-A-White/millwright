@@ -7,7 +7,9 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/domain"
@@ -32,6 +34,16 @@ const (
 	FilesExpectedKey       = "files_expected"
 	NightlySuiteKey        = "nightly_suite"
 	SuiteEpicKey           = "suite_epic"
+
+	// The landing keys: how a rig's stories land (plans/0117). A value of these
+	// that makes no sense reads as its default with a warning, never an error.
+	LandingKey          = "landing"
+	BatchEveryKey       = "batch_every"
+	BatchMinKey         = "batch_min"
+	BatchMaxKey         = "batch_max"
+	BatchFixerModelKey  = "batch_fixer_model"
+	BatchFixerEffortKey = "batch_fixer_effort"
+	BatchFixerTurnsKey  = "batch_fixer_turns"
 )
 
 var _ application.EpicRules = (*Vault)(nil)
@@ -53,6 +65,13 @@ var beadID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 //	files_expected         = true
 //	nightly_suite          = true
 //	suite_epic             = "mw-5r3p30"
+//	landing                = "batch"   # or "each", the default
+//	batch_every            = "30m"
+//	batch_min              = 2
+//	batch_max              = 6
+//	batch_fixer_model      = "sonnet"
+//	batch_fixer_effort     = "high"
+//	batch_fixer_turns      = 60
 //
 // A rig with no file asks nothing. A key this does not know is an error rather
 // than a silence: a misspelt key would otherwise switch the requirement off
@@ -94,6 +113,8 @@ func (v *Vault) readRigFile(_ context.Context, rig string, lenient bool) (domain
 var knownKeys = map[string]bool{
 	EpicSectionsKey: true, EpicLastStoryLabelsKey: true, GuestKey: true, VersionFilesKey: true, ChangelogFilesKey: true, UnionMergeFilesKey: true,
 	PublicURLKey: true, FilesExpectedKey: true, NightlySuiteKey: true, SuiteEpicKey: true,
+	LandingKey: true, BatchEveryKey: true, BatchMinKey: true, BatchMaxKey: true,
+	BatchFixerModelKey: true, BatchFixerEffortKey: true, BatchFixerTurnsKey: true,
 }
 
 // bareKey is what a key may be for a lenient read to set it aside as one it
@@ -122,6 +143,12 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 			for strings.HasPrefix(value, "[") && !strings.Contains(value, "]") && i+1 < len(lines) {
 				i++
 				value += " " + strings.TrimSpace(stripComment(lines[i]))
+			}
+			continue
+		}
+		if found && landingKeys[key] {
+			if warning := setLandingKey(&requirements.Landing, key, value); warning != "" {
+				requirements.Warnings = append(requirements.Warnings, fmt.Sprintf("line %d: %s", i+1, warning))
 			}
 			continue
 		}
@@ -208,11 +235,74 @@ func parseRigFile(written string, lenient bool) (domain.EpicRequirements, []stri
 				requirements.VersionFiles = names
 			}
 		default:
-			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s, %s and %s)",
-				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, UnionMergeFilesKey, PublicURLKey, FilesExpectedKey, NightlySuiteKey, SuiteEpicKey)
+			return requirements, nil, fmt.Errorf("line %d: %q is not a key a rig's file has (it has %s, %s, %s, %s, %s, %s, %s, %s, %s, %s and the landing keys %s, %s, %s, %s, %s, %s and %s)",
+				i+1, key, EpicSectionsKey, EpicLastStoryLabelsKey, GuestKey, VersionFilesKey, ChangelogFilesKey, UnionMergeFilesKey, PublicURLKey, FilesExpectedKey, NightlySuiteKey, SuiteEpicKey,
+				LandingKey, BatchEveryKey, BatchMinKey, BatchMaxKey, BatchFixerModelKey, BatchFixerEffortKey, BatchFixerTurnsKey)
 		}
 	}
 	return requirements, unknown, nil
+}
+
+// landingKeys are the keys of a rig's file that say how its stories land.
+var landingKeys = map[string]bool{
+	LandingKey: true, BatchEveryKey: true, BatchMinKey: true, BatchMaxKey: true,
+	BatchFixerModelKey: true, BatchFixerEffortKey: true, BatchFixerTurnsKey: true,
+}
+
+// setLandingKey reads the value of one landing key into s. A value that makes no
+// sense leaves the key unset, so that it reads as its default, and comes back
+// as a warning: an older or newer mw must never stop a landing over this file.
+func setLandingKey(s *domain.LandingSettings, key, value string) string {
+	bad := func(want string) string {
+		return fmt.Sprintf("%s = %s is not %s; read as the default", key, value, want)
+	}
+	switch key {
+	case LandingKey:
+		mode, err := quotedStrings(value)
+		if err == nil && len(mode) == 1 && mode[0] == string(domain.LandingBatch) {
+			s.Mode = domain.LandingBatch
+			return ""
+		}
+		if err == nil && len(mode) == 1 && mode[0] == string(domain.LandingEach) {
+			s.Mode = domain.LandingEach
+			return ""
+		}
+		s.Mode = domain.LandingEach
+		return bad(`"each" or "batch"`) + ` ("each")`
+	case BatchEveryKey:
+		text, err := quotedStrings(value)
+		if err == nil && len(text) == 1 {
+			if d, err := time.ParseDuration(text[0]); err == nil && d > 0 {
+				s.BatchEvery = d
+				return ""
+			}
+		}
+		return bad(`a duration such as "30m"`)
+	case BatchMinKey, BatchMaxKey, BatchFixerTurnsKey:
+		n, err := strconv.Atoi(value)
+		if err != nil || n <= 0 {
+			return bad("a whole number above zero")
+		}
+		switch key {
+		case BatchMinKey:
+			s.BatchMin = n
+		case BatchMaxKey:
+			s.BatchMax = n
+		default:
+			s.FixerTurns = n
+		}
+	default: // BatchFixerModelKey, BatchFixerEffortKey
+		text, err := quotedStrings(value)
+		if err != nil || len(text) != 1 {
+			return bad("one quoted word")
+		}
+		if key == BatchFixerModelKey {
+			s.FixerModel = text[0]
+		} else {
+			s.FixerEffort = text[0]
+		}
+	}
+	return ""
 }
 
 // stripComment cuts a trailing # comment off a line, leaving a # inside quotes.
