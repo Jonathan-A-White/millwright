@@ -19,6 +19,12 @@
 #   d. a missing input, a loose env file, a foreign OS and a malformed value
 #      are each refused in one line, nothing changed
 #   e. the checkout mode (the script run from inside a rig) skips the clone
+#   f. config.toml gets a [tests] line for every rig it clones, and [changed_specs]
+#      where the vault's hosts/boost-config.toml has one, copied from that file;
+#      a rig that file does not name is said, not guessed (mw-gq6.453)
+#   g. each cloned rig that depends on @playwright/test has chromium installed
+#      with its system deps, at that rig's own version; the step is planned in a
+#      dry run and skipped on a second run (mw-gq6.453)
 # The shell linter is run over the script when it is installed, and skipped when not.
 
 set -eu
@@ -135,7 +141,11 @@ stub git <<'EOF'
 if [ "$1" = clone ]; then
 	echo "git $*" >>"$CALLS"
 	mkdir -p "$3/.git"
-	case $2 in *millwright.git) cp -R "$RIGTEMPLATE/." "$3/" ;; esac
+	case $2 in
+	*millwright.git) cp -R "$RIGTEMPLATE/." "$3/" ;;
+	*millwright-vault.git) cp -R "$VAULTTEMPLATE/." "$3/" ;;
+	*postern.git) cp -R "$POSTERNTEMPLATE/." "$3/" ;;
+	esac
 	exit 0
 fi
 exec /usr/bin/git "$@"
@@ -195,13 +205,61 @@ systemctl --user daemon-reload
 systemctl --user enable --now mw-dispatch.timer
 EOF
 
+# The vault a clone produces, with the file that says what a Boost's tables hold.
+VAULT_TEMPLATE=$T/vault-template
+mkdir -p "$VAULT_TEMPLATE/hosts"
+cat >"$VAULT_TEMPLATE/hosts/boost-config.toml" <<'EOF2'
+# the tables a Boost copies from the home's config.toml
+[tests]
+millwright = "make test"
+argus = "npm ci --no-audit --no-fund && npm run lint && npm run build"
+postern = "npm ci --no-audit --no-fund && TZ=UTC npm test && npm run gate:shots"
+lampas = "npm ci --no-audit --no-fund && TZ=UTC npm test"
+
+[changed_specs]
+postern = "npm run build && npx playwright test --project=shots {specs}"
+lampas = "npm run build && TZ=UTC npx playwright test --project=shots {specs}"
+EOF2
+# postern depends on @playwright/test, locked at 1.49.1; argus does not.
+POSTERN_TEMPLATE=$T/postern-template
+mkdir -p "$POSTERN_TEMPLATE"
+cat >"$POSTERN_TEMPLATE/package.json" <<'EOF2'
+{
+  "name": "postern",
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "typescript": "^5.6.0"
+  }
+}
+EOF2
+cat >"$POSTERN_TEMPLATE/package-lock.json" <<'EOF2'
+{
+  "name": "postern",
+  "packages": {
+    "": { "name": "postern" },
+    "node_modules/@playwright/test": {
+      "version": "1.49.1",
+      "dev": true
+    },
+    "node_modules/typescript": {
+      "version": "5.6.3"
+    }
+  }
+}
+EOF2
+
 # The Node archive the stand-in curl serves, and the checksums file beside it.
 FIXTURE=$T/fixture
 mkdir -p "$FIXTURE/x/node-v24.21.0-linux-x64/bin"
-for b in node npx; do
-	# shellcheck disable=SC2016
-	printf '#!/bin/sh\ncase "$1" in --version) echo v24.21.0 ;; esac\n' >"$FIXTURE/x/node-v24.21.0-linux-x64/bin/$b"
-done
+# shellcheck disable=SC2016
+printf '#!/bin/sh\ncase "$1" in --version) echo v24.21.0 ;; esac\n' >"$FIXTURE/x/node-v24.21.0-linux-x64/bin/node"
+cat >"$FIXTURE/x/node-v24.21.0-linux-x64/bin/npx" <<'EOF2'
+#!/bin/sh
+echo "npx $* (in $(pwd))" >>"$CALLS"
+case "$*" in
+*" install "*) mkdir -p "$HOME/.cache/ms-playwright/chromium-1148" ;;
+esac
+EOF2
 cat >"$FIXTURE/x/node-v24.21.0-linux-x64/bin/npm" <<'EOF'
 #!/bin/sh
 echo "npm $*" >>"$CALLS"
@@ -248,7 +306,7 @@ cp "$SCRIPT" "$LOOSE/boost-bootstrap.sh"
 boost() {
 	env -i PATH="$BIN:$REAL" HOME="$HOME_DIR" BOOST_ROOT="$BOOT" BOOST_OS_RELEASE="$T/os-release" \
 		MW_HOME="$HOME_DIR/millwright" \
-		STATE="$STATE" CALLS="$CALLS" FIXTURE="$FIXTURE" RIGTEMPLATE="$TEMPLATE" \
+		STATE="$STATE" CALLS="$CALLS" FIXTURE="$FIXTURE" RIGTEMPLATE="$TEMPLATE" VAULTTEMPLATE="$VAULT_TEMPLATE" POSTERNTEMPLATE="$POSTERN_TEMPLATE" \
 		bash "$LOOSE/boost-bootstrap.sh" "$@"
 }
 
@@ -265,10 +323,10 @@ snapshot() {
 
 # changing: the calls in the log that change the machine.
 changing() {
-	grep -E '^(apt-get install|git clone|npm install|curl .*(\.tar\.xz)|loginctl|systemctl (user|system) (enable|daemon-reload)|install\.sh [^-]|install\.sh$|install-units\.sh)' "$1" || true
+	grep -E '^(apt-get install|git clone|npm install|npx .* install |curl .*(\.tar\.xz)|loginctl|systemctl (user|system) (enable|daemon-reload)|install\.sh [^-]|install\.sh$|install-units\.sh)' "$1" || true
 }
 
-STEPS="packages node git wireguard rig claude vault rigs config beads profile dispatch"
+STEPS="packages node git wireguard rig claude vault rigs config browsers beads profile dispatch"
 
 # --- a. --dry-run prints every step and changes nothing ----------------------
 NAME="--dry-run prints every step in order and changes nothing"
@@ -289,6 +347,10 @@ for s in $STEPS; do
 	last=$ln
 done
 printf '%s\n' "$OUT" | grep -Fq "would:" || fail "$NAME: no step says what it would do: $OUT"
+browsers_out=$(printf '%s\n' "$OUT" | awk '/^==> \[/ { on = ($0 ~ /\] browsers:/) } on')
+printf '%s\n' "$browsers_out" | grep -F "would:" | grep -Fq "install --with-deps chromium" || fail "$NAME: the browsers step does not plan a Playwright chromium install: $browsers_out"
+config_out=$(printf '%s\n' "$OUT" | awk '/^==> \[/ { on = ($0 ~ /\] config:/) } on')
+printf '%s\n' "$config_out" | grep -F "would:" | grep -Fq "[tests]" || fail "$NAME: the config step does not plan a [tests] table: $config_out"
 [ "$(snapshot)" = "$before" ] || fail "$NAME: the machine changed"
 [ -z "$(changing "$CALLS")" ] || fail "$NAME: a changing command ran: $(changing "$CALLS")"
 for secret in "$GH_TOKEN_VALUE" "$CLAUDE_TOKEN_VALUE" "$BEADS_PW_VALUE" "$WG_PRIV_VALUE"; do
@@ -319,6 +381,17 @@ grep -Fq 'beads_server_host = "10.88.0.2"' "$CONF" || fail "$NAME: config.toml d
 grep -Fq 'beads_sync = "auto"' "$CONF" || fail "$NAME: config.toml has no beads_sync: $(cat "$CONF")"
 grep -Fq 'argus = "'"$HOME_DIR"'/argus"' "$CONF" || fail "$NAME: config.toml does not list the argus rig: $(cat "$CONF")"
 grep -Fq 'millwright = "'"$HOME_DIR"'/millwright"' "$CONF" || fail "$NAME: config.toml does not list the millwright rig: $(cat "$CONF")"
+# f. [tests] for every rig cloned, [changed_specs] where the vault's file has one
+for want in 'millwright = "make test"' \
+	'argus = "npm ci --no-audit --no-fund && npm run lint && npm run build"' \
+	'postern = "npm ci --no-audit --no-fund && TZ=UTC npm test && npm run gate:shots"'; do
+	sed -n '/^\[tests\]$/,/^$/p' "$CONF" | grep -Fxq "$want" || fail "$NAME: config.toml has no [tests] line: $want: $(cat "$CONF")"
+done
+sed -n '/^\[changed_specs\]$/,/^$/p' "$CONF" | grep -Fxq 'postern = "npm run build && npx playwright test --project=shots {specs}"' || fail "$NAME: config.toml has no [changed_specs] line for postern: $(cat "$CONF")"
+grep -Fq 'lampas' "$CONF" && fail "$NAME: config.toml names lampas, a rig that was not cloned: $(cat "$CONF")"
+# g. chromium, at the rig's own locked version, only where the rig depends on @playwright/test
+grep -F 'npx --yes playwright@1.49.1 install --with-deps chromium (in '"$HOME_DIR"'/postern)' "$CALLS" >/dev/null || fail "$NAME: no Playwright chromium install in postern at 1.49.1: $(grep npx "$CALLS")"
+[ "$(grep -c 'install --with-deps chromium' "$CALLS")" = 1 ] || fail "$NAME: chromium was installed for a rig that does not depend on @playwright/test: $(grep npx "$CALLS")"
 BEADS=$HOME_DIR/.config/mw/beads.env
 grep -Fxq 'BEADS_DOLT_SERVER_HOST=10.88.0.2' "$BEADS" || fail "$NAME: beads.env has no server host: $(sed 's/PASSWORD=.*/PASSWORD=.../' "$BEADS")"
 grep -Fxq 'BEADS_DOLT_SERVER_PORT=3307' "$BEADS" || fail "$NAME: beads.env has no server port"
@@ -419,7 +492,7 @@ echo "ok: a token with a space is refused"
 
 refused "a system that is not Ubuntu is refused" env BOOST_OS_RELEASE="$T/os-release-fedora" \
 	env -i PATH="$BIN:$REAL" HOME="$HOME_DIR" BOOST_ROOT="$BOOT" BOOST_OS_RELEASE="$T/os-release-fedora" \
-	STATE="$STATE" CALLS="$CALLS" FIXTURE="$FIXTURE" RIGTEMPLATE="$TEMPLATE" \
+	STATE="$STATE" CALLS="$CALLS" FIXTURE="$FIXTURE" RIGTEMPLATE="$TEMPLATE" VAULTTEMPLATE="$VAULT_TEMPLATE" POSTERNTEMPLATE="$POSTERN_TEMPLATE" \
 	bash "$LOOSE/boost-bootstrap.sh" --env-file "$ENVFILE"
 echo "ok: a system that is not Ubuntu is refused"
 
@@ -440,11 +513,57 @@ cp "$SCRIPT" "$INRIG/contrib/boost-bootstrap.sh"
 : >"$CALLS"
 RC=0
 OUT=$(env -i PATH="$BIN:$REAL" HOME="$HOME_DIR" BOOST_ROOT="$BOOT" BOOST_OS_RELEASE="$T/os-release" \
-	STATE="$STATE" CALLS="$CALLS" FIXTURE="$FIXTURE" RIGTEMPLATE="$TEMPLATE" \
+	STATE="$STATE" CALLS="$CALLS" FIXTURE="$FIXTURE" RIGTEMPLATE="$TEMPLATE" VAULTTEMPLATE="$VAULT_TEMPLATE" POSTERNTEMPLATE="$POSTERN_TEMPLATE" \
 	bash "$INRIG/contrib/boost-bootstrap.sh" --env-file "$ENVFILE" 2>&1) || RC=$?
 [ "$RC" = 0 ] || fail "$NAME: exited $RC: $OUT"
 grep -F 'git clone' "$CALLS" | grep -Fq 'millwright.git' && fail "$NAME: it cloned the rig it is in"
 grep -Fq 'millwright = "'"$INRIG"'"' "$HOME_DIR/.config/mw/config.toml" || fail "$NAME: config.toml does not name $INRIG: $(cat "$HOME_DIR/.config/mw/config.toml")"
+echo "ok: $NAME"
+
+# --- f. an existing config.toml is never edited, and the lacking [tests] lines are said ----
+NAME="an existing config.toml without [tests] is left alone and the missing lines are named"
+mkdir -p "$HOME_DIR/.config/mw"
+printf 'host = "cloud1"\n\n[rigs]\nargus = "%s/argus"\n' "$HOME_DIR" >"$HOME_DIR/.config/mw/config.toml"
+before_conf=$(cat "$HOME_DIR/.config/mw/config.toml")
+RC=0
+OUT=$(env -i PATH="$BIN:$REAL" HOME="$HOME_DIR" BOOST_ROOT="$BOOT" BOOST_OS_RELEASE="$T/os-release" \
+	STATE="$STATE" CALLS="$CALLS" FIXTURE="$FIXTURE" RIGTEMPLATE="$TEMPLATE" VAULTTEMPLATE="$VAULT_TEMPLATE" POSTERNTEMPLATE="$POSTERN_TEMPLATE" \
+	bash "$INRIG/contrib/boost-bootstrap.sh" --env-file "$ENVFILE" 2>&1) || RC=$?
+[ "$RC" = 0 ] || fail "$NAME: exited $RC: $OUT"
+[ "$(cat "$HOME_DIR/.config/mw/config.toml")" = "$before_conf" ] || fail "$NAME: config.toml was edited"
+printf '%s\n' "$OUT" | grep -Fq 'config.toml has no line: argus = "npm ci' || fail "$NAME: the missing [tests] line for argus is not named: $OUT"
+echo "ok: $NAME"
+
+# --- g. a vault that does not say what a rig's tests are: said, not guessed ----------------
+NAME="a vault with no hosts/boost-config.toml leaves [tests] out and says so"
+rm -rf "$HOME_DIR" "$STATE" "$BOOT"
+mkdir -p "$HOME_DIR" "$STATE" "$BOOT/etc"
+EMPTY_VAULT=$T/vault-empty
+mkdir -p "$EMPTY_VAULT"
+RC=0
+OUT=$(env -i PATH="$BIN:$REAL" HOME="$HOME_DIR" BOOST_ROOT="$BOOT" BOOST_OS_RELEASE="$T/os-release" \
+	STATE="$STATE" CALLS="$CALLS" FIXTURE="$FIXTURE" RIGTEMPLATE="$TEMPLATE" VAULTTEMPLATE="$EMPTY_VAULT" POSTERNTEMPLATE="$POSTERN_TEMPLATE" \
+	bash "$INRIG/contrib/boost-bootstrap.sh" --env-file "$ENVFILE" 2>&1) || RC=$?
+[ "$RC" = 0 ] || fail "$NAME: exited $RC: $OUT"
+printf '%s\n' "$OUT" | grep -Fq 'the vault has no hosts/boost-config.toml' || fail "$NAME: the missing file is not said: $OUT"
+grep -Fq '[tests]' "$HOME_DIR/.config/mw/config.toml" && fail "$NAME: a [tests] table was written from nothing"
+echo "ok: $NAME"
+
+NAME="a rig the vault's file does not name is said, and its line is not guessed"
+rm -rf "$HOME_DIR" "$STATE" "$BOOT"
+mkdir -p "$HOME_DIR" "$STATE" "$BOOT/etc"
+PARTIAL_VAULT=$T/vault-partial
+mkdir -p "$PARTIAL_VAULT/hosts"
+printf '[tests]\nargus = "npm test"\n' >"$PARTIAL_VAULT/hosts/boost-config.toml"
+RC=0
+OUT=$(env -i PATH="$BIN:$REAL" HOME="$HOME_DIR" BOOST_ROOT="$BOOT" BOOST_OS_RELEASE="$T/os-release" \
+	STATE="$STATE" CALLS="$CALLS" FIXTURE="$FIXTURE" RIGTEMPLATE="$TEMPLATE" VAULTTEMPLATE="$PARTIAL_VAULT" POSTERNTEMPLATE="$POSTERN_TEMPLATE" \
+	bash "$INRIG/contrib/boost-bootstrap.sh" --env-file "$ENVFILE" 2>&1) || RC=$?
+[ "$RC" = 0 ] || fail "$NAME: exited $RC: $OUT"
+printf '%s\n' "$OUT" | grep -Fq 'no [tests] line for postern' || fail "$NAME: postern's missing line is not said: $OUT"
+printf '%s\n' "$OUT" | grep -Fq 'no [tests] line for argus' && fail "$NAME: argus has a line and is said to lack one"
+grep -Fxq 'argus = "npm test"' "$HOME_DIR/.config/mw/config.toml" || fail "$NAME: argus's line was not copied"
+sed -n '/^\[tests\]$/,/^$/p' "$HOME_DIR/.config/mw/config.toml" | grep -Fq 'postern' && fail "$NAME: a postern [tests] line was made up"
 echo "ok: $NAME"
 
 echo "OK: contrib/boost-bootstrap.sh prints and runs every step in order, checks before it acts so a second run changes nothing, writes tokens only to mode 600 files, and refuses bad input"

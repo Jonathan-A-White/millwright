@@ -201,7 +201,10 @@ a snapshot is working in about two. To make the snapshot:
    --name cloud1`.
 
 A box made from it runs the bootstrap again through cloud-init, which changes only
-what is the box's own (its name, WireGuard key and address). The snapshot holds
+what is the box's own (its name, WireGuard key and address). A `config.toml` that is
+already there is never edited, so a snapshot made before the bootstrap wrote `[tests]`
+keeps a config without it: the bootstrap names the lines it lacks, and `mw doctor
+rig-tests` names the rigs. The snapshot holds
 what the box held, its tokens too: delete it at Vultr (my.vultr.com, Snapshots)
 when you revoke them, and make a new one. It is billed for its size while kept.
 
