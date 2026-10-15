@@ -797,7 +797,7 @@ func (g GristGrind) readGrindText(ctx context.Context, w *gristWork, checkout st
 			return "", ""
 		}
 	}
-	text, found, err := g.Grinds.ReadAt(ctx, checkout, w.commit, w.grind.Instructions)
+	text, found, err := g.readInstructions(ctx, checkout, w.commit, w.grind.Instructions)
 	if err != nil {
 		w.settle(GristFailed, GristReasonUnread)
 		return "", ""
@@ -813,6 +813,58 @@ func (g GristGrind) readGrindText(ctx context.Context, w *gristWork, checkout st
 		return "", ""
 	}
 	return string(text), compact.String()
+}
+
+// readInstructions reads the file at p at commit; when p is not a file but a
+// directory, it reads every *.md part directly in it, in byte order of name,
+// joined as joinGrindParts says. found is false when p is neither, or the
+// directory has no part.
+func (g GristGrind) readInstructions(ctx context.Context, checkout, commit, p string) (text []byte, found bool, err error) {
+	if text, found, err = g.Grinds.ReadAt(ctx, checkout, commit, p); err != nil || found {
+		return text, found, err
+	}
+	files, err := g.Grinds.List(ctx, checkout, commit, p)
+	if err != nil {
+		return nil, false, err
+	}
+	var parts []string
+	for _, file := range slices.Sorted(slices.Values(files)) {
+		if path.Dir(file) != p || !isGrindPart(file) {
+			continue
+		}
+		part, ok, err := g.Grinds.ReadAt(ctx, checkout, commit, file)
+		if err != nil {
+			return nil, false, err
+		}
+		if ok {
+			parts = append(parts, string(part))
+		}
+	}
+	if len(parts) == 0 {
+		return nil, false, nil
+	}
+	return []byte(joinGrindParts(parts)), true, nil
+}
+
+// isGrindPart reports whether name is a part of a grind's instructions kept
+// in a directory: a Markdown file.
+func isGrindPart(name string) bool {
+	return strings.HasSuffix(name, ".md")
+}
+
+// joinGrindParts joins the parts of a grind's instructions, in the order
+// given, with one blank line between them: each part but the last loses its
+// trailing newlines first, so a part that ends in one does not add a second
+// blank line.
+func joinGrindParts(parts []string) string {
+	trimmed := make([]string, len(parts))
+	for i, part := range parts {
+		trimmed[i] = part
+		if i < len(parts)-1 {
+			trimmed[i] = strings.TrimRight(part, "\n")
+		}
+	}
+	return strings.Join(trimmed, "\n\n")
 }
 
 // rigPath reports whether p names a file inside a rig: relative, clean, and
