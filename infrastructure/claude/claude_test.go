@@ -41,6 +41,23 @@ func launch(change func(*application.Launch)) application.Launch {
 	return l
 }
 
+func TestASessionWithATurnCapIsGivenItAndOneWithoutIsNot(t *testing.T) {
+	capped, err := New().Session(launch(func(l *application.Launch) { l.MaxTurns = 60 }))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	if line := capped.Command[2]; !strings.Contains(line, "--max-turns 60 'You are booted into the builder seat.'") {
+		t.Errorf("expected the turn cap just before the kickoff, got %q", line)
+	}
+	open, err := New().Session(launch(nil))
+	if err != nil {
+		t.Fatalf("assembling the session: %v", err)
+	}
+	if line := open.Command[2]; strings.Contains(line, "--max-turns") {
+		t.Errorf("expected no turn cap on a story's session, got %q", line)
+	}
+}
+
 func TestSessionIsAShellLineThatKeepsTheResult(t *testing.T) {
 	spec, err := New().Session(launch(nil))
 	if err != nil {

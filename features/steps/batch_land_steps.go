@@ -27,6 +27,10 @@ type batchFixture struct {
 	gitBefore    int    // the lines of the git log before mw land
 	mainBefore   string // main at the origin before mw land
 	printedFrom  int    // where in the printed output mw land began
+
+	// fixer is the runner mw land starts a batch's fixer through, when the
+	// scenario lets it start one (features/batch_land.feature, Land Rush 5).
+	fixer *fakeFixer
 }
 
 // registerBatchLandSteps registers the steps of features/batch_land.feature.
@@ -52,6 +56,7 @@ func registerBatchLandSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^metrics/factory.jsonl holds no line for the rig$`, c.theMetricsHoldNoBatch)
 	ctx.Then(`^no batch record was kept$`, c.noBatchRecordWasKept)
 	ctx.Then(`^the newest entry of "([^"]*)" at the rig's origin is for "([^"]*)", the next for "([^"]*)"$`, c.theNewestEntriesAreFor)
+	registerBatchFixSteps(ctx, c)
 }
 
 // tableIDs is the first cell of every row of a one-column table.
@@ -123,11 +128,17 @@ func (c *nextContext) land(dryRun bool) error {
 		gitBefore:    len(c.gitLines()),
 		mainBefore:   main,
 		printedFrom:  c.printed.Len(),
+		fixer:        c.batch.fixer,
+	}
+	next := c.nextUseCase()
+	if c.batch.fixer != nil {
+		next.Runner = c.batch.fixer
 	}
 	c.batch.report, c.batch.err = application.BatchLand{
-		Next:    c.nextUseCase(),
+		Next:    next,
 		Records: vault.New(c.vault),
 		Metrics: vault.New(c.vault),
+		Fix:     c.batch.fixer != nil,
 		DryRun:  dryRun,
 	}.Run(context.Background(), c.rigKey())
 	return nil

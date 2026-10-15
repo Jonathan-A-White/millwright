@@ -301,6 +301,85 @@ func (b SeatBoot) MergeFix(ctx context.Context, detail StoryDetail, dir, onto st
 	})
 }
 
+// BatchFixBrief is what the fixer of a batch is told of it (plans/0117, Land
+// Rush 5): the batch, each of its stories in the order they were merged and
+// what became of each, and the rig's tests on the batch when they ran.
+type BatchFixBrief struct {
+	Rig    string
+	Target string
+	Number int
+	// Base is the commit of Target the batch was made on.
+	Base string
+	// Stories are the batch's stories in merge order: those merged carry
+	// their merge commit, those set aside their Why and git's Conflicts.
+	Stories []BatchStory
+	// Tested says the rig's tests ran on the batch before the fixer was
+	// started, and Gate is that run.
+	Tested bool
+	Gate   Checked
+	// Settings are the rig's landing keys: the fixer's model, effort and turns.
+	Settings domain.LandingSettings
+}
+
+// Label names the batch in a sentence: "batch 3 of lampas".
+func (f BatchFixBrief) Label() string {
+	return BatchReport{Rig: f.Rig, Number: f.Number}.Label()
+}
+
+// BatchFix assembles the one fixer a batch is given when a branch of it was set
+// aside or the rig's tests on it were red: a fresh session of the seat in the
+// batch's landing worktree dir, on the model, effort and turns of the rig's
+// fixer keys, told every branch, what merged and what conflicted, the end of
+// the tests, and what it may and may not do. It runs under BatchFixerName,
+// which is also its run's directory under runs/; nothing runs after it, since
+// mw land waits for it and runs the rig's tests on the batch again itself.
+func (b SeatBoot) BatchFix(ctx context.Context, brief BatchFixBrief, dir string) (SessionSpec, error) {
+	name := BatchFixerName(brief.Rig, brief.Number)
+	switch {
+	case b.Vault == nil || b.Harness == nil:
+		return SessionSpec{}, fmt.Errorf("booting the fixer of %s: a seat boot needs a vault and a harness", brief.Label())
+	case b.Seat == "":
+		return SessionSpec{}, fmt.Errorf("booting the fixer of %s: which seat is it?", brief.Label())
+	case dir == "":
+		return SessionSpec{}, fmt.Errorf("booting the fixer of %s: in which worktree?", brief.Label())
+	}
+	settings := brief.Settings
+	path := domain.Path{
+		Rig: brief.Rig, Branch: brief.Target, Harness: b.Harness.Name(),
+		Model: domain.Model(settings.FixerModel), Effort: domain.Effort(settings.FixerEffort), Host: b.Host,
+	}
+	if err := path.Validate(); err != nil {
+		return SessionSpec{}, fmt.Errorf("booting the fixer of %s: the rig's batch_fixer keys do not make a path: %w", brief.Label(), err)
+	}
+	seat, err := b.Vault.Seat(ctx, b.Seat, brief.Rig)
+	if err != nil {
+		return SessionSpec{}, fmt.Errorf("booting the fixer of %s: %w", brief.Label(), err)
+	}
+	bootFile, err := b.Vault.PutRunFile(ctx, name, BootFileName, BatchFixBootPrompt(seat, brief))
+	if err != nil {
+		return SessionSpec{}, fmt.Errorf("booting the fixer of %s: %w", brief.Label(), err)
+	}
+	spec, err := b.Harness.Session(Launch{
+		StoryID:    name,
+		Path:       path,
+		Seat:       b.Seat,
+		Host:       b.Host,
+		Dir:        dir,
+		BootFile:   bootFile,
+		ResultFile: b.Vault.RunFile(name, ResultFileName),
+		Kickoff:    BatchFixKickoffPrompt(b.Seat, brief, b.Vault.Dir()),
+		BdRetry:    b.BdRetry,
+		MaxTurns:   settings.FixerTurns,
+	})
+	if err != nil {
+		return SessionSpec{}, fmt.Errorf("booting the fixer of %s: %w", brief.Label(), err)
+	}
+	if err := spec.Validate(); err != nil {
+		return SessionSpec{}, fmt.Errorf("booting the fixer of %s: %w", brief.Label(), err)
+	}
+	return spec, nil
+}
+
 // boot is Boot with the first thing the session is told left to the caller,
 // given the vault's directory on this host.
 func (b SeatBoot) boot(ctx context.Context, detail StoryDetail, dir string, kickoff func(vaultDir string) string) (SessionSpec, error) {
@@ -532,6 +611,100 @@ func MergeFixKickoffPrompt(seat, storyID, vaultDir, onto string) string {
 		"When you end, mw next lands the branch; if the merged tests still fail it stops, and nobody is sent back again. "+
 		"This session is headless and ends when your turn ends. %s"+
 		"Commit before you stop.", seat, storyID, onto, bdVault(vaultDir), storyID, longCommandAdvice)
+}
+
+// The lines a batch's fixer ends its last message with, one per story: the
+// stories it touched with the files it changed, and the story whose change it
+// says made the batch red. mw reads them back as the fixer's word.
+const (
+	FixerTouched = "TOUCHED"
+	FixerCause   = "CAUSE"
+)
+
+// BatchFixKickoffPrompt is the first thing a batch's fixer is told: who it is,
+// where the batch is described, and the rules that keep every story's intent.
+// What the batch is lies in the boot file, not here, so that no story's words
+// have to survive a shell.
+func BatchFixKickoffPrompt(seat string, brief BatchFixBrief, vaultDir string) string {
+	return fmt.Sprintf("You are booted into the %s seat of millwright as the fixer of %s, and you work no story of your own. "+
+		"Your charter, your memory of this rig and the batch are in the system prompt you were given, "+
+		"with what you may and may not do: read all of it before you change anything. "+
+		"Your worktree is the batch's landing worktree, the directory you are in: work only there. "+
+		"Do not push. "+
+		"Your memory of this rig is read-only to you. "+
+		"Sign nothing you commit: no Co-Authored-By trailer, no Generated with line, "+
+		"no AI attribution of any kind. "+
+		"bd runs without asking, but as its own Bash call, never chained with another command "+
+		"by ;, | or &&. "+
+		"%s"+
+		"This session is headless and ends when your turn ends. %s"+
+		"Commit before you stop.", seat, brief.Label(), bdVault(vaultDir), longCommandAdvice)
+}
+
+// BatchFixRules are what a batch's fixer may and may not do, as its boot file
+// says them: they are what keeps every story's intent in the batch.
+func BatchFixRules() string {
+	return "You may merge the branches that were set aside, as the origin has them, resolving every conflict so that " +
+		"both stories' intent is kept; fix code or tests so that the batch holds every story's change and passes; " +
+		"and run the rig's suite in the foreground until it is green. " +
+		"Commit everything you change on the batch as it is, detached: make or switch to no branch.\n\n" +
+		"You may not push. You may not revert a story's branch or its merge, and you may not drop a story's change. " +
+		"You may not delete, skip or loosen a test without saying so on that story. " +
+		"A branch you cannot merge while keeping both intents you leave set aside, and say why.\n\n" +
+		"You must comment on each story you touched, once each, naming the files you changed and why. " +
+		"End your last message with one line for each story you touched, `" + FixerTouched + " <story>: <file>, <file>`, " +
+		"and, where you can say whose change made the batch red, one line `" + FixerCause + " <story>: <one sentence>`. " +
+		"That is recorded as your word, and nobody bisects it.\n\n" +
+		"When you end, mw looks at the batch you left and runs the rig's tests on it itself: green lands the batch, " +
+		"red holds it, and no second fixer is started. Changes left uncommitted, or a story merged before you " +
+		"that the batch no longer holds, hold it too."
+}
+
+// BatchFixBootPrompt is the boot file a batch's fixer is primed with: the seat's
+// charter and its memory of the rig, as any session of the seat is, and then
+// the batch in place of a story.
+func BatchFixBootPrompt(seat Seat, brief BatchFixBrief) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# The %s seat\n\n", seat.Name)
+	section(&b, seat.Charter)
+	if memory := seat.RigMemory(); memory != "" {
+		fmt.Fprintf(&b, "# The %s seat's memory of the rig %s\n\n", seat.Name, seat.Rig)
+		section(&b, memory)
+	}
+
+	fmt.Fprintf(&b, "# Your batch: %s\n\n", brief.Label())
+	section(&b, fmt.Sprintf("The batch was made on %s at %s, in the worktree you are in. "+
+		"Each story's branch was merged as the origin has it, oldest queued first.", brief.Target, brief.Base))
+
+	b.WriteString("## The branches, in the order they were merged\n\n")
+	for i, s := range brief.Stories {
+		fmt.Fprintf(&b, "%d. %s, %s: ", i+1, s.ID, s.Branch)
+		switch {
+		case len(s.Conflicts) > 0:
+			fmt.Fprintf(&b, "SET ASIDE, git said: %s", strings.Join(s.Conflicts, "; "))
+		case s.Why != "":
+			fmt.Fprintf(&b, "SET ASIDE: %s", s.Why)
+		default:
+			fmt.Fprintf(&b, "merged at %s", s.Merge)
+		}
+		if title := strings.Join(strings.Fields(s.Title), " "); title != "" {
+			fmt.Fprintf(&b, " (%s)", title)
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("\nEach story's own description and acceptance criteria are on its bead: `bd show <story>`.\n\n")
+
+	b.WriteString("## The rig's tests on the batch\n\n")
+	if brief.Tested {
+		fmt.Fprintf(&b, "`%s` did not pass on the batch. It ended:\n\n```\n%s\n```\n\n", brief.Gate.Command, brief.Gate.Tail(CheckLines))
+	} else {
+		section(&b, "Not run yet: you were started because a branch was set aside, and the version is raised and "+
+			"the tests run once you have ended. Run the rig's suite yourself before you stop.")
+	}
+
+	b.WriteString("## What you may and may not do\n\n")
+	section(&b, BatchFixRules())
+	return b.String()
 }
 
 // bdVault is the sentence that gives a session the exact bd command for this

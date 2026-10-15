@@ -339,8 +339,11 @@ func (h *Harness) Session(l application.Launch) (application.SessionSpec, error)
 		// SessionSettings and sessionSettings.
 		"--settings", settings,
 		"--name", l.StoryID,
-		l.Kickoff,
 	}
+	if l.MaxTurns > 0 {
+		argv = append(argv, "--max-turns", strconv.Itoa(l.MaxTurns))
+	}
+	argv = append(argv, l.Kickoff)
 
 	if h.nice > 0 {
 		argv = append([]string{"nice", "-n", strconv.Itoa(h.nice)}, argv...)

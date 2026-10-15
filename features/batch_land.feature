@@ -94,3 +94,65 @@ Feature: mw land lands a batch rig's queue under one gate run
     And "main" at the rig's origin has exactly 1 commits saying "Version 1.4.3 (batch 1 of millwright)"
     And "public/changelog.json" at the rig's origin lists the versions "1.4.3" then "1.4.3"
     And the newest entry of "public/changelog.json" at the rig's origin is for "mw-gq6.2", the next for "mw-gq6.1"
+
+  # Land Rush 5: a batch that was set aside or red is given one fixer, a Builder
+  # session in the batch's landing worktree, and mw runs the rig's tests on the
+  # batch again itself once the fixer has ended: the fixer's word is not the gate.
+
+  Scenario: A red batch starts exactly one fixer, told every branch, the tests' tail and what it may not do, and lands once mw's own run is green
+    Given the rig's file in the vault also holds the line "batch_fixer_model = 'haiku'"
+    And the rig's file in the vault also holds the line "batch_fixer_turns = 12"
+    And these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+      | mw-gq6.3 |
+    And the rig's tests fail on the batch, saying "the batch is red", until "FIXED" is committed
+    And mw land may start a fixer, which commits "FIXED" and says it touched "mw-gq6.2"
+    When mw lands the batch of the rig
+    Then exactly one fixer was started, for batch 1, in a landing worktree holding the work of every story in it
+    And the fixer was started on the model "haiku" with at most 12 turns
+    And the fixer's prompt names the branch of every story in the batch and the tests' last words "the batch is red"
+    And the fixer's prompt says it may not push, revert a branch, drop a story's change, or delete, skip or loosen a test without saying so on that story
+    And the batch landed on "main" in one push, forcing nothing
+    And the rig's tests were run twice on the batch
+    And the ledger line of "mw-gq6.2" says "resolved by the fixer", and those of the others do not:
+      | mw-gq6.1 |
+      | mw-gq6.3 |
+    And metrics/factory.jsonl holds a line for batch 1 of the rig: 3 stories, 2 gate runs, a fixer, outcome "fixed"
+
+  Scenario: The fixer merges a branch that was set aside, keeping both sides, and mw's own run lands the whole batch
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And "mw-gq6.3" is queued for batch landing, writing "mw-gq6.1.md" with words of its own
+    And mw land may start a fixer, which merges "mw-gq6.3" keeping both sides and says it touched "mw-gq6.3"
+    When mw lands the batch of the rig
+    Then exactly one fixer was started, for batch 1, in a landing worktree holding the work of every story in it
+    And the fixer's prompt names "mw-gq6.1.md" in the conflict of "mw-gq6.3"
+    And the batch landed on "main" in one push, forcing nothing
+    And the rig's tests were run once on the batch
+    And these stories are on "main" at the rig's origin, closed and recorded as landed, each with a ledger line naming batch 1:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And "mw-gq6.3" is closed and recorded as landed, and "mw-gq6.1.md" at the rig's origin holds the words of both "mw-gq6.1" and "mw-gq6.3"
+    And the ledger line of "mw-gq6.3" says "resolved by the fixer", and those of the others do not:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the Mayor was sent no mail saying the batch was held
+
+  Scenario: When mw's own run after the fixer is red, the batch is held and mailed, and no second fixer is started
+    Given these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the rig's tests fail, saying "the batch is still red"
+    And mw land may start a fixer, which commits "TRIED" and says it touched "mw-gq6.1"
+    When mw lands the batch of the rig
+    Then exactly one fixer was started, for batch 1, in a landing worktree holding the work of every story in it
+    And the rig's tests were run twice on the batch
+    And "main" at the rig's origin is where it was before the batch
+    And these stories are still queued for batch landing, none of them closed:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the batch is held, and the Mayor's mail names every story in it and says "the batch is still red"
+    And the Mayor's mail about the batch says the fixer was given it and no second fixer was started
+    And metrics/factory.jsonl holds a line for batch 1 of the rig: 2 stories, 2 gate runs, a fixer, outcome "held"
