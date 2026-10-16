@@ -175,6 +175,9 @@ var landingMeasures = []landingMeasure{
 	{"QUALITY", "bugs/landing", true, false, func(q Quality, _ Speed, _ FuelUse, _ int) (float64, bool) {
 		return q.BugsPerLanding, q.Landed > 0
 	}, func(v float64) string { return fmt.Sprintf("%.2f", v) }},
+	{"QUALITY", "escaped bugs", true, true, func(q Quality, _ Speed, _ FuelUse, days int) (float64, bool) {
+		return float64(q.EscapedBugs), days > 0
+	}, func(v float64) string { return fmt.Sprintf("%.0f", v) }},
 	{"QUALITY", "findings/landing", true, false, func(q Quality, _ Speed, _ FuelUse, _ int) (float64, bool) {
 		return q.FindingsPerLanding, q.Landed > 0
 	}, func(v float64) string { return fmt.Sprintf("%.2f", v) }},
@@ -286,7 +289,7 @@ func (l ReportLanding) String() string {
 		b.WriteString("today counts once it is over\n")
 	}
 	if l.AfterDays > 0 && l.AfterDays != l.BeforeDays {
-		b.WriteString("landed and refused are compared per day\n")
+		b.WriteString("landed, refused and escaped bugs are compared per day\n")
 	}
 	fmt.Fprintf(&b, "\n%s\n", landingLine(l.Scope, "before", "after", "change"))
 	part := ""

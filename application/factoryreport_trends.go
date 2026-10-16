@@ -214,6 +214,7 @@ func qualityArrows(now, before Quality) map[string]Trend {
 	set("attempts_per_landing", trendIf(both, now.AttemptsPerLanding, before.AttemptsPerLanding, true))
 	set("bugs_per_landing", trendIf(both, now.BugsPerLanding, before.BugsPerLanding, true))
 	set("findings_per_landing", trendIf(both, now.FindingsPerLanding, before.FindingsPerLanding, true))
+	set("escaped_bugs", NewTrend(float64(now.EscapedBugs), float64(before.EscapedBugs), true))
 	return arrows
 }
 
