@@ -211,6 +211,27 @@ Feature: Closing out a finished story and carrying on
     And no fresh session was started
     And the rig's tests were run 0 times
 
+  # mw-gq6.434: the harness's usage limit is not the work's failure.
+  Scenario: A session the usage limit stopped is held as that, its attempt not to be counted
+    Given the session of "mw-gq6.1" reported this result:
+      """
+      {
+        "type": "result",
+        "subtype": "success",
+        "is_error": true,
+        "num_turns": 1,
+        "duration_ms": 4000,
+        "result": "You've hit your weekly limit · resets Oct 16, 9am (America/New_York)"
+      }
+      """
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is not closed
+    And the story "mw-gq6.1" is held blocked
+    And the report says it stopped for "usage-limit"
+    And the story "mw-gq6.1" carries a comment quoting: is not counted
+    And the rig's tests were run 0 times
+
   Scenario: A session that left no result at all is not taken for a success
     Given the session of "mw-gq6.1" left no result at all
     When mw closes out "mw-gq6.1"

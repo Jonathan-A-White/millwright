@@ -852,6 +852,14 @@ func (n Next) land(ctx context.Context, c *closeOut, report *NextReport) (NextRe
 	}
 	c.result, report.Result = result, result
 	if !result.Finished() {
+		// Stopped by the harness for something that is not the work's: the
+		// claim is kept as for any stop, and mw dispatch gives it back itself
+		// once the stop's time has come, the attempt not counted (mw-gq6.434).
+		if stop, stopped := HarnessStopOf(result, sessionEnded(c.detail, result, n.now())); stopped {
+			return n.stop(ctx, c, report, stop.Reason, fmt.Sprintf(
+				"the harness stopped the session, not its work: %s. The attempt is not counted: mw dispatch on %s claims nothing new until %s, "+
+					"then gives this story back itself", stop.Said, n.Host, stop.Until.UTC().Format(time.RFC3339)), "")
+		}
 		return n.stop(ctx, c, report, ReasonSessionFailed, "the session did not finish: "+result.Trouble(), "")
 	}
 
