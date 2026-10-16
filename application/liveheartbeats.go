@@ -3,7 +3,16 @@ package application
 import (
 	"context"
 	"fmt"
+	"time"
 )
+
+// DefaultHeartbeatGrace is how long a close-out waits for the heartbeat of its
+// story to go (Next.HeartbeatGrace), polling every heartbeatGraceStep: long
+// enough for mw to finish ending on TERM, short enough that a by-hand mw next
+// on a session truly at work is refused with little delay.
+const DefaultHeartbeatGrace = 15 * time.Second
+
+const heartbeatGraceStep = time.Second
 
 // LiveHeartbeats says whether a story's session is still being worked, as seen
 // from this host's process table. A dispatched session's shell line starts
@@ -29,6 +38,14 @@ func (n Next) stillRunning(ctx context.Context, storyID string) string {
 		return ""
 	}
 	pids, err := n.Heartbeats.Beating(ctx, storyID)
+	// A heartbeat just killed is still in the table for a moment (mw-gq6.500):
+	// wait for it, up to the grace, and refuse only one that stays.
+	for waited := time.Duration(0); err == nil && len(pids) > 0 && waited < n.HeartbeatGrace; waited += heartbeatGraceStep {
+		if n.wait(ctx, heartbeatGraceStep) != nil {
+			break
+		}
+		pids, err = n.Heartbeats.Beating(ctx, storyID)
+	}
 	if err != nil || len(pids) == 0 {
 		return ""
 	}

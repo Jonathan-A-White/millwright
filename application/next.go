@@ -369,6 +369,14 @@ type Next struct {
 	// nothing, and every close-out goes on.
 	Heartbeats LiveHeartbeats
 
+	// HeartbeatGrace is how long a close-out waits for a heartbeat of its story
+	// to go before it refuses the story as still running (mw-gq6.500): the pane
+	// line of a session launched before mw-gq6.487 kills the heartbeat and starts
+	// the close-out at once, and mw ends on TERM by cancelling what it was doing,
+	// so the heartbeat can outlive the kill by a moment. Zero waits not at all,
+	// so that a test never sleeps.
+	HeartbeatGrace time.Duration
+
 	// Leftovers is the host's table of the user's processes, swept at the end
 	// of a Tester story's close-out for what its session left running under
 	// /tmp/tester-<story>/ (mw-gq6.409). Nil sweeps nothing.

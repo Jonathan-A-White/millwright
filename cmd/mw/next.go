@@ -259,6 +259,8 @@ func newNextCmd() *cobra.Command {
 				Out:         cmd.OutOrStdout(),
 				Err:         cmd.ErrOrStderr(),
 
+				HeartbeatGrace: application.DefaultHeartbeatGrace,
+
 				AfterLanding: rig.NewAfterLanding(rig.WithAfterCommands(afterLanding), rig.WithAfterLimits(afterLimits)),
 				DeploySlot:   rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix)),
 				Backend:      hostBackend(gateway, files, host, rigs, cmd.ErrOrStderr()),

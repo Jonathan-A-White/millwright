@@ -93,3 +93,56 @@ func TestTheHeartbeatIsNotRefusedByARunningHeartbeat(t *testing.T) {
 		t.Errorf("expected the heartbeat to wait and tick, ticked %d times", ticks)
 	}
 }
+
+// mw-gq6.500: the pane line of a session launched before mw-gq6.487 kills the
+// heartbeat and starts the close-out at once, and mw ends on TERM by cancelling
+// what it was doing, not at once: the desktop's mw-5r3p30.324 was refused as
+// "still running (mw next --heartbeat ... is alive as process 1282067)" by its
+// own close-out and left no trace but the pane. A heartbeat that goes within
+// the grace is a session over, not one still at work.
+func TestACloseOutWaitsForTheHeartbeatItsPaneJustKilled(t *testing.T) {
+	marks := apptest.NewFakeCloseOutMarks()
+	beats := apptest.NewFakeHeartbeats()
+	beats.Start("mw-gq6.1", 1282067)
+	ticks := 0
+
+	_, _ = application.Next{
+		Tracker: apptest.NewFakeTracker(), Heartbeats: beats, CloseOuts: marks,
+		HeartbeatGrace: application.DefaultHeartbeatGrace,
+		HeartbeatWait: func(context.Context, time.Duration) error {
+			if ticks++; ticks == 2 {
+				beats.Stop("mw-gq6.1")
+			}
+			return nil
+		},
+	}.Run(context.Background(), "mw-gq6.1")
+
+	if len(marks.Writes) == 0 {
+		t.Errorf("expected the close-out to go on once the heartbeat went, and it never began (waited %d times)", ticks)
+	}
+}
+
+// A heartbeat that outlasts the grace is a session at work, and is refused as
+// before, after waiting no longer than the grace.
+func TestACloseOutStopsWaitingForAHeartbeatThatStaysAlive(t *testing.T) {
+	marks := apptest.NewFakeCloseOutMarks()
+	beats := apptest.NewFakeHeartbeats()
+	beats.Start("mw-gq6.1", 4242)
+	var waited time.Duration
+
+	_, err := application.Next{
+		Tracker: apptest.NewFakeTracker(), Heartbeats: beats, CloseOuts: marks,
+		HeartbeatGrace: application.DefaultHeartbeatGrace,
+		HeartbeatWait:  func(_ context.Context, d time.Duration) error { waited += d; return nil },
+	}.Run(context.Background(), "mw-gq6.1")
+
+	if err == nil || !strings.Contains(err.Error(), "still running") || !strings.Contains(err.Error(), "4242") {
+		t.Errorf("expected the refusal naming the running heartbeat, got %v", err)
+	}
+	if waited == 0 || waited > application.DefaultHeartbeatGrace {
+		t.Errorf("expected a wait of up to %s, waited %s", application.DefaultHeartbeatGrace, waited)
+	}
+	if len(marks.Writes) != 0 {
+		t.Errorf("expected no close-out mark, got %+v", marks.Writes)
+	}
+}
