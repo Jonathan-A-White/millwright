@@ -50,6 +50,12 @@ const SpringRestartedReason = "run again after the follower restarted"
 // to find a pass its predecessor was cut short in.
 const springLookback = 200
 
+// SpringClockLookback is how many of the log's newest events the first Spring
+// reads to seed each clock job from its own last pass (mw-gq6.539): the
+// follower must not scan the whole log at start. A clock job whose last pass is
+// older than this window counts as due.
+const SpringClockLookback = 1000
+
 // TellFailureEvery is how long a job with TellFailure is quiet after it has
 // mailed the Mayor of a failed pass: a job that fails on every pass is told of
 // once a day, not on each.
@@ -221,8 +227,13 @@ func ClockJob(name string, every time.Duration, run func(context.Context) error)
 // the follower that comes back finds that work and waits for it.
 //
 // The first Spring otherwise only reads where the log stands: history springs
-// nothing, and a job's clock runs from then. A failure to write a job event is said on
-// Err and the pass goes on.
+// no pass for an event, and the clock of a job with a heartbeat runs from then.
+// The clock of a ClockJob runs from its own last pass of this host in the log
+// instead, since the follower restarts on every landing of the factory rig and
+// would else never reach a period longer than the gap between two landings
+// (mw-gq6.539): a job with no pass in the last SpringClockLookback events, or
+// one older than its period, is run by the first Spring. A failure to write a
+// job event is said on Err and the pass goes on.
 type EventSpring struct {
 	Log  EventLog
 	Host string
@@ -274,12 +285,22 @@ func (s *EventSpring) Spring(ctx context.Context) error {
 		s.seen = head
 		s.jobs = map[string]*springState{}
 		interrupted := s.interruptedPasses(ctx, head)
+		passes := s.lastPasses(ctx, head)
 		for _, j := range s.Jobs {
 			st := &springState{last: events.Start, lastRun: now}
 			s.jobs[j.Name] = st
-			if interrupted[j.Name] {
+			switch {
+			case interrupted[j.Name]:
 				st.last = events.JobDone
 				s.launch(ctx, j, st, SpringRestartedReason)
+			case j.Reason == ClockReason && j.Every > 0:
+				// A clock job runs from its own last pass, not from this start:
+				// the follower restarts on every landing (mw-gq6.539).
+				if at, ok := passes[j.Name]; ok && now.Sub(at) < j.Every {
+					st.lastRun = at
+				} else {
+					s.launch(ctx, j, st, j.Reason)
+				}
 			}
 		}
 		for _, j := range s.Jobs {
@@ -454,6 +475,41 @@ func (s *EventSpring) interruptedPasses(ctx context.Context, head uint64) map[st
 	for _, j := range s.Jobs {
 		if e, ok := last[j.Name+"@"+s.Host]; ok && e.To == events.JobDone && (e.Detail == SpringInterruptedDetail || e.Detail == SpringLeftRunningDetail) {
 			out[j.Name] = true
+		}
+	}
+	return out
+}
+
+// lastPasses names, for each job, when its newest pass of this host ended (a
+// job event done or failed), among the log's last SpringClockLookback events up
+// to head. A job with no pass in that window is absent, and a log that cannot
+// be read says there are none: a clock job is then due at once. A pass stamped
+// after now is taken as ending now.
+func (s *EventSpring) lastPasses(ctx context.Context, head uint64) map[string]time.Time {
+	from := uint64(0)
+	if head > SpringClockLookback {
+		from = head - SpringClockLookback
+	}
+	recent, err := s.Log.Since(ctx, from)
+	if err != nil {
+		return nil
+	}
+	now := s.now()
+	out := map[string]time.Time{}
+	for _, e := range recent {
+		if e.Kind != events.KindJob || (e.To != events.JobDone && e.To != events.JobFailed) {
+			continue
+		}
+		name, ok := strings.CutSuffix(e.Actor, "@"+s.Host)
+		if !ok {
+			continue
+		}
+		at := e.Ts
+		if at.After(now) {
+			at = now
+		}
+		if at.After(out[name]) {
+			out[name] = at
 		}
 	}
 	return out
