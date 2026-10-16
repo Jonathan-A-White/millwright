@@ -2272,6 +2272,12 @@ func ChangedSpecs() (map[string]string, error) {
 // runs its own mw from the rig's bin/ keeps it current. A rig that says nothing
 // has nothing run, and a machine with no such table is not an error.
 //
+// The one exception is the factory rig on a host whose `[rigs]` table checks it
+// out: with no `millwright` key in the table it is DefaultMillwrightAfterLanding,
+// because a Boost's config copies no `[after_landing]` table and its mw then
+// stayed as old as its last build (mw-gq6.521). A host that wants none says
+// `millwright = ""`.
+//
 // It is a command line, as a test is in `[tests]`, and for the same reason: a
 // rig says what it means in its own words, and the shell reads them.
 func AfterLanding() (map[string]string, error) {
@@ -2279,8 +2285,31 @@ func AfterLanding() (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
 	}
-	return tableIn(filepath.Join(home, File), AfterLandingTable)
+	commands, err := tableIn(filepath.Join(home, File), AfterLandingTable)
+	if err != nil {
+		return nil, err
+	}
+	if _, said := commands[factoryRig]; said {
+		return commands, nil
+	}
+	rigs, err := tableIn(filepath.Join(home, File), RigsTable)
+	if err != nil {
+		return nil, err
+	}
+	if dir := rigs[factoryRig]; dir != "" {
+		commands[factoryRig] = DefaultMillwrightAfterLanding
+	}
+	return commands, nil
 }
+
+// DefaultMillwrightAfterLanding is the command a host with the factory rig's
+// checkout and no `millwright` entry in `[after_landing]` runs once a landing or
+// a tick has moved that checkout.
+const DefaultMillwrightAfterLanding = "make build"
+
+// factoryRig is the name of the factory's own rig, application.FactoryRig,
+// which this package does not import.
+const factoryRig = "millwright"
 
 // AfterLandingLimits reports how long each rig's after-landing command may run
 // before it is stopped, by rig name, read from the `[after_landing_limit]` table

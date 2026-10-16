@@ -177,6 +177,14 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				rigs = nil
 			}
+			// Main's commit is read as this host last fetched it; without a
+			// checkout of the factory rig no host is said to be behind it.
+			var mainCommit string
+			if dir := rigs[application.FactoryRig]; dir != "" {
+				if tip, err := rig.New().Tip(cmd.Context(), dir, "origin", application.FactoryBranch); err == nil && len(tip) >= 7 {
+					mainCommit = tip[:7]
+				}
+			}
 			// Without the harness's projects directory no session's turns are
 			// read, and the report names none past the line (mw-1ljpo9.6).
 			var turns application.TranscriptTurns
@@ -196,6 +204,7 @@ func newStatusCmd() *cobra.Command {
 				Changes:          rig.New(),
 				RigFiles:         rig.Files{},
 				Notes:            tracker,
+				MainCommit:       mainCommit,
 				Vault:            mwVault(dir, host),
 				RigFacts:         mwVault(dir, host),
 				Errors:           files,

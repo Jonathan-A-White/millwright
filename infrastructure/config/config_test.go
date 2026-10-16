@@ -529,8 +529,8 @@ func TestAnAfterLandingLimitThatIsNotADurationIsRefusedByName(t *testing.T) {
 	}
 }
 
-func TestAHostThatSaysNothingAboutAfterALandingRunsNothing(t *testing.T) {
-	writeConfig(t, vpsConfig)
+func TestAHostWithNoMillwrightCheckoutAndNoAfterLandingTableRunsNothing(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\nhost = \"cloud1\"\n\n[rigs]\nlampas = \"/root/lampas\"\n")
 
 	after, err := config.AfterLanding()
 	if err != nil {
@@ -538,6 +538,45 @@ func TestAHostThatSaysNothingAboutAfterALandingRunsNothing(t *testing.T) {
 	}
 	if len(after) != 0 {
 		t.Errorf("expected no rig to have a command, got %+v", after)
+	}
+}
+
+// A Boost's mw is as old as its last build unless a landing or a tick rebuilds
+// it, and its config copies no [after_landing] table (mw-gq6.521): a host with
+// the millwright checkout rebuilds it unless it says otherwise.
+func TestAHostWithTheMillwrightCheckoutAndNoEntryRebuildsItWithMakeBuild(t *testing.T) {
+	for name, contents := range map[string]string{
+		"no table":          vpsConfig,
+		"a table of others": vpsConfig + "\n[after_landing]\npostern = \"deploy\"\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			writeConfig(t, contents)
+
+			after, err := config.AfterLanding()
+			if err != nil {
+				t.Fatalf("reading what runs after a landing: %v", err)
+			}
+			if after["millwright"] != "make build" {
+				t.Errorf("expected make build for millwright, got %+v", after)
+			}
+		})
+	}
+}
+
+func TestAnEntryForMillwrightIsKeptAndAnEmptyOneRunsNothing(t *testing.T) {
+	writeConfig(t, vpsConfig+"\n[after_landing]\nmillwright = \"make build && make install\"\n")
+	after, err := config.AfterLanding()
+	if err != nil || after["millwright"] != "make build && make install" {
+		t.Errorf("expected the host's own command, got %+v, %v", after, err)
+	}
+
+	writeConfig(t, vpsConfig+"\n[after_landing]\nmillwright = \"\"\n")
+	after, err = config.AfterLanding()
+	if err != nil {
+		t.Fatalf("reading what runs after a landing: %v", err)
+	}
+	if after["millwright"] != "" {
+		t.Errorf("expected an explicit empty entry to run nothing, got %+v", after)
 	}
 }
 

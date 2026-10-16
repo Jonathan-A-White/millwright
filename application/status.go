@@ -195,6 +195,10 @@ type Status struct {
 	// checkout on this host, to name the stories filed into the wrong rig under
 	// WrongRigHeading (mw-gq6.428). Nil leaves the section out.
 	RigFiles RigFiles
+	// MainCommit is the commit of the factory rig's main as this host last
+	// fetched it, the one every host's mw is to be level with. Empty when it is
+	// not known, and then no host is said to be behind it.
+	MainCommit string
 	// Notes is where the other hosts' last sync times are read from. A nil
 	// Notes leaves the other-hosts section out altogether rather than calling
 	// every host asleep on no evidence.
@@ -490,6 +494,12 @@ type HostWork struct {
 	// Ticks are the counts of that host's timers as it left them with its last
 	// sync: nothing known of a host that has left none.
 	Ticks HostTicks
+	// MwCommit is the short commit that host's mw was built from, as it left it
+	// with its last sync, "" when it has left none. BehindMain says main's
+	// commit is known and is not that one, or the host noted none: the host
+	// works stories on an mw without main's newest fixes (mw-gq6.521).
+	MwCommit   string
+	BehindMain bool
 	// Stories are the stories pathed to this host that are ready to be taken or
 	// already claimed, in the order the tracker listed them.
 	Stories []StoryDetail
@@ -506,6 +516,9 @@ func (w HostWork) Unreadable() bool { return w.Said != "" && w.LastSync.IsZero()
 // StatusReport is what one host is doing right now, as `mw status` reads it.
 type StatusReport struct {
 	Host string
+	// MainCommit is the factory rig's main as this host last fetched it, "" when
+	// not known: what each other host's mw commit is read against.
+	MainCommit string
 	// IdeasOnly is the line 'Governor: Ideas only until 21:00 UTC (2 ideas
 	// held)', "" when the Governor is not in Ideas only.
 	IdeasOnly string
@@ -693,12 +706,12 @@ type StatusReport struct {
 
 // Run reads the report and prints it. Every call it makes is a read: the
 // tracker's WorkInHand, StoryState and OpenSteps, ReadyWithLabel and
-// BlockedForHost, two Notes per other host, the two tick logs' Read and the
+// BlockedForHost, four Notes per other host, the two tick logs' Read and the
 // vault's ReadLedger and RigMemorySizes. WorkInHand is read once, and this
 // host's running and ready stories and the other hosts' work are all narrowed
 // from it. Nothing is claimed, nothing is poured, nothing is written.
 func (s Status) Run(ctx context.Context) (StatusReport, error) {
-	report := StatusReport{Host: s.Host, SyncMode: s.syncMode()}
+	report := StatusReport{Host: s.Host, MainCommit: s.MainCommit, SyncMode: s.syncMode()}
 	if report.SyncMode == BeadsSyncAuto {
 		resolved, err := ResolveBeadsSync(ctx, s.Home, s.Host, BeadsSyncAuto)
 		if unknown, ok := HomeUnknownIn(err); ok {
@@ -1362,14 +1375,14 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand) ([]HostWork, e
 	// another: all of them are started before the first is waited for.
 	now := s.now()
 	type noted struct {
-		synced, halted, ticks func() (string, error)
+		synced, halted, ticks, mw func() (string, error)
 	}
 	notes := make([]noted, len(hosts))
 	for i, host := range hosts {
 		read := func(key string) func() (string, error) {
 			return later(func() (string, error) { return s.Notes.Note(ctx, key) })
 		}
-		notes[i] = noted{read(LastSyncKey(host)), read(SyncHaltKey(host)), read(TicksKey(host))}
+		notes[i] = noted{read(LastSyncKey(host)), read(SyncHaltKey(host)), read(TicksKey(host)), read(MwCommitKey(host))}
 	}
 
 	work := make([]HostWork, 0, len(hosts))
@@ -1401,9 +1414,34 @@ func (s Status) elsewhere(ctx context.Context, inHand WorkInHand) ([]HostWork, e
 			return nil, fmt.Errorf("reading how the timers of %s are doing: %w", host, err)
 		}
 		held.Ticks = ParseHostTicks(ticks)
+
+		commit, err := notes[i].mw()
+		if err != nil {
+			return nil, fmt.Errorf("reading which mw %s runs: %w", host, err)
+		}
+		held.MwCommit = strings.TrimSpace(commit)
+		held.BehindMain = behindMain(held.MwCommit, s.MainCommit)
 		work = append(work, held)
 	}
 	return work, nil
+}
+
+// mainShort is main's commit as the report names it: its first seven characters.
+func mainShort(main string) string {
+	if len(main) > 7 {
+		return main[:7]
+	}
+	return main
+}
+
+// behindMain says a host whose mw was built from commit is not level with main:
+// main is known and is not that commit, the shorter of the two being a prefix of
+// the longer. A host that noted no commit runs an mw older than the note.
+func behindMain(commit, main string) bool {
+	if main == "" {
+		return false
+	}
+	return commit == "" || !(strings.HasPrefix(main, commit) || strings.HasPrefix(commit, main))
 }
 
 // syncMode is how this host's beads are synced, remote when nothing says.
@@ -1707,7 +1745,7 @@ func (r StatusReport) String() string {
 		clip(&b, "  nothing pathed to another host")
 	}
 	for _, w := range r.Others {
-		w.write(&b, r.Host, r.SyncMode.OneDatabase())
+		w.write(&b, r.Host, r.MainCommit, r.SyncMode.OneDatabase())
 	}
 	b.WriteString("\n")
 
@@ -1938,7 +1976,7 @@ func needWhy(need PosternViewNeed) string {
 // host the report is for, and so the host a stranded story is re-pathed to.
 // live says the note was read straight out of the one database every host
 // shares, rather than out of this host's own copy, which is a cycle behind.
-func (w HostWork) write(b *strings.Builder, here string, live bool) {
+func (w HostWork) write(b *strings.Builder, here, main string, live bool) {
 	clip(b, fmt.Sprintf("  %s · %s", w.Host, w.state()))
 	if w.Halt != nil {
 		clip(b, "    "+haltLine(w.Host, *w.Halt))
@@ -1954,6 +1992,7 @@ func (w HostWork) write(b *strings.Builder, here string, live bool) {
 	if w.Asleep {
 		clip(b, "    re-path: "+RepathHint+here)
 	}
+	w.writeMw(b, main)
 	w.Ticks.write(b, "    ")
 
 	note := ""
@@ -1962,6 +2001,19 @@ func (w HostWork) write(b *strings.Builder, here string, live bool) {
 	}
 	for _, d := range w.Stories {
 		writeStoryIn(b, "    ", d, strings.TrimPrefix(note+" · "+readyOrClaimed(d), " · "))
+	}
+}
+
+// writeMw is the line beside the sync line that says which mw the host runs:
+// its commit, and that it is behind main when it is not main's.
+func (w HostWork) writeMw(b *strings.Builder, main string) {
+	switch {
+	case w.MwCommit != "" && w.BehindMain:
+		clip(b, fmt.Sprintf("    mw %s · behind main (%s)", w.MwCommit, mainShort(main)))
+	case w.MwCommit != "":
+		clip(b, "    mw "+w.MwCommit)
+	case w.BehindMain:
+		clip(b, fmt.Sprintf("    mw commit not noted · behind main (%s)", mainShort(main)))
 	}
 }
 

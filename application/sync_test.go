@@ -488,6 +488,42 @@ func TestSyncWithNoLogsLeavesNoNoteOfTicks(t *testing.T) {
 	}
 }
 
+func TestSyncLeavesTheCommitOfItsMwBesideTheNoteOfWhenItWasLevel(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	sync.MwCommit = "243b096"
+	if _, err := sync.Run(context.Background()); err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	if got := note(t, tracker, application.MwCommitKey("vps")); got != "243b096" {
+		t.Fatalf("expected host.vps.mw_commit to hold the commit, got %q", got)
+	}
+	if key := application.MwCommitKey("vps"); key != "host.vps.mw_commit" {
+		t.Fatalf("expected the key to sit beside host.vps.last_sync, got %q", key)
+	}
+}
+
+func TestAHostThatKeepsTheOneDatabaseLeavesTheCommitOfItsMwOnEverySync(t *testing.T) {
+	sync, _, tracker := keeping(t)
+	backedUpAgo(t, tracker, 10*time.Minute)
+	sync.MwCommit = "b3273a6"
+	if _, err := sync.Run(context.Background()); err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	if got := note(t, tracker, application.MwCommitKey("vps")); got != "b3273a6" {
+		t.Fatalf("expected host.vps.mw_commit to hold the commit, got %q", got)
+	}
+}
+
+func TestSyncThatKnowsNoCommitLeavesNoNoteOfIt(t *testing.T) {
+	sync, _, tracker := syncing(t)
+	if _, err := sync.Run(context.Background()); err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	if got := note(t, tracker, application.MwCommitKey("vps")); got != "" {
+		t.Fatalf("expected no note of a commit nobody named, got %q", got)
+	}
+}
+
 func TestAHaltWorthAnAlarmNotesItselfForTheOtherHost(t *testing.T) {
 	for _, code := range []int{2, 4} {
 		sync, _, tracker := syncing(t)

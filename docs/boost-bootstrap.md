@@ -90,7 +90,9 @@ the home's `config.toml`, run it again, or the next Boost gets the old line; `mw
 boost-config`, on the home, says when the two differ, naming each rig. Only the rigs in
 `BOOST_RIGS` are copied, in the order of `[rigs]`.
 
-The home's other per-rig tables are not copied, on purpose: `[after_landing]` and
+The home's other per-rig tables are not copied, on purpose (a Boost's `mw` still follows
+main: a host with the millwright checkout and no `millwright` key in `[after_landing]` runs
+`make build` for it, README "How each host's mw is rebuilt"): `[after_landing]` and
 `[after_landing_limit]` run on the host whose checkout a landing moved (a deploy from the
 home), `[heavy_net]` only matters on a metered network, which a Boost is not, and `[tester]`
 springs the Tester's stories from the home's dispatch.

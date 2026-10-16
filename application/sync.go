@@ -25,6 +25,11 @@ const (
 // the VPS is host.vps.last_sync.
 func LastSyncKey(host string) string { return "host." + host + ".last_sync" }
 
+// MwCommitKey is where a host leaves the short commit its mw was built from, on
+// every sync, beside LastSyncKey: mw status reads it for each other host and says
+// when it is not main's (mw-gq6.521).
+func MwCommitKey(host string) string { return "host." + host + ".mw_commit" }
+
 // BeadsSyncMode is how mw sync treats this host's beads database: where the
 // database lives, and so what the tracker's remote is for.
 //
@@ -692,6 +697,11 @@ type Sync struct {
 	// is the sync's to fail.
 	Ticks TickLogs
 
+	// MwCommit is the short commit this host's mw was built from. Every sync
+	// that gets level leaves it as MwCommitKey, beside the note of when it was
+	// level. Empty leaves no note: a build that knows no commit says nothing.
+	MwCommit string
+
 	// GCInterval is how long this host waits between asking the tracker to
 	// reclaim disk space. Zero reads DefaultGCInterval.
 	GCInterval time.Duration
@@ -864,6 +874,15 @@ func (s Sync) queueStamp(ctx context.Context, report *SyncReport) {
 	}
 }
 
+// noteMwCommit leaves the commit of this host's mw for the other hosts to read.
+// It is best effort, like the counts of the timers: a note that cannot be
+// written costs the other host a reading and is not the sync's to fail.
+func (s Sync) noteMwCommit(ctx context.Context) {
+	if s.MwCommit != "" {
+		_ = s.Tracker.SetNote(ctx, MwCommitKey(s.Host), s.MwCommit)
+	}
+}
+
 // recordLevelInTheOneDatabase is the beads half on a host whose notes go
 // straight into the one database every host reads: the note of when this host
 // was level and its timers' counts, written on every sync because nothing has
@@ -881,6 +900,7 @@ func (s Sync) recordLevelInTheOneDatabase(ctx context.Context, report SyncReport
 	if held := ReadHostTicks(ctx, s.Ticks); held.Known() {
 		_ = s.Tracker.SetNote(ctx, TicksKey(s.Host), held.Note())
 	}
+	s.noteMwCommit(ctx)
 
 	if report.Mode == BeadsSyncShared {
 		ClearSyncHalt(ctx, s.SyncHalts)
@@ -993,6 +1013,7 @@ func (s Sync) syncBeadsRecordingLevel(ctx context.Context, report SyncReport) (S
 	if held := ReadHostTicks(ctx, s.Ticks); held.Known() {
 		_ = s.Tracker.SetNote(ctx, TicksKey(s.Host), held.Note())
 	}
+	s.noteMwCommit(ctx)
 
 	retried, err := s.syncTrackerMarking(ctx)
 	// A cycle that halted still went through the database, which keeps growing

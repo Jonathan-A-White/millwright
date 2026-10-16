@@ -157,7 +157,8 @@ func newDispatchCmd() *cobra.Command {
 			"here; nothing done\" and leaves with 0.\n\n" +
 			"Once it holds that lock, before the sync, a real dispatch keeps this host's mw level with the\n" +
 			"factory rig's main as mw millhand tick does, so a host that runs no Millhand tick stays level too:\n" +
-			"on a host whose [after_landing] table names a command for the millwright rig, a clean checkout\n" +
+			"on a host whose [after_landing] table names a command for the millwright rig (make build, when it\n" +
+			"names none and the host checks the rig out), a clean checkout\n" +
 			"behind origin's main is fast-forwarded and the command run in it, and it prints \"self-update:\n" +
 			"millwright <old> → <new>, built\". A commit already built (by either tick) is not built again; a\n" +
 			"dirty checkout is left alone, and a build that fails keeps the old mw and is tried by the next tick.\n\n" +
