@@ -2448,8 +2448,10 @@ func (n Next) handOn(ctx context.Context, c *closeOut, report *NextReport, reaso
 	if err := writeRetrying(ctx, n, report, "the note that its next attempt continues its branch", func() error {
 		return n.Memory.SetNote(ctx, ContinueKey(c.id), strconv.Itoa(c.attempt()))
 	}); err != nil {
-		report.Notes = append(report.Notes, fmt.Sprintf("the note that the next attempt of %s continues its branch could not be written, "+
-			"so it starts from %s: %v", c.id, c.target, err))
+		lost := fmt.Sprintf("the note that the next attempt of %s continues its branch could not be written, "+
+			"so it starts from %s: %v", c.id, c.target, err)
+		report.Notes = append(report.Notes, lost)
+		n.mailLostWrite(ctx, c, report, "the continue note", lost)
 		return false
 	}
 	return true
@@ -2515,7 +2517,35 @@ func (n Next) closeFormula(ctx context.Context, c *closeOut, report *NextReport,
 	closed, err := closeFormula(ctx, n.Tracker, root, FormulaClosedWhy("mw next", n.Host, c.id, what))
 	report.FormulaClosed = closed
 	if err != nil {
-		report.Notes = append(report.Notes, fmt.Sprintf("the formula %s of %s could not be closed: %v", root, c.id, err))
+		lost := fmt.Sprintf("the formula %s of %s could not be closed: %v", root, c.id, err)
+		report.Notes = append(report.Notes, lost)
+		n.mailLostWrite(ctx, c, report, "the formula close", lost)
+	}
+}
+
+// mailLostWrite tells the Mayor of a write to the tracker that was lost for good
+// — tried again by the gateway and by writeRetrying, and still refused — so
+// that it is not only a note in the close-out that nobody reads (mw-gq6.538).
+// The mail names the story, what was lost and the command that failed, in the
+// tracker's own words, and what the loss costs. A mail that cannot be sent is
+// said on stderr and changes nothing else.
+func (n Next) mailLostWrite(ctx context.Context, c *closeOut, report *NextReport, what, said string) {
+	if n.Mailbox == nil || ctx.Err() != nil {
+		return
+	}
+	mail := NewMessage{
+		From:    SeatIdentity(MwSeat, n.Host),
+		To:      MayorMailbox,
+		Subject: fmt.Sprintf("lost write: %s on %s (%s)", what, c.id, n.Host),
+		Body: fmt.Sprintf("mw next on %s lost a write while closing out %s: %s.\n\n%s\n\nIt was tried again and still failed; "+
+			"nothing else was changed for it. Make the write by hand, with the command named above.\n", n.Host, c.id, what, said),
+	}
+	err := writeRetrying(ctx, n, report, "the mail about a lost write", func() error {
+		_, err := n.Mailbox.Send(ctx, mail)
+		return err
+	})
+	if err != nil && n.Err != nil {
+		fmt.Fprintf(n.Err, "mw next: the mail to %s about a lost write of %s could not be sent: %v\n", MayorMailbox, c.id, err)
 	}
 }
 
