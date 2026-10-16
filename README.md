@@ -145,7 +145,7 @@ timer. Since 2026-09-30 the home host serves the vault's beads through a Dolt SQ
 | `beads_sync` | The host | What `mw sync` does with beads |
 | --- | --- | --- |
 | `remote` (default) | keeps a copy of its own | one `bd sync` every sync, carrying the notes: *Keeping two hosts level* |
-| `backup` | holds the one database: the desktop | writes the notes straight into it every sync; one `bd sync` as a backup only once the last got through `beads_backup_minutes` ago (30), recorded as `host.<name>.last_backup`; GC on its usual daily cadence, whether or not the backup got through |
+| `backup` | holds the one database: the desktop | writes the notes straight into it every sync; one `bd sync` as a backup only once the last got through `beads_backup_minutes` ago (30), recorded as `host.<name>.last_backup`; GC on its usual daily cadence, whether or not the backup got through; that GC first squashes the beads history into one commit once it holds 50,000 commits and no backup has got through for a day |
 | `shared` | reaches the desktop's database: the Laptop on a boost | writes the notes straight into it every sync; never a `bd sync` and never a GC, which are the desktop's |
 
 In every mode the vault half runs exactly as before, and every sync that gets
