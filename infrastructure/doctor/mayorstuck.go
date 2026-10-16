@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -43,22 +42,6 @@ const mayorStuckAlarmStateName = "mayor-stuck-alarm"
 // Governor was paged about it, until the pane leaves the limit.
 const mayorStuckLimitStateName = "mayor-stuck-limit"
 
-// mayorStuckLimitChoice is a choice of the menu the harness puts up at the
-// usage limit — "1. Stop and wait for limit to reset", "2. Switch to usage
-// credits" — marked or not by its selection arrow, drawn in a box or not. The
-// words quoted in prose, as a story's title quotes them, are not a choice.
-var mayorStuckLimitChoice = regexp.MustCompile(`^[\s│|]*(?:[❯>]\s*)?\d+\.\s+(?:Stop and wait|Switch to usage credits)`)
-
-// mayorStuckLimitNotice is the harness's own line at the limit, which begins
-// with its words ("⎿  You've hit your weekly limit · resets …"); a sentence
-// that only mentions them does not.
-var mayorStuckLimitNotice = regexp.MustCompile(`^[\s│|⎿]*(?i:you(?:'|’)ve|you have) hit your\b`)
-
-// mayorStuckLimitTail is how far up from the bottom of the pane the limit
-// notice is read when no limit menu stands under it: the input box and status
-// lines are below it, and a Mayor that went on working has scrolled it away.
-const mayorStuckLimitTail = 12
-
 // mayorStuckDialTimeout bounds one TCP connect to a proxy.
 const mayorStuckDialTimeout = 3 * time.Second
 
@@ -80,7 +63,9 @@ var MayorStuckProxyNames = []string{"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", 
 // weekly limit" notice, writes no reply at all, so the transcript cannot see it
 // (mw-gq6.433: @138 sat there 2h12m on 2026-10-15). A pane on the limit for
 // Window is the factory stopped. A successor would meet the same limit, so that
-// cure leaves the window alone and pages the Governor once for the window.
+// cure leaves the window alone and pages the Governor once for the window; paged,
+// the check is ok until the limit resets. A Mayor still on the limit after its
+// reset is closed and a successor started, as a stuck one is (mw-gq6.473).
 //
 // Its cure drops each proxy setting whose port refuses a TCP connect from the
 // environment bin/mayor-up runs in and from the tmux server's global
@@ -124,6 +109,8 @@ type MayorStuck struct {
 	// limited is whether the last Probe found the pane parked on the usage
 	// limit, and outcome what Cure did about it, both read by WayBack.
 	limited bool
+	// reset is whether that limit had reset by then, so that Cure restarts.
+	reset   bool
 	outcome string
 }
 
@@ -147,9 +134,11 @@ func (m *MayorStuck) stale(env []string) *MayorStale {
 
 // Probe implements application.DoctorCheck: ok where the seat is not held;
 // faulty, naming the minutes and the harness's notice, when the pane has stood
-// on the usage limit for Window, and ok while it has stood there less, whatever
-// the transcript says; cannot-tell when the transcript cannot be read; ok when
-// the last Window holds no reply, or one that worked; faulty, naming the count
+// on the usage limit for Window, and ok while it has stood there less, or once
+// the Governor is paged about it until the limit resets, whatever the
+// transcript says; faulty again, naming the reset, once it has passed;
+// cannot-tell when the transcript cannot be read; ok when the last Window
+// holds no reply, or one that worked; faulty, naming the count
 // and the last error, when it holds replies and every one was an API error. It
 // writes only its own record of when it first saw the pane on the limit, and,
 // once the Mayor has answered again after an alarm, the one event that ends it
@@ -164,19 +153,36 @@ func (m *MayorStuck) Probe(ctx context.Context) (application.Verdict, string) {
 	// it is judged as one not on the limit.
 	pane, _ := st.capture(ctx, id)
 	limit, on := limitOf(pane)
-	m.limited = on
+	m.limited, m.reset = on, false
 	since, err := m.limitSince(ctx, id, on)
 	if err != nil {
 		return application.DoctorCannotTell, err.Error()
 	}
 	if on {
 		// Parked on the limit, the Mayor writes nothing: its replies say
-		// nothing of it, and a respawn would meet the same limit.
-		if still := m.now().Sub(since); still >= m.window() {
-			return application.DoctorFaulty, fmt.Sprintf("the Mayor (window %s, %s) is stopped at the usage limit: its pane has shown it for %d minutes with no output: %s",
-				name, id, int(still/time.Minute), strings.Join(strings.Fields(firstLimitLine(limit)), " "))
+		// nothing of it, and a respawn would meet the same limit — until the
+		// limit resets, when a successor is the cure.
+		still := m.now().Sub(since)
+		if still < m.window() {
+			return application.DoctorOK, ""
 		}
-		return application.DoctorOK, ""
+		if reset := application.ReadPaneLimit(limit, since); reset.Over(m.now()) {
+			m.reset = true
+			return application.DoctorFaulty, fmt.Sprintf("the Mayor (window %s, %s) is still stopped at the usage limit, which reset at %s: %s",
+				name, id, reset.Resets.UTC().Format(application.TicksTimeFormat), strings.Join(strings.Fields(firstLimitLine(limit)), " "))
+		}
+		// The Governor is paged once for the window; until the reset there is
+		// nothing more to do, and an episode that stayed open would damp the
+		// restart after it.
+		paged, err := m.paged(ctx, id)
+		if err != nil {
+			return application.DoctorCannotTell, err.Error()
+		}
+		if paged {
+			return application.DoctorOK, ""
+		}
+		return application.DoctorFaulty, fmt.Sprintf("the Mayor (window %s, %s) is stopped at the usage limit: its pane has shown it for %d minutes with no output: %s",
+			name, id, int(still/time.Minute), strings.Join(strings.Fields(firstLimitLine(limit)), " "))
 	}
 	if m.Replies == nil {
 		return application.DoctorCannotTell, "there is no transcript to read the Mayor's replies from"
@@ -236,7 +242,8 @@ func (m *MayorStuck) ended(ctx context.Context, name string) error {
 // Cure implements application.DoctorCheck: drop the dead proxies, close the
 // Mayor's window, run bin/mayor-up, and send the one alarm whichever way the
 // respawn went. A pane parked on the usage limit is left alone instead, and
-// the alarm, sent once for the window, carries the limit and its menu.
+// the alarm, sent once for the window, carries the limit and its menu, until
+// the limit resets: after it the Mayor is restarted all the same.
 func (m *MayorStuck) Cure(ctx context.Context) error {
 	st := m.stale(nil)
 	m.outcome = ""
@@ -244,25 +251,42 @@ func (m *MayorStuck) Cure(ctx context.Context) error {
 	if !held {
 		return fmt.Errorf("the Mayor's window is no longer found (%s)", reason)
 	}
+	var reset *application.PaneLimit
 	if pane, err := st.capture(ctx, window); err == nil {
 		if limit, on := limitOf(pane); on {
-			return m.pageTheLimit(ctx, window, name, limit)
+			since, err := m.limitSince(ctx, window, true)
+			if err != nil {
+				return err
+			}
+			read := application.ReadPaneLimit(limit, since)
+			if !read.Over(m.now()) {
+				return m.pageTheLimit(ctx, window, name, limit)
+			}
+			reset = &read
 		}
 	}
 	env, dropped := m.withoutDeadProxies(ctx, st)
 	st.Env = env
 
+	stuck := "stuck on API Errors"
+	if reset != nil {
+		stuck = fmt.Sprintf("still stopped at the usage limit, which reset at %s", reset.Resets.UTC().Format(application.TicksTimeFormat))
+	}
 	if _, err := st.held().run(ctx, "kill-window", "-t", window); err != nil {
-		return m.alarm(ctx, fmt.Sprintf("The Mayor (window %s) is stuck on API Errors, and the doctor could not close it: %v", name, err), err)
+		return m.alarm(ctx, fmt.Sprintf("The Mayor (window %s) is %s, and the doctor could not close it: %v", name, stuck, err), err)
 	}
 	started, upErr := st.mayorUp(ctx)
 	if upErr != nil {
-		text := fmt.Sprintf("The Mayor (window %s) was stuck on API Errors. The doctor closed it but could not start a new one: %v", name, upErr)
+		text := fmt.Sprintf("The Mayor (window %s) was %s. The doctor closed it but could not start a new one: %v", name, stuck, upErr)
 		return m.alarm(ctx, text, upErr)
 	}
 	m.started = started
 	text := fmt.Sprintf("The Mayor (window %s) was stuck on API Errors: every reply in %d minutes failed. The doctor closed it and started a new one in window %s, with no handover.",
 		name, int(m.window()/time.Minute), started)
+	if reset != nil {
+		text = fmt.Sprintf("The Mayor (window %s) was %s: %s. The doctor closed it and started a new one in window %s, with no handover.",
+			name, stuck, reset.Notice, started)
+	}
 	if len(dropped) > 0 {
 		text += " It dropped a dead proxy: " + strings.Join(dropped, ", ") + "."
 	}
@@ -339,6 +363,16 @@ func (m *MayorStuck) limitSince(ctx context.Context, window string, on bool) (ti
 	return at, nil
 }
 
+// paged reports whether the Governor was paged already about window's pane on
+// the usage limit (pageTheLimit).
+func (m *MayorStuck) paged(ctx context.Context, window string) (bool, error) {
+	seen, err := m.loadLimit(ctx)
+	if err != nil {
+		return false, err
+	}
+	return len(seen) == 3 && seen[0] == window && seen[2] == "paged", nil
+}
+
 // loadLimit is the usage-limit sighting this check keeps: the window, when it
 // was first seen there, and "paged" once the Governor was told.
 func (m *MayorStuck) loadLimit(ctx context.Context) ([]string, error) {
@@ -352,30 +386,9 @@ func (m *MayorStuck) loadLimit(ctx context.Context) ([]string, error) {
 	return episode.SeenPaths, nil
 }
 
-// limitOf is the usage limit a pane is parked on, when it shows one: the
-// harness's notice and the choices of its limit menu, each line trimmed. With
-// the menu up, the notice is read anywhere on the pane; without it, only in the
-// pane's last mayorStuckLimitTail lines.
-func limitOf(pane string) (string, bool) {
-	lines := nonEmptyLines(strings.ReplaceAll(pane, "\u00a0", " "))
-	menu := false
-	for _, line := range lines {
-		if mayorStuckLimitChoice.MatchString(line) {
-			menu = true
-			break
-		}
-	}
-	var shown []string
-	for i, line := range lines {
-		switch {
-		case mayorStuckLimitChoice.MatchString(line):
-			shown = append(shown, line)
-		case mayorStuckLimitNotice.MatchString(line) && application.AtUsageLimit(line) && (menu || i >= len(lines)-mayorStuckLimitTail):
-			shown = append(shown, line)
-		}
-	}
-	return strings.Join(shown, "\n"), len(shown) > 0
-}
+// limitOf is the usage limit a pane is parked on, when it shows one, read by
+// the one reader every seat's reaper reads it by (application.PaneUsageLimit).
+func limitOf(pane string) (string, bool) { return application.PaneUsageLimit(pane) }
 
 // firstLimitLine is the first line of what limitOf read: the notice, where
 // the pane shows one.
@@ -526,7 +539,7 @@ func (m *MayorStuck) WayBack() string {
 	if m.outcome != "" {
 		return m.outcome
 	}
-	if m.limited && m.started == "" {
+	if m.limited && !m.reset && m.started == "" {
 		return "would leave the Mayor's window alone, as it is stopped at the usage limit, and page the Governor once with the limit and its menu"
 	}
 	if m.started == "" {

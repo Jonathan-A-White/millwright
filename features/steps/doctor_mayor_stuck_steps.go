@@ -57,6 +57,7 @@ func (c *doctorContext) registerMayorStuckSteps(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a transcript with no replies$`, c.aTranscriptWithNoReplies)
 	ctx.Given(`^this host is not home$`, c.thisHostIsNotHome)
 	ctx.Given(`^the Mayor's pane shows the weekly-limit menu$`, c.thePaneShowsTheWeeklyLimitMenu)
+	ctx.Given(`^the Mayor's pane shows the usage-limit menu under the notice "([^"]*)"$`, c.thePaneShowsTheLimitMenuUnder)
 	ctx.Given(`^the environment sets HTTPS_PROXY and https_proxy to a proxy whose port refuses connections$`, c.theEnvironmentSetsADeadProxy)
 	ctx.Given(`^the tmux server's global environment sets HTTPS_PROXY, https_proxy and ALL_PROXY to that same proxy$`, c.theTmuxEnvironmentSetsTheSameProxy)
 	ctx.Given(`^the environment sets HTTPS_PROXY to a proxy that answers$`, c.theEnvironmentSetsALiveProxy)
@@ -225,6 +226,19 @@ func (c *doctorContext) thePaneShowsTheWeeklyLimitMenu() error {
 		" ❯ 1. Stop and wait for limit to reset\n"+
 		"   2. Switch to usage credits\n"+
 		"   3. Upgrade your plan\n\n"+
+		" Enter to confirm · Esc to cancel\n"), 0o644)
+}
+
+func (c *doctorContext) thePaneShowsTheLimitMenuUnder(notice string) error {
+	f, err := c.stuckFixture()
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(f.pane, []byte("● Reading the newest handoff first.\n\n"+
+		"  ⎿  "+notice+"\n\n"+
+		" What do you want to do?\n\n"+
+		" ❯ 1. Stop and wait for limit to reset\n"+
+		"   2. Switch to usage credits\n\n"+
 		" Enter to confirm · Esc to cancel\n"), 0o644)
 }
 
