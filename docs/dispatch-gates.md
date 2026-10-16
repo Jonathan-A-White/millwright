@@ -25,7 +25,7 @@ three.
 | `no-sweep` | a bug filed after the sweep rule has no line beginning `Sweep:` in its acceptance (below) |
 | `attempts-exhausted` | it was started `max_attempts` times already |
 | `handed-back` | its Builder handed it back (a comment opening `HANDED BACK`) and no later comment opening `RE-PATHED:` says what changed (below) |
-| `shared-files` | it names a file a running story of the rig names or has changed |
+| `shared-files` | it names a file a running story of the rig names or has changed; since when is kept in the note `host.<host>.files_held` |
 | `cap` | the host runs as many sessions as it may |
 
 ## The sweep gate
