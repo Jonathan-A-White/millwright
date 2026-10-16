@@ -456,8 +456,8 @@ func newPosternSendCmd() *cobra.Command {
 			"--re <txid> answers inside a post's thread: <text> goes with its re set to the post's txid,\n" +
 			"as mw postern inbox prints it (direct:<sha256>) or bare, so the app shows it in that\n" +
 			"post's thread. Give the post's own txid, or the re of a message already in its thread\n" +
-			"(mw postern inbox prints the command). With no channel flag the reply goes to the ROOT's\n" +
-			"channel — the one mw postern inbox read it in, or mw postern send sent it to — never\n" +
+			"(mw postern inbox and mw talk wait print it). With no channel flag the reply goes to the ROOT's\n" +
+			"channel, as mw postern send, mw postern inbox or mw talk wait saw it or a reply to it — never\n" +
 			"silently to Factory; a root mw has not seen is refused, saying to give --bead-channel <id>\n" +
 			"or --channel <name>. A channel flag given with --re wins. It is refused with --bead,\n" +
 			"which asks a question of its own.\n\n" +

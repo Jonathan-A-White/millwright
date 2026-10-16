@@ -142,6 +142,12 @@ type TalkWait struct {
 	Transcriber   PosternTranscriber
 	AttachmentDir string
 
+	// Threads, when set, is told the channel of each message the wait prints
+	// and of the post it answers, so that the answer line printed under it,
+	// mw postern send --re, finds the root's channel (mw-gq6.435). Nil
+	// remembers none.
+	Threads PosternThreadIndex
+
 	// Log, when set, is the home's event log, which the wait looks at once a
 	// second, spending no token, for the Mayor's handover (mw-jrx0s.11). A
 	// handover to another window than Self ends the wait at once with
@@ -478,6 +484,9 @@ func (r *talkWaitRun) page(arrived time.Time) error {
 			if record.Seq > inboxCursor {
 				if message, ok := r.unreadMessage(record, privKey); ok && !r.keepsMessage(message) {
 					r.posts = append(r.posts, message)
+					if err := rememberChannelOf(r.Threads, message); err != nil {
+						r.printf(r.Err, "mw talk wait: %v\n", err)
+					}
 				}
 			}
 		}
