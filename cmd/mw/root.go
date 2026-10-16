@@ -20,6 +20,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newCheckCmd())
 	root.AddCommand(newCloudCmd())
 	root.AddCommand(newConfigCmd())
+	root.AddCommand(newDigestCmd())
 	root.AddCommand(newDispatchCmd())
 	root.AddCommand(newDoctorCmd())
 	root.AddCommand(newEventsCmd())
