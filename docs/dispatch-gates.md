@@ -10,7 +10,7 @@ three.
 | Gate | Holds the story when |
 |-|-|
 | `paused` | the host is paused by a pause-host event: nothing at all is done |
-| `hitl` | the story is labelled hitl: the Governor must be present, the Mayor works it |
+| `hitl` | the story is labelled hitl, or demo with no files key (his own demo): the Governor must be present, the Mayor works it |
 | `no-path` | the story's path cannot be read |
 | `no-host` | the path names no host |
 | `other-host` | the path names another host |

@@ -765,6 +765,10 @@ A story the Governor must be present for carries the label `hitl` (`bd update
 unless made with `--no-inherit-labels`). No dispatcher takes it, and, dry run
 or not, it is passed over with that reason; the Mayor claims it and does it beside
 the Governor, and a `hitl` story in progress does not count against the cap.
+A story labelled `demo` with no files key is the Governor's own demo and is held
+the same way, as `(demo)` in `mw queue`; a demo a Builder builds names its files
+and is dispatched as any story. `mw file` and `mw path set` warn of a `demo` with
+neither `hitl` nor a files key.
 
 What it asks of him is one more label beside `hitl`: `hitl:hands`, `hitl:decision`,
 `hitl:review` or `hitl:verify`, and Needs you lists the bead as a need of that

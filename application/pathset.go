@@ -120,6 +120,9 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		// set (mw-gq6.371).
 		now := story.Merged().Overlay(path)
 		fmt.Fprintf(s.Out, "Set the path of %s:\n%s", id, pathLines(now))
+		if governorsDemo(story.Labels, story.Story.Overrides.Overlay(path).Files) && !hasHitlLabel(story.Labels) {
+			fmt.Fprintln(s.Out, demoNoHitlLine(id))
+		}
 	}
 	// A story filed by hand into an epic is made a need of the epic's last
 	// story, as the Tester's is (mw-gq6.498).

@@ -23,7 +23,8 @@ func TestAHitlStoryIsOfTheKindItsLabelNames(t *testing.T) {
 		{[]string{"hitl", "hitl:review", "hitl:review"}, "review", []string{"review"}, true},
 		{[]string{"hitl", "hitl:other"}, "hands", nil, true},
 		{[]string{"hitl:other"}, "hands", nil, false},
-		{[]string{"demo"}, "hands", nil, false},
+		// A demo with no files key is the Governor's own (mw-gq6.535).
+		{[]string{"demo"}, "hands", nil, true},
 	}
 	for _, c := range cases {
 		d := application.StoryDetail{Story: domain.Story{ID: "x"}, Labels: c.labels}
