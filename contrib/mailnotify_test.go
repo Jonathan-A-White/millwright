@@ -46,15 +46,25 @@ var panes = map[string]string{
 
 	// Panes that draw what is typed after the prompt mark, as Claude Code does,
 	// and take the line only at the Nth Enter, writing it to $MW_TEST_DIR/taken.
-	"enter-lost-once": lossyPane(2),
-	"enter-never":     lossyPane(1 << 20),
+	"enter-lost-once": lossyPane(2, 0),
+	"enter-never":     lossyPane(1<<20, 0),
+
+	// A session on a loaded host: it draws nothing it is typed for the first
+	// two seconds, longer than the script's own waits before it reads back.
+	"enter-never-slow": lossyPane(1<<20, 2),
 }
 
 // lossyPane is a pane script for a session that ignores every Enter before the
-// nth: the typed text stays on the input line, after the prompt mark.
-func lossyPane(n int) string {
-	return fmt.Sprintf(`printf '\342\235\257\302\240'; stty raw -echo; buf=; n=0
+// nth: the typed text stays on the input line, after the prompt mark. Once the
+// first key comes it lets lag seconds pass before it draws anything, as a
+// session the host does not let run would. After each key it writes the
+// input line it holds to $MW_TEST_DIR/pane-buf and the count of keys it has
+// read to $MW_TEST_DIR/pane-read, for keysReached's tmux to wait on.
+func lossyPane(n, lag int) string {
+	return fmt.Sprintf(`printf '\342\235\257\302\240'; stty raw -echo; buf=; n=0; r=0
+first=1
 while c=$(dd bs=1 count=1 2>/dev/null); do
+	[ -n "$first" ] && sleep %d; first=
 	if [ "$c" = "$(printf '\r')" ]; then
 		n=$((n+1))
 		if [ $n -ge %d ]; then
@@ -64,7 +74,53 @@ while c=$(dd bs=1 count=1 2>/dev/null); do
 	else
 		buf="$buf$c"; printf '%%s' "$c"
 	fi
-done`, n)
+	printf '%%s' "$buf" > "$MW_TEST_DIR/pane-buf"
+	r=$((r+1)); echo $r > "$MW_TEST_DIR/pane-read.new"; mv "$MW_TEST_DIR/pane-read.new" "$MW_TEST_DIR/pane-read"
+done`, lag, n)
+}
+
+// keysReached puts a tmux before the real one on the script's PATH that, after
+// each send-keys, waits until a lossyPane has read every key sent to it and
+// its screen shows the input line the pane holds. So the script reads back
+// what the pane did with the keys, never a pane the host has not let run yet,
+// however short the script's own waits (mw-gq6.440: the laptop at load 57 of
+// 20 read the line back before the pane had drawn it). It waits 30 seconds at
+// most, and then lets the script go on to fail the test in its own words.
+func (f *factory) keysReached() {
+	f.t.Helper()
+	real, err := exec.LookPath("tmux")
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	f.write("bin/tmux", `#!/bin/sh
+"`+real+`" "$@" || exit
+sock=; target=; sending=; keys=0
+while [ $# -gt 0 ]; do
+	case $1 in
+	-L) sock=$2; shift ;;
+	-t) target=$2; shift ;;
+	-l) keys=$(printf '%s' "$2" | wc -c); shift ;;
+	send-keys) sending=1 ;;
+	*) [ -n "$sending" ] && keys=$((keys + 1)) ;;
+	esac
+	shift
+done
+[ -n "$sending" ] || exit 0
+sent=$(($(cat "$MW_TEST_DIR/pane-sent" 2>/dev/null || echo 0) + keys))
+echo "$sent" > "$MW_TEST_DIR/pane-sent"
+mark=$(printf '\342\235\257\302\240')
+i=0
+while [ $i -lt 1500 ]; do
+	read=$(cat "$MW_TEST_DIR/pane-read" 2>/dev/null)
+	if [ "${read:-0}" -ge "$sent" ]; then
+		line=$("`+real+`" -L "$sock" capture-pane -p -t "$target" | grep -F "$mark" | tail -n 1)
+		[ "${line#*"$mark"}" = "$(cat "$MW_TEST_DIR/pane-buf")" ] && exit 0
+	fi
+	sleep 0.02
+	i=$((i + 1))
+done
+exit 0
+`, 0o755)
 }
 
 // factory is one throwaway world for the script to run in.
@@ -261,6 +317,9 @@ func (f *factory) tmux(args ...string) string {
 func (f *factory) mayor(state, acting string) string {
 	f.t.Helper()
 	f.write("pane.sh", "#!/bin/sh\n"+panes[state]+"\nexec cat > \"$MW_TEST_DIR/typed\"\n", 0o755)
+	if strings.HasPrefix(state, "enter-") {
+		f.keysReached()
+	}
 	// A window of another name first, so the Mayor's is neither index 0 nor the
 	// first the server lists.
 	f.tmux("new-session", "-d", "-s", "factory", "-n", "shell", "-x", "100", "-y", "20", "sleep 600")
@@ -608,12 +667,21 @@ func TestATickWhileAnotherRunsDoesNothing(t *testing.T) {
 	if err := os.MkdirAll(f.path("state"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	holder := exec.Command("flock", f.path("state/lock"), "sleep", "10")
+	// The holder says when it has the lock, so the tick never runs before it
+	// does, however long the host takes to start it (mw-gq6.440).
+	holder := exec.Command("flock", f.path("state/lock"), "sh", "-c", `touch "$1" && exec sleep 10`, "sh", f.path("held"))
 	if err := holder.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = holder.Process.Kill(); _ = holder.Wait() })
-	time.Sleep(300 * time.Millisecond) // for flock to take the lock
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if _, err := os.Stat(f.path("held")); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("flock never took the lock")
+		}
+	}
 
 	f.tick()
 
@@ -1561,6 +1629,24 @@ func TestALineThatNeverGoesIsPressedOnceMoreSaidStuckAndNotAnnounced(t *testing.
 	}
 	if got := f.read("taken"); got != "" {
 		t.Fatalf("the window took %q, want nothing", got)
+	}
+	if got := f.announced(); got != "" {
+		t.Fatalf("recorded %q for mail that never went", got)
+	}
+}
+
+// On a loaded host the session draws what is typed late: the line is said
+// stuck all the same, and the test does not lean on the script's waits being
+// long enough for the pane (mw-gq6.440: the laptop at load 57 of 20).
+func TestALineThatNeverGoesIsSaidStuckThoughThePaneDrawsItLate(t *testing.T) {
+	f := newFactory(t)
+	f.mayor("enter-never-slow", actingByID)
+	f.inbox("mw-aaa")
+
+	out := f.tick()
+
+	if !strings.Contains(out, "on its input line still") {
+		t.Fatalf("the tick said %q, want that the line is on its input line still", out)
 	}
 	if got := f.announced(); got != "" {
 		t.Fatalf("recorded %q for mail that never went", got)
