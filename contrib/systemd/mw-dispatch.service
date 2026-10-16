@@ -6,6 +6,7 @@
 # cap on sessions running at once is what limits the fuel spent.
 [Unit]
 Description=Dispatch ready stories to Builder sessions (mw dispatch)
+OnFailure=mw-unit-failed@%n.service
 
 [Service]
 Type=oneshot

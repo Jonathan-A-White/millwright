@@ -8,7 +8,7 @@
 #
 # What it holds: with no unit named it lists every pair in contrib/systemd/ and
 # changes nothing (--enable then is refused); naming a pair leaves two symlinks
-# into this checkout, calls `systemctl --user daemon-reload` once and never
+# into this checkout, and a third to the failure-mail template, calls `systemctl --user daemon-reload` once and never
 # `enable`; --enable adds one `enable --now <timer>`; a second run changes
 # nothing; --dry-run changes nothing and calls nothing that changes anything;
 # an unknown unit, a copy in the way, a link elsewhere and a missing systemctl
@@ -245,13 +245,14 @@ unchanged "$(cat "$T/before")"
 ok
 
 # --- 5. one pair: two symlinks, one reload, no enable --------------------------------------
-NAME="mw-health links two files, reloads once, enables never"
+NAME="mw-health links two files and the failure-mail template, reloads once, enables never"
 world
 run mw-health
 rc_is 0
 is_link_to_rig "$USERDIR/mw-health.service" mw-health.service
 is_link_to_rig "$USERDIR/mw-health.timer" mw-health.timer
-[ "$(nlinks "$W/home")" = 2 ] || fail "$NAME: $(nlinks "$W/home") symlinks, wanted 2"
+is_link_to_rig "$USERDIR/mw-unit-failed@.service" mw-unit-failed@.service
+[ "$(nlinks "$W/home")" = 3 ] || fail "$NAME: $(nlinks "$W/home") symlinks, wanted 3"
 calls_are 1 '^systemctl --user daemon-reload$'
 calls_are 0 'enable'
 calls_are 0 '^loginctl'
@@ -317,7 +318,7 @@ calls_are 1 '^systemctl --user enable --now mw-health.timer$'
 ok
 
 # --- 7. several pairs, and the suffixes ---------------------------------------------------
-NAME="two pairs named: four links, one reload, one enable for both timers"
+NAME="two pairs named: four links and the template, one reload, one enable for both timers"
 world
 run --enable mw-millhand-tick mw-millhand-review.timer
 rc_is 0
@@ -325,7 +326,7 @@ for n in mw-millhand-tick mw-millhand-review; do
 	is_link_to_rig "$USERDIR/$n.service" "$n.service"
 	is_link_to_rig "$USERDIR/$n.timer" "$n.timer"
 done
-[ "$(nlinks "$W/home")" = 4 ] || fail "$NAME: $(nlinks "$W/home") symlinks, wanted 4"
+[ "$(nlinks "$W/home")" = 5 ] || fail "$NAME: $(nlinks "$W/home") symlinks, wanted 5"
 calls_are 1 '^systemctl --user daemon-reload$'
 calls_are 1 '^systemctl --user enable --now mw-millhand-tick.timer mw-millhand-review.timer$'
 ok
@@ -335,7 +336,7 @@ world
 # shellcheck disable=SC2086
 run $PAIRS
 rc_is 0
-want=$(($(echo $PAIRS | wc -w) * 2))
+want=$(($(echo $PAIRS | wc -w) * 2 + 1))
 [ "$(nlinks "$W/home")" = "$want" ] || fail "$NAME: $(nlinks "$W/home") symlinks, wanted $want"
 calls_are 1 '^systemctl --user daemon-reload$'
 calls_are 0 'enable'
@@ -344,12 +345,13 @@ has 'contrib/mail-notify'
 has 'contrib/health/mw-health.sh'
 ok
 
-NAME="a daemon (a .service with no timer) links one file and enables the service"
+NAME="a daemon (a .service with no timer) links its file and the template and enables the service"
 world
 run --enable mw-view-follow
 rc_is 0
 is_link_to_rig "$USERDIR/mw-view-follow.service" mw-view-follow.service
-[ "$(nlinks "$W/home")" = 1 ] || fail "$NAME: $(nlinks "$W/home") symlinks, wanted 1"
+is_link_to_rig "$USERDIR/mw-unit-failed@.service" mw-unit-failed@.service
+[ "$(nlinks "$W/home")" = 2 ] || fail "$NAME: $(nlinks "$W/home") symlinks, wanted 2"
 calls_are 1 '^systemctl --user daemon-reload$'
 calls_are 1 '^systemctl --user enable --now mw-view-follow.service$'
 has 'beads.env'

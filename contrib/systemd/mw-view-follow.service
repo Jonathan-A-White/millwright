@@ -18,6 +18,7 @@
 # this one. Each pass is told in the log as job events (mw events tail).
 [Unit]
 Description=Follow the beads into the event log and republish the live view (mw events follow)
+OnFailure=mw-unit-failed@%n.service
 
 [Service]
 # bd reaches the home's Dolt server through BEADS_DOLT_* in beads.env; without

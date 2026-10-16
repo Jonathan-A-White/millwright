@@ -1,0 +1,32 @@
+# Tell the Mayor that a unit failed, as root: one mail, then it exits. A system
+# template, never enabled or started by a timer; see contrib/systemd/mw-unit-failed@.service.
+#
+# Every other service in this directory names it in an OnFailure= line (with %n),
+# so systemd starts one instance of it, with the failed unit's name as the
+# instance (%i), whenever that unit ends in failure: a non-zero exit, a kill, a
+# timeout. Before this a failed `mw report send`, `mw doctor` or `mw dispatch`
+# ended in an exit code and a journal line and nobody was told (mw-gq6.511).
+#
+# The mail goes to the Mayor from a seat named for the host (doctor@<host>), and
+# names the unit and the host in its subject and carries the last 20 lines of
+# the unit's journal. It has no OnFailure= itself: a failed mail must not start
+# another (scripts/check-timer-units.sh holds that). To try it by hand:
+#   systemctl start mw-unit-failed@mw-report.service.service
+[Unit]
+Description=Mail the Mayor that %i failed
+
+[Service]
+Type=oneshot
+User=root
+
+# The same environment as mw-report.service: the one fixed binary, and the
+# tracker's Dolt server through beads.env (mw mail send reads the vault).
+EnvironmentFile=-%h/.config/mw/beads.env
+EnvironmentFile=-%h/.config/mw/dispatch.env
+Environment=MW_SEAT=doctor@%H
+# $$ is a single $ to systemd: the shell expands the command substitution.
+ExecStart=/bin/sh -c '%h/.local/bin/mw mail send mayor -s "unit failed: %i on %H" -m "$$(journalctl -u %i -n 20 --no-pager 2>&1)"'
+
+# Type=oneshot has no start timeout by default, and a hung mail would then
+# block every later one.
+TimeoutStartSec=2min

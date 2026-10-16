@@ -11,6 +11,7 @@
 # answers to no user manager, so it cannot be taken down with one.
 [Unit]
 Description=Keep a tmux server up for this host's seats (session 0)
+OnFailure=mw-unit-failed@%n.service
 After=network.target
 
 # The one process everything else on this host depends on must keep trying:

@@ -8,6 +8,7 @@
 # host's own data.
 [Unit]
 Description=Copy the postern's data to the boost, and the watchdog's files to the VPS (mw postern mirror)
+OnFailure=mw-unit-failed@%n.service
 
 [Service]
 Type=oneshot

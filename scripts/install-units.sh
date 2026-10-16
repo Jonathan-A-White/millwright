@@ -20,6 +20,11 @@
 # also disables mw-mail-notify.timer: the follower is what runs that job now,
 # on its own clock (mw-jrx0s.14).
 #
+# Naming any unit also links mw-unit-failed@.service, the template every unit
+# names as OnFailure=: it mails the Mayor when a unit fails (mw-gq6.511). It is
+# not a pair or a daemon of its own, is never listed or enabled, and a unit
+# linked without it would fail silently as before.
+#
 # A live timer starts real work and spends fuel, so a timer is enabled ONLY when
 # --enable is given, and then with `systemctl --user enable --now`. Without it
 # the pairs are linked and the host is told the command to arm them.
@@ -175,10 +180,14 @@ for t in "$SRC"/*.timer; do
 done
 [ -n "$PAIRS" ] || die "$SRC holds no timer/service pair"
 
+# The failure mail every unit names in OnFailure=: a template, not a daemon.
+FAILED_UNIT=mw-unit-failed@.service
+
 # Every daemon the rig ships: a .service with no .timer beside it.
 DAEMONS=""
 for sv in "$SRC"/*.service; do
 	[ -f "$sv" ] || continue
+	[ "$(basename "$sv")" = "$FAILED_UNIT" ] && continue
 	n=$(basename "$sv" .service)
 	[ -f "$SRC/$n.timer" ] || DAEMONS="$DAEMONS $n"
 done
@@ -241,7 +250,7 @@ for u in $UNITS; do
 done
 
 for n in $NAMED; do
-	for f in $(unit_files "$n"); do
+	for f in $(unit_files "$n") $FAILED_UNIT; do
 		if [ -L "$DEST/$f" ]; then
 			[ "$(readlink "$DEST/$f")" = "$SRC/$f" ] ||
 				die "$DEST/$f is a link to $(readlink "$DEST/$f"), not to this rig; remove it by hand first. Nothing was changed"
@@ -263,7 +272,7 @@ run() { # <command>...: run it, or say it would be
 if [ "$DRY" = 1 ]; then echo "would make: $DEST"; else mkdir -p "$DEST"; fi
 TIMERS=""
 for n in $NAMED; do
-	for f in $(unit_files "$n"); do
+	for f in $(unit_files "$n") $FAILED_UNIT; do
 		if [ -L "$DEST/$f" ]; then
 			echo "skip: $DEST/$f already links to $SRC/$f"
 		elif [ "$DRY" = 1 ]; then

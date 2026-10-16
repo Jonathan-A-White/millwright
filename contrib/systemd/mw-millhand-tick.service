@@ -6,6 +6,7 @@
 # A oneshot unit is never started twice at once.
 [Unit]
 Description=Wake this host's Millhand if something needs it (mw millhand tick)
+OnFailure=mw-unit-failed@%n.service
 
 [Service]
 Type=oneshot

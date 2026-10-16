@@ -2844,6 +2844,16 @@ timer pairs in `contrib/systemd/` by name, and with none named lists them and
 which are installed and active, changing nothing; `--dry-run` says what it would
 do. It prints the `loginctl enable-linger` line as a hand step and never runs it.
 
+Every service in `contrib/systemd/` (and the two under `contrib/systemd/system/`)
+names `OnFailure=mw-unit-failed@%n.service`. When a unit ends in failure (a
+non-zero exit, a kill, a timeout) systemd starts that template, which sends the
+Mayor one mail from the seat `doctor@<host>` naming the unit and the host, with
+the last 20 lines of the unit's journal. `install-units.sh` links the template
+along with whatever unit it is asked for. To try it:
+`systemctl --user start mw-unit-failed@mw-report.service.service`, then
+`MW_SEAT=mayor mw mail inbox`. `scripts/check-timer-units.sh` fails a unit that
+lacks the line, and a template that has one (a failed mail must not start another).
+
 A user unit gets a bare `PATH`, and the rig names no host's directories. The
 host owns `~/.config/mw/dispatch.env`, one line saying where `mw`, `bd`, `git`,
 `tmux`, `claude` and `go` are (`go` because a Builder runs the rig's tests):
