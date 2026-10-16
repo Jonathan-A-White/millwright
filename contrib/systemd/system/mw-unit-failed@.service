@@ -1,7 +1,7 @@
 # Tell the Mayor that a unit failed, as root: one mail, then it exits. A system
 # template, never enabled or started by a timer; see contrib/systemd/mw-unit-failed@.service.
 #
-# Every other service in this directory names it as OnFailure=mw-unit-failed@%n.service,
+# Every other service in this directory names it in an OnFailure= line (with %n),
 # so systemd starts one instance of it, with the failed unit's name as the
 # instance (%i), whenever that unit ends in failure: a non-zero exit, a kill, a
 # timeout. Before this a failed `mw report send`, `mw doctor` or `mw dispatch`
