@@ -94,6 +94,8 @@ func (n *TodoNightly) zone() *time.Location {
 func (n *TodoNightly) Job() SpringJob {
 	return SpringJob{
 		Name: TodoRankJobName,
+		// A failed night's rank is told to the Mayor (mw-gq6.531).
+		TellFailure: true,
 		Probe: func(ctx context.Context) (string, bool) {
 			if n.due(ctx) {
 				return ClockReason, true

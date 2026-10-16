@@ -84,6 +84,8 @@ func (n *NightlySuite) now() time.Time {
 func (n *NightlySuite) Job() SpringJob {
 	return SpringJob{
 		Name: NightlySuiteJobName,
+		// A failed night's suite is told to the Mayor (mw-gq6.531).
+		TellFailure: true,
 		Probe: func(ctx context.Context) (string, bool) {
 			due, _ := n.due(ctx)
 			if len(due) == 0 {
