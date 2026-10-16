@@ -820,9 +820,38 @@ func (g *Gateway) StoriesComments(ctx context.Context, ids []string) (map[string
 	return said, nil
 }
 
-// CloseStory implements application.WorkTracker.
+// CloseStory implements application.WorkTracker. bd closes a story in
+// progress only for the actor holding its claim; a refusal is told apart from
+// any other failure as ClaimStory tells one, by reading the story back rather
+// than by bd's wording: one found in progress under another assignee is held.
 func (g *Gateway) CloseStory(ctx context.Context, id, reason string) error {
 	_, err := g.call(ctx, "close", id, "--reason", reason)
+	if err == nil || g.actor == "" {
+		return err
+	}
+	story, readErr := g.showOne(ctx, id)
+	if readErr == nil && story.Status == StatusInProgress && story.Assignee != "" && story.Assignee != g.actor {
+		return &application.CloseHeldError{ID: id, Holder: story.Assignee, Actor: g.actor, Said: err.Error()}
+	}
+	return err
+}
+
+// TakeOverClaim implements application.WorkTracker. `bd update --assignee`
+// takes a live claim from another actor only with --force, and bd will not
+// combine --force with --if-assignee, so the guard is a read just before: a
+// story holder no longer holds is left alone.
+func (g *Gateway) TakeOverClaim(ctx context.Context, id, holder string) error {
+	if g.actor == "" {
+		return fmt.Errorf("taking over the claim on %s: mw acts under no name of its own here", id)
+	}
+	story, err := g.showOne(ctx, id)
+	if err != nil {
+		return err
+	}
+	if story.Assignee != holder {
+		return fmt.Errorf("taking over the claim on %s: it is held by %q, not %q", id, story.Assignee, holder)
+	}
+	_, err = g.call(ctx, "update", id, "--assignee", g.actor, "--force")
 	return err
 }
 
