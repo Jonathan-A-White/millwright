@@ -217,6 +217,9 @@ type FactoryReportResult struct {
 	// against the window before and the target, the line that ends QUALITY;
 	// nil for a landing.
 	InvestShare *InvestShare `json:"invest_share,omitempty"`
+	// ModelCompare is MODELS, the models side by side after FUEL; nil for a
+	// landing.
+	ModelCompare *ModelCompare `json:"model_compare,omitempty"`
 }
 
 // reportEntry is one thing the window saw: a landing, a refusal, a bug filed
@@ -249,6 +252,10 @@ type reportEntry struct {
 	// tokens and costUSD are the fuel of every attempt of a landed story.
 	tokens  int
 	costUSD float64
+	// ran is the model the ledger row names, the one the session ran on, else
+	// model; bugStory says the story is a bug. MODELS reads both.
+	ran      string
+	bugStory bool
 }
 
 // Run reads the ledger and the tracker and prints the report.
@@ -360,6 +367,7 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 			e.cause = d.Cause
 			e.exhausted = d.Exhausted
 			e.investment = hasLabel(d.Labels, LabelInvestment)
+			e.bugStory = domain.IsBugStory(d.Type, d.Story.Title)
 			if d.Attempts > 1 {
 				e.attempts = d.Attempts
 			}
@@ -370,6 +378,7 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 		} else if b, found := benchmarks[row.StoryID]; found {
 			e.rig, e.host = orElse(b.Rig, e.rig), orElse(b.Host, e.host)
 		}
+		e.ran = orElse(row.Model, e.model)
 		all = append(all, e)
 	}
 
@@ -441,6 +450,7 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 	if result.Landing == nil {
 		share := readInvestShare(result.Whole, r.InvestShare)
 		result.InvestShare = &share
+		result.ModelCompare = r.modelCompare(entries, escapedOfLanding(escapes))
 	}
 	if r.Investments != nil && result.Landing == nil {
 		records, err := r.Investments.Investments(ctx)
@@ -649,13 +659,14 @@ func percentOf(part, whole int) float64 {
 
 // String is the report as mw report prints it: the window, then QUALITY, SPEED
 // and FUEL in that order, each with a block per rig, per model and per host,
-// and CHEAP WINS at the end, none of it wider than ReportWidth columns.
+// then MODELS, and CHEAP WINS at the end, none of it wider than ReportWidth columns.
 func (r FactoryReportResult) String() string {
 	if r.Landing != nil {
 		return r.Landing.String()
 	}
 	var b strings.Builder
 	r.writeParts(&b)
+	writeModels(&b, r.ModelCompare)
 	writeChanges(&b, r.Changes)
 	writeInvestments(&b, r.Investments)
 	writeCheapWins(&b, r.CheapWins)

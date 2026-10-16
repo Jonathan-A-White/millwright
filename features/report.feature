@@ -23,6 +23,14 @@ Feature: mw report
   Beside the bugs filed, QUALITY counts the escaped bugs: a [bug] story of a
   landing's rig filed on its day or in the 14 days after, naming its story id;
   FACTORY CHANGES shows each landing's own.
+  After FUEL, MODELS sets the models side by side, a column each: opus and
+  sonnet always, haiku and fable when they landed or were refused a story in
+  the window. For each it counts the stories landed, the share of them landed
+  on the first attempt, the refusals, the landed stories that were retried,
+  the tokens and dollars per landed story, and the escaped bugs per landed
+  story, each bug counted against the model that landed the story it names;
+  then, by kind (rig and bug or feature), what each model landed and its first
+  try share. A model with nothing to measure a number by shows "-", not 0.
 
   Background:
     Given a report factory whose clock reads "2026-10-11T12:00:00Z"
@@ -685,3 +693,86 @@ Feature: mw report
     Then the report JSON has invest_share.share as "55.6"
     And the report JSON has invest_share.target as "20"
     And the report JSON has invest_share.off as "over"
+
+  Scenario: MODELS sets two models side by side: first try, refusals, retries and fuel per landed story
+    Given the report stories:
+      | id  | title      | rig    | host   | model  | attempts | filed |
+      | o-1 | One        | lampas | laptop | opus   |          |       |
+      | o-2 | Two        | lampas | laptop | opus   | 2        |       |
+      | o-3 | Three      | lampas | laptop | opus   |          |       |
+      | s-1 | [bug] Four | lampas | laptop | sonnet |          |       |
+      | s-2 | Five       | orrery | vps    | sonnet |          |       |
+    And the report ledger holds the rows:
+      | day        | id  | outcome                      | worker      | tokens |
+      | 2026-10-08 | o-1 | landed on main               | opus/high   | 1000   |
+      | 2026-10-08 | o-2 | not landed (tests-fail): red | opus/high   | 500    |
+      | 2026-10-09 | o-2 | landed on main               | opus/high   | 1500   |
+      | 2026-10-09 | o-3 | not landed (tests-fail): red | opus/high   | 800    |
+      | 2026-10-09 | s-1 | landed on main               | sonnet/high | 400    |
+      | 2026-10-10 | s-2 | landed on main               | sonnet/high | 600    |
+    And the report result files:
+      | story | attempt | cost |
+      | o-1   | 1       | 2.00 |
+      | o-2   | 1       | 1.00 |
+      | o-2   | 2       | 3.00 |
+      | s-1   | 1       | 0.30 |
+      | s-2   | 1       | 0.90 |
+    When mw report runs with "--since 7d"
+    Then the MODELS columns are "opus sonnet"
+    And the MODELS line "landed" reads "2 2"
+    And the MODELS line "first try" reads "50% 100%"
+    And the MODELS line "refused" reads "2 0"
+    And the MODELS line "retried" reads "1 0"
+    And the MODELS line "tokens/landing" reads "1.5k 500"
+    And the MODELS line "$/landing" reads "3.00 0.60"
+    And the MODELS line "lampas/feature" reads "2 50% -"
+    And the MODELS line "lampas/bug" reads "- 1 100%"
+    And the MODELS line "orrery/feature" reads "- 1 100%"
+    And no line of the report is wider than 60 columns
+
+  Scenario: --json carries MODELS, each model and each kind
+    Given the report stories:
+      | id  | title | rig    | host   | model  | attempts | filed |
+      | o-1 | One   | lampas | laptop | opus   | 2        |       |
+      | s-1 | Two   | lampas | laptop | sonnet |          |       |
+    And the report ledger holds the rows:
+      | day        | id  | outcome        | worker      |
+      | 2026-10-08 | o-1 | landed on main | opus/high   |
+      | 2026-10-09 | s-1 | landed on main | sonnet/high |
+    When mw report runs with "--since 7d --json"
+    Then the report JSON has model_compare.models.0.model as "opus"
+    And the report JSON has model_compare.models.0.landed as "1"
+    And the report JSON has model_compare.models.0.retried as "1"
+    And the report JSON has model_compare.models.0.first_try_share as "0"
+    And the report JSON has model_compare.models.1.model as "sonnet"
+    And the report JSON has model_compare.models.1.first_try_share as "100"
+    And the report JSON has model_compare.kinds.0.kind as "lampas/feature"
+    And the report JSON has model_compare.kinds.0.model as "opus"
+
+  Scenario: Haiku is a column once it has one refusal, and a model with no sessions shows "-"
+    Given the report stories:
+      | id  | title | rig    | host   | model | attempts | filed |
+      | h-1 | One   | lampas | laptop | haiku |          |       |
+    And the report ledger holds the rows:
+      | day        | id  | outcome                      | worker    |
+      | 2026-10-09 | h-1 | not landed (tests-fail): red | haiku/max |
+    When mw report runs with "--since 7d"
+    Then the MODELS columns are "opus sonnet haiku"
+    And the MODELS line "landed" reads "- - 0"
+    And the MODELS line "first try" reads "- - -"
+    And the MODELS line "refused" reads "- - 1"
+    And the MODELS line "tokens/landing" reads "- - -"
+    And the MODELS line "escaped bugs/landing" reads "- - -"
+
+  Scenario: An escaped bug counts against the model that landed the story it names
+    Given the report stories:
+      | id  | title          | rig    | host   | model  | attempts | filed      | description      |
+      | l-1 | One            | lampas | laptop | opus   |          |            |                  |
+      | l-2 | Two            | lampas | laptop | sonnet |          |            |                  |
+      | e-1 | [bug] it broke | lampas | laptop | sonnet |          | 2026-10-09 | after l-1 landed |
+    And the report ledger holds the rows:
+      | day        | id  | outcome        | worker      |
+      | 2026-10-08 | l-1 | landed on main | opus/high   |
+      | 2026-10-08 | l-2 | landed on main | sonnet/high |
+    When mw report runs with "--since 7d"
+    Then the MODELS line "escaped bugs/landing" reads "1.00 0.00"

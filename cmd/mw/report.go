@@ -32,8 +32,12 @@ func newReportCmd() *cobra.Command {
 			"After QUALITY come SPEED (the median and p90 of actual over par, the wall time from dispatch\n" +
 			"to landing, and each host's gate usual against latest; 'no par yet' where no close-out\n" +
 			"measured one) and FUEL (tokens per landing from the ledger and $ per landing from the result\n" +
-			"files, every attempt of a story summed). A number carries an arrow against the window before,\n" +
-			"level inside 5%, and says better or worse by the measure. --rig and --host narrow every\n" +
+			"files, every attempt of a story summed). After FUEL, MODELS sets opus and sonnet (and haiku and\n" +
+			"fable once they had a session) side by side: landed, first-try share, refused, retried, tokens,\n" +
+			"$ and escaped bugs per landed story, '-' where a model has nothing to measure, then by kind\n" +
+			"(rig and bug or feature) what each landed and its first-try share; --json has every number\n" +
+			"of every kind. A number carries an arrow against the window before, level inside 5%, and\n" +
+			"says better or worse by the measure. --rig and --host narrow every\n" +
 			"block. A ledger row whose story is gone counts under rig unknown. The report ends with CHEAP\n" +
 			"WINS: at most three one-line suggestions by fixed rules (causes unset, a dominant refusal\n" +
 			"reason, attempts used up, a refusal rate up, a flagged par, a slow gate, an investment share\n" +

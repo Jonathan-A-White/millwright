@@ -541,6 +541,17 @@ an arrow on the headline numbers; `--json` carries them all, as `arrows.<measure
 with `previous`, `arrow` and `verdict`, beside the previous window's figures
 (`previous`, `speed_previous`, `fuel_previous`).
 
+After FUEL comes MODELS, the models side by side, a column each: opus and sonnet
+always, haiku and fable once a story was landed or refused on them in the window. Each
+column counts the stories the model landed (a story once), the share of them landed on
+the first attempt, the refusals, the landed stories that were retried, the tokens and
+dollars per landed story (every attempt summed) and the escaped bugs per landed story,
+each bug against the model that landed the story it names. A row counts under the
+model its ledger row says ran it, so a story moved from sonnet to opus keeps its
+sonnet refusals under sonnet. Then `by kind` gives each rig and bug or feature what
+each model landed and its first-try share. A model with nothing to measure a number by
+shows `-`, not 0. `--json` has it all under `model_compare` (`models`, `kinds`).
+
 CHEAP WINS ends the report: at most three one-line suggestions, each naming its rig,
 host, kind or story and what to try, chosen by fixed rules in this order (quality
 first), the first three that hold being printed, numbered 1 to 3. R1 refusals with no
@@ -580,11 +591,12 @@ bin/mw report send [--force] [--dry-run]
 
 A report nobody reads measures nothing, so `mw report send` posts the same numbers to
 the Governor's phone. It builds a summary of the last 7 days from the same report, in
-at most 14 lines of 60 columns: `Factory, 7 days to 2026-10-11`, then QUALITY (landed,
+at most 19 lines of 60 columns: `Factory, 7 days to 2026-10-11`, then QUALITY (landed,
 refused and its rate, attempts and bugs per landing, escaped bugs, the investment
 share against its target), SPEED (par median and p90, the
-wall time from dispatch to landing), FUEL (tokens and dollars per landing) and CHEAP
-WINS, in that order, each number with its arrow against the week before. It is sent
+wall time from dispatch to landing), FUEL (tokens and dollars per landing), MODELS
+(a line a model: landed, first try, refused, retried, $ and escaped bugs per landing)
+and CHEAP WINS, in that order, each number with its arrow against the week before. It is sent
 as a plain message, with no bead and no class, to the Factory channel, and its txid is
 printed.
 

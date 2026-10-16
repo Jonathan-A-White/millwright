@@ -19,10 +19,10 @@ func newReportSendCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "send [--force] [--dry-run]",
 		Short: "Post the phone-sized summary of the week to the Factory channel, once a day, from the home",
-		Long: "send builds the week's summary from the same numbers as mw report, in at most 14 lines of\n" +
-			"60 columns (QUALITY with the investment share against its target, SPEED, FUEL and CHEAP\n" +
-			"WINS, each number with its arrow against the week before), and posts it as a plain message\n" +
-			"to the Factory channel, printing its txid.\n" +
+		Long: "send builds the week's summary from the same numbers as mw report, in at most 19 lines of\n" +
+			"60 columns (QUALITY with the investment share against its target, SPEED and FUEL, each\n" +
+			"number with its arrow against the week before, then MODELS a line a model, and CHEAP WINS),\n" +
+			"and posts it as a plain message to the Factory channel, printing its txid.\n" +
 			"It goes out from the home alone: on any other host it says which is home and sends\n" +
 			"nothing. It sends at most once a UTC day, remembering the day in\n" +
 			"~/.local/state/mw/report/sent.jsonl; a second run says when it sent. --force sends again;\n" +

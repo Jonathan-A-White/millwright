@@ -6,13 +6,14 @@ import (
 )
 
 // SummaryLines is the most lines the phone summary of mw report send has.
-const SummaryLines = 14
+const SummaryLines = 19
 
 // Summary is the report as a phone reads it: the window, then QUALITY (escaped
 // bugs and the investment share against its target among it), SPEED, FUEL and
 // CHEAP WINS for the whole factory, each number with its arrow against the
-// window before, and a CHANGES line when a factory change went WORSE, in at
-// most SummaryLines lines of ReportWidth columns.
+// window before, a CHANGES line when a factory change went WORSE, and before
+// CHEAP WINS a MODELS line a model, in at most SummaryLines lines of
+// ReportWidth columns.
 func (r FactoryReportResult) Summary() string {
 	days := int(reportDay(r.Window.Until).Sub(r.Window.Since).Hours() / 24)
 	var b strings.Builder
@@ -65,6 +66,8 @@ func (r FactoryReportResult) Summary() string {
 		}
 		summaryLine(&b, "", "CHANGES ", fmt.Sprintf("%d WORSE: %s", len(bad), strings.Join(names, ", ")))
 	}
+
+	summaryModels(&b, r.ModelCompare)
 
 	var wins strings.Builder
 	writeCheapWins(&wins, r.CheapWins)
