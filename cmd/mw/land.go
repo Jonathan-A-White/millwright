@@ -38,11 +38,13 @@ func newLandCmd() *cobra.Command {
 			"A red run, a batch of which nothing merged, or a push the origin refuses pushes nothing: the\n" +
 			"batch is held, every story in it stays queued, the Mayor is mailed (Held) each story and why,\n" +
 			"and land exits non-zero.\n\n" +
-			"A batch with a branch set aside for its conflicts, or whose run is red, is first given one\n" +
-			"fixer: a Builder session (batch-<rig>-<n>) in the landing worktree, on the rig's\n" +
+			"A batch with a branch set aside for its conflicts (even when every branch was, so that nothing\n" +
+			"merged), or whose run is red, is first given one fixer:\n" +
+			"a Builder session (batch-<rig>-<n>) in the landing worktree, on the rig's\n" +
 			"batch_fixer_model, batch_fixer_effort and batch_fixer_turns, told every branch, git's conflicts\n" +
 			"and the run's last lines. land waits for it and runs the rig's tests on the batch again itself:\n" +
-			"green lands the batch, red holds it, and no second fixer is started.\n\n" +
+			"green lands the batch, red holds it, and no second fixer is started. A batch with nothing queued,\n" +
+			"with only branches missing from the origin, or whose push the origin refuses is given none.\n\n" +
 			"What the batch did is kept in the vault under runs/batch/<rig>/<n>/: merge-order.txt, gate.log\n" +
 			"and outcome.txt, committed with the ledger.\n\n" +
 			"--one takes only the oldest queued story, whatever else is queued, and lands it by itself.\n\n" +
