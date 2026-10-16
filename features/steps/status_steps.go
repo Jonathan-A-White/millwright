@@ -164,6 +164,7 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the status story "([^"]*)" has been started (\d+) times?$`, c.theStatusStoryHasBeenStarted)
 	ctx.Given(`^the status story "([^"]*)" is marked run=(\S+)$`, c.theStatusStoryIsMarkedRun)
 	ctx.Given(`^the session of "([^"]*)" left a result saying "([^"]*)"$`, c.theSessionLeftAResultSaying)
+	ctx.Given(`^the session of "([^"]*)" printed "([^"]*)" instead of a result$`, c.theSessionPrintedInsteadOfAResult)
 	ctx.Given(`^the formula poured for "([^"]*)" has a step still open$`, c.theFormulaPouredHasAStepStillOpen)
 	ctx.Given(`^a status story "([^"]*)" titled "([^"]*)" pathed to the host "([^"]*)"$`, c.aStatusStoryTitledPathedToTheHost)
 	ctx.Given(`^the builder's ledger holds a line from (today|\d{4}-\d{2}-\d{2}) burning (\d+) tokens$`,
@@ -1042,6 +1043,20 @@ func (c *statusContext) theSessionLeftAResultSaying(id, said string) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(runs, application.ResultFileName), result, 0o644)
+}
+
+// theSessionPrintedInsteadOfAResult is a session the harness stopped before it
+// wrote its JSON: its result file holds the harness's plain words (mw-gq6.471).
+func (c *statusContext) theSessionPrintedInsteadOfAResult(id, printed string) error {
+	dir, err := c.workspace()
+	if err != nil {
+		return err
+	}
+	runs := filepath.Join(dir, "runs", id)
+	if err := os.MkdirAll(runs, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(runs, application.ResultFileName), []byte(printed+"\n"), 0o644)
 }
 
 // usageLimitWords is what mw status says beside a story whose session was

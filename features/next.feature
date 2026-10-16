@@ -232,6 +232,36 @@ Feature: Closing out a finished story and carrying on
     And the story "mw-gq6.1" carries a comment quoting: is not counted
     And the rig's tests were run 0 times
 
+  # mw-gq6.471: a limit that leaves no result JSON is the harness's stop all
+  # the same, read by the one reader of the limit notice.
+  Scenario: A session the usage limit stopped before it wrote its JSON is a harness stop, not a missing result
+    Given the session of "mw-gq6.1" reported this result:
+      """
+      Claude AI usage limit reached|1792155600
+      """
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is held blocked
+    And the report says it stopped for "usage-limit"
+    And the story "mw-gq6.1" carries a comment quoting: is not counted
+    And the story "mw-gq6.1" carries a comment quoting: until 2026-10-16T13:00:00Z
+    And the rig's tests were run 0 times
+
+  Scenario: A session the usage limit stopped with an empty result is read as a harness stop from its pane
+    Given the session of "mw-gq6.1" left an empty result
+    And the pane of "mw-gq6.1" last printed "You’ve hit your weekly limit · resets Oct 16, 9am (America/New_York)"
+    When mw closes out "mw-gq6.1"
+    Then nothing was landed on "main"
+    And the story "mw-gq6.1" is held blocked
+    And the report says it stopped for "usage-limit"
+    And the story "mw-gq6.1" carries a comment quoting: is not counted
+    And the rig's tests were run 0 times
+    And mw committed to the vault exactly:
+      | seats/builder/ledger.md            |
+      | seats/builder/rigs/millwright.md   |
+      | runs/mw-gq6.1/result.json          |
+      | runs/mw-gq6.1/harness-stop.txt     |
+
   Scenario: A session that left no result at all is not taken for a success
     Given the session of "mw-gq6.1" left no result at all
     When mw closes out "mw-gq6.1"

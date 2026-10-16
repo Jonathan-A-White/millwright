@@ -1227,15 +1227,10 @@ func (s Status) usageLimit(ctx context.Context, detail StoryDetail) string {
 	if attempt < 1 {
 		attempt = 1
 	}
-	printed, err := s.Vault.ReadRunFile(ctx, detail.Story.ID, ResultFileNameForAttempt(attempt))
-	if err != nil || strings.TrimSpace(printed) == "" {
-		return ""
+	if stop, ok := harnessStopOfRun(ctx, s.Vault, detail, attempt, s.now()); ok && stop.Reason == ReasonUsageLimit {
+		return stop.Said
 	}
-	result, err := ReadSessionResult(printed)
-	if err != nil {
-		return ""
-	}
-	return result.UsageLimit()
+	return ""
 }
 
 // elsewhere reads what the other hosts hold: the stories pathed to each of

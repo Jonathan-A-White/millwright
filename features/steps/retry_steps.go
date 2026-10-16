@@ -88,6 +88,7 @@ func InitializeRetryScenario(ctx *godog.ScenarioContext) {
 	ctx.When(`^mw retries "([^"]*)"$`, c.mwRetries)
 	ctx.Given(`^the session of "([^"]*)" was stopped by the harness, saying: (.+)$`, c.theSessionsResultSaid)
 	ctx.Given(`^the session of "([^"]*)" ended in error, its result saying: (.+)$`, c.theSessionsResultSaid)
+	ctx.Given(`^the session of "([^"]*)" was stopped by the harness before it wrote a result, printing: (.+)$`, c.theSessionPrinted)
 	ctx.When(`^mw retries "([^"]*)" at "([^"]*)"$`, c.mwRetriesAt)
 	ctx.Then(`^the stopped attempt of "([^"]*)" is not counted: it records (\d+) attempts?$`, c.theStoryStillRecordsAttempts)
 	ctx.Then(`^the retry says the next dispatch tick takes "([^"]*)" as attempt (\d+)$`, c.theRetrySaysTheNextAttempt)
@@ -516,6 +517,20 @@ func (c *retryContext) theSessionsResultSaid(id, said string) error {
 	}
 	result := fmt.Sprintf(`{"type":"result","subtype":"success","is_error":true,"num_turns":1,"duration_ms":4000,"result":%q}`, said)
 	return os.WriteFile(filepath.Join(dir, application.ResultFileNameForAttempt(detail.Attempts)), []byte(result), 0o644)
+}
+
+// theSessionPrinted is a session the harness stopped before it wrote its JSON:
+// its result file holds the harness's plain words (mw-gq6.471).
+func (c *retryContext) theSessionPrinted(id, printed string) error {
+	detail, err := c.tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	dir := filepath.Join(c.vault, application.RunsDir, id)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, application.ResultFileNameForAttempt(detail.Attempts)), []byte(printed+"\n"), 0o644)
 }
 
 func (c *retryContext) mwRetriesAt(id, at string) error {

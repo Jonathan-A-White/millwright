@@ -1044,15 +1044,11 @@ func gristHarnessStop(result SessionResult, err error, ended time.Time) (Harness
 		if errors.Is(err, ErrGrindTimedOut) {
 			return HarnessStop{}, false
 		}
-		result = SessionResult{IsError: true, Said: err.Error()}
-	}
-	stop, ok := HarnessStopOf(result, ended)
-	if ok && err != nil && stop.Reason != ReasonUsageLimit {
 		// An error's words are mw's as well as the harness's: only the usage
 		// limit's own line is read in them.
-		return HarnessStop{}, false
+		return HarnessStopOfWords(err.Error(), ended)
 	}
-	return stop, ok
+	return HarnessStopOf(result, ended)
 }
 
 // GristReasonLimited is the reason a grind the harness stopped for a limit of

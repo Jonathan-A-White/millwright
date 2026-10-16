@@ -221,6 +221,15 @@ Feature: mw status
     Then reading status succeeds
     And the report shows "mw-gq6.10" as stopped at the usage limit
 
+  Scenario: A story whose session stopped at the usage limit before it wrote its JSON says so too (mw-gq6.471)
+    Given a status story "mw-gq6.10" filed under it
+    And the status story "mw-gq6.10" is claimed with its session running
+    And the status story "mw-gq6.10" is marked run=blocked
+    And the session of "mw-gq6.10" printed "Claude AI usage limit reached|1792155600" instead of a result
+    When mw status reads the host
+    Then reading status succeeds
+    And the report shows "mw-gq6.10" as stopped at the usage limit
+
   # mw-1ljpo9.6: a Builder's session is capped at next.max_turns (120); one
   # past 100 turns is named while it runs, read from its transcript.
   Scenario: A running session past 100 turns is named with its turns so far
