@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	pathpkg "path"
 	"regexp"
 	"slices"
 	"sort"
@@ -453,12 +454,48 @@ func safeRig(rig string) error {
 	return nil
 }
 
-// Errors is mw errors: the Mayor keeps the common-errors register. Each verb
-// writes files and nothing else (no commit, no bead, no mail), and spends no
-// fuel; none deletes a class.
+// RecordVault is what a verb that writes tracked vault files commits and
+// pushes them through; VaultFiles' Commit and Push, narrowed. A verb given none
+// leaves its files for a person to commit.
+type RecordVault interface {
+	Commit(ctx context.Context, message string, paths []string) ([]string, error)
+	Push(ctx context.Context) (int, error)
+}
+
+// recordInVault commits exactly the files a verb wrote, under a message that
+// names the command and its subject, and pushes. A vault that holds someone
+// else's uncommitted change is not swept into the commit: only the paths are.
+// A commit that fails is an error, the files being written and not recorded; a
+// push that fails is said on warn and is not, the commit being kept for the
+// next sync to carry (mw-gq6.501).
+func recordInVault(ctx context.Context, vault RecordVault, warn io.Writer, message string, paths []string) error {
+	if vault == nil {
+		return nil
+	}
+	recorded, err := vault.Commit(ctx, message, paths)
+	if err != nil {
+		return fmt.Errorf("%s: the files are written but not committed in the vault: %w", message, err)
+	}
+	if len(recorded) == 0 {
+		return nil
+	}
+	if _, err := vault.Push(ctx); err != nil && warn != nil {
+		fmt.Fprintf(warn, "%s: committed in the vault, not pushed (mw sync carries it): %v\n", message, err)
+	}
+	return nil
+}
+
+// Errors is mw errors: the Mayor and the seats keep the common-errors
+// register. Each verb writes files and spends no fuel, files no bead and sends
+// no mail; none deletes a class. With a Vault it commits the files it wrote,
+// those alone, and pushes them.
 type Errors struct {
 	Files ErrorFiles
 	Seat  string
+	// Vault commits and pushes what a verb wrote; nil leaves that to a person.
+	// Warn is where a push that did not go is said.
+	Vault RecordVault
+	Warn  io.Writer
 	// Seed is the register a fresh vault is born with, its class files at its
 	// root: what seed writes into a register that lacks them.
 	Seed fs.FS
@@ -512,16 +549,22 @@ func existingClass(slug string, files map[string]string, classes map[string]Erro
 	return ErrorClass{}, fmt.Errorf("no class %q in the register (mw errors list names them)", slug)
 }
 
-func (e Errors) put(ctx context.Context, class ErrorClass) error {
+// put writes a class and reports its path from the vault's root.
+func (e Errors) put(ctx context.Context, class ErrorClass) (string, error) {
 	if err := class.validate(); err != nil {
-		return err
+		return "", err
 	}
 	path, err := e.Files.WriteErrorClass(ctx, e.Seat, class.Slug, class.String())
 	if err != nil {
-		return err
+		return "", err
 	}
 	fmt.Fprintln(e.Out, path)
-	return nil
+	return pathpkg.Join(SeatsDir, e.Seat, ErrorRegisterDir, class.Slug+MemoryExt), nil
+}
+
+// record commits what the verb wrote.
+func (e Errors) record(ctx context.Context, subject string, paths ...string) error {
+	return recordInVault(ctx, e.Vault, e.Warn, "mw errors "+subject, paths)
 }
 
 // Add writes a new class. It refuses a slug already in the register.
@@ -551,7 +594,11 @@ func (e Errors) Add(ctx context.Context, req ErrorAdd) error {
 	if _, taken := files[req.Slug]; taken {
 		return fmt.Errorf("the class %q is already in the register: record a new find with mw errors checked %s <rig> found:<bead>", req.Slug, req.Slug)
 	}
-	return e.put(ctx, class)
+	written, err := e.put(ctx, class)
+	if err != nil {
+		return err
+	}
+	return e.record(ctx, "add "+class.Slug, written)
 }
 
 // Checked records that a rig was checked for a class, dated today, and when
@@ -575,7 +622,11 @@ func (e Errors) Checked(ctx context.Context, slug, rig, result string) error {
 	}
 	before := len(class.Occurrences())
 	class.Checks = append(class.Checks, ErrorCheck{Date: e.today(), Rig: rig, Found: found})
-	if err := e.put(ctx, class); err != nil {
+	written, err := e.put(ctx, class)
+	if err != nil {
+		return err
+	}
+	if err := e.record(ctx, fmt.Sprintf("checked %s %s %s", slug, rig, result), written); err != nil {
 		return err
 	}
 	if after := len(class.Occurrences()); after > before && after >= 2 {
@@ -607,7 +658,11 @@ func (e Errors) Shared(ctx context.Context, slug, verdict string) error {
 		return err
 	}
 	class.Shared = verdict
-	return e.put(ctx, class)
+	written, err := e.put(ctx, class)
+	if err != nil {
+		return err
+	}
+	return e.record(ctx, "shared "+slug, written)
 }
 
 // List prints one line a class, by slug: its kinds, how often it was found,
@@ -708,7 +763,7 @@ func (e Errors) Kinds(ctx context.Context, rig string, kinds []string) error {
 		return err
 	}
 	fmt.Fprintln(e.Out, path)
-	return nil
+	return e.record(ctx, "kinds "+rig, pathpkg.Join(SeatsDir, e.Seat, ErrorRegisterDir, ErrorKindsFile))
 }
 
 // SeedRegister writes each seed class the register does not hold yet, and
@@ -725,6 +780,7 @@ func (e Errors) SeedRegister(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	var written []string
 	for _, entry := range entries {
 		slug, isClass := strings.CutSuffix(entry.Name(), MemoryExt)
 		if entry.IsDir() || !isClass {
@@ -742,11 +798,16 @@ func (e Errors) SeedRegister(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("the seed %s is not whole: %w", slug, err)
 		}
-		if err := e.put(ctx, class); err != nil {
+		path, err := e.put(ctx, class)
+		if err != nil {
 			return err
 		}
+		written = append(written, path)
 	}
-	return nil
+	if len(written) == 0 {
+		return nil
+	}
+	return e.record(ctx, "seed", written...)
 }
 
 // CommonErrorsMarker heads the section of a bug's closing comment that names

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	pathpkg "path"
 	"sort"
 	"strings"
 	"time"
@@ -55,12 +56,15 @@ type MemoryQueryLog interface {
 const factSlugWords = 5
 
 // Memory is mw memory: the Mayor places, replaces and retires the facts of a
-// rig that is kept as facts. Each verb writes files and nothing else — no
-// commit, no push — and no verb deletes a fact, so a fact's reason outlives it.
-// (migrate removes the one memory file of a rig it has turned into facts, and
-// nothing else.)
+// rig that is kept as facts. A verb that changes a fact commits the files it
+// wrote, those alone, and pushes them when it has a Vault; no verb deletes a
+// fact, so a fact's reason outlives it. (migrate removes the one memory file of
+// a rig it has turned into facts, and nothing else.)
 type Memory struct {
 	Files RigFactFiles
+	// Vault commits and pushes what a verb wrote; nil leaves that to a person.
+	// A push that did not go is said on Warn.
+	Vault RecordVault
 	// Legacy and Head are what migrate needs: the rig's one memory file and the
 	// vault's HEAD, which names the source of a line that cites no bead.
 	Legacy RigLegacyFiles
@@ -193,16 +197,36 @@ func checkSlug(slug string) error {
 	return nil
 }
 
-func (m Memory) put(ctx context.Context, rig string, fact RigFact) error {
+// put writes a fact and reports its path from the vault's root.
+func (m Memory) put(ctx context.Context, rig string, fact RigFact) (string, error) {
 	if err := fact.validate(); err != nil {
-		return err
+		return "", err
 	}
 	path, err := m.Files.WriteRigFact(ctx, m.Seat, rig, fact.Slug, fact.String())
 	if err != nil {
-		return err
+		return "", err
 	}
 	fmt.Fprintln(m.Out, path)
-	return nil
+	return factPath(m.Seat, rig, fact.Slug), nil
+}
+
+// factPath is where a fact's file is, from the vault's root.
+func factPath(seat, rig, slug string) string {
+	return pathpkg.Join(SeatsDir, seat, RigsDir, rig, FactsDir, strings.TrimSuffix(slug, MemoryExt)+MemoryExt)
+}
+
+// record commits what the verb wrote, under "mw memory <subject>".
+func (m Memory) record(ctx context.Context, subject string, paths ...string) error {
+	return recordInVault(ctx, m.Vault, m.Warn, "mw memory "+subject, paths)
+}
+
+// putAndRecord is put then record, for the verbs that write one fact.
+func (m Memory) putAndRecord(ctx context.Context, rig string, fact RigFact, subject string) error {
+	path, err := m.put(ctx, rig, fact)
+	if err != nil {
+		return err
+	}
+	return m.record(ctx, subject, path)
 }
 
 // Add writes a new current fact.
@@ -235,10 +259,10 @@ func (m Memory) Add(ctx context.Context, req MemoryAdd) error {
 	if err := m.free(req.Rig, slug, files, facts); err != nil {
 		return err
 	}
-	return m.put(ctx, req.Rig, RigFact{
+	return m.putAndRecord(ctx, req.Rig, RigFact{
 		Slug: slug, Subject: req.Subject, Kind: req.Kind, Status: FactCurrent,
 		Source: req.Source, Since: m.today(), Sentence: strings.TrimSpace(req.Sentence),
-	})
+	}, "add "+req.Rig+" "+slug)
 }
 
 // free refuses a slug that already has a file, saying so plainly for a fact
@@ -295,10 +319,15 @@ func (m Memory) Supersede(ctx context.Context, req MemorySupersede) error {
 	if err := successor.validate(); err != nil {
 		return err
 	}
-	if err := m.put(ctx, req.Rig, successor); err != nil {
+	written, err := m.put(ctx, req.Rig, successor)
+	if err != nil {
 		return err
 	}
-	return m.put(ctx, req.Rig, old)
+	retired, err := m.put(ctx, req.Rig, old)
+	if err != nil {
+		return err
+	}
+	return m.record(ctx, "supersede "+req.Rig+" "+old.Slug+" with "+slug, written, retired)
 }
 
 // Retire keeps a fact's sentence and gives the reason it is no longer read.
@@ -318,7 +347,7 @@ func (m Memory) Retire(ctx context.Context, rig, slug, reason string) error {
 		return fmt.Errorf("the fact %q of the rig %s is already retired", slug, rig)
 	}
 	fact.Status, fact.Retired, fact.Reason = FactRetired, m.today(), strings.TrimSpace(reason)
-	return m.put(ctx, rig, fact)
+	return m.putAndRecord(ctx, rig, fact, "retire "+rig+" "+slug)
 }
 
 // Recheck flags a fact as in doubt, with why appended to its reason. A flagged
@@ -346,7 +375,7 @@ func (m Memory) Recheck(ctx context.Context, rig, slug, why string) error {
 		}
 		fact.Reason = why
 	}
-	return m.put(ctx, rig, fact)
+	return m.putAndRecord(ctx, rig, fact, "recheck "+rig+" "+slug)
 }
 
 // Demote keeps a current fact out of the boot render (boot: no). The fact stays
@@ -384,7 +413,7 @@ func (m Memory) Demote(ctx context.Context, rig, slug string) error {
 		return fmt.Errorf("no eval question finds %s; add one to eval.md first", slug)
 	}
 	fact.Unbooted = true
-	return m.put(ctx, rig, fact)
+	return m.putAndRecord(ctx, rig, fact, "demote "+rig+" "+slug)
 }
 
 // Promote puts a demoted fact back into the boot render.
@@ -401,7 +430,7 @@ func (m Memory) Promote(ctx context.Context, rig, slug string) error {
 		return fmt.Errorf("the fact %q of the rig %s is not demoted", slug, rig)
 	}
 	fact.Unbooted = false
-	return m.put(ctx, rig, fact)
+	return m.putAndRecord(ctx, rig, fact, "promote "+rig+" "+slug)
 }
 
 // statusRank puts the facts a Builder reads first.

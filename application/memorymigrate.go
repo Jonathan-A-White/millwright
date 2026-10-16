@@ -3,6 +3,7 @@ package application
 import (
 	"context"
 	"fmt"
+	pathpkg "path"
 	"regexp"
 	"sort"
 	"strings"
@@ -346,7 +347,7 @@ func (m Memory) migration(ctx context.Context, rig string, files RigMemoryFiles)
 // Migrate turns the one memory file a seat keeps of a rig, and its archive,
 // into an about text and one fact file each, the archive's lines retired with
 // the date and name of the heading they sat under. With DryRun it prints what
-// it would write and writes nothing. It runs no git command: the Mayor commits.
+// it would write and writes nothing. With a Vault it commits what it wrote and removed, and pushes.
 func (m Memory) Migrate(ctx context.Context, req MemoryMigrate) error {
 	if m.Legacy == nil {
 		return fmt.Errorf("mw memory migrate has no way to read the seat's memory files")
@@ -394,19 +395,30 @@ func (m Memory) Migrate(ctx context.Context, req MemoryMigrate) error {
 		return nil
 	}
 
+	var written []string
 	if mg.about != "" {
 		path, err := m.Legacy.WriteRigAbout(ctx, m.Seat, req.Rig, mg.about+"\n")
 		if err != nil {
 			return err
 		}
 		fmt.Fprintln(m.Out, path)
+		written = append(written, pathpkg.Join(SeatsDir, m.Seat, RigsDir, req.Rig, AboutFile))
 	}
 	for _, fact := range mg.facts {
-		if err := m.put(ctx, req.Rig, fact); err != nil {
+		path, err := m.put(ctx, req.Rig, fact)
+		if err != nil {
 			return err
 		}
+		written = append(written, path)
 	}
 	if err := m.Legacy.RemoveRigMemoryFiles(ctx, m.Seat, req.Rig); err != nil {
+		return err
+	}
+	// The two files migrate removed are recorded as gone with the rest.
+	written = append(written,
+		pathpkg.Join(SeatsDir, m.Seat, RigsDir, req.Rig+MemoryExt),
+		pathpkg.Join(SeatsDir, m.Seat, RigsDir, req.Rig+ArchiveSuffix+MemoryExt))
+	if err := m.record(ctx, "migrate "+req.Rig, written...); err != nil {
 		return err
 	}
 	for _, line := range mg.notPlaced {

@@ -21,8 +21,9 @@ func newErrorsCmd() *cobra.Command {
 		Long: "The register is seats/builder/common-errors/ in the vault: one file a class (symptom, cause,\n" +
 			"the sweep over the whole class, the kinds of rig it can occur in, the shared-component verdict\n" +
 			"and every rig checked, dated) and kinds.toml, the kinds of each rig. A Builder reads it by need,\n" +
-			"never at boot. These verbs are how the Mayor keeps it: each writes files and prints each file it\n" +
-			"wrote, spends no fuel, runs no git command and files nothing. A class found twice asks whether a\n" +
+			"never at boot. These verbs are how the Mayor and the seats keep it: each writes files, prints each\n" +
+			"file it wrote, commits those files alone and pushes them (a push that does not go is said on\n" +
+			"stderr, the commit kept), spends no fuel and files nothing. A class found twice asks whether a\n" +
 			"shared component would carry one fix to every rig; the Mayor weighs it and records the verdict.\n" +
 			"mw status lists, under ERROR CLASSES TO CHECK, the classes not yet checked in every rig of their kinds.",
 		Args: cobra.NoArgs,
@@ -42,7 +43,21 @@ func errorsFor(cmd *cobra.Command) (application.Errors, error) {
 	if err != nil {
 		return application.Errors{}, err
 	}
-	return application.Errors{Files: vault.New(dir), Seat: BuilderSeat, Seed: seed, Out: cmd.OutOrStdout()}, nil
+	files := recordingVault(dir)
+	return application.Errors{
+		Files: files, Seat: BuilderSeat, Seed: seed, Out: cmd.OutOrStdout(),
+		Vault: files, Warn: cmd.ErrOrStderr(),
+	}, nil
+}
+
+// recordingVault is the vault as a verb that records in it uses it: committing
+// under mw's name on this host when the host is known, and under the clone's
+// own when it is not, since these verbs never needed a host before.
+func recordingVault(dir string) *vault.Vault {
+	if host, err := config.Host(); err == nil {
+		return mwVault(dir, host)
+	}
+	return vault.New(dir)
 }
 
 func newErrorsAddCmd() *cobra.Command {
