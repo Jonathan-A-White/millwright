@@ -27,6 +27,7 @@ const (
 	WinRefusalRate    = "R4"
 	WinParFlag        = "R5"
 	WinGateSlow       = "R6"
+	WinInvestShare    = "R7"
 )
 
 // CheapWin is one suggestion a rule made over the report's numbers. Shown says
@@ -53,6 +54,8 @@ type WinInputs struct {
 	Gates []GateTrend
 	Kinds []KindCalibration
 	Heavy []HeavyStory
+	// Share is the window's investment share; nil for none.
+	Share *InvestShare
 }
 
 // CheapWins runs the rules in their fixed order and returns each that holds,
@@ -73,6 +76,7 @@ func CheapWins(in WinInputs) []CheapWin {
 	add(WinRefusalRate, winRefusalRate(in.Rigs))
 	add(WinParFlag, winParFlag(in.Kinds))
 	add(WinGateSlow, winGateSlow(in.Gates))
+	add(WinInvestShare, winInvestShare(in.Share))
 	for i := range wins {
 		wins[i].Shown = i < MaxCheapWins
 	}
@@ -122,7 +126,7 @@ func winDominantReason(rigs []ReportBlock) string {
 			continue
 		}
 		top := q.Reasons[0]
-		topShare := float64(top.Count) * 100 / float64(q.Refused)
+		topShare := 100 * fraction(float64(top.Count), float64(q.Refused))
 		if top.Count < WinDominantMin || topShare < WinDominantShare {
 			continue
 		}

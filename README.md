@@ -496,6 +496,16 @@ description names the landing's story id (`after mw-x landed`, `since mw-x`; `mw
 does not name `mw-x`). It is counted in the window it was filed in, once, under the
 rig, host and model of the newest landing it names.
 
+QUALITY ends with the INVESTMENTS line, for the whole factory (or what `--rig` and
+`--host` narrow it to): the landings whose story carries the label `investment` over
+all the landings, beside the window before, with its arrow, and the target,
+`INVESTMENTS 3/9 (33%) ↑, before 1/4 (25%), target 33%`. The target is `[factory]
+invest_share` of the config, a fraction (`mw config set factory.invest_share 0.2`),
+0.33 when unset. A share under half the target or over double it adds a line
+saying so (`under half the 33% target`) and is cheap win R7. `--json` has it under
+`invest_share`, in percent like the refusal rate. Every ratio the report prints
+reads 0 over nothing rather than failing.
+
 SPEED is read from the close-outs' benchmarks: `par x1.1 median, x2.5 p90` is the
 median and p90 (nearest rank) of actual over par across the block's landings, 1 at
 par; `dispatch to landing` the median wall time; and under a rig each host's, under
@@ -522,8 +532,8 @@ cause, naming their stories (the first 5, then `+N more`; `--json` has all under
 at least 3 of them; R3 a story that used up its attempts or needed 3; R4 a rig's
 refusal rate up 5 points or more on the window before; R5 a kind whose par is flagged
 by the calibration (its FLAG line); R6 a host's latest gate at least 1.5
-times its usual. When none holds it says `CHEAP WINS: none seen`. `--json` has
-`cheap_wins`, every rule that held with its `rule` id (`R1` to `R6`), its `text` and
+times its usual; R7 the investment share under half the target or over double it. When none holds it says `CHEAP WINS: none seen`. `--json` has
+`cheap_wins`, every rule that held with its `rule` id (`R1` to `R7`), its `text` and
 whether it was `shown`. The thresholds are PROVISIONAL. The section only suggests: it
 files nothing, and the bigger call stays the Mayor's.
 
@@ -552,7 +562,8 @@ bin/mw report send [--force] [--dry-run]
 A report nobody reads measures nothing, so `mw report send` posts the same numbers to
 the Governor's phone. It builds a summary of the last 7 days from the same report, in
 at most 14 lines of 60 columns: `Factory, 7 days to 2026-10-11`, then QUALITY (landed,
-refused and its rate, attempts and bugs per landing, escaped bugs), SPEED (par median and p90, the
+refused and its rate, attempts and bugs per landing, escaped bugs, the investment
+share against its target), SPEED (par median and p90, the
 wall time from dispatch to landing), FUEL (tokens and dollars per landing) and CHEAP
 WINS, in that order, each number with its arrow against the week before. It is sent
 as a plain message, with no bead and no class, to the Factory channel, and its txid is

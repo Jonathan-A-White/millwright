@@ -237,7 +237,7 @@ func (l *ReportLanding) measure(entries []reportEntry, rig, host string) {
 		if row.Before != nil && row.After != nil {
 			was, is := *row.Before, *row.After
 			if m.perDay {
-				was, is = was/float64(l.BeforeDays), is/float64(l.AfterDays)
+				was, is = fraction(was, float64(l.BeforeDays)), fraction(is, float64(l.AfterDays))
 			}
 			row.Change = landingChange(was, is, m.lowerIsBetter)
 		}
@@ -256,7 +256,7 @@ func landingChange(before, after float64, lowerIsBetter bool) string {
 	case before == 0:
 		return t.Verdict
 	}
-	return fmt.Sprintf("%+.0f%% %s", (after-before)*100/before, t.Verdict)
+	return fmt.Sprintf("%+.0f%% %s", 100*fraction(after-before, before), t.Verdict)
 }
 
 // String is mw report --since <landing> as it prints: what landed and when,

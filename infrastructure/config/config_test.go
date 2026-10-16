@@ -1,6 +1,8 @@
 package config_test
 
 import (
+	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -8,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/configfile"
 )
 
 // writeConfig puts a config file under a fresh home directory and makes it the
@@ -2460,6 +2464,33 @@ func TestTodoRanksAtSevenAndWeeksBeginOnMondayUntilTheTodoTableSaysOtherwise(t *
 		writeConfig(t, "[todo]\n"+bad+"\n")
 		if _, err := config.Todo(); err == nil || !strings.Contains(err.Error(), strings.Split(bad, " = ")[0]) {
 			t.Fatalf("expected %q refused, naming the key, got %v", bad, err)
+		}
+	}
+}
+
+// [factory] invest_share (mw-2zh33g.15) is the share of landings meant to be
+// investments: one in three until the config says otherwise, and mw config set
+// changes it.
+func TestFactoryInvestShareIsOneInThreeUntilConfigSetChangesIt(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\ninvest_share = 0.5\n")
+	if share, err := config.FactoryInvestShare(); err != nil || share != 0.33 {
+		t.Fatalf("expected the default 0.33, not a root-table key, got %v: %v", share, err)
+	}
+	path, err := config.FilePath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := application.ConfigSet{File: configfile.New(path), Out: io.Discard, Now: func() time.Time { return time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC) }}
+	if err := set.Run(context.Background(), "factory.invest_share", "0.2", false); err != nil {
+		t.Fatalf("mw config set factory.invest_share 0.2: %v", err)
+	}
+	if share, err := config.FactoryInvestShare(); err != nil || share != 0.2 {
+		t.Fatalf("expected the share mw config set wrote, 0.2, got %v: %v", share, err)
+	}
+	for _, bad := range []string{"0", "1.5", "-0.2", "\"lots\""} {
+		writeConfig(t, "[factory]\ninvest_share = "+bad+"\n")
+		if _, err := config.FactoryInvestShare(); err == nil {
+			t.Errorf("expected factory.invest_share = %s to be refused", bad)
 		}
 	}
 }

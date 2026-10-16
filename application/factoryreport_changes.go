@@ -284,7 +284,7 @@ func writeChanges(b *strings.Builder, changes []FactoryChange) {
 			format := changeMetrics[c.Expect.Metric].format
 			moved := ""
 			if *c.Before != 0 {
-				moved = fmt.Sprintf(" (%+.0f%%)", (*c.After-*c.Before)*100 / *c.Before)
+				moved = fmt.Sprintf(" (%+.0f%%)", 100*fraction(*c.After-*c.Before, *c.Before))
 			}
 			fmt.Fprintf(b, "  %s\n", fitLine(fmt.Sprintf("%s → %s%s: %s", format(*c.Before), format(*c.After), moved, c.Verdict), ReportWidth-2))
 		}

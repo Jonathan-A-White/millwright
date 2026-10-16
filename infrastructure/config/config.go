@@ -1088,6 +1088,38 @@ func SyncBeadsSquash() (bool, error) {
 	return on, nil
 }
 
+// FactoryTable is the table of the config file that holds the factory's own
+// targets, as mw report measures against them.
+const FactoryTable = "factory"
+
+// DefaultFactoryInvestShare is one landing in three an investment, while the
+// apps are young; application.DefaultInvestShare is the same number.
+const DefaultFactoryInvestShare = 0.33
+
+// FactoryInvestShare reports the share of landings meant to be investments,
+// the `invest_share` key of the [factory] table of ~/.config/mw/config.toml as
+// a fraction above 0 and at most 1; DefaultFactoryInvestShare when unset.
+func FactoryInvestShare() (float64, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return 0, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	table, err := tableIn(path, FactoryTable)
+	if err != nil {
+		return 0, err
+	}
+	said := strings.TrimSpace(table["invest_share"])
+	if said == "" {
+		return DefaultFactoryInvestShare, nil
+	}
+	share, err := strconv.ParseFloat(said, 64)
+	if err != nil || share <= 0 || share > 1 {
+		return 0, fmt.Errorf("the [%s] table of %s says invest_share = %q: it must be a fraction above 0 and at most 1, such as 0.33", FactoryTable, path, said)
+	}
+	return share, nil
+}
+
 // DispatchTable is the table of the config file that says how much room a host
 // must have before mw dispatch starts a story on it.
 const DispatchTable = "dispatch"

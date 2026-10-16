@@ -24,6 +24,9 @@ func newReportCmd() *cobra.Command {
 			"(mw cause), the [bug] stories filed and the Tester's findings, those two per landing, and\n" +
 			"the escaped bugs: [bug] stories of a landing's rig filed on its day or in the 14 days after,\n" +
 			"naming its story id, counted under the rig, host and model of that landing.\n" +
+			"QUALITY ends with INVESTMENTS: the landings labelled investment over all the landings, the\n" +
+			"window before, the arrow and the target ([factory] invest_share, 0.33 unless set; mw config\n" +
+			"set factory.invest_share 0.2), and a line when the share is under half or over double it.\n" +
 			"The window is --since (7d by default; a number of days, a day such as 2026-10-09, or a UTC\n" +
 			"time) to now; the window of the same length before it is computed too and is in --json.\n" +
 			"After QUALITY come SPEED (the median and p90 of actual over par, the wall time from dispatch\n" +
@@ -33,7 +36,8 @@ func newReportCmd() *cobra.Command {
 			"level inside 5%, and says better or worse by the measure. --rig and --host narrow every\n" +
 			"block. A ledger row whose story is gone counts under rig unknown. The report ends with CHEAP\n" +
 			"WINS: at most three one-line suggestions by fixed rules (causes unset, a dominant refusal\n" +
-			"reason, attempts used up, a refusal rate up, a flagged par, a slow gate), or 'none seen';\n" +
+			"reason, attempts used up, a refusal rate up, a flagged par, a slow gate, an investment share\n" +
+			"far off its target), or 'none seen';\n" +
 			"--json carries every rule that held. Between FUEL and CHEAP WINS is FACTORY CHANGES: each\n" +
 			"millwright landing of the last 30 days with the 'Expect: <metric> <up|down>' line of its\n" +
 			"acceptance, that metric for the whole factory in the 7 days before and the 7 days after the\n" +
@@ -71,6 +75,10 @@ func newReportCmd() *cobra.Command {
 					factoryDir = rigs[application.FactoryRig]
 				}
 			}
+			share, err := config.FactoryInvestShare()
+			if err != nil {
+				return err
+			}
 			files := mwVault(dir, here)
 			_, err = application.FactoryReport{
 				Tracker:     mwGateway(dir, here),
@@ -82,6 +90,7 @@ func newReportCmd() *cobra.Command {
 				Commits:     rig.New(),
 				FactoryDir:  factoryDir,
 				Investments: files,
+				InvestShare: share,
 				Rig:         rigName,
 				Host:        host,
 				JSON:        asJSON,
