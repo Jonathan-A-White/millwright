@@ -16,7 +16,7 @@
 #   5  rig        the millwright rig (this checkout, or cloned to $MW_HOME), then scripts/install.sh:
 #                 Go and bd at the pinned versions, mw built and linked into ~/.local/bin
 #   6  claude     Claude Code (npm, into ~/.local) and ~/.config/mw/claude.env (CLAUDE_CODE_OAUTH_TOKEN=...)
-#   7  vault      the vault cloned to BOOST_VAULT
+#   7  vault      the vault cloned to BOOST_VAULT, its .beads made mode 700 (bd warns at any other)
 #   8  rigs       every rig in BOOST_RIGS cloned beside it
 #                 A checkout already there (5, 7, 8: a box made from a snapshot has them all) is checked
 #                 with git status and git fsck --connectivity-only, and for empty object files; a broken
@@ -608,9 +608,19 @@ clone_into() { # <url> <dir>
 		GH_TOKEN="${BOOST_GITHUB_TOKEN}" git clone "$1" "$2" || die "could not clone $1 (a private repo needs BOOST_GITHUB_TOKEN)"
 	fi
 }
+# bd warns on every call while the vault's .beads is any mode but 700, and a
+# clone makes it at the umask's (mw-gq6.451).
 s_vault() {
+	local beads=$BOOST_VAULT/.beads
 	step vault "$BOOST_VAULT"
 	clone_into "$BOOST_VAULT_REPO" "$BOOST_VAULT"
+	if [ "$DRY" = 0 ] && [ ! -d "$beads" ]; then
+		skip "the vault has no .beads"
+	elif [ -d "$beads" ] && [ "$(stat -c %a "$beads")" = 700 ]; then
+		skip "$beads is mode 700"
+	elif act "chmod 700 $beads (bd warns on every call at any other mode)"; then
+		chmod 700 "$beads"
+	fi
 }
 
 # --- 8. the rigs ------------------------------------------------------------------
