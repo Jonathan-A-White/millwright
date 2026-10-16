@@ -909,7 +909,11 @@ what Builders propose in their closing comments (a session never edits it, but a
 stray edit is committed all the same), so a close-out that left them uncommitted
 would stop its own sync and every later one. The run record is committed so that the evidence behind a ledger
 line's fuel travels to the other host with the line; `runs/<story>/boot.md` beside
-it is never committed. A run record that is not there is said so in the report,
+it is never committed. Neither are the run's other leftovers — its result's
+`.tmp`, `next-<n>.log`, `check-<n>.log` — nor `metrics/` and the seats' dot
+files beside the vault: the `.gitignore` `mw init` lays names each of them, so
+git status of the vault is quiet after a run (features/vault_leftovers.feature).
+A run record that is not there is said so in the report,
 and the other two are committed all the same. Anything else
 uncommitted in the vault is still somebody else's to commit, and the sync's
 vault half still refuses because of it, naming the file — the story is landed and closed all the

@@ -1,8 +1,44 @@
-
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db
 .beads-credential-key
-.mayor-launch.sh
-.mayor-acting
-.mayor-reaper.log
+
+# bd backup's per-host config and state (mw-82vdd.6)
+.beads/dolt-backup*.json
+
+# Per-host Claude Code allow rules: local to each host, never committed
+.claude/settings.local.json
+
+# What the factory writes into the vault and never commits (mw-gq6.461), so
+# that git status of the vault is quiet after a run. What mw does commit (a
+# run's result, landing-error.txt, gate logs, close-out-unrecorded.json,
+# attempt bundles, runs/batch/, runs/suite/) is never named here.
+
+# A run's boot file, written by mw dispatch (README, Booting a session into a seat)
+runs/*/boot.md
+runs/*/boot-*.md
+# The temp file a session's result is redirected into, left when the session is killed
+runs/*/result.json.tmp
+runs/*/result-*.json.tmp
+# The close-out's own log, kept by the session's launch line
+runs/*/next-*.log
+# mw check's whole output
+runs/*/check-*.log
+# mw todo rank's pass logs
+runs/todo-rank/
+
+# The key metrics: mw report send's daily line and mw land's batch lines, kept per host
+/metrics/
+
+# A seat's host-local files beside the vault: its acting file (and the temp it
+# is written through), its reaper and talk logs, and the launch script and
+# settings the vault's own scripts start its session with
+/.*-acting
+/.*-acting.tmp
+/.*-reaper.log
+/.*-talk.log
+/.*-launch.sh
+/.*-settings.json
+
+# Python's bytecode cache, beside the vault's scripts
+__pycache__/
