@@ -3,6 +3,7 @@ package application_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -223,5 +224,229 @@ func TestDigestJobSendsOncePerMondayAndOnlyOnTheHome(t *testing.T) {
 	}
 	if sends != 1 {
 		t.Fatalf("sent %d times, want 1", sends)
+	}
+}
+
+// fakeLoop is the Factory loop section's source: whatever the test lays out.
+type fakeLoop struct {
+	in    application.LoopInputs
+	err   error
+	reads int
+}
+
+func (l *fakeLoop) Gather(context.Context) (application.LoopInputs, error) {
+	l.reads++
+	return l.in, l.err
+}
+
+// loopWeek is a week with two picks, one KEPT verdict, one outcome and a share
+// of 33% with a bound, all dated inside the window 2026-10-12 to 2026-10-19,
+// beside a pick, a verdict and an outcome dated outside it.
+func loopWeek() application.LoopInputs {
+	day := func(d int) time.Time { return time.Date(2026, 10, d, 9, 0, 0, 0, time.UTC) }
+	pick := func(id, title, acceptance string, created time.Time) application.StoryDetail {
+		return application.StoryDetail{Story: domain.Story{ID: id, Title: title}, Labels: []string{application.LabelInvestment},
+			Acceptance: acceptance, Created: created}
+	}
+	return application.LoopInputs{
+		Result: application.FactoryReportResult{
+			Window: application.ReportWindow{Since: day(12), Until: day(19)},
+			Changes: []application.FactoryChange{
+				{Story: "mw-old.1", Title: "Shorter formula", Verdict: application.ChangeKept, AfterEnds: "2026-10-15"},
+				{Story: "mw-old.2", Title: "Earlier change", Verdict: application.ChangeWorse, AfterEnds: "2026-10-05"},
+				{Story: "mw-old.3", Title: "Too soon to say", Verdict: application.ChangeNoData, AfterEnds: "2026-10-16"},
+			},
+			InvestShare: &application.InvestShare{Invested: 3, Landed: 9, Share: 33.3, Target: 33, Min: 10, Max: 33,
+				Bound: application.BoundMax, Reason: "quality falling: refusals 10% -> 20%"},
+		},
+		Investments: []application.Investment{
+			{Made: application.InvestmentRecord{Kind: application.RecordInvestment, Bead: "mw-inv.1", At: day(1)},
+				Outcomes: []application.InvestmentRecord{{Kind: application.RecordOutcome, Bead: "mw-inv.1", At: day(14),
+					Result: application.ResultWin, Lesson: "the shorter formula saved a third of the attempts " + strings.Repeat("y", 100)}}},
+			{Made: application.InvestmentRecord{Kind: application.RecordInvestment, Bead: "mw-inv.2", At: day(1)},
+				Outcomes: []application.InvestmentRecord{{Kind: application.RecordOutcome, Bead: "mw-inv.2", At: day(5),
+					Result: application.ResultLoss, Lesson: "outside the window"}}},
+		},
+		Picks: []application.StoryDetail{
+			pick("mw-pick.1", "Faster gate", "1. It is faster.\nExpect: dispatch-to-landing down", day(13)),
+			pick("mw-pick.2", "Fewer refusals", "1. Fewer.\n2. Expect: refusals down", day(15)),
+			pick("mw-pick.3", "Last month's pick", "Expect: tokens/landing down", time.Date(2026, 9, 20, 9, 0, 0, 0, time.UTC)),
+		},
+		Now: day(19),
+	}
+}
+
+func (f *digestFixture) runLoop(t *testing.T, dryRun bool, loop application.LoopSource) application.DigestReport {
+	t.Helper()
+	report, err := application.Digest{
+		Tracker: f.tracker, Sender: f.sender, Parent: "mw-6ww.119", DryRun: dryRun, Loop: loop,
+		Now: func() time.Time { return time.Date(2026, 10, 19, 11, 0, 0, 0, time.UTC) },
+		Out: &f.out,
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatalf("mw digest send: %v", err)
+	}
+	return report
+}
+
+func TestDigestCardCarriesTheFactoryLoopSectionAfterTheDemos(t *testing.T) {
+	f := newDigestFixture()
+	f.threeDemos(t)
+
+	f.runLoop(t, false, &fakeLoop{in: loopWeek()})
+
+	sent := f.sender.Sent()
+	if len(sent) != 1 {
+		t.Fatalf("sent %d cards, want one", len(sent))
+	}
+	text := sent[0].Text
+	// Each in its place, in this order, full ids present.
+	order := []string{"mw-e.2", "Factory loop", "PICKS", "mw-pick.1", "Faster gate", "Expect: dispatch-to-landing down",
+		"mw-pick.2", "Expect: refusals down", "VERDICTS", "KEPT", "Shorter formula", "mw-old.1", "mw-inv.1", "win",
+		"the shorter formula saved a third of the attempts", "SHARE", "INVESTMENTS 3/9 (33%)", "bound: up to 33% allowed (quality falling"}
+	at := 0
+	for _, want := range order {
+		i := strings.Index(text[at:], want)
+		if i < 0 {
+			t.Fatalf("the card does not hold %q after position %d:\n%s", want, at, text)
+		}
+		at += i + len(want)
+	}
+	for _, not := range []string{"mw-pick.3", "mw-old.2", "mw-old.3", "mw-inv.2", strings.Repeat("y", 100)} {
+		if strings.Contains(text, not) {
+			t.Fatalf("the card holds %q, which is not this week's:\n%s", not, text)
+		}
+	}
+	if strings.Contains(text, "moved to") {
+		t.Fatalf("the card says the share moved with no digest before it:\n%s", text)
+	}
+}
+
+func TestDigestCardKeepsItsOptionTexts(t *testing.T) {
+	f := newDigestFixture()
+	f.threeDemos(t)
+
+	f.runLoop(t, false, &fakeLoop{in: loopWeek()})
+
+	card := f.sender.Sent()[0]
+	if got, want := strings.Join(card.Options, "|"), "A: Looks good on all 2|B: Hold, I'll name which"; got != want {
+		t.Fatalf("the card offers %q, want %q", got, want)
+	}
+	if card.Recommend != "A: Looks good on all 2" {
+		t.Fatalf("the card recommends %q", card.Recommend)
+	}
+}
+
+func TestDigestWithNoDemosButAPickStillGoesOut(t *testing.T) {
+	f := newDigestFixture()
+	in := loopWeek()
+	in.Picks = in.Picks[:1]
+	in.Result.Changes, in.Investments = nil, nil
+
+	report := f.runLoop(t, false, &fakeLoop{in: in})
+
+	sent := f.sender.Sent()
+	if report.Bead == "" || len(sent) != 1 {
+		t.Fatalf("filed %q and sent %d cards, want the card out", report.Bead, len(sent))
+	}
+	for _, want := range []string{"no factory demos this week", "Factory loop", "mw-pick.1"} {
+		if !strings.Contains(sent[0].Text, want) {
+			t.Fatalf("the card does not hold %q:\n%s", want, sent[0].Text)
+		}
+	}
+	if strings.Contains(sent[0].Text, "mw-pick.2") {
+		t.Fatalf("the card holds the pick left out:\n%s", sent[0].Text)
+	}
+}
+
+func TestDigestWithNoDemosAndNoLoopContentSendsNothing(t *testing.T) {
+	f := newDigestFixture()
+	in := loopWeek()
+	in.Picks, in.Investments = nil, nil
+	in.Result.Changes = []application.FactoryChange{{Story: "mw-old.3", Title: "Too soon", Verdict: application.ChangeNoData, AfterEnds: "2026-10-16"}}
+	writes := f.tracker.Writes()
+
+	report := f.runLoop(t, false, &fakeLoop{in: in})
+
+	if report.Bead != "" || f.tracker.Writes() != writes || len(f.sender.Sent()) != 0 {
+		t.Fatalf("filed %q, %d writes, %d cards, with nothing to digest", report.Bead, f.tracker.Writes()-writes, len(f.sender.Sent()))
+	}
+	if !strings.Contains(f.out.String(), "nothing to digest") {
+		t.Fatalf("the output does not say nothing to digest:\n%s", f.out.String())
+	}
+}
+
+func TestDigestSaysTheShareMovedSinceThePreviousDigestBead(t *testing.T) {
+	f := newDigestFixture()
+	f.threeDemos(t)
+	f.tracker.AddStory("mw-6ww.119", domain.Story{ID: "mw-6ww.119.1", Title: "Weekly digest 2026-10-12: 2 factory demos"})
+	description := "- mw-x.1: Demo\n  VERIFIED\ninvest_share: 25%\n"
+	mustDo(t, f.tracker.EditStory(context.Background(), "mw-6ww.119.1", application.StoryEdit{Description: &description}))
+	mustDo(t, f.tracker.SetCreated("mw-6ww.119.1", time.Date(2026, 10, 12, 11, 0, 0, 0, time.UTC)))
+
+	report := f.runLoop(t, false, &fakeLoop{in: loopWeek()})
+
+	if text := f.sender.Sent()[0].Text; !strings.Contains(text, "moved to 33% on 2026-10-19") {
+		t.Fatalf("the SHARE line does not say the share moved to 33%%:\n%s", text)
+	}
+	created, err := f.tracker.ShowStory(context.Background(), report.Bead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(created.Description, "invest_share: 33%") {
+		t.Fatalf("the digest bead does not record the share it saw:\n%s", created.Description)
+	}
+	// The batch-close path reads the demos off the lines that begin "- ":
+	// the share line must not be one of them.
+	for _, line := range strings.Split(created.Description, "\n") {
+		if strings.HasPrefix(line, "- ") && !strings.HasPrefix(line, "- mw-e.1:") && !strings.HasPrefix(line, "- mw-e.2:") {
+			t.Fatalf("the description has a listed line that is no demo: %q", line)
+		}
+	}
+}
+
+func TestDigestSaysNothingOfAMoveWhenTheShareIsTheSame(t *testing.T) {
+	f := newDigestFixture()
+	f.threeDemos(t)
+	f.tracker.AddStory("mw-6ww.119", domain.Story{ID: "mw-6ww.119.1", Title: "Weekly digest 2026-10-12: 2 factory demos"})
+	description := "invest_share: 33%\n"
+	mustDo(t, f.tracker.EditStory(context.Background(), "mw-6ww.119.1", application.StoryEdit{Description: &description}))
+
+	f.runLoop(t, false, &fakeLoop{in: loopWeek()})
+
+	if text := f.sender.Sent()[0].Text; strings.Contains(text, "moved to") {
+		t.Fatalf("the card says the share moved when it did not:\n%s", text)
+	}
+}
+
+func TestDigestDryRunPrintsTheWholeCardAndCreatesAndSendsNothing(t *testing.T) {
+	f := newDigestFixture()
+	f.threeDemos(t)
+	writes := f.tracker.Writes()
+
+	report := f.runLoop(t, true, &fakeLoop{in: loopWeek()})
+
+	if report.Bead != "" || f.tracker.Writes() != writes || len(f.sender.Sent()) != 0 {
+		t.Fatalf("a dry run filed %q, %d writes, %d cards", report.Bead, f.tracker.Writes()-writes, len(f.sender.Sent()))
+	}
+	for _, want := range []string{"Factory loop", "mw-pick.1", "mw-old.1", "mw-inv.1", "SHARE", "A: Looks good on all 2"} {
+		if !strings.Contains(f.out.String(), want) {
+			t.Fatalf("the dry run does not print %q:\n%s", want, f.out.String())
+		}
+	}
+}
+
+func TestDigestGoesOutWithTheDemosWhenTheLoopCannotBeRead(t *testing.T) {
+	f := newDigestFixture()
+	f.threeDemos(t)
+
+	f.runLoop(t, false, &fakeLoop{err: errors.New("the report would not run")})
+
+	sent := f.sender.Sent()
+	if len(sent) != 1 || strings.Contains(sent[0].Text, "Factory loop") {
+		t.Fatalf("sent %d cards; want the demos' card without the section", len(sent))
+	}
+	if !strings.Contains(f.out.String(), "the report would not run") {
+		t.Fatalf("the output does not say why the loop section is missing:\n%s", f.out.String())
 	}
 }

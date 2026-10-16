@@ -4,9 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // LabelDigest marks a demo the Mayor has verified himself, after writing
@@ -44,6 +49,9 @@ type Digest struct {
 	// Parent is the bead the digest is filed under; empty is
 	// DigestDefaultParent.
 	Parent string
+	// Loop, when set, is where the card's Factory loop section is read from
+	// (mw loop brief's inputs); nil leaves the section out.
+	Loop LoopSource
 	// DryRun prints the card and files and sends nothing.
 	DryRun bool
 	// Now dates the digest's title; nil reads the real clock.
@@ -107,19 +115,20 @@ func (d Digest) Run(ctx context.Context) (DigestReport, error) {
 	for _, id := range report.LeftOut {
 		d.say("%s: not verified, left out\n", id)
 	}
-	if len(report.Listed) == 0 {
+	section := d.loopSection(ctx)
+	if len(report.Listed) == 0 && !section.hasContent() {
 		d.say("nothing to digest\n")
 		return report, nil
 	}
 
-	card := d.card(report.Listed)
+	card := d.card(report.Listed, section)
 	if d.DryRun {
 		d.say("dry run: would file %q under %s and send:\n%s\noptions: %s (recommended), %s\n",
 			d.title(len(report.Listed)), d.parent(), card.Text, card.Options[0], card.Options[1])
 		return report, nil
 	}
 	id, err := d.Tracker.CreateStory(ctx, NewStory{
-		EpicID: d.parent(), Title: d.title(len(report.Listed)), Description: digestDescription(report.Listed),
+		EpicID: d.parent(), Title: d.title(len(report.Listed)), Description: digestDescription(report.Listed, section.seen),
 	})
 	if err != nil {
 		return report, fmt.Errorf("filing the weekly digest: %w", err)
@@ -141,26 +150,169 @@ func (d Digest) Run(ctx context.Context) (DigestReport, error) {
 }
 
 // card is the decision card naming each listed demo by its full id, so each
-// shows as a chip; its Bead is set once the digest is filed.
-func (d Digest) card(listed []DigestEntry) PosternSendRequest {
-	lines := make([]string, 0, len(listed))
-	for _, e := range listed {
-		lines = append(lines, fmt.Sprintf("- %s: %s", e.ID, e.Title))
+// shows as a chip, then the Factory loop section; its Bead is set once the
+// digest is filed.
+func (d Digest) card(listed []DigestEntry, section digestLoop) PosternSendRequest {
+	var text string
+	if len(listed) == 0 {
+		text = "Weekly digest: no factory demos this week.\nA closes this digest; B holds it and I ask."
+	} else {
+		lines := make([]string, 0, len(listed))
+		for _, e := range listed {
+			lines = append(lines, fmt.Sprintf("- %s: %s", e.ID, e.Title))
+		}
+		text = fmt.Sprintf("Weekly digest: %d factory demos I verified myself.\n%s\nA closes them all; B holds them and I ask which.",
+			len(listed), strings.Join(lines, "\n"))
 	}
-	text := fmt.Sprintf("Weekly digest: %d factory demos I verified myself.\n%s\nA closes them all; B holds them and I ask which.",
-		len(listed), strings.Join(lines, "\n"))
+	if loop := section.text(); loop != "" {
+		text += "\n\n" + loop
+	}
 	looksGood := DigestLooksGoodOption(len(listed))
 	return PosternSendRequest{
 		Class: "decision-needed", Text: text, Recommend: looksGood, Options: []string{looksGood, DigestHoldOption},
 	}
 }
 
-func (d Digest) title(n int) string {
-	now := time.Now
-	if d.Now != nil {
-		now = d.Now
+// DigestLoopClip is how many characters of a pick's title and of an outcome's
+// lesson the Factory loop section quotes.
+const DigestLoopClip = 80
+
+// DigestShareKey begins the line of a digest bead's description that records
+// the investment target the digest saw, in percent: "invest_share: 33%".
+const DigestShareKey = "invest_share: "
+
+// digestLoop is the card's Factory loop section, laid out from the loop's
+// inputs. The zero value is a section not read.
+type digestLoop struct {
+	read                   bool
+	picks, verdicts, share []string
+	// seen is the target in percent as the digest bead's description records
+	// it; empty when the report carried no share.
+	seen string
+}
+
+// hasContent says the section has a pick or a verdict: the share alone does not
+// make a week worth a card.
+func (s digestLoop) hasContent() bool { return len(s.picks) > 0 || len(s.verdicts) > 0 }
+
+// text is the section under the heading "Factory loop"; empty when not read.
+func (s digestLoop) text() string {
+	if !s.read {
+		return ""
 	}
-	return fmt.Sprintf("Weekly digest %s: %d factory demos", now().UTC().Format(time.DateOnly), n)
+	var b strings.Builder
+	b.WriteString("Factory loop\n")
+	part := func(heading string, lines []string, none string) {
+		b.WriteString(heading + "\n")
+		if len(lines) == 0 {
+			lines = []string{"  " + none}
+		}
+		for _, l := range lines {
+			b.WriteString(l + "\n")
+		}
+	}
+	part("PICKS", s.picks, "none filed this week")
+	part("VERDICTS", s.verdicts, "none reached 14 days or recorded this week")
+	part("SHARE", s.share, "no share read")
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// loopSection reads the Factory loop section from d.Loop. A loop that cannot be
+// read is said in Out and leaves the section out, so that the demos' card still
+// goes out.
+func (d Digest) loopSection(ctx context.Context) digestLoop {
+	if d.Loop == nil {
+		return digestLoop{}
+	}
+	in, err := d.Loop.Gather(ctx)
+	if err != nil {
+		d.say("the factory loop section is left out: %v\n", err)
+		return digestLoop{}
+	}
+	brief := ReadLoopBrief(in)
+	r := in.Result
+	s := digestLoop{read: true}
+
+	picks := append([]StoryDetail(nil), in.Picks...)
+	sort.SliceStable(picks, func(i, j int) bool { return picks[i].Created.Before(picks[j].Created) })
+	for _, p := range picks {
+		if !r.inWindowDay(p.Created.UTC().Format(LedgerDate)) {
+			continue
+		}
+		expect := "no Expect line"
+		if lines := domain.LinesBeginning(p.Acceptance, "Expect"); len(lines) > 0 {
+			expect = "Expect: " + strings.TrimSpace(lines[0])
+		}
+		s.picks = append(s.picks, fmt.Sprintf("- %s: %s — %s", p.Story.ID, clipRunes(strings.TrimSpace(p.Story.Title), DigestLoopClip), expect))
+	}
+
+	for _, c := range brief.Verdicts.Changes {
+		if c.Verdict == ChangeKept || c.Verdict == ChangeWorse {
+			s.verdicts = append(s.verdicts, fmt.Sprintf("- %s %s (%s)", c.Verdict, clipRunes(strings.TrimSpace(c.Title), DigestLoopClip), c.Story))
+		}
+	}
+	for _, inv := range in.Investments {
+		for _, o := range inv.Outcomes {
+			if r.inWindowDay(o.At.UTC().Format(LedgerDate)) {
+				s.verdicts = append(s.verdicts, fmt.Sprintf("- %s %s: %s", o.Bead, o.Result,
+					clipRunes(strings.Join(strings.Fields(o.Lesson), " "), DigestLoopClip)))
+			}
+		}
+	}
+
+	for _, line := range brief.Share.Lines {
+		s.share = append(s.share, "  "+strings.TrimSpace(line))
+	}
+	if brief.Share.Bound != "" {
+		s.share = append(s.share, "  "+brief.Share.Bound)
+	}
+	if r.InvestShare != nil {
+		s.seen = percentText(r.InvestShare.Target)
+		if was, recorded := d.previousShare(ctx); recorded && math.Abs(was-r.InvestShare.Target) > 0.05 {
+			s.share = append(s.share, fmt.Sprintf("  moved to %s on %s", s.seen, d.now().UTC().Format(time.DateOnly)))
+		}
+	}
+	return s
+}
+
+// previousShare is the investment target the newest weekly digest bead under
+// the parent recorded in its description, and whether it recorded one.
+func (d Digest) previousShare(ctx context.Context) (float64, bool) {
+	epic, err := d.Tracker.ShowEpic(ctx, d.parent())
+	if err != nil {
+		d.say("the share the previous digest saw is not known: %v\n", err)
+		return 0, false
+	}
+	var newest *StoryDetail
+	for i, bead := range epic.Stories {
+		if bead.IsEpic || !isDigest(bead) {
+			continue
+		}
+		if newest == nil || !bead.Created.Before(newest.Created) {
+			newest = &epic.Stories[i]
+		}
+	}
+	if newest == nil {
+		return 0, false
+	}
+	for _, line := range strings.Split(newest.Description, "\n") {
+		if rest, ok := strings.CutPrefix(line, DigestShareKey); ok {
+			v, err := strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(rest), "%"), 64)
+			return v, err == nil
+		}
+	}
+	return 0, false
+}
+
+func (d Digest) now() time.Time {
+	if d.Now != nil {
+		return d.Now()
+	}
+	return time.Now()
+}
+
+func (d Digest) title(n int) string {
+	return fmt.Sprintf("Weekly digest %s: %d factory demos", d.now().UTC().Format(time.DateOnly), n)
 }
 
 func (d Digest) parent() string {
@@ -177,11 +329,16 @@ func (d Digest) say(format string, args ...any) {
 }
 
 // digestDescription is the digest bead's description: each demo's full id,
-// title and VERIFIED line.
-func digestDescription(listed []DigestEntry) string {
+// title and VERIFIED line, then the investment target the digest saw (seen, in
+// percent) when there is one, for the next digest to compare. The line is not
+// a listed demo (digestListed).
+func digestDescription(listed []DigestEntry, seen string) string {
 	var b strings.Builder
 	for _, e := range listed {
 		fmt.Fprintf(&b, "- %s: %s\n  %s\n", e.ID, e.Title, e.Verified)
+	}
+	if seen != "" {
+		b.WriteString(DigestShareKey + seen + "\n")
 	}
 	return b.String()
 }

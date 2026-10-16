@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
@@ -43,8 +44,13 @@ func newDigestSendCmd() *cobra.Command {
 			"--parent (default " + application.DigestDefaultParent + ") listing each one's id, title and VERIFIED line, and sends one\n" +
 			"decision-needed card on it naming each demo by its full id, offering 'A: Looks good on all N'\n" +
 			"(recommended) and '" + application.DigestHoldOption + "'. A labelled demo with no VERIFIED comment is\n" +
-			"printed as not verified, left out. With none to list it prints 'nothing to digest' and sends\n" +
-			"nothing. --dry-run prints the card and files and sends nothing.",
+			"printed as not verified, left out. After the demos the card carries a 'Factory loop' section read\n" +
+			"as mw loop brief reads it: PICKS (the investment stories filed in the last 7 days, each with its\n" +
+			"Expect line), VERDICTS (factory changes that reached 14 days with KEPT or WORSE, and the mw invest\n" +
+			"outcomes recorded) and SHARE (the investment line and its bound, with 'moved to N% on <date>' when\n" +
+			"the target differs from the one the previous digest bead recorded). With no demos but a pick or a\n" +
+			"verdict the card still goes out, saying 'no factory demos this week'; with neither it prints\n" +
+			"'nothing to digest' and sends nothing. --dry-run prints the card and files and sends nothing.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := config.Vault()
@@ -56,9 +62,14 @@ func newDigestSendCmd() *cobra.Command {
 				return err
 			}
 			gateway := mwGateway(dir, here)
+			loop, err := newDigestLoop(dir, here)
+			if err != nil {
+				return err
+			}
 			_, err = application.Digest{
 				Tracker: gateway,
 				Sender:  newDigestSender(gateway),
+				Loop:    loop,
 				Parent:  parent,
 				DryRun:  dryRun,
 				Out:     cmd.OutOrStdout(),
@@ -86,7 +97,11 @@ func digestSpringJob(host string, out io.Writer) (application.SpringJob, error) 
 			return application.IsHome(ctx, mwVault(dir, host), host)
 		},
 		Send: func(ctx context.Context) error {
-			_, err := application.Digest{Tracker: gateway, Sender: newDigestSender(gateway), Out: out}.Run(ctx)
+			loop, err := newDigestLoop(dir, host)
+			if err != nil {
+				return fmt.Errorf("mw digest send: %w", err)
+			}
+			_, err = application.Digest{Tracker: gateway, Sender: newDigestSender(gateway), Loop: loop, Out: out}.Run(ctx)
 			if err != nil {
 				return fmt.Errorf("mw digest send: %w", err)
 			}
@@ -95,4 +110,15 @@ func digestSpringJob(host string, out io.Writer) (application.SpringJob, error) 
 		Err: out,
 	}
 	return weekly.Job(), nil
+}
+
+// newDigestLoop is the digest card's Factory loop section's source: the loop
+// brief's reads over the default window, with the investment stories filed in it.
+func newDigestLoop(dir, here string) (application.LoopSource, error) {
+	run, err := newLoopBriefRun(dir, here, time.Time{})
+	if err != nil {
+		return nil, err
+	}
+	run.Picks = true
+	return run, nil
 }

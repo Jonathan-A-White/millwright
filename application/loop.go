@@ -44,7 +44,16 @@ type LoopInputs struct {
 	Ideas       []ImprovementIdea
 	// HaveIdeas says the improvements ledger exists.
 	HaveIdeas bool
-	Now       time.Time
+	// Picks are the stories labelled LabelInvestment filed or changed since the
+	// window began, read only when LoopBriefRun.Picks asks for them (the digest does).
+	Picks []StoryDetail
+	Now   time.Time
+}
+
+// LoopSource is what the weekly digest reads its Factory loop section from:
+// the one set of inputs the brief is made of. LoopBriefRun is the real one.
+type LoopSource interface {
+	Gather(ctx context.Context) (LoopInputs, error)
 }
 
 // LoopQualitySpeedFuel is the brief's first part: the summary lines of mw
@@ -293,43 +302,18 @@ type LoopBriefRun struct {
 	Seat         string
 	Investments  InvestmentBook
 	Improvements ImprovementBook
-	JSON         bool
-	Out          io.Writer
+	// Picks asks Gather to read the investment stories since the window began
+	// too, as the digest's PICKS: one more read of the tracker, none of the report.
+	Picks bool
+	JSON  bool
+	Out   io.Writer
 }
 
 // Run reads and prints the brief.
 func (l LoopBriefRun) Run(ctx context.Context) (LoopBrief, error) {
-	report := l.Report
-	report.Out, report.JSON = nil, false
-	report.Notes, report.Mailbox, report.Snapshots = nil, nil, nil
-	result, err := report.Run(ctx)
+	in, err := l.Gather(ctx)
 	if err != nil {
 		return LoopBrief{}, err
-	}
-	now := time.Now()
-	if report.Now != nil {
-		now = report.Now()
-	}
-	in := LoopInputs{Result: result, Now: now}
-	if l.Errors != nil {
-		files, _, err := l.Errors.ReadErrorRegister(ctx, l.Seat)
-		if err != nil {
-			return LoopBrief{}, fmt.Errorf("reading the error register: %w", err)
-		}
-		in.Classes, _ = LoadErrorClasses(files)
-	}
-	if l.Investments != nil {
-		records, err := l.Investments.Investments(ctx)
-		if err != nil {
-			return LoopBrief{}, fmt.Errorf("reading the investments: %w", err)
-		}
-		in.Investments = GroupInvestments(records)
-	}
-	if l.Improvements != nil {
-		in.Ideas, in.HaveIdeas, err = l.Improvements.Improvements(ctx)
-		if err != nil {
-			return LoopBrief{}, fmt.Errorf("reading the improvements ledger: %w", err)
-		}
 	}
 	brief := ReadLoopBrief(in)
 	if l.Out != nil {
@@ -341,4 +325,54 @@ func (l LoopBriefRun) Run(ctx context.Context) (LoopBrief, error) {
 		fmt.Fprint(l.Out, brief.String())
 	}
 	return brief, nil
+}
+
+// Gather builds the one report result and reads the register, the investments
+// and the improvements beside it: every input of the brief, and of the digest's
+// Factory loop section. The report is run once.
+func (l LoopBriefRun) Gather(ctx context.Context) (LoopInputs, error) {
+	report := l.Report
+	report.Out, report.JSON = nil, false
+	report.Notes, report.Mailbox, report.Snapshots = nil, nil, nil
+	result, err := report.Run(ctx)
+	if err != nil {
+		return LoopInputs{}, err
+	}
+	now := time.Now()
+	if report.Now != nil {
+		now = report.Now()
+	}
+	in := LoopInputs{Result: result, Now: now}
+	if l.Errors != nil {
+		files, _, err := l.Errors.ReadErrorRegister(ctx, l.Seat)
+		if err != nil {
+			return LoopInputs{}, fmt.Errorf("reading the error register: %w", err)
+		}
+		in.Classes, _ = LoadErrorClasses(files)
+	}
+	if l.Investments != nil {
+		records, err := l.Investments.Investments(ctx)
+		if err != nil {
+			return LoopInputs{}, fmt.Errorf("reading the investments: %w", err)
+		}
+		in.Investments = GroupInvestments(records)
+	}
+	if l.Improvements != nil {
+		in.Ideas, in.HaveIdeas, err = l.Improvements.Improvements(ctx)
+		if err != nil {
+			return LoopInputs{}, fmt.Errorf("reading the improvements ledger: %w", err)
+		}
+	}
+	if l.Picks {
+		stories, err := report.Tracker.StoriesSince(ctx, result.Window.Since)
+		if err != nil {
+			return LoopInputs{}, fmt.Errorf("reading the investment stories filed in the window: %w", err)
+		}
+		for _, d := range stories {
+			if !d.IsEpic && hasLabel(d.Labels, LabelInvestment) {
+				in.Picks = append(in.Picks, d)
+			}
+		}
+	}
+	return in, nil
 }

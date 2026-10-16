@@ -56,32 +56,42 @@ func newLoopBriefCmd() *cobra.Command {
 			if around != "" {
 				return fmt.Errorf("--since %q names a landing; the brief reads a window: 7d, a day or a UTC time", since)
 			}
-			share, shareMin, shareMax, err := investShareSettings()
+			run, err := newLoopBriefRun(dir, here, from)
 			if err != nil {
 				return err
 			}
-			files := mwVault(dir, here)
-			_, err = application.LoopBriefRun{
-				Report: application.FactoryReport{
-					Tracker:     mwGateway(dir, here),
-					Files:       files,
-					Benchmarks:  vault.Benchmarks{Vault: files},
-					Seat:        BuilderSeat,
-					Since:       from,
-					Investments: files,
-					InvestShare: share, InvestShareMin: shareMin, InvestShareMax: shareMax,
-				},
-				Errors:       files,
-				Seat:         BuilderSeat,
-				Investments:  files,
-				Improvements: files,
-				JSON:         asJSON,
-				Out:          cmd.OutOrStdout(),
-			}.Run(cmd.Context())
+			run.JSON, run.Out = asJSON, cmd.OutOrStdout()
+			_, err = run.Run(cmd.Context())
 			return err
 		},
 	}
 	cmd.Flags().StringVar(&since, "since", "", "where the window starts: 7d, a day (2026-10-09) or a UTC time; 7d by default")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print the six parts as one JSON object")
 	return cmd
+}
+
+// newLoopBriefRun is the loop's reads as mw loop brief and the weekly digest
+// make them: one report from since (zero is the default window), the register,
+// the investments and the improvements ledger, all in the vault at dir.
+func newLoopBriefRun(dir, here string, since time.Time) (application.LoopBriefRun, error) {
+	share, shareMin, shareMax, err := investShareSettings()
+	if err != nil {
+		return application.LoopBriefRun{}, err
+	}
+	files := mwVault(dir, here)
+	return application.LoopBriefRun{
+		Report: application.FactoryReport{
+			Tracker:     mwGateway(dir, here),
+			Files:       files,
+			Benchmarks:  vault.Benchmarks{Vault: files},
+			Seat:        BuilderSeat,
+			Since:       since,
+			Investments: files,
+			InvestShare: share, InvestShareMin: shareMin, InvestShareMax: shareMax,
+		},
+		Errors:       files,
+		Seat:         BuilderSeat,
+		Investments:  files,
+		Improvements: files,
+	}, nil
 }
