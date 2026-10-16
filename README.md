@@ -3233,6 +3233,10 @@ five parts, and two more when there is something to say.
 - **BLOCKED** — what is waiting, each with only the work it is still waiting
   for: a wait that has finished is not listed.
 - **OTHER HOSTS** — every other host a story is pathed to, and what it holds.
+- **AT THE USAGE LIMIT** — every window on this host's terminal whose pane is
+  stopped at the harness's usage limit, read off the pane: its name and id,
+  `until <reset>` (or `reset <time>` once that has passed, until the seat is
+  restarted), and the harness's notice. Left out when no pane is at it.
 - **TICKS** — how this host's timers are doing, counted from the logs they
   keep: for `mw dispatch` and for the Millhand's tick, when the last good run
   was and how many runs since have failed (`failed 3 in a row`). A local network
@@ -3632,7 +3636,10 @@ ever closes another's. `mw seat up` starts it, and it can be run by hand.
 
 Idle means an empty input line with nothing running, on two looks in a row. A
 window whose input line holds text is never closed, in either mode: someone
-may be typing. Only the tmux adapter reads a pane.
+may be typing. Only the tmux adapter reads a pane. A pane stopped at the
+harness's usage limit counts as idle here: it holds no draft and is idle again
+only after the reset, so it is closed, saying `the pane was stopped at the usage
+limit until <reset>: <the notice>`, and no mail nudge is typed into it.
 
 A window with a running `mw next` in its pane tree is not closed either, in
 either mode: a hand-run `mw next <id>` killed mid-test is a run lost. The
@@ -3936,7 +3943,15 @@ the notifier uses, prints `nudged the Deputy in window <name>` and exits 0. If
 the pane is busy (`esc to interrupt` on screen, or text already on the input
 line) it types nothing, says `the Deputy is busy in window <name>; the mail
 waits` and exits **8**. With no unread mail, or a pane or box it cannot read,
-it says "already up" as above. See
+it says "already up" as above. A pane stopped at the harness's usage limit (its
+"Stop and wait for limit to reset" menu, or its `You've hit your … limit ·
+resets …` notice above the input line) is typed nothing, mail or none: before the
+reset `mw deputy` says `the Deputy in window <name> is stopped at the usage limit
+until <reset>: <the notice>; the mail waits for the reset` and exits **8**; once
+the reset has passed it closes the window (`closed the window <name>: its Deputy
+was stopped at the usage limit, which reset at <reset>`) and starts a fresh
+Deputy. A reset named without a date (`resets 3pm`) is the first such time after
+the window opened. See
 `features/deputy.feature`, `features/talk_wait.feature`, `features/talk_say.feature`
 and `features/talk_model.feature`.
 
@@ -4011,7 +4026,12 @@ run every 15 minutes for ever. It looks in this order:
    handoff`. A window whose input line holds text, or whose pane is working, is
    never closed: `already up`. A look the terminal cannot answer counts as not
    finished. `--dry-run` says `would close` or `would be restarted` and closes
-   nothing.
+   nothing. A Millhand stopped at the harness's usage limit is neither: until
+   the limit resets the tick closes and types nothing and says `already up
+   (<window>); the Millhand is stopped at the usage limit until <reset>: <the
+   notice>`, since a fresh Millhand would meet the same limit; once it has reset
+   the tick restarts it as above (`restarted: stopped at the usage limit, which
+   reset at <reset>`).
 2. With a `[watch]` table in the config file (see *Watching a host*), it applies
    `mw watch`'s rule to the host it watches. This comes before the sync, because
    a fault of this host's own network is one the sync would only time out on:
@@ -4452,7 +4472,10 @@ no reply at all, so the transcript cannot see it (on 2026-10-15 one sat there
 2h12m). A pane on the limit for 10 minutes faults as `stopped at the usage
 limit`; the cure leaves the window alone, as a successor would meet the same
 limit, and pages the Governor once for the window that the factory is stopped,
-with the limit and its menu. `mayor-stale` leaves such a pane to it. `mw doctor
+with the limit and its menu. Paged, the check is ok until the limit resets; a
+Mayor still on the limit after its reset faults as `still stopped at the usage
+limit, which reset at <time>`, and the cure closes its window and starts a
+successor, as for API Errors. `mayor-stale` leaves such a pane to it. `mw doctor
 mayor-stuck` runs it by hand; `--dry-run` names the finding and changes nothing.
 
 **postern-channel** faults the home host, and only it, when its config does not
