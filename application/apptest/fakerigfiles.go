@@ -35,13 +35,16 @@ func (f *FakeRigFiles) Add(rigDir string, names ...string) {
 }
 
 // Exists implements application.RigFiles: a pattern is held when the checkout
-// holds a file it matches as path.Match has it.
+// holds a file it matches as path.Match has it, or a directory: one of the
+// directories a file it holds is under.
 func (f *FakeRigFiles) Exists(rigDir, pattern string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for name := range f.files[rigDir] {
-		if ok, _ := path.Match(pattern, name); ok {
-			return true
+		for held := name; held != "." && held != "/"; held = path.Dir(held) {
+			if ok, _ := path.Match(pattern, held); ok {
+				return true
+			}
 		}
 	}
 	return false

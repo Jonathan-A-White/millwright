@@ -2,6 +2,8 @@ package application_test
 
 import (
 	"context"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -176,5 +178,58 @@ func TestStatusNamesTheOpenAndHeldStoriesFiledIntoTheWrongRig(t *testing.T) {
 	}
 	if strings.Contains(text, "ep.2: none") || strings.Contains(text, "ep.3: none") {
 		t.Errorf("named a story that is not in the wrong rig:\n%s", text)
+	}
+}
+
+// wrongRigNamed is the stories of rig, by their files keys in order, that mw
+// status names as filed into the wrong rig.
+func wrongRigNamed(t *testing.T, rigs map[string]string, files *apptest.FakeRigFiles, rig string, keys ...string) []string {
+	t.Helper()
+	tracker := apptest.NewFakeTracker()
+	tracker.AddEpic("ep", domain.Path{Rig: rig, Branch: "main", Host: "desktop"})
+	byID := map[string]string{}
+	for i, key := range keys {
+		story := domain.Story{ID: fmt.Sprintf("ep.%d", i+1), Title: key}
+		if err := story.Overrides.Set("files", key); err != nil {
+			t.Fatal(err)
+		}
+		tracker.AddStory("ep", story)
+		byID[story.ID] = key
+	}
+	report, err := application.Status{
+		Tracker: tracker, Notes: tracker, Host: "desktop", Seat: "builder", Rigs: rigs, RigFiles: files,
+		Now: func() time.Time { return statusNow },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatalf("reading status: %v", err)
+	}
+	var named []string
+	for _, w := range report.WrongRig {
+		named = append(named, byID[w.ID])
+	}
+	return named
+}
+
+func TestANewFileUnderADirectoryTheRigHasIsNotCalledWrong(t *testing.T) {
+	files := apptest.NewFakeRigFiles()
+	files.Add("/rigs/millwright", "application/status.go", "docs/codemap.md")
+	rigs := map[string]string{"millwright": "/rigs/millwright"}
+
+	named := wrongRigNamed(t, rigs, files, "millwright", "docs/research/new.md", "src/todo/*.tsx", "NEW.md")
+	if !slices.Equal(named, []string{"src/todo/*.tsx"}) {
+		t.Errorf("expected only src/todo/*.tsx named: millwright has docs/ and a root, but no src/; got %q", named)
+	}
+}
+
+func TestANewFileUnderSrcOfALampasShapedRigIsNotCalledWrong(t *testing.T) {
+	files := apptest.NewFakeRigFiles()
+	files.Add("/rigs/lampas", "src/main.ts", "package.json")
+	rigs := map[string]string{"lampas": "/rigs/lampas"}
+
+	if named := wrongRigNamed(t, rigs, files, "lampas", "src/handwriting/recognizer.ts", "src/handwriting/*.ts"); len(named) > 0 {
+		t.Errorf("expected nothing named: lampas has src/; got %q", named)
+	}
+	if named := wrongRigNamed(t, rigs, files, "lampas", "application/status.go"); !slices.Equal(named, []string{"application/status.go"}) {
+		t.Errorf("expected application/status.go named: lampas has no application/; got %q", named)
 	}
 }

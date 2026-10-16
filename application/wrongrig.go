@@ -22,9 +22,10 @@ type RigFiles interface {
 }
 
 // WrongRig is a story whose files key names paths that exist in none of its
-// rig's checkout on this host, which is what a story filed into the wrong rig
-// looks like (mw-gq6.428, mw-ev7oyy.12). A story of new files alone would look
-// the same if all its files were new, so it is a warning, never a refusal.
+// rig's checkout on this host, nor their top-level directories, which is what a
+// story filed into the wrong rig looks like (mw-gq6.428, mw-ev7oyy.12). A story
+// of new files in new top-level directories would look the same, so it is a
+// warning, never a refusal.
 type WrongRig struct {
 	ID  string
 	Rig string
@@ -49,11 +50,22 @@ func wrongRigOf(rigs map[string]string, files RigFiles, path domain.Path) bool {
 		return false
 	}
 	for _, name := range named {
-		if files.Exists(dir, name) {
+		if inRig(files, dir, name) {
 			return false
 		}
 	}
 	return true
+}
+
+// inRig is whether a path of a files key belongs in the checkout at dir: it is
+// there, it is a name at the checkout's root, or its top-level directory is
+// there. A story names files it will create (docs/research/new.md in
+// millwright, src/handwriting/*.ts in lampas), and a new file under a
+// directory the rig has is in it; one under src/ in a rig with no src/ is not
+// (mw-gq6.448).
+func inRig(files RigFiles, dir, name string) bool {
+	top, _, nested := strings.Cut(name, "/")
+	return files.Exists(dir, name) || !nested || files.Exists(dir, top)
 }
 
 // wrongRigStories is the stories among details that are open, held or running,
