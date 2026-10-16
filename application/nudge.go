@@ -38,6 +38,14 @@ type TranscriptWrites interface {
 	LastWrite(ctx context.Context, dir string) (time.Time, error)
 }
 
+// ClaimTranscripts is the port the check for a session that never started reads
+// the harness's record through: what was said in the worktree, and when the
+// harness last wrote there.
+type ClaimTranscripts interface {
+	TranscriptTail
+	TranscriptWrites
+}
+
 // HostSign is the newest sign of life seen of a host besides its sync note:
 // when it was, and what it was, as it reads inside a clause ("vault commit").
 // The zero value is no sign at all.

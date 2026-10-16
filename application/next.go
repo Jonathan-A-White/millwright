@@ -254,8 +254,9 @@ type Next struct {
 
 	// Transcripts is what the harness recorded in a story's worktree. A claim
 	// here with no session behind it is given back only when no transcript was
-	// recorded; a nil Transcripts cannot say so, and the claim is left alone.
-	Transcripts TranscriptTail
+	// recorded since the claim began; a nil Transcripts cannot say so, and the
+	// claim is left alone.
+	Transcripts ClaimTranscripts
 
 	// HeartbeatWait is how Heartbeat waits between ticks: the real clock,
 	// unless a test replaces it to move time without truly waiting for it.
@@ -2853,7 +2854,7 @@ func (n Next) abandoned(ctx context.Context, skip string, report *NextReport) []
 const NeverStartedGrace = 5 * time.Minute
 
 // giveBackIfNeverStarted gives back the claim of a story whose session is gone
-// and which has left nothing behind it: no transcript, no commit beyond the
+// and which has left nothing behind it: no transcript written since the claim began, no commit beyond the
 // target, no change in its worktree (or no worktree at all). There is no work
 // for a given-back claim to take away. Anything it cannot establish — no
 // transcripts to read, a claim of unknown or recent age, a git or tracker
@@ -2875,9 +2876,18 @@ func (n Next) giveBackIfNeverStarted(ctx context.Context, detail StoryDetail, re
 	}
 	worktree, branch := WorktreeDir(rigDir, id), StoryBranch(id)
 
-	tail, err := n.Transcripts.Tail(ctx, worktree, PeekLines)
-	if err != nil || strings.TrimSpace(tail) != "" {
+	// Every attempt of a story reuses its worktree path, so a transcript under
+	// it may be an earlier attempt's. Only one written since this claim began
+	// is this claim's work (mw-gq6.529).
+	written, err := n.Transcripts.LastWrite(ctx, worktree)
+	if err != nil {
 		return false
+	}
+	if written.IsZero() || !written.Before(started) {
+		tail, err := n.Transcripts.Tail(ctx, worktree, PeekLines)
+		if err != nil || strings.TrimSpace(tail) != "" {
+			return false
+		}
 	}
 	dirThere, err := n.Worktrees.Exists(ctx, rigDir, worktree, "")
 	if err != nil {
