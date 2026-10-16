@@ -28,6 +28,7 @@ func newTalkCmd() *cobra.Command {
 	talk.AddCommand(newTalkCallCmd())
 	talk.AddCommand(newTalkModelCmd())
 	talk.AddCommand(newTalkSayCmd())
+	talk.AddCommand(newTalkShowCmd())
 	talk.AddCommand(newTalkWaitCmd())
 	return talk
 }
@@ -123,6 +124,9 @@ func newTalkWaitCmd() *cobra.Command {
 			"milliseconds from the event to the print, and any new mail the Deputy sent the Mayor since the\n" +
 			"last turn, each message once. mw postern inbox and its --unread-count leave talk records alone, so\n" +
 			"mail-wait never wakes the Mayor a second time for one turn.\n\n" +
+			"The turn's whole text is also written to <txid>.txt in the postern inbox dir, beside its picture, and\n" +
+			"'saved: <path>' is printed under the text line: read that file, never a cut copy of the print\n" +
+			"(mw talk show reads a whole talk back from the backend).\n\n" +
 			"A turn that carries a picture prints 'image: <path> (<name>)' under its text: the picture decrypted\n" +
 			"into the postern inbox dir as <txid>.jpg, as mw postern inbox writes a message's, and fetched only\n" +
 			"once; look at it before answering. One that cannot be had prints 'image: could not be fetched\n" +
@@ -222,6 +226,48 @@ func newTalkWaitCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&minBackoff, "min-backoff", application.DefaultTalkWaitMinBackoff, "the first pause before opening a dropped stream again")
 	cmd.Flags().DurationVar(&maxBackoff, "max-backoff", application.DefaultTalkWaitMaxBackoff, "the longest pause before opening a dropped stream again")
 	return cmd
+}
+
+// newTalkShowCmd builds `mw talk show`: every turn of a talk the Governor sent
+// the Mayor's key, read from the backend, whole.
+func newTalkShowCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "show <talk-id>",
+		Short: "Print every turn of a talk, whole, from the backend",
+		Long: "show reads the postern backend's records and prints each turn of the talk <talk-id> that the\n" +
+			"Governor sent the Mayor's key, oldest first: its role, turn, time, text and, if it carries a\n" +
+			"picture, 'image: <path>' (fetched into the postern inbox dir as mw talk wait does). The text is\n" +
+			"never cut. The Mayor's own answers are sealed to the Governor's key and are not shown. It\n" +
+			"refuses a talk with no turn to show. Reading the records takes a cockpit licence.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			keys, err := posternKeys()
+			if err != nil {
+				return err
+			}
+			backend, err := posternBackend(keys)
+			if err != nil {
+				return err
+			}
+			governorKey, err := config.PosternGovernorKey()
+			if err != nil {
+				return err
+			}
+			attachmentDir, err := config.PosternInboxDir()
+			if err != nil {
+				return err
+			}
+			return application.TalkShow{
+				Postern:       backend,
+				Cipher:        posternCipher(keys),
+				Keys:          keys,
+				GovernorKey:   governorKey,
+				AttachmentDir: attachmentDir,
+				Out:           cmd.OutOrStdout(),
+				Err:           cmd.ErrOrStderr(),
+			}.Run(cmd.Context(), args[0])
+		},
+	}
 }
 
 // newTalkSayCmd builds `mw talk say`: the Mayor's answer, encrypted to the

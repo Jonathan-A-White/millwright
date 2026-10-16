@@ -374,7 +374,7 @@ func InitializeTalkWaitScenario(ctx *godog.ScenarioContext) {
 		return c.memory.SetNote(context.Background(), application.TalkWaitCursorKey, "0")
 	})
 	ctx.Then(`^the wait printed "([^"]*)" on the line after "([^"]*)"$`, func(line, above string) error {
-		want := above + "\n" + strings.ReplaceAll(line, "<inbox dir>", c.inboxDir())
+		want := strings.ReplaceAll(above, "<inbox dir>", c.inboxDir()) + "\n" + strings.ReplaceAll(line, "<inbox dir>", c.inboxDir())
 		if !strings.Contains(c.run.out.String(), want) {
 			return fmt.Errorf("expected the wait to print %q, it printed:\n%s", want, c.run.out.String())
 		}
@@ -387,6 +387,16 @@ func InitializeTalkWaitScenario(ctx *godog.ScenarioContext) {
 		}
 		if string(got) != talkPicture {
 			return fmt.Errorf("expected %s to hold %q, it holds %q", name, talkPicture, got)
+		}
+		return nil
+	})
+	ctx.Then(`^the inbox dir holds "([^"]*)" with the text "([^"]*)"$`, func(name, text string) error {
+		got, err := os.ReadFile(filepath.Join(c.inboxDir(), name))
+		if err != nil {
+			return err
+		}
+		if string(got) != text {
+			return fmt.Errorf("expected %s to hold %q, it holds %q", name, text, got)
 		}
 		return nil
 	})

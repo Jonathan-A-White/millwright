@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -647,9 +648,10 @@ func (r *talkWaitRun) finish(ctx context.Context) (TalkWaitReport, error) {
 		}
 		// The picture is fetched after the index-to-print time is taken, so
 		// that the time still measures the wake and not the blob.
+		saved := r.turnSaved()
 		image := r.turnImage(ctx)
-		r.printf(r.Out, "talk %s turn %d (role %s)\nmodel %s\n%scut %s\ntext: %s\n%s%sindex-to-print %d ms\n",
-			r.turn.Talk.ID, r.turn.Talk.Turn, r.turn.Role, model, switched, cut, r.turn.Text, image, about, report.IndexToPrint.Milliseconds())
+		r.printf(r.Out, "talk %s turn %d (role %s)\nmodel %s\n%scut %s\ntext: %s\n%s%s%sindex-to-print %d ms\n",
+			r.turn.Talk.ID, r.turn.Talk.Turn, r.turn.Role, model, switched, cut, r.turn.Text, saved, image, about, report.IndexToPrint.Milliseconds())
 	}
 	if len(r.posts) > 0 {
 		r.printf(r.Out, "new postern message: %d unread, read them with mw postern inbox\n", len(r.posts))
@@ -703,15 +705,19 @@ const TalkWaitImageLimit = 30 * time.Second
 // is not fetched again. A picture that cannot be had is "image: could not be
 // fetched (<reason>)", and the turn is printed all the same.
 func (r *talkWaitRun) turnImage(ctx context.Context) string {
-	picture := r.turn.Attachment
+	inbox := PosternInbox{Postern: r.Postern, Cipher: r.Cipher, Keys: r.Keys, AttachmentDir: r.AttachmentDir}
+	return inbox.talkImageLine(ctx, r.turn.Attachment, r.turnTxid)
+}
+
+// talkImageLine is turnImage for the picture of the turn recorded under txid.
+func (inbox PosternInbox) talkImageLine(ctx context.Context, picture *PosternAttachment, txid string) string {
 	if picture == nil {
 		return ""
 	}
-	if r.AttachmentDir == "" || r.turnTxid == "" {
+	if inbox.AttachmentDir == "" || txid == "" {
 		return "image: could not be fetched (no postern inbox dir or no txid to name it by)\n"
 	}
-	inbox := PosternInbox{Postern: r.Postern, Cipher: r.Cipher, Keys: r.Keys, AttachmentDir: r.AttachmentDir}
-	name := posternFileName(r.turnTxid)
+	name := posternFileName(txid)
 	path := inbox.attachmentPath(picture, name)
 	if _, err := os.Stat(path); err != nil {
 		// The turn is heard: the wait's own limit does not cut the fetch short.
@@ -725,6 +731,89 @@ func (r *talkWaitRun) turnImage(ctx context.Context) string {
 		path += " (" + label + ")"
 	}
 	return "image: " + path + "\n"
+}
+
+// turnSaved writes the turn's whole text to AttachmentDir as <txid>.txt, beside
+// its picture, and returns the line printed under the text: "saved: <path>",
+// so that a print that is cut, or an output file written over, never loses a
+// turn (mw-gq6.515). "" when there is no dir or no txid to name the file by; a
+// file that cannot be written is "saved: could not be written (<reason>)".
+func (r *talkWaitRun) turnSaved() string {
+	if r.AttachmentDir == "" || r.turnTxid == "" {
+		return ""
+	}
+	path := filepath.Join(r.AttachmentDir, posternFileName(r.turnTxid)+".txt")
+	err := os.MkdirAll(r.AttachmentDir, 0o755)
+	if err == nil {
+		err = os.WriteFile(path, []byte(r.turn.Text), 0o644)
+	}
+	if err != nil {
+		return fmt.Sprintf("saved: could not be written (%v)\n", err)
+	}
+	return "saved: " + path + "\n"
+}
+
+// TalkShow prints every turn of one talk the Governor sent the Mayor's key, read
+// from the backend, whole: its role, turn, time, text and picture path. It never
+// cuts a turn. The Mayor's own answers are sealed to the Governor's key, so the
+// Mayor cannot read them back and they are not shown.
+type TalkShow struct {
+	Postern Postern
+	Cipher  Cipher
+	Keys    PosternKeyFile
+
+	// GovernorKey is the Governor's compressed public key, hex.
+	GovernorKey string
+	// AttachmentDir is where a turn's picture is written, as the wait does.
+	AttachmentDir string
+
+	// Out gets the turns. Err gets a record that would not decrypt.
+	Out io.Writer
+	Err io.Writer
+}
+
+// Run prints the turns of talk id, oldest first. A talk with none to show is
+// an error.
+func (s TalkShow) Run(ctx context.Context, id string) error {
+	if s.Postern == nil || s.Cipher == nil || s.Keys == nil {
+		return fmt.Errorf("mw talk show: no postern backend, cipher or key file is configured")
+	}
+	if strings.TrimSpace(id) == "" {
+		return fmt.Errorf("mw talk show: which talk? give its id")
+	}
+	records, err := s.Postern.Messages(ctx, 0)
+	if err != nil {
+		return fmt.Errorf("mw talk show: reading the records: %w", err)
+	}
+	pubKey, _, err := s.Keys.PublicKey()
+	if err != nil {
+		return err
+	}
+	privKey, err := s.Keys.PrivateKeyWIF()
+	if err != nil {
+		return err
+	}
+	// The wait's own reading of a record decides which are the Governor's.
+	reader := &talkWaitRun{TalkWait: TalkWait{Cipher: s.Cipher, GovernorKey: s.GovernorKey, Err: s.Err}}
+	inbox := PosternInbox{Postern: s.Postern, Cipher: s.Cipher, Keys: s.Keys, AttachmentDir: s.AttachmentDir}
+	shown := 0
+	for _, record := range records {
+		if record.Class != talkRecordClass || record.To != pubKey {
+			continue
+		}
+		turn, ok := reader.governorsTurn(record, privKey)
+		if !ok || turn.Talk.ID != id {
+			continue
+		}
+		shown++
+		fmt.Fprintf(s.Out, "talk %s turn %d (role %s) at %s\ntext: %s\n%s",
+			turn.Talk.ID, turn.Talk.Turn, turn.Role, record.Ts.UTC().Format(time.RFC3339), turn.Text,
+			inbox.talkImageLine(ctx, turn.Attachment, record.Txid))
+	}
+	if shown == 0 {
+		return fmt.Errorf("mw talk show: no turn of talk %s that the Governor sent this key", id)
+	}
+	return nil
 }
 
 // handedOver is how a wait ends on the seat's handover: it says so, and moves
