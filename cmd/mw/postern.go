@@ -411,6 +411,31 @@ func moveHomeOnTheGovernorsTap(inbox *application.PosternInbox, host, attachment
 	return nil
 }
 
+// posternTapEvery is how often the follower reads the backend for the Governor's
+// taps, and posternTapLockWait how long its pass waits for the inbox lock, which
+// a hands step may hold for minutes: it tries again on the next pass.
+const (
+	posternTapEvery    = 5 * time.Second
+	posternTapLockWait = 10 * time.Second
+)
+
+// posternTaps is the follower's applier of his one-tap actions: the inbox an
+// --apply pass wires, with a lock that does not hold the follower up.
+func posternTaps(out io.Writer) (*application.PosternTaps, error) {
+	inbox, wired, err := newPosternInbox(out)
+	if err != nil {
+		return nil, err
+	}
+	if err := answerTheGovernor(&inbox, wired.backend, wired.keys, wired.governorKey); err != nil {
+		return nil, err
+	}
+	if err := moveHomeOnTheGovernorsTap(&inbox, wired.host, wired.attachmentDir); err != nil {
+		return nil, err
+	}
+	inbox.Lock = hostlock.New(filepath.Dir(wired.attachmentDir), hostlock.WithWait(posternTapLockWait))
+	return &application.PosternTaps{Inbox: inbox, Every: posternTapEvery}, nil
+}
+
 // posternThreads is the file mw remembers the channel of each post in, for
 // mw postern send --re.
 func posternThreads() (*postern.ThreadFile, error) {

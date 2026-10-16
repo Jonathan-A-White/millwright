@@ -5,12 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/domain/events"
 )
 
 const applyInboxKey = "apply-inbox-pubkey-hex"
@@ -690,5 +694,230 @@ func TestDigestLooksGoodTapIsRefusedWhenNotOfferedOrNotADigest(t *testing.T) {
 	g.assertOpen(t, "mw-e.5", "mw-e.6", "mw-d.1")
 	if subjects := g.subjects(t); len(subjects) != 1 {
 		t.Fatalf("expected only the answer's mail, got %v", subjects)
+	}
+}
+
+// followTaps runs the follower for one pass over f, with its taps applied and
+// nothing else, as mw-view-follow.service runs it.
+func (f *applyFixture) followTaps(t *testing.T, log *apptest.FakeEventLog) {
+	t.Helper()
+	inbox := f.inbox()
+	inbox.Events = log
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	follow := application.EventFollow{
+		Head:    &apptest.FakeHead{Heads: []string{"a"}},
+		Publish: func(context.Context) error { return nil },
+		Tapper:  &application.PosternTaps{Inbox: inbox},
+		Every:   time.Second,
+		Sleep:   func(context.Context, time.Duration) error { stop(); return ctx.Err() },
+	}
+	if err := follow.Run(ctx); err != nil {
+		t.Fatalf("the follower ended with %v, want a clean stop", err)
+	}
+}
+
+// A close tap on a To do card is applied by one pass of the follower, with no
+// mw postern inbox run: the card closed, the txid marked applied and the
+// action_applied event written.
+func TestFollowerAppliesACloseTapOnAToDoCardInOnePass(t *testing.T) {
+	f := newApplyFixture(t)
+	mustDo(t, f.tracker.SetLabels("mw-e.3", application.LabelHitl, application.LabelHitlTodo))
+	f.action(t, "tx-done", map[string]any{"action": "close", "bead": "mw-e.3"})
+	log := &apptest.FakeEventLog{}
+
+	f.followTaps(t, log)
+
+	if got := f.status(t, "mw-e.3"); got != apptest.StatusClosed {
+		t.Fatalf("expected mw-e.3 closed, got %s", got)
+	}
+	if note, _ := f.tracker.Note(context.Background(), application.PosternAppliedKey("tx-done")); note != "applied close mw-e.3 txid tx-done" {
+		t.Fatalf("expected the txid marked applied, got %q", note)
+	}
+	got := log.All()
+	if len(got) != 1 || got[0].Kind != events.KindActionApplied || got[0].Bead != "mw-e.3" || got[0].Detail != "tx-done" {
+		t.Fatalf("expected one action_applied event of tx-done, got %+v", got)
+	}
+}
+
+// His typed words, an answer to a card and his voice stay for the seat: the
+// follower marks none read and applies none, and mw postern inbox still shows
+// each as it always did.
+func TestFollowerLeavesWhatIsNotATapForTheSeat(t *testing.T) {
+	f := newApplyFixture(t)
+	threaded, _ := json.Marshal(application.PosternThreadedMessage{Thread: application.PosternThread{Bead: "mw-e.2"}, Text: "please look at this"})
+	f.message(t, releaseTapGovernorKey, "tx-typed", string(threaded))
+	reply, _ := json.Marshal(application.PosternReply{Bead: "mw-e.3", Answer: "B"})
+	f.message(t, releaseTapGovernorKey, "tx-answer", string(reply))
+	f.message(t, releaseTapGovernorKey, "tx-plain", "a plain word to the Mayor")
+	f.action(t, "tx-tap", map[string]any{"action": "hold", "bead": "mw-e.3"})
+
+	f.followTaps(t, &apptest.FakeEventLog{})
+
+	for _, txid := range []string{"tx-typed", "tx-answer", "tx-plain"} {
+		if note, _ := f.tracker.Note(context.Background(), application.PosternAppliedKey(txid)); note != "" {
+			t.Fatalf("expected %s left unapplied, got %q", txid, note)
+		}
+	}
+	if got := f.tracker.Comments("mw-e.2"); len(got) != 0 {
+		t.Fatalf("expected no comment written on mw-e.2, got %v", got)
+	}
+	if got := f.tracker.Comments("mw-e.3"); len(got) != 1 || strings.HasPrefix(got[0], "ANSWER") {
+		t.Fatalf("expected only the hold's comment on mw-e.3, got %v", got)
+	}
+	if cursor, _ := f.tracker.Note(context.Background(), application.PosternCursorKey); cursor != "" {
+		t.Fatalf("expected the cursor left where it was, got %q", cursor)
+	}
+	f.out.Reset()
+	if _, err := f.inbox().Run(context.Background()); err != nil {
+		t.Fatalf("reading: %v", err)
+	}
+	for _, want := range []string{"a plain word to the Mayor", "already applied earlier: applied hold mw-e.3 txid tx-tap"} {
+		if !strings.Contains(f.out.String(), want) {
+			t.Fatalf("expected the read to show %q, got %q", want, f.out.String())
+		}
+	}
+	if got := f.tracker.Comments("mw-e.2"); len(got) != 1 || !strings.HasSuffix(got[0], ": please look at this") {
+		t.Fatalf("expected the seat's read to record his typed words on mw-e.2, got %v", got)
+	}
+	if got := f.tracker.Comments("mw-e.3"); len(got) != 2 || !strings.HasPrefix(got[1], "ANSWER ") {
+		t.Fatalf("expected the seat's read to record his answer on mw-e.3, got %v", got)
+	}
+}
+
+// A tap the follower applied is applied once: the Mayor's later read says
+// 'already applied earlier', and a later pass of either finds it done.
+func TestATapSeenByTheFollowerAndThenTheInboxIsAppliedOnce(t *testing.T) {
+	f := newApplyFixture(t)
+	f.action(t, "tx-rel", map[string]any{"action": "release", "bead": "mw-e.1"})
+	log := &apptest.FakeEventLog{}
+
+	f.followTaps(t, log)
+	f.out.Reset()
+	if _, err := f.inbox().Run(context.Background()); err != nil {
+		t.Fatalf("reading: %v", err)
+	}
+	f.followTaps(t, log)
+	f.apply(t)
+
+	if got := strings.TrimSpace(f.out.String()); got != "already applied earlier: applied release mw-e.1 txid tx-rel" {
+		t.Fatalf("expected the read to say it was applied earlier, got %q", got)
+	}
+	if got := f.tracker.Comments("mw-e.1"); len(got) != 1 {
+		t.Fatalf("expected the release written once, got %v", got)
+	}
+	if got := f.subjects(t); len(got) != 1 {
+		t.Fatalf("expected one mail, got %v", got)
+	}
+	if got := log.All(); len(got) != 1 {
+		t.Fatalf("expected one action_applied event, got %+v", got)
+	}
+}
+
+// Every action the inbox applies goes through the follower the same way, and
+// one that is refused is refused as the inbox refuses it: the same note, the
+// same comment, the same mail. Each case is run twice, once by the inbox's own
+// Apply and once by the follower, over the same fixture.
+func TestFollowerAppliesAndRefusesEachActionAsTheInboxDoes(t *testing.T) {
+	str := func(s string) *string { return &s }
+	cases := []struct {
+		name   string
+		prep   func(*testing.T, *applyFixture)
+		action map[string]any
+	}{
+		{"release", nil, map[string]any{"action": "release", "bead": "mw-e.1"}},
+		{"release refused", nil, map[string]any{"action": "release", "bead": "mw-e.3"}},
+		{"hold", nil, map[string]any{"action": "hold", "bead": "mw-e.3"}},
+		{"hold refused", nil, map[string]any{"action": "hold", "bead": "mw-e.4"}},
+		{"priority", nil, map[string]any{"action": "priority", "bead": "mw-e.3", "priority": 1}},
+		{"priority refused", nil, map[string]any{"action": "priority", "bead": "mw-e.3", "priority": 9}},
+		{"thaw", func(t *testing.T, f *applyFixture) {
+			mustDo(t, application.Ice{Tracker: f.tracker, Notes: f.tracker}.Run(context.Background(), "mw-e.1", "later"))
+		}, map[string]any{"action": "thaw", "bead": "mw-e.1"}},
+		{"thaw refused", nil, map[string]any{"action": "thaw", "bead": "mw-e.2"}},
+		{"verified", nil, map[string]any{"action": "verified", "bead": "mw-e.3"}},
+		{"keep", nil, map[string]any{"action": "keep", "bead": "mw-e.3", "days": 5}},
+		{"close", nil, map[string]any{"action": "close", "bead": "mw-e.2"}},
+		{"close refused", nil, map[string]any{"action": "close", "bead": "mw-e.4"}},
+		{"chase", nil, map[string]any{"action": "chase", "bead": "mw-e.3"}},
+		{"ask_done", nil, map[string]any{"action": "ask_done", "bead": "mw-e.3"}},
+		{"keep_waiting", nil, map[string]any{"action": "keep_waiting", "bead": "mw-e.3"}},
+		{"todo_add", nil, map[string]any{"action": "todo_add", "list": "mw-e", "title": str("Text Dad")}},
+		{"todo_edit", func(t *testing.T, f *applyFixture) {
+			mustDo(t, f.tracker.SetLabels("mw-e.3", application.LabelHitl, application.LabelHitlTodo))
+		}, map[string]any{"action": "todo_edit", "bead": "mw-e.3", "title": str("Text Mum")}},
+		{"todo_move", func(t *testing.T, f *applyFixture) {
+			mustDo(t, f.tracker.SetLabels("mw-e.3", application.LabelHitl, application.LabelHitlTodo))
+			mustDo(t, f.tracker.SetLabels("mw-e.2", application.LabelHitl, application.LabelHitlTodo))
+		}, map[string]any{"action": "todo_move", "bead": "mw-e.3", "before": "mw-e.2"}},
+	}
+	// what is left of an action in the fixture: every bead's status, comments and
+	// labels, the mail, and every applied note.
+	left := func(t *testing.T, f *applyFixture) string {
+		t.Helper()
+		var b strings.Builder
+		for _, id := range []string{"mw-e.1", "mw-e.2", "mw-e.3", "mw-e.4"} {
+			d, err := f.tracker.ShowStory(context.Background(), id)
+			mustDo(t, err)
+			fmt.Fprintf(&b, "%s %s p%d %v %v\n", id, d.Status, d.Priority, d.Labels, f.tracker.Comments(id))
+		}
+		notes, err := f.tracker.NotesWithPrefix(context.Background(), application.PosternAppliedPrefix)
+		mustDo(t, err)
+		keys := make([]string, 0, len(notes))
+		for k := range notes {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		for _, k := range keys {
+			fmt.Fprintf(&b, "%s=%s\n", k, notes[k])
+		}
+		fmt.Fprintf(&b, "mail %v", f.subjects(t))
+		return b.String()
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			viaInbox, viaFollower := newApplyFixture(t), newApplyFixture(t)
+			for _, f := range []*applyFixture{viaInbox, viaFollower} {
+				if c.prep != nil {
+					c.prep(t, f)
+				}
+				f.action(t, "tx-one", c.action)
+			}
+			inbox := viaInbox.inbox()
+			inbox.Events = &apptest.FakeEventLog{}
+			if _, err := inbox.Apply(context.Background()); err != nil {
+				t.Fatalf("applying: %v", err)
+			}
+			viaFollower.followTaps(t, &apptest.FakeEventLog{})
+
+			want, got := left(t, viaInbox), left(t, viaFollower)
+			if got != want {
+				t.Fatalf("the follower left\n%s\nwhere the inbox left\n%s", got, want)
+			}
+			if !strings.Contains(got, "postern.applied.tx-one=") {
+				t.Fatalf("expected the tap marked applied or refused, got\n%s", got)
+			}
+		})
+	}
+}
+
+// The follower reads the backend no oftener than Every, so a pass a second
+// long does not ask for his taps a second at a time.
+func TestPosternTapsReadsTheBackendNoOftenerThanEvery(t *testing.T) {
+	f := newApplyFixture(t)
+	now := viewNow
+	taps := &application.PosternTaps{Inbox: f.inbox(), Every: 5 * time.Second, Now: func() time.Time { return now }}
+	mustDo(t, taps.Tap(context.Background()))
+	f.action(t, "tx-late", map[string]any{"action": "release", "bead": "mw-e.1"})
+
+	now = now.Add(2 * time.Second)
+	mustDo(t, taps.Tap(context.Background()))
+	if got := f.status(t, "mw-e.1"); got != apptest.StatusDeferred {
+		t.Fatalf("expected no read inside Every, but mw-e.1 is %s", got)
+	}
+	now = now.Add(4 * time.Second)
+	mustDo(t, taps.Tap(context.Background()))
+	if got := f.status(t, "mw-e.1"); got != apptest.StatusOpen {
+		t.Fatalf("expected the tap applied once Every had passed, but mw-e.1 is %s", got)
 	}
 }

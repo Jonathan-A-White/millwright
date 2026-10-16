@@ -130,6 +130,16 @@ only its pane, and the session's line keeps that pane's words in the run as `nex
 charging its session, `mw dispatch` names the attempt tooling (`mw cause`) instead of refunding it,
 comments the log's last 20 lines on the story and mails the Mayor "Close-out died: <story>".
 
+## Applying his taps
+
+Each pass the follower also applies the Governor's one-tap actions (`PosternTaps`, mw-ev7oyy.31):
+at most every 5 s it reads the backend past the inbox's cursor and runs every verified tap of his
+that `mw postern inbox --apply` knows (release, hold, priority, thaw, verified, keep, close, the chase
+answers, the To do edits) through the same Apply path, so the bead, its comment, the mail, the
+`action_applied` event and the `postern.applied.<txid>` note are the same as the inbox writes, and a
+tap seen by both is applied once. It leaves everything else unread for a seat: his typed words, answers
+to a card, Looks good, voice notes, run (hands) taps and a move-home. A host that is not home applies none.
+
 ## Springing the jobs
 
 The follower runs the factory's jobs (mw-jrx0s.14): `dispatch` (a bead_changed to open, or to

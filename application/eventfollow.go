@@ -150,6 +150,11 @@ type EventFollow struct {
 	// the line that tells a seat's session past its limit to hand off
 	// (SeatContextWatch), reading the transcripts at most once a minute.
 	Watcher ContextWatcher
+	// Tapper, when set, is called each pass, after the Watcher and before the
+	// Shipper: it applies the Governor's one-tap actions the backend holds
+	// (PosternTaps), so a tap is applied within seconds with no seat running
+	// anything.
+	Tapper EventTapper
 	// Trimmer, when set, is called at the end of the first pass of each UTC
 	// day, after the Shipper, to move old events out of the log (EventTrim).
 	Trimmer EventTrimmer
@@ -174,6 +179,12 @@ type EventFollow struct {
 	// stamped ahead by a host whose clock runs fast would otherwise move it
 	// past changes still to come. Nil is time.Now.
 	Now func() time.Time
+}
+
+// EventTapper is what EventFollow calls each pass to apply the Governor's
+// one-tap actions: PosternTaps.
+type EventTapper interface {
+	Tap(ctx context.Context) error
 }
 
 // Run follows the beads until ctx ends, which is a clean stop: it returns nil.
@@ -304,6 +315,15 @@ func (f EventFollow) Run(ctx context.Context) error {
 				}
 			} else {
 				quiet("watching the seats' context")
+			}
+		}
+		if f.Tapper != nil && ctx.Err() == nil {
+			if err := f.Tapper.Tap(ctx); err != nil {
+				if ctx.Err() == nil {
+					say("applying the Governor's taps", err)
+				}
+			} else {
+				quiet("applying the Governor's taps")
 			}
 		}
 		// Ship goes last: a send that hangs or fails slowly (a 502 took ~26 s

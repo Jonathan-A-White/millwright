@@ -169,37 +169,72 @@ func (a posternApplied) line() string {
 // twice, and a tracker the boost cannot reach (the old home's, dead) does not
 // stop it: see toApply.
 func (i PosternInbox) Apply(ctx context.Context) ([]string, error) {
+	lines, _, err := i.apply(ctx, false, 0)
+	return lines, err
+}
+
+// isOneTap reports whether m is one of the Governor's one-tap actions the
+// follower applies on its own: an action this host knows (section 13) other
+// than a hands step's run, which stays with the pass that can outlive a
+// restart of the backend. A move-home, a reply, a comment and a voice note are
+// none of them.
+func isOneTap(m PosternInboxMessage) bool {
+	if m.Class == PosternClassMoveHome {
+		return false
+	}
+	if _, ok := decodePosternReply(m.Text); ok {
+		return false
+	}
+	action, ok := decodePosternAction(m.Text)
+	return ok && knownPosternAction(action.Action) && action.Action != PosternActionRun
+}
+
+// apply is Apply, or with tapsOnly the follower's pass: only the Governor's
+// one-tap actions are applied, by the same applyOne, each marked, answered and
+// echoed as Apply does, and everything else is left unread and unapplied for
+// the seat's own pass. Ideas are not given back, and a host that is not home
+// applies none. Records are read from after, when that is past the inbox's
+// cursor, so a follower does not read what it has read again; resume is the
+// seq to read from next time, held back at a tap that could not be applied yet.
+func (i PosternInbox) apply(ctx context.Context, tapsOnly bool, after int64) (lines []string, resume int64, err error) {
+	resume = after
 	if err := i.wired(); err != nil {
-		return nil, err
+		return nil, resume, err
 	}
 	i.prompts = &promptCache{}
 	if i.Tracker == nil {
-		return nil, fmt.Errorf("mw postern inbox --apply: no work tracker is configured to apply anything to")
+		return nil, resume, fmt.Errorf("mw postern inbox --apply: no work tracker is configured to apply anything to")
 	}
 	release, err := i.lock(ctx)
 	if err != nil {
-		return nil, err
+		return nil, resume, err
 	}
 	defer release()
 
 	home, err := i.homeHost(ctx)
 	if err != nil {
-		return nil, err
+		return nil, resume, err
 	}
 	pass := moveHomePass{home: home}
+	if tapsOnly && pass.onBoost(i.Host) {
+		return nil, resume, nil
+	}
 	// A mode that has ended gives its ideas back before anything of his is read,
 	// so that what he sends now is not kept with them.
-	var lines []string
-	if !pass.onBoost(i.Host) {
+	if !tapsOnly && !pass.onBoost(i.Host) {
 		lines = i.giveIdeasBack(ctx)
 	}
-	mine, applied, err := i.toApply(ctx, &pass)
+	mine, applied, newest, err := i.toApply(ctx, &pass, after)
 	if err != nil {
-		return nil, err
+		return nil, resume, err
 	}
 	pass.applied = applied
+	stuck := int64(0)
 	var ideas ideasPass
 	for _, m := range mine {
+		if tapsOnly && !isOneTap(m) {
+			continue
+		}
 		if m.Txid == "" {
 			continue
 		}
@@ -223,7 +258,7 @@ func (i PosternInbox) Apply(ctx context.Context) ([]string, error) {
 		// infrastructure and does not wait for him.
 		line, kept, fresh, err := i.holdIdea(ctx, m, &ideas)
 		if err != nil {
-			return lines, err
+			return lines, after, err
 		}
 		if kept {
 			if fresh {
@@ -239,18 +274,25 @@ func (i PosternInbox) Apply(ctx context.Context) ([]string, error) {
 		}
 		result, handled, err := i.applyOne(ctx, m, outcome, saved)
 		if err != nil {
-			return lines, err
+			return lines, after, err
 		}
 		if !handled {
+			if stuck == 0 || m.Seq < stuck {
+				stuck = m.Seq
+			}
 			continue
 		}
 		if err := i.markApplied(ctx, applied, result); err != nil {
-			return lines, err
+			return lines, after, err
 		}
 		lines = append(lines, result.summary())
 		i.printf("%s\n", result.summary())
 	}
-	return lines, nil
+	resume = max(after, newest)
+	if stuck > 0 && stuck-1 < resume {
+		resume = max(after, stuck-1)
+	}
+	return lines, resume, nil
 }
 
 // toApply reads what a pass may apply and the txids already applied. On the
@@ -261,14 +303,18 @@ func (i PosternInbox) Apply(ctx context.Context) ([]string, error) {
 // applied, and the pass is dark (a move-home then writes nothing before its
 // move), so that a move the Governor asked for is never held up by the host
 // it moves away from.
-func (i PosternInbox) toApply(ctx context.Context, pass *moveHomePass) ([]PosternInboxMessage, map[string]string, error) {
+func (i PosternInbox) toApply(ctx context.Context, pass *moveHomePass, after int64) ([]PosternInboxMessage, map[string]string, int64, error) {
 	if !pass.onBoost(i.Host) {
-		mine, _, _, err := i.fetch(ctx)
+		cursor, err := i.readCursor(ctx)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, 0, err
+		}
+		mine, newest, err := i.fetchSince(ctx, max(cursor, after))
+		if err != nil {
+			return nil, nil, 0, err
 		}
 		applied, err := i.appliedNotes(ctx)
-		return mine, applied, err
+		return mine, applied, newest, err
 	}
 	bounded, cancel := i.bounded(ctx, *pass)
 	cursor, err := i.readCursor(bounded)
@@ -277,9 +323,9 @@ func (i PosternInbox) toApply(ctx context.Context, pass *moveHomePass) ([]Poster
 		i.printf("this host is not home and the postern inbox cursor could not be read (%v): every record is read for a move-home\n", err)
 		cursor, pass.dark = 0, true
 	}
-	mine, _, err := i.fetchSince(ctx, cursor)
+	mine, newest, err := i.fetchSince(ctx, cursor)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	applied := map[string]string{}
 	if !pass.dark {
@@ -290,7 +336,7 @@ func (i PosternInbox) toApply(ctx context.Context, pass *moveHomePass) ([]Poster
 			applied, pass.dark = map[string]string{}, true
 		}
 	}
-	return mine, applied, nil
+	return mine, applied, newest, nil
 }
 
 // appliedNotes reads every PosternAppliedKey note at once, txid to line.
@@ -962,4 +1008,43 @@ func (i PosternInbox) digestOnTap(ctx context.Context, m PosternInboxMessage, be
 	return i.mail(ctx, fmt.Sprintf("Closed: the weekly digest %s on his Looks good", bead),
 		fmt.Sprintf("The Governor said %q by postern (txid %s) to the weekly digest %s.\nClosed %d demos: %s.\nSkipped: %s.",
 			strings.TrimSpace(answer), m.Txid, bead, len(closed), joinOrNone(closed), joinOrNone(skipped)))
+}
+
+// PosternTaps is the follower's applier of the Governor's one-tap actions
+// (Release, Hold, Priority, Keep, Verified, Done and the rest of section 13):
+// each pass of it applies, at zero tokens and through the same Apply path as
+// mw postern inbox --apply, the taps that came in since, so a tap does not wait
+// for a seat to run the inbox. His typed words, answers and voice notes are
+// left as they are for the seat, and a tap seen twice, here or by the inbox, is
+// applied once (the postern.applied note). It is held across the passes.
+type PosternTaps struct {
+	// Inbox is wired as mw postern inbox --apply wires it.
+	Inbox PosternInbox
+	// Every is the least time between two reads of the backend; zero reads on
+	// every pass.
+	Every time.Duration
+	// Now is the clock Every is kept by; nil is time.Now.
+	Now func() time.Time
+
+	last  time.Time
+	after int64
+}
+
+// Tap applies the taps that came in since the last pass, once Every has passed
+// since it last read, and says what it did on the inbox's Out.
+func (t *PosternTaps) Tap(ctx context.Context) error {
+	now := time.Now
+	if t.Now != nil {
+		now = t.Now
+	}
+	if t.Every > 0 && !t.last.IsZero() && now().Sub(t.last) < t.Every {
+		return nil
+	}
+	t.last = now()
+	_, resume, err := t.Inbox.apply(ctx, true, t.after)
+	if err != nil {
+		return err
+	}
+	t.after = resume
+	return nil
 }
