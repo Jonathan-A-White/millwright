@@ -102,31 +102,6 @@ func (f *changeFactory) report(withWrites bool) (application.FactoryReportResult
 	return result, out.String()
 }
 
-func TestParseExpectReadsTheMetricAndTheDirection(t *testing.T) {
-	for text, want := range map[string]application.Expect{
-		"1. It works.\n2. Expect: refusals down":                        {Metric: "refusals", Direction: "down"},
-		"Expect: attempts/landing down, because the formula is shorter": {Metric: "attempts/landing", Direction: "down"},
-		"- expect: $/landing UP":                                        {Metric: "$/landing", Direction: "up"},
-		"3) Expect: dispatch-to-landing down.":                          {Metric: "dispatch-to-landing", Direction: "down"},
-		"Expect: tokens/landing down":                                   {Metric: "tokens/landing", Direction: "down"},
-		"Expect: bugs/landing down":                                     {Metric: "bugs/landing", Direction: "down"},
-		"Expect: none, because this is a doc":                           {Metric: application.ExpectNone},
-	} {
-		got, err := application.ParseExpect(text)
-		if err != nil || got.Metric != want.Metric || got.Direction != want.Direction {
-			t.Errorf("%q: got %+v, %v; want %+v", text, got, err, want)
-		}
-	}
-	if _, err := application.ParseExpect("1. It works\nSweep: none, because it is the tool"); err != application.ErrNoExpect {
-		t.Errorf("acceptance with no Expect line: got %v, want ErrNoExpect", err)
-	}
-	for _, bad := range []string{"Expect: speed up", "Expect: refusals", "Expect: refusals sideways", "Expect:"} {
-		if _, err := application.ParseExpect(bad); err == nil || err == application.ErrNoExpect {
-			t.Errorf("%q was accepted or taken for no line: %v", bad, err)
-		}
-	}
-}
-
 func TestAChangeThatMovedItsMetricTheWrongWayPastTheBandIsWorse(t *testing.T) {
 	f := newChangeFactory(t)
 	f.rows("2026-09-27", "lampas", 4, 1) // before: 1 of 5 refused, 20%
@@ -156,11 +131,11 @@ func TestAChangeIsBetterLevelOrWorseOnlyPastTheBand(t *testing.T) {
 		afterL, afterR   int
 		verdict          string
 	}{
-		{"down and fell", "Expect: refusals down", 4, 1, 5, 0, application.ChangeBetter},
+		{"down and fell", "Expect: refusals down", 4, 1, 5, 0, application.ChangeKept},
 		{"down and rose", "Expect: refusals down", 4, 1, 3, 2, application.ChangeWorse},
 		{"up and fell", "Expect: refusals up", 3, 2, 4, 1, application.ChangeWorse},
-		{"up and rose", "Expect: refusals up", 4, 1, 3, 2, application.ChangeBetter},
-		{"level", "Expect: refusals down", 4, 1, 4, 1, application.ChangeLevel},
+		{"up and rose", "Expect: refusals up", 4, 1, 3, 2, application.ChangeKept},
+		{"level", "Expect: refusals down", 4, 1, 4, 1, application.ChangeKept},
 		{"none is never worse", "Expect: none, because a doc", 4, 1, 1, 4, application.ChangeNone},
 		{"no Expect named", "1. It works.", 4, 1, 1, 4, application.ChangeNoExpect},
 		{"no landings after", "Expect: attempts/landing down", 4, 1, 0, 0, application.ChangeNoData},
@@ -182,7 +157,7 @@ func TestTheWorseBandIsTenPercentOfTheWeekBefore(t *testing.T) {
 	}
 	// Attempts per landing: 1.00 the week before; with ten landings after, one
 	// that took two attempts is 1.10, on the band, and two is 1.20, past it.
-	for slow, verdict := range map[int]string{1: application.ChangeLevel, 2: application.ChangeWorse} {
+	for slow, verdict := range map[int]string{1: application.ChangeKept, 2: application.ChangeWorse} {
 		f := newChangeFactory(t)
 		f.rows("2026-09-27", "lampas", 10, 0)
 		f.rows("2026-10-05", "lampas", 10, 0)
@@ -291,5 +266,92 @@ func TestOneSnapshotADayOfTheKeyMetricsIsKept(t *testing.T) {
 	f.report(true)
 	if got := f.snapshots.All(); len(got) != 2 || got[0].Day != "2026-10-20" || got[1].Day != "2026-10-21" {
 		t.Errorf("the next day's report left %+v, want the two days in order", got)
+	}
+}
+
+func TestAChangeIsJudgedOnlyOnceFourteenDaysHavePassed(t *testing.T) {
+	for _, c := range []struct {
+		landed, verdict string
+	}{
+		{"2026-10-10", application.ChangeTooSoon}, // ten days: past the old week, not yet 14
+		{"2026-10-06", application.ChangeTooSoon}, // the 14 days after run to 10-20, today
+		{"2026-10-05", application.ChangeWorse},   // the 14 days after ended 10-19
+	} {
+		f := newChangeFactory(t)
+		at, _ := time.Parse(application.LedgerDate, c.landed)
+		f.rows(at.AddDate(0, 0, -3).Format(application.LedgerDate), "lampas", 4, 1)
+		f.rows(at.AddDate(0, 0, 3).Format(application.LedgerDate), "lampas", 2, 2)
+		f.change("Expect: refusals down", c.landed)
+		result, printed := f.report(false)
+		if len(result.Changes) != 1 || result.Changes[0].Verdict != c.verdict {
+			t.Errorf("landed %s: changes %+v, want %q\n%s", c.landed, result.Changes, c.verdict, printed)
+		}
+	}
+}
+
+func TestEveryJudgedChangePrintsItsVerdict(t *testing.T) {
+	for _, c := range []struct {
+		name, acceptance string
+		beforeL, beforeR int
+		afterL, afterR   int
+		want             string
+	}{
+		{"kept, moved the right way", "Expect: refusals down", 4, 1, 5, 0, "20% → 0% (-100%): KEPT"},
+		{"kept, level", "Expect: refusals down", 4, 1, 4, 1, "20% → 20% (+0%): KEPT"},
+		{"worse", "Expect: refusals down", 4, 1, 2, 2, "20% → 50% (+150%): WORSE"},
+		{"none", "Expect: none, because a doc", 4, 1, 2, 2, "NONE: no metric to judge"},
+	} {
+		f := newChangeFactory(t)
+		f.rows("2026-09-27", "lampas", c.beforeL, c.beforeR)
+		f.rows("2026-10-05", "lampas", c.afterL, c.afterR)
+		f.change(c.acceptance, "2026-10-01")
+		_, printed := f.report(false)
+		if !strings.Contains(printed, c.want) {
+			t.Errorf("%s: the report does not say %q:\n%s", c.name, c.want, printed)
+		}
+	}
+}
+
+func TestAWorseChangeWithNoFixIsACheapWin(t *testing.T) {
+	f := newChangeFactory(t)
+	f.rows("2026-09-27", "lampas", 4, 1)
+	f.rows("2026-10-05", "lampas", 2, 2)
+	f.change("Expect: refusals down", "2026-10-01")
+
+	result, printed := f.report(false)
+	var win *application.CheapWin
+	for i := range result.CheapWins {
+		if result.CheapWins[i].Rule == application.WinWorseChange {
+			win = &result.CheapWins[i]
+		}
+	}
+	if win == nil || !win.Shown || len(win.IDs) != 1 || win.IDs[0] != "mw-c.1" {
+		t.Fatalf("cheap wins %+v, want one shown naming mw-c.1", result.CheapWins)
+	}
+	want := "1. mw-c.1 made refusals worse: file a fix (Fixes: mw-c.1)"
+	if !strings.Contains(printed, want) {
+		t.Errorf("CHEAP WINS does not say %q:\n%s", want, printed)
+	}
+
+	// A story that names it as its fix takes it off the list.
+	f.story("mw-fix", "Undo the refusals", "millwright", "1. Refusals fall back.\nFixes: mw-c.1\nExpect: refusals down")
+	result, printed = f.report(false)
+	for _, w := range result.CheapWins {
+		if w.Rule == application.WinWorseChange {
+			t.Errorf("a WORSE change with a story fixing it is still a cheap win: %+v\n%s", w, printed)
+		}
+	}
+}
+
+func TestAKeptChangeIsNoCheapWin(t *testing.T) {
+	f := newChangeFactory(t)
+	f.rows("2026-09-27", "lampas", 4, 1)
+	f.rows("2026-10-05", "lampas", 5, 0)
+	f.change("Expect: refusals down", "2026-10-01")
+	result, _ := f.report(false)
+	for _, w := range result.CheapWins {
+		if w.Rule == application.WinWorseChange {
+			t.Errorf("a KEPT change is a cheap win: %+v", w)
+		}
 	}
 }

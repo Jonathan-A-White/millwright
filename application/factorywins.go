@@ -19,8 +19,11 @@ const (
 	WinGateOverUsual  = 1.5
 )
 
-// The rules, in the order they are tried. Quality comes first.
+// The rules. They are tried in the order of their numbers, but for R8, tried
+// first: a factory change that made things worse is the cheapest win there is.
+// Quality comes first.
 const (
+	WinWorseChange    = "R8"
 	WinCausesUnset    = "R1"
 	WinDominantReason = "R2"
 	WinAttemptsUsed   = "R3"
@@ -48,12 +51,14 @@ type HeavyStory struct {
 }
 
 // WinInputs is what the rules read: the report's rig blocks, its gate trends,
-// each kind's calibration, and the stories that used their attempts up.
+// each kind's calibration, the stories that used their attempts up, the
+// WORSE factory changes no story names as its fix, and the investment share.
 type WinInputs struct {
-	Rigs  []ReportBlock
-	Gates []GateTrend
-	Kinds []KindCalibration
-	Heavy []HeavyStory
+	Rigs    []ReportBlock
+	Gates   []GateTrend
+	Kinds   []KindCalibration
+	Heavy   []HeavyStory
+	Unfixed []FactoryChange
 	// Share is the window's investment share; nil for none.
 	Share *InvestShare
 }
@@ -68,6 +73,9 @@ func CheapWins(in WinInputs) []CheapWin {
 			wins = append(wins, CheapWin{Rule: rule, Text: text})
 		}
 	}
+	for _, c := range in.Unfixed {
+		wins = append(wins, CheapWin{Rule: WinWorseChange, Text: winWorseChange(c), IDs: []string{c.Story}})
+	}
 	if text, ids := winCausesUnset(in.Rigs); text != "" {
 		wins = append(wins, CheapWin{Rule: WinCausesUnset, Text: text, IDs: ids})
 	}
@@ -81,6 +89,12 @@ func CheapWins(in WinInputs) []CheapWin {
 		wins[i].Shown = i < MaxCheapWins
 	}
 	return wins
+}
+
+// winWorseChange is R8: a factory change whose metric went the wrong way past
+// the band, and no story names it as its fix.
+func winWorseChange(c FactoryChange) string {
+	return fmt.Sprintf("%s made %s worse: file a fix (Fixes: %s)", c.Story, c.Expect.Metric, c.Story)
 }
 
 // MaxNamedUncaused is how many stories R1 names in its text; --json has them all.

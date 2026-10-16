@@ -5,34 +5,39 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
-// ChangeDays is how far back the report looks for factory changes, and
-// ChangeWindowDays how many days before and after a landing it compares.
+// ChangeDays is how far back the report looks for factory changes,
+// ChangeWindowDays how many days a snapshot of the key metrics and mw report
+// --since a landing take in, and ChangeVerdictDays how many days before and
+// after a landing a change is judged on: it is too soon to judge until that
+// many days after it are over.
 const (
-	ChangeDays       = 30
-	ChangeWindowDays = 7
+	ChangeDays        = 30
+	ChangeWindowDays  = 7
+	ChangeVerdictDays = 14
 )
 
-// ChangeBand is how far a metric may move the wrong way, as a share of the week
+// ChangeBand is how far a metric may move the wrong way, as a share of the days
 // before, and not be called WORSE (PROVISIONAL, the Governor to confirm).
 const ChangeBand = 0.10
 
-// ExpectNone is the metric a story names when it does not expect to move one.
-const ExpectNone = "none"
-
-// The verdicts of a factory change.
+// The verdicts of a factory change: KEPT when its metric moved the way its
+// story expected or held inside the ChangeBand, WORSE when it went the other way
+// past it, NONE when the story expected to move none. ChangeLevel is how mw
+// report --since a landing says a measure held.
 const (
+	ChangeKept      = "KEPT"
 	ChangeWorse     = "WORSE"
-	ChangeBetter    = "better"
+	ChangeNone      = "NONE"
 	ChangeLevel     = "level"
 	ChangeTooSoon   = "too soon"
 	ChangeNoData    = "no data"
-	ChangeNone      = "none expected"
 	ChangeNoExpect  = "no Expect"
 	ChangeBadExpect = "unreadable Expect"
 )
@@ -40,65 +45,6 @@ const (
 // MailFactoryChange starts the subject of the mail that tells the Mayor a factory
 // change made things worse.
 const MailFactoryChange = "Worse"
-
-// ErrNoExpect says acceptance criteria carry no line beginning Expect:.
-var ErrNoExpect = errors.New("no Expect: line")
-
-// Expect is what a millwright story says it should move: one metric of the
-// health report and the way it should go. The metric none has no direction.
-type Expect struct {
-	Metric    string `json:"metric"`
-	Direction string `json:"direction,omitempty"`
-}
-
-// String is the Expect as a story spells it after the colon.
-func (e Expect) String() string {
-	if e.Direction == "" {
-		return e.Metric
-	}
-	return e.Metric + " " + e.Direction
-}
-
-// expectLine is a line of acceptance criteria that names an Expect, after an
-// optional list number or bullet.
-var expectLine = regexp.MustCompile(`(?i)^\s*(?:[-*]\s+|\d+[.)]\s+)?expect:\s*(.*)$`)
-
-// ParseExpect reads the 'Expect: <metric> <up|down>' line of a story's
-// acceptance criteria, or 'Expect: none, because <reason>'. It reports
-// ErrNoExpect when there is no such line and another error when the line cannot
-// be read.
-func ParseExpect(acceptance string) (Expect, error) {
-	for _, line := range strings.Split(acceptance, "\n") {
-		m := expectLine.FindStringSubmatch(line)
-		if m == nil {
-			continue
-		}
-		words := strings.Fields(strings.ToLower(m[1]))
-		trim := func(w string) string { return strings.TrimRight(w, ".,;:") }
-		if len(words) > 0 && trim(words[0]) == ExpectNone {
-			return Expect{Metric: ExpectNone}, nil
-		}
-		// A metric of two words, escaped bugs, is read as one.
-		if len(words) >= 3 {
-			if _, known := changeMetrics[words[0]+" "+words[1]]; known {
-				words = append([]string{words[0] + " " + words[1]}, words[2:]...)
-			}
-		}
-		if len(words) >= 2 {
-			metric, direction := trim(words[0]), trim(words[1])
-			if _, known := changeMetrics[metric]; known && (direction == "up" || direction == "down") {
-				return Expect{Metric: metric, Direction: direction}, nil
-			}
-		}
-		return Expect{}, fmt.Errorf("%q is not 'Expect: <metric> <up|down>' with a metric of %s, or 'Expect: none'", strings.TrimSpace(line), strings.Join(ExpectMetrics(), ", "))
-	}
-	return Expect{}, ErrNoExpect
-}
-
-// ExpectMetrics are the metrics a story may name, in the order the report shows them.
-func ExpectMetrics() []string {
-	return []string{"refusals", "attempts/landing", "bugs/landing", "escaped bugs", "dispatch-to-landing", "tokens/landing", "$/landing"}
-}
 
 // changeMetric reads one metric of the health report from the entries of a
 // stretch of days: its value, and whether those days had anything to measure
@@ -142,20 +88,20 @@ var changeMetrics = map[string]changeMetric{
 }
 
 // FactoryChange is one millwright landing of the last ChangeDays days: what its
-// story expected, and how that metric stood in the ChangeWindowDays days before
+// story expected, and how that metric stood in the ChangeVerdictDays days before
 // the landing day and in the same number after it, factory-wide. The landing's
 // own day is in neither. Before and After are nil where there was nothing to
 // compare.
 type FactoryChange struct {
-	Story   string   `json:"story"`
-	Title   string   `json:"title"`
-	Landed  string   `json:"landed"`
-	Expect  Expect   `json:"expect"`
-	Problem string   `json:"problem,omitempty"`
-	Before  *float64 `json:"before,omitempty"`
-	After   *float64 `json:"after,omitempty"`
-	Verdict string   `json:"verdict"`
-	// AfterEnds is the last day the week after takes in.
+	Story   string        `json:"story"`
+	Title   string        `json:"title"`
+	Landed  string        `json:"landed"`
+	Expect  domain.Expect `json:"expect"`
+	Problem string        `json:"problem,omitempty"`
+	Before  *float64      `json:"before,omitempty"`
+	After   *float64      `json:"after,omitempty"`
+	Verdict string        `json:"verdict"`
+	// AfterEnds is the last day the ChangeVerdictDays after the landing take in.
 	AfterEnds string `json:"after_ends"`
 	// EscapedBugs are the bugs that escaped the landing so far, EscapedIDs
 	// their stories; EscapedTooSoon says the EscapeDays after it, which end
@@ -166,14 +112,13 @@ type FactoryChange struct {
 	EscapedEnds    string   `json:"escaped_ends"`
 }
 
-// judgeChange says whether a metric moved the way a story expected, inside the
-// ChangeBand of the week before: better, level, or WORSE.
-func judgeChange(e Expect, before, after float64) string {
-	if math.Abs(after-before) <= ChangeBand*math.Abs(before)+1e-9 {
-		return ChangeLevel
-	}
-	if (after > before) == (e.Direction == "up") {
-		return ChangeBetter
+// judgeChange says whether a metric moved the way a story expected or held
+// inside the ChangeBand of the days before, KEPT, or went the other way past it,
+// WORSE.
+func judgeChange(e domain.Expect, before, after float64) string {
+	held := math.Abs(after-before) <= ChangeBand*math.Abs(before)+1e-9
+	if held || (after > before) == (e.Direction == "up") {
+		return ChangeKept
 	}
 	return ChangeWorse
 }
@@ -195,23 +140,25 @@ func factoryChanges(all []reportEntry, stories map[string]StoryDetail, escaped m
 	for id, landing := range first {
 		d, known := stories[id]
 		change := FactoryChange{Story: id, Title: id, Landed: landing.at.Format(LedgerDate),
-			AfterEnds:   landing.at.AddDate(0, 0, ChangeWindowDays).Format(LedgerDate),
+			AfterEnds:   landing.at.AddDate(0, 0, ChangeVerdictDays).Format(LedgerDate),
 			EscapedBugs: len(escaped[id]), EscapedIDs: escaped[id],
 			EscapedTooSoon: !escapeOver(landing.at, today), EscapedEnds: landing.at.AddDate(0, 0, EscapeDays).Format(LedgerDate)}
 		if known && strings.TrimSpace(d.Story.Title) != "" {
 			change.Title = strings.Join(strings.Fields(d.Story.Title), " ")
 		}
-		expect, err := ParseExpect(d.Acceptance)
+		expect, err := domain.ParseExpect(d.Acceptance)
 		switch {
-		case errors.Is(err, ErrNoExpect):
+		case errors.Is(err, domain.ErrNoExpect):
 			change.Verdict = ChangeNoExpect
 		case err != nil:
 			change.Verdict, change.Problem = ChangeBadExpect, err.Error()
-		case expect.Metric == ExpectNone:
+		case !today.After(landing.at.AddDate(0, 0, ChangeVerdictDays)):
+			change.Expect, change.Verdict = expect, ChangeTooSoon
+		case expect.Metric == domain.ExpectNone:
 			change.Expect, change.Verdict = expect, ChangeNone
 		default:
 			change.Expect = expect
-			change.measure(all, landing.at, today)
+			change.measure(all, landing.at)
 		}
 		changes = append(changes, change)
 	}
@@ -224,16 +171,12 @@ func factoryChanges(all []reportEntry, stories map[string]StoryDetail, escaped m
 	return changes
 }
 
-// measure sets the verdict of a change whose story named a metric: too soon
-// until the week after the landing day is over.
-func (c *FactoryChange) measure(all []reportEntry, landed, today time.Time) {
-	if !today.After(landed.AddDate(0, 0, ChangeWindowDays)) {
-		c.Verdict = ChangeTooSoon
-		return
-	}
+// measure sets the verdict of a change whose story named a metric, once the
+// ChangeVerdictDays after the landing day are over.
+func (c *FactoryChange) measure(all []reportEntry, landed time.Time) {
 	metric := changeMetrics[c.Expect.Metric]
-	before, haveBefore := metric.value(entriesBetween(all, landed.AddDate(0, 0, -ChangeWindowDays), landed))
-	after, haveAfter := metric.value(entriesBetween(all, landed.AddDate(0, 0, 1), landed.AddDate(0, 0, ChangeWindowDays+1)))
+	before, haveBefore := metric.value(entriesBetween(all, landed.AddDate(0, 0, -ChangeVerdictDays), landed))
+	after, haveAfter := metric.value(entriesBetween(all, landed.AddDate(0, 0, 1), landed.AddDate(0, 0, ChangeVerdictDays+1)))
 	if !haveBefore || !haveAfter {
 		c.Verdict = ChangeNoData
 		return
@@ -253,11 +196,11 @@ func entriesBetween(all []reportEntry, from, to time.Time) []reportEntry {
 	return in
 }
 
-// writeChanges prints FACTORY CHANGES: each change with its Expect and how the
-// metric moved, in at most ReportWidth columns.
+// writeChanges prints FACTORY CHANGES: each change with its Expect, how the
+// metric moved and its verdict, in at most ReportWidth columns.
 func writeChanges(b *strings.Builder, changes []FactoryChange) {
 	fmt.Fprintf(b, "\nFACTORY CHANGES (millwright landings, %d days)\n", ChangeDays)
-	fmt.Fprintf(b, "  %d days before vs %d after; WORSE past a %.0f%% band\n", ChangeWindowDays, ChangeWindowDays, ChangeBand*100)
+	fmt.Fprintf(b, "  %d days before vs %d after; WORSE past a %.0f%% band\n", ChangeVerdictDays, ChangeVerdictDays, ChangeBand*100)
 	if len(changes) == 0 {
 		b.WriteString("  none landed\n")
 		return
@@ -274,11 +217,11 @@ func writeChanges(b *strings.Builder, changes []FactoryChange) {
 		case ChangeBadExpect:
 			fmt.Fprintf(b, "  landed %s, Expect: not readable\n", c.Landed)
 		case ChangeNone:
-			fmt.Fprintf(b, "  landed %s, Expect: none\n", c.Landed)
+			fmt.Fprintf(b, "  landed %s, Expect: none\n  %s: no metric to judge\n", c.Landed, ChangeNone)
 		case ChangeTooSoon:
-			fmt.Fprintf(b, "  landed %s, Expect: %s\n  too soon: the week after ends %s\n", c.Landed, c.Expect, c.AfterEnds)
+			fmt.Fprintf(b, "  landed %s, Expect: %s\n  too soon: the %d days after end %s\n", c.Landed, c.Expect, ChangeVerdictDays, c.AfterEnds)
 		case ChangeNoData:
-			fmt.Fprintf(b, "  landed %s, Expect: %s\n  no data in the week before or after\n", c.Landed, c.Expect)
+			fmt.Fprintf(b, "  landed %s, Expect: %s\n  no data in the %d days before or after\n", c.Landed, c.Expect, ChangeVerdictDays)
 		default:
 			fmt.Fprintf(b, "  landed %s, Expect: %s\n", c.Landed, c.Expect)
 			format := changeMetrics[c.Expect.Metric].format
@@ -298,6 +241,29 @@ func writeChanges(b *strings.Builder, changes []FactoryChange) {
 		fmt.Fprintf(b, "  %d landed with no Expect named (--json lists them)\n", unnamed)
 		fmt.Fprintf(b, "  escaped bugs of those %d\n", unnamedEscaped)
 	}
+}
+
+// unfixed are the changes of worse that no story of stories names as its fix,
+// by a line "Fixes: <id>" in its description or acceptance (read by
+// domain.LinesBeginning). A story does not fix itself.
+func unfixed(worse []FactoryChange, stories []StoryDetail) []FactoryChange {
+	fixed := map[string]bool{}
+	for _, d := range stories {
+		for _, line := range domain.LinesBeginning(d.Description+"\n"+d.Acceptance, "Fixes") {
+			for _, id := range strings.FieldsFunc(line, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' }) {
+				if id = strings.TrimRight(id, ".;:"); id != d.Story.ID {
+					fixed[id] = true
+				}
+			}
+		}
+	}
+	var out []FactoryChange
+	for _, c := range worse {
+		if !fixed[c.Story] {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // worse are the changes that made things worse.
@@ -396,7 +362,7 @@ func (r FactoryReport) tellMayor(ctx context.Context, c FactoryChange, at time.T
 		"%s in the %d days before, %s in the %d days after (the whole factory, %s to %s).\n\n"+
 		"Look at it, and either fix it, take it back, or say the measure was noise: mw report shows FACTORY CHANGES.\n",
 		c.Title, c.Story, c.Landed, c.Expect, c.Expect.Metric, ChangeBand*100,
-		format(*c.Before), ChangeWindowDays, format(*c.After), ChangeWindowDays,
+		format(*c.Before), ChangeVerdictDays, format(*c.After), ChangeVerdictDays,
 		c.Landed, c.AfterEnds)
 	if _, err := r.Mailbox.Send(ctx, NewMessage{From: MwSeat, To: MayorMailbox,
 		Subject: MailFactoryChange + ": " + c.Title + " made " + c.Expect.Metric + " worse", Body: body}); err != nil {

@@ -36,7 +36,7 @@ func (e Expect) String() string {
 
 // ExpectMetrics are the metrics a story may name, in the order the report shows them.
 func ExpectMetrics() []string {
-	return []string{"refusals", "attempts/landing", "bugs/landing", "dispatch-to-landing", "tokens/landing", "$/landing"}
+	return []string{"refusals", "attempts/landing", "bugs/landing", "escaped bugs", "dispatch-to-landing", "tokens/landing", "$/landing"}
 }
 
 // ParseExpect reads the 'Expect: <metric> <up|down>' line of a story's
@@ -56,6 +56,10 @@ func ParseExpect(acceptance string) (Expect, error) {
 			return Expect{}, fmt.Errorf("'Expect: %s' gives no reason: it must read 'Expect: none, because <why>'", text)
 		}
 		return Expect{Metric: ExpectNone}, nil
+	}
+	// A metric of two words, escaped bugs, is read as one.
+	if len(words) >= 3 && isExpectMetric(words[0]+" "+words[1]) {
+		words = append([]string{words[0] + " " + words[1]}, words[2:]...)
 	}
 	if len(words) >= 2 {
 		metric, direction := trim(words[0]), trim(words[1])

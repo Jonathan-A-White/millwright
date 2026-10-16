@@ -291,10 +291,10 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 	}
 
 	// Entries are read back as far as a factory change needs them, a landing
-	// of the last ChangeDays days and the week before it, and as far as a bug
-	// of the window before may have escaped from.
+	// of the last ChangeDays days and the ChangeVerdictDays before it, and as
+	// far as a bug of the window before may have escaped from.
 	earliest := result.PreviousWindow.Since.AddDate(0, 0, -EscapeDays)
-	if wide := reportDay(now).AddDate(0, 0, -(ChangeDays + ChangeWindowDays)); wide.Before(earliest) {
+	if wide := reportDay(now).AddDate(0, 0, -(ChangeDays + ChangeVerdictDays)); wide.Before(earliest) {
 		earliest = wide
 	}
 	stories, err := r.Tracker.StoriesSince(ctx, earliest)
@@ -450,7 +450,8 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 		section := ReadInvestmentsSection(GroupInvestments(records), result.Window, now)
 		result.Investments = &section
 	}
-	result.CheapWins = CheapWins(WinInputs{Rigs: result.Rigs, Gates: gates, Kinds: Calibrate(recent, BenchmarkSettings{}), Heavy: r.heavyStories(entries), Share: result.InvestShare})
+	result.CheapWins = CheapWins(WinInputs{Rigs: result.Rigs, Gates: gates, Kinds: Calibrate(recent, BenchmarkSettings{}), Heavy: r.heavyStories(entries),
+		Unfixed: unfixed(worse(result.Changes), stories), Share: result.InvestShare})
 
 	if r.Out != nil {
 		if r.JSON {
