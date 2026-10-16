@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/rig"
@@ -222,6 +223,30 @@ func TestResolveExpandsACommitNamedByItsFirstCharacters(t *testing.T) {
 	}
 	if _, err := rig.New().Resolve(context.Background(), here, "deadbeef"); err == nil {
 		t.Fatal("Resolve of a commit that is not there succeeded")
+	}
+}
+
+func TestCommitOfReadsACommitAsTheCheckoutHasItWithWhenItWasCommitted(t *testing.T) {
+	here, _ := aRig(t)
+	write(t, here, "NOTES.md", "a note\n")
+	run(t, here, "git", "add", "-A")
+	cmd := exec.Command("git", "commit", "-qm", "Merge branch 'mw/mw-x.1' into HEAD")
+	cmd.Dir = here
+	cmd.Env = append(os.Environ(), "GIT_COMMITTER_DATE=2026-09-20T15:04:00Z")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("committing: %v: %s", err, out)
+	}
+	full := run(t, here, "git", "rev-parse", "HEAD")
+
+	got, err := rig.New().CommitOf(context.Background(), here, full[:7])
+	if err != nil {
+		t.Fatalf("CommitOf: %v", err)
+	}
+	if got.Commit != full || got.Subject != "Merge branch 'mw/mw-x.1' into HEAD" || !got.At.Equal(time.Date(2026, 9, 20, 15, 4, 0, 0, time.UTC)) {
+		t.Fatalf("CommitOf = %+v, want commit %s, the merge subject, at 2026-09-20T15:04:00Z", got, full)
+	}
+	if _, err := rig.New().CommitOf(context.Background(), here, "deadbeef"); err == nil {
+		t.Fatal("CommitOf of a commit that is not there succeeded")
 	}
 }
 

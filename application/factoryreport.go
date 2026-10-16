@@ -75,6 +75,12 @@ type FactoryReport struct {
 	Since time.Time
 	// Rig and Host, when set, narrow every block to that rig or host.
 	Rig, Host string
+	// Around, when set, is a story id or a commit of the factory's rig, and
+	// the report is the days before that landing beside the days after it.
+	// Commits reads such a commit in the checkout at FactoryDir.
+	Around     string
+	Commits    FactoryCommits
+	FactoryDir string
 	// JSON prints the result as one object instead of text.
 	JSON bool
 	// Notes, Mailbox and Snapshots, when all set, are what mw report send
@@ -85,6 +91,13 @@ type FactoryReport struct {
 	Snapshots MetricSnapshots
 	Now       func() time.Time
 	Out       io.Writer
+}
+
+// FactoryCommits reads a commit of a rig's checkout as the checkout has it,
+// with no fetch: its full name, its subject and when it was committed. The
+// adapter is the rig's git (infrastructure/rig).
+type FactoryCommits interface {
+	CommitOf(ctx context.Context, rigDir, rev string) (RigCommit, error)
 }
 
 // ReportNotes is the part of the tracker's key-value store that remembers which
@@ -179,6 +192,10 @@ type FactoryReportResult struct {
 	// Whole is the whole factory as one block, what Summary reads; nil when
 	// nothing landed, was refused or was filed. It is not in the JSON.
 	Whole *ReportBlock `json:"-"`
+	// Landing, for mw report --since <story|commit>, is that landing with the
+	// days before it beside the days after, the PreviousWindow and the Window;
+	// nil for a report of a window.
+	Landing *ReportLanding `json:"landing,omitempty"`
 }
 
 // reportEntry is one thing the window saw: a landing, a refusal or a bug filed.
@@ -217,22 +234,34 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 	if r.Now != nil {
 		now = r.Now()
 	}
-	since := r.Since
-	if since.IsZero() {
-		since = now.AddDate(0, 0, -DefaultReportDays)
+	ledger, err := r.Files.ReadLedger(ctx, r.Seat)
+	if err != nil {
+		return FactoryReportResult{}, fmt.Errorf("reporting quality: the %s seat's ledger: %w", r.Seat, err)
 	}
-	since = reportDay(since)
-	if !since.Before(now) {
-		return FactoryReportResult{}, fmt.Errorf("reporting quality: --since %s is not before now", since.Format(LedgerDate))
-	}
-	// The window before is as many whole days long as the one asked for.
-	days := int(reportDay(now).Sub(since).Hours() / 24)
-	if days < 1 {
-		days = 1
-	}
-	result := FactoryReportResult{
-		Window:         ReportWindow{Since: since, Until: now},
-		PreviousWindow: ReportWindow{Since: since.AddDate(0, 0, -days), Until: since},
+	var result FactoryReportResult
+	if strings.TrimSpace(r.Around) != "" {
+		landing, err := r.landingOf(ctx, ledger)
+		if err != nil {
+			return result, fmt.Errorf("reporting on a landing: %w", err)
+		}
+		result.PreviousWindow, result.Window = landing.windows(now)
+		result.Landing = &landing
+	} else {
+		since := r.Since
+		if since.IsZero() {
+			since = now.AddDate(0, 0, -DefaultReportDays)
+		}
+		since = reportDay(since)
+		if !since.Before(now) {
+			return result, fmt.Errorf("reporting quality: --since %s is not before now", since.Format(LedgerDate))
+		}
+		// The window before is as many whole days long as the one asked for.
+		days := int(reportDay(now).Sub(since).Hours() / 24)
+		if days < 1 {
+			days = 1
+		}
+		result.Window = ReportWindow{Since: since, Until: now}
+		result.PreviousWindow = ReportWindow{Since: since.AddDate(0, 0, -days), Until: since}
 	}
 
 	// Entries are read back as far as a factory change needs them: a landing
@@ -248,10 +277,6 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 	byID := make(map[string]StoryDetail, len(stories))
 	for _, d := range stories {
 		byID[d.Story.ID] = d
-	}
-	ledger, err := r.Files.ReadLedger(ctx, r.Seat)
-	if err != nil {
-		return result, fmt.Errorf("reporting quality: the %s seat's ledger: %w", r.Seat, err)
 	}
 	var recent []Benchmark
 	if r.Benchmarks != nil {
@@ -368,6 +393,12 @@ func (r FactoryReport) Run(ctx context.Context) (FactoryReportResult, error) {
 		}
 	}
 	result.Changes = factoryChanges(all, byID, now)
+	if result.Landing != nil {
+		if d, known := byID[result.Landing.Story]; known && strings.TrimSpace(d.Story.Title) != "" {
+			result.Landing.Title = d.Story.Title
+		}
+		result.Landing.measure(entries, r.Rig, r.Host)
+	}
 
 	gates := gateTrends(recent, result.Window.Since, r.Rig, r.Host)
 	result.Rigs = r.blocks(entries, gates, func(e reportEntry) string { return e.rig }, func(g GateTrend) string { return g.Rig })
@@ -437,12 +468,12 @@ func (r FactoryReportResult) windowOfDay(day string) (previous, inside bool) {
 }
 
 // windowOfTime says which window a moment falls in; a ledger day counts from
-// the start of its day.
+// the start of its day, and the window's last day counts whole.
 func (r FactoryReportResult) windowOfTime(at time.Time) (previous, inside bool) {
 	switch {
-	case !at.Before(r.Window.Since) && !at.After(r.Window.Until):
+	case !at.Before(r.Window.Since) && !reportDay(at).After(reportDay(r.Window.Until)):
 		return false, true
-	case !at.Before(r.PreviousWindow.Since) && at.Before(r.Window.Since):
+	case !at.Before(r.PreviousWindow.Since) && at.Before(r.PreviousWindow.Until):
 		return true, true
 	}
 	return false, false
@@ -560,6 +591,9 @@ func twoPlaces(x float64) float64 { return math.Round(x*100) / 100 }
 // and FUEL in that order, each with a block per rig, per model and per host,
 // and CHEAP WINS at the end, none of it wider than ReportWidth columns.
 func (r FactoryReportResult) String() string {
+	if r.Landing != nil {
+		return r.Landing.String()
+	}
 	var b strings.Builder
 	r.writeParts(&b)
 	writeChanges(&b, r.Changes)

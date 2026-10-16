@@ -43,6 +43,7 @@ var _ application.Worktrees = (*Worktrees)(nil)
 var _ application.SuiteTrees = (*Worktrees)(nil)
 var _ application.CommitNotes = (*Worktrees)(nil)
 var _ application.RigHeads = (*Worktrees)(nil)
+var _ application.FactoryCommits = (*Worktrees)(nil)
 
 // Option is a setting of a Worktrees, given to New.
 type Option func(*Worktrees)
@@ -282,6 +283,27 @@ func (w *Worktrees) Resolve(ctx context.Context, rigDir, rev string) (applicatio
 		return application.RigCommit{}, err
 	}
 	return application.RigCommit{Branch: branch, Commit: commit, Subject: strings.TrimSpace(subject)}, nil
+}
+
+// CommitOf implements application.FactoryCommits: rev is read as a commit of
+// the checkout at rigDir as it stands, with no fetch, and given in full with its
+// subject and when it was committed.
+func (w *Worktrees) CommitOf(ctx context.Context, rigDir, rev string) (application.RigCommit, error) {
+	commit, err := w.git(ctx, rigDir, "rev-parse", "--verify", "--quiet", rev+"^{commit}")
+	if err != nil {
+		return application.RigCommit{}, fmt.Errorf("%s is not a commit in %s", rev, rigDir)
+	}
+	commit = strings.TrimSpace(commit)
+	out, err := w.git(ctx, rigDir, "log", "-1", "--format=%cI%x00%s", commit)
+	if err != nil {
+		return application.RigCommit{}, err
+	}
+	when, subject, _ := strings.Cut(strings.TrimSpace(out), "\x00")
+	at, err := time.Parse(time.RFC3339, when)
+	if err != nil {
+		return application.RigCommit{}, fmt.Errorf("reading when %s was committed: %w", commit, err)
+	}
+	return application.RigCommit{Commit: commit, Subject: subject, At: at}, nil
 }
 
 // defaultBranch is the branch the remote's HEAD names: the clone's own record
