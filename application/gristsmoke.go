@@ -284,10 +284,11 @@ func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, fi
 	send := GristSendRequest{App: app, Kind: kind, Version: example.SchemaVersion, RequestFile: request, Photos: photos, Wait: wait}
 	sent, err := s.Send.Run(ctx, send)
 	retried := false
-	if gristSessionDidNotFinish(err) {
-		// The mill's own session ended before its answer, which says nothing of
-		// the example: it is sent once more before it counts (mw-gq6.454).
-		s.say("  the mill's session did not finish; sending it once more ...")
+	if gristMillsFault(err) {
+		// The mill could not grind it, which says nothing of the example (a
+		// session that did not finish, a grind out of time on a loaded host):
+		// it is sent once more before it counts (mw-gq6.454, mw-gq6.490).
+		s.say("  the mill could not grind it; sending it once more ...")
 		retried = true
 		sent, err = s.Send.Run(ctx, send)
 	}
@@ -347,13 +348,36 @@ func gristAnswerIsNotTheExamples(status, reason string) bool {
 	return false
 }
 
-// gristSessionDidNotFinish says the mill failed a grist because its grind's
-// session ended before an answer (GristReasonSessionEnd): the mill's fault, on
-// a busy host, and not the grist's.
-func gristSessionDidNotFinish(err error) bool {
+// gristMillsFault says the mill failed a grist for a reason that is the mill's
+// or its host's, and not the example's, so one more send may well pass. The
+// verdict on each reason the mill fails a grist with, and so on every "send it
+// again" reason of gristgrind.go:
+//
+//	GristReasonSessionEnd: mill's fault, retried. The grind's session ended
+//	  before an answer, on a busy host (mw-gq6.454).
+//	GristReasonTimedOut: mill's fault, retried. The grind ran out of time, which
+//	  a loaded host causes as easily as a heavy grind (mw-gq6.490).
+//	GristReasonUnread: mill's fault, retried. The checkout's commit or the
+//	  grind's files could not be read (git or disk trouble); a grind that is
+//	  missing or broken is refused instead, and fails at once.
+//	GristReasonPhotoLost: mill's fault, retried. The photo's blob could not be
+//	  fetched from the postern, a network matter; a photo that is forged or of
+//	  the wrong type is another reason, and fails at once.
+//	GristReasonNotSent: mill's fault, retried. The factory could not mail a
+//	  forwarded grist on (temp dir, keeping the photos, the mailbox).
+//	GristReasonNoAnswer: app's fault, fails at once. The grind's answer did not
+//	  match its schema: the grind or its instructions are what the smoke is
+//	  there to test, and a second send would only hide a flaky grind.
+func gristMillsFault(err error) bool {
 	unanswered, ok := GristUnansweredIn(err)
-	return ok && unanswered.Answer != nil && unanswered.Answer.Status == GristFailed &&
-		strings.TrimSpace(unanswered.Answer.Reason) == GristReasonSessionEnd
+	if !ok || unanswered.Answer == nil || unanswered.Answer.Status != GristFailed {
+		return false
+	}
+	switch strings.TrimSpace(unanswered.Answer.Reason) {
+	case GristReasonSessionEnd, GristReasonTimedOut, GristReasonUnread, GristReasonPhotoLost, GristReasonNotSent:
+		return true
+	}
+	return false
 }
 
 func (s GristSmoke) say(format string, args ...any) {
