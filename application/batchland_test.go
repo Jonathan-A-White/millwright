@@ -13,6 +13,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/domain"
+	"github.com/Jonathan-A-White/millwright/domain/events"
 )
 
 // mw land (plans/0117, Land Rush 3): which stories a batch takes and in what
@@ -413,6 +414,79 @@ func TestTheBatchLandJobStopsDrainingWhenALandingLeavesTheQueueAsItWas(t *testin
 	err := landings.Job().Run(context.Background())
 	if err == nil || len(j.asked) != 1 {
 		t.Fatalf("expected one try and an error for a landing that landed nothing, got %d tries, %v", len(j.asked), err)
+	}
+}
+
+// mw-gq6.470: the follower restarts after every landing of the factory rig.
+// A landing in flight then runs on apart from it; the follower that comes back
+// waits for that landing, begins no second one beside it however often the
+// queue says it is due, and the log tells one outcome, not a pass cut short.
+func TestABatchLandInFlightAcrossAFollowerRestartIsWaitedForAndToldOnce(t *testing.T) {
+	j := newLandingJob(t)
+	j.rule("lampas", domain.LandingBatch)
+	j.queued("lampas", "lp-1", 600)
+	j.queued("lampas", "lp-2", 600)
+	log, procs := &apptest.FakeEventLog{}, &apptest.FakeLandProcesses{}
+	follower := func() *application.EventSpring {
+		detached := application.DetachedLand{Processes: procs}
+		landings := &application.BatchLandings{
+			Rigs: map[string]string{"lampas": "/rigs/lampas"}, Rules: j.rules, Tracker: j.tracker,
+			Home: func(context.Context) (bool, error) { return true, nil },
+			Land: detached.Land, Pending: detached.Pending,
+			Now: func() time.Time { return j.now },
+		}
+		return &application.EventSpring{Log: log, Host: "laptop", Jobs: []application.SpringJob{landings.Job()},
+			Now: func() time.Time { return j.now }}
+	}
+	waiting := func() {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); !procs.Waiting("lampas"); time.Sleep(5 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatal("nothing waited on the landing of lampas")
+			}
+		}
+	}
+
+	ctx, stop := context.WithCancel(context.Background())
+	first := follower()
+	mustDo(t, first.Spring(ctx)) // its bearings
+	mustDo(t, first.Spring(ctx)) // the queue is due
+	waiting()
+	stop() // a millwright landing restarts the follower
+	first.Wait()
+
+	second := follower()
+	mustDo(t, second.Spring(context.Background()))
+	waiting()
+	mustDo(t, second.Spring(context.Background())) // the queue still reads due
+	if got := procs.Begun("lampas"); got != 1 {
+		t.Fatalf("expected the one landing waited for across the restart, got %d begun", got)
+	}
+	for _, id := range []string{"lp-1", "lp-2"} { // what mw land does
+		mustDo(t, j.tracker.SetStoryState(context.Background(), id, application.RunState, application.RunLanded, "landed"))
+	}
+	mustDo(t, procs.End("lampas", nil))
+	second.Wait()
+
+	var told []string
+	for _, e := range log.All() {
+		if e.Kind != events.KindJob || e.Actor != "batch-land@laptop" {
+			continue
+		}
+		if e.Detail == application.SpringInterruptedDetail || e.To == events.JobFailed {
+			t.Errorf("the log says the landing was %s: %q", e.To, e.Detail)
+		}
+		told = append(told, e.To+" "+e.Detail)
+	}
+	want := []string{
+		"scheduled landing of lampas (2 queued)", "running ", "done " + application.SpringLeftRunningDetail,
+		"scheduled " + application.SpringRestartedReason, "running ", "done ",
+	}
+	if len(told) < len(want) || !reflect.DeepEqual(told[:len(want)], want) {
+		t.Fatalf("expected the log to tell\n%q\nfirst, got\n%q", want, told)
+	}
+	if got := procs.Begun("lampas"); got != 1 {
+		t.Fatalf("expected one landing, got %d begun", got)
 	}
 }
 

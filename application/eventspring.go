@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -20,6 +21,26 @@ const HeartbeatReason = "heartbeat"
 // factory rig brings (mw-gq6.242): the pass is not a failure, and the follower
 // that comes back runs it again.
 const SpringInterruptedDetail = "cut short by the follower stopping; run again when it is back"
+
+// SpringLeftRunningDetail is the detail of the done event of a pass whose
+// work runs in a process apart from the follower (a landing, the nightly
+// suite), when the follower stops while it waits: the work goes on, and the
+// follower that comes back waits for it and tells its outcome (mw-gq6.470).
+const SpringLeftRunningDetail = "the follower stopped while it waited; the work runs on apart from it, and the follower that comes back waits for it"
+
+// ErrLeftRunning marks the error of a pass whose wait the follower stopping
+// ended while its work runs on apart from the follower: such a pass is written
+// done with SpringLeftRunningDetail.
+var ErrLeftRunning = errors.New("left running apart from the follower")
+
+// LeftRunning is err, from a wait that ctx ending cut short, marked
+// ErrLeftRunning when ctx has ended.
+func LeftRunning(ctx context.Context, err error) error {
+	if err == nil || ctx.Err() == nil {
+		return err
+	}
+	return fmt.Errorf("%w: %w", ErrLeftRunning, err)
+}
 
 // SpringRestartedReason is the detail of the scheduled event of a pass run
 // again because the follower before this one stopped in the middle of it.
@@ -141,7 +162,10 @@ func ClockJob(name string, every time.Duration, run func(context.Context) error)
 // A pass that ends in an error while the follower is being stopped (a restart
 // after a landing terminates the systemctl it was waiting on) is not a failure:
 // it is written done, with SpringInterruptedDetail, and the first Spring of the
-// follower that comes back runs it again.
+// follower that comes back runs it again. A pass whose work runs apart from the
+// follower and goes on (its error is ErrLeftRunning) is written done with
+// SpringLeftRunningDetail instead, and is run again the same way: the pass of
+// the follower that comes back finds that work and waits for it.
 //
 // The first Spring otherwise only reads where the log stands: history springs
 // nothing, and a job's clock runs from then. A failure to write a job event is said on
@@ -283,7 +307,9 @@ func (s *EventSpring) launch(ctx context.Context, j SpringJob, st *springState, 
 		cutShort := err != nil && s.stopping(ctx)
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if cutShort {
+		if cutShort && errors.Is(err, ErrLeftRunning) {
+			s.say(j, s.write(ctx, j, st, events.JobDone, SpringLeftRunningDetail))
+		} else if cutShort {
 			s.say(j, s.write(ctx, j, st, events.JobDone, SpringInterruptedDetail))
 		} else if err != nil {
 			s.say(j, s.write(ctx, j, st, events.JobFailed, clippedTo(oneLine(err.Error()), DispatchLogReasonLimit)))
@@ -316,8 +342,9 @@ func (s *EventSpring) stopping(ctx context.Context) bool {
 }
 
 // interruptedPasses names the jobs whose last event of this host, among the
-// log's last springLookback up to head, is a pass cut short. A log that cannot
-// be read says there are none: the heartbeat runs the job anyway.
+// log's last springLookback up to head, is a pass cut short or left running
+// apart. A log that cannot be read says there are none: the heartbeat runs the
+// job anyway.
 func (s *EventSpring) interruptedPasses(ctx context.Context, head uint64) map[string]bool {
 	from := uint64(0)
 	if head > springLookback {
@@ -335,7 +362,7 @@ func (s *EventSpring) interruptedPasses(ctx context.Context, head uint64) map[st
 	}
 	out := map[string]bool{}
 	for _, j := range s.Jobs {
-		if e, ok := last[j.Name+"@"+s.Host]; ok && e.To == events.JobDone && e.Detail == SpringInterruptedDetail {
+		if e, ok := last[j.Name+"@"+s.Host]; ok && e.To == events.JobDone && (e.Detail == SpringInterruptedDetail || e.Detail == SpringLeftRunningDetail) {
 			out[j.Name] = true
 		}
 	}

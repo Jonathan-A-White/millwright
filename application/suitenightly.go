@@ -200,7 +200,7 @@ type DetachedSuite struct {
 // Run begins the suite of rig, or finds the one running, and waits for it.
 func (d DetachedSuite) Run(ctx context.Context, rig string) error {
 	if err := d.Processes.Begin(ctx, rig); err != nil {
-		return fmt.Errorf("beginning the suite: %w", err)
+		return LeftRunning(ctx, fmt.Errorf("beginning the suite: %w", err))
 	}
-	return d.Processes.Wait(ctx, rig)
+	return LeftRunning(ctx, d.Processes.Wait(ctx, rig))
 }

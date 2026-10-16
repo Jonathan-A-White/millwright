@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"sort"
 	"strings"
 	"sync"
 
@@ -217,21 +218,28 @@ type FakeSuiteProcesses struct {
 type fakeSuiteProc struct {
 	done chan struct{}
 	err  error
+	told bool // a Wait has returned its outcome
+}
+
+// owed says whether p is still running, or ended with nobody told how.
+func (p *fakeSuiteProc) owed() bool {
+	select {
+	case <-p.done:
+		return !p.told
+	default:
+		return true
+	}
 }
 
 var _ application.SuiteProcesses = (*FakeSuiteProcesses)(nil)
 
-// Begin implements application.SuiteProcesses: a suite of rig already running
-// is left as it is.
+// Begin implements application.SuiteProcesses: a suite of rig already running,
+// or ended with nobody told how, is left as it is.
 func (f *FakeSuiteProcesses) Begin(_ context.Context, rig string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if p := f.procs[rig]; p != nil {
-		select {
-		case <-p.done:
-		default:
-			return nil
-		}
+	if p := f.procs[rig]; p != nil && p.owed() {
+		return nil
 	}
 	if f.procs == nil {
 		f.procs = map[string]*fakeSuiteProc{}
@@ -260,10 +268,41 @@ func (f *FakeSuiteProcesses) Wait(ctx context.Context, rig string) error {
 	}
 	select {
 	case <-p.done:
+		f.mu.Lock()
+		p.told = true
+		f.mu.Unlock()
 		return p.err
 	case <-ctx.Done():
 		return ctx.Err()
 	}
+}
+
+// Pending names the rigs whose suite is running or ended with nobody told how.
+func (f *FakeSuiteProcesses) Pending(context.Context) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var names []string
+	for rig, p := range f.procs {
+		if p.owed() {
+			names = append(names, rig)
+		}
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// FakeLandProcesses is an application.LandProcesses whose landings run apart
+// from whoever began them, as FakeSuiteProcesses' suites do; End, Waiting and
+// Begun are theirs.
+type FakeLandProcesses struct {
+	FakeSuiteProcesses
+}
+
+var _ application.LandProcesses = (*FakeLandProcesses)(nil)
+
+// Begin implements application.LandProcesses.
+func (f *FakeLandProcesses) Begin(ctx context.Context, rig string, _ bool) error {
+	return f.FakeSuiteProcesses.Begin(ctx, rig)
 }
 
 // Waiting says whether something is waiting on the suite of rig.
