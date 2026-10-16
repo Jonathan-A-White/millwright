@@ -700,7 +700,7 @@ func (r *homeMoveRun) vault(ctx context.Context) error {
 	if m.Planned {
 		message = fmt.Sprintf("home: %s (planned move from %s)", m.Target, r.old)
 	}
-	committed, err := m.Vault.Commit(ctx, message, []string{HomeFileName})
+	committed, err := commitWritten(ctx, m.Vault, message, []string{HomeFileName})
 	if err != nil {
 		return fmt.Errorf("committing the home file: %w", err)
 	}

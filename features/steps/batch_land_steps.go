@@ -33,6 +33,11 @@ type batchFixture struct {
 	// fixer is the runner mw land starts a batch's fixer through, when the
 	// scenario lets it start one (features/batch_land.feature, Land Rush 5).
 	fixer *fakeFixer
+
+	// ledgerWatch, when set, stops mw land the moment the first ledger line is
+	// in the vault and looks at the vault each time a story is closed
+	// (features/batch_land.feature, mw-gq6.502).
+	ledgerWatch *ledgerWatch
 }
 
 // registerBatchLandSteps registers the steps of features/batch_land.feature.
@@ -46,6 +51,7 @@ func registerBatchLandSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the tracker acts as "([^"]*)", this host's mw$`, c.theTrackerActsAs)
 	ctx.Given(`^"([^"]*)" is claimed by "([^"]*)", on another host$`, c.claimedOnAnotherHost)
 	ctx.When(`^mw lands the batch of the rig$`, c.mwLandsTheBatch)
+	registerLedgerWatchSteps(ctx, c)
 	ctx.Then(`^the story "([^"]*)" is recorded as landed and is still open$`, c.landedAndStillOpen)
 	ctx.When(`^mw lands the batch of the rig with --dry-run$`, c.mwLandsTheBatchDryRun)
 	ctx.Then(`^the batch landed on "([^"]*)" in one push, forcing nothing$`, c.theBatchLandedInOnePush)
@@ -170,10 +176,18 @@ func (c *nextContext) land(dryRun bool) error {
 		mainBefore:   main,
 		printedFrom:  c.printed.Len(),
 		fixer:        c.batch.fixer,
+		ledgerWatch:  c.batch.ledgerWatch,
 	}
 	next := c.nextUseCase()
 	if c.batch.fixer != nil {
 		next.Runner = c.batch.fixer
+	}
+	ctx := context.Background()
+	if watch := c.batch.ledgerWatch; watch != nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		defer cancel()
+		watch.attach(&next, c.vault, cancel)
 	}
 	c.batch.report, c.batch.err = application.BatchLand{
 		Next:    next,
@@ -181,7 +195,7 @@ func (c *nextContext) land(dryRun bool) error {
 		Metrics: vault.New(c.vault),
 		Fix:     c.batch.fixer != nil,
 		DryRun:  dryRun,
-	}.Run(context.Background(), c.rigKey())
+	}.Run(ctx, c.rigKey())
 	return nil
 }
 

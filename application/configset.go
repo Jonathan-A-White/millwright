@@ -239,7 +239,7 @@ func (e ConfigExportBoost) Run(ctx context.Context, dryRun bool) error {
 		return fmt.Errorf("writing %s: %w", e.Target.Path(), err)
 	}
 	message := fmt.Sprintf("%s: [tests] and [changed_specs] from %s's config.toml (mw config export-boost)", BoostConfigFile, e.Host)
-	committed, err := e.Vault.Commit(ctx, message, []string{BoostConfigFile})
+	committed, err := commitWritten(ctx, e.Vault, message, []string{BoostConfigFile})
 	if err != nil {
 		return fmt.Errorf("%s is written but not committed: %w", e.Target.Path(), err)
 	}

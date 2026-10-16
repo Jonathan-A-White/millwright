@@ -110,6 +110,10 @@ var ErrInvestmentExists = errors.New("already has an investment on the ledger")
 type Invest struct {
 	Book  InvestmentBook
 	Actor string
+	// Vault commits and pushes the ledger after a line is appended to it; nil
+	// leaves that to a person. Warn is where a push that did not go is said.
+	Vault RecordVault
+	Warn  io.Writer
 	Now   func() time.Time
 	Out   io.Writer
 }
@@ -119,6 +123,14 @@ func (v Invest) now() time.Time {
 		return v.Now().UTC()
 	}
 	return time.Now().UTC()
+}
+
+// record commits the ledger, which a line was just appended to, and pushes it.
+func (v Invest) record(ctx context.Context, message string) error {
+	if err := recordInVault(ctx, v.Vault, v.Warn, message, []string{InvestmentsFile}); err != nil {
+		return fmt.Errorf("investing: %w", err)
+	}
+	return nil
 }
 
 func (v Invest) read(ctx context.Context) ([]Investment, error) {
@@ -167,6 +179,9 @@ func (v Invest) Add(ctx context.Context, bead, aim, predict, measure string, rev
 	if err := v.Book.AppendInvestment(ctx, rec); err != nil {
 		return fmt.Errorf("investing: %w", err)
 	}
+	if err := v.record(ctx, "mw invest add "+bead); err != nil {
+		return err
+	}
 	if v.Out != nil {
 		fmt.Fprintf(v.Out, "recorded the investment %s; look again on %s\n", bead, Investment{Made: rec}.ReviewAt().Format(LedgerDate))
 	}
@@ -194,6 +209,9 @@ func (v Invest) Outcome(ctx context.Context, bead, result, actual, lesson, next 
 		Result: result, Actual: strings.TrimSpace(actual), Lesson: strings.TrimSpace(lesson), Next: strings.TrimSpace(next)}
 	if err := v.Book.AppendInvestment(ctx, rec); err != nil {
 		return fmt.Errorf("investing: %w", err)
+	}
+	if err := v.record(ctx, "mw invest outcome "+bead); err != nil {
+		return err
 	}
 	if v.Out != nil {
 		fmt.Fprintf(v.Out, "recorded a %s for %s\n", result, bead)

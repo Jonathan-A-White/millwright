@@ -43,7 +43,8 @@ func investFromConfig(cmd *cobra.Command) (application.Invest, error) {
 	if err != nil {
 		return application.Invest{}, err
 	}
-	return application.Invest{Book: mwVault(dir, host), Actor: actor, Out: cmd.OutOrStdout()}, nil
+	files := mwVault(dir, host)
+	return application.Invest{Book: files, Vault: files, Warn: cmd.ErrOrStderr(), Actor: actor, Out: cmd.OutOrStdout()}, nil
 }
 
 func newInvestAddCmd() *cobra.Command {

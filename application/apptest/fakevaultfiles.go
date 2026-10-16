@@ -110,9 +110,14 @@ func (f *FakeVaultFiles) Push(_ context.Context) (int, error) {
 // Commit implements application.VaultFiles: it writes nothing down but what it
 // was asked for, and reports every path asked of it as committed but the ones
 // the test said were unchanged.
-func (f *FakeVaultFiles) Commit(_ context.Context, message string, paths []string) ([]string, error) {
+func (f *FakeVaultFiles) Commit(ctx context.Context, message string, paths []string) ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	// Real git is run under the context and is killed when it ends: a commit
+	// asked for on an ended context fails here too (mw-gq6.502).
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if f.CommitErr != nil {
 		return nil, f.CommitErr
 	}

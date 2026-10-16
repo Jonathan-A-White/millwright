@@ -2734,7 +2734,7 @@ func (n Next) commit(ctx context.Context, c *closeOut, report *NextReport) {
 		}
 	}
 
-	committed, err := n.Files.Commit(ctx, VaultCommitMessage(c.id, c.detail.Story.Title), paths)
+	committed, err := commitWritten(ctx, n.Files, VaultCommitMessage(c.id, c.detail.Story.Title), paths)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be committed in the vault, so the next sync will refuse until somebody does: %v",
 			strings.Join(paths, " and "), err))

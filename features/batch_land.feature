@@ -60,6 +60,15 @@ Feature: mw land lands a batch rig's queue under one gate run
     And the batch report says: record  runs/mw-gq6.2/after-landing.log
     And the vault's git history holds "runs/mw-gq6.2/after-landing.log", unmodified
 
+  Scenario: The ledger line of a landed story is committed at once, even when mw is told to stop (mw-gq6.502)
+    Given the vault is a real git clone
+    And these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    When mw lands the batch of the rig, stopped as soon as the first ledger line is written
+    Then the vault held no modified tracked file as each story was closed
+    And the vault holds no modified tracked file
+
   Scenario: A story claimed on another host is closed by this host once its batch lands, and the takeover is noted on it
     Given the tracker acts as "mw@laptop", this host's mw
     And these stories are queued for batch landing:

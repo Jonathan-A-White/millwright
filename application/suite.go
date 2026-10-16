@@ -426,7 +426,7 @@ func (s Suite) Run(ctx context.Context, rig string) (SuiteReport, error) {
 				said = fmt.Sprintf("%d %s failed", n, plural(n, "file", "files"))
 			}
 		}
-		if _, err := s.Files.Commit(ctx, fmt.Sprintf("mw suite %s %s: %s", rig, day, said), []string{report.LogPath, report.ResultPath}); err != nil {
+		if _, err := commitWritten(ctx, s.Files, fmt.Sprintf("mw suite %s %s: %s", rig, day, said), []string{report.LogPath, report.ResultPath}); err != nil {
 			return report, fmt.Errorf("committing the result of the suite in the vault: %w", err)
 		}
 	}

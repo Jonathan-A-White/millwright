@@ -687,6 +687,10 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 		if err := n.Vault.AppendToLedger(ctx, n.Seat, line); err != nil {
 			nr.Notes = append(nr.Notes, fmt.Sprintf("the line for %s could not be appended to the %s seat's ledger: %v", s.ID, n.Seat, err))
 		}
+		// Committed as soon as it is written, before the worktree comes away,
+		// the story is closed and the mail goes: a stop anywhere after leaves
+		// the vault clean (mw-gq6.502).
+		b.commitLedger(ctx, report)
 		if err := n.Worktrees.Remove(ctx, rigDir, c.worktree, c.branch); err != nil {
 			nr.Notes = append(nr.Notes, fmt.Sprintf("the worktree %s could not be taken away: %v", c.worktree, err))
 		}
@@ -710,11 +714,10 @@ func (b BatchLand) recordLanded(ctx context.Context, rigDir string, report *Batc
 		mails = append(mails, mail{c: c, sent: &mailed})
 	}
 
-	// The ledger lines are in the vault now: committed before the checkout, the
-	// after-landing command and the smoke, which may run for many minutes, so
-	// that the vault is not left dirty and every sync refused meanwhile
-	// (mw-gq6.493). The batch's records are written and committed after.
-	b.commitLedger(ctx, report)
+	// The ledger lines were committed as each was written, so that the vault is
+	// not left dirty while the checkout, the after-landing command and the
+	// smoke run for many minutes (mw-gq6.493, mw-gq6.502). The batch's records
+	// are written and committed after.
 
 	// Once for the batch: the rig's checkout, the after-landing command and the
 	// smoke, as the newest story's.
@@ -938,10 +941,10 @@ func countStories(count int) string {
 	return strconv.Itoa(count) + " stories"
 }
 
-// commitLedger commits the seat's ledger, which holds the lines of the stories
-// just landed, on its own: it is the one tracked file the batch has written by
-// the time its long steps begin. A commit that cannot be made is a note, as it
-// is for the commit that ends the batch.
+// commitLedger commits the seat's ledger on its own, right after a landed
+// story's line is appended to it: it is the one tracked file the batch has
+// written by the time its long steps begin. A commit that cannot be made is a
+// note, as it is for the commit that ends the batch.
 func (b BatchLand) commitLedger(ctx context.Context, report *BatchReport) {
 	b.commitPaths(ctx, report, []string{path.Join(SeatsDir, b.Next.Seat, LedgerFileName)})
 }
@@ -968,7 +971,7 @@ func (b BatchLand) commitPaths(ctx context.Context, report *BatchReport, paths [
 	if !report.Landed {
 		verb = "Hold"
 	}
-	committed, err := n.Files.Commit(ctx, fmt.Sprintf("%s %s: %s", verb, report.Label(), strings.Join(storyIDs(report.Queue), ", ")), paths)
+	committed, err := commitWritten(ctx, n.Files, fmt.Sprintf("%s %s: %s", verb, report.Label(), strings.Join(storyIDs(report.Queue), ", ")), paths)
 	if err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("%s could not be committed in the vault, so the next sync will refuse until somebody does: %v", strings.Join(paths, " and "), err))
 		return
