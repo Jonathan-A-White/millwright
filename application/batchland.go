@@ -71,7 +71,8 @@ type BatchMetrics interface {
 // In a landing worktree detached at the target branch as the origin has it, it
 // merges each queued story's branch as the origin has it (mw/<id>), oldest
 // queued first, by the rig's union rules; a branch that does not merge is set
-// aside with git's conflict list. It raises the rig's version once for the
+// aside with git's conflict list, and one with a commit signed as a machine's
+// work (AIAttribution) is set aside, never merged, naming the commit. It raises the rig's version once for the
 // batch, with one changelog entry per story; it runs the rig's tests once on
 // the batch, under the host's gate lock and the calm rule; and only when that
 // run passes does it push the target branch, which is a fast-forward of what
@@ -516,6 +517,13 @@ func (b BatchLand) mergeAll(ctx context.Context, dir, rigDir string, union []str
 		if ahead, err := n.Landing.Ahead(ctx, rigDir, s.Branch, report.Base); err == nil {
 			s.Commits = ahead
 		}
+		// A branch whose commits sign the work as a machine's is refused here as
+		// mw next refuses it: it is never merged, whatever else is in the batch.
+		if why := b.signedWhy(ctx, rigDir, s.Branch, report.Base, "its branch "+s.Branch); why != "" {
+			s.Why = why
+			report.SetAside = append(report.SetAside, s)
+			continue
+		}
 		var landed Landed
 		var err error
 		if len(union) > 0 {
@@ -536,6 +544,24 @@ func (b BatchLand) mergeAll(ctx context.Context, dir, rigDir string, union []str
 		s.Merge, s.FastForward, s.Unioned = landed.Commit, landed.FastForward, landed.Unioned
 		report.Merged = append(report.Merged, s)
 	}
+}
+
+// signedWhy reads the commits of branch beyond base and says, in a sentence that
+// begins with whose they are, why they may not land: the first one that carries
+// an AIAttribution, by its hash and the line, or that they could not be read —
+// a close-out that cannot tell lands nothing. It is empty when every commit is
+// clean.
+func (b BatchLand) signedWhy(ctx context.Context, dir, branch, base, whose string) string {
+	commits, err := b.Next.Landing.Commits(ctx, dir, branch, base)
+	if err != nil {
+		return fmt.Sprintf("the commit messages on %s could not be read: %v", branch, firstLine(err.Error()))
+	}
+	for _, commit := range commits {
+		if line := AIAttribution(commit.Message); line != "" {
+			return fmt.Sprintf("%s holds commit %s, signed as a machine's work, which this factory's commits never are: %s", whose, commit.Hash, line)
+		}
+	}
+	return ""
 }
 
 // ConflictLines are git's own lines naming what a merge conflicted in

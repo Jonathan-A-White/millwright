@@ -197,6 +197,12 @@ func (b BatchLand) afterFixer(ctx context.Context, dir, rigDir string, report *B
 		report.Held = fmt.Sprintf("the batch as its fixer %s left it could not be read: %v", f.Name, err)
 		return false
 	}
+	// What the fixer committed is held to the rule every branch is: nothing
+	// signed as a machine's work is pushed, whoever made the commit.
+	if why := b.signedWhy(ctx, dir, "HEAD", report.Base, "its fixer "+f.Name+"'s batch"); why != "" {
+		report.Held = why + ": nothing was pushed"
+		return false
+	}
 	holds := func(s BatchStory) bool {
 		ahead, err := n.Landing.Ahead(ctx, rigDir, s.Branch, f.Commit)
 		return err == nil && ahead == 0
