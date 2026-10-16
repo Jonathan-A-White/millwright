@@ -128,3 +128,36 @@ func TestDispatchKeepsQuietOnADirtyVaultWithoutAMailboxOrMemory(t *testing.T) {
 		t.Errorf("expected no mail without a memory to keep the hour in, got %d writes", mailbox.Writes())
 	}
 }
+
+// The mail names each file and how to clear it: who writes it when mw knows,
+// and the one command that commits it as found (mw-gq6.462).
+func TestTheDirtyVaultMailNamesTheFileAndTheFix(t *testing.T) {
+	ctx := context.Background()
+	dispatch, mailbox, now := aBlockedDispatch(t, "hosts/vultr/cloud.json")
+	dispatch.VaultDir = "/home/jwhite/millwright-vault"
+	_, _ = dispatch.Run(ctx)
+	*now = now.Add(time.Minute)
+	_, _ = dispatch.Run(ctx)
+
+	inbox, _ := mailbox.Inbox(ctx, application.MayorMailbox)
+	if len(inbox) != 1 {
+		t.Fatalf("expected one mail to the mayor, got %d", len(inbox))
+	}
+	body := inbox[0].Body
+	for _, want := range []string{
+		"hosts/vultr/cloud.json is the cloud's book, written and committed by mw cloud check",
+		"git -C /home/jwhite/millwright-vault commit -m 'commit as found what dispatch on vps was refused on' -- hosts/vultr/cloud.json",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected the mail to say %q, got:\n%s", want, body)
+		}
+	}
+}
+
+func TestTheDirtyVaultFixQuotesWhatTheShellWouldSplit(t *testing.T) {
+	got := application.VaultBlockedFix("/home/j w/vault", "vps", []string{"seats/mayor/ledger.md", "plans/a b.md"})
+	want := "git -C '/home/j w/vault' commit -m 'commit as found what dispatch on vps was refused on' -- seats/mayor/ledger.md 'plans/a b.md'"
+	if got != want {
+		t.Errorf("expected\n  %s\ngot\n  %s", want, got)
+	}
+}
