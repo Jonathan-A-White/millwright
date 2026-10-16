@@ -91,3 +91,18 @@ Feature: A rig that lands in batches queues each story that passes its close-out
     Then the story "mw-gq6.1" is recorded as queued for batch landing
     And the ledger holds exactly one line for "mw-gq6.1"
     And the close-out says the story is queued already
+
+  Scenario: A story its batch landed and left open, claimed on another host, is closed by the next mw next
+    Given the tracker acts as "mw@laptop", this host's mw
+    And the rig lands its stories in batches
+    And the session of "mw-gq6.1" reported a plain success
+    When mw closes out "mw-gq6.1"
+    Then the story "mw-gq6.1" is recorded as queued for batch landing
+    Given the tracker refuses to close "mw-gq6.1", saying: database is locked
+    When mw lands the batch of the rig
+    Then the story "mw-gq6.1" is recorded as landed and is still open
+    Given the tracker will take a close of "mw-gq6.1" again
+    And "mw-gq6.1" is claimed by "mw@cloud1", on another host
+    When mw closes out "mw-gq6.1" a second time
+    Then the story "mw-gq6.1" is closed
+    And the comment on "mw-gq6.1" says: mw@laptop took the claim over from mw@cloud1 to close it

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
@@ -37,7 +38,10 @@ type batchFixture struct {
 func registerBatchLandSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^these stories are queued for batch landing:$`, c.theseStoriesAreQueued)
 	ctx.Given(`^"([^"]*)" is queued for batch landing, writing "([^"]*)" with words of its own$`, c.aStoryIsQueuedWriting)
+	ctx.Given(`^the tracker acts as "([^"]*)", this host's mw$`, c.theTrackerActsAs)
+	ctx.Given(`^"([^"]*)" is claimed by "([^"]*)", on another host$`, c.claimedOnAnotherHost)
 	ctx.When(`^mw lands the batch of the rig$`, c.mwLandsTheBatch)
+	ctx.Then(`^the story "([^"]*)" is recorded as landed and is still open$`, c.landedAndStillOpen)
 	ctx.When(`^mw lands the batch of the rig with --dry-run$`, c.mwLandsTheBatchDryRun)
 	ctx.Then(`^the batch landed on "([^"]*)" in one push, forcing nothing$`, c.theBatchLandedInOnePush)
 	ctx.Then(`^the rig's tests were run once on the batch$`, c.theTestsRanOnceOnTheBatch)
@@ -109,6 +113,34 @@ func (c *nextContext) queueByCloseOut(id string) error {
 	}
 	if got := c.tracker.State(id, application.RunState); got != application.RunQueued {
 		return fmt.Errorf("expected the close-out to queue %s, got %s=%q (it said: %v)\n%s", id, application.RunState, got, c.err, c.printed.String())
+	}
+	return nil
+}
+
+// theTrackerActsAs makes the tracker act under the name given, as the real
+// gateway acts under this host's mw name: it claims as that name, and closes a
+// story in progress only when that name holds the claim, as bd does.
+func (c *nextContext) theTrackerActsAs(name string) error {
+	c.tracker.ActAs(name)
+	return nil
+}
+
+// claimedOnAnotherHost hands a story's claim to another host's actor, as a
+// story dispatched on a cloud host and landed here is held (mw-gq6.475).
+func (c *nextContext) claimedOnAnotherHost(id, holder string) error {
+	return c.tracker.ClaimAs(id, holder, time.Now().Add(time.Hour))
+}
+
+func (c *nextContext) landedAndStillOpen(id string) error {
+	if got := c.tracker.State(id, application.RunState); got != application.RunLanded {
+		return fmt.Errorf("expected %s to be recorded %s=%s, got %q\n%s", id, application.RunState, application.RunLanded, got, c.said())
+	}
+	detail, err := c.tracker.ShowStory(context.Background(), id)
+	if err != nil {
+		return err
+	}
+	if detail.Closed() {
+		return fmt.Errorf("expected %s to be still open, got %q\n%s", id, detail.Status, c.said())
 	}
 	return nil
 }

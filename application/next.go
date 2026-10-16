@@ -1703,7 +1703,9 @@ func (n Next) finish(ctx context.Context, c *closeOut, report *NextReport, outco
 	if isDemo(c.detail) {
 		closeErr = n.holdDemo(ctx, c, report, outcome)
 	} else {
-		closeErr = n.closeStory(ctx, c.id, outcome)
+		var notes []string
+		notes, closeErr = n.closeStory(ctx, c.id, outcome)
+		report.Notes = append(report.Notes, notes...)
 	}
 	if closeErr == nil {
 		what := "landed"
@@ -1772,27 +1774,62 @@ func (n Next) holdDemo(ctx context.Context, c *closeOut, report *NextReport, out
 // story left in_progress is one a later dispatch could take for work in
 // flight. A close whose answer was lost but whose write went through is read
 // back, and counts as closed.
-func (n Next) closeStory(ctx context.Context, id, outcome string) error {
+//
+// A story another host claimed — dispatched there and landed here, as a batch
+// lands them — is refused to this host's name, and mw acts under no other:
+// this host takes the claim over and closes it under its own, and says so on
+// the story (mw-gq6.475). What it says is in the notes returned.
+func (n Next) closeStory(ctx context.Context, id, outcome string) ([]string, error) {
 	tries := n.pushTries()
 	var last error
+	var notes []string
 	for try := 1; try <= tries; try++ {
 		if try > 1 {
 			if err := waitFor(ctx, n.PushWait); err != nil {
-				return fmt.Errorf("%w (and waiting %s to try the close again: %v)", last, n.PushWait, err)
+				return notes, fmt.Errorf("%w (and waiting %s to try the close again: %v)", last, n.PushWait, err)
 			}
 		}
 		last = n.Tracker.CloseStory(ctx, id, outcome)
+		var held *CloseHeldError
+		if errors.As(last, &held) {
+			var said []string
+			said, last = n.takeOverAndClose(ctx, id, outcome, held)
+			notes = append(notes, said...)
+		}
 		if last == nil {
-			return nil
+			return notes, nil
 		}
 		if detail, err := n.Tracker.ShowStory(ctx, id); err == nil && detail.Closed() {
-			return nil
+			return notes, nil
 		}
 	}
 	if tries == 1 {
-		return last
+		return notes, last
 	}
-	return fmt.Errorf("the close failed on each of its %d tries, the last saying: %w", tries, last)
+	return notes, fmt.Errorf("the close failed on each of its %d tries, the last saying: %w", tries, last)
+}
+
+// takeOverAndClose is the close of a landed story whose claim another actor
+// holds: the claim is taken over by force, a comment on the story says who
+// held it and who took it to close it, and the story is closed under this
+// host's own name. The comment is written before the close, so a close that
+// fails or is tried again later leaves the takeover recorded all the same; a
+// comment that cannot be written stops nothing, and the note says so.
+func (n Next) takeOverAndClose(ctx context.Context, id, outcome string, held *CloseHeldError) ([]string, error) {
+	actor := held.Actor
+	if actor == "" {
+		actor = SeatIdentity(MwSeat, n.Host)
+	}
+	if err := n.Tracker.TakeOverClaim(ctx, id, held.Holder); err != nil {
+		return nil, fmt.Errorf("%w; taking the claim over from %s failed: %v", held, held.Holder, err)
+	}
+	notes := []string{fmt.Sprintf("%s was claimed by %s: %s took the claim over to close it", id, held.Holder, actor)}
+	said := fmt.Sprintf("%s held the claim on %s when it landed, and beads lets only a claim's holder close a story: "+
+		"%s took the claim over from %s to close it.", held.Holder, id, actor, held.Holder)
+	if err := n.Tracker.CommentOnStory(ctx, id, said); err != nil {
+		notes = append(notes, fmt.Sprintf("%s: the comment saying who held its claim could not be written: %v", id, err))
+	}
+	return notes, n.Tracker.CloseStory(ctx, id, outcome)
 }
 
 // ledgered reports whether the seat's ledger already holds this story's line.

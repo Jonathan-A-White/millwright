@@ -325,8 +325,11 @@ Feature: mw talk wait
     And mw talk wait is armed
     When the Governor's turn 3 of talk "talk-7" saying "An idea: a quieter dashboard" is indexed
     Then the wait has kept 2 ideas
+    And the wait has answered the Governor 1 time
     When the backend says the Governor's Ideas only has ended
-    Then mw talk wait ends within 2 seconds
+    # Only the event can end this wait (the clock stays inside the mode), so
+    # the bound is room for a loaded host, not a measure.
+    Then mw talk wait ends within 5 seconds
     And the wait printed "Ideas only ended"
     And the wait printed "2 ideas"
     And the wait printed "An idea: a quieter dashboard"
@@ -339,6 +342,7 @@ Feature: mw talk wait
     And mw talk wait is armed
     When the Governor's turn 3 of talk "talk-7" saying "An idea: a quieter dashboard" is indexed
     Then the wait has kept 1 idea
+    And the wait has answered the Governor 1 time
     When 1500 milliseconds go by on the host running mw talk wait
     And the backend says the Governor's Ideas only has ended
     Then mw talk wait ends within 2 seconds
