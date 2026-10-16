@@ -139,3 +139,41 @@ func TestWriteIfAbsentNeverTouchesAFileThatIsThere(t *testing.T) {
 		t.Errorf("the file holds %q, want it as it was", got)
 	}
 }
+
+// bd warns on every call, "has permissions 0775 (recommended: 0700)", when the
+// vault's .beads is any mode but 0700, and a clone makes it at the umask's mode;
+// bd bootstrap leaves it so (mw-gq6.451).
+func TestCloneMakesTheBeadsDirectoryMode0700(t *testing.T) {
+	birth := aBirth(t)
+	ctx := context.Background()
+	origin := t.TempDir()
+	write(t, origin, ".beads/config.yaml", "prefix: mw\n")
+	if err := os.Chmod(filepath.Join(origin, ".beads"), 0o775); err != nil {
+		t.Fatal(err)
+	}
+	if err := birth.Commit(ctx, origin, "A fresh vault"); err != nil {
+		t.Fatalf("committing the origin: %v", err)
+	}
+
+	dir := filepath.Join(t.TempDir(), "vault")
+	if err := birth.Clone(ctx, origin, dir); err != nil {
+		t.Fatalf("cloning: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(dir, ".beads"))
+	if err != nil {
+		t.Fatalf("the clone has no .beads: %v", err)
+	}
+	if mode := info.Mode().Perm(); mode != 0o700 {
+		t.Errorf("the clone's .beads is mode %04o, want 0700", mode)
+	}
+
+	// A vault with no .beads is cloned all the same.
+	bare := t.TempDir()
+	write(t, bare, "CLAUDE.md", "notes\n")
+	if err := birth.Commit(ctx, bare, "A fresh vault"); err != nil {
+		t.Fatalf("committing the second origin: %v", err)
+	}
+	if err := birth.Clone(ctx, bare, filepath.Join(t.TempDir(), "vault")); err != nil {
+		t.Errorf("cloning a vault with no .beads: %v", err)
+	}
+}

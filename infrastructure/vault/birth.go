@@ -122,7 +122,10 @@ func (b *Birth) backToRoot(ctx context.Context, dir string) error {
 // Clone implements application.VaultBirth: it makes dir a git clone of url,
 // the same clone a person's own `git clone` would make. Nothing here forces,
 // migrates or rewrites what the clone brings with it — that is the vault's
-// own history, from wherever it already lives.
+// own history, from wherever it already lives. Only the mode of its .beads is
+// set, to 0700: the clone makes it at the umask's, bd bootstrap leaves it so,
+// and bd warns on every call at any other (mw-gq6.451). Git keeps no mode for
+// a directory, so nothing tracked changes.
 func (b *Birth) Clone(ctx context.Context, url, dir string) error {
 	cmd := exec.CommandContext(ctx, Git, "clone", "-q", url, dir)
 	cmd.Env = append(append(os.Environ(), "GIT_TERMINAL_PROMPT=0"), b.env...)
@@ -132,6 +135,13 @@ func (b *Birth) Clone(ctx context.Context, url, dir string) error {
 	cmd.Stderr = &errs
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s clone %s %s: %w: %s", Git, url, dir, err, strings.TrimSpace(errs.String()))
+	}
+	beads := filepath.Join(dir, ".beads")
+	if info, err := os.Stat(beads); err != nil || !info.IsDir() {
+		return nil
+	}
+	if err := os.Chmod(beads, 0o700); err != nil {
+		return fmt.Errorf("making %s mode 0700: %w", beads, err)
 	}
 	return nil
 }
