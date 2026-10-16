@@ -18,6 +18,7 @@ import (
 // mw-gq6.92).
 func newRetryCmd() *cobra.Command {
 	var repathed string
+	var fromMain bool
 	cmd := &cobra.Command{
 		Use:   "retry <story-id>",
 		Short: "Recover a story after a refused landing, so the next dispatch tick tries it again",
@@ -42,7 +43,13 @@ func newRetryCmd() *cobra.Command {
 			"A story its Builder handed back (its newest hand-back comment opens HANDED BACK) is refused,\n" +
 			"and mw dispatch passes it over, until a comment opening RE-PATHED: follows it: the same Builder\n" +
 			"given the same story hands it back the same way. --repathed \"<what changed>\" writes that\n" +
-			"comment, once the retry is past its refusals, and goes on.",
+			"comment, once the retry is past its refusals, and goes on.\n\n" +
+			"A story whose last attempt mw next refused at the gate or the merge, or stopped at its turn cap,\n" +
+			"keeps its branch (mw-1ljpo9.7): the worktree is taken away, the branch is not, and the next\n" +
+			"dispatch cuts the next attempt from it, rebased onto the target, so the fix is a delta. A branch\n" +
+			"that does not rebase cleanly falls back to the target, and the boot says so. --from-main deletes\n" +
+			"the branch as before, so the next attempt starts from the target; so does\n" +
+			"next.retry_from_branch = false in the config file.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := config.Vault()
@@ -58,6 +65,10 @@ func newRetryCmd() *cobra.Command {
 				return err
 			}
 			maxAttempts, err := config.MaxAttempts()
+			if err != nil {
+				return err
+			}
+			fromBranch, err := config.NextRetryFromBranch()
 			if err != nil {
 				return err
 			}
@@ -89,11 +100,14 @@ func newRetryCmd() *cobra.Command {
 				Notes:       gateway,
 				Out:         cmd.OutOrStdout(),
 				RePathed:    repathed,
+				FromMain:    fromMain || !fromBranch,
 			}.Run(cmd.Context(), args[0])
 			return err
 		},
 	}
 	cmd.Flags().StringVar(&repathed, "repathed", "",
 		"what changed since the Builder handed the story back: written as a RE-PATHED: comment, and lets the retry of a handed-back story go on")
+	cmd.Flags().BoolVar(&fromMain, "from-main", false,
+		"start the next attempt from the target, deleting the branch, rather than continuing the branch a refused or capped attempt left")
 	return cmd
 }
