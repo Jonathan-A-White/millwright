@@ -5,8 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 )
+
+// OverHoldMarker opens the comment Release writes on a story it releases over a
+// hold on the Governor's word. A hold comment older than the newest one of these
+// on the story no longer holds it.
+const OverHoldMarker = "RELEASED OVER HOLD:"
 
 // Release approves a plan that was filed earlier. `mw file` holds every story
 // it files, because the Governor is usually not at the machine when the Mayor
@@ -37,6 +43,11 @@ type Release struct {
 	// (mw-gq6.428). Either nil warns of none.
 	Rigs     map[string]string
 	RigFiles RigFiles
+
+	// OverHold is why a story held on the Governor's word is released anyway
+	// (mw-gq6.481). Empty releases none of them: the release is refused, naming
+	// the comment. It is written on each story it lets through.
+	OverHold string
 
 	// Out is where the tree is printed. A nil Out prints nothing.
 	Out io.Writer
@@ -71,6 +82,13 @@ func (r Release) Run(ctx context.Context, epicID string) (FiledPlan, error) {
 
 	held := found.held()
 	iced := found.iced()
+	refs := make([]heldRef, 0, len(held))
+	for _, story := range held {
+		refs = append(refs, heldRef{ID: story.ID, Parent: epic.ID})
+	}
+	if err := r.checkWordHolds(ctx, refs); err != nil {
+		return found, err
+	}
 	for _, story := range held {
 		if err := r.Tracker.ReleaseStory(ctx, story.ID); err != nil {
 			return found, fmt.Errorf("releasing story %s of %s: %w", story.ID, epic.ID, err)
@@ -130,12 +148,130 @@ func (r Release) story(ctx context.Context, id string) (FiledPlan, error) {
 	// A warning only: the story is released all the same.
 	warnNoFilesKey(ctx, r.Out, r.Rules, detail)
 	warnWrongRig(r.Out, r.Rigs, r.RigFiles, detail)
+	if err := r.checkWordHolds(ctx, []heldRef{{ID: id, Parent: detail.EpicID}}); err != nil {
+		return found, err
+	}
 	if err := r.Tracker.ReleaseStory(ctx, id); err != nil {
 		return found, fmt.Errorf("releasing story %s: %w", id, err)
 	}
 	found.Released = true
 	r.print(fmt.Sprintf("released 1: %s\n", id))
 	return found, nil
+}
+
+// heldRef is a held story to be released and the bead it hangs from.
+type heldRef struct {
+	ID, Parent string
+}
+
+var (
+	holdWord      = regexp.MustCompile(`(?i)\b(held|parked)\b`)
+	governorsWord = regexp.MustCompile(`(?i)\b(governor|his word)\b`)
+)
+
+// wordHold is the newest comment on a story, or on its parent, that holds it on
+// the Governor's word: one that says held or parked together with Governor or
+// his word, and that no OverHoldMarker comment on the story is newer than.
+// ok is false when there is none.
+func wordHold(own, parent []Comment) (Comment, bool) {
+	var marked Comment
+	hasMark := false
+	for _, c := range own {
+		if strings.HasPrefix(strings.TrimSpace(c.Text), OverHoldMarker) {
+			marked, hasMark = c, true
+		}
+	}
+	var found Comment
+	ok := false
+	scan := func(comments []Comment, sameList bool) {
+		for i, c := range comments {
+			if !holdWord.MatchString(c.Text) || !governorsWord.MatchString(c.Text) ||
+				strings.HasPrefix(strings.TrimSpace(c.Text), OverHoldMarker) {
+				continue
+			}
+			if hasMark {
+				if !c.Created.IsZero() && !marked.Created.IsZero() {
+					if !marked.Created.Before(c.Created) {
+						continue
+					}
+				} else if sameList && i < indexOfComment(comments, marked) {
+					continue
+				}
+			}
+			if !ok || c.Created.After(found.Created) || c.Created.Equal(found.Created) {
+				found, ok = c, true
+			}
+		}
+	}
+	scan(own, true)
+	scan(parent, false)
+	return found, ok
+}
+
+func indexOfComment(comments []Comment, want Comment) int {
+	for i, c := range comments {
+		if c == want {
+			return i
+		}
+	}
+	return -1
+}
+
+// checkWordHolds refuses the release of any of these held stories that a comment
+// of its own or of its parent holds on the Governor's word, naming the comment,
+// unless OverHold says why not; nothing has been released when it refuses. With
+// OverHold it writes the reason on each such story.
+func (r Release) checkWordHolds(ctx context.Context, refs []heldRef) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	var ids []string
+	seen := map[string]bool{}
+	for _, ref := range refs {
+		for _, id := range []string{ref.ID, ref.Parent} {
+			if id != "" && !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
+	}
+	comments, err := r.Tracker.StoriesComments(ctx, ids)
+	if err != nil {
+		return fmt.Errorf("reading the comments of %s to look for a hold on the Governor's word: %w",
+			strings.Join(ids, ", "), err)
+	}
+	var refusals []string
+	var flagged []string
+	for _, ref := range refs {
+		hold, ok := wordHold(comments[ref.ID], comments[ref.Parent])
+		if !ok {
+			continue
+		}
+		flagged = append(flagged, ref.ID)
+		refusals = append(refusals, fmt.Sprintf("%s is held on the Governor's word, by this comment by %s%s: %q",
+			ref.ID, hold.Author, holdTime(hold), strings.TrimSpace(hold.Text)))
+	}
+	if len(flagged) == 0 {
+		return nil
+	}
+	if strings.TrimSpace(r.OverHold) == "" {
+		return fmt.Errorf("releasing refused, nothing released: %s\nRelease anyway with --over-hold \"<why>\"",
+			strings.Join(refusals, "\n"))
+	}
+	for _, id := range flagged {
+		note := fmt.Sprintf("%s %s", OverHoldMarker, strings.TrimSpace(r.OverHold))
+		if err := r.Tracker.CommentOnStory(ctx, id, note); err != nil {
+			return fmt.Errorf("writing the reason for releasing %s over its hold: %w", id, err)
+		}
+	}
+	return nil
+}
+
+func holdTime(c Comment) string {
+	if c.Created.IsZero() {
+		return ""
+	}
+	return " at " + c.Created.UTC().Format("2006-01-02 15:04Z")
 }
 
 // print writes one block of the report, when there is somewhere to write it.
