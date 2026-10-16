@@ -38,7 +38,7 @@
     {
       "id": "adversarial",
       "title": "At least five adversarial moves",
-      "description": "Still at 390x844, with a shot of each, try at least five adversarial moves on the screens HOW TO CHECK IT touched: (1) leave the app and come back (page hidden, then visible); (2) hold and let go at once on each button that holds; (3) tap twice fast on each button; (4) slow 3G (Playwright network throttling) through the steps; (5) rotate to 844x390 and back; (6) Back at each screen. Note each move, what happened and its shot path. This step commits nothing.",
+      "description": "Still at 390x844, with a shot of each, try at least five adversarial moves on the screens HOW TO CHECK IT touched: (1) leave the app and come back (page hidden, then visible); (2) hold and let go at once on each button that holds; (3) tap twice fast on each button; (4) slow 3G (Playwright network throttling) through the steps; (5) rotate to 844x390 and back; (6) Back at each screen. Note each move, what happened and its shot path. This step commits nothing. A check 'under load' runs under contrib/mw-under-load <command>; never hand-rolled busy loops, stress or yes on a host.",
       "type": "task",
       "depends_on": ["check"]
     },
