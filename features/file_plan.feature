@@ -272,7 +272,9 @@ Feature: Filing the Mayor's plan
     And filing is refused, saying: story lazy: it is a bug and its 'Sweep: none' gives no reason
     And nothing is written
 
-  Scenario: A bug story with 'Sweep: none, because <reason>' or a numbered Sweep line is filed, and a story that is no bug needs none
+  # mw-6drexa.1's numbered items ran on in one line, '... 4. ... 5. Sweep: ...',
+  # and dispatch refused it as no-sweep (mw-gq6.469).
+  Scenario: A bug story with 'Sweep: none, because <reason>' or a numbered or bulleted Sweep item is filed, and a story that is no bug needs none
     Given the plan:
       """
       {
@@ -284,10 +286,12 @@ Feature: Filing the Mayor's plan
         "stories": [
           { "key": "crash", "title": "[bug] The reader crashes on an empty book", "acceptance": "1. An empty book opens.\nSweep: none, because only the reader opens books.", "needs": [] },
           { "key": "page", "title": "The page is lost after rotate", "labels": ["bug"], "acceptance": "1. Rotating keeps the page.\n7. Sweep: every viewport effect is grepped for state it drops.", "needs": [] },
-          { "key": "theme", "title": "A dark theme", "acceptance": "The reader can be dark.", "needs": [] }
+          { "key": "theme", "title": "A dark theme", "acceptance": "The reader can be dark.", "needs": [] },
+          { "key": "silent", "title": "[bug] A failed run is silent", "acceptance": "1. A failed run sends one email. 4. A held lock exits non-zero. 5. Sweep: every error return path goes through the one notifier. 6. Gate green.", "needs": [] },
+          { "key": "dash", "title": "[bug] The margin drifts", "acceptance": "- It stays put.\n- Sweep: every margin setter is grepped.", "needs": [] }
         ]
       }
       """
     When the plan is filed
     Then filing succeeds
-    And the stories are filed in the order crash, page, theme
+    And the stories are filed in the order crash, page, theme, silent, dash

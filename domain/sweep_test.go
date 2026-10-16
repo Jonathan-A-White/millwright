@@ -30,6 +30,16 @@ func TestASweepLineIsReadFromAcceptance(t *testing.T) {
 		{"the word mid-line is not a line", "1. It passes. Sweep: yes", domain.SweepMissing},
 		{"a word that starts the same", "Sweeping: everything", domain.SweepMissing},
 		{"a later good line beats nothing", "Sweep: none\nSweep: grep the class", domain.SweepGiven},
+		{"a numbered line", "5. Sweep: x", domain.SweepGiven},
+		{"a dashed line", "- Sweep: x", domain.SweepGiven},
+		{"a starred line", "* Sweep: x", domain.SweepGiven},
+		{"a plussed line", "+ Sweep: x", domain.SweepGiven},
+		{"no sweep here", "No sweep here", domain.SweepMissing},
+		// mw-6drexa.1: the Mayor's numbered items ran on in one line (mw-gq6.469).
+		{"a numbered item run on in one line", "1. A unit test. 4. Another test. 5. Sweep: every error return path goes through the one notifier. 6. Gate green.", domain.SweepGiven},
+		{"a run-on item saying nothing", "4. It passes. 5. Sweep: 6. Gate green.", domain.SweepEmpty},
+		{"a run-on none with no reason", "4. It passes. 5. Sweep: none 6. Gate green.", domain.SweepNoneWithoutReason},
+		{"a run-on bracketed item", "1) It passes. 2) Sweep: grep the class", domain.SweepGiven},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
