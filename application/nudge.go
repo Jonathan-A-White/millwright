@@ -23,6 +23,21 @@ const DefaultNudgeSyncStale = 20 * time.Minute
 // alarm names it.
 const MayorNeedAfter = 30 * time.Minute
 
+// TranscriptLive is how recently a running session's transcript must have
+// been written for the quiet alarm to count it as working, however long the
+// story has gone with nothing mailed about it.
+const TranscriptLive = 15 * time.Minute
+
+// TranscriptWrites is the port the quiet alarm reads a running session's last
+// sign of work through: when the harness last wrote its record of it. It is
+// read-only and costs no fuel.
+type TranscriptWrites interface {
+	// LastWrite reports when the harness last wrote anything of the sessions
+	// run in dir. It is the zero time when the harness has recorded nothing
+	// there, which is not an error.
+	LastWrite(ctx context.Context, dir string) (time.Time, error)
+}
+
 // NudgeClause is one reason the quiet alarm has to speak: a story that has run
 // long with nothing mailed about it, or another host whose last sync has gone
 // stale.
@@ -84,6 +99,15 @@ type Nudge struct {
 	// host's own halt says nothing of it: the halt is named, and the other
 	// hosts' ages are kept beside it. Empty reads BeadsSyncRemote.
 	SyncMode BeadsSyncMode
+
+	// Transcripts is where the harness's record of each running session is
+	// read: a story whose transcript was written within TranscriptLive is not
+	// quiet, and a story named says how long its transcript has been quiet.
+	// Rigs is each rig's checkout on this host, by name: the story's worktree,
+	// whose sessions are read, is beside it. A nil Transcripts, or a rig not
+	// in Rigs, judges the story by its mail and age alone.
+	Transcripts TranscriptWrites
+	Rigs        map[string]string
 
 	// NudgeAfter is how long a claimed story may run with nothing mailed about
 	// it before it is named. Zero reads DefaultNudgeAfter.
@@ -153,12 +177,24 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 		if rs.Queued() || rs.HandedBack() {
 			continue
 		}
-		if elapsed := now.Sub(since); elapsed > n.nudgeAfter() {
-			clauses = append(clauses, NudgeClause{
-				Key:  detail.Story.ID,
-				Text: fmt.Sprintf("%s in progress %d min, no mail", detail.Story.ID, minutes(elapsed)),
-			})
+		elapsed := now.Sub(since)
+		if elapsed <= n.nudgeAfter() {
+			continue
 		}
+		text := fmt.Sprintf("%s in progress %d min, no mail", detail.Story.ID, minutes(elapsed))
+		// A session whose transcript is still being written is working, however
+		// long it has gone with nothing mailed (mw-gq6.477): only a story quiet
+		// in both is named, with how long its transcript has been quiet.
+		if written, known := n.lastWrite(ctx, detail); known {
+			if written.IsZero() {
+				text += ", no transcript"
+			} else if quiet := now.Sub(written); quiet <= TranscriptLive {
+				continue
+			} else {
+				text += fmt.Sprintf(", transcript quiet %d min", minutes(quiet))
+			}
+		}
+		clauses = append(clauses, NudgeClause{Key: detail.Story.ID, Text: text})
 	}
 
 	if n.Mayor != nil {
@@ -233,6 +269,22 @@ func (n Nudge) hitlBeads(ctx context.Context, work WorkInHand) []StoryDetail {
 		return hitl
 	}
 	return append(hitl, ready...)
+}
+
+// lastWrite is when the harness last wrote its record of the story's sessions,
+// zero when it has recorded none; known is false when that cannot be told here
+// — no Transcripts, the story's rig not checked out on this host, or the record
+// unreadable — and the story is judged by its mail and age alone.
+func (n Nudge) lastWrite(ctx context.Context, detail StoryDetail) (written time.Time, known bool) {
+	rig := n.Rigs[detail.Merged().Rig]
+	if n.Transcripts == nil || rig == "" {
+		return time.Time{}, false
+	}
+	written, err := n.Transcripts.LastWrite(ctx, WorktreeDir(rig, detail.Story.ID))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return written, true
 }
 
 // holdsClaim reports whether any of the stories pathed to this host is claimed:

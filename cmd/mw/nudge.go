@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 
 	"github.com/spf13/cobra"
@@ -28,6 +29,10 @@ func newNudgeCmd() *cobra.Command {
 			"WAITING ON THE MAYOR) is a clause too, keyed mayor.<bead>.\n" +
 			"A story whose close-out (mw next) is running on this host is not quiet and is left out, however\n" +
 			"long it has been claimed: mw status shows it as closing out, and as waiting for calm when it is.\n" +
+			"So is a story whose session's transcript (read beside its rig's checkout, subagents included)\n" +
+			"was written in the last 15 minutes: it is working, however long it has gone with no mail. A\n" +
+			"story named says how long its transcript has been quiet, or that it has none; where its rig\n" +
+			"is not checked out on this host it is judged by its mail and age alone.\n" +
 			"When this host's own sync is halted, the other hosts' ages are read off notes\n" +
 			"this host cannot currently refresh, so they are left out in favour of one clause naming\n" +
 			"this host's own halt instead — unless beads_sync is backup or shared, where every host's note\n" +
@@ -60,18 +65,30 @@ func newNudgeCmd() *cobra.Command {
 				return err
 			}
 
+			// Each running story's transcript is read beside its rig's checkout,
+			// where Claude Code keeps it. A rigs table that cannot be read, or a
+			// host with no home, judges the stories by their mail alone rather
+			// than silencing the alarm.
+			var transcripts application.TranscriptWrites
+			rigs, rigsErr := config.Rigs()
+			if projects, err := claude.DefaultProjectsRoot(); err == nil && rigsErr == nil {
+				transcripts = claude.NewTranscripts(projects)
+			}
+
 			tracker := mwGateway(dir, host)
 			clauses, err := application.Nudge{
-				Tracker:    tracker,
-				Notes:      tracker,
-				Mayor:      application.MayorReader{Tracker: tracker, Notes: tracker},
-				Host:       host,
-				Home:       mwVault(dir, host),
-				SyncHalt:   hostSyncHalt(),
-				CloseOuts:  hostCloseOuts(),
-				SyncMode:   setting.Mode(),
-				NudgeAfter: time.Duration(after) * time.Minute,
-				SyncStale:  time.Duration(stale) * time.Minute,
+				Tracker:     tracker,
+				Notes:       tracker,
+				Mayor:       application.MayorReader{Tracker: tracker, Notes: tracker},
+				Host:        host,
+				Home:        mwVault(dir, host),
+				SyncHalt:    hostSyncHalt(),
+				CloseOuts:   hostCloseOuts(),
+				Transcripts: transcripts,
+				Rigs:        rigs,
+				SyncMode:    setting.Mode(),
+				NudgeAfter:  time.Duration(after) * time.Minute,
+				SyncStale:   time.Duration(stale) * time.Minute,
 			}.Run(cmd.Context())
 			if err != nil {
 				return err

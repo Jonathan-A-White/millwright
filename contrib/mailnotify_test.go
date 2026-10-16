@@ -759,13 +759,13 @@ func TestQuietAlarmCombinesEveryClauseMwNudgeGivesInOneLine(t *testing.T) {
 	f := newFactory(t)
 	f.mayor("idle", actingByID)
 	f.nudges(
-		[2]string{"mw-gq6.30", "mw-gq6.30 in progress 73 min, no mail"},
+		[2]string{"mw-gq6.30", "mw-gq6.30 in progress 147 min, no mail, transcript quiet 32 min"},
 		[2]string{"host:laptop", "laptop last synced 31 min ago"},
 	)
 
 	f.tick()
 
-	f.typed("Quiet alarm for mayor: mw-gq6.30 in progress 73 min, no mail; laptop last synced 31 min ago. Run mw status.\n")
+	f.typed("Quiet alarm for mayor: mw-gq6.30 in progress 147 min, no mail, transcript quiet 32 min; laptop last synced 31 min ago. Run mw status.\n")
 }
 
 func TestQuietAlarmSaysNothingWhenMwNudgeSaysNothing(t *testing.T) {

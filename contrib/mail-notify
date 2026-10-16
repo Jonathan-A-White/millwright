@@ -102,7 +102,9 @@
 # mailed about it (default 60 minutes), and how stale another host's last
 # sync may be (default 20 minutes) — are `mw nudge`'s own settings,
 # nudge_after_minutes and nudge_sync_stale_minutes in ~/.config/mw/config.toml
-# (see README.md, "What a host is told"), not this script's.
+# (see README.md, "What a host is told"), not this script's. A story whose
+# session's transcript was written in the last 15 minutes is working, not
+# quiet, and `mw nudge` leaves it out (mw-gq6.477).
 #
 # The host may set, in the unit's environment or in mail-notify.env beside it:
 #   MW_VAULT             the vault (else the `vault` key of ~/.config/mw/config.toml)
