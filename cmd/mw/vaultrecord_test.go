@@ -188,3 +188,26 @@ func TestMemorySupersedeAndMigrateCommitEveryFileTheyTouched(t *testing.T) {
 		t.Errorf("migrate's commit was not pushed")
 	}
 }
+
+// mw invest add and mw invest outcome commit the investments ledger in the
+// step that writes it and push, so that a tracked ledger is never left for a
+// person to commit before dispatch will run (mw-gq6.502).
+func TestInvestAddAndOutcomeCommitTheLedgerAndPush(t *testing.T) {
+	vaultDir, remote := gitVaultWithRemote(t, true)
+	const ledger = "plans/investments/ledger.jsonl"
+
+	before := gitIn(t, vaultDir, "rev-parse", "HEAD")
+	runMW(t, "invest", "add", "mw-a.1", "--aim", "cut merge conflicts", "--predict", "tokens -10%", "--measure", "tokens per story", "--review", "14")
+	theCommitHolds(t, vaultDir, before, ledger)
+	if subject := gitIn(t, vaultDir, "log", "-1", "--format=%s"); !strings.Contains(subject, "mw invest") || !strings.Contains(subject, "mw-a.1") {
+		t.Errorf("the commit message %q does not name mw invest and the bead", subject)
+	}
+
+	before = gitIn(t, vaultDir, "rev-parse", "HEAD")
+	runMW(t, "invest", "outcome", "mw-a.1", "--result", "win", "--actual", "tokens -12%", "--lesson", "keep going")
+	theCommitHolds(t, vaultDir, before, ledger)
+
+	if pushed := gitIn(t, remote, "rev-parse", "main"); pushed != gitIn(t, vaultDir, "rev-parse", "HEAD") {
+		t.Errorf("the commits were not pushed (remote at %s)", pushed)
+	}
+}
