@@ -1906,11 +1906,11 @@ spring = true   # deputy and millhand only: bring the seat up when its window is
 `landing` is a `bead_changed` that ends in `landed`; a `mail` event is the seat's only when its
 box is the seat's. Each pass the follower reads these files and, for a seat with new matching
 events: when the seat's window (`<seat>-*`, of several the one its acting file names) is up
-and its pane idle at an empty input line, types `New events for <seat>: N. Run mw events tail
---since <seq>.` and, when mail is among them, `New mail for <seat>: N message(s). Run bd mail
-inbox.`; leaves a busy pane alone and tells it on a later pass; and when the window is down
-and the seat is marked `spring = true`, runs its up command (`mw deputy`, `mw millhand`) with
-the same line as its reason. A seat whose window is down and not marked is told nothing: it
+and its pane idle at an empty input line, types one line: `New events for <seat>: N. Run mw
+events tail --since <seq>.`, or `New mail for <seat>: N message(s). Run bd mail inbox.` when
+every event is mail (one mail is one notice, mw-gq6.457); leaves a busy pane alone and tells
+it on a later pass; and when the window is down and the seat is marked `spring = true`, runs
+its up command (`mw deputy`, `mw millhand`) with the events line as its reason. A seat whose window is down and not marked is told nothing: it
 reads the log from its handoff. A seat starts at the log's head the first time it is seen
 (history is not told); the cursors are `nudge.json` beside the log. A bad file is logged and
 that seat left out. `mw events wait --for <seat> [--kinds k1,k2] [--since N] [--limit 50m]` is the

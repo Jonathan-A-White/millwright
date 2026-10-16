@@ -48,23 +48,38 @@ func (w *nudgeWorld) pass(t *testing.T) {
 	}
 }
 
-func TestNudgeTypesTheLineIntoAnIdlePaneAndTheMailLineToo(t *testing.T) {
+// One mail is one notice (mw-gq6.457): events that are all mail are told with
+// the mail line alone, never the events line and the mail line one after the
+// other.
+func TestNudgeTypesTheMailLineAloneIntoAnIdlePaneWhenEveryEventIsMail(t *testing.T) {
 	w := newNudgeWorld(t)
 	w.subs.Set("deputy", `kinds = ["mail", "message"]`)
 	w.windows.HoldsWithID("@7", "deputy-2026-10-01-01", time.Time{})
 	w.pass(t) // the seat starts at the head: nothing is told
 	appendAll(t, w.log, jobEvent, events.Event{Kind: events.KindMail, Bead: "mw-m1", Detail: "deputy"}, events.Event{Kind: events.KindMail, Bead: "mw-m2", Detail: "deputy"})
 	w.pass(t)
-	want := []string{
-		"New events for deputy: 2. Run mw events tail --since 1.\n",
-		"New mail for deputy: 2 message(s). Run bd mail inbox.\n",
-	}
+	want := []string{"New mail for deputy: 2 message(s). Run bd mail inbox.\n"}
 	if got := w.windows.Typed("@7"); strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("typed %q, want %q", got, want)
 	}
 	w.pass(t) // told once
-	if got := w.windows.Typed("@7"); len(got) != 2 {
+	if got := w.windows.Typed("@7"); len(got) != 1 {
 		t.Fatalf("a second pass typed again: %q", got)
+	}
+}
+
+// Mail among other events is told by the events line alone: mw events tail
+// names the mail with the rest.
+func TestNudgeTypesTheEventsLineAloneWhenMailIsAmongOtherEvents(t *testing.T) {
+	w := newNudgeWorld(t)
+	w.subs.Set("deputy", `kinds = ["mail", "message"]`)
+	w.windows.HoldsWithID("@7", "deputy-2026-10-01-01", time.Time{})
+	w.pass(t)
+	appendAll(t, w.log, events.Event{Kind: events.KindMail, Bead: "mw-m1", Detail: "deputy"}, msgEvent)
+	w.pass(t)
+	want := []string{"New events for deputy: 2. Run mw events tail --since 0.\n"}
+	if got := w.windows.Typed("@7"); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("typed %q, want %q", got, want)
 	}
 }
 
@@ -95,7 +110,7 @@ func TestNudgeLeavesABusyPaneAndTellsItOnceIdle(t *testing.T) {
 		}
 		_ = w.windows.Pane("@7", application.PaneIdle)
 		w.pass(t)
-		if got := w.windows.Typed("@7"); len(got) != 2 || !strings.HasPrefix(got[0], "New events for deputy: 1.") {
+		if got := w.windows.Typed("@7"); len(got) != 1 || got[0] != "New mail for deputy: 1 message(s). Run bd mail inbox.\n" {
 			t.Fatalf("pane %s: once idle it was typed %q", state, got)
 		}
 		if len(w.sprung) != 0 {
@@ -159,7 +174,7 @@ func TestNudgeSaysABadSubscribeFileAndTellsTheOthers(t *testing.T) {
 	w.pass(t)
 	appendAll(t, w.log, events.Event{Kind: events.KindMail, Bead: "mw-m1", Detail: "deputy"})
 	w.pass(t)
-	if len(w.windows.Typed("@7")) != 2 || len(w.windows.Typed("@8")) != 0 {
+	if len(w.windows.Typed("@7")) != 1 || len(w.windows.Typed("@8")) != 0 {
 		t.Fatalf("typed %q / %q", w.windows.Typed("@7"), w.windows.Typed("@8"))
 	}
 	if !strings.Contains(w.err.String(), "smoke-signal") || !strings.Contains(w.err.String(), "card_answered") {
