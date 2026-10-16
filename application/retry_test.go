@@ -513,3 +513,104 @@ func TestRetryOnTheClaimingHostBundlesEvenWhenTheHostKeyNamesAnother(t *testing.
 		t.Errorf("expected the story open and unassigned, got status %q assignee %q", detail.Status, detail.Assignee)
 	}
 }
+
+// mw-1ljpo9.7: a story whose last attempt mw next refused at the gate or the
+// merge, or capped, has the note that its next attempt continues the branch;
+// mw retry keeps the branch for it and takes only the worktree away, and
+// --from-main deletes the branch and clears the note, as before.
+func TestRetryKeepsTheBranchTheNextAttemptContinuesUnlessFromMain(t *testing.T) {
+	for _, fromMain := range []bool{false, true} {
+		tracker := apptest.NewFakeTracker()
+		aRetryStory(t, tracker, "mw-gq6.1")
+		ctx := context.Background()
+		if err := tracker.SetNote(ctx, application.ContinueKey("mw-gq6.1"), "1"); err != nil {
+			t.Fatal(err)
+		}
+		landing := &fakeRetryLanding{AheadCount: 2, BundleSHA: "abc123"}
+		var out strings.Builder
+		retry := aRetry(tracker, landing, &apptest.FakeVaultFiles{}, &out)
+		retry.Notes, retry.FromMain = tracker, fromMain
+
+		report, err := retry.Run(ctx, "mw-gq6.1")
+		if err != nil {
+			t.Fatalf("from-main=%v: expected the retry to succeed, got: %v\n%s", fromMain, err, out.String())
+		}
+		if !landing.removed || !report.WorktreeGone {
+			t.Errorf("from-main=%v: expected the worktree taken away, got %+v", fromMain, report)
+		}
+		note, _ := tracker.Note(ctx, application.ContinueKey("mw-gq6.1"))
+		if fromMain {
+			if !landing.branchDeleted || report.BranchKept || note != "" {
+				t.Errorf("--from-main: expected the branch deleted and the note cleared, got deleted=%v kept=%v note=%q",
+					landing.branchDeleted, report.BranchKept, note)
+			}
+			continue
+		}
+		if landing.branchDeleted || !report.BranchKept || report.BranchGone || note != "1" {
+			t.Errorf("expected the branch kept and the note left for the dispatch, got deleted=%v kept=%v note=%q",
+				landing.branchDeleted, report.BranchKept, note)
+		}
+		if !strings.Contains(out.String(), "the next attempt continues it") {
+			t.Errorf("expected the report to say the branch is kept for the next attempt, got:\n%s", out.String())
+		}
+		comments := tracker.Comments("mw-gq6.1")
+		if len(comments) == 0 || !strings.Contains(comments[len(comments)-1], "mw retry --from-main starts it from main instead") {
+			t.Errorf("expected the comment to name the branch kept and --from-main, got %+v", comments)
+		}
+	}
+}
+
+// Without the note — an attempt refused for what is in its commits, or none —
+// the branch is deleted as before, --from-main or not.
+func TestRetryWithoutTheNoteDeletesTheBranch(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	aRetryStory(t, tracker, "mw-gq6.1")
+	landing := &fakeRetryLanding{AheadCount: 2, BundleSHA: "abc123"}
+	var out strings.Builder
+	retry := aRetry(tracker, landing, &apptest.FakeVaultFiles{}, &out)
+	retry.Notes = tracker
+	if _, err := retry.Run(context.Background(), "mw-gq6.1"); err != nil {
+		t.Fatalf("expected the retry to succeed, got: %v\n%s", err, out.String())
+	}
+	if !landing.branchDeleted {
+		t.Errorf("expected the branch deleted with no note to keep it")
+	}
+}
+
+func TestOnlyTheGateTheMergeAndTheTurnCapHandABranchOn(t *testing.T) {
+	for reason, want := range map[application.Reason]bool{
+		application.ReasonTestsFail: true, application.ReasonMergedTestsFail: true, application.ReasonMergeConflict: true,
+		application.ReasonTurnCap: true, application.ReasonOpenSteps: true,
+		application.ReasonSignedCommit: false, application.ReasonNoCommits: false, application.ReasonUncommittedWork: false,
+	} {
+		if got := application.ContinuesFrom(reason); got != want {
+			t.Errorf("ContinuesFrom(%s) = %v, want %v", reason, got, want)
+		}
+	}
+}
+
+// A --from-main retry refused for a session still running changes nothing: the
+// note that the next attempt continues the branch is still there.
+func TestRetryFromMainRefusedLeavesTheNote(t *testing.T) {
+	tracker := apptest.NewFakeTracker()
+	aRetryStory(t, tracker, "mw-gq6.1")
+	ctx := context.Background()
+	if err := tracker.SetNote(ctx, application.ContinueKey("mw-gq6.1"), "1"); err != nil {
+		t.Fatal(err)
+	}
+	runner := apptest.NewFakeRunner()
+	if err := runner.Start(ctx, application.SessionSpec{Name: application.SessionName("mw-gq6.1"), Dir: "/w", Command: []string{"claude"}}); err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	retry := aRetry(tracker, &fakeRetryLanding{AheadCount: 2}, &apptest.FakeVaultFiles{}, &out)
+	retry.Notes, retry.FromMain, retry.Runner = tracker, true, runner
+
+	report, _ := retry.Run(ctx, "mw-gq6.1")
+	if !report.Refused {
+		t.Fatalf("expected the retry refused for a running session, got %+v", report)
+	}
+	if note, _ := tracker.Note(ctx, application.ContinueKey("mw-gq6.1")); note != "1" {
+		t.Errorf("expected the note left as it was by a refusal, got %q", note)
+	}
+}

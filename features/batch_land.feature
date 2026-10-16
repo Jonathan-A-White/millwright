@@ -7,7 +7,8 @@ Feature: mw land lands a batch rig's queue under one gate run
   once on the batch under the gate lock and the calm rule, and only when that
   run is green and no branch was set aside does it push the target branch, as
   a fast-forward. Each story is then closed run=landed with a ledger line
-  naming the batch. A branch that conflicts is set aside and stays queued; a
+  naming the batch; one whose claim another host holds is closed by this host
+  taking the claim over, which a comment on the story records. A branch that conflicts is set aside and stays queued; a
   red gate pushes nothing. Either way the batch is held, every story in it
   stays queued, and one mail tells the Mayor each story and why. What the
   batch did is kept under runs/batch/<rig>/<n>/.
@@ -33,6 +34,19 @@ Feature: mw land lands a batch rig's queue under one gate run
     And the batch records of batch 1 hold the merge order, the gate log and the outcome "landed"
     And metrics/factory.jsonl holds a line for batch 1 of the rig: 3 stories, 1 gate run, no fixer, outcome "green"
     And the Mayor was sent no mail saying the batch was held
+
+  Scenario: A story claimed on another host is closed by this host once its batch lands, and the takeover is noted on it
+    Given the tracker acts as "mw@laptop", this host's mw
+    And these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And "mw-gq6.2" is claimed by "mw@cloud1", on another host
+    When mw lands the batch of the rig
+    Then the batch landed on "main" in one push, forcing nothing
+    And these stories are on "main" at the rig's origin, closed and recorded as landed, each with a ledger line naming batch 1:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    And the comment on "mw-gq6.2" says: mw@laptop took the claim over from mw@cloud1 to close it
 
   Scenario: A fourth branch that conflicts is set aside and stays queued while the other three land
     Given these stories are queued for batch landing:

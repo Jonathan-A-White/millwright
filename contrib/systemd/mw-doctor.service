@@ -2,8 +2,9 @@
 # `systemctl --user`; see README.md, "mw doctor".
 #
 # Started by mw-doctor.timer. It works a table of checks, each its own probe
-# and cure, offline and without AI, and logs what it found on this host; it
-# writes no beads note, sends no mail and touches no tracker.
+# and cure, offline and without AI, and logs what it found on this host. It
+# sends no mail itself, but a check left needing a person is a beads note and
+# the alarms are pushed through the tracker, so its bd needs beads.env too.
 [Unit]
 Description=Cure this host's known faults offline, on a table of checks (mw doctor)
 
@@ -16,6 +17,10 @@ Type=oneshot
 # verify` from having to resolve %h itself; it does no PATH lookup on a path
 # holding a "/".
 EnvironmentFile=-%h/.config/mw/dispatch.env
+# bd reaches a served beads database through BEADS_DOLT_* in beads.env; without
+# them it makes .beads/embeddeddolt and finds nothing (mw-gq6.446). Optional, as
+# a host whose beads are embedded has none.
+EnvironmentFile=-%h/.config/mw/beads.env
 ExecStart=/usr/bin/env %h/.local/bin/mw doctor
 
 # Type=oneshot has no start timeout by default, and a hung systemctl would

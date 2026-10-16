@@ -548,6 +548,28 @@ remembers nothing.
 only the home sends. `mw doctor` restarts the timer if it is found stopped
 (`mw-report.service` is among its default units). See `features/report_send.feature`.
 
+## The factory's investments
+
+```sh
+bin/mw invest add mw-1ljpo9.9 --aim "cut the Builder's tokens" --predict "20% fewer tokens per landing" --measure "tokens/landing in mw report" --review 14
+bin/mw invest outcome mw-1ljpo9.9 --result win --actual "tokens/landing fell 22%" --lesson "the trim mattered" [--next "<better approach or bead>"]
+bin/mw invest due      # review date passed, no outcome yet
+bin/mw invest list     # every investment, its outcomes in order, the lessons
+```
+
+`mw invest` keeps an append-only ledger, `plans/investments/ledger.jsonl` in the vault,
+one JSON line each, stamped with the UTC time and the actor. `add` records what an
+investment aims at, the gain predicted (tokens, speed or quality), how it is measured and
+the days until it is looked at again; a second `add` for the same bead is refused.
+`outcome` records `win`, `loss` or `mixed`, what actually happened with numbers, the
+lesson and, if there is one, the better approach. A line is never edited: a later
+outcome is a new line, and the newest is the one `list` and `mw report` show. `due`
+lists the investments whose review date has passed with no outcome.
+
+`mw report` gains an INVESTMENTS part after FACTORY CHANGES: the wins its window
+recorded, named with their measured gain; the losses with their lesson and the better
+approach; and the count still due. See `features/invest.feature`.
+
 ## Changing one key of the config file
 
 ```sh
@@ -1341,6 +1363,25 @@ It never resets a story's attempts count, and a story already started
 A story labelled `hitl` is still retried and its claim still given back, but
 dispatch passes a `hitl` story over, so the report adds a line naming the label
 and the cure: `bd update <id> --remove-label hitl`. See `features/retry.feature`.
+
+### The next attempt continues the branch (mw-1ljpo9.7)
+
+An attempt `mw next` refused at the gate or the merge (`tests-fail`,
+`merged-tests-fail`, `merge-conflict`), or stopped at its turn cap or with steps
+open, is most of its story already. `mw next` records it (the bd kv note
+`continue.<story>`, the attempt as its value), `mw retry` then keeps the branch
+and takes only the worktree away (the bundle is still made), and the dispatch that
+takes the story again keeps the branch as `mw/<story>-attempt<N>`, cuts the new
+worktree from it and rebases it onto the target, so the fix is a delta, not a
+rebuild. The boot tells the Builder `You continue attempt N's branch: read git log
+first`. A branch that does not rebase cleanly is put back and the worktree cut
+from the target after all, and the boot says so, naming the kept branch. A branch
+refused for what is in its commits (a signed commit) is not continued.
+
+`mw retry --from-main` deletes the branch and clears the note, so the next
+attempt starts from the target, as before; `retry_from_branch = false` under
+`[next]` in the config file is the rollback for every story. See
+`features/retry_from_branch.feature`.
 
 ## Running a rig's whole suite
 
@@ -4375,7 +4416,20 @@ command's. `MW_HEAVY_MEMORY_MAX` (default `512M`, the VPS's; half of `MemTotal` 
 (default `1G`) are the two caps; `MW_HEAVY_LOCK` overrides the lock file
 (else the same one `contrib/mail-notify` locks, above); `MW_HEAVY_DRY=1`
 prints the `systemd-run` line it would run and runs nothing. A Mayor's
-verification of a landed branch runs the rig's tests through it.
+verification of a landed branch runs the rig's tests through it. When
+`BEADS_DOLT_SERVER_HOST` is not set, it reads `~/.config/mw/beads.env` (or
+`MW_BEADS_ENV`) before the command, so a `bd` or `mw` it runs from a unit or a
+`nohup` that never read the file still reaches the served beads: `bd` without
+them makes a second, empty database in `.beads/embeddeddolt` and finds nothing.
+
+`contrib/mw-closeout <story>` starts `mw-heavy mw next <story> --no-dispatch`
+as a transient user unit (`mw-closeout-<story>`, its dots made dashes) that
+outlives the session that started it, with `EnvironmentFile=` naming
+`beads.env` and the caller's `PATH`, `MW_VAULT`, `MW_HOST`, `MW_SEAT` and
+`MW_BD_REAL` passed on. It prints the unit's name and the file its output is
+appended to (`~/.local/state/mw-closeout/<unit>.out`, or `MW_CLOSEOUT_DIR`),
+and returns at once; `systemctl --user status <unit>` follows it. A long
+close-out started by hand goes through it, never a bare `systemd-run`.
 
 `OOMScoreAdjust=500` and `MemoryMax=384M` are also set directly on
 `mw-mail-notify.service`, `mw-health.service` and `mw-doctor.service`, so a

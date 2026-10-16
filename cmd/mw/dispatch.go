@@ -239,6 +239,10 @@ func newDispatchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			fromBranch, err := config.NextRetryFromBranch()
+			if err != nil {
+				return err
+			}
 
 			tries, err := config.DispatchSyncTries()
 			if err != nil {
@@ -306,6 +310,9 @@ func newDispatchCmd() *cobra.Command {
 				},
 				DryRun: dryRun,
 				Out:    cmd.OutOrStdout(),
+
+				RetryFromBranch: fromBranch,
+				Rebases:         worktrees,
 			}
 			// The mill answers what it left waiting, on the host that is home and
 			// where a [grist] table says so. A mill that cannot be set up costs

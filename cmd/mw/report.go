@@ -37,6 +37,9 @@ func newReportCmd() *cobra.Command {
 			"acceptance, that metric for the whole factory in the 7 days before and the 7 days after the\n" +
 			"landing day ('too soon' until the 7 days are over), and WORSE when it went the wrong way by\n" +
 			"more than a 10% band. It reads and writes nothing, and prints in 60 columns.\n" +
+			"The INVESTMENTS part follows FACTORY CHANGES: of the factory's investments (mw invest) the wins\n" +
+			"the window recorded, named with their measured gain, the losses with their lesson and the\n" +
+			"better approach, and how many are still due for review.\n" +
 			"--since a story id or a commit of the millwright rig is one landing instead: the same\n" +
 			"quality, speed and fuel for the whole factory (or --rig, --host) in the 7 days before its\n" +
 			"day and in the days after it, up to 7 (as many as there have been), side by side with the\n" +
@@ -67,18 +70,19 @@ func newReportCmd() *cobra.Command {
 			}
 			files := mwVault(dir, here)
 			_, err = application.FactoryReport{
-				Tracker:    mwGateway(dir, here),
-				Files:      files,
-				Benchmarks: vault.Benchmarks{Vault: files},
-				Seat:       BuilderSeat,
-				Since:      from,
-				Around:     around,
-				Commits:    rig.New(),
-				FactoryDir: factoryDir,
-				Rig:        rigName,
-				Host:       host,
-				JSON:       asJSON,
-				Out:        cmd.OutOrStdout(),
+				Tracker:     mwGateway(dir, here),
+				Files:       files,
+				Benchmarks:  vault.Benchmarks{Vault: files},
+				Seat:        BuilderSeat,
+				Since:       from,
+				Around:      around,
+				Commits:     rig.New(),
+				FactoryDir:  factoryDir,
+				Investments: files,
+				Rig:         rigName,
+				Host:        host,
+				JSON:        asJSON,
+				Out:         cmd.OutOrStdout(),
 			}.Run(cmd.Context())
 			return err
 		},

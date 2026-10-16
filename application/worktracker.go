@@ -190,6 +190,12 @@ type StoryDetail struct {
 	// Molecule is the formula poured for this story, empty until it has been
 	// poured. It is filled in by whoever pours it, not by reading the story.
 	Molecule Molecule
+	// Continues is what the boot tells the session of the branch it starts on
+	// when an earlier attempt's branch was handed to it (mw-1ljpo9.7): that it
+	// continues that branch, or why it starts from the target after all. It is
+	// filled in by the dispatch that cuts the worktree, not by reading the
+	// story; empty when the attempt starts from the target as any first does.
+	Continues string
 	// LeaseExpires is when the tracker's own lease on this story's claim runs
 	// out unless a heartbeat renews it first; zero when the story is not
 	// claimed or the tracker does not say. A claim found past this with its
@@ -702,8 +708,18 @@ type WorkTracker interface {
 	// absent from the map rather than failing the whole call.
 	StoriesComments(ctx context.Context, ids []string) (map[string][]Comment, error)
 
-	// CloseStory closes a story with the reason it was closed for.
+	// CloseStory closes a story with the reason it was closed for. A story in
+	// progress whose claim another actor holds is refused with a
+	// *CloseHeldError, nothing written: only a claim's holder closes it.
 	CloseStory(ctx context.Context, id, reason string) error
+
+	// TakeOverClaim makes this actor the holder of a claim holder has, by
+	// force, so that a story landed here can be closed here under this
+	// actor's own name rather than under the other host's (mw-gq6.475). A
+	// story holder no longer holds is left as it is, and reported as a
+	// failure. It is for a story whose work is done: a claim with a session
+	// behind it is never taken.
+	TakeOverClaim(ctx context.Context, id, holder string) error
 
 	// StaleClaims lists the claimed stories whose lease had expired by now
 	// with no heartbeat since — the sessions that went away without closing or
@@ -723,4 +739,23 @@ type ClaimHeldError struct {
 
 func (e *ClaimHeldError) Error() string {
 	return fmt.Sprintf("%s is already claimed by %s, so it was not taken", e.ID, e.Holder)
+}
+
+// CloseHeldError is a close refused because another actor holds the story's
+// claim: beads lets only the claim's holder close a story in progress, so a
+// story another host claimed is refused to this one (mw-gq6.475). Actor is
+// the name this tracker acts under, and Said what the tracker said, when it
+// said anything.
+type CloseHeldError struct {
+	ID     string
+	Holder string
+	Actor  string
+	Said   string
+}
+
+func (e *CloseHeldError) Error() string {
+	if e.Said != "" {
+		return e.Said
+	}
+	return fmt.Sprintf("cannot close %s: assignee is %q, actor is %q", e.ID, e.Holder, e.Actor)
 }

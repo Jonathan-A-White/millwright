@@ -122,6 +122,10 @@ func newNextCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			fromBranch, err := config.NextRetryFromBranch()
+			if err != nil {
+				return err
+			}
 			changedSpecs, err := config.ChangedSpecs()
 			if err != nil {
 				return err
@@ -201,6 +205,9 @@ func newNextCmd() *cobra.Command {
 					Events:      homeEventLog(),
 					SmokeHolds:  gristSmokeBook(gateway, host),
 					Out:         cmd.OutOrStdout(),
+
+					RetryFromBranch: fromBranch,
+					Rebases:         worktrees,
 				}, dir)
 			}
 
@@ -262,6 +269,8 @@ func newNextCmd() *cobra.Command {
 				Tester:       tester,
 				Benchmarks:   vault.Benchmarks{Vault: files},
 				Bench:        benchmarkLimits(bench),
+
+				RetryFromBranch: fromBranch,
 			}.Run(cmd.Context(), args[0])
 			return err
 		},

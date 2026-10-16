@@ -253,6 +253,26 @@ func (w *Worktrees) RenameBranch(ctx context.Context, rigDir, from, to string) e
 	return err
 }
 
+// Worktrees satisfies the port an attempt continuing an earlier attempt's
+// branch is rebased through (mw-1ljpo9.7).
+var _ application.Rebases = (*Worktrees)(nil)
+
+// Rebase implements application.Rebases: `git rebase onto` in dir. A rebase
+// that stops on a conflict is aborted, leaving dir on the commit it was on, and
+// reported as false; one that cannot even be undone is an error.
+func (w *Worktrees) Rebase(ctx context.Context, dir, onto string) (bool, error) {
+	if onto == "" {
+		return false, fmt.Errorf("rebasing %s: onto what?", dir)
+	}
+	if _, err := w.git(ctx, dir, "rebase", onto); err != nil {
+		if _, abort := w.git(ctx, dir, "rebase", "--abort"); abort != nil {
+			return false, fmt.Errorf("%w (and the half-made rebase in %s could not be undone: %v)", err, dir, abort)
+		}
+		return false, nil
+	}
+	return true, nil
+}
+
 // AddNote implements application.CommitNotes: `git notes --ref=<ref> add -f -m
 // <note> <commit>` in the rig's checkout.
 func (w *Worktrees) AddNote(ctx context.Context, rigDir, ref, commit, note string) error {

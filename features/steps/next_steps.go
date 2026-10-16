@@ -58,6 +58,9 @@ type nextContext struct {
 	// status back, rather than the in-memory files fake every other scenario
 	// commits through.
 	realVault bool
+	// fromMain says the scenario's config file turned next.retry_from_branch
+	// off (mw-1ljpo9.7): every attempt then starts from the target.
+	fromMain bool
 	// dispatchReport is what the last standalone dispatch (mw-gq6.87's own
 	// scenarios, re-dispatching a story before it is closed out) reported.
 	dispatchReport application.DispatchReport
@@ -207,6 +210,7 @@ func InitializeNextScenario(ctx *godog.ScenarioContext) {
 	registerNextMergeFixSteps(ctx, c)
 	registerNextSpecsSteps(ctx, c)
 	registerNextReattemptSteps(ctx, c)
+	registerRetryFromBranchSteps(ctx, c)
 	registerNextGiveBackSteps(ctx, c)
 	registerNextStampSteps(ctx, c)
 	registerNextVersionSteps(ctx, c)
@@ -1011,9 +1015,11 @@ func (c *nextContext) nextUseCase() application.Next {
 		Seat: nextSeat,
 		Host: nextHost,
 		Rigs: rigs,
-		Now:  func() time.Time { return time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC) },
-		Out:  &c.printed,
-		Err:  &c.stderr,
+
+		RetryFromBranch: !c.fromMain,
+		Now:             func() time.Time { return time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC) },
+		Out:             &c.printed,
+		Err:             &c.stderr,
 
 		AfterLanding:   rig.NewAfterLanding(rig.WithAfterCommands(c.afterCommands), rig.WithAfterLimit(c.afterLimit)),
 		DeploySlot:     rig.NewSlots(rig.WithSlotSuffix(rig.AfterLandingSlotSuffix), rig.WithSlotWait(slotPatience), rig.WithSlotPoll(20*time.Millisecond)),

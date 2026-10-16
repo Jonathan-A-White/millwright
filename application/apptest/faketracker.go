@@ -26,7 +26,8 @@ const (
 	StatusClosed     = application.StatusClosed
 )
 
-// Actor is the assignee the fake records when a story is claimed.
+// Actor is the assignee the fake records when a story is claimed, unless
+// ActAs names another.
 const Actor = "fake"
 
 // LeaseTTL is how long a claim's lease runs in the fake, from the claim or the
@@ -66,6 +67,9 @@ type FakeTracker struct {
 
 	// refused is the stories CloseStory turns down, by the reason it gives.
 	refused map[string]string
+
+	// actor is the name the fake acts under, set by ActAs; "" is Actor.
+	actor string
 
 	// writes counts the calls that changed something, so that a test can say a
 	// reading wrote nothing.
@@ -489,6 +493,24 @@ func (f *FakeTracker) Stories() []string {
 	return append([]string(nil), f.order...)
 }
 
+// ActAs names the actor the fake acts under from now on — what it claims as,
+// and the only assignee it lets close a story in progress — as a gateway acts
+// under this host's mw name. It is set before the fake is used.
+func (f *FakeTracker) ActAs(name string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.actor = name
+}
+
+// me is the name the fake acts under. It takes no lock: ActAs is called
+// before anything reads it.
+func (f *FakeTracker) me() string {
+	if f.actor == "" {
+		return Actor
+	}
+	return f.actor
+}
+
 // ClaimAs claims a story for another assignee than the fake's own Actor, with
 // a lease until the time given: the claim another host's dispatcher made.
 func (f *FakeTracker) ClaimAs(id, holder string, until time.Time) error {
@@ -569,7 +591,7 @@ func (f *FakeTracker) StoryComments(_ context.Context, id string) ([]application
 		if i < len(times) {
 			at = times[i]
 		}
-		comments = append(comments, application.Comment{Author: Actor, Text: text, Created: at})
+		comments = append(comments, application.Comment{Author: f.me(), Text: text, Created: at})
 	}
 	return comments, nil
 }
@@ -1344,14 +1366,14 @@ func (f *FakeTracker) WorkInHand(_ context.Context) (application.WorkInHand, err
 // fake's own Actor, mirroring the real gateway's --if-assignee guard: a claim
 // another actor holds — set up with ClaimAs — is left exactly as it is.
 func (f *FakeTracker) ReleaseClaim(ctx context.Context, id string) error {
-	return f.release(ctx, id, Actor, "ReleaseClaim")
+	return f.release(ctx, id, f.me(), "ReleaseClaim")
 }
 
 // ReleaseClaimHeldBy implements application.WorkTracker. It is conditional on
 // the holder named, not the fake's own Actor; an empty holder is the Actor.
 func (f *FakeTracker) ReleaseClaimHeldBy(ctx context.Context, id, holder string) error {
 	if holder == "" {
-		holder = Actor
+		holder = f.me()
 	}
 	return f.release(ctx, id, holder, "ReleaseClaimHeldBy")
 }
@@ -1475,10 +1497,10 @@ func (f *FakeTracker) ReadyStories(_ context.Context, epicID, host string) ([]ap
 func (f *FakeTracker) ClaimStory(_ context.Context, id string) error {
 	f.note("ClaimStory")
 	return f.write(id, func(s *fakeStory) error {
-		if s.detail.Assignee != "" && s.detail.Assignee != Actor {
+		if s.detail.Assignee != "" && s.detail.Assignee != f.me() {
 			return &application.ClaimHeldError{ID: id, Holder: s.detail.Assignee}
 		}
-		s.detail.Assignee = Actor
+		s.detail.Assignee = f.me()
 		s.detail.Status = StatusInProgress
 		s.detail.LeaseExpires = f.now().Add(LeaseTTL)
 		// A run state an earlier attempt left on the story is not this claim's:
@@ -1866,8 +1888,30 @@ func (f *FakeTracker) CloseStory(_ context.Context, id, reason string) error {
 		if why := f.refused[id]; why != "" {
 			return fmt.Errorf("%s", why)
 		}
+		// bd lets only the claim's holder close a story in progress.
+		if s.detail.Status == StatusInProgress && s.detail.Assignee != "" && s.detail.Assignee != f.me() {
+			return &application.CloseHeldError{ID: id, Holder: s.detail.Assignee, Actor: f.me()}
+		}
 		s.detail.Status = StatusClosed
 		s.closeReason = reason
+		return nil
+	})
+}
+
+// TakeOverClaim implements application.WorkTracker.
+func (f *FakeTracker) TakeOverClaim(_ context.Context, id, holder string) error {
+	f.note("TakeOverClaim")
+	f.mu.Lock()
+	failing := f.failing["TakeOverClaim"]
+	f.mu.Unlock()
+	if failing != nil {
+		return failing
+	}
+	return f.write(id, func(s *fakeStory) error {
+		if s.detail.Assignee != holder {
+			return fmt.Errorf("taking over the claim on %s: it is held by %q, not %q", id, s.detail.Assignee, holder)
+		}
+		s.detail.Assignee = f.me()
 		return nil
 	})
 }
@@ -1903,8 +1947,8 @@ func (f *FakeTracker) StaleClaims(_ context.Context, now time.Time) ([]applicati
 // HeartbeatClaim implements application.WorkTracker.
 func (f *FakeTracker) HeartbeatClaim(_ context.Context, id string) error {
 	return f.write(id, func(s *fakeStory) error {
-		if s.detail.Status != StatusInProgress || s.detail.Assignee != Actor {
-			return fmt.Errorf("heartbeat %s: it is %s and held by %q, not a claim of %s", id, s.detail.Status, s.detail.Assignee, Actor)
+		if s.detail.Status != StatusInProgress || s.detail.Assignee != f.me() {
+			return fmt.Errorf("heartbeat %s: it is %s and held by %q, not a claim of %s", id, s.detail.Status, s.detail.Assignee, f.me())
 		}
 		s.detail.LeaseExpires = f.now().Add(LeaseTTL)
 		return nil
