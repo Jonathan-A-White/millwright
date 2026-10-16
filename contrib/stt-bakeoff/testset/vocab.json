@@ -1,0 +1,5160 @@
+{
+ "source": "Lampas public/data/1jn/2.json and rom/8.json; respelling by Lampas src/speech/schemes/modern.ts respellModern",
+ "passages": {
+  "1jn2": {
+   "book": "1 John",
+   "chapter": 2,
+   "words": [
+    {
+     "greek": "τεκνία",
+     "respelling": "te-KNEE-a",
+     "lemma": "τεκνίον",
+     "gloss": "children",
+     "verses": [
+      1,
+      12,
+      28
+     ]
+    },
+    {
+     "greek": "μου",
+     "respelling": "moo",
+     "lemma": "ἐγώ",
+     "gloss": "I/we",
+     "verses": [
+      1
+     ]
+    },
+    {
+     "greek": "ταῦτα",
+     "respelling": "TAF-ta",
+     "lemma": "οὗτος",
+     "gloss": "this/he/she/it",
+     "verses": [
+      1,
+      26
+     ]
+    },
+    {
+     "greek": "γράφω",
+     "respelling": "GHRA-fo",
+     "lemma": "γράφω",
+     "gloss": "to write",
+     "verses": [
+      1,
+      7,
+      8,
+      12,
+      13
+     ]
+    },
+    {
+     "greek": "ὑμῖν",
+     "respelling": "ee-MEEN",
+     "lemma": "σύ",
+     "gloss": "you",
+     "verses": [
+      1,
+      7,
+      8,
+      12,
+      13,
+      14,
+      21,
+      24,
+      26,
+      27
+     ]
+    },
+    {
+     "greek": "ἵνα",
+     "respelling": "EE-na",
+     "lemma": "ἵνα",
+     "gloss": "in order that/to",
+     "verses": [
+      1,
+      19,
+      27,
+      28
+     ]
+    },
+    {
+     "greek": "μὴ",
+     "respelling": "mee",
+     "lemma": "μή",
+     "gloss": "not",
+     "verses": [
+      1,
+      4,
+      15,
+      22,
+      28
+     ]
+    },
+    {
+     "greek": "ἁμάρτητε",
+     "respelling": "a-MAR-tee-te",
+     "lemma": "ἁμαρτάνω",
+     "gloss": "to sin",
+     "verses": [
+      1
+     ]
+    },
+    {
+     "greek": "καὶ",
+     "respelling": "ke",
+     "lemma": "καί",
+     "gloss": "and",
+     "verses": [
+      1,
+      2,
+      3,
+      4,
+      6,
+      8,
+      9,
+      10,
+      11,
+      14,
+      16,
+      17,
+      18,
+      20,
+      21,
+      22,
+      24,
+      25,
+      27,
+      28
+     ]
+    },
+    {
+     "greek": "ἐάν",
+     "respelling": "e-AN",
+     "lemma": "ἐάν",
+     "gloss": "if",
+     "verses": [
+      1,
+      3,
+      15,
+      24,
+      29
+     ]
+    },
+    {
+     "greek": "τις",
+     "respelling": "tees",
+     "lemma": "τις",
+     "gloss": "one",
+     "verses": [
+      1,
+      15,
+      22,
+      27
+     ]
+    },
+    {
+     "greek": "ἁμάρτῃ",
+     "respelling": "a-MAR-tee",
+     "lemma": "ἁμαρτάνω",
+     "gloss": "to sin",
+     "verses": [
+      1
+     ]
+    },
+    {
+     "greek": "παράκλητον",
+     "respelling": "pa-RA-klee-ton",
+     "lemma": "παράκλητος",
+     "gloss": "counsellor",
+     "verses": [
+      1
+     ]
+    },
+    {
+     "greek": "ἔχομεν",
+     "respelling": "E-kho-men",
+     "lemma": "ἔχω",
+     "gloss": "to have/be",
+     "verses": [
+      1
+     ]
+    },
+    {
+     "greek": "πρὸς",
+     "respelling": "pros",
+     "lemma": "πρός",
+     "gloss": "to/with",
+     "verses": [
+      1
+     ]
+    },
+    {
+     "greek": "τὸν",
+     "respelling": "ton",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      1,
+      5,
+      9,
+      10,
+      11,
+      13,
+      14,
+      15,
+      17,
+      22,
+      23
+     ]
+    },
+    {
+     "greek": "πατέρα",
+     "respelling": "pa-TE-ra",
+     "lemma": "πατήρ",
+     "gloss": "father",
+     "verses": [
+      1,
+      13,
+      22,
+      23
+     ]
+    },
+    {
+     "greek": "Ἰησοῦν",
+     "respelling": "ee-ee-SOON",
+     "lemma": "Ἰησοῦς",
+     "gloss": "Jesus",
+     "verses": [
+      1
+     ]
+    },
+    {
+     "greek": "χριστὸν",
+     "respelling": "khree-STON",
+     "lemma": "Χριστός",
+     "gloss": "Christ",
+     "verses": [
+      1
+     ]
+    },
+    {
+     "greek": "δίκαιον",
+     "respelling": "DHEE-ke-on",
+     "lemma": "δίκαιος",
+     "gloss": "just",
+     "verses": [
+      1
+     ]
+    },
+    {
+     "greek": "αὐτὸς",
+     "respelling": "af-TOS",
+     "lemma": "αὐτός",
+     "gloss": "it/s/he",
+     "verses": [
+      2,
+      6,
+      25
+     ]
+    },
+    {
+     "greek": "ἱλασμός",
+     "respelling": "ee-laz-MOS",
+     "lemma": "ἱλασμός",
+     "gloss": "propitiation",
+     "verses": [
+      2
+     ]
+    },
+    {
+     "greek": "ἐστιν",
+     "respelling": "e-steen",
+     "lemma": "εἰμί",
+     "gloss": "to be",
+     "verses": [
+      2,
+      4,
+      7,
+      8,
+      9,
+      10,
+      11,
+      15,
+      16,
+      18,
+      21,
+      22,
+      25,
+      27,
+      29
+     ]
+    },
+    {
+     "greek": "περὶ",
+     "respelling": "pe-REE",
+     "lemma": "περί",
+     "gloss": "about",
+     "verses": [
+      2,
+      26,
+      27
+     ]
+    },
+    {
+     "greek": "τῶν",
+     "respelling": "ton",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      2,
+      16,
+      26
+     ]
+    },
+    {
+     "greek": "ἁμαρτιῶν",
+     "respelling": "a-mar-tee-ON",
+     "lemma": "ἁμαρτία",
+     "gloss": "sin",
+     "verses": [
+      2
+     ]
+    },
+    {
+     "greek": "ἡμῶν",
+     "respelling": "ee-MON",
+     "lemma": "ἐγώ",
+     "gloss": "I/we",
+     "verses": [
+      2,
+      19
+     ]
+    },
+    {
+     "greek": "οὐ",
+     "respelling": "oo",
+     "lemma": "οὐ",
+     "gloss": "no",
+     "verses": [
+      2,
+      27
+     ]
+    },
+    {
+     "greek": "ἡμετέρων",
+     "respelling": "ee-me-TE-ron",
+     "lemma": "ἡμέτερος",
+     "gloss": "our",
+     "verses": [
+      2
+     ]
+    },
+    {
+     "greek": "δὲ",
+     "respelling": "dhe",
+     "lemma": "δέ",
+     "gloss": "then",
+     "verses": [
+      2,
+      11,
+      17
+     ]
+    },
+    {
+     "greek": "μόνον",
+     "respelling": "MO-non",
+     "lemma": "μόνον",
+     "gloss": "only",
+     "verses": [
+      2
+     ]
+    },
+    {
+     "greek": "ἀλλὰ",
+     "respelling": "a-LA",
+     "lemma": "ἀλλά",
+     "gloss": "but",
+     "verses": [
+      2
+     ]
+    },
+    {
+     "greek": "ὅλου",
+     "respelling": "O-loo",
+     "lemma": "ὅλος",
+     "gloss": "all",
+     "verses": [
+      2
+     ]
+    },
+    {
+     "greek": "τοῦ",
+     "respelling": "too",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      2,
+      5,
+      14,
+      15,
+      16,
+      17,
+      20
+     ]
+    },
+    {
+     "greek": "κόσμου",
+     "respelling": "KOZ-moo",
+     "lemma": "κόσμος",
+     "gloss": "world",
+     "verses": [
+      2,
+      16
+     ]
+    },
+    {
+     "greek": "ἐν",
+     "respelling": "en",
+     "lemma": "ἐν",
+     "gloss": "in/on/among",
+     "verses": [
+      3,
+      4,
+      5,
+      6,
+      8,
+      9,
+      10,
+      11,
+      14,
+      15,
+      16,
+      24,
+      27,
+      28
+     ]
+    },
+    {
+     "greek": "τούτῳ",
+     "respelling": "TOO-to",
+     "lemma": "οὗτος",
+     "gloss": "this/he/she/it",
+     "verses": [
+      3,
+      4,
+      5
+     ]
+    },
+    {
+     "greek": "γινώσκομεν",
+     "respelling": "yee-NO-sko-men",
+     "lemma": "γινώσκω",
+     "gloss": "to know",
+     "verses": [
+      3,
+      5,
+      18
+     ]
+    },
+    {
+     "greek": "ὅτι",
+     "respelling": "O-tee",
+     "lemma": "ὅτι",
+     "gloss": "that/since: that",
+     "verses": [
+      3,
+      5,
+      8,
+      11,
+      12,
+      13,
+      14,
+      16,
+      18,
+      19,
+      21,
+      22,
+      29
+     ]
+    },
+    {
+     "greek": "ἐγνώκαμεν",
+     "respelling": "e-GHNO-ka-men",
+     "lemma": "γινώσκω",
+     "gloss": "to know",
+     "verses": [
+      3
+     ]
+    },
+    {
+     "greek": "αὐτόν",
+     "respelling": "af-TON",
+     "lemma": "αὐτός",
+     "gloss": "it/s/he",
+     "verses": [
+      3,
+      4
+     ]
+    },
+    {
+     "greek": "τὰς",
+     "respelling": "tas",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      3,
+      4
+     ]
+    },
+    {
+     "greek": "ἐντολὰς",
+     "respelling": "en-do-LAS",
+     "lemma": "ἐντολή",
+     "gloss": "commandment",
+     "verses": [
+      3,
+      4
+     ]
+    },
+    {
+     "greek": "αὐτοῦ",
+     "respelling": "af-TOO",
+     "lemma": "αὐτός",
+     "gloss": "it/s/he",
+     "verses": [
+      3,
+      4,
+      5,
+      9,
+      10,
+      11,
+      12,
+      17,
+      27,
+      28,
+      29
+     ]
+    },
+    {
+     "greek": "τηρῶμεν",
+     "respelling": "tee-RO-men",
+     "lemma": "τηρέω",
+     "gloss": "to keep: observe",
+     "verses": [
+      3
+     ]
+    },
+    {
+     "greek": "ὁ",
+     "respelling": "o",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      4,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      14,
+      17,
+      18,
+      22,
+      23,
+      24,
+      27,
+      29
+     ]
+    },
+    {
+     "greek": "λέγων",
+     "respelling": "LE-ghon",
+     "lemma": "λέγω",
+     "gloss": "to say",
+     "verses": [
+      4,
+      6,
+      9
+     ]
+    },
+    {
+     "greek": "ἔγνωκα",
+     "respelling": "E-ghno-ka",
+     "lemma": "γινώσκω",
+     "gloss": "to know",
+     "verses": [
+      4
+     ]
+    },
+    {
+     "greek": "τηρῶν",
+     "respelling": "tee-RON",
+     "lemma": "τηρέω",
+     "gloss": "to keep: observe",
+     "verses": [
+      4
+     ]
+    },
+    {
+     "greek": "ψεύστης",
+     "respelling": "PSEF-stees",
+     "lemma": "ψεύστης",
+     "gloss": "liar",
+     "verses": [
+      4,
+      22
+     ]
+    },
+    {
+     "greek": "ἡ",
+     "respelling": "ee",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      4,
+      5,
+      7,
+      8,
+      11,
+      15,
+      16,
+      17,
+      25
+     ]
+    },
+    {
+     "greek": "ἀλήθεια",
+     "respelling": "a-LEE-thee-a",
+     "lemma": "ἀλήθεια",
+     "gloss": "truth",
+     "verses": [
+      4
+     ]
+    },
+    {
+     "greek": "οὐκ",
+     "respelling": "ook",
+     "lemma": "οὐ",
+     "gloss": "no",
+     "verses": [
+      4,
+      7,
+      10,
+      11,
+      15,
+      16,
+      19,
+      21,
+      22,
+      27
+     ]
+    },
+    {
+     "greek": "ὃς",
+     "respelling": "os",
+     "lemma": "ὅς",
+     "gloss": "which",
+     "verses": [
+      5
+     ]
+    },
+    {
+     "greek": "δ",
+     "respelling": "dh",
+     "lemma": "δέ",
+     "gloss": "then",
+     "verses": [
+      5
+     ]
+    },
+    {
+     "greek": "ἂν",
+     "respelling": "an",
+     "lemma": "ἄν",
+     "gloss": "if",
+     "verses": [
+      5,
+      19
+     ]
+    },
+    {
+     "greek": "τηρῇ",
+     "respelling": "tee-REE",
+     "lemma": "τηρέω",
+     "gloss": "to keep: observe",
+     "verses": [
+      5
+     ]
+    },
+    {
+     "greek": "λόγον",
+     "respelling": "LO-ghon",
+     "lemma": "λόγος",
+     "gloss": "word",
+     "verses": [
+      5
+     ]
+    },
+    {
+     "greek": "ἀληθῶς",
+     "respelling": "a-lee-THOS",
+     "lemma": "ἀληθῶς",
+     "gloss": "truly",
+     "verses": [
+      5
+     ]
+    },
+    {
+     "greek": "ἀγάπη",
+     "respelling": "a-GHA-pee",
+     "lemma": "ἀγάπη",
+     "gloss": "love",
+     "verses": [
+      5,
+      15
+     ]
+    },
+    {
+     "greek": "θεοῦ",
+     "respelling": "the-OO",
+     "lemma": "θεός",
+     "gloss": "God",
+     "verses": [
+      5,
+      14,
+      17
+     ]
+    },
+    {
+     "greek": "τετελείωται",
+     "respelling": "te-te-LEE-o-te",
+     "lemma": "τελειόω",
+     "gloss": "to perfect",
+     "verses": [
+      5
+     ]
+    },
+    {
+     "greek": "αὐτῷ",
+     "respelling": "af-TO",
+     "lemma": "αὐτός",
+     "gloss": "it/s/he",
+     "verses": [
+      5,
+      6,
+      8,
+      10,
+      15,
+      27,
+      28
+     ]
+    },
+    {
+     "greek": "ἐσμέν",
+     "respelling": "ez-MEN",
+     "lemma": "εἰμί",
+     "gloss": "to be",
+     "verses": [
+      5
+     ]
+    },
+    {
+     "greek": "μένειν",
+     "respelling": "ME-neen",
+     "lemma": "μένω",
+     "gloss": "to stay",
+     "verses": [
+      6
+     ]
+    },
+    {
+     "greek": "ὀφείλει",
+     "respelling": "o-FEE-lee",
+     "lemma": "ὀφείλω",
+     "gloss": "to owe",
+     "verses": [
+      6
+     ]
+    },
+    {
+     "greek": "καθὼς",
+     "respelling": "ka-THOS",
+     "lemma": "καθώς",
+     "gloss": "as/just as",
+     "verses": [
+      6,
+      18,
+      27
+     ]
+    },
+    {
+     "greek": "ἐκεῖνος",
+     "respelling": "e-KEE-nos",
+     "lemma": "ἐκεῖνος",
+     "gloss": "that",
+     "verses": [
+      6
+     ]
+    },
+    {
+     "greek": "περιεπάτησεν",
+     "respelling": "pe-ree-e-PA-tee-sen",
+     "lemma": "περιπατέω",
+     "gloss": "to walk",
+     "verses": [
+      6
+     ]
+    },
+    {
+     "greek": "οὕτως",
+     "respelling": "OO-tos",
+     "lemma": "οὕτως",
+     "gloss": "thus(-ly)",
+     "verses": [
+      6
+     ]
+    },
+    {
+     "greek": "περιπατεῖν",
+     "respelling": "pe-ree-pa-TEEN",
+     "lemma": "περιπατέω",
+     "gloss": "to walk",
+     "verses": [
+      6
+     ]
+    },
+    {
+     "greek": "ἀδελφοί",
+     "respelling": "a-dhel-FEE",
+     "lemma": "ἀδελφός",
+     "gloss": "brother",
+     "verses": [
+      7
+     ]
+    },
+    {
+     "greek": "ἐντολὴν",
+     "respelling": "en-do-LEEN",
+     "lemma": "ἐντολή",
+     "gloss": "commandment",
+     "verses": [
+      7,
+      8
+     ]
+    },
+    {
+     "greek": "καινὴν",
+     "respelling": "ke-NEEN",
+     "lemma": "καινός",
+     "gloss": "new",
+     "verses": [
+      7,
+      8
+     ]
+    },
+    {
+     "greek": "ἀλλ",
+     "respelling": "al",
+     "lemma": "ἀλλά",
+     "gloss": "but",
+     "verses": [
+      7,
+      16,
+      19,
+      21,
+      27
+     ]
+    },
+    {
+     "greek": "παλαιάν",
+     "respelling": "pa-le-AN",
+     "lemma": "παλαιός",
+     "gloss": "old",
+     "verses": [
+      7
+     ]
+    },
+    {
+     "greek": "ἣν",
+     "respelling": "een",
+     "lemma": "ὅς",
+     "gloss": "which",
+     "verses": [
+      7,
+      25
+     ]
+    },
+    {
+     "greek": "εἴχετε",
+     "respelling": "EE-hye-te",
+     "lemma": "ἔχω",
+     "gloss": "to have/be",
+     "verses": [
+      7
+     ]
+    },
+    {
+     "greek": "ἀπ",
+     "respelling": "ap",
+     "lemma": "ἀπό",
+     "gloss": "away from",
+     "verses": [
+      7,
+      13,
+      14,
+      24,
+      27,
+      28
+     ]
+    },
+    {
+     "greek": "ἀρχῆς",
+     "respelling": "ar-HYEES",
+     "lemma": "ἀρχή",
+     "gloss": "beginning",
+     "verses": [
+      7,
+      13,
+      14,
+      24
+     ]
+    },
+    {
+     "greek": "ἐντολὴ",
+     "respelling": "en-do-LEE",
+     "lemma": "ἐντολή",
+     "gloss": "commandment",
+     "verses": [
+      7
+     ]
+    },
+    {
+     "greek": "παλαιά",
+     "respelling": "pa-le-A",
+     "lemma": "παλαιός",
+     "gloss": "old",
+     "verses": [
+      7
+     ]
+    },
+    {
+     "greek": "λόγος",
+     "respelling": "LO-ghos",
+     "lemma": "λόγος",
+     "gloss": "word",
+     "verses": [
+      7,
+      14
+     ]
+    },
+    {
+     "greek": "ὃν",
+     "respelling": "on",
+     "lemma": "ὅς",
+     "gloss": "which",
+     "verses": [
+      7
+     ]
+    },
+    {
+     "greek": "ἠκούσατε",
+     "respelling": "ee-KOO-sa-te",
+     "lemma": "ἀκούω",
+     "gloss": "to hear",
+     "verses": [
+      7,
+      18,
+      24
+     ]
+    },
+    {
+     "greek": "πάλιν",
+     "respelling": "PA-leen",
+     "lemma": "πάλιν",
+     "gloss": "again",
+     "verses": [
+      8
+     ]
+    },
+    {
+     "greek": "ἀληθὲς",
+     "respelling": "a-lee-THES",
+     "lemma": "ἀληθής",
+     "gloss": "true",
+     "verses": [
+      8,
+      27
+     ]
+    },
+    {
+     "greek": "σκοτία",
+     "respelling": "sko-TEE-a",
+     "lemma": "σκοτία",
+     "gloss": "darkness",
+     "verses": [
+      8,
+      9,
+      11
+     ]
+    },
+    {
+     "greek": "παράγεται",
+     "respelling": "pa-RA-ye-te",
+     "lemma": "παράγω",
+     "gloss": "to pass",
+     "verses": [
+      8,
+      17
+     ]
+    },
+    {
+     "greek": "τὸ",
+     "respelling": "to",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      8,
+      12,
+      16,
+      17,
+      27
+     ]
+    },
+    {
+     "greek": "φῶς",
+     "respelling": "fos",
+     "lemma": "φῶς",
+     "gloss": "light",
+     "verses": [
+      8
+     ]
+    },
+    {
+     "greek": "ἀληθινὸν",
+     "respelling": "a-lee-thee-NON",
+     "lemma": "ἀληθινός",
+     "gloss": "true",
+     "verses": [
+      8
+     ]
+    },
+    {
+     "greek": "ἤδη",
+     "respelling": "EE-dhee",
+     "lemma": "ἤδη",
+     "gloss": "already",
+     "verses": [
+      8
+     ]
+    },
+    {
+     "greek": "φαίνει",
+     "respelling": "FE-nee",
+     "lemma": "φαίνω",
+     "gloss": "to shine/appear",
+     "verses": [
+      8
+     ]
+    },
+    {
+     "greek": "τῷ",
+     "respelling": "to",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      9,
+      10,
+      15,
+      16,
+      24
+     ]
+    },
+    {
+     "greek": "φωτὶ",
+     "respelling": "fo-TEE",
+     "lemma": "φῶς",
+     "gloss": "light",
+     "verses": [
+      9,
+      10
+     ]
+    },
+    {
+     "greek": "εἶναι",
+     "respelling": "EE-ne",
+     "lemma": "εἰμί",
+     "gloss": "to be",
+     "verses": [
+      9
+     ]
+    },
+    {
+     "greek": "ἀδελφὸν",
+     "respelling": "a-dhel-FON",
+     "lemma": "ἀδελφός",
+     "gloss": "brother",
+     "verses": [
+      9,
+      10,
+      11
+     ]
+    },
+    {
+     "greek": "μισῶν",
+     "respelling": "mee-SON",
+     "lemma": "μισέω",
+     "gloss": "to hate",
+     "verses": [
+      9,
+      11
+     ]
+    },
+    {
+     "greek": "τῇ",
+     "respelling": "tee",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      9,
+      11,
+      28
+     ]
+    },
+    {
+     "greek": "ἕως",
+     "respelling": "E-os",
+     "lemma": "ἕως",
+     "gloss": "until",
+     "verses": [
+      9
+     ]
+    },
+    {
+     "greek": "ἄρτι",
+     "respelling": "AR-tee",
+     "lemma": "ἄρτι",
+     "gloss": "now",
+     "verses": [
+      9
+     ]
+    },
+    {
+     "greek": "ἀγαπῶν",
+     "respelling": "a-gha-PON",
+     "lemma": "ἀγαπάω",
+     "gloss": "to love",
+     "verses": [
+      10
+     ]
+    },
+    {
+     "greek": "μένει",
+     "respelling": "ME-nee",
+     "lemma": "μένω",
+     "gloss": "to stay",
+     "verses": [
+      10,
+      14,
+      17,
+      27
+     ]
+    },
+    {
+     "greek": "σκάνδαλον",
+     "respelling": "SKAN-dha-lon",
+     "lemma": "σκάνδαλον",
+     "gloss": "stumbling block",
+     "verses": [
+      10
+     ]
+    },
+    {
+     "greek": "περιπατεῖ",
+     "respelling": "pe-ree-pa-TEE",
+     "lemma": "περιπατέω",
+     "gloss": "to walk",
+     "verses": [
+      11
+     ]
+    },
+    {
+     "greek": "οἶδεν",
+     "respelling": "EE-dhen",
+     "lemma": "εἴδω",
+     "gloss": "to perceive: understand",
+     "verses": [
+      11
+     ]
+    },
+    {
+     "greek": "ποῦ",
+     "respelling": "poo",
+     "lemma": "πού",
+     "gloss": "somewhere",
+     "verses": [
+      11
+     ]
+    },
+    {
+     "greek": "ὑπάγει",
+     "respelling": "ee-PA-yee",
+     "lemma": "ὑπάγω",
+     "gloss": "to go",
+     "verses": [
+      11
+     ]
+    },
+    {
+     "greek": "ἐτύφλωσεν",
+     "respelling": "e-TEE-flo-sen",
+     "lemma": "τυφλόω",
+     "gloss": "to blind",
+     "verses": [
+      11
+     ]
+    },
+    {
+     "greek": "τοὺς",
+     "respelling": "toos",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      11
+     ]
+    },
+    {
+     "greek": "ὀφθαλμοὺς",
+     "respelling": "o-fthal-MOOS",
+     "lemma": "ὀφθαλμός",
+     "gloss": "eye",
+     "verses": [
+      11
+     ]
+    },
+    {
+     "greek": "ἀφέωνται",
+     "respelling": "a-FE-on-de",
+     "lemma": "ἀφίημι",
+     "gloss": "to release: leave",
+     "verses": [
+      12
+     ]
+    },
+    {
+     "greek": "αἱ",
+     "respelling": "e",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      12
+     ]
+    },
+    {
+     "greek": "ἁμαρτίαι",
+     "respelling": "a-mar-TEE-e",
+     "lemma": "ἁμαρτία",
+     "gloss": "sin",
+     "verses": [
+      12
+     ]
+    },
+    {
+     "greek": "διὰ",
+     "respelling": "dhee-A",
+     "lemma": "διά",
+     "gloss": "through/because of",
+     "verses": [
+      12
+     ]
+    },
+    {
+     "greek": "ὄνομα",
+     "respelling": "O-no-ma",
+     "lemma": "ὄνομα",
+     "gloss": "name",
+     "verses": [
+      12
+     ]
+    },
+    {
+     "greek": "πατέρες",
+     "respelling": "pa-TE-res",
+     "lemma": "πατήρ",
+     "gloss": "father",
+     "verses": [
+      13,
+      14
+     ]
+    },
+    {
+     "greek": "ἐγνώκατε",
+     "respelling": "e-GHNO-ka-te",
+     "lemma": "γινώσκω",
+     "gloss": "to know",
+     "verses": [
+      13,
+      14
+     ]
+    },
+    {
+     "greek": "νεανίσκοι",
+     "respelling": "ne-a-NEE-skee",
+     "lemma": "νεανίσκος",
+     "gloss": "young man",
+     "verses": [
+      13,
+      14
+     ]
+    },
+    {
+     "greek": "νενικήκατε",
+     "respelling": "ne-nee-KEE-ka-te",
+     "lemma": "νικάω",
+     "gloss": "to conquer",
+     "verses": [
+      13,
+      14
+     ]
+    },
+    {
+     "greek": "πονηρόν",
+     "respelling": "po-nee-RON",
+     "lemma": "πονηρός",
+     "gloss": "evil/bad",
+     "verses": [
+      13,
+      14
+     ]
+    },
+    {
+     "greek": "παιδία",
+     "respelling": "pe-DHEE-a",
+     "lemma": "παιδίον",
+     "gloss": "child",
+     "verses": [
+      13,
+      18
+     ]
+    },
+    {
+     "greek": "ἔγραψα",
+     "respelling": "E-ghra-psa",
+     "lemma": "γράφω",
+     "gloss": "to write",
+     "verses": [
+      14,
+      21,
+      26
+     ]
+    },
+    {
+     "greek": "ἰσχυροί",
+     "respelling": "ee-shyee-REE",
+     "lemma": "ἰσχυρός",
+     "gloss": "strong",
+     "verses": [
+      14
+     ]
+    },
+    {
+     "greek": "ἐστε",
+     "respelling": "e-ste",
+     "lemma": "εἰμί",
+     "gloss": "to be",
+     "verses": [
+      14
+     ]
+    },
+    {
+     "greek": "ἀγαπᾶτε",
+     "respelling": "a-gha-PA-te",
+     "lemma": "ἀγαπάω",
+     "gloss": "to love",
+     "verses": [
+      15
+     ]
+    },
+    {
+     "greek": "κόσμον",
+     "respelling": "KOZ-mon",
+     "lemma": "κόσμος",
+     "gloss": "world",
+     "verses": [
+      15
+     ]
+    },
+    {
+     "greek": "μηδὲ",
+     "respelling": "mee-DHE",
+     "lemma": "μηδέ",
+     "gloss": "nor",
+     "verses": [
+      15
+     ]
+    },
+    {
+     "greek": "τὰ",
+     "respelling": "ta",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      15
+     ]
+    },
+    {
+     "greek": "κόσμῳ",
+     "respelling": "KOZ-mo",
+     "lemma": "κόσμος",
+     "gloss": "world",
+     "verses": [
+      15,
+      16
+     ]
+    },
+    {
+     "greek": "ἀγαπᾷ",
+     "respelling": "a-gha-PA",
+     "lemma": "ἀγαπάω",
+     "gloss": "to love",
+     "verses": [
+      15
+     ]
+    },
+    {
+     "greek": "πατρὸς",
+     "respelling": "pa-TROS",
+     "lemma": "πατήρ",
+     "gloss": "father",
+     "verses": [
+      15,
+      16
+     ]
+    },
+    {
+     "greek": "πᾶν",
+     "respelling": "pan",
+     "lemma": "πᾶς",
+     "gloss": "all",
+     "verses": [
+      16,
+      21
+     ]
+    },
+    {
+     "greek": "ἐπιθυμία",
+     "respelling": "e-pee-thee-MEE-a",
+     "lemma": "ἐπιθυμία",
+     "gloss": "desire",
+     "verses": [
+      16,
+      17
+     ]
+    },
+    {
+     "greek": "τῆς",
+     "respelling": "tees",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      16,
+      21
+     ]
+    },
+    {
+     "greek": "σαρκός",
+     "respelling": "sar-KOS",
+     "lemma": "σάρξ",
+     "gloss": "flesh",
+     "verses": [
+      16
+     ]
+    },
+    {
+     "greek": "ὀφθαλμῶν",
+     "respelling": "o-fthal-MON",
+     "lemma": "ὀφθαλμός",
+     "gloss": "eye",
+     "verses": [
+      16
+     ]
+    },
+    {
+     "greek": "ἀλαζονεία",
+     "respelling": "a-la-zo-NEE-a",
+     "lemma": "ἀλαζονεία",
+     "gloss": "boasting",
+     "verses": [
+      16
+     ]
+    },
+    {
+     "greek": "βίου",
+     "respelling": "VEE-oo",
+     "lemma": "βίος",
+     "gloss": "life",
+     "verses": [
+      16
+     ]
+    },
+    {
+     "greek": "ἐκ",
+     "respelling": "ek",
+     "lemma": "ἐκ",
+     "gloss": "out from",
+     "verses": [
+      16,
+      21
+     ]
+    },
+    {
+     "greek": "κόσμος",
+     "respelling": "KOZ-mos",
+     "lemma": "κόσμος",
+     "gloss": "world",
+     "verses": [
+      17
+     ]
+    },
+    {
+     "greek": "ποιῶν",
+     "respelling": "pee-ON",
+     "lemma": "ποιέω",
+     "gloss": "to do/make: do",
+     "verses": [
+      17,
+      29
+     ]
+    },
+    {
+     "greek": "θέλημα",
+     "respelling": "THE-lee-ma",
+     "lemma": "θέλημα",
+     "gloss": "will/desire",
+     "verses": [
+      17
+     ]
+    },
+    {
+     "greek": "εἰς",
+     "respelling": "ees",
+     "lemma": "εἰς",
+     "gloss": "toward",
+     "verses": [
+      17
+     ]
+    },
+    {
+     "greek": "αἰῶνα",
+     "respelling": "e-O-na",
+     "lemma": "αἰών",
+     "gloss": "an age: age",
+     "verses": [
+      17
+     ]
+    },
+    {
+     "greek": "ἐσχάτη",
+     "respelling": "e-SKHA-tee",
+     "lemma": "ἔσχατος",
+     "gloss": "last/least",
+     "verses": [
+      18
+     ]
+    },
+    {
+     "greek": "ὥρα",
+     "respelling": "O-ra",
+     "lemma": "ὥρα",
+     "gloss": "hour",
+     "verses": [
+      18
+     ]
+    },
+    {
+     "greek": "ἀντίχριστος",
+     "respelling": "an-DEE-khree-stos",
+     "lemma": "ἀντίχριστος",
+     "gloss": "antichrist",
+     "verses": [
+      18,
+      22
+     ]
+    },
+    {
+     "greek": "ἔρχεται",
+     "respelling": "ER-hye-te",
+     "lemma": "ἔρχομαι",
+     "gloss": "to come/go",
+     "verses": [
+      18
+     ]
+    },
+    {
+     "greek": "νῦν",
+     "respelling": "neen",
+     "lemma": "νῦν",
+     "gloss": "now",
+     "verses": [
+      18,
+      28
+     ]
+    },
+    {
+     "greek": "ἀντίχριστοι",
+     "respelling": "an-DEE-khree-stee",
+     "lemma": "ἀντίχριστος",
+     "gloss": "antichrist",
+     "verses": [
+      18
+     ]
+    },
+    {
+     "greek": "πολλοὶ",
+     "respelling": "po-LEE",
+     "lemma": "πολύς",
+     "gloss": "much",
+     "verses": [
+      18
+     ]
+    },
+    {
+     "greek": "γεγόνασιν",
+     "respelling": "ye-GHO-na-seen",
+     "lemma": "γίνομαι",
+     "gloss": "to be",
+     "verses": [
+      18
+     ]
+    },
+    {
+     "greek": "ὅθεν",
+     "respelling": "O-then",
+     "lemma": "ὅθεν",
+     "gloss": "whence",
+     "verses": [
+      18
+     ]
+    },
+    {
+     "greek": "ἐξ",
+     "respelling": "eks",
+     "lemma": "ἐκ",
+     "gloss": "out from",
+     "verses": [
+      19,
+      29
+     ]
+    },
+    {
+     "greek": "ἐξῆλθον",
+     "respelling": "e-KSEEL-thon",
+     "lemma": "ἐξέρχομαι",
+     "gloss": "to go out",
+     "verses": [
+      19
+     ]
+    },
+    {
+     "greek": "ἦσαν",
+     "respelling": "EE-san",
+     "lemma": "εἰμί",
+     "gloss": "to be",
+     "verses": [
+      19
+     ]
+    },
+    {
+     "greek": "εἰ",
+     "respelling": "ee",
+     "lemma": "εἰ",
+     "gloss": "if",
+     "verses": [
+      19,
+      22
+     ]
+    },
+    {
+     "greek": "γὰρ",
+     "respelling": "ghar",
+     "lemma": "γάρ",
+     "gloss": "for",
+     "verses": [
+      19
+     ]
+    },
+    {
+     "greek": "μεμενήκεισαν",
+     "respelling": "me-me-NEE-kee-san",
+     "lemma": "μένω",
+     "gloss": "to stay",
+     "verses": [
+      19
+     ]
+    },
+    {
+     "greek": "μεθ",
+     "respelling": "meth",
+     "lemma": "μετά",
+     "gloss": "with/after",
+     "verses": [
+      19
+     ]
+    },
+    {
+     "greek": "φανερωθῶσιν",
+     "respelling": "fa-ne-ro-THO-seen",
+     "lemma": "φανερόω",
+     "gloss": "to reveal",
+     "verses": [
+      19
+     ]
+    },
+    {
+     "greek": "εἰσὶν",
+     "respelling": "ee-SEEN",
+     "lemma": "εἰμί",
+     "gloss": "to be",
+     "verses": [
+      19
+     ]
+    },
+    {
+     "greek": "πάντες",
+     "respelling": "PAN-des",
+     "lemma": "πᾶς",
+     "gloss": "all",
+     "verses": [
+      19
+     ]
+    },
+    {
+     "greek": "ὑμεῖς",
+     "respelling": "ee-MEES",
+     "lemma": "σύ",
+     "gloss": "you",
+     "verses": [
+      20,
+      24,
+      27
+     ]
+    },
+    {
+     "greek": "χρίσμα",
+     "respelling": "KHREEZ-ma",
+     "lemma": "χρῖσμα",
+     "gloss": "anointing",
+     "verses": [
+      20,
+      27
+     ]
+    },
+    {
+     "greek": "ἔχετε",
+     "respelling": "E-hye-te",
+     "lemma": "ἔχω",
+     "gloss": "to have/be",
+     "verses": [
+      20,
+      27
+     ]
+    },
+    {
+     "greek": "ἀπὸ",
+     "respelling": "a-PO",
+     "lemma": "ἀπό",
+     "gloss": "away from",
+     "verses": [
+      20
+     ]
+    },
+    {
+     "greek": "ἁγίου",
+     "respelling": "a-YEE-oo",
+     "lemma": "ἅγιος",
+     "gloss": "holy",
+     "verses": [
+      20
+     ]
+    },
+    {
+     "greek": "οἴδατε",
+     "respelling": "EE-dha-te",
+     "lemma": "εἴδω",
+     "gloss": "to perceive: understand",
+     "verses": [
+      20,
+      21
+     ]
+    },
+    {
+     "greek": "πάντα",
+     "respelling": "PAN-da",
+     "lemma": "πᾶς",
+     "gloss": "all",
+     "verses": [
+      20
+     ]
+    },
+    {
+     "greek": "τὴν",
+     "respelling": "teen",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      21,
+      25,
+      29
+     ]
+    },
+    {
+     "greek": "ἀλήθειαν",
+     "respelling": "a-LEE-thee-an",
+     "lemma": "ἀλήθεια",
+     "gloss": "truth",
+     "verses": [
+      21
+     ]
+    },
+    {
+     "greek": "αὐτήν",
+     "respelling": "af-TEEN",
+     "lemma": "αὐτός",
+     "gloss": "it/s/he",
+     "verses": [
+      21
+     ]
+    },
+    {
+     "greek": "ψεῦδος",
+     "respelling": "PSEV-dhos",
+     "lemma": "ψεῦδος",
+     "gloss": "lie",
+     "verses": [
+      21,
+      27
+     ]
+    },
+    {
+     "greek": "ἀληθείας",
+     "respelling": "a-lee-THEE-as",
+     "lemma": "ἀλήθεια",
+     "gloss": "truth",
+     "verses": [
+      21
+     ]
+    },
+    {
+     "greek": "ἀρνούμενος",
+     "respelling": "ar-NOO-me-nos",
+     "lemma": "ἀρνέομαι",
+     "gloss": "to deny",
+     "verses": [
+      22,
+      23
+     ]
+    },
+    {
+     "greek": "Ἰησοῦς",
+     "respelling": "ee-ee-SOOS",
+     "lemma": "Ἰησοῦς",
+     "gloss": "Jesus",
+     "verses": [
+      22
+     ]
+    },
+    {
+     "greek": "χριστός",
+     "respelling": "khree-STOS",
+     "lemma": "Χριστός",
+     "gloss": "Christ",
+     "verses": [
+      22
+     ]
+    },
+    {
+     "greek": "οὗτός",
+     "respelling": "OO-tos",
+     "lemma": "οὗτος",
+     "gloss": "this/he/she/it",
+     "verses": [
+      22
+     ]
+    },
+    {
+     "greek": "υἱόν",
+     "respelling": "ee-ON",
+     "lemma": "υἱός",
+     "gloss": "son",
+     "verses": [
+      22,
+      23
+     ]
+    },
+    {
+     "greek": "πᾶς",
+     "respelling": "pas",
+     "lemma": "πᾶς",
+     "gloss": "all",
+     "verses": [
+      23,
+      29
+     ]
+    },
+    {
+     "greek": "οὐδὲ",
+     "respelling": "oo-DHE",
+     "lemma": "οὐδέ",
+     "gloss": "nor",
+     "verses": [
+      23
+     ]
+    },
+    {
+     "greek": "ἔχει",
+     "respelling": "E-hyee",
+     "lemma": "ἔχω",
+     "gloss": "to have/be",
+     "verses": [
+      23
+     ]
+    },
+    {
+     "greek": "οὖν",
+     "respelling": "oon",
+     "lemma": "οὖν",
+     "gloss": "therefore/then",
+     "verses": [
+      24
+     ]
+    },
+    {
+     "greek": "μενέτω",
+     "respelling": "me-NE-to",
+     "lemma": "μένω",
+     "gloss": "to stay",
+     "verses": [
+      24
+     ]
+    },
+    {
+     "greek": "μείνῃ",
+     "respelling": "MEE-nee",
+     "lemma": "μένω",
+     "gloss": "to stay",
+     "verses": [
+      24
+     ]
+    },
+    {
+     "greek": "υἱῷ",
+     "respelling": "ee-O",
+     "lemma": "υἱός",
+     "gloss": "son",
+     "verses": [
+      24
+     ]
+    },
+    {
+     "greek": "πατρὶ",
+     "respelling": "pa-TREE",
+     "lemma": "πατήρ",
+     "gloss": "father",
+     "verses": [
+      24
+     ]
+    },
+    {
+     "greek": "μενεῖτε",
+     "respelling": "me-NEE-te",
+     "lemma": "μένω",
+     "gloss": "to stay",
+     "verses": [
+      24,
+      27
+     ]
+    },
+    {
+     "greek": "αὕτη",
+     "respelling": "AF-tee",
+     "lemma": "οὗτος",
+     "gloss": "this/he/she/it",
+     "verses": [
+      25
+     ]
+    },
+    {
+     "greek": "ἐπαγγελία",
+     "respelling": "e-pan-ge-LEE-a",
+     "lemma": "ἐπαγγελία",
+     "gloss": "promise",
+     "verses": [
+      25
+     ]
+    },
+    {
+     "greek": "ἐπηγγείλατο",
+     "respelling": "e-peen-GHEE-la-to",
+     "lemma": "ἐπαγγέλλω",
+     "gloss": "to profess",
+     "verses": [
+      25
+     ]
+    },
+    {
+     "greek": "ἡμῖν",
+     "respelling": "ee-MEEN",
+     "lemma": "ἐγώ",
+     "gloss": "I/we",
+     "verses": [
+      25
+     ]
+    },
+    {
+     "greek": "ζωὴν",
+     "respelling": "zo-EEN",
+     "lemma": "ζωή",
+     "gloss": "life",
+     "verses": [
+      25
+     ]
+    },
+    {
+     "greek": "αἰώνιον",
+     "respelling": "e-O-nee-on",
+     "lemma": "αἰώνιος",
+     "gloss": "eternal",
+     "verses": [
+      25
+     ]
+    },
+    {
+     "greek": "πλανώντων",
+     "respelling": "pla-NON-don",
+     "lemma": "πλανάω",
+     "gloss": "to lead astray",
+     "verses": [
+      26
+     ]
+    },
+    {
+     "greek": "ὑμᾶς",
+     "respelling": "ee-MAS",
+     "lemma": "σύ",
+     "gloss": "you",
+     "verses": [
+      26,
+      27
+     ]
+    },
+    {
+     "greek": "ἐλάβετε",
+     "respelling": "e-LA-ve-te",
+     "lemma": "λαμβάνω",
+     "gloss": "to take",
+     "verses": [
+      27
+     ]
+    },
+    {
+     "greek": "χρείαν",
+     "respelling": "KHREE-an",
+     "lemma": "χρεία",
+     "gloss": "need",
+     "verses": [
+      27
+     ]
+    },
+    {
+     "greek": "διδάσκῃ",
+     "respelling": "dhee-DHA-skee",
+     "lemma": "διδάσκω",
+     "gloss": "to teach",
+     "verses": [
+      27
+     ]
+    },
+    {
+     "greek": "ὡς",
+     "respelling": "os",
+     "lemma": "ὡς",
+     "gloss": "as/when",
+     "verses": [
+      27
+     ]
+    },
+    {
+     "greek": "αὐτὸ",
+     "respelling": "af-TO",
+     "lemma": "αὐτός",
+     "gloss": "it/s/he",
+     "verses": [
+      27
+     ]
+    },
+    {
+     "greek": "διδάσκει",
+     "respelling": "dhee-DHA-skee",
+     "lemma": "διδάσκω",
+     "gloss": "to teach",
+     "verses": [
+      27
+     ]
+    },
+    {
+     "greek": "πάντων",
+     "respelling": "PAN-don",
+     "lemma": "πᾶς",
+     "gloss": "all",
+     "verses": [
+      27
+     ]
+    },
+    {
+     "greek": "ἐδίδαξεν",
+     "respelling": "e-DHEE-dha-ksen",
+     "lemma": "διδάσκω",
+     "gloss": "to teach",
+     "verses": [
+      27
+     ]
+    },
+    {
+     "greek": "μένετε",
+     "respelling": "ME-ne-te",
+     "lemma": "μένω",
+     "gloss": "to stay",
+     "verses": [
+      28
+     ]
+    },
+    {
+     "greek": "ὅταν",
+     "respelling": "O-tan",
+     "lemma": "ὅταν",
+     "gloss": "when(-ever)",
+     "verses": [
+      28
+     ]
+    },
+    {
+     "greek": "φανερωθῇ",
+     "respelling": "fa-ne-ro-THEE",
+     "lemma": "φανερόω",
+     "gloss": "to reveal",
+     "verses": [
+      28
+     ]
+    },
+    {
+     "greek": "ἔχωμεν",
+     "respelling": "E-kho-men",
+     "lemma": "ἔχω",
+     "gloss": "to have/be",
+     "verses": [
+      28
+     ]
+    },
+    {
+     "greek": "παρρησίαν",
+     "respelling": "pa-ree-SEE-an",
+     "lemma": "παρρησία",
+     "gloss": "boldness",
+     "verses": [
+      28
+     ]
+    },
+    {
+     "greek": "αἰσχυνθῶμεν",
+     "respelling": "e-shyeen-THO-men",
+     "lemma": "αἰσχύνω",
+     "gloss": "be ashamed",
+     "verses": [
+      28
+     ]
+    },
+    {
+     "greek": "παρουσίᾳ",
+     "respelling": "pa-roo-SEE-a",
+     "lemma": "παρουσία",
+     "gloss": "coming",
+     "verses": [
+      28
+     ]
+    },
+    {
+     "greek": "εἰδῆτε",
+     "respelling": "ee-DHEE-te",
+     "lemma": "εἴδω",
+     "gloss": "to perceive: understand",
+     "verses": [
+      29
+     ]
+    },
+    {
+     "greek": "δίκαιός",
+     "respelling": "DHEE-ke-os",
+     "lemma": "δίκαιος",
+     "gloss": "just",
+     "verses": [
+      29
+     ]
+    },
+    {
+     "greek": "γινώσκετε",
+     "respelling": "yee-NO-ske-te",
+     "lemma": "γινώσκω",
+     "gloss": "to know",
+     "verses": [
+      29
+     ]
+    },
+    {
+     "greek": "δικαιοσύνην",
+     "respelling": "dhee-ke-o-SEE-neen",
+     "lemma": "δικαιοσύνη",
+     "gloss": "righteousness",
+     "verses": [
+      29
+     ]
+    },
+    {
+     "greek": "γεγέννηται",
+     "respelling": "ye-YE-nee-te",
+     "lemma": "γεννάω",
+     "gloss": "to beget",
+     "verses": [
+      29
+     ]
+    }
+   ]
+  },
+  "rom8": {
+   "book": "Romans",
+   "chapter": 8,
+   "words": [
+    {
+     "greek": "οὐδὲν",
+     "respelling": "oo-DHEN",
+     "lemma": "οὐδείς",
+     "gloss": "none",
+     "verses": [
+      1
+     ]
+    },
+    {
+     "greek": "ἄρα",
+     "respelling": "A-ra",
+     "lemma": "ἄρα",
+     "gloss": "therefore",
+     "verses": [
+      1,
+      12
+     ]
+    },
+    {
+     "greek": "νῦν",
+     "respelling": "neen",
+     "lemma": "νῦν",
+     "gloss": "now",
+     "verses": [
+      1,
+      18,
+      22
+     ]
+    },
+    {
+     "greek": "κατάκριμα",
+     "respelling": "ka-TA-kree-ma",
+     "lemma": "κατάκριμα",
+     "gloss": "condemnation",
+     "verses": [
+      1
+     ]
+    },
+    {
+     "greek": "τοῖς",
+     "respelling": "tees",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      1,
+      4,
+      28
+     ]
+    },
+    {
+     "greek": "ἐν",
+     "respelling": "en",
+     "lemma": "ἐν",
+     "gloss": "in/on/among",
+     "verses": [
+      1,
+      2,
+      3,
+      4,
+      8,
+      9,
+      10,
+      11,
+      15,
+      23,
+      29,
+      34,
+      37,
+      39
+     ]
+    },
+    {
+     "greek": "χριστῷ",
+     "respelling": "khree-STO",
+     "lemma": "Χριστός",
+     "gloss": "Christ",
+     "verses": [
+      1,
+      2,
+      39
+     ]
+    },
+    {
+     "greek": "Ἰησοῦ",
+     "respelling": "ee-ee-SOO",
+     "lemma": "Ἰησοῦς",
+     "gloss": "Jesus",
+     "verses": [
+      1,
+      2,
+      39
+     ]
+    },
+    {
+     "greek": "μὴ",
+     "respelling": "mee",
+     "lemma": "μή",
+     "gloss": "not",
+     "verses": [
+      1,
+      4
+     ]
+    },
+    {
+     "greek": "κατὰ",
+     "respelling": "ka-TA",
+     "lemma": "κατά",
+     "gloss": "according to",
+     "verses": [
+      1,
+      4,
+      5,
+      12,
+      13,
+      27,
+      28,
+      33
+     ]
+    },
+    {
+     "greek": "σάρκα",
+     "respelling": "SAR-ka",
+     "lemma": "σάρξ",
+     "gloss": "flesh",
+     "verses": [
+      1,
+      4,
+      5,
+      12,
+      13
+     ]
+    },
+    {
+     "greek": "περιπατοῦσιν",
+     "respelling": "pe-ree-pa-TOO-seen",
+     "lemma": "περιπατέω",
+     "gloss": "to walk",
+     "verses": [
+      1,
+      4
+     ]
+    },
+    {
+     "greek": "ἀλλὰ",
+     "respelling": "a-LA",
+     "lemma": "ἀλλά",
+     "gloss": "but",
+     "verses": [
+      1,
+      4,
+      20,
+      23
+     ]
+    },
+    {
+     "greek": "πνεῦμα",
+     "respelling": "PNEV-ma",
+     "lemma": "πνεῦμα",
+     "gloss": "spirit/breath: spirit",
+     "verses": [
+      1,
+      4,
+      5,
+      9,
+      10,
+      11,
+      15,
+      16,
+      26
+     ]
+    },
+    {
+     "greek": "ὁ",
+     "respelling": "o",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      2,
+      3,
+      11,
+      15,
+      24,
+      25,
+      27,
+      31,
+      33,
+      34
+     ]
+    },
+    {
+     "greek": "γὰρ",
+     "respelling": "ghar",
+     "lemma": "γάρ",
+     "gloss": "for",
+     "verses": [
+      2,
+      3,
+      5,
+      6,
+      7,
+      13,
+      14,
+      15,
+      18,
+      19,
+      20,
+      22,
+      24,
+      26,
+      38
+     ]
+    },
+    {
+     "greek": "νόμος",
+     "respelling": "NO-mos",
+     "lemma": "νόμος",
+     "gloss": "law",
+     "verses": [
+      2
+     ]
+    },
+    {
+     "greek": "τοῦ",
+     "respelling": "too",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      11,
+      12,
+      13,
+      18,
+      19,
+      21,
+      22,
+      23,
+      27,
+      29,
+      32,
+      34,
+      35,
+      37,
+      39
+     ]
+    },
+    {
+     "greek": "πνεύματος",
+     "respelling": "PNEV-ma-tos",
+     "lemma": "πνεῦμα",
+     "gloss": "spirit/breath: spirit",
+     "verses": [
+      2,
+      5,
+      6,
+      23,
+      27
+     ]
+    },
+    {
+     "greek": "τῆς",
+     "respelling": "tees",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      2,
+      3,
+      5,
+      6,
+      7,
+      19,
+      21,
+      29,
+      35,
+      39
+     ]
+    },
+    {
+     "greek": "ζωῆς",
+     "respelling": "zo-EES",
+     "lemma": "ζωή",
+     "gloss": "life",
+     "verses": [
+      2
+     ]
+    },
+    {
+     "greek": "ἠλευθέρωσέν",
+     "respelling": "ee-lef-THE-ro-sen",
+     "lemma": "ἐλευθερόω",
+     "gloss": "to set free",
+     "verses": [
+      2
+     ]
+    },
+    {
+     "greek": "με",
+     "respelling": "me",
+     "lemma": "ἐγώ",
+     "gloss": "I/we",
+     "verses": [
+      2
+     ]
+    },
+    {
+     "greek": "ἀπὸ",
+     "respelling": "a-PO",
+     "lemma": "ἀπό",
+     "gloss": "away from",
+     "verses": [
+      2,
+      21,
+      35,
+      39
+     ]
+    },
+    {
+     "greek": "νόμου",
+     "respelling": "NO-moo",
+     "lemma": "νόμος",
+     "gloss": "law",
+     "verses": [
+      2,
+      3,
+      4
+     ]
+    },
+    {
+     "greek": "ἁμαρτίας",
+     "respelling": "a-mar-TEE-as",
+     "lemma": "ἁμαρτία",
+     "gloss": "sin",
+     "verses": [
+      2,
+      3
+     ]
+    },
+    {
+     "greek": "καὶ",
+     "respelling": "ke",
+     "lemma": "καί",
+     "gloss": "and",
+     "verses": [
+      2,
+      3,
+      6,
+      11,
+      17,
+      21,
+      22,
+      23,
+      24,
+      26,
+      29,
+      30,
+      32,
+      34
+     ]
+    },
+    {
+     "greek": "θανάτου",
+     "respelling": "tha-NA-too",
+     "lemma": "θάνατος",
+     "gloss": "death",
+     "verses": [
+      2
+     ]
+    },
+    {
+     "greek": "τὸ",
+     "respelling": "to",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      3,
+      4,
+      6,
+      7,
+      10,
+      11,
+      16,
+      26,
+      27,
+      29
+     ]
+    },
+    {
+     "greek": "ἀδύνατον",
+     "respelling": "a-DHEE-na-ton",
+     "lemma": "ἀδύνατος",
+     "gloss": "unable",
+     "verses": [
+      3
+     ]
+    },
+    {
+     "greek": "ᾧ",
+     "respelling": "o",
+     "lemma": "ὅς",
+     "gloss": "which",
+     "verses": [
+      3,
+      15
+     ]
+    },
+    {
+     "greek": "ἠσθένει",
+     "respelling": "ee-STHE-nee",
+     "lemma": "ἀσθενέω",
+     "gloss": "be weak: weak",
+     "verses": [
+      3
+     ]
+    },
+    {
+     "greek": "διὰ",
+     "respelling": "dhee-A",
+     "lemma": "διά",
+     "gloss": "through/because of",
+     "verses": [
+      3,
+      10,
+      11,
+      20,
+      37
+     ]
+    },
+    {
+     "greek": "σαρκός",
+     "respelling": "sar-KOS",
+     "lemma": "σάρξ",
+     "gloss": "flesh",
+     "verses": [
+      3,
+      5,
+      6,
+      7
+     ]
+    },
+    {
+     "greek": "θεὸς",
+     "respelling": "the-OS",
+     "lemma": "θεός",
+     "gloss": "God",
+     "verses": [
+      3,
+      31,
+      33
+     ]
+    },
+    {
+     "greek": "τὸν",
+     "respelling": "ton",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      3,
+      11,
+      20,
+      28
+     ]
+    },
+    {
+     "greek": "ἑαυτοῦ",
+     "respelling": "e-af-TOO",
+     "lemma": "ἑαυτοῦ",
+     "gloss": "themself",
+     "verses": [
+      3
+     ]
+    },
+    {
+     "greek": "υἱὸν",
+     "respelling": "ee-ON",
+     "lemma": "υἱός",
+     "gloss": "son",
+     "verses": [
+      3
+     ]
+    },
+    {
+     "greek": "πέμψας",
+     "respelling": "PEM-psas",
+     "lemma": "πέμπω",
+     "gloss": "to send",
+     "verses": [
+      3
+     ]
+    },
+    {
+     "greek": "ὁμοιώματι",
+     "respelling": "o-mee-O-ma-tee",
+     "lemma": "ὁμοίωμα",
+     "gloss": "likeness",
+     "verses": [
+      3
+     ]
+    },
+    {
+     "greek": "περὶ",
+     "respelling": "pe-REE",
+     "lemma": "περί",
+     "gloss": "about",
+     "verses": [
+      3
+     ]
+    },
+    {
+     "greek": "κατέκρινεν",
+     "respelling": "ka-TE-kree-nen",
+     "lemma": "κατακρίνω",
+     "gloss": "to condemn",
+     "verses": [
+      3
+     ]
+    },
+    {
+     "greek": "τὴν",
+     "respelling": "teen",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      3,
+      18,
+      19,
+      21,
+      23,
+      36
+     ]
+    },
+    {
+     "greek": "ἁμαρτίαν",
+     "respelling": "a-mar-TEE-an",
+     "lemma": "ἁμαρτία",
+     "gloss": "sin",
+     "verses": [
+      3,
+      10
+     ]
+    },
+    {
+     "greek": "τῇ",
+     "respelling": "tee",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      3,
+      12,
+      20,
+      24
+     ]
+    },
+    {
+     "greek": "σαρκί",
+     "respelling": "sar-KEE",
+     "lemma": "σάρξ",
+     "gloss": "flesh",
+     "verses": [
+      3,
+      8,
+      9,
+      12
+     ]
+    },
+    {
+     "greek": "ἵνα",
+     "respelling": "EE-na",
+     "lemma": "ἵνα",
+     "gloss": "in order that/to",
+     "verses": [
+      4,
+      17
+     ]
+    },
+    {
+     "greek": "δικαίωμα",
+     "respelling": "dhee-KE-o-ma",
+     "lemma": "δικαίωμα",
+     "gloss": "righteous act",
+     "verses": [
+      4
+     ]
+    },
+    {
+     "greek": "πληρωθῇ",
+     "respelling": "plee-ro-THEE",
+     "lemma": "πληρόω",
+     "gloss": "to fulfill",
+     "verses": [
+      4
+     ]
+    },
+    {
+     "greek": "ἡμῖν",
+     "respelling": "ee-MEEN",
+     "lemma": "ἐγώ",
+     "gloss": "I/we",
+     "verses": [
+      4,
+      32
+     ]
+    },
+    {
+     "greek": "οἱ",
+     "respelling": "ee",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      5,
+      8
+     ]
+    },
+    {
+     "greek": "ὄντες",
+     "respelling": "ON-des",
+     "lemma": "εἰμί",
+     "gloss": "to be",
+     "verses": [
+      5,
+      8
+     ]
+    },
+    {
+     "greek": "τὰ",
+     "respelling": "ta",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      5,
+      11,
+      18,
+      32
+     ]
+    },
+    {
+     "greek": "φρονοῦσιν",
+     "respelling": "fro-NOO-seen",
+     "lemma": "φρονέω",
+     "gloss": "to reason",
+     "verses": [
+      5
+     ]
+    },
+    {
+     "greek": "δὲ",
+     "respelling": "dhe",
+     "lemma": "δέ",
+     "gloss": "then",
+     "verses": [
+      5,
+      6,
+      8,
+      9,
+      10,
+      11,
+      13,
+      17,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      30,
+      34
+     ]
+    },
+    {
+     "greek": "φρόνημα",
+     "respelling": "FRO-nee-ma",
+     "lemma": "φρόνημα",
+     "gloss": "purpose",
+     "verses": [
+      6,
+      7,
+      27
+     ]
+    },
+    {
+     "greek": "θάνατος",
+     "respelling": "THA-na-tos",
+     "lemma": "θάνατος",
+     "gloss": "death",
+     "verses": [
+      6,
+      38
+     ]
+    },
+    {
+     "greek": "ζωὴ",
+     "respelling": "zo-EE",
+     "lemma": "ζωή",
+     "gloss": "life",
+     "verses": [
+      6,
+      10,
+      38
+     ]
+    },
+    {
+     "greek": "εἰρήνη",
+     "respelling": "ee-REE-nee",
+     "lemma": "εἰρήνη",
+     "gloss": "peace",
+     "verses": [
+      6
+     ]
+    },
+    {
+     "greek": "διότι",
+     "respelling": "dhee-O-tee",
+     "lemma": "διότι",
+     "gloss": "because",
+     "verses": [
+      7
+     ]
+    },
+    {
+     "greek": "ἔχθρα",
+     "respelling": "EKH-thra",
+     "lemma": "ἔχθρα",
+     "gloss": "hostility",
+     "verses": [
+      7
+     ]
+    },
+    {
+     "greek": "εἰς",
+     "respelling": "ees",
+     "lemma": "εἰς",
+     "gloss": "toward",
+     "verses": [
+      7,
+      15,
+      18,
+      21,
+      28,
+      29
+     ]
+    },
+    {
+     "greek": "θεόν",
+     "respelling": "the-ON",
+     "lemma": "θεός",
+     "gloss": "God",
+     "verses": [
+      7,
+      27,
+      28
+     ]
+    },
+    {
+     "greek": "τῷ",
+     "respelling": "to",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      7,
+      16,
+      39
+     ]
+    },
+    {
+     "greek": "νόμῳ",
+     "respelling": "NO-mo",
+     "lemma": "νόμος",
+     "gloss": "law",
+     "verses": [
+      7
+     ]
+    },
+    {
+     "greek": "θεοῦ",
+     "respelling": "the-OO",
+     "lemma": "θεός",
+     "gloss": "God",
+     "verses": [
+      7,
+      9,
+      14,
+      16,
+      17,
+      19,
+      21,
+      33,
+      34,
+      39
+     ]
+    },
+    {
+     "greek": "οὐχ",
+     "respelling": "ookh",
+     "lemma": "οὐ",
+     "gloss": "no",
+     "verses": [
+      7,
+      20
+     ]
+    },
+    {
+     "greek": "ὑποτάσσεται",
+     "respelling": "ee-po-TAS-se-te",
+     "lemma": "ὑποτάσσω",
+     "gloss": "to subject",
+     "verses": [
+      7
+     ]
+    },
+    {
+     "greek": "οὐδὲ",
+     "respelling": "oo-DHE",
+     "lemma": "οὐδέ",
+     "gloss": "nor",
+     "verses": [
+      7
+     ]
+    },
+    {
+     "greek": "δύναται",
+     "respelling": "DHEE-na-te",
+     "lemma": "δύναμαι",
+     "gloss": "be able",
+     "verses": [
+      7
+     ]
+    },
+    {
+     "greek": "θεῷ",
+     "respelling": "the-O",
+     "lemma": "θεός",
+     "gloss": "God",
+     "verses": [
+      8
+     ]
+    },
+    {
+     "greek": "ἀρέσαι",
+     "respelling": "a-RE-se",
+     "lemma": "ἀρέσκω",
+     "gloss": "to please",
+     "verses": [
+      8
+     ]
+    },
+    {
+     "greek": "οὐ",
+     "respelling": "oo",
+     "lemma": "οὐ",
+     "gloss": "no",
+     "verses": [
+      8,
+      12,
+      15,
+      23,
+      25
+     ]
+    },
+    {
+     "greek": "δύνανται",
+     "respelling": "DHEE-nan-de",
+     "lemma": "δύναμαι",
+     "gloss": "be able",
+     "verses": [
+      8
+     ]
+    },
+    {
+     "greek": "ὑμεῖς",
+     "respelling": "ee-MEES",
+     "lemma": "σύ",
+     "gloss": "you",
+     "verses": [
+      9
+     ]
+    },
+    {
+     "greek": "οὐκ",
+     "respelling": "ook",
+     "lemma": "οὐ",
+     "gloss": "no",
+     "verses": [
+      9,
+      18,
+      24,
+      26,
+      32
+     ]
+    },
+    {
+     "greek": "ἐστὲ",
+     "respelling": "e-STE",
+     "lemma": "εἰμί",
+     "gloss": "to be",
+     "verses": [
+      9
+     ]
+    },
+    {
+     "greek": "ἀλλ",
+     "respelling": "al",
+     "lemma": "ἀλλά",
+     "gloss": "but",
+     "verses": [
+      9,
+      15,
+      26,
+      32,
+      37
+     ]
+    },
+    {
+     "greek": "πνεύματι",
+     "respelling": "PNEV-ma-tee",
+     "lemma": "πνεῦμα",
+     "gloss": "spirit/breath: spirit",
+     "verses": [
+      9,
+      13,
+      14,
+      16
+     ]
+    },
+    {
+     "greek": "εἴπερ",
+     "respelling": "EE-per",
+     "lemma": "εἴπερ",
+     "gloss": "if so/since",
+     "verses": [
+      9,
+      17
+     ]
+    },
+    {
+     "greek": "οἰκεῖ",
+     "respelling": "ee-KEE",
+     "lemma": "οἰκέω",
+     "gloss": "to dwell",
+     "verses": [
+      9,
+      11
+     ]
+    },
+    {
+     "greek": "ὑμῖν",
+     "respelling": "ee-MEEN",
+     "lemma": "σύ",
+     "gloss": "you",
+     "verses": [
+      9,
+      10,
+      11
+     ]
+    },
+    {
+     "greek": "εἰ",
+     "respelling": "ee",
+     "lemma": "εἰ",
+     "gloss": "if",
+     "verses": [
+      9,
+      10,
+      11,
+      13,
+      17,
+      25,
+      31
+     ]
+    },
+    {
+     "greek": "τις",
+     "respelling": "tees",
+     "lemma": "τις",
+     "gloss": "one",
+     "verses": [
+      9,
+      24,
+      31,
+      33,
+      34,
+      35,
+      39
+     ]
+    },
+    {
+     "greek": "χριστοῦ",
+     "respelling": "khree-STOO",
+     "lemma": "Χριστός",
+     "gloss": "Christ",
+     "verses": [
+      9,
+      17,
+      35
+     ]
+    },
+    {
+     "greek": "ἔχει",
+     "respelling": "E-hyee",
+     "lemma": "ἔχω",
+     "gloss": "to have/be",
+     "verses": [
+      9
+     ]
+    },
+    {
+     "greek": "οὗτος",
+     "respelling": "OO-tos",
+     "lemma": "οὗτος",
+     "gloss": "this/he/she/it",
+     "verses": [
+      9
+     ]
+    },
+    {
+     "greek": "ἔστιν",
+     "respelling": "E-steen",
+     "lemma": "εἰμί",
+     "gloss": "to be",
+     "verses": [
+      9,
+      24,
+      34
+     ]
+    },
+    {
+     "greek": "αὐτοῦ",
+     "respelling": "af-TOO",
+     "lemma": "αὐτός",
+     "gloss": "it/s/he",
+     "verses": [
+      9,
+      11,
+      29
+     ]
+    },
+    {
+     "greek": "χριστὸς",
+     "respelling": "khree-STOS",
+     "lemma": "Χριστός",
+     "gloss": "Christ",
+     "verses": [
+      10,
+      34
+     ]
+    },
+    {
+     "greek": "μὲν",
+     "respelling": "men",
+     "lemma": "μέν",
+     "gloss": "on the other hand",
+     "verses": [
+      10,
+      17
+     ]
+    },
+    {
+     "greek": "σῶμα",
+     "respelling": "SO-ma",
+     "lemma": "σῶμα",
+     "gloss": "body",
+     "verses": [
+      10
+     ]
+    },
+    {
+     "greek": "νεκρὸν",
+     "respelling": "ne-KRON",
+     "lemma": "νεκρός",
+     "gloss": "dead",
+     "verses": [
+      10
+     ]
+    },
+    {
+     "greek": "δικαιοσύνην",
+     "respelling": "dhee-ke-o-SEE-neen",
+     "lemma": "δικαιοσύνη",
+     "gloss": "righteousness",
+     "verses": [
+      10
+     ]
+    },
+    {
+     "greek": "ἐγείραντος",
+     "respelling": "e-YEE-ran-dos",
+     "lemma": "ἐγείρω",
+     "gloss": "to arise",
+     "verses": [
+      11
+     ]
+    },
+    {
+     "greek": "Ἰησοῦν",
+     "respelling": "ee-ee-SOON",
+     "lemma": "Ἰησοῦς",
+     "gloss": "Jesus",
+     "verses": [
+      11
+     ]
+    },
+    {
+     "greek": "ἐκ",
+     "respelling": "ek",
+     "lemma": "ἐκ",
+     "gloss": "out from",
+     "verses": [
+      11
+     ]
+    },
+    {
+     "greek": "νεκρῶν",
+     "respelling": "ne-KRON",
+     "lemma": "νεκρός",
+     "gloss": "dead",
+     "verses": [
+      11
+     ]
+    },
+    {
+     "greek": "ἐγείρας",
+     "respelling": "e-YEE-ras",
+     "lemma": "ἐγείρω",
+     "gloss": "to arise",
+     "verses": [
+      11
+     ]
+    },
+    {
+     "greek": "χριστὸν",
+     "respelling": "khree-STON",
+     "lemma": "Χριστός",
+     "gloss": "Christ",
+     "verses": [
+      11
+     ]
+    },
+    {
+     "greek": "ζῳοποιήσει",
+     "respelling": "zo-o-pee-EE-see",
+     "lemma": "ζωοποιέω",
+     "gloss": "to make alive",
+     "verses": [
+      11
+     ]
+    },
+    {
+     "greek": "θνητὰ",
+     "respelling": "thnee-TA",
+     "lemma": "θνητός",
+     "gloss": "mortal",
+     "verses": [
+      11
+     ]
+    },
+    {
+     "greek": "σώματα",
+     "respelling": "SO-ma-ta",
+     "lemma": "σῶμα",
+     "gloss": "body",
+     "verses": [
+      11
+     ]
+    },
+    {
+     "greek": "ὑμῶν",
+     "respelling": "ee-MON",
+     "lemma": "σύ",
+     "gloss": "you",
+     "verses": [
+      11
+     ]
+    },
+    {
+     "greek": "ἐνοικοῦν",
+     "respelling": "e-nee-KOON",
+     "lemma": "ἐνοικέω",
+     "gloss": "to dwell in/with",
+     "verses": [
+      11
+     ]
+    },
+    {
+     "greek": "οὖν",
+     "respelling": "oon",
+     "lemma": "οὖν",
+     "gloss": "therefore/then",
+     "verses": [
+      12,
+      31
+     ]
+    },
+    {
+     "greek": "ἀδελφοί",
+     "respelling": "a-dhel-FEE",
+     "lemma": "ἀδελφός",
+     "gloss": "brother",
+     "verses": [
+      12
+     ]
+    },
+    {
+     "greek": "ὀφειλέται",
+     "respelling": "o-fee-LE-te",
+     "lemma": "ὀφειλέτης",
+     "gloss": "debtor",
+     "verses": [
+      12
+     ]
+    },
+    {
+     "greek": "ἐσμέν",
+     "respelling": "ez-MEN",
+     "lemma": "εἰμί",
+     "gloss": "to be",
+     "verses": [
+      12,
+      16
+     ]
+    },
+    {
+     "greek": "ζῇν",
+     "respelling": "zeen",
+     "lemma": "ζάω",
+     "gloss": "to live",
+     "verses": [
+      12
+     ]
+    },
+    {
+     "greek": "ζῆτε",
+     "respelling": "ZEE-te",
+     "lemma": "ζάω",
+     "gloss": "to live",
+     "verses": [
+      13
+     ]
+    },
+    {
+     "greek": "μέλλετε",
+     "respelling": "ME-le-te",
+     "lemma": "μέλλω",
+     "gloss": "to ensue",
+     "verses": [
+      13
+     ]
+    },
+    {
+     "greek": "ἀποθνῄσκειν",
+     "respelling": "a-po-THNEE-skeen",
+     "lemma": "ἀποθνήσκω",
+     "gloss": "to die",
+     "verses": [
+      13
+     ]
+    },
+    {
+     "greek": "τὰς",
+     "respelling": "tas",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      13,
+      27
+     ]
+    },
+    {
+     "greek": "πράξεις",
+     "respelling": "PRA-ksees",
+     "lemma": "πρᾶξις",
+     "gloss": "action",
+     "verses": [
+      13
+     ]
+    },
+    {
+     "greek": "σώματος",
+     "respelling": "SO-ma-tos",
+     "lemma": "σῶμα",
+     "gloss": "body",
+     "verses": [
+      13,
+      23
+     ]
+    },
+    {
+     "greek": "θανατοῦτε",
+     "respelling": "tha-na-TOO-te",
+     "lemma": "θανατόω",
+     "gloss": "to kill",
+     "verses": [
+      13
+     ]
+    },
+    {
+     "greek": "ζήσεσθε",
+     "respelling": "ZEE-se-sthe",
+     "lemma": "ζάω",
+     "gloss": "to live",
+     "verses": [
+      13
+     ]
+    },
+    {
+     "greek": "ὅσοι",
+     "respelling": "O-see",
+     "lemma": "ὅσος",
+     "gloss": "just as/how much",
+     "verses": [
+      14
+     ]
+    },
+    {
+     "greek": "ἄγονται",
+     "respelling": "A-ghon-de",
+     "lemma": "ἄγω",
+     "gloss": "to bring",
+     "verses": [
+      14
+     ]
+    },
+    {
+     "greek": "οὗτοί",
+     "respelling": "OO-tee",
+     "lemma": "οὗτος",
+     "gloss": "this/he/she/it",
+     "verses": [
+      14
+     ]
+    },
+    {
+     "greek": "εἰσιν",
+     "respelling": "ee-seen",
+     "lemma": "εἰμί",
+     "gloss": "to be",
+     "verses": [
+      14
+     ]
+    },
+    {
+     "greek": "υἱοὶ",
+     "respelling": "ee-EE",
+     "lemma": "υἱός",
+     "gloss": "son",
+     "verses": [
+      14
+     ]
+    },
+    {
+     "greek": "ἐλάβετε",
+     "respelling": "e-LA-ve-te",
+     "lemma": "λαμβάνω",
+     "gloss": "to take",
+     "verses": [
+      15
+     ]
+    },
+    {
+     "greek": "δουλείας",
+     "respelling": "dhoo-LEE-as",
+     "lemma": "δουλεία",
+     "gloss": "slavery",
+     "verses": [
+      15,
+      21
+     ]
+    },
+    {
+     "greek": "πάλιν",
+     "respelling": "PA-leen",
+     "lemma": "πάλιν",
+     "gloss": "again",
+     "verses": [
+      15
+     ]
+    },
+    {
+     "greek": "φόβον",
+     "respelling": "FO-von",
+     "lemma": "φόβος",
+     "gloss": "fear",
+     "verses": [
+      15
+     ]
+    },
+    {
+     "greek": "υἱοθεσίας",
+     "respelling": "ee-o-the-SEE-as",
+     "lemma": "υἱοθεσία",
+     "gloss": "adoption (as son)",
+     "verses": [
+      15
+     ]
+    },
+    {
+     "greek": "κράζομεν",
+     "respelling": "KRA-zo-men",
+     "lemma": "κράζω",
+     "gloss": "to cry",
+     "verses": [
+      15
+     ]
+    },
+    {
+     "greek": "ἀββᾶ",
+     "respelling": "a-VA",
+     "lemma": "ἀββά",
+     "gloss": "Abba",
+     "verses": [
+      15
+     ]
+    },
+    {
+     "greek": "πατήρ",
+     "respelling": "pa-TEER",
+     "lemma": "πατήρ",
+     "gloss": "father",
+     "verses": [
+      15
+     ]
+    },
+    {
+     "greek": "αὐτὸ",
+     "respelling": "af-TO",
+     "lemma": "αὐτός",
+     "gloss": "it/s/he",
+     "verses": [
+      16,
+      26
+     ]
+    },
+    {
+     "greek": "συμμαρτυρεῖ",
+     "respelling": "see-mar-tee-REE",
+     "lemma": "συμμαρτυρέω",
+     "gloss": "to testify with",
+     "verses": [
+      16
+     ]
+    },
+    {
+     "greek": "ἡμῶν",
+     "respelling": "ee-MON",
+     "lemma": "ἐγώ",
+     "gloss": "I/we",
+     "verses": [
+      16,
+      23,
+      26,
+      31,
+      32,
+      34,
+      39
+     ]
+    },
+    {
+     "greek": "ὅτι",
+     "respelling": "O-tee",
+     "lemma": "ὅτι",
+     "gloss": "that/since: that",
+     "verses": [
+      16,
+      18,
+      21,
+      22,
+      27,
+      28,
+      29,
+      36,
+      38
+     ]
+    },
+    {
+     "greek": "τέκνα",
+     "respelling": "TE-kna",
+     "lemma": "τέκνον",
+     "gloss": "child",
+     "verses": [
+      16,
+      17
+     ]
+    },
+    {
+     "greek": "κληρονόμοι",
+     "respelling": "klee-ro-NO-mee",
+     "lemma": "κληρονόμος",
+     "gloss": "heir",
+     "verses": [
+      17
+     ]
+    },
+    {
+     "greek": "συγκληρονόμοι",
+     "respelling": "seen-glee-ro-NO-mee",
+     "lemma": "συγκληρονόμος",
+     "gloss": "co-heir",
+     "verses": [
+      17
+     ]
+    },
+    {
+     "greek": "συμπάσχομεν",
+     "respelling": "seem-BA-skho-men",
+     "lemma": "συμπάσχω",
+     "gloss": "to suffer with",
+     "verses": [
+      17
+     ]
+    },
+    {
+     "greek": "συνδοξασθῶμεν",
+     "respelling": "seen-dho-ksa-STHO-men",
+     "lemma": "συνδοξάζω",
+     "gloss": "to glory with",
+     "verses": [
+      17
+     ]
+    },
+    {
+     "greek": "λογίζομαι",
+     "respelling": "lo-YEE-zo-me",
+     "lemma": "λογίζομαι",
+     "gloss": "to count",
+     "verses": [
+      18
+     ]
+    },
+    {
+     "greek": "ἄξια",
+     "respelling": "A-ksee-a",
+     "lemma": "ἄξιος",
+     "gloss": "worthy",
+     "verses": [
+      18
+     ]
+    },
+    {
+     "greek": "παθήματα",
+     "respelling": "pa-THEE-ma-ta",
+     "lemma": "πάθημα",
+     "gloss": "suffering",
+     "verses": [
+      18
+     ]
+    },
+    {
+     "greek": "καιροῦ",
+     "respelling": "ke-ROO",
+     "lemma": "καιρός",
+     "gloss": "time/right time",
+     "verses": [
+      18
+     ]
+    },
+    {
+     "greek": "πρὸς",
+     "respelling": "pros",
+     "lemma": "πρός",
+     "gloss": "to/with",
+     "verses": [
+      18,
+      31
+     ]
+    },
+    {
+     "greek": "μέλλουσαν",
+     "respelling": "ME-loo-san",
+     "lemma": "μέλλω",
+     "gloss": "to ensue",
+     "verses": [
+      18
+     ]
+    },
+    {
+     "greek": "δόξαν",
+     "respelling": "DHO-ksan",
+     "lemma": "δόξα",
+     "gloss": "glory",
+     "verses": [
+      18
+     ]
+    },
+    {
+     "greek": "ἀποκαλυφθῆναι",
+     "respelling": "a-po-ka-lee-FTHEE-ne",
+     "lemma": "ἀποκαλύπτω",
+     "gloss": "to reveal",
+     "verses": [
+      18
+     ]
+    },
+    {
+     "greek": "ἡμᾶς",
+     "respelling": "ee-MAS",
+     "lemma": "ἐγώ",
+     "gloss": "I/we",
+     "verses": [
+      18,
+      35,
+      37,
+      39
+     ]
+    },
+    {
+     "greek": "ἡ",
+     "respelling": "ee",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      19,
+      20,
+      21,
+      22,
+      35
+     ]
+    },
+    {
+     "greek": "ἀποκαραδοκία",
+     "respelling": "a-po-ka-ra-dho-KEE-a",
+     "lemma": "ἀποκαραδοκία",
+     "gloss": "eager expectation",
+     "verses": [
+      19
+     ]
+    },
+    {
+     "greek": "κτίσεως",
+     "respelling": "KTEE-se-os",
+     "lemma": "κτίσις",
+     "gloss": "creation",
+     "verses": [
+      19
+     ]
+    },
+    {
+     "greek": "ἀποκάλυψιν",
+     "respelling": "a-po-KA-lee-pseen",
+     "lemma": "ἀποκάλυψις",
+     "gloss": "revelation",
+     "verses": [
+      19
+     ]
+    },
+    {
+     "greek": "τῶν",
+     "respelling": "ton",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      19,
+      21
+     ]
+    },
+    {
+     "greek": "υἱῶν",
+     "respelling": "ee-ON",
+     "lemma": "υἱός",
+     "gloss": "son",
+     "verses": [
+      19
+     ]
+    },
+    {
+     "greek": "ἀπεκδέχεται",
+     "respelling": "a-pek-DHE-hye-te",
+     "lemma": "ἀπεκδέχομαι",
+     "gloss": "to expect",
+     "verses": [
+      19
+     ]
+    },
+    {
+     "greek": "ματαιότητι",
+     "respelling": "ma-te-O-tee-tee",
+     "lemma": "ματαιότης",
+     "gloss": "futility",
+     "verses": [
+      20
+     ]
+    },
+    {
+     "greek": "κτίσις",
+     "respelling": "KTEE-sees",
+     "lemma": "κτίσις",
+     "gloss": "creation",
+     "verses": [
+      20,
+      21,
+      22,
+      39
+     ]
+    },
+    {
+     "greek": "ὑπετάγη",
+     "respelling": "ee-pe-TA-yee",
+     "lemma": "ὑποτάσσω",
+     "gloss": "to subject",
+     "verses": [
+      20
+     ]
+    },
+    {
+     "greek": "ἑκοῦσα",
+     "respelling": "e-KOO-sa",
+     "lemma": "ἑκών",
+     "gloss": "voluntarily",
+     "verses": [
+      20
+     ]
+    },
+    {
+     "greek": "ὑποτάξαντα",
+     "respelling": "ee-po-TA-ksan-da",
+     "lemma": "ὑποτάσσω",
+     "gloss": "to subject",
+     "verses": [
+      20
+     ]
+    },
+    {
+     "greek": "ἐπ",
+     "respelling": "ep",
+     "lemma": "ἐπί",
+     "gloss": "upon/to/against",
+     "verses": [
+      20
+     ]
+    },
+    {
+     "greek": "ἐλπίδι",
+     "respelling": "el-PEE-dhee",
+     "lemma": "ἐλπίς",
+     "gloss": "hope",
+     "verses": [
+      20,
+      24
+     ]
+    },
+    {
+     "greek": "αὐτὴ",
+     "respelling": "af-TEE",
+     "lemma": "αὐτός",
+     "gloss": "it/s/he",
+     "verses": [
+      21
+     ]
+    },
+    {
+     "greek": "ἐλευθερωθήσεται",
+     "respelling": "e-lef-the-ro-THEE-se-te",
+     "lemma": "ἐλευθερόω",
+     "gloss": "to set free",
+     "verses": [
+      21
+     ]
+    },
+    {
+     "greek": "φθορᾶς",
+     "respelling": "ftho-RAS",
+     "lemma": "φθορά",
+     "gloss": "corruption",
+     "verses": [
+      21
+     ]
+    },
+    {
+     "greek": "ἐλευθερίαν",
+     "respelling": "e-lef-the-REE-an",
+     "lemma": "ἐλευθερία",
+     "gloss": "freedom",
+     "verses": [
+      21
+     ]
+    },
+    {
+     "greek": "δόξης",
+     "respelling": "DHO-ksees",
+     "lemma": "δόξα",
+     "gloss": "glory",
+     "verses": [
+      21
+     ]
+    },
+    {
+     "greek": "τέκνων",
+     "respelling": "TE-knon",
+     "lemma": "τέκνον",
+     "gloss": "child",
+     "verses": [
+      21
+     ]
+    },
+    {
+     "greek": "οἴδαμεν",
+     "respelling": "EE-dha-men",
+     "lemma": "εἴδω",
+     "gloss": "to perceive: understand",
+     "verses": [
+      22,
+      26,
+      28
+     ]
+    },
+    {
+     "greek": "πᾶσα",
+     "respelling": "PA-sa",
+     "lemma": "πᾶς",
+     "gloss": "all",
+     "verses": [
+      22
+     ]
+    },
+    {
+     "greek": "συστενάζει",
+     "respelling": "see-ste-NA-zee",
+     "lemma": "συστενάζω",
+     "gloss": "to groan with",
+     "verses": [
+      22
+     ]
+    },
+    {
+     "greek": "συνωδίνει",
+     "respelling": "see-no-DHEE-nee",
+     "lemma": "συνωδίνω",
+     "gloss": "to labor together",
+     "verses": [
+      22
+     ]
+    },
+    {
+     "greek": "ἄχρι",
+     "respelling": "A-khree",
+     "lemma": "ἄχρι",
+     "gloss": "until",
+     "verses": [
+      22
+     ]
+    },
+    {
+     "greek": "μόνον",
+     "respelling": "MO-non",
+     "lemma": "μόνον",
+     "gloss": "only",
+     "verses": [
+      23
+     ]
+    },
+    {
+     "greek": "αὐτοὶ",
+     "respelling": "af-TEE",
+     "lemma": "αὐτός",
+     "gloss": "it/s/he",
+     "verses": [
+      23
+     ]
+    },
+    {
+     "greek": "ἀπαρχὴν",
+     "respelling": "a-par-HYEEN",
+     "lemma": "ἀπαρχή",
+     "gloss": "firstfruits",
+     "verses": [
+      23
+     ]
+    },
+    {
+     "greek": "ἔχοντες",
+     "respelling": "E-khon-des",
+     "lemma": "ἔχω",
+     "gloss": "to have/be",
+     "verses": [
+      23
+     ]
+    },
+    {
+     "greek": "ἡμεῖς",
+     "respelling": "ee-MEES",
+     "lemma": "ἐγώ",
+     "gloss": "I/we",
+     "verses": [
+      23
+     ]
+    },
+    {
+     "greek": "ἑαυτοῖς",
+     "respelling": "e-af-TEES",
+     "lemma": "ἑαυτοῦ",
+     "gloss": "themself",
+     "verses": [
+      23
+     ]
+    },
+    {
+     "greek": "στενάζομεν",
+     "respelling": "ste-NA-zo-men",
+     "lemma": "στενάζω",
+     "gloss": "to groan",
+     "verses": [
+      23
+     ]
+    },
+    {
+     "greek": "υἱοθεσίαν",
+     "respelling": "ee-o-the-SEE-an",
+     "lemma": "υἱοθεσία",
+     "gloss": "adoption (as son)",
+     "verses": [
+      23
+     ]
+    },
+    {
+     "greek": "ἀπεκδεχόμενοι",
+     "respelling": "a-pek-dhe-KHO-me-nee",
+     "lemma": "ἀπεκδέχομαι",
+     "gloss": "to expect",
+     "verses": [
+      23
+     ]
+    },
+    {
+     "greek": "ἀπολύτρωσιν",
+     "respelling": "a-po-LEE-tro-seen",
+     "lemma": "ἀπολύτρωσις",
+     "gloss": "redemption",
+     "verses": [
+      23
+     ]
+    },
+    {
+     "greek": "ἐσώθημεν",
+     "respelling": "e-SO-thee-men",
+     "lemma": "σῴζω",
+     "gloss": "to save",
+     "verses": [
+      24
+     ]
+    },
+    {
+     "greek": "ἐλπὶς",
+     "respelling": "el-PEES",
+     "lemma": "ἐλπίς",
+     "gloss": "hope",
+     "verses": [
+      24
+     ]
+    },
+    {
+     "greek": "βλεπομένη",
+     "respelling": "vle-po-ME-nee",
+     "lemma": "βλέπω",
+     "gloss": "to see",
+     "verses": [
+      24
+     ]
+    },
+    {
+     "greek": "βλέπει",
+     "respelling": "VLE-pee",
+     "lemma": "βλέπω",
+     "gloss": "to see",
+     "verses": [
+      24
+     ]
+    },
+    {
+     "greek": "τί",
+     "respelling": "tee",
+     "lemma": "τίς",
+     "gloss": "which?",
+     "verses": [
+      24,
+      26,
+      27,
+      31
+     ]
+    },
+    {
+     "greek": "ἐλπίζει",
+     "respelling": "el-PEE-zee",
+     "lemma": "ἐλπίζω",
+     "gloss": "to hope/expect",
+     "verses": [
+      24
+     ]
+    },
+    {
+     "greek": "βλέπομεν",
+     "respelling": "VLE-po-men",
+     "lemma": "βλέπω",
+     "gloss": "to see",
+     "verses": [
+      25
+     ]
+    },
+    {
+     "greek": "ἐλπίζομεν",
+     "respelling": "el-PEE-zo-men",
+     "lemma": "ἐλπίζω",
+     "gloss": "to hope/expect",
+     "verses": [
+      25
+     ]
+    },
+    {
+     "greek": "δι",
+     "respelling": "dhee",
+     "lemma": "διά",
+     "gloss": "through/because of",
+     "verses": [
+      25
+     ]
+    },
+    {
+     "greek": "ὑπομονῆς",
+     "respelling": "ee-po-mo-NEES",
+     "lemma": "ὑπομονή",
+     "gloss": "perseverance",
+     "verses": [
+      25
+     ]
+    },
+    {
+     "greek": "ἀπεκδεχόμεθα",
+     "respelling": "a-pek-dhe-KHO-me-tha",
+     "lemma": "ἀπεκδέχομαι",
+     "gloss": "to expect",
+     "verses": [
+      25
+     ]
+    },
+    {
+     "greek": "ὡσαύτως",
+     "respelling": "o-SAF-tos",
+     "lemma": "ὡσαύτως",
+     "gloss": "likewise",
+     "verses": [
+      26
+     ]
+    },
+    {
+     "greek": "συναντιλαμβάνεται",
+     "respelling": "see-nan-dee-lam-VA-ne-te",
+     "lemma": "συναντιλαμβάνομαι",
+     "gloss": "to help",
+     "verses": [
+      26
+     ]
+    },
+    {
+     "greek": "ταῖς",
+     "respelling": "tes",
+     "lemma": "ὁ",
+     "gloss": "the/this/who",
+     "verses": [
+      26
+     ]
+    },
+    {
+     "greek": "ἀσθενείαις",
+     "respelling": "a-sthe-NEE-es",
+     "lemma": "ἀσθένεια",
+     "gloss": "weakness: weak",
+     "verses": [
+      26
+     ]
+    },
+    {
+     "greek": "προσευξόμεθα",
+     "respelling": "pro-sef-KSO-me-tha",
+     "lemma": "προσεύχομαι",
+     "gloss": "to pray",
+     "verses": [
+      26
+     ]
+    },
+    {
+     "greek": "καθὸ",
+     "respelling": "ka-THO",
+     "lemma": "καθό",
+     "gloss": "insofar as",
+     "verses": [
+      26
+     ]
+    },
+    {
+     "greek": "δεῖ",
+     "respelling": "dhee",
+     "lemma": "δεῖ",
+     "gloss": "be necessary",
+     "verses": [
+      26
+     ]
+    },
+    {
+     "greek": "ὑπερεντυγχάνει",
+     "respelling": "ee-pe-ren-deeng-KHA-nee",
+     "lemma": "ὑπερεντυγχάνω",
+     "gloss": "to intercede",
+     "verses": [
+      26
+     ]
+    },
+    {
+     "greek": "ὑπὲρ",
+     "respelling": "ee-PER",
+     "lemma": "ὑπέρ",
+     "gloss": "above/for",
+     "verses": [
+      26,
+      27,
+      31,
+      32,
+      34
+     ]
+    },
+    {
+     "greek": "στεναγμοῖς",
+     "respelling": "ste-nagh-MEES",
+     "lemma": "στεναγμός",
+     "gloss": "groan",
+     "verses": [
+      26
+     ]
+    },
+    {
+     "greek": "ἀλαλήτοις",
+     "respelling": "a-la-LEE-tees",
+     "lemma": "ἀλάλητος",
+     "gloss": "inexpressible",
+     "verses": [
+      26
+     ]
+    },
+    {
+     "greek": "ἐρευνῶν",
+     "respelling": "e-rev-NON",
+     "lemma": "ἐρευνάω",
+     "gloss": "to look for/into",
+     "verses": [
+      27
+     ]
+    },
+    {
+     "greek": "καρδίας",
+     "respelling": "kar-DHEE-as",
+     "lemma": "καρδία",
+     "gloss": "heart",
+     "verses": [
+      27
+     ]
+    },
+    {
+     "greek": "οἶδεν",
+     "respelling": "EE-dhen",
+     "lemma": "εἴδω",
+     "gloss": "to perceive: understand",
+     "verses": [
+      27
+     ]
+    },
+    {
+     "greek": "ἐντυγχάνει",
+     "respelling": "en-deeng-KHA-nee",
+     "lemma": "ἐντυγχάνω",
+     "gloss": "to call on",
+     "verses": [
+      27,
+      34
+     ]
+    },
+    {
+     "greek": "ἁγίων",
+     "respelling": "a-YEE-on",
+     "lemma": "ἅγιος",
+     "gloss": "holy",
+     "verses": [
+      27
+     ]
+    },
+    {
+     "greek": "ἀγαπῶσιν",
+     "respelling": "a-gha-PO-seen",
+     "lemma": "ἀγαπάω",
+     "gloss": "to love",
+     "verses": [
+      28
+     ]
+    },
+    {
+     "greek": "πάντα",
+     "respelling": "PAN-da",
+     "lemma": "πᾶς",
+     "gloss": "all",
+     "verses": [
+      28,
+      32
+     ]
+    },
+    {
+     "greek": "συνεργεῖ",
+     "respelling": "see-ner-YEE",
+     "lemma": "συνεργέω",
+     "gloss": "to work with",
+     "verses": [
+      28
+     ]
+    },
+    {
+     "greek": "ἀγαθόν",
+     "respelling": "a-gha-THON",
+     "lemma": "ἀγαθός",
+     "gloss": "good",
+     "verses": [
+      28
+     ]
+    },
+    {
+     "greek": "πρόθεσιν",
+     "respelling": "PRO-the-seen",
+     "lemma": "πρόθεσις",
+     "gloss": "purpose",
+     "verses": [
+      28
+     ]
+    },
+    {
+     "greek": "κλητοῖς",
+     "respelling": "klee-TEES",
+     "lemma": "κλητός",
+     "gloss": "called",
+     "verses": [
+      28
+     ]
+    },
+    {
+     "greek": "οὖσιν",
+     "respelling": "OO-seen",
+     "lemma": "εἰμί",
+     "gloss": "to be",
+     "verses": [
+      28
+     ]
+    },
+    {
+     "greek": "οὓς",
+     "respelling": "oos",
+     "lemma": "ὅς",
+     "gloss": "which",
+     "verses": [
+      29,
+      30
+     ]
+    },
+    {
+     "greek": "προέγνω",
+     "respelling": "pro-E-ghno",
+     "lemma": "προγινώσκω",
+     "gloss": "to know/choose",
+     "verses": [
+      29
+     ]
+    },
+    {
+     "greek": "προώρισεν",
+     "respelling": "pro-O-ree-sen",
+     "lemma": "προορίζω",
+     "gloss": "to predestine",
+     "verses": [
+      29,
+      30
+     ]
+    },
+    {
+     "greek": "συμμόρφους",
+     "respelling": "see-MOR-foos",
+     "lemma": "σύμμορφος",
+     "gloss": "conformed",
+     "verses": [
+      29
+     ]
+    },
+    {
+     "greek": "εἰκόνος",
+     "respelling": "ee-KO-nos",
+     "lemma": "εἰκών",
+     "gloss": "image",
+     "verses": [
+      29
+     ]
+    },
+    {
+     "greek": "υἱοῦ",
+     "respelling": "ee-OO",
+     "lemma": "υἱός",
+     "gloss": "son",
+     "verses": [
+      29,
+      32
+     ]
+    },
+    {
+     "greek": "εἶναι",
+     "respelling": "EE-ne",
+     "lemma": "εἰμί",
+     "gloss": "to be",
+     "verses": [
+      29
+     ]
+    },
+    {
+     "greek": "αὐτὸν",
+     "respelling": "af-TON",
+     "lemma": "αὐτός",
+     "gloss": "it/s/he",
+     "verses": [
+      29,
+      32
+     ]
+    },
+    {
+     "greek": "πρωτότοκον",
+     "respelling": "pro-TO-to-kon",
+     "lemma": "πρωτότοκος",
+     "gloss": "firstborn",
+     "verses": [
+      29
+     ]
+    },
+    {
+     "greek": "πολλοῖς",
+     "respelling": "po-LEES",
+     "lemma": "πολύς",
+     "gloss": "much",
+     "verses": [
+      29
+     ]
+    },
+    {
+     "greek": "ἀδελφοῖς",
+     "respelling": "a-dhel-FEES",
+     "lemma": "ἀδελφός",
+     "gloss": "brother",
+     "verses": [
+      29
+     ]
+    },
+    {
+     "greek": "τούτους",
+     "respelling": "TOO-toos",
+     "lemma": "οὗτος",
+     "gloss": "this/he/she/it",
+     "verses": [
+      30
+     ]
+    },
+    {
+     "greek": "ἐκάλεσεν",
+     "respelling": "e-KA-le-sen",
+     "lemma": "καλέω",
+     "gloss": "to call: call",
+     "verses": [
+      30
+     ]
+    },
+    {
+     "greek": "ἐδικαίωσεν",
+     "respelling": "e-dhee-KE-o-sen",
+     "lemma": "δικαιόω",
+     "gloss": "to justify",
+     "verses": [
+      30
+     ]
+    },
+    {
+     "greek": "ἐδόξασεν",
+     "respelling": "e-DHO-ksa-sen",
+     "lemma": "δοξάζω",
+     "gloss": "to glorify",
+     "verses": [
+      30
+     ]
+    },
+    {
+     "greek": "ἐροῦμεν",
+     "respelling": "e-ROO-men",
+     "lemma": "ἐρῶ",
+     "gloss": "to say",
+     "verses": [
+      31
+     ]
+    },
+    {
+     "greek": "ταῦτα",
+     "respelling": "TAF-ta",
+     "lemma": "οὗτος",
+     "gloss": "this/he/she/it",
+     "verses": [
+      31
+     ]
+    },
+    {
+     "greek": "καθ",
+     "respelling": "kath",
+     "lemma": "κατά",
+     "gloss": "according to",
+     "verses": [
+      31
+     ]
+    },
+    {
+     "greek": "ὅς",
+     "respelling": "os",
+     "lemma": "ὅς",
+     "gloss": "which",
+     "verses": [
+      32,
+      34
+     ]
+    },
+    {
+     "greek": "γε",
+     "respelling": "ye",
+     "lemma": "γέ",
+     "gloss": "indeed",
+     "verses": [
+      32
+     ]
+    },
+    {
+     "greek": "ἰδίου",
+     "respelling": "ee-DHEE-oo",
+     "lemma": "ἴδιος",
+     "gloss": "one's own/private",
+     "verses": [
+      32
+     ]
+    },
+    {
+     "greek": "ἐφείσατο",
+     "respelling": "e-FEE-sa-to",
+     "lemma": "φείδομαι",
+     "gloss": "to spare",
+     "verses": [
+      32
+     ]
+    },
+    {
+     "greek": "πάντων",
+     "respelling": "PAN-don",
+     "lemma": "πᾶς",
+     "gloss": "all",
+     "verses": [
+      32
+     ]
+    },
+    {
+     "greek": "παρέδωκεν",
+     "respelling": "pa-RE-dho-ken",
+     "lemma": "παραδίδωμι",
+     "gloss": "to deliver",
+     "verses": [
+      32
+     ]
+    },
+    {
+     "greek": "πῶς",
+     "respelling": "pos",
+     "lemma": "πῶς",
+     "gloss": "how?!",
+     "verses": [
+      32
+     ]
+    },
+    {
+     "greek": "οὐχὶ",
+     "respelling": "oo-HYEE",
+     "lemma": "οὐχί",
+     "gloss": "not!",
+     "verses": [
+      32
+     ]
+    },
+    {
+     "greek": "σὺν",
+     "respelling": "seen",
+     "lemma": "σύν",
+     "gloss": "with",
+     "verses": [
+      32
+     ]
+    },
+    {
+     "greek": "αὐτῷ",
+     "respelling": "af-TO",
+     "lemma": "αὐτός",
+     "gloss": "it/s/he",
+     "verses": [
+      32
+     ]
+    },
+    {
+     "greek": "χαρίσεται",
+     "respelling": "kha-REE-se-te",
+     "lemma": "χαρίζω",
+     "gloss": "to give grace",
+     "verses": [
+      32
+     ]
+    },
+    {
+     "greek": "ἐγκαλέσει",
+     "respelling": "en-ga-LE-see",
+     "lemma": "ἐγκαλέω",
+     "gloss": "to accuse",
+     "verses": [
+      33
+     ]
+    },
+    {
+     "greek": "ἐκλεκτῶν",
+     "respelling": "e-kle-KTON",
+     "lemma": "ἐκλεκτός",
+     "gloss": "select",
+     "verses": [
+      33
+     ]
+    },
+    {
+     "greek": "δικαιῶν",
+     "respelling": "dhee-ke-ON",
+     "lemma": "δικαιόω",
+     "gloss": "to justify",
+     "verses": [
+      33
+     ]
+    },
+    {
+     "greek": "κατακρίνων",
+     "respelling": "ka-ta-KREE-non",
+     "lemma": "κατακρίνω",
+     "gloss": "to condemn",
+     "verses": [
+      34
+     ]
+    },
+    {
+     "greek": "ἀποθανών",
+     "respelling": "a-po-tha-NON",
+     "lemma": "ἀποθνήσκω",
+     "gloss": "to die",
+     "verses": [
+      34
+     ]
+    },
+    {
+     "greek": "μᾶλλον",
+     "respelling": "MA-lon",
+     "lemma": "μᾶλλον",
+     "gloss": "more",
+     "verses": [
+      34
+     ]
+    },
+    {
+     "greek": "ἐγερθείς",
+     "respelling": "e-yer-THEES",
+     "lemma": "ἐγείρω",
+     "gloss": "to arise",
+     "verses": [
+      34
+     ]
+    },
+    {
+     "greek": "δεξιᾷ",
+     "respelling": "dhe-ksee-A",
+     "lemma": "δεξιός",
+     "gloss": "right",
+     "verses": [
+      34
+     ]
+    },
+    {
+     "greek": "χωρίσει",
+     "respelling": "kho-REE-see",
+     "lemma": "χωρίζω",
+     "gloss": "to separate/leave",
+     "verses": [
+      35
+     ]
+    },
+    {
+     "greek": "ἀγάπης",
+     "respelling": "a-GHA-pees",
+     "lemma": "ἀγάπη",
+     "gloss": "love",
+     "verses": [
+      35,
+      39
+     ]
+    },
+    {
+     "greek": "θλίψις",
+     "respelling": "THLEE-psees",
+     "lemma": "θλῖψις",
+     "gloss": "pressure",
+     "verses": [
+      35
+     ]
+    },
+    {
+     "greek": "στενοχωρία",
+     "respelling": "ste-no-kho-REE-a",
+     "lemma": "στενοχωρία",
+     "gloss": "hardship",
+     "verses": [
+      35
+     ]
+    },
+    {
+     "greek": "διωγμός",
+     "respelling": "dhee-ogh-MOS",
+     "lemma": "διωγμός",
+     "gloss": "persecution",
+     "verses": [
+      35
+     ]
+    },
+    {
+     "greek": "λιμός",
+     "respelling": "lee-MOS",
+     "lemma": "λιμός",
+     "gloss": "hunger",
+     "verses": [
+      35
+     ]
+    },
+    {
+     "greek": "γυμνότης",
+     "respelling": "yee-MNO-tees",
+     "lemma": "γυμνότης",
+     "gloss": "nakedness",
+     "verses": [
+      35
+     ]
+    },
+    {
+     "greek": "κίνδυνος",
+     "respelling": "KEEN-dhee-nos",
+     "lemma": "κίνδυνος",
+     "gloss": "danger",
+     "verses": [
+      35
+     ]
+    },
+    {
+     "greek": "μάχαιρα",
+     "respelling": "MA-hye-ra",
+     "lemma": "μάχαιρα",
+     "gloss": "sword",
+     "verses": [
+      35
+     ]
+    },
+    {
+     "greek": "καθὼς",
+     "respelling": "ka-THOS",
+     "lemma": "καθώς",
+     "gloss": "as/just as",
+     "verses": [
+      36
+     ]
+    },
+    {
+     "greek": "γέγραπται",
+     "respelling": "YE-ghra-pte",
+     "lemma": "γράφω",
+     "gloss": "to write",
+     "verses": [
+      36
+     ]
+    },
+    {
+     "greek": "ἕνεκέν",
+     "respelling": "E-ne-ken",
+     "lemma": "ἕνεκα",
+     "gloss": "because of",
+     "verses": [
+      36
+     ]
+    },
+    {
+     "greek": "σου",
+     "respelling": "soo",
+     "lemma": "σύ",
+     "gloss": "you",
+     "verses": [
+      36
+     ]
+    },
+    {
+     "greek": "θανατούμεθα",
+     "respelling": "tha-na-TOO-me-tha",
+     "lemma": "θανατόω",
+     "gloss": "to kill",
+     "verses": [
+      36
+     ]
+    },
+    {
+     "greek": "ὅλην",
+     "respelling": "O-leen",
+     "lemma": "ὅλος",
+     "gloss": "all",
+     "verses": [
+      36
+     ]
+    },
+    {
+     "greek": "ἡμέραν",
+     "respelling": "ee-ME-ran",
+     "lemma": "ἡμέρα",
+     "gloss": "day",
+     "verses": [
+      36
+     ]
+    },
+    {
+     "greek": "ἐλογίσθημεν",
+     "respelling": "e-lo-YEE-sthee-men",
+     "lemma": "λογίζομαι",
+     "gloss": "to count",
+     "verses": [
+      36
+     ]
+    },
+    {
+     "greek": "ὡς",
+     "respelling": "os",
+     "lemma": "ὡς",
+     "gloss": "as/when",
+     "verses": [
+      36
+     ]
+    },
+    {
+     "greek": "πρόβατα",
+     "respelling": "PRO-va-ta",
+     "lemma": "πρόβατον",
+     "gloss": "sheep",
+     "verses": [
+      36
+     ]
+    },
+    {
+     "greek": "σφαγῆς",
+     "respelling": "sfa-YEES",
+     "lemma": "σφαγή",
+     "gloss": "slaughter",
+     "verses": [
+      36
+     ]
+    },
+    {
+     "greek": "τούτοις",
+     "respelling": "TOO-tees",
+     "lemma": "οὗτος",
+     "gloss": "this/he/she/it",
+     "verses": [
+      37
+     ]
+    },
+    {
+     "greek": "πᾶσιν",
+     "respelling": "PA-seen",
+     "lemma": "πᾶς",
+     "gloss": "all",
+     "verses": [
+      37
+     ]
+    },
+    {
+     "greek": "ὑπερνικῶμεν",
+     "respelling": "ee-per-nee-KO-men",
+     "lemma": "ὑπερνικάω",
+     "gloss": "to conquer",
+     "verses": [
+      37
+     ]
+    },
+    {
+     "greek": "ἀγαπήσαντος",
+     "respelling": "a-gha-PEE-san-dos",
+     "lemma": "ἀγαπάω",
+     "gloss": "to love",
+     "verses": [
+      37
+     ]
+    },
+    {
+     "greek": "πέπεισμαι",
+     "respelling": "PE-peez-me",
+     "lemma": "πείθω",
+     "gloss": "to persuade",
+     "verses": [
+      38
+     ]
+    },
+    {
+     "greek": "οὔτε",
+     "respelling": "OO-te",
+     "lemma": "οὔτε",
+     "gloss": "neither",
+     "verses": [
+      38,
+      39
+     ]
+    },
+    {
+     "greek": "ἄγγελοι",
+     "respelling": "AN-ge-lee",
+     "lemma": "ἄγγελος",
+     "gloss": "angel",
+     "verses": [
+      38
+     ]
+    },
+    {
+     "greek": "ἀρχαὶ",
+     "respelling": "ar-HYE",
+     "lemma": "ἀρχή",
+     "gloss": "beginning",
+     "verses": [
+      38
+     ]
+    },
+    {
+     "greek": "δυνάμεις",
+     "respelling": "dhee-NA-mees",
+     "lemma": "δύναμις",
+     "gloss": "power",
+     "verses": [
+      38
+     ]
+    },
+    {
+     "greek": "ἐνεστῶτα",
+     "respelling": "e-ne-STO-ta",
+     "lemma": "ἐνίστημι",
+     "gloss": "be present",
+     "verses": [
+      38
+     ]
+    },
+    {
+     "greek": "μέλλοντα",
+     "respelling": "ME-lon-da",
+     "lemma": "μέλλω",
+     "gloss": "to ensue",
+     "verses": [
+      38
+     ]
+    },
+    {
+     "greek": "ὕψωμα",
+     "respelling": "EE-pso-ma",
+     "lemma": "ὕψωμα",
+     "gloss": "height",
+     "verses": [
+      39
+     ]
+    },
+    {
+     "greek": "βάθος",
+     "respelling": "VA-thos",
+     "lemma": "βάθος",
+     "gloss": "depth",
+     "verses": [
+      39
+     ]
+    },
+    {
+     "greek": "ἑτέρα",
+     "respelling": "e-TE-ra",
+     "lemma": "ἕτερος",
+     "gloss": "other",
+     "verses": [
+      39
+     ]
+    },
+    {
+     "greek": "δυνήσεται",
+     "respelling": "dhee-NEE-se-te",
+     "lemma": "δύναμαι",
+     "gloss": "be able",
+     "verses": [
+      39
+     ]
+    },
+    {
+     "greek": "χωρίσαι",
+     "respelling": "kho-REE-se",
+     "lemma": "χωρίζω",
+     "gloss": "to separate/leave",
+     "verses": [
+      39
+     ]
+    },
+    {
+     "greek": "κυρίῳ",
+     "respelling": "kee-REE-o",
+     "lemma": "κύριος",
+     "gloss": "lord: God",
+     "verses": [
+      39
+     ]
+    }
+   ]
+  }
+ }
+}
