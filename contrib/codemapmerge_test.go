@@ -1,12 +1,13 @@
 package contrib_test
 
-// docs/codemap.md is merged by git's union driver (.gitattributes), so two
-// stories that each add a row near each other both keep it instead of
-// conflicting (mw-gq6.408). Union also keeps both versions of a row two
-// branches edited differently, and it can leave the page over its byte cap
-// (mw-gq6.317); scripts/check-codemap.sh, which make test runs, is the net for
-// those. These tests prove all of that in a throwaway repository in a
-// temporary directory.
+// docs/codemap.md is merged by scripts/codemap-merge.sh, named merge=codemap in
+// .gitattributes (mw-gq6.495). Two stories that each add a row near each other
+// both keep it, as union gave (mw-gq6.408); unlike union, a story that trims
+// rows does not get the old rows back when main added one meanwhile
+// (mw-gq6.480 merged at 13,844 bytes twice). A row two branches edited takes
+// ours. scripts/check-codemap.sh, which make test runs, is still the net for
+// the byte cap and repeated rows. These tests prove all of that in a throwaway
+// repository in a temporary directory.
 
 import (
 	"os"
@@ -36,22 +37,41 @@ func gitIn(t *testing.T, dir string, args ...string) string {
 	return out
 }
 
-func TestCodemapIsMergedByUnion(t *testing.T) {
+func TestCodemapIsMergedByTheCodemapDriver(t *testing.T) {
 	root, err := filepath.Abs("..")
 	if err != nil {
 		t.Fatal(err)
 	}
 	out := strings.TrimSpace(gitIn(t, root, "check-attr", "merge", "docs/codemap.md"))
-	if want := "docs/codemap.md: merge: union"; out != want {
+	if want := "docs/codemap.md: merge: codemap"; out != want {
 		t.Fatalf("git check-attr merge docs/codemap.md = %q, want %q", out, want)
 	}
 }
 
+// codemapDriver is the merge.codemap.driver mw passes on its merges: the
+// rig's own scripts/codemap-merge.sh, with nothing in any git config.
+func codemapDriver(t *testing.T) string {
+	t.Helper()
+	script, err := filepath.Abs("../scripts/codemap-merge.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return "merge.codemap.driver=sh '" + script + "' %O %A %B"
+}
+
 // mergeCodemapBranches commits base (the real map when empty) and the rig's attributes in a
 // throwaway repository, edits it on branches alpha and beta with the given
-// functions, merges both into main and returns the merged map, plus whether
-// the second merge succeeded.
+// functions, merges both into main with the codemap driver passed as mw passes
+// it and returns the merged map, plus whether the second merge succeeded.
 func mergeCodemapBranches(t *testing.T, base string, alpha, beta func(lines []string) []string) (string, bool) {
+	t.Helper()
+	return mergeCodemapBranchesWith(t, codemapDriver(t), base, alpha, beta)
+}
+
+// mergeCodemapBranchesWith is mergeCodemapBranches with driver as the -c given
+// to each merge, or none when it is empty: a merge by hand on a host whose git
+// config does not name the driver.
+func mergeCodemapBranchesWith(t *testing.T, driver, base string, alpha, beta func(lines []string) []string) (string, bool) {
 	t.Helper()
 	root, err := filepath.Abs("..")
 	if err != nil {
@@ -97,8 +117,14 @@ func mergeCodemapBranches(t *testing.T, base string, alpha, beta func(lines []st
 	edit("beta", beta)
 
 	gitIn(t, dir, "checkout", "-q", "main")
-	gitIn(t, dir, "merge", "--no-edit", "alpha")
-	_, mergeErr := gitTry(dir, "merge", "--no-edit", "beta")
+	merge := func(branch string) []string {
+		if driver == "" {
+			return []string{"merge", "--no-edit", branch}
+		}
+		return []string{"-c", driver, "merge", "--no-edit", branch}
+	}
+	gitIn(t, dir, merge("alpha")...)
+	_, mergeErr := gitTry(dir, merge("beta")...)
 	merged, err := os.ReadFile(mapPath)
 	if err != nil {
 		t.Fatal(err)
@@ -140,37 +166,196 @@ func TestTwoRowsAddedAtTheSameSpotMergeWithBothRows(t *testing.T) {
 	}
 }
 
-func TestCheckCodemapRefusesARowTwoBranchesEdited(t *testing.T) {
-	// Union keeps both versions of a row each branch edited; the check
-	// scripts/check-codemap.sh makes in the gate is what catches them.
+// editRow returns a change that appends s to the row starting anchor.
+func editRow(t *testing.T, anchor, s string) func([]string) []string {
+	return func(lines []string) []string {
+		for i, l := range lines {
+			if strings.HasPrefix(l, anchor) {
+				lines[i] = l + s
+				return lines
+			}
+		}
+		t.Fatalf("docs/codemap.md has no row starting %q", anchor)
+		return nil
+	}
+}
+
+func TestARowTwoBranchesEditedTakesOurs(t *testing.T) {
+	// main has alpha's edit when beta merges into it, so alpha's is ours.
 	const anchor = "| `WorkTracker` |"
 	base := "# Map\n\n| Port | Declared in |\n| --- | --- |\n| `Other` | `a` |\n" +
 		"| `WorkTracker` | `b` |\n| `Last` | `c` |\n"
-	suffix := func(s string) func([]string) []string {
-		return func(lines []string) []string {
-			for i, l := range lines {
-				if strings.HasPrefix(l, anchor) {
-					lines[i] = l + s
-					return lines
-				}
-			}
-			t.Fatalf("docs/codemap.md has no row starting %q", anchor)
-			return nil
+	merged, ok := mergeCodemapBranches(t, base, editRow(t, anchor, " alpha"), editRow(t, anchor, " beta"))
+	if !ok {
+		t.Fatalf("merging a row two branches edited conflicted:\n%s", merged)
+	}
+	if n := strings.Count(merged, anchor); n != 1 {
+		t.Fatalf("merged codemap holds a row starting %q %d times, want once:\n%s", anchor, n, merged)
+	}
+	if !strings.Contains(merged, "| `WorkTracker` | `b` | alpha\n") {
+		t.Errorf("merged codemap does not keep ours, alpha's edit:\n%s", merged)
+	}
+	if code, out := checkCodemapIn(t, merged); code != 0 {
+		t.Errorf("check-codemap refused the merged map (exit %d):\n%s", code, out)
+	}
+}
+
+func TestWithoutTheDriverAMergeStopsOnAConflictAndTheCheckRefusesIt(t *testing.T) {
+	// A host whose git config does not name merge.codemap.driver (a merge
+	// made by hand, not by mw) gets git's text merge: a conflict, said out
+	// loud, never union, and the check that make test makes refuses the
+	// markers if they are committed.
+	const anchor = "| `WorkTracker` |"
+	base := "# Map\n\n| Port | Declared in |\n| --- | --- |\n| `Other` | `a` |\n" +
+		"| `WorkTracker` | `b` |\n| `Last` | `c` |\n"
+	merged, ok := mergeCodemapBranchesWith(t, "", base, editRow(t, anchor, " alpha"), editRow(t, anchor, " beta"))
+	if ok {
+		t.Fatalf("a merge with no driver configured went through:\n%s", merged)
+	}
+	if !strings.Contains(merged, "<<<<<<<") {
+		t.Fatalf("a merge with no driver configured left no conflict markers:\n%s", merged)
+	}
+	if code, out := checkCodemapIn(t, merged); code == 0 || !strings.Contains(out, "conflict marker") {
+		t.Errorf("check-codemap did not refuse the conflicted map (exit %d):\n%s", code, out)
+	}
+}
+
+// runDriver runs scripts/codemap-merge.sh on the three versions as git would,
+// and returns what it left in ours.
+func runDriver(t *testing.T, base, ours, theirs string) string {
+	t.Helper()
+	script, err := filepath.Abs("../scripts/codemap-merge.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	paths := map[string]string{"base": base, "ours": ours, "theirs": theirs}
+	for name, text := range paths {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
 		}
 	}
-	merged, ok := mergeCodemapBranches(t, base, suffix(" alpha"), suffix(" beta"))
-	if !ok {
-		return // a conflict: the Builder resolves it by hand
+	cmd := exec.Command("sh", script, "base", "ours", "theirs")
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("codemap-merge.sh: %v\n%s", err, out)
 	}
-	if n := strings.Count(merged, anchor); n != 2 {
-		t.Fatalf("merged codemap holds a row starting %q %d times, want 2 (union)", anchor, n)
+	merged, err := os.ReadFile(filepath.Join(dir, "ours"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	code, out := checkCodemapIn(t, merged)
-	if code == 0 {
-		t.Fatalf("check-codemap passed a map holding two versions of one row:\n%s", out)
+	return string(merged)
+}
+
+// realCodemap is docs/codemap.md as the rig has it.
+func realCodemap(t *testing.T) string {
+	t.Helper()
+	body, err := os.ReadFile("../docs/codemap.md")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(out, "same first cell") {
-		t.Errorf("output does not name the repeated first cell:\n%s", out)
+	return string(body)
+}
+
+// trimmed is the map with every port row's last cell cut to its first eight
+// bytes and the two rows starting drop taken out, as a trim of the map does.
+func trimmed(t *testing.T, codemap string, drop ...string) string {
+	t.Helper()
+	var out []string
+	ports := false
+	dropped := 0
+next:
+	for _, line := range strings.Split(codemap, "\n") {
+		for _, d := range drop {
+			if strings.HasPrefix(line, d) {
+				dropped++
+				continue next
+			}
+		}
+		if strings.HasPrefix(line, "## ") {
+			ports = line == "## Ports"
+		}
+		if ports && strings.HasPrefix(line, "| ") && !strings.HasPrefix(line, "| Port ") {
+			cells := strings.Split(strings.TrimSuffix(line, " |"), " | ")
+			if last := cells[len(cells)-1]; len(last) > 8 {
+				cells[len(cells)-1] = last[:8]
+			}
+			line = strings.Join(cells, " | ") + " |"
+		}
+		out = append(out, line)
+	}
+	if dropped != len(drop) {
+		t.Fatalf("docs/codemap.md has %d of the rows %q", dropped, drop)
+	}
+	return strings.Join(out, "\n")
+}
+
+func TestTheDriverKeepsATrimAndTheRowTheOtherSideAdded(t *testing.T) {
+	// Ours trims the real map, theirs adds one port row among the rows ours
+	// shortened: the result is ours with theirs' row, not the union.
+	base := realCodemap(t)
+	ours := trimmed(t, base, "| `WorkTracker` |", "| WatchProbes |")
+	row := "| `NewPort` | application/newport.go | infra/newport | FakeNewPort |"
+	theirs := strings.Join(insertAfterRow(t, "| Reap{Terminal,Log,Armer} |", row)(strings.Split(base, "\n")), "\n")
+
+	merged := runDriver(t, base, ours, theirs)
+
+	shortReap := ""
+	for _, line := range strings.Split(ours, "\n") {
+		if strings.HasPrefix(line, "| Reap{Terminal,Log,Armer} |") {
+			shortReap = line
+		}
+	}
+	want := strings.Replace(ours, shortReap+"\n", shortReap+"\n"+row+"\n", 1)
+	if merged != want {
+		t.Errorf("merged map is not ours with theirs' row after the Reap row:\n%s", merged)
+	}
+	for _, line := range strings.Split(base, "\n") {
+		if !strings.Contains(ours, line) && strings.Contains(merged, line+"\n") {
+			t.Errorf("merged map brings back a row the trim shortened or took out: %q", line)
+		}
+	}
+	if len(merged) > 10240 {
+		t.Errorf("merged map is %d bytes, over the 10240 cap", len(merged))
+	}
+	if code, out := checkCodemapIn(t, merged); code != 0 {
+		t.Errorf("check-codemap refused the merged map (exit %d):\n%s", code, out)
+	}
+
+	// The other way round, as a landing merges a trim into a main that added
+	// the row: the same rows.
+	other := runDriver(t, base, theirs, ours)
+	if other != want {
+		t.Errorf("merging the trim into theirs is not the trim with theirs' row:\n%s", other)
+	}
+}
+
+func TestTheDriverKeepsTwoRowsAddedToOneSection(t *testing.T) {
+	base := realCodemap(t)
+	const anchor = "| WatchProbes |"
+	rowA := "| `AlphaPort` | application/alpha.go | infra/alpha | FakeAlpha |"
+	rowB := "| `BetaPort` | application/beta.go | infra/beta | FakeBeta |"
+	lines := func(row string) string {
+		return strings.Join(insertAfterRow(t, anchor, row)(strings.Split(base, "\n")), "\n")
+	}
+	merged := runDriver(t, base, lines(rowA), lines(rowB))
+	for _, row := range []string{rowA, rowB} {
+		if n := strings.Count(merged, row+"\n"); n != 1 {
+			t.Errorf("merged map holds %q %d times, want once", row, n)
+		}
+	}
+	if !strings.Contains(merged, anchor) || strings.Count(merged, "\n") != strings.Count(base, "\n")+2 {
+		t.Errorf("merged map is not the base with the two rows:\n%s", merged)
+	}
+}
+
+func TestTheDriverDropsARowTheOtherSideTookOut(t *testing.T) {
+	base := "# Map\n\n## Ports\n\n| Port | Declared in |\n|-|-|\n| `A` | a |\n| `B` | b |\n| `C` | c |\n"
+	ours := strings.Replace(base, "| `B` | b |\n", "| `B` | b |\n| `N` | n |\n", 1)
+	theirs := strings.Replace(base, "| `B` | b |\n", "", 1)
+	want := strings.Replace(base, "| `B` | b |\n", "| `N` | n |\n", 1)
+	if merged := runDriver(t, base, ours, theirs); merged != want {
+		t.Errorf("merged map keeps a row theirs took out, or loses ours:\n%s", merged)
 	}
 }
 

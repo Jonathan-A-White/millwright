@@ -4604,6 +4604,15 @@ story sent back to rebase as before. A rig without the key lands as it always di
 the key only once no older `mw next` runs on any host: an older one only notes that it
 does not know the key, and sends the story back.
 
+Union keeps both sides of every hunk both changed, so a story that trims rows gets the
+old rows back whenever the other side added one. millwright's own `docs/codemap.md` is
+therefore named `merge=codemap` in `.gitattributes`, and every merge `mw` makes passes
+`-c merge.codemap.driver=sh <worktree>/scripts/codemap-merge.sh %O %A %B` itself, so no
+host's git config is edited: the result keeps each side's trims and removals, adds the
+rows the other side added, and a row both edited takes ours. A merge made by hand, with
+no such config, gets git's text merge, which stops on a conflict; a landing never settles
+a `merge=codemap` file by union, even when the rig lists it (mw-gq6.495).
+
 ### The changelog a landing writes
 
 A rig's file that names `version_files` may also say
