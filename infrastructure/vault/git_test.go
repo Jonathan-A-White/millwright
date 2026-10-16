@@ -582,3 +582,31 @@ func TestBranchAndHeadSubjectNameTheCheckedOutBranchAndItsHeadsFirstLine(t *test
 		t.Fatalf("expected the head's subject, got %q, %v", subject, err)
 	}
 }
+
+func TestLastSignIsTheNewestCommitAuthoredAsThatHostAndNoOtherHosts(t *testing.T) {
+	here, _ := twoHosts(t)
+	ctx := context.Background()
+
+	commitAs := func(author, name string) {
+		t.Helper()
+		write(t, here, name, name+"\n")
+		if _, err := vault.New(here, vault.WithAuthor(author)).Commit(ctx, "Close out "+name, []string{name}); err != nil {
+			t.Fatalf("committing as %s: %v", author, err)
+		}
+	}
+	commitAs("mw@cloud2", "runs/mw-gq6.1/report.md")
+	commitAs("mw@cloud22", "runs/mw-gq6.2/report.md")
+
+	sign, err := vault.New(here).LastSign(ctx, "cloud2")
+	if err != nil {
+		t.Fatalf("reading the sign of cloud2: %v", err)
+	}
+	if sign.What != vault.SignOfLifeCommit || sign.At.IsZero() || time.Since(sign.At) > time.Minute {
+		t.Fatalf("expected a vault commit made just now, got %+v", sign)
+	}
+
+	// mw@cloud is a prefix of both of them, and has committed nothing.
+	if sign, err := vault.New(here).LastSign(ctx, "cloud"); err != nil || !sign.At.IsZero() {
+		t.Fatalf("expected no sign of cloud, got %+v, %v", sign, err)
+	}
+}
