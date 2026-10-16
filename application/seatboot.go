@@ -39,6 +39,24 @@ type Seat struct {
 	HasFacts     bool
 	Facts        []RigFact
 	SkippedFacts []string
+	// SubjectQueries is how many logged queries of the rig hit each subject of
+	// its facts; the boot names the most queried (mw-1ljpo9.8).
+	SubjectQueries map[string]int
+}
+
+// QueriedSubjects is the one line a Builder's boot adds for a rig kept as facts:
+// its ten most queried subjects and the command that queries them, so that a
+// Builder queries before it guesses. Empty for a rig with no facts.
+func (s Seat) QueriedSubjects() string {
+	if !s.HasFacts {
+		return ""
+	}
+	subjects := TopSubjects(s.Facts, s.SubjectQueries, TopSubjectsLimit)
+	if len(subjects) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Most queried subjects: %s. The render above is not all of it; before touching one, run mw memory query %s <term>.",
+		strings.Join(subjects, ", "), s.Rig)
 }
 
 // RigMemory is what a session reads of the seat's memory of its rig: the render
@@ -265,6 +283,10 @@ type SeatBoot struct {
 	// real bd.
 	BdRetry []string
 
+	// Queries is the host's log of memory queries, read at boot for the subjects
+	// of a rig's facts that Builders query most; nil counts none.
+	Queries MemoryQueryLog
+
 	// MaxTurns is the most turns a story's session may take, the host's
 	// next.max_turns, unless the story's own path sets max_turns (mw-1ljpo9.6).
 	// The session is told to wrap up at TurnCapWrapUp of them, and at the cap
@@ -476,6 +498,13 @@ func (b SeatBoot) boot(ctx context.Context, detail StoryDetail, dir string, kick
 	seat, err := b.Vault.Seat(ctx, b.Seat, path.Rig)
 	if err != nil {
 		return SessionSpec{}, fmt.Errorf("booting %s: %w", id, err)
+	}
+
+	if b.Queries != nil && seat.HasFacts {
+		// A log that does not read leaves the boot without counts, not without a boot.
+		if records, err := b.Queries.ReadMemoryQueries(ctx); err == nil {
+			seat.SubjectQueries = SubjectQueryCounts(records, path.Rig, time.Time{})
+		}
 	}
 
 	// The attempt this session is: the first for a story dispatched fresh, one
@@ -745,6 +774,9 @@ func BatchFixBootPrompt(seat Seat, brief BatchFixBrief) string {
 	if memory := seat.RigMemory(); memory != "" {
 		fmt.Fprintf(&b, "# The %s seat's memory of the rig %s\n\n", seat.Name, seat.Rig)
 		section(&b, memory)
+		if line := seat.QueriedSubjects(); line != "" {
+			section(&b, line)
+		}
 	}
 
 	fmt.Fprintf(&b, "# Your batch: %s\n\n", brief.Label())
@@ -811,6 +843,9 @@ func BootPrompt(seat Seat, detail StoryDetail) string {
 		fmt.Fprintf(&b, "# The %s seat's memory of the rig %s\n\n", seat.Name, seat.Rig)
 		if memory != "" {
 			section(&b, memory)
+		}
+		if line := seat.QueriedSubjects(); line != "" {
+			section(&b, line)
 		}
 		if len(seat.SkippedFacts) > 0 {
 			b.WriteString("Fact files skipped because they are malformed (tell the Mayor):\n\n")

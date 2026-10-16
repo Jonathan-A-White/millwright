@@ -31,6 +31,26 @@ type RigFactFiles interface {
 	ReadRigEval(ctx context.Context, seat, rig string) (text string, found bool, err error)
 }
 
+// MemoryQueryRecord is one `mw memory query` run, as the host's log keeps it:
+// when, of which rig, with which terms, how many facts it hit, the subjects of
+// those facts, and the story whose session ran it (empty for the Mayor's).
+type MemoryQueryRecord struct {
+	At       time.Time `json:"at"`
+	Rig      string    `json:"rig"`
+	Terms    []string  `json:"terms"`
+	Hits     int       `json:"hits"`
+	Subjects []string  `json:"subjects,omitempty"`
+	Story    string    `json:"story,omitempty"`
+}
+
+// MemoryQueryLog is the port behind the count of what Builders query: the
+// host's own log, one record a query. It is host state, never the vault.
+type MemoryQueryLog interface {
+	AppendMemoryQuery(ctx context.Context, record MemoryQueryRecord) error
+	// ReadMemoryQueries reads every record, oldest first; no log is no records.
+	ReadMemoryQueries(ctx context.Context) ([]MemoryQueryRecord, error)
+}
+
 // factSlugWords is how many words of a sentence a slug is made of by default.
 const factSlugWords = 5
 
@@ -50,6 +70,13 @@ type Memory struct {
 	Budget int
 	Now    func() time.Time
 	Out    io.Writer
+
+	// Queries logs each query and reads them back for stats; nil logs nothing.
+	// Story is the story whose session runs the query, Warn where a log that
+	// cannot be written is said (a query still answers).
+	Queries MemoryQueryLog
+	Story   string
+	Warn    io.Writer
 }
 
 // MemoryAdd is the request mw memory add makes.
@@ -78,12 +105,15 @@ type MemoryQuery struct {
 	Terms []string
 }
 
-func (m Memory) today() string {
-	now := time.Now
+func (m Memory) clock() time.Time {
 	if m.Now != nil {
-		now = m.Now
+		return m.Now()
 	}
-	return now().UTC().Format(FactDateLayout)
+	return time.Now()
+}
+
+func (m Memory) today() string {
+	return m.clock().UTC().Format(FactDateLayout)
 }
 
 // load reads a rig's facts, refusing a rig the seat has no folder for. The
@@ -583,6 +613,7 @@ func (m Memory) Query(ctx context.Context, req MemoryQuery) error {
 			hits = append(hits, fact)
 		}
 	}
+	m.logQuery(ctx, req.Rig, terms, hits)
 	if len(hits) == 0 {
 		return fmt.Errorf("no fact matches %s in the rig %s", strings.Join(terms, " "), req.Rig)
 	}
@@ -591,6 +622,134 @@ func (m Memory) Query(ctx context.Context, req MemoryQuery) error {
 	}
 	for _, fact := range related(hits, all, bySlug) {
 		fmt.Fprintln(m.Out, queryLine(fact)+"  related")
+	}
+	return nil
+}
+
+// logQuery records a query in the host's log. A log that cannot be written is
+// warned of and does not fail the query.
+func (m Memory) logQuery(ctx context.Context, rig string, terms []string, hits []RigFact) {
+	if m.Queries == nil {
+		return
+	}
+	seen := map[string]bool{}
+	var subjects []string
+	for _, fact := range hits {
+		if !seen[fact.Subject] {
+			seen[fact.Subject] = true
+			subjects = append(subjects, fact.Subject)
+		}
+	}
+	sort.Strings(subjects)
+	record := MemoryQueryRecord{At: m.clock().UTC(), Rig: rig, Terms: terms, Hits: len(hits), Subjects: subjects, Story: m.Story}
+	if err := m.Queries.AppendMemoryQuery(ctx, record); err != nil && m.Warn != nil {
+		fmt.Fprintf(m.Warn, "the query was not logged: %v\n", err)
+	}
+}
+
+// SubjectQueryCounts is how many queries of a rig, at or after since (zero for
+// all of them), hit each subject.
+func SubjectQueryCounts(records []MemoryQueryRecord, rig string, since time.Time) map[string]int {
+	counts := map[string]int{}
+	for _, record := range records {
+		if record.Rig != rig || record.At.Before(since) {
+			continue
+		}
+		for _, subject := range record.Subjects {
+			counts[subject]++
+		}
+	}
+	return counts
+}
+
+// TopSubjectsLimit is how many subjects a Builder's boot names.
+const TopSubjectsLimit = 10
+
+// TopSubjects names at most n subjects of facts, the most queried first, then
+// the one with the most facts, then by name. A subject no fact has is left out
+// however often it was queried.
+func TopSubjects(facts []RigFact, queries map[string]int, n int) []string {
+	held := map[string]int{}
+	for _, fact := range facts {
+		held[fact.Subject]++
+	}
+	subjects := make([]string, 0, len(held))
+	for subject := range held {
+		subjects = append(subjects, subject)
+	}
+	sort.Slice(subjects, func(i, j int) bool {
+		a, b := subjects[i], subjects[j]
+		switch {
+		case queries[a] != queries[b]:
+			return queries[a] > queries[b]
+		case held[a] != held[b]:
+			return held[a] > held[b]
+		}
+		return a < b
+	})
+	if len(subjects) > n {
+		subjects = subjects[:n]
+	}
+	return subjects
+}
+
+// MemoryStats is the request mw memory stats makes. An empty Since is a week.
+type MemoryStats struct {
+	Rig, Since string
+}
+
+// Stats prints how often a rig's memory was queried since a time, how many of
+// the queries found nothing, and the subjects they hit, most first.
+func (m Memory) Stats(ctx context.Context, req MemoryStats) error {
+	if m.Queries == nil {
+		return fmt.Errorf("there is no query log on this host")
+	}
+	if _, _, _, err := m.load(ctx, req.Rig); err != nil {
+		return err
+	}
+	text := req.Since
+	if text == "" {
+		text = "7d"
+	}
+	from, err := ParseReportSince(text, m.clock())
+	if err != nil {
+		return err
+	}
+	records, err := m.Queries.ReadMemoryQueries(ctx)
+	if err != nil {
+		return err
+	}
+	queries, empty := 0, 0
+	for _, record := range records {
+		if record.Rig != req.Rig || record.At.Before(from) {
+			continue
+		}
+		queries++
+		if record.Hits == 0 {
+			empty++
+		}
+	}
+	noun := "queries"
+	if queries == 1 {
+		noun = "query"
+	}
+	fmt.Fprintf(m.Out, "%s: %d %s since %s, %d found nothing\n", req.Rig, queries, noun, from.Format(LedgerDate), empty)
+	counts := SubjectQueryCounts(records, req.Rig, from)
+	subjects := make([]string, 0, len(counts))
+	for subject := range counts {
+		subjects = append(subjects, subject)
+	}
+	sort.Slice(subjects, func(i, j int) bool {
+		if counts[subjects[i]] != counts[subjects[j]] {
+			return counts[subjects[i]] > counts[subjects[j]]
+		}
+		return subjects[i] < subjects[j]
+	})
+	for i, subject := range subjects {
+		if i == 0 {
+			fmt.Fprintln(m.Out, "subjects queried, most first:")
+		}
+		fmt.Fprintf(m.Out, "  %3d  %s\n", counts[subject], subject)
 	}
 	return nil
 }

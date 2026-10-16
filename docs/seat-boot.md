@@ -135,7 +135,13 @@ topic read then.
    hierarchical for a rig kept as facts (`mw memory query`, `mw memory demote`
    after an eval); millwright's own memory is still the flat `millwright.md` at
    7,835 of 8,000 bytes, so migrating it (`mw memory migrate millwright`) is
-   what makes demotion by eval apply to it.
+   what makes demotion by eval apply to it. Every `mw memory query` is logged
+   (rig, terms, hits, the story from `$MW_STORY`) to the host's
+   `~/.local/state/mw/memory-queries.jsonl`, host state so that a Builder's
+   query leaves the vault clean; `mw memory stats <rig> [--since 7d]` counts
+   them, and a facts rig's boot ends its memory with one line naming the ten
+   most queried subjects (then those with most facts) and the query command
+   (mw-1ljpo9.8).
 6. **Every session in the vault reads `AGENTS.md`'s beads block** if the
    harness reads `AGENTS.md`: 3,793 bytes telling it to use `bd prime`, `bd
    remember` and to push before stopping, all three against ADR 0003 and the
