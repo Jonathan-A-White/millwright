@@ -1,6 +1,8 @@
 package rig
 
 import (
+	"context"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -63,4 +65,32 @@ func (Files) FilesIn(rigDir, dir string, most int) (int, bool) {
 		return nil
 	})
 	return n, true
+}
+
+// Docs reads one file of a rig's checkout on this host, for a seat's boot
+// manifest entry that names a rig: the adapter behind application.RigDocs.
+// Rigs is where each rig is checked out, by name, as the config's [rigs] says.
+type Docs struct {
+	Rigs map[string]string
+}
+
+var _ application.RigDocs = Docs{}
+
+// RigFile implements application.RigDocs.
+func (d Docs) RigFile(_ context.Context, rig, rel string) (string, error) {
+	dir, here := d.Rigs[rig]
+	if !here || dir == "" {
+		return "", fmt.Errorf("the rig %s is not checked out on this host (the config's [rigs] does not name it)", rig)
+	}
+	switch {
+	case rel == "":
+		return "", fmt.Errorf("a path in the rig %s is needed", rig)
+	case strings.HasPrefix(rel, "/"), strings.Contains(rel, `\`), strings.Contains(rel, ".."):
+		return "", fmt.Errorf("%q would reach outside the rig %s", rel, rig)
+	}
+	text, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+	if err != nil {
+		return "", fmt.Errorf("reading %s of the rig %s: %w", rel, rig, err)
+	}
+	return string(text), nil
 }

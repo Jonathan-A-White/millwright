@@ -3433,6 +3433,43 @@ one, as tmux's `-L`; it is for tests.
 See `features/seat_up.feature`, and `infrastructure/tmux/window.go` for the
 windows themselves.
 
+## What a seat reads at boot
+
+```sh
+bin/mw seat boot mayor
+bin/mw seat read mayor handing-off
+bin/mw seat read mayor
+```
+
+`mw seat boot <seat>` prints a seat's boot set in one output: every part its
+manifest, `seats/<seat>/boot.toml`, names, in order, each under a
+`==> <part> <==` line and within its byte cap, then an index of what the seat
+can read by need. It is
+one tool call in place of the run of reads a seat's kickoff used to send it on,
+and nothing the manifest does not name is read, so what a seat pays at boot is
+what its manifest says. A `[[boot]]` entry is one of `file` (a path from the
+vault's root, or from a rig's checkout with `rig = "<rig>"`), `newest` (a
+directory of the vault whose newest `.md` by name is read: a seat's handoffs) or
+`command` (a shell line run in the vault, what it prints being the part), with
+`section` (one heading of the file, by text or slug) and `cap` (bytes; `0`
+none; default the manifest's own `cap`, else 8000). A path may hold `{host}`
+and `{seat}`. A part past its cap is cut at a line end and ends
+`[cut at <cap> of <size> bytes]`. A part that cannot be read is said in its
+place, the rest is printed, and the command exits non-zero counting them.
+
+`mw seat read <seat> <topic>` prints the section under one heading of the files
+the manifest names as `[[topic]]` entries, whole: the heading line through the
+line before the next heading of its level or higher. A topic is the heading's
+slug (its first five words before any aside in parentheses or after a colon,
+lower-case and hyphenated, as the boot set's index lists them) or a prefix no
+other slug shares; an unknown or ambiguous one is refused, naming what there
+is. With no topic it prints the index. Both read files only; `boot` also runs
+the manifest's commands, each for at most `--timeout` (2m).
+
+The measurements behind it, each seat's boot in tokens before and after, and
+the manifests proposed for each seat are in `docs/seat-boot.md`. See
+`application/seatboot_manifest.go` and its tests.
+
 ## Closing a finished session's window
 
 ```sh
