@@ -26,6 +26,7 @@ func keepingAHistory(t *testing.T, commits int) (application.Sync, *apptest.Fake
 	t.Helper()
 	sync, _, tracker := keeping(t)
 	sync.History = tracker
+	sync.Squash = true
 	tracker.SetHistory(commits)
 	backedUpAgo(t, tracker, 10*24*time.Hour)
 	tracker.SyncExits(1, "Blob not found ecbmjej2q1bv3qjpr9ihoj3ql22n5jrf.darc")
@@ -89,6 +90,7 @@ func TestTheHomeKeepsItsHistoryWhileItsBackupGetsThrough(t *testing.T) {
 		"backed up this sync": func(t *testing.T) (application.Sync, *apptest.FakeTracker) {
 			sync, _, tracker := keeping(t)
 			sync.History = tracker
+			sync.Squash = true
 			tracker.SetHistory(96_100)
 			backedUpAgo(t, tracker, 10*24*time.Hour)
 			return sync, tracker
@@ -96,6 +98,7 @@ func TestTheHomeKeepsItsHistoryWhileItsBackupGetsThrough(t *testing.T) {
 		"backed up within the day": func(t *testing.T) (application.Sync, *apptest.FakeTracker) {
 			sync, _, tracker := keeping(t)
 			sync.History = tracker
+			sync.Squash = true
 			tracker.SetHistory(96_100)
 			backedUpAgo(t, tracker, 10*time.Minute)
 			return sync, tracker
@@ -125,6 +128,7 @@ func TestTheHomeKeepsItsHistoryWhileItsBackupGetsThrough(t *testing.T) {
 func TestAHostThatSyncsThroughTheRemoteNeverSquashes(t *testing.T) {
 	sync, _, tracker := syncing(t)
 	sync.History = tracker
+	sync.Squash = true
 	tracker.SetHistory(96_100)
 
 	report, err := sync.Run(context.Background())
@@ -205,5 +209,31 @@ func TestANilHistoryNeverSquashes(t *testing.T) {
 	}
 	if got := tracker.Squashes(); got != 0 {
 		t.Fatalf("expected a sync with no history port never to squash, got %d", got)
+	}
+}
+
+// The squash erases the only copy of the home's beads history while its backup
+// is down, and only the Governor may say that is wanted (mw-gq6.504): a home
+// whose config says nothing about it never squashes, however long the history
+// and however long the backup has been down.
+func TestTheHomeNeverSquashesUntilTheConfigTurnsItOn(t *testing.T) {
+	sync, _, tracker := keeping(t)
+	sync.History = tracker
+	tracker.SetHistory(96_100)
+	backedUpAgo(t, tracker, 10*24*time.Hour)
+	tracker.SyncExits(1, "Blob not found ecbmjej2q1bv3qjpr9ihoj3ql22n5jrf.darc")
+
+	report, err := sync.Run(context.Background())
+	if err != nil {
+		t.Fatalf("syncing: %v", err)
+	}
+	if tracker.Squashes() != 0 || report.Squashed != 0 {
+		t.Fatalf("expected a home whose config does not turn the squash on to keep its history, got %d squashes", tracker.Squashes())
+	}
+	if line := report.String(); strings.Contains(line, "squashed") {
+		t.Fatalf("expected the sync's line to say nothing of a squash, got %q", line)
+	}
+	if !report.GCed || tracker.GCs() != 1 {
+		t.Fatalf("expected the day's collection to run all the same, got GCed=%v and %d", report.GCed, tracker.GCs())
 	}
 }

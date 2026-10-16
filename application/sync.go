@@ -702,6 +702,11 @@ type Sync struct {
 	// BackupDownBeforeSquash. A nil History never squashes.
 	History TrackerHistory
 
+	// Squash is sync.beads_squash of the config file (mw-gq6.504): without it
+	// the history is never squashed, the zero value, because a squash erases
+	// the only copy of it while the backup is down and cannot be undone.
+	Squash bool
+
 	// SquashAt is how many commits the history may hold before it is
 	// squashed. Zero reads DefaultSquashAt.
 	SquashAt int
@@ -1046,14 +1051,15 @@ func (s Sync) collectTheOneDatabase(ctx context.Context, report *SyncReport) {
 	report.GCed = s.gc(ctx)
 }
 
-// maybeSquash squashes the beads history once it holds SquashAt commits and
+// maybeSquash squashes the beads history, when the config has turned Squash
+// on, once it holds SquashAt commits and
 // nothing can pull the old history back in: no backup has got through for
 // BackupDownBeforeSquash, this sync's own included. It reports how many
 // commits it folded, 0 when it did not. Like the collection it never fails a
 // sync: a history that cannot be counted or squashed is left as it was, for
 // the next collection to try.
 func (s Sync) maybeSquash(ctx context.Context, report SyncReport) int {
-	if s.History == nil || report.BackedUp || !s.backupDownFor(ctx, BackupDownBeforeSquash) {
+	if !s.Squash || s.History == nil || report.BackedUp || !s.backupDownFor(ctx, BackupDownBeforeSquash) {
 		return 0
 	}
 	commits, err := s.History.HistoryCommits(ctx)
