@@ -11,6 +11,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/application/apptest"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
+	"github.com/Jonathan-A-White/millwright/infrastructure/hands"
 )
 
 // fakeHandsPush swaps the sender mw hands add pushes through for a fake, so
@@ -238,5 +239,17 @@ func TestHandsListWithNoBeadIsAccepted(t *testing.T) {
 	}
 	if !strings.Contains(out, "no open hands steps") {
 		t.Errorf("expected nothing waiting said, got %q", out)
+	}
+}
+
+// mw hands add's help says the PATH a user step runs with, the runner's own
+// (mw-gq6.458): a step that names mw finds it in ~/.local/bin.
+func TestHandsAddHelpSaysTheUserStepPath(t *testing.T) {
+	out, err := runMw(t, "hands", "add", "--help")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "PATH="+hands.UserStepPath+":$PATH") {
+		t.Errorf("expected mw hands add --help to say a user step's PATH, %s:$PATH, got:\n%s", hands.UserStepPath, out)
 	}
 }

@@ -10,7 +10,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -43,9 +45,17 @@ const DefaultRootHelper = "/usr/local/sbin/mw-hands-root"
 // much a step prints.
 const OutputKept = 1 << 20
 
-// Runner runs an approved step: a user step as sh -c, a root step by handing
-// the request to mw-hands-root through sudo -n on its standard input; on
-// another host, both over that host's ssh prefix.
+// UserStepPath is what a user step finds ahead of the PATH mw has, here and
+// over ssh alike, ~ its user's home: where every host installs mw and bd
+// (~/.local/bin), go install puts its programs, and Go itself, as the seats'
+// shells have them. mw is often started under a systemd user service's bare
+// PATH, and a step that ran `mw cloud check` there ended exit 127.
+const UserStepPath = "~/.local/bin:~/go/bin:/usr/local/go/bin"
+
+// Runner runs an approved step: a user step as sh -c with UserStepPath ahead
+// of its PATH, a root step by handing the request to mw-hands-root through
+// sudo -n on its standard input; on another host, both over that host's ssh
+// prefix.
 type Runner struct {
 	// RootHelper is mw-hands-root's path, the same on every host.
 	RootHelper string
@@ -115,9 +125,9 @@ func (r Runner) command(job application.HandsJob) ([]string, []byte, time.Durati
 			if logsInAsRoot(job.Remote) {
 				return nil, nil, 0, fmt.Errorf("the [hands_hosts] prefix for %s logs in as root, so a user step there would run as root without mw-hands-root's checks: give it a non-root login", req.Host)
 			}
-			return append(append([]string(nil), job.Remote...), "sh -c "+shellQuote(req.Run)), nil, r.UserLimit, nil
+			return append(append([]string(nil), job.Remote...), "sh -c "+shellQuote(userScript(req.Run))), nil, r.UserLimit, nil
 		}
-		return []string{r.Shell, "-c", req.Run}, nil, r.UserLimit, nil
+		return []string{r.Shell, "-c", userScript(req.Run)}, nil, r.UserLimit, nil
 	case domain.HandsAsRoot:
 		body, err := json.Marshal(req)
 		if err != nil {
@@ -130,6 +140,27 @@ func (r Runner) command(job application.HandsJob) ([]string, []byte, time.Durati
 	default:
 		return nil, nil, 0, fmt.Errorf("a step runs as %s or %s, not %q", domain.HandsAsUser, domain.HandsAsRoot, req.As)
 	}
+}
+
+// userScript is what sh -c runs for a user step: UserStepPath put ahead of
+// PATH by the shell that runs it, so ~ is that host's home, then run.
+func userScript(run string) string {
+	return `PATH="` + strings.ReplaceAll(UserStepPath, "~", "$HOME") + `:$PATH"; export PATH` + "\n" + run
+}
+
+// Finds reports whether a user step on this host would find program: an
+// executable file in a directory of UserStepPath or of mw's own PATH.
+func (Runner) Finds(program string) bool {
+	path := strings.ReplaceAll(UserStepPath, "~", os.Getenv("HOME")) + string(filepath.ListSeparator) + os.Getenv("PATH")
+	for _, dir := range filepath.SplitList(path) {
+		if dir == "" {
+			continue
+		}
+		if info, err := os.Stat(filepath.Join(dir, program)); err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // logsInAsRoot reports whether an ssh prefix names root as its login, as

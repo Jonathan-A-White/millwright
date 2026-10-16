@@ -179,3 +179,85 @@ func TestRunnerRefusesAUserStepOverARootLogin(t *testing.T) {
 		}
 	}
 }
+
+// A user step finds mw where every host installs it, ~/.local/bin, though
+// the PATH mw was started with (postern-backend.service's, a systemd user
+// service's) lacks it: his cloud-table step ended exit 127 on `mw cloud
+// check` (mw-gq6.458).
+func TestRunnerFindsMwInTheUsersLocalBinForAUserStep(t *testing.T) {
+	home := t.TempDir()
+	mw := filepath.Join(home, ".local", "bin", "mw")
+	if err := os.MkdirAll(filepath.Dir(mw), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mw, []byte("#!/bin/sh\necho mw ran\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", "/usr/bin:/bin")
+
+	outcome, err := hands.NewRunner("/usr/local/sbin/mw-hands-root").Run(context.Background(), userJob("command -v mw && mw"))
+	if err != nil {
+		t.Fatalf("running: %v", err)
+	}
+	if outcome.Exit != 0 || !strings.Contains(outcome.Output, mw+"\nmw ran") {
+		t.Fatalf("expected the step to find %s and run it, got %+v", mw, outcome)
+	}
+}
+
+// The PATH a user step gets is the one documented on the runner and in mw
+// hands add's help: ~/.local/bin, ~/go/bin and /usr/local/go/bin ahead of the
+// PATH mw has, here and over ssh alike.
+func TestAUserStepGetsTheDocumentedPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", "/usr/bin:/bin")
+	want := home + "/.local/bin:" + home + "/go/bin:/usr/local/go/bin:/usr/bin:/bin\n"
+	if got := strings.ReplaceAll(hands.UserStepPath, "~", home) + ":/usr/bin:/bin\n"; got != want {
+		t.Fatalf("expected the documented PATH %q, got %q", want, got)
+	}
+
+	runner := hands.NewRunner("/usr/local/sbin/mw-hands-root")
+	here, err := runner.Run(context.Background(), userJob(`echo "$PATH"`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if here.Output != want {
+		t.Fatalf("expected a user step here to get PATH %q, got %q", want, here.Output)
+	}
+
+	job := userJob(`echo "$PATH"`)
+	job.Request.Host = "laptop"
+	job.Remote = []string{standIn(t, "ssh", `for last in "$@"; do :; done
+exec sh -c "$last"
+`), "laptop"}
+	there, err := runner.Run(context.Background(), job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if there.Output != want {
+		t.Fatalf("expected a user step over ssh to get PATH %q, got %q", want, there.Output)
+	}
+}
+
+// Finds looks where a user step would: mw in ~/.local/bin only is found, a
+// program nowhere is not.
+func TestRunnerFindsWhatAUserStepWouldFind(t *testing.T) {
+	home := t.TempDir()
+	mw := filepath.Join(home, ".local", "bin", "mw")
+	if err := os.MkdirAll(filepath.Dir(mw), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mw, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", "/usr/bin:/bin")
+	runner := hands.NewRunner("/usr/local/sbin/mw-hands-root")
+	if !runner.Finds("mw") {
+		t.Fatal("expected mw found in ~/.local/bin")
+	}
+	if runner.Finds("no-such-program-mw-gq6-458") {
+		t.Fatal("expected a program nowhere not found")
+	}
+}

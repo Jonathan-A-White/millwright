@@ -13,6 +13,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
+	"github.com/Jonathan-A-White/millwright/infrastructure/hands"
 	"github.com/Jonathan-A-White/millwright/infrastructure/hostlock"
 )
 
@@ -143,6 +144,10 @@ func newHandsAddCmd() *cobra.Command {
 			"The commands are one argument after --, quoted. --way-back says how to undo them. An id\n" +
 			"is used once per bead: --replace changes a step already there, which changes its hash\n" +
 			"and so voids any approval of the old one.\n\n" +
+			"A user step runs as sh -c with PATH=" + hands.UserStepPath + ":$PATH, ~ the home of\n" +
+			"the host's user, as the seats' shells have it: so a step that names mw finds it in\n" +
+			"~/.local/bin. A user step for this host that names mw when no mw is there is kept with\n" +
+			"a warning on stderr.\n\n" +
 			"Once the step is kept, one Postern message is sent to the Governor on the bead's thread,\n" +
 			"whose tap opens Needs you. A push that fails is said on stderr and on the bead, and the\n" +
 			"step stays: mw hands add still exits 0. --no-push sends none. A --replace sends one only\n" +
@@ -175,6 +180,9 @@ func newHandsAddCmd() *cobra.Command {
 				View:     newHandsView(gateway, viewHost),
 				ViewLock: newHandsViewLock(),
 				NoView:   noView,
+
+				Here:  viewHost,
+				Finds: hands.NewRunner("").Finds,
 			}.Run(cmd.Context(), application.HandsAddRequest{
 				Bead:    args[0],
 				Step:    domain.HandsStep{ID: id, Host: host, As: as, Run: args[1], WayBack: wayBack},
