@@ -175,6 +175,13 @@ func (r TodoReminder) say(format string, args ...any) {
 	}
 }
 
+// TodoNightlyNotes is the part of the tracker's key-value store the job keeps its
+// days in.
+type TodoNightlyNotes interface {
+	Note(ctx context.Context, key string) (string, error)
+	SetNote(ctx context.Context, key, value string) error
+}
+
 // TodoReminderJob is the job the follower runs for TodoReminder: no event
 // springs it, it runs every d, on the follower's own clock.
 func TodoReminderJob(every time.Duration, run func(context.Context) error) SpringJob {

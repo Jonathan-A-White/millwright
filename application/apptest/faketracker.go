@@ -1604,6 +1604,9 @@ func (f *FakeTracker) SetStoryMetadata(_ context.Context, id string, fields map[
 			if k == application.TodoSlippedField {
 				s.detail.TodoSlipped = v
 			}
+			if k == application.TodoSlippedToldField {
+				s.detail.TodoSlippedTold = v
+			}
 			if k == application.TodoRemindedField {
 				s.detail.TodoReminded = v
 			}

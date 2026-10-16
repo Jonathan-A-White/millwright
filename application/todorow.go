@@ -19,6 +19,9 @@ const (
 	TodoRowField     = "todo_row"
 	TodoRowWhyField  = "todo_row_why"
 	TodoSlippedField = "todo_slipped"
+	// TodoSlippedToldField is the todo_slipped due time the nightly job last told
+	// him of in the card's thread, so a slipped star is told once.
+	TodoSlippedToldField = "todo_slipped_told"
 )
 
 // The four rows of his board: Do now, Make time, Later and Let go.
