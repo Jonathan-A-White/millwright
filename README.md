@@ -291,6 +291,12 @@ whichever host is under its cap and has room takes it, and the claim writes that
 host's name over `auto`, so every later reader sees a concrete host.
 `mw status` lists a ready `auto` story under READY on every host, as `host auto`.
 
+`mw queue [--host h] [--rig r] [--json]` prints what a dispatch would start next: the
+ready stories in the dispatch's own start order (priority, then oldest), each with its
+priority, age and size, a line under one the files guard would hold, and then the next
+five blocked stories with the stories each waits on. The Postern view's `hosts[].up_next`
+carries the first three per host. It only reads.
+
 A host has **room** for a story of any host, `auto` or named, only while its
 1-minute load average is under `room_load_per_core` of a core each (default 1.0,
 so under its core count) and at least `room_min_free_mb` of memory is available
