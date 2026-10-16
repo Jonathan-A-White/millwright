@@ -196,7 +196,8 @@ func (r EpicRequirements) Check(epic EpicShape) []Shortfall {
 
 // HasSection reports whether a description contains a section called name: a
 // markdown heading whose text is the name (a trailing colon allowed), or any
-// line that starts "<name>:". Case is not significant.
+// line that starts "<name>:", after any bullet or item number. Case is not
+// significant.
 func HasSection(description, name string) bool {
 	name = strings.TrimSpace(name)
 	for _, line := range strings.Split(description, "\n") {
@@ -207,6 +208,8 @@ func HasSection(description, name string) bool {
 				return true
 			}
 		}
+		// A bullet or an item number may come first: "3. Demo: ..." (mw-gq6.469).
+		line = TrimListMarker(line)
 		if len(line) > len(name) && strings.EqualFold(line[:len(name)], name) && line[len(name)] == ':' {
 			return true
 		}

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/Jonathan-A-White/millwright/domain"
 )
 
 // RigMemoryMarker heads the section at the end of a Builder's closing comment
@@ -53,8 +55,6 @@ var (
 	proposalSubjectForm = regexp.MustCompile(`^(gotcha|decision) \[([^\]]*)\]:(.*)$`)
 	// proposalSlugForm is 'supersede <slug>: sentence', and retire's and recheck's.
 	proposalSlugForm = regexp.MustCompile(`^(supersede|retire|recheck) ([a-z0-9][a-z0-9-]*):(.*)$`)
-	// proposalListMarker is a bullet or a number a line may start with.
-	proposalListMarker = regexp.MustCompile(`^(?:[-*+]|\d+[.)])\s+`)
 )
 
 // ParseFactProposals reads the 'For the rig memory:' section of one closing
@@ -82,7 +82,7 @@ func ParseFactProposals(comment string) FactProposals {
 		if strings.Contains(strings.ToLower(raw), strings.ToLower(CommonErrorsMarker)) {
 			break
 		}
-		text := strings.TrimSpace(proposalListMarker.ReplaceAllString(strings.TrimSpace(raw), ""))
+		text := strings.TrimSpace(domain.TrimListMarker(raw))
 		if text == "" {
 			continue
 		}
