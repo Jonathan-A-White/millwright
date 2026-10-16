@@ -284,7 +284,12 @@ func newDoctorCmd() *cobra.Command {
 			rootDisk.Note = func(ctx context.Context, text string) error {
 				return mwGateway(vault, host).SetNote(ctx, application.DoctorNoteKey(host, doctor.RootDiskBudgetName), text)
 			}
+			dampers, err := damperSurvey(mwGateway(vault, host))
+			if err != nil {
+				return err
+			}
 			return runDoctor(cmd, application.Doctor{
+				Dampers: dampers,
 				Checks: append(application.DoctorChecks{
 					doctor.NewDaemonReload(units),
 					doctor.NewWifi(reach, powershell, store),

@@ -3,6 +3,7 @@ package domain
 import (
 	"fmt"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -24,6 +25,8 @@ type GraphBead struct {
 	// Type is the tracker's word for the kind of bead: epic, task, bug.
 	Type   string
 	Labels []string
+	// Created is when the bead was filed; zero when the tracker did not say.
+	Created time.Time
 	// Edges are the links this bead itself carries, each to another bead. A
 	// parent-child edge runs from the child to its parent.
 	Edges []BeadEdge
@@ -58,6 +61,15 @@ func (b GraphBead) isWayfinderTicket() bool {
 	}
 	return b.hasLabel("wayfinder:grilling") || b.hasLabel("wayfinder:research")
 }
+
+// IsGrilling reports whether a bead is a grilling ticket, by its title or its
+// wayfinder:grilling label.
+func (b GraphBead) IsGrilling() bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(b.Title)), "grilling:") || b.hasLabel("wayfinder:grilling")
+}
+
+// IsOpen reports whether a bead is open or in progress.
+func (b GraphBead) IsOpen() bool { return graphStatusOpen(b.Status) }
 
 // isMapOrEpic reports whether a bead is an epic or a map, by its type, its
 // wayfinder:map label or a title that begins "Map".

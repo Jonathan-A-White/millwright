@@ -309,6 +309,12 @@ func (r DoctorReport) String() string {
 	return b.String()
 }
 
+// DamperCounter reads the DAMPERS alarms' counts, for mw doctor to repeat.
+// DamperSurvey is the one reader; it reads and writes nothing.
+type DamperCounter interface {
+	DamperCounts(ctx context.Context) (DampersReport, error)
+}
+
 // Doctor runs a table of checks, each its own probe, cure, damper and way
 // back, and logs what it found on this host. Nothing in it needs the network
 // except a check's own probe or cure; it writes nothing to the tracker and
@@ -322,6 +328,11 @@ type Doctor struct {
 	// note, and cleared once it is ok again. A nil Notes writes and clears
 	// nothing, so a caller with nowhere to keep one still runs.
 	Notes DoctorNotes
+
+	// Dampers, when set, is read after the checks for the one line that repeats
+	// the DAMPERS counts mw status judges its alarms by. A reading that fails
+	// is said on that line and changes nothing else. Nil leaves the line out.
+	Dampers DamperCounter
 
 	// Host is this host, part of the key a check's own note is written and
 	// cleared under: two hosts share one config table, so without it one
@@ -381,6 +392,13 @@ func (d Doctor) Run(ctx context.Context, name string, dryRun bool) (DoctorReport
 
 	if d.Out != nil {
 		fmt.Fprint(d.Out, report.String())
+		if d.Dampers != nil && name == "" {
+			if dampers, err := d.Dampers.DamperCounts(ctx); err != nil {
+				fmt.Fprintf(d.Out, "dampers: could not be read (%v)\n", err)
+			} else {
+				fmt.Fprintln(d.Out, dampers.CountsLine())
+			}
+		}
 	}
 	if report.Faulty() {
 		return report, &DoctorFault{Line: strings.Join(report.FaultyNames(), ", ")}

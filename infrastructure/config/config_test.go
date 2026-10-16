@@ -2494,3 +2494,28 @@ func TestFactoryInvestShareIsOneInThreeUntilConfigSetChangesIt(t *testing.T) {
 		}
 	}
 }
+
+func TestDampersAreReadFromTheTableAndLeaveTheRestZero(t *testing.T) {
+	writeConfig(t, "host = \"desktop\"\n")
+	if got, err := config.Dampers(); err != nil || got != (config.DampersSettings{}) {
+		t.Fatalf("expected zero settings, which read as the defaults, got %+v, %v", got, err)
+	}
+
+	writeConfig(t, "[dampers]\nready_p1 = 12\np1_untouched_days = 4\ndemo_waiting_days = 6\ngrilling_days = 9\ntesters_per_rig = 2\nreview_queue = 5\n")
+	got, err := config.Dampers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := config.DampersSettings{ReadyP1: 12, P1UntouchedDays: 4, DemoWaitingDays: 6, GrillingDays: 9, TestersPerRig: 2, ReviewQueue: 5}
+	if got != want {
+		t.Fatalf("expected %+v, got %+v", want, got)
+	}
+
+	for _, bad := range []string{"ready_p1 = 0\n", "review_queue = many\n", "grilling_days = -1\n"} {
+		writeConfig(t, "[dampers]\n"+bad)
+		key, _, _ := strings.Cut(bad, " ")
+		if _, err := config.Dampers(); err == nil || !strings.Contains(err.Error(), key) {
+			t.Errorf("expected %q to be refused naming the key, got %v", bad, err)
+		}
+	}
+}

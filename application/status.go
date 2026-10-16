@@ -116,6 +116,18 @@ const (
 // Mayor decides.
 const FinishedHeading = "DONE, STILL OPEN"
 
+// DamperNotes is the read-only half of the tracker's notes the alarms read his
+// open cards and unrun hands steps from.
+type DamperNotes interface {
+	NotesWithPrefix(ctx context.Context, prefix string) (map[string]string, error)
+}
+
+// DamperReader judges the DAMPERS alarms from the work already read, at now.
+// DamperSurvey is the one reader; it reads and writes nothing else.
+type DamperReader interface {
+	Dampers(ctx context.Context, work WorkInHand, now time.Time) (DampersReport, error)
+}
+
 // BeadGraph reads every bead the tracker holds, closed ones included, with the
 // links each carries, for the DONE, STILL OPEN section. It reads and writes
 // nothing.
@@ -225,6 +237,10 @@ type Status struct {
 	// have a line is told by Rigs and Rules (landing = "batch"). Nil leaves the
 	// last batch out of the line.
 	Batches BatchHistory
+
+	// Dampers, when set, is where the DAMPERS alarms are judged. Nil leaves the
+	// section out, as does a report with no alarm tripped.
+	Dampers DamperReader
 
 	// Graph is where the beads that look finished are found, for the DONE, STILL
 	// OPEN section. A nil Graph leaves the section out.
@@ -527,6 +543,9 @@ type StatusReport struct {
 	WaitingOnMayor []PosternViewNeed
 	// HeldHands are the held beads that keep a hands step, in id order.
 	HeldHands []StoryDetail
+	// Dampers are the alarms tripped: too much in progress, work left to age,
+	// his review queue too long. Empty when none is or it was not asked.
+	Dampers DampersReport
 	// Icebox is the ICEBOX line's facts; its Known is false when not read.
 	Icebox  IceboxSummary
 	NeedsAt time.Time
@@ -1065,6 +1084,15 @@ func (s Status) Run(ctx context.Context) (StatusReport, error) {
 
 	report.OpenButClaimed = work.OpenClaimed
 
+	if s.Dampers != nil {
+		// An alarm that cannot be judged costs the report only its section.
+		if dampers, err := s.Dampers.Dampers(ctx, work, s.now()); err != nil {
+			s.print("mw status: the dampers could not be read: " + err.Error() + "\n")
+		} else {
+			report.Dampers = dampers
+		}
+	}
+
 	if err := report.markGuests(ctx, s.Rules); err != nil {
 		return report, err
 	}
@@ -1452,6 +1480,8 @@ func (r StatusReport) String() string {
 		clip(&b, r.syncModeLine())
 		b.WriteString("\n")
 	}
+
+	r.Dampers.Write(&b)
 
 	if r.Cap > 0 {
 		clip(&b, fmt.Sprintf("host: %d of cap %d", r.InUse, r.Cap))

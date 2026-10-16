@@ -1228,6 +1228,55 @@ func RoomAt(now time.Time) (RoomSettings, error) {
 // what a story's par is the median of, and when a kind's par is flagged.
 const BenchmarkTable = "benchmark"
 
+// DampersTable is the table of the config file the thresholds of mw status's
+// DAMPERS section are read from.
+const DampersTable = "dampers"
+
+// DampersSettings are the [dampers] table's thresholds, each zero when the
+// table does not say.
+type DampersSettings struct {
+	ReadyP1         int
+	P1UntouchedDays int
+	DemoWaitingDays int
+	GrillingDays    int
+	TestersPerRig   int
+	ReviewQueue     int
+}
+
+// Dampers reports the [dampers] table of ~/.config/mw/config.toml:
+// `ready_p1` (how many ready P1 stories before the alarm, default 10),
+// `p1_untouched_days` (5), `demo_waiting_days` (7), `grilling_days` (7),
+// `testers_per_rig` (1) and `review_queue` (8); each a whole number, 1 or
+// more.
+func Dampers() (DampersSettings, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return DampersSettings{}, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	table, err := tableIn(path, DampersTable)
+	if err != nil {
+		return DampersSettings{}, err
+	}
+	var settings DampersSettings
+	for key, into := range map[string]*int{
+		"ready_p1": &settings.ReadyP1, "p1_untouched_days": &settings.P1UntouchedDays,
+		"demo_waiting_days": &settings.DemoWaitingDays, "grilling_days": &settings.GrillingDays,
+		"testers_per_rig": &settings.TestersPerRig, "review_queue": &settings.ReviewQueue,
+	} {
+		said := strings.TrimSpace(table[key])
+		if said == "" {
+			continue
+		}
+		n, err := strconv.Atoi(said)
+		if err != nil || n < 1 {
+			return DampersSettings{}, fmt.Errorf("the [%s] table of %s says %s = %q: it must be a whole number, 1 or more", DampersTable, path, key, said)
+		}
+		*into = n
+	}
+	return settings, nil
+}
+
 // BenchmarkSettings are the [benchmark] table's thresholds, each zero when the
 // table says nothing, which application reads as its own default
 // (application.BenchmarkSettings).

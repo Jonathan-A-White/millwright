@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
 	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
@@ -182,8 +183,13 @@ func newStatusCmd() *cobra.Command {
 			if projects, err := claude.DefaultProjectsRoot(); err == nil {
 				turns = claude.NewTranscripts(projects)
 			}
+			dampers, err := damperSurvey(tracker)
+			if err != nil {
+				return err
+			}
 			_, err = application.Status{
 				Tracker:          tracker,
+				Dampers:          dampers,
 				Turns:            turns,
 				Ideas:            bootIdeasOnly(),
 				Rigs:             rigs,
@@ -268,6 +274,22 @@ func idleSource() (application.EventLog, time.Duration, error) {
 }
 
 // benchmarkLimits is the [benchmark] table as the use cases read it.
+// damperSurvey is where mw status and mw doctor judge the DAMPERS alarms from:
+// the [dampers] table's limits over the tracker.
+func damperSurvey(tracker *beads.Gateway) (application.DamperSurvey, error) {
+	limits, err := config.Dampers()
+	if err != nil {
+		return application.DamperSurvey{}, err
+	}
+	return application.DamperSurvey{
+		Tracker: tracker, Notes: tracker, Graph: tracker,
+		Limits: application.DamperLimits{
+			ReadyP1: limits.ReadyP1, P1UntouchedDays: limits.P1UntouchedDays, DemoWaitingDays: limits.DemoWaitingDays,
+			GrillingDays: limits.GrillingDays, TestersPerRig: limits.TestersPerRig, ReviewQueue: limits.ReviewQueue,
+		},
+	}, nil
+}
+
 func benchmarkLimits(s config.BenchmarkSettings) application.BenchmarkSettings {
 	return application.BenchmarkSettings{
 		UsualGates: s.UsualGates, ParWindow: s.ParWindow, ParMin: s.ParMin,
