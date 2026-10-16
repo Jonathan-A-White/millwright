@@ -49,7 +49,10 @@ func newRetryCmd() *cobra.Command {
 			"dispatch cuts the next attempt from it, rebased onto the target, so the fix is a delta. A branch\n" +
 			"that does not rebase cleanly falls back to the target, and the boot says so. --from-main deletes\n" +
 			"the branch as before, so the next attempt starts from the target; so does\n" +
-			"next.retry_from_branch = false in the config file.",
+			"next.retry_from_branch = false in the config file.\n\n" +
+			"An attempt keeps its branch when it left work, committed or found in the worktree (which retry\n" +
+			"commits), whatever ended it, unless mw next refused it for what its commits hold (a signed\n" +
+			"commit, a tracked binary) or --from-main was given; a branch with nothing ahead is deleted.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dir, err := config.Vault()

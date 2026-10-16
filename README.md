@@ -1498,6 +1498,13 @@ first`. A branch that does not rebase cleanly is put back and the worktree cut
 from the target after all, and the boot says so, naming the kept branch. A branch
 refused for what is in its commits (a signed commit) is not continued.
 
+An attempt that left no refusal and no note, its close-out killed or its session
+dead, is continued the same way when it left work (mw-gq6.537): `mw retry` commits
+what the worktree holds, bundles it, keeps the branch and leaves the note itself.
+Which attempts keep their branch, in one sentence: those with work on the branch
+or in the worktree, unless `mw next` refused them for what their commits hold, or
+`--from-main` was given. See `features/retry_died_attempt.feature`.
+
 `mw retry --from-main` deletes the branch and clears the note, so the next
 attempt starts from the target, as before; `retry_from_branch = false` under
 `[next]` in the config file is the rollback for every story. See
