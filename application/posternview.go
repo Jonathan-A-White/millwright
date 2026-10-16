@@ -213,6 +213,11 @@ type PosternViewBead struct {
 	// is absent on a bead with none.
 	TodoSize string `json:"todo_size,omitempty"`
 	TodoThen string `json:"todo_then,omitempty"`
+	// TodoRow is the row mw todo rank put a hitl:todo card in (now, make-time,
+	// later or let-go), and TodoRowWhy its one line on why; each is absent on a
+	// bead with none.
+	TodoRow    string `json:"todo_row,omitempty"`
+	TodoRowWhy string `json:"todo_row_why,omitempty"`
 }
 
 // TrackerSnapshot is a tracker that can read every bead at once and answer the
@@ -1687,7 +1692,7 @@ func viewBeadOf(e *viewEntry) PosternViewBead {
 		Started: formatOrEmpty(d.Started), Closed: formatOrEmpty(d.ClosedAt),
 		Path: e.path, Attempts: d.Attempts, Summary: viewSummary(d.Description),
 		Comments: d.CommentCount, DoneEarlier: e.doneEarlier, TodoRank: d.TodoRank, TodoDue: d.TodoDue,
-		TodoImportant: d.TodoImportant, TodoSize: d.TodoSize, TodoThen: d.TodoThen,
+		TodoImportant: d.TodoImportant, TodoSize: d.TodoSize, TodoThen: d.TodoThen, TodoRow: d.TodoRow, TodoRowWhy: d.TodoRowWhy,
 	}
 }
 

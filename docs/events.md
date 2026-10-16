@@ -201,6 +201,11 @@ close tap closes a card that has a `todo_then`, mw files the line as one new ope
 card's `Open:` line copied if it has one, and comments `THEN filed as <new id>: <line>` on the closed card,
 which keeps its fields. A card with no Then line closes as before.
 
+A card can carry a row too: `mw todo rank` (README, "Ranking the Governor's To do board") writes the
+metadata `todo_row` (`now`, `make-time`, `later` or `let-go`) and `todo_row_why` (one line under 80
+characters), and `todo_slipped` (the card's `todo_due`) on a starred card past its due time. The view
+publishes `todo_row` and `todo_row_why`, each absent when empty; the reminder reads none of them.
+
 The `cloud` job runs the cloud check (`mw cloud check`, docs/vultr-boost.md, "Elastic") in the
 follower itself, every minute, reason `clock`, on a host whose config has a `[cloud]` table and
 only while it is home. A pass that makes or destroys a box writes a `cloud` event, actor
