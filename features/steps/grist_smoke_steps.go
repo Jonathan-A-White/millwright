@@ -143,6 +143,7 @@ func InitializeGristSmokeScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the app "([^"]*)" has no grinds$`, c.theAppHasNoGrinds)
 	ctx.Given(`^the mill answers the next grist with:$`, c.theMillAnswers)
 	ctx.Given(`^the mill refuses the next grist because "([^"]*)"$`, c.theMillRefuses)
+	ctx.Given(`^the mill fails the next grist because "([^"]*)"$`, c.theMillFails)
 	ctx.Given(`^the mill does not answer the next grist$`, c.theMillIsSilent)
 	ctx.Given(`^the postern backend cannot be reached for the next grist$`, c.theBackendIsUnreachable)
 	ctx.Given(`^a rig "([^"]*)" checked out where the app "([^"]*)" is$`, c.aRigWhereTheAppIs)
@@ -216,6 +217,11 @@ func (c *smokeContext) theMillAnswers(doc *godog.DocString) error {
 
 func (c *smokeContext) theMillRefuses(reason string) error {
 	c.sender.script = append(c.sender.script, smokeAnswer{status: application.GristRefused, reason: reason})
+	return nil
+}
+
+func (c *smokeContext) theMillFails(reason string) error {
+	c.sender.script = append(c.sender.script, smokeAnswer{status: application.GristFailed, reason: reason})
 	return nil
 }
 

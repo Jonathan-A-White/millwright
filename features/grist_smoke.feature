@@ -8,7 +8,8 @@ Feature: mw grist smoke tests an app's grist end to end
   (for the factory's own rig) the mill itself, runs it; a failure is an alarm,
   a line of mw status and a hold on the rig's open stories. A smoke the mill
   would not take for a reason that is not the examples' (the key's daily limit,
-  its licence, the backend out of reach) is "not run": it holds nothing.
+  its licence, the backend out of reach, the factory's usage limit) is "not
+  run": it holds nothing.
 
   Background:
     Given the app "trade-tracker" has the grind "price-check" whose answer must carry a price and a confidence
@@ -219,6 +220,26 @@ Feature: mw grist smoke tests an app's grist end to end
     Then mw status shows "trade-tracker not run"
     And mw status shows "not run: the postern backend could not be reached"
     And the open stories of "trade-tracker" are not held
+
+  Scenario: a smoke the mill cannot grind for its usage limit is not run, and holds nothing
+    Given a rig "trade-tracker" checked out where the app "trade-tracker" is
+    And the mill fails the next grist because "The factory cannot grind just now: it has reached its usage limit; send it again after 2026-10-16 13:00Z."
+    When a landing in "trade-tracker" changes "grinds/price-check.json"
+    Then mw status shows "trade-tracker not run"
+    And mw status shows "not run: The factory cannot grind just now: it has"
+    And mw status shows "reached its usage limit"
+    And the open stories of "trade-tracker" are not held
+    And no alarm was posted
+
+  Scenario: mw grist smoke says it was not run for the usage limit, and did not fail
+    Given the mill fails the next grist because "The factory cannot grind just now: it has reached its usage limit; send it again after 2026-10-16 13:00Z."
+    When mw grist smoke is run for "trade-tracker"
+    Then the smoke was not run, saying "trade-tracker: not run: The factory cannot grind just now: it has reached its usage limit; send it again after 2026-10-16 13:00Z."
+
+  Scenario: a grind that fails for itself still fails the smoke
+    Given the mill fails the next grist because "The grind's session did not finish; send it again."
+    When mw grist smoke is run for "trade-tracker"
+    Then the smoke failed, saying "the mill failed it: The grind's session did not finish; send it again."
 
   Scenario: mw grist smoke says it was not run, and did not fail
     Given the mill refuses the next grist because "This key has sent its 50 grist for today; send it again tomorrow."

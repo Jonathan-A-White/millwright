@@ -71,9 +71,11 @@ type GristSmokeReport struct {
 	// NoGrinds says the app's rig has no grinds, so there was nothing to test.
 	NoGrinds bool `json:"no_grinds,omitempty"`
 	// NotRun are the reasons the mill could not be asked, when that is all that
-	// went wrong: it refused for the day's limit or the licence, or could not be
-	// reached. None of that is the examples' fault, so it is no Failure and holds
-	// nothing. Any Failure beside it takes these into itself.
+	// went wrong: it refused for the day's limit or the licence, failed for a
+	// limit of the factory's, its usage limit or its model's
+	// (GristReasonLimited), or could not be reached. None of that is the
+	// examples' fault, so it is no Failure and holds nothing. Any Failure beside
+	// it takes these into itself.
 	NotRun []string `json:"not_run,omitempty"`
 	// FiledOn are the open beads that name every failing example (SmokeExamplesField),
 	// set by GristSmokeBook.Mark; empty when any failure is not named, so the
@@ -284,7 +286,7 @@ func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, fi
 			return fmt.Sprintf("no answer in %s", wait), ""
 		}
 		reason := strings.TrimSpace(unanswered.Answer.Reason)
-		if unanswered.Answer.Status == GristRefused && gristRefusalIsNotTheExamples(reason) {
+		if gristAnswerIsNotTheExamples(unanswered.Answer.Status, reason) {
 			return "", reason
 		}
 		return fmt.Sprintf("the mill %s it: %s", unanswered.Answer.Status, reason), ""
@@ -311,11 +313,19 @@ func (s GristSmoke) example(ctx context.Context, checkout, commit, app, kind, fi
 	return "", ""
 }
 
-// gristRefusalIsNotTheExamples says the mill refused a grist for a reason that
-// is not in the examples: the key has sent its limit today, or has no licence
-// for the app. The smoke cannot say whether the app's grist works then.
-func gristRefusalIsNotTheExamples(reason string) bool {
-	return reason == GristReasonLicence || isGristReasonDaily(reason)
+// gristAnswerIsNotTheExamples says the mill would not grind a grist for a
+// reason that is not in the examples: it refused it because the key has sent its
+// limit today, or has no licence for the app, or failed it because the harness
+// stopped the grind at a limit of the factory's, its usage limit or its model's
+// (mw-gq6.436). The smoke cannot say whether the app's grist works then.
+func gristAnswerIsNotTheExamples(status, reason string) bool {
+	switch status {
+	case GristRefused:
+		return reason == GristReasonLicence || isGristReasonDaily(reason)
+	case GristFailed:
+		return IsGristReasonLimited(reason)
+	}
+	return false
 }
 
 func (s GristSmoke) say(format string, args ...any) {
