@@ -124,6 +124,18 @@ type PosternViewDoc struct {
 type PosternViewHost struct {
 	Name     string `json:"name"`
 	LastSync string `json:"last_sync"`
+	// UpNext is the first PosternViewUpNext stories a dispatch on this host
+	// would start, in its start order; omitted when none is ready.
+	UpNext []PosternViewUpNextStory `json:"up_next,omitempty"`
+}
+
+// PosternViewUpNext is how many stories a host's up_next lists.
+const PosternViewUpNext = 3
+
+// PosternViewUpNextStory is one story a host would start soon.
+type PosternViewUpNextStory struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
 }
 
 // PosternViewNeed is one thing waiting on the Governor, §11's needs.
@@ -539,6 +551,7 @@ func (v PosternView) Build(ctx context.Context) (PosternViewDoc, error) {
 	}
 
 	hosts, hostNeeds := v.hosts(b, notes)
+	v.upNext(b, hosts)
 	needs = append(needs, hostNeeds...)
 	sortPosternNeeds(needs)
 
@@ -1650,6 +1663,34 @@ func (v PosternView) hosts(b *viewBuild, notes map[string]string) ([]PosternView
 		})
 	}
 	return hosts, alarms
+}
+
+// upNext fills in each host's up_next from the beads the view already holds,
+// so it costs the tracker no read: the open, unclaimed stories waiting on
+// nothing unfinished whose path names the host, or auto, ordered by inStartOrder
+// as a dispatch orders what it starts. A story that needs the Governor present
+// is no session's to start, so it is left out.
+func (v PosternView) upNext(b *viewBuild, hosts []PosternViewHost) {
+	for i := range hosts {
+		var startable []StoryDetail
+		for _, id := range b.order {
+			e := b.entries[id]
+			d := e.detail
+			host := d.Merged().Host
+			if e.verifyOnly || d.IsEpic || d.Type == "epic" || d.Hitl() || len(e.waits) > 0 || d.Assignee != "" ||
+				!strings.EqualFold(strings.TrimSpace(d.Status), StatusOpen) ||
+				host != hosts[i].Name && host != domain.HostAuto {
+				continue
+			}
+			startable = append(startable, d)
+		}
+		for _, detail := range inStartOrder(startable) {
+			if len(hosts[i].UpNext) == PosternViewUpNext {
+				break
+			}
+			hosts[i].UpNext = append(hosts[i].UpNext, PosternViewUpNextStory{ID: detail.Story.ID, Title: detail.Story.Title})
+		}
+	}
 }
 
 // sortPosternNeeds orders needs most blocking first, then oldest — a need
