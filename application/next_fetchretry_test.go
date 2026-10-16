@@ -172,3 +172,25 @@ func TestAPushThatIsRefusedIsNotRetried(t *testing.T) {
 		t.Fatalf("expected one push and no wait, got %d pushes and waits %v", run.lands.pushes, run.waits)
 	}
 }
+
+// A close-out whose fetch lost the lock on origin/main to another fetch in the
+// same checkout, as mw-ev7oyy.14's did, tries it again and lands, and the
+// landing report names the retry (mw-gq6.439).
+func TestAFetchThatLostTheRefLockToAnotherFetchIsRetriedAndTheStoryLands(t *testing.T) {
+	race := &application.TransientFault{
+		Why: "cannot lock ref",
+		Err: errors.New("git fetch origin in /home/jwhite/postern: exit status 1: error: cannot lock ref 'refs/remotes/origin/main': is at 4b67387 but expected 732d955"),
+	}
+	run := aCloseOutOverFlakyGit(t, &flakyLanding{fetchFails: 1, err: race}, false)
+
+	if run.err != nil || !run.report.Landed {
+		t.Fatalf("expected the story landed on the second fetch, got err %v and %+v", run.err, run.report)
+	}
+	if run.lands.fetches != 2 {
+		t.Fatalf("expected 2 fetches, got %d", run.lands.fetches)
+	}
+	want := []string{"fetch failed (cannot lock ref), retried in 10s"}
+	if notes := notesNaming(run.report, "fetch failed"); fmt.Sprint(notes) != fmt.Sprint(want) {
+		t.Fatalf("expected the retried fetch named in a note, %q, got %q", want, notes)
+	}
+}

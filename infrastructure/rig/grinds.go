@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/gitcmd"
@@ -22,8 +23,9 @@ const GrindBranch = "refs/heads/main"
 // never the working tree, so whatever is half-done in the checkout is never
 // what the mill runs.
 type Grinds struct {
-	program string
-	remote  string
+	program  string
+	remote   string
+	raceWait time.Duration
 }
 
 // Grinds satisfies the port.
@@ -32,16 +34,44 @@ var _ application.GrindSource = (*Grinds)(nil)
 // NewGrinds is a grind source that runs git as this host has it.
 func NewGrinds(opts ...Option) *Grinds {
 	w := New(opts...)
-	return &Grinds{program: w.program, remote: w.remote}
+	return &Grinds{program: w.program, remote: w.remote, raceWait: w.raceWait}
 }
 
 // Refresh implements application.GrindSource: it fetches the remote's main
-// into the checkout's view of it, and moves nothing else.
+// into the checkout's view of it, and moves nothing else. A fetch that lost a
+// ref's lock to another git process in the checkout, a close-out's fetch most
+// often, is tried again here RaceRetries times, a growing short wait apart:
+// the mill has nobody else to try it again, and keeps a failed refresh for a
+// while (mw-gq6.439). Any other failure comes back at once.
 func (g *Grinds) Refresh(ctx context.Context, checkout string) error {
-	if _, err := g.git(ctx, checkout, "fetch", "--quiet", g.remote, "main"); err != nil {
-		return fmt.Errorf("fetching main from %s in %s: %w", g.remote, checkout, err)
+	for retry := 0; ; retry++ {
+		_, err := g.git(ctx, checkout, "fetch", "--quiet", g.remote, "main")
+		if err == nil {
+			return nil
+		}
+		err = fmt.Errorf("fetching main from %s in %s: %w", g.remote, checkout, err)
+		if _, raced := raceWhy(err); !raced || retry == RaceRetries {
+			return err
+		}
+		if waitErr := sleep(ctx, g.raceWait*time.Duration(retry+1)); waitErr != nil {
+			return fmt.Errorf("%w (and waiting to fetch again: %v)", err, waitErr)
+		}
 	}
-	return nil
+}
+
+// sleep waits d, or until ctx ends, whichever is first.
+func sleep(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // Commit implements application.GrindSource: the commit the remote's main is

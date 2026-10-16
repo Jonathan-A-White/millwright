@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/gitcmd"
@@ -32,8 +33,9 @@ const (
 // Worktrees makes and removes the worktrees of the rigs this host has checked
 // out. It holds no state: every call names the rig it works in.
 type Worktrees struct {
-	program string
-	remote  string
+	program  string
+	remote   string
+	raceWait time.Duration
 }
 
 // Worktrees satisfies the port.
@@ -56,9 +58,16 @@ func WithRemote(remote string) Option {
 	return func(w *Worktrees) { w.remote = remote }
 }
 
+// WithRaceWait sets how long a grind refresh waits before its first try again
+// of a fetch that lost a ref's lock, the wait growing by as much each time; a
+// test gives zero so as never to sleep.
+func WithRaceWait(d time.Duration) Option {
+	return func(w *Worktrees) { w.raceWait = d }
+}
+
 // New returns a Worktrees that runs git as this host has it.
 func New(opts ...Option) *Worktrees {
-	w := &Worktrees{program: Program, remote: DefaultRemote}
+	w := &Worktrees{program: Program, remote: DefaultRemote, raceWait: DefaultRaceWait}
 	for _, opt := range opts {
 		opt(w)
 	}
@@ -75,16 +84,58 @@ func Available() bool {
 	return err == nil
 }
 
-// Fetch implements application.Worktrees.
+// Fetch implements application.Worktrees. A fetch that failed on a passing
+// fault, the network's or a lost race for a ref's lock, comes back as an
+// application.TransientFault, for the caller to try again.
 func (w *Worktrees) Fetch(ctx context.Context, rigDir string) error {
 	_, err := w.git(ctx, rigDir, "fetch", w.remote)
 	if err == nil {
 		return nil
 	}
-	if why, passing := transientWhy(err); passing {
+	if why, passing := fetchFaultWhy(err); passing {
 		return &application.TransientFault{Why: why, Err: err}
 	}
 	return err
+}
+
+// RaceRetries is how many times a grind refresh tries again a fetch that lost
+// a ref's lock, and DefaultRaceWait how long it waits before the first of them
+// (mw-gq6.439).
+const (
+	RaceRetries     = 3
+	DefaultRaceWait = time.Second
+)
+
+// lostRefLock are the words git says a fetch with when another git process in
+// the same checkout, most often another fetch, moved or held a ref it was
+// moving: "cannot lock ref 'refs/remotes/origin/main': is at X but expected
+// Y", and on the line of the ref itself, "(unable to update local ref)". Two
+// fetches in one rig checkout race so (mw-ev7oyy.14), and the one that lost
+// passes when tried again a moment later.
+var lostRefLock = []string{
+	"cannot lock ref",
+	"unable to update local ref",
+}
+
+// raceWhy reports whether git failed because it lost a ref's lock to another
+// git process, and names it in a few words for a note.
+func raceWhy(err error) (string, bool) {
+	said := strings.ToLower(err.Error())
+	for _, phrase := range lostRefLock {
+		if strings.Contains(said, phrase) {
+			return phrase, true
+		}
+	}
+	return "", false
+}
+
+// fetchFaultWhy reports whether a fetch failed on a passing fault worth trying
+// again: a lost race for a ref's lock, or a fault of the network or the remote.
+func fetchFaultWhy(err error) (string, bool) {
+	if why, raced := raceWhy(err); raced {
+		return why, true
+	}
+	return transientWhy(err)
 }
 
 // Add implements application.Worktrees.

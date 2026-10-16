@@ -1127,7 +1127,7 @@ beads_budget_bytes = 1500000000    # how large this host's .beads may grow befor
 dispatch_sync_tries = 3            # how many times mw dispatch tries its sync when a name cannot be resolved (default 3)
 dispatch_sync_wait = "15s"         # how long it waits between those tries (default 15s, at most 90s in all)
 push_tries = 4                     # how many times mw next tries a push in all after a fault at the remote itself (default 4: three retries)
-push_wait_seconds = 20             # the base wait between those tries, which grow: half of it, then it, then half as much again; a fetch that meets a passing network fault is retried the same way (default 20)
+push_wait_seconds = 20             # the base wait between those tries, which grow: half of it, then it, then half as much again; a fetch that meets a passing network fault, or loses a ref's lock to another fetch in the same checkout, is retried the same way (default 20)
 max_attempts = 3                   # how many times a story is started in all before mw dispatch stops and mails the Mayor (default 3)
 millhand_routine_model = "sonnet"  # the model of a routine wake, and of a wake by hand, of the Millhand (default sonnet)
 millhand_review_model = "opus"     # the model of a review wake of the Millhand (default opus)
@@ -2038,8 +2038,9 @@ instructions and schema at that commit, and the commit is stamped on the
 answer. Before it reads, the mill fetches the rig's remote `main` (at most
 once a minute per rig) and reads the remote's commit when it is ahead of the
 rig's local `main`, so a grind landed on another host goes live without a
-landing here; if the remote cannot be reached it reads the local commit and
-says so in its report. A grind takes one of the mill's own grind slots, first come first served; the host's `cap` on Builders neither holds a grind back nor counts it.
+landing here; a fetch that lost a ref's lock to another fetch in the checkout
+is tried again three times, a second, two and three apart; if the remote
+cannot be reached it reads the local commit and says so in its report. A grind takes one of the mill's own grind slots, first come first served; the host's `cap` on Builders neither holds a grind back nor counts it.
 The mill grinds up to `[grist]` `concurrency` grists at once (default 2), oldest
 first, each in its own temp directory and run record, with one lock file
 `grind-<n>.lock` for each; a grist past that waits for a grind to end, and the
