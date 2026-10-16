@@ -14,6 +14,7 @@ three.
 | `no-path` | the story's path cannot be read |
 | `no-host` | the path names no host |
 | `other-host` | the path names another host |
+| `harness-hold` | the harness stopped a session here (usage limit, rate limit, overloaded or failing API) and the time it named has not come (below) |
 | `no-room` | the host has no room: load, or a grist tutor in use |
 | `landed` | its last run landed it and only the close was lost |
 | `blocked` | it waits on a story that is not closed |
@@ -49,3 +50,14 @@ opening `RE-PATHED:` follows: the same Builder given the same story hands it bac
 the same way. `mw retry <id> --repathed "<what changed>"` writes that comment and
 retries. `mw status` lists such stories under HANDED BACK with the date of the
 hand-back.
+
+## The harness-hold gate
+
+A session the harness stopped for something that is not the work's is held by
+its close-out under its own reason (`usage-limit`, `rate-limit`, `overloaded`,
+`server-error`), the claim kept. Until the time the stop names (the reset a usage
+limit names, or a quarter hour after the session ended for the rest) the host
+claims nothing new; once it has come, a dispatch gives the stopped story back
+itself, its stopped attempt not counted, and it is started again. `mw retry` of
+such a story does not count the attempt either, and keeps the hold. The hold is
+kept in the host's note `host.<host>.harness_hold`.

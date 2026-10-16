@@ -405,6 +405,13 @@ type DispatchReport struct {
 	// FixedOnMain is every nightly-suite bug closed before dispatch because its
 	// spec passes on main already.
 	FixedOnMain []FixedOnMain
+	// HarnessHold is the harness stop this host claims nothing new for, until
+	// the time it names (mw-gq6.434); nil when none holds it.
+	HarnessHold *HarnessHold
+	// HarnessRetried is every story the harness stopped whose time has passed:
+	// this dispatch gave its claim back itself, the stopped attempt not counted,
+	// so it is read fresh among what is ready.
+	HarnessRetried []string
 	// Paused is the pause-host event that stopped this pass, nil when none did.
 	Paused  *HostPause
 	Started []Started
@@ -649,6 +656,9 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		}
 		report.Running++
 	}
+	// A harness stop holds every new claim here until the time it names: a
+	// session started before then stops on its first turn (mw-gq6.434).
+	d.readHarnessHoldNote(ctx, &report)
 
 	// What the other hosts hold keeps its files from the stories ready here too,
 	// and counts for nothing else: it is their sessions, their cap (mw-gq6.389).
@@ -727,6 +737,14 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		auto := path.Host == domain.HostAuto
 		if path.Host != d.Host && !auto {
 			report.Passed = append(report.Passed, Passed{StoryID: id, Why: "it is worked on " + path.Host})
+			continue
+		}
+		// gate: harness-hold
+		// A story this host would take waits, unclaimed, until the time a harness
+		// stop names: its usage limit's reset, or a quarter hour after a rate
+		// limit or an overloaded API (mw-gq6.434).
+		if hold := report.HarnessHold; hold != nil {
+			report.Passed = append(report.Passed, Passed{StoryID: id, Why: hold.harnessHeld(d.Host)})
 			continue
 		}
 		// gate: no-room
@@ -1641,6 +1659,11 @@ func (d Dispatch) reclaimDeadPane(ctx context.Context, detail StoryDetail, repor
 		return false, false, nil
 	}
 	if run == RunBlocked {
+		// A refusal for a harness stop is not the work's: it is given back by
+		// the dispatch itself once the stop's time has come (mw-gq6.434).
+		if d.retryHarnessStop(ctx, detail, name, dead, report) {
+			return true, false, nil
+		}
 		report.HeldRefused = append(report.HeldRefused, HeldRefused{StoryID: id, Session: name})
 		return false, true, nil
 	}
@@ -2094,6 +2117,12 @@ func (r DispatchReport) String() string {
 	for _, reclaim := range r.Reclaimed {
 		fmt.Fprintf(&b, "  reclaimed %s · %s · dead pane, lease expired %s\n", reclaim.StoryID, reclaim.Session,
 			reclaim.LeaseExpired.UTC().Format(time.RFC3339))
+	}
+	for _, id := range r.HarnessRetried {
+		fmt.Fprintf(&b, "  retried %s · stopped by the harness and its time has come: given back, the stopped attempt not counted\n", id)
+	}
+	if hold := r.HarnessHold; hold != nil {
+		fmt.Fprintf(&b, "  hold    %s\n", hold.harnessHeld(r.Host))
 	}
 
 	verb := "started"
