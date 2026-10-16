@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/apartproc"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
-	"github.com/Jonathan-A-White/millwright/infrastructure/suiteproc"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 )
 
@@ -38,7 +38,7 @@ func nightlySuiteSpringJob(host string, suiteHour int, out io.Writer) (applicati
 	if err != nil {
 		return application.SpringJob{}, fmt.Errorf("finding the home directory to keep the suite's state in: %w", err)
 	}
-	detached := application.DetachedSuite{Processes: &suiteproc.Processes{
+	detached := application.DetachedSuite{Processes: &apartproc.Processes{
 		Dir: filepath.Join(home, ".local", "state", "mw", "suite"), Program: self,
 	}}
 	files := vault.New(dir)

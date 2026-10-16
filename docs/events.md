@@ -137,7 +137,12 @@ and an event that springs it meanwhile earns one more pass after it. A pass cut 
 follower is stopping (a landing of millwright restarts it onto the new build, ending the systemctl
 the pass waited on) is not failed: it is `done` with the detail `cut short by the follower
 stopping; run again when it is back`, and the first look of the follower that comes back runs it
-again, scheduled for `run again after the follower restarted`.
+again, scheduled for `run again after the follower restarted`. The `batch-land` job's `mw land`
+and the `suite` job's `mw suite` run in a process apart from the follower (a systemd scope of
+their own, state under `~/.local/state/mw/land` and `.../suite`), so a stop leaves them running:
+such a pass is `done` with the detail `the follower stopped while it waited; the work runs on
+apart from it, and the follower that comes back waits for it`, and the pass run again finds that
+process and waits for it rather than beginning another (mw-gq6.470).
 
 The `grist-grind` job runs one pass of the mill (`mw grist grind`) in the follower itself, on a
 host whose config has a `[grist]` table and only while that host is home. No event springs it:

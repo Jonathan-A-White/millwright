@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -999,6 +1000,11 @@ type BatchLandings struct {
 	Home func(ctx context.Context) (bool, error)
 	// Land does mw land <rig>, or with one mw land <rig> --one.
 	Land func(ctx context.Context, rig string, one bool) error
+	// Pending, when set, names the rigs whose landing runs on apart from the
+	// follower, or ended with no follower told how (DetachedLand.Pending):
+	// each pass waits for those first, due or not, so that a landing a
+	// follower before this one began is told once.
+	Pending func(ctx context.Context) ([]string, error)
 	// Now is the clock; nil is time.Now.
 	Now func() time.Time
 
@@ -1138,16 +1144,23 @@ func (b *BatchLandings) requirements(ctx context.Context, rig string) (domain.Ep
 // stop the next; the pass then fails, naming each.
 func (b *BatchLandings) run(ctx context.Context) error {
 	due, err := b.due(ctx)
+	due, perr := b.pending(ctx, due)
 	if len(due) == 0 {
-		return err
+		return errors.Join(err, perr)
 	}
-	errs := []error{err}
+	errs := []error{err, perr}
 	for _, d := range due {
 		if ctx.Err() != nil {
 			errs = append(errs, ctx.Err())
 			break
 		}
-		if err := b.landRig(ctx, d); err != nil {
+		err := b.landRig(ctx, d)
+		if errors.Is(err, ErrLeftRunning) {
+			// The landing goes on apart: the follower that comes back tells it.
+			errs = append(errs, fmt.Errorf("landing %s: %w", d.rig, err))
+			break
+		}
+		if err != nil {
 			b.mu.Lock()
 			if b.failed == nil {
 				b.failed = map[string]time.Time{}
@@ -1158,6 +1171,33 @@ func (b *BatchLandings) run(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// pending puts first in due each rig of this host whose landing is pending
+// (Pending) and is not due already, on the home only: a landing begun by a
+// follower before this one, waited for whether or not its queue is due now.
+func (b *BatchLandings) pending(ctx context.Context, due []batchDue) ([]batchDue, error) {
+	if b.Pending == nil {
+		return due, nil
+	}
+	names, err := b.Pending(ctx)
+	if err != nil {
+		return due, fmt.Errorf("reading the landings in flight: %w", err)
+	}
+	var adopt []batchDue
+	for _, name := range names {
+		if _, here := b.Rigs[name]; !here || slices.ContainsFunc(due, func(d batchDue) bool { return d.rig == name }) {
+			continue
+		}
+		adopt = append(adopt, batchDue{rig: name})
+	}
+	if len(adopt) == 0 {
+		return due, nil
+	}
+	if at, err := b.Home(ctx); err != nil || !at {
+		return due, err
+	}
+	return append(adopt, due...), nil
 }
 
 // landRig lands the queue of one rig: all of it at once, or on a rig that lands
@@ -1183,6 +1223,46 @@ func (b *BatchLandings) landRig(ctx context.Context, d batchDue) error {
 		left = remaining
 	}
 	return nil
+}
+
+// LandProcesses is the port the follower's landings are begun and waited for
+// through. Each runs in a process apart from the follower: a follower that
+// stops, as it does after every landing of the factory rig, leaves it running,
+// and the one that comes back waits for it (mw-gq6.470). The real adapter is
+// infrastructure/apartproc; the fake is apptest.FakeLandProcesses.
+type LandProcesses interface {
+	// Begin starts mw land <rig>, or with one mw land <rig> --one, unless a
+	// landing of rig begun earlier, by this follower or another, is still
+	// running or ended with no follower told how: that one is the landing.
+	Begin(ctx context.Context, rig string, one bool) error
+	// Wait returns when the landing of rig ends: nil if it landed, an error if
+	// it failed or ended without saying. Once told, it is no longer pending. A
+	// ctx that ends stops the wait, not the landing.
+	Wait(ctx context.Context, rig string) error
+	// Pending names the rigs whose landing is running or ended with no
+	// follower told how, in name order.
+	Pending(ctx context.Context) ([]string, error)
+}
+
+// DetachedLand is BatchLandings' Land and Pending for landings run apart from
+// the follower: a landing a follower before this one began is found and
+// waited for, not begun again beside it.
+type DetachedLand struct {
+	Processes LandProcesses
+}
+
+// Land begins the landing of rig, or finds the one running, and waits for it.
+// A wait the follower stopping ends is ErrLeftRunning: the landing goes on.
+func (d DetachedLand) Land(ctx context.Context, rig string, one bool) error {
+	if err := d.Processes.Begin(ctx, rig, one); err != nil {
+		return LeftRunning(ctx, fmt.Errorf("beginning mw land %s: %w", rig, err))
+	}
+	return LeftRunning(ctx, d.Processes.Wait(ctx, rig))
+}
+
+// Pending is the Processes' Pending.
+func (d DetachedLand) Pending(ctx context.Context) ([]string, error) {
+	return d.Processes.Pending(ctx)
 }
 
 // BatchFixerName is the name the fixer of a batch is run under, and its run's

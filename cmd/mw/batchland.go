@@ -5,9 +5,10 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
+	"path/filepath"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/apartproc"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 )
 
@@ -16,7 +17,11 @@ import (
 // a rig that lands in batches when it has batch_min queued and the oldest has
 // waited batch_every, or batch_max queued; a rig flipped back to landing =
 // each with stories still queued, one story at a time (`mw land <rig> --one`)
-// until none remains. Each is a run of this binary, its output on out.
+// until none remains. Each is a process of this binary of its own, apart from
+// the follower (in a systemd scope where there is one): a follower restarted
+// after a landing of the factory rig leaves a landing running, and the one that
+// comes back waits for it and tells its real outcome (mw-gq6.470). Its output
+// goes to a log beside its state, under ~/.local/state/mw/land.
 func batchLandSpringJob(host string, out io.Writer) (application.SpringJob, error) {
 	dir, err := config.Vault()
 	if err != nil {
@@ -30,6 +35,11 @@ func batchLandSpringJob(host string, out io.Writer) (application.SpringJob, erro
 	if err != nil {
 		return application.SpringJob{}, fmt.Errorf("finding the mw binary to land with: %w", err)
 	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return application.SpringJob{}, fmt.Errorf("finding the home directory to keep the landings' state in: %w", err)
+	}
+	detached := batchLandApart(self, filepath.Join(home, ".local", "state", "mw", "land"), "")
 	landings := &application.BatchLandings{
 		Rigs:    rigs,
 		Rules:   mwVault(dir, host),
@@ -37,15 +47,15 @@ func batchLandSpringJob(host string, out io.Writer) (application.SpringJob, erro
 		Home: func(ctx context.Context) (bool, error) {
 			return application.IsHome(ctx, mwVault(dir, host), host)
 		},
-		Land: func(ctx context.Context, rig string, one bool) error {
-			args := []string{"land", rig}
-			if one {
-				args = append(args, "--one")
-			}
-			cmd := exec.CommandContext(ctx, self, args...)
-			cmd.Stdout, cmd.Stderr = out, out
-			return cmd.Run()
-		},
+		Land:    detached.Land,
+		Pending: detached.Pending,
 	}
 	return landings.Job(), nil
+}
+
+// batchLandApart is how the job runs `mw land <rig>` with the binary self:
+// apart from the follower, its state in stateDir, in a scope of scope's making
+// (empty: systemd-run, where there is a user manager).
+func batchLandApart(self, stateDir, scope string) application.DetachedLand {
+	return application.DetachedLand{Processes: &apartproc.Landings{Dir: stateDir, Program: self, Scope: scope}}
 }

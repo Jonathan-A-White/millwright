@@ -26,14 +26,14 @@ domain/ stdlib · application/ use cases, ports · infra/ adapters · cmd/mw/ co
 | Worktrees, BranchChanges, RigFiles | application/worktrees.go, application/wrongrig.go | infra/rig/{worktree,rigfiles}.go | - |
 | HostLoad, GateLock, Cloud*, BenchmarkBook | application/hostload.go, application/gate.go, application/benchmark.go | infra/{hostload,hostlock/gate.go,cloud,vault/{cloudbook,benchmarks}.go} | Fake{HostLoad,Cloud*,Benchmarks}; features/next_gate_lock.feature |
 | TickLog, Notifier, HomeMoveHost, OldHome, VaultBirth, TrackerBirth | application/{millhandtick,homemove,init}.go | infra/{ticklog,notify/notify,homemove/homemove,vault/birth,beads/init}.go | FakeTickLog |
-| Landing, Checks, SpecChecks, MergeSlot, Batch{Records,Metrics} | application/landing.go, application/batchland.go | infra/rig/{landing,checks,slot}.go, vault/batch.go | - |
+| Landing, Checks, SpecChecks, MergeSlot, Batch{Records,Metrics}, LandProcesses | application/landing.go, application/batchland.go | infra/rig/{landing,checks,slot}.go, vault/batch.go, apartproc | FakeLand* |
 | AfterLanding, SelfUpdate, BuiltMarks, BackendBuilds, UnitRestarter, FormulaInstaller | application/afterlanding.go, application/selfupdate.go, application/backendstage.go, application/formulainstall.go | infra/{rig/{afterlanding,built,backend},userunits,vault/formulas}.go | features/{self_update,backend_swap}.feature |
 | EventLog, BeadFeed, FollowCursors, ShipStates, SubscribeFiles, NudgeCursors, EventSpringer, EventController, HarnessCount | application/event*.go, status.go | infra/{eventlog,procs,userunits}, vault/subscribe.go, beads/feed.go | Fake{EventLog,Follow*,Ship*,Tracker,Subscribe*} |
 | Postern, hands, Prompts | application/{postern*,hands,prompt}.go | infra/{postern,hands*,homemove} | Fake{Postern*,Cipher,Hands*,HomeMover,Prompts} |
 | Chain, StampQueue, StampStore, CommitNotes, RigHeads | application/chain.go, application/chainstamp.go, application/prove.go | infra/{bsv,stampqueue,chainlookup}, rig/worktree.go | Fake{Chain,Stamp*,Commit*,RigHeads} |
 | Grinder, WarmGrinder, GristPoolBoard, GrindSource, GristState, GristLock, GristRunStore, GristForwardStore, GristRequestStore, GristLandings, GristSmoke*, VisionSource | application/grist.go, application/gristpool.go, application/vision.go, application/gristruns.go, application/griststatus.go, application/gristsmoke.go | infra/{claude/grind,rig/{grinds,landingof},hostlock/try}.go, infra/grist | Fake{Grind*,WarmGrinder,Grist*,Landings,Visions} |
-| IdeasOnlyReader, IdeasOnlyFiles | application/ideasonly.go | infra/{postern/http.go,ideasonly} | FakePostern; features/ideas_only.feature |
-| SuiteTrees, SuiteRunner, SuiteRecords, SuiteHistory, SuiteProcesses | application/suite.go, application/suitenightly.go | infra/{rig/{worktree,checks}.go,vault/vault.go,suiteproc} | FakeSuite* |
+| IdeasOnlyReader, IdeasOnlyFiles | application/ideasonly.go | infra/{postern/http.go,ideasonly} | FakePostern |
+| SuiteTrees, SuiteRunner, SuiteRecords, SuiteHistory, SuiteProcesses | application/suite.go, application/suitenightly.go | infra/{rig/{worktree,checks}.go,vault/vault.go,apartproc} | FakeSuite* |
 | Scorer, SecretStore | application/scorer.go, application/secrets.go | infra/{scorer,sops} | Fake{Scorer,SecretStore} |
 
 ## Use cases
