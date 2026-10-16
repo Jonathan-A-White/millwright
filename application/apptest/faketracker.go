@@ -104,6 +104,13 @@ type FakeTracker struct {
 	packChecks int
 	// GCErr, when set, is what GC reports instead of collecting.
 	GCErr error
+	// history is how many commits HistoryCommits reports; squashes counts
+	// the calls to SquashHistory that got through.
+	history  int
+	squashes int
+	// HistoryErr and SquashErr, when set, are what HistoryCommits and
+	// SquashHistory report instead.
+	HistoryErr, SquashErr error
 	// size is what Size reports.
 	size int64
 	// asked is the dispatch-facing calls in the order they were made, so that a
@@ -2224,6 +2231,45 @@ func (f *FakeTracker) GC(_ context.Context) error {
 	return nil
 }
 
+// SetHistory makes HistoryCommits report commits, as if the beads database's
+// history held that many.
+func (f *FakeTracker) SetHistory(commits int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.history = commits
+}
+
+// HistoryCommits implements application.TrackerHistory.
+func (f *FakeTracker) HistoryCommits(_ context.Context) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.HistoryErr != nil {
+		return 0, f.HistoryErr
+	}
+	return f.history, nil
+}
+
+// SquashHistory implements application.TrackerHistory: the history is left
+// one commit long, as a real squash leaves it.
+func (f *FakeTracker) SquashHistory(_ context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.asked = append(f.asked, "SquashHistory")
+	if f.SquashErr != nil {
+		return f.SquashErr
+	}
+	f.squashes++
+	f.history = 1
+	return nil
+}
+
+// Squashes reports how many times the history was squashed.
+func (f *FakeTracker) Squashes() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.squashes
+}
+
 // GCs reports how many times GC was asked to collect, so that a test can say
 // a cadence held it back.
 func (f *FakeTracker) GCs() int {
@@ -2335,10 +2381,11 @@ func SortedIDs(details []application.StoryDetail) []string {
 
 // FakeTracker satisfies the ports the beads gateway stands behind.
 var (
-	_ application.WorkTracker  = (*FakeTracker)(nil)
-	_ application.TrackerSync  = (*FakeTracker)(nil)
-	_ application.TrackerNotes = (*FakeTracker)(nil)
-	_ application.DoctorNotes  = (*FakeTracker)(nil)
+	_ application.WorkTracker    = (*FakeTracker)(nil)
+	_ application.TrackerSync    = (*FakeTracker)(nil)
+	_ application.TrackerHistory = (*FakeTracker)(nil)
+	_ application.TrackerNotes   = (*FakeTracker)(nil)
+	_ application.DoctorNotes    = (*FakeTracker)(nil)
 )
 
 // priorityOr is a priority a story was filed with, or the default when it was

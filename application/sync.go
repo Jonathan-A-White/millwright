@@ -315,6 +315,35 @@ type TrackerSync interface {
 	GC(ctx context.Context) error
 }
 
+// TrackerHistory is the history the one beads database keeps of itself: a
+// commit for every write, about 35 KB each on the Laptop's, and every one of
+// them reachable, so no collection ever reclaims any (mw-gq6.455: 96,100
+// commits filled 3.1 GB of a store whose rows take under 100 MB). The beads
+// gateway is the adapter.
+type TrackerHistory interface {
+	// HistoryCommits counts the commits the database's history holds.
+	HistoryCommits(ctx context.Context) (int, error)
+
+	// SquashHistory folds the whole history into one commit on top of the
+	// first, every row kept as it stands, forgets the remote-tracking
+	// branches that would keep the old history alive, and collects every
+	// generation so that the space comes back. It never touches the working
+	// set, so a write that lands meanwhile is kept.
+	SquashHistory(ctx context.Context) error
+}
+
+// DefaultSquashAt is how many commits the home's history may hold before its
+// collection squashes it: about 1.7 GB of history at the Laptop's 35 KB a
+// commit, some ten days of the factory's writes, kept under a 4 GB budget with
+// room beside the git-remote-cache.
+const DefaultSquashAt = 50_000
+
+// BackupDownBeforeSquash is how long the home's backup must have failed to get
+// through before the home may squash its history. A backup that gets through
+// holds the old history: squashed under it, its next pull would merge every
+// old commit back in, or halt on a conflict for every row changed since.
+const BackupDownBeforeSquash = 24 * time.Hour
+
 // SyncHalt is a tracker synchronisation that stopped without publishing
 // anything. Code is the tracker's own exit code, surfaced as it was: mw neither
 // hides it nor interprets it beyond saying, in plain words, what it means.
@@ -481,6 +510,10 @@ type SyncReport struct {
 	// nothing needed reclaiming, only that it was not this sync's turn.
 	GCed bool
 
+	// Squashed is how many commits of the beads history this sync folded
+	// into one, on the host that keeps the one database. Zero on most syncs.
+	Squashed int
+
 	// Mode is how this sync treated the beads database. Empty reads
 	// BeadsSyncRemote.
 	Mode BeadsSyncMode
@@ -538,6 +571,9 @@ func (r SyncReport) String() string {
 	}
 	if r.StampNote != "" {
 		fmt.Fprintf(&b, "; chain stamp: not queued: %s", r.StampNote)
+	}
+	if r.Squashed > 0 {
+		fmt.Fprintf(&b, "; squashed %d commits of beads history", r.Squashed)
 	}
 	if r.GCed {
 		b.WriteString("; garbage collected")
@@ -610,8 +646,9 @@ func (r SyncReport) beadsMode() string {
 // holds the database it is a backup, one cycle every BackupInterval, and a
 // backup that halts is said in the report and marked like any halt but stops
 // nothing, since no host's view of the work waits on it; the GC cadence is
-// the same as ever. On a host whose tracker reaches that database over the
-// network there is no cycle and no GC at all.
+// the same as ever, and that GC squashes the database's history first when it
+// has grown long while the backup is down (History). On a host whose tracker
+// reaches that database over the network there is no cycle and no GC at all.
 type Sync struct {
 	Vault   VaultFiles
 	Tracker TrackerSync
@@ -658,6 +695,16 @@ type Sync struct {
 	// GCInterval is how long this host waits between asking the tracker to
 	// reclaim disk space. Zero reads DefaultGCInterval.
 	GCInterval time.Duration
+
+	// History is the beads database's own history. On the host that keeps
+	// the one database, a collection that is due squashes it once it holds
+	// SquashAt commits and the backup has not got through for
+	// BackupDownBeforeSquash. A nil History never squashes.
+	History TrackerHistory
+
+	// SquashAt is how many commits the history may hold before it is
+	// squashed. Zero reads DefaultSquashAt.
+	SquashAt int
 
 	// Lock keeps this host's whole sync, vault and beads, from running twice at
 	// once. A nil Lock runs it unlocked, which is never mw's own choice — every
@@ -762,7 +809,7 @@ func (s Sync) Run(ctx context.Context) (SyncReport, error) {
 		case BeadsSyncBackup:
 			s.backupIfDue(ctx, &report)
 			if !s.SkipBackup {
-				report.GCed = s.maybeGC(ctx)
+				s.collectTheOneDatabase(ctx, &report)
 			}
 		case BeadsSyncShared:
 		default:
@@ -840,7 +887,7 @@ func (s Sync) recordLevelInTheOneDatabase(ctx context.Context, report SyncReport
 	// The collection is local work on the database and has nothing to wait for
 	// from the backup: a remote that keeps failing must not starve it (mw-gq6.449).
 	if report.Mode == BeadsSyncBackup && !s.SkipBackup {
-		report.GCed = s.maybeGC(ctx)
+		s.collectTheOneDatabase(ctx, &report)
 	}
 	if noteErr != nil {
 		return report, fmt.Errorf("recording when %s was last level: %w", s.Host, noteErr)
@@ -975,11 +1022,74 @@ func (s Sync) maybeGC(ctx context.Context) bool {
 	if !s.dueForGC(ctx) {
 		return false
 	}
+	return s.gc(ctx)
+}
+
+// gc asks the tracker to reclaim disk space and records when, reporting
+// whether it did.
+func (s Sync) gc(ctx context.Context) bool {
 	if err := s.Tracker.GC(ctx); err != nil {
 		return false
 	}
 	_ = s.Tracker.SetNote(ctx, LastGCKey(s.Host), s.now().UTC().Format(LastSyncFormat))
 	return true
+}
+
+// collectTheOneDatabase is the collection on the host that keeps the one
+// database, on the cadence any other host's runs on, with the history squashed
+// first when it is time to (maybeSquash).
+func (s Sync) collectTheOneDatabase(ctx context.Context, report *SyncReport) {
+	if !s.dueForGC(ctx) {
+		return
+	}
+	report.Squashed = s.maybeSquash(ctx, *report)
+	report.GCed = s.gc(ctx)
+}
+
+// maybeSquash squashes the beads history once it holds SquashAt commits and
+// nothing can pull the old history back in: no backup has got through for
+// BackupDownBeforeSquash, this sync's own included. It reports how many
+// commits it folded, 0 when it did not. Like the collection it never fails a
+// sync: a history that cannot be counted or squashed is left as it was, for
+// the next collection to try.
+func (s Sync) maybeSquash(ctx context.Context, report SyncReport) int {
+	if s.History == nil || report.BackedUp || !s.backupDownFor(ctx, BackupDownBeforeSquash) {
+		return 0
+	}
+	commits, err := s.History.HistoryCommits(ctx)
+	if err != nil || commits < s.squashAt() {
+		return 0
+	}
+	if err := s.History.SquashHistory(ctx); err != nil {
+		return 0
+	}
+	return commits
+}
+
+// backupDownFor reports whether no backup of the one database has got through
+// for at least down. One that never has is down; a note that cannot be read,
+// or read as a time, is not: squashing on a guess is what this must not do.
+func (s Sync) backupDownFor(ctx context.Context, down time.Duration) bool {
+	last, err := s.Tracker.Note(ctx, LastBackupKey(s.Host))
+	if err != nil {
+		return false
+	}
+	if last == "" {
+		return true
+	}
+	at, err := time.Parse(LastSyncFormat, last)
+	if err != nil {
+		return false
+	}
+	return s.now().Sub(at) >= down
+}
+
+// squashAt is how many commits the history may hold before it is squashed.
+func (s Sync) squashAt() int {
+	if s.SquashAt <= 0 {
+		return DefaultSquashAt
+	}
+	return s.SquashAt
 }
 
 // dueForGC reports whether it has been at least GCInterval since this host
