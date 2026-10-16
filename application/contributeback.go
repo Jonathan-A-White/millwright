@@ -97,6 +97,8 @@ func (c *ContributeBack) month() (string, bool) {
 func (c *ContributeBack) Job() SpringJob {
 	return SpringJob{
 		Name: ContributeBackJobName,
+		// A failed month's review is told to the Mayor (mw-gq6.531).
+		TellFailure: true,
 		Probe: func(ctx context.Context) (string, bool) {
 			month, due, _ := c.due(ctx)
 			if !due {

@@ -559,8 +559,10 @@ func (n *SleepNightly) Job() SpringJob {
 		about = fmt.Sprintf("once a day from %02d:%02dZ (Sundays the deep pass)", n.Hour, n.Minute)
 	}
 	return SpringJob{
-		Name:  SleepJobName,
-		About: about,
+		Name: SleepJobName,
+		// A failed night's pass is told to the Mayor (mw-gq6.531).
+		TellFailure: true,
+		About:       about,
 		Probe: func(ctx context.Context) (string, bool) {
 			if n.due(ctx) {
 				return ClockReason, true

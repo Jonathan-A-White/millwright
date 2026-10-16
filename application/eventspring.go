@@ -50,6 +50,11 @@ const SpringRestartedReason = "run again after the follower restarted"
 // to find a pass its predecessor was cut short in.
 const springLookback = 200
 
+// TellFailureEvery is how long a job with TellFailure is quiet after it has
+// mailed the Mayor of a failed pass: a job that fails on every pass is told of
+// once a day, not on each.
+const TellFailureEvery = 24 * time.Hour
+
 // ClockReason is the detail of the scheduled event of a pass on a job's own
 // clock.
 const ClockReason = "clock"
@@ -87,6 +92,10 @@ type SpringJob struct {
 	// counted from its last pass of any cause; zero is never.
 	Every  time.Duration
 	Reason string
+	// TellFailure makes a failed pass mail the Mayor (mw-gq6.531), at most once
+	// in TellFailureEvery: for the jobs on a clock of a day or longer, whose
+	// failure nobody else sees.
+	TellFailure bool
 	// About, when set, says in a few words when the job runs, for the
 	// listing of mw events jobs.
 	About string
@@ -186,6 +195,9 @@ type EventSpring struct {
 	// follower is being stopped: the units' stop terminates a pass's systemctl
 	// a moment before the follower hears its own signal. Zero waits not at all.
 	Settle time.Duration
+	// Mailbox is where the Mayor is told of a failed pass of a job with
+	// TellFailure; nil tells no one.
+	Mailbox Mailbox
 
 	mu      sync.Mutex
 	started bool
@@ -199,7 +211,8 @@ type springState struct {
 	last     string // the job's state in the job machine, as last written
 	lastRun  time.Time
 	inFlight bool
-	again    string // why one more pass is wanted when this ends
+	again    string    // why one more pass is wanted when this ends
+	told     time.Time // when the Mayor was last mailed of a failed pass
 }
 
 // Spring springs the jobs the log's new events and the clocks want. It
@@ -309,13 +322,14 @@ func (s *EventSpring) launch(ctx context.Context, j SpringJob, st *springState, 
 		err := j.Run(ctx)
 		cutShort := err != nil && s.stopping(ctx)
 		s.mu.Lock()
-		defer s.mu.Unlock()
+		tell := false
 		if cutShort && errors.Is(err, ErrLeftRunning) {
 			s.say(j, s.write(ctx, j, st, events.JobDone, SpringLeftRunningDetail))
 		} else if cutShort {
 			s.say(j, s.write(ctx, j, st, events.JobDone, SpringInterruptedDetail))
 		} else if err != nil {
 			s.say(j, s.write(ctx, j, st, events.JobFailed, clippedTo(oneLine(err.Error()), DispatchLogReasonLimit)))
+			tell = s.dueToTell(j, st)
 		} else {
 			s.say(j, s.write(ctx, j, st, events.JobDone, ""))
 		}
@@ -324,7 +338,39 @@ func (s *EventSpring) launch(ctx context.Context, j SpringJob, st *springState, 
 			st.again = ""
 			s.launch(ctx, j, st, again)
 		}
+		s.mu.Unlock()
+		if tell {
+			s.tell(ctx, j, err)
+		}
 	}()
+}
+
+// dueToTell says whether a failed pass of j is to be mailed to the Mayor: j
+// asks for it, there is a mailbox, and the Mayor was not mailed of j within
+// TellFailureEvery. It marks the Mayor as told. s.mu is held.
+func (s *EventSpring) dueToTell(j SpringJob, st *springState) bool {
+	now := s.now()
+	if !j.TellFailure || s.Mailbox == nil || (!st.told.IsZero() && now.Sub(st.told) < TellFailureEvery) {
+		return false
+	}
+	st.told = now
+	return true
+}
+
+// tell mails the Mayor that a pass of j failed, as the job: the subject names
+// the job and the host and the body is the failure, as the units' mail does
+// (contrib/systemd/mw-unit-failed@.service). A mail that cannot be sent is said
+// on Err. s.mu is not held: sending reaches the tracker.
+func (s *EventSpring) tell(ctx context.Context, j SpringJob, failure error) {
+	_, err := s.Mailbox.Send(context.WithoutCancel(ctx), NewMessage{
+		From:    SeatIdentity(j.Name, s.Host),
+		To:      MayorMailbox,
+		Subject: fmt.Sprintf("job failed: %s on %s", j.Name, s.Host),
+		Body:    strings.TrimSpace(failure.Error()),
+	})
+	if err != nil && s.Err != nil {
+		fmt.Fprintf(s.Err, "mw events follow: mailing %s that %s failed: %v\n", MayorMailbox, j.Name, err)
+	}
 }
 
 // stopping says whether the follower is being stopped, waiting up to Settle

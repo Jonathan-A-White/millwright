@@ -139,7 +139,10 @@ own clock only), each by starting its systemd unit. Every pass is a run of the j
 the actor `<job>@<host>`: scheduled, whose detail says why (`bead mw-x opened`, `bead mw-x landed`,
 `alarm`, `heartbeat`, `clock`), running, then done, or failed with the failure as its detail. A
 job unrun for `[events] heartbeat` is run for `heartbeat`; the pass is in flight at most once,
-and an event that springs it meanwhile earns one more pass after it. A pass cut short because the
+and an event that springs it meanwhile earns one more pass after it. A failed pass of a job on a clock of a day
+or longer (`suite`, `todo-rank`, `sleep`, `digest`, `contribute-back`) also mails the Mayor, from
+`<job>@<host>`, subject `job failed: <job> on <host>`, the failure as the body, at most once in 24
+hours per job; the jobs of a shorter clock never do (mw-gq6.531). A pass cut short because the
 follower is stopping (a landing of millwright restarts it onto the new build, ending the systemctl
 the pass waited on) is not failed: it is `done` with the detail `cut short by the follower
 stopping; run again when it is back`, and the first look of the follower that comes back runs it

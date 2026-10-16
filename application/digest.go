@@ -269,6 +269,8 @@ func (w *DigestWeekly) now() time.Time {
 func (w *DigestWeekly) Job() SpringJob {
 	return SpringJob{
 		Name: DigestJobName,
+		// A failed week's digest is told to the Mayor (mw-gq6.531).
+		TellFailure: true,
 		Probe: func(ctx context.Context) (string, bool) {
 			if w.due(ctx) {
 				return ClockReason, true
