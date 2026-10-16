@@ -72,9 +72,9 @@ type BatchMetrics interface {
 // merges each queued story's branch as the origin has it (mw/<id>), oldest
 // queued first, by the rig's union rules; a branch that does not merge is set
 // aside with git's conflict list, and one with a commit signed as a machine's
-// work (AIAttribution) is set aside, never merged, naming the commit. It raises the rig's version once for the
-// batch, with one changelog entry per story; it runs the rig's tests once on
-// the batch, under the host's gate lock and the calm rule; and only when that
+// work (AIAttribution) is set aside, never merged, naming the commit. It
+// raises the rig's version once for the batch, with one changelog entry per
+// story; it runs the rig's tests once on the batch, under the host's gate lock and the calm rule; and only when that
 // run passes does it push the target branch, which is a fast-forward of what
 // the origin had, never forced. Each story merged is then closed run=landed,
 // naming the batch's commit and its own merge commit, with a chain stamp and a
