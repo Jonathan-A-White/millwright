@@ -7,6 +7,7 @@
 # nothing, and exits 0. It spends no fuel and starts no session.
 [Unit]
 Description=Post the phone-sized factory report to the Factory channel, from the home (mw report send)
+OnFailure=mw-unit-failed@%n.service
 
 [Service]
 Type=oneshot

@@ -4,7 +4,7 @@
 # real Builder sessions and spends fuel, so this only ever asks systemd to
 # read the files.
 #
-# Four checks:
+# Five checks:
 #
 # 1. VERIFY. Where systemd-analyze exists, `systemd-analyze --user verify` must
 #    accept every --user unit file (the dispatch, mail-notify, health and
@@ -48,6 +48,13 @@
 #    session named "0" already exists, starts one only when it does not, and
 #    either way settles into a loop that watches has-session rather than
 #    exiting — the process Type=simple then tracks as long as session 0 is up.
+#
+# 5. ONFAILURE=. Every .service under contrib/systemd/ and
+#    contrib/systemd/system/ other than the two mw-unit-failed@.service
+#    templates carries OnFailure=mw-unit-failed@%n.service, so a run that ends
+#    in failure is mailed to the Mayor instead of ending in an exit code nobody
+#    reads (mw-gq6.511); a unit without it is named. The templates carry no
+#    OnFailure= themselves: a failed mail must not start another.
 
 set -eu
 
@@ -72,6 +79,8 @@ MIRROR_TIMER=$DIR/mw-postern-mirror.timer
 REPORT_SERVICE=$DIR/mw-report.service
 REPORT_TIMER=$DIR/mw-report.timer
 FOLLOW_SERVICE=$DIR/mw-view-follow.service
+FAILED_TEMPLATE=$DIR/mw-unit-failed@.service
+SYS_FAILED_TEMPLATE=$DIR/system/mw-unit-failed@.service
 SEAT_TMUX_SERVICE=$DIR/system/mw-seat-tmux.service
 SYS_DOCTOR_SERVICE=$DIR/system/mw-doctor.service
 SYS_DOCTOR_TIMER=$DIR/system/mw-doctor.timer
@@ -102,6 +111,8 @@ fail() {
 [ -f "$REPORT_SERVICE" ] || fail "$REPORT_SERVICE does not exist"
 [ -f "$REPORT_TIMER" ] || fail "$REPORT_TIMER does not exist"
 [ -f "$FOLLOW_SERVICE" ] || fail "$FOLLOW_SERVICE does not exist"
+[ -f "$FAILED_TEMPLATE" ] || fail "$FAILED_TEMPLATE does not exist"
+[ -f "$SYS_FAILED_TEMPLATE" ] || fail "$SYS_FAILED_TEMPLATE does not exist"
 [ -f "$SEAT_TMUX_SERVICE" ] || fail "$SEAT_TMUX_SERVICE does not exist"
 [ -f "$SYS_DOCTOR_SERVICE" ] || fail "$SYS_DOCTOR_SERVICE does not exist"
 [ -f "$SYS_DOCTOR_TIMER" ] || fail "$SYS_DOCTOR_TIMER does not exist"
@@ -113,7 +124,7 @@ if command -v systemd-analyze >/dev/null 2>&1; then
 	# and complains about them (not the rig's to change): those lines are noted
 	# and do not fail. A line names a rig unit by its path or, as systemd does for
 	# some faults, by its file name alone.
-	UNITS="$SERVICE $TIMER $MAIL_SERVICE $MAIL_TIMER $HEALTH_SERVICE $HEALTH_TIMER $TICK_SERVICE $TICK_TIMER $REVIEW_SERVICE $REVIEW_TIMER $DOCTOR_SERVICE $DOCTOR_TIMER $MIRROR_SERVICE $MIRROR_TIMER $REPORT_SERVICE $REPORT_TIMER $FOLLOW_SERVICE"
+	UNITS="$SERVICE $TIMER $MAIL_SERVICE $MAIL_TIMER $HEALTH_SERVICE $HEALTH_TIMER $TICK_SERVICE $TICK_TIMER $REVIEW_SERVICE $REVIEW_TIMER $DOCTOR_SERVICE $DOCTOR_TIMER $MIRROR_SERVICE $MIRROR_TIMER $REPORT_SERVICE $REPORT_TIMER $FOLLOW_SERVICE $FAILED_TEMPLATE"
 	# shellcheck disable=SC2086 # the unit paths hold no spaces; word splitting is the point
 	out=$(systemd-analyze --user verify $UNITS 2>&1) || {
 		echo "$out" >&2
@@ -139,7 +150,7 @@ if command -v systemd-analyze >/dev/null 2>&1; then
 
 	# The system pair: no --user, since these are system units (run as root,
 	# outside any user manager). Same "ignore what is not ours" treatment.
-	SYS_UNITS="$SEAT_TMUX_SERVICE $SYS_DOCTOR_SERVICE $SYS_DOCTOR_TIMER"
+	SYS_UNITS="$SEAT_TMUX_SERVICE $SYS_DOCTOR_SERVICE $SYS_DOCTOR_TIMER $SYS_FAILED_TEMPLATE"
 	# shellcheck disable=SC2086
 	sys_out=$(systemd-analyze verify $SYS_UNITS 2>&1) || {
 		echo "$sys_out" >&2
@@ -294,6 +305,27 @@ BE=$(mktemp -d)
 grep -v 'beads\.env' "$REPORT_SERVICE" >"$BE/mw-report.service"
 beads_env_missing "$BE/mw-report.service" || fail "the beads.env check passed a mw-report.service with the line removed"
 rm -rf "$BE"
+
+# The failure mail: every service names the template in OnFailure=, and the
+# templates, which are what it starts, name nothing (no loop). The template is
+# a oneshot that sends one mail to the Mayor, naming the failed unit (%i).
+ON_FAILURE_LINE="OnFailure=mw-unit-failed@%n.service"
+for unit in "$DIR"/*.service "$DIR"/system/*.service; do
+	case ${unit##*/} in
+	mw-unit-failed@.service)
+		if grep -q '^OnFailure=' "$unit"; then
+			fail "$unit sets OnFailure=: a failed mail would start another, a loop"
+		fi
+		continue ;;
+	esac
+	need "$unit" "$ON_FAILURE_LINE"
+done
+for template in "$FAILED_TEMPLATE" "$SYS_FAILED_TEMPLATE"; do
+	need "$template" "Type=oneshot"
+	need "$template" "TimeoutStartSec=2min"
+	grep -q '^ExecStart=.*mw mail send mayor .*%i' "$template" ||
+		fail "$template does not send a mail to the mayor naming the failed unit (%i)"
+done
 
 # The scripts the services run must be there to run, and must parse.
 for script in "$MAIL_SCRIPT" "$HEALTH_SCRIPT"; do

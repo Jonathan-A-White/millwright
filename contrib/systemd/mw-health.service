@@ -5,6 +5,7 @@
 # ~/.mw-health; it changes nothing else, starts nothing and spends no tokens.
 [Unit]
 Description=Write this host's one-line health reading (mw-health)
+OnFailure=mw-unit-failed@%n.service
 
 [Service]
 Type=oneshot

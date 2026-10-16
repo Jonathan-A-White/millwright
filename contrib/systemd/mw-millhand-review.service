@@ -6,6 +6,7 @@
 # that fuel every time.
 [Unit]
 Description=Wake this host's Millhand for a review (mw millhand --wake review)
+OnFailure=mw-unit-failed@%n.service
 
 [Service]
 Type=oneshot

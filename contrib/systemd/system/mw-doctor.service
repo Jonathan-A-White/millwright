@@ -14,6 +14,7 @@
 # the alarms are pushed through the tracker, so its bd needs beads.env too.
 [Unit]
 Description=Cure this host's known faults offline, on a table of checks (mw doctor)
+OnFailure=mw-unit-failed@%n.service
 
 [Service]
 Type=oneshot

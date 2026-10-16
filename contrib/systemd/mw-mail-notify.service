@@ -8,6 +8,7 @@
 # input line; it starts nothing and reads no mail content.
 [Unit]
 Description=Tell the Mayor's tmux window when mail arrives (mw-mail-notify)
+OnFailure=mw-unit-failed@%n.service
 
 [Service]
 Type=oneshot
