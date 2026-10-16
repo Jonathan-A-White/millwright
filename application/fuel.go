@@ -45,6 +45,11 @@ type SessionResult struct {
 	TerminalReason string
 	SessionID      string
 	Model          string
+	// ModelID is the model id `modelUsage` names, the one that wrote the most
+	// output where it names more than one: the model the session ran on, which
+	// an alias it was started with does not say once the alias moves. Empty
+	// when the file has no `modelUsage`.
+	ModelID string
 	// Turns and Duration are the harness's `num_turns` and `duration_ms`, and
 	// they cover only what the result message itself covers. When Woken is
 	// true that is the last turn alone, not the session.
@@ -260,6 +265,18 @@ func (f resultFile) fuel() (Fuel, bool) {
 	return whole, true
 }
 
+// modelID is the model `modelUsage` names that wrote the most output tokens,
+// the first by name of those that tie, and empty when it names none.
+func (f resultFile) modelID() string {
+	id, most := "", -1
+	for name, model := range f.ModelUsage {
+		if model.Output > most || model.Output == most && name < id {
+			id, most = name, model.Output
+		}
+	}
+	return id
+}
+
 // ReadSessionResult reads what a session reported. A file that is not JSON at
 // all is an error: it is the difference between a session that failed and a
 // session that never ran, and a close-out must not mistake one for the other.
@@ -282,6 +299,7 @@ func ReadSessionResult(printed string) (SessionResult, error) {
 		TerminalReason:   file.TerminalReason,
 		SessionID:        file.SessionID,
 		Model:            file.Model,
+		ModelID:          file.modelID(),
 		Turns:            file.Turns,
 		Duration:         time.Duration(file.DurationMS) * time.Millisecond,
 		APIDuration:      time.Duration(file.APIDurationMS) * time.Millisecond,

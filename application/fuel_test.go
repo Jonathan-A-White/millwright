@@ -281,3 +281,23 @@ func TestAResultStoppedAtTheUsageLimitSaysSo(t *testing.T) {
 		}
 	}
 }
+
+// The model a session ran on is the id modelUsage names, not the alias it was
+// started with: an alias moves, the id does not (mw-2zh33g.11). Where
+// modelUsage names more than one, it is the one that wrote the most output,
+// even when another took in more tokens all told.
+func TestReadSessionResultNamesTheModelIDThatWroteTheMostOutput(t *testing.T) {
+	if got := realResult(t, "result-haiku-grind.json").ModelID; got != "claude-haiku-5-5" {
+		t.Errorf("expected the grind's model id claude-haiku-5-5, got %q", got)
+	}
+	if got := realResult(t, "result-one-stretch.json").ModelID; got != "claude-sonnet-5" {
+		t.Errorf("expected the one model the run names, got %q", got)
+	}
+	none, err := application.ReadSessionResult(`{"subtype": "success", "usage": {"output_tokens": 20}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if none.ModelID != "" {
+		t.Errorf("expected no model id from a result with no modelUsage, got %q", none.ModelID)
+	}
+}

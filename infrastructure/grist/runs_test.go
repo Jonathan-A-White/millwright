@@ -142,3 +142,28 @@ func TestOnlyAForwardRunThatKeptItsSenderIsForwarded(t *testing.T) {
 		}
 	}
 }
+
+// A run kept before timings carried model_id lists and times as it did
+// (mw-2zh33g.11).
+func TestARunWithNoModelIDStillLists(t *testing.T) {
+	ctx, dir := context.Background(), t.TempDir()
+	run := filepath.Join(dir, "runs", "direct:old")
+	if err := os.MkdirAll(run, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	old := `{"txid":"direct:old","app":"lampas","kind":"tips","model":"haiku","effort":"low","received":"2026-10-01T09:00:00Z","harness_started":"2026-10-01T09:00:00Z","answered":"2026-10-01T09:00:03Z","scoring_seconds":0,"harness_seconds":3,"seconds":3.4,"run_s":3.4}`
+	for name, body := range map[string]string{"timing.json": old, "answer.json": `{"status":"answered"}`} {
+		if err := os.WriteFile(filepath.Join(run, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runs := grist.NewRuns(dir)
+	listed, err := runs.List(ctx, time.Time{})
+	if err != nil || len(listed) != 1 || listed[0].Model != "haiku" || listed[0].Kind != "tips" || listed[0].Seconds != 3.4 || listed[0].Status != "answered" {
+		t.Fatalf("expected the old run listed as it was, got %+v %v", listed, err)
+	}
+	timings, err := runs.Timings(ctx)
+	if err != nil || len(timings) != 1 || timings[0].ModelID != "" || timings[0].Model != "haiku" || timings[0].HarnessSeconds != 3 {
+		t.Fatalf("expected the old timing read with no model id, got %+v %v", timings, err)
+	}
+}

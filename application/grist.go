@@ -357,7 +357,11 @@ type GrindLine struct {
 	V      string    `json:"v,omitempty"`
 	Sender string    `json:"sender"`
 	Model  string    `json:"model,omitempty"`
-	Effort string    `json:"effort,omitempty"`
+	// ModelID is the model id the harness's result named (SessionResult's
+	// ModelID), where Model is the alias the grind was run with; left out
+	// when the result named none, and on lines written before it was kept.
+	ModelID string `json:"model_id,omitempty"`
+	Effort  string `json:"effort,omitempty"`
 	// ModelFrom and EffortFrom say where Model and Effort came from: "grist"
 	// when the sender asked for them, "grind file" otherwise.
 	ModelFrom  string `json:"model_from,omitempty"`
