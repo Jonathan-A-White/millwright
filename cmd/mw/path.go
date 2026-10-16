@@ -29,7 +29,9 @@ func newPathSetCmd() *cobra.Command {
 		Long: "set gives a story its path keys (rig, branch, harness, model, effort, formula, host,\n" +
 			"files) in one write, in place of one bd update --set-metadata call for each. files is\n" +
 			"the comma-separated repo paths or globs the story expects to change: dispatch does not\n" +
-			"start it while a running story on its rig shares one.\n\n" +
+			"start it while a running story on its rig shares one. bump=minor has the landing raise\n" +
+			"the rig's minor version, patch reset to 0, in place of its patch: the epic's last story\n" +
+			"says it here, and a Builder never edits the version itself.\n\n" +
 			"  mw path set B --from A               copy the seven keys from the story A\n" +
 			"  mw path set B --from A model=opus    copy them, with model overridden\n" +
 			"  mw path set B rig=lampas             set only the rig\n" +
@@ -63,7 +65,7 @@ func newPathShowCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "show <story-id>",
 		Short: "Print a story's ten path keys",
-		Long: "show prints the ten path keys of a story as it is worked by them. On a rig whose file\n" +
+		Long: "show prints the eleven path keys of a story as it is worked by them. On a rig whose file\n" +
 			"in the vault says files_expected = true, a story with no files key also gets one line\n" +
 			"saying so: a warning, and the keys are printed all the same.",
 		Args: cobra.ExactArgs(1),

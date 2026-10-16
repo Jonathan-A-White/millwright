@@ -4795,9 +4795,12 @@ A rig's file may also say `version_files = ["package.json", "package-lock.json"]
 the first file at landing (1.2.3 becomes 1.2.4), writes it into every file named
 (a lock file's top-level `version` and `packages[""].version`; every other byte stays),
 and commits that in the landing worktree as `Version X.Y.Z (<story id>)`, after the merge
-and before the gate and the push. A story whose own commits changed that version, the
-minor a Builder raises in an epic's last story, lands with it untouched; a version file the
-story adds (a rig's first landing) is not a raise, and its patch is raised. A push that is
+and before the gate and the push. A story whose path says `bump=minor` (an epic's last story;
+`mw path set <story> bump=minor`) has the minor raised instead, the patch reset to 0
+(1.2.3 becomes 1.3.0), in the same commit and files, so a Builder never edits the version and
+the branch never conflicts with the patch bumps landed meanwhile. A story whose own commits
+changed that version by hand (one in flight from before `bump=minor`) lands with it untouched;
+a version file the story adds (a rig's first landing) is not a raise, and its patch is raised. A push that is
 refused and tried again raises the version once, from the new base. A rig without the
 key lands as it always did, and a Builder never bumps the patch by hand. The Landed mail
 and the ledger line say `version X.Y.Z`. See `features/next.feature`.

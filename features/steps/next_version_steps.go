@@ -1,12 +1,14 @@
 package steps
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/domain"
 	"github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/cucumber/godog"
@@ -25,6 +27,8 @@ func registerNextVersionSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the rig's file in the vault also holds the line "([^"]*)"$`, c.theRigFileAlsoHoldsTheLine)
 	ctx.Given(`^the work of "([^"]*)" is rebased onto that main$`, c.theWorkIsRebasedOntoMain)
 	ctx.Given(`^the story "([^"]*)" raised the version to "([^"]*)" itself$`, c.theStoryRaisedTheVersion)
+	ctx.Given(`^the story "([^"]*)" says bump=minor in its path$`, c.theStorySaysBumpMinor)
+	ctx.Given(`^the other host landed patch bumps to "([^"]*)" and then "([^"]*)" on "([^"]*)" while "([^"]*)" was worked$`, c.theOtherHostLandedPatchBumps)
 	ctx.Given(`^the other host lands a story and its version bump the moment mw first tries to push$`, c.theOtherHostRacesWithABump)
 
 	ctx.Then(`^"([^"]*)" at the rig's origin holds version "([^"]*)" in "([^"]*)" and "([^"]*)"$`, c.theOriginHoldsVersion)
@@ -118,6 +122,28 @@ func (c *nextContext) theStoryRaisedTheVersion(id, version string) error {
 		}
 	}
 	return commitIn(dir, "Version "+version+" ("+id+")")
+}
+
+// theStorySaysBumpMinor sets bump=minor in the story's path, as mw path set does.
+func (c *nextContext) theStorySaysBumpMinor(id string) error {
+	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{"bump": domain.BumpMinor})
+}
+
+// theOtherHostLandedPatchBumps lands, one after the other, the two patch bumps
+// mw makes for other stories, on main at the origin, so that the story's branch
+// forks from a version that has since moved twice.
+func (c *nextContext) theOtherHostLandedPatchBumps(first, second, branch, _ string) error {
+	for i, version := range []string{first, second} {
+		for file, text := range map[string]string{"package.json": packageJSON(version), "package-lock.json": packageLock(version)} {
+			if err := os.WriteFile(filepath.Join(c.seed, file), []byte(text), 0o644); err != nil {
+				return err
+			}
+		}
+		if err := commitIn(c.seed, fmt.Sprintf("Version %s (mw-other.%d)", version, i+1)); err != nil {
+			return err
+		}
+	}
+	return gitRun(c.seed, "git", "push", "-q", "origin", branch)
 }
 
 // theOtherHostRacesWithABump is a racer that lands a story of its own with the

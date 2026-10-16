@@ -25,6 +25,21 @@ func NextPatch(version string) (string, error) {
 	return fmt.Sprintf("%s.%s.%d", m[1], m[2], patch+1), nil
 }
 
+// NextMinor raises the minor of a plain X.Y.Z version and resets its patch:
+// 1.2.3 is 1.3.0. The same refusal as NextPatch for a version that is not three
+// plain numbers.
+func NextMinor(version string) (string, error) {
+	m := plainVersion.FindStringSubmatch(version)
+	if m == nil {
+		return "", fmt.Errorf("%q is not a plain X.Y.Z version, so its minor cannot be raised", version)
+	}
+	minor, err := strconv.Atoi(m[2])
+	if err != nil {
+		return "", fmt.Errorf("the minor of %q is too large: %w", version, err)
+	}
+	return fmt.Sprintf("%s.%d.0", m[1], minor+1), nil
+}
+
 // versionPaths are the places an npm package.json or package-lock.json keeps
 // the package's own version: the top-level "version", and in a lock file the
 // root package's entry, packages[""].version. Every other "version" in either

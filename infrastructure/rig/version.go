@@ -19,7 +19,7 @@ func (w *Worktrees) BumpVersion(ctx context.Context, landingDir string, bump app
 	}
 
 	// Did the story's own commits change the version? Then the Builder raised it
-	// on purpose (the minor of an epic's last story) and mw adds nothing to it.
+	// by hand (a story in flight from before bump=minor) and mw adds nothing to it.
 	// A file the story added, with no version before, is a rig's first landing
 	// (mw-gq6.334): that is not a raise, and the patch is raised from what it holds.
 	fork, err := w.git(ctx, landingDir, "merge-base", bump.Before, bump.Branch)
@@ -40,7 +40,11 @@ func (w *Worktrees) BumpVersion(ctx context.Context, landingDir string, bump app
 	if err != nil {
 		return application.Bumped{}, fmt.Errorf("%s: %w", bump.Files[0], err)
 	}
-	next, err := domain.NextPatch(current)
+	raise := domain.NextPatch
+	if bump.Minor {
+		raise = domain.NextMinor
+	}
+	next, err := raise(current)
 	if err != nil {
 		return application.Bumped{}, fmt.Errorf("%s: %w", bump.Files[0], err)
 	}
