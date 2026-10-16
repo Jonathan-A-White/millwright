@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
 
+	millwright "github.com/Jonathan-A-White/millwright"
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/beads"
+	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 
 	"github.com/spf13/cobra"
@@ -21,6 +24,7 @@ func newTodoCmd() *cobra.Command {
 	todo.AddCommand(newTodoDueCmd())
 	todo.AddCommand(newTodoSizeCmd())
 	todo.AddCommand(newTodoThenCmd())
+	todo.AddCommand(newTodoRankCmd())
 	return todo
 }
 
@@ -127,6 +131,56 @@ func newTodoThenCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&clear, "clear", false, "take the Then line off the card")
+	return cmd
+}
+
+func newTodoRankCmd() *cobra.Command {
+	var dryRun bool
+	var about string
+	cmd := &cobra.Command{
+		Use:   "rank [--dry-run] [--about <file>]",
+		Short: "Put every To do card in a row, now, by one model pass",
+		Long: "rank runs one short model pass over the Governor's To do board: every open card (an open bead\n" +
+			"labelled hitl:todo), the cards he closed in the last 30 days and his about file, the vault's\n" +
+			application.TodoAboutFile + " (or --about <file>). The model puts each open card in a row, now,\n" +
+			"make-time, later or let-go, with a one-line why, and mw writes them as the card's todo_row and\n" +
+			"todo_row_why where they changed, marks a starred card past its due time todo_slipped once, and\n" +
+			"writes the pass log runs/todo-rank/<date>.json in the vault. The model and its effort are\n" +
+			"[todo] rank_model and rank_effort in the config (sonnet and medium).\n\n" +
+			"  mw todo rank\n" +
+			"  mw todo rank --dry-run\n\n" +
+			"An answer that misses a card, names one it was not given, says another row, puts more than\n" +
+			"three cards in now or make-time, or lets a starred card go is refused and nothing is written.\n" +
+			"--dry-run prints the rows and writes nothing.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dir, err := config.Vault()
+			if err != nil {
+				return err
+			}
+			host, err := config.Host()
+			if err != nil {
+				return err
+			}
+			settings, err := config.Todo()
+			if err != nil {
+				return err
+			}
+			gateway := mwGateway(dir, host)
+			pass := application.TodoRankPass{
+				Tracker: gateway, Closed: gateway, Grinder: claude.NewGrinder(), Runs: mwVault(dir, host),
+				Instructions: millwright.TodoRankInstructions, AboutFile: filepath.Join(dir, application.TodoAboutFile),
+				Model: settings.RankModel, Effort: settings.RankEffort, Zone: settings.Zone, Out: cmd.OutOrStdout(),
+			}
+			if about != "" {
+				pass.AboutFile, pass.AboutRequired = about, true
+			}
+			_, err = pass.Run(cmd.Context(), dryRun)
+			return err
+		},
+	}
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print the rows and write nothing")
+	cmd.Flags().StringVar(&about, "about", "", "read his about file from here, not the vault's "+application.TodoAboutFile)
 	return cmd
 }
 

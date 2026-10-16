@@ -2336,6 +2336,53 @@ func Tester() (TesterSettings, error) {
 	return tester, nil
 }
 
+// TodoTable is the table of the config file that says how mw todo rank runs
+// its model pass over the Governor's To do board: `rank_model` and
+// `rank_effort` (sonnet and medium when it does not say), and `tz`, his zone,
+// the days and hours the pass is given are in (America/New_York when it does
+// not say).
+const TodoTable = "todo"
+
+// What mw todo rank runs on, and in which zone, when [todo] does not say.
+const (
+	DefaultTodoRankModel  = "sonnet"
+	DefaultTodoRankEffort = "medium"
+	DefaultTodoZone       = "America/New_York"
+)
+
+// TodoSettings is what the `[todo]` table says, the defaults filled in.
+type TodoSettings struct {
+	RankModel, RankEffort string
+	Zone                  *time.Location
+}
+
+// Todo reports the `[todo]` table of ~/.config/mw/config.toml. A machine with
+// no such table has the defaults, which is not an error; a tz that is not a
+// zone of the tz database is refused.
+func Todo() (TodoSettings, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return TodoSettings{}, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	table, err := tableIn(path, TodoTable)
+	if err != nil {
+		return TodoSettings{}, err
+	}
+	said := func(key, fallback string) string {
+		if value := strings.Trim(strings.TrimSpace(table[key]), `"'`); value != "" {
+			return value
+		}
+		return fallback
+	}
+	todo := TodoSettings{RankModel: said("rank_model", DefaultTodoRankModel), RankEffort: said("rank_effort", DefaultTodoRankEffort)}
+	zone := said("tz", DefaultTodoZone)
+	if todo.Zone, err = time.LoadLocation(zone); err != nil {
+		return TodoSettings{}, fmt.Errorf("the [%s] table of %s says tz = %q: say a zone of the tz database, like %q", TodoTable, path, zone, DefaultTodoZone)
+	}
+	return todo, nil
+}
+
 // CloudTable is the table of the config file that turns the elastic cloud on
 // (docs/vultr-boost.md, "Elastic"), and CloudCapsTable the one that says how
 // many sessions each host runs at once, for counting the free ones: host name

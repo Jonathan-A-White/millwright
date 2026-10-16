@@ -2569,6 +2569,35 @@ from root's own mw config, and no sudoers file is written, since root runs
 name. Re-running it replaces the same files and keeps the record of approvals run.
 See `features/hands.feature` and `features/postern_inbox_apply.feature`.
 
+## Ranking the Governor's To do board
+
+`mw todo rank` runs one short model pass over his To do board (mw-ht6gsw.2): every open card (an open
+bead labelled `hitl:todo`), the cards he closed in the last 30 days (each with the time he closed it, in
+his zone, its weekday, size and days open) and his about file, the vault's `seats/mayor/todo-about.md`
+(his hours and days in his own words, written by the Mayor; `--about <file>` reads another). The model
+is held to `grinds/todo-rank.md`, his rule in his words, built into mw: Do now is important and due
+soon (past due or within two days), at most three; Make time is important and not urgent, longest
+waiting first, at most three; Later is the rest; an unstarred card untouched for 30 days goes to Let
+go, and a starred card never does. It answers each card's row (`now`, `make-time`, `later` or
+`let-go`) and a why under 80 characters.
+
+The pass is all or nothing: an answer that misses a card, names a bead it was not given or one twice,
+says another row, puts more than three cards in now or make-time, or lets a starred card go is refused
+and nothing is written. Otherwise mw writes the metadata `todo_row` and `todo_row_why` on each card
+whose row or why changed, `todo_slipped` (its `todo_due`) on a starred card past its due time, once for
+each due time, and the pass log `runs/todo-rank/<date>.json` in the vault: every card's row and why,
+the model's tokens and the elapsed time. The view publishes `todo_row` and `todo_row_why`.
+`--dry-run` prints the rows and writes nothing.
+
+```toml
+[todo]
+rank_model  = "sonnet"            # the pass's model (sonnet when left out)
+rank_effort = "medium"            # and effort (medium when left out)
+tz          = "America/New_York"  # his zone, the days and hours are given in (America/New_York when left out)
+```
+
+See `features/todo-rank.feature`.
+
 ## Saved prompts
 
 The Mayor keeps prompts on the postern backend, so the Governor can run one by

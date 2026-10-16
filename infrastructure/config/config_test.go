@@ -2395,3 +2395,27 @@ func TestNextMaxTurnsRefusesWhatIsNotAWholeNumber(t *testing.T) {
 		}
 	}
 }
+
+// [todo] (mw-ht6gsw.2): mw todo rank runs on sonnet at medium in the
+// Governor's zone until the table says otherwise; a tz that is no zone is
+// refused.
+func TestTodoRanksOnSonnetAtMediumUntilTheTodoTableSaysOtherwise(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\nrank_model = \"opus\"\n")
+	todo, err := config.Todo()
+	if err != nil {
+		t.Fatalf("reading [todo]: %v", err)
+	}
+	if todo.RankModel != "sonnet" || todo.RankEffort != "medium" || todo.Zone.String() != "America/New_York" {
+		t.Fatalf("expected the defaults sonnet, medium and America/New_York, not a root-table key, got %+v", todo)
+	}
+
+	writeConfig(t, "[todo]\nrank_model = \"haiku\"\nrank_effort = \"low\"\ntz = \"Europe/London\"\n")
+	if todo, err = config.Todo(); err != nil || todo.RankModel != "haiku" || todo.RankEffort != "low" || todo.Zone.String() != "Europe/London" {
+		t.Fatalf("expected the [todo] table's haiku, low and Europe/London, got %+v: %v", todo, err)
+	}
+
+	writeConfig(t, "[todo]\ntz = \"Mars/Olympus\"\n")
+	if _, err := config.Todo(); err == nil || !strings.Contains(err.Error(), "Mars/Olympus") {
+		t.Fatalf("expected tz = \"Mars/Olympus\" refused, naming it, got %v", err)
+	}
+}
