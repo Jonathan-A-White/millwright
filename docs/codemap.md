@@ -6,7 +6,7 @@
 |-|-|-|
 | `WorkTracker` | application/worktracker.go | beads |
 | TrackerNotes, SweepNotes, BeadGraph, IceNotes, IcedBeads | application/{status,sweep,ice}.go | same |
-| VaultFiles, TrackerSync, TrackerHistory, TrackerFlush, SyncHaltMarker | application/sync.go | {vault/git,beads/sync}.go, synchalt, flushlog |
+| VaultFiles, Tracker{Sync,History,Flush}, SyncHaltMarker | application/sync.go | {vault/git,beads/sync}.go, synchalt, flushlog |
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | beads/mail.go |
 | EpicRules (+LandingRules) | application/epicrules.go | vault/epicrules.go |
 | Vault, Harness, SeatBootFiles, RigDocs, BootCommands | seatboot.go, application/seatboot_manifest.go, application/harness.go | {vault,claude,shellcmd}, rig/rigfiles.go |
