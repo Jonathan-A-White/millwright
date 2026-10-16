@@ -9,11 +9,12 @@ where you would break one, say so in a question instead.
 
 ## What you are given
 
-Files in your working directory (read them all):
+Files in your working directory (read them all, one read each: mw has cut each to
+a size you can read whole, so do not page through them or read one twice):
 
-- `triage.jsonl`: one JSON line per live work bead (id, type, status, p, labels,
-  rig, size, parent, days since update, days ready, deps, dependents, the start of
-  the description, `his_priority`).
+- `triage.jsonl`: one JSON line per live work bead (id, type, status, priority,
+  labels, rig, size, parent, days since update, days ready, deps, dependents, the
+  start of the description, `his_priority`; a field that is empty is left out).
 - `triage-diff.txt`: what moved since the last dump: new, closed, moved, newly
   ready, newly stale.
 - `queue.json`: the stories ready on this host in dispatch's start order, why each
@@ -22,10 +23,13 @@ Files in your working directory (read them all):
   with commits and words this week is hot, one with neither is cool.
 - `runs.txt`: the sessions' results aggregated by model: failures, turns, cache
   read for each turn, time on the model, tokens.
-- `report.json`: `mw report`: quality, speed and fuel by rig, model and host, the
-  cheap wins, the landings that were investments and how they measured.
+- `report.txt`: `mw report` in its text form: quality, speed and fuel by rig, model
+  and host, the cheap wins, the landings that were investments and how they
+  measured.
 
 A file may say it could not be read; work from the rest and say what you lacked.
+A file mw had to cut ends in a line that says "mw cut this part" and how much of it
+you have; weigh what you have, and say in a question when what was cut matters.
 
 On a Sunday you are given the whole picture and a month of report: read everything,
 not only what moved. On other nights weigh the diff and the day's runs; read the
