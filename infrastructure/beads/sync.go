@@ -19,9 +19,10 @@ import (
 // Gateway also brings the one beads database level with the other host's, and
 // is where a read-only reader of the hosts' notes — mw status — reads them.
 var (
-	_ application.TrackerSync  = (*Gateway)(nil)
-	_ application.TrackerNotes = (*Gateway)(nil)
-	_ application.DoctorNotes  = (*Gateway)(nil)
+	_ application.TrackerSync    = (*Gateway)(nil)
+	_ application.TrackerHistory = (*Gateway)(nil)
+	_ application.TrackerNotes   = (*Gateway)(nil)
+	_ application.DoctorNotes    = (*Gateway)(nil)
 )
 
 // beadsDir is where bd keeps everything about one vault's database — the
@@ -206,3 +207,84 @@ func (g *Gateway) ClearNote(ctx context.Context, key string) error {
 	}
 	return nil
 }
+
+// squashMessage is the commit a squash of the history leaves on top of the
+// first one.
+const squashMessage = "mw: squash the beads history into one commit"
+
+// HistoryCommits implements application.TrackerHistory: Dolt's own count of the
+// commits on the branch. bd answers SQL only from a served database, so on an
+// embedded one this is an error, and the history is never squashed there.
+func (g *Gateway) HistoryCommits(ctx context.Context) (int, error) {
+	var rows []struct {
+		Commits int `json:"commits"`
+	}
+	if err := g.query(ctx, "SELECT COUNT(*) AS commits FROM dolt_log", &rows); err != nil {
+		return 0, err
+	}
+	if len(rows) != 1 {
+		return 0, fmt.Errorf("counting the beads history: bd sql returned %d rows", len(rows))
+	}
+	return rows[0].Commits, nil
+}
+
+// SquashHistory implements application.TrackerHistory. bd flatten does the same
+// with a hard reset of the branch onto a squashed copy of it, which drops any
+// write that lands between the copy and the reset; this resets softly onto the
+// first commit and commits there, which moves only the branch's head and never
+// the working set every write lands in. A write in between commits the whole
+// working set onto the first commit itself, and the squash's own commit then
+// has nothing left to commit: that is the squash done. Tried on a copy of the
+// Laptop's database served by Dolt 2.2.0, twenty squashes under three writers
+// lost none of 600 writes (mw-gq6.455).
+//
+// The remote-tracking branches go next, since each keeps its whole history
+// alive: the Laptop's backup left one that held 43,506 commits. A later fetch
+// makes them again. Last, a full collection: the history an earlier
+// collection moved to the old generation is reclaimed by no other.
+func (g *Gateway) SquashHistory(ctx context.Context) error {
+	var first []struct {
+		Hash string `json:"commit_hash"`
+	}
+	if err := g.query(ctx, "SELECT commit_hash FROM dolt_log ORDER BY date ASC LIMIT 1", &first); err != nil {
+		return err
+	}
+	if len(first) != 1 || strings.TrimSpace(first[0].Hash) == "" {
+		return fmt.Errorf("squashing the beads history: bd sql named no first commit")
+	}
+	if _, err := g.call(ctx, "sql", fmt.Sprintf("CALL DOLT_RESET('--soft', '%s')", sqlQuoted(first[0].Hash))); err != nil {
+		return err
+	}
+	if _, err := g.call(ctx, "sql", fmt.Sprintf("CALL DOLT_COMMIT('-Am', '%s')", squashMessage)); err != nil &&
+		!strings.Contains(err.Error(), "nothing to commit") {
+		return err
+	}
+	var remotes []struct {
+		Name string `json:"name"`
+	}
+	if err := g.query(ctx, "SELECT name FROM dolt_remote_branches", &remotes); err != nil {
+		return err
+	}
+	for _, remote := range remotes {
+		if _, err := g.call(ctx, "sql", fmt.Sprintf("CALL DOLT_BRANCH('-D', '-r', '%s')", sqlQuoted(remote.Name))); err != nil {
+			return err
+		}
+	}
+	_, err := g.call(ctx, "gc", "--skip-decay", "--force", "--full")
+	return err
+}
+
+// query runs one SQL query through bd and reads its JSON rows into rows.
+func (g *Gateway) query(ctx context.Context, query string, rows any) error {
+	out, err := g.call(ctx, "sql", "--json", query)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(out, rows); err != nil {
+		return fmt.Errorf("parsing bd sql --json for %q: %w", query, err)
+	}
+	return nil
+}
+
+// sqlQuoted is text made safe inside a single-quoted SQL string.
+func sqlQuoted(text string) string { return strings.ReplaceAll(text, "'", "''") }
