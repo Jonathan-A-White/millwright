@@ -45,7 +45,7 @@ Fakes: application/apptest/fake*.go, Fake<Port>; seatboot ports: seatboot*_test.
 | Sweep, Tidy, Sync, Nudge, Mail, Home[Move] | application/sweep.go, application/tidy.go, application/nudge.go, application/mail.go, application/home.go, application/homemove.go | cmd/mw/sweep.go, cmd/mw/tidy.go, cmd/mw/sync.go, cmd/mw/nudge.go, cmd/mw/mail.go, cmd/mw/home.go, cmd/mw/homemove.go | {sweep,tidy,sync,mail,home} |
 | Suite, SuiteFiler, NightlySuite, ContributeBack | application/suitefile.go, application/suitestatus.go, application/contributeback.go | cmd/mw/suite.go, cmd/mw/suitenightly.go | {suite*,contribute_back} |
 | Config* | application/configset.go | cmd/mw/config.go | config_* |
-| IdeasOnly* | application/ideasonly.go, application/ideasonlyrelease.go, application/posternideas.go, application/talkwaitideas.go | cmd/mw/ideasonly.go | ideas_only, postern_inbox_apply, talk_wait |
+| IdeasOnly* | application/ideasonly.go, application/ideasonlyrelease.go | cmd/mw/ideasonly.go | ideas_only, postern_inbox_apply, talk_wait |
 | Seat* | application/seat{context,up,reap,handover}.go | cmd/mw/seat.go | seat_* |
 | Talk* | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go | cmd/mw/talk.go | talk_* |
 | Millhand, Deputy, MillhandTick | application/millhand.go, application/deputy.go, application/millhandtick.go | cmd/mw/millhand.go, cmd/mw/deputy.go, cmd/mw/millhandtick.go | {millhand*,deputy} |
