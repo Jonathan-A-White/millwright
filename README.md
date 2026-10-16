@@ -1401,7 +1401,8 @@ its `mw` is older than the note. Main unknown says nothing of any host.
 
 A rig whose file in the vault says `landing = "batch"` (plans/0117, Land Rush)
 does not land each story by itself: `mw next` queues it (its branch pushed as
-`mw/<story>`, run=queued), and `mw land <rig>` lands the queue:
+`mw/<story>`, run=queued), and `mw land <rig>` lands the queue (the keys, the fixer's rules, the stop rule and the way back:
+`docs/land-rush.md`):
 
 ```sh
 mw land lampas --dry-run   # the batch it would make, oldest queued first; nothing else
