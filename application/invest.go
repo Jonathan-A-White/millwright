@@ -238,18 +238,22 @@ func (v Invest) Due(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	due := DueInvestments(all, v.now())
-	if len(due) == 0 {
-		fmt.Fprintln(v.Out, "nothing is due: every investment is inside its review date or has an outcome")
-		return nil
-	}
-	fmt.Fprintf(v.Out, "%d due for review:\n", len(due))
-	for _, inv := range due {
-		fmt.Fprintf(v.Out, "%s (review was %s)\n", inv.Made.Bead, inv.ReviewAt().Format(LedgerDate))
-		writeIndented(v.Out, "  ", "aim: "+inv.Made.Aim)
-		writeIndented(v.Out, "  ", "measured by: "+inv.Made.Measure)
-	}
+	writeDue(v.Out, DueInvestments(all, v.now()))
 	return nil
+}
+
+// writeDue prints the investments to look at again, or that none is due.
+func writeDue(w io.Writer, due []Investment) {
+	if len(due) == 0 {
+		fmt.Fprintln(w, "nothing is due: every investment is inside its review date or has an outcome")
+		return
+	}
+	fmt.Fprintf(w, "%d due for review:\n", len(due))
+	for _, inv := range due {
+		fmt.Fprintf(w, "%s (review was %s)\n", inv.Made.Bead, inv.ReviewAt().Format(LedgerDate))
+		writeIndented(w, "  ", "aim: "+inv.Made.Aim)
+		writeIndented(w, "  ", "measured by: "+inv.Made.Measure)
+	}
 }
 
 // List prints every investment with its prediction, how it is measured, its

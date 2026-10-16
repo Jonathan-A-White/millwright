@@ -204,17 +204,28 @@ func shareOf(invested, landed int) string {
 	return fmt.Sprintf("%d/%d (%.0f%%)", invested, landed, percentOf(invested, landed))
 }
 
-// writeInvestShare prints the line that ends QUALITY: the share, the share
-// before and the target, and under it the words when the share is far off.
-func writeInvestShare(b *strings.Builder, s *InvestShare) {
+// lines are the lines that end QUALITY: the share, the share before and the
+// target, and under it the words when the share is far off; nil for no share.
+func (s *InvestShare) lines() []string {
 	if s == nil {
-		return
+		return nil
 	}
 	line := fmt.Sprintf("INVESTMENTS %s%s, before %s, target %s",
 		shareOf(s.Invested, s.Landed), s.Arrow.Text(), shareOf(s.PreviousInvested, s.PreviousLanded), s.target())
-	fmt.Fprintf(b, "\n%s\n", fitLine(line, ReportWidth))
+	lines := []string{fitLine(line, ReportWidth)}
 	if words := s.offWords(); words != "" {
-		fmt.Fprintf(b, "  %s\n", words)
+		lines = append(lines, "  "+words)
+	}
+	return lines
+}
+
+// writeInvestShare prints the line that ends QUALITY, after a blank one.
+func writeInvestShare(b *strings.Builder, s *InvestShare) {
+	for i, line := range s.lines() {
+		if i == 0 {
+			b.WriteString("\n")
+		}
+		fmt.Fprintf(b, "%s\n", line)
 	}
 	if words := s.boundWords(); words != "" {
 		wrapInto(b, "  ", words)

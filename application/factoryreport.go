@@ -731,19 +731,25 @@ func (k ReportBlock) writeQuality(b *strings.Builder) {
 		fmt.Fprintf(b, "  attempts per landing %.2f%s\n", q.AttemptsPerLanding, k.arrow("attempts_per_landing"))
 	}
 	if q.Refused > 0 {
-		var causes []string
-		for _, class := range append(append([]string{}, CauseClasses...), CauseUnset) {
-			if n := q.Causes[class]; n > 0 || class == CauseUnset {
-				causes = append(causes, fmt.Sprintf("%s %d", class, n))
-			}
-		}
-		fmt.Fprintf(b, "  causes %s\n", strings.Join(causes, " · "))
+		fmt.Fprintf(b, "  causes %s\n", q.causesText())
 	}
 	fmt.Fprintf(b, "  bugs filed %d%s\n", q.BugsFiled, perLanding(q, q.BugsPerLanding, k.arrow("bugs_per_landing")))
 	fmt.Fprintf(b, "  escaped bugs %d%s\n", q.EscapedBugs, k.arrow("escaped_bugs"))
 	if q.Landed > 0 {
 		fmt.Fprintf(b, "  Tester findings %d%s\n", q.Findings, perLanding(q, q.FindingsPerLanding, k.arrow("findings_per_landing")))
 	}
+}
+
+// causesText is the refusals' causes as a line: each class that has one, then
+// unset last, which is told even when it is 0. mw loop brief reads it too.
+func (q Quality) causesText() string {
+	var causes []string
+	for _, class := range append(append([]string{}, CauseClasses...), CauseUnset) {
+		if n := q.Causes[class]; n > 0 || class == CauseUnset {
+			causes = append(causes, fmt.Sprintf("%s %d", class, n))
+		}
+	}
+	return strings.Join(causes, " · ")
 }
 
 // writeSpeed prints one block's speed: the median and p90 of actual over par,
