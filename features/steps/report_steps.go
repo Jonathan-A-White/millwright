@@ -177,6 +177,11 @@ func (c *reportContext) theStories(table *godog.Table) error {
 		if err := c.addStory(cell("id"), cell("title"), cell("rig"), cell("host"), cell("model"), attempts, filed); err != nil {
 			return err
 		}
+		if _, has := cols["description"]; has && cell("description") != "" {
+			if err := c.tracker.SetDescription(cell("id"), cell("description")); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
