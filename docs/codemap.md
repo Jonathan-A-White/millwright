@@ -13,9 +13,8 @@ domain/ stdlib · application/ use cases, ports · infra/ adapters · cmd/mw/ co
 | VaultFiles, TrackerSync, SyncHaltMarker | application/sync.go | infra/{vault/git,beads/sync}.go, infra/synchalt | Fake{VaultFiles,Tracker,SyncHaltMarker} |
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | infra/beads/mail.go | FakeMailbox |
 | EpicRules (+LandingRules) | application/epicrules.go | infra/vault/epicrules.go | FakeEpicRules |
-| Vault | application/seatboot.go | infra/vault | seatboot_test.go |
+| Vault, Harness | application/seatboot.go, application/harness.go | infra/{vault,claude} | seatboot_test.go |
 | Runner, BdProgram | application/runner.go, application/bdretry.go | infra/{tmux,bdprogram} | FakeRunner, FakeBd |
-| Harness | application/harness.go | infra/claude | seatboot_test.go |
 | SeatFiles, Windows, SeatHarness, ActingFile | application/seatup.go, application/seathandover.go | infra/{vault/{seat,reaplog},tmux/window,claude/claude}.go | Fake{Windows,Acting*} |
 | Transcripts{,Tail,Replies,Titled}, PeekRemote | application/seatcontext.go, application/peek.go | infra/{claude,peekremote} | FakePeek |
 | Reap{Terminal,Log,Armer} | application/seatreap.go | infra/{tmux/reap,vault/reaplog,reaper/arm}.go | Fake{Windows,Reap*} |
@@ -34,10 +33,8 @@ domain/ stdlib · application/ use cases, ports · infra/ adapters · cmd/mw/ co
 | Chain, StampQueue, StampStore, CommitNotes, RigHeads | application/chain.go, application/chainstamp.go, application/prove.go | infra/{bsv,stampqueue,chainlookup}, rig/worktree.go | Fake{Chain,Stamp*,Commit*,RigHeads} |
 | Grinder, WarmGrinder, GristPoolBoard, GrindSource, GristState, GristLock, GristRunStore, GristForwardStore, GristRequestStore, GristLandings, GristSmoke*, VisionSource | application/grist.go, application/gristpool.go, application/vision.go, application/gristruns.go, application/griststatus.go, application/gristsmoke.go | infra/{claude/grind,rig/{grinds,landingof},hostlock/try}.go, infra/grist | Fake{Grind*,WarmGrinder,Grist*,Landings,Visions} |
 | IdeasOnlyReader, IdeasOnlyFiles | application/ideasonly.go | infra/{postern/http.go,ideasonly} | FakePostern; features/ideas_only.feature |
-| ConfigFile | application/configset.go | infra/configfile | features/config_set.feature |
 | SuiteTrees, SuiteRunner, SuiteRecords, SuiteHistory, SuiteProcesses | application/suite.go, application/suitenightly.go | infra/{rig/{worktree,checks}.go,vault/vault.go,suiteproc} | FakeSuite* |
-| Scorer | application/scorer.go | infra/scorer | FakeScorer |
-| SecretStore | application/secrets.go | infra/sops | FakeSecretStore |
+| Scorer, SecretStore | application/scorer.go, application/secrets.go | infra/{scorer,sops} | Fake{Scorer,SecretStore} |
 
 ## Use cases
 
@@ -49,7 +46,7 @@ domain/ stdlib · application/ use cases, ports · infra/ adapters · cmd/mw/ co
 | Check{,Background,Logs,Starter}, Status, CloudCheck, CloudMake, Brief | application/check.go, application/status.go, application/cloud.go, application/cloudmake.go, application/brief.go | cmd/mw/check.go, cmd/mw/status.go, cmd/mw/cloud.go, cmd/mw/brief.go | features/{check,status,cloud,brief}.feature |
 | Sweep, Tidy, Sync, Nudge, Mail, Home[Move] | application/sweep.go, application/tidy.go, application/nudge.go, application/mail.go, application/home.go, application/homemove.go | mw sweep/tidy/sync/nudge/mail/home - cmd/mw/sweep.go, cmd/mw/tidy.go, cmd/mw/sync.go, cmd/mw/nudge.go, cmd/mw/mail.go, cmd/mw/home.go, cmd/mw/homemove.go | features/{sweep,tidy,sync,mail,home}.feature |
 | Suite, SuiteFiler, NightlySuite, ContributeBack | application/suitefile.go, application/suitestatus.go, application/contributeback.go | mw suite - cmd/mw/suite.go, cmd/mw/suitenightly.go | features/{suite*,contribute_back}.feature |
-| ConfigSet, ConfigGet | application/configset.go | mw config set/get - cmd/mw/config.go | features/config_set.feature |
+| ConfigSet, ConfigGet, ConfigFile | application/configset.go | mw config set/get - cmd/mw/config.go | features/config_set.feature |
 | IdeasOnly{Show,Mode,Release}, his records | application/ideasonly.go, application/ideasonlyrelease.go, application/posternideas.go, application/talkwaitideas.go | mw ideas-only - cmd/mw/ideasonly.go | features/ideas_only.feature, postern_inbox_apply, talk_wait |
 | Seat{Context,Up,Reap,Handover} | application/seat{context,up,reap,handover}.go | mw seat <sub> - cmd/mw/seat.go | features/seat_*.feature |
 | Talk{Call,Model,Say,Wait} | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go | mw talk <sub> - cmd/mw/talk.go | features/talk_*.feature |
@@ -61,6 +58,7 @@ domain/ stdlib · application/ use cases, ports · infra/ adapters · cmd/mw/ co
 | Postern{Serve,Nginx,Mirror} | application/posternhand.go, application/posternmirror.go | mw postern <sub> - cmd/mw/postern.go, cmd/mw/posternmirror.go | features/postern_serve.feature |
 | Prompt*, Cards, Todo* | application/prompt.go, application/tododue.go, application/todosize.go | mw prompt/card/todo - cmd/mw/prompt.go, cmd/mw/card.go, cmd/mw/todo.go | features/{prompt,card,todo*}.feature |
 | Grist{Key,Grind,Send,Request,Status,Eval,Score,Runs,Stats,Timing,Smoke,Level} | application/grist.go, application/gristtiming.go, application/gristlevel.go, application/gristgrind.go, application/gristsend.go, application/gristrequest.go, application/griststatus.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go, application/gristroom.go, application/gristsmoke.go | mw grist <sub> - cmd/mw/grist.go, cmd/mw/gristsmoke.go | features/{grist*,scorer}.feature |
+| Triage{Dump,Diff,Orphans} (infra/beads/triage.go) | application/triage.go | mw triage - cmd/mw/triage.go | - |
 
 cmd/mw/root.go, cmd/mw/version.go
 
