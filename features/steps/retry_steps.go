@@ -77,6 +77,7 @@ func InitializeRetryScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the session of "([^"]*)" has ended$`, c.theSessionHasEnded)
 	ctx.Given(`^the session of "([^"]*)" is still running$`, c.theSessionIsStillRunning)
 	ctx.Given(`^the story "([^"]*)" has been tried (\d+) times? in all$`, c.theStoryHasBeenTriedTimesInAll)
+	ctx.Given(`^the story "([^"]*)" has been tried (\d+) times, mw cause naming its attempts (.+)$`, c.theStoryHasBeenTriedWithCauses)
 	ctx.Given(`^the story "([^"]*)" ran on the host "([^"]*)" and its worktree is there, not here$`, c.theStoryRanOnAnotherHost)
 	ctx.Given(`^the story "([^"]*)" ran on the host "([^"]*)" and is claimed there by "([^"]*)"$`, c.theStoryIsClaimedByAnotherHostsActor)
 	ctx.Given(`^the host key of the story "([^"]*)" is changed to "([^"]*)"$`, c.theHostKeyIsChanged)
@@ -109,6 +110,15 @@ func InitializeRetryScenario(ctx *godog.ScenarioContext) {
 			return fmt.Errorf("the printed report does not say %q:\n%s", text, c.printed.String())
 		}
 		return nil
+	})
+	ctx.Then(`^the retry comment on "([^"]*)" says "([^"]*)"$`, func(id, text string) error {
+		comments := c.tracker.Comments(id)
+		for _, comment := range comments {
+			if strings.HasPrefix(comment, "mw retry on ") && strings.Contains(comment, text) {
+				return nil
+			}
+		}
+		return fmt.Errorf("expected the retry's comment on %s to say %q, got %q", id, text, comments)
 	})
 	ctx.Then(`^the retry succeeds$`, c.theRetrySucceeds)
 	ctx.Then(`^the retry refuses, saying: (.+)$`, c.theRetryRefusesSaying)
@@ -418,6 +428,28 @@ func (c *retryContext) theSessionIsStillRunning(id string) error {
 
 func (c *retryContext) theStoryHasBeenTriedTimesInAll(id string, times int) error {
 	return c.tracker.SetStoryMetadata(context.Background(), id, map[string]string{application.AttemptsField: strconv.Itoa(times)})
+}
+
+// theStoryHasBeenTriedWithCauses records times attempts, running mw cause on
+// each in turn as the Mayor would once it failed, with the class the list
+// gives it: "-" is an attempt nobody named a cause for.
+func (c *retryContext) theStoryHasBeenTriedWithCauses(id string, times int, classes string) error {
+	named := strings.Split(classes, ",")
+	if len(named) != times {
+		return fmt.Errorf("%d causes for %d attempts: %q", len(named), times, classes)
+	}
+	for i, class := range named {
+		if err := c.theStoryHasBeenTriedTimesInAll(id, i+1); err != nil {
+			return err
+		}
+		if class = strings.TrimSpace(class); class == "-" {
+			continue
+		}
+		if _, err := (application.Cause{Tracker: c.tracker}).Run(context.Background(), id, class, "attempt "+strconv.Itoa(i+1)+" failed", ""); err != nil {
+			return fmt.Errorf("naming the cause of attempt %d: %w", i+1, err)
+		}
+	}
+	return nil
 }
 
 func (c *retryContext) theStoryHasHadRefunds(id string, times int) error {

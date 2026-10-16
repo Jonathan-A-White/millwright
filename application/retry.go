@@ -188,10 +188,13 @@ func salvageBranch(ctx context.Context, worktrees Worktrees, landing Landing, fi
 // got that far — has nothing to read or bundle either: the claim is given back
 // and a comment says so (mw-gq6.296).
 //
-// It never resets a story's attempts count, and a story already started
-// MaxAttempts times is refused rather than retried — that is the Mayor's
-// decision to make, not a retry's to take for them. The one attempt it does not
-// count is one the harness stopped for something that is not the work's (a
+// It never resets a story's attempts count, and a story whose own attempts
+// reach MaxAttempts is refused rather than retried — that is the Mayor's
+// decision to make, not a retry's to take for them. Its own are the attempts
+// mw cause named code, or named nothing: one named test, tooling or process
+// failed for what is not the story's code, and the Mayor retries it (A40,
+// mw-gq6.450). The one attempt it takes off the count is one the harness
+// stopped for something that is not the work's (a
 // usage limit, a rate limit, an overloaded or failing API: HarnessStopOf): the
 // count is lowered by it as the claim is given back, and, when the time the stop
 // names has not come, the host's hold on new claims is kept until then
@@ -285,6 +288,14 @@ type RetryReport struct {
 	// attempts metadata plus one, which differs from Attempt+1 when the
 	// metadata was reset by hand below the attempt that was bundled.
 	NextAttempt int
+
+	// Own is how many of the story's attempts count toward max_attempts, and
+	// Uncounted the ones that do not, with the class mw cause named for each
+	// (mw-gq6.450); an attempt the harness stopped is in neither, being taken
+	// off the count. most is the max_attempts the retry read against.
+	Own       int
+	Uncounted []UncountedAttempt
+	most      int
 
 	// CommittedLeftovers says the worktree held work the session never
 	// committed, and this retry committed it onto the branch before bundling.
@@ -434,20 +445,32 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	report.unclaimed = detail.Assignee == "" && detail.Status == StatusOpen
 	report.molecule = detail.Molecule.RootID
 
-	// An attempt the harness stopped is not counted (mw-gq6.434). A story open
-	// with no claim was given back already, by whoever gave it back.
+	// Only the story's own attempts count (mw-gq6.450): one mw cause named
+	// test, tooling or process failed for what is not its code. An attempt the
+	// harness stopped is not counted either (mw-gq6.434). A story open with no
+	// claim was given back already, by whoever gave it back.
 	tried := detail.Attempts
+	own, uncounted := OwnAttempts(detail)
+	report.most, report.Uncounted = r.maxAttempts(), uncounted
 	if !report.unclaimed {
 		if stop, stopped := harnessStopOfAttempt(ctx, r.Vault, detail, r.now()); stopped {
 			report.Stopped = &stop
 			report.NextAttempt = detail.Attempts
 			tried--
+			if len(uncounted) == 0 || uncounted[len(uncounted)-1].Attempt != detail.Attempts {
+				own--
+				uncounted = append(uncounted, UncountedAttempt{Attempt: detail.Attempts, Cause: "stopped by the harness"})
+			} else {
+				// The stopped attempt is taken off the count, so its cause is
+				// not one of the attempts left.
+				report.Uncounted = uncounted[:len(uncounted)-1]
+			}
 		}
 	}
+	report.Own = own
 
-	if most := r.maxAttempts(); tried >= most {
-		return r.refuse(report, fmt.Sprintf(
-			"it has been started %d times, the most a story may be (max_attempts is %d): attempts exhausted", tried, most))
+	if own >= report.most {
+		return r.refuse(report, exhaustedWhy(tried, own, report.most, uncounted))
 	}
 
 	// A story its Builder handed back, with nothing said since of what changed,
@@ -527,6 +550,42 @@ func (r Retry) run(ctx context.Context, storyID string) (RetryReport, error) {
 	return r.giveBack(ctx, report, "")
 }
 
+// nextSaid is the attempt the next dispatch tick takes the story as, out of
+// max_attempts when ofMost says so; when some attempts were not the story's own
+// code, it is its own attempt that is out of max_attempts, and the ones not
+// counted are named.
+func (r RetryReport) nextSaid(ofMost bool) string {
+	if len(r.Uncounted) == 0 && ofMost {
+		return fmt.Sprintf("attempt %d of %d", r.NextAttempt, r.most)
+	}
+	if len(r.Uncounted) == 0 {
+		return fmt.Sprintf("attempt %d", r.NextAttempt)
+	}
+	return fmt.Sprintf("attempt %d, its own attempt %d of %d (not counted: %s)",
+		r.NextAttempt, r.Own+1, r.most, uncountedSaid(r.Uncounted))
+}
+
+// uncountedSaid names the attempts that do not count, with their causes.
+func uncountedSaid(uncounted []UncountedAttempt) string {
+	named := make([]string, len(uncounted))
+	for i, u := range uncounted {
+		named[i] = fmt.Sprintf("attempt %d (%s)", u.Attempt, u.Cause)
+	}
+	return strings.Join(named, ", ")
+}
+
+// exhaustedWhy is why a retry of a story whose own attempts reached most is
+// refused: how many it was started, how many of those counted, and the ones
+// that did not, with their causes.
+func exhaustedWhy(tried, own, most int, uncounted []UncountedAttempt) string {
+	if len(uncounted) == 0 {
+		return fmt.Sprintf("it has been started %d times and all %d count, the most a story may be (max_attempts is %d): attempts exhausted",
+			tried, own, most)
+	}
+	return fmt.Sprintf("it has been started %d times and %d count, the most a story may be (max_attempts is %d): attempts exhausted; "+
+		"not counted: %s", tried, own, most, uncountedSaid(uncounted))
+}
+
 // continued reports whether the story's next attempt continues the branch its
 // last attempt left (mw-1ljpo9.7): the note mw next wrote when it refused or
 // capped that attempt says so, and FromMain does not. It writes nothing, so
@@ -584,29 +643,29 @@ func (r Retry) giveBack(ctx context.Context, report RetryReport, nothing string)
 	if report.NoWorktree {
 		comment = fmt.Sprintf(
 			"mw retry on %s gave back the claim on attempt %d of %s without reading a worktree: %s. "+
-				"The story is open again and the next dispatch tick takes it as attempt %d of %d.",
-			r.Host, attempt, storyID, nothing, report.NextAttempt, r.maxAttempts())
+				"The story is open again and the next dispatch tick takes it as %s.",
+			r.Host, attempt, storyID, nothing, report.nextSaid(true))
 	} else if report.Bundled && report.BranchKept {
 		comment = fmt.Sprintf(
 			"mw retry on %s bundled attempt %d of %s (branch %s at %s) into %s, pushed to the vault as %s. "+
 				"The worktree is gone and the branch is kept: the next attempt continues it, rebased onto %s "+
 				"(mw retry --from-main starts it from %s instead). The claim was given back and the story is open again. "+
-				"The next dispatch tick takes it as attempt %d of %d.",
+				"The next dispatch tick takes it as %s.",
 			r.Host, attempt, storyID, report.Branch, shortCommit(report.BranchCommit), report.BundlePath, shortVaultCommit(report.VaultCommit),
-			report.Target, report.Target, report.NextAttempt, r.maxAttempts())
+			report.Target, report.Target, report.nextSaid(true))
 	} else if report.Bundled {
 		comment = fmt.Sprintf(
 			"mw retry on %s bundled attempt %d of %s (branch %s at %s) into %s, pushed to the vault as %s. "+
 				"The worktree and branch are gone; the claim was given back and the story is open again. "+
-				"The next dispatch tick takes it as attempt %d of %d.",
+				"The next dispatch tick takes it as %s.",
 			r.Host, attempt, storyID, report.Branch, shortCommit(report.BranchCommit), report.BundlePath, shortVaultCommit(report.VaultCommit),
-			report.NextAttempt, r.maxAttempts())
+			report.nextSaid(true))
 	} else {
 		comment = fmt.Sprintf(
 			"mw retry on %s found nothing to keep on attempt %d of %s: %s had no commits ahead of %s, so nothing was bundled. "+
 				"The worktree and branch are gone; the claim was given back and the story is open again. "+
-				"The next dispatch tick takes it as attempt %d of %d.",
-			r.Host, attempt, storyID, report.Branch, report.Target, report.NextAttempt, r.maxAttempts())
+				"The next dispatch tick takes it as %s.",
+			r.Host, attempt, storyID, report.Branch, report.Target, report.nextSaid(true))
 	}
 	comment += report.stopSaid() + report.formulaSaid()
 	if err := r.Tracker.CommentOnStory(ctx, storyID, comment); err != nil {
@@ -725,8 +784,8 @@ func (r Retry) handBack(ctx context.Context, report RetryReport, elsewhere strin
 	comment := fmt.Sprintf(
 		"mw retry on %s gave back the claim on attempt %d of %s without reading a worktree: the story was worked on %s, "+
 			"so its worktree and branch are left there, and the next dispatch on %s bundles whatever they hold before it cuts a fresh one. "+
-			"The story is open again and the next dispatch tick takes it as attempt %d of %d.",
-		r.Host, report.Attempt, storyID, elsewhere, elsewhere, report.NextAttempt, r.maxAttempts())
+			"The story is open again and the next dispatch tick takes it as %s.",
+		r.Host, report.Attempt, storyID, elsewhere, elsewhere, report.nextSaid(true))
 	comment += report.stopSaid() + report.formulaSaid()
 	if err := r.Tracker.CommentOnStory(ctx, storyID, comment); err != nil {
 		return report, fmt.Errorf("retrying %s: the claim was given back, but the comment naming what happened could not be written: %w", storyID, err)
@@ -784,7 +843,7 @@ func (r RetryReport) String() string {
 		fmt.Fprintf(&b, "  there   the story was worked on %s; its worktree and branch are left there, not read from here\n", r.Elsewhere)
 		r.writeFormula(&b)
 		if r.ClaimReleased {
-			fmt.Fprintf(&b, "  open    the claim was given back; the next dispatch tick takes it as attempt %d\n", r.NextAttempt)
+			fmt.Fprintf(&b, "  open    the claim was given back; the next dispatch tick takes it as %s\n", r.nextSaid(false))
 			r.writeHitl(&b)
 		}
 		return b.String()
@@ -813,7 +872,7 @@ func (r RetryReport) String() string {
 	}
 	r.writeFormula(&b)
 	if r.ClaimReleased {
-		fmt.Fprintf(&b, "  open    the claim was given back; the next dispatch tick takes it as attempt %d\n", r.NextAttempt)
+		fmt.Fprintf(&b, "  open    the claim was given back; the next dispatch tick takes it as %s\n", r.nextSaid(false))
 		r.writeHitl(&b)
 	}
 	return b.String()
