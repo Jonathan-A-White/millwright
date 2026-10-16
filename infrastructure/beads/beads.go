@@ -48,6 +48,7 @@ type Gateway struct {
 	vault   string
 	program string
 	actor   string
+	sleep   func(ctx context.Context, d time.Duration) error
 	mu      sync.RWMutex
 	reads   chan struct{}
 }
@@ -76,6 +77,13 @@ func WithProgram(program string) Option {
 // leaves bd to its own default, which is what a person running bd by hand gets.
 func WithActor(actor string) Option {
 	return func(g *Gateway) { g.actor = strings.TrimSpace(actor) }
+}
+
+// WithSleep gives the Gateway the wait it takes between the tries of a bd that
+// met a breaker that is open, in place of a real sleep: for a test, whose clock
+// is a fake one.
+func WithSleep(sleep func(ctx context.Context, d time.Duration) error) Option {
+	return func(g *Gateway) { g.sleep = sleep }
 }
 
 // New returns a Gateway onto the beads database in a vault directory.
@@ -971,6 +979,9 @@ func (g *Gateway) failed(err error, out, errs []byte, args []string) error {
 // will never change, each with the short name a note gives it.
 var passingFaults = []struct{ phrase, why string }{
 	{"dolt server unreachable", "dolt server unreachable"},
+	{"circuit breaker is open", "dolt circuit breaker open"},
+	{"server appears down", "dolt server appears down"},
+	{"connection refused", "connection refused"},
 	{"i/o timeout", "i/o timeout"},
 	{"connection reset by peer", "connection reset"},
 	{"no such host", "could not resolve host"},
@@ -993,7 +1004,62 @@ func passingFault(said string) (string, bool) {
 // its output before mw stops waiting for it.
 const killGrace = time.Second
 
-// run runs one bd command in the vault and hands back both streams and the
+// breakerWaits are the waits between the tries of a bd that failed fast because
+// its Dolt client's circuit breaker is open: a little longer than the 5 s
+// cooldown the breaker names, then twice that, three tries and about 20 s in
+// all (mw-gq6.538). The breaker opens on a blip of the server and fails every
+// call until its cooldown is over, so a call that gave up at once lost its
+// write for nothing.
+var breakerWaits = []time.Duration{6 * time.Second, 14 * time.Second}
+
+// breakerOpen reports whether what bd said is a Dolt server that failed fast or
+// refused the connection, as against a reason it states that trying again will
+// never change. Both are refusals before bd did anything, so a write that met
+// one has not been done and is safe to try again; a timeout, which may have
+// been done, is not among them.
+func breakerOpen(said string) bool {
+	said = strings.ToLower(said)
+	for _, phrase := range []string{"circuit breaker is open", "server appears down", "connection refused"} {
+		if strings.Contains(said, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
+// run is runOnce, tried again after the breaker's cooldown when bd failed fast
+// on an open breaker or a refused connection, at most len(breakerWaits) more
+// times. Every other failure comes back at once, and so does the last of these.
+// The Gateway's lock is let go of while it waits, so that the reads beside it
+// are not held back.
+func (g *Gateway) run(ctx context.Context, args ...string) ([]byte, []byte, error) {
+	for try := 0; ; try++ {
+		out, errs, err := g.runOnce(ctx, args...)
+		if err == nil || try == len(breakerWaits) || ctx.Err() != nil || !breakerOpen(said(out, errs)) {
+			return out, errs, err
+		}
+		if waitErr := g.wait(ctx, breakerWaits[try]); waitErr != nil {
+			return out, errs, err
+		}
+	}
+}
+
+// wait waits d, or until ctx ends, on the Gateway's sleep.
+func (g *Gateway) wait(ctx context.Context, d time.Duration) error {
+	if g.sleep != nil {
+		return g.sleep(ctx, d)
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+// runOnce runs one bd command in the vault and hands back both streams and the
 // unwrapped error, so that a caller that cares about bd's exit code can read
 // it. Only one bd runs at a time: the database takes a single-writer lock.
 //
@@ -1002,7 +1068,7 @@ const killGrace = time.Second
 // only bd but the git it may have started underneath (`bd sync` talks to the
 // remote through git itself), rather than leaving them behind for the next
 // tick to trip over.
-func (g *Gateway) run(ctx context.Context, args ...string) ([]byte, []byte, error) {
+func (g *Gateway) runOnce(ctx context.Context, args ...string) ([]byte, []byte, error) {
 	if g.sideBySide(args) {
 		select {
 		case g.reads <- struct{}{}:

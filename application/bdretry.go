@@ -64,6 +64,8 @@ type BdRetry struct {
 // nothing about.
 var bdPassingFaults = []string{
 	"dolt server unreachable",
+	"circuit breaker is open",
+	"server appears down",
 	"indeterminate",
 	"connection refused",
 	"i/o timeout",

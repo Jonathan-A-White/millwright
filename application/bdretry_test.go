@@ -171,3 +171,15 @@ func TestACommentThatCannotBeReadBackIsNotWrittenBlind(t *testing.T) {
 		t.Errorf("it should name the fault, it said %q", run.errs.String())
 	}
 }
+
+func TestAStepCloseThatMeetsAnOpenCircuitBreakerIsTriedAgain(t *testing.T) {
+	bd := apptest.NewFakeBd("step-1")
+	bd.FailWrites(apptest.BdFault{Said: "dolt circuit breaker is open: server appears down, failing fast (cooldown 5s)"})
+	run := runBdRetry(t, bd, "-C", "/vault", "close", "step-1", "--reason", "done")
+	if run.err != nil || run.exit != 0 {
+		t.Fatalf("exit %d, err %v, said %q", run.exit, run.err, run.errs.String())
+	}
+	if got := bd.Status("step-1"); got != "closed" {
+		t.Errorf("step-1 is %s, want closed", got)
+	}
+}
