@@ -419,6 +419,23 @@ so releasing an epic twice does no more than releasing it once. An epic the
 tracker does not have is a plain refusal, and nothing is written. See
 `features/release.feature`.
 
+## The icebox
+
+```sh
+bin/mw ice mw-gq6.9 --reason "waits on the new rig"  # label icebox, P4, held, one comment
+bin/mw thaw mw-gq6.9 --priority 2                    # label off, P2 (default 3), still held
+```
+
+The icebox is work not yet decided against. `mw ice` sets the label `icebox`,
+priority 4 and the held status, and writes the comment `Iced: <reason>`; an
+epic, a finished bead and a claimed one are refused. `mw thaw` takes the label
+off, sets the priority (3 unless told) and writes `Thawed`; the bead stays held,
+and `mw release` is the yes. `mw status` prints an `ICEBOX:` line (the count, the
+oldest, how many were thawed in 7 days) and keeps iced beads out of its held
+lists; `mw release <epic>` leaves an iced child held and names it. Postern's
+`{action:'thaw'}` from the Governor's key does what `mw thaw` does. See
+`application/ice_test.go`.
+
 ## Naming why a story failed
 
 ```sh
