@@ -40,7 +40,9 @@ pass. Older bugs are not asked.
 
 The first time a dispatch passes a bug over for it, it comments on the bead and
 mails the Mayor, once per bead. `mw status` lists such bugs under
-BUGS WITHOUT A SWEEP, and nothing when there are none.
+BUGS WITHOUT A SWEEP, and nothing when there are none. `mw file` refuses a plan
+with such a bug in it, and `mw tester file` such a bug finding, with the same
+words, before anything is filed (mw-gq6.447).
 
 ## The handed-back gate
 

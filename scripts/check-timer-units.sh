@@ -344,15 +344,25 @@ chmod +x "$ST/bin/tmux"
 
 # ExecStart now settles into a loop that never returns on its own as long as
 # the stub says the session is up, exactly like the real unit watching a real
-# session — so each case below runs it in the background and kills it after
-# it has had time to make its calls and reach the loop's `sleep 1` line,
-# rather than waiting for an exit that is not supposed to happen.
+# session — so each case below runs it in the background and kills it once
+# it has called has-session a second time (the loop's first watch), or once
+# SEAT_WAIT seconds have gone by without that, rather than waiting for an exit
+# that is not supposed to happen. Never a fixed wait: on a loaded host (the
+# whole suite at once) one second was not always enough for three calls.
+SEAT_WAIT=${SEAT_WAIT:-30}
+has_sessions() {
+	grep -c '^tmux has-session -t =0$' "$ST/calls" || true
+}
 run_seatcmd() {
 	: >"$ST/calls"
 	echo "$1" >"$ST/state"
 	PATH="$ST/bin:/usr/bin:/bin" SEAT_CALLS="$ST/calls" SEAT_STATE="$ST/state" "$STSH" -c "$seatcmd" &
 	seatpid=$!
-	sleep 1
+	tries=$((SEAT_WAIT * 10))
+	while [ "$(has_sessions)" -lt 2 ] && [ "$tries" -gt 0 ] && kill -0 "$seatpid" 2>/dev/null; do
+		sleep 0.1
+		tries=$((tries - 1))
+	done
 	kill "$seatpid" 2>/dev/null || true
 	wait "$seatpid" 2>/dev/null || true
 }
@@ -361,7 +371,7 @@ run_seatcmd 1
 grep -qx 'tmux has-session -t =0' "$ST/calls" || fail "a session already up: ExecStart did not call has-session"
 grep -q '^tmux new-session' "$ST/calls" && fail "a session already up: ExecStart started a new one anyway"
 [ "$(grep -c '^tmux has-session -t =0$' "$ST/calls")" -ge 2 ] ||
-	fail "a session already up: ExecStart did not settle into a loop watching has-session (only $(grep -c '^tmux has-session -t =0$' "$ST/calls") call(s) in 1s)"
+	fail "a session already up: ExecStart did not settle into a loop watching has-session (only $(has_sessions) call(s) in ${SEAT_WAIT}s)"
 
 run_seatcmd 0
 grep -qx 'tmux new-session -d -s 0' "$ST/calls" || fail "no session up: ExecStart did not start one with new-session -d -s 0"

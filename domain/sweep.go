@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -47,6 +48,23 @@ func (v SweepVerdict) String() string {
 // A line's own number or bullet may come before the word: "3. Sweep: ...".
 var sweepLine = regexp.MustCompile(`(?i)^\s*(?:[-*]\s+)?(?:\d+\s*[.)]?\s*)?sweep:(.*)$`)
 
+// SweepRuleName is the name of the rule, as mw dispatch gives it for a bug it
+// does not claim for want of a sweep.
+const SweepRuleName = "no-sweep"
+
+// Refusal is what is wrong with a bug whose acceptance this verdict is of,
+// and what would be right, as mw dispatch says it.
+func (v SweepVerdict) Refusal() string {
+	return fmt.Sprintf("it is a bug and %s (a check over the whole class of the fault, or 'Sweep: none, because <reason>')", v)
+}
+
+// FilingRefusal is the Refusal and the rule mw dispatch would refuse the bug
+// by. mw file and mw tester file give it before anything is filed, so that a
+// bug is never filed only for dispatch to refuse it (mw-gq6.447).
+func (v SweepVerdict) FilingRefusal() string {
+	return v.Refusal() + ": mw dispatch would refuse it as " + SweepRuleName
+}
+
 // SweepOf reads the acceptance criteria for a sweep line. The best line wins: one
 // that passes beats one that does not.
 func SweepOf(acceptance string) SweepVerdict {
@@ -90,5 +108,11 @@ func OwesASweep(storyType, title string, labels []string, created time.Time) boo
 	if created.IsZero() || created.Before(SweepRuleFrom) {
 		return false
 	}
+	return IsBug(storyType, title, labels)
+}
+
+// IsBug says whether a story is a bug: by its type, its [bug] title or the bug
+// label.
+func IsBug(storyType, title string, labels []string) bool {
 	return IsBugStory(storyType, title) || slices.Contains(labels, "bug")
 }

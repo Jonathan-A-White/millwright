@@ -99,6 +99,10 @@ func (f TesterFiler) File(ctx context.Context, testerID string, finding TesterFi
 	case strings.TrimSpace(finding.HowToCheck) == "":
 		return TesterFiled{}, fmt.Errorf("filing a Tester finding: it needs a HOW TO CHECK IT")
 	}
+	// A bug finding owes a sweep as a bug the Mayor files does (mw-gq6.447).
+	if verdict := domain.SweepOf(finding.Acceptance); finding.Kind == TesterKindBug && !verdict.Passes() {
+		return TesterFiled{}, fmt.Errorf("filing a Tester finding: %s: add that line to --accept", verdict.FilingRefusal())
+	}
 
 	tester, err := f.Tracker.ShowStory(ctx, testerID)
 	if err != nil {

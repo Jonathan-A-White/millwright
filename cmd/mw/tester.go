@@ -111,7 +111,8 @@ func newTesterFileCmd() *cobra.Command {
 			"marked PROVISIONAL, HOW TO CHECK IT, the acceptance, the landed story's path with --files as its files\n" +
 			"key, a wait on every running or open story of the rig that names the same file, and the epic's open\n" +
 			"demo waiting on it. A finding whose title an open bead of the rig already has is not filed: the bead\n" +
-			"is named. It prints the id; put 'held: <id>' (or 'duplicate of: <id>') under the finding in FINDINGS.\n" +
+			"is named. A bug whose --accept has no line beginning 'Sweep:' is refused, as mw dispatch would refuse it.\n" +
+			"It prints the id; put 'held: <id>' (or 'duplicate of: <id>') under the finding in FINDINGS.\n" +
 			"It releases nothing: that stays the Mayor's. A text flag whose value starts with @ reads that file.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -148,7 +149,7 @@ func newTesterFileCmd() *cobra.Command {
 	flags.StringVar(&finding.Shot, "shot", "", "the shot's path")
 	flags.StringVar(&finding.Fix, "fix", "", "a one-line suggested fix, filed as PROVISIONAL (@file reads a file)")
 	flags.StringVar(&finding.HowToCheck, "how", "", "HOW TO CHECK IT, for the Governor (@file reads a file)")
-	flags.StringVar(&finding.Acceptance, "accept", "", "acceptance checkable by running something (@file reads a file)")
+	flags.StringVar(&finding.Acceptance, "accept", "", "acceptance checkable by running something; a bug's needs a line beginning 'Sweep:' too (@file reads a file)")
 	flags.StringVar(&finding.Files, "files", "", "the files key: the repo paths or globs the fix expects to change, comma-separated")
 	return cmd
 }

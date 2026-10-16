@@ -59,6 +59,8 @@ func registerTesterSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^process (\d+) is running "([^"]*)" from "([^"]*)"$`, c.aProcessIsRunning)
 	ctx.Then(`^process (\d+) is still running$`, c.processIsStillRunning)
 	ctx.Then(`^process (\d+) has been stopped$`, c.processHasBeenStopped)
+
+	registerTesterFileSteps(ctx)
 }
 
 // aProcessIsRunning puts a process of the user in the host's table, the way a
