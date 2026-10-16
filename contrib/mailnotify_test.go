@@ -39,6 +39,16 @@ var panes = map[string]string{
 	"busy":     `printf 'working (esc to interrupt)\n'; ` + emptyPrompt,
 	"has-text": `printf '\342\235\257 a half-written thought'`,
 
+	// The harness parked at its usage limit (mw-gq6.519): the notice and the
+	// limit menu above an empty input line, the arrow on the second choice or
+	// on the first. Each waits for $MW_TEST_DIR/reset, then clears the screen
+	// and draws an empty prompt, as the harness does when the limit resets.
+	"limit-menu": limitScreen(`printf "  \342\216\277  You've hit your weekly limit \302\267 resets 3pm\n\n"; ` +
+		`printf "    1. Stop and wait for limit to reset\n  \342\235\257 2. Switch to usage credits\n\n"; `),
+	"limit-menu-selected": limitScreen(`printf "  You've hit your weekly limit \302\267 resets 3pm\n\n"; ` +
+		`printf "  \342\235\257 1. Stop and wait for limit to reset\n    2. Switch to usage credits\n\n"; `),
+	"limit-prompt": limitScreen(`printf "  Stop and wait for limit to reset\n\n"; `),
+
 	// The screens tmux captured, shared with infrastructure/tmux's test: Claude
 	// Code's dim suggested next prompt after the mark, and text a person typed.
 	"ghost": `cat "$MW_FIXTURES/ghost-suggestion.txt"`,
@@ -52,6 +62,14 @@ var panes = map[string]string{
 	// A session on a loaded host: it draws nothing it is typed for the first
 	// two seconds, longer than the script's own waits before it reads back.
 	"enter-never-slow": lossyPane(1<<20, 2),
+}
+
+// limitScreen is a pane script that draws shown, and an empty input line under
+// it, and at $MW_TEST_DIR/reset clears the screen and draws the empty input line
+// alone.
+func limitScreen(shown string) string {
+	return shown + emptyPrompt + `; while [ ! -e "$MW_TEST_DIR/reset" ]; do sleep 0.1; done; ` +
+		`printf '\033[2J\033[H'; ` + emptyPrompt
 }
 
 // lossyPane is a pane script for a session that ignores every Enter before the
@@ -1748,4 +1766,48 @@ func TestACursorPastMailTheSeatDoesNotSubscribeToStillTypes(t *testing.T) {
 	f.tick()
 
 	f.typed(fmt.Sprintf(announcement, 1))
+}
+
+// A Mayor parked at the harness's usage limit is not idle: the harness will not
+// work what is typed before the reset, so nothing is typed, the ids are not
+// recorded, and the event nudge's cursor stays where it was (mw-gq6.519).
+func TestAMayorAtTheUsageLimitIsNotTypedAndTheNudgeIsHeldUntilItIsIdle(t *testing.T) {
+	for _, state := range []string{"limit-menu", "limit-menu-selected", "limit-prompt"} {
+		t.Run(state, func(t *testing.T) {
+			f := newFactory(t)
+			id := f.mayor(state, actingByID)
+			f.subscribesToMail()
+			f.eventLog(0, "mw-aaa")
+			f.inbox("mw-aaa")
+			cursor := f.read(".local/state/mw/events/nudge.json")
+
+			out := f.tick()
+
+			f.nothingMoreTyped("")
+			if got := f.announced(); got != "" {
+				t.Fatalf("recorded %q for mail that was never announced", got)
+			}
+			if got := f.read(".local/state/mw/events/nudge.json"); got != cursor {
+				t.Fatalf("the nudge cursor moved to %q from %q", got, cursor)
+			}
+			if !strings.Contains(out, "usage limit") {
+				t.Fatalf("the tick did not say the window is at the usage limit:\n%s", out)
+			}
+
+			// The limit resets: the pane is idle again and gets the held nudge.
+			f.write("reset", "", 0o644)
+			deadline := time.Now().Add(5 * time.Second)
+			for strings.Contains(f.tmux("capture-pane", "-p", "-t", id), "Stop and wait") {
+				if time.Now().After(deadline) {
+					t.Fatal("the pane never cleared its limit screen")
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+			f.tick()
+			f.typed(fmt.Sprintf(announcement, 1))
+			if got := f.announced(); got != "mw-aaa\n" {
+				t.Fatalf("recorded ids %q", got)
+			}
+		})
+	}
 }
