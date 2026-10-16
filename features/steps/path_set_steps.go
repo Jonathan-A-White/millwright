@@ -31,6 +31,7 @@ func InitializePathSetScenario(ctx *godog.ScenarioContext) {
 
 	ctx.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
 		*c = pathSetContext{tracker: apptest.NewFakeTracker()}
+		c.tracker.AddFormula("tdd-feature")
 		return ctx, nil
 	})
 

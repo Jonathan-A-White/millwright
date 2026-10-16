@@ -82,6 +82,17 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 		}
 	}
 	path = path.Overlay(named)
+	// A formula the vault has not installed would park the story: dispatch
+	// leaves it unclaimed with one comment nobody reads (mw-gq6.497).
+	if path.Formula != "" {
+		installed, err := s.Tracker.Formulas(ctx)
+		if err != nil {
+			return domain.Path{}, fmt.Errorf("checking which formulas are installed: %w", err)
+		}
+		if err := path.ValidateFormula(installed); err != nil {
+			return domain.Path{}, fmt.Errorf("%w: nothing was written", err)
+		}
+	}
 	// Only a files key being written is judged: one the story already holds is
 	// not this command's to refuse a model= or rig= over.
 	if named.Files != "" {
