@@ -2370,6 +2370,23 @@ func TestNextMaxTurnsIs120UntilTheNextTableSaysOtherwise(t *testing.T) {
 	}
 }
 
+// next.retry_from_branch (mw-1ljpo9.7) is on until the [next] table turns it
+// off, the rollback; anything but true or false is refused.
+func TestNextRetryFromBranchIsOnUntilTheNextTableTurnsItOff(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\nretry_from_branch = false\n")
+	if on, err := config.NextRetryFromBranch(); err != nil || !on {
+		t.Fatalf("expected the default on, not a root-table key, got %v: %v", on, err)
+	}
+	writeConfig(t, "[next]\nretry_from_branch = false\n")
+	if on, err := config.NextRetryFromBranch(); err != nil || on {
+		t.Fatalf("expected the [next] table's false, got %v: %v", on, err)
+	}
+	writeConfig(t, "[next]\nretry_from_branch = \"sometimes\"\n")
+	if _, err := config.NextRetryFromBranch(); err == nil {
+		t.Fatalf("expected retry_from_branch = \"sometimes\" to be refused")
+	}
+}
+
 func TestNextMaxTurnsRefusesWhatIsNotAWholeNumber(t *testing.T) {
 	for _, bad := range []string{"-1", "\"lots\""} {
 		writeConfig(t, "[next]\nmax_turns = "+bad+"\n")

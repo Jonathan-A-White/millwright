@@ -29,6 +29,7 @@
 //
 //	[next]
 //	max_turns = 120                    # most turns a Builder's session takes; 0 is no cap (mw-1ljpo9.6)
+//	retry_from_branch = true           # a refused or capped attempt's branch is the next attempt's start (mw-1ljpo9.7)
 //
 //	[dispatch]                         # the room a host needs to start a story (mw-t0z3fu.1)
 //	room_load_per_core = 1.0           # none while the 1-minute load is this many a core
@@ -1024,6 +1025,33 @@ func NextMaxTurns() (int, error) {
 		return 0, fmt.Errorf("the [%s] table of %s says max_turns = %q: it must be a whole number of turns, 0 for no cap", NextTable, path, said)
 	}
 	return turns, nil
+}
+
+// NextRetryFromBranch reports `retry_from_branch` of the `[next]` table of
+// ~/.config/mw/config.toml (mw-1ljpo9.7): whether the branch of an attempt
+// refused at close-out (by the gate or the merge) or stopped at its turn cap is
+// kept and handed to the next attempt, rebased onto the target. True when the
+// table says nothing; false, the rollback, starts every attempt from the target
+// as mw retry --from-main does.
+func NextRetryFromBranch() (bool, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	table, err := tableIn(path, NextTable)
+	if err != nil {
+		return false, err
+	}
+	said := strings.TrimSpace(table["retry_from_branch"])
+	if said == "" {
+		return true, nil
+	}
+	on, err := strconv.ParseBool(said)
+	if err != nil {
+		return false, fmt.Errorf("the [%s] table of %s says retry_from_branch = %q: it must be true or false", NextTable, path, said)
+	}
+	return on, nil
 }
 
 // DispatchTable is the table of the config file that says how much room a host
