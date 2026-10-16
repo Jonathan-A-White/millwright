@@ -47,6 +47,17 @@ Feature: mw land lands a batch rig's queue under one gate run
     And the batch report says: after landing: <the command>: ok
     And the batch report does not say: not brought up
 
+  Scenario: The ledger lines of a batch are committed in the vault before the after-landing command runs (mw-gq6.493)
+    Given the vault is a real git clone
+    And the rig names a command to run after a landing, which looks at what the vault holds uncommitted
+    And these stories are queued for batch landing:
+      | mw-gq6.1 |
+      | mw-gq6.2 |
+    When mw lands the batch of the rig
+    Then the batch landed on "main" in one push, forcing nothing
+    And the rig's after-landing command found no modified tracked file in the vault
+    And the vault holds no modified tracked file
+
   Scenario: A story claimed on another host is closed by this host once its batch lands, and the takeover is noted on it
     Given the tracker acts as "mw@laptop", this host's mw
     And these stories are queued for batch landing:

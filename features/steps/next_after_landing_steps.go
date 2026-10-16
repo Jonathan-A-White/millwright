@@ -27,6 +27,7 @@ func registerNextAfterLandingSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Given(`^the rig names a command to run after a landing$`, c.theRigNamesACommand)
 	ctx.Given(`^the rig names a command to run after a landing, which prints "([^"]*)" and exits (\d+)$`, c.theRigNamesAFailingCommand)
 	ctx.Given(`^the rig names a command to run after a landing, which runs far too long$`, c.theRigNamesASlowCommand)
+	ctx.Given(`^the rig names a command to run after a landing, which looks at what the vault holds uncommitted$`, c.theRigNamesACommandLookingAtTheVault)
 	ctx.Given(`^another rig, and not this one, names a command to run after a landing$`, c.anotherRigNamesACommand)
 	ctx.Given(`^this host runs the follower, mw-view-follow.service$`, c.thisHostRunsTheFollower)
 	ctx.Given(`^this host runs the follower, mw-view-follow.service, which fails to restart, saying: (.+)$`, c.theFollowerFailsToRestart)
@@ -41,6 +42,7 @@ func registerNextAfterLandingSteps(ctx *godog.ScenarioContext, c *nextContext) {
 	ctx.Then(`^mw-view-follow.service was try-restarted once$`, c.theFollowerWasRestartedOnce)
 	ctx.Then(`^no user unit was try-restarted$`, c.noUnitWasRestarted)
 	ctx.Then(`^the rig's after-landing command did not run$`, c.theCommandDidNotRun)
+	ctx.Then(`^the rig's after-landing command found no modified tracked file in the vault$`, c.theCommandFoundTheVaultClean)
 	ctx.Then(`^the report says: (.+)$`, c.theReportSays)
 	ctx.Then(`^the report does not say: (.+)$`, c.theReportDoesNotSay)
 	ctx.Then(`^the batch report says: (.+)$`, c.theBatchReportSays)
@@ -75,6 +77,28 @@ func (c *nextContext) theRigNamesAFailingCommand(prints string, status int) erro
 }
 
 func (c *nextContext) theRigNamesASlowCommand() error { return c.afterScript("sleep 30") }
+
+// vaultAtDeploy is where the script that looks at the vault writes what git
+// says is modified there at the moment the command runs.
+const vaultAtDeploy = "vault-at-deploy.log"
+
+// theRigNamesACommandLookingAtTheVault is a command that writes the vault's
+// own `git status` into vault-at-deploy.log, so that a scenario can say what
+// the vault held while the deploy ran (mw-gq6.493).
+func (c *nextContext) theRigNamesACommandLookingAtTheVault() error {
+	return c.afterScript(fmt.Sprintf("git -C %q status --porcelain --untracked-files=no > \"$(dirname \"$0\")/%s\"", c.vault, vaultAtDeploy))
+}
+
+func (c *nextContext) theCommandFoundTheVaultClean() error {
+	seen, err := os.ReadFile(filepath.Join(c.root, vaultAtDeploy))
+	if err != nil {
+		return fmt.Errorf("the command never said what the vault held: %w", err)
+	}
+	if strings.TrimSpace(string(seen)) != "" {
+		return fmt.Errorf("expected the vault to hold no modified tracked file while the after-landing command ran, git said:\n%s", seen)
+	}
+	return nil
+}
 
 // theRigNamesAFlakyCommand is a command that fails the first time it is run the
 // way ssh fails on a passing DNS fault, and succeeds every time after.
