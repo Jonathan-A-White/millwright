@@ -221,7 +221,7 @@ func newNextCmd() *cobra.Command {
 
 			// Without the harness's projects directory no transcript can be read, and
 			// a claim with no session behind it is left alone rather than given back.
-			var transcripts application.TranscriptTail
+			var transcripts application.ClaimTranscripts
 			if projects, err := claude.DefaultProjectsRoot(); err == nil {
 				transcripts = claude.NewTranscripts(projects)
 			}

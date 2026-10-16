@@ -32,10 +32,22 @@ type aTranscript string
 
 func (t aTranscript) Tail(context.Context, string, int) (string, error) { return string(t), nil }
 
+// LastWrite says nothing about when it was written: the zero time, as the
+// harness reports for a directory it has recorded nothing in.
+func (t aTranscript) LastWrite(context.Context, string) (time.Time, error) { return time.Time{}, nil }
+
+// aDatedTranscript is a transcript the harness wrote at a known time.
+type aDatedTranscript struct {
+	aTranscript
+	at time.Time
+}
+
+func (t aDatedTranscript) LastWrite(context.Context, string) (time.Time, error) { return t.at, nil }
+
 // aNextWithAStrandedClaim is the mw next that closes mw-x.1 out of its ledger
 // line while mw-x.2 sits claimed on this host with no session behind it,
 // claimed claimAge before the clock (mw-gq6.372).
-func aNextWithAStrandedClaim(t *testing.T, claimAge time.Duration, landing application.Landing, worktrees application.Worktrees, transcripts application.TranscriptTail) (application.Next, *apptest.FakeTracker) {
+func aNextWithAStrandedClaim(t *testing.T, claimAge time.Duration, landing application.Landing, worktrees application.Worktrees, transcripts application.ClaimTranscripts) (application.Next, *apptest.FakeTracker) {
 	t.Helper()
 	ctx := context.Background()
 	now := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC)
@@ -125,6 +137,42 @@ func TestNextKeepsTheClaimOfASessionThatLeftSomething(t *testing.T) {
 			}
 			if len(report.GaveBack) != 0 {
 				t.Fatalf("expected nothing given back, got %q", report.GaveBack)
+			}
+		})
+	}
+}
+
+// A worktree path is reused by every attempt of a story, so a transcript found
+// under it may be an earlier attempt's: one written before this claim began is
+// not this claim's work (mw-gq6.529).
+func TestNextGivesBackAClaimOnlyAnEarlierAttemptLeftATranscriptFor(t *testing.T) {
+	claimAge := 10 * time.Minute
+	claimed := time.Date(2026, 10, 12, 12, 0, 0, 0, time.UTC).Add(-claimAge)
+	for _, c := range []struct {
+		name     string
+		written  time.Time
+		wantBack bool
+	}{
+		{"written before the claim", claimed.Add(-48 * time.Hour), true},
+		{"written after the claim", claimed.Add(time.Minute), false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ctx := context.Background()
+			lands := &fakeRetryLanding{NoWorktree: true}
+			transcript := aDatedTranscript{aTranscript("assistant: attempt one"), c.written}
+			next, tracker := aNextWithAStrandedClaim(t, claimAge, lands, lands, transcript)
+
+			report, err := next.Run(ctx, "mw-x.1")
+			if err != nil {
+				t.Fatalf("mw next: %v", err)
+			}
+			detail, err := tracker.ShowStory(ctx, "mw-x.2")
+			if err != nil {
+				t.Fatalf("showing the story: %v", err)
+			}
+			gaveBack := detail.Status == application.StatusOpen && detail.Assignee == "" && len(report.GaveBack) == 1
+			if gaveBack != c.wantBack {
+				t.Fatalf("transcript %s: expected given back %v, got status %q assignee %q gave back %q", c.name, c.wantBack, detail.Status, detail.Assignee, report.GaveBack)
 			}
 		})
 	}
