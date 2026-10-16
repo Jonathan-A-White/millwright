@@ -382,7 +382,7 @@ func FullModelID(m Model) string {
 	case ModelSonnet:
 		return "claude-sonnet-5-5"
 	case ModelHaiku:
-		return "claude-haiku-4-5-20251001"
+		return "claude-haiku-5-5"
 	}
 	return ""
 }

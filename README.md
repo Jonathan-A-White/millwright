@@ -3613,7 +3613,7 @@ Claude Code window failed and froze the seat on a dialog, so the switch is a
 fresh Mayor on the chosen model. The command types into no window and starts
 nothing. It maps the chip name to the full model id (`sonnet` is
 `claude-sonnet-5-5`, `opus` `claude-opus-5-5`, `fable` `claude-fable-5-1`,
-`haiku` `claude-haiku-4-5-20251001`), speaks on the talk "Switching to Sonnet:
+`haiku` `claude-haiku-5-5`), speaks on the talk "Switching to Sonnet:
 a fresh Mayor takes the line in about a minute", appends a dated line to
 `.mayor-talk.log` in the vault, and prints the one line the Mayor runs next:
 
