@@ -29,7 +29,8 @@ func standIn(t *testing.T, says string, exit int) *beads.Gateway {
 	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bd-stand-in")
-	script := fmt.Sprintf("#!/bin/sh\necho %q >&2\nexit %d\n", says, exit)
+	// The flush that comes before a sync (mw-gq6.508) is not what is failing.
+	script := fmt.Sprintf("#!/bin/sh\ncase \"$*\" in *\" dolt commit \"*) exit 0 ;; esac\necho %q >&2\nexit %d\n", says, exit)
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatalf("writing the stand-in: %v", err)
 	}

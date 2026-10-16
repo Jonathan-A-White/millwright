@@ -6,13 +6,13 @@
 |-|-|-|
 | `WorkTracker` | application/worktracker.go | beads |
 | TrackerNotes, SweepNotes, BeadGraph, IceNotes, IcedBeads | application/{status,sweep,ice}.go | same |
-| VaultFiles, TrackerSync, TrackerHistory, SyncHaltMarker | application/sync.go | {vault/git,beads/sync}.go, synchalt |
+| VaultFiles, TrackerSync, TrackerHistory, TrackerFlush, SyncHaltMarker | application/sync.go | {vault/git,beads/sync}.go, synchalt, flushlog |
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | beads/mail.go |
 | EpicRules (+LandingRules) | application/epicrules.go | vault/epicrules.go |
 | Vault, Harness, SeatBootFiles, RigDocs, BootCommands | seatboot.go, application/seatboot_manifest.go, application/harness.go | {vault,claude,shellcmd}, rig/rigfiles.go |
 | Runner, BdProgram | application/runner.go, application/bdretry.go | {tmux,bdprogram} |
 | SeatFiles, Windows, SeatHarness, ActingFile | application/seatup.go, application/seathandover.go | {vault/{seat,reaplog},tmux/window,claude/claude}.go |
-| Transcripts{,Tail,Replies,Titled,Turns}, TranscriptWrites, HostSigns, PeekRemote | application/seatcontext.go, application/peek.go, application/nudge.go | {claude,peekremote,vault/git.go} |
+| Transcripts{,Tail,Replies,Titled,Turns}, TranscriptWrites, HostSigns, PeekRemote | application/seatcontext.go, application/peek.go, nudge.go | {claude,peekremote,vault/git.go} |
 | Reap{Terminal,Log,Armer} | application/seatreap.go | {tmux/reap,vault/reaplog,reaper/arm}.go |
 | WatchProbes | watch.go | watch |
 | Doctor*, VPSProbe | doctor.go, application/vpsnginx.go | {doctor,vpsnginx} |

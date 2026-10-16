@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
 	"github.com/Jonathan-A-White/millwright/infrastructure/netfault"
@@ -21,6 +22,7 @@ import (
 var (
 	_ application.TrackerSync    = (*Gateway)(nil)
 	_ application.TrackerHistory = (*Gateway)(nil)
+	_ application.TrackerFlush   = (*Gateway)(nil)
 	_ application.TrackerNotes   = (*Gateway)(nil)
 	_ application.DoctorNotes    = (*Gateway)(nil)
 )
@@ -54,6 +56,11 @@ var NoteMissing = []string{"not set", "not found"}
 // has already spent its retries. Nothing is resolved here either: a conflict
 // in the factory's one database is the Governor's to look at.
 func (g *Gateway) Sync(ctx context.Context) error {
+	// In bd's batch mode the pending writes are in no commit, so in no push or
+	// backup either until someone flushes (mw-gq6.508).
+	if _, err := g.Flush(ctx, time.Now()); err != nil {
+		return fmt.Errorf("flushing the beads database before bd sync: %w", err)
+	}
 	out, errs, err := g.run(ctx, "sync")
 	if err == nil {
 		_ = g.repackCrowdedRemoteCaches(ctx)
@@ -243,6 +250,11 @@ func (g *Gateway) HistoryCommits(ctx context.Context) (int, error) {
 // makes them again. Last, a full collection: the history an earlier
 // collection moved to the old generation is reclaimed by no other.
 func (g *Gateway) SquashHistory(ctx context.Context) error {
+	// A flush first, so that batch mode's pending writes are in a commit the
+	// squash folds in (mw-gq6.508).
+	if _, err := g.Flush(ctx, time.Now()); err != nil {
+		return fmt.Errorf("flushing the beads database before the squash: %w", err)
+	}
 	var first []struct {
 		Hash string `json:"commit_hash"`
 	}
@@ -284,4 +296,41 @@ func (g *Gateway) query(ctx context.Context, query string, rows any) error {
 		return fmt.Errorf("parsing bd sql --json for %q: %w", query, err)
 	}
 	return nil
+}
+
+// FlushMessage is the commit message of a flush made at the time given.
+func FlushMessage(at time.Time) string {
+	return "mw flush " + at.UTC().Format(time.RFC3339)
+}
+
+// nothingToFlush are the words bd uses for a working set with no change in it.
+var nothingToFlush = []string{"nothing to commit", "no changes"}
+
+// Flush implements application.TrackerFlush: one `bd dolt commit`, which
+// commits every pending write of every client of the database together. In
+// bd's batch mode that is the only commit there is; in its default mode there
+// is never anything left to commit. A working set that is clean is not a
+// failure, only a flush that committed nothing.
+func (g *Gateway) Flush(ctx context.Context, at time.Time) (bool, error) {
+	if _, err := g.call(ctx, "dolt", "commit", "-m", FlushMessage(at)); err != nil {
+		said := strings.ToLower(err.Error())
+		for _, clean := range nothingToFlush {
+			if strings.Contains(said, clean) {
+				return false, nil
+			}
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// AutoCommit implements application.TrackerFlush: what bd answers to `bd
+// config get dolt.auto-commit` here, the environment (BD_DOLT_AUTO_COMMIT)
+// and the flag counted as bd counts them.
+func (g *Gateway) AutoCommit(ctx context.Context) (string, error) {
+	out, err := g.call(ctx, "config", "get", "dolt.auto-commit")
+	if err != nil {
+		return "", err
+	}
+	return strings.ToLower(strings.TrimSpace(string(out))), nil
 }

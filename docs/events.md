@@ -197,6 +197,12 @@ story. A stamp the backend would not take stays in `pending.jsonl` with its fail
 (`attempts`, no limit) and is tried again on the next pass; the pass is `done` all the same, its
 failures said on the follower's stderr. A pass over an empty queue reads nothing but the queue.
 
+The `beads-flush` job (mw-gq6.508) runs in the follower itself, on its own clock only: every 15 minutes,
+reason `clock`, and works only while this host is home. A pass is `bd dolt commit` (message `mw flush <time>`),
+which commits the beads working set bd's batch auto-commit mode leaves pending; a clean working set is a pass.
+It leaves the line in `~/.local/state/mw/beads-flush` (`$MW_BEADS_FLUSH_FILE`) that `mw doctor`'s beads-flush
+check reads, and a failed flush is a failed pass.
+
 The `digest` job (events' actor `digest@<host>`) runs in the follower itself, on the home only, reason `clock`:
 on Mondays from 11:00 UTC (provisional), once for each day, it runs `mw digest send`. The UTC day is kept in the
 note `digest.weekly.last` and marked before the send, so a restart the same Monday sends nothing twice. His tap

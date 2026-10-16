@@ -16,6 +16,7 @@ import (
 	"github.com/Jonathan-A-White/millwright/infrastructure/configfile"
 	"github.com/Jonathan-A-White/millwright/infrastructure/doctor"
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
+	"github.com/Jonathan-A-White/millwright/infrastructure/flushlog"
 	vaultpkg "github.com/Jonathan-A-White/millwright/infrastructure/vault"
 
 	"github.com/spf13/cobra"
@@ -293,6 +294,15 @@ func newDoctorCmd() *cobra.Command {
 					Terminal:    seatWindows(),
 				}).Readings)
 			}
+			// The home's last flush is read from the file its follower job writes;
+			// a path this host cannot work out is the check's to say.
+			flushFile, flushFileErr := config.BeadsFlushFile()
+			beadsFlushCheck := doctor.NewBeadsFlush(vault, func(ctx context.Context) (bool, error) {
+				return application.IsHome(ctx, mwVault(vault, host), host)
+			}, flushlog.New(flushFile))
+			if flushFileErr != nil {
+				beadsFlushCheck.Log = brokenFlushLog{flushFileErr}
+			}
 			tmpLeftovers := doctor.NewTmpLeftovers(os.TempDir())
 			tmpLeftovers.Budget, tmpLeftovers.GoBuildBudget = tmpLeftoversBudget, goBuildBudget
 			rootDisk := doctor.NewRootDiskBudget()
@@ -316,6 +326,8 @@ func newDoctorCmd() *cobra.Command {
 					doctor.NewTimers(units),
 					&doctor.BeadsSize{Dir: vault, Budget: beadsBudget},
 					doctor.NewBeadsStores(vault),
+					doctor.NewBeadsBatch(vault, mwGateway(vault, host).AutoCommit),
+					beadsFlushCheck,
 					tmpLeftovers,
 					rootDisk,
 					mayorStuck,
@@ -419,3 +431,13 @@ func emitDoctorClear(ctx context.Context, log application.EventLog, now func() t
 	}
 	return err
 }
+
+// brokenFlushLog is the beads flush log of a host whose file path cannot be
+// worked out: every read says why.
+type brokenFlushLog struct{ err error }
+
+func (b brokenFlushLog) Last(context.Context) (application.BeadsFlushRecord, error) {
+	return application.BeadsFlushRecord{}, b.err
+}
+
+func (b brokenFlushLog) Record(context.Context, application.BeadsFlushRecord) error { return b.err }

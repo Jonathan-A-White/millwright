@@ -187,10 +187,17 @@ func (h Host) OldDisableUnit(ctx context.Context, ssh []string, unit string) (bo
 
 // OldPush implements application.OldHome: `bd dolt push` in the old home's vault,
 // with beads.env sourced (remoteEnv), so BEADS_FSCK_TIMEOUT applies: a served push
-// at bd's default fsck timeout fails.
+// at bd's default fsck timeout fails. A `bd dolt commit` goes first, for the
+// writes bd's batch auto-commit mode leaves in the working set (mw-gq6.508); a
+// working set with nothing to commit is not a failure.
 func (h Host) OldPush(ctx context.Context, ssh []string) error {
 	_, err := h.ok(ctx, ssh, vaultLookup+`
-cd "$V" && bd dolt push`)
+cd "$V" || exit 1
+flushed=$(bd dolt commit -m "mw flush $(date -u +%Y-%m-%dT%H:%M:%SZ)" 2>&1) || case "$flushed" in
+  *"nothing to commit"*|*"no changes"*) ;;
+  *) echo "$flushed" >&2; exit 1 ;;
+esac
+bd dolt push`)
 	return err
 }
 

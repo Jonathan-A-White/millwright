@@ -169,6 +169,7 @@ const (
 	PosternViewPathEnv      = "MW_POSTERN_VIEW_PATH"
 	EventsLogPathEnv        = "MW_EVENTS_LOG_PATH"
 	StampsDirEnv            = "MW_STAMPS_DIR"
+	BeadsFlushFileEnv       = "MW_BEADS_FLUSH_FILE"
 	PosternChannelEnv       = "MW_POSTERN_CHANNEL"
 	PosternTranscribeCmdEnv = "MW_POSTERN_TRANSCRIBE_CMD"
 	PosternDataEnv          = "MW_POSTERN_DATA"
@@ -493,6 +494,18 @@ var DefaultStampsDir = filepath.Join(".local", "state", "mw", "stamps")
 // the home directory when neither says.
 func StampsDir() (string, error) {
 	return fullPathSetting("stamps_dir", StampsDirEnv, DefaultStampsDir, "the chain stamp directory")
+}
+
+// DefaultBeadsFlushFile is where the home keeps a line about its last beads
+// flush under the home directory when nothing says otherwise.
+var DefaultBeadsFlushFile = filepath.Join(".local", "state", "mw", "beads-flush")
+
+// BeadsFlushFile reports the file of the home's last beads flush:
+// $MW_BEADS_FLUSH_FILE if it is set, otherwise the root-table
+// `beads_flush_file` key of ~/.config/mw/config.toml, a full path either way,
+// and DefaultBeadsFlushFile under the home directory when neither says.
+func BeadsFlushFile() (string, error) {
+	return fullPathSetting("beads_flush_file", BeadsFlushFileEnv, DefaultBeadsFlushFile, "the beads flush file")
 }
 
 // PosternInboxDir reports the full path to the directory mw postern inbox
