@@ -82,6 +82,7 @@ func newNudgeCmd() *cobra.Command {
 				Mayor:       application.MayorReader{Tracker: tracker, Notes: tracker},
 				Host:        host,
 				Home:        mwVault(dir, host),
+				Signs:       mwVault(dir, host),
 				SyncHalt:    hostSyncHalt(),
 				CloseOuts:   hostCloseOuts(),
 				Transcripts: transcripts,

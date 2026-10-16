@@ -38,6 +38,23 @@ type TranscriptWrites interface {
 	LastWrite(ctx context.Context, dir string) (time.Time, error)
 }
 
+// HostSign is the newest sign of life seen of a host besides its sync note:
+// when it was, and what it was, as it reads inside a clause ("vault commit").
+// The zero value is no sign at all.
+type HostSign struct {
+	At   time.Time
+	What string
+}
+
+// HostSigns is the port the quiet alarm reads a host's other signs of life
+// through: what the vault holds of it, such as a commit signed mw@<host>. It is
+// read-only and costs no fuel.
+type HostSigns interface {
+	// LastSign reports the newest sign of life of a host. It is the zero
+	// HostSign when there is none, which is not an error.
+	LastSign(ctx context.Context, host string) (HostSign, error)
+}
+
 // NudgeClause is one reason the quiet alarm has to speak: a story that has run
 // long with nothing mailed about it, or another host whose last sync has gone
 // stale.
@@ -108,6 +125,12 @@ type Nudge struct {
 	// in Rigs, judges the story by its mail and age alone.
 	Transcripts TranscriptWrites
 	Rigs        map[string]string
+
+	// Signs is where a host's other signs of life are read, so that a Boost
+	// that syncs only on its dispatch ticks is not called quiet while it is
+	// landing and pushing (mw-gq6.505). A nil Signs, or signs that cannot be
+	// read, judge a host by its sync and its claims alone.
+	Signs HostSigns
 
 	// NudgeAfter is how long a claimed story may run with nothing mailed about
 	// it before it is named. Zero reads DefaultNudgeAfter.
@@ -245,10 +268,18 @@ func (n Nudge) Run(ctx context.Context) ([]NudgeClause, error) {
 		if w.LastSync.IsZero() || w.Silent <= n.syncStale() || !w.holdsClaim() {
 			continue
 		}
-		clauses = append(clauses, NudgeClause{
-			Key:  "host:" + w.Host,
-			Text: fmt.Sprintf("%s last synced %d min ago", w.Host, minutes(w.Silent)),
-		})
+		// A Boost syncs on its dispatch ticks, so its sync age alone is not a
+		// sign it is quiet: it is named only when nothing else of it is newer
+		// than the limit either (mw-gq6.505).
+		text := fmt.Sprintf("%s last synced %d min ago", w.Host, minutes(w.Silent))
+		if sign := n.newestSign(ctx, w); sign.At.After(w.LastSync) {
+			quiet := now.Sub(sign.At)
+			if quiet <= n.syncStale() {
+				continue
+			}
+			text += fmt.Sprintf(", newest sign of life %s %d min ago", withArticle(sign.What), minutes(quiet))
+		}
+		clauses = append(clauses, NudgeClause{Key: "host:" + w.Host, Text: text})
 	}
 
 	return clauses, nil
@@ -285,6 +316,36 @@ func (n Nudge) lastWrite(ctx context.Context, detail StoryDetail) (written time.
 		return time.Time{}, false
 	}
 	return written, true
+}
+
+// newestSign is the newest sign of life of a host besides its sync note: the
+// claims its stories were last made or sent back under, and what the vault
+// holds of it. Signs that cannot be read are left out, and the host is judged
+// by the rest.
+func (n Nudge) newestSign(ctx context.Context, w HostWork) HostSign {
+	var newest HostSign
+	for _, d := range w.Stories {
+		if d.ClaimedAt.After(newest.At) {
+			newest = HostSign{At: d.ClaimedAt, What: "claim"}
+		}
+		if d.SentBackAt.After(newest.At) {
+			newest = HostSign{At: d.SentBackAt, What: "send-back"}
+		}
+	}
+	if n.Signs != nil {
+		if sign, err := n.Signs.LastSign(ctx, w.Host); err == nil && sign.At.After(newest.At) {
+			newest = sign
+		}
+	}
+	return newest
+}
+
+// withArticle puts "a" or "an" before a noun phrase.
+func withArticle(what string) string {
+	if what != "" && strings.ContainsRune("aeiou", rune(what[0])) {
+		return "an " + what
+	}
+	return "a " + what
 }
 
 // holdsClaim reports whether any of the stories pathed to this host is claimed:

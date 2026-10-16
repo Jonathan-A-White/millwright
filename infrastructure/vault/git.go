@@ -338,6 +338,34 @@ func (v *Vault) HeadSubject(ctx context.Context) (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// SignOfLifeCommit is what a host's newest commit in the vault is called in the
+// quiet alarm's line.
+const SignOfLifeCommit = "vault commit"
+
+// LastSign implements application.HostSigns: the newest commit in this clone
+// authored as mw@<host>, which is what a host's close-out, send-back and mail
+// leave behind in the vault. A host with none is the zero sign.
+func (v *Vault) LastSign(ctx context.Context, host string) (application.HostSign, error) {
+	if strings.TrimSpace(host) == "" {
+		return application.HostSign{}, nil
+	}
+	// The author line reads "mw@<host> <mw@<host>>": the angle brackets make
+	// the match whole, so that mw@cloud does not answer for mw@cloud2.
+	out, err := v.git(ctx, "log", "-1", "--fixed-strings", "--author=<mw@"+host+">", "--format=%cI")
+	if err != nil {
+		return application.HostSign{}, err
+	}
+	said := strings.TrimSpace(out)
+	if said == "" {
+		return application.HostSign{}, nil
+	}
+	at, err := time.Parse(time.RFC3339, said)
+	if err != nil {
+		return application.HostSign{}, fmt.Errorf("reading when mw@%s last committed in %s: %w", host, v.dir, err)
+	}
+	return application.HostSign{At: at, What: SignOfLifeCommit}, nil
+}
+
 // upstream is the branch this clone tracks, and the reason there is none: a
 // vault whose branch tracks nothing has no other host to be level with.
 func (v *Vault) upstream(ctx context.Context) (string, error) {
