@@ -102,6 +102,7 @@ func initializeScenarios(ctx *godog.ScenarioContext) {
 	steps.InitializeBuilderJobsScenario(ctx)
 	steps.InitializeChainStampScenario(ctx)
 	steps.InitializeCloudScenario(ctx)
+	steps.InitializeConfigExportBoostScenario(ctx)
 	steps.InitializeConfigSetScenario(ctx)
 	steps.InitializeCardScenario(ctx)
 	steps.InitializeDispatchScenario(ctx)
