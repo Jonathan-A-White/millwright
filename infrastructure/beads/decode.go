@@ -344,6 +344,7 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		Cause:            b.text(application.CauseField),
 		CauseWhy:         b.text(application.CauseWhyField),
 		CauseFix:         b.text(application.CauseFixField),
+		AttemptCauses:    application.ParseAttemptCauses(b.text(application.AttemptCausesField)),
 		Exhausted:        b.exhausted(),
 		AttemptsRefunded: b.count(application.AttemptsRefundedField),
 		Needs:            b.needs(),

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -16,6 +18,75 @@ const (
 	CauseWhyField = "cause_why"
 	CauseFixField = "cause_fix"
 )
+
+// AttemptCausesField is the metadata that keeps the class mw cause named for
+// each of the story's attempts, attempt:class pairs comma separated
+// ("1:process,2:test,3:code"): CauseField holds only the latest, and an attempt
+// that failed for what is not the story's own code is not counted toward
+// max_attempts (mw-gq6.450).
+const AttemptCausesField = "attempt_causes"
+
+// OwnCause is the class of cause that is the story's own code: an attempt named
+// it, or named nothing, counts toward max_attempts.
+const OwnCause = "code"
+
+// ParseAttemptCauses is the AttemptCausesField metadata read back: the class
+// named for each attempt, by attempt. A pair it cannot read is left out; empty
+// is nil.
+func ParseAttemptCauses(text string) map[int]string {
+	var causes map[int]string
+	for _, pair := range strings.Split(text, ",") {
+		at, class, ok := strings.Cut(strings.TrimSpace(pair), ":")
+		attempt, err := strconv.Atoi(strings.TrimSpace(at))
+		if !ok || err != nil || attempt < 1 || strings.TrimSpace(class) == "" {
+			continue
+		}
+		if causes == nil {
+			causes = map[int]string{}
+		}
+		causes[attempt] = strings.TrimSpace(class)
+	}
+	return causes
+}
+
+// attemptCausesText is causes as the AttemptCausesField metadata keeps them,
+// oldest attempt first.
+func attemptCausesText(causes map[int]string) string {
+	attempts := make([]int, 0, len(causes))
+	for attempt := range causes {
+		attempts = append(attempts, attempt)
+	}
+	sort.Ints(attempts)
+	pairs := make([]string, len(attempts))
+	for i, attempt := range attempts {
+		pairs[i] = fmt.Sprintf("%d:%s", attempt, causes[attempt])
+	}
+	return strings.Join(pairs, ",")
+}
+
+// UncountedAttempt is one of a story's attempts that does not count toward
+// max_attempts, and why: the class mw cause named for it.
+type UncountedAttempt struct {
+	Attempt int
+	Cause   string
+}
+
+// OwnAttempts is how many of the story's attempts count toward max_attempts:
+// those mw cause named code, or named nothing (mw-gq6.450). The attempts that
+// do not count, the ones named test, tooling or process, come back with their
+// class, oldest first.
+func OwnAttempts(d StoryDetail) (int, []UncountedAttempt) {
+	own := 0
+	var uncounted []UncountedAttempt
+	for attempt := 1; attempt <= d.Attempts; attempt++ {
+		if class := d.AttemptCauses[attempt]; class == "" || class == OwnCause {
+			own++
+		} else {
+			uncounted = append(uncounted, UncountedAttempt{Attempt: attempt, Cause: class})
+		}
+	}
+	return own, uncounted
+}
 
 // CauseClasses are the four classes a failed story's cause falls in.
 var CauseClasses = []string{"code", "test", "tooling", "process"}
@@ -58,8 +129,10 @@ func validCauseClass(class string) (string, bool) {
 
 // Cause records why a story failed: its class (one of CauseClasses), the reason
 // in words, and, when there is one, the bead that fixes it. The class, reason
-// and fix are written as the story's metadata in one write, and one comment
-// beginning "CAUSE (<class>):" says the same to a person reading the story. A
+// and fix are written as the story's metadata in one write, the class kept
+// besides as the cause of the story's latest attempt (AttemptCausesField), and
+// one comment beginning "CAUSE (<class>):" says the same to a person reading
+// the story. A
 // story named twice has its class, reason and fix replaced and a second
 // comment added. Nothing else of the story is touched: not its status, its
 // claim nor its attempts.
@@ -108,7 +181,12 @@ func (c Cause) Run(ctx context.Context, id, class, why, fix string) (CauseReport
 		}
 	}
 
-	fields := map[string]string{CauseField: class, CauseWhyField: why}
+	causes := map[int]string{}
+	for attempt, named := range story.AttemptCauses {
+		causes[attempt] = named
+	}
+	causes[max(story.Attempts, 1)] = class
+	fields := map[string]string{CauseField: class, CauseWhyField: why, AttemptCausesField: attemptCausesText(causes)}
 	if report.Fix != "" || story.CauseFix != "" {
 		fields[CauseFixField] = report.Fix
 	}

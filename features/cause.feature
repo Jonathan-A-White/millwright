@@ -18,6 +18,13 @@ Feature: mw cause
     And the story "mw-x.1" has exactly 1 comment, beginning "CAUSE (tooling):"
     And the cause comment on "mw-x.1" says "the gate's node was missing"
 
+  # mw-gq6.450: the class is kept for the attempt it was named for, so that mw
+  # retry counts only the attempts that were the story's own code.
+  Scenario: The cause is kept as the cause of the story's latest attempt
+    When mw records the cause of "mw-x.1" as tooling, saying "the gate's node was missing"
+    Then recording the cause succeeds
+    And the story "mw-x.1" has the cause metadata "attempt_causes" as "2:tooling"
+
   Scenario: A fix names the bead that mends the cause
     When mw records the cause of "mw-x.1" as code, saying "the retry lost the claim", fixed by "mw-y.2"
     Then recording the cause succeeds
