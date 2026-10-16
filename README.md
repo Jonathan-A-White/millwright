@@ -341,6 +341,14 @@ its core count is refused as `timeout under load`. The windows and thresholds ar
 config file's `[benchmark]` table: `usual_gates`, `par_window`, `par_min`,
 `calibration_window`, `error_flag_percent`, `over_par_factor`.
 
+`mw status` prints a DAMPERS section when an alarm trips, one line each naming up to five
+beads (then `+N`) and its principle in a word: WIP (more than 10 ready P1 stories, more
+than one Tester story running on a rig), ageing (a P1 untouched 5 days, a demo waiting
+over 7 days, a grilling open over 7 days with no card), review (his open cards, open
+demos and unrun hands steps over 8). The limits are the config file's `[dampers]` table:
+`ready_p1`, `p1_untouched_days`, `demo_waiting_days`, `grilling_days`, `testers_per_rig`,
+`review_queue`. `mw doctor` repeats the counts on one `dampers:` line.
+
 Every story is filed **held** — beads' `deferred` status — so that nothing can
 be dispatched from a plan nobody has approved. `mw file` prints the tree it
 filed, with each story's Path and what it waits on, and then asks. `--approve`

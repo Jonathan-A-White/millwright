@@ -612,3 +612,38 @@ func TestACappedFaultWhoseReasonChangesEveryRunIsNotedOncePerEpisode(t *testing.
 		t.Errorf("expected the new episode's note to be written")
 	}
 }
+
+type fakeDamperCounter struct {
+	report application.DampersReport
+	err    error
+}
+
+func (f fakeDamperCounter) DamperCounts(context.Context) (application.DampersReport, error) {
+	return f.report, f.err
+}
+
+func TestDoctorRepeatsTheDamperCounts(t *testing.T) {
+	now := doctorNow
+	var out strings.Builder
+	doctor := aDoctor(apptest.NewFakeDoctorState(), &apptest.FakeDoctorLog{}, &now,
+		&apptest.FakeDoctorCheck{CheckName: "widget", Verdict: application.DoctorOK})
+	doctor.Out = &out
+	doctor.Dampers = fakeDamperCounter{report: application.ReadDampers(application.DamperFacts{Now: now}, application.DamperLimits{})}
+	if _, err := doctor.Run(context.Background(), "", false); err != nil {
+		t.Fatalf("running: %v", err)
+	}
+	for _, want := range []string{"widget: ok", "dampers: ready P1 0 (limit 10)", "his review queue 0 (limit 8)"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("expected %q in:\n%s", want, out.String())
+		}
+	}
+
+	out.Reset()
+	doctor.Dampers = fakeDamperCounter{err: errors.New("no tracker")}
+	if _, err := doctor.Run(context.Background(), "", false); err != nil {
+		t.Fatalf("an unreadable count is no fault, got %v", err)
+	}
+	if !strings.Contains(out.String(), "dampers: could not be read (no tracker)") {
+		t.Errorf("expected the failure said on the line, got:\n%s", out.String())
+	}
+}

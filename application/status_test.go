@@ -3,6 +3,8 @@ package application_test
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -774,5 +776,165 @@ func TestStatusShowsNothingOfFormulasWhenEveryOneIsInstalled(t *testing.T) {
 
 	if text := otherHostStatus(t, tracker).String(); strings.Contains(text, application.FormulaNotInstalledHeading) {
 		t.Errorf("zero should show nothing, got:\n%s", text)
+	}
+}
+
+// damperStory is a story as the tracker lists it, last changed `idle` ago.
+func damperStory(id string, priority int, idle time.Duration, labels ...string) application.StoryDetail {
+	return application.StoryDetail{
+		Story:    domain.Story{ID: id, Title: "story " + id},
+		Status:   "open",
+		Priority: priority,
+		Labels:   labels,
+		Created:  statusNow.Add(-idle),
+		Updated:  statusNow.Add(-idle),
+		Defaults: domain.Path{Rig: "millwright"},
+	}
+}
+
+// aCleanDamperFixture trips nothing: a few fresh P1s, a young demo, a grilling
+// with its card, one Tester story running, and a short queue of his.
+func aCleanDamperFixture() application.DamperFacts {
+	tester := damperStory("mw-t.1", 2, time.Hour, application.LabelTester)
+	tester.Status = "in_progress"
+	return application.DamperFacts{
+		Now: statusNow,
+		Work: application.WorkInHand{
+			Ready: []application.StoryDetail{
+				damperStory("mw-a.1", 1, time.Hour),
+				damperStory("mw-a.2", 1, 2*24*time.Hour),
+				damperStory("mw-a.3", 2, 30*24*time.Hour),
+				damperStory("mw-d.1", 2, 2*24*time.Hour, application.LabelDemo, application.LabelHitl),
+			},
+			Running: []application.StoryDetail{tester},
+		},
+		Graph: []domain.GraphBead{
+			{ID: "mw-g.1", Title: "grilling: which queue", Status: "open", Created: statusNow.Add(-20 * 24 * time.Hour)},
+		},
+		Notes: map[string]string{
+			application.PosternQuestionKey("mw-g.1"): `{"q":"which queue?"}`,
+		},
+	}
+}
+
+func TestDampersAreQuietOnACleanFixture(t *testing.T) {
+	report := application.ReadDampers(aCleanDamperFixture(), application.DamperLimits{})
+	if len(report.Alarms) != 0 {
+		t.Fatalf("expected no alarm on a clean fixture, got %+v", report.Alarms)
+	}
+	if report.Counts.ReadyP1 != 2 || report.Counts.ReviewQueue != 2 {
+		t.Errorf("expected the counts of the clean fixture to be read, got %+v", report.Counts)
+	}
+}
+
+func TestEachDamperTripsOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		principle string
+		beads     []string
+		change    func(f *application.DamperFacts)
+	}{
+		{"too many ready P1s", "WIP", []string{"mw-p.1", "mw-p.2"}, func(f *application.DamperFacts) {
+			for i := 1; i <= 9; i++ {
+				f.Work.Ready = append(f.Work.Ready, damperStory(fmt.Sprintf("mw-p.%d", i), 1, time.Hour))
+			}
+		}},
+		{"a P1 untouched five days", "ageing", []string{"mw-old.1"}, func(f *application.DamperFacts) {
+			f.Work.Ready = append(f.Work.Ready, damperStory("mw-old.1", 1, 6*24*time.Hour))
+		}},
+		{"a demo waiting a week", "ageing", []string{"mw-d.9"}, func(f *application.DamperFacts) {
+			f.Work.Ready = append(f.Work.Ready, damperStory("mw-d.9", 3, 8*24*time.Hour, application.LabelDemo, application.LabelHitl))
+		}},
+		{"a grilling open a week with no card", "ageing", []string{"mw-g.9"}, func(f *application.DamperFacts) {
+			f.Graph = append(f.Graph, domain.GraphBead{ID: "mw-g.9", Title: "grilling: bare", Status: "open", Created: statusNow.Add(-8 * 24 * time.Hour)})
+		}},
+		{"two Tester stories on one rig", "WIP", []string{"mw-t.1", "mw-t.2"}, func(f *application.DamperFacts) {
+			second := damperStory("mw-t.2", 2, time.Hour, application.LabelTester)
+			second.Status = "in_progress"
+			f.Work.Running = append(f.Work.Running, second)
+		}},
+		{"his review queue over eight", "review", nil, func(f *application.DamperFacts) {
+			for i := 1; i <= 7; i++ {
+				f.Notes[application.PosternQuestionKey(fmt.Sprintf("mw-q.%d", i))] = `{"q":"which?"}`
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			facts := aCleanDamperFixture()
+			tc.change(&facts)
+			report := application.ReadDampers(facts, application.DamperLimits{})
+			if len(report.Alarms) != 1 {
+				t.Fatalf("expected exactly this alarm, got %+v", report.Alarms)
+			}
+			alarm := report.Alarms[0]
+			if alarm.Principle != tc.principle {
+				t.Errorf("expected the principle %q, got %q", tc.principle, alarm.Principle)
+			}
+			for _, bead := range tc.beads {
+				if !slices.Contains(alarm.Beads, bead) {
+					t.Errorf("expected the alarm to name %s, got %v", bead, alarm.Beads)
+				}
+			}
+		})
+	}
+}
+
+func TestADamperLineNamesFiveBeadsThenTheRest(t *testing.T) {
+	facts := aCleanDamperFixture()
+	for i := 1; i <= 12; i++ {
+		facts.Work.Ready = append(facts.Work.Ready, damperStory(fmt.Sprintf("mw-p.%d", i), 1, time.Hour))
+	}
+	report := application.ReadDampers(facts, application.DamperLimits{})
+	var b strings.Builder
+	report.Write(&b)
+	text := b.String()
+	for _, want := range []string{application.DampersHeading, "WIP", "14 ready P1", "+9"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("expected %q in:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "mw-p.6") {
+		t.Errorf("expected only five beads named, got:\n%s", text)
+	}
+}
+
+func TestADamperLimitIsConfigurable(t *testing.T) {
+	facts := aCleanDamperFixture()
+	report := application.ReadDampers(facts, application.DamperLimits{ReadyP1: 1})
+	if len(report.Alarms) != 1 || report.Alarms[0].Principle != "WIP" {
+		t.Fatalf("expected the ready P1 alarm at a limit of 1, got %+v", report.Alarms)
+	}
+}
+
+func TestStatusPrintsDampers(t *testing.T) {
+	tracker := aTrackerPathedToVPS(t)
+	storyOn(t, tracker, "mw-gq6.70", "A P1 left alone", "vps")
+	if err := tracker.SetPriority("mw-gq6.70", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.SetUpdated("mw-gq6.70", statusNow.Add(-9*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	status := application.Status{
+		Tracker: tracker, Notes: tracker, Host: "vps", Seat: "builder",
+		Now:     func() time.Time { return statusNow },
+		Dampers: application.DamperSurvey{Tracker: tracker, Notes: tracker},
+	}
+	report, err := status.Run(context.Background())
+	if err != nil {
+		t.Fatalf("reading status: %v", err)
+	}
+	printed := report.String()
+	t.Logf("\n%s", printed)
+	if !strings.Contains(printed, application.DampersHeading) || !strings.Contains(printed, "mw-gq6.70") {
+		t.Errorf("expected the DAMPERS section naming the untouched P1, got:\n%s", printed)
+	}
+	quiet := application.Status{Tracker: aTrackerPathedToVPS(t), Host: "vps", Seat: "builder", Now: func() time.Time { return statusNow }}
+	empty, err := quiet.Run(context.Background())
+	if err != nil {
+		t.Fatalf("reading status: %v", err)
+	}
+	if strings.Contains(empty.String(), application.DampersHeading) {
+		t.Errorf("expected no DAMPERS section when nothing is tripped")
 	}
 }
