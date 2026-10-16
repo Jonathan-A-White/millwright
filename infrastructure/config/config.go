@@ -27,6 +27,9 @@
 //	[rigs]
 //	millwright = "/root/millwright"
 //
+//	[next]
+//	max_turns = 120                    # most turns a Builder's session takes; 0 is no cap (mw-1ljpo9.6)
+//
 //	[dispatch]                         # the room a host needs to start a story (mw-t0z3fu.1)
 //	room_load_per_core = 1.0           # none while the 1-minute load is this many a core
 //	room_min_free_mb   = 2048          # none while less memory than this is available
@@ -986,6 +989,41 @@ func PosternVerifyDays() (int, error) {
 		return 0, fmt.Errorf("the [%s] table of %s says verify_days = %q: it must be a whole number of days, 1 or more", PosternTable, path, said)
 	}
 	return days, nil
+}
+
+// NextTable is the table of the config file that says how a Builder's session
+// is worked (mw-1ljpo9.6).
+const NextTable = "next"
+
+// DefaultNextMaxTurns is the most turns a Builder's session may take when the
+// [next] table says nothing; it is application's own DefaultMaxTurns, said
+// again so that this package needs not import it.
+const DefaultNextMaxTurns = 120
+
+// NextMaxTurns reports `max_turns` of the `[next]` table of
+// ~/.config/mw/config.toml: the most turns a Builder's session may take before
+// its harness stops it and the story is given back (mw-1ljpo9.6), unless the
+// story's own path says otherwise. A whole number; 0 sets no cap, the rollback;
+// DefaultNextMaxTurns when the table says nothing.
+func NextMaxTurns() (int, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return 0, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	path := filepath.Join(home, File)
+	table, err := tableIn(path, NextTable)
+	if err != nil {
+		return 0, err
+	}
+	said := strings.TrimSpace(table["max_turns"])
+	if said == "" {
+		return DefaultNextMaxTurns, nil
+	}
+	turns, err := strconv.Atoi(said)
+	if err != nil || turns < 0 {
+		return 0, fmt.Errorf("the [%s] table of %s says max_turns = %q: it must be a whole number of turns, 0 for no cap", NextTable, path, said)
+	}
+	return turns, nil
 }
 
 // DispatchTable is the table of the config file that says how much room a host

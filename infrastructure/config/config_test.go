@@ -2346,3 +2346,35 @@ func TestSeatHandoffsRefuseAValueThatIsNotANumber(t *testing.T) {
 		t.Fatalf("expected an error naming the seat, got %v", err)
 	}
 }
+
+// next.max_turns (mw-1ljpo9.6) caps a Builder's session: 120 turns until the
+// [next] table says otherwise, and 0 sets no cap, the rollback.
+func TestNextMaxTurnsIs120UntilTheNextTableSaysOtherwise(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\nhost = \"vps\"\nmax_turns = 7\n")
+	turns, err := config.NextMaxTurns()
+	if err != nil {
+		t.Fatalf("reading next.max_turns: %v", err)
+	}
+	if turns != 120 || config.DefaultNextMaxTurns != 120 {
+		t.Fatalf("expected the default 120, not a root-table key, got %d", turns)
+	}
+
+	writeConfig(t, "[next]\nmax_turns = 160\n")
+	if turns, err = config.NextMaxTurns(); err != nil || turns != 160 {
+		t.Fatalf("expected the [next] table's 160, got %d: %v", turns, err)
+	}
+
+	writeConfig(t, "[next]\nmax_turns = 0\n")
+	if turns, err = config.NextMaxTurns(); err != nil || turns != 0 {
+		t.Fatalf("expected 0 to read back as no cap, got %d: %v", turns, err)
+	}
+}
+
+func TestNextMaxTurnsRefusesWhatIsNotAWholeNumber(t *testing.T) {
+	for _, bad := range []string{"-1", "\"lots\""} {
+		writeConfig(t, "[next]\nmax_turns = "+bad+"\n")
+		if _, err := config.NextMaxTurns(); err == nil {
+			t.Errorf("expected next.max_turns = %s to be refused", bad)
+		}
+	}
+}

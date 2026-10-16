@@ -90,7 +90,7 @@ func (s PathSet) Run(ctx context.Context, id, from string, pairs []string) (doma
 }
 
 // parsePathPairs reads key=value settings into a path, refusing a key that is
-// not one of the eight and a value left empty.
+// not one of the nine and a value left empty.
 func parsePathPairs(pairs []string) (domain.Path, error) {
 	var path domain.Path
 	for _, pair := range pairs {
@@ -106,7 +106,7 @@ func parsePathPairs(pairs []string) (domain.Path, error) {
 	return path, nil
 }
 
-// pathLines is a path as a key=value line for each of the eight keys, a key it
+// pathLines is a path as a key=value line for each of the nine keys, a key it
 // does not set shown as PathUnset.
 func pathLines(path domain.Path) string {
 	var b strings.Builder
@@ -120,7 +120,7 @@ func pathLines(path domain.Path) string {
 	return b.String()
 }
 
-// PathShow prints the eight path keys of a story, as the story is worked by
+// PathShow prints the nine path keys of a story, as the story is worked by
 // them: its own settings over its epic's defaults.
 type PathShow struct {
 	Tracker WorkTracker

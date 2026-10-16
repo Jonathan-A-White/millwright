@@ -172,7 +172,7 @@ func (c *pathSetContext) printedTheLine(line string) error {
 }
 
 // echoedWhatShowPrints holds the echo of the last set to the keys that `mw path
-// show` prints for the story now: the same eight lines.
+// show` prints for the story now: the same nine lines.
 func (c *pathSetContext) echoedWhatShowPrints(id string) error {
 	var shown bytes.Buffer
 	if _, err := (application.PathShow{Tracker: c.tracker, Out: &shown}).Run(context.Background(), id); err != nil {

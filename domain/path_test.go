@@ -17,6 +17,8 @@ func completePath() domain.Path {
 		Formula: "tdd-feature",
 		Host:    "vps",
 		Files:   "src/Reader.tsx,src/data/*.ts",
+		// MaxTurns: mw-1ljpo9.6.
+		MaxTurns: "160",
 	}
 }
 
@@ -136,6 +138,7 @@ func TestMetadataLeavesOutEmptyFields(t *testing.T) {
 	p.Formula = ""
 	p.Host = ""
 	p.Files = ""
+	p.MaxTurns = ""
 
 	got := p.Metadata()
 	if len(got) != 5 {
@@ -220,5 +223,41 @@ func TestStoryPathFromReportsAnInvalidPath(t *testing.T) {
 	}
 	if got != (domain.Path{}) {
 		t.Fatalf("expected no path alongside the error, got %+v", got)
+	}
+}
+
+// max_turns (mw-1ljpo9.6) is a story's own turn cap: a whole number, 0 for no
+// cap, and empty to leave it to the host's next.max_turns.
+func TestMaxTurnsIsAWholeNumberOrEmpty(t *testing.T) {
+	for _, ok := range []string{"", "0", "60", "160"} {
+		p := completePath()
+		p.MaxTurns = ok
+		if err := p.Validate(); err != nil {
+			t.Errorf("expected max_turns %q to be valid, got %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"-1", "lots", "1.5"} {
+		p := completePath()
+		p.MaxTurns = bad
+		var unknown domain.UnknownValueError
+		if err := p.Validate(); !errors.As(err, &unknown) || unknown.Field != "max_turns" {
+			t.Errorf("expected max_turns %q to be refused, got %v", bad, err)
+		}
+	}
+}
+
+func TestTurnCapIsThePathsOwnOrTheHostsWhenThePathSaysNothing(t *testing.T) {
+	p := completePath()
+	p.MaxTurns = ""
+	if got := p.TurnCap(120); got != 120 {
+		t.Fatalf("expected the host's 120 when the path says nothing, got %d", got)
+	}
+	p.MaxTurns = "60"
+	if got := p.TurnCap(120); got != 60 {
+		t.Fatalf("expected the path's 60, got %d", got)
+	}
+	p.MaxTurns = "0"
+	if got := p.TurnCap(120); got != 0 {
+		t.Fatalf("expected a path's 0 to set no cap, got %d", got)
 	}
 }

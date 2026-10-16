@@ -6,6 +6,7 @@ package domain
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -62,6 +63,10 @@ type Path struct {
 	// separated: a story whose files a running story on its rig shares waits
 	// for it (mw-gq6.349). They are the story's own, never a sibling's.
 	Files string `json:"files,omitempty"`
+	// MaxTurns is the most turns the story's session may take, a whole number:
+	// 0 sets no cap, and empty leaves it to the host's next.max_turns
+	// (mw-1ljpo9.6). See TurnCap.
+	MaxTurns string `json:"max_turns,omitempty"`
 }
 
 // Story is a bead sized to be worked start to finish by one session in one
@@ -116,7 +121,7 @@ func (e FormulaNotInstalledError) Error() string {
 
 // Fields are the names of a path's fields, in the order a path is written out.
 // They are also the metadata keys a path is stored under.
-var Fields = []string{"rig", "branch", "harness", "model", "effort", "formula", "host", "files"}
+var Fields = []string{"rig", "branch", "harness", "model", "effort", "formula", "host", "files", "max_turns"}
 
 // Set sets the field of p named by one of Fields. It is how a path is read out
 // of stored metadata: one key, one value, at a time.
@@ -138,6 +143,8 @@ func (p *Path) Set(field, value string) error {
 		p.Host = value
 	case "files":
 		p.Files = value
+	case "max_turns":
+		p.MaxTurns = value
 	default:
 		return UnknownFieldError{Field: field}
 	}
@@ -163,6 +170,8 @@ func (p Path) Field(field string) (string, error) {
 		return p.Host, nil
 	case "files":
 		return p.Files, nil
+	case "max_turns":
+		return p.MaxTurns, nil
 	default:
 		return "", UnknownFieldError{Field: field}
 	}
@@ -253,12 +262,39 @@ func (p Path) Overlay(override Path) Path {
 	if override.Files != "" {
 		p.Files = override.Files
 	}
+	if override.MaxTurns != "" {
+		p.MaxTurns = override.MaxTurns
+	}
 	return p
+}
+
+// TurnCap is the most turns the session working p may take: p's own max_turns
+// when it sets one, else hostCap, the host's next.max_turns. 0 is no cap. A
+// max_turns that is not a whole number, which Validate refuses, is hostCap.
+func (p Path) TurnCap(hostCap int) int {
+	if turns, ok := p.turns(); ok {
+		return turns
+	}
+	return hostCap
+}
+
+// turns is p's max_turns read as a whole number, and false when it sets none or
+// none that is one.
+func (p Path) turns() (int, bool) {
+	if p.MaxTurns == "" {
+		return 0, false
+	}
+	turns, err := strconv.Atoi(p.MaxTurns)
+	if err != nil || turns < 0 {
+		return 0, false
+	}
+	return turns, true
 }
 
 // Validate reports the first reason p cannot be worked. Rig and branch are
 // mandatory; harness, model and effort must each name something the factory
-// knows. Formula and host are optional here: the dispatcher supplies them.
+// knows; max_turns, when set, is a whole number. Formula and host are optional
+// here: the dispatcher supplies them.
 func (p Path) Validate() error {
 	if p.Rig == "" {
 		return ErrRigRequired
@@ -283,6 +319,9 @@ func (p Path) Validate() error {
 		return ErrEffortRequired
 	case !KnownEffort(p.Effort):
 		return UnknownValueError{Field: "effort", Value: string(p.Effort)}
+	}
+	if _, ok := p.turns(); p.MaxTurns != "" && !ok {
+		return UnknownValueError{Field: "max_turns", Value: p.MaxTurns}
 	}
 	return nil
 }
