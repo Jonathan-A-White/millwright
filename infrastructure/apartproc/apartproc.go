@@ -91,7 +91,7 @@ func (l *Landings) Pending(context.Context) ([]string, error) {
 }
 
 // apart is one kind of pass run apart from the follower. A pass's state is
-// five files in Dir/<name>: pid (the shell that runs it), status (its exit
+// five files in Dir/<name>: pid (the shell that runs it, moved into place once whole), status (its exit
 // status, written when it ends), owed (there while no follower has been told how
 // it ended), log (what it printed) and log.1 (what the pass before it printed).
 type apart struct {
@@ -111,9 +111,10 @@ func (a apart) poll() time.Duration {
 }
 
 // script is what the process runs: it notes its pid, runs the rest of its
-// arguments, and notes how they ended. The status file is written whole and
-// then moved into place, so it is never half read.
-const script = `d=$1; shift; echo $$ > "$d/pid"; "$@" >> "$d/log" 2>&1; echo $? > "$d/status.tmp"; mv "$d/status.tmp" "$d/status"`
+// arguments, and notes how they ended. The pid and status files are written
+// whole and then moved into place, so neither is ever read empty or half written
+// (a pid read empty was a pass that "ended without saying how", mw-gq6.516).
+const script = `d=$1; shift; echo $$ > "$d/pid.tmp"; mv "$d/pid.tmp" "$d/pid"; "$@" >> "$d/log" 2>&1; echo $? > "$d/status.tmp"; mv "$d/status.tmp" "$d/status"`
 
 // begin starts args as the pass name, unless one begun earlier, by this
 // follower or another, is still running or has ended with no follower told
@@ -126,7 +127,7 @@ func (a apart) begin(ctx context.Context, name, what string, args ...string) err
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	for _, f := range []string{"pid", "status", "status.tmp", "owed"} {
+	for _, f := range []string{"pid", "pid.tmp", "status", "status.tmp", "owed"} {
 		if err := os.Remove(filepath.Join(dir, f)); err != nil && !os.IsNotExist(err) {
 			return err
 		}
@@ -156,7 +157,9 @@ func (a apart) begin(ctx context.Context, name, what string, args ...string) err
 	}
 	deadline := time.Now().Add(wait)
 	for time.Now().Before(deadline) {
-		if _, err := os.Stat(filepath.Join(dir, "pid")); err == nil {
+		// A pid file read empty is one whose number is still being written
+		// (a pass begun by an older mw makes it before it fills it): not yet said.
+		if raw, err := os.ReadFile(filepath.Join(dir, "pid")); err == nil && len(strings.TrimSpace(string(raw))) > 0 {
 			return nil
 		}
 		select {

@@ -168,6 +168,57 @@ func TestALandingThatEndedWhileNoFollowerWaitedIsToldOnceAndNotRunAgain(t *testi
 	}
 }
 
+// TestABeginIsNotToldTheSuiteStartedBeforeItHasSaidItsPid: the pid file is made
+// before its number is written (echo > pid opens, then writes), and a Begin that
+// returned in that gap left Wait reading an empty pid as a pass that had ended
+// without saying how (mw-gq6.516). The scope stand-in holds the gap open until the
+// test, which has seen the empty pid, releases it.
+func TestABeginIsNotToldTheSuiteStartedBeforeItHasSaidItsPid(t *testing.T) {
+	prog := standIn(t, "0", 0)
+	dir := t.TempDir()
+	p := &apartproc.Processes{Dir: dir, Program: prog, Scope: gapScope(t), Poll: 20 * time.Millisecond}
+	pidFile := filepath.Join(dir, "lampas", "pid")
+	release := filepath.Join(dir, "lampas", "release")
+	released := make(chan struct{})
+	go func() {
+		defer close(released)
+		for deadline := time.Now().Add(time.Minute); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
+			if _, err := os.Stat(pidFile); err == nil {
+				os.WriteFile(release, nil, 0o644)
+				return
+			}
+		}
+	}()
+	err := p.Begin(context.Background(), "lampas")
+	if err == nil {
+		err = p.Wait(context.Background(), "lampas")
+	}
+	<-released
+	if err != nil {
+		t.Errorf("the suite passed, but Begin and Wait said: %v", err)
+	}
+	// Let the stand-in end before the temp dirs go.
+	for deadline := time.Now().Add(time.Minute); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if _, err := os.Stat(filepath.Join(dir, "lampas", "status")); err == nil {
+			return
+		}
+	}
+	t.Error("the stand-in never ended")
+}
+
+// gapScope is a noScope that first makes an empty pid file, as the shell does
+// between opening it and writing its number, and holds there until the test makes
+// release beside it, a minute at most.
+func gapScope(t *testing.T) string {
+	t.Helper()
+	prog := filepath.Join(t.TempDir(), "systemd-run")
+	body := "#!/bin/sh\nwhile [ \"$1\" != sh ]; do shift; done\nd=$5\n: > \"$d/pid\"\ni=0\nwhile [ ! -e \"$d/release\" ] && [ $i -lt 3000 ]; do sleep 0.02; i=$((i + 1)); done\nexec \"$@\"\n"
+	if err := os.WriteFile(prog, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return prog
+}
+
 // noScope is a systemd-run that is not one: it runs the rest of its arguments,
 // so that a test needs no user manager.
 func noScope(t *testing.T) string {
