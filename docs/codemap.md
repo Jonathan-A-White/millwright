@@ -8,8 +8,7 @@ domain/ stdlib · application/ use cases, ports · infra/ adapters · cmd/mw/ co
 |-|-|-|
 | `WorkTracker` | application/worktracker.go | beads |
 | TrackerNotes, SweepNotes, BeadGraph, IceNotes, IcedBeads | application/{status,sweep,ice}.go | same |
-| VaultFiles, TrackerSync, TrackerHistory, SyncHaltMarker | application/sync.go | infra/{vault/git,beads/sync,synchalt} | Fake{VaultFiles,Tracker,SyncHalt*} |
-| VaultFiles, TrackerSync, SyncHaltMarker | application/sync.go | {vault/git,beads/sync}.go, synchalt |
+| VaultFiles, TrackerSync, TrackerHistory, SyncHaltMarker | application/sync.go | {vault/git,beads/sync}.go, synchalt |
 | Mailbox, TidyMailbox | application/{mail,tidy}.go | beads/mail.go |
 | EpicRules (+LandingRules) | application/epicrules.go | vault/epicrules.go |
 | Vault, Harness, SeatBootFiles, RigDocs, BootCommands | seatboot.go, application/seatboot_manifest.go, application/harness.go | {vault,claude,shellcmd}, rig/rigfiles.go |
