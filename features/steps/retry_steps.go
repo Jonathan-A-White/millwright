@@ -96,6 +96,20 @@ func InitializeRetryScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^the cause of the story "([^"]*)" is recorded as "([^"]*)"$`, c.theCauseIsRecorded)
 	ctx.Then(`^the retry printed the reminder: (.+)$`, c.theRetryPrintedTheReminder)
 	ctx.Then(`^the retry printed no cause reminder$`, c.theRetryPrintedNoReminder)
+	ctx.Given(`^the retried story "([^"]*)" worked a formula and closed (\d+) of its 3 steps$`, func(id string, closed int) error {
+		_, err := pourFormula(c.tracker, id, closed)
+		return err
+	})
+	ctx.Then(`^nothing of the retried story's formula "([^"]*)" is left open, its root and (\d+) steps? closed saying "([^"]*)"$`,
+		func(id string, steps int, text string) error { return formulaClosedSaying(c.tracker, id, steps, text) })
+	ctx.Then(`^the retried story's formula "([^"]*)" is as its session left it, (\d+) steps? still open$`,
+		func(id string, open int) error { return formulaUntouched(c.tracker, id, open) })
+	ctx.Then(`^the printed retry report says "([^"]*)"$`, func(text string) error {
+		if !strings.Contains(c.printed.String(), text) {
+			return fmt.Errorf("the printed report does not say %q:\n%s", text, c.printed.String())
+		}
+		return nil
+	})
 	ctx.Then(`^the retry succeeds$`, c.theRetrySucceeds)
 	ctx.Then(`^the retry refuses, saying: (.+)$`, c.theRetryRefusesSaying)
 	ctx.Then(`^the retry fails, saying: (.+)$`, c.theRetryFailsSaying)

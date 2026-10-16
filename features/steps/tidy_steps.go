@@ -56,6 +56,13 @@ func InitializeTidyScenario(ctx *godog.ScenarioContext) {
 	ctx.Given(`^a tidy epic "([^"]*)" that is open and (\d+) days old$`, c.anOldTidyEpic)
 	ctx.Given(`^a postern question note for "([^"]*)" and for "([^"]*)"$`, c.questionNotes)
 
+	ctx.Given(`^a tidy story "([^"]*)" that is (open|closed|running), with a formula poured whose session closed (\d+) of its 3 steps$`, c.aTidyStoryWithAFormula)
+	ctx.Given(`^the root of the tidy formula of "([^"]*)" was closed already$`, c.theRootWasClosedAlready)
+	ctx.Then(`^nothing of the tidy formula of "([^"]*)" is left open, its root and (\d+) steps? closed saying "([^"]*)"$`,
+		func(id string, steps int, text string) error { return formulaClosedSaying(c.tracker, id, steps, text) })
+	ctx.Then(`^the tidy formula of "([^"]*)" is as its session left it, (\d+) steps? still open$`,
+		func(id string, open int) error { return formulaUntouched(c.tracker, id, open) })
+
 	ctx.When(`^mw tidy runs$`, func() error { return c.run(false) })
 	ctx.When(`^mw tidy runs with --dry-run$`, func() error { return c.run(true) })
 
@@ -130,6 +137,34 @@ func (c *tidyContext) aTidyStory(id, status string) error {
 	return nil
 }
 
+// aTidyStoryWithAFormula files a story with a formula poured for it, as
+// dispatch pours one, its session having closed some of the steps; a running
+// story is claimed.
+func (c *tidyContext) aTidyStoryWithAFormula(id, status string, closed int) error {
+	if err := c.aTidyStory(id, "open"); err != nil {
+		return err
+	}
+	if _, err := pourFormula(c.tracker, id, closed); err != nil {
+		return err
+	}
+	switch status {
+	case "closed":
+		return c.tracker.SetStatus(id, apptest.StatusClosed)
+	case "running":
+		return c.tracker.ClaimStory(context.Background(), id)
+	}
+	return nil
+}
+
+func (c *tidyContext) theRootWasClosedAlready(id string) error {
+	molecule, poured := c.tracker.Poured(id)
+	if !poured {
+		return fmt.Errorf("no formula was poured for %s", id)
+	}
+	c.tracker.CloseMolecule(molecule.RootID)
+	return nil
+}
+
 func (c *tidyContext) anOldTidyStory(id, days string) error {
 	return c.anOldLabelledTidyStory(id, "", days)
 }
@@ -169,7 +204,7 @@ func (c *tidyContext) questionNotes(first, second string) error {
 func (c *tidyContext) run(dry bool) error {
 	c.written = c.tracker.Writes()
 	c.report, c.err = application.Tidy{
-		Mail: c.mail, Notes: c.tracker, Beads: c.tracker, Log: c.log,
+		Mail: c.mail, Notes: c.tracker, Beads: c.tracker, Formulas: c.tracker, Log: c.log,
 		DryRun: dry,
 		Now:    func() time.Time { return c.now },
 	}.Run(context.Background())

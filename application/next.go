@@ -467,7 +467,10 @@ type NextReport struct {
 	// Committed is what was committed in the vault, empty when there was
 	// nothing to commit.
 	Committed []string
-	Closed    bool
+	// FormulaClosed is what this close-out closed of the story's formula
+	// (mw-gq6.438).
+	FormulaClosed FormulaClosed
+	Closed        bool
 	// DemoHeld is true when the story landed and is a demo, so it was left open
 	// and held for the Governor's "Looks good" rather than closed.
 	DemoHeld bool
@@ -1693,6 +1696,13 @@ func (n Next) finish(ctx context.Context, c *closeOut, report *NextReport, outco
 	} else {
 		closeErr = n.closeStory(ctx, c.id, outcome)
 	}
+	if closeErr == nil {
+		what := "landed"
+		if c.tested != "" {
+			what = "was tested"
+		}
+		n.closeFormula(ctx, c, report, what)
+	}
 	switch {
 	case closeErr != nil:
 		report.NotClosed = closeErr.Error()
@@ -2195,9 +2205,10 @@ func (n Next) carryOn(ctx context.Context, c *closeOut, report *NextReport) (Nex
 // filed under, on the story; the story marked blocked so that nobody takes it
 // for work in flight; and one line in the ledger saying it did not land, its
 // outcome starting with the code. Nothing is merged, nothing is pushed, nothing
-// is closed and, but for open steps (mw-gq6.341), nothing is given back — the
-// worktree and the branch are left exactly as the session left them, because
-// they are the evidence.
+// is closed but what is left open of the story's formula (mw-gq6.438) and, but
+// for open steps (mw-gq6.341), nothing is given back — the worktree and the
+// branch are left exactly as the session left them, because they are the
+// evidence.
 func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason Reason, why, said string) (NextReport, error) {
 	// Tests that timed out on a host at or above its core count did not fail on
 	// the story: the refusal says so, in the mail and on the story.
@@ -2206,6 +2217,11 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 	}
 	report.Why, report.Reason = why, reason
 	n.recordBenchmark(ctx, c, report, false)
+
+	// The formula is closed before the claim can be given back, so that a
+	// dispatch that takes the story again pours it a fresh one rather than
+	// working what this attempt left of its own.
+	n.closeFormula(ctx, c, report, fmt.Sprintf("was not landed (%s), and its next attempt pours its formula afresh", reason))
 
 	var trouble []string
 	// A story whose work is committed and whose formula was left unfinished is
@@ -2279,6 +2295,19 @@ func (n Next) stop(ctx context.Context, c *closeOut, report *NextReport, reason 
 		err = fmt.Errorf("%w (and %s)", err, strings.Join(trouble, "; "))
 	}
 	return *report, err
+}
+
+// closeFormula closes what is left open of the story's formula once the
+// close-out has settled what became of the story (mw-gq6.438). One that cannot
+// be closed is a note: it changes nothing about the story, and mw tidy closes
+// it once the story is closed.
+func (n Next) closeFormula(ctx context.Context, c *closeOut, report *NextReport, what string) {
+	root := c.detail.Molecule.RootID
+	closed, err := closeFormula(ctx, n.Tracker, root, FormulaClosedWhy("mw next", n.Host, c.id, what))
+	report.FormulaClosed = closed
+	if err != nil {
+		report.Notes = append(report.Notes, fmt.Sprintf("the formula %s of %s could not be closed: %v", root, c.id, err))
+	}
 }
 
 // mailTheMayor sends the one mail that says what became of the story: from mw
@@ -2818,6 +2847,9 @@ func (r NextReport) String() string {
 	}
 	if r.Closed {
 		b.WriteString("  closed  the story is closed\n")
+	}
+	if r.FormulaClosed.Any() {
+		fmt.Fprintf(&b, "  formula closed %s\n", r.FormulaClosed)
 	}
 	if r.Queued {
 		b.WriteString("  open    the story stays open and claimed, its worktree kept, until its batch lands it\n")

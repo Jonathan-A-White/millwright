@@ -62,6 +62,7 @@ type FakeTracker struct {
 	pouredBugs  map[string]bool   // story id -> its molecule was poured as a bug's
 	closedSteps map[string]bool   // step id -> closed by the session working it
 	closedRoots map[string]bool   // molecule root id -> closed
+	formulaShut map[string]string // step or root id -> the reason CloseStory closed it with
 
 	// refused is the stories CloseStory turns down, by the reason it gives.
 	refused map[string]string
@@ -599,6 +600,9 @@ func (f *FakeTracker) CloseReason(id string) string {
 	defer f.mu.Unlock()
 	if s, ok := f.stories[id]; ok {
 		return s.closeReason
+	}
+	if reason, ok := f.formulaShut[id]; ok {
+		return reason
 	}
 	return f.epicShut[id]
 }
@@ -1664,6 +1668,85 @@ func (f *FakeTracker) OpenMolecule(_ context.Context, rootID string) (applicatio
 	return application.Molecule{}, nil
 }
 
+// closeFormulaBead closes a step or a root of a poured molecule with a reason,
+// the lock held by the caller, and says whether id named one.
+func (f *FakeTracker) closeFormulaBead(id, reason string) bool {
+	for _, molecule := range f.molecules {
+		step := false
+		for _, each := range molecule.Steps {
+			step = step || each.ID == id
+		}
+		if !step && molecule.RootID != id {
+			continue
+		}
+		if f.closedSteps == nil {
+			f.closedSteps = map[string]bool{}
+		}
+		if f.closedRoots == nil {
+			f.closedRoots = map[string]bool{}
+		}
+		if f.formulaShut == nil {
+			f.formulaShut = map[string]string{}
+		}
+		if step {
+			f.closedSteps[id] = true
+		} else {
+			f.closedRoots[id] = true
+		}
+		f.formulaShut[id] = reason
+		f.writes++
+		return true
+	}
+	return false
+}
+
+// OpenFormulas implements application.TidyFormulas: every poured molecule with
+// a step or its root still open, its story read from its steps' titles as the
+// beads adapter reads it, and the story not closed that records it, if any.
+func (f *FakeTracker) OpenFormulas(_ context.Context) ([]application.PouredFormula, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return nil, f.Err
+	}
+	var open []application.PouredFormula
+	for _, molecule := range f.molecules {
+		poured := application.PouredFormula{Root: molecule.RootID, RootOpen: !f.closedRoots[molecule.RootID]}
+		for _, step := range molecule.Steps {
+			if !f.closedSteps[step.ID] {
+				poured.Steps = append(poured.Steps, step.ID)
+			}
+			if poured.Story == "" {
+				poured.Story = application.FormulaStoryOf(step.Title)
+			}
+		}
+		if !poured.RootOpen && len(poured.Steps) == 0 {
+			continue
+		}
+		for _, id := range f.order {
+			if s := f.stories[id]; s.detail.Molecule.RootID == molecule.RootID && s.detail.Status != StatusClosed {
+				poured.LiveStory = id
+			}
+		}
+		open = append(open, poured)
+	}
+	return open, nil
+}
+
+// CloseFormulaBead implements application.TidyFormulas: it closes a step or a
+// root of a poured molecule, and refuses any other id.
+func (f *FakeTracker) CloseFormulaBead(_ context.Context, id, reason string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Err != nil {
+		return f.Err
+	}
+	if !f.closeFormulaBead(id, reason) {
+		return fmt.Errorf("%s is not a bead of a poured formula, so it was not closed", id)
+	}
+	return nil
+}
+
 // OpenSteps implements application.WorkTracker.
 func (f *FakeTracker) OpenSteps(_ context.Context, moleculeID string) ([]application.FormulaStep, error) {
 	f.mu.Lock()
@@ -1753,19 +1836,11 @@ func (f *FakeTracker) RefuseToClose(id, why string) {
 // CloseStory implements application.WorkTracker.
 func (f *FakeTracker) CloseStory(_ context.Context, id, reason string) error {
 	f.mu.Lock()
-	// bd closes a step the way it closes a story: by its id.
-	for _, molecule := range f.molecules {
-		for _, step := range molecule.Steps {
-			if step.ID == id && f.Err == nil {
-				if f.closedSteps == nil {
-					f.closedSteps = map[string]bool{}
-				}
-				f.closedSteps[id] = true
-				f.writes++
-				f.mu.Unlock()
-				return nil
-			}
-		}
+	// bd closes a step, and a molecule's root, the way it closes a story: by
+	// its id.
+	if f.Err == nil && f.closeFormulaBead(id, reason) {
+		f.mu.Unlock()
+		return nil
 	}
 	if open := f.openChildren(id); f.Err == nil && open > 0 {
 		f.mu.Unlock()
