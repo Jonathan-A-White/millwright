@@ -71,6 +71,9 @@ type statusContext struct {
 	gristRuns *apptest.FakeGristRuns
 	// benchmarks are the past close-outs a scenario gave (mw-t0z3fu.2).
 	benchmarks *apptest.FakeBenchmarks
+	// turns are the turns each running story's session has taken so far, when
+	// a scenario gave any (mw-1ljpo9.6).
+	turns statusTurns
 	// apps is where the host's [grist-apps] check each app out, and visions the
 	// VISION.md files those checkouts hold (mw-7vrp1r.1).
 	apps    map[string]string
@@ -127,6 +130,7 @@ func InitializeStatusScenario(ctx *godog.ScenarioContext) {
 	})
 
 	registerStatusRoomSteps(ctx, c)
+	registerStatusTurnsSteps(ctx, c)
 	registerStatusBenchmarkSteps(ctx, c)
 	registerStatusCauseSteps(ctx, c)
 	registerStatusVisionSteps(ctx, c)
@@ -647,6 +651,12 @@ func (c *statusContext) mwStatusReadsTheHost() error {
 	}
 	if c.suites != nil {
 		status.Rigs, status.Suites = c.rigs, c.suites
+	}
+	if c.turns != nil {
+		status.Turns = c.turns
+		if status.Rigs == nil {
+			status.Rigs = map[string]string{"millwright": "/rigs/millwright"}
+		}
 	}
 	c.report, c.err = status.Run(context.Background())
 	return nil

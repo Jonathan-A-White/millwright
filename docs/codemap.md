@@ -16,7 +16,7 @@ domain/ stdlib · application/ use cases, ports · infra/ adapters · cmd/mw/ co
 | Vault, Harness | application/seatboot.go, application/harness.go | infra/{vault,claude} | seatboot_test.go |
 | Runner, BdProgram | application/runner.go, application/bdretry.go | infra/{tmux,bdprogram} | FakeRunner, FakeBd |
 | SeatFiles, Windows, SeatHarness, ActingFile | application/seatup.go, application/seathandover.go | infra/{vault/{seat,reaplog},tmux/window,claude/claude}.go | Fake{Windows,Acting*} |
-| Transcripts{,Tail,Replies,Titled}, PeekRemote | application/seatcontext.go, application/peek.go | infra/{claude,peekremote} | FakePeek |
+| Transcripts{,Tail,Replies,Titled,Turns}, PeekRemote | application/seatcontext.go, application/peek.go | infra/{claude,peekremote} | FakePeek |
 | Reap{Terminal,Log,Armer} | application/seatreap.go | infra/{tmux/reap,vault/reaplog,reaper/arm}.go | Fake{Windows,Reap*} |
 | WatchProbes | application/watch.go | infra/watch | FakeWatch |
 | Doctor{Check,State,Log,Notes}, VPSProbe | application/doctor.go, application/vpsnginx.go | infra/{doctor,vpsnginx} | - |

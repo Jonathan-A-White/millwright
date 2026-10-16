@@ -221,6 +221,21 @@ Feature: mw status
     Then reading status succeeds
     And the report shows "mw-gq6.10" as stopped at the usage limit
 
+  # mw-1ljpo9.6: a Builder's session is capped at next.max_turns (120); one
+  # past 100 turns is named while it runs, read from its transcript.
+  Scenario: A running session past 100 turns is named with its turns so far
+    Given a status story "mw-gq6.10" filed under it
+    And the status story "mw-gq6.10" is claimed with its session running
+    And a status story "mw-gq6.11" filed under it
+    And the status story "mw-gq6.11" is claimed with its session running
+    And the session of "mw-gq6.10" has taken 130 turns so far
+    And the session of "mw-gq6.11" has taken 100 turns so far
+    When mw status reads the host
+    Then reading status succeeds
+    And the report says "past 100 turns: 130 so far"
+    And the report does not say "100 so far"
+    And every line of the report is at most 60 columns wide
+
   Scenario: A story whose session failed for another reason is not shown at the usage limit
     Given a status story "mw-gq6.10" filed under it
     And the status story "mw-gq6.10" is claimed with its session running

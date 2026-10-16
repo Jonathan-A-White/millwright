@@ -25,6 +25,14 @@ type Transcripts interface {
 	LiveContext(ctx context.Context, dir string) (TranscriptContext, error)
 }
 
+// TranscriptTurns is the same record read for how many turns the newest session
+// run in dir has taken so far, counted as the harness counts its num_turns
+// (mw-1ljpo9.6): mw status names a running session past TurnsNamedPast. A
+// directory with no transcript has taken none, which is not an error.
+type TranscriptTurns interface {
+	Turns(ctx context.Context, dir string) (int, error)
+}
+
 // TranscriptReplies is the same record read for what the harness answered: the
 // Mayor's session is stuck when every reply it got lately was an API error.
 // It is read-only and costs no fuel.

@@ -277,6 +277,11 @@ type Status struct {
 	IdleAfter time.Duration
 	Harness   HarnessCount
 
+	// Turns, when set, reads how many turns each running story's session has
+	// taken so far, in its worktree beside its rig's checkout in Rigs, so that
+	// one past TurnsNamedPast is named (mw-1ljpo9.6). Nil names none.
+	Turns TranscriptTurns
+
 	// CloseOuts, when set, is where the close-outs running on this host are
 	// read from, so that a story being closed out says so beside it. Nil
 	// leaves the line out.
@@ -386,6 +391,9 @@ type RunningStory struct {
 	// empty otherwise: a story parked there waits on the limit, not on its
 	// work (mw-gq6.433).
 	UsageLimit string
+	// Turns is how many turns the story's session has taken so far, 0 when it
+	// was not read (mw-1ljpo9.6).
+	Turns int
 	// CloseOut is the close-out running on this host for the story, nil when
 	// none is. Now is when it was read, to say how long it has run.
 	CloseOut *CloseOutMark
@@ -1130,7 +1138,29 @@ func (s Status) running(ctx context.Context, detail StoryDetail) (RunningStory, 
 		rs.FormulaSteps = len(open)
 	}
 	rs.UsageLimit = s.usageLimit(ctx, detail)
+	rs.Turns = s.turns(ctx, rs)
 	return rs, nil
+}
+
+// TurnsNamedPast is how many turns a running session may take before mw status
+// names it (mw-1ljpo9.6): the cap, next.max_turns, is 120 by default.
+const TurnsNamedPast = 100
+
+// turns is how many turns the story's session has taken so far, read from its
+// worktree on this host, and 0 when there is no reader, no checkout of its rig
+// here or no session that could be running: a stopped, refused, queued or
+// handed-back story has none. A turn count that cannot be read is no reason to
+// fail the report.
+func (s Status) turns(ctx context.Context, rs RunningStory) int {
+	rigDir := s.Rigs[rs.Detail.Merged().Rig]
+	if s.Turns == nil || rigDir == "" || rs.Stopped() || rs.Refused() || rs.Queued() || rs.HandedBack() {
+		return 0
+	}
+	turns, err := s.Turns.Turns(ctx, WorktreeDir(rigDir, rs.Detail.Story.ID))
+	if err != nil {
+		return 0
+	}
+	return turns
 }
 
 // usageLimit is the harness's words when the result the story's session left
@@ -1896,6 +1926,9 @@ func (r RunningStory) write(b *strings.Builder) {
 	}
 	if r.UsageLimit != "" {
 		clip(b, "    stopped at the usage limit: "+r.UsageLimit)
+	}
+	if r.Turns > TurnsNamedPast {
+		clip(b, fmt.Sprintf("    past %d turns: %d so far", TurnsNamedPast, r.Turns))
 	}
 	if r.Refused() {
 		clip(b, "    refused, waiting on the Mayor (mw retry or a hold)")

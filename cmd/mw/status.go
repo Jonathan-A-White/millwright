@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Jonathan-A-White/millwright/application"
+	"github.com/Jonathan-A-White/millwright/infrastructure/claude"
 	"github.com/Jonathan-A-White/millwright/infrastructure/config"
 	"github.com/Jonathan-A-White/millwright/infrastructure/eventlog"
 	"github.com/Jonathan-A-White/millwright/infrastructure/grist"
@@ -175,8 +176,15 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				rigs = nil
 			}
+			// Without the harness's projects directory no session's turns are
+			// read, and the report names none past the line (mw-1ljpo9.6).
+			var turns application.TranscriptTurns
+			if projects, err := claude.DefaultProjectsRoot(); err == nil {
+				turns = claude.NewTranscripts(projects)
+			}
 			_, err = application.Status{
 				Tracker:          tracker,
+				Turns:            turns,
 				Ideas:            bootIdeasOnly(),
 				Rigs:             rigs,
 				Changes:          rig.New(),
