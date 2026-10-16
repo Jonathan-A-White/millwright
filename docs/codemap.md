@@ -45,7 +45,7 @@ Fakes: application/apptest/fake*.go, Fake<Port>; seatboot ports: seatboot*_test.
 | Sweep, Tidy, Sync, Nudge, Mail, Home[Move] | application/sweep.go, application/tidy.go, application/nudge.go, application/mail.go, application/home.go, application/homemove.go | cmd/mw/sweep.go, cmd/mw/tidy.go, cmd/mw/sync.go, cmd/mw/nudge.go, cmd/mw/mail.go, cmd/mw/home.go, cmd/mw/homemove.go | {sweep,tidy,sync,mail,home} |
 | Suite, SuiteFiler, NightlySuite, ContributeBack | application/suitefile.go, application/suitestatus.go, application/contributeback.go | cmd/mw/suite.go, cmd/mw/suitenightly.go | {suite*,contribute_back} |
 | Config* | application/configset.go | cmd/mw/config.go | config_* |
-| IdeasOnly* | application/ideasonly.go, application/ideasonlyrelease.go, application/posternideas.go, application/talkwaitideas.go | cmd/mw/ideasonly.go | ideas_only, postern_inbox_apply, talk_wait |
+| IdeasOnly* | application/ideasonly.go, application/ideasonlyrelease.go | cmd/mw/ideasonly.go | ideas_only, postern_inbox_apply, talk_wait |
 | Seat* | application/seat{context,up,reap,handover}.go | cmd/mw/seat.go | seat_* |
 | Talk* | application/talkcall.go, application/talkmodel.go, application/talksay.go, application/talkwait.go | cmd/mw/talk.go | talk_* |
 | Millhand, Deputy, MillhandTick | application/millhand.go, application/deputy.go, application/millhandtick.go | cmd/mw/millhand.go, cmd/mw/deputy.go, cmd/mw/millhandtick.go | {millhand*,deputy} |
@@ -56,8 +56,7 @@ Fakes: application/apptest/fake*.go, Fake<Port>; seatboot ports: seatboot*_test.
 | Postern{Serve,Mirror} | application/posternhand.go, application/posternmirror.go | cmd/mw/postern.go, cmd/mw/posternmirror.go | postern_serve |
 | Prompt*, Cards, Todo* | application/prompt.go, application/tododue.go, application/todosize.go, application/todorank.go | cmd/mw/prompt.go, cmd/mw/card.go, cmd/mw/todo.go | {prompt,card,todo*} |
 | Grist* | application/grist.go, application/gristtiming.go, application/gristlevel.go, application/gristgrind.go, application/gristsend.go, application/gristrequest.go, application/griststatus.go, application/gristeval.go, application/gristscore.go, application/gristrunstats.go, application/gristroom.go, application/gristsmoke.go | cmd/mw/grist.go, cmd/mw/gristsmoke.go | {grist*,scorer} |
-| Triage{Dump,Diff,Orphans} | application/triage.go | infra/beads/triage.go, cmd/mw/triage.go | - |
-| Queue | application/queue.go | cmd/mw/queue.go | - |
+| Triage*, Queue, Sleep | application/triage.go, application/queue.go, application/sleep.go, application/sleepgather.go, application/fuelkinds.go | infra/beads/triage.go, cmd/mw/triage.go, cmd/mw/queue.go, cmd/mw/sleep.go | - |
 
 cmd/mw/root.go, cmd/mw/version.go
 

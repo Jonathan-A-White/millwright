@@ -2013,6 +2013,7 @@ The Mayor's commands on the log:
 | --- | --- |
 | `mw events follow [--every 1s]` | The follower: writes the log, publishes the view, ships batches, nudges and springs seats and jobs. Never exits. |
 | `mw events tail [--since N] [--follow]` | Prints the events after seq N, one per line; `--follow` keeps going. |
+| `mw events jobs` | Lists the jobs the follower runs on this host, one to a line, with what springs each: events, a check each pass, a clock. |
 | `mw events emit --kind <k> [--bead <id>] [--emergency] ...` | Appends one event of its own, stamped now, and prints its seq; `--emergency` puts it in the emergency lane. |
 | `mw events wait --for <seat> [--kinds ...] [--since N] [--limit 50m]` | Blocks on the log, no polling and no bd, until an event the seat subscribed to; ends on a handover. |
 | `mw seat handover [--at N] [--to <window>]` | The old Mayor's last act: marks event N as the last it answers and names the successor. |
@@ -2686,6 +2687,49 @@ week_start  = "monday"            # the weekday, in tz, the weekly Let go card i
 ```
 
 See `features/todo-rank.feature` and `features/todo-nightly.feature`.
+
+## The sleep pass
+
+`mw sleep pass` is the factory's night shift (mw-1ljpo9.10): one fresh agent that reads what the factory did
+and what is waiting, and writes the day's **priorities**, **maps** and **improvements** for the Mayor. It files
+no bead and changes nothing else. The follower makes it once a day (the `sleep` job, `mw events jobs` lists it;
+docs/events.md) from `[events] sleep_hour` UTC (`07:30`, before his commute), on the home host only; a pass that
+fails is not tried again that day, for it costs fuel.
+
+The pass gathers a bundle, each part a file in the agent's working directory: the triage dump (`mw triage dump`)
+and what moved since the last one, the ready stories in dispatch's order with what holds the next ones back
+(`mw queue --json`), each rig's git log of the last 10 days, the sessions' results of the day aggregated by
+model, and `mw report --since 7d --json`. It starts one agent with `plans/principles.md` (else the newest
+`plans/triage-<date>/principles.md`) and the rule in `grinds/sleep.md`, which also carries his two asks of
+2026-10-15: every ready story not started within 24 hours is listed with why it waits (files key, host, hold,
+smoke) and fixed or raised, and the top refusal causes of each rig are weighed against the open investments.
+The agent answers in a schema; mw writes, into `plans/sleep-<date>/` of the vault, `recommendations.json`,
+`questions.md`, `maps.md`, `improvements.md` (each improvement with a prediction on tokens, speed and quality,
+its cost, its measure and its rollback), `summary.md`, and the dump as `triage.jsonl` (tomorrow's diff starts
+from it), and commits them with the run log `runs/sleep/<date>.json`. It mails the Mayor the summary, at most
+150 words. An answer that misses a part, or whose recommendations are not JSON, is refused: no plan is
+written, the run log of the spent fuel is.
+
+Nightly it runs Opus at medium effort (about 100K tokens); on Sundays, UTC, Fable at extra high over everything
+(a month of report and a week of runs, about 500K tokens), his card of 2026-10-15.
+
+```toml
+[events]
+sleep_hour = "07:30"     # the UTC time the pass is due from; "7" is 07:00 (07:30 when left out)
+
+[sleep]
+nightly_model  = "opus"    # the model Monday to Saturday (opus when left out)
+nightly_effort = "medium"  # and effort (medium when left out)
+sunday_model   = "fable"   # the model on Sundays (fable when left out)
+sunday_effort  = "xhigh"   # and effort (xhigh when left out)
+```
+
+`mw sleep pass --dry-run` gathers the bundle and prints the agent's model, its system prompt, its prompt and the
+size of each part; it starts no agent, writes no file and mails nothing. `--model` and `--effort` replace the
+day's. `mw fuel [--days n]` adds up the tokens of the model passes that keep a run log in `runs/<kind>/` (the
+sleep pass, kind `sleep`, and the To do ranking, kind `todo-rank`) and prints a line for each kind, with how many
+passes ran on which model and effort. Not yet built: the improvements ledger and the 14-day outcome scoring
+(investments.md, section 6, slice b).
 
 ## Saved prompts
 

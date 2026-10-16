@@ -2519,3 +2519,43 @@ func TestDampersAreReadFromTheTableAndLeaveTheRestZero(t *testing.T) {
 		}
 	}
 }
+
+func TestEventsSleepHourDefaultsToHalfPastSevenAndIsReadFromTheTable(t *testing.T) {
+	writeConfig(t, "host = \"laptop\"\n")
+	got, err := config.Events()
+	if err != nil || got.SleepHour != 7 || got.SleepMinute != 30 {
+		t.Fatalf("expected 07:30, got %02d:%02d: %v", got.SleepHour, got.SleepMinute, err)
+	}
+	for said, want := range map[string][2]int{
+		"sleep_hour = \"06:15\"": {6, 15}, "sleep_hour = 5": {5, 0}, "sleep_hour = \"23:59\"": {23, 59}, "sleep_hour = \"0:00\"": {0, 0},
+	} {
+		writeConfig(t, "[events]\n"+said+"\n")
+		if got, err = config.Events(); err != nil || got.SleepHour != want[0] || got.SleepMinute != want[1] {
+			t.Errorf("%s: expected %v, got %02d:%02d: %v", said, want, got.SleepHour, got.SleepMinute, err)
+		}
+	}
+}
+
+func TestEventsSleepHourThatIsNotATimeIsRefused(t *testing.T) {
+	for _, bad := range []string{"sleep_hour = 24", "sleep_hour = \"07:60\"", "sleep_hour = late", "sleep_hour = \"7:\""} {
+		writeConfig(t, "[events]\n"+bad+"\n")
+		if _, err := config.Events(); err == nil || !strings.Contains(err.Error(), "sleep_hour") {
+			t.Errorf("expected %q refused naming sleep_hour, got %v", bad, err)
+		}
+	}
+}
+
+func TestSleepNamesTheNightlyAndTheSundayModelAndEffort(t *testing.T) {
+	writeConfig(t, "host = \"laptop\"\n")
+	got, err := config.Sleep()
+	want := config.SleepSettings{NightlyModel: "opus", NightlyEffort: "medium", SundayModel: "fable", SundayEffort: "xhigh"}
+	if err != nil || got != want {
+		t.Fatalf("defaults = %+v (%v), want %+v", got, err, want)
+	}
+	writeConfig(t, "[sleep]\nnightly_model = \"sonnet\"\nnightly_effort = low\nsunday_model = opus\nsunday_effort = \"high\"\n")
+	got, err = config.Sleep()
+	want = config.SleepSettings{NightlyModel: "sonnet", NightlyEffort: "low", SundayModel: "opus", SundayEffort: "high"}
+	if err != nil || got != want {
+		t.Fatalf("read = %+v (%v), want %+v", got, err, want)
+	}
+}

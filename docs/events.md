@@ -212,6 +212,14 @@ metadata `todo_row` (`now`, `make-time`, `later` or `let-go`) and `todo_row_why`
 characters), and `todo_slipped` (the card's `todo_due`) on a starred card past its due time. The view
 publishes `todo_row` and `todo_row_why`, each absent when empty; the reminder reads none of them.
 
+The `sleep` job (mw-1ljpo9.10) runs in the follower itself, on the home only, reason `clock`: no event
+springs it. Every pass of the follower asks whether it is due: it is `[events] sleep_hour` UTC (default
+07:30) or later, no pass has begun today (the tracker note `sleep.last` holds the UTC day of the last one,
+set before the pass runs, so a pass that fails is not repeated until the next day), and this host is home.
+A pass is `mw sleep pass`: one fresh agent over the night's bundle, Opus at medium effort, or on a Sunday
+Fable at extra high (README, "The sleep pass"). `mw events jobs` lists the jobs the follower runs on a
+host, this one with its time.
+
 The `todo-rank` job (mw-ht6gsw.3) runs in the follower itself, on the home only, reason `clock`: one
 ranking pass over the To do board (`mw todo rank`) a UTC day, from `rank_hour` of the config's `[todo]`
 table (0 to 23, default 7). A kv note holds the day of the last pass, set before the pass begins, so a pass

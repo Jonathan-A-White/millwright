@@ -1376,6 +1376,15 @@ const (
 // morning in the US. It is application.DefaultNightlySuiteHour.
 const DefaultEventsSuiteHour = 8
 
+// DefaultEventsSleepHour and DefaultEventsSleepMinute are the UTC time from
+// which the home's follower makes the sleep pass when nothing says otherwise,
+// before his commute. They are application.DefaultSleepHour and
+// application.DefaultSleepMinute.
+const (
+	DefaultEventsSleepHour   = 7
+	DefaultEventsSleepMinute = 30
+)
+
 // DefaultEventsContributeBackDay is the day of the month, UTC, from which the home's
 // follower files the monthly contribute-back review when nothing says otherwise.
 // It is application.DefaultContributeBackDay.
@@ -1411,6 +1420,9 @@ type EventsSettings struct {
 	// ContributeBackDay is the day of the month, UTC, 1 to 28, from which the
 	// home's follower files the monthly contribute-back review.
 	ContributeBackDay int
+	// SleepHour and SleepMinute are the UTC time from which the home's
+	// follower makes the nightly sleep pass.
+	SleepHour, SleepMinute int
 }
 
 // Events reports the `[events]` table of ~/.config/mw/config.toml: `chain`
@@ -1421,8 +1433,9 @@ type EventsSettings struct {
 // default 10m) and `suite_hour` (a whole number, 0 to 23, the UTC hour the nightly
 // suite is run from, default DefaultEventsSuiteHour) and `contribute_back_day`
 // (a whole number, 1 to 28, the UTC day of the month the contribute-back review is
-// filed from, default DefaultEventsContributeBackDay), each its default when the
-// table says nothing.
+// filed from, default DefaultEventsContributeBackDay) and `sleep_hour` (a UTC time,
+// "07:30", or a whole hour, "7": from when the nightly sleep pass is made, default
+// 07:30), each its default when the table says nothing.
 func Events() (EventsSettings, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -1437,6 +1450,7 @@ func Events() (EventsSettings, error) {
 		Chain: true, ChainDailyCap: DefaultEventsChainDailyCap, EmergencyDailyCap: DefaultEventsEmergencyDailyCap,
 		Heartbeat: DefaultEventsHeartbeat, Clock: DefaultEventsClock, IdleAfter: DefaultEventsIdleAfter,
 		SuiteHour: DefaultEventsSuiteHour, ContributeBackDay: DefaultEventsContributeBackDay,
+		SleepHour: DefaultEventsSleepHour, SleepMinute: DefaultEventsSleepMinute,
 	}
 	for key, into := range map[string]*time.Duration{"heartbeat": &settings.Heartbeat, "clock": &settings.Clock, "idle_after": &settings.IdleAfter} {
 		said := strings.TrimSpace(table[key])
@@ -1484,7 +1498,64 @@ func Events() (EventsSettings, error) {
 		}
 		settings.ContributeBackDay = n
 	}
+	if said := strings.Trim(strings.TrimSpace(table["sleep_hour"]), `"'`); said != "" {
+		hour, minute, ok := parseClockTime(said)
+		if !ok {
+			return EventsSettings{}, fmt.Errorf("the [%s] table of %s says sleep_hour = %q: it must be a UTC time like %q, or a whole hour, 0 to 23", EventsTable, path, said, "07:30")
+		}
+		settings.SleepHour, settings.SleepMinute = hour, minute
+	}
 	return settings, nil
+}
+
+// parseClockTime reads "07:30" or "7" as an hour and minute of the day.
+func parseClockTime(said string) (hour, minute int, ok bool) {
+	hh, mm, hasMinute := strings.Cut(said, ":")
+	hour, err := strconv.Atoi(hh)
+	if err != nil || hour < 0 || hour > 23 {
+		return 0, 0, false
+	}
+	if hasMinute {
+		if minute, err = strconv.Atoi(mm); err != nil || minute < 0 || minute > 59 {
+			return 0, 0, false
+		}
+	}
+	return hour, minute, true
+}
+
+// SleepTable is the table of the config file that says what the sleep pass
+// runs on: `nightly_model` and `nightly_effort` (opus and medium when it does
+// not say) and `sunday_model` and `sunday_effort` (fable and xhigh), the
+// Governor's card of 2026-10-15. The time of day is `sleep_hour` of [events].
+const SleepTable = "sleep"
+
+// SleepSettings is what the `[sleep]` table says, the defaults filled in.
+type SleepSettings struct {
+	NightlyModel, NightlyEffort string
+	SundayModel, SundayEffort   string
+}
+
+// Sleep reports the `[sleep]` table of ~/.config/mw/config.toml. A machine with
+// no such table has the defaults, which is not an error.
+func Sleep() (SleepSettings, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return SleepSettings{}, fmt.Errorf("there is no home directory to read %s in: %w", File, err)
+	}
+	table, err := tableIn(filepath.Join(home, File), SleepTable)
+	if err != nil {
+		return SleepSettings{}, err
+	}
+	said := func(key, fallback string) string {
+		if value := strings.Trim(strings.TrimSpace(table[key]), `"'`); value != "" {
+			return value
+		}
+		return fallback
+	}
+	return SleepSettings{
+		NightlyModel: said("nightly_model", "opus"), NightlyEffort: said("nightly_effort", "medium"),
+		SundayModel: said("sunday_model", "fable"), SundayEffort: said("sunday_effort", "xhigh"),
+	}, nil
 }
 
 // countIn reads a [grist] key that is a whole number, 1 or more, and

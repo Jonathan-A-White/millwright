@@ -87,6 +87,9 @@ type SpringJob struct {
 	// counted from its last pass of any cause; zero is never.
 	Every  time.Duration
 	Reason string
+	// About, when set, says in a few words when the job runs, for the
+	// listing of mw events jobs.
+	About string
 	// Run does one pass and returns when it is over: a pass that returns an
 	// error is a failed job.
 	Run func(ctx context.Context) error

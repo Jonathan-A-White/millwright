@@ -37,7 +37,7 @@ func newEventsCmd() *cobra.Command {
 			"`mw events emit` adds a job's own, `mw events tail` reads it, `mw events wait` blocks on it\n" +
 			"until a seat's subscribed event comes, and `mw events trim` moves the old events to the archive.",
 	}
-	cmd.AddCommand(newEventsFollowCmd(), newEventsEmitCmd(), newEventsTailCmd(), newEventsWaitCmd(), newEventsTrimCmd())
+	cmd.AddCommand(newEventsFollowCmd(), newEventsEmitCmd(), newEventsTailCmd(), newEventsWaitCmd(), newEventsTrimCmd(), newEventsJobsCmd())
 	return cmd
 }
 
@@ -298,6 +298,38 @@ func newEventsEmitCmd() *cobra.Command {
 	cmd.Flags().StringVar(&e.Detail, "detail", "", "what happened: a job's outcome on done or failed")
 	cmd.Flags().StringVar(&e.Actor, "actor", "", "who: <job>@<host> for a job (default mw@<host>)")
 	cmd.Flags().BoolVar(&emergency, "emergency", false, "send it alone and at once, ahead of the batches (the emergency lane)")
+	return cmd
+}
+
+// newEventsJobsCmd builds `mw events jobs`: the jobs the follower runs on this
+// host, and what springs each.
+func newEventsJobsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "jobs",
+		Short: "List the jobs the follower runs on this host, and what springs each",
+		Long: "jobs lists, one to a line, the jobs `mw events follow` runs here: dispatch, millhand-tick, mail-notify,\n" +
+			"the grist jobs, chain-stamp, the To do jobs, the nightly suite, sleep, batch-land, contribute-back\n" +
+			"and the cloud job, each with what springs it: events, a check each pass, a watch, or a clock.\n" +
+			"A job whose unit is not installed here is not run, and is not listed; it is said on stderr. It\n" +
+			"reads the config and starts nothing.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			host, err := config.Host()
+			if err != nil {
+				return err
+			}
+			path, err := config.EventsLogPath()
+			if err != nil {
+				return err
+			}
+			spring, err := homeSpring(path, host, cmd.ErrOrStderr())
+			if err != nil {
+				return err
+			}
+			application.WriteEventJobs(cmd.OutOrStdout(), spring.Jobs)
+			return nil
+		},
+	}
 	return cmd
 }
 
