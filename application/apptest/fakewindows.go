@@ -40,6 +40,9 @@ type FakeWindows struct {
 	// nexts is the story of the `mw next` running in each window, by id
 	// (RunsNext).
 	nexts map[string]string
+	// screens is the screen each window's pane shows, by id, where a test gave
+	// one (Shows).
+	screens map[string]string
 
 	// Opened is every spec Open was asked for, in the order it was asked.
 	Opened []application.WindowSpec
