@@ -183,3 +183,139 @@ func TestSnapshotViewHoldsALandingUnderAClosedEpicAsAFoldedVerifyNeed(t *testing
 		t.Errorf("expected one verify need, on t-1.1, got %v", verifies)
 	}
 }
+
+// mw-gq6.492: against a server a bd call is two seconds, and BlockedForHost
+// cost `bd blocked` and a `bd show` for each of 168 blocked stories. The
+// snapshot's listing holds every edge and every status, so it answers from the
+// one read what `bd blocked` and the shows would: the open, unclaimed stories
+// on the host with a blocking edge to a bead not yet closed, never a step of a
+// poured formula, an epic, a claimed story or one that is only related.
+func TestSnapshotBlockedForHostIsReadFromTheListing(t *testing.T) {
+	edge := func(from, to, kind string) string {
+		return fmt.Sprintf(`{"issue_id":%q,"depends_on_id":%q,"type":%q}`, from, to, kind)
+	}
+	listing := `[
+	 {"id":"t-e","title":"Epic","status":"open","issue_type":"epic","priority":1,"metadata":{"host":"vps","rig":"millwright"}},
+	 {"id":"t-0","title":"Done","status":"closed","issue_type":"task","parent":"t-e","closed_at":"2026-10-01T00:00:00Z"},
+	 {"id":"t-c","title":"Still open","status":"open","issue_type":"task","parent":"t-e"},
+	 {"id":"t-a","title":"Waits on a closed one","status":"open","issue_type":"task","parent":"t-e","dependencies":[` + edge("t-a", "t-0", "blocks") + `]},
+	 {"id":"t-b","title":"Waits on t-c","status":"open","issue_type":"task","parent":"t-e","dependencies":[` + edge("t-b", "t-e", "parent-child") + `,` + edge("t-b", "t-0", "blocks") + `,` + edge("t-b", "t-c", "blocks") + `]},
+	 {"id":"t-d","title":"Another host's","status":"open","issue_type":"task","parent":"t-e","metadata":{"host":"desktop"},"dependencies":[` + edge("t-d", "t-c", "blocks") + `]},
+	 {"id":"t-f","title":"Claimed","status":"in_progress","assignee":"mw@vps","issue_type":"task","parent":"t-e","dependencies":[` + edge("t-f", "t-c", "blocks") + `]},
+	 {"id":"t-g","title":"Only related","status":"open","issue_type":"task","parent":"t-e","dependencies":[` + edge("t-g", "t-c", "related") + `]},
+	 {"id":"t-mol-1","title":"A step","status":"open","issue_type":"task","parent":"t-e","dependencies":[` + edge("t-mol-1", "t-c", "blocks") + `]},
+	 {"id":"t-h","title":"Waits on t-c too","status":"open","issue_type":"task","parent":"t-e","dependencies":[` + edge("t-h", "t-c", "waits-for") + `]}
+	]`
+	gateway, asked := standInSnapshot(t, listing, `[]`)
+	snapshot, err := gateway.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("taking the snapshot: %v", err)
+	}
+
+	blocked, err := snapshot.BlockedForHost(context.Background(), "vps")
+	if err != nil {
+		t.Fatalf("reading what is blocked: %v", err)
+	}
+	var ids []string
+	for _, detail := range blocked {
+		ids = append(ids, detail.Story.ID)
+	}
+	if got := strings.Join(ids, " "); got != "t-b t-h" {
+		t.Fatalf("expected t-b and t-h blocked on vps, got %q", got)
+	}
+	if got := strings.Join(blocked[0].Needs, " "); got != "t-c" {
+		t.Errorf("expected t-b to wait for t-c alone, the closed t-0 left out, got %q", got)
+	}
+	if blocked[0].Merged().Rig != "millwright" {
+		t.Errorf("expected the epic's defaults overlaid, got %+v", blocked[0].Merged())
+	}
+	log, _ := os.ReadFile(asked)
+	for _, call := range strings.Split(strings.TrimSpace(string(log)), "\n") {
+		if !strings.Contains(call, " list ") && !strings.Contains(call, " sql ") {
+			t.Errorf("expected the listing and the sql call alone, bd was asked %q", call)
+		}
+	}
+}
+
+// mw-gq6.492: the stories in flight on this host and on the others come of one
+// read of the in-progress list, each narrowed as RunningStories and
+// RunningElsewhere narrow it.
+func TestGatewayReadsWhatIsRunningHereAndElsewhereInOneList(t *testing.T) {
+	listing := `[
+	 {"id":"t-1","title":"Here","status":"in_progress","issue_type":"task","metadata":{"host":"vps"}},
+	 {"id":"t-2","title":"There","status":"in_progress","issue_type":"task","metadata":{"host":"desktop"}},
+	 {"id":"t-3","title":"Anywhere","status":"in_progress","issue_type":"task","metadata":{"host":"auto"}},
+	 {"id":"t-4","title":"Nowhere","status":"in_progress","issue_type":"task"}
+	]`
+	gateway, asked := standInSnapshot(t, listing, `[]`)
+
+	here, away, err := gateway.RunningEverywhere(context.Background(), "vps")
+	if err != nil {
+		t.Fatalf("reading what is running: %v", err)
+	}
+	if len(here) != 1 || here[0].Story.ID != "t-1" {
+		t.Errorf("expected t-1 running here, got %+v", here)
+	}
+	if len(away) != 1 || away[0].Story.ID != "t-2" {
+		t.Errorf("expected t-2 running elsewhere, got %+v", away)
+	}
+	log, _ := os.ReadFile(asked)
+	if calls := strings.Split(strings.TrimSpace(string(log)), "\n"); len(calls) != 1 || !strings.Contains(calls[0], "--status in_progress") {
+		t.Errorf("expected one list of the in-progress stories, bd was asked:\n%s", log)
+	}
+}
+
+// mw-gq6.492: against a server a select of `bd sql` only reads, so it runs
+// beside the reads under way. Taken for a write, as every sql was, it waited
+// for each read to end and held back every one after it: a snapshot's second
+// call started when all the others were done. The stand-in's list holds until
+// the sql has run, so a sql that waited on it would never run.
+func TestASqlSelectRunsBesideAListAgainstAServer(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the stand-in for bd is a shell script")
+	}
+	t.Setenv("BEADS_DOLT_SERVER_HOST", "10.0.0.1")
+	dir := t.TempDir()
+	started, release := filepath.Join(dir, "list.started"), filepath.Join(dir, "release")
+	script := fmt.Sprintf(`#!/bin/sh
+shift 2
+case "$1" in --actor) shift 2 ;; esac
+case "$1" in
+  list)
+    : > %[1]q
+    for i in $(seq 1 100); do
+      [ -e %[2]q ] && { printf '[]'; exit 0; }
+      sleep 0.1
+    done
+    echo "the sql never ran beside the list" >&2; exit 1 ;;
+  sql) : > %[2]q; printf '[]' ;;
+  *) exit 1 ;;
+esac
+`, started, release)
+	path := filepath.Join(dir, "bd-sql")
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gateway := beads.New(t.TempDir(), beads.WithProgram(path))
+
+	listed := make(chan error, 1)
+	go func() {
+		_, err := gateway.LiveEpics(context.Background())
+		listed <- err
+	}()
+	for i := 0; ; i++ {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+		if i > 200 {
+			t.Fatal("the list never started")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if _, err := gateway.StoriesComments(context.Background(), []string{"t-1", "t-2"}); err != nil {
+		t.Fatalf("reading the comments: %v", err)
+	}
+	if err := <-listed; err != nil {
+		t.Errorf("expected the list to end once the sql had run: %v", err)
+	}
+}

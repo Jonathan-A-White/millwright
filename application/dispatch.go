@@ -622,7 +622,15 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 		d.print(fmt.Sprintf("  synced  %s\n", synced))
 	}
 
-	running, err := d.Tracker.RunningStories(ctx, d.Host)
+	// What runs here and what runs elsewhere are one list of the tracker's
+	// in-progress stories, which a tracker that can say so reads once (mw-gq6.492).
+	var running, away []StoryDetail
+	together, readTogether := d.Tracker.(RunningEverywhere)
+	if readTogether {
+		running, away, err = together.RunningEverywhere(ctx, d.Host)
+	} else {
+		running, err = d.Tracker.RunningStories(ctx, d.Host)
+	}
 	if err != nil {
 		return report, fmt.Errorf("dispatching on %s: reading what is already running here: %w", d.Host, err)
 	}
@@ -688,13 +696,16 @@ func (d Dispatch) run(ctx context.Context) (DispatchReport, error) {
 	// What the other hosts hold keeps its files from the stories ready here too,
 	// and counts for nothing else: it is their sessions, their cap (mw-gq6.389).
 	// A tracker that cannot say holds nothing back.
-	if away, err := d.Tracker.RunningElsewhere(ctx, d.Host); err != nil {
-		report.Notes = append(report.Notes, fmt.Sprintf("what the other hosts are running could not be read, so it holds nothing back: %v", err))
-	} else {
-		for _, detail := range away {
-			if !detail.Hitl() {
-				shares.addAway(detail, detail.Merged().Host)
-			}
+	if !readTogether {
+		var awayErr error
+		if away, awayErr = d.Tracker.RunningElsewhere(ctx, d.Host); awayErr != nil {
+			report.Notes = append(report.Notes, fmt.Sprintf("what the other hosts are running could not be read, so it holds nothing back: %v", awayErr))
+			away = nil
+		}
+	}
+	for _, detail := range away {
+		if !detail.Hitl() {
+			shares.addAway(detail, detail.Merged().Host)
 		}
 	}
 

@@ -154,3 +154,25 @@ func (n *countedNotes) NotesWithPrefix(ctx context.Context, prefix string) (map[
 	n.mu.Unlock()
 	return n.FakeTracker.NotesWithPrefix(ctx, prefix)
 }
+
+// mw-gq6.492: what this host and the others have in flight is one list of the
+// tracker's in-progress stories narrowed twice, so a tick reads it once and not
+// once for RunningStories and again for RunningElsewhere.
+func TestADispatchTickReadsTheInProgressListOnce(t *testing.T) {
+	ctx := context.Background()
+	dispatch, tracker, _, _, _ := aFactory(t)
+	tracker.AddEpic("mw-away", domain.Path{Rig: "millwright", Branch: "main", Harness: domain.HarnessClaude,
+		Model: domain.ModelOpus, Effort: domain.EffortHigh, Formula: "tdd-feature", Host: "desktop"})
+	tracker.AddStory("mw-away", domain.Story{ID: "mw-away.1", Title: "Held by the desktop"})
+	if err := tracker.ClaimStory(ctx, "mw-away.1"); err != nil {
+		t.Fatal(err)
+	}
+	tracker.AddStory("mw-gq6", domain.Story{ID: "mw-gq6.1", Title: "Ready here"})
+
+	if _, err := dispatch.Run(ctx); err != nil {
+		t.Fatalf("dispatching: %v", err)
+	}
+	if got := tracker.InProgressReads(); got != 1 {
+		t.Errorf("expected the in-progress list read once in a tick, got %d: %v", got, tracker.Asked())
+	}
+}

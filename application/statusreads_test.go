@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -65,5 +66,60 @@ func TestStatusReadsWhatItCanTogether(t *testing.T) {
 	}
 	if len(tracker.alone) > 0 {
 		t.Errorf("expected what waits for the Governor and what is blocked to be read together, but %v was read alone", tracker.alone)
+	}
+}
+
+// mw-gq6.492: a Boost reads the tracker through a tunnel, a bd call two seconds
+// and the blocked stories, the epics and their children a call apiece (431 calls,
+// 131 s). A tracker that offers a snapshot is read through it, once, as the
+// Postern view does.
+func TestStatusReadsThroughTheTrackersSnapshotWhenItOffersOne(t *testing.T) {
+	path := domain.Path{Rig: "spell-forge", Branch: "main", Harness: "claude", Model: "opus", Effort: "high", Host: "vps"}
+	live, snap := apptest.NewFakeTracker(), apptest.NewFakeTracker()
+	for _, tracker := range []*apptest.FakeTracker{live, snap} {
+		tracker.AddEpic("epic-1", path)
+		tracker.AddStory("epic-1", domain.Story{ID: "epic-1.1", Title: "Open for a while"})
+	}
+	// Only the snapshot is told of the story that waits: the status that
+	// shows it was read from the snapshot.
+	snap.AddStory("epic-1", domain.Story{ID: "epic-1.2", Title: "Waits on the first"})
+	snap.Needs("epic-1.2", "epic-1.1")
+	offering := &snapshotting{FakeTracker: live, snap: snap}
+
+	report, err := application.Status{
+		Tracker: offering, Notes: live, Host: "vps", Seat: "builder",
+		Now: func() time.Time { return statusNow },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatalf("reading status: %v", err)
+	}
+	if offering.taken != 1 {
+		t.Errorf("expected one snapshot for the status, got %d", offering.taken)
+	}
+	if len(report.Blocked) != 1 || report.Blocked[0].Story.ID != "epic-1.2" {
+		t.Errorf("expected the blocked story read through the snapshot, got %+v", report.Blocked)
+	}
+}
+
+// A snapshot that cannot be taken costs the status its speed and nothing else:
+// it reads the tracker's own way.
+func TestStatusReadsTheTrackerItselfWhenTheSnapshotFails(t *testing.T) {
+	path := domain.Path{Rig: "spell-forge", Branch: "main", Harness: "claude", Model: "opus", Effort: "high", Host: "vps"}
+	live := apptest.NewFakeTracker()
+	live.AddEpic("epic-1", path)
+	live.AddStory("epic-1", domain.Story{ID: "epic-1.1", Title: "Open for a while"})
+	live.AddStory("epic-1", domain.Story{ID: "epic-1.2", Title: "Waits on the first"})
+	live.Needs("epic-1.2", "epic-1.1")
+	offering := &snapshotting{FakeTracker: live, err: errors.New("bd is gone")}
+
+	report, err := application.Status{
+		Tracker: offering, Notes: live, Host: "vps", Seat: "builder",
+		Now: func() time.Time { return statusNow },
+	}.Run(context.Background())
+	if err != nil {
+		t.Fatalf("reading status: %v", err)
+	}
+	if len(report.Blocked) != 1 || len(report.Ready) != 1 {
+		t.Errorf("expected the status read from the tracker itself, got blocked %+v ready %+v", report.Blocked, report.Ready)
 	}
 }
