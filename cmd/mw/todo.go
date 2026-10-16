@@ -204,3 +204,37 @@ func todoReminderSpringJob(host string, out io.Writer) (application.SpringJob, e
 		return err
 	}), nil
 }
+
+// todoRankSpringJob is the job that makes the night's ranking pass over the To
+// do board (mw todo rank), once a UTC day from [todo] rank_hour, on the home
+// only; tells him once, in the card's own thread, of a starred card that slipped
+// past its due time; and on the first pass of the week posts the weekly Let go
+// card. Its pass is the very one mw todo rank makes.
+func todoRankSpringJob(host string, out io.Writer) (application.SpringJob, error) {
+	dir, err := config.Vault()
+	if err != nil {
+		return application.SpringJob{}, err
+	}
+	settings, err := config.Todo()
+	if err != nil {
+		return application.SpringJob{}, err
+	}
+	gateway := mwGateway(dir, host)
+	pass := application.TodoRankPass{
+		Tracker: gateway, Closed: gateway, Grinder: claude.NewGrinder(), Runs: mwVault(dir, host),
+		Instructions: millwright.TodoRankInstructions, AboutFile: filepath.Join(dir, application.TodoAboutFile),
+		Model: settings.RankModel, Effort: settings.RankEffort, Zone: settings.Zone, Out: out,
+	}
+	nightly := &application.TodoNightly{
+		Hour: settings.RankHour, WeekStart: settings.WeekStart, Zone: settings.Zone,
+		Rank: func(ctx context.Context) error {
+			_, err := pass.Run(ctx, false)
+			return err
+		},
+		Tracker: gateway, Notes: gateway, Sender: handsPush{gateway: gateway}, Err: out,
+		Home: func(ctx context.Context) (bool, error) {
+			return application.IsHome(ctx, mwVault(dir, host), host)
+		},
+	}
+	return nightly.Job(), nil
+}

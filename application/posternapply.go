@@ -793,3 +793,75 @@ func (i PosternInbox) giveIdeasBack(ctx context.Context) []string {
 	}
 	return report.Applied
 }
+
+// isKeepAllTap and isDropAllTap report whether answer's word is "keep them all"
+// or "drop them all": the two answers of the weekly Let go card.
+func isKeepAllTap(answer string) bool {
+	return posternAnswerWord(answer) == posternAnswerWord(TodoKeepAllOption)
+}
+
+func isDropAllTap(answer string) bool {
+	return posternAnswerWord(answer) == posternAnswerWord(TodoDropAllOption)
+}
+
+// letGoOnTap answers the weekly Let go card of the list epic: keep puts every
+// card the card listed back in later, and touches it with a comment; otherwise
+// each is closed with the reason let-go. It acts only when m's verified sender is
+// this host's GovernorKey, noteValue shows the question offered the answer, and
+// the job kept the cards it listed (TodoLetGoKey): any other card that happens
+// to offer the same words is not this. A card closed since, or no longer in
+// let-go, is left as it is. The Mayor is mailed what was done, or why not.
+func (i PosternInbox) letGoOnTap(ctx context.Context, m PosternInboxMessage, epic, noteValue string, keep bool) error {
+	option, verb := TodoDropAllOption, "Dropped"
+	if keep {
+		option, verb = TodoKeepAllOption, "Kept"
+	}
+	listed, err := i.Memory.Note(ctx, TodoLetGoKey(epic))
+	if err != nil {
+		return fmt.Errorf("reading the cards of the Let go card of %s: %w", epic, err)
+	}
+	var ids []string
+	if json.Unmarshal([]byte(listed), &ids) != nil || len(ids) == 0 {
+		return nil
+	}
+	notApplied := func(why string) error {
+		return i.mail(ctx, fmt.Sprintf("Let go not applied: %s", epic), fmt.Sprintf("%s: %q not applied, %s", epic, option, why))
+	}
+	if !i.isGovernor(m) {
+		return notApplied("the tap's signer unchecked")
+	}
+	if !posternQuestionOffered(noteValue, posternAnswerWord(option)) {
+		return notApplied("its question never offered it")
+	}
+	found, err := i.Tracker.ShowBeads(ctx, ids)
+	if err != nil {
+		return fmt.Errorf("reading the cards of the Let go card of %s: %w", epic, err)
+	}
+	var done []string
+	for _, card := range found {
+		if why := refuseNotACard(card); why != "" || card.TodoRow != TodoRowLetGo {
+			continue
+		}
+		id := card.Story.ID
+		comment := fmt.Sprintf("%s by the Governor via postern, txid %s: on the weekly Let go card", strings.ToUpper(verb), m.Txid)
+		if err := i.Tracker.CommentOnStory(ctx, id, comment); err != nil {
+			return fmt.Errorf("recording the Governor's answer to the Let go card on %s: %w", id, err)
+		}
+		if keep {
+			err = i.Tracker.SetStoryMetadata(ctx, id, map[string]string{
+				TodoRowField: TodoRowLater, TodoRowWhyField: "Kept on the weekly Let go card",
+			})
+		} else {
+			err = i.Tracker.CloseStory(ctx, id, TodoLetGoReason)
+		}
+		if err != nil {
+			return notApplied(fmt.Sprintf("%s failed: %v", id, err))
+		}
+		done = append(done, id)
+	}
+	if err := i.Memory.ClearNote(ctx, TodoLetGoKey(epic)); err != nil {
+		return fmt.Errorf("clearing the cards of the Let go card of %s: %w", epic, err)
+	}
+	return i.mail(ctx, fmt.Sprintf("%s: the Let go card of %s", verb, epic),
+		fmt.Sprintf("%s by the Governor's tap (txid %s): %d cards: %s", verb, m.Txid, len(done), joinOrNone(done)))
+}

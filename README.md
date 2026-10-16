@@ -2595,14 +2595,23 @@ each due time, and the pass log `runs/todo-rank/<date>.json` in the vault: every
 the model's tokens and the elapsed time. The view publishes `todo_row` and `todo_row_why`.
 `--dry-run` prints the rows and writes nothing.
 
+The follower runs the pass by itself, once a night (the `todo-rank` job, `mw events follow`; docs/events.md):
+from `rank_hour` UTC (7 when left out), on the home host only, and a pass that fails is tried the next night,
+never twice in one. After a pass it tells him once, in the card's own thread, that a starred card slipped past its
+due time, and on the first pass of a week (`week_start`, monday when left out, in his zone) it sends the weekly
+Let go card: a decision card on the To do list listing the let-go cards, with `A: Keep them all` (each goes to
+later) and `B: Drop them all` (each is closed with the reason `let-go`). A tap on a card's own Keep or Drop is finer.
+
 ```toml
 [todo]
 rank_model  = "sonnet"            # the pass's model (sonnet when left out)
 rank_effort = "medium"            # and effort (medium when left out)
 tz          = "America/New_York"  # his zone, the days and hours are given in (America/New_York when left out)
+rank_hour   = 7                   # the UTC hour the nightly pass is due from, 0 to 23 (7 when left out)
+week_start  = "monday"            # the weekday, in tz, the weekly Let go card is sent on (monday when left out)
 ```
 
-See `features/todo-rank.feature`.
+See `features/todo-rank.feature` and `features/todo-nightly.feature`.
 
 ## Saved prompts
 

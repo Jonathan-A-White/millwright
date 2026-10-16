@@ -2419,3 +2419,26 @@ func TestTodoRanksOnSonnetAtMediumUntilTheTodoTableSaysOtherwise(t *testing.T) {
 		t.Fatalf("expected tz = \"Mars/Olympus\" refused, naming it, got %v", err)
 	}
 }
+
+// [todo] rank_hour and week_start (mw-ht6gsw.3): the nightly pass is due from
+// 07:00 UTC and the weekly Let go card is posted on Monday until the table says
+// otherwise; an hour outside 0 to 23 and a day that is no weekday are refused.
+func TestTodoRanksAtSevenAndWeeksBeginOnMondayUntilTheTodoTableSaysOtherwise(t *testing.T) {
+	writeConfig(t, "vault = \"/v\"\n")
+	todo, err := config.Todo()
+	if err != nil || todo.RankHour != 7 || todo.WeekStart != time.Monday {
+		t.Fatalf("expected rank_hour 7 and week_start monday, got %+v: %v", todo, err)
+	}
+
+	writeConfig(t, "[todo]\nrank_hour = 0\nweek_start = \"Sunday\"\n")
+	if todo, err = config.Todo(); err != nil || todo.RankHour != 0 || todo.WeekStart != time.Sunday {
+		t.Fatalf("expected the [todo] table's hour 0 and sunday, got %+v: %v", todo, err)
+	}
+
+	for _, bad := range []string{"rank_hour = 24", "rank_hour = \"soon\"", "week_start = \"someday\""} {
+		writeConfig(t, "[todo]\n"+bad+"\n")
+		if _, err := config.Todo(); err == nil || !strings.Contains(err.Error(), strings.Split(bad, " = ")[0]) {
+			t.Fatalf("expected %q refused, naming the key, got %v", bad, err)
+		}
+	}
+}

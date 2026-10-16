@@ -1128,6 +1128,11 @@ func (i PosternInbox) recordAnswer(ctx context.Context, m PosternInboxMessage, r
 			return false, err
 		}
 	}
+	if keep, drop := isKeepAllTap(reply.Answer), isDropAllTap(reply.Answer); keep || drop {
+		if err := i.letGoOnTap(ctx, m, reply.Bead, noteValue, keep); err != nil {
+			return false, err
+		}
+	}
 	return true, nil
 }
 

@@ -233,6 +233,9 @@ type StoryDetail struct {
 	TodoRow     string
 	TodoRowWhy  string
 	TodoSlipped string
+	// TodoSlippedTold is the TodoSlipped due time the Governor was last told of
+	// in the card's thread (TodoSlippedToldField); empty when none.
+	TodoSlippedTold string
 }
 
 // WorkInHand is what the tracker has in hand across every host: the stories

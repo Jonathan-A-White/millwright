@@ -339,6 +339,7 @@ func (b bead) detail(defaults domain.Path) application.StoryDetail {
 		TodoRow:          b.text(application.TodoRowField),
 		TodoRowWhy:       b.text(application.TodoRowWhyField),
 		TodoSlipped:      b.text(application.TodoSlippedField),
+		TodoSlippedTold:  b.text(application.TodoSlippedToldField),
 		Attempts:         b.attempts(),
 		RebaseSends:      b.count(application.RebaseSendsField),
 		RebaseBase:       b.text(application.RebaseBaseField),

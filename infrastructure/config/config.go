@@ -2340,7 +2340,10 @@ func Tester() (TesterSettings, error) {
 // its model pass over the Governor's To do board: `rank_model` and
 // `rank_effort` (sonnet and medium when it does not say), and `tz`, his zone,
 // the days and hours the pass is given are in (America/New_York when it does
-// not say).
+// not say). `rank_hour` (0 to 23, 7 when it does not say) is the UTC hour from
+// which the follower's todo-rank job makes its nightly pass, and `week_start`
+// (monday when it does not say) the weekday, in his zone, on which the pass
+// posts the weekly Let go card.
 const TodoTable = "todo"
 
 // What mw todo rank runs on, and in which zone, when [todo] does not say.
@@ -2348,12 +2351,18 @@ const (
 	DefaultTodoRankModel  = "sonnet"
 	DefaultTodoRankEffort = "medium"
 	DefaultTodoZone       = "America/New_York"
+	DefaultTodoRankHour   = 7
+	DefaultTodoWeekStart  = time.Monday
 )
 
 // TodoSettings is what the `[todo]` table says, the defaults filled in.
 type TodoSettings struct {
 	RankModel, RankEffort string
 	Zone                  *time.Location
+	// RankHour is the UTC hour from which the nightly pass is due.
+	RankHour int
+	// WeekStart is the weekday, in Zone, a week begins on.
+	WeekStart time.Weekday
 }
 
 // Todo reports the `[todo]` table of ~/.config/mw/config.toml. A machine with
@@ -2375,7 +2384,28 @@ func Todo() (TodoSettings, error) {
 		}
 		return fallback
 	}
-	todo := TodoSettings{RankModel: said("rank_model", DefaultTodoRankModel), RankEffort: said("rank_effort", DefaultTodoRankEffort)}
+	todo := TodoSettings{
+		RankModel: said("rank_model", DefaultTodoRankModel), RankEffort: said("rank_effort", DefaultTodoRankEffort),
+		RankHour: DefaultTodoRankHour, WeekStart: DefaultTodoWeekStart,
+	}
+	if hour := said("rank_hour", ""); hour != "" {
+		n, err := strconv.Atoi(hour)
+		if err != nil || n < 0 || n > 23 {
+			return TodoSettings{}, fmt.Errorf("the [%s] table of %s says rank_hour = %q: it must be a whole number of hours, 0 to 23 (UTC)", TodoTable, path, hour)
+		}
+		todo.RankHour = n
+	}
+	if day := strings.ToLower(said("week_start", "")); day != "" {
+		found := false
+		for d := time.Sunday; d <= time.Saturday; d++ {
+			if strings.ToLower(d.String()) == day {
+				todo.WeekStart, found = d, true
+			}
+		}
+		if !found {
+			return TodoSettings{}, fmt.Errorf("the [%s] table of %s says week_start = %q: say a weekday, like %q", TodoTable, path, day, "monday")
+		}
+	}
 	zone := said("tz", DefaultTodoZone)
 	if todo.Zone, err = time.LoadLocation(zone); err != nil {
 		return TodoSettings{}, fmt.Errorf("the [%s] table of %s says tz = %q: say a zone of the tz database, like %q", TodoTable, path, zone, DefaultTodoZone)
