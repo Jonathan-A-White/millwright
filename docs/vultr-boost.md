@@ -17,6 +17,7 @@ contrib/vultr-boost list           # every instance Vultr holds: id, label, stat
 contrib/vultr-boost adopt          # --instance ID: import a restoring instance into the box's state
 contrib/vultr-boost snapshot       # a ready-made image of a bootstrapped box
 contrib/vultr-boost spend          # what Vultr's billing says the boxes cost this month
+contrib/vultr-boost set-cap        # --name NAME --cap N: set the sessions a box that is up runs at once
 ```
 
 `--name NAME` picks the box (default the tfvars `name`, else `cloud1`). The
@@ -153,7 +154,7 @@ max_boxes       = 2         # boxes up at once, at most
 monthly_cap_usd = 75        # the most the boxes may cost in a UTC month
 idle_minutes    = 30        # a box with no story this long is destroyed
 hourly_usd      = 0.132     # what one box costs an hour
-box_cap         = 2         # sessions a box runs at once (the bootstrap's cap)
+box_cap         = 2         # sessions a box runs at once; a change reaches the boxes up (see "A changed box_cap")
 up_minutes      = 60        # how long a make may run before it reads the box back from Vultr
 snapshot        = "<id>"    # what contrib/vultr-boost snapshot printed; blank bootstraps in full
 command         = "<full path to contrib/vultr-boost>"   # default: the millwright checkout of [rigs]
@@ -245,6 +246,38 @@ Each check:
    same; until then it shows `waiting for its first dispatch`. Two boxes from cloud1's
    snapshot once both ran as cloud1 with a broken vault, and claimed nothing for an hour
    while the book said they were up (mw-5gr3k0.8).
+
+### A changed box_cap reaches the boxes already up
+
+`box_cap` is the home's count of a box's sessions. A box runs at its own `cap`, in its own
+`~/.config/mw/config.toml`, which `boost-bootstrap.sh` wrote once from `BOOST_CAP` (the tfvars
+`cap`). So that a changed `box_cap` reaches a box with no rebuild and no hand step, each cloud
+check (every minute, on the home) compares the cap it last set on each box with `box_cap`, and for
+a box that differs runs `contrib/vultr-boost set-cap --name cloudN --cap <box_cap>`. That reads
+the box's WireGuard address off the hub (nothing there changes) and runs, over ssh as the box's
+user, a small rewrite of the first `cap` line of the box's config: the other lines stay, and the
+box's next dispatch reads it, no restart. Raising or lowering works alike: sessions running
+finish, and a box over a lowered cap starts none until it is under it.
+
+- Only a box that has dispatched is touched (before that it may not answer ssh); one a book
+  never set a cap on is set once, so every box is counted at the cap it really runs.
+- The book (`hosts/vultr/cloud.json`) keeps each box's `cap`. A set that took is a move in
+  the book for each box (`cloud1: cap 2 to 3`) and one `cloud` event for the check (`box_cap 3
+  set on cloud1, cloud2`). The count of free sessions uses the new cap at once.
+- A box the check cannot reach keeps its old cap in the count, says so once as a `cloud`
+  event (`could not set cap 3 on cloud2: ...; it is counted at the cap 2 it has`), and `mw
+  status` shows under it `cap 2, not the 3 box_cap says: ...` until a later check gets through.
+
+**`mw cloud cap N`** (N from 1 to 8; the home only, refused elsewhere) is the one command that
+changes `box_cap`: it writes it in the `[cloud]` table of the home's `~/.config/mw/config.toml`,
+in the vault's copy `hosts/vultr/cloud-table.toml`, and as `cap` in
+`hosts/vultr/vultr-boost.tfvars` (what the next box is made with), commits the vault's two
+files, and prints what it was and the way back, `mw cloud cap <old>`. It reaches no box: the next
+check applies it. Editing `box_cap` by hand in the config works the same way; the command only
+keeps the three places level.
+
+To undo: `mw cloud cap <old>`; the next check sets the old cap on each box again. A box that is
+being made takes the tfvars `cap`, which the command keeps level with `box_cap`.
 
 ### What Vultr can refuse
 

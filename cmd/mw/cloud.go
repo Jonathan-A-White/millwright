@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -62,7 +63,53 @@ func newCloudCmd() *cobra.Command {
 		},
 	})
 	cmd.AddCommand(newCloudMakeCmd())
+	cmd.AddCommand(newCloudCapCmd())
 	return cmd
+}
+
+// newCloudCapCmd builds `mw cloud cap <n>`: box_cap, changed where the cloud
+// keeps it, for the next cloud check to set on the boxes already up.
+func newCloudCapCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "cap <n>",
+		Short: "Set how many sessions each cloud box runs at once, boxes up now included",
+		Long: "cap writes box_cap, n from 1 to 8, in the [cloud] table of the home's ~/.config/mw/config.toml,\n" +
+			"in the vault's copy of it (hosts/vultr/cloud-table.toml) and as cap in\n" +
+			"hosts/vultr/vultr-boost.tfvars, which the next box is made with, and commits the vault's two.\n" +
+			"It prints the old value, the way back. It reaches no box: the next cloud check, within a\n" +
+			"minute, sets the cap on each box up, raised or lowered; running sessions finish and none\n" +
+			"starts above a lowered cap. It runs on the home only.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			n, err := strconv.Atoi(args[0])
+			if err != nil {
+				return fmt.Errorf("a box runs 1 to %d sessions at once, not %q", application.CloudBoxCapMax, args[0])
+			}
+			dir, err := config.Vault()
+			if err != nil {
+				return err
+			}
+			host, err := config.Host()
+			if err != nil {
+				return err
+			}
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			files := mwVault(dir, host)
+			report, err := application.CloudCap{
+				Files: cloud.CapFiles{Config: filepath.Join(home, config.File), Vault: files},
+				Home:  files,
+				Host:  host,
+			}.Run(cmd.Context(), n)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), report)
+			return nil
+		},
+	}
 }
 
 // newCloudMakeCmd builds `mw cloud make <box>`: the process the cloud check

@@ -41,6 +41,11 @@ type CloudProvider interface {
 	// was cut off before its state was kept, into the provider's state
 	// (terraform import), so that Down finds it.
 	Adopt(ctx context.Context, name string, instance CloudInstance) error
+	// SetCap sets how many sessions the box runs at once, in the config of
+	// the box itself, over WireGuard: its next dispatch reads it, running
+	// sessions are not touched. An error is a box that could not be reached
+	// or written, which keeps the cap it had.
+	SetCap(ctx context.Context, name string, cap int) error
 }
 
 // CloudInstance is one box as the provider holds it: Status is Vultr's
@@ -158,6 +163,22 @@ type CloudBox struct {
 	Made           time.Time `json:"made,omitzero"`
 	Dispatched     time.Time `json:"dispatched,omitzero"`
 	NotDispatching string    `json:"not_dispatching,omitempty"`
+	// Cap is how many sessions the box runs at once, as the check last set it
+	// on the box: the count of its free sessions. Zero is a box whose cap the
+	// book has not set yet, counted at the plan's BoxCap. CapFault is why the
+	// cap the plan wants has not reached the box, "" when it has; the box keeps
+	// counting at Cap meanwhile.
+	Cap      int    `json:"cap,omitempty"`
+	CapFault string `json:"cap_fault,omitempty"`
+}
+
+// boxCap is how many sessions the box is counted to run at once: the cap the
+// book last set on it, else the plan's.
+func (b CloudBox) boxCap(plan CloudPlan) int {
+	if b.Cap > 0 {
+		return b.Cap
+	}
+	return plan.boxCap()
 }
 
 // made is when the box was made, Up for one the book did not keep it of.
@@ -247,6 +268,13 @@ func (p CloudPlan) prefix() string {
 // does not say: boost-bootstrap.sh's own default.
 const DefaultCloudBoxCap = 2
 
+func (p CloudPlan) boxCap() int {
+	if p.BoxCap <= 0 {
+		return DefaultCloudBoxCap
+	}
+	return p.BoxCap
+}
+
 // CloudCheck is one look at the cloud (mw cloud check; the follower's cloud
 // job each minute). It costs no tokens: it reads the tracker's work in hand,
 // the book and the provider's billing, and calls the provider only to make or
@@ -267,6 +295,11 @@ const DefaultCloudBoxCap = 2
 //     was made;
 //   - marks each box idle from the first check that finds no story claimed on
 //     it, and busy again once one is;
+//   - sets the plan's BoxCap on each box that has dispatched and runs another
+//     (a changed box_cap reaches the boxes already up, raised or lowered:
+//     running sessions finish, no new ones start above the cap); a box that
+//     cannot be reached keeps its old cap in the count, and its CapFault says
+//     why;
 //   - gives up a box begun the plan's MakeStale ago and not yet up (the process
 //     making it died) and destroys it;
 //   - destroys every box up when one more hour of them would pass the
@@ -359,6 +392,7 @@ func (c CloudCheck) Run(ctx context.Context) (CloudReport, error) {
 	p.dropStale(ctx)
 	p.seeDispatch(ctx)
 	p.markIdle(work)
+	p.setCaps(ctx)
 
 	if n := len(p.state.Boxes); n > 0 && p.spent()+c.Plan.HourlyUSD*float64(n) > c.Plan.MonthlyCapUSD {
 		p.capReached(ctx, "destroying every box")
@@ -706,6 +740,57 @@ func (p *cloudPass) markIdle(work WorkInHand) {
 	}
 }
 
+// setCaps sets the plan's BoxCap on each box up that runs another, once its
+// first dispatch has reached the beads server (before that the box may not
+// answer ssh yet, and its config is the bootstrap's own). A box that took it
+// is counted at the new cap, and is a move in the book for each box and one
+// cloud event for all of them; a box that could not be reached keeps its cap,
+// is counted at it, and is a move and a CapFault the first time for that cap,
+// said again at each check without a move.
+func (p *cloudPass) setCaps(ctx context.Context) {
+	want := p.check.Plan.boxCap()
+	var set []string
+	for i := range p.state.Boxes {
+		box := &p.state.Boxes[i]
+		if box.Making || box.Restoring || box.Dispatched.IsZero() {
+			continue
+		}
+		if box.Cap == want {
+			if box.CapFault != "" {
+				box.CapFault = ""
+				p.dirty = box.Name + " cap"
+			}
+			continue
+		}
+		if err := p.check.Provider.SetCap(ctx, box.Name, want); err != nil {
+			text := fmt.Sprintf("could not set cap %d on %s: %v", want, box.Name, oneLine(err.Error()))
+			if first := !strings.HasPrefix(box.CapFault, fmt.Sprintf("could not set cap %d ", want)); first {
+				box.CapFault = text
+				p.move(ctx, fmt.Sprintf("%s; it is counted at the cap %d it has", text, box.boxCap(p.check.Plan)))
+				p.dirty = box.Name + " cap"
+			} else {
+				p.check.say("%s", text)
+			}
+			continue
+		}
+		was := box.boxCap(p.check.Plan)
+		known := box.Cap > 0
+		box.Cap, box.CapFault = want, ""
+		p.dirty = box.Name + " cap"
+		set = append(set, box.Name)
+		what := fmt.Sprintf("%s: cap set to %d", box.Name, want)
+		if known {
+			what = fmt.Sprintf("%s: cap %d to %d", box.Name, was, want)
+		}
+		p.check.say("%s", what)
+		p.report.Moves = append(p.report.Moves, what)
+		p.state.Moves = p.addMove(CloudMove{At: p.now, What: what})
+	}
+	if len(set) > 0 {
+		p.emit(ctx, fmt.Sprintf("box_cap %d set on %s: sessions a box runs at once", want, strings.Join(set, ", ")))
+	}
+}
+
 // demand counts the stories that wait for any host, and the sessions free
 // across the hosts the plan names and the boxes.
 func (p *cloudPass) demand(work WorkInHand) (waiting, free int) {
@@ -717,12 +802,8 @@ func (p *cloudPass) demand(work WorkInHand) (waiting, free int) {
 	for host, limit := range p.check.Plan.HostCaps {
 		free += max(0, limit-sessions(work, host))
 	}
-	boxCap := p.check.Plan.BoxCap
-	if boxCap <= 0 {
-		boxCap = DefaultCloudBoxCap
-	}
 	for _, box := range p.state.Boxes {
-		free += max(0, boxCap-sessions(work, box.Name))
+		free += max(0, box.boxCap(p.check.Plan)-sessions(work, box.Name))
 	}
 	return waiting, free
 }
@@ -836,10 +917,21 @@ func (p *cloudPass) capReached(ctx context.Context, what string) {
 func (p *cloudPass) move(ctx context.Context, what string) {
 	p.check.say("%s", what)
 	p.report.Moves = append(p.report.Moves, what)
-	p.state.Moves = append(p.state.Moves, CloudMove{At: p.now, What: what})
-	if n := len(p.state.Moves); n > cloudMovesKept {
-		p.state.Moves = append([]CloudMove(nil), p.state.Moves[n-cloudMovesKept:]...)
+	p.state.Moves = p.addMove(CloudMove{At: p.now, What: what})
+	p.emit(ctx, what)
+}
+
+// addMove is the book's moves with m after them, the latest cloudMovesKept.
+func (p *cloudPass) addMove(m CloudMove) []CloudMove {
+	moves := append(p.state.Moves, m)
+	if n := len(moves); n > cloudMovesKept {
+		moves = append([]CloudMove(nil), moves[n-cloudMovesKept:]...)
 	}
+	return moves
+}
+
+// emit writes one cloud event, and no move of the book's.
+func (p *cloudPass) emit(ctx context.Context, what string) {
 	if p.check.Log == nil {
 		return
 	}
@@ -915,7 +1007,10 @@ type CloudReading struct {
 	SpentUSD float64
 	CapUSD   float64
 	MaxBoxes int
-	Now      time.Time
+	// BoxCap is the box_cap the plan wants, which a box with a CapFault has
+	// not got.
+	BoxCap int
+	Now    time.Time
 	// FeeLimitAt is when Vultr last refused a box for its fee limit, zero when
 	// it is not holding one back.
 	FeeLimitAt time.Time
@@ -934,6 +1029,7 @@ func ReadCloud(ctx context.Context, book CloudBook, plan CloudPlan, now time.Tim
 		SpentUSD: float64(state.hours(now)) * plan.HourlyUSD,
 		CapUSD:   plan.MonthlyCapUSD,
 		MaxBoxes: plan.MaxBoxes,
+		BoxCap:   plan.boxCap(),
 		Now:      now,
 
 		FeeLimitAt: state.FeeLimitAt,
@@ -966,6 +1062,9 @@ func (r CloudReading) write(b *strings.Builder) {
 			line += ", working"
 		}
 		clip(b, line)
+		if box.CapFault != "" {
+			clip(b, fmt.Sprintf("    cap %d, not the %d box_cap says: %s", box.boxCap(CloudPlan{BoxCap: r.BoxCap}), r.BoxCap, box.CapFault))
+		}
 	}
 	if !r.FeeLimitAt.IsZero() {
 		clip(b, "  Vultr fee limit reached since "+r.FeeLimitAt.UTC().Format("01-02 15:04Z"))
@@ -973,4 +1072,65 @@ func (r CloudReading) write(b *strings.Builder) {
 	for _, m := range r.Moves {
 		clip(b, "  "+m.At.UTC().Format("01-02 15:04Z")+" "+m.What)
 	}
+}
+
+// CloudBoxCapMax is the most sessions a box may be told to run at once.
+const CloudBoxCapMax = 8
+
+// CloudCapFiles is where box_cap is kept: the [cloud] table of the home's
+// ~/.config/mw/config.toml, its copy in the vault (hosts/vultr/cloud-table.toml)
+// and the cap the next box is made with (hosts/vultr/vultr-boost.tfvars).
+type CloudCapFiles interface {
+	// BoxCap is the box_cap the home's [cloud] table says, 0 when it says none.
+	BoxCap(ctx context.Context) (int, error)
+	// SetBoxCap writes n in all three places, the home's config last, and
+	// commits the vault's two; an error names what was written before it.
+	SetBoxCap(ctx context.Context, n int) error
+}
+
+// CloudCap is mw cloud cap: it changes box_cap in the places the cloud keeps
+// it. It starts no box and reaches no box: the next cloud check sets the cap
+// on each box up. It is for the home only, the one host that runs the check.
+type CloudCap struct {
+	Files CloudCapFiles
+	Home  HomeFile
+	Host  string
+}
+
+// CloudCapReport is what mw cloud cap changed.
+type CloudCapReport struct{ Was, Now int }
+
+// String is the report, with the way back.
+func (r CloudCapReport) String() string {
+	was := fmt.Sprintf("was %d", r.Was)
+	if r.Was == 0 {
+		was = "it said none, so the default 2 was in force"
+	}
+	return fmt.Sprintf("box_cap is %d (%s): written in the home's [cloud] table, the vault's hosts/vultr/cloud-table.toml and cap in hosts/vultr/vultr-boost.tfvars.\n"+
+		"The next cloud check, within a minute, sets it on each box up; running sessions finish, and a box over the cap starts no new one.\n"+
+		"Way back: mw cloud cap %d", r.Now, was, max(r.Was, 1))
+}
+
+// Run sets box_cap to n, 1 to CloudBoxCapMax; on a host that is not home it
+// changes nothing.
+func (c CloudCap) Run(ctx context.Context, n int) (CloudCapReport, error) {
+	if n < 1 || n > CloudBoxCapMax {
+		return CloudCapReport{}, fmt.Errorf("a box runs 1 to %d sessions at once, not %d", CloudBoxCapMax, n)
+	}
+	home, err := IsHome(ctx, c.Home, c.Host)
+	if err != nil {
+		return CloudCapReport{}, err
+	}
+	if !home {
+		record, _ := WhereIsHome(ctx, c.Home)
+		return CloudCapReport{}, &HomeElsewhere{Home: record.Host, Host: c.Host}
+	}
+	was, err := c.Files.BoxCap(ctx)
+	if err != nil {
+		return CloudCapReport{}, err
+	}
+	if err := c.Files.SetBoxCap(ctx, n); err != nil {
+		return CloudCapReport{}, err
+	}
+	return CloudCapReport{Was: was, Now: n}, nil
 }

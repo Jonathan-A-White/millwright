@@ -34,6 +34,7 @@ type cloudContext struct {
 // InitializeCloudScenario registers the steps of features/cloud.feature.
 func InitializeCloudScenario(ctx *godog.ScenarioContext) {
 	c := &cloudContext{}
+	c.registerCapSteps(ctx)
 
 	ctx.Given(`^a cloud of at most (\d+) boxes, capped at \$([0-9.]+) a month, idle after (\d+) minutes, at \$([0-9.]+) an hour$`, c.aCloud)
 	ctx.Given(`^the hosts "([^"]*)" and "([^"]*)" run (\d+) sessions each, and a cloud box runs (\d+)$`, c.theHosts)

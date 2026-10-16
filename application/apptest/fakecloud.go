@@ -37,7 +37,13 @@ type FakeCloud struct {
 	// for a box it holds no state for.
 	DownKeeps bool
 	// AdoptErr is why Adopt fails.
-	AdoptErr    error
+	AdoptErr error
+	// Unreachable are the boxes SetCap cannot reach, by name; Caps is the cap
+	// each box last took, by name, and CapCalls each SetCap asked, as "<box>
+	// <cap>", kept apart from Calls.
+	Unreachable map[string]bool
+	Caps        map[string]int
+	capCalls    []string
 	BilledUSD   float64
 	BilledKnown bool
 	begun       []string
@@ -158,6 +164,29 @@ func (f *FakeCloud) Adopt(_ context.Context, name string, _ application.CloudIns
 	return f.AdoptErr
 }
 
+// SetCap implements application.CloudProvider: the box takes the cap, unless
+// it is Unreachable.
+func (f *FakeCloud) SetCap(_ context.Context, name string, cap int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.capCalls = append(f.capCalls, fmt.Sprintf("%s %d", name, cap))
+	if f.Unreachable[name] {
+		return fmt.Errorf("ssh %s: no route to the box", name)
+	}
+	if f.Caps == nil {
+		f.Caps = map[string]int{}
+	}
+	f.Caps[name] = cap
+	return nil
+}
+
+// CapCalls are the SetCaps asked for, in order, each "<box> <cap>".
+func (f *FakeCloud) CapCalls() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.capCalls...)
+}
+
 // Billed implements application.CloudProvider.
 func (f *FakeCloud) Billed(context.Context, []string) (float64, bool, error) {
 	f.mu.Lock()
@@ -237,5 +266,24 @@ func (f *FakeCloudNotice) Tell(_ context.Context, title, text string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.Cards = append(f.Cards, title+": "+text)
+	return nil
+}
+
+// FakeCloudCapFiles is an application.CloudCapFiles held in memory: Was is the
+// box_cap it says, Written each cap SetBoxCap was given.
+type FakeCloudCapFiles struct {
+	Was     int
+	Written []int
+}
+
+var _ application.CloudCapFiles = (*FakeCloudCapFiles)(nil)
+
+// BoxCap implements application.CloudCapFiles.
+func (f *FakeCloudCapFiles) BoxCap(context.Context) (int, error) { return f.Was, nil }
+
+// SetBoxCap implements application.CloudCapFiles.
+func (f *FakeCloudCapFiles) SetBoxCap(_ context.Context, n int) error {
+	f.Written = append(f.Written, n)
+	f.Was = n
 	return nil
 }
