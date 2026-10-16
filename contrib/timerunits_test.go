@@ -265,3 +265,70 @@ func TestCheckTimerUnitsOnFailure(t *testing.T) {
 		})
 	}
 }
+
+// A unit whose ExecStart runs a mw command that leaves with a status that is
+// not a failure carries SuccessExitStatus= for it, or the OnFailure= mail goes
+// to the Mayor on every run (mw-gq6.532: mw doctor's 6 on every 5-minute tick).
+func TestCheckTimerUnitsSuccessExitStatus(t *testing.T) {
+	stripLine := func(rel, line string) func(root string) {
+		return func(root string) {
+			path := filepath.Join(root, "contrib", "systemd", rel)
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var keep []string
+			for _, l := range strings.Split(string(data), "\n") {
+				if l != line {
+					keep = append(keep, l)
+				}
+			}
+			if err := os.WriteFile(path, []byte(strings.Join(keep, "\n")), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	// addUnit writes a service that runs execStart with everything else the
+	// check asks of a service, so only SuccessExitStatus= can fault it.
+	addUnit := func(rel, execStart, success string) func(root string) {
+		return func(root string) {
+			text := "[Unit]\nDescription=a stand-in\nOnFailure=mw-unit-failed@%n.service\n\n[Service]\nType=oneshot\n" +
+				"EnvironmentFile=-%h/.config/mw/beads.env\nExecStart=" + execStart + "\n"
+			if success != "" {
+				text += success + "\n"
+			}
+			if err := os.WriteFile(filepath.Join(root, "contrib", "systemd", rel), []byte(text), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	for _, rel := range []string{"mw-doctor.service", "system/mw-doctor.service"} {
+		t.Run("the 6 taken out of "+rel+" fails, naming it", func(t *testing.T) {
+			out, passed := runTimerUnitsOnCopy(t, stripLine(rel, "SuccessExitStatus=6"))
+			if passed {
+				t.Fatalf("the check passed a tree whose %s has no SuccessExitStatus=6:\n%s", rel, out)
+			}
+			if !strings.Contains(out, rel) || !strings.Contains(out, "SuccessExitStatus=") {
+				t.Errorf("the check did not name %s and SuccessExitStatus=; it printed:\n%s", rel, out)
+			}
+		})
+	}
+
+	t.Run("a unit running mw watch without the 6 fails, naming it", func(t *testing.T) {
+		out, passed := runTimerUnitsOnCopy(t, addUnit("mw-watch.service", "/usr/bin/env mw watch", ""))
+		if passed {
+			t.Fatalf("the check passed a mw watch unit with no SuccessExitStatus=:\n%s", out)
+		}
+		if !strings.Contains(out, "mw-watch.service") || !strings.Contains(out, "SuccessExitStatus=") {
+			t.Errorf("the check did not name mw-watch.service and SuccessExitStatus=; it printed:\n%s", out)
+		}
+	})
+
+	t.Run("a unit running mw watch with the 6 passes", func(t *testing.T) {
+		out, passed := runTimerUnitsOnCopy(t, addUnit("mw-watch.service", "/usr/bin/env mw watch", "SuccessExitStatus=6"))
+		if !passed {
+			t.Errorf("the check failed a mw watch unit that has SuccessExitStatus=6:\n%s", out)
+		}
+	})
+}

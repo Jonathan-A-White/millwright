@@ -746,3 +746,26 @@ func TestDoctorRepeatsTheDamperCounts(t *testing.T) {
 		t.Errorf("expected the failure said on the line, got:\n%s", out.String())
 	}
 }
+
+// The dampers are the Mayor's planning signal, not a fault of this host: a
+// queue over its limit is said on the dampers line and nothing else, and mw
+// doctor still leaves with 0, so a timer's OnFailure= does not mail on it
+// (mw-gq6.532).
+func TestDampersOverTheirLimitAreNoFaultOfTheHost(t *testing.T) {
+	now := doctorNow
+	var out strings.Builder
+	doctor := aDoctor(apptest.NewFakeDoctorState(), &apptest.FakeDoctorLog{}, &now,
+		&apptest.FakeDoctorCheck{CheckName: "widget", Verdict: application.DoctorOK})
+	doctor.Out = &out
+	report := application.ReadDampers(application.DamperFacts{Now: now}, application.DamperLimits{})
+	report.Counts.ReviewQueue, report.Counts.DemosWaiting = 43, 4
+	report.Alarms = []application.DamperAlarm{{Principle: "review", Text: "his review queue 43 is over 8", Beads: []string{"mw-1"}}}
+	doctor.Dampers = fakeDamperCounter{report: report}
+
+	if _, err := doctor.Run(context.Background(), "", false); err != nil {
+		t.Fatalf("expected dampers over their limit to be no fault, got %v (exit %d)", err, application.ExitStatus(err))
+	}
+	if !strings.Contains(out.String(), "his review queue 43 (limit 8)") {
+		t.Errorf("expected the over-limit count still said, got:\n%s", out.String())
+	}
+}

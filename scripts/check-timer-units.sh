@@ -55,6 +55,13 @@
 #    in failure is mailed to the Mayor instead of ending in an exit code nobody
 #    reads (mw-gq6.511); a unit without it is named. The templates carry no
 #    OnFailure= themselves: a failed mail must not start another.
+#
+# 6. SUCCESSEXITSTATUS=. A unit whose ExecStart runs a mw command that leaves
+#    with a status that is an outcome and not a failure lists it in
+#    SuccessExitStatus=, or systemd counts the run failed and check 5's mail
+#    goes to the Mayor every time: mw doctor and mw watch leave with 6, mw
+#    deputy with 8, mw millhand --wake with 5, mw dispatch with 5 and 7
+#    (mw-gq6.532); a unit without its status is named.
 
 set -eu
 
@@ -319,6 +326,37 @@ for unit in "$DIR"/*.service "$DIR"/system/*.service; do
 		continue ;;
 	esac
 	need "$unit" "$ON_FAILURE_LINE"
+done
+# The statuses that are not failures: for each mw command a unit may run, the
+# ExecStart pattern that finds it and the status it leaves with (see
+# application.ExitStatus). A new command that leaves a status of its own is
+# added here, so a unit running it is held to listing it.
+EXIT_STATUSES="doctor:6
+watch:6
+deputy:8
+millhand --:5
+dispatch:5
+dispatch:7"
+# success_status_missing prints and returns 0 when the unit file $1 runs a mw
+# command from EXIT_STATUSES and has no SuccessExitStatus= naming its status.
+success_status_missing() {
+	status_missing=""
+	listed=$(sed -n 's/^SuccessExitStatus=//p' "$1")
+	while IFS=: read -r cmd code; do
+		grep -q "^ExecStart=.*[ /]mw $cmd" "$1" || continue
+		case " $listed " in
+		*" $code "*) ;;
+		*) status_missing="$status_missing $code (mw $cmd)" ;;
+		esac
+	done <<-END
+	$EXIT_STATUSES
+	END
+	[ -n "$status_missing" ]
+}
+for unit in "$DIR"/*.service "$DIR"/system/*.service; do
+	if success_status_missing "$unit"; then
+		fail "$unit runs a mw command that leaves with a status that is not a failure, but has no SuccessExitStatus= naming${status_missing}: OnFailure= would mail the Mayor on every run"
+	fi
 done
 for template in "$FAILED_TEMPLATE" "$SYS_FAILED_TEMPLATE"; do
 	need "$template" "Type=oneshot"

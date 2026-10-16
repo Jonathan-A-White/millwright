@@ -35,6 +35,13 @@ EnvironmentFile=-%h/.config/mw/dispatch.env
 EnvironmentFile=-%h/.config/mw/beads.env
 ExecStart=/usr/bin/env %h/.local/bin/mw doctor
 
+# mw doctor leaves with 6 (application.DoctorFaultExit) when a check is left
+# faulty and uncured: "somebody should look", an outcome and not a failure, and
+# the report naming it is already in the journal. systemd counts any other
+# non-zero status as failed, and OnFailure= would then mail the Mayor on every
+# 5-minute run while the fault lasts (mw-gq6.532).
+SuccessExitStatus=6
+
 # Type=oneshot has no start timeout by default, and a hung systemctl would
 # then block every later run.
 TimeoutStartSec=2min
