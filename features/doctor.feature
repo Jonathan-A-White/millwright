@@ -597,3 +597,91 @@ Feature: mw doctor
     When mw doctor's age-key check runs
     Then mw doctor leaves with the status 0
     And the doctor log holds "age-key ok n/a: the vault keeps no secrets"
+
+  Scenario: The real boost-config check on the home whose [tests] has a line the vault's hosts/boost-config.toml lacks is faulty, naming the rig and the fix
+    Given the home host's config.toml for boost-config holding:
+      """
+      [tests]
+      millwright = "make test"
+      argus = "npm test"
+      """
+    And the vault's hosts/boost-config.toml for boost-config holding:
+      """
+      [tests]
+      millwright = "make test"
+      """
+    When mw doctor's boost-config check runs on the home
+    Then mw doctor leaves with the status 6
+    And the doctor log holds "boost-config cure-failed no cure"
+    And mw doctor printed "[tests] argus: missing"
+    And mw doctor printed "mw config export-boost"
+
+  Scenario: The real boost-config check on the home whose [changed_specs] line differs from the vault's is faulty, naming the rig
+    Given the home host's config.toml for boost-config holding:
+      """
+      [tests]
+      lampas = "npm test"
+
+      [changed_specs]
+      lampas = "npx playwright test --project=shots {specs}"
+      """
+    And the vault's hosts/boost-config.toml for boost-config holding:
+      """
+      [tests]
+      lampas = "npm test"
+
+      [changed_specs]
+      lampas = "npx playwright test {specs}"
+      """
+    When mw doctor's boost-config check runs on the home
+    Then mw doctor leaves with the status 6
+    And mw doctor printed "[changed_specs] lampas: differs"
+
+  Scenario: The real boost-config check on the home with no hosts/boost-config.toml in the vault is faulty
+    Given the home host's config.toml for boost-config holding:
+      """
+      [tests]
+      argus = "npm test"
+      """
+    When mw doctor's boost-config check runs on the home
+    Then mw doctor leaves with the status 6
+    And mw doctor printed "no hosts/boost-config.toml"
+
+  Scenario: The real boost-config check on the home whose tables are level with the vault's is ok, whatever else either file holds
+    Given the home host's config.toml for boost-config holding:
+      """
+      cap = 2
+
+      [tests]
+      argus = "npm test"
+
+      [after_landing]
+      millwright = "make build"
+      """
+    And the vault's hosts/boost-config.toml for boost-config holding:
+      """
+      # copied from the home
+      [tests]
+      argus = 'npm test'
+
+      [changed_specs]
+      """
+    When mw doctor's boost-config check runs on the home
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "boost-config ok"
+
+  Scenario: The real boost-config check on a host that is not home is ok, though its tables are a part of the home's
+    Given the home host's config.toml for boost-config holding:
+      """
+      [tests]
+      argus = "npm test"
+      """
+    And the vault's hosts/boost-config.toml for boost-config holding:
+      """
+      [tests]
+      argus = "npm test"
+      lampas = "npm test"
+      """
+    When mw doctor's boost-config check runs on a host that is not home
+    Then mw doctor leaves with the status 0
+    And the doctor log holds "boost-config ok"
