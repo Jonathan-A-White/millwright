@@ -295,6 +295,8 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 			f.print(WrongRig{ID: story.ID, Rig: strings.TrimSpace(story.Path.Rig)}.Line() + "\n")
 		}
 	}
+	// Warnings only: the stories are filed, and released, all the same.
+	f.print(sizeWarnings(filed.Stories, true, false))
 	if workErr != nil {
 		f.print(fmt.Sprintf("\nWhat is in flight on the rig could not be read, so no story above says what it overlaps: %v\n", workErr))
 	}
@@ -323,6 +325,7 @@ func (f File) Run(ctx context.Context, plan domain.Plan) (FiledPlan, error) {
 	}
 	filed.Released = true
 	f.print(filed.releases())
+	f.print(sizeWarnings(filed.Stories, false, true))
 	return filed, nil
 }
 

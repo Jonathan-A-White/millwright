@@ -41,6 +41,36 @@ const (
 	EffortMax    Effort = "max"
 )
 
+// Size is how big the Mayor judged a story to be, as a T-shirt size: the input
+// the triage pass prioritises by (mw-1ljpo9.3). A story of no size is one nobody
+// has judged.
+type Size string
+
+// The sizes a story may be.
+const (
+	SizeXS Size = "XS"
+	SizeS  Size = "S"
+	SizeM  Size = "M"
+	SizeL  Size = "L"
+	SizeXL Size = "XL"
+)
+
+// Sizes are the sizes a story may be, smallest first.
+var Sizes = []Size{SizeXS, SizeS, SizeM, SizeL, SizeXL}
+
+// KnownSize says whether s is one of Sizes.
+func KnownSize(s Size) bool {
+	for _, known := range Sizes {
+		if s == known {
+			return true
+		}
+	}
+	return false
+}
+
+// Big says the size is L or XL: more than one session is likely to finish.
+func (s Size) Big() bool { return s == SizeL || s == SizeXL }
+
 // HostAuto is the host a story's Path names when it does not matter which host
 // works it: whichever host is under its cap and its load takes it, and the
 // claim then writes that host in its place.
@@ -67,6 +97,9 @@ type Path struct {
 	// 0 sets no cap, and empty leaves it to the host's next.max_turns
 	// (mw-1ljpo9.6). See TurnCap.
 	MaxTurns string `json:"max_turns,omitempty"`
+	// Size is how big the story is judged to be: XS, S, M, L or XL, or empty
+	// when nobody has (mw-1ljpo9.3). A story's own, like Files.
+	Size Size `json:"size,omitempty"`
 }
 
 // Story is a bead sized to be worked start to finish by one session in one
@@ -121,7 +154,7 @@ func (e FormulaNotInstalledError) Error() string {
 
 // Fields are the names of a path's fields, in the order a path is written out.
 // They are also the metadata keys a path is stored under.
-var Fields = []string{"rig", "branch", "harness", "model", "effort", "formula", "host", "files", "max_turns"}
+var Fields = []string{"rig", "branch", "harness", "model", "effort", "formula", "host", "files", "max_turns", "size"}
 
 // Set sets the field of p named by one of Fields. It is how a path is read out
 // of stored metadata: one key, one value, at a time.
@@ -145,6 +178,8 @@ func (p *Path) Set(field, value string) error {
 		p.Files = value
 	case "max_turns":
 		p.MaxTurns = value
+	case "size":
+		p.Size = Size(value)
 	default:
 		return UnknownFieldError{Field: field}
 	}
@@ -172,6 +207,8 @@ func (p Path) Field(field string) (string, error) {
 		return p.Files, nil
 	case "max_turns":
 		return p.MaxTurns, nil
+	case "size":
+		return string(p.Size), nil
 	default:
 		return "", UnknownFieldError{Field: field}
 	}
@@ -265,6 +302,9 @@ func (p Path) Overlay(override Path) Path {
 	if override.MaxTurns != "" {
 		p.MaxTurns = override.MaxTurns
 	}
+	if override.Size != "" {
+		p.Size = override.Size
+	}
 	return p
 }
 
@@ -293,8 +333,8 @@ func (p Path) turns() (int, bool) {
 
 // Validate reports the first reason p cannot be worked. Rig and branch are
 // mandatory; harness, model and effort must each name something the factory
-// knows; max_turns, when set, is a whole number. Formula and host are optional
-// here: the dispatcher supplies them.
+// knows; max_turns, when set, is a whole number and size, when set, one of
+// Sizes. Formula and host are optional here: the dispatcher supplies them.
 func (p Path) Validate() error {
 	if p.Rig == "" {
 		return ErrRigRequired
@@ -322,6 +362,9 @@ func (p Path) Validate() error {
 	}
 	if _, ok := p.turns(); p.MaxTurns != "" && !ok {
 		return UnknownValueError{Field: "max_turns", Value: p.MaxTurns}
+	}
+	if p.Size != "" && !KnownSize(p.Size) {
+		return UnknownValueError{Field: "size", Value: string(p.Size)}
 	}
 	return nil
 }

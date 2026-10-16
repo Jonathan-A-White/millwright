@@ -60,8 +60,8 @@ func newPathSetCmd() *cobra.Command {
 func newPathShowCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "show <story-id>",
-		Short: "Print a story's nine path keys",
-		Long: "show prints the nine path keys of a story as it is worked by them. On a rig whose file\n" +
+		Short: "Print a story's ten path keys",
+		Long: "show prints the ten path keys of a story as it is worked by them. On a rig whose file\n" +
 			"in the vault says files_expected = true, a story with no files key also gets one line\n" +
 			"saying so: a warning, and the keys are printed all the same.",
 		Args: cobra.ExactArgs(1),
