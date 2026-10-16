@@ -215,3 +215,20 @@ Feature: A one-week Tester trial
     Given the Tester of "mw-l.2" commented on "mw-l.1": "FINDINGS: none\nTester fuel: unknown"
     When a session checks "mw-l.2"
     Then the check passes
+
+  # A bug filed without a Sweep: line is refused by mw dispatch as no-sweep, so a
+  # Tester's bug finding carries one from the start (mw-gq6.447).
+  Scenario: A Tester's bug finding is filed only with a line beginning 'Sweep:'
+    Given the landed story "mw-e.1" on "lampas" and its Tester story "mw-e.2"
+    When the Tester files the bug finding "The page number is lost after rotate" accepting:
+      """
+      npx vitest run src/Reader.test.tsx passes with the new rotate case
+      """
+    Then the finding is refused, saying: it is a bug and no line begins with 'Sweep:' (a check over the whole class of the fault, or 'Sweep: none, because <reason>'): mw dispatch would refuse it as no-sweep
+    And no story was filed from the finding
+    When the Tester files the bug finding "The page number is lost after rotate" accepting:
+      """
+      1. npx vitest run src/Reader.test.tsx passes with the new rotate case
+      2. Sweep: every viewport effect in src/ is grepped for state it drops on rotate
+      """
+    Then the finding is filed held, labelled bug, its acceptance carrying "2. Sweep: every viewport effect in src/"

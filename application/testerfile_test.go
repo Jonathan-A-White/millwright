@@ -61,7 +61,7 @@ func testerFinding() application.TesterFinding {
 		Shot:       "/tmp/tester-mw-e.2/06-rotate.png",
 		Fix:        "keep the page in state, not in the viewport effect",
 		HowToCheck: "1. Open page 7.\n2. Rotate the phone and back: page 7 is still shown.",
-		Acceptance: "npx vitest run src/Reader.test.tsx passes with the new rotate case",
+		Acceptance: "npx vitest run src/Reader.test.tsx passes with the new rotate case\nSweep: every viewport effect in src/ is grepped for state it drops",
 		Files:      "src/Reader.tsx",
 	}
 }
@@ -184,6 +184,8 @@ func TestATasteFindingIsFiledTastedAndNeedsNoFilesKey(t *testing.T) {
 	tracker, rules := testerFileEpic(t)
 	finding := testerFinding()
 	finding.Kind, finding.Files = "taste", ""
+	// A taste finding is no bug, so it owes no Sweep line (mw-gq6.447).
+	finding.Acceptance = "npx vitest run src/Reader.test.tsx passes with the new rotate case"
 	filed, err := application.TesterFiler{Tracker: tracker, Rules: rules}.File(context.Background(), "mw-e.2", finding)
 	if err != nil {
 		t.Fatal(err)
@@ -211,6 +213,12 @@ func TestATesterFindingIsRefusedWithoutWhatTheMayorNeeds(t *testing.T) {
 		"no finding":    func(f *application.TesterFinding) { f.Finding = "" },
 		"no acceptance": func(f *application.TesterFinding) { f.Acceptance = "" },
 		"no how":        func(f *application.TesterFinding) { f.HowToCheck = "" },
+		"a bug with no sweep": func(f *application.TesterFinding) {
+			f.Acceptance = "npx vitest run src/Reader.test.tsx passes\nSweep listed in the closing comment"
+		},
+		"a bug whose sweep is none with no reason": func(f *application.TesterFinding) {
+			f.Acceptance = "npx vitest run src/Reader.test.tsx passes\n2. Sweep: none"
+		},
 	} {
 		tracker, rules := testerFileEpic(t)
 		finding := testerFinding()
